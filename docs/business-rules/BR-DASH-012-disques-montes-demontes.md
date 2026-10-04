@@ -11,7 +11,7 @@ maj: 2026-10-04
 # BR-DASH-012 — Un disque monté ou retiré apparaît ou disparaît automatiquement
 
 ## Règle
-La liste des disques est relue à chaque échantillon (`disks` de chaque `metrics`) : un disque monté apparaît, un disque retiré disparaît, sans rechargement. `GET /machine` relit aussi la liste. Les systèmes de fichiers de service (mémoire, pseudo-systèmes) et les doublons d'un même volume monté plusieurs fois ne comptent pas comme des disques.
+La liste des disques est relue à chaque échantillon (`disks` de chaque `metrics`) : un disque monté apparaît, un disque retiré disparaît, sans rechargement. L'identité (`GET /machine`, `snapshot`) est mise en cache et relue au plus toutes les 30 s. Les systèmes de fichiers de service (mémoire, pseudo-systèmes) et les doublons d'un même volume monté plusieurs fois ne comptent pas comme des disques.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/machine.rs::{is_real_filesystem, visible_volumes}`.

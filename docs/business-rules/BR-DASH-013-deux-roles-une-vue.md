@@ -15,7 +15,7 @@ maj: 2026-10-04
 
 ## Application (code)
 - `crates/hearth-agent/src/entrypoint/http/mod.rs::ENDPOINTS` (niveau `Authenticated` pour `/machine` et `/metrics/history`, `FirstMessage` pour `/stream`).
-- `crates/hearth-agent/src/entrypoint/ws/connection.rs` (abonnement `audit`).
+- `crates/hearth-agent/src/domain/accounts/role.rs::Role::can_read_audit` ; `crates/hearth-agent/src/entrypoint/ws/connection.rs` (abonnement `audit` et relecture du rôle).
 
 ## Vérification
 - `tests/http_api.rs` (balayage de la table)

@@ -46,7 +46,7 @@ Historique des mesures de la machine, rééchantillonné (BR-DASH-010). L'agent 
 
 | Champ | Description |
 |---|---|
-| `at` | Instant de la mesure, RFC 3339 UTC (horloge de l'agent). Dans l'historique 1 h, celui du dernier échantillon du pas. |
+| `at` | Instant de la mesure, RFC 3339 UTC (horloge murale de l'agent, pour l'affichage : elle peut reculer). L'ordre, les fenêtres et les pas reposent sur l'horloge monotone de l'agent. Dans l'historique 1 h, celui du dernier échantillon du pas. |
 | `uptime_s` | Durée de fonctionnement de la machine, en secondes. |
 | `cpu`, `cores` | Charge globale et par cœur logique, en pourcentage (0 à 100, une décimale). |
 | `mem`, `disks` | Occupation en octets. `disks` suit les montages (un disque monté ou retiré apparaît ou disparaît, BR-DASH-012). |

@@ -11,7 +11,7 @@ maj: 2026-10-04
 # BR-DASH-005 — Une machine sans carte graphique affiche la section avec « Non disponible sur cette machine »
 
 ## Règle
-Côté agent : une machine sans carte graphique mesurable a `capabilities.gpu = false` et une liste `gpus` vide, dans l'identité comme dans chaque échantillon. Aucune erreur, aucune carte inventée. Le libellé et la section visible sont l'affaire du client (HRT-11).
+Côté agent : une machine sans carte graphique mesurable a `capabilities.gpu = false` et une liste `gpus` vide, dans l'identité comme dans chaque échantillon. Aucune erreur, aucune carte inventée. Une carte vue une fois reste dans l'identité pendant une relance de `nvidia-smi` (seules ses mesures deviennent absentes), et `nvidia-smi` est retrouvé si la carte ou le pilote arrive après le démarrage. Le libellé et la section visible sont l'affaire du client (HRT-11).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/machine.rs::MachineIdentity::capabilities`.

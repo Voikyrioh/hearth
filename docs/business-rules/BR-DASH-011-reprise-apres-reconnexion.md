@@ -11,7 +11,7 @@ maj: 2026-10-04
 # BR-DASH-011 — Après une reconnexion, les valeurs reprennent en direct sans déformer les courbes
 
 ## Règle
-Côté agent : à chaque abonnement, le `snapshot` rend l'historique jusqu'au dernier échantillon connu, puis le flux reprend sans trou ni doublon (un échantillon déjà inclus dans le snapshot n'est pas renvoyé). Le client recolle la série ; l'état « Connecté » et la fin du gris sont l'affaire de `hearth-link` et du client.
+Côté agent : à chaque abonnement, le `snapshot` rend l'historique jusqu'au dernier échantillon connu, puis le flux reprend sans trou ni doublon (un échantillon déjà inclus dans le snapshot n'est pas renvoyé). La comparaison se fait sur l'horloge monotone de l'agent : un recul de l'horloge murale ne fait pas taire le flux. Le client recolle la série ; l'état « Connecté » et la fin du gris sont l'affaire de `hearth-link` et du client.
 
 ## Application (code)
 - `crates/hearth-agent/src/entrypoint/ws/connection.rs` : s'abonner avant de lire l'historique, ignorer les échantillons déjà envoyés.
