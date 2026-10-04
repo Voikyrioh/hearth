@@ -75,7 +75,8 @@ pub fn ensure_private_file(path: &Path) -> io::Result<()> {
         .map(|_| ())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
