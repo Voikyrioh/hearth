@@ -514,7 +514,7 @@ mod tests {
         let store = FileIdentityStore::new(dir.path());
         store.load_or_create().expect("creation");
         fs::remove_file(dir.path().join(INSTALL_ID_FILE)).expect("remove");
-        // Certificat présent sans install_id : refus. On recrée un fichier illisible (dossier).
+        // Un dossier à la place de install_id : présent pour la décision, illisible à la lecture.
         fs::create_dir(dir.path().join(INSTALL_ID_FILE)).expect("mkdir");
         let err = store.load_or_create().expect_err("lecture impossible");
         assert!(err.to_string().contains(INSTALL_ID_FILE), "{err}");

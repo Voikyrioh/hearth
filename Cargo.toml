@@ -14,7 +14,6 @@ hearth-proto = { path = "crates/hearth-proto" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-anyhow = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync", "signal", "process", "io-util", "fs"] }
 tracing = "0.1"
 axum = { version = "0.8", default-features = false, features = ["http1", "http2", "json", "tokio"] }

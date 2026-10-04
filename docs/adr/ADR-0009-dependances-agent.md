@@ -27,7 +27,7 @@ HRT-02 pose le premier code de l'agent ; les tickets suivants repartiront de cet
 | `toml` 1 + `serde` | Lecture de `agent.toml` | Format lisible par l'administrateur, clés inconnues refusées. | Fichier de petite taille seulement. |
 | `mac_address` 1 + `gethostname` 1 | Adresses MAC, nom de machine | Évitent `sysinfo` (lourd) pour deux lectures au démarrage. À remplacer par `sysinfo` si HRT-06 l'adopte déjà. | Lectures faites une fois au démarrage, jamais par requête. |
 | `tower-http` 0.6 (`trace`) | Journal de chaque requête | Méthode, chemin, statut, durée en une ligne. | Ne jamais journaliser d'en-têtes `Authorization` ni de corps. |
-| `tracing` + `tracing-subscriber` (`env-filter`, `fmt`, `json`) | Journaux structurés | Sortie standard reprise par journald ; texte en terminal, JSON sinon (`HEARTH_LOG_FORMAT`). | `anyhow` seulement dans `main` ; ailleurs `thiserror`. |
+| `tracing` + `tracing-subscriber` (`env-filter`, `fmt`, `json`) | Journaux structurés | Sortie standard reprise par journald ; texte en terminal, JSON sinon (`HEARTH_LOG_FORMAT`). | Erreur fatale journalisée une seule fois, dans `main`. |
 | `serde` + `serde_json` | Corps JSON, configuration | Standard Rust. | `hearth-proto` n'a que ces deux crates plus `sha2` et `thiserror`. |
 | `thiserror` 2 | Erreurs typées par couche | Convention du dépôt (CLAUDE.md) : pas d'`anyhow` dans le code de l'agent. | Chaque message d'erreur porte sa cause ; ne pas la ré-imprimer en parcourant la chaîne. |
 | `tokio` 1 | Runtime asynchrone, signaux, tâches | Imposé par axum et rustls. | Rien de bloquant dans les handlers ; le démarrage est synchrone (verrou d'identité). |
