@@ -515,7 +515,7 @@ async fn the_purge_removes_by_age_and_then_by_count_and_keeps_the_search_in_step
     let mut tx = store.begin().await.unwrap();
     let removed = tx
         .audit()
-        .purge_before(start_time() + Duration::seconds(30))
+        .purge_before(start_time() + Duration::seconds(30), 1000)
         .await
         .unwrap();
     assert_eq!(removed, 3);
@@ -533,7 +533,10 @@ async fn the_purge_removes_by_age_and_then_by_count_and_keeps_the_search_in_step
     );
     // Rien à supprimer : zéro, sans erreur.
     let mut tx = store.begin().await.unwrap();
-    assert_eq!(tx.audit().purge_before(start_time()).await.unwrap(), 0);
+    assert_eq!(
+        tx.audit().purge_before(start_time(), 1000).await.unwrap(),
+        0
+    );
     assert_eq!(tx.audit().purge_oldest(0).await.unwrap(), 0);
     tx.commit().await.unwrap();
 
@@ -587,4 +590,19 @@ async fn an_uncommitted_entry_is_not_written() {
     tx.audit().record(&simple(1)).await.unwrap();
     drop(tx);
     assert_eq!(w.count().await, 0);
+}
+
+#[tokio::test]
+async fn a_batch_purge_removes_at_most_its_limit() {
+    let w = written().await;
+    let events: Vec<AuditEvent> = (0..10).map(simple).collect();
+    w.write(&events).await;
+    let store = SqliteStore::new(w.env.db.pool().clone());
+    let mut tx = store.begin().await.unwrap();
+    let cutoff = start_time() + Duration::seconds(100);
+    assert_eq!(tx.audit().purge_before(cutoff, 4).await.unwrap(), 4);
+    assert_eq!(tx.audit().purge_before(cutoff, 4).await.unwrap(), 4);
+    assert_eq!(tx.audit().purge_before(cutoff, 4).await.unwrap(), 2);
+    assert_eq!(tx.audit().purge_before(cutoff, 4).await.unwrap(), 0);
+    assert_eq!(tx.audit().count().await.unwrap(), 0);
 }

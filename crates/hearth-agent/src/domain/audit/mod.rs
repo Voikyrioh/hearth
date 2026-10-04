@@ -17,7 +17,7 @@ pub use event::{
 };
 pub use filter::{AuditFilter, FilterError, MAX_PAGE_SIZE, RawFilter, SearchQuery};
 pub use policy::{
-    MAX_ENTRIES, RETENTION, RequestKind, can_read_journal, excess_entries, is_journaled,
-    retention_cutoff,
+    CAP_CHECK_EVERY, MAX_ENTRIES, PURGE_BATCH, RETENTION, RequestKind, can_read_journal,
+    excess_entries, is_journaled, retention_cutoff,
 };
 pub use repeat::{MAX_TRACKED, REPEAT_WINDOW, RepeatFilter};

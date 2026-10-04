@@ -12,8 +12,8 @@ use hearth_agent::application::ports::AuditFeed;
 use hearth_agent::application::sessions::LoginError;
 use hearth_agent::domain::accounts::{Role, Username};
 use hearth_agent::domain::audit::{
-    Actor, AuditAction, AuditFilter, AuditRecord, MAX_ENTRIES, Origin, OriginKind, Outcome,
-    OutcomeKind, RawFilter, Reason, Target,
+    Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, MAX_ENTRIES, Origin, OriginKind,
+    Outcome, OutcomeKind, RawFilter, Reason, Target,
 };
 use support::{PASSWORD, by, client, client_at, env, secret, start_time};
 
@@ -770,4 +770,65 @@ async fn refusals_that_differ_are_not_grouped_and_a_later_one_brings_the_summary
     assert_eq!(records.len(), 5);
     assert_eq!(records[3].repeat_count, 2);
     assert_eq!(records[4].repeat_count, 0);
+}
+
+#[tokio::test]
+async fn the_purge_goes_by_batches_and_removes_everything_that_is_due() {
+    let env = env().await;
+    // Plus de deux lots d'entrées trop vieilles.
+    flood(&env, 2_500, "2026-01-01T00:00:00.000Z").await;
+    flood(&env, 10, "2026-09-21T14:13:20.000Z").await;
+    let report = env.maintenance.purge().await.unwrap();
+    assert_eq!(report.audit_events, 2_500);
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(left, 10);
+}
+
+#[tokio::test]
+async fn writing_checks_the_cap_between_two_purges() {
+    let env = env().await;
+    let over = i64::try_from(MAX_ENTRIES).unwrap() + 1_200;
+    flood(&env, over, "2026-09-21T14:13:20.000Z").await;
+    // 500 entrées écrites par les cas d'usage : le contrôle du plafond se déclenche, sans purge
+    // horaire, et supprime le surplus par lots dans des transactions à part.
+    {
+        use hearth_agent::application::ports::Store;
+        let store = hearth_agent::infrastructure::sqlite::SqliteStore::new(env.db.pool().clone());
+        let mut tx = store.begin().await.unwrap();
+        for _ in 0..500 {
+            tx.audit()
+                .record(&AuditEvent::new(
+                    start_time(),
+                    Actor::command_line(),
+                    AuditAction::AccountCreate,
+                    Target::None,
+                    Outcome::Succeeded,
+                ))
+                .await
+                .unwrap();
+        }
+        tx.commit().await.unwrap();
+    }
+    let mut left = i64::MAX;
+    for _ in 0..100 {
+        left = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap();
+        if left == i64::try_from(MAX_ENTRIES).unwrap() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(left, i64::try_from(MAX_ENTRIES).unwrap());
+    // Les plus anciennes sont parties, les 500 nouvelles restent.
+    let new: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE action = 'account.create'")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(new, 500);
 }

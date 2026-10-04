@@ -26,10 +26,14 @@ CREATE TABLE audit_events (
     repeat_count INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
+-- Un seul index, sur `at` : la purge par âge (`DELETE … WHERE at < ? LIMIT ?`, plan `SEARCH
+-- audit_events USING COVERING INDEX audit_events_at`). Les index sur `account`, `action` et
+-- `outcome` ne servent à aucune requête : la lecture est une requête vérifiée à filtres facultatifs
+-- (`?1 IS NULL OR …`, listes lues par `json_each`) dont le plan est `SCAN e` dans l'ordre de la clé
+-- primaire décroissante (`ORDER BY id DESC LIMIT n` s'arrête dès la page pleine), avec ou sans
+-- filtre de compte ; ils coûteraient une écriture de plus à chaque entrée pour rien. Mesuré avec
+-- `EXPLAIN QUERY PLAN` ; à rouvrir si la lecture est réécrite en requêtes par filtre.
 CREATE INDEX audit_events_at ON audit_events (at);
-CREATE INDEX audit_events_account ON audit_events (account);
-CREATE INDEX audit_events_action ON audit_events (action);
-CREATE INDEX audit_events_outcome ON audit_events (outcome);
 
 -- Aucune modification d'une entrée écrite.
 CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events

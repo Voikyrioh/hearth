@@ -11,6 +11,13 @@ pub const RETENTION: Duration = Duration::days(90);
 /// Nombre maximal d'entrées conservées : les plus anciennes partent d'abord.
 pub const MAX_ENTRIES: u64 = 50_000;
 
+/// Lignes supprimées par transaction : la purge procède par lots, chacun dans sa propre
+/// transaction, pour ne pas tenir longtemps le verrou d'écriture (chaque ligne supprimée met aussi
+/// à jour la table de recherche).
+pub const PURGE_BATCH: u64 = 1_000;
+/// Le plafond est aussi contrôlé par l'écriture : toutes les 500 entrées écrites.
+pub const CAP_CHECK_EVERY: u64 = 500;
+
 /// Avant cette date, une entrée est trop ancienne.
 pub fn retention_cutoff(now: OffsetDateTime) -> OffsetDateTime {
     now - RETENTION

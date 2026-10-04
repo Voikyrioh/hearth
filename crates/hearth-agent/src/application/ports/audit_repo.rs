@@ -26,8 +26,10 @@ pub trait AuditTx: Send {
     /// Nombre d'entrées.
     async fn count(&mut self) -> Result<u64, StoreError>;
 
-    /// Supprime les entrées écrites avant `before` ; rend leur nombre.
-    async fn purge_before(&mut self, before: OffsetDateTime) -> Result<u64, StoreError>;
+    /// Supprime au plus `limit` entrées écrites avant `before` ; rend leur nombre (un lot : le
+    /// cas d'usage recommence tant qu'il en reste, chaque lot dans sa transaction).
+    async fn purge_before(&mut self, before: OffsetDateTime, limit: u64)
+    -> Result<u64, StoreError>;
 
     /// Supprime les `count` entrées les plus anciennes ; rend leur nombre.
     async fn purge_oldest(&mut self, count: u64) -> Result<u64, StoreError>;
