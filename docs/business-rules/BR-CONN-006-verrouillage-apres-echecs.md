@@ -13,7 +13,7 @@ maj: 2026-10-04
 ## Règle
 Le 5e échec de connexion consécutif d'un même couple identifiant + adresse du client impose une attente de 1 minute avant la tentative suivante. Chaque échec fait ensuite (après l'attente) double l'attente : 1, 2, 4, 8 puis 15 minutes, plafond 15 minutes. Un succès remet le compteur et l'attente à zéro. Pendant l'attente, toute tentative est refusée sans même vérifier le mot de passe : `429 TOO_MANY_ATTEMPTS` avec `details.retry_after_s` (arrondi au-dessus). L'échec qui déclenche l'attente reçoit déjà cette réponse.
 
-Un compteur sans activité depuis 24 h (et sans attente en cours) est purgé par la tâche périodique (BR-CONN-007).
+Un compteur sans activité depuis 24 h (`domain::lockout::ATTEMPT_RETENTION`, et sans attente en cours) est purgé par la tâche périodique (BR-CONN-007).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/lockout.rs::step` — fonction pure `(état, événement, maintenant) → (état, décision)` ; `retry_after_seconds` pour l'annonce.

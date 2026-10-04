@@ -1,18 +1,13 @@
 //! Purge périodique : sessions expirées, traces de révocation anciennes, compteurs de connexion
-//! inactifs, opérations de plus de 24 h. Une seule transaction : la purge est tout ou rien.
+//! inactifs, opérations de plus de 24 h. Une seule transaction : la purge est tout ou rien. Les
+//! durées de conservation sont des règles du domaine (`lockout`, `sessions`, `operations`).
 
 use std::sync::Arc;
 
-use time::Duration;
-
 use super::ports::{Clock, Store, StoreError};
+use crate::domain::lockout::ATTEMPT_RETENTION;
 use crate::domain::operations::RETENTION as OPERATION_RETENTION;
-
-/// Durée pendant laquelle l'empreinte d'un jeton révoqué est retenue (BR-RESIL-014).
-pub const REVOCATION_RETENTION: Duration = Duration::days(90);
-
-/// Un compteur de tentatives sans activité depuis ce délai (et sans attente en cours) est oublié.
-pub const ATTEMPT_RETENTION: Duration = Duration::hours(24);
+use crate::domain::sessions::REVOCATION_RETENTION;
 
 /// Ce que la purge a supprimé.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -13,7 +13,7 @@ maj: 2026-10-04
 ## Règle
 Une session vit 30 jours après sa dernière activité : chaque requête authentifiée repousse l'expiration (au plus une écriture toutes les 5 minutes). Passé ce délai : `401 SESSION_EXPIRED`. Un jeton inconnu et non révoqué (session déjà purgée après expiration) reçoit aussi `SESSION_EXPIRED`.
 
-Le jeton est 32 octets aléatoires du système, rendu au client en hexadécimal (64 caractères) une seule fois. L'agent n'en conserve que le SHA-256 ; la comparaison des empreintes se fait en temps constant. Aucun jeton n'est journalisé ni affiché (`Debug` masqué).
+Le jeton est 32 octets aléatoires du système, rendu au client en hexadécimal (64 caractères) une seule fois. L'agent n'en conserve que le SHA-256 et retrouve la session par cette empreinte (le jeton en clair n'est jamais comparé) ; `TokenHash` se compare en temps constant. Aucun jeton n'est journalisé ni affiché (`Debug` masqué).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/sessions.rs::{expiry_from, check, renewed_expiry}`.

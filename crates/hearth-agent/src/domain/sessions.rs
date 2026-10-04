@@ -12,6 +12,9 @@ use super::session_token::TokenHash;
 /// Durée de vie d'une session sans activité (BR-RESIL-012).
 pub const LIFETIME: Duration = Duration::days(30);
 
+/// Durée pendant laquelle l'empreinte d'un jeton révoqué est retenue (BR-RESIL-014).
+pub const REVOCATION_RETENTION: Duration = Duration::days(90);
+
 /// Intervalle minimal entre deux renouvellements : l'activité repousse l'expiration, mais pas
 /// à chaque requête (une écriture par requête serait inutilement coûteuse).
 pub const RENEWAL_INTERVAL: Duration = Duration::minutes(5);

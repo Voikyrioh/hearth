@@ -17,6 +17,9 @@ pub const FIRST_LOCK: Duration = Duration::seconds(60);
 /// Plafond de l'attente.
 pub const MAX_LOCK: Duration = Duration::seconds(15 * 60);
 
+/// Un compteur sans activité depuis ce délai (et sans attente en cours) est oublié (BR-CONN-006).
+pub const ATTEMPT_RETENTION: Duration = Duration::hours(24);
+
 /// Longueur maximale (en caractères) de l'identifiant retenu dans la clé : borne la taille du
 /// stockage face à un client qui enverrait des identifiants démesurés.
 const MAX_KEY_PART: usize = 64;

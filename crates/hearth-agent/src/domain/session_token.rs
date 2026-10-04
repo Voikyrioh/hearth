@@ -53,8 +53,8 @@ impl Drop for SessionToken {
     }
 }
 
-/// Empreinte SHA-256 d'un jeton : ce qui est stocké et retrouvé. La comparaison se fait en
-/// temps constant.
+/// Empreinte SHA-256 d'un jeton : ce qui est stocké et retrouvé (la recherche se fait sur
+/// l'empreinte, le jeton en clair n'est jamais comparé). `PartialEq` est en temps constant.
 #[derive(Clone)]
 pub struct TokenHash([u8; TOKEN_LEN]);
 

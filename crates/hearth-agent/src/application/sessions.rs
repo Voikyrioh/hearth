@@ -194,13 +194,7 @@ impl SessionService {
         let token = SessionToken::parse(token).map_err(|_| AuthError::Malformed)?;
         let hash = token.hash();
         let now = self.clock.now();
-        // L'empreinte retrouvée est re-comparée en temps constant : la recherche en base ne
-        // suffit pas à décider qu'un jeton est le bon.
-        let found = self
-            .sessions
-            .find_by_token_hash(&hash)
-            .await?
-            .filter(|session| session.token_hash == hash);
+        let found = self.sessions.find_by_token_hash(&hash).await?;
         let revoked = match found {
             Some(_) => false,
             None => self.sessions.is_revoked(&hash).await?,

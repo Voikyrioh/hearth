@@ -11,7 +11,7 @@ maj: 2026-10-04
 # BR-RESIL-010 — Opérations suivies par clé (côté agent)
 
 ## Règle
-Toute requête qui modifie, faite par un compte connecté, peut porter `Idempotency-Key: <clé>`. L'agent enregistre la clé avant d'exécuter, puis le résultat (statut HTTP et corps) : rejouer la même clé rend le premier résultat (en-tête `Idempotent-Replayed: true`) sans ré-exécuter ; une clé dont l'exécution n'est pas finie répond `409 OPERATION_IN_PROGRESS` ; une clé déjà utilisée par un autre compte est refusée (`422 VALIDATION_ERROR`). Un résultat `5xx` n'est pas retenu (le client peut relancer). `GET /operations/{id}` relit l'état : `running`, `succeeded`, `failed`, ou `404` (jamais reçue : « non exécuté »). Les opérations sont conservées 24 h.
+Toute requête qui modifie, faite par un compte connecté, peut porter `Idempotency-Key: <clé>`. L'agent enregistre la clé avant d'exécuter, puis le résultat (statut HTTP et corps) : rejouer la même clé rend le premier résultat (en-tête `Idempotent-Replayed: true`) sans ré-exécuter ; une clé dont l'exécution n'est pas finie répond `409 OPERATION_IN_PROGRESS` ; une clé déjà utilisée par un autre compte est refusée (`422 VALIDATION_ERROR`). Un résultat `5xx` n'est pas retenu (le client peut relancer). `GET /operations/{id}` relit l'état : `running`, `succeeded`, `failed`, ou `404` (jamais reçue : « non exécuté »). Les opérations sont conservées 24 h (`domain::operations::RETENTION`).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/operations.rs::classify`, `OperationKey::parse`.

@@ -11,7 +11,7 @@ maj: 2026-10-04
 # BR-RESIL-014 — Accès révoqué
 
 ## Règle
-Quand les sessions d'un compte sont fermées par un changement de mot de passe (BR-ACCT-008, 009), une suppression de compte (BR-ACCT-010) ou une révocation (BR-ACCT-011), l'empreinte de chaque jeton fermé est retenue (table `revoked_sessions`, 90 jours) : le client qui revient avec ce jeton reçoit `401 SESSION_REVOKED` (état « Accès révoqué »), pas `SESSION_EXPIRED` (qui lui ferait rejouer une reconnexion silencieuse). La déconnexion explicite (`DELETE /sessions/current`) ne laisse pas de trace de révocation.
+Quand les sessions d'un compte sont fermées par un changement de mot de passe (BR-ACCT-008, 009), une suppression de compte (BR-ACCT-010) ou une révocation (BR-ACCT-011), l'empreinte de chaque jeton fermé est retenue (table `revoked_sessions`, 90 jours : `domain::sessions::REVOCATION_RETENTION`) : le client qui revient avec ce jeton reçoit `401 SESSION_REVOKED` (état « Accès révoqué »), pas `SESSION_EXPIRED` (qui lui ferait rejouer une reconnexion silencieuse). La déconnexion explicite (`DELETE /sessions/current`) ne laisse pas de trace de révocation.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/sessions.rs::check` (`SessionEnd::Revoked`).
