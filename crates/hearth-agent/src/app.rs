@@ -20,7 +20,7 @@ use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError
 use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::sqlite::{
-    Database, DatabaseError, SqliteAccountRepo, SqliteSessionRepo,
+    Database, DatabaseError, SqliteAccountRepo, SqliteSessionRepo, SqliteStore,
 };
 use crate::infrastructure::system::SystemMachineInfo;
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
@@ -78,6 +78,7 @@ pub fn account_service(database: &Database) -> Result<AccountService, AppError> 
     Ok(AccountService::new(
         Arc::new(SqliteAccountRepo::new(database.pool().clone())),
         Arc::new(SqliteSessionRepo::new(database.pool().clone())),
+        Arc::new(SqliteStore::new(database.pool().clone())),
         Arc::new(Argon2Hasher::new()?),
         Arc::new(SystemClock),
         Arc::new(UlidGen),

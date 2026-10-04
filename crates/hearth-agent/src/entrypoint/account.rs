@@ -11,7 +11,6 @@ use time::OffsetDateTime;
 
 use super::cli::AccountAction;
 use crate::application::accounts::{AccountError, AccountService, AccountSummary};
-use crate::domain::accounts::Username;
 use crate::domain::secret::Secret;
 
 #[derive(Debug, Error)]
@@ -45,7 +44,7 @@ pub async fn execute(
     match action {
         AccountAction::Add { username, role } => {
             // Contrôle de l'identifiant avant de demander un mot de passe.
-            Username::parse(username).map_err(AccountError::from)?;
+            AccountService::validate_username(username)?;
             let password = passwords.new_password()?;
             let account = service.create(username, password, *role).await?;
             writeln!(out, "Compte {} créé", account.username)?;

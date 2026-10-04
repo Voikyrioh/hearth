@@ -506,3 +506,88 @@ async fn the_repository_reads_what_the_service_wrote() {
     assert_eq!(found.id, created.id);
     assert_eq!(found.password_hash.expose(), created.password_hash.expose());
 }
+
+/// Hacheur qui simule un changement concurrent du mot de passe, juste après la vérification de
+/// l'ancien : le haché en base n'est plus celui qui a été vérifié.
+struct RacingHasher {
+    inner: hearth_agent::infrastructure::argon2::Argon2Hasher,
+    pool: sqlx::SqlitePool,
+}
+
+#[async_trait::async_trait]
+impl hearth_agent::application::ports::PasswordHasher for RacingHasher {
+    async fn hash(
+        &self,
+        password: &hearth_agent::domain::accounts::PlainPassword,
+    ) -> Result<hearth_agent::domain::secret::Secret, hearth_agent::application::ports::HashError>
+    {
+        self.inner.hash(password).await
+    }
+
+    async fn verify(
+        &self,
+        password: &hearth_agent::domain::secret::Secret,
+        hash: &hearth_agent::domain::secret::Secret,
+    ) -> Result<bool, hearth_agent::application::ports::HashError> {
+        let verified = self.inner.verify(password, hash).await?;
+        sqlx::query("UPDATE accounts SET password_hash = 'concurrent-change'")
+            .execute(&self.pool)
+            .await
+            .unwrap();
+        Ok(verified)
+    }
+}
+
+#[tokio::test]
+async fn a_password_changed_between_verification_and_write_is_not_overwritten() {
+    use std::sync::Arc;
+
+    use hearth_agent::application::accounts::AccountService;
+    use hearth_agent::infrastructure::sqlite::{SqliteSessionRepo, SqliteStore};
+
+    let env = env().await;
+    let marie = env.create("marie", Role::ReadOnly).await;
+    env.insert_session(&marie.id, "S1", Duration::hours(1))
+        .await;
+    let pool = env.db.pool().clone();
+    let racing = AccountService::new(
+        Arc::new(SqliteAccountRepo::new(pool.clone())),
+        Arc::new(SqliteSessionRepo::new(pool.clone())),
+        Arc::new(SqliteStore::new(pool.clone())),
+        Arc::new(RacingHasher {
+            inner: hearth_agent::infrastructure::argon2::Argon2Hasher::with_cost(8, 1, 1).unwrap(),
+            pool: pool.clone(),
+        }),
+        env.clock.clone(),
+        Arc::new(support::SequentialIds::starting_at(100)),
+    );
+
+    let error = racing
+        .change_own_password(
+            &marie.id,
+            secret(PASSWORD),
+            secret("Brand-New-Pass-7"),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, AccountError::PasswordChangedMeanwhile));
+    assert_eq!(
+        error.to_string(),
+        "Le mot de passe a été modifié entre-temps, réessaie"
+    );
+    let stored: String = sqlx::query_scalar("SELECT password_hash FROM accounts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, "concurrent-change");
+    assert_eq!(env.session_ids(&marie.id).await, ["S1"]);
+}
+
+#[test]
+fn an_invalid_username_is_refused_without_touching_anything() {
+    use hearth_agent::application::accounts::AccountService;
+    assert!(AccountService::validate_username("marie").is_ok());
+    assert!(AccountService::validate_username("a b").is_err());
+    assert!(AccountService::validate_username("").is_err());
+}

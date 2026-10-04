@@ -4,11 +4,13 @@
 
 mod support;
 
-use hearth_agent::application::ports::{AccountRepo, SessionRepo, StoreError};
+use hearth_agent::application::ports::{AccountRepo, SessionRepo, Store, StoreError};
 use hearth_agent::domain::accounts::{Account, AccountId, Role, Username};
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::sessions::{SessionClosure, SessionId};
-use hearth_agent::infrastructure::sqlite::{Database, SqliteAccountRepo, SqliteSessionRepo};
+use hearth_agent::infrastructure::sqlite::{
+    Database, SqliteAccountRepo, SqliteSessionRepo, SqliteStore,
+};
 use support::{env, start_time};
 use time::Duration;
 
@@ -24,8 +26,12 @@ fn account(id: &str, username: &str, role: Role) -> Account {
     }
 }
 
-async fn insert(repo: &SqliteAccountRepo, account: &Account) {
-    let mut tx = repo.begin().await.unwrap();
+fn store(env: &support::Env) -> SqliteStore {
+    SqliteStore::new(env.db.pool().clone())
+}
+
+async fn insert(env: &support::Env, account: &Account) {
+    let mut tx = store(env).begin().await.unwrap();
     tx.insert(account).await.unwrap();
     tx.commit().await.unwrap();
 }
@@ -36,7 +42,7 @@ async fn an_account_round_trips_through_the_database() {
     let repo = SqliteAccountRepo::new(env.db.pool().clone());
     let mut original = account("A1", "marie", Role::Admin);
     original.last_login_at = Some(start_time() + Duration::hours(3));
-    insert(&repo, &original).await;
+    insert(&env, &original).await;
 
     let found = repo
         .find_by_id(&AccountId::new("A1"))
@@ -69,8 +75,8 @@ async fn list_is_ordered_by_creation() {
     let repo = SqliteAccountRepo::new(env.db.pool().clone());
     let mut late = account("A1", "zoe", Role::Admin);
     late.created_at = start_time() + Duration::hours(1);
-    insert(&repo, &late).await;
-    insert(&repo, &account("A2", "adam", Role::ReadOnly)).await;
+    insert(&env, &late).await;
+    insert(&env, &account("A2", "adam", Role::ReadOnly)).await;
 
     let names: Vec<_> = repo
         .list()
@@ -85,8 +91,7 @@ async fn list_is_ordered_by_creation() {
 #[tokio::test]
 async fn the_database_refuses_two_usernames_differing_by_case() {
     let env = env().await;
-    let repo = SqliteAccountRepo::new(env.db.pool().clone());
-    insert(&repo, &account("A1", "marie", Role::Admin)).await;
+    insert(&env, &account("A1", "marie", Role::Admin)).await;
 
     // Même en contournant le domaine : la contrainte de la base tient.
     let direct = sqlx::query(
@@ -97,7 +102,7 @@ async fn the_database_refuses_two_usernames_differing_by_case() {
     .await;
     assert!(direct.is_err());
 
-    let mut tx = repo.begin().await.unwrap();
+    let mut tx = store(&env).begin().await.unwrap();
     let duplicate = tx.insert(&account("A2", "marie", Role::ReadOnly)).await;
     assert!(matches!(
         duplicate,
@@ -111,10 +116,10 @@ async fn the_database_refuses_two_usernames_differing_by_case() {
 async fn a_transaction_dropped_without_commit_changes_nothing() {
     let env = env().await;
     let repo = SqliteAccountRepo::new(env.db.pool().clone());
-    insert(&repo, &account("A1", "marie", Role::Admin)).await;
+    insert(&env, &account("A1", "marie", Role::Admin)).await;
 
     {
-        let mut tx = repo.begin().await.unwrap();
+        let mut tx = store(&env).begin().await.unwrap();
         tx.insert(&account("A2", "paul", Role::Admin))
             .await
             .unwrap();
@@ -129,19 +134,18 @@ async fn a_transaction_dropped_without_commit_changes_nothing() {
     assert_eq!(accounts.len(), 1);
     assert_eq!(accounts[0].role, Role::Admin);
     // La base reste utilisable pour l'écrivain suivant.
-    let mut tx = repo.begin().await.unwrap();
+    let mut tx = store(&env).begin().await.unwrap();
     assert_eq!(tx.count_admins().await.unwrap(), 1);
 }
 
 #[tokio::test]
 async fn count_admins_counts_only_administrators() {
     let env = env().await;
-    let repo = SqliteAccountRepo::new(env.db.pool().clone());
-    insert(&repo, &account("A1", "marie", Role::Admin)).await;
-    insert(&repo, &account("A2", "paul", Role::ReadOnly)).await;
-    insert(&repo, &account("A3", "zoe", Role::Admin)).await;
+    insert(&env, &account("A1", "marie", Role::Admin)).await;
+    insert(&env, &account("A2", "paul", Role::ReadOnly)).await;
+    insert(&env, &account("A3", "zoe", Role::Admin)).await;
 
-    let mut tx = repo.begin().await.unwrap();
+    let mut tx = store(&env).begin().await.unwrap();
     assert_eq!(tx.count_admins().await.unwrap(), 2);
 }
 
@@ -149,10 +153,10 @@ async fn count_admins_counts_only_administrators() {
 async fn set_role_and_set_password_are_visible_after_commit() {
     let env = env().await;
     let repo = SqliteAccountRepo::new(env.db.pool().clone());
-    insert(&repo, &account("A1", "marie", Role::ReadOnly)).await;
+    insert(&env, &account("A1", "marie", Role::ReadOnly)).await;
 
     let later = start_time() + Duration::days(2);
-    let mut tx = repo.begin().await.unwrap();
+    let mut tx = store(&env).begin().await.unwrap();
     tx.set_role(&AccountId::new("A1"), Role::Admin)
         .await
         .unwrap();
@@ -174,13 +178,12 @@ async fn set_role_and_set_password_are_visible_after_commit() {
 #[tokio::test]
 async fn deleting_an_account_deletes_its_sessions_by_cascade() {
     let env = env().await;
-    let repo = SqliteAccountRepo::new(env.db.pool().clone());
     let marie = account("A1", "marie", Role::Admin);
-    insert(&repo, &marie).await;
+    insert(&env, &marie).await;
     env.insert_session(&marie.id, "S1", Duration::hours(1))
         .await;
 
-    let mut tx = repo.begin().await.unwrap();
+    let mut tx = store(&env).begin().await.unwrap();
     tx.delete(&marie.id).await.unwrap();
     tx.commit().await.unwrap();
 
@@ -202,12 +205,11 @@ async fn a_session_cannot_reference_an_unknown_account() {
 #[tokio::test]
 async fn session_repo_lists_expiries_and_closes_by_scope() {
     let env = env().await;
-    let accounts = SqliteAccountRepo::new(env.db.pool().clone());
     let sessions = SqliteSessionRepo::new(env.db.pool().clone());
     let marie = account("A1", "marie", Role::Admin);
     let paul = account("A2", "paul", Role::ReadOnly);
-    insert(&accounts, &marie).await;
-    insert(&accounts, &paul).await;
+    insert(&env, &marie).await;
+    insert(&env, &paul).await;
     for id in ["S1", "S2", "S3"] {
         env.insert_session(&marie.id, id, Duration::hours(1)).await;
     }
@@ -221,28 +223,30 @@ async fn session_repo_lists_expiries_and_closes_by_scope() {
             .all(|&e| e == start_time() + Duration::hours(1))
     );
 
-    let closed = sessions
-        .close(&marie.id, &SessionClosure::AllExcept(SessionId::new("S2")))
+    let mut tx = store(&env).begin().await.unwrap();
+    let closed = tx
+        .close_sessions(&marie.id, &SessionClosure::AllExcept(SessionId::new("S2")))
         .await
         .unwrap();
     assert_eq!(closed, 2);
+    tx.commit().await.unwrap();
     assert_eq!(env.session_ids(&marie.id).await, ["S2"]);
     assert_eq!(env.session_ids(&paul.id).await, ["S4"]);
 
+    let mut tx = store(&env).begin().await.unwrap();
     assert_eq!(
-        sessions
-            .close(&marie.id, &SessionClosure::All)
+        tx.close_sessions(&marie.id, &SessionClosure::All)
             .await
             .unwrap(),
         1
     );
     assert_eq!(
-        sessions
-            .close(&marie.id, &SessionClosure::All)
+        tx.close_sessions(&marie.id, &SessionClosure::All)
             .await
             .unwrap(),
         0
     );
+    tx.commit().await.unwrap();
 }
 
 #[tokio::test]
@@ -264,8 +268,7 @@ async fn a_corrupt_row_is_reported_with_the_resource_not_hidden() {
 #[tokio::test]
 async fn the_database_survives_being_reopened() {
     let env = env().await;
-    let repo = SqliteAccountRepo::new(env.db.pool().clone());
-    insert(&repo, &account("A1", "marie", Role::Admin)).await;
+    insert(&env, &account("A1", "marie", Role::Admin)).await;
     env.db.pool().close().await;
 
     let reopened = Database::open(env.dir.path()).await.unwrap();
@@ -279,8 +282,8 @@ async fn list_orders_accounts_created_within_the_same_second() {
     let repo = SqliteAccountRepo::new(env.db.pool().clone());
     let mut half = account("A1", "later", Role::Admin);
     half.created_at = start_time() + Duration::milliseconds(500);
-    insert(&repo, &half).await;
-    insert(&repo, &account("A2", "first", Role::Admin)).await;
+    insert(&env, &half).await;
+    insert(&env, &account("A2", "first", Role::Admin)).await;
 
     let names: Vec<_> = repo
         .list()

@@ -36,15 +36,6 @@ impl SessionRepo for SqliteSessionRepo {
             .map(|value| parse_date(RESOURCE, value))
             .collect()
     }
-
-    async fn close(
-        &self,
-        account: &AccountId,
-        closure: &SessionClosure,
-    ) -> Result<u64, StoreError> {
-        let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
-        close_sessions(&mut conn, account, closure).await
-    }
 }
 
 /// Supprime les sessions du compte désignées par `closure`. Partagé avec la transaction des

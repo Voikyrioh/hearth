@@ -11,7 +11,9 @@ use hearth_agent::application::ports::{Clock, IdGen};
 use hearth_agent::domain::accounts::{Account, AccountId, Role};
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
-use hearth_agent::infrastructure::sqlite::{Database, SqliteAccountRepo, SqliteSessionRepo};
+use hearth_agent::infrastructure::sqlite::{
+    Database, SqliteAccountRepo, SqliteSessionRepo, SqliteStore,
+};
 use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
 
@@ -38,6 +40,12 @@ impl Clock for TestClock {
 
 pub struct SequentialIds(AtomicU64);
 
+impl SequentialIds {
+    pub fn starting_at(first: u64) -> Self {
+        Self(AtomicU64::new(first))
+    }
+}
+
 impl IdGen for SequentialIds {
     fn new_id(&self) -> String {
         format!("ID{:08}", self.0.fetch_add(1, Ordering::SeqCst))
@@ -62,6 +70,7 @@ pub async fn env() -> Env {
     let service = Arc::new(AccountService::new(
         Arc::new(SqliteAccountRepo::new(db.pool().clone())),
         Arc::new(SqliteSessionRepo::new(db.pool().clone())),
+        Arc::new(SqliteStore::new(db.pool().clone())),
         Arc::new(Argon2Hasher::with_cost(8, 1, 1).expect("paramètres")),
         clock.clone(),
         Arc::new(SequentialIds(AtomicU64::new(1))),

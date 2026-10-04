@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use super::ports::{AccountRepo, Clock, HashError, IdGen, PasswordHasher, SessionRepo, StoreError};
+use super::ports::{
+    AccountRepo, Clock, HashError, IdGen, PasswordHasher, SessionRepo, Store, StoreError,
+};
 use crate::domain::accounts::{
     Account, AccountId, ConfirmationMismatch, LastAdminError, PasswordRejected, PlainPassword,
     Role, Username, UsernameError, check_removal, check_role_change, confirm_self_deletion,
@@ -34,6 +36,8 @@ pub enum AccountError {
     LastAdmin(#[from] LastAdminError),
     #[error("L'ancien mot de passe est incorrect")]
     OldPasswordIncorrect,
+    #[error("Le mot de passe a été modifié entre-temps, réessaie")]
+    PasswordChangedMeanwhile,
     #[error(transparent)]
     SelfDeletion(#[from] ConfirmationMismatch),
     #[error(transparent)]
@@ -53,6 +57,7 @@ pub struct AccountSummary {
 pub struct AccountService {
     accounts: Arc<dyn AccountRepo>,
     sessions: Arc<dyn SessionRepo>,
+    store: Arc<dyn Store>,
     hasher: Arc<dyn PasswordHasher>,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
@@ -62,6 +67,7 @@ impl AccountService {
     pub fn new(
         accounts: Arc<dyn AccountRepo>,
         sessions: Arc<dyn SessionRepo>,
+        store: Arc<dyn Store>,
         hasher: Arc<dyn PasswordHasher>,
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGen>,
@@ -69,10 +75,18 @@ impl AccountService {
         Self {
             accounts,
             sessions,
+            store,
             hasher,
             clock,
             ids,
         }
+    }
+
+    /// BR-ACCT-002 : contrôle le format d'un identifiant sans rien lire ni écrire. Permet de
+    /// refuser avant de demander un mot de passe.
+    pub fn validate_username(username: &str) -> Result<(), AccountError> {
+        Username::parse(username)?;
+        Ok(())
     }
 
     /// BR-ACCT-001 à BR-ACCT-005 : crée un compte.
@@ -97,7 +111,7 @@ impl AccountService {
             last_login_at: None,
         };
 
-        let mut tx = self.accounts.begin().await?;
+        let mut tx = self.store.begin().await?;
         if tx.find_by_username(&account.username).await?.is_some() {
             return Err(AccountError::UsernameTaken);
         }
@@ -138,7 +152,7 @@ impl AccountService {
 
     /// BR-ACCT-007 : change le rôle, sauf pour rétrograder le dernier administrateur.
     pub async fn change_role(&self, id: &AccountId, role: Role) -> Result<(), AccountError> {
-        let mut tx = self.accounts.begin().await?;
+        let mut tx = self.store.begin().await?;
         let account = tx.find(id).await?.ok_or(AccountError::NotFound)?;
         let admins = tx.count_admins().await?;
         check_role_change(account.role, role, admins)?;
@@ -156,7 +170,7 @@ impl AccountService {
     ) -> Result<u64, AccountError> {
         let account = self.require(id).await?;
         let hash = self.hash_for(&account, password).await?;
-        self.apply_password(id, &hash, PasswordChange::ByAdmin)
+        self.apply_password(id, &hash, PasswordChange::ByAdmin, None)
             .await
     }
 
@@ -178,8 +192,13 @@ impl AccountService {
             return Err(AccountError::OldPasswordIncorrect);
         }
         let hash = self.hash_for(&account, new_password).await?;
-        self.apply_password(id, &hash, PasswordChange::Own { current_session })
-            .await
+        self.apply_password(
+            id,
+            &hash,
+            PasswordChange::Own { current_session },
+            Some(&account.password_hash),
+        )
+        .await
     }
 
     /// BR-ACCT-007, BR-ACCT-010, BR-ACCT-012 : supprime un compte et ferme ses sessions.
@@ -192,7 +211,7 @@ impl AccountService {
         acting: Option<&AccountId>,
         confirmation: Option<&str>,
     ) -> Result<u64, AccountError> {
-        let mut tx = self.accounts.begin().await?;
+        let mut tx = self.store.begin().await?;
         let account = tx.find(id).await?.ok_or(AccountError::NotFound)?;
         if acting == Some(id) {
             confirm_self_deletion(&account.username, confirmation.unwrap_or(""))?;
@@ -210,8 +229,11 @@ impl AccountService {
     /// BR-ACCT-011 : ferme toutes les sessions du compte sans toucher au mot de passe.
     /// Rend le nombre de sessions fermées.
     pub async fn revoke_sessions(&self, id: &AccountId) -> Result<u64, AccountError> {
-        self.require(id).await?;
-        Ok(self.sessions.close(id, &closure_on_revocation()).await?)
+        let mut tx = self.store.begin().await?;
+        tx.find(id).await?.ok_or(AccountError::NotFound)?;
+        let closed = tx.close_sessions(id, &closure_on_revocation()).await?;
+        tx.commit().await?;
+        Ok(closed)
     }
 
     async fn require(&self, id: &AccountId) -> Result<Account, AccountError> {
@@ -233,9 +255,17 @@ impl AccountService {
         id: &AccountId,
         hash: &Secret,
         change: PasswordChange,
+        verified_hash: Option<&Secret>,
     ) -> Result<u64, AccountError> {
-        let mut tx = self.accounts.begin().await?;
-        tx.find(id).await?.ok_or(AccountError::NotFound)?;
+        let mut tx = self.store.begin().await?;
+        let current = tx.find(id).await?.ok_or(AccountError::NotFound)?;
+        // Ce qui a été vérifié doit être ce qu'on remplace : si le mot de passe a changé depuis,
+        // on refuse plutôt que d'écraser un changement fait entre-temps.
+        if let Some(verified) = verified_hash
+            && current.password_hash.expose() != verified.expose()
+        {
+            return Err(AccountError::PasswordChangedMeanwhile);
+        }
         tx.set_password(id, hash, self.clock.now()).await?;
         let closed = tx
             .close_sessions(id, &closure_on_password_change(change))

@@ -8,6 +8,7 @@
 mod account_repo;
 mod convert;
 mod session_repo;
+mod store;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -20,6 +21,7 @@ use super::data_dir;
 
 pub use account_repo::SqliteAccountRepo;
 pub use session_repo::SqliteSessionRepo;
+pub use store::SqliteStore;
 
 pub const DATABASE_FILE: &str = "hearth.db";
 
