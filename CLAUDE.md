@@ -1,12 +1,12 @@
 # Hearth — guide pour Claude
 
-Hub et pipeline : `J:\Dev\Projects\orga\global\CLAUDE.md` (prime sur tout). Contexte produit : `contexts/hearth/` du hub (épics, stories, specs, conception technique, tickets `HRT-*`, sessions).
+Hub et pipeline : `CLAUDE.md` du hub `orga-global` (dépôt privé, prime sur tout). Contexte produit : `contexts/hearth/` du hub (épics, stories, specs, conception technique, tickets `HRT-*`, sessions).
 
 ## Avant de coder
 
 1. `ARCHITECTURE.md` puis `docs/INDEX.md`.
 2. `docs/adr/` (décisions) et `docs/business-rules/` (règles du domaine touché).
-3. Conception : `contexts/hearth/conceptions/2026-10-04-technique-socle.md` du hub.
+3. Conception : `contexts/hearth/conceptions/2026-10-04-technique-socle.md` du hub (privé) ; les décisions reprises ici sont dans `docs/adr/`.
 
 ## Commandes
 

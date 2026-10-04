@@ -13,5 +13,5 @@ Maj : 2026-10-04. Point d'entrée obligatoire des agents (recherche, dev, concep
 
 ## Globales (orga-global)
 
-- `J:/Dev/Projects/orga/global/docs/adr/INDEX.md` — ADR globales (règles de code/archi communes)
-- `J:/Dev/Projects/orga/global/product-descriptions/hearth.md` — Fiche produit écosystème
+- `docs/adr/INDEX.md` du hub `orga-global` (privé) — ADR globales (règles de code/archi communes)
+- `product-descriptions/hearth.md` du hub `orga-global` (privé) — Fiche produit écosystème
