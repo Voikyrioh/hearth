@@ -11,8 +11,8 @@ mod policy;
 pub use action::AuditAction;
 pub use csv::{BOM, SEPARATOR, field as csv_field, render as render_csv};
 pub use event::{
-    Actor, AuditEvent, AuditRecord, ClientName, Origin, OriginKind, Outcome, OutcomeKind, Reason,
-    Target,
+    Actor, AuditEvent, AuditRecord, ClientName, MAX_CLIENT_NAME, Origin, OriginKind, Outcome,
+    OutcomeKind, Reason, Target,
 };
 pub use filter::{AuditFilter, FilterError, MAX_PAGE_SIZE, RawFilter, SearchQuery};
 pub use policy::{

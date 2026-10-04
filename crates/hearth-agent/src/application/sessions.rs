@@ -51,7 +51,8 @@ pub enum LoginError {
     InvalidCredentials,
     #[error("Trop de tentatives, attends avant de réessayer")]
     TooManyAttempts { retry_after: Duration },
-    /// Trop de connexions en attente pour cette adresse : refus immédiat, sans compter d'échec.
+    /// Trop de connexions en attente pour cette adresse : refus immédiat (`429`), sans compter
+    /// d'échec.
     #[error("Trop de connexions en attente pour cette adresse")]
     Busy,
     #[error(transparent)]
@@ -217,6 +218,11 @@ impl SessionService {
         // Un seul tour, par adresse : le couple contient l'adresse, deux connexions du même couple
         // sont donc déjà sérialisées par le tour de leur adresse.
         let Some(_turn) = self.turns.lock(address.as_str()).await else {
+            tracing::warn!(
+                addr = %client.addr,
+                reason = "queue_full",
+                "connexion refusée : trop de connexions en attente pour cette adresse"
+            );
             return Err(LoginError::Busy);
         };
         let result = self
@@ -268,6 +274,9 @@ impl SessionService {
             .as_ref()
             .map_or_else(|| self.hasher.decoy_hash(), |found| &found.password_hash);
         let verified = self.hasher.verify(&password, hash).await?;
+        // Le compte visé, pour le journal, seulement s'il existe : ce n'est alors pas un mot de
+        // passe tapé à la place de l'identifiant (BR-AUDIT-005, 006).
+        let targeted = account.as_ref().map(|found| found.username.clone());
         let verified_account = account.filter(|_| verified);
 
         // 3. Issue, dans une seule transaction : compteurs, et pour un succès la session et la
@@ -297,10 +306,11 @@ impl SessionService {
                 .save(address, &address_next, now)
                 .await?;
             // Journal (BR-AUDIT-003, 005, 006, 007), dans la transaction des compteurs : la
-            // tentative refusée, sans compte ni identifiant saisi (la raison est la même que
-            // l'identifiant existe ou non), puis le blocage qu'elle a éventuellement déclenché.
+            // tentative refusée, avec le compte visé seulement s'il existe (la raison est la même
+            // que l'identifiant existe ou non, et l'identifiant saisi n'est jamais retenu),
+            // puis le blocage qu'elle a éventuellement déclenché.
             let wait = longest_wait(&[pair_decision, address_decision]);
-            let actor = Actor::new(None, Origin::client(Some(&client.name), &client.addr));
+            let actor = Actor::new(targeted, Origin::client(Some(&client.name), &client.addr));
             let reason = if Username::parse(username).is_err() {
                 Reason::InvalidIdentifier
             } else {

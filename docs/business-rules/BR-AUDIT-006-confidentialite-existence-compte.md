@@ -11,7 +11,7 @@ maj: 2026-10-04
 # BR-AUDIT-006 — Un échec de connexion ne dit pas si le compte existe
 
 ## Règle
-L'entrée d'une connexion refusée a la même forme, la même raison (« identifiants incorrects ») et aucun compte, que l'identifiant existe ou non, que le mot de passe soit faux ou non. Un identifiant dont le format est impossible (ce peut être un mot de passe tapé au mauvais endroit) a la raison « identifiant invalide », sans valeur ; cette raison ne dépend que du format, jamais de l'existence. **Conséquence assumée** : l'administrateur ne voit pas quel compte était visé ; il voit l'adresse, le poste et l'heure, ce que le regroupement par rafale (BR-AUDIT-013) utilise.
+L'entrée d'une connexion refusée a la même forme et la même raison (« identifiants incorrects »), que l'identifiant existe ou non, que le mot de passe soit faux ou non : la **raison** ne dit jamais si le compte existe. Un identifiant dont le format est impossible (ce peut être un mot de passe tapé au mauvais endroit) a la raison « identifiant invalide », sans valeur ; cette raison ne dépend que du format. **Le compte visé n'est renseigné que si l'identifiant saisi correspond à un compte existant** : l'administrateur voit alors quel compte est attaqué ; pour un identifiant inconnu ou impossible, le compte est vide (la valeur saisie n'est jamais retenue, BR-AUDIT-005). Cette différence est lisible de l'administrateur seul (le journal ne l'est que de lui) ; elle n'est jamais visible d'un client, dont la réponse reste identique (BR-CONN-013).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/audit/event.rs::Reason::{InvalidCredentials, InvalidIdentifier}`.

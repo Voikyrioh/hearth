@@ -41,7 +41,7 @@ Une entrée :
 ```
 
 - `at` : UTC ; l'interface l'affiche dans le fuseau du poste (BR-AUDIT-012).
-- `account` : identifiant figé à l'écriture ; `null` pour la ligne de commande et pour une connexion refusée (l'identifiant saisi n'est jamais retenu : BR-AUDIT-005, BR-AUDIT-006).
+- `account` : identifiant figé à l'écriture ; `null` pour la ligne de commande et pour une connexion refusée dont l'identifiant saisi ne correspond à aucun compte (l'identifiant saisi n'est jamais retenu : BR-AUDIT-005, BR-AUDIT-006) ; pour un identifiant qui correspond à un compte, ce compte.
 - `origin.kind` : `client` (adresse de la connexion et nom du poste, `name` absent si le poste n'est pas identifié, texte « 10.0.0.7 (inconnu) »), `cli` (« ligne de commande du serveur »), `assistant`.
 - `target` : un compte (`paul`, `paul (Lecture seule)` pour un changement de rôle) ou, pour un refus ou un échec dont la cible n'est pas connue, le motif de la route (`/accounts/{id}`).
 - `outcome` : `ok`, `denied`, `failed` ; `reason` dit pourquoi pour les deux derniers (« identifiants incorrects », « identifiant invalide », « trop de tentatives, attente de 60 s », « lecture seule », « données invalides », « identifiant déjà utilisé », « mot de passe actuel incorrect », « dernier administrateur », « conflit avec l'état du serveur », « cible introuvable », « agent occupé », « erreur interne »).
@@ -80,4 +80,4 @@ Mêmes filtres (sans `before` ni `limit`). `200` : le résultat filtré en CSV, 
 | La couche d'accès (`auth::guard`), d'après la colonne `audit` de `ENDPOINTS` | Les refus faute de droits (toute route réservée aux administrateurs, consultation comprise) et les échecs des requêtes qui modifient. |
 | Les sous-commandes `account …` | Les succès, avec l'origine « ligne de commande du serveur ». |
 
-Une entrée écrite dans la transaction d'une action en partage le sort : si son écriture échoue, l'action n'est pas validée (erreur interne). Hors transaction (refus et échecs relevés par la couche d'accès), un échec d'écriture est tracé en `error` et ne change rien pour l'appelant. Les tentatives de connexion refusées pendant une attente ne sont pas consignées (le blocage l'est, une fois). Conservation : 90 jours ou 50 000 entrées (BR-AUDIT-008).
+Une entrée écrite dans la transaction d'une action en partage le sort : si son écriture échoue, l'action n'est pas validée (erreur interne). Hors transaction (refus et échecs relevés par la couche d'accès), un échec d'écriture est tracé en `error` et ne change rien pour l'appelant. Les tentatives de connexion refusées pendant une attente, et celles qui débordent la file d'une adresse, ne sont pas consignées (le blocage l'est, une fois). Conservation : 90 jours ou 50 000 entrées (BR-AUDIT-008).

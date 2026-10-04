@@ -128,10 +128,11 @@ impl From<LoginError> for ApiError {
                     format!("Trop de tentatives. Attends {seconds} s avant de réessayer."),
                 ))
             }
-            LoginError::Busy => Self::new(
-                ErrorCode::Busy,
-                "L'agent est occupé. Réessaie dans un instant.",
-            ),
+            // C'est le client qui déborde, pas l'agent : 429, comme un verrouillage.
+            LoginError::Busy => Self(ErrorBody::too_many_attempts(
+                1,
+                "Trop de connexions en attente depuis cette adresse. Réessaie dans un instant.",
+            )),
             LoginError::Store(error) => Self::internal(&error),
             LoginError::Hash(error) => Self::from(error),
             LoginError::Token(error) => Self::internal(&error),
@@ -275,10 +276,14 @@ mod tests {
     }
 
     #[test]
-    fn a_full_connection_queue_answers_503_busy_too() {
-        let response = ApiError::from(LoginError::Busy).into_response();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(response.headers().get(RETRY_AFTER).unwrap(), "1");
+    fn a_full_connection_queue_answers_429_with_the_wait() {
+        let error = ApiError::from(LoginError::Busy);
+        assert_eq!(error.0.error.code, ErrorCode::TooManyAttempts);
+        assert_eq!(error.0.error.details, json!({ "retry_after_s": 1 }));
+        assert_eq!(
+            error.into_response().status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
     }
 
     #[test]

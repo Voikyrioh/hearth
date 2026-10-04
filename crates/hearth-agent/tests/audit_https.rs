@@ -104,7 +104,7 @@ async fn an_account_creation_produces_its_entry_with_who_where_and_what() {
 }
 
 #[tokio::test]
-async fn a_refused_login_is_journaled_without_account_nor_typed_identifier() {
+async fn a_refused_login_names_the_account_only_when_it_exists_and_never_the_typed_identifier() {
     let env = env().await;
     env.create("marie", Role::Admin).await;
     let agent = https::start(&env).await;
@@ -118,14 +118,14 @@ async fn a_refused_login_is_journaled_without_account_nor_typed_identifier() {
     assert_eq!(listed.len(), 3);
     for event in &listed {
         assert_eq!(event["action"], "login");
-        assert_eq!(
-            event["account"],
-            json!(null),
-            "l'identifiant saisi n'est pas retenu"
-        );
         assert_eq!(event["origin"]["addr"], "127.0.0.1");
         assert_eq!(event["origin"]["name"], "poste-de-test/1.0");
     }
+    // Le compte n'est renseigné que s'il existe (ce n'est alors pas un mot de passe tapé par
+    // erreur) ; l'identifiant saisi inconnu ou impossible n'est jamais retenu.
+    assert_eq!(listed[2]["account"], "marie");
+    assert_eq!(listed[1]["account"], json!(null));
+    assert_eq!(listed[0]["account"], json!(null));
     // Même raison que l'identifiant existe ou non ; le format impossible a la sienne.
     assert_eq!(listed[2]["reason"], listed[1]["reason"]);
     assert_eq!(listed[2]["reason"], "identifiants incorrects");

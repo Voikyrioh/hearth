@@ -13,6 +13,7 @@
 //! balayage d'identifiants (un identifiant différent par requête échappe au compteur par couple).
 //! Un succès ne le remet pas à zéro : un attaquant intercalerait sinon une connexion valide.
 
+use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 
 use super::text::is_unsafe_char;
@@ -45,7 +46,9 @@ const SEPARATOR: char = '\u{1f}';
 /// stockage face à un client qui enverrait des identifiants démesurés.
 const MAX_KEY_PART: usize = 64;
 
-/// Clé du compteur : identifiant saisi (normalisé) + adresse du client.
+/// Clé du compteur : **empreinte** de l'identifiant saisi (normalisé) + adresse du client.
+/// L'identifiant n'est jamais écrit en clair : ce peut être un mot de passe tapé au mauvais
+/// endroit, et la clé reste 24 h en base (BR-AUDIT-005).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AttemptKey(String);
 
@@ -62,14 +65,12 @@ impl AttemptKey {
             .take(MAX_KEY_PART)
             .collect();
         let addr: String = addr.chars().take(MAX_KEY_PART).collect();
-        Self(format!("{username}{SEPARATOR}{addr}"))
-    }
-
-    /// L'identifiant normalisé de la clé (pour les traces ; vide pour une clé d'adresse).
-    pub fn username(&self) -> &str {
-        self.0
-            .split_once(SEPARATOR)
-            .map_or("", |(username, _)| username)
+        let digest = Sha256::digest(username.as_bytes());
+        let fingerprint: String = digest[..16]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        Self(format!("{fingerprint}{SEPARATOR}{addr}"))
     }
 
     /// Clé du compteur par adresse seule. Ne peut pas coïncider avec une clé de couple (celles-ci
@@ -409,7 +410,7 @@ mod tests {
     #[test]
     fn the_key_stays_bounded_whatever_the_username() {
         let key = AttemptKey::new(&"x".repeat(10_000), "10.0.0.1");
-        assert!(key.as_str().len() <= 2 * MAX_KEY_PART + 1);
+        assert!(key.as_str().len() <= 32 + MAX_KEY_PART + 1);
     }
 
     // ---- compteur par adresse seule
@@ -522,8 +523,7 @@ mod tests {
     #[test]
     fn control_characters_never_reach_the_key_or_the_traces() {
         let key = AttemptKey::new("marie\nWARN forged line\r\t\u{1f}x", "10.0.0.1");
-        assert_eq!(key.username(), "marieWARN forged linex".to_lowercase());
-        assert!(!key.username().chars().any(char::is_control));
+        assert_eq!(key, AttemptKey::new("marieWARN forged linex", "10.0.0.1"));
         assert!(!key.as_str().contains('\n'));
     }
 
@@ -533,7 +533,7 @@ mod tests {
             "ma\u{2028}rie\u{2029}\u{202E}evil\u{200F}\u{2066}x\u{FEFF}",
             "10.0.0.1",
         );
-        assert_eq!(key.username(), "marieevilx");
+        assert_eq!(key, AttemptKey::new("marieevilx", "10.0.0.1"));
         assert!(
             !key.as_str()
                 .contains(['\u{2028}', '\u{2029}', '\u{202E}', '\u{200F}'])
@@ -558,9 +558,20 @@ mod tests {
     #[test]
     fn a_pipe_in_the_username_is_kept_and_the_key_stays_unambiguous() {
         let key = AttemptKey::new("a|b", "10.0.0.1");
-        assert_eq!(key.username(), "a|b");
         // « a|b » + « 10.0.0.1 » et « a » + « b|10.0.0.1 » ne coïncident pas.
         assert_ne!(key, AttemptKey::new("a", "b|10.0.0.1"));
-        assert_eq!(AttemptKey::address("10.0.0.1").username(), "");
+    }
+
+    #[test]
+    fn the_typed_identifier_never_appears_in_the_key() {
+        let key = AttemptKey::new("Correct-Horse-9", "10.0.0.1");
+        let text = key.as_str().to_lowercase();
+        assert!(
+            !text.contains("correct") && !text.contains("horse"),
+            "{text}"
+        );
+        let (fingerprint, addr) = key.as_str().split_once(SEPARATOR).unwrap();
+        assert_eq!((fingerprint.len(), addr), (32, "10.0.0.1"));
+        assert!(fingerprint.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

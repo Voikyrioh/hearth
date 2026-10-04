@@ -243,12 +243,13 @@ async fn a_refused_login_is_journaled_without_account_and_says_the_same_thing_fo
     for record in refused {
         assert_eq!(record.action, "login");
         assert_eq!(record.outcome, OutcomeKind::Denied);
-        assert_eq!(
-            record.account, None,
-            "l'identifiant saisi n'est jamais retenu"
-        );
         assert_eq!(record.target, None);
     }
+    // Le compte visé n'est renseigné que s'il existe ; jamais l'identifiant saisi inconnu ou
+    // impossible (ce peut être un mot de passe).
+    assert_eq!(refused[0].account.as_deref(), Some("marie"));
+    assert_eq!(refused[1].account, None);
+    assert_eq!(refused[2].account, None);
     // BR-AUDIT-006 : même raison, que l'identifiant existe ou non.
     assert_eq!(refused[0].reason, refused[1].reason);
     assert_eq!(
@@ -291,8 +292,13 @@ async fn the_attempt_that_locks_adds_a_lock_entry_and_attempts_during_the_wait_a
     assert_eq!(
         tail,
         [
-            ("login".into(), "denied".into(), None, None),
-            ("login.locked".into(), "denied".into(), None, None),
+            ("login".into(), "denied".into(), Some("marie".into()), None),
+            (
+                "login.locked".into(),
+                "denied".into(),
+                Some("marie".into()),
+                None
+            ),
         ]
     );
     assert_eq!(
