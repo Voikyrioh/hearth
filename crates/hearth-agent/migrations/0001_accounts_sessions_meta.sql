@@ -1,6 +1,7 @@
 -- Comptes, sessions et métadonnées (HRT-03). Les tables login_attempts, operations et
 -- audit_events arrivent avec les tickets qui en ont besoin.
--- Dates : texte RFC 3339 en UTC. Identifiants techniques : ULID.
+-- Dates : texte à largeur fixe en UTC, `YYYY-MM-DDTHH:MM:SS.mmmZ` (fractions toujours
+-- présentes) : l'ordre du texte est l'ordre chronologique. Identifiants techniques : ULID.
 
 CREATE TABLE accounts (
     id                  TEXT NOT NULL PRIMARY KEY,

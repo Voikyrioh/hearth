@@ -272,3 +272,22 @@ async fn the_database_survives_being_reopened() {
     let repo = SqliteAccountRepo::new(reopened.pool().clone());
     assert_eq!(repo.list().await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn list_orders_accounts_created_within_the_same_second() {
+    let env = env().await;
+    let repo = SqliteAccountRepo::new(env.db.pool().clone());
+    let mut half = account("A1", "later", Role::Admin);
+    half.created_at = start_time() + Duration::milliseconds(500);
+    insert(&repo, &half).await;
+    insert(&repo, &account("A2", "first", Role::Admin)).await;
+
+    let names: Vec<_> = repo
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|a| a.username.to_string())
+        .collect();
+    assert_eq!(names, ["first", "later"]);
+}

@@ -156,9 +156,12 @@ impl AccountTransaction for SqliteAccountTransaction {
     }
 
     async fn insert(&mut self, account: &Account) -> Result<(), StoreError> {
-        let created_at = format_date(account.created_at);
-        let changed_at = format_date(account.password_changed_at);
-        let last_login_at = account.last_login_at.map(format_date);
+        let created_at = format_date(RESOURCE, account.created_at)?;
+        let changed_at = format_date(RESOURCE, account.password_changed_at)?;
+        let last_login_at = account
+            .last_login_at
+            .map(|date| format_date(RESOURCE, date))
+            .transpose()?;
         sqlx::query!(
             "INSERT INTO accounts (id, username, password_hash, role, created_at, password_changed_at, last_login_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -200,7 +203,7 @@ impl AccountTransaction for SqliteAccountTransaction {
         hash: &Secret,
         changed_at: OffsetDateTime,
     ) -> Result<(), StoreError> {
-        let changed_at = format_date(changed_at);
+        let changed_at = format_date(RESOURCE, changed_at)?;
         sqlx::query!(
             "UPDATE accounts SET password_hash = ?, password_changed_at = ? WHERE id = ?",
             hash.expose(),
