@@ -25,15 +25,17 @@ pub enum IdentityError {
     Corrupt(String),
     #[error("génération du certificat impossible : {0}")]
     Generation(String),
-    #[error(
-        "création de l'identité bloquée par un autre processus ; si aucun agent ne tourne, supprime le verrou {0}"
-    )]
-    LockTimeout(String),
-    #[error("accès au stockage de l'identité impossible : {0}")]
-    Storage(#[from] std::io::Error),
+    /// Un autre processus est en train de créer l'identité et n'a pas fini à temps.
+    #[error("identité occupée par un autre processus")]
+    LockTimeout,
+    #[error("accès à {path} impossible : {source}")]
+    Storage {
+        path: String,
+        source: std::io::Error,
+    },
 }
 
-/// Stockage durable de l'identité de l'agent.
+/// Conservation de l'identité de l'agent.
 pub trait IdentityStore {
     /// Charge l'identité existante ou la crée à la première exécution (selon
     /// `domain::identity_policy`). Plusieurs appels, même simultanés depuis plusieurs

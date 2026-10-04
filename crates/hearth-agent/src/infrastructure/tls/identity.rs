@@ -1,8 +1,9 @@
 //! Identité persistée dans le dossier de données : `cert.pem`, `key.pem`, `install_id`.
 //!
 //! La décision (créer, réutiliser, refuser, nettoyer) vient de `domain::identity_policy` :
-//! cet adaptateur observe le dossier et exécute. La création est protégée par un fichier
-//! verrou pour qu'un seul processus à la fois écrive l'identité.
+//! cet adaptateur observe le dossier et exécute. La création est protégée par un verrou de
+//! fichier du système (`File::try_lock`), relâché par le noyau si le processus meurt : le
+//! fichier `identity.lock` peut rester sur disque, sa seule présence ne bloque rien.
 
 use std::fs;
 use std::io;
@@ -75,7 +76,8 @@ impl FileIdentityStore {
 
     fn read_public(&self) -> Result<PublicIdentity, IdentityError> {
         let certificate = read_certificate(&self.path(CERT_FILE))?;
-        let text = fs::read_to_string(self.path(INSTALL_ID_FILE))?;
+        let id_path = self.path(INSTALL_ID_FILE);
+        let text = fs::read_to_string(&id_path).map_err(storage(&id_path))?;
         let install_id = InstallId::parse(&text)
             .map_err(|e| IdentityError::Corrupt(format!("{INSTALL_ID_FILE} : {e}")))?;
         Ok(PublicIdentity {
@@ -87,7 +89,8 @@ impl FileIdentityStore {
     /// Charge certificat et clé. À appeler après `load_or_create`.
     pub(super) fn read_tls_material(&self) -> Result<TlsMaterial, IdentityError> {
         let certificate = read_certificate(&self.path(CERT_FILE))?;
-        let key_pem = fs::read(self.path(KEY_FILE))?;
+        let key_path = self.path(KEY_FILE);
+        let key_pem = fs::read(&key_path).map_err(storage(&key_path))?;
         let private_key = PrivateKeyDer::from_pem_slice(&key_pem)
             .map_err(|e| IdentityError::Corrupt(format!("{KEY_FILE} : {e}")))?;
         Ok(TlsMaterial {
@@ -108,13 +111,13 @@ impl FileIdentityStore {
             .map_err(|e| IdentityError::Generation(e.to_string()))?;
 
         // Le certificat est écrit en dernier : sa présence valide toute l'identité.
-        write_file(
-            &self.path(INSTALL_ID_FILE),
-            install_id.as_str().as_bytes(),
-            false,
-        )?;
-        write_file(&self.path(KEY_FILE), generated.key_pem.as_bytes(), true)?;
-        write_file(&self.path(CERT_FILE), generated.cert_pem.as_bytes(), false)?;
+        let id_path = self.path(INSTALL_ID_FILE);
+        let key_path = self.path(KEY_FILE);
+        let cert_path = self.path(CERT_FILE);
+        write_file(&id_path, install_id.as_str().as_bytes(), false).map_err(storage(&id_path))?;
+        write_file(&key_path, generated.key_pem.as_bytes(), true).map_err(storage(&key_path))?;
+        write_file(&cert_path, generated.cert_pem.as_bytes(), false)
+            .map_err(storage(&cert_path))?;
 
         Ok(PublicIdentity {
             fingerprint: Fingerprint::of_certificate_der(&generated.cert_der),
@@ -122,16 +125,45 @@ impl FileIdentityStore {
         })
     }
 
-    fn remove_leftovers(&self) -> io::Result<()> {
+    fn remove_leftovers(&self) -> Result<(), IdentityError> {
         for name in [KEY_FILE, INSTALL_ID_FILE] {
-            match fs::remove_file(self.path(name)) {
-                Ok(()) => {}
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e),
+            remove_if_present(&self.path(name))?;
+        }
+        Ok(())
+    }
+
+    /// Supprime les temporaires d'écriture (`key.pem.<pid>.<n>.tmp`…) d'un processus mort : ils
+    /// peuvent contenir une clé privée. À appeler sous le verrou seulement.
+    fn remove_stale_temporaries(&self) -> Result<(), IdentityError> {
+        let entries = fs::read_dir(&self.dir).map_err(storage(&self.dir))?;
+        for entry in entries {
+            let entry = entry.map_err(storage(&self.dir))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let is_temporary = name.ends_with(".tmp")
+                && [CERT_FILE, KEY_FILE, INSTALL_ID_FILE]
+                    .iter()
+                    .any(|base| name.starts_with(&format!("{base}.")));
+            if is_temporary {
+                tracing::warn!(file = %name, "temporaire d'identité orphelin supprimé");
+                remove_if_present(&entry.path())?;
             }
         }
         Ok(())
     }
+}
+
+fn remove_if_present(path: &Path) -> Result<(), IdentityError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(storage(path)(e)),
+    }
+}
+
+/// Convertit une erreur d'E/S en erreur d'identité qui nomme le chemin concerné.
+fn storage(path: &Path) -> impl FnOnce(io::Error) -> IdentityError {
+    let path = path.display().to_string();
+    move |source| IdentityError::Storage { path, source }
 }
 
 impl IdentityStore for FileIdentityStore {
@@ -143,11 +175,18 @@ impl IdentityStore for FileIdentityStore {
             IdentityAction::Create | IdentityAction::CleanThenCreate => {}
         }
 
-        create_data_dir(&self.dir)?;
+        create_data_dir(&self.dir).map_err(storage(&self.dir))?;
         let _lock = CreationLock::acquire(&self.path(LOCK_FILE), self.lock_timeout)?;
 
         // Un autre processus a pu finir pendant l'attente : on observe de nouveau.
-        match identity_policy::decide(self.observe()) {
+        let action = identity_policy::decide(self.observe());
+        if matches!(
+            action,
+            IdentityAction::Create | IdentityAction::CleanThenCreate
+        ) {
+            self.remove_stale_temporaries()?;
+        }
+        match action {
             IdentityAction::Reuse => self.read_public(),
             IdentityAction::Refuse { missing } => Err(self.refuse(missing)),
             IdentityAction::CleanThenCreate => {
@@ -163,49 +202,40 @@ impl IdentityStore for FileIdentityStore {
     }
 }
 
-/// Verrou entre processus : un fichier créé en exclusivité, supprimé à la libération
-/// (y compris sur erreur, via `Drop`).
+/// Verrou exclusif entre processus sur `identity.lock`. Le noyau le relâche quand le fichier
+/// est fermé ou que le processus meurt : aucun nettoyage à faire, même après un arrêt brutal.
 struct CreationLock {
-    path: PathBuf,
+    _file: fs::File,
 }
 
 impl CreationLock {
     fn acquire(path: &Path, timeout: Duration) -> Result<Self, IdentityError> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(path)
+            .map_err(storage(path))?;
         let deadline = Instant::now() + timeout;
         loop {
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)
-            {
-                Ok(_) => {
-                    return Ok(Self {
-                        path: path.to_owned(),
-                    });
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { _file: file }),
+                Err(fs::TryLockError::WouldBlock) => {
                     if Instant::now() >= deadline {
-                        return Err(IdentityError::LockTimeout(path.display().to_string()));
+                        tracing::warn!(path = %path.display(), "verrou de création tenu par un autre processus");
+                        return Err(IdentityError::LockTimeout);
                     }
                     // Le démarrage est synchrone : une courte attente bloquante suffit.
                     thread::sleep(LOCK_RETRY);
                 }
-                Err(e) => return Err(e.into()),
+                Err(fs::TryLockError::Error(e)) => return Err(storage(path)(e)),
             }
         }
     }
 }
 
-impl Drop for CreationLock {
-    fn drop(&mut self) {
-        if let Err(e) = fs::remove_file(&self.path) {
-            tracing::warn!(path = %self.path.display(), error = %e, "suppression du verrou impossible");
-        }
-    }
-}
-
 fn read_certificate(path: &Path) -> Result<CertificateDer<'static>, IdentityError> {
-    let pem = fs::read(path)?;
+    let pem = fs::read(path).map_err(storage(path))?;
     CertificateDer::from_pem_slice(&pem)
         .map_err(|e| IdentityError::Corrupt(format!("{CERT_FILE} : {e}")))
 }
@@ -294,6 +324,17 @@ mod tests {
     use super::*;
     use crate::domain::identity_policy::IdentityPart;
 
+    /// Vrai si le verrou est libre (on le prend puis on le rend).
+    fn can_lock(path: &Path) -> bool {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(path)
+            .expect("open");
+        file.try_lock().is_ok()
+    }
+
     fn cert_fingerprint(dir: &Path) -> Fingerprint {
         let pem = fs::read(dir.join(CERT_FILE)).expect("read");
         let der = CertificateDer::from_pem_slice(&pem).expect("pem");
@@ -310,7 +351,7 @@ mod tests {
         for name in [CERT_FILE, KEY_FILE, INSTALL_ID_FILE] {
             assert!(data.join(name).is_file(), "{name}");
         }
-        assert!(!data.join(LOCK_FILE).exists(), "verrou libéré");
+        assert!(can_lock(&data.join(LOCK_FILE)), "verrou libéré");
         assert_eq!(identity.fingerprint, cert_fingerprint(&data));
     }
 
@@ -401,24 +442,35 @@ mod tests {
         assert!(identities.windows(2).all(|pair| pair[0] == pair[1]));
         // Ce qui est sur le disque est cohérent avec ce que tout le monde a reçu.
         assert_eq!(identities[0].fingerprint, cert_fingerprint(dir.path()));
-        assert!(!dir.path().join(LOCK_FILE).exists());
+        assert!(can_lock(&dir.path().join(LOCK_FILE)));
     }
 
     #[test]
-    fn a_held_lock_ends_in_a_clear_error_and_is_not_removed() {
+    fn a_lock_held_by_another_handle_ends_in_a_timeout_then_frees_up() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let lock = dir.path().join(LOCK_FILE);
-        fs::write(&lock, "").expect("write");
-        let start = Instant::now();
+        let lock_path = dir.path().join(LOCK_FILE);
+        let holder = fs::File::create(&lock_path).expect("create");
+        holder.try_lock().expect("verrou pris par le test");
+
         let timeout = Duration::from_millis(200);
-        let err = FileIdentityStore::new(dir.path())
-            .with_lock_timeout(timeout)
-            .load_or_create()
-            .expect_err("doit échouer");
-        assert!(matches!(err, IdentityError::LockTimeout(_)), "{err}");
+        let store = FileIdentityStore::new(dir.path()).with_lock_timeout(timeout);
+        let start = Instant::now();
+        let err = store.load_or_create().expect_err("doit échouer");
+        assert!(matches!(err, IdentityError::LockTimeout), "{err}");
         assert!(start.elapsed() >= timeout);
-        assert!(lock.exists(), "le verrou d'un autre n'est pas supprimé");
         assert!(!dir.path().join(CERT_FILE).exists());
+
+        drop(holder);
+        store.load_or_create().expect("création après libération");
+    }
+
+    #[test]
+    fn a_leftover_lock_file_that_nobody_holds_does_not_block() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(dir.path().join(LOCK_FILE), "reste d'un processus mort").expect("write");
+        let store =
+            FileIdentityStore::new(dir.path()).with_lock_timeout(Duration::from_millis(200));
+        store.load_or_create().expect("création");
     }
 
     #[test]
@@ -426,9 +478,46 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         // Un dossier à la place du fichier install_id fait échouer l'écriture.
         fs::create_dir(dir.path().join(INSTALL_ID_FILE)).expect("mkdir");
-        let err = FileIdentityStore::new(dir.path()).load_or_create();
-        assert!(err.is_err());
-        assert!(!dir.path().join(LOCK_FILE).exists());
+        let err = FileIdentityStore::new(dir.path())
+            .load_or_create()
+            .expect_err("doit échouer");
+        assert!(can_lock(&dir.path().join(LOCK_FILE)));
+        // L'erreur nomme le chemin concerné.
+        assert!(err.to_string().contains(INSTALL_ID_FILE), "{err}");
+    }
+
+    #[test]
+    fn stale_temporaries_of_a_dead_process_are_removed_before_creation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for name in [
+            "key.pem.4242.0.tmp",
+            "cert.pem.4242.1.tmp",
+            "install_id.4242.2.tmp",
+        ] {
+            fs::write(dir.path().join(name), "clé orpheline").expect("write");
+        }
+        fs::write(dir.path().join("autre.tmp"), "pas à nous").expect("write");
+        FileIdentityStore::new(dir.path())
+            .load_or_create()
+            .expect("creation");
+        let left: Vec<String> = fs::read_dir(dir.path())
+            .expect("read_dir")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert_eq!(left, vec!["autre.tmp".to_owned()]);
+    }
+
+    #[test]
+    fn missing_file_errors_name_the_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = FileIdentityStore::new(dir.path());
+        store.load_or_create().expect("creation");
+        fs::remove_file(dir.path().join(INSTALL_ID_FILE)).expect("remove");
+        // Certificat présent sans install_id : refus. On recrée un fichier illisible (dossier).
+        fs::create_dir(dir.path().join(INSTALL_ID_FILE)).expect("mkdir");
+        let err = store.load_or_create().expect_err("lecture impossible");
+        assert!(err.to_string().contains(INSTALL_ID_FILE), "{err}");
     }
 
     #[cfg(unix)]
