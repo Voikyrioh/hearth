@@ -1,49 +1,42 @@
-use std::fmt;
-
+use hearth_proto::fingerprint::Fingerprint;
 use thiserror::Error;
 
-use crate::domain::fingerprint::Fingerprint;
+use crate::domain::identity_policy::IdentityPart;
 use crate::domain::install_id::InstallId;
 
-/// Identité cryptographique de l'installation : certificat, clé privée et identifiant.
-#[derive(Clone)]
-pub struct Identity {
-    /// Certificat auto-signé, encodé en DER.
-    pub certificate_der: Vec<u8>,
-    /// Clé privée PKCS#8, encodée en DER. Ne doit jamais être journalisée.
-    pub private_key_der: Vec<u8>,
+/// Partie publique de l'identité : ce que le reste de l'agent a le droit de connaître.
+/// La clé privée n'en fait pas partie : seul l'adaptateur TLS la lit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicIdentity {
     pub install_id: InstallId,
     pub fingerprint: Fingerprint,
 }
 
-// Écrit à la main pour ne jamais exposer la clé privée.
-impl fmt::Debug for Identity {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Identity")
-            .field("install_id", &self.install_id)
-            .field("fingerprint", &self.fingerprint)
-            .field("private_key_der", &"<masquée>")
-            .finish_non_exhaustive()
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum IdentityError {
-    /// Une partie de l'identité existe sans l'autre : on ne régénère jamais en silence,
-    /// car l'empreinte ne doit pas changer (BR-INSTALL-004).
-    #[error("identité incomplète dans {0} : fichier manquant {1}")]
-    Incomplete(String, String),
+    /// Une partie de l'identité manque alors que le certificat existe : on ne régénère jamais
+    /// en silence, car l'empreinte ne doit pas changer (BR-INSTALL-004).
+    #[error("identité incomplète dans {dir} : éléments manquants {missing:?}")]
+    Incomplete {
+        dir: String,
+        missing: Vec<IdentityPart>,
+    },
     #[error("identité illisible : {0}")]
     Corrupt(String),
     #[error("génération du certificat impossible : {0}")]
     Generation(String),
+    #[error(
+        "création de l'identité bloquée par un autre processus ; si aucun agent ne tourne, supprime le verrou {0}"
+    )]
+    LockTimeout(String),
     #[error("accès au stockage de l'identité impossible : {0}")]
     Storage(#[from] std::io::Error),
 }
 
 /// Stockage durable de l'identité de l'agent.
 pub trait IdentityStore {
-    /// Charge l'identité existante ou la crée à la première exécution.
-    /// Un second appel renvoie toujours la même identité.
-    fn load_or_create(&self) -> Result<Identity, IdentityError>;
+    /// Charge l'identité existante ou la crée à la première exécution (selon
+    /// `domain::identity_policy`). Plusieurs appels, même simultanés depuis plusieurs
+    /// processus, renvoient la même identité.
+    fn load_or_create(&self) -> Result<PublicIdentity, IdentityError>;
 }

@@ -1,5 +1,5 @@
 /// Informations d'identification de la machine hôte.
-pub trait MachineInfo: Send + Sync {
+pub trait MachineInfo {
     fn machine_name(&self) -> String;
 
     /// Adresses MAC des interfaces, au format `AA:BB:CC:DD:EE:FF`, sans doublon.

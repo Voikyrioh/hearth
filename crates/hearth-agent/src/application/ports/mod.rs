@@ -3,5 +3,5 @@
 mod identity_store;
 mod machine_info;
 
-pub use identity_store::{Identity, IdentityError, IdentityStore};
+pub use identity_store::{IdentityError, IdentityStore, PublicIdentity};
 pub use machine_info::MachineInfo;

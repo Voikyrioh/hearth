@@ -196,33 +196,25 @@ mod tests {
         move |name| map.get(name).cloned()
     }
 
-    /// Environnement qui ne dépend pas de la machine : fichier explicite vide, dossier explicite.
-    fn isolated(dir: &Path, extra: &[(&str, &str)]) -> (CliOverrides, HashMap<String, String>) {
-        let cfg = dir.join("agent.toml");
-        if !cfg.exists() {
-            std::fs::write(&cfg, "").expect("write");
+    /// Options CLI qui pointent un `agent.toml` vide du dossier donné : la config de la
+    /// machine de test n'interfère jamais.
+    fn cli_with_empty_file(dir: &Path) -> CliOverrides {
+        let path = dir.join("agent.toml");
+        if !path.exists() {
+            std::fs::write(&path, "").expect("write");
         }
-        let cli = CliOverrides {
-            config_path: Some(cfg),
+        CliOverrides {
+            config_path: Some(path),
             data_dir: None,
-        };
-        let env = extra
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-            .collect();
-        (cli, env)
-    }
-
-    fn lookup(map: &HashMap<String, String>) -> impl Fn(&str) -> Option<String> + '_ {
-        move |name| map.get(name).cloned()
+        }
     }
 
     #[test]
     fn defaults_apply_without_any_source() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (cli, mut env) = isolated(dir.path(), &[]);
-        env.insert("LOCALAPPDATA".into(), "C:/Users/test/AppData/Local".into());
-        let config = load(&cli, &lookup(&env)).expect("config");
+        let cli = cli_with_empty_file(dir.path());
+        let env = env_of(&[("LOCALAPPDATA", "C:/Users/test/AppData/Local")]);
+        let config = load(&cli, &env).expect("config");
         assert_eq!(config.port, 7341);
         assert_eq!(config.listen_addr, IpAddr::V4(Ipv4Addr::UNSPECIFIED));
         assert!(!config.managed);
@@ -238,13 +230,14 @@ mod tests {
     #[test]
     fn file_overrides_defaults() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (cli, env) = isolated(dir.path(), &[]);
+        let cli = cli_with_empty_file(dir.path());
+        let env = env_of(&[]);
         std::fs::write(
             dir.path().join("agent.toml"),
             "port = 9000\nlisten_addr = \"127.0.0.1\"\ndata_dir = \"/srv/h\"\nmanaged = true\n",
         )
         .expect("write");
-        let config = load(&cli, &lookup(&env)).expect("config");
+        let config = load(&cli, &env).expect("config");
         assert_eq!(config.port, 9000);
         assert_eq!(
             config.listen_addr,
@@ -257,7 +250,7 @@ mod tests {
     #[test]
     fn env_overrides_file() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (cli, _) = isolated(dir.path(), &[]);
+        let cli = cli_with_empty_file(dir.path());
         std::fs::write(
             dir.path().join("agent.toml"),
             "port = 9000\nmanaged = true\n",
@@ -279,7 +272,7 @@ mod tests {
     #[test]
     fn cli_data_dir_overrides_env_and_file() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (mut cli, _) = isolated(dir.path(), &[]);
+        let mut cli = cli_with_empty_file(dir.path());
         cli.data_dir = Some(PathBuf::from("/cli/data"));
         let env = env_of(&[(ENV_DATA_DIR, "/env/data")]);
         let config = load(&cli, &env).expect("config");
@@ -311,7 +304,7 @@ mod tests {
     #[test]
     fn bad_values_are_reported() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (cli, _) = isolated(dir.path(), &[]);
+        let cli = cli_with_empty_file(dir.path());
         let err = load(&cli, &env_of(&[(ENV_PORT, "abc"), (ENV_DATA_DIR, "/d")]))
             .expect_err("port invalide");
         assert!(matches!(err, ConfigError::BadEnv { name: ENV_PORT, .. }));
@@ -332,7 +325,7 @@ mod tests {
     #[test]
     fn unknown_keys_in_the_file_are_rejected() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (cli, _) = isolated(dir.path(), &[]);
+        let cli = cli_with_empty_file(dir.path());
         std::fs::write(dir.path().join("agent.toml"), "prot = 1\n").expect("write");
         let err = load(&cli, &env_of(&[(ENV_DATA_DIR, "/d")])).expect_err("clé inconnue");
         assert!(matches!(err, ConfigError::Parse { .. }));
