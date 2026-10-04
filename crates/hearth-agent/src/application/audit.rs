@@ -5,7 +5,9 @@
 //!
 //! Les règles sont celles de `domain::audit` (ce qui est journalisé, ce qui peut y entrer, la
 //! conservation, les filtres, le CSV) ; ce module les enchaîne et demande au stockage d'exécuter.
-//! **Un échec d'écriture du journal ne fait jamais échouer l'action** : il est tracé en `error`.
+//! Une entrée écrite dans la transaction d'une action en partage le sort : si l'écriture échoue,
+//! l'action n'est pas validée. Hors transaction (refus et échecs relevés par la couche d'accès),
+//! un échec d'écriture est tracé en `error` et ne change rien pour l'appelant.
 
 use std::sync::Arc;
 
@@ -60,7 +62,10 @@ impl AuditService {
         Self { repo, feed }
     }
 
-    fn check(role: Role) -> Result<(), AuditError> {
+    /// BR-AUDIT-001 : le rôle peut-il lire le journal ? À réévaluer, sur le compte tel qu'il est
+    /// **maintenant**, par celui qui sert un abonnement au flux : `subscribe` ne contrôle le rôle
+    /// qu'une fois, à l'abonnement, et un administrateur rétrogradé ensuite ne doit plus recevoir.
+    pub fn ensure_reader(role: Role) -> Result<(), AuditError> {
         if can_read_journal(role) {
             Ok(())
         } else {
@@ -71,7 +76,7 @@ impl AuditService {
     /// Une page du journal (BR-AUDIT-001, BR-AUDIT-014 à BR-AUDIT-016). Le journal ne se
     /// consulte qu'en lecture : rien ici ne le modifie (BR-AUDIT-009).
     pub async fn search(&self, role: Role, filter: &AuditFilter) -> Result<AuditPage, AuditError> {
-        Self::check(role)?;
+        Self::ensure_reader(role)?;
         // Une entrée de plus que la page : elle dit s'il y en a une suivante.
         let mut records = self.repo.search(filter, filter.limit + 1).await?;
         let next_before = if records.len() > filter.limit {
@@ -93,7 +98,7 @@ impl AuditService {
         role: Role,
         filter: &AuditFilter,
     ) -> Result<AuditExport, AuditError> {
-        Self::check(role)?;
+        Self::ensure_reader(role)?;
         let filter = AuditFilter {
             before: None,
             ..filter.clone()
@@ -110,7 +115,7 @@ impl AuditService {
     /// Les entrées écrites à partir de maintenant, pour le flux temps réel (BR-AUDIT-010) ;
     /// réservé aux administrateurs.
     pub fn subscribe(&self, role: Role) -> Result<broadcast::Receiver<AuditRecord>, AuditError> {
-        Self::check(role)?;
+        Self::ensure_reader(role)?;
         Ok(self.feed.subscribe())
     }
 }
@@ -154,14 +159,16 @@ pub(super) struct Pending(Vec<AuditRecord>);
 
 impl Pending {
     /// Écrit l'entrée dans la transaction de l'action : elle existe si l'action est validée, et
-    /// seulement alors. Un échec d'écriture n'annule pas l'action : tracé en `error`.
-    pub(super) async fn record(&mut self, tx: &mut dyn UnitOfWork, event: AuditEvent) {
-        match tx.audit().record(&event).await {
-            Ok(record) => self.0.push(record),
-            Err(error) => {
-                tracing::error!(%error, action = event.action.code(), "entrée du journal non écrite");
-            }
-        }
+    /// seulement alors. Une erreur d'écriture fait échouer la transaction (l'appelant la propage :
+    /// pas d'action validée sans son entrée).
+    pub(super) async fn record(
+        &mut self,
+        tx: &mut dyn UnitOfWork,
+        event: AuditEvent,
+    ) -> Result<(), StoreError> {
+        let record = tx.audit().record(&event).await?;
+        self.0.push(record);
+        Ok(())
     }
 
     /// À appeler une fois la transaction validée.

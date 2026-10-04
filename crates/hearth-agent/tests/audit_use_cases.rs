@@ -628,3 +628,73 @@ async fn no_event_ever_holds_a_password_or_a_token_after_a_full_scenario() {
         assert!(!haystack.0.contains(&token_hash));
     }
 }
+
+/// Fait échouer toute écriture du journal.
+async fn break_the_journal(env: &support::Env) {
+    sqlx::query(
+        "CREATE TRIGGER audit_broken BEFORE INSERT ON audit_events
+         BEGIN SELECT RAISE(ABORT, 'journal en panne'); END",
+    )
+    .execute(env.db.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn when_the_entry_cannot_be_written_the_action_is_not_committed() {
+    let env = env().await;
+    let marie = env.create("marie", Role::Admin).await;
+    let paul = env.create("paul", Role::ReadOnly).await;
+    let outcome = env
+        .sessions
+        .login("marie", secret(PASSWORD), &client())
+        .await
+        .unwrap();
+    let mut feed = env.feed.subscribe();
+    break_the_journal(&env).await;
+
+    // Création : pas de compte sans son entrée.
+    let error = env
+        .service
+        .create("nouveau", secret(PASSWORD), Role::Admin, by())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        hearth_agent::application::accounts::AccountError::Store(_)
+    ));
+    assert!(env.service.find("nouveau").await.is_err());
+    // Rôle, mot de passe, suppression, fermeture : rien ne change.
+    let hash = env.hash_of(&paul.id).await;
+    env.service
+        .change_role(&paul.id, Role::Admin, by())
+        .await
+        .unwrap_err();
+    env.service
+        .set_password(&paul.id, secret("Another-Pass-77"), by())
+        .await
+        .unwrap_err();
+    env.service
+        .revoke_sessions(&marie.id, by())
+        .await
+        .unwrap_err();
+    env.service
+        .delete(&paul.id, None, None, by())
+        .await
+        .unwrap_err();
+    assert_eq!(env.service.find("paul").await.unwrap().role, Role::ReadOnly);
+    assert_eq!(env.hash_of(&paul.id).await, hash);
+    // Connexion : pas de session sans son entrée ; déconnexion : la session reste.
+    env.sessions
+        .login("paul", secret(PASSWORD), &client())
+        .await
+        .unwrap_err();
+    assert!(env.session_ids(&paul.id).await.is_empty());
+    let actor = Actor::new(Some(Username::parse("marie").unwrap()), Origin::CommandLine);
+    env.sessions
+        .logout(&outcome.session_id, &actor)
+        .await
+        .unwrap_err();
+    assert_eq!(env.session_ids(&marie.id).await.len(), 1);
+    assert!(feed.try_recv().is_err(), "rien de diffusé");
+}

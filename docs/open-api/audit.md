@@ -80,4 +80,4 @@ Mêmes filtres (sans `before` ni `limit`). `200` : le résultat filtré en CSV, 
 | La couche d'accès (`auth::guard`), d'après la colonne `audit` de `ENDPOINTS` | Les refus faute de droits (toute route réservée aux administrateurs, consultation comprise) et les échecs des requêtes qui modifient. |
 | Les sous-commandes `account …` | Les succès, avec l'origine « ligne de commande du serveur ». |
 
-Un échec d'écriture du journal ne fait pas échouer l'action ; il est tracé en `error`. Les tentatives de connexion refusées pendant une attente ne sont pas consignées (le blocage l'est, une fois). Conservation : 90 jours ou 50 000 entrées (BR-AUDIT-008).
+Une entrée écrite dans la transaction d'une action en partage le sort : si son écriture échoue, l'action n'est pas validée (erreur interne). Hors transaction (refus et échecs relevés par la couche d'accès), un échec d'écriture est tracé en `error` et ne change rien pour l'appelant. Les tentatives de connexion refusées pendant une attente ne sont pas consignées (le blocage l'est, une fois). Conservation : 90 jours ou 50 000 entrées (BR-AUDIT-008).

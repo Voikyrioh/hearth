@@ -177,7 +177,7 @@ impl AccountService {
             AuditAction::AccountCreate,
             Target::Account(account.username.clone()),
         );
-        journal.record(&mut *tx, event).await;
+        journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&*self.feed);
         Ok(AccountView::from(&account))
@@ -234,7 +234,7 @@ impl AccountService {
             AuditAction::AccountRole,
             Target::AccountRole(account.username.clone(), role),
         );
-        journal.record(&mut *tx, event).await;
+        journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&*self.feed);
         Ok(())
@@ -322,7 +322,7 @@ impl AccountService {
             AuditAction::AccountDelete,
             Target::Account(account.username.clone()),
         );
-        journal.record(&mut *tx, event).await;
+        journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&*self.feed);
         Ok(closed)
@@ -347,7 +347,7 @@ impl AccountService {
             AuditAction::SessionsRevoke,
             Target::Account(account.username.clone()),
         );
-        journal.record(&mut *tx, event).await;
+        journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&*self.feed);
         Ok(closed)
@@ -396,7 +396,7 @@ impl AccountService {
             .await?;
         let mut journal = Pending::default();
         let event = self.succeeded(by, action, Target::Account(current.username.clone()));
-        journal.record(&mut *tx, event).await;
+        journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&*self.feed);
         Ok(closed)

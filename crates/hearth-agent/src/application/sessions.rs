@@ -314,7 +314,7 @@ impl SessionService {
                 Target::None,
                 Outcome::Denied(reason),
             );
-            journal.record(&mut *tx, denied).await;
+            journal.record(&mut *tx, denied).await?;
             if let Some(retry_after) = wait {
                 let locked = AuditEvent::new(
                     now,
@@ -325,7 +325,7 @@ impl SessionService {
                         retry_after_s: retry_after_seconds(retry_after),
                     }),
                 );
-                journal.record(&mut *tx, locked).await;
+                journal.record(&mut *tx, locked).await?;
             }
             tx.commit().await?;
             journal.publish(&*self.feed);
@@ -361,7 +361,7 @@ impl SessionService {
             Target::None,
             Outcome::Succeeded,
         );
-        journal.record(&mut *tx, succeeded).await;
+        journal.record(&mut *tx, succeeded).await?;
         tx.commit().await?;
         journal.publish(&*self.feed);
 
@@ -422,7 +422,7 @@ impl SessionService {
             Target::None,
             Outcome::Succeeded,
         );
-        journal.record(&mut *tx, event).await;
+        journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&*self.feed);
         Ok(())

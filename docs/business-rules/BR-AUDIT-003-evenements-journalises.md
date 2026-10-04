@@ -11,7 +11,7 @@ maj: 2026-10-04
 # BR-AUDIT-003 — Connexions, refus, déconnexions, modifications et refus faute de droits sont journalisés
 
 ## Règle
-Sont consignés : toute connexion réussie ; toute tentative de connexion refusée ; toute déconnexion ; toute requête qui modifie (création, suppression, rôle, mots de passe, fermeture de sessions), réussie ou échouée ; toute action refusée faute de droits. Les succès sont écrits par les cas d'usage **dans la transaction de l'action** (l'entrée existe si l'action est validée, et seulement alors) ; les refus et les échecs des routes sont écrits par la couche d'accès, d'après la colonne « action de journal » de `ENDPOINTS`, sans qu'un handler y pense. Un échec d'écriture du journal ne fait pas échouer l'action : il est tracé en `error`.
+Sont consignés : toute connexion réussie ; toute tentative de connexion refusée ; toute déconnexion ; toute requête qui modifie (création, suppression, rôle, mots de passe, fermeture de sessions), réussie ou échouée ; toute action refusée faute de droits. Les succès sont écrits par les cas d'usage **dans la transaction de l'action** (l'entrée existe si l'action est validée, et seulement alors) ; les refus et les échecs des routes sont écrits par la couche d'accès, d'après la colonne « action de journal » de `ENDPOINTS`, sans qu'un handler y pense. Une erreur d'écriture d'une entrée écrite dans la transaction de l'action la fait échouer (pas d'action validée sans son entrée) ; hors transaction (refus, échecs), elle est tracée en `error`.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/audit/policy.rs::is_journaled`.

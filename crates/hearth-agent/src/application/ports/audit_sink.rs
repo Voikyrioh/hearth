@@ -19,6 +19,10 @@ pub trait AuditSink: Send + Sync {
 pub trait AuditFeed: Send + Sync {
     fn publish(&self, record: AuditRecord);
 
+    /// **Le rôle n'est pas contrôlé ici** : celui qui sert le flux temps réel doit réévaluer le
+    /// rôle du compte à l'abonnement et à chaque message (`AuditService::ensure_reader`), car une
+    /// session reste ouverte pendant qu'un administrateur peut être rétrogradé ou supprimé.
+    ///
     /// Un abonné reçoit les entrées publiées après son abonnement. Un abonné trop lent perd les
     /// plus anciennes (`RecvError::Lagged`) : il doit alors recharger le journal.
     fn subscribe(&self) -> broadcast::Receiver<AuditRecord>;
