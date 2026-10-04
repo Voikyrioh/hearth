@@ -16,8 +16,8 @@ L'empreinte du serveur doit être vérifiée et confirmée explicitement par l'u
 La confirmation par l'utilisateur relève du client (`hearth-link`, interface) ; cette fiche couvre le calcul et le format, côté agent (commande `hearth-agent fingerprint`) comme côté client : le code est dans `hearth-proto` pour que `hearth-link` affiche exactement la même chose.
 
 ## Application (code)
-- `crates/hearth-proto/src/fingerprint.rs::Fingerprint::of_certificate_der` (L33) — SHA-256 du certificat DER.
-- `crates/hearth-proto/src/fingerprint.rs::Fingerprint::short` (L61) — affichage 8 × 4 majuscules (16 premiers octets) ; `Display` y renvoie.
+- `crates/hearth-proto/src/fingerprint.rs::Fingerprint::of_certificate_der` (L36) — SHA-256 du certificat DER.
+- `crates/hearth-proto/src/fingerprint.rs::Fingerprint::short` (L68) — affichage 8 × 4 majuscules (16 premiers octets) ; `Display` y renvoie.
 - `crates/hearth-proto/src/fingerprint.rs` — `#[derive(PartialEq)]` sur les 32 octets.
 - `crates/hearth-agent/src/app.rs::run` — sous-commande `fingerprint` : affiche la forme courte.
 

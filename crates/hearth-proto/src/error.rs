@@ -21,6 +21,8 @@ pub enum ErrorCode {
     InternalError,
     /// Route ou ressource inconnue.
     NotFound,
+    /// Méthode HTTP non prise en charge par la route.
+    MethodNotAllowed,
 }
 
 impl ErrorCode {
@@ -30,6 +32,7 @@ impl ErrorCode {
             Self::Unauthenticated | Self::SessionExpired | Self::SessionRevoked => 401,
             Self::ForbiddenRole => 403,
             Self::NotFound => 404,
+            Self::MethodNotAllowed => 405,
             Self::OperationInProgress => 409,
             Self::ValidationError => 422,
             Self::IncompatibleVersion => 426,
@@ -81,7 +84,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL: [(ErrorCode, &str, u16); 10] = [
+    const ALL: [(ErrorCode, &str, u16); 11] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::SessionExpired, "SESSION_EXPIRED", 401),
         (ErrorCode::SessionRevoked, "SESSION_REVOKED", 401),
@@ -92,6 +95,7 @@ mod tests {
         (ErrorCode::TooManyAttempts, "TOO_MANY_ATTEMPTS", 429),
         (ErrorCode::InternalError, "INTERNAL_ERROR", 500),
         (ErrorCode::NotFound, "NOT_FOUND", 404),
+        (ErrorCode::MethodNotAllowed, "METHOD_NOT_ALLOWED", 405),
     ];
 
     #[test]

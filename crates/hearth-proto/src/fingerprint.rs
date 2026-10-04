@@ -1,5 +1,8 @@
 //! Empreinte du certificat de l'agent (BR-CONN-001, BR-INSTALL-004).
 //!
+//! Vit dans `hearth-proto` parce que l'agent et `hearth-link` doivent calculer et afficher
+//! exactement la même chose.
+//!
 //! L'empreinte est le SHA-256 du certificat au format DER. La comparaison porte
 //! toujours sur les 32 octets ; l'affichage n'en montre que les 16 premiers, en
 //! 8 groupes de 4 caractères hexadécimaux majuscules séparés par des espaces.
@@ -48,6 +51,10 @@ impl Fingerprint {
         let text = text.trim();
         if text.len() != LEN * 2 {
             return Err(FingerprintError::BadLength(text.len()));
+        }
+        // `from_str_radix` accepte un signe : on filtre avant toute conversion.
+        if !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(FingerprintError::NotHex);
         }
         let mut bytes = [0u8; LEN];
         for (byte, pair) in bytes.iter_mut().zip(text.as_bytes().chunks(2)) {
@@ -140,6 +147,13 @@ mod tests {
         let fp = ramp();
         assert_eq!(Fingerprint::from_hex(&fp.to_hex()), Ok(fp));
         assert_eq!(Fingerprint::from_hex(&fp.to_hex().to_uppercase()), Ok(fp));
+    }
+
+    #[test]
+    fn parse_rejects_a_sign_in_front_of_a_byte() {
+        let mut text = Fingerprint::from_bytes([0x11; LEN]).to_hex();
+        text.replace_range(0..2, "+a");
+        assert_eq!(Fingerprint::from_hex(&text), Err(FingerprintError::NotHex));
     }
 
     #[test]
