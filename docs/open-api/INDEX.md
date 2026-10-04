@@ -21,8 +21,8 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Comptes** | PUT | [`/me/password`](./accounts.md) | user+ | Changer son mot de passe (ferme autres sessions) |
 | **Comptes** | DELETE | [`/accounts/{id}`](./accounts.md) | admin | Supprimer compte |
 | **Comptes** | DELETE | [`/accounts/{id}/sessions`](./accounts.md) | admin | Fermer toutes les sessions du compte |
-| **Audit** | GET | `/audit?filters…` | admin | Journal d'activité (pagination curseur) |
-| **Audit** | GET | `/audit/export?filters…` | admin | Journal CSV (UTF-8 BOM, `;` séparateur) |
+| **Audit** | GET | [`/audit?filters…`](./audit.md) | admin | Journal d'activité (filtres, recherche plein texte, pagination curseur) |
+| **Audit** | GET | [`/audit/export?filters…`](./audit.md) | admin | Journal CSV (UTF-8 BOM, `;` séparateur) |
 | **Mise à jour** | GET | `/agent/update` | user+ | Statut mise à jour (courant, en cours, dernier résultat) |
 | **Mise à jour** | POST | `/agent/update` | admin | Lancer mise à jour (URL, signature minisign) |
 | **CLI** | `hearth-agent install` | — | — | Installation interactive (env var override) |
@@ -52,6 +52,6 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - Idempotency : requêtes modifiantes portent `Idempotency-Key: <ULID>` (rejouer = même résultat, sans ré-exécuter ; en cours = `409` ; autre requête = `422 IDEMPOTENCY_KEY_REUSED`) : voir [opérations](./operations.md). `POST /sessions` n'est pas suivi (son résultat contient un jeton).
 - Versioning : client envoie `X-Hearth-Api: <n>` (obligatoire sauf sur `/hello`) ; hors plage `426 INCOMPATIBLE_VERSION` avec `details.upgrade` ; l'agent répond `X-Hearth-Api-Range: min-max`.
 - Client : `X-Hearth-Client: poste/version` (nom du poste, retenu avec la session).
-- Accès : chaque route est déclarée dans `ENDPOINTS` (`entrypoint/http/mod.rs`) avec son niveau (public, authentifié, administrateur) et son suivi par clé ; le routeur pose la couche d'accès depuis la table et un test de balayage vérifie que les routes réservées refusent l'appelant sans droit.
+- Accès : chaque route est déclarée dans `ENDPOINTS` (`entrypoint/http/mod.rs`) avec son niveau (public, authentifié, administrateur), son suivi par clé et son action de journal (les refus et les échecs sont consignés par la couche d'accès) ; le routeur pose la couche d'accès depuis la table et un test de balayage vérifie que les routes réservées refusent l'appelant sans droit.
 - Réponses : succès = corps JSON propre à la route, sans enveloppe (ex. `/hello`) ; échec = `{ error: { code, message, details } }` (`hearth-proto::error::ErrorBody`).
-- Fiches de route détaillées : [hello](./hello.md), [sessions](./sessions.md), [comptes](./accounts.md), [opérations](./operations.md).
+- Fiches de route détaillées : [hello](./hello.md), [sessions](./sessions.md), [comptes](./accounts.md), [opérations](./operations.md), [journal](./audit.md).
