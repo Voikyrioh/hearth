@@ -77,7 +77,11 @@ pub fn spawn(
     let server = axum_server::from_tcp(listener)?
         .acceptor(acceptor)
         .handle(handle.clone());
-    let task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
+    let task = tokio::spawn(async move {
+        server
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+    });
     Ok(ServerHandle {
         local_addr,
         handle,

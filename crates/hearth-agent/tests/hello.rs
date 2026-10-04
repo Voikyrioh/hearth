@@ -130,8 +130,8 @@ fn config_for(dir: &Path) -> AgentConfig {
     }
 }
 
-fn start(dir: &Path) -> (ServerHandle, Fingerprint) {
-    let running = app::start(&config_for(dir)).expect("démarrage");
+async fn start(dir: &Path) -> (ServerHandle, Fingerprint) {
+    let running = app::start(&config_for(dir)).await.expect("démarrage");
     (running.server, running.identity.fingerprint)
 }
 
@@ -158,7 +158,7 @@ fn cli_fingerprint(data: &Path) -> String {
 #[tokio::test]
 async fn hello_is_served_over_tls13_with_the_pinned_certificate() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (server, fingerprint) = start(dir.path());
+    let (server, fingerprint) = start(dir.path()).await;
 
     let reply = get(server.local_addr(), "/api/v1/hello").await;
     assert_eq!(reply.status, 200);
@@ -183,7 +183,7 @@ async fn hello_is_served_over_tls13_with_the_pinned_certificate() {
 #[tokio::test]
 async fn unknown_route_answers_the_error_format_over_tls() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (server, _) = start(dir.path());
+    let (server, _) = start(dir.path()).await;
     let reply = get(server.local_addr(), "/api/v1/inconnue").await;
     assert_eq!(reply.status, 404);
     let body: ErrorBody = serde_json::from_slice(&reply.body).expect("json");
@@ -195,12 +195,12 @@ async fn unknown_route_answers_the_error_format_over_tls() {
 async fn fingerprint_and_install_id_survive_a_restart() {
     let dir = tempfile::tempdir().expect("tempdir");
 
-    let (server, first_fingerprint) = start(dir.path());
+    let (server, first_fingerprint) = start(dir.path()).await;
     let first = get(server.local_addr(), "/api/v1/hello").await;
     let first_hello: HelloResponse = serde_json::from_slice(&first.body).expect("json");
     server.shutdown().await.expect("arrêt");
 
-    let (server, second_fingerprint) = start(dir.path());
+    let (server, second_fingerprint) = start(dir.path()).await;
     let second = get(server.local_addr(), "/api/v1/hello").await;
     let second_hello: HelloResponse = serde_json::from_slice(&second.body).expect("json");
     server.shutdown().await.expect("arrêt");
@@ -224,7 +224,7 @@ fn fingerprint_command_creates_the_identity_when_absent() {
 #[tokio::test]
 async fn tls12_connections_are_refused_with_a_protocol_version_alert() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (server, _) = start(dir.path());
+    let (server, _) = start(dir.path()).await;
     let error = connect(
         server.local_addr(),
         client_config(&[&rustls::version::TLS12]),
@@ -249,7 +249,7 @@ async fn tls12_connections_are_refused_with_a_protocol_version_alert() {
 #[tokio::test]
 async fn wrong_method_answers_405_in_the_error_format_over_tls() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (server, _) = start(dir.path());
+    let (server, _) = start(dir.path()).await;
     let mut tls = connect(
         server.local_addr(),
         client_config(&[&rustls::version::TLS13]),
