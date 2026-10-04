@@ -230,6 +230,7 @@ async fn an_administrator_password_change_closes_every_session() {
     env.insert_session(&other.id, "S3", Duration::hours(1))
         .await;
     env.clock.advance(Duration::minutes(5));
+    let before = env.hash_of(&marie.id).await;
 
     let closed = env
         .service
@@ -245,7 +246,7 @@ async fn an_administrator_password_change_closes_every_session() {
         updated.password_changed_at,
         support::start_time() + Duration::minutes(5)
     );
-    assert_ne!(updated.password_hash.expose(), marie.password_hash.expose());
+    assert_ne!(env.hash_of(&marie.id).await, before);
 }
 
 #[tokio::test]
@@ -255,6 +256,7 @@ async fn set_password_applies_the_rules_and_changes_nothing_when_refused() {
     env.insert_session(&marie.id, "S1", Duration::hours(1))
         .await;
 
+    let before = env.hash_of(&marie.id).await;
     let error = env
         .service
         .set_password(&marie.id, secret("short"))
@@ -262,15 +264,7 @@ async fn set_password_applies_the_rules_and_changes_nothing_when_refused() {
         .unwrap_err();
     assert!(matches!(error, AccountError::WeakPassword(_)));
     assert_eq!(env.session_ids(&marie.id).await, ["S1"]);
-    assert_eq!(
-        env.service
-            .find("marie")
-            .await
-            .unwrap()
-            .password_hash
-            .expose(),
-        marie.password_hash.expose()
-    );
+    assert_eq!(env.hash_of(&marie.id).await, before);
 }
 
 #[tokio::test]
@@ -320,6 +314,7 @@ async fn a_wrong_old_password_changes_nothing() {
     env.insert_session(&marie.id, "S2", Duration::hours(1))
         .await;
 
+    let before = env.hash_of(&marie.id).await;
     let error = env
         .service
         .change_own_password(
@@ -333,15 +328,7 @@ async fn a_wrong_old_password_changes_nothing() {
     assert!(matches!(error, AccountError::OldPasswordIncorrect));
     assert_eq!(error.to_string(), "L'ancien mot de passe est incorrect");
     assert_eq!(env.session_ids(&marie.id).await, ["S1", "S2"]);
-    assert_eq!(
-        env.service
-            .find("marie")
-            .await
-            .unwrap()
-            .password_hash
-            .expose(),
-        marie.password_hash.expose()
-    );
+    assert_eq!(env.hash_of(&marie.id).await, before);
 }
 
 #[tokio::test]
@@ -417,12 +404,13 @@ async fn revoking_closes_sessions_and_keeps_the_password() {
     env.insert_session(&marie.id, "S2", Duration::hours(1))
         .await;
 
+    let before = env.hash_of(&marie.id).await;
     assert_eq!(env.service.revoke_sessions(&marie.id).await.unwrap(), 2);
     assert!(env.session_ids(&marie.id).await.is_empty());
     assert_eq!(env.service.revoke_sessions(&marie.id).await.unwrap(), 0);
 
     let after = env.service.find("marie").await.unwrap();
-    assert_eq!(after.password_hash.expose(), marie.password_hash.expose());
+    assert_eq!(env.hash_of(&marie.id).await, before);
     assert_eq!(after.password_changed_at, marie.password_changed_at);
 }
 
@@ -504,7 +492,7 @@ async fn the_repository_reads_what_the_service_wrote() {
         .unwrap()
         .unwrap();
     assert_eq!(found.id, created.id);
-    assert_eq!(found.password_hash.expose(), created.password_hash.expose());
+    assert_eq!(found.password_hash.expose(), env.hash_of(&created.id).await);
 }
 
 /// Hacheur qui simule un changement concurrent du mot de passe, juste après la vérification de

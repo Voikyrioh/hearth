@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use hearth_agent::application::accounts::AccountService;
+use hearth_agent::application::accounts::{AccountService, AccountView};
 use hearth_agent::application::ports::{Clock, IdGen};
-use hearth_agent::domain::accounts::{Account, AccountId, Role};
+use hearth_agent::domain::accounts::{AccountId, Role};
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
 use hearth_agent::infrastructure::sqlite::{
@@ -88,7 +88,7 @@ pub fn secret(value: &str) -> Secret {
 }
 
 impl Env {
-    pub async fn create(&self, username: &str, role: Role) -> Account {
+    pub async fn create(&self, username: &str, role: Role) -> AccountView {
         self.service
             .create(username, secret(PASSWORD), role)
             .await
@@ -113,6 +113,14 @@ impl Env {
         .execute(self.db.pool())
         .await
         .expect("session");
+    }
+
+    pub async fn hash_of(&self, account: &AccountId) -> String {
+        sqlx::query_scalar("SELECT password_hash FROM accounts WHERE id = ?")
+            .bind(account.as_str())
+            .fetch_one(self.db.pool())
+            .await
+            .expect("haché")
     }
 
     pub async fn session_ids(&self, account: &AccountId) -> Vec<String> {

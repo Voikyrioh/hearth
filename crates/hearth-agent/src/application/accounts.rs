@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use thiserror::Error;
+use time::OffsetDateTime;
 
 use super::ports::{
     AccountRepo, Clock, HashError, IdGen, PasswordHasher, SessionRepo, Store, StoreError,
@@ -46,10 +47,34 @@ pub enum AccountError {
     Hash(#[from] HashError),
 }
 
+/// Ce que les cas d'usage rendent d'un compte : jamais le haché du mot de passe (BR-ACCT-006).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountView {
+    pub id: AccountId,
+    pub username: Username,
+    pub role: Role,
+    pub created_at: OffsetDateTime,
+    pub password_changed_at: OffsetDateTime,
+    pub last_login_at: Option<OffsetDateTime>,
+}
+
+impl From<&Account> for AccountView {
+    fn from(account: &Account) -> Self {
+        Self {
+            id: account.id.clone(),
+            username: account.username.clone(),
+            role: account.role,
+            created_at: account.created_at,
+            password_changed_at: account.password_changed_at,
+            last_login_at: account.last_login_at,
+        }
+    }
+}
+
 /// Un compte et ce que la liste affiche à son sujet.
 #[derive(Debug)]
 pub struct AccountSummary {
-    pub account: Account,
+    pub account: AccountView,
     /// Sessions dont l'expiration est dans le futur.
     pub sessions_open: usize,
 }
@@ -95,7 +120,7 @@ impl AccountService {
         username: &str,
         password: Secret,
         role: Role,
-    ) -> Result<Account, AccountError> {
+    ) -> Result<AccountView, AccountError> {
         let username = Username::parse(username)?;
         let password =
             PlainPassword::new(password, &username).map_err(AccountError::WeakPassword)?;
@@ -120,16 +145,18 @@ impl AccountService {
             other => AccountError::Store(other),
         })?;
         tx.commit().await?;
-        Ok(account)
+        Ok(AccountView::from(&account))
     }
 
     /// Retrouve un compte par l'identifiant saisi (insensible à la casse).
-    pub async fn find(&self, username: &str) -> Result<Account, AccountError> {
+    pub async fn find(&self, username: &str) -> Result<AccountView, AccountError> {
         let username = Username::parse(username)?;
-        self.accounts
+        let account = self
+            .accounts
             .find_by_username(&username)
             .await?
-            .ok_or(AccountError::NotFound)
+            .ok_or(AccountError::NotFound)?;
+        Ok(AccountView::from(&account))
     }
 
     /// Les comptes avec leur nombre de sessions ouvertes, du plus ancien au plus récent.
@@ -143,7 +170,7 @@ impl AccountService {
                 .filter(|&expires_at| is_open(expires_at, now))
                 .count();
             summaries.push(AccountSummary {
-                account,
+                account: AccountView::from(&account),
                 sessions_open,
             });
         }
