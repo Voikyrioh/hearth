@@ -1,0 +1,31 @@
+---
+id: BR-ACCT-009
+domaine: ACCT
+titre: Changer son propre mot de passe ferme les autres sessions
+statut: active
+invariant: true
+source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-gerer-comptes.md (BR-ACCT-009), HRT-03
+maj: 2026-10-04
+---
+
+# BR-ACCT-009 — Changer son propre mot de passe ferme les autres sessions
+
+## Règle
+Le titulaire saisit l'ancien mot de passe puis le nouveau. Les autres sessions du compte sont fermées ; la session courante est conservée. Si l'appelant n'a pas de session courante, toutes sont fermées. Message d'erreur : « L'ancien mot de passe est incorrect ». L'ancien mot de passe n'est pas soumis aux règles de complexité.
+
+## Application (code)
+- `crates/hearth-agent/src/domain/sessions.rs::closure_on_password_change` (`PasswordChange::Own { current_session }` → `SessionClosure::AllExcept` ou `All`).
+- `crates/hearth-agent/src/application/accounts.rs::AccountService::change_own_password` — vérifie l'ancien (`PasswordHasher::verify`), applique les règles au nouveau, change et ferme dans une transaction.
+
+## Vérification
+- Tests : `domain::sessions::tests::own_password_change_keeps_the_current_session`, `own_password_change_without_current_session_closes_everything` ; `tests/accounts_use_cases.rs::changing_your_own_password_keeps_only_the_current_session`, `a_wrong_old_password_changes_nothing`.
+
+## Cas limites
+- Ancien mot de passe faux → rien ne change, aucune session fermée.
+- Les routes HTTP (HRT-04) fourniront `current_session` ; la ligne de commande n'a pas de session et passe par `set_password`.
+
+## Règles liées
+- BR-ACCT-008, BR-ACCT-004.
+
+## Historique
+- 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
