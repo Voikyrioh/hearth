@@ -208,6 +208,7 @@ pub async fn env() -> Env {
     let audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink> =
         Arc::new(hearth_agent::application::audit::AuditRecorder::new(
             store,
+            clock.clone(),
             feed.clone() as Arc<dyn AuditFeed>,
         ));
     Env {

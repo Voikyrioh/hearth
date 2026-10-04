@@ -13,9 +13,12 @@ use async_trait::async_trait;
 use thiserror::Error;
 use tokio::sync::broadcast;
 
-use super::ports::{AuditFeed, AuditRepo, AuditSink, Store, StoreError, UnitOfWork};
+use super::ports::{AuditFeed, AuditRepo, AuditSink, Clock, Store, StoreError, UnitOfWork};
 use crate::domain::accounts::Role;
-use crate::domain::audit::{AuditEvent, AuditFilter, AuditRecord, can_read_journal, render_csv};
+use crate::domain::audit::{
+    Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, Outcome, Target, can_read_journal,
+    render_csv,
+};
 
 /// Lignes d'un export, au plus : les plus récentes (le journal entier tient en 50 000 entrées, un
 /// export de cette taille n'a plus rien d'un fichier qu'on ouvre dans un tableur).
@@ -115,12 +118,13 @@ impl AuditService {
 /// Écrit une entrée hors transaction (refus et échecs relevés par le routeur).
 pub struct AuditRecorder {
     store: Arc<dyn Store>,
+    clock: Arc<dyn Clock>,
     feed: Arc<dyn AuditFeed>,
 }
 
 impl AuditRecorder {
-    pub fn new(store: Arc<dyn Store>, feed: Arc<dyn AuditFeed>) -> Self {
-        Self { store, feed }
+    pub fn new(store: Arc<dyn Store>, clock: Arc<dyn Clock>, feed: Arc<dyn AuditFeed>) -> Self {
+        Self { store, clock, feed }
     }
 
     async fn write(&self, event: &AuditEvent) -> Result<AuditRecord, StoreError> {
@@ -133,7 +137,8 @@ impl AuditRecorder {
 
 #[async_trait]
 impl AuditSink for AuditRecorder {
-    async fn record(&self, event: AuditEvent) {
+    async fn record(&self, actor: Actor, action: AuditAction, target: Target, outcome: Outcome) {
+        let event = AuditEvent::new(self.clock.now(), actor, action, target, outcome);
         match self.write(&event).await {
             Ok(record) => self.feed.publish(record),
             Err(error) => {

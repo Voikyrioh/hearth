@@ -12,6 +12,7 @@
 //! - Toute erreur de routage, d'extraction ou de méthode sort au format `ErrorBody` (`error.rs`).
 
 mod accounts;
+mod audit;
 mod auth;
 mod error;
 mod hello;
@@ -32,9 +33,12 @@ use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 use crate::application::accounts::AccountService;
+use crate::application::audit::AuditService;
 use crate::application::hello::HelloService;
 use crate::application::operations::OperationService;
+use crate::application::ports::AuditSink;
 use crate::application::sessions::SessionService;
+use crate::domain::audit::AuditAction;
 
 pub use error::ApiError;
 pub use server::{ServerError, ServerHandle, spawn};
@@ -46,6 +50,9 @@ pub struct AppState {
     pub accounts: Arc<AccountService>,
     pub sessions: Arc<SessionService>,
     pub operations: Arc<OperationService>,
+    pub audit: Arc<AuditService>,
+    /// Écrit au journal les refus et les échecs relevés par la couche d'accès.
+    pub sink: Arc<dyn AuditSink>,
 }
 
 /// Qui peut appeler une route.
@@ -69,6 +76,12 @@ pub struct Endpoint {
     /// Les requêtes qui portent une `Idempotency-Key` sont suivies (`operations.rs`) : routes
     /// authentifiées qui modifient, hors connexion (son résultat contient un jeton).
     pub tracked: bool,
+    /// L'action du journal d'activité de la route : celle de ses refus faute de droits et, pour
+    /// une route qui modifie, de ses échecs, que la couche d'accès consigne (BR-AUDIT-003). Les
+    /// succès sont écrits par les cas d'usage, dans la transaction de l'action ; la connexion
+    /// (route publique) se consigne elle-même. `None` : consultation sans droit particulier
+    /// (BR-AUDIT-004).
+    pub audit: Option<AuditAction>,
     route: fn() -> MethodRouter<AppState>,
 }
 
@@ -87,6 +100,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Public,
         version_checked: false,
         tracked: false,
+        audit: None,
         route: || get(hello::hello),
     },
     Endpoint {
@@ -95,6 +109,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Public,
         version_checked: true,
         tracked: false,
+        audit: Some(AuditAction::Login),
         route: || post(sessions::login),
     },
     Endpoint {
@@ -103,6 +118,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Authenticated,
         version_checked: true,
         tracked: false,
+        audit: Some(AuditAction::Logout),
         route: || delete(sessions::logout),
     },
     Endpoint {
@@ -111,6 +127,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Authenticated,
         version_checked: true,
         tracked: false,
+        audit: None,
         route: || get(sessions::me),
     },
     Endpoint {
@@ -119,6 +136,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Authenticated,
         version_checked: true,
         tracked: true,
+        audit: Some(AuditAction::OwnPassword),
         route: || put(accounts::change_own_password),
     },
     Endpoint {
@@ -127,6 +145,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Authenticated,
         version_checked: true,
         tracked: false,
+        audit: None,
         route: || get(operations::get),
     },
     Endpoint {
@@ -135,6 +154,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Admin,
         version_checked: true,
         tracked: false,
+        audit: Some(AuditAction::AccountsRead),
         route: || get(accounts::list),
     },
     Endpoint {
@@ -143,6 +163,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Admin,
         version_checked: true,
         tracked: true,
+        audit: Some(AuditAction::AccountCreate),
         route: || post(accounts::create),
     },
     Endpoint {
@@ -151,6 +172,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Admin,
         version_checked: true,
         tracked: true,
+        audit: Some(AuditAction::AccountRole),
         route: || patch(accounts::change_role),
     },
     Endpoint {
@@ -159,6 +181,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Admin,
         version_checked: true,
         tracked: true,
+        audit: Some(AuditAction::AccountDelete),
         route: || delete(accounts::delete),
     },
     Endpoint {
@@ -167,6 +190,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Admin,
         version_checked: true,
         tracked: true,
+        audit: Some(AuditAction::AccountPassword),
         route: || put(accounts::set_password),
     },
     Endpoint {
@@ -175,7 +199,26 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Admin,
         version_checked: true,
         tracked: true,
+        audit: Some(AuditAction::SessionsRevoke),
         route: || delete(accounts::revoke_sessions),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/audit",
+        access: Access::Admin,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::AuditRead),
+        route: || get(audit::list),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/audit/export",
+        access: Access::Admin,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::AuditRead),
+        route: || get(audit::export),
     },
 ];
 
@@ -192,6 +235,9 @@ pub fn router(state: AppState) -> Router {
                     app: state.clone(),
                     access: endpoint.access,
                     tracked: endpoint.tracked,
+                    audit: endpoint.audit,
+                    modifies: endpoint.modifies(),
+                    route: endpoint.path,
                 },
                 auth::guard,
             ));
@@ -301,6 +347,38 @@ mod tests {
             .unwrap();
         assert!(!login.tracked);
         assert!(ENDPOINTS.iter().filter(|endpoint| endpoint.tracked).count() >= 5);
+    }
+
+    #[test]
+    fn every_route_that_modifies_or_is_reserved_has_a_journal_action() {
+        for endpoint in ENDPOINTS {
+            if endpoint.modifies() || endpoint.access == Access::Admin {
+                assert!(
+                    endpoint.audit.is_some(),
+                    "{} {} sans action de journal",
+                    endpoint.method,
+                    endpoint.path
+                );
+            }
+        }
+        // Les consultations sans droit particulier ne s'écrivent pas (BR-AUDIT-004).
+        for path in ["/hello", "/me", "/operations/{id}"] {
+            let endpoint = ENDPOINTS
+                .iter()
+                .find(|endpoint| endpoint.path == path)
+                .unwrap();
+            assert_eq!(endpoint.audit, None, "{path}");
+        }
+        // Lire le journal refusé s'écrit, sous le libellé de la spec (BR-AUDIT-021).
+        for path in ["/audit", "/audit/export"] {
+            let endpoint = ENDPOINTS
+                .iter()
+                .find(|endpoint| endpoint.path == path)
+                .unwrap();
+            assert_eq!(endpoint.access, Access::Admin);
+            assert_eq!(endpoint.audit, Some(AuditAction::AuditRead));
+            assert!(!endpoint.modifies() && !endpoint.tracked);
+        }
     }
 
     #[test]

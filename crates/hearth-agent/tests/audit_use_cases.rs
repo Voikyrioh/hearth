@@ -12,8 +12,8 @@ use hearth_agent::application::ports::AuditFeed;
 use hearth_agent::application::sessions::LoginError;
 use hearth_agent::domain::accounts::{Role, Username};
 use hearth_agent::domain::audit::{
-    Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, MAX_ENTRIES, Origin, OriginKind,
-    Outcome, OutcomeKind, RawFilter, Reason, Target,
+    Actor, AuditAction, AuditFilter, AuditRecord, MAX_ENTRIES, Origin, OriginKind, Outcome,
+    OutcomeKind, RawFilter, Reason, Target,
 };
 use support::{PASSWORD, by, client, client_at, env, secret, start_time};
 
@@ -499,24 +499,26 @@ async fn the_purge_keeps_entries_of_exactly_ninety_days_and_removes_older_ones()
 async fn the_sink_writes_and_publishes_and_a_failing_write_never_fails_the_caller() {
     let env = env().await;
     let mut feed = env.feed.subscribe();
-    let event = AuditEvent::new(
-        start_time(),
-        Actor::new(
-            Some(Username::parse("marie").unwrap()),
-            Origin::client(Some("poste"), "10.0.0.7"),
-        ),
-        AuditAction::AuditRead,
-        Target::Route("/audit"),
-        Outcome::Denied(Reason::ReadOnly),
+    let actor = Actor::new(
+        Some(Username::parse("marie").unwrap()),
+        Origin::client(Some("poste"), "10.0.0.7"),
     );
-    env.audit_sink.record(event.clone()).await;
+    let record = |actor: Actor| {
+        env.audit_sink.record(
+            actor,
+            AuditAction::AuditRead,
+            Target::Route("/audit"),
+            Outcome::Denied(Reason::ReadOnly),
+        )
+    };
+    record(actor.clone()).await;
     let stored = all(&env).await;
     assert_eq!(stored.len(), 1);
     assert_eq!(feed.try_recv().unwrap(), stored[0]);
 
     // Base indisponible : l'écriture échoue, l'appelant continue (tracé en `error`).
     env.db.pool().close().await;
-    env.audit_sink.record(event).await;
+    record(actor).await;
     assert!(
         feed.try_recv().is_err(),
         "rien de diffusé pour une entrée non écrite"

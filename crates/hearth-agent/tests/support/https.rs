@@ -73,7 +73,10 @@ fn client_config() -> Arc<ClientConfig> {
 pub struct Wire {
     pub status: u16,
     pub headers: Vec<(String, String)>,
+    /// Le corps lu comme JSON (`null` s'il est vide ou n'est pas du JSON : un export CSV).
     pub body: Value,
+    /// Le corps tel quel.
+    pub text: String,
 }
 
 impl Wire {
@@ -243,7 +246,8 @@ fn parse(raw: &[u8]) -> Wire {
         body: if body.is_empty() {
             Value::Null
         } else {
-            serde_json::from_slice(body).expect("JSON")
+            serde_json::from_slice(body).unwrap_or(Value::Null)
         },
+        text: String::from_utf8_lossy(body).into_owned(),
     }
 }

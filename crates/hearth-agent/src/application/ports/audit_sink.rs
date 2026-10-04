@@ -1,15 +1,16 @@
 use async_trait::async_trait;
 use tokio::sync::broadcast;
 
-use crate::domain::audit::{AuditEvent, AuditRecord};
+use crate::domain::audit::{Actor, AuditAction, AuditRecord, Outcome, Target};
 
 /// Écrit une entrée du journal **hors transaction** : ce qui n'a pas à être atomique avec une
-/// action (refus, échecs). Un échec d'écriture ne fait jamais échouer l'action : il est tracé en
-/// `error` et l'appelant continue. Pour une entrée atomique avec l'action (gestion des comptes,
-/// connexion), le cas d'usage écrit dans son unité de travail (`UnitOfWork::audit`).
+/// action (refus, échecs). L'entrée est datée par l'horloge de l'agent. Un échec d'écriture ne
+/// fait jamais échouer l'action : il est tracé en `error` et l'appelant continue. Pour une entrée
+/// atomique avec l'action (gestion des comptes, connexion), le cas d'usage écrit dans son unité
+/// de travail (`UnitOfWork::audit`).
 #[async_trait]
 pub trait AuditSink: Send + Sync {
-    async fn record(&self, event: AuditEvent);
+    async fn record(&self, actor: Actor, action: AuditAction, target: Target, outcome: Outcome);
 }
 
 /// Diffusion interne des entrées écrites, à destination du flux temps réel (sujet `audit`,

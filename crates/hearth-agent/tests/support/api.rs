@@ -41,13 +41,18 @@ pub fn state(env: &Env) -> AppState {
         accounts: env.service.clone(),
         sessions: env.sessions.clone(),
         operations: env.operations.clone(),
+        audit: env.audit.clone(),
+        sink: env.audit_sink.clone(),
     }
 }
 
 pub struct Reply {
     pub status: StatusCode,
     pub headers: HeaderMap,
+    /// Le corps lu comme JSON (`null` s'il est vide ou n'est pas du JSON : un export CSV).
     pub body: Value,
+    /// Le corps tel quel.
+    pub text: String,
 }
 
 impl Reply {
@@ -192,12 +197,13 @@ impl<'a> Call<'a> {
         let body = if bytes.is_empty() {
             Value::Null
         } else {
-            serde_json::from_slice(&bytes).expect("JSON")
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null)
         };
         Reply {
             status,
             headers,
             body,
+            text: String::from_utf8_lossy(&bytes).into_owned(),
         }
     }
 }

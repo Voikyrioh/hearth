@@ -4,7 +4,9 @@
 //! d'accès déclaré dans `ENDPOINTS` : session valable, puis rôle pour une route réservée aux
 //! administrateurs (BR-ACCT-013 et BR-ACCT-014), avant toute lecture du corps. Un handler ne
 //! redéclare rien : il reçoit le contexte authentifié par l'extracteur `Caller`. La couche pose
-//! aussi le suivi des opérations quand la table le demande.
+//! aussi le suivi des opérations quand la table le demande, et consigne au journal d'activité les
+//! refus faute de droits et les échecs des requêtes qui modifient (BR-AUDIT-003), d'après la
+//! colonne « action de journal » de la table : un handler n'y pense pas.
 
 use std::net::SocketAddr;
 
@@ -16,9 +18,12 @@ use axum::response::{IntoResponse, Response};
 use hearth_proto::error::ErrorCode;
 use hearth_proto::headers;
 
+use super::error::ErrorMark;
 use super::{Access, ApiError, AppState, operations};
 use crate::application::sessions::CurrentSession;
-use crate::domain::audit::{Actor, Origin};
+use crate::domain::audit::{
+    Actor, AuditAction, Origin, Outcome, Reason, RequestKind, Target, is_journaled,
+};
 
 /// Ce que la couche d'accès a décidé pour une route : son niveau, et si ses requêtes qui
 /// portent une clé d'opération sont suivies.
@@ -27,6 +32,64 @@ pub struct GuardState {
     pub app: AppState,
     pub access: Access,
     pub tracked: bool,
+    /// L'action du journal d'activité de la route (`Endpoint::audit`).
+    pub audit: Option<AuditAction>,
+    /// La route modifie quelque chose (`Endpoint::modifies`).
+    pub modifies: bool,
+    /// Le motif de la route (`/accounts/{id}`) : la cible d'un refus ou d'un échec.
+    pub route: &'static str,
+}
+
+impl GuardState {
+    /// Consigne un refus ou un échec si la route a une action et si la règle du journal le veut
+    /// (`domain::audit::is_journaled`). Un échec d'écriture est tracé, jamais subi par l'appelant.
+    async fn journal(&self, actor: &Actor, outcome: Outcome) {
+        let Some(action) = self.audit else {
+            return;
+        };
+        let kind = if self.modifies {
+            RequestKind::Modification
+        } else {
+            RequestKind::Consultation
+        };
+        if !is_journaled(kind, outcome.kind()) {
+            return;
+        }
+        self.app
+            .sink
+            .record(actor.clone(), action, Target::Route(self.route), outcome)
+            .await;
+    }
+}
+
+/// Ce que le journal retient d'une réponse d'erreur : un refus faute de droits, ou un échec.
+/// `None` pour ce qui n'est pas une action ratée : pas d'appelant reconnu, connexion (qui se
+/// consigne elle-même), requête qui ne s'est pas exécutée (clé d'opération rejouée ou déjà en
+/// cours), version incompatible, route ou méthode inconnue. Exhaustif : un nouveau code oblige à
+/// choisir.
+fn failure_of(code: ErrorCode) -> Option<Outcome> {
+    match code {
+        ErrorCode::ForbiddenRole => Some(Outcome::Denied(Reason::ReadOnly)),
+        ErrorCode::ValidationError | ErrorCode::WeakPassword | ErrorCode::PayloadTooLarge => {
+            Some(Outcome::Failed(Reason::Validation))
+        }
+        ErrorCode::UsernameTaken => Some(Outcome::Failed(Reason::UsernameTaken)),
+        ErrorCode::WrongPassword => Some(Outcome::Failed(Reason::WrongPassword)),
+        ErrorCode::LastAdmin => Some(Outcome::Failed(Reason::LastAdmin)),
+        ErrorCode::Conflict => Some(Outcome::Failed(Reason::Conflict)),
+        ErrorCode::NotFound => Some(Outcome::Failed(Reason::NotFound)),
+        ErrorCode::Busy => Some(Outcome::Failed(Reason::Busy)),
+        ErrorCode::InternalError => Some(Outcome::Failed(Reason::Internal)),
+        ErrorCode::Unauthenticated
+        | ErrorCode::InvalidCredentials
+        | ErrorCode::SessionExpired
+        | ErrorCode::SessionRevoked
+        | ErrorCode::OperationInProgress
+        | ErrorCode::IdempotencyKeyReused
+        | ErrorCode::IncompatibleVersion
+        | ErrorCode::TooManyAttempts
+        | ErrorCode::MethodNotAllowed => None,
+    }
 }
 
 /// Lit le jeton de `Authorization: Bearer <jeton>`.
@@ -80,24 +143,39 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         Ok(session) => session,
         Err(error) => return error.into_response(),
     };
+    let actor = Actor::new(Some(session.account.username.clone()), origin_of(&parts));
     if !allows(guard.access, &session) {
+        // BR-AUDIT-003, BR-AUDIT-021 : toute action refusée faute de droits est consignée,
+        // consultation du journal comprise.
+        guard
+            .journal(&actor, Outcome::Denied(Reason::ReadOnly))
+            .await;
         return ApiError::new(
             ErrorCode::ForbiddenRole,
             "Tu n'as pas la permission pour accéder à la gestion des comptes",
         )
         .into_response();
     }
-    parts.extensions.insert(Requester(Actor::new(
-        Some(session.account.username.clone()),
-        origin_of(&parts),
-    )));
+    parts.extensions.insert(Requester(actor.clone()));
     parts.extensions.insert(Caller(session.clone()));
     let request = Request::from_parts(parts, body);
-    if guard.tracked {
+    let response = if guard.tracked {
         operations::track(&guard.app, session, request, next).await
     } else {
         next.run(request).await
+    };
+    // Un échec de la requête (jamais le succès : le cas d'usage l'a écrit dans sa transaction).
+    // Une réponse rejouée depuis la clé d'opération ne s'est pas exécutée : rien à consigner.
+    let replayed = response
+        .headers()
+        .contains_key(headers::IDEMPOTENT_REPLAYED);
+    if !replayed
+        && let Some(ErrorMark(code)) = response.extensions().get::<ErrorMark>().copied()
+        && let Some(outcome) = failure_of(code)
+    {
+        guard.journal(&actor, outcome).await;
     }
+    response
 }
 
 /// Le compte et la session de l'appelant, posés par la couche d'accès. Un handler de route
@@ -183,6 +261,41 @@ mod tests {
         assert!(!allows(Access::Admin, &session(Role::ReadOnly)));
         for access in [Access::Public, Access::Authenticated] {
             assert!(allows(access, &session(Role::ReadOnly)));
+        }
+    }
+
+    #[test]
+    fn an_error_is_journaled_as_a_denial_or_a_failure_and_never_as_noise() {
+        use ErrorCode::*;
+        let outcome = |code| failure_of(code).map(|outcome| outcome.kind().code());
+        assert_eq!(outcome(ForbiddenRole), Some("denied"));
+        for code in [
+            ValidationError,
+            WeakPassword,
+            PayloadTooLarge,
+            UsernameTaken,
+            WrongPassword,
+            LastAdmin,
+            Conflict,
+            NotFound,
+            Busy,
+            InternalError,
+        ] {
+            assert_eq!(outcome(code), Some("failed"), "{code:?}");
+        }
+        // Pas une action ratée : pas d'appelant, connexion, requête non exécutée, routage.
+        for code in [
+            Unauthenticated,
+            InvalidCredentials,
+            SessionExpired,
+            SessionRevoked,
+            OperationInProgress,
+            IdempotencyKeyReused,
+            IncompatibleVersion,
+            TooManyAttempts,
+            MethodNotAllowed,
+        ] {
+            assert_eq!(outcome(code), None, "{code:?}");
         }
     }
 

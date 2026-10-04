@@ -126,6 +126,19 @@ async fn every_admin_route_refuses_a_read_only_account_and_changes_nothing() {
     );
     assert_eq!(snapshot(&env).await, before, "rien n'a changé en base");
 
+    // Chaque refus est consigné au journal (BR-AUDIT-003, BR-AUDIT-021), une entrée par route.
+    let admin_routes = ENDPOINTS
+        .iter()
+        .filter(|endpoint| endpoint.access == Access::Admin)
+        .count();
+    let denials: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE outcome = 'denied' AND account = 'lucas'",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(usize::try_from(denials).unwrap(), admin_routes);
+
     // Contrôle : le même appel passe pour l'administrateur (la garde ne refuse pas tout).
     let reply = api.get("/accounts").token(&admin_token).send().await;
     assert_eq!(reply.status, StatusCode::OK);

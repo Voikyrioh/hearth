@@ -172,7 +172,11 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             Arc::new(SqliteAuditRepo::new(pool.clone())),
             feed.clone(),
         )),
-        audit_sink: Arc::new(AuditRecorder::new(store, feed.clone())),
+        audit_sink: Arc::new(AuditRecorder::new(
+            store,
+            adapters.clock.clone(),
+            feed.clone(),
+        )),
         audit_feed: feed,
     }
 }
@@ -218,6 +222,8 @@ pub async fn start_with(
         accounts: services.accounts,
         sessions: services.sessions,
         operations: services.operations,
+        audit: services.audit,
+        sink: services.audit_sink,
     });
     let server = http::spawn(listener, tls, router)?;
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
