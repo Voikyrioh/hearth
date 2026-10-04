@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::task::JoinHandle;
+use tokio::time::timeout;
 
 use super::round1;
 use crate::application::ports::GpuProbe;
@@ -31,6 +32,22 @@ const QUERY: &str = "index,name,utilization.gpu,memory.used,memory.total,tempera
 
 /// Une ligne plus vieille que ça n'est plus une mesure : la carte ne répond plus.
 const STALE_AFTER: Duration = Duration::from_secs(3);
+
+/// Variable d'environnement : chemin explicite de `nvidia-smi`.
+pub const NVIDIA_SMI_VAR: &str = "HEARTH_NVIDIA_SMI";
+
+/// Emplacements essayés quand `nvidia-smi` n'est pas dans le `PATH` (NixOS, installations).
+const KNOWN_PATHS: &[&str] = &[
+    "/run/current-system/sw/bin/nvidia-smi",
+    "/usr/bin/nvidia-smi",
+    "/usr/local/bin/nvidia-smi",
+];
+
+/// Aucune ligne pendant ce délai : le processus est tué et relancé.
+const SILENCE: Duration = Duration::from_secs(10);
+
+/// Délai entre deux recherches de `nvidia-smi` tant qu'il est introuvable.
+const RESCAN: Duration = Duration::from_secs(60);
 
 const RESTART_MIN: Duration = Duration::from_secs(5);
 const RESTART_MAX: Duration = Duration::from_secs(60);
@@ -111,34 +128,116 @@ struct Entry {
     line: SmiLine,
 }
 
-/// Dernière ligne de chaque carte, par indice.
 #[derive(Default)]
-struct Latest(Mutex<BTreeMap<u32, Entry>>);
+struct State {
+    /// Dernière ligne de chaque carte, par indice.
+    lines: BTreeMap<u32, Entry>,
+    /// Cartes déjà vues : l'identité ne dépend pas de la fraîcheur des lignes (une relance ne fait
+    /// pas disparaître la carte, seules ses mesures deviennent absentes).
+    known: BTreeMap<u32, GpuIdentity>,
+}
+
+#[derive(Default)]
+struct Latest(Mutex<State>);
 
 impl Latest {
-    fn put(&self, line: SmiLine, at: Instant) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(line.index, Entry { at, line });
+    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn put(&self, line: SmiLine, at: Instant) {
+        let mut state = self.state();
+        state.known.insert(
+            line.index,
+            GpuIdentity {
+                name: line.name.clone(),
+                memory_total_bytes: line.memory_total_mib.map(|mib| mib * MIB),
+            },
+        );
+        state.lines.insert(line.index, Entry { at, line });
+    }
+
+    /// Oublie les mesures (pas l'identité des cartes).
     fn clear(&self) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+        self.state().lines.clear();
     }
 
     /// Les lignes encore fraîches à `now`, par indice.
     fn fresh(&self, now: Instant) -> Vec<SmiLine> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.state()
+            .lines
             .values()
             .filter(|entry| now.saturating_duration_since(entry.at) <= STALE_AFTER)
             .map(|entry| entry.line.clone())
             .collect()
+    }
+
+    fn identities(&self) -> Vec<GpuIdentity> {
+        self.state().known.values().cloned().collect()
+    }
+}
+
+/// Où trouver `nvidia-smi`, dans l'ordre : la variable `HEARTH_NVIDIA_SMI` (chemin explicite), le
+/// `PATH`, puis les emplacements connus (NixOS ne met pas `nvidia-smi` dans le `PATH` d'un
+/// service). `env` lit une variable d'environnement, `exists` dit si un fichier existe : injectés
+/// pour les tests.
+pub fn locate(
+    env: &dyn Fn(&str) -> Option<OsString>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    if let Some(explicit) = env(NVIDIA_SMI_VAR).filter(|value| !value.is_empty()) {
+        let explicit = PathBuf::from(explicit);
+        if exists(&explicit) {
+            return Some(explicit);
+        }
+    }
+    if let Some(path) = env("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join("nvidia-smi");
+            if exists(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    KNOWN_PATHS
+        .iter()
+        .map(PathBuf::from)
+        .find(|candidate| exists(candidate))
+}
+
+/// Recherche réelle, sur la machine.
+fn locate_on_this_machine() -> Option<OsString> {
+    locate(&|name| std::env::var_os(name), &|path| path.is_file()).map(PathBuf::into_os_string)
+}
+
+/// Comment la sonde trouve et lance son processus, et ses délais : réglables pour les tests.
+pub struct Launch {
+    /// Chemin du programme, `None` s'il est introuvable (la recherche est refaite plus tard).
+    pub locate: Box<dyn Fn() -> Option<OsString> + Send + Sync>,
+    pub args: Vec<OsString>,
+    /// Premier délai avant une relance (double jusqu'à 60 s).
+    pub first_restart: Duration,
+    /// Délai entre deux recherches d'un programme introuvable.
+    pub rescan: Duration,
+    /// Aucune ligne pendant ce délai : le processus est tué puis relancé.
+    pub silence: Duration,
+}
+
+impl Launch {
+    /// `nvidia-smi` en mode continu, trouvé sur la machine.
+    pub fn nvidia_smi() -> Self {
+        Self {
+            locate: Box::new(locate_on_this_machine),
+            args: vec![
+                OsString::from(format!("--query-gpu={QUERY}")),
+                OsString::from("--format=csv,noheader,nounits"),
+                OsString::from("-l"),
+                OsString::from("1"),
+            ],
+            first_restart: RESTART_MIN,
+            rescan: RESCAN,
+            silence: SILENCE,
+        }
     }
 }
 
@@ -151,19 +250,13 @@ pub struct NvidiaSmiProbe {
 impl NvidiaSmiProbe {
     /// Lance `nvidia-smi` en mode continu. À appeler dans un runtime Tokio.
     pub fn start() -> Self {
-        let args = vec![
-            OsString::from(format!("--query-gpu={QUERY}")),
-            OsString::from("--format=csv,noheader,nounits"),
-            OsString::from("-l"),
-            OsString::from("1"),
-        ];
-        Self::start_command("nvidia-smi".into(), args, RESTART_MIN)
+        Self::start_with(Launch::nvidia_smi())
     }
 
     /// Lance une commande quelconque qui produit les mêmes lignes (tests).
-    pub fn start_command(program: OsString, args: Vec<OsString>, first_restart: Duration) -> Self {
+    pub fn start_with(launch: Launch) -> Self {
         let latest = Arc::new(Latest::default());
-        let task = tokio::spawn(supervise(program, args, latest.clone(), first_restart));
+        let task = tokio::spawn(supervise(launch, latest.clone()));
         Self { latest, task }
     }
 
@@ -180,14 +273,9 @@ impl Drop for NvidiaSmiProbe {
 }
 
 impl GpuProbe for NvidiaSmiProbe {
+    /// Les cartes déjà vues, même pendant une relance.
     fn detect(&self) -> Vec<GpuIdentity> {
-        self.lines()
-            .into_iter()
-            .map(|line| GpuIdentity {
-                memory_total_bytes: line.memory_total_mib.map(|mib| mib * MIB),
-                name: line.name,
-            })
-            .collect()
+        self.latest.identities()
     }
 
     fn sample(&self) -> Vec<GpuReading> {
@@ -196,40 +284,53 @@ impl GpuProbe for NvidiaSmiProbe {
 }
 
 enum Run {
-    /// `nvidia-smi` n'existe pas sur cette machine : inutile de réessayer.
-    NotInstalled,
     /// Il a tourné et produit des lignes avant de s'arrêter.
     Produced,
-    /// Il s'est arrêté sans rien produire (pilote absent, erreur).
+    /// Il s'est arrêté sans rien produire (pilote absent, erreur) ou n'a pas pu être lancé.
     Failed,
 }
 
-/// Lance, lit, relance : tant que la sonde vit.
-async fn supervise(program: OsString, args: Vec<OsString>, latest: Arc<Latest>, first: Duration) {
-    let mut delay = first;
+/// Cherche, lance, lit, relance : tant que la sonde vit. Introuvable : un message `info` une
+/// seule fois, puis une nouvelle recherche à chaque `rescan` (un pilote peut arriver après le
+/// démarrage).
+async fn supervise(launch: Launch, latest: Arc<Latest>) {
+    let mut delay = launch.first_restart;
+    let mut warned_missing = false;
     loop {
-        match run_once(&program, &args, &latest).await {
-            Run::NotInstalled => {
-                tracing::debug!("nvidia-smi absent : pas de carte NVIDIA mesurée");
-                return;
+        let Some(program) = (launch.locate)() else {
+            if !warned_missing {
+                warned_missing = true;
+                tracing::info!(
+                    variable = NVIDIA_SMI_VAR,
+                    "nvidia-smi introuvable : pas de carte NVIDIA mesurée, nouvelle recherche toutes les 60 s"
+                );
             }
-            Run::Produced => delay = first,
+            tokio::time::sleep(launch.rescan).await;
+            continue;
+        };
+        if warned_missing {
+            warned_missing = false;
+            tracing::info!(program = %program.to_string_lossy(), "nvidia-smi trouvé");
+        }
+        match run_once(&program, &launch, &latest).await {
+            Run::Produced => delay = launch.first_restart,
             Run::Failed => {}
         }
-        // Les dernières valeurs ne sont plus des mesures : la carte disparaît le temps de la relance.
+        // Les dernières valeurs ne sont plus des mesures : les mesures disparaissent le temps de
+        // la relance, pas l'identité des cartes.
         latest.clear();
         tracing::debug!(
-            retry_in_s = delay.as_secs(),
+            retry_in_s = delay.as_secs_f32(),
             "nvidia-smi arrêté, relance prévue"
         );
         tokio::time::sleep(delay).await;
-        delay = next_backoff(delay).max(first);
+        delay = next_backoff(delay).max(launch.first_restart);
     }
 }
 
-async fn run_once(program: &OsString, args: &[OsString], latest: &Latest) -> Run {
+async fn run_once(program: &OsString, launch: &Launch, latest: &Latest) -> Run {
     let spawned = Command::new(program)
-        .args(args)
+        .args(&launch.args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -237,30 +338,44 @@ async fn run_once(program: &OsString, args: &[OsString], latest: &Latest) -> Run
         .spawn();
     let mut child = match spawned {
         Ok(child) => child,
-        Err(error)
-            if matches!(
-                error.kind(),
-                ErrorKind::NotFound | ErrorKind::PermissionDenied
-            ) =>
-        {
-            return Run::NotInstalled;
-        }
         Err(error) => {
             tracing::debug!(%error, "lancement de nvidia-smi impossible");
             return Run::Failed;
         }
     };
     let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill().await;
         return Run::Failed;
     };
     let mut lines = BufReader::new(stdout).lines();
     let mut produced = false;
-    while let Ok(Some(line)) = lines.next_line().await {
-        if let Some(parsed) = parse_line(&line) {
-            latest.put(parsed, Instant::now());
-            produced = true;
+    loop {
+        match timeout(launch.silence, lines.next_line()).await {
+            Ok(Ok(Some(line))) => {
+                if let Some(parsed) = parse_line(&line) {
+                    latest.put(parsed, Instant::now());
+                    produced = true;
+                }
+            }
+            // Fin normale de la sortie : le processus s'est arrêté.
+            Ok(Ok(None)) => break,
+            // Erreur de lecture ou silence prolongé : le processus tourne peut-être encore ; on
+            // le tue pour le relancer.
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "lecture de nvidia-smi impossible, relance");
+                break;
+            }
+            Err(_) => {
+                tracing::warn!(
+                    silence_s = launch.silence.as_secs_f32(),
+                    "nvidia-smi muet, relance"
+                );
+                break;
+            }
         }
     }
+    // Tué s'il vit encore, puis attendu : jamais de processus zombie.
+    let _ = child.kill().await;
     let _ = child.wait().await;
     if produced { Run::Produced } else { Run::Failed }
 }
@@ -390,47 +505,192 @@ mod tests {
         assert_eq!(lines[0].load_percent, Some(20.0));
     }
 
-    #[tokio::test]
-    async fn a_missing_nvidia_smi_means_no_card_and_no_retry() {
-        let probe = NvidiaSmiProbe::start_command(
-            "hearth-test-no-such-program".into(),
-            vec![],
-            Duration::from_millis(10),
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(probe.detect().is_empty());
-        assert!(probe.sample().is_empty());
-        assert!(probe.task.is_finished(), "pas de relance sans l'outil");
+    /// Attend qu'une condition devienne vraie (délai large : seul un vrai blocage échoue).
+    async fn eventually(what: &str, condition: impl Fn() -> bool) {
+        let started = Instant::now();
+        while !condition() {
+            assert!(
+                started.elapsed() < Duration::from_secs(20),
+                "délai dépassé : {what}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
-    /// Un faux `nvidia-smi` : un script qui imprime deux cartes en boucle, une fois sur deux sans
-    /// mesure de température.
-    #[cfg(unix)]
+    fn fast(
+        locate: impl Fn() -> Option<OsString> + Send + Sync + 'static,
+        args: Vec<OsString>,
+    ) -> Launch {
+        Launch {
+            locate: Box::new(locate),
+            args,
+            first_restart: Duration::from_millis(20),
+            rescan: Duration::from_millis(10),
+            silence: Duration::from_secs(60),
+        }
+    }
+
+    #[test]
+    fn the_program_is_looked_up_by_variable_then_path_then_known_places() {
+        let join = |dir: &str| Path::new(dir).join("nvidia-smi");
+        let files = [
+            PathBuf::from("/explicit/smi"),
+            join("/bin-a"),
+            PathBuf::from("/run/current-system/sw/bin/nvidia-smi"),
+        ];
+        let exists = |path: &Path| files.iter().any(|file| file == path);
+        let path_of = |dirs: &[&str]| std::env::join_paths(dirs).unwrap();
+        let env = |explicit: Option<&'static str>, path: OsString| {
+            move |name: &str| match name {
+                "HEARTH_NVIDIA_SMI" => explicit.map(OsString::from),
+                "PATH" => Some(path.clone()),
+                _ => None,
+            }
+        };
+
+        let all = env(Some("/explicit/smi"), path_of(&["/bin-a"]));
+        assert_eq!(locate(&all, &exists), Some(PathBuf::from("/explicit/smi")));
+
+        // Variable qui pointe dans le vide : on continue la recherche.
+        let wrong = env(Some("/nowhere"), path_of(&["/bin-b", "/bin-a"]));
+        assert_eq!(locate(&wrong, &exists), Some(join("/bin-a")));
+
+        // Ni variable ni PATH utile (service NixOS) : emplacement connu.
+        let nixos = env(None, path_of(&["/bin-c"]));
+        assert_eq!(
+            locate(&nixos, &exists),
+            Some(PathBuf::from("/run/current-system/sw/bin/nvidia-smi"))
+        );
+
+        let nothing = |_: &Path| false;
+        assert_eq!(locate(&nixos, &nothing), None);
+    }
+
+    #[test]
+    fn a_card_seen_once_stays_in_the_identity_while_its_measures_go_away() {
+        let latest = Latest::default();
+        let now = Instant::now();
+        latest.put(parse_line("0, RTX, 10, 2, 3, 4").unwrap(), now);
+        latest.clear();
+        assert!(latest.fresh(now).is_empty());
+        let identities = latest.identities();
+        assert_eq!(identities.len(), 1);
+        assert_eq!(identities[0].name, "RTX");
+        // Elle reste aussi quand ses lignes vieillissent.
+        latest.put(parse_line("0, RTX, 10, 2, 3, 4").unwrap(), now);
+        assert!(latest.fresh(now + Duration::from_secs(30)).is_empty());
+        assert_eq!(latest.identities().len(), 1);
+    }
+
     #[tokio::test]
-    async fn a_running_process_feeds_the_samples_and_is_restarted_when_it_dies() {
-        let dir = tempfile::tempdir().unwrap();
-        let marker = dir.path().join("runs");
-        let script = format!(
-            "echo x >> {marker}; echo '0, GPU zero, 10, 100, 1000, 50'; echo '1, GPU un, 20, 200, 2000, [N/A]'; sleep 0.2",
+    async fn a_missing_nvidia_smi_means_no_card_and_is_looked_for_again() {
+        let searches = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let counter = searches.clone();
+        let probe = NvidiaSmiProbe::start_with(fast(
+            move || {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                None
+            },
+            vec![],
+        ));
+        eventually("nouvelle recherche", || {
+            searches.load(std::sync::atomic::Ordering::SeqCst) >= 3
+        })
+        .await;
+        assert!(probe.detect().is_empty());
+        assert!(probe.sample().is_empty());
+        assert!(!probe.task.is_finished(), "la recherche continue");
+    }
+
+    /// Un faux `nvidia-smi` : un script qui imprime deux cartes (la seconde sans température)
+    /// puis s'arrête.
+    #[cfg(unix)]
+    fn script(marker: &Path, tail: &str) -> Vec<OsString> {
+        let body = format!(
+            "echo $$ >> {marker}; echo '0, GPU zero, 10, 100, 1000, 50'; echo '1, GPU un, 20, 200, 2000, [N/A]'; {tail}",
             marker = marker.display()
         );
-        let probe = NvidiaSmiProbe::start_command(
-            "sh".into(),
-            vec!["-c".into(), script.into()],
-            Duration::from_millis(20),
-        );
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        vec!["-c".into(), body.into()]
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_program_that_appears_later_is_found_and_feeds_the_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("runs");
+        let searches = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let counter = searches.clone();
+        let probe = NvidiaSmiProbe::start_with(fast(
+            move || {
+                // Introuvable aux deux premières recherches, puis installé.
+                (counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 2)
+                    .then(|| OsString::from("sh"))
+            },
+            script(&marker, "sleep 30"),
+        ));
+        eventually("des mesures", || probe.sample().len() == 2).await;
         let readings = probe.sample();
-        assert_eq!(readings.len(), 2);
         assert_eq!(readings[0].temp_c, Some(50.0));
         assert_eq!(readings[1].temp_c, None);
         assert_eq!(
             probe.detect()[1].memory_total_bytes,
             Some(2000 * 1024 * 1024)
         );
-        // Le processus s'arrête de lui-même : il est relancé.
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        let runs = std::fs::read_to_string(&marker).unwrap().lines().count();
-        assert!(runs >= 2, "relancé : {runs} lancement(s)");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_process_that_dies_is_restarted_and_the_cards_stay_known_meanwhile() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("runs");
+        let mut launch = fast(|| Some(OsString::from("sh")), script(&marker, "sleep 0.2"));
+        // Relance lente : on observe l'intervalle entre l'arrêt du processus et la relance.
+        launch.first_restart = Duration::from_millis(600);
+        let probe = NvidiaSmiProbe::start_with(launch);
+        eventually("première mesure", || probe.sample().len() == 2).await;
+        eventually("processus arrêté, mesures retirées", || {
+            probe.sample().is_empty()
+        })
+        .await;
+        // Pendant la relance : plus de mesures, mais les cartes restent dans l'identité.
+        assert_eq!(probe.detect().len(), 2);
+        eventually("relancé", || {
+            std::fs::read_to_string(&marker).unwrap().lines().count() >= 2
+        })
+        .await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_silent_process_is_killed_then_restarted_without_leaving_a_zombie() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("runs");
+        let mut launch = fast(|| Some(OsString::from("sh")), script(&marker, "sleep 60"));
+        // Il imprime puis se tait : plus aucune ligne pendant 300 ms.
+        launch.silence = Duration::from_millis(300);
+        let probe = NvidiaSmiProbe::start_with(launch);
+        eventually("deux lancements", || {
+            std::fs::read_to_string(&marker)
+                .map(|runs| runs.lines().count() >= 2)
+                .unwrap_or(false)
+        })
+        .await;
+        // Le premier processus (`sh`, pid écrit dans le marqueur) n'existe plus.
+        let first_pid = std::fs::read_to_string(&marker)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_owned();
+        let alive = || {
+            std::process::Command::new("kill")
+                .args(["-0", &first_pid])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        };
+        eventually("processus tué et attendu", || !alive()).await;
+        drop(probe);
     }
 }
