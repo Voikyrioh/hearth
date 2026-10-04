@@ -903,3 +903,106 @@ async fn a_tracked_body_over_one_mebibyte_is_413_not_422() {
         .await;
     assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Balayage des succès : chaque route qui modifie laisse exactement une entrée « réussi »
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn every_modifying_route_leaves_exactly_one_success_entry() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let own = env.account_with_token(&api, "carl", Role::ReadOnly).await;
+    let role_victim = env.create("v-role", Role::ReadOnly).await;
+    let password_victim = env.create("v-pass", Role::ReadOnly).await;
+    let sessions_victim = env.create("v-sess", Role::ReadOnly).await;
+    let delete_victim = env.create("v-del", Role::ReadOnly).await;
+
+    let successes = |env: &support::Env| {
+        let pool = env.db.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_events WHERE outcome = 'ok'")
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    let mut swept = 0;
+    for endpoint in ENDPOINTS.iter().filter(|endpoint| endpoint.modifies()) {
+        // Une session fraîche pour la déconnexion (sa connexion s'écrit avant la mesure).
+        let logout_token = if endpoint.path == "/sessions/current" {
+            Some(api.token_of("marie").await)
+        } else {
+            None
+        };
+        let before = successes(&env).await;
+        let reply = match (endpoint.method.as_str(), endpoint.path) {
+            ("POST", "/sessions") => api.login("marie", PASSWORD).await,
+            ("DELETE", "/sessions/current") => {
+                api.delete("/sessions/current")
+                    .token(logout_token.as_deref().unwrap())
+                    .send()
+                    .await
+            }
+            ("PUT", "/me/password") => {
+                api.put("/me/password")
+                    .token(&own)
+                    .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
+                    .send()
+                    .await
+            }
+            ("POST", "/accounts") => {
+                api.post("/accounts")
+                    .token(&admin)
+                    .json(&json!({ "username": "nouveau", "password": OTHER_PASSWORD, "role": "readonly" }))
+                    .send()
+                    .await
+            }
+            ("PATCH", "/accounts/{id}") => {
+                api.patch(&format!("/accounts/{}", role_victim.id))
+                    .token(&admin)
+                    .json(&json!({ "role": "admin" }))
+                    .send()
+                    .await
+            }
+            ("DELETE", "/accounts/{id}") => {
+                api.delete(&format!("/accounts/{}", delete_victim.id))
+                    .token(&admin)
+                    .send()
+                    .await
+            }
+            ("PUT", "/accounts/{id}/password") => {
+                api.put(&format!("/accounts/{}/password", password_victim.id))
+                    .token(&admin)
+                    .json(&json!({ "password": OTHER_PASSWORD }))
+                    .send()
+                    .await
+            }
+            ("DELETE", "/accounts/{id}/sessions") => {
+                api.delete(&format!("/accounts/{}/sessions", sessions_victim.id))
+                    .token(&admin)
+                    .send()
+                    .await
+            }
+            (method, path) => panic!("route modifiante sans scénario de réussite : {method} {path}"),
+        };
+        assert!(
+            reply.status.is_success(),
+            "{} {} : {:?}",
+            endpoint.method,
+            endpoint.path,
+            reply.body
+        );
+        assert_eq!(
+            successes(&env).await - before,
+            1,
+            "{} {} doit laisser exactement une entrée réussie",
+            endpoint.method,
+            endpoint.path
+        );
+        swept += 1;
+    }
+    assert!(swept >= 8, "{swept} routes balayées");
+}

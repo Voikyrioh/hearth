@@ -25,6 +25,8 @@ Quand un compte lecture seule demande le journal ou son export, la réponse est 
 - `entrypoint::http::tests::every_route_that_modifies_or_is_reserved_has_a_journal_action`.
 
 ## Cas limites
+- Le message du `403` dépend de la route : celui du journal parle du journal, celui des routes de comptes de la gestion des comptes (`auth::forbidden_message`).
+- Les refus identiques répétés se regroupent (BR-AUDIT-007).
 - Un jeton absent ou invalide (401) n'écrit rien : l'appelant est inconnu.
 
 ## Règles liées

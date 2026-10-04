@@ -497,3 +497,75 @@ async fn no_password_nor_token_is_anywhere_in_the_journal_after_a_full_scenario(
 
     agent.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_failure_or_a_refusal_on_an_account_route_names_the_account() {
+    let env = env().await;
+    let marie = env.create("marie", Role::Admin).await;
+    let lucas = env.create("lucas", Role::ReadOnly).await;
+    let agent = https::start(&env).await;
+    let admin = token(&agent, "marie").await;
+    let readonly = token(&agent, "lucas").await;
+
+    // Échec : supprimer le dernier administrateur.
+    let refused = agent
+        .request("DELETE", &format!("/accounts/{}", marie.id))
+        .token(&admin)
+        .json(&json!({ "confirmation": "marie" }))
+        .send()
+        .await;
+    assert_eq!(refused.status, 409);
+    // Refus : un compte lecture seule vise le compte de marie.
+    env.clock.advance(time::Duration::seconds(61));
+    let denied = agent
+        .request("PUT", &format!("/accounts/{}/password", lucas.id))
+        .token(&readonly)
+        .json(&json!({ "password": OTHER_PASSWORD }))
+        .send()
+        .await;
+    assert_eq!(denied.status, 403);
+    // Compte inconnu : le motif de la route.
+    env.clock.advance(time::Duration::seconds(61));
+    let unknown = agent
+        .request("PATCH", "/accounts/INCONNU")
+        .token(&admin)
+        .json(&json!({ "role": "readonly" }))
+        .send()
+        .await;
+    assert_eq!(unknown.status, 404);
+
+    let listed = events(&agent, &admin, "?outcome=denied,failed").await;
+    let targets: Vec<(&str, &str)> = listed
+        .iter()
+        .map(|e| (e["action"].as_str().unwrap(), e["target"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        targets,
+        [
+            ("account.role", "/accounts/{id}"),
+            ("account.password", "lucas"),
+            ("account.delete", "marie"),
+        ]
+    );
+    // Le message du refus parle de ce que la route protège.
+    let journal = agent.request("GET", "/audit").token(&readonly).send().await;
+    assert!(
+        journal.body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("journal")
+    );
+    let accounts = agent
+        .request("GET", "/accounts")
+        .token(&readonly)
+        .send()
+        .await;
+    assert!(
+        accounts.body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("comptes")
+    );
+
+    agent.shutdown().await;
+}

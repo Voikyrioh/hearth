@@ -18,9 +18,12 @@ use axum::response::{IntoResponse, Response};
 use hearth_proto::error::ErrorCode;
 use hearth_proto::headers;
 
+use tracing::Instrument;
+
 use super::error::ErrorMark;
 use super::{Access, ApiError, AppState, operations};
 use crate::application::sessions::CurrentSession;
+use crate::domain::accounts::AccountId;
 use crate::domain::audit::{
     Actor, AuditAction, Origin, Outcome, Reason, RequestKind, Target, is_journaled,
 };
@@ -43,7 +46,7 @@ pub struct GuardState {
 impl GuardState {
     /// Consigne un refus ou un échec si la route a une action et si la règle du journal le veut
     /// (`domain::audit::is_journaled`). Un échec d'écriture est tracé, jamais subi par l'appelant.
-    async fn journal(&self, actor: &Actor, outcome: Outcome) {
+    async fn journal(&self, actor: &Actor, target: Target, outcome: Outcome) {
         let Some(action) = self.audit else {
             return;
         };
@@ -55,10 +58,57 @@ impl GuardState {
         if !is_journaled(kind, outcome.kind()) {
             return;
         }
-        self.app
-            .sink
-            .record(actor.clone(), action, Target::Route(self.route), outcome)
-            .await;
+        // Tâche détachée, dans le span de la requête : un client qui coupe n'annule pas l'écriture.
+        let sink = self.app.sink.clone();
+        let actor = actor.clone();
+        let write = tokio::spawn(
+            async move { sink.record(actor, action, target, outcome).await }.in_current_span(),
+        );
+        if let Err(error) = write.await {
+            tracing::error!(%error, "écriture du journal interrompue");
+        }
+    }
+
+    /// La cible d'une action sur `/accounts/{id}…` : le nom du compte, résolu **avant** l'action
+    /// (l'action peut supprimer le compte). Sans identifiant dans la route, ou compte inconnu : le
+    /// motif de la route.
+    async fn target_of(&self, parts: &Parts) -> Target {
+        if self.audit.is_none() {
+            return Target::Route(self.route);
+        }
+        let Some(id) = path_param(self.route, parts.uri.path(), "id") else {
+            return Target::Route(self.route);
+        };
+        match self.app.accounts.username_of(&AccountId::new(id)).await {
+            Ok(Some(username)) => Target::Account(username),
+            Ok(None) => Target::Route(self.route),
+            Err(error) => {
+                tracing::warn!(%error, "cible du journal non résolue");
+                Target::Route(self.route)
+            }
+        }
+    }
+}
+
+/// La valeur du paramètre `name` du chemin `path` d'après le motif de la route (`/accounts/{id}`) :
+/// les segments se comparent par la fin, que le chemin porte ou non son préfixe `/api/v1`.
+fn path_param(pattern: &str, path: &str, name: &str) -> Option<String> {
+    let wanted = format!("{{{name}}}");
+    let pattern: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    let path: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let offset = path.len().checked_sub(pattern.len())?;
+    pattern
+        .iter()
+        .position(|segment| *segment == wanted)
+        .and_then(|index| path.get(offset + index))
+        .map(|value| (*value).to_owned())
+}
+
+/// Le refus faute de droits, dit pour ce que la route protège.
+fn forbidden_message(action: Option<AuditAction>) -> &'static str {
+    match action {
+        Some(AuditAction::AuditRead) => "Tu n'as pas la permission de lire le journal d'activité",
+        _ => "Tu n'as pas la permission pour accéder à la gestion des comptes",
     }
 }
 
@@ -144,17 +194,15 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         Err(error) => return error.into_response(),
     };
     let actor = Actor::new(Some(session.account.username.clone()), origin_of(&parts));
+    let target = guard.target_of(&parts).await;
     if !allows(guard.access, &session) {
         // BR-AUDIT-003, BR-AUDIT-021 : toute action refusée faute de droits est consignée,
         // consultation du journal comprise.
         guard
-            .journal(&actor, Outcome::Denied(Reason::ReadOnly))
+            .journal(&actor, target, Outcome::Denied(Reason::ReadOnly))
             .await;
-        return ApiError::new(
-            ErrorCode::ForbiddenRole,
-            "Tu n'as pas la permission pour accéder à la gestion des comptes",
-        )
-        .into_response();
+        return ApiError::new(ErrorCode::ForbiddenRole, forbidden_message(guard.audit))
+            .into_response();
     }
     parts.extensions.insert(Requester(actor.clone()));
     parts.extensions.insert(Caller(session.clone()));
@@ -173,7 +221,7 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         && let Some(ErrorMark(code)) = response.extensions().get::<ErrorMark>().copied()
         && let Some(outcome) = failure_of(code)
     {
-        guard.journal(&actor, outcome).await;
+        guard.journal(&actor, target, outcome).await;
     }
     response
 }
@@ -262,6 +310,34 @@ mod tests {
         for access in [Access::Public, Access::Authenticated] {
             assert!(allows(access, &session(Role::ReadOnly)));
         }
+    }
+
+    #[test]
+    fn the_account_id_is_read_from_the_route_pattern_with_or_without_the_prefix() {
+        for path in ["/accounts/01ABC", "/api/v1/accounts/01ABC"] {
+            assert_eq!(
+                path_param("/accounts/{id}", path, "id").as_deref(),
+                Some("01ABC")
+            );
+        }
+        assert_eq!(
+            path_param(
+                "/accounts/{id}/password",
+                "/api/v1/accounts/01ABC/password",
+                "id"
+            )
+            .as_deref(),
+            Some("01ABC")
+        );
+        assert_eq!(path_param("/accounts", "/api/v1/accounts", "id"), None);
+        assert_eq!(path_param("/accounts/{id}", "/x", "id"), None);
+    }
+
+    #[test]
+    fn a_refusal_speaks_of_what_the_route_protects() {
+        assert!(forbidden_message(Some(AuditAction::AuditRead)).contains("journal"));
+        assert!(forbidden_message(Some(AuditAction::AccountCreate)).contains("comptes"));
+        assert!(forbidden_message(None).contains("comptes"));
     }
 
     #[test]

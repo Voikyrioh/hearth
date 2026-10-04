@@ -194,6 +194,16 @@ impl AccountService {
         Ok(AccountView::from(&account))
     }
 
+    /// L'identifiant d'un compte par son identifiant technique, `None` s'il n'existe pas (ou
+    /// plus) : pour nommer la cible d'une action dans le journal.
+    pub async fn username_of(&self, id: &AccountId) -> Result<Option<Username>, AccountError> {
+        Ok(self
+            .accounts
+            .find_by_id(id)
+            .await?
+            .map(|account| account.username))
+    }
+
     /// Les comptes avec leur nombre de sessions ouvertes, du plus ancien au plus récent.
     pub async fn list(&self) -> Result<Vec<AccountSummary>, AccountError> {
         let now = self.clock.now();
