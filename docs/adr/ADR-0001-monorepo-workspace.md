@@ -47,4 +47,4 @@ Un seul dépôt `voikyrioh/hearth` privé. Workspace Cargo à la racine : `crate
 
 - Cargo Workspaces : https://doc.rust-lang.org/cargo/reference/workspaces.html
 - Tauri + Cargo : https://tauri.app/en/v1/guides/getting-started/setup/integrate/
-- ADR globale 0001 (stack) : `J:/Dev/Projects/orga/global/docs/adr/ADR-0001-*.md`
+- ADR globale 0001 (stack) : `docs/adr/ADR-0001` du hub `orga-global` (privé)

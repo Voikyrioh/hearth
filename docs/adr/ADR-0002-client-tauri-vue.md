@@ -26,7 +26,7 @@ Client : coquille Tauri 2.x (Rust) + frontend Vue 3. Tous les appels réseau (é
 - `apps/desktop/src-tauri/main.rs` : initialise la fenêtre, zone notification, coffre, lecteur mises à jour.
 - `apps/desktop/src/main.ts` : initialise Vue 3, hydrate stores depuis état Tauri.
 - Tout appel réseau : `invoke()` → Tauri command → `crates/hearth-link` (async).
-- Secrets (mots de passe, tokens) : reçus par commande Tauri, stockés au coffre (plugin `tauri-plugin-stronghold`), jamais en localStorage.
+- Secrets (mots de passe, tokens) : reçus par commande Tauri, stockés dans le Gestionnaire d'identification Windows (crate `keyring`, côté cœur Rust), jamais en localStorage.
 
 ## Quand NE PAS l'appliquer / limites
 
