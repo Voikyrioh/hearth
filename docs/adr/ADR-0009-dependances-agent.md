@@ -1,6 +1,6 @@
 ---
 id: ADR-0009
-titre: Dépendances de l'agent : axum, axum-server, rustls + ring, rcgen, clap, toml, mac_address, tower-http, tracing, sqlx, argon2, zeroize, ulid, rpassword, async-trait
+titre: Dépendances de l'agent : axum, axum-server, rustls + ring, rcgen, clap, toml, mac_address, tower-http, tracing, sqlx, argon2, zeroize, ulid, rpassword, async-trait, sha2, subtle, getrandom
 type: librairie
 statut: acceptée
 date: 2026-10-04
@@ -35,10 +35,12 @@ HRT-02 pose le premier code de l'agent ; les tickets suivants repartiront de cet
 | `sqlx` 0.9 (`runtime-tokio`, `sqlite`, `migrate`, `macros`, `default-features = false`) | Base SQLite `hearth.db` : pool, migrations embarquées, requêtes `query!` vérifiées à la compilation | ADR-0006. `sqlite` compile `libsqlite3` embarquée avec `cc` (comme `ring`, pas de bibliothèque système). Pas de feature TLS, ni `any`, ni `chrono`/`uuid` (dates et identifiants sont des textes). Mode hors ligne : `.sqlx/` versionné. | Pas d'accès à SQLx hors de `infrastructure/sqlite/`. Requête construite dynamiquement : `query_as` non vérifiée, à justifier. |
 | `argon2` 0.6 | Hachage des mots de passe : Argon2id, m = 19 Mio, t = 2, p = 1 (OWASP) | Pur Rust. Paramètres inscrits dans le haché PHC : ils pourront évoluer sans casser les anciens hachés. | Calcul coûteux : toujours dans `spawn_blocking`, jamais dans le runtime asynchrone. |
 | `zeroize` 1 | Efface la mémoire des `Secret` à la libération | Minimal. | N'efface pas les copies faites avant la libération : ne pas cloner un secret. |
-| `ulid` 3 | Identifiants techniques des comptes et sessions (triables par date) | Format imposé par la conception technique. | Pas d'ULID pour les jetons de session (32 octets aléatoires, HRT-04). |
+| `ulid` 3 | Identifiants techniques des comptes et sessions (triables par date) | Format imposé par la conception technique. | Pas d'ULID pour les jetons de session (32 octets aléatoires du système, `getrandom`). |
 | `rpassword` 7 | Saisie du mot de passe sans écho au terminal (`account add`, `passwd`) | Windows et Unix. | Terminal requis : sans terminal, `HEARTH_ACCOUNT_PASSWORD`. Entrypoint seulement. |
 | `async-trait` 0.1 | Ports asynchrones utilisables en objet (`Arc<dyn AccountRepo>`) | Les traits asynchrones natifs ne sont pas utilisables en objet. | À retirer quand les objets-traits asynchrones seront stables. |
-| `sha2` (dans `hearth-proto`) | Empreinte SHA-256 | Pur Rust, partagé avec `hearth-link`. | Pas de cryptographie d'authentification avec cette crate seule. |
+| `sha2` (dans `hearth-proto` et `hearth-agent`) | Empreinte SHA-256 du certificat ; empreinte stockée des jetons de session (HRT-04) | Pur Rust, partagé avec `hearth-link`. | Pas de cryptographie d'authentification avec cette crate seule. Pas pour les mots de passe (Argon2id). |
+| `subtle` 2 | Comparaison en temps constant des empreintes de jetons (`TokenHash`) | Pur Rust, sans dépendance, `no_std`. | Seulement pour comparer des valeurs secrètes ou dérivées de secrets ; ailleurs `==` suffit. |
+| `getrandom` 0.4 | 32 octets aléatoires du système pour les jetons de session (`infrastructure/random.rs`) | Appel direct au générateur du système d'exploitation, déjà dans l'arbre (via argon2 et password-hash, même version 0.4), compile en musl. | Ne pas l'utiliser pour des identifiants techniques (ULID) ; un échec du système est une erreur, jamais un repli sur un hasard faible. |
 
 **Règle** : pas d'`aws-lc`, pas d'OpenSSL, aucune dépendance qui ne compile pas en musl. Une nouvelle dépendance de l'agent passe par une mise à jour de cette ADR.
 

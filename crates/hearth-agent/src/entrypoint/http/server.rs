@@ -77,7 +77,11 @@ pub fn spawn(
     let server = axum_server::from_tcp(listener)?
         .acceptor(acceptor)
         .handle(handle.clone());
-    let task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
+    let task = tokio::spawn(async move {
+        server
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+    });
     Ok(ServerHandle {
         local_addr,
         handle,
@@ -126,7 +130,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_server_that_ends_by_itself_is_an_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let server = started(dir.path());
         server.handle.shutdown();
         let result = server.run_until(std::future::pending()).await;
@@ -138,7 +142,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_requested_stop_is_not_an_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let server = started(dir.path());
         server
             .run_until(std::future::ready(()))

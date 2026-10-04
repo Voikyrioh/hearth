@@ -16,13 +16,14 @@ Le titulaire saisit l'ancien mot de passe puis le nouveau. Les autres sessions d
 ## Application (code)
 - `crates/hearth-agent/src/domain/sessions.rs::closure_on_password_change` (`PasswordChange::Own { current_session }` → `SessionClosure::AllExcept` ou `All`).
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::change_own_password` — vérifie l'ancien (`PasswordHasher::verify`), applique les règles au nouveau, change et ferme dans une transaction.
+- Route : `PUT /api/v1/me/password` (`entrypoint/http/accounts.rs::change_own_password`), permise à tout rôle.
 
 ## Vérification
 - Tests : `domain::sessions::tests::own_password_change_keeps_the_current_session`, `own_password_change_without_current_session_closes_everything` ; `crates/hearth-agent/tests/accounts_use_cases.rs::changing_your_own_password_keeps_only_the_current_session`, `a_wrong_old_password_changes_nothing`, `a_password_changed_between_verification_and_write_is_not_overwritten`.
 
 ## Cas limites
 - Ancien mot de passe faux → rien ne change, aucune session fermée.
-- Le mot de passe change entre la vérification de l'ancien et l'écriture → refus « Le mot de passe a été modifié entre-temps, réessaie », rien n'est écrasé (le haché vérifié est comparé au haché en base dans la transaction).
+- Le mot de passe change entre la vérification de l'ancien et l'écriture → refus « Le mot de passe a été modifié entre-temps, réessaye », rien n'est écrasé (le haché vérifié est comparé au haché en base dans la transaction).
 - Les routes HTTP (HRT-04) fourniront `current_session` ; la ligne de commande n'a pas de session et passe par `set_password`.
 
 ## Règles liées

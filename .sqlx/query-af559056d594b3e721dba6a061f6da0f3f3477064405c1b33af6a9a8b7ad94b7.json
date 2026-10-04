@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM revoked_sessions WHERE revoked_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "af559056d594b3e721dba6a061f6da0f3f3477064405c1b33af6a9a8b7ad94b7"
+}

@@ -37,7 +37,7 @@ pub enum AccountError {
     LastAdmin(#[from] LastAdminError),
     #[error("L'ancien mot de passe est incorrect")]
     OldPasswordIncorrect,
-    #[error("Le mot de passe a été modifié entre-temps, réessaie")]
+    #[error("Le mot de passe a été modifié entre-temps, réessaye")]
     PasswordChangedMeanwhile,
     #[error(transparent)]
     SelfDeletion(#[from] ConfirmationMismatch),
@@ -137,13 +137,21 @@ impl AccountService {
         };
 
         let mut tx = self.store.begin().await?;
-        if tx.find_by_username(&account.username).await?.is_some() {
+        if tx
+            .accounts()
+            .find_by_username(&account.username)
+            .await?
+            .is_some()
+        {
             return Err(AccountError::UsernameTaken);
         }
-        tx.insert(&account).await.map_err(|error| match error {
-            StoreError::Duplicate { .. } => AccountError::UsernameTaken,
-            other => AccountError::Store(other),
-        })?;
+        tx.accounts()
+            .insert(&account)
+            .await
+            .map_err(|error| match error {
+                StoreError::Duplicate { .. } => AccountError::UsernameTaken,
+                other => AccountError::Store(other),
+            })?;
         tx.commit().await?;
         Ok(AccountView::from(&account))
     }
@@ -180,10 +188,14 @@ impl AccountService {
     /// BR-ACCT-007 : change le rôle, sauf pour rétrograder le dernier administrateur.
     pub async fn change_role(&self, id: &AccountId, role: Role) -> Result<(), AccountError> {
         let mut tx = self.store.begin().await?;
-        let account = tx.find(id).await?.ok_or(AccountError::NotFound)?;
-        let admins = tx.count_admins().await?;
+        let account = tx
+            .accounts()
+            .find(id)
+            .await?
+            .ok_or(AccountError::NotFound)?;
+        let admins = tx.accounts().count_admins().await?;
         check_role_change(account.role, role, admins)?;
-        tx.set_role(id, role).await?;
+        tx.accounts().set_role(id, role).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -239,16 +251,21 @@ impl AccountService {
         confirmation: Option<&str>,
     ) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
-        let account = tx.find(id).await?.ok_or(AccountError::NotFound)?;
+        let account = tx
+            .accounts()
+            .find(id)
+            .await?
+            .ok_or(AccountError::NotFound)?;
         if acting == Some(id) {
             confirm_self_deletion(&account.username, confirmation.unwrap_or(""))?;
         }
-        let admins = tx.count_admins().await?;
+        let admins = tx.accounts().count_admins().await?;
         check_removal(account.role, admins)?;
         let closed = tx
-            .close_sessions(id, &closure_on_account_deletion())
+            .sessions()
+            .close(id, &closure_on_account_deletion(), self.clock.now())
             .await?;
-        tx.delete(id).await?;
+        tx.accounts().delete(id).await?;
         tx.commit().await?;
         Ok(closed)
     }
@@ -257,8 +274,14 @@ impl AccountService {
     /// Rend le nombre de sessions fermées.
     pub async fn revoke_sessions(&self, id: &AccountId) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
-        tx.find(id).await?.ok_or(AccountError::NotFound)?;
-        let closed = tx.close_sessions(id, &closure_on_revocation()).await?;
+        tx.accounts()
+            .find(id)
+            .await?
+            .ok_or(AccountError::NotFound)?;
+        let closed = tx
+            .sessions()
+            .close(id, &closure_on_revocation(), self.clock.now())
+            .await?;
         tx.commit().await?;
         Ok(closed)
     }
@@ -285,7 +308,11 @@ impl AccountService {
         verified_hash: Option<&Secret>,
     ) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
-        let current = tx.find(id).await?.ok_or(AccountError::NotFound)?;
+        let current = tx
+            .accounts()
+            .find(id)
+            .await?
+            .ok_or(AccountError::NotFound)?;
         // Ce qui a été vérifié doit être ce qu'on remplace : si le mot de passe a changé depuis,
         // on refuse plutôt que d'écraser un changement fait entre-temps.
         if let Some(verified) = verified_hash
@@ -293,9 +320,11 @@ impl AccountService {
         {
             return Err(AccountError::PasswordChangedMeanwhile);
         }
-        tx.set_password(id, hash, self.clock.now()).await?;
+        let now = self.clock.now();
+        tx.accounts().set_password(id, hash, now).await?;
         let closed = tx
-            .close_sessions(id, &closure_on_password_change(change))
+            .sessions()
+            .close(id, &closure_on_password_change(change), now)
             .await?;
         tx.commit().await?;
         Ok(closed)

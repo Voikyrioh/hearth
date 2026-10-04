@@ -7,6 +7,7 @@ pub mod config;
 pub mod data_dir;
 pub mod ids;
 pub mod logging;
+pub mod random;
 pub mod sqlite;
 pub mod system;
 pub mod tls;

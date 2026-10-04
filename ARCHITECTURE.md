@@ -13,12 +13,12 @@ Hearth est un système de monitoring de machines avec authentification et journa
 
 ```
 crates/
-├── hearth-proto/    → Types partagés, sans E/S ni framework : `api/` (corps de requêtes/réponses, `hello`), `error` (ErrorBody, ErrorCode), `fingerprint` (empreinte SHA-256, affichage 8 × 4), `product` (nom, port 7341), `version`
-├── hearth-agent/    → Serveur : identité TLS, route /hello, comptes (règles, SQLite, Argon2id, sous-commandes `account`) ; sessions, mesures, audit, mise à jour à venir [ARCHITECTURE.md]
-│   ├── domain/      → Règles métier pures : politique de création de l'identité, identifiant d'installation, comptes (`accounts/`), sessions, `Secret` (journal à venir)
-│   ├── application/ → Cas d'usage (`hello`, `accounts`) et `ports/` (IdentityStore, MachineInfo, AccountRepo, SessionRepo, PasswordHasher, Clock, IdGen)
-│   ├── infrastructure/ → Adaptateurs : `tls/` (certificat auto-signé, config rustls TLS 1.3), `config/` (agent.toml + HEARTH_*), `logging.rs` (texte ou JSON), `system/` (nom, MAC), `sqlite/` (hearth.db, migrations, dépôts SQLx), `argon2.rs` ; sondes à venir
-│   ├── entrypoint/  → `http/` (axum, routeur /api/v1, erreurs, journal des requêtes, serveur HTTPS), `cli.rs` (options et sous-commandes dont `account …`), `account.rs`, `terminal.rs` (saisie du mot de passe) et `signal.rs`
+├── hearth-proto/    → Types partagés, sans E/S ni framework : `api/` (corps de requêtes/réponses : `hello`, `sessions`, `accounts`, `operations`), `error` (ErrorBody, ErrorCode), `fingerprint` (empreinte SHA-256, affichage 8 × 4), `headers` (noms des en-têtes), `product` (nom, port 7341), `version`
+├── hearth-agent/    → Serveur : identité TLS, routes `/hello`, sessions, comptes, opérations (règles, SQLite, Argon2id, garde de rôle, sous-commandes `account`) ; mesures, audit, mise à jour à venir [ARCHITECTURE.md]
+│   ├── domain/      → Règles métier pures : politique de création de l'identité, identifiant d'installation, comptes (`accounts/`), sessions et jetons, verrouillage, compatibilité de versions, opérations, `Secret` (journal à venir)
+│   ├── application/ → Cas d'usage (`hello`, `accounts`, `sessions`, `operations`, `maintenance`) et `ports/` (un port de lecture et un port d'écriture par sujet, `Store` + `UnitOfWork`, PasswordHasher, Clock, IdGen, TokenGen…)
+│   ├── infrastructure/ → Adaptateurs : `tls/` (certificat auto-signé, config rustls TLS 1.3), `config/` (agent.toml + HEARTH_*), `logging.rs` (texte ou JSON), `system/` (nom, MAC), `sqlite/` (hearth.db, migrations, dépôts et unité de travail SQLx), `argon2.rs`, `data_dir.rs`, `random.rs` ; sondes à venir
+│   ├── entrypoint/  → `http/` (axum, table `ENDPOINTS`, couche d'accès et suivi posés depuis la table, couche de version, erreurs, serveur HTTPS), `cli.rs` (options et sous-commandes dont `account …`), `account.rs`, `terminal.rs` (saisie du mot de passe), `tasks.rs` (purge périodique) et `signal.rs`
 │   └── app.rs       → Racine de composition : charge la config, assemble adaptateurs, cas d'usage et serveur, exécute la commande
 ├── hearth-link/     → Bibliothèque cliente : épinglage, connexion, machine à états, reconnexion [ARCHITECTURE.md]
 └── xtask/           → Tâches build : binaire agent statique en conteneur, empaquetage, manifeste
@@ -33,7 +33,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 
 ## Flux principaux
 
-- **Première connexion** : Client → probe (TLS sans confiance) → `/hello` → empreinte cert → confirmation utilisateur → login (Argon2id) → jeton → WebSocket `/stream` (snapshot + mesures chaque seconde). Secrets au coffre Windows.
+- **Première connexion** : Client → probe (TLS sans confiance) → `/hello` → empreinte cert → confirmation utilisateur → `POST /sessions` (`X-Hearth-Api`, Argon2id, verrouillage progressif) → jeton (haché en base, session glissante 30 jours) → WebSocket `/stream` (snapshot + mesures chaque seconde, à venir). Secrets au coffre Windows.
 - **Action pendant coupure réseau** : Client envoie action avec `Idempotency-Key:ULID` → lien coupé → Client affiche « Reconnexion… » (après 3 s) → tentatives espacées (0,5 s → 30 s) → lien rétabli → vérification état opération → résultat ou relance.
 - **Mise à jour agent** : Admin → POST `/agent/update` → télécharge, vérifie minisign → superviseur lance détaché → arrêt ancien, échange binaires, redémarrage → vérification 60 s → succès ou rollback.
 
@@ -41,7 +41,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 
 - **Architecture** : Hexagonal pour `hearth-agent` et `hearth-link` ; `domain/` aucune I/O, `application/` orchestration, `infrastructure/` adaptateurs externes.
 - **Front** : Atomic design (atoms → molecules → organisms → pages). Aucune logique réseau dans la vue ; tout par événements Tauri typés.
-- **Erreurs API** : `{ error: { code, message, details } }`. Codes transverses : `401 UNAUTHENTICATED`, `401 SESSION_EXPIRED`, `401 SESSION_REVOKED`, `403 FORBIDDEN_ROLE`, `409 OPERATION_IN_PROGRESS`, `422 VALIDATION_ERROR`, `426 INCOMPATIBLE_VERSION`, `429 TOO_MANY_ATTEMPTS`, `500 INTERNAL_ERROR`.
+- **Erreurs API** : `{ error: { code, message, details } }`. Codes transverses : `401 UNAUTHENTICATED`, `401 INVALID_CREDENTIALS`, `401 SESSION_EXPIRED`, `401 SESSION_REVOKED`, `403 FORBIDDEN_ROLE`, `409 OPERATION_IN_PROGRESS`, `422 VALIDATION_ERROR`, `426 INCOMPATIBLE_VERSION`, `429 TOO_MANY_ATTEMPTS`, `500 INTERNAL_ERROR` ; comptes : `USERNAME_TAKEN`, `LAST_ADMIN`, `CONFLICT`, `WEAK_PASSWORD`, `WRONG_PASSWORD` ; `IDEMPOTENCY_KEY_REUSED` (422), `BUSY` (503).
 - **Logs** : Structurés sur stdout (repris par journald), niveau réglable.
 - **Règles métier** : Partagées `domain/` (aucune I/O), testées unitairement, documentées `docs/business-rules/`.
 
@@ -64,6 +64,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 | l'empreinte / le certificat de l'agent | `crates/hearth-proto/src/fingerprint.rs`, `domain/identity_policy.rs` et `infrastructure/tls/` |
 | un composant Vue | `docs/components/INDEX.md` puis `apps/desktop/src/components/` |
 | la résilience du lien | `crates/hearth-link/src/state_machine.rs` et `docs/adr/ADR-0007-machine-a-etats-du-lien.md` |
-| un cas d'authentification | `docs/adr/ADR-0005-tls-epingle.md` + `crates/hearth-agent/src/domain/accounts/` |
+| un cas d'authentification | `docs/adr/ADR-0005-tls-epingle.md`, `crates/hearth-agent/src/application/sessions.rs` et `domain/{sessions,lockout,session_token}.rs` |
+| qui a le droit d'appeler une route | `crates/hearth-agent/src/entrypoint/http/mod.rs` (`ENDPOINTS`) et `auth.rs` (`guard`, `Caller`) |
 | une table, une migration, une requête SQL | `crates/hearth-agent/migrations/` et `crates/hearth-agent/src/infrastructure/sqlite/` |
 | une règle de compte (identifiant, mot de passe, dernier administrateur) | `docs/business-rules/BR-ACCT-*.md` puis `domain/accounts/` |

@@ -7,6 +7,8 @@
 
 mod account_repo;
 mod convert;
+mod login_attempt_repo;
+mod operation_repo;
 mod session_repo;
 mod store;
 
@@ -20,6 +22,8 @@ use thiserror::Error;
 use super::data_dir;
 
 pub use account_repo::SqliteAccountRepo;
+pub use login_attempt_repo::SqliteLoginAttemptRepo;
+pub use operation_repo::SqliteOperationRepo;
 pub use session_repo::SqliteSessionRepo;
 pub use store::SqliteStore;
 
@@ -29,6 +33,11 @@ pub const DATABASE_FILE: &str = "hearth.db";
 pub enum DatabaseError {
     #[error("dossier de données {path} inaccessible : {source}")]
     DataDir {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("fichier de base {path} inaccessible : {source}")]
+    File {
         path: PathBuf,
         source: std::io::Error,
     },
@@ -55,7 +64,7 @@ impl Database {
         })?;
         let path = data_dir.join(DATABASE_FILE);
         // Le fichier de base (et donc ses compagnons -wal et -shm) n'est lisible que par nous.
-        data_dir::ensure_private_file(&path).map_err(|source| DatabaseError::DataDir {
+        data_dir::ensure_private_file(&path).map_err(|source| DatabaseError::File {
             path: path.clone(),
             source,
         })?;
@@ -95,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn opening_creates_the_file_in_wal_mode_with_foreign_keys() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let db = Database::open(&dir.path().join("nested").join("data"))
             .await
             .unwrap();
@@ -128,7 +137,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn the_directory_created_by_the_database_alone_is_private() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         let dir = root.path().join("data");
         Database::open(&dir).await.unwrap();
         assert_eq!(mode(&dir), 0o700);
@@ -137,7 +146,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn the_database_and_its_companions_are_private() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         let db = Database::open(root.path()).await.unwrap();
         sqlx::query("CREATE TABLE IF NOT EXISTS probe (x INTEGER)")
             .execute(db.pool())
@@ -152,9 +161,26 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn an_existing_wide_directory_and_database_are_tightened() {
+    async fn an_existing_wide_database_file_is_tightened() {
         use std::os::unix::fs::PermissionsExt;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
+        Database::open(root.path())
+            .await
+            .unwrap()
+            .pool()
+            .close()
+            .await;
+        let file = root.path().join(DATABASE_FILE);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Database::open(root.path()).await.unwrap();
+        assert_eq!(mode(&file), 0o600);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_existing_wide_directory_with_content_is_refused_not_tightened() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = crate::infrastructure::data_dir::private_tempdir();
         Database::open(root.path())
             .await
             .unwrap()
@@ -162,11 +188,10 @@ mod tests {
             .close()
             .await;
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-        let file = root.path().join(DATABASE_FILE);
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-        Database::open(root.path()).await.unwrap();
-        assert_eq!(mode(root.path()), 0o700);
-        assert_eq!(mode(&file), 0o600);
+        let error = Database::open(root.path()).await.unwrap_err();
+        assert!(matches!(error, DatabaseError::DataDir { .. }), "{error}");
+        assert!(error.to_string().contains("chmod 700"), "{error}");
+        assert_eq!(mode(root.path()), 0o755);
     }
 
     #[cfg(unix)]
@@ -174,7 +199,7 @@ mod tests {
     fn the_identity_store_after_the_database_keeps_the_directory_private() {
         use crate::application::ports::IdentityStore;
         use crate::infrastructure::tls::FileIdentityStore;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         let dir = root.path().join("data");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(Database::open(&dir)).unwrap();
@@ -187,7 +212,7 @@ mod tests {
     fn the_database_after_the_identity_store_keeps_the_directory_private() {
         use crate::application::ports::IdentityStore;
         use crate::infrastructure::tls::FileIdentityStore;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         let dir = root.path().join("data");
         FileIdentityStore::new(&dir).load_or_create().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -196,16 +221,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migrations_create_the_three_tables_and_are_idempotent() {
-        let dir = tempfile::tempdir().unwrap();
+    async fn a_problem_with_the_database_file_is_not_reported_as_the_data_directory() {
+        let dir = crate::infrastructure::data_dir::private_tempdir();
+        std::fs::create_dir(dir.path().join(DATABASE_FILE)).unwrap();
+        let error = Database::open(dir.path()).await.unwrap_err();
+        assert!(matches!(error, DatabaseError::File { .. }), "{error}");
+        assert!(error.to_string().contains(DATABASE_FILE), "{error}");
+    }
+
+    #[tokio::test]
+    async fn migrations_create_every_table_and_are_idempotent() {
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         Database::open(dir.path()).await.unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type = 'table'              AND name IN ('accounts', 'sessions', 'meta') ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type = 'table'              AND name IN ('accounts', 'sessions', 'meta', 'login_attempts', 'operations', 'revoked_sessions') ORDER BY name",
         )
         .fetch_all(db.pool())
         .await
         .unwrap();
-        assert_eq!(tables, ["accounts", "meta", "sessions"]);
+        assert_eq!(
+            tables,
+            [
+                "accounts",
+                "login_attempts",
+                "meta",
+                "operations",
+                "revoked_sessions",
+                "sessions"
+            ]
+        );
     }
 }

@@ -15,10 +15,10 @@ Même si le client est modifié ou contourné, l'agent refuse création, suppres
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/accounts/role.rs::Role::can_manage_accounts` — décision pure.
-- Application aux routes : à venir avec HRT-04 (une seule couche d'extraction, test de balayage de toutes les routes modifiantes).
+- `crates/hearth-agent/src/entrypoint/http/auth.rs::guard` — une seule couche, avant la lecture du corps ; `crates/hearth-agent/src/entrypoint/http/mod.rs::ENDPOINTS` — table de toutes les routes avec leur niveau d'accès, dont le routeur est construit et que le balayage parcourt.
 
 ## Vérification
-- Tests : `domain::accounts::role::tests::only_an_administrator_manages_accounts` ; test de balayage des routes à écrire dans HRT-04.
+- Tests : `domain::accounts::role::tests::only_an_administrator_manages_accounts` ; `tests/http_api.rs::every_admin_route_refuses_a_read_only_account_and_changes_nothing` (chaque route modifiante réservée : `403` pour lecture seule, rien ne change en base) et `::every_reserved_route_refuses_a_caller_without_a_session` (`401`) ; `::no_route_exists_outside_the_endpoint_table`.
 
 ## Cas limites
 - La ligne de commande n'a pas de rôle : elle s'exécute avec les droits du système sur le serveur (BR-ACCT-015).
@@ -28,3 +28,4 @@ Même si le client est modifié ou contourné, l'agent refuse création, suppres
 
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
+- 2026-10-04 — appliquée aux routes (HRT-04).

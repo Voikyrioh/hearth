@@ -16,6 +16,7 @@ Un administrateur (ou la ligne de commande) qui définit le mot de passe d'un co
 ## Application (code)
 - `crates/hearth-agent/src/domain/sessions.rs::closure_on_password_change` (`PasswordChange::ByAdmin` → `SessionClosure::All`).
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::set_password`.
+- Route : `PUT /api/v1/accounts/{id}/password` (`entrypoint/http/accounts.rs::set_password`, `docs/open-api/accounts.md`) ; le jeton fermé répond ensuite `SESSION_REVOKED` (BR-RESIL-014).
 
 ## Vérification
 - Tests : `domain::sessions::tests::admin_password_change_closes_every_session` ; `crates/hearth-agent/tests/accounts_use_cases.rs::an_administrator_password_change_closes_every_session`.

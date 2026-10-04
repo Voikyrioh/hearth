@@ -1,21 +1,30 @@
 //! Ports : interfaces que l'application attend de l'infrastructure.
+//!
+//! Un sujet (comptes, sessions, tentatives de connexion, opérations) a un fichier qui porte son
+//! port de lecture (`*Repo`, sur le pool) et son port d'écriture (`*Tx`, dans l'unité de travail).
 
 mod account_repo;
 mod clock;
 mod id_gen;
 mod identity_store;
+mod login_attempt_repo;
 mod machine_info;
+mod operation_repo;
 mod password_hasher;
 mod session_repo;
 mod store_error;
+mod token_gen;
 mod unit_of_work;
 
-pub use account_repo::AccountRepo;
+pub use account_repo::{AccountRepo, AccountTx};
 pub use clock::Clock;
 pub use id_gen::IdGen;
 pub use identity_store::{IdentityError, IdentityStore, PublicIdentity};
+pub use login_attempt_repo::{LoginAttemptRepo, LoginAttemptTx};
 pub use machine_info::MachineInfo;
+pub use operation_repo::{OperationRepo, OperationTx};
 pub use password_hasher::{HashError, PasswordHasher};
-pub use session_repo::SessionRepo;
+pub use session_repo::{SessionRepo, SessionTx};
 pub use store_error::StoreError;
+pub use token_gen::{TokenGen, TokenGenError};
 pub use unit_of_work::{Store, UnitOfWork};
