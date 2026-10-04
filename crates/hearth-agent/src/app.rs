@@ -4,16 +4,18 @@
 use std::future::Future;
 use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
+use std::time::Duration;
 
 use thiserror::Error;
 
 use crate::application::accounts::AccountService;
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
+use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    Clock, HashError, IdGen, IdentityError, IdentityStore, PasswordHasher, PublicIdentity, Store,
-    StoreError, TokenGen,
+    AuditFeed, Clock, GpuProbe, HashError, IdGen, IdentityError, IdentityStore, PasswordHasher,
+    PublicIdentity, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::sessions::SessionService;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -22,7 +24,9 @@ use crate::entrypoint::http::{self, AppState, ServerError, ServerHandle};
 use crate::entrypoint::signal::shutdown_signal;
 use crate::entrypoint::tasks::{self, BackgroundTask};
 use crate::entrypoint::terminal::TerminalPasswords;
+use crate::entrypoint::ws::{StreamContext, StreamSettings};
 use crate::infrastructure::argon2::Argon2Hasher;
+use crate::infrastructure::audit_feed::NoAuditFeed;
 use crate::infrastructure::clock::SystemClock;
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::data_dir;
@@ -32,7 +36,8 @@ use crate::infrastructure::sqlite::{
     Database, DatabaseError, SqliteAccountRepo, SqliteLoginAttemptRepo, SqliteOperationRepo,
     SqliteSessionRepo, SqliteStore,
 };
-use crate::infrastructure::system::SystemMachineInfo;
+use crate::infrastructure::system::gpu;
+use crate::infrastructure::system::{SysinfoProbe, SystemMachineInfo};
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
 
 #[derive(Debug, Error)]
@@ -81,6 +86,36 @@ impl Adapters {
     }
 }
 
+/// Ce qui mesure la machine et alimente le flux temps réel : sondes, cadence d'échantillonnage,
+/// flux d'audit, délais du flux. Ceux de production par défaut ; les tests injectent des sondes
+/// simulées, une cadence rapide et des délais courts.
+pub struct Metering {
+    pub system: Arc<dyn SystemProbe>,
+    pub gpu: Arc<dyn GpuProbe>,
+    /// Horloge qui date les échantillons.
+    pub clock: Arc<dyn Clock>,
+    pub period: Duration,
+    /// Événements du journal pour le sujet `audit` du flux (vide tant que le journal n'est pas
+    /// branché).
+    pub audit: Arc<dyn AuditFeed>,
+    pub stream: StreamSettings,
+}
+
+impl Metering {
+    /// Sondes de la machine réelle. À appeler dans un runtime Tokio (la sonde NVIDIA lance son
+    /// sous-processus).
+    pub fn production() -> Self {
+        Self {
+            system: Arc::new(SysinfoProbe::new()),
+            gpu: gpu::platform_probe(),
+            clock: Arc::new(SystemClock),
+            period: tasks::SAMPLE_PERIOD,
+            audit: Arc::new(NoAuditFeed),
+            stream: StreamSettings::default(),
+        }
+    }
+}
+
 /// Les cas d'usage assemblés sur une base ouverte.
 pub struct Services {
     pub accounts: Arc<AccountService>,
@@ -95,6 +130,8 @@ pub struct RunningAgent {
     pub identity: PublicIdentity,
     /// Purge périodique : arrêtée avec l'agent.
     pub purge: BackgroundTask,
+    /// Échantillonneur des mesures : arrêté avec l'agent.
+    pub sampler: BackgroundTask,
 }
 
 impl RunningAgent {
@@ -103,6 +140,7 @@ impl RunningAgent {
         let Self {
             server,
             purge: _purge,
+            sampler: _sampler,
             ..
         } = self;
         server.run_until(stop).await
@@ -168,11 +206,22 @@ pub async fn start(config: &AgentConfig) -> Result<RunningAgent, AppError> {
     start_with(config, &database, &Adapters::production()?).await
 }
 
-/// Démarre le serveur sur une base déjà ouverte (migrations appliquées) avec ces adaptateurs.
+/// Démarre le serveur sur une base déjà ouverte (migrations appliquées) avec ces adaptateurs et
+/// les sondes de la machine réelle.
 pub async fn start_with(
     config: &AgentConfig,
     database: &Database,
     adapters: &Adapters,
+) -> Result<RunningAgent, AppError> {
+    start_with_metering(config, database, adapters, Metering::production()).await
+}
+
+/// Comme `start_with`, avec ces sondes et ces délais.
+pub async fn start_with_metering(
+    config: &AgentConfig,
+    database: &Database,
+    adapters: &Adapters,
+    metering: Metering,
 ) -> Result<RunningAgent, AppError> {
     let store = FileIdentityStore::new(&config.data_dir);
     let identity = load_identity(&store)?;
@@ -193,18 +242,30 @@ pub async fn start_with(
         config.managed,
         &SystemMachineInfo,
     );
+    let metrics = Arc::new(MetricsService::new(
+        metering.system,
+        metering.gpu,
+        metering.clock,
+    ));
+    let stream = StreamContext::new(metering.audit, metering.stream);
+    let closing = stream.clone();
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
         sessions: services.sessions,
         operations: services.operations,
+        metrics: metrics.clone(),
+        stream,
     });
-    let server = http::spawn(listener, tls, router)?;
+    // À l'arrêt, les flux ouverts se ferment d'eux-mêmes avant que le serveur n'attende les connexions.
+    let server = http::spawn(listener, tls, router)?.on_shutdown(move || closing.begin_shutdown());
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
+    let sampler = tasks::spawn_sampler(metrics, metering.period);
     Ok(RunningAgent {
         server,
         identity,
         purge,
+        sampler,
     })
 }
 

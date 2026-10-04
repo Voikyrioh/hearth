@@ -5,7 +5,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use hearth_agent::app::{self, Adapters, RunningAgent};
+use hearth_agent::app::{self, Adapters, Metering, RunningAgent};
 use hearth_agent::infrastructure::config::AgentConfig;
 use hearth_agent::infrastructure::ids::UlidGen;
 use hearth_agent::infrastructure::random::OsTokenGen;
@@ -58,7 +58,7 @@ impl ServerCertVerifier for AcceptAnyCertificate {
     }
 }
 
-fn client_config() -> Arc<ClientConfig> {
+pub fn client_config() -> Arc<ClientConfig> {
     let provider = Arc::new(ring::default_provider());
     let config = ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -96,6 +96,11 @@ pub struct Agent {
 }
 
 pub async fn start(env: &Env) -> Agent {
+    start_metered(env, super::probe::metering()).await
+}
+
+/// Comme `start`, avec ces sondes (simulées), cette cadence et ces délais de flux.
+pub async fn start_metered(env: &Env, metering: Metering) -> Agent {
     let config = AgentConfig {
         listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
         port: 0,
@@ -108,7 +113,7 @@ pub async fn start(env: &Env) -> Agent {
         ids: Arc::new(UlidGen),
         tokens: Arc::new(OsTokenGen),
     };
-    let running = app::start_with(&config, &env.db, &adapters)
+    let running = app::start_with_metering(&config, &env.db, &adapters, metering)
         .await
         .expect("démarrage");
     let addr = running.server.local_addr();

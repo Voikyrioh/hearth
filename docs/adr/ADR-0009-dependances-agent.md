@@ -61,7 +61,7 @@ HRT-02 pose le premier code de l'agent ; les tickets suivants repartiront de cet
 
 - Le conteneur `rust:alpine` de `cargo xtask agent` doit fournir un compilateur C pour `ring`.
 - SQLx en mode hors ligne : `cargo sqlx prepare` régénère `.sqlx/` (voir `CLAUDE.md`) ; la CI compile sans `DATABASE_URL`.
-- Dépendances de test seulement : `tempfile` (dossiers temporaires), `tokio-rustls` (client TLS des tests d'intégration), `tower` (`oneshot` sur le routeur), `tokio-tungstenite` (client du flux).
+- Dépendances de test seulement : `tempfile` (dossiers temporaires), `tokio-rustls` (client TLS des tests d'intégration), `tower` (`oneshot` sur le routeur), `tokio-tungstenite` et `futures-util` (`sink`, `std` : lire et écrire sur le client du flux).
 - `nvidia-smi` n'est **pas** une dépendance de compilation : c'est un outil du système, lancé en sous-processus (ADR-0003). Absent, la machine n'a simplement pas de carte NVIDIA mesurée.
 - Les tests d'intégration activent `tls12` côté client pour prouver le refus de TLS 1.2.
 

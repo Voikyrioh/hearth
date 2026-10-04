@@ -826,6 +826,7 @@ dependencies = [
  "axum",
  "axum-server",
  "clap",
+ "futures-util",
  "gethostname",
  "getrandom 0.4.3",
  "hearth-proto",

@@ -114,7 +114,7 @@ mod tests {
 
     use super::*;
     use crate::domain::machine::{CpuIdentity, GpuIdentity, MachineIdentity, OsIdentity};
-    use crate::domain::metrics::{GpuReading, MemoryUsage, SystemSample};
+    use crate::domain::metrics::{DiskUsage, GpuReading, MemoryUsage, SystemSample};
 
     struct ManualClock(Mutex<OffsetDateTime>);
 
@@ -142,6 +142,8 @@ mod tests {
         calls: AtomicU32,
         fail_on: Option<u32>,
         panic_on: Option<u32>,
+        /// Disques montés à cet instant : le test les change entre deux échantillons.
+        disks: Mutex<Vec<DiskUsage>>,
     }
 
     impl SystemProbe for FakeProbe {
@@ -183,7 +185,7 @@ mod tests {
                     used_bytes: 1,
                     total_bytes: 1_000,
                 },
-                disks: vec![],
+                disks: self.disks.lock().unwrap().clone(),
                 net: None,
                 temps: vec![],
             })
@@ -336,6 +338,42 @@ mod tests {
         ));
         assert_eq!(slow.recv().await.unwrap().cpu, 4.0);
         assert_eq!(slow.recv().await.unwrap().cpu, 5.0);
+    }
+
+    #[tokio::test]
+    async fn a_mounted_or_removed_disk_shows_in_the_next_sample() {
+        let clock = ManualClock::new();
+        let probe = Arc::new(FakeProbe::default());
+        let metrics = MetricsService::new(probe.clone(), Arc::new(FakeGpu(vec![])), clock.clone());
+        let disk = |mount: &str| DiskUsage {
+            name: format!("dev{mount}"),
+            mount: mount.into(),
+            used_bytes: 1,
+            total_bytes: 2,
+        };
+        let mounts = |window| -> Vec<Vec<String>> {
+            metrics
+                .history(window)
+                .iter()
+                .map(|sample| sample.disks.iter().map(|d| d.mount.clone()).collect())
+                .collect()
+        };
+
+        *probe.disks.lock().unwrap() = vec![disk("/")];
+        metrics.sample_once().await.unwrap();
+        clock.advance(1);
+        // Un disque est monté.
+        *probe.disks.lock().unwrap() = vec![disk("/"), disk("/mnt/usb")];
+        metrics.sample_once().await.unwrap();
+        clock.advance(1);
+        // Puis retiré.
+        *probe.disks.lock().unwrap() = vec![disk("/")];
+        metrics.sample_once().await.unwrap();
+        clock.advance(1);
+        assert_eq!(
+            mounts(HistoryWindow::OneMinute),
+            [vec!["/"], vec!["/", "/mnt/usb"], vec!["/"]]
+        );
     }
 
     #[tokio::test]
