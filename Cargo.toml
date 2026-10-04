@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/hearth-proto", "crates/hearth-agent", "crates/hearth-link", "xtask"]
+members = ["crates/hearth-proto", "crates/hearth-agent", "crates/hearth-link", "xtask", "apps/desktop/src-tauri"]
+# La coquille Tauri exige les bibliothèques système de WebView2/GTK : hors des membres par défaut.
+# Sous Linux, `cargo` sans `--workspace` l'ignore ; avec `--workspace`, ajouter `--exclude hearth-desktop`.
+default-members = ["crates/hearth-proto", "crates/hearth-agent", "crates/hearth-link", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
