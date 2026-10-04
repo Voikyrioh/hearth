@@ -9,6 +9,8 @@ pub enum OperationStatus {
     Running,
     Succeeded,
     Failed,
+    /// L'agent s'est arrêté pendant l'exécution : on ne sait pas si elle a eu lieu.
+    Interrupted,
 }
 
 /// Réponse de `GET /operations/{id}`.

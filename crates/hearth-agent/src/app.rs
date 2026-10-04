@@ -13,7 +13,7 @@ use crate::application::maintenance::MaintenanceService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
     Clock, HashError, IdGen, IdentityError, IdentityStore, PasswordHasher, PublicIdentity, Store,
-    TokenGen,
+    StoreError, TokenGen,
 };
 use crate::application::sessions::SessionService;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -51,6 +51,8 @@ pub enum AppError {
     Account(#[from] AccountCliError),
     #[error(transparent)]
     Server(#[from] ServerError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
     #[error("ouverture du port {addr} impossible : {source}")]
     Bind {
         addr: SocketAddr,
@@ -163,11 +165,11 @@ pub fn account_service(database: &Database) -> Result<Arc<AccountService>, AppEr
 /// Ouvre le port et démarre le serveur HTTPS, avec les adaptateurs de production.
 pub async fn start(config: &AgentConfig) -> Result<RunningAgent, AppError> {
     let database = Database::open(&config.data_dir).await?;
-    start_with(config, &database, &Adapters::production()?)
+    start_with(config, &database, &Adapters::production()?).await
 }
 
 /// Démarre le serveur sur une base déjà ouverte (migrations appliquées) avec ces adaptateurs.
-pub fn start_with(
+pub async fn start_with(
     config: &AgentConfig,
     database: &Database,
     adapters: &Adapters,
@@ -180,6 +182,12 @@ pub fn start_with(
     let listener = TcpListener::bind(addr).map_err(|source| AppError::Bind { addr, source })?;
 
     let services = services(database, adapters);
+    // Aucune exécution ne survit à un arrêt : les opérations restées « en cours » deviennent
+    // « interrompues » avant d'accepter la moindre requête.
+    let interrupted = services.operations.interrupt_running().await?;
+    if interrupted > 0 {
+        tracing::warn!(interrupted, "opérations interrompues par l'arrêt précédent");
+    }
     let hello = HelloService::new(
         identity.install_id.clone(),
         config.managed,

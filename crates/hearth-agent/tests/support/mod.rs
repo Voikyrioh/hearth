@@ -70,6 +70,9 @@ pub struct CountingHasher {
     inner: Argon2Hasher,
     pub verifications: AtomicU64,
     pub against_decoy: AtomicU64,
+    /// Attente (ms) avant chaque vérification : simule un calcul long pour couper le client
+    /// pendant l'exécution.
+    pub delay_ms: AtomicU64,
 }
 
 impl CountingHasher {
@@ -78,6 +81,7 @@ impl CountingHasher {
             inner: Argon2Hasher::with_cost(8, 1, 1).expect("paramètres"),
             verifications: AtomicU64::new(0),
             against_decoy: AtomicU64::new(0),
+            delay_ms: AtomicU64::new(0),
         }
     }
 
@@ -98,6 +102,10 @@ impl PasswordHasher for CountingHasher {
 
     async fn verify(&self, password: &Secret, hash: &Secret) -> Result<bool, HashError> {
         self.verifications.fetch_add(1, Ordering::SeqCst);
+        let delay = self.delay_ms.load(Ordering::SeqCst);
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
         if hash.expose() == self.inner.decoy_hash().expose() {
             self.against_decoy.fetch_add(1, Ordering::SeqCst);
         }

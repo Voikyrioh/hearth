@@ -5,11 +5,10 @@
 
 mod support;
 
-use hearth_agent::application::operations::Begin;
 use hearth_agent::application::ports::Clock;
 use hearth_agent::application::sessions::{AuthError, LoginError};
 use hearth_agent::domain::accounts::Role;
-use hearth_agent::domain::operations::OperationKey;
+use hearth_agent::domain::operations::{OperationKey, OperationStatus, Replay, RequestFingerprint};
 use hearth_agent::domain::sessions::{LIFETIME, SessionEnd};
 use support::{PASSWORD, client, client_at, env, secret};
 use time::Duration;
@@ -421,13 +420,14 @@ async fn the_purge_removes_expired_sessions_old_revocations_idle_counters_and_ol
         .login("marie", secret(WRONG), &client_at("10.9.9.9"))
         .await;
     let key = OperationKey::parse("OLDKEY").unwrap();
-    assert!(matches!(
+    let request = RequestFingerprint::of("PUT", "/x", b"");
+    assert_eq!(
         env.operations
-            .begin(&key, &marie.id, "PUT /x")
+            .begin(&key, &marie.id, "PUT /x", &request)
             .await
             .unwrap(),
-        Begin::Execute
-    ));
+        Replay::Execute
+    );
     env.service.revoke_sessions(&paul.id).await.unwrap();
 
     // 2 h plus tard : la session de test (1 h) est expirée, rien d'autre n'est périmé.
@@ -466,52 +466,32 @@ async fn the_purge_removes_expired_sessions_old_revocations_idle_counters_and_ol
 async fn an_operation_key_runs_once_and_replays_its_result() {
     let env = env().await;
     let marie = env.create("marie", Role::Admin).await;
-    let paul = env.create("paul", Role::Admin).await;
     let key = OperationKey::parse("01J9ZY0G3Q8M2K6W4T7V5N1B9D").unwrap();
+    let request = RequestFingerprint::of("PUT", "/me/password", b"{}");
+    let begin = || {
+        env.operations
+            .begin(&key, &marie.id, "PUT /me/password", &request)
+    };
 
-    assert!(matches!(
-        env.operations
-            .begin(&key, &marie.id, "PUT /me/password")
-            .await
-            .unwrap(),
-        Begin::Execute
-    ));
-    assert!(matches!(
-        env.operations
-            .begin(&key, &marie.id, "PUT /me/password")
-            .await
-            .unwrap(),
-        Begin::InProgress
-    ));
-    assert!(matches!(
-        env.operations
-            .begin(&key, &paul.id, "PUT /me/password")
-            .await
-            .unwrap(),
-        Begin::ForeignKey
-    ));
-    assert!(env.operations.find(&key, &paul.id).await.unwrap().is_none());
+    assert_eq!(begin().await.unwrap(), Replay::Execute);
+    assert_eq!(begin().await.unwrap(), Replay::InProgress);
 
     env.operations
-        .finish(&key, true, r#"{"status":200,"body":{}}"#)
+        .finish(&marie.id, &key, true, r#"{"status":200,"body":{}}"#)
         .await
         .unwrap();
-    let Begin::Replay(replayed) = env
-        .operations
-        .begin(&key, &marie.id, "PUT /me/password")
-        .await
-        .unwrap()
-    else {
+    let Replay::Return(replayed) = begin().await.unwrap() else {
         panic!("attendu : rejeu");
     };
     assert_eq!(
         replayed.result_json.as_deref(),
         Some(r#"{"status":200,"body":{}}"#)
     );
+    assert_eq!(replayed.status, OperationStatus::Succeeded);
     let found = env.operations.find(&key, &marie.id).await.unwrap().unwrap();
     assert_eq!(found.kind, "PUT /me/password");
 
-    env.operations.discard(&key).await.unwrap();
+    env.operations.discard(&marie.id, &key).await.unwrap();
     assert!(
         env.operations
             .find(&key, &marie.id)
@@ -519,6 +499,101 @@ async fn an_operation_key_runs_once_and_replays_its_result() {
             .unwrap()
             .is_none()
     );
+}
+
+#[tokio::test]
+async fn a_key_is_bound_to_its_request_and_scoped_by_account() {
+    let env = env().await;
+    let marie = env.create("marie", Role::Admin).await;
+    let paul = env.create("paul", Role::Admin).await;
+    let key = OperationKey::parse("SHARED").unwrap();
+    let put = RequestFingerprint::of("PUT", "/accounts/B/password", b"{}");
+    let delete = RequestFingerprint::of("DELETE", "/accounts/B", b"");
+
+    assert_eq!(
+        env.operations
+            .begin(&key, &marie.id, "PUT", &put)
+            .await
+            .unwrap(),
+        Replay::Execute
+    );
+    env.operations
+        .finish(&marie.id, &key, true, r#"{"status":200,"body":null}"#)
+        .await
+        .unwrap();
+    // Même clé, autre requête : refus, rien n'est enregistré ni exécuté.
+    assert_eq!(
+        env.operations
+            .begin(&key, &marie.id, "DELETE", &delete)
+            .await
+            .unwrap(),
+        Replay::KeyReused
+    );
+    // Un autre compte peut choisir la même clé : elle est à lui, indépendante.
+    assert_eq!(
+        env.operations
+            .begin(&key, &paul.id, "DELETE", &delete)
+            .await
+            .unwrap(),
+        Replay::Execute
+    );
+    assert!(
+        env.operations
+            .find(&key, &marie.id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let own = env.operations.find(&key, &paul.id).await.unwrap().unwrap();
+    assert_eq!(own.status, OperationStatus::Running);
+}
+
+#[tokio::test]
+async fn running_operations_become_interrupted_at_startup_and_are_not_replayed() {
+    let env = env().await;
+    let marie = env.create("marie", Role::Admin).await;
+    let running = OperationKey::parse("RUNNING").unwrap();
+    let done = OperationKey::parse("DONE").unwrap();
+    let request = RequestFingerprint::of("PUT", "/x", b"");
+    env.operations
+        .begin(&running, &marie.id, "PUT /x", &request)
+        .await
+        .unwrap();
+    env.operations
+        .begin(&done, &marie.id, "PUT /x", &request)
+        .await
+        .unwrap();
+    env.operations
+        .finish(&marie.id, &done, true, r#"{"status":200,"body":null}"#)
+        .await
+        .unwrap();
+
+    assert_eq!(env.operations.interrupt_running().await.unwrap(), 1);
+    let interrupted = env
+        .operations
+        .find(&running, &marie.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(interrupted.status, OperationStatus::Interrupted);
+    assert!(interrupted.finished_at.is_some());
+    assert_eq!(
+        env.operations
+            .find(&done, &marie.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        OperationStatus::Succeeded
+    );
+    assert_eq!(
+        env.operations
+            .begin(&running, &marie.id, "PUT /x", &request)
+            .await
+            .unwrap(),
+        Replay::Interrupted
+    );
+    assert_eq!(env.operations.interrupt_running().await.unwrap(), 0);
 }
 
 #[tokio::test]

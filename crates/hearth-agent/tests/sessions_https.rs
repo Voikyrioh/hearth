@@ -279,3 +279,101 @@ async fn a_read_only_account_cannot_manage_accounts_over_tls() {
     assert_eq!(env.service.list().await.unwrap().len(), 1);
     agent.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_client_that_cuts_before_the_answer_still_gets_its_result_recorded() {
+    let env = env().await;
+    env.create("lucas", Role::ReadOnly).await;
+    let agent = https::start(&env).await;
+    let token = token(&agent, "lucas").await;
+    let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
+
+    // Le calcul du mot de passe dure 300 ms : le client coupe pendant l'exécution.
+    env.hasher
+        .delay_ms
+        .store(300, std::sync::atomic::Ordering::SeqCst);
+    agent
+        .request("PUT", "/me/password")
+        .token(&token)
+        .header("idempotency-key", KEY)
+        .json(&body)
+        .send_and_cut()
+        .await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    env.hasher
+        .delay_ms
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+
+    // Le client revient : l'opération est terminée (jamais « en cours » pour toujours).
+    let mut status = String::new();
+    for _ in 0..200 {
+        let state = agent
+            .request("GET", &format!("/operations/{KEY}"))
+            .token(&token)
+            .send()
+            .await;
+        if state.status == 200 {
+            status = state.body["status"].as_str().unwrap().to_owned();
+            if status != "running" {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(status, "succeeded");
+    assert_eq!(
+        login(&agent, "lucas", OTHER_PASSWORD).await.status,
+        201,
+        "le changement a eu lieu"
+    );
+
+    // Et la même clé rend ce résultat sans ré-exécuter.
+    let replay = agent
+        .request("PUT", "/me/password")
+        .token(&token)
+        .header("idempotency-key", KEY)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(replay.status, 200);
+    assert_eq!(replay.header("idempotent-replayed"), Some("true"));
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_operation_left_running_by_a_previous_run_is_interrupted_at_startup() {
+    use hearth_agent::domain::operations::{OperationKey, RequestFingerprint};
+
+    let env = env().await;
+    let lucas = env.create("lucas", Role::ReadOnly).await;
+    let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
+    let key = OperationKey::parse(KEY).unwrap();
+    let request = RequestFingerprint::of("PUT", "/me/password", body.to_string().as_bytes());
+    env.operations
+        .begin(&key, &lucas.id, "PUT /me/password", &request)
+        .await
+        .unwrap();
+
+    let agent = https::start(&env).await;
+    let token = token(&agent, "lucas").await;
+    let state = agent
+        .request("GET", &format!("/operations/{KEY}"))
+        .token(&token)
+        .send()
+        .await;
+    assert_eq!(state.body["status"], "interrupted");
+
+    let retry = agent
+        .request("PUT", "/me/password")
+        .token(&token)
+        .header("idempotency-key", KEY)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(
+        (retry.status, retry.code()),
+        (409, "CONFLICT"),
+        "résultat inconnu : pas de rejeu"
+    );
+    agent.shutdown().await;
+}

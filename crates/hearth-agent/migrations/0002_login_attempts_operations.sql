@@ -14,17 +14,20 @@ CREATE TABLE login_attempts (
     window_started_at TEXT
 ) STRICT;
 
--- Opérations suivies par la clé du client (BR-RESIL-010). `account_id` n'est pas une clé
--- étrangère : l'opération « supprimer mon compte » doit survivre au compte. `result_json` :
--- statut HTTP et corps de la réponse.
+-- Opérations suivies par la clé du client (BR-RESIL-010). La clé est celle d'un compte :
+-- clé primaire (account_id, id). `account_id` n'est pas une clé étrangère : l'opération
+-- « supprimer mon compte » doit survivre au compte. `request_hash` lie la clé à une requête
+-- (méthode, chemin, corps). `result_json` : statut HTTP et corps de la réponse.
 CREATE TABLE operations (
-    id          TEXT NOT NULL PRIMARY KEY,
-    account_id  TEXT NOT NULL,
-    kind        TEXT NOT NULL,
-    status      TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
-    result_json TEXT,
-    created_at  TEXT NOT NULL,
-    finished_at TEXT
+    id           TEXT NOT NULL,
+    account_id   TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    status       TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'interrupted')),
+    result_json  TEXT,
+    created_at   TEXT NOT NULL,
+    finished_at  TEXT,
+    PRIMARY KEY (account_id, id)
 ) STRICT;
 
 CREATE INDEX operations_created_at ON operations (created_at);

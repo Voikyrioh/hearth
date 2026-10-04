@@ -108,7 +108,9 @@ pub async fn start(env: &Env) -> Agent {
         ids: Arc::new(UlidGen),
         tokens: Arc::new(OsTokenGen),
     };
-    let running = app::start_with(&config, &env.db, &adapters).expect("démarrage");
+    let running = app::start_with(&config, &env.db, &adapters)
+        .await
+        .expect("démarrage");
     let addr = running.server.local_addr();
     Agent { running, addr }
 }
@@ -153,6 +155,35 @@ impl Request<'_> {
     pub fn json(mut self, body: &Value) -> Self {
         self.body = Some(body.to_string());
         self
+    }
+
+    /// Envoie la requête puis coupe la connexion sans lire la réponse (client qui perd le lien).
+    pub async fn send_and_cut(self) {
+        let tcp = TcpStream::connect(self.agent.addr)
+            .await
+            .expect("connexion");
+        let name = ServerName::try_from("localhost").expect("nom");
+        let mut tls = TlsConnector::from(client_config())
+            .connect(name, tcp)
+            .await
+            .expect("poignée de main TLS 1.3");
+        let body = self.body.clone().unwrap_or_default();
+        let mut head = format!(
+            "{} {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n",
+            self.method, self.path
+        );
+        for (name, value) in &self.headers {
+            head.push_str(&format!("{name}: {value}\r\n"));
+        }
+        head.push_str(&format!(
+            "content-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        ));
+        tls.write_all(head.as_bytes()).await.expect("écriture");
+        tls.flush().await.expect("envoi");
+        // Laisse l'agent lire la requête avant que la connexion ne tombe.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        drop(tls);
     }
 
     pub async fn send(self) -> Wire {

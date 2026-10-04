@@ -683,19 +683,21 @@ async fn a_failed_result_is_replayed_too() {
 }
 
 #[tokio::test]
-async fn a_key_still_running_answers_409_and_a_foreign_key_is_refused() {
+async fn a_key_still_running_answers_409_and_each_account_has_its_own_keys() {
+    use hearth_agent::domain::operations::RequestFingerprint;
     let env = env().await;
     let api = Api::new(&env);
     let lucas = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
     let paul = env.account_with_token(&api, "paul", Role::ReadOnly).await;
     let lucas_account = env.service.find("lucas").await.unwrap().id;
     let key = hearth_agent::domain::operations::OperationKey::parse(KEY).unwrap();
+    let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
+    let request = RequestFingerprint::of("PUT", "/me/password", body.to_string().as_bytes());
     env.operations
-        .begin(&key, &lucas_account, "PUT /me/password")
+        .begin(&key, &lucas_account, "PUT /me/password", &request)
         .await
         .unwrap();
 
-    let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
     let busy = api
         .put("/me/password")
         .token(&lucas)
@@ -715,23 +717,73 @@ async fn a_key_still_running_answers_409_and_a_foreign_key_is_refused() {
     assert_eq!(state.body["status"], "running");
     assert!(state.body["result"].is_null());
 
-    let foreign = api
+    // La même clé chez un autre compte est la sienne : elle s'exécute, sans voir celle de lucas.
+    let own = api
         .put("/me/password")
         .token(&paul)
         .key(KEY)
         .json(&body)
         .send()
         .await;
-    assert_eq!(
-        (foreign.status, foreign.code()),
-        (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR")
-    );
-    let hidden = api
+    assert_eq!(own.status, StatusCode::OK, "{:?}", own.body);
+    let paul_state = api
         .get(&format!("/operations/{KEY}"))
         .token(&paul)
         .send()
         .await;
-    assert_eq!(hidden.status, StatusCode::NOT_FOUND);
+    assert_eq!(paul_state.body["status"], "succeeded");
+}
+
+#[tokio::test]
+async fn a_key_reused_for_another_request_is_refused_without_running() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let lucas = env.create("lucas", Role::ReadOnly).await;
+    let first = api
+        .put(&format!("/accounts/{}/password", lucas.id))
+        .token(&admin)
+        .key(KEY)
+        .json(&json!({ "password": OTHER_PASSWORD }))
+        .send()
+        .await;
+    assert_eq!(first.status, StatusCode::OK, "{:?}", first.body);
+
+    // Même clé, autre méthode et autre chemin : jamais le résultat du PUT, jamais exécutée.
+    let other = api
+        .delete(&format!("/accounts/{}", lucas.id))
+        .token(&admin)
+        .key(KEY)
+        .send()
+        .await;
+    assert_eq!(
+        (other.status, other.code()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "IDEMPOTENCY_KEY_REUSED")
+    );
+    assert!(
+        env.service.find("lucas").await.is_ok(),
+        "le compte existe toujours"
+    );
+
+    // Même clé, même requête mais un autre corps : refusée aussi.
+    let changed_body = api
+        .put(&format!("/accounts/{}/password", lucas.id))
+        .token(&admin)
+        .key(KEY)
+        .json(&json!({ "password": "Third-Pass-9999" }))
+        .send()
+        .await;
+    assert_eq!(changed_body.code(), "IDEMPOTENCY_KEY_REUSED");
+
+    // La requête d'origine, rejouée à l'identique, rend son résultat.
+    let replay = api
+        .put(&format!("/accounts/{}/password", lucas.id))
+        .token(&admin)
+        .key(KEY)
+        .json(&json!({ "password": OTHER_PASSWORD }))
+        .send()
+        .await;
+    assert_eq!(replay.headers.get("idempotent-replayed").unwrap(), "true");
 }
 
 #[tokio::test]

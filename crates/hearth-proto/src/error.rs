@@ -30,6 +30,8 @@ pub enum ErrorCode {
     LastAdmin,
     /// Conflit avec un changement concurrent : réessayer.
     Conflict,
+    /// Cette clé d'opération a déjà servi pour une autre requête.
+    IdempotencyKeyReused,
     /// L'agent est saturé (calculs de mots de passe) : réessayer après `Retry-After`.
     Busy,
     InternalError,
@@ -53,7 +55,10 @@ impl ErrorCode {
             Self::OperationInProgress | Self::UsernameTaken | Self::LastAdmin | Self::Conflict => {
                 409
             }
-            Self::ValidationError | Self::WeakPassword | Self::WrongPassword => 422,
+            Self::ValidationError
+            | Self::WeakPassword
+            | Self::WrongPassword
+            | Self::IdempotencyKeyReused => 422,
             Self::Busy => 503,
             Self::IncompatibleVersion => 426,
             Self::TooManyAttempts => 429,
@@ -141,7 +146,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL: [(ErrorCode, &str, u16); 18] = [
+    const ALL: [(ErrorCode, &str, u16); 19] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -150,6 +155,11 @@ mod tests {
         (ErrorCode::LastAdmin, "LAST_ADMIN", 409),
         (ErrorCode::Conflict, "CONFLICT", 409),
         (ErrorCode::Busy, "BUSY", 503),
+        (
+            ErrorCode::IdempotencyKeyReused,
+            "IDEMPOTENCY_KEY_REUSED",
+            422,
+        ),
         (ErrorCode::SessionExpired, "SESSION_EXPIRED", 401),
         (ErrorCode::SessionRevoked, "SESSION_REVOKED", 401),
         (ErrorCode::ForbiddenRole, "FORBIDDEN_ROLE", 403),

@@ -1,12 +1,15 @@
 //! Suivi des opérations par clé (BR-RESIL-010, côté agent).
 //!
-//! Le client donne à chaque requête qui modifie une clé (`Idempotency-Key`). L'agent la retient
-//! avec le résultat : rejouer la même clé rend le premier résultat sans ré-exécuter ; une clé
-//! dont l'exécution n'est pas finie répond « en cours » ; une clé qui appartient à un autre
-//! compte est refusée (un compte ne lit jamais l'opération d'un autre).
+//! Le client donne à chaque requête qui modifie une clé (`Idempotency-Key`). La clé est celle
+//! d'un compte (deux comptes peuvent choisir la même sans se voir) et est liée à une requête
+//! précise : méthode, chemin et corps. L'agent la retient avec le résultat : rejouer la même clé
+//! avec la même requête rend le premier résultat sans ré-exécuter ; une clé dont l'exécution
+//! n'est pas finie répond « en cours » ; une exécution interrompue par un arrêt de l'agent
+//! répond « résultat inconnu » ; la même clé avec une autre requête est refusée.
 
 use std::fmt;
 
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
 
@@ -52,11 +55,44 @@ impl fmt::Display for OperationKey {
     }
 }
 
+/// Empreinte de la requête liée à une clé : SHA-256 de la méthode, du chemin et du corps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestFingerprint(String);
+
+impl RequestFingerprint {
+    pub fn of(method: &str, path: &str, body: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        // Les séparateurs (octet nul) empêchent de déplacer une frontière entre les parties.
+        hasher.update(method.as_bytes());
+        hasher.update([0]);
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+        hasher.update(body);
+        let digest = hasher.finalize();
+        let mut text = String::with_capacity(64);
+        for byte in digest {
+            text.push_str(&format!("{byte:02x}"));
+        }
+        Self(text)
+    }
+
+    /// Relit une empreinte stockée.
+    pub fn from_stored(text: String) -> Self {
+        Self(text)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationStatus {
     Running,
     Succeeded,
     Failed,
+    /// L'agent s'est arrêté pendant l'exécution : on ne sait pas si elle a eu lieu.
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -70,6 +106,7 @@ impl OperationStatus {
             Self::Running => "running",
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
         }
     }
 
@@ -78,46 +115,55 @@ impl OperationStatus {
             "running" => Ok(Self::Running),
             "succeeded" => Ok(Self::Succeeded),
             "failed" => Ok(Self::Failed),
+            "interrupted" => Ok(Self::Interrupted),
             _ => Err(UnknownStatus),
         }
     }
 }
 
-/// Une opération telle que conservée. Le résultat est le JSON de la réponse (statut HTTP et
-/// corps), opaque pour le domaine.
+/// Une opération telle que conservée. Le résultat est le JSON de la réponse, opaque pour le
+/// domaine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Operation {
     pub key: OperationKey,
     pub account: AccountId,
     /// Requête d'origine, `MÉTHODE /chemin`, pour le diagnostic.
     pub kind: String,
+    pub request: RequestFingerprint,
     pub status: OperationStatus,
     pub result_json: Option<String>,
     pub created_at: OffsetDateTime,
     pub finished_at: Option<OffsetDateTime>,
 }
 
-/// Que faire d'une requête qui porte la clé `key` quand `existing` est ce qu'on a en mémoire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Replay<'a> {
-    /// Clé inconnue : exécuter la requête.
+/// Que faire d'une requête qui porte une clé.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Replay {
+    /// Clé inconnue de ce compte : enregistrer et exécuter.
     Execute,
-    /// Clé déjà terminée pour ce compte : rendre le premier résultat.
-    Return(&'a Operation),
-    /// Clé déjà reçue, exécution pas finie : répondre « en cours ».
+    /// Clé déjà terminée, même requête : rendre ce premier résultat.
+    Return(Operation),
+    /// Clé déjà reçue, exécution pas finie.
     InProgress,
-    /// Clé déjà utilisée par un autre compte.
-    ForeignKey,
+    /// Exécution interrompue par un arrêt de l'agent : résultat inconnu, ne pas rejouer.
+    Interrupted,
+    /// Même clé, autre requête : refus, sans exécuter.
+    KeyReused,
 }
 
-pub fn classify<'a>(existing: Option<&'a Operation>, account: &AccountId) -> Replay<'a> {
-    match existing {
-        None => Replay::Execute,
-        Some(operation) if &operation.account != account => Replay::ForeignKey,
-        Some(operation) => match operation.status {
-            OperationStatus::Running => Replay::InProgress,
-            OperationStatus::Succeeded | OperationStatus::Failed => Replay::Return(operation),
-        },
+/// `existing` : l'opération déjà connue pour cette clé et ce compte ; `request` : la requête
+/// qui arrive.
+pub fn classify(existing: Option<Operation>, request: &RequestFingerprint) -> Replay {
+    let Some(operation) = existing else {
+        return Replay::Execute;
+    };
+    if operation.request != *request {
+        return Replay::KeyReused;
+    }
+    match operation.status {
+        OperationStatus::Running => Replay::InProgress,
+        OperationStatus::Interrupted => Replay::Interrupted,
+        OperationStatus::Succeeded | OperationStatus::Failed => Replay::Return(operation),
     }
 }
 
@@ -125,11 +171,16 @@ pub fn classify<'a>(existing: Option<&'a Operation>, account: &AccountId) -> Rep
 mod tests {
     use super::*;
 
-    fn operation(account: &str, status: OperationStatus) -> Operation {
+    fn fingerprint(body: &str) -> RequestFingerprint {
+        RequestFingerprint::of("PUT", "/me/password", body.as_bytes())
+    }
+
+    fn operation(status: OperationStatus) -> Operation {
         Operation {
             key: OperationKey::parse("01J0KEY").unwrap(),
-            account: AccountId::new(account),
+            account: AccountId::new("A"),
             kind: "PUT /me/password".into(),
+            request: fingerprint("{}"),
             status,
             result_json: None,
             created_at: OffsetDateTime::UNIX_EPOCH,
@@ -151,41 +202,60 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_key_is_executed() {
-        assert_eq!(classify(None, &AccountId::new("A")), Replay::Execute);
+    fn the_request_fingerprint_covers_method_path_and_body() {
+        let base = RequestFingerprint::of("PUT", "/a", b"x");
+        assert_eq!(base, RequestFingerprint::of("PUT", "/a", b"x"));
+        assert_ne!(base, RequestFingerprint::of("DELETE", "/a", b"x"));
+        assert_ne!(base, RequestFingerprint::of("PUT", "/b", b"x"));
+        assert_ne!(base, RequestFingerprint::of("PUT", "/a", b"y"));
+        // Une frontière déplacée entre les parties ne donne pas la même empreinte.
+        assert_ne!(
+            RequestFingerprint::of("PUT", "/ab", b""),
+            RequestFingerprint::of("PUT", "/a", b"b")
+        );
+        assert_eq!(base.as_str().len(), 64);
     }
 
     #[test]
-    fn a_finished_operation_of_the_same_account_is_returned() {
+    fn an_unknown_key_is_executed() {
+        assert_eq!(classify(None, &fingerprint("{}")), Replay::Execute);
+    }
+
+    #[test]
+    fn a_finished_operation_with_the_same_request_is_returned() {
         for status in [OperationStatus::Succeeded, OperationStatus::Failed] {
-            let op = operation("A", status);
+            let op = operation(status);
             assert_eq!(
-                classify(Some(&op), &AccountId::new("A")),
-                Replay::Return(&op)
+                classify(Some(op.clone()), &fingerprint("{}")),
+                Replay::Return(op)
             );
         }
     }
 
     #[test]
     fn a_running_operation_answers_in_progress() {
-        let op = operation("A", OperationStatus::Running);
-        assert_eq!(
-            classify(Some(&op), &AccountId::new("A")),
-            Replay::InProgress
-        );
+        let op = operation(OperationStatus::Running);
+        assert_eq!(classify(Some(op), &fingerprint("{}")), Replay::InProgress);
     }
 
     #[test]
-    fn another_accounts_key_is_refused_whatever_its_status() {
+    fn an_interrupted_operation_is_never_replayed() {
+        let op = operation(OperationStatus::Interrupted);
+        assert_eq!(classify(Some(op), &fingerprint("{}")), Replay::Interrupted);
+    }
+
+    #[test]
+    fn the_same_key_with_another_request_is_refused_whatever_the_status() {
         for status in [
             OperationStatus::Running,
             OperationStatus::Succeeded,
             OperationStatus::Failed,
+            OperationStatus::Interrupted,
         ] {
-            let op = operation("A", status);
+            let op = operation(status);
             assert_eq!(
-                classify(Some(&op), &AccountId::new("B")),
-                Replay::ForeignKey
+                classify(Some(op), &fingerprint(r#"{"autre":1}"#)),
+                Replay::KeyReused
             );
         }
     }
@@ -196,6 +266,7 @@ mod tests {
             OperationStatus::Running,
             OperationStatus::Succeeded,
             OperationStatus::Failed,
+            OperationStatus::Interrupted,
         ] {
             assert_eq!(OperationStatus::from_stored(status.as_str()), Ok(status));
         }

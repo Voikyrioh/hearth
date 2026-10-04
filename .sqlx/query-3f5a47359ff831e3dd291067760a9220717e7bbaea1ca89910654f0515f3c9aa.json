@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, account_id, kind, status, result_json, created_at, finished_at\n         FROM operations WHERE id = ?",
+  "query": "SELECT id, account_id, kind, request_hash, status, result_json, created_at, finished_at\n         FROM operations WHERE account_id = ? AND id = ?",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,19 @@
         }
       },
       {
-        "name": "status",
+        "name": "request_hash",
         "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "operations",
+            "name": "request_hash"
+          }
+        }
+      },
+      {
+        "name": "status",
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "result_json",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "created_at",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "finished_at",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -82,9 +93,10 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -94,5 +106,5 @@
       true
     ]
   },
-  "hash": "43dcd1ec596f5940afa4244c9669f6143253e6e0d37f65e42e8c02290b42e3c6"
+  "hash": "3f5a47359ff831e3dd291067760a9220717e7bbaea1ca89910654f0515f3c9aa"
 }
