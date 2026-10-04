@@ -417,54 +417,55 @@ async fn the_search_finds_every_visible_field_regardless_of_case_and_accents() {
 async fn special_characters_in_the_search_are_text_never_a_query() {
     let w = written().await;
     let r = w.write(&[simple(1), simple(2)]).await;
-    for input in [
-        "\"",
-        "\"\"",
-        "\"unclosed",
-        "*",
-        "**",
-        "a*",
-        "-",
-        "-marie",
-        "marie OR paul",
-        "marie AND",
-        "AND",
-        "NOT marie",
-        "NEAR(marie poste)",
-        "NEAR/2",
-        "(",
-        ")",
-        "((marie)",
-        "col:marie",
-        "account:marie",
-        "^marie",
-        "marie^",
-        "'; DROP TABLE audit_events; --",
-        "%",
-        "_",
-        "\\",
-        "marie\u{0}x",
-        "\u{202E}marie",
-        "{marie}",
-        "[marie]",
-        "marie, poste",
-        "@",
-        "+",
-        "~",
-        "10.0.0.7:*",
-    ] {
-        // Jamais une erreur ; le résultat est celui d'un simple texte.
-        let found = w.search(text(input)).await;
-        assert!(found.len() <= 2, "{input:?}");
+    let both = [r[1].id, r[0].id];
+    // (saisie, lignes attendues) : les deux entrées portent « marie », « poste-de-marie »,
+    // « 10.0.0.7 » et « Connexion ». Une saisie sans lettre ni chiffre n'a pas d'effet (tout) ;
+    // sinon chaque mot est un mot ordinaire : la syntaxe du moteur n'agit jamais.
+    let cases: [(&str, bool); 36] = [
+        ("\"", true),
+        ("\"\"", true),
+        ("*", true),
+        ("**", true),
+        ("-", true),
+        ("(", true),
+        (")", true),
+        ("%", true),
+        ("_", true),
+        ("\\", true),
+        ("@", true),
+        ("+", true),
+        ("~", true),
+        ("-marie", true),
+        ("^marie", true),
+        ("marie^", true),
+        ("((marie)", true),
+        ("{marie}", true),
+        ("[marie]", true),
+        ("\u{202E}marie", true),
+        ("marie, poste", true),
+        ("10.0.0.7:*", true),
+        ("\"marie\"", true),
+        ("marie*", true),
+        ("\"unclosed", false),
+        ("a*", false),
+        ("marie OR paul", false),
+        ("marie AND", false),
+        ("AND", false),
+        ("NOT marie", false),
+        ("NEAR(marie poste)", false),
+        ("NEAR/2", false),
+        ("col:marie", false),
+        ("account:marie", false),
+        ("'; DROP TABLE audit_events; --", false),
+        ("marie\u{0}x", false),
+    ];
+    for (input, matches) in cases {
+        let found = w.ids(text(input)).await;
+        let expected: Vec<i64> = if matches { both.to_vec() } else { Vec::new() };
+        assert_eq!(found, expected, "{input:?}");
     }
-    // Les mots ordinaires de ces saisies fonctionnent encore.
-    assert_eq!(w.ids(text("\"marie\"")).await.len(), 2);
-    assert_eq!(w.ids(text("marie*")).await.len(), 2);
-    assert_eq!(w.ids(text("(marie)")).await.len(), 2);
-    // Un opérateur du moteur n'est qu'un mot : il ne trouve rien ici.
-    assert_eq!(w.ids(text("marie OR paul")).await, Vec::<i64>::new());
+    // La table est intacte après « DROP TABLE ».
     assert_eq!(w.count().await, 2);
-    let _ = r;
 }
 
 #[tokio::test]

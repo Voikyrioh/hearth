@@ -147,12 +147,39 @@ async fn execute_detached(
     key: OperationKey,
     work: impl Future<Output = Response> + Send + 'static,
 ) -> Response {
+    let (retained, discarded) = (operations.clone(), operations);
+    let (retained_account, discarded_account) = (account.clone(), account);
+    let (retained_key, discarded_key) = (key.clone(), key);
+    run_detached(
+        work,
+        move |response| async move {
+            retain(&retained, &retained_account, &retained_key, response).await
+        },
+        move || async move { discard(&discarded, &discarded_account, &discarded_key).await },
+    )
+    .await
+}
+
+/// La mécanique de `execute_detached`, sans le stockage : `work` s'exécute dans une tâche
+/// détachée (dans le span de la requête) ; sa réponse passe par `retain` ; s'il panique,
+/// `discard` oublie la clé et la réponse est une erreur interne.
+async fn run_detached<Retain, RetainFut, Discard, DiscardFut>(
+    work: impl Future<Output = Response> + Send + 'static,
+    retain: Retain,
+    discard: Discard,
+) -> Response
+where
+    Retain: FnOnce(Response) -> RetainFut + Send + 'static,
+    RetainFut: Future<Output = Response> + Send,
+    Discard: FnOnce() -> DiscardFut + Send + 'static,
+    DiscardFut: Future<Output = ()> + Send,
+{
     let task = tokio::spawn(
         async move {
             match tokio::spawn(work.in_current_span()).await {
-                Ok(response) => retain(&operations, &account, &key, response).await,
+                Ok(response) => retain(response).await,
                 Err(error) => {
-                    discard(&operations, &account, &key).await;
+                    discard().await;
                     ApiError::internal(&error).into_response()
                 }
             }
@@ -268,9 +295,6 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::*;
-    use crate::infrastructure::clock::SystemClock;
-    use crate::infrastructure::data_dir::private_tempdir;
-    use crate::infrastructure::sqlite::{Database, SqliteOperationRepo, SqliteStore};
 
     fn operation(result: &str) -> Operation {
         Operation {
@@ -322,36 +346,45 @@ mod tests {
 
     #[tokio::test]
     async fn a_panicking_handler_never_leaves_its_key_running() {
-        let dir = private_tempdir();
-        let db = Database::open(dir.path()).await.unwrap();
-        let operations = Arc::new(OperationService::new(
-            Arc::new(SqliteOperationRepo::new(db.pool().clone())),
-            Arc::new(SqliteStore::new(db.pool().clone())),
-            Arc::new(SystemClock),
-        ));
-        let account = AccountId::new("A");
-        let key = OperationKey::parse("PANIC").unwrap();
-        let request = RequestFingerprint::of("PUT", "/x", b"");
-        assert_eq!(
-            operations
-                .begin(&key, &account, "PUT /x", &request)
-                .await
-                .unwrap(),
-            Replay::Execute
-        );
+        use std::sync::atomic::{AtomicBool, Ordering};
 
-        let response = execute_detached(operations.clone(), account.clone(), key.clone(), async {
-            if true {
-                panic!("le handler panique");
-            }
-            StatusCode::OK.into_response()
-        })
+        let discarded = Arc::new(AtomicBool::new(false));
+        let flag = discarded.clone();
+        let response = run_detached(
+            async {
+                if true {
+                    panic!("le handler panique");
+                }
+                StatusCode::OK.into_response()
+            },
+            |response| async move { response },
+            move || async move { flag.store(true, Ordering::SeqCst) },
+        )
         .await;
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert!(
-            operations.find(&key, &account).await.unwrap().is_none(),
+            discarded.load(Ordering::SeqCst),
             "la clé est oubliée, le client peut relancer"
         );
+    }
+
+    #[tokio::test]
+    async fn a_handler_that_answers_has_its_response_retained_not_its_key_discarded() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let retained = Arc::new(AtomicBool::new(false));
+        let flag = retained.clone();
+        let response = run_detached(
+            async { StatusCode::CREATED.into_response() },
+            move |response| async move {
+                flag.store(true, Ordering::SeqCst);
+                response
+            },
+            || async { panic!("jamais oubliée") },
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert!(retained.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
