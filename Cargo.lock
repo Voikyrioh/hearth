@@ -812,6 +812,7 @@ dependencies = [
  "gethostname",
  "getrandom 0.4.3",
  "hearth-proto",
+ "http-body-util",
  "mac_address",
  "rcgen",
  "rpassword",

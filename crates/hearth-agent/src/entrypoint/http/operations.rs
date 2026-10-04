@@ -23,6 +23,7 @@ use axum::response::{IntoResponse, Response};
 use hearth_proto::api::operations::{OperationResponse, OperationStatus as WireStatus};
 use hearth_proto::error::ErrorCode;
 use hearth_proto::headers;
+use http_body_util::LengthLimitError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::Instrument;
@@ -92,8 +93,9 @@ pub(super) async fn track(
             .into_response();
         }
         Err(error) => {
-            return ApiError::invalid("body", format!("Corps de requête illisible : {error}"))
-                .into_response();
+            // Le détail d'une lecture interrompue sert au diagnostic, pas au client.
+            tracing::debug!(%error, "corps de requête illisible");
+            return ApiError::invalid("body", "Corps de requête illisible").into_response();
         }
     };
     let request_fingerprint =
@@ -139,7 +141,7 @@ pub(super) async fn track(
 /// retient son résultat sous la clé. Un client qui coupe n'interrompt rien. Si le travail
 /// panique, la clé est oubliée dans la tâche même (jamais « en cours » pour toujours) et la
 /// réponse est une erreur interne.
-pub async fn execute_detached(
+async fn execute_detached(
     operations: Arc<OperationService>,
     account: AccountId,
     key: OperationKey,
@@ -163,9 +165,10 @@ pub async fn execute_detached(
     }
 }
 
-/// La limite de taille a-t-elle été dépassée (et non une lecture interrompue) ?
+/// La limite de taille a-t-elle été dépassée (et non une lecture interrompue) ? Reconnue par le
+/// type de l'erreur (`LengthLimitError`), jamais par son texte.
 fn is_too_large(error: &axum::Error) -> bool {
-    error.to_string().contains("length limit")
+    std::error::Error::source(error).is_some_and(|source| source.is::<LengthLimitError>())
 }
 
 /// Retient le résultat de la réponse sous la clé, puis la rend telle quelle. Une erreur
@@ -265,6 +268,9 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::*;
+    use crate::infrastructure::clock::SystemClock;
+    use crate::infrastructure::data_dir::private_tempdir;
+    use crate::infrastructure::sqlite::{Database, SqliteOperationRepo, SqliteStore};
 
     fn operation(result: &str) -> Operation {
         Operation {
@@ -312,5 +318,47 @@ mod tests {
             replay(&operation(r#"{"status":204,"body":null}"#)).status(),
             StatusCode::NO_CONTENT
         );
+    }
+
+    #[tokio::test]
+    async fn a_panicking_handler_never_leaves_its_key_running() {
+        let dir = private_tempdir();
+        let db = Database::open(dir.path()).await.unwrap();
+        let operations = Arc::new(OperationService::new(
+            Arc::new(SqliteOperationRepo::new(db.pool().clone())),
+            Arc::new(SqliteStore::new(db.pool().clone())),
+            Arc::new(SystemClock),
+        ));
+        let account = AccountId::new("A");
+        let key = OperationKey::parse("PANIC").unwrap();
+        let request = RequestFingerprint::of("PUT", "/x", b"");
+        assert_eq!(
+            operations
+                .begin(&key, &account, "PUT /x", &request)
+                .await
+                .unwrap(),
+            Replay::Execute
+        );
+
+        let response = execute_detached(operations.clone(), account.clone(), key.clone(), async {
+            if true {
+                panic!("le handler panique");
+            }
+            StatusCode::OK.into_response()
+        })
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            operations.find(&key, &account).await.unwrap().is_none(),
+            "la clé est oubliée, le client peut relancer"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_the_length_limit_error_counts_as_too_large() {
+        let too_large = to_bytes(Body::from(vec![0_u8; 16]), 8).await.unwrap_err();
+        assert!(is_too_large(&too_large));
+        let interrupted = axum::Error::new(std::io::Error::other("length limit exceeded"));
+        assert!(!is_too_large(&interrupted), "le texte ne compte pas");
     }
 }
