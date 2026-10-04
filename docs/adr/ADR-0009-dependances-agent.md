@@ -28,6 +28,10 @@ HRT-02 pose le premier code de l'agent ; les tickets suivants repartiront de cet
 | `mac_address` 1 + `gethostname` 1 | Adresses MAC, nom de machine | Évitent `sysinfo` (lourd) pour deux lectures au démarrage. À remplacer par `sysinfo` si HRT-06 l'adopte déjà. | Lectures faites une fois au démarrage, jamais par requête. |
 | `tower-http` 0.6 (`trace`) | Journal de chaque requête | Méthode, chemin, statut, durée en une ligne. | Ne jamais journaliser d'en-têtes `Authorization` ni de corps. |
 | `tracing` + `tracing-subscriber` (`env-filter`, `fmt`, `json`) | Journaux structurés | Sortie standard reprise par journald ; texte en terminal, JSON sinon (`HEARTH_LOG_FORMAT`). | `anyhow` seulement dans `main` ; ailleurs `thiserror`. |
+| `serde` + `serde_json` | Corps JSON, configuration | Standard Rust. | `hearth-proto` n'a que ces deux crates plus `sha2` et `thiserror`. |
+| `thiserror` 2 | Erreurs typées par couche | Convention du dépôt (CLAUDE.md) : pas d'`anyhow` dans le code de l'agent. | Chaque message d'erreur porte sa cause ; ne pas la ré-imprimer en parcourant la chaîne. |
+| `tokio` 1 | Runtime asynchrone, signaux, tâches | Imposé par axum et rustls. | Rien de bloquant dans les handlers ; le démarrage est synchrone (verrou d'identité). |
+| `time` 0.3 | Dates de validité du certificat (`not_before`, `not_after` pour rcgen) | Type attendu par `rcgen` ; déjà dans l'arbre. | Pas pour la logique métier : les horloges passeront par un port `Clock` (HRT-03). |
 | `sha2` (dans `hearth-proto`) | Empreinte SHA-256 | Pur Rust, partagé avec `hearth-link`. | Pas de cryptographie d'authentification avec cette crate seule. |
 
 **Règle** : pas d'`aws-lc`, pas d'OpenSSL, aucune dépendance qui ne compile pas en musl. Une nouvelle dépendance de l'agent passe par une mise à jour de cette ADR.
@@ -46,6 +50,7 @@ HRT-02 pose le premier code de l'agent ; les tickets suivants repartiront de cet
 ## Conséquences
 
 - Le conteneur `rust:alpine` de `cargo xtask agent` doit fournir un compilateur C pour `ring`.
+- Dépendances de test seulement : `tempfile` (dossiers temporaires), `tokio-rustls` (client TLS des tests d'intégration), `tower` (`oneshot` sur le routeur).
 - Les tests d'intégration activent `tls12` côté client pour prouver le refus de TLS 1.2.
 
 ## Références

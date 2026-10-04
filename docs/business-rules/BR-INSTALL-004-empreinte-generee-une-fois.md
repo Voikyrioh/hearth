@@ -17,18 +17,18 @@ Fichiers dans le dossier de données : `cert.pem`, `key.pem` (permissions 0600 s
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/identity_policy.rs::decide` — fonction pure : d'après ce que le stockage contient (`StoreObservation`), renvoie `Create`, `Reuse`, `CleanThenCreate` ou `Refuse { missing }`.
-- `crates/hearth-agent/src/infrastructure/tls/identity.rs::FileIdentityStore::load_or_create` — observe le dossier, appelle `decide`, exécute. La création est protégée par un fichier verrou `identity.lock` (création exclusive, attente bornée 10 s puis erreur claire, supprimé à la fin y compris sur erreur) : plusieurs processus ou threads simultanés obtiennent la même identité. L'état est observé de nouveau après l'obtention du verrou.
+- `crates/hearth-agent/src/infrastructure/tls/identity.rs::FileIdentityStore::load_or_create` — observe le dossier, appelle `decide`, exécute. La création est protégée par un verrou de fichier du système (`File::try_lock` sur `identity.lock`, attente bornée 10 s puis `IdentityError::LockTimeout`) : plusieurs processus ou threads simultanés obtiennent la même identité. Le noyau relâche le verrou à la mort du processus ; le fichier `identity.lock` peut rester sur disque sans rien bloquer. L'état est observé de nouveau après l'obtention du verrou.
 - `crates/hearth-proto/src/fingerprint.rs::Fingerprint::of_certificate_der` — empreinte dérivée du certificat persisté.
 - `crates/hearth-agent/src/domain/install_id.rs::InstallId` — format de l'identifiant.
 - Port : `application/ports/identity_store.rs::IdentityStore` (consommé par `app.rs`) ; il n'expose que la partie publique (identifiant, empreinte), la clé privée ne sort pas de `infrastructure/tls`.
 
 ## Vérification
-- Tests : `domain::identity_policy::tests` (les quatre cas de la décision) ; `infrastructure::tls::identity::tests` (`second_load_returns_the_same_identity`, `existing_certificate_without_key_is_an_error_not_a_regeneration`, `leftovers_of_an_interrupted_creation_are_replaced`, `simultaneous_creations_yield_one_identity`, `a_held_lock_ends_in_a_clear_error_and_is_not_removed`, `the_lock_is_released_even_when_creation_fails`).
+- Tests : `domain::identity_policy::tests` (les quatre cas de la décision) ; `infrastructure::tls::identity::tests` (`second_load_returns_the_same_identity`, `existing_certificate_without_key_is_an_error_not_a_regeneration`, `leftovers_of_an_interrupted_creation_are_replaced`, `simultaneous_creations_yield_one_identity`, `a_lock_held_by_another_handle_ends_in_a_timeout_then_frees_up`, `a_leftover_lock_file_that_nobody_holds_does_not_block`, `stale_temporaries_of_a_dead_process_are_removed_before_creation`, `the_lock_is_released_even_when_creation_fails`).
 - Intégration : `crates/hearth-agent/tests/hello.rs::fingerprint_and_install_id_survive_a_restart`.
 
 ## Cas limites
 - Clé ou `install_id` absent alors que `cert.pem` existe → erreur `IdentityError::Incomplete`, certificat intact.
-- Deux processus créent en même temps (`serve` et `fingerprint`) : l'un attend le verrou, puis relit l'identité de l'autre. Verrou orphelin (processus tué) : erreur `LockTimeout` qui nomme le fichier à supprimer.
+- Deux processus créent en même temps (`serve` et `fingerprint`) : l'un attend le verrou, puis relit l'identité de l'autre. Processus tué pendant la création : le verrou est relâché par le noyau, le démarrage suivant reprend normalement ; les temporaires orphelins (`key.pem.<pid>.<n>.tmp`…) sont supprimés sous le verrou avant de créer.
 - Fichier illisible ou invalide → `IdentityError::Corrupt`, rien n'est écrasé.
 - Suppression volontaire du dossier de données : nouvelle identité, les clients doivent réapprouver l'empreinte (BR-CONN-003).
 
@@ -38,3 +38,4 @@ Fichiers dans le dossier de données : `cert.pem`, `key.pem` (permissions 0600 s
 ## Historique
 - 2026-10-04 — création (HRT-02, session 2026-10-04-hearth-creation).
 - 2026-10-04 — règle déplacée dans `domain/identity_policy.rs`, verrou de création (review Stephen round 1).
+- 2026-10-04 — verrou du système au lieu d'un fichier à supprimer, nettoyage des temporaires orphelins (review Stephen round 2).
