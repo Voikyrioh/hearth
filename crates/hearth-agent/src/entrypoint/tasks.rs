@@ -8,10 +8,14 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 
+use crate::application::audit::AuditRecorder;
 use crate::application::maintenance::MaintenanceService;
 
 /// Période de la purge (sessions expirées, traces anciennes, opérations de plus de 24 h).
 pub const PURGE_PERIOD: Duration = Duration::from_secs(60 * 60);
+
+/// Période d'écriture des synthèses du journal (fenêtres de répétition finies).
+pub const AUDIT_FLUSH_PERIOD: Duration = Duration::from_secs(15);
 
 /// Tâche de fond ; abandonner la valeur l'arrête.
 pub struct BackgroundTask(JoinHandle<()>);
@@ -40,6 +44,14 @@ where
             }
         }
     }))
+}
+
+/// Écrit les entrées de synthèse du journal quand leur fenêtre est finie.
+pub fn spawn_audit_flush(recorder: Arc<AuditRecorder>, period: Duration) -> BackgroundTask {
+    every("audit-flush", period, move || {
+        let recorder = recorder.clone();
+        async move { recorder.flush().await }
+    })
 }
 
 /// Purge périodique du stockage.

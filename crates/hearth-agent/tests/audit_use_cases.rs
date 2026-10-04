@@ -704,3 +704,70 @@ async fn when_the_entry_cannot_be_written_the_action_is_not_committed() {
     assert_eq!(env.session_ids(&marie.id).await.len(), 1);
     assert!(feed.try_recv().is_err(), "rien de diffusé");
 }
+
+fn denied_read(account: &str, addr: &str) -> (Actor, AuditAction, Target, Outcome) {
+    (
+        Actor::new(
+            Some(Username::parse(account).unwrap()),
+            Origin::client(Some("poste"), addr),
+        ),
+        AuditAction::AuditRead,
+        Target::Route("/audit"),
+        Outcome::Denied(Reason::ReadOnly),
+    )
+}
+
+#[tokio::test]
+async fn a_thousand_identical_refusals_make_two_entries() {
+    let env = env().await;
+    for _ in 0..1000 {
+        let (actor, action, target, outcome) = denied_read("lucas", "10.0.0.9");
+        env.audit_sink.record(actor, action, target, outcome).await;
+    }
+    assert_eq!(
+        all(&env).await.len(),
+        1,
+        "le premier seul est écrit tout de suite"
+    );
+
+    // Fenêtre non finie : rien de plus. Finie : une seule synthèse.
+    env.clock.advance(time::Duration::seconds(59));
+    env.audit_recorder.flush().await;
+    assert_eq!(all(&env).await.len(), 1);
+    env.clock.advance(time::Duration::seconds(2));
+    env.audit_recorder.flush().await;
+    env.audit_recorder.flush().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].repeat_count, 0);
+    assert_eq!(records[1].repeat_count, 999);
+    assert_eq!(
+        records[1].reason.as_deref(),
+        Some("lecture seule (999 autres fois en 1 min)")
+    );
+    assert_eq!(records[1].account.as_deref(), Some("lucas"));
+}
+
+#[tokio::test]
+async fn refusals_that_differ_are_not_grouped_and_a_later_one_brings_the_summary() {
+    let env = env().await;
+    for (account, addr) in [
+        ("lucas", "10.0.0.9"),
+        ("lucas", "10.0.0.8"),
+        ("paul", "10.0.0.9"),
+    ] {
+        for _ in 0..3 {
+            let (actor, action, target, outcome) = denied_read(account, addr);
+            env.audit_sink.record(actor, action, target, outcome).await;
+        }
+    }
+    assert_eq!(all(&env).await.len(), 3, "trois groupes, un premier chacun");
+    env.clock.advance(time::Duration::seconds(61));
+    let (actor, action, target, outcome) = denied_read("lucas", "10.0.0.9");
+    env.audit_sink.record(actor, action, target, outcome).await;
+    // La synthèse du groupe fini (2 autres fois), puis le nouveau premier.
+    let records = all(&env).await;
+    assert_eq!(records.len(), 5);
+    assert_eq!(records[3].repeat_count, 2);
+    assert_eq!(records[4].repeat_count, 0);
+}

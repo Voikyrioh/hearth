@@ -57,6 +57,7 @@ mod tests {
             target: None,
             outcome: OutcomeKind::Ok,
             reason: None,
+            repeat_count: 0,
         }
     }
 

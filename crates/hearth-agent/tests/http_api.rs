@@ -98,6 +98,8 @@ async fn every_admin_route_refuses_a_read_only_account_and_changes_nothing() {
         .filter(|endpoint| endpoint.access == Access::Admin)
     {
         let path = concrete(endpoint.path);
+        // Les refus identiques à moins d'une minute se regroupent : on espace les appels.
+        env.clock.advance(time::Duration::seconds(61));
         // Un corps valide pour la route : si la garde laissait passer, la requête agirait.
         let body = json!({
             "username": "intrus", "password": OTHER_PASSWORD, "role": "admin",

@@ -9,7 +9,7 @@
 //! l'action n'est pas validée. Hors transaction (refus et échecs relevés par la couche d'accès),
 //! un échec d'écriture est tracé en `error` et ne change rien pour l'appelant.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use thiserror::Error;
@@ -18,8 +18,8 @@ use tokio::sync::broadcast;
 use super::ports::{AuditFeed, AuditRepo, AuditSink, Clock, Store, StoreError, UnitOfWork};
 use crate::domain::accounts::Role;
 use crate::domain::audit::{
-    Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, Outcome, Target, can_read_journal,
-    render_csv,
+    Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, Outcome, RepeatFilter, Target,
+    can_read_journal, render_csv,
 };
 
 /// Lignes d'un export, au plus : les plus récentes (le journal entier tient en 50 000 entrées, un
@@ -121,15 +121,46 @@ impl AuditService {
 }
 
 /// Écrit une entrée hors transaction (refus et échecs relevés par le routeur).
+///
+/// Les événements identiques répétés sont regroupés (`domain::audit::RepeatFilter`) : le premier
+/// est écrit, les suivants de la minute sont comptés, une entrée de synthèse est écrite à la fin
+/// de la fenêtre (`flush`, appelé régulièrement, ou dès qu'un événement identique suit).
 pub struct AuditRecorder {
     store: Arc<dyn Store>,
     clock: Arc<dyn Clock>,
     feed: Arc<dyn AuditFeed>,
+    repeats: Mutex<RepeatFilter>,
 }
 
 impl AuditRecorder {
     pub fn new(store: Arc<dyn Store>, clock: Arc<dyn Clock>, feed: Arc<dyn AuditFeed>) -> Self {
-        Self { store, clock, feed }
+        Self {
+            store,
+            clock,
+            feed,
+            repeats: Mutex::new(RepeatFilter::new()),
+        }
+    }
+
+    /// Écrit les synthèses des fenêtres finies : à appeler régulièrement.
+    pub async fn flush(&self) {
+        let due = self
+            .repeats
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .due(self.clock.now());
+        for event in due {
+            self.write_and_publish(event).await;
+        }
+    }
+
+    async fn write_and_publish(&self, event: AuditEvent) {
+        match self.write(&event).await {
+            Ok(record) => self.feed.publish(record),
+            Err(error) => {
+                tracing::error!(%error, action = event.action.code(), "entrée du journal non écrite");
+            }
+        }
     }
 
     async fn write(&self, event: &AuditEvent) -> Result<AuditRecord, StoreError> {
@@ -144,11 +175,13 @@ impl AuditRecorder {
 impl AuditSink for AuditRecorder {
     async fn record(&self, actor: Actor, action: AuditAction, target: Target, outcome: Outcome) {
         let event = AuditEvent::new(self.clock.now(), actor, action, target, outcome);
-        match self.write(&event).await {
-            Ok(record) => self.feed.publish(record),
-            Err(error) => {
-                tracing::error!(%error, action = event.action.code(), "entrée du journal non écrite");
-            }
+        let to_write = self
+            .repeats
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .admit(event);
+        for event in to_write {
+            self.write_and_publish(event).await;
         }
     }
 }

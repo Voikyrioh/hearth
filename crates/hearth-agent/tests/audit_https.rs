@@ -148,6 +148,8 @@ async fn a_read_only_account_is_refused_and_its_attempts_are_journaled() {
     let readonly = token(&agent, "lucas").await;
 
     for path in ["/audit", "/audit/export", "/accounts"] {
+        // Deux refus identiques à moins d'une minute se regroupent : on espace les demandes.
+        env.clock.advance(time::Duration::seconds(61));
         let reply = agent
             .request("GET", path)
             .token(&readonly)
@@ -221,6 +223,8 @@ async fn a_failed_modifying_request_is_journaled_once_even_when_replayed() {
         request("K-WEAK", "nouveau", "faible").send().await.status,
         422
     );
+    // Deux échecs identiques à moins d'une minute se regroupent : on espace les requêtes.
+    env.clock.advance(time::Duration::seconds(61));
     assert_eq!(
         request("K-TAKEN", "PAUL", OTHER_PASSWORD)
             .send()

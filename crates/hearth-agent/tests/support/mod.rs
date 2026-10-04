@@ -133,6 +133,7 @@ pub struct Env {
     pub maintenance: Arc<MaintenanceService>,
     pub audit: Arc<AuditService>,
     pub audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink>,
+    pub audit_recorder: Arc<hearth_agent::application::audit::AuditRecorder>,
     pub feed: Arc<BroadcastAuditFeed>,
 }
 
@@ -205,12 +206,12 @@ pub async fn env() -> Env {
         Arc::new(SqliteAuditRepo::new(db.pool().clone())),
         feed.clone(),
     ));
-    let audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink> =
-        Arc::new(hearth_agent::application::audit::AuditRecorder::new(
-            store,
-            clock.clone(),
-            feed.clone() as Arc<dyn AuditFeed>,
-        ));
+    let audit_recorder = Arc::new(hearth_agent::application::audit::AuditRecorder::new(
+        store,
+        clock.clone(),
+        feed.clone() as Arc<dyn AuditFeed>,
+    ));
+    let audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink> = audit_recorder.clone();
     Env {
         dir,
         db,
@@ -222,6 +223,7 @@ pub async fn env() -> Env {
         maintenance,
         audit,
         audit_sink,
+        audit_recorder,
         feed,
     }
 }

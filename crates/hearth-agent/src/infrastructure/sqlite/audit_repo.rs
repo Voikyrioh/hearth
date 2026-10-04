@@ -39,6 +39,7 @@ struct AuditRow {
     target: Option<String>,
     outcome: String,
     reason: Option<String>,
+    repeat_count: i64,
 }
 
 fn into_record(row: AuditRow) -> Result<AuditRecord, StoreError> {
@@ -59,6 +60,7 @@ fn into_record(row: AuditRow) -> Result<AuditRecord, StoreError> {
         target: row.target.clone(),
         outcome: OutcomeKind::from_code(&row.outcome).ok_or_else(|| unreadable("résultat"))?,
         reason: row.reason.clone(),
+        repeat_count: u32::try_from(row.repeat_count).unwrap_or(u32::MAX),
     })
 }
 
@@ -99,7 +101,8 @@ impl AuditRepo for SqliteAuditRepo {
         let rows = sqlx::query_as!(
             AuditRow,
             r#"SELECT e.id AS "id!: i64", e.at, e.account, e.origin_kind, e.origin_name,
-                      e.origin_addr, e.action, e.action_label, e.target, e.outcome, e.reason
+                      e.origin_addr, e.action, e.action_label, e.target, e.outcome, e.reason,
+                      e.repeat_count AS "repeat_count!: i64"
                FROM audit_events e
                WHERE (?1 IS NULL OR e.account IN (SELECT value FROM json_each(?1)))
                  AND (?2 IS NULL OR e.action IN (SELECT value FROM json_each(?2)))
@@ -138,11 +141,12 @@ impl AuditTx for SqliteUnitOfWork {
         let action_label = event.action.label();
         let target = event.target.text();
         let outcome = event.outcome.kind().code();
-        let reason = event.outcome.reason().map(|reason| reason.text());
+        let reason = event.clone().into_record(0).reason;
+        let repeat_count = i64::from(event.repeat_count);
         let result = sqlx::query!(
             "INSERT INTO audit_events
-                 (at, account, origin_kind, origin_name, origin_addr, action, action_label, target, outcome, reason)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 (at, account, origin_kind, origin_name, origin_addr, action, action_label, target, outcome, reason, repeat_count)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             at,
             account,
             origin_kind,
@@ -152,7 +156,8 @@ impl AuditTx for SqliteUnitOfWork {
             action_label,
             target,
             outcome,
-            reason
+            reason,
+            repeat_count
         )
         .execute(&mut *self.tx)
         .await

@@ -90,6 +90,7 @@ mod tests {
             target: target.map(str::to_owned),
             outcome: OutcomeKind::Ok,
             reason: None,
+            repeat_count: 0,
         }
     }
 

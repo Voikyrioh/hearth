@@ -21,7 +21,9 @@ CREATE TABLE audit_events (
     action_label TEXT NOT NULL,
     target       TEXT,
     outcome      TEXT NOT NULL CHECK (outcome IN ('ok', 'denied', 'failed')),
-    reason       TEXT
+    reason       TEXT,
+    -- Entrée de synthèse : combien d'autres fois le même événement s'est produit en 1 minute.
+    repeat_count INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 CREATE INDEX audit_events_at ON audit_events (at);

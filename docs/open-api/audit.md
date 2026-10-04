@@ -36,7 +36,8 @@ Une entrée :
   "action_label": "Création de compte",
   "target": "paul",
   "outcome": "ok",
-  "reason": null
+  "reason": null,
+  "repeat_count": 0
 }
 ```
 
@@ -44,6 +45,7 @@ Une entrée :
 - `account` : identifiant figé à l'écriture ; `null` pour la ligne de commande et pour une connexion refusée dont l'identifiant saisi ne correspond à aucun compte (l'identifiant saisi n'est jamais retenu : BR-AUDIT-005, BR-AUDIT-006) ; pour un identifiant qui correspond à un compte, ce compte.
 - `origin.kind` : `client` (adresse de la connexion et nom du poste, `name` absent si le poste n'est pas identifié, texte « 10.0.0.7 (inconnu) »), `cli` (« ligne de commande du serveur »), `assistant`.
 - `target` : un compte (`paul`, `paul (Lecture seule)` pour un changement de rôle) ou, pour un refus ou un échec dont la cible n'est pas connue, le motif de la route (`/accounts/{id}`).
+- `repeat_count` : 0 pour une entrée ordinaire ; pour une entrée de synthèse, le nombre d'autres fois où le même refus ou échec (même compte, même origine, même action, même résultat) s'est produit dans la minute (BR-AUDIT-007) ; la raison le dit aussi (« … (999 autres fois en 1 min) »).
 - `outcome` : `ok`, `denied`, `failed` ; `reason` dit pourquoi pour les deux derniers (« identifiants incorrects », « identifiant invalide », « trop de tentatives, attente de 60 s », « lecture seule », « données invalides », « identifiant déjà utilisé », « mot de passe actuel incorrect », « dernier administrateur », « conflit avec l'état du serveur », « cible introuvable », « agent occupé », « erreur interne »).
 
 ### Codes d'action

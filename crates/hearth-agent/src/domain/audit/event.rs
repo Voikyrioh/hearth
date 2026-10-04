@@ -42,7 +42,7 @@ impl ClientName {
 }
 
 /// D'où vient l'action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OriginKind {
     Client,
     CommandLine,
@@ -220,7 +220,7 @@ impl Reason {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OutcomeKind {
     Ok,
     Denied,
@@ -284,6 +284,9 @@ pub struct AuditEvent {
     pub action: AuditAction,
     pub target: Target,
     pub outcome: Outcome,
+    /// Pour une entrée de synthèse (`repeat::RepeatFilter`) : combien d'autres fois le même
+    /// événement s'est produit dans la fenêtre ; 0 pour une entrée ordinaire.
+    pub repeat_count: u32,
 }
 
 impl AuditEvent {
@@ -300,7 +303,14 @@ impl AuditEvent {
             action,
             target,
             outcome,
+            repeat_count: 0,
         }
+    }
+
+    /// L'entrée de synthèse de `count` autres occurrences.
+    pub fn with_repeats(mut self, count: u32) -> Self {
+        self.repeat_count = count;
+        self
     }
 
     /// L'entrée telle qu'elle est écrite et relue : textes figés.
@@ -316,7 +326,11 @@ impl AuditEvent {
             action_label: self.action.label().to_owned(),
             target: self.target.text(),
             outcome: self.outcome.kind(),
-            reason: self.outcome.reason().map(Reason::text),
+            reason: self.outcome.reason().map(|reason| match self.repeat_count {
+                0 => reason.text(),
+                n => format!("{} ({n} autres fois en 1 min)", reason.text()),
+            }),
+            repeat_count: self.repeat_count,
         }
     }
 }
@@ -338,7 +352,10 @@ pub struct AuditRecord {
     pub action_label: String,
     pub target: Option<String>,
     pub outcome: OutcomeKind,
+    /// La raison dit aussi « (n autres fois en 1 min) » pour une synthèse.
     pub reason: Option<String>,
+    /// Autres occurrences regroupées dans cette entrée de synthèse ; 0 pour une entrée ordinaire.
+    pub repeat_count: u32,
 }
 
 impl AuditRecord {
@@ -515,6 +532,24 @@ mod tests {
         assert_eq!(record.outcome, OutcomeKind::Denied);
         assert_eq!(record.reason.as_deref(), Some("lecture seule"));
         assert_eq!(record.origin_text(), "10.0.0.7 (poste)");
+    }
+
+    #[test]
+    fn a_summary_entry_says_how_many_other_times() {
+        let record = AuditEvent::new(
+            at(),
+            Actor::command_line(),
+            AuditAction::AuditRead,
+            Target::Route("/audit"),
+            Outcome::Denied(Reason::ReadOnly),
+        )
+        .with_repeats(999)
+        .into_record(3);
+        assert_eq!(record.repeat_count, 999);
+        assert_eq!(
+            record.reason.as_deref(),
+            Some("lecture seule (999 autres fois en 1 min)")
+        );
     }
 
     #[test]

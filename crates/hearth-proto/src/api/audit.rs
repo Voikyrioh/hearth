@@ -86,8 +86,11 @@ pub struct AuditEventItem {
     pub action_label: String,
     pub target: Option<String>,
     pub outcome: OutcomeName,
-    /// Pourquoi, pour un refus ou un échec.
+    /// Pourquoi, pour un refus ou un échec (« … (999 autres fois en 1 min) » pour une synthèse).
     pub reason: Option<String>,
+    /// Entrée de synthèse : combien d'autres fois le même événement (même compte, même origine,
+    /// même action, même résultat) s'est produit dans la minute ; 0 pour une entrée ordinaire.
+    pub repeat_count: u32,
 }
 
 /// Réponse de `GET /audit` : les entrées de la plus récente à la plus ancienne.
@@ -119,6 +122,7 @@ mod tests {
             target: Some("paul".into()),
             outcome: OutcomeName::Ok,
             reason: None,
+            repeat_count: 0,
         }
     }
 

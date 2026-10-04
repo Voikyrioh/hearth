@@ -75,6 +75,7 @@ pub fn audit_item(record: &AuditRecord) -> Result<AuditEventItem, ApiError> {
             OutcomeKind::Failed => OutcomeName::Failed,
         },
         reason: record.reason.clone(),
+        repeat_count: record.repeat_count,
     })
 }
 

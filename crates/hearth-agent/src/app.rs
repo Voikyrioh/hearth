@@ -93,6 +93,8 @@ pub struct Services {
     pub audit: Arc<AuditService>,
     /// Écriture du journal hors transaction (refus et échecs relevés par le routeur).
     pub audit_sink: Arc<dyn AuditSink>,
+    /// Le même, pour écrire les synthèses des événements répétés (`flush`).
+    pub audit_recorder: Arc<AuditRecorder>,
     /// Diffusion interne des entrées du journal, pour le flux temps réel.
     pub audit_feed: Arc<dyn AuditFeed>,
 }
@@ -103,6 +105,8 @@ pub struct RunningAgent {
     pub identity: PublicIdentity,
     /// Purge périodique : arrêtée avec l'agent.
     pub purge: BackgroundTask,
+    /// Écriture des synthèses du journal : arrêtée avec l'agent.
+    pub audit_flush: BackgroundTask,
 }
 
 impl RunningAgent {
@@ -111,6 +115,7 @@ impl RunningAgent {
         let Self {
             server,
             purge: _purge,
+            audit_flush: _audit_flush,
             ..
         } = self;
         server.run_until(stop).await
@@ -138,6 +143,11 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
     let sessions_repo = Arc::new(SqliteSessionRepo::new(pool.clone()));
     let store: Arc<dyn Store> = Arc::new(SqliteStore::new(pool.clone()));
     let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
+    let recorder = Arc::new(AuditRecorder::new(
+        store.clone(),
+        adapters.clock.clone(),
+        feed.clone(),
+    ));
     Services {
         accounts: Arc::new(AccountService::new(
             accounts_repo.clone(),
@@ -172,11 +182,8 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             Arc::new(SqliteAuditRepo::new(pool.clone())),
             feed.clone(),
         )),
-        audit_sink: Arc::new(AuditRecorder::new(
-            store,
-            adapters.clock.clone(),
-            feed.clone(),
-        )),
+        audit_sink: recorder.clone(),
+        audit_recorder: recorder,
         audit_feed: feed,
     }
 }
@@ -227,10 +234,12 @@ pub async fn start_with(
     });
     let server = http::spawn(listener, tls, router)?;
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
+    let audit_flush = tasks::spawn_audit_flush(services.audit_recorder, tasks::AUDIT_FLUSH_PERIOD);
     Ok(RunningAgent {
         server,
         identity,
         purge,
+        audit_flush,
     })
 }
 

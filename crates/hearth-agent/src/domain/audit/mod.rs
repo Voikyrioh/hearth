@@ -7,6 +7,7 @@ mod csv;
 mod event;
 mod filter;
 mod policy;
+mod repeat;
 
 pub use action::AuditAction;
 pub use csv::{BOM, SEPARATOR, field as csv_field, render as render_csv};
@@ -19,3 +20,4 @@ pub use policy::{
     MAX_ENTRIES, RETENTION, RequestKind, can_read_journal, excess_entries, is_journaled,
     retention_cutoff,
 };
+pub use repeat::{MAX_TRACKED, REPEAT_WINDOW, RepeatFilter};
