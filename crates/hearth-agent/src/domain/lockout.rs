@@ -15,6 +15,8 @@
 
 use time::{Duration, OffsetDateTime};
 
+use super::text::is_unsafe_char;
+
 /// Nombre d'échecs qui déclenche la première attente.
 pub const FAILURES_BEFORE_LOCK: u32 = 5;
 /// Première attente.
@@ -44,13 +46,14 @@ pub struct AttemptKey(String);
 
 impl AttemptKey {
     pub fn new(username: &str, addr: &str) -> Self {
-        // Sans caractère de contrôle : la clé et les traces (une ligne de journal) ne peuvent pas
-        // être forgées par l'identifiant, et le séparateur ne peut pas y apparaître.
+        // Sans caractère de contrôle, séparateur de ligne Unicode ni caractère de format
+        // (bidirectionnel…) : la clé et les traces (une ligne de journal) ne peuvent pas être
+        // forgées par l'identifiant, et le séparateur ne peut pas y apparaître.
         let username: String = username
             .trim()
             .to_lowercase()
             .chars()
-            .filter(|c| !c.is_control())
+            .filter(|&c| !is_unsafe_char(c))
             .take(MAX_KEY_PART)
             .collect();
         let addr: String = addr.chars().take(MAX_KEY_PART).collect();
@@ -511,6 +514,19 @@ mod tests {
         assert_eq!(key.username(), "marieWARN forged linex".to_lowercase());
         assert!(!key.username().chars().any(char::is_control));
         assert!(!key.as_str().contains('\n'));
+    }
+
+    #[test]
+    fn unicode_line_separators_and_format_characters_never_reach_the_key_or_the_traces() {
+        let key = AttemptKey::new(
+            "ma\u{2028}rie\u{2029}\u{202E}evil\u{200F}\u{2066}x\u{FEFF}",
+            "10.0.0.1",
+        );
+        assert_eq!(key.username(), "marieevilx");
+        assert!(
+            !key.as_str()
+                .contains(['\u{2028}', '\u{2029}', '\u{202E}', '\u{200F}'])
+        );
     }
 
     #[test]

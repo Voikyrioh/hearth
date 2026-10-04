@@ -15,6 +15,7 @@ use super::auth::Caller;
 use super::{ApiError, AppState, wire};
 use crate::application::sessions::ClientInfo;
 use crate::domain::secret::Secret;
+use crate::domain::text::is_unsafe_char;
 
 /// Longueur maximale retenue du nom du poste (`X-Hearth-Client`).
 const MAX_CLIENT_NAME: usize = 128;
@@ -37,14 +38,15 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientAddr {
     }
 }
 
-/// Nom du poste annoncé par le client, nettoyé (caractères de contrôle retirés, longueur bornée).
+/// Nom du poste annoncé par le client, nettoyé (caractères de contrôle, de format et séparateurs
+/// de ligne retirés, longueur bornée).
 fn client_name(headers: &HeaderMap) -> String {
     let name: String = headers
         .get(headers::CLIENT)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|&c| !is_unsafe_char(c))
         .take(MAX_CLIENT_NAME)
         .collect();
     let name = name.trim();

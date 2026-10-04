@@ -10,3 +10,4 @@ pub mod operations;
 pub mod secret;
 pub mod session_token;
 pub mod sessions;
+pub mod text;
