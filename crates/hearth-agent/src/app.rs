@@ -8,12 +8,13 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::application::accounts::AccountService;
+use crate::application::audit::{AuditRecorder, AuditService};
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    Clock, HashError, IdGen, IdentityError, IdentityStore, PasswordHasher, PublicIdentity, Store,
-    StoreError, TokenGen,
+    AuditFeed, AuditSink, Clock, HashError, IdGen, IdentityError, IdentityStore, PasswordHasher,
+    PublicIdentity, Store, StoreError, TokenGen,
 };
 use crate::application::sessions::SessionService;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -23,14 +24,15 @@ use crate::entrypoint::signal::shutdown_signal;
 use crate::entrypoint::tasks::{self, BackgroundTask};
 use crate::entrypoint::terminal::TerminalPasswords;
 use crate::infrastructure::argon2::Argon2Hasher;
+use crate::infrastructure::audit_feed::BroadcastAuditFeed;
 use crate::infrastructure::clock::SystemClock;
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::sqlite::{
-    Database, DatabaseError, SqliteAccountRepo, SqliteLoginAttemptRepo, SqliteOperationRepo,
-    SqliteSessionRepo, SqliteStore,
+    Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteLoginAttemptRepo,
+    SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
 };
 use crate::infrastructure::system::SystemMachineInfo;
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
@@ -87,6 +89,12 @@ pub struct Services {
     pub sessions: Arc<SessionService>,
     pub operations: Arc<OperationService>,
     pub maintenance: Arc<MaintenanceService>,
+    /// Lecture et export du journal d'activité.
+    pub audit: Arc<AuditService>,
+    /// Écriture du journal hors transaction (refus et échecs relevés par le routeur).
+    pub audit_sink: Arc<dyn AuditSink>,
+    /// Diffusion interne des entrées du journal, pour le flux temps réel.
+    pub audit_feed: Arc<dyn AuditFeed>,
 }
 
 /// Agent démarré : le serveur, la partie publique de son identité et ses tâches de fond.
@@ -129,6 +137,7 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
     let accounts_repo = Arc::new(SqliteAccountRepo::new(pool.clone()));
     let sessions_repo = Arc::new(SqliteSessionRepo::new(pool.clone()));
     let store: Arc<dyn Store> = Arc::new(SqliteStore::new(pool.clone()));
+    let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
     Services {
         accounts: Arc::new(AccountService::new(
             accounts_repo.clone(),
@@ -137,6 +146,7 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             adapters.hasher.clone(),
             adapters.clock.clone(),
             adapters.ids.clone(),
+            feed.clone(),
         )),
         sessions: Arc::new(SessionService::new(
             accounts_repo,
@@ -147,13 +157,23 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             adapters.clock.clone(),
             adapters.ids.clone(),
             adapters.tokens.clone(),
+            feed.clone(),
         )),
         operations: Arc::new(OperationService::new(
             Arc::new(SqliteOperationRepo::new(pool.clone())),
             store.clone(),
             adapters.clock.clone(),
         )),
-        maintenance: Arc::new(MaintenanceService::new(store, adapters.clock.clone())),
+        maintenance: Arc::new(MaintenanceService::new(
+            store.clone(),
+            adapters.clock.clone(),
+        )),
+        audit: Arc::new(AuditService::new(
+            Arc::new(SqliteAuditRepo::new(pool.clone())),
+            feed.clone(),
+        )),
+        audit_sink: Arc::new(AuditRecorder::new(store, feed.clone())),
+        audit_feed: feed,
     }
 }
 

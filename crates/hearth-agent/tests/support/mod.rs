@@ -12,19 +12,24 @@ pub mod https;
 
 use async_trait::async_trait;
 use hearth_agent::application::accounts::{AccountService, AccountView};
+use hearth_agent::application::audit::AuditService;
 use hearth_agent::application::maintenance::MaintenanceService;
 use hearth_agent::application::operations::OperationService;
-use hearth_agent::application::ports::{Clock, HashError, IdGen, PasswordHasher, Store, TokenGen};
+use hearth_agent::application::ports::{
+    AuditFeed, Clock, HashError, IdGen, PasswordHasher, Store, TokenGen,
+};
 use hearth_agent::application::sessions::{ClientInfo, SessionService};
-use hearth_agent::domain::accounts::{AccountId, PlainPassword, Role};
+use hearth_agent::domain::accounts::{AccountId, PlainPassword, Role, Username};
+use hearth_agent::domain::audit::{Actor, Origin};
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::session_token::SessionToken;
 use hearth_agent::domain::sessions::{Session, SessionId};
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
+use hearth_agent::infrastructure::audit_feed::BroadcastAuditFeed;
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::{
-    Database, SqliteAccountRepo, SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo,
-    SqliteStore,
+    Database, SqliteAccountRepo, SqliteAuditRepo, SqliteLoginAttemptRepo, SqliteOperationRepo,
+    SqliteSessionRepo, SqliteStore,
 };
 use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
@@ -126,6 +131,9 @@ pub struct Env {
     pub sessions: Arc<SessionService>,
     pub operations: Arc<OperationService>,
     pub maintenance: Arc<MaintenanceService>,
+    pub audit: Arc<AuditService>,
+    pub audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink>,
+    pub feed: Arc<BroadcastAuditFeed>,
 }
 
 pub const CLIENT_ADDR: &str = "10.0.0.7";
@@ -139,6 +147,17 @@ pub fn client_at(addr: &str) -> ClientInfo {
         name: "poste/1.0".into(),
         addr: addr.into(),
     }
+}
+
+/// Qui demande, dans les tests des cas d'usage : un administrateur depuis un poste du réseau.
+pub fn by() -> &'static Actor {
+    static BY: std::sync::OnceLock<Actor> = std::sync::OnceLock::new();
+    BY.get_or_init(|| {
+        Actor::new(
+            Some(Username::parse("root").unwrap()),
+            Origin::client(Some("poste/1.0"), CLIENT_ADDR),
+        )
+    })
 }
 
 pub fn start_time() -> OffsetDateTime {
@@ -155,6 +174,7 @@ pub async fn env() -> Env {
     let accounts = Arc::new(SqliteAccountRepo::new(db.pool().clone()));
     let session_repo = Arc::new(SqliteSessionRepo::new(db.pool().clone()));
     let tokens: Arc<dyn TokenGen> = Arc::new(OsTokenGen);
+    let feed = Arc::new(BroadcastAuditFeed::new());
     let service = Arc::new(AccountService::new(
         accounts.clone(),
         session_repo.clone(),
@@ -162,6 +182,7 @@ pub async fn env() -> Env {
         hasher.clone(),
         clock.clone(),
         ids.clone(),
+        feed.clone(),
     ));
     let sessions = Arc::new(SessionService::new(
         accounts,
@@ -172,13 +193,23 @@ pub async fn env() -> Env {
         clock.clone(),
         ids,
         tokens,
+        feed.clone(),
     ));
     let operations = Arc::new(OperationService::new(
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
         store.clone(),
         clock.clone(),
     ));
-    let maintenance = Arc::new(MaintenanceService::new(store, clock.clone()));
+    let maintenance = Arc::new(MaintenanceService::new(store.clone(), clock.clone()));
+    let audit = Arc::new(AuditService::new(
+        Arc::new(SqliteAuditRepo::new(db.pool().clone())),
+        feed.clone(),
+    ));
+    let audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink> =
+        Arc::new(hearth_agent::application::audit::AuditRecorder::new(
+            store,
+            feed.clone() as Arc<dyn AuditFeed>,
+        ));
     Env {
         dir,
         db,
@@ -188,6 +219,9 @@ pub async fn env() -> Env {
         sessions,
         operations,
         maintenance,
+        audit,
+        audit_sink,
+        feed,
     }
 }
 
@@ -198,7 +232,7 @@ pub fn secret(value: &str) -> Secret {
 impl Env {
     pub async fn create(&self, username: &str, role: Role) -> AccountView {
         self.service
-            .create(username, secret(PASSWORD), role)
+            .create(username, secret(PASSWORD), role, by())
             .await
             .expect("création")
     }

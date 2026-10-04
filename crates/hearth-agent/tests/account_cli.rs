@@ -340,6 +340,17 @@ async fn revoke_closes_the_sessions_without_touching_the_password() {
     assert_eq!(stored_hash(dir.path()).await, hash_before);
 }
 
+/// action, compte, origine, adresse, cible, résultat, raison.
+type AuditRow = (
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    Option<String>,
+);
+
 async fn stored_hash(dir: &Path) -> String {
     let db = Database::open(dir).await.unwrap();
     let hash = sqlx::query_scalar("SELECT password_hash FROM accounts")
@@ -348,4 +359,53 @@ async fn stored_hash(dir: &Path) -> String {
         .unwrap();
     db.pool().close().await;
     hash
+}
+
+#[tokio::test]
+async fn every_command_is_journaled_with_the_command_line_origin_and_no_secret() {
+    let dir = data_dir();
+    assert!(add(dir.path(), "marie", "admin").ok());
+    assert!(add(dir.path(), "paul", "readonly").ok());
+    assert!(hearth(dir.path(), &["role", "paul", "admin"], None).ok());
+    assert!(hearth(dir.path(), &["passwd", "paul"], Some("Another-Pass-77")).ok());
+    assert!(hearth(dir.path(), &["revoke", "paul"], None).ok());
+    assert!(hearth(dir.path(), &["remove", "paul"], None).ok());
+    // Une commande qui échoue n'écrit rien.
+    assert!(!add(dir.path(), "marie", "admin").ok());
+    // Une consultation n'est pas journalisée.
+    assert!(hearth(dir.path(), &["list"], None).ok());
+
+    let db = Database::open(dir.path()).await.unwrap();
+    let rows: Vec<AuditRow> = sqlx::query_as(
+        "SELECT action, account, origin_kind, origin_addr, target, outcome, reason
+             FROM audit_events ORDER BY id",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    db.pool().close().await;
+    let actions: Vec<(&str, Option<&str>)> = rows
+        .iter()
+        .map(|row| (row.0.as_str(), row.4.as_deref()))
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            ("account.create", Some("marie")),
+            ("account.create", Some("paul")),
+            ("account.role", Some("paul (Administrateur)")),
+            ("account.password", Some("paul")),
+            ("sessions.revoke", Some("paul")),
+            ("account.delete", Some("paul")),
+        ]
+    );
+    for row in &rows {
+        assert_eq!(row.1, None, "pas de compte pour la ligne de commande");
+        assert_eq!(row.2, "cli");
+        assert_eq!(row.3, None, "pas d'adresse");
+        assert_eq!(row.5, "ok");
+        assert_eq!(row.6, None);
+    }
+    let dump = format!("{rows:?}");
+    assert!(!dump.contains(PASSWORD) && !dump.contains("Another-Pass-77"));
 }

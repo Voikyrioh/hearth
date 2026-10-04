@@ -73,7 +73,8 @@ fn describe(kind: OriginKind, name: Option<&str>, addr: Option<&str>) -> String 
         OriginKind::Assistant => "assistant".to_owned(),
         OriginKind::Client => format!(
             "{} ({})",
-            addr.unwrap_or("adresse inconnue"),
+            addr.filter(|addr| !addr.is_empty())
+                .unwrap_or("adresse inconnue"),
             name.unwrap_or("inconnu")
         ),
     }

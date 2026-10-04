@@ -11,7 +11,7 @@ use hearth_proto::api::sessions::{LoginRequest, LoginResponse, MeResponse};
 use hearth_proto::headers;
 use tracing::Instrument;
 
-use super::auth::Caller;
+use super::auth::{Caller, Requester};
 use super::{ApiError, AppState, wire};
 use crate::application::sessions::ClientInfo;
 use crate::domain::secret::Secret;
@@ -95,8 +95,9 @@ pub async fn login(
 pub async fn logout(
     State(state): State<AppState>,
     Caller(caller): Caller,
+    Requester(by): Requester,
 ) -> Result<StatusCode, ApiError> {
-    state.sessions.logout(&caller.session_id).await?;
+    state.sessions.logout(&caller.session_id, &by).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

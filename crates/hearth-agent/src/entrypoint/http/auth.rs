@@ -6,15 +6,19 @@
 //! redéclare rien : il reçoit le contexte authentifié par l'extracteur `Caller`. La couche pose
 //! aussi le suivi des opérations quand la table le demande.
 
-use axum::extract::{FromRequestParts, Request, State};
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, FromRequestParts, Request, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use hearth_proto::error::ErrorCode;
+use hearth_proto::headers;
 
 use super::{Access, ApiError, AppState, operations};
 use crate::application::sessions::CurrentSession;
+use crate::domain::audit::{Actor, Origin};
 
 /// Ce que la couche d'accès a décidé pour une route : son niveau, et si ses requêtes qui
 /// portent une clé d'opération sont suivies.
@@ -54,6 +58,21 @@ fn allows(access: Access, session: &CurrentSession) -> bool {
     }
 }
 
+/// D'où vient la requête : l'adresse de la connexion TCP (jamais un en-tête de mandataire) et le
+/// nom du poste annoncé par le client.
+fn origin_of(parts: &Parts) -> Origin {
+    let addr = parts
+        .extensions
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| addr.ip().to_canonical().to_string())
+        .unwrap_or_default();
+    let name = parts
+        .headers
+        .get(headers::CLIENT)
+        .and_then(|value| value.to_str().ok());
+    Origin::client(name, &addr)
+}
+
 /// La couche d'accès d'une route non publique.
 pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next) -> Response {
     let (mut parts, body) = request.into_parts();
@@ -68,6 +87,10 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         )
         .into_response();
     }
+    parts.extensions.insert(Requester(Actor::new(
+        Some(session.account.username.clone()),
+        origin_of(&parts),
+    )));
     parts.extensions.insert(Caller(session.clone()));
     let request = Request::from_parts(parts, body);
     if guard.tracked {
@@ -89,6 +112,23 @@ impl<S: Send + Sync> FromRequestParts<S> for Caller {
         parts
             .extensions
             .get::<Caller>()
+            .cloned()
+            .ok_or_else(|| ApiError::internal(&"route sans couche d'accès"))
+    }
+}
+
+/// Qui fait la requête, pour le journal d'activité : le compte de l'appelant et l'origine de la
+/// demande. Posé par la couche d'accès, comme `Caller`.
+#[derive(Clone)]
+pub struct Requester(pub Actor);
+
+impl<S: Send + Sync> FromRequestParts<S> for Requester {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<Requester>()
             .cloned()
             .ok_or_else(|| ApiError::internal(&"route sans couche d'accès"))
     }

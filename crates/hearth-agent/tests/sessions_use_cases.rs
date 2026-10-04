@@ -10,7 +10,7 @@ use hearth_agent::application::sessions::{AuthError, LoginError};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::operations::{OperationKey, OperationStatus, Replay, RequestFingerprint};
 use hearth_agent::domain::sessions::{LIFETIME, SessionEnd};
-use support::{PASSWORD, client, client_at, env, secret};
+use support::{PASSWORD, by, client, client_at, env, secret};
 use time::Duration;
 
 const WRONG: &str = "Wrong-Horse-9999";
@@ -333,7 +333,10 @@ async fn logout_deletes_the_session_without_a_revocation_trace() {
     let env = env().await;
     let marie = env.create("marie", Role::Admin).await;
     let outcome = login_ok(&env, "marie").await;
-    env.sessions.logout(&outcome.session_id).await.unwrap();
+    env.sessions
+        .logout(&outcome.session_id, by())
+        .await
+        .unwrap();
     assert!(env.session_ids(&marie.id).await.is_empty());
     let error = env
         .sessions
@@ -353,7 +356,7 @@ async fn closing_sessions_leaves_a_revocation_trace_whatever_the_cause() {
 
     // Mot de passe changé par un administrateur.
     env.service
-        .set_password(&marie.id, secret("Another-Pass-77"))
+        .set_password(&marie.id, secret("Another-Pass-77"), by())
         .await
         .unwrap();
     let error = env.sessions.authenticate(&marie_token).await.unwrap_err();
@@ -363,7 +366,10 @@ async fn closing_sessions_leaves_a_revocation_trace_whatever_the_cause() {
     );
 
     // Suppression du compte : le jeton est révoqué, pas « expiré ».
-    env.service.delete(&paul.id, None, None).await.unwrap();
+    env.service
+        .delete(&paul.id, None, None, by())
+        .await
+        .unwrap();
     let error = env.sessions.authenticate(&paul_token).await.unwrap_err();
     assert!(
         matches!(error, AuthError::Ended(SessionEnd::Revoked)),
@@ -384,6 +390,7 @@ async fn revoking_sessions_closes_them_and_changing_my_password_keeps_the_curren
             secret(PASSWORD),
             secret("Another-Pass-77"),
             Some(kept.session_id.clone()),
+            by(),
         )
         .await
         .unwrap();
@@ -398,7 +405,7 @@ async fn revoking_sessions_closes_them_and_changing_my_password_keeps_the_curren
         .unwrap_err();
     assert!(matches!(error, AuthError::Ended(SessionEnd::Revoked)));
 
-    env.service.revoke_sessions(&marie.id).await.unwrap();
+    env.service.revoke_sessions(&marie.id, by()).await.unwrap();
     let error = env
         .sessions
         .authenticate(&kept.token.encode())
@@ -428,7 +435,7 @@ async fn the_purge_removes_expired_sessions_old_revocations_idle_counters_and_ol
             .unwrap(),
         Replay::Execute
     );
-    env.service.revoke_sessions(&paul.id).await.unwrap();
+    env.service.revoke_sessions(&paul.id, by()).await.unwrap();
 
     // 2 h plus tard : la session de test (1 h) est expirée, rien d'autre n'est périmé.
     env.clock.advance(Duration::hours(2));
@@ -731,6 +738,7 @@ async fn a_password_changed_between_verification_and_session_creation_does_not_l
         env.clock.clone(),
         Arc::new(support::SequentialIds::starting_at(500)),
         Arc::new(OsTokenGen),
+        env.feed.clone(),
     );
     let error = service
         .login("marie", secret(PASSWORD), &client())

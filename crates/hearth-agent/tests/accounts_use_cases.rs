@@ -9,7 +9,7 @@ use hearth_agent::application::ports::AccountRepo;
 use hearth_agent::domain::accounts::{PasswordRule, Role, Username};
 use hearth_agent::domain::sessions::SessionId;
 use hearth_agent::infrastructure::sqlite::SqliteAccountRepo;
-use support::{PASSWORD, env, secret};
+use support::{PASSWORD, by, env, secret};
 use time::Duration;
 
 #[tokio::test]
@@ -35,7 +35,7 @@ async fn create_refuses_an_invalid_username() {
     for bad in ["", "ab", "a b", &"x".repeat(33)] {
         let error = env
             .service
-            .create(bad, secret(PASSWORD), Role::Admin)
+            .create(bad, secret(PASSWORD), Role::Admin, by())
             .await
             .unwrap_err();
         assert!(matches!(error, AccountError::Username(_)), "{bad:?}");
@@ -48,7 +48,7 @@ async fn create_lists_every_unmet_password_rule() {
     let env = env().await;
     let error = env
         .service
-        .create("marie", secret("abc"), Role::ReadOnly)
+        .create("marie", secret("abc"), Role::ReadOnly, by())
         .await
         .unwrap_err();
     let AccountError::WeakPassword(rejected) = error else {
@@ -70,7 +70,7 @@ async fn a_password_containing_the_username_is_refused() {
     let env = env().await;
     let error = env
         .service
-        .create("marie", secret("Hello-Marie-123"), Role::Admin)
+        .create("marie", secret("Hello-Marie-123"), Role::Admin, by())
         .await
         .unwrap_err();
     assert!(matches!(
@@ -86,7 +86,7 @@ async fn usernames_are_unique_whatever_the_case() {
     for duplicate in ["marie", "MARIE", "Marie"] {
         let error = env
             .service
-            .create(duplicate, secret(PASSWORD), Role::ReadOnly)
+            .create(duplicate, secret(PASSWORD), Role::ReadOnly, by())
             .await
             .unwrap_err();
         assert!(matches!(error, AccountError::UsernameTaken), "{duplicate}");
@@ -98,8 +98,12 @@ async fn usernames_are_unique_whatever_the_case() {
 #[tokio::test]
 async fn two_simultaneous_creations_of_the_same_username_give_one_account() {
     let env = env().await;
-    let first = env.service.create("marie", secret(PASSWORD), Role::Admin);
-    let second = env.service.create("MARIE", secret(PASSWORD), Role::Admin);
+    let first = env
+        .service
+        .create("marie", secret(PASSWORD), Role::Admin, by());
+    let second = env
+        .service
+        .create("MARIE", secret(PASSWORD), Role::Admin, by());
     let (first, second) = tokio::join!(first, second);
     assert_eq!(first.is_ok() as u8 + second.is_ok() as u8, 1);
     assert_eq!(env.service.list().await.unwrap().len(), 1);
@@ -147,12 +151,12 @@ async fn change_role_promotes_and_demotes() {
     let paul = env.create("paul", Role::ReadOnly).await;
 
     env.service
-        .change_role(&paul.id, Role::Admin)
+        .change_role(&paul.id, Role::Admin, by())
         .await
         .unwrap();
     assert_eq!(env.service.find("paul").await.unwrap().role, Role::Admin);
     env.service
-        .change_role(&paul.id, Role::ReadOnly)
+        .change_role(&paul.id, Role::ReadOnly, by())
         .await
         .unwrap();
     assert_eq!(env.service.find("paul").await.unwrap().role, Role::ReadOnly);
@@ -166,7 +170,11 @@ async fn the_last_administrator_cannot_be_removed_nor_demoted() {
     env.insert_session(&marie.id, "S1", Duration::hours(1))
         .await;
 
-    let removal = env.service.delete(&marie.id, None, None).await.unwrap_err();
+    let removal = env
+        .service
+        .delete(&marie.id, None, None, by())
+        .await
+        .unwrap_err();
     assert!(matches!(removal, AccountError::LastAdmin(_)));
     assert_eq!(
         removal.to_string(),
@@ -174,7 +182,7 @@ async fn the_last_administrator_cannot_be_removed_nor_demoted() {
     );
     let demotion = env
         .service
-        .change_role(&marie.id, Role::ReadOnly)
+        .change_role(&marie.id, Role::ReadOnly, by())
         .await
         .unwrap_err();
     assert!(matches!(demotion, AccountError::LastAdmin(_)));
@@ -185,18 +193,21 @@ async fn the_last_administrator_cannot_be_removed_nor_demoted() {
 
     // Avec un second administrateur, la rétrogradation puis la suppression de l'autre passent.
     env.service
-        .change_role(&paul.id, Role::Admin)
+        .change_role(&paul.id, Role::Admin, by())
         .await
         .unwrap();
     env.service
-        .change_role(&marie.id, Role::ReadOnly)
+        .change_role(&marie.id, Role::ReadOnly, by())
         .await
         .unwrap();
     assert!(matches!(
-        env.service.delete(&paul.id, None, None).await,
+        env.service.delete(&paul.id, None, None, by()).await,
         Err(AccountError::LastAdmin(_))
     ));
-    env.service.delete(&marie.id, None, None).await.unwrap();
+    env.service
+        .delete(&marie.id, None, None, by())
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -205,8 +216,8 @@ async fn two_simultaneous_removals_of_the_last_two_administrators_leave_one() {
     let marie = env.create("marie", Role::Admin).await;
     let paul = env.create("paul", Role::Admin).await;
 
-    let first = env.service.delete(&marie.id, None, None);
-    let second = env.service.delete(&paul.id, None, None);
+    let first = env.service.delete(&marie.id, None, None, by());
+    let second = env.service.delete(&paul.id, None, None, by());
     let (first, second) = tokio::join!(first, second);
 
     let refused = [&first, &second]
@@ -234,7 +245,7 @@ async fn an_administrator_password_change_closes_every_session() {
 
     let closed = env
         .service
-        .set_password(&marie.id, secret("Brand-New-Pass-7"))
+        .set_password(&marie.id, secret("Brand-New-Pass-7"), by())
         .await
         .unwrap();
     assert_eq!(closed, 2);
@@ -259,7 +270,7 @@ async fn set_password_applies_the_rules_and_changes_nothing_when_refused() {
     let before = env.hash_of(&marie.id).await;
     let error = env
         .service
-        .set_password(&marie.id, secret("short"))
+        .set_password(&marie.id, secret("short"), by())
         .await
         .unwrap_err();
     assert!(matches!(error, AccountError::WeakPassword(_)));
@@ -285,6 +296,7 @@ async fn changing_your_own_password_keeps_only_the_current_session() {
             secret(PASSWORD),
             secret("Brand-New-Pass-7"),
             Some(SessionId::new("S2")),
+            by(),
         )
         .await
         .unwrap();
@@ -299,6 +311,7 @@ async fn changing_your_own_password_keeps_only_the_current_session() {
             secret("Brand-New-Pass-7"),
             secret("Another-Pass-88"),
             None,
+            by(),
         )
         .await
         .unwrap();
@@ -322,6 +335,7 @@ async fn a_wrong_old_password_changes_nothing() {
             secret("Not-The-Password-1"),
             secret("Brand-New-Pass-7"),
             Some(SessionId::new("S1")),
+            by(),
         )
         .await
         .unwrap_err();
@@ -350,7 +364,13 @@ async fn the_old_password_is_not_subject_to_the_complexity_rules() {
         .unwrap();
 
     env.service
-        .change_own_password(&marie.id, secret("weak"), secret("Brand-New-Pass-7"), None)
+        .change_own_password(
+            &marie.id,
+            secret("weak"),
+            secret("Brand-New-Pass-7"),
+            None,
+            by(),
+        )
         .await
         .unwrap();
 }
@@ -363,7 +383,11 @@ async fn removing_an_account_closes_its_sessions() {
     env.insert_session(&paul.id, "S1", Duration::hours(1)).await;
     env.insert_session(&paul.id, "S2", Duration::hours(1)).await;
 
-    let closed = env.service.delete(&paul.id, None, None).await.unwrap();
+    let closed = env
+        .service
+        .delete(&paul.id, None, None, by())
+        .await
+        .unwrap();
     assert_eq!(closed, 2);
     assert!(env.session_ids(&paul.id).await.is_empty());
     assert!(matches!(
@@ -378,19 +402,21 @@ async fn removing_an_unknown_account_is_not_found() {
     env.create("marie", Role::Admin).await;
     let ghost = hearth_agent::domain::accounts::AccountId::new("INCONNU");
     assert!(matches!(
-        env.service.delete(&ghost, None, None).await,
+        env.service.delete(&ghost, None, None, by()).await,
         Err(AccountError::NotFound)
     ));
     assert!(matches!(
-        env.service.set_password(&ghost, secret(PASSWORD)).await,
+        env.service
+            .set_password(&ghost, secret(PASSWORD), by())
+            .await,
         Err(AccountError::NotFound)
     ));
     assert!(matches!(
-        env.service.revoke_sessions(&ghost).await,
+        env.service.revoke_sessions(&ghost, by()).await,
         Err(AccountError::NotFound)
     ));
     assert!(matches!(
-        env.service.change_role(&ghost, Role::Admin).await,
+        env.service.change_role(&ghost, Role::Admin, by()).await,
         Err(AccountError::NotFound)
     ));
 }
@@ -405,9 +431,15 @@ async fn revoking_closes_sessions_and_keeps_the_password() {
         .await;
 
     let before = env.hash_of(&marie.id).await;
-    assert_eq!(env.service.revoke_sessions(&marie.id).await.unwrap(), 2);
+    assert_eq!(
+        env.service.revoke_sessions(&marie.id, by()).await.unwrap(),
+        2
+    );
     assert!(env.session_ids(&marie.id).await.is_empty());
-    assert_eq!(env.service.revoke_sessions(&marie.id).await.unwrap(), 0);
+    assert_eq!(
+        env.service.revoke_sessions(&marie.id, by()).await.unwrap(),
+        0
+    );
 
     let after = env.service.find("marie").await.unwrap();
     assert_eq!(env.hash_of(&marie.id).await, before);
@@ -423,7 +455,7 @@ async fn deleting_your_own_account_requires_your_username() {
     for wrong in [None, Some(""), Some("paul"), Some("mari")] {
         let error = env
             .service
-            .delete(&marie.id, Some(&marie.id), wrong)
+            .delete(&marie.id, Some(&marie.id), wrong, by())
             .await
             .unwrap_err();
         assert!(matches!(error, AccountError::SelfDeletion(_)), "{wrong:?}");
@@ -435,7 +467,7 @@ async fn deleting_your_own_account_requires_your_username() {
     assert_eq!(env.service.list().await.unwrap().len(), 2);
 
     env.service
-        .delete(&marie.id, Some(&marie.id), Some("MARIE"))
+        .delete(&marie.id, Some(&marie.id), Some("MARIE"), by())
         .await
         .unwrap();
     assert_eq!(env.service.list().await.unwrap().len(), 1);
@@ -447,7 +479,7 @@ async fn deleting_someone_else_needs_no_confirmation() {
     let marie = env.create("marie", Role::Admin).await;
     let paul = env.create("paul", Role::ReadOnly).await;
     env.service
-        .delete(&paul.id, Some(&marie.id), None)
+        .delete(&paul.id, Some(&marie.id), None, by())
         .await
         .unwrap();
 }
@@ -462,13 +494,13 @@ async fn errors_never_contain_the_password() {
     for attempt in attempts {
         let error = env
             .service
-            .set_password(&marie.id, secret(attempt))
+            .set_password(&marie.id, secret(attempt), by())
             .await
             .unwrap_err();
         messages.push(format!("{error} {error:?}"));
         let error = env
             .service
-            .change_own_password(&marie.id, secret(attempt), secret(attempt), None)
+            .change_own_password(&marie.id, secret(attempt), secret(attempt), None, by())
             .await
             .unwrap_err();
         messages.push(format!("{error} {error:?}"));
@@ -552,6 +584,7 @@ async fn a_password_changed_between_verification_and_write_is_not_overwritten() 
         }),
         env.clock.clone(),
         Arc::new(support::SequentialIds::starting_at(100)),
+        env.feed.clone(),
     );
 
     let error = racing
@@ -560,6 +593,7 @@ async fn a_password_changed_between_verification_and_write_is_not_overwritten() 
             secret(PASSWORD),
             secret("Brand-New-Pass-7"),
             None,
+            by(),
         )
         .await
         .unwrap_err();
@@ -602,9 +636,10 @@ async fn the_date_returned_by_create_is_the_one_read_back_by_find() {
         Arc::new(Argon2Hasher::with_cost(8, 1, 1).unwrap()),
         Arc::new(SystemClock),
         Arc::new(UlidGen),
+        env.feed.clone(),
     );
     let created = service
-        .create("marie", secret(PASSWORD), Role::Admin)
+        .create("marie", secret(PASSWORD), Role::Admin, by())
         .await
         .unwrap();
     let found = service.find("marie").await.unwrap();

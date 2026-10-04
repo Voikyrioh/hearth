@@ -12,11 +12,13 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use super::accounts::AccountView;
+use super::audit::Pending;
 use super::ports::{
-    AccountRepo, Clock, HashError, IdGen, LoginAttemptRepo, PasswordHasher, SessionRepo, Store,
-    StoreError, TokenGen, TokenGenError,
+    AccountRepo, AuditFeed, Clock, HashError, IdGen, LoginAttemptRepo, PasswordHasher, SessionRepo,
+    Store, StoreError, TokenGen, TokenGenError,
 };
 use crate::domain::accounts::Username;
+use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
 use crate::domain::lockout::{
     AttemptKey, LockoutDecision, LockoutEvent, LockoutState, admits_in_queue, retry_after_seconds,
     step, step_address,
@@ -89,6 +91,7 @@ pub struct SessionService {
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     tokens: Arc<dyn TokenGen>,
+    feed: Arc<dyn AuditFeed>,
     turns: Turns,
 }
 
@@ -179,6 +182,7 @@ impl SessionService {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGen>,
         tokens: Arc<dyn TokenGen>,
+        feed: Arc<dyn AuditFeed>,
     ) -> Self {
         Self {
             accounts,
@@ -189,6 +193,7 @@ impl SessionService {
             clock,
             ids,
             tokens,
+            feed,
             turns: Turns::default(),
         }
     }
@@ -217,17 +222,16 @@ impl SessionService {
         let result = self
             .login_in_turn(username, password, client, &pair, &address)
             .await;
-        // Trace des refus : identifiant tenté, adresse, raison ; jamais le mot de passe. Le
-        // journal d'activité (HRT-05) se branchera ici pour consigner connexions et verrouillages.
+        // Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de
+        // passe tapé au mauvais endroit, BR-AUDIT-005) ni le mot de passe. Le journal d'activité
+        // consigne connexions et verrouillages (écrits dans la transaction de la tentative).
         match &result {
             Err(LoginError::InvalidCredentials) => tracing::warn!(
-                username = %pair.username(),
                 addr = %client.addr,
                 reason = "invalid_credentials",
                 "connexion refusée"
             ),
             Err(LoginError::TooManyAttempts { retry_after }) => tracing::warn!(
-                username = %pair.username(),
                 addr = %client.addr,
                 reason = "locked",
                 retry_after_s = retry_after_seconds(*retry_after),
@@ -292,8 +296,40 @@ impl SessionService {
             tx.login_attempts()
                 .save(address, &address_next, now)
                 .await?;
+            // Journal (BR-AUDIT-003, 005, 006, 007), dans la transaction des compteurs : la
+            // tentative refusée, sans compte ni identifiant saisi (la raison est la même que
+            // l'identifiant existe ou non), puis le blocage qu'elle a éventuellement déclenché.
+            let wait = longest_wait(&[pair_decision, address_decision]);
+            let actor = Actor::new(None, Origin::client(Some(&client.name), &client.addr));
+            let reason = if Username::parse(username).is_err() {
+                Reason::InvalidIdentifier
+            } else {
+                Reason::InvalidCredentials
+            };
+            let mut journal = Pending::default();
+            let denied = AuditEvent::new(
+                now,
+                actor.clone(),
+                AuditAction::Login,
+                Target::None,
+                Outcome::Denied(reason),
+            );
+            journal.record(&mut *tx, denied).await;
+            if let Some(retry_after) = wait {
+                let locked = AuditEvent::new(
+                    now,
+                    actor,
+                    AuditAction::LoginLocked,
+                    Target::None,
+                    Outcome::Denied(Reason::TooManyAttempts {
+                        retry_after_s: retry_after_seconds(retry_after),
+                    }),
+                );
+                journal.record(&mut *tx, locked).await;
+            }
             tx.commit().await?;
-            return Err(match longest_wait(&[pair_decision, address_decision]) {
+            journal.publish(&*self.feed);
+            return Err(match wait {
                 Some(retry_after) => LoginError::TooManyAttempts { retry_after },
                 None => LoginError::InvalidCredentials,
             });
@@ -314,7 +350,20 @@ impl SessionService {
         };
         tx.sessions().insert(&session).await?;
         tx.accounts().record_login(&account.id, now).await?;
+        let mut journal = Pending::default();
+        let succeeded = AuditEvent::new(
+            now,
+            Actor::new(
+                Some(account.username.clone()),
+                Origin::client(Some(&client.name), &client.addr),
+            ),
+            AuditAction::Login,
+            Target::None,
+            Outcome::Succeeded,
+        );
+        journal.record(&mut *tx, succeeded).await;
         tx.commit().await?;
+        journal.publish(&*self.feed);
 
         let mut view = AccountView::from(&account);
         view.last_login_at = Some(now);
@@ -360,10 +409,22 @@ impl SessionService {
         })
     }
 
-    /// Déconnexion explicite : supprime la session courante.
-    pub async fn logout(&self, session: &SessionId) -> Result<(), StoreError> {
+    /// Déconnexion explicite : supprime la session courante. `by` : le compte et l'origine de la
+    /// requête (journal d'activité, BR-AUDIT-003).
+    pub async fn logout(&self, session: &SessionId, by: &Actor) -> Result<(), StoreError> {
         let mut tx = self.store.begin().await?;
         tx.sessions().delete(session).await?;
-        tx.commit().await
+        let mut journal = Pending::default();
+        let event = AuditEvent::new(
+            self.clock.now(),
+            by.clone(),
+            AuditAction::Logout,
+            Target::None,
+            Outcome::Succeeded,
+        );
+        journal.record(&mut *tx, event).await;
+        tx.commit().await?;
+        journal.publish(&*self.feed);
+        Ok(())
     }
 }

@@ -10,13 +10,15 @@ use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
 
+use super::audit::Pending;
 use super::ports::{
-    AccountRepo, Clock, HashError, IdGen, PasswordHasher, SessionRepo, Store, StoreError,
+    AccountRepo, AuditFeed, Clock, HashError, IdGen, PasswordHasher, SessionRepo, Store, StoreError,
 };
 use crate::domain::accounts::{
     Account, AccountId, ConfirmationMismatch, LastAdminError, PasswordRejected, PlainPassword,
     Role, Username, UsernameError, check_removal, check_role_change, confirm_self_deletion,
 };
+use crate::domain::audit::{Actor, AuditAction, AuditEvent, Outcome, Target};
 use crate::domain::secret::Secret;
 use crate::domain::sessions::{
     PasswordChange, SessionId, closure_on_account_deletion, closure_on_password_change,
@@ -86,9 +88,11 @@ pub struct AccountService {
     hasher: Arc<dyn PasswordHasher>,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
+    feed: Arc<dyn AuditFeed>,
 }
 
 impl AccountService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         accounts: Arc<dyn AccountRepo>,
         sessions: Arc<dyn SessionRepo>,
@@ -96,6 +100,7 @@ impl AccountService {
         hasher: Arc<dyn PasswordHasher>,
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGen>,
+        feed: Arc<dyn AuditFeed>,
     ) -> Self {
         Self {
             accounts,
@@ -104,7 +109,20 @@ impl AccountService {
             hasher,
             clock,
             ids,
+            feed,
         }
+    }
+
+    /// L'entrée du journal d'une action de gestion des comptes réussie (BR-AUDIT-003), écrite
+    /// dans la transaction de l'action (BR-ACCT-016).
+    fn succeeded(&self, by: &Actor, action: AuditAction, target: Target) -> AuditEvent {
+        AuditEvent::new(
+            self.clock.now(),
+            by.clone(),
+            action,
+            target,
+            Outcome::Succeeded,
+        )
     }
 
     /// BR-ACCT-002 : contrôle le format d'un identifiant sans rien lire ni écrire. Permet de
@@ -114,12 +132,13 @@ impl AccountService {
         Ok(())
     }
 
-    /// BR-ACCT-001 à BR-ACCT-005 : crée un compte.
+    /// BR-ACCT-001 à BR-ACCT-005 : crée un compte. `by` : qui le demande (journal d'activité).
     pub async fn create(
         &self,
         username: &str,
         password: Secret,
         role: Role,
+        by: &Actor,
     ) -> Result<AccountView, AccountError> {
         let username = Username::parse(username)?;
         let password =
@@ -152,7 +171,15 @@ impl AccountService {
                 StoreError::Duplicate { .. } => AccountError::UsernameTaken,
                 other => AccountError::Store(other),
             })?;
+        let mut journal = Pending::default();
+        let event = self.succeeded(
+            by,
+            AuditAction::AccountCreate,
+            Target::Account(account.username.clone()),
+        );
+        journal.record(&mut *tx, event).await;
         tx.commit().await?;
+        journal.publish(&*self.feed);
         Ok(AccountView::from(&account))
     }
 
@@ -186,7 +213,12 @@ impl AccountService {
     }
 
     /// BR-ACCT-007 : change le rôle, sauf pour rétrograder le dernier administrateur.
-    pub async fn change_role(&self, id: &AccountId, role: Role) -> Result<(), AccountError> {
+    pub async fn change_role(
+        &self,
+        id: &AccountId,
+        role: Role,
+        by: &Actor,
+    ) -> Result<(), AccountError> {
         let mut tx = self.store.begin().await?;
         let account = tx
             .accounts()
@@ -196,7 +228,15 @@ impl AccountService {
         let admins = tx.accounts().count_admins().await?;
         check_role_change(account.role, role, admins)?;
         tx.accounts().set_role(id, role).await?;
+        let mut journal = Pending::default();
+        let event = self.succeeded(
+            by,
+            AuditAction::AccountRole,
+            Target::AccountRole(account.username.clone(), role),
+        );
+        journal.record(&mut *tx, event).await;
         tx.commit().await?;
+        journal.publish(&*self.feed);
         Ok(())
     }
 
@@ -206,11 +246,18 @@ impl AccountService {
         &self,
         id: &AccountId,
         password: Secret,
+        by: &Actor,
     ) -> Result<u64, AccountError> {
         let account = self.require(id).await?;
         let hash = self.hash_for(&account, password).await?;
-        self.apply_password(id, &hash, PasswordChange::ByAdmin, None)
-            .await
+        self.apply_password(
+            id,
+            &hash,
+            PasswordChange::ByAdmin,
+            None,
+            (by, AuditAction::AccountPassword),
+        )
+        .await
     }
 
     /// BR-ACCT-009 : le titulaire change son mot de passe. Vérifie l'ancien, ferme les autres
@@ -221,6 +268,7 @@ impl AccountService {
         old_password: Secret,
         new_password: Secret,
         current_session: Option<SessionId>,
+        by: &Actor,
     ) -> Result<u64, AccountError> {
         let account = self.require(id).await?;
         if !self
@@ -236,6 +284,7 @@ impl AccountService {
             &hash,
             PasswordChange::Own { current_session },
             Some(&account.password_hash),
+            (by, AuditAction::OwnPassword),
         )
         .await
     }
@@ -249,6 +298,7 @@ impl AccountService {
         id: &AccountId,
         acting: Option<&AccountId>,
         confirmation: Option<&str>,
+        by: &Actor,
     ) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
         let account = tx
@@ -266,15 +316,24 @@ impl AccountService {
             .close(id, &closure_on_account_deletion(), self.clock.now())
             .await?;
         tx.accounts().delete(id).await?;
+        let mut journal = Pending::default();
+        let event = self.succeeded(
+            by,
+            AuditAction::AccountDelete,
+            Target::Account(account.username.clone()),
+        );
+        journal.record(&mut *tx, event).await;
         tx.commit().await?;
+        journal.publish(&*self.feed);
         Ok(closed)
     }
 
     /// BR-ACCT-011 : ferme toutes les sessions du compte sans toucher au mot de passe.
     /// Rend le nombre de sessions fermées.
-    pub async fn revoke_sessions(&self, id: &AccountId) -> Result<u64, AccountError> {
+    pub async fn revoke_sessions(&self, id: &AccountId, by: &Actor) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
-        tx.accounts()
+        let account = tx
+            .accounts()
             .find(id)
             .await?
             .ok_or(AccountError::NotFound)?;
@@ -282,7 +341,15 @@ impl AccountService {
             .sessions()
             .close(id, &closure_on_revocation(), self.clock.now())
             .await?;
+        let mut journal = Pending::default();
+        let event = self.succeeded(
+            by,
+            AuditAction::SessionsRevoke,
+            Target::Account(account.username.clone()),
+        );
+        journal.record(&mut *tx, event).await;
         tx.commit().await?;
+        journal.publish(&*self.feed);
         Ok(closed)
     }
 
@@ -306,6 +373,7 @@ impl AccountService {
         hash: &Secret,
         change: PasswordChange,
         verified_hash: Option<&Secret>,
+        (by, action): (&Actor, AuditAction),
     ) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
         let current = tx
@@ -326,7 +394,11 @@ impl AccountService {
             .sessions()
             .close(id, &closure_on_password_change(change), now)
             .await?;
+        let mut journal = Pending::default();
+        let event = self.succeeded(by, action, Target::Account(current.username.clone()));
+        journal.record(&mut *tx, event).await;
         tx.commit().await?;
+        journal.publish(&*self.feed);
         Ok(closed)
     }
 }
