@@ -29,6 +29,8 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-ACCT-014](./BR-ACCT-014-serveur-refuse-gestion-lecture-seule.md) — Le serveur refuse la gestion de comptes à un compte lecture seule  — `domain/accounts/role.rs::Role::can_manage_accounts` — ✓
 - [BR-ACCT-015](./BR-ACCT-015-gestion-en-ligne-de-commande.md) — Gestion de comptes en ligne de commande sur le serveur — `entrypoint/account.rs::execute` — —
 - [BR-ACCT-016](./BR-ACCT-016-changements-consignes-au-journal.md) — Changements de compte consignés au journal (HRT-05, pas encore appliquée) — — — —
+- [BR-DASH-004](./BR-DASH-004-hysteresis-processeur.md) — La charge du processeur doit tenir un niveau 30 secondes avant d'alerter — `hearth-proto/src/thresholds.rs::cpu_level` — invariant ✓
+- [BR-DASH-003](./BR-DASH-003-trois-niveaux-d-alerte.md) — Un état d'alerte comporte trois niveaux : normal, attention, critique — `hearth-proto/src/thresholds.rs::{percent_level, usage_level, temperature_level}` — invariant ✓
 
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
