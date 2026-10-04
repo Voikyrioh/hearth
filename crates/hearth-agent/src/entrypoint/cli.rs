@@ -1,9 +1,11 @@
-//! Ligne de commande : définition des options et sous-commandes (`serve` par défaut, `fingerprint`).
-//! L'exécution est assemblée par `app::run`.
+//! Ligne de commande : définition des options et sous-commandes (`serve` par défaut,
+//! `fingerprint`, `account …`). L'exécution est assemblée par `app::run`.
 
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+
+use crate::domain::accounts::Role;
 
 #[derive(Debug, Parser)]
 #[command(name = "hearth-agent", version, about = "Agent Hearth")]
@@ -20,17 +22,54 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Subcommand)]
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Command {
     /// Démarre l'agent (commande par défaut).
     Serve,
     /// Affiche l'empreinte du certificat, en créant l'identité si elle n'existe pas encore.
     Fingerprint,
+    /// Gère les comptes directement sur le serveur, sans réseau (mêmes règles que l'interface).
+    Account {
+        #[command(subcommand)]
+        action: AccountAction,
+    },
+}
+
+/// Opérations sur les comptes. Le mot de passe est demandé sans écho avec confirmation, ou lu
+/// dans la variable d'environnement `HEARTH_ACCOUNT_PASSWORD` (automatisation). Jamais en argument.
+#[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
+pub enum AccountAction {
+    /// Crée un compte.
+    Add {
+        /// Identifiant : 3 à 32 caractères, minuscules, chiffres, tiret, underscore.
+        username: String,
+        /// Rôle du compte : `admin` ou `readonly`.
+        #[arg(long, value_parser = parse_role)]
+        role: Role,
+    },
+    /// Liste les comptes avec leur dernière connexion et leurs sessions ouvertes.
+    List,
+    /// Définit un nouveau mot de passe et ferme les sessions du compte.
+    Passwd { username: String },
+    /// Change le rôle d'un compte (`admin` ou `readonly`).
+    Role {
+        username: String,
+        #[arg(value_parser = parse_role)]
+        role: Role,
+    },
+    /// Supprime un compte et ferme ses sessions.
+    Remove { username: String },
+    /// Ferme toutes les sessions d'un compte sans changer son mot de passe.
+    Revoke { username: String },
+}
+
+fn parse_role(value: &str) -> Result<Role, String> {
+    value.parse::<Role>().map_err(|error| error.to_string())
 }
 
 impl Cli {
     pub fn command(&self) -> Command {
-        self.command.unwrap_or(Command::Serve)
+        self.command.clone().unwrap_or(Command::Serve)
     }
 }
 
@@ -51,5 +90,79 @@ mod tests {
         assert_eq!(cli.data_dir, Some(PathBuf::from("/d")));
         let cli = Cli::parse_from(["hearth-agent", "fingerprint", "--config", "/c.toml"]);
         assert_eq!(cli.config, Some(PathBuf::from("/c.toml")));
+    }
+
+    #[test]
+    fn account_subcommands_are_parsed() {
+        let action = |args: &[&str]| match Cli::parse_from(args).command() {
+            Command::Account { action } => action,
+            other => panic!("attendu : account, reçu {other:?}"),
+        };
+        assert_eq!(
+            action(&["hearth-agent", "account", "add", "marie", "--role", "admin"]),
+            AccountAction::Add {
+                username: "marie".into(),
+                role: Role::Admin
+            }
+        );
+        assert_eq!(
+            action(&["hearth-agent", "account", "list"]),
+            AccountAction::List
+        );
+        assert_eq!(
+            action(&["hearth-agent", "account", "passwd", "marie"]),
+            AccountAction::Passwd {
+                username: "marie".into()
+            }
+        );
+        assert_eq!(
+            action(&["hearth-agent", "account", "role", "marie", "readonly"]),
+            AccountAction::Role {
+                username: "marie".into(),
+                role: Role::ReadOnly
+            }
+        );
+        assert_eq!(
+            action(&["hearth-agent", "account", "remove", "marie"]),
+            AccountAction::Remove {
+                username: "marie".into()
+            }
+        );
+        assert_eq!(
+            action(&["hearth-agent", "account", "revoke", "marie"]),
+            AccountAction::Revoke {
+                username: "marie".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_password_is_never_accepted_as_an_argument() {
+        assert!(
+            Cli::try_parse_from([
+                "hearth-agent",
+                "account",
+                "add",
+                "marie",
+                "--role",
+                "admin",
+                "--password",
+                "x"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["hearth-agent", "account", "passwd", "marie", "Secret-12345"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn an_unknown_role_is_refused() {
+        assert!(
+            Cli::try_parse_from(["hearth-agent", "account", "add", "marie", "--role", "root"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["hearth-agent", "account", "add", "marie"]).is_err());
     }
 }
