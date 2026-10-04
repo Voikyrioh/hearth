@@ -1,8 +1,17 @@
-//! Dossier de données de l'agent : le seul endroit qui le crée et qui en garantit les droits.
+//! Dossier de données de l'agent : le seul endroit qui le crée et qui contrôle ses droits.
 //!
-//! Sous Unix le dossier est en 0700 (créé ainsi, ou resserré s'il existe avec des droits plus
-//! larges) et les fichiers privés (`hearth.db`, `key.pem`…) ne sont lisibles que par le
-//! propriétaire. Sous Windows, le dossier de l'utilisateur est déjà protégé par ses ACL.
+//! Sous Unix : un dossier absent est créé en 0700. Un dossier qui existe déjà n'est jamais
+//! modifié en silence : s'il est ouvert à d'autres utilisateurs (droits au-delà de 0700), c'est
+//! une erreur qui dit quoi faire (`chmod 700`), sauf s'il est vide et qu'on peut en changer les
+//! droits (on en est le propriétaire) : il est alors resserré, puisqu'il ne contient encore rien
+//! d'exposé. Les fichiers privés (`hearth.db`, `key.pem`…) ne sont lisibles que par leur
+//! propriétaire.
+//!
+//! Sous Windows, ce module crée le dossier avec les droits hérités de son parent et ne
+//! vérifie ni ne change aucun droit : la confidentialité vient de l'emplacement par défaut
+//! (`%LOCALAPPDATA%`, protégé par les ACL du profil de l'utilisateur) ; un dossier choisi ailleurs
+//! n'est pas protégé par ce code. Windows ne sert qu'au développement.
+//!
 //! La racine de composition l'appelle avant d'ouvrir la base et le magasin d'identité ; chaque
 //! adaptateur le rappelle (sans effet si tout est déjà en ordre) pour ne jamais dépendre de
 //! l'ordre des appels.
@@ -15,31 +24,46 @@ const DIR_MODE: u32 = 0o700;
 #[cfg(unix)]
 const FILE_MODE: u32 = 0o600;
 
-/// Crée le dossier (et ses parents) s'il manque, et le resserre à 0700 s'il est plus ouvert.
-/// Échoue clairement si les droits ne peuvent pas être corrigés.
+/// Garantit que le dossier de données existe et n'est pas ouvert aux autres utilisateurs.
 #[cfg(unix)]
 pub fn ensure(dir: &Path) -> io::Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    use std::os::unix::fs::DirBuilderExt;
 
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(DIR_MODE)
-        .create(dir)?;
-    let mode = std::fs::metadata(dir)?.permissions().mode();
-    if mode & 0o077 != 0 {
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(DIR_MODE)).map_err(
-            |source| {
-                io::Error::new(
-                    source.kind(),
-                    format!(
-                        "droits du dossier de données trop larges ({:o}) et impossibles à resserrer en 0700 : {source}",
-                        mode & 0o777
-                    ),
-                )
-            },
-        )?;
+    match std::fs::metadata(dir) {
+        Ok(meta) if meta.is_dir() => check_existing(dir),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} existe et n'est pas un dossier", dir.display()),
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(DIR_MODE)
+            .create(dir),
+        Err(error) => Err(error),
     }
-    Ok(())
+}
+
+/// Dossier déjà là : on ne le resserre que s'il est vide (et seulement si les droits le permettent,
+/// ce qui revient à en être le propriétaire) ; sinon l'opérateur décide.
+#[cfg(unix)]
+fn check_existing(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = std::fs::metadata(dir)?.permissions().mode() & 0o777;
+    if mode & 0o077 == 0 {
+        return Ok(());
+    }
+    let advice = format!(
+        "le dossier de données {} est ouvert aux autres utilisateurs (droits {mode:o}) ; corrige-le avec `chmod 700 {}` ou choisis un autre dossier",
+        dir.display(),
+        dir.display()
+    );
+    let is_empty = std::fs::read_dir(dir)?.next().is_none();
+    if !is_empty {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, advice));
+    }
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(DIR_MODE))
+        .map_err(|source| io::Error::new(source.kind(), format!("{advice} ({source})")))
 }
 
 #[cfg(not(unix))]
@@ -94,11 +118,44 @@ mod tests {
     }
 
     #[test]
-    fn a_wider_existing_directory_is_tightened() {
+    fn an_empty_wider_directory_we_own_is_tightened() {
         let root = tempfile::tempdir().unwrap();
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         ensure(root.path()).unwrap();
         assert_eq!(mode(root.path()), 0o700);
+    }
+
+    #[test]
+    fn a_wider_directory_with_content_is_refused_and_left_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("hearth.db"), b"x").unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = ensure(root.path()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        let message = error.to_string();
+        assert!(message.contains("chmod 700"), "{message}");
+        assert!(
+            message.contains(&root.path().display().to_string()),
+            "{message}"
+        );
+        assert!(message.contains("755"), "{message}");
+        assert_eq!(mode(root.path()), 0o755);
+    }
+
+    #[test]
+    fn a_private_directory_with_content_is_accepted_as_is() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("hearth.db"), b"x").unwrap();
+        ensure(root.path()).unwrap();
+        assert_eq!(mode(root.path()), 0o700);
+    }
+
+    #[test]
+    fn a_file_in_place_of_the_directory_is_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("data");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(ensure(&file).is_err());
     }
 
     #[test]

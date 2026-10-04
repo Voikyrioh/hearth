@@ -152,7 +152,24 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn an_existing_wide_directory_and_database_are_tightened() {
+    async fn an_existing_wide_database_file_is_tightened() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        Database::open(root.path())
+            .await
+            .unwrap()
+            .pool()
+            .close()
+            .await;
+        let file = root.path().join(DATABASE_FILE);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Database::open(root.path()).await.unwrap();
+        assert_eq!(mode(&file), 0o600);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_existing_wide_directory_with_content_is_refused_not_tightened() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         Database::open(root.path())
@@ -162,11 +179,10 @@ mod tests {
             .close()
             .await;
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-        let file = root.path().join(DATABASE_FILE);
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-        Database::open(root.path()).await.unwrap();
-        assert_eq!(mode(root.path()), 0o700);
-        assert_eq!(mode(&file), 0o600);
+        let error = Database::open(root.path()).await.unwrap_err();
+        assert!(matches!(error, DatabaseError::DataDir { .. }), "{error}");
+        assert!(error.to_string().contains("chmod 700"), "{error}");
+        assert_eq!(mode(root.path()), 0o755);
     }
 
     #[cfg(unix)]
