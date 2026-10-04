@@ -99,6 +99,20 @@ pub fn ensure_private_file(path: &Path) -> io::Result<()> {
         .map(|_| ())
 }
 
+/// Dossier temporaire de test aux droits d'un vrai dossier de données (0700 sous Unix) :
+/// `tempfile::tempdir()` crée des dossiers 0755, que `ensure` refuse quand ils ont du contenu.
+#[cfg(test)]
+pub(crate) fn private_tempdir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("droits du dossier temporaire");
+    }
+    dir
+}
+
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
@@ -111,7 +125,7 @@ mod tests {
 
     #[test]
     fn a_missing_directory_is_created_private_with_its_parents() {
-        let root = tempfile::tempdir().unwrap();
+        let root = private_tempdir();
         let dir = root.path().join("a").join("b");
         ensure(&dir).unwrap();
         assert_eq!(mode(&dir), 0o700);
@@ -119,7 +133,7 @@ mod tests {
 
     #[test]
     fn an_empty_wider_directory_we_own_is_tightened() {
-        let root = tempfile::tempdir().unwrap();
+        let root = private_tempdir();
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         ensure(root.path()).unwrap();
         assert_eq!(mode(root.path()), 0o700);
@@ -127,7 +141,7 @@ mod tests {
 
     #[test]
     fn a_wider_directory_with_content_is_refused_and_left_untouched() {
-        let root = tempfile::tempdir().unwrap();
+        let root = private_tempdir();
         std::fs::write(root.path().join("hearth.db"), b"x").unwrap();
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         let error = ensure(root.path()).unwrap_err();
@@ -144,7 +158,7 @@ mod tests {
 
     #[test]
     fn a_private_directory_with_content_is_accepted_as_is() {
-        let root = tempfile::tempdir().unwrap();
+        let root = private_tempdir();
         std::fs::write(root.path().join("hearth.db"), b"x").unwrap();
         ensure(root.path()).unwrap();
         assert_eq!(mode(root.path()), 0o700);
@@ -152,7 +166,7 @@ mod tests {
 
     #[test]
     fn a_file_in_place_of_the_directory_is_an_error() {
-        let root = tempfile::tempdir().unwrap();
+        let root = private_tempdir();
         let file = root.path().join("data");
         std::fs::write(&file, b"x").unwrap();
         assert!(ensure(&file).is_err());
@@ -160,7 +174,7 @@ mod tests {
 
     #[test]
     fn a_private_file_is_created_0600_and_a_wider_one_is_tightened() {
-        let root = tempfile::tempdir().unwrap();
+        let root = private_tempdir();
         let file = root.path().join("hearth.db");
         ensure_private_file(&file).unwrap();
         assert_eq!(mode(&file), 0o600);

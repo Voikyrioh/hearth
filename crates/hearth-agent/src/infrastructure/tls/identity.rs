@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn first_run_creates_the_files_and_releases_the_lock() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let data = dir.path().join("data");
         let identity = FileIdentityStore::new(&data)
             .load_or_create()
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn second_load_returns_the_same_identity() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let first = FileIdentityStore::new(dir.path())
             .load_or_create()
             .expect("creation");
@@ -359,8 +359,8 @@ mod tests {
 
     #[test]
     fn two_installations_have_different_identities() {
-        let a = tempfile::tempdir().expect("tempdir");
-        let b = tempfile::tempdir().expect("tempdir");
+        let a = crate::infrastructure::data_dir::private_tempdir();
+        let b = crate::infrastructure::data_dir::private_tempdir();
         let ia = FileIdentityStore::new(a.path())
             .load_or_create()
             .expect("a");
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn existing_certificate_without_key_is_an_error_not_a_regeneration() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let store = FileIdentityStore::new(dir.path());
         let first = store.load_or_create().expect("creation");
         fs::remove_file(dir.path().join(KEY_FILE)).expect("remove");
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn leftovers_of_an_interrupted_creation_are_replaced() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         fs::write(dir.path().join(KEY_FILE), "reste").expect("write");
         FileIdentityStore::new(dir.path())
             .load_or_create()
@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn corrupt_files_are_reported() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let store = FileIdentityStore::new(dir.path());
         store.load_or_create().expect("creation");
         fs::write(dir.path().join(INSTALL_ID_FILE), "pas-un-id").expect("write");
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn simultaneous_creations_yield_one_identity() {
         const THREADS: usize = 8;
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let barrier = Barrier::new(THREADS);
         let identities: Vec<PublicIdentity> = thread::scope(|scope| {
             let handles: Vec<_> = (0..THREADS)
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn a_lock_held_by_another_handle_ends_in_a_timeout_then_frees_up() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let lock_path = dir.path().join(LOCK_FILE);
         let holder = fs::File::create(&lock_path).expect("create");
         holder.try_lock().expect("verrou pris par le test");
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn a_leftover_lock_file_that_nobody_holds_does_not_block() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         fs::write(dir.path().join(LOCK_FILE), "reste d'un processus mort").expect("write");
         let store =
             FileIdentityStore::new(dir.path()).with_lock_timeout(Duration::from_millis(200));
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn the_lock_is_released_even_when_creation_fails() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         // Un dossier à la place du fichier install_id fait échouer l'écriture.
         fs::create_dir(dir.path().join(INSTALL_ID_FILE)).expect("mkdir");
         let err = FileIdentityStore::new(dir.path())
@@ -478,7 +478,7 @@ mod tests {
 
     #[test]
     fn stale_temporaries_of_a_dead_process_are_removed_before_creation() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         for name in [
             "key.pem.4242.0.tmp",
             "cert.pem.4242.1.tmp",
@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn missing_file_errors_name_the_path() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let store = FileIdentityStore::new(dir.path());
         store.load_or_create().expect("creation");
         fs::remove_file(dir.path().join(INSTALL_ID_FILE)).expect("remove");
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn private_key_is_readable_by_its_owner_only() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         FileIdentityStore::new(dir.path())
             .load_or_create()
             .expect("creation");

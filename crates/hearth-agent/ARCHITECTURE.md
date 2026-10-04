@@ -4,26 +4,30 @@ Service installé sur la machine pilotée. Hexagonal : les dépendances vont de 
 
 ```
 src/
-├── domain/          → Règles pures, sans E/S. identity_policy.rs (créer / réutiliser / refuser / nettoyer l'identité), install_id.rs, secret.rs (`Secret` : jamais affiché, effacé à la libération), sessions.rs (session ouverte, sessions à fermer), accounts/ (username, password, role, admin_guard, self_deletion, account). L'empreinte (`Fingerprint`) vit dans `hearth-proto`.
-├── application/     → hello.rs (cas d'usage `GET /hello`, rend `AgentDescription`), accounts.rs (`AccountService`, rend des `AccountView` sans haché : créer, lister, changer le rôle, définir ou changer un mot de passe, supprimer, fermer les sessions) ; ports/ : IdentityStore (partie publique seulement), MachineInfo, AccountRepo, SessionRepo (lectures), Store + UnitOfWork (écritures), PasswordHasher, Clock, IdGen, StoreError
+├── domain/          → Règles pures, sans E/S. identity_policy.rs (créer / réutiliser / refuser / nettoyer l'identité), install_id.rs, secret.rs (`Secret` : jamais affiché, effacé à la libération), sessions.rs (session, expiration glissante 30 j, raisons de fin expirée / révoquée, sessions à fermer), session_token.rs (jeton 32 octets, empreinte SHA-256, comparaison en temps constant), lockout.rs (verrouillage progressif : fonction pure `(état, événement, maintenant) → (état, décision)`), compat.rs (qui doit se mettre à jour, sur `hearth_proto::version`), operations.rs (clé d'opération : exécuter, rejouer, en cours, clé d'autrui), accounts/ (username, password, role, admin_guard, self_deletion, account). L'empreinte (`Fingerprint`) vit dans `hearth-proto`.
+├── application/     → hello.rs (`GET /hello`), accounts.rs (`AccountService` : créer, lister, rôle, mots de passe, supprimer, fermer les sessions), sessions.rs (`SessionService` : connexion avec verrouillage, reconnaissance d'un jeton, déconnexion), operations.rs (`OperationService` : enregistrer, retenir, rejouer, relire), maintenance.rs (`MaintenanceService` : purge) ; ports/ : un fichier par sujet avec son port de lecture (`AccountRepo`, `SessionRepo`, `LoginAttemptRepo`, `OperationRepo`) et son port d'écriture (`AccountTx`, `SessionTx`, `LoginAttemptTx`, `OperationTx`), `Store` + `UnitOfWork`, IdentityStore, MachineInfo, PasswordHasher (dont `decoy_hash`), Clock, IdGen, TokenGen, StoreError
 ├── infrastructure/  → Adaptateurs des ports et services techniques
 │   ├── tls/         → identity.rs (FileIdentityStore : cert.pem, key.pem, install_id, verrou identity.lock ; rcgen), server_config.rs (rustls, TLS 1.3 seul, ring ; seul lecteur de la clé privée)
-│   ├── sqlite/      → mod.rs (`Database` : hearth.db, WAL, clés étrangères, migrations embarquées), account_repo.rs (lectures), session_repo.rs (lectures + requête de fermeture partagée), store.rs (`SqliteStore` : unité de travail, transaction `BEGIN IMMEDIATE`), convert.rs (dates texte UTC à largeur fixe `YYYY-MM-DDTHH:MM:SS.mmmZ`, erreurs de stockage) ; requêtes SQLx vérifiées à la compilation (`.sqlx/` versionné)
-│   ├── argon2.rs    → Argon2Hasher : Argon2id m=19 Mio, t=2, p=1, dans `spawn_blocking`
-│   ├── clock.rs, ids.rs → horloge système, ULID
+│   ├── sqlite/      → mod.rs (`Database` : hearth.db, WAL, clés étrangères, migrations embarquées), un fichier par sujet (account_repo.rs, session_repo.rs, login_attempt_repo.rs, operation_repo.rs : lectures sur le pool + port d'écriture implémenté sur `SqliteUnitOfWork`), store.rs (`SqliteStore` / `SqliteUnitOfWork` : transaction `BEGIN IMMEDIATE`), convert.rs (dates texte UTC à largeur fixe `YYYY-MM-DDTHH:MM:SS.mmmZ`, erreurs de stockage) ; requêtes SQLx vérifiées à la compilation (`.sqlx/` versionné)
+│   ├── argon2.rs    → Argon2Hasher : Argon2id m=19 Mio, t=2, p=1, dans `spawn_blocking` ; haché factice de mêmes paramètres
+│   ├── clock.rs, ids.rs, random.rs → horloge système (tronquée à la milliseconde), ULID, hasard du système (jetons)
 │   ├── config/      → agent.toml + variables HEARTH_* + options CLI, fusionnés par `load`
+│   ├── data_dir.rs  → dossier de données : création 0700, refus d'un dossier existant trop ouvert, fichiers privés
 │   ├── logging.rs   → tracing : texte en terminal, JSON sinon (HEARTH_LOG_FORMAT)
 │   └── system/      → machine_info.rs (nom d'hôte, adresses MAC)
 ├── entrypoint/
-│   ├── http/        → mod.rs (routeur /api/v1, journal des requêtes, erreurs de routage en ErrorBody), hello.rs, error.rs (ApiError), server.rs (axum-server + rustls, arrêt propre, poignées de main refusées en debug)
+│   ├── http/        → mod.rs (`ENDPOINTS` : table de toutes les routes avec leur accès ; routeur construit depuis la table ; journal des requêtes ; erreurs de routage en ErrorBody), auth.rs (extracteurs `Authenticated` et `AdminOnly` : la seule couche de contrôle d'accès), version.rs (couche `X-Hearth-Api`, 426), operations.rs (couche `Idempotency-Key` + `GET /operations/{id}`), sessions.rs, accounts.rs, hello.rs (handlers), wire.rs (conversions types applicatifs → types du fil), error.rs (ApiError : seul endroit où une erreur applicative devient un code du protocole), server.rs (axum-server + rustls, adresse du client, arrêt propre, poignées de main refusées en debug)
 │   ├── cli.rs       → clap : options et sous-commandes `serve` (défaut), `fingerprint`, `account add|list|passwd|role|remove|revoke`
 │   ├── account.rs   → exécution des sous-commandes `account` (messages de la spec, table de la liste) ; port d'entrée `PasswordInput`
 │   ├── terminal.rs  → `TerminalPasswords` : saisie sans écho avec confirmation (rpassword) ou `HEARTH_ACCOUNT_PASSWORD`
+│   ├── tasks.rs     → tâches périodiques supervisées (purge horaire : un passage qui panique est journalisé, le suivant a lieu)
 │   └── signal.rs    → Ctrl+C / SIGTERM
-└── app.rs           → Racine de composition : load_config, load_identity, account_service, start, run
-migrations/          → Migrations SQLx embarquées (0001 : accounts, sessions, meta) ; `build.rs` les surveille
+└── app.rs           → Racine de composition : `Adapters` (hachage, horloge, ids, hasard : de production ou injectés par les tests), `services`, `start` / `start_with`, `run`
+migrations/          → Migrations SQLx embarquées (0001 : accounts, sessions, meta ; 0002 : login_attempts, operations, revoked_sessions) ; `build.rs` les surveille
 tests/hello.rs       → Intégration : serveur sur port libre, client rustls sans vérification, empreinte, TLS 1.2 refusé
-tests/accounts_repo.rs, accounts_use_cases.rs → Intégration : dépôts et cas d'usage sur base SQLite temporaire (support/ : horloge, ids, sessions de test)
+tests/accounts_repo.rs, accounts_use_cases.rs, sessions_use_cases.rs → Intégration : dépôts et cas d'usage sur base SQLite temporaire (support/ : horloge, ids, hacheur qui compte ses appels, sessions écrites par la fonction de production)
+tests/http_api.rs    → Intégration : routeur en processus ; test de balayage de `ENDPOINTS` (401 sans jeton, 403 lecture seule, rien ne change) ; connexion, comptes, version, clés d'opération (support/api.rs)
+tests/sessions_https.rs → Intégration : vrai agent en HTTPS (support/https.rs) : connexion, verrouillage, expiration, révocation, version, clé rejouée, adresse du client
 tests/account_cli.rs → Intégration : le vrai binaire lancé en processus sur un dossier temporaire
 ```
 
@@ -32,10 +36,14 @@ tests/account_cli.rs → Intégration : le vrai binaire lancé en processus sur 
 - **Le cas d'usage rend une structure applicative ; `entrypoint/http` la convertit en type du fil de `hearth-proto`.** `application` ne connaît jamais le contrat JSON.
 - La clé privée ne sort pas de `infrastructure/tls` : les ports n'exposent que du public.
 - Les décisions métier sont des fonctions pures de `domain/` ; les adaptateurs observent et exécutent (ex. dernier administrateur : le dépôt compte dans la transaction, `domain::accounts::check_removal` décide).
-- **Écritures atomiques** : toute écriture passe par `Store::begin` → `UnitOfWork`, une transaction neutre qui couvre tous les sujets (comptes, sessions, plus tard journal et opérations) et lit, garde, écrit en une fois ; SQLite `BEGIN IMMEDIATE` sérialise les écrivains, sans `commit` tout est annulé. Convention : les dépôts (`AccountRepo`, `SessionRepo`…) ne font que lire ; chaque nouvelle écriture est une méthode de `UnitOfWork` (un seul chemin par opération, par exemple `close_sessions`), et HRT-04 y ajoutera la création d'une session et la mise à jour de `last_login_at`, dans la même transaction.
+- **Écritures atomiques, un port par sujet** : toute écriture passe par `Store::begin` → `UnitOfWork`, une transaction neutre qui couvre tous les sujets et lit, garde, écrit en une fois ; SQLite `BEGIN IMMEDIATE` sérialise les écrivains, sans `commit` tout est annulé. **Forme** : l'unité de travail ne porte aucune opération elle-même, elle donne un accesseur par sujet (`uow.accounts()`, `uow.sessions()`, `uow.login_attempts()`, `uow.operations()`) qui rend le port d'écriture du sujet (`AccountTx`, `SessionTx`…), tous liés à la même transaction. Les dépôts (`AccountRepo`, `SessionRepo`…) ne font que lire, sur le pool. Un nouveau sujet (le journal, HRT-05) = un fichier de ports (`*Repo` + `*Tx`), un accesseur sur `UnitOfWork`, une implémentation dans `infrastructure/sqlite/{sujet}.rs` ; aucun autre sujet n'est touché. Un cas d'usage n'importe que les ports des sujets qu'il touche. Un seul chemin par opération (fermer des sessions : `SessionTx::close`, qui retient aussi les empreintes révoquées). Exemple : la connexion écrit le compteur, la session et `last_login_at` dans une seule transaction.
 - **Dossier de données** : `infrastructure/data_dir.rs` est le seul endroit qui le crée (absent : créé en 0700 ; existant et ouvert aux autres : erreur qui dit de faire `chmod 700`, sauf dossier vide dont on est propriétaire, resserré ; jamais de chmod silencieux sur un dossier qu'on n'a pas créé) et qui rend `hearth.db` privé (0600, `-wal` et `-shm` suivent) ; sous Windows il crée seulement le dossier, sans contrôle de droits (développement) ; `app.rs` l'appelle avant la base et le magasin d'identité.
 - **Dates en base** : texte UTC à largeur fixe `YYYY-MM-DDTHH:MM:SS.mmmZ`, triable ; écriture et lecture faillibles (`StoreError`). L'horloge (`infrastructure/clock.rs`) tronque à la milliseconde, une seule fois : la date rendue par une écriture est celle qu'on relit.
 - Les cas d'usage ne rendent jamais le haché du mot de passe (`AccountView`).
+- **Contrôle d'accès** : une seule couche (`entrypoint/http/auth.rs`). Un handler d'une route réservée prend `AdminOnly` (ou `Authenticated`) en premier argument ; la décision « qui gère les comptes » est `Role::can_manage_accounts`. **Toute route est une ligne de `ENDPOINTS`** (`entrypoint/http/mod.rs`) avec son niveau d'accès : le routeur est construit depuis la table, et `tests/http_api.rs` la parcourt (sans jeton `401`, lecture seule `403`, rien ne change en base, aucune route hors table). Ajouter une route sans ligne dans la table est impossible ; la déclarer à un niveau que son handler ne respecte pas fait échouer le test.
+- **Connexion** : identifiant inconnu et mot de passe faux suivent le même chemin (vérification Argon2 contre un haché factice, échec compté, même transaction) ; la comparaison des empreintes de jetons est en temps constant ; l'adresse du client vient de la connexion TCP, jamais d'un en-tête.
+- **Version d'interface** (`X-Hearth-Api`) contrôlée sur toutes les routes sauf `/hello` ; **clés d'opération** (`Idempotency-Key`) suivies sur les requêtes qui modifient, sauf la connexion (son résultat contient un jeton).
+- **Tâches de fond** : `entrypoint/tasks.rs` ; un passage qui échoue ou panique est journalisé et le suivant a lieu ; elles s'arrêtent avec `RunningAgent`.
 - **Secrets** : mots de passe et hachés sont des `Secret` (pas de `Display`, `Debug` masqué, effacés à la libération) ; aucun message d'erreur ni journal ne les contient.
 - **SQLx hors ligne** : les `query!` sont vérifiées contre `.sqlx/` ; voir « SQLx » dans `CLAUDE.md` pour régénérer après toute modification de requête ou de migration.
 - Les ports sont consommés en `Arc<dyn Port>` / `&dyn Port` : seul `app.rs` connaît les types concrets.
@@ -43,12 +51,12 @@ tests/account_cli.rs → Intégration : le vrai binaire lancé en processus sur 
 ## Pour ajouter une table ou une requête
 
 1. Migration `migrations/NNNN_nom.sql` (jamais modifier une migration déjà publiée).
-2. Port dans `application/ports/`, adaptateur dans `infrastructure/sqlite/`, requêtes `query!`.
+2. Fichier de ports dans `application/ports/` (`*Repo` en lecture, `*Tx` en écriture), accesseur sur `UnitOfWork`, adaptateur dans `infrastructure/sqlite/{sujet}.rs`, requêtes `query!`.
 3. Régénérer `.sqlx/` (voir `CLAUDE.md`), committer le dossier.
 
 ## Pour ajouter une route
 
 1. Types de corps dans `hearth-proto/src/api/`.
 2. Cas d'usage dans `application/` (ports si besoin), règles dans `domain/`.
-3. Handler dans `entrypoint/http/{route}.rs` (conversion vers le type du fil), déclaré dans `router` (`mod.rs`) ; erreurs via `ApiError`.
+3. Handler dans `entrypoint/http/{route}.rs` (premier argument `AdminOnly` ou `Authenticated` si la route n'est pas publique ; conversion vers le type du fil dans `wire.rs`), **une ligne dans `ENDPOINTS`** (`mod.rs`) avec son accès ; erreurs via `ApiError` (`error.rs`).
 4. Fiche `docs/open-api/{route}.md` et ligne d'index ; fiche `docs/business-rules/BR-*` si règle.

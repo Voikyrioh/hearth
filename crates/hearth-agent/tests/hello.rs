@@ -138,8 +138,10 @@ async fn start(dir: &Path) -> (ServerHandle, Fingerprint) {
 /// Lance le vrai binaire. Un `agent.toml` vide est passé explicitement pour que la config
 /// de la machine de test (`/etc/hearth/agent.toml`) n'interfère pas.
 fn cli_fingerprint(data: &Path) -> String {
-    std::fs::create_dir_all(data).expect("dossier");
-    let config = data.join("agent.toml");
+    // Le fichier de configuration vit hors du dossier de données : y poser un fichier avant le
+    // premier démarrage rendrait un dossier ouvert (0755) « non vide », donc refusé.
+    let config_dir = tempfile::tempdir().expect("dossier de configuration");
+    let config = config_dir.path().join("agent.toml");
     std::fs::write(&config, "").expect("config vide");
     let output = Command::new(env!("CARGO_BIN_EXE_hearth-agent"))
         .args(["fingerprint", "--data-dir"])

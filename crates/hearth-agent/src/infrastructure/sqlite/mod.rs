@@ -104,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn opening_creates_the_file_in_wal_mode_with_foreign_keys() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         let db = Database::open(&dir.path().join("nested").join("data"))
             .await
             .unwrap();
@@ -137,7 +137,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn the_directory_created_by_the_database_alone_is_private() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         let dir = root.path().join("data");
         Database::open(&dir).await.unwrap();
         assert_eq!(mode(&dir), 0o700);
@@ -146,7 +146,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn the_database_and_its_companions_are_private() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         let db = Database::open(root.path()).await.unwrap();
         sqlx::query("CREATE TABLE IF NOT EXISTS probe (x INTEGER)")
             .execute(db.pool())
@@ -163,7 +163,7 @@ mod tests {
     #[tokio::test]
     async fn an_existing_wide_database_file_is_tightened() {
         use std::os::unix::fs::PermissionsExt;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         Database::open(root.path())
             .await
             .unwrap()
@@ -180,7 +180,7 @@ mod tests {
     #[tokio::test]
     async fn an_existing_wide_directory_with_content_is_refused_not_tightened() {
         use std::os::unix::fs::PermissionsExt;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         Database::open(root.path())
             .await
             .unwrap()
@@ -199,7 +199,7 @@ mod tests {
     fn the_identity_store_after_the_database_keeps_the_directory_private() {
         use crate::application::ports::IdentityStore;
         use crate::infrastructure::tls::FileIdentityStore;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         let dir = root.path().join("data");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(Database::open(&dir)).unwrap();
@@ -212,7 +212,7 @@ mod tests {
     fn the_database_after_the_identity_store_keeps_the_directory_private() {
         use crate::application::ports::IdentityStore;
         use crate::infrastructure::tls::FileIdentityStore;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::infrastructure::data_dir::private_tempdir();
         let dir = root.path().join("data");
         FileIdentityStore::new(&dir).load_or_create().unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -222,7 +222,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_problem_with_the_database_file_is_not_reported_as_the_data_directory() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         std::fs::create_dir(dir.path().join(DATABASE_FILE)).unwrap();
         let error = Database::open(dir.path()).await.unwrap_err();
         assert!(matches!(error, DatabaseError::File { .. }), "{error}");
@@ -231,7 +231,7 @@ mod tests {
 
     #[tokio::test]
     async fn migrations_create_every_table_and_are_idempotent() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::infrastructure::data_dir::private_tempdir();
         Database::open(dir.path()).await.unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let tables: Vec<String> = sqlx::query_scalar(
