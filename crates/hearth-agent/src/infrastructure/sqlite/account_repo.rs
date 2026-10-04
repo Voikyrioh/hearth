@@ -1,6 +1,6 @@
-//! Comptes en SQLite : lectures sur le pool, écritures dans une transaction `BEGIN IMMEDIATE`
-//! (un seul écrivain à la fois : ce que la transaction a observé ne change plus avant sa
-//! validation, ce qui rend atomique la garde du dernier administrateur).
+//! Comptes en SQLite : les lectures sur le pool (`AccountRepo`) et les requêtes de lecture
+//! partagées avec l'unité de travail. Les écritures vivent dans `store.rs` (transaction
+//! `BEGIN IMMEDIATE`), pas ici.
 
 use async_trait::async_trait;
 use sqlx::{SqliteConnection, SqlitePool};

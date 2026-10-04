@@ -1,4 +1,6 @@
-//! Sessions en SQLite.
+//! Sessions en SQLite : lectures sur le pool (`SessionRepo`) et requête de fermeture partagée
+//! avec l'unité de travail (`store.rs`), pour que fermer des sessions et changer un compte soient
+//! une seule transaction.
 
 use async_trait::async_trait;
 use sqlx::{SqliteConnection, SqlitePool};
