@@ -12,3 +12,4 @@ Décisions d'architecture et conventions. Chaque ADR référence les ADR globale
 | [ADR-0006](./ADR-0006-sqlite-sqlx.md) | librairie | Persistance agent : SQLx + SQLite | acceptée | 2026-10-04 |
 | [ADR-0007](./ADR-0007-machine-a-etats-du-lien.md) | architecture | Machine à états du lien : seuils 3s/30s, reconnexion sans fin | acceptée | 2026-10-04 |
 | [ADR-0008](./ADR-0008-mises-a-jour-signees.md) | securite | Mises à jour agent signées (minisign), superviseur et retour arrière | acceptée | 2026-10-04 |
+| [ADR-0009](./ADR-0009-dependances-agent.md) | librairie | Dépendances de l'agent : axum, rustls + ring, rcgen, clap, toml, tower-http (pas d'aws-lc ni d'OpenSSL) | acceptée | 2026-10-04 |

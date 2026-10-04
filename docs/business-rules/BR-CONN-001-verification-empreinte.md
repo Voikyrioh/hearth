@@ -13,16 +13,16 @@ maj: 2026-10-04
 ## Règle
 L'empreinte du serveur doit être vérifiée et confirmée explicitement par l'utilisateur avant la première connexion. Elle est le SHA-256 du certificat de l'agent encodé en DER. Format affiché : les 16 premiers octets, en 8 groupes de 4 caractères hexadécimaux **majuscules** séparés par une espace (`A1B2 C3D4 E5F6 0718 293A 4B5C 6D7E 8F90`). La comparaison interne porte toujours sur les 32 octets, jamais sur l'affichage court.
 
-La confirmation par l'utilisateur relève du client (`hearth-link`, interface) ; cette fiche couvre le calcul et le format, côté agent (commande `hearth-agent fingerprint`) comme côté client.
+La confirmation par l'utilisateur relève du client (`hearth-link`, interface) ; cette fiche couvre le calcul et le format, côté agent (commande `hearth-agent fingerprint`) comme côté client : le code est dans `hearth-proto` pour que `hearth-link` affiche exactement la même chose.
 
 ## Application (code)
-- `crates/hearth-agent/src/domain/fingerprint.rs::Fingerprint::of_certificate_der` (L33) — SHA-256 du certificat DER.
-- `crates/hearth-agent/src/domain/fingerprint.rs::Fingerprint::short` (L61) — affichage 8 × 4 majuscules (16 premiers octets) ; `Display` y renvoie.
-- `crates/hearth-agent/src/domain/fingerprint.rs` — `#[derive(PartialEq)]` sur les 32 octets.
-- `crates/hearth-agent/src/entrypoint/cli.rs::run` — sous-commande `fingerprint` : affiche la forme courte.
+- `crates/hearth-proto/src/fingerprint.rs::Fingerprint::of_certificate_der` (L33) — SHA-256 du certificat DER.
+- `crates/hearth-proto/src/fingerprint.rs::Fingerprint::short` (L61) — affichage 8 × 4 majuscules (16 premiers octets) ; `Display` y renvoie.
+- `crates/hearth-proto/src/fingerprint.rs` — `#[derive(PartialEq)]` sur les 32 octets.
+- `crates/hearth-agent/src/app.rs::run` — sous-commande `fingerprint` : affiche la forme courte.
 
 ## Vérification
-- Tests : `domain::fingerprint::tests` (`short_form_is_eight_groups_of_four_uppercase_hex`, `short_form_uses_only_the_first_sixteen_bytes`, `equality_compares_all_thirty_two_bytes`, `hashes_the_der_with_sha256`).
+- Tests : `hearth_proto::fingerprint::tests` (`short_form_is_eight_groups_of_four_uppercase_hex`, `short_form_uses_only_the_first_sixteen_bytes`, `equality_compares_all_thirty_two_bytes`, `hashes_the_der_with_sha256`, `parse_rejects_a_sign_in_front_of_a_byte`).
 - Intégration : `crates/hearth-agent/tests/hello.rs::hello_is_served_over_tls13_with_the_pinned_certificate` — l'empreinte du certificat présenté en TLS égale celle de la commande `fingerprint`.
 - À la main : `hearth-agent fingerprint --data-dir <dossier>`.
 
@@ -36,3 +36,4 @@ La confirmation par l'utilisateur relève du client (`hearth-link`, interface) ;
 
 ## Historique
 - 2026-10-04 — création (HRT-02, session 2026-10-04-hearth-creation).
+- 2026-10-04 — `Fingerprint` déplacée dans `hearth-proto` ; l'analyse de la forme complète refuse tout caractère non hexadécimal (review Stephen round 1).

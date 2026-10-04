@@ -5,7 +5,7 @@ Identité publique de l'agent. Sert de sonde de vie et de premier contact : le c
 - **Authentification** : aucune.
 - **Rôle requis** : aucun.
 - **Idempotence** : lecture, sans effet de bord.
-- **Code** : `crates/hearth-agent/src/entrypoint/http/hello.rs` (cas d'usage `application/hello.rs`).
+- **Code** : `crates/hearth-agent/src/entrypoint/http/hello.rs` (conversion vers le type du fil) et cas d'usage `application/hello.rs` (structure applicative `AgentDescription`).
 - **Types** : `hearth-proto::api::hello::HelloResponse`.
 
 ## Réponse `200`
@@ -38,11 +38,17 @@ L'empreinte du certificat n'est pas dans le corps : le client la calcule sur le 
 
 ## Erreurs
 
-Toute route inconnue sous `/api/v1` (ou ailleurs) répond `404` au format commun :
+Toute erreur de routage, de méthode ou d'extraction sort au format commun (`hearth-proto::error::ErrorBody`) : route inconnue `404 NOT_FOUND`, méthode non prise en charge (`POST /api/v1/hello`) `405 METHOD_NOT_ALLOWED`, corps JSON invalide `422 VALIDATION_ERROR`. Exemple :
 
 ```json
 { "error": { "code": "NOT_FOUND", "message": "route inconnue", "details": {} } }
 ```
+
+Les valeurs `machine_name` et `mac_addresses` sont lues une fois au démarrage de l'agent : un changement d'interface demande un redémarrage.
+
+## Journal
+
+Chaque requête servie produit une ligne `INFO` (méthode, chemin, statut, durée en ms) ; une poignée de main TLS refusée produit une ligne `DEBUG`. Format : texte en terminal, JSON sinon, forçable par `HEARTH_LOG_FORMAT=json|text`.
 
 ## Transport
 

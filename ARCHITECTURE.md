@@ -13,13 +13,13 @@ Hearth est un système de monitoring de machines avec authentification et journa
 
 ```
 crates/
-├── hearth-proto/    → Types partagés, sans E/S ni framework : `api/` (corps de requêtes/réponses, `hello`), `error` (ErrorBody, ErrorCode), `product` (nom, port 7341), `version`
+├── hearth-proto/    → Types partagés, sans E/S ni framework : `api/` (corps de requêtes/réponses, `hello`), `error` (ErrorBody, ErrorCode), `fingerprint` (empreinte SHA-256, affichage 8 × 4), `product` (nom, port 7341), `version`
 ├── hearth-agent/    → Serveur : identité TLS, route /hello (comptes, sessions, mesures, audit, mise à jour à venir) [ARCHITECTURE.md]
-│   ├── domain/      → Règles métier pures : empreinte du certificat, identifiant d'installation (comptes, journal à venir)
+│   ├── domain/      → Règles métier pures : politique de création de l'identité, identifiant d'installation (comptes, journal à venir)
 │   ├── application/ → Cas d'usage (`hello`) et `ports/` (IdentityStore, MachineInfo)
-│   ├── infrastructure/ → Adaptateurs : `tls/` (certificat auto-signé, config rustls TLS 1.3), `config/` (agent.toml + HEARTH_*), `system/` (nom, MAC) ; SQLite et sondes à venir
-│   ├── entrypoint/  → `http/` (axum, routeur /api/v1, erreurs, serveur HTTPS) et `cli.rs` (serve, fingerprint)
-│   └── app.rs       → Racine de composition : assemble adaptateurs, cas d'usage et serveur
+│   ├── infrastructure/ → Adaptateurs : `tls/` (certificat auto-signé, config rustls TLS 1.3), `config/` (agent.toml + HEARTH_*), `logging.rs` (texte ou JSON), `system/` (nom, MAC) ; SQLite et sondes à venir
+│   ├── entrypoint/  → `http/` (axum, routeur /api/v1, erreurs, journal des requêtes, serveur HTTPS), `cli.rs` (options et sous-commandes) et `signal.rs`
+│   └── app.rs       → Racine de composition : charge la config, assemble adaptateurs, cas d'usage et serveur, exécute la commande
 ├── hearth-link/     → Bibliothèque cliente : épinglage, connexion, machine à états, reconnexion [ARCHITECTURE.md]
 └── xtask/           → Tâches build : binaire agent statique en conteneur, empaquetage, manifeste
 
@@ -51,7 +51,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 - Lint : `cargo clippy -- -D warnings` + `cargo fmt --check` + `npx biome check`.
 - Build agent : `cargo xtask agent` (conteneur alpine, cible musl).
 - Build client : `cd apps/desktop && npm run tauri build` (Windows NSIS).
-- Run local agent : `RUST_LOG=debug cargo run --bin hearth-agent -- serve --data-dir ./.dev-data` ; empreinte : `cargo run --bin hearth-agent -- fingerprint --data-dir ./.dev-data`. Configuration : `agent.toml` (`--config`, `HEARTH_CONFIG`) puis variables `HEARTH_PORT`, `HEARTH_LISTEN_ADDR`, `HEARTH_DATA_DIR`, `HEARTH_MANAGED`, puis `--data-dir`. Dossier de données par défaut : `/var/lib/hearth` (Linux), `%LOCALAPPDATA%\hearth-agent` (Windows, mode dev).
+- Run local agent : `RUST_LOG=debug cargo run --bin hearth-agent -- serve --data-dir ./.dev-data` ; empreinte : `cargo run --bin hearth-agent -- fingerprint --data-dir ./.dev-data`. Configuration : `agent.toml` (`--config`, `HEARTH_CONFIG`) puis variables `HEARTH_PORT`, `HEARTH_LISTEN_ADDR`, `HEARTH_DATA_DIR`, `HEARTH_MANAGED`, puis `--data-dir`. Journaux : `HEARTH_LOG_FORMAT=json|text` (texte en terminal, JSON sinon), niveau par `RUST_LOG`. Dossier de données par défaut : `/var/lib/hearth` (Linux), `%LOCALAPPDATA%\hearth-agent` (Windows, mode dev).
 
 ## Où chercher
 
@@ -60,7 +60,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 | une règle métier | `docs/business-rules/INDEX.md` puis `crates/hearth-agent/src/domain/` |
 | un endpoint API | `docs/open-api/INDEX.md` puis `crates/hearth-agent/src/entrypoint/http/` |
 | une route WebSocket | `docs/open-api/INDEX.md` (sujet `/stream`) puis `crates/hearth-agent/src/entrypoint/ws/` (à venir) |
-| l'empreinte / le certificat de l'agent | `crates/hearth-agent/src/domain/fingerprint.rs` et `infrastructure/tls/` |
+| l'empreinte / le certificat de l'agent | `crates/hearth-proto/src/fingerprint.rs`, `domain/identity_policy.rs` et `infrastructure/tls/` |
 | un composant Vue | `docs/components/INDEX.md` puis `apps/desktop/src/components/` |
 | la résilience du lien | `crates/hearth-link/src/state_machine.rs` et `docs/adr/ADR-0007-machine-a-etats-du-lien.md` |
 | un cas d'authentification | `docs/adr/ADR-0005-tls-epingle.md` + `crates/hearth-agent/src/domain/accounts.rs` |
