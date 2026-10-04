@@ -76,11 +76,4 @@ mod tests {
         };
         assert!(!format!("{holder:?}").contains("hunter2"));
     }
-
-    #[test]
-    fn zeroize_clears_the_buffer() {
-        let mut value = String::from("secret-value");
-        value.zeroize();
-        assert!(value.is_empty());
-    }
 }

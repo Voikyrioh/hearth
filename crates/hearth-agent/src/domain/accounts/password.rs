@@ -43,10 +43,23 @@ pub fn unmet_rules(password: &str, username: &Username) -> Vec<PasswordRule> {
     if !password.chars().any(char::is_uppercase) {
         unmet.push(PasswordRule::Uppercase);
     }
-    if password.to_lowercase().contains(username.as_str()) {
+    if contains_ignore_ascii_case(password, username.as_str()) {
         unmet.push(PasswordRule::ContainsUsername);
     }
     unmet
+}
+
+/// L'identifiant est en ASCII : la comparaison se fait octet par octet, sans copie (donc sans
+/// copie en clair du mot de passe à effacer).
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    if needle.is_empty() {
+        return false;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 /// Mot de passe refusé : toutes les règles non respectées, une par ligne à l'affichage.
