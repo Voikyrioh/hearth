@@ -29,7 +29,7 @@ Sont consignés : toute connexion réussie ; toute tentative de connexion refus�
 - `entrypoint::http::tests::every_route_that_modifies_or_is_reserved_has_a_journal_action`.
 
 ## Cas limites
-- Les refus et échecs identiques répétés (même compte, origine, action, résultat) sont regroupés par fenêtre de 60 s en une entrée de synthèse (`repeat_count`) : voir BR-AUDIT-007.
+- Les refus et échecs identiques répétés (même compte, action, résultat, cible et raison ; pas le nom du poste ni l'adresse) sont regroupés par fenêtre de 60 s en une entrée de synthèse (`repeat_count`) : voir BR-AUDIT-007.
 - « Toute mise à jour de l'agent » : l'action `agent.update` est au catalogue, son écriture arrive avec la mise à jour de l'agent (HRT-17).
 - Une requête rejouée depuis sa clé d'opération ne s'est pas exécutée : rien n'est écrit une seconde fois.
 - Sans jeton valable (401), l'appelant est inconnu : rien n'est écrit.

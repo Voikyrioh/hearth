@@ -749,15 +749,11 @@ async fn a_thousand_identical_refusals_make_two_entries() {
 }
 
 #[tokio::test]
-async fn refusals_that_differ_are_not_grouped_and_a_later_one_brings_the_summary() {
+async fn refusals_of_different_accounts_are_not_grouped_and_a_later_one_brings_the_summary() {
     let env = env().await;
-    for (account, addr) in [
-        ("lucas", "10.0.0.9"),
-        ("lucas", "10.0.0.8"),
-        ("paul", "10.0.0.9"),
-    ] {
+    for account in ["lucas", "paul", "carl"] {
         for _ in 0..3 {
-            let (actor, action, target, outcome) = denied_read(account, addr);
+            let (actor, action, target, outcome) = denied_read(account, "10.0.0.9");
             env.audit_sink.record(actor, action, target, outcome).await;
         }
     }
@@ -765,11 +761,111 @@ async fn refusals_that_differ_are_not_grouped_and_a_later_one_brings_the_summary
     env.clock.advance(time::Duration::seconds(61));
     let (actor, action, target, outcome) = denied_read("lucas", "10.0.0.9");
     env.audit_sink.record(actor, action, target, outcome).await;
-    // La synthèse du groupe fini (2 autres fois), puis le nouveau premier.
+    // Les trois synthèses des groupes finis (2 autres fois chacune), puis le nouveau premier.
     let records = all(&env).await;
-    assert_eq!(records.len(), 5);
-    assert_eq!(records[3].repeat_count, 2);
-    assert_eq!(records[4].repeat_count, 0);
+    assert_eq!(records.len(), 7);
+    assert_eq!(records.iter().filter(|r| r.repeat_count == 2).count(), 3);
+    assert_eq!(records[6].repeat_count, 0);
+}
+
+#[tokio::test]
+async fn five_thousand_refusals_of_one_account_with_changing_hosts_and_addresses_make_two_entries()
+{
+    let env = env().await;
+    for n in 0..5000 {
+        env.audit_sink
+            .record(
+                Actor::new(
+                    Some(Username::parse("lucas").unwrap()),
+                    Origin::client(Some(&format!("poste-{n}")), &format!("2001:db8::{n:x}")),
+                ),
+                AuditAction::AuditRead,
+                Target::Route("/audit"),
+                Outcome::Denied(Reason::ReadOnly),
+            )
+            .await;
+    }
+    env.clock.advance(time::Duration::seconds(61));
+    env.audit_recorder.flush().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[1].repeat_count, 4999);
+    assert_eq!(
+        records[1].origin_name.as_deref(),
+        Some("poste-4999"),
+        "la dernière occurrence"
+    );
+}
+
+#[tokio::test]
+async fn targeting_three_accounts_in_a_minute_leaves_a_trace_for_each() {
+    let env = env().await;
+    for name in ["marie", "paul", "carl"] {
+        for _ in 0..4 {
+            env.audit_sink
+                .record(
+                    Actor::new(
+                        Some(Username::parse("lucas").unwrap()),
+                        Origin::client(Some("poste"), "10.0.0.9"),
+                    ),
+                    AuditAction::AccountPassword,
+                    Target::Account(Username::parse(name).unwrap()),
+                    Outcome::Denied(Reason::ReadOnly),
+                )
+                .await;
+        }
+    }
+    env.clock.advance(time::Duration::seconds(61));
+    env.audit_recorder.flush().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), 6, "trois premiers, trois synthèses");
+    for name in ["marie", "paul", "carl"] {
+        let of: Vec<_> = records
+            .iter()
+            .filter(|r| r.target.as_deref() == Some(name))
+            .collect();
+        assert_eq!(of.len(), 2, "{name}");
+        assert_eq!(of[1].repeat_count, 3);
+    }
+}
+
+#[tokio::test]
+async fn anonymous_events_of_one_action_group_whatever_the_number_of_addresses() {
+    let env = env().await;
+    for n in 0..2000 {
+        env.audit_sink
+            .record(
+                Actor::new(
+                    None,
+                    Origin::client(None, &format!("10.{}.{}.1", n / 250, n % 250)),
+                ),
+                AuditAction::Login,
+                Target::None,
+                Outcome::Denied(Reason::InvalidCredentials),
+            )
+            .await;
+    }
+    env.clock.advance(time::Duration::seconds(61));
+    env.audit_recorder.flush().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[1].repeat_count, 1999);
+}
+
+#[tokio::test]
+async fn stopping_writes_every_pending_summary_before_the_windows_end() {
+    let env = env().await;
+    for _ in 0..10 {
+        let (actor, action, target, outcome) = denied_read("lucas", "10.0.0.9");
+        env.audit_sink.record(actor, action, target, outcome).await;
+    }
+    assert_eq!(all(&env).await.len(), 1);
+    env.audit_recorder.flush_all().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[1].repeat_count, 9);
+    env.audit_recorder.flush_all().await;
+    assert_eq!(all(&env).await.len(), 2, "rien de plus");
 }
 
 #[tokio::test]

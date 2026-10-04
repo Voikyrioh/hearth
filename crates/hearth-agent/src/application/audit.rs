@@ -154,6 +154,19 @@ impl AuditRecorder {
         }
     }
 
+    /// Écrit **toutes** les synthèses en attente, fenêtres finies ou non : à l'arrêt de l'agent,
+    /// avant de rendre la main.
+    pub async fn flush_all(&self) {
+        let pending = self
+            .repeats
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain();
+        for event in pending {
+            self.write_and_publish(event).await;
+        }
+    }
+
     async fn write_and_publish(&self, event: AuditEvent) {
         match self.write(&event).await {
             Ok(record) => self.feed.publish(record),

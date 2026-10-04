@@ -107,6 +107,8 @@ pub struct RunningAgent {
     pub purge: BackgroundTask,
     /// Écriture des synthèses du journal : arrêtée avec l'agent.
     pub audit_flush: BackgroundTask,
+    /// Écrit les synthèses du journal en attente à l'arrêt.
+    audit_recorder: Arc<AuditRecorder>,
 }
 
 impl RunningAgent {
@@ -116,9 +118,13 @@ impl RunningAgent {
             server,
             purge: _purge,
             audit_flush: _audit_flush,
+            audit_recorder,
             ..
         } = self;
-        server.run_until(stop).await
+        let result = server.run_until(stop).await;
+        // Les synthèses en attente ne partent pas avec la tâche : écrites avant de rendre la main.
+        audit_recorder.flush_all().await;
+        result
     }
 }
 
@@ -234,12 +240,14 @@ pub async fn start_with(
     });
     let server = http::spawn(listener, tls, router)?;
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
-    let audit_flush = tasks::spawn_audit_flush(services.audit_recorder, tasks::AUDIT_FLUSH_PERIOD);
+    let audit_flush =
+        tasks::spawn_audit_flush(services.audit_recorder.clone(), tasks::AUDIT_FLUSH_PERIOD);
     Ok(RunningAgent {
         server,
         identity,
         purge,
         audit_flush,
+        audit_recorder: services.audit_recorder,
     })
 }
 

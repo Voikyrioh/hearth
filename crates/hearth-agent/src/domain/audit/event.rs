@@ -196,6 +196,8 @@ pub enum Reason {
     NotFound,
     Busy,
     Internal,
+    /// Entrée de synthèse de débordement (`repeat::RepeatFilter`) : trop de groupes différents.
+    TooVaried,
 }
 
 impl Reason {
@@ -216,6 +218,7 @@ impl Reason {
             Self::NotFound => "cible introuvable".to_owned(),
             Self::Busy => "agent occupé".to_owned(),
             Self::Internal => "erreur interne".to_owned(),
+            Self::TooVaried => "activité trop variée".to_owned(),
         }
     }
 }
@@ -313,6 +316,17 @@ impl AuditEvent {
         self
     }
 
+    /// L'entrée de synthèse de débordement : `count` événements de natures trop variées, regroupés
+    /// en une entrée (la dernière occurrence donne le compte, l'origine, l'action et la cible).
+    pub fn as_overflow(mut self, count: u32) -> Self {
+        self.outcome = match self.outcome {
+            Outcome::Denied(_) => Outcome::Denied(Reason::TooVaried),
+            _ => Outcome::Failed(Reason::TooVaried),
+        };
+        self.repeat_count = count;
+        self
+    }
+
     /// L'entrée telle qu'elle est écrite et relue : textes figés.
     pub fn into_record(self, id: i64) -> AuditRecord {
         AuditRecord {
@@ -326,10 +340,16 @@ impl AuditEvent {
             action_label: self.action.label().to_owned(),
             target: self.target.text(),
             outcome: self.outcome.kind(),
-            reason: self.outcome.reason().map(|reason| match self.repeat_count {
-                0 => reason.text(),
-                n => format!("{} ({n} autres fois en 1 min)", reason.text()),
-            }),
+            reason: self
+                .outcome
+                .reason()
+                .map(|reason| match (reason, self.repeat_count) {
+                    (_, 0) => reason.text(),
+                    (Reason::TooVaried, n) => {
+                        format!("{}, {n} événements regroupés", reason.text())
+                    }
+                    (_, n) => format!("{} ({n} autres fois en 1 min)", reason.text()),
+                }),
             repeat_count: self.repeat_count,
         }
     }
@@ -504,6 +524,7 @@ mod tests {
             Reason::NotFound,
             Reason::Busy,
             Reason::Internal,
+            Reason::TooVaried,
         ] {
             let text = reason.text();
             assert!(!text.is_empty());
