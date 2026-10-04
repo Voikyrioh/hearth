@@ -29,6 +29,11 @@ pub const ADDRESS_FAILURES_BEFORE_LOCK: u32 = 20;
 /// Fenêtre dans laquelle ces échecs sont comptés (elle s'ouvre au premier échec).
 pub const ADDRESS_WINDOW: Duration = Duration::minutes(10);
 
+/// Connexions qu'une même adresse peut laisser en attente de leur tour (BR-CONN-007) : une est
+/// traitée, huit attendent au plus ; la suivante est refusée tout de suite, sans mot de passe
+/// gardé en mémoire.
+pub const MAX_WAITING_PER_ADDRESS: usize = 8;
+
 /// Un compteur sans activité depuis ce délai (et sans attente en cours) est oublié (BR-CONN-006).
 pub const ATTEMPT_RETENTION: Duration = Duration::hours(24);
 
@@ -77,6 +82,12 @@ impl AttemptKey {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Une connexion de plus peut-elle faire la queue pour son adresse ? `in_flight` = connexions
+/// déjà admises pour cette adresse, celle en cours de traitement comprise.
+pub fn admits_in_queue(in_flight: usize) -> bool {
+    in_flight <= MAX_WAITING_PER_ADDRESS
 }
 
 /// Ce que l'on retient d'un couple identifiant + adresse.
@@ -527,6 +538,21 @@ mod tests {
             !key.as_str()
                 .contains(['\u{2028}', '\u{2029}', '\u{202E}', '\u{200F}'])
         );
+    }
+
+    #[test]
+    fn one_connection_runs_and_eight_wait_the_ninth_waiter_is_refused() {
+        assert!(admits_in_queue(0), "la première s'exécute");
+        assert!(admits_in_queue(1), "première en attente");
+        assert!(
+            admits_in_queue(MAX_WAITING_PER_ADDRESS),
+            "huitième en attente"
+        );
+        assert!(
+            !admits_in_queue(MAX_WAITING_PER_ADDRESS + 1),
+            "neuvième : refusée"
+        );
+        assert!(!admits_in_queue(usize::MAX));
     }
 
     #[test]

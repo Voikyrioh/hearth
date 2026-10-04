@@ -122,6 +122,10 @@ impl From<LoginError> for ApiError {
                     format!("Trop de tentatives. Attends {seconds} s avant de réessayer."),
                 ))
             }
+            LoginError::Busy => Self::new(
+                ErrorCode::Busy,
+                "L'agent est occupé. Réessaie dans un instant.",
+            ),
             LoginError::Store(error) => Self::internal(&error),
             LoginError::Hash(error) => Self::from(error),
             LoginError::Token(error) => Self::internal(&error),
@@ -248,6 +252,13 @@ mod tests {
         assert_eq!(response.headers().get(RETRY_AFTER).unwrap(), "1");
         let error = ApiError::from(AccountError::Hash(HashError::Busy));
         assert_eq!(error.0.error.code, ErrorCode::Busy);
+    }
+
+    #[test]
+    fn a_full_connection_queue_answers_503_busy_too() {
+        let response = ApiError::from(LoginError::Busy).into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers().get(RETRY_AFTER).unwrap(), "1");
     }
 
     #[test]

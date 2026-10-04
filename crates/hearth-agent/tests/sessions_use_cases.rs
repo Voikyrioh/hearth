@@ -597,11 +597,12 @@ async fn running_operations_become_interrupted_at_startup_and_are_not_replayed()
 }
 
 #[tokio::test]
-async fn ten_simultaneous_wrong_logins_make_exactly_five_verifications() {
+async fn nine_simultaneous_wrong_logins_make_exactly_five_verifications() {
     let env = env().await;
     env.create("marie", Role::Admin).await;
     let mut tasks = Vec::new();
-    for _ in 0..10 {
+    // Neuf : une traitée et huit en attente, le plafond d'une adresse.
+    for _ in 0..9 {
         let sessions = env.sessions.clone();
         tasks.push(tokio::spawn(async move {
             sessions.login("marie", secret(WRONG), &client()).await
@@ -621,7 +622,7 @@ async fn ten_simultaneous_wrong_logins_make_exactly_five_verifications() {
         5,
         "les autres sont bloquées avant vérification"
     );
-    assert_eq!((invalid, locked), (4, 6));
+    assert_eq!((invalid, locked), (4, 5));
 }
 
 #[tokio::test]
@@ -738,4 +739,44 @@ async fn a_password_changed_between_verification_and_session_creation_does_not_l
     assert!(matches!(error, LoginError::InvalidCredentials), "{error:?}");
     assert!(env.session_ids(&marie.id).await.is_empty());
     assert_eq!(env.service.find("marie").await.unwrap().last_login_at, None);
+}
+
+#[tokio::test]
+async fn the_ninth_waiting_connection_of_an_address_is_refused_busy_at_once() {
+    let env = env().await;
+    env.hasher
+        .delay_ms
+        .store(300, std::sync::atomic::Ordering::SeqCst);
+    // Dix connexions simultanées de la même adresse : une est traitée, huit attendent, une est
+    // refusée sans attendre (et sans garder son mot de passe).
+    let mut attempts = Vec::new();
+    for n in 0..10 {
+        let sessions = env.sessions.clone();
+        attempts.push(tokio::spawn(async move {
+            sessions
+                .login(&format!("user{n}"), secret(WRONG), &client())
+                .await
+        }));
+    }
+    let mut busy = 0;
+    let mut refused = 0;
+    for attempt in attempts {
+        match attempt.await.unwrap().unwrap_err() {
+            LoginError::Busy => busy += 1,
+            LoginError::InvalidCredentials => refused += 1,
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!((busy, refused), (1, 9));
+
+    // Une adresse est libérée quand sa file est vide : la suivante passe, comptée comme un échec.
+    env.hasher
+        .delay_ms
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    let error = env
+        .sessions
+        .login("later", secret(WRONG), &client())
+        .await
+        .unwrap_err();
+    assert!(matches!(error, LoginError::InvalidCredentials), "{error:?}");
 }

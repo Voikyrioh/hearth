@@ -18,8 +18,8 @@ use super::ports::{
 };
 use crate::domain::accounts::Username;
 use crate::domain::lockout::{
-    AttemptKey, LockoutDecision, LockoutEvent, LockoutState, retry_after_seconds, step,
-    step_address,
+    AttemptKey, LockoutDecision, LockoutEvent, LockoutState, admits_in_queue, retry_after_seconds,
+    step, step_address,
 };
 use crate::domain::secret::Secret;
 use crate::domain::session_token::SessionToken;
@@ -49,6 +49,9 @@ pub enum LoginError {
     InvalidCredentials,
     #[error("Trop de tentatives, attends avant de réessayer")]
     TooManyAttempts { retry_after: Duration },
+    /// Trop de connexions en attente pour cette adresse : refus immédiat, sans compter d'échec.
+    #[error("Trop de connexions en attente pour cette adresse")]
+    Busy,
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
@@ -89,10 +92,20 @@ pub struct SessionService {
     turns: Turns,
 }
 
-/// Tours de parole par adresse : une seule connexion à la fois pour une même adresse.
+/// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, et une file
+/// d'attente bornée (`domain::lockout::admits_in_queue`).
 #[derive(Default)]
-struct Turns(Mutex<HashMap<String, Arc<AsyncMutex<()>>>>);
+struct Turns(Mutex<HashMap<String, Slot>>);
 
+/// Une adresse : son verrou, et combien de connexions elle a d'admises (en cours et en attente).
+#[derive(Default)]
+struct Slot {
+    mutex: Arc<AsyncMutex<()>>,
+    in_flight: usize,
+}
+
+/// Place dans la file d'une adresse : rendue (et l'entrée oubliée si plus personne n'attend) à
+/// l'abandon, même si l'appelant est annulé pendant l'attente.
 struct Turn<'a> {
     turns: &'a Turns,
     key: String,
@@ -100,30 +113,38 @@ struct Turn<'a> {
 }
 
 impl Turns {
-    async fn lock(&self, key: &str) -> Turn<'_> {
+    /// Prend place dans la file de `key` et attend son tour ; `None` si la file de l'adresse est
+    /// pleine (refus immédiat).
+    async fn lock(&self, key: &str) -> Option<Turn<'_>> {
         let mutex = {
             let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            map.entry(key.to_owned()).or_default().clone()
+            let slot = map.entry(key.to_owned()).or_default();
+            if !admits_in_queue(slot.in_flight) {
+                return None;
+            }
+            slot.in_flight += 1;
+            slot.mutex.clone()
         };
-        let guard = mutex.lock_owned().await;
-        Turn {
+        let mut turn = Turn {
             turns: self,
             key: key.to_owned(),
-            guard: Some(guard),
-        }
+            guard: None,
+        };
+        turn.guard = Some(mutex.lock_owned().await);
+        Some(turn)
     }
 }
 
 impl Drop for Turn<'_> {
     fn drop(&mut self) {
-        // Rend le tour, puis oublie l'entrée si plus personne ne l'attend.
+        // Rend le tour, puis la place ; oublie l'entrée si plus personne ne l'attend.
         self.guard.take();
         let mut map = self.turns.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if map
-            .get(&self.key)
-            .is_some_and(|mutex| Arc::strong_count(mutex) == 1)
-        {
-            map.remove(&self.key);
+        if let Some(slot) = map.get_mut(&self.key) {
+            slot.in_flight = slot.in_flight.saturating_sub(1);
+            if slot.in_flight == 0 {
+                map.remove(&self.key);
+            }
         }
     }
 }
@@ -176,8 +197,10 @@ impl SessionService {
     /// chemin : une vérification Argon2 (contre un haché factice si le compte n'existe pas), un
     /// échec compté, une transaction (BR-CONN-013).
     ///
-    /// Les connexions d'une même adresse sont traitées l'une après l'autre : le palier de verrouillage se joue sur des états à jour
-    /// (dix tentatives simultanées ne font pas dix vérifications).
+    /// Les connexions d'une même adresse sont traitées l'une après l'autre : le palier de
+    /// verrouillage se joue sur des états à jour (dix tentatives simultanées ne font pas dix
+    /// vérifications). Au plus huit attendent leur tour par adresse ; au-delà, la connexion est
+    /// refusée tout de suite (`LoginError::Busy`) et son mot de passe n'est pas gardé.
     pub async fn login(
         &self,
         username: &str,
@@ -188,7 +211,9 @@ impl SessionService {
         let address = AttemptKey::address(&client.addr);
         // Un seul tour, par adresse : le couple contient l'adresse, deux connexions du même couple
         // sont donc déjà sérialisées par le tour de leur adresse.
-        let _turn = self.turns.lock(address.as_str()).await;
+        let Some(_turn) = self.turns.lock(address.as_str()).await else {
+            return Err(LoginError::Busy);
+        };
         let result = self
             .login_in_turn(username, password, client, &pair, &address)
             .await;
