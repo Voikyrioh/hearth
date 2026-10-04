@@ -43,8 +43,8 @@ import { t } from "@/i18n";
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 40px;
-  min-height: 40px;
+  min-width: var(--target-size);
+  min-height: var(--target-size);
   border-radius: var(--radius-control);
 }
 

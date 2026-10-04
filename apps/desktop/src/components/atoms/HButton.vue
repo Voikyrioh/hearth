@@ -40,7 +40,7 @@ function onClick(event: MouseEvent) {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  min-height: 40px;
+  min-height: var(--target-size);
   padding: 0 var(--space-4);
   border: 1px solid transparent;
   border-radius: var(--radius-control);
@@ -71,7 +71,7 @@ function onClick(event: MouseEvent) {
 }
 
 .btn--ghost {
-  min-width: 40px;
+  min-width: var(--target-size);
   padding: 0;
   background: transparent;
   color: var(--tx2);
@@ -84,7 +84,7 @@ function onClick(event: MouseEvent) {
 
 .btn--disabled,
 .btn--disabled:hover {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 

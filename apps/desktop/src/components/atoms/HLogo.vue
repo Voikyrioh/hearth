@@ -54,17 +54,14 @@ withDefaults(defineProps<{ size?: "sm" | "md" | "lg"; decorative?: boolean }>(),
 }
 
 .logo--sm {
-  width: 28px;
-  height: 29px;
+  width: var(--logo-sm);
 }
 
 .logo--md {
-  width: 56px;
-  height: 58px;
+  width: var(--logo-md);
 }
 
 .logo--lg {
-  width: 120px;
-  height: 124px;
+  width: var(--logo-lg);
 }
 </style>

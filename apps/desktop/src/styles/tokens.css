@@ -51,6 +51,20 @@
   --space-6: 40px;
   --rail-width: 64px;
   --content-max: 420px;
+  --panel-max: 640px;
+  --target-size: 40px;
+  --icon-size: 20px;
+  --logo-sm: 28px;
+  --logo-md: 56px;
+  --logo-lg: 120px;
+  --toggle-width: 44px;
+  --toggle-height: 26px;
+  --toggle-knob: 20px;
+  --toggle-inset: 2px;
+  --toggle-travel: 18px;
+
+  /* États */
+  --opacity-disabled: 0.45;
 
   /* Mouvement */
   --motion-fast: 150ms;

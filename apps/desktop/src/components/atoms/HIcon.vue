@@ -30,8 +30,8 @@ withDefaults(defineProps<{ name: IconName; label?: string }>(), { label: undefin
 <style scoped>
 .icon {
   display: block;
-  width: 20px;
-  height: 20px;
+  width: var(--icon-size);
+  height: var(--icon-size);
   flex: none;
 }
 </style>

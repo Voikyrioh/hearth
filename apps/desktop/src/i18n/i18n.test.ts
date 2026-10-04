@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fr } from "./fr";
-import { t } from "./index";
+import { errorKey, t } from "./index";
 
 function leaves(node: unknown, path = ""): [string, string][] {
   if (typeof node === "string") return [[path, node]];
@@ -25,5 +25,11 @@ describe("i18n", () => {
     for (const [path, text] of leaves(fr)) {
       expect(text.trim(), path).not.toBe("");
     }
+  });
+
+  it("maps every typed Rust error kind to a French text", () => {
+    expect(t(errorKey("store"))).toBe("Impossible de lire ou d'enregistrer tes réglages.");
+    expect(t(errorKey("autostart"))).toContain("Windows");
+    expect(t(errorKey("logs"))).toContain("journaux");
   });
 });

@@ -1,45 +1,76 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { commands } from "@/bindings";
-import type { MessageKey } from "@/i18n";
+import { errorKey, type MessageKey } from "@/i18n";
 
-/** Réglages locaux, lus et écrits uniquement par les commandes typées du cœur Rust. */
+/**
+ * Réglages locaux, lus et écrits uniquement par les commandes typées du cœur Rust.
+ * Chaque source échoue séparément : réglages illisibles, version indisponible et
+ * dossier des journaux inaccessible ne se masquent pas entre eux.
+ */
 export const useSettingsStore = defineStore("settings", () => {
   const launchAtStartup = ref(false);
-  const version = ref("");
   const loaded = ref(false);
+  const saving = ref(false);
+  const version = ref<string | null>(null);
   const error = ref<MessageKey | null>(null);
 
   async function load() {
     try {
-      const settings = await commands.getSettings();
-      if (settings.status === "ok") {
-        launchAtStartup.value = settings.data.launchAtStartup;
+      const result = await commands.getSettings();
+      if (result.status === "ok") {
+        launchAtStartup.value = result.data.launchAtStartup;
         loaded.value = true;
         error.value = null;
       } else {
-        error.value = "settings.loadError";
+        error.value = errorKey(result.error.kind);
       }
-      version.value = await commands.getAppVersion();
     } catch {
       // Hors de l'application (navigateur de revue sans pont) ou pont en panne.
       error.value = "settings.loadError";
     }
+    try {
+      version.value = await commands.getAppVersion();
+    } catch {
+      version.value = null;
+    }
   }
 
   async function setLaunchAtStartup(enabled: boolean) {
+    if (saving.value) return;
+    saving.value = true;
     try {
       const result = await commands.setLaunchAtStartup(enabled);
       if (result.status === "ok") {
         launchAtStartup.value = result.data.launchAtStartup;
         error.value = null;
-        return;
+      } else {
+        error.value = errorKey(result.error.kind);
       }
     } catch {
-      // Traité comme un échec d'écriture ci-dessous.
+      error.value = "settings.saveError";
+    } finally {
+      saving.value = false;
     }
-    error.value = "settings.saveError";
   }
 
-  return { launchAtStartup, version, loaded, error, load, setLaunchAtStartup };
+  async function openLogsFolder() {
+    try {
+      const result = await commands.openLogsFolder();
+      error.value = result.status === "ok" ? null : errorKey(result.error.kind);
+    } catch {
+      error.value = errorKey("logs");
+    }
+  }
+
+  return {
+    launchAtStartup,
+    loaded,
+    saving,
+    version,
+    error,
+    load,
+    setLaunchAtStartup,
+    openLogsFolder,
+  };
 });

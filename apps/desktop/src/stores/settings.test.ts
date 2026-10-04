@@ -14,6 +14,8 @@ function bridge(handler: (cmd: string, args?: unknown) => unknown) {
   return calls;
 }
 
+const ok = { launchAtStartup: true };
+
 describe("settings store", () => {
   beforeEach(() => setActivePinia(createPinia()));
   afterEach(() => clearMocks());
@@ -22,15 +24,12 @@ describe("settings store", () => {
     const store = useSettingsStore();
     expect(store.launchAtStartup).toBe(false);
     expect(store.loaded).toBe(false);
+    expect(store.version).toBeNull();
   });
 
   it("loads settings and version from the Rust core", async () => {
     bridge((cmd) =>
-      cmd === "get_settings"
-        ? { launchAtStartup: true, closeHintSeen: false }
-        : cmd === "get_app_version"
-          ? "0.1.0"
-          : undefined,
+      cmd === "get_settings" ? ok : cmd === "get_app_version" ? "0.1.0" : undefined,
     );
     const store = useSettingsStore();
     await store.load();
@@ -40,14 +39,28 @@ describe("settings store", () => {
     expect(store.error).toBeNull();
   });
 
-  it("reports a typed Rust error when loading fails", async () => {
-    bridge(() => {
-      throw { kind: "store", message: "disque" };
+  it("picks the text from the typed error kind when settings cannot be read", async () => {
+    bridge((cmd) => {
+      if (cmd === "get_settings") throw { kind: "autostart", message: "registre" };
+      return "0.1.0";
     });
     const store = useSettingsStore();
     await store.load();
-    expect(store.error).toBe("settings.loadError");
+    expect(store.error).toBe("errors.autostart");
     expect(store.loaded).toBe(false);
+    expect(store.version).toBe("0.1.0");
+  });
+
+  it("does not blame the settings when only the version is unavailable", async () => {
+    bridge((cmd) => {
+      if (cmd === "get_app_version") throw new Error("x");
+      return ok;
+    });
+    const store = useSettingsStore();
+    await store.load();
+    expect(store.error).toBeNull();
+    expect(store.loaded).toBe(true);
+    expect(store.version).toBeNull();
   });
 
   it("reports an error when there is no bridge at all", async () => {
@@ -60,7 +73,7 @@ describe("settings store", () => {
   it("sends the new value and follows what Rust reports (BR-CLIENT-007)", async () => {
     const calls = bridge((cmd, args) =>
       cmd === "set_launch_at_startup"
-        ? { launchAtStartup: (args as { enabled: boolean }).enabled, closeHintSeen: false }
+        ? { launchAtStartup: (args as { enabled: boolean }).enabled }
         : undefined,
     );
     const store = useSettingsStore();
@@ -68,15 +81,46 @@ describe("settings store", () => {
     expect(calls).toEqual([{ cmd: "set_launch_at_startup", args: { enabled: true } }]);
     expect(store.launchAtStartup).toBe(true);
     expect(store.error).toBeNull();
+    expect(store.saving).toBe(false);
   });
 
-  it("keeps the old value and shows an error when the change fails", async () => {
+  it("keeps the old value and uses the error kind when the change fails", async () => {
     bridge(() => {
       throw { kind: "autostart", message: "registre" };
     });
     const store = useSettingsStore();
     await store.setLaunchAtStartup(true);
     expect(store.launchAtStartup).toBe(false);
-    expect(store.error).toBe("settings.saveError");
+    expect(store.error).toBe("errors.autostart");
+    expect(store.saving).toBe(false);
+  });
+
+  it("ignores a second change while one is running", async () => {
+    let release: () => void = () => {};
+    const calls = bridge(
+      () => new Promise((resolve) => (release = () => resolve({ launchAtStartup: true }))),
+    );
+    const store = useSettingsStore();
+    const first = store.setLaunchAtStartup(true);
+    expect(store.saving).toBe(true);
+    await store.setLaunchAtStartup(false);
+    expect(calls).toHaveLength(1);
+    release();
+    await first;
+    expect(store.saving).toBe(false);
+  });
+
+  it("opens the logs folder and reports a typed failure", async () => {
+    const calls = bridge(() => undefined);
+    const store = useSettingsStore();
+    await store.openLogsFolder();
+    expect(calls).toEqual([{ cmd: "open_logs_folder", args: {} }]);
+    expect(store.error).toBeNull();
+
+    bridge(() => {
+      throw { kind: "logs", message: "droits" };
+    });
+    await store.openLogsFolder();
+    expect(store.error).toBe("errors.logs");
   });
 });

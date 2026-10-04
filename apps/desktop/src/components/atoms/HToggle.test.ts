@@ -15,9 +15,22 @@ describe("HToggle", () => {
     expect(wrapper.emitted("update:modelValue")).toEqual([[true]]);
   });
 
-  it("does nothing when disabled", async () => {
-    const wrapper = mount(HToggle, { props: { modelValue: false, disabled: true } });
+  it("follows the HButton convention when disabled: focusable, explained, inert", async () => {
+    const wrapper = mount(HToggle, {
+      props: { modelValue: false, disabled: true, hint: "Pas encore" },
+    });
     await wrapper.trigger("click");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(wrapper.attributes("aria-disabled")).toBe("true");
+    expect(wrapper.attributes("title")).toBe("Pas encore");
+    expect(wrapper.attributes("disabled")).toBeUndefined();
+  });
+
+  it("ignores a second click while busy and says so", async () => {
+    const wrapper = mount(HToggle, { props: { modelValue: false, busy: true } });
+    await wrapper.trigger("click");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(wrapper.attributes("aria-busy")).toBe("true");
+    expect(wrapper.attributes("aria-disabled")).toBe("true");
   });
 });

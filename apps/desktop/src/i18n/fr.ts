@@ -20,13 +20,22 @@ export const fr = {
   },
   settings: {
     title: "Réglages",
-    tabsLabel: "Sections des réglages",
-    tabGeneral: "Général",
+    sectionGeneral: "Général",
     launchAtStartup: "Lancer Hearth au démarrage de Windows",
     launchAtStartupHelp: "Hearth s'ouvrira dans la zone de notification au démarrage de Windows.",
+    toggleUnavailable: "Disponible dès que tes réglages sont lus.",
+    logs: "Journaux",
+    logsHelp: "Les journaux aident à comprendre un problème.",
+    openLogs: "Ouvrir le dossier des journaux",
     version: "Version",
+    versionUnavailable: "indisponible",
     loadError: "Impossible de lire tes réglages.",
     saveError: "Impossible de changer ce réglage. Réessaie.",
+  },
+  errors: {
+    store: "Impossible de lire ou d'enregistrer tes réglages.",
+    autostart: "Windows n'a pas pris en compte ce changement. Réessaie.",
+    logs: "Impossible d'ouvrir le dossier des journaux.",
   },
 } as const;
 
