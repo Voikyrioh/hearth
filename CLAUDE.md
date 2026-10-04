@@ -18,6 +18,21 @@ cargo test --workspace
 
 Les trois doivent passer avant tout commit.
 
+### Client Windows (`apps/desktop`)
+
+La crate Tauri `hearth-desktop` est membre du workspace mais **hors `default-members`** : sous Linux elle ne compile pas (bibliothèques WebView absentes). Sous Linux, ajouter `--exclude hearth-desktop` aux commandes `--workspace` (le job Linux de la CI le fait) ; le job `desktop` de la CI (Windows) la vérifie. Sous Windows les trois commandes ci-dessus couvrent tout.
+
+```sh
+cd apps/desktop
+npm ci
+npm run lint && npm run typecheck && npm test     # Biome, vue-tsc, Vitest
+npm run build                                     # requis avant clippy/test Rust de la coquille (dist/ lu à la compilation)
+npm run tauri dev                                 # application complète ; régénère src/bindings.ts
+npm run tauri build                               # installateur NSIS dans target/release/bundle/nsis/
+```
+
+`src/bindings.ts` est généré (tauri-specta) et versionné ; s'il est périmé, `cargo test -p hearth-desktop` échoue : `HEARTH_REGEN_BINDINGS=1 cargo test -p hearth-desktop`. Détails et ajout d'une commande : `docs/adr/ADR-0010-dependances-client.md`.
+
 ## SQLx (requêtes vérifiées, mode hors ligne)
 
 Les `query!`/`query_as!` sont vérifiées à la compilation contre `.sqlx/` (versionné). Sans `DATABASE_URL`, `cargo build` et la CI lisent ce dossier : rien à configurer. Après toute modification d'une requête `query!` ou d'une migration, régénérer et committer `.sqlx/` :
@@ -43,5 +58,6 @@ Si `cargo sqlx` manque ou n'a pas le pilote SQLite : `cargo install sqlx-cli --n
 - Un port est consommé par la racine de composition (`app.rs`) via `Arc<dyn Port>` ou `&dyn Port`, jamais par son type concret. `application` ne connaît ni axum ni SQLx ; `entrypoint` n'importe pas `infrastructure`. Mots de passe et hachés : type `Secret`, jamais dans un message ou un journal.
 - `hearth-proto` : aucun type de framework, aucune E/S.
 - Le client ne parle à l'agent que par `hearth-link`. L'interface web n'ouvre aucune connexion réseau.
+- Interface (`apps/desktop/src`) : Composition API et `<script setup lang="ts">`, Atomic design, zéro `style=` en ligne, SVG en composants atomes, jetons CSS uniquement (`styles/tokens.css`), textes dans `i18n/fr.ts`.
 - Textes d'interface : français, tutoiement, pas de tiret cadratin.
 - Git : une branche par ticket (`feat/HRT-nn-slug`), PR, pas de push direct sur `main`. Gel des commits en heures ouvrées (voir hub).

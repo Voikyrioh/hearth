@@ -24,8 +24,8 @@ crates/
 └── xtask/           → Tâches build : binaire agent statique en conteneur, empaquetage, manifeste
 
 apps/
-├── desktop/src-tauri/  → Coquille Tauri : fenêtre, zone notification, coffre, mises à jour, relais
-├── desktop/src/        → Interface Vue 3 : affichage état, validation saisies, formatage, tous textes
+├── desktop/src-tauri/  → Coquille Tauri : fenêtre, instance unique, zone de notification, démarrage Windows, réglages locaux (livré HRT-08) ; coffre, mises à jour, relais à venir [apps/desktop/ARCHITECTURE.md]
+├── desktop/src/        → Interface Vue 3 : écran de premier lancement, réglages, jetons Braise, textes (`i18n/fr.ts`), pont Tauri typé (`bindings.ts`) ; affichage d'état et saisies à venir
 └── deploy/             → Script installation une commande
 
 docs/              → INDEX.md (adr, business-rules, open-api, components, bugs)
@@ -50,7 +50,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 - Tests : `cargo test` (domain seul) + `cargo test --test '*' ` (intégration) + `npx vitest` (front composants) + `npx playwright test` (e2e navigateur).
 - Lint : `cargo clippy -- -D warnings` + `cargo fmt --check` + `npx biome check`.
 - Build agent : `cargo xtask agent` (conteneur alpine, cible musl).
-- Build client : `cd apps/desktop && npm run tauri build` (Windows NSIS).
+- Build client : `cd apps/desktop && npm run tauri build` (Windows NSIS : `target/release/bundle/nsis/Hearth_<version>_x64-setup.exe`). Interface seule : `npm run lint`, `npm run typecheck`, `npm test` dans `apps/desktop`.
 - Comptes sur le serveur (sans réseau) : `cargo run --bin hearth-agent -- --data-dir ./.dev-data account add marie --role admin` (mot de passe demandé sans écho, ou `HEARTH_ACCOUNT_PASSWORD`), puis `account list|passwd|role|remove|revoke` ; runbook `docs/runbooks/recuperer-acces-administrateur.md`. Régénérer `.sqlx/` après une requête ou migration modifiée : voir `CLAUDE.md`.
 - Run local agent : `RUST_LOG=debug cargo run --bin hearth-agent -- serve --data-dir ./.dev-data` ; empreinte : `cargo run --bin hearth-agent -- fingerprint --data-dir ./.dev-data`. Configuration : `agent.toml` (`--config`, `HEARTH_CONFIG`) puis variables `HEARTH_PORT`, `HEARTH_LISTEN_ADDR`, `HEARTH_DATA_DIR`, `HEARTH_MANAGED`, puis `--data-dir`. Journaux : `HEARTH_LOG_FORMAT=json|text` (texte en terminal, JSON sinon), niveau par `RUST_LOG`. Dossier de données par défaut : `/var/lib/hearth` (Linux), `%LOCALAPPDATA%\hearth-agent` (Windows, mode dev).
 
