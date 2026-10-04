@@ -3,18 +3,15 @@
 
 use hearth_desktop_lib::{BINDINGS_PATH, specta_builder, typescript};
 
+fn normalize(text: String) -> String {
+    text.replace("\r\n", "\n")
+}
+
 #[test]
 fn bindings_file_is_up_to_date() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("bindings.ts");
     specta_builder().export(typescript(), &out).unwrap();
-    let normalize = |text: String| {
-        text.replace(
-            "
-", "
-",
-        )
-    };
     let fresh = normalize(std::fs::read_to_string(&out).unwrap());
     if std::env::var_os("HEARTH_REGEN_BINDINGS").is_some() {
         std::fs::write(BINDINGS_PATH, &fresh).unwrap();

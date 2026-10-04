@@ -1,4 +1,4 @@
-﻿; Textes français (tutoiement) de l'installateur Hearth. Remplace le fichier fourni par
+; Textes français (tutoiement) de l'installateur Hearth. Remplace le fichier fourni par
 ; Tauri, qui vouvoie. Mêmes clés que le modèle ; seules les formulations changent.
 LangString addOrReinstall ${LANG_FRENCH} "Ajouter ou réinstaller un composant."
 LangString alreadyInstalled ${LANG_FRENCH} "Déjà installé."
