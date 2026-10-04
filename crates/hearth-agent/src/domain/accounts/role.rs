@@ -38,6 +38,12 @@ impl Role {
     pub fn can_manage_accounts(self) -> bool {
         matches!(self, Role::Admin)
     }
+
+    /// BR-DASH-013 : le journal d'activité (sujet `audit` du flux temps réel) est réservé aux
+    /// administrateurs. Distinct de `can_manage_accounts` pour que les deux puissent évoluer.
+    pub fn can_read_audit(self) -> bool {
+        matches!(self, Role::Admin)
+    }
 }
 
 impl FromStr for Role {
@@ -60,6 +66,12 @@ impl fmt::Display for Role {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_an_administrator_reads_the_audit() {
+        assert!(Role::Admin.can_read_audit());
+        assert!(!Role::ReadOnly.can_read_audit());
+    }
+
     use super::*;
 
     #[test]

@@ -14,8 +14,8 @@ use sysinfo::{Components, DiskRefreshKind, Disks, MINIMUM_CPU_UPDATE_INTERVAL, N
 use super::gpu::round1;
 use crate::application::ports::{ProbeError, SystemProbe};
 use crate::domain::machine::{
-    CpuIdentity, DiskIdentity, MachineIdentity, OsIdentity, Volume, counts_for_throughput,
-    visible_volumes,
+    CpuIdentity, DiskIdentity, InterfaceKind, MachineIdentity, OsIdentity, Volume,
+    throughput_interfaces, visible_volumes,
 };
 use crate::domain::metrics::{DiskUsage, MemoryUsage, NetRate, SystemSample, TempReading};
 
@@ -113,6 +113,21 @@ fn temperatures(components: &Components) -> Vec<TempReading> {
         .collect()
 }
 
+/// Observe une interface : bouclage (par son nom), matériel (sous Linux, un périphérique est
+/// derrière `/sys/class/net/<interface>/device` ; ailleurs on ne sait pas, la règle se rabat sur
+/// toutes les interfaces sauf le bouclage).
+fn observe_interface(name: &str) -> InterfaceKind {
+    let lower = name.to_ascii_lowercase();
+    InterfaceKind {
+        loopback: lower == "lo" || lower == "lo0" || lower.contains("loopback"),
+        physical: cfg!(target_os = "linux")
+            && std::path::Path::new("/sys/class/net")
+                .join(name)
+                .join("device")
+                .exists(),
+    }
+}
+
 fn percent(value: f32) -> f32 {
     round1(value.clamp(0.0, 100.0))
 }
@@ -179,10 +194,15 @@ impl SystemProbe for SysinfoProbe {
         let elapsed = state.net_refreshed_at.elapsed();
         state.networks.refresh(true);
         state.net_refreshed_at = Instant::now();
-        let counted: Vec<_> = state
-            .networks
+        let interfaces: Vec<_> = state.networks.iter().collect();
+        let kinds: Vec<_> = interfaces
             .iter()
-            .filter(|(name, _)| counts_for_throughput(name))
+            .map(|(name, _)| observe_interface(name))
+            .collect();
+        let counted: Vec<_> = interfaces
+            .iter()
+            .zip(throughput_interfaces(&kinds))
+            .filter_map(|(entry, counts)| counts.then_some(*entry))
             .collect();
         let net = (elapsed >= MIN_NET_INTERVAL && !counted.is_empty()).then(|| {
             let seconds = elapsed.as_secs_f64();
@@ -228,6 +248,18 @@ impl SystemProbe for SysinfoProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_loopback_is_recognised_by_its_name() {
+        for name in ["lo", "lo0", "Loopback Pseudo-Interface 1"] {
+            assert!(observe_interface(name).loopback, "{name}");
+        }
+        for name in ["eth0", "Ethernet", "tailscale0"] {
+            assert!(!observe_interface(name).loopback, "{name}");
+        }
+        // Une interface qui n'existe pas n'est pas physique.
+        assert!(!observe_interface("hearth-test-no-such-if").physical);
+    }
 
     #[test]
     fn the_identity_describes_this_machine() {

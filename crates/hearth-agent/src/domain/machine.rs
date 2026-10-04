@@ -144,18 +144,30 @@ pub fn visible_volumes(mut volumes: Vec<Volume>) -> Vec<Volume> {
     volumes
 }
 
-/// Le débit de cette interface compte-t-il dans le débit de la machine ? Bouclage et interfaces
-/// virtuelles de conteneurs ou de ponts sont exclus : leur trafic passe aussi par l'interface
-/// physique et serait compté deux fois.
-pub fn counts_for_throughput(interface: &str) -> bool {
-    let name = interface.to_ascii_lowercase();
-    let virtual_prefixes = ["veth", "docker", "br-", "virbr"];
-    !(name == "lo"
-        || name == "lo0"
-        || name.contains("loopback")
-        || virtual_prefixes
-            .iter()
-            .any(|prefix| name.starts_with(prefix)))
+/// Ce que l'observation dit d'une interface réseau.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InterfaceKind {
+    /// L'interface a un périphérique matériel derrière elle (carte réseau, adaptateur Wi-Fi).
+    pub physical: bool,
+    /// C'est le bouclage local.
+    pub loopback: bool,
+}
+
+/// Quelles interfaces comptent dans le débit de la machine (BR-DASH-015) : les interfaces
+/// physiques, dont le trafic est le vrai trafic de la machine. Conteneurs, ponts, tunnels,
+/// VPN et agrégats font repasser leur trafic par une interface physique : les compter
+/// doublerait le débit. Si l'observation ne trouve aucune interface physique (système qui ne
+/// l'expose pas, mode dev), on se rabat sur toutes les interfaces sauf le bouclage.
+///
+/// `interfaces` : les interfaces observées ; rend, pour chacune, si elle compte.
+pub fn throughput_interfaces(interfaces: &[InterfaceKind]) -> Vec<bool> {
+    let any_physical = interfaces
+        .iter()
+        .any(|interface| interface.physical && !interface.loopback);
+    interfaces
+        .iter()
+        .map(|interface| !interface.loopback && (interface.physical || !any_physical))
+        .collect()
 }
 
 #[cfg(test)]
@@ -267,20 +279,37 @@ mod tests {
         assert_eq!(volume("a", "/", "ext4", 100, 130).used_bytes(), 0);
     }
 
+    fn kind(physical: bool, loopback: bool) -> InterfaceKind {
+        InterfaceKind { physical, loopback }
+    }
+
     #[test]
-    fn loopback_and_virtual_interfaces_do_not_count() {
-        for name in [
-            "lo",
-            "veth12ab",
-            "docker0",
-            "br-3f2a",
-            "virbr0",
-            "Loopback Pseudo-Interface 1",
-        ] {
-            assert!(!counts_for_throughput(name), "{name}");
-        }
-        for name in ["eth0", "enp3s0", "wlan0", "Ethernet", "Wi-Fi", "tailscale0"] {
-            assert!(counts_for_throughput(name), "{name}");
-        }
+    fn only_physical_interfaces_count_when_there_are_some() {
+        // lo, eth0 (physique), docker0, tailscale0, bond0
+        let observed = [
+            kind(false, true),
+            kind(true, false),
+            kind(false, false),
+            kind(false, false),
+            kind(false, false),
+        ];
+        assert_eq!(
+            throughput_interfaces(&observed),
+            [false, true, false, false, false]
+        );
+    }
+
+    #[test]
+    fn without_any_physical_interface_everything_but_the_loopback_counts() {
+        let observed = [kind(false, true), kind(false, false), kind(false, false)];
+        assert_eq!(throughput_interfaces(&observed), [false, true, true]);
+    }
+
+    #[test]
+    fn a_loopback_never_counts_even_if_it_claims_a_device() {
+        let observed = [kind(true, true), kind(true, false)];
+        assert_eq!(throughput_interfaces(&observed), [false, true]);
+        assert_eq!(throughput_interfaces(&[kind(true, true)]), [false]);
+        assert!(throughput_interfaces(&[]).is_empty());
     }
 }

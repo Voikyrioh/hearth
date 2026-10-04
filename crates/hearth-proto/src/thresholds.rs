@@ -79,7 +79,10 @@ pub fn temperature_level(celsius: f32) -> Level {
     }
 }
 
-/// Un point de la série de charge du processeur.
+/// Un point de la série de charge du processeur. La série doit être **au pas de 1 s** (le flux
+/// direct, ou l'historique `1m` et `5m`) : la fenêtre `1h` est au pas de 10 s, plus large que
+/// [`CPU_MAX_GAP_MS`], et `cpu_level` y rendrait toujours « normal ». Le niveau « tenu 30 s » se
+/// calcule donc sur le flux en direct, jamais sur la fenêtre `1h`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CpuPoint {
     /// Instant du point, en millisecondes (l'origine importe peu : seules les différences servent).
@@ -87,7 +90,7 @@ pub struct CpuPoint {
     pub percent: f32,
 }
 
-/// Niveau du processeur d'après sa série (du plus ancien au plus récent) : un niveau ne compte que
+/// Niveau du processeur d'après sa série **au pas de 1 s** (du plus ancien au plus récent) : un niveau ne compte que
 /// si **tous** les points depuis au moins [`CPU_HOLD_MS`] y sont (BR-DASH-004), sans trou de plus
 /// de [`CPU_MAX_GAP_MS`]. Un pic bref reste normal ; une charge à 100 % depuis 10 s et à 90 %
 /// avant est « attention », pas « critique ».
@@ -251,6 +254,18 @@ mod tests {
         let mut series = flat(100_000, 31, 90.0);
         series.drain(10..14);
         assert_eq!(cpu_level(&series), Level::Attention);
+    }
+
+    #[test]
+    fn a_series_at_ten_seconds_is_not_evaluable_and_stays_normal() {
+        // La fenêtre 1 h de l'historique (un point par 10 s) : pas de niveau « tenu 30 s » ici.
+        let series: Vec<_> = (0..20)
+            .map(|i| CpuPoint {
+                at_ms: i * 10_000,
+                percent: 100.0,
+            })
+            .collect();
+        assert_eq!(cpu_level(&series), Level::Normal);
     }
 
     #[test]

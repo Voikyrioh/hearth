@@ -43,13 +43,14 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-DASH-012](./BR-DASH-012-disques-montes-demontes.md) — Un disque monté ou retiré apparaît ou disparaît automatiquement — `domain/machine.rs::{is_real_filesystem, visible_volumes}, infrastructure/system/sysinfo_probe.rs` — invariant ✓
 - [BR-DASH-013](./BR-DASH-013-deux-roles-une-vue.md) — Les deux rôles voient le tableau de bord à l'identique — `entrypoint/http/mod.rs::ENDPOINTS, entrypoint/ws/connection.rs` — invariant ✓
 - [BR-DASH-014](./BR-DASH-014-formats-d-unites.md) — Les nombres suivent les unités : pourcentages entiers, Go à une décimale, débit adaptatif, durée longue — `hearth-proto/src/api/metrics.rs` — —
+- [BR-DASH-015](./BR-DASH-015-interfaces-reseau-comptees.md) — Seules les interfaces réseau physiques comptent dans le débit — `domain/machine.rs::throughput_interfaces` — invariant ✓
 
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
 | **INSTALL** | Installation agent : déploiement, service système, génération certificat | 12 | us-installer-agent |
 | **CLIENT** | Installation et configuration client desktop : NSIS, Tauri, démarrage, zone notification | 14 | us-installer-client |
 | **CONN** | Connexion au serveur : découverte, épinglage TLS, authentification, session, coffre | 17 | us-connecter-serveur |
-| **DASH** | Tableau de bord machine : mesures système, GPU, historique, seuils | 14 | us-tableau-de-bord-machine |
+| **DASH** | Tableau de bord machine : mesures système, GPU, historique, seuils | 15 | us-tableau-de-bord-machine |
 | **RESIL** | Résilience du lien : reconnexion, opérations idempotentes, instantanés, affichage état | 20 | us-lien-resilient |
 | **ACCT** | Gestion comptes : création, suppression, rôles, mots de passe, dernier administrateur | 16 | us-gerer-comptes |
 | **AUDIT** | Journal d'activité : logging, filtrage, recherche FTS5, purge, export CSV | 21 | us-journal-activite |

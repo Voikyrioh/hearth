@@ -50,11 +50,11 @@ Historique des mesures de la machine, rééchantillonné (BR-DASH-010). L'agent 
 | `uptime_s` | Durée de fonctionnement de la machine, en secondes. |
 | `cpu`, `cores` | Charge globale et par cœur logique, en pourcentage (0 à 100, une décimale). |
 | `mem`, `disks` | Occupation en octets. `disks` suit les montages (un disque monté ou retiré apparaît ou disparaît, BR-DASH-012). |
-| `net` | Débit des interfaces physiques (hors bouclage et interfaces de conteneurs), en octets par seconde, calculé entre deux échantillons ; absent s'il n'est pas calculable. |
+| `net` | Débit des interfaces physiques (BR-DASH-015 : sous Linux celles qui ont un périphérique, hors bouclage, conteneurs, ponts, tunnels, VPN et agrégats), en octets par seconde, calculé entre deux échantillons ; absent s'il n'est pas calculable. |
 | `gpus` | Une entrée par carte ; **liste vide** sans carte. Chaque champ est absent (`null`) s'il est illisible : `temp_c` absente = « Non disponible » (BR-DASH-007), les autres champs restent. |
 | `temps` | Sondes de température lisibles et plausibles (-50 à 150 °C) ; **liste vide** sans sonde (BR-DASH-006). |
 
-Une mesure illisible est un champ absent, **jamais un zéro inventé**, et n'affecte pas les autres (BR-DASH-008). Aucun arrondi côté agent hors une décimale sur les pourcentages et températures : le formatage est celui du client (BR-DASH-014). Les seuils d'alerte sont dans `hearth_proto::thresholds`, appliqués par le client.
+Une mesure illisible est un champ absent, **jamais un zéro inventé**, et n'affecte pas les autres (BR-DASH-008). Aucun arrondi côté agent hors une décimale sur les pourcentages et températures : le formatage est celui du client (BR-DASH-014). Les seuils d'alerte sont dans `hearth_proto::thresholds`, appliqués par le client. Le niveau du processeur « tenu 30 s » (`cpu_level`) se calcule sur une série **au pas de 1 s** : le flux en direct, ou les fenêtres `1m` et `5m`. La fenêtre `1h` (un point par 10 s) ne s'y prête pas (`cpu_level` y rend toujours « normal ») ; ses courbes servent à l'affichage, pas à l'alerte du processeur.
 
 ## Erreurs
 
