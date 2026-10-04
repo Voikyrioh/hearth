@@ -562,7 +562,7 @@ async fn a_password_changed_between_verification_and_write_is_not_overwritten() 
     assert!(matches!(error, AccountError::PasswordChangedMeanwhile));
     assert_eq!(
         error.to_string(),
-        "Le mot de passe a été modifié entre-temps, réessaie"
+        "Le mot de passe a été modifié entre-temps, réessaye"
     );
     let stored: String = sqlx::query_scalar("SELECT password_hash FROM accounts")
         .fetch_one(&pool)

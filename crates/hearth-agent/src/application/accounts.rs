@@ -37,7 +37,7 @@ pub enum AccountError {
     LastAdmin(#[from] LastAdminError),
     #[error("L'ancien mot de passe est incorrect")]
     OldPasswordIncorrect,
-    #[error("Le mot de passe a été modifié entre-temps, réessaie")]
+    #[error("Le mot de passe a été modifié entre-temps, réessaye")]
     PasswordChangedMeanwhile,
     #[error(transparent)]
     SelfDeletion(#[from] ConfirmationMismatch),

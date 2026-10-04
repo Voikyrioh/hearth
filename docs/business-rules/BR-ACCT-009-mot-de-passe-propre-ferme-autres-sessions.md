@@ -22,7 +22,7 @@ Le titulaire saisit l'ancien mot de passe puis le nouveau. Les autres sessions d
 
 ## Cas limites
 - Ancien mot de passe faux → rien ne change, aucune session fermée.
-- Le mot de passe change entre la vérification de l'ancien et l'écriture → refus « Le mot de passe a été modifié entre-temps, réessaie », rien n'est écrasé (le haché vérifié est comparé au haché en base dans la transaction).
+- Le mot de passe change entre la vérification de l'ancien et l'écriture → refus « Le mot de passe a été modifié entre-temps, réessaye », rien n'est écrasé (le haché vérifié est comparé au haché en base dans la transaction).
 - Les routes HTTP (HRT-04) fourniront `current_session` ; la ligne de commande n'a pas de session et passe par `set_password`.
 
 ## Règles liées
