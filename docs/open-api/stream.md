@@ -1,6 +1,6 @@
 # GET /api/v1/stream (WebSocket)
 
-Flux temps réel : l'identité et l'historique de la machine, puis un échantillon par seconde, sur la même adresse HTTPS que l'API (mise à niveau d'une requête `GET`). Types : `hearth-proto::stream` (messages JSON à champ `type`, un par trame texte). `snapshot` sert l'identité de la machine **en cache** (relue au plus toutes les 30 s).
+Flux temps réel : l'identité et l'historique de la machine, puis un échantillon par seconde, sur la même adresse HTTPS que l'API (mise à niveau d'une requête `GET`). Types : `hearth-proto::stream` (messages JSON à champ `type`, un par trame texte). `snapshot` sert l'identité de la machine **en cache** (relue au plus toutes les 30 s, et aussitôt qu'une carte graphique nouvelle est vue). **Carte apparue après le `snapshot`** : l'agent renvoie un nouveau `snapshot` complet (identité à jour et historique, à vérifier toutes les 5 s) à l'abonné aux mesures ; le client remplace son identité et recolle l'historique comme après une reconnexion.
 
 - **Authentification** : par le **premier message** (`auth`), pas par l'en-tête `Authorization` (un client web ne peut pas en poser sur un WebSocket). **Rôle requis** : tous ; le sujet `audit` est réservé aux administrateurs.
 - **Version d'interface** : `X-Hearth-Api` est requis sur la requête d'ouverture (`422` absent, `426` hors plage), comme ailleurs.
@@ -29,7 +29,7 @@ Taille maximale d'un message du client : 4 096 octets (au-delà, l'agent ferme).
 
 | `type` | Champs | Quand |
 |---|---|---|
-| `snapshot` | `machine` ([machine](./machine.md)), `history` (5 dernières minutes, 1 échantillon par seconde) | Après `subscribe` avec `metrics`. |
+| `snapshot` | `machine` ([machine](./machine.md)), `history` (5 dernières minutes, 1 échantillon par seconde) | Après `subscribe` avec `metrics`, et de nouveau quand une carte graphique apparaît. |
 | `metrics` | champs de l'échantillon à plat ([metrics](./metrics.md)) | Chaque seconde. |
 | `audit` | `event` | Événement du journal d'activité, administrateurs abonnés à `audit`. Forme fixée par le journal (HRT-05) ; silencieux tant qu'aucun journal n'est branché. |
 | `session` | `kind` : `revoked` ou `expired` | La session prend fin ; l'agent ferme ensuite. |
@@ -42,7 +42,12 @@ L'agent s'abonne aux échantillons **avant** de lire l'historique du `snapshot`,
 
 ## Charge et plafonds
 
-Au plus **32 flux ouverts** au total et **4 par compte**. Au-delà du total : refus dès l'ouverture, `503 BUSY` (format d'erreur, `Retry-After`). Au-delà du plafond d'un compte : le compte n'est connu qu'après `auth`, donc message `error` `BUSY` puis fermeture (`1008`). Un flux fermé rend sa place.
+Deux quotas distincts :
+
+- **Connexions pas encore authentifiées** (en attente de leur `auth`) : au plus **2 par adresse** et **16 au total**. Au-delà : refus dès l'ouverture, `503 BUSY` au format d'erreur (avec `Retry-After`). La place est rendue dès que l'`auth` réussit, ou à la fermeture quelle qu'en soit la cause (délai de 5 s, coupure, erreur d'authentification).
+- **Flux authentifiés** : au plus **32 au total** et **4 par compte**. La place n'est prise qu'après un `auth` réussi ; au-delà, message `error` `BUSY` puis fermeture (`1008`). Un flux fermé rend sa place.
+
+Un anonyme muet ne prend donc jamais la place d'un flux authentifié ; il ne peut qu'occuper les places d'attente de **sa** propre adresse (2) et, avec des adresses multiples, jusqu'à 16 places d'attente pendant 5 s chacune.
 
 Chaque connexion est une tâche indépendante. Les échantillons passent par un canal de diffusion borné : un abonné lent perd les plus anciens, il ne ralentit ni l'échantillonnage ni les autres. Un message qui ne part pas en 10 s fait abandonner le client.
 

@@ -32,7 +32,7 @@ Identité de la machine : ce que l'agent sait d'elle et qui change rarement. Mê
 | `gpus` | Cartes graphiques mesurables, **liste vide** sans carte (BR-DASH-005). Une carte vue une fois reste listée (et `capabilities.gpu` vrai) même pendant une relance de `nvidia-smi`, seules ses mesures deviennent absentes. `memory_total_bytes` absent si la carte ne l'expose pas. |
 | `capabilities` | `gpu` : au moins une carte mesurable ; `temps` : au moins une sonde de température exposée par le système (BR-DASH-006). |
 
-Une machine sans carte graphique ou sans sonde n'est jamais une erreur : capacité fausse, liste vide. Si la sonde ne répond pas (2 s), l'identité du cache est servie, périmée au besoin ; `500` seulement si elle n'a jamais pu être lue.
+Une machine sans carte graphique ou sans sonde n'est jamais une erreur : capacité fausse, liste vide. Si la sonde ne répond pas (2 s), l'identité du cache est servie, périmée au besoin, sans nouvelle tentative pendant 5 s ; `500` seulement si elle n'a jamais pu être lue.
 
 ## Erreurs
 
