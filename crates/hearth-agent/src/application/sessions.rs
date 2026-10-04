@@ -4,10 +4,12 @@
 //! Les règles sont celles de `domain::{lockout, sessions, session_token}` ; ce module les
 //! enchaîne et demande au stockage d'exécuter.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use super::accounts::AccountView;
 use super::ports::{
@@ -15,7 +17,10 @@ use super::ports::{
     StoreError, TokenGen, TokenGenError,
 };
 use crate::domain::accounts::Username;
-use crate::domain::lockout::{AttemptKey, LockoutDecision, LockoutEvent, step};
+use crate::domain::lockout::{
+    AttemptKey, LockoutDecision, LockoutEvent, LockoutState, retry_after_seconds, step,
+    step_address,
+};
 use crate::domain::secret::Secret;
 use crate::domain::session_token::SessionToken;
 use crate::domain::sessions::{Session, SessionEnd, SessionId, check, expiry_from, renewed_expiry};
@@ -81,6 +86,65 @@ pub struct SessionService {
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     tokens: Arc<dyn TokenGen>,
+    turns: Turns,
+}
+
+/// Tours de parole par clé : une seule connexion à la fois par adresse et par couple.
+#[derive(Default)]
+struct Turns(Mutex<HashMap<String, Arc<AsyncMutex<()>>>>);
+
+struct Turn<'a> {
+    turns: &'a Turns,
+    key: String,
+    guard: Option<OwnedMutexGuard<()>>,
+}
+
+impl Turns {
+    async fn lock(&self, key: &str) -> Turn<'_> {
+        let mutex = {
+            let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+            map.entry(key.to_owned()).or_default().clone()
+        };
+        let guard = mutex.lock_owned().await;
+        Turn {
+            turns: self,
+            key: key.to_owned(),
+            guard: Some(guard),
+        }
+    }
+}
+
+impl Drop for Turn<'_> {
+    fn drop(&mut self) {
+        // Rend le tour, puis oublie l'entrée si plus personne ne l'attend.
+        self.guard.take();
+        let mut map = self.turns.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if map
+            .get(&self.key)
+            .is_some_and(|mutex| Arc::strong_count(mutex) == 1)
+        {
+            map.remove(&self.key);
+        }
+    }
+}
+
+/// Attente la plus longue imposée par l'une des décisions, s'il y en a une.
+fn longest_wait(decisions: &[LockoutDecision]) -> Option<Duration> {
+    decisions
+        .iter()
+        .filter_map(|decision| match decision {
+            LockoutDecision::Blocked { retry_after } => Some(*retry_after),
+            LockoutDecision::Allowed => None,
+        })
+        .max()
+}
+
+/// La tentative est-elle admise ? Sinon, l'attente à annoncer (la plus longue des deux compteurs).
+fn admission(pair: LockoutState, address: LockoutState, now: OffsetDateTime) -> Option<Duration> {
+    longest_wait(&[
+        step(pair, LockoutEvent::Attempt, now).1,
+        step_address(address, LockoutEvent::Attempt, now).1,
+    ])
 }
 
 impl SessionService {
@@ -104,25 +168,64 @@ impl SessionService {
             clock,
             ids,
             tokens,
+            turns: Turns::default(),
         }
     }
 
     /// Ouvre une session. Identifiant inconnu et mot de passe faux suivent exactement le même
     /// chemin : une vérification Argon2 (contre un haché factice si le compte n'existe pas), un
     /// échec compté, une transaction (BR-CONN-013).
+    ///
+    /// Les connexions d'une même adresse, et d'un même couple identifiant + adresse, sont
+    /// traitées l'une après l'autre : le palier de verrouillage se joue sur des états à jour
+    /// (dix tentatives simultanées ne font pas dix vérifications).
     pub async fn login(
         &self,
         username: &str,
         password: Secret,
         client: &ClientInfo,
     ) -> Result<LoginOutcome, LoginError> {
-        let key = AttemptKey::new(username, &client.addr);
+        let pair = AttemptKey::new(username, &client.addr);
+        let address = AttemptKey::address(&client.addr);
+        let _address_turn = self.turns.lock(address.as_str()).await;
+        let _pair_turn = self.turns.lock(pair.as_str()).await;
+        let result = self
+            .login_in_turn(username, password, client, &pair, &address)
+            .await;
+        // Trace des refus : identifiant tenté, adresse, raison ; jamais le mot de passe. Le
+        // journal d'activité (HRT-05) se branchera ici pour consigner connexions et verrouillages.
+        match &result {
+            Err(LoginError::InvalidCredentials) => tracing::warn!(
+                username = %pair.username(),
+                addr = %client.addr,
+                reason = "invalid_credentials",
+                "connexion refusée"
+            ),
+            Err(LoginError::TooManyAttempts { retry_after }) => tracing::warn!(
+                username = %pair.username(),
+                addr = %client.addr,
+                reason = "locked",
+                retry_after_s = retry_after_seconds(*retry_after),
+                "connexion refusée : verrouillage"
+            ),
+            _ => {}
+        }
+        result
+    }
 
+    async fn login_in_turn(
+        &self,
+        username: &str,
+        password: Secret,
+        client: &ClientInfo,
+        pair: &AttemptKey,
+        address: &AttemptKey,
+    ) -> Result<LoginOutcome, LoginError> {
         // 1. Admission : pendant une attente, on ne vérifie même pas le mot de passe.
-        let state = self.attempts.get(&key).await?;
-        if let (_, LockoutDecision::Blocked { retry_after }) =
-            step(state, LockoutEvent::Attempt, self.clock.now())
-        {
+        let now = self.clock.now();
+        let pair_state = self.attempts.get(pair).await?;
+        let address_state = self.attempts.get(address).await?;
+        if let Some(retry_after) = admission(pair_state, address_state, now) {
             return Err(LoginError::TooManyAttempts { retry_after });
         }
 
@@ -136,33 +239,43 @@ impl SessionService {
             .as_ref()
             .map_or_else(|| self.hasher.decoy_hash(), |found| &found.password_hash);
         let verified = self.hasher.verify(&password, hash).await?;
-        let account = account.filter(|_| verified);
+        let verified_account = account.filter(|_| verified);
 
-        // 3. Issue, dans une seule transaction : compteur, et pour un succès la session et la
-        //    date de dernière connexion. L'état est relu dans la transaction : des tentatives
-        //    concurrentes ne peuvent pas dépasser le palier.
+        // 3. Issue, dans une seule transaction : compteurs, et pour un succès la session et la
+        //    date de dernière connexion. Les états sont relus dans la transaction ; le haché
+        //    vérifié est comparé à celui d'aujourd'hui (même garde que `change_own_password`) :
+        //    un mot de passe changé entre-temps ne connecte pas.
         let mut tx = self.store.begin().await?;
         let now = self.clock.now();
-        let state = tx.login_attempts().get(&key).await?;
-        if let (_, LockoutDecision::Blocked { retry_after }) =
-            step(state, LockoutEvent::Attempt, now)
-        {
+        let pair_state = tx.login_attempts().get(pair).await?;
+        let address_state = tx.login_attempts().get(address).await?;
+        if let Some(retry_after) = admission(pair_state, address_state, now) {
             return Err(LoginError::TooManyAttempts { retry_after });
         }
+        let account =
+            match verified_account {
+                Some(account) => tx.accounts().find(&account.id).await?.filter(|current| {
+                    current.password_hash.expose() == account.password_hash.expose()
+                }),
+                None => None,
+            };
         let Some(account) = account else {
-            let (next, decision) = step(state, LockoutEvent::Failed, now);
-            tx.login_attempts().save(&key, &next, now).await?;
+            let (pair_next, pair_decision) = step(pair_state, LockoutEvent::Failed, now);
+            let (address_next, address_decision) =
+                step_address(address_state, LockoutEvent::Failed, now);
+            tx.login_attempts().save(pair, &pair_next, now).await?;
+            tx.login_attempts()
+                .save(address, &address_next, now)
+                .await?;
             tx.commit().await?;
-            return Err(match decision {
-                LockoutDecision::Blocked { retry_after } => {
-                    LoginError::TooManyAttempts { retry_after }
-                }
-                LockoutDecision::Allowed => LoginError::InvalidCredentials,
+            return Err(match longest_wait(&[pair_decision, address_decision]) {
+                Some(retry_after) => LoginError::TooManyAttempts { retry_after },
+                None => LoginError::InvalidCredentials,
             });
         };
 
-        let (reset, _) = step(state, LockoutEvent::Succeeded, now);
-        tx.login_attempts().save(&key, &reset, now).await?;
+        let (reset, _) = step(pair_state, LockoutEvent::Succeeded, now);
+        tx.login_attempts().save(pair, &reset, now).await?;
         let token = self.tokens.generate()?;
         let session = Session {
             id: SessionId::new(self.ids.new_id()),

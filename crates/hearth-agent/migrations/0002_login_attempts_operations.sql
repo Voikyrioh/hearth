@@ -3,12 +3,15 @@
 -- fixe). La table audit_events arrive avec HRT-05.
 
 -- Verrouillage progressif : un compteur par couple « identifiant|adresse » (BR-CONN-006/007).
--- La clé existe aussi pour les identifiants inconnus : le verrouillage ne révèle rien.
+-- La clé existe aussi pour les identifiants inconnus : le verrouillage ne révèle rien. Une
+-- ligne « addr:<adresse> » compte les échecs d'une adresse, tous identifiants confondus.
 CREATE TABLE login_attempts (
     key          TEXT NOT NULL PRIMARY KEY,
     failures     INTEGER NOT NULL,
     locked_until TEXT,
-    updated_at   TEXT NOT NULL
+    updated_at   TEXT NOT NULL,
+    -- Ouverture de la fenêtre de comptage (compteur par adresse « addr:… » seulement).
+    window_started_at TEXT
 ) STRICT;
 
 -- Opérations suivies par la clé du client (BR-RESIL-010). `account_id` n'est pas une clé

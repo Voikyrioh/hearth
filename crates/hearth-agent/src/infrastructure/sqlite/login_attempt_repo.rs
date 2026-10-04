@@ -24,12 +24,13 @@ impl SqliteLoginAttemptRepo {
 struct AttemptRow {
     failures: i64,
     locked_until: Option<String>,
+    window_started_at: Option<String>,
 }
 
 async fn get(conn: &mut SqliteConnection, key: &AttemptKey) -> Result<LockoutState, StoreError> {
     let row = sqlx::query_as!(
         AttemptRow,
-        "SELECT failures, locked_until FROM login_attempts WHERE key = ?",
+        "SELECT failures, locked_until, window_started_at FROM login_attempts WHERE key = ?",
         key.as_str()
     )
     .fetch_optional(&mut *conn)
@@ -42,6 +43,11 @@ async fn get(conn: &mut SqliteConnection, key: &AttemptKey) -> Result<LockoutSta
         failures: u32::try_from(row.failures).unwrap_or(u32::MAX),
         locked_until: row
             .locked_until
+            .as_deref()
+            .map(|value| parse_date(RESOURCE, value))
+            .transpose()?,
+        window_started_at: row
+            .window_started_at
             .as_deref()
             .map(|value| parse_date(RESOURCE, value))
             .transpose()?,
@@ -73,15 +79,22 @@ impl LoginAttemptTx for SqliteUnitOfWork {
             .locked_until
             .map(|date| format_date(RESOURCE, date))
             .transpose()?;
+        let window_started_at = state
+            .window_started_at
+            .map(|date| format_date(RESOURCE, date))
+            .transpose()?;
         let updated_at = format_date(RESOURCE, at)?;
         sqlx::query!(
-            "INSERT INTO login_attempts (key, failures, locked_until, updated_at) VALUES (?, ?, ?, ?)
+            "INSERT INTO login_attempts (key, failures, locked_until, updated_at, window_started_at)
+             VALUES (?, ?, ?, ?, ?)
              ON CONFLICT (key) DO UPDATE SET failures = excluded.failures,
-                 locked_until = excluded.locked_until, updated_at = excluded.updated_at",
+                 locked_until = excluded.locked_until, updated_at = excluded.updated_at,
+                 window_started_at = excluded.window_started_at",
             key.as_str(),
             failures,
             locked_until,
-            updated_at
+            updated_at,
+            window_started_at
         )
         .execute(&mut *self.tx)
         .await

@@ -7,6 +7,11 @@
 //!
 //! Palier : le 5e échec impose 1 minute d'attente, chaque échec suivant (fait après l'attente)
 //! la double, plafonnée à 15 minutes. Un succès remet tout à zéro.
+//!
+//! Second compteur, par adresse seule et tous identifiants confondus (`step_address`) : 20
+//! échecs en 10 minutes bloquent l'adresse, mêmes paliers doublés, même plafond. Il ferme le
+//! balayage d'identifiants (un identifiant différent par requête échappe au compteur par couple).
+//! Un succès ne le remet pas à zéro : un attaquant intercalerait sinon une connexion valide.
 
 use time::{Duration, OffsetDateTime};
 
@@ -16,6 +21,11 @@ pub const FAILURES_BEFORE_LOCK: u32 = 5;
 pub const FIRST_LOCK: Duration = Duration::seconds(60);
 /// Plafond de l'attente.
 pub const MAX_LOCK: Duration = Duration::seconds(15 * 60);
+
+/// Échecs, toutes identités confondues, qui bloquent une adresse.
+pub const ADDRESS_FAILURES_BEFORE_LOCK: u32 = 20;
+/// Fenêtre dans laquelle ces échecs sont comptés (elle s'ouvre au premier échec).
+pub const ADDRESS_WINDOW: Duration = Duration::minutes(10);
 
 /// Un compteur sans activité depuis ce délai (et sans attente en cours) est oublié (BR-CONN-006).
 pub const ATTEMPT_RETENTION: Duration = Duration::hours(24);
@@ -40,6 +50,22 @@ impl AttemptKey {
         Self(format!("{username}|{addr}"))
     }
 
+    /// L'identifiant normalisé de la clé (pour les traces ; vide pour une clé d'adresse).
+    pub fn username(&self) -> &str {
+        self.0
+            .split('|')
+            .next()
+            .filter(|_| self.0.contains('|'))
+            .unwrap_or("")
+    }
+
+    /// Clé du compteur par adresse seule. Ne peut pas coïncider avec une clé de couple (celles-ci
+    /// contiennent toujours `|`, jamais une adresse).
+    pub fn address(addr: &str) -> Self {
+        let addr: String = addr.chars().take(MAX_KEY_PART).collect();
+        Self(format!("addr:{addr}"))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -50,6 +76,8 @@ impl AttemptKey {
 pub struct LockoutState {
     pub failures: u32,
     pub locked_until: Option<OffsetDateTime>,
+    /// Ouverture de la fenêtre de comptage (compteur par adresse seulement).
+    pub window_started_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,9 +99,9 @@ pub enum LockoutDecision {
     },
 }
 
-/// Durée d'attente imposée par l'échec numéro `failures` (à partir du 5e).
-fn lock_duration(failures: u32) -> Duration {
-    let doublings = failures.saturating_sub(FAILURES_BEFORE_LOCK).min(16);
+/// Durée d'attente imposée par l'échec numéro `failures`, une fois `threshold` atteint.
+fn lock_duration(failures: u32, threshold: u32) -> Duration {
+    let doublings = failures.saturating_sub(threshold).min(16);
     let seconds = FIRST_LOCK
         .whole_seconds()
         .saturating_mul(1_i64 << doublings);
@@ -105,11 +133,12 @@ pub fn step(
         LockoutEvent::Failed => {
             let failures = state.failures.saturating_add(1);
             if failures >= FAILURES_BEFORE_LOCK {
-                let wait = lock_duration(failures);
+                let wait = lock_duration(failures, FAILURES_BEFORE_LOCK);
                 (
                     LockoutState {
                         failures,
                         locked_until: Some(now + wait),
+                        window_started_at: None,
                     },
                     LockoutDecision::Blocked { retry_after: wait },
                 )
@@ -118,12 +147,67 @@ pub fn step(
                     LockoutState {
                         failures,
                         locked_until: None,
+                        window_started_at: None,
                     },
                     LockoutDecision::Allowed,
                 )
             }
         }
         LockoutEvent::Succeeded => (LockoutState::default(), LockoutDecision::Allowed),
+    }
+}
+
+/// Compteur par adresse seule (tous identifiants confondus) : 20 échecs en 10 minutes bloquent
+/// l'adresse, attente 1 minute doublée à chaque échec suivant, plafond 15 minutes. La fenêtre
+/// s'ouvre au premier échec et se rouvre quand elle est écoulée. Un succès ne change rien.
+pub fn step_address(
+    state: LockoutState,
+    event: LockoutEvent,
+    now: OffsetDateTime,
+) -> (LockoutState, LockoutDecision) {
+    let still_locked = state.locked_until.filter(|&until| until > now);
+    let blocked = |until: OffsetDateTime| LockoutDecision::Blocked {
+        retry_after: until - now,
+    };
+    match event {
+        LockoutEvent::Succeeded => (state, LockoutDecision::Allowed),
+        LockoutEvent::Attempt => match still_locked {
+            Some(until) => (state, blocked(until)),
+            None => (state, LockoutDecision::Allowed),
+        },
+        LockoutEvent::Failed => {
+            if let Some(until) = still_locked {
+                return (state, blocked(until));
+            }
+            let in_window = state
+                .window_started_at
+                .is_some_and(|start| now - start < ADDRESS_WINDOW);
+            let (failures, window_started_at) = if in_window {
+                (state.failures.saturating_add(1), state.window_started_at)
+            } else {
+                (1, Some(now))
+            };
+            if failures >= ADDRESS_FAILURES_BEFORE_LOCK {
+                let wait = lock_duration(failures, ADDRESS_FAILURES_BEFORE_LOCK);
+                (
+                    LockoutState {
+                        failures,
+                        locked_until: Some(now + wait),
+                        window_started_at,
+                    },
+                    LockoutDecision::Blocked { retry_after: wait },
+                )
+            } else {
+                (
+                    LockoutState {
+                        failures,
+                        locked_until: None,
+                        window_started_at,
+                    },
+                    LockoutDecision::Allowed,
+                )
+            }
+        }
     }
 }
 
@@ -275,6 +359,7 @@ mod tests {
         let state = LockoutState {
             failures: u32::MAX,
             locked_until: None,
+            window_started_at: None,
         };
         let (_, decision) = step(state, LockoutEvent::Failed, t0());
         assert_eq!(
@@ -306,5 +391,108 @@ mod tests {
     fn the_key_stays_bounded_whatever_the_username() {
         let key = AttemptKey::new(&"x".repeat(10_000), "10.0.0.1");
         assert!(key.as_str().len() <= 2 * MAX_KEY_PART + 1);
+    }
+
+    // ---- compteur par adresse seule
+
+    /// `count` échecs espacés de `gap` à partir de `t0` ; rend l'état, la décision, l'instant suivant.
+    fn address_failures(
+        count: u32,
+        gap: Duration,
+    ) -> (LockoutState, LockoutDecision, OffsetDateTime) {
+        let mut state = LockoutState::default();
+        let mut decision = LockoutDecision::Allowed;
+        let mut now = t0();
+        for _ in 0..count {
+            (state, decision) = step_address(state, LockoutEvent::Failed, now);
+            now += gap;
+        }
+        (state, decision, now)
+    }
+
+    #[test]
+    fn nineteen_failures_in_the_window_do_not_block_the_address() {
+        let (state, decision, _) = address_failures(19, Duration::seconds(10));
+        assert_eq!(decision, LockoutDecision::Allowed);
+        assert_eq!(state.failures, 19);
+        assert_eq!(state.locked_until, None);
+    }
+
+    #[test]
+    fn the_twentieth_failure_in_ten_minutes_blocks_for_one_minute() {
+        let (state, decision, _) = address_failures(20, Duration::seconds(10));
+        assert_eq!(
+            decision,
+            LockoutDecision::Blocked {
+                retry_after: Duration::seconds(60)
+            }
+        );
+        assert!(state.locked_until.is_some());
+    }
+
+    #[test]
+    fn failures_spread_over_more_than_the_window_never_block() {
+        // Un échec toutes les 31 secondes : jamais 20 dans la même fenêtre de 10 minutes.
+        let (state, decision, _) = address_failures(60, Duration::seconds(31));
+        assert_eq!(decision, LockoutDecision::Allowed);
+        assert!(state.failures < ADDRESS_FAILURES_BEFORE_LOCK);
+    }
+
+    #[test]
+    fn the_window_reopens_when_it_has_elapsed() {
+        let (state, _, now) = address_failures(10, Duration::seconds(1));
+        let later = now + ADDRESS_WINDOW;
+        let (state, _) = step_address(state, LockoutEvent::Failed, later);
+        assert_eq!(state.failures, 1);
+        assert_eq!(state.window_started_at, Some(later));
+    }
+
+    #[test]
+    fn address_waits_double_up_to_the_cap() {
+        let mut state = LockoutState::default();
+        let mut now = t0();
+        for _ in 0..19 {
+            (state, _) = step_address(state, LockoutEvent::Failed, now);
+        }
+        for expected in [60, 120, 240, 480, 900, 900] {
+            let (next, decision) = step_address(state, LockoutEvent::Failed, now);
+            assert_eq!(
+                decision,
+                LockoutDecision::Blocked {
+                    retry_after: Duration::seconds(expected)
+                }
+            );
+            state = next;
+            // Attente écoulée, dans la même fenêtre : on repart juste après.
+            now = state.locked_until.expect("verrou");
+            state.window_started_at = Some(now - Duration::seconds(1));
+        }
+    }
+
+    #[test]
+    fn an_attempt_during_the_address_wait_is_blocked_and_changes_nothing() {
+        let (state, _, _) = address_failures(20, Duration::seconds(1));
+        let now = t0() + Duration::seconds(30);
+        let (after, decision) = step_address(state, LockoutEvent::Attempt, now);
+        assert_eq!(after, state);
+        assert!(matches!(decision, LockoutDecision::Blocked { .. }));
+        let (after, _) = step_address(state, LockoutEvent::Failed, now);
+        assert_eq!(after, state);
+    }
+
+    #[test]
+    fn a_success_does_not_reset_the_address_counter() {
+        let (state, _, now) = address_failures(15, Duration::seconds(1));
+        let (after, decision) = step_address(state, LockoutEvent::Succeeded, now);
+        assert_eq!(after, state);
+        assert_eq!(decision, LockoutDecision::Allowed);
+    }
+
+    #[test]
+    fn the_address_key_cannot_collide_with_a_pair_key() {
+        let address = AttemptKey::address("10.0.0.1");
+        assert_ne!(address, AttemptKey::new("addr:10.0.0.1", ""));
+        assert!(!address.as_str().contains('|'));
+        assert!(AttemptKey::new("marie", "10.0.0.1").as_str().contains('|'));
     }
 }

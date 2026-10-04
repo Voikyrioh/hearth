@@ -112,7 +112,7 @@ async fn unknown_username_and_wrong_password_take_the_same_path() {
         .fetch_one(env.db.pool())
         .await
         .unwrap();
-    assert_eq!(rows, 3);
+    assert_eq!(rows, 4, "trois couples et une adresse");
     let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
         .fetch_one(env.db.pool())
         .await
@@ -444,8 +444,8 @@ async fn the_purge_removes_expired_sessions_old_revocations_idle_counters_and_ol
     env.clock.advance(Duration::days(2));
     let report = env.maintenance.purge().await.unwrap();
     assert_eq!(
-        report.login_attempts, 2,
-        "compteurs inactifs depuis plus de 24 h"
+        report.login_attempts, 3,
+        "deux couples et une adresse, inactifs depuis plus de 24 h"
     );
     assert_eq!(report.operations, 1);
     assert_eq!(report.sessions, 0);
@@ -519,4 +519,148 @@ async fn an_operation_key_runs_once_and_replays_its_result() {
             .unwrap()
             .is_none()
     );
+}
+
+#[tokio::test]
+async fn ten_simultaneous_wrong_logins_make_exactly_five_verifications() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let mut tasks = Vec::new();
+    for _ in 0..10 {
+        let sessions = env.sessions.clone();
+        tasks.push(tokio::spawn(async move {
+            sessions.login("marie", secret(WRONG), &client()).await
+        }));
+    }
+    let mut invalid = 0;
+    let mut locked = 0;
+    for task in tasks {
+        match task.await.unwrap().unwrap_err() {
+            LoginError::InvalidCredentials => invalid += 1,
+            LoginError::TooManyAttempts { .. } => locked += 1,
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(
+        env.hasher.verifications(),
+        5,
+        "les autres sont bloquées avant vérification"
+    );
+    assert_eq!((invalid, locked), (4, 6));
+}
+
+#[tokio::test]
+async fn an_address_trying_many_usernames_is_blocked_after_twenty_failures() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    for index in 0..19 {
+        let error = env
+            .sessions
+            .login(&format!("inconnu{index}"), secret(WRONG), &client())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, LoginError::InvalidCredentials),
+            "{index} : {error:?}"
+        );
+    }
+    let twentieth = env
+        .sessions
+        .login("inconnu19", secret(WRONG), &client())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(twentieth, LoginError::TooManyAttempts { retry_after } if retry_after == Duration::seconds(60)),
+        "{twentieth:?}"
+    );
+
+    // L'adresse est bloquée pour tous les identifiants, même un compte réel avec le bon mot de passe.
+    let verifications = env.hasher.verifications();
+    let blocked = env
+        .sessions
+        .login("marie", secret(PASSWORD), &client())
+        .await
+        .unwrap_err();
+    assert!(matches!(blocked, LoginError::TooManyAttempts { .. }));
+    assert_eq!(env.hasher.verifications(), verifications);
+
+    // Une autre adresse n'est pas touchée ; l'attente écoulée, celle-ci non plus.
+    env.sessions
+        .login("marie", secret(PASSWORD), &client_at("10.0.0.99"))
+        .await
+        .expect("autre adresse");
+    env.clock.advance(Duration::seconds(61));
+    env.sessions
+        .login("marie", secret(PASSWORD), &client())
+        .await
+        .expect("attente écoulée");
+}
+
+/// Hacheur qui change le mot de passe du compte juste après la vérification.
+struct ChangingHasher {
+    inner: std::sync::Arc<support::CountingHasher>,
+    pool: sqlx::SqlitePool,
+}
+
+#[async_trait::async_trait]
+impl hearth_agent::application::ports::PasswordHasher for ChangingHasher {
+    async fn hash(
+        &self,
+        password: &hearth_agent::domain::accounts::PlainPassword,
+    ) -> Result<hearth_agent::domain::secret::Secret, hearth_agent::application::ports::HashError>
+    {
+        self.inner.hash(password).await
+    }
+
+    async fn verify(
+        &self,
+        password: &hearth_agent::domain::secret::Secret,
+        hash: &hearth_agent::domain::secret::Secret,
+    ) -> Result<bool, hearth_agent::application::ports::HashError> {
+        let verified = self.inner.verify(password, hash).await?;
+        sqlx::query("UPDATE accounts SET password_hash = 'changed-meanwhile'")
+            .execute(&self.pool)
+            .await
+            .unwrap();
+        Ok(verified)
+    }
+
+    fn decoy_hash(&self) -> &hearth_agent::domain::secret::Secret {
+        self.inner.decoy_hash()
+    }
+}
+
+#[tokio::test]
+async fn a_password_changed_between_verification_and_session_creation_does_not_log_in() {
+    use std::sync::Arc;
+
+    use hearth_agent::application::sessions::SessionService;
+    use hearth_agent::infrastructure::random::OsTokenGen;
+    use hearth_agent::infrastructure::sqlite::{
+        SqliteAccountRepo, SqliteLoginAttemptRepo, SqliteSessionRepo, SqliteStore,
+    };
+
+    let env = env().await;
+    let marie = env.create("marie", Role::Admin).await;
+    let pool = env.db.pool().clone();
+    let service = SessionService::new(
+        Arc::new(SqliteAccountRepo::new(pool.clone())),
+        Arc::new(SqliteSessionRepo::new(pool.clone())),
+        Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
+        Arc::new(SqliteStore::new(pool.clone())),
+        Arc::new(ChangingHasher {
+            inner: env.hasher.clone(),
+            pool,
+        }),
+        env.clock.clone(),
+        Arc::new(support::SequentialIds::starting_at(500)),
+        Arc::new(OsTokenGen),
+    );
+    let error = service
+        .login("marie", secret(PASSWORD), &client())
+        .await
+        .unwrap_err();
+    assert!(matches!(error, LoginError::InvalidCredentials), "{error:?}");
+    assert!(env.session_ids(&marie.id).await.is_empty());
+    assert_eq!(env.service.find("marie").await.unwrap().last_login_at, None);
 }
