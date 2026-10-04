@@ -15,7 +15,7 @@ Un compte lecture seule ne voit pas la gestion des comptes ; il peut uniquement 
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/accounts/role.rs::Role::can_manage_accounts`.
-- `crates/hearth-agent/src/entrypoint/http/auth.rs::AdminOnly` — extracteur unique ; refuse `403 FORBIDDEN_ROLE` (« Tu n'as pas la permission pour accéder à la gestion des comptes »). Toutes les routes `/accounts*` le prennent en premier argument.
+- `crates/hearth-agent/src/entrypoint/http/auth.rs::guard` — couche unique posée par le routeur sur les routes de niveau `Access::Admin` de `ENDPOINTS` ; refuse `403 FORBIDDEN_ROLE` (« Tu n'as pas la permission pour accéder à la gestion des comptes »).
 
 ## Vérification
 - Tests : `domain::accounts::role::tests::only_an_administrator_manages_accounts` ; `tests/http_api.rs::every_admin_route_refuses_a_read_only_account_and_changes_nothing` (balayage de `ENDPOINTS`) ; `tests/sessions_https.rs::a_read_only_account_cannot_manage_accounts_over_tls`.

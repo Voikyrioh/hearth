@@ -15,7 +15,7 @@ Quand les sessions d'un compte sont fermées par un changement de mot de passe (
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/sessions.rs::check` (`SessionEnd::Revoked`).
-- `crates/hearth-agent/src/infrastructure/sqlite/store.rs` — `SessionTx::close` enregistre les empreintes révoquées dans la même transaction que la suppression.
+- `crates/hearth-agent/src/infrastructure/sqlite/session_repo.rs` — `impl SessionTx for SqliteUnitOfWork::close` enregistre les empreintes révoquées dans la même transaction que la suppression ; `SqliteSessionRepo::is_revoked` les relit.
 
 ## Vérification
 - Tests : `domain::sessions::tests::a_revoked_token_ends_as_revoked` ; `tests/sessions_https.rs::a_session_is_revoked_when_its_password_changes`.

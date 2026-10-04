@@ -16,7 +16,7 @@ Un compte administrateur ne peut être ni supprimé ni rétrogradé s'il est le 
 ## Application (code)
 - `crates/hearth-agent/src/domain/accounts/admin_guard.rs::check_removal` — suppression.
 - `crates/hearth-agent/src/domain/accounts/admin_guard.rs::check_role_change` — changement de rôle.
-- `crates/hearth-agent/src/application/accounts.rs::AccountService::delete` et `::change_role` — comptent les administrateurs via `UnitOfWork::count_admins`, appellent les fonctions du domaine, puis valident ou abandonnent.
+- `crates/hearth-agent/src/application/accounts.rs::AccountService::delete` et `::change_role` — comptent les administrateurs via `uow.accounts().count_admins()` (`AccountTx`), appellent les fonctions du domaine, puis valident ou abandonnent.
 - Routes : `PATCH /api/v1/accounts/{id}` et `DELETE /api/v1/accounts/{id}` ; refus `409 LAST_ADMIN`.
 
 ## Vérification

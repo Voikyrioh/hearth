@@ -14,7 +14,7 @@ maj: 2026-10-04
 Un identifiant inconnu et un mot de passe faux produisent exactement la même réponse (`401 INVALID_CREDENTIALS`, même message) **et suivent le même chemin** : dans les deux cas l'agent vérifie le mot de passe contre un haché (un haché factice quand l'identifiant n'existe pas), compte l'échec dans la même table et écrit dans la même transaction. La durée de la réponse ne distingue donc pas les deux cas. Le verrouillage s'applique aussi aux identifiants inconnus (BR-CONN-007).
 
 ## Application (code)
-- `crates/hearth-agent/src/application/sessions.rs::SessionService::login`.
+- `crates/hearth-agent/src/application/sessions.rs::SessionService::login` — les refus (identifiant tenté, adresse, raison ; jamais le mot de passe) sont journalisés en `warn` ; le journal d'activité (HRT-05) s'y branchera. Le haché vérifié est comparé à celui relu dans la transaction de création de la session.
 - `crates/hearth-agent/src/infrastructure/argon2.rs::Argon2Hasher::decoy_hash` — haché factice, de mêmes paramètres que les vrais.
 
 ## Vérification

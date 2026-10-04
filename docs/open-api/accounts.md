@@ -2,7 +2,7 @@
 
 Gestion des comptes. Code : `crates/hearth-agent/src/entrypoint/http/accounts.rs` (handlers), `application/accounts.rs` (cas d'usage), `domain/accounts/` (règles). Types du fil : `hearth-proto::api::accounts`.
 
-Toutes ces routes exigent `X-Hearth-Api` et un jeton (`Authorization: Bearer …`). Sauf `PUT /me/password`, elles sont **réservées aux administrateurs** : un compte lecture seule reçoit `403 FORBIDDEN_ROLE` (BR-ACCT-013, BR-ACCT-014), avant même la lecture du corps. Le contrôle est fait par l'agent, par une couche unique (`AdminOnly`), jamais par le client.
+Toutes ces routes exigent `X-Hearth-Api` et un jeton (`Authorization: Bearer …`). Sauf `PUT /me/password`, elles sont **réservées aux administrateurs** : un compte lecture seule reçoit `403 FORBIDDEN_ROLE` (BR-ACCT-013, BR-ACCT-014), avant même la lecture du corps. Le contrôle est fait par l'agent, par une couche unique (`auth::guard`, posée par le routeur d'après la table `ENDPOINTS`), jamais par le client.
 
 Toutes les requêtes qui modifient acceptent `Idempotency-Key` : rejouer la clé rend le premier résultat sans ré-exécuter (BR-RESIL-010).
 
@@ -56,6 +56,8 @@ Corps : `{ "current": "…", "password": "…" }`. `200` : `{ "sessions_closed":
 | 422 | `WRONG_PASSWORD` | Le mot de passe actuel est incorrect. |
 | 422 | `WEAK_PASSWORD` | Le nouveau mot de passe ne respecte pas les règles. |
 | 409 | `CONFLICT` | Le mot de passe a changé entre la vérification et l'écriture : réessayer. |
+
+Les routes qui changent un mot de passe ou créent un compte répondent aussi `503 BUSY` (avec `Retry-After`) quand l'agent est saturé de calculs de mots de passe.
 
 ## Journal
 

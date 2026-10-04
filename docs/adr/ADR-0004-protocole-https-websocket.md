@@ -23,7 +23,7 @@ API versionnée `/api/v1`. Requêtes modifiantes portent clé idempotence `Idemp
 
 ### Routes HTTP
 
-- **Commandes idempotentes** : `PUT /accounts/{id}/password`, `POST /accounts`, `POST /agent/update`, etc. Exception : `POST /api/v1/sessions` n'est pas suivi par clé (HRT-04) : sa réponse contient le jeton, qu'on ne conserve pas en base ; rejouer une connexion ouvre une nouvelle session.
+- **Commandes idempotentes** : `PUT /accounts/{id}/password`, `POST /accounts`, `POST /agent/update`, etc. La clé est celle d'un compte et liée à la requête (méthode, chemin, SHA-256 du corps) : une autre requête avec la même clé répond `422 IDEMPOTENCY_KEY_REUSED`. La requête suivie s'exécute dans une tâche détachée ; une opération restée en cours à l'arrêt de l'agent devient `interrupted`. Charge : `503 BUSY` + `Retry-After` quand les calculs de mots de passe sont saturés. Exception : `POST /api/v1/sessions` n'est pas suivi par clé (HRT-04) : sa réponse contient le jeton, qu'on ne conserve pas en base ; rejouer une connexion ouvre une nouvelle session.
   - Client génère `Idempotency-Key: <ULID>` persistent pour l'opération.
   - Serveur indexe par clé, rejeu renvoie le premier résultat sans rejouer.
 - **Requêtes de lecture** : `GET` sans idempotency (indemne).
@@ -42,6 +42,8 @@ Codes transverses :
 - `422 VALIDATION_ERROR` : paramètre invalide (`details.field`)
 - `426 INCOMPATIBLE_VERSION` : version client/agent incompatible (`details.upgrade: "client" | "agent"`)
 - `429 TOO_MANY_ATTEMPTS` : trop de tentatives (login) ; `details.retry_after_s`
+- `422 IDEMPOTENCY_KEY_REUSED` : clé d'opération déjà utilisée pour une autre requête
+- `503 BUSY` : agent saturé, `Retry-After`
 - `500 INTERNAL_ERROR` : erreur serveur
 
 ### WebSocket

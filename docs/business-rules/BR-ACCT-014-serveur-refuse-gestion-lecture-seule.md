@@ -15,7 +15,7 @@ Même si le client est modifié ou contourné, l'agent refuse création, suppres
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/accounts/role.rs::Role::can_manage_accounts` — décision pure.
-- `crates/hearth-agent/src/entrypoint/http/auth.rs::AdminOnly` — une seule couche d'extraction, avant la lecture du corps ; `crates/hearth-agent/src/entrypoint/http/mod.rs::ENDPOINTS` — table de toutes les routes, dont le niveau d'accès est vérifié par le balayage.
+- `crates/hearth-agent/src/entrypoint/http/auth.rs::guard` — une seule couche, avant la lecture du corps ; `crates/hearth-agent/src/entrypoint/http/mod.rs::ENDPOINTS` — table de toutes les routes avec leur niveau d'accès, dont le routeur est construit et que le balayage parcourt.
 
 ## Vérification
 - Tests : `domain::accounts::role::tests::only_an_administrator_manages_accounts` ; `tests/http_api.rs::every_admin_route_refuses_a_read_only_account_and_changes_nothing` (chaque route modifiante réservée : `403` pour lecture seule, rien ne change en base) et `::every_reserved_route_refuses_a_caller_without_a_session` (`401`) ; `::no_route_exists_outside_the_endpoint_table`.
