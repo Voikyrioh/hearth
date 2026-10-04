@@ -49,7 +49,8 @@ async fn authenticate(state: &AppState, parts: &Parts) -> Result<CurrentSession,
 /// Un niveau d'accès autorise-t-il ce compte ?
 fn allows(access: Access, session: &CurrentSession) -> bool {
     match access {
-        Access::Public | Access::Authenticated => true,
+        // `FirstMessage` n'a pas de couche d'accès : le flux s'authentifie lui-même.
+        Access::Public | Access::FirstMessage | Access::Authenticated => true,
         Access::Admin => session.account.role.can_manage_accounts(),
     }
 }
@@ -141,7 +142,7 @@ mod tests {
     fn only_an_administrator_passes_the_admin_level() {
         assert!(allows(Access::Admin, &session(Role::Admin)));
         assert!(!allows(Access::Admin, &session(Role::ReadOnly)));
-        for access in [Access::Public, Access::Authenticated] {
+        for access in [Access::Public, Access::FirstMessage, Access::Authenticated] {
             assert!(allows(access, &session(Role::ReadOnly)));
         }
     }

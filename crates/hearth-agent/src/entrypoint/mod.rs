@@ -5,6 +5,8 @@
 pub mod account;
 pub mod cli;
 pub mod http;
+pub mod metrics_wire;
 pub mod signal;
 pub mod tasks;
 pub mod terminal;
+pub mod ws;

@@ -62,6 +62,9 @@ pub struct ServerHandle {
     local_addr: SocketAddr,
     handle: Handle<SocketAddr>,
     task: JoinHandle<io::Result<()>>,
+    /// Appelé au début de l'arrêt, avant d'attendre les connexions : les connexions longues
+    /// (flux WebSocket) doivent se fermer d'elles-mêmes.
+    on_shutdown: Option<Box<dyn FnOnce() + Send>>,
 }
 
 /// Démarre le serveur sur un port déjà ouvert (port 0 accepté : voir [`ServerHandle::local_addr`]).
@@ -86,6 +89,7 @@ pub fn spawn(
         local_addr,
         handle,
         task,
+        on_shutdown: None,
     })
 }
 
@@ -94,8 +98,17 @@ impl ServerHandle {
         self.local_addr
     }
 
+    /// Fonction à appeler au début de l'arrêt (fermer les flux longs).
+    pub fn on_shutdown(mut self, hook: impl FnOnce() + Send + 'static) -> Self {
+        self.on_shutdown = Some(Box::new(hook));
+        self
+    }
+
     /// Arrêt propre, puis attente de la fin du serveur.
     pub async fn shutdown(mut self) -> Result<(), ServerError> {
+        if let Some(hook) = self.on_shutdown.take() {
+            hook();
+        }
         self.handle.graceful_shutdown(Some(GRACE));
         (&mut self.task).await??;
         Ok(())
