@@ -1,13 +1,20 @@
 //! Hachage Argon2id des mots de passe : m = 19 Mio, t = 2, p = 1 (recommandation OWASP).
 //! Le calcul est coûteux : il s'exécute sur un thread dédié (`spawn_blocking`), jamais sur
 //! le runtime asynchrone.
+//!
+//! Chaque calcul occupe 19 Mio : la route de connexion étant publique, le nombre de calculs
+//! simultanés est plafonné (au plus 4, et pas plus que de cœurs). Les demandes en trop attendent
+//! dans une file bornée ; au-delà, refus immédiat (`HashError::Busy`, 503) plutôt que d'épuiser
+//! la mémoire de la machine.
 
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher as _, PasswordVerifier as _};
 use argon2::{Algorithm, Argon2, Params, Version};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::application::ports::{HashError, PasswordHasher};
 use crate::domain::accounts::PlainPassword;
@@ -16,12 +23,48 @@ use crate::domain::secret::Secret;
 pub const MEMORY_KIB: u32 = 19 * 1024;
 pub const ITERATIONS: u32 = 2;
 pub const PARALLELISM: u32 = 1;
+/// Plafond du nombre de calculs simultanés.
+pub const MAX_CONCURRENT: usize = 4;
+/// Demandes qui peuvent attendre un permis ; la suivante est refusée.
+pub const MAX_WAITING: usize = 32;
+
+/// Limite de concurrence partagée par tous les clones du hacheur.
+#[derive(Debug)]
+struct Gate {
+    permits: Arc<Semaphore>,
+    waiting: AtomicUsize,
+    max_waiting: usize,
+}
+
+impl Gate {
+    fn new(permits: usize, max_waiting: usize) -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(permits.max(1))),
+            waiting: AtomicUsize::new(0),
+            max_waiting,
+        }
+    }
+
+    async fn acquire(&self) -> Result<OwnedSemaphorePermit, HashError> {
+        if let Ok(permit) = self.permits.clone().try_acquire_owned() {
+            return Ok(permit);
+        }
+        if self.waiting.fetch_add(1, Ordering::SeqCst) >= self.max_waiting {
+            self.waiting.fetch_sub(1, Ordering::SeqCst);
+            return Err(HashError::Busy);
+        }
+        let permit = self.permits.clone().acquire_owned().await;
+        self.waiting.fetch_sub(1, Ordering::SeqCst);
+        permit.map_err(|_| HashError::Hash("limiteur de calculs fermé".to_owned()))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Argon2Hasher {
     params: Params,
     /// Haché d'un mot de passe jeté, calculé une fois : voir `PasswordHasher::decoy_hash`.
     decoy: Arc<Secret>,
+    gate: Arc<Gate>,
 }
 
 impl Argon2Hasher {
@@ -36,6 +79,24 @@ impl Argon2Hasher {
         iterations: u32,
         parallelism: u32,
     ) -> Result<Self, HashError> {
+        let cores = std::thread::available_parallelism().map_or(1, usize::from);
+        Self::with_limits(
+            memory_kib,
+            iterations,
+            parallelism,
+            cores.min(MAX_CONCURRENT),
+            MAX_WAITING,
+        )
+    }
+
+    /// Coût et limites personnalisés : `permits` calculs simultanés, `max_waiting` en attente.
+    pub fn with_limits(
+        memory_kib: u32,
+        iterations: u32,
+        parallelism: u32,
+        permits: usize,
+        max_waiting: usize,
+    ) -> Result<Self, HashError> {
         let params = Params::new(memory_kib, iterations, parallelism, None)
             .map_err(|error| HashError::Hash(error.to_string()))?;
         let engine = Argon2::new(Algorithm::Argon2id, Version::V0x13, params.clone());
@@ -46,6 +107,7 @@ impl Argon2Hasher {
         Ok(Self {
             params,
             decoy: Arc::new(decoy),
+            gate: Arc::new(Gate::new(permits, max_waiting)),
         })
     }
 
@@ -57,32 +119,39 @@ impl Argon2Hasher {
 #[async_trait]
 impl PasswordHasher for Argon2Hasher {
     async fn hash(&self, password: &PlainPassword) -> Result<Secret, HashError> {
+        let permit = self.gate.acquire().await?;
         let hasher = self.clone();
         let password = Secret::from(password.expose());
-        tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             hasher
                 .engine()
                 .hash_password(password.expose().as_bytes())
                 .map(|hash| Secret::new(hash.to_string()))
                 .map_err(|error| HashError::Hash(error.to_string()))
         })
-        .await
-        .map_err(|error| HashError::Hash(format!("tâche de hachage interrompue : {error}")))?
+        .await;
+        drop(permit);
+        result
+            .map_err(|error| HashError::Hash(format!("tâche de hachage interrompue : {error}")))?
     }
 
     async fn verify(&self, password: &Secret, hash: &Secret) -> Result<bool, HashError> {
+        let permit = self.gate.acquire().await?;
         let hasher = self.clone();
         let password = Secret::from(password.expose());
         let hash = Secret::from(hash.expose());
-        tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             let parsed = PasswordHash::new(hash.expose()).map_err(|_| HashError::MalformedHash)?;
             Ok(hasher
                 .engine()
                 .verify_password(password.expose().as_bytes(), &parsed)
                 .is_ok())
         })
-        .await
-        .map_err(|error| HashError::Hash(format!("tâche de vérification interrompue : {error}")))?
+        .await;
+        drop(permit);
+        result.map_err(|error| {
+            HashError::Hash(format!("tâche de vérification interrompue : {error}"))
+        })?
     }
 
     fn decoy_hash(&self) -> &Secret {
@@ -163,6 +232,64 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn the_default_limit_is_between_one_and_four_computations() {
+        let hasher = Argon2Hasher::with_cost(8, 1, 1).unwrap();
+        let permits = hasher.gate.permits.available_permits();
+        assert!((1..=MAX_CONCURRENT).contains(&permits), "{permits}");
+    }
+
+    /// Tant que tous les permis sont pris, plus aucun calcul ne démarre : la demande attend dans
+    /// la file ; la demande de trop est refusée tout de suite ; tout repart à la libération.
+    #[tokio::test]
+    async fn computations_wait_for_a_permit_and_the_queue_is_bounded() {
+        let hasher = Argon2Hasher::with_limits(8, 1, 1, 1, 1).unwrap();
+        let held = hasher.gate.permits.clone().acquire_owned().await.unwrap();
+        let hash = hasher.decoy_hash().expose().to_owned();
+
+        let waiting = {
+            let hasher = hasher.clone();
+            let hash = Secret::from(hash.as_str());
+            tokio::spawn(async move { hasher.verify(&Secret::from("x"), &hash).await })
+        };
+        while hasher.gate.waiting.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert!(!waiting.is_finished(), "pas de permis : le calcul attend");
+
+        let refused = hasher
+            .verify(&Secret::from("x"), &Secret::from(hash.as_str()))
+            .await;
+        assert!(matches!(refused, Err(HashError::Busy)), "{refused:?}");
+        assert!(matches!(
+            hasher.hash(&plain("Abcdefghij12")).await,
+            Err(HashError::Busy)
+        ));
+
+        drop(held);
+        assert!(waiting.await.unwrap().is_ok());
+        assert_eq!(hasher.gate.waiting.load(Ordering::SeqCst), 0);
+        assert!(hasher.hash(&plain("Abcdefghij12")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_burst_is_served_and_every_permit_is_given_back() {
+        let hasher = Argon2Hasher::with_limits(8, 1, 1, 2, 64).unwrap();
+        let hash = Arc::new(Secret::from(hasher.decoy_hash().expose()));
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            let hasher = hasher.clone();
+            let hash = hash.clone();
+            tasks.push(tokio::spawn(async move {
+                hasher.verify(&Secret::from("x"), &hash).await.is_ok()
+            }));
+        }
+        for task in tasks {
+            assert!(task.await.unwrap());
+        }
+        assert_eq!(hasher.gate.permits.available_permits(), 2);
     }
 
     #[tokio::test]

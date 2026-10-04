@@ -10,6 +10,9 @@ pub enum HashError {
     Hash(String),
     #[error("empreinte de mot de passe illisible")]
     MalformedHash,
+    /// Trop de calculs en cours et en attente : refus immédiat plutôt que d'empiler (503).
+    #[error("service occupé")]
+    Busy,
 }
 
 /// Hachage des mots de passe. Coûteux : l'adaptateur l'exécute hors du runtime asynchrone.

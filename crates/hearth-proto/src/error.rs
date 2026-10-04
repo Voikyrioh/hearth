@@ -30,6 +30,8 @@ pub enum ErrorCode {
     LastAdmin,
     /// Conflit avec un changement concurrent : réessayer.
     Conflict,
+    /// L'agent est saturé (calculs de mots de passe) : réessayer après `Retry-After`.
+    Busy,
     InternalError,
     /// Route ou ressource inconnue.
     NotFound,
@@ -52,6 +54,7 @@ impl ErrorCode {
                 409
             }
             Self::ValidationError | Self::WeakPassword | Self::WrongPassword => 422,
+            Self::Busy => 503,
             Self::IncompatibleVersion => 426,
             Self::TooManyAttempts => 429,
             Self::InternalError => 500,
@@ -138,7 +141,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL: [(ErrorCode, &str, u16); 17] = [
+    const ALL: [(ErrorCode, &str, u16); 18] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -146,6 +149,7 @@ mod tests {
         (ErrorCode::WrongPassword, "WRONG_PASSWORD", 422),
         (ErrorCode::LastAdmin, "LAST_ADMIN", 409),
         (ErrorCode::Conflict, "CONFLICT", 409),
+        (ErrorCode::Busy, "BUSY", 503),
         (ErrorCode::SessionExpired, "SESSION_EXPIRED", 401),
         (ErrorCode::SessionRevoked, "SESSION_REVOKED", 401),
         (ErrorCode::ForbiddenRole, "FORBIDDEN_ROLE", 403),

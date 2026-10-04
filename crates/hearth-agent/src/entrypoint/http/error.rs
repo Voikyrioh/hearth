@@ -2,13 +2,13 @@ use std::fmt::Display;
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header::RETRY_AFTER};
 use axum::response::{IntoResponse, Response};
 use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
 use serde_json::json;
 
 use crate::application::accounts::AccountError;
-use crate::application::ports::StoreError;
+use crate::application::ports::{HashError, StoreError};
 use crate::application::sessions::{AuthError, LoginError};
 use crate::domain::accounts::PasswordRule;
 use crate::domain::compat::Incompatibility;
@@ -50,6 +50,19 @@ impl From<ErrorBody> for ApiError {
 impl From<JsonRejection> for ApiError {
     fn from(rejection: JsonRejection) -> Self {
         Self::new(ErrorCode::ValidationError, rejection.body_text())
+    }
+}
+
+/// Saturation : `503 BUSY` ; toute autre erreur de hachage est interne.
+impl From<HashError> for ApiError {
+    fn from(error: HashError) -> Self {
+        match error {
+            HashError::Busy => Self::new(
+                ErrorCode::Busy,
+                "L'agent est occupé. Réessaie dans un instant.",
+            ),
+            other => Self::internal(&other),
+        }
     }
 }
 
@@ -110,7 +123,7 @@ impl From<LoginError> for ApiError {
                 ))
             }
             LoginError::Store(error) => Self::internal(&error),
-            LoginError::Hash(error) => Self::internal(&error),
+            LoginError::Hash(error) => Self::from(error),
             LoginError::Token(error) => Self::internal(&error),
         }
     }
@@ -144,7 +157,7 @@ impl From<AccountError> for ApiError {
             AccountError::PasswordChangedMeanwhile => Self::new(ErrorCode::Conflict, message),
             AccountError::SelfDeletion(_) => Self::invalid("confirmation", message),
             AccountError::Store(error) => Self::internal(&error),
-            AccountError::Hash(error) => Self::internal(&error),
+            AccountError::Hash(error) => Self::from(error),
         }
     }
 }
@@ -153,7 +166,14 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = StatusCode::from_u16(self.0.error.code.http_status())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        (status, Json(self.0)).into_response()
+        let busy = self.0.error.code == ErrorCode::Busy;
+        let mut response = (status, Json(self.0)).into_response();
+        if busy {
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from_static("1"));
+        }
+        response
     }
 }
 
@@ -217,6 +237,17 @@ mod tests {
         assert_eq!(client.0.error.details, json!({ "upgrade": "client" }));
         assert_eq!(agent.0.error.details, json!({ "upgrade": "agent" }));
         assert_eq!(client.0.error.code, ErrorCode::IncompatibleVersion);
+    }
+
+    #[test]
+    fn a_saturated_hasher_answers_503_busy_with_retry_after() {
+        let error = ApiError::from(LoginError::Hash(HashError::Busy));
+        assert_eq!(error.0.error.code, ErrorCode::Busy);
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers().get(RETRY_AFTER).unwrap(), "1");
+        let error = ApiError::from(AccountError::Hash(HashError::Busy));
+        assert_eq!(error.0.error.code, ErrorCode::Busy);
     }
 
     #[test]
