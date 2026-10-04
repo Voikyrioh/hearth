@@ -27,10 +27,16 @@ toml = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 gethostname = "1"
 mac_address = "1"
-time = "0.3"
+time = { version = "0.3", features = ["formatting", "parsing"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", default-features = false, features = ["trace"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+argon2 = "0.6"
+zeroize = "1"
+ulid = "3"
+rpassword = "7"
+async-trait = "0.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

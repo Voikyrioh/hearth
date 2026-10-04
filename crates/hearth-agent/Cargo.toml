@@ -20,14 +20,18 @@ path = "src/main.rs"
 [dependencies]
 hearth-proto.workspace = true
 axum.workspace = true
+argon2.workspace = true
+async-trait.workspace = true
 axum-server.workspace = true
 clap.workspace = true
 gethostname.workspace = true
 mac_address.workspace = true
 rcgen.workspace = true
+rpassword.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
@@ -35,6 +39,8 @@ tower-http.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+ulid.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
