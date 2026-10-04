@@ -1,0 +1,7 @@
+/target
+node_modules
+dist
+*.log
+.env
+/apps/desktop/src-tauri/target
+/apps/desktop/src-tauri/gen
