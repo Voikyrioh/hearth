@@ -7,6 +7,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub mod api;
+pub mod https;
+
 use async_trait::async_trait;
 use hearth_agent::application::accounts::{AccountService, AccountView};
 use hearth_agent::application::maintenance::MaintenanceService;
