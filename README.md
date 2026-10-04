@@ -29,3 +29,11 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+## Licence
+
+Hearth est distribué sous licence [GNU AGPL version 3 ou ultérieure](./LICENSE) : tu peux l'utiliser, le modifier et le redistribuer, y compris commercialement, à condition de publier tes modifications sous la même licence, même si tu ne fais que le faire tourner comme service.
+
+Copyright © 2026 Voikyrioh. Pour un usage hors des conditions de l'AGPL, une licence commerciale peut être accordée par l'auteur.
+
+Les contributions externes ne sont pas acceptées pour l'instant.
