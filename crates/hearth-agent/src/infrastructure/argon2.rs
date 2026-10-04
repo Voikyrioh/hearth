@@ -36,6 +36,16 @@ struct Gate {
     max_waiting: usize,
 }
 
+/// Une demande en attente d'un permis : décompte rendu à la libération, y compris quand le
+/// futur est abandonné pendant l'attente (client qui coupe).
+struct Waiting<'a>(&'a AtomicUsize);
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 impl Gate {
     fn new(permits: usize, max_waiting: usize) -> Self {
         Self {
@@ -53,8 +63,8 @@ impl Gate {
             self.waiting.fetch_sub(1, Ordering::SeqCst);
             return Err(HashError::Busy);
         }
+        let _waiting = Waiting(&self.waiting);
         let permit = self.permits.clone().acquire_owned().await;
-        self.waiting.fetch_sub(1, Ordering::SeqCst);
         permit.map_err(|_| HashError::Hash("limiteur de calculs fermé".to_owned()))
     }
 }
@@ -122,7 +132,10 @@ impl PasswordHasher for Argon2Hasher {
         let permit = self.gate.acquire().await?;
         let hasher = self.clone();
         let password = Secret::from(password.expose());
+        // Le permis vit dans la closure : il n'est rendu que quand le calcul est fini, même si le
+        // futur appelant est abandonné (le thread bloquant, lui, continue).
         let result = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             hasher
                 .engine()
                 .hash_password(password.expose().as_bytes())
@@ -130,7 +143,6 @@ impl PasswordHasher for Argon2Hasher {
                 .map_err(|error| HashError::Hash(error.to_string()))
         })
         .await;
-        drop(permit);
         result
             .map_err(|error| HashError::Hash(format!("tâche de hachage interrompue : {error}")))?
     }
@@ -141,6 +153,7 @@ impl PasswordHasher for Argon2Hasher {
         let password = Secret::from(password.expose());
         let hash = Secret::from(hash.expose());
         let result = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let parsed = PasswordHash::new(hash.expose()).map_err(|_| HashError::MalformedHash)?;
             Ok(hasher
                 .engine()
@@ -148,7 +161,6 @@ impl PasswordHasher for Argon2Hasher {
                 .is_ok())
         })
         .await;
-        drop(permit);
         result.map_err(|error| {
             HashError::Hash(format!("tâche de vérification interrompue : {error}"))
         })?
@@ -271,6 +283,59 @@ mod tests {
         drop(held);
         assert!(waiting.await.unwrap().is_ok());
         assert_eq!(hasher.gate.waiting.load(Ordering::SeqCst), 0);
+        assert!(hasher.hash(&plain("Abcdefghij12")).await.is_ok());
+    }
+
+    /// Le futur abandonné ne libère pas le permis : le calcul continue sur son thread, le permis
+    /// ne revient qu'à sa fin, le plafond n'est jamais dépassé.
+    #[tokio::test]
+    async fn a_cancelled_verification_keeps_its_permit_until_the_computation_ends() {
+        let hasher = Argon2Hasher::with_limits(64 * 1024, 3, 1, 1, 4).unwrap();
+        let hash = Secret::from(hasher.decoy_hash().expose());
+        let task = {
+            let hasher = hasher.clone();
+            tokio::spawn(async move { hasher.verify(&Secret::from("x"), &hash).await })
+        };
+        while hasher.gate.permits.available_permits() != 0 {
+            tokio::task::yield_now().await;
+        }
+        task.abort();
+        let _ = task.await;
+        assert_eq!(
+            hasher.gate.permits.available_permits(),
+            0,
+            "le calcul tourne encore : permis pris"
+        );
+        let other = Secret::from(hasher.decoy_hash().expose());
+        let started = std::time::Instant::now();
+        // Une nouvelle demande attend la fin du calcul abandonné au lieu de s'ajouter.
+        assert!(hasher.verify(&Secret::from("x"), &other).await.is_ok());
+        assert!(started.elapsed() > std::time::Duration::from_millis(1));
+        assert_eq!(hasher.gate.permits.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_waits_give_their_place_back_in_the_queue() {
+        let hasher = Argon2Hasher::with_limits(8, 1, 1, 1, 3).unwrap();
+        let held = hasher.gate.permits.clone().acquire_owned().await.unwrap();
+        let hash = hasher.decoy_hash().expose().to_owned();
+        let mut waits = Vec::new();
+        for _ in 0..3 {
+            let hasher = hasher.clone();
+            let hash = Secret::from(hash.as_str());
+            waits.push(tokio::spawn(async move {
+                hasher.verify(&Secret::from("x"), &hash).await
+            }));
+        }
+        while hasher.gate.waiting.load(Ordering::SeqCst) < 3 {
+            tokio::task::yield_now().await;
+        }
+        for wait in waits {
+            wait.abort();
+            let _ = wait.await;
+        }
+        assert_eq!(hasher.gate.waiting.load(Ordering::SeqCst), 0);
+        drop(held);
         assert!(hasher.hash(&plain("Abcdefghij12")).await.is_ok());
     }
 
