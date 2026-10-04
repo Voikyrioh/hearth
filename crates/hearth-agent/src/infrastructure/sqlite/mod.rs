@@ -7,6 +7,8 @@
 
 mod account_repo;
 mod convert;
+mod login_attempt_repo;
+mod operation_repo;
 mod session_repo;
 mod store;
 
@@ -20,6 +22,8 @@ use thiserror::Error;
 use super::data_dir;
 
 pub use account_repo::SqliteAccountRepo;
+pub use login_attempt_repo::SqliteLoginAttemptRepo;
+pub use operation_repo::SqliteOperationRepo;
 pub use session_repo::SqliteSessionRepo;
 pub use store::SqliteStore;
 
@@ -226,16 +230,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migrations_create_the_three_tables_and_are_idempotent() {
+    async fn migrations_create_every_table_and_are_idempotent() {
         let dir = tempfile::tempdir().unwrap();
         Database::open(dir.path()).await.unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type = 'table'              AND name IN ('accounts', 'sessions', 'meta') ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type = 'table'              AND name IN ('accounts', 'sessions', 'meta', 'login_attempts', 'operations', 'revoked_sessions') ORDER BY name",
         )
         .fetch_all(db.pool())
         .await
         .unwrap();
-        assert_eq!(tables, ["accounts", "meta", "sessions"]);
+        assert_eq!(
+            tables,
+            [
+                "accounts",
+                "login_attempts",
+                "meta",
+                "operations",
+                "revoked_sessions",
+                "sessions"
+            ]
+        );
     }
 }

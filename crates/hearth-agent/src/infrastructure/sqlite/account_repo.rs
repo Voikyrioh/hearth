@@ -4,9 +4,11 @@
 
 use async_trait::async_trait;
 use sqlx::{SqliteConnection, SqlitePool};
+use time::OffsetDateTime;
 
-use super::convert::{parse_date, storage};
-use crate::application::ports::{AccountRepo, StoreError};
+use super::convert::{format_date, is_unique_violation, parse_date, storage};
+use super::store::SqliteUnitOfWork;
+use crate::application::ports::{AccountRepo, AccountTx, StoreError};
 use crate::domain::accounts::{Account, AccountId, Role, Username};
 use crate::domain::secret::Secret;
 
@@ -111,5 +113,112 @@ impl AccountRepo for SqliteAccountRepo {
         .into_iter()
         .map(into_account)
         .collect()
+    }
+}
+
+#[async_trait]
+impl AccountTx for SqliteUnitOfWork {
+    async fn find(&mut self, id: &AccountId) -> Result<Option<Account>, StoreError> {
+        find_by_id(&mut self.tx, id).await
+    }
+
+    async fn find_by_username(
+        &mut self,
+        username: &Username,
+    ) -> Result<Option<Account>, StoreError> {
+        find_by_username(&mut self.tx, username).await
+    }
+
+    async fn count_admins(&mut self) -> Result<u64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "count!: i64" FROM accounts WHERE role = ?"#,
+            Role::Admin.as_str()
+        )
+        .fetch_one(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(u64::try_from(count).unwrap_or(0))
+    }
+
+    async fn insert(&mut self, account: &Account) -> Result<(), StoreError> {
+        let created_at = format_date(RESOURCE, account.created_at)?;
+        let changed_at = format_date(RESOURCE, account.password_changed_at)?;
+        let last_login_at = account
+            .last_login_at
+            .map(|date| format_date(RESOURCE, date))
+            .transpose()?;
+        sqlx::query!(
+            "INSERT INTO accounts (id, username, password_hash, role, created_at, password_changed_at, last_login_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            account.id.as_str(),
+            account.username.as_str(),
+            account.password_hash.expose(),
+            account.role.as_str(),
+            created_at,
+            changed_at,
+            last_login_at
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(|error| {
+            if is_unique_violation(&error) {
+                StoreError::Duplicate { resource: RESOURCE }
+            } else {
+                storage(RESOURCE)(error)
+            }
+        })?;
+        Ok(())
+    }
+
+    async fn set_role(&mut self, id: &AccountId, role: Role) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE accounts SET role = ? WHERE id = ?",
+            role.as_str(),
+            id.as_str()
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(())
+    }
+
+    async fn set_password(
+        &mut self,
+        id: &AccountId,
+        hash: &Secret,
+        changed_at: OffsetDateTime,
+    ) -> Result<(), StoreError> {
+        let changed_at = format_date(RESOURCE, changed_at)?;
+        sqlx::query!(
+            "UPDATE accounts SET password_hash = ?, password_changed_at = ? WHERE id = ?",
+            hash.expose(),
+            changed_at,
+            id.as_str()
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(())
+    }
+
+    async fn record_login(&mut self, id: &AccountId, at: OffsetDateTime) -> Result<(), StoreError> {
+        let at = format_date(RESOURCE, at)?;
+        sqlx::query!(
+            "UPDATE accounts SET last_login_at = ? WHERE id = ?",
+            at,
+            id.as_str()
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(())
+    }
+
+    async fn delete(&mut self, id: &AccountId) -> Result<(), StoreError> {
+        sqlx::query!("DELETE FROM accounts WHERE id = ?", id.as_str())
+            .execute(&mut *self.tx)
+            .await
+            .map_err(storage(RESOURCE))?;
+        Ok(())
     }
 }

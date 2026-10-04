@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO revoked_sessions (token_hash, revoked_at)\n                     SELECT token_hash, ? FROM sessions WHERE account_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "790c5ba51d5696214ce7122b09ddb4d8192c2aa416511c5eea6861e5a43027e5"
+}

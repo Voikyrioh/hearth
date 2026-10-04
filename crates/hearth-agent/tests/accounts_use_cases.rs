@@ -524,6 +524,10 @@ impl hearth_agent::application::ports::PasswordHasher for RacingHasher {
             .unwrap();
         Ok(verified)
     }
+
+    fn decoy_hash(&self) -> &hearth_agent::domain::secret::Secret {
+        self.inner.decoy_hash()
+    }
 }
 
 #[tokio::test]

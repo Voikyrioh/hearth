@@ -5,6 +5,8 @@
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher as _, PasswordVerifier as _};
 use argon2::{Algorithm, Argon2, Params, Version};
+use std::sync::Arc;
+
 use async_trait::async_trait;
 
 use crate::application::ports::{HashError, PasswordHasher};
@@ -18,6 +20,8 @@ pub const PARALLELISM: u32 = 1;
 #[derive(Debug, Clone)]
 pub struct Argon2Hasher {
     params: Params,
+    /// Haché d'un mot de passe jeté, calculé une fois : voir `PasswordHasher::decoy_hash`.
+    decoy: Arc<Secret>,
 }
 
 impl Argon2Hasher {
@@ -34,7 +38,15 @@ impl Argon2Hasher {
     ) -> Result<Self, HashError> {
         let params = Params::new(memory_kib, iterations, parallelism, None)
             .map_err(|error| HashError::Hash(error.to_string()))?;
-        Ok(Self { params })
+        let engine = Argon2::new(Algorithm::Argon2id, Version::V0x13, params.clone());
+        let decoy = engine
+            .hash_password(b"hearth-decoy-password-never-matched")
+            .map(|hash| Secret::new(hash.to_string()))
+            .map_err(|error| HashError::Hash(error.to_string()))?;
+        Ok(Self {
+            params,
+            decoy: Arc::new(decoy),
+        })
     }
 
     fn engine(&self) -> Argon2<'_> {
@@ -71,6 +83,10 @@ impl PasswordHasher for Argon2Hasher {
         })
         .await
         .map_err(|error| HashError::Hash(format!("tâche de vérification interrompue : {error}")))?
+    }
+
+    fn decoy_hash(&self) -> &Secret {
+        &self.decoy
     }
 }
 
@@ -127,6 +143,26 @@ mod tests {
             .verify(&Secret::from("Abcdefghij12"), &Secret::from("pas un hash"))
             .await;
         assert!(matches!(result, Err(HashError::MalformedHash)));
+    }
+
+    #[tokio::test]
+    async fn the_decoy_has_the_same_parameters_as_real_hashes_and_matches_nothing() {
+        let hasher = Argon2Hasher::new().unwrap();
+        let real = hasher.hash(&plain("Abcdefghij12")).await.unwrap();
+        let prefix = |hash: &Secret| {
+            hash.expose()
+                .split('$')
+                .take(4)
+                .collect::<Vec<_>>()
+                .join("$")
+        };
+        assert_eq!(prefix(hasher.decoy_hash()), prefix(&real));
+        assert!(
+            !hasher
+                .verify(&Secret::from("Abcdefghij12"), hasher.decoy_hash())
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

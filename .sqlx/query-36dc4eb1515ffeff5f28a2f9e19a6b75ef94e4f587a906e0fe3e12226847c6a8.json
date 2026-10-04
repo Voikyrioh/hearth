@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT failures, locked_until FROM login_attempts WHERE key = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "failures",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "login_attempts",
+            "name": "failures"
+          }
+        }
+      },
+      {
+        "name": "locked_until",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "login_attempts",
+            "name": "locked_until"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "36dc4eb1515ffeff5f28a2f9e19a6b75ef94e4f587a906e0fe3e12226847c6a8"
+}
