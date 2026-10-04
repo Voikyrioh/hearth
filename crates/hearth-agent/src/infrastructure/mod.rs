@@ -4,6 +4,7 @@
 pub mod argon2;
 pub mod clock;
 pub mod config;
+pub mod data_dir;
 pub mod ids;
 pub mod logging;
 pub mod sqlite;

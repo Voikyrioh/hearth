@@ -17,6 +17,7 @@ use crate::entrypoint::terminal::TerminalPasswords;
 use crate::infrastructure::argon2::Argon2Hasher;
 use crate::infrastructure::clock::SystemClock;
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
+use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::sqlite::{
     Database, DatabaseError, SqliteAccountRepo, SqliteSessionRepo,
@@ -36,6 +37,11 @@ pub enum AppError {
     Database(#[from] DatabaseError),
     #[error(transparent)]
     Hash(#[from] HashError),
+    #[error("dossier de données {path} inaccessible : {source}")]
+    DataDir {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
     #[error(transparent)]
     Account(#[from] AccountCliError),
     #[error(transparent)]
@@ -102,6 +108,12 @@ pub fn start(config: &AgentConfig) -> Result<RunningAgent, AppError> {
 /// Exécute la commande demandée sur la ligne de commande.
 pub async fn run(cli: Cli) -> Result<(), AppError> {
     let config = load_config(&cli)?;
+    // Un seul endroit crée le dossier de données et en garantit les droits, avant que la base
+    // ou le magasin d'identité n'y écrive.
+    data_dir::ensure(&config.data_dir).map_err(|source| AppError::DataDir {
+        path: config.data_dir.clone(),
+        source,
+    })?;
     match cli.command() {
         Command::Fingerprint => {
             let identity = load_identity(&FileIdentityStore::new(&config.data_dir))?;

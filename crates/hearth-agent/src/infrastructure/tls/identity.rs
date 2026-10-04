@@ -263,18 +263,8 @@ fn generate_certificate(install_id: &InstallId) -> Result<Generated, rcgen::Erro
     })
 }
 
-#[cfg(unix)]
 fn create_data_dir(dir: &Path) -> io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)
-}
-
-#[cfg(not(unix))]
-fn create_data_dir(dir: &Path) -> io::Result<()> {
-    fs::create_dir_all(dir)
+    crate::infrastructure::data_dir::ensure(dir)
 }
 
 /// Écrit via un fichier temporaire propre au processus puis renomme, pour ne jamais laisser un
