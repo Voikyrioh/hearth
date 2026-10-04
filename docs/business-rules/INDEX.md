@@ -29,6 +29,8 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-ACCT-014](./BR-ACCT-014-serveur-refuse-gestion-lecture-seule.md) — Le serveur refuse la gestion de comptes à un compte lecture seule  — `domain/accounts/role.rs::Role::can_manage_accounts` — ✓
 - [BR-ACCT-015](./BR-ACCT-015-gestion-en-ligne-de-commande.md) — Gestion de comptes en ligne de commande sur le serveur — `entrypoint/account.rs::execute` — —
 - [BR-ACCT-016](./BR-ACCT-016-changements-consignes-au-journal.md) — Changements de compte consignés au journal (HRT-05, pas encore appliquée) — — — —
+- [BR-DASH-012](./BR-DASH-012-disques-montes-demontes.md) — Un disque monté ou retiré apparaît ou disparaît automatiquement — `domain/machine.rs::{is_real_filesystem, visible_disks}, infrastructure/system/sysinfo_probe.rs` — invariant ✓
+- [BR-DASH-007](./BR-DASH-007-gpu-sans-temperature.md) — Une carte graphique sans mesure de température affiche « Non disponible » — `infrastructure/system/gpu/nvidia_smi.rs::parse_line, infrastructure/system/gpu/sysfs.rs::read_card` — invariant ✓
 - [BR-DASH-010](./BR-DASH-010-courbes-fenetres.md) — Courbes : 5 minutes par défaut, bascule 1 minute, 5 minutes, 1 heure — `domain/metrics.rs::{RING_CAPACITY, Ring, HistoryWindow, resample}, application/metrics.rs::MetricsService::history` — invariant ✓
 - [BR-DASH-008](./BR-DASH-008-mesure-indisponible.md) — Une mesure momentanément indisponible n'affecte pas les autres — `application/metrics.rs::MetricsService::sample_once, domain/metrics.rs::resample` — invariant ✓
 - [BR-DASH-006](./BR-DASH-006-machine-sans-sondes.md) — Une machine sans sonde de température affiche un texte explicatif — `domain/machine.rs::MachineIdentity::capabilities` — invariant ✓
