@@ -15,7 +15,7 @@ apps/desktop/
 │   │   ├── domain.rs    → Règles pures sans E/S ni Tauri : décision de fermeture, entrées du menu, argument `--minimized`, `Settings`
 │   │   ├── settings.rs  → Réglages : port `Autostart` (entrée de démarrage Windows, greffon autostart) ; fichier interne `settings.json` (greffon store, explication de fermeture) lu séparément et sans effet sur le réglage de démarrage
 │   │   ├── commands.rs  → Commandes exposées à l'interface (`get_settings`, `set_launch_at_startup`, `get_app_version`, `open_logs_folder`)
-│   │   ├── logging.rs   → Journal tournant `%APPDATA%r.voikyrioh.hearth\logs` (quotidien, 7 fichiers), crochet de panique, ouverture du dossier
+│   │   ├── logging.rs   → Journal tournant `%APPDATA%/fr.voikyrioh.hearth/logs` (quotidien, 7 fichiers), crochet de panique, ouverture du dossier
 │   │   ├── window.rs    → Fenêtre principale : `show_main`, fermeture = masquage, notification d'explication unique
 │   │   ├── tray.rs      → Icône de la zone de notification et son menu
 │   │   ├── error.rs     → `AppError` (`store`, `autostart`, `logs`), sérialisée `{ kind, message }`
