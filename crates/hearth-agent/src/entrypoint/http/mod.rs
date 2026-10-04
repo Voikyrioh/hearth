@@ -3,12 +3,12 @@
 //! Conventions :
 //! - Un handler lit l'état partagé (cas d'usage), puis convertit la structure applicative en type
 //!   du fil de `hearth-proto` (`wire.rs`) : le contrat JSON n'est connu qu'ici.
-//! - **Toute route est déclarée dans `ENDPOINTS`**, avec son niveau d'accès. Le routeur est
-//!   construit depuis cette table, et le test de balayage (`tests/http_api.rs`) la parcourt : une
-//!   route réservée dont le handler oublie `AdminOnly` / `Authenticated` fait échouer le test.
-//! - Le contrôle d'accès est une seule couche (`auth.rs`) ; la version d'interface (`version.rs`)
-//!   est contrôlée sur toutes les routes sauf `/hello` ; les requêtes qui modifient et portent une
-//!   clé sont suivies (`operations.rs`).
+//! - **Toute route est déclarée dans `ENDPOINTS`** : méthode, chemin, niveau d'accès, suivie ou non
+//!   par clé d'opération. Le routeur est construit depuis cette table et pose lui-même, par route,
+//!   la couche d'accès (`auth::guard`, session puis rôle) et le suivi des opérations : un handler
+//!   ne redéclare rien, il reçoit l'appelant par `Caller`. Le test de balayage
+//!   (`tests/http_api.rs`) parcourt la table et vérifie le comportement réel de chaque route.
+//! - La version d'interface (`version.rs`) est contrôlée sur toutes les routes sauf `/hello`.
 //! - Toute erreur de routage, d'extraction ou de méthode sort au format `ErrorBody` (`error.rs`).
 
 mod accounts;
@@ -66,6 +66,9 @@ pub struct Endpoint {
     pub access: Access,
     /// Le contrôle de version d'interface s'applique (tout sauf `/hello`).
     pub version_checked: bool,
+    /// Les requêtes qui portent une `Idempotency-Key` sont suivies (`operations.rs`) : routes
+    /// authentifiées qui modifient, hors connexion (son résultat contient un jeton).
+    pub tracked: bool,
     route: fn() -> MethodRouter<AppState>,
 }
 
@@ -83,6 +86,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/hello",
         access: Access::Public,
         version_checked: false,
+        tracked: false,
         route: || get(hello::hello),
     },
     Endpoint {
@@ -90,6 +94,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/sessions",
         access: Access::Public,
         version_checked: true,
+        tracked: false,
         route: || post(sessions::login),
     },
     Endpoint {
@@ -97,6 +102,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/sessions/current",
         access: Access::Authenticated,
         version_checked: true,
+        tracked: false,
         route: || delete(sessions::logout),
     },
     Endpoint {
@@ -104,6 +110,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/me",
         access: Access::Authenticated,
         version_checked: true,
+        tracked: false,
         route: || get(sessions::me),
     },
     Endpoint {
@@ -111,6 +118,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/me/password",
         access: Access::Authenticated,
         version_checked: true,
+        tracked: true,
         route: || put(accounts::change_own_password),
     },
     Endpoint {
@@ -118,6 +126,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/operations/{id}",
         access: Access::Authenticated,
         version_checked: true,
+        tracked: false,
         route: || get(operations::get),
     },
     Endpoint {
@@ -125,6 +134,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/accounts",
         access: Access::Admin,
         version_checked: true,
+        tracked: false,
         route: || get(accounts::list),
     },
     Endpoint {
@@ -132,6 +142,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/accounts",
         access: Access::Admin,
         version_checked: true,
+        tracked: true,
         route: || post(accounts::create),
     },
     Endpoint {
@@ -139,6 +150,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/accounts/{id}",
         access: Access::Admin,
         version_checked: true,
+        tracked: true,
         route: || patch(accounts::change_role),
     },
     Endpoint {
@@ -146,6 +158,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/accounts/{id}",
         access: Access::Admin,
         version_checked: true,
+        tracked: true,
         route: || delete(accounts::delete),
     },
     Endpoint {
@@ -153,6 +166,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/accounts/{id}/password",
         access: Access::Admin,
         version_checked: true,
+        tracked: true,
         route: || put(accounts::set_password),
     },
     Endpoint {
@@ -160,6 +174,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         path: "/accounts/{id}/sessions",
         access: Access::Admin,
         version_checked: true,
+        tracked: true,
         route: || delete(accounts::revoke_sessions),
     },
 ];
@@ -170,20 +185,25 @@ pub fn router(state: AppState) -> Router {
     let mut unchecked = Router::new();
     let mut checked = Router::new();
     for endpoint in ENDPOINTS {
+        let mut route = (endpoint.route)();
+        if endpoint.access != Access::Public {
+            route = route.route_layer(middleware::from_fn_with_state(
+                auth::GuardState {
+                    app: state.clone(),
+                    access: endpoint.access,
+                    tracked: endpoint.tracked,
+                },
+                auth::guard,
+            ));
+        }
         if endpoint.version_checked {
-            checked = checked.route(endpoint.path, (endpoint.route)());
+            checked = checked.route(endpoint.path, route);
         } else {
-            unchecked = unchecked.route(endpoint.path, (endpoint.route)());
+            unchecked = unchecked.route(endpoint.path, route);
         }
     }
-    // Couches des routes contrôlées : la dernière ajoutée s'exécute en premier (version, puis
-    // suivi des opérations, puis handler et ses extracteurs d'accès).
-    let checked = checked
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            operations::layer,
-        ))
-        .route_layer(middleware::from_fn(version::layer));
+    // La version est contrôlée avant tout (même sans jeton), puis l'accès et le suivi par route.
+    let checked = checked.route_layer(middleware::from_fn(version::layer));
     let v1 = unchecked.merge(checked);
     with_error_fallbacks(Router::new().nest("/api/v1", v1))
         .layer(
@@ -265,6 +285,22 @@ mod tests {
             public,
             vec![(Method::GET, "/hello"), (Method::POST, "/sessions")]
         );
+    }
+
+    #[test]
+    fn tracked_routes_are_the_authenticated_ones_that_modify_but_never_the_login() {
+        for endpoint in ENDPOINTS {
+            if endpoint.tracked {
+                assert!(endpoint.modifies(), "{}", endpoint.path);
+                assert_ne!(endpoint.access, Access::Public, "{}", endpoint.path);
+            }
+        }
+        let login = ENDPOINTS
+            .iter()
+            .find(|endpoint| endpoint.path == "/sessions" && endpoint.method == Method::POST)
+            .unwrap();
+        assert!(!login.tracked);
+        assert!(ENDPOINTS.iter().filter(|endpoint| endpoint.tracked).count() >= 5);
     }
 
     #[test]

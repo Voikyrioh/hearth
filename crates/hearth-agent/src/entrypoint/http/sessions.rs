@@ -10,7 +10,7 @@ use axum::http::{HeaderMap, StatusCode};
 use hearth_proto::api::sessions::{LoginRequest, LoginResponse, MeResponse};
 use hearth_proto::headers;
 
-use super::auth::Authenticated;
+use super::auth::Caller;
 use super::{ApiError, AppState, wire};
 use crate::application::sessions::ClientInfo;
 use crate::domain::secret::Secret;
@@ -81,14 +81,14 @@ pub async fn login(
 /// `DELETE /api/v1/sessions/current` : ferme la session de l'appelant.
 pub async fn logout(
     State(state): State<AppState>,
-    Authenticated(caller): Authenticated,
+    Caller(caller): Caller,
 ) -> Result<StatusCode, ApiError> {
     state.sessions.logout(&caller.session_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// `GET /api/v1/me` : le compte de l'appelant et son rôle.
-pub async fn me(Authenticated(caller): Authenticated) -> Result<Json<MeResponse>, ApiError> {
+pub async fn me(Caller(caller): Caller) -> Result<Json<MeResponse>, ApiError> {
     Ok(Json(MeResponse {
         account: wire::account_info(&caller.account),
         session_expires_at: wire::date(caller.expires_at)?,

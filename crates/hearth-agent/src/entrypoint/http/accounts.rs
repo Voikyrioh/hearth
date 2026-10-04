@@ -1,6 +1,6 @@
-//! Routes des comptes. Toutes (sauf `PUT /me/password`) sont réservées aux administrateurs : le
-//! premier argument de chaque handler est `AdminOnly`, qui refuse (`401` ou `403`) avant la lecture
-//! du corps (BR-ACCT-013, BR-ACCT-014).
+//! Routes des comptes. Toutes (sauf `PUT /me/password`) sont réservées aux administrateurs : la
+//! table `ENDPOINTS` leur donne le niveau `Admin`, et la couche d'accès du routeur refuse (`401`
+//! ou `403`) avant la lecture du corps (BR-ACCT-013, BR-ACCT-014). Les handlers ne contrôlent rien.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -12,7 +12,7 @@ use hearth_proto::api::accounts::{
     CreateAccountRequest, DeleteAccountRequest, SessionsClosedResponse, SetPasswordRequest,
 };
 
-use super::auth::{AdminOnly, Authenticated};
+use super::auth::Caller;
 use super::{ApiError, AppState, wire};
 use crate::domain::accounts::AccountId;
 use crate::domain::secret::Secret;
@@ -24,10 +24,7 @@ fn closed(count: u64) -> Json<SessionsClosedResponse> {
 }
 
 /// `GET /api/v1/accounts` : les comptes, avec sessions ouvertes et dernière connexion.
-pub async fn list(
-    State(state): State<AppState>,
-    AdminOnly(_): AdminOnly,
-) -> Result<Json<AccountsResponse>, ApiError> {
+pub async fn list(State(state): State<AppState>) -> Result<Json<AccountsResponse>, ApiError> {
     let accounts = state
         .accounts
         .list()
@@ -41,7 +38,6 @@ pub async fn list(
 /// `POST /api/v1/accounts` : crée un compte.
 pub async fn create(
     State(state): State<AppState>,
-    AdminOnly(_): AdminOnly,
     body: Result<Json<CreateAccountRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<AccountItem>), ApiError> {
     let Json(request) = body?;
@@ -59,7 +55,6 @@ pub async fn create(
 /// `PATCH /api/v1/accounts/{id}` : change le rôle (jamais celui du dernier administrateur).
 pub async fn change_role(
     State(state): State<AppState>,
-    AdminOnly(_): AdminOnly,
     Path(id): Path<String>,
     body: Result<Json<ChangeRoleRequest>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
@@ -75,7 +70,7 @@ pub async fn change_role(
 /// propre compte retape son identifiant (`confirmation`, BR-ACCT-012).
 pub async fn delete(
     State(state): State<AppState>,
-    AdminOnly(caller): AdminOnly,
+    Caller(caller): Caller,
     Path(id): Path<String>,
     body: Bytes,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
@@ -100,7 +95,6 @@ pub async fn delete(
 /// ses sessions sont fermées (BR-ACCT-008).
 pub async fn set_password(
     State(state): State<AppState>,
-    AdminOnly(_): AdminOnly,
     Path(id): Path<String>,
     body: Result<Json<SetPasswordRequest>, JsonRejection>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
@@ -115,7 +109,6 @@ pub async fn set_password(
 /// `DELETE /api/v1/accounts/{id}/sessions` : ferme toutes les sessions du compte (BR-ACCT-011).
 pub async fn revoke_sessions(
     State(state): State<AppState>,
-    AdminOnly(_): AdminOnly,
     Path(id): Path<String>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
     let count = state.accounts.revoke_sessions(&AccountId::new(id)).await?;
@@ -126,7 +119,7 @@ pub async fn revoke_sessions(
 /// fermées, la courante est gardée (BR-ACCT-009). Permis à tout rôle.
 pub async fn change_own_password(
     State(state): State<AppState>,
-    Authenticated(caller): Authenticated,
+    Caller(caller): Caller,
     body: Result<Json<ChangeOwnPasswordRequest>, JsonRejection>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
     let Json(request) = body?;

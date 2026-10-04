@@ -1,6 +1,8 @@
 //! Suivi des opérations par clé (BR-RESIL-010) : la couche qui enregistre une requête qui
 //! modifie avant de l'exécuter et retient son résultat, et la route `GET /operations/{id}`.
 //!
+//! Posée par la couche d'accès (`auth::guard`) sur les routes que `ENDPOINTS` déclare suivies.
+//!
 //! - La clé est celle d'un compte et liée à la requête (méthode, chemin, corps) : la même clé
 //!   avec une autre requête est refusée (`422 IDEMPOTENCY_KEY_REUSED`), sans exécuter.
 //! - Rejouer la même clé avec la même requête rend le premier résultat sans ré-exécuter ; une clé
@@ -12,7 +14,7 @@
 use axum::Json;
 use axum::body::{Body, to_bytes};
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderName, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use hearth_proto::api::operations::{OperationResponse, OperationStatus as WireStatus};
@@ -21,8 +23,9 @@ use hearth_proto::headers;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::auth::{self, Authenticated};
+use super::auth::Caller;
 use super::{ApiError, AppState};
+use crate::application::sessions::CurrentSession;
 use crate::domain::accounts::AccountId;
 use crate::domain::operations::{
     Operation, OperationKey, OperationStatus, Replay, RequestFingerprint,
@@ -45,21 +48,19 @@ impl StoredResult {
     }
 }
 
-/// Une requête est suivie si elle modifie et porte une clé, hors connexion.
-fn is_tracked(request: &Request) -> bool {
-    let modifies = !matches!(
-        *request.method(),
-        Method::GET | Method::HEAD | Method::OPTIONS
-    );
-    let is_login = *request.method() == Method::POST && request.uri().path().ends_with("/sessions");
-    modifies && !is_login && request.headers().contains_key(headers::IDEMPOTENCY_KEY)
-}
-
-pub async fn layer(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    if !is_tracked(&request) {
+/// Suit la requête si elle porte une clé d'opération ; la couche d'accès l'appelle pour les
+/// routes que la table `ENDPOINTS` déclare suivies, une fois l'appelant connu (une clé est celle
+/// d'un compte). Sans clé, la requête s'exécute sans suivi.
+pub(super) async fn track(
+    state: &AppState,
+    caller: CurrentSession,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !request.headers().contains_key(headers::IDEMPOTENCY_KEY) {
         return next.run(request).await;
     }
-    let (mut parts, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
     let key = parts
         .headers
         .get(headers::IDEMPOTENCY_KEY)
@@ -74,11 +75,6 @@ pub async fn layer(State(state): State<AppState>, request: Request, next: Next) 
             )
             .into_response();
         }
-    };
-    // Il faut connaître l'appelant avant d'exécuter : une clé est celle d'un compte.
-    let caller = match auth::resolve(&state, &mut parts).await {
-        Ok(session) => session,
-        Err(error) => return error.into_response(),
     };
     let account = caller.account.id;
     let bytes = match to_bytes(body, MAX_BYTES).await {
@@ -134,7 +130,7 @@ pub async fn layer(State(state): State<AppState>, request: Request, next: Next) 
         Ok(response) => response,
         Err(error) => {
             // Le handler a paniqué : rien n'est retenu, le client peut relancer.
-            discard(&state, &account, &key).await;
+            discard(state, &account, &key).await;
             ApiError::internal(&error).into_response()
         }
     }
@@ -209,7 +205,7 @@ fn replay(operation: &Operation) -> Response {
 /// jamais reçu cette clé (l'action n'a pas été exécutée).
 pub async fn get(
     State(state): State<AppState>,
-    Authenticated(caller): Authenticated,
+    Caller(caller): Caller,
     Path(id): Path<String>,
 ) -> Result<Json<OperationResponse>, ApiError> {
     let not_found = || ApiError::new(ErrorCode::NotFound, "Opération inconnue");
@@ -235,18 +231,9 @@ pub async fn get(
 
 #[cfg(test)]
 mod tests {
-    use axum::http::Request as HttpRequest;
     use time::OffsetDateTime;
 
     use super::*;
-
-    fn request(method: Method, path: &str, key: bool) -> Request {
-        let mut builder = HttpRequest::builder().method(method).uri(path);
-        if key {
-            builder = builder.header(headers::IDEMPOTENCY_KEY, "01J9ZY0G3Q8M2K6W4T7V5N1B9D");
-        }
-        builder.body(Body::empty()).unwrap()
-    }
 
     fn operation(result: &str) -> Operation {
         Operation {
@@ -259,20 +246,6 @@ mod tests {
             created_at: OffsetDateTime::UNIX_EPOCH,
             finished_at: None,
         }
-    }
-
-    #[test]
-    fn only_modifying_requests_with_a_key_are_tracked() {
-        assert!(is_tracked(&request(Method::PUT, "/me/password", true)));
-        assert!(is_tracked(&request(Method::DELETE, "/accounts/A", true)));
-        assert!(!is_tracked(&request(Method::PUT, "/me/password", false)));
-        assert!(!is_tracked(&request(Method::GET, "/me", true)));
-    }
-
-    #[test]
-    fn the_login_is_never_tracked_because_its_response_holds_a_token() {
-        assert!(!is_tracked(&request(Method::POST, "/sessions", true)));
-        assert!(is_tracked(&request(Method::POST, "/accounts", true)));
     }
 
     #[test]
