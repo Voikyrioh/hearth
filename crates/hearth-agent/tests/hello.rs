@@ -10,11 +10,11 @@ use std::process::Command;
 use std::sync::Arc;
 
 use hearth_agent::app;
-use hearth_agent::domain::fingerprint::Fingerprint;
 use hearth_agent::entrypoint::http::ServerHandle;
 use hearth_agent::infrastructure::config::AgentConfig;
 use hearth_proto::api::hello::HelloResponse;
 use hearth_proto::error::{ErrorBody, ErrorCode};
+use hearth_proto::fingerprint::Fingerprint;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, ring};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -131,10 +131,8 @@ fn config_for(dir: &Path) -> AgentConfig {
 }
 
 fn start(dir: &Path) -> (ServerHandle, Fingerprint) {
-    let config = config_for(dir);
-    let identity = app::load_identity(&config).expect("identité");
-    let server = app::start(&config, &identity).expect("démarrage");
-    (server, identity.fingerprint)
+    let running = app::start(&config_for(dir)).expect("démarrage");
+    (running.server, running.identity.fingerprint)
 }
 
 /// Lance le vrai binaire. Un `agent.toml` vide est passé explicitement pour que la config
@@ -224,14 +222,54 @@ fn fingerprint_command_creates_the_identity_when_absent() {
 }
 
 #[tokio::test]
-async fn tls12_connections_are_refused() {
+async fn tls12_connections_are_refused_with_a_protocol_version_alert() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (server, _) = start(dir.path());
-    let result = connect(
+    let error = connect(
         server.local_addr(),
         client_config(&[&rustls::version::TLS12]),
     )
-    .await;
-    assert!(result.is_err(), "une connexion TLS 1.2 ne doit pas aboutir");
+    .await
+    .map(|_| ())
+    .expect_err("une connexion TLS 1.2 ne doit pas aboutir");
+    let tls_error = error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+        .expect("erreur rustls");
+    assert!(
+        matches!(
+            tls_error,
+            rustls::Error::AlertReceived(rustls::AlertDescription::ProtocolVersion)
+        ),
+        "alerte attendue : version de protocole, reçu {tls_error:?}"
+    );
+    server.shutdown().await.expect("arrêt");
+}
+
+#[tokio::test]
+async fn wrong_method_answers_405_in_the_error_format_over_tls() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (server, _) = start(dir.path());
+    let mut tls = connect(
+        server.local_addr(),
+        client_config(&[&rustls::version::TLS13]),
+    )
+    .await
+    .expect("poignée de main");
+    tls.write_all(
+        b"POST /api/v1/hello HTTP/1.1
+Host: localhost
+Content-Length: 0
+Connection: close
+
+",
+    )
+    .await
+    .expect("écriture");
+    let mut raw = Vec::new();
+    let _ = tls.read_to_end(&mut raw).await;
+    let text = String::from_utf8_lossy(&raw);
+    assert!(text.starts_with("HTTP/1.1 405"), "{text}");
+    assert!(text.contains("METHOD_NOT_ALLOWED"), "{text}");
     server.shutdown().await.expect("arrêt");
 }
