@@ -40,7 +40,7 @@ HRT-02 pose le premier code de l'agent ; les tickets suivants repartiront de cet
 | `async-trait` 0.1 | Ports asynchrones utilisables en objet (`Arc<dyn AccountRepo>`) | Les traits asynchrones natifs ne sont pas utilisables en objet. | À retirer quand les objets-traits asynchrones seront stables. |
 | `sha2` (dans `hearth-proto` et `hearth-agent`) | Empreinte SHA-256 du certificat ; empreinte stockée des jetons de session (HRT-04) | Pur Rust, partagé avec `hearth-link`. | Pas de cryptographie d'authentification avec cette crate seule. Pas pour les mots de passe (Argon2id). |
 | `subtle` 2 | Comparaison en temps constant des empreintes de jetons (`TokenHash`) | Pur Rust, sans dépendance, `no_std`. | Seulement pour comparer des valeurs secrètes ou dérivées de secrets ; ailleurs `==` suffit. |
-| `getrandom` 0.4 | 32 octets aléatoires du système pour les jetons de session (`infrastructure/random.rs`) | Appel direct au générateur du système d'exploitation, déjà dans l'arbre (via rustls/ring), compile en musl. | Ne pas l'utiliser pour des identifiants techniques (ULID) ; un échec du système est une erreur, jamais un repli sur un hasard faible. |
+| `getrandom` 0.4 | 32 octets aléatoires du système pour les jetons de session (`infrastructure/random.rs`) | Appel direct au générateur du système d'exploitation, déjà dans l'arbre (via argon2 et password-hash, même version 0.4), compile en musl. | Ne pas l'utiliser pour des identifiants techniques (ULID) ; un échec du système est une erreur, jamais un repli sur un hasard faible. |
 
 **Règle** : pas d'`aws-lc`, pas d'OpenSSL, aucune dépendance qui ne compile pas en musl. Une nouvelle dépendance de l'agent passe par une mise à jour de cette ADR.
 
