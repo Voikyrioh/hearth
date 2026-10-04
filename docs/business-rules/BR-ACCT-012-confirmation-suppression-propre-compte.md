@@ -16,6 +16,7 @@ Un administrateur qui supprime son propre compte doit retaper son identifiant (i
 ## Application (code)
 - `crates/hearth-agent/src/domain/accounts/self_deletion.rs::confirm_self_deletion`.
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::delete` — paramètres `acting` (compte appelant) et `confirmation` ; la confirmation n'est exigée que si `acting` est la cible. La ligne de commande n'a pas d'appelant et n'est donc pas concernée.
+- Route : `DELETE /api/v1/accounts/{id}` avec `{ "confirmation": "<identifiant>" }` (`entrypoint/http/accounts.rs::delete`) ; refus `VALIDATION_ERROR` (`details.field = "confirmation"`).
 
 ## Vérification
 - Tests : `domain::accounts::self_deletion::tests` ; `crates/hearth-agent/tests/accounts_use_cases.rs::deleting_your_own_account_requires_your_username`.

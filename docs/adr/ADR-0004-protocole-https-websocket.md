@@ -23,7 +23,7 @@ API versionnée `/api/v1`. Requêtes modifiantes portent clé idempotence `Idemp
 
 ### Routes HTTP
 
-- **Commandes idempotentes** : `POST /api/v1/sessions`, `PUT /accounts/{id}/password`, `POST /agent/update`, etc.
+- **Commandes idempotentes** : `PUT /accounts/{id}/password`, `POST /accounts`, `POST /agent/update`, etc. Exception : `POST /api/v1/sessions` n'est pas suivi par clé (HRT-04) : sa réponse contient le jeton, qu'on ne conserve pas en base ; rejouer une connexion ouvre une nouvelle session.
   - Client génère `Idempotency-Key: <ULID>` persistent pour l'opération.
   - Serveur indexe par clé, rejeu renvoie le premier résultat sans rejouer.
 - **Requêtes de lecture** : `GET` sans idempotency (indemne).

@@ -16,6 +16,7 @@ La révocation ferme immédiatement toutes les sessions ouvertes du compte et ne
 ## Application (code)
 - `crates/hearth-agent/src/domain/sessions.rs::closure_on_revocation`.
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::revoke_sessions`.
+- Route : `DELETE /api/v1/accounts/{id}/sessions` (`entrypoint/http/accounts.rs::revoke_sessions`).
 
 ## Vérification
 - Tests : `crates/hearth-agent/tests/accounts_use_cases.rs::revoking_closes_sessions_and_keeps_the_password` ; `crates/hearth-agent/tests/account_cli.rs`.
