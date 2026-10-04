@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 
 use super::action::AuditAction;
 use super::event::OutcomeKind;
+use crate::domain::text::is_unsafe_char;
 
 /// Entrées par page, au plus (et par défaut).
 pub const MAX_PAGE_SIZE: usize = 100;
@@ -45,6 +46,12 @@ impl SearchQuery {
     /// `None` quand il ne reste aucun mot cherchable (saisie vide ou faite de ponctuation) : le
     /// filtre est alors sans effet, jamais une erreur.
     pub fn parse(text: &str) -> Option<Self> {
+        // Un caractère de contrôle (le NUL met fin à une chaîne pour le moteur), un séparateur de
+        // ligne Unicode ou un caractère de format sépare les mots comme une espace.
+        let text: String = text
+            .chars()
+            .map(|c| if is_unsafe_char(c) { ' ' } else { c })
+            .collect();
         let terms: Vec<String> = text
             .split_whitespace()
             .filter(|word| word.chars().any(char::is_alphanumeric))
@@ -288,6 +295,17 @@ mod tests {
         assert!(expression.starts_with("\"a\"\"b\"* \"OR\"* \"NEAR(x\"*"));
         assert!(expression.contains("\"-z\"*") && expression.contains("\"col:val\"*"));
         assert!(!expression.contains(" * "), "un mot sans lettre est écarté");
+    }
+
+    #[test]
+    fn control_characters_only_separate_words() {
+        assert_eq!(
+            SearchQuery::parse("a\u{0}b\nc\u{202E}d")
+                .unwrap()
+                .expression(),
+            "\"a\"* \"b\"* \"c\"* \"d\"*"
+        );
+        assert_eq!(SearchQuery::parse("\u{0}"), None);
     }
 
     #[test]

@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 
-use super::{AccountTx, LoginAttemptTx, OperationTx, SessionTx, StoreError};
+use super::{AccountTx, AuditTx, LoginAttemptTx, OperationTx, SessionTx, StoreError};
 
 /// Point d'entrée des écritures. Le magasin est neutre : il ne porte aucun sujet (comptes,
-/// sessions, tentatives, opérations, plus tard le journal), l'unité de travail les donne.
+/// sessions, tentatives, opérations, journal), l'unité de travail les donne.
 #[async_trait]
 pub trait Store: Send + Sync {
     /// Ouvre une unité de travail. Les écritures sont sérialisées : ce qu'elle observe ne peut
@@ -27,6 +27,8 @@ pub trait UnitOfWork: Send {
     fn login_attempts(&mut self) -> &mut dyn LoginAttemptTx;
 
     fn operations(&mut self) -> &mut dyn OperationTx;
+
+    fn audit(&mut self) -> &mut dyn AuditTx;
 
     async fn commit(self: Box<Self>) -> Result<(), StoreError>;
 }
