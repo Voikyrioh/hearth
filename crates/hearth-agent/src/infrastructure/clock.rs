@@ -1,13 +1,51 @@
 //! Horloge du système.
+//!
+//! La précision de l'horloge est celle du stockage : la milliseconde. La troncature se fait ici,
+//! une seule fois, pour que la date que rend un cas d'usage après une écriture soit exactement
+//! celle qu'on relira en base.
 
 use time::OffsetDateTime;
 
 use crate::application::ports::Clock;
 
+const NANOS_PER_MILLI: u32 = 1_000_000;
+
 pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now(&self) -> OffsetDateTime {
-        OffsetDateTime::now_utc()
+        truncate_to_millis(OffsetDateTime::now_utc())
+    }
+}
+
+fn truncate_to_millis(date: OffsetDateTime) -> OffsetDateTime {
+    let nanos = date.nanosecond() / NANOS_PER_MILLI * NANOS_PER_MILLI;
+    date.replace_nanosecond(nanos).unwrap_or(date)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::Duration;
+
+    #[test]
+    fn truncation_drops_everything_below_the_millisecond() {
+        let date = OffsetDateTime::UNIX_EPOCH + Duration::new(100, 123_456_789);
+        assert_eq!(
+            truncate_to_millis(date),
+            OffsetDateTime::UNIX_EPOCH + Duration::new(100, 123_000_000)
+        );
+    }
+
+    #[test]
+    fn truncation_keeps_a_whole_millisecond() {
+        let date = OffsetDateTime::UNIX_EPOCH + Duration::new(100, 5_000_000);
+        assert_eq!(truncate_to_millis(date), date);
+    }
+
+    #[test]
+    fn the_system_clock_has_no_sub_millisecond_digits() {
+        let now = SystemClock.now();
+        assert_eq!(now.nanosecond() % NANOS_PER_MILLI, 0);
     }
 }

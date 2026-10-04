@@ -579,3 +579,31 @@ fn an_invalid_username_is_refused_without_touching_anything() {
     assert!(AccountService::validate_username("a b").is_err());
     assert!(AccountService::validate_username("").is_err());
 }
+
+#[tokio::test]
+async fn the_date_returned_by_create_is_the_one_read_back_by_find() {
+    use std::sync::Arc;
+
+    use hearth_agent::application::accounts::AccountService;
+    use hearth_agent::infrastructure::argon2::Argon2Hasher;
+    use hearth_agent::infrastructure::clock::SystemClock;
+    use hearth_agent::infrastructure::ids::UlidGen;
+    use hearth_agent::infrastructure::sqlite::{SqliteSessionRepo, SqliteStore};
+
+    let env = env().await;
+    let service = AccountService::new(
+        Arc::new(SqliteAccountRepo::new(env.db.pool().clone())),
+        Arc::new(SqliteSessionRepo::new(env.db.pool().clone())),
+        Arc::new(SqliteStore::new(env.db.pool().clone())),
+        Arc::new(Argon2Hasher::with_cost(8, 1, 1).unwrap()),
+        Arc::new(SystemClock),
+        Arc::new(UlidGen),
+    );
+    let created = service
+        .create("marie", secret(PASSWORD), Role::Admin)
+        .await
+        .unwrap();
+    let found = service.find("marie").await.unwrap();
+    assert_eq!(created.created_at, found.created_at);
+    assert_eq!(created.password_changed_at, found.password_changed_at);
+}
