@@ -11,6 +11,8 @@ use serde_json::Value;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     Unauthenticated,
+    /// Identifiant ou mot de passe refusé, sans préciser lequel (BR-CONN-013).
+    InvalidCredentials,
     SessionExpired,
     SessionRevoked,
     ForbiddenRole,
@@ -18,6 +20,16 @@ pub enum ErrorCode {
     ValidationError,
     IncompatibleVersion,
     TooManyAttempts,
+    /// Identifiant déjà pris par un autre compte.
+    UsernameTaken,
+    /// Mot de passe refusé ; `details.rules` liste les règles non respectées.
+    WeakPassword,
+    /// Mot de passe actuel incorrect lors d'un changement de son propre mot de passe.
+    WrongPassword,
+    /// L'opération laisserait le serveur sans administrateur.
+    LastAdmin,
+    /// Conflit avec un changement concurrent : réessayer.
+    Conflict,
     InternalError,
     /// Route ou ressource inconnue.
     NotFound,
@@ -29,12 +41,17 @@ impl ErrorCode {
     /// Statut HTTP associé au code.
     pub const fn http_status(self) -> u16 {
         match self {
-            Self::Unauthenticated | Self::SessionExpired | Self::SessionRevoked => 401,
+            Self::Unauthenticated
+            | Self::InvalidCredentials
+            | Self::SessionExpired
+            | Self::SessionRevoked => 401,
             Self::ForbiddenRole => 403,
             Self::NotFound => 404,
             Self::MethodNotAllowed => 405,
-            Self::OperationInProgress => 409,
-            Self::ValidationError => 422,
+            Self::OperationInProgress | Self::UsernameTaken | Self::LastAdmin | Self::Conflict => {
+                409
+            }
+            Self::ValidationError | Self::WeakPassword | Self::WrongPassword => 422,
             Self::IncompatibleVersion => 426,
             Self::TooManyAttempts => 429,
             Self::InternalError => 500,
@@ -75,6 +92,43 @@ impl ErrorBody {
     }
 }
 
+/// Qui doit se mettre à jour quand les versions d'interface sont incompatibles (`details.upgrade`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpgradeTarget {
+    Client,
+    Agent,
+}
+
+impl ErrorBody {
+    /// `426 INCOMPATIBLE_VERSION` avec `details.upgrade`.
+    pub fn incompatible_version(upgrade: UpgradeTarget, message: impl Into<String>) -> Self {
+        Self::with_details(
+            ErrorCode::IncompatibleVersion,
+            message,
+            serde_json::json!({ "upgrade": upgrade }),
+        )
+    }
+
+    /// `429 TOO_MANY_ATTEMPTS` avec `details.retry_after_s`.
+    pub fn too_many_attempts(retry_after_s: u64, message: impl Into<String>) -> Self {
+        Self::with_details(
+            ErrorCode::TooManyAttempts,
+            message,
+            serde_json::json!({ "retry_after_s": retry_after_s }),
+        )
+    }
+
+    /// `422 WEAK_PASSWORD` avec `details.rules` : les règles non respectées, par code stable.
+    pub fn weak_password(rules: &[&str], message: impl Into<String>) -> Self {
+        Self::with_details(
+            ErrorCode::WeakPassword,
+            message,
+            serde_json::json!({ "rules": rules }),
+        )
+    }
+}
+
 fn empty_details() -> Value {
     Value::Object(serde_json::Map::new())
 }
@@ -84,8 +138,14 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL: [(ErrorCode, &str, u16); 11] = [
+    const ALL: [(ErrorCode, &str, u16); 17] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
+        (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
+        (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
+        (ErrorCode::WeakPassword, "WEAK_PASSWORD", 422),
+        (ErrorCode::WrongPassword, "WRONG_PASSWORD", 422),
+        (ErrorCode::LastAdmin, "LAST_ADMIN", 409),
+        (ErrorCode::Conflict, "CONFLICT", 409),
         (ErrorCode::SessionExpired, "SESSION_EXPIRED", 401),
         (ErrorCode::SessionRevoked, "SESSION_REVOKED", 401),
         (ErrorCode::ForbiddenRole, "FORBIDDEN_ROLE", 403),
@@ -131,6 +191,20 @@ mod tests {
                     "details": { "upgrade": "client" }
                 }
             })
+        );
+    }
+
+    #[test]
+    fn helpers_build_the_documented_details() {
+        let body = ErrorBody::incompatible_version(UpgradeTarget::Agent, "agent trop ancien");
+        assert_eq!(body.error.details, json!({ "upgrade": "agent" }));
+        let body = ErrorBody::too_many_attempts(60, "attends");
+        assert_eq!(body.error.code, ErrorCode::TooManyAttempts);
+        assert_eq!(body.error.details, json!({ "retry_after_s": 60 }));
+        let body = ErrorBody::weak_password(&["min_length", "digit"], "faible");
+        assert_eq!(
+            body.error.details,
+            json!({ "rules": ["min_length", "digit"] })
         );
     }
 

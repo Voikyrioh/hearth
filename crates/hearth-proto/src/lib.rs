@@ -3,5 +3,6 @@
 pub mod api;
 pub mod error;
 pub mod fingerprint;
+pub mod headers;
 pub mod product;
 pub mod version;
