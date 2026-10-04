@@ -27,4 +27,10 @@ LangString webview2Downloading ${LANG_FRENCH} "Téléchargement de WebView2..."
 LangString webview2InstallError ${LANG_FRENCH} "Erreur : l'installation de WebView2 a échoué avec le code $1"
 LangString webview2InstallSuccess ${LANG_FRENCH} "WebView2 est installé."
 ; Case de la page de désinstallation, décochée par défaut : décochée = on garde tout.
+; À FAIRE avec le coffre Windows (Gestionnaire d'identification) : le modèle de Tauri ne
+; supprime que des dossiers. Quand les mots de passe y seront stockés, la désinstallation
+; devra aussi effacer ces identifiants si la case est cochée, sinon ce texte ment.
 LangString deleteAppData ${LANG_FRENCH} "Tout effacer : supprimer aussi mes serveurs enregistrés et mes mots de passe mémorisés"
+; Contrôles d'avant installation (BR-CLIENT-014), appelés par hooks.nsh.
+LangString hearthWindowsTooOld ${LANG_FRENCH} "Hearth a besoin de Windows 10 ou plus récent, en 64 bits. Ta version ne fonctionne pas."
+LangString hearthDiskTooSmall ${LANG_FRENCH} "Il manque de la place. Libère au moins 50 Mo. Espace disponible : $R8 Mo."
