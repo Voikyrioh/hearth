@@ -43,6 +43,7 @@ Codes transverses :
 - `426 INCOMPATIBLE_VERSION` : version client/agent incompatible (`details.upgrade: "client" | "agent"`)
 - `429 TOO_MANY_ATTEMPTS` : trop de tentatives (login) ; `details.retry_after_s`
 - `422 IDEMPOTENCY_KEY_REUSED` : clé d'opération déjà utilisée pour une autre requête
+- `413 PAYLOAD_TOO_LARGE` : corps d'une requête suivie > 1 Mio
 - `503 BUSY` : agent saturé, `Retry-After`
 - `500 INTERNAL_ERROR` : erreur serveur
 

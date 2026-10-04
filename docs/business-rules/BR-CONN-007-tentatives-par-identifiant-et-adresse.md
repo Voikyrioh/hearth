@@ -13,10 +13,10 @@ maj: 2026-10-04
 ## Règle
 La spec dit « par compte et par serveur » ; l'agent applique deux compteurs, que l'identifiant existe ou non (sinon le verrouillage révélerait quels comptes existent, BR-CONN-013) :
 
-1. **Par couple (identifiant saisi, adresse IP du client)** : 5 échecs, puis attente 1 min doublée à chaque échec, plafond 15 min (BR-CONN-006). L'identifiant est normalisé (minuscules, espaces autour retirés, 64 caractères au plus).
+1. **Par couple (identifiant saisi, adresse IP du client)** : 5 échecs, puis attente 1 min doublée à chaque échec, plafond 15 min (BR-CONN-006). L'identifiant est normalisé (minuscules, espaces autour retirés, caractères de contrôle retirés, 64 caractères au plus) : un retour à la ligne ne peut ni forger une ligne de journal ni brouiller la clé ; le séparateur de la clé est un caractère de contrôle, jamais présent dans l'identifiant.
 2. **Par adresse seule, tous identifiants confondus** : 20 échecs en 10 minutes (la fenêtre s'ouvre au premier échec) bloquent l'adresse, mêmes paliers (1 min doublée, plafond 15 min). Il ferme le balayage d'identifiants (un identifiant différent à chaque requête échappe au compteur 1). Un succès ne le remet pas à zéro (sinon un attaquant intercalerait une connexion valide).
 
-Une tentative est refusée dès que l'un des deux compteurs est en attente ; la réponse annonce l'attente la plus longue. L'adresse est celle de la connexion TCP (jamais un en-tête de mandataire, forgeable). Les connexions d'une même adresse sont traitées l'une après l'autre : des tentatives simultanées ne dépassent pas les paliers.
+Une tentative est refusée dès que l'un des deux compteurs est en attente ; la réponse annonce l'attente la plus longue. L'adresse est celle de la connexion TCP (jamais un en-tête de mandataire, forgeable). Les connexions d'une même adresse sont traitées l'une après l'autre (un tour par adresse) : des tentatives simultanées ne dépassent pas les paliers. La tentative va jusqu'au bout même si le client coupe : l'échec est toujours compté.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/lockout.rs::{AttemptKey::new, AttemptKey::address, step, step_address}`.
@@ -28,6 +28,7 @@ Une tentative est refusée dès que l'un des deux compteurs est en attente ; la 
 
 ## Cas limites et limites connues
 - **Contournement par changement d'adresse** : un attaquant qui dispose de nombreuses adresses garde 5 essais par identifiant et par adresse, et 20 par adresse. Aucun plafond par identifiant seul n'existe (il permettrait de verrouiller un compte à distance en le visant). Suivi : borne par identifiant tous clients confondus, à décider avec le journal d'activité (HRT-05).
+- **Un poste légitime derrière la même adresse qu'un attaquant est bloqué avec lui** (le compteur par adresse ne distingue pas les personnes : NAT, poste partagé, mandataire).
 - Derrière un mandataire, toutes les connexions partagent l'adresse du mandataire : le compteur par adresse bloquerait alors tout le monde. L'agent n'est pas prévu pour être derrière un mandataire.
 - Purge des compteurs inactifs depuis 24 h : `application/maintenance.rs`.
 

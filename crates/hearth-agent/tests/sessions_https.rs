@@ -377,3 +377,39 @@ async fn an_operation_left_running_by_a_previous_run_is_interrupted_at_startup()
     );
     agent.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_login_cut_by_the_client_still_counts_its_failure() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let agent = https::start(&env).await;
+
+    // La vérification dure 300 ms : le client coupe pendant la tentative.
+    env.hasher
+        .delay_ms
+        .store(300, std::sync::atomic::Ordering::SeqCst);
+    agent
+        .request("POST", "/sessions")
+        .json(&json!({ "username": "marie", "password": "Wrong-Horse-9999" }))
+        .send_and_cut()
+        .await;
+    env.hasher
+        .delay_ms
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+
+    let mut failures = 0_i64;
+    for _ in 0..100 {
+        failures = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(failures), 0) FROM login_attempts WHERE key NOT LIKE 'addr:%'",
+        )
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+        if failures > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(failures, 1, "l'échec est compté malgré la coupure");
+    agent.shutdown().await;
+}

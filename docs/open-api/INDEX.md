@@ -43,6 +43,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - `429 TOO_MANY_ATTEMPTS` : trop de tentatives (login verrouillé), `details.retry_after_s`
 - `409 USERNAME_TAKEN`, `409 LAST_ADMIN`, `409 CONFLICT` ; `422 WEAK_PASSWORD` (`details.rules`), `422 WRONG_PASSWORD` : voir [comptes](./accounts.md)
 - `422 IDEMPOTENCY_KEY_REUSED` : la clé d'opération a déjà servi pour une autre requête
+- `413 PAYLOAD_TOO_LARGE` : corps d'une requête suivie au-delà de 1 Mio
 - `503 BUSY` : agent saturé (calculs de mots de passe), en-tête `Retry-After`
 - `500 INTERNAL_ERROR` : erreur serveur
 

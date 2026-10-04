@@ -9,6 +9,7 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
 use hearth_proto::api::sessions::{LoginRequest, LoginResponse, MeResponse};
 use hearth_proto::headers;
+use tracing::Instrument;
 
 use super::auth::Caller;
 use super::{ApiError, AppState, wire};
@@ -66,10 +67,20 @@ pub async fn login(
         name: client_name(&request_headers),
         addr,
     };
-    let outcome = state
-        .sessions
-        .login(&request.username, Secret::from(request.password), &client)
-        .await?;
+    // La tentative (verrouillage, vérification, écriture du résultat) va jusqu'au bout même si le
+    // client coupe : un échec est toujours compté. Tâche détachée, dans le span de la requête.
+    let sessions = state.sessions.clone();
+    let attempt = tokio::spawn(
+        async move {
+            sessions
+                .login(&request.username, Secret::from(request.password), &client)
+                .await
+        }
+        .in_current_span(),
+    );
+    let outcome = attempt
+        .await
+        .map_err(|error| ApiError::internal(&error))??;
     let response = LoginResponse {
         token: outcome.token.encode(),
         expires_at: wire::date(outcome.expires_at)?,

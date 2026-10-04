@@ -89,7 +89,7 @@ pub struct SessionService {
     turns: Turns,
 }
 
-/// Tours de parole par clé : une seule connexion à la fois par adresse et par couple.
+/// Tours de parole par adresse : une seule connexion à la fois pour une même adresse.
 #[derive(Default)]
 struct Turns(Mutex<HashMap<String, Arc<AsyncMutex<()>>>>);
 
@@ -176,8 +176,7 @@ impl SessionService {
     /// chemin : une vérification Argon2 (contre un haché factice si le compte n'existe pas), un
     /// échec compté, une transaction (BR-CONN-013).
     ///
-    /// Les connexions d'une même adresse, et d'un même couple identifiant + adresse, sont
-    /// traitées l'une après l'autre : le palier de verrouillage se joue sur des états à jour
+    /// Les connexions d'une même adresse sont traitées l'une après l'autre : le palier de verrouillage se joue sur des états à jour
     /// (dix tentatives simultanées ne font pas dix vérifications).
     pub async fn login(
         &self,
@@ -187,8 +186,9 @@ impl SessionService {
     ) -> Result<LoginOutcome, LoginError> {
         let pair = AttemptKey::new(username, &client.addr);
         let address = AttemptKey::address(&client.addr);
-        let _address_turn = self.turns.lock(address.as_str()).await;
-        let _pair_turn = self.turns.lock(pair.as_str()).await;
+        // Un seul tour, par adresse : le couple contient l'adresse, deux connexions du même couple
+        // sont donc déjà sérialisées par le tour de leur adresse.
+        let _turn = self.turns.lock(address.as_str()).await;
         let result = self
             .login_in_turn(username, password, client, &pair, &address)
             .await;

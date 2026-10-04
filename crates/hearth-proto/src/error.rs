@@ -30,6 +30,8 @@ pub enum ErrorCode {
     LastAdmin,
     /// Conflit avec un changement concurrent : réessayer.
     Conflict,
+    /// Corps de requête trop volumineux.
+    PayloadTooLarge,
     /// Cette clé d'opération a déjà servi pour une autre requête.
     IdempotencyKeyReused,
     /// L'agent est saturé (calculs de mots de passe) : réessayer après `Retry-After`.
@@ -52,6 +54,7 @@ impl ErrorCode {
             Self::ForbiddenRole => 403,
             Self::NotFound => 404,
             Self::MethodNotAllowed => 405,
+            Self::PayloadTooLarge => 413,
             Self::OperationInProgress | Self::UsernameTaken | Self::LastAdmin | Self::Conflict => {
                 409
             }
@@ -146,7 +149,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL: [(ErrorCode, &str, u16); 19] = [
+    const ALL: [(ErrorCode, &str, u16); 20] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -155,6 +158,7 @@ mod tests {
         (ErrorCode::LastAdmin, "LAST_ADMIN", 409),
         (ErrorCode::Conflict, "CONFLICT", 409),
         (ErrorCode::Busy, "BUSY", 503),
+        (ErrorCode::PayloadTooLarge, "PAYLOAD_TOO_LARGE", 413),
         (
             ErrorCode::IdempotencyKeyReused,
             "IDEMPOTENCY_KEY_REUSED",

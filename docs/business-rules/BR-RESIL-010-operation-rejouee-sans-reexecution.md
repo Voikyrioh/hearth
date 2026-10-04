@@ -17,7 +17,7 @@ Toute requête authentifiée qui modifie (routes marquées « suivie » dans `EN
 - même clé, autre requête : `422 IDEMPOTENCY_KEY_REUSED`, sans exécuter ;
 - exécution interrompue par un arrêt de l'agent (état `interrupted`, posé au démarrage) : `409 CONFLICT`, résultat inconnu, jamais rejoué.
 
-La requête suivie s'exécute dans une tâche détachée : un client qui coupe avant la réponse retrouve le résultat (BR-RESIL-010 : « Fait pendant la coupure »). Un résultat `5xx` n'est pas retenu (le client peut relancer). `GET /operations/{id}` relit l'état : `running`, `succeeded`, `failed`, `interrupted`, ou `404` (jamais reçue : « non exécuté »). Les opérations sont conservées 24 h (`domain::operations::RETENTION`).
+La requête suivie s'exécute dans une tâche détachée, dans le span de la requête (un handler qui panique laisse la clé oubliée, jamais « en cours ») : un client qui coupe avant la réponse retrouve le résultat (BR-RESIL-010 : « Fait pendant la coupure »). Un résultat `5xx` n'est pas retenu (le client peut relancer). `GET /operations/{id}` relit l'état : `running`, `succeeded`, `failed`, `interrupted`, ou `404` (jamais reçue : « non exécuté »). Les opérations sont conservées 24 h (`domain::operations::RETENTION`).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/operations.rs::{classify, RequestFingerprint::of, OperationKey::parse}`.

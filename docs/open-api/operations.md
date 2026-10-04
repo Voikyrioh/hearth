@@ -5,6 +5,7 @@ Suivi par clé des requêtes qui modifient, pour qu'un client qui perd le lien a
 ## En-tête `Idempotency-Key: <clé>`
 
 - À mettre sur toute requête qui modifie faite par un compte connecté (`POST`, `PUT`, `PATCH`, `DELETE`). Absente : la requête s'exécute sans suivi.
+- Corps de la requête suivie : 1 Mio au plus, sinon `413 PAYLOAD_TOO_LARGE` ; un corps coupé ou illisible reste `422 VALIDATION_ERROR`.
 - Forme : 1 à 64 caractères, lettres, chiffres, tiret, souligné (un ULID en pratique). Sinon `422 VALIDATION_ERROR` (`details.field = "idempotency-key"`).
 - La clé est celle d'un compte (deux comptes peuvent choisir la même) et **liée à la requête** : méthode, chemin et SHA-256 du corps. Elle est enregistrée **avant** l'exécution, puis le résultat (statut et corps de la réponse) :
   - clé inconnue : la requête s'exécute ;

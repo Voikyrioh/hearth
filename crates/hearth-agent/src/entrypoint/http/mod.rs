@@ -37,6 +37,7 @@ use crate::application::operations::OperationService;
 use crate::application::sessions::SessionService;
 
 pub use error::ApiError;
+pub use operations::execute_detached;
 pub use server::{ServerError, ServerHandle, spawn};
 
 /// État partagé des routes : les cas d'usage, jamais d'infrastructure directe.

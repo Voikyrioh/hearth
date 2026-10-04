@@ -11,6 +11,9 @@
 //!   résultat est tout de même retenu, c'est le cas pour lequel la clé existe. Au démarrage de
 //!   l'agent, une opération restée en cours devient « interrompue ».
 
+use std::future::Future;
+use std::sync::Arc;
+
 use axum::Json;
 use axum::body::{Body, to_bytes};
 use axum::extract::{Path, Request, State};
@@ -22,9 +25,11 @@ use hearth_proto::error::ErrorCode;
 use hearth_proto::headers;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::Instrument;
 
 use super::auth::Caller;
 use super::{ApiError, AppState};
+use crate::application::operations::OperationService;
 use crate::application::sessions::CurrentSession;
 use crate::domain::accounts::AccountId;
 use crate::domain::operations::{
@@ -79,8 +84,16 @@ pub(super) async fn track(
     let account = caller.account.id;
     let bytes = match to_bytes(body, MAX_BYTES).await {
         Ok(bytes) => bytes,
-        Err(_) => {
-            return ApiError::invalid("body", "Corps de requête trop volumineux").into_response();
+        Err(error) if is_too_large(&error) => {
+            return ApiError::new(
+                ErrorCode::PayloadTooLarge,
+                "Corps de requête trop volumineux (1 Mio au plus)",
+            )
+            .into_response();
+        }
+        Err(error) => {
+            return ApiError::invalid("body", format!("Corps de requête illisible : {error}"))
+                .into_response();
         }
     };
     let request_fingerprint =
@@ -119,27 +132,46 @@ pub(super) async fn track(
 
     // Tâche détachée : si le client coupe, la requête va jusqu'au bout et son résultat est retenu.
     let request = Request::from_parts(parts, Body::from(bytes));
-    let task_state = state.clone();
-    let task_account = account.clone();
-    let task_key = key.clone();
-    let task = tokio::spawn(async move {
-        let response = next.run(request).await;
-        retain(&task_state, &task_account, &task_key, response).await
-    });
+    execute_detached(state.operations.clone(), account, key, next.run(request)).await
+}
+
+/// Exécute `work` (la requête suivie) dans une tâche détachée, dans le span de la requête, et
+/// retient son résultat sous la clé. Un client qui coupe n'interrompt rien. Si le travail
+/// panique, la clé est oubliée dans la tâche même (jamais « en cours » pour toujours) et la
+/// réponse est une erreur interne.
+pub async fn execute_detached(
+    operations: Arc<OperationService>,
+    account: AccountId,
+    key: OperationKey,
+    work: impl Future<Output = Response> + Send + 'static,
+) -> Response {
+    let task = tokio::spawn(
+        async move {
+            match tokio::spawn(work.in_current_span()).await {
+                Ok(response) => retain(&operations, &account, &key, response).await,
+                Err(error) => {
+                    discard(&operations, &account, &key).await;
+                    ApiError::internal(&error).into_response()
+                }
+            }
+        }
+        .in_current_span(),
+    );
     match task.await {
         Ok(response) => response,
-        Err(error) => {
-            // Le handler a paniqué : rien n'est retenu, le client peut relancer.
-            discard(state, &account, &key).await;
-            ApiError::internal(&error).into_response()
-        }
+        Err(error) => ApiError::internal(&error).into_response(),
     }
+}
+
+/// La limite de taille a-t-elle été dépassée (et non une lecture interrompue) ?
+fn is_too_large(error: &axum::Error) -> bool {
+    error.to_string().contains("length limit")
 }
 
 /// Retient le résultat de la réponse sous la clé, puis la rend telle quelle. Une erreur
 /// interne n'est pas retenue : la clé est oubliée, le client peut relancer.
 async fn retain(
-    state: &AppState,
+    operations: &OperationService,
     account: &AccountId,
     key: &OperationKey,
     response: Response,
@@ -149,12 +181,12 @@ async fn retain(
     let bytes = match to_bytes(body, MAX_BYTES).await {
         Ok(bytes) => bytes,
         Err(error) => {
-            discard(state, account, key).await;
+            discard(operations, account, key).await;
             return ApiError::internal(&error).into_response();
         }
     };
     if status.is_server_error() {
-        discard(state, account, key).await;
+        discard(operations, account, key).await;
     } else {
         let result = StoredResult {
             status: status.as_u16(),
@@ -162,8 +194,7 @@ async fn retain(
         };
         match serde_json::to_string(&result) {
             Ok(stored) => {
-                if let Err(error) = state
-                    .operations
+                if let Err(error) = operations
                     .finish(account, key, status.is_success(), &stored)
                     .await
                 {
@@ -176,8 +207,8 @@ async fn retain(
     Response::from_parts(parts, Body::from(bytes))
 }
 
-async fn discard(state: &AppState, account: &AccountId, key: &OperationKey) {
-    if let Err(error) = state.operations.discard(account, key).await {
+async fn discard(operations: &OperationService, account: &AccountId, key: &OperationKey) {
+    if let Err(error) = operations.discard(account, key).await {
         tracing::error!(%error, "clé d'opération non oubliée");
     }
 }

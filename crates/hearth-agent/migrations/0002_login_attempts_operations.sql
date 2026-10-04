@@ -2,7 +2,7 @@
 -- par clé, jetons de sessions révoquées. Même convention de dates que 0001 (texte UTC à largeur
 -- fixe). La table audit_events arrive avec HRT-05.
 
--- Verrouillage progressif : un compteur par couple « identifiant|adresse » (BR-CONN-006/007).
+-- Verrouillage progressif : un compteur par couple (identifiant, adresse séparés par un caractère de contrôle) (BR-CONN-006/007).
 -- La clé existe aussi pour les identifiants inconnus : le verrouillage ne révèle rien. Une
 -- ligne « addr:<adresse> » compte les échecs d'une adresse, tous identifiants confondus.
 CREATE TABLE login_attempts (

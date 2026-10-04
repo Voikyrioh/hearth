@@ -860,3 +860,31 @@ async fn a_replayed_creation_creates_the_account_once() {
     );
     assert_eq!(env.service.list().await.unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn a_tracked_body_over_one_mebibyte_is_413_not_422() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let token = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
+    let huge = format!(r#"{{"current":"{}"}}"#, "x".repeat(1 << 20));
+    let reply = api
+        .put("/me/password")
+        .token(&token)
+        .key(KEY)
+        .raw_body(&huge)
+        .send()
+        .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::PAYLOAD_TOO_LARGE, "PAYLOAD_TOO_LARGE")
+    );
+    // Un corps simplement illisible reste une erreur de validation.
+    let reply = api
+        .put("/me/password")
+        .token(&token)
+        .key("K2")
+        .raw_body("pas du json")
+        .send()
+        .await;
+    assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
+}

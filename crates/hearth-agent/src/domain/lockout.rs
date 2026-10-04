@@ -30,6 +30,10 @@ pub const ADDRESS_WINDOW: Duration = Duration::minutes(10);
 /// Un compteur sans activité depuis ce délai (et sans attente en cours) est oublié (BR-CONN-006).
 pub const ATTEMPT_RETENTION: Duration = Duration::hours(24);
 
+/// Séparateur identifiant / adresse dans la clé d'un couple : un caractère de contrôle, retiré
+/// de l'identifiant, donc sans ambiguïté.
+const SEPARATOR: char = '\u{1f}';
+
 /// Longueur maximale (en caractères) de l'identifiant retenu dans la clé : borne la taille du
 /// stockage face à un client qui enverrait des identifiants démesurés.
 const MAX_KEY_PART: usize = 64;
@@ -40,27 +44,28 @@ pub struct AttemptKey(String);
 
 impl AttemptKey {
     pub fn new(username: &str, addr: &str) -> Self {
+        // Sans caractère de contrôle : la clé et les traces (une ligne de journal) ne peuvent pas
+        // être forgées par l'identifiant, et le séparateur ne peut pas y apparaître.
         let username: String = username
             .trim()
             .to_lowercase()
             .chars()
+            .filter(|c| !c.is_control())
             .take(MAX_KEY_PART)
             .collect();
         let addr: String = addr.chars().take(MAX_KEY_PART).collect();
-        Self(format!("{username}|{addr}"))
+        Self(format!("{username}{SEPARATOR}{addr}"))
     }
 
     /// L'identifiant normalisé de la clé (pour les traces ; vide pour une clé d'adresse).
     pub fn username(&self) -> &str {
         self.0
-            .split('|')
-            .next()
-            .filter(|_| self.0.contains('|'))
-            .unwrap_or("")
+            .split_once(SEPARATOR)
+            .map_or("", |(username, _)| username)
     }
 
     /// Clé du compteur par adresse seule. Ne peut pas coïncider avec une clé de couple (celles-ci
-    /// contiennent toujours `|`, jamais une adresse).
+    /// contiennent toujours le séparateur, jamais une adresse).
     pub fn address(addr: &str) -> Self {
         let addr: String = addr.chars().take(MAX_KEY_PART).collect();
         Self(format!("addr:{addr}"))
@@ -492,7 +497,28 @@ mod tests {
     fn the_address_key_cannot_collide_with_a_pair_key() {
         let address = AttemptKey::address("10.0.0.1");
         assert_ne!(address, AttemptKey::new("addr:10.0.0.1", ""));
-        assert!(!address.as_str().contains('|'));
-        assert!(AttemptKey::new("marie", "10.0.0.1").as_str().contains('|'));
+        assert!(!address.as_str().contains(SEPARATOR));
+        assert!(
+            AttemptKey::new("marie", "10.0.0.1")
+                .as_str()
+                .contains(SEPARATOR)
+        );
+    }
+
+    #[test]
+    fn control_characters_never_reach_the_key_or_the_traces() {
+        let key = AttemptKey::new("marie\nWARN forged line\r\t\u{1f}x", "10.0.0.1");
+        assert_eq!(key.username(), "marieWARN forged linex".to_lowercase());
+        assert!(!key.username().chars().any(char::is_control));
+        assert!(!key.as_str().contains('\n'));
+    }
+
+    #[test]
+    fn a_pipe_in_the_username_is_kept_and_the_key_stays_unambiguous() {
+        let key = AttemptKey::new("a|b", "10.0.0.1");
+        assert_eq!(key.username(), "a|b");
+        // « a|b » + « 10.0.0.1 » et « a » + « b|10.0.0.1 » ne coïncident pas.
+        assert_ne!(key, AttemptKey::new("a", "b|10.0.0.1"));
+        assert_eq!(AttemptKey::address("10.0.0.1").username(), "");
     }
 }
