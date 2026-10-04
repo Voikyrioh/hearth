@@ -9,18 +9,23 @@
 
 mod connection;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use axum::extract::State;
 use axum::extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
 use axum::response::Response;
+use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{AUTH_TIMEOUT_S, MAX_CLIENT_MESSAGE_BYTES};
 use tokio::sync::watch;
 
 use super::http::{ApiError, AppState};
 use crate::application::ports::AuditFeed;
-use crate::domain::stream::{IDLE_TIMEOUT, SEND_TIMEOUT, SESSION_CHECK_PERIOD};
+use crate::domain::stream::{
+    Admission, IDLE_TIMEOUT, MAX_STREAMS_PER_ACCOUNT, MAX_STREAMS_TOTAL, MIN_SUBSCRIBE_INTERVAL,
+    SEND_TIMEOUT, SESSION_CHECK_PERIOD, admission,
+};
 
 /// Délais du flux. Les valeurs par défaut sont celles du protocole ; les tests les raccourcissent.
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +38,12 @@ pub struct StreamSettings {
     pub session_check_period: Duration,
     /// Temps accordé à l'envoi d'un message.
     pub send_timeout: Duration,
+    /// Flux ouverts en même temps, au total.
+    pub max_total: usize,
+    /// Flux ouverts en même temps par un même compte.
+    pub max_per_account: usize,
+    /// Délai minimal entre deux `subscribe` d'une connexion.
+    pub min_subscribe_interval: Duration,
 }
 
 impl Default for StreamSettings {
@@ -42,6 +53,9 @@ impl Default for StreamSettings {
             idle_timeout: IDLE_TIMEOUT,
             session_check_period: SESSION_CHECK_PERIOD,
             send_timeout: SEND_TIMEOUT,
+            max_total: MAX_STREAMS_TOTAL,
+            max_per_account: MAX_STREAMS_PER_ACCOUNT,
+            min_subscribe_interval: MIN_SUBSCRIBE_INTERVAL,
         }
     }
 }
@@ -52,6 +66,50 @@ pub struct StreamContext {
     pub(crate) audit: Arc<dyn AuditFeed>,
     pub(crate) settings: StreamSettings,
     shutdown: Arc<watch::Sender<bool>>,
+    open: Arc<Mutex<Open>>,
+}
+
+/// Flux ouverts : au total et par compte.
+#[derive(Default)]
+struct Open {
+    total: usize,
+    per_account: HashMap<String, usize>,
+}
+
+/// Une place de flux ouverte ; la rendre (la laisser tomber) libère la place.
+pub(crate) struct Permit {
+    open: Arc<Mutex<Open>>,
+    account: Option<String>,
+}
+
+impl Permit {
+    /// Rattache la place à un compte, une fois authentifié : refusé si ce compte a déjà trop de
+    /// flux ouverts.
+    pub(crate) fn bind_account(&mut self, account: &str, max_per_account: usize) -> bool {
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        let count = open.per_account.get(account).copied().unwrap_or(0);
+        if admission(0, count, usize::MAX, max_per_account) != Admission::Admitted {
+            return false;
+        }
+        open.per_account.insert(account.to_owned(), count + 1);
+        self.account = Some(account.to_owned());
+        true
+    }
+}
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        open.total = open.total.saturating_sub(1);
+        if let Some(account) = self.account.take()
+            && let Some(count) = open.per_account.get_mut(&account)
+        {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                open.per_account.remove(&account);
+            }
+        }
+    }
 }
 
 impl StreamContext {
@@ -60,7 +118,21 @@ impl StreamContext {
             audit,
             settings,
             shutdown: Arc::new(watch::channel(false).0),
+            open: Arc::default(),
         }
+    }
+
+    /// Réserve une place de flux : refusée si l'agent a déjà trop de flux ouverts.
+    pub(crate) fn try_open(&self) -> Option<Permit> {
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        if admission(open.total, 0, self.settings.max_total, usize::MAX) != Admission::Admitted {
+            return None;
+        }
+        open.total += 1;
+        Some(Permit {
+            open: self.open.clone(),
+            account: None,
+        })
     }
 
     /// Demande à toutes les connexions de se fermer proprement (code 1001, « parti »). Appelé à
@@ -87,8 +159,78 @@ pub async fn stream(
             "Cette route est un flux WebSocket : ouvre-la par une mise à niveau",
         )
     })?;
+    let permit = state.stream.try_open().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Busy,
+            "Trop de flux ouverts sur cet agent, réessaie dans un instant",
+        )
+    })?;
     Ok(upgrade
         .max_message_size(MAX_CLIENT_MESSAGE_BYTES)
         .max_frame_size(MAX_CLIENT_MESSAGE_BYTES)
-        .on_upgrade(move |socket| connection::run(socket, state)))
+        .on_upgrade(move |socket| connection::run(socket, state, permit)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+    use tokio::sync::broadcast;
+
+    struct NoFeed;
+
+    impl AuditFeed for NoFeed {
+        fn subscribe(&self) -> Option<broadcast::Receiver<Arc<Value>>> {
+            None
+        }
+    }
+
+    fn context(max_total: usize) -> StreamContext {
+        StreamContext::new(
+            Arc::new(NoFeed),
+            StreamSettings {
+                max_total,
+                ..StreamSettings::default()
+            },
+        )
+    }
+
+    #[test]
+    fn places_are_limited_in_total_and_given_back() {
+        let context = context(2);
+        let first = context.try_open().expect("première place");
+        let _second = context.try_open().expect("deuxième place");
+        assert!(context.try_open().is_none(), "plafond atteint");
+        drop(first);
+        assert!(
+            context.try_open().is_some(),
+            "une place rendue est reprenable"
+        );
+    }
+
+    #[test]
+    fn places_are_limited_per_account_and_given_back() {
+        let context = context(10);
+        let mut permits: Vec<_> = (0..4).filter_map(|_| context.try_open()).collect();
+        for permit in &mut permits {
+            assert!(permit.bind_account("marie", 4));
+        }
+        let mut fifth = context.try_open().expect("place du total");
+        assert!(!fifth.bind_account("marie", 4), "5e flux de marie refusé");
+        assert!(fifth.bind_account("lucas", 4), "un autre compte passe");
+        drop(permits.pop());
+        let mut sixth = context.try_open().expect("place du total");
+        assert!(sixth.bind_account("marie", 4), "une place de marie rendue");
+    }
+
+    #[tokio::test]
+    async fn a_receiver_created_after_the_shutdown_still_sees_it() {
+        let context = context(1);
+        context.begin_shutdown();
+        let mut late = context.shutdown_signal();
+        tokio::time::timeout(Duration::from_secs(30), late.wait_for(|stopped| *stopped))
+            .await
+            .expect("le signal d'arrêt est déjà levé")
+            .expect("canal ouvert");
+    }
 }

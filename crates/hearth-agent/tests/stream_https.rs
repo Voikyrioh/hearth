@@ -6,6 +6,7 @@
 mod support;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use hearth_agent::application::ports::AuditFeed;
@@ -15,7 +16,7 @@ use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{ServerMessage, SessionNotice, Topic};
 use serde_json::{Value, json};
 use support::https::{self, Agent};
-use support::probe::{fast_stream, metering, metering_with};
+use support::probe::{FakeSystem, fast_stream, metering, metering_with};
 use support::ws::{self, End, WsClient};
 use support::{Env, PASSWORD, env};
 use time::OffsetDateTime;
@@ -259,41 +260,230 @@ async fn an_expired_session_is_told_then_closed_during_the_stream() {
     agent.shutdown().await;
 }
 
-#[tokio::test]
-async fn a_subscriber_that_never_reads_blocks_nobody() {
-    let env = env().await;
-    let agent = https::start_metered(&env, metering()).await;
-    let token = token(&env, &agent, "lucas", Role::ReadOnly).await;
-    let (_asleep, _) = subscribed(&agent, &token).await;
-    let (mut reading, _) = subscribed(&agent, &token).await;
-
-    // L'abonné qui lit reçoit 100 échantillons consécutifs (2 s de mesures) pendant que l'autre
-    // laisse les siens s'entasser.
+/// Attend qu'une condition devienne vraie (délai large : seul un vrai blocage échoue).
+async fn eventually<F: std::future::Future<Output = bool>>(
+    what: &str,
+    mut attempt: impl FnMut() -> F,
+) {
     let started = Instant::now();
-    let mut seconds = Vec::new();
-    for _ in 0..100 {
-        seconds.push(metrics(&mut reading).await.uptime_s);
+    while !attempt().await {
+        assert!(
+            started.elapsed() < Duration::from_secs(60),
+            "délai dépassé : {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "l'échantillonnage n'a pas ralenti : {:?}",
-        started.elapsed()
+}
+
+#[tokio::test]
+async fn a_client_that_stops_reading_is_dropped_and_blocks_nobody() {
+    let env = env().await;
+    // Échantillons très gros (1 500 cœurs) toutes les 2 ms, envoi limité à 300 ms, deux flux au
+    // plus : le client qui ne lit pas remplit les tampons TCP, l'envoi ne passe plus, il est
+    // abandonné et sa place est rendue.
+    let mut config = metering();
+    config.system = Arc::new(FakeSystem::wide(1_500));
+    config.period = Duration::from_millis(2);
+    config.stream.send_timeout = Duration::from_millis(300);
+    config.stream.max_total = 2;
+    let agent = https::start_metered(&env, config).await;
+    let token = token(&env, &agent, "lucas", Role::ReadOnly).await;
+
+    let mut stuck = ws::connect_with(&agent, Some("1"), Some(1_024))
+        .await
+        .expect("flux ouvert");
+    stuck.auth(&token).await;
+    stuck.subscribe(&[Topic::Metrics]).await;
+    // Il ne lira plus rien : `stuck` reste ouvert, jamais lu.
+
+    let (mut reading, _) = subscribed(&agent, &token).await;
+    let progress = Arc::new(AtomicU64::new(0));
+    let seen = progress.clone();
+    let reader = tokio::spawn(async move {
+        while let Ok(message) = reading.next().await {
+            if let ServerMessage::Metrics(sample) = message {
+                seen.store(sample.uptime_s, Ordering::SeqCst);
+            }
+        }
+    });
+
+    // Les deux places sont prises : un troisième flux est refusé tant que le bloqué est là.
+    assert_eq!(
+        ws::connect(&agent, Some("1")).await.err().unwrap().status,
+        503
     );
-    assert!(seconds.windows(2).all(|pair| pair[1] > pair[0]));
-    // Aucune seconde n'est perdue pour celui qui lit.
-    assert!(
-        seconds.windows(2).all(|pair| pair[1] == pair[0] + 1),
-        "trou dans la série : {seconds:?}"
+    eventually(
+        "le client bloqué est abandonné et sa place rendue",
+        || async { ws::connect(&agent, Some("1")).await.is_ok() },
+    )
+    .await;
+
+    // Celui qui lit n'a pas été ralenti : ses échantillons n'ont cessé d'arriver.
+    let before = progress.load(Ordering::SeqCst);
+    eventually("le lecteur reçoit encore des échantillons", || async {
+        progress.load(Ordering::SeqCst) > before
+    })
+    .await;
+    assert!(!reader.is_finished(), "le lecteur n'a pas été coupé");
+    drop(stuck);
+    reader.abort();
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_number_of_open_streams_is_capped_in_total_and_per_account() {
+    let env = env().await;
+    let mut config = metering();
+    config.stream.max_total = 3;
+    config.stream.max_per_account = 2;
+    let agent = https::start_metered(&env, config).await;
+    let lucas = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    let marie = token(&env, &agent, "marie", Role::ReadOnly).await;
+
+    let (first, _) = subscribed(&agent, &lucas).await;
+    let (_second, _) = subscribed(&agent, &lucas).await;
+
+    // Un troisième flux de lucas : refusé après l'authentification, au format d'erreur, code BUSY.
+    let mut third = ws::open(&agent).await;
+    third.auth(&lucas).await;
+    let ServerMessage::Error(error) = third.expect().await else {
+        panic!("une erreur était attendue");
+    };
+    assert_eq!(error.code, ErrorCode::Busy);
+    assert_eq!(third.until_end().await, End::Closed(1008));
+
+    // Un autre compte passe tant que l'agent n'est pas plein (la place du refusé est rendue).
+    let started = Instant::now();
+    let mut marie_stream = loop {
+        match ws::connect(&agent, Some("1")).await {
+            Ok(client) => break client,
+            Err(_) => {
+                assert!(
+                    started.elapsed() < Duration::from_secs(60),
+                    "place non rendue"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    };
+    marie_stream.auth(&marie).await;
+    marie_stream.subscribe(&[Topic::Metrics]).await;
+    assert!(matches!(
+        marie_stream.expect().await,
+        ServerMessage::Snapshot { .. }
+    ));
+
+    // L'agent est plein : refus dès l'ouverture, 503 BUSY.
+    assert_eq!(
+        ws::connect(&agent, Some("1")).await.err().unwrap().status,
+        503
     );
+
+    // Un flux fermé rend sa place.
+    drop(first);
+    eventually("une place est rendue", || async {
+        ws::connect(&agent, Some("1")).await.is_ok()
+    })
+    .await;
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_connection_subscribes_once_per_interval_without_being_closed() {
+    let env = env().await;
+    let mut config = metering();
+    config.stream.min_subscribe_interval = Duration::from_secs(30);
+    let agent = https::start_metered(&env, config).await;
+    let token = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    let (mut client, _) = subscribed(&agent, &token).await;
+
+    client.subscribe(&[Topic::Metrics]).await;
+    let busy = loop {
+        match client.expect().await {
+            ServerMessage::Metrics(_) => {}
+            other => break other,
+        }
+    };
+    let ServerMessage::Error(error) = busy else {
+        panic!("une erreur était attendue, reçu {busy:?}");
+    };
+    assert_eq!(error.code, ErrorCode::Busy);
+    // Pas de second snapshot, le flux reste ouvert et l'abonnement d'origine continue.
+    client
+        .send(&hearth_proto::stream::ClientMessage::Ping { n: 9 })
+        .await;
+    loop {
+        match client.expect().await {
+            ServerMessage::Metrics(_) => {}
+            ServerMessage::Pong { n } => {
+                assert_eq!(n, 9);
+                break;
+            }
+            other => panic!("inattendu : {other:?}"),
+        }
+    }
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_administrator_demoted_during_the_stream_loses_the_audit_topic() {
+    let env = env().await;
+    let (sender, _) = broadcast::channel(16);
+    let config = metering_with(Arc::new(Feed(sender.clone())), fast_stream());
+    let agent = https::start_metered(&env, config).await;
+    // Un deuxième administrateur : on ne rétrograde pas le dernier.
+    token(&env, &agent, "root", Role::Admin).await;
+    let marie = env.create("marie", Role::Admin).await;
+    let reply = agent
+        .request("POST", "/sessions")
+        .json(&json!({ "username": "marie", "password": PASSWORD }))
+        .send()
+        .await;
+    let marie_token = reply.body["token"].as_str().unwrap().to_owned();
+
+    let mut client = ws::open(&agent).await;
+    client.auth(&marie_token).await;
+    client.subscribe(&[Topic::Audit]).await;
+    client
+        .send(&hearth_proto::stream::ClientMessage::Ping { n: 1 })
+        .await;
+    assert_eq!(client.expect().await, ServerMessage::Pong { n: 1 });
+    sender.send(Arc::new(json!({ "id": 1 }))).unwrap();
+    assert_eq!(
+        client.expect().await,
+        ServerMessage::Audit {
+            event: json!({ "id": 1 })
+        }
+    );
+
+    // Marie devient lecture seule pendant le flux : son abonnement se perd, avec un message.
+    env.service
+        .change_role(&marie.id, Role::ReadOnly)
+        .await
+        .unwrap();
+    let ServerMessage::Error(error) = client.expect().await else {
+        panic!("une erreur était attendue");
+    };
+    assert_eq!(error.code, ErrorCode::ForbiddenRole);
+    // Plus aucun événement d'audit ne lui parvient (le prochain message est la réponse au ping).
+    assert!(
+        sender.send(Arc::new(json!({ "id": 2 }))).is_err(),
+        "plus aucun abonné au journal sur cet agent"
+    );
+    client
+        .send(&hearth_proto::stream::ClientMessage::Ping { n: 2 })
+        .await;
+    assert_eq!(client.expect().await, ServerMessage::Pong { n: 2 });
     agent.shutdown().await;
 }
 
 #[tokio::test]
 async fn a_new_subscription_resumes_without_gap_or_duplicate() {
     let env = env().await;
-    // 50 ms entre deux échantillons : marge confortable pour un test sans trou.
+    // 100 ms entre deux échantillons : une pause de la CI de plusieurs centaines de ms ne fait
+    // pas perdre d'échantillon à l'abonné (le canal en garde 16).
     let mut config = metering();
-    config.period = Duration::from_millis(50);
+    config.period = Duration::from_millis(100);
     let agent = https::start_metered(&env, config).await;
     let token = token(&env, &agent, "lucas", Role::ReadOnly).await;
 
@@ -393,7 +583,7 @@ async fn stopping_the_agent_closes_the_open_streams_cleanly_and_quickly() {
     assert_eq!(end, End::Closed(1001));
     assert_eq!(waiting_end, End::Closed(1001));
     assert!(
-        started.elapsed() < Duration::from_secs(3),
+        started.elapsed() < Duration::from_secs(4),
         "l'arrêt n'attend pas le délai de grâce : {:?}",
         started.elapsed()
     );

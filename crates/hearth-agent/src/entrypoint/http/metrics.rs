@@ -49,7 +49,10 @@ pub async fn history(
     Ok(Json(HistoryResponse {
         window: metrics_wire::window_to_wire(window),
         step_s: window.step_s(),
-        samples: samples.iter().map(metrics_wire::sample).collect(),
+        samples: samples
+            .iter()
+            .map(|sample| metrics_wire::sample(sample))
+            .collect(),
     }))
 }
 

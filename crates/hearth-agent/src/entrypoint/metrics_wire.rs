@@ -137,6 +137,7 @@ mod tests {
     fn a_sample_converts_every_field_and_keeps_absent_ones_absent() {
         let domain = DomainSample {
             at: OffsetDateTime::UNIX_EPOCH,
+            mono: Duration::ZERO,
             uptime_s: 5,
             cpu: 10.5,
             cores: vec![1.0, 2.0],

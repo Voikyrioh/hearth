@@ -14,11 +14,23 @@ use hearth_agent::domain::machine::{
 use hearth_agent::domain::metrics::{DiskUsage, GpuReading, MemoryUsage, SystemSample};
 use hearth_agent::entrypoint::ws::StreamSettings;
 use hearth_agent::infrastructure::audit_feed::NoAuditFeed;
-use hearth_agent::infrastructure::clock::SystemClock;
+use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
 
 #[derive(Default)]
 pub struct FakeSystem {
     calls: AtomicU32,
+    /// Nombre de cœurs rendus (0 : 4) : beaucoup de cœurs gonflent chaque échantillon.
+    pub cores: usize,
+}
+
+impl FakeSystem {
+    /// Sonde dont chaque échantillon porte `cores` cœurs : des messages volumineux.
+    pub fn wide(cores: usize) -> Self {
+        Self {
+            calls: AtomicU32::new(0),
+            cores,
+        }
+    }
 }
 
 impl SystemProbe for FakeSystem {
@@ -55,7 +67,7 @@ impl SystemProbe for FakeSystem {
         Ok(SystemSample {
             uptime_s: 1_000 + u64::from(call),
             cpu: (call % 100) as f32,
-            cores: vec![(call % 100) as f32; 4],
+            cores: vec![(call % 100) as f32; if self.cores == 0 { 4 } else { self.cores }],
             mem: MemoryUsage {
                 used_bytes: 4 << 30,
                 total_bytes: 16 << 30,
@@ -100,6 +112,9 @@ pub fn fast_stream() -> StreamSettings {
         idle_timeout: Duration::from_secs(10),
         session_check_period: Duration::from_millis(50),
         send_timeout: Duration::from_secs(5),
+        max_total: 32,
+        max_per_account: 4,
+        min_subscribe_interval: Duration::from_millis(50),
     }
 }
 
@@ -114,6 +129,7 @@ pub fn metering_with(audit: Arc<dyn AuditFeed>, stream: StreamSettings) -> Meter
         gpu: Arc::new(FakeGpu),
         // Les échantillons sont datés en temps réel : le flux les distingue par leur date.
         clock: Arc::new(SystemClock),
+        monotonic: Arc::new(SystemMonotonic::new()),
         period: Duration::from_millis(20),
         audit,
         stream,

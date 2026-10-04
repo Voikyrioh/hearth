@@ -1,12 +1,28 @@
 //! Mesures : l'échantillon, l'anneau d'une heure, les fenêtres d'historique et leur
 //! rééchantillonnage (BR-DASH-008, BR-DASH-010, BR-DASH-011). Fonctions pures.
 //!
+//! Deux horloges : `at` (murale, pour dater l'échantillon à l'affichage) et `mono` (monotone,
+//! depuis le démarrage de l'agent), sur laquelle reposent les fenêtres, les pas de
+//! rééchantillonnage et l'ordre d'envoi : un recul de l'horloge murale (synchronisation NTP,
+//! réglage manuel) ne fait ni sauter ni taire de mesures.
+//!
 //! Une mesure illisible est absente (`None`, liste vide) : jamais un zéro inventé, et les autres
 //! mesures de l'échantillon ne sont pas touchées.
 
+use std::borrow::Borrow;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use time::{Duration, OffsetDateTime};
+
+/// Temps accordé à la sonde pour un échantillon : au-delà, l'échantillon est abandonné et les tours
+/// suivants sont sautés jusqu'à son retour.
+pub const SAMPLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Âge maximal de l'identité de la machine servie par `/machine` et le `snapshot` : au-delà elle
+/// est relue (un disque monté apparaît au plus tard à ce délai dans l'identité ; les échantillons,
+/// eux, portent la liste à jour chaque seconde).
+pub const IDENTITY_MAX_AGE: Duration = Duration::seconds(30);
 
 /// Taille de l'anneau : une heure à un échantillon par seconde. Rien n'est écrit sur disque.
 pub const RING_CAPACITY: usize = 3_600;
@@ -62,7 +78,10 @@ pub struct SystemSample {
 /// Une seconde de la vie de la machine.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sample {
+    /// Instant de la mesure, horloge murale : affichage seulement, peut reculer.
     pub at: OffsetDateTime,
+    /// Instant de la mesure, horloge monotone depuis le démarrage de l'agent : croît toujours.
+    pub mono: Duration,
     pub uptime_s: u64,
     pub cpu: f32,
     pub cores: Vec<f32>,
@@ -74,9 +93,15 @@ pub struct Sample {
 }
 
 impl Sample {
-    pub fn new(at: OffsetDateTime, system: SystemSample, gpus: Vec<GpuReading>) -> Self {
+    pub fn new(
+        at: OffsetDateTime,
+        mono: Duration,
+        system: SystemSample,
+        gpus: Vec<GpuReading>,
+    ) -> Self {
         Self {
             at,
+            mono,
             uptime_s: system.uptime_s,
             cpu: system.cpu,
             cores: system.cores,
@@ -127,10 +152,10 @@ impl HistoryWindow {
 }
 
 /// Les derniers échantillons, du plus ancien au plus récent ; le plus ancien est oublié quand
-/// l'anneau est plein.
+/// l'anneau est plein. Ce sont les mêmes `Arc` que ceux diffusés aux abonnés : aucune copie.
 #[derive(Debug, Clone)]
 pub struct Ring {
-    samples: VecDeque<Sample>,
+    samples: VecDeque<Arc<Sample>>,
     capacity: usize,
 }
 
@@ -148,7 +173,7 @@ impl Ring {
         }
     }
 
-    pub fn push(&mut self, sample: Sample) {
+    pub fn push(&mut self, sample: Arc<Sample>) {
         if self.samples.len() == self.capacity {
             self.samples.pop_front();
         }
@@ -163,45 +188,62 @@ impl Ring {
         self.samples.is_empty()
     }
 
-    pub fn latest(&self) -> Option<&Sample> {
+    pub fn latest(&self) -> Option<&Arc<Sample>> {
         self.samples.back()
     }
 
-    /// Les échantillons plus récents que `since` (exclu), bruts.
-    pub fn since(&self, since: OffsetDateTime) -> Vec<Sample> {
+    /// Les échantillons de moins de `span` d'âge à `now` (horloge monotone), bruts.
+    pub fn since(&self, now: Duration, span: Duration) -> Vec<Arc<Sample>> {
         self.samples
             .iter()
-            .filter(|sample| sample.at > since)
+            .filter(|sample| now - sample.mono < span)
             .cloned()
             .collect()
     }
 
-    /// L'historique d'une fenêtre à `now` : les échantillons des dernières `window.span()`,
-    /// rééchantillonnés au pas de la fenêtre.
-    pub fn history(&self, window: HistoryWindow, now: OffsetDateTime) -> Vec<Sample> {
-        resample(&self.since(now - window.span()), window.step_s())
+    /// L'historique d'une fenêtre à `now` : voir [`window_samples`].
+    pub fn history(&self, window: HistoryWindow, now: Duration) -> Vec<Arc<Sample>> {
+        window_samples(self.since(now, window.span()), window)
     }
 }
 
+/// Met en forme l'historique d'une fenêtre à partir de ses échantillons bruts : tels quels au pas
+/// d'une seconde, moyennés par pas de 10 s pour l'heure. Séparé de [`Ring::history`] pour que le
+/// calcul se fasse hors du verrou de l'anneau.
+pub fn window_samples(raw: Vec<Arc<Sample>>, window: HistoryWindow) -> Vec<Arc<Sample>> {
+    if window.step_s() <= 1 {
+        return raw;
+    }
+    resample(&raw, window.step_s())
+        .into_iter()
+        .map(Arc::new)
+        .collect()
+}
+
 /// Réduit une série (du plus ancien au plus récent) à un échantillon par pas de `step_s`
-/// secondes, les pas étant alignés sur les multiples de `step_s` de l'horloge. Chaque pas devient
-/// la moyenne de ses échantillons, daté de son dernier ; les listes (cœurs, disques, cartes
+/// secondes, les pas étant alignés sur les secondes de l'horloge monotone. Chaque pas devient la
+/// moyenne de ses échantillons, daté de son dernier ; les listes (cœurs, disques, cartes
 /// graphiques, sondes) suivent le dernier échantillon du pas. Une mesure absente de tout un pas
 /// reste absente (BR-DASH-008). Un pas de 1 s ou moins rend la série telle quelle.
-pub fn resample(samples: &[Sample], step_s: u32) -> Vec<Sample> {
+pub fn resample<S: Borrow<Sample>>(samples: &[S], step_s: u32) -> Vec<Sample> {
     if step_s <= 1 {
-        return samples.to_vec();
+        return samples
+            .iter()
+            .map(|sample| sample.borrow().clone())
+            .collect();
     }
     let step = i64::from(step_s);
+    let bucket_of = |sample: &S| sample.borrow().mono.whole_seconds().div_euclid(step);
     let mut out = Vec::new();
     let mut start = 0;
     while start < samples.len() {
-        let bucket = samples[start].at.unix_timestamp().div_euclid(step);
+        let bucket = bucket_of(&samples[start]);
         let end = samples[start..]
             .iter()
-            .position(|sample| sample.at.unix_timestamp().div_euclid(step) != bucket)
+            .position(|sample| bucket_of(sample) != bucket)
             .map_or(samples.len(), |offset| start + offset);
-        out.push(average(&samples[start..end]));
+        let group: Vec<&Sample> = samples[start..end].iter().map(Borrow::borrow).collect();
+        out.push(average(&group));
         start = end;
     }
     out
@@ -222,11 +264,12 @@ fn mean_u64(values: impl Iterator<Item = u64>) -> Option<u64> {
 }
 
 /// Moyenne d'un groupe non vide d'échantillons consécutifs.
-fn average(group: &[Sample]) -> Sample {
+fn average(group: &[&Sample]) -> Sample {
     let Some(last) = group.last() else {
         // Les groupes viennent de `resample`, jamais vides.
         return Sample {
             at: OffsetDateTime::UNIX_EPOCH,
+            mono: Duration::ZERO,
             uptime_s: 0,
             cpu: 0.0,
             cores: vec![],
@@ -306,6 +349,7 @@ fn average(group: &[Sample]) -> Sample {
         .collect();
     Sample {
         at: last.at,
+        mono: last.mono,
         uptime_s: last.uptime_s,
         cpu: mean_f32(group.iter().map(|s| s.cpu)).unwrap_or(last.cpu),
         cores,
@@ -332,6 +376,7 @@ mod tests {
     fn sample(seconds: i64, cpu: f32) -> Sample {
         Sample {
             at: at(seconds),
+            mono: Duration::seconds(seconds),
             uptime_s: seconds as u64,
             cpu,
             cores: vec![cpu, cpu / 2.0],
@@ -358,11 +403,13 @@ mod tests {
     fn the_ring_keeps_the_last_hour_and_forgets_the_oldest() {
         let mut ring = Ring::default();
         for i in 0..(RING_CAPACITY as i64 + 5) {
-            ring.push(sample(i, 1.0));
+            ring.push(Arc::new(sample(i, 1.0)));
         }
         assert_eq!(ring.len(), RING_CAPACITY);
         assert_eq!(
-            ring.since(at(-1)).first().map(|s| s.at),
+            ring.since(Duration::seconds(10_000), Duration::seconds(100_000))
+                .first()
+                .map(|s| s.at),
             Some(at(5)),
             "les 5 plus anciens ont été oubliés"
         );
@@ -376,7 +423,10 @@ mod tests {
     fn an_empty_ring_has_no_history() {
         let ring = Ring::default();
         assert!(ring.is_empty());
-        assert!(ring.history(HistoryWindow::OneHour, at(0)).is_empty());
+        assert!(
+            ring.history(HistoryWindow::OneHour, Duration::ZERO)
+                .is_empty()
+        );
         assert!(ring.latest().is_none());
     }
 
@@ -403,9 +453,9 @@ mod tests {
     fn short_windows_return_one_sample_per_second_up_to_now() {
         let mut ring = Ring::default();
         for i in 0..400 {
-            ring.push(sample(i, 1.0));
+            ring.push(Arc::new(sample(i, 1.0)));
         }
-        let now = at(399);
+        let now = Duration::seconds(399);
         let minute = ring.history(HistoryWindow::OneMinute, now);
         assert_eq!(minute.len(), 60);
         assert_eq!(minute.last().map(|s| s.at), Some(at(399)));
@@ -420,9 +470,9 @@ mod tests {
         let mut ring = Ring::default();
         // Cpu = numéro de seconde : la moyenne d'un pas [10k, 10k+9] vaut 10k + 4,5.
         for i in 0..100 {
-            ring.push(sample(i, i as f32));
+            ring.push(Arc::new(sample(i, i as f32)));
         }
-        let hour = ring.history(HistoryWindow::OneHour, at(99));
+        let hour = ring.history(HistoryWindow::OneHour, Duration::seconds(99));
         assert_eq!(hour.len(), 10);
         let base = at(0).unix_timestamp().rem_euclid(10);
         // Les pas sont alignés sur l'horloge : 1 790 000 000 est un multiple de 10.
@@ -512,6 +562,6 @@ mod tests {
     fn a_step_of_one_second_is_the_series_itself() {
         let samples: Vec<_> = (0..5).map(|i| sample(i, i as f32)).collect();
         assert_eq!(resample(&samples, 1), samples);
-        assert!(resample(&[], 10).is_empty());
+        assert!(resample::<Sample>(&[], 10).is_empty());
     }
 }

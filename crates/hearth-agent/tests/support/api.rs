@@ -17,6 +17,7 @@ use hearth_agent::domain::install_id::InstallId;
 use hearth_agent::entrypoint::http::{AppState, router};
 use hearth_agent::entrypoint::ws::{StreamContext, StreamSettings};
 use hearth_agent::infrastructure::audit_feed::NoAuditFeed;
+use hearth_agent::infrastructure::clock::SystemMonotonic;
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -49,6 +50,7 @@ pub fn state(env: &Env) -> AppState {
             Arc::new(FakeSystem::default()),
             Arc::new(FakeGpu),
             env.clock.clone(),
+            Arc::new(SystemMonotonic::new()),
         )),
         stream: StreamContext::new(Arc::new(NoAuditFeed), StreamSettings::default()),
     }

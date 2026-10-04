@@ -41,7 +41,26 @@ pub enum End {
 }
 
 pub async fn connect(agent: &Agent, api_version: Option<&str>) -> Result<WsClient, Refused> {
-    let tcp = TcpStream::connect(agent.addr).await.expect("connexion");
+    connect_with(agent, api_version, None).await
+}
+
+/// Comme `connect`, avec un tampon de réception minuscule côté client : s'il ne lit pas, la
+/// fenêtre TCP se ferme vite et l'agent ne peut plus rien lui envoyer.
+pub async fn connect_with(
+    agent: &Agent,
+    api_version: Option<&str>,
+    recv_buffer: Option<u32>,
+) -> Result<WsClient, Refused> {
+    let tcp = match recv_buffer {
+        None => TcpStream::connect(agent.addr).await.expect("connexion"),
+        Some(size) => {
+            let socket = tokio::net::TcpSocket::new_v4().expect("socket");
+            socket
+                .set_recv_buffer_size(size)
+                .expect("tampon de réception");
+            socket.connect(agent.addr).await.expect("connexion")
+        }
+    };
     let name = ServerName::try_from("localhost").expect("nom");
     let tls = TlsConnector::from(client_config())
         .connect(name, tcp)

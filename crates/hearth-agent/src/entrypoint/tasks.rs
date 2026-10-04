@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 
 use crate::application::maintenance::MaintenanceService;
-use crate::application::metrics::MetricsService;
+use crate::application::metrics::{MetricsError, MetricsService};
 
 /// Période de la purge (sessions expirées, traces anciennes, opérations de plus de 24 h).
 pub const PURGE_PERIOD: Duration = Duration::from_secs(60 * 60);
@@ -67,8 +67,13 @@ pub fn spawn_sampler(service: Arc<MetricsService>, period: Duration) -> Backgrou
     every("sampler", period, move || {
         let service = service.clone();
         async move {
-            if let Err(error) = service.sample_once().await {
-                tracing::warn!(%error, "échantillon manquant, reprise au prochain passage");
+            match service.sample_once().await {
+                Ok(()) => {}
+                // Déjà journalisé une fois par épisode par le service : pas de bruit à chaque seconde.
+                Err(MetricsError::Stalled | MetricsError::Skipped) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "échantillon manquant, reprise au prochain passage");
+                }
             }
         }
     })
@@ -150,12 +155,21 @@ mod tests {
         }
     }
 
+    struct Mono(std::time::Instant);
+
+    impl crate::application::ports::MonotonicClock for Mono {
+        fn elapsed(&self) -> time::Duration {
+            time::Duration::try_from(self.0.elapsed()).unwrap_or(time::Duration::ZERO)
+        }
+    }
+
     #[tokio::test]
     async fn the_sampler_survives_a_probe_panic_and_a_probe_error() {
         let service = Arc::new(MetricsService::new(
             Arc::new(Flaky(AtomicU32::new(0))),
             Arc::new(NoGpu),
             Arc::new(RealTime),
+            Arc::new(Mono(std::time::Instant::now())),
         ));
         let mut feed = service.subscribe();
         let _sampler = spawn_sampler(service.clone(), Duration::from_millis(10));

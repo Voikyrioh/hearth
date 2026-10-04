@@ -11,16 +11,15 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use hearth_proto::error::{ErrorCode, ErrorDetail};
 use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, Topic};
 use serde_json::Value;
-use time::OffsetDateTime;
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, timeout};
 
-use super::StreamSettings;
+use super::{Permit, StreamSettings};
 use crate::application::sessions::{AuthError, CurrentSession};
 use crate::domain::metrics::Sample;
 use crate::domain::secret::Secret;
 use crate::domain::sessions::SessionEnd;
-use crate::domain::stream::{SNAPSHOT_WINDOW, is_new};
+use crate::domain::stream::{SNAPSHOT_WINDOW, is_new, may_subscribe};
 use crate::entrypoint::http::{ApiError, AppState};
 use crate::entrypoint::metrics_wire;
 
@@ -39,8 +38,9 @@ fn policy(reason: &'static str) -> Option<Closing> {
 }
 
 /// Sert la connexion jusqu'à sa fin, puis envoie la trame de fermeture.
-pub async fn run(mut socket: WebSocket, state: AppState) {
-    let closing = serve(&mut socket, &state).await;
+pub async fn run(mut socket: WebSocket, state: AppState, permit: Permit) {
+    // La place de flux est rendue à la fin de la connexion, quelle qu'en soit l'issue.
+    let closing = serve(&mut socket, &state, permit).await;
     if let Some(closing) = closing {
         let frame = CloseFrame {
             code: closing.code,
@@ -88,8 +88,11 @@ fn from_api(error: ApiError) -> ServerMessage {
 struct Subscriptions {
     metrics: Option<broadcast::Receiver<Arc<Sample>>>,
     audit: Option<broadcast::Receiver<Arc<Value>>>,
-    /// Instant du dernier échantillon envoyé (snapshot compris) : pas de doublon (BR-DASH-011).
-    last_sent: Option<OffsetDateTime>,
+    /// Instant monotone du dernier échantillon envoyé (snapshot compris) : pas de doublon
+    /// (BR-DASH-011), même si l'horloge murale recule.
+    last_sent: Option<time::Duration>,
+    /// Dernier `subscribe` accepté : un par seconde au plus.
+    last_subscribe: Option<Instant>,
 }
 
 /// Reçoit le prochain élément d'un abonnement, ou attend sans fin s'il n'y en a pas.
@@ -100,12 +103,12 @@ async fn next<T: Clone>(rx: &mut Option<broadcast::Receiver<T>>) -> Result<T, Re
     }
 }
 
-async fn serve(socket: &mut WebSocket, state: &AppState) -> Option<Closing> {
+async fn serve(socket: &mut WebSocket, state: &AppState, mut permit: Permit) -> Option<Closing> {
     let settings = state.stream.settings;
     let mut shutdown = state.stream.shutdown_signal();
 
     // 1. Authentification : le premier message, dans le délai imparti.
-    let (session, token) = tokio::select! {
+    let (mut session, token) = tokio::select! {
         outcome = timeout(settings.auth_timeout, authenticate(socket, state)) => match outcome {
             Ok(Ok(authenticated)) => authenticated,
             Ok(Err(closing)) => return closing,
@@ -122,8 +125,22 @@ async fn serve(socket: &mut WebSocket, state: &AppState) -> Option<Closing> {
                 return policy("authentification attendue");
             }
         },
-        _ = shutdown.changed() => return going_away(),
+        () = stopped(&mut shutdown) => return going_away(),
     };
+
+    // Plafond de flux par compte, une fois le compte connu.
+    if !permit.bind_account(session.account.id.as_str(), settings.max_per_account) {
+        send(
+            socket,
+            &settings,
+            &error_message(
+                ErrorCode::Busy,
+                "Ce compte a déjà trop de flux ouverts : ferme-en un avant d'en ouvrir un autre",
+            ),
+        )
+        .await;
+        return policy("trop de flux pour ce compte");
+    }
 
     // 2. Flux : abonnements, échantillons, battement, session.
     let mut subscriptions = Subscriptions::default();
@@ -137,7 +154,7 @@ async fn serve(socket: &mut WebSocket, state: &AppState) -> Option<Closing> {
 
     loop {
         tokio::select! {
-            _ = shutdown.changed() => return going_away(),
+            () = stopped(&mut shutdown) => return going_away(),
             () = &mut idle => return policy("silence du client"),
             received = socket.recv() => {
                 let message = match received {
@@ -169,8 +186,8 @@ async fn serve(socket: &mut WebSocket, state: &AppState) -> Option<Closing> {
             }
             sample = next(&mut subscriptions.metrics) => match sample {
                 Ok(sample) => {
-                    if is_new(subscriptions.last_sent, sample.at) {
-                        subscriptions.last_sent = Some(sample.at);
+                    if is_new(subscriptions.last_sent, sample.mono) {
+                        subscriptions.last_sent = Some(sample.mono);
                         let message = ServerMessage::Metrics(metrics_wire::sample(&sample));
                         if !send(socket, &settings, &message).await {
                             return None;
@@ -193,7 +210,21 @@ async fn serve(socket: &mut WebSocket, state: &AppState) -> Option<Closing> {
             },
             _ = check.tick() => {
                 match state.sessions.authenticate(token.expose()).await {
-                    Ok(_) => {}
+                    Ok(current) => {
+                        // Le rôle a pu changer pendant le flux (`change_role` ne ferme pas les
+                        // sessions) : le sujet `audit` se perd avec le droit de le lire.
+                        session = current;
+                        if subscriptions.audit.is_some() && !session.account.role.can_read_audit() {
+                            subscriptions.audit = None;
+                            let notice = error_message(
+                                ErrorCode::ForbiddenRole,
+                                "Le journal d'activité n'est plus accessible avec ton rôle",
+                            );
+                            if !send(socket, &settings, &notice).await {
+                                return None;
+                            }
+                        }
+                    }
                     Err(AuthError::Ended(end)) => {
                         let kind = match end {
                             SessionEnd::Expired => SessionNotice::Expired,
@@ -207,6 +238,12 @@ async fn serve(socket: &mut WebSocket, state: &AppState) -> Option<Closing> {
             }
         }
     }
+}
+
+/// Se termine quand l'arrêt de l'agent est demandé, y compris s'il l'était déjà à la création du
+/// récepteur.
+async fn stopped(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
+    let _ = shutdown.wait_for(|stopped| *stopped).await;
 }
 
 fn going_away() -> Option<Closing> {
@@ -275,7 +312,19 @@ async fn handle_text(
     let settings = state.stream.settings;
     let reply = match serde_json::from_str::<ClientMessage>(text) {
         Ok(ClientMessage::Ping { n }) => vec![ServerMessage::Pong { n }],
+        Ok(ClientMessage::Subscribe { .. })
+            if !may_subscribe(
+                subscriptions.last_subscribe.map(|at| at.elapsed()),
+                settings.min_subscribe_interval,
+            ) =>
+        {
+            vec![error_message(
+                ErrorCode::Busy,
+                "Un abonnement par seconde au plus : attends avant de t'abonner de nouveau",
+            )]
+        }
         Ok(ClientMessage::Subscribe { topics }) => {
+            subscriptions.last_subscribe = Some(Instant::now());
             subscribe(state, session, subscriptions, &topics).await
         }
         Ok(ClientMessage::Auth { .. }) => vec![error_message(
@@ -293,12 +342,6 @@ async fn handle_text(
         }
     }
     Handled::Continue
-}
-
-/// Le journal est réservé aux administrateurs ; la règle de ce qu'est un administrateur est celle
-/// de `Role` (HRT-05 pourra la préciser).
-fn may_read_audit(session: &CurrentSession) -> bool {
-    session.account.role.can_manage_accounts()
 }
 
 /// Remplace les abonnements par les sujets demandés ; rend les messages à envoyer. S'abonner à
@@ -321,18 +364,21 @@ async fn subscribe(
         let history = state.metrics.history(SNAPSHOT_WINDOW);
         match state.metrics.identity().await {
             Ok(identity) => {
-                subscriptions.last_sent = history.last().map(|sample| sample.at);
+                subscriptions.last_sent = history.last().map(|sample| sample.mono);
                 subscriptions.metrics = Some(receiver);
                 out.push(ServerMessage::Snapshot {
                     machine: metrics_wire::machine(&identity),
-                    history: history.iter().map(metrics_wire::sample).collect(),
+                    history: history
+                        .iter()
+                        .map(|sample| metrics_wire::sample(sample))
+                        .collect(),
                 });
             }
             Err(error) => out.push(from_api(ApiError::internal(&error))),
         }
     }
     if topics.contains(&Topic::Audit) {
-        if may_read_audit(session) {
+        if session.account.role.can_read_audit() {
             subscriptions.audit = state.stream.audit.subscribe();
         } else {
             out.push(error_message(

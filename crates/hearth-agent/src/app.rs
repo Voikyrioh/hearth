@@ -14,8 +14,8 @@ use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    AuditFeed, Clock, GpuProbe, HashError, IdGen, IdentityError, IdentityStore, PasswordHasher,
-    PublicIdentity, Store, StoreError, SystemProbe, TokenGen,
+    AuditFeed, Clock, GpuProbe, HashError, IdGen, IdentityError, IdentityStore, MonotonicClock,
+    PasswordHasher, PublicIdentity, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::sessions::SessionService;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -27,7 +27,7 @@ use crate::entrypoint::terminal::TerminalPasswords;
 use crate::entrypoint::ws::{StreamContext, StreamSettings};
 use crate::infrastructure::argon2::Argon2Hasher;
 use crate::infrastructure::audit_feed::NoAuditFeed;
-use crate::infrastructure::clock::SystemClock;
+use crate::infrastructure::clock::{SystemClock, SystemMonotonic};
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
@@ -92,8 +92,10 @@ impl Adapters {
 pub struct Metering {
     pub system: Arc<dyn SystemProbe>,
     pub gpu: Arc<dyn GpuProbe>,
-    /// Horloge qui date les échantillons.
+    /// Horloge murale qui date les échantillons.
     pub clock: Arc<dyn Clock>,
+    /// Horloge monotone : cadence, fenêtres et ordre des échantillons.
+    pub monotonic: Arc<dyn MonotonicClock>,
     pub period: Duration,
     /// Événements du journal pour le sujet `audit` du flux (vide tant que le journal n'est pas
     /// branché).
@@ -109,6 +111,7 @@ impl Metering {
             system: Arc::new(SysinfoProbe::new()),
             gpu: gpu::platform_probe(),
             clock: Arc::new(SystemClock),
+            monotonic: Arc::new(SystemMonotonic::new()),
             period: tasks::SAMPLE_PERIOD,
             audit: Arc::new(NoAuditFeed),
             stream: StreamSettings::default(),
@@ -246,6 +249,7 @@ pub async fn start_with_metering(
         metering.system,
         metering.gpu,
         metering.clock,
+        metering.monotonic,
     ));
     let stream = StreamContext::new(metering.audit, metering.stream);
     let closing = stream.clone();
