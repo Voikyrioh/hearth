@@ -18,7 +18,7 @@ La suppression d'un compte ferme immédiatement toutes ses sessions ouvertes, da
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::delete`.
 
 ## Vérification
-- Tests : `domain::sessions::tests::deletion_and_revocation_close_every_session` ; `tests/accounts_use_cases.rs::removing_an_account_closes_its_sessions`.
+- Tests : `domain::sessions::tests::deletion_and_revocation_close_every_session` ; `crates/hearth-agent/tests/accounts_use_cases.rs::removing_an_account_closes_its_sessions`.
 
 ## Cas limites
 - Suppression refusée (dernier administrateur) → les sessions restent ouvertes.

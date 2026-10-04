@@ -20,7 +20,7 @@ maj: 2026-10-04
 - `crates/hearth-agent/src/app.rs::run` — assemblage (`Command::Account`).
 
 ## Vérification
-- Tests : `tests/account_cli.rs` (binaire lancé en processus : ajout puis liste, mot de passe faible, doublon, dernier administrateur, `passwd`, `revoke`, compte inconnu) ; `entrypoint::cli::tests` (le mot de passe n'est jamais accepté en argument).
+- Tests : `crates/hearth-agent/tests/account_cli.rs` (binaire lancé en processus : ajout puis liste, mot de passe faible, doublon, dernier administrateur, `passwd`, `revoke`, compte inconnu) ; `entrypoint::cli::tests` (le mot de passe n'est jamais accepté en argument).
 
 ## Cas limites
 - La ligne de commande n'a pas de compte appelant : elle s'exécute avec les droits du système sur le serveur ; la suppression de son propre compte (BR-ACCT-012) ne la concerne pas.

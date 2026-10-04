@@ -17,9 +17,10 @@ Un mot de passe n'est jamais rendu en clair après sa création : l'agent ne con
 - `crates/hearth-agent/src/domain/secret.rs::Secret` — `Debug` masqué (`Secret(***)`), pas de `Display`, pas de `Clone`, mémoire effacée à la libération (`zeroize`) ; `expose()` explicite.
 - `crates/hearth-agent/src/domain/accounts/account.rs::Account` — le hachage est un `Secret`.
 - `crates/hearth-agent/src/application/ports/password_hasher.rs::PasswordHasher` — ne manipule que des `Secret`.
+- `crates/hearth-agent/src/application/accounts.rs::AccountView` — ce que rendent les cas d'usage : le haché n'en fait pas partie.
 
 ## Vérification
-- Tests : `domain::secret::tests` ; `domain::accounts::password::tests::debug_of_a_plain_password_does_not_reveal_it` ; `tests/accounts_use_cases.rs::errors_never_contain_the_password`.
+- Tests : `domain::secret::tests` ; `domain::accounts::password::tests::debug_of_a_plain_password_does_not_reveal_it` ; `crates/hearth-agent/tests/accounts_use_cases.rs::errors_never_contain_the_password`.
 
 ## Cas limites
 - Le mot de passe fourni par `HEARTH_ACCOUNT_PASSWORD` reste dans l'environnement du processus appelant : à utiliser pour l'automatisation seulement.

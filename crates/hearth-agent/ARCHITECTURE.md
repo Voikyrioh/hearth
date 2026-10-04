@@ -5,7 +5,7 @@ Service installé sur la machine pilotée. Hexagonal : les dépendances vont de 
 ```
 src/
 ├── domain/          → Règles pures, sans E/S. identity_policy.rs (créer / réutiliser / refuser / nettoyer l'identité), install_id.rs, secret.rs (`Secret` : jamais affiché, effacé à la libération), sessions.rs (session ouverte, sessions à fermer), accounts/ (username, password, role, admin_guard, self_deletion, account). L'empreinte (`Fingerprint`) vit dans `hearth-proto`.
-├── application/     → hello.rs (cas d'usage `GET /hello`, rend `AgentDescription`), accounts.rs (`AccountService` : créer, lister, changer le rôle, définir ou changer un mot de passe, supprimer, fermer les sessions) ; ports/ : IdentityStore (partie publique seulement), MachineInfo, AccountRepo + AccountTransaction, SessionRepo, PasswordHasher, Clock, IdGen, StoreError
+├── application/     → hello.rs (cas d'usage `GET /hello`, rend `AgentDescription`), accounts.rs (`AccountService`, rend des `AccountView` sans haché : créer, lister, changer le rôle, définir ou changer un mot de passe, supprimer, fermer les sessions) ; ports/ : IdentityStore (partie publique seulement), MachineInfo, AccountRepo, SessionRepo (lectures), Store + UnitOfWork (écritures), PasswordHasher, Clock, IdGen, StoreError
 ├── infrastructure/  → Adaptateurs des ports et services techniques
 │   ├── tls/         → identity.rs (FileIdentityStore : cert.pem, key.pem, install_id, verrou identity.lock ; rcgen), server_config.rs (rustls, TLS 1.3 seul, ring ; seul lecteur de la clé privée)
 │   ├── sqlite/      → mod.rs (`Database` : hearth.db, WAL, clés étrangères, migrations embarquées), account_repo.rs (lectures + transaction `BEGIN IMMEDIATE`), session_repo.rs, convert.rs (dates RFC 3339, erreurs de stockage) ; requêtes SQLx vérifiées à la compilation (`.sqlx/` versionné)
@@ -32,7 +32,10 @@ tests/account_cli.rs → Intégration : le vrai binaire lancé en processus sur 
 - **Le cas d'usage rend une structure applicative ; `entrypoint/http` la convertit en type du fil de `hearth-proto`.** `application` ne connaît jamais le contrat JSON.
 - La clé privée ne sort pas de `infrastructure/tls` : les ports n'exposent que du public.
 - Les décisions métier sont des fonctions pures de `domain/` ; les adaptateurs observent et exécutent (ex. dernier administrateur : le dépôt compte dans la transaction, `domain::accounts::check_removal` décide).
-- **Écritures atomiques** : un port de transaction (`AccountRepo::begin` → `AccountTransaction`) exécute en une fois lecture, garde et écriture ; SQLite `BEGIN IMMEDIATE` sérialise les écrivains. Sans `commit`, tout est annulé.
+- **Écritures atomiques** : toute écriture passe par `Store::begin` → `UnitOfWork`, une transaction neutre qui couvre tous les sujets (comptes, sessions, plus tard journal et opérations) et lit, garde, écrit en une fois ; SQLite `BEGIN IMMEDIATE` sérialise les écrivains, sans `commit` tout est annulé. Convention : les dépôts (`AccountRepo`, `SessionRepo`…) ne font que lire ; chaque nouvelle écriture est une méthode de `UnitOfWork` (un seul chemin par opération, par exemple `close_sessions`), et HRT-04 y ajoutera la création d'une session et la mise à jour de `last_login_at`, dans la même transaction.
+- **Dossier de données** : `infrastructure/data_dir.rs` est le seul endroit qui le crée (0700, resserré s'il est plus ouvert) et qui rend `hearth.db` privé (0600, `-wal` et `-shm` suivent) ; `app.rs` l'appelle avant la base et le magasin d'identité.
+- **Dates en base** : texte UTC à largeur fixe `YYYY-MM-DDTHH:MM:SS.mmmZ`, triable ; écriture et lecture faillibles (`StoreError`).
+- Les cas d'usage ne rendent jamais le haché du mot de passe (`AccountView`).
 - **Secrets** : mots de passe et hachés sont des `Secret` (pas de `Display`, `Debug` masqué, effacés à la libération) ; aucun message d'erreur ni journal ne les contient.
 - **SQLx hors ligne** : les `query!` sont vérifiées contre `.sqlx/` ; voir « SQLx » dans `CLAUDE.md` pour régénérer après toute modification de requête ou de migration.
 - Les ports sont consommés en `Arc<dyn Port>` / `&dyn Port` : seul `app.rs` connaît les types concrets.

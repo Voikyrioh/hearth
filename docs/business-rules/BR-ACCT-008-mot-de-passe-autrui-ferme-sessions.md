@@ -18,7 +18,7 @@ Un administrateur (ou la ligne de commande) qui définit le mot de passe d'un co
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::set_password`.
 
 ## Vérification
-- Tests : `domain::sessions::tests::admin_password_change_closes_every_session` ; `tests/accounts_use_cases.rs::an_administrator_password_change_closes_every_session`.
+- Tests : `domain::sessions::tests::admin_password_change_closes_every_session` ; `crates/hearth-agent/tests/accounts_use_cases.rs::an_administrator_password_change_closes_every_session`.
 
 ## Cas limites
 - Si la transaction échoue, ni le mot de passe ni les sessions ne changent.

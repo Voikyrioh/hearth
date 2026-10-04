@@ -16,10 +16,10 @@ Un compte administrateur ne peut être ni supprimé ni rétrogradé s'il est le 
 ## Application (code)
 - `crates/hearth-agent/src/domain/accounts/admin_guard.rs::check_removal` — suppression.
 - `crates/hearth-agent/src/domain/accounts/admin_guard.rs::check_role_change` — changement de rôle.
-- `crates/hearth-agent/src/application/accounts.rs::AccountService::delete` et `::change_role` — comptent les administrateurs via `AccountTransaction::count_admins`, appellent les fonctions du domaine, puis valident ou abandonnent.
+- `crates/hearth-agent/src/application/accounts.rs::AccountService::delete` et `::change_role` — comptent les administrateurs via `UnitOfWork::count_admins`, appellent les fonctions du domaine, puis valident ou abandonnent.
 
 ## Vérification
-- Tests : `domain::accounts::admin_guard::tests` ; `tests/accounts_use_cases.rs::the_last_administrator_cannot_be_removed_nor_demoted`, `two_simultaneous_removals_of_the_last_two_administrators_leave_one` ; `tests/account_cli.rs::removing_the_last_administrator_is_refused`.
+- Tests : `domain::accounts::admin_guard::tests` ; `crates/hearth-agent/tests/accounts_use_cases.rs::the_last_administrator_cannot_be_removed_nor_demoted`, `two_simultaneous_removals_of_the_last_two_administrators_leave_one` ; `crates/hearth-agent/tests/account_cli.rs::removing_the_last_administrator_is_refused`.
 
 ## Cas limites
 - Un compte lecture seule se supprime toujours.

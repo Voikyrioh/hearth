@@ -4,35 +4,35 @@ Cas : mot de passe administrateur perdu, ou aucun compte administrateur ne reste
 
 ## Prérequis
 
-- Un accès shell sur le serveur qui héberge l'agent, avec le droit de lire et écrire le dossier de données (`/var/lib/hearth` par défaut, ou `--data-dir` / `HEARTH_DATA_DIR`). L'accès au serveur est le facteur de confiance : qui peut lancer la commande peut reprendre la main.
+- Un accès shell sur le serveur qui héberge l'agent. L'accès au serveur est le facteur de confiance : qui peut lancer la commande peut reprendre la main.
 - Le binaire `hearth-agent` (même version que l'agent en service).
+- **Lance toujours la commande sous le compte qui fait tourner le service, avec le dossier de données du service** (`--data-dir`, `/var/lib/hearth` par défaut). Lancée en root, elle crée `hearth.db-wal` et `hearth.db-shm` appartenant à root : l'agent ne pourrait plus écrire dans sa base. Si cela arrive, remets le propriétaire (`chown <utilisateur-de-l-agent> <dossier>/hearth.db*`) avant de redémarrer l'agent.
+- Le mot de passe se saisit au clavier, sans écho. Ne le tape jamais sur la ligne de commande ni dans une variable exportée à la main (l'historique du shell le garderait). Avec `ssh`, ajoute `-t` pour avoir un terminal.
 
 ## Étapes
+
+Dans les commandes ci-dessous, `<service>` est le compte du service et `<dossier>` son dossier de données.
 
 1. Liste les comptes existants (sans réseau, l'agent peut tourner pendant ce temps) :
 
    ```sh
-   sudo -u hearth hearth-agent --data-dir /var/lib/hearth account list
+   sudo -u <service> hearth-agent --data-dir <dossier> account list
    ```
 
-2. Un compte administrateur existe mais son mot de passe est perdu : définis-en un nouveau. Le mot de passe est demandé sans écho avec confirmation, et toutes les sessions du compte sont fermées.
+2. Un compte administrateur existe mais son mot de passe est perdu : définis-en un nouveau. Le mot de passe est demandé deux fois, sans écho, et toutes les sessions du compte sont fermées.
 
    ```sh
-   sudo -u hearth hearth-agent --data-dir /var/lib/hearth account passwd marie
+   sudo -u <service> hearth-agent --data-dir <dossier> account passwd marie
    ```
 
-3. Plus aucun administrateur (compte supprimé ou rétrogradé par erreur) : promeus un compte existant, ou crée-en un.
+3. Plus aucun administrateur (compte supprimé ou rétrogradé par erreur) : promeus un compte existant, ou crée-en un (le mot de passe est demandé de la même façon).
 
    ```sh
-   sudo -u hearth hearth-agent --data-dir /var/lib/hearth account role paul admin
-   sudo -u hearth hearth-agent --data-dir /var/lib/hearth account add marie --role admin
+   sudo -u <service> hearth-agent --data-dir <dossier> account role paul admin
+   sudo -u <service> hearth-agent --data-dir <dossier> account add marie --role admin
    ```
 
-4. Automatisation (script, provisionnement) : fournis le mot de passe par la variable d'environnement, jamais en argument :
-
-   ```sh
-   HEARTH_ACCOUNT_PASSWORD='un-mot-de-passe-solide-1A' hearth-agent account passwd marie
-   ```
+4. Automatisation seulement (provisionnement) : `HEARTH_ACCOUNT_PASSWORD` fournit le mot de passe sans terminal. Alimente-la depuis un gestionnaire de secrets ou un fichier lisible par le seul service (`HEARTH_ACCOUNT_PASSWORD="$(cat <fichier-secret>)"`), jamais avec le mot de passe écrit en clair dans la commande.
 
 ## Diagnostic
 

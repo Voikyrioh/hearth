@@ -15,11 +15,11 @@ Deux comptes « marie » et « MARIE » ne peuvent pas coexister. L'identifiant 
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/accounts/username.rs::Username::parse` — normalise en minuscules ASCII (une saisie « MARIE » devient « marie »).
-- `crates/hearth-agent/migrations/0001_accounts.sql` — `username TEXT NOT NULL UNIQUE COLLATE NOCASE` : filet de sécurité contre une insertion concurrente.
+- `crates/hearth-agent/migrations/0001_accounts_sessions_meta.sql` — `username TEXT NOT NULL UNIQUE COLLATE NOCASE` : filet de sécurité contre une insertion concurrente.
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::create` — refuse avec `AccountError::UsernameTaken` (vérification dans la transaction d'écriture, violation d'unicité rendue par le dépôt en `StoreError::Duplicate`).
 
 ## Vérification
-- Tests : `domain::accounts::username::tests::uppercase_is_normalized_so_uniqueness_ignores_case` ; `tests/accounts_use_cases.rs::usernames_are_unique_whatever_the_case` ; `tests/accounts_repo.rs::the_database_refuses_two_usernames_differing_by_case`.
+- Tests : `domain::accounts::username::tests::uppercase_is_normalized_so_uniqueness_ignores_case` ; `crates/hearth-agent/tests/accounts_use_cases.rs::usernames_are_unique_whatever_the_case` ; `crates/hearth-agent/tests/accounts_repo.rs::the_database_refuses_two_usernames_differing_by_case`.
 
 ## Cas limites
 - Deux créations simultanées du même identifiant : l'écriture est sérialisée (`BEGIN IMMEDIATE`), la seconde reçoit « Cet identifiant est déjà utilisé ».

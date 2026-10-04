@@ -20,7 +20,7 @@ Un compte est créé avec un identifiant, un mot de passe et un rôle (Administr
 - `crates/hearth-agent/migrations/0001_accounts_sessions_meta.sql` — table `accounts`.
 
 ## Vérification
-- Tests : `tests/accounts_use_cases.rs::create_stores_a_hash_and_never_the_password`, `create_refuses_an_invalid_username`, `create_lists_every_unmet_password_rule` ; `tests/account_cli.rs::add_then_list`.
+- Tests : `crates/hearth-agent/tests/accounts_use_cases.rs::create_stores_a_hash_and_never_the_password`, `create_refuses_an_invalid_username`, `create_lists_every_unmet_password_rule` ; `crates/hearth-agent/tests/account_cli.rs::add_then_list`.
 
 ## Cas limites
 - Échec d'une règle : aucun compte créé.

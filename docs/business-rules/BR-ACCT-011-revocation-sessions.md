@@ -18,7 +18,7 @@ La révocation ferme immédiatement toutes les sessions ouvertes du compte et ne
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::revoke_sessions`.
 
 ## Vérification
-- Tests : `tests/accounts_use_cases.rs::revoking_closes_sessions_and_keeps_the_password` ; `tests/account_cli.rs`.
+- Tests : `crates/hearth-agent/tests/accounts_use_cases.rs::revoking_closes_sessions_and_keeps_the_password` ; `crates/hearth-agent/tests/account_cli.rs`.
 
 ## Cas limites
 - Compte inconnu → « Ce compte n'existe pas ».
