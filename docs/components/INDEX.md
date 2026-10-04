@@ -28,6 +28,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue ; tout reçu 
 - `PasswordRules` — Affiche règles mot de passe (checklist, couleur per-rule).
 - `ConfirmDialog` — Modal confirmation action destructrice (title, message, boutons).
 - [`EmptyState`](./EmptyState.md) — Placeholder quand liste vide (icône, texte, CTA optionnelle). **Livré (HRT-08).**
+- [`SettingRow`](./SettingRow.md) — Ligne de réglage : libellé, aide, contrôle nommé par `aria-labelledby`. **Livré (HRT-08).**
 
 ## Organisms
 

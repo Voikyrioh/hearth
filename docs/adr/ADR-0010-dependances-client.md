@@ -30,7 +30,10 @@ HRT-08 pose la coquille Windows du client (`apps/desktop`). ADR-0002 a choisi Ta
 | Lint, format | `@biomejs/biome` 2 | Pile par défaut du hub ; un seul outil. | La prise en charge des fichiers `.vue` est partielle : les règles d'imports et de variables inutilisés sont coupées sur `*.vue` (le gabarit est invisible pour Biome), `vue-tsc` couvre le reste. |
 | Tests front | `vitest` 4, `@vue/test-utils`, `happy-dom`, `@tauri-apps/api/mocks` | Pile par défaut du hub ; pont Tauri simulé par `mockIPC`. | `jsdom` 27 exige Node 22.12 ou plus (`require` d'ES module) : `happy-dom` retenu, Node 22.7 en poste de dev. |
 | Polices | `@fontsource/sora`, `@fontsource/instrument-sans`, `@fontsource/dm-mono` (sous-ensemble `latin`) | Polices embarquées dans l'app, aucun appel à un service de polices (CSP stricte). | Seul le sous-ensemble `latin` est livré (accents français, œ) ; un autre alphabet demande d'ajouter son sous-ensemble. |
-| Textes | module maison `src/i18n/fr.ts` + `t()` | Un fichier typé, clés vérifiées à la compilation, zéro dépendance. | Remplace `vue-translate` (ADR-0011 du hub) le temps du socle ; à raccorder si un second langage apparaît. |
+| Journal | `tracing-subscriber` (déjà au workspace), `tracing-appender` 0.2 | Fichier tournant `logs/` (quotidien, 7 gardés) dans le dossier de données, initialisé avant tout ; crochet de panique ; sans console dans le binaire livré, c'est la seule trace. | Écriture synchrone sous verrou (volume faible) pour qu'une panique soit écrite avant la fin du processus. |
+| Boîte d'erreur de démarrage | `rfd` 0.17 | Message système avec le chemin du journal quand le démarrage échoue, sans `AppHandle` ni greffon (donc sans permission côté web). | Dépendance de plus ; l'ouverture du dossier des journaux passe par `explorer.exe`, sans greffon `opener`. |
+| Tests Rust de la coquille | `tauri` avec la feature `test` (runtime simulé) en dev-dependency | `settings.rs` et `window.rs` testés sans fenêtre réelle ; l'entrée de démarrage est un port (`Autostart`) simulé. | Le runtime simulé ne rend pas la visibilité ni la destruction des fenêtres observables. |
+| Textes | module maison `src/i18n/fr.ts` + `t()` | Un fichier typé, clés vérifiées à la compilation, zéro dépendance. | Écart avec `vue-translate` (ADR-0011 du hub) : ce paquet charge ses fichiers de traduction par `fetch` (refusé par la CSP `connect-src` sans origine distante) et vit sur GitHub Packages (`npm ci` exigerait un jeton, y compris en CI et chez les contributeurs d'un dépôt public). À rouvrir si un second langage apparaît, avec un chargement par import statique. |
 
 ### Sécurité de la coquille
 
@@ -41,15 +44,17 @@ HRT-08 pose la coquille Windows du client (`apps/desktop`). ADR-0002 a choisi Ta
 ### Installateur NSIS
 
 - Cible `nsis` seule, `installMode: currentUser`, WebView2 en `embedBootstrapper`, français sans sélecteur de langue (BR-CLIENT-001/002).
-- `installer/hooks.nsh` : contrôle de Windows 10 64 bits et de 50 Mo libres avant copie (BR-CLIENT-014).
+- `installer/hooks.nsh` : contrôle de Windows 10 64 bits et de 50 Mo libres avant toute écriture (BR-CLIENT-014), dans `.onGUIInit` et dans une section masquée placée avant celles du modèle (WebView2, copie) : un refus ne laisse rien sur la machine, mode silencieux compris. Le modèle n'a pas de crochet plus tôt.
 - `installer/French.nsh` : remplace le fichier français de Tauri pour tutoyer et reformuler la case de désinstallation.
 - Désinstallation : le modèle NSIS de Tauri arrête l'application, retire l'entrée de démarrage et propose la case d'effacement des données ; la page à deux boutons « Garder mes serveurs » / « Tout effacer » de la spec exigerait un modèle NSIS entier sur mesure, trop coûteux à maintenir : la case « Tout effacer : ... » (décochée = tout garder) en tient lieu.
-- La case de démarrage avec Windows à l'installation (BR-CLIENT-006) n'est pas dans l'installateur : le réglage existe dans l'application (BR-CLIENT-007). À reprendre avec une page d'options NSIS si Voiky le demande.
+- La case de démarrage avec Windows à l'installation (BR-CLIENT-006) n'est pas dans l'installateur : le réglage existe dans l'application (BR-CLIENT-007). Suivi : ticket HRT-21 (page d'options NSIS sur mesure).
+- La case « Tout effacer » promet d'effacer aussi les mots de passe mémorisés, mais le modèle ne supprime que des dossiers : quand le coffre Windows arrivera, la désinstallation devra y effacer les identifiants (note dans `installer/French.nsh`).
 
 ## Comment l'appliquer
 
 - Ajouter une dépendance front : `npm install` dans `apps/desktop`, `package-lock.json` committé, mise à jour de cette table.
 - Ajouter une commande Tauri : fonction `#[tauri::command] #[specta::specta]` dans `commands.rs`, ligne dans `collect_commands!` (`lib.rs`), nom dans `COMMANDS` de `build.rs`, permission `allow-...` dans `capabilities/default.json`, puis `HEARTH_REGEN_BINDINGS=1 cargo test -p hearth-desktop` pour régénérer `src/bindings.ts`.
+- Ajouter un texte d'erreur : une nouvelle `kind` de `AppError` ne compile pas côté front sans son entrée dans `src/i18n/index.ts` (`ERROR_KEYS`).
 - Passer à Tauri 3 ou à TypeScript 7 : nouvelle ADR.
 
 ## Quand NE PAS l'appliquer / limites
@@ -67,8 +72,9 @@ HRT-08 pose la coquille Windows du client (`apps/desktop`). ADR-0002 a choisi Ta
 
 ## Conséquences
 
-- Les tests Rust de la coquille vivent dans `apps/desktop/src-tauri/tests/` (tests d'intégration) : `build.rs` embarque le manifeste « Common Controls v6 » dans ces seuls binaires, sinon ils échouent au chargement sous Windows (`STATUS_ENTRYPOINT_NOT_FOUND`). Les tests unitaires de la bibliothèque sont désactivés (`test = false`) pour la même raison.
-- Le job CI `desktop` tourne sous Windows ; le job Linux exclut `hearth-desktop`.
+- Les tests Rust de la coquille vivent dans `apps/desktop/src-tauri/tests/` (tests d'intégration) : `build.rs` embarque le manifeste « Common Controls v6 » dans ces seuls binaires, sinon ils échouent au chargement sous Windows (`STATUS_ENTRYPOINT_NOT_FOUND`). Les tests unitaires de la bibliothèque sont désactivés (`test = false`) pour la même raison. Le journal et son crochet de panique étant globaux au processus, `tests/logging.rs` les initialise dans un seul test.
+- Le job CI `desktop` tourne sous Windows, construit aussi l'installateur NSIS et le publie en artefact (`hearth-windows-installer`) ; le job Linux exclut `hearth-desktop`.
+- `cargo test --workspace` sous Windows exige que le front ait été construit une fois (`dist/` est lu à la compilation) ; sans lui : `--exclude hearth-desktop`.
 
 ## Références
 

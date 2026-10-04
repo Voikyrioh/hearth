@@ -2,8 +2,8 @@
 
 Page · `apps/desktop/src/pages/Settings.vue`
 
-Réglages, onglet « Général » : interrupteur « Lancer Hearth au démarrage de Windows » (BR-CLIENT-007) et version de l'application. Lit et écrit par le store `settings` (commandes typées). Route `/settings`.
+Réglages, section unique « Général » (pas de barre d'onglets tant qu'il n'y a qu'une section) : interrupteur « Lancer Hearth au démarrage de Windows » (BR-CLIENT-007), bouton « Ouvrir le dossier des journaux » et version de l'application. Lit et écrit par le store `settings` (commandes typées) ; réglages illisibles, version indisponible et dossier des journaux inaccessible s'affichent séparément. Route `/settings`.
 
 - Props : aucune
 - Événements et slots : aucun
-- Notes : Les sections « Client » et « Mises à jour » et les cartes d'état par serveur arrivent avec leurs tickets. Tests : `Settings.test.ts`.
+- Notes : D'autres sections et les cartes d'état par serveur arrivent avec leurs tickets ; la barre de sections reviendra avec la seconde. Tests : `Settings.test.ts`.

@@ -21,6 +21,7 @@ La page de désinstallation porte une case « Tout effacer : supprimer aussi mes
 - À la main : désinstaller case décochée puis cochée, vérifier `%APPDATA%\fr.voikyrioh.hearth`.
 
 ## Cas limites
+- Coffre Windows : la case promet aussi d'effacer les mots de passe mémorisés, or le modèle ne supprime que des dossiers. Tant qu'aucun mot de passe n'est stocké dans le Gestionnaire d'identification (ticket du coffre), rien n'est menti ; dès qu'il l'est, la désinstallation devra y effacer les identifiants du client quand la case est cochée (note dans `installer/French.nsh`).
 - Mode silencieux ou mise à jour : jamais d'effacement.
 
 ## Règles liées

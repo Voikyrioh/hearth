@@ -82,16 +82,16 @@ Première connexion vers un agent inconnu (pas dans `servers.json`).
 - [BR-CLIENT-001](./BR-CLIENT-001-installation-sans-droits-administrateur.md) — L'installation se déroule sans droits administrateur ni logiciel tiers — apps/desktop/src-tauri/tauri.conf.json — invariant ✓
 - [BR-CLIENT-002](./BR-CLIENT-002-installation-par-utilisateur.md) — L'installation se fait pour le compte Windows courant seulement — apps/desktop/src-tauri/tauri.conf.json — invariant ✓
 - [BR-CLIENT-003](./BR-CLIENT-003-instance-unique.md) — Une seule instance du client à la fois ; relancer ramène la fenêtre au premier plan — apps/desktop/src-tauri/src/lib.rs::run — invariant ✓
-- [BR-CLIENT-004](./BR-CLIENT-004-fermer-reduit-dans-la-zone-de-notification.md) — Fermer la fenêtre la réduit dans la zone de notification — apps/desktop/src-tauri/src/domain.rs::on_close_requested — invariant ✓
-- [BR-CLIENT-005](./BR-CLIENT-005-explication-de-fermeture-une-seule-fois.md) — L'explication de la réduction n'est donnée qu'à la première fermeture — apps/desktop/src-tauri/src/domain.rs::on_close_requested — —
-- [BR-CLIENT-006](./BR-CLIENT-006-demarrage-avec-windows-desactive-par-defaut.md) — Le lancement au démarrage de Windows est désactivé par défaut — apps/desktop/src-tauri/src/settings.rs::read — —
+- [BR-CLIENT-004](./BR-CLIENT-004-fermer-reduit-dans-la-zone-de-notification.md) — Fermer la fenêtre la réduit dans la zone de notification — apps/desktop/src-tauri/src/domain.rs::hides_on_close — invariant ✓
+- [BR-CLIENT-005](./BR-CLIENT-005-explication-de-fermeture-une-seule-fois.md) — L'explication de la réduction n'est donnée qu'à la première fermeture — apps/desktop/src-tauri/src/domain.rs::hides_on_close — —
+- [BR-CLIENT-006](./BR-CLIENT-006-demarrage-avec-windows-desactive-par-defaut.md) — Le lancement au démarrage de Windows est proposé à l'installation, désactivé par défaut (partiellement appliquée, HRT-21) — apps/desktop/src-tauri/src/settings.rs::read — —
 - [BR-CLIENT-007](./BR-CLIENT-007-demarrage-avec-windows-reglable.md) — Le lancement au démarrage se règle depuis l'application — apps/desktop/src-tauri/src/settings.rs::set_launch_at_startup — —
 - [BR-CLIENT-008](./BR-CLIENT-008-reinstallation-conserve-les-donnees.md) — Réinstaller par-dessus une version existante conserve serveurs et réglages — domain/ — invariant ✓
 - [BR-CLIENT-009](./BR-CLIENT-009-desinstallation-garder-ou-tout-effacer.md) — La désinstallation propose de garder ou d'effacer serveurs et mots de passe — apps/desktop/src-tauri/installer/French.nsh — —
 - [BR-CLIENT-010](./BR-CLIENT-010-desinstallation-arret-propre-et-retrait-du-demarrage.md) — La désinstallation arrête l'application et retire l'entrée de démarrage — CheckIfAppIsRunning — —
 - [BR-CLIENT-011](./BR-CLIENT-011-menu-de-la-zone-de-notification.md) — Le menu de l'icône propose « Ouvrir Hearth » et « Quitter » — apps/desktop/src-tauri/src/domain.rs::tray_action — —
 - [BR-CLIENT-013](./BR-CLIENT-013-ecran-de-premier-lancement.md) — Sans serveur enregistré, l'application s'ouvre sur un écran d'accueil — apps/desktop/src/pages/Welcome.vue — —
-- [BR-CLIENT-014](./BR-CLIENT-014-controles-avant-installation.md) — Windows 10 64 bits et 50 Mo libres sont vérifiés avant toute copie — apps/desktop/src-tauri/installer/hooks.nsh — —
+- [BR-CLIENT-014](./BR-CLIENT-014-controles-avant-installation.md) — Windows 10 64 bits et 50 Mo libres sont vérifiés avant toute écriture — apps/desktop/src-tauri/installer/hooks.nsh — —
 
 Les règles BR-CLIENT-012 (état du lien dans l'icône) et le reste de l'installateur sur mesure arrivent avec `hearth-link` et les tickets suivants.
 

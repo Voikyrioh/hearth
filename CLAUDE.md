@@ -20,7 +20,7 @@ Les trois doivent passer avant tout commit.
 
 ### Client Windows (`apps/desktop`)
 
-La crate Tauri `hearth-desktop` est membre du workspace mais **hors `default-members`** : sous Linux elle ne compile pas (bibliothèques WebView absentes). Sous Linux, ajouter `--exclude hearth-desktop` aux commandes `--workspace` (le job Linux de la CI le fait) ; le job `desktop` de la CI (Windows) la vérifie. Sous Windows les trois commandes ci-dessus couvrent tout.
+La crate Tauri `hearth-desktop` est membre du workspace mais **hors `default-members`** : sous Linux elle ne compile pas (bibliothèques WebView absentes). Sous Linux, ajouter `--exclude hearth-desktop` aux commandes `--workspace` (le job Linux de la CI le fait) ; le job `desktop` de la CI (Windows) la vérifie. Sous Windows les trois commandes ci-dessus couvrent tout, **mais** `cargo clippy`/`cargo test --workspace` compilent la coquille Tauri, qui lit `apps/desktop/dist` à la compilation : sur un clone neuf, construire le front une fois d'abord (`cd apps/desktop && npm ci && npm run build`), sinon la compilation échoue. Pour tester seulement l'agent, sans le client ni le front : `cargo test --workspace --exclude hearth-desktop` (idem pour clippy).
 
 ```sh
 cd apps/desktop
