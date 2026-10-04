@@ -37,11 +37,6 @@ pub enum AppError {
     Database(#[from] DatabaseError),
     #[error(transparent)]
     Hash(#[from] HashError),
-    #[error("dossier de données {path} inaccessible : {source}")]
-    DataDir {
-        path: std::path::PathBuf,
-        source: std::io::Error,
-    },
     #[error(transparent)]
     Account(#[from] AccountCliError),
     #[error(transparent)]
@@ -111,7 +106,7 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
     let config = load_config(&cli)?;
     // Un seul endroit crée le dossier de données et en garantit les droits, avant que la base
     // ou le magasin d'identité n'y écrive.
-    data_dir::ensure(&config.data_dir).map_err(|source| AppError::DataDir {
+    data_dir::ensure(&config.data_dir).map_err(|source| DatabaseError::DataDir {
         path: config.data_dir.clone(),
         source,
     })?;

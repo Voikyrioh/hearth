@@ -32,6 +32,11 @@ pub enum DatabaseError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("fichier de base {path} inaccessible : {source}")]
+    File {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("ouverture de la base {path} impossible : {message}")]
     Open { path: PathBuf, message: String },
     #[error("migration de la base {path} impossible : {message}")]
@@ -55,7 +60,7 @@ impl Database {
         })?;
         let path = data_dir.join(DATABASE_FILE);
         // Le fichier de base (et donc ses compagnons -wal et -shm) n'est lisible que par nous.
-        data_dir::ensure_private_file(&path).map_err(|source| DatabaseError::DataDir {
+        data_dir::ensure_private_file(&path).map_err(|source| DatabaseError::File {
             path: path.clone(),
             source,
         })?;
@@ -209,6 +214,15 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(Database::open(&dir)).unwrap();
         assert_eq!(mode(&dir), 0o700);
+    }
+
+    #[tokio::test]
+    async fn a_problem_with_the_database_file_is_not_reported_as_the_data_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(DATABASE_FILE)).unwrap();
+        let error = Database::open(dir.path()).await.unwrap_err();
+        assert!(matches!(error, DatabaseError::File { .. }), "{error}");
+        assert!(error.to_string().contains(DATABASE_FILE), "{error}");
     }
 
     #[tokio::test]
