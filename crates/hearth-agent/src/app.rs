@@ -1,4 +1,5 @@
-//! Racine de composition : assemble les adaptateurs, les cas d'usage et le serveur.
+//! Racine de composition : charge la configuration, assemble adaptateurs, cas d'usage et
+//! serveur, puis exécute la commande demandée. Seul endroit qui connaît les types concrets.
 
 use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
@@ -6,9 +7,11 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::application::hello::HelloService;
-use crate::application::ports::{Identity, IdentityError, IdentityStore};
+use crate::application::ports::{IdentityError, IdentityStore, PublicIdentity};
+use crate::entrypoint::cli::{Cli, Command};
 use crate::entrypoint::http::{self, AppState, ServerError, ServerHandle};
-use crate::infrastructure::config::{AgentConfig, ConfigError};
+use crate::entrypoint::signal::shutdown_signal;
+use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::system::SystemMachineInfo;
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
 
@@ -27,28 +30,69 @@ pub enum AppError {
         addr: SocketAddr,
         source: std::io::Error,
     },
-    #[error("entrée/sortie : {0}")]
-    Io(#[from] std::io::Error),
+}
+
+/// Agent démarré : le serveur et la partie publique de son identité.
+pub struct RunningAgent {
+    pub server: ServerHandle,
+    pub identity: PublicIdentity,
+}
+
+/// Fusionne fichier, variables d'environnement et options de la ligne de commande.
+pub fn load_config(cli: &Cli) -> Result<AgentConfig, AppError> {
+    let overrides = CliOverrides {
+        config_path: cli.config.clone(),
+        data_dir: cli.data_dir.clone(),
+    };
+    Ok(config::load(&overrides, &|name| std::env::var(name).ok())?)
 }
 
 /// Charge l'identité de l'installation, en la créant à la première exécution.
-pub fn load_identity(config: &AgentConfig) -> Result<Identity, AppError> {
-    Ok(FileIdentityStore::new(&config.data_dir).load_or_create()?)
+pub fn load_identity(store: &dyn IdentityStore) -> Result<PublicIdentity, AppError> {
+    Ok(store.load_or_create()?)
 }
 
 /// Ouvre le port et démarre le serveur HTTPS.
-pub fn start(config: &AgentConfig, identity: &Identity) -> Result<ServerHandle, AppError> {
+pub fn start(config: &AgentConfig) -> Result<RunningAgent, AppError> {
+    let store = FileIdentityStore::new(&config.data_dir);
+    let identity = load_identity(&store)?;
+    let tls = tls::server_config(&store)?;
+
     let addr = SocketAddr::new(config.listen_addr, config.port);
     let listener = TcpListener::bind(addr).map_err(|source| AppError::Bind { addr, source })?;
 
     let hello = HelloService::new(
         identity.install_id.clone(),
         config.managed,
-        Arc::new(SystemMachineInfo),
+        &SystemMachineInfo,
     );
     let router = http::router(AppState {
         hello: Arc::new(hello),
     });
-    let tls = tls::server_config(identity)?;
-    Ok(http::spawn(listener, tls, router)?)
+    let server = http::spawn(listener, tls, router)?;
+    Ok(RunningAgent { server, identity })
+}
+
+/// Exécute la commande demandée sur la ligne de commande.
+pub async fn run(cli: Cli) -> Result<(), AppError> {
+    let config = load_config(&cli)?;
+    match cli.command() {
+        Command::Fingerprint => {
+            let identity = load_identity(&FileIdentityStore::new(&config.data_dir))?;
+            println!("{}", identity.fingerprint);
+            Ok(())
+        }
+        Command::Serve => {
+            let RunningAgent { server, identity } = start(&config)?;
+            tracing::info!(
+                addr = %server.local_addr(),
+                fingerprint = %identity.fingerprint,
+                install_id = %identity.install_id,
+                "agent démarré"
+            );
+            server.run_until(shutdown_signal()).await?;
+            tracing::info!("agent arrêté");
+            Ok(())
+        }
+    }
 }

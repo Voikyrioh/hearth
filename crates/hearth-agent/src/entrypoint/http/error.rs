@@ -1,4 +1,5 @@
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use hearth_proto::error::{ErrorBody, ErrorCode};
@@ -19,6 +20,13 @@ impl From<ErrorBody> for ApiError {
     }
 }
 
+/// Corps JSON illisible ou invalide : erreur de validation, jamais le texte brut d'axum.
+impl From<JsonRejection> for ApiError {
+    fn from(rejection: JsonRejection) -> Self {
+        Self::new(ErrorCode::ValidationError, rejection.body_text())
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = StatusCode::from_u16(self.0.error.code.http_status())
@@ -30,4 +38,9 @@ impl IntoResponse for ApiError {
 /// Réponse des routes inconnues.
 pub async fn not_found() -> ApiError {
     ApiError::new(ErrorCode::NotFound, "route inconnue")
+}
+
+/// Réponse d'une route existante appelée avec une autre méthode.
+pub async fn method_not_allowed() -> ApiError {
+    ApiError::new(ErrorCode::MethodNotAllowed, "méthode non prise en charge")
 }

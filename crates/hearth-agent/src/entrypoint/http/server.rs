@@ -1,12 +1,14 @@
 use std::future::Future;
 use std::io;
 use std::net::{SocketAddr, TcpListener};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
 use axum_server::Handle;
-use axum_server::tls_rustls::RustlsConfig;
+use axum_server::accept::Accept;
+use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
 use rustls::ServerConfig;
 use thiserror::Error;
 use tokio::task::JoinHandle;
@@ -20,6 +22,36 @@ pub enum ServerError {
     Io(#[from] io::Error),
     #[error("tâche du serveur interrompue : {0}")]
     Task(#[from] tokio::task::JoinError),
+}
+
+/// Enveloppe l'acceptation TLS pour journaliser (niveau debug) les poignées de main refusées :
+/// version de protocole non prise en charge, client qui coupe, délai dépassé…
+#[derive(Clone)]
+struct LoggingAcceptor(RustlsAcceptor);
+
+type AcceptFuture<S, T> = Pin<Box<dyn Future<Output = io::Result<(S, T)>> + Send>>;
+
+impl<I, S> Accept<I, S> for LoggingAcceptor
+where
+    RustlsAcceptor: Accept<I, S>,
+    <RustlsAcceptor as Accept<I, S>>::Future: Send + 'static,
+    <RustlsAcceptor as Accept<I, S>>::Stream: Send + 'static,
+    <RustlsAcceptor as Accept<I, S>>::Service: Send + 'static,
+{
+    type Stream = <RustlsAcceptor as Accept<I, S>>::Stream;
+    type Service = <RustlsAcceptor as Accept<I, S>>::Service;
+    type Future = AcceptFuture<Self::Stream, Self::Service>;
+
+    fn accept(&self, stream: I, service: S) -> Self::Future {
+        let inner = self.0.accept(stream, service);
+        Box::pin(async move {
+            let result = inner.await;
+            if let Err(error) = &result {
+                tracing::debug!(%error, "poignée de main TLS refusée");
+            }
+            result
+        })
+    }
 }
 
 /// Serveur HTTPS en cours d'exécution.
@@ -38,7 +70,9 @@ pub fn spawn(
     listener.set_nonblocking(true)?;
     let local_addr = listener.local_addr()?;
     let handle = Handle::new();
-    let server = axum_server::from_tcp_rustls(listener, RustlsConfig::from_config(tls))?
+    let acceptor = LoggingAcceptor(RustlsAcceptor::new(RustlsConfig::from_config(tls)));
+    let server = axum_server::from_tcp(listener)?
+        .acceptor(acceptor)
         .handle(handle.clone());
     let task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
     Ok(ServerHandle {
