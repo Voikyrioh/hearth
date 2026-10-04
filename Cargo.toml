@@ -30,6 +30,7 @@ gethostname = "1"
 mac_address = "1"
 time = "0.3"
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
