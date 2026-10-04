@@ -22,7 +22,7 @@ Les trois doivent passer avant tout commit.
 
 - Architecture hexagonale dans `hearth-agent` et `hearth-link` : `domain/` sans E/S ni dépendance vers axum, SQLx, système. Ports dans `application/ports/`.
 - Une règle métier vit dans `domain/` et a sa fiche `docs/business-rules/BR-*.md`, modifiée dans le même commit.
-- `unwrap` et `expect` interdits hors tests (lint en erreur). Erreurs : `thiserror` par couche, `anyhow` dans `main` seulement.
+- `unwrap` et `expect` interdits hors tests (lint en erreur). Erreurs : `thiserror` par couche, pas d'`anyhow` ; l'erreur fatale est journalisée une seule fois dans `main`.
 - `hearth-proto` : aucun type de framework, aucune E/S.
 - Le client ne parle à l'agent que par `hearth-link`. L'interface web n'ouvre aucune connexion réseau.
 - Textes d'interface : français, tutoiement, pas de tiret cadratin.

@@ -1,6 +1,11 @@
 # Business Rules — Hearth
 
-Règles métier par domaine. Chaque fiches `BR-{DOMAINE}-{NNN}.md` documente une règle : condition, acteur, action, résultat, exception. Aucune fiche pour l'instant ; à créer par story lors du dev.
+Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documente une règle : énoncé, code qui l'applique, vérification, cas limites. Créées par ticket lors du dev.
+
+## Fiches
+
+- [BR-CONN-001](./BR-CONN-001-verification-empreinte.md) — Empreinte du serveur : format 8 × 4 hexadécimaux et confirmation — `hearth-proto/src/fingerprint.rs::Fingerprint::short` — invariant ✓
+- [BR-INSTALL-004](./BR-INSTALL-004-empreinte-generee-une-fois.md) — Empreinte générée une seule fois, jamais modifiée — `domain/identity_policy.rs::decide` — invariant ✓
 
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
@@ -53,6 +58,6 @@ Première connexion vers un agent inconnu (pas dans `servers.json`).
 
 Logique métier = `crates/hearth-agent/src/domain/` (aucune I/O).
 Appel client = `crates/hearth-link/src/` (lib réutilisable).
-Routes HTTP = `crates/hearth-agent/src/entrypoint/http.rs`.
+Routes HTTP = `crates/hearth-agent/src/entrypoint/http/`.
 Entrypoint CLI = `crates/hearth-agent/src/entrypoint/cli.rs`.
 Front Vue = `apps/desktop/src/pages/` (par user story).

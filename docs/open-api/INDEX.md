@@ -6,7 +6,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
-| **Session** | GET | `/hello` | — | Info agent, versions, empreinte cert |
+| **Session** | GET | [`/hello`](./hello.md) | — | Identité de l'agent, plage de versions (l'empreinte se lit sur le certificat TLS) |
 | **Session** | POST | `/sessions` | — | Login (username + password) → token |
 | **Session** | DELETE | `/sessions/current` | user+ | Logout |
 | **Session** | GET | `/me` | user+ | Compte courant + rôle |
@@ -46,4 +46,5 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 
 - Idempotency : requêtes modifiantes portent `Idempotency-Key: <ULID>` (rejouer = même résultat).
 - Versioning : client envoie `X-Hearth-Api: <n>` ; serveur répond `X-Hearth-Api-Range: min-max`.
-- Réponses : `{ data: {...}, error: null }` (succès) ou `{ error: { code, message, details }, data: null }` (échec).
+- Réponses : succès = corps JSON propre à la route, sans enveloppe (ex. `/hello`) ; échec = `{ error: { code, message, details } }` (`hearth-proto::error::ErrorBody`).
+- Fiches de route détaillées : [hello](./hello.md).

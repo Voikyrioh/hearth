@@ -5,3 +5,4 @@ dist
 .env
 /apps/desktop/src-tauri/target
 /apps/desktop/src-tauri/gen
+/.dev-data
