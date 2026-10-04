@@ -22,6 +22,9 @@ pub enum ServerError {
     Io(#[from] io::Error),
     #[error("tâche du serveur interrompue : {0}")]
     Task(#[from] tokio::task::JoinError),
+    /// Le serveur s'est arrêté sans qu'aucun arrêt n'ait été demandé.
+    #[error("le serveur s'est arrêté sans signal d'arrêt")]
+    StoppedUnexpectedly,
 }
 
 /// Enveloppe l'acceptation TLS pour journaliser (niveau debug) les poignées de main refusées :
@@ -94,14 +97,52 @@ impl ServerHandle {
         Ok(())
     }
 
-    /// Sert jusqu'à `stop` (signal d'arrêt) ou jusqu'à la fin prématurée du serveur.
+    /// Sert jusqu'à `stop` (arrêt demandé, `Ok`). Une fin du serveur avant `stop` est une
+    /// erreur, même sans message : `StoppedUnexpectedly` ou l'erreur d'E/S d'origine.
     pub async fn run_until(mut self, stop: impl Future<Output = ()>) -> Result<(), ServerError> {
         tokio::select! {
             result = &mut self.task => {
                 result??;
-                Ok(())
+                Err(ServerError::StoppedUnexpectedly)
             }
             () = stop => self.shutdown().await,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::ports::IdentityStore;
+    use crate::infrastructure::tls::{self, FileIdentityStore};
+
+    fn started(dir: &std::path::Path) -> ServerHandle {
+        let store = FileIdentityStore::new(dir);
+        store.load_or_create().expect("identité");
+        let tls = tls::server_config(&store).expect("tls");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        spawn(listener, tls, Router::new()).expect("spawn")
+    }
+
+    #[tokio::test]
+    async fn a_server_that_ends_by_itself_is_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let server = started(dir.path());
+        server.handle.shutdown();
+        let result = server.run_until(std::future::pending()).await;
+        assert!(
+            matches!(result, Err(ServerError::StoppedUnexpectedly)),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_requested_stop_is_not_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let server = started(dir.path());
+        server
+            .run_until(std::future::ready(()))
+            .await
+            .expect("arrêt demandé");
     }
 }

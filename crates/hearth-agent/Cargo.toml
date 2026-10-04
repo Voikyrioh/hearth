@@ -19,7 +19,6 @@ path = "src/main.rs"
 
 [dependencies]
 hearth-proto.workspace = true
-anyhow.workspace = true
 axum.workspace = true
 axum-server.workspace = true
 clap.workspace = true

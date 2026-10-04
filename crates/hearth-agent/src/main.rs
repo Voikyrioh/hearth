@@ -12,17 +12,13 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     logging::init(cli.command() == Command::Fingerprint);
 
-    match run(cli).await {
+    match app::run(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            // Une erreur fatale passe par les journaux, comme tout le reste.
-            tracing::error!(error = %format!("{error:#}"), "arrêt sur erreur fatale");
+            // Une erreur fatale passe par les journaux, comme tout le reste. Chaque message
+            // porte déjà sa cause : on n'affiche pas la chaîne des sources en plus.
+            tracing::error!(%error, "arrêt sur erreur fatale");
             ExitCode::FAILURE
         }
     }
-}
-
-async fn run(cli: Cli) -> anyhow::Result<()> {
-    app::run(cli).await?;
-    Ok(())
 }
