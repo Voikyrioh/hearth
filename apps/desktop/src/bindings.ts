@@ -9,22 +9,29 @@ export const commands = {
 	getSettings: () => typedError<Settings, AppError>(__TAURI_INVOKE("get_settings")),
 	setLaunchAtStartup: (enabled: boolean) => typedError<Settings, AppError>(__TAURI_INVOKE("set_launch_at_startup", { enabled })),
 	getAppVersion: () => __TAURI_INVOKE<string>("get_app_version"),
+	openLogsFolder: () => typedError<null, AppError>(__TAURI_INVOKE("open_logs_folder")),
 };
 
 /* Types */
-/**  Erreur d'une commande. Sérialisée `{ kind, message }` côté TypeScript. */
+/**
+ *  Erreur d'une commande. Sérialisée `{ kind, message }` côté TypeScript ;
+ *  l'interface choisit son texte d'après `kind`.
+ */
 export type AppError = 
 /**  Lecture ou écriture des réglages locaux impossible. */
 { kind: "store"; message: string } | 
 /**  Lecture ou écriture de l'entrée de démarrage de Windows impossible. */
-{ kind: "autostart"; message: string };
+{ kind: "autostart"; message: string } | 
+/**  Dossier des journaux impossible à créer ou à ouvrir. */
+{ kind: "logs"; message: string };
 
-/**  Réglages locaux, tels que l'interface les voit. */
+/**
+ *  Réglages locaux, tels que l'interface les voit. Le fait que l'explication de
+ *  fermeture ait été montrée reste interne à la coquille.
+ */
 export type Settings = {
 	/**  Lancer Hearth au démarrage de Windows (désactivé par défaut, BR-CLIENT-006). */
 	launchAtStartup: boolean,
-	/**  L'explication de fermeture a déjà été montrée (BR-CLIENT-005). */
-	closeHintSeen: boolean,
 };
 
 /* Tauri Specta runtime */

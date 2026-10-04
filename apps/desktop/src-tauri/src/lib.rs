@@ -5,10 +5,11 @@
 mod commands;
 pub mod domain;
 pub mod error;
-mod settings;
-mod texts;
+pub mod logging;
+pub mod settings;
+pub mod texts;
 mod tray;
-mod window;
+pub mod window;
 
 use tauri::Manager as _;
 use tauri_plugin_autostart::MacosLauncher;
@@ -28,10 +29,16 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::get_settings,
         commands::set_launch_at_startup,
         commands::get_app_version,
+        commands::open_logs_folder,
     ])
 }
 
 pub fn run() {
+    // Le journal d'abord : sans console, c'est la seule trace d'un échec.
+    // Sans journal on démarre quand même ; un échec de démarrage sera dit à l'écran.
+    let _ = logging::init();
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "démarrage de Hearth");
+
     let builder = specta_builder();
 
     #[cfg(debug_assertions)]
@@ -54,7 +61,7 @@ pub fn run() {
         .setup(|app| {
             tray::build(app.handle())?;
             if domain::is_minimized_launch(std::env::args()) {
-                if let Some(main) = app.get_webview_window(window::MAIN_WINDOW) {
+                if let Some(main) = app.get_webview_window(domain::MAIN_WINDOW) {
                     main.hide()?;
                 }
             } else {
@@ -65,7 +72,18 @@ pub fn run() {
         .run(tauri::generate_context!());
 
     if let Err(error) = result {
-        eprintln!("Hearth n'a pas pu démarrer : {error}");
-        std::process::exit(1);
+        fail_startup(&error.to_string());
     }
+}
+
+/// Le démarrage a échoué : journal, boîte de message système avec le chemin du
+/// journal, code de sortie 1. Jamais de sortie silencieuse.
+fn fail_startup(error: &str) -> ! {
+    tracing::error!(error, "démarrage impossible");
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title(texts::STARTUP_FAILED_TITLE)
+        .set_description(texts::startup_failed_body(error, &logging::log_dir()))
+        .show();
+    std::process::exit(1);
 }

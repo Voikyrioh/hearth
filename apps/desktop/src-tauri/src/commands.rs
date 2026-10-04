@@ -5,7 +5,7 @@ use tauri::AppHandle;
 
 use crate::domain::Settings;
 use crate::error::AppError;
-use crate::settings;
+use crate::{logging, settings};
 
 #[tauri::command]
 #[specta::specta]
@@ -23,4 +23,10 @@ pub fn set_launch_at_startup(app: AppHandle, enabled: bool) -> Result<Settings, 
 #[specta::specta]
 pub fn get_app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn open_logs_folder() -> Result<(), AppError> {
+    logging::open_log_dir()
 }

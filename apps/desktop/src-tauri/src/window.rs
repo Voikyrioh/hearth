@@ -1,12 +1,12 @@
 //! Fenêtre principale : afficher, cacher, réagir à la fermeture.
 
+use std::path::Path;
+
 use tauri::{AppHandle, Manager, Runtime, Window, WindowEvent};
 use tauri_plugin_notification::NotificationExt as _;
 
-use crate::domain::{CloseOutcome, on_close_requested};
+use crate::domain::{MAIN_WINDOW, hides_on_close, should_explain_close};
 use crate::{settings, texts};
-
-pub const MAIN_WINDOW: &str = "main";
 
 /// Ramène la fenêtre au premier plan, restaurée si elle était réduite ou
 /// cachée (BR-CLIENT-003, BR-CLIENT-011).
@@ -26,39 +26,51 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// La croix cache la fenêtre au lieu de quitter (BR-CLIENT-004) et explique
-/// la première fois seulement (BR-CLIENT-005).
+/// La croix de la fenêtre principale la cache au lieu de quitter
+/// (BR-CLIENT-004) ; les autres fenêtres se ferment normalement.
 pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
-    let WindowEvent::CloseRequested { api, .. } = event else {
+    if !hides_on_close(window.label()) {
         return;
-    };
-    api.prevent_close();
+    }
+    if let WindowEvent::CloseRequested { api, .. } = event {
+        api.prevent_close();
+        let app = window.app_handle().clone();
+        hide_to_tray(window, Path::new(settings::STORE_FILE), move || {
+            notify_close_hint(&app);
+        });
+    }
+}
+
+/// Cache la fenêtre ; à la première fois seulement, demande l'explication
+/// (`notify`) puis le mémorise dans `store_file` (BR-CLIENT-005). Si le fichier
+/// des réglages est illisible, on se tait plutôt que de répéter l'explication.
+pub fn hide_to_tray<R: Runtime>(window: &Window<R>, store_file: &Path, notify: impl FnOnce()) {
     if let Err(error) = window.hide() {
         tracing::warn!(%error, "fenêtre non cachée");
     }
     let app = window.app_handle();
-    let seen = settings::close_hint_seen(app).unwrap_or_else(|error| {
+    let seen = settings::close_hint_seen(app, store_file).unwrap_or_else(|error| {
         tracing::warn!(%error, "lecture de « explication déjà vue » impossible");
         true
     });
-    if on_close_requested(seen) == CloseOutcome::HideAndExplain {
-        explain_close(app);
+    if should_explain_close(seen) {
+        notify();
+        if let Err(error) = settings::mark_close_hint_seen(app, store_file) {
+            tracing::warn!(%error, "mémorisation de l'explication impossible");
+        }
     }
 }
 
-fn explain_close<R: Runtime>(app: &AppHandle<R>) {
-    let shown = app
+/// Demande la notification d'explication au système. Le greffon ne dit pas si
+/// Windows l'a réellement affichée : « demandée » est tout ce qu'on peut garantir.
+fn notify_close_hint<R: Runtime>(app: &AppHandle<R>) {
+    if let Err(error) = app
         .notification()
         .builder()
         .title(texts::APP_NAME)
         .body(texts::CLOSE_HINT)
-        .show();
-    match shown {
-        Ok(()) => {
-            if let Err(error) = settings::mark_close_hint_seen(app) {
-                tracing::warn!(%error, "mémorisation de l'explication impossible");
-            }
-        }
-        Err(error) => tracing::warn!(%error, "notification d'explication non affichée"),
+        .show()
+    {
+        tracing::warn!(%error, "notification d'explication refusée");
     }
 }

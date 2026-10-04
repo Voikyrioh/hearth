@@ -1,11 +1,18 @@
 //! Règles pures de la coquille (BR-CLIENT-004, 005, 006, 007, 011).
+#![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
 use hearth_desktop_lib::domain::*;
 
 #[test]
-fn first_close_explains_then_stays_silent() {
-    assert_eq!(on_close_requested(false), CloseOutcome::HideAndExplain);
-    assert_eq!(on_close_requested(true), CloseOutcome::HideSilently);
+fn only_the_main_window_hides_on_close() {
+    assert!(hides_on_close(MAIN_WINDOW));
+    assert!(!hides_on_close("autre"));
+}
+
+#[test]
+fn the_close_explanation_is_given_once() {
+    assert!(should_explain_close(false));
+    assert!(!should_explain_close(true));
 }
 
 #[test]
@@ -30,13 +37,20 @@ fn minimized_launch_is_detected_from_the_startup_argument() {
 }
 
 #[test]
-fn settings_serialize_in_camel_case() {
+fn settings_expose_only_the_startup_option() {
     let json = serde_json::to_value(Settings {
         launch_at_startup: true,
-        close_hint_seen: false,
     });
     assert_eq!(
         json.ok(),
-        Some(serde_json::json!({ "launchAtStartup": true, "closeHintSeen": false }))
+        Some(serde_json::json!({ "launchAtStartup": true }))
     );
+}
+
+#[test]
+fn identifier_and_main_window_match_the_tauri_config() {
+    let raw = std::fs::read_to_string("tauri.conf.json").unwrap();
+    let config: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(config["identifier"], IDENTIFIER);
+    assert_eq!(config["app"]["windows"][0]["label"], MAIN_WINDOW);
 }

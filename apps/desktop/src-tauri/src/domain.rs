@@ -3,6 +3,12 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+/// Identifiant de l'application (`tauri.conf.json`) : nom du dossier de données.
+pub const IDENTIFIER: &str = "fr.voikyrioh.hearth";
+
+/// Étiquette de la fenêtre principale (`tauri.conf.json`).
+pub const MAIN_WINDOW: &str = "main";
+
 /// Argument passé par l'entrée de démarrage de Windows : l'application
 /// démarre alors réduite dans la zone de notification (BR-CLIENT-006/007).
 pub const MINIMIZED_FLAG: &str = "--minimized";
@@ -11,14 +17,13 @@ pub const MINIMIZED_FLAG: &str = "--minimized";
 pub const MENU_OPEN: &str = "open";
 pub const MENU_QUIT: &str = "quit";
 
-/// Réglages locaux, tels que l'interface les voit.
+/// Réglages locaux, tels que l'interface les voit. Le fait que l'explication de
+/// fermeture ait été montrée reste interne à la coquille.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     /// Lancer Hearth au démarrage de Windows (désactivé par défaut, BR-CLIENT-006).
     pub launch_at_startup: bool,
-    /// L'explication de fermeture a déjà été montrée (BR-CLIENT-005).
-    pub close_hint_seen: bool,
 }
 
 /// Lit un booléen du fichier de réglages ; absent ou mal typé = `false`
@@ -27,23 +32,15 @@ pub fn flag_from(value: Option<&serde_json::Value>) -> bool {
     value.and_then(serde_json::Value::as_bool).unwrap_or(false)
 }
 
-/// Ce que fait la fermeture de la fenêtre (BR-CLIENT-004, BR-CLIENT-005).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CloseOutcome {
-    /// Cacher la fenêtre sans rien dire.
-    HideSilently,
-    /// Cacher la fenêtre et expliquer, une seule fois.
-    HideAndExplain,
+/// Seule la fenêtre principale se cache dans la zone de notification : toute
+/// autre fenêtre se ferme normalement (BR-CLIENT-004).
+pub fn hides_on_close(window_label: &str) -> bool {
+    window_label == MAIN_WINDOW
 }
 
-/// La croix cache toujours la fenêtre ; l'explication n'est donnée qu'à la
-/// première fermeture.
-pub fn on_close_requested(close_hint_seen: bool) -> CloseOutcome {
-    if close_hint_seen {
-        CloseOutcome::HideSilently
-    } else {
-        CloseOutcome::HideAndExplain
-    }
+/// L'explication de la réduction n'est donnée qu'une fois (BR-CLIENT-005).
+pub fn should_explain_close(close_hint_seen: bool) -> bool {
+    !close_hint_seen
 }
 
 /// Entrées du menu de la zone de notification (BR-CLIENT-011).

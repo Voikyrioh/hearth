@@ -1,5 +1,6 @@
 //! Les types TypeScript committés doivent refléter les commandes Rust.
 //! Régénération : `HEARTH_REGEN_BINDINGS=1 cargo test -p hearth-desktop`.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
 use hearth_desktop_lib::{BINDINGS_PATH, specta_builder, typescript};
 

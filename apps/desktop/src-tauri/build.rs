@@ -2,7 +2,12 @@ use tauri_build::{AppManifest, Attributes};
 
 /// Commandes exposées à l'interface : liste blanche, gardée en phase avec
 /// `capabilities/default.json` (une permission `allow-*` par commande).
-const COMMANDS: &[&str] = &["get_settings", "set_launch_at_startup", "get_app_version"];
+const COMMANDS: &[&str] = &[
+    "get_settings",
+    "set_launch_at_startup",
+    "get_app_version",
+    "open_logs_folder",
+];
 
 fn main() {
     // Les tests d'intégration (`tests/`) ne reçoivent pas le manifeste de Tauri :
