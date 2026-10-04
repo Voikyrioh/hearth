@@ -7,12 +7,17 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use time::OffsetDateTime;
 
 use super::account_repo::{RESOURCE, find_by_id, find_by_username};
+
 use super::convert::{format_date, is_unique_violation, storage};
 use super::session_repo::close_sessions;
 use crate::application::ports::{Store, StoreError, UnitOfWork};
 use crate::domain::accounts::{Account, AccountId, Role, Username};
 use crate::domain::secret::Secret;
 use crate::domain::sessions::SessionClosure;
+
+/// Ressource nommée par les erreurs d'ouverture et de validation d'une unité de travail : le
+/// magasin lui-même, pas un sujet (comptes, sessions…).
+const STORE: &str = "store";
 
 pub struct SqliteStore {
     pool: SqlitePool,
@@ -31,7 +36,7 @@ impl Store for SqliteStore {
             .pool
             .begin_with("BEGIN IMMEDIATE")
             .await
-            .map_err(storage(RESOURCE))?;
+            .map_err(storage(STORE))?;
         Ok(Box::new(SqliteUnitOfWork { tx }))
     }
 }
@@ -143,6 +148,6 @@ impl UnitOfWork for SqliteUnitOfWork {
     }
 
     async fn commit(self: Box<Self>) -> Result<(), StoreError> {
-        self.tx.commit().await.map_err(storage(RESOURCE))
+        self.tx.commit().await.map_err(storage(STORE))
     }
 }

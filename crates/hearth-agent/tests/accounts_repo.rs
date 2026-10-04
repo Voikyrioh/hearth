@@ -294,3 +294,16 @@ async fn list_orders_accounts_created_within_the_same_second() {
         .collect();
     assert_eq!(names, ["first", "later"]);
 }
+
+#[tokio::test]
+async fn a_failure_to_open_a_unit_of_work_names_the_store_not_a_subject() {
+    let env = env().await;
+    env.db.pool().close().await;
+    let error = match store(&env).begin().await {
+        Ok(_) => panic!("la base fermée ne doit pas ouvrir d'unité de travail"),
+        Err(error) => error,
+    };
+    let message = error.to_string();
+    assert!(message.contains("store"), "{message}");
+    assert!(!message.contains("accounts"), "{message}");
+}
