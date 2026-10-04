@@ -22,7 +22,8 @@ use tokio::sync::broadcast;
 use super::ports::{Clock, GpuProbe, MonotonicClock, ProbeError, SystemProbe};
 use crate::domain::machine::MachineIdentity;
 use crate::domain::metrics::{
-    HistoryWindow, IDENTITY_MAX_AGE, Ring, SAMPLE_TIMEOUT, Sample, window_samples,
+    HistoryWindow, IDENTITY_MAX_AGE, IDENTITY_RETRY_AFTER, Ring, SAMPLE_TIMEOUT, Sample,
+    window_samples,
 };
 
 /// Échantillons que garde un abonné avant d'en perdre : un abonné lent perd les plus anciens, il
@@ -76,7 +77,24 @@ pub struct MetricsService {
     /// Un épisode de blocage est déjà journalisé : pas de répétition à chaque seconde.
     stalled: AtomicBool,
     identity_flight: Flight,
-    identity: tokio::sync::Mutex<Option<(Duration, MachineIdentity)>>,
+    identity: Mutex<IdentityCache>,
+}
+
+/// Dernière identité lue et, après un échec, l'instant avant lequel on ne retente pas.
+#[derive(Default)]
+struct IdentityCache {
+    value: Option<(Duration, MachineIdentity)>,
+    retry_after: Option<Duration>,
+}
+
+impl IdentityCache {
+    /// La dernière identité connue, périmée au besoin ; `Stalled` s'il n'y en a jamais eu.
+    fn stale(&self) -> Result<MachineIdentity, MetricsError> {
+        self.value
+            .as_ref()
+            .map(|(_, identity)| identity.clone())
+            .ok_or(MetricsError::Stalled)
+    }
 }
 
 impl MetricsService {
@@ -97,7 +115,7 @@ impl MetricsService {
             sampling: Flight::default(),
             stalled: AtomicBool::new(false),
             identity_flight: Flight::default(),
-            identity: tokio::sync::Mutex::new(None),
+            identity: Mutex::default(),
         }
     }
 
@@ -113,43 +131,58 @@ impl MetricsService {
         self
     }
 
-    /// Identité de la machine : celle du cache, rafraîchie au plus toutes les
-    /// `IDENTITY_MAX_AGE`. Une sonde qui ne répond pas ne bloque pas : on sert le cache, périmé
-    /// s'il le faut (erreur seulement s'il n'y en a jamais eu).
+    /// Identité de la machine : celle du cache, rafraîchie au plus toutes les `IDENTITY_MAX_AGE`,
+    /// et aussitôt si la liste des cartes graphiques connues a changé (une carte vue pour la
+    /// première fois). Le verrou du cache n'est jamais tenu pendant l'attente de la sonde. Après un
+    /// échec ou un délai dépassé, on ne retente pas avant `IDENTITY_RETRY_AFTER` et on sert la
+    /// dernière identité connue (`Stalled` s'il n'y en a jamais eu : « pas encore lue »).
     pub async fn identity(&self) -> Result<MachineIdentity, MetricsError> {
-        let mut cache = self.identity.lock().await;
         let now = self.mono.elapsed();
-        if let Some((at, identity)) = cache.as_ref()
-            && now - *at < IDENTITY_MAX_AGE
+        // Lecture rapide de l'état déjà connu (mutex en mémoire, ou quelques petits fichiers du
+        // noyau) : pas d'attente de sonde.
+        let known_gpus = self.gpu.detect();
         {
-            return Ok(identity.clone());
-        }
-        let refreshed = match self.identity_flight.try_acquire() {
-            Some(guard) => {
-                let probe = self.probe.clone();
-                let gpu = self.gpu.clone();
-                let task = tokio::task::spawn_blocking(move || {
-                    let _guard = guard;
-                    let mut identity = probe.identity();
-                    identity.gpus = gpu.detect();
-                    identity
-                });
-                tokio::time::timeout(self.sample_timeout, task)
-                    .await
-                    .ok()
-                    .and_then(Result::ok)
+            let cache = self.identity.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some((at, identity)) = cache.value.as_ref()
+                && now - *at < IDENTITY_MAX_AGE
+                && identity.gpus == known_gpus
+            {
+                return Ok(identity.clone());
             }
-            None => None,
+            if cache.retry_after.is_some_and(|retry| now < retry) {
+                return cache.stale();
+            }
+        }
+        let Some(guard) = self.identity_flight.try_acquire() else {
+            return self
+                .identity
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .stale();
         };
+        let probe = self.probe.clone();
+        let gpu = self.gpu.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            let mut identity = probe.identity();
+            identity.gpus = gpu.detect();
+            identity
+        });
+        let refreshed = tokio::time::timeout(self.sample_timeout, task)
+            .await
+            .ok()
+            .and_then(Result::ok);
+        let mut cache = self.identity.lock().unwrap_or_else(PoisonError::into_inner);
         match refreshed {
             Some(identity) => {
-                *cache = Some((now, identity.clone()));
+                cache.value = Some((now, identity.clone()));
+                cache.retry_after = None;
                 Ok(identity)
             }
-            None => match cache.as_ref() {
-                Some((_, stale)) => Ok(stale.clone()),
-                None => Err(MetricsError::Stalled),
-            },
+            None => {
+                cache.retry_after = Some(now + IDENTITY_RETRY_AFTER);
+                cache.stale()
+            }
         }
     }
 
@@ -458,14 +491,12 @@ mod tests {
             assert!(metrics.identity().await.unwrap().capabilities().gpu);
         }
         assert_eq!(probe.identities.load(Ordering::SeqCst), 1);
-        // La carte disparaît un instant (relance de `nvidia-smi`) : le cache la garde.
-        gpus.0.lock().unwrap().clear();
         time.advance(29);
         assert!(metrics.identity().await.unwrap().capabilities().gpu);
         assert_eq!(probe.identities.load(Ordering::SeqCst), 1);
         // Passé le délai, l'identité est relue.
         time.advance(2);
-        assert!(!metrics.identity().await.unwrap().capabilities().gpu);
+        assert!(metrics.identity().await.unwrap().capabilities().gpu);
         assert_eq!(probe.identities.load(Ordering::SeqCst), 2);
     }
 
@@ -550,6 +581,68 @@ mod tests {
         }
         assert!(taken, "la mesure doit reprendre quand la sonde revient");
         assert_eq!(metrics.history(HistoryWindow::FiveMinutes).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_card_seen_for_the_first_time_invalidates_the_identity_cache_at_once() {
+        let time = Time::new();
+        let probe = Arc::new(FakeProbe::default());
+        let gpus = FakeGpu::new(vec![]);
+        let metrics = MetricsService::new(probe.clone(), gpus.clone(), time.clone(), time.clone());
+        assert!(!metrics.identity().await.unwrap().capabilities().gpu);
+        assert_eq!(probe.identities.load(Ordering::SeqCst), 1);
+        // Une carte apparaît : bien avant les 30 s, l'identité est relue et la contient.
+        gpus.0.lock().unwrap().push(GpuIdentity {
+            name: "RTX".into(),
+            memory_total_bytes: None,
+        });
+        time.advance(1);
+        assert!(metrics.identity().await.unwrap().capabilities().gpu);
+        assert_eq!(probe.identities.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn after_a_slow_read_the_identity_is_not_retried_for_five_seconds() {
+        let time = Time::new();
+        let probe = Arc::new(FakeProbe {
+            sleep_on: Some((0, StdDuration::from_millis(400))),
+            ..FakeProbe::default()
+        });
+        let metrics = MetricsService::new(
+            probe.clone(),
+            FakeGpu::new(vec![]),
+            time.clone(),
+            time.clone(),
+        )
+        .with_sample_timeout(StdDuration::from_millis(50));
+        // Un échantillon qui dort tient la sonde ; l'identité n'a jamais été lue : erreur claire.
+        assert!(matches!(
+            metrics.sample_once().await,
+            Err(MetricsError::Stalled)
+        ));
+        assert!(matches!(
+            metrics.identity().await,
+            Err(MetricsError::Stalled)
+        ));
+        // Dans les 5 s : aucune nouvelle tentative (aucun fil de plus bloqué sur la sonde).
+        time.advance(4);
+        assert!(matches!(
+            metrics.identity().await,
+            Err(MetricsError::Stalled)
+        ));
+        eventually("la lecture bloquée est revenue", || {
+            metrics.identity_flight.try_acquire().is_some()
+        })
+        .await;
+        assert_eq!(
+            probe.identities.load(Ordering::SeqCst),
+            1,
+            "une seule lecture lancée : la seconde tentative a attendu"
+        );
+        // Passé le délai, la lecture se fait (la sonde répond de nouveau).
+        time.advance(2);
+        assert!(metrics.identity().await.is_ok());
+        assert_eq!(probe.identities.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

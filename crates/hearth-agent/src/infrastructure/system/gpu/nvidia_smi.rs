@@ -213,7 +213,7 @@ fn locate_on_this_machine() -> Option<OsString> {
 /// Comment la sonde trouve et lance son processus, et ses délais : réglables pour les tests.
 pub struct Launch {
     /// Chemin du programme, `None` s'il est introuvable (la recherche est refaite plus tard).
-    pub locate: Box<dyn Fn() -> Option<OsString> + Send + Sync>,
+    pub locate: Arc<dyn Fn() -> Option<OsString> + Send + Sync>,
     pub args: Vec<OsString>,
     /// Premier délai avant une relance (double jusqu'à 60 s).
     pub first_restart: Duration,
@@ -227,7 +227,7 @@ impl Launch {
     /// `nvidia-smi` en mode continu, trouvé sur la machine.
     pub fn nvidia_smi() -> Self {
         Self {
-            locate: Box::new(locate_on_this_machine),
+            locate: Arc::new(locate_on_this_machine),
             args: vec![
                 OsString::from(format!("--query-gpu={QUERY}")),
                 OsString::from("--format=csv,noheader,nounits"),
@@ -297,7 +297,13 @@ async fn supervise(launch: Launch, latest: Arc<Latest>) {
     let mut delay = launch.first_restart;
     let mut warned_missing = false;
     loop {
-        let Some(program) = (launch.locate)() else {
+        // La recherche parcourt le PATH et le disque : hors du runtime asynchrone.
+        let locate = launch.locate.clone();
+        let found = tokio::task::spawn_blocking(move || locate())
+            .await
+            .ok()
+            .flatten();
+        let Some(program) = found else {
             if !warned_missing {
                 warned_missing = true;
                 tracing::info!(
@@ -522,7 +528,7 @@ mod tests {
         args: Vec<OsString>,
     ) -> Launch {
         Launch {
-            locate: Box::new(locate),
+            locate: Arc::new(locate),
             args,
             first_restart: Duration::from_millis(20),
             rescan: Duration::from_millis(10),

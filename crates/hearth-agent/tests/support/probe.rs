@@ -84,6 +84,41 @@ impl SystemProbe for FakeSystem {
     }
 }
 
+/// Cartes qui apparaissent en cours de route : `set` change la liste détectée.
+#[derive(Default)]
+pub struct ToggleGpu(std::sync::Mutex<Vec<GpuIdentity>>);
+
+impl ToggleGpu {
+    pub fn set(&self, names: &[&str]) {
+        *self.0.lock().unwrap() = names
+            .iter()
+            .map(|name| GpuIdentity {
+                name: (*name).into(),
+                memory_total_bytes: Some(8 << 30),
+            })
+            .collect();
+    }
+}
+
+impl GpuProbe for ToggleGpu {
+    fn detect(&self) -> Vec<GpuIdentity> {
+        self.0.lock().unwrap().clone()
+    }
+
+    fn sample(&self) -> Vec<GpuReading> {
+        self.detect()
+            .into_iter()
+            .map(|gpu| GpuReading {
+                name: gpu.name,
+                load_percent: Some(1.0),
+                memory_used_bytes: None,
+                memory_total_bytes: gpu.memory_total_bytes,
+                temp_c: None,
+            })
+            .collect()
+    }
+}
+
 pub struct FakeGpu;
 
 impl GpuProbe for FakeGpu {
@@ -112,6 +147,8 @@ pub fn fast_stream() -> StreamSettings {
         idle_timeout: Duration::from_secs(10),
         session_check_period: Duration::from_millis(50),
         send_timeout: Duration::from_secs(5),
+        max_pending_total: 16,
+        max_pending_per_address: 8,
         max_total: 32,
         max_per_account: 4,
         min_subscribe_interval: Duration::from_millis(50),

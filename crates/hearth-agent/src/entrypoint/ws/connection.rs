@@ -93,6 +93,9 @@ struct Subscriptions {
     last_sent: Option<time::Duration>,
     /// Dernier `subscribe` accepté : un par seconde au plus.
     last_subscribe: Option<Instant>,
+    /// Cartes graphiques de l'identité envoyée dans le dernier `snapshot` : une carte qui
+    /// apparaît ensuite déclenche un nouveau `snapshot`.
+    snapshot_gpus: Vec<crate::domain::machine::GpuIdentity>,
 }
 
 /// Reçoit le prochain élément d'un abonnement, ou attend sans fin s'il n'y en a pas.
@@ -129,17 +132,21 @@ async fn serve(socket: &mut WebSocket, state: &AppState, mut permit: Permit) -> 
     };
 
     // Plafond de flux par compte, une fois le compte connu.
-    if !permit.bind_account(session.account.id.as_str(), settings.max_per_account) {
+    if !permit.authenticate(
+        session.account.id.as_str(),
+        settings.max_total,
+        settings.max_per_account,
+    ) {
         send(
             socket,
             &settings,
             &error_message(
                 ErrorCode::Busy,
-                "Ce compte a déjà trop de flux ouverts : ferme-en un avant d'en ouvrir un autre",
+                "Trop de flux ouverts (sur l'agent ou pour ce compte) : ferme-en un avant d'en ouvrir un autre",
             ),
         )
         .await;
-        return policy("trop de flux pour ce compte");
+        return policy("trop de flux ouverts");
     }
 
     // 2. Flux : abonnements, échantillons, battement, session.
@@ -211,6 +218,16 @@ async fn serve(socket: &mut WebSocket, state: &AppState, mut permit: Permit) -> 
             _ = check.tick() => {
                 match state.sessions.authenticate(token.expose()).await {
                     Ok(current) => {
+                        // Une carte graphique apparue depuis le dernier snapshot : l'identité a
+                        // changé, le client en reçoit un nouveau.
+                        if subscriptions.metrics.is_some()
+                            && state.metrics.identity().await.is_ok_and(|identity| identity.gpus != subscriptions.snapshot_gpus)
+                        {
+                            let snapshot = metrics_snapshot(state, &mut subscriptions).await;
+                            if !send(socket, &settings, &snapshot).await {
+                                return None;
+                            }
+                        }
                         // Le rôle a pu changer pendant le flux (`change_role` ne ferme pas les
                         // sessions) : le sujet `audit` se perd avec le droit de le lire.
                         session = current;
@@ -346,6 +363,29 @@ async fn handle_text(
 
 /// Remplace les abonnements par les sujets demandés ; rend les messages à envoyer. S'abonner à
 /// `metrics` répond par un `snapshot` (identité et historique des 5 dernières minutes).
+/// Abonne la connexion aux mesures et rend le `snapshot` (ou l'erreur) à envoyer. S'abonner AVANT
+/// de lire l'historique : aucun échantillon n'échappe, ceux que le snapshot contient déjà sont
+/// écartés à l'envoi (`is_new`).
+async fn metrics_snapshot(state: &AppState, subscriptions: &mut Subscriptions) -> ServerMessage {
+    let receiver = state.metrics.subscribe();
+    let history = state.metrics.history(SNAPSHOT_WINDOW);
+    match state.metrics.identity().await {
+        Ok(identity) => {
+            subscriptions.last_sent = history.last().map(|sample| sample.mono);
+            subscriptions.metrics = Some(receiver);
+            subscriptions.snapshot_gpus = identity.gpus.clone();
+            ServerMessage::Snapshot {
+                machine: metrics_wire::machine(&identity),
+                history: history
+                    .iter()
+                    .map(|sample| metrics_wire::sample(sample))
+                    .collect(),
+            }
+        }
+        Err(error) => from_api(ApiError::internal(&error)),
+    }
+}
+
 async fn subscribe(
     state: &AppState,
     session: &CurrentSession,
@@ -358,24 +398,7 @@ async fn subscribe(
     subscriptions.last_sent = None;
 
     if topics.contains(&Topic::Metrics) {
-        // S'abonner AVANT de lire l'historique : aucun échantillon n'échappe, ceux que le
-        // snapshot contient déjà sont écartés à l'envoi (`is_new`).
-        let receiver = state.metrics.subscribe();
-        let history = state.metrics.history(SNAPSHOT_WINDOW);
-        match state.metrics.identity().await {
-            Ok(identity) => {
-                subscriptions.last_sent = history.last().map(|sample| sample.mono);
-                subscriptions.metrics = Some(receiver);
-                out.push(ServerMessage::Snapshot {
-                    machine: metrics_wire::machine(&identity),
-                    history: history
-                        .iter()
-                        .map(|sample| metrics_wire::sample(sample))
-                        .collect(),
-                });
-            }
-            Err(error) => out.push(from_api(ApiError::internal(&error))),
-        }
+        out.push(metrics_snapshot(state, subscriptions).await);
     }
     if topics.contains(&Topic::Audit) {
         if session.account.role.can_read_audit() {

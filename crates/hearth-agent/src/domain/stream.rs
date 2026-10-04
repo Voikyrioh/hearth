@@ -22,11 +22,19 @@ pub const SESSION_CHECK_PERIOD: Duration = Duration::from_secs(5);
 /// ni l'agent ni les autres abonnés.
 pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Flux ouverts en même temps, au total.
+/// Flux **authentifiés** ouverts en même temps, au total.
 pub const MAX_STREAMS_TOTAL: usize = 32;
 
-/// Flux ouverts en même temps par un même compte.
+/// Flux authentifiés ouverts en même temps par un même compte.
 pub const MAX_STREAMS_PER_ACCOUNT: usize = 4;
+
+/// Connexions **pas encore authentifiées** en attente de leur `auth`, au total. Quota distinct de
+/// celui des flux : un anonyme qui ouvre des connexions muettes ne prend jamais la place d'un
+/// flux authentifié.
+pub const MAX_PENDING_TOTAL: usize = 16;
+
+/// Connexions en attente d'authentification depuis une même adresse.
+pub const MAX_PENDING_PER_ADDRESS: usize = 2;
 
 /// Délai minimal entre deux `subscribe` d'une même connexion : chacun coûte un `snapshot`.
 pub const MIN_SUBSCRIBE_INTERVAL: Duration = Duration::from_secs(1);
@@ -38,30 +46,10 @@ pub fn is_new(last_sent: Option<MonoDuration>, mono: MonoDuration) -> bool {
     last_sent.is_none_or(|last| mono > last)
 }
 
-/// Un nouveau flux est-il admis ?
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Admission {
-    Admitted,
-    /// L'agent a déjà trop de flux ouverts.
-    TotalFull,
-    /// Ce compte a déjà trop de flux ouverts.
-    AccountFull,
-}
-
-/// Décide d'après le nombre de flux déjà ouverts (au total, et pour ce compte).
-pub fn admission(
-    open_total: usize,
-    open_for_account: usize,
-    max_total: usize,
-    max_per_account: usize,
-) -> Admission {
-    if open_total >= max_total {
-        Admission::TotalFull
-    } else if open_for_account >= max_per_account {
-        Admission::AccountFull
-    } else {
-        Admission::Admitted
-    }
+/// Reste-t-il de la place : sous le plafond total **et** sous le plafond de celui qui demande
+/// (une adresse pour les connexions en attente, un compte pour les flux) ?
+pub fn within_caps(open_total: usize, open_own: usize, max_total: usize, max_own: usize) -> bool {
+    open_total < max_total && open_own < max_own
 }
 
 /// Un `subscribe` est-il admis, sachant le temps écoulé depuis le précédent de la connexion ?
@@ -89,13 +77,18 @@ mod tests {
     }
 
     #[test]
-    fn streams_are_admitted_up_to_the_caps() {
-        assert_eq!(admission(0, 0, 32, 4), Admission::Admitted);
-        assert_eq!(admission(31, 3, 32, 4), Admission::Admitted);
-        assert_eq!(admission(31, 4, 32, 4), Admission::AccountFull);
-        assert_eq!(admission(32, 0, 32, 4), Admission::TotalFull);
-        // Le plafond total prime : l'agent plein refuse tout le monde.
-        assert_eq!(admission(32, 4, 32, 4), Admission::TotalFull);
+    fn a_request_is_admitted_below_both_caps_only() {
+        assert!(within_caps(0, 0, 32, 4));
+        assert!(within_caps(31, 3, 32, 4));
+        assert!(!within_caps(31, 4, 32, 4), "plafond du demandeur");
+        assert!(!within_caps(32, 0, 32, 4), "plafond total");
+        assert!(!within_caps(32, 4, 32, 4));
+    }
+
+    #[test]
+    fn the_pre_authentication_quota_is_small_and_distinct() {
+        assert_eq!(MAX_PENDING_PER_ADDRESS, 2);
+        const { assert!(MAX_PENDING_TOTAL < MAX_STREAMS_TOTAL) };
     }
 
     #[test]

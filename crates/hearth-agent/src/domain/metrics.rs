@@ -24,6 +24,9 @@ pub const SAMPLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2
 /// eux, portent la liste à jour chaque seconde).
 pub const IDENTITY_MAX_AGE: Duration = Duration::seconds(30);
 
+/// Après une lecture d'identité échouée ou trop lente, on ne retente pas avant ce délai.
+pub const IDENTITY_RETRY_AFTER: Duration = Duration::seconds(5);
+
 /// Taille de l'anneau : une heure à un échantillon par seconde. Rien n'est écrit sur disque.
 pub const RING_CAPACITY: usize = 3_600;
 

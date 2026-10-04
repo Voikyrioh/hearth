@@ -16,7 +16,7 @@ use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{ServerMessage, SessionNotice, Topic};
 use serde_json::{Value, json};
 use support::https::{self, Agent};
-use support::probe::{FakeSystem, fast_stream, metering, metering_with};
+use support::probe::{FakeSystem, ToggleGpu, fast_stream, metering, metering_with};
 use support::ws::{self, End, WsClient};
 use support::{Env, PASSWORD, env};
 use time::OffsetDateTime;
@@ -307,14 +307,12 @@ async fn a_client_that_stops_reading_is_dropped_and_blocks_nobody() {
         }
     });
 
-    // Les deux places sont prises : un troisième flux est refusé tant que le bloqué est là.
-    assert_eq!(
-        ws::connect(&agent, Some("1")).await.err().unwrap().status,
-        503
-    );
+    // Les deux places de flux sont prises : un troisième flux authentifié est refusé tant que le
+    // bloqué est là, puis accepté quand il est abandonné et sa place rendue.
+    assert!(try_stream(&agent, &token).await.is_none());
     eventually(
         "le client bloqué est abandonné et sa place rendue",
-        || async { ws::connect(&agent, Some("1")).await.is_ok() },
+        || async { try_stream(&agent, &token).await.is_some() },
     )
     .await;
 
@@ -330,8 +328,20 @@ async fn a_client_that_stops_reading_is_dropped_and_blocks_nobody() {
     agent.shutdown().await;
 }
 
+/// Ouvre un flux authentifié et abonné aux mesures : `Some` s'il est accepté (snapshot reçu),
+/// `None` s'il est refusé (ouverture refusée, ou erreur `BUSY` après `auth`).
+async fn try_stream(agent: &Agent, token: &str) -> Option<WsClient> {
+    let mut client = ws::connect(agent, Some("1")).await.ok()?;
+    client.auth(token).await;
+    client.subscribe(&[Topic::Metrics]).await;
+    match client.next().await {
+        Ok(ServerMessage::Snapshot { .. }) => Some(client),
+        _ => None,
+    }
+}
+
 #[tokio::test]
-async fn the_number_of_open_streams_is_capped_in_total_and_per_account() {
+async fn authenticated_streams_are_capped_in_total_and_per_account() {
     let env = env().await;
     let mut config = metering();
     config.stream.max_total = 3;
@@ -339,11 +349,12 @@ async fn the_number_of_open_streams_is_capped_in_total_and_per_account() {
     let agent = https::start_metered(&env, config).await;
     let lucas = token(&env, &agent, "lucas", Role::ReadOnly).await;
     let marie = token(&env, &agent, "marie", Role::ReadOnly).await;
+    let paul = token(&env, &agent, "paul", Role::ReadOnly).await;
 
-    let (first, _) = subscribed(&agent, &lucas).await;
-    let (_second, _) = subscribed(&agent, &lucas).await;
+    let first = try_stream(&agent, &lucas).await.expect("1er flux de lucas");
+    let _second = try_stream(&agent, &lucas).await.expect("2e flux de lucas");
 
-    // Un troisième flux de lucas : refusé après l'authentification, au format d'erreur, code BUSY.
+    // Un troisième flux de lucas : refusé après l'authentification, au format d'erreur, BUSY.
     let mut third = ws::open(&agent).await;
     third.auth(&lucas).await;
     let ServerMessage::Error(error) = third.expect().await else {
@@ -352,39 +363,129 @@ async fn the_number_of_open_streams_is_capped_in_total_and_per_account() {
     assert_eq!(error.code, ErrorCode::Busy);
     assert_eq!(third.until_end().await, End::Closed(1008));
 
-    // Un autre compte passe tant que l'agent n'est pas plein (la place du refusé est rendue).
-    let started = Instant::now();
-    let mut marie_stream = loop {
-        match ws::connect(&agent, Some("1")).await {
-            Ok(client) => break client,
-            Err(_) => {
-                assert!(
-                    started.elapsed() < Duration::from_secs(60),
-                    "place non rendue"
-                );
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        }
-    };
-    marie_stream.auth(&marie).await;
-    marie_stream.subscribe(&[Topic::Metrics]).await;
-    assert!(matches!(
-        marie_stream.expect().await,
-        ServerMessage::Snapshot { .. }
-    ));
-
-    // L'agent est plein : refus dès l'ouverture, 503 BUSY.
-    assert_eq!(
-        ws::connect(&agent, Some("1")).await.err().unwrap().status,
-        503
-    );
+    // Un autre compte passe tant que l'agent n'est pas plein.
+    let _marie = try_stream(&agent, &marie).await.expect("flux de marie");
+    // L'agent a 3 flux : un quatrième, même d'un autre compte, est refusé.
+    assert!(try_stream(&agent, &paul).await.is_none());
 
     // Un flux fermé rend sa place.
     drop(first);
-    eventually("une place est rendue", || async {
+    eventually("une place de flux est rendue", || async {
+        try_stream(&agent, &paul).await.is_some()
+    })
+    .await;
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_address_holds_at_most_two_waiting_connections_and_every_path_gives_them_back() {
+    let env = env().await;
+    let mut config = metering();
+    config.stream.max_pending_per_address = 2;
+    let agent = https::start_metered(&env, config).await;
+    let status = |result: Result<WsClient, support::ws::Refused>| result.err().map(|r| r.status);
+
+    // Deux connexions muettes tiennent les deux places d'attente de cette adresse.
+    let mut silent_a = ws::open(&agent).await;
+    let silent_b = ws::open(&agent).await;
+    assert_eq!(status(ws::connect(&agent, Some("1")).await), Some(503));
+
+    // Délai d'authentification dépassé : erreur, fermeture, place rendue.
+    assert!(matches!(silent_a.expect().await, ServerMessage::Error(_)));
+    assert_eq!(silent_a.until_end().await, End::Closed(1008));
+    eventually("place rendue après le délai d'authentification", || async {
         ws::connect(&agent, Some("1")).await.is_ok()
     })
     .await;
+
+    // Coupure du client : place rendue.
+    drop(silent_b);
+    let mut bad = loop {
+        if let Ok(client) = ws::connect(&agent, Some("1")).await {
+            break client;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    // Erreur d'authentification : message, fermeture, place rendue.
+    bad.auth("pas-un-jeton").await;
+    assert!(matches!(bad.expect().await, ServerMessage::Error(_)));
+    assert_eq!(bad.until_end().await, End::Closed(1008));
+    eventually("deux places rendues", || async {
+        let one = ws::connect(&agent, Some("1")).await;
+        let two = ws::connect(&agent, Some("1")).await;
+        one.is_ok() && two.is_ok()
+    })
+    .await;
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn silent_anonymous_connections_never_take_a_stream_place() {
+    let env = env().await;
+    let mut config = metering();
+    // Les anonymes ne sont pas coupés pendant le test ; les quotas d'attente sont ceux de
+    // production (16 au total) ; un seul compte, deux places de flux.
+    config.stream.auth_timeout = Duration::from_secs(60);
+    config.stream.max_pending_per_address = 16;
+    config.stream.max_total = 2;
+    let agent = https::start_metered(&env, config).await;
+    let token = token(&env, &agent, "lucas", Role::ReadOnly).await;
+
+    // 15 anonymes muets (plus un client légitime : le quota d'attente est de 16).
+    let mut silent = Vec::new();
+    for _ in 0..15 {
+        silent.push(ws::open(&agent).await);
+    }
+    // Le client légitime s'authentifie et obtient sa place de flux : les anonymes n'en
+    // consomment aucune. Il en obtient même une deuxième dès qu'une place d'attente se libère.
+    let mut legit = ws::open(&agent).await;
+    legit.auth(&token).await;
+    legit.subscribe(&[Topic::Metrics]).await;
+    assert!(matches!(
+        legit.expect().await,
+        ServerMessage::Snapshot { .. }
+    ));
+    // Au-delà de 16 attentes, refus dès l'ouverture, 503 BUSY.
+    let extra = ws::open(&agent).await;
+    assert_eq!(
+        ws::connect(&agent, Some("1")).await.err().map(|r| r.status),
+        Some(503)
+    );
+    drop(extra);
+    drop(silent);
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_card_appearing_after_the_snapshot_gets_the_subscriber_a_new_snapshot() {
+    let env = env().await;
+    let gpu = Arc::new(ToggleGpu::default());
+    let mut config = metering();
+    config.gpu = gpu.clone();
+    let agent = https::start_metered(&env, config).await;
+    let token = token(&env, &agent, "lucas", Role::ReadOnly).await;
+
+    let mut client = ws::open(&agent).await;
+    client.auth(&token).await;
+    client.subscribe(&[Topic::Metrics]).await;
+    let ServerMessage::Snapshot { machine, .. } = client.expect().await else {
+        panic!("le snapshot vient en premier");
+    };
+    assert!(!machine.capabilities.gpu);
+
+    // Une carte apparaît : le client reçoit un nouveau snapshot avec la carte.
+    gpu.set(&["RTX nouvelle"]);
+    let updated = loop {
+        match client.expect().await {
+            ServerMessage::Metrics(_) => {}
+            ServerMessage::Snapshot { machine, .. } => break machine,
+            other => panic!("inattendu : {other:?}"),
+        }
+    };
+    assert!(updated.capabilities.gpu);
+    assert_eq!(updated.gpus[0].name, "RTX nouvelle");
+    // Et le flux continue ensuite, sans nouveau snapshot tant que rien ne change.
+    metrics(&mut client).await;
     agent.shutdown().await;
 }
 
