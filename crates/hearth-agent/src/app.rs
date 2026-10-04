@@ -8,7 +8,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::application::accounts::AccountService;
-use crate::application::audit::{AuditRecorder, AuditService};
+use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::operations::OperationService;
@@ -149,10 +149,15 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
     let sessions_repo = Arc::new(SqliteSessionRepo::new(pool.clone()));
     let store: Arc<dyn Store> = Arc::new(SqliteStore::new(pool.clone()));
     let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
+    let maintenance = Arc::new(MaintenanceService::new(
+        store.clone(),
+        adapters.clock.clone(),
+    ));
+    let trail = Arc::new(AuditTrail::new(feed.clone(), maintenance.clone()));
     let recorder = Arc::new(AuditRecorder::new(
         store.clone(),
         adapters.clock.clone(),
-        feed.clone(),
+        trail.clone(),
     ));
     Services {
         accounts: Arc::new(AccountService::new(
@@ -162,7 +167,7 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             adapters.hasher.clone(),
             adapters.clock.clone(),
             adapters.ids.clone(),
-            feed.clone(),
+            trail.clone(),
         )),
         sessions: Arc::new(SessionService::new(
             accounts_repo,
@@ -173,17 +178,14 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             adapters.clock.clone(),
             adapters.ids.clone(),
             adapters.tokens.clone(),
-            feed.clone(),
+            trail.clone(),
         )),
         operations: Arc::new(OperationService::new(
             Arc::new(SqliteOperationRepo::new(pool.clone())),
             store.clone(),
             adapters.clock.clone(),
         )),
-        maintenance: Arc::new(MaintenanceService::new(
-            store.clone(),
-            adapters.clock.clone(),
-        )),
+        maintenance,
         audit: Arc::new(AuditService::new(
             Arc::new(SqliteAuditRepo::new(pool.clone())),
             feed.clone(),

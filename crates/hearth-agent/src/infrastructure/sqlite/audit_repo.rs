@@ -6,8 +6,6 @@
 //! Aucun SQL n'est assemblé à partir de la saisie ; la recherche plein texte reçoit une expression
 //! déjà échappée par le domaine (`SearchQuery`), liée comme paramètre.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
@@ -15,62 +13,9 @@ use time::OffsetDateTime;
 use super::convert::{format_date, parse_date, storage};
 use super::store::SqliteUnitOfWork;
 use crate::application::ports::{AuditRepo, AuditTx, StoreError};
-use crate::domain::audit::{
-    AuditEvent, AuditFilter, AuditRecord, CAP_CHECK_EVERY, OriginKind, OutcomeKind, PURGE_BATCH,
-    excess_entries,
-};
+use crate::domain::audit::{AuditEvent, AuditFilter, AuditRecord, OriginKind, OutcomeKind};
 
 const RESOURCE: &str = "audit_events";
-
-/// Entrées écrites depuis le démarrage, tous écrivains confondus.
-static WRITES: AtomicU64 = AtomicU64::new(0);
-
-/// Après une unité de travail validée qui a écrit `count` entrées : tous les `CAP_CHECK_EVERY`
-/// écrites, le plafond est contrôlé (un comptage bon marché) et le surplus supprimé par lots, dans
-/// des transactions à part. Entre deux purges horaires, la table ne dépasse ainsi pas le plafond de
-/// beaucoup, quel que soit le rythme d'écriture.
-pub(super) fn note_writes(pool: &SqlitePool, count: u64) {
-    let before = WRITES.fetch_add(count, Ordering::Relaxed);
-    if before / CAP_CHECK_EVERY == (before + count) / CAP_CHECK_EVERY {
-        return;
-    }
-    let pool = pool.clone();
-    // Hors du chemin de l'écriture : l'appelant n'attend pas la suppression.
-    tokio::spawn(async move {
-        if let Err(error) = trim(&pool).await {
-            tracing::warn!(%error, "plafond du journal non appliqué, repris à la prochaine purge");
-        }
-    });
-}
-
-/// Supprime le surplus au-delà de `MAX_ENTRIES`, les plus anciennes d'abord, un lot par
-/// transaction.
-async fn trim(pool: &SqlitePool) -> Result<(), StoreError> {
-    loop {
-        let mut tx = pool
-            .begin_with("BEGIN IMMEDIATE")
-            .await
-            .map_err(storage(RESOURCE))?;
-        let count = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!: i64" FROM audit_events"#)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(storage(RESOURCE))?;
-        let excess = excess_entries(u64::try_from(count).unwrap_or(0)).min(PURGE_BATCH);
-        if excess == 0 {
-            return Ok(());
-        }
-        let batch = i64::try_from(excess).unwrap_or(i64::MAX);
-        sqlx::query!(
-            "DELETE FROM audit_events
-             WHERE id IN (SELECT id FROM audit_events ORDER BY id ASC LIMIT ?)",
-            batch
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(storage(RESOURCE))?;
-        tx.commit().await.map_err(storage(RESOURCE))?;
-    }
-}
 
 pub struct SqliteAuditRepo {
     pool: SqlitePool,
@@ -217,7 +162,6 @@ impl AuditTx for SqliteUnitOfWork {
         .execute(&mut *self.tx)
         .await
         .map_err(storage(RESOURCE))?;
-        self.audit_writes += 1;
         Ok(event.clone().into_record(result.last_insert_rowid()))
     }
 

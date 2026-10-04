@@ -9,17 +9,19 @@
 //! l'action n'est pas validée. Hors transaction (refus et échecs relevés par la couche d'accès),
 //! un échec d'écriture est tracé en `error` et ne change rien pour l'appelant.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use thiserror::Error;
 use tokio::sync::broadcast;
 
+use super::maintenance::MaintenanceService;
 use super::ports::{AuditFeed, AuditRepo, AuditSink, Clock, Store, StoreError, UnitOfWork};
 use crate::domain::accounts::Role;
 use crate::domain::audit::{
-    Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, Outcome, RepeatFilter, Target,
-    can_read_journal, render_csv,
+    Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, CAP_CHECK_EVERY, Outcome,
+    RepeatFilter, Target, can_read_journal, render_csv,
 };
 
 /// Lignes d'un export, au plus : les plus récentes (le journal entier tient en 50 000 entrées, un
@@ -128,16 +130,16 @@ impl AuditService {
 pub struct AuditRecorder {
     store: Arc<dyn Store>,
     clock: Arc<dyn Clock>,
-    feed: Arc<dyn AuditFeed>,
+    trail: Arc<AuditTrail>,
     repeats: Mutex<RepeatFilter>,
 }
 
 impl AuditRecorder {
-    pub fn new(store: Arc<dyn Store>, clock: Arc<dyn Clock>, feed: Arc<dyn AuditFeed>) -> Self {
+    pub fn new(store: Arc<dyn Store>, clock: Arc<dyn Clock>, trail: Arc<AuditTrail>) -> Self {
         Self {
             store,
             clock,
-            feed,
+            trail,
             repeats: Mutex::new(RepeatFilter::new()),
         }
     }
@@ -169,7 +171,7 @@ impl AuditRecorder {
 
     async fn write_and_publish(&self, event: AuditEvent) {
         match self.write(&event).await {
-            Ok(record) => self.feed.publish(record),
+            Ok(record) => self.trail.publish(vec![record]),
             Err(error) => {
                 tracing::error!(%error, action = event.action.code(), "entrée du journal non écrite");
             }
@@ -218,9 +220,52 @@ impl Pending {
     }
 
     /// À appeler une fois la transaction validée.
-    pub(super) fn publish(self, feed: &dyn AuditFeed) {
-        for record in self.0 {
-            feed.publish(record);
+    pub(super) fn publish(self, trail: &AuditTrail) {
+        trail.publish(self.0);
+    }
+}
+
+/// Ce qui suit une entrée écrite et validée : sa diffusion sur le canal interne, et le compte des
+/// écritures qui déclenche le contrôle du plafond.
+///
+/// **Le plafond n'a pas de second chemin de purge** : toutes les `CAP_CHECK_EVERY` entrées écrites,
+/// l'objet demande à `MaintenanceService::purge_journal` (le seul endroit qui purge) de ramener le
+/// journal à son plafond, par lots, dans des transactions à part. Le compteur vit ici, dans
+/// l'objet que l'application assemble une fois par base, pas dans une variable du processus.
+pub struct AuditTrail {
+    feed: Arc<dyn AuditFeed>,
+    maintenance: Arc<MaintenanceService>,
+    writes: AtomicU64,
+}
+
+impl AuditTrail {
+    pub fn new(feed: Arc<dyn AuditFeed>, maintenance: Arc<MaintenanceService>) -> Self {
+        Self {
+            feed,
+            maintenance,
+            writes: AtomicU64::new(0),
         }
+    }
+
+    /// Diffuse des entrées dont la transaction est validée, puis les compte pour le plafond.
+    pub fn publish(&self, records: Vec<AuditRecord>) {
+        let count = records.len() as u64;
+        for record in records {
+            self.feed.publish(record);
+        }
+        if count == 0 {
+            return;
+        }
+        let before = self.writes.fetch_add(count, Ordering::Relaxed);
+        if before / CAP_CHECK_EVERY == (before + count) / CAP_CHECK_EVERY {
+            return;
+        }
+        let maintenance = self.maintenance.clone();
+        // Hors du chemin de l'écriture : l'appelant n'attend pas la suppression.
+        tokio::spawn(async move {
+            if let Err(error) = maintenance.purge_journal().await {
+                tracing::warn!(%error, "plafond du journal non appliqué, repris à la prochaine purge");
+            }
+        });
     }
 }

@@ -194,8 +194,9 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         Err(error) => return error.into_response(),
     };
     let actor = Actor::new(Some(session.account.username.clone()), origin_of(&parts));
-    let target = guard.target_of(&parts).await;
     if !allows(guard.access, &session) {
+        // Le nom du compte visé n'est lu que pour un refus à écrire.
+        let target = guard.target_of(&parts).await;
         // BR-AUDIT-003, BR-AUDIT-021 : toute action refusée faute de droits est consignée,
         // consultation du journal comprise.
         guard
@@ -204,6 +205,13 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         return ApiError::new(ErrorCode::ForbiddenRole, forbidden_message(guard.audit))
             .into_response();
     }
+    // Pour une requête qui modifie seulement : l'action peut supprimer le compte visé, il faut le
+    // nommer avant. Une lecture réussie n'écrit rien : rien à résoudre.
+    let target = if guard.modifies {
+        guard.target_of(&parts).await
+    } else {
+        Target::Route(guard.route)
+    };
     parts.extensions.insert(Requester(actor.clone()));
     parts.extensions.insert(Caller(session.clone()));
     let request = Request::from_parts(parts, body);

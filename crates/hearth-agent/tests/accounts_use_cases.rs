@@ -584,7 +584,7 @@ async fn a_password_changed_between_verification_and_write_is_not_overwritten() 
         }),
         env.clock.clone(),
         Arc::new(support::SequentialIds::starting_at(100)),
-        env.feed.clone(),
+        env.trail.clone(),
     );
 
     let error = racing
@@ -636,7 +636,7 @@ async fn the_date_returned_by_create_is_the_one_read_back_by_find() {
         Arc::new(Argon2Hasher::with_cost(8, 1, 1).unwrap()),
         Arc::new(SystemClock),
         Arc::new(UlidGen),
-        env.feed.clone(),
+        env.trail.clone(),
     );
     let created = service
         .create("marie", secret(PASSWORD), Role::Admin, by())

@@ -888,26 +888,26 @@ async fn writing_checks_the_cap_between_two_purges() {
     let env = env().await;
     let over = i64::try_from(MAX_ENTRIES).unwrap() + 1_200;
     flood(&env, over, "2026-09-21T14:13:20.000Z").await;
-    // 500 entrées écrites par les cas d'usage : le contrôle du plafond se déclenche, sans purge
-    // horaire, et supprime le surplus par lots dans des transactions à part.
-    {
-        use hearth_agent::application::ports::Store;
-        let store = hearth_agent::infrastructure::sqlite::SqliteStore::new(env.db.pool().clone());
-        let mut tx = store.begin().await.unwrap();
-        for _ in 0..500 {
-            tx.audit()
-                .record(&AuditEvent::new(
-                    start_time(),
-                    Actor::command_line(),
-                    AuditAction::AccountCreate,
-                    Target::None,
-                    Outcome::Succeeded,
-                ))
-                .await
-                .unwrap();
-        }
-        tx.commit().await.unwrap();
-    }
+    // 500 entrées écrites et validées : le contrôle du plafond se déclenche, sans purge horaire,
+    // et ramène le journal au plafond par `MaintenanceService::purge_journal`, par lots.
+    let event = AuditEvent::new(
+        start_time(),
+        Actor::command_line(),
+        AuditAction::AccountCreate,
+        Target::None,
+        Outcome::Succeeded,
+    );
+    let records: Vec<AuditRecord> = (0..500).map(|n| event.clone().into_record(n + 1)).collect();
+    // Les 500 entrées sont réellement écrites (le cas d'usage les a écrites avant de publier).
+    sqlx::query(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 500)
+         INSERT INTO audit_events (at, origin_kind, action, action_label, outcome)
+         SELECT '2026-09-21T14:13:20.000Z', 'cli', 'account.create', 'Création de compte', 'ok' FROM n",
+    )
+    .execute(env.db.pool())
+    .await
+    .unwrap();
+    env.trail.publish(records);
     let mut left = i64::MAX;
     for _ in 0..100 {
         left = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events")

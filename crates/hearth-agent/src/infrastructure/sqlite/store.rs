@@ -36,20 +36,13 @@ impl Store for SqliteStore {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(storage(STORE))?;
-        Ok(Box::new(SqliteUnitOfWork {
-            tx,
-            pool: self.pool.clone(),
-            audit_writes: 0,
-        }))
+        Ok(Box::new(SqliteUnitOfWork { tx }))
     }
 }
 
 /// Unité de travail SQLite. Abandonnée sans `commit`, SQLx l'annule.
 pub struct SqliteUnitOfWork {
     pub(super) tx: Transaction<'static, Sqlite>,
-    pool: SqlitePool,
-    /// Entrées du journal écrites dans cette unité : le plafond s'en inquiète une fois validée.
-    pub(super) audit_writes: u64,
 }
 
 #[async_trait]
@@ -75,11 +68,6 @@ impl UnitOfWork for SqliteUnitOfWork {
     }
 
     async fn commit(self: Box<Self>) -> Result<(), StoreError> {
-        let (pool, writes) = (self.pool.clone(), self.audit_writes);
-        self.tx.commit().await.map_err(storage(STORE))?;
-        if writes > 0 {
-            super::audit_repo::note_writes(&pool, writes);
-        }
-        Ok(())
+        self.tx.commit().await.map_err(storage(STORE))
     }
 }

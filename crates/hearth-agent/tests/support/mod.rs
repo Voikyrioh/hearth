@@ -135,6 +135,7 @@ pub struct Env {
     pub audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink>,
     pub audit_recorder: Arc<hearth_agent::application::audit::AuditRecorder>,
     pub feed: Arc<BroadcastAuditFeed>,
+    pub trail: Arc<hearth_agent::application::audit::AuditTrail>,
 }
 
 pub const CLIENT_ADDR: &str = "10.0.0.7";
@@ -176,6 +177,11 @@ pub async fn env() -> Env {
     let session_repo = Arc::new(SqliteSessionRepo::new(db.pool().clone()));
     let tokens: Arc<dyn TokenGen> = Arc::new(OsTokenGen);
     let feed = Arc::new(BroadcastAuditFeed::new());
+    let maintenance = Arc::new(MaintenanceService::new(store.clone(), clock.clone()));
+    let trail = Arc::new(hearth_agent::application::audit::AuditTrail::new(
+        feed.clone() as Arc<dyn AuditFeed>,
+        maintenance.clone(),
+    ));
     let service = Arc::new(AccountService::new(
         accounts.clone(),
         session_repo.clone(),
@@ -183,7 +189,7 @@ pub async fn env() -> Env {
         hasher.clone(),
         clock.clone(),
         ids.clone(),
-        feed.clone(),
+        trail.clone(),
     ));
     let sessions = Arc::new(SessionService::new(
         accounts,
@@ -194,14 +200,13 @@ pub async fn env() -> Env {
         clock.clone(),
         ids,
         tokens,
-        feed.clone(),
+        trail.clone(),
     ));
     let operations = Arc::new(OperationService::new(
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
         store.clone(),
         clock.clone(),
     ));
-    let maintenance = Arc::new(MaintenanceService::new(store.clone(), clock.clone()));
     let audit = Arc::new(AuditService::new(
         Arc::new(SqliteAuditRepo::new(db.pool().clone())),
         feed.clone(),
@@ -209,7 +214,7 @@ pub async fn env() -> Env {
     let audit_recorder = Arc::new(hearth_agent::application::audit::AuditRecorder::new(
         store,
         clock.clone(),
-        feed.clone() as Arc<dyn AuditFeed>,
+        trail.clone(),
     ));
     let audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink> = audit_recorder.clone();
     Env {
@@ -225,6 +230,7 @@ pub async fn env() -> Env {
         audit_sink,
         audit_recorder,
         feed,
+        trail,
     }
 }
 

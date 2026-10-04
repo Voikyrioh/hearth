@@ -738,7 +738,7 @@ async fn a_password_changed_between_verification_and_session_creation_does_not_l
         env.clock.clone(),
         Arc::new(support::SequentialIds::starting_at(500)),
         Arc::new(OsTokenGen),
-        env.feed.clone(),
+        env.trail.clone(),
     );
     let error = service
         .login("marie", secret(PASSWORD), &client())

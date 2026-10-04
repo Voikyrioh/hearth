@@ -12,10 +12,10 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use super::accounts::AccountView;
-use super::audit::Pending;
+use super::audit::{AuditTrail, Pending};
 use super::ports::{
-    AccountRepo, AuditFeed, Clock, HashError, IdGen, LoginAttemptRepo, PasswordHasher, SessionRepo,
-    Store, StoreError, TokenGen, TokenGenError,
+    AccountRepo, Clock, HashError, IdGen, LoginAttemptRepo, PasswordHasher, SessionRepo, Store,
+    StoreError, TokenGen, TokenGenError,
 };
 use crate::domain::accounts::Username;
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
@@ -92,7 +92,7 @@ pub struct SessionService {
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     tokens: Arc<dyn TokenGen>,
-    feed: Arc<dyn AuditFeed>,
+    trail: Arc<AuditTrail>,
     turns: Turns,
 }
 
@@ -183,7 +183,7 @@ impl SessionService {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGen>,
         tokens: Arc<dyn TokenGen>,
-        feed: Arc<dyn AuditFeed>,
+        trail: Arc<AuditTrail>,
     ) -> Self {
         Self {
             accounts,
@@ -194,7 +194,7 @@ impl SessionService {
             clock,
             ids,
             tokens,
-            feed,
+            trail,
             turns: Turns::default(),
         }
     }
@@ -338,7 +338,7 @@ impl SessionService {
                 journal.record(&mut *tx, locked).await?;
             }
             tx.commit().await?;
-            journal.publish(&*self.feed);
+            journal.publish(&self.trail);
             return Err(match wait {
                 Some(retry_after) => LoginError::TooManyAttempts { retry_after },
                 None => LoginError::InvalidCredentials,
@@ -373,7 +373,7 @@ impl SessionService {
         );
         journal.record(&mut *tx, succeeded).await?;
         tx.commit().await?;
-        journal.publish(&*self.feed);
+        journal.publish(&self.trail);
 
         let mut view = AccountView::from(&account);
         view.last_login_at = Some(now);
@@ -434,7 +434,7 @@ impl SessionService {
         );
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
-        journal.publish(&*self.feed);
+        journal.publish(&self.trail);
         Ok(())
     }
 }

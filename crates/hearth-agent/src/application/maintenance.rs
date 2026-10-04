@@ -35,8 +35,11 @@ impl MaintenanceService {
     /// Journal d'activité (BR-AUDIT-008) : l'âge d'abord, puis le nombre sur ce qui reste (la
     /// première limite atteinte joue), **par lots de `PURGE_BATCH`, chacun dans sa propre
     /// transaction** : la suppression ne tient jamais longtemps le verrou d'écriture.
-    async fn purge_journal(&self, now: time::OffsetDateTime) -> Result<u64, StoreError> {
-        let cutoff = retention_cutoff(now);
+    ///
+    /// **Le seul endroit qui purge le journal** : la purge horaire l'appelle, et le contrôle du
+    /// plafond à l'écriture (`audit::AuditTrail`) aussi.
+    pub async fn purge_journal(&self) -> Result<u64, StoreError> {
+        let cutoff = retention_cutoff(self.clock.now());
         let mut total = 0;
         loop {
             let mut tx = self.store.begin().await?;
@@ -83,7 +86,7 @@ impl MaintenanceService {
         };
         tx.commit().await?;
         Ok(PurgeReport {
-            audit_events: self.purge_journal(now).await?,
+            audit_events: self.purge_journal().await?,
             ..report
         })
     }

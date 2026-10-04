@@ -10,9 +10,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
 
-use super::audit::Pending;
+use super::audit::{AuditTrail, Pending};
 use super::ports::{
-    AccountRepo, AuditFeed, Clock, HashError, IdGen, PasswordHasher, SessionRepo, Store, StoreError,
+    AccountRepo, Clock, HashError, IdGen, PasswordHasher, SessionRepo, Store, StoreError,
 };
 use crate::domain::accounts::{
     Account, AccountId, ConfirmationMismatch, LastAdminError, PasswordRejected, PlainPassword,
@@ -88,7 +88,7 @@ pub struct AccountService {
     hasher: Arc<dyn PasswordHasher>,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
-    feed: Arc<dyn AuditFeed>,
+    trail: Arc<AuditTrail>,
 }
 
 impl AccountService {
@@ -100,7 +100,7 @@ impl AccountService {
         hasher: Arc<dyn PasswordHasher>,
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGen>,
-        feed: Arc<dyn AuditFeed>,
+        trail: Arc<AuditTrail>,
     ) -> Self {
         Self {
             accounts,
@@ -109,7 +109,7 @@ impl AccountService {
             hasher,
             clock,
             ids,
-            feed,
+            trail,
         }
     }
 
@@ -179,7 +179,7 @@ impl AccountService {
         );
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
-        journal.publish(&*self.feed);
+        journal.publish(&self.trail);
         Ok(AccountView::from(&account))
     }
 
@@ -246,7 +246,7 @@ impl AccountService {
         );
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
-        journal.publish(&*self.feed);
+        journal.publish(&self.trail);
         Ok(())
     }
 
@@ -334,7 +334,7 @@ impl AccountService {
         );
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
-        journal.publish(&*self.feed);
+        journal.publish(&self.trail);
         Ok(closed)
     }
 
@@ -359,7 +359,7 @@ impl AccountService {
         );
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
-        journal.publish(&*self.feed);
+        journal.publish(&self.trail);
         Ok(closed)
     }
 
@@ -408,7 +408,7 @@ impl AccountService {
         let event = self.succeeded(by, action, Target::Account(current.username.clone()));
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
-        journal.publish(&*self.feed);
+        journal.publish(&self.trail);
         Ok(closed)
     }
 }

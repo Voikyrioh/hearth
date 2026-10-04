@@ -11,12 +11,12 @@ maj: 2026-10-04
 # BR-AUDIT-008 — Le journal est conservé 90 jours ou 50 000 entrées
 
 ## Règle
-Une entrée est supprimée automatiquement quand elle a plus de 90 jours, puis, s'il reste plus de 50 000 entrées, les plus anciennes sont supprimées jusqu'à 50 000 : la première limite atteinte joue. Le nettoyage tourne toutes les heures avec le reste de la maintenance, **par lots de 1 000 lignes, chacun dans sa propre transaction** (il ne tient jamais longtemps le verrou d'écriture). Le plafond est **aussi contrôlé par l'écriture** : toutes les 500 entrées écrites (une transaction validée), un comptage bon marché et, s'il y a surplus, la suppression des plus anciennes par lots dans des transactions à part ; entre deux purges horaires, la table ne dépasse donc pas le plafond de beaucoup.
+Une entrée est supprimée automatiquement quand elle a plus de 90 jours, puis, s'il reste plus de 50 000 entrées, les plus anciennes sont supprimées jusqu'à 50 000 : la première limite atteinte joue. Le nettoyage tourne toutes les heures avec le reste de la maintenance, **par lots de 1 000 lignes, chacun dans sa propre transaction** (il ne tient jamais longtemps le verrou d'écriture). Le plafond est **aussi contrôlé par l'écriture** : toutes les 500 entrées écrites (une transaction validée), `AuditTrail` (un compteur par base, assemblé par `app.rs`) demande à `MaintenanceService::purge_journal` — le seul endroit qui purge — de ramener le journal à son plafond, par lots dans des transactions à part ; entre deux purges horaires, la table ne dépasse donc pas le plafond de beaucoup.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/audit/policy.rs::{RETENTION, MAX_ENTRIES, retention_cutoff, excess_entries}`.
 - `crates/hearth-agent/src/application/maintenance.rs::MaintenanceService::purge`.
-- `crates/hearth-agent/src/infrastructure/sqlite/audit_repo.rs` (`purge_before`, `purge_oldest`, `note_writes`, `trim`) ; `domain/audit/policy.rs::{PURGE_BATCH, CAP_CHECK_EVERY}`.
+- `crates/hearth-agent/src/infrastructure/sqlite/audit_repo.rs` (`purge_before`, `purge_oldest` : un lot) ; `application/maintenance.rs::MaintenanceService::purge_journal` ; `application/audit.rs::AuditTrail` ; `domain/audit/policy.rs::{PURGE_BATCH, CAP_CHECK_EVERY}`.
 - `crates/hearth-agent/src/entrypoint/tasks.rs::spawn_purge`.
 
 ## Vérification
