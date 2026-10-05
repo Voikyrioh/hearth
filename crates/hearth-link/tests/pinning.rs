@@ -513,7 +513,12 @@ async fn changing_the_address_demands_a_new_fingerprint_and_keeps_the_remembered
 async fn forgetting_the_credentials_erases_the_password_but_keeps_the_session() {
     let world = World::connected(Options {
         remember: true,
-        ..Options::default()
+        // Seuils du lien hors d'atteinte : « Connecté » ne dépend pas de la vitesse du runner.
+        ..support::Options::with_thresholds(support::thresholds(
+            Some(support::never()),
+            false,
+            false,
+        ))
     })
     .await;
     assert!(
