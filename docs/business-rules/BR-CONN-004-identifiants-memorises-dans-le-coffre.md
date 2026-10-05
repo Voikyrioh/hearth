@@ -24,14 +24,19 @@ Le mot de passe n'est mémorisé que si l'utilisateur coche « Se souvenir de mo
 ## Vérification
 - Tests : `crates/hearth-link/tests/pinning.rs::forgetting_the_credentials_erases_the_password_but_keeps_the_session`, `::servers_are_validated_listed_and_removed_with_their_secrets` ; `apps/desktop/src-tauri/tests/vault.rs` (clés, aller-retour, effacement ; `the_windows_credential_manager_stores_reads_and_erases_a_secret` contre le vrai Gestionnaire, `--ignored`, lancé par le job Windows de la CI) ; `tests/link_runtime.rs::the_wizard_registers_only_on_a_successful_login_then_remembers_forgets_and_removes` (coffre sous `Hearth/{id}`, rien après un refus) ; `src/pages/Servers.test.ts`, `e2e/connect.spec.ts` (oubli des identifiants).
 - À la main : Gestionnaire d'identification de Windows, identifiants génériques `Hearth/…`.
+- `crates/hearth-link/tests/tracking.rs::a_remembered_login_without_a_password_in_the_vault_is_not_promised_at_startup`.
 
 ## Cas limites
 - Écriture de la première connexion : carnet d'abord, secrets ensuite ; une application tuée entre les deux laisse un serveur sans session (visible, supprimable), jamais un secret orphelin ; un échec défait tout et referme la session obtenue (`tracking.rs::a_vault_that_refuses_to_write_leaves_no_server_and_closes_the_new_session`).
 - Un refus de connexion n'écrit rien au coffre.
 - Coffre inaccessible : l'erreur ne contient aucun secret ; la connexion échoue (`vault`), l'utilisateur est invité à réessayer.
 
+## Application (code)
+- Au démarrage, `LinkManager::start` ne promet pas « se souvenir » sans mot de passe au coffre (application tuée pendant l'ajout) : le carnet repasse à `remember = false` (FIX-01M46G800Z47XQ8R64G2MDC4NP), le formulaire de reconnexion s'affiche sans la case cochée à tort.
+
 ## Règles liées
 - BR-CONN-005, BR-CONN-010, BR-CONN-016, BR-CONN-017.
 
 ## Historique
 - 2026-10-05 — création (HRT-10).
+- 2026-10-05 : « se souvenir » sans secret corrigé à l'ouverture du carnet (HRT-12, FIX-01M46G800Z47XQ8R64G2MDC4NP).

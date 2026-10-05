@@ -776,6 +776,43 @@ fn record(signed_out: bool) -> ServerRecord {
 }
 
 #[tokio::test]
+async fn a_remembered_login_without_a_password_in_the_vault_is_not_promised_at_startup() {
+    // Application tuée pendant l'ajout : le carnet dit « se souvenir », le coffre n'a rien.
+    let script = Script::new();
+    let store = Store::new(Disk::Normal);
+    store.servers.lock().unwrap().push(record(true));
+    let vault = Arc::new(MemoryVault::new());
+    let manager = start(&script, &store, &vault, None).await;
+    let id = ServerId::parse("srv").unwrap();
+    assert!(!manager.servers()[0].remember, "pas de case cochée à tort");
+    assert!(
+        !store.servers.lock().unwrap()[0].remember,
+        "corrigé aussi sur disque"
+    );
+    // Un mot de passe bien au coffre garde sa promesse.
+    let mut kept = record(true);
+    kept.id = ServerId::parse("kept").unwrap();
+    store.servers.lock().unwrap().push(kept);
+    vault
+        .put(
+            &ServerId::parse("kept").unwrap(),
+            SecretKind::Password,
+            &Secret::from("p"),
+        )
+        .unwrap();
+    manager.shutdown().await;
+    let manager = start(&script, &store, &vault, None).await;
+    let remembered: Vec<_> = manager
+        .servers()
+        .into_iter()
+        .filter(|s| s.remember)
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(remembered, [ServerId::parse("kept").unwrap()]);
+    let _ = id;
+}
+
+#[tokio::test]
 async fn after_a_panic_a_disconnected_server_stays_disconnected() {
     let script = Script::new();
     let store = Store::new(Disk::Normal);
