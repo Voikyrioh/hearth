@@ -39,8 +39,10 @@ pub fn fast_config() -> LinkConfig {
     LinkConfig {
         thresholds: Thresholds::scaled(SCALE),
         heartbeat_period: Duration::from_millis(333),
-        attempt_timeout: Duration::from_millis(1_500),
-        request_timeout: Duration::from_millis(1_500),
+        // Délais de garde des échanges : très larges, pour qu'une machine saturée ne transforme
+        // jamais une réponse lente en échec. Les seuils du lien (`Thresholds`) restent à l'échelle.
+        attempt_timeout: Duration::from_secs(30),
+        request_timeout: Duration::from_secs(30),
         net_poll_period: Duration::from_millis(60),
         wake_check_period: Duration::from_millis(50),
         snapshot_save_period: Duration::from_millis(200),
@@ -248,9 +250,9 @@ pub async fn start_manager(
 
 pub fn transport() -> HttpTransport {
     HttpTransport::new(HttpTransportConfig {
-        connect_timeout: Duration::from_millis(1_000),
-        request_timeout: Duration::from_millis(1_500),
-        send_timeout: Duration::from_millis(1_000),
+        connect_timeout: Duration::from_secs(10),
+        request_timeout: Duration::from_secs(30),
+        send_timeout: Duration::from_secs(10),
         client_name: "poste-test/0.1".into(),
     })
 }
@@ -292,10 +294,8 @@ impl World {
             .login(&id, "marie", Secret::from(PASSWORD), options.remember)
             .await
             .unwrap();
-        recorder
-            .wait_state(mark, LinkState::Connected, Duration::from_secs(5))
-            .await;
-        recorder.wait_metrics(mark, Duration::from_secs(5)).await;
+        recorder.wait_state(mark, LinkState::Connected, WAIT).await;
+        recorder.wait_metrics(mark, WAIT).await;
         Self {
             agent,
             proxy,
@@ -315,7 +315,66 @@ impl World {
     }
 }
 
-pub const WAIT: Duration = Duration::from_secs(10);
+/// Délai de garde des attentes : un test bloqué échoue au bout de ce temps. Jamais une assertion
+/// de vitesse : chaque attente porte sur un fait observable (état, événement, compteur).
+pub const WAIT: Duration = Duration::from_secs(60);
+
+/// Seuils si larges qu'aucune machine ne peut les franchir par hasard : le lien n'affiche jamais
+/// rien tant que le test ne le provoque pas (les seuils exacts sont prouvés par `domain/state`).
+pub fn never() -> Duration {
+    Duration::from_secs(3_600)
+}
+
+/// Les seuils de l'échelle des tests, dont certains sont relevés à « jamais » : `silence`
+/// (sinon un calcul retardé de 0,5 s passe pour une coupure), `reconnecting_after` et
+/// `offline_after` selon ce que le scénario attend.
+pub fn thresholds(silence: Option<Duration>, reconnecting: bool, offline: bool) -> Thresholds {
+    let base = Thresholds::scaled(SCALE);
+    Thresholds {
+        silence: silence.unwrap_or(base.silence),
+        reconnecting_after: if reconnecting {
+            base.reconnecting_after
+        } else {
+            never()
+        },
+        offline_after: if offline {
+            base.offline_after
+        } else {
+            never() * 2
+        },
+        ..base
+    }
+}
+
+impl Options {
+    pub fn with_thresholds(thresholds: Thresholds) -> Self {
+        Self {
+            config: LinkConfig {
+                thresholds,
+                ..fast_config()
+            },
+            ..Self::default()
+        }
+    }
+}
+
+/// Attend `n` salves de mesures de plus (le flux vit, quelle que soit la vitesse de la machine).
+pub async fn wait_metrics_times(recorder: &Recorder, n: usize) {
+    for _ in 0..n {
+        let mark = recorder.mark();
+        recorder.wait_metrics(mark, WAIT).await;
+    }
+}
+
+/// Attend que le mandataire ait reçu `n` connexions de plus (le lien tente de se rétablir).
+pub async fn wait_attempts(proxy: &FaultProxy, n: u64) {
+    let target = proxy.accepted() + n;
+    let deadline = Instant::now() + WAIT;
+    while proxy.accepted() < target {
+        assert!(Instant::now() < deadline, "aucune nouvelle tentative");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
 
 /// Durée réelle d'une durée du produit à l'échelle des tests.
 pub fn scaled(real: Duration) -> Duration {

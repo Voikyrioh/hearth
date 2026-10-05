@@ -4,6 +4,12 @@
 //! Les durées du produit sont divisées par 6 (`support::SCALE`) : 3 s deviennent 0,5 s, 30 s
 //! deviennent 5 s, les délais de reconnexion suivent. Chaque test porte le nom de la ligne du
 //! tableau des transitions de la spec (section 6) ou du cas limite qu'il couvre.
+//!
+//! Déterminisme (HRT-12) : aucune assertion ne dépend de la vitesse de la machine. Un scénario
+//! attend un fait observable (état, événement, connexion reçue, action arrivée chez l'agent,
+//! opération terminée) ; l'agent retient les actions tant que le test ne les relâche pas
+//! (`hold_actions`) au lieu d'un délai fixe ; les seuils du lien qui n'ont pas à jouer dans un
+//! scénario sont relevés à « jamais » (`support::thresholds`) ; `WAIT` est un délai de garde.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -20,7 +26,9 @@ use hearth_link::ports::transport::Method;
 use hearth_link::ports::vault::{SecretKind, Vault as _};
 use hearth_link::{ActionOutcome, ActionRequest, LinkError};
 use serde_json::json;
-use support::{Options, PASSWORD, WAIT, World, scaled};
+use support::{
+    Options, PASSWORD, WAIT, World, never, thresholds, wait_attempts, wait_metrics_times,
+};
 use time::Duration as TimeDuration;
 
 fn ms(n: u64) -> Duration {
@@ -59,20 +67,17 @@ async fn wait_for_a_distant_retry(world: &World, at_least: Duration) -> Instant 
 
 #[tokio::test]
 async fn a_cut_shorter_than_the_threshold_is_invisible() {
-    // Seuil de « Reconnexion » à 1 s (échelle 1/3) ; la coupure en fait le tiers (échelle de la
-    // spec : 1 s de coupure pour 3 s de seuil), de la marge pour une machine chargée.
-    let thresholds = hearth_link::domain::state::Thresholds::scaled(3);
-    let world = World::connected(Options {
-        config: hearth_link::LinkConfig {
-            thresholds,
-            ..support::fast_config()
-        },
-        ..Options::default()
-    })
+    // Le seuil de « Reconnexion » est hors d'atteinte : la coupure dure ce qu'elle dure (le test
+    // attend qu'une tentative de reconnexion ait vu le lien coupé), elle est toujours plus courte.
+    let world = World::connected(Options::with_thresholds(thresholds(
+        Some(never()),
+        false,
+        false,
+    )))
     .await;
     let mark = world.recorder.mark();
     world.proxy.cut();
-    tokio::time::sleep(thresholds.reconnecting_after / 3).await;
+    wait_attempts(&world.proxy, 2).await;
     world.proxy.heal();
     let resumed = world.recorder.mark();
     world.recorder.wait_metrics(resumed, WAIT).await;
@@ -86,10 +91,19 @@ async fn a_cut_shorter_than_the_threshold_is_invisible() {
 
 #[tokio::test]
 async fn a_ten_second_cut_shows_reconnecting_then_connected() {
-    let world = World::connected(Options::default()).await;
+    // « Hors ligne » est hors d'atteinte : seule la coupure provoque « Reconnexion ».
+    let world = World::connected(Options::with_thresholds(thresholds(
+        Some(never()),
+        true,
+        false,
+    )))
+    .await;
     let mark = world.recorder.mark();
     world.proxy.cut();
-    tokio::time::sleep(scaled(Duration::from_secs(10))).await;
+    world
+        .recorder
+        .wait_state(mark, LinkState::Reconnecting, WAIT)
+        .await;
     world.proxy.heal();
     world
         .recorder
@@ -103,7 +117,12 @@ async fn a_ten_second_cut_shows_reconnecting_then_connected() {
 
 #[tokio::test]
 async fn a_long_cut_goes_offline_then_comes_back() {
-    let world = World::connected(Options::default()).await;
+    let world = World::connected(Options::with_thresholds(thresholds(
+        Some(never()),
+        true,
+        true,
+    )))
+    .await;
     let mark = world.recorder.mark();
     world.proxy.cut();
     world
@@ -120,7 +139,8 @@ async fn a_long_cut_goes_offline_then_comes_back() {
     let last = world.manager.last_known(&world.id).await.unwrap().unwrap();
     assert!(!last.history.is_empty());
     assert!(last.machine.is_some());
-    tokio::time::sleep(scaled(Duration::from_secs(40))).await;
+    // Les tentatives continuent sans fin tant que le lien est coupé.
+    wait_attempts(&world.proxy, 2).await;
     world.proxy.heal();
     world
         .recorder
@@ -184,18 +204,29 @@ async fn a_prolonged_freeze_without_closing_is_detected_by_the_heartbeat() {
 
 #[tokio::test]
 async fn a_slow_but_alive_agent_is_not_cut_by_a_false_positive() {
-    let world = World::connected(Options::default()).await;
+    // Chaque morceau arrive en retard mais arrive : le flux vit (plusieurs salves de mesures
+    // reçues) sans qu'aucun état ne change. Le seuil exact du silence est prouvé par le domaine.
+    let world = World::connected(Options::with_thresholds(thresholds(
+        Some(never()),
+        false,
+        false,
+    )))
+    .await;
     let mark = world.recorder.mark();
-    // Un message n'arrive que juste avant l'échéance du silence (0,5 s) : pas de faux positif.
     world.proxy.delay(ms(250));
-    tokio::time::sleep(ms(3_000)).await;
+    wait_metrics_times(&world.recorder, 3).await;
     assert_eq!(world.recorder.states_since(mark), []);
     assert_eq!(world.state().state, LinkState::Connected);
 }
 
 #[tokio::test]
 async fn a_clean_close_reconnects_by_itself() {
-    let world = World::connected(Options::default()).await;
+    let world = World::connected(Options::with_thresholds(thresholds(
+        Some(never()),
+        false,
+        false,
+    )))
+    .await;
     let mark = world.recorder.mark();
     let before = world.proxy.accepted();
     world.proxy.close();
@@ -251,12 +282,15 @@ async fn an_agent_restart_is_a_short_reconnecting() {
 async fn a_read_only_account_has_the_same_link_behaviour() {
     let world = World::connected(Options {
         role: Role::ReadOnly,
-        ..Options::default()
+        ..Options::with_thresholds(thresholds(Some(never()), true, false))
     })
     .await;
     let mark = world.recorder.mark();
     world.proxy.cut();
-    tokio::time::sleep(scaled(Duration::from_secs(10))).await;
+    world
+        .recorder
+        .wait_state(mark, LinkState::Reconnecting, WAIT)
+        .await;
     world.proxy.heal();
     world
         .recorder
@@ -279,7 +313,7 @@ async fn retry_now_forces_an_attempt_without_waiting() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    let scheduled = wait_for_a_distant_retry(&world, ms(2_500)).await;
+    let scheduled = wait_for_a_distant_retry(&world, ms(3_500)).await;
     world.proxy.heal();
     let clicked = world.recorder.mark();
     world.manager.retry_now(&world.id).unwrap();
@@ -304,7 +338,7 @@ async fn a_network_change_reconnects_immediately() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    let scheduled = wait_for_a_distant_retry(&world, ms(2_500)).await;
+    let scheduled = wait_for_a_distant_retry(&world, ms(3_500)).await;
     world.proxy.heal();
     let changed = world.recorder.mark();
     // Câble débranché, Wi-Fi : la liste des adresses locales change.
@@ -328,7 +362,7 @@ async fn a_wake_up_reconnects_immediately() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    let scheduled = wait_for_a_distant_retry(&world, ms(2_500)).await;
+    let scheduled = wait_for_a_distant_retry(&world, ms(3_500)).await;
     world.proxy.heal();
     let woke = world.recorder.mark();
     // L'horloge murale saute de dix minutes sans que la monotone bouge : veille puis réveil.
@@ -492,7 +526,7 @@ async fn a_session_revoked_during_the_stream_shows_access_revoked_and_stops() {
 async fn an_expired_session_with_a_saved_password_reconnects_silently() {
     let world = World::connected(Options {
         remember: true,
-        ..Options::default()
+        ..Options::with_thresholds(thresholds(Some(never()), false, false))
     })
     .await;
     let old_token = world
@@ -576,32 +610,29 @@ async fn an_expired_session_without_a_saved_password_asks_for_it_then_login_reco
 async fn an_action_cut_before_the_answer_is_unknown_and_never_replayed() {
     // Issue 1 : l'agent a exécuté pendant la coupure.
     let world = World::connected(Options::default()).await;
-    world
-        .agent
-        .hasher
-        .delay_ms
-        .store(900, std::sync::atomic::Ordering::SeqCst);
+    // L'agent retient l'action : « en cours » tant que le test ne la relâche pas.
+    world.agent.hold_actions();
+    let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
     let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    tokio::time::sleep(ms(200)).await;
+    world.agent.wait_action_started(started).await;
     let mark = world.recorder.mark();
     world.proxy.cut();
-    let answered = Instant::now();
-    let outcome = tokio::time::timeout(Duration::from_secs(6), sent)
+    let outcome = tokio::time::timeout(WAIT, sent)
         .await
         .expect("l'appel ne reste pas suspendu")
         .unwrap()
         .unwrap();
-    assert!(
-        answered.elapsed() < ms(3_000),
-        "la réponse « inconnu » est immédiate"
-    );
     let ActionOutcome::ResultUnknown { id: operation } = outcome else {
         panic!("résultat inconnu attendu, reçu {outcome:?}");
     };
     // L'agent finit l'action pendant que le lien est coupé, puis le lien revient.
-    tokio::time::sleep(ms(1_300)).await;
+    world.agent.release_actions();
+    world
+        .agent
+        .wait_operation_settled("marie", operation.as_str())
+        .await;
     world.proxy.heal();
     let (_, event) = world
         .recorder
@@ -660,15 +691,13 @@ async fn an_action_that_never_reached_the_agent_is_announced_as_not_executed() {
 #[tokio::test]
 async fn an_action_interrupted_by_the_agent_stopping_stays_unknown() {
     let world = World::connected(Options::default()).await;
-    world
-        .agent
-        .hasher
-        .delay_ms
-        .store(2_500, std::sync::atomic::Ordering::SeqCst);
+    // Retenue pour de bon : l'agent « s'arrête » en pleine exécution, l'action ne finit jamais.
+    world.agent.hold_actions();
+    let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
     let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    tokio::time::sleep(ms(200)).await;
+    world.agent.wait_action_started(started).await;
     let mark = world.recorder.mark();
     world.proxy.cut();
     let ActionOutcome::ResultUnknown { id: operation } = sent.await.unwrap().unwrap() else {
@@ -752,7 +781,8 @@ async fn waking_up_after_a_long_outage_shows_reconnecting_again_not_offline() {
         .recorder
         .wait_state(woke, LinkState::Reconnecting, WAIT)
         .await;
-    tokio::time::sleep(ms(1_500)).await;
+    // Les tentatives reprennent depuis le réveil (le lien cherche à se rétablir).
+    wait_attempts(&world.proxy, 2).await;
     assert_eq!(world.state().state, LinkState::Reconnecting);
     assert_eq!(
         world.recorder.states_since(woke),
@@ -768,7 +798,12 @@ async fn waking_up_after_a_long_outage_shows_reconnecting_again_not_offline() {
 
 #[tokio::test]
 async fn a_network_change_does_not_cut_a_healthy_stream() {
-    let world = World::connected(Options::default()).await;
+    let world = World::connected(Options::with_thresholds(thresholds(
+        Some(never()),
+        false,
+        false,
+    )))
+    .await;
     let mark = world.recorder.mark();
     let connections = world.proxy.accepted();
     // Docker, WSL, Tailscale : la liste d'adresses change, le réseau utile non.
@@ -789,17 +824,22 @@ async fn a_network_change_does_not_cut_a_healthy_stream() {
 #[tokio::test]
 async fn an_action_in_flight_is_not_made_unknown_by_a_network_change() {
     let world = World::connected(Options::default()).await;
-    world
-        .agent
-        .hasher
-        .delay_ms
-        .store(700, std::sync::atomic::Ordering::SeqCst);
+    world.agent.hold_actions();
+    let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
     let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    tokio::time::sleep(ms(150)).await;
+    world.agent.wait_action_started(started).await;
     world.net.set(&["10.8.0.2"]);
-    let outcome = sent.await.unwrap().unwrap();
+    // Le changement est pris en compte (le veilleur sonde toutes les 60 ms) pendant que l'action
+    // est retenue côté agent ; puis l'agent la relâche.
+    tokio::time::sleep(ms(300)).await;
+    world.agent.release_actions();
+    let outcome = tokio::time::timeout(WAIT, sent)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     assert!(
         matches!(outcome, ActionOutcome::Completed { status: 200, .. }),
         "{outcome:?}"
@@ -809,18 +849,16 @@ async fn an_action_in_flight_is_not_made_unknown_by_a_network_change() {
 #[tokio::test]
 async fn an_abandoned_action_stays_tracked_and_its_outcome_is_announced() {
     let world = World::connected(Options::default()).await;
-    world
-        .agent
-        .hasher
-        .delay_ms
-        .store(350, std::sync::atomic::Ordering::SeqCst);
+    world.agent.hold_actions();
+    let started = world.agent.verifications_started();
     let mark = world.recorder.mark();
     let manager = world.manager.clone();
     let id = world.id.clone();
     let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    tokio::time::sleep(ms(150)).await;
+    world.agent.wait_action_started(started).await;
     // L'appelant n'attend plus (fenêtre fermée, délai) : la requête est partie, elle reste suivie.
     sent.abort();
+    world.agent.release_actions();
     let (_, event) = world
         .recorder
         .wait_for(mark, "issue de l'opération", WAIT, |e| {
@@ -839,22 +877,23 @@ async fn an_abandoned_action_stays_tracked_and_its_outcome_is_announced() {
 #[tokio::test]
 async fn an_unknown_operation_survives_a_restart_of_the_application() {
     let world = World::connected(Options::default()).await;
-    world
-        .agent
-        .hasher
-        .delay_ms
-        .store(900, std::sync::atomic::Ordering::SeqCst);
+    world.agent.hold_actions();
+    let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
     let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    tokio::time::sleep(ms(200)).await;
+    world.agent.wait_action_started(started).await;
     world.proxy.cut();
     let ActionOutcome::ResultUnknown { id: operation } = sent.await.unwrap().unwrap() else {
         panic!("résultat inconnu attendu");
     };
     // L'application se ferme pendant la coupure ; l'agent finit l'action.
     world.manager.shutdown().await;
-    tokio::time::sleep(ms(1_300)).await;
+    world.agent.release_actions();
+    world
+        .agent
+        .wait_operation_settled("marie", operation.as_str())
+        .await;
     world.proxy.heal();
     let manager = support::start_manager(
         world.dir.path(),

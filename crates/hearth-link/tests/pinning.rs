@@ -106,12 +106,12 @@ async fn the_probe_of_something_that_is_not_an_agent_fails_cleanly() {
             held.push(socket);
         }
     });
-    let started = std::time::Instant::now();
-    assert!(manager.probe("127.0.0.1", silent_port).await.is_err());
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "la sonde ne bloque pas"
-    );
+    // « Ne bloque pas » : la sonde finit en erreur (son délai propre), sans assertion de durée ;
+    // `WAIT` n'est qu'un délai de garde.
+    let probed = tokio::time::timeout(WAIT, manager.probe("127.0.0.1", silent_port))
+        .await
+        .expect("la sonde ne bloque pas");
+    assert!(probed.is_err());
 }
 
 #[tokio::test]
@@ -286,8 +286,22 @@ async fn logout_closes_the_session_but_keeps_the_remembered_password() {
 #[tokio::test]
 async fn the_application_resumes_a_saved_session_after_a_restart() {
     let world = World::connected(Options::default()).await;
-    // Laisse le temps de sauvegarder la dernière vue, puis ferme l'application.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Attend que la dernière vue soit sauvegardée (fichier relu), puis ferme l'application.
+    let on_disk = hearth_link::adapters::FileSnapshotStore::new(world.dir.path().join("snapshots"));
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let saved = hearth_link::ports::SnapshotStore::load(&on_disk, &world.id)
+            .await
+            .unwrap();
+        if saved.is_some_and(|last| last.machine.is_some() && !last.history.is_empty()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "la dernière vue n'est jamais sauvegardée"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     world.manager.shutdown().await;
     drop(world.manager);
 

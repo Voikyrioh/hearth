@@ -67,6 +67,10 @@ impl AgentClock for TestClock {
 pub struct SlowHasher {
     inner: Argon2Hasher,
     pub delay_ms: AtomicU64,
+    /// Si posé : toute vérification attend d'être relâchée (`release`), aucune durée en jeu.
+    pub hold: std::sync::atomic::AtomicBool,
+    /// Nombre de vérifications commencées (une action « en cours » côté agent).
+    pub entered: AtomicU32,
 }
 
 #[async_trait]
@@ -76,6 +80,10 @@ impl PasswordHasher for SlowHasher {
     }
 
     async fn verify(&self, password: &AgentSecret, hash: &AgentSecret) -> Result<bool, HashError> {
+        self.entered.fetch_add(1, Ordering::SeqCst);
+        while self.hold.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
         let delay = self.delay_ms.load(Ordering::SeqCst);
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -202,6 +210,8 @@ impl TestAgent {
         let hasher = Arc::new(SlowHasher {
             inner: Argon2Hasher::with_cost(8, 1, 1).unwrap(),
             delay_ms: AtomicU64::new(0),
+            hold: std::sync::atomic::AtomicBool::new(false),
+            entered: AtomicU32::new(0),
         });
         let adapters = Adapters {
             hasher: hasher.clone(),
@@ -278,6 +288,57 @@ impl TestAgent {
             .find(|summary| summary.account.username.as_str() == username)
             .map(|summary| summary.sessions_open)
             .unwrap_or(0)
+    }
+
+    /// Retient les vérifications de mot de passe : une action lancée reste « en cours » côté agent
+    /// tant que le test ne la relâche pas (`release_actions`).
+    pub fn hold_actions(&self) {
+        self.hasher.hold.store(true, Ordering::SeqCst);
+    }
+
+    pub fn release_actions(&self) {
+        self.hasher.hold.store(false, Ordering::SeqCst);
+    }
+
+    /// Vérifications de mot de passe commencées depuis le démarrage.
+    pub fn verifications_started(&self) -> u32 {
+        self.hasher.entered.load(Ordering::SeqCst)
+    }
+
+    /// Attend qu'une vérification de plus soit commencée (l'action est arrivée à l'agent).
+    pub async fn wait_action_started(&self, baseline: u32) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while self.verifications_started() <= baseline {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "l'action n'est jamais arrivée à l'agent"
+            );
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    }
+
+    /// Attend que l'agent ait terminé l'opération `key` du compte (ni « en cours » ni absente).
+    pub async fn wait_operation_settled(&self, username: &str, key: &str) {
+        use hearth_agent::domain::operations::{OperationKey, OperationStatus};
+        let account = self.services.accounts.find(username).await.unwrap();
+        let key = OperationKey::parse(key).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let found = self
+                .services
+                .operations
+                .find(&key, &account.id)
+                .await
+                .unwrap();
+            if matches!(found, Some(op) if op.status != OperationStatus::Running) {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "l'opération n'a pas fini côté agent"
+            );
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
     }
 
     pub async fn interrupt_running(&self) -> u64 {
