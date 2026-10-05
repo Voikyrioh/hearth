@@ -47,13 +47,34 @@ pub fn check_username(username: &str) -> Result<String, BookError> {
 
 /// Adresses MAC annoncées par l'agent : elles viennent de lui, pas de l'utilisateur, et une machine
 /// avec Docker en annonce des dizaines. On garde les valides (six paires hexadécimales, rendues en
-/// majuscules), dans l'ordre annoncé, au plus [`MAC_MAX`] ; le reste est écarté, jamais un refus.
+/// majuscules), sans doublon, au plus [`MAC_MAX`] ; le reste est écarté, jamais un refus.
+///
+/// La troncature ne se fait pas au hasard de l'ordre annoncé (trié par l'agent : les cartes
+/// virtuelles de Docker, en `02:42:…`, peuvent précéder la carte physique) : les adresses
+/// « universelles » (bit « administrée localement » à zéro, ce que portent les vraies cartes)
+/// passent avant les adresses administrées localement (conteneurs, ponts, machines virtuelles),
+/// chaque groupe gardant l'ordre annoncé. Le réveil réseau (Wake-on-LAN) a ainsi la carte
+/// physique, même derrière quarante interfaces virtuelles.
+// FIX:01M46G7Y2DW32G1D190GE4MA7A — la troncature gardait les premières adresses annoncées, la carte physique
+// pouvait sauter (docs/bugs/FIX-01M46G7Y2DW32G1D190GE4MA7A.md)
 pub fn check_mac_addresses(macs: &[String]) -> Vec<String> {
-    macs.iter()
-        .filter(|mac| is_mac(mac))
-        .take(MAC_MAX)
-        .map(|mac| mac.to_ascii_uppercase())
-        .collect()
+    let mut valid: Vec<String> = Vec::new();
+    for mac in macs.iter().filter(|mac| is_mac(mac)) {
+        let mac = mac.to_ascii_uppercase();
+        if !valid.contains(&mac) {
+            valid.push(mac);
+        }
+    }
+    let (universal, local): (Vec<String>, Vec<String>) =
+        valid.into_iter().partition(|mac| is_universal(mac));
+    universal.into_iter().chain(local).take(MAC_MAX).collect()
+}
+
+/// Adresse de carte réelle : individuelle (bit 0) et universelle (bit 1 du premier octet à zéro).
+fn is_universal(mac: &str) -> bool {
+    mac.get(..2)
+        .and_then(|octet| u8::from_str_radix(octet, 16).ok())
+        .is_some_and(|octet| octet & 0b11 == 0)
 }
 
 fn is_mac(mac: &str) -> bool {
@@ -255,6 +276,30 @@ mod tests {
             kept[MAC_MAX - 1],
             format!("02:00:00:00:00:{:02X}", MAC_MAX - 1)
         );
+    }
+
+    #[test]
+    fn the_physical_card_survives_the_truncation_behind_forty_virtual_ones() {
+        // L'agent annonce dans l'ordre trié : les `02:42:…` de Docker passent devant la vraie carte.
+        let mut announced: Vec<String> =
+            (0..40).map(|n| format!("02:42:ac:11:00:{n:02x}")).collect();
+        announced.push("d8:5e:d3:11:22:33".to_owned());
+        announced.push("D8:5E:D3:11:22:33".to_owned());
+        let kept = check_mac_addresses(&announced);
+        assert_eq!(kept.len(), MAC_MAX);
+        assert_eq!(kept[0], "D8:5E:D3:11:22:33", "la carte physique en premier");
+        assert_eq!(
+            kept.iter().filter(|m| *m == "D8:5E:D3:11:22:33").count(),
+            1,
+            "sans doublon"
+        );
+        assert_eq!(kept[1], "02:42:AC:11:00:00", "puis l'ordre annoncé");
+        // Adresse de diffusion (bit de groupe) : jamais préférée à une vraie carte.
+        let kept = check_mac_addresses(&[
+            "01:00:5e:00:00:01".to_owned(),
+            "00:1a:2b:3c:4d:5e".to_owned(),
+        ]);
+        assert_eq!(kept[0], "00:1A:2B:3C:4D:5E");
     }
 
     #[test]

@@ -16,7 +16,7 @@ maj: 2026-10-05
 - Une adresse et un port déjà enregistrés ne s'ajoutent pas deux fois : « Ce serveur est déjà enregistré. Ouvrir l'entrée existante ? ».
 
 ## Bibliothèque
-- `crates/hearth-link/src/domain/book.rs::check_name`, `check_address`, `address_changed`, `check_username` (identifiant : non vide, 64 caractères au plus), `check_mac_addresses` (adresses venues de l'agent : on garde les six paires hexadécimales valides, au plus 16, le reste est écarté, jamais un refus : un hôte Docker en annonce des dizaines ; test `pinning.rs::an_agent_announcing_forty_interfaces…`) : règle de référence ; `manager/mod.rs::LinkManager::add_server`, `::update_server`, `::add_and_login`.
+- `crates/hearth-link/src/domain/book.rs::check_name`, `check_address`, `address_changed`, `check_username` (identifiant : non vide, 64 caractères au plus), `check_mac_addresses` (adresses venues de l'agent : on garde les six paires hexadécimales valides, sans doublon, au plus 16, le reste est écarté, jamais un refus : un hôte Docker en annonce des dizaines ; les adresses « universelles » des vraies cartes passent avant les adresses administrées localement de Docker, ponts et machines virtuelles, pour que le réveil réseau garde la carte physique ; tests `pinning.rs::an_agent_announcing_forty_interfaces…`, `book::tests::the_physical_card_survives_the_truncation_behind_forty_virtual_ones`, FIX-01M46G7Y2DW32G1D190GE4MA7A) : règle de référence ; `manager/mod.rs::LinkManager::add_server`, `::update_server`, `::add_and_login`.
 
 ## Interface (coquille et vue)
 - `apps/desktop/src/validation/server.ts` (`nameError`, `hostError`, `portError`, `parsePort`, `serverAt`) : miroir pour répondre pendant la frappe, mêmes cas que `book.rs` ; la coquille refait le contrôle à l'enregistrement (`LinkFailure::NameTaken`, `InvalidInput`).
@@ -34,3 +34,4 @@ maj: 2026-10-05
 
 ## Historique
 - 2026-10-05 — création (HRT-10).
+- 2026-10-05 : troncature des adresses MAC : la carte physique est gardée (HRT-12, FIX-01M46G7Y2DW32G1D190GE4MA7A).
