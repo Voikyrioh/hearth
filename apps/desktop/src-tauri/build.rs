@@ -8,6 +8,17 @@ const COMMANDS: &[&str] = &[
     "get_app_version",
     "open_logs_folder",
     "log_frontend_error",
+    "list_servers",
+    "list_link_states",
+    "probe_server",
+    "add_server",
+    "login",
+    "logout",
+    "retry_now",
+    "accept_fingerprint",
+    "update_server",
+    "remove_server",
+    "forget_credentials",
 ];
 
 fn main() {

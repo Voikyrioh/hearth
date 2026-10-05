@@ -16,6 +16,17 @@ export const commands = {
 	 *  échouer en rapportant un échec. Message borné en taille, débit limité.
 	 */
 	logFrontendError: (source: string, message: string) => __TAURI_INVOKE<void>("log_frontend_error", { source, message }),
+	listServers: () => __TAURI_INVOKE<ServerDto[]>("list_servers"),
+	listLinkStates: () => __TAURI_INVOKE<LinkStateDto[]>("list_link_states"),
+	probeServer: (host: string, port: number | null) => typedError<ProbeDto, LinkFailure>(__TAURI_INVOKE("probe_server", { host, port })),
+	addServer: (name: string, color: number, host: string, port: number | null, fingerprint: string, macAddresses: string[]) => typedError<ServerDto, LinkFailure>(__TAURI_INVOKE("add_server", { name, color, host, port, fingerprint, macAddresses })),
+	login: (serverId: string, username: string, password: string, remember: boolean) => typedError<LoginDto, LinkFailure>(__TAURI_INVOKE("login", { serverId, username, password, remember })),
+	logout: (serverId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("logout", { serverId })),
+	retryNow: (serverId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("retry_now", { serverId })),
+	acceptFingerprint: (serverId: string, fingerprint: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("accept_fingerprint", { serverId, fingerprint })),
+	updateServer: (serverId: string, name: string, color: number, host: string, port: number | null, fingerprint: string | null) => typedError<ServerDto, LinkFailure>(__TAURI_INVOKE("update_server", { serverId, name, color, host, port, fingerprint })),
+	removeServer: (serverId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("remove_server", { serverId })),
+	forgetCredentials: (serverId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("forget_credentials", { serverId })),
 };
 
 /* Types */
@@ -30,6 +41,121 @@ export type AppError =
 { kind: "autostart"; message: string } | 
 /**  Dossier des journaux impossible à créer ou à ouvrir. */
 { kind: "logs"; message: string };
+
+export type BlockedDto = "fingerprint_changed" | "incompatible_agent" | "incompatible_client";
+
+/**
+ *  Le certificat présenté n'est plus celui qui a été confirmé (BR-CONN-003). Les empreintes sont
+ *  en 8 groupes de 4 pour l'affichage ; `presented_hex` est la forme complète à renvoyer pour
+ *  l'accepter.
+ */
+export type FingerprintEvent = {
+	serverId: string,
+	expected: string,
+	presented: string,
+	presentedHex: string,
+};
+
+export type InvalidField = "name" | "address" | "port" | "credentials" | "fingerprint" | "other";
+
+/**  Échec d'une commande de liaison, sans texte : l'interface choisit le message d'après `kind`. */
+export type LinkFailure = 
+/**  Adresse injoignable ou délai dépassé. */
+{ kind: "unreachable" } | 
+/**  Quelque chose répond, mais ce n'est pas un agent Hearth (BR-CONN-012). */
+{ kind: "not_agent" } | 
+/**  L'agent est trop ancien (BR-CONN-014). */
+{ kind: "incompatible_agent" } | 
+/**  Le client est trop ancien (BR-CONN-014). */
+{ kind: "incompatible_client" } | 
+/**  Identifiant ou mot de passe refusé, sans dire lequel (BR-CONN-013). */
+{ kind: "invalid_credentials" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "fingerprint_changed" } | { kind: "name_taken" } | { kind: "already_exists" } | 
+/**  Champ invalide : `name`, `address`, `port` ou `credentials`. */
+{ kind: "invalid_input"; field: InvalidField } | { kind: "verification_required" } | { kind: "unknown_server" } | { kind: "storage" } | { kind: "vault" } | { kind: "internal" };
+
+/**
+ *  État du lien d'un serveur (`link://state`). `seq` croît strictement par serveur : l'interface
+ *  écarte tout événement dont `seq` n'est pas supérieur au dernier connu.
+ */
+export type LinkStateDto = {
+	serverId: string,
+	seq: number,
+	state: LinkStateName,
+	since: number | null,
+	lastContactAt: number | null,
+	nextRetryAt: number | null,
+	blocked: BlockedDto | null,
+	reason: ReasonDto | null,
+	failedAttempts: number,
+};
+
+export type LinkStateName = "connected" | "reconnecting" | "offline" | "session_expired" | "access_revoked";
+
+export type LoginDto = {
+	role: RoleDto,
+	username: string,
+};
+
+export type NoticeEvent = {
+	kind: NoticeKind,
+	serverId: string | null,
+};
+
+export type NoticeKind = 
+/**  Les suivis d'actions d'un serveur étaient illisibles : vérifie l'état avant de relancer. */
+"operations_lost" | 
+/**  L'écoute a pris du retard : des changements ont pu être manqués (états relus). */
+"lagged";
+
+export type OperationEventDto = {
+	opId: string,
+	serverId: string,
+	outcome: OutcomeDto,
+};
+
+export type OutcomeDto = "done" | "not_executed" | "unknown";
+
+/**  Première prise de contact : l'empreinte à faire confirmer. */
+export type ProbeDto = {
+	/**  Forme complète (64 caractères hexadécimaux), à renvoyer à `add_server`. */
+	fingerprint: string,
+	/**  8 groupes de 4 caractères, pour l'affichage. */
+	display: string,
+	machineName: string,
+	agentVersion: string,
+	macAddresses: string[],
+};
+
+export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked";
+
+export type RoleDto = "admin" | "readonly";
+
+/**  Un serveur du carnet, sans secret. */
+export type ServerDto = {
+	id: string,
+	name: string,
+	/**  Adresse telle qu'on l'affiche : le port n'apparaît que s'il n'est pas celui par défaut. */
+	address: string,
+	host: string,
+	port: number,
+	/**  Numéro de la palette de 8 couleurs (1 à 8). */
+	color: number,
+	/**  Rôle à la dernière connexion ; lecture seule tant qu'on n'est jamais connecté. */
+	role: RoleDto,
+	username: string,
+	remember: boolean,
+};
+
+export type ServersEvent = {
+	servers: ServerDto[],
+};
+
+export type SessionEndDto = "expired" | "revoked" | "stored_password_refused";
+
+export type SessionEndedEvent = {
+	serverId: string,
+	kind: SessionEndDto,
+};
 
 /**
  *  Réglages locaux, tels que l'interface les voit. Le fait que l'explication de

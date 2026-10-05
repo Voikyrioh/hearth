@@ -1,13 +1,26 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Interface principale : uniquement les commandes de l'application. Aucun accès direct aux greffons ni à la fenêtre depuis le web.",
+  "description": "Interface principale : les commandes de l'application, et l'écoute des événements de la liaison (link://*). Aucun accès direct aux greffons ni à la fenêtre depuis le web.",
   "windows": ["main"],
   "permissions": [
     "allow-get-settings",
     "allow-set-launch-at-startup",
     "allow-get-app-version",
     "allow-open-logs-folder",
-    "allow-log-frontend-error"
+    "allow-log-frontend-error",
+    "allow-list-servers",
+    "allow-list-link-states",
+    "allow-probe-server",
+    "allow-add-server",
+    "allow-login",
+    "allow-logout",
+    "allow-retry-now",
+    "allow-accept-fingerprint",
+    "allow-update-server",
+    "allow-remove-server",
+    "allow-forget-credentials",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }
