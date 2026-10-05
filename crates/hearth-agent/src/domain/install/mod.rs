@@ -6,6 +6,7 @@
 //! fonctionnelle : tutoiement, pas de tiret cadratin.
 
 mod credentials;
+mod files;
 mod observed;
 mod plan;
 mod platform;
@@ -18,6 +19,14 @@ mod version;
 pub use credentials::{
     AdminNameError, AdminPasswordError, HashFormatError, NAME_HELP, PASSWORD_HELP,
     check_admin_password, check_password_hash_format, parse_admin_name,
+};
+pub use files::{
+    BINARY_TEMP_PREFIX, CERT_FILE, DATA_FILES, DATABASE_FILE, DATABASE_FILES,
+    IDENTITY_CONTENT_FILES, IDENTITY_FILES, IDENTITY_LOCK_FILE, INSTALL_ID_FILE, KEY_FILE,
+    UNIT_TEMP_EXTENSION, UPDATE_DB_BACKUP_FILE, UPDATE_DIR, UPDATE_FILES, UPDATE_JOB_FILE,
+    UPDATE_LAST_FILE, UPDATE_LOCK_FILE, UPDATE_STAGED_FILE, UPDATE_STATE_FILE,
+    UPDATE_SUPERVISOR_FILE, UPDATE_WAL_BACKUP_FILE, binary_temporary_name, is_binary_temporary,
+    is_database_temporary, is_identity_temporary, is_update_temporary,
 };
 pub use observed::{BinaryState, DataState, Observed, UnitState};
 pub use plan::{InstallKind, InstallPlan, Kept, PlanError, ServiceAction, plan_install};

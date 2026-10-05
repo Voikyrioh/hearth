@@ -21,10 +21,9 @@ use crate::application::ports::{IdentityError, IdentityStore, PublicIdentity};
 use crate::domain::identity_policy::{self, IdentityAction, StoreObservation};
 use crate::domain::install_id::InstallId;
 
-const CERT_FILE: &str = "cert.pem";
-const KEY_FILE: &str = "key.pem";
-const INSTALL_ID_FILE: &str = "install_id";
-const LOCK_FILE: &str = "identity.lock";
+use crate::domain::install::{
+    CERT_FILE, IDENTITY_LOCK_FILE as LOCK_FILE, INSTALL_ID_FILE, KEY_FILE, is_identity_temporary,
+};
 const VALIDITY_DAYS: i64 = 3650;
 /// Attente maximale du verrou de création, puis erreur claire.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -139,11 +138,7 @@ impl FileIdentityStore {
         for entry in entries {
             let entry = entry.map_err(storage(&self.dir))?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            let is_temporary = name.ends_with(".tmp")
-                && [CERT_FILE, KEY_FILE, INSTALL_ID_FILE]
-                    .iter()
-                    .any(|base| name.starts_with(&format!("{base}.")));
-            if is_temporary {
+            if is_identity_temporary(&name) {
                 tracing::warn!(file = %name, "temporaire d'identité orphelin supprimé");
                 remove_if_present(&entry.path())?;
             }
@@ -314,7 +309,9 @@ mod tests {
     use super::*;
     use crate::domain::identity_policy::IdentityPart;
 
-    /// Vrai si le verrou est libre (on le prend puis on le rend).
+    /// Vrai si le verrou est libre (on le prend puis on le rend). Quelques essais : un autre test
+    /// qui lance un processus au même instant en garde un instant une copie du descripteur (entre
+    /// `fork` et `exec`), et un verrou `flock` dure tant qu'une copie existe.
     fn can_lock(path: &Path) -> bool {
         let file = fs::OpenOptions::new()
             .create(true)
@@ -322,7 +319,13 @@ mod tests {
             .truncate(false)
             .open(path)
             .expect("open");
-        file.try_lock().is_ok()
+        for _ in 0..50 {
+            if file.try_lock().is_ok() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
     }
 
     fn cert_fingerprint(dir: &Path) -> Fingerprint {
