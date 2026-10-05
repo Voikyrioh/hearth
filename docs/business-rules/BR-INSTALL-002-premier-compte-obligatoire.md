@@ -26,10 +26,11 @@ Quand aucun administrateur n'existe (première installation, ou base sans admini
 
 ## Cas limites
 - Un haché fourni n'a pas de règle de complexité (le mot de passe n'est pas connu) : seul le format Argon2id est contrôlé.
-- Le mot de passe n'est jamais un argument de la ligne de commande (`--password` n'existe pas).
+- Le mot de passe n'est jamais un argument de la ligne de commande (`--password` n'existe pas) ; voies : saisie sans écho, `HEARTH_ADMIN_PASSWORD_HASH` (haché fabriqué par `hash-password`), ou variable lue au clavier et transmise par l'environnement préservé de `sudo` (runbook).
 
 ## Règles liées
 - BR-INSTALL-009, BR-INSTALL-010, BR-ACCT-001
 
 ## Historique
 - 2026-10-05 : création (HRT-15, session 2026-10-04-hearth-creation).
+- 2026-10-05 : voies sans mot de passe en argument.

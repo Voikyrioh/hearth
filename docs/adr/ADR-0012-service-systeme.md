@@ -20,12 +20,13 @@ La suite du produit demande à l'agent de piloter Docker (socket `/var/run/docke
 ## Décision
 
 1. **L'agent tourne en root**, dans une unité systemd durcie. Un utilisateur dédié (`hearth`) ne protégerait presque rien : pour piloter Docker il lui faudrait l'appartenance au groupe `docker` (équivalent à root : monter `/` dans un conteneur suffit), pour éteindre la machine une règle polkit, pour se mettre à jour la propriété de son propre binaire (donc la possibilité de le remplacer par un autre). Le gain apparent coûterait trois mécanismes à maintenir, sans barrière réelle.
-2. **Le durcissement est dans l'unité** (`infrastructure/service/systemd.rs::render_unit`) :
+2. **Le durcissement est dans l'unité** (`infrastructure/service/systemd.rs::render_unit`). **Ce sont des garde-fous contre les erreurs et les compromissions bêtes, pas une barrière contre un attaquant qui contrôle le processus** : un processus root qui garde `CAP_DAC_OVERRIDE` et l'accès au socket de Docker peut, en pratique, tout faire sur la machine (il lui suffit de lancer un conteneur qui monte `/`). Ce que l'unité retire réellement :
    - `Restart=always`, `RestartSec=5`, `WantedBy=multi-user.target`, `After=network-online.target`.
-   - `NoNewPrivileges=yes`, `ProtectSystem=full` (`/usr`, `/boot`, `/etc` en lecture seule) avec `ReadWritePaths=` limité au dossier de données et au dossier du binaire (mise à jour), `ProtectHome=read-only`, `PrivateTmp=yes`.
-   - `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`, `ProtectClock`, `RestrictSUIDSGID`, `RestrictRealtime`, `LockPersonality`, `SystemCallArchitectures=native`.
+   - **Capacités bornées** : `CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_BOOT`. Sont retirées `CAP_SYS_ADMIN`, `CAP_SYS_PTRACE`, `CAP_SYS_MODULE`, `CAP_SYS_RAWIO`, `CAP_NET_ADMIN`, `CAP_MKNOD`... : ce que les besoins connus (fichiers, port choisi, arrêt et redémarrage de la machine, envoi de paquets de réveil) n'exigent pas.
+   - **Appels système filtrés** : `SystemCallFilter=@system-service` (pas de montage, d'échange, d'accès brut, de chargement de module), `SystemCallErrorNumber=EPERM`, `SystemCallArchitectures=native`, `RestrictNamespaces=yes`, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK`.
+   - `NoNewPrivileges=yes`, `ProtectSystem=full` (`/usr`, `/boot`, `/etc` en lecture seule) avec `ReadWritePaths=` limité au dossier de données et au dossier du binaire (mise à jour), `ProtectHome=read-only`, `PrivateTmp=yes`, `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`, `ProtectClock`, `RestrictSUIDSGID`, `RestrictRealtime`, `LockPersonality`.
    - `UMask=0077` : tout fichier créé par l'agent n'est lisible que par root.
-   - **Pas** de `MemoryDenyWriteExecute` (hérité par `nvidia-smi`, qui y échoue), pas de `ProtectKernelTunables` ni de restriction d'espaces de noms (inutiles et à revoir avec Docker).
+   - **Volontairement absents** : `MemoryDenyWriteExecute` (hérité par `nvidia-smi`, qui y échoue), `ProtectKernelTunables`, `PrivateDevices` (cartes graphiques). Piloter Docker par son socket et éteindre ou redémarrer par `systemctl` ou logind passent par des fichiers et des sockets Unix, que ce filtre laisse libres. **À vérifier sur la forge** (cartes NVIDIA : `NoNewPrivileges` empêche les aides setuid ; si `nvidia-smi` échoue, assouplir ici, jamais en modifiant l'unité à la main).
 3. **L'unité ne contient aucun secret** : ni mot de passe, ni haché, ni variable d'environnement. L'agent lit tout dans sa base et son dossier de données. Les chemins écrits dans l'unité sont validés (absolus, caractères sûrs) : aucun chemin ne peut y injecter une directive.
 4. **Installation gérée** (`--managed`, ou `HEARTH_MANAGED=1`) : adaptateur `none` (`Unmanaged`) : l'agent n'écrit aucune unité, ne copie pas son binaire, ne lance rien, et le dit. Il crée le dossier de données, l'identité, le premier compte et une configuration `managed = true` (donc pas de mise à jour automatique). Le système déclare et démarre le service. Sans systemd et sans `--managed`, l'installation refuse et suggère `--managed`.
 5. **Chemins fixes** : `/usr/local/bin/hearth-agent`, `/etc/hearth/agent.toml`, `/var/lib/hearth/`, `/etc/systemd/system/hearth-agent.service`. L'unité est écrite par un fichier voisin puis un renommage (jamais d'unité à moitié écrite), droits 0644.
@@ -51,7 +52,8 @@ La suite du produit demande à l'agent de piloter Docker (socket `/var/run/docke
 ## Conséquences
 
 - L'installation est atomique côté unité et réversible (BR-INSTALL-008).
-- La compromission du processus agent donne root, atténuée par le bac à sable de l'unité : la surface exposée est celle de l'API HTTPS authentifiée (ADR-0004, ADR-0005).
+- La compromission du processus agent donne root ; le bac à sable de l'unité en réduit les dégâts accidentels et ferme les chemins les plus courants (modules, montages, espaces de noms, écriture dans `/usr` et `/etc`), mais ne contient pas un attaquant décidé (Docker, `DAC_OVERRIDE`). La surface exposée est celle de l'API HTTPS authentifiée (ADR-0004, ADR-0005).
+- **Rétablissement fidèle** : avant d'écrire l'unité, l'installateur en garde le texte ; après un échec, il la réécrit telle quelle et remet le service dans l'état d'avant (relancé s'il tournait, arrêté sinon).
 
 ## Références
 

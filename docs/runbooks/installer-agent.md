@@ -1,15 +1,16 @@
 # Installer, réinstaller et désinstaller l'agent
 
-L'agent s'installe en une commande sur un serveur Linux (x86_64 ou arm64). Il devient un service qui démarre avec la machine, avec son premier compte administrateur et son empreinte.
+L'agent s'installe en une commande sur un serveur Linux x86_64 (arm64 viendra plus tard : aucun binaire arm64 n'est construit, l'installation le refuse clairement). Il devient un service qui démarre avec la machine, avec son premier compte administrateur et son empreinte.
 
 Règles : `docs/business-rules/BR-INSTALL-*.md`. Décision de service (root, durcissement, installation gérée) : `docs/adr/ADR-0012-service-systeme.md`.
 
 ## Prérequis
 
 - Un accès shell avec les droits d'administration (`sudo`).
-- Linux x86_64 ou arm64 ; systemd (sinon, installation gérée, voir plus bas).
+- Linux x86_64 ; systemd (sinon, installation gérée, voir plus bas).
 - Le port 7341 libre (ou un autre, au choix) et 256 Mio libres sur le disque du dossier de données.
-- Le binaire : fichier local (`cargo xtask agent` le construit dans `target/dist/hearth-agent`), ou une adresse. **La publication des versions n'existe pas encore** : sans `--binary` ni adresse, le téléchargement par défaut échoue proprement (« Aucune version de l'agent n'est publiée… ») et rien n'est installé.
+- Le binaire : fichier local (`cargo xtask agent` le construit dans `target/dist/hearth-agent`, avec sa somme SHA-256 dans la CI), ou une adresse **HTTPS** avec sa somme SHA-256. **La publication des versions n'existe pas encore** : sans `--binary` ni adresse, le téléchargement par défaut échoue proprement et rien n'est installé.
+- Le dossier de données (`/var/lib/hearth`) : absolu, chemin simple, appartenant à root et fermé aux autres (0700) s'il existe déjà ; sinon l'installation refuse avant d'écrire.
 
 Chemins fixes : binaire `/usr/local/bin/hearth-agent`, configuration `/etc/hearth/agent.toml`, données `/var/lib/hearth/` (base, certificat, clé), unité `/etc/systemd/system/hearth-agent.service`.
 
@@ -31,16 +32,28 @@ Lu depuis un tube (`curl … | sh`), le script garde les questions sur le termin
 
 ## Installation sans question
 
-```sh
-sudo HEARTH_ADMIN_USER=marie HEARTH_ADMIN_PASSWORD='…' HEARTH_PORT=7341 \
-  sh deploy/install.sh --binary ./hearth-agent --yes
-```
+Le mot de passe du premier compte ne se met **jamais** sur une ligne de commande : un argument de `sudo` ou d'un script est lisible par tous les utilisateurs (`ps`), écrit dans le journal de `sudo` et dans l'historique du shell. Trois voies :
 
-- `HEARTH_ADMIN_USER` et `HEARTH_ADMIN_PASSWORD` (ou `HEARTH_ADMIN_PASSWORD_HASH`, un haché Argon2id au format PHC `$argon2id$v=19$m=…,t=…,p=…$sel$haché` : l'agent ne connaît alors jamais le mot de passe). Jamais en argument de commande.
+1. **Interactive** (ci-dessus) : saisie sans écho.
+2. **Haché** (recommandée pour l'automatisation) : fabrique le haché Argon2id sur ta machine, mot de passe saisi sans écho, puis fournis-le par l'environnement :
+
+   ```sh
+   HEARTH_ADMIN_PASSWORD_HASH="$(hearth-agent hash-password --user marie)"; export HEARTH_ADMIN_PASSWORD_HASH
+   HEARTH_ADMIN_USER=marie; export HEARTH_ADMIN_USER
+   sudo --preserve-env=HEARTH_ADMIN_USER,HEARTH_ADMIN_PASSWORD_HASH \
+     sh deploy/install.sh --binary ./hearth-agent --yes
+   ```
+
+   Le haché doit être un Argon2id au format PHC, version 19, mémoire de 19 à 256 Mio (`m=19456` à `262144`), 2 à 10 itérations, parallélisme de 1 à 4, sel d'au moins 16 octets et sortie d'au moins 32 : un haché trop faible ou trop gourmand est refusé avant toute écriture. L'agent ne connaît alors jamais le mot de passe.
+3. **Variable lue au clavier** : `read -rs HEARTH_ADMIN_PASSWORD; export HEARTH_ADMIN_PASSWORD`, puis le même `sudo --preserve-env=…` (avec `HEARTH_ADMIN_PASSWORD` dans la liste).
+
+L'installateur ne passe jamais ces variables à ses sous-processus (`df`, `systemctl`, l'ancien binaire) et le service, lancé par systemd, ne les reçoit pas.
+
 - `HEARTH_PORT` ou `--port`. `--yes` : aucune question ; une valeur manquante arrête l'installation **avant toute écriture**.
-- `HEARTH_SHA256` ou `--sha256` : somme attendue du binaire. Sans elle, le script le dit : le binaire n'est pas vérifié (la signature minisign arrivera avec ADR-0008).
+- **Téléchargement** : `--url` (ou `HEARTH_RELEASE_URL`) en **HTTPS seulement** (redirections bornées et en HTTPS seulement). La somme SHA-256 est **obligatoire** : `--sha256` / `HEARTH_SHA256`, ou publiée à côté (`ADRESSE.sha256`, même origine). Sans somme, rien n'est téléchargé.
+- **Fichier local** : `--binary` (chemin résolu en absolu, jamais cherché dans le `PATH`). Sans `--sha256`, le script annonce clairement, avant de le lancer en root, que le binaire n'est pas vérifié. La signature minisign arrivera avec ADR-0008.
 
-Directement avec le binaire (sans le script) : `sudo ./hearth-agent install --yes` avec les mêmes variables.
+Directement avec le binaire (sans le script) : `sudo --preserve-env=… ./hearth-agent install --yes` avec les mêmes variables.
 
 ## Réinstaller, mettre à niveau
 
@@ -62,10 +75,12 @@ sudo hearth-agent uninstall --purge --yes       # plus aucune trace
 
 Après `--keep-data`, une nouvelle installation retrouve comptes et empreinte. Après `--purge`, la machine ne garde rien de l'agent (le verrou d'installation vit dans `/run`, volatil).
 
+**La purge ne supprime que les fichiers que Hearth connaît** (`cert.pem`, `key.pem`, `install_id`, `identity.lock`, `hearth.db` et ses fichiers compagnons, qui contiennent comptes et journal), puis le dossier s'il est vide ; de même pour la configuration et son dossier. Un dossier de données partagé avec autre chose garde ce qui n'est pas à Hearth : ces fichiers sont listés, jamais touchés. Aucun `rm -r` n'est fait sur un chemin venu de la configuration.
+
 ## Installation gérée par le système (NixOS, autre gestionnaire que systemd)
 
 ```sh
-sudo HEARTH_ADMIN_USER=marie HEARTH_ADMIN_PASSWORD='…' hearth-agent install --managed --yes
+sudo --preserve-env=HEARTH_ADMIN_USER,HEARTH_ADMIN_PASSWORD_HASH hearth-agent install --managed --yes
 ```
 
 L'agent n'écrit **aucune unité** et ne copie pas son binaire : il crée le dossier de données, l'identité, le premier compte et `agent.toml` avec `managed = true` (pas de mise à jour automatique), puis le dit. Le système déclare et démarre le service (`hearth-agent serve`). Même option (ou `HEARTH_MANAGED=1`) pour `uninstall`.
@@ -78,7 +93,11 @@ Un prérequis qui manque, une erreur ou Ctrl+C : l'agent annonce ce qui s'est pa
 |---|---|---|
 | « Droits d'administration requis… » | pas root | relancer avec `sudo` (la commande exacte est affichée) |
 | « Le port configuré est déjà utilisé… » | un autre processus écoute | `ss -ltnp \| grep 7341`, ou relancer avec `--port 7342` |
-| « Cette architecture n'est pas prise en charge… » | ni x86_64 ni arm64 | pas d'agent pour cette machine |
+| « Cette architecture n'est pas prise en charge… » | pas x86_64 (arm64 inclus pour l'instant) | pas d'agent pour cette machine |
+| « L'identité du serveur est incomplète… » | certificat, clé et identifiant d'installation ne sont pas tous là | rien n'est touché ; restaurer depuis une sauvegarde, ou supprimer les trois fichiers à la main si une nouvelle empreinte est acceptable |
+| « Le dossier de données n'appartient pas à root » ou « est ouvert à d'autres utilisateurs » | droits du dossier existant | `chown root` / `chmod 700`, ou autre dossier |
+| « L'adresse … n'est pas en HTTPS » / « Aucune somme SHA-256 n'est fournie ni publiée… » | téléchargement non vérifiable | adresse HTTPS et `--sha256` |
+| « …hors des bornes acceptées » | haché fourni trop faible ou trop gourmand | `hearth-agent hash-password` |
 | « Espace disque insuffisant… » | moins de 256 Mio libres | libérer de l'espace |
 | « systemd est introuvable… » | pas de systemd | `--managed` |
 | « Une installation est déjà en cours… » | une autre installation tient le verrou | attendre qu'elle se termine |
@@ -98,4 +117,4 @@ Un prérequis qui manque, une erreur ou Ctrl+C : l'agent annonce ce qui s'est pa
 
 ## Vérifier l'installation de bout en bout (développement)
 
-`cargo xtask e2e-install` construit le binaire statique, démarre un conteneur Debian avec systemd et rejoue tout ce runbook (installation par le script lu depuis un tube, réinstallation, désinstallation avec conservation puis purge, refus, retour en arrière, installation gérée). Docker est requis. `cargo xtask shellcheck` contrôle les scripts.
+`cargo xtask e2e-install` construit le binaire statique, démarre un conteneur Debian avec systemd et rejoue tout ce runbook (installation par le script lu depuis un tube en HTTPS, réinstallation, mise à niveau depuis une autre version, désinstallation avec conservation puis purge d'un dossier partagé, refus, erreur tardive et SIGHUP avec retour en arrière complet, installation interactive sur un terminal, installation gérée). Docker est requis. `cargo xtask shellcheck` contrôle les scripts.

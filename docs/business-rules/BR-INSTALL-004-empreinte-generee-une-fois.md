@@ -29,6 +29,7 @@ Fichiers dans le dossier de données : `cert.pem`, `key.pem` (permissions 0600 s
 - Bout en bout : `cargo xtask e2e-install` : l'empreinte affichée est celle du certificat servi (`openssl s_client`), identique après réinstallation, après désinstallation avec conservation puis réinstallation.
 
 ## Cas limites
+- **Identité incomplète à l'installation** (certificat sans clé ou sans `install_id`, ou l'inverse) : `plan_install` refuse (`PlanError::IdentityIncomplete`) **avant toute écriture** et ne supprime rien ; le message dit quoi faire. L'installateur ne note « créé par moi » que ce qui n'existait pas du tout, et n'efface jamais un fichier d'identité préexistant, même au retour en arrière (`tests/install_fs.rs`).
 - Clé ou `install_id` absent alors que `cert.pem` existe → erreur `IdentityError::Incomplete`, certificat intact.
 - Deux processus créent en même temps (`serve` et `fingerprint`) : l'un attend le verrou, puis relit l'identité de l'autre. Processus tué pendant la création : le verrou est relâché par le noyau, le démarrage suivant reprend normalement ; les temporaires orphelins (`key.pem.<pid>.<n>.tmp`…) sont supprimés sous le verrou avant de créer.
 - Fichier illisible ou invalide → `IdentityError::Corrupt`, rien n'est écrasé.
@@ -42,3 +43,4 @@ Fichiers dans le dossier de données : `cert.pem`, `key.pem` (permissions 0600 s
 - 2026-10-04 — règle déplacée dans `domain/identity_policy.rs`, verrou de création (review Stephen round 1).
 - 2026-10-04 — verrou du système au lieu d'un fichier à supprimer, nettoyage des temporaires orphelins (review Stephen round 2).
 - 2026-10-05 : installation, réinstallation et comparaison avec le certificat servi (HRT-15).
+- 2026-10-05 : identité partielle refusée, jamais supprimée (revue Stephen, HRT-15).

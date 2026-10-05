@@ -62,7 +62,7 @@ cargo xtask shellcheck    # deploy/install.sh et le scénario, shellcheck en con
 
 Le cache Cargo du conteneur est un volume nommé (`hearth-xtask-cargo`, `hearth-xtask-target`) ; `HEARTH_XTASK_CACHE=<dossier>` le place dans ce dossier de l'hôte (c'est ce que met en cache la CI). Sous Git Bash, préfixer par `MSYS_NO_PATHCONV=1`.
 
-`hearth-agent install [--port N] [--managed] [--yes]` et `uninstall [--keep-data|--purge] [--yes]` : interactif, ou sans question par `HEARTH_ADMIN_USER`, `HEARTH_ADMIN_PASSWORD` (ou `HEARTH_ADMIN_PASSWORD_HASH`), `HEARTH_PORT`. Droits d'administration requis. Le mot de passe n'est jamais un argument. Règles `BR-INSTALL-*`, runbook `docs/runbooks/installer-agent.md`, décision `docs/adr/ADR-0012-service-systeme.md`. Tout le code d'installation compile sous Windows mais ne s'exécute que sous Linux ; les tests de l'adaptateur systemd utilisent un faux `systemctl`.
+`hearth-agent install [--port N] [--managed] [--yes]` et `uninstall [--keep-data|--purge] [--yes]` : interactif, ou sans question par `HEARTH_ADMIN_USER`, `HEARTH_ADMIN_PASSWORD` (ou `HEARTH_ADMIN_PASSWORD_HASH`), `HEARTH_PORT`. Droits d'administration requis. Le mot de passe n'est jamais un argument ni un exemple de ligne de commande (`hearth-agent hash-password --user NOM` fabrique le haché pour `HEARTH_ADMIN_PASSWORD_HASH`). Téléchargement : HTTPS et SHA-256 obligatoires ; x86_64 seulement. Règles `BR-INSTALL-*`, runbook `docs/runbooks/installer-agent.md`, décision `docs/adr/ADR-0012-service-systeme.md`. Tout le code d'installation compile sous Windows mais ne s'exécute que sous Linux ; les tests de l'adaptateur systemd utilisent un faux `systemctl`.
 
 ## Règles
 

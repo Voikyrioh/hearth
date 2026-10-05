@@ -11,7 +11,7 @@ maj: 2026-10-05
 # BR-INSTALL-006 : L'installation s'interrompt sans modification si un prérequis manque
 
 ## Règle
-Les prérequis sont contrôlés dans l'ordre : droits, système (Linux), architecture, port libre, espace disque (256 Mio libres), et systemd présent (sinon `--managed`). Le premier qui manque arrête l'installation **avant la moindre écriture**, avec le message de la spécification et, pour un port occupé, la commande à relancer avec un autre port. Un port occupé par l'agent déjà installé et en marche n'est pas un obstacle à sa réinstallation.
+Les prérequis sont contrôlés dans l'ordre : droits, système (Linux), architecture, port libre, espace disque (256 Mio libres), et systemd présent (sinon `--managed`). Le premier qui manque arrête l'installation **avant la moindre écriture**, avec le message de la spécification et, pour un port occupé, la commande à relancer avec un autre port. Le dossier de données et le fichier de configuration doivent être des chemins absolus, sans `..` ni caractère hors `[A-Za-z0-9/_.@:+-]` ; un dossier de données existant doit appartenir à root et être fermé aux autres (0700). Un port occupé par l'agent déjà installé et en marche n'est pas un obstacle à sa réinstallation.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/install/prerequisites.rs::check_prerequisites`.
@@ -32,3 +32,4 @@ Les prérequis sont contrôlés dans l'ordre : droits, système (Linux), archite
 
 ## Historique
 - 2026-10-05 : création (HRT-15, session 2026-10-04-hearth-creation).
+- 2026-10-05 : contrôle des chemins, du propriétaire et des droits du dossier de données (`Prerequisites`, `unsafe_path_reason`).

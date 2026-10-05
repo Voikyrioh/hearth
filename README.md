@@ -10,14 +10,14 @@ Deux morceaux :
 
 ## Installer l'agent
 
-Sur le serveur Linux (x86_64 ou arm64, systemd), avec les droits d'administration :
+Sur le serveur Linux (x86_64 pour l'instant, arm64 viendra ; systemd), avec les droits d'administration :
 
 ```sh
 cargo xtask agent                                   # binaire statique dans target/dist/hearth-agent (Docker requis)
 sudo sh deploy/install.sh --binary ./hearth-agent   # questions : port, premier compte, mot de passe
 ```
 
-Sans question : `sudo HEARTH_ADMIN_USER=marie HEARTH_ADMIN_PASSWORD='…' sh deploy/install.sh --binary ./hearth-agent --yes`. À la fin, l'agent tourne, démarre avec le serveur, et affiche son **empreinte** : à comparer avec celle du client à la première connexion. Désinstaller : `sudo hearth-agent uninstall [--keep-data|--purge]`. Détails, réinstallation, installation gérée (NixOS), dépannage : [`docs/runbooks/installer-agent.md`](./docs/runbooks/installer-agent.md).
+Sans question : fabrique un haché (`hearth-agent hash-password --user marie`, saisie sans écho), puis passe-le par l'environnement préservé de `sudo` : `HEARTH_ADMIN_USER=marie HEARTH_ADMIN_PASSWORD_HASH='$argon2id$…' sudo --preserve-env=HEARTH_ADMIN_USER,HEARTH_ADMIN_PASSWORD_HASH sh deploy/install.sh --binary ./hearth-agent --yes`. Un mot de passe ne se met jamais sur une ligne de commande. À la fin, l'agent tourne, démarre avec le serveur, et affiche son **empreinte** : à comparer avec celle du client à la première connexion. Désinstaller : `sudo hearth-agent uninstall [--keep-data|--purge]`. Détails, réinstallation, installation gérée (NixOS), dépannage : [`docs/runbooks/installer-agent.md`](./docs/runbooks/installer-agent.md).
 
 ## Dépôt
 
