@@ -112,6 +112,7 @@ fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
     let client = link::client_name(env!("CARGO_PKG_VERSION"));
     let runtime = tauri::async_runtime::block_on(link::LinkRuntime::open(&dir, vault, &client))
         .map_err(|error| format!("liaison avec les serveurs : {error}"))?;
+    tracing::info!(servers = runtime.servers().len(), data = %dir.display(), "liaison prête");
     let runtime = Arc::new(runtime);
     let events = runtime.manager().subscribe();
     app.manage(runtime.clone());
