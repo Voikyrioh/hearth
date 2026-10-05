@@ -5,6 +5,7 @@ pub mod accounts;
 pub mod audit;
 pub mod compat;
 pub mod identity_policy;
+pub mod install;
 pub mod install_id;
 pub mod lockout;
 pub mod machine;
