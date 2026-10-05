@@ -166,6 +166,15 @@ impl PasswordHasher for Argon2Hasher {
         })?
     }
 
+    fn validate_hash(&self, hash: &Secret) -> Result<(), HashError> {
+        let parsed = PasswordHash::new(hash.expose()).map_err(|_| HashError::MalformedHash)?;
+        if parsed.algorithm.as_str() == "argon2id" {
+            Ok(())
+        } else {
+            Err(HashError::MalformedHash)
+        }
+    }
+
     fn decoy_hash(&self) -> &Secret {
         &self.decoy
     }
