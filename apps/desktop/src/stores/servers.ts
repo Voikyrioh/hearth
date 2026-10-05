@@ -3,9 +3,10 @@ import { computed, ref } from "vue";
 import { getLinkBridge, type ServerInfo, type Unsubscribe } from "@/link";
 
 /**
- * Serveurs enregistrés, alimentés par le pont de liaison. `currentId` est le serveur
- * affiché (posé par le gabarit de serveur d'après la route) : la directive `v-needs-link`
- * et les composants de la coquille y lisent « le serveur courant ».
+ * Serveurs enregistrés, alimentés par le pont de liaison (qui rejoue la liste courante à
+ * l'abonnement : un seul modèle, aucune fenêtre où un ajout ou une suppression serait perdu).
+ * `currentId` est le serveur affiché (posé par le gabarit de serveur d'après la route) :
+ * `useNeedsLink` et les composants de la coquille y lisent « le serveur courant ».
  */
 export const useServersStore = defineStore("servers", () => {
   const servers = ref<ServerInfo[]>([]);
@@ -17,15 +18,19 @@ export const useServersStore = defineStore("servers", () => {
   const current = computed(() => servers.value.find((s) => s.id === currentId.value) ?? null);
   const first = computed(() => servers.value[0] ?? null);
 
-  /** Charge la liste une seule fois et suit ses changements. */
+  /** S'abonne une seule fois ; rend la main quand la liste courante est arrivée. */
   function load(): Promise<void> {
     loading ??= (async () => {
-      const bridge = getLinkBridge();
-      servers.value = await bridge.listServers();
-      unsubscribe = bridge.onServersChanged((next) => {
-        servers.value = next;
+      let firstList!: () => void;
+      const arrived = new Promise<void>((resolve) => {
+        firstList = resolve;
       });
-      loaded.value = true;
+      unsubscribe = await getLinkBridge().onServersChanged((next) => {
+        servers.value = next;
+        loaded.value = true;
+        firstList();
+      });
+      await arrived;
     })().catch((error) => {
       loading = null;
       throw error;

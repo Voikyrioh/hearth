@@ -56,6 +56,7 @@ export const fr = {
     done: "Fait pendant la coupure.",
     notExecuted: "Non exécuté. Tu peux relancer.",
     unknown: "Résultat inconnu. Vérifie l'état du serveur.",
+    withServer: "{server} : {message}",
   },
   server: {
     avatarLabel: "{name}, {state}",

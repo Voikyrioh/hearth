@@ -37,19 +37,16 @@ export class SimulatedLinkBridge implements LinkBridge {
     for (const server of this.servers) this.events.set(server.id, this.connectedEvent(server.id));
   }
 
-  async listServers(): Promise<ServerInfo[]> {
-    return this.servers.map((server) => ({ ...server }));
-  }
-
-  onServersChanged(listener: (servers: ServerInfo[]) => void): Unsubscribe {
+  async onServersChanged(listener: (servers: ServerInfo[]) => void): Promise<Unsubscribe> {
     this.serverListeners.add(listener);
-    return () => this.serverListeners.delete(listener);
+    listener(this.servers.map((server) => ({ ...server })));
+    return () => void this.serverListeners.delete(listener);
   }
 
-  onLinkState(listener: (event: LinkStateEvent) => void): Unsubscribe {
+  async onLinkState(listener: (event: LinkStateEvent) => void): Promise<Unsubscribe> {
     this.stateListeners.add(listener);
     for (const event of this.events.values()) listener({ ...event });
-    return () => this.stateListeners.delete(listener);
+    return () => void this.stateListeners.delete(listener);
   }
 
   async retryNow(serverId: string): Promise<void> {
@@ -60,9 +57,9 @@ export class SimulatedLinkBridge implements LinkBridge {
     }
   }
 
-  onOperation(listener: (event: OperationEvent) => void): Unsubscribe {
+  async onOperation(listener: (event: OperationEvent) => void): Promise<Unsubscribe> {
     this.operationListeners.add(listener);
-    return () => this.operationListeners.delete(listener);
+    return () => void this.operationListeners.delete(listener);
   }
 
   // --- Pilotage (code de test, panneau de développement) ---

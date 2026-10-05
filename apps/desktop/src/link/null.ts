@@ -1,19 +1,17 @@
 import type { LinkBridge } from "./bridge";
-import type { ServerInfo } from "./types";
+import type { LinkStateEvent, OperationEvent, ServerInfo, Unsubscribe } from "./types";
 
 /** Pont vide : aucun serveur, aucun événement. Sert tant que le pont réel n'est pas branché. */
 export class NullLinkBridge implements LinkBridge {
-  async listServers(): Promise<ServerInfo[]> {
-    return [];
-  }
-  onServersChanged() {
+  async onServersChanged(listener: (servers: ServerInfo[]) => void): Promise<Unsubscribe> {
+    listener([]);
     return () => {};
   }
-  onLinkState() {
+  async onLinkState(_listener: (event: LinkStateEvent) => void): Promise<Unsubscribe> {
     return () => {};
   }
-  async retryNow() {}
-  onOperation() {
+  async retryNow(): Promise<void> {}
+  async onOperation(_listener: (event: OperationEvent) => void): Promise<Unsubscribe> {
     return () => {};
   }
 }

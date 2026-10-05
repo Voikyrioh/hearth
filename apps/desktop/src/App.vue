@@ -4,12 +4,15 @@ import { RouterView, useRoute } from "vue-router";
 import ErrorBoundary from "@/components/molecules/ErrorBoundary.vue";
 import ToastStack from "@/components/molecules/ToastStack.vue";
 import ServerRail from "@/components/organisms/ServerRail.vue";
+import { reportUiError } from "@/errors/report";
 import { useLinkStore } from "@/stores/link";
 
 const route = useRoute();
 
 // L'interface écoute le pont de liaison dès le démarrage (états des liens, issues d'opérations).
-useLinkStore().start();
+useLinkStore()
+  .start()
+  .catch((error) => reportUiError(error, "link:start"));
 
 // Panneau de simulation : seulement en mode développement (retiré du binaire livré).
 const DevLinkPanel = import.meta.env.DEV

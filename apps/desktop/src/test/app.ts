@@ -18,6 +18,6 @@ export async function startedApp(options: SimulatedOptions = {}) {
   const servers = useServersStore();
   const link = useLinkStore();
   await servers.load();
-  link.start();
+  await link.start();
   return { ...ctx, servers, link };
 }

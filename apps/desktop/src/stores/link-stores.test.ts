@@ -1,7 +1,9 @@
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LinkStateEvent } from "@/link";
 import { LINK_STATES, SimulatedLinkBridge, setLinkBridge } from "@/link";
 import { freshBridge, startedApp } from "@/test/app";
+import { useLinkStore } from "./link";
 import { useServersStore } from "./servers";
 import { MAX_VISIBLE_TOASTS, TOAST_LIFETIME_MS, useToastsStore } from "./toasts";
 
@@ -18,9 +20,13 @@ afterEach(() => {
 describe("simulated link bridge", () => {
   it("lists the sample servers, all connected, and emits every state it is driven to", async () => {
     const { bridge } = freshBridge();
-    expect((await bridge.listServers()).map((s) => s.id)).toEqual(["forge", "salon"]);
+    let listed: string[] = [];
+    await bridge.onServersChanged((list) => {
+      listed = list.map((s) => s.id);
+    });
+    expect(listed).toEqual(["forge", "salon"]);
     const seen: string[] = [];
-    const stop = bridge.onLinkState((e) => seen.push(`${e.serverId}:${e.state}`));
+    const stop = await bridge.onLinkState((e) => seen.push(`${e.serverId}:${e.state}`));
     expect(seen).toEqual(["forge:connected", "salon:connected"]);
     for (const state of LINK_STATES) bridge.setState("forge", state);
     expect(seen.slice(2)).toEqual(LINK_STATES.map((s) => `forge:${s}`));
@@ -29,12 +35,12 @@ describe("simulated link bridge", () => {
     expect(seen).toHaveLength(2 + LINK_STATES.length);
   });
 
-  it("keeps the last contact while the link is down and refreshes it on return", () => {
+  it("keeps the last contact while the link is down and refreshes it on return", async () => {
     let now = 1000;
     const bridge = new SimulatedLinkBridge({ now: () => now });
     const events: { state: string; lastContactAt: number | null; nextRetryAt: number | null }[] =
       [];
-    bridge.onLinkState((e) => e.serverId === "forge" && events.push(e));
+    await bridge.onLinkState((e) => e.serverId === "forge" && events.push(e));
     now = 5000;
     bridge.setState("forge", "offline");
     now = 9000;
@@ -47,7 +53,7 @@ describe("simulated link bridge", () => {
   it("goes reconnecting on « Réessayer maintenant », then back to connected", async () => {
     const bridge = new SimulatedLinkBridge({ retryDelayMs: 1500 });
     const states: string[] = [];
-    bridge.onLinkState((e) => e.serverId === "forge" && states.push(e.state));
+    await bridge.onLinkState((e) => e.serverId === "forge" && states.push(e.state));
     bridge.setState("forge", "offline");
     await bridge.retryNow("forge");
     expect(states.at(-1)).toBe("reconnecting");
@@ -116,14 +122,14 @@ describe("link store", () => {
 
   it("turns operation outcomes into discreet notifications with the exact texts", async () => {
     const { bridge } = await startedApp();
-    bridge.emitOperation({ opId: "1", outcome: "done" });
-    bridge.emitOperation({ opId: "2", outcome: "not_executed" });
-    bridge.emitOperation({ opId: "3", outcome: "unknown" });
+    bridge.emitOperation({ opId: "1", serverId: "forge", outcome: "done" });
+    bridge.emitOperation({ opId: "2", serverId: "salon", outcome: "not_executed" });
+    bridge.emitOperation({ opId: "3", serverId: "forge", outcome: "unknown" });
     const toasts = useToastsStore();
     expect(toasts.items.map((t) => [t.kind, t.message])).toEqual([
-      ["success", "Fait pendant la coupure."],
-      ["info", "Non exécuté. Tu peux relancer."],
-      ["warn", "Résultat inconnu. Vérifie l'état du serveur."],
+      ["success", "forge : Fait pendant la coupure."],
+      ["info", "nas-salon : Non exécuté. Tu peux relancer."],
+      ["warn", "forge : Résultat inconnu. Vérifie l'état du serveur."],
     ]);
   });
 
@@ -191,11 +197,73 @@ describe("servers store failure", () => {
     freshBridge();
     const store = useServersStore();
     const bridge = new SimulatedLinkBridge();
-    vi.spyOn(bridge, "listServers").mockRejectedValueOnce(new Error("pont en panne"));
+    vi.spyOn(bridge, "onServersChanged").mockRejectedValueOnce(new Error("pont en panne"));
     setLinkBridge(bridge);
     await expect(store.load()).rejects.toThrow("pont en panne");
     await store.load();
     await flushPromises();
     expect(store.loaded).toBe(true);
+  });
+});
+
+describe("bridge contract", () => {
+  it("replays the current servers and states at subscription, and a server added before is not lost", async () => {
+    const { bridge } = freshBridge();
+    bridge.addServer({ id: "x", name: "x", address: "x", color: 2, role: "admin" });
+    bridge.setState("x", "offline");
+    const lists: string[][] = [];
+    const states: string[] = [];
+    const stopServers = await bridge.onServersChanged((l) => lists.push(l.map((s) => s.id)));
+    const stopStates = await bridge.onLinkState((e) => states.push(`${e.serverId}:${e.state}`));
+    expect(lists).toEqual([["forge", "salon", "x"]]);
+    expect(states).toContain("x:offline");
+    bridge.removeServer("salon");
+    expect(lists.at(-1)).toEqual(["forge", "x"]);
+    stopServers();
+    stopStates();
+    bridge.removeServer("x");
+    expect(lists).toHaveLength(2);
+  });
+});
+
+describe("link store ordering and operations", () => {
+  it("never lets an older event overwrite a newer one", async () => {
+    const { bridge } = freshBridge();
+    let push: (event: LinkStateEvent) => void = () => {};
+    vi.spyOn(bridge, "onLinkState").mockImplementation(async (listener) => {
+      push = listener;
+      return () => {};
+    });
+    const link = useLinkStore();
+    await link.start();
+    const event = (state: LinkStateEvent["state"], since: number): LinkStateEvent => ({
+      serverId: "forge",
+      state,
+      since,
+      lastContactAt: null,
+      nextRetryAt: null,
+    });
+    push(event("offline", 2000));
+    // Un instantané en retard (since plus ancien) arrive ensuite : ignoré.
+    push(event("connected", 1000));
+    expect(link.stateOf("forge")).toBe("offline");
+    push(event("connected", 3000));
+    expect(link.stateOf("forge")).toBe("connected");
+  });
+
+  it("keeps the outcome by opId so a page finds the one of ITS action, bounded in count and age", async () => {
+    const { bridge, link } = await startedApp();
+    bridge.emitOperation({ opId: "mine", serverId: "forge", outcome: "done" });
+    expect(link.outcomeOf("mine")).toBe("done");
+    expect(link.outcomeOf("other")).toBeUndefined();
+    for (let i = 0; i < 300; i++) {
+      bridge.emitOperation({ opId: `op${i}`, serverId: "forge", outcome: "unknown" });
+    }
+    expect(Object.keys(link.operations).length).toBeLessThanOrEqual(100);
+    expect(link.outcomeOf("mine")).toBeUndefined();
+    expect(link.outcomeOf("op299")).toBe("unknown");
+    vi.setSystemTime(Date.now() + 11 * 60_000);
+    bridge.emitOperation({ opId: "late", serverId: "forge", outcome: "done" });
+    expect(Object.keys(link.operations)).toEqual(["late"]);
   });
 });

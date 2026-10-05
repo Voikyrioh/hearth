@@ -43,6 +43,7 @@ export type OperationOutcome = "done" | "not_executed" | "unknown";
 /** Événement `link://operation`. */
 export interface OperationEvent {
   opId: string;
+  serverId: string;
   outcome: OperationOutcome;
 }
 
