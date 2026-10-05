@@ -26,7 +26,7 @@ Le processeur n'est « attention » ou « critique » que si tous les points de 
 - BR-DASH-003, BR-DASH-011
 
 ## Interface
-- `dashboard.rs::DashBook::on_metrics` tient la série du processeur au pas de 1 s par serveur et appelle `cpu_level` ; un instantané de reconnexion la reprend. Le niveau du processeur affiché est celui-là, jamais calculé sur la fenêtre d'une heure. Tests : `src-tauri/tests/dashboard.rs` (29 s, 30 s, creux, trou, séries indépendantes).
+- `dashboard.rs::DashBook::on_metrics` tient la série du processeur par serveur sur l'instant de RÉCEPTION (jamais l'horloge de l'agent) et appelle `cpu_level` ; un instantané de reconnexion la reprend. Le niveau du processeur affiché est celui-là, jamais calculé sur la fenêtre d'une heure. Tests : `src-tauri/tests/dashboard.rs` (29 s, 30 s, creux, trou, séries indépendantes).
 
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).

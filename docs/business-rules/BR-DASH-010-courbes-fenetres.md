@@ -28,7 +28,7 @@ L'agent garde 3 600 échantillons (1 heure à 1 Hz) en mémoire, rien sur disque
 - BR-DASH-001, BR-DASH-011
 
 ## Interface
-- `dashboard/series.ts` : `WINDOWS`, `resample` (1 s pour 1 min et 5 min, 10 s pour 1 h, moyenne par pas), `SampleRing` (3 600 échantillons au plus) ; sélecteur `HSegmented` « 1 min / 5 min / 1 h » au-dessus de la grille, 5 min par défaut, changement immédiat. La fenêtre d'une heure se remplit depuis l'ouverture de l'application (« Depuis N min », ADR-0015). Tests : `dashboard/series.test.ts`, `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`.
+- `dashboard/series.ts` : `WINDOWS`, `resample` (1 s pour 1 min et 5 min, 10 s pour 1 h, moyenne par pas), `SampleRing` (3 600 échantillons au plus) ; sélecteur `HSegmented` « 1 min / 5 min / 1 h » au-dessus de la grille, 5 min par défaut, changement immédiat. La fenêtre d'une heure se remplit depuis l'ouverture de l'application (« Depuis N min », mesuré dans la fenêtre sur des échantillons contigus ; suivi HRT-18, ADR-0015). Tests : `dashboard/series.test.ts`, `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`.
 
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).

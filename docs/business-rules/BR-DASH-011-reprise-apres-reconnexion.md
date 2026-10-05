@@ -27,7 +27,7 @@ Côté agent : à chaque abonnement, le `snapshot` rend l'historique jusqu'au de
 - BR-DASH-004, BR-DASH-009, BR-DASH-010
 
 ## Interface
-- `SampleRing::merge` : l'instantané qui suit une reconnexion remplace ce qu'il recouvre et garde le plus ancien ; les courbes se terminent au dernier échantillon (elles ne glissent pas pendant la coupure). Tests : `dashboard/series.test.ts`, `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`.
+- `SampleRing::merge` : l'instantané qui suit une reconnexion remplace ce qu'il recouvre et garde le plus ancien et le plus récent ; les courbes se terminent au dernier échantillon (elles ne glissent pas pendant la coupure). Tests : `dashboard/series.test.ts`, `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`.
 
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
