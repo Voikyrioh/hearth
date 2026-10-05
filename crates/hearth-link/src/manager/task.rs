@@ -27,7 +27,7 @@ use super::{ActionOutcome, ActionRequest, Deps, Shared};
 use crate::domain::event::{Event, SessionEnd, StateInfo};
 use crate::domain::pending_ops::{Lookup, OperationId, Outcome, PendingOps, Resolution};
 use crate::domain::server::{HISTORY_CAP, LastKnown, ServerId};
-use crate::domain::state::{Effect, Input, LinkMachine, LinkState, Start, Status};
+use crate::domain::state::{Effect, Input, LinkMachine, LinkState, Reason, Start, Status};
 use crate::domain::time::WallTime;
 use crate::error::LinkError;
 use crate::ports::transport::{ApiResponse, Frame, StreamConn, TransportError};
@@ -306,7 +306,11 @@ impl Runner {
                 self.input(Input::LoginSucceeded).await;
             }
             Command::LoginRefused => self.input(Input::LoginRefused).await,
-            Command::LoggedOut => self.input(Input::LoggedOut).await,
+            Command::LoggedOut => {
+                self.input(Input::LoggedOut).await;
+                // Après l'arrêt de toute tentative : un jeton obtenu entre-temps n'a plus d'objet.
+                let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
+            }
             Command::Execute {
                 key,
                 request,
@@ -482,6 +486,10 @@ impl Runner {
     /// 401 `SESSION_EXPIRED` : reconnexion silencieuse si le mot de passe est au coffre, sinon
     /// « Session expirée » (BR-RESIL-012, 013).
     async fn session_expired(&mut self) {
+        // Déconnexion volontaire : la fin de session qui suit est la nôtre, pas une expiration.
+        if self.machine.status().reason == Some(Reason::UserDisconnected) {
+            return;
+        }
         let can_reauth = self.has_saved_password();
         self.input(Input::SessionExpired { can_reauth }).await;
         if self.machine.state() == LinkState::SessionExpired {

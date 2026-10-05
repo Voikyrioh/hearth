@@ -537,6 +537,16 @@ impl LinkManager {
     pub async fn logout(&self, id: &ServerId) -> Result<(), LinkError> {
         let (commands, shared) = self.handle(id)?;
         let deps = &self.inner.deps;
+        // D'abord arrêter la tâche (plus de reconnexion possible), ensuite fermer la session :
+        // sinon le flux annonce « session fermée » et la reconnexion silencieuse rouvre une
+        // session avec le mot de passe mémorisé.
+        let mut record = shared.record();
+        record.signed_out = true;
+        shared.set_record(record.clone());
+        commands
+            .send(Command::LoggedOut)
+            .await
+            .map_err(|_| LinkError::Stopped)?;
         if let Ok(Some(token)) = deps.vault.get(id, SecretKind::Token) {
             // Au mieux : un serveur injoignable n'empêche pas de se déconnecter.
             let _ = timeout(
@@ -548,17 +558,10 @@ impl LinkManager {
         deps.vault
             .delete(id, SecretKind::Token)
             .map_err(|e| LinkError::Vault(e.0))?;
-        let mut record = shared.record();
-        record.signed_out = true;
-        shared.set_record(record.clone());
         deps.servers
             .save(&record)
             .await
-            .map_err(|e| LinkError::Store(e.0))?;
-        commands
-            .send(Command::LoggedOut)
-            .await
-            .map_err(|_| LinkError::Stopped)
+            .map_err(|e| LinkError::Store(e.0))
     }
 
     /// Retire le serveur : tâche arrêtée, secrets, carnet et dernière vue effacés.
