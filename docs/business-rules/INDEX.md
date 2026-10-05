@@ -106,6 +106,21 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-DASH-014](./BR-DASH-014-formats-d-unites.md) — Les nombres suivent les unités : pourcentages entiers, Go à une décimale, débit adaptatif, durée longue — `hearth-proto/src/api/metrics.rs` — —
 - [BR-DASH-015](./BR-DASH-015-interfaces-reseau-comptees.md) — Seules les interfaces réseau physiques comptent dans le débit — `domain/machine.rs::throughput_interfaces` — invariant ✓
 
+### UPDATE (client, HRT-16)
+
+- [BR-UPDATE-001](./BR-UPDATE-001-verification-au-lancement-puis-une-fois-par-jour.md) — Le client vérifie au lancement, puis une fois par jour au plus (une tentative qui échoue compte) — `update/domain.rs::check_is_due`, `update/service.rs::UpdateService::check` — invariant ✓
+- [BR-UPDATE-002](./BR-UPDATE-002-aucune-installation-sans-consentement.md) — Aucune mise à jour du client n'est installée sans le clic de l'utilisateur — `update/service.rs::UpdateService::begin_install` — invariant ✓
+- [BR-UPDATE-003](./BR-UPDATE-003-bandeau-nouvelle-version-avec-notes.md) — Une version plus récente est annoncée par un bandeau discret avec les notes (texte brut) — `update/domain.rs::{validate_candidate, banner_visible}` — invariant —
+- [BR-UPDATE-004](./BR-UPDATE-004-telechargement-signature-installation-relance.md) — Téléchargement en mémoire, signature minisign vérifiée avant toute écriture, installation et relance — `update/feed.rs::TauriFeed::{download, install}` — invariant ✓
+- [BR-UPDATE-005](./BR-UPDATE-005-serveurs-et-reglages-conserves.md) — Serveurs et réglages conservés après la mise à jour (à vérifier sur une vraie publication) — `update/domain.rs::forget_installed` — invariant —
+- [BR-UPDATE-006](./BR-UPDATE-006-plus-tard-masque-le-bandeau-24-h.md) — « Plus tard » masque le bandeau 24 h, report enregistré côté Rust — `update/domain.rs::{postponed_until, is_postponed}` — invariant ✓
+- [BR-UPDATE-007](./BR-UPDATE-007-sans-internet-echec-silencieux.md) — Sans Internet : échec silencieux, « Dernière vérification » dans les réglages — `update/service.rs::UpdateService::absorb` — invariant —
+- [BR-UPDATE-008](./BR-UPDATE-008-service-de-versions-muet-abandon-silencieux.md) — Service de versions muet : abandon silencieux, retenté plus tard — `update/service.rs::UpdateService::absorb` — invariant —
+- [BR-UPDATE-009](./BR-UPDATE-009-telechargement-interrompu-relancable.md) — Téléchargement interrompu : relançable, la version en cours reste utilisable — `update/feed.rs::classify` — invariant —
+- [BR-UPDATE-010](./BR-UPDATE-010-mise-a-jour-corrompue-refusee.md) — Mise à jour corrompue : refusée, la version en cours reste utilisable — `update/feed.rs::classify` — invariant ✓
+- [BR-UPDATE-025](./BR-UPDATE-025-versions-dans-les-reglages.md) — Les réglages affichent la version du client (celle de l'agent viendra avec son écran) — `pages/Settings.vue`, `UpdatePanel.vue` — invariant —
+- [BR-UPDATE-026](./BR-UPDATE-026-verifier-maintenant.md) — « Vérifier maintenant » force une vérification, hors de la règle des 24 h — `update/service.rs::UpdateService::check_now` — invariant —
+
 ### UPDATE (agent, HRT-17)
 
 - [BR-UPDATE-011](./BR-UPDATE-011-seul-admin-met-a-jour-agent.md) — Seul un administrateur déclenche la mise à jour de l'agent — `entrypoint/http/mod.rs::ENDPOINTS` — invariant ✓
@@ -123,7 +138,7 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-UPDATE-028](./BR-UPDATE-028-travail-de-mise-a-jour-laisse-en-cours.md) — Un travail de mise à jour laissé en cours est conclu au démarrage — `domain/update/orphan.rs::classify_orphan` — invariant ✓
 - [BR-UPDATE-029](./BR-UPDATE-029-retour-arriere-ne-laisse-pas-une-base-migree.md) — Un retour arrière ne laisse jamais un ancien binaire devant une base déjà migrée — `application/update_supervisor.rs::Supervisor::{run, roll_back}` — invariant ✓
 
-Les règles BR-UPDATE-001 à 010 et 020 à 023, 025, 026 concernent le client (HRT-16, HRT-18) : fiches à venir. Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée).
+Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent côté client (versions incompatibles, version de l'agent, mention « Mise à jour disponible » : HRT-18) : fiches à venir. Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée).
 
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
@@ -134,7 +149,7 @@ Les règles BR-UPDATE-001 à 010 et 020 à 023, 025, 026 concernent le client (H
 | **RESIL** | Résilience du lien : reconnexion, opérations idempotentes, instantanés, affichage état | 20 | us-lien-resilient |
 | **ACCT** | Gestion comptes : création, suppression, rôles, mots de passe, dernier administrateur | 16 | us-gerer-comptes |
 | **AUDIT** | Journal d'activité : logging, filtrage, recherche FTS5, purge, export CSV | 21 | us-journal-activite |
-| **UPDATE** | Mises à jour agent et client : flux de versions, signatures minisign, superviseur, rollback | 29 (13 côté agent livrées : 011 à 019, 024, 027 à 029) | us-mises-a-jour |
+| **UPDATE** | Mises à jour agent et client : flux de versions, signatures minisign, superviseur, rollback | 29 (25 livrées : côté client 001 à 010, 025, 026 ; côté agent 011 à 019, 024, 027 à 029) | us-mises-a-jour |
 
 ## Comment documenter une règle
 

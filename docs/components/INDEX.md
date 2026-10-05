@@ -28,6 +28,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`StaleSurface`](./StaleSurface.md) — Enveloppe des données périmées (désaturées et datées).
 - [`ToastStack`](./ToastStack.md) — Notifications empilées (3 visibles, compteur).
 - [`ConfirmDialog`](./ConfirmDialog.md) — Confirmation modale (piège à focus, défaut sûr).
+- [`ReleaseNotesDialog`](./ReleaseNotesDialog.md) — Notes de version en texte brut (boîte modale).
 - [`ErrorBoundary`](./ErrorBoundary.md) — Frontière d'erreur d'une page.
 - [`EmptyState`](./EmptyState.md) — Placeholder de vue vide.
 - [`SettingRow`](./SettingRow.md) — Ligne de réglage.
@@ -49,6 +50,8 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`ServerNav`](./ServerNav.md) — Navigation du serveur.
 - [`AppHeader`](./AppHeader.md) — En-tête avec pastille du lien.
 - [`OfflineBanner`](./OfflineBanner.md) — Bandeau hors ligne.
+- [`UpdateBanner`](./UpdateBanner.md) — Bandeau de mise à jour du client (annonce, téléchargement, installation, échec).
+- [`UpdatePanel`](./UpdatePanel.md) — Section « Mises à jour » des réglages.
 - [`LoginForm`](./LoginForm.md) — Formulaire de connexion (identifiant, mot de passe, se souvenir).
 - [`AddServerWizard`](./AddServerWizard.md) — Assistant d'ajout en 3 temps.
 - [`FingerprintAlert`](./FingerprintAlert.md) — Alerte bloquante d'identité changée.
@@ -85,7 +88,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 
 ## À venir (autres tickets)
 
-`Sparkline` (non retenu : les courbes de chaque carte suffisent), `PasswordRules`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `UpdatePanel`, `AgentUpdateSteps`.
+`Sparkline` (non retenu : les courbes de chaque carte suffisent), `PasswordRules`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `AgentUpdateSteps`.
 
 Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `layouts/`, `pages/`, `composables/`, `stores/`, `link/`, `errors/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
 
