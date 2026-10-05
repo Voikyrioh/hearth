@@ -64,3 +64,40 @@ jobs:
           path: target/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 7
+
+  # Le binaire de l'agent (statique, musl), l'installation de bout en bout dans un conteneur avec
+  # systemd, et les scripts de deploy/. Les conteneurs sont ceux de `cargo xtask` ; leur cache
+  # (registre Cargo et dossier de cibles) est un dossier de l'hôte, mis en cache d'une exécution
+  # à l'autre.
+  agent-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HEARTH_XTASK_CACHE: ${{ github.workspace }}/.xtask-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: .xtask-cache
+          key: xtask-agent-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: xtask-agent-${{ runner.os }}-
+      - name: Scripts de deploy/ (shellcheck)
+        run: cargo xtask shellcheck
+      - name: Binaire statique de l'agent (musl)
+        run: cargo xtask agent
+      - name: Installation de bout en bout (Debian + systemd)
+        run: cargo xtask e2e-install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hearth-agent-linux-x86_64
+          path: target/dist/hearth-agent
+          if-no-files-found: error
+          retention-days: 7
+      # Le conteneur écrit le cache en root : rendu à l'utilisateur pour que la sauvegarde le lise.
+      - name: Droits du cache
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .xtask-cache || true
