@@ -16,6 +16,7 @@ mod audit;
 mod auth;
 mod error;
 mod hello;
+mod metrics;
 mod operations;
 mod server;
 mod sessions;
@@ -35,13 +36,16 @@ use tracing::Level;
 use crate::application::accounts::AccountService;
 use crate::application::audit::AuditService;
 use crate::application::hello::HelloService;
+use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::AuditSink;
 use crate::application::sessions::SessionService;
 use crate::domain::audit::AuditAction;
+use crate::entrypoint::ws::{self, StreamContext};
 
 pub use error::ApiError;
 pub use server::{ServerError, ServerHandle, spawn};
+pub(crate) use wire::audit_item;
 
 /// État partagé des routes : les cas d'usage, jamais d'infrastructure directe.
 #[derive(Clone)]
@@ -53,6 +57,8 @@ pub struct AppState {
     pub audit: Arc<AuditService>,
     /// Écrit au journal les refus et les échecs relevés par la couche d'accès.
     pub sink: Arc<dyn AuditSink>,
+    pub metrics: Arc<MetricsService>,
+    pub stream: StreamContext,
 }
 
 /// Qui peut appeler une route.
@@ -62,6 +68,9 @@ pub enum Access {
     Public,
     /// Une session valable, quel que soit le rôle.
     Authenticated,
+    /// L'authentification se fait dans le protocole de la route, par son premier message (le
+    /// flux WebSocket) : aucune couche d'accès n'est posée sur la requête d'ouverture.
+    FirstMessage,
     /// Une session valable d'un compte qui gère les comptes.
     Admin,
 }
@@ -150,6 +159,33 @@ pub static ENDPOINTS: &[Endpoint] = &[
     },
     Endpoint {
         method: Method::GET,
+        path: "/machine",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(metrics::machine),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/metrics/history",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(metrics::history),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/stream",
+        access: Access::FirstMessage,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(ws::stream),
+    },
+    Endpoint {
+        method: Method::GET,
         path: "/accounts",
         access: Access::Admin,
         version_checked: true,
@@ -229,7 +265,7 @@ pub fn router(state: AppState) -> Router {
     let mut checked = Router::new();
     for endpoint in ENDPOINTS {
         let mut route = (endpoint.route)();
-        if endpoint.access != Access::Public {
+        if !matches!(endpoint.access, Access::Public | Access::FirstMessage) {
             route = route.route_layer(middleware::from_fn_with_state(
                 auth::GuardState {
                     app: state.clone(),
@@ -379,6 +415,19 @@ mod tests {
             assert_eq!(endpoint.audit, Some(AuditAction::AuditRead));
             assert!(!endpoint.modifies() && !endpoint.tracked);
         }
+    }
+
+    #[test]
+    fn only_the_stream_authenticates_by_its_first_message_and_it_is_version_checked() {
+        let first_message: Vec<_> = ENDPOINTS
+            .iter()
+            .filter(|endpoint| endpoint.access == Access::FirstMessage)
+            .collect();
+        assert_eq!(first_message.len(), 1);
+        assert_eq!(first_message[0].path, "/stream");
+        assert_eq!(first_message[0].method, Method::GET);
+        assert!(first_message[0].version_checked);
+        assert!(!first_message[0].tracked);
     }
 
     #[test]

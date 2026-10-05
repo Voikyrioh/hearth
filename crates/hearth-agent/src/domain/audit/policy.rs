@@ -30,9 +30,11 @@ pub fn excess_entries(count: u64) -> u64 {
     count.saturating_sub(MAX_ENTRIES)
 }
 
-/// BR-AUDIT-001 : seul un administrateur lit le journal.
+/// BR-AUDIT-001 : seul un administrateur lit le journal. **Une seule source de vérité** :
+/// `Role::can_read_audit`, que le flux temps réel (sujet `audit`, rôle relu toutes les 5 s)
+/// interroge directement ; cette fonction est le nom du journal pour la même règle.
 pub fn can_read_journal(role: Role) -> bool {
-    matches!(role, Role::Admin)
+    role.can_read_audit()
 }
 
 /// Nature d'une requête : elle consulte, ou elle modifie quelque chose.

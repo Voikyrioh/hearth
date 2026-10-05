@@ -11,9 +11,9 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Session** | DELETE | [`/sessions/current`](./sessions.md) | user+ | Logout |
 | **Session** | GET | [`/me`](./sessions.md) | user+ | Compte courant + rôle |
 | **Session** | GET | [`/operations/{id}`](./operations.md) | user+ | Statut opération idempotente |
-| **Mesures** | GET | `/machine` | user+ | Identité machine, specs hardware |
-| **Mesures** | GET | `/stream` | user+ | WebSocket flux temps réel (snapshot + metrics chaque seconde) |
-| **Mesures** | GET | `/metrics/history?window=1m\|5m\|1h` | user+ | Historique rééchantillonné |
+| **Mesures** | GET | [`/machine`](./machine.md) | user+ | Identité machine, specs hardware |
+| **Mesures** | GET | [`/stream`](./stream.md) | user+ (jeton dans le premier message) | WebSocket flux temps réel (snapshot + metrics chaque seconde) |
+| **Mesures** | GET | [`/metrics/history?window=1m\|5m\|1h`](./metrics.md) | user+ | Historique rééchantillonné |
 | **Comptes** | GET | [`/accounts`](./accounts.md) | admin | Liste comptes, sessions ouvertes, dernier login |
 | **Comptes** | POST | [`/accounts`](./accounts.md) | admin | Créer compte (username, password, role) |
 | **Comptes** | PATCH | [`/accounts/{id}`](./accounts.md) | admin | Modifier rôle |
@@ -52,6 +52,6 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - Idempotency : requêtes modifiantes portent `Idempotency-Key: <ULID>` (rejouer = même résultat, sans ré-exécuter ; en cours = `409` ; autre requête = `422 IDEMPOTENCY_KEY_REUSED`) : voir [opérations](./operations.md). `POST /sessions` n'est pas suivi (son résultat contient un jeton).
 - Versioning : client envoie `X-Hearth-Api: <n>` (obligatoire sauf sur `/hello`) ; hors plage `426 INCOMPATIBLE_VERSION` avec `details.upgrade` ; l'agent répond `X-Hearth-Api-Range: min-max`.
 - Client : `X-Hearth-Client: poste/version` (nom du poste, retenu avec la session).
-- Accès : chaque route est déclarée dans `ENDPOINTS` (`entrypoint/http/mod.rs`) avec son niveau (public, authentifié, administrateur), son suivi par clé et son action de journal (les refus et les échecs sont consignés par la couche d'accès) ; le routeur pose la couche d'accès depuis la table et un test de balayage vérifie que les routes réservées refusent l'appelant sans droit.
+- Accès : chaque route est déclarée dans `ENDPOINTS` (`entrypoint/http/mod.rs`) avec son niveau (public, authentifié, administrateur, ou « premier message » pour le flux, qui s'authentifie lui-même) son suivi par clé et son action de journal (les refus et les échecs sont consignés par la couche d'accès) ; le routeur pose la couche d'accès depuis la table et un test de balayage vérifie que les routes réservées refusent l'appelant sans droit.
 - Réponses : succès = corps JSON propre à la route, sans enveloppe (ex. `/hello`) ; échec = `{ error: { code, message, details } }` (`hearth-proto::error::ErrorBody`).
-- Fiches de route détaillées : [hello](./hello.md), [sessions](./sessions.md), [comptes](./accounts.md), [opérations](./operations.md), [journal](./audit.md).
+- Fiches de route détaillées : [hello](./hello.md), [sessions](./sessions.md), [comptes](./accounts.md), [opérations](./operations.md), [machine](./machine.md), [historique des mesures](./metrics.md), [flux temps réel](./stream.md), [journal](./audit.md).

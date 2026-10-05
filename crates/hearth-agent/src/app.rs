@@ -4,6 +4,7 @@
 use std::future::Future;
 use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -11,10 +12,11 @@ use crate::application::accounts::AccountService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
+use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    AuditFeed, AuditSink, Clock, HashError, IdGen, IdentityError, IdentityStore, PasswordHasher,
-    PublicIdentity, Store, StoreError, TokenGen,
+    AuditFeed, AuditSink, Clock, GpuProbe, HashError, IdGen, IdentityError, IdentityStore,
+    MonotonicClock, PasswordHasher, PublicIdentity, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::sessions::SessionService;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -23,9 +25,10 @@ use crate::entrypoint::http::{self, AppState, ServerError, ServerHandle};
 use crate::entrypoint::signal::shutdown_signal;
 use crate::entrypoint::tasks::{self, BackgroundTask};
 use crate::entrypoint::terminal::TerminalPasswords;
+use crate::entrypoint::ws::{StreamContext, StreamSettings};
 use crate::infrastructure::argon2::Argon2Hasher;
 use crate::infrastructure::audit_feed::BroadcastAuditFeed;
-use crate::infrastructure::clock::SystemClock;
+use crate::infrastructure::clock::{SystemClock, SystemMonotonic};
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
@@ -34,7 +37,8 @@ use crate::infrastructure::sqlite::{
     Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteLoginAttemptRepo,
     SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
 };
-use crate::infrastructure::system::SystemMachineInfo;
+use crate::infrastructure::system::gpu;
+use crate::infrastructure::system::{SysinfoProbe, SystemMachineInfo};
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
 
 #[derive(Debug, Error)]
@@ -83,6 +87,35 @@ impl Adapters {
     }
 }
 
+/// Ce qui mesure la machine et alimente le flux temps réel : sondes, cadence d'échantillonnage,
+/// délais du flux. Ceux de production par défaut ; les tests injectent des sondes
+/// simulées, une cadence rapide et des délais courts.
+pub struct Metering {
+    pub system: Arc<dyn SystemProbe>,
+    pub gpu: Arc<dyn GpuProbe>,
+    /// Horloge murale qui date les échantillons.
+    pub clock: Arc<dyn Clock>,
+    /// Horloge monotone : cadence, fenêtres et ordre des échantillons.
+    pub monotonic: Arc<dyn MonotonicClock>,
+    pub period: Duration,
+    pub stream: StreamSettings,
+}
+
+impl Metering {
+    /// Sondes de la machine réelle. À appeler dans un runtime Tokio (la sonde NVIDIA lance son
+    /// sous-processus).
+    pub fn production() -> Self {
+        Self {
+            system: Arc::new(SysinfoProbe::new()),
+            gpu: gpu::platform_probe(),
+            clock: Arc::new(SystemClock),
+            monotonic: Arc::new(SystemMonotonic::new()),
+            period: tasks::SAMPLE_PERIOD,
+            stream: StreamSettings::default(),
+        }
+    }
+}
+
 /// Les cas d'usage assemblés sur une base ouverte.
 pub struct Services {
     pub accounts: Arc<AccountService>,
@@ -105,6 +138,8 @@ pub struct RunningAgent {
     pub identity: PublicIdentity,
     /// Purge périodique : arrêtée avec l'agent.
     pub purge: BackgroundTask,
+    /// Échantillonneur des mesures : arrêté avec l'agent.
+    pub sampler: BackgroundTask,
     /// Écriture des synthèses du journal : arrêtée avec l'agent.
     pub audit_flush: BackgroundTask,
     /// Écrit les synthèses du journal en attente à l'arrêt.
@@ -117,6 +152,7 @@ impl RunningAgent {
         let Self {
             server,
             purge: _purge,
+            sampler: _sampler,
             audit_flush: _audit_flush,
             audit_recorder,
             ..
@@ -207,11 +243,22 @@ pub async fn start(config: &AgentConfig) -> Result<RunningAgent, AppError> {
     start_with(config, &database, &Adapters::production()?).await
 }
 
-/// Démarre le serveur sur une base déjà ouverte (migrations appliquées) avec ces adaptateurs.
+/// Démarre le serveur sur une base déjà ouverte (migrations appliquées) avec ces adaptateurs et
+/// les sondes de la machine réelle.
 pub async fn start_with(
     config: &AgentConfig,
     database: &Database,
     adapters: &Adapters,
+) -> Result<RunningAgent, AppError> {
+    start_with_metering(config, database, adapters, Metering::production()).await
+}
+
+/// Comme `start_with`, avec ces sondes et ces délais.
+pub async fn start_with_metering(
+    config: &AgentConfig,
+    database: &Database,
+    adapters: &Adapters,
+    metering: Metering,
 ) -> Result<RunningAgent, AppError> {
     let store = FileIdentityStore::new(&config.data_dir);
     let identity = load_identity(&store)?;
@@ -232,6 +279,16 @@ pub async fn start_with(
         config.managed,
         &SystemMachineInfo,
     );
+    let metrics = Arc::new(MetricsService::new(
+        metering.system,
+        metering.gpu,
+        metering.clock,
+        metering.monotonic,
+    ));
+    // L'identité de la machine est lue avant de servir : les premières requêtes la trouvent prête.
+    metrics.warm_up().await;
+    let stream = StreamContext::new(services.audit_feed.clone(), metering.stream);
+    let closing = stream.clone();
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -239,15 +296,20 @@ pub async fn start_with(
         operations: services.operations,
         audit: services.audit,
         sink: services.audit_sink,
+        metrics: metrics.clone(),
+        stream,
     });
-    let server = http::spawn(listener, tls, router)?;
+    // À l'arrêt, les flux ouverts se ferment d'eux-mêmes avant que le serveur n'attende les connexions.
+    let server = http::spawn(listener, tls, router)?.on_shutdown(move || closing.begin_shutdown());
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
+    let sampler = tasks::spawn_sampler(metrics, metering.period);
     let audit_flush =
         tasks::spawn_audit_flush(services.audit_recorder.clone(), tasks::AUDIT_FLUSH_PERIOD);
     Ok(RunningAgent {
         server,
         identity,
         purge,
+        sampler,
         audit_flush,
         audit_recorder: services.audit_recorder,
     })

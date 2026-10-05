@@ -10,13 +10,17 @@ use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use hearth_agent::application::hello::HelloService;
-use hearth_agent::application::ports::MachineInfo;
+use hearth_agent::application::metrics::MetricsService;
+use hearth_agent::application::ports::{AuditFeed, MachineInfo};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::install_id::InstallId;
 use hearth_agent::entrypoint::http::{AppState, router};
+use hearth_agent::entrypoint::ws::{StreamContext, StreamSettings};
+use hearth_agent::infrastructure::clock::SystemMonotonic;
 use serde_json::Value;
 use tower::ServiceExt;
 
+use super::probe::{FakeGpu, FakeSystem};
 use super::{Env, PASSWORD};
 
 struct FakeMachine;
@@ -43,6 +47,16 @@ pub fn state(env: &Env) -> AppState {
         operations: env.operations.clone(),
         audit: env.audit.clone(),
         sink: env.audit_sink.clone(),
+        metrics: Arc::new(MetricsService::new(
+            Arc::new(FakeSystem::default()),
+            Arc::new(FakeGpu),
+            env.clock.clone(),
+            Arc::new(SystemMonotonic::new()),
+        )),
+        stream: StreamContext::new(
+            env.feed.clone() as Arc<dyn AuditFeed>,
+            StreamSettings::default(),
+        ),
     }
 }
 
