@@ -13,28 +13,26 @@ pub struct EventStream {
 }
 
 impl EventStream {
-    /// Prochain événement ; `None` quand la bibliothèque est arrêtée. Si l'abonné a pris du
-    /// retard, les événements perdus sont sautés (un état plus récent suivra toujours).
+    /// Prochain événement ; `None` quand la bibliothèque est arrêtée. Un abonné en retard reçoit
+    /// `Event::Lagged { skipped }` : des événements ont été perdus, dont peut-être le dernier
+    /// changement d'état. Il doit alors relire `LinkManager::states()`.
     pub async fn recv(&mut self) -> Option<Event> {
-        loop {
-            match self.receiver.recv().await {
-                Ok(event) => return Some(event),
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::warn!(skipped, "abonné aux événements du lien en retard");
-                }
-                Err(broadcast::error::RecvError::Closed) => return None,
+        match self.receiver.recv().await {
+            Ok(event) => Some(event),
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                tracing::warn!(skipped, "abonné aux événements du lien en retard");
+                Some(Event::Lagged { skipped })
             }
+            Err(broadcast::error::RecvError::Closed) => None,
         }
     }
 
-    /// Événement déjà disponible, sans attendre.
+    /// Événement déjà disponible, sans attendre (même règle de retard que `recv`).
     pub fn try_recv(&mut self) -> Option<Event> {
-        loop {
-            match self.receiver.try_recv() {
-                Ok(event) => return Some(event),
-                Err(broadcast::error::TryRecvError::Lagged(_)) => {}
-                Err(_) => return None,
-            }
+        match self.receiver.try_recv() {
+            Ok(event) => Some(event),
+            Err(broadcast::error::TryRecvError::Lagged(skipped)) => Some(Event::Lagged { skipped }),
+            Err(_) => None,
         }
     }
 }

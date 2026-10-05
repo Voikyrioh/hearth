@@ -30,6 +30,10 @@ pub(crate) enum AttemptResult {
     Failed,
     SessionExpired,
     Revoked,
+    /// Le mot de passe mémorisé est refusé (reconnexion silencieuse).
+    StoredPasswordRefused,
+    /// Le serveur demande d'attendre avant de réessayer (`429`, `503`).
+    RetryAfter(Duration),
     Fingerprint {
         presented: Fingerprint,
     },
@@ -51,9 +55,13 @@ fn classify(error: &TransportError) -> AttemptResult {
             Some(ErrorCode::SessionExpired | ErrorCode::Unauthenticated) => {
                 AttemptResult::SessionExpired
             }
-            Some(ErrorCode::SessionRevoked | ErrorCode::InvalidCredentials) => {
-                AttemptResult::Revoked
-            }
+            Some(ErrorCode::SessionRevoked) => AttemptResult::Revoked,
+            Some(ErrorCode::InvalidCredentials) => AttemptResult::StoredPasswordRefused,
+            Some(ErrorCode::TooManyAttempts | ErrorCode::Busy) => match api.retry_after_s {
+                // Plafonné : un serveur détraqué ne nous endort pas pour des jours.
+                Some(seconds) => AttemptResult::RetryAfter(Duration::from_secs(seconds.min(3_600))),
+                None => AttemptResult::Failed,
+            },
             _ if api.status == 426 => AttemptResult::Incompatible(upgrade_target(&api.details)),
             _ => AttemptResult::Failed,
         },
@@ -229,4 +237,65 @@ pub(crate) async fn guarded<T>(
 /// Durée d'attente entre deux relectures d'une opération « en cours ».
 pub(crate) fn recheck_delay(deps: &Deps) -> Duration {
     deps.config.recheck_delay
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::ports::transport::ApiError;
+
+    fn api(code: Option<ErrorCode>, status: u16, retry: Option<u64>) -> TransportError {
+        TransportError::Api(ApiError {
+            status,
+            code,
+            details: json!({ "upgrade": "agent" }),
+            retry_after_s: retry,
+        })
+    }
+
+    #[test]
+    fn a_throttled_login_waits_for_the_delay_the_server_gave() {
+        let result = classify(&api(Some(ErrorCode::TooManyAttempts), 429, Some(60)));
+        assert!(matches!(result, AttemptResult::RetryAfter(d) if d == Duration::from_secs(60)));
+        // Plafonné : un serveur détraqué ne nous endort pas pour des jours.
+        let result = classify(&api(Some(ErrorCode::Busy), 503, Some(u64::MAX)));
+        assert!(matches!(result, AttemptResult::RetryAfter(d) if d == Duration::from_secs(3_600)));
+        // Sans délai donné : tentative ordinaire.
+        assert!(matches!(
+            classify(&api(Some(ErrorCode::Busy), 503, None)),
+            AttemptResult::Failed
+        ));
+    }
+
+    #[test]
+    fn each_refusal_has_its_own_outcome() {
+        assert!(matches!(
+            classify(&api(Some(ErrorCode::InvalidCredentials), 401, None)),
+            AttemptResult::StoredPasswordRefused
+        ));
+        assert!(matches!(
+            classify(&api(Some(ErrorCode::SessionRevoked), 401, None)),
+            AttemptResult::Revoked
+        ));
+        assert!(matches!(
+            classify(&api(Some(ErrorCode::SessionExpired), 401, None)),
+            AttemptResult::SessionExpired
+        ));
+        assert!(matches!(
+            classify(&api(None, 426, None)),
+            AttemptResult::Incompatible(UpgradeTarget::Agent)
+        ));
+        assert!(matches!(
+            classify(&TransportError::Timeout),
+            AttemptResult::Failed
+        ));
+        assert!(matches!(
+            classify(&TransportError::FingerprintMismatch {
+                presented: Fingerprint::from_bytes([1; 32])
+            }),
+            AttemptResult::Fingerprint { .. }
+        ));
+    }
 }

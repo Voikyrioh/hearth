@@ -14,7 +14,9 @@ use serde_json::Value;
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::Mutex;
 
+use crate::domain::pending_ops::PendingOp;
 use crate::domain::server::{LastKnown, ServerId, ServerRecord};
+use crate::ports::operation_store::OperationStore;
 use crate::ports::server_store::{ServerStore, StoreError};
 use crate::ports::snapshot_store::SnapshotStore;
 
@@ -200,6 +202,58 @@ impl SnapshotStore for FileSnapshotStore {
     }
 }
 
+/// Les opérations en suspens : `{dossier}/{id}.json`, une liste (au plus 256 entrées, voir
+/// `domain::pending_ops::MAX_PENDING`).
+pub struct FileOperationStore {
+    dir: PathBuf,
+}
+
+impl FileOperationStore {
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self { dir: dir.into() }
+    }
+
+    fn path(&self, id: &ServerId) -> PathBuf {
+        self.dir.join(format!("{}.json", id.as_str()))
+    }
+}
+
+#[async_trait]
+impl OperationStore for FileOperationStore {
+    async fn load(&self, id: &ServerId) -> Result<Vec<PendingOp>, StoreError> {
+        let path = self.path(id);
+        let bytes = match tokio::fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(io_error("lecture des opérations", &error)),
+        };
+        match serde_json::from_slice(&bytes) {
+            Ok(operations) => Ok(operations),
+            Err(_) => {
+                tracing::warn!(file = %path.display(), "opérations en suspens illisibles, ignorées");
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    async fn save(&self, id: &ServerId, operations: &[PendingOp]) -> Result<(), StoreError> {
+        if operations.is_empty() {
+            return self.remove(id).await;
+        }
+        let bytes = serde_json::to_vec(operations)
+            .map_err(|e| StoreError(format!("sérialisation : {e}")))?;
+        write_atomic(&self.path(id), &bytes).await
+    }
+
+    async fn remove(&self, id: &ServerId) -> Result<(), StoreError> {
+        match tokio::fs::remove_file(self.path(id)).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(io_error("suppression des opérations", &error)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hearth_proto::fingerprint::Fingerprint;
@@ -219,6 +273,7 @@ mod tests {
             remember: false,
             mac_addresses: vec![],
             last_contact_at: None,
+            signed_out: false,
         }
     }
 
@@ -319,5 +374,31 @@ mod tests {
         assert_eq!(store.load(&id).await.unwrap(), None);
         store.remove(&id).await.unwrap();
         store.remove(&id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pending_operations_round_trip_and_an_empty_list_erases() {
+        use crate::domain::pending_ops::{OperationId, PendingOps};
+        use crate::domain::time::WallTime;
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileOperationStore::new(dir.path().join("operations"));
+        let id = ServerId::parse("a").unwrap();
+        assert!(store.load(&id).await.unwrap().is_empty());
+        let mut ops = PendingOps::new();
+        ops.register(
+            OperationId::parse("01J9").unwrap(),
+            "PUT /me/password".into(),
+            WallTime::from_millis(5),
+        )
+        .unwrap();
+        store.save(&id, &ops.snapshot()).await.unwrap();
+        assert_eq!(store.load(&id).await.unwrap().len(), 1);
+        tokio::fs::write(dir.path().join("operations").join("a.json"), b"[{")
+            .await
+            .unwrap();
+        assert!(store.load(&id).await.unwrap().is_empty());
+        store.save(&id, &ops.snapshot()).await.unwrap();
+        store.save(&id, &[]).await.unwrap();
+        assert!(!dir.path().join("operations").join("a.json").exists());
     }
 }

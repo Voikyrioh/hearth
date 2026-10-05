@@ -16,6 +16,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hearth_link::adapters::{MemoryVault, TokioClock};
 use hearth_link::domain::pending_ops::OperationId;
+use hearth_link::domain::pending_ops::PendingOp;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::{HISTORY_CAP, LastKnown, ServerId, ServerRecord};
 use hearth_link::domain::state::Thresholds;
@@ -26,7 +27,7 @@ use hearth_link::ports::transport::{
     ApiError, ApiRequest, ApiResponse, Frame, Method, Probed, StreamConn, Target, Transport,
     TransportError,
 };
-use hearth_link::ports::{Clock, Rng, ServerStore, SnapshotStore};
+use hearth_link::ports::{Clock, OperationStore, Rng, ServerStore, SnapshotStore};
 use hearth_link::{ActionRequest, LinkConfig, LinkManager, NewServer, Ports};
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{AuditEventItem, AuditOrigin, OriginKindName, OutcomeName};
@@ -431,6 +432,31 @@ impl StreamConn for ChaosStream {
 struct MemStore {
     servers: Mutex<HashMap<ServerId, ServerRecord>>,
     views: Mutex<HashMap<ServerId, LastKnown>>,
+    operations: Mutex<HashMap<ServerId, Vec<PendingOp>>>,
+}
+
+#[async_trait]
+impl OperationStore for MemStore {
+    async fn load(&self, id: &ServerId) -> Result<Vec<PendingOp>, StoreError> {
+        Ok(self
+            .operations
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .unwrap_or_default())
+    }
+    async fn save(&self, id: &ServerId, operations: &[PendingOp]) -> Result<(), StoreError> {
+        self.operations
+            .lock()
+            .unwrap()
+            .insert(id.clone(), operations.to_vec());
+        Ok(())
+    }
+    async fn remove(&self, id: &ServerId) -> Result<(), StoreError> {
+        self.operations.lock().unwrap().remove(id);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -518,6 +544,7 @@ async fn run(seed: u64, iterations: u32) {
             vault: Arc::new(MemoryVault::new()),
             servers: store.clone(),
             snapshots: store.clone(),
+            operations: store.clone(),
             clock: clock.clone(),
             rng: dice.clone(),
             net: net.clone(),
@@ -760,6 +787,7 @@ async fn a_server_that_always_fails_keeps_being_retried_with_bounded_state() {
         remember: true,
         mac_addresses: vec![],
         last_contact_at: None,
+        signed_out: false,
     };
     ServerStore::save(&*store, &record).await.unwrap();
     // Une session mémorisée : le client essaie de se connecter au démarrage.
@@ -772,7 +800,8 @@ async fn a_server_that_always_fails_keeps_being_retried_with_bounded_state() {
             transport: Arc::new(Dead),
             vault,
             servers: store.clone(),
-            snapshots: store,
+            snapshots: store.clone(),
+            operations: store,
             clock,
             rng: Dice::new(9),
             net: Arc::new(Net::default()),

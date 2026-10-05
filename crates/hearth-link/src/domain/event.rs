@@ -9,7 +9,7 @@ use hearth_proto::fingerprint::Fingerprint;
 
 use super::pending_ops::{OperationId, Outcome};
 use super::server::ServerId;
-use super::state::{Blocked, LinkState, Status};
+use super::state::{Blocked, LinkState, Reason, Status};
 use super::time::{Mono, WallTime};
 
 /// L'état du lien tel que l'interface le reçoit (`link://state`).
@@ -17,6 +17,9 @@ use super::time::{Mono, WallTime};
 pub struct StateInfo {
     pub state: LinkState,
     pub blocked: Option<Blocked>,
+    /// Pourquoi l'état d'arrêt est affiché (`SessionExpired`, `AccessRevoked`) : l'interface
+    /// choisit son message et son action (formulaire de connexion, etc.).
+    pub reason: Option<Reason>,
     /// Depuis quand cet état est affiché.
     pub since: WallTime,
     /// Heure du dernier contact (bandeau « Dernier contact à {heure} »).
@@ -38,6 +41,7 @@ impl StateInfo {
         Self {
             state: status.state,
             blocked: status.blocked,
+            reason: status.reason,
             since: to_wall(status.since, now, wall_now),
             last_contact_at,
             next_retry_at: status.next_retry_at.map(|at| to_wall(at, now, wall_now)),
@@ -60,10 +64,15 @@ pub fn to_wall(at: Mono, now: Mono, wall_now: WallTime) -> WallTime {
 pub enum SessionEnd {
     Expired,
     Revoked,
+    /// Le mot de passe mémorisé est refusé : formulaire de connexion, identifiant prérempli.
+    StoredPasswordRefused,
 }
 
 #[derive(Debug, Clone)]
 pub enum Event {
+    /// L'abonné a pris du retard : `skipped` événements ont été perdus, dont peut-être des
+    /// changements d'état. Relire `LinkManager::states()` pour retrouver l'état courant.
+    Lagged { skipped: u64 },
     /// Changement d'état du lien d'un serveur.
     State { server: ServerId, info: StateInfo },
     /// Un échantillon de mesures (chaque seconde).
@@ -99,15 +108,17 @@ pub enum Event {
 }
 
 impl Event {
-    pub fn server(&self) -> &ServerId {
+    /// Le serveur concerné (aucun pour `Lagged`).
+    pub fn server(&self) -> Option<&ServerId> {
         match self {
+            Self::Lagged { .. } => None,
             Self::State { server, .. }
             | Self::Metrics { server, .. }
             | Self::Snapshot { server, .. }
             | Self::Operation { server, .. }
             | Self::SessionEnded { server, .. }
             | Self::FingerprintChanged { server, .. }
-            | Self::Audit { server, .. } => server,
+            | Self::Audit { server, .. } => Some(server),
         }
     }
 }

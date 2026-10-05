@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use hearth_agent::domain::accounts::Role;
 use hearth_link::adapters::{
-    FileServerStore, FileSnapshotStore, HttpTransport, HttpTransportConfig, MemoryVault, OsRng,
-    SystemClock,
+    FileOperationStore, FileServerStore, FileSnapshotStore, HttpTransport, HttpTransportConfig,
+    MemoryVault, OsRng, SystemClock,
 };
 use hearth_link::domain::event::{Event, StateInfo};
 use hearth_link::domain::secret::Secret;
@@ -41,7 +41,6 @@ pub fn fast_config() -> LinkConfig {
         heartbeat_period: Duration::from_millis(333),
         attempt_timeout: Duration::from_millis(1_500),
         request_timeout: Duration::from_millis(1_500),
-        execute_timeout: Duration::from_secs(8),
         net_poll_period: Duration::from_millis(60),
         wake_check_period: Duration::from_millis(50),
         snapshot_save_period: Duration::from_millis(200),
@@ -235,6 +234,7 @@ pub async fn start_manager(
             vault,
             servers: Arc::new(FileServerStore::new(dir.join("servers.json"))),
             snapshots: Arc::new(FileSnapshotStore::new(dir.join("snapshots"))),
+            operations: Arc::new(FileOperationStore::new(dir.join("operations"))),
             clock,
             rng: Arc::new(OsRng::default()),
             net,

@@ -7,6 +7,7 @@
 
 mod attempt;
 mod events;
+mod persist;
 mod task;
 mod watchers;
 
@@ -29,21 +30,21 @@ use events::Fanout;
 use task::Command;
 
 use crate::adapters::{
-    FileServerStore, FileSnapshotStore, HttpTransport, HttpTransportConfig, OsRng, SystemClock,
-    SystemNetWatcher,
+    FileOperationStore, FileServerStore, FileSnapshotStore, HttpTransport, HttpTransportConfig,
+    OsRng, SystemClock, SystemNetWatcher,
 };
 use crate::domain::compat::{self, Compatibility};
 use crate::domain::event::StateInfo;
 use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
 use crate::domain::server::{LastKnown, ServerId, ServerRecord};
-use crate::domain::state::{LinkState, Start, Thresholds};
+use crate::domain::state::{LinkState, Reason, Start, Thresholds};
 use crate::domain::time::WallTime;
 use crate::error::LinkError;
 use crate::ports::transport::{Method, Pin, Target};
 use crate::ports::vault::SecretKind;
 use crate::ports::{
-    Clock, EventSink, NetWatcher, Rng, ServerStore, SnapshotStore, Transport, Vault,
+    Clock, EventSink, NetWatcher, OperationStore, Rng, ServerStore, SnapshotStore, Transport, Vault,
 };
 
 /// Réglages de la bibliothèque. Les valeurs par défaut sont celles de la spec ; les tests de
@@ -55,10 +56,10 @@ pub struct LinkConfig {
     pub heartbeat_period: Duration,
     /// Durée maximale d'une tentative de connexion complète (flux, authentification, instantané).
     pub attempt_timeout: Duration,
-    /// Durée maximale d'une requête simple (relecture d'opération, déconnexion…).
+    /// Délai d'une requête (action, relecture d'opération, déconnexion, connexion). Un seul
+    /// réglage : le transport de production le reprend (`LinkManager::open`) et la tâche du
+    /// serveur borne elle-même chaque action.
     pub request_timeout: Duration,
-    /// Durée maximale d'un appel à `execute`.
-    pub execute_timeout: Duration,
     /// Période de relecture des adresses réseau locales : 5 s.
     pub net_poll_period: Duration,
     /// Période de contrôle de l'horloge pour détecter un réveil : 1 s.
@@ -82,7 +83,6 @@ impl Default for LinkConfig {
             heartbeat_period: Duration::from_secs(2),
             attempt_timeout: Duration::from_secs(8),
             request_timeout: Duration::from_secs(10),
-            execute_timeout: Duration::from_secs(20),
             net_poll_period: Duration::from_secs(5),
             wake_check_period: Duration::from_secs(1),
             snapshot_save_period: Duration::from_secs(30),
@@ -100,6 +100,7 @@ pub struct Ports {
     pub vault: Arc<dyn Vault>,
     pub servers: Arc<dyn ServerStore>,
     pub snapshots: Arc<dyn SnapshotStore>,
+    pub operations: Arc<dyn OperationStore>,
     pub clock: Arc<dyn Clock>,
     pub rng: Arc<dyn Rng>,
     pub net: Arc<dyn NetWatcher>,
@@ -112,6 +113,7 @@ pub(crate) struct Deps {
     pub vault: Arc<dyn Vault>,
     pub servers: Arc<dyn ServerStore>,
     pub snapshots: Arc<dyn SnapshotStore>,
+    pub operations: Arc<dyn OperationStore>,
     pub clock: Arc<dyn Clock>,
     pub rng: Arc<dyn Rng>,
     pub net: Arc<dyn NetWatcher>,
@@ -139,10 +141,15 @@ impl Shared {
         let initial = StateInfo {
             state: match start {
                 Start::Connecting => LinkState::Reconnecting,
-                Start::SignedOut => LinkState::SessionExpired,
+                Start::SignedOut | Start::Disconnected => LinkState::SessionExpired,
                 Start::Recovered => LinkState::Offline,
             },
             blocked: None,
+            reason: match start {
+                Start::SignedOut => Some(Reason::NoSession),
+                Start::Disconnected => Some(Reason::UserDisconnected),
+                _ => None,
+            },
             since: wall,
             last_contact_at: record.last_contact_at,
             next_retry_at: None,
@@ -274,11 +281,22 @@ pub struct LoginInfo {
 
 /// Une action à envoyer au serveur. Le chemin est relatif à `/api/v1` (par exemple
 /// `/accounts`) ; la clé d'opération est posée par la bibliothèque.
-#[derive(Debug, Clone, PartialEq)]
+/// Le corps peut porter un mot de passe : `Debug` écrit à la main, sans le corps.
+#[derive(Clone, PartialEq)]
 pub struct ActionRequest {
     pub method: Method,
     pub path: String,
     pub body: Option<Value>,
+}
+
+impl std::fmt::Debug for ActionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActionRequest")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field("body", &self.body.as_ref().map(|_| "***"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -312,6 +330,7 @@ impl LinkManager {
     ) -> Result<Self, LinkError> {
         let transport = HttpTransport::new(HttpTransportConfig {
             client_name: client_name.to_owned(),
+            request_timeout: config.request_timeout,
             ..HttpTransportConfig::default()
         });
         Self::start(
@@ -320,6 +339,7 @@ impl LinkManager {
                 vault,
                 servers: Arc::new(FileServerStore::new(data_dir.join("servers.json"))),
                 snapshots: Arc::new(FileSnapshotStore::new(data_dir.join("snapshots"))),
+                operations: Arc::new(FileOperationStore::new(data_dir.join("operations"))),
                 clock: Arc::new(SystemClock::new()),
                 rng: Arc::new(OsRng::default()),
                 net: Arc::new(SystemNetWatcher),
@@ -338,6 +358,7 @@ impl LinkManager {
             vault: ports.vault,
             servers: ports.servers,
             snapshots: ports.snapshots,
+            operations: ports.operations,
             clock: ports.clock,
             rng: ports.rng,
             net: ports.net,
@@ -352,7 +373,7 @@ impl LinkManager {
             .map_err(|e| LinkError::Store(e.0))?;
         for record in records {
             let last_known = deps.snapshots.load(&record.id).await.ok().flatten();
-            let start = initial_start(&deps, &record.id);
+            let start = initial_start(&deps, &record.id, record.signed_out);
             spawn_server(&deps, &registry, record, last_known, start);
         }
         let watchers = watchers::spawn(deps.clone(), Arc::downgrade(&registry));
@@ -422,6 +443,7 @@ impl LinkManager {
             remember: false,
             mac_addresses: new.mac_addresses,
             last_contact_at: None,
+            signed_out: false,
         };
         let deps = &self.inner.deps;
         deps.servers
@@ -487,15 +509,19 @@ impl LinkManager {
                 .map_err(vault_error)?;
         }
         let mut record = shared.record();
+        // Un autre compte : les clés d'opération de l'ancien ne disent plus rien.
+        let account_changed =
+            !record.username.is_empty() && !record.username.eq_ignore_ascii_case(username);
         record.username = username.to_owned();
         record.remember = remember;
+        record.signed_out = false;
         shared.set_record(record.clone());
         deps.servers
             .save(&record)
             .await
             .map_err(|e| LinkError::Store(e.0))?;
         commands
-            .send(Command::LoggedIn)
+            .send(Command::LoggedIn { account_changed })
             .await
             .map_err(|_| LinkError::Stopped)?;
         Ok(LoginInfo {
@@ -504,7 +530,10 @@ impl LinkManager {
         })
     }
 
-    /// Ferme la session côté serveur (si possible) et efface jeton et mot de passe du coffre.
+    /// Déconnexion volontaire (BR-CONN-016) : ferme la session côté serveur (si possible) et
+    /// efface le jeton. Le mot de passe mémorisé et la case « se souvenir » restent : seul
+    /// `remove_server` efface tout. Aucune reconnexion automatique ensuite, pas même au
+    /// prochain démarrage.
     pub async fn logout(&self, id: &ServerId) -> Result<(), LinkError> {
         let (commands, shared) = self.handle(id)?;
         let deps = &self.inner.deps;
@@ -518,17 +547,14 @@ impl LinkManager {
         }
         deps.vault
             .delete(id, SecretKind::Token)
-            .and_then(|()| deps.vault.delete(id, SecretKind::Password))
             .map_err(|e| LinkError::Vault(e.0))?;
         let mut record = shared.record();
-        if record.remember {
-            record.remember = false;
-            shared.set_record(record.clone());
-            deps.servers
-                .save(&record)
-                .await
-                .map_err(|e| LinkError::Store(e.0))?;
-        }
+        record.signed_out = true;
+        shared.set_record(record.clone());
+        deps.servers
+            .save(&record)
+            .await
+            .map_err(|e| LinkError::Store(e.0))?;
         commands
             .send(Command::LoggedOut)
             .await
@@ -557,6 +583,7 @@ impl LinkManager {
         let _ = deps.vault.delete(id, SecretKind::Token);
         let _ = deps.vault.delete(id, SecretKind::Password);
         let _ = deps.snapshots.remove(id).await;
+        let _ = deps.operations.remove(id).await;
         deps.servers
             .remove(id)
             .await
@@ -622,26 +649,37 @@ impl LinkManager {
     }
 
     /// Envoie une action au serveur. Hors « Connecté », `NotConnected` sans rien envoyer. Si le
-    /// lien tombe avant la réponse, `ResultUnknown` tout de suite : l'action n'est jamais rejouée.
+    /// lien tombe avant la réponse, ou si le délai de la requête passe, `ResultUnknown` avec la
+    /// clé d'opération : l'action n'est jamais rejouée, l'issue arrive par `Event::Operation`.
+    /// Si l'appelant abandonne l'attente, l'opération reste suivie de la même façon.
     pub async fn execute(
         &self,
         id: &ServerId,
         action: ActionRequest,
     ) -> Result<ActionOutcome, LinkError> {
         let (commands, _) = self.handle(id)?;
+        let key = OperationId::parse(&ulid::Ulid::generate().to_string())
+            .map_err(|_| LinkError::Protocol("clé d'opération".into()))?;
         let (reply, answer) = oneshot::channel();
         commands
             .send(Command::Execute {
+                key: key.clone(),
                 request: action,
                 reply,
             })
             .await
             .map_err(|_| LinkError::Stopped)?;
-        match timeout(self.inner.deps.config.execute_timeout, answer).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(LinkError::TaskRestarted),
-            Err(_) => Err(LinkError::Timeout),
-        }
+        // Si cet appel est abandonné avant la réponse, l'opération reste suivie.
+        let mut guard = AbandonGuard {
+            commands: commands.clone(),
+            id: Some(key),
+        };
+        let result = match answer.await {
+            Ok(result) => result,
+            Err(_) => Err(LinkError::TaskRestarted),
+        };
+        guard.id = None;
+        result
     }
 
     /// Dernière vue connue du serveur (en mémoire, sinon la dernière sauvegardée).
@@ -690,8 +728,25 @@ impl LinkManager {
     }
 }
 
+/// Prévient la tâche du serveur quand un appel d'`execute` est abandonné avant sa réponse.
+struct AbandonGuard {
+    commands: mpsc::Sender<Command>,
+    id: Option<OperationId>,
+}
+
+impl Drop for AbandonGuard {
+    fn drop(&mut self) {
+        if let Some(id) = self.id.take() {
+            let _ = self.commands.try_send(Command::Abandon { id });
+        }
+    }
+}
+
 /// Une session mémorisée (jeton ou mot de passe) : on se connecte au démarrage ; sinon on attend.
-fn initial_start(deps: &Deps, id: &ServerId) -> Start {
+fn initial_start(deps: &Deps, id: &ServerId, signed_out: bool) -> Start {
+    if signed_out {
+        return Start::Disconnected;
+    }
     let has_token = matches!(deps.vault.get(id, SecretKind::Token), Ok(Some(_)));
     let has_password = matches!(deps.vault.get(id, SecretKind::Password), Ok(Some(_)));
     if has_token || has_password {
@@ -730,4 +785,61 @@ fn validate_address(host: &str, port: u16) -> Result<(), LinkError> {
         return Err(LinkError::InvalidInput("port du serveur"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::ports::transport::ApiRequest;
+    use hearth_proto::api::sessions::{LoginRequest, LoginResponse};
+    use hearth_proto::stream::ClientMessage;
+
+    const PASSWORD: &str = "Tr0ub4dor&3-secret";
+
+    /// Aucun type qui transporte un mot de passe, un corps de requête ou un jeton ne le montre
+    /// dans un `Debug` : un journal ou un message d'erreur ne peut pas le fuir.
+    #[test]
+    fn debug_never_shows_a_password_a_token_or_a_request_body() {
+        let body = json!({ "current": PASSWORD, "password": "New-Secret-12" });
+        let action = ActionRequest {
+            method: Method::Put,
+            path: "/me/password".into(),
+            body: Some(body.clone()),
+        };
+        let api = ApiRequest {
+            method: Method::Put,
+            path: "/me/password".into(),
+            body: Some(body),
+            idempotency_key: Some("01J9".into()),
+        };
+        let login = LoginRequest {
+            username: "marie".into(),
+            password: PASSWORD.into(),
+        };
+        let token = "ab".repeat(32);
+        let message = ClientMessage::Auth {
+            token: token.clone(),
+        };
+        let response = LoginResponse {
+            token: token.clone(),
+            expires_at: "x".into(),
+            account: hearth_proto::api::accounts::AccountInfo {
+                id: "A".into(),
+                username: "marie".into(),
+                role: hearth_proto::api::accounts::RoleName::Admin,
+            },
+        };
+        let secret = Secret::new(PASSWORD);
+        let text = format!(
+            "{action:?} {api:?} {login:?} {message:?} {response:?} {secret:?} {:?}",
+            Some(&action)
+        );
+        for hidden in [PASSWORD, "New-Secret-12", token.as_str()] {
+            assert!(!text.contains(hidden), "{hidden} apparaît dans : {text}");
+        }
+        // Ce qui aide à diagnostiquer reste visible.
+        assert!(text.contains("/me/password"));
+    }
 }

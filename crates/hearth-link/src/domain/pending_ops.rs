@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use hearth_proto::api::operations::OperationStatus;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -27,8 +28,23 @@ pub const MAX_RUNNING_CHECKS: u32 = 5;
 pub const MAX_PENDING: usize = 256;
 
 /// Clé d'opération : 1 à 64 caractères, lettres, chiffres, tiret, souligné (un ULID en pratique).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct OperationId(String);
+
+impl TryFrom<String> for OperationId {
+    type Error = InvalidOperationId;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+impl From<OperationId> for String {
+    fn from(value: OperationId) -> Self {
+        value.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("clé d'opération invalide")]
@@ -59,7 +75,7 @@ impl std::fmt::Display for OperationId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Phase {
     /// Envoyée, réponse attendue, lien tenu.
     InFlight,
@@ -67,7 +83,8 @@ pub enum Phase {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// Ne contient ni corps de requête ni secret : seulement la clé, `MÉTHODE /chemin` et des dates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingOp {
     pub id: OperationId,
     /// `MÉTHODE /chemin`, pour l'affichage.
@@ -139,6 +156,38 @@ impl PendingOps {
 
     pub fn get(&self, id: &OperationId) -> Option<&PendingOp> {
         self.ops.get(id)
+    }
+
+    /// Les opérations suivies, pour les mettre sur disque (elles survivent à un redémarrage).
+    pub fn snapshot(&self) -> Vec<PendingOp> {
+        self.ops.values().cloned().collect()
+    }
+
+    /// Reprend des opérations lues sur disque. L'application a redémarré : ce qui était en vol
+    /// est « résultat inconnu ». Les opérations de plus de 24 h et celles au-delà de
+    /// [`MAX_PENDING`] sont abandonnées ; rend les clés abandonnées (« résultat inconnu »).
+    pub fn restore(&mut self, saved: Vec<PendingOp>, now: WallTime) -> Vec<OperationId> {
+        let mut abandoned = Vec::new();
+        for mut op in saved {
+            if now.since(op.sent_at) >= ABANDON_AFTER
+                || self.ops.len() >= MAX_PENDING
+                || self.ops.contains_key(&op.id)
+            {
+                abandoned.push(op.id);
+                continue;
+            }
+            op.phase = Phase::Unknown;
+            self.ops.insert(op.id.clone(), op);
+        }
+        abandoned
+    }
+
+    /// Solde tout en « résultat inconnu » sans interroger l'agent (autre compte, nouvelle
+    /// empreinte : la clé d'opération ne dit plus rien). Rend les clés soldées.
+    pub fn settle_all(&mut self) -> Vec<OperationId> {
+        let ids: Vec<OperationId> = self.ops.keys().cloned().collect();
+        self.ops.clear();
+        ids
     }
 
     /// Une action part : on la suit.
@@ -423,6 +472,37 @@ mod tests {
             ops.resolve(&id("A"), Lookup::NotFound, due),
             Some(Resolution::Final(Outcome::StillUnknown))
         );
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn pending_operations_survive_a_restart_as_unknown_and_old_ones_are_dropped() {
+        let mut ops = pending_with("A");
+        ops.register(id("B"), "POST /x".into(), T0.minus(ABANDON_AFTER))
+            .unwrap();
+        let saved = ops.snapshot();
+        let text = serde_json::to_string(&saved).unwrap();
+        let loaded: Vec<PendingOp> = serde_json::from_str(&text).unwrap();
+        let mut fresh = PendingOps::new();
+        let abandoned = fresh.restore(loaded, T0);
+        assert_eq!(abandoned, vec![id("B")]);
+        assert_eq!(fresh.get(&id("A")).unwrap().phase, Phase::Unknown);
+        assert_eq!(fresh.to_resolve(), vec![id("A")]);
+    }
+
+    #[test]
+    fn a_saved_key_that_is_not_a_valid_key_is_refused_on_load() {
+        let text = r#"[{"id":"a/b","kind":"x","sent_at":1,"phase":"Unknown","checks":0}]"#;
+        assert!(serde_json::from_str::<Vec<PendingOp>>(text).is_err());
+    }
+
+    #[test]
+    fn settling_everything_forgets_the_operations_and_returns_their_keys() {
+        let mut ops = lost("A");
+        ops.register(id("B"), "x".into(), T0).unwrap();
+        let mut settled = ops.settle_all();
+        settled.sort();
+        assert_eq!(settled, vec![id("A"), id("B")]);
         assert!(ops.is_empty());
     }
 

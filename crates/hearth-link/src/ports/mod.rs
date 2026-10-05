@@ -4,6 +4,7 @@
 pub mod clock;
 pub mod event_sink;
 pub mod net_watcher;
+pub mod operation_store;
 pub mod rng;
 pub mod server_store;
 pub mod snapshot_store;
@@ -13,6 +14,7 @@ pub mod vault;
 pub use clock::Clock;
 pub use event_sink::EventSink;
 pub use net_watcher::NetWatcher;
+pub use operation_store::OperationStore;
 pub use rng::Rng;
 pub use server_store::ServerStore;
 pub use snapshot_store::SnapshotStore;

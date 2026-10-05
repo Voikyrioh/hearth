@@ -22,9 +22,10 @@ use tokio::task::{AbortHandle, JoinError, JoinHandle};
 use tokio::time::timeout;
 
 use super::attempt::{self, AttemptResult};
+use super::persist::{Job, Persister};
 use super::{ActionOutcome, ActionRequest, Deps, Shared};
 use crate::domain::event::{Event, SessionEnd, StateInfo};
-use crate::domain::pending_ops::{Lookup, OperationId, PendingOps, Resolution};
+use crate::domain::pending_ops::{Lookup, OperationId, Outcome, PendingOps, Resolution};
 use crate::domain::server::{HISTORY_CAP, LastKnown, ServerId};
 use crate::domain::state::{Effect, Input, LinkMachine, LinkState, Start, Status};
 use crate::domain::time::WallTime;
@@ -38,14 +39,24 @@ pub(crate) enum Command {
     Woke,
     NetworkChanged,
     /// L'utilisateur vient de se connecter (jeton et dossier mis à jour par la façade).
-    LoggedIn,
+    /// `account_changed` : l'utilisateur s'est reconnecté avec un autre identifiant.
+    LoggedIn {
+        account_changed: bool,
+    },
     LoginRefused,
     LoggedOut,
     /// L'utilisateur a accepté la nouvelle empreinte (carnet mis à jour par la façade).
     FingerprintAccepted,
     Execute {
+        /// Clé d'opération (`Idempotency-Key`), choisie par la façade pour qu'elle puisse la
+        /// rendre même si elle cesse d'attendre.
+        key: OperationId,
         request: ActionRequest,
         reply: oneshot::Sender<Result<ActionOutcome, LinkError>>,
+    },
+    /// L'appelant d'`execute` n'attend plus (annulation) : l'opération reste suivie.
+    Abandon {
+        id: OperationId,
     },
     Shutdown {
         done: oneshot::Sender<()>,
@@ -147,6 +158,8 @@ struct Runner {
     ping_n: u64,
     last_saved: crate::domain::time::Mono,
     done: Option<oneshot::Sender<()>>,
+    persister: Persister,
+    ping_failed: bool,
     stopped: bool,
 }
 
@@ -170,6 +183,7 @@ impl Runner {
             None => (VecDeque::new(), None),
         };
         Self {
+            persister: Persister::spawn(deps.clone(), shared.id()),
             id: shared.id(),
             last_saved: deps.clock.mono(),
             deps,
@@ -186,12 +200,14 @@ impl Runner {
             last_contact,
             published: None,
             ping_n: 0,
+            ping_failed: false,
             done: None,
             stopped: false,
         }
     }
 
     async fn run(&mut self, commands: &mut mpsc::Receiver<Command>) -> Exit {
+        self.restore_pending().await;
         self.publish();
         let mut heartbeat = tokio::time::interval(self.deps.config.heartbeat_period);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -200,7 +216,14 @@ impl Runner {
                 .machine
                 .deadline()
                 .map(|at| at.since(self.deps.clock.mono()));
+            // `biased` : les trames déjà reçues passent AVANT l'échéance du silence. Après un
+            // passage lent dans la boucle, une trame prête et une échéance échue le sont
+            // ensemble : un tirage au hasard couperait un lien vivant.
             tokio::select! {
+                biased;
+                frame = next_frame(&mut self.stream) => self.on_frame(frame).await,
+                Some(message) = self.internal_rx.recv() => self.on_internal(message).await,
+                joined = next_attempt(&mut self.attempt) => self.on_attempt(joined).await,
                 command = commands.recv() => match command {
                     Some(command) => self.on_command(command).await,
                     None => {
@@ -208,11 +231,11 @@ impl Runner {
                         self.input(Input::Shutdown).await;
                     }
                 },
-                frame = next_frame(&mut self.stream) => self.on_frame(frame).await,
-                joined = next_attempt(&mut self.attempt) => self.on_attempt(joined).await,
-                Some(message) = self.internal_rx.recv() => self.on_internal(message).await,
                 () = sleep_or_pending(wake) => self.input(Input::Tick).await,
                 _ = heartbeat.tick() => self.on_heartbeat().await,
+            }
+            if std::mem::take(&mut self.ping_failed) {
+                self.input(Input::TransportFailed).await;
             }
             if self.stopped {
                 self.finish().await;
@@ -221,13 +244,36 @@ impl Runner {
         }
     }
 
+    /// Reprend les opérations en suspens d'avant le redémarrage de l'application : elles sont
+    /// « résultat inconnu » et seront relues au premier retour du lien (BR-RESIL-009, 010).
+    async fn restore_pending(&mut self) {
+        let saved = match self.deps.operations.load(&self.id).await {
+            Ok(saved) => saved,
+            Err(error) => {
+                tracing::warn!(server = %self.id, %error, "opérations en suspens illisibles");
+                return;
+            }
+        };
+        let abandoned = self.pending.restore(saved, self.deps.clock.wall());
+        for id in abandoned {
+            self.deps.sink.emit(Event::Operation {
+                server: self.id.clone(),
+                id,
+                outcome: Outcome::StillUnknown,
+            });
+        }
+        self.persist_operations();
+    }
+
     /// Fin de vie : dernière vue sauvegardée, appels en attente libérés, accusé de l'arrêt.
     async fn finish(&mut self) {
-        self.persist(true).await;
+        self.persist(true);
+        self.persist_operations();
         for (_, waiter) in self.waiters.drain() {
             waiter.request.abort();
             let _ = waiter.reply.send(Err(LinkError::Stopped));
         }
+        self.persister.flush(Duration::from_secs(2)).await;
         if let Some(done) = self.done.take() {
             let _ = done.send(());
         }
@@ -245,13 +291,28 @@ impl Runner {
 
     async fn on_command(&mut self, command: Command) {
         match command {
-            Command::RetryNow | Command::FingerprintAccepted => self.input(Input::RetryNow).await,
+            Command::RetryNow => self.input(Input::RetryNow).await,
+            Command::FingerprintAccepted => {
+                // Une autre identité : les clés d'opération ne disent plus rien.
+                self.settle_pending();
+                self.input(Input::RetryNow).await;
+            }
             Command::Woke => self.input(Input::Woke).await,
             Command::NetworkChanged => self.input(Input::NetworkChanged).await,
-            Command::LoggedIn => self.input(Input::LoginSucceeded).await,
+            Command::LoggedIn { account_changed } => {
+                if account_changed {
+                    self.settle_pending();
+                }
+                self.input(Input::LoginSucceeded).await;
+            }
             Command::LoginRefused => self.input(Input::LoginRefused).await,
             Command::LoggedOut => self.input(Input::LoggedOut).await,
-            Command::Execute { request, reply } => self.on_execute(request, reply),
+            Command::Execute {
+                key,
+                request,
+                reply,
+            } => self.on_execute(key, request, reply),
+            Command::Abandon { id } => self.on_abandon(&id),
             Command::Shutdown { done } => {
                 self.done = Some(done);
                 self.input(Input::Shutdown).await;
@@ -295,7 +356,7 @@ impl Runner {
                     server: self.id.clone(),
                     sample,
                 });
-                self.persist(false).await;
+                self.persist(false);
             }
             ServerMessage::Snapshot { machine, history } => {
                 self.install_snapshot(machine, history);
@@ -366,6 +427,8 @@ impl Runner {
             AttemptResult::Failed => self.input(Input::TransportFailed).await,
             AttemptResult::SessionExpired => self.session_expired().await,
             AttemptResult::Revoked => self.access_revoked().await,
+            AttemptResult::StoredPasswordRefused => self.stored_password_refused().await,
+            AttemptResult::RetryAfter(delay) => self.input(Input::RetryAfter(delay)).await,
             AttemptResult::Fingerprint { presented } => {
                 let expected = self.shared.record().fingerprint;
                 self.deps.sink.emit(Event::FingerprintChanged {
@@ -388,8 +451,15 @@ impl Runner {
     }
 
     async fn on_heartbeat(&mut self) {
+        if !self.send_ping().await {
+            self.input(Input::TransportFailed).await;
+        }
+    }
+
+    /// Un ping sur le flux ; faux si l'envoi échoue ou dépasse la période du battement.
+    async fn send_ping(&mut self) -> bool {
         let Some(stream) = self.stream.as_mut() else {
-            return;
+            return true;
         };
         self.ping_n = self.ping_n.wrapping_add(1);
         let sent = timeout(
@@ -397,9 +467,7 @@ impl Runner {
             stream.send(&ClientMessage::Ping { n: self.ping_n }),
         )
         .await;
-        if !matches!(sent, Ok(Ok(()))) {
-            self.input(Input::TransportFailed).await;
-        }
+        matches!(sent, Ok(Ok(())))
     }
 
     // ── Session ────────────────────────────────────────────────────────────────────────────
@@ -425,24 +493,42 @@ impl Runner {
         }
     }
 
-    /// 401 `SESSION_REVOKED` ou identifiants refusés : plus aucune tentative (BR-RESIL-014).
+    /// 401 `SESSION_REVOKED` : plus aucune tentative, jeton et mot de passe effacés du coffre (pas
+    /// de reconnexion avec les anciens identifiants), BR-RESIL-014.
     async fn access_revoked(&mut self) {
         self.input(Input::AccessRevoked).await;
         if self.machine.state() == LinkState::AccessRevoked {
             let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
             let _ = self.deps.vault.delete(&self.id, SecretKind::Password);
-            let mut record = self.shared.record();
-            if record.remember {
-                record.remember = false;
-                self.shared.set_record(record.clone());
-                if let Err(error) = self.deps.servers.save(&record).await {
-                    tracing::warn!(server = %self.id, %error, "carnet non mis à jour");
-                }
-            }
+            self.forget_remembered_password();
             self.deps.sink.emit(Event::SessionEnded {
                 server: self.id.clone(),
                 kind: SessionEnd::Revoked,
             });
+        }
+    }
+
+    /// Le mot de passe mémorisé est refusé (changé côté serveur) : ce n'est pas un accès révoqué.
+    /// L'interface rouvre le formulaire de connexion, identifiant prérempli (BR-CONN-017).
+    async fn stored_password_refused(&mut self) {
+        self.input(Input::StoredPasswordRefused).await;
+        if self.machine.state() == LinkState::SessionExpired {
+            let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
+            let _ = self.deps.vault.delete(&self.id, SecretKind::Password);
+            self.forget_remembered_password();
+            self.deps.sink.emit(Event::SessionEnded {
+                server: self.id.clone(),
+                kind: SessionEnd::StoredPasswordRefused,
+            });
+        }
+    }
+
+    fn forget_remembered_password(&mut self) {
+        let mut record = self.shared.record();
+        if record.remember {
+            record.remember = false;
+            self.shared.set_record(record.clone());
+            self.persister.send(Job::Record(record));
         }
     }
 
@@ -454,9 +540,16 @@ impl Runner {
                 Effect::StartAttempt => self.start_attempt(AttemptKind::Connect),
                 Effect::Reauthenticate => self.start_attempt(AttemptKind::Reauth),
                 Effect::AbortAttempt => self.abort_attempt(),
+                // Le réseau a changé : vérification immédiate. Un échec est traité par la boucle
+                // (pas d'appel récursif ici).
+                Effect::PingNow => {
+                    if !self.send_ping().await {
+                        self.ping_failed = true;
+                    }
+                }
                 Effect::CloseStream => {
                     if self.stream.take().is_some() {
-                        self.persist(true).await;
+                        self.persist(true);
                     }
                 }
                 Effect::MarkPendingUnknown => self.mark_pending_unknown(),
@@ -487,7 +580,11 @@ impl Runner {
     /// Le lien est tombé : chaque action en vol devient « résultat inconnu » ; ses appelants le
     /// savent tout de suite. Rien n'est jamais renvoyé (BR-RESIL-009).
     fn mark_pending_unknown(&mut self) {
-        for id in self.pending.link_lost() {
+        let lost = self.pending.link_lost();
+        if !lost.is_empty() {
+            self.persist_operations();
+        }
+        for id in lost {
             if let Some(waiter) = self.waiters.remove(&id) {
                 waiter.request.abort();
                 let _ = waiter
@@ -495,6 +592,25 @@ impl Runner {
                     .send(Ok(ActionOutcome::ResultUnknown { id: id.clone() }));
             }
         }
+    }
+
+    /// Solde toutes les opérations en suspens en « résultat inconnu » sans interroger l'agent :
+    /// autre compte, ou nouvelle empreinte acceptée (la clé ne dit plus rien).
+    fn settle_pending(&mut self) {
+        self.mark_pending_unknown();
+        for id in self.pending.settle_all() {
+            self.deps.sink.emit(Event::Operation {
+                server: self.id.clone(),
+                id,
+                outcome: Outcome::StillUnknown,
+            });
+        }
+        self.persist_operations();
+    }
+
+    fn persist_operations(&self) {
+        self.persister
+            .send(Job::Operations(self.pending.snapshot()));
     }
 
     fn resolve_pending(&mut self) {
@@ -525,6 +641,7 @@ impl Runner {
 
     fn on_execute(
         &mut self,
+        key: OperationId,
         request: ActionRequest,
         reply: oneshot::Sender<Result<ActionOutcome, LinkError>>,
     ) {
@@ -539,33 +656,37 @@ impl Runner {
             let _ = reply.send(Err(LinkError::NotConnected));
             return;
         };
-        let key = ulid::Ulid::generate().to_string();
-        let Ok(id) = OperationId::parse(&key) else {
-            let _ = reply.send(Err(LinkError::Protocol("clé d'opération".into())));
-            return;
-        };
         let kind = format!("{} {}", request.method.as_str(), request.path);
         if self
             .pending
-            .register(id.clone(), kind, self.deps.clock.wall())
+            .register(key.clone(), kind, self.deps.clock.wall())
             .is_err()
         {
             let _ = reply.send(Err(LinkError::TooManyPending));
             return;
         }
+        self.persist_operations();
         let api_request = crate::ports::transport::ApiRequest {
             method: request.method,
             path: request.path,
             body: request.body,
-            idempotency_key: Some(key),
+            idempotency_key: Some(key.as_str().to_owned()),
         };
         let deps = self.deps.clone();
         let target = self.shared.target();
         let sender = self.internal_tx.clone();
-        let operation = id.clone();
+        let operation = key.clone();
         let task = tokio::spawn(async move {
-            let result =
-                attempt::guarded(deps.transport.request(&target, &token, &api_request)).await;
+            // Le seul délai de requête : la tâche borne elle-même l'appel au transport.
+            let call = async {
+                timeout(
+                    deps.config.request_timeout,
+                    deps.transport.request(&target, &token, &api_request),
+                )
+                .await
+                .unwrap_or(Err(TransportError::Timeout))
+            };
+            let result = attempt::guarded(call).await;
             let _ = sender
                 .send(Internal::OpResponse {
                     id: operation,
@@ -574,12 +695,26 @@ impl Runner {
                 .await;
         });
         self.waiters.insert(
-            id,
+            key,
             Waiter {
                 reply,
                 request: task.abort_handle(),
             },
         );
+    }
+
+    /// L'appelant n'attend plus : l'opération n'est plus « en vol » pour personne, elle devient
+    /// « résultat inconnu » et reste suivie ; sa requête, déjà partie, n'est pas rejouée.
+    fn on_abandon(&mut self, id: &OperationId) {
+        if let Some(waiter) = self.waiters.remove(id) {
+            waiter.request.abort();
+            if self.pending.mark_unknown(id) {
+                self.persist_operations();
+                if self.stream.is_some() {
+                    self.spawn_resolver(vec![id.clone()], Duration::ZERO);
+                }
+            }
+        }
     }
 
     async fn on_op_response(
@@ -594,6 +729,7 @@ impl Runner {
         match result {
             Ok(response) => {
                 self.pending.complete(&id);
+                self.persist_operations();
                 self.traffic();
                 let _ = waiter.reply.send(Ok(ActionOutcome::Completed {
                     status: response.status,
@@ -603,6 +739,7 @@ impl Runner {
             }
             Err(TransportError::FingerprintMismatch { presented }) => {
                 self.pending.mark_unknown(&id);
+                self.persist_operations();
                 let _ = waiter
                     .reply
                     .send(Ok(ActionOutcome::ResultUnknown { id: id.clone() }));
@@ -618,6 +755,7 @@ impl Runner {
                 // La requête a échoué sans réponse : on ne sait pas ce qu'elle est devenue. Le
                 // flux, lui, vit : on relit l'opération tout de suite.
                 self.pending.mark_unknown(&id);
+                self.persist_operations();
                 let _ = waiter
                     .reply
                     .send(Ok(ActionOutcome::ResultUnknown { id: id.clone() }));
@@ -638,11 +776,14 @@ impl Runner {
         );
         let wall = self.deps.clock.wall();
         match self.pending.resolve(&id, lookup, wall) {
-            Some(Resolution::Final(outcome)) => self.deps.sink.emit(Event::Operation {
-                server: self.id.clone(),
-                id,
-                outcome,
-            }),
+            Some(Resolution::Final(outcome)) => {
+                self.persist_operations();
+                self.deps.sink.emit(Event::Operation {
+                    server: self.id.clone(),
+                    id,
+                    outcome,
+                });
+            }
             Some(Resolution::CheckAgain) if running => {
                 let delay = attempt::recheck_delay(&self.deps);
                 self.spawn_resolver(vec![id], delay);
@@ -663,26 +804,22 @@ impl Runner {
         self.shared.set_last_known(view);
     }
 
-    /// Sauvegarde la dernière vue et la date du dernier contact. Hors `force`, au plus une fois
-    /// par période.
-    async fn persist(&mut self, force: bool) {
+    /// Dépose la dernière vue et la date du dernier contact dans la file d'écriture (jamais
+    /// d'E/S ici). Hors `force`, au plus une fois par période.
+    fn persist(&mut self, force: bool) {
         let now = self.deps.clock.mono();
         if !force && now.since(self.last_saved) < self.deps.config.snapshot_save_period {
             return;
         }
         self.last_saved = now;
-        if let Some(view) = self.shared.last_known()
-            && let Err(error) = self.deps.snapshots.save(&self.id, &view).await
-        {
-            tracing::warn!(server = %self.id, %error, "dernière vue non sauvegardée");
+        if let Some(view) = self.shared.last_known() {
+            self.persister.send(Job::View(view));
         }
         let mut record = self.shared.record();
         if record.last_contact_at != self.last_contact {
             record.last_contact_at = self.last_contact;
             self.shared.set_record(record.clone());
-            if let Err(error) = self.deps.servers.save(&record).await {
-                tracing::warn!(server = %self.id, %error, "dernier contact non sauvegardé");
-            }
+            self.persister.send(Job::Record(record));
         }
     }
 
@@ -715,7 +852,10 @@ impl Runner {
 /// date) n'est pas un événement de plus : il y en a un par tentative, pas deux. Le dernier
 /// contact, qui bouge à chaque message, ne compte jamais.
 fn display_changed(previous: &Status, now: &Status) -> bool {
-    if previous.state != now.state || previous.blocked != now.blocked || previous.since != now.since
+    if previous.state != now.state
+        || previous.blocked != now.blocked
+        || previous.reason != now.reason
+        || previous.since != now.since
     {
         return true;
     }

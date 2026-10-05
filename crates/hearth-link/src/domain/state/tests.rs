@@ -538,10 +538,10 @@ fn a_stale_failure_without_a_running_attempt_does_not_advance_the_delays() {
 // ── Réveil et réseau depuis « Connecté » ────────────────────────────────────────────────────
 
 #[test]
-fn waking_while_connected_counts_the_outage_from_the_last_message() {
+fn waking_while_connected_counts_the_outage_from_the_wake_up_not_from_the_last_message() {
     let mut rig = Rig::connected();
     rig.send_at(2_000, Input::Traffic);
-    // Le PC dormait depuis 2 s ; il se réveille à 100 s.
+    // Le PC dormait ; il se réveille à 100 s.
     rig.now = 100_000;
     let effects = rig.send(Input::Woke);
     assert_eq!(
@@ -552,33 +552,89 @@ fn waking_while_connected_counts_the_outage_from_the_last_message() {
             Effect::StartAttempt
         ]
     );
+    // Réseau pas encore prêt : « Reconnexion en cours », pas « Hors ligne » à chaque matin.
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    rig.run_failing_until(129_999);
+    assert_eq!(
+        rig.state(),
+        LinkState::Reconnecting,
+        "29 999 ms après le réveil"
+    );
+    rig.run_failing_until(130_000);
     assert_eq!(
         rig.state(),
         LinkState::Offline,
-        "98 s de coupure : directement « Hors ligne »"
+        "30 s après le réveil sans succès"
     );
 }
 
 #[test]
-fn a_network_change_while_connected_reopens_the_link_quietly() {
+fn waking_while_offline_restarts_the_outage_clock_at_the_wake_up() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::TransportFailed);
+    rig.run_failing_until(100_000);
+    assert_eq!(rig.state(), LinkState::Offline);
+    let effects = rig.send_at(100_010, Input::Woke);
+    assert_eq!(effects, [Effect::StartAttempt]);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    rig.run_failing_until(130_009);
+    assert_eq!(
+        rig.state(),
+        LinkState::Reconnecting,
+        "toujours moins de 30 s depuis le réveil"
+    );
+    rig.run_failing_until(130_010);
+    assert_eq!(rig.state(), LinkState::Offline);
+}
+
+#[test]
+fn waking_while_reconnecting_attempts_at_once_and_restarts_the_clock() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::TransportFailed);
+    rig.run_failing_until(20_000);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    assert_eq!(rig.send_at(20_001, Input::Woke), [Effect::StartAttempt]);
+    rig.run_failing_until(49_000);
+    assert_eq!(
+        rig.state(),
+        LinkState::Reconnecting,
+        "10 s + 29 s : pas encore 30 s depuis le réveil"
+    );
+    rig.run_failing_until(50_001);
+    assert_eq!(rig.state(), LinkState::Offline);
+}
+
+#[test]
+fn a_network_change_while_connected_does_not_cut_a_healthy_stream() {
     let mut rig = Rig::connected();
     rig.send_at(2_000, Input::Traffic);
     let effects = rig.send_at(2_100, Input::NetworkChanged);
+    assert_eq!(effects, [Effect::PingNow], "on vérifie, on ne coupe pas");
+    assert_eq!(rig.count(Effect::CloseStream), 0);
     assert_eq!(
-        effects,
-        [
-            Effect::CloseStream,
-            Effect::MarkPendingUnknown,
-            Effect::StartAttempt
-        ]
+        rig.count(Effect::MarkPendingUnknown),
+        0,
+        "les actions en vol ne deviennent pas inconnues"
     );
-    assert_eq!(
-        rig.state(),
-        LinkState::Connected,
-        "invisible tant que moins de 3 s"
-    );
-    rig.send_at(2_400, Input::Connected);
+    // Le serveur répond dans la seconde : la vérification est faite, rien ne bouge.
+    rig.send_at(2_600, Input::Traffic);
+    rig.heartbeat_until(10_000);
     assert_eq!(rig.state(), LinkState::Connected);
+    assert_eq!(rig.count(Effect::CloseStream), 0);
+}
+
+#[test]
+fn a_network_change_with_no_answer_cuts_the_link_after_the_shortened_deadline() {
+    let mut rig = Rig::connected();
+    rig.send_at(2_000, Input::Traffic);
+    rig.send_at(2_100, Input::NetworkChanged);
+    // Échéance raccourcie : 1 s (un tiers du silence), pas 3 s.
+    assert_eq!(rig.machine.deadline(), Some(Mono::from_millis(3_100)));
+    rig.advance_to(3_099);
+    assert_eq!(rig.count(Effect::CloseStream), 0);
+    rig.advance_to(3_100);
+    assert_eq!(rig.count(Effect::CloseStream), 1);
+    assert_eq!(rig.count(Effect::MarkPendingUnknown), 1);
 }
 
 #[test]
@@ -739,6 +795,74 @@ fn after_an_internal_incident_the_link_restarts_offline_and_retries() {
     assert_eq!(rig.send(Input::Tick), [Effect::StartAttempt]);
     rig.send(Input::Connected);
     assert_eq!(rig.state(), LinkState::Connected);
+}
+
+#[test]
+fn every_stopped_state_carries_its_reason() {
+    let mut rig = Rig::connected();
+    rig.send_at(5_000, Input::SessionExpired { can_reauth: false });
+    assert_eq!(rig.machine.status().reason, Some(Reason::Expired));
+    let mut rig = Rig::connected();
+    rig.send_at(5_000, Input::AccessRevoked);
+    assert_eq!(rig.machine.status().reason, Some(Reason::Revoked));
+    // Mot de passe mémorisé refusé : formulaire de connexion, pas « accès révoqué ».
+    let mut rig = Rig::connected();
+    rig.send_at(5_000, Input::SessionExpired { can_reauth: true });
+    rig.send_at(5_100, Input::StoredPasswordRefused);
+    assert_eq!(rig.state(), LinkState::SessionExpired);
+    assert_eq!(
+        rig.machine.status().reason,
+        Some(Reason::StoredPasswordRefused)
+    );
+    assert_eq!(rig.machine.deadline(), None, "aucune tentative");
+    // Déconnexion volontaire : distincte d'une expiration, même depuis un état d'arrêt.
+    let mut rig = Rig::connected();
+    rig.send_at(5_000, Input::LoggedOut);
+    assert_eq!(rig.machine.status().reason, Some(Reason::UserDisconnected));
+    let mut rig = Rig::connected();
+    rig.send_at(5_000, Input::SessionExpired { can_reauth: false });
+    rig.send(Input::LoggedOut);
+    assert_eq!(rig.machine.status().reason, Some(Reason::UserDisconnected));
+    // États de départ.
+    assert_eq!(
+        Rig::starting(Start::SignedOut).machine.status().reason,
+        Some(Reason::NoSession)
+    );
+    let disconnected = Rig::starting(Start::Disconnected);
+    assert_eq!(
+        disconnected.machine.status().reason,
+        Some(Reason::UserDisconnected)
+    );
+    assert_eq!(
+        disconnected.machine.deadline(),
+        None,
+        "pas de reconnexion automatique"
+    );
+    // Les états qui ne sont pas d'arrêt n'ont pas de raison.
+    assert_eq!(Rig::connected().machine.status().reason, None);
+}
+
+#[test]
+fn a_server_that_says_to_wait_delays_the_next_attempt() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::TransportFailed);
+    // La tentative immédiate reçoit « 429, réessaie dans 60 s ».
+    rig.send_at(10_100, Input::RetryAfter(Duration::from_secs(60)));
+    assert_eq!(
+        rig.machine.status().next_retry_at,
+        Some(Mono::from_millis(70_100))
+    );
+    let before = rig.count(Effect::StartAttempt);
+    rig.advance_to(70_099);
+    assert_eq!(rig.count(Effect::StartAttempt), before);
+    rig.advance_to(70_100);
+    assert_eq!(rig.count(Effect::StartAttempt), before + 1);
+    // Un délai plus court que le délai habituel ne l'écourte pas.
+    rig.send_at(70_200, Input::RetryAfter(Duration::from_millis(1)));
+    assert_eq!(
+        rig.machine.status().next_retry_at,
+        Some(Mono::from_millis(70_200 + 1_000))
+    );
 }
 
 #[test]

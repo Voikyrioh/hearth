@@ -220,7 +220,7 @@ async fn servers_are_validated_listed_and_removed_with_their_secrets() {
 }
 
 #[tokio::test]
-async fn logout_closes_the_session_and_forgets_the_secrets() {
+async fn logout_closes_the_session_but_keeps_the_remembered_password() {
     let world = World::connected(Options {
         remember: true,
         ..Options::default()
@@ -232,6 +232,11 @@ async fn logout_closes_the_session_and_forgets_the_secrets() {
         .recorder
         .wait_state(mark, LinkState::SessionExpired, WAIT)
         .await;
+    assert_eq!(
+        world.state().reason,
+        Some(hearth_link::domain::state::Reason::UserDisconnected)
+    );
+    // BR-CONN-016 : le jeton part, le mot de passe mémorisé et la case « se souvenir » restent.
     assert!(
         world
             .vault
@@ -244,14 +249,38 @@ async fn logout_closes_the_session_and_forgets_the_secrets() {
             .vault
             .get(&world.id, SecretKind::Password)
             .unwrap()
-            .is_none()
+            .is_some()
     );
+    assert!(world.manager.servers()[0].remember);
     assert_eq!(
         world.agent.sessions_open("marie").await,
         0,
         "la session est fermée côté agent"
     );
-    assert!(!world.manager.servers()[0].remember);
+
+    // Aucune reconnexion automatique, pas même au prochain démarrage de l'application.
+    world.manager.shutdown().await;
+    let manager = start_manager(
+        world.dir.path(),
+        world.vault.clone(),
+        world.net.clone(),
+        world.clock.clone(),
+        fast_config(),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let info = manager.state(&world.id).unwrap();
+    assert_eq!(info.state, LinkState::SessionExpired);
+    assert_eq!(
+        info.reason,
+        Some(hearth_link::domain::state::Reason::UserDisconnected)
+    );
+    assert_eq!(world.agent.sessions_open("marie").await, 0);
+    // Se reconnecter lève la déconnexion.
+    manager
+        .login(&world.id, "marie", Secret::from(PASSWORD), true)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

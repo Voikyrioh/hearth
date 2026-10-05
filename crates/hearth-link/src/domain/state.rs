@@ -78,6 +78,24 @@ pub enum LinkState {
     AccessRevoked,
 }
 
+/// Pourquoi un état d'arrêt (`SessionExpired`, `AccessRevoked`) est affiché : l'interface choisit
+/// son message et son action selon la raison, les cinq états restent les mêmes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    /// Aucune session : serveur tout juste ajouté, en attente d'une première connexion.
+    NoSession,
+    /// La session a expiré et aucun mot de passe n'est mémorisé.
+    Expired,
+    /// Le mot de passe mémorisé est refusé (changé côté serveur, compte supprimé) : l'interface
+    /// rouvre le formulaire de connexion, identifiant prérempli (BR-CONN-017).
+    StoredPasswordRefused,
+    /// L'utilisateur s'est déconnecté : aucune reconnexion automatique (BR-CONN-016).
+    UserDisconnected,
+    /// Session fermée par l'administration (changement de mot de passe, révocation,
+    /// suppression du compte : l'agent répond `SESSION_REVOKED` dans tous les cas).
+    Revoked,
+}
+
 /// Pourquoi les tentatives sont arrêtées alors que l'état affiché est `Offline`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Blocked {
@@ -103,8 +121,13 @@ pub enum Input {
     SessionExpired { can_reauth: bool },
     /// La reconnexion silencieuse a réussi : on rouvre le flux.
     Reauthenticated,
-    /// 401 `SESSION_REVOKED` ou `INVALID_CREDENTIALS`.
+    /// 401 `SESSION_REVOKED`.
     AccessRevoked,
+    /// Le mot de passe mémorisé est refusé à la reconnexion silencieuse (`INVALID_CREDENTIALS`).
+    StoredPasswordRefused,
+    /// Le serveur demande d'attendre (`429`, `503` avec `retry_after_s`) : la prochaine tentative
+    /// n'a pas lieu avant ce délai, ni avant le délai habituel s'il est plus long.
+    RetryAfter(Duration),
     /// Le certificat présenté n'a pas l'empreinte mémorisée.
     FingerprintChanged,
     /// 426 : versions d'interface incompatibles.
@@ -136,6 +159,9 @@ pub enum Effect {
     AbortAttempt,
     /// Fermer le flux ouvert.
     CloseStream,
+    /// Vérifier le lien tout de suite (ping immédiat) : le réseau a changé, le flux est peut-être
+    /// sain, peut-être mort.
+    PingNow,
     /// Les actions en vol deviennent « résultat inconnu » (jamais rejouées).
     MarkPendingUnknown,
     /// Le lien est revenu : demander à l'agent le sort des opérations en suspens.
@@ -155,6 +181,8 @@ pub struct Status {
     pub since: Mono,
     /// Dernier message reçu du serveur.
     pub last_contact: Option<Mono>,
+    /// Raison de l'état d'arrêt affiché (`SessionExpired`, `AccessRevoked`).
+    pub reason: Option<Reason>,
     /// Prochaine tentative planifiée (aucune si une est en cours ou si les tentatives sont
     /// arrêtées).
     pub next_retry_at: Option<Mono>,
@@ -169,6 +197,8 @@ pub enum Start {
     Connecting,
     /// Aucune session : en attente d'une connexion de l'utilisateur.
     SignedOut,
+    /// L'utilisateur s'était déconnecté : pas de reconnexion automatique au démarrage.
+    Disconnected,
     /// Reprise après un incident interne (tâche relancée) : affiché « Hors ligne », on retente.
     Recovered,
 }
@@ -200,9 +230,14 @@ struct Outage {
 
 #[derive(Debug, Clone, Copy)]
 enum Phase {
-    Up { last_traffic: Mono },
+    Up {
+        last_traffic: Mono,
+        /// Vérification demandée (changement de réseau) : sans message d'ici là, le lien est
+        /// réputé coupé.
+        check_by: Option<Mono>,
+    },
     Down(Outage),
-    Expired,
+    Expired(Reason),
     Revoked,
     Blocked(Blocked),
     Stopped,
@@ -248,7 +283,11 @@ impl LinkMachine {
                 }),
                 LinkState::Reconnecting,
             ),
-            Start::SignedOut => (Phase::Expired, LinkState::SessionExpired),
+            Start::SignedOut => (Phase::Expired(Reason::NoSession), LinkState::SessionExpired),
+            Start::Disconnected => (
+                Phase::Expired(Reason::UserDisconnected),
+                LinkState::SessionExpired,
+            ),
             Start::Recovered => (
                 Phase::Down(Outage {
                     since: now.before(thresholds.offline_after),
@@ -284,6 +323,11 @@ impl LinkMachine {
                 Phase::Blocked(reason) => Some(reason),
                 _ => None,
             },
+            reason: match self.phase {
+                Phase::Expired(reason) => Some(reason),
+                Phase::Revoked => Some(Reason::Revoked),
+                _ => None,
+            },
             since: self.shown_since,
             last_contact: self.last_contact,
             next_retry_at,
@@ -299,7 +343,13 @@ impl LinkMachine {
     /// consommée par le `Tick` correspondant : pas de boucle active.
     pub fn deadline(&self) -> Option<Mono> {
         match self.phase {
-            Phase::Up { last_traffic } => Some(last_traffic.after(self.thresholds.silence)),
+            Phase::Up {
+                last_traffic,
+                check_by,
+            } => {
+                let silence = last_traffic.after(self.thresholds.silence);
+                Some(check_by.map_or(silence, |at| at.min(silence)))
+            }
             Phase::Down(outage) => {
                 let mut next: Option<Mono> = None;
                 let mut offer = |at: Mono| next = Some(next.map_or(at, |n| n.min(at)));
@@ -338,6 +388,16 @@ impl LinkMachine {
             Input::AccessRevoked => {
                 self.stop_trying(now, Phase::Revoked, &mut effects);
             }
+            Input::StoredPasswordRefused => {
+                if matches!(self.phase, Phase::Up { .. } | Phase::Down(_)) {
+                    self.stop_trying(
+                        now,
+                        Phase::Expired(Reason::StoredPasswordRefused),
+                        &mut effects,
+                    );
+                }
+            }
+            Input::RetryAfter(delay) => self.on_retry_after(now, delay),
             Input::FingerprintChanged => {
                 self.stop_trying(
                     now,
@@ -358,7 +418,7 @@ impl LinkMachine {
             Input::LoginSucceeded => self.on_login_succeeded(now, &mut effects),
             Input::LoginRefused => {}
             Input::LoggedOut => {
-                self.stop_trying(now, Phase::Expired, &mut effects);
+                self.stop_trying(now, Phase::Expired(Reason::UserDisconnected), &mut effects);
             }
             Input::Shutdown => {
                 self.phase = Phase::Stopped;
@@ -372,7 +432,12 @@ impl LinkMachine {
     fn on_tick(&mut self, now: Mono, effects: &mut Vec<Effect>) {
         match self.phase {
             // Silence : la coupure a commencé au dernier message reçu.
-            Phase::Up { last_traffic } if now.since(last_traffic) >= self.thresholds.silence => {
+            Phase::Up {
+                last_traffic,
+                check_by,
+            } if now.since(last_traffic) >= self.thresholds.silence
+                || check_by.is_some_and(|at| at <= now) =>
+            {
                 self.lose(last_traffic, effects);
             }
             Phase::Down(mut outage)
@@ -388,15 +453,24 @@ impl LinkMachine {
     }
 
     fn on_traffic(&mut self, now: Mono) {
-        if let Phase::Up { last_traffic } = &mut self.phase {
+        if let Phase::Up {
+            last_traffic,
+            check_by,
+        } = &mut self.phase
+        {
             *last_traffic = (*last_traffic).max(now);
+            // Le lien a répondu : la vérification est faite.
+            *check_by = None;
             self.last_contact = Some(now);
         }
     }
 
     fn on_connected(&mut self, now: Mono, effects: &mut Vec<Effect>) {
         if matches!(self.phase, Phase::Down(_)) {
-            self.phase = Phase::Up { last_traffic: now };
+            self.phase = Phase::Up {
+                last_traffic: now,
+                check_by: None,
+            };
             self.last_contact = Some(now);
             self.backoff.reset();
             effects.push(Effect::ResolvePending);
@@ -422,7 +496,7 @@ impl LinkMachine {
             return;
         }
         if !can_reauth {
-            self.stop_trying(now, Phase::Expired, effects);
+            self.stop_trying(now, Phase::Expired(Reason::Expired), effects);
             return;
         }
         if let Phase::Down(mut outage) = self.phase
@@ -473,26 +547,62 @@ impl LinkMachine {
     }
 
     fn on_trigger(&mut self, now: Mono, trigger: Trigger, effects: &mut Vec<Effect>) {
-        match self.phase {
-            Phase::Up { last_traffic } => match trigger {
-                // Le PC s'est réveillé : la coupure a commencé à la dernière réception.
-                Trigger::Woke => self.lose(last_traffic, effects),
-                // Le réseau a changé : la connexion est peut-être morte, on repart proprement.
-                Trigger::NetworkChanged => self.lose(now, effects),
-                Trigger::RetryNow => {}
-            },
-            Phase::Down(mut outage) => {
+        match (self.phase, trigger) {
+            // Réveil du PC : la connexion est morte, la coupure compte à partir du réveil (le
+            // réseau n'est peut-être pas encore prêt : « Reconnexion en cours », pas « Hors
+            // ligne » parce que le PC a dormi).
+            (Phase::Up { .. }, Trigger::Woke) => {
+                self.lose(now, effects);
+                self.mark_unproven();
+            }
+            // Réseau changé : le flux est peut-être sain. On ne le coupe pas ; on le vérifie vite.
+            (Phase::Up { last_traffic, .. }, Trigger::NetworkChanged) => {
+                let check_by = now.after(self.thresholds.silence / 3);
+                self.phase = Phase::Up {
+                    last_traffic,
+                    check_by: Some(check_by),
+                };
+                effects.push(Effect::PingNow);
+            }
+            (Phase::Up { .. }, Trigger::RetryNow) => {}
+            (Phase::Down(mut outage), trigger) => {
                 outage.manual = outage.manual || self.shown == LinkState::Offline;
+                if trigger == Trigger::Woke {
+                    // L'horloge de coupure repart du réveil.
+                    outage.since = now;
+                    outage.unproven = true;
+                    outage.manual = false;
+                    self.backoff.reset();
+                }
                 outage.in_flight = true;
                 outage.next_attempt_at = None;
                 effects.push(step_effect(outage.step));
                 self.phase = Phase::Down(outage);
             }
             // Un blocage se lève par une nouvelle tentative explicite seulement.
-            Phase::Blocked(_) if trigger == Trigger::RetryNow => {
-                self.start_fresh(now, effects);
-            }
+            (Phase::Blocked(_), Trigger::RetryNow) => self.start_fresh(now, effects),
             _ => {}
+        }
+    }
+
+    /// Affiche « Reconnexion en cours » dès le début de la coupure en cours.
+    fn mark_unproven(&mut self) {
+        if let Phase::Down(mut outage) = self.phase {
+            outage.unproven = true;
+            self.phase = Phase::Down(outage);
+        }
+    }
+
+    /// Le serveur demande d'attendre : pas de tentative avant ce délai.
+    fn on_retry_after(&mut self, now: Mono, delay: Duration) {
+        if let Phase::Down(mut outage) = self.phase
+            && outage.in_flight
+        {
+            let usual = self.backoff.next_delay((self.jitter)());
+            outage.in_flight = false;
+            outage.manual = false;
+            outage.next_attempt_at = Some(now.after(usual.max(delay)));
+            self.phase = Phase::Down(outage);
         }
     }
 
@@ -547,9 +657,10 @@ impl LinkMachine {
         // passer par une connexion de l'utilisateur, sauf déconnexion explicite.
         let from_stopped = matches!(
             self.phase,
-            Phase::Expired | Phase::Revoked | Phase::Blocked(_)
+            Phase::Expired(_) | Phase::Revoked | Phase::Blocked(_)
         );
-        if from_stopped && !matches!(phase, Phase::Expired) {
+        // Seule la déconnexion volontaire change la raison d'un état d'arrêt.
+        if from_stopped && !matches!(phase, Phase::Expired(Reason::UserDisconnected)) {
             return;
         }
         self.phase = phase;
@@ -565,7 +676,7 @@ impl LinkMachine {
         let (derived, at) = match self.phase {
             Phase::Up { .. } => (LinkState::Connected, now),
             Phase::Down(outage) => self.derive_down(outage, now),
-            Phase::Expired => (LinkState::SessionExpired, now),
+            Phase::Expired(_) => (LinkState::SessionExpired, now),
             Phase::Revoked => (LinkState::AccessRevoked, now),
             Phase::Blocked(_) => (LinkState::Offline, now),
             Phase::Stopped => return,

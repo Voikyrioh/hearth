@@ -7,7 +7,7 @@ pub mod net_watch;
 pub mod system;
 pub mod tls;
 
-pub use file_store::{FileServerStore, FileSnapshotStore};
+pub use file_store::{FileOperationStore, FileServerStore, FileSnapshotStore};
 pub use http_transport::{HttpTransport, HttpTransportConfig};
 pub use memory_vault::MemoryVault;
 pub use net_watch::SystemNetWatcher;

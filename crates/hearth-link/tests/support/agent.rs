@@ -156,14 +156,16 @@ impl GpuProbe for NoGpu {
     }
 }
 
-/// Un échantillon toutes les 20 ms ; la session est revérifiée toutes les 50 ms.
+/// Un échantillon toutes les 167 ms (1 s à l'échelle 1/6) ; la session est revérifiée toutes les 50 ms.
 fn metering() -> Metering {
     Metering {
         system: Arc::new(FakeSystem::default()),
         gpu: Arc::new(NoGpu),
         clock: Arc::new(SystemClock),
         monotonic: Arc::new(SystemMonotonic::new()),
-        period: Duration::from_millis(20),
+        // Un échantillon par seconde dans le produit, silence à 3 s : même rapport (1/6) que les
+        // seuils du lien dans ces tests.
+        period: Duration::from_millis(167),
         stream: StreamSettings {
             auth_timeout: Duration::from_millis(800),
             idle_timeout: Duration::from_secs(10),

@@ -18,7 +18,8 @@ use crate::domain::secret::Secret;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pin {
     /// Accepte tout certificat et rend son empreinte. **Uniquement** pour `hello` à la première
-    /// prise de contact : aucune requête authentifiée ne doit jamais passer par là.
+    /// prise de contact : l'adaptateur refuse ce mode pour tout le reste (connexion, requêtes,
+    /// flux), BR-CONN-011.
     Probe,
     /// Refuse tout certificat dont l'empreinte SHA-256 diffère, quelle que soit la chaîne ou le
     /// nom.
@@ -54,13 +55,25 @@ impl Method {
 }
 
 /// Une requête authentifiée générique, chemin relatif à `/api/v1` (par exemple `/accounts`).
-#[derive(Debug, Clone, PartialEq)]
+/// Le corps peut porter un mot de passe : `Debug` écrit à la main, sans le corps.
+#[derive(Clone, PartialEq)]
 pub struct ApiRequest {
     pub method: Method,
     pub path: String,
     pub body: Option<Value>,
     /// Clé d'opération (`Idempotency-Key`) pour les requêtes qui modifient.
     pub idempotency_key: Option<String>,
+}
+
+impl std::fmt::Debug for ApiRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApiRequest")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field("body", &self.body.as_ref().map(|_| "***"))
+            .field("idempotency_key", &self.idempotency_key)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

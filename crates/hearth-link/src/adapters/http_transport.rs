@@ -31,6 +31,7 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
 use super::tls::{PinState, client_config};
+use crate::domain::agent_identity;
 use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
 use crate::ports::transport::{
@@ -113,6 +114,7 @@ impl HttpTransport {
             idempotency_key,
             body,
         } = call;
+        require_pinned(target)?;
         if !path.starts_with('/') {
             return Err(TransportError::Protocol("chemin invalide".into()));
         }
@@ -213,11 +215,9 @@ impl Transport for HttpTransport {
         }
         let hello: HelloResponse = serde_json::from_slice(&bytes)
             .map_err(|e| TransportError::Protocol(format!("réponse illisible : {e}")))?;
-        if hello.product != hearth_proto::product::PRODUCT_NAME {
-            return Err(TransportError::Protocol(
-                "ce serveur n'est pas un agent Hearth".into(),
-            ));
-        }
+        // BR-CONN-012 : la règle est dans le domaine.
+        agent_identity::check_product(&hello.product)
+            .map_err(|e| TransportError::Protocol(e.to_string()))?;
         Ok(Probed { fingerprint, hello })
     }
 
@@ -291,6 +291,7 @@ impl Transport for HttpTransport {
     }
 
     async fn open_stream(&self, target: &Target) -> Result<Box<dyn StreamConn>, TransportError> {
+        require_pinned(target)?;
         let (tls_config, state) =
             client_config(target.pin).map_err(|e| TransportError::Protocol(e.to_string()))?;
         let connect_timeout = self.config.connect_timeout;
@@ -389,6 +390,17 @@ impl StreamConn for WsConn {
             }
             Some(Ok(_)) => Ok(Frame::Other),
         }
+    }
+}
+
+/// Tout sauf `hello` exige l'empreinte confirmée : le mode « sonde » n'envoie jamais ni
+/// identifiant ni jeton (BR-CONN-011).
+fn require_pinned(target: &Target) -> Result<(), TransportError> {
+    match target.pin {
+        Pin::Pinned(_) => Ok(()),
+        Pin::Probe => Err(TransportError::Protocol(
+            "empreinte du serveur non confirmée".into(),
+        )),
     }
 }
 
@@ -494,6 +506,45 @@ fn api_error(status: u16, headers: &HeaderMap, body: &[u8]) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_probe_mode_is_refused_for_everything_but_hello() {
+        use hearth_proto::api::sessions::LoginRequest;
+        let transport = HttpTransport::new(HttpTransportConfig::default());
+        let target = Target {
+            host: "127.0.0.1".into(),
+            port: 1,
+            pin: Pin::Probe,
+        };
+        let refused = |e: TransportError| {
+            assert_eq!(
+                e,
+                TransportError::Protocol("empreinte du serveur non confirmée".into())
+            );
+        };
+        let login = LoginRequest {
+            username: "u".into(),
+            password: "p".into(),
+        };
+        refused(transport.login(&target, &login).await.unwrap_err());
+        refused(transport.open_stream(&target).await.err().unwrap());
+        let token = Secret::from("t");
+        refused(transport.logout(&target, &token).await.unwrap_err());
+        let request = ApiRequest {
+            method: Method::Get,
+            path: "/me".into(),
+            body: None,
+            idempotency_key: None,
+        };
+        refused(
+            transport
+                .request(&target, &token, &request)
+                .await
+                .unwrap_err(),
+        );
+        let id = OperationId::parse("A").unwrap();
+        refused(transport.operation(&target, &token, &id).await.unwrap_err());
+    }
 
     #[test]
     fn ipv6_hosts_are_bracketed_in_urls() {

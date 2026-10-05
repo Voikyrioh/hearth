@@ -76,6 +76,10 @@ pub struct ServerRecord {
     /// Adresses MAC annoncées par l'agent (réveil à distance, plus tard).
     pub mac_addresses: Vec<String>,
     pub last_contact_at: Option<WallTime>,
+    /// L'utilisateur s'est déconnecté : pas de reconnexion automatique au démarrage
+    /// (BR-CONN-016). Le mot de passe mémorisé, lui, est conservé.
+    #[serde(default)]
+    pub signed_out: bool,
 }
 
 mod fingerprint_hex {
@@ -139,6 +143,7 @@ mod tests {
             remember: true,
             mac_addresses: vec!["AA:BB:CC:DD:EE:FF".into()],
             last_contact_at: Some(WallTime::from_millis(1_790_000_000_000)),
+            signed_out: true,
         };
         let text = serde_json::to_string(&record).unwrap();
         assert!(text.contains(&"ab".repeat(32)), "{text}");
