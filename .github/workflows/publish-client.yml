@@ -1,0 +1,104 @@
+name: publish-client
+
+# Publication du client Windows (HRT-16, ADR-0017, runbook docs/runbooks/publier-une-version-du-client.md).
+#
+# DÉCLENCHÉ À LA MAIN SEULEMENT (Actions, « Run workflow ») : aucun push, aucune PR, aucune étiquette ne
+# le lance. Il construit l'installateur NSIS, le signe avec la clé SECRÈTE des secrets du dépôt, fabrique
+# `latest.json` et crée une release BROUILLON : le client ne la voit qu'une fois que tu l'as publiée à
+# la main (le flux `releases/latest` ne propose jamais un brouillon). Rien ici ne publie à ta place.
+#
+# Secrets du dépôt à créer avant la première exécution (jamais dans un fichier du dépôt) :
+#   HEARTH_CLIENT_SIGNING_KEY            contenu du fichier de clé secrète (`tauri signer generate`)
+#   HEARTH_CLIENT_SIGNING_KEY_PASSWORD   son mot de passe (vide si la clé n'en a pas)
+# Et la clé PUBLIQUE correspondante dans apps/desktop/src-tauri/update-key.pub, commitée AVANT : le
+# contrôle `client-release-check` refuse la clé de développement du dépôt.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à publier, X.Y.Z (celle de Cargo.toml et de apps/desktop/package.json)"
+        required: true
+        type: string
+      notes:
+        description: "Notes de version (texte brut, affiché tel quel dans le client)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ inputs.version }}
+      NOTES: ${{ inputs.notes }}
+      GH_TOKEN: ${{ github.token }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.HEARTH_CLIENT_SIGNING_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.HEARTH_CLIENT_SIGNING_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # Garde de publication : la clé publique du dépôt n'est pas celle de développement, la version
+      # demandée est celle du dépôt. Avant toute fabrication.
+      - name: Garde de publication
+        shell: bash
+        run: cargo xtask client-release-check --version "$VERSION"
+
+      - name: Secret de signature présent
+        shell: bash
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "le secret HEARTH_CLIENT_SIGNING_KEY n'existe pas (runbook publier-une-version-du-client)" >&2
+            exit 1
+          fi
+
+      - name: Installateur NSIS
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          npm ci
+          npm run tauri build
+
+      - name: Signature de l'installateur
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          setup="../../target/release/bundle/nsis/Hearth_${VERSION}_x64-setup.exe"
+          test -f "$setup" || { echo "installateur introuvable : $setup" >&2; exit 1; }
+          npx tauri signer sign "$setup"
+          test -f "$setup.sig" || { echo "signature absente" >&2; exit 1; }
+
+      - name: Manifeste latest.json
+        shell: bash
+        run: |
+          out=target/release/bundle/nsis
+          printf '%s' "$NOTES" > "$out/notes.txt"
+          cargo xtask client-manifest \
+            --version "$VERSION" \
+            --notes-file "$out/notes.txt" \
+            --signature-file "$out/Hearth_${VERSION}_x64-setup.exe.sig" \
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/Hearth_${VERSION}_x64-setup.exe" \
+            --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --out "$out/latest.json"
+
+      # BROUILLON : à relire et à publier à la main depuis la page des releases.
+      - name: Release brouillon
+        shell: bash
+        run: |
+          out=target/release/bundle/nsis
+          gh release create "v${VERSION}" --draft --title "Hearth ${VERSION}" --notes-file "$out/notes.txt" \
+            "$out/Hearth_${VERSION}_x64-setup.exe" \
+            "$out/Hearth_${VERSION}_x64-setup.exe.sig" \
+            "$out/latest.json"
