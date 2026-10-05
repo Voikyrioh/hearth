@@ -25,6 +25,21 @@
   --card-edge: inset 0 1px 0 #ffffff0d;
   --focus-halo: color-mix(in srgb, var(--ac) 25%, transparent);
   --ac-hover: color-mix(in srgb, var(--ac) 94%, white);
+  --crit-hover: color-mix(in srgb, var(--crit) 12%, transparent);
+  --crit-tint: color-mix(in srgb, var(--crit) 12%, var(--card));
+  --warn-tint: color-mix(in srgb, var(--warn) 12%, var(--card));
+  --on-crit: #1c1518;
+  --scrim: color-mix(in srgb, var(--bg) 72%, transparent);
+
+  /* Couleurs de serveur : palette de 8 (anneau de l'avatar actif) */
+  --server-1: #ff7b3d;
+  --server-2: #ff4f7a;
+  --server-3: #5fd0c0;
+  --server-4: #7ed39a;
+  --server-5: #ffc04d;
+  --server-6: #8fa7ff;
+  --server-7: #c58bff;
+  --server-8: #e6d5a8;
 
   /* Typographie */
   --font-title: "Sora", system-ui, sans-serif;
@@ -38,6 +53,8 @@
   --fs-h2: 27px;
   --fs-h1: 30px;
   --lh-body: 1.4;
+  --ls-label: 0.07em;
+  --ls-title: -0.02em;
 
   /* Formes et espace */
   --radius-card: 16px;
@@ -50,10 +67,30 @@
   --space-5: 24px;
   --space-6: 40px;
   --rail-width: 64px;
+  --nav-width: 208px;
+  --page-pad: 24px;
+  --soon-min-height: 320px;
+  --dialog-width: 440px;
+  --toast-width: 340px;
+  --tooltip-max: 260px;
+  --avatar-size: 38px;
+  --status-dot: 11px;
+  --pill-dot: 8px;
+  --nav-puck: 7px;
+  --check-size: 18px;
+  --spinner-size: 16px;
+  --spinner-stroke: 3px;
+  --ring-width: 2px;
+  --border-width: 1px;
+  --control-sm: 32px;
+  --control-lg: 48px;
+  --field-pad-y: 10px;
+  --field-pad-x: 12px;
   --content-max: 420px;
   --panel-max: 640px;
   --target-size: 40px;
   --icon-size: 20px;
+  --icon-sm: 16px;
   --logo-sm: 28px;
   --logo-md: 56px;
   --logo-lg: 120px;
@@ -65,9 +102,19 @@
 
   /* États */
   --opacity-disabled: 0.45;
+  --opacity-stale: 0.62;
+  --grayscale-stale: 0.85;
+  --opacity-pulse-low: 0.35;
 
   /* Mouvement */
   --motion-fast: 150ms;
   --motion-base: 300ms;
+  --motion-pulse: 1s;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Couches */
+  --z-tooltip: 30;
+  --z-toast: 40;
+  --z-dialog: 50;
+  --z-dev: 60;
 }

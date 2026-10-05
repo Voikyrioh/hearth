@@ -1,5 +1,7 @@
 <script setup lang="ts">
-defineProps<{ title: string; text: string }>();
+withDefaults(defineProps<{ title: string; text: string; heading?: "h1" | "h2" }>(), {
+  heading: "h1",
+});
 </script>
 
 <template>
@@ -7,7 +9,7 @@ defineProps<{ title: string; text: string }>();
     <div v-if="$slots.illustration" class="empty__illustration">
       <slot name="illustration" />
     </div>
-    <h1 class="empty__title">{{ title }}</h1>
+    <component :is="heading" class="empty__title">{{ title }}</component>
     <p class="empty__text">{{ text }}</p>
     <div v-if="$slots.action" class="empty__action">
       <slot name="action" />

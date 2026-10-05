@@ -38,6 +38,12 @@ button {
   color: inherit;
 }
 
+/* Désactivé (par l'état, le lien ou le rôle) : même aspect partout, y compris via `v-needs-link`. */
+[aria-disabled="true"] {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
 /* Focus clavier : contour 2 px décalé de 2 px sur tout élément interactif. */
 :focus-visible {
   outline: 2px solid var(--tx);
