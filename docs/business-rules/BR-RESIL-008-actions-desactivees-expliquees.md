@@ -11,13 +11,13 @@ maj: 2026-10-05
 # BR-RESIL-008 — Hors « Connecté », les actions qui exigent le serveur sont désactivées et expliquées
 
 ## Règle
-Toute action qui a besoin du serveur est désactivée tant que le lien du serveur courant n'est pas « Connecté » (ou que le rôle ne suffit pas, avec `{ role: 'admin' }`). Elle reste focalisable (`aria-disabled`), ignore le clic avant tout gestionnaire et porte une infobulle : « Indisponible tant que le serveur est hors ligne. », « Indisponible pendant la reconnexion au serveur. », « Indisponible : ta session a expiré. », « Indisponible : ton compte n'est plus accessible. », « Réservé aux administrateurs. ». Une seule implémentation : la directive `v-needs-link`. Elle se réactive seule au retour du lien.
+Toute action qui a besoin du serveur est désactivée tant que le lien du serveur courant n'est pas « Connecté » (ou que le rôle ne suffit pas, avec `{ role: 'admin' }`). Elle reste focalisable (`aria-disabled`), ignore le clic et explique pourquoi dans une infobulle (`HTooltip`, au survol ET au focus clavier, `aria-describedby`) : « Indisponible tant que le serveur est hors ligne. », « Indisponible pendant la reconnexion au serveur. », « Indisponible : ta session a expiré. », « Indisponible : ton compte n'est plus accessible. », « Réservé aux administrateurs. ». Une seule implémentation : la prop `needsLink` de `HButton`, `HToggle` et `HInput`, qui appelle `useNeedsLink`. L'état final est `disabled || busy || raison du lien`, calculé dans le composant : un bouton occupé dont le lien tombe puis revient ne reprend jamais un aspect actif à tort. Il se réactive seul au retour du lien.
 
 ## Application (code)
-- `apps/desktop/src/directives/needsLink.ts::vNeedsLink` ; textes `fr.ts` groupe `needs` ; usage `apps/desktop/src/pages/Accounts.vue`, `Audit.vue`.
+- `apps/desktop/src/composables/useNeedsLink.ts::useNeedsLink` ; `apps/desktop/src/components/atoms/HButton.vue`, `HToggle.vue`, `HInput.vue` (prop `needsLink`) ; `HTooltip.vue` ; textes `fr.ts` groupe `needs` ; usage `apps/desktop/src/pages/Accounts.vue`, `Audit.vue`.
 
 ## Vérification
-- Tests : `needsLink.test.ts` (4 états, clic bloqué, focus conservé, rôle, serveur courant seul, restitution du `title`), `shell.test.ts::disables the header action of Comptes`, `e2e/shell.spec.ts`.
+- Tests : `HButton.test.ts::needs-link on HButton and HToggle` (4 états, busy et lien combinés, focus clavier et infobulle, rôle, serveur courant seul, HToggle), `shell.test.ts::disables the header action of Comptes`, `e2e/shell.spec.ts`.
 
 ## Cas limites
 - Pas de serveur courant : « Indisponible : aucun serveur sélectionné. ».

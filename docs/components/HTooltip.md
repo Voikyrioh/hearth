@@ -2,8 +2,8 @@
 
 Atome · `apps/desktop/src/components/atoms/HTooltip.vue`
 
-Bulle d'explication au survol et au focus clavier (`role="tooltip"`), fermée par Échap. Le slot reçoit `describedby` à poser sur le contrôle.
+Bulle d'explication au survol et au focus clavier (`role="tooltip"`), fermée par Échap. Le slot reçoit `describedby` à poser sur le contrôle. L'enveloppe existe même sans texte (le contrôle n'est jamais recréé quand l'explication apparaît : le focus clavier reste).
 
-- Props : `text`
+- Props : `text` (sans texte, pas de bulle), `placement` (`start`, `center`, `end`), `side` (`bottom`, `top`)
 - Événements et slots : slot par défaut (`{ describedby }`)
-- Notes : Les contrôles désactivés par le lien ou le rôle utilisent l'attribut `title` posé par `v-needs-link`, pas ce composant. Tests : `atoms.test.ts`.
+- Notes : C'est l'unique affichage de la raison d'un blocage (lien, rôle, `hint`) : `HButton`, `HToggle` et `HInput` l'utilisent. Tests : `atoms.test.ts`.

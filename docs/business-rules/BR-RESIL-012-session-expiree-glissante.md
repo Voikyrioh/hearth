@@ -30,7 +30,7 @@ Le jeton est 32 octets aléatoires du système, rendu au client en hexadécimal 
 - Horloge qui recule : aucun renouvellement.
 
 ## Affichage dans le client
-- État « Session expirée » : pastille `apps/desktop/src/components/molecules/LinkStatePill.vue`, actions désactivées par `v-needs-link` (BR-RESIL-001, 008).
+- État « Session expirée » : pastille `apps/desktop/src/components/molecules/LinkStatePill.vue`, actions désactivées par la prop `needsLink` (BR-RESIL-001, 008).
 
 ## Règles liées
 - BR-RESIL-014, BR-ACCT-008 à BR-ACCT-011 (fermetures de sessions).

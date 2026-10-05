@@ -2,7 +2,7 @@
 
 Page · `apps/desktop/src/pages/Audit.vue`
 
-Journal d'activité : « Bientôt disponible » (ticket suivant), réservé aux administrateurs. Bouton « Exporter » dans l'en-tête, désactivé par `v-needs-link` hors connexion.
+Journal d'activité : « Bientôt disponible » (ticket suivant), réservé aux administrateurs. Bouton « Exporter » dans l'en-tête, désactivé par sa prop `needs-link` hors connexion.
 
 - Props : aucune
 - Événements et slots : aucun

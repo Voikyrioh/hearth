@@ -29,7 +29,7 @@ HRT-08 pose la coquille Windows du client (`apps/desktop`). ADR-0002 a choisi Ta
 | Build front | `vite` 7, `@vitejs/plugin-vue` 6, `typescript` ~5.9, `vue-tsc` 3 | Pile par défaut du hub. | TypeScript 7 (portage natif) est refusé par `vue-tsc` 3 : rester en 5.9 jusqu'à sa prise en charge. |
 | Lint, format | `@biomejs/biome` 2 | Pile par défaut du hub ; un seul outil. | La prise en charge des fichiers `.vue` est partielle : les règles d'imports et de variables inutilisés sont coupées sur `*.vue` (le gabarit est invisible pour Biome), `vue-tsc` couvre le reste. |
 | Routeur | `vue-router` 5, historique par hachage | Routes `/welcome`, `/servers/:id/...`, `/settings` ; gardes qui redirigent selon les serveurs (aucun serveur, serveur supprimé, rôle). Le hachage convient à une application servie depuis des fichiers locaux. | Une seule table de routes ; le titre et le rôle requis vivent dans `meta`. |
-| Tests navigateur | `@playwright/test` (Chromium, dépendance de dev de `apps/desktop`) | Scénarios de la coquille avec le pont de liaison simulé et captures 1366/1920/2560 (revue UX) ; `npm run e2e`. Lancé aussi par le job CI `desktop`. | Pas de coquille Tauri dans ces tests (le pont Tauri n'y est pas exercé) ; Playwright refuse de cliquer un contrôle `aria-disabled` : `click({ force: true })` pour tester le blocage. Navigateur : `npx playwright install chromium`. |
+| Tests navigateur | `@playwright/test` (Chromium, dépendance de dev de `apps/desktop`) | Scénarios de la coquille avec le pont de liaison simulé et captures 1366/1920/2560 (revue UX) ; `npm run e2e`. Deux projets : `dev` (Vite, pont simulé) et `prod` (le build livré servi par `vite preview`, pont vide : accueil, aucune erreur de console, aucune simulation). Lancés aussi par le job CI `desktop`, après `npm run check:dist`. | Pas de coquille Tauri dans ces tests (le pont Tauri n'y est pas exercé) ; Playwright refuse de cliquer un contrôle `aria-disabled` : `click({ force: true })` pour tester le blocage. Navigateur : `npx playwright install chromium`. |
 | Tests front | `vitest` 4, `@vue/test-utils`, `happy-dom`, `@tauri-apps/api/mocks` | Pile par défaut du hub ; pont Tauri simulé par `mockIPC`. | `jsdom` 27 exige Node 22.12 ou plus (`require` d'ES module) : `happy-dom` retenu, Node 22.7 en poste de dev. |
 | Polices | `@fontsource/sora`, `@fontsource/instrument-sans`, `@fontsource/dm-mono` (sous-ensemble `latin`) | Polices embarquées dans l'app, aucun appel à un service de polices (CSP stricte). | Seul le sous-ensemble `latin` est livré (accents français, œ) ; un autre alphabet demande d'ajouter son sous-ensemble. |
 | Journal | `tracing-subscriber` (déjà au workspace), `tracing-appender` 0.2 | Fichier tournant `logs/` (quotidien, 7 gardés, 16 Mio au plus au total : les plus anciens, par date de modification, supprimés ; au plafond, une dernière ligne « journal plein » puis écritures abandonnées jusqu'au changement de jour ou à la place libérée) dans le dossier de données, initialisé avant tout ; crochet de panique qui écrit directement dans le fichier (sans abonné `tracing`) et montre une boîte de message si le journal est indisponible, posé même si le journal ne s'ouvre pas ; sans console dans le binaire livré, c'est la seule trace. | Écriture synchrone sous verrou (volume faible) pour qu'une panique soit écrite avant la fin du processus. Niveau fixé par le code (`info` livré, `debug` en développement) : `RUST_LOG` n'est lu qu'en développement. La borne de taille est maison (`tracing-appender` ne borne que le nombre de fichiers). |
@@ -51,6 +51,23 @@ HRT-08 pose la coquille Windows du client (`apps/desktop`). ADR-0002 a choisi Ta
 - Désinstallation : le modèle NSIS de Tauri arrête l'application, retire l'entrée de démarrage et propose la case d'effacement des données ; la page à deux boutons « Garder mes serveurs » / « Tout effacer » de la spec exigerait un modèle NSIS entier sur mesure, trop coûteux à maintenir : la case « Tout effacer : ... » (décochée = tout garder) en tient lieu.
 - La case de démarrage avec Windows à l'installation (BR-CLIENT-006) n'est pas dans l'installateur : le réglage existe dans l'application (BR-CLIENT-007). Suivi : ticket HRT-21 (page d'options NSIS sur mesure).
 - La case « Tout effacer » promet d'effacer aussi les mots de passe mémorisés, mais le modèle ne supprime que des dossiers : quand le coffre Windows arrivera, la désinstallation devra y effacer les identifiants (note dans `installer/French.nsh`).
+
+## Contrat du pont de liaison (interface ⇄ `hearth-link`)
+
+Stabilisé avant la vraie liaison (`apps/desktop/src/link/bridge.ts`) :
+
+- chaque abonnement (`onServersChanged`, `onLinkState`, `onOperation`) rend une **promesse** de désabonnement, comme `listen` de Tauri ;
+- `onServersChanged` et `onLinkState` **rejouent l'état courant** à l'abonnement : pas de lecture initiale séparée (`listServers` supprimée), donc aucune fenêtre où un ajout ou une suppression de serveur serait perdu ; l'implémentation réelle s'abonne d'abord aux événements puis envoie l'instantané ;
+- un événement `link://state` porte `since` ; l'interface ignore un événement plus ancien que celui qu'elle connaît (un instantané en retard n'écrase rien) ;
+- `link://operation` porte `serverId` et `opId` ; le store garde les issues par `opId` (100 au plus, 10 minutes) pour qu'une page retrouve celle de son action.
+
+## Règles d'interface décidées en revue (HRT-09)
+
+- **Une seule source pour « lien ou rôle manquant »** : la prop `needsLink` de `HButton`, `HToggle` et `HInput` (`useNeedsLink`). Pas de directive qui retouche le DOM d'un composant qui lie déjà les mêmes attributs.
+- **La coquille n'est jamais dans une frontière d'erreur qui la remplace** ; seule une erreur de rendu d'une page affiche le repli.
+- **Aucune valeur visuelle littérale** hors de `tokens.css`, vérifié par `scripts/check-style.mjs` (dans `npm run lint`).
+- **Aucun code de simulation dans le binaire livré**, vérifié par `scripts/check-dist.mjs` (CI).
+- Dialogue de confirmation : élément `<dialog>` natif et `showModal()`.
 
 ## Comment l'appliquer
 

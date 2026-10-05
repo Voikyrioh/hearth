@@ -6,4 +6,4 @@ Panneau de développement qui pilote le pont simulé (état de chaque serveur, i
 
 - Props : aucune
 - Événements et slots : aucun
-- Notes : Importé par `App.vue` derrière `import.meta.env.DEV` : absent du binaire livré (vérifié : ni le panneau ni le pont simulé n'apparaissent dans `dist/`). Couvert par `e2e/shell.spec.ts`.
+- Notes : Importé par `App.vue` derrière `import.meta.env.DEV` : absent du binaire livré (`npm run check:dist` en CI : ni le panneau, ni ses libellés, ni le pont simulé, ni les données d'exemple dans `dist/`). Couvert par `e2e/shell.spec.ts`.

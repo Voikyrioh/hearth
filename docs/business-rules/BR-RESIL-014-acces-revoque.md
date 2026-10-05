@@ -24,7 +24,7 @@ Quand les sessions d'un compte sont fermées par un changement de mot de passe (
 - Passé 90 jours, la trace est purgée : le jeton reçoit `SESSION_EXPIRED`, la reconnexion silencieuse échoue alors avec `INVALID_CREDENTIALS` côté client (« Accès révoqué » quand même).
 
 ## Affichage dans le client
-- État « Accès révoqué » : pastille `apps/desktop/src/components/molecules/LinkStatePill.vue`, actions désactivées par `v-needs-link` (BR-RESIL-001, 008).
+- État « Accès révoqué » : pastille `apps/desktop/src/components/molecules/LinkStatePill.vue`, actions désactivées par la prop `needsLink` (BR-RESIL-001, 008).
 
 ## Règles liées
 - BR-RESIL-012.

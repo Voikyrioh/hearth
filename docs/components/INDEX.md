@@ -49,19 +49,20 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
 - [`Settings`](./Settings.md) — Réglages.
 
-## Directive
+## Règle partagée
 
-- [`v-needs-link`](./v-needs-link.md) — désactive et explique toute action qui exige le lien ou un rôle.
+- [`needs-link`](./needs-link.md) — prop `needsLink` et `useNeedsLink` : désactive et explique toute action qui exige le lien ou un rôle (unique source de vérité).
 
 ## À venir (autres tickets)
 
 `Gauge`, `Sparkline`, `TimeSeriesChart`, `FingerprintBlock`, `PasswordRules`, `AddServerWizard`, `FingerprintAlert`, `MachineCards`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `UpdatePanel`, `AgentUpdateSteps`.
 
-Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `layouts/`, `pages/`, `directives/`, `stores/`, `link/`, `errors/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
+Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `layouts/`, `pages/`, `composables/`, `stores/`, `link/`, `errors/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
 
 ## Conventions
 
 - Tous textes → module `src/i18n/fr.ts` + `t(clé, { paramètres })` (clés par chemin, `welcome.title`). Le raccordement à `vue-translate` est repoussé (voir ADR-0010).
 - Aucun texte en dur. Aucun `style=` en ligne : une valeur visuelle = un jeton de `src/styles/tokens.css` (la couleur d'un serveur est un numéro de palette).
-- Désactivé = `aria-disabled` (jamais `disabled` natif : le focus clavier est conservé). Pour le lien et le rôle : `v-needs-link`, nulle part ailleurs.
+- Désactivé = `aria-disabled` (jamais `disabled` natif : le focus clavier est conservé), explication par `HTooltip`. Pour le lien et le rôle : la prop `needsLink`, nulle part ailleurs.
+- Aucune valeur visuelle littérale : `npm run lint` échoue sur une couleur ou un `px` hors de `tokens.css`.
 - Responsive : captures 1366, 1920 et 2560 px (`npm run e2e`, `apps/desktop/e2e/screenshots/`, non commitées).

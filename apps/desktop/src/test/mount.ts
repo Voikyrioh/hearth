@@ -3,7 +3,7 @@ import type { SimulatedOptions } from "@/link";
 import { createAppRouter } from "@/router";
 import { startedApp } from "./app";
 
-/** Application complète en mémoire : routeur (historique mémoire), pinia, directive. */
+/** Application complète en mémoire : routeur (historique mémoire), pinia. */
 export async function mountContext(options: SimulatedOptions = {}) {
   const ctx = await startedApp(options);
   const router = createAppRouter(createMemoryHistory());

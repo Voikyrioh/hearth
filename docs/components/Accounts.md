@@ -2,7 +2,7 @@
 
 Page · `apps/desktop/src/pages/Accounts.vue`
 
-Comptes : « Bientôt disponible » (ticket suivant), réservée aux administrateurs. Bouton « Ajouter un compte » dans l'en-tête, désactivé par `v-needs-link` hors connexion.
+Comptes : « Bientôt disponible » (ticket suivant), réservée aux administrateurs. Bouton « Ajouter un compte » dans l'en-tête, désactivé par sa prop `needs-link` hors connexion.
 
 - Props : aucune
 - Événements et slots : aucun
