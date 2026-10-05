@@ -55,7 +55,7 @@ served_fingerprint() {
 }
 
 printed_fingerprint() {
-    sed -n 's/^Empreinte du serveur : //p' "$OUT" | head -n 1
+    sed -n 's/^Empreinte du serveur : //p' "$OUT" | tr -d '\r' | head -n 1
 }
 
 echo "== système : $(uname -m), systemd $(systemctl --version | head -n 1)"
@@ -254,6 +254,42 @@ ok "purge : aucun des chemins ($TRACES) n'existe, plus d'unité, plus de process
 run "$BIN" uninstall --yes || die "la désinstallation d'une machine propre devrait réussir"
 must_say "L'agent n'est pas installé sur ce serveur. Rien à désinstaller."
 ok "rien d'installé : « Rien à désinstaller »"
+
+# --------------------------------------------------------------------------------------------
+# Installation interactive, sur un vrai terminal (pty) : port par défaut, nom, mot de passe
+# sans écho avec confirmation, après deux saisies invalides
+# --------------------------------------------------------------------------------------------
+# Réponses : port (vide), nom vide, nom invalide, nom correct, mot de passe trop court,
+# mot de passe correct, confirmation différente, mot de passe correct, confirmation correcte.
+# Une ligne par seconde : le terminal n'affiche pas ce qui est tapé pendant la saisie du mot de
+# passe, à condition que la réponse n'arrive pas avant la question.
+feed() {
+    for line in "$@"; do
+        sleep 1
+        printf '%s\n' "$line"
+    done
+}
+feed "" "" "Marie Dupont" "$USER_NAME" court "$PW" autre-chose "$PW" "$PW" \
+    | script -qec "$BIN install" /dev/null >"$OUT" 2>&1 || die "l'installation interactive a échoué"
+must_say "Numéro de port [7341]:"
+must_say "Le nom du compte est requis."
+must_say "Le nom du compte contient des caractères non autorisés."
+must_say "Le mot de passe est trop court."
+must_say "Les deux mots de passe ne correspondent pas."
+must_say "Installation réussie. L'agent démarre automatiquement avec ton serveur."
+must_not_say "$PW"
+INTERACTIVE_FP=$(printed_fingerprint)
+[ -n "$INTERACTIVE_FP" ] || die "aucune empreinte affichée (installation interactive)"
+[ "$(login)" = 201 ] || die "la connexion échoue après l'installation interactive"
+[ "$(served_fingerprint)" = "$INTERACTIVE_FP" ] || die "empreinte affichée et empreinte servie diffèrent (installation interactive)"
+ok "installation interactive (pty) : questions, erreurs réaffichées sans quitter, mot de passe jamais affiché, compte créé"
+# Désinstallation interactive : la question est reposée jusqu'à une réponse valide.
+feed peut-etre supprimer | script -qec "$INSTALLED uninstall" /dev/null >"$OUT" 2>&1 || die "la désinstallation interactive a échoué"
+must_say "Supprimer aussi les comptes, le journal et la configuration ? (conserver/supprimer)"
+must_say "Réponds 'conserver' ou 'supprimer'."
+must_say "Aucune trace de l'agent ne reste sur ta machine."
+nothing_left "après désinstallation interactive"
+ok "désinstallation interactive : question reposée jusqu'à une réponse valide, purge complète"
 
 # --------------------------------------------------------------------------------------------
 # Installation gérée par le système : aucune unité, aucun binaire copié
