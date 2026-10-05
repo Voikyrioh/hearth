@@ -7,13 +7,12 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use hearth_agent::app::Metering;
-use hearth_agent::application::ports::{AuditFeed, GpuProbe, ProbeError, SystemProbe};
+use hearth_agent::application::ports::{GpuProbe, ProbeError, SystemProbe};
 use hearth_agent::domain::machine::{
     CpuIdentity, DiskIdentity, GpuIdentity, MachineIdentity, OsIdentity,
 };
 use hearth_agent::domain::metrics::{DiskUsage, GpuReading, MemoryUsage, SystemSample};
 use hearth_agent::entrypoint::ws::StreamSettings;
-use hearth_agent::infrastructure::audit_feed::NoAuditFeed;
 use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
 
 #[derive(Default)]
@@ -155,12 +154,12 @@ pub fn fast_stream() -> StreamSettings {
     }
 }
 
-/// Sondes simulées, un échantillon toutes les 20 ms, pas de journal.
+/// Sondes simulées, un échantillon toutes les 20 ms.
 pub fn metering() -> Metering {
-    metering_with(Arc::new(NoAuditFeed), fast_stream())
+    metering_with(fast_stream())
 }
 
-pub fn metering_with(audit: Arc<dyn AuditFeed>, stream: StreamSettings) -> Metering {
+pub fn metering_with(stream: StreamSettings) -> Metering {
     Metering {
         system: Arc::new(FakeSystem::default()),
         gpu: Arc::new(FakeGpu),
@@ -168,7 +167,6 @@ pub fn metering_with(audit: Arc<dyn AuditFeed>, stream: StreamSettings) -> Meter
         clock: Arc::new(SystemClock),
         monotonic: Arc::new(SystemMonotonic::new()),
         period: Duration::from_millis(20),
-        audit,
         stream,
     }
 }

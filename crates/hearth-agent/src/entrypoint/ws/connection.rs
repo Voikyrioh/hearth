@@ -16,11 +16,12 @@ use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, timeout};
 
 use super::{Permit, StreamSettings};
 use crate::application::sessions::{AuthError, CurrentSession};
+use crate::domain::audit::AuditRecord;
 use crate::domain::metrics::Sample;
 use crate::domain::secret::Secret;
 use crate::domain::sessions::SessionEnd;
 use crate::domain::stream::{SNAPSHOT_WINDOW, is_new, may_subscribe};
-use crate::entrypoint::http::{ApiError, AppState};
+use crate::entrypoint::http::{self, ApiError, AppState};
 use crate::entrypoint::metrics_wire;
 
 /// Comment la connexion se termine : un code de fermeture et une raison courte, ou rien si le
@@ -87,14 +88,14 @@ fn from_api(error: ApiError) -> ServerMessage {
 #[derive(Default)]
 struct Subscriptions {
     metrics: Option<broadcast::Receiver<Arc<Sample>>>,
-    audit: Option<broadcast::Receiver<Arc<Value>>>,
+    audit: Option<broadcast::Receiver<AuditRecord>>,
     /// Instant monotone du dernier échantillon envoyé (snapshot compris) : pas de doublon
     /// (BR-DASH-011), même si l'horloge murale recule.
     last_sent: Option<time::Duration>,
     /// Dernier `subscribe` accepté : un par seconde au plus.
     last_subscribe: Option<Instant>,
-    /// Cartes graphiques de l'identité envoyée dans le dernier `snapshot` : une carte qui
-    /// apparaît ensuite déclenche un nouveau `snapshot`.
+    /// Cartes graphiques de l'identité envoyée dans le dernier `snapshot` : un nouveau `snapshot`
+    /// part quand la liste des cartes change.
     snapshot_gpus: Vec<crate::domain::machine::GpuIdentity>,
 }
 
@@ -206,10 +207,15 @@ async fn serve(socket: &mut WebSocket, state: &AppState, mut permit: Permit) -> 
                 Err(RecvError::Closed) => return going_away(),
             },
             event = next(&mut subscriptions.audit) => match event {
-                Ok(event) => {
-                    let message = ServerMessage::Audit { event: Value::clone(&event) };
-                    if !send(socket, &settings, &message).await {
-                        return None;
+                Ok(record) => {
+                    // L'événement du domaine devient le type du fil ici, comme les mesures.
+                    match http::audit_item(&record) {
+                        Ok(event) => {
+                            if !send(socket, &settings, &ServerMessage::Audit { event }).await {
+                                return None;
+                            }
+                        }
+                        Err(_) => tracing::warn!("événement du journal non convertible, ignoré"),
                     }
                 }
                 Err(RecvError::Lagged(missed)) => tracing::debug!(missed, "abonné lent : événements d'audit perdus"),
@@ -361,8 +367,6 @@ async fn handle_text(
     Handled::Continue
 }
 
-/// Remplace les abonnements par les sujets demandés ; rend les messages à envoyer. S'abonner à
-/// `metrics` répond par un `snapshot` (identité et historique des 5 dernières minutes).
 /// Abonne la connexion aux mesures et rend le `snapshot` (ou l'erreur) à envoyer. S'abonner AVANT
 /// de lire l'historique : aucun échantillon n'échappe, ceux que le snapshot contient déjà sont
 /// écartés à l'envoi (`is_new`).
@@ -386,6 +390,10 @@ async fn metrics_snapshot(state: &AppState, subscriptions: &mut Subscriptions) -
     }
 }
 
+/// Remplace les abonnements par les sujets demandés ; rend les messages à envoyer. S'abonner à
+/// `metrics` répond par un `snapshot` (identité et historique des 5 dernières minutes) ;
+/// s'abonner à `audit` est réservé aux administrateurs (`Role::can_read_audit`, la règle du
+/// journal : `domain::audit::can_read_journal`).
 async fn subscribe(
     state: &AppState,
     session: &CurrentSession,
@@ -402,7 +410,7 @@ async fn subscribe(
     }
     if topics.contains(&Topic::Audit) {
         if session.account.role.can_read_audit() {
-            subscriptions.audit = state.stream.audit.subscribe();
+            subscriptions.audit = Some(state.stream.audit.subscribe());
         } else {
             out.push(error_message(
                 ErrorCode::ForbiddenRole,

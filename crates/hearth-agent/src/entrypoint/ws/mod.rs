@@ -222,14 +222,16 @@ pub async fn stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use crate::domain::audit::AuditRecord;
     use tokio::sync::broadcast;
 
     struct NoFeed;
 
     impl AuditFeed for NoFeed {
-        fn subscribe(&self) -> Option<broadcast::Receiver<Arc<Value>>> {
-            None
+        fn publish(&self, _record: AuditRecord) {}
+
+        fn subscribe(&self) -> broadcast::Receiver<AuditRecord> {
+            broadcast::channel(1).1
         }
     }
 

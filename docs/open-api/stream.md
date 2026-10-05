@@ -31,7 +31,7 @@ Taille maximale d'un message du client : 4 096 octets (au-delà, l'agent ferme).
 |---|---|---|
 | `snapshot` | `machine` ([machine](./machine.md)), `history` (5 dernières minutes, 1 échantillon par seconde) | Après `subscribe` avec `metrics`, et de nouveau quand une carte graphique apparaît. |
 | `metrics` | champs de l'échantillon à plat ([metrics](./metrics.md)) | Chaque seconde. |
-| `audit` | `event` | Événement du journal d'activité, administrateurs abonnés à `audit`. Forme fixée par le journal (HRT-05) ; silencieux tant qu'aucun journal n'est branché. |
+| `audit` | `event` | Événement du journal d'activité, administrateurs abonnés à `audit`. Une entrée du journal, **dans la même forme que `GET /audit`** (`AuditEventItem` : `id`, `at`, `account`, `origin`, `action`, `action_label`, `target`, `outcome`, `reason`, `repeat_count`, voir [journal](./audit.md)), envoyée une fois la transaction de l'action validée (BR-AUDIT-010). Un abonné lent perd les plus anciennes entrées : il recharge `GET /audit`. Exemple : `{"type":"audit","event":{"id":42,"at":"2026-10-04T10:30:15.250Z","account":"marie","origin":{"kind":"client","name":"poste","addr":"10.0.0.7","text":"10.0.0.7 (poste)"},"action":"account.create","action_label":"Création de compte","target":"paul","outcome":"ok","reason":null,"repeat_count":0}}`. |
 | `session` | `kind` : `revoked` ou `expired` | La session prend fin ; l'agent ferme ensuite. |
 | `pong` | `n` | Réponse à `ping`. |
 | `error` | `code`, `message`, `details` | Même format et mêmes codes que l'API HTTP. Fatal avant l'authentification (fermeture ensuite) ; ensuite le flux reste ouvert (`VALIDATION_ERROR` : message mal formé ; `FORBIDDEN_ROLE` : sujet interdit). |

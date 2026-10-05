@@ -8,12 +8,18 @@ use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
 use serde_json::json;
 
 use crate::application::accounts::AccountError;
+use crate::application::audit::AuditError;
 use crate::application::ports::{HashError, StoreError};
 use crate::application::sessions::{AuthError, LoginError};
 use crate::domain::accounts::PasswordRule;
 use crate::domain::compat::Incompatibility;
 use crate::domain::lockout::retry_after_seconds;
 use crate::domain::sessions::SessionEnd;
+
+/// Posé sur toute réponse d'erreur de l'API : le code du protocole, que la couche d'accès lit pour
+/// consigner l'échec d'une requête qui modifie (jamais le corps).
+#[derive(Debug, Clone, Copy)]
+pub struct ErrorMark(pub ErrorCode);
 
 /// Erreur d'API : toujours rendue au format `ErrorBody`, avec le statut du code.
 #[derive(Debug)]
@@ -122,6 +128,11 @@ impl From<LoginError> for ApiError {
                     format!("Trop de tentatives. Attends {seconds} s avant de réessayer."),
                 ))
             }
+            // C'est le client qui déborde, pas l'agent : 429, comme un verrouillage.
+            LoginError::Busy => Self(ErrorBody::too_many_attempts(
+                1,
+                "Trop de connexions en attente depuis cette adresse. Réessaie dans un instant.",
+            )),
             LoginError::Store(error) => Self::internal(&error),
             LoginError::Hash(error) => Self::from(error),
             LoginError::Token(error) => Self::internal(&error),
@@ -162,12 +173,26 @@ impl From<AccountError> for ApiError {
     }
 }
 
+impl From<AuditError> for ApiError {
+    fn from(error: AuditError) -> Self {
+        match error {
+            AuditError::Forbidden => Self::new(
+                ErrorCode::ForbiddenRole,
+                "Tu n'as pas la permission de lire le journal d'activité",
+            ),
+            AuditError::Store(error) => Self::internal(&error),
+        }
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = StatusCode::from_u16(self.0.error.code.http_status())
-            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        let busy = self.0.error.code == ErrorCode::Busy;
+        let code = self.0.error.code;
+        let status =
+            StatusCode::from_u16(code.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let busy = code == ErrorCode::Busy;
         let mut response = (status, Json(self.0)).into_response();
+        response.extensions_mut().insert(ErrorMark(code));
         if busy {
             response
                 .headers_mut()
@@ -248,6 +273,17 @@ mod tests {
         assert_eq!(response.headers().get(RETRY_AFTER).unwrap(), "1");
         let error = ApiError::from(AccountError::Hash(HashError::Busy));
         assert_eq!(error.0.error.code, ErrorCode::Busy);
+    }
+
+    #[test]
+    fn a_full_connection_queue_answers_429_with_the_wait() {
+        let error = ApiError::from(LoginError::Busy);
+        assert_eq!(error.0.error.code, ErrorCode::TooManyAttempts);
+        assert_eq!(error.0.error.details, json!({ "retry_after_s": 1 }));
+        assert_eq!(
+            error.into_response().status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
     }
 
     #[test]

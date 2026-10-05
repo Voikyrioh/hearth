@@ -4,6 +4,7 @@
 //! un secret (mot de passe, jeton) ont un `Debug` qui le masque.
 
 pub mod accounts;
+pub mod audit;
 pub mod hello;
 pub mod machine;
 pub mod metrics;
