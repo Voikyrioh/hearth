@@ -52,6 +52,7 @@ function isActive(id: string): boolean {
     <HButton
       variant="ghost"
       disabled
+      tip-placement="start"
       :hint="t('welcome.addServerSoon')"
       :aria-label="t('rail.addServer')"
       data-rail-item

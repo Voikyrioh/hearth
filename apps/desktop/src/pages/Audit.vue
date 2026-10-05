@@ -13,7 +13,8 @@ const toasts = useToastsStore();
 <template>
   <Teleport defer to="#header-actions">
     <HButton
-      v-needs-link
+      needs-link
+      tip-placement="end"
       variant="secondary"
       @click="toasts.push({ kind: 'info', message: t('common.comingSoon') })"
     >

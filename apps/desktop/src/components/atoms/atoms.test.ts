@@ -13,27 +13,27 @@ import HTooltip from "./HTooltip.vue";
 
 describe("HButton variants and busy state", () => {
   it("renders the danger variant, and a solid one only for danger", () => {
-    const danger = mount(HButton, { props: { variant: "danger" } });
+    const danger = mount(HButton, { props: { variant: "danger" } }).get("button");
     expect(danger.classes()).toContain("btn--danger");
     expect(danger.classes()).not.toContain("btn--solid");
-    const solid = mount(HButton, { props: { variant: "danger", solid: true } });
+    const solid = mount(HButton, { props: { variant: "danger", solid: true } }).get("button");
     expect(solid.classes()).toContain("btn--solid");
-    const primarySolid = mount(HButton, { props: { solid: true } });
+    const primarySolid = mount(HButton, { props: { solid: true } }).get("button");
     expect(primarySolid.classes()).not.toContain("btn--solid");
   });
 
   it("has three sizes", () => {
     for (const size of ["sm", "md", "lg"] as const) {
-      expect(mount(HButton, { props: { size } }).classes()).toContain(`btn--${size}`);
+      expect(mount(HButton, { props: { size } }).get("button").classes()).toContain(`btn--${size}`);
     }
   });
 
   it("shows a spinner and ignores clicks while busy, and says so to assistive tech", async () => {
     const wrapper = mount(HButton, { props: { busy: true }, slots: { default: "Envoi" } });
     expect(wrapper.find("svg.spinner").exists()).toBe(true);
-    expect(wrapper.attributes("aria-busy")).toBe("true");
-    expect(wrapper.attributes("aria-disabled")).toBe("true");
-    await wrapper.trigger("click");
+    expect(wrapper.get("button").attributes("aria-busy")).toBe("true");
+    expect(wrapper.get("button").attributes("aria-disabled")).toBe("true");
+    await wrapper.get("button").trigger("click");
     expect(wrapper.emitted("click")).toBeUndefined();
   });
 });
@@ -164,7 +164,7 @@ describe("HTooltip", () => {
     const wrapper = mount(HTooltip, {
       props: { text: "Explication" },
       slots: {
-        default: ({ describedby }: { describedby: string }) =>
+        default: ({ describedby }: { describedby?: string }) =>
           h("button", { type: "button", "aria-describedby": describedby }, "x"),
       },
     });

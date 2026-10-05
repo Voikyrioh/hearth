@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { ref, useId } from "vue";
 
-// Bulle d'explication au survol ET au focus clavier. Le slot reçoit `describedby` à poser
-// sur le contrôle pour que les lecteurs d'écran la lisent. Échap la ferme.
-defineProps<{ text: string }>();
+// Bulle d'explication au survol ET au focus clavier (`role="tooltip"`), fermée par Échap.
+// Le slot reçoit `describedby` à poser sur le contrôle pour que les lecteurs d'écran la lisent.
+// Sans `text`, aucune bulle (l'enveloppe reste : le contrôle n'est jamais recréé quand
+// l'explication apparaît ou disparaît, le focus clavier est conservé). `placement` aligne la bulle sur le
+// début, le centre ou la fin du contrôle (éviter de sortir de la fenêtre).
+withDefaults(
+  defineProps<{ text?: string; placement?: "start" | "center" | "end"; side?: "bottom" | "top" }>(),
+  { text: undefined, placement: "center", side: "bottom" },
+);
 
 const id = useId();
 const open = ref(false);
@@ -18,8 +24,15 @@ const open = ref(false);
     @focusout="open = false"
     @keydown.esc="open = false"
   >
-    <slot :describedby="id" />
-    <span v-show="open" :id="id" class="tip__bubble" role="tooltip">{{ text }}</span>
+    <slot :describedby="text ? id : undefined" />
+    <span
+      v-if="text"
+      v-show="open"
+      :id="id"
+      :class="['tip__bubble', `tip__bubble--${placement}`, `tip__bubble--${side}`]"
+      role="tooltip"
+      >{{ text }}</span
+    >
   </span>
 </template>
 
@@ -31,8 +44,6 @@ const open = ref(false);
 
 .tip__bubble {
   position: absolute;
-  bottom: calc(100% + var(--space-2));
-  left: 50%;
   z-index: var(--z-tooltip);
   width: max-content;
   max-width: var(--tooltip-max);
@@ -42,7 +53,29 @@ const open = ref(false);
   background: var(--card-2);
   color: var(--tx);
   font-size: var(--fs-small);
-  transform: translateX(-50%);
+  font-weight: 400;
+  white-space: normal;
   pointer-events: none;
+}
+
+.tip__bubble--bottom {
+  top: calc(100% + var(--space-2));
+}
+
+.tip__bubble--top {
+  bottom: calc(100% + var(--space-2));
+}
+
+.tip__bubble--start {
+  left: 0;
+}
+
+.tip__bubble--end {
+  right: 0;
+}
+
+.tip__bubble--center {
+  left: 50%;
+  transform: translateX(-50%);
 }
 </style>

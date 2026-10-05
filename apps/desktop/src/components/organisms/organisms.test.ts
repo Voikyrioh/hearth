@@ -67,7 +67,7 @@ describe("ServerRail", () => {
     const { wrapper } = await mountRail();
     const add = wrapper.get('button[aria-label="Ajouter un serveur"]');
     expect(add.attributes("aria-disabled")).toBe("true");
-    expect(add.attributes("title")).toBe("Bientôt disponible");
+    expect(wrapper.get('[role="tooltip"]').text()).toBe("Bientôt disponible");
   });
 
   it("moves the focus with the arrow keys, wrapping around", async () => {

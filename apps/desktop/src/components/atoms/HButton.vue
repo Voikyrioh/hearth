@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { type NeedsLink, useNeedsLink } from "@/composables/useNeedsLink";
 import HSpinner from "./HSpinner.vue";
+import HTooltip from "./HTooltip.vue";
 
-// Désactivé = `aria-disabled` (et non `disabled`) : le bouton garde le focus clavier
-// et son infobulle `hint`, qui explique pourquoi il est inactif. `busy` bloque aussi
-// le clic et montre un indicateur d'attente. `solid` (destructeur seulement) : plein,
-// réservé à la confirmation finale.
+// Désactivé = `aria-disabled` (et non `disabled`) : le bouton garde le focus clavier et son
+// infobulle, qui explique pourquoi il est inactif. L'état final se calcule ICI :
+// `disabled` OU `busy` OU « le serveur manque » (`needsLink`, voir `useNeedsLink`). `hint`
+// est l'explication d'un blocage fixe ; l'explication du lien, plus spécifique, la remplace.
+// `solid` (destructeur seulement) : plein, réservé à la confirmation finale.
+defineOptions({ inheritAttrs: false });
+
 const props = withDefaults(
   defineProps<{
     variant?: "primary" | "secondary" | "danger" | "ghost";
@@ -13,7 +18,9 @@ const props = withDefaults(
     disabled?: boolean;
     busy?: boolean;
     solid?: boolean;
+    needsLink?: NeedsLink;
     hint?: string;
+    tipPlacement?: "start" | "center" | "end";
     type?: "button" | "submit";
   }>(),
   {
@@ -22,14 +29,18 @@ const props = withDefaults(
     disabled: false,
     busy: false,
     solid: false,
+    needsLink: undefined,
     hint: undefined,
+    tipPlacement: "center",
     type: "button",
   },
 );
 
 const emit = defineEmits<{ click: [event: MouseEvent] }>();
 
-const inert = computed(() => props.disabled || props.busy);
+const linkReason = useNeedsLink(() => props.needsLink);
+const inert = computed(() => props.disabled || props.busy || linkReason.value !== null);
+const tip = computed(() => linkReason.value ?? (props.disabled ? props.hint : undefined));
 
 function onClick(event: MouseEvent) {
   if (inert.value) {
@@ -41,22 +52,27 @@ function onClick(event: MouseEvent) {
 </script>
 
 <template>
-  <button
-    :type="type"
-    :class="[
-      'btn',
-      `btn--${variant}`,
-      `btn--${size}`,
-      { 'btn--disabled': disabled, 'btn--busy': busy, 'btn--solid': solid && variant === 'danger' },
-    ]"
-    :aria-disabled="inert ? 'true' : undefined"
-    :aria-busy="busy ? 'true' : undefined"
-    :title="hint"
-    @click="onClick"
-  >
-    <HSpinner v-if="busy" />
-    <slot />
-  </button>
+  <HTooltip :text="tip" :placement="tipPlacement">
+    <template #default="{ describedby }">
+      <button
+        v-bind="$attrs"
+        :type="type"
+        :class="[
+          'btn',
+          `btn--${variant}`,
+          `btn--${size}`,
+          { 'btn--busy': busy, 'btn--solid': solid && variant === 'danger' },
+        ]"
+        :aria-disabled="inert ? 'true' : undefined"
+        :aria-busy="busy ? 'true' : undefined"
+        :aria-describedby="describedby"
+        @click="onClick"
+      >
+        <HSpinner v-if="busy" />
+        <slot />
+      </button>
+    </template>
+  </HTooltip>
 </template>
 
 <style scoped>
@@ -95,7 +111,7 @@ function onClick(event: MouseEvent) {
   color: var(--on-ac);
 }
 
-.btn--primary:hover {
+.btn--primary:hover:not([aria-disabled="true"]) {
   background: var(--ac-hover);
 }
 
@@ -105,7 +121,7 @@ function onClick(event: MouseEvent) {
   color: var(--tx);
 }
 
-.btn--secondary:hover {
+.btn--secondary:hover:not([aria-disabled="true"]) {
   background: var(--card-2);
 }
 
@@ -115,7 +131,7 @@ function onClick(event: MouseEvent) {
   color: var(--crit);
 }
 
-.btn--danger:hover {
+.btn--danger:hover:not([aria-disabled="true"]) {
   background: var(--crit-hover);
 }
 
@@ -131,30 +147,12 @@ function onClick(event: MouseEvent) {
   color: var(--tx2);
 }
 
-.btn--ghost:hover {
+.btn--ghost:hover:not([aria-disabled="true"]) {
   background: var(--card-2);
   color: var(--tx);
 }
 
-.btn--disabled,
-.btn--busy,
-.btn--disabled:hover,
-.btn--busy:hover {
-  opacity: var(--opacity-disabled);
-  cursor: not-allowed;
-}
-
 .btn--busy {
   cursor: progress;
-}
-
-.btn--primary.btn--disabled:hover,
-.btn--primary.btn--busy:hover {
-  background: var(--ac);
-}
-
-.btn--danger.btn--solid.btn--disabled:hover,
-.btn--danger.btn--solid.btn--busy:hover {
-  background: var(--crit);
 }
 </style>

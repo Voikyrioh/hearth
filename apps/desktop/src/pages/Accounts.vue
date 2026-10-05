@@ -12,7 +12,7 @@ const toasts = useToastsStore();
 
 <template>
   <Teleport defer to="#header-actions">
-    <HButton v-needs-link @click="toasts.push({ kind: 'info', message: t('common.comingSoon') })">
+    <HButton needs-link tip-placement="end" @click="toasts.push({ kind: 'info', message: t('common.comingSoon') })">
       {{ t("pages.addAccount") }}
     </HButton>
   </Teleport>

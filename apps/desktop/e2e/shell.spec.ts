@@ -85,7 +85,12 @@ test("connecté, reconnexion, hors ligne puis retour", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText(/^Vu il y a \d+ s$/)).toBeVisible();
   await expect(action).toHaveAttribute("aria-disabled", "true");
-  await expect(action).toHaveAttribute("title", "Indisponible tant que le serveur est hors ligne.");
+  // L'explication s'affiche au focus clavier (infobulle), pas par `title`.
+  await action.focus();
+  await expect(page.getByRole("tooltip")).toHaveText(
+    "Indisponible tant que le serveur est hors ligne.",
+  );
+  await expect(action).toHaveAttribute("aria-describedby", /.+/);
   // `force` : Playwright refuse de cliquer un contrôle `aria-disabled`, on veut justement tenter.
   await action.click({ force: true });
   await expect(page.locator(".toast")).toHaveCount(0);

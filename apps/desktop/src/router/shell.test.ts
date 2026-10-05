@@ -132,7 +132,9 @@ describe("shell of a server", () => {
     bridge.setState("forge", "offline");
     await flushPromises();
     expect(action().attributes("aria-disabled")).toBe("true");
-    expect(action().attributes("title")).toBe("Indisponible tant que le serveur est hors ligne.");
+    expect(wrapper.get("#header-actions [role=tooltip]").text()).toBe(
+      "Indisponible tant que le serveur est hors ligne.",
+    );
     await action().trigger("click");
     expect(wrapper.find(".toast").exists()).toBe(false);
     bridge.setState("forge", "connected");
