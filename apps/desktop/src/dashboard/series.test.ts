@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GIB, makeSample } from "@/test/machine";
+import { GIB, makeSample, makeSeries } from "@/test/machine";
 import {
   coverageMs,
   cpuLoad,
@@ -94,8 +94,9 @@ describe("resample", () => {
 
   it("averages the readings of each 10 s step on the hour window", () => {
     const hour = resample(second, "1h", cpuLoad);
-    // Les 10 dernières secondes (390 à 399) : moyenne 394.5.
-    expect(hour.at(-1)?.v).toBeCloseTo(394.5, 5);
+    // Chaque échantillon va au pas le plus proche de son âge : le dernier pas reçoit les âges de
+    // 0 à 5 s (échantillons 395 à 399), moyenne 397.
+    expect(hour.at(-1)?.v).toBeCloseTo(397, 5);
   });
 
   it("leaves a hole (null) where nothing was measured, never a zero", () => {
@@ -113,6 +114,52 @@ describe("resample", () => {
     ];
     const points = resample(samples, "1m", netUp);
     expect(points.filter((point) => point.v !== null)).toHaveLength(1);
+  });
+});
+
+describe("resample with a real agent clock (jitter, drift)", () => {
+  const holes = (points: { v: number | null }[]) =>
+    points.filter((point) => point.v === null).length;
+
+  it.each([1, 3, 20])("±%i ms of jitter: no empty step, no step with two samples", (jitterMs) => {
+    const samples = makeSeries(400, T0, { jitterMs });
+    for (const window of ["1m", "5m"] as const) {
+      const points = resample(samples, window, cpuLoad);
+      expect(holes(points), `${window} ±${jitterMs} ms`).toBe(0);
+    }
+    // Deux échantillons légitimes ne se rangent jamais dans la même case : la valeur d'un pas est
+    // celle d'UN échantillon (cpu = 10 + (i % 7), jamais une moyenne de deux).
+    const values = resample(samples, "1m", cpuLoad).map((point) => point.v);
+    expect(values.every((value) => Number.isInteger(value))).toBe(true);
+  });
+
+  it("a slow drift (1.003 s between samples over 5 minutes) leaves no hole", () => {
+    const samples = makeSeries(300, T0, { intervalMs: 1003, jitterMs: 5 });
+    expect(holes(resample(samples, "5m", cpuLoad).slice(-299))).toBe(0);
+    expect(coverageMs(samples, "5m")).toBeGreaterThan(298_000);
+  });
+
+  it("a real hole of several seconds stays a hole, with jitter", () => {
+    const samples = makeSeries(200, T0, { jitterMs: 20 });
+    const withHole = [...samples.slice(0, 100), ...samples.slice(110)];
+    const points = resample(withHole, "5m", cpuLoad);
+    expect(holes(points.slice(-200))).toBeGreaterThanOrEqual(9);
+    // Un trou de 2 échantillons manquants (3 s) reste un trou aussi.
+    const short = [...samples.slice(0, 160), ...samples.slice(162)];
+    expect(holes(resample(short, "1m", cpuLoad))).toBeGreaterThanOrEqual(1);
+  });
+
+  it("the hour window (10 s steps) is not hurt by jitter either", () => {
+    const samples = makeSeries(3600, T0, { jitterMs: 20 });
+    const points = resample(samples, "1h", cpuLoad);
+    expect(holes(points)).toBe(0);
+  });
+
+  it("the tolerated gap follows the step of the window", () => {
+    const samples = makeSeries(600, T0, { jitterMs: 3 });
+    const gappy = [...samples.slice(0, 300), ...samples.slice(306)];
+    expect(coverageMs(gappy, "5m")).toBeLessThan(300_000);
+    expect(coverageMs(gappy, "1h")).toBeGreaterThan(590_000);
   });
 });
 

@@ -369,7 +369,7 @@ describe("link not connected (BR-DASH-009, 011)", () => {
     expect(new Set(times).size).toBe(times.length);
     expect(times).toEqual([...times].sort((a, b) => a - b));
     const gaps = times.slice(1).map((time, i) => time - (times[i] ?? 0));
-    expect(Math.max(...gaps)).toBeLessThanOrEqual(1000);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(1100);
     await second(ctx);
     expect(entry?.ring.last?.at).toBeGreaterThan(lastAt ?? 0);
     ctx.wrapper.unmount();

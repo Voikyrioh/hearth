@@ -185,7 +185,7 @@ export class SimulatedMachine {
     const last = track.history.at(-1);
     if (!last) return;
     const now = this.now();
-    for (let at = last.at + 1000; at <= now - 1000; at += 1000) this.generate(track, at);
+    for (let at = last.at + 1000; at <= now - 500; at += 1000) this.generate(track, at);
   }
 
   /** Un échantillon par seconde pour tous les serveurs connus (navigateur de développement). */
@@ -237,8 +237,10 @@ export class SimulatedMachine {
     const memPercent = this.value(track, "mem", 22 + 12 * wave(37));
     const first = machine.disks[0];
     const gpus = machine.capabilities.gpu ? machine.gpus : [];
+    // L'agent date à la milliseconde réelle : une gigue déterministe de ±20 ms (jamais à la seconde ronde).
+    const jitter = ((n * 7919) % 41) - 20;
     const sample: MachineSample = {
-      at,
+      at: at + jitter,
       uptimeS: 266_400 + n,
       cpu: one(cpu),
       cores: Array.from({ length: machine.cpu.logicalCores }, (_, core) =>

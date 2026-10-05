@@ -1,7 +1,7 @@
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RING_CAP } from "@/dashboard/series";
-import { setLinkBridge } from "@/link";
+import { type SampleLevels, setLinkBridge } from "@/link";
 import { startedApp } from "@/test/app";
 import { makeMachine, makeSample } from "@/test/machine";
 import { MACHINE_RETRY_MS, useDashboardStore } from "./dashboard";
@@ -52,17 +52,48 @@ describe("dashboard store", () => {
   it("ignores a sample that is not newer than the last one", async () => {
     const { bridge } = await startedApp();
     bridge.machine.prefill("forge", 5);
+    let deliver: Parameters<typeof bridge.onMachine>[1] = () => {};
+    vi.spyOn(bridge, "onMachine").mockImplementation(async (_id, listener) => {
+      deliver = listener;
+      return () => {};
+    });
     const store = useDashboardStore();
     await store.follow("forge");
     const entry = store.of("forge");
-    vi.advanceTimersByTime(1000);
-    bridge.machine.tick("forge");
+    const last = makeSample(Date.now() + 1000);
+    const levels: SampleLevels = { cpu: "normal", mem: "normal", disks: [], gpus: [], temps: [] };
+    deliver({ kind: "metrics", metrics: { serverId: "forge", sample: last, levels } });
     const ticks = entry?.tick ?? 0;
     const length = entry?.ring.length ?? 0;
-    // Même instant : le flux rejoué n'ajoute rien et ne redessine rien.
-    bridge.machine.tick("forge");
+    // Même instant, ou plus ancien : le flux rejoué n'ajoute rien et ne redessine rien.
+    deliver({ kind: "metrics", metrics: { serverId: "forge", sample: last, levels } });
+    deliver({
+      kind: "metrics",
+      metrics: { serverId: "forge", sample: makeSample(last.at - 500), levels },
+    });
     expect(entry?.ring.length).toBe(length);
     expect(entry?.tick).toBe(ticks);
+  });
+
+  it("a late view older than the live data does not put yesterday's identity back", async () => {
+    const { bridge } = await startedApp();
+    let deliver: Parameters<typeof bridge.onMachine>[1] = () => {};
+    vi.spyOn(bridge, "onMachine").mockImplementation(async (_id, listener) => {
+      deliver = listener;
+      return () => {};
+    });
+    const store = useDashboardStore();
+    await store.follow("forge");
+    const now = Date.now();
+    const todayHistory = [makeSample(now), makeSample(now + 1000)];
+    const levels: SampleLevels = { cpu: "normal", mem: "normal", disks: [], gpus: [], temps: [] };
+    const view = (name: string, history: typeof todayHistory) => ({
+      kind: "view" as const,
+      view: { serverId: "forge", machine: makeMachine({ name }), history, levels },
+    });
+    deliver(view("aujourd'hui", todayHistory));
+    deliver(view("hier", [makeSample(now - 20 * 3600_000)]));
+    expect(store.of("forge")?.machine?.name).toBe("aujourd'hui");
   });
 
   it("is bounded to an hour of samples", async () => {

@@ -58,3 +58,18 @@ export function normalLevels(sample: MachineSample): SampleLevels {
     temps: sample.temps.map(() => normal),
   };
 }
+
+/**
+ * Une suite d'échantillons à 1 Hz datés comme le fait un vrai agent : gigue en millisecondes,
+ * intervalle réel qui dérive (`intervalMs`), jamais la seconde ronde.
+ */
+export function makeSeries(
+  count: number,
+  from: number,
+  { jitterMs = 0, intervalMs = 1000 }: { jitterMs?: number; intervalMs?: number } = {},
+): MachineSample[] {
+  return Array.from({ length: count }, (_, i) => {
+    const jitter = jitterMs === 0 ? 0 : ((i * 7919) % (2 * jitterMs + 1)) - jitterMs;
+    return makeSample(Math.round(from + i * intervalMs + jitter), { cpu: 10 + (i % 7) });
+  });
+}

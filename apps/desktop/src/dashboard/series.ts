@@ -86,8 +86,20 @@ export class SampleRing {
 }
 
 /**
+ * Deux échantillons voisins séparés d'au plus cette durée n'ont qu'un pas vide entre eux : un
+ * échantillon à 1 Hz dont l'intervalle réel dérive (1,003 s) saute une case de temps de loin en
+ * loin. Ce pas-là est comblé (moyenne de ses voisins) ; au-delà, c'est un vrai trou et il reste vide.
+ */
+export const BRIDGE_MS = 2500;
+
+/**
  * Courbe d'une mesure sur une fenêtre : `spanMs / stepMs` pas, chacun la MOYENNE des valeurs lues
  * dans le pas (`null` s'il n'y en a aucune). La fenêtre se termine au dernier échantillon.
+ *
+ * L'agent date à la milliseconde réelle : un échantillon est rangé dans le pas le PLUS PROCHE de
+ * son âge (arrondi, pas troncature), donc ±quelques ms de gigue ne changent pas de case. Un pas
+ * isolé que la dérive de l'horloge a laissé vide entre deux échantillons voisins (`BRIDGE_MS`) est
+ * comblé ; un vrai trou reste un trou.
  */
 export function resample(
   samples: readonly MachineSample[],
@@ -101,18 +113,33 @@ export function resample(
   const start = last.at - spanMs;
   const sums = new Array<number>(count).fill(0);
   const counts = new Array<number>(count).fill(0);
+  const firstAt = new Array<number>(count).fill(Number.POSITIVE_INFINITY);
+  const lastAt = new Array<number>(count).fill(Number.NEGATIVE_INFINITY);
   for (let index = samples.length - 1; index >= 0; index -= 1) {
     const sample = samples[index];
     if (!sample || sample.at <= start) break;
     const value = pick(sample);
     if (value === null) continue;
-    const bucket = Math.min(count - 1, Math.floor((sample.at - start - 1) / stepMs));
+    const bucket = count - 1 - Math.round((last.at - sample.at) / stepMs);
+    if (bucket < 0) continue;
     sums[bucket] = (sums[bucket] ?? 0) + value;
     counts[bucket] = (counts[bucket] ?? 0) + 1;
+    firstAt[bucket] = Math.min(firstAt[bucket] ?? sample.at, sample.at);
+    lastAt[bucket] = Math.max(lastAt[bucket] ?? sample.at, sample.at);
   }
-  return sums.map((sum, bucket) => {
+  const means = sums.map((sum, bucket) => {
     const n = counts[bucket] ?? 0;
-    return { t: start + (bucket + 1) * stepMs, v: n > 0 ? sum / n : null };
+    return n > 0 ? sum / n : null;
+  });
+  return means.map((mean, bucket) => {
+    let v = mean;
+    if (v === null && bucket > 0 && bucket < count - 1) {
+      const before = means[bucket - 1] ?? null;
+      const after = means[bucket + 1] ?? null;
+      const gap = (firstAt[bucket + 1] ?? Number.POSITIVE_INFINITY) - (lastAt[bucket - 1] ?? 0);
+      if (before !== null && after !== null && gap <= BRIDGE_MS) v = (before + after) / 2;
+    }
+    return { t: start + (bucket + 1) * stepMs, v };
   });
 }
 
@@ -128,10 +155,12 @@ export function coverageMs(samples: readonly MachineSample[], window: WindowKey)
   const last = samples.at(-1);
   if (!last) return 0;
   const start = last.at - WINDOWS[window].spanMs;
+  // Le trou toléré suit le pas de la fenêtre (10 s sur 1 h), jamais moins de MAX_GAP_MS.
+  const gap = Math.max(MAX_GAP_MS, WINDOWS[window].stepMs * 1.5);
   let first = last.at;
   for (let index = samples.length - 2; index >= 0; index -= 1) {
     const sample = samples[index];
-    if (!sample || sample.at <= start || first - sample.at > MAX_GAP_MS) break;
+    if (!sample || sample.at <= start || first - sample.at > gap) break;
     first = sample.at;
   }
   return last.at - first;

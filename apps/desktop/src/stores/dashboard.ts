@@ -90,10 +90,12 @@ export const useDashboardStore = defineStore("dashboard", () => {
     if (event.kind === "view") {
       const { view } = event;
       target.ring.merge(view.history);
-      target.machine = view.machine;
+      const viewLast = view.history.at(-1);
+      // Une lecture du disque qui arrive après l'instantané de connexion ne remet pas l'identité d'hier.
+      const stale = viewLast && target.latest && viewLast.at < target.latest.sample.at;
+      if (!stale || !target.machine) target.machine = view.machine;
       // Les niveaux de la vue sont ceux de SON dernier échantillon : ils ne remplacent pas ceux d'un
       // échantillon du flux plus récent.
-      const viewLast = view.history.at(-1);
       if (viewLast && view.levels && (!target.latest || viewLast.at >= target.latest.sample.at)) {
         target.latest = { sample: viewLast, levels: view.levels };
       }
