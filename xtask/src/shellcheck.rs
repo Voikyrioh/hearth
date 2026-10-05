@@ -18,6 +18,7 @@ pub fn run() -> Result<(), String> {
         "-x",
         "/mnt/install.sh",
         "/mnt/e2e/scenario.sh",
+        "/mnt/e2e/scenario-update.sh",
     ]));
     docker::run(&command)?;
     println!("shellcheck : aucun avertissement");

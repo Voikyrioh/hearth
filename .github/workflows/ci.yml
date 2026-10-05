@@ -106,6 +106,8 @@ jobs:
         run: cargo xtask agent
       - name: Installation de bout en bout (Debian + systemd)
         run: cargo xtask e2e-install
+      - name: Mise à jour de l'agent à distance de bout en bout (Debian + systemd, clé jetable)
+        run: cargo xtask e2e-update
       - name: Somme SHA-256 du binaire
         run: sha256sum hearth-agent > hearth-agent.sha256 && cat hearth-agent.sha256
         working-directory: target/dist
