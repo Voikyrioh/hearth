@@ -5,7 +5,7 @@
 use hearth_desktop_lib::update::domain::{
     CHECK_INTERVAL_MS, Candidate, DownloadPolicy, FEED_URL, NOTES_MAX_CHARS, POSTPONE_MS,
     Rejection, Release, UpdateRecord, banner_visible, check_is_due, clean_notes, forget_installed,
-    is_postponed, millis_until_due, postponed_until, validate_candidate,
+    is_postponed, manual_check_allowed, postponed_until, validate_candidate,
 };
 
 const HOUR: i64 = 60 * 60 * 1000;
@@ -31,12 +31,45 @@ fn a_last_check_in_the_future_means_the_clock_was_corrected() {
 }
 
 #[test]
-fn the_wait_until_the_next_check_counts_down() {
-    assert_eq!(millis_until_due(NOW, None), 0);
-    assert_eq!(millis_until_due(NOW, Some(NOW)), CHECK_INTERVAL_MS);
-    assert_eq!(millis_until_due(NOW, Some(NOW - 20 * HOUR)), 4 * HOUR);
-    assert_eq!(millis_until_due(NOW, Some(NOW - 30 * HOUR)), 0);
-    assert_eq!(millis_until_due(NOW, Some(NOW + HOUR)), 0);
+fn a_manual_check_waits_thirty_seconds_after_the_previous_attempt() {
+    assert!(manual_check_allowed(NOW, None));
+    assert!(!manual_check_allowed(NOW, Some(NOW - 29_000)));
+    assert!(manual_check_allowed(NOW, Some(NOW - 30_000)));
+    assert!(manual_check_allowed(NOW, Some(NOW + HOUR)));
+}
+
+#[test]
+fn redirects_of_the_installer_stay_https_on_github_and_bounded() {
+    let policy = DownloadPolicy::github_releases();
+    let ok = |url: &str, hops: usize| policy.allows_redirect(&url::Url::parse(url).unwrap(), hops);
+    assert!(ok(
+        "https://github.com/Voikyrioh/hearth/releases/download/v1/x.exe",
+        0
+    ));
+    assert!(ok(
+        "https://release-assets.githubusercontent.com/github-production-release-asset/1/x",
+        1
+    ));
+    assert!(ok("https://objects.githubusercontent.com/x", 2));
+    assert!(!ok("https://objects.githubusercontent.com/x", 3)); // trop de sauts
+    assert!(!ok("http://github.com/x", 0)); // en clair
+    assert!(!ok("http://objects.githubusercontent.com/x", 0));
+    assert!(!ok("https://example.com/x", 0)); // autre hôte
+    assert!(!ok("https://githubusercontent.com.evil.test/x", 0));
+    assert!(!ok("https://evilgithubusercontent.com/x", 0));
+    assert!(!ok("https://user:pw@github.com/x", 0));
+    assert!(policy.https_only());
+}
+
+#[test]
+fn build_metadata_is_refused_like_a_prerelease() {
+    // `0.1.0+1` se classe au-dessus de `0.1.0` pour `semver` (vérifié ici) : la version en cours se
+    // reproposerait.
+    assert!(semver::Version::parse("0.1.0+1").unwrap() > semver::Version::parse("0.1.0").unwrap());
+    assert!(matches!(
+        validate_candidate("0.1.0", &candidate("0.1.0+1", GOOD_URL), &policy()),
+        Err(Rejection::Malformed(_))
+    ));
 }
 
 #[test]
@@ -212,6 +245,7 @@ fn the_feed_address_is_a_fixed_https_address_of_the_public_repository() {
 fn the_record_survives_a_json_round_trip_and_tolerates_missing_fields() {
     let record = UpdateRecord {
         last_attempt_at: Some(NOW),
+        last_request_at: Some(NOW),
         last_success_at: Some(NOW - 1),
         postponed_until: Some(NOW + HOUR),
         available: Some(Release {

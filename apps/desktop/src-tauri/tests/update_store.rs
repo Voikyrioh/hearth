@@ -14,6 +14,7 @@ use hearth_desktop_lib::update::store::{FILE_NAME, FileUpdateStore, SystemClock}
 fn record() -> UpdateRecord {
     UpdateRecord {
         last_attempt_at: Some(1_800_000_000_000),
+        last_request_at: Some(1_800_000_000_000),
         last_success_at: Some(1_799_999_999_000),
         postponed_until: Some(1_800_086_400_000),
         available: Some(Release {
@@ -177,6 +178,8 @@ fn the_configuration_opens_no_bypass_and_fixes_no_address() {
             "{flag} ne doit pas être activé"
         );
     }
+    // La version annoncée doit être celle du commentaire signé (pas de rejeu d'un ancien installateur).
+    assert_eq!(updater["requireSignedVersion"], true);
     // La clé vient du fichier embarqué (`update-key.pub`), pas de la configuration.
     assert_eq!(updater["pubkey"], "");
     // Le web ne peut joindre que la coquille : aucune origine distante.

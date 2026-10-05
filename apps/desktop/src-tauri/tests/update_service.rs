@@ -13,7 +13,7 @@ use hearth_desktop_lib::update::domain::{
 };
 use hearth_desktop_lib::update::dto::{UpdateFailure, UpdatePhase, UpdateStateDto};
 use hearth_desktop_lib::update::ports::{
-    Clock, DownloadError, Feed, FeedError, StateSink, UpdateStore,
+    Clock, DownloadError, Feed, FeedError, StateSink, UpdateStore, VerifiedInstaller,
 };
 use hearth_desktop_lib::update::service::{InstallRefusal, UpdateService};
 
@@ -67,7 +67,7 @@ impl StateSink for Sink {
 #[derive(Default)]
 struct FakeFeed {
     checks: Mutex<VecDeque<Result<Option<Candidate>, FeedError>>>,
-    downloads: Mutex<VecDeque<Result<Vec<u8>, DownloadError>>>,
+    downloads: Mutex<VecDeque<Result<VerifiedInstaller, DownloadError>>>,
     install_result: Mutex<Option<DownloadError>>,
     progress_script: Mutex<Vec<(u64, Option<u64>)>>,
     check_calls: AtomicUsize,
@@ -83,14 +83,14 @@ impl Feed for FakeFeed {
             .lock()
             .unwrap()
             .pop_front()
-            .unwrap_or_else(|| Err(FeedError("rien de prévu".into())))
+            .unwrap_or_else(|| Err(FeedError::failed("rien de prévu")))
     }
 
     async fn download(
         &self,
         _version: &str,
         progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
-    ) -> Result<Vec<u8>, DownloadError> {
+    ) -> Result<VerifiedInstaller, DownloadError> {
         self.download_calls.fetch_add(1, Ordering::SeqCst);
         for (received, total) in self.progress_script.lock().unwrap().clone() {
             progress(received, total);
@@ -102,13 +102,24 @@ impl Feed for FakeFeed {
             .unwrap_or(Err(DownloadError::Failed("rien de prévu".into())))
     }
 
-    fn install(&self, _version: &str, _bytes: Vec<u8>) -> Result<(), DownloadError> {
+    fn install(&self, _version: &str, _installer: VerifiedInstaller) -> Result<(), DownloadError> {
         self.install_calls.fetch_add(1, Ordering::SeqCst);
         match self.install_result.lock().unwrap().clone() {
             Some(error) => Err(error),
             None => Ok(()),
         }
     }
+}
+
+fn bytes(data: &[u8]) -> VerifiedInstaller {
+    VerifiedInstaller::unverified_for_tests(data.to_vec())
+}
+
+/// Le clic : `begin_install` puis `run_install`.
+async fn install(service: &UpdateService) -> Result<(), InstallRefusal> {
+    service.begin_install()?;
+    service.run_install().await;
+    Ok(())
 }
 
 fn candidate(version: &str) -> Candidate {
@@ -162,7 +173,7 @@ fn script_check(rig: &Rig, result: Result<Option<Candidate>, FeedError>) {
 }
 
 fn offline() -> Result<Option<Candidate>, FeedError> {
-    Err(FeedError("pas de réseau".into()))
+    Err(FeedError::offline("pas de réseau"))
 }
 
 // ---- BR-UPDATE-001 : au lancement, puis une fois par jour au plus -------------------------------
@@ -205,12 +216,100 @@ async fn a_restart_within_the_day_does_not_check_again() {
 #[tokio::test]
 async fn a_failed_attempt_counts_it_is_not_retried_before_the_next_day() {
     let rig = rig();
-    script_check(&rig, offline());
+    script_check(&rig, Err(FeedError::failed("503")));
     rig.service.check_if_due().await;
     rig.service.check_if_due().await;
     rig.clock.advance(6 * HOUR);
     rig.service.tick().await;
     assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 1);
+    // Le lendemain, une nouvelle tentative.
+    rig.clock.advance(18 * HOUR);
+    script_check(&rig, Ok(None));
+    rig.service.tick().await;
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 2);
+}
+
+// ---- BR-UPDATE-001, règle des 24 h : tentative sans réseau, tentative sans réponse -----------------
+
+#[tokio::test]
+async fn an_attempt_that_could_not_send_a_request_does_not_use_the_daily_quota() {
+    let rig = rig();
+    // Windows démarre, le réseau n'est pas prêt : trois heures de battements sans réseau.
+    for _ in 0..3 {
+        script_check(&rig, offline());
+        rig.service.tick().await;
+        rig.clock.advance(HOUR);
+    }
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 3);
+    let state = rig.service.state();
+    assert_eq!(state.last_checked_at, None);
+    assert!(state.failure.is_none());
+    assert!(!state.up_to_date);
+
+    // Le réseau revient : la vérification a lieu tout de suite, sans attendre 24 h.
+    script_check(&rig, Ok(Some(candidate("1.1.0"))));
+    rig.service.tick().await;
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 4);
+    assert!(rig.service.state().banner_visible);
+
+    // Et c'est la seule requête partie de la journée (au plus une par 24 h).
+    for _ in 0..23 {
+        rig.clock.advance(HOUR);
+        rig.service.tick().await;
+    }
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn an_offline_attempt_after_a_success_keeps_the_original_window() {
+    let rig = rig();
+    script_check(&rig, Ok(None));
+    rig.service.check_if_due().await; // une requête, à START
+    rig.clock.advance(24 * HOUR);
+    script_check(&rig, offline());
+    rig.service.tick().await; // due, mais sans réseau : le quota n'est pas consommé
+    rig.clock.advance(HOUR);
+    script_check(&rig, Ok(None));
+    rig.service.tick().await; // réseau revenu : refait
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 3);
+    rig.clock.advance(23 * HOUR);
+    rig.service.tick().await;
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn a_silent_service_or_a_bad_answer_after_the_request_used_the_quota() {
+    for failure in [
+        FeedError::failed("503"),
+        FeedError::failed("réponse illisible"),
+    ] {
+        let rig = rig();
+        script_check(&rig, Err(failure));
+        rig.service.tick().await;
+        for _ in 0..23 {
+            rig.clock.advance(HOUR);
+            rig.service.tick().await;
+        }
+        assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 1);
+        // « Vérifier maintenant » reste disponible.
+        script_check(&rig, Ok(None));
+        assert!(rig.service.check_now().await.up_to_date);
+        assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[tokio::test]
+async fn a_manual_check_cannot_be_looped_on() {
+    let rig = rig();
+    script_check(&rig, Ok(None));
+    script_check(&rig, Ok(None));
+    rig.service.check_now().await;
+    rig.clock.advance(5_000);
+    rig.service.check_now().await;
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 1);
+    rig.clock.advance(30_000);
+    rig.service.check_now().await;
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
@@ -230,10 +329,10 @@ async fn the_attempt_is_written_before_the_network_call() {
             &self,
             _: &str,
             _: &mut (dyn FnMut(u64, Option<u64>) + Send),
-        ) -> Result<Vec<u8>, DownloadError> {
+        ) -> Result<VerifiedInstaller, DownloadError> {
             Err(DownloadError::NotStaged)
         }
-        fn install(&self, _: &str, _: Vec<u8>) -> Result<(), DownloadError> {
+        fn install(&self, _: &str, _: VerifiedInstaller) -> Result<(), DownloadError> {
             Ok(())
         }
     }
@@ -253,6 +352,7 @@ async fn the_attempt_is_written_before_the_network_call() {
     service.check_if_due().await;
     let seen = probe.seen.lock().unwrap().clone().unwrap();
     assert_eq!(seen.last_attempt_at, Some(START));
+    assert_eq!(seen.last_request_at, Some(START));
     assert_eq!(seen.last_success_at, None);
 }
 
@@ -315,6 +415,7 @@ async fn an_older_or_equal_announcement_is_not_a_banner() {
     let state = rig.service.check_now().await;
     assert!(state.available.is_none());
     assert!(state.up_to_date);
+    rig.clock.advance(HOUR);
     script_check(&rig, Ok(Some(candidate("0.9.0"))));
     assert!(rig.service.check_now().await.available.is_none());
 }
@@ -411,7 +512,7 @@ async fn a_silent_service_keeps_a_known_release_on_screen() {
     script_check(&rig, Ok(Some(candidate("1.1.0"))));
     rig.service.check_if_due().await;
     rig.clock.advance(25 * HOUR);
-    script_check(&rig, Err(FeedError("503".into())));
+    script_check(&rig, Err(FeedError::failed("503")));
     let state = rig.service.check_if_due().await;
     assert!(state.available.is_some());
     assert!(state.banner_visible);
@@ -442,6 +543,7 @@ async fn nothing_is_installed_without_a_click() {
     rig.clock.advance(10 * 24 * HOUR);
     script_check(&rig, Ok(Some(candidate("1.1.0"))));
     rig.service.tick().await;
+    rig.clock.advance(HOUR);
     rig.service.check_now().await;
     assert_eq!(rig.feed.download_calls.load(Ordering::SeqCst), 0);
     assert_eq!(rig.feed.install_calls.load(Ordering::SeqCst), 0);
@@ -460,9 +562,9 @@ async fn a_click_downloads_reports_progress_then_installs() {
         .downloads
         .lock()
         .unwrap()
-        .push_back(Ok(vec![1, 2, 3]));
+        .push_back(Ok(bytes(&[1, 2, 3])));
 
-    rig.service.install().await.unwrap();
+    install(&rig.service).await.unwrap();
 
     assert_eq!(rig.feed.download_calls.load(Ordering::SeqCst), 1);
     assert_eq!(rig.feed.install_calls.load(Ordering::SeqCst), 1);
@@ -480,7 +582,7 @@ async fn a_second_click_while_busy_is_refused_and_so_is_a_click_without_a_releas
     let rig = with_known_release().await;
     rig.service.begin_install().unwrap();
     assert_eq!(rig.service.begin_install(), Err(InstallRefusal::Busy));
-    assert_eq!(rig.service.install().await, Err(InstallRefusal::Busy));
+    assert_eq!(install(&rig.service).await, Err(InstallRefusal::Busy));
     // Une vérification manuelle ne marche pas non plus sur un téléchargement.
     let state = rig.service.check_now().await;
     assert_eq!(state.phase, UpdatePhase::Downloading);
@@ -510,10 +612,14 @@ async fn a_release_from_a_previous_session_is_re_read_on_click_before_downloadin
         .lock()
         .unwrap()
         .push_back(Err(DownloadError::NotStaged));
-    rig.feed.downloads.lock().unwrap().push_back(Ok(vec![9]));
+    rig.feed
+        .downloads
+        .lock()
+        .unwrap()
+        .push_back(Ok(bytes(&[9])));
     script_check(&rig, Ok(Some(candidate("1.1.0"))));
 
-    rig.service.install().await.unwrap();
+    install(&rig.service).await.unwrap();
 
     assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 1);
     assert_eq!(rig.feed.download_calls.load(Ordering::SeqCst), 2);
@@ -536,7 +642,7 @@ async fn if_the_release_vanished_the_click_ends_quietly() {
         .unwrap()
         .push_back(Err(DownloadError::NotStaged));
     script_check(&rig, Ok(None));
-    rig.service.install().await.unwrap();
+    install(&rig.service).await.unwrap();
     let state = rig.service.state();
     assert!(state.available.is_none());
     assert!(state.failure.is_none());
@@ -554,7 +660,7 @@ async fn an_interrupted_download_can_be_started_again() {
         .lock()
         .unwrap()
         .push_back(Err(DownloadError::Interrupted("coupure".into())));
-    rig.service.install().await.unwrap();
+    install(&rig.service).await.unwrap();
 
     let state = rig.service.state();
     assert_eq!(state.failure, Some(UpdateFailure::Interrupted));
@@ -564,8 +670,12 @@ async fn an_interrupted_download_can_be_started_again() {
     assert_eq!(rig.feed.install_calls.load(Ordering::SeqCst), 0);
 
     // Relance : l'échec disparaît à la demande suivante et l'installation va au bout.
-    rig.feed.downloads.lock().unwrap().push_back(Ok(vec![1]));
-    rig.service.install().await.unwrap();
+    rig.feed
+        .downloads
+        .lock()
+        .unwrap()
+        .push_back(Ok(bytes(&[1])));
+    install(&rig.service).await.unwrap();
     assert_eq!(rig.feed.install_calls.load(Ordering::SeqCst), 1);
     assert_eq!(rig.service.state().failure, None);
 }
@@ -578,7 +688,7 @@ async fn a_corrupted_update_is_refused_and_never_installed() {
         .lock()
         .unwrap()
         .push_back(Err(DownloadError::Corrupted("signature".into())));
-    rig.service.install().await.unwrap();
+    install(&rig.service).await.unwrap();
     let state = rig.service.state();
     assert_eq!(state.failure, Some(UpdateFailure::Corrupted));
     assert_eq!(rig.feed.install_calls.load(Ordering::SeqCst), 0);
@@ -589,9 +699,13 @@ async fn a_corrupted_update_is_refused_and_never_installed() {
 #[tokio::test]
 async fn an_installer_that_cannot_start_leaves_the_current_version_usable() {
     let rig = with_known_release().await;
-    rig.feed.downloads.lock().unwrap().push_back(Ok(vec![1]));
+    rig.feed
+        .downloads
+        .lock()
+        .unwrap()
+        .push_back(Ok(bytes(&[1])));
     *rig.feed.install_result.lock().unwrap() = Some(DownloadError::Failed("disque".into()));
-    rig.service.install().await.unwrap();
+    install(&rig.service).await.unwrap();
     let state = rig.service.state();
     assert_eq!(state.failure, Some(UpdateFailure::Failed));
     assert_eq!(state.phase, UpdatePhase::Idle);
@@ -605,7 +719,7 @@ async fn later_after_a_failure_clears_it_and_hides_the_banner() {
         .lock()
         .unwrap()
         .push_back(Err(DownloadError::Corrupted("x".into())));
-    rig.service.install().await.unwrap();
+    install(&rig.service).await.unwrap();
     let state = rig.service.postpone();
     assert_eq!(state.failure, None);
     assert!(!state.banner_visible);

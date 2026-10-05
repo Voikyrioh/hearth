@@ -17,7 +17,9 @@ use base64::engine::general_purpose::STANDARD;
 use hearth_desktop_lib::update::domain::{Candidate, DownloadPolicy, UpdateRecord};
 use hearth_desktop_lib::update::dto::{UpdateFailure, UpdatePhase, UpdateStateDto};
 use hearth_desktop_lib::update::feed::{TARGET, TauriFeed, plugin_with_key};
-use hearth_desktop_lib::update::ports::{Clock, DownloadError, Feed, StateSink, UpdateStore};
+use hearth_desktop_lib::update::ports::{
+    Clock, DownloadError, Feed, FeedError, StateSink, UpdateStore, VerifiedInstaller,
+};
 use hearth_desktop_lib::update::service::UpdateService;
 use serde_json::json;
 use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
@@ -36,6 +38,8 @@ enum Reply {
         sent: Vec<u8>,
     },
     Status(u16),
+    /// Redirige (302) vers cette adresse.
+    Redirect(String),
 }
 
 struct Server {
@@ -82,6 +86,10 @@ impl Server {
                             b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                                 .to_vec()
                         }
+                        Some(Reply::Redirect(to)) => format!(
+                            "HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .into_bytes(),
                         Some(Reply::Status(code)) => format!(
                             "HTTP/1.1 {code} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         )
@@ -155,13 +163,23 @@ impl TestKey {
     /// La signature comme la publie Tauri : le contenu du `.sig` en base64, commentaire de
     /// confiance `timestamp:…\tfile:…\tversion:…`.
     fn sign(&self, data: &[u8], version: &str) -> String {
-        let comment =
-            format!("timestamp:1\tfile:Hearth_{version}_x64-setup.exe\tversion:{version}");
+        self.sign_with_comment(
+            data,
+            &format!("timestamp:1\tfile:Hearth_{version}_x64-setup.exe\tversion:{version}"),
+        )
+    }
+
+    /// Une signature sans version (`tauri signer sign` sans `--app-version`).
+    fn sign_without_version(&self, data: &[u8]) -> String {
+        self.sign_with_comment(data, "timestamp:1\tfile:Hearth_x64-setup.exe")
+    }
+
+    fn sign_with_comment(&self, data: &[u8], comment: &str) -> String {
         let signature = minisign::sign(
             Some(&self.pair.pk),
             &self.pair.sk,
             Cursor::new(data),
-            Some(&comment),
+            Some(comment),
             Some("signature de test"),
         )
         .unwrap();
@@ -191,11 +209,20 @@ fn manifest(version: &str, url: &str, signature: &str) -> Vec<u8> {
 /// la « version en cours » du greffon dans ces tests.
 fn app(key: &TestKey) -> tauri::App<MockRuntime> {
     let mut context = mock_context(noop_assets());
+    // La configuration du greffon est celle de `tauri.conf.json` (dont `requireSignedVersion`) et
+    // non une copie : ce que les tests éprouvent est ce qui est livré.
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     context
         .config_mut()
         .plugins
         .0
-        .insert("updater".to_owned(), json!({ "pubkey": "" }));
+        .insert("updater".to_owned(), config["plugins"]["updater"].clone());
     mock_builder()
         .plugin(plugin_with_key::<MockRuntime>(&key.public_file()))
         .build(context)
@@ -214,7 +241,9 @@ async fn no_progress(
     feed: &TauriFeed<MockRuntime>,
     version: &str,
 ) -> Result<Vec<u8>, DownloadError> {
-    feed.download(version, &mut |_, _| {}).await
+    feed.download(version, &mut |_, _| {})
+        .await
+        .map(VerifiedInstaller::into_bytes_for_tests)
 }
 
 // ---- manifeste ------------------------------------------------------------------------------------
@@ -282,7 +311,8 @@ async fn a_mute_unreachable_or_broken_feed_is_an_error_the_service_swallows() {
     // 404 (aucune release publiée), 503, JSON cassé, plateforme absente.
     assert!(feed.check().await.is_err());
     server.serve("/latest.json", Reply::Status(503));
-    assert!(feed.check().await.is_err());
+    let answered = feed.check().await.unwrap_err();
+    assert!(!answered.no_request_sent, "{answered:?}"); // la requête est partie : quota consommé
     server.serve("/latest.json", Reply::Ok(b"pas du json".to_vec()));
     assert!(feed.check().await.is_err());
     server.serve(
@@ -295,16 +325,18 @@ async fn a_mute_unreachable_or_broken_feed_is_an_error_the_service_swallows() {
     );
     assert!(feed.check().await.is_err());
 
-    // Rien n'écoute : refus de connexion.
-    let dead = Server::start().await;
+    // Rien n'écoute : refus de connexion, donc aucune requête partie (pas de réseau).
+    let closed = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
     let dead_feed = TauriFeed::with_endpoint(
         app.handle().clone(),
-        Url::parse(&dead.url("/latest.json")).unwrap(),
-        DownloadPolicy::local_for_tests(dead.port),
+        Url::parse(&format!("http://127.0.0.1:{closed}/latest.json")).unwrap(),
+        DownloadPolicy::local_for_tests(closed),
     );
-    drop(dead);
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    assert!(dead_feed.check().await.is_err());
+    let offline: FeedError = dead_feed.check().await.unwrap_err();
+    assert!(offline.no_request_sent, "{offline:?}");
 }
 
 // ---- téléchargement et signature ------------------------------------------------------------------
@@ -343,7 +375,7 @@ async fn a_download_with_a_valid_signature_is_returned_with_its_progress() {
         .await
         .unwrap();
 
-    assert_eq!(bytes, file);
+    assert_eq!(bytes.into_bytes_for_tests(), file);
     let seen = seen.lock().unwrap();
     assert_eq!(seen.last().unwrap().0, file.len() as u64, "reçus cumulés");
     assert_eq!(seen.last().unwrap().1, Some(file.len() as u64));
@@ -552,13 +584,22 @@ impl<F: Feed> Feed for RecordingInstaller<F> {
         &self,
         version: &str,
         progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
-    ) -> Result<Vec<u8>, DownloadError> {
+    ) -> Result<VerifiedInstaller, DownloadError> {
         self.inner.download(version, progress).await
     }
-    fn install(&self, _version: &str, _bytes: Vec<u8>) -> Result<(), DownloadError> {
+    fn install(&self, _version: &str, _installer: VerifiedInstaller) -> Result<(), DownloadError> {
         self.installed.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
+}
+
+/// Le clic.
+async fn install(
+    service: &UpdateService,
+) -> Result<(), hearth_desktop_lib::update::service::InstallRefusal> {
+    service.begin_install()?;
+    service.run_install().await;
+    Ok(())
 }
 
 fn service_on(
@@ -611,7 +652,7 @@ async fn end_to_end_check_then_click_installs_only_a_verified_file() {
     );
     assert_eq!(feed.installed.load(Ordering::SeqCst), 0);
 
-    service.install().await.unwrap();
+    install(&service).await.unwrap();
 
     assert_eq!(feed.installed.load(Ordering::SeqCst), 1);
     assert_eq!(server.hits("/setup.exe"), 1);
@@ -635,7 +676,7 @@ async fn end_to_end_a_tampered_installer_is_refused_with_the_corrupted_failure()
     let (feed, service, _) = service_on(&app, &server);
     service.check_if_due().await;
 
-    service.install().await.unwrap();
+    install(&service).await.unwrap();
 
     let state = service.state();
     assert_eq!(state.failure, Some(UpdateFailure::Corrupted));
@@ -672,12 +713,12 @@ async fn end_to_end_a_cut_download_then_a_second_try_succeeds() {
     let (feed, service, _) = service_on(&app, &server);
     service.check_if_due().await;
 
-    service.install().await.unwrap();
+    install(&service).await.unwrap();
     assert_eq!(service.state().failure, Some(UpdateFailure::Interrupted));
     assert_eq!(feed.installed.load(Ordering::SeqCst), 0);
 
     server.serve("/setup.exe", Reply::Ok(file));
-    service.install().await.unwrap();
+    install(&service).await.unwrap();
     assert_eq!(feed.installed.load(Ordering::SeqCst), 1);
     assert_eq!(service.state().failure, None);
 }
@@ -702,8 +743,122 @@ async fn end_to_end_with_a_different_key_embedded_nothing_ever_verifies() {
     let (feed, service, _) = service_on(&app, &server);
     service.check_if_due().await;
 
-    service.install().await.unwrap();
+    install(&service).await.unwrap();
 
     assert_eq!(service.state().failure, Some(UpdateFailure::Corrupted));
     assert_eq!(feed.installed.load(Ordering::SeqCst), 0);
+}
+
+// ---- version signée : rejeu d'un ancien installateur, signature sans version ---------------------
+
+#[tokio::test]
+async fn an_old_installer_validly_signed_for_another_version_is_refused_when_announced_newer() {
+    // Rejeu : l'installateur de la 1.0.5, bel et bien signé par la clé, est servi par un manifeste
+    // qui annonce la 1.1.0. La signature est bonne, mais elle porte `version:1.0.5` : refusé AVANT
+    // toute écriture exécutable (`requireSignedVersion` de tauri.conf.json).
+    let key = TestKey::new();
+    let server = Server::start().await;
+    let old = installer(4_000);
+    server.serve("/setup.exe", Reply::Ok(old.clone()));
+    let app = app(&key);
+    let (feed, _) = staged(&key, &server, &app, &key.sign(&old, "1.0.5")).await;
+
+    let error = no_progress(&feed, "1.1.0").await.unwrap_err();
+
+    assert!(matches!(error, DownloadError::Corrupted(_)), "{error:?}");
+    assert!(error.to_string().contains("1.0.5"), "{error}");
+    // Rien n'a été installé : le flux de bout en bout aboutit au même refus.
+    let (installing, service, _) = service_on(&app, &server);
+    service.check_if_due().await;
+    install(&service).await.unwrap();
+    assert_eq!(service.state().failure, Some(UpdateFailure::Corrupted));
+    assert_eq!(installing.installed.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_signature_without_a_version_is_refused() {
+    // Une signature produite sans `--app-version` resterait rejouable à vie.
+    let key = TestKey::new();
+    let server = Server::start().await;
+    let file = installer(4_000);
+    server.serve("/setup.exe", Reply::Ok(file.clone()));
+    let app = app(&key);
+    let (feed, _) = staged(&key, &server, &app, &key.sign_without_version(&file)).await;
+
+    let error = no_progress(&feed, "1.1.0").await.unwrap_err();
+
+    assert!(matches!(error, DownloadError::Corrupted(_)), "{error:?}");
+}
+
+#[tokio::test]
+async fn the_signed_version_may_be_spelled_with_a_leading_v() {
+    let key = TestKey::new();
+    let server = Server::start().await;
+    let file = installer(4_000);
+    server.serve("/setup.exe", Reply::Ok(file.clone()));
+    let app = app(&key);
+    let (feed, _) = staged(&key, &server, &app, &key.sign(&file, "v1.1.0")).await;
+    assert_eq!(no_progress(&feed, "1.1.0").await.unwrap(), file);
+}
+
+// ---- redirections ---------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_redirect_of_the_installer_to_plain_http_is_not_followed() {
+    let key = TestKey::new();
+    let server = Server::start().await;
+    let file = installer(2_000);
+    let signature = key.sign(&file, "1.1.0");
+    server.serve("/real.exe", Reply::Ok(file.clone()));
+    server.serve("/setup.exe", Reply::Redirect(server.url("/real.exe")));
+    server.serve(
+        "/latest.json",
+        Reply::Ok(manifest("1.1.0", &server.url("/setup.exe"), &signature)),
+    );
+    let app = app(&key);
+    // Règle de production sur les sauts : HTTPS à chaque saut ; ici le saut est en http://.
+    let feed = TauriFeed::with_endpoint(
+        app.handle().clone(),
+        Url::parse(&server.url("/latest.json")).unwrap(),
+        DownloadPolicy::local_strict_redirects_for_tests(server.port),
+    );
+    feed.check().await.unwrap().unwrap();
+
+    let error = no_progress(&feed, "1.1.0").await.unwrap_err();
+
+    assert!(matches!(error, DownloadError::Interrupted(_)), "{error:?}");
+    assert_eq!(
+        server.hits("/real.exe"),
+        0,
+        "la redirection en clair n'a pas été suivie"
+    );
+}
+
+#[tokio::test]
+async fn a_redirect_is_followed_when_the_policy_allows_the_hop() {
+    let key = TestKey::new();
+    let server = Server::start().await;
+    let file = installer(2_000);
+    server.serve("/real.exe", Reply::Ok(file.clone()));
+    server.serve("/setup.exe", Reply::Redirect(server.url("/real.exe")));
+    let app = app(&key);
+    let (feed, _) = staged(&key, &server, &app, &key.sign(&file, "1.1.0")).await;
+    assert_eq!(no_progress(&feed, "1.1.0").await.unwrap(), file);
+    assert_eq!(server.hits("/real.exe"), 1);
+}
+
+#[tokio::test]
+async fn a_redirect_loop_stops_at_the_hop_limit() {
+    let key = TestKey::new();
+    let server = Server::start().await;
+    let file = installer(100);
+    server.serve("/setup.exe", Reply::Redirect(server.url("/setup.exe")));
+    let app = app(&key);
+    let (feed, _) = staged(&key, &server, &app, &key.sign(&file, "1.1.0")).await;
+    assert!(no_progress(&feed, "1.1.0").await.is_err());
+    assert!(
+        server.hits("/setup.exe") <= 5,
+        "{}",
+        server.hits("/setup.exe")
+    );
 }
