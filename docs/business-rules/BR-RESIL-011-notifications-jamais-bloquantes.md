@@ -23,6 +23,7 @@ Une perte de lien, une erreur de reconnexion, l'issue d'une opération incertain
 ## Vérification
 - Interface : `molecules.test.ts::ToastStack`, `::ErrorBoundary`, `link-stores.test.ts::toasts store`, `::turns operation outcomes into discreet notifications`, `errors.test.ts`, `shell.test.ts::error containment`, `src-tauri/tests/domain.rs::frontend_errors_are_rate_limited_per_window`, `::a_frontend_text_cannot_forge_log_lines`, `::long_frontend_messages_are_cut_on_a_character_boundary`, `e2e/shell.spec.ts` (notifications).
 - Bibliothèque : `crates/hearth-link/tests/robustness.rs` (erreurs et réponses mal formées : jamais de panique, voir BR-RESIL-017).
+- Interface : `apps/desktop/e2e/offline.spec.ts` (aucun `dialog` ni `alertdialog` pendant reconnexion, hors ligne, session expirée, accès révoqué, action coupée, coupures répétées).
 
 ## Cas limites
 - Seule modale de l'application hors cette règle : `ConfirmDialog` pour une action destructrice voulue par l'utilisateur, et l'empreinte changée.
@@ -35,3 +36,4 @@ Une perte de lien, une erreur de reconnexion, l'issue d'une opération incertain
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — création de la partie interface (HRT-09, session 2026-10-04-hearth-creation). Portée par l'interface ; le calcul des états est dans `hearth-link` (ADR-0007).
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
+- 2026-10-05 : vérification de bout en bout (HRT-12).

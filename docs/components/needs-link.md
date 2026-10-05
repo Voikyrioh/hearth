@@ -6,7 +6,7 @@ L'unique façon de désactiver une action qui exige le serveur (BR-RESIL-008). `
 
 - Valeur de la prop : `true`, ou `{ role: 'admin' }` pour exiger aussi le rôle administrateur
 - Textes (`fr.ts`, groupe `needs`) : « Indisponible tant que le serveur est hors ligne. », « Indisponible pendant la reconnexion au serveur. », « Indisponible : ta session a expiré. », « Indisponible : ton compte n'est plus accessible. », « Réservé aux administrateurs. », « Indisponible : aucun serveur sélectionné. »
-- Notes : le rôle est testé avant l'état du lien. Un nouveau contrôle qui exige le serveur reçoit la prop `needsLink` (ou appelle `useNeedsLink` pour le sien ; `HInput` n'en a pas tant qu'aucun champ n'en a besoin) : jamais de désactivation maison. Tests : `HButton.test.ts`, `shell.test.ts`, `e2e/shell.spec.ts`.
+- Notes : le rôle est testé avant l'état du lien. Un nouveau contrôle qui exige le serveur reçoit la prop `needsLink` (ou appelle `useNeedsLink` pour le sien ; `HInput` n'en a pas tant qu'aucun champ n'en a besoin) : jamais de désactivation maison. Tests : `HButton.test.ts`, `shell.test.ts`, `e2e/shell.spec.ts`, `e2e/offline.spec.ts`. Un bouton qui lance une action passe par `useServerAction` (`composables/useServerAction.ts`) : résultat inconnu à la coupure, notifications discrètes, jamais de rejeu (BR-RESIL-009).
 
 ```vue
 <HButton needs-link @click="remove">Supprimer</HButton>

@@ -7,3 +7,5 @@ Enveloppe commune des données périmées : quand `stale`, le contenu est désat
 - Props : `stale`, `lastContactAt`
 - Événements et slots : slot par défaut
 - Notes : Pose `data-stale="true"`. Jetons : `--grayscale-stale`, `--opacity-stale`. Tests : `molecules.test.ts`, `shell.test.ts`.
+
+- HRT-12 : chaque page enveloppe son contenu de `StaleSurface` quand `useCurrentServer().isConnected` est faux (désaturation, opacité 0,62, âge en direct) ; rien d'autre à écrire pour BR-RESIL-007. Vérifié par `e2e/offline.spec.ts`.

@@ -26,6 +26,8 @@ Quand l'état du lien est « Hors ligne », un bandeau non modal affiche « Serv
 - Bibliothèque : `domain::state::tests::row03_connected_cut_over_30s_shows_offline` (29 999 / 30 000 ms), `::row05_reconnecting_with_no_answer_for_30s_goes_offline`, `::row06_offline_retry_now_shows_reconnecting_and_starts_an_attempt`, `::row07_offline_link_back_automatically_is_connected`, `::a_late_tick_dates_the_state_at_the_threshold_not_at_the_late_instant`.
 - Bibliothèque, intégration : `tests/fault_proxy.rs::a_long_cut_goes_offline_then_comes_back`, `::retry_now_forces_an_attempt_without_waiting`.
 - Interface : `organisms.test.ts::OfflineBanner`, `shell.test.ts::goes connected -> reconnecting -> offline -> back`, `shell.test.ts::« Réessayer maintenant » asks the bridge to retry that server`, `e2e/shell.spec.ts`.
+- Coquille : `apps/desktop/src-tauri/tests/offline.rs``::a_long_cut_shows_reconnecting_then_offline_notifies_once_and_turns_the_icon_red_then_green` (« Reconnexion… » puis « Hors ligne » reçus à l'écran).
+- Interface : `apps/desktop/e2e/offline.spec.ts` (« hors ligne : bandeau, données périmées, retour du lien »).
 
 ## Cas limites
 - Une tentative lancée par « Réessayer maintenant » qui échoue remet `Offline` avec la date d'origine (`since` inchangé : le serveur est resté hors ligne sans interruption).
@@ -39,3 +41,4 @@ Quand l'état du lien est « Hors ligne », un bandeau non modal affiche « Serv
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — création de la partie interface (HRT-09, session 2026-10-04-hearth-creation). Portée par l'interface ; le calcul des états est dans `hearth-link` (ADR-0007).
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
+- 2026-10-05 : tests de la coquille et de l'écran (HRT-12).

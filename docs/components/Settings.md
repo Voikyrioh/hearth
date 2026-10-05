@@ -7,3 +7,5 @@ Réglages, section unique « Général » (pas de barre d'onglets tant qu'il n'y
 - Props : aucune
 - Événements et slots : aucun
 - Notes : D'autres sections et les cartes d'état par serveur arrivent avec leurs tickets ; la barre de sections reviendra avec la seconde. Tests : `Settings.test.ts`.
+
+- HRT-12 : section « Notifications » : « Notifier quand un serveur devient hors ligne ou revient » (activé par défaut, BR-RESIL-015) ; commandes `get_notify_on_link_change` / `set_notify_on_link_change`.

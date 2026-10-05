@@ -18,6 +18,7 @@ La machine à états, les délais et la résolution des opérations n'ont aucune
 
 ## Vérification
 - Vérifié par construction (aucune donnée de rôle dans les types du domaine). Intégration : `tests/fault_proxy.rs::a_read_only_account_has_the_same_link_behaviour`.
+- Interface : `apps/desktop/e2e/offline.spec.ts` (le serveur en lecture seule ne change pas de comportement : voir aussi `fault_proxy.rs::a_read_only_account_has_the_same_link_behaviour`).
 
 ## Cas limites
 - Une action refusée `403` est une réponse reçue : elle n'est pas « inconnue ».
@@ -27,3 +28,4 @@ La machine à états, les délais et la résolution des opérations n'ont aucune
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 : aucune règle propre à un rôle côté lien (HRT-12).

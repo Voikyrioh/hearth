@@ -26,6 +26,7 @@ Le jeton est 32 octets aléatoires du système, rendu au client en hexadécimal 
 ## Vérification
 - Tests : `domain::sessions::tests`, `domain::session_token::tests` ; `tests/sessions_use_cases.rs` (expiration glissante) ; `tests/sessions_https.rs`.
 - Tests côté client : `domain::state::tests::row09_connected_session_expired_without_saved_password_shows_session_expired`, `::row10_session_expired_then_password_accepted_is_connected`, `::row11_session_expired_then_password_refused_stays_session_expired` ; `crates/hearth-link/tests/fault_proxy.rs::an_expired_session_without_a_saved_password_asks_for_it_then_login_recovers`.
+- Interface : `apps/desktop/e2e/offline.spec.ts` (« session expirée : un panneau non bloquant, mot de passe refusé puis accepté »), `connect.test.ts::ReconnectPanel`.
 
 ## Cas limites
 - L'expiration est exclusive : une session dont l'expiration est exactement `maintenant` est expirée.
@@ -33,6 +34,7 @@ Le jeton est 32 octets aléatoires du système, rendu au client en hexadécimal 
 
 ## Affichage dans le client
 - État « Session expirée » : pastille `apps/desktop/src/components/molecules/LinkStatePill.vue`, actions désactivées par la prop `needsLink` (BR-RESIL-001, 008).
+- Panneau non bloquant `ReconnectPanel` au-dessus de la dernière vue (périmée) : « Ta session a expiré. », « Rentre ton mot de passe pour reprendre. », bouton « Me reconnecter » ; mot de passe refusé : erreur discrète, le panneau reste.
 
 ## Règles liées
 - BR-RESIL-013 (reconnexion silencieuse côté client).
@@ -41,3 +43,4 @@ Le jeton est 32 octets aléatoires du système, rendu au client en hexadécimal 
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-05 — côté client ajouté (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 : panneau de session expirée (HRT-12).
