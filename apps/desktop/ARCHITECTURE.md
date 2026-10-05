@@ -15,7 +15,7 @@ apps/desktop/
 │   │   ├── domain.rs    → Règles pures sans E/S ni Tauri : décision de fermeture, entrées du menu, argument `--minimized`, `Settings`
 │   │   ├── settings.rs  → Réglages : port `Autostart` (entrée de démarrage Windows, greffon autostart) ; fichier interne `settings.json` (greffon store, explication de fermeture) lu séparément et sans effet sur le réglage de démarrage
 │   │   ├── commands.rs  → Commandes exposées à l'interface (`get_settings`, `set_launch_at_startup`, `get_app_version`, `open_logs_folder`)
-│   │   ├── logging.rs   → Journal tournant `%APPDATA%/fr.voikyrioh.hearth/logs` (quotidien, 7 fichiers), crochet de panique, ouverture du dossier
+│   │   ├── logging.rs   → Journal tournant `%APPDATA%/fr.voikyrioh.hearth/logs` (quotidien, 7 fichiers, 16 Mio au plus), crochet de panique, ouverture du dossier ; niveau fixé par le code
 │   │   ├── window.rs    → Fenêtre principale : `show_main`, fermeture = masquage, notification d'explication unique
 │   │   ├── tray.rs      → Icône de la zone de notification et son menu
 │   │   ├── error.rs     → `AppError` (`store`, `autostart`, `logs`), sérialisée `{ kind, message }`
@@ -43,7 +43,7 @@ apps/desktop/
 - **Fermeture** : `window::on_window_event` annule la fermeture, cache la fenêtre, et à la première fois seulement émet la notification d'explication puis mémorise `closeHintSeen`. « Quitter » (menu de l'icône) appelle `app.exit`.
 - **Réglage de démarrage** : interrupteur de `Settings.vue` → store `settings` → `commands.setLaunchAtStartup` → `settings::set_launch_at_startup` → greffon autostart → état relu et renvoyé.
 
-- **Échec de démarrage** : journalisé, boîte de message système avec le chemin du journal, sortie 1. Jamais de sortie silencieuse.
+- **Échec de démarrage** : `start_or_report` (appelé par `setup`, qui ne rend jamais d'erreur à Tauri car il en panique) journalise, affiche une boîte de message système avec la raison et le chemin du journal (ou le fait qu'il n'a pas pu être écrit), puis sort avec le code 1. Jamais de sortie silencieuse ni d'application sans fenêtre.
 - **Désinstallation et coffre** : le modèle NSIS ne supprime que des dossiers. Quand le coffre Windows (Gestionnaire d'identification) stockera des mots de passe, la désinstallation devra aussi y effacer les identifiants du client si la case « Tout effacer » est cochée (voir `installer/French.nsh`).
 
 ## Règles

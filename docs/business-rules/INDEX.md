@@ -83,7 +83,7 @@ Première connexion vers un agent inconnu (pas dans `servers.json`).
 - [BR-CLIENT-002](./BR-CLIENT-002-installation-par-utilisateur.md) — L'installation se fait pour le compte Windows courant seulement — apps/desktop/src-tauri/tauri.conf.json — invariant ✓
 - [BR-CLIENT-003](./BR-CLIENT-003-instance-unique.md) — Une seule instance du client à la fois ; relancer ramène la fenêtre au premier plan — apps/desktop/src-tauri/src/lib.rs::run — invariant ✓
 - [BR-CLIENT-004](./BR-CLIENT-004-fermer-reduit-dans-la-zone-de-notification.md) — Fermer la fenêtre la réduit dans la zone de notification — apps/desktop/src-tauri/src/domain.rs::hides_on_close — invariant ✓
-- [BR-CLIENT-005](./BR-CLIENT-005-explication-de-fermeture-une-seule-fois.md) — L'explication de la réduction n'est donnée qu'à la première fermeture — apps/desktop/src-tauri/src/domain.rs::hides_on_close — —
+- [BR-CLIENT-005](./BR-CLIENT-005-explication-de-fermeture-une-seule-fois.md) — L'explication de la réduction n'est donnée qu'à la première fermeture — apps/desktop/src-tauri/src/domain.rs::should_explain_close — —
 - [BR-CLIENT-006](./BR-CLIENT-006-demarrage-avec-windows-desactive-par-defaut.md) — Le lancement au démarrage de Windows est proposé à l'installation, désactivé par défaut (partiellement appliquée, HRT-21) — apps/desktop/src-tauri/src/settings.rs::read — —
 - [BR-CLIENT-007](./BR-CLIENT-007-demarrage-avec-windows-reglable.md) — Le lancement au démarrage se règle depuis l'application — apps/desktop/src-tauri/src/settings.rs::set_launch_at_startup — —
 - [BR-CLIENT-008](./BR-CLIENT-008-reinstallation-conserve-les-donnees.md) — Réinstaller par-dessus une version existante conserve serveurs et réglages — domain/ — invariant ✓

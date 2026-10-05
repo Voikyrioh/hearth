@@ -21,11 +21,12 @@ Ce qui est garanti : une seule demande par installation. Ce qui ne l'est pas : q
 - `apps/desktop/src-tauri/src/settings.rs::close_hint_seen`, `mark_close_hint_seen`.
 
 ## Vérification
-- Tests : `tests/domain.rs::the_close_explanation_is_given_once`, `a_missing_or_malformed_flag_defaults_to_false` ; `tests/window.rs::closing_main_hides_it_and_explains_only_once`, `an_unreadable_settings_file_hides_without_repeating_the_explanation` ; `tests/settings.rs::the_close_hint_flag_is_remembered_in_the_file`.
+- Tests : `tests/domain.rs::the_close_explanation_is_given_once`, `a_missing_or_malformed_flag_defaults_to_false` ; `tests/window.rs::closing_main_hides_it_and_explains_only_once`, `a_corrupt_settings_file_is_treated_as_missing_...` ; `tests/settings.rs::the_close_hint_flag_is_remembered_in_the_file`.
 - À la main : première croix = notification ; seconde = rien, y compris après redémarrage.
 
 ## Cas limites
-- Fichier des réglages illisible : on se tait (pas de répétition à chaque fermeture), l'erreur est journalisée.
+- Fichier des réglages corrompu : le greffon avale l'erreur et rend « jamais vu » ; l'explication est donnée une fois de plus, puis le fichier est réécrit (test exact : `tests/window.rs::a_corrupt_settings_file_is_treated_as_missing_...`, `tests/settings.rs::a_corrupt_settings_file_reads_as_never_seen_...`).
+- Fichier impossible à ouvrir (erreur réelle du greffon) : on se tait, pas de répétition à chaque fermeture, l'erreur est journalisée.
 - Pas de fichier : première fermeture.
 
 ## Règles liées
