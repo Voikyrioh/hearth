@@ -1,6 +1,7 @@
 //! Journal du client : fichier tournant dans le dossier de données de
 //! l'application (`logs/`, un fichier par jour, 7 gardés, 16 Mio au plus au
-//! total). Initialisé avant tout le reste ; les paniques y sont écrites. Les
+//! total). Initialisé avant tout le reste ; les paniques y sont écrites
+//! directement (boîte de message si le journal est indisponible). Les
 //! binaires livrés n'ont pas de console : sans ce fichier, aucune erreur ne
 //! serait visible. Niveau fixé par le code (`info` livré, `debug` en
 //! développement, où `RUST_LOG` est honoré) : un utilisateur ne peut pas
@@ -11,11 +12,13 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
 
 use tracing_appender::rolling::{InitError, RollingFileAppender, Rotation};
 
 use crate::domain::IDENTIFIER;
 use crate::error::AppError;
+use crate::texts;
 
 /// Nombre de fichiers journaux gardés (rotation quotidienne).
 pub const KEPT_FILES: usize = 7;
@@ -26,10 +29,20 @@ const FILE_PREFIX: &str = "hearth";
 const FILE_SUFFIX: &str = "log";
 /// Octets écrits entre deux vérifications de la taille du dossier.
 const CHECK_EVERY: usize = 64 * 1024;
+/// Une fois le plafond atteint : délai minimal entre deux vérifications (place
+/// libérée, changement de jour).
+const RECHECK_WHEN_FULL: Duration = Duration::from_secs(1);
+/// Dernière ligne écrite quand le plafond de taille est atteint.
+pub const FULL_LINE: &str = "journal plein : les messages suivants sont abandonnés jusqu'au changement de jour ou jusqu'à ce que de la place soit libérée\n";
+/// Fichier créé par le crochet de panique s'il n'y a encore aucun journal.
+const PANIC_FILE: &str = "hearth.panic.log";
 
 /// Raison pour laquelle le journal n'a pas pu s'ouvrir, gardée pour la boîte de
 /// message d'un éventuel échec de démarrage.
 static INIT_FAILURE: OnceLock<String> = OnceLock::new();
+
+/// Dossier où le crochet de panique écrit directement (sans passer par `tracing`).
+static PANIC_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, thiserror::Error)]
 pub enum LogError {
@@ -61,9 +74,12 @@ pub fn init_failure() -> Option<&'static str> {
 /// posé dans tous les cas ; si le journal ne s'ouvre pas, l'erreur est gardée
 /// (`init_failure`) et rendue, l'application démarre quand même.
 pub fn init() -> Result<(), LogError> {
-    let result = init_in(&log_dir());
+    let dir = log_dir();
+    let result = init_in(&dir);
     if let Err(error) = &result {
         let _ = INIT_FAILURE.set(error.to_string());
+        // Le crochet tente quand même d'écrire dans le dossier ; sinon, boîte de message.
+        let _ = PANIC_DIR.set(dir);
         install_panic_hook();
     }
     result
@@ -77,6 +93,7 @@ pub fn init_in(dir: &Path) -> Result<(), LogError> {
         .filename_suffix(FILE_SUFFIX)
         .max_log_files(KEPT_FILES)
         .build(dir)?;
+    let _ = PANIC_DIR.set(dir.to_path_buf());
     let writer = BoundedWriter::new(appender, dir.to_path_buf(), MAX_TOTAL_BYTES);
     // Écriture synchrone : une panique n'attend pas qu'un tampon soit vidé.
     let builder = tracing_subscriber::fmt()
@@ -99,43 +116,101 @@ pub fn init_in(dir: &Path) -> Result<(), LogError> {
 fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        tracing::error!(
-            panic = %info,
-            backtrace = %Backtrace::force_capture(),
-            "panique"
+        let report = format!(
+            "panique : {info}\nbacktrace :\n{}\n",
+            Backtrace::force_capture()
         );
+        // Direct dans le fichier : aucun abonné `tracing` n'est nécessaire. Si le
+        // journal est indisponible, la panique est montrée avant la sortie.
+        if !write_panic_report(PANIC_DIR.get().map(PathBuf::as_path), &report) {
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title(texts::PANIC_TITLE)
+                .set_description(texts::panic_body(&info.to_string()))
+                .show();
+        }
         previous(info);
     }));
 }
 
-/// Écrivain qui borne la taille totale du dossier des journaux.
-struct BoundedWriter<W: Write> {
+/// Ajoute `report` au fichier journal le plus récent de `dir` (ou crée
+/// `hearth.panic.log`). Vrai si l'écriture a réussi.
+pub fn write_panic_report(dir: Option<&Path>, report: &str) -> bool {
+    let Some(dir) = dir else {
+        return false;
+    };
+    let _ = std::fs::create_dir_all(dir);
+    let target = list_logs(dir)
+        .into_iter()
+        .max_by_key(|file| file.modified)
+        .map_or_else(|| dir.join(PANIC_FILE), |file| dir.join(file.name));
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(target)
+        .and_then(|mut file| {
+            file.write_all(report.as_bytes())?;
+            file.flush()
+        })
+        .is_ok()
+}
+
+/// Écrivain qui borne la taille totale du dossier des journaux. Au plafond, il
+/// écrit une dernière ligne (`FULL_LINE`) puis abandonne les messages ; la
+/// rotation quotidienne de `inner` et la place libérée le rouvrent.
+pub struct BoundedWriter<W: Write> {
     inner: W,
     dir: PathBuf,
     cap: u64,
     since_check: usize,
     full: bool,
+    recheck: Duration,
+    last_check: Instant,
 }
 
 impl<W: Write> BoundedWriter<W> {
-    fn new(inner: W, dir: PathBuf, cap: u64) -> Self {
-        let full = enforce_cap(&dir, cap);
-        Self {
+    pub fn new(inner: W, dir: PathBuf, cap: u64) -> Self {
+        Self::with_recheck(inner, dir, cap, RECHECK_WHEN_FULL)
+    }
+
+    /// Comme `new`, avec le délai entre deux vérifications une fois plein.
+    pub fn with_recheck(inner: W, dir: PathBuf, cap: u64, recheck: Duration) -> Self {
+        let mut writer = Self {
             inner,
             dir,
             cap,
             since_check: 0,
-            full,
+            full: false,
+            recheck,
+            last_check: Instant::now(),
+        };
+        writer.refresh();
+        writer
+    }
+
+    /// Recalcule l'état « plein » ; écrit la dernière ligne à la bascule.
+    fn refresh(&mut self) {
+        self.since_check = 0;
+        self.last_check = Instant::now();
+        let full = enforce_cap(&self.dir, self.cap);
+        if full && !self.full {
+            let _ = self.inner.write_all(FULL_LINE.as_bytes());
         }
+        self.full = full;
     }
 }
 
 impl<W: Write> Write for BoundedWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.since_check += buf.len();
-        if self.since_check >= CHECK_EVERY {
-            self.since_check = 0;
-            self.full = enforce_cap(&self.dir, self.cap);
+        if self.full {
+            if self.last_check.elapsed() >= self.recheck {
+                // Écrire zéro octet suffit à `inner` pour tourner au changement de jour.
+                let _ = self.inner.write(&[]);
+                self.refresh();
+            }
+        } else if self.since_check >= CHECK_EVERY {
+            self.refresh();
         }
         if self.full {
             return Ok(buf.len());
@@ -148,29 +223,51 @@ impl<W: Write> Write for BoundedWriter<W> {
     }
 }
 
-/// Supprime les plus anciens journaux de `dir` tant que le total dépasse `cap`
-/// (le plus récent n'est jamais supprimé : il est ouvert). Renvoie vrai si le
-/// total dépasse encore `cap`, c'est-à-dire s'il faut abandonner les écritures.
-pub fn enforce_cap(dir: &Path, cap: u64) -> bool {
+struct LogFile {
+    name: String,
+    len: u64,
+    modified: SystemTime,
+}
+
+fn list_logs(dir: &Path) -> Vec<LogFile> {
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return false;
+        return Vec::new();
     };
-    let mut files: Vec<(String, u64)> = entries
+    entries
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let is_log = name.starts_with(FILE_PREFIX) && name.ends_with(FILE_SUFFIX);
-            let len = entry.metadata().ok()?.len();
-            is_log.then_some((name, len))
+            if !(name.starts_with(FILE_PREFIX) && name.ends_with(FILE_SUFFIX)) {
+                return None;
+            }
+            let meta = entry.metadata().ok()?;
+            Some(LogFile {
+                name,
+                len: meta.len(),
+                modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            })
         })
-        .collect();
-    // Le nom porte la date (`hearth.2026-10-04.log`) : l'ordre alphabétique est chronologique.
-    files.sort();
-    let mut total: u64 = files.iter().map(|(_, len)| len).sum();
+        .collect()
+}
+
+/// Supprime les plus anciens journaux de `dir` tant que le total dépasse `cap`.
+/// « Plus ancien » = date de modification (le nom ne suffit pas : une horloge
+/// reculée donne un nom plus ancien à un fichier encore ouvert) ; le fichier
+/// modifié en dernier n'est jamais supprimé. Renvoie vrai si le total dépasse
+/// encore `cap`, c'est-à-dire s'il faut abandonner les écritures.
+pub fn enforce_cap(dir: &Path, cap: u64) -> bool {
+    let mut files = list_logs(dir);
+    // Du plus ancien au plus récent ; à date égale, le nom (qui porte la date) départage.
+    files.sort_by(|a, b| {
+        a.modified
+            .cmp(&b.modified)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    let mut total: u64 = files.iter().map(|file| file.len).sum();
     while total > cap && files.len() > 1 {
-        let (name, len) = files.remove(0);
-        if std::fs::remove_file(dir.join(&name)).is_ok() {
-            total -= len;
+        let oldest = files.remove(0);
+        if std::fs::remove_file(dir.join(&oldest.name)).is_ok() {
+            total -= oldest.len;
         }
     }
     total > cap
