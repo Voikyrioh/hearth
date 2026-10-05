@@ -10,6 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+use crate::domain::install::UNIT_TEMP_EXTENSION;
 use crate::infrastructure::install::scrub::scrubbed;
 
 use crate::application::ports::{ServiceError, ServiceKind, ServiceManager, ServiceSpec};
@@ -73,7 +74,7 @@ impl Systemd {
 
     /// Écrit l'unité par un fichier voisin puis un renommage : jamais d'unité à moitié écrite.
     fn write_unit(&self, text: &str) -> Result<(), ServiceError> {
-        let temporary = self.unit_path.with_extension("service.new");
+        let temporary = self.unit_path.with_extension(UNIT_TEMP_EXTENSION);
         let write = || -> std::io::Result<()> {
             let mut options = std::fs::OpenOptions::new();
             options.write(true).create(true).truncate(true);
@@ -122,6 +123,7 @@ pub fn render_unit(spec: &ServiceSpec) -> Result<String, ServiceError> {
         .parent()
         .and_then(|dir| safe_path(dir).ok())
         .unwrap_or("/usr/local/bin");
+    // FIX:01M460G9KDDNZAJE3NTJSP49T4 : `CAP_MKNOD` est gardée dans `CapabilityBoundingSet` (voir plus bas).
     Ok(format!(
         "\
 [Unit]
@@ -142,9 +144,11 @@ UMask=0077
 # besoins (SYS_ADMIN, SYS_PTRACE, NET_ADMIN, SYS_MODULE...), les appels système hors d'un service
 # ordinaire, les espaces de noms, les familles d'adresses inutiles, l'écriture dans /usr, /etc et
 # /boot, et le gain de privilèges. Ce qu'elle ne retire pas : root garde l'accès à tout fichier
-# (DAC_OVERRIDE) et au socket de Docker, c'est-à-dire, en pratique, à la machine.
+# (DAC_OVERRIDE) et au socket de Docker, c'est-à-dire, en pratique, à la machine. CAP_MKNOD est
+# gardée : sans écran, le premier `nvidia-smi` crée /dev/nvidia* lui-même (mknod), sinon la
+# carte graphique n'est jamais vue.
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_BOOT
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_BOOT CAP_MKNOD
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 RestrictNamespaces=yes
 SystemCallFilter=@system-service
@@ -192,6 +196,25 @@ impl ServiceManager for Systemd {
         Ok(status.success())
     }
 
+    fn is_enabled(&self) -> Result<bool, ServiceError> {
+        if !self.unit_path.exists() {
+            return Ok(false);
+        }
+        let status = scrubbed(&self.systemctl)
+            .args(["is-enabled", "--quiet", UNIT_NAME])
+            .stdin(Stdio::null())
+            .status()
+            .map_err(|source| ServiceError::Command {
+                command: format!("is-enabled {UNIT_NAME}"),
+                detail: format!("lancement impossible : {source}"),
+            })?;
+        Ok(status.success())
+    }
+
+    fn enable(&self) -> Result<(), ServiceError> {
+        self.run(&["enable", UNIT_NAME])
+    }
+
     fn install(&self, spec: &ServiceSpec) -> Result<(), ServiceError> {
         let text = render_unit(spec)?;
         self.write_unit(&text)?;
@@ -231,6 +254,8 @@ impl ServiceManager for Systemd {
     }
 
     fn remove(&self) -> Result<(), ServiceError> {
+        // Un fichier voisin resté d'une écriture interrompue part avec l'unité.
+        let _ = std::fs::remove_file(self.unit_path.with_extension(UNIT_TEMP_EXTENSION));
         match std::fs::remove_file(&self.unit_path) {
             Ok(()) => self.run(&["daemon-reload"]),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -353,6 +378,39 @@ mod tests {
         ] {
             assert!(!line.contains(dropped), "{dropped}");
         }
+    }
+
+    #[test]
+    fn the_capability_set_keeps_mknod_for_the_first_nvidia_smi_on_a_headless_server() {
+        let text = render_unit(&spec()).unwrap();
+        let line = text
+            .lines()
+            .find(|line| line.starts_with("CapabilityBoundingSet="))
+            .expect("ligne des capacités");
+        assert!(line.contains("CAP_MKNOD"));
+    }
+
+    #[test]
+    fn removing_the_unit_also_removes_a_leftover_temporary_unit() {
+        let fake = Fake::new();
+        fake.systemd.install(&spec()).unwrap();
+        let leftover = fake.dir.path().join("hearth-agent.service.new");
+        std::fs::write(&leftover, "à moitié écrite").unwrap();
+        fake.systemd.remove().unwrap();
+        assert!(!leftover.exists());
+    }
+
+    #[test]
+    fn enabled_follows_the_unit_and_enable_does_not_start() {
+        let fake = Fake::new();
+        assert!(!fake.systemd.is_enabled().unwrap(), "pas d'unité");
+        fake.systemd.install(&spec()).unwrap();
+        fake.systemd.stop().unwrap();
+        fake.systemd.enable().unwrap();
+        assert_eq!(
+            fake.calls().last().map(String::as_str),
+            Some("enable hearth-agent.service")
+        );
     }
 
     #[test]

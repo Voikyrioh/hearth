@@ -120,6 +120,7 @@ impl InstallHost for Host {
 struct ServiceState {
     unit: Option<String>,
     active: bool,
+    enabled: bool,
     fail_install: bool,
 }
 
@@ -140,6 +141,20 @@ impl ServiceManager for Service {
     fn is_active(&self) -> Result<bool, ServiceError> {
         Ok(self.0.lock().unwrap_or_else(PoisonError::into_inner).active)
     }
+    fn is_enabled(&self) -> Result<bool, ServiceError> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .enabled)
+    }
+    fn enable(&self) -> Result<(), ServiceError> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .enabled = true;
+        Ok(())
+    }
     fn install(&self, _spec: &ServiceSpec) -> Result<(), ServiceError> {
         let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         if state.fail_install {
@@ -150,6 +165,7 @@ impl ServiceManager for Service {
         }
         state.unit = Some("unite-v2".to_owned());
         state.active = true;
+        state.enabled = true;
         Ok(())
     }
     fn unit_text(&self) -> Result<Option<String>, ServiceError> {
@@ -472,6 +488,35 @@ async fn a_purge_removes_only_the_files_hearth_knows_and_leaves_a_shared_directo
     assert!(out.contains("notes.txt"), "{out}");
     assert!(out.contains("autre-dossier"), "{out}");
     assert!(out.contains("n'ont pas été touchés"), "{out}");
+}
+
+#[tokio::test]
+async fn a_purge_also_removes_the_temporaries_and_the_update_directory_of_hearth() {
+    let machine = Machine::new();
+    machine.install(true).await.unwrap();
+    // Restes d'une écriture interrompue : identité (peut porter une clé), binaire, mise à jour.
+    std::fs::write(machine.data("key.pem.4242.0.tmp"), "cle-a-moitie").unwrap();
+    let bin_dir = machine.paths.binary.parent().unwrap().to_path_buf();
+    std::fs::write(bin_dir.join(".hearth-agent.new-4242"), "binaire-a-moitie").unwrap();
+    let update = machine.data("update");
+    std::fs::create_dir(&update).unwrap();
+    for name in [
+        "hearth-agent.new",
+        "supervisor",
+        "job.json",
+        "last.json",
+        "last.json.4242.tmp",
+    ] {
+        std::fs::write(update.join(name), "x").unwrap();
+    }
+
+    let out = machine.uninstall(true).await.unwrap();
+    assert!(!machine.paths.data_dir.exists(), "{out}");
+    assert!(!bin_dir.join(".hearth-agent.new-4242").exists());
+    assert!(
+        out.contains("Aucune trace de l'agent ne reste sur ta machine."),
+        "{out}"
+    );
 }
 
 #[tokio::test]

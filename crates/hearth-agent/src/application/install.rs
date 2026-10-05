@@ -25,33 +25,13 @@ use crate::domain::install::{
     Prerequisites, ServiceAction, Undo, UninstallPlan, UnitState, Version, check_prerequisites,
     plan_install, undo_plan,
 };
+use crate::domain::install::{
+    DATA_FILES, DATABASE_FILES, IDENTITY_FILES, UPDATE_DIR, UPDATE_FILES, is_binary_temporary,
+    is_database_temporary, is_identity_temporary, is_update_temporary,
+};
 
 /// Combien de temps on attend que l'agent réponde après son démarrage.
 pub const START_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Fichiers de l'identité dans le dossier de données (BR-INSTALL-004).
-const IDENTITY_FILES: [&str; 4] = ["cert.pem", "key.pem", "install_id", "identity.lock"];
-/// Fichiers de la base : `hearth.db` et ceux que SQLite y ajoute.
-const DATABASE_FILES: [&str; 4] = [
-    "hearth.db",
-    "hearth.db-wal",
-    "hearth.db-shm",
-    "hearth.db-journal",
-];
-
-/// **La liste exacte** de ce que Hearth écrit dans le dossier de données (le journal d'activité
-/// vit dans la base). Suppression et retour en arrière ne retirent que ces noms, puis le dossier
-/// s'il est vide : jamais de suppression récursive d'un chemin qui vient de la configuration.
-const DATA_FILES: [&str; 8] = [
-    "cert.pem",
-    "key.pem",
-    "install_id",
-    "identity.lock",
-    "hearth.db",
-    "hearth.db-wal",
-    "hearth.db-shm",
-    "hearth.db-journal",
-];
 
 /// Ce que l'entrypoint raconte à l'utilisateur, étape après étape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +123,8 @@ struct Before<'a> {
     unit: Option<&'a str>,
     /// Le service tournait.
     was_active: bool,
+    /// Le service démarrait avec le système.
+    was_enabled: bool,
 }
 
 pub struct Installer<'a> {
@@ -250,6 +232,18 @@ impl Installer<'_> {
         // L'unité telle qu'elle est avant : rétablie à l'identique en cas d'échec.
         let previous_unit = self.service.unit_text().unwrap_or(None);
         let was_active = observed.service_active;
+        // FIX:01M460G9AE6AFPSTRF4ZD872QB : une erreur de lecture n'est pas « pas activé » ; sans
+        // cette réponse, le retour en arrière pourrait désactiver un service qui l'était. Rien n'a
+        // encore été modifié : l'installation s'arrête.
+        let was_enabled = match self.service.is_enabled() {
+            Ok(enabled) => enabled,
+            Err(error) => {
+                return Err(Failure {
+                    cause: InstallError::Service(error),
+                    left_behind: Vec::new(),
+                });
+            }
+        };
         match self
             .run(plan, observed, inputs, say, &mut done, &mut binary)
             .await
@@ -269,6 +263,7 @@ impl Installer<'_> {
                             created_admin: admin_name.as_ref(),
                             unit: previous_unit.as_deref(),
                             was_active,
+                            was_enabled,
                         },
                     )
                     .await;
@@ -422,7 +417,7 @@ impl Installer<'_> {
                         .restore_binary(&paths.binary, installed)
                         .map_err(|e| e.to_string())
                 }),
-                Undo::Remove(Asset::Identity) => self.remove_files(&IDENTITY_FILES),
+                Undo::Remove(Asset::Identity) => self.remove_identity(),
                 Undo::Remove(Asset::Database) => self.remove_files(&DATABASE_FILES),
                 Undo::Remove(Asset::FirstAccount) => match created_admin {
                     Some(name) => self
@@ -457,6 +452,15 @@ impl Installer<'_> {
                 None => Ok(()),
             }
             .and_then(|()| {
+                // FIX:01M460G9AE6AFPSTRF4ZD872QB : l'activation au démarrage d'avant est remise,
+                // réactivée si elle l'était, retirée sinon.
+                if before.was_enabled {
+                    self.service.enable()
+                } else {
+                    self.service.disable()
+                }
+            })
+            .and_then(|()| {
                 if before.was_active {
                     self.service.restart()
                 } else {
@@ -472,12 +476,58 @@ impl Installer<'_> {
 
     /// Retire les fichiers que Hearth connaît dans le dossier de données, puis le dossier s'il est
     /// vide. Rend les noms de ce qui reste (fichiers qui ne sont pas à Hearth : intacts).
+    // FIX:01M460G9WVEJW4GPTAZ6MVVC0V : les temporaires d'écriture et le dossier `update/` partent aussi.
     fn remove_known_data(&self) -> Result<Vec<String>, HostError> {
+        let data = &self.paths.data_dir;
         for name in DATA_FILES {
-            self.host.remove_file(&self.paths.data_dir.join(name))?;
+            self.host.remove_file(&data.join(name))?;
         }
-        self.host.remove_dir_if_empty(&self.paths.data_dir)?;
-        self.host.list_dir(&self.paths.data_dir)
+        // Les temporaires d'écriture de l'identité (peuvent contenir une clé privée) et le dossier
+        // de la mise à jour, avec ce que Hearth y écrit.
+        for name in self.host.list_dir(data)? {
+            if is_identity_temporary(&name) || is_database_temporary(&name) {
+                self.host.remove_file(&data.join(&name))?;
+            }
+        }
+        let update = data.join(UPDATE_DIR);
+        for name in UPDATE_FILES {
+            self.host.remove_file(&update.join(name))?;
+        }
+        for name in self.host.list_dir(&update)? {
+            if is_update_temporary(&name) {
+                self.host.remove_file(&update.join(&name))?;
+            }
+        }
+        self.host.remove_dir_if_empty(&update)?;
+        self.host.remove_dir_if_empty(data)?;
+        self.host.list_dir(data)
+    }
+
+    /// Retire les fichiers voisins du binaire restés après une copie interrompue
+    /// (`.hearth-agent.new-<pid>`).
+    fn remove_binary_temporaries(&self) -> Result<(), HostError> {
+        let Some(dir) = self.paths.binary.parent() else {
+            return Ok(());
+        };
+        for name in self.host.list_dir(dir)? {
+            if is_binary_temporary(&name) {
+                self.host.remove_file(&dir.join(&name))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Les fichiers de l'identité, et ses temporaires d'écriture.
+    fn remove_identity(&self) -> Result<(), String> {
+        self.remove_files(&IDENTITY_FILES)?;
+        let data = &self.paths.data_dir;
+        let names = self.host.list_dir(data).map_err(|e| e.to_string())?;
+        for name in names.iter().filter(|name| is_identity_temporary(name)) {
+            self.host
+                .remove_file(&data.join(name))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     fn remove_files(&self, names: &[&str]) -> Result<(), String> {
@@ -522,6 +572,7 @@ impl Installer<'_> {
                 self.host
                     .remove_file(&paths.binary)
                     .and_then(|()| self.host.remove_file(&paths.backup()))
+                    .and_then(|()| self.remove_binary_temporaries())
                     .map_err(|e| e.to_string()),
             );
         }
@@ -539,7 +590,7 @@ impl Installer<'_> {
 }
 
 /// L'adresse jointe pour la vérification : `0.0.0.0` et `::` s'atteignent par le bouclage.
-fn probe_ip(listen: IpAddr) -> IpAddr {
+pub(crate) fn probe_ip(listen: IpAddr) -> IpAddr {
     match listen {
         IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::from([127, 0, 0, 1]),
         IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]),

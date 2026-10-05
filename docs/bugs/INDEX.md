@@ -2,7 +2,16 @@
 
 Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le code, fiche explicative `FIX-{ULID}.md` documentant symptôme, cause root, workaround, correction.
 
-Aucune fiche pour l'instant. À créer lors de bugfix conformément à `skills/bugfix/SKILL.md` et `docs/code-rules.md`.
+| Fiche | Titre | Date |
+|---|---|---|
+| [FIX-01M45V0PZB5TRE3A7KQHAHJNXD](./FIX-01M45V0PZB5TRE3A7KQHAHJNXD.md) | Une erreur de lecture de la base était comptée comme « 0 administrateur » | 2026-10-05 |
+| [FIX-01M460G91CSXXRV2Q34FXQBYMT](./FIX-01M460G91CSXXRV2Q34FXQBYMT.md) | install.sh suivait une redirection de HTTPS vers HTTP avec wget | 2026-10-05 |
+| [FIX-01M460G9AE6AFPSTRF4ZD872QB](./FIX-01M460G9AE6AFPSTRF4ZD872QB.md) | Le retour en arrière d'une installation ne remettait pas l'activation au démarrage, et une erreur de lecture valait « pas activé » | 2026-10-05 |
+| [FIX-01M460G9KDDNZAJE3NTJSP49T4](./FIX-01M460G9KDDNZAJE3NTJSP49T4.md) | L'unité systemd retirait CAP_MKNOD : nvidia-smi ne voyait pas la carte d'un serveur sans écran | 2026-10-05 |
+| [FIX-01M460G9WVEJW4GPTAZ6MVVC0V](./FIX-01M460G9WVEJW4GPTAZ6MVVC0V.md) | La désinstallation avec purge laissait des temporaires d'écriture (clé privée comprise) et le dossier de données | 2026-10-05 |
+| [FIX-01M460GA87EM6ZF9M5R9CWVXW3](./FIX-01M460GA87EM6ZF9M5R9CWVXW3.md) | Un fichier à la place du dossier de données était dit « ouvert à d'autres utilisateurs » | 2026-10-05 |
+
+À créer lors de tout bugfix conformément à `skills/bugfix/SKILL.md` et `docs/code-rules.md`.
 
 Format fiche :
 

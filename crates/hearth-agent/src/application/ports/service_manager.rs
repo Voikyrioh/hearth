@@ -45,6 +45,12 @@ pub trait ServiceManager: Send + Sync {
     /// Le service tourne-t-il ?
     fn is_active(&self) -> Result<bool, ServiceError>;
 
+    /// Le service démarre-t-il avec le système ?
+    fn is_enabled(&self) -> Result<bool, ServiceError>;
+
+    /// Le fait démarrer avec le système, sans le lancer.
+    fn enable(&self) -> Result<(), ServiceError>;
+
     /// Écrit l'unité, la fait connaître au système, l'active au démarrage et la démarre
     /// (idempotent : sans effet sur un service qui tourne déjà avec la même unité).
     fn install(&self, spec: &ServiceSpec) -> Result<(), ServiceError>;

@@ -320,6 +320,15 @@ impl ServiceManager for FakeService {
         Ok(self.0.world().active)
     }
 
+    fn is_enabled(&self) -> Result<bool, ServiceError> {
+        Ok(self.0.world().enabled)
+    }
+
+    fn enable(&self) -> Result<(), ServiceError> {
+        self.0.world().enabled = true;
+        Ok(())
+    }
+
     fn install(&self, _spec: &ServiceSpec) -> Result<(), ServiceError> {
         self.0.step("service").map_err(service_error)?;
         let mut world = self.0.world();
@@ -1031,6 +1040,32 @@ async fn a_failed_reinstallation_restores_the_binary_and_keeps_data_and_accounts
         machine.world().restarts >= 1,
         "le service repart sur l'ancien binaire"
     );
+}
+
+#[tokio::test]
+async fn a_failure_puts_the_start_at_boot_setting_back_as_it_was() {
+    // Un service arrêté et désactivé au démarrage : l'installation l'active (`enable --now`), son
+    // échec le désactive de nouveau.
+    let machine = Machine::new();
+    machine.installed(Version::new(0, 1, 0), false);
+    machine.world().enabled = false;
+    machine.world().fail.push("hello");
+    let run = run_install(&machine, &install_args(), &[], false, Script::default()).await;
+    assert!(run.result.is_err());
+    let (enabled, active) = {
+        let world = machine.world();
+        (world.enabled, world.active)
+    };
+    assert!(!enabled, "l'activation au démarrage d'avant est rétablie");
+    assert!(!active);
+
+    // Un service actif et activé le reste.
+    let machine = Machine::new();
+    machine.installed(Version::new(0, 1, 0), true);
+    machine.world().fail.push("hello");
+    let run = run_install(&machine, &install_args(), &[], false, Script::default()).await;
+    assert!(run.result.is_err());
+    assert!(machine.world().enabled && machine.world().active);
 }
 
 // ----------------------------------------------------------------------------------------------

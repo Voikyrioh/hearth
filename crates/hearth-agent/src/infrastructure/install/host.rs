@@ -17,7 +17,10 @@ use crate::application::ports::{
     Answered, BinaryInstalled, ConfigSpec, HostError, HostFacts, InstallHost, InstallLock,
     InstallPaths,
 };
-use crate::domain::install::{BinaryState, DataDirState, DataState, Version};
+use crate::domain::install::{
+    BinaryState, DATABASE_FILE, DataDirState, DataState, IDENTITY_CONTENT_FILES, Version,
+    binary_temporary_name,
+};
 use crate::infrastructure::config;
 use crate::infrastructure::data_dir;
 
@@ -98,14 +101,14 @@ impl InstallHost for SystemHost {
             BinaryState::Absent
         };
         let data_dir = &paths.data_dir;
-        let identity_present = ["cert.pem", "key.pem", "install_id"]
+        let identity_present = IDENTITY_CONTENT_FILES
             .iter()
             .filter(|name| data_dir.join(name).exists())
             .count();
         let data = DataState {
             dir_exists: data_dir.is_dir(),
             identity: identity_present == 3,
-            database: data_dir.join("hearth.db").is_file(),
+            database: data_dir.join(DATABASE_FILE).is_file(),
             identity_partial: identity_present > 0 && identity_present < 3,
         };
         Ok(HostFacts {
@@ -142,7 +145,7 @@ impl InstallHost for SystemHost {
         dest: &Path,
         backup: &Path,
     ) -> Result<BinaryInstalled, HostError> {
-        let temporary = dest.with_file_name(format!(".hearth-agent.new-{}", std::process::id()));
+        let temporary = dest.with_file_name(binary_temporary_name(std::process::id()));
         let result = (|| -> Result<BinaryInstalled, HostError> {
             // Fichier voisin, droits 0755 dès la création, puis renommage : jamais un binaire à
             // moitié copié sous le nom définitif.
@@ -257,15 +260,16 @@ impl InstallHost for SystemHost {
             use std::os::unix::fs::{MetadataExt, PermissionsExt};
             DataDirState {
                 exists: true,
+                directory: meta.is_dir(),
                 owned_by_root: meta.uid() == 0,
                 private: meta.permissions().mode() & 0o077 == 0,
             }
         }
         #[cfg(not(unix))]
         {
-            let _ = meta;
             DataDirState {
                 exists: true,
+                directory: meta.is_dir(),
                 owned_by_root: true,
                 private: true,
             }

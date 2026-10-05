@@ -18,6 +18,14 @@ impl ServiceManager for Unmanaged {
         Ok(false)
     }
 
+    fn is_enabled(&self) -> Result<bool, ServiceError> {
+        Ok(false)
+    }
+
+    fn enable(&self) -> Result<(), ServiceError> {
+        Ok(())
+    }
+
     fn install(&self, _spec: &ServiceSpec) -> Result<(), ServiceError> {
         Ok(())
     }
@@ -66,6 +74,8 @@ mod tests {
         assert!(manager.restart().is_ok());
         assert!(manager.stop().is_ok());
         assert!(manager.disable().is_ok());
+        assert!(manager.enable().is_ok());
+        assert!(!manager.is_enabled().unwrap());
         assert!(manager.remove().is_ok());
         assert!(!manager.is_installed().unwrap());
         assert!(!manager.is_active().unwrap());
