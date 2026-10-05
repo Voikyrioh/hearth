@@ -20,6 +20,7 @@ mod metrics;
 mod operations;
 mod server;
 mod sessions;
+mod update;
 mod version;
 mod wire;
 
@@ -40,6 +41,7 @@ use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::AuditSink;
 use crate::application::sessions::SessionService;
+use crate::application::update::UpdateService;
 use crate::domain::audit::AuditAction;
 use crate::entrypoint::ws::{self, StreamContext};
 
@@ -58,6 +60,8 @@ pub struct AppState {
     /// Écrit au journal les refus et les échecs relevés par la couche d'accès.
     pub sink: Arc<dyn AuditSink>,
     pub metrics: Arc<MetricsService>,
+    /// Mise à jour de l'agent à distance (HRT-17).
+    pub update: Arc<UpdateService>,
     pub stream: StreamContext,
 }
 
@@ -237,6 +241,33 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::SessionsRevoke),
         route: || delete(accounts::revoke_sessions),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/agent/update",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(update::status),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/agent/update/last",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(update::last),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/agent/update",
+        access: Access::Admin,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::AgentUpdate),
+        route: || post(update::start),
     },
     Endpoint {
         method: Method::GET,

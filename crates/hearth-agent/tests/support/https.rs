@@ -104,6 +104,15 @@ pub async fn start(env: &Env) -> Agent {
 
 /// Comme `start`, avec ces sondes (simulées), cette cadence et ces délais de flux.
 pub async fn start_metered(env: &Env, metering: Metering) -> Agent {
+    start_updating(env, metering, None).await
+}
+
+/// Comme `start_metered`, avec ces adaptateurs de mise à jour (faux) s'il y en a.
+pub async fn start_updating(
+    env: &Env,
+    metering: Metering,
+    updating: Option<hearth_agent::app::Updating>,
+) -> Agent {
     let config = AgentConfig {
         listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
         port: 0,
@@ -116,9 +125,13 @@ pub async fn start_metered(env: &Env, metering: Metering) -> Agent {
         ids: Arc::new(UlidGen),
         tokens: Arc::new(OsTokenGen),
     };
-    let running = app::start_with_metering(&config, &env.db, &adapters, metering)
-        .await
-        .expect("démarrage");
+    let running = match updating {
+        Some(updating) => {
+            app::start_with_all(&config, &env.db, &adapters, metering, updating).await
+        }
+        None => app::start_with_metering(&config, &env.db, &adapters, metering).await,
+    }
+    .expect("démarrage");
     let addr = running.server.local_addr();
     Agent { running, addr }
 }

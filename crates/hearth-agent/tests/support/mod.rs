@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub mod api;
 pub mod https;
 pub mod probe;
+pub mod update;
 pub mod ws;
 
 use async_trait::async_trait;
