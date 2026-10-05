@@ -276,7 +276,8 @@ async fn the_attempt_that_locks_adds_a_lock_entry_and_attempts_during_the_wait_a
             .await
             .unwrap_err();
     }
-    assert_eq!(all(&env).await.len(), base + 4, "pas encore de blocage");
+    // Les refus identiques se regroupent : le premier est écrit, les trois suivants sont comptés.
+    assert_eq!(all(&env).await.len(), base + 1, "pas encore de blocage");
 
     let locking = env
         .sessions
@@ -287,19 +288,17 @@ async fn the_attempt_that_locks_adds_a_lock_entry_and_attempts_during_the_wait_a
         matches!(locking, LoginError::TooManyAttempts { .. }),
         "{locking:?}"
     );
+    // Le blocage est une autre action : il s'écrit tout de suite, une fois.
     let records = all(&env).await;
-    let tail: Vec<_> = records[base + 4..].iter().map(compact).collect();
+    let tail: Vec<_> = records[base + 1..].iter().map(compact).collect();
     assert_eq!(
         tail,
-        [
-            ("login".into(), "denied".into(), Some("marie".into()), None),
-            (
-                "login.locked".into(),
-                "denied".into(),
-                Some("marie".into()),
-                None
-            ),
-        ]
+        [(
+            "login.locked".into(),
+            "denied".into(),
+            Some("marie".into()),
+            None
+        )]
     );
     assert_eq!(
         records.last().unwrap().reason.as_deref(),
@@ -316,7 +315,16 @@ async fn the_attempt_that_locks_adds_a_lock_entry_and_attempts_during_the_wait_a
             .unwrap_err();
         assert!(matches!(blocked, LoginError::TooManyAttempts { .. }));
     }
-    assert_eq!(all(&env).await.len(), base + 6);
+    assert_eq!(all(&env).await.len(), base + 2);
+
+    // À la fin de la fenêtre, une synthèse dit combien de refus ont été comptés (quatre
+    // tentatives après la première, dont celle qui a bloqué).
+    env.clock.advance(time::Duration::seconds(61));
+    env.audit_recorder.flush().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), base + 3);
+    assert_eq!(records.last().unwrap().action, "login");
+    assert_eq!(records.last().unwrap().repeat_count, 4);
 }
 
 #[tokio::test]
@@ -586,6 +594,8 @@ async fn no_event_ever_holds_a_password_or_a_token_after_a_full_scenario() {
         .await
         .unwrap();
 
+    // Les synthèses en attente sont écrites aussi : elles sont dans ce qu'on fouille.
+    env.audit_recorder.flush_all().await;
     // Toute la table, colonne par colonne, et la table de recherche.
     let rows: Vec<(String,)> = sqlx::query_as(
         "SELECT COALESCE(at,'') || '|' || COALESCE(account,'') || '|' || origin_kind || '|' ||
@@ -830,26 +840,31 @@ async fn targeting_three_accounts_in_a_minute_leaves_a_trace_for_each() {
 }
 
 #[tokio::test]
-async fn anonymous_events_of_one_action_group_whatever_the_number_of_addresses() {
+async fn refused_logins_from_many_addresses_leave_one_entry_and_one_summary() {
+    // Le vrai chemin de production : des connexions refusées (identifiant inconnu), chacune d'une
+    // adresse différente, donc hors de portée du verrouillage par adresse.
     let env = env().await;
-    for n in 0..2000 {
-        env.audit_sink
-            .record(
-                Actor::new(
-                    None,
-                    Origin::client(None, &format!("10.{}.{}.1", n / 250, n % 250)),
-                ),
-                AuditAction::Login,
-                Target::None,
-                Outcome::Denied(Reason::InvalidCredentials),
+    for n in 0..400 {
+        let error = env
+            .sessions
+            .login(
+                "fantome",
+                secret(WRONG),
+                &client_at(&format!("2001:db8::{n:x}")),
             )
-            .await;
+            .await
+            .unwrap_err();
+        assert!(matches!(error, LoginError::InvalidCredentials), "{error:?}");
     }
     env.clock.advance(time::Duration::seconds(61));
     env.audit_recorder.flush().await;
     let records = all(&env).await;
-    assert_eq!(records.len(), 2);
-    assert_eq!(records[1].repeat_count, 1999);
+    assert_eq!(records.len(), 2, "un premier refus et une synthèse");
+    assert_eq!(records[0].repeat_count, 0);
+    assert_eq!(records[1].repeat_count, 399);
+    assert_eq!(records[1].account, None);
+    // La synthèse garde l'origine de la dernière occurrence.
+    assert_eq!(records[1].origin_addr.as_deref(), Some("2001:db8::18f"));
 }
 
 #[tokio::test]

@@ -1,27 +1,71 @@
 <script setup lang="ts">
-import { RouterLink } from "vue-router";
+import { ref } from "vue";
+import { RouterLink, useRoute } from "vue-router";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HLogo from "@/components/atoms/HLogo.vue";
+import ServerAvatar from "@/components/molecules/ServerAvatar.vue";
+import { arrowNav } from "@/composables/arrowNav";
 import { t } from "@/i18n";
+import { useLinkStore } from "@/stores/link";
+import { useServersStore } from "@/stores/servers";
+
+// Barre des serveurs : logo, un avatar par serveur (sélection = ouvrir son tableau de bord),
+// bouton « + », réglages. Flèches haut/bas : on passe d'un contrôle au suivant.
+const servers = useServersStore();
+const link = useLinkStore();
+const route = useRoute();
+const rail = ref<HTMLElement | null>(null);
+
+function isActive(id: string): boolean {
+  return route.params.id === id;
+}
 </script>
 
 <template>
-  <nav class="rail" :aria-label="t('rail.label')">
-    <RouterLink class="rail__link" to="/" :aria-label="t('rail.home')">
+  <nav
+    ref="rail"
+    class="rail"
+    :aria-label="t('rail.label')"
+    @keydown="arrowNav($event, rail, '[data-rail-item]')"
+  >
+    <RouterLink class="rail__link" to="/" :aria-label="t('rail.home')" data-rail-item>
       <HLogo size="sm" decorative />
     </RouterLink>
-    <!-- Aucun serveur enregistré : la liste des serveurs viendra ici. -->
+    <RouterLink
+      v-for="server in servers.servers"
+      :key="server.id"
+      class="rail__link"
+      :to="{ name: 'dashboard', params: { id: server.id } }"
+      :aria-current="isActive(server.id) ? 'true' : undefined"
+      :data-server="server.id"
+      data-rail-item
+    >
+      <ServerAvatar
+        :name="server.name"
+        :color="server.color"
+        :state="link.stateOf(server.id)"
+        :active="isActive(server.id)"
+      />
+    </RouterLink>
+    <!-- L'assistant d'ajout de serveur n'existe pas encore (ticket suivant). -->
     <HButton
       variant="ghost"
       disabled
+      tip-placement="start"
       :hint="t('welcome.addServerSoon')"
       :aria-label="t('rail.addServer')"
+      data-rail-item
     >
       <HIcon name="plus" />
     </HButton>
     <span class="rail__spacer" />
-    <RouterLink class="rail__link rail__link--tool" to="/settings" :aria-label="t('rail.settings')">
+    <RouterLink
+      class="rail__link rail__link--tool"
+      to="/settings"
+      :aria-label="t('rail.settings')"
+      data-rail-item
+    >
       <HIcon name="settings" />
     </RouterLink>
   </nav>
@@ -32,10 +76,11 @@ import { t } from "@/i18n";
   display: flex;
   flex-direction: column;
   align-items: center;
+  flex: none;
   gap: var(--space-3);
   width: var(--rail-width);
   padding: var(--space-4) 0;
-  border-right: 1px solid var(--bd);
+  border-right: var(--border-width) solid var(--bd);
   background: var(--side);
 }
 

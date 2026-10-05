@@ -3,13 +3,17 @@ import { fr, type MessageKey } from "./fr";
 
 export type { MessageKey } from "./fr";
 
-/** Texte français pour une clé. */
-export function t(key: MessageKey): string {
+/** Texte français pour une clé ; `{nom}` est remplacé par `params.nom`. */
+export function t(key: MessageKey, params?: Record<string, string | number>): string {
   let node: unknown = fr;
   for (const part of key.split(".")) {
     node = (node as Record<string, unknown>)[part];
   }
-  return node as string;
+  const text = node as string;
+  if (!params) return text;
+  return text.replace(/\{(\w+)\}/g, (match, name: string) =>
+    name in params ? String(params[name]) : match,
+  );
 }
 
 // Exhaustif : une nouvelle `kind` côté Rust ne compile pas ici sans son texte.

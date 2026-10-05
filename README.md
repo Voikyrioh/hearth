@@ -6,7 +6,18 @@ Deux morceaux :
 - **agent** : un binaire autonome installé sur le serveur Linux ;
 - **client** : une app Windows avec installateur.
 
-État : socle en cours de développement. Rien n'est encore installable.
+État : socle en cours de développement. L'agent s'installe en une commande sur un serveur Linux ; le client Windows est en construction. La publication des versions n'existe pas encore : l'agent se construit et s'installe depuis ce dépôt.
+
+## Installer l'agent
+
+Sur le serveur Linux (x86_64 pour l'instant, arm64 viendra ; systemd), avec les droits d'administration :
+
+```sh
+cargo xtask agent                                   # binaire statique dans target/dist/hearth-agent (Docker requis)
+sudo sh deploy/install.sh --binary ./hearth-agent   # questions : port, premier compte, mot de passe
+```
+
+Sans question : fabrique un haché (`hearth-agent hash-password --user marie`, saisie sans écho), puis passe-le par l'environnement préservé de `sudo` : `HEARTH_ADMIN_USER=marie HEARTH_ADMIN_PASSWORD_HASH='$argon2id$…' sudo --preserve-env=HEARTH_ADMIN_USER,HEARTH_ADMIN_PASSWORD_HASH sh deploy/install.sh --binary ./hearth-agent --yes`. Un mot de passe ne se met jamais sur une ligne de commande. À la fin, l'agent tourne, démarre avec le serveur, et affiche son **empreinte** : à comparer avec celle du client à la première connexion. Désinstaller : `sudo hearth-agent uninstall [--keep-data|--purge]`. Détails, réinstallation, installation gérée (NixOS), dépannage : [`docs/runbooks/installer-agent.md`](./docs/runbooks/installer-agent.md).
 
 ## Dépôt
 
@@ -16,8 +27,8 @@ Deux morceaux :
 | `crates/hearth-agent` | Agent serveur |
 | `crates/hearth-link` | Liaison cliente (épinglage, session, reconnexion) |
 | `apps/desktop` | Client Windows (à venir) |
-| `deploy/` | Script d'installation (à venir) |
-| `xtask/` | Tâches de build |
+| `deploy/` | Script d'installation (`install.sh`) et scénario de bout en bout (`e2e/`) |
+| `xtask/` | Tâches de build : `cargo xtask agent`, `e2e-install`, `shellcheck` |
 | `docs/` | ADR, règles métier, contrats, composants |
 
 ## Développer

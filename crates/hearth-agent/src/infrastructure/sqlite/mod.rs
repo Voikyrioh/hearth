@@ -100,6 +100,37 @@ impl Database {
     }
 }
 
+/// Nombre d'administrateurs, lu en **lecture seule** et sans migration : l'installation observe
+/// la base d'un service qui tourne sans la modifier. Base absente, ou pas encore migrée : 0.
+/// Requête non vérifiée à la compilation (`query_scalar` dynamique) : elle ne peut pas l'être
+/// sans créer ni migrer la base, et elle ne lit qu'un compte.
+pub async fn count_admins_read_only(data_dir: &Path) -> Result<u64, DatabaseError> {
+    let path = data_dir.join(DATABASE_FILE);
+    if !path.is_file() {
+        return Ok(0);
+    }
+    let options = SqliteConnectOptions::new()
+        .filename(&path)
+        .read_only(true)
+        .create_if_missing(false)
+        .busy_timeout(Duration::from_secs(5));
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .map_err(|error| DatabaseError::Open {
+            path: path.clone(),
+            message: error.to_string(),
+        })?;
+    let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM accounts WHERE role = 'admin'")
+        .fetch_one(&pool)
+        .await
+        // Table absente : la base n'a jamais été migrée, donc aucun compte.
+        .unwrap_or(0);
+    pool.close().await;
+    Ok(u64::try_from(count).unwrap_or(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

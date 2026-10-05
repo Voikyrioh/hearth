@@ -26,11 +26,16 @@ h2,
 h3 {
   margin: 0;
   font-family: var(--font-title);
-  letter-spacing: -0.02em;
+  letter-spacing: var(--ls-title);
 }
 
 p {
   margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
 }
 
 button {
@@ -38,10 +43,16 @@ button {
   color: inherit;
 }
 
+/* Désactivé (par l'état, le lien ou le rôle) : même aspect partout, y compris via `needsLink`. */
+[aria-disabled="true"] {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
 /* Focus clavier : contour 2 px décalé de 2 px sur tout élément interactif. */
 :focus-visible {
-  outline: 2px solid var(--tx);
-  outline-offset: 2px;
+  outline: var(--focus-ring) solid var(--tx);
+  outline-offset: var(--focus-offset);
 }
 
 @media (prefers-reduced-motion: reduce) {

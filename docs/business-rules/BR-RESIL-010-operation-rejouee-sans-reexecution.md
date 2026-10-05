@@ -33,6 +33,9 @@ La requête suivie s'exécute dans une tâche détachée, dans le span de la req
 - `POST /sessions` n'est pas suivi par clé : son résultat contient un jeton, qu'on ne conserve pas en base (les jetons n'y sont qu'en empreinte). Rejouer une connexion crée une nouvelle session.
 - Une clé absente n'est pas une erreur : la requête s'exécute sans suivi.
 
+## Affichage dans le client
+- L'interface annonce l'issue par une notification discrète : `apps/desktop/src/stores/link.ts` (`OPERATION_TEXTS`), voir BR-RESIL-011.
+
 ## Règles liées
 - BR-RESIL-009 (côté client : jamais de rejeu automatique).
 - BR-RESIL-009 (le client ne rejoue jamais seul une action incertaine).

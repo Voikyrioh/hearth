@@ -36,3 +36,25 @@ pub async fn shutdown_signal() {
     }
     tracing::info!("signal d'arrêt reçu");
 }
+
+/// Comme `shutdown_signal`, avec SIGHUP : une session ssh qui tombe interrompt l'installation
+/// proprement (retour en arrière) au lieu de la tuer au milieu.
+pub async fn interruption_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::hangup()) {
+            Ok(mut stream) => {
+                tokio::select! {
+                    () = shutdown_signal() => {}
+                    _ = stream.recv() => {}
+                }
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "gestionnaire SIGHUP indisponible");
+            }
+        }
+    }
+    shutdown_signal().await;
+}

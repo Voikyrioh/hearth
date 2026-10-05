@@ -32,6 +32,17 @@ pub fn choose_format(value: Option<&str>, is_terminal: bool) -> (LogFormat, bool
 /// Initialise les journaux. Sur la sortie standard (reprise par journald), sauf `to_stderr`
 /// (commande `fingerprint` : la sortie standard ne contient que l'empreinte).
 pub fn init(to_stderr: bool) {
+    init_with(to_stderr, "info");
+}
+
+/// Comme `init`, avec le niveau `warn` par défaut : les commandes interactives (`install`,
+/// `uninstall`) parlent par leurs propres messages, pas par des journaux d'information.
+/// `RUST_LOG` reste prioritaire.
+pub fn init_quiet(to_stderr: bool) {
+    init_with(to_stderr, "warn");
+}
+
+fn init_with(to_stderr: bool, default_level: &str) {
     let is_terminal = if to_stderr {
         std::io::stderr().is_terminal()
     } else {
@@ -40,7 +51,8 @@ pub fn init(to_stderr: bool) {
     let requested = std::env::var(ENV_LOG_FORMAT).ok();
     let (format, valid) = choose_format(requested.as_deref(), is_terminal);
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
     let writer = if to_stderr {
         BoxMakeWriter::new(std::io::stderr)
     } else {

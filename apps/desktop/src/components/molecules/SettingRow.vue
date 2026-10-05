@@ -27,7 +27,7 @@ const labelId = useId();
 }
 
 .row__label {
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .row__help {

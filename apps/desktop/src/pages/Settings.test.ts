@@ -69,7 +69,9 @@ describe("Settings page", () => {
     );
     const toggle = wrapper.get('[role="switch"]');
     expect(toggle.attributes("aria-disabled")).toBe("true");
-    expect(toggle.attributes("title")).toBe("Disponible dès que tes réglages sont lus.");
+    expect(wrapper.get('[role="tooltip"]').text()).toBe(
+      "Disponible dès que tes réglages sont lus.",
+    );
     expect(wrapper.text()).toContain("0.1.0");
   });
 

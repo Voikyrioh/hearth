@@ -30,6 +30,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::set_launch_at_startup,
         commands::get_app_version,
         commands::open_logs_folder,
+        commands::log_frontend_error,
     ])
 }
 
@@ -51,8 +52,12 @@ pub fn start<R: Runtime>(
 ) -> Result<(), StartupError> {
     build_tray(app).map_err(StartupError::Tray)?;
     if minimized {
-        if let Some(main) = app.get_webview_window(domain::MAIN_WINDOW) {
-            main.hide().map_err(StartupError::Window)?;
+        if let Some(main) = app.get_webview_window(domain::MAIN_WINDOW)
+            && let Err(error) = main.hide()
+        {
+            // L'icône existe déjà : la retirer, sinon elle reste en fantôme après la sortie.
+            app.remove_tray_by_id(tray::TRAY_ID);
+            return Err(StartupError::Window(error));
         }
     } else {
         window::show_main(app);
@@ -60,8 +65,9 @@ pub fn start<R: Runtime>(
     Ok(())
 }
 
-/// Lance `start` ; en cas d'erreur, la journalise puis appelle `report` avec la
-/// raison (en production : boîte de message et sortie, voir `fail_startup`).
+/// Lance `start` ; en cas d'erreur, appelle `report` avec la raison (en
+/// production : `fail_startup`, qui la journalise, affiche la boîte de message
+/// et sort).
 /// Tauri panique si `setup` rend une erreur : on ne la lui rend donc jamais.
 pub fn start_or_report<R: Runtime>(
     app: &AppHandle<R>,

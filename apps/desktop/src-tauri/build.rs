@@ -7,6 +7,7 @@ const COMMANDS: &[&str] = &[
     "set_launch_at_startup",
     "get_app_version",
     "open_logs_folder",
+    "log_frontend_error",
 ];
 
 fn main() {

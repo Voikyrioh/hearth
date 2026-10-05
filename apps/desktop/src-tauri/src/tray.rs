@@ -12,12 +12,15 @@ use crate::{texts, window};
 /// Flamme seule, une couleur (`hearth-logo-small.svg`), lisible à 16 px.
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray.png");
 
+/// Identifiant de l'icône (pour la retirer si le démarrage échoue ensuite).
+pub const TRAY_ID: &str = "hearth";
+
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, MENU_OPEN, texts::MENU_OPEN_LABEL, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT, texts::MENU_QUIT_LABEL, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
 
-    TrayIconBuilder::with_id("hearth")
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(Image::from_bytes(TRAY_ICON)?)
         .tooltip(texts::APP_NAME)
         .menu(&menu)

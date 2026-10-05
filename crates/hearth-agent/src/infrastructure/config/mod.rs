@@ -101,6 +101,28 @@ pub fn load(
     })
 }
 
+/// Le texte de `agent.toml` écrit à l'installation. Écrit une seule fois : une réinstallation ne
+/// l'écrase jamais. `data_dir` seulement s'il diffère du dossier par défaut.
+pub fn render_file(port: u16, managed: bool, data_dir: Option<&Path>) -> String {
+    let mut text = String::from(
+        "# Configuration de l'agent Hearth, écrite à l'installation (une réinstallation ne l'écrase pas).\n",
+    );
+    text.push_str(&format!("port = {port}\n"));
+    text.push_str(&format!("managed = {managed}\n"));
+    if let Some(dir) = data_dir {
+        let quoted = toml::Value::String(dir.to_string_lossy().into_owned());
+        text.push_str(&format!("data_dir = {quoted}\n"));
+    }
+    text
+}
+
+/// Le port inscrit dans un fichier de configuration existant ; `None` s'il manque, est illisible
+/// ou ne dit rien du port.
+pub fn read_port(path: &Path) -> Option<u16> {
+    let text = std::fs::read_to_string(path).ok()?;
+    parse_file(path, &text).ok()?.port
+}
+
 fn read_file_config(
     cli: &CliOverrides,
     env: &dyn Fn(&str) -> Option<String>,
@@ -207,6 +229,43 @@ mod tests {
             config_path: Some(path),
             data_dir: None,
         }
+    }
+
+    #[test]
+    fn the_installed_file_is_read_back_by_the_agent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("agent.toml");
+        std::fs::write(
+            &path,
+            render_file(9000, true, Some(Path::new("/srv/h \"x\""))),
+        )
+        .expect("write");
+        assert_eq!(read_port(&path), Some(9000));
+        let cli = CliOverrides {
+            config_path: Some(path),
+            data_dir: None,
+        };
+        let config = load(&cli, &env_of(&[])).expect("config");
+        assert_eq!(config.port, 9000);
+        assert!(config.managed);
+        assert_eq!(config.data_dir, PathBuf::from("/srv/h \"x\""));
+    }
+
+    #[test]
+    fn the_default_installed_file_has_only_the_port_and_the_managed_flag() {
+        let text = render_file(7341, false, None);
+        assert!(text.contains("port = 7341\n"));
+        assert!(text.contains("managed = false\n"));
+        assert!(!text.contains("data_dir"));
+    }
+
+    #[test]
+    fn a_missing_or_broken_file_has_no_port() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(read_port(&dir.path().join("none.toml")), None);
+        let bad = dir.path().join("bad.toml");
+        std::fs::write(&bad, "port = [").expect("write");
+        assert_eq!(read_port(&bad), None);
     }
 
     #[test]

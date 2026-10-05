@@ -22,7 +22,6 @@ use hearth_proto::stream::{AUTH_TIMEOUT_S, MAX_CLIENT_MESSAGE_BYTES};
 use tokio::sync::watch;
 
 use super::http::{ApiError, AppState};
-use crate::application::ports::AuditFeed;
 use crate::domain::stream::{
     IDLE_TIMEOUT, MAX_PENDING_PER_ADDRESS, MAX_PENDING_TOTAL, MAX_STREAMS_PER_ACCOUNT,
     MAX_STREAMS_TOTAL, MIN_SUBSCRIBE_INTERVAL, SEND_TIMEOUT, SESSION_CHECK_PERIOD, within_caps,
@@ -70,7 +69,6 @@ impl Default for StreamSettings {
 /// Ce que partagent toutes les connexions du flux.
 #[derive(Clone)]
 pub struct StreamContext {
-    pub(crate) audit: Arc<dyn AuditFeed>,
     pub(crate) settings: StreamSettings,
     shutdown: Arc<watch::Sender<bool>>,
     open: Arc<Mutex<Open>>,
@@ -149,9 +147,8 @@ impl Drop for Permit {
 }
 
 impl StreamContext {
-    pub fn new(audit: Arc<dyn AuditFeed>, settings: StreamSettings) -> Self {
+    pub fn new(settings: StreamSettings) -> Self {
         Self {
-            audit,
             settings,
             shutdown: Arc::new(watch::channel(false).0),
             open: Arc::default(),
@@ -222,21 +219,8 @@ pub async fn stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::audit::AuditRecord;
-    use tokio::sync::broadcast;
-
-    struct NoFeed;
-
-    impl AuditFeed for NoFeed {
-        fn publish(&self, _record: AuditRecord) {}
-
-        fn subscribe(&self) -> broadcast::Receiver<AuditRecord> {
-            broadcast::channel(1).1
-        }
-    }
-
     fn context(settings: StreamSettings) -> StreamContext {
-        StreamContext::new(Arc::new(NoFeed), settings)
+        StreamContext::new(settings)
     }
 
     fn ip(last: u8) -> IpAddr {
