@@ -173,7 +173,7 @@ fn context<'a>(
         source_binary: data.source_binary.clone(),
         listen_addr: data.listen_addr,
         data_dir_override: data.data_dir_override.clone(),
-        target: Version::parse(env!("CARGO_PKG_VERSION")).map_err(AppError::Version)?,
+        target: Version::parse(crate::build_info::VERSION).map_err(AppError::Version)?,
         command_line: data.command_line.clone(),
         systemd_missing: data.systemd_missing,
     })
