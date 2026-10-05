@@ -9,13 +9,14 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::application::accounts::AccountService;
+use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    AuditFeed, Clock, GpuProbe, HashError, IdGen, IdentityError, IdentityStore, MonotonicClock,
-    PasswordHasher, PublicIdentity, Store, StoreError, SystemProbe, TokenGen,
+    AuditFeed, AuditSink, Clock, GpuProbe, HashError, IdGen, IdentityError, IdentityStore,
+    MonotonicClock, PasswordHasher, PublicIdentity, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::sessions::SessionService;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -26,15 +27,15 @@ use crate::entrypoint::tasks::{self, BackgroundTask};
 use crate::entrypoint::terminal::TerminalPasswords;
 use crate::entrypoint::ws::{StreamContext, StreamSettings};
 use crate::infrastructure::argon2::Argon2Hasher;
-use crate::infrastructure::audit_feed::NoAuditFeed;
+use crate::infrastructure::audit_feed::BroadcastAuditFeed;
 use crate::infrastructure::clock::{SystemClock, SystemMonotonic};
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::sqlite::{
-    Database, DatabaseError, SqliteAccountRepo, SqliteLoginAttemptRepo, SqliteOperationRepo,
-    SqliteSessionRepo, SqliteStore,
+    Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteLoginAttemptRepo,
+    SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
 };
 use crate::infrastructure::system::gpu;
 use crate::infrastructure::system::{SysinfoProbe, SystemMachineInfo};
@@ -87,7 +88,7 @@ impl Adapters {
 }
 
 /// Ce qui mesure la machine et alimente le flux temps réel : sondes, cadence d'échantillonnage,
-/// flux d'audit, délais du flux. Ceux de production par défaut ; les tests injectent des sondes
+/// délais du flux. Ceux de production par défaut ; les tests injectent des sondes
 /// simulées, une cadence rapide et des délais courts.
 pub struct Metering {
     pub system: Arc<dyn SystemProbe>,
@@ -97,9 +98,6 @@ pub struct Metering {
     /// Horloge monotone : cadence, fenêtres et ordre des échantillons.
     pub monotonic: Arc<dyn MonotonicClock>,
     pub period: Duration,
-    /// Événements du journal pour le sujet `audit` du flux (vide tant que le journal n'est pas
-    /// branché).
-    pub audit: Arc<dyn AuditFeed>,
     pub stream: StreamSettings,
 }
 
@@ -113,7 +111,6 @@ impl Metering {
             clock: Arc::new(SystemClock),
             monotonic: Arc::new(SystemMonotonic::new()),
             period: tasks::SAMPLE_PERIOD,
-            audit: Arc::new(NoAuditFeed),
             stream: StreamSettings::default(),
         }
     }
@@ -125,6 +122,14 @@ pub struct Services {
     pub sessions: Arc<SessionService>,
     pub operations: Arc<OperationService>,
     pub maintenance: Arc<MaintenanceService>,
+    /// Lecture et export du journal d'activité.
+    pub audit: Arc<AuditService>,
+    /// Écriture du journal hors transaction (refus et échecs relevés par le routeur).
+    pub audit_sink: Arc<dyn AuditSink>,
+    /// Le même, pour écrire les synthèses des événements répétés (`flush`).
+    pub audit_recorder: Arc<AuditRecorder>,
+    /// Diffusion interne des entrées du journal, pour le flux temps réel.
+    pub audit_feed: Arc<dyn AuditFeed>,
 }
 
 /// Agent démarré : le serveur, la partie publique de son identité et ses tâches de fond.
@@ -135,6 +140,10 @@ pub struct RunningAgent {
     pub purge: BackgroundTask,
     /// Échantillonneur des mesures : arrêté avec l'agent.
     pub sampler: BackgroundTask,
+    /// Écriture des synthèses du journal : arrêtée avec l'agent.
+    pub audit_flush: BackgroundTask,
+    /// Écrit les synthèses du journal en attente à l'arrêt.
+    audit_recorder: Arc<AuditRecorder>,
 }
 
 impl RunningAgent {
@@ -144,9 +153,14 @@ impl RunningAgent {
             server,
             purge: _purge,
             sampler: _sampler,
+            audit_flush: _audit_flush,
+            audit_recorder,
             ..
         } = self;
-        server.run_until(stop).await
+        let result = server.run_until(stop).await;
+        // Les synthèses en attente ne partent pas avec la tâche : écrites avant de rendre la main.
+        audit_recorder.flush_all().await;
+        result
     }
 }
 
@@ -170,6 +184,17 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
     let accounts_repo = Arc::new(SqliteAccountRepo::new(pool.clone()));
     let sessions_repo = Arc::new(SqliteSessionRepo::new(pool.clone()));
     let store: Arc<dyn Store> = Arc::new(SqliteStore::new(pool.clone()));
+    let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
+    let maintenance = Arc::new(MaintenanceService::new(
+        store.clone(),
+        adapters.clock.clone(),
+    ));
+    let trail = Arc::new(AuditTrail::new(feed.clone(), maintenance.clone()));
+    let recorder = Arc::new(AuditRecorder::new(
+        store.clone(),
+        adapters.clock.clone(),
+        trail.clone(),
+    ));
     Services {
         accounts: Arc::new(AccountService::new(
             accounts_repo.clone(),
@@ -178,6 +203,7 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             adapters.hasher.clone(),
             adapters.clock.clone(),
             adapters.ids.clone(),
+            trail.clone(),
         )),
         sessions: Arc::new(SessionService::new(
             accounts_repo,
@@ -188,13 +214,21 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             adapters.clock.clone(),
             adapters.ids.clone(),
             adapters.tokens.clone(),
+            trail.clone(),
         )),
         operations: Arc::new(OperationService::new(
             Arc::new(SqliteOperationRepo::new(pool.clone())),
             store.clone(),
             adapters.clock.clone(),
         )),
-        maintenance: Arc::new(MaintenanceService::new(store, adapters.clock.clone())),
+        maintenance,
+        audit: Arc::new(AuditService::new(
+            Arc::new(SqliteAuditRepo::new(pool.clone())),
+            feed.clone(),
+        )),
+        audit_sink: recorder.clone(),
+        audit_recorder: recorder,
+        audit_feed: feed,
     }
 }
 
@@ -251,13 +285,17 @@ pub async fn start_with_metering(
         metering.clock,
         metering.monotonic,
     ));
-    let stream = StreamContext::new(metering.audit, metering.stream);
+    // L'identité de la machine est lue avant de servir : les premières requêtes la trouvent prête.
+    metrics.warm_up().await;
+    let stream = StreamContext::new(services.audit_feed.clone(), metering.stream);
     let closing = stream.clone();
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
         sessions: services.sessions,
         operations: services.operations,
+        audit: services.audit,
+        sink: services.audit_sink,
         metrics: metrics.clone(),
         stream,
     });
@@ -265,11 +303,15 @@ pub async fn start_with_metering(
     let server = http::spawn(listener, tls, router)?.on_shutdown(move || closing.begin_shutdown());
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
     let sampler = tasks::spawn_sampler(metrics, metering.period);
+    let audit_flush =
+        tasks::spawn_audit_flush(services.audit_recorder.clone(), tasks::AUDIT_FLUSH_PERIOD);
     Ok(RunningAgent {
         server,
         identity,
         purge,
         sampler,
+        audit_flush,
+        audit_recorder: services.audit_recorder,
     })
 }
 

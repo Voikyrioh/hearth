@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 
 use super::cli::AccountAction;
 use crate::application::accounts::{AccountError, AccountService, AccountSummary};
+use crate::domain::audit::Actor;
 use crate::domain::secret::Secret;
 
 #[derive(Debug, Error)]
@@ -41,12 +42,14 @@ pub async fn execute(
     passwords: &dyn PasswordInput,
     out: &mut dyn Write,
 ) -> Result<(), AccountCliError> {
+    // Origine « ligne de commande du serveur » : pas de compte, pas d'adresse (BR-AUDIT-002).
+    let by = Actor::command_line();
     match action {
         AccountAction::Add { username, role } => {
             // Contrôle de l'identifiant avant de demander un mot de passe.
             AccountService::validate_username(username)?;
             let password = passwords.new_password()?;
-            let account = service.create(username, password, *role).await?;
+            let account = service.create(username, password, *role, &by).await?;
             writeln!(out, "Compte {} créé", account.username)?;
         }
         AccountAction::List => {
@@ -56,22 +59,22 @@ pub async fn execute(
         AccountAction::Passwd { username } => {
             let account = service.find(username).await?;
             let password = passwords.new_password()?;
-            service.set_password(&account.id, password).await?;
+            service.set_password(&account.id, password, &by).await?;
             writeln!(out, "Mot de passe changé")?;
         }
         AccountAction::Role { username, role } => {
             let account = service.find(username).await?;
-            service.change_role(&account.id, *role).await?;
+            service.change_role(&account.id, *role, &by).await?;
             writeln!(out, "{} est maintenant {}", account.username, role.label())?;
         }
         AccountAction::Remove { username } => {
             let account = service.find(username).await?;
-            service.delete(&account.id, None, None).await?;
+            service.delete(&account.id, None, None, &by).await?;
             writeln!(out, "Compte {} supprimé", account.username)?;
         }
         AccountAction::Revoke { username } => {
             let account = service.find(username).await?;
-            service.revoke_sessions(&account.id).await?;
+            service.revoke_sessions(&account.id, &by).await?;
             writeln!(out, "Sessions de {} fermées", account.username)?;
         }
     }

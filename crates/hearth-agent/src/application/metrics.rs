@@ -20,7 +20,7 @@ use time::Duration;
 use tokio::sync::broadcast;
 
 use super::ports::{Clock, GpuProbe, MonotonicClock, ProbeError, SystemProbe};
-use crate::domain::machine::MachineIdentity;
+use crate::domain::machine::{GpuIdentity, MachineIdentity};
 use crate::domain::metrics::{
     HistoryWindow, IDENTITY_MAX_AGE, IDENTITY_RETRY_AFTER, Ring, SAMPLE_TIMEOUT, Sample,
     window_samples,
@@ -78,6 +78,10 @@ pub struct MetricsService {
     stalled: AtomicBool,
     identity_flight: Flight,
     identity: Mutex<IdentityCache>,
+    /// Dernière détection des cartes graphiques : elle lit le matériel, donc jamais dans le
+    /// runtime asynchrone ni à chaque appel (voir `known_gpus`).
+    detected: Mutex<Option<(Duration, Vec<GpuIdentity>)>>,
+    detect_flight: Flight,
 }
 
 /// Dernière identité lue et, après un échec, l'instant avant lequel on ne retente pas.
@@ -116,6 +120,8 @@ impl MetricsService {
             stalled: AtomicBool::new(false),
             identity_flight: Flight::default(),
             identity: Mutex::default(),
+            detected: Mutex::new(None),
+            detect_flight: Flight::default(),
         }
     }
 
@@ -138,9 +144,9 @@ impl MetricsService {
     /// dernière identité connue (`Stalled` s'il n'y en a jamais eu : « pas encore lue »).
     pub async fn identity(&self) -> Result<MachineIdentity, MetricsError> {
         let now = self.mono.elapsed();
-        // Lecture rapide de l'état déjà connu (mutex en mémoire, ou quelques petits fichiers du
-        // noyau) : pas d'attente de sonde.
-        let known_gpus = self.gpu.detect();
+        // Les cartes connues : la détection est gardée quelques secondes et se fait hors du
+        // runtime asynchrone.
+        let known_gpus = self.known_gpus(now).await;
         {
             let cache = self.identity.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some((at, identity)) = cache.value.as_ref()
@@ -183,6 +189,46 @@ impl MetricsService {
                 cache.retry_after = Some(now + IDENTITY_RETRY_AFTER);
                 cache.stale()
             }
+        }
+    }
+
+    /// Lit l'identité une première fois, avant de servir : les premières requêtes simultanées
+    /// trouvent un cache rempli et non une lecture en cours (`Stalled`). Un échec n'empêche pas de
+    /// démarrer ; la lecture sera retentée à la première demande.
+    pub async fn warm_up(&self) {
+        if let Err(error) = self.identity().await {
+            tracing::warn!(%error, "identité de la machine non lue au démarrage");
+        }
+    }
+
+    /// Les cartes graphiques détectées : la détection lit le matériel (processus, fichiers du
+    /// noyau), elle se fait **hors du runtime asynchrone** (`spawn_blocking`) et son résultat est
+    /// gardé `IDENTITY_RETRY_AFTER`, pas relancé à chaque `/machine` ni à chaque tick d'un flux.
+    /// Une détection en cours ou qui ne revient pas à temps rend la dernière valeur connue.
+    async fn known_gpus(&self, now: Duration) -> Vec<GpuIdentity> {
+        let stale = {
+            let cache = self.detected.lock().unwrap_or_else(PoisonError::into_inner);
+            match cache.as_ref() {
+                Some((at, gpus)) if now - *at < IDENTITY_RETRY_AFTER => return gpus.clone(),
+                Some((_, gpus)) => gpus.clone(),
+                None => Vec::new(),
+            }
+        };
+        let Some(guard) = self.detect_flight.try_acquire() else {
+            return stale;
+        };
+        let gpu = self.gpu.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            gpu.detect()
+        });
+        match tokio::time::timeout(self.sample_timeout, task).await {
+            Ok(Ok(gpus)) => {
+                *self.detected.lock().unwrap_or_else(PoisonError::into_inner) =
+                    Some((now, gpus.clone()));
+                gpus
+            }
+            _ => stale,
         }
     }
 
@@ -591,14 +637,78 @@ mod tests {
         let metrics = MetricsService::new(probe.clone(), gpus.clone(), time.clone(), time.clone());
         assert!(!metrics.identity().await.unwrap().capabilities().gpu);
         assert_eq!(probe.identities.load(Ordering::SeqCst), 1);
-        // Une carte apparaît : bien avant les 30 s, l'identité est relue et la contient.
+        // Une carte apparaît : bien avant les 30 s (la détection est gardée 5 s), l'identité est
+        // relue et la contient.
         gpus.0.lock().unwrap().push(GpuIdentity {
             name: "RTX".into(),
             memory_total_bytes: None,
         });
-        time.advance(1);
+        time.advance(5);
         assert!(metrics.identity().await.unwrap().capabilities().gpu);
         assert_eq!(probe.identities.load(Ordering::SeqCst), 2);
+    }
+
+    /// Cartes qui comptent leurs détections.
+    struct CountedGpu(AtomicU32);
+
+    impl GpuProbe for CountedGpu {
+        fn detect(&self) -> Vec<GpuIdentity> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            vec![]
+        }
+
+        fn sample(&self) -> Vec<GpuReading> {
+            vec![]
+        }
+    }
+
+    #[tokio::test]
+    async fn the_gpu_detection_is_not_repeated_on_every_identity_request() {
+        let time = Time::new();
+        let gpu = Arc::new(CountedGpu(AtomicU32::new(0)));
+        let metrics = MetricsService::new(
+            Arc::new(FakeProbe::default()),
+            gpu.clone(),
+            time.clone(),
+            time.clone(),
+        );
+        for _ in 0..50 {
+            metrics.identity().await.unwrap();
+        }
+        // Une détection pour la lecture de l'identité, une pour la liste connue : pas cinquante.
+        assert!(
+            gpu.0.load(Ordering::SeqCst) <= 2,
+            "{}",
+            gpu.0.load(Ordering::SeqCst)
+        );
+        time.advance(6);
+        metrics.identity().await.unwrap();
+        assert!(gpu.0.load(Ordering::SeqCst) <= 4);
+    }
+
+    #[tokio::test]
+    async fn the_first_simultaneous_requests_after_the_warm_up_are_all_served() {
+        let time = Time::new();
+        let metrics = Arc::new(service(FakeProbe::default(), vec![], &time));
+        metrics.warm_up().await;
+        let results = futures_like_join(&metrics).await;
+        assert!(results.iter().all(Result::is_ok), "{results:?}");
+    }
+
+    async fn futures_like_join(
+        metrics: &Arc<MetricsService>,
+    ) -> Vec<Result<MachineIdentity, MetricsError>> {
+        let tasks: Vec<_> = (0..8)
+            .map(|_| {
+                let metrics = metrics.clone();
+                tokio::spawn(async move { metrics.identity().await })
+            })
+            .collect();
+        let mut out = Vec::new();
+        for task in tasks {
+            out.push(task.await.unwrap());
+        }
+        out
     }
 
     #[tokio::test]

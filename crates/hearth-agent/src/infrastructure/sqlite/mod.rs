@@ -6,6 +6,7 @@
 //! `CLAUDE.md` pour régénérer.
 
 mod account_repo;
+mod audit_repo;
 mod convert;
 mod login_attempt_repo;
 mod operation_repo;
@@ -22,6 +23,7 @@ use thiserror::Error;
 use super::data_dir;
 
 pub use account_repo::SqliteAccountRepo;
+pub use audit_repo::SqliteAuditRepo;
 pub use login_attempt_repo::SqliteLoginAttemptRepo;
 pub use operation_repo::SqliteOperationRepo;
 pub use session_repo::SqliteSessionRepo;
@@ -235,7 +237,7 @@ mod tests {
         Database::open(dir.path()).await.unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type = 'table'              AND name IN ('accounts', 'sessions', 'meta', 'login_attempts', 'operations', 'revoked_sessions') ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type = 'table'              AND name IN ('accounts', 'sessions', 'meta', 'login_attempts', 'operations', 'revoked_sessions', 'audit_events', 'audit_fts') ORDER BY name",
         )
         .fetch_all(db.pool())
         .await
@@ -244,6 +246,8 @@ mod tests {
             tables,
             [
                 "accounts",
+                "audit_events",
+                "audit_fts",
                 "login_attempts",
                 "meta",
                 "operations",

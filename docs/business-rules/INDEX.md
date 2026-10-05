@@ -28,7 +28,28 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-ACCT-013](./BR-ACCT-013-lecture-seule-sans-gestion-comptes.md) — Lecture seule : pas d'accès à la gestion des comptes — `domain/accounts/role.rs::Role::can_manage_accounts`, `entrypoint/http/auth.rs::guard` — ✓
 - [BR-ACCT-014](./BR-ACCT-014-serveur-refuse-gestion-lecture-seule.md) — Le serveur refuse la gestion de comptes à un compte lecture seule  — `domain/accounts/role.rs::Role::can_manage_accounts` — ✓
 - [BR-ACCT-015](./BR-ACCT-015-gestion-en-ligne-de-commande.md) — Gestion de comptes en ligne de commande sur le serveur — `entrypoint/account.rs::execute` — —
-- [BR-ACCT-016](./BR-ACCT-016-changements-consignes-au-journal.md) — Changements de compte consignés au journal (HRT-05, pas encore appliquée) — — — —
+- [BR-ACCT-016](./BR-ACCT-016-changements-consignes-au-journal.md) — Changements de compte consignés au journal — `application/accounts.rs::AccountService`, `domain/audit/policy.rs::is_journaled` — ✓
+- [BR-AUDIT-001](./BR-AUDIT-001-controle-acces-journal.md) — Seul un administrateur lit le journal — `domain/audit/policy.rs::can_read_journal` — invariant ✓
+- [BR-AUDIT-002](./BR-AUDIT-002-structure-entree.md) — Chaque entrée dit quand, qui, d'où, quoi, sur quoi et avec quel résultat — `domain/audit/event.rs::{AuditEvent, Actor, Origin, Target, Outcome, Reason, AuditRecord}` — —
+- [BR-AUDIT-003](./BR-AUDIT-003-evenements-journalises.md) — Connexions, refus, déconnexions, modifications et refus faute de droits sont journalisés — `domain/audit/policy.rs::is_journaled` — —
+- [BR-AUDIT-004](./BR-AUDIT-004-consultations-non-journalisees.md) — Les consultations ne sont pas journalisées — `domain/audit/policy.rs::is_journaled` — —
+- [BR-AUDIT-005](./BR-AUDIT-005-aucun-secret.md) — Aucun secret n'entre dans le journal — `domain/audit/event.rs` — invariant ✓
+- [BR-AUDIT-006](./BR-AUDIT-006-confidentialite-existence-compte.md) — Un échec de connexion ne dit pas si le compte existe — `domain/audit/event.rs::Reason::{InvalidCredentials, InvalidIdentifier}` — invariant ✓
+- [BR-AUDIT-007](./BR-AUDIT-007-blocage-temporaire.md) — Le blocage temporaire d'un compte est journalisé — `application/sessions.rs::SessionService::login_in_turn` — —
+- [BR-AUDIT-008](./BR-AUDIT-008-conservation-journal.md) — Le journal est conservé 90 jours ou 50 000 entrées — `domain/audit/policy.rs::{RETENTION, MAX_ENTRIES, retention_cutoff, excess_entries}` — invariant ✓
+- [BR-AUDIT-009](./BR-AUDIT-009-immutabilite-journal.md) — Le journal ne se modifie ni ne se vide depuis le client — `migrations/0003_audit_events.sql` — invariant ✓
+- [BR-AUDIT-010](./BR-AUDIT-010-affichage-temps-reel.md) — Les nouvelles entrées arrivent en direct — `application/ports/audit_sink.rs::AuditFeed` — —
+- [BR-AUDIT-011](./BR-AUDIT-011-donnees-perimees.md) — Données périmées quand le lien est coupé — — — —
+- [BR-AUDIT-012](./BR-AUDIT-012-fuseau-horaire-client.md) — L'heure s'affiche dans le fuseau du PC client — `entrypoint/http/wire.rs::date` — —
+- [BR-AUDIT-013](./BR-AUDIT-013-regroupement-rafales.md) — Les refus en rafale sont regroupés à l'affichage — — — —
+- [BR-AUDIT-014](./BR-AUDIT-014-gestion-filtres.md) — Les filtres appliqués restent visibles et se réinitialisent en un clic — `domain/audit/filter.rs::{AuditFilter, RawFilter}` — —
+- [BR-AUDIT-015](./BR-AUDIT-015-filtres-multi-valeurs-periode.md) — Compte, action et résultat acceptent plusieurs valeurs ; une période à la fois — `domain/audit/filter.rs::AuditFilter::new` — —
+- [BR-AUDIT-016](./BR-AUDIT-016-recherche-plein-texte.md) — La recherche plein texte porte sur tous les champs visibles — `domain/audit/filter.rs::SearchQuery::parse` — —
+- [BR-AUDIT-017](./BR-AUDIT-017-export-resultat-filtre.md) — L'export porte sur le résultat filtré — `domain/audit/csv.rs::{render, field}` — —
+- [BR-AUDIT-018](./BR-AUDIT-018-resultat-vide.md) — Aucun événement : message et bouton d'effacement — `application/audit.rs::AuditService::search` — —
+- [BR-AUDIT-019](./BR-AUDIT-019-indicateur-conservation.md) — L'indicateur de conservation est toujours visible — `domain/audit/policy.rs::{RETENTION, MAX_ENTRIES}` — —
+- [BR-AUDIT-020](./BR-AUDIT-020-rechargement-manuel.md) — Rechargement manuel quand le lien est coupé — — — —
+- [BR-AUDIT-021](./BR-AUDIT-021-journalisation-refus-acces.md) — Un refus d'accès au journal est lui-même journalisé — `entrypoint/http/mod.rs::ENDPOINTS` — invariant ✓
 - [BR-DASH-001](./BR-DASH-001-affichage-initial-complet.md) — Le tableau de bord affiche l'état complet de la machine dès sa première ouverture — `application/metrics.rs::MetricsService::{identity, history}, entrypoint/ws/connection.rs` — invariant ✓
 - [BR-DASH-002](./BR-DASH-002-rafraichissement-chaque-seconde.md) — Les mesures sont rafraîchies automatiquement chaque seconde — `entrypoint/tasks.rs::spawn_sampler, application/metrics.rs::MetricsService::sample_once` — invariant ✓
 - [BR-DASH-003](./BR-DASH-003-trois-niveaux-d-alerte.md) — Un état d'alerte comporte trois niveaux : normal, attention, critique — `hearth-proto/src/thresholds.rs::{percent_level, usage_level, temperature_level}` — invariant ✓

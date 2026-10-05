@@ -61,4 +61,4 @@ Les routes qui changent un mot de passe ou créent un compte répondent aussi `5
 
 ## Journal
 
-Les changements de compte seront consignés au journal d'activité avec HRT-05 (BR-ACCT-016) ; cette tâche n'écrit pas encore dans le journal.
+Chaque changement de compte réussi est consigné au journal d'activité, dans la transaction de l'action (BR-ACCT-016) ; un refus faute de droits et un échec de la requête le sont aussi (BR-AUDIT-003). Voir [journal](./audit.md).

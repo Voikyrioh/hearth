@@ -2,12 +2,14 @@
 //! C'est ici, et seulement dans `entrypoint/http`, que le contrat JSON est connu.
 
 use hearth_proto::api::accounts::{AccountInfo, AccountItem, RoleName};
+use hearth_proto::api::audit::{AuditEventItem, AuditOrigin, OriginKindName, OutcomeName};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use super::error::ApiError;
 use crate::application::accounts::{AccountSummary, AccountView};
 use crate::domain::accounts::Role;
+use crate::domain::audit::{AuditRecord, OriginKind, OutcomeKind};
 
 pub fn role_to_wire(role: Role) -> RoleName {
     match role {
@@ -46,6 +48,34 @@ pub fn account_item(account: &AccountView, sessions_open: usize) -> Result<Accou
         created_at: date(account.created_at)?,
         last_login_at: account.last_login_at.map(date).transpose()?,
         sessions_open: u64::try_from(sessions_open).unwrap_or(u64::MAX),
+    })
+}
+
+pub fn audit_item(record: &AuditRecord) -> Result<AuditEventItem, ApiError> {
+    Ok(AuditEventItem {
+        id: record.id,
+        at: date(record.at)?,
+        account: record.account.clone(),
+        origin: AuditOrigin {
+            kind: match record.origin_kind {
+                OriginKind::Client => OriginKindName::Client,
+                OriginKind::CommandLine => OriginKindName::Cli,
+                OriginKind::Assistant => OriginKindName::Assistant,
+            },
+            name: record.origin_name.clone(),
+            addr: record.origin_addr.clone(),
+            text: record.origin_text(),
+        },
+        action: record.action.clone(),
+        action_label: record.action_label.clone(),
+        target: record.target.clone(),
+        outcome: match record.outcome {
+            OutcomeKind::Ok => OutcomeName::Ok,
+            OutcomeKind::Denied => OutcomeName::Denied,
+            OutcomeKind::Failed => OutcomeName::Failed,
+        },
+        reason: record.reason.clone(),
+        repeat_count: record.repeat_count,
     })
 }
 

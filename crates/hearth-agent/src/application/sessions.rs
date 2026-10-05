@@ -12,14 +12,16 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use super::accounts::AccountView;
+use super::audit::{AuditTrail, Pending};
 use super::ports::{
     AccountRepo, Clock, HashError, IdGen, LoginAttemptRepo, PasswordHasher, SessionRepo, Store,
     StoreError, TokenGen, TokenGenError,
 };
 use crate::domain::accounts::Username;
+use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
 use crate::domain::lockout::{
-    AttemptKey, LockoutDecision, LockoutEvent, LockoutState, retry_after_seconds, step,
-    step_address,
+    AttemptKey, LockoutDecision, LockoutEvent, LockoutState, admits_in_queue, retry_after_seconds,
+    step, step_address,
 };
 use crate::domain::secret::Secret;
 use crate::domain::session_token::SessionToken;
@@ -49,6 +51,10 @@ pub enum LoginError {
     InvalidCredentials,
     #[error("Trop de tentatives, attends avant de réessayer")]
     TooManyAttempts { retry_after: Duration },
+    /// Trop de connexions en attente pour cette adresse : refus immédiat (`429`), sans compter
+    /// d'échec.
+    #[error("Trop de connexions en attente pour cette adresse")]
+    Busy,
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]
@@ -86,13 +92,24 @@ pub struct SessionService {
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     tokens: Arc<dyn TokenGen>,
+    trail: Arc<AuditTrail>,
     turns: Turns,
 }
 
-/// Tours de parole par adresse : une seule connexion à la fois pour une même adresse.
+/// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, et une file
+/// d'attente bornée (`domain::lockout::admits_in_queue`).
 #[derive(Default)]
-struct Turns(Mutex<HashMap<String, Arc<AsyncMutex<()>>>>);
+struct Turns(Mutex<HashMap<String, Slot>>);
 
+/// Une adresse : son verrou, et combien de connexions elle a d'admises (en cours et en attente).
+#[derive(Default)]
+struct Slot {
+    mutex: Arc<AsyncMutex<()>>,
+    in_flight: usize,
+}
+
+/// Place dans la file d'une adresse : rendue (et l'entrée oubliée si plus personne n'attend) à
+/// l'abandon, même si l'appelant est annulé pendant l'attente.
 struct Turn<'a> {
     turns: &'a Turns,
     key: String,
@@ -100,30 +117,38 @@ struct Turn<'a> {
 }
 
 impl Turns {
-    async fn lock(&self, key: &str) -> Turn<'_> {
+    /// Prend place dans la file de `key` et attend son tour ; `None` si la file de l'adresse est
+    /// pleine (refus immédiat).
+    async fn lock(&self, key: &str) -> Option<Turn<'_>> {
         let mutex = {
             let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            map.entry(key.to_owned()).or_default().clone()
+            let slot = map.entry(key.to_owned()).or_default();
+            if !admits_in_queue(slot.in_flight) {
+                return None;
+            }
+            slot.in_flight += 1;
+            slot.mutex.clone()
         };
-        let guard = mutex.lock_owned().await;
-        Turn {
+        let mut turn = Turn {
             turns: self,
             key: key.to_owned(),
-            guard: Some(guard),
-        }
+            guard: None,
+        };
+        turn.guard = Some(mutex.lock_owned().await);
+        Some(turn)
     }
 }
 
 impl Drop for Turn<'_> {
     fn drop(&mut self) {
-        // Rend le tour, puis oublie l'entrée si plus personne ne l'attend.
+        // Rend le tour, puis la place ; oublie l'entrée si plus personne ne l'attend.
         self.guard.take();
         let mut map = self.turns.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if map
-            .get(&self.key)
-            .is_some_and(|mutex| Arc::strong_count(mutex) == 1)
-        {
-            map.remove(&self.key);
+        if let Some(slot) = map.get_mut(&self.key) {
+            slot.in_flight = slot.in_flight.saturating_sub(1);
+            if slot.in_flight == 0 {
+                map.remove(&self.key);
+            }
         }
     }
 }
@@ -158,6 +183,7 @@ impl SessionService {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGen>,
         tokens: Arc<dyn TokenGen>,
+        trail: Arc<AuditTrail>,
     ) -> Self {
         Self {
             accounts,
@@ -168,6 +194,7 @@ impl SessionService {
             clock,
             ids,
             tokens,
+            trail,
             turns: Turns::default(),
         }
     }
@@ -176,8 +203,10 @@ impl SessionService {
     /// chemin : une vérification Argon2 (contre un haché factice si le compte n'existe pas), un
     /// échec compté, une transaction (BR-CONN-013).
     ///
-    /// Les connexions d'une même adresse sont traitées l'une après l'autre : le palier de verrouillage se joue sur des états à jour
-    /// (dix tentatives simultanées ne font pas dix vérifications).
+    /// Les connexions d'une même adresse sont traitées l'une après l'autre : le palier de
+    /// verrouillage se joue sur des états à jour (dix tentatives simultanées ne font pas dix
+    /// vérifications). Au plus huit attendent leur tour par adresse ; au-delà, la connexion est
+    /// refusée tout de suite (`LoginError::Busy`) et son mot de passe n'est pas gardé.
     pub async fn login(
         &self,
         username: &str,
@@ -188,21 +217,27 @@ impl SessionService {
         let address = AttemptKey::address(&client.addr);
         // Un seul tour, par adresse : le couple contient l'adresse, deux connexions du même couple
         // sont donc déjà sérialisées par le tour de leur adresse.
-        let _turn = self.turns.lock(address.as_str()).await;
+        let Some(_turn) = self.turns.lock(address.as_str()).await else {
+            tracing::warn!(
+                addr = %client.addr,
+                reason = "queue_full",
+                "connexion refusée : trop de connexions en attente pour cette adresse"
+            );
+            return Err(LoginError::Busy);
+        };
         let result = self
             .login_in_turn(username, password, client, &pair, &address)
             .await;
-        // Trace des refus : identifiant tenté, adresse, raison ; jamais le mot de passe. Le
-        // journal d'activité (HRT-05) se branchera ici pour consigner connexions et verrouillages.
+        // Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de
+        // passe tapé au mauvais endroit, BR-AUDIT-005) ni le mot de passe. Le journal d'activité
+        // consigne connexions et verrouillages (écrits dans la transaction de la tentative).
         match &result {
             Err(LoginError::InvalidCredentials) => tracing::warn!(
-                username = %pair.username(),
                 addr = %client.addr,
                 reason = "invalid_credentials",
                 "connexion refusée"
             ),
             Err(LoginError::TooManyAttempts { retry_after }) => tracing::warn!(
-                username = %pair.username(),
                 addr = %client.addr,
                 reason = "locked",
                 retry_after_s = retry_after_seconds(*retry_after),
@@ -239,6 +274,9 @@ impl SessionService {
             .as_ref()
             .map_or_else(|| self.hasher.decoy_hash(), |found| &found.password_hash);
         let verified = self.hasher.verify(&password, hash).await?;
+        // Le compte visé, pour le journal, seulement s'il existe : ce n'est alors pas un mot de
+        // passe tapé à la place de l'identifiant (BR-AUDIT-005, 006).
+        let targeted = account.as_ref().map(|found| found.username.clone());
         let verified_account = account.filter(|_| verified);
 
         // 3. Issue, dans une seule transaction : compteurs, et pour un succès la session et la
@@ -267,8 +305,41 @@ impl SessionService {
             tx.login_attempts()
                 .save(address, &address_next, now)
                 .await?;
+            // Journal (BR-AUDIT-003, 005, 006, 007), dans la transaction des compteurs : la
+            // tentative refusée, avec le compte visé seulement s'il existe (la raison est la même
+            // que l'identifiant existe ou non, et l'identifiant saisi n'est jamais retenu),
+            // puis le blocage qu'elle a éventuellement déclenché.
+            let wait = longest_wait(&[pair_decision, address_decision]);
+            let actor = Actor::new(targeted, Origin::client(Some(&client.name), &client.addr));
+            let reason = if Username::parse(username).is_err() {
+                Reason::InvalidIdentifier
+            } else {
+                Reason::InvalidCredentials
+            };
+            let mut journal = Pending::default();
+            let denied = AuditEvent::new(
+                now,
+                actor.clone(),
+                AuditAction::Login,
+                Target::None,
+                Outcome::Denied(reason),
+            );
+            journal.record(&mut *tx, denied).await?;
+            if let Some(retry_after) = wait {
+                let locked = AuditEvent::new(
+                    now,
+                    actor,
+                    AuditAction::LoginLocked,
+                    Target::None,
+                    Outcome::Denied(Reason::TooManyAttempts {
+                        retry_after_s: retry_after_seconds(retry_after),
+                    }),
+                );
+                journal.record(&mut *tx, locked).await?;
+            }
             tx.commit().await?;
-            return Err(match longest_wait(&[pair_decision, address_decision]) {
+            journal.publish(&self.trail);
+            return Err(match wait {
                 Some(retry_after) => LoginError::TooManyAttempts { retry_after },
                 None => LoginError::InvalidCredentials,
             });
@@ -289,7 +360,20 @@ impl SessionService {
         };
         tx.sessions().insert(&session).await?;
         tx.accounts().record_login(&account.id, now).await?;
+        let mut journal = Pending::default();
+        let succeeded = AuditEvent::new(
+            now,
+            Actor::new(
+                Some(account.username.clone()),
+                Origin::client(Some(&client.name), &client.addr),
+            ),
+            AuditAction::Login,
+            Target::None,
+            Outcome::Succeeded,
+        );
+        journal.record(&mut *tx, succeeded).await?;
         tx.commit().await?;
+        journal.publish(&self.trail);
 
         let mut view = AccountView::from(&account);
         view.last_login_at = Some(now);
@@ -335,10 +419,22 @@ impl SessionService {
         })
     }
 
-    /// Déconnexion explicite : supprime la session courante.
-    pub async fn logout(&self, session: &SessionId) -> Result<(), StoreError> {
+    /// Déconnexion explicite : supprime la session courante. `by` : le compte et l'origine de la
+    /// requête (journal d'activité, BR-AUDIT-003).
+    pub async fn logout(&self, session: &SessionId, by: &Actor) -> Result<(), StoreError> {
         let mut tx = self.store.begin().await?;
         tx.sessions().delete(session).await?;
-        tx.commit().await
+        let mut journal = Pending::default();
+        let event = AuditEvent::new(
+            self.clock.now(),
+            by.clone(),
+            AuditAction::Logout,
+            Target::None,
+            Outcome::Succeeded,
+        );
+        journal.record(&mut *tx, event).await?;
+        tx.commit().await?;
+        journal.publish(&self.trail);
+        Ok(())
     }
 }

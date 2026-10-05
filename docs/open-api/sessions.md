@@ -33,6 +33,7 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 | 429 | `TOO_MANY_ATTEMPTS` | 5 échecs pour ce couple identifiant + adresse, ou 20 échecs en 10 minutes pour cette adresse tous identifiants confondus ; `details.retry_after_s` (BR-CONN-006, BR-CONN-007). Même le bon mot de passe est refusé pendant l'attente. |
 | 422 | `VALIDATION_ERROR` | Corps illisible ou champ manquant, ou `X-Hearth-Api` absent. |
 | 503 | `BUSY` | Trop de vérifications de mot de passe en cours : réessayer après `Retry-After` (1 s). |
+| 429 | `TOO_MANY_ATTEMPTS` | Aussi quand plus de huit connexions attendent déjà pour la même adresse : `details.retry_after_s = 1`. |
 | 426 | `INCOMPATIBLE_VERSION` | Version d'interface hors plage ; `details.upgrade` : `client` ou `agent` (BR-CONN-014). |
 
 ## `DELETE /api/v1/sessions/current` : se déconnecter

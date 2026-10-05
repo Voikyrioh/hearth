@@ -4,17 +4,29 @@
 //! d'accès déclaré dans `ENDPOINTS` : session valable, puis rôle pour une route réservée aux
 //! administrateurs (BR-ACCT-013 et BR-ACCT-014), avant toute lecture du corps. Un handler ne
 //! redéclare rien : il reçoit le contexte authentifié par l'extracteur `Caller`. La couche pose
-//! aussi le suivi des opérations quand la table le demande.
+//! aussi le suivi des opérations quand la table le demande, et consigne au journal d'activité les
+//! refus faute de droits et les échecs des requêtes qui modifient (BR-AUDIT-003), d'après la
+//! colonne « action de journal » de la table : un handler n'y pense pas.
 
-use axum::extract::{FromRequestParts, Request, State};
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, FromRequestParts, Request, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use hearth_proto::error::ErrorCode;
+use hearth_proto::headers;
 
+use tracing::Instrument;
+
+use super::error::ErrorMark;
 use super::{Access, ApiError, AppState, operations};
 use crate::application::sessions::CurrentSession;
+use crate::domain::accounts::AccountId;
+use crate::domain::audit::{
+    Actor, AuditAction, Origin, Outcome, Reason, RequestKind, Target, is_journaled,
+};
 
 /// Ce que la couche d'accès a décidé pour une route : son niveau, et si ses requêtes qui
 /// portent une clé d'opération sont suivies.
@@ -23,6 +35,111 @@ pub struct GuardState {
     pub app: AppState,
     pub access: Access,
     pub tracked: bool,
+    /// L'action du journal d'activité de la route (`Endpoint::audit`).
+    pub audit: Option<AuditAction>,
+    /// La route modifie quelque chose (`Endpoint::modifies`).
+    pub modifies: bool,
+    /// Le motif de la route (`/accounts/{id}`) : la cible d'un refus ou d'un échec.
+    pub route: &'static str,
+}
+
+impl GuardState {
+    /// Consigne un refus ou un échec si la route a une action et si la règle du journal le veut
+    /// (`domain::audit::is_journaled`). Un échec d'écriture est tracé, jamais subi par l'appelant.
+    async fn journal(&self, actor: &Actor, target: Target, outcome: Outcome) {
+        let Some(action) = self.audit else {
+            return;
+        };
+        let kind = if self.modifies {
+            RequestKind::Modification
+        } else {
+            RequestKind::Consultation
+        };
+        if !is_journaled(kind, outcome.kind()) {
+            return;
+        }
+        // Tâche détachée, dans le span de la requête : un client qui coupe n'annule pas l'écriture.
+        let sink = self.app.sink.clone();
+        let actor = actor.clone();
+        let write = tokio::spawn(
+            async move { sink.record(actor, action, target, outcome).await }.in_current_span(),
+        );
+        if let Err(error) = write.await {
+            tracing::error!(%error, "écriture du journal interrompue");
+        }
+    }
+
+    /// La cible d'une action sur `/accounts/{id}…` : le nom du compte, résolu **avant** l'action
+    /// (l'action peut supprimer le compte). Sans identifiant dans la route, ou compte inconnu : le
+    /// motif de la route.
+    async fn target_of(&self, parts: &Parts) -> Target {
+        if self.audit.is_none() {
+            return Target::Route(self.route);
+        }
+        let Some(id) = path_param(self.route, parts.uri.path(), "id") else {
+            return Target::Route(self.route);
+        };
+        match self.app.accounts.username_of(&AccountId::new(id)).await {
+            Ok(Some(username)) => Target::Account(username),
+            Ok(None) => Target::Route(self.route),
+            Err(error) => {
+                tracing::warn!(%error, "cible du journal non résolue");
+                Target::Route(self.route)
+            }
+        }
+    }
+}
+
+/// La valeur du paramètre `name` du chemin `path` d'après le motif de la route (`/accounts/{id}`) :
+/// les segments se comparent par la fin, que le chemin porte ou non son préfixe `/api/v1`.
+fn path_param(pattern: &str, path: &str, name: &str) -> Option<String> {
+    let wanted = format!("{{{name}}}");
+    let pattern: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    let path: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let offset = path.len().checked_sub(pattern.len())?;
+    pattern
+        .iter()
+        .position(|segment| *segment == wanted)
+        .and_then(|index| path.get(offset + index))
+        .map(|value| (*value).to_owned())
+}
+
+/// Le refus faute de droits, dit pour ce que la route protège.
+fn forbidden_message(action: Option<AuditAction>) -> &'static str {
+    match action {
+        Some(AuditAction::AuditRead) => "Tu n'as pas la permission de lire le journal d'activité",
+        _ => "Tu n'as pas la permission pour accéder à la gestion des comptes",
+    }
+}
+
+/// Ce que le journal retient d'une réponse d'erreur : un refus faute de droits, ou un échec.
+/// `None` pour ce qui n'est pas une action ratée : pas d'appelant reconnu, connexion (qui se
+/// consigne elle-même), requête qui ne s'est pas exécutée (clé d'opération rejouée ou déjà en
+/// cours), version incompatible, route ou méthode inconnue. Exhaustif : un nouveau code oblige à
+/// choisir.
+fn failure_of(code: ErrorCode) -> Option<Outcome> {
+    match code {
+        ErrorCode::ForbiddenRole => Some(Outcome::Denied(Reason::ReadOnly)),
+        ErrorCode::ValidationError | ErrorCode::WeakPassword | ErrorCode::PayloadTooLarge => {
+            Some(Outcome::Failed(Reason::Validation))
+        }
+        ErrorCode::UsernameTaken => Some(Outcome::Failed(Reason::UsernameTaken)),
+        ErrorCode::WrongPassword => Some(Outcome::Failed(Reason::WrongPassword)),
+        ErrorCode::LastAdmin => Some(Outcome::Failed(Reason::LastAdmin)),
+        ErrorCode::Conflict => Some(Outcome::Failed(Reason::Conflict)),
+        ErrorCode::NotFound => Some(Outcome::Failed(Reason::NotFound)),
+        ErrorCode::Busy => Some(Outcome::Failed(Reason::Busy)),
+        ErrorCode::InternalError => Some(Outcome::Failed(Reason::Internal)),
+        ErrorCode::Unauthenticated
+        | ErrorCode::InvalidCredentials
+        | ErrorCode::SessionExpired
+        | ErrorCode::SessionRevoked
+        | ErrorCode::OperationInProgress
+        | ErrorCode::IdempotencyKeyReused
+        | ErrorCode::IncompatibleVersion
+        | ErrorCode::TooManyAttempts
+        | ErrorCode::MethodNotAllowed => None,
+    }
 }
 
 /// Lit le jeton de `Authorization: Bearer <jeton>`.
@@ -55,6 +172,21 @@ fn allows(access: Access, session: &CurrentSession) -> bool {
     }
 }
 
+/// D'où vient la requête : l'adresse de la connexion TCP (jamais un en-tête de mandataire) et le
+/// nom du poste annoncé par le client.
+fn origin_of(parts: &Parts) -> Origin {
+    let addr = parts
+        .extensions
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| addr.ip().to_canonical().to_string())
+        .unwrap_or_default();
+    let name = parts
+        .headers
+        .get(headers::CLIENT)
+        .and_then(|value| value.to_str().ok());
+    Origin::client(name, &addr)
+}
+
 /// La couche d'accès d'une route non publique.
 pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next) -> Response {
     let (mut parts, body) = request.into_parts();
@@ -62,20 +194,45 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         Ok(session) => session,
         Err(error) => return error.into_response(),
     };
+    let actor = Actor::new(Some(session.account.username.clone()), origin_of(&parts));
     if !allows(guard.access, &session) {
-        return ApiError::new(
-            ErrorCode::ForbiddenRole,
-            "Tu n'as pas la permission pour accéder à la gestion des comptes",
-        )
-        .into_response();
+        // Le nom du compte visé n'est lu que pour un refus à écrire.
+        let target = guard.target_of(&parts).await;
+        // BR-AUDIT-003, BR-AUDIT-021 : toute action refusée faute de droits est consignée,
+        // consultation du journal comprise.
+        guard
+            .journal(&actor, target, Outcome::Denied(Reason::ReadOnly))
+            .await;
+        return ApiError::new(ErrorCode::ForbiddenRole, forbidden_message(guard.audit))
+            .into_response();
     }
+    // Pour une requête qui modifie seulement : l'action peut supprimer le compte visé, il faut le
+    // nommer avant. Une lecture réussie n'écrit rien : rien à résoudre.
+    let target = if guard.modifies {
+        guard.target_of(&parts).await
+    } else {
+        Target::Route(guard.route)
+    };
+    parts.extensions.insert(Requester(actor.clone()));
     parts.extensions.insert(Caller(session.clone()));
     let request = Request::from_parts(parts, body);
-    if guard.tracked {
+    let response = if guard.tracked {
         operations::track(&guard.app, session, request, next).await
     } else {
         next.run(request).await
+    };
+    // Un échec de la requête (jamais le succès : le cas d'usage l'a écrit dans sa transaction).
+    // Une réponse rejouée depuis la clé d'opération ne s'est pas exécutée : rien à consigner.
+    let replayed = response
+        .headers()
+        .contains_key(headers::IDEMPOTENT_REPLAYED);
+    if !replayed
+        && let Some(ErrorMark(code)) = response.extensions().get::<ErrorMark>().copied()
+        && let Some(outcome) = failure_of(code)
+    {
+        guard.journal(&actor, target, outcome).await;
     }
+    response
 }
 
 /// Le compte et la session de l'appelant, posés par la couche d'accès. Un handler de route
@@ -90,6 +247,23 @@ impl<S: Send + Sync> FromRequestParts<S> for Caller {
         parts
             .extensions
             .get::<Caller>()
+            .cloned()
+            .ok_or_else(|| ApiError::internal(&"route sans couche d'accès"))
+    }
+}
+
+/// Qui fait la requête, pour le journal d'activité : le compte de l'appelant et l'origine de la
+/// demande. Posé par la couche d'accès, comme `Caller`.
+#[derive(Clone)]
+pub struct Requester(pub Actor);
+
+impl<S: Send + Sync> FromRequestParts<S> for Requester {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<Requester>()
             .cloned()
             .ok_or_else(|| ApiError::internal(&"route sans couche d'accès"))
     }
@@ -144,6 +318,69 @@ mod tests {
         assert!(!allows(Access::Admin, &session(Role::ReadOnly)));
         for access in [Access::Public, Access::FirstMessage, Access::Authenticated] {
             assert!(allows(access, &session(Role::ReadOnly)));
+        }
+    }
+
+    #[test]
+    fn the_account_id_is_read_from_the_route_pattern_with_or_without_the_prefix() {
+        for path in ["/accounts/01ABC", "/api/v1/accounts/01ABC"] {
+            assert_eq!(
+                path_param("/accounts/{id}", path, "id").as_deref(),
+                Some("01ABC")
+            );
+        }
+        assert_eq!(
+            path_param(
+                "/accounts/{id}/password",
+                "/api/v1/accounts/01ABC/password",
+                "id"
+            )
+            .as_deref(),
+            Some("01ABC")
+        );
+        assert_eq!(path_param("/accounts", "/api/v1/accounts", "id"), None);
+        assert_eq!(path_param("/accounts/{id}", "/x", "id"), None);
+    }
+
+    #[test]
+    fn a_refusal_speaks_of_what_the_route_protects() {
+        assert!(forbidden_message(Some(AuditAction::AuditRead)).contains("journal"));
+        assert!(forbidden_message(Some(AuditAction::AccountCreate)).contains("comptes"));
+        assert!(forbidden_message(None).contains("comptes"));
+    }
+
+    #[test]
+    fn an_error_is_journaled_as_a_denial_or_a_failure_and_never_as_noise() {
+        use ErrorCode::*;
+        let outcome = |code| failure_of(code).map(|outcome| outcome.kind().code());
+        assert_eq!(outcome(ForbiddenRole), Some("denied"));
+        for code in [
+            ValidationError,
+            WeakPassword,
+            PayloadTooLarge,
+            UsernameTaken,
+            WrongPassword,
+            LastAdmin,
+            Conflict,
+            NotFound,
+            Busy,
+            InternalError,
+        ] {
+            assert_eq!(outcome(code), Some("failed"), "{code:?}");
+        }
+        // Pas une action ratée : pas d'appelant, connexion, requête non exécutée, routage.
+        for code in [
+            Unauthenticated,
+            InvalidCredentials,
+            SessionExpired,
+            SessionRevoked,
+            OperationInProgress,
+            IdempotencyKeyReused,
+            IncompatibleVersion,
+            TooManyAttempts,
+            MethodNotAllowed,
+        ] {
+            assert_eq!(outcome(code), None, "{code:?}");
         }
     }
 

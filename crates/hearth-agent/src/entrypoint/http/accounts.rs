@@ -12,7 +12,7 @@ use hearth_proto::api::accounts::{
     CreateAccountRequest, DeleteAccountRequest, SessionsClosedResponse, SetPasswordRequest,
 };
 
-use super::auth::Caller;
+use super::auth::{Caller, Requester};
 use super::{ApiError, AppState, wire};
 use crate::domain::accounts::AccountId;
 use crate::domain::secret::Secret;
@@ -38,6 +38,7 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<AccountsResponse
 /// `POST /api/v1/accounts` : crée un compte.
 pub async fn create(
     State(state): State<AppState>,
+    Requester(by): Requester,
     body: Result<Json<CreateAccountRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<AccountItem>), ApiError> {
     let Json(request) = body?;
@@ -47,6 +48,7 @@ pub async fn create(
             &request.username,
             Secret::from(request.password),
             wire::role_from_wire(request.role),
+            &by,
         )
         .await?;
     Ok((StatusCode::CREATED, Json(wire::account_item(&account, 0)?)))
@@ -55,13 +57,14 @@ pub async fn create(
 /// `PATCH /api/v1/accounts/{id}` : change le rôle (jamais celui du dernier administrateur).
 pub async fn change_role(
     State(state): State<AppState>,
+    Requester(by): Requester,
     Path(id): Path<String>,
     body: Result<Json<ChangeRoleRequest>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
     let Json(request) = body?;
     state
         .accounts
-        .change_role(&AccountId::new(id), wire::role_from_wire(request.role))
+        .change_role(&AccountId::new(id), wire::role_from_wire(request.role), &by)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -71,6 +74,7 @@ pub async fn change_role(
 pub async fn delete(
     State(state): State<AppState>,
     Caller(caller): Caller,
+    Requester(by): Requester,
     Path(id): Path<String>,
     body: Bytes,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
@@ -86,6 +90,7 @@ pub async fn delete(
             &AccountId::new(id),
             Some(&caller.account.id),
             request.confirmation.as_deref(),
+            &by,
         )
         .await?;
     Ok(closed(count))
@@ -95,13 +100,14 @@ pub async fn delete(
 /// ses sessions sont fermées (BR-ACCT-008).
 pub async fn set_password(
     State(state): State<AppState>,
+    Requester(by): Requester,
     Path(id): Path<String>,
     body: Result<Json<SetPasswordRequest>, JsonRejection>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
     let Json(request) = body?;
     let count = state
         .accounts
-        .set_password(&AccountId::new(id), Secret::from(request.password))
+        .set_password(&AccountId::new(id), Secret::from(request.password), &by)
         .await?;
     Ok(closed(count))
 }
@@ -109,9 +115,13 @@ pub async fn set_password(
 /// `DELETE /api/v1/accounts/{id}/sessions` : ferme toutes les sessions du compte (BR-ACCT-011).
 pub async fn revoke_sessions(
     State(state): State<AppState>,
+    Requester(by): Requester,
     Path(id): Path<String>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
-    let count = state.accounts.revoke_sessions(&AccountId::new(id)).await?;
+    let count = state
+        .accounts
+        .revoke_sessions(&AccountId::new(id), &by)
+        .await?;
     Ok(closed(count))
 }
 
@@ -120,6 +130,7 @@ pub async fn revoke_sessions(
 pub async fn change_own_password(
     State(state): State<AppState>,
     Caller(caller): Caller,
+    Requester(by): Requester,
     body: Result<Json<ChangeOwnPasswordRequest>, JsonRejection>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
     let Json(request) = body?;
@@ -130,6 +141,7 @@ pub async fn change_own_password(
             Secret::from(request.current),
             Secret::from(request.password),
             Some(caller.session_id),
+            &by,
         )
         .await?;
     Ok(closed(count))

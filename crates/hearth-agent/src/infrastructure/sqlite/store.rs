@@ -4,14 +4,14 @@
 //!
 //! `SqliteUnitOfWork` implémente les ports d'écriture de chaque sujet ; chacun vit dans le
 //! fichier de son sujet (`account_repo.rs`, `session_repo.rs`, `login_attempt_repo.rs`,
-//! `operation_repo.rs`). Ce fichier ne fait qu'ouvrir et valider la transaction.
+//! `operation_repo.rs`, `audit_repo.rs`). Ce fichier ne fait qu'ouvrir et valider la transaction.
 
 use async_trait::async_trait;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::convert::storage;
 use crate::application::ports::{
-    AccountTx, LoginAttemptTx, OperationTx, SessionTx, Store, StoreError, UnitOfWork,
+    AccountTx, AuditTx, LoginAttemptTx, OperationTx, SessionTx, Store, StoreError, UnitOfWork,
 };
 
 /// Ressource nommée par les erreurs d'ouverture et de validation d'une unité de travail : le
@@ -60,6 +60,10 @@ impl UnitOfWork for SqliteUnitOfWork {
     }
 
     fn operations(&mut self) -> &mut dyn OperationTx {
+        self
+    }
+
+    fn audit(&mut self) -> &mut dyn AuditTx {
         self
     }
 

@@ -15,8 +15,8 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
+use crate::api::audit::AuditEventItem;
 use crate::api::machine::MachineResponse;
 use crate::api::metrics::Sample;
 use crate::error::ErrorDetail;
@@ -88,9 +88,10 @@ pub enum ServerMessage {
     },
     /// Un échantillon, chaque seconde (les champs de [`Sample`] sont à plat à côté de `type`).
     Metrics(Sample),
-    /// Un événement du journal d'activité, dans la forme que le journal lui donne.
+    /// Un événement du journal d'activité (administrateurs seulement), dans la même forme que
+    /// `GET /audit`.
     Audit {
-        event: Value,
+        event: AuditEventItem,
     },
     Session {
         kind: SessionNotice,
@@ -190,7 +191,23 @@ mod tests {
                 kind: SessionNotice::Revoked,
             },
             ServerMessage::Audit {
-                event: json!({ "id": 1 }),
+                event: crate::api::audit::AuditEventItem {
+                    id: 1,
+                    at: "2026-10-04T10:30:15.250Z".into(),
+                    account: Some("marie".into()),
+                    origin: crate::api::audit::AuditOrigin {
+                        kind: crate::api::audit::OriginKindName::Cli,
+                        name: None,
+                        addr: None,
+                        text: "ligne de commande du serveur".into(),
+                    },
+                    action: "login".into(),
+                    action_label: "Connexion".into(),
+                    target: None,
+                    outcome: crate::api::audit::OutcomeName::Ok,
+                    reason: None,
+                    repeat_count: 0,
+                },
             },
             ServerMessage::Error(ErrorDetail {
                 code: ErrorCode::Unauthenticated,
