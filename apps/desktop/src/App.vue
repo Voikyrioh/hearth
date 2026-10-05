@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { defineAsyncComponent } from "vue";
-import { RouterView, useRoute } from "vue-router";
+import { RouterView } from "vue-router";
 import ErrorBoundary from "@/components/molecules/ErrorBoundary.vue";
 import ToastStack from "@/components/molecules/ToastStack.vue";
 import ServerRail from "@/components/organisms/ServerRail.vue";
 import { reportUiError } from "@/errors/report";
 import { useLinkStore } from "@/stores/link";
-
-const route = useRoute();
 
 // L'interface écoute le pont de liaison dès le démarrage (états des liens, issues d'opérations).
 useLinkStore()
@@ -24,7 +22,13 @@ const DevLinkPanel = import.meta.env.DEV
   <div class="shell">
     <ServerRail />
     <div class="shell__content">
-      <ErrorBoundary :reset-key="route.fullPath"><RouterView /></ErrorBoundary>
+      <!-- La coquille (barre des serveurs, ci-dessus) n'est dans aucune frontière. Les vues d'un serveur
+           ont leur propre frontière DANS le gabarit, sous l'en-tête : navigation, pastille du lien et
+           bandeau ne sont jamais remplacés. -->
+      <RouterView v-slot="{ Component, route: view }">
+        <component :is="Component" v-if="view.matched.some((r) => r.meta.ownBoundary)" />
+        <ErrorBoundary v-else :reset-key="view.fullPath"><component :is="Component" /></ErrorBoundary>
+      </RouterView>
     </div>
   </div>
   <ToastStack />

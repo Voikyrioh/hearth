@@ -1,5 +1,5 @@
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, defineComponent, h } from "vue";
 import { useToastsStore } from "@/stores/toasts";
@@ -98,12 +98,5 @@ describe("installErrorHandlers", () => {
     await flushPromises();
     expect(calls.map((c) => c.args?.source)).toEqual(["unhandledrejection", "window"]);
     expect(useToastsStore().items[0]?.count).toBe(2);
-  });
-
-  it("mounts without a blank screen when a page crashes under the app", async () => {
-    const wrapper = mount(defineComponent({ render: () => h("p", "ok") }), {
-      global: { plugins: [freshBridge().pinia] },
-    });
-    expect(wrapper.text()).toBe("ok");
   });
 });

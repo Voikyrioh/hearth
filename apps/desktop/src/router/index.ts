@@ -22,6 +22,8 @@ declare module "vue-router" {
     title?: MessageKey;
     /** Vue réservée au rôle administrateur (BR-ACCT-013). */
     adminOnly?: boolean;
+    /** La vue a sa propre frontière d'erreur (gabarit de serveur) : `App.vue` n'en pose pas autour. */
+    ownBoundary?: boolean;
   }
 }
 
@@ -38,7 +40,9 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
       { path: "/welcome", name: "welcome", component: Welcome },
       {
         path: "/servers/:id",
+        name: "server",
         component: ServerLayout,
+        meta: { ownBoundary: true },
         children: [
           { path: "", redirect: { name: "dashboard" } },
           {

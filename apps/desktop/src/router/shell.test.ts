@@ -1,6 +1,8 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defineComponent, h } from "vue";
 import App from "@/App.vue";
+import { reportUiError } from "@/errors/report";
 import { mountContext } from "@/test/mount";
 
 beforeEach(() =>
@@ -10,11 +12,21 @@ beforeEach(() =>
 );
 afterEach(() => vi.useRealTimers());
 
-async function boot(path: string, options: Parameters<typeof mountContext>[0] = {}) {
+async function boot(
+  path: string,
+  options: Parameters<typeof mountContext>[0] = {},
+  prepare?: (router: Awaited<ReturnType<typeof mountContext>>["router"]) => void,
+) {
   const ctx = await mountContext(options);
+  prepare?.(ctx.router);
   await ctx.router.push(path);
   await ctx.router.isReady();
-  const wrapper = mount(App, { global: ctx.global, attachTo: document.body });
+  // Comme `main.ts` : le gestionnaire global rapporte ce qu'aucune frontière n'a pris.
+  const global = {
+    ...ctx.global,
+    config: { errorHandler: (error: unknown) => reportUiError(error, "test") },
+  };
+  const wrapper = mount(App, { global, attachTo: document.body });
   await flushPromises();
   return { ...ctx, wrapper };
 }
@@ -156,6 +168,83 @@ describe("shell of a server", () => {
     await router.push("/servers/forge/dashboard");
     await flushPromises();
     expect(wrapper.get(".head [role=status]").text()).toBe("Connecté");
+    wrapper.unmount();
+  });
+});
+
+describe("error containment: the shell is never replaced", () => {
+  const BrokenRender = defineComponent({
+    setup() {
+      throw new Error("rendu cassé");
+    },
+    render: () => h("p"),
+  });
+  const BrokenClick = defineComponent({
+    setup: () => ({
+      boom() {
+        throw new Error("clic cassé");
+      },
+    }),
+    template: '<button type="button" class="page-action" @click="boom">Agir</button>',
+  });
+  const addBroken = (router: Parameters<NonNullable<Parameters<typeof boot>[2]>>[0]) => {
+    router.addRoute("server", {
+      path: "render",
+      name: "render",
+      component: BrokenRender,
+      meta: { title: "pages.dashboard" },
+    });
+    router.addRoute("server", {
+      path: "click",
+      name: "click",
+      component: BrokenClick,
+      meta: { title: "pages.dashboard" },
+    });
+  };
+
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
+
+  it("a rejecting action (retryNow) leaves the shell and the page intact, with a discreet notification", async () => {
+    const { wrapper, bridge } = await boot("/servers/forge/dashboard");
+    vi.spyOn(bridge, "retryNow").mockRejectedValue(new Error("liaison en panne"));
+    bridge.setState("forge", "offline");
+    await flushPromises();
+    await wrapper.get(".banner button").trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.find('nav[aria-label="Serveurs"]').exists()).toBe(true);
+    expect(wrapper.find('nav[aria-label="Navigation du serveur"]').exists()).toBe(true);
+    expect(wrapper.get(".head [role=status]").text()).toBe("Hors ligne");
+    expect(wrapper.find(".banner").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Bientôt disponible");
+    expect(wrapper.get(".toast").text()).toContain("problème est survenu");
+    wrapper.unmount();
+  });
+
+  it("a page whose render crashes shows the fallback but keeps the shell usable and the pill visible", async () => {
+    const { wrapper, router } = await boot("/servers/forge/dashboard", {}, addBroken);
+    await router.push("/servers/forge/render");
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain("Cette page a rencontré un problème");
+    expect(wrapper.get(".head [role=status]").text()).toBe("Connecté");
+    expect(wrapper.find('nav[aria-label="Serveurs"]').exists()).toBe(true);
+    // La navigation fonctionne encore : on quitte la page cassée.
+    await wrapper.findAll(".nav__item")[0]?.trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.name).toBe("dashboard");
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("an event handler that throws inside a page does not replace the page", async () => {
+    const { wrapper, router } = await boot("/servers/forge/dashboard", {}, addBroken);
+    await router.push("/servers/forge/click");
+    await flushPromises();
+    await wrapper.get(".page-action").trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.find(".page-action").exists()).toBe(true);
+    expect(wrapper.get(".toast").text()).toContain("problème est survenu");
     wrapper.unmount();
   });
 });

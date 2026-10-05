@@ -5,16 +5,21 @@ import { reportUiError } from "@/errors/report";
 import { t } from "@/i18n";
 import EmptyState from "./EmptyState.vue";
 
-// Frontière d'erreur : une page qui plante est remplacée par un message avec « Réessayer »,
+// Frontière d'erreur du CONTENU d'une page (jamais de la coquille) : une page dont le rendu plante est remplacée par un message avec « Réessayer »,
 // la coquille autour reste utilisable (jamais d'écran blanc). L'erreur est notifiée
 // discrètement et journalisée ; `resetKey` (la route) relance l'affichage au changement de page.
 const props = withDefaults(defineProps<{ resetKey?: string }>(), { resetKey: undefined });
 
 const failed = ref(false);
 
+// Seule une erreur de RENDU (ou de cycle de vie) remplace la page par le repli. Une erreur de
+// gestionnaire d'événement, de surveillant ou une promesse rejetée (ex. « Réessayer maintenant »)
+// ne détruit rien : notification discrète et journal, la page reste affichée.
+const RENDER_PHASES = /^(setup function|render function|component update|scheduler flush|.* hook)$/;
+
 onErrorCaptured((error, _instance, info) => {
-  failed.value = true;
   reportUiError(error, `boundary:${info}`);
+  if (RENDER_PHASES.test(info)) failed.value = true;
   return false;
 });
 
