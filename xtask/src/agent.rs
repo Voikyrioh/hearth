@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 
 use crate::docker::{self, args, mount_path};
 
-pub const IMAGE: &str = "rust:1.95-alpine";
+pub const IMAGE: &str =
+    "rust:1.95-alpine@sha256:606fd313a0f49743ee2a7bd49a0914bab7deedb12791f3a846a34a4711db7ed2";
 pub const TARGET: &str = "x86_64-unknown-linux-musl";
 
 /// Exécuté dans le conteneur. Constante : aucune valeur n'y est insérée, tout vient de

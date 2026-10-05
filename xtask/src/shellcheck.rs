@@ -10,7 +10,7 @@ pub fn run() -> Result<(), String> {
         mount_path(&deploy)
     ));
     command.extend(args(&[
-        "koalaman/shellcheck:stable",
+        "koalaman/shellcheck:stable@sha256:bb596a0d169b85ddd81d8b6d3a2ff6d5baf5fca10b97f575ebc647c3dff62b3d",
         "-s",
         "sh",
         "-S",
