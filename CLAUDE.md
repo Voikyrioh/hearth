@@ -50,6 +50,20 @@ Si `cargo sqlx` manque ou n'a pas le pilote SQLite : `cargo install sqlx-cli --n
 
 `hearth-agent account add|list|passwd|role|remove|revoke` (voir `docs/runbooks/recuperer-acces-administrateur.md`). Le mot de passe n'est jamais un argument : saisie sans écho, ou `HEARTH_ACCOUNT_PASSWORD`.
 
+## Binaire de l'agent, installation (HRT-15)
+
+Docker est requis (conteneurs jetables ; rien n'est installé sur le poste, jamais sur un vrai serveur).
+
+```sh
+cargo xtask agent         # binaire statique x86_64-unknown-linux-musl construit dans rust:1.95-alpine ; vérifié statique (file, readelf) ; taille et SHA-256 affichés ; sortie target/dist/hearth-agent
+cargo xtask e2e-install   # installation de bout en bout dans un conteneur Debian avec systemd (scénario deploy/e2e/scenario.sh) : install.sh, /hello, connexion, empreinte, réinstallation, désinstallation, purge, retour en arrière, installation gérée
+cargo xtask shellcheck    # deploy/install.sh et le scénario, shellcheck en conteneur
+```
+
+Le cache Cargo du conteneur est un volume nommé (`hearth-xtask-cargo`, `hearth-xtask-target`) ; `HEARTH_XTASK_CACHE=<dossier>` le place dans ce dossier de l'hôte (c'est ce que met en cache la CI). Sous Git Bash, préfixer par `MSYS_NO_PATHCONV=1`.
+
+`hearth-agent install [--port N] [--managed] [--yes]` et `uninstall [--keep-data|--purge] [--yes]` : interactif, ou sans question par `HEARTH_ADMIN_USER`, `HEARTH_ADMIN_PASSWORD` (ou `HEARTH_ADMIN_PASSWORD_HASH`), `HEARTH_PORT`. Droits d'administration requis. Le mot de passe n'est jamais un argument. Règles `BR-INSTALL-*`, runbook `docs/runbooks/installer-agent.md`, décision `docs/adr/ADR-0012-service-systeme.md`. Tout le code d'installation compile sous Windows mais ne s'exécute que sous Linux ; les tests de l'adaptateur systemd utilisent un faux `systemctl`.
+
 ## Règles
 
 - Architecture hexagonale dans `hearth-agent` et `hearth-link` : `domain/` sans E/S ni dépendance vers axum, SQLx, système. Ports dans `application/ports/`.
