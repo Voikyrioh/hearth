@@ -860,6 +860,10 @@ name = "hearth-link"
 version = "0.1.0"
 dependencies = [
  "hearth-proto",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "zeroize",
 ]
 
 [[package]]
