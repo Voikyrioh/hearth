@@ -11,7 +11,25 @@ workspace = true
 
 [dependencies]
 hearth-proto.workspace = true
+async-trait.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+if-addrs.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+ulid.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+hearth-agent = { path = "../hearth-agent" }
+rcgen.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+time.workspace = true
