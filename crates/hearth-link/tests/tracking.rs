@@ -949,6 +949,39 @@ async fn a_slow_logout_does_not_hold_back_a_removal() {
     assert!(rig.store.servers.lock().unwrap().is_empty());
 }
 
+// ── Déconnexion lente contre reconnexion (FIX-01M46G7Z0ZP43T53M2F5KG4VKS) ─────────────────────
+
+#[tokio::test]
+async fn a_slow_logout_never_erases_the_token_of_a_login_that_came_in_between() {
+    let (rig, id) = connected(Disk::Normal, true).await;
+    rig.script.logout_hold.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let logout = tokio::spawn(async move { manager.logout(&task_id).await });
+    wait_until("déconnexion en vol", || {
+        rig.script.logout_in_flight.load(Ordering::SeqCst)
+    })
+    .await;
+    // Pendant l'appel réseau de la déconnexion, l'utilisateur se reconnecte : jeton neuf au coffre.
+    rig.manager
+        .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap();
+    let fresh = rig.vault.get(&id, SecretKind::Token).unwrap().unwrap();
+    rig.script.logout_hold.store(false, Ordering::SeqCst);
+    logout.await.unwrap().unwrap();
+    assert_eq!(
+        rig.vault.get(&id, SecretKind::Token).unwrap(),
+        Some(fresh),
+        "le jeton de la nouvelle session est intact"
+    );
+    assert!(
+        !rig.store.servers.lock().unwrap()[0].signed_out,
+        "le carnet dit toujours « connecté »"
+    );
+    wait_state(&rig.manager, &id, LinkState::Connected).await;
+}
+
 // ── Suppression contre connexion en vol (review PR 12, bloquant 2) ───────────────────────────
 
 #[tokio::test]

@@ -844,16 +844,27 @@ impl LinkManager {
                 deps.vault.get(id, SecretKind::Token),
             )
         };
-        if let Ok(Some(token)) = token {
+        let revoked = token.ok().flatten();
+        if let Some(token) = &revoked {
             // Au mieux : un serveur injoignable n'empêche pas de se déconnecter.
             let _ = timeout(
                 deps.config.request_timeout,
-                deps.transport.logout(&target, &token),
+                deps.transport.logout(&target, token),
             )
             .await;
         }
         // Le serveur a pu être supprimé pendant l'appel : alors rien à écrire.
         let locked = self.lock(id).await?;
+        // FIX:01M46G7Z0ZP43T53M2F5KG4VKS — une connexion intervenue pendant l'appel réseau a rangé un
+        // jeton neuf : on n'efface que celui qu'on vient de fermer (docs/bugs/FIX-01M46G7Z0ZP43T53M2F5KG4VKS.md)
+        let newer_session = !locked.shared.record().signed_out
+            || matches!(
+                deps.vault.get(id, SecretKind::Token),
+                Ok(Some(current)) if revoked.as_ref() != Some(&current)
+            );
+        if newer_session {
+            return Ok(());
+        }
         deps.vault
             .delete(id, SecretKind::Token)
             .map_err(|e| LinkError::Vault(e.0))?;
