@@ -302,7 +302,7 @@ impl Runner {
             }
             ServerMessage::Audit { event } => self.deps.sink.emit(Event::Audit {
                 server: self.id.clone(),
-                event,
+                event: Arc::new(event),
             }),
             ServerMessage::Session { kind } => match kind {
                 SessionNotice::Expired => self.session_expired().await,

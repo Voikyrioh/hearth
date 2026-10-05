@@ -13,7 +13,8 @@ use hearth_agent::app::{self, Adapters, Metering, RunningAgent, Services};
 use hearth_agent::application::ports::{
     Clock as AgentClock, GpuProbe, HashError, PasswordHasher, ProbeError, SystemProbe,
 };
-use hearth_agent::domain::accounts::{PlainPassword, Role};
+use hearth_agent::domain::accounts::{PlainPassword, Role, Username};
+use hearth_agent::domain::audit::{Actor, Origin};
 use hearth_agent::domain::machine::{
     CpuIdentity, DiskIdentity, GpuIdentity, MachineIdentity, OsIdentity,
 };
@@ -21,7 +22,6 @@ use hearth_agent::domain::metrics::{DiskUsage, GpuReading, MemoryUsage, SystemSa
 use hearth_agent::domain::secret::Secret as AgentSecret;
 use hearth_agent::entrypoint::ws::StreamSettings;
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
-use hearth_agent::infrastructure::audit_feed::NoAuditFeed;
 use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
 use hearth_agent::infrastructure::config::AgentConfig;
 use hearth_agent::infrastructure::ids::UlidGen;
@@ -31,6 +31,17 @@ use tempfile::TempDir;
 use time::{Duration as TimeDuration, OffsetDateTime};
 
 pub const PASSWORD: &str = "Correct-Horse-9";
+
+/// Qui demande, pour le journal d'activité : l'administrateur d'un poste du réseau.
+fn by() -> &'static Actor {
+    static BY: std::sync::OnceLock<Actor> = std::sync::OnceLock::new();
+    BY.get_or_init(|| {
+        Actor::new(
+            Some(Username::parse("root").unwrap()),
+            Origin::client(Some("poste/1.0"), "10.0.0.7"),
+        )
+    })
+}
 
 pub struct TestClock(Mutex<OffsetDateTime>);
 
@@ -153,7 +164,6 @@ fn metering() -> Metering {
         clock: Arc::new(SystemClock),
         monotonic: Arc::new(SystemMonotonic::new()),
         period: Duration::from_millis(20),
-        audit: Arc::new(NoAuditFeed),
         stream: StreamSettings {
             auth_timeout: Duration::from_millis(800),
             idle_timeout: Duration::from_secs(10),
@@ -242,7 +252,7 @@ impl TestAgent {
     pub async fn create_account(&self, username: &str, role: Role) {
         self.services
             .accounts
-            .create(username, AgentSecret::from(PASSWORD), role)
+            .create(username, AgentSecret::from(PASSWORD), role, by())
             .await
             .unwrap();
     }
@@ -251,7 +261,7 @@ impl TestAgent {
         let account = self.services.accounts.find(username).await.unwrap();
         self.services
             .accounts
-            .revoke_sessions(&account.id)
+            .revoke_sessions(&account.id, by())
             .await
             .unwrap();
     }

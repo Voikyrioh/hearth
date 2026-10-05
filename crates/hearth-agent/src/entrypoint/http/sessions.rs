@@ -11,13 +11,11 @@ use hearth_proto::api::sessions::{LoginRequest, LoginResponse, MeResponse};
 use hearth_proto::headers;
 use tracing::Instrument;
 
-use super::auth::Caller;
+use super::auth::{Caller, Requester};
 use super::{ApiError, AppState, wire};
 use crate::application::sessions::ClientInfo;
+use crate::domain::audit::ClientName;
 use crate::domain::secret::Secret;
-
-/// Longueur maximale retenue du nom du poste (`X-Hearth-Client`).
-const MAX_CLIENT_NAME: usize = 128;
 
 /// Adresse IP du client, telle que vue sur la connexion TCP. Jamais lue d'un en-tête de
 /// mandataire (`X-Forwarded-For`…) : un client la forgerait pour échapper au verrouillage
@@ -37,22 +35,14 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientAddr {
     }
 }
 
-/// Nom du poste annoncé par le client, nettoyé (caractères de contrôle retirés, longueur bornée).
+/// Nom du poste annoncé par le client : le nettoyage du domaine (`ClientName`), « inconnu » s'il
+/// n'en reste rien.
 fn client_name(headers: &HeaderMap) -> String {
-    let name: String = headers
+    headers
         .get(headers::CLIENT)
         .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(MAX_CLIENT_NAME)
-        .collect();
-    let name = name.trim();
-    if name.is_empty() {
-        "inconnu".to_owned()
-    } else {
-        name.to_owned()
-    }
+        .and_then(ClientName::parse)
+        .map_or_else(|| "inconnu".to_owned(), |name| name.as_str().to_owned())
 }
 
 /// `POST /api/v1/sessions` : ouvre une session. Rend le jeton une seule fois.
@@ -93,8 +83,9 @@ pub async fn login(
 pub async fn logout(
     State(state): State<AppState>,
     Caller(caller): Caller,
+    Requester(by): Requester,
 ) -> Result<StatusCode, ApiError> {
-    state.sessions.logout(&caller.session_id).await?;
+    state.sessions.logout(&caller.session_id, &by).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -126,7 +117,7 @@ mod tests {
         );
         assert_eq!(
             client_name(&headers_with(&"x".repeat(500))).chars().count(),
-            MAX_CLIENT_NAME
+            crate::domain::audit::MAX_CLIENT_NAME
         );
     }
 

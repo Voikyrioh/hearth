@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
+use hearth_proto::api::audit::AuditEventItem;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
 use hearth_proto::fingerprint::Fingerprint;
-use serde_json::Value;
 
 use super::pending_ops::{OperationId, Outcome};
 use super::server::ServerId;
@@ -92,7 +92,10 @@ pub enum Event {
         presented: Fingerprint,
     },
     /// Événement du journal d'activité (administrateurs abonnés).
-    Audit { server: ServerId, event: Value },
+    Audit {
+        server: ServerId,
+        event: Arc<AuditEventItem>,
+    },
 }
 
 impl Event {

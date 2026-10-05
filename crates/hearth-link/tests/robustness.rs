@@ -29,6 +29,7 @@ use hearth_link::ports::transport::{
 use hearth_link::ports::{Clock, Rng, ServerStore, SnapshotStore};
 use hearth_link::{ActionRequest, LinkConfig, LinkManager, NewServer, Ports};
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
+use hearth_proto::api::audit::{AuditEventItem, AuditOrigin, OriginKindName, OutcomeName};
 use hearth_proto::api::hello::{ApiRange, HelloResponse};
 use hearth_proto::api::machine::{Capabilities, CpuInfo, MachineResponse, OsInfo};
 use hearth_proto::api::metrics::{MemorySample, Sample};
@@ -185,7 +186,27 @@ fn message(dice: &Dice, first: bool) -> ServerMessage {
         2..=4 => ServerMessage::Metrics(sample(dice)),
         5 => ServerMessage::Pong { n: big(dice) },
         6 => ServerMessage::Audit {
-            event: deep_json(dice, 6),
+            event: AuditEventItem {
+                id: big(dice) as i64,
+                at: "n'importe quoi".repeat(dice.below(50) as usize),
+                account: if dice.chance(50) {
+                    None
+                } else {
+                    Some("é".into())
+                },
+                origin: AuditOrigin {
+                    kind: OriginKindName::Cli,
+                    name: None,
+                    addr: None,
+                    text: "x".repeat(dice.below(4_000) as usize),
+                },
+                action: "login".into(),
+                action_label: "Connexion".into(),
+                target: None,
+                outcome: OutcomeName::Failed,
+                reason: Some("raison".into()),
+                repeat_count: dice.below(1_000_000) as u32,
+            },
         },
         7 => ServerMessage::Session {
             kind: if dice.chance(50) {

@@ -13,7 +13,10 @@
 //! balayage d'identifiants (un identifiant différent par requête échappe au compteur par couple).
 //! Un succès ne le remet pas à zéro : un attaquant intercalerait sinon une connexion valide.
 
+use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
+
+use super::text::is_unsafe_char;
 
 /// Nombre d'échecs qui déclenche la première attente.
 pub const FAILURES_BEFORE_LOCK: u32 = 5;
@@ -27,6 +30,11 @@ pub const ADDRESS_FAILURES_BEFORE_LOCK: u32 = 20;
 /// Fenêtre dans laquelle ces échecs sont comptés (elle s'ouvre au premier échec).
 pub const ADDRESS_WINDOW: Duration = Duration::minutes(10);
 
+/// Connexions qu'une même adresse peut laisser en attente de leur tour (BR-CONN-007) : une est
+/// traitée, huit attendent au plus ; la suivante est refusée tout de suite, sans mot de passe
+/// gardé en mémoire.
+pub const MAX_WAITING_PER_ADDRESS: usize = 8;
+
 /// Un compteur sans activité depuis ce délai (et sans attente en cours) est oublié (BR-CONN-006).
 pub const ATTEMPT_RETENTION: Duration = Duration::hours(24);
 
@@ -38,30 +46,31 @@ const SEPARATOR: char = '\u{1f}';
 /// stockage face à un client qui enverrait des identifiants démesurés.
 const MAX_KEY_PART: usize = 64;
 
-/// Clé du compteur : identifiant saisi (normalisé) + adresse du client.
+/// Clé du compteur : **empreinte** de l'identifiant saisi (normalisé) + adresse du client.
+/// L'identifiant n'est jamais écrit en clair : ce peut être un mot de passe tapé au mauvais
+/// endroit, et la clé reste 24 h en base (BR-AUDIT-005).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AttemptKey(String);
 
 impl AttemptKey {
     pub fn new(username: &str, addr: &str) -> Self {
-        // Sans caractère de contrôle : la clé et les traces (une ligne de journal) ne peuvent pas
-        // être forgées par l'identifiant, et le séparateur ne peut pas y apparaître.
+        // Sans caractère de contrôle, séparateur de ligne Unicode ni caractère de format
+        // (bidirectionnel…) : la clé et les traces (une ligne de journal) ne peuvent pas être
+        // forgées par l'identifiant, et le séparateur ne peut pas y apparaître.
         let username: String = username
             .trim()
             .to_lowercase()
             .chars()
-            .filter(|c| !c.is_control())
+            .filter(|&c| !is_unsafe_char(c))
             .take(MAX_KEY_PART)
             .collect();
         let addr: String = addr.chars().take(MAX_KEY_PART).collect();
-        Self(format!("{username}{SEPARATOR}{addr}"))
-    }
-
-    /// L'identifiant normalisé de la clé (pour les traces ; vide pour une clé d'adresse).
-    pub fn username(&self) -> &str {
-        self.0
-            .split_once(SEPARATOR)
-            .map_or("", |(username, _)| username)
+        let digest = Sha256::digest(username.as_bytes());
+        let fingerprint: String = digest[..16]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        Self(format!("{fingerprint}{SEPARATOR}{addr}"))
     }
 
     /// Clé du compteur par adresse seule. Ne peut pas coïncider avec une clé de couple (celles-ci
@@ -74,6 +83,12 @@ impl AttemptKey {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Une connexion de plus peut-elle faire la queue pour son adresse ? `in_flight` = connexions
+/// déjà admises pour cette adresse, celle en cours de traitement comprise.
+pub fn admits_in_queue(in_flight: usize) -> bool {
+    in_flight <= MAX_WAITING_PER_ADDRESS
 }
 
 /// Ce que l'on retient d'un couple identifiant + adresse.
@@ -395,7 +410,7 @@ mod tests {
     #[test]
     fn the_key_stays_bounded_whatever_the_username() {
         let key = AttemptKey::new(&"x".repeat(10_000), "10.0.0.1");
-        assert!(key.as_str().len() <= 2 * MAX_KEY_PART + 1);
+        assert!(key.as_str().len() <= 32 + MAX_KEY_PART + 1);
     }
 
     // ---- compteur par adresse seule
@@ -508,17 +523,55 @@ mod tests {
     #[test]
     fn control_characters_never_reach_the_key_or_the_traces() {
         let key = AttemptKey::new("marie\nWARN forged line\r\t\u{1f}x", "10.0.0.1");
-        assert_eq!(key.username(), "marieWARN forged linex".to_lowercase());
-        assert!(!key.username().chars().any(char::is_control));
+        assert_eq!(key, AttemptKey::new("marieWARN forged linex", "10.0.0.1"));
         assert!(!key.as_str().contains('\n'));
+    }
+
+    #[test]
+    fn unicode_line_separators_and_format_characters_never_reach_the_key_or_the_traces() {
+        let key = AttemptKey::new(
+            "ma\u{2028}rie\u{2029}\u{202E}evil\u{200F}\u{2066}x\u{FEFF}",
+            "10.0.0.1",
+        );
+        assert_eq!(key, AttemptKey::new("marieevilx", "10.0.0.1"));
+        assert!(
+            !key.as_str()
+                .contains(['\u{2028}', '\u{2029}', '\u{202E}', '\u{200F}'])
+        );
+    }
+
+    #[test]
+    fn one_connection_runs_and_eight_wait_the_ninth_waiter_is_refused() {
+        assert!(admits_in_queue(0), "la première s'exécute");
+        assert!(admits_in_queue(1), "première en attente");
+        assert!(
+            admits_in_queue(MAX_WAITING_PER_ADDRESS),
+            "huitième en attente"
+        );
+        assert!(
+            !admits_in_queue(MAX_WAITING_PER_ADDRESS + 1),
+            "neuvième : refusée"
+        );
+        assert!(!admits_in_queue(usize::MAX));
     }
 
     #[test]
     fn a_pipe_in_the_username_is_kept_and_the_key_stays_unambiguous() {
         let key = AttemptKey::new("a|b", "10.0.0.1");
-        assert_eq!(key.username(), "a|b");
         // « a|b » + « 10.0.0.1 » et « a » + « b|10.0.0.1 » ne coïncident pas.
         assert_ne!(key, AttemptKey::new("a", "b|10.0.0.1"));
-        assert_eq!(AttemptKey::address("10.0.0.1").username(), "");
+    }
+
+    #[test]
+    fn the_typed_identifier_never_appears_in_the_key() {
+        let key = AttemptKey::new("Correct-Horse-9", "10.0.0.1");
+        let text = key.as_str().to_lowercase();
+        assert!(
+            !text.contains("correct") && !text.contains("horse"),
+            "{text}"
+        );
+        let (fingerprint, addr) = key.as_str().split_once(SEPARATOR).unwrap();
+        assert_eq!((fingerprint.len(), addr), (32, "10.0.0.1"));
+        assert!(fingerprint.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

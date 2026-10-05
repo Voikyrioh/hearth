@@ -11,12 +11,11 @@ use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use hearth_agent::application::hello::HelloService;
 use hearth_agent::application::metrics::MetricsService;
-use hearth_agent::application::ports::MachineInfo;
+use hearth_agent::application::ports::{AuditFeed, MachineInfo};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::install_id::InstallId;
 use hearth_agent::entrypoint::http::{AppState, router};
 use hearth_agent::entrypoint::ws::{StreamContext, StreamSettings};
-use hearth_agent::infrastructure::audit_feed::NoAuditFeed;
 use hearth_agent::infrastructure::clock::SystemMonotonic;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -46,20 +45,28 @@ pub fn state(env: &Env) -> AppState {
         accounts: env.service.clone(),
         sessions: env.sessions.clone(),
         operations: env.operations.clone(),
+        audit: env.audit.clone(),
+        sink: env.audit_sink.clone(),
         metrics: Arc::new(MetricsService::new(
             Arc::new(FakeSystem::default()),
             Arc::new(FakeGpu),
             env.clock.clone(),
             Arc::new(SystemMonotonic::new()),
         )),
-        stream: StreamContext::new(Arc::new(NoAuditFeed), StreamSettings::default()),
+        stream: StreamContext::new(
+            env.feed.clone() as Arc<dyn AuditFeed>,
+            StreamSettings::default(),
+        ),
     }
 }
 
 pub struct Reply {
     pub status: StatusCode,
     pub headers: HeaderMap,
+    /// Le corps lu comme JSON (`null` s'il est vide ou n'est pas du JSON : un export CSV).
     pub body: Value,
+    /// Le corps tel quel.
+    pub text: String,
 }
 
 impl Reply {
@@ -204,12 +211,13 @@ impl<'a> Call<'a> {
         let body = if bytes.is_empty() {
             Value::Null
         } else {
-            serde_json::from_slice(&bytes).expect("JSON")
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null)
         };
         Reply {
             status,
             headers,
             body,
+            text: String::from_utf8_lossy(&bytes).into_owned(),
         }
     }
 }

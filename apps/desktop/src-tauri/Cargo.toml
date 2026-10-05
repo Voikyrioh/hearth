@@ -1,0 +1,47 @@
+[package]
+name = "hearth-desktop"
+description = "Hearth, client Windows : coquille Tauri"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "hearth_desktop_lib"
+crate-type = ["rlib"]
+# Les tests vivent dans `tests/` (voir build.rs : manifeste Windows des tests d'intégration).
+test = false
+doctest = false
+
+[[bin]]
+name = "hearth-desktop"
+path = "src/main.rs"
+test = false
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-store = "2"
+tauri-plugin-notification = "2"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+specta = "=2.0.0-rc.25"
+specta-typescript = "0.0.12"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rfd = "0.17.2"
+tracing-appender = "0.2.5"
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+tempfile.workspace = true

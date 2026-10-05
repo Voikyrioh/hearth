@@ -24,5 +24,43 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # La coquille Tauri est vérifiée par le job `desktop` (Windows, WebView2) : pas de bibliothèques système sous Linux.
+      - run: cargo clippy --workspace --exclude hearth-desktop --all-targets -- -D warnings
+      - run: cargo test --workspace --exclude hearth-desktop
+
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Interface (installation, Biome, types, Vitest, build)
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Coquille Tauri (clippy, tests)
+        run: |
+          cargo clippy -p hearth-desktop --all-targets -- -D warnings
+          cargo test -p hearth-desktop
+      # Le livrable du ticket : l'installateur doit se construire à chaque PR.
+      - name: Installateur NSIS
+        working-directory: apps/desktop
+        run: npm run tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hearth-windows-installer
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 7

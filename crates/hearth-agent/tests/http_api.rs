@@ -99,6 +99,8 @@ async fn every_admin_route_refuses_a_read_only_account_and_changes_nothing() {
         .filter(|endpoint| endpoint.access == Access::Admin)
     {
         let path = concrete(endpoint.path);
+        // Les refus identiques à moins d'une minute se regroupent : on espace les appels.
+        env.clock.advance(time::Duration::seconds(61));
         // Un corps valide pour la route : si la garde laissait passer, la requête agirait.
         let body = json!({
             "username": "intrus", "password": OTHER_PASSWORD, "role": "admin",
@@ -126,6 +128,19 @@ async fn every_admin_route_refuses_a_read_only_account_and_changes_nothing() {
         "le balayage doit couvrir les routes modifiantes"
     );
     assert_eq!(snapshot(&env).await, before, "rien n'a changé en base");
+
+    // Chaque refus est consigné au journal (BR-AUDIT-003, BR-AUDIT-021), une entrée par route.
+    let admin_routes = ENDPOINTS
+        .iter()
+        .filter(|endpoint| endpoint.access == Access::Admin)
+        .count();
+    let denials: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE outcome = 'denied' AND account = 'lucas'",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(usize::try_from(denials).unwrap(), admin_routes);
 
     // Contrôle : le même appel passe pour l'administrateur (la garde ne refuse pas tout).
     let reply = api.get("/accounts").token(&admin_token).send().await;
@@ -888,6 +903,143 @@ async fn a_tracked_body_over_one_mebibyte_is_413_not_422() {
         .send()
         .await;
     assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Balayage des succès : chaque route qui modifie laisse exactement une entrée « réussi »
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn every_modifying_route_leaves_exactly_one_success_entry() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let own = env.account_with_token(&api, "carl", Role::ReadOnly).await;
+    let role_victim = env.create("v-role", Role::ReadOnly).await;
+    let password_victim = env.create("v-pass", Role::ReadOnly).await;
+    let sessions_victim = env.create("v-sess", Role::ReadOnly).await;
+    let delete_victim = env.create("v-del", Role::ReadOnly).await;
+
+    let successes = |env: &support::Env| {
+        let pool = env.db.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_events WHERE outcome = 'ok'")
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    let mut swept = 0;
+    for endpoint in ENDPOINTS.iter().filter(|endpoint| endpoint.modifies()) {
+        // Une session fraîche pour la déconnexion (sa connexion s'écrit avant la mesure).
+        let logout_token = if endpoint.path == "/sessions/current" {
+            Some(api.token_of("marie").await)
+        } else {
+            None
+        };
+        let before = successes(&env).await;
+        let reply = match (endpoint.method.as_str(), endpoint.path) {
+            ("POST", "/sessions") => api.login("marie", PASSWORD).await,
+            ("DELETE", "/sessions/current") => {
+                api.delete("/sessions/current")
+                    .token(logout_token.as_deref().unwrap())
+                    .send()
+                    .await
+            }
+            ("PUT", "/me/password") => {
+                api.put("/me/password")
+                    .token(&own)
+                    .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
+                    .send()
+                    .await
+            }
+            ("POST", "/accounts") => {
+                api.post("/accounts")
+                    .token(&admin)
+                    .json(&json!({ "username": "nouveau", "password": OTHER_PASSWORD, "role": "readonly" }))
+                    .send()
+                    .await
+            }
+            ("PATCH", "/accounts/{id}") => {
+                api.patch(&format!("/accounts/{}", role_victim.id))
+                    .token(&admin)
+                    .json(&json!({ "role": "admin" }))
+                    .send()
+                    .await
+            }
+            ("DELETE", "/accounts/{id}") => {
+                api.delete(&format!("/accounts/{}", delete_victim.id))
+                    .token(&admin)
+                    .send()
+                    .await
+            }
+            ("PUT", "/accounts/{id}/password") => {
+                api.put(&format!("/accounts/{}/password", password_victim.id))
+                    .token(&admin)
+                    .json(&json!({ "password": OTHER_PASSWORD }))
+                    .send()
+                    .await
+            }
+            ("DELETE", "/accounts/{id}/sessions") => {
+                api.delete(&format!("/accounts/{}/sessions", sessions_victim.id))
+                    .token(&admin)
+                    .send()
+                    .await
+            }
+            (method, path) => panic!("route modifiante sans scénario de réussite : {method} {path}"),
+        };
+        assert!(
+            reply.status.is_success(),
+            "{} {} : {:?}",
+            endpoint.method,
+            endpoint.path,
+            reply.body
+        );
+        assert_eq!(
+            successes(&env).await - before,
+            1,
+            "{} {} doit laisser exactement une entrée réussie",
+            endpoint.method,
+            endpoint.path
+        );
+        swept += 1;
+    }
+    assert!(swept >= 8, "{swept} routes balayées");
+
+    // Les routes de lecture (dont celles des mesures) ne laissent aucune entrée (BR-AUDIT-004).
+    let entries = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_events")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap()
+    };
+    let before = entries().await;
+    let mut reads = 0;
+    for endpoint in ENDPOINTS
+        .iter()
+        .filter(|endpoint| !endpoint.modifies() && endpoint.audit.is_none())
+    {
+        let path = match endpoint.path {
+            "/hello" | "/me" | "/machine" | "/metrics/history" => endpoint.path.to_owned(),
+            "/operations/{id}" => "/operations/INCONNUE".to_owned(),
+            "/stream" => continue, // le flux se teste en WebSocket (stream_https.rs)
+            other => panic!("route de lecture sans scénario : {other}"),
+        };
+        let reply = api.get(&path).token(&admin).send().await;
+        assert!(
+            reply.status.is_success() || reply.status == StatusCode::NOT_FOUND,
+            "{path} : {:?}",
+            reply.body
+        );
+        reads += 1;
+    }
+    assert!(reads >= 4, "{reads} routes de lecture balayées");
+    assert_eq!(
+        entries().await,
+        before,
+        "une lecture n'écrit rien au journal"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -4,14 +4,15 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue ; tout reçu 
 
 ## Atoms
 
-- `HButton` — Bouton actionnable (primary, secondary, danger, disabled).
+- [`HButton`](./HButton.md) — Bouton actionnable (primary, secondary, danger, disabled). **Livré (HRT-08).**
 - `HInput` — Champ texte avec validation de format.
 - `HPasswordInput` — Champ mot de passe (affiche/masque, règles visualisées).
 - `HBadge` — Libellé statut (color, taille).
-- `HIcon` — Icône SVG (role sémantique).
+- [`HIcon`](./HIcon.md) — Icône SVG (role sémantique). **Livré (HRT-08).**
+- [`HLogo`](./HLogo.md) — Logo Hearth (flamme dans un âtre), tailles sm/md/lg, version simplifiée en petit. **Livré (HRT-08).**
 - `HTooltip` — Bulle d'explication (position, délai).
 - `HSpinner` — Indicateur chargement (taille).
-- `HToggle` — Interrupteur booléen (label, disabled).
+- [`HToggle`](./HToggle.md) — Interrupteur booléen (label, disabled). **Livré (HRT-08).**
 - `HSegmented` — Groupe boutons mutuellement exclusifs (options[]).
 
 ## Molecules
@@ -26,11 +27,12 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue ; tout reçu 
 - `FingerprintBlock` — Affiche empreinte 8 blocs 4 hex majuscules (monospace, copyable).
 - `PasswordRules` — Affiche règles mot de passe (checklist, couleur per-rule).
 - `ConfirmDialog` — Modal confirmation action destructrice (title, message, boutons).
-- `EmptyState` — Placeholder quand liste vide (icône, texte, CTA optionnelle).
+- [`EmptyState`](./EmptyState.md) — Placeholder quand liste vide (icône, texte, CTA optionnelle). **Livré (HRT-08).**
+- [`SettingRow`](./SettingRow.md) — Ligne de réglage : libellé, aide, contrôle nommé par `aria-labelledby`. **Livré (HRT-08).**
 
 ## Organisms
 
-- `ServerRail` — Rail gauche : liste serveurs avec avatar + nom, état lien badge.
+- [`ServerRail`](./ServerRail.md) — Rail gauche : liste serveurs avec avatar + nom, état lien badge. **Livré (HRT-08).**
 - `ServerNav` — Onglets serveur sélectionné (Dashboard, Comptes, Audit, Réglages).
 - `AppHeader` — Barre haut : logo Hearth, info serveur connecté, bouton paramètres.
 - `OfflineBanner` — Banneau alerte haut si lien pas Connected (raison, bouton relancer).
@@ -46,11 +48,13 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue ; tout reçu 
 
 ## Pages
 
-- `Welcome` — Page accueil (aucun serveur) : présentation, bouton « Ajouter serveur » → AddServerWizard.
+- [`Welcome`](./Welcome.md) — Page accueil (aucun serveur) : présentation, bouton « Ajouter serveur » → AddServerWizard. **Livré (HRT-08).**
 - `Dashboard` — Page tableau de bord (sélection serveur + ServerNav affiche Dashboard).
 - `Accounts` — Page comptes (ServerNav + Accounts tab ; table + form création).
 - `Audit` — Page audit (ServerNav + Audit tab ; filters + table pagination).
-- `Settings` — Page réglages (ServerNav + Settings tab ; langue, log path, à propos).
+- [`Settings`](./Settings.md) — Page réglages (ServerNav + Settings tab ; langue, log path, à propos). **Livré (HRT-08).**
+
+Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `pages/`, `stores/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
 
 ## Directive v-needs-link
 
@@ -67,7 +71,7 @@ Affiche infobulle explicative du blocage.
 
 ## Conventions
 
-- Tous textes → `vue-translate` (clés `pages.dashboard.title`, …).
+- Tous textes → module `src/i18n/fr.ts` + `t(clé)` (clés par chemin, `welcome.title`). Le raccordement à `vue-translate` est repoussé (voir ADR-0010).
 - Aucun texte en dur.
-- Styles via tokens CSS (colors, spacing, fonts) dans `:root`.
+- Styles via jetons CSS : `src/styles/tokens.css` est l'unique source (couleurs, espacements, rayons, polices, mouvement) ; zéro `style=` en ligne.
 - Responsive : 1920 px + 2560 px pour captures Nora.

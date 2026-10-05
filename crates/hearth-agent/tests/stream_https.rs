@@ -9,19 +9,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use hearth_agent::application::ports::AuditFeed;
 use hearth_agent::domain::accounts::Role;
 use hearth_proto::api::metrics::Sample;
 use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{ServerMessage, SessionNotice, Topic};
-use serde_json::{Value, json};
+use serde_json::json;
 use support::https::{self, Agent};
 use support::probe::{FakeSystem, ToggleGpu, fast_stream, metering, metering_with};
 use support::ws::{self, End, WsClient};
 use support::{Env, PASSWORD, env};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use tokio::sync::broadcast;
 
 async fn token(env: &Env, agent: &Agent, username: &str, role: Role) -> String {
     env.create(username, role).await;
@@ -218,7 +216,10 @@ async fn a_revoked_session_is_told_then_closed_during_the_stream() {
     let (mut client, _) = subscribed(&agent, &token).await;
     metrics(&mut client).await;
 
-    env.service.revoke_sessions(&account.id).await.unwrap();
+    env.service
+        .revoke_sessions(&account.id, support::by())
+        .await
+        .unwrap();
     let notice = loop {
         match client.expect().await {
             ServerMessage::Metrics(_) => {}
@@ -526,14 +527,23 @@ async fn a_connection_subscribes_once_per_interval_without_being_closed() {
     agent.shutdown().await;
 }
 
+/// Un administrateur crée un compte par l'API : l'agent écrit l'événement et le diffuse.
+async fn create_account(agent: &Agent, admin: &str, username: &str) {
+    let reply = agent
+        .request("POST", "/accounts")
+        .token(admin)
+        .json(&json!({ "username": username, "password": PASSWORD, "role": "readonly" }))
+        .send()
+        .await;
+    assert_eq!(reply.status, 201, "{:?}", reply.body);
+}
+
 #[tokio::test]
 async fn an_administrator_demoted_during_the_stream_loses_the_audit_topic() {
     let env = env().await;
-    let (sender, _) = broadcast::channel(16);
-    let config = metering_with(Arc::new(Feed(sender.clone())), fast_stream());
-    let agent = https::start_metered(&env, config).await;
+    let agent = https::start_metered(&env, metering_with(fast_stream())).await;
     // Un deuxième administrateur : on ne rétrograde pas le dernier.
-    token(&env, &agent, "root", Role::Admin).await;
+    let root = token(&env, &agent, "root", Role::Admin).await;
     let marie = env.create("marie", Role::Admin).await;
     let reply = agent
         .request("POST", "/sessions")
@@ -549,28 +559,26 @@ async fn an_administrator_demoted_during_the_stream_loses_the_audit_topic() {
         .send(&hearth_proto::stream::ClientMessage::Ping { n: 1 })
         .await;
     assert_eq!(client.expect().await, ServerMessage::Pong { n: 1 });
-    sender.send(Arc::new(json!({ "id": 1 }))).unwrap();
+    create_account(&agent, &root, "paul").await;
+    let ServerMessage::Audit { event } = client.expect().await else {
+        panic!("un événement du journal était attendu");
+    };
     assert_eq!(
-        client.expect().await,
-        ServerMessage::Audit {
-            event: json!({ "id": 1 })
-        }
+        (event.action.as_str(), event.target.as_deref()),
+        ("account.create", Some("paul"))
     );
 
     // Marie devient lecture seule pendant le flux : son abonnement se perd, avec un message.
     env.service
-        .change_role(&marie.id, Role::ReadOnly)
+        .change_role(&marie.id, Role::ReadOnly, support::by())
         .await
         .unwrap();
     let ServerMessage::Error(error) = client.expect().await else {
         panic!("une erreur était attendue");
     };
     assert_eq!(error.code, ErrorCode::ForbiddenRole);
-    // Plus aucun événement d'audit ne lui parvient (le prochain message est la réponse au ping).
-    assert!(
-        sender.send(Arc::new(json!({ "id": 2 }))).is_err(),
-        "plus aucun abonné au journal sur cet agent"
-    );
+    // Plus aucun événement du journal ne lui parvient (le prochain message est la réponse au ping).
+    create_account(&agent, &root, "carl").await;
     client
         .send(&hearth_proto::stream::ClientMessage::Ping { n: 2 })
         .await;
@@ -619,23 +627,14 @@ async fn a_new_subscription_resumes_without_gap_or_duplicate() {
     agent.shutdown().await;
 }
 
-struct Feed(broadcast::Sender<Arc<Value>>);
-
-impl AuditFeed for Feed {
-    fn subscribe(&self) -> Option<broadcast::Receiver<Arc<Value>>> {
-        Some(self.0.subscribe())
-    }
-}
-
 #[tokio::test]
-async fn the_audit_topic_is_for_administrators_and_carries_the_feed() {
+async fn the_audit_topic_is_for_administrators_and_carries_the_account_creation() {
     let env = env().await;
-    let (sender, _) = broadcast::channel(16);
-    let config = metering_with(Arc::new(Feed(sender.clone())), fast_stream());
-    let agent = https::start_metered(&env, config).await;
+    let agent = https::start_metered(&env, metering_with(fast_stream())).await;
     let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
     let admin = token(&env, &agent, "marie", Role::Admin).await;
 
+    // Un compte lecture seule ne peut pas s'abonner ; le flux reste ouvert pour le reste.
     let mut reader = ws::open(&agent).await;
     reader.auth(&readonly).await;
     reader.subscribe(&[Topic::Audit]).await;
@@ -643,7 +642,6 @@ async fn the_audit_topic_is_for_administrators_and_carries_the_feed() {
         panic!("une erreur était attendue");
     };
     assert_eq!(error.code, ErrorCode::ForbiddenRole);
-    // Le flux reste ouvert pour le reste.
     reader
         .send(&hearth_proto::stream::ClientMessage::Ping { n: 1 })
         .await;
@@ -652,20 +650,22 @@ async fn the_audit_topic_is_for_administrators_and_carries_the_feed() {
     let mut owner = ws::open(&agent).await;
     owner.auth(&admin).await;
     owner.subscribe(&[Topic::Audit]).await;
-    // Laisse l'abonnement s'établir, puis publie un événement.
+    // Laisse l'abonnement s'établir, puis crée un compte.
     owner
         .send(&hearth_proto::stream::ClientMessage::Ping { n: 2 })
         .await;
     assert_eq!(owner.expect().await, ServerMessage::Pong { n: 2 });
-    sender
-        .send(Arc::new(json!({ "id": 7, "action": "login" })))
-        .unwrap();
-    assert_eq!(
-        owner.expect().await,
-        ServerMessage::Audit {
-            event: json!({ "id": 7, "action": "login" })
-        }
-    );
+    create_account(&agent, &admin, "paul").await;
+    let ServerMessage::Audit { event } = owner.expect().await else {
+        panic!("un événement du journal était attendu");
+    };
+    assert_eq!(event.action, "account.create");
+    assert_eq!(event.action_label, "Création de compte");
+    assert_eq!(event.account.as_deref(), Some("marie"));
+    assert_eq!(event.target.as_deref(), Some("paul"));
+    // Même forme que `GET /audit` : l'entrée relue par l'API est celle du flux.
+    let listed = agent.request("GET", "/audit").token(&admin).send().await;
+    assert_eq!(listed.body["events"][0]["id"], event.id);
     agent.shutdown().await;
 }
 

@@ -25,7 +25,7 @@ maj: 2026-10-04
 ## Cas limites
 - La ligne de commande n'a pas de compte appelant : elle s'exécute avec les droits du système sur le serveur ; la suppression de son propre compte (BR-ACCT-012) ne la concerne pas.
 - Sans terminal et sans `HEARTH_ACCOUNT_PASSWORD`, la saisie échoue avec un message qui indique la variable.
-- Aucune opération de la ligne de commande n'est encore consignée au journal (BR-ACCT-016, HRT-05).
+- Chaque opération qui réussit est consignée au journal avec l'origine « ligne de commande du serveur », sans compte ni adresse (BR-ACCT-016, BR-AUDIT-002). Une commande qui échoue n'écrit rien : l'opérateur voit l'erreur sur le terminal.
 
 ## Règles liées
 - BR-ACCT-007, BR-ACCT-008, BR-ACCT-010, BR-ACCT-011, BR-ACCT-016.
