@@ -12,8 +12,8 @@ pub mod ports;
 
 pub use hearth_proto::version::API_VERSION;
 
-pub use error::LinkError;
+pub use error::{InputField, LinkError};
 pub use manager::{
     ActionOutcome, ActionRequest, EventStream, LinkConfig, LinkManager, LoginInfo, NewServer,
-    Ports, ProbeResult,
+    Ports, ProbeResult, ServerUpdate,
 };

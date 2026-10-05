@@ -5,6 +5,9 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 ## Fiches
 
 - [BR-CONN-001](./BR-CONN-001-verification-empreinte.md) — Empreinte du serveur : format 8 × 4 hexadécimaux et confirmation — `hearth-proto/src/fingerprint.rs::Fingerprint::short` — invariant ✓
+- [BR-CONN-004](./BR-CONN-004-identifiants-memorises-dans-le-coffre.md) — Les identifiants ne sont mémorisés que dans le coffre de Windows, si « Se souvenir de moi » est cochée — crates/hearth-link/src/manager/mod.rs::LinkManager::login, ::forget_credentials ; coquille : apps/desktop/src-tauri/src/vault.rs::CredentialVault — invariant ✓
+- [BR-CONN-005](./BR-CONN-005-connexion-automatique-au-lancement.md) — Au lancement, les serveurs dont les identifiants sont mémorisés se reconnectent seuls — crates/hearth-link/src/manager/mod.rs::initial_start — —
+- [BR-CONN-008](./BR-CONN-008-nom-de-serveur-unique.md) — Nom de serveur unique (sans tenir compte de la casse), adresse et port valides — crates/hearth-link/src/domain/book.rs::check_name, check_address ; interface : apps/desktop/src/validation/server.ts — invariant ✓
 - [BR-CONN-006](./BR-CONN-006-verrouillage-apres-echecs.md) — 5 échecs : attente 1 min doublée, plafond 15 min — `domain/lockout.rs::step` — invariant ✓
 - [BR-CONN-007](./BR-CONN-007-tentatives-par-identifiant-et-adresse.md) — Tentatives comptées par identifiant et adresse du client — `domain/lockout.rs::AttemptKey::new` — —
 - [BR-CONN-013](./BR-CONN-013-message-de-connexion-generique.md) — Refus de connexion générique, même chemin identifiant inconnu / mot de passe faux — `application/sessions.rs::SessionService::login` — invariant ✓
@@ -32,7 +35,7 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-RESIL-018](./BR-RESIL-018-notifications-agregees-par-compteur.md) — Coupures répétées : une même notification répétée devient un compteur — bibliothèque : Status::failed_attempts ; interface : apps/desktop/src/stores/toasts.ts::push — —
 - [BR-RESIL-019](./BR-RESIL-019-comportement-identique-tous-roles.md) — Le comportement du lien ne dépend pas du rôle du compte — crates/hearth-link/src/domain/state.rs::Input — invariant ✓
 - [BR-RESIL-020](./BR-RESIL-020-etat-du-lien-par-serveur.md) — Chaque serveur enregistré a son propre état de lien, indépendant des autres — crates/hearth-link/src/manager/mod.rs::LinkManager::{state, states} ; interface : apps/desktop/src/stores/link.ts — invariant ✓
-- [BR-CONN-009](./BR-CONN-009-changement-d-adresse-nouvelle-verification.md) — Modifier l'adresse d'un serveur enregistré impose une nouvelle vérification de l'empreinte — à venir — —
+- [BR-CONN-009](./BR-CONN-009-changement-d-adresse-nouvelle-verification.md) — Modifier l'adresse d'un serveur enregistré impose une nouvelle vérification de l'empreinte — crates/hearth-link/src/manager/mod.rs::LinkManager::update_server, domain/book.rs::address_changed ; interface : apps/desktop/src/components/organisms/ServerEditForm.vue — invariant ✓
 - [BR-CONN-010](./BR-CONN-010-suppression-efface-les-secrets.md) — Supprimer un serveur efface aussi ses identifiants mémorisés du coffre — crates/hearth-link/src/manager/mod.rs::LinkManager::remove_server — invariant ✓
 - [BR-CONN-012](./BR-CONN-012-aucun-identifiant-hors-agent-hearth.md) — Aucun identifiant n'est envoyé si le serveur n'est pas un agent Hearth — crates/hearth-link/src/domain/agent_identity.rs::check_product — invariant ✓
 - [BR-CONN-015](./BR-CONN-015-plusieurs-serveurs-simultanes.md) — Plusieurs serveurs peuvent être connectés en même temps ; basculer ne ferme rien — crates/hearth-link/src/manager/mod.rs::LinkManager::{states, servers} — invariant ✓

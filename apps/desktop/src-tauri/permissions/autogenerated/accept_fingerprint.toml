@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-accept-fingerprint"
+description = "Enables the accept_fingerprint command without any pre-configured scope."
+commands.allow = ["accept_fingerprint"]
+
+[[permission]]
+identifier = "deny-accept-fingerprint"
+description = "Denies the accept_fingerprint command without any pre-configured scope."
+commands.deny = ["accept_fingerprint"]

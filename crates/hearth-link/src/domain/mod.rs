@@ -2,6 +2,7 @@
 
 pub mod agent_identity;
 pub mod backoff;
+pub mod book;
 pub mod compat;
 pub mod event;
 pub mod pending_ops;

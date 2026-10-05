@@ -3,8 +3,19 @@
 use hearth_proto::error::ErrorCode;
 use thiserror::Error;
 
+use crate::domain::book::BookError;
 use crate::domain::compat::Compatibility;
 use crate::ports::transport::{ApiError, TransportError};
+
+/// Le champ d'une saisie refusée (jamais un texte : l'interface choisit son message).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputField {
+    Name,
+    Address,
+    Port,
+    Credentials,
+    Fingerprint,
+}
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum LinkError {
@@ -12,8 +23,14 @@ pub enum LinkError {
     UnknownServer,
     #[error("ce serveur est déjà enregistré")]
     AlreadyExists,
-    #[error("paramètre invalide : {0}")]
-    InvalidInput(&'static str),
+    /// Un autre serveur du carnet porte déjà ce nom (BR-CONN-008).
+    #[error("un serveur porte déjà ce nom")]
+    NameTaken,
+    /// L'adresse change : l'empreinte doit être relue et confirmée de nouveau (BR-CONN-009).
+    #[error("nouvelle vérification de l'empreinte requise")]
+    VerificationRequired,
+    #[error("paramètre invalide : {0:?}")]
+    InvalidInput(InputField),
     /// Le lien n'est pas « Connecté » : rien n'a été envoyé (BR-RESIL-008).
     #[error("le lien avec le serveur n'est pas établi")]
     NotConnected,
@@ -22,6 +39,9 @@ pub enum LinkError {
     /// Le suivi de l'action n'a pas pu être écrit sur disque : l'action n'a PAS été lancée.
     #[error("suivi impossible : l'action n'a pas été lancée")]
     TrackingUnavailable,
+    /// Le disque n'a pas écrit le suivi à temps : l'action n'a PAS été lancée.
+    #[error("disque trop lent : l'action n'a pas été lancée")]
+    TrackingSlow,
     #[error("l'empreinte du serveur a changé")]
     FingerprintChanged,
     #[error("versions incompatibles")]
@@ -47,6 +67,20 @@ pub enum LinkError {
     TaskRestarted,
     #[error("la bibliothèque est arrêtée")]
     Stopped,
+}
+
+impl From<BookError> for LinkError {
+    fn from(error: BookError) -> Self {
+        match error {
+            BookError::NameRequired | BookError::NameTooLong => {
+                Self::InvalidInput(InputField::Name)
+            }
+            BookError::NameTaken => Self::NameTaken,
+            BookError::BadAddress => Self::InvalidInput(InputField::Address),
+            BookError::BadPort => Self::InvalidInput(InputField::Port),
+            BookError::BadUsername => Self::InvalidInput(InputField::Credentials),
+        }
+    }
 }
 
 impl From<TransportError> for LinkError {

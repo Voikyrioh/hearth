@@ -13,15 +13,16 @@ mod watchers;
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use hearth_proto::api::accounts::AccountInfo;
 use hearth_proto::api::hello::HelloResponse;
+use hearth_proto::api::sessions::LoginResponse;
 use hearth_proto::fingerprint::Fingerprint;
 use serde_json::Value;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{OwnedMutexGuard, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -33,6 +34,7 @@ use crate::adapters::{
     FileOperationStore, FileServerStore, FileSnapshotStore, HttpTransport, HttpTransportConfig,
     OsRng, SystemClock, SystemNetWatcher,
 };
+use crate::domain::book;
 use crate::domain::compat::{self, Compatibility};
 use crate::domain::event::StateInfo;
 use crate::domain::pending_ops::OperationId;
@@ -40,7 +42,7 @@ use crate::domain::secret::Secret;
 use crate::domain::server::{LastKnown, ServerId, ServerRecord};
 use crate::domain::state::{LinkState, Reason, Start, Thresholds};
 use crate::domain::time::WallTime;
-use crate::error::LinkError;
+use crate::error::{InputField, LinkError};
 use crate::ports::transport::{Method, Pin, Target};
 use crate::ports::vault::SecretKind;
 use crate::ports::{
@@ -132,6 +134,14 @@ pub(crate) struct Shared {
     last_known: Mutex<Option<LastKnown>>,
     record: Mutex<ServerRecord>,
     pub(crate) restarts: AtomicU32,
+    /// Écrivains d'un même serveur (connexion, déconnexion, modification, oubli, suppression) :
+    /// un à la fois, pour qu'une suppression gagne toujours.
+    writers: Arc<tokio::sync::Mutex<()>>,
+    /// Le serveur est retiré du carnet : plus aucune écriture ne le concerne.
+    removed: AtomicBool,
+    /// Empreinte présentée par le serveur et en attente de décision (BR-CONN-003) : posée par la
+    /// tâche AVANT d'annoncer le changement, levée quand le lien repart ou à l'acceptation.
+    pub(crate) presented: Mutex<Option<Fingerprint>>,
 }
 
 impl Shared {
@@ -165,7 +175,24 @@ impl Shared {
             last_known: Mutex::new(last_known),
             record: Mutex::new(record),
             restarts: AtomicU32::new(0),
+            writers: Arc::new(tokio::sync::Mutex::new(())),
+            removed: AtomicBool::new(false),
+            presented: Mutex::new(None),
         }
+    }
+
+    pub(crate) fn set_presented(&self, fingerprint: Fingerprint) {
+        *self
+            .presented
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(fingerprint);
+    }
+
+    pub(crate) fn clear_presented(&self) {
+        *self
+            .presented
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     pub(crate) fn id(&self) -> ServerId {
@@ -243,6 +270,23 @@ struct Inner {
     registry: Arc<Registry>,
     fanout: Arc<Fanout>,
     watchers: Mutex<Vec<JoinHandle<()>>>,
+    /// Contrôles du carnet (nom, adresse) et enregistrement, d'un seul tenant : deux ajouts en même
+    /// temps ne passent pas tous deux les contrôles.
+    book: tokio::sync::Mutex<()>,
+}
+
+/// Un serveur à qui on peut écrire : son verrou d'écriture est pris et il est encore au carnet.
+struct Locked {
+    commands: mpsc::Sender<Command>,
+    shared: Arc<Shared>,
+    _guard: OwnedMutexGuard<()>,
+}
+
+/// Échec de l'ouverture d'une session : `refused` quand le serveur a refusé la connexion elle-même
+/// (et non la prise de contact).
+struct AuthFailure {
+    error: LinkError,
+    refused: bool,
 }
 
 impl Drop for Inner {
@@ -266,6 +310,18 @@ pub struct NewServer {
     pub port: u16,
     pub fingerprint: Fingerprint,
     pub mac_addresses: Vec<String>,
+}
+
+/// Modification d'un serveur du carnet (nom, couleur, adresse). Si l'adresse change,
+/// `fingerprint` est l'empreinte relue (`probe`) et confirmée de nouveau par l'utilisateur
+/// (BR-CONN-009) : sans elle, la modification est refusée.
+#[derive(Debug, Clone)]
+pub struct ServerUpdate {
+    pub name: String,
+    pub color: String,
+    pub host: String,
+    pub port: u16,
+    pub fingerprint: Option<Fingerprint>,
 }
 
 /// Résultat de la première prise de contact.
@@ -332,6 +388,19 @@ impl LinkManager {
         client_name: &str,
         config: LinkConfig,
     ) -> Result<Self, LinkError> {
+        Self::open_with_sink(data_dir, vault, client_name, config, None).await
+    }
+
+    /// Comme `open`, avec une destination d'événements branchée AVANT le lancement des tâches :
+    /// elle reçoit tout, y compris ce qui est annoncé à l'ouverture (suivis perdus, empreinte
+    /// changée constatée par la première tentative), qu'un `subscribe` fait après coup manquerait.
+    pub async fn open_with_sink(
+        data_dir: &Path,
+        vault: Arc<dyn Vault>,
+        client_name: &str,
+        config: LinkConfig,
+        extra_sink: Option<Arc<dyn EventSink>>,
+    ) -> Result<Self, LinkError> {
         let transport = HttpTransport::new(HttpTransportConfig {
             client_name: client_name.to_owned(),
             request_timeout: config.request_timeout,
@@ -347,7 +416,7 @@ impl LinkManager {
                 clock: Arc::new(SystemClock::new()),
                 rng: Arc::new(OsRng::default()),
                 net: Arc::new(SystemNetWatcher),
-                extra_sink: None,
+                extra_sink,
             },
             config,
         )
@@ -387,6 +456,7 @@ impl LinkManager {
                 registry,
                 fanout,
                 watchers: Mutex::new(watchers),
+                book: tokio::sync::Mutex::new(()),
             }),
         })
     }
@@ -403,7 +473,7 @@ impl LinkManager {
     /// Première prise de contact : l'empreinte du certificat et l'identité de l'agent, sans
     /// authentification (BR-CONN-001, 011). L'utilisateur confirme l'empreinte avant `add_server`.
     pub async fn probe(&self, host: &str, port: u16) -> Result<ProbeResult, LinkError> {
-        validate_address(host, port)?;
+        book::check_address(host, port)?;
         let target = Target {
             host: host.to_owned(),
             port,
@@ -420,35 +490,69 @@ impl LinkManager {
         })
     }
 
-    /// Enregistre un serveur dont l'empreinte a été confirmée. Il reste « Session expirée »
-    /// (en attente de connexion) jusqu'à `login`.
-    pub async fn add_server(&self, new: NewServer) -> Result<ServerId, LinkError> {
-        validate_address(&new.host, new.port)?;
-        let name = new.name.trim();
-        if name.is_empty() || name.chars().count() > 64 {
-            return Err(LinkError::InvalidInput("nom du serveur"));
+    /// Prend le verrou d'écriture d'un serveur et vérifie qu'il est encore au carnet : une
+    /// suppression qui a eu lieu entre-temps gagne, rien n'est écrit pour un serveur supprimé.
+    async fn lock(&self, id: &ServerId) -> Result<Locked, LinkError> {
+        let (commands, shared) = self.handle(id)?;
+        let guard = shared.writers.clone().lock_owned().await;
+        if shared.removed.load(Ordering::SeqCst) {
+            return Err(LinkError::UnknownServer);
         }
-        let duplicate = self.servers().iter().any(|existing| {
+        Ok(Locked {
+            commands,
+            shared,
+            _guard: guard,
+        })
+    }
+
+    /// Les contrôles du carnet pour un serveur à ajouter : adresse déjà enregistrée, nom unique.
+    fn check_new(&self, new: &NewServer) -> Result<String, LinkError> {
+        let known = self.servers();
+        let duplicate = known.iter().any(|existing| {
             existing.host.eq_ignore_ascii_case(&new.host) && existing.port == new.port
         });
         if duplicate {
             return Err(LinkError::AlreadyExists);
         }
+        Ok(book::check_name(&new.name, &known)?)
+    }
+
+    fn new_record(
+        new: NewServer,
+        name: String,
+        macs: Vec<String>,
+        username: String,
+        remember: bool,
+        role: Option<hearth_proto::api::accounts::RoleName>,
+    ) -> Result<ServerRecord, LinkError> {
         let id = ServerId::parse(&ulid::Ulid::generate().to_string())
             .map_err(|_| LinkError::Protocol("identifiant".into()))?;
-        let record = ServerRecord {
-            id: id.clone(),
-            name: name.to_owned(),
+        Ok(ServerRecord {
+            id,
+            name,
             color: new.color,
             host: new.host,
             port: new.port,
             fingerprint: new.fingerprint,
-            username: String::new(),
-            remember: false,
-            mac_addresses: new.mac_addresses,
+            username,
+            remember,
+            mac_addresses: macs,
             last_contact_at: None,
             signed_out: false,
-        };
+            role,
+        })
+    }
+
+    /// Enregistre un serveur dont l'empreinte a été confirmée. Il reste « Session expirée »
+    /// (en attente de connexion) jusqu'à `login`. L'application, elle, n'enregistre un serveur
+    /// qu'à sa première connexion réussie : `add_and_login`.
+    pub async fn add_server(&self, new: NewServer) -> Result<ServerId, LinkError> {
+        book::check_address(&new.host, new.port)?;
+        let macs = book::check_mac_addresses(&new.mac_addresses);
+        let _book = self.inner.book.lock().await;
+        let name = self.check_new(&new)?;
+        let record = Self::new_record(new, name, macs, String::new(), false, None)?;
+        let id = record.id.clone();
         let deps = &self.inner.deps;
         deps.servers
             .save(&record)
@@ -458,9 +562,197 @@ impl LinkManager {
         Ok(id)
     }
 
+    /// Prise de contact épinglée puis ouverture d'une session : la prise de contact (version
+    /// compatible), puis `POST /sessions`. Rien n'est écrit ici.
+    async fn authenticate(
+        &self,
+        target: &Target,
+        username: &str,
+        password: &Secret,
+    ) -> Result<LoginResponse, AuthFailure> {
+        let deps = &self.inner.deps;
+        let limit = deps.config.request_timeout;
+        let hello = |error: LinkError| AuthFailure {
+            error,
+            refused: false,
+        };
+        let probed = timeout(limit, deps.transport.hello(target))
+            .await
+            .map_err(|_| hello(LinkError::Timeout))?
+            .map_err(|e| hello(e.into()))?;
+        let compatibility = compat::check(probed.hello.api);
+        if compatibility != Compatibility::Compatible {
+            return Err(hello(LinkError::Incompatible(compatibility)));
+        }
+        let request = attempt::login_request(username, password);
+        let outcome = timeout(limit, deps.transport.login(target, &request)).await;
+        attempt::wipe(request);
+        match outcome {
+            Err(_) => Err(hello(LinkError::Timeout)),
+            Ok(Err(error)) => Err(AuthFailure {
+                error: error.into(),
+                refused: true,
+            }),
+            Ok(Ok(response)) => Ok(response),
+        }
+    }
+
+    /// Ferme au mieux une session qu'on vient d'obtenir et qu'on n'utilisera pas.
+    async fn close_session(&self, target: &Target, token: &str) {
+        let deps = &self.inner.deps;
+        let _ = timeout(
+            deps.config.request_timeout,
+            deps.transport.logout(target, &Secret::new(token)),
+        )
+        .await;
+    }
+
+    /// Première connexion d'un serveur : contacte l'adresse épinglée sur l'empreinte que
+    /// l'utilisateur vient de confirmer, ouvre la session, et SEULEMENT si elle réussit enregistre le
+    /// serveur (carnet, empreinte), ses secrets (coffre) et lance son lien. Un échec, un abandon ou une
+    /// application tuée avant l'écriture ne laissent rien ; tuée pendant, elle laisse au pire un serveur sans session, visible et supprimable, jamais un secret orphelin (BR-CONN-002, 004).
+    pub async fn add_and_login(
+        &self,
+        new: NewServer,
+        username: &str,
+        password: Secret,
+        remember: bool,
+    ) -> Result<(ServerId, LoginInfo), LinkError> {
+        book::check_address(&new.host, new.port)?;
+        let macs = book::check_mac_addresses(&new.mac_addresses);
+        let username = book::check_username(username)?;
+        if password.is_empty() {
+            return Err(LinkError::InvalidInput(InputField::Credentials));
+        }
+        // Mêmes refus qu'à l'enregistrement, avant de contacter le serveur.
+        self.check_new(&new)?;
+        let target = Target {
+            host: new.host.clone(),
+            port: new.port,
+            pin: Pin::Pinned(new.fingerprint),
+        };
+        let mut response = self
+            .authenticate(&target, &username, &password)
+            .await
+            .map_err(|failure| failure.error)?;
+        let _book = self.inner.book.lock().await;
+        // Un autre ajout a pu passer pendant l'attente du réseau.
+        let name = match self.check_new(&new) {
+            Ok(name) => name,
+            Err(error) => {
+                self.close_session(&target, &response.token).await;
+                return Err(error);
+            }
+        };
+        let record = Self::new_record(
+            new,
+            name,
+            macs,
+            username,
+            remember,
+            Some(response.account.role),
+        )?;
+        let id = record.id.clone();
+        let deps = &self.inner.deps;
+        // Le carnet d'abord, les secrets ensuite : une application tuée entre les deux laisse au pire
+        // un serveur sans session (visible, qu'on supprime), jamais un secret au coffre pour un
+        // identifiant que plus rien ne connaît.
+        if let Err(error) = deps.servers.save(&record).await {
+            self.close_session(&target, &response.token).await;
+            return Err(LinkError::Store(error.0));
+        }
+        let token = Secret::new(std::mem::take(&mut response.token));
+        let stored = deps
+            .vault
+            .put(&id, SecretKind::Token, &token)
+            .and_then(|()| {
+                if remember {
+                    deps.vault.put(&id, SecretKind::Password, &password)
+                } else {
+                    Ok(())
+                }
+            });
+        if let Err(error) = stored {
+            let _ = deps.vault.delete(&id, SecretKind::Token);
+            let _ = deps.vault.delete(&id, SecretKind::Password);
+            let _ = deps.servers.remove(&id).await;
+            let _ = timeout(
+                deps.config.request_timeout,
+                deps.transport.logout(&target, &token),
+            )
+            .await;
+            return Err(LinkError::Vault(error.0));
+        }
+        spawn_server(deps, &self.inner.registry, record, None, Start::SignedOut);
+        let (commands, _) = self.handle(&id)?;
+        commands
+            .send(Command::LoggedIn {
+                account_changed: false,
+            })
+            .await
+            .map_err(|_| LinkError::Stopped)?;
+        Ok((
+            id,
+            LoginInfo {
+                account: response.account.clone(),
+                expires_at: response.expires_at.clone(),
+            },
+        ))
+    }
+
+    /// Modifie un serveur du carnet. Les identifiants mémorisés sont conservés. Si l'adresse
+    /// change (BR-CONN-009), la nouvelle empreinte confirmée remplace l'ancienne et le lien repart
+    /// vers la nouvelle adresse ; un nom identique à celui d'un autre serveur est refusé
+    /// (BR-CONN-008).
+    pub async fn update_server(
+        &self,
+        id: &ServerId,
+        update: ServerUpdate,
+    ) -> Result<ServerRecord, LinkError> {
+        book::check_address(&update.host, update.port)?;
+        let locked = self.lock(id).await?;
+        let _book = self.inner.book.lock().await;
+        let known = self.servers();
+        let others: Vec<&ServerRecord> = known.iter().filter(|other| &other.id != id).collect();
+        if others
+            .iter()
+            .any(|other| other.host.eq_ignore_ascii_case(&update.host) && other.port == update.port)
+        {
+            return Err(LinkError::AlreadyExists);
+        }
+        let name = book::check_name(&update.name, others.iter().copied())?;
+        let mut record = locked.shared.record();
+        let moved = book::address_changed(&record, &update.host, update.port);
+        if moved {
+            record.fingerprint = update.fingerprint.ok_or(LinkError::VerificationRequired)?;
+        }
+        record.name = name;
+        record.color = update.color;
+        record.host = update.host;
+        record.port = update.port;
+        self.inner
+            .deps
+            .servers
+            .save(&record)
+            .await
+            .map_err(|e| LinkError::Store(e.0))?;
+        locked.shared.set_record(record.clone());
+        if moved {
+            // Autre adresse, autre identité possible : les clés d'opération ne disent plus rien ;
+            // une tentative repart vers la nouvelle adresse, épinglée sur la nouvelle empreinte.
+            locked
+                .commands
+                .send(Command::FingerprintAccepted)
+                .await
+                .map_err(|_| LinkError::Stopped)?;
+        }
+        Ok(record)
+    }
+
     /// Ouvre une session (`POST /sessions`) sur la connexion épinglée, mémorise le jeton au coffre
     /// (et le mot de passe si `remember`), puis lance le flux. Le mot de passe n'est envoyé qu'à
-    /// un serveur dont l'empreinte est celle confirmée (BR-CONN-011).
+    /// un serveur dont l'empreinte est celle confirmée (BR-CONN-011). Si le serveur est supprimé
+    /// pendant l'échange avec le réseau, rien n'est écrit : la suppression gagne.
     pub async fn login(
         &self,
         id: &ServerId,
@@ -469,32 +761,24 @@ impl LinkManager {
         remember: bool,
     ) -> Result<LoginInfo, LinkError> {
         let (commands, shared) = self.handle(id)?;
-        let username = username.trim();
-        if username.is_empty() || password.is_empty() {
-            return Err(LinkError::InvalidInput("identifiant ou mot de passe vide"));
+        let username = book::check_username(username)?;
+        if password.is_empty() {
+            return Err(LinkError::InvalidInput(InputField::Credentials));
         }
         let deps = &self.inner.deps;
         let target = shared.target();
-        let limit = deps.config.request_timeout;
-        let probed = timeout(limit, deps.transport.hello(&target))
-            .await
-            .map_err(|_| LinkError::Timeout)??;
-        let compatibility = compat::check(probed.hello.api);
-        if compatibility != Compatibility::Compatible {
-            return Err(LinkError::Incompatible(compatibility));
-        }
-        let request = attempt::login_request(username, &password);
-        let outcome = timeout(limit, deps.transport.login(&target, &request)).await;
-        attempt::wipe(request);
-        let response = match outcome {
-            Err(_) => return Err(LinkError::Timeout),
-            Ok(Err(error)) => {
-                let _ = commands.send(Command::LoginRefused).await;
-                return Err(error.into());
+        let mut response = match self.authenticate(&target, &username, &password).await {
+            Ok(response) => response,
+            Err(failure) => {
+                if failure.refused {
+                    let _ = commands.send(Command::LoginRefused).await;
+                }
+                return Err(failure.error);
             }
-            Ok(Ok(response)) => response,
         };
-        let mut response = response;
+        // Le réseau a pu durer : le serveur est-il encore là ? Sinon, aucune écriture.
+        let locked = self.lock(id).await?;
+        let shared = &locked.shared;
         let vault_error = |e: crate::ports::vault::VaultError| LinkError::Vault(e.0);
         deps.vault
             .put(
@@ -515,16 +799,18 @@ impl LinkManager {
         let mut record = shared.record();
         // Un autre compte : les clés d'opération de l'ancien ne disent plus rien.
         let account_changed =
-            !record.username.is_empty() && !record.username.eq_ignore_ascii_case(username);
-        record.username = username.to_owned();
+            !record.username.is_empty() && !record.username.eq_ignore_ascii_case(&username);
+        record.username = username;
         record.remember = remember;
         record.signed_out = false;
+        record.role = Some(response.account.role);
         shared.set_record(record.clone());
         deps.servers
             .save(&record)
             .await
             .map_err(|e| LinkError::Store(e.0))?;
-        commands
+        locked
+            .commands
             .send(Command::LoggedIn { account_changed })
             .await
             .map_err(|_| LinkError::Stopped)?;
@@ -539,36 +825,69 @@ impl LinkManager {
     /// `remove_server` efface tout. Aucune reconnexion automatique ensuite, pas même au
     /// prochain démarrage.
     pub async fn logout(&self, id: &ServerId) -> Result<(), LinkError> {
-        let (commands, shared) = self.handle(id)?;
         let deps = &self.inner.deps;
-        // D'abord arrêter la tâche (plus de reconnexion possible), ensuite fermer la session :
-        // sinon le flux annonce « session fermée » et la reconnexion silencieuse rouvre une
-        // session avec le mot de passe mémorisé.
-        let mut record = shared.record();
-        record.signed_out = true;
-        shared.set_record(record.clone());
-        commands
-            .send(Command::LoggedOut)
-            .await
-            .map_err(|_| LinkError::Stopped)?;
-        if let Ok(Some(token)) = deps.vault.get(id, SecretKind::Token) {
+        // Sous verrou : arrêter la tâche (plus de reconnexion possible) et noter la déconnexion. Le
+        // réseau, lui, se fait hors verrou : un serveur injoignable ne retient ni une suppression ni
+        // une connexion pendant `request_timeout`.
+        let (target, token) = {
+            let locked = self.lock(id).await?;
+            let mut record = locked.shared.record();
+            record.signed_out = true;
+            locked.shared.set_record(record);
+            locked
+                .commands
+                .send(Command::LoggedOut)
+                .await
+                .map_err(|_| LinkError::Stopped)?;
+            (
+                locked.shared.target(),
+                deps.vault.get(id, SecretKind::Token),
+            )
+        };
+        if let Ok(Some(token)) = token {
             // Au mieux : un serveur injoignable n'empêche pas de se déconnecter.
             let _ = timeout(
                 deps.config.request_timeout,
-                deps.transport.logout(&shared.target(), &token),
+                deps.transport.logout(&target, &token),
             )
             .await;
         }
+        // Le serveur a pu être supprimé pendant l'appel : alors rien à écrire.
+        let locked = self.lock(id).await?;
         deps.vault
             .delete(id, SecretKind::Token)
             .map_err(|e| LinkError::Vault(e.0))?;
         deps.servers
-            .save(&record)
+            .save(&locked.shared.record())
             .await
             .map_err(|e| LinkError::Store(e.0))
     }
 
-    /// Retire le serveur : tâche arrêtée, secrets, carnet et dernière vue effacés.
+    /// Oubli des identifiants : le mot de passe mémorisé est effacé du coffre et « se souvenir »
+    /// repasse à faux. La session en cours n'est pas touchée ; à son expiration, l'utilisateur
+    /// devra se reconnecter à la main (BR-CONN-004). Sans effet si rien n'était mémorisé.
+    pub async fn forget_credentials(&self, id: &ServerId) -> Result<(), LinkError> {
+        let locked = self.lock(id).await?;
+        let deps = &self.inner.deps;
+        deps.vault
+            .delete(id, SecretKind::Password)
+            .map_err(|e| LinkError::Vault(e.0))?;
+        let mut record = locked.shared.record();
+        if record.remember {
+            record.remember = false;
+            locked.shared.set_record(record.clone());
+            deps.servers
+                .save(&record)
+                .await
+                .map_err(|e| LinkError::Store(e.0))?;
+        }
+        Ok(())
+    }
+
+    /// Retire le serveur : tâche arrêtée, secrets, carnet et dernière vue effacés. La suppression
+    /// gagne toujours : elle attend les écritures en cours de ce serveur, et plus aucune ne peut
+    /// suivre (`removed`). Si le coffre refuse d'effacer un secret, rien n'est dit « supprimé » :
+    /// le serveur est remis en service tel quel et l'erreur remonte (BR-CONN-010).
     pub async fn remove_server(&self, id: &ServerId) -> Result<(), LinkError> {
         let handle = self
             .inner
@@ -576,6 +895,9 @@ impl LinkManager {
             .lock()
             .remove(id)
             .ok_or(LinkError::UnknownServer)?;
+        handle.shared.removed.store(true, Ordering::SeqCst);
+        // Les écritures déjà commencées (connexion, déconnexion…) se terminent avant nous.
+        let _writers = handle.shared.writers.clone().lock_owned().await;
         let (done, stopped) = oneshot::channel();
         if handle
             .commands
@@ -587,8 +909,16 @@ impl LinkManager {
         }
         handle.join.abort();
         let deps = &self.inner.deps;
-        let _ = deps.vault.delete(id, SecretKind::Token);
-        let _ = deps.vault.delete(id, SecretKind::Password);
+        let token = deps.vault.delete(id, SecretKind::Token);
+        let password = deps.vault.delete(id, SecretKind::Password);
+        if let Err(error) = token.and(password) {
+            tracing::error!(server = %id, %error, "secrets non effacés : serveur remis en service");
+            let record = handle.shared.record();
+            let last_known = handle.shared.last_known();
+            let start = initial_start(deps, id, record.signed_out);
+            spawn_server(deps, &self.inner.registry, record, last_known, start);
+            return Err(LinkError::Vault(error.0));
+        }
         let _ = deps.snapshots.remove(id).await;
         let _ = deps.operations.remove(id).await;
         deps.servers
@@ -639,17 +969,31 @@ impl LinkManager {
         id: &ServerId,
         fingerprint: Fingerprint,
     ) -> Result<(), LinkError> {
-        let (commands, shared) = self.handle(id)?;
-        let mut record = shared.record();
+        let locked = self.lock(id).await?;
+        // Seule l'empreinte que le serveur a présentée et que l'utilisateur a sous les yeux : refus
+        // si elle diffère, ou si aucun changement d'empreinte n'attend de décision.
+        {
+            let mut presented = locked
+                .shared
+                .presented
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if *presented != Some(fingerprint) {
+                return Err(LinkError::InvalidInput(InputField::Fingerprint));
+            }
+            *presented = None;
+        }
+        let mut record = locked.shared.record();
         record.fingerprint = fingerprint;
-        shared.set_record(record.clone());
+        locked.shared.set_record(record.clone());
         self.inner
             .deps
             .servers
             .save(&record)
             .await
             .map_err(|e| LinkError::Store(e.0))?;
-        commands
+        locked
+            .commands
             .send(Command::FingerprintAccepted)
             .await
             .map_err(|_| LinkError::Stopped)
@@ -781,17 +1125,6 @@ fn spawn_server(
             join,
         },
     );
-}
-
-fn validate_address(host: &str, port: u16) -> Result<(), LinkError> {
-    let bad_char = |c: char| c.is_whitespace() || matches!(c, '/' | '\\' | '?' | '#' | '@');
-    if host.is_empty() || host.len() > 253 || host.chars().any(bad_char) {
-        return Err(LinkError::InvalidInput("adresse du serveur"));
-    }
-    if port == 0 {
-        return Err(LinkError::InvalidInput("port du serveur"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-and-login"
+description = "Enables the add_and_login command without any pre-configured scope."
+commands.allow = ["add_and_login"]
+
+[[permission]]
+identifier = "deny-add-and-login"
+description = "Denies the add_and_login command without any pre-configured scope."
+commands.deny = ["add_and_login"]

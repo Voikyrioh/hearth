@@ -156,7 +156,7 @@ test("notifications : 3 visibles au plus, compteur sur les répétitions", async
     page.evaluate((outcome) => {
       const sim = (window as unknown as { __hearthSim: { emitOperation(e: unknown): void } })
         .__hearthSim;
-      sim.emitOperation({ opId: "x", outcome });
+      sim.emitOperation({ opId: `x${Math.random()}`, outcome });
     }, kind);
   await bridge("done");
   await bridge("not_executed");

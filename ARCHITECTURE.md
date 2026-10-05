@@ -21,15 +21,15 @@ crates/
 │   ├── entrypoint/  → `http/` (axum, table `ENDPOINTS`, couche d'accès et suivi posés depuis la table, couche de version, erreurs, serveur HTTPS), `cli.rs` (options et sous-commandes dont `account …`), `account.rs`, `terminal.rs` (saisie du mot de passe), `ws/` (flux temps réel : une tâche par connexion), `metrics_wire.rs` (conversions mesures vers le fil), `tasks.rs` (purge périodique, échantillonneur à 1 Hz) et `signal.rs`
 │   └── app.rs       → Racine de composition : charge la config, assemble adaptateurs, cas d'usage et serveur, exécute la commande
 ├── hearth-link/     → Bibliothèque cliente, sans interface : épinglage de l'empreinte (rustls sur mesure), connexion et session, machine à états du lien (3 s / 30 s, tentatives sans fin), opérations en suspens jamais rejouées, dernières vues, flux temps réel ; une tâche supervisée par serveur [ARCHITECTURE.md]
-│   ├── domain/      → Règles pures, horloge injectée : `state.rs` (machine à états), `backoff.rs`, `pending_ops.rs`, `pinning.rs`, `compat.rs`, `triggers.rs` (réveil, réseau), `event.rs`, `server.rs`, `secret.rs`
+│   ├── domain/      → Règles pures, horloge injectée : `state.rs` (machine à états), `backoff.rs`, `pending_ops.rs`, `pinning.rs`, `compat.rs`, `triggers.rs` (réveil, réseau), `event.rs`, `server.rs`, `book.rs` (nom unique, adresse, port, adresse modifiée), `secret.rs`
 │   ├── ports/       → `Transport`, `Vault`, `ServerStore`, `SnapshotStore`, `Clock`, `Rng`, `NetWatcher`, `EventSink`
-│   ├── adapters/    → `tls.rs` (vérificateurs « sonde » et « épinglé »), `http_transport.rs` (reqwest + tokio-tungstenite), `file_store.rs` (JSON, écriture atomique), coffre en mémoire, horloges, aléa, adresses locales
+│   ├── adapters/    → `tls.rs` (vérificateurs « sonde » et « épinglé »), `http_transport.rs` (reqwest + tokio-tungstenite), `file_store.rs` (JSON, écriture atomique), coffre en mémoire (tests ; le coffre Windows est dans la coquille, `apps/desktop/src-tauri/src/vault.rs`), horloges, aléa, adresses locales
 │   └── manager/     → Façade `LinkManager` (`task.rs` : tâche supervisée par serveur ; `attempt.rs`, `watchers.rs`, `events.rs`)
 └── xtask/           → Tâches build : `agent` (binaire statique en conteneur), `e2e-install` (installation de bout en bout en conteneur systemd), `shellcheck`, `br-check` (toute référence BR-… du code et des docs a sa fiche) ; empaquetage et manifeste à venir
 
 apps/
-├── desktop/src-tauri/  → Coquille Tauri : fenêtre, instance unique, zone de notification, démarrage Windows, réglages locaux (livré HRT-08) ; coffre, mises à jour, relais à venir ; interface : design system Braise, coquille (barre, navigation, en-tête, bandeau), pont de liaison simulé (HRT-09) [apps/desktop/ARCHITECTURE.md]
-├── desktop/src/        → Interface Vue 3 : écran de premier lancement, réglages, jetons Braise, textes (`i18n/fr.ts`), pont Tauri typé (`bindings.ts`) ; affichage d'état et saisies à venir
+├── desktop/src-tauri/  → Coquille Tauri : fenêtre, instance unique, zone de notification, démarrage Windows, réglages locaux (HRT-08) ; pont réel de liaison (`LinkRuntime` sur `hearth-link`, commandes et événements typés `link://*`) et coffre du Gestionnaire d'identification de Windows (HRT-10) ; mises à jour, relais à venir ; interface : design system Braise, coquille, assistant d'ajout de serveur, carnet, alerte d'empreinte [apps/desktop/ARCHITECTURE.md]
+├── desktop/src/        → Interface Vue 3 : écran de premier lancement, assistant d'ajout, carnet de serveurs, réglages, jetons Braise, textes (`i18n/fr.ts`), pont de liaison (`link/` : réel, simulé, vide) et pont Tauri typé (`bindings.ts`) ; tableau de bord, comptes, journal à venir
 └── deploy/             → `install.sh` (installation en une commande, POSIX sh) ; `e2e/` (image Debian + systemd, scénario de bout en bout)
 
 docs/              → INDEX.md (adr, business-rules, open-api, components, bugs)
@@ -37,7 +37,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 
 ## Flux principaux
 
-- **Première connexion** : Client → probe (TLS sans confiance) → `/hello` → empreinte cert → confirmation utilisateur → `POST /sessions` (`X-Hearth-Api`, Argon2id, verrouillage progressif) → jeton (haché en base, session glissante 30 jours) → WebSocket `/stream` (jeton dans le premier message, snapshot puis mesures chaque seconde). Secrets au coffre Windows.
+- **Première connexion** : Client → probe (TLS sans confiance) → `/hello` → empreinte cert → confirmation utilisateur (assistant en 3 temps ; le serveur n'est enregistré qu'à la connexion réussie) → `POST /sessions` (`X-Hearth-Api`, Argon2id, verrouillage progressif) → jeton (haché en base, session glissante 30 jours) → WebSocket `/stream` (jeton dans le premier message, snapshot puis mesures chaque seconde). Secrets au coffre Windows (`Hearth/{id}`).
 - **Action pendant coupure réseau** : Client envoie action avec `Idempotency-Key:ULID` → lien coupé → Client affiche « Reconnexion… » (après 3 s) → tentatives espacées (0,5 s → 30 s) → lien rétabli → vérification état opération → résultat ou relance.
 - **Mise à jour agent** : Admin → POST `/agent/update` → télécharge, vérifie minisign → superviseur lance détaché → arrêt ancien, échange binaires, redémarrage → vérification 60 s → succès ou rollback.
 
@@ -72,6 +72,9 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 | une action coupée avant sa réponse | `crates/hearth-link/src/domain/pending_ops.rs` et `docs/business-rules/BR-RESIL-009-*.md`, `BR-RESIL-010-*.md` |
 | un cas d'authentification | `docs/adr/ADR-0005-tls-epingle.md`, `crates/hearth-agent/src/application/sessions.rs` et `domain/{sessions,lockout,session_token}.rs` |
 | l'épinglage de l'empreinte côté client | `crates/hearth-link/src/adapters/tls.rs`, `domain/pinning.rs` et `docs/business-rules/BR-CONN-002-*.md`, `BR-CONN-003-*.md` |
+| le pont réel de l'application, le coffre Windows | `apps/desktop/src-tauri/src/link.rs`, `link_dto.rs`, `vault.rs` et `docs/adr/ADR-0013-pont-de-liaison-et-coffre-windows.md` |
+| l'assistant d'ajout d'un serveur, le carnet, l'alerte d'empreinte | `apps/desktop/src/composables/useAddServer.ts`, `components/organisms/{AddServerWizard,FingerprintAlert,ServerRow}.vue`, `pages/Servers.vue` et `docs/business-rules/BR-CONN-*.md` |
+| les règles du carnet (nom unique, adresse, adresse modifiée) | `crates/hearth-link/src/domain/book.rs` et `docs/business-rules/BR-CONN-008-*.md`, `BR-CONN-009-*.md` |
 | qui a le droit d'appeler une route | `crates/hearth-agent/src/entrypoint/http/mod.rs` (`ENDPOINTS`) et `auth.rs` (`guard`, `Caller`) |
 | une table, une migration, une requête SQL | `crates/hearth-agent/migrations/` et `crates/hearth-agent/src/infrastructure/sqlite/` |
 | un seuil d'alerte, la fenêtre d'un historique, une mesure | `docs/business-rules/BR-DASH-*.md`, `crates/hearth-proto/src/thresholds.rs`, `crates/hearth-agent/src/domain/{metrics,machine,stream}.rs` |

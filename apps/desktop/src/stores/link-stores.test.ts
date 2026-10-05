@@ -69,9 +69,19 @@ describe("servers store", () => {
     expect(servers.loaded).toBe(true);
     expect(servers.servers.map((s) => s.id)).toEqual(["forge", "salon"]);
     expect(servers.first?.id).toBe("forge");
-    bridge.removeServer("forge");
+    bridge.dropServer("forge");
     expect(servers.servers.map((s) => s.id)).toEqual(["salon"]);
-    bridge.addServer({ id: "x", name: "x", address: "x", color: 2, role: "admin" });
+    bridge.seedServer({
+      id: "x",
+      name: "x",
+      address: "x",
+      host: "x",
+      port: 7341,
+      color: 2,
+      role: "admin",
+      username: "",
+      remember: false,
+    });
     expect(servers.byId("x")?.name).toBe("x");
     await servers.load();
     expect(servers.servers).toHaveLength(2);
@@ -209,7 +219,17 @@ describe("servers store failure", () => {
 describe("bridge contract", () => {
   it("replays the current servers and states at subscription, and a server added before is not lost", async () => {
     const { bridge } = freshBridge();
-    bridge.addServer({ id: "x", name: "x", address: "x", color: 2, role: "admin" });
+    bridge.seedServer({
+      id: "x",
+      name: "x",
+      address: "x",
+      host: "x",
+      port: 7341,
+      color: 2,
+      role: "admin",
+      username: "",
+      remember: false,
+    });
     bridge.setState("x", "offline");
     const lists: string[][] = [];
     const states: string[] = [];
@@ -217,11 +237,11 @@ describe("bridge contract", () => {
     const stopStates = await bridge.onLinkState((e) => states.push(`${e.serverId}:${e.state}`));
     expect(lists).toEqual([["forge", "salon", "x"]]);
     expect(states).toContain("x:offline");
-    bridge.removeServer("salon");
+    bridge.dropServer("salon");
     expect(lists.at(-1)).toEqual(["forge", "x"]);
     stopServers();
     stopStates();
-    bridge.removeServer("x");
+    bridge.dropServer("x");
     expect(lists).toHaveLength(2);
   });
 });
@@ -243,6 +263,9 @@ describe("link store ordering and operations", () => {
       since,
       lastContactAt: null,
       nextRetryAt: null,
+      blocked: null,
+      reason: null,
+      failedAttempts: 0,
     });
     push(event("offline", 5, 2000));
     // Un instantané en retard (seq plus petit) arrive ensuite : ignoré, même avec un `since` plus récent.
@@ -292,7 +315,7 @@ describe("real teardown", () => {
     const { bridge, servers, link } = await startedApp();
     servers.reset();
     link.reset();
-    bridge.removeServer("forge");
+    bridge.dropServer("forge");
     bridge.setState("salon", "offline");
     bridge.emitOperation({ opId: "z", serverId: "salon", outcome: "done" });
     expect(servers.servers).toEqual([]);

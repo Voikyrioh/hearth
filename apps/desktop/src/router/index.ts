@@ -7,11 +7,14 @@ import {
   type Router,
   type RouterHistory,
 } from "vue-router";
+import { reportUiError } from "@/errors/report";
 import type { MessageKey } from "@/i18n";
 import ServerLayout from "@/layouts/ServerLayout.vue";
 import Accounts from "@/pages/Accounts.vue";
+import AddServer from "@/pages/AddServer.vue";
 import Audit from "@/pages/Audit.vue";
 import Dashboard from "@/pages/Dashboard.vue";
+import Servers from "@/pages/Servers.vue";
 import Settings from "@/pages/Settings.vue";
 import Welcome from "@/pages/Welcome.vue";
 import { useServersStore } from "@/stores/servers";
@@ -28,8 +31,8 @@ declare module "vue-router" {
 }
 
 /**
- * Routes : `/welcome` (aucun serveur), `/servers/:id/{dashboard,accounts,audit}` dans le
- * gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
+ * Routes : `/welcome` (aucun serveur), `/servers/new` (assistant d'ajout), `/servers` (carnet),
+ * `/servers/:id/{dashboard,accounts,audit}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
  * serveur ou l'accueil. Historique par hachage (l'application est servie depuis des fichiers).
  */
 export function createAppRouter(history: RouterHistory = createWebHashHistory()): Router {
@@ -38,6 +41,8 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
     routes: [
       { path: "/", name: "home", component: { render: () => null } },
       { path: "/welcome", name: "welcome", component: Welcome },
+      { path: "/servers/new", name: "add-server", component: AddServer },
+      { path: "/servers", name: "servers", component: Servers },
       {
         path: "/servers/:id",
         name: "server",
@@ -81,6 +86,10 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
     ],
   });
 
+  // Une navigation qui échoue (page introuvable, erreur d'un garde) : notification discrète et
+  // ligne au journal, jamais un échec silencieux ni un écran blanc.
+  router.onError((error) => reportUiError(error, "router"));
+
   let watching = false;
   router.beforeEach(async (to) => {
     const servers = useServersStore();
@@ -113,6 +122,9 @@ export function redirectFor(route: RouteLocationNormalized): RouteLocationRaw | 
     : { name: "welcome" };
   if (route.name === "home") return home;
   if (route.name === "welcome") return servers.first ? home : null;
+  // Le carnet n'a de sens qu'avec au moins un serveur ; l'ajout est toujours permis.
+  if (route.name === "servers") return servers.first ? null : home;
+  if (route.name === "add-server") return null;
   if (typeof route.params.id === "string") {
     const server = servers.byId(route.params.id);
     if (!server) return home;

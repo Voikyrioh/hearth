@@ -76,10 +76,10 @@ describe("redirections", () => {
 
   it("moves to the first remaining server when the displayed server is removed", async () => {
     const { router, bridge, wrapper } = await boot("/servers/salon/dashboard");
-    bridge.removeServer("salon");
+    bridge.dropServer("salon");
     await flushPromises();
     expect(router.currentRoute.value.fullPath).toBe("/servers/forge/dashboard");
-    bridge.removeServer("forge");
+    bridge.dropServer("forge");
     await flushPromises();
     expect(router.currentRoute.value.name).toBe("welcome");
     wrapper.unmount();

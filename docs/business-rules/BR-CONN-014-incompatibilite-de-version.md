@@ -17,6 +17,9 @@ Le client annonce la version d'interface qu'il parle (`X-Hearth-Api: <n>`) ; l'a
 - `crates/hearth-agent/src/domain/compat.rs::check` — décision pure (`Incompatibility`).
 - `crates/hearth-agent/src/entrypoint/http/version.rs` — couche de contrôle, appliquée à toutes les routes sauf `/hello`.
 
+## Interface (coquille et vue)
+- `link_dto::LinkFailure::{IncompatibleAgent, IncompatibleClient}`, `BlockedDto::{IncompatibleAgent, IncompatibleClient}` ; textes « L'agent de ce serveur est trop ancien. Mets à jour l'agent sur le serveur. » / « Le client est trop ancien. Mets à jour le client sur ce PC. » dans l'assistant (message de carte) et dans `OfflineBanner.vue`. Pas de bouton de mise à jour avant HRT-16/17.
+
 ## Vérification
 - Tests : `domain::compat::tests` ; `tests/sessions_https.rs::an_incompatible_version_is_refused_with_who_must_upgrade`.
 
@@ -28,3 +31,4 @@ Le client annonce la version d'interface qu'il parle (`X-Hearth-Api: <n>`) ; l'a
 
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
+- 2026-10-05 : section Interface (HRT-10).

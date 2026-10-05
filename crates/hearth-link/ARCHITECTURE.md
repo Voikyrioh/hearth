@@ -4,9 +4,10 @@ Bibliothèque cliente, sans interface : elle tient le lien avec un agent quoi qu
 
 ```
 src/
-├── lib.rs           → réexporte la façade (`LinkManager`, `LinkConfig`, `Ports`, `ActionRequest`, `ActionOutcome`, `NewServer`, `ProbeResult`, `LoginInfo`, `EventStream`, `LinkError`)
+├── lib.rs           → réexporte la façade (`LinkManager`, `LinkConfig`, `Ports`, `ActionRequest`, `ActionOutcome`, `NewServer`, `ProbeResult`, `ServerUpdate`, `LoginInfo`, `EventStream`, `LinkError`)
 ├── error.rs         → `LinkError` : erreurs publiques typées, jamais de secret dans un message
 ├── domain/          → Règles pures : pas d'E/S, pas d'horloge propre (le temps est un paramètre), pas de tokio
+│   ├── book.rs      → règles du carnet : `check_name` (nom requis, 255 caractères au plus, unique sans tenir compte de la casse, BR-CONN-008), `check_address` (IPv4, IPv6, nom, port ; BR-CONN-008), `check_username`, `check_mac_addresses` (filtre et tronque, jamais un refus), `address_changed` (BR-CONN-009)
 │   ├── agent_identity.rs → `check_product` : seul un `/hello` annonçant `product = "hearth"` est un agent (BR-CONN-012)
 │   ├── state.rs     → `LinkMachine` : machine à états `Connected | Reconnecting | Offline | SessionExpired | AccessRevoked` pilotée par des `Input` (trafic, silence, erreur de transport, tentative réussie, 401 expiré, 401 révoqué, empreinte différente, versions incompatibles, « Réessayer maintenant », réveil, changement de réseau, connexion, déconnexion, arrêt) ; rend des `Effect` (lancer une tentative, reconnexion silencieuse, fermer le flux, résoudre les opérations). Seuils 3 s / 30 s exacts à la milliseconde, `Thresholds` injectables. `state/tests.rs` : une ligne du tableau des transitions de la spec = un test `rowNN_…`
 │   ├── backoff.rs   → délais 0,5 s, 1 s, 2 s, 4 s, 8 s, 15 s, 30 s, 30 s… avec ± 20 % d'aléa (source d'aléa fournie), plafond dur de 30 s, remise à zéro sur succès
@@ -15,23 +16,23 @@ src/
 │   ├── compat.rs    → plage de versions de `/hello` : compatible / mettre à jour le client / mettre à jour l'agent
 │   ├── triggers.rs  → `detect_wake` (saut d'horloge > 5 s), `network_changed` (liste d'adresses locales)
 │   ├── event.rs     → `Event` (état du lien avec `since`, `last_contact_at`, `next_retry_at` ; mesures ; instantané ; issue d'opération ; fin de session ; empreinte changée ; audit), `StateInfo`
-│   ├── server.rs    → `ServerId`, `ServerRecord` (entrée du carnet, sans secret), `LastKnown` (dernière vue, bornée)
+│   ├── server.rs    → `ServerId`, `ServerRecord` (entrée du carnet, sans secret ; garde le rôle de la dernière connexion), `LastKnown` (dernière vue, bornée)
 │   ├── secret.rs    → `Secret` : effacé de la mémoire à la libération, `Debug` masqué
 │   └── time.rs      → `Mono` (instant monotone) et `WallTime` (date murale), arithmétique saturante
 ├── ports/           → `Transport` (hello, login, logout, requête authentifiée, opération, ouverture du flux), `StreamConn`, `Vault`, `ServerStore`, `SnapshotStore`, `OperationStore`, `Clock`, `Rng`, `NetWatcher`, `EventSink`
 ├── adapters/        → Monde réel
 │   ├── tls.rs       → vérificateurs rustls sur mesure : mode « sonde » (accepte tout certificat, rend l'empreinte, pour le premier `/hello`) et mode « épinglé » (refuse toute empreinte différente, quelle que soit la chaîne ou le nom) ; TLS 1.3 seul ; la signature de la poignée de main est vérifiée dans les deux modes
 │   ├── http_transport.rs → `HttpTransport` : `reqwest` (rustls, fournisseur `ring`) pour les requêtes, `tokio-tungstenite` sur `tokio-rustls` pour le flux ; en-têtes `X-Hearth-Api`, `X-Hearth-Client`, `Authorization`, `Idempotency-Key` ; délais de connexion, de requête et d'envoi ; corps et messages bornés ; une connexion neuve par appel
-│   ├── file_store.rs → carnet (`servers.json`), dernières vues (`snapshots/{id}.json`) et opérations en suspens (`operations/{id}.json`) en JSON, écriture atomique (fichier temporaire, synchronisation, renommage) ; fichier illisible ignoré avec avertissement et mis de côté en `.corrupt`
+│   ├── file_store.rs → carnet (`servers.json`), dernières vues (`snapshots/{id}.json`) et opérations en suspens (`operations/{id}.json`) en JSON, écriture atomique (fichier temporaire, synchronisation, renommage) ; fichier illisible (ou dont la lecture échoue) ignoré avec avertissement et mis de côté en `.corrupt`
 │   ├── memory_vault.rs → coffre en mémoire (tests) ; le coffre Windows vient avec l'application
 │   ├── system.rs    → `SystemClock`, `TokioClock` (temps virtuel des tests), `OsRng`
 │   └── net_watch.rs → `SystemNetWatcher` : adresses locales (crate `if-addrs`)
 └── manager/         → Façade
-    ├── mod.rs       → `LinkManager` : `probe`, `add_server`, `login`, `logout`, `remove_server`, `state`, `states`, `servers`, `subscribe`, `retry_now`, `accept_fingerprint`, `execute`, `last_known`, `task_restarts`, `shutdown` ; `LinkConfig` (durées par défaut = spec) ; `Ports` (tout ce qui vient du monde extérieur)
+    ├── mod.rs       → `LinkManager` (écritures d'un même serveur sous un verrou par serveur, une suppression gagne toujours ; `open_with_sink` branche une destination d'événements avant le lancement des tâches) : `probe`, `add_server`, `add_and_login` (première connexion : le serveur n'est enregistré qu'au succès), `update_server` (nom, couleur, adresse : une autre adresse exige l'empreinte confirmée de nouveau), `login`, `logout`, `forget_credentials` (oubli du mot de passe mémorisé), `remove_server`, `state`, `states`, `servers`, `subscribe`, `retry_now`, `accept_fingerprint`, `execute`, `last_known`, `task_restarts`, `shutdown` ; `LinkConfig` (durées par défaut = spec) ; `Ports` (tout ce qui vient du monde extérieur)
     ├── task.rs      → la tâche d'un serveur : seule propriétaire de la machine à états, du flux, des opérations en suspens ; une boucle `select!` (commandes, flux, tentatives, résultats internes, échéance de la machine, battement) ; supervisée sous `catch_unwind` : une panique est journalisée, comptée, et le lien repart `Offline` avec une nouvelle tentative
     ├── attempt.rs   → une tentative (flux, authentification, instantané), la reconnexion silencieuse, la relecture d'une opération : tâches abandonnables qui rendent un résultat, sans toucher à la machine
     ├── watchers.rs  → veilleurs globaux : réveil (contrôle d'horloge chaque seconde) et changement de réseau (adresses sondées toutes les 5 s)
-    ├── persist.rs   → file d'écriture par serveur (dernière vue, carnet, opérations en suspens) : la boucle du serveur ne fait jamais d'E/S disque ; file bornée « dernier état gagne » ; accusé d'écriture des opérations (persister PUIS envoyer, `LinkError::TrackingUnavailable`)
+    ├── persist.rs   → deux files d'écriture par serveur (opérations en suspens d'un côté, dernière vue et carnet de l'autre : l'accusé d'une action ne passe jamais derrière l'écriture d'une vue) : la boucle du serveur ne fait jamais d'E/S disque ; file bornée « dernier état gagne » ; accusé d'écriture des opérations (persister PUIS envoyer, `LinkError::TrackingUnavailable`)
     └── events.rs    → diffusion des événements (canal borné, `EventStream`, `Event::Lagged` pour un abonné en retard)
 tests/
 ├── support/         → agent réel dans le processus (`agent.rs`), mandataire TCP à pannes (`proxy.rs`), `World` (agent + mandataire + `LinkManager`), `Recorder`
@@ -51,7 +52,8 @@ Le début d'une coupure est le dernier message reçu (silence de 3 s) ou l'erreu
 - Les opérations en suspens sont sur disque (`operations/{id}.json`), le carnet dans `servers.json`, la dernière vue dans `snapshots/{id}.json`.
 - `Event::OperationsLost` : le fichier des suivis était illisible (mis de côté en `.corrupt`), des suivis ont pu être perdus.
 - Contrôle des références : `cargo xtask br-check` (CI) vérifie que toute référence `BR-…` du code et des docs a sa fiche.
-- À venir : modification de l'adresse d'un serveur enregistré avec nouvelle vérification de l'empreinte (BR-CONN-009, hors HRT-07).
+- Modification de l'adresse d'un serveur enregistré : `LinkManager::update_server`, nouvelle vérification de l'empreinte exigée (BR-CONN-009).
+- `LinkError::InvalidInput(InputField)` porte le champ refusé (jamais un texte). `LinkError::TrackingSlow` : le disque n'a pas écrit le suivi d'une action à temps (distinct de `TrackingUnavailable`, écriture en échec) ; dans les deux cas l'action n'est pas partie. Si le lien tombe pendant cette écriture, `Event::Operation` annonce « non exécuté » (la requête n'est jamais partie).
 
 ## Règles de la bibliothèque
 
