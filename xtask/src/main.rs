@@ -5,6 +5,8 @@
 //! - `e2e-install` : installe ce binaire dans un conteneur jetable et vérifie tout le parcours
 //!   (installation, réinstallation, désinstallation).
 //!
+//! - `shellcheck` : `deploy/install.sh` et le scénario de bout en bout passent `shellcheck`.
+//!
 //! Aucune commande n'est lancée par un interpréteur avec une chaîne construite : les programmes
 //! reçoivent des listes d'arguments ; les rares scripts `sh -c` sont des constantes, exécutées
 //! dans le conteneur, qui reçoivent leurs valeurs par variables d'environnement.
@@ -12,6 +14,7 @@
 mod agent;
 mod docker;
 mod e2e;
+mod shellcheck;
 
 use std::process::ExitCode;
 
@@ -20,12 +23,13 @@ fn main() -> ExitCode {
     let result = match task.as_deref() {
         None | Some("help") => {
             println!(
-                "tâches :\n  agent         construit le binaire statique de l'agent en conteneur (target/dist/hearth-agent)\n  e2e-install   installation de bout en bout dans un conteneur jetable"
+                "tâches :\n  agent         construit le binaire statique de l'agent en conteneur (target/dist/hearth-agent)\n  e2e-install   installation de bout en bout dans un conteneur jetable\n  shellcheck    contrôle les scripts de deploy/ avec shellcheck (en conteneur)"
             );
             return ExitCode::SUCCESS;
         }
         Some("agent") => agent::run().map(|_| ()),
         Some("e2e-install") => e2e::run(),
+        Some("shellcheck") => shellcheck::run(),
         Some(other) => Err(format!("tâche inconnue : {other}")),
     };
     match result {
