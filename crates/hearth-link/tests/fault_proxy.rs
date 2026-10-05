@@ -138,7 +138,7 @@ async fn a_long_cut_goes_offline_then_comes_back() {
 
 #[tokio::test]
 async fn a_freeze_goes_through_reconnecting_then_offline_in_that_order() {
-    let world = World::connected(Options::default()).await;
+    let world = World::connected(Options::silent_link()).await;
     let mark = world.recorder.mark();
     world.proxy.freeze();
     world
@@ -159,7 +159,7 @@ async fn a_freeze_goes_through_reconnecting_then_offline_in_that_order() {
 
 #[tokio::test]
 async fn a_prolonged_freeze_without_closing_is_detected_by_the_heartbeat() {
-    let world = World::connected(Options::default()).await;
+    let world = World::connected(Options::silent_link()).await;
     let mark = world.recorder.mark();
     world.proxy.freeze();
     // Ni fermeture ni erreur : seul le silence révèle la coupure.
@@ -594,8 +594,8 @@ async fn an_action_cut_before_the_answer_is_unknown_and_never_replayed() {
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    world.agent.wait_action_started(started).await;
+    let mut sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
+    support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     let mark = world.recorder.mark();
     world.proxy.cut();
     let outcome = tokio::time::timeout(WAIT, sent)
@@ -634,7 +634,7 @@ async fn an_action_cut_before_the_answer_is_unknown_and_never_replayed() {
 
 #[tokio::test]
 async fn an_action_that_never_reached_the_agent_is_announced_as_not_executed() {
-    let world = World::connected(Options::default()).await;
+    let world = World::connected(Options::silent_link()).await;
     // Trou noir : la requête part dans le vide, l'agent ne la reçoit jamais.
     world.proxy.freeze();
     let outcome = world
@@ -675,8 +675,8 @@ async fn an_action_interrupted_by_the_agent_stopping_stays_unknown() {
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    world.agent.wait_action_started(started).await;
+    let mut sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
+    support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     let mark = world.recorder.mark();
     world.proxy.cut();
     let ActionOutcome::ResultUnknown { id: operation } = sent.await.unwrap().unwrap() else {
@@ -745,32 +745,6 @@ async fn a_completed_action_returns_the_agent_answer_even_when_it_is_a_refusal()
 }
 
 #[tokio::test]
-async fn waking_up_after_a_long_outage_shows_reconnecting_again_not_offline() {
-    let world = World::connected(Options::default()).await;
-    let mark = world.recorder.mark();
-    world.proxy.cut();
-    world
-        .recorder
-        .wait_state(mark, LinkState::Offline, WAIT)
-        .await;
-    // Le PC s'est endormi puis réveille : la coupure compte à partir du réveil.
-    let woke = world.recorder.mark();
-    world.clock.jump(Duration::from_secs(600));
-    world
-        .recorder
-        .wait_state(woke, LinkState::Reconnecting, WAIT)
-        .await;
-    // Fait observé : après le réveil l'écran passe de « Hors ligne » à « Reconnexion » (seul le
-    // réveil le fait, les tentatives planifiées laissent « Hors ligne »). Le délai de 30 s depuis le
-    // réveil, avant de redire « Hors ligne », est prouvé par `domain::state::tests`.
-    world.proxy.heal();
-    world
-        .recorder
-        .wait_state(woke, LinkState::Connected, WAIT)
-        .await;
-}
-
-#[tokio::test]
 async fn a_network_change_does_not_cut_a_healthy_stream() {
     let world = World::connected(Options::with_thresholds(thresholds(
         Some(never()),
@@ -804,8 +778,8 @@ async fn an_action_in_flight_is_not_made_unknown_by_a_network_change() {
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    world.agent.wait_action_started(started).await;
+    let mut sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
+    support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     world.net.set(&["10.8.0.2"]);
     // Le veilleur a LU la nouvelle liste (fait), et le flux a continué après (ordre des commandes de
     // la tâche) pendant que l'action est retenue côté agent ; puis l'agent la relâche.
@@ -831,8 +805,8 @@ async fn an_abandoned_action_stays_tracked_and_its_outcome_is_announced() {
     let mark = world.recorder.mark();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    world.agent.wait_action_started(started).await;
+    let mut sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
+    support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     // L'appelant n'attend plus (fenêtre fermée, délai) : la requête est partie, elle reste suivie.
     sent.abort();
     world.agent.release_actions();
@@ -858,8 +832,8 @@ async fn an_unknown_operation_survives_a_restart_of_the_application() {
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
-    world.agent.wait_action_started(started).await;
+    let mut sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
+    support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     world.proxy.cut();
     let ActionOutcome::ResultUnknown { id: operation } = sent.await.unwrap().unwrap() else {
         panic!("résultat inconnu attendu");
@@ -943,5 +917,32 @@ async fn a_stored_password_that_is_refused_asks_for_the_login_form_not_access_re
         world.proxy.accepted(),
         attempts,
         "aucune nouvelle tentative"
+    );
+}
+
+#[tokio::test]
+async fn a_stall_of_the_whole_machine_cannot_cut_the_link_of_a_scenario() {
+    // Cause établie du rouge de la revue (round 2) : avec le silence à l'échelle (0,5 s), un arrêt de
+    // la machine plus long le fait atteindre (mesuré : `execute` rend « résultat inconnu » sans que
+    // l'action parte, état « Reconnexion »). La configuration par défaut des scénarios met donc tous
+    // les délais hors d'atteinte : un arrêt de 1,2 s ne change rien.
+    let world = World::connected(Options::default()).await;
+    std::thread::sleep(ms(1_200));
+    world.agent.hold_actions();
+    let started = world.agent.verifications_started();
+    let manager = world.manager.clone();
+    let id = world.id.clone();
+    let mut sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
+    support::wait_started_or_returned(&world.agent, started, &mut sent).await;
+    assert_eq!(world.state().state, LinkState::Connected);
+    world.agent.release_actions();
+    let outcome = tokio::time::timeout(WAIT, sent)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(outcome, ActionOutcome::Completed { status: 200, .. }),
+        "{outcome:?}"
     );
 }

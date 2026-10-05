@@ -434,7 +434,8 @@ impl EventSink for Gate {
     fn emit(&self, _: Event) {
         if self.block_next.swap(false, Ordering::SeqCst) {
             self.reached.store(true, Ordering::SeqCst);
-            while !self.release.load(Ordering::SeqCst) {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !self.release.load(Ordering::SeqCst) && Instant::now() < deadline {
                 std::thread::sleep(ms(1));
             }
         }
@@ -791,6 +792,139 @@ async fn a_task_late_on_a_logout_never_erases_the_token_of_a_login_that_already_
         Some(fresh),
         "le jeton de la connexion est intact"
     );
+}
+
+/// Coffre qui retient `login` APRÈS qu'il a rangé son jeton et avant qu'il lève « déconnecté » : la
+/// fenêtre que la fiche FIX-01M46G7Z0ZP43T53M2F5KG4VKS disait « réduite, pas fermée ».
+struct HoldingVault {
+    inner: MemoryVault,
+    hold_after_token_put: AtomicBool,
+    reached: AtomicBool,
+    release: AtomicBool,
+}
+
+impl Vault for HoldingVault {
+    fn get(&self, s: &ServerId, k: SecretKind) -> Result<Option<Secret>, VaultError> {
+        self.inner.get(s, k)
+    }
+    fn put(&self, s: &ServerId, k: SecretKind, v: &Secret) -> Result<(), VaultError> {
+        self.inner.put(s, k, v)?;
+        if k == SecretKind::Token && self.hold_after_token_put.swap(false, Ordering::SeqCst) {
+            self.reached.store(true, Ordering::SeqCst);
+            // Garde : si le test échoue avant de relâcher, le fil ne reste pas bloqué à jamais.
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !self.release.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::sleep(ms(1));
+            }
+        }
+        Ok(())
+    }
+    fn delete(&self, s: &ServerId, k: SecretKind) -> Result<(), VaultError> {
+        self.inner.delete(s, k)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_late_task_never_erases_a_token_stored_by_a_login_that_has_not_yet_cleared_signed_out() {
+    // La fenêtre entière : `login` a rangé son jeton, n'a pas encore levé « déconnecté », et la
+    // tâche (en retard sur la commande de déconnexion) traite `LoggedOut` JUSTE À CE MOMENT. Lecture
+    // et effacement de la tâche, rangement et drapeau de `login` : sous le même verrou d'écriture.
+    let script = Script::new();
+    let store = Store::new(Disk::Normal);
+    let vault = Arc::new(HoldingVault {
+        inner: MemoryVault::new(),
+        hold_after_token_put: AtomicBool::new(false),
+        reached: AtomicBool::new(false),
+        release: AtomicBool::new(false),
+    });
+    let gate = Arc::new(Gate::default());
+    let manager = LinkManager::start(
+        Ports {
+            transport: Arc::new(Mock(script.clone())),
+            vault: vault.clone(),
+            servers: store.clone(),
+            snapshots: store.clone(),
+            operations: store.clone(),
+            clock: Arc::new(SystemClock::new()),
+            rng: Arc::new(OsRng::default()),
+            net: Arc::new(NoNet),
+            extra_sink: Some(gate.clone()),
+        },
+        config(),
+    )
+    .await
+    .unwrap();
+    let id = manager
+        .add_server(NewServer {
+            name: "Mock".into(),
+            color: "1".into(),
+            host: "mock.test".into(),
+            port: 7341,
+            fingerprint: Fingerprint::from_bytes([7; 32]),
+            mac_addresses: vec![],
+        })
+        .await
+        .unwrap();
+    manager
+        .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap();
+    wait_state(&manager, &id, LinkState::Connected).await;
+    // La tâche est retenue ; la déconnexion part et reste en vol côté réseau (sa commande attend).
+    gate.block_next.store(true, Ordering::SeqCst);
+    script.snapshot_next.store(true, Ordering::SeqCst);
+    script.wake.notify_one();
+    wait_until("tâche retenue", || gate.reached.load(Ordering::SeqCst)).await;
+    script.logout_hold.store(true, Ordering::SeqCst);
+    let logout = {
+        let manager = manager.clone();
+        let id = id.clone();
+        tokio::spawn(async move { manager.logout(&id).await })
+    };
+    wait_until("déconnexion en vol", || {
+        script.logout_in_flight.load(Ordering::SeqCst)
+    })
+    .await;
+    // `login` range son jeton puis reste retenu avant de lever « déconnecté ».
+    vault.hold_after_token_put.store(true, Ordering::SeqCst);
+    let login = {
+        let manager = manager.clone();
+        let id = id.clone();
+        tokio::spawn(async move {
+            manager
+                .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+                .await
+        })
+    };
+    wait_until("jeton rangé, drapeau pas encore levé", || {
+        vault.reached.load(Ordering::SeqCst)
+    })
+    .await;
+    // La tâche se réveille et traite la déconnexion pendant cette fenêtre.
+    gate.release.store(true, Ordering::SeqCst);
+    wait_until("déconnexion traitée par la tâche", || {
+        let info = manager.state(&id).unwrap();
+        info.state == LinkState::SessionExpired && info.reason == Some(Reason::UserDisconnected)
+    })
+    .await;
+    // Fenêtre d'observation d'une absence : la tâche n'efface rien tant que `login` tient le verrou.
+    tokio::time::sleep(ms(200)).await;
+    let fresh = vault.get(&id, SecretKind::Token).unwrap();
+    assert!(fresh.is_some(), "le jeton neuf est encore là");
+    vault.release.store(true, Ordering::SeqCst);
+    script.logout_hold.store(false, Ordering::SeqCst);
+    tokio::time::timeout(GUARD, login)
+        .await
+        .expect("la connexion se termine")
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(GUARD, logout)
+        .await
+        .expect("la déconnexion se termine")
+        .unwrap()
+        .unwrap();
+    wait_state(&manager, &id, LinkState::Connected).await;
+    assert_eq!(vault.get(&id, SecretKind::Token).unwrap(), fresh);
 }
 
 // ── Reprise après panique ───────────────────────────────────────────────────────────────────

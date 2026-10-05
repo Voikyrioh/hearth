@@ -35,12 +35,33 @@ pub use proxy::FaultProxy;
 /// Facteur de réduction des durées du produit.
 pub const SCALE: u32 = 6;
 
+/// Configuration par défaut des scénarios : AUCUN délai de la bibliothèque ne peut être atteint par la
+/// seule lenteur de la machine (silence du lien, battement, seuils « Reconnexion » et « Hors ligne »
+/// hors d'atteinte ; la coupure d'un mandataire se voit par l'erreur de transport, pas par le
+/// silence). Les scénarios qui ÉPROUVENT un délai le disent : `silence_config()` (gel), ou
+/// `Options::with_thresholds` avec les seuils voulus.
 pub fn fast_config() -> LinkConfig {
+    LinkConfig {
+        thresholds: thresholds(Some(never()), true, true),
+        heartbeat_period: Duration::from_secs(5),
+        ..scaled_config()
+    }
+}
+
+/// Seuils à l'échelle des tests, silence et battement compris : seulement pour les scénarios qui
+/// éprouvent la détection d'un flux muet (agent figé, trou noir).
+pub fn silence_config() -> LinkConfig {
     LinkConfig {
         thresholds: Thresholds::scaled(SCALE),
         heartbeat_period: Duration::from_millis(333),
+        ..scaled_config()
+    }
+}
+
+fn scaled_config() -> LinkConfig {
+    LinkConfig {
         // Délais de garde des échanges : très larges, pour qu'une machine saturée ne transforme
-        // jamais une réponse lente en échec. Les seuils du lien (`Thresholds`) restent à l'échelle.
+        // jamais une réponse lente en échec.
         attempt_timeout: Duration::from_secs(30),
         request_timeout: Duration::from_secs(30),
         net_poll_period: Duration::from_millis(60),
@@ -391,6 +412,14 @@ pub fn thresholds(silence: Option<Duration>, reconnecting: bool, offline: bool) 
 }
 
 impl Options {
+    /// Scénario qui éprouve la détection d'un flux muet : silence et battement à l'échelle.
+    pub fn silent_link() -> Self {
+        Self {
+            config: silence_config(),
+            ..Self::default()
+        }
+    }
+
     pub fn with_thresholds(thresholds: Thresholds) -> Self {
         Self {
             config: LinkConfig {
@@ -423,4 +452,17 @@ pub async fn wait_attempts(proxy: &FaultProxy, n: u64) {
 /// Durée réelle d'une durée du produit à l'échelle des tests.
 pub fn scaled(real: Duration) -> Duration {
     real / SCALE
+}
+
+/// Attend que l'action arrive chez l'agent ; si `execute` rend avant, dit ce qu'il a rendu (au lieu
+/// d'attendre pour rien jusqu'au délai de garde).
+pub async fn wait_started_or_returned<T: std::fmt::Debug>(
+    agent: &TestAgent,
+    baseline: u32,
+    call: &mut tokio::task::JoinHandle<T>,
+) {
+    tokio::select! {
+        () = agent.wait_action_started(baseline) => {}
+        returned = &mut *call => panic!("execute a rendu avant l'arrivée chez l'agent : {returned:?}"),
+    }
 }
