@@ -31,7 +31,7 @@ src/
     ├── task.rs      → la tâche d'un serveur : seule propriétaire de la machine à états, du flux, des opérations en suspens ; une boucle `select!` (commandes, flux, tentatives, résultats internes, échéance de la machine, battement) ; supervisée sous `catch_unwind` : une panique est journalisée, comptée, et le lien repart `Offline` avec une nouvelle tentative
     ├── attempt.rs   → une tentative (flux, authentification, instantané), la reconnexion silencieuse, la relecture d'une opération : tâches abandonnables qui rendent un résultat, sans toucher à la machine
     ├── watchers.rs  → veilleurs globaux : réveil (contrôle d'horloge chaque seconde) et changement de réseau (adresses sondées toutes les 5 s)
-    ├── persist.rs   → file d'écriture par serveur (dernière vue, carnet, opérations en suspens) : la boucle du serveur ne fait jamais d'E/S disque
+    ├── persist.rs   → file d'écriture par serveur (dernière vue, carnet, opérations en suspens) : la boucle du serveur ne fait jamais d'E/S disque ; file bornée « dernier état gagne » ; accusé d'écriture des opérations (persister PUIS envoyer, `LinkError::TrackingUnavailable`)
     └── events.rs    → diffusion des événements (canal borné, `EventStream`, `Event::Lagged` pour un abonné en retard)
 tests/
 ├── support/         → agent réel dans le processus (`agent.rs`), mandataire TCP à pannes (`proxy.rs`), `World` (agent + mandataire + `LinkManager`), `Recorder`
@@ -49,6 +49,8 @@ Le début d'une coupure est le dernier message reçu (silence de 3 s) ou l'erreu
 - L'événement d'état porte `reason` quand l'état est `SessionExpired` ou `AccessRevoked` : `NoSession`, `Expired`, `StoredPasswordRefused` (l'interface rouvre le formulaire de connexion, identifiant prérempli), `UserDisconnected` (aucune reconnexion automatique, même au démarrage), `Revoked`. Les cinq états ne changent pas ; détail : ADR-0007.
 - Un abonné qui prend du retard reçoit `Event::Lagged { skipped }` : des événements, dont peut-être un changement d'état, ont été perdus. Il relit `LinkManager::states()`.
 - Les opérations en suspens sont sur disque (`operations/{id}.json`), le carnet dans `servers.json`, la dernière vue dans `snapshots/{id}.json`.
+- `Event::OperationsLost` : le fichier des suivis était illisible (mis de côté en `.corrupt`), des suivis ont pu être perdus.
+- Contrôle des références : `cargo xtask br-check` (CI) vérifie que toute référence `BR-…` du code et des docs a sa fiche.
 - À venir : modification de l'adresse d'un serveur enregistré avec nouvelle vérification de l'empreinte (BR-CONN-009, hors HRT-07).
 
 ## Règles de la bibliothèque

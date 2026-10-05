@@ -22,6 +22,7 @@ maj: 2026-10-05
 
 ## Cas limites
 - Le jeton est effacé même si le serveur est injoignable.
+- Une trame de fin de session qui arrive pendant la déconnexion ne relance jamais de reconnexion silencieuse : la tâche lit `signed_out` de l'enregistrement partagé (posé avant la commande) et la déconnexion survit à une panique de la tâche (`Start::Disconnected`) ; tests : `crates/hearth-link/tests/tracking.rs::a_session_end_frame_racing_a_logout_never_triggers_a_silent_reconnection`, `::after_a_panic_a_disconnected_server_stays_disconnected`.
 
 ## Règles liées
 - BR-CONN-010, BR-CONN-017.

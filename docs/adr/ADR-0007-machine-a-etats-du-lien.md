@@ -112,3 +112,12 @@ Après reconnexion : `GET /operations/{id}` pour chacune ; timeout > 24 h → ab
 - **`429` / `503` avec `retry_after_s`** sur une tentative (reconnexion silencieuse comprise) : la prochaine tentative n'a pas lieu avant ce délai (plafonné à 1 h) ni avant le délai habituel s'il est plus long.
 - **Opérations en suspens** : écrites sur disque (un fichier par serveur, écriture atomique, 256 au plus, 24 h au plus) ; au redémarrage de l'application elles sont « résultat inconnu » et relues au premier retour du lien. Soldées en « résultat inconnu » sans interroger l'agent si la session suivante est celle d'un autre compte ou après acceptation d'une nouvelle empreinte. Une requête partie dont l'appelant abandonne l'attente, ou qui dépasse son délai, rend `ResultUnknown` avec la clé et reste suivie.
 - **Boucle d'un serveur** : `select!` `biased`, trames reçues avant l'échéance du silence ; aucune E/S disque dans la boucle (file d'écriture dédiée).
+
+## Précisions (HRT-07, review Stephen round 2)
+
+- **Persister PUIS envoyer** : une action ne part qu'une fois son suivi écrit et confirmé sur disque (accusé de la file d'écriture, attente bornée par `persist_timeout`, 2 s) ; sinon `TrackingUnavailable` et rien n'est envoyé. L'attente est dans le chemin de l'action, pas dans la boucle du lien.
+- **File d'écriture** : bornée, « dernier état gagne » par type de fichier (vue, enregistrement, opérations) : un disque pendu ne fait pas grossir la mémoire.
+- **Réveils répétés** : le report de « Hors ligne » par un réveil n'a lieu qu'une fois par coupure (jusqu'à un contact réussi).
+- **Équité** : après 32 trames consécutives, commandes, résultats, échéances et battement passent avant la trame suivante.
+- **Panique** : un serveur déconnecté volontairement repart `Disconnected`, pas `Recovered`.
+- **Fichier d'opérations illisible** : mis de côté en `.corrupt`, `Event::OperationsLost` ; une entrée invalide n'emporte pas les autres.
