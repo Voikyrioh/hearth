@@ -10,10 +10,19 @@ pub const MENU_QUIT_LABEL: &str = "Quitter";
 pub const CLOSE_HINT: &str = "Hearth continue de fonctionner. Clique sur l'icône pour rouvrir.";
 pub const STARTUP_FAILED_TITLE: &str = "Hearth n'a pas pu démarrer";
 
-/// Corps de la boîte de message affichée quand le démarrage échoue.
-pub fn startup_failed_body(error: &str, log_dir: &Path) -> String {
+/// Corps de la boîte de message affichée quand le démarrage échoue. Si le
+/// journal n'a pas pu s'ouvrir, on le dit au lieu de renvoyer vers un fichier
+/// qui n'existe pas.
+pub fn startup_failed_body(error: &str, log_dir: &Path, log_problem: Option<&str>) -> String {
+    let log = match log_problem {
+        None => format!("Le détail est dans le journal : {}", log_dir.display()),
+        Some(problem) => format!("Le journal n'a pas pu être écrit ({problem})."),
+    };
     format!(
-        "Hearth n'a pas pu démarrer.\n\n{error}\n\nLe détail est dans le journal : {}",
-        log_dir.display()
+        "Hearth n'a pas pu démarrer.
+
+{error}
+
+{log}"
     )
 }

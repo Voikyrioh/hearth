@@ -42,8 +42,11 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 }
 
 /// Cache la fenêtre ; à la première fois seulement, demande l'explication
-/// (`notify`) puis le mémorise dans `store_file` (BR-CLIENT-005). Si le fichier
-/// des réglages est illisible, on se tait plutôt que de répéter l'explication.
+/// (`notify`) puis le mémorise dans `store_file` (BR-CLIENT-005). Un fichier
+/// corrompu est avalé par le greffon, qui rend « jamais vu » : l'explication est
+/// alors redonnée une fois et le fichier réécrit. Seule une vraie erreur du
+/// greffon (fichier impossible à ouvrir) fait taire l'explication, pour ne pas la
+/// répéter à chaque fermeture.
 pub fn hide_to_tray<R: Runtime>(window: &Window<R>, store_file: &Path, notify: impl FnOnce()) {
     if let Err(error) = window.hide() {
         tracing::warn!(%error, "fenêtre non cachée");

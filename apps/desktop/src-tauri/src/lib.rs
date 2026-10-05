@@ -11,7 +11,7 @@ pub mod texts;
 mod tray;
 pub mod window;
 
-use tauri::Manager as _;
+use tauri::{AppHandle, Manager as _, Runtime};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_specta::{Builder, collect_commands};
 
@@ -33,9 +33,55 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
     ])
 }
 
+/// Erreur de démarrage, avec l'étape qui a échoué.
+#[derive(Debug, thiserror::Error)]
+pub enum StartupError {
+    #[error("icône de la zone de notification : {0}")]
+    Tray(tauri::Error),
+    #[error("fenêtre principale : {0}")]
+    Window(tauri::Error),
+}
+
+/// Corps du démarrage (appelé par `setup`). `build_tray` est injectable pour
+/// pouvoir simuler l'échec de l'icône.
+pub fn start<R: Runtime>(
+    app: &AppHandle<R>,
+    minimized: bool,
+    build_tray: impl FnOnce(&AppHandle<R>) -> tauri::Result<()>,
+) -> Result<(), StartupError> {
+    build_tray(app).map_err(StartupError::Tray)?;
+    if minimized {
+        if let Some(main) = app.get_webview_window(domain::MAIN_WINDOW) {
+            main.hide().map_err(StartupError::Window)?;
+        }
+    } else {
+        window::show_main(app);
+    }
+    Ok(())
+}
+
+/// Lance `start` ; en cas d'erreur, la journalise puis appelle `report` avec la
+/// raison (en production : boîte de message et sortie, voir `fail_startup`).
+/// Tauri panique si `setup` rend une erreur : on ne la lui rend donc jamais.
+pub fn start_or_report<R: Runtime>(
+    app: &AppHandle<R>,
+    minimized: bool,
+    build_tray: impl FnOnce(&AppHandle<R>) -> tauri::Result<()>,
+    report: impl FnOnce(&str),
+) -> bool {
+    match start(app, minimized, build_tray) {
+        Ok(()) => true,
+        Err(error) => {
+            report(&error.to_string());
+            false
+        }
+    }
+}
+
 pub fn run() {
-    // Le journal d'abord : sans console, c'est la seule trace d'un échec.
-    // Sans journal on démarre quand même ; un échec de démarrage sera dit à l'écran.
+    // Le journal d'abord : sans console, c'est la seule trace d'un échec. S'il ne
+    // s'ouvre pas, on démarre quand même ; la raison est gardée pour la boîte
+    // de message d'un éventuel échec (`logging::init_failure`).
     let _ = logging::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "démarrage de Hearth");
 
@@ -59,14 +105,10 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .on_window_event(window::on_window_event)
         .setup(|app| {
-            tray::build(app.handle())?;
-            if domain::is_minimized_launch(std::env::args()) {
-                if let Some(main) = app.get_webview_window(domain::MAIN_WINDOW) {
-                    main.hide()?;
-                }
-            } else {
-                window::show_main(app.handle());
-            }
+            let minimized = domain::is_minimized_launch(std::env::args());
+            start_or_report(app.handle(), minimized, tray::build, |reason| {
+                fail_startup(reason)
+            });
             Ok(())
         })
         .run(tauri::generate_context!());
@@ -76,14 +118,19 @@ pub fn run() {
     }
 }
 
-/// Le démarrage a échoué : journal, boîte de message système avec le chemin du
-/// journal, code de sortie 1. Jamais de sortie silencieuse.
+/// Le démarrage a échoué : journal, boîte de message système avec la raison et
+/// le chemin du journal (ou le fait qu'il n'a pas pu être écrit), sortie avec le
+/// code 1. Jamais de sortie silencieuse, jamais d'application sans fenêtre ni icône.
 fn fail_startup(error: &str) -> ! {
     tracing::error!(error, "démarrage impossible");
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title(texts::STARTUP_FAILED_TITLE)
-        .set_description(texts::startup_failed_body(error, &logging::log_dir()))
+        .set_description(texts::startup_failed_body(
+            error,
+            &logging::log_dir(),
+            logging::init_failure(),
+        ))
         .show();
     std::process::exit(1);
 }

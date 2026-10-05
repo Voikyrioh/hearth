@@ -45,7 +45,8 @@ fn closing_main_hides_it_and_explains_only_once() {
 }
 
 #[test]
-fn an_unreadable_settings_file_hides_without_repeating_the_explanation() {
+fn a_corrupt_settings_file_is_treated_as_missing_so_the_explanation_is_given_once_and_the_file_rewritten()
+ {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("settings.json");
     std::fs::write(&file, "{ pas du json").unwrap();
@@ -58,8 +59,8 @@ fn an_unreadable_settings_file_hides_without_repeating_the_explanation() {
     hide_to_tray(&main.as_ref().window(), &file, || {
         asked.set(asked.get() + 1)
     });
-    assert!(
-        asked.get() <= 1,
-        "au plus une explication, jamais à chaque fermeture"
-    );
+    assert_eq!(asked.get(), 1);
+    let rewritten: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(rewritten["closeHintSeen"], true);
 }

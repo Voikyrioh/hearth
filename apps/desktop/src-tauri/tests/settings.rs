@@ -85,17 +85,13 @@ fn the_close_hint_flag_is_remembered_in_the_file() {
 }
 
 #[test]
-fn a_corrupt_settings_file_never_blocks_the_startup_setting() {
+fn a_corrupt_settings_file_reads_as_never_seen_and_never_blocks_the_startup_setting() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("settings.json");
     std::fs::write(&file, "{ pas du json").unwrap();
     let app = app();
-    // Erreur typée ou valeur par défaut : jamais de panique.
-    let result = close_hint_seen(app.handle(), &file);
-    assert!(
-        matches!(result, Err(AppError::Store(_)) | Ok(false)),
-        "{result:?}"
-    );
+    // Le greffon avale l'erreur de lecture : un fichier corrompu vaut « jamais vu ».
+    assert!(!close_hint_seen(app.handle(), &file).unwrap());
     // Le réglage de démarrage ne lit jamais ce fichier.
     let autostart = FakeAutostart::default();
     assert!(set_launch_at_startup(&autostart, true).is_ok());
