@@ -1,4 +1,6 @@
 import type {
+  ActionInput,
+  ActionResult,
   FingerprintChange,
   LinkNotice,
   LinkStateEvent,
@@ -76,4 +78,13 @@ export interface LinkBridge {
   removeServer(serverId: string): Promise<void>;
   /** Efface le mot de passe mémorisé ; la session en cours continue. */
   forgetCredentials(serverId: string): Promise<void>;
+
+  /**
+   * Envoie une action au serveur. Hors « Connecté » : rejette avec `not_connected`, rien n'est
+   * parti (BR-RESIL-008). Si le lien tombe avant la réponse : `unknown` (BR-RESIL-009), jamais
+   * rejouée ; l'issue arrive par `onOperation`.
+   */
+  runAction(serverId: string, action: ActionInput): Promise<ActionResult>;
+  /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
+  setDisplayedServer(serverId: string | null): Promise<void>;
 }

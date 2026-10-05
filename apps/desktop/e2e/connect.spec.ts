@@ -190,7 +190,7 @@ test("serveur déconnecté : le formulaire de connexion apparaît, identifiant p
       .__hearthSim;
     sim.publish("forge", "session_expired", { reason: "expired" });
   });
-  await expect(page.getByText("Session expirée. Reconnecte-toi.")).toBeVisible();
+  await expect(page.getByText("Ta session a expiré.")).toBeVisible();
   await expect(page.getByLabel("Identifiant")).toHaveValue("marie");
   await shoot(page, "reconnexion");
 });

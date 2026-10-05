@@ -172,3 +172,22 @@ export class LinkCommandError extends Error {
 }
 
 export type Unsubscribe = () => void;
+
+/** Méthode HTTP d'une action envoyée à un serveur. */
+export type ActionMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/** Une action demandée à un serveur ; `body` : texte JSON. */
+export interface ActionInput {
+  method: ActionMethod;
+  path: string;
+  body?: string | null;
+}
+
+/**
+ * Réponse à une action : l'agent a répondu (`completed`, `status` dit succès ou refus), ou le lien est
+ * tombé avant la réponse (`unknown`, BR-RESIL-009) : l'action n'est jamais rejouée, l'issue arrive
+ * plus tard par `link://operation` sous cet `opId`.
+ */
+export type ActionResult =
+  | { kind: "completed"; status: number; body: string }
+  | { kind: "unknown"; opId: string };

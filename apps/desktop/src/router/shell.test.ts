@@ -248,3 +248,38 @@ describe("error containment: the shell is never replaced", () => {
     wrapper.unmount();
   });
 });
+
+describe("hors ligne (HRT-12)", () => {
+  it("tells the shell which server is displayed, and none on the settings page", async () => {
+    const { bridge, router, wrapper } = await boot("/servers/forge/dashboard");
+    expect(bridge.displayedServer).toBe("forge");
+    await router.push("/servers/salon/dashboard");
+    await flushPromises();
+    expect(bridge.displayedServer).toBe("salon");
+    await router.push("/settings");
+    await flushPromises();
+    expect(bridge.displayedServer).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("keeps the page, dims it, dates it and explains the disabled action while offline, without any dialog", async () => {
+    const { bridge, wrapper } = await boot("/servers/forge/accounts");
+    bridge.setState("forge", "offline");
+    await flushPromises();
+    expect(wrapper.get(".head [role=status]").text()).toBe("Hors ligne");
+    expect(wrapper.text()).toContain("Dernier contact à");
+    expect(wrapper.text()).toContain("Réessayer maintenant");
+    expect(wrapper.find('[data-stale="true"]').exists()).toBe(true);
+    expect(wrapper.text()).toMatch(/Vu il y a \d+ s/);
+    const action = wrapper.findAll("button").find((b) => b.text() === "Ajouter un compte");
+    expect(action?.attributes("aria-disabled")).toBe("true");
+    expect(wrapper.text()).toContain("Indisponible tant que le serveur est hors ligne.");
+    expect(wrapper.find('[role="dialog"], [role="alertdialog"], dialog').exists()).toBe(false);
+    // Le lien revient : tout se remet en place.
+    bridge.setState("forge", "connected");
+    await flushPromises();
+    expect(wrapper.find('[data-stale="true"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Dernier contact à");
+    wrapper.unmount();
+  });
+});

@@ -9,6 +9,8 @@ export interface Toast {
   message: string;
   /** Nombre de fois que cette même notification a été émise (1 = une seule). */
   count: number;
+  /** Clé d'une notification qui se met à jour sur place (compteur d'échecs, par exemple). */
+  key?: string;
 }
 
 /** Notifications visibles en même temps (les autres attendent leur tour). */
@@ -37,7 +39,16 @@ export const useToastsStore = defineStore("toasts", () => {
     );
   }
 
-  function push(toast: { kind: ToastKind; message: string }): number {
+  function push(toast: { kind: ToastKind; message: string; key?: string }): number {
+    // Une notification à clé se met à jour sur place : « Reconnexion échouée 4 fois » devient « 5 fois »
+    // au lieu d'ajouter une ligne (BR-RESIL-018).
+    const keyed = toast.key ? items.value.find((item) => item.key === toast.key) : undefined;
+    if (keyed) {
+      keyed.kind = toast.kind;
+      keyed.message = toast.message;
+      arm(keyed.id);
+      return keyed.id;
+    }
     const existing = items.value.find(
       (item) => item.kind === toast.kind && item.message === toast.message,
     );
@@ -47,7 +58,7 @@ export const useToastsStore = defineStore("toasts", () => {
       return existing.id;
     }
     const id = nextId++;
-    items.value.push({ id, kind: toast.kind, message: toast.message, count: 1 });
+    items.value.push({ id, kind: toast.kind, message: toast.message, count: 1, key: toast.key });
     arm(id);
     while (items.value.length > MAX_QUEUED_TOASTS) {
       const dropped = items.value.shift();
@@ -62,10 +73,16 @@ export const useToastsStore = defineStore("toasts", () => {
     items.value = items.value.filter((item) => item.id !== id);
   }
 
+  /** Retire la notification à cette clé, si elle existe (le lien est revenu). */
+  function dismissKey(key: string) {
+    const found = items.value.find((item) => item.key === key);
+    if (found) dismiss(found.id);
+  }
+
   function clear() {
     for (const id of [...timers.keys()]) dismiss(id);
     items.value = [];
   }
 
-  return { items, visible, push, dismiss, clear };
+  return { items, visible, push, dismiss, dismissKey, clear };
 });

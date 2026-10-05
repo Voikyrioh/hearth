@@ -23,6 +23,8 @@ const OPERATION_TEXTS = {
 /** Issues d'opération gardées (nombre et âge bornés : session longue, BR-RESIL-017). */
 export const MAX_OPERATIONS = 100;
 export const OPERATION_MAX_AGE_MS = 10 * 60_000;
+/** À partir de ce nombre d'échecs de reconnexion consécutifs, une notification discrète les compte. */
+export const RECONNECT_FAILURE_NOTICE_FROM = 3;
 /** Nouvelle tentative d'abonnement : espacement doublé de 1 s jusqu'à 30 s. */
 export const RESUBSCRIBE_BASE_MS = 1000;
 export const RESUBSCRIBE_MAX_MS = 30_000;
@@ -118,10 +120,31 @@ export const useLinkStore = defineStore("link", () => {
     const known = events.value[event.serverId];
     if (known && event.seq <= known.seq) return;
     events.value = { ...events.value, [event.serverId]: event };
+    reportReconnectFailures(event);
     // L'alerte d'empreinte ne survit pas à la levée du blocage (acceptée, ou serveur revenu).
     if (event.blocked !== "fingerprint_changed" && event.serverId in alerts.value) {
       const { [event.serverId]: _gone, ...rest } = alerts.value;
       alerts.value = rest;
+    }
+  }
+
+  // Coupures répétées (BR-RESIL-018) : une seule notification par serveur, dont le compteur monte,
+  // jamais une ligne par tentative ; elle disparaît quand le lien revient.
+  function reportReconnectFailures(event: LinkStateEvent) {
+    const key = `reconnect:${event.serverId}`;
+    const retrying = event.state === "reconnecting" || event.state === "offline";
+    if (retrying && event.failedAttempts >= RECONNECT_FAILURE_NOTICE_FROM) {
+      const name = servers.byId(event.serverId)?.name ?? event.serverId;
+      toasts.push({
+        key,
+        kind: "warn",
+        message: t("operation.withServer", {
+          server: name,
+          message: t("link.reconnectFailed", { n: event.failedAttempts }),
+        }),
+      });
+    } else if (!retrying || event.failedAttempts === 0) {
+      toasts.dismissKey(key);
     }
   }
 

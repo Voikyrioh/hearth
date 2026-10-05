@@ -107,7 +107,7 @@ describe("changed identity at the application level", () => {
     await flushPromises();
     bridge.publish("forge", "session_expired", { reason: "expired" });
     await flushPromises();
-    expect(wrapper.text()).toContain("Session expirée. Reconnecte-toi.");
+    expect(wrapper.text()).toContain("Ta session a expiré.");
     expect(
       (wrapper.get('section form input[autocomplete="username"]').element as HTMLInputElement)
         .value,
