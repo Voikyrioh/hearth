@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkStateEvent } from "@/link";
 import { LINK_STATES, SimulatedLinkBridge, setLinkBridge } from "@/link";
 import { freshBridge, startedApp } from "@/test/app";
-import { useLinkStore } from "./link";
-import { useServersStore } from "./servers";
+import { RESUBSCRIBE_BASE_MS, RESUBSCRIBE_MAX_MS, useLinkStore } from "./link";
+import { LOAD_TIMEOUT_MS, useServersStore } from "./servers";
 import { MAX_VISIBLE_TOASTS, TOAST_LIFETIME_MS, useToastsStore } from "./toasts";
 
 beforeEach(() =>
@@ -227,7 +227,7 @@ describe("bridge contract", () => {
 });
 
 describe("link store ordering and operations", () => {
-  it("never lets an older event overwrite a newer one", async () => {
+  it("orders events by seq, never by the wall clock", async () => {
     const { bridge } = freshBridge();
     let push: (event: LinkStateEvent) => void = () => {};
     vi.spyOn(bridge, "onLinkState").mockImplementation(async (listener) => {
@@ -236,19 +236,38 @@ describe("link store ordering and operations", () => {
     });
     const link = useLinkStore();
     await link.start();
-    const event = (state: LinkStateEvent["state"], since: number): LinkStateEvent => ({
+    const event = (state: LinkStateEvent["state"], seq: number, since: number): LinkStateEvent => ({
       serverId: "forge",
+      seq,
       state,
       since,
       lastContactAt: null,
       nextRetryAt: null,
     });
-    push(event("offline", 2000));
-    // Un instantané en retard (since plus ancien) arrive ensuite : ignoré.
-    push(event("connected", 1000));
+    push(event("offline", 5, 2000));
+    // Un instantané en retard (seq plus petit) arrive ensuite : ignoré, même avec un `since` plus récent.
+    push(event("connected", 4, 9999));
     expect(link.stateOf("forge")).toBe("offline");
-    push(event("connected", 3000));
+    // Un rejeu du même seq ne change rien ; un seq supérieur gagne même avec une horloge reculée.
+    push(event("connected", 5, 1));
+    expect(link.stateOf("forge")).toBe("offline");
+    push(event("connected", 6, 1));
     expect(link.stateOf("forge")).toBe("connected");
+  });
+
+  it("the simulated bridge numbers events strictly per server", async () => {
+    const { bridge } = freshBridge();
+    const seen: Record<string, number[]> = {};
+    await bridge.onLinkState((e) => {
+      const list = seen[e.serverId] ?? [];
+      list.push(e.seq);
+      seen[e.serverId] = list;
+    });
+    bridge.setState("forge", "offline");
+    bridge.setState("forge", "connected");
+    bridge.setState("salon", "offline");
+    expect(seen.forge).toEqual([1, 2, 3]);
+    expect(seen.salon).toEqual([1, 2]);
   });
 
   it("keeps the outcome by opId so a page finds the one of ITS action, bounded in count and age", async () => {
@@ -279,5 +298,126 @@ describe("real teardown", () => {
     expect(servers.servers).toEqual([]);
     expect(link.eventOf("salon")).toBeUndefined();
     expect(link.outcomeOf("z")).toBeUndefined();
+  });
+});
+
+describe("link store subscriptions", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  it("a stop() during the pending subscription leaks no listener", async () => {
+    const { bridge } = freshBridge();
+    const slow = deferred<() => void>();
+    const unsubscribe = vi.fn();
+    vi.spyOn(bridge, "onLinkState").mockReturnValue(slow.promise);
+    const operations = vi.spyOn(bridge, "onOperation");
+    const link = useLinkStore();
+    const started = link.start();
+    link.stop();
+    slow.resolve(unsubscribe);
+    await started;
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(operations).not.toHaveBeenCalled();
+  });
+
+  it("keeps each unsubscribe as soon as it is obtained: a failure of the second releases the first", async () => {
+    const { bridge } = freshBridge();
+    const first = vi.fn();
+    vi.spyOn(bridge, "onLinkState").mockResolvedValue(first);
+    vi.spyOn(bridge, "onOperation").mockRejectedValue(new Error("pont en panne"));
+    const link = useLinkStore();
+    await link.start();
+    expect(first).toHaveBeenCalledTimes(1);
+    link.stop();
+  });
+
+  it("shows « Hors ligne » (not a frozen « Reconnexion… ») when the subscription fails, then retries with growing delays and recovers", async () => {
+    const { bridge } = freshBridge();
+    const link = useLinkStore();
+    const attempts = vi
+      .spyOn(bridge, "onLinkState")
+      .mockRejectedValueOnce(new Error("1"))
+      .mockRejectedValueOnce(new Error("2"));
+    await link.start();
+    expect(link.subscriptionFailed).toBe(true);
+    expect(link.stateOf("forge")).toBe("offline");
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_BASE_MS - 10);
+    expect(attempts).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(attempts).toHaveBeenCalledTimes(2);
+    // Deuxième échec : l'espacement double.
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_BASE_MS * 2 - 60);
+    expect(attempts).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(attempts).toHaveBeenCalledTimes(3);
+    // Troisième tentative : les vrais abonnements réussissent.
+    expect(link.subscriptionFailed).toBe(false);
+    expect(link.stateOf("forge")).toBe("connected");
+    link.stop();
+  });
+
+  it("« Réessayer maintenant » relaunches a failed subscription at once", async () => {
+    const { bridge } = freshBridge();
+    const link = useLinkStore();
+    vi.spyOn(bridge, "onLinkState").mockRejectedValueOnce(new Error("x"));
+    await link.start();
+    expect(link.subscriptionFailed).toBe(true);
+    await link.retryNow("forge");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(link.subscriptionFailed).toBe(false);
+    link.stop();
+  });
+
+  it("stop() cancels the pending retry", async () => {
+    const { bridge } = freshBridge();
+    const link = useLinkStore();
+    const attempts = vi.spyOn(bridge, "onLinkState").mockRejectedValue(new Error("x"));
+    await link.start();
+    link.stop();
+    await vi.advanceTimersByTimeAsync(RESUBSCRIBE_MAX_MS * 2);
+    expect(attempts).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("servers store with a bridge that never answers", () => {
+  it("gives up after the delay with an error state instead of blocking the router guard forever", async () => {
+    const { bridge } = freshBridge();
+    const store = useServersStore();
+    const unsubscribe = vi.fn();
+    let release!: (value: () => void) => void;
+    vi.spyOn(bridge, "onServersChanged").mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const outcome = store.load().then(
+      () => "ok",
+      () => "failed",
+    );
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS + 10);
+    expect(await outcome).toBe("failed");
+    expect(store.loadFailed).toBe(true);
+    expect(store.loaded).toBe(false);
+    // L'abonnement arrivé trop tard est libéré, pas laissé actif.
+    release(unsubscribe);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the router start without servers (welcome page) when the bridge is silent", async () => {
+    const { bridge } = freshBridge();
+    vi.spyOn(bridge, "onServersChanged").mockReturnValue(new Promise(() => {}));
+    const { createAppRouter } = await import("@/router");
+    const { createMemoryHistory } = await import("vue-router");
+    const router = createAppRouter(createMemoryHistory());
+    const navigation = router.push("/");
+    for (let i = 0; i < 4; i++) await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS);
+    await navigation;
+    expect(router.currentRoute.value.name).toBe("welcome");
   });
 });

@@ -12,7 +12,9 @@ import type { LinkStateEvent, OperationEvent, ServerInfo, Unsubscribe } from "./
  *   récepteur est appelé avec la liste ou avec l'événement de chaque serveur, au plus
  *   tard avant que la promesse ne se résolve) : il n'y a donc pas de « lecture initiale »
  *   séparée, et aucune fenêtre où un ajout ou une suppression serait perdu ;
- * - un implémenteur réel s'abonne d'abord aux événements, puis envoie l'instantané.
+ * - un implémenteur réel s'abonne d'abord aux événements, puis envoie l'instantané ;
+ * - `LinkStateEvent.seq` croît strictement par serveur : l'interface écarte tout événement dont
+ *   `seq` n'est pas supérieur au dernier connu (rejeu d'un instantané compris).
  */
 export interface LinkBridge {
   /** Serveurs enregistrés : liste courante, puis à chaque ajout ou suppression. */

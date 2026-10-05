@@ -28,9 +28,15 @@ export interface ServerInfo {
   role: Role;
 }
 
-/** Événement `link://state` : dates en millisecondes depuis l'époque, `null` si inconnues. */
+/**
+ * Événement `link://state`. `seq` est un numéro de séquence strictement croissant PAR SERVEUR,
+ * fourni par la liaison : c'est lui (et non l'horloge) qui sert à écarter un événement en retard.
+ * `since` et les dates (millisecondes depuis l'époque, `null` si inconnues) ne sont que de
+ * l'affichage.
+ */
 export interface LinkStateEvent {
   serverId: string;
+  seq: number;
   state: LinkState;
   since: number;
   lastContactAt: number | null;

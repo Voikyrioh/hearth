@@ -22,6 +22,7 @@ export interface SimulatedOptions {
 export class SimulatedLinkBridge implements LinkBridge {
   private servers: ServerInfo[];
   private readonly events = new Map<string, LinkStateEvent>();
+  private readonly seqs = new Map<string, number>();
   private readonly stateListeners = new Set<(event: LinkStateEvent) => void>();
   private readonly serverListeners = new Set<(servers: ServerInfo[]) => void>();
   private readonly operationListeners = new Set<(event: OperationEvent) => void>();
@@ -70,6 +71,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     const now = this.now();
     const event: LinkStateEvent = {
       serverId,
+      seq: this.nextSeq(serverId),
       state,
       since: now,
       lastContactAt: state === "connected" ? now : (previous?.lastContactAt ?? null),
@@ -106,6 +108,19 @@ export class SimulatedLinkBridge implements LinkBridge {
 
   private connectedEvent(serverId: string): LinkStateEvent {
     const now = this.now();
-    return { serverId, state: "connected", since: now, lastContactAt: now, nextRetryAt: null };
+    return {
+      serverId,
+      seq: this.nextSeq(serverId),
+      state: "connected",
+      since: now,
+      lastContactAt: now,
+      nextRetryAt: null,
+    };
+  }
+
+  private nextSeq(serverId: string): number {
+    const next = (this.seqs.get(serverId) ?? 0) + 1;
+    this.seqs.set(serverId, next);
+    return next;
   }
 }

@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { reportUiError } from "@/errors/report";
 import { t } from "@/i18n";
 import {
   getLinkBridge,
@@ -20,37 +21,77 @@ const OPERATION_TEXTS = {
 /** Issues d'opération gardées (nombre et âge bornés : session longue, BR-RESIL-017). */
 export const MAX_OPERATIONS = 100;
 export const OPERATION_MAX_AGE_MS = 10 * 60_000;
+/** Nouvelle tentative d'abonnement : espacement doublé de 1 s jusqu'à 30 s. */
+export const RESUBSCRIBE_BASE_MS = 1000;
+export const RESUBSCRIBE_MAX_MS = 30_000;
 
 /**
  * État du lien de chaque serveur (BR-RESIL-020 : un état indépendant par serveur),
  * alimenté par le pont. Les issues d'opérations incertaines deviennent des notifications
  * discrètes qui nomment le serveur (BR-RESIL-010, 011) et restent consultables par `opId`.
+ *
+ * Abonnements : chaque désabonnement est gardé dès qu'il est obtenu ; `stop()` pendant une
+ * attente n'en laisse aucun actif ; si l'abonnement échoue, `subscriptionFailed` passe à vrai
+ * (les serveurs sans événement s'affichent « Hors ligne », jamais « Reconnexion… » pour
+ * toujours) et une nouvelle tentative est faite, de plus en plus espacée.
  */
 export const useLinkStore = defineStore("link", () => {
   const events = ref<Record<string, LinkStateEvent>>({});
   const operations = ref<Record<string, { event: OperationEvent; at: number }>>({});
+  const subscriptionFailed = ref(false);
   const toasts = useToastsStore();
   const servers = useServersStore();
-  const subscriptions: Unsubscribe[] = [];
+  let subscriptions: Unsubscribe[] = [];
+  let generation = 0;
+  let attempts = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let starting: Promise<void> | null = null;
 
-  /** Écoute le pont (une seule fois). Rend la main quand les états courants sont arrivés. */
+  /** Écoute le pont (une seule fois). Rend la main quand la première tentative est finie. */
   function start(): Promise<void> {
-    starting ??= (async () => {
-      const bridge = getLinkBridge();
-      subscriptions.push(await bridge.onLinkState(onState), await bridge.onOperation(onOperation));
-    })().catch((error) => {
-      starting = null;
-      throw error;
-    });
+    starting ??= attempt();
     return starting;
   }
 
-  // Un événement plus ancien (`since`) n'écrase jamais un plus récent : avec le vrai pont,
-  // un instantané en retard peut arriver après un changement d'état.
+  async function attempt(): Promise<void> {
+    const mine = generation;
+    const keep = (unsubscribe: Unsubscribe) => {
+      if (mine === generation) subscriptions.push(unsubscribe);
+      else unsubscribe();
+    };
+    try {
+      const bridge = getLinkBridge();
+      keep(await bridge.onLinkState(onState));
+      if (mine !== generation) return;
+      keep(await bridge.onOperation(onOperation));
+      if (mine === generation) {
+        subscriptionFailed.value = false;
+        attempts = 0;
+      }
+    } catch (error) {
+      if (mine !== generation) return;
+      subscriptionFailed.value = true;
+      reportUiError(error, "link:subscribe");
+      releaseAll();
+      const delay = Math.min(RESUBSCRIBE_BASE_MS * 2 ** attempts, RESUBSCRIBE_MAX_MS);
+      attempts += 1;
+      timer = setTimeout(() => {
+        if (mine === generation) starting = attempt();
+      }, delay);
+    }
+  }
+
+  function releaseAll() {
+    const old = subscriptions;
+    subscriptions = [];
+    for (const unsubscribe of old) unsubscribe();
+  }
+
+  // Un événement dont `seq` n'est pas supérieur au dernier connu est écarté (événement en
+  // retard, rejeu d'un instantané) : l'horloge murale n'entre pas dans l'ordre.
   function onState(event: LinkStateEvent) {
     const known = events.value[event.serverId];
-    if (known && event.since < known.since) return;
+    if (known && event.seq <= known.seq) return;
     events.value = { ...events.value, [event.serverId]: event };
   }
 
@@ -80,21 +121,31 @@ export const useLinkStore = defineStore("link", () => {
     return operations.value[opId]?.event.outcome;
   }
 
+  /** Arrête l'écoute : annule l'attente en cours, la nouvelle tentative et tout abonnement. */
   function stop() {
+    generation += 1;
+    clearTimeout(timer);
     starting = null;
-    for (const unsubscribe of subscriptions.splice(0)) unsubscribe();
+    attempts = 0;
+    subscriptionFailed.value = false;
+    releaseAll();
   }
 
   function eventOf(serverId: string): LinkStateEvent | undefined {
     return events.value[serverId];
   }
 
-  /** Avant le premier événement d'un serveur, le lien est en cours d'établissement. */
+  /** Sans événement : « Reconnexion… » le temps de s'abonner, « Hors ligne » si l'abonnement échoue. */
   function stateOf(serverId: string): LinkState {
-    return events.value[serverId]?.state ?? "reconnecting";
+    return events.value[serverId]?.state ?? (subscriptionFailed.value ? "offline" : "reconnecting");
   }
 
   async function retryNow(serverId: string) {
+    if (subscriptionFailed.value) {
+      // « Réessayer maintenant » relance aussi l'abonnement qui avait échoué.
+      clearTimeout(timer);
+      starting = attempt();
+    }
     await getLinkBridge().retryNow(serverId);
   }
 
@@ -105,5 +156,16 @@ export const useLinkStore = defineStore("link", () => {
     operations.value = {};
   }
 
-  return { events, operations, start, stop, eventOf, stateOf, outcomeOf, retryNow, reset };
+  return {
+    events,
+    operations,
+    subscriptionFailed,
+    start,
+    stop,
+    eventOf,
+    stateOf,
+    outcomeOf,
+    retryNow,
+    reset,
+  };
 });
