@@ -6,3 +6,4 @@ pub mod probe;
 pub mod scrub;
 
 pub use host::SystemHost;
+pub use probe::AgentHelloProbe;

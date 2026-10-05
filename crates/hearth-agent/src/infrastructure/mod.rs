@@ -14,3 +14,4 @@ pub mod service;
 pub mod sqlite;
 pub mod system;
 pub mod tls;
+pub mod update;
