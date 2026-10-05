@@ -5,7 +5,7 @@ titre: Un état d'alerte comporte trois niveaux : normal, attention, critique
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-003), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-003 — Un état d'alerte comporte trois niveaux : normal, attention, critique
@@ -25,5 +25,9 @@ Mémoire, mémoire vidéo, disque et processeur : attention à partir de 85 %, c
 ## Règles liées
 - BR-DASH-004
 
+## Interface
+- Les niveaux sont décidés côté Rust (`src-tauri/src/dashboard.rs`, par ces fonctions) et reçus par mesure (`SampleLevels`) : l'interface ne connaît aucun seuil (ADR-0015). Affichage : `LevelBadge` (icône + « Attention » ou « Critique », jamais la couleur seule), `HGaugeArc` et `HMeter` (couleur `--warn` ou `--crit`). Tests : `src-tauri/tests/dashboard.rs`, `pages/Dashboard.test.ts`, `components/dashboard.test.ts`.
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

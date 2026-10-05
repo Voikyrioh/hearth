@@ -1,0 +1,9 @@
+# TimeSeriesChart
+
+Molécule · `apps/desktop/src/components/molecules/TimeSeriesChart.vue`
+
+Courbe d'une mesure sur la fenêtre choisie. Quand l'historique gardé ne couvre pas toute la fenêtre (application récemment ouverte), le dit : « Depuis 12 min ».
+
+- Props : `series`, `max`, `label`, `window` (`1m`, `5m`, `1h`), `coveredMs`
+- Événements et slots : aucun
+- Notes : BR-DASH-010. Tests : `components/dashboard.test.ts`, `pages/Dashboard.test.ts`.

@@ -18,3 +18,4 @@ Décisions d'architecture et conventions. Chaque ADR référence les ADR globale
 | [ADR-0012](./ADR-0012-service-systeme.md) | securite | Service système : root, unité systemd durcie, installation gérée sans unité | acceptée | 2026-10-05 |
 | [ADR-0013](./ADR-0013-pont-de-liaison-et-coffre-windows.md) | securite | Pont de liaison de l'application et coffre Windows : commandes typées, événements link://*, keyring-core | acceptée | 2026-10-05 |
 | [ADR-0014](./ADR-0014-mise-a-jour-agent.md) | librairie | Mise à jour de l'agent à distance : superviseur détaché (systemd-run), minisign-verify, reqwest et rustls-native-certs côté agent | acceptée | 2026-10-05 |
+| [ADR-0015](./ADR-0015-tableau-de-bord.md) | architecture | Tableau de bord : courbes en SVG maison, seuils appliqués côté Rust, historique client borné | acceptée | 2026-10-05 |
