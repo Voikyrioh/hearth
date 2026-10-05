@@ -60,6 +60,9 @@ pub struct LinkConfig {
     /// réglage : le transport de production le reprend (`LinkManager::open`) et la tâche du
     /// serveur borne elle-même chaque action.
     pub request_timeout: Duration,
+    /// Délai accordé à l'écriture du suivi d'une action, avant son envoi. Passé ce délai (ou si
+    /// l'écriture échoue), l'action n'est pas lancée.
+    pub persist_timeout: Duration,
     /// Période de relecture des adresses réseau locales : 5 s.
     pub net_poll_period: Duration,
     /// Période de contrôle de l'horloge pour détecter un réveil : 1 s.
@@ -83,6 +86,7 @@ impl Default for LinkConfig {
             heartbeat_period: Duration::from_secs(2),
             attempt_timeout: Duration::from_secs(8),
             request_timeout: Duration::from_secs(10),
+            persist_timeout: Duration::from_secs(2),
             net_poll_period: Duration::from_secs(5),
             wake_check_period: Duration::from_secs(1),
             snapshot_save_period: Duration::from_secs(30),

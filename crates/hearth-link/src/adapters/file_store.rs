@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 
 use crate::domain::pending_ops::PendingOp;
 use crate::domain::server::{LastKnown, ServerId, ServerRecord};
-use crate::ports::operation_store::OperationStore;
+use crate::ports::operation_store::{LoadedOperations, OperationStore};
 use crate::ports::server_store::{ServerStore, StoreError};
 use crate::ports::snapshot_store::SnapshotStore;
 
@@ -220,20 +220,42 @@ impl FileOperationStore {
 
 #[async_trait]
 impl OperationStore for FileOperationStore {
-    async fn load(&self, id: &ServerId) -> Result<Vec<PendingOp>, StoreError> {
+    async fn load(&self, id: &ServerId) -> Result<LoadedOperations, StoreError> {
         let path = self.path(id);
         let bytes = match tokio::fs::read(&path).await {
             Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(LoadedOperations::default());
+            }
             Err(error) => return Err(io_error("lecture des opérations", &error)),
         };
-        match serde_json::from_slice(&bytes) {
-            Ok(operations) => Ok(operations),
-            Err(_) => {
-                tracing::warn!(file = %path.display(), "opérations en suspens illisibles, ignorées");
-                Ok(Vec::new())
+        let parsed: Result<Vec<Value>, _> = serde_json::from_slice(&bytes);
+        let Ok(entries) = parsed else {
+            tracing::warn!(file = %path.display(), "opérations en suspens illisibles, mises de côté");
+            set_aside(&path).await;
+            return Ok(LoadedOperations {
+                operations: Vec::new(),
+                damaged: true,
+            });
+        };
+        let mut operations = Vec::with_capacity(entries.len());
+        let mut skipped = 0usize;
+        for entry in entries {
+            match serde_json::from_value::<PendingOp>(entry) {
+                Ok(operation) => operations.push(operation),
+                Err(_) => skipped += 1,
             }
         }
+        if skipped > 0 {
+            tracing::warn!(file = %path.display(), skipped, "entrées d'opérations illisibles, ignorées");
+            let mut aside = path.as_os_str().to_owned();
+            aside.push(".corrupt");
+            let _ = tokio::fs::write(PathBuf::from(aside), &bytes).await;
+        }
+        Ok(LoadedOperations {
+            operations,
+            damaged: skipped > 0,
+        })
     }
 
     async fn save(&self, id: &ServerId, operations: &[PendingOp]) -> Result<(), StoreError> {
@@ -381,9 +403,10 @@ mod tests {
         use crate::domain::pending_ops::{OperationId, PendingOps};
         use crate::domain::time::WallTime;
         let dir = tempfile::tempdir().unwrap();
-        let store = FileOperationStore::new(dir.path().join("operations"));
+        let folder = dir.path().join("operations");
+        let store = FileOperationStore::new(&folder);
         let id = ServerId::parse("a").unwrap();
-        assert!(store.load(&id).await.unwrap().is_empty());
+        assert_eq!(store.load(&id).await.unwrap(), LoadedOperations::default());
         let mut ops = PendingOps::new();
         ops.register(
             OperationId::parse("01J9").unwrap(),
@@ -392,13 +415,30 @@ mod tests {
         )
         .unwrap();
         store.save(&id, &ops.snapshot()).await.unwrap();
-        assert_eq!(store.load(&id).await.unwrap().len(), 1);
-        tokio::fs::write(dir.path().join("operations").join("a.json"), b"[{")
+        let loaded = store.load(&id).await.unwrap();
+        assert_eq!(loaded.operations.len(), 1);
+        assert!(!loaded.damaged);
+
+        // Illisible : mis de côté (pas supprimé), signalé.
+        tokio::fs::write(folder.join("a.json"), b"[{")
             .await
             .unwrap();
-        assert!(store.load(&id).await.unwrap().is_empty());
+        let loaded = store.load(&id).await.unwrap();
+        assert!(loaded.operations.is_empty() && loaded.damaged);
+        assert!(folder.join("a.json.corrupt").exists());
+
+        // Une entrée invalide n'emporte pas les autres.
+        let good = serde_json::to_value(ops.snapshot()).unwrap();
+        let mixed = serde_json::json!([good[0], { "id": "a/b" }, 7]);
+        tokio::fs::write(folder.join("a.json"), mixed.to_string())
+            .await
+            .unwrap();
+        let loaded = store.load(&id).await.unwrap();
+        assert_eq!(loaded.operations.len(), 1);
+        assert!(loaded.damaged);
+
         store.save(&id, &ops.snapshot()).await.unwrap();
         store.save(&id, &[]).await.unwrap();
-        assert!(!dir.path().join("operations").join("a.json").exists());
+        assert!(!folder.join("a.json").exists());
     }
 }

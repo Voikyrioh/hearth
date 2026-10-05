@@ -196,7 +196,8 @@ async fn reauthenticate_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                 }
             }
         }
-        // Un mot de passe refusé ne se réessaie pas : l'accès est révoqué.
+        // Mot de passe mémorisé refusé (`INVALID_CREDENTIALS`) : `StoredPasswordRefused`, pas de
+        // nouvelle tentative (BR-CONN-017) ; un `429` donne `RetryAfter`.
         Err(error) => classify(&error),
     }
 }

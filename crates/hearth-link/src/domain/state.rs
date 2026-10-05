@@ -226,6 +226,9 @@ struct Outage {
     /// nouvelle « session expirée » à ce stade n'est pas relancée sur-le-champ (boucle serrée
     /// contre un serveur qui refuserait toujours), elle suit les délais.
     reauthed: bool,
+    /// Un réveil a déjà repoussé « Hors ligne » dans cette coupure : un seul report tant qu'aucun
+    /// contact n'a réussi (un poste qui se réveille toutes les 20 s finit « Hors ligne »).
+    woken: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -280,6 +283,7 @@ impl LinkMachine {
                     in_flight: false,
                     next_attempt_at: Some(now),
                     reauthed: false,
+                    woken: false,
                 }),
                 LinkState::Reconnecting,
             ),
@@ -297,6 +301,7 @@ impl LinkMachine {
                     in_flight: false,
                     next_attempt_at: Some(now),
                     reauthed: false,
+                    woken: false,
                 }),
                 LinkState::Offline,
             ),
@@ -529,6 +534,7 @@ impl LinkMachine {
             in_flight: true,
             next_attempt_at: None,
             reauthed: false,
+            woken: false,
         });
         effects.push(Effect::Reauthenticate);
     }
@@ -567,11 +573,12 @@ impl LinkMachine {
             (Phase::Up { .. }, Trigger::RetryNow) => {}
             (Phase::Down(mut outage), trigger) => {
                 outage.manual = outage.manual || self.shown == LinkState::Offline;
-                if trigger == Trigger::Woke {
-                    // L'horloge de coupure repart du réveil.
+                if trigger == Trigger::Woke && !outage.woken {
+                    // L'horloge de coupure repart du réveil, une seule fois par coupure.
                     outage.since = now;
                     outage.unproven = true;
                     outage.manual = false;
+                    outage.woken = true;
                     self.backoff.reset();
                 }
                 outage.in_flight = true;
@@ -589,6 +596,7 @@ impl LinkMachine {
     fn mark_unproven(&mut self) {
         if let Phase::Down(mut outage) = self.phase {
             outage.unproven = true;
+            outage.woken = true;
             self.phase = Phase::Down(outage);
         }
     }
@@ -625,6 +633,7 @@ impl LinkMachine {
             in_flight: true,
             next_attempt_at: None,
             reauthed: false,
+            woken: false,
         });
         effects.push(Effect::StartAttempt);
     }
@@ -640,6 +649,7 @@ impl LinkMachine {
             in_flight: true,
             next_attempt_at: None,
             reauthed: false,
+            woken: false,
         });
         effects.extend([
             Effect::CloseStream,

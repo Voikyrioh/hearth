@@ -22,7 +22,7 @@ use tokio::task::{AbortHandle, JoinError, JoinHandle};
 use tokio::time::timeout;
 
 use super::attempt::{self, AttemptResult};
-use super::persist::{Job, Persister};
+use super::persist::Persister;
 use super::{ActionOutcome, ActionRequest, Deps, Shared};
 use crate::domain::event::{Event, SessionEnd, StateInfo};
 use crate::domain::pending_ops::{Lookup, OperationId, Outcome, PendingOps, Resolution};
@@ -73,6 +73,10 @@ enum Internal {
         id: OperationId,
         lookup: Lookup,
     },
+    /// Le suivi n'a pas pu être écrit sur disque à temps : la requête n'est PAS partie.
+    NotSent {
+        id: OperationId,
+    },
 }
 
 struct Waiter {
@@ -84,6 +88,19 @@ struct Waiter {
 enum AttemptKind {
     Connect,
     Reauth,
+}
+
+/// Trames consécutives traitées avant de rendre la main au reste de la boucle.
+const FRAME_BUDGET: u32 = 32;
+
+/// Ce qui a réveillé la boucle.
+enum WakeUp {
+    Frame(Result<Frame, TransportError>),
+    Internal(Internal),
+    Attempt(Result<AttemptResult, JoinError>),
+    Command(Option<Command>),
+    Tick,
+    Heartbeat,
 }
 
 enum Exit {
@@ -125,7 +142,11 @@ async fn supervise(
                 // Les appels en cours de cette génération perdent leur canal de réponse :
                 // `execute` rend `TaskRestarted`.
                 drop(runner);
-                start = Start::Recovered;
+                start = if shared.record().signed_out {
+                    Start::Disconnected
+                } else {
+                    Start::Recovered
+                };
                 tokio::time::sleep(deps.config.restart_delay).await;
             }
         }
@@ -159,6 +180,7 @@ struct Runner {
     last_saved: crate::domain::time::Mono,
     done: Option<oneshot::Sender<()>>,
     persister: Persister,
+    frames_in_row: u32,
     ping_failed: bool,
     stopped: bool,
 }
@@ -201,6 +223,7 @@ impl Runner {
             published: None,
             ping_n: 0,
             ping_failed: false,
+            frames_in_row: 0,
             done: None,
             stopped: false,
         }
@@ -218,21 +241,47 @@ impl Runner {
                 .map(|at| at.since(self.deps.clock.mono()));
             // `biased` : les trames déjà reçues passent AVANT l'échéance du silence. Après un
             // passage lent dans la boucle, une trame prête et une échéance échue le sont
-            // ensemble : un tirage au hasard couperait un lien vivant.
-            tokio::select! {
-                biased;
-                frame = next_frame(&mut self.stream) => self.on_frame(frame).await,
-                Some(message) = self.internal_rx.recv() => self.on_internal(message).await,
-                joined = next_attempt(&mut self.attempt) => self.on_attempt(joined).await,
-                command = commands.recv() => match command {
-                    Some(command) => self.on_command(command).await,
-                    None => {
-                        // Plus de façade : on s'arrête proprement.
-                        self.input(Input::Shutdown).await;
-                    }
-                },
-                () = sleep_or_pending(wake) => self.input(Input::Tick).await,
-                _ = heartbeat.tick() => self.on_heartbeat().await,
+            // ensemble : un tirage au hasard couperait un lien vivant. Mais un agent qui inonde
+            // le flux ne doit rien affamer : après `FRAME_BUDGET` trames d'affilée, tout le reste
+            // (commandes, résultats, échéance, battement) passe avant la trame suivante.
+            let flooded = self.frames_in_row >= FRAME_BUDGET;
+            let wake_up = if flooded {
+                tokio::select! {
+                    biased;
+                    Some(message) = self.internal_rx.recv() => WakeUp::Internal(message),
+                    joined = next_attempt(&mut self.attempt) => WakeUp::Attempt(joined),
+                    command = commands.recv() => WakeUp::Command(command),
+                    () = sleep_or_pending(wake) => WakeUp::Tick,
+                    _ = heartbeat.tick() => WakeUp::Heartbeat,
+                    frame = next_frame(&mut self.stream) => WakeUp::Frame(frame),
+                }
+            } else {
+                tokio::select! {
+                    biased;
+                    frame = next_frame(&mut self.stream) => WakeUp::Frame(frame),
+                    Some(message) = self.internal_rx.recv() => WakeUp::Internal(message),
+                    joined = next_attempt(&mut self.attempt) => WakeUp::Attempt(joined),
+                    command = commands.recv() => WakeUp::Command(command),
+                    () = sleep_or_pending(wake) => WakeUp::Tick,
+                    _ = heartbeat.tick() => WakeUp::Heartbeat,
+                }
+            };
+            if matches!(wake_up, WakeUp::Frame(_)) {
+                self.frames_in_row += 1;
+            } else {
+                self.frames_in_row = 0;
+            }
+            match wake_up {
+                WakeUp::Frame(frame) => self.on_frame(frame).await,
+                WakeUp::Internal(message) => self.on_internal(message).await,
+                WakeUp::Attempt(joined) => self.on_attempt(joined).await,
+                WakeUp::Command(Some(command)) => self.on_command(command).await,
+                WakeUp::Command(None) => {
+                    // Plus de façade : on s'arrête proprement.
+                    self.input(Input::Shutdown).await;
+                }
+                WakeUp::Tick => self.input(Input::Tick).await,
+                WakeUp::Heartbeat => self.on_heartbeat().await,
             }
             if std::mem::take(&mut self.ping_failed) {
                 self.input(Input::TransportFailed).await;
@@ -247,14 +296,25 @@ impl Runner {
     /// Reprend les opérations en suspens d'avant le redémarrage de l'application : elles sont
     /// « résultat inconnu » et seront relues au premier retour du lien (BR-RESIL-009, 010).
     async fn restore_pending(&mut self) {
-        let saved = match self.deps.operations.load(&self.id).await {
-            Ok(saved) => saved,
+        let loaded = match self.deps.operations.load(&self.id).await {
+            Ok(loaded) => loaded,
             Err(error) => {
                 tracing::warn!(server = %self.id, %error, "opérations en suspens illisibles");
+                self.deps.sink.emit(Event::OperationsLost {
+                    server: self.id.clone(),
+                });
                 return;
             }
         };
-        let abandoned = self.pending.restore(saved, self.deps.clock.wall());
+        if loaded.damaged {
+            // Des suivis ont pu être perdus : l'interface le dit (« vérifie l'état »).
+            self.deps.sink.emit(Event::OperationsLost {
+                server: self.id.clone(),
+            });
+        }
+        let abandoned = self
+            .pending
+            .restore(loaded.operations, self.deps.clock.wall());
         for id in abandoned {
             self.deps.sink.emit(Event::Operation {
                 server: self.id.clone(),
@@ -451,6 +511,7 @@ impl Runner {
         match message {
             Internal::OpResponse { id, result } => self.on_op_response(id, result).await,
             Internal::Lookup { id, lookup } => self.on_lookup(id, lookup),
+            Internal::NotSent { id } => self.on_not_sent(&id),
         }
     }
 
@@ -487,7 +548,11 @@ impl Runner {
     /// « Session expirée » (BR-RESIL-012, 013).
     async fn session_expired(&mut self) {
         // Déconnexion volontaire : la fin de session qui suit est la nôtre, pas une expiration.
-        if self.machine.status().reason == Some(Reason::UserDisconnected) {
+        // La déconnexion est lue aussi sur l'enregistrement partagé, posé AVANT la commande : une
+        // trame de fin de session qui passerait avant la commande ne relance rien.
+        if self.machine.status().reason == Some(Reason::UserDisconnected)
+            || self.shared.record().signed_out
+        {
             return;
         }
         let can_reauth = self.has_saved_password();
@@ -536,7 +601,7 @@ impl Runner {
         if record.remember {
             record.remember = false;
             self.shared.set_record(record.clone());
-            self.persister.send(Job::Record(record));
+            self.persister.save_record(record);
         }
     }
 
@@ -617,8 +682,7 @@ impl Runner {
     }
 
     fn persist_operations(&self) {
-        self.persister
-            .send(Job::Operations(self.pending.snapshot()));
+        self.persister.save_operations(self.pending.snapshot());
     }
 
     fn resolve_pending(&mut self) {
@@ -673,7 +737,12 @@ impl Runner {
             let _ = reply.send(Err(LinkError::TooManyPending));
             return;
         }
-        self.persist_operations();
+        // Persister PUIS envoyer : la requête n'attend pas la boucle, elle attend l'accusé
+        // d'écriture de son suivi (écriture atomique terminée). Sans accusé, elle ne part pas.
+        let written = self
+            .persister
+            .save_operations_acked(self.pending.snapshot());
+        let persist_timeout = self.deps.config.persist_timeout;
         let api_request = crate::ports::transport::ApiRequest {
             method: request.method,
             path: request.path,
@@ -685,6 +754,10 @@ impl Runner {
         let sender = self.internal_tx.clone();
         let operation = key.clone();
         let task = tokio::spawn(async move {
+            if !matches!(timeout(persist_timeout, written).await, Ok(Ok(true))) {
+                let _ = sender.send(Internal::NotSent { id: operation }).await;
+                return;
+            }
             // Le seul délai de requête : la tâche borne elle-même l'appel au transport.
             let call = async {
                 timeout(
@@ -774,6 +847,15 @@ impl Runner {
         }
     }
 
+    /// Le suivi n'a pas pu être écrit : l'action n'est pas partie, l'appelant le sait.
+    fn on_not_sent(&mut self, id: &OperationId) {
+        if let Some(waiter) = self.waiters.remove(id) {
+            let _ = waiter.reply.send(Err(LinkError::TrackingUnavailable));
+        }
+        self.pending.complete(id);
+        self.persist_operations();
+    }
+
     fn on_lookup(&mut self, id: OperationId, lookup: Lookup) {
         let running = matches!(
             &lookup,
@@ -821,13 +903,13 @@ impl Runner {
         }
         self.last_saved = now;
         if let Some(view) = self.shared.last_known() {
-            self.persister.send(Job::View(view));
+            self.persister.save_view(view);
         }
         let mut record = self.shared.record();
         if record.last_contact_at != self.last_contact {
             record.last_contact_at = self.last_contact;
             self.shared.set_record(record.clone());
-            self.persister.send(Job::Record(record));
+            self.persister.save_record(record);
         }
     }
 

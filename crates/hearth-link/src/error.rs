@@ -19,6 +19,9 @@ pub enum LinkError {
     NotConnected,
     #[error("trop d'opérations en suspens")]
     TooManyPending,
+    /// Le suivi de l'action n'a pas pu être écrit sur disque : l'action n'a PAS été lancée.
+    #[error("suivi impossible : l'action n'a pas été lancée")]
+    TrackingUnavailable,
     #[error("l'empreinte du serveur a changé")]
     FingerprintChanged,
     #[error("versions incompatibles")]

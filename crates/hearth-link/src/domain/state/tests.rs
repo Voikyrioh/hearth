@@ -588,6 +588,42 @@ fn waking_while_offline_restarts_the_outage_clock_at_the_wake_up() {
 }
 
 #[test]
+fn a_pc_waking_every_twenty_seconds_in_front_of_a_dead_server_ends_offline() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::TransportFailed);
+    rig.run_failing_until(10_001);
+    // Premier réveil : l'horloge repart ; les suivants ne la repoussent plus.
+    rig.send_at(20_000, Input::Woke);
+    for wake in [40_000, 60_000, 80_000] {
+        rig.run_failing_until(wake - 1);
+        rig.send_at(wake, Input::Woke);
+    }
+    rig.run_failing_until(99_999);
+    assert_eq!(
+        rig.state(),
+        LinkState::Offline,
+        "30 s après le premier réveil, malgré les suivants"
+    );
+    // Un réveil depuis « Hors ligne » tente tout de suite (affiché « Reconnexion » le temps de
+    // la tentative) sans effacer les 30 s déjà écoulées : l'échec ramène « Hors ligne ».
+    assert_eq!(rig.send_at(100_000, Input::Woke), [Effect::StartAttempt]);
+    rig.send_at(100_050, Input::TransportFailed);
+    assert_eq!(rig.state(), LinkState::Offline);
+    rig.send_at(100_500, Input::Tick);
+    // Un contact réussi rend le report de nouveau possible pour la coupure suivante.
+    rig.send(Input::Connected);
+    rig.send_at(110_000, Input::TransportFailed);
+    rig.run_failing_until(120_000);
+    rig.send_at(120_001, Input::Woke);
+    rig.run_failing_until(150_000);
+    assert_eq!(
+        rig.state(),
+        LinkState::Reconnecting,
+        "nouvelle coupure : nouveau report possible"
+    );
+}
+
+#[test]
 fn waking_while_reconnecting_attempts_at_once_and_restarts_the_clock() {
     let mut rig = Rig::connected();
     rig.send_at(10_000, Input::TransportFailed);

@@ -73,6 +73,9 @@ pub enum Event {
     /// L'abonné a pris du retard : `skipped` événements ont été perdus, dont peut-être des
     /// changements d'état. Relire `LinkManager::states()` pour retrouver l'état courant.
     Lagged { skipped: u64 },
+    /// Le fichier des opérations en suspens était illisible (en tout ou en partie) : des suivis
+    /// ont pu être perdus. L'interface dit de vérifier l'état du serveur.
+    OperationsLost { server: ServerId },
     /// Changement d'état du lien d'un serveur.
     State { server: ServerId, info: StateInfo },
     /// Un échantillon de mesures (chaque seconde).
@@ -112,6 +115,7 @@ impl Event {
     pub fn server(&self) -> Option<&ServerId> {
         match self {
             Self::Lagged { .. } => None,
+            Self::OperationsLost { server } => Some(server),
             Self::State { server, .. }
             | Self::Metrics { server, .. }
             | Self::Snapshot { server, .. }

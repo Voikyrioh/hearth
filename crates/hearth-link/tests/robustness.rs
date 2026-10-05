@@ -437,14 +437,20 @@ struct MemStore {
 
 #[async_trait]
 impl OperationStore for MemStore {
-    async fn load(&self, id: &ServerId) -> Result<Vec<PendingOp>, StoreError> {
-        Ok(self
-            .operations
-            .lock()
-            .unwrap()
-            .get(id)
-            .cloned()
-            .unwrap_or_default())
+    async fn load(
+        &self,
+        id: &ServerId,
+    ) -> Result<hearth_link::ports::operation_store::LoadedOperations, StoreError> {
+        Ok(hearth_link::ports::operation_store::LoadedOperations {
+            operations: self
+                .operations
+                .lock()
+                .unwrap()
+                .get(id)
+                .cloned()
+                .unwrap_or_default(),
+            damaged: false,
+        })
     }
     async fn save(&self, id: &ServerId, operations: &[PendingOp]) -> Result<(), StoreError> {
         self.operations
