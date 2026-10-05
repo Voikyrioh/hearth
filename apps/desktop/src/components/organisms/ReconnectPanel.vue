@@ -1,0 +1,67 @@
+<script setup lang="ts">
+import { computed, ref } from "vue";
+import LoginForm from "@/components/organisms/LoginForm.vue";
+import { useReconnect } from "@/composables/useReconnect";
+import { t } from "@/i18n";
+import type { Reason, ServerInfo } from "@/link";
+
+// Serveur enregistré sans session : session expirée, déconnexion volontaire, première connexion
+// interrompue, ou mot de passe mémorisé devenu invalide. Le formulaire de connexion remplace la
+// page, identifiant prérempli. Mot de passe mémorisé refusé : aucun message bloquant, juste le
+// formulaire (BR-CONN-017). Accès révoqué : rien à saisir, on dit à qui s'adresser. Le panneau est
+// recréé pour chaque serveur (`:key` du gabarit) : la saisie d'un serveur ne part jamais vers un autre.
+const props = defineProps<{ server: ServerInfo; reason: Reason | null; revoked?: boolean }>();
+
+const reconnect = useReconnect(() => props.server);
+const form = ref<InstanceType<typeof LoginForm> | null>(null);
+
+const notice = computed(() => {
+  if (props.revoked) return t("connect.accessRevoked");
+  return props.reason === "expired" ? t("connect.sessionExpired") : null;
+});
+
+async function submit(entry: { username: string; password: string; remember: boolean }) {
+  const connected = await reconnect.submit(entry);
+  if (!connected) form.value?.clearPassword();
+}
+</script>
+
+<template>
+  <section class="reconnect" :aria-label="t('connect.reconnectTitle', { name: server.name })">
+    <h2 class="reconnect__title">{{ t("connect.reconnectTitle", { name: server.name }) }}</h2>
+    <p v-if="notice" class="reconnect__notice" role="status">{{ notice }}</p>
+    <LoginForm
+      v-if="!revoked"
+      ref="form"
+      :username="server.username"
+      :busy="reconnect.busy.value"
+      :error="reconnect.error.value"
+      :locked-seconds="reconnect.lockedSeconds.value"
+      :remember="server.remember || reason !== 'stored_password_refused'"
+      @submit="submit"
+    />
+  </section>
+</template>
+
+<style scoped>
+.reconnect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: var(--content-max);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  border: var(--border-width) solid var(--bd);
+  border-radius: var(--radius-card);
+  background: var(--card);
+}
+
+.reconnect__title {
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-semibold);
+}
+
+.reconnect__notice {
+  color: var(--warn);
+}
+</style>

@@ -17,6 +17,9 @@ maj: 2026-10-05
 - `crates/hearth-link/src/domain/state.rs::LinkMachine` (`Input::LoggedOut`, `Reason::UserDisconnected`, `Start::Disconnected`).
 - `crates/hearth-link/src/manager/mod.rs::LinkManager::logout`, `initial_start` ; `domain/server.rs::ServerRecord::signed_out`.
 
+## Interface (coquille et vue)
+- `pages/Servers.vue` : bouton « Se déconnecter » (visible seulement connecté), le mot de passe mémorisé reste ; `components/organisms/ReconnectPanel.vue` rouvre le formulaire de connexion. Tests : `src/pages/Servers.test.ts`, `e2e/connect.spec.ts`.
+
 ## Vérification
 - Tests : `domain::state::tests::logging_out_stops_everything_and_shows_session_expired`, `::every_stopped_state_carries_its_reason` ; `crates/hearth-link/tests/pinning.rs::logout_closes_the_session_but_keeps_the_remembered_password`.
 
@@ -29,3 +32,4 @@ maj: 2026-10-05
 
 ## Historique
 - 2026-10-05 — création (HRT-07, review Stephen round 1).
+- 2026-10-05 : section Interface (HRT-10).

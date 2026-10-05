@@ -5,11 +5,17 @@
 mod commands;
 pub mod domain;
 pub mod error;
+pub mod link;
+mod link_commands;
+pub mod link_dto;
 pub mod logging;
 pub mod settings;
 pub mod texts;
 mod tray;
+pub mod vault;
 pub mod window;
+
+use std::sync::Arc;
 
 use tauri::{AppHandle, Manager as _, Runtime};
 use tauri_plugin_autostart::MacosLauncher;
@@ -25,13 +31,34 @@ pub fn typescript() -> specta_typescript::Typescript {
 /// Déclare les commandes typées. Séparé de `run` pour que les tests
 /// vérifient que `bindings.ts` est à jour.
 pub fn specta_builder() -> Builder<tauri::Wry> {
-    Builder::<tauri::Wry>::new().commands(collect_commands![
-        commands::get_settings,
-        commands::set_launch_at_startup,
-        commands::get_app_version,
-        commands::open_logs_folder,
-        commands::log_frontend_error,
-    ])
+    Builder::<tauri::Wry>::new()
+        .commands(collect_commands![
+            commands::get_settings,
+            commands::set_launch_at_startup,
+            commands::get_app_version,
+            commands::open_logs_folder,
+            commands::log_frontend_error,
+            link_commands::list_servers,
+            link_commands::list_link_states,
+            link_commands::probe_server,
+            link_commands::add_and_login,
+            link_commands::login,
+            link_commands::logout,
+            link_commands::retry_now,
+            link_commands::accept_fingerprint,
+            link_commands::update_server,
+            link_commands::remove_server,
+            link_commands::forget_credentials,
+            link_commands::list_fingerprint_alerts,
+            link_commands::list_link_notices,
+            link_commands::ack_link_notices,
+            link_commands::list_unread_operations,
+            link_commands::ack_unread_operations,
+        ])
+        .typ::<link_dto::ServersEvent>()
+        .typ::<link_dto::OperationEventDto>()
+        .typ::<link_dto::FingerprintEvent>()
+        .typ::<link_dto::NoticeEvent>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.
@@ -62,6 +89,39 @@ pub fn start<R: Runtime>(
     } else {
         window::show_main(app);
     }
+    Ok(())
+}
+
+/// Coffre des secrets de la plateforme : le Gestionnaire d'identification de Windows. Ailleurs, pas
+/// de coffre : le client ne démarre pas plutôt que de garder des mots de passe en clair.
+#[cfg(windows)]
+fn system_vault() -> Result<Arc<dyn hearth_link::ports::Vault>, String> {
+    let backend = vault::WindowsCredentials::new()?;
+    Ok(Arc::new(vault::CredentialVault::new(backend)))
+}
+
+#[cfg(not(windows))]
+fn system_vault() -> Result<Arc<dyn hearth_link::ports::Vault>, String> {
+    Err("coffre des secrets indisponible sur cette plateforme".to_owned())
+}
+
+/// Branche la liaison : carnet, dernières vues et suivis dans le dossier de données de
+/// l'application, secrets au coffre de Windows, et relais des événements vers la fenêtre.
+fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("dossier de données : {error}"))?;
+    let vault = system_vault()?;
+    let client = link::client_name(env!("CARGO_PKG_VERSION"));
+    let runtime = tauri::async_runtime::block_on(link::LinkRuntime::open(&dir, vault, &client))
+        .map_err(|error| format!("liaison avec les serveurs : {error}"))?;
+    tracing::info!(servers = runtime.servers().len(), data = %dir.display(), "liaison prête");
+    let runtime = Arc::new(runtime);
+    let events = runtime.manager().subscribe();
+    app.manage(runtime.clone());
+    let sink = link_commands::TauriSink(app.handle().clone());
+    tauri::async_runtime::spawn(async move { runtime.forward(events, &sink).await });
     Ok(())
 }
 
@@ -111,6 +171,9 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .on_window_event(window::on_window_event)
         .setup(|app| {
+            if let Err(error) = install_link(app) {
+                fail_startup(&error);
+            }
             let minimized = domain::is_minimized_launch(std::env::args());
             start_or_report(app.handle(), minimized, tray::build, |reason| {
                 fail_startup(reason)

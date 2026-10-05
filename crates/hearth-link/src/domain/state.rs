@@ -526,6 +526,9 @@ impl LinkMachine {
             }
         };
         let unproven = matches!(self.phase, Phase::Down(outage) if outage.unproven);
+        // Un réveil déjà compté dans cette coupure le reste : la session expirée ne le remet pas
+        // à zéro (sinon un second réveil repousserait encore « Hors ligne »).
+        let woken = matches!(self.phase, Phase::Down(outage) if outage.woken);
         self.phase = Phase::Down(Outage {
             since,
             unproven,
@@ -534,7 +537,7 @@ impl LinkMachine {
             in_flight: true,
             next_attempt_at: None,
             reauthed: false,
-            woken: false,
+            woken,
         });
         effects.push(Effect::Reauthenticate);
     }

@@ -28,6 +28,10 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`EmptyState`](./EmptyState.md) — Placeholder de vue vide.
 - [`SettingRow`](./SettingRow.md) — Ligne de réglage.
 - [`ComingSoonPanel`](./ComingSoonPanel.md) — Carte « Bientôt disponible ».
+- [`ColorSwatches`](./ColorSwatches.md) — Palette des 8 couleurs de serveur.
+- [`StepTrail`](./StepTrail.md) — Fil des étapes de l'assistant.
+- [`FingerprintBlock`](./FingerprintBlock.md) — Empreinte en 8 groupes de 4.
+- [`BridgeDownBanner`](./BridgeDownBanner.md) — Liste des serveurs illisible, avec « Réessayer ».
 
 ## Organismes
 
@@ -35,6 +39,12 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`ServerNav`](./ServerNav.md) — Navigation du serveur.
 - [`AppHeader`](./AppHeader.md) — En-tête avec pastille du lien.
 - [`OfflineBanner`](./OfflineBanner.md) — Bandeau hors ligne.
+- [`LoginForm`](./LoginForm.md) — Formulaire de connexion (identifiant, mot de passe, se souvenir).
+- [`AddServerWizard`](./AddServerWizard.md) — Assistant d'ajout en 3 temps.
+- [`FingerprintAlert`](./FingerprintAlert.md) — Alerte bloquante d'identité changée.
+- [`ReconnectPanel`](./ReconnectPanel.md) — Formulaire de reconnexion d'un serveur sans session.
+- [`ServerEditForm`](./ServerEditForm.md) — Modification d'un serveur (nom, couleur, adresse).
+- [`ServerRow`](./ServerRow.md) — Ligne du carnet de serveurs.
 - [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
 
 ## Gabarits
@@ -44,6 +54,8 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 ## Pages
 
 - [`Welcome`](./Welcome.md) — Accueil (aucun serveur).
+- [`AddServer`](./AddServer.md) — Ajout d'un serveur (assistant).
+- [`Servers`](./Servers.md) — Carnet de serveurs.
 - [`Dashboard`](./Dashboard.md) — Tableau de bord (à venir).
 - [`Accounts`](./Accounts.md) — Comptes (à venir).
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
@@ -55,7 +67,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 
 ## À venir (autres tickets)
 
-`Gauge`, `Sparkline`, `TimeSeriesChart`, `FingerprintBlock`, `PasswordRules`, `AddServerWizard`, `FingerprintAlert`, `MachineCards`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `UpdatePanel`, `AgentUpdateSteps`.
+`Gauge`, `Sparkline`, `TimeSeriesChart`, `PasswordRules`, `MachineCards`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `UpdatePanel`, `AgentUpdateSteps`.
 
 Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `layouts/`, `pages/`, `composables/`, `stores/`, `link/`, `errors/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
 

@@ -17,6 +17,9 @@ Un identifiant inconnu et un mot de passe faux produisent exactement la même r�
 - `crates/hearth-agent/src/application/sessions.rs::SessionService::login` — les refus (identifiant tenté, adresse, raison ; jamais le mot de passe) sont journalisés en `warn` ; le journal d'activité (HRT-05) s'y branchera. Le haché vérifié est comparé à celui relu dans la transaction de création de la session.
 - `crates/hearth-agent/src/infrastructure/argon2.rs::Argon2Hasher::decoy_hash` — haché factice, de mêmes paramètres que les vrais.
 
+## Interface (coquille et vue)
+- `apps/desktop/src/link/messages.ts::failureMessage` : « Identifiant ou mot de passe incorrect. » sous le mot de passe, jamais le champ fautif ; `components/organisms/LoginForm.vue`. Test : `src/components/organisms/connect.test.ts`, `src/composables/useAddServer.test.ts` (même texte pour un identifiant inconnu).
+
 ## Vérification
 - Tests : `tests/sessions_use_cases.rs::unknown_username_and_wrong_password_take_the_same_path` (compte les appels au hacheur, ne chronomètre pas) ; `tests/sessions_https.rs` (même réponse sur le fil).
 
@@ -28,3 +31,4 @@ Un identifiant inconnu et un mot de passe faux produisent exactement la même r�
 
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
+- 2026-10-05 : section Interface (HRT-10).

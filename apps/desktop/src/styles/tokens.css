@@ -92,6 +92,9 @@
   --field-pad-y: 10px;
   --field-pad-x: 12px;
   --content-max: 420px;
+  --wizard-width: 520px;
+  --swatch-size: 28px;
+  --fs-fingerprint: 20px;
   --panel-max: 640px;
   --target-size: 40px;
   --icon-size: 20px;

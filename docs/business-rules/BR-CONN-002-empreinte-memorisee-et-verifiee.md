@@ -18,6 +18,10 @@ Une fois confirmée par l'utilisateur, l'empreinte (32 octets) est enregistrée 
 - `crates/hearth-link/src/adapters/tls.rs` : vérificateur rustls « épinglé » et vérificateur « sonde ».
 - `crates/hearth-link/src/manager/mod.rs::LinkManager::probe`.
 
+## Interface (coquille et vue)
+- `apps/desktop/src-tauri/src/link.rs::LinkRuntime::add_and_login` : l'empreinte confirmée par l'utilisateur est enregistrée au carnet (`servers.json`) avec le serveur, quand sa première connexion réussit (`LinkManager::add_and_login`, contact épinglé sur cette empreinte) ; `::probe` ne l'enregistre pas et la coquille ne confirme qu'une empreinte qu'une de ses sondes a lue à cette adresse.
+- Tests : `apps/desktop/src-tauri/tests/link_runtime.rs::the_wizard_registers_only_on_a_successful_login_then_remembers_forgets_and_removes`, `crates/hearth-link/tests/pinning.rs::a_server_is_registered_only_when_its_first_login_succeeds`.
+
 ## Vérification
 - Tests : `domain::pinning::tests`, `adapters::tls::tests` ; intégration : `tests/fault_proxy.rs::a_reinstalled_agent_is_refused_by_the_pinned_fingerprint`, `tests/pinning.rs`.
 
@@ -30,3 +34,4 @@ Une fois confirmée par l'utilisateur, l'empreinte (32 octets) est enregistrée 
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 : section Interface (HRT-10).

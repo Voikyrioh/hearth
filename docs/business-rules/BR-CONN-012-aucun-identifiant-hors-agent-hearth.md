@@ -17,6 +17,9 @@ Un serveur n'est reconnu comme agent Hearth que si son `/hello` annonce `product
 - `crates/hearth-link/src/domain/agent_identity.rs::check_product`.
 - Appelée par `crates/hearth-link/src/adapters/http_transport.rs` (`Transport::hello`), que `LinkManager::probe` et `LinkManager::login` utilisent avant tout envoi d'identifiant.
 
+## Interface (coquille et vue)
+- `apps/desktop/src-tauri/src/link_dto.rs::LinkFailure::NotAgent` ; texte « Cette adresse ne répond pas comme un agent Hearth. Vérifie l'adresse. » sous le champ de l'adresse (`composables/useAddServer.ts`).
+
 ## Vérification
 - Tests : `domain::agent_identity::tests::only_the_hearth_product_name_is_an_agent` ; `crates/hearth-link/tests/pinning.rs::the_probe_of_something_that_is_not_an_agent_fails_cleanly`.
 
@@ -28,3 +31,4 @@ Un serveur n'est reconnu comme agent Hearth que si son `/hello` annonce `product
 
 ## Historique
 - 2026-10-05 — création (HRT-07, review Stephen round 1).
+- 2026-10-05 : section Interface (HRT-10).

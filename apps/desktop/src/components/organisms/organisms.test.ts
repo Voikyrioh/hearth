@@ -17,6 +17,8 @@ async function mountRail(path = "/") {
     routes: [
       { path: "/", name: "home", component: stub },
       { path: "/settings", name: "settings", component: stub },
+      { path: "/servers/new", name: "add-server", component: stub },
+      { path: "/servers", name: "servers", component: stub },
       { path: "/servers/:id/dashboard", name: "dashboard", component: stub },
     ],
   });
@@ -63,11 +65,29 @@ describe("ServerRail", () => {
     expect(labels).toEqual(["forge, Connecté", "nas-salon, Hors ligne"]);
   });
 
-  it("keeps the add button inactive with an explanation until the wizard exists", async () => {
+  it("opens the add-server wizard and the server book from the rail", async () => {
     const { wrapper } = await mountRail();
-    const add = wrapper.get('button[aria-label="Ajouter un serveur"]');
-    expect(add.attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get('[role="tooltip"]').text()).toBe("Bientôt disponible");
+    expect(wrapper.get('a[aria-label="Ajouter un serveur"]').attributes("href")).toBe(
+      "/servers/new",
+    );
+    expect(wrapper.get('a[aria-label="Mes serveurs"]').attributes("href")).toBe("/servers");
+  });
+
+  it("hides the server book link while no server is registered", async () => {
+    const ctx = await mountContext({ servers: [] });
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", name: "home", component: stub },
+        { path: "/servers/new", name: "add-server", component: stub },
+        { path: "/servers", name: "servers", component: stub },
+        { path: "/settings", name: "settings", component: stub },
+      ],
+    });
+    await router.push("/");
+    const wrapper = mount(ServerRail, { global: { plugins: [ctx.pinia, router] } });
+    expect(wrapper.find('a[aria-label="Mes serveurs"]').exists()).toBe(false);
+    expect(wrapper.find('a[aria-label="Ajouter un serveur"]').exists()).toBe(true);
   });
 
   it("moves the focus with the arrow keys, wrapping around", async () => {
@@ -95,8 +115,12 @@ describe("ServerNav", () => {
       id: "forge",
       name: "forge",
       address: "192.168.1.120",
+      host: "192.168.1.120",
+      port: 7341,
       color: 1,
       role,
+      username: "marie",
+      remember: true,
     } as const;
     return mount(ServerNav, { props: { server }, global: ctx.global });
   }
