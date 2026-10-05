@@ -12,7 +12,8 @@
     "lint": "biome check . && node scripts/check-style.mjs",
     "format": "biome check --write .",
     "test": "vitest run",
-    "e2e": "npm run build && playwright test",
+    "e2e": "npm run build && npm run build:e2e && playwright test",
+    "build:e2e": "vite build --mode e2e --outDir dist-e2e",
     "check:dist": "node scripts/check-dist.mjs",
     "tauri": "tauri"
   },

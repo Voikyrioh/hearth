@@ -6,6 +6,7 @@
       "!**/src/bindings.ts",
       "!**/src-tauri",
       "!**/dist",
+      "!**/dist-e2e",
       "!**/test-results",
       "!**/playwright-report",
       "!**/e2e/screenshots"

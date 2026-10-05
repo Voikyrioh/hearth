@@ -7,6 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
 // Aucune coquille Tauri, aucun réseau. Ports : 1420 (celui de `vite.config.ts`) et 4173.
 const DEV_PORT = 1420;
 const PROD_PORT = 4173;
+const PROD_E2E_PORT = 4174;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -30,6 +31,13 @@ export default defineConfig({
       testMatch: "prod.spec.ts",
       use: { baseURL: `http://localhost:${PROD_PORT}` },
     },
+    {
+      // Build de production de TEST (`--mode e2e`, dossier `dist-e2e`) : même code que le livré
+      // plus une page de diagnostic dont le rendu plante, absente du build livré.
+      name: "prod-e2e",
+      testMatch: "prod-crash.spec.ts",
+      use: { baseURL: `http://localhost:${PROD_E2E_PORT}` },
+    },
   ],
   webServer: [
     {
@@ -41,6 +49,12 @@ export default defineConfig({
     {
       command: `npm run preview -- --port ${PROD_PORT} --strictPort`,
       url: `http://localhost:${PROD_PORT}`,
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+    {
+      command: `npm run preview -- --outDir dist-e2e --port ${PROD_E2E_PORT} --strictPort`,
+      url: `http://localhost:${PROD_E2E_PORT}`,
       reuseExistingServer: true,
       timeout: 60_000,
     },

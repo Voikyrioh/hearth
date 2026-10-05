@@ -66,6 +66,17 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
         ],
       },
       { path: "/settings", name: "settings", component: Settings },
+      // Page de diagnostic du build de test seulement (`--mode e2e`) : la condition est une
+      // constante de build, la route et sa page disparaissent du build livré.
+      ...(import.meta.env.MODE === "e2e"
+        ? [
+            {
+              path: "/diagnostic-crash",
+              name: "diagnostic-crash",
+              component: () => import("@/diagnostics/CrashPage.vue"),
+            },
+          ]
+        : []),
       { path: "/:pathMatch(.*)*", redirect: { name: "home" } },
     ],
   });
