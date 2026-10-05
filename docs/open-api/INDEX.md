@@ -2,7 +2,7 @@
 
 Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête `Authorization: Bearer …`.
 
-23 endpoints : session, comptes, mesures, audit, mises à jour.
+24 endpoints : session, comptes, mesures, audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
@@ -23,8 +23,9 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Comptes** | DELETE | [`/accounts/{id}/sessions`](./accounts.md) | admin | Fermer toutes les sessions du compte |
 | **Audit** | GET | [`/audit?filters…`](./audit.md) | admin | Journal d'activité (filtres, recherche plein texte, pagination curseur) |
 | **Audit** | GET | [`/audit/export?filters…`](./audit.md) | admin | Journal CSV (UTF-8 BOM, `;` séparateur) |
-| **Mise à jour** | GET | `/agent/update` | user+ | Statut mise à jour (courant, en cours, dernier résultat) |
-| **Mise à jour** | POST | `/agent/update` | admin | Lancer mise à jour (URL, signature minisign) |
+| **Mise à jour** | GET | [`/agent/update`](./agent-update.md) | user+ | Statut mise à jour (version, installation gérée, en cours, dernier résultat) |
+| **Mise à jour** | GET | [`/agent/update/last`](./agent-update.md) | user+ | Dernier résultat (survit au redémarrage de l'agent) |
+| **Mise à jour** | POST | [`/agent/update`](./agent-update.md) | admin | Lancer la mise à jour (version, URL HTTPS, signature minisign, somme SHA-256) : `202`, suivi par le flux |
 | **CLI** | `hearth-agent install` | — | — | Installation interactive (env var override) |
 | **CLI** | `hearth-agent uninstall` | — | — | Désinstallation |
 | **CLI** | `hearth-agent account` | — | — | Sous-cmds : add, list, passwd, role, remove, revoke |
@@ -38,6 +39,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - `401 SESSION_REVOKED` : session révoquée
 - `403 FORBIDDEN_ROLE` : rôle insuffisant
 - `409 OPERATION_IN_PROGRESS` : opération en cours (ex. mise à jour)
+- `409 MANAGED_INSTALL` : installation gérée par le système, pas de mise à jour à distance ; `422 BAD_SIGNATURE` : signature de mise à jour refusée : voir [mise à jour de l'agent](./agent-update.md)
 - `422 VALIDATION_ERROR` : paramètre invalide (détails champ)
 - `426 INCOMPATIBLE_VERSION` : client/agent incompatibles
 - `429 TOO_MANY_ATTEMPTS` : trop de tentatives (login verrouillé), `details.retry_after_s`
@@ -54,4 +56,4 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - Client : `X-Hearth-Client: poste/version` (nom du poste, retenu avec la session).
 - Accès : chaque route est déclarée dans `ENDPOINTS` (`entrypoint/http/mod.rs`) avec son niveau (public, authentifié, administrateur, ou « premier message » pour le flux, qui s'authentifie lui-même) son suivi par clé et son action de journal (les refus et les échecs sont consignés par la couche d'accès) ; le routeur pose la couche d'accès depuis la table et un test de balayage vérifie que les routes réservées refusent l'appelant sans droit.
 - Réponses : succès = corps JSON propre à la route, sans enveloppe (ex. `/hello`) ; échec = `{ error: { code, message, details } }` (`hearth-proto::error::ErrorBody`).
-- Fiches de route détaillées : [hello](./hello.md), [sessions](./sessions.md), [comptes](./accounts.md), [opérations](./operations.md), [machine](./machine.md), [historique des mesures](./metrics.md), [flux temps réel](./stream.md), [journal](./audit.md).
+- Fiches de route détaillées : [mise à jour de l'agent](./agent-update.md), [hello](./hello.md), [sessions](./sessions.md), [comptes](./accounts.md), [opérations](./operations.md), [machine](./machine.md), [historique des mesures](./metrics.md), [flux temps réel](./stream.md), [journal](./audit.md).

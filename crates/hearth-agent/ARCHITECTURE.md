@@ -41,6 +41,16 @@ tests/account_cli.rs → Intégration : le vrai binaire lancé en processus sur 
 tests/install_flow.rs → Intégration : installation et désinstallation sur une machine simulée (ports remplacés par des doubles qui tiennent l'état) : messages, état après chaque étape qui échoue ou est interrompue ; le bout en bout réel est `cargo xtask e2e-install`
 ```
 
+## Mise à jour de l'agent à distance (HRT-17)
+
+Règles `BR-UPDATE-011` à `019` et `024`, ADR-0014, contrat `docs/open-api/agent-update.md`, runbook `docs/runbooks/mettre-a-jour-agent.md`.
+
+- `domain/update/` : `target.rs` (`plan_update` : installation gérée, déjà en cours, cible valable : version plus récente, URL HTTPS sans identifiant, somme), `progress.rs` (`PercentTracker`), `supervise.rs` (`check_verdict` : 60 s, nouvelle version et même certificat), `record.rs` (`Job`, `SupervisorState`, `UpdateRecord` : ce que la mise à jour écrit dans `update/`, sans secret). `domain/install/files.rs` : **source unique des noms de fichiers** (identité, base, `update/…`, temporaires), lue par l'écriture et par la purge.
+- `application/update.rs` (`UpdateService` : `start` rend `202`, tâche détachée : téléchargement en mémoire, somme, signature, dépôt, copie du superviseur, travail, lancement ; `resume` au démarrage annonce le résultat une fois ; `status`, `last`, `subscribe`) et `application/update_supervisor.rs` (`Supervisor::run` : arrêt, échange atomique, redémarrage, contrôle, `roll_back`). Ports : `application/ports/update.rs` (`Downloader`, `SignatureVerifier`, `UpdateHost`, `HelloProbe`, `UpdateFeed`) ; l'échange réutilise `InstallHost::{install_binary, restore_binary}`.
+- `infrastructure/update/` : `download.rs` (`HttpsDownloader` : reqwest, rustls + `ring`, TLS 1.3, magasin de certificats du système, redirections en HTTPS seulement), `minisign.rs` (`MinisignVerifier`, clé embarquée), `host.rs` (`FsUpdateHost` : dossier `update/` 0700, verrou de fichier, `systemd-run`), `feed.rs`. `infrastructure/install/probe.rs::AgentHelloProbe` (le contrôle du superviseur).
+- `entrypoint/http/update.rs` (`GET /agent/update`, `GET /agent/update/last`, `POST /agent/update` en `Access::Admin`) ; sujet `update` du flux dans `entrypoint/ws/connection.rs` ; sous-commande cachée `update-supervise` (`entrypoint/cli.rs`) exécutée par `app/update.rs::run_supervisor`.
+- `build_info.rs` : la version, en un seul endroit. `build.rs` embarque `update-key.pub` (ou `HEARTH_UPDATE_PUBKEY_FILE`, tests de bout en bout seulement).
+
 ## Conventions
 
 - **Le cas d'usage rend une structure applicative ; `entrypoint/http` la convertit en type du fil de `hearth-proto`.** `application` ne connaît jamais le contrat JSON.

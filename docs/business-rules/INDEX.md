@@ -103,6 +103,25 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-DASH-014](./BR-DASH-014-formats-d-unites.md) — Les nombres suivent les unités : pourcentages entiers, Go à une décimale, débit adaptatif, durée longue — `hearth-proto/src/api/metrics.rs` — —
 - [BR-DASH-015](./BR-DASH-015-interfaces-reseau-comptees.md) — Seules les interfaces réseau physiques comptent dans le débit — `domain/machine.rs::throughput_interfaces` — invariant ✓
 
+### UPDATE (agent, HRT-17)
+
+- [BR-UPDATE-011](./BR-UPDATE-011-seul-admin-met-a-jour-agent.md) — Seul un administrateur déclenche la mise à jour de l'agent — `entrypoint/http/mod.rs::ENDPOINTS` — invariant ✓
+- [BR-UPDATE-012](./BR-UPDATE-012-une-seule-mise-a-jour-a-la-fois.md) — Une seule mise à jour de l'agent à la fois — `domain/update/target.rs::plan_update` — invariant ✓
+- [BR-UPDATE-013](./BR-UPDATE-013-avancement-visible-etape-par-etape.md) — Une mise à jour de l'agent est visible étape par étape — `domain/update/progress.rs::PercentTracker` — invariant ✓
+- [BR-UPDATE-014](./BR-UPDATE-014-etape-redemarrage-annoncee.md) — L'étape « redémarrage » est annoncée avant l'arrêt de l'agent — `application/update.rs::UpdateService::{execute, progress, resume}` — invariant ✗
+- [BR-UPDATE-015](./BR-UPDATE-015-retour-automatique-si-le-nouvel-agent-ne-repond-pas.md) — Retour automatique si le nouvel agent ne répond pas dans les 60 secondes — `domain/update/supervise.rs::check_verdict` — invariant ✓
+- [BR-UPDATE-016](./BR-UPDATE-016-pas-de-relance-apres-une-mise-a-jour-annulee.md) — Une mise à jour annulée n'est pas relancée automatiquement — `application/update.rs::UpdateService::{resume, report_pending, report}` — invariant ✗
+- [BR-UPDATE-017](./BR-UPDATE-017-la-mise-a-jour-continue-malgre-la-coupure.md) — La mise à jour continue côté serveur malgré une coupure réseau — `application/update.rs::UpdateService::{start, last, status}` — invariant ✓
+- [BR-UPDATE-018](./BR-UPDATE-018-comptes-journal-empreinte-survivent.md) — Comptes, journal et empreinte survivent à la mise à jour — `application/update_supervisor.rs::Supervisor::{run, ask}` — invariant ✓
+- [BR-UPDATE-019](./BR-UPDATE-019-serveur-sans-internet.md) — Serveur sans accès à Internet : l'agent actuel continue de fonctionner — `infrastructure/update/download.rs::{HttpsDownloader::fetch, map_error}` — invariant ✗
+- [BR-UPDATE-024](./BR-UPDATE-024-refus-de-mise-a-jour-consignes-au-journal.md) — Les refus de mise à jour sont consignés au journal d'activité — `entrypoint/http/auth.rs::{guard, failure_of}` — invariant ✗
+
+- [BR-UPDATE-027](./BR-UPDATE-027-adresse-de-telechargement-publique-et-https.md) — Le serveur ne télécharge qu'en HTTPS, depuis une adresse publique — `domain/update/target.rs::{is_local_address, plan_update}` — invariant ✓
+- [BR-UPDATE-028](./BR-UPDATE-028-travail-de-mise-a-jour-laisse-en-cours.md) — Un travail de mise à jour laissé en cours est conclu au démarrage — `domain/update/orphan.rs::classify_orphan` — invariant ✓
+- [BR-UPDATE-029](./BR-UPDATE-029-retour-arriere-ne-laisse-pas-une-base-migree.md) — Un retour arrière ne laisse jamais un ancien binaire devant une base déjà migrée — `application/update_supervisor.rs::Supervisor::{run, roll_back}` — invariant ✓
+
+Les règles BR-UPDATE-001 à 010 et 020 à 023, 025, 026 concernent le client (HRT-16, HRT-18) : fiches à venir. Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée).
+
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
 | **INSTALL** | Installation agent : déploiement, service système, génération certificat | 12 | us-installer-agent |
@@ -112,7 +131,7 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 | **RESIL** | Résilience du lien : reconnexion, opérations idempotentes, instantanés, affichage état | 20 | us-lien-resilient |
 | **ACCT** | Gestion comptes : création, suppression, rôles, mots de passe, dernier administrateur | 16 | us-gerer-comptes |
 | **AUDIT** | Journal d'activité : logging, filtrage, recherche FTS5, purge, export CSV | 21 | us-journal-activite |
-| **UPDATE** | Mises à jour agent et client : flux de versions, signatures minisign, superviseur, rollback | 26 | us-mises-a-jour |
+| **UPDATE** | Mises à jour agent et client : flux de versions, signatures minisign, superviseur, rollback | 29 (13 côté agent livrées : 011 à 019, 024, 027 à 029) | us-mises-a-jour |
 
 ## Comment documenter une règle
 

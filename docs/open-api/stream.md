@@ -15,6 +15,10 @@ Flux temps réel : l'identité et l'historique de la machine, puis un échantill
 4. La session est revérifiée toutes les 5 s. Si le rôle a changé (un administrateur rétrogradé), l'abonnement `audit` est retiré avec un message `error` `FORBIDDEN_ROLE`. Si la session est révoquée ou expire, l'agent envoie `{"type":"session","kind":"revoked"}` ou `{"type":"session","kind":"expired"}`, puis ferme (`1008`).
 5. À l'arrêt de l'agent : fermeture propre, code `1001`.
 
+## Sujet `update` (HRT-17)
+
+Le sujet `update` (tout compte authentifié) diffuse la progression d'une mise à jour de l'agent à distance (BR-UPDATE-013). À l'abonnement, l'état courant s'il y a une mise à jour en cours ; puis `{"type":"update","version":"0.2.0","step":"download","percent":35,"outcome":null,"reason":null}` à chaque changement d'étape ou de pourcentage entier, et à la fin `step: "done"` avec `outcome` et `reason`. Ce type n'est pas un `ServerMessage` : un client qui ne le connaît pas l'ignore. Détails : [agent-update.md](./agent-update.md).
+
 ## Messages client → agent
 
 | `type` | Champs | Rôle |
