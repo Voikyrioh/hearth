@@ -23,6 +23,7 @@ Quand l'agent répond `SESSION_EXPIRED` (au retour du lien ou par un message `se
 
 ## Cas limites
 - La reconnexion silencieuse est une tentative comme une autre : si le serveur est injoignable, elle est retentée avec les mêmes délais.
+- Si la session toute neuve est refusée aussitôt (`SESSION_EXPIRED` juste après la reconnexion), la reconnexion silencieuse n'est pas relancée en boucle serrée : elle suit les délais de reconnexion (test : `domain::state::tests::a_new_session_refused_at_once_is_retried_with_the_delays_not_in_a_tight_loop`).
 
 ## Règles liées
 - BR-RESIL-012, BR-RESIL-014.

@@ -629,6 +629,36 @@ fn a_silent_reconnection_that_cannot_reach_the_server_keeps_the_reauth_step() {
 }
 
 #[test]
+fn a_new_session_refused_at_once_is_retried_with_the_delays_not_in_a_tight_loop() {
+    let mut rig = Rig::connected();
+    rig.send_at(5_000, Input::SessionExpired { can_reauth: true });
+    rig.send_at(5_100, Input::Reauthenticated);
+    // Le serveur refuse déjà la session qu'il vient de donner.
+    let effects = rig.send_at(5_200, Input::SessionExpired { can_reauth: true });
+    assert!(effects.is_empty(), "{effects:?}");
+    assert_eq!(
+        rig.machine.status().next_retry_at,
+        Some(Mono::from_millis(5_200 + 500))
+    );
+    let before = rig.count(Effect::Reauthenticate);
+    rig.advance_to(5_699);
+    assert_eq!(rig.count(Effect::Reauthenticate), before);
+    rig.advance_to(5_700);
+    assert_eq!(
+        rig.count(Effect::Reauthenticate),
+        before + 1,
+        "reconnexion silencieuse retentée"
+    );
+    // Et la fois suivante, le délai a doublé.
+    rig.send_at(5_800, Input::Reauthenticated);
+    rig.send_at(5_900, Input::SessionExpired { can_reauth: true });
+    assert_eq!(
+        rig.machine.status().next_retry_at,
+        Some(Mono::from_millis(5_900 + 1_000))
+    );
+}
+
+#[test]
 fn a_session_already_expired_does_not_become_expired_again_or_revoked_by_stale_events() {
     let mut rig = Rig::connected();
     rig.send_at(5_000, Input::SessionExpired { can_reauth: false });

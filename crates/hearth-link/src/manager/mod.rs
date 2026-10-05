@@ -129,9 +129,19 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
-    fn new(record: ServerRecord, last_known: Option<LastKnown>, wall: WallTime) -> Self {
+    fn new(
+        record: ServerRecord,
+        last_known: Option<LastKnown>,
+        wall: WallTime,
+        start: Start,
+    ) -> Self {
+        // L'état annoncé tout de suite, avant même que la tâche n'ait tourné.
         let initial = StateInfo {
-            state: LinkState::Offline,
+            state: match start {
+                Start::Connecting => LinkState::Reconnecting,
+                Start::SignedOut => LinkState::SessionExpired,
+                Start::Recovered => LinkState::Offline,
+            },
             blocked: None,
             since: wall,
             last_contact_at: record.last_contact_at,
@@ -458,9 +468,14 @@ impl LinkManager {
             }
             Ok(Ok(response)) => response,
         };
+        let mut response = response;
         let vault_error = |e: crate::ports::vault::VaultError| LinkError::Vault(e.0);
         deps.vault
-            .put(id, SecretKind::Token, &Secret::new(response.token.clone()))
+            .put(
+                id,
+                SecretKind::Token,
+                &Secret::new(std::mem::take(&mut response.token)),
+            )
             .map_err(vault_error)?;
         if remember {
             deps.vault
@@ -694,7 +709,7 @@ fn spawn_server(
     start: Start,
 ) {
     let id = record.id.clone();
-    let shared = Arc::new(Shared::new(record, last_known, deps.clock.wall()));
+    let shared = Arc::new(Shared::new(record, last_known, deps.clock.wall(), start));
     let (commands, join) = task::spawn(deps.clone(), shared.clone(), start);
     registry.lock().insert(
         id,

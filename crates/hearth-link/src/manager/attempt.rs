@@ -92,11 +92,14 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
     };
     // Les erreurs d'envoi sont lues par `recv` : un refus d'authentification arrive en message
     // `error` avant la fermeture, et c'est lui qu'on veut.
-    let _ = stream
-        .send(&ClientMessage::Auth {
-            token: token.expose().to_owned(),
-        })
-        .await;
+    let auth = ClientMessage::Auth {
+        token: token.expose().to_owned(),
+    };
+    let _ = stream.send(&auth).await;
+    // La copie du jeton faite pour le message est effacée dès qu'il est parti.
+    if let ClientMessage::Auth { mut token } = auth {
+        token.zeroize();
+    }
     let mut topics = vec![Topic::Metrics, Topic::Session];
     if deps.config.subscribe_audit {
         topics.push(Topic::Audit);
@@ -174,9 +177,9 @@ async fn reauthenticate_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
     let outcome = deps.transport.login(&shared.target(), &request).await;
     wipe(request);
     match outcome {
-        Ok(response) => {
-            let token = Secret::new(response.token.clone());
-            drop(response);
+        Ok(mut response) => {
+            // Le jeton passe dans un `Secret` sans copie : la réponse n'en garde rien.
+            let token = Secret::new(std::mem::take(&mut response.token));
             match deps.vault.put(&id, SecretKind::Token, &token) {
                 Ok(()) => AttemptResult::Reauthenticated,
                 Err(error) => {

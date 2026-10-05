@@ -102,3 +102,4 @@ Après reconnexion : `GET /operations/{id}` pour chacune ; timeout > 24 h → ab
 - **Démarrage** : avec une session mémorisée, l'état affiché est `Reconnecting` tout de suite (jamais un faux « Connecté ») ; sans session, `SessionExpired`.
 - **Supervision** : une panique dans la tâche d'un serveur est capturée, journalisée, comptée, et le lien repart `Offline` avec une nouvelle tentative.
 - **Opérations** : `running` est relu au plus 5 fois (500 ms d'écart), puis « résultat inconnu » ; `failed` (refus `4xx` retenu par l'agent) vaut « non exécuté » ; `interrupted` vaut « résultat inconnu » ; au-delà de 24 h, abandon en « résultat inconnu ».
+- **Reconnexion silencieuse** : si la session qu'on vient d'obtenir est refusée aussitôt, la reconnexion suit les délais de reconnexion au lieu de boucler.

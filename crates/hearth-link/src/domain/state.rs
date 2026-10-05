@@ -192,6 +192,10 @@ struct Outage {
     step: Step,
     in_flight: bool,
     next_attempt_at: Option<Mono>,
+    /// La reconnexion silencieuse vient de réussir et le flux n'est pas encore rouvert : une
+    /// nouvelle « session expirée » à ce stade n'est pas relancée sur-le-champ (boucle serrée
+    /// contre un serveur qui refuserait toujours), elle suit les délais.
+    reauthed: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -240,6 +244,7 @@ impl LinkMachine {
                     step: Step::Reconnect,
                     in_flight: false,
                     next_attempt_at: Some(now),
+                    reauthed: false,
                 }),
                 LinkState::Reconnecting,
             ),
@@ -252,6 +257,7 @@ impl LinkMachine {
                     step: Step::Reconnect,
                     in_flight: false,
                     next_attempt_at: Some(now),
+                    reauthed: false,
                 }),
                 LinkState::Offline,
             ),
@@ -419,6 +425,19 @@ impl LinkMachine {
             self.stop_trying(now, Phase::Expired, effects);
             return;
         }
+        if let Phase::Down(mut outage) = self.phase
+            && outage.reauthed
+        {
+            // La session toute neuve est déjà refusée : on ne boucle pas, on suit les délais.
+            let delay = self.backoff.next_delay((self.jitter)());
+            outage.step = Step::Reauth;
+            outage.in_flight = false;
+            outage.manual = false;
+            outage.reauthed = false;
+            outage.next_attempt_at = Some(now.after(delay));
+            self.phase = Phase::Down(outage);
+            return;
+        }
         // Reconnexion silencieuse : une coupure comme une autre, qui commence maintenant.
         let since = match self.phase {
             Phase::Down(outage) => outage.since,
@@ -435,6 +454,7 @@ impl LinkMachine {
             step: Step::Reauth,
             in_flight: true,
             next_attempt_at: None,
+            reauthed: false,
         });
         effects.push(Effect::Reauthenticate);
     }
@@ -446,6 +466,7 @@ impl LinkMachine {
             outage.step = Step::Reconnect;
             outage.in_flight = true;
             outage.next_attempt_at = None;
+            outage.reauthed = true;
             self.phase = Phase::Down(outage);
             effects.push(Effect::StartAttempt);
         }
@@ -493,6 +514,7 @@ impl LinkMachine {
             step: Step::Reconnect,
             in_flight: true,
             next_attempt_at: None,
+            reauthed: false,
         });
         effects.push(Effect::StartAttempt);
     }
@@ -507,6 +529,7 @@ impl LinkMachine {
             step: Step::Reconnect,
             in_flight: true,
             next_attempt_at: None,
+            reauthed: false,
         });
         effects.extend([
             Effect::CloseStream,
