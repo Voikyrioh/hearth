@@ -994,3 +994,19 @@ fn every_input_in_every_phase_is_handled_without_panicking_or_spinning() {
         }
     }
 }
+
+#[test]
+fn a_silent_reauthentication_does_not_forget_that_the_pc_already_woke() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::TransportFailed);
+    rig.run_failing_until(10_001);
+    rig.send_at(20_000, Input::Woke);
+    rig.send_at(20_100, Input::SessionExpired { can_reauth: true });
+    let since = rig.machine.status().since;
+    rig.send_at(40_000, Input::Woke);
+    assert_eq!(
+        rig.machine.status().since,
+        since,
+        "un seul report par coupure, même après une session expirée"
+    );
+}

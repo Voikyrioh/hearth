@@ -22,6 +22,9 @@ pub enum LinkError {
     /// Le suivi de l'action n'a pas pu être écrit sur disque : l'action n'a PAS été lancée.
     #[error("suivi impossible : l'action n'a pas été lancée")]
     TrackingUnavailable,
+    /// Le disque n'a pas écrit le suivi à temps : l'action n'a PAS été lancée.
+    #[error("disque trop lent : l'action n'a pas été lancée")]
+    TrackingSlow,
     #[error("l'empreinte du serveur a changé")]
     FingerprintChanged,
     #[error("versions incompatibles")]

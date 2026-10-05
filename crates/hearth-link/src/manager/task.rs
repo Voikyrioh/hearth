@@ -76,6 +76,8 @@ enum Internal {
     /// Le suivi n'a pas pu être écrit sur disque à temps : la requête n'est PAS partie.
     NotSent {
         id: OperationId,
+        /// L'écriture n'a pas fini dans le délai (disque trop lent), plutôt qu'échoué.
+        slow: bool,
     },
 }
 
@@ -511,7 +513,7 @@ impl Runner {
         match message {
             Internal::OpResponse { id, result } => self.on_op_response(id, result).await,
             Internal::Lookup { id, lookup } => self.on_lookup(id, lookup),
-            Internal::NotSent { id } => self.on_not_sent(&id),
+            Internal::NotSent { id, slow } => self.on_not_sent(&id, slow),
         }
     }
 
@@ -754,9 +756,18 @@ impl Runner {
         let sender = self.internal_tx.clone();
         let operation = key.clone();
         let task = tokio::spawn(async move {
-            if !matches!(timeout(persist_timeout, written).await, Ok(Ok(true))) {
-                let _ = sender.send(Internal::NotSent { id: operation }).await;
-                return;
+            match timeout(persist_timeout, written).await {
+                Ok(Ok(true)) => {}
+                outcome => {
+                    let slow = outcome.is_err();
+                    let _ = sender
+                        .send(Internal::NotSent {
+                            id: operation,
+                            slow,
+                        })
+                        .await;
+                    return;
+                }
             }
             // Le seul délai de requête : la tâche borne elle-même l'appel au transport.
             let call = async {
@@ -848,9 +859,26 @@ impl Runner {
     }
 
     /// Le suivi n'a pas pu être écrit : l'action n'est pas partie, l'appelant le sait.
-    fn on_not_sent(&mut self, id: &OperationId) {
-        if let Some(waiter) = self.waiters.remove(id) {
-            let _ = waiter.reply.send(Err(LinkError::TrackingUnavailable));
+    fn on_not_sent(&mut self, id: &OperationId, slow: bool) {
+        match self.waiters.remove(id) {
+            Some(waiter) => {
+                let error = if slow {
+                    LinkError::TrackingSlow
+                } else {
+                    LinkError::TrackingUnavailable
+                };
+                let _ = waiter.reply.send(Err(error));
+            }
+            None => {
+                // Le lien est tombé pendant l'écriture : l'appelant a déjà reçu « résultat
+                // inconnu » avec cette clé. La requête n'est jamais partie : on le lui dit
+                // (« Non exécuté, tu peux relancer ») au lieu de laisser l'issue manquante.
+                self.deps.sink.emit(Event::Operation {
+                    server: self.id.clone(),
+                    id: id.clone(),
+                    outcome: Outcome::NotExecuted,
+                });
+            }
         }
         self.pending.complete(id);
         self.persist_operations();

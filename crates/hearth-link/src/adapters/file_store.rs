@@ -227,7 +227,16 @@ impl OperationStore for FileOperationStore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(LoadedOperations::default());
             }
-            Err(error) => return Err(io_error("lecture des opérations", &error)),
+            Err(error) => {
+                // Illisible (droits, partage, disque) : mis de côté comme un fichier abîmé, sans
+                // quoi la prochaine écriture l'écraserait sans trace.
+                tracing::warn!(file = %path.display(), error = %error.kind(), "opérations en suspens non lues, mises de côté");
+                set_aside(&path).await;
+                return Ok(LoadedOperations {
+                    operations: Vec::new(),
+                    damaged: true,
+                });
+            }
         };
         let parsed: Result<Vec<Value>, _> = serde_json::from_slice(&bytes);
         let Ok(entries) = parsed else {
@@ -396,6 +405,22 @@ mod tests {
         assert_eq!(store.load(&id).await.unwrap(), None);
         store.remove(&id).await.unwrap();
         store.remove(&id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_operations_file_that_cannot_be_read_is_set_aside_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("operations");
+        let store = FileOperationStore::new(&folder);
+        let id = ServerId::parse("a").unwrap();
+        // Un dossier à la place du fichier : la lecture échoue autrement que par « absent ».
+        tokio::fs::create_dir_all(folder.join("a.json"))
+            .await
+            .unwrap();
+        let loaded = store.load(&id).await.unwrap();
+        assert!(loaded.operations.is_empty() && loaded.damaged);
+        assert!(folder.join("a.json.corrupt").exists());
+        assert!(!folder.join("a.json").exists());
     }
 
     #[tokio::test]
