@@ -13,6 +13,9 @@ REPO="Voikyrioh/hearth"
 BINARY=""
 URL="${HEARTH_RELEASE_URL:-}"
 SHA256="${HEARTH_SHA256:-}"
+# D'où vient la somme : « given » (donnée par l'utilisateur) ou « origin » (publiée à côté du
+# binaire, par la même origine : elle couvre un téléchargement abîmé, pas une origine compromise).
+SHA256_SOURCE="given"
 WORKDIR=""
 
 say() {
@@ -93,6 +96,35 @@ make_workdir() {
     fail "Aucun dossier temporaire où exécuter le binaire (/tmp, /var/tmp, /root et /usr/local/lib sont absents, protégés ou montés sans droit d'exécution). Fournis un binaire avec --binary : il sera lancé depuis sa place."
 }
 
+# FIX:01M460G91CSXXRV2Q34FXQBYMT
+# `wget --https-only` ne vaut qu'en mode récursif : une redirection de https vers http serait
+# suivie. wget ne suit donc aucune redirection (`--max-redirect=0`) ; elles sont suivies ici, une
+# à une, et chacune doit être en HTTPS. Rend 0 si abouti, 2 si l'adresse n'existe pas (404), 1 sinon.
+wget_https_only() {
+    url="$1"
+    hops=0
+    while [ "$hops" -le 5 ]; do
+        case "$url" in
+            https://*) ;;
+            *) return 1 ;;
+        esac
+        headers="$WORKDIR/wget.headers"
+        if wget -nv -S --max-redirect=0 -T 15 -O "$2" "$url" 2>"$headers"; then
+            return 0
+        fi
+        location="$(grep -i '^ *Location:' "$headers" | tail -n 1 | sed 's/^ *[Ll]ocation: *//' | tr -d '\r')"
+        if [ -z "$location" ]; then
+            if grep -q ' 404 ' "$headers"; then
+                return 2
+            fi
+            return 1
+        fi
+        url="$location"
+        hops=$((hops + 1))
+    done
+    return 1
+}
+
 # Téléchargement en HTTPS seulement, redirections comprises et bornées. Rend 0 si abouti, 2 si
 # l'adresse n'existe pas (404), 1 sinon.
 download() {
@@ -109,8 +141,8 @@ download() {
             *) return 1 ;;
         esac
     elif command -v wget >/dev/null 2>&1; then
-        wget -q --https-only --max-redirect=5 -T 15 -O "$2" "$1" 2>/dev/null || return 1
-        return 0
+        wget_https_only "$1" "$2"
+        return $?
     fi
     fail "Ni curl ni wget : téléchargement impossible. Fournis un binaire avec --binary."
 }
@@ -201,6 +233,7 @@ $1"
             download "$URL.sha256" "$WORKDIR/expected.sha256" || status=$?
             if [ "$status" -eq 0 ]; then
                 SHA256="$(cut -d ' ' -f 1 "$WORKDIR/expected.sha256" | head -n 1)"
+                SHA256_SOURCE="origin"
             elif [ "$status" -eq 2 ]; then
                 fail "Aucune somme SHA-256 n'est fournie ni publiée à côté du binaire ($URL.sha256), et aucune version de l'agent n'est peut-être publiée à cette adresse (la publication des versions n'est pas encore disponible). Rien n'est téléchargé : un binaire lancé en root ne s'installe pas sans vérification. Donne la somme avec --sha256, ou fournis un binaire avec --binary. Aucune modification n'a été apportée à ta machine."
             else
@@ -234,7 +267,11 @@ $1"
         if [ "$actual" != "$expected" ]; then
             fail "La somme SHA-256 du binaire ne correspond pas (attendue $expected, trouvée $actual). Installation abandonnée, aucune modification n'a été apportée à ta machine."
         fi
-        say "Somme SHA-256 vérifiée."
+        if [ "$SHA256_SOURCE" = "origin" ]; then
+            say "Somme SHA-256 vérifiée, mais elle vient de la même adresse que le binaire : elle écarte un téléchargement abîmé, pas une origine compromise. Pour t'en garantir, donne-la toi-même avec --sha256."
+        else
+            say "Somme SHA-256 vérifiée (celle que tu as donnée)."
+        fi
     else
         say "Attention : ce binaire local n'a pas de somme SHA-256 à comparer, il n'est pas vérifié. Il va être lancé avec les droits d'administration : interromps maintenant (Ctrl+C) si tu ne lui fais pas confiance."
     fi
