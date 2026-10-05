@@ -6,6 +6,14 @@
 
 pub mod adapters;
 pub mod domain;
+pub mod error;
+pub mod manager;
 pub mod ports;
 
 pub use hearth_proto::version::API_VERSION;
+
+pub use error::LinkError;
+pub use manager::{
+    ActionOutcome, ActionRequest, EventStream, LinkConfig, LinkManager, LoginInfo, NewServer,
+    Ports, ProbeResult,
+};

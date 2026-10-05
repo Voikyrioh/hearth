@@ -172,6 +172,18 @@ impl PendingOps {
         self.ops.remove(id).is_some()
     }
 
+    /// Une seule opération en vol devient « résultat inconnu » (sa requête a échoué sans que le
+    /// flux soit tombé). Vrai si elle était en vol.
+    pub fn mark_unknown(&mut self, id: &OperationId) -> bool {
+        match self.ops.get_mut(id) {
+            Some(op) if op.phase == Phase::InFlight => {
+                op.phase = Phase::Unknown;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Le lien est tombé : toutes les opérations en vol passent à « résultat inconnu ».
     /// Rend celles qui viennent de basculer.
     pub fn link_lost(&mut self) -> Vec<OperationId> {
@@ -289,6 +301,17 @@ mod tests {
         // Une seconde perte ne re-signale pas ce qui est déjà inconnu.
         assert!(ops.link_lost().is_empty());
         assert_eq!(ops.to_resolve(), vec![id("A")]);
+    }
+
+    #[test]
+    fn one_operation_can_become_unknown_alone() {
+        let mut ops = pending_with("A");
+        ops.register(id("B"), "x".into(), T0).unwrap();
+        assert!(ops.mark_unknown(&id("A")));
+        assert!(!ops.mark_unknown(&id("A")), "déjà inconnue");
+        assert!(!ops.mark_unknown(&id("Z")), "inconnue du suivi");
+        assert_eq!(ops.to_resolve(), vec![id("A")]);
+        assert_eq!(ops.get(&id("B")).unwrap().phase, Phase::InFlight);
     }
 
     #[test]

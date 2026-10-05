@@ -44,16 +44,6 @@ impl StateInfo {
             failed_attempts: status.failed_attempts,
         }
     }
-
-    /// Ce qui compte pour décider d'annoncer un changement : tout sauf le dernier contact, qui
-    /// bouge à chaque message.
-    pub fn same_display(&self, other: &Self) -> bool {
-        self.state == other.state
-            && self.blocked == other.blocked
-            && self.since == other.since
-            && self.next_retry_at == other.next_retry_at
-            && self.failed_attempts == other.failed_attempts
-    }
 }
 
 /// Date murale d'un instant monotone, par rapport à « maintenant ».
@@ -135,27 +125,5 @@ mod tests {
             to_wall(Mono::from_millis(12_500), now, wall),
             WallTime::from_millis(1_002_500)
         );
-    }
-
-    #[test]
-    fn the_last_contact_alone_is_not_a_display_change() {
-        let base = StateInfo {
-            state: LinkState::Connected,
-            blocked: None,
-            since: WallTime::from_millis(1),
-            last_contact_at: Some(WallTime::from_millis(5)),
-            next_retry_at: None,
-            failed_attempts: 0,
-        };
-        let later = StateInfo {
-            last_contact_at: Some(WallTime::from_millis(9)),
-            ..base
-        };
-        assert!(base.same_display(&later));
-        let offline = StateInfo {
-            state: LinkState::Offline,
-            ..base
-        };
-        assert!(!base.same_display(&offline));
     }
 }

@@ -39,6 +39,8 @@ pub struct Thresholds {
     pub silence: Duration,
     pub reconnecting_after: Duration,
     pub offline_after: Duration,
+    /// Diviseur des délais de reconnexion : 1 en production, plus pour les tests rapides.
+    pub backoff_divisor: u32,
 }
 
 impl Default for Thresholds {
@@ -47,6 +49,21 @@ impl Default for Thresholds {
             silence: SILENCE,
             reconnecting_after: RECONNECTING_AFTER,
             offline_after: OFFLINE_AFTER,
+            backoff_divisor: 1,
+        }
+    }
+}
+
+impl Thresholds {
+    /// Tous les seuils et délais divisés par `divisor` : les mêmes scénarios, `divisor` fois plus
+    /// vite (tests de résilience).
+    pub fn scaled(divisor: u32) -> Self {
+        let divisor = divisor.max(1);
+        Self {
+            silence: SILENCE / divisor,
+            reconnecting_after: RECONNECTING_AFTER / divisor,
+            offline_after: OFFLINE_AFTER / divisor,
+            backoff_divisor: divisor,
         }
     }
 }
@@ -241,7 +258,7 @@ impl LinkMachine {
         };
         Self {
             thresholds,
-            backoff: Backoff::new(),
+            backoff: Backoff::scaled(thresholds.backoff_divisor),
             jitter,
             phase,
             shown,
