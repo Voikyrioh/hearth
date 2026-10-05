@@ -4,6 +4,7 @@ import { RouterView, useRoute } from "vue-router";
 import ErrorBoundary from "@/components/molecules/ErrorBoundary.vue";
 import AppHeader from "@/components/organisms/AppHeader.vue";
 import OfflineBanner from "@/components/organisms/OfflineBanner.vue";
+import ReconnectPanel from "@/components/organisms/ReconnectPanel.vue";
 import ServerNav from "@/components/organisms/ServerNav.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { t } from "@/i18n";
@@ -18,6 +19,7 @@ const route = useRoute();
 const servers = useServersStore();
 const link = useLinkStore();
 const { server, state, lastContactAt } = useCurrentServer();
+const event = computed(() => (server.value ? link.eventOf(server.value.id) : undefined));
 
 watch(
   () => route.params.id,
@@ -39,9 +41,18 @@ const title = computed(() => (route.meta.title ? t(route.meta.title) : ""));
       <OfflineBanner
         v-if="state === 'offline'"
         :last-contact-at="lastContactAt"
+        :blocked="event?.blocked ?? null"
         @retry="link.retryNow(server.id)"
+        @alert="link.reopenAlert(server.id)"
       />
       <div class="layout__content">
+        <!-- Sans session : le formulaire de connexion, au-dessus de la dernière vue (périmée). -->
+        <ReconnectPanel
+          v-if="state === 'session_expired' || state === 'access_revoked'"
+          :server="server"
+          :reason="event?.reason ?? null"
+          :revoked="state === 'access_revoked'"
+        />
         <ErrorBoundary :reset-key="route.fullPath"><RouterView /></ErrorBoundary>
       </div>
     </div>

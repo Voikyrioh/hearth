@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HLogo from "@/components/atoms/HLogo.vue";
 import ServerAvatar from "@/components/molecules/ServerAvatar.vue";
@@ -48,17 +47,25 @@ function isActive(id: string): boolean {
         :active="isActive(server.id)"
       />
     </RouterLink>
-    <!-- L'assistant d'ajout de serveur n'existe pas encore (ticket suivant). -->
-    <HButton
-      variant="ghost"
-      disabled
-      tip-placement="start"
-      :hint="t('welcome.addServerSoon')"
+    <RouterLink
+      class="rail__link rail__link--tool"
+      :to="{ name: 'add-server' }"
       :aria-label="t('rail.addServer')"
       data-rail-item
+      data-rail-add
     >
       <HIcon name="plus" />
-    </HButton>
+    </RouterLink>
+    <RouterLink
+      v-if="servers.servers.length > 0"
+      class="rail__link rail__link--tool"
+      :to="{ name: 'servers' }"
+      :aria-label="t('rail.servers')"
+      data-rail-item
+      data-rail-servers
+    >
+      <HIcon name="server" />
+    </RouterLink>
     <span class="rail__spacer" />
     <RouterLink
       class="rail__link rail__link--tool"

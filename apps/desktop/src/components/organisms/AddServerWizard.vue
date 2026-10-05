@@ -1,0 +1,225 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, ref } from "vue";
+import { RouterLink } from "vue-router";
+import HButton from "@/components/atoms/HButton.vue";
+import HInput from "@/components/atoms/HInput.vue";
+import ColorSwatches from "@/components/molecules/ColorSwatches.vue";
+import FingerprintBlock from "@/components/molecules/FingerprintBlock.vue";
+import StepTrail from "@/components/molecules/StepTrail.vue";
+import LoginForm from "@/components/organisms/LoginForm.vue";
+import { ADD_STEPS, useAddServer } from "@/composables/useAddServer";
+import { t } from "@/i18n";
+
+// Assistant d'ajout de serveur en 3 temps (adresse, empreinte, connexion). La logique est dans
+// `useAddServer` ; ici, seulement l'affichage. « Refuser » et « Annuler » rendent la main à la
+// page par `cancel` ; la connexion réussie par `done` avec l'identifiant du serveur.
+const emit = defineEmits<{ cancel: []; done: [serverId: string] }>();
+
+const wizard = useAddServer();
+const login = ref<InstanceType<typeof LoginForm> | null>(null);
+
+const stepIndex = computed(() => ADD_STEPS.indexOf(wizard.step.value));
+const stepNames = computed(() => [
+  t("connect.stepAddress"),
+  t("connect.stepFingerprint"),
+  t("connect.stepLogin"),
+]);
+const checking = computed(() => wizard.busy.value === "probe");
+
+async function onLogin(entry: { username: string; password: string; remember: boolean }) {
+  const id = await wizard.login(entry);
+  if (id) emit("done", id);
+  else login.value?.clearPassword();
+}
+
+async function cancel() {
+  await wizard.abandon();
+  emit("cancel");
+}
+
+function refuse() {
+  wizard.refuse();
+  emit("cancel");
+}
+
+// Quitter l'assistant (navigation) pendant le 3e temps : le serveur enregistré est retiré.
+onBeforeUnmount(() => void wizard.abandon());
+</script>
+
+<template>
+  <section class="wizard" :aria-labelledby="'wizard-title'">
+    <StepTrail :steps="stepNames" :current="stepIndex" :label="t('connect.stepsLabel')" />
+
+    <!-- Temps 1 : nom, adresse, port, couleur -->
+    <form
+      v-if="wizard.step.value === 'address'"
+      class="wizard__form"
+      novalidate
+      @submit.prevent="wizard.next()"
+    >
+      <h1 id="wizard-title" class="wizard__title">{{ t("connect.addTitle") }}</h1>
+      <HInput
+        v-model="wizard.name.value"
+        :label="t('connect.name')"
+        :placeholder="t('connect.namePlaceholder')"
+        :disabled="checking"
+        :error="wizard.errors.value.name ?? undefined"
+        @update:model-value="wizard.edited(); wizard.touched.value.name = true"
+      />
+      <div class="wizard__row">
+        <div class="wizard__host">
+          <HInput
+            v-model="wizard.host.value"
+            :label="t('connect.host')"
+            :placeholder="t('connect.hostPlaceholder')"
+            :disabled="checking"
+            :error="wizard.errors.value.host ?? undefined"
+            @update:model-value="wizard.edited(); wizard.touched.value.host = true"
+          />
+        </div>
+        <div class="wizard__port">
+          <HInput
+            v-model="wizard.port.value"
+            :label="t('connect.port')"
+            :placeholder="t('connect.portPlaceholder')"
+            :disabled="checking"
+            :error="wizard.errors.value.port ?? undefined"
+            mono
+            @update:model-value="wizard.edited(); wizard.touched.value.port = true"
+          />
+        </div>
+      </div>
+      <div class="wizard__colors">
+        <span class="wizard__colors-label">{{ t("connect.color") }}</span>
+        <ColorSwatches v-model="wizard.color.value" :label="t('connect.color')" :disabled="checking" />
+      </div>
+      <p v-if="wizard.existing.value" class="wizard__info" role="status" data-existing>
+        {{ t("connect.existing") }}
+        <RouterLink
+          class="wizard__link"
+          :to="{ name: 'dashboard', params: { id: wizard.existing.value.id } }"
+        >
+          {{ t("connect.openExisting") }}
+        </RouterLink>
+      </p>
+      <p v-if="wizard.cardMessage.value" class="wizard__error" role="alert">
+        {{ wizard.cardMessage.value }}
+      </p>
+      <p v-if="checking" class="wizard__status" role="status">{{ t("connect.checking") }}</p>
+      <div class="wizard__actions">
+        <HButton variant="secondary" :disabled="checking" @click="cancel">
+          {{ t("connect.cancel") }}
+        </HButton>
+        <HButton type="submit" :busy="checking" :disabled="!wizard.canNext.value">
+          {{ t("connect.next") }}
+        </HButton>
+      </div>
+    </form>
+
+    <!-- Temps 2 : l'empreinte à comparer -->
+    <div v-else-if="wizard.step.value === 'fingerprint' && wizard.probe.value" class="wizard__form">
+      <h1 id="wizard-title" class="wizard__title">{{ t("connect.verifyTitle") }}</h1>
+      <FingerprintBlock
+        :value="wizard.probe.value.display"
+        :label="t('connect.fingerprintLabel')"
+      />
+      <p class="wizard__help">{{ t("connect.fingerprintHelp") }}</p>
+      <div class="wizard__actions">
+        <HButton variant="secondary" :disabled="wizard.busy.value === 'add'" @click="refuse">
+          {{ t("connect.refuseFingerprint") }}
+        </HButton>
+        <HButton :busy="wizard.busy.value === 'add'" @click="wizard.confirm()">
+          {{ t("connect.confirmFingerprint") }}
+        </HButton>
+      </div>
+    </div>
+
+    <!-- Temps 3 : connexion -->
+    <div v-else class="wizard__form">
+      <h1 id="wizard-title" class="wizard__title">{{ t("connect.loginTitle") }}</h1>
+      <LoginForm
+        ref="login"
+        :busy="wizard.busy.value === 'login'"
+        :error="wizard.loginError.value"
+        :locked-seconds="wizard.lockedSeconds.value"
+        :back-label="t('connect.previous')"
+        @submit="onLogin"
+        @back="wizard.back()"
+      />
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.wizard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: 100%;
+  max-width: var(--wizard-width);
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--bd);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+.wizard__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.wizard__title {
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-semibold);
+}
+
+.wizard__row {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.wizard__host {
+  flex: 3;
+}
+
+.wizard__port {
+  flex: 1;
+}
+
+.wizard__colors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.wizard__colors-label {
+  color: var(--tx2);
+  font-size: var(--fs-small);
+}
+
+.wizard__help,
+.wizard__status {
+  color: var(--tx2);
+}
+
+.wizard__info {
+  color: var(--tx2);
+}
+
+.wizard__link {
+  color: var(--ac);
+  text-decoration: underline;
+}
+
+.wizard__error {
+  color: var(--crit);
+}
+
+.wizard__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+</style>

@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { useRouter } from "vue-router";
 import HButton from "@/components/atoms/HButton.vue";
 import HLogo from "@/components/atoms/HLogo.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import { t } from "@/i18n";
+
+const router = useRouter();
 </script>
 
 <template>
@@ -12,8 +15,7 @@ import { t } from "@/i18n";
         <HLogo size="lg" decorative />
       </template>
       <template #action>
-        <!-- Inactif tant que l'assistant d'ajout de serveur n'existe pas. -->
-        <HButton disabled :hint="t('welcome.addServerSoon')">{{ t("welcome.addServer") }}</HButton>
+        <HButton @click="router.push({ name: 'add-server' })">{{ t("welcome.addServer") }}</HButton>
       </template>
     </EmptyState>
   </main>
