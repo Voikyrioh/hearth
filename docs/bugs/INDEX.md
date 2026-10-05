@@ -10,6 +10,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M460G9KDDNZAJE3NTJSP49T4](./FIX-01M460G9KDDNZAJE3NTJSP49T4.md) | L'unité systemd retirait CAP_MKNOD : nvidia-smi ne voyait pas la carte d'un serveur sans écran | 2026-10-05 |
 | [FIX-01M460G9WVEJW4GPTAZ6MVVC0V](./FIX-01M460G9WVEJW4GPTAZ6MVVC0V.md) | La désinstallation avec purge laissait des temporaires d'écriture (clé privée comprise) et le dossier de données | 2026-10-05 |
 | [FIX-01M460GA87EM6ZF9M5R9CWVXW3](./FIX-01M460GA87EM6ZF9M5R9CWVXW3.md) | Un fichier à la place du dossier de données était dit « ouvert à d'autres utilisateurs » | 2026-10-05 |
+| [FIX-01M46N01GMK08NXQHCZ28A2KQ1](./FIX-01M46N01GMK08NXQHCZ28A2KQ1.md) | Une désinstallation lancée juste après une installation pouvait être refusée à tort (verrou relâché trop tard) | 2026-10-05 |
 
 À créer lors de tout bugfix conformément à `skills/bugfix/SKILL.md` et `docs/code-rules.md`.
 
