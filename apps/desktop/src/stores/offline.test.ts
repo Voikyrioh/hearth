@@ -1,9 +1,9 @@
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useServerAction } from "@/composables/useServerAction";
-import { setLinkBridge } from "@/link";
+import { getLinkBridge, type SimulatedLinkBridge, setLinkBridge } from "@/link";
 import { startedApp } from "@/test/app";
-import { MAX_OPERATIONS, RECONNECT_FAILURE_NOTICE_FROM } from "./link";
+import { MAX_OPERATIONS, RECONNECT_FAILURE_STEP } from "./link";
 import { TOAST_LIFETIME_MS, useToastsStore } from "./toasts";
 
 // HRT-12 : l'app reste utilisable hors ligne. Les règles BR-RESIL-008 à 011, 017, 018 et 020 côté
@@ -20,38 +20,51 @@ afterEach(() => {
 });
 
 describe("coupures répétées (BR-RESIL-018)", () => {
-  it("compte les échecs dans UNE notification par serveur, qui monte sur place", async () => {
+  it("compte les échecs dans UNE notification par serveur, mise à jour à chaque palier de 5, jamais à chaque tentative", async () => {
     const { bridge } = await startedApp();
     const toasts = useToastsStore();
-    bridge.publish("forge", "reconnecting", { failedAttempts: RECONNECT_FAILURE_NOTICE_FROM - 1 });
-    expect(toasts.items).toHaveLength(0);
-    for (let n = RECONNECT_FAILURE_NOTICE_FROM; n <= 12; n += 1) {
-      bridge.publish("forge", n > 6 ? "offline" : "reconnecting", { failedAttempts: n });
+    for (let n = 1; n < RECONNECT_FAILURE_STEP; n += 1) {
+      bridge.publish("forge", n > 3 ? "offline" : "reconnecting", { failedAttempts: n });
     }
+    expect(toasts.items, "rien avant le premier palier").toHaveLength(0);
+    bridge.publish("forge", "offline", { failedAttempts: 5 });
     expect(toasts.items).toHaveLength(1);
-    expect(toasts.items[0]?.message).toBe("forge : Reconnexion échouée 12 fois.");
+    expect(toasts.items[0]?.message).toBe("forge : Reconnexion échouée 5 fois.");
     expect(toasts.items[0]?.kind).toBe("warn");
+    // Les tentatives du même palier ne touchent plus la notification (ni texte, ni durée).
+    await vi.advanceTimersByTimeAsync(TOAST_LIFETIME_MS - 100);
+    for (let n = 6; n <= 9; n += 1) bridge.publish("forge", "offline", { failedAttempts: n });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(toasts.items, "elle disparaît seule : rien ne l'a renouvelée").toHaveLength(0);
+    // Palier suivant : elle revient avec le nouveau compte, sans doublon.
+    bridge.publish("forge", "offline", { failedAttempts: 10 });
+    bridge.publish("forge", "offline", { failedAttempts: 11 });
+    expect(toasts.items).toHaveLength(1);
+    expect(toasts.items[0]?.message).toBe("forge : Reconnexion échouée 10 fois.");
   });
 
   it("garde un compteur par serveur et retire celui d'un serveur dont le lien est revenu", async () => {
     const { bridge } = await startedApp();
     const toasts = useToastsStore();
     bridge.publish("forge", "offline", { failedAttempts: 5 });
-    bridge.publish("salon", "offline", { failedAttempts: 4 });
+    bridge.publish("salon", "offline", { failedAttempts: 10 });
     expect(toasts.items.map((item) => item.message)).toEqual([
       "forge : Reconnexion échouée 5 fois.",
-      "nas-salon : Reconnexion échouée 4 fois.",
+      "nas-salon : Reconnexion échouée 10 fois.",
     ]);
     bridge.setState("forge", "connected");
     expect(toasts.items.map((item) => item.message)).toEqual([
-      "nas-salon : Reconnexion échouée 4 fois.",
+      "nas-salon : Reconnexion échouée 10 fois.",
     ]);
+    // Une nouvelle coupure repart de zéro.
+    bridge.publish("forge", "offline", { failedAttempts: 5 });
+    expect(toasts.items).toHaveLength(2);
   });
 
   it("ne dit rien d'une coupure courte, ni d'une session expirée ou d'un accès révoqué", async () => {
     const { bridge } = await startedApp();
     const toasts = useToastsStore();
-    bridge.publish("forge", "reconnecting", { failedAttempts: 1 });
+    bridge.publish("forge", "reconnecting", { failedAttempts: 4 });
     bridge.publish("forge", "session_expired", { reason: "expired", failedAttempts: 0 });
     bridge.publish("salon", "access_revoked", { reason: "revoked" });
     expect(toasts.items).toHaveLength(0);
@@ -84,14 +97,14 @@ describe("action lancée au moment d'une coupure (BR-RESIL-009, 010)", () => {
     const toasts = useToastsStore();
     const action = useServerAction();
     bridge.actionMode = "cut";
-    const result = await action.run("forge", { method: "POST", path: "/dev/ping" });
+    const result = await action.run(() => bridge.runDevAction("forge"));
     expect(result).toMatchObject({ kind: "unknown" });
     expect(toasts.items.map((item) => item.message)).toEqual([
       "Le résultat de cette action n'est pas connu.",
       "Vérifie l'état du serveur, puis relance l'action si besoin.",
     ]);
     expect(link.stateOf("forge")).toBe("reconnecting");
-    const opId = action.unknownOpId.value;
+    const opId = result?.kind === "unknown" ? result.opId : null;
     expect(opId).toBe(bridge.lastUnknownOpId);
     // Le lien revient : la bibliothèque a lu `/operations/{id}` et annonce l'issue.
     bridge.setState("forge", "connected");
@@ -99,9 +112,7 @@ describe("action lancée au moment d'une coupure (BR-RESIL-009, 010)", () => {
     expect(link.outcomeOf(opId ?? "")).toBe("done");
     expect(toasts.items.at(-1)?.message).toBe("forge : Fait pendant la coupure.");
     // Jamais rejouée : une seule action est partie.
-    expect(bridge.calls.filter((call) => call.startsWith("action "))).toEqual([
-      "action POST /dev/ping",
-    ]);
+    expect(bridge.calls.filter((call) => call.startsWith("action "))).toEqual(["action dev-ping"]);
   });
 
   it("annonce les trois issues avec les textes de la spec", async () => {
@@ -122,7 +133,7 @@ describe("action lancée au moment d'une coupure (BR-RESIL-009, 010)", () => {
     const toasts = useToastsStore();
     const action = useServerAction();
     bridge.setState("forge", "offline");
-    const result = await action.run("forge", { method: "POST", path: "/dev/ping" });
+    const result = await action.run(() => bridge.runDevAction("forge"));
     expect(result).toBeNull();
     expect(toasts.items.map((item) => item.kind)).toEqual(["error"]);
     expect(toasts.items[0]?.message).toBe(
@@ -133,12 +144,12 @@ describe("action lancée au moment d'une coupure (BR-RESIL-009, 010)", () => {
   it("répond normalement quand le lien tient", async () => {
     await startedApp();
     const action = useServerAction();
-    expect(await action.run("forge", { method: "GET", path: "/dev/ping" })).toEqual({
+    const bridge = getLinkBridge() as SimulatedLinkBridge;
+    expect(await action.run(() => bridge.runDevAction("forge"))).toEqual({
       kind: "completed",
       status: 200,
       body: "{}",
     });
-    expect(action.unknownOpId.value).toBeNull();
     expect(action.busy.value).toBe(false);
   });
 });

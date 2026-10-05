@@ -1,6 +1,5 @@
 import type { LinkBridge } from "./bridge";
 import {
-  type ActionInput,
   type ActionResult,
   DEFAULT_PORT,
   type FingerprintChange,
@@ -356,8 +355,12 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.replaceServer({ ...server, remember: false });
   }
 
-  async runAction(serverId: string, action: ActionInput): Promise<ActionResult> {
-    this.calls.push(`action ${action.method} ${action.path}`);
+  /**
+   * Action d'essai du navigateur de développement (panneau `DevActionPanel`) : n'existe que dans le
+   * pont simulé, jamais dans le pont réel ni dans le binaire livré.
+   */
+  async runDevAction(serverId: string): Promise<ActionResult> {
+    this.calls.push("action dev-ping");
     this.requireServer(serverId);
     await this.delay();
     if (this.events.get(serverId)?.state !== "connected") {

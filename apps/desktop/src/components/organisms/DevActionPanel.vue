@@ -4,7 +4,8 @@ import { useServerAction } from "@/composables/useServerAction";
 import { getLinkBridge, SimulatedLinkBridge } from "@/link";
 import { useServersStore } from "@/stores/servers";
 
-// Panneau de développement : lance une action sur le serveur affiché, comme le fera un vrai bouton
+// Panneau de développement : lance une action d'essai du pont SIMULÉ (jamais du pont réel : aucune
+// commande générique n'existe dans la coquille) sur le serveur affiché, comme le fera un vrai bouton
 // d'administration (même composable, même règle « le serveur est requis »). Le mode de l'action
 // (réponse, ou lien coupé avant la réponse) se pilote par `__hearthSim.actionMode`. Chargé
 // seulement en mode développement, jamais dans le binaire livré. Libellés hors `fr.ts` : outil de
@@ -18,7 +19,7 @@ const action = useServerAction();
 
 async function launch() {
   const id = servers.current?.id;
-  if (id) await action.run(id, { method: "POST", path: "/dev/ping" });
+  if (id && sim) await action.run(() => sim.runDevAction(id));
 }
 </script>
 

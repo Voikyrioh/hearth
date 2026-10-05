@@ -282,4 +282,26 @@ describe("hors ligne (HRT-12)", () => {
     expect(wrapper.text()).not.toContain("Dernier contact à");
     wrapper.unmount();
   });
+
+  it("dims and dates EVERY page of a server from the layout, none can forget it (BR-RESIL-007)", async () => {
+    const { bridge, router, wrapper } = await boot("/servers/forge/dashboard");
+    for (const name of ["dashboard", "accounts", "audit"]) {
+      await router.push(`/servers/forge/${name}`);
+      await flushPromises();
+      expect(wrapper.findAll('[data-stale="true"]'), `${name} connecté`).toHaveLength(0);
+      bridge.setState("forge", "offline");
+      await flushPromises();
+      expect(wrapper.findAll('[data-stale="true"]'), `${name} hors ligne`).toHaveLength(1);
+      expect(wrapper.text(), name).toMatch(/Vu il y a \d+ s/);
+      bridge.setState("forge", "connected");
+      await flushPromises();
+    }
+    // Toute page déclarée sous le gabarit du serveur est couverte : la liste ci-dessus suit le routeur.
+    const pages = router
+      .getRoutes()
+      .filter((route) => route.path.startsWith("/servers/:id/") && route.name)
+      .map((route) => String(route.name));
+    expect(pages.sort()).toEqual(["accounts", "audit", "dashboard"]);
+    wrapper.unmount();
+  });
 });

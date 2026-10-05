@@ -11,8 +11,6 @@ import {
 } from "@/bindings";
 import type { LinkBridge } from "./bridge";
 import {
-  type ActionInput,
-  type ActionResult,
   type FingerprintChange,
   LinkCommandError,
   type LinkNotice,
@@ -223,19 +221,6 @@ export class TauriLinkBridge implements LinkBridge {
 
   async forgetCredentials(serverId: string): Promise<void> {
     unwrap(await commands.forgetCredentials(serverId));
-  }
-
-  async runAction(serverId: string, action: ActionInput): Promise<ActionResult> {
-    const result = unwrap(
-      await commands.runAction(serverId, {
-        method: action.method,
-        path: action.path,
-        body: action.body ?? null,
-      }),
-    );
-    return result.kind === "completed"
-      ? { kind: "completed", status: result.status, body: result.body }
-      : { kind: "unknown", opId: result.opId };
   }
 
   async setDisplayedServer(serverId: string | null): Promise<void> {

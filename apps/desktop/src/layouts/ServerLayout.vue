@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, watch } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import ErrorBoundary from "@/components/molecules/ErrorBoundary.vue";
+import StaleSurface from "@/components/molecules/StaleSurface.vue";
 import AppHeader from "@/components/organisms/AppHeader.vue";
 import OfflineBanner from "@/components/organisms/OfflineBanner.vue";
 import ReconnectPanel from "@/components/organisms/ReconnectPanel.vue";
@@ -54,7 +55,11 @@ const title = computed(() => (route.meta.title ? t(route.meta.title) : ""));
           :reason="event?.reason ?? null"
           :revoked="state === 'access_revoked'"
         />
-        <ErrorBoundary :reset-key="route.fullPath"><RouterView /></ErrorBoundary>
+        <!-- Données périmées (BR-RESIL-007) : c'est le GABARIT qui désature et date la page, pour
+             toute page présente et à venir ; une page ne l'enveloppe pas elle-même. -->
+        <StaleSurface :stale="state !== 'connected'" :last-contact-at="lastContactAt">
+          <ErrorBoundary :reset-key="route.fullPath"><RouterView /></ErrorBoundary>
+        </StaleSurface>
       </div>
     </div>
   </div>

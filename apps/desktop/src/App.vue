@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { computed, defineAsyncComponent, ref } from "vue";
 import { RouterView } from "vue-router";
 import BridgeDownBanner from "@/components/molecules/BridgeDownBanner.vue";
 import ErrorBoundary from "@/components/molecules/ErrorBoundary.vue";
@@ -7,7 +7,7 @@ import ToastStack from "@/components/molecules/ToastStack.vue";
 import FingerprintAlert from "@/components/organisms/FingerprintAlert.vue";
 import ServerRail from "@/components/organisms/ServerRail.vue";
 import { reportUiError } from "@/errors/report";
-import { failureMessage, failureOf, getLinkBridge } from "@/link";
+import { failureMessage, failureOf } from "@/link";
 import { useLinkStore } from "@/stores/link";
 import { useServersStore } from "@/stores/servers";
 import { useToastsStore } from "@/stores/toasts";
@@ -17,18 +17,6 @@ const link = useLinkStore();
 const servers = useServersStore();
 const toasts = useToastsStore();
 link.start().catch((error) => reportUiError(error, "link:start"));
-
-// Le serveur affiché dans la fenêtre : l'icône de la zone de notification reflète son état
-// (BR-RESIL-016). Au mieux : un échec ne gêne jamais l'interface.
-watch(
-  () => servers.currentId,
-  (id) => {
-    getLinkBridge()
-      .setDisplayedServer(id)
-      .catch((error) => reportUiError(error, "link:displayed-server"));
-  },
-  { immediate: true },
-);
 
 // Panneau de simulation : seulement en mode développement (retiré du binaire livré).
 const DevLinkPanel = import.meta.env.DEV

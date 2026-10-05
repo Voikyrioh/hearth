@@ -1,19 +1,15 @@
 <script setup lang="ts">
 import { t } from "@/i18n";
 import EmptyState from "./EmptyState.vue";
-import StaleSurface from "./StaleSurface.vue";
 
-// Carte « Bientôt disponible » des vues dont le ticket suit. Elle passe par `StaleSurface` :
-// c'est la vitrine du mécanisme de données périmées (BR-RESIL-007) en attendant les vraies cartes.
-defineProps<{ stale: boolean; lastContactAt: number | null }>();
+// Carte « Bientôt disponible » des vues dont le ticket suit. Les données périmées (BR-RESIL-007)
+// sont gérées par le gabarit du serveur (`ServerLayout`), pas par la page.
 </script>
 
 <template>
-  <StaleSurface :stale="stale" :last-contact-at="lastContactAt">
-    <section class="soon">
-      <EmptyState :title="t('pages.soonTitle')" :text="t('pages.soonText')" heading="h2" />
-    </section>
-  </StaleSurface>
+  <section class="soon">
+    <EmptyState :title="t('pages.soonTitle')" :text="t('pages.soonText')" heading="h2" />
+  </section>
 </template>
 
 <style scoped>

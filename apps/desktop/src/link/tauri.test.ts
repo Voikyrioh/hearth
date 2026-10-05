@@ -265,41 +265,7 @@ describe("TauriLinkBridge", () => {
   });
 });
 
-describe("TauriLinkBridge : actions et serveur affiché (HRT-12)", () => {
-  it("sends an action to a server and maps both kinds of answer", async () => {
-    const calls = ipc((cmd) => {
-      if (cmd !== "run_action") return undefined;
-      return calls.filter((call) => call.cmd === "run_action").length === 1
-        ? { kind: "completed", status: 200, body: '{"ok":true}' }
-        : { kind: "unknown", opId: "01OP" };
-    });
-    const bridge = new TauriLinkBridge();
-    const done = await bridge.runAction("01J9", {
-      method: "PUT",
-      path: "/me/password",
-      body: "{}",
-    });
-    expect(done).toEqual({ kind: "completed", status: 200, body: '{"ok":true}' });
-    const lost = await bridge.runAction("01J9", { method: "DELETE", path: "/x" });
-    expect(lost).toEqual({ kind: "unknown", opId: "01OP" });
-    expect(calls.filter((call) => call.cmd === "run_action").map((call) => call.args)).toEqual([
-      { serverId: "01J9", action: { method: "PUT", path: "/me/password", body: "{}" } },
-      { serverId: "01J9", action: { method: "DELETE", path: "/x", body: null } },
-    ]);
-  });
-
-  it("refuses with the typed failure when the link is not connected", async () => {
-    ipc((cmd) => {
-      if (cmd === "run_action") throw { kind: "not_connected" };
-      return undefined;
-    });
-    const refused = await new TauriLinkBridge()
-      .runAction("01J9", { method: "GET", path: "/x" })
-      .catch((error: unknown) => error);
-    expect(refused).toBeInstanceOf(LinkCommandError);
-    expect((refused as LinkCommandError).failure.kind).toBe("not_connected");
-  });
-
+describe("TauriLinkBridge : serveur affiché (HRT-12)", () => {
   it("tells the shell which server is displayed", async () => {
     const calls = ipc(() => undefined);
     const bridge = new TauriLinkBridge();

@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
 import {
@@ -23,8 +23,11 @@ const OPERATION_TEXTS = {
 /** Issues d'opération gardées (nombre et âge bornés : session longue, BR-RESIL-017). */
 export const MAX_OPERATIONS = 100;
 export const OPERATION_MAX_AGE_MS = 10 * 60_000;
-/** À partir de ce nombre d'échecs de reconnexion consécutifs, une notification discrète les compte. */
-export const RECONNECT_FAILURE_NOTICE_FROM = 3;
+/**
+ * Palier d'échecs de reconnexion consécutifs : une notification discrète les compte à chaque palier
+ * franchi (5, 10, 15…), jamais à chaque tentative (BR-RESIL-018).
+ */
+export const RECONNECT_FAILURE_STEP = 5;
 /** Nouvelle tentative d'abonnement : espacement doublé de 1 s jusqu'à 30 s. */
 export const RESUBSCRIBE_BASE_MS = 1000;
 export const RESUBSCRIBE_MAX_MS = 30_000;
@@ -128,25 +131,44 @@ export const useLinkStore = defineStore("link", () => {
     }
   }
 
-  // Coupures répétées (BR-RESIL-018) : une seule notification par serveur, dont le compteur monte,
-  // jamais une ligne par tentative ; elle disparaît quand le lien revient.
+  // Coupures répétées (BR-RESIL-018) : une seule notification par serveur, dont le compteur monte
+  // à chaque PALIER franchi (5, 10, 15 échecs), jamais à chaque tentative ; elle disparaît au retour
+  // du lien.
+  const failureSteps = new Map<string, number>();
+
   function reportReconnectFailures(event: LinkStateEvent) {
     const key = `reconnect:${event.serverId}`;
-    const retrying = event.state === "reconnecting" || event.state === "offline";
-    if (retrying && event.failedAttempts >= RECONNECT_FAILURE_NOTICE_FROM) {
-      const name = servers.byId(event.serverId)?.name ?? event.serverId;
-      toasts.push({
-        key,
-        kind: "warn",
-        message: t("operation.withServer", {
-          server: name,
-          message: t("link.reconnectFailed", { n: event.failedAttempts }),
-        }),
-      });
-    } else if (!retrying || event.failedAttempts === 0) {
+    if (event.state === "connected") {
+      failureSteps.delete(event.serverId);
       toasts.dismissKey(key);
+      return;
     }
+    if (event.state !== "reconnecting" && event.state !== "offline") return;
+    const step = Math.floor(event.failedAttempts / RECONNECT_FAILURE_STEP);
+    if (step <= (failureSteps.get(event.serverId) ?? 0)) return;
+    failureSteps.set(event.serverId, step);
+    const name = servers.byId(event.serverId)?.name ?? event.serverId;
+    toasts.push({
+      key,
+      kind: "warn",
+      message: t("operation.withServer", {
+        server: name,
+        message: t("link.reconnectFailed", { n: event.failedAttempts }),
+      }),
+    });
   }
+
+  // Le serveur affiché dans la fenêtre : l'icône de la zone de notification reflète son état
+  // (BR-RESIL-016). Au mieux : un échec ne gêne jamais l'interface.
+  watch(
+    () => servers.currentId,
+    (id) => {
+      getLinkBridge()
+        .setDisplayedServer(id)
+        .catch((error) => logUiError(error, "link:displayed-server"));
+    },
+    { immediate: true },
+  );
 
   function onFingerprint(change: FingerprintChange) {
     alerts.value = { ...alerts.value, [change.serverId]: change };
@@ -268,6 +290,7 @@ export const useLinkStore = defineStore("link", () => {
     operations.value = {};
     alerts.value = {};
     dismissed.value = {};
+    failureSteps.clear();
   }
 
   return {
