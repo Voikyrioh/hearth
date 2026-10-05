@@ -13,6 +13,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M46G7Y2DW32G1D190GE4MA7A](./FIX-01M46G7Y2DW32G1D190GE4MA7A.md) | La troncature des adresses MAC pouvait écarter la carte physique | 2026-10-05 |
 | [FIX-01M46G7Z0ZP43T53M2F5KG4VKS](./FIX-01M46G7Z0ZP43T53M2F5KG4VKS.md) | La fin de `logout` effaçait le jeton d'une reconnexion intervenue entre-temps | 2026-10-05 |
 | [FIX-01M46G800Z47XQ8R64G2MDC4NP](./FIX-01M46G800Z47XQ8R64G2MDC4NP.md) | « Se souvenir » restait coché sans mot de passe au coffre après une application tuée pendant l'ajout | 2026-10-05 |
+| [FIX-01M46N01GMK08NXQHCZ28A2KQ1](./FIX-01M46N01GMK08NXQHCZ28A2KQ1.md) | Une désinstallation lancée juste après une installation pouvait être refusée à tort (verrou relâché trop tard) | 2026-10-05 |
 
 À créer lors de tout bugfix conformément à `skills/bugfix/SKILL.md` et `docs/code-rules.md`.
 

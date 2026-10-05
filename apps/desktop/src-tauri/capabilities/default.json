@@ -28,6 +28,7 @@
     "allow-get-notify-on-link-change",
     "allow-set-notify-on-link-change",
     "allow-set-displayed-server",
+    "allow-get-dashboard",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

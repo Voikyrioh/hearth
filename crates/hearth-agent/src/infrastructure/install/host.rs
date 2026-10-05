@@ -131,7 +131,7 @@ impl InstallHost for SystemHost {
             .open(path)
             .map_err(io_error("ouverture du verrou d'installation", path))?;
         match file.try_lock() {
-            Ok(()) => Ok(InstallLock(Box::new(file))),
+            Ok(()) => Ok(InstallLock(Box::new(HeldLock(file)))),
             Err(fs::TryLockError::WouldBlock) => Err(HostError::AlreadyRunning),
             Err(fs::TryLockError::Error(error)) => {
                 Err(io_error("verrou d'installation", path)(error))
@@ -383,6 +383,26 @@ fn parse_df(output: &str) -> Option<u64> {
     let line = output.lines().nth(1)?;
     let kib: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
     kib.checked_mul(1024)
+}
+
+/// Le verrou tenu : relâché **explicitement** à la destruction, pas seulement par la fermeture du
+/// descripteur.
+///
+/// Un `flock` appartient à la description de fichier ouverte, pas au descripteur. Si un autre
+/// thread lance un sous-processus à cet instant, l'enfant porte une copie du descripteur entre le
+/// `fork` et l'`exec` (qui le ferme : `O_CLOEXEC`) ; fermer le nôtre ne suffit alors pas, le
+/// verrou reste pris le temps de cet `exec`, et l'opération suivante est refusée à tort.
+/// `unlock` agit sur la description : elle libère le verrou quels que soient les copies vivantes.
+struct HeldLock(File);
+
+impl Drop for HeldLock {
+    fn drop(&mut self) {
+        // FIX:01M46N01GMK08NXQHCZ28A2KQ1 : relâche le verrou même si un enfant en cours de
+        // lancement garde encore une copie du descripteur (docs/bugs/FIX-01M46N01GMK08NXQHCZ28A2KQ1.md).
+        // Échec ignoré : la fermeture qui suit le relâche de toute façon, et on ne panique pas
+        // dans un `drop`.
+        let _ = self.0.unlock();
+    }
 }
 
 #[cfg(test)]
@@ -640,6 +660,31 @@ mod unix_tests {
         assert!(matches!(second, Err(HostError::AlreadyRunning)));
         drop(first);
         assert!(SystemHost.lock(&path).is_ok(), "libéré avec le verrou");
+    }
+
+    /// FIX:01M46N01GMK08NXQHCZ28A2KQ1 : un enfant en cours de lancement (`fork` avant `exec`)
+    /// porte une copie du descripteur ; elle ne doit pas retenir le verrou après sa libération.
+    #[test]
+    fn the_install_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive() {
+        let dir = tempfile::tempdir().expect("dossier");
+        let path = dir.path().join("install.lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .expect("ouverture");
+        file.try_lock().expect("verrou pris");
+        // Même description de fichier ouverte, comme le descripteur hérité par un enfant forké.
+        let child_copy = file.try_clone().expect("copie du descripteur");
+
+        drop(HeldLock(file));
+
+        assert!(
+            SystemHost.lock(&path).is_ok(),
+            "le verrou doit être libre alors que la copie vit encore"
+        );
+        drop(child_copy);
     }
 
     #[test]

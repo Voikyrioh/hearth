@@ -1,6 +1,6 @@
 # Composants — Hearth
 
-Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe par le pont de liaison (`src/link/`, interface `LinkBridge`) et les stores Pinia `servers`, `link`, `toasts`. Une fiche par composant.
+Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe par le pont de liaison (`src/link/`, interface `LinkBridge`) et les stores Pinia `servers`, `link`, `toasts`, `dashboard`. Une fiche par composant.
 
 ## Atomes
 
@@ -15,6 +15,10 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`HSpinner`](./HSpinner.md) — Indicateur d'attente.
 - [`HToggle`](./HToggle.md) — Interrupteur booléen.
 - [`HSegmented`](./HSegmented.md) — Choix exclusif (radiogroup).
+- [`HGaugeArc`](./HGaugeArc.md) — Arc de jauge de 270° (SVG).
+- [`HAreaChart`](./HAreaChart.md) — Courbe pleine à une ou deux séries (SVG), trous pour les mesures absentes.
+- [`HBars`](./HBars.md) — Barres verticales (SVG), une par cœur.
+- [`HMeter`](./HMeter.md) — Jauge linéaire (SVG), occupation d'un disque.
 
 ## Molécules
 
@@ -32,6 +36,12 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`StepTrail`](./StepTrail.md) — Fil des étapes de l'assistant.
 - [`FingerprintBlock`](./FingerprintBlock.md) — Empreinte en 8 groupes de 4.
 - [`BridgeDownBanner`](./BridgeDownBanner.md) — Liste des serveurs illisible, avec « Réessayer ».
+- [`LevelBadge`](./LevelBadge.md) — Marque d'alerte : icône + « Attention » ou « Critique ».
+- [`Gauge`](./Gauge.md) — Jauge : arc, valeur, libellé, marque d'alerte.
+- [`TimeSeriesChart`](./TimeSeriesChart.md) — Courbe sur la fenêtre choisie, « Depuis N min » si l'historique est court.
+- [`StatRow`](./StatRow.md) — Ligne « libellé : valeur » d'une carte.
+- [`DashCard`](./DashCard.md) — Carte du tableau de bord (titre de section, corps).
+- [`CoreBars`](./CoreBars.md) — Une barre par cœur du processeur.
 
 ## Organismes
 
@@ -47,6 +57,14 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`ServerRow`](./ServerRow.md) — Ligne du carnet de serveurs.
 - [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
 - [`DevActionPanel`](./DevActionPanel.md) — Bouton d'action de développement (`useServerAction`, `needs-link`).
+- [`MachineCard`](./MachineCard.md) — Sections Machine et Durée de fonctionnement.
+- [`CpuCard`](./CpuCard.md) — Section Processeur (jauge, courbe, cœurs).
+- [`MemoryCard`](./MemoryCard.md) — Section Mémoire.
+- [`GpuCard`](./GpuCard.md) — Section Carte graphique (ou « Non disponible sur cette machine »).
+- [`GpuPanel`](./GpuPanel.md) — Une carte graphique (charge, mémoire vidéo, température).
+- [`NetworkCard`](./NetworkCard.md) — Section Réseau (montant, descendant).
+- [`DisksCard`](./DisksCard.md) — Section Disques (suit les montages).
+- [`TemperaturesCard`](./TemperaturesCard.md) — Section Températures (ou explication sans sonde).
 
 ## Gabarits
 
@@ -57,7 +75,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`Welcome`](./Welcome.md) — Accueil (aucun serveur).
 - [`AddServer`](./AddServer.md) — Ajout d'un serveur (assistant).
 - [`Servers`](./Servers.md) — Carnet de serveurs.
-- [`Dashboard`](./Dashboard.md) — Tableau de bord (à venir).
+- [`Dashboard`](./Dashboard.md) — Tableau de bord : la machine en direct (jauges, courbes, seuils, matériel absent).
 - [`Accounts`](./Accounts.md) — Comptes (à venir).
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
 - [`Settings`](./Settings.md) — Réglages.
@@ -68,7 +86,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 
 ## À venir (autres tickets)
 
-`Gauge`, `Sparkline`, `TimeSeriesChart`, `PasswordRules`, `MachineCards`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `UpdatePanel`, `AgentUpdateSteps`.
+`Sparkline` (non retenu : les courbes de chaque carte suffisent), `PasswordRules`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `UpdatePanel`, `AgentUpdateSteps`.
 
 Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `layouts/`, `pages/`, `composables/`, `stores/`, `link/`, `errors/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
 

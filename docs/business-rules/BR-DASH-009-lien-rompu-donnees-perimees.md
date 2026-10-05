@@ -5,7 +5,7 @@ titre: Lien rompu : dernières valeurs grisées avec leur âge
 statut: partielle
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-009), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-009 — Lien rompu : dernières valeurs grisées avec leur âge
@@ -25,5 +25,9 @@ Côté agent : chaque échantillon porte l'instant `at` de la mesure (RFC 3339 U
 ## Règles liées
 - BR-DASH-011
 
+## Interface
+- `layouts/ServerLayout.vue` enveloppe la page (donc la grille) dans `StaleSurface` (une seule fois, la page ne le fait plus, BR-RESIL-007) (désaturée, opacité .62, « Vu il y a … ») quand le lien n'est pas « Connecté » ; le store garde l'identité, le dernier échantillon et l'historique. Au démarrage hors ligne, `get_dashboard` rend la dernière vue du disque. Tests : `pages/Dashboard.test.ts`, `src-tauri/tests/dashboard_runtime.rs`, `e2e/dashboard.spec.ts`.
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

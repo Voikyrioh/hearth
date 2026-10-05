@@ -23,7 +23,7 @@ export default defineConfig({
   projects: [
     {
       name: "dev",
-      testMatch: ["shell.spec.ts", "connect.spec.ts", "offline.spec.ts"],
+      testMatch: ["shell.spec.ts", "connect.spec.ts", "dashboard.spec.ts", "offline.spec.ts"],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },
     {

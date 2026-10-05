@@ -44,6 +44,16 @@ export const commands = {
 	/**  Issues d'actions retenues tant qu'elles ne sont pas acquittées (lecture non destructive). */
 	listUnreadOperations: () => __TAURI_INVOKE<OperationEventDto[]>("list_unread_operations"),
 	ackUnreadOperations: (opIds: string[]) => __TAURI_INVOKE<void>("ack_unread_operations", { opIds }),
+	/**
+	 *  Dernière vue connue de la machine d'un serveur (tableau de bord) : à lire après l'abonnement à
+	 *  `link://snapshot` et `link://metrics`. `None` tant qu'aucune identité n'a été reçue.
+	 */
+	getDashboard: (serverId: string) => typedError<{
+	serverId: string,
+	machine: MachineDto,
+	history: SampleDto[],
+	levels: LevelsDto | null,
+} | null, LinkFailure>(__TAURI_INVOKE("get_dashboard", { serverId })),
 };
 
 /* Types */
@@ -78,6 +88,33 @@ export type AppError =
 
 export type BlockedDto = "fingerprint_changed" | "incompatible_agent" | "incompatible_client";
 
+export type CapabilitiesDto = {
+	gpu: boolean,
+	temps: boolean,
+};
+
+export type CpuInfoDto = {
+	model: string,
+	physicalCores: number | null,
+	logicalCores: number,
+	frequencyMhz: number | null,
+};
+
+export type DiskInfoDto = {
+	name: string,
+	mount: string,
+	fs: string | null,
+	totalBytes: number | null,
+	removable: boolean,
+};
+
+export type DiskSampleDto = {
+	name: string,
+	mount: string,
+	usedBytes: number | null,
+	totalBytes: number | null,
+};
+
 /**
  *  Le certificat présenté n'est plus celui qui a été confirmé (BR-CONN-003). Les empreintes sont
  *  en 8 groupes de 4 pour l'affichage ; `presented_hex` est la forme complète à renvoyer pour
@@ -90,7 +127,40 @@ export type FingerprintEvent = {
 	presentedHex: string,
 };
 
+export type GpuInfoDto = {
+	name: string,
+	memoryTotalBytes: number | null,
+};
+
+export type GpuLevelsDto = {
+	memory: LevelDto,
+	temp: LevelDto,
+};
+
+export type GpuSampleDto = {
+	name: string,
+	loadPercent: number | null,
+	memoryUsedBytes: number | null,
+	memoryTotalBytes: number | null,
+	/**  Absente quand la carte n'expose pas sa température (BR-DASH-007). */
+	tempC: number | null,
+};
+
 export type InvalidField = "name" | "address" | "port" | "credentials" | "fingerprint" | "other";
+
+export type LevelDto = "normal" | "attention" | "critical";
+
+/**
+ *  Niveau d'alerte de chaque mesure d'un échantillon (BR-DASH-003). Mêmes positions que les
+ *  listes de l'échantillon (`disks[i]`, `gpus[i]`, `temps[i]`).
+ */
+export type LevelsDto = {
+	cpu: LevelDto,
+	mem: LevelDto,
+	disks: LevelDto[],
+	gpus: GpuLevelsDto[],
+	temps: LevelDto[],
+};
 
 /**  Échec d'une commande de liaison, sans texte : l'interface choisit le message d'après `kind`. */
 export type LinkFailure = 
@@ -136,6 +206,34 @@ export type LoginDto = {
 	username: string,
 };
 
+/**  Identité de la machine (BR-DASH-001, 005, 006). */
+export type MachineDto = {
+	name: string,
+	os: OsDto,
+	cpu: CpuInfoDto,
+	memoryTotalBytes: number | null,
+	disks: DiskInfoDto[],
+	gpus: GpuInfoDto[],
+	capabilities: CapabilitiesDto,
+};
+
+export type MemoryDto = {
+	usedBytes: number | null,
+	totalBytes: number | null,
+};
+
+/**  Un échantillon en direct (`link://metrics`, chaque seconde). */
+export type MetricsEvent = {
+	serverId: string,
+	sample: SampleDto,
+	levels: LevelsDto,
+};
+
+export type NetDto = {
+	upBytesPerS: number | null,
+	downBytesPerS: number | null,
+};
+
 export type NoticeEvent = {
 	/**  Numéro de l'avis retenu par la coquille (acquittement, dédoublonnage) ; 0 : non retenu. */
 	id: number,
@@ -155,6 +253,13 @@ export type OperationEventDto = {
 	outcome: OutcomeDto,
 };
 
+export type OsDto = {
+	name: string,
+	version: string | null,
+	kernel: string | null,
+	arch: string,
+};
+
 export type OutcomeDto = "done" | "not_executed" | "unknown";
 
 /**  Première prise de contact : l'empreinte à faire confirmer. */
@@ -171,6 +276,20 @@ export type ProbeDto = {
 export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked";
 
 export type RoleDto = "admin" | "readonly";
+
+/**  Une seconde de la vie de la machine. */
+export type SampleDto = {
+	/**  Instant de la mesure (millisecondes depuis l'époque). */
+	at: number | null,
+	uptimeS: number | null,
+	cpu: number | null,
+	cores: (number | null)[],
+	mem: MemoryDto,
+	disks: DiskSampleDto[],
+	net: NetDto | null,
+	gpus: GpuSampleDto[],
+	temps: TempDto[],
+};
 
 /**  Un serveur du carnet, sans secret. */
 export type ServerDto = {
@@ -199,6 +318,22 @@ export type ServersEvent = {
 export type Settings = {
 	/**  Lancer Hearth au démarrage de Windows (désactivé par défaut, BR-CLIENT-006). */
 	launchAtStartup: boolean,
+};
+
+/**
+ *  Identité et historique (`link://snapshot`, et lecture `get_dashboard`). `levels` : ceux du
+ *  dernier échantillon de `history`, s'il y en a un.
+ */
+export type SnapshotEvent = {
+	serverId: string,
+	machine: MachineDto,
+	history: SampleDto[],
+	levels: LevelsDto | null,
+};
+
+export type TempDto = {
+	label: string,
+	celsius: number | null,
 };
 
 /* Tauri Specta runtime */

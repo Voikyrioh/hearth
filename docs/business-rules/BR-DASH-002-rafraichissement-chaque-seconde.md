@@ -5,7 +5,7 @@ titre: Les mesures sont rafraîchies automatiquement chaque seconde
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-002), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-002 — Les mesures sont rafraîchies automatiquement chaque seconde
@@ -27,5 +27,9 @@ L'agent prend un échantillon par seconde (tâche supervisée) et le diffuse à 
 ## Règles liées
 - BR-DASH-008
 
+## Interface
+- Un `link://metrics` par seconde (`LinkRuntime::relay`), pris par `stores/dashboard.ts` s'il est plus récent que le dernier ; seuls les composants qui lisent une valeur changée se redessinent, les courbes sur un compteur (`useMachineSeries`). Tests : `stores/dashboard.test.ts`, `e2e/dashboard.spec.ts` (la courbe avance).
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

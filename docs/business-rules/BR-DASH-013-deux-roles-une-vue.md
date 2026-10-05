@@ -5,7 +5,7 @@ titre: Les deux rôles voient le tableau de bord à l'identique
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-013), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-013 — Les deux rôles voient le tableau de bord à l'identique
@@ -27,5 +27,9 @@ maj: 2026-10-04
 ## Règles liées
 - BR-ACCT-013
 
+## Interface
+- Aucune branche sur le rôle dans `Dashboard.vue` ni dans les cartes. Tests : `pages/Dashboard.test.ts` (« salon » en lecture seule, « forge » administrateur : mêmes sections).
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

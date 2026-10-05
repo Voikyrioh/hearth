@@ -5,7 +5,7 @@ titre: Une carte graphique sans mesure de température affiche « Non disponible
 statut: partielle
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-007), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-007 — Une carte graphique sans mesure de température affiche « Non disponible »
@@ -28,5 +28,9 @@ Côté agent : `gpus[].temp_c` est absent (`null`) quand la carte n'expose pas s
 ## Règles liées
 - BR-DASH-005, BR-DASH-008
 
+## Interface
+- `components/organisms/GpuPanel.vue` : `tempC` nul : « Non disponible » dans le champ Température, jauges Charge et Mémoire vidéo inchangées. Tests : `pages/Dashboard.test.ts`.
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).
