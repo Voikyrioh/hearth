@@ -4,7 +4,9 @@ import { t } from "@/i18n";
 export function formatAgo(timestamp: number, now: number): string {
   const minutes = Math.max(0, Math.floor((now - timestamp) / 60_000));
   if (minutes < 1) return t("updates.agoNow");
-  if (minutes < 60) return t("updates.agoMinutes", { n: minutes });
+  if (minutes < 60) {
+    return minutes === 1 ? t("updates.agoMinute") : t("updates.agoMinutes", { n: minutes });
+  }
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return hours === 1 ? t("updates.agoHour") : t("updates.agoHours", { n: hours });
   const days = Math.floor(hours / 24);

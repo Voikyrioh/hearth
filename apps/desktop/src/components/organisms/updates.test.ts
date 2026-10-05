@@ -235,7 +235,8 @@ describe("formatAgo", () => {
   const now = 1_800_000_000_000;
   it.each([
     [30_000, "à l'instant"],
-    [5 * 60_000, "il y a 5 min"],
+    [60_000, "il y a 1 minute"],
+    [5 * 60_000, "il y a 5 minutes"],
     [60 * 60_000, "il y a 1 heure"],
     [2 * 3_600_000, "il y a 2 heures"],
     [24 * 3_600_000, "il y a 1 jour"],
