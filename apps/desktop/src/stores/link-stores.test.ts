@@ -267,3 +267,17 @@ describe("link store ordering and operations", () => {
     expect(Object.keys(link.operations)).toEqual(["late"]);
   });
 });
+
+describe("real teardown", () => {
+  it("stops following the bridge for real once reset (servers and link)", async () => {
+    const { bridge, servers, link } = await startedApp();
+    servers.reset();
+    link.reset();
+    bridge.removeServer("forge");
+    bridge.setState("salon", "offline");
+    bridge.emitOperation({ opId: "z", serverId: "salon", outcome: "done" });
+    expect(servers.servers).toEqual([]);
+    expect(link.eventOf("salon")).toBeUndefined();
+    expect(link.outcomeOf("z")).toBeUndefined();
+  });
+});
