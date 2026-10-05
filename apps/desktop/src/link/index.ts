@@ -32,7 +32,9 @@ function insideTauri(): boolean {
  */
 export function createLinkBridge(): LinkBridge {
   if (import.meta.env.DEV && !insideTauri()) {
-    const simulated = new SimulatedLinkBridge();
+    // `?servers=none` : navigateur de revue sans serveur enregistré (écran d'accueil).
+    const none = new URLSearchParams(window.location.search).get("servers") === "none";
+    const simulated = new SimulatedLinkBridge(none ? { servers: [] } : {});
     (window as unknown as { __hearthSim?: SimulatedLinkBridge }).__hearthSim = simulated;
     return simulated;
   }

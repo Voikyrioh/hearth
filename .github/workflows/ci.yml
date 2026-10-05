@@ -50,6 +50,18 @@ jobs:
           npm run typecheck
           npm test
           npm run build
+      # Interface servie par Vite avec le pont de liaison simulé, dans Chromium (captures 1366/1920/2560).
+      - name: Scénarios navigateur (Playwright)
+        working-directory: apps/desktop
+        run: |
+          npx playwright install chromium
+          npm run e2e
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hearth-ui-screenshots
+          path: apps/desktop/e2e/screenshots/*.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Coquille Tauri (clippy, tests)
         run: |
           cargo clippy -p hearth-desktop --all-targets -- -D warnings
