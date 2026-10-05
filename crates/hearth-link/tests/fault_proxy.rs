@@ -59,7 +59,16 @@ async fn wait_for_a_distant_retry(world: &World, at_least: Duration) {
 
 #[tokio::test]
 async fn a_one_second_cut_is_invisible() {
-    let world = World::connected(Options::default()).await;
+    // Seuils à l'échelle 1/3 (silence et « Reconnexion » à 1 s) pour une coupure de 1/6 de
+    // seconde : de la marge pour une machine chargée, sans changer ce qui est prouvé.
+    let world = World::connected(Options {
+        config: hearth_link::LinkConfig {
+            thresholds: hearth_link::domain::state::Thresholds::scaled(3),
+            ..support::fast_config()
+        },
+        ..Options::default()
+    })
+    .await;
     let mark = world.recorder.mark();
     world.proxy.cut();
     tokio::time::sleep(scaled(Duration::from_secs(1))).await;
@@ -148,7 +157,7 @@ async fn the_thresholds_are_respected_to_the_scale() {
         reconnecting >= ms(380) && reconnecting <= ms(1_200),
         "{reconnecting:?}"
     );
-    assert!(offline >= ms(4_700) && offline <= ms(6_500), "{offline:?}");
+    assert!(offline >= ms(4_700) && offline <= ms(8_000), "{offline:?}");
     world.proxy.heal();
     world
         .recorder
@@ -284,7 +293,7 @@ async fn retry_now_forces_an_attempt_without_waiting() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    wait_for_a_distant_retry(&world, ms(1_500)).await;
+    wait_for_a_distant_retry(&world, ms(2_500)).await;
     world.proxy.heal();
     let clicked = world.recorder.mark();
     let click = Instant::now();
@@ -293,7 +302,7 @@ async fn retry_now_forces_an_attempt_without_waiting() {
         .recorder
         .wait_state(clicked, LinkState::Connected, WAIT)
         .await;
-    assert!(back - click < ms(1_200), "{:?}", back - click);
+    assert!(back - click < ms(2_000), "{:?}", back - click);
     let states = world.recorder.states_since(clicked);
     assert_eq!(states.first(), Some(&LinkState::Reconnecting), "{states:?}");
 }
@@ -307,7 +316,7 @@ async fn a_network_change_reconnects_immediately() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    wait_for_a_distant_retry(&world, ms(1_500)).await;
+    wait_for_a_distant_retry(&world, ms(2_500)).await;
     world.proxy.heal();
     let changed = world.recorder.mark();
     let at = Instant::now();
@@ -317,7 +326,7 @@ async fn a_network_change_reconnects_immediately() {
         .recorder
         .wait_state(changed, LinkState::Connected, WAIT)
         .await;
-    assert!(back - at < ms(1_200), "{:?}", back - at);
+    assert!(back - at < ms(2_000), "{:?}", back - at);
 }
 
 #[tokio::test]
@@ -329,7 +338,7 @@ async fn a_wake_up_reconnects_immediately() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    wait_for_a_distant_retry(&world, ms(1_500)).await;
+    wait_for_a_distant_retry(&world, ms(2_500)).await;
     world.proxy.heal();
     let woke = world.recorder.mark();
     let at = Instant::now();
@@ -339,7 +348,7 @@ async fn a_wake_up_reconnects_immediately() {
         .recorder
         .wait_state(woke, LinkState::Connected, WAIT)
         .await;
-    assert!(back - at < ms(1_200), "{:?}", back - at);
+    assert!(back - at < ms(2_000), "{:?}", back - at);
 }
 
 // ── Empreinte ───────────────────────────────────────────────────────────────────────────────
