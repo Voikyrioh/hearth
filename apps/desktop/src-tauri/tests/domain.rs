@@ -54,3 +54,25 @@ fn identifier_and_main_window_match_the_tauri_config() {
     assert_eq!(config["identifier"], IDENTIFIER);
     assert_eq!(config["app"]["windows"][0]["label"], MAIN_WINDOW);
 }
+
+#[test]
+fn long_frontend_messages_are_cut_on_a_character_boundary() {
+    assert_eq!(truncate_chars("court", 10), "court");
+    let cut = truncate_chars(&"é".repeat(50), 10);
+    assert_eq!(cut.chars().count(), 11);
+    assert!(cut.ends_with('…'));
+}
+
+#[test]
+fn frontend_errors_are_rate_limited_per_window() {
+    let mut limiter = FrontendErrorLimiter::default();
+    for _ in 0..FRONTEND_MAX_PER_WINDOW {
+        assert!(limiter.allow(100));
+    }
+    assert!(!limiter.allow(100), "au-delà du plafond : refusé");
+    assert!(!limiter.allow(100 + FRONTEND_WINDOW_SECS - 1));
+    assert!(
+        limiter.allow(100 + FRONTEND_WINDOW_SECS),
+        "nouvelle fenêtre"
+    );
+}

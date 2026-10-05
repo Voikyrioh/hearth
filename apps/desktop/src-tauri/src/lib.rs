@@ -30,6 +30,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         commands::set_launch_at_startup,
         commands::get_app_version,
         commands::open_logs_folder,
+        commands::log_frontend_error,
     ])
 }
 

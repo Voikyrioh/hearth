@@ -68,3 +68,47 @@ where
 {
     args.into_iter().any(|arg| arg.as_ref() == MINIMIZED_FLAG)
 }
+
+/// Taille maximale, en caractères, d'un message d'erreur de l'interface écrit au
+/// journal (au-delà : coupé, avec un point de suspension).
+pub const FRONTEND_MESSAGE_MAX_CHARS: usize = 2000;
+/// Nombre maximal de lignes d'erreur de l'interface par fenêtre de temps.
+pub const FRONTEND_MAX_PER_WINDOW: u32 = 20;
+/// Durée de la fenêtre de débit, en secondes.
+pub const FRONTEND_WINDOW_SECS: u64 = 60;
+
+/// Coupe `text` à `max` caractères (jamais au milieu d'un caractère).
+pub fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut cut: String = text.chars().take(max).collect();
+    cut.push('…');
+    cut
+}
+
+/// Limiteur de débit des erreurs remontées par l'interface : une boucle d'erreurs
+/// côté web ne doit pas remplir le journal. Fenêtre fixe ; l'horloge est passée
+/// en paramètre (secondes écoulées depuis un instant de référence) pour rester pure.
+#[derive(Debug, Default)]
+pub struct FrontendErrorLimiter {
+    window_start_secs: u64,
+    count: u32,
+}
+
+impl FrontendErrorLimiter {
+    /// Vrai si une erreur survenue à `now_secs` peut être écrite.
+    pub fn allow(&mut self, now_secs: u64) -> bool {
+        if now_secs.saturating_sub(self.window_start_secs) >= FRONTEND_WINDOW_SECS
+            || self.count == 0
+        {
+            self.window_start_secs = now_secs;
+            self.count = 0;
+        }
+        if self.count >= FRONTEND_MAX_PER_WINDOW {
+            return false;
+        }
+        self.count += 1;
+        true
+    }
+}
