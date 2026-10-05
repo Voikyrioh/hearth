@@ -67,6 +67,10 @@ Script shell ou Rust minimal `deploy/supervisor` :
 
 `GET /api/v1/agent/update` → `{ current, managed, in_progress, last: { version, outcome, at } }`.
 
+## Réalisation (HRT-17)
+
+Les écarts avec l'esquisse ci-dessus, décidés à la réalisation (voir ADR-0014) : le superviseur est une copie de l'ancien binaire (`hearth-agent update-supervise`), lancée par `systemd-run` hors du groupe de contrôle du service ; les fichiers sont dans `<données>/update/` (pas `/tmp`, pas `/var/run`) ; la demande porte aussi la somme (`sha256`) ; le fichier est téléchargé en mémoire et vérifié (somme puis signature) avant toute écriture ; le résultat est `update/last.json` (pas `last_update.json`) et se lit par `GET /agent/update` et `GET /agent/update/last` ; le contrôle exige la nouvelle version **et** le même certificat. Contrat : `docs/open-api/agent-update.md`.
+
 ## Quand NE PAS l'appliquer / limites
 
 - Offline update : si agent jamais accède Internet (machine air-gap), mise à jour manuelle ou flux interne.

@@ -16,3 +16,4 @@ pub mod session_token;
 pub mod sessions;
 pub mod stream;
 pub mod text;
+pub mod update;

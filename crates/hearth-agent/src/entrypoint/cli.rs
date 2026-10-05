@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::domain::accounts::Role;
 
 #[derive(Debug, Parser)]
-#[command(name = "hearth-agent", version, about = "Agent Hearth")]
+#[command(name = "hearth-agent", version = crate::build_info::VERSION, about = "Agent Hearth")]
 pub struct Cli {
     /// Dossier de données (certificat, clé, base). Prioritaire sur `HEARTH_DATA_DIR`.
     #[arg(long, global = true, value_name = "DIR")]
@@ -36,9 +36,20 @@ pub enum Command {
     /// Désinstalle l'agent : arrête et retire le service et le binaire ; les comptes, le journal
     /// et la configuration sont conservés ou supprimés selon le choix.
     Uninstall(UninstallArgs),
+    /// Le superviseur d'une mise à jour de l'agent (lancé par l'agent lui-même, détaché ; pas une
+    /// commande d'administration).
+    #[command(hide = true)]
+    UpdateSupervise {
+        #[arg(long, value_name = "FICHIER")]
+        job: PathBuf,
+    },
     /// Fabrique le haché Argon2id (format PHC) d'un mot de passe, pour `HEARTH_ADMIN_PASSWORD_HASH` :
     /// le mot de passe est saisi sans écho avec confirmation, le haché est écrit sur la sortie
     /// standard. Le mot de passe n'apparaît jamais sur une ligne de commande.
+    /// Écrit la clé de mise à jour embarquée et ce qui distingue cette construction d'une
+    /// publication (contrôle de `cargo xtask agent`).
+    #[command(hide = true)]
+    BuildInfo,
     HashPassword {
         /// Le compte auquel le mot de passe est destiné (le mot de passe ne doit pas le contenir).
         #[arg(long, value_name = "NOM")]

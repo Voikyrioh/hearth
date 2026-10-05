@@ -8,8 +8,9 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
+use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, ErrorDetail};
-use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, Topic};
+use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, Topic, UpdateMessage};
 use serde_json::Value;
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, timeout};
@@ -58,7 +59,11 @@ pub async fn run(mut socket: WebSocket, state: AppState, permit: Permit) {
 }
 
 /// Envoie un message ; `false` si le client ne le reçoit plus (coupé ou trop lent).
-async fn send(socket: &mut WebSocket, settings: &StreamSettings, message: &ServerMessage) -> bool {
+async fn send(
+    socket: &mut WebSocket,
+    settings: &StreamSettings,
+    message: &impl serde::Serialize,
+) -> bool {
     let Ok(text) = serde_json::to_string(message) else {
         tracing::error!("message du flux impossible à sérialiser");
         return true;
@@ -90,6 +95,8 @@ fn from_api(error: ApiError) -> ServerMessage {
 struct Subscriptions {
     metrics: Option<broadcast::Receiver<Arc<Sample>>>,
     audit: Option<broadcast::Receiver<AuditRecord>>,
+    /// Progression de la mise à jour de l'agent (tout compte authentifié).
+    update: Option<broadcast::Receiver<UpdateProgress>>,
     /// Instant monotone du dernier échantillon envoyé (snapshot compris) : pas de doublon
     /// (BR-DASH-011), même si l'horloge murale recule.
     last_sent: Option<time::Duration>,
@@ -222,6 +229,15 @@ async fn serve(socket: &mut WebSocket, state: &AppState, mut permit: Permit) -> 
                 Err(RecvError::Lagged(missed)) => tracing::debug!(missed, "abonné lent : événements d'audit perdus"),
                 Err(RecvError::Closed) => subscriptions.audit = None,
             },
+            progress = next(&mut subscriptions.update) => match progress {
+                Ok(progress) => {
+                    if !send(socket, &settings, &UpdateMessage::Update(progress)).await {
+                        return None;
+                    }
+                }
+                Err(RecvError::Lagged(missed)) => tracing::debug!(missed, "abonné lent : étapes de mise à jour perdues"),
+                Err(RecvError::Closed) => subscriptions.update = None,
+            },
             _ = check.tick() => {
                 match state.sessions.authenticate(token.expose()).await {
                     Ok(current) => {
@@ -351,7 +367,20 @@ async fn handle_text(
         }
         Ok(ClientMessage::Subscribe { topics }) => {
             subscriptions.last_subscribe = Some(Instant::now());
-            subscribe(state, session, subscriptions, &topics).await
+            let replies = subscribe(state, session, subscriptions, &topics).await;
+            // La mise à jour : ouverte à tout compte authentifié. L'état courant part d'abord, un
+            // client qui se reconnecte en plein redémarrage voit où elle en est.
+            subscriptions.update = None;
+            if topics.contains(&Topic::Update) {
+                let (receiver, current) = state.update.subscribe();
+                subscriptions.update = Some(receiver);
+                if let Some(progress) = current
+                    && !send(socket, &settings, &UpdateMessage::Update(progress)).await
+                {
+                    return Handled::Stop;
+                }
+            }
+            replies
         }
         Ok(ClientMessage::Auth { .. }) => vec![error_message(
             ErrorCode::ValidationError,

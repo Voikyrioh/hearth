@@ -12,6 +12,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use hearth_proto::api::hello::HelloResponse;
 use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::headers::API_VERSION;
 use hearth_proto::product::PRODUCT_NAME;
@@ -20,6 +21,9 @@ use rustls::crypto::{CryptoProvider, verify_tls13_signature};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, ClientConnection, DigitallySignedStruct, SignatureScheme, StreamOwned};
 use thiserror::Error;
+
+use crate::application::ports::{Greeting, HelloProbe};
+use crate::domain::install::Version;
 
 #[derive(Debug, Error)]
 pub enum ProbeError {
@@ -87,8 +91,35 @@ impl ServerCertVerifier for CaptureVerifier {
     }
 }
 
+/// Ce que répond l'agent : l'empreinte du certificat servi, et sa version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Greeted {
+    pub fingerprint: Fingerprint,
+    pub agent_version: String,
+}
+
 /// Une demande de `/api/v1/hello` : l'empreinte du certificat servi si l'agent répond bien.
 pub fn hello(addr: SocketAddr, timeout: Duration) -> Result<Fingerprint, ProbeError> {
+    greeting(addr, timeout).map(|greeted| greeted.fingerprint)
+}
+
+/// Le contrôle du superviseur de mise à jour : `GET /api/v1/hello` rendu avec la version de
+/// l'agent qui a répondu.
+pub struct AgentHelloProbe;
+
+impl HelloProbe for AgentHelloProbe {
+    fn hello(&self, addr: SocketAddr, timeout: Duration) -> Result<Greeting, String> {
+        let greeted = greeting(addr, timeout).map_err(|error| error.to_string())?;
+        let version = Version::parse(&greeted.agent_version).map_err(|error| error.to_string())?;
+        Ok(Greeting {
+            version,
+            fingerprint: greeted.fingerprint,
+        })
+    }
+}
+
+/// Comme `hello`, avec la version annoncée.
+pub fn greeting(addr: SocketAddr, timeout: Duration) -> Result<Greeted, ProbeError> {
     let tls_error = |detail: String| ProbeError::Tls { addr, detail };
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let verifier = Arc::new(CaptureVerifier {
@@ -136,5 +167,15 @@ pub fn hello(addr: SocketAddr, timeout: Duration) -> Result<Fingerprint, ProbeEr
         });
     }
     let seen = *verifier.seen.lock().unwrap_or_else(PoisonError::into_inner);
-    seen.ok_or_else(|| tls_error("aucun certificat présenté".to_owned()))
+    let fingerprint = seen.ok_or_else(|| tls_error("aucun certificat présenté".to_owned()))?;
+    let body = text.split_once("\r\n\r\n").map_or("", |(_, body)| body);
+    let hello: HelloResponse =
+        serde_json::from_str(body).map_err(|error| ProbeError::Response {
+            addr,
+            detail: format!("réponse illisible : {error}"),
+        })?;
+    Ok(Greeted {
+        fingerprint,
+        agent_version: hello.agent_version,
+    })
 }

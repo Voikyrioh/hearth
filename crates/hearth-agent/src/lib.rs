@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod application;
+pub mod build_info;
 pub mod domain;
 pub mod entrypoint;
 pub mod infrastructure;

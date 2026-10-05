@@ -36,6 +36,14 @@ impl MachineInfo for FakeMachine {
 }
 
 pub fn state(env: &Env) -> AppState {
+    state_with(env, super::update::Rig::new(env, false, false).service)
+}
+
+/// Comme `state`, avec ce service de mise à jour.
+pub fn state_with(
+    env: &Env,
+    update: Arc<hearth_agent::application::update::UpdateService>,
+) -> AppState {
     AppState {
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),
@@ -53,6 +61,7 @@ pub fn state(env: &Env) -> AppState {
             env.clock.clone(),
             Arc::new(SystemMonotonic::new()),
         )),
+        update,
         stream: StreamContext::new(StreamSettings::default()),
     }
 }
@@ -91,8 +100,13 @@ pub struct Call<'a> {
 
 impl Api {
     pub fn new(env: &Env) -> Self {
+        Self::from_state(state(env))
+    }
+
+    /// Le routeur de cet état : les tests de mise à jour y mettent leur service.
+    pub fn from_state(state: AppState) -> Self {
         Self {
-            router: router(state(env)),
+            router: router(state),
             addr: SocketAddr::from(([10, 0, 0, 7], 40_000)),
         }
     }

@@ -33,7 +33,12 @@ impl InstallPaths {
 
     /// Le fichier de sauvegarde du binaire remplacé.
     pub fn backup(&self) -> PathBuf {
-        self.binary.with_file_name(".hearth-agent.previous")
+        Self::backup_of(&self.binary)
+    }
+
+    /// Le fichier de sauvegarde de ce binaire (l'installation comme la mise à jour s'en servent).
+    pub fn backup_of(binary: &Path) -> PathBuf {
+        binary.with_file_name(".hearth-agent.previous")
     }
 }
 

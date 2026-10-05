@@ -108,6 +108,7 @@ fn path_param(pattern: &str, path: &str, name: &str) -> Option<String> {
 fn forbidden_message(action: Option<AuditAction>) -> &'static str {
     match action {
         Some(AuditAction::AuditRead) => "Tu n'as pas la permission de lire le journal d'activité",
+        Some(AuditAction::AgentUpdate) => "Seul un administrateur peut mettre à jour l'agent",
         _ => "Tu n'as pas la permission pour accéder à la gestion des comptes",
     }
 }
@@ -130,6 +131,8 @@ fn failure_of(code: ErrorCode) -> Option<Outcome> {
         ErrorCode::NotFound => Some(Outcome::Failed(Reason::NotFound)),
         ErrorCode::Busy => Some(Outcome::Failed(Reason::Busy)),
         ErrorCode::InternalError => Some(Outcome::Failed(Reason::Internal)),
+        ErrorCode::ManagedInstall => Some(Outcome::Failed(Reason::ManagedInstall)),
+        ErrorCode::BadSignature => Some(Outcome::Failed(Reason::BadSignature)),
         ErrorCode::Unauthenticated
         | ErrorCode::InvalidCredentials
         | ErrorCode::SessionExpired

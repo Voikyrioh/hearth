@@ -159,6 +159,8 @@ pub enum Target {
     AccountRole(Username, Role),
     /// Une route de l'API, par son motif (`/accounts/{id}`) : quand la cible n'est pas connue.
     Route(&'static str),
+    /// La version visée d'une mise à jour de l'agent (`0.2.0`).
+    AgentVersion(String),
 }
 
 impl Target {
@@ -168,6 +170,7 @@ impl Target {
             Self::Account(username) => Some(username.to_string()),
             Self::AccountRole(username, role) => Some(format!("{username} ({})", role.label())),
             Self::Route(pattern) => Some((*pattern).to_owned()),
+            Self::AgentVersion(version) => Some(format!("version {version}")),
         }
     }
 }
@@ -196,6 +199,18 @@ pub enum Reason {
     NotFound,
     Busy,
     Internal,
+    /// Une mise à jour de l'agent est déjà en cours (BR-UPDATE-012).
+    UpdateInProgress,
+    /// Installation gérée par le système : pas de mise à jour à distance.
+    ManagedInstall,
+    /// La signature de la mise à jour est refusée.
+    BadSignature,
+    /// Le téléchargement de la mise à jour n'a pas abouti.
+    DownloadFailed,
+    /// La mise à jour a échoué avant tout échange de binaire.
+    UpdateFailed,
+    /// Le nouvel agent n'a pas répondu : l'ancien binaire est revenu (BR-UPDATE-015).
+    RolledBack,
     /// Entrée de synthèse de débordement (`repeat::RepeatFilter`) : trop de groupes différents.
     TooVaried,
 }
@@ -218,6 +233,14 @@ impl Reason {
             Self::NotFound => "cible introuvable".to_owned(),
             Self::Busy => "agent occupé".to_owned(),
             Self::Internal => "erreur interne".to_owned(),
+            Self::UpdateInProgress => "mise à jour déjà en cours".to_owned(),
+            Self::ManagedInstall => "installation gérée par le système".to_owned(),
+            Self::BadSignature => "signature invalide".to_owned(),
+            Self::DownloadFailed => "téléchargement impossible".to_owned(),
+            Self::UpdateFailed => "mise à jour échouée".to_owned(),
+            Self::RolledBack => {
+                "le nouvel agent n'a pas répondu, retour à la version précédente".to_owned()
+            }
             Self::TooVaried => "activité trop variée".to_owned(),
         }
     }

@@ -13,6 +13,9 @@ pub const MIN_FREE_BYTES: u64 = 256 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DataDirState {
     pub exists: bool,
+    /// C'est un dossier (un fichier à cet endroit est refusé : sans cela, il serait dit « ouvert
+    /// à d'autres utilisateurs », ce qui est trompeur).
+    pub directory: bool,
     /// Appartient à root (sans objet s'il n'existe pas).
     pub owned_by_root: bool,
     /// Fermé aux autres utilisateurs (0700, sans objet s'il n'existe pas).
@@ -22,6 +25,7 @@ pub struct DataDirState {
 impl DataDirState {
     pub const ABSENT: Self = Self {
         exists: false,
+        directory: true,
         owned_by_root: true,
         private: true,
     };
@@ -83,6 +87,10 @@ pub enum Blocker {
         reason: &'static str,
     },
     #[error(
+        "Le chemin du dossier de données existe mais n'est pas un dossier. Retire ce fichier ou choisis un autre dossier. Rien n'a été modifié."
+    )]
+    DataDirNotDirectory,
+    #[error(
         "Le dossier de données existe mais n'appartient pas à root. Corrige-le (chown root) ou choisis un autre dossier. Rien n'a été modifié."
     )]
     DataDirNotRoot,
@@ -132,6 +140,10 @@ pub fn check_prerequisites(found: &Prerequisites) -> Result<(), Blocker> {
         }
     }
     if found.data_dir_state.exists {
+        // FIX:01M460GA87EM6ZF9M5R9CWVXW3 : un fichier à cet endroit n'est pas « ouvert aux autres ».
+        if !found.data_dir_state.directory {
+            return Err(Blocker::DataDirNotDirectory);
+        }
         if !found.data_dir_state.owned_by_root {
             return Err(Blocker::DataDirNotRoot);
         }
@@ -207,6 +219,7 @@ b",
         let found = Prerequisites {
             data_dir_state: DataDirState {
                 exists: true,
+                directory: true,
                 owned_by_root: false,
                 private: true,
             },
@@ -216,6 +229,7 @@ b",
         let found = Prerequisites {
             data_dir_state: DataDirState {
                 exists: true,
+                directory: true,
                 owned_by_root: true,
                 private: false,
             },
@@ -225,12 +239,27 @@ b",
         let found = Prerequisites {
             data_dir_state: DataDirState {
                 exists: true,
+                directory: true,
                 owned_by_root: true,
                 private: true,
             },
             ..ok()
         };
         assert_eq!(check_prerequisites(&found), Ok(()));
+        // Un fichier à la place du dossier : dit tel quel, pas « ouvert à d'autres utilisateurs ».
+        let found = Prerequisites {
+            data_dir_state: DataDirState {
+                exists: true,
+                directory: false,
+                owned_by_root: true,
+                private: false,
+            },
+            ..ok()
+        };
+        assert_eq!(
+            check_prerequisites(&found),
+            Err(Blocker::DataDirNotDirectory)
+        );
     }
 
     #[test]

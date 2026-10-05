@@ -32,7 +32,7 @@ impl HelloService {
         Self {
             description: AgentDescription {
                 product: PRODUCT_NAME,
-                agent_version: env!("CARGO_PKG_VERSION"),
+                agent_version: crate::build_info::VERSION,
                 api_min: API_MIN_SUPPORTED,
                 api_max: API_VERSION,
                 machine_name: machine.machine_name(),

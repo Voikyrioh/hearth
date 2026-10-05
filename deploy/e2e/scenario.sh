@@ -274,7 +274,8 @@ umount /tmp/noexec
 ok "install.sh : TMPDIR monté sans droit d'exécution, repli sur un autre dossier temporaire"
 
 # Un téléchargement tronqué n'exécute rien : tout est dans main, appelé à la dernière ligne.
-head -c 3000 /deploy/install.sh | run sh -s -- --yes && die "un script tronqué ne devrait pas réussir"
+# Coupé dans les dernières lignes de `main` (qui n'est appelé qu'à la toute dernière ligne).
+head -c "$(($(wc -c </deploy/install.sh) - 300))" /deploy/install.sh | run sh -s -- --yes && die "un script tronqué ne devrait pas réussir"
 must_not_say "Installation de l'agent Hearth"
 nothing_left "script tronqué"
 ok "install.sh tronqué : rien n'est exécuté"
@@ -305,7 +306,7 @@ ok "hash-password : haché Argon2id fabriqué à partir d'une saisie sans écho"
 cat /deploy/install.sh | run env HEARTH_ADMIN_USER=$USER_NAME "HEARTH_ADMIN_PASSWORD_HASH=$HASH" \
     HEARTH_RELEASE_URL="$REL" \
     sh -s -- --yes || die "la première installation a échoué"
-must_say "Somme SHA-256 vérifiée."
+must_say "Somme SHA-256 vérifiée, mais elle vient de la même adresse"
 must_say "Installation en cours..."
 must_say "Démarrage du service..."
 must_say "Installation réussie. L'agent démarre automatiquement avec ton serveur."

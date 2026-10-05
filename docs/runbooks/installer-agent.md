@@ -101,10 +101,21 @@ Un prérequis qui manque, une erreur ou Ctrl+C : l'agent annonce ce qui s'est pa
 | « Espace disque insuffisant… » | moins de 256 Mio libres | libérer de l'espace |
 | « systemd est introuvable… » | pas de systemd | `--managed` |
 | « Une installation est déjà en cours… » | une autre installation tient le verrou | attendre qu'elle se termine |
-| « Une version plus récente… est déjà installée » | le binaire installé est plus récent | rien : l'agent ne rétrograde pas |
+| « Une version plus récente… est déjà installée » | le binaire installé est plus récent | rien : le script n'installe jamais une version plus ancienne que le binaire installé |
+| « Le chemin du dossier de données existe mais n'est pas un dossier » | un fichier occupe l'emplacement | le retirer, ou autre dossier |
 | « Aucune version de l'agent n'est publiée… » | pas de publication de versions | `--binary` ou `HEARTH_RELEASE_URL` |
 | « Le téléchargement n'a pas abouti… » | réseau coupé, adresse injoignable | relancer (aucun cache partiel n'est utilisé) |
 | « La somme SHA-256 du binaire ne correspond pas… » | binaire altéré ou mauvaise somme | vérifier la source, ne pas installer |
+
+## Réinstaller une version plus ancienne après `uninstall --keep-data`
+
+Le refus de rétrograder ne porte que sur le **binaire installé**. Après `uninstall --keep-data`, le binaire n'est plus là, mais la base reste, et une version plus récente a pu la migrer. Réinstaller dessus une version plus ancienne n'est pas refusé par `install` : c'est le **démarrage** de l'agent qui échoue (SQLx refuse une base dont des migrations lui sont inconnues). L'installation ne reçoit aucune réponse, s'annule et défait tout (le binaire d'avant, l'unité, l'activation au démarrage) ; la base n'est pas touchée. Pour revenir en arrière malgré tout : réinstaller la version qui avait migré la base, ou `uninstall --purge` (les comptes et le journal sont perdus).
+
+## Variables d'environnement et messages trompeurs
+
+- **`install.sh` hérite de l'environnement de `sudo`** : les variables `HEARTH_ADMIN_USER`, `HEARTH_ADMIN_PASSWORD` et `HEARTH_ADMIN_PASSWORD_HASH` qui traînent dans le terminal sont lues par l'installation. Un mot de passe oublié dans l'environnement crée donc un premier compte sans qu'il soit demandé. Vérifier avec `env | grep HEARTH_` avant de lancer. Les sous-processus de l'installation (`systemctl`, `df`, l'ancien binaire) ne reçoivent jamais ces variables.
+- **Somme SHA-256** : `install.sh` dit d'où elle vient. Donnée par `--sha256`, elle protège contre un binaire abîmé **et** contre une origine compromise. Publiée à côté du binaire (`ADRESSE.sha256`, même origine), elle ne protège que d'un téléchargement abîmé : le script le dit.
+- **Redirections** : le script ne suit une redirection que si elle reste en HTTPS (avec `curl` comme avec `wget`).
 
 ## Dépannage
 

@@ -46,7 +46,7 @@ Une entrée :
 - `origin.kind` : `client` (adresse de la connexion et nom du poste, `name` absent si le poste n'est pas identifié, texte « 10.0.0.7 (inconnu) »), `cli` (« ligne de commande du serveur »), `assistant`.
 - `target` : un compte (`paul`, `paul (Lecture seule)` pour un changement de rôle) ou le motif de la route (`/audit`, `/accounts`…) quand la route n'a pas de compte pour cible. Pour un refus ou un échec sur `/accounts/{id}…`, la cible est le nom du compte, résolu avant l'action (l'action peut le supprimer) ; si le compte n'existe pas, le motif `/accounts/{id}`.
 - `repeat_count` : 0 pour une entrée ordinaire ; pour une entrée de synthèse, le nombre d'autres fois où le même refus ou échec (même compte, même action, même résultat, même cible, même raison ; l'origine de la synthèse est celle de la dernière occurrence) s'est produit dans la minute (BR-AUDIT-007) ; la raison le dit aussi (« … (999 autres fois en 1 min) »). Une entrée « activité trop variée, N événements regroupés » résume le débordement du regroupement.
-- `outcome` : `ok`, `denied`, `failed` ; `reason` dit pourquoi pour les deux derniers (« identifiants incorrects », « identifiant invalide », « trop de tentatives, attente de 60 s », « lecture seule », « données invalides », « identifiant déjà utilisé », « mot de passe actuel incorrect », « dernier administrateur », « conflit avec l'état du serveur », « cible introuvable », « agent occupé », « erreur interne »).
+- `outcome` : `ok`, `denied`, `failed` ; `reason` dit pourquoi pour les deux derniers (« identifiants incorrects », « identifiant invalide », « trop de tentatives, attente de 60 s », « lecture seule », « données invalides », « identifiant déjà utilisé », « mot de passe actuel incorrect », « dernier administrateur », « conflit avec l'état du serveur », « cible introuvable », « agent occupé », « erreur interne », et pour `agent.update` : « mise à jour déjà en cours », « installation gérée par le système », « signature invalide », « téléchargement impossible », « mise à jour échouée », « le nouvel agent n'a pas répondu, retour à la version précédente »).
 
 ### Codes d'action
 
@@ -63,7 +63,7 @@ Une entrée :
 | `sessions.revoke` | Fermeture des sessions | |
 | `accounts.read` | Consultation des comptes | Seulement refusée. |
 | `audit.read` | Tentative de lecture du journal | Seulement refusée. |
-| `agent.update` | Mise à jour de l'agent | Écrite avec la mise à jour de l'agent (HRT-17). |
+| `agent.update` | Mise à jour de l'agent | Refus (lecture seule, déjà en cours, installation gérée, signature) et résultat final de chaque mise à jour lancée : « Réussi », ou « Échoué » avec « téléchargement impossible », « signature invalide », « mise à jour échouée », « le nouvel agent n'a pas répondu, retour à la version précédente ». Cible : « version X.Y.Z » (BR-UPDATE-024). |
 
 ## `GET /api/v1/audit/export` (admin)
 

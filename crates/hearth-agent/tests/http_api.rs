@@ -932,6 +932,12 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
 
     let mut swept = 0;
     for endpoint in ENDPOINTS.iter().filter(|endpoint| endpoint.modifies()) {
+        // La mise à jour de l'agent répond `202` et s'exécute côté serveur : son entrée réussie est
+        // écrite par l'agent qui revient (BR-UPDATE-024), pas par la requête. Elle est couverte par
+        // `update_use_cases.rs` et `update_http.rs`.
+        if endpoint.path == "/agent/update" {
+            continue;
+        }
         // Une session fraîche pour la déconnexion (sa connexion s'écrit avant la mesure).
         let logout_token = if endpoint.path == "/sessions/current" {
             Some(api.token_of("marie").await)
@@ -1021,7 +1027,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         .filter(|endpoint| !endpoint.modifies() && endpoint.audit.is_none())
     {
         let path = match endpoint.path {
-            "/hello" | "/me" | "/machine" | "/metrics/history" => endpoint.path.to_owned(),
+            "/hello" | "/me" | "/machine" | "/metrics/history" | "/agent/update"
+            | "/agent/update/last" => endpoint.path.to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
             "/stream" => continue, // le flux se teste en WebSocket (stream_https.rs)
             other => panic!("route de lecture sans scénario : {other}"),

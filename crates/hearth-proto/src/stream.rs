@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::audit::AuditEventItem;
 use crate::api::machine::MachineResponse;
 use crate::api::metrics::Sample;
+use crate::api::update::UpdateProgress;
 use crate::error::ErrorDetail;
 
 /// Délai laissé au client pour envoyer `auth` après l'ouverture.
@@ -37,6 +38,9 @@ pub enum Topic {
     Audit,
     /// Fin de session : toujours reçue, même sans abonnement.
     Session,
+    /// Progression de la mise à jour de l'agent (tout compte authentifié) : l'état courant à
+    /// l'abonnement, puis un message par changement d'étape ou de pourcentage entier.
+    Update,
 }
 
 /// Messages du client vers l'agent.
@@ -74,6 +78,15 @@ impl fmt::Debug for ClientMessage {
 pub enum SessionNotice {
     Revoked,
     Expired,
+}
+
+/// Message du sujet `update`, envoyé à part des `ServerMessage` : un client qui ne le connaît pas
+/// l'ignore (trame de type inconnu), ce qui laisse `ServerMessage` inchangé. Les champs de
+/// [`UpdateProgress`] sont à plat à côté de `type`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UpdateMessage {
+    Update(UpdateProgress),
 }
 
 /// Messages de l'agent vers le client.
@@ -127,6 +140,36 @@ mod tests {
             gpus: vec![],
             temps: vec![],
         }
+    }
+
+    #[test]
+    fn an_update_message_is_flat_next_to_its_type_and_old_clients_ignore_it() {
+        let message = UpdateMessage::Update(UpdateProgress {
+            version: "0.2.0".into(),
+            step: crate::api::update::UpdateStep::Download,
+            percent: Some(35),
+            outcome: None,
+            reason: None,
+        });
+        let value = serde_json::to_value(&message).expect("json");
+        assert_eq!(value["type"], "update");
+        assert_eq!(value["step"], "download");
+        assert_eq!(value["percent"], 35);
+        // `ServerMessage` ne le connaît pas : l'ancien client le lit comme une trame inconnue.
+        assert!(serde_json::from_value::<ServerMessage>(value.clone()).is_err());
+        assert_eq!(
+            serde_json::from_value::<UpdateMessage>(value).expect("update"),
+            message
+        );
+        let subscribe: ClientMessage =
+            serde_json::from_value(json!({ "type": "subscribe", "topics": ["update"] }))
+                .expect("subscribe");
+        assert_eq!(
+            subscribe,
+            ClientMessage::Subscribe {
+                topics: vec![Topic::Update]
+            }
+        );
     }
 
     #[test]

@@ -35,6 +35,11 @@ pub fn is_unsafe_char(c: char) -> bool {
         )
 }
 
+/// Octets en hexadécimal minuscule (une seule copie pour la somme et l'empreinte).
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Le texte sans caractère de `is_unsafe_char`.
 pub fn strip_unsafe(text: &str) -> String {
     text.chars().filter(|&c| !is_unsafe_char(c)).collect()

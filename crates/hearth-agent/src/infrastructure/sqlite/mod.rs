@@ -122,18 +122,63 @@ pub async fn count_admins_read_only(data_dir: &Path) -> Result<u64, DatabaseErro
             path: path.clone(),
             message: error.to_string(),
         })?;
-    let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM accounts WHERE role = 'admin'")
-        .fetch_one(&pool)
-        .await
-        // Table absente : la base n'a jamais été migrée, donc aucun compte.
-        .unwrap_or(0);
+    let counted =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM accounts WHERE role = 'admin'")
+            .fetch_one(&pool)
+            .await;
     pool.close().await;
-    Ok(u64::try_from(count).unwrap_or(0))
+    // FIX:01M45V0PZB5TRE3A7KQHAHJNXD : seule la table absente (base jamais migrée) vaut « aucun
+    // compte » ; toute autre erreur de lecture (base verrouillée, corrompue, droits) est rendue,
+    // sinon l'installation croirait la machine sans administrateur et en créerait un autre.
+    match counted {
+        Ok(count) => Ok(u64::try_from(count).unwrap_or(0)),
+        Err(error) if is_missing_table(&error) => Ok(0),
+        Err(error) => Err(DatabaseError::Open {
+            path,
+            message: format!("lecture des comptes impossible : {error}"),
+        }),
+    }
+}
+
+/// L'erreur de SQLite « no such table » : la table n'existe pas.
+fn is_missing_table(error: &sqlx::Error) -> bool {
+    matches!(error, sqlx::Error::Database(db) if db.message().starts_with("no such table"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_database_name_is_the_one_the_purge_knows() {
+        assert_eq!(DATABASE_FILE, crate::domain::install::DATABASE_FILE);
+    }
+
+    // FIX:01M45V0PZB5TRE3A7KQHAHJNXD
+    #[tokio::test]
+    async fn counting_admins_tells_a_missing_table_from_an_unreadable_database() {
+        let dir = crate::infrastructure::data_dir::private_tempdir();
+        // Base jamais migrée (table absente) : aucun compte.
+        let options = SqliteConnectOptions::new()
+            .filename(dir.path().join(DATABASE_FILE))
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE unrelated (x INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        assert_eq!(count_admins_read_only(dir.path()).await.unwrap(), 0);
+
+        // Fichier qui n'est pas une base : une erreur, jamais « 0 administrateur ».
+        let broken = crate::infrastructure::data_dir::private_tempdir();
+        std::fs::write(broken.path().join(DATABASE_FILE), vec![7u8; 4096]).unwrap();
+        assert!(count_admins_read_only(broken.path()).await.is_err());
+    }
 
     #[tokio::test]
     async fn opening_creates_the_file_in_wal_mode_with_foreign_keys() {

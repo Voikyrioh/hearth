@@ -138,6 +138,28 @@ impl WsClient {
         }
     }
 
+    /// Prochaine progression de mise à jour (les autres messages sont ignorés).
+    pub async fn next_update(&mut self) -> hearth_proto::stream::UpdateMessage {
+        loop {
+            let frame = timeout(WAIT, self.socket.next())
+                .await
+                .expect("aucun message dans le délai")
+                .transpose()
+                .unwrap_or(None);
+            match frame {
+                Some(Message::Text(text)) => {
+                    if let Ok(message) =
+                        serde_json::from_str::<hearth_proto::stream::UpdateMessage>(text.as_str())
+                    {
+                        return message;
+                    }
+                }
+                Some(Message::Close(_)) | None => panic!("flux fermé avant la progression"),
+                Some(_) => {}
+            }
+        }
+    }
+
     /// Prochain message, qui doit exister.
     pub async fn expect(&mut self) -> ServerMessage {
         self.next().await.expect("un message")

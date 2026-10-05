@@ -9,6 +9,9 @@ use std::time::Duration;
 use thiserror::Error;
 
 mod install;
+mod update;
+
+pub use update::{Updating, run_supervisor, update_service};
 
 use crate::application::accounts::AccountService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
@@ -60,6 +63,10 @@ pub enum AppError {
     Account(#[from] AccountCliError),
     #[error(transparent)]
     Install(#[from] InstallCliError),
+    #[error("mise à jour de l'agent : {0}")]
+    Update(String),
+    #[error("superviseur de mise à jour : {detail}")]
+    Supervise { detail: String },
     #[error("chemin du binaire en cours d'exécution introuvable : {0}")]
     CurrentExe(std::io::Error),
     #[error(transparent)]
@@ -267,6 +274,25 @@ pub async fn start_with_metering(
     adapters: &Adapters,
     metering: Metering,
 ) -> Result<RunningAgent, AppError> {
+    start_with_all(
+        config,
+        database,
+        adapters,
+        metering,
+        Updating::production(config)?,
+    )
+    .await
+}
+
+/// Comme `start_with_metering`, avec ces adaptateurs de mise à jour (les tests en injectent des
+/// faux).
+pub async fn start_with_all(
+    config: &AgentConfig,
+    database: &Database,
+    adapters: &Adapters,
+    metering: Metering,
+    updating: Updating,
+) -> Result<RunningAgent, AppError> {
     let store = FileIdentityStore::new(&config.data_dir);
     let identity = load_identity(&store)?;
     let tls = tls::server_config(&store)?;
@@ -296,6 +322,13 @@ pub async fn start_with_metering(
     metrics.warm_up().await;
     let stream = StreamContext::new(metering.stream);
     let closing = stream.clone();
+    let update = update_service(
+        updating,
+        addr,
+        identity.fingerprint,
+        services.audit_sink.clone(),
+        adapters.clock.clone(),
+    )?;
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -304,10 +337,17 @@ pub async fn start_with_metering(
         audit: services.audit,
         sink: services.audit_sink,
         metrics: metrics.clone(),
+        update: update.clone(),
         stream,
     });
     // À l'arrêt, les flux ouverts se ferment d'eux-mêmes avant que le serveur n'attende les connexions.
     let server = http::spawn(listener, tls, router)?.on_shutdown(move || closing.begin_shutdown());
+    // Le résultat d'une mise à jour que personne n'a encore annoncé (le nouvel agent après un
+    // échange, l'ancien après un retour en arrière) part au journal et au flux.
+    tokio::spawn({
+        let update = update.clone();
+        async move { update.resume().await }
+    });
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
     let sampler = tasks::spawn_sampler(metrics, metering.period);
     let audit_flush =
@@ -330,6 +370,16 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
         Command::Install(args) => return install::run_install(&cli, &args).await,
         Command::Uninstall(args) => return install::run_uninstall(&cli, &args).await,
         Command::HashPassword { user } => return install::run_hash_password(&user).await,
+        Command::UpdateSupervise { job } => return run_supervisor(&job),
+        Command::BuildInfo => {
+            let key = crate::infrastructure::update::EMBEDDED_PUBLIC_KEY;
+            println!(
+                "cle: {}\nnotes: {}",
+                key.lines().next().unwrap_or(""),
+                crate::build_info::BUILD_NOTES
+            );
+            return Ok(());
+        }
         _ => {}
     }
     let config = load_config(&cli)?;
@@ -352,8 +402,18 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
             account::execute(&action, &service, &passwords, &mut std::io::stdout()).await?;
             Ok(())
         }
-        Command::Install(_) | Command::Uninstall(_) | Command::HashPassword { .. } => Ok(()),
+        Command::Install(_)
+        | Command::Uninstall(_)
+        | Command::HashPassword { .. }
+        | Command::UpdateSupervise { .. }
+        | Command::BuildInfo => Ok(()),
         Command::Serve => {
+            if !crate::build_info::BUILD_NOTES.is_empty() {
+                tracing::warn!(
+                    notes = crate::build_info::BUILD_NOTES,
+                    "construction qui n'est pas une publication"
+                );
+            }
             // Migrations appliquées avant d'accepter la moindre connexion.
             let running = start(&config).await?;
             tracing::info!(

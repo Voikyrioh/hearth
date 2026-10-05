@@ -41,6 +41,11 @@ pub enum ErrorCode {
     NotFound,
     /// Méthode HTTP non prise en charge par la route.
     MethodNotAllowed,
+    /// L'agent ne se met pas à jour à distance : installation gérée par le système, ou sans
+    /// systemd (HRT-17).
+    ManagedInstall,
+    /// La signature minisign de la mise à jour est refusée (HRT-17).
+    BadSignature,
 }
 
 impl ErrorCode {
@@ -55,10 +60,13 @@ impl ErrorCode {
             Self::NotFound => 404,
             Self::MethodNotAllowed => 405,
             Self::PayloadTooLarge => 413,
-            Self::OperationInProgress | Self::UsernameTaken | Self::LastAdmin | Self::Conflict => {
-                409
-            }
+            Self::OperationInProgress
+            | Self::UsernameTaken
+            | Self::LastAdmin
+            | Self::Conflict
+            | Self::ManagedInstall => 409,
             Self::ValidationError
+            | Self::BadSignature
             | Self::WeakPassword
             | Self::WrongPassword
             | Self::IdempotencyKeyReused => 422,
@@ -149,7 +157,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL: [(ErrorCode, &str, u16); 20] = [
+    const ALL: [(ErrorCode, &str, u16); 22] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -174,6 +182,8 @@ mod tests {
         (ErrorCode::InternalError, "INTERNAL_ERROR", 500),
         (ErrorCode::NotFound, "NOT_FOUND", 404),
         (ErrorCode::MethodNotAllowed, "METHOD_NOT_ALLOWED", 405),
+        (ErrorCode::ManagedInstall, "MANAGED_INSTALL", 409),
+        (ErrorCode::BadSignature, "BAD_SIGNATURE", 422),
     ];
 
     #[test]

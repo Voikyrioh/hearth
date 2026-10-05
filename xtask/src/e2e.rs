@@ -4,8 +4,10 @@
 //! systemd réellement démarré** (comme un vrai serveur), y monte le binaire et `deploy/`, et y
 //! exécute `deploy/e2e/scenario.sh` : installation par `install.sh`, `/hello`, connexion,
 //! empreinte, réinstallation, désinstallation avec conservation puis purge, retour en arrière,
-//! installation gérée. Le conteneur est supprimé quoi qu'il arrive.
+//! installation gérée. Le conteneur est supprimé quoi qu'il arrive. `machine` est aussi la machine
+//! de `cargo xtask e2e-update` (mise à jour de l'agent à distance).
 
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -31,7 +33,20 @@ impl Drop for Container {
 pub fn run() -> Result<(), String> {
     agent::run()?;
     let root = docker::repo_root()?;
-    let dist = root.join("target").join("dist");
+    machine(
+        &root.join("target").join("dist"),
+        "/deploy/e2e/scenario.sh",
+        "journalctl -u hearth-agent --no-pager 2>/dev/null | tail -n 40 || true",
+    )?;
+    println!("bout en bout : vert");
+    Ok(())
+}
+
+/// Démarre la machine jetable (`dist` monté sur `/dist`, `deploy/` sur `/deploy`, tous deux en
+/// lecture seule), y exécute `scenario` (un script de `/deploy`) ; si le scénario échoue, affiche
+/// `diagnostic` (une commande constante exécutée dans le conteneur). Le conteneur est supprimé.
+pub fn machine(dist: &Path, scenario: &str, diagnostic: &str) -> Result<(), String> {
+    let root = docker::repo_root()?;
     let deploy = root.join("deploy");
 
     println!("image {IMAGE} (Debian + systemd)...");
@@ -65,7 +80,7 @@ pub fn run() -> Result<(), String> {
         "--mount".to_owned(),
         format!(
             "type=bind,source={},target=/dist,readonly",
-            mount_path(&dist)
+            mount_path(dist)
         ),
         "--mount".to_owned(),
         format!(
@@ -78,20 +93,12 @@ pub fn run() -> Result<(), String> {
     wait_for_systemd(&name)?;
 
     println!("scénario...");
-    let result = docker::run(&args(&["exec", &name, "sh", "/deploy/e2e/scenario.sh"]));
+    let result = docker::run(&args(&["exec", &name, "sh", scenario]));
     if result.is_err() {
         // Ce que dit le service, pour comprendre un échec.
-        let _ = docker::run(&args(&[
-            "exec",
-            &name,
-            "sh",
-            "-c",
-            "journalctl -u hearth-agent --no-pager 2>/dev/null | tail -n 40 || true",
-        ]));
+        let _ = docker::run(&args(&["exec", &name, "sh", "-c", diagnostic]));
     }
-    result?;
-    println!("bout en bout : vert");
-    Ok(())
+    result
 }
 
 /// Attend que systemd ait fini de démarrer (`running`, ou `degraded` : des unités inutiles dans
