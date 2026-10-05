@@ -16,6 +16,9 @@ maj: 2026-10-05
 ## Application (code)
 - `crates/hearth-link/src/manager/mod.rs::LinkManager::remove_server`.
 
+## Interface (coquille et vue)
+- `pages/Servers.vue` : « Supprimer » ouvre la confirmation « Supprimer ce serveur ? » / « Ses identifiants mémorisés seront aussi supprimés. » ; coquille `LinkRuntime::remove_server`. Tests : `src/pages/Servers.test.ts::asks for a confirmation before removing…`, `apps/desktop/src-tauri/tests/link_runtime.rs`.
+
 ## Vérification
 - Tests : `crates/hearth-link/tests/pinning.rs::servers_are_validated_listed_and_removed_with_their_secrets`.
 
@@ -27,3 +30,4 @@ maj: 2026-10-05
 
 ## Historique
 - 2026-10-05 — création (HRT-07, review Stephen round 1).
+- 2026-10-05 : section Interface (HRT-10).

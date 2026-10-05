@@ -32,3 +32,5 @@ Un saut d'horloge de plus de 5 s (réveil de veille) ou un changement de la list
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — précisé (HRT-07, review Stephen round 1).
+- Un réveil déjà compté dans une coupure le reste après une reconnexion silencieuse (session expirée) : un second réveil ne repousse pas « Hors ligne » une deuxième fois. Code : `crates/hearth-link/src/domain/state.rs` (`on_session_expired`), test `a_silent_reauthentication_does_not_forget_that_the_pc_already_woke`.
+- 2026-10-05 : réveil conservé après session expirée (HRT-10, suivi de review HRT-07).

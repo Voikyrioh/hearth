@@ -18,6 +18,11 @@ Si le certificat présenté a une autre empreinte que celle mémorisée (agent r
 - `crates/hearth-link/src/domain/pinning.rs::decide`, `crates/hearth-link/src/adapters/tls.rs` (refus dans la poignée de main).
 - `crates/hearth-link/src/manager/mod.rs::LinkManager::accept_fingerprint`.
 
+## Interface (coquille et vue)
+- `apps/desktop/src/components/organisms/FingerprintAlert.vue` : alerte bloquante (deux empreintes côte à côte, « Ne pas se connecter » par défaut au clavier et sur Échap, « Accepter la nouvelle empreinte » en bouton contour) ; `stores/link.ts` (`pendingAlert`, `dismissAlert`, `reopenAlert`, `acceptAlert`) ; `components/organisms/OfflineBanner.vue` (suspension et « Voir l'alerte »).
+- Coquille : événement `link://fingerprint` (`link_dto::FingerprintEvent`), commande `accept_fingerprint`.
+- Tests : `apps/desktop/src-tauri/tests/link_runtime.rs::a_changed_fingerprint_blocks_the_link_until_it_is_accepted` (vrai agent réinstallé), `src/router/connect.test.ts`, `src/stores/connect-stores.test.ts`, `e2e/connect.spec.ts` (alerte refusée puis acceptée).
+
 ## Vérification
 - Tests : `domain::state::tests::a_changed_fingerprint_blocks_every_attempt`, `::only_an_explicit_retry_lifts_a_block`.
 - Intégration : `tests/fault_proxy.rs::a_reinstalled_agent_is_refused_by_the_pinned_fingerprint`, `::accepting_the_new_fingerprint_unblocks_the_link`.
@@ -30,3 +35,4 @@ Si le certificat présenté a une autre empreinte que celle mémorisée (agent r
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 : section Interface (HRT-10).

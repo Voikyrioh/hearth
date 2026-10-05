@@ -21,6 +21,10 @@ La confirmation par l'utilisateur relève du client (`hearth-link`, interface) ;
 - `crates/hearth-proto/src/fingerprint.rs` — `#[derive(PartialEq)]` sur les 32 octets.
 - `crates/hearth-agent/src/app.rs::run` — sous-commande `fingerprint` : affiche la forme courte.
 
+## Interface (coquille et vue)
+- `apps/desktop/src/components/molecules/FingerprintBlock.vue` : l'empreinte en 8 groupes de 4 sur 2 lignes ; `components/organisms/AddServerWizard.vue` (2e temps « Vérifie l'identité du serveur », boutons « Refuser » / « Confirmer ») ; logique : `composables/useAddServer.ts` (`next`, `confirm`, `refuse`).
+- Tests : `src/composables/useAddServer.test.ts`, `src/components/organisms/connect.test.ts`, `e2e/connect.spec.ts` (empreinte refusée puis acceptée).
+
 ## Vérification
 - Tests : `hearth_proto::fingerprint::tests` (`short_form_is_eight_groups_of_four_uppercase_hex`, `short_form_uses_only_the_first_sixteen_bytes`, `equality_compares_all_thirty_two_bytes`, `hashes_the_der_with_sha256`, `parse_rejects_a_sign_in_front_of_a_byte`).
 - Intégration : `crates/hearth-agent/tests/hello.rs::hello_is_served_over_tls13_with_the_pinned_certificate` — l'empreinte du certificat présenté en TLS égale celle de la commande `fingerprint`.
@@ -37,3 +41,4 @@ La confirmation par l'utilisateur relève du client (`hearth-link`, interface) ;
 ## Historique
 - 2026-10-04 — création (HRT-02, session 2026-10-04-hearth-creation).
 - 2026-10-04 — `Fingerprint` déplacée dans `hearth-proto` ; l'analyse de la forme complète refuse tout caractère non hexadécimal (review Stephen round 1).
+- 2026-10-05 : section Interface (HRT-10).
