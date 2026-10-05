@@ -1,3 +1,4 @@
+import type { MachineEvent } from "./machine";
 import type {
   FingerprintChange,
   LinkNotice,
@@ -46,6 +47,15 @@ export interface LinkBridge {
   onFingerprintChanged(listener: (change: FingerprintChange) => void): Promise<Unsubscribe>;
   /** Avis de la liaison (`link://notice`) : suivis d'actions perdus, écoute en retard ; rejoue les non lus, une fois. */
   onNotice(listener: (notice: LinkNotice) => void): Promise<Unsubscribe>;
+
+  /**
+   * Machine d'un serveur (tableau de bord) : la dernière vue connue (identité, historique de 5
+   * minutes, niveaux), même hors ligne, puis chaque nouvel instantané (`view`) et chaque échantillon
+   * (`metrics`, un par seconde). Le niveau d'alerte de chaque mesure arrive décidé : l'interface
+   * ne connaît aucun seuil (BR-DASH-003, 004). Un échantillon plus ancien que le dernier connu est
+   * ignoré par le récepteur.
+   */
+  onMachine(serverId: string, listener: (event: MachineEvent) => void): Promise<Unsubscribe>;
 
   /** Première prise de contact : l'empreinte à faire confirmer. Aucun identifiant n'est envoyé (BR-CONN-011). */
   probeServer(host: string, port: number | null): Promise<ProbeResult>;

@@ -4,6 +4,7 @@ import { SAMPLE_AGENT, SimulatedLinkBridge } from "./simulated";
 import { TauriLinkBridge } from "./tauri";
 
 export type { LinkBridge } from "./bridge";
+export * from "./machine";
 export * from "./messages";
 export {
   groupFingerprint,
@@ -15,6 +16,7 @@ export {
   SimulatedLinkBridge,
   type SimulatedOptions,
 } from "./simulated";
+export { bareMachine, type Pinnable, SimulatedMachine, sampleMachine } from "./simulated-machine";
 export { TauriLinkBridge } from "./tauri";
 export * from "./types";
 
@@ -52,6 +54,7 @@ export function createLinkBridge(): LinkBridge {
     const simulated = new SimulatedLinkBridge({
       ...(none ? { servers: [] } : {}),
       agents: [SAMPLE_AGENT],
+      liveMetrics: true,
     });
     (window as unknown as { __hearthSim?: SimulatedLinkBridge }).__hearthSim = simulated;
     return simulated;
