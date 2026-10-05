@@ -7,6 +7,8 @@ import { useServersStore } from "@/stores/servers";
 // Panneau de développement : pilote le pont simulé (états du lien, issues d'opérations).
 // Chargé seulement en mode développement et seulement dans un navigateur : jamais dans le
 // binaire livré (App.vue l'importe derrière `import.meta.env.DEV`). `?nodev` le masque.
+// Outil de développement : ses libellés restent ici (hors `fr.ts`) pour ne pas entrer dans le bundle livré.
+const TITLE = "Simulation du lien";
 const bridge = getLinkBridge();
 const sim = bridge instanceof SimulatedLinkBridge ? bridge : null;
 const hidden = new URLSearchParams(window.location.search).has("nodev");
@@ -23,7 +25,7 @@ const LABELS: Record<LinkState, MessageKey> = {
 
 <template>
   <details v-if="sim && !hidden" class="dev">
-    <summary class="dev__title">{{ t("dev.title") }}</summary>
+    <summary class="dev__title">{{ TITLE }}</summary>
     <div v-for="server in servers.servers" :key="server.id" class="dev__server">
       <span class="dev__name">{{ server.name }}</span>
       <div class="dev__buttons">

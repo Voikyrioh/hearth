@@ -87,13 +87,6 @@ export const fr = {
     soonTitle: "Bientôt disponible",
     soonText: "Cette partie de Hearth arrive bientôt.",
   },
-  dev: {
-    title: "Simulation du lien",
-    server: "Serveur",
-    state: "État",
-    retryDone: "Retour à connecté",
-    operation: "Issue d'opération",
-  },
   welcome: {
     title: "Bienvenue dans Hearth",
     text: "Ajoute ton premier serveur pour commencer.",

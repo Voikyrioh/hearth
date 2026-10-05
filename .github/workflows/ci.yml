@@ -50,7 +50,8 @@ jobs:
           npm run typecheck
           npm test
           npm run build
-      # Interface servie par Vite avec le pont de liaison simulé, dans Chromium (captures 1366/1920/2560).
+          npm run check:dist
+      # Interface servie par Vite avec le pont simulé (captures 1366/1920/2560) ET build livré servi en statique (pont vide).
       - name: Scénarios navigateur (Playwright)
         working-directory: apps/desktop
         run: |

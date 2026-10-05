@@ -1,8 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Les scénarios lancent l'interface servie par Vite dans Chromium, avec le pont de liaison
-// SIMULÉ (aucune coquille Tauri, aucun réseau). Port : celui de `vite.config.ts`.
-const PORT = 1420;
+// Deux cibles :
+// - `dev` : l'interface servie par Vite avec le pont de liaison SIMULÉ (scénarios de la coquille) ;
+// - `prod` : le build livré (`dist/`, servi en statique par `vite preview`) avec le pont vide :
+//   ce qui est expédié démarre, affiche l'accueil, sans erreur ni code de simulation.
+// Aucune coquille Tauri, aucun réseau. Ports : 1420 (celui de `vite.config.ts`) et 4173.
+const DEV_PORT = 1420;
+const PROD_PORT = 4173;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -11,15 +15,34 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: `http://localhost:${PORT}`,
     ...devices["Desktop Chrome"],
     viewport: { width: 1366, height: 800 },
     colorScheme: "dark",
   },
-  webServer: {
-    command: "npm run dev",
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: true,
-    timeout: 60_000,
-  },
+  projects: [
+    {
+      name: "dev",
+      testMatch: "shell.spec.ts",
+      use: { baseURL: `http://localhost:${DEV_PORT}` },
+    },
+    {
+      name: "prod",
+      testMatch: "prod.spec.ts",
+      use: { baseURL: `http://localhost:${PROD_PORT}` },
+    },
+  ],
+  webServer: [
+    {
+      command: "npm run dev",
+      url: `http://localhost:${DEV_PORT}`,
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+    {
+      command: `npm run preview -- --port ${PROD_PORT} --strictPort`,
+      url: `http://localhost:${PROD_PORT}`,
+      reuseExistingServer: true,
+      timeout: 60_000,
+    },
+  ],
 });
