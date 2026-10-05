@@ -20,8 +20,12 @@ crates/
 │   ├── infrastructure/ → Adaptateurs : `tls/` (certificat auto-signé, config rustls TLS 1.3), `config/` (agent.toml + HEARTH_*), `logging.rs` (texte ou JSON), `system/` (nom, MAC ; `sysinfo_probe.rs` : processeur, mémoire, disques, réseau, températures ; `gpu/` : `nvidia-smi` en sous-processus, noyau pour AMD/Intel, aucune carte ailleurs), `sqlite/` (hearth.db, migrations, dépôts et unité de travail SQLx), `argon2.rs`, `service/` (`systemd` : unité durcie ; `none` : installation gérée), `install/` (`SystemHost` : droits, port, espace, fichiers ; sonde `/hello`), `audit_feed.rs` (diffusion interne des entrées écrites, d'où part le sujet `audit` du flux), `data_dir.rs`, `random.rs`
 │   ├── entrypoint/  → `http/` (axum, table `ENDPOINTS`, couche d'accès et suivi posés depuis la table, couche de version, erreurs, serveur HTTPS), `cli.rs` (options et sous-commandes dont `account …`), `account.rs`, `terminal.rs` (saisie du mot de passe), `ws/` (flux temps réel : une tâche par connexion), `metrics_wire.rs` (conversions mesures vers le fil), `tasks.rs` (purge périodique, échantillonneur à 1 Hz) et `signal.rs`
 │   └── app.rs       → Racine de composition : charge la config, assemble adaptateurs, cas d'usage et serveur, exécute la commande
-├── hearth-link/     → Bibliothèque cliente : épinglage, connexion, machine à états, reconnexion [ARCHITECTURE.md]
-└── xtask/           → Tâches build : `agent` (binaire statique en conteneur), `e2e-install` (installation de bout en bout en conteneur systemd), `shellcheck` ; empaquetage et manifeste à venir
+├── hearth-link/     → Bibliothèque cliente, sans interface : épinglage de l'empreinte (rustls sur mesure), connexion et session, machine à états du lien (3 s / 30 s, tentatives sans fin), opérations en suspens jamais rejouées, dernières vues, flux temps réel ; une tâche supervisée par serveur [ARCHITECTURE.md]
+│   ├── domain/      → Règles pures, horloge injectée : `state.rs` (machine à états), `backoff.rs`, `pending_ops.rs`, `pinning.rs`, `compat.rs`, `triggers.rs` (réveil, réseau), `event.rs`, `server.rs`, `secret.rs`
+│   ├── ports/       → `Transport`, `Vault`, `ServerStore`, `SnapshotStore`, `Clock`, `Rng`, `NetWatcher`, `EventSink`
+│   ├── adapters/    → `tls.rs` (vérificateurs « sonde » et « épinglé »), `http_transport.rs` (reqwest + tokio-tungstenite), `file_store.rs` (JSON, écriture atomique), coffre en mémoire, horloges, aléa, adresses locales
+│   └── manager/     → Façade `LinkManager` (`task.rs` : tâche supervisée par serveur ; `attempt.rs`, `watchers.rs`, `events.rs`)
+└── xtask/           → Tâches build : `agent` (binaire statique en conteneur), `e2e-install` (installation de bout en bout en conteneur systemd), `shellcheck`, `br-check` (toute référence BR-… du code et des docs a sa fiche) ; empaquetage et manifeste à venir
 
 apps/
 ├── desktop/src-tauri/  → Coquille Tauri : fenêtre, instance unique, zone de notification, démarrage Windows, réglages locaux (livré HRT-08) ; coffre, mises à jour, relais à venir ; interface : design system Braise, coquille (barre, navigation, en-tête, bandeau), pont de liaison simulé (HRT-09) [apps/desktop/ARCHITECTURE.md]
@@ -63,8 +67,11 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 | une route WebSocket | `docs/open-api/INDEX.md` (sujet `/stream`) puis `crates/hearth-agent/src/entrypoint/ws/` |
 | l'empreinte / le certificat de l'agent | `crates/hearth-proto/src/fingerprint.rs`, `domain/identity_policy.rs` et `infrastructure/tls/` |
 | un composant Vue | `docs/components/INDEX.md` puis `apps/desktop/src/components/` |
-| la résilience du lien | `crates/hearth-link/src/state_machine.rs` et `docs/adr/ADR-0007-machine-a-etats-du-lien.md` |
+| la résilience du lien (états, seuils, tentatives) | `crates/hearth-link/src/domain/state.rs`, `domain/backoff.rs`, `docs/business-rules/BR-RESIL-*.md` et `docs/adr/ADR-0007-machine-a-etats-du-lien.md` |
+| les tests de résilience (mandataire à pannes) | `crates/hearth-link/tests/fault_proxy.rs` et `tests/support/proxy.rs` |
+| une action coupée avant sa réponse | `crates/hearth-link/src/domain/pending_ops.rs` et `docs/business-rules/BR-RESIL-009-*.md`, `BR-RESIL-010-*.md` |
 | un cas d'authentification | `docs/adr/ADR-0005-tls-epingle.md`, `crates/hearth-agent/src/application/sessions.rs` et `domain/{sessions,lockout,session_token}.rs` |
+| l'épinglage de l'empreinte côté client | `crates/hearth-link/src/adapters/tls.rs`, `domain/pinning.rs` et `docs/business-rules/BR-CONN-002-*.md`, `BR-CONN-003-*.md` |
 | qui a le droit d'appeler une route | `crates/hearth-agent/src/entrypoint/http/mod.rs` (`ENDPOINTS`) et `auth.rs` (`guard`, `Caller`) |
 | une table, une migration, une requête SQL | `crates/hearth-agent/migrations/` et `crates/hearth-agent/src/infrastructure/sqlite/` |
 | un seuil d'alerte, la fenêtre d'un historique, une mesure | `docs/business-rules/BR-DASH-*.md`, `crates/hearth-proto/src/thresholds.rs`, `crates/hearth-agent/src/domain/{metrics,machine,stream}.rs` |

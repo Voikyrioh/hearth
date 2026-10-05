@@ -14,4 +14,5 @@ Décisions d'architecture et conventions. Chaque ADR référence les ADR globale
 | [ADR-0008](./ADR-0008-mises-a-jour-signees.md) | securite | Mises à jour agent signées (minisign), superviseur et retour arrière | acceptée | 2026-10-04 |
 | [ADR-0009](./ADR-0009-dependances-agent.md) | librairie | Dépendances de l'agent : axum, rustls + ring, rcgen, clap, toml, tower-http, sqlx, argon2 (pas d'aws-lc ni d'OpenSSL) | acceptée | 2026-10-04 |
 | [ADR-0010](./ADR-0010-dependances-client.md) | librairie | Dépendances du client : Tauri et greffons, Vue, Pinia, Vite, Biome, Vitest, tauri-specta, polices embarquées | acceptée | 2026-10-04 |
+| [ADR-0011](./ADR-0011-dependances-liaison.md) | librairie | Dépendances de la bibliothèque de liaison : reqwest, rustls + ring, tokio-rustls, tokio-tungstenite, futures-util, if-addrs (pas d'aws-lc ni d'OpenSSL) | acceptée | 2026-10-05 |
 | [ADR-0012](./ADR-0012-service-systeme.md) | securite | Service système : root, unité systemd durcie, installation gérée sans unité | acceptée | 2026-10-05 |

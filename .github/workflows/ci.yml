@@ -24,6 +24,8 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo fmt --all -- --check
+      # Toute référence BR-… du code et des docs a sa fiche dans docs/business-rules.
+      - run: cargo xtask br-check
       # La coquille Tauri est vérifiée par le job `desktop` (Windows, WebView2) : pas de bibliothèques système sous Linux.
       - run: cargo clippy --workspace --exclude hearth-desktop --all-targets -- -D warnings
       - run: cargo test --workspace --exclude hearth-desktop

@@ -6,12 +6,14 @@
 //!   (installation, réinstallation, désinstallation).
 //!
 //! - `shellcheck` : `deploy/install.sh` et le scénario de bout en bout passent `shellcheck`.
+//! - `br-check` : toute référence `BR-…` du code et des docs a sa fiche.
 //!
 //! Aucune commande n'est lancée par un interpréteur avec une chaîne construite : les programmes
 //! reçoivent des listes d'arguments ; les rares scripts `sh -c` sont des constantes, exécutées
 //! dans le conteneur, qui reçoivent leurs valeurs par variables d'environnement.
 
 mod agent;
+mod br_check;
 mod docker;
 mod e2e;
 mod shellcheck;
@@ -23,13 +25,14 @@ fn main() -> ExitCode {
     let result = match task.as_deref() {
         None | Some("help") => {
             println!(
-                "tâches :\n  agent         construit le binaire statique de l'agent en conteneur (target/dist/hearth-agent)\n  e2e-install   installation de bout en bout dans un conteneur jetable\n  shellcheck    contrôle les scripts de deploy/ avec shellcheck (en conteneur)"
+                "tâches :\n  agent         construit le binaire statique de l'agent en conteneur (target/dist/hearth-agent)\n  e2e-install   installation de bout en bout dans un conteneur jetable\n  shellcheck    contrôle les scripts de deploy/ avec shellcheck (en conteneur)\n  br-check      toute référence BR-… du code et des docs a sa fiche"
             );
             return ExitCode::SUCCESS;
         }
         Some("agent") => agent::run().map(|_| ()),
         Some("e2e-install") => e2e::run(),
         Some("shellcheck") => shellcheck::run(),
+        Some("br-check") => return br_check::run(),
         Some(other) => Err(format!("tâche inconnue : {other}")),
     };
     match result {
