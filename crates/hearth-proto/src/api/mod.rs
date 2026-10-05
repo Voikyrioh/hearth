@@ -10,3 +10,4 @@ pub mod machine;
 pub mod metrics;
 pub mod operations;
 pub mod sessions;
+pub mod update;
