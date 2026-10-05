@@ -10,7 +10,13 @@ export interface ChartSeries {
   tone: "ac" | "cool";
 }
 
-const props = defineProps<{ series: readonly ChartSeries[]; max: number | null; label: string }>();
+const props = defineProps<{
+  series: readonly ChartSeries[];
+  max: number | null;
+  /** Échelle minimale quand `max` est nul : une courbe de température ne plafonne pas à sa valeur. */
+  atLeast?: number;
+  label: string;
+}>();
 
 const WIDTH = 300;
 const HEIGHT = 80;
@@ -23,7 +29,7 @@ const ceiling = computed(() => {
   for (const serie of props.series) {
     for (const point of serie.points) if (point.v !== null && point.v > top) top = point.v;
   }
-  return Math.max(top, 1);
+  return Math.max(top, props.atLeast ?? 1);
 });
 
 interface Drawn {

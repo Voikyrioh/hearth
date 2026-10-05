@@ -118,7 +118,7 @@ describe("curves window (BR-DASH-010)", () => {
     await radios()[2]?.trigger("click");
     expect(ctx.store.windowKey).toBe("1h");
     expect(radios()[2]?.attributes("aria-checked")).toBe("true");
-    expect(ctx.wrapper.text()).toContain("Depuis 5 min");
+    expect(ctx.wrapper.text()).toContain("Depuis 4 min");
     await radios()[0]?.trigger("click");
     expect(ctx.store.windowKey).toBe("1m");
     expect(ctx.wrapper.text()).not.toContain("Depuis");
@@ -133,6 +133,61 @@ describe("curves window (BR-DASH-010)", () => {
     expect(ctx.store.windowKey).toBe("5m");
     await radios()[2]?.trigger("click");
     expect(ctx.store.windowKey).toBe("1h");
+    ctx.wrapper.unmount();
+  });
+});
+
+describe("history sources (HRT-11 review)", () => {
+  it("shows the sections when a sample reaches the store before the view", async () => {
+    const ctx = await open("forge", 0);
+    // Le flux a de l'avance sur la lecture initiale : un échantillon d'abord, la vue ensuite.
+    ctx.bridge.machine.prefill("forge", 5);
+    const real = ctx.bridge.machine.subscribe.bind(ctx.bridge.machine);
+    ctx.store.reset();
+    vi.spyOn(ctx.bridge, "onMachine").mockImplementation(async (id, listener) => {
+      let view: Parameters<typeof listener>[0] | null = null;
+      const stop = real(id, (event) => {
+        if (event.kind === "view") view = event;
+      });
+      stop();
+      if (view) {
+        const { sample, levels } = {
+          sample: (view as { view: { history: never[] } }).view.history.at(-1),
+          levels: (view as { view: { levels: unknown } }).view.levels,
+        };
+        listener({ kind: "metrics", metrics: { serverId: id, sample, levels } as never });
+        listener(view);
+      }
+      return () => {};
+    });
+    await ctx.store.follow("forge");
+    await flushPromises();
+    expect(headings(ctx.wrapper).length).toBeGreaterThan(0);
+    ctx.wrapper.unmount();
+  });
+
+  it("a view read from the disk (yesterday) then today's snapshot: the 1 h curve says how little it covers", async () => {
+    const ctx = await open("forge", 0);
+    const entry = ctx.store.of("forge");
+    const { makeMachine, makeSample, normalLevels } = await import("@/test/machine");
+    const now = Date.now();
+    const yesterday = Array.from({ length: 300 }, (_, i) =>
+      makeSample(now - 20 * 3600_000 + i * 1000),
+    );
+    const today = Array.from({ length: 301 }, (_, i) => makeSample(now - 300_000 + i * 1000));
+    const last = today.at(-1);
+    if (!entry || !last) throw new Error("setup");
+    const merge = (history: typeof today) => {
+      entry.ring.merge(history);
+      entry.machine = makeMachine();
+      entry.latest = { sample: last, levels: normalLevels(last) };
+      entry.tick += 1;
+    };
+    merge(yesterday);
+    merge(today);
+    ctx.store.setWindow("1h");
+    await flushPromises();
+    expect(ctx.wrapper.text()).toContain("Depuis 5 min");
     ctx.wrapper.unmount();
   });
 });

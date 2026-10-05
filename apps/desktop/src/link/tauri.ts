@@ -126,7 +126,6 @@ export class TauriLinkBridge implements LinkBridge {
   }
 
   async onMachine(serverId: string, listener: (event: MachineEvent) => void): Promise<Unsubscribe> {
-    let newer = false;
     const unlisteners: Unsubscribe[] = [];
     const release = () => {
       for (const unlisten of unlisteners) unlisten();
@@ -136,25 +135,22 @@ export class TauriLinkBridge implements LinkBridge {
         await listen<SnapshotEvent>(LINK_EVENTS.snapshot, (event) => {
           if (event.payload.serverId !== serverId) return;
           const view = toView(event.payload);
-          if (!view) return;
-          newer = true;
-          listener({ kind: "view", view });
+          if (view) listener({ kind: "view", view });
         }),
       );
       unlisteners.push(
         await listen<MetricsEvent>(LINK_EVENTS.metrics, (event) => {
           if (event.payload.serverId !== serverId) return;
           const metrics = toMetrics(event.payload);
-          if (!metrics) return;
-          newer = true;
-          listener({ kind: "metrics", metrics });
+          if (metrics) listener({ kind: "metrics", metrics });
         }),
       );
-      // Écoute posée d'abord, lecture ensuite : un événement arrivé pendant la lecture est au
-      // moins aussi récent que la dernière vue connue, il l'emporte.
+      // Écoute posée d'abord, lecture ensuite. Rien n'est jeté : la vue lue complète ce que le flux
+      // a déjà apporté (le récepteur recolle par instant), et l'identité de la machine arrive
+      // toujours, même si des échantillons l'ont précédée.
       const last = unwrap(await commands.getDashboard(serverId));
       const view = last ? toView(last) : null;
-      if (view && !newer) listener({ kind: "view", view });
+      if (view) listener({ kind: "view", view });
     } catch (error) {
       release();
       throw error;

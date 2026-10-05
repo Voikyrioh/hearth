@@ -14,19 +14,25 @@ const props = defineProps<{ entry: ServerMachine }>();
 const machine = computed(() => props.entry.machine);
 const system = computed(() => {
   const os = machine.value?.os;
-  return os ? [os.name, os.version].filter(Boolean).join(" ") : t("dash.unavailable");
+  if (!os) return t("dash.unavailable");
+  return os.version ? t("dash.systemLine", { name: os.name, version: os.version }) : os.name;
 });
 const processor = computed(() => {
   const cpu = machine.value?.cpu;
   if (!cpu) return t("dash.unavailable");
   const threads = t("dash.cores", { n: cpu.logicalCores });
-  return `${cpu.model} · ${threads}${cpu.frequencyMhz ? ` · ${formatFrequency(cpu.frequencyMhz)}` : ""}`;
+  const line = t("dash.processorLine", { model: cpu.model, threads });
+  return cpu.frequencyMhz
+    ? t("dash.processorFreq", { line, freq: formatFrequency(cpu.frequencyMhz) })
+    : line;
 });
 const disks = computed(() => {
   const live = props.entry.latest?.sample.disks;
   const listed = live ?? machine.value?.disks ?? [];
   if (listed.length === 0) return t("dash.unavailable");
-  return listed.map((disk) => `${disk.mount} ${formatGb(disk.totalBytes)}`).join(", ");
+  return listed
+    .map((disk) => t("dash.diskEntry", { mount: disk.mount, size: formatGb(disk.totalBytes) }))
+    .join(", ");
 });
 const uptime = computed(() => formatUptime(props.entry.latest?.sample.uptimeS ?? null));
 </script>

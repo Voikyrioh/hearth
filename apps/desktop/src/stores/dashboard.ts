@@ -91,8 +91,12 @@ export const useDashboardStore = defineStore("dashboard", () => {
       const { view } = event;
       target.ring.merge(view.history);
       target.machine = view.machine;
-      const last = target.ring.last;
-      if (last && view.levels) target.latest = { sample: last, levels: view.levels };
+      // Les niveaux de la vue sont ceux de SON dernier échantillon : ils ne remplacent pas ceux d'un
+      // échantillon du flux plus récent.
+      const viewLast = view.history.at(-1);
+      if (viewLast && view.levels && (!target.latest || viewLast.at >= target.latest.sample.at)) {
+        target.latest = { sample: viewLast, levels: view.levels };
+      }
       target.tick += 1;
       return;
     }

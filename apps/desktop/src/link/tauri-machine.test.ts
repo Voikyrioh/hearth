@@ -73,6 +73,19 @@ describe("machine conversions", () => {
     expect(toSample(sample(1000, { gpus: [gpu] }))?.gpus[0]).toEqual(gpu);
   });
 
+  it("drops a sample whose lists hold an unreadable number instead of inventing a zero", () => {
+    expect(toSample(sample(1000, { cores: [1, null] }))).toBeNull();
+    expect(toSample(sample(1000, { temps: [{ label: "t", celsius: null }] }))).toBeNull();
+    expect(
+      toSample(
+        sample(1000, { disks: [{ name: "d", mount: "/", usedBytes: null, totalBytes: 1 }] }),
+      ),
+    ).toBeNull();
+    expect(
+      toSample(sample(1000, { net: { upBytesPerS: 1, downBytesPerS: null } }))?.net,
+    ).toBeNull();
+  });
+
   it("turns a snapshot and a live message into the interface types, levels untouched", () => {
     const converted = toView(view("a", [sample(1000), sample(null as unknown as number)]));
     expect(converted?.history).toHaveLength(1);
@@ -116,7 +129,7 @@ describe("TauriLinkBridge.onMachine", () => {
     expect(got).toEqual([]);
   });
 
-  it("an event that arrives while the view is read wins over it", async () => {
+  it("merges the view read with a sample that arrived meanwhile: nothing is dropped, the identity always comes", async () => {
     ipc((cmd) => {
       if (cmd !== "get_dashboard") return undefined;
       void emit(LINK_EVENTS.metrics, { serverId: "a", sample: sample(5000), levels });
@@ -127,7 +140,7 @@ describe("TauriLinkBridge.onMachine", () => {
       got.push(event.kind === "view" ? "view" : "metrics"),
     );
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(got).toEqual(["metrics"]);
+    expect(got.sort()).toEqual(["metrics", "view"]);
   });
 
   it("rejects with the typed failure and leaves no listener behind", async () => {

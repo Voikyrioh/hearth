@@ -7,7 +7,10 @@ const HEIGHT = 1000;
 
 type Sim = {
   setState(id: string, state: string): void;
-  machine: { pin(id: string, measure: string, level: string | null): void };
+  machine: {
+    pin(id: string, measure: string, level: string | null): void;
+    tick(id: string): unknown;
+  };
 };
 
 async function sim<T>(page: Page, run: (sim: Sim) => T) {
@@ -99,7 +102,11 @@ test("perte du lien : dernières valeurs grisées et datées, puis retour en dir
   await expect(section(page, "Machine")).toContainText("NixOS 25.05");
   // Aucune mesure n'arrive : la courbe ne bouge pas.
   const frozen = await cpuCurve(page).getAttribute("d");
-  await page.waitForTimeout(2500);
+  // La machine est mesurée pendant la coupure mais rien n'est annoncé : pas d'attente de vrai temps.
+  await sim(page, (s) => {
+    s.machine.tick("forge");
+    s.machine.tick("forge");
+  });
   expect(await cpuCurve(page).getAttribute("d")).toBe(frozen);
   await shoot(page, "tableau-de-bord-hors-ligne");
 
@@ -118,7 +125,7 @@ test("les courbes basculent entre 1 min, 5 min et 1 h sans attente", async ({ pa
   await radios.nth(2).click();
   await expect(radios.nth(2)).toHaveAttribute("aria-checked", "true");
   // L'application vient de s'ouvrir : l'heure n'est pas encore remplie, et la courbe le dit.
-  await expect(page.getByText("Depuis 5 min").first()).toBeVisible();
+  await expect(page.getByText(/^Depuis \d+ min$/).first()).toBeVisible();
   await radios.nth(0).click();
   await expect(radios.nth(0)).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText(/^Depuis/)).toHaveCount(0);

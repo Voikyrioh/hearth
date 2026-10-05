@@ -25,6 +25,7 @@ const probes = computed(() => {
   }));
 });
 const points = useMachineSeries(props.entry, hottest);
+const hottestNow = computed(() => (props.entry.latest ? hottest(props.entry.latest.sample) : null));
 const covered = useCoverage(props.entry);
 </script>
 
@@ -35,8 +36,8 @@ const covered = useCoverage(props.entry);
       <p v-if="probes.length === 0" class="temps__none">{{ t("dash.unavailable") }}</p>
       <dl v-else class="temps__rows">
         <StatRow
-          v-for="probe in probes"
-          :key="probe.label"
+          v-for="(probe, index) in probes"
+          :key="index"
           :label="probe.label"
           :value="formatTemperature(probe.celsius)"
           :level="probe.level"
@@ -44,8 +45,9 @@ const covered = useCoverage(props.entry);
       </dl>
       <TimeSeriesChart
         :series="[{ points, tone: 'ac' }]"
-        :max="100"
-        :label="t('dash.chartTemp')"
+        :max="null"
+        :at-least="100"
+        :label="t('dash.chartWithValue', { label: t('dash.chartTemp'), value: formatTemperature(hottestNow) })"
         :window="store.windowKey"
         :covered-ms="covered"
       />

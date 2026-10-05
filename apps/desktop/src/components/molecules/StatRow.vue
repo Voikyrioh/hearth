@@ -11,14 +11,18 @@ withDefaults(
     level?: Level;
     muted?: boolean;
     stacked?: boolean;
+    /** Pastille de la couleur de la courbe correspondante (la couleur ne porte jamais seule le sens). */
+    swatch?: "ac" | "cool";
   }>(),
-  { level: "normal", muted: false, stacked: false },
+  { level: "normal", muted: false, stacked: false, swatch: undefined },
 );
 </script>
 
 <template>
   <div :class="['stat', { 'stat--stacked': stacked }]" :data-level="level">
-    <dt class="stat__label">{{ label }}</dt>
+    <dt class="stat__label">
+      <i v-if="swatch" :class="['stat__swatch', `stat__swatch--${swatch}`]" aria-hidden="true" />{{ label }}
+    </dt>
     <dd :class="['stat__value', { 'stat__value--muted': muted }]">
       {{ value }}<LevelBadge :level="level" />
     </dd>
@@ -43,6 +47,22 @@ withDefaults(
 .stat--stacked .stat__value {
   justify-content: flex-start;
   text-align: left;
+}
+
+.stat__swatch {
+  display: inline-block;
+  width: var(--pill-dot);
+  height: var(--pill-dot);
+  margin-right: var(--space-2);
+  border-radius: 50%;
+}
+
+.stat__swatch--ac {
+  background: var(--ac);
+}
+
+.stat__swatch--cool {
+  background: var(--cool);
 }
 
 .stat__label {

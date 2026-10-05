@@ -36,7 +36,7 @@ const covered = useCoverage(props.entry);
         class="mem__chart"
         :series="[{ points, tone: 'ac' }]"
         :max="100"
-        :label="t('dash.chartMemory')"
+        :label="t('dash.chartWithValue', { label: t('dash.chartMemory'), value: formatPercent(percent) })"
         :window="store.windowKey"
         :covered-ms="covered"
       />

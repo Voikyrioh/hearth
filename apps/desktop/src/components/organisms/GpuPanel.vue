@@ -49,7 +49,7 @@ const covered = useCoverage(props.entry);
         class="gpu__chart"
         :series="[{ points, tone: 'ac' }]"
         :max="100"
-        :label="t('dash.chartGpu')"
+        :label="t('dash.chartWithValue', { label: t('dash.chartGpu'), value: formatPercent(load) })"
         :window="store.windowKey"
         :covered-ms="covered"
       />

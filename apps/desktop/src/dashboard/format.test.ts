@@ -14,7 +14,10 @@ import {
 describe("formats (BR-DASH-014)", () => {
   it("rounds percentages to an integer", () => {
     expect(formatPercent(87.4)).toBe("87 %");
-    expect(formatPercent(86.5)).toBe("87 %");
+    // Tronqué : le seuil d'attention (85) n'est atteint que si « 85 % » s'affiche.
+    expect(formatPercent(84.6)).toBe("84 %");
+    expect(formatPercent(94.6)).toBe("94 %");
+    expect(formatPercent(85)).toBe("85 %");
     expect(formatPercent(0)).toBe("0 %");
     expect(formatPercent(100)).toBe("100 %");
   });
@@ -31,6 +34,9 @@ describe("formats (BR-DASH-014)", () => {
     expect(formatRate(300)).toBe("300 o/s");
     expect(formatRate(0)).toBe("0 o/s");
     expect(formatRate(2.5 * GIB)).toBe("2.5 Go/s");
+    // La bascule se fait après l'arrondi : jamais « 1024 Ko/s ».
+    expect(formatRate(1_048_500)).toBe("1.0 Mo/s");
+    expect(formatRate(1023.4 * 1024)).toBe("1023 Ko/s");
   });
 
   it("writes the uptime long: days, hours, minutes", () => {
@@ -56,10 +62,12 @@ describe("formats (BR-DASH-014)", () => {
 
   it("writes temperatures, frequencies and covered time", () => {
     expect(formatTemperature(52.4)).toBe("52 °C");
+    expect(formatTemperature(79.9)).toBe("79 °C");
     expect(formatFrequency(4500)).toBe("4.5 GHz");
     expect(formatFrequency(800)).toBe("800 MHz");
     expect(formatCovered(12 * 60_000 + 20_000)).toBe("12 min");
-    expect(formatCovered(10_000)).toBe("1 min");
+    expect(formatCovered(30_000)).toBe("30 s");
+    expect(formatCovered(59.6 * 60_000)).toBe("59 min");
     expect(formatCovered(90 * 60_000)).toBe("1 h 30 min");
   });
 });

@@ -52,7 +52,7 @@ const covered = useCoverage(props.entry);
         <HMeter
           :ratio="disk.percent === null ? null : disk.percent / 100"
           :level="disk.level"
-          :label="`${disk.name} : ${formatPercent(disk.percent)}`"
+          :label="t('dash.gaugeLabel', { name: disk.name, value: formatPercent(disk.percent) })"
         />
         <dl class="disk__rows">
           <StatRow stacked :label="t('dash.diskUsage')" :value="disk.usage" />

@@ -61,7 +61,11 @@ export class SampleRing {
     return true;
   }
 
-  /** Colle un historique (du plus ancien au plus récent) : il remplace ce qu'il recouvre. */
+  /**
+   * Colle un historique (du plus ancien au plus récent) : il remplace ce qu'il recouvre, garde ce
+   * qui est plus ancien ET ce qui est plus récent (un échantillon du flux arrivé pendant la
+   * lecture n'est jamais jeté).
+   */
   merge(history: readonly MachineSample[]): void {
     const incoming: MachineSample[] = [];
     for (const sample of history) {
@@ -69,9 +73,11 @@ export class SampleRing {
       if (!previous || sample.at > previous.at) incoming.push(sample);
     }
     const head = incoming[0];
-    if (!head) return;
+    const tail = incoming.at(-1);
+    if (!head || !tail) return;
     const older = this.items.filter((sample) => sample.at < head.at);
-    this.items = [...older, ...incoming].slice(-RING_CAP);
+    const newer = this.items.filter((sample) => sample.at > tail.at);
+    this.items = [...older, ...incoming, ...newer].slice(-RING_CAP);
   }
 
   clear(): void {
@@ -110,17 +116,31 @@ export function resample(
   });
 }
 
-/** Durée réellement couverte par l'historique (ms) : sert à dire qu'une fenêtre n'est pas pleine. */
-export function coverageMs(samples: readonly MachineSample[]): number {
-  const first = samples[0];
+/** Écart au-delà duquel deux échantillons ne sont plus « contigus » (coupure, session précédente). */
+export const MAX_GAP_MS = 5000;
+
+/**
+ * Durée couverte DANS la fenêtre affichée, sur des échantillons contigus : du plus ancien
+ * échantillon de la fenêtre qu'aucun trou ne sépare du dernier, jusqu'au dernier. Un trou
+ * (session précédente relue du disque, coupure) n'est jamais compté comme couvert.
+ */
+export function coverageMs(samples: readonly MachineSample[], window: WindowKey): number {
   const last = samples.at(-1);
-  return first && last ? last.at - first.at : 0;
+  if (!last) return 0;
+  const start = last.at - WINDOWS[window].spanMs;
+  let first = last.at;
+  for (let index = samples.length - 2; index >= 0; index -= 1) {
+    const sample = samples[index];
+    if (!sample || sample.at <= start || first - sample.at > MAX_GAP_MS) break;
+    first = sample.at;
+  }
+  return last.at - first;
 }
 
 // ── Mesures tracées ──────────────────────────────────────────────────────────────────────────
 
 export function percentOf(used: number, total: number): number | null {
-  return total > 0 ? (used / total) * 100 : null;
+  return total > 0 ? (used * 100) / total : null;
 }
 
 export const cpuLoad = (sample: MachineSample): number | null => sample.cpu;

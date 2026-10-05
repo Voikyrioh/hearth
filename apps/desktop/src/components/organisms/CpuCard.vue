@@ -35,7 +35,7 @@ const covered = useCoverage(props.entry);
         class="cpu__chart"
         :series="[{ points, tone: 'ac' }]"
         :max="100"
-        :label="t('dash.chartCpu')"
+        :label="t('dash.chartWithValue', { label: t('dash.chartCpu'), value: formatPercent(cpu) })"
         :window="store.windowKey"
         :covered-ms="covered"
       />

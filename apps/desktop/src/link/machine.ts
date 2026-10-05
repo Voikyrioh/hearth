@@ -102,9 +102,25 @@ function num(value: number | null): number | null {
   return value !== null && Number.isFinite(value) ? value : null;
 }
 
+/** Les nombres d'une liste, ou `null` si l'un d'eux est illisible (jamais remplacé par zéro). */
+function all(values: readonly (number | null)[]): number[] | null {
+  const out: number[] = [];
+  for (const value of values) {
+    const read = num(value);
+    if (read === null) return null;
+    out.push(read);
+  }
+  return out;
+}
+
+/**
+ * `null` si l'identité est incomplète. La coquille n'envoie jamais de nombre illisible pour ces
+ * champs : un `null` ici est un message abîmé, et la vue est écartée plutôt que complétée de zéros.
+ */
 export function toMachine(dto: MachineDto): MachineInfo | null {
   const memory = num(dto.memoryTotalBytes);
-  if (memory === null) return null;
+  const disks = all(dto.disks.map((disk) => disk.totalBytes));
+  if (memory === null || disks === null) return null;
   return {
     name: dto.name,
     os: dto.os,
@@ -115,11 +131,11 @@ export function toMachine(dto: MachineDto): MachineInfo | null {
       frequencyMhz: num(dto.cpu.frequencyMhz),
     },
     memoryTotalBytes: memory,
-    disks: dto.disks.map((disk) => ({
+    disks: dto.disks.map((disk, index) => ({
       name: disk.name,
       mount: disk.mount,
       fs: disk.fs,
-      totalBytes: num(disk.totalBytes) ?? 0,
+      totalBytes: disks[index] ?? 0,
       removable: disk.removable,
     })),
     gpus: dto.gpus.map((gpu) => ({
@@ -130,31 +146,48 @@ export function toMachine(dto: MachineDto): MachineInfo | null {
   };
 }
 
-/** `null` si ce qui est indispensable (instant, charge, mémoire) est illisible : l'échantillon est écarté. */
+/**
+ * `null` si un champ qui n'a pas le droit d'être absent (instant, charge, mémoire, cœurs, disques,
+ * sondes) est illisible : l'échantillon est écarté, car ses listes doivent garder les positions de
+ * ses niveaux. Un débit illisible est un `net` absent ; une mesure de carte graphique illisible reste
+ * `null` (BR-DASH-007, 008).
+ */
 export function toSample(dto: SampleDto): MachineSample | null {
   const at = num(dto.at);
   const cpu = num(dto.cpu);
   const used = num(dto.mem.usedBytes);
   const total = num(dto.mem.totalBytes);
-  if (at === null || cpu === null || used === null || total === null) return null;
+  const cores = all(dto.cores);
+  const diskUsed = all(dto.disks.map((disk) => disk.usedBytes));
+  const diskTotal = all(dto.disks.map((disk) => disk.totalBytes));
+  const celsius = all(dto.temps.map((temp) => temp.celsius));
+  if (
+    at === null ||
+    cpu === null ||
+    used === null ||
+    total === null ||
+    !cores ||
+    !diskUsed ||
+    !diskTotal ||
+    !celsius
+  ) {
+    return null;
+  }
+  const up = dto.net ? num(dto.net.upBytesPerS) : null;
+  const down = dto.net ? num(dto.net.downBytesPerS) : null;
   return {
     at,
     uptimeS: num(dto.uptimeS),
     cpu,
-    cores: dto.cores.map((core) => num(core) ?? 0),
+    cores,
     mem: { usedBytes: used, totalBytes: total },
-    disks: dto.disks.map((disk) => ({
+    disks: dto.disks.map((disk, index) => ({
       name: disk.name,
       mount: disk.mount,
-      usedBytes: num(disk.usedBytes) ?? 0,
-      totalBytes: num(disk.totalBytes) ?? 0,
+      usedBytes: diskUsed[index] ?? 0,
+      totalBytes: diskTotal[index] ?? 0,
     })),
-    net: dto.net
-      ? {
-          upBytesPerS: num(dto.net.upBytesPerS) ?? 0,
-          downBytesPerS: num(dto.net.downBytesPerS) ?? 0,
-        }
-      : null,
+    net: up !== null && down !== null ? { upBytesPerS: up, downBytesPerS: down } : null,
     gpus: dto.gpus.map((gpu) => ({
       name: gpu.name,
       loadPercent: num(gpu.loadPercent),
@@ -162,7 +195,7 @@ export function toSample(dto: SampleDto): MachineSample | null {
       memoryTotalBytes: num(gpu.memoryTotalBytes),
       tempC: num(gpu.tempC),
     })),
-    temps: dto.temps.map((temp) => ({ label: temp.label, celsius: num(temp.celsius) ?? 0 })),
+    temps: dto.temps.map((temp, index) => ({ label: temp.label, celsius: celsius[index] ?? 0 })),
   };
 }
 

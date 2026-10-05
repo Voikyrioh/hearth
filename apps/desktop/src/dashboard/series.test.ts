@@ -46,9 +46,18 @@ describe("SampleRing", () => {
     expect(ring.samples().every((sample) => sample.cpu === 99)).toBe(true);
     // Un snapshot plus court garde l'ancien début.
     ring.merge([makeSample(at(100), { cpu: 5 }), makeSample(at(101), { cpu: 5 })]);
-    expect(ring.length).toBe(102);
-    expect(ring.last?.cpu).toBe(5);
+    // Ce qui est plus récent que le snapshot reste : rien n'est jeté.
+    expect(ring.length).toBe(121);
+    expect(ring.samples()[100]?.cpu).toBe(5);
+    expect(ring.last?.cpu).toBe(99);
     expect(ring.samples()[99]?.cpu).toBe(99);
+  });
+
+  it("keeps a live sample newer than the snapshot pasted after it", () => {
+    const ring = new SampleRing();
+    ring.push(makeSample(at(10)));
+    ring.merge([makeSample(at(1)), makeSample(at(2))]);
+    expect(ring.samples().map((sample) => sample.at)).toEqual([at(1), at(2), at(10)]);
   });
 
   it("ignores an empty snapshot and drops duplicates inside one", () => {
@@ -108,9 +117,27 @@ describe("resample", () => {
 });
 
 describe("coverage and measures", () => {
-  it("measures the time really covered", () => {
-    expect(coverageMs([])).toBe(0);
-    expect(coverageMs([makeSample(at(0)), makeSample(at(90))])).toBe(90_000);
+  it("measures the time covered inside the window, on contiguous samples", () => {
+    expect(coverageMs([], "5m")).toBe(0);
+    const run = Array.from({ length: 91 }, (_, i) => makeSample(at(i)));
+    expect(coverageMs(run, "5m")).toBe(90_000);
+    // Fenêtre d'une minute : seule la dernière minute compte.
+    expect(coverageMs(run, "1m")).toBe(59_000);
+  });
+
+  it("never counts a hole as covered (previous session, long outage)", () => {
+    const yesterday = Array.from({ length: 300 }, (_, i) => makeSample(at(i) - 20 * 3600_000));
+    const today = Array.from({ length: 301 }, (_, i) => makeSample(at(i)));
+    const ring = new SampleRing();
+    ring.merge(yesterday);
+    ring.merge(today);
+    expect(ring.length).toBe(601);
+    expect(coverageMs(ring.samples(), "1h")).toBe(300_000);
+    // Le trou n'est pas relié : les pas de la veille sont hors fenêtre, ceux de la coupure sont vides.
+    const outage = [...today.slice(0, 100), ...today.slice(200)];
+    expect(coverageMs(outage, "5m")).toBe(100_000);
+    const points = resample(outage, "5m", cpuLoad);
+    expect(points.filter((point) => point.v === null).length).toBeGreaterThanOrEqual(100);
   });
 
   it("takes the fullest disk, the hottest probe, and memory as a percentage", () => {

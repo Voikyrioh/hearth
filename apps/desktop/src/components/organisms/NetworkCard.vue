@@ -25,11 +25,13 @@ const covered = useCoverage(props.entry);
     <dl class="net__rows">
       <StatRow
         :label="t('dash.netUp')"
+        swatch="ac"
         :value="formatRate(net?.upBytesPerS ?? null)"
         :muted="net === null"
       />
       <StatRow
         :label="t('dash.netDown')"
+        swatch="cool"
         :value="formatRate(net?.downBytesPerS ?? null)"
         :muted="net === null"
       />
@@ -40,7 +42,7 @@ const covered = useCoverage(props.entry);
         { points: up, tone: 'ac' },
       ]"
       :max="null"
-      :label="t('dash.chartNet')"
+      :label="t('dash.chartWithValue', { label: t('dash.chartNet'), value: `${t('dash.netUp')} ${formatRate(net?.upBytesPerS ?? null)}, ${t('dash.netDown')} ${formatRate(net?.downBytesPerS ?? null)}` })"
       :window="store.windowKey"
       :covered-ms="covered"
     />

@@ -11,8 +11,30 @@ const props = defineProps<{ cores: readonly number[]; label: string }>();
 const titles = computed(() =>
   props.cores.map((core, index) => `${t("dash.core", { n: index + 1 })} : ${formatPercent(core)}`),
 );
+const summary = computed(() => titles.value.join(", "));
 </script>
 
 <template>
-  <HBars :values="cores" :titles="titles" :label="label" />
+  <div class="cores">
+    <HBars :values="cores" :titles="titles" :label="`${label} : ${summary}`" />
+    <p class="cores__ends">
+      <span>{{ t("dash.coreFirst") }}</span>
+      <span>{{ t("dash.core", { n: cores.length }) }}</span>
+    </p>
+  </div>
 </template>
+
+<style scoped>
+.cores {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cores__ends {
+  display: flex;
+  justify-content: space-between;
+  color: var(--tx3);
+  font-size: var(--fs-small);
+}
+</style>

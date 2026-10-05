@@ -11,6 +11,7 @@ import HAreaChart, { type ChartSeries } from "../atoms/HAreaChart.vue";
 const props = defineProps<{
   series: readonly ChartSeries[];
   max: number | null;
+  atLeast?: number;
   label: string;
   window: WindowKey;
   coveredMs: number;
@@ -21,7 +22,7 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
 
 <template>
   <div class="series">
-    <HAreaChart :series="series" :max="max" :label="label" />
+    <HAreaChart :series="series" :max="max" :at-least="atLeast" :label="label" />
     <p v-if="partial" class="series__covered">
       {{ t("dash.coveredSince", { duration: formatCovered(coveredMs) }) }}
     </p>

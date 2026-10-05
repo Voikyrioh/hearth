@@ -21,8 +21,9 @@ export function useMachineSeries(
 
 /** Durée que l'historique couvre vraiment (ms). */
 export function useCoverage(entry: ServerMachine) {
+  const store = useDashboardStore();
   return computed(() => {
     void entry.tick;
-    return coverageMs(entry.ring.samples());
+    return coverageMs(entry.ring.samples(), store.windowKey);
   });
 }
