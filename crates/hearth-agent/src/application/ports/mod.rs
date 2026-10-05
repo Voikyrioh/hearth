@@ -23,6 +23,7 @@ mod store_error;
 mod system_probe;
 mod token_gen;
 mod unit_of_work;
+mod update;
 
 pub use account_repo::{AccountRepo, AccountTx};
 pub use admin_accounts::{AdminAccounts, AdminAccountsError, AdminCredential};
@@ -47,3 +48,7 @@ pub use store_error::StoreError;
 pub use system_probe::{ProbeError, SystemProbe};
 pub use token_gen::{TokenGen, TokenGenError};
 pub use unit_of_work::{Store, UnitOfWork};
+pub use update::{
+    Downloader, FetchError, Greeting, HelloProbe, SignatureError, SignatureVerifier,
+    SupervisorLock, UpdateFeed, UpdateHost, UpdateHostError,
+};
