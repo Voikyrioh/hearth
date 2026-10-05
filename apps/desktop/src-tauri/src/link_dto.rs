@@ -476,3 +476,62 @@ pub fn parse_fingerprint(text: &str) -> Result<Fingerprint, LinkFailure> {
         field: InvalidField::Fingerprint,
     })
 }
+
+/// Méthode HTTP d'une action envoyée à un serveur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Type)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum ActionMethod {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+/// Une action que l'interface demande à un serveur (jamais journalisée : le corps peut porter un
+/// mot de passe). `body` : texte JSON.
+#[derive(Clone, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionInput {
+    pub method: ActionMethod,
+    pub path: String,
+    pub body: Option<String>,
+}
+
+impl std::fmt::Debug for ActionInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActionInput")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Réponse à une action : l'agent a répondu (succès ou refus, c'est `status` qui le dit), ou le lien
+/// est tombé avant la réponse (BR-RESIL-009) : l'issue arrivera par `link://operation`, et l'action
+/// n'est jamais rejouée.
+#[derive(Clone, PartialEq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActionResultDto {
+    Completed {
+        status: u16,
+        /// Texte JSON de la réponse.
+        body: String,
+    },
+    Unknown {
+        #[serde(rename = "opId")]
+        op_id: String,
+    },
+}
+
+impl std::fmt::Debug for ActionResultDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Completed { status, .. } => f
+                .debug_struct("Completed")
+                .field("status", status)
+                .finish_non_exhaustive(),
+            Self::Unknown { op_id } => f.debug_struct("Unknown").field("op_id", op_id).finish(),
+        }
+    }
+}

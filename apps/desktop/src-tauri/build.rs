@@ -24,6 +24,10 @@ const COMMANDS: &[&str] = &[
     "ack_link_notices",
     "list_unread_operations",
     "ack_unread_operations",
+    "get_notify_on_link_change",
+    "set_notify_on_link_change",
+    "set_displayed_server",
+    "run_action",
 ];
 
 fn main() {

@@ -2,6 +2,7 @@
 //! unique, démarrage avec Windows, réglages locaux. Aucun accès réseau ici :
 //! tout le réseau vivra dans `hearth-link` (ADR-0002).
 
+pub mod alerts;
 mod commands;
 pub mod domain;
 pub mod error;
@@ -9,13 +10,16 @@ pub mod link;
 mod link_commands;
 pub mod link_dto;
 pub mod logging;
+pub mod presence;
 pub mod settings;
 pub mod texts;
 mod tray;
 pub mod vault;
 pub mod window;
 
+use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager as _, Runtime};
 use tauri_plugin_autostart::MacosLauncher;
@@ -38,6 +42,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_app_version,
             commands::open_logs_folder,
             commands::log_frontend_error,
+            commands::get_notify_on_link_change,
+            commands::set_notify_on_link_change,
+            commands::set_displayed_server,
+            link_commands::run_action,
             link_commands::list_servers,
             link_commands::list_link_states,
             link_commands::probe_server,
@@ -59,6 +67,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<link_dto::OperationEventDto>()
         .typ::<link_dto::FingerprintEvent>()
         .typ::<link_dto::NoticeEvent>()
+        .typ::<link_dto::ActionResultDto>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.
@@ -120,6 +129,29 @@ fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
     let runtime = Arc::new(runtime);
     let events = runtime.manager().subscribe();
     app.manage(runtime.clone());
+    // Notifications système (une par minute et par serveur) et icône de la zone de notification :
+    // branchées avant le relais, l'état courant leur est donné tout de suite.
+    let enabled = settings::notify_on_link_change(app.handle(), Path::new(settings::STORE_FILE))
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "réglage des notifications illisible : activées");
+            true
+        });
+    let started = Instant::now();
+    let alerts = Arc::new(alerts::Alerts::new(
+        Arc::new(tray::TauriNotifier(app.handle().clone())),
+        Arc::new(tray::TauriTray(app.handle().clone())),
+        enabled,
+        move || u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    ));
+    app.manage(alerts.clone());
+    runtime.set_observer(alerts.clone());
+    tauri::async_runtime::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            tick.tick().await;
+            alerts.tick();
+        }
+    });
     let sink = link_commands::TauriSink(app.handle().clone());
     tauri::async_runtime::spawn(async move { runtime.forward(events, &sink).await });
     Ok(())

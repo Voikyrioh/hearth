@@ -11,12 +11,13 @@ use tauri::{AppHandle, Runtime};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_store::StoreExt as _;
 
-use crate::domain::{Settings, flag_from};
+use crate::domain::{Settings, flag_from, flag_or};
 use crate::error::AppError;
 
 /// Fichier des réglages internes, dans le dossier de données de l'application.
 pub const STORE_FILE: &str = "settings.json";
 const KEY_CLOSE_HINT_SEEN: &str = "closeHintSeen";
+const KEY_NOTIFY_ON_LINK_CHANGE: &str = "notifyOnLinkChange";
 
 /// Entrée de démarrage de Windows (port, pour pouvoir la simuler en test).
 pub trait Autostart {
@@ -62,6 +63,28 @@ pub fn set_launch_at_startup(
 ) -> Result<Settings, AppError> {
     autostart.set_enabled(enabled)?;
     read(autostart)
+}
+
+/// Notifications système du lien (BR-RESIL-015) : activées tant que l'utilisateur ne les a pas
+/// désactivées.
+pub fn notify_on_link_change<R: Runtime>(
+    app: &AppHandle<R>,
+    file: &Path,
+) -> Result<bool, AppError> {
+    let store = app.store(file).map_err(store_error)?;
+    Ok(flag_or(store.get(KEY_NOTIFY_ON_LINK_CHANGE).as_ref(), true))
+}
+
+/// Active ou désactive les notifications système du lien, puis relit l'état réel.
+pub fn set_notify_on_link_change<R: Runtime>(
+    app: &AppHandle<R>,
+    file: &Path,
+    enabled: bool,
+) -> Result<bool, AppError> {
+    let store = app.store(file).map_err(store_error)?;
+    store.set(KEY_NOTIFY_ON_LINK_CHANGE, json!(enabled));
+    store.save().map_err(store_error)?;
+    Ok(flag_or(store.get(KEY_NOTIFY_ON_LINK_CHANGE).as_ref(), true))
 }
 
 /// L'explication de fermeture a-t-elle déjà été demandée au système ?

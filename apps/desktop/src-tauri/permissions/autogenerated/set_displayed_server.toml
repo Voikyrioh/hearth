@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-displayed-server"
+description = "Enables the set_displayed_server command without any pre-configured scope."
+commands.allow = ["set_displayed_server"]
+
+[[permission]]
+identifier = "deny-set-displayed-server"
+description = "Denies the set_displayed_server command without any pre-configured scope."
+commands.deny = ["set_displayed_server"]
