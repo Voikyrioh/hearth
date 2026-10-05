@@ -34,12 +34,15 @@ pub struct DataState {
     pub identity: bool,
     /// `hearth.db` existe.
     pub database: bool,
+    /// Une partie seulement de l'identité existe (certificat, clé, identifiant d'installation) :
+    /// l'installation refuse, elle ne touche à rien (BR-INSTALL-004).
+    pub identity_partial: bool,
 }
 
 impl DataState {
     /// Y a-t-il des données qu'une réinstallation doit conserver ?
     pub fn any(&self) -> bool {
-        self.identity || self.database
+        self.identity || self.database || self.identity_partial
     }
 }
 

@@ -23,7 +23,7 @@ use hearth_agent::application::ports::{
     PublicIdentity, ServiceError, ServiceKind, ServiceManager, ServiceSpec,
 };
 use hearth_agent::domain::accounts::Username;
-use hearth_agent::domain::install::{BinaryState, DataState, Version};
+use hearth_agent::domain::install::{BinaryState, DataDirState, DataState, Version};
 use hearth_agent::domain::install_id::InstallId;
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::entrypoint::cli::{InstallArgs, UninstallArgs};
@@ -47,6 +47,7 @@ struct World {
     binary: Option<(Version, Vec<u8>)>,
     backup: Option<(Version, Vec<u8>)>,
     unit: bool,
+    unit_text: String,
     active: bool,
     enabled: bool,
     data_dir: bool,
@@ -115,6 +116,7 @@ impl Machine {
         let mut world = self.world();
         world.binary = Some((version, b"binaire".to_vec()));
         world.unit = true;
+        world.unit_text = "unite-v1".to_owned();
         world.enabled = true;
         world.active = active;
         world.data_dir = true;
@@ -171,6 +173,7 @@ impl InstallHost for FakeHost {
                 dir_exists: world.data_dir,
                 identity: world.identity,
                 database: world.database,
+                identity_partial: false,
             },
             config_exists: world.config_port.is_some(),
             configured_port: world.config_port,
@@ -236,7 +239,10 @@ impl InstallHost for FakeHost {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         match name {
             "cert.pem" | "key.pem" | "install_id" => world.identity = false,
-            "hearth.db" => world.database = false,
+            "hearth.db" => {
+                world.database = false;
+                world.admins.clear();
+            }
             "agent.toml" => {
                 world.config_port = None;
                 world.config_managed = None;
@@ -247,16 +253,19 @@ impl InstallHost for FakeHost {
         Ok(())
     }
 
-    fn remove_dir(&self, _path: &Path) -> Result<(), HostError> {
-        let mut world = self.0.world();
-        world.data_dir = false;
-        world.identity = false;
-        world.database = false;
-        world.admins.clear();
-        Ok(())
+    fn list_dir(&self, _path: &Path) -> Result<Vec<String>, HostError> {
+        Ok(Vec::new())
     }
 
-    fn remove_dir_if_empty(&self, _path: &Path) -> Result<(), HostError> {
+    fn data_dir_state(&self, _path: &Path) -> DataDirState {
+        DataDirState::ABSENT
+    }
+
+    fn remove_dir_if_empty(&self, path: &Path) -> Result<(), HostError> {
+        if path.ends_with("hearth") && self.0.world().data_dir {
+            // Le dossier de données : vide une fois ses fichiers retirés un à un.
+            self.0.world().data_dir = false;
+        }
         Ok(())
     }
 
@@ -315,8 +324,21 @@ impl ServiceManager for FakeService {
         self.0.step("service").map_err(service_error)?;
         let mut world = self.0.world();
         world.unit = true;
+        world.unit_text = "unite-v2".to_owned();
         world.enabled = true;
         world.active = true;
+        Ok(())
+    }
+
+    fn unit_text(&self) -> Result<Option<String>, ServiceError> {
+        let world = self.0.world();
+        Ok(world.unit.then(|| world.unit_text.clone()))
+    }
+
+    fn restore_unit(&self, text: &str) -> Result<(), ServiceError> {
+        let mut world = self.0.world();
+        world.unit = true;
+        world.unit_text = text.to_owned();
         Ok(())
     }
 
@@ -338,7 +360,9 @@ impl ServiceManager for FakeService {
     }
 
     fn remove(&self) -> Result<(), ServiceError> {
-        self.0.world().unit = false;
+        let mut world = self.0.world();
+        world.unit = false;
+        world.unit_text.clear();
         Ok(())
     }
 }
@@ -628,7 +652,7 @@ async fn a_password_hash_creates_the_account_without_any_password() {
         ("HEARTH_ADMIN_USER", "marie"),
         (
             "HEARTH_ADMIN_PASSWORD_HASH",
-            "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaGhhc2hoYXNoaGFzaA",
+            "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g",
         ),
     ];
     let run = run_install(&machine, &install_args(), &env, false, Script::default()).await;
@@ -805,7 +829,7 @@ async fn an_unsupported_architecture_is_refused_and_nothing_is_written() {
     .await;
     assert_eq!(
         run.error(),
-        "Cette architecture n'est pas prise en charge. Architectures supportées : x86_64, arm64."
+        "Cette architecture n'est pas prise en charge. Architecture supportée : x86_64 (arm64 viendra plus tard)."
     );
     assert_eq!(machine.snapshot(), before, "BR-INSTALL-012");
 }
@@ -1012,6 +1036,32 @@ async fn a_failed_reinstallation_restores_the_binary_and_keeps_data_and_accounts
 // ----------------------------------------------------------------------------------------------
 // Réinstallation, mise à niveau, réparation
 // ----------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_service_that_was_stopped_stays_stopped_with_its_old_unit_after_a_failure() {
+    let machine = Machine::new();
+    machine.installed(Version::new(0, 1, 0), false);
+    machine.world().fail.push("hello");
+    let run = run_install(&machine, &install_args(), &[], false, Script::default()).await;
+    assert!(run.result.is_err());
+    let world = machine.world();
+    assert!(!world.active, "le service arrêté n'a pas été relancé");
+    assert_eq!(world.unit_text, "unite-v1", "l'unité d'avant, telle quelle");
+    assert_eq!(world.restarts, 0);
+}
+
+#[tokio::test]
+async fn a_service_that_was_running_runs_again_on_its_old_unit_after_a_failure() {
+    let machine = Machine::new();
+    machine.installed(Version::new(0, 1, 0), true);
+    machine.world().fail.push("hello");
+    let run = run_install(&machine, &install_args(), &[], false, Script::default()).await;
+    assert!(run.result.is_err());
+    let world = machine.world();
+    assert!(world.active);
+    assert_eq!(world.unit_text, "unite-v1");
+    assert!(world.restarts >= 1);
+}
 
 #[tokio::test]
 async fn a_reinstallation_asks_nothing_keeps_everything_and_restarts_on_the_new_binary() {

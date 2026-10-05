@@ -439,16 +439,21 @@ pub async fn uninstall(
     }
     let choice = choose_data(args, context, &observed, prompter, out)?;
     let plan = uninstall_plan(&observed, choice);
-    let left = installer.uninstall(&plan);
-    if !left.is_empty() {
+    let result = installer.uninstall(&plan);
+    if !result.failed.is_empty() {
         return Err(InstallCliError::Failed(format!(
             "La désinstallation n'est pas complète : {}. Nettoie ces éléments à la main.",
-            left.join(" ; ")
+            result.failed.join(" ; ")
         )));
     }
     match choice {
         DataChoice::Keep => writeln!(out, "{MSG_UNINSTALL_KEPT}")?,
-        DataChoice::Purge => writeln!(out, "{MSG_UNINSTALL_PURGED}")?,
+        DataChoice::Purge if result.foreign.is_empty() => writeln!(out, "{MSG_UNINSTALL_PURGED}")?,
+        DataChoice::Purge => writeln!(
+            out,
+            "Service arrêté. Les comptes, le journal et la configuration ont été supprimés. Le dossier de données contient aussi des fichiers qui ne sont pas à Hearth ; ils n'ont pas été touchés : {}.",
+            result.foreign.join(", ")
+        )?,
     }
     Ok(())
 }

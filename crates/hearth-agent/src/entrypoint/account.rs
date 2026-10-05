@@ -11,6 +11,8 @@ use time::OffsetDateTime;
 
 use super::cli::AccountAction;
 use crate::application::accounts::{AccountError, AccountService, AccountSummary};
+use crate::application::ports::PasswordHasher;
+use crate::domain::accounts::{PlainPassword, Username};
 use crate::domain::audit::Actor;
 use crate::domain::secret::Secret;
 
@@ -78,6 +80,22 @@ pub async fn execute(
             writeln!(out, "Sessions de {} fermées", account.username)?;
         }
     }
+    Ok(())
+}
+
+/// `hearth-agent hash-password --user NOM` : le haché PHC Argon2id d'un mot de passe saisi sans
+/// écho (mêmes règles que pour un compte), écrit seul sur la sortie standard.
+pub async fn hash_password(
+    user: &str,
+    passwords: &dyn PasswordInput,
+    hasher: &dyn PasswordHasher,
+    out: &mut dyn Write,
+) -> Result<(), AccountCliError> {
+    let username = Username::parse(user).map_err(AccountError::from)?;
+    let password = passwords.new_password()?;
+    let plain = PlainPassword::new(password, &username).map_err(AccountError::WeakPassword)?;
+    let hash = hasher.hash(&plain).await.map_err(AccountError::from)?;
+    writeln!(out, "{}", hash.expose())?;
     Ok(())
 }
 

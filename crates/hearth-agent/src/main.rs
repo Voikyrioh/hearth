@@ -15,7 +15,11 @@ async fn main() -> ExitCode {
     // `install`, `uninstall` et `account` parlent à la personne qui les a tapées : journaux à part
     // (sortie d'erreur), et muets pour l'installation.
     let is_install = matches!(command, Command::Install(_) | Command::Uninstall(_));
-    let is_account = is_install || matches!(command, Command::Account { .. });
+    let is_account = is_install
+        || matches!(
+            command,
+            Command::Account { .. } | Command::HashPassword { .. }
+        );
     if is_install {
         logging::init_quiet(true);
     } else {

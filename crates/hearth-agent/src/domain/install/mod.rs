@@ -24,7 +24,8 @@ pub use plan::{InstallKind, InstallPlan, Kept, PlanError, ServiceAction, plan_in
 pub use platform::{Arch, SUPPORTED_ARCHITECTURES, parse_arch};
 pub use port::{PortError, parse_port};
 pub use prerequisites::{
-    Blocker, MIN_FREE_BYTES, Prerequisites, check_prerequisites, check_rights,
+    Blocker, DataDirState, MIN_FREE_BYTES, Prerequisites, check_prerequisites, check_rights,
+    unsafe_path_reason,
 };
 pub use rollback::{Asset, Done, Undo, undo_plan};
 pub use uninstall::{

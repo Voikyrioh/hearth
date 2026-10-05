@@ -78,6 +78,7 @@ mod tests {
                 dir_exists: true,
                 identity: true,
                 database: true,
+                ..DataState::default()
             },
             config_exists: true,
             admin_accounts: 1,
@@ -131,6 +132,7 @@ mod tests {
             dir_exists: true,
             identity: true,
             database: true,
+            ..DataState::default()
         };
         leftovers.config_exists = true;
         let plan = uninstall_plan(&leftovers, DataChoice::Purge);

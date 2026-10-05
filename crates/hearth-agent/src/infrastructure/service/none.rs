@@ -22,6 +22,14 @@ impl ServiceManager for Unmanaged {
         Ok(())
     }
 
+    fn unit_text(&self) -> Result<Option<String>, ServiceError> {
+        Ok(None)
+    }
+
+    fn restore_unit(&self, _text: &str) -> Result<(), ServiceError> {
+        Ok(())
+    }
+
     fn restart(&self) -> Result<(), ServiceError> {
         Ok(())
     }

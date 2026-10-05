@@ -49,6 +49,13 @@ pub trait ServiceManager: Send + Sync {
     /// (idempotent : sans effet sur un service qui tourne déjà avec la même unité).
     fn install(&self, spec: &ServiceSpec) -> Result<(), ServiceError>;
 
+    /// Le texte de l'unité telle qu'elle est écrite, `None` s'il n'y en a pas : sert à la rétablir
+    /// telle quelle après un échec.
+    fn unit_text(&self) -> Result<Option<String>, ServiceError>;
+
+    /// Réécrit l'unité avec ce texte et en informe le système, sans la démarrer ni l'activer.
+    fn restore_unit(&self, text: &str) -> Result<(), ServiceError>;
+
     /// Redémarre le service.
     fn restart(&self) -> Result<(), ServiceError>;
 

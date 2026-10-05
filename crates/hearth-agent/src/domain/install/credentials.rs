@@ -57,30 +57,75 @@ pub fn check_admin_password(password: &str, name: &Username) -> Result<(), Admin
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum HashFormatError {
     #[error(
-        "HEARTH_ADMIN_PASSWORD_HASH n'est pas un haché Argon2id au format PHC (`$argon2id$v=19$m=…,t=…,p=…$sel$haché`)."
+        "HEARTH_ADMIN_PASSWORD_HASH n'est pas un haché Argon2id au format PHC (`$argon2id$v=19$m=…,t=…,p=…$sel$haché`). Fabrique-le avec `hearth-agent hash-password`."
     )]
     NotArgon2id,
+    #[error(
+        "Les paramètres du haché sont hors des bornes acceptées : mémoire de 19 Mio à 256 Mio (m=19456 à 262144), 2 à 10 itérations, parallélisme de 1 à 4, sel d'au moins 16 octets, haché d'au moins 32 octets. Un haché trop faible se casse ; un haché trop gourmand épuiserait la mémoire du serveur à chaque connexion."
+    )]
+    OutOfBounds,
 }
 
-/// Forme d'un haché Argon2id au format PHC : `$argon2id$v=19$m=…,t=…,p=…$sel$haché`. Contrôle
-/// de forme seulement ; l'adaptateur de hachage fait la lecture complète.
+/// Mémoire minimale (OWASP, 19 Mio) et maximale (256 Mio) d'un haché fourni, en Kio.
+pub const MIN_MEMORY_KIB: u32 = 19 * 1024;
+pub const MAX_MEMORY_KIB: u32 = 256 * 1024;
+
+fn is_b64(part: &str) -> bool {
+    !part.is_empty()
+        && part
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+}
+
+/// Nombre d'octets que représente un texte base64 sans remplissage.
+fn b64_bytes(text: &str) -> usize {
+    text.len() * 6 / 8
+}
+
+/// Haché Argon2id au format PHC, `$argon2id$v=19$m=…,t=…,p=…$sel$haché`, **strictement** : version
+/// 19, paramètres entre des bornes basses et hautes, sel et sortie de longueur suffisante. Le
+/// haché fourni ne doit être ni trop faible ni capable d'allouer la mémoire du serveur à chaque
+/// connexion. Contrôle de forme et de bornes ; l'adaptateur de hachage fait la lecture complète.
 pub fn check_password_hash_format(hash: &str) -> Result<(), HashFormatError> {
     let parts: Vec<&str> = hash.split('$').collect();
-    let well_formed = parts.len() == 6
+    let shaped = parts.len() == 6
         && parts[0].is_empty()
         && parts[1] == "argon2id"
-        && parts[2].starts_with("v=")
-        && parts[3].starts_with("m=")
-        && parts[4..].iter().all(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
-        });
-    if well_formed {
+        && parts[2] == "v=19"
+        && is_b64(parts[4])
+        && is_b64(parts[5]);
+    if !shaped {
+        return Err(HashFormatError::NotArgon2id);
+    }
+    let mut memory = None;
+    let mut time = None;
+    let mut lanes = None;
+    let params: Vec<&str> = parts[3].split(',').collect();
+    if params.len() != 3 {
+        return Err(HashFormatError::NotArgon2id);
+    }
+    for (param, slot) in params.iter().zip([&mut memory, &mut time, &mut lanes]) {
+        let (_, value) = param.split_once('=').ok_or(HashFormatError::NotArgon2id)?;
+        if !value.bytes().all(|b| b.is_ascii_digit()) || value.is_empty() || value.len() > 9 {
+            return Err(HashFormatError::NotArgon2id);
+        }
+        *slot = value.parse::<u32>().ok();
+    }
+    if !(parts[3].starts_with("m=") && parts[3].contains(",t=") && parts[3].contains(",p=")) {
+        return Err(HashFormatError::NotArgon2id);
+    }
+    let (Some(memory), Some(time), Some(lanes)) = (memory, time, lanes) else {
+        return Err(HashFormatError::NotArgon2id);
+    };
+    let in_bounds = (MIN_MEMORY_KIB..=MAX_MEMORY_KIB).contains(&memory)
+        && (2..=10).contains(&time)
+        && (1..=4).contains(&lanes)
+        && (16..=64).contains(&b64_bytes(parts[4]))
+        && (32..=128).contains(&b64_bytes(parts[5]));
+    if in_bounds {
         Ok(())
     } else {
-        Err(HashFormatError::NotArgon2id)
+        Err(HashFormatError::OutOfBounds)
     }
 }
 
@@ -149,20 +194,75 @@ mod tests {
         assert_eq!(check_admin_password("Abcdefghij12", &name), Ok(()));
     }
 
+    const SALT: &str = "c29tZXNhbHRzb21lc2FsdA";
+    const OUT: &str = "aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g";
+
+    fn hash(params: &str) -> String {
+        format!("$argon2id$v=19${params}${SALT}${OUT}")
+    }
+
     #[test]
     fn only_an_argon2id_phc_hash_is_accepted() {
-        let good = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaGhhc2hoYXNoaGFzaA";
-        assert_eq!(check_password_hash_format(good), Ok(()));
+        assert_eq!(check_password_hash_format(&hash("m=19456,t=2,p=1")), Ok(()));
         for bad in [
             "",
             "Cheval-Agrafe-42",
-            "$argon2i$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaA",
+            "$argon2i$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$aGFzaA",
+            "$argon2id$v=16$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$aGFzaA",
             "$2b$12$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234",
-            "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ",
+            "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA",
             "$argon2id$v=19$m=19456,t=2,p=1$$aGFzaA",
             "$argon2id$v=19$m=19456,t=2,p=1$sel$ha sh",
+            "$argon2id$v=19$m=19456,t=2$c29tZXNhbHRzb21lc2FsdA$aGFzaA",
+            "$argon2id$v=19$t=2,m=19456,p=1$c29tZXNhbHRzb21lc2FsdA$aGFzaA",
+            "$argon2id$v=19$m=-1,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$aGFzaA",
         ] {
-            assert!(check_password_hash_format(bad).is_err(), "{bad}");
+            assert_eq!(
+                check_password_hash_format(bad),
+                Err(HashFormatError::NotArgon2id),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn parameters_too_weak_or_too_greedy_are_refused() {
+        for params in [
+            "m=8,t=1,p=1",
+            "m=19455,t=2,p=1",
+            "m=19456,t=1,p=1",
+            "m=19456,t=11,p=1",
+            "m=19456,t=2,p=0",
+            "m=19456,t=2,p=5",
+            "m=262145,t=2,p=1",
+            "m=4194304,t=2,p=1",
+        ] {
+            assert_eq!(
+                check_password_hash_format(&hash(params)),
+                Err(HashFormatError::OutOfBounds),
+                "{params}"
+            );
+        }
+        for params in ["m=19456,t=2,p=1", "m=262144,t=10,p=4", "m=65536,t=3,p=2"] {
+            assert_eq!(
+                check_password_hash_format(&hash(params)),
+                Ok(()),
+                "{params}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_salt_or_an_output_too_short_or_too_long_is_refused() {
+        let short_salt = format!("$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ${OUT}");
+        let short_out = format!("$argon2id$v=19$m=19456,t=2,p=1${SALT}$aGFzaA");
+        let long_out = format!("$argon2id$v=19$m=19456,t=2,p=1${SALT}${}", "A".repeat(200));
+        for bad in [short_salt, short_out, long_out] {
+            assert_eq!(
+                check_password_hash_format(&bad),
+                Err(HashFormatError::OutOfBounds),
+                "{bad}"
+            );
         }
     }
 }

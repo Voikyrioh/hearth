@@ -6,17 +6,18 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener};
-use std::path::{Component, Path};
-use std::process::{Command, Stdio};
+use std::path::Path;
+use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::probe;
+use super::scrub::scrubbed;
 use crate::application::ports::{
     Answered, BinaryInstalled, ConfigSpec, HostError, HostFacts, InstallHost, InstallLock,
     InstallPaths,
 };
-use crate::domain::install::{BinaryState, DataState, Version};
+use crate::domain::install::{BinaryState, DataDirState, DataState, Version};
 use crate::infrastructure::config;
 use crate::infrastructure::data_dir;
 
@@ -24,12 +25,6 @@ use crate::infrastructure::data_dir;
 const RETRY: Duration = Duration::from_millis(300);
 /// Au-delà, `--version` d'un binaire installé est considéré comme sans réponse.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
-/// Dossiers qu'on ne supprime jamais, quoi qu'on nous donne comme dossier de données.
-const NEVER_REMOVE: [&str; 17] = [
-    "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/opt", "/proc", "/root",
-    "/run", "/sbin", "/sys", "/tmp", "/usr", "/var",
-];
-
 pub struct SystemHost;
 
 fn io_error(action: &'static str, path: &Path) -> impl FnOnce(io::Error) -> HostError {
@@ -75,7 +70,7 @@ impl InstallHost for SystemHost {
             .ancestors()
             .find(|candidate| candidate.exists())
             .unwrap_or(Path::new("/"));
-        let output = Command::new("df")
+        let output = scrubbed("df")
             .args(["-Pk"])
             .arg(existing)
             .stdin(Stdio::null())
@@ -103,12 +98,15 @@ impl InstallHost for SystemHost {
             BinaryState::Absent
         };
         let data_dir = &paths.data_dir;
+        let identity_present = ["cert.pem", "key.pem", "install_id"]
+            .iter()
+            .filter(|name| data_dir.join(name).exists())
+            .count();
         let data = DataState {
             dir_exists: data_dir.is_dir(),
-            identity: ["cert.pem", "key.pem", "install_id"]
-                .iter()
-                .all(|name| data_dir.join(name).is_file()),
+            identity: identity_present == 3,
             database: data_dir.join("hearth.db").is_file(),
+            identity_partial: identity_present > 0 && identity_present < 3,
         };
         Ok(HostFacts {
             binary,
@@ -236,17 +234,41 @@ impl InstallHost for SystemHost {
         }
     }
 
-    fn remove_dir(&self, path: &Path) -> Result<(), HostError> {
-        if !is_removable_dir(path) {
-            return Err(HostError::Other(format!(
-                "{} n'est pas un dossier que l'agent accepte de supprimer",
-                path.display()
-            )));
+    fn list_dir(&self, path: &Path) -> Result<Vec<String>, HostError> {
+        let entries = match fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(io_error("lecture du dossier", path)(error)),
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        Ok(names)
+    }
+
+    fn data_dir_state(&self, path: &Path) -> DataDirState {
+        let Ok(meta) = fs::metadata(path) else {
+            return DataDirState::ABSENT;
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            DataDirState {
+                exists: true,
+                owned_by_root: meta.uid() == 0,
+                private: meta.permissions().mode() & 0o077 == 0,
+            }
         }
-        match fs::remove_dir_all(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(io_error("suppression du dossier", path)(error)),
+        #[cfg(not(unix))]
+        {
+            let _ = meta;
+            DataDirState {
+                exists: true,
+                owned_by_root: true,
+                private: true,
+            }
         }
     }
 
@@ -287,24 +309,9 @@ impl InstallHost for SystemHost {
     }
 }
 
-/// Un dossier qu'on accepte de supprimer : chemin absolu, pas un dossier système, au moins deux
-/// niveaux (jamais `/srv` seul).
-fn is_removable_dir(path: &Path) -> bool {
-    if !path.has_root() || path.components().any(|c| matches!(c, Component::ParentDir)) {
-        return false;
-    }
-    let normal = path
-        .components()
-        .filter(|c| matches!(c, Component::Normal(_)))
-        .count();
-    let text = path.to_string_lossy();
-    let text = text.trim_end_matches('/');
-    normal >= 2 && !NEVER_REMOVE.contains(&text) && text != "/var/lib"
-}
-
 /// La version d'un binaire installé, par `--version` (avec un délai) ; `None` si illisible.
 fn installed_version(binary: &Path) -> Option<Version> {
-    let mut child = Command::new(binary)
+    let mut child = scrubbed(binary)
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -387,33 +394,6 @@ mod tests {
     }
 
     #[test]
-    fn system_directories_are_never_removed() {
-        for path in [
-            "/",
-            "/etc",
-            "/var",
-            "/var/lib",
-            "/usr",
-            "/home",
-            "/root",
-            "/tmp",
-            "relative/dir",
-            "/srv",
-            "/var/lib/../..",
-        ] {
-            assert!(!is_removable_dir(Path::new(path)), "{path}");
-        }
-        for path in [
-            "/var/lib/hearth",
-            "/srv/hearth",
-            "/etc/hearth",
-            "/opt/x/hearth",
-        ] {
-            assert!(is_removable_dir(Path::new(path)), "{path}");
-        }
-    }
-
-    #[test]
     fn this_machine_is_described_by_the_standard_library() {
         let host = SystemHost;
         assert_eq!(host.os(), std::env::consts::OS);
@@ -467,6 +447,24 @@ mod tests {
         };
         assert!(!host.write_config_new(&path, &second).expect("seconde"));
         assert_eq!(std::fs::read_to_string(&path).expect("lecture"), before);
+    }
+
+    #[test]
+    fn a_directory_is_listed_by_name_and_never_removed_with_its_content() {
+        let dir = tempfile::tempdir().expect("dossier");
+        let host = SystemHost;
+        assert_eq!(
+            host.list_dir(&dir.path().join("none")).expect("absent"),
+            Vec::<String>::new()
+        );
+        let shared = dir.path().join("shared");
+        std::fs::create_dir(&shared).expect("dossier");
+        std::fs::write(shared.join("b.txt"), "x").expect("fichier");
+        std::fs::write(shared.join("a.txt"), "x").expect("fichier");
+        assert_eq!(host.list_dir(&shared).expect("liste"), ["a.txt", "b.txt"]);
+        host.remove_dir_if_empty(&shared)
+            .expect("non vide : sans effet");
+        assert!(shared.join("a.txt").exists() && shared.join("b.txt").exists());
     }
 
     #[test]
@@ -620,7 +618,13 @@ mod unix_tests {
         write(&paths.config, b"port = 9100\n");
         let facts = SystemHost.inspect(&paths, &source).expect("relevé");
         assert!(facts.data.identity && facts.data.database && facts.data.dir_exists);
+        assert!(!facts.data.identity_partial);
         assert_eq!(facts.configured_port, Some(9100));
+        // Une identité à moitié là est signalée, rien n'est touché.
+        std::fs::remove_file(paths.data_dir.join("install_id")).expect("retrait");
+        let facts = SystemHost.inspect(&paths, &source).expect("relevé");
+        assert!(facts.data.identity_partial && !facts.data.identity);
+        assert!(paths.data_dir.join("cert.pem").exists());
     }
 
     #[test]

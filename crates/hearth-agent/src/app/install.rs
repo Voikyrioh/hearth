@@ -21,7 +21,7 @@ use crate::domain::install::Version;
 use crate::domain::secret::Secret;
 use crate::entrypoint::cli::{Cli, InstallArgs, UninstallArgs};
 use crate::entrypoint::install::{self, Context};
-use crate::entrypoint::signal::shutdown_signal;
+use crate::entrypoint::signal::interruption_signal;
 use crate::entrypoint::terminal::TerminalPrompter;
 use crate::infrastructure::argon2::Argon2Hasher;
 use crate::infrastructure::install::SystemHost;
@@ -49,20 +49,12 @@ impl AdminAccounts for LocalAdmins {
     }
 
     async fn admin_count(&self) -> Result<u64, AdminAccountsError> {
-        if !self.data_dir.join("hearth.db").is_file() {
-            return Ok(0);
-        }
-        let database = Database::open(&self.data_dir).await.map_err(failed)?;
-        let accounts = super::account_service(&database).map_err(failed)?;
-        let count = accounts
-            .list()
+        // En lecture seule, sans migration : observer ne modifie jamais la base d'un service
+        // qui tourne. Les migrations d'une base existante sont jouées par le service au
+        // démarrage, jamais par l'installateur (sauf pour y créer le premier compte).
+        crate::infrastructure::sqlite::count_admins_read_only(&self.data_dir)
             .await
-            .map_err(failed)?
-            .iter()
-            .filter(|summary| summary.account.role == Role::Admin)
-            .count();
-        database.pool().close().await;
-        Ok(count as u64)
+            .map_err(failed)
     }
 
     async fn create_admin(
@@ -116,7 +108,7 @@ fn watch_interruptions() -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
     let raised = flag.clone();
     tokio::spawn(async move {
-        shutdown_signal().await;
+        interruption_signal().await;
         raised.store(true, Ordering::SeqCst);
     });
     flag
@@ -234,5 +226,15 @@ pub async fn run_uninstall(cli: &Cli, args: &UninstallArgs) -> Result<(), AppErr
         &mut std::io::stdout(),
     )
     .await?;
+    Ok(())
+}
+
+/// `hearth-agent hash-password --user NOM`.
+pub async fn run_hash_password(user: &str) -> Result<(), AppError> {
+    let hasher = Argon2Hasher::new()?;
+    let passwords =
+        crate::entrypoint::terminal::TerminalPasswords::from_env(&|name| std::env::var(name).ok());
+    crate::entrypoint::account::hash_password(user, &passwords, &hasher, &mut std::io::stdout())
+        .await?;
     Ok(())
 }

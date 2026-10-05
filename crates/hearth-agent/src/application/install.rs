@@ -32,7 +32,26 @@ pub const START_TIMEOUT: Duration = Duration::from_secs(30);
 /// Fichiers de l'identité dans le dossier de données (BR-INSTALL-004).
 const IDENTITY_FILES: [&str; 4] = ["cert.pem", "key.pem", "install_id", "identity.lock"];
 /// Fichiers de la base : `hearth.db` et ceux que SQLite y ajoute.
-const DATABASE_FILES: [&str; 3] = ["hearth.db", "hearth.db-wal", "hearth.db-shm"];
+const DATABASE_FILES: [&str; 4] = [
+    "hearth.db",
+    "hearth.db-wal",
+    "hearth.db-shm",
+    "hearth.db-journal",
+];
+
+/// **La liste exacte** de ce que Hearth écrit dans le dossier de données (le journal d'activité
+/// vit dans la base). Suppression et retour en arrière ne retirent que ces noms, puis le dossier
+/// s'il est vide : jamais de suppression récursive d'un chemin qui vient de la configuration.
+const DATA_FILES: [&str; 8] = [
+    "cert.pem",
+    "key.pem",
+    "install_id",
+    "identity.lock",
+    "hearth.db",
+    "hearth.db-wal",
+    "hearth.db-shm",
+    "hearth.db-journal",
+];
 
 /// Ce que l'entrypoint raconte à l'utilisateur, étape après étape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +124,25 @@ pub struct Failure {
     /// Ce que le retour en arrière n'a pas pu retirer ; vide quand la machine est revenue à son
     /// état d'avant.
     pub left_behind: Vec<String>,
+}
+
+/// Ce que la désinstallation n'a pas pu faire, et ce qu'elle a laissé volontairement.
+#[derive(Debug, Default)]
+pub struct Uninstalled {
+    /// Étapes qui ont échoué : à nettoyer à la main.
+    pub failed: Vec<String>,
+    /// Fichiers qui ne sont pas à Hearth, restés dans le dossier de données (non touchés).
+    pub foreign: Vec<String>,
+}
+
+/// L'état d'avant, de quoi y revenir.
+struct Before<'a> {
+    binary: Option<&'a BinaryInstalled>,
+    created_admin: Option<&'a Username>,
+    /// Le texte de l'unité d'avant.
+    unit: Option<&'a str>,
+    /// Le service tournait.
+    was_active: bool,
 }
 
 pub struct Installer<'a> {
@@ -187,6 +225,9 @@ impl Installer<'_> {
             port,
             port_taken,
             free_bytes,
+            data_dir: self.paths.data_dir.to_string_lossy().into_owned(),
+            config: self.paths.config.to_string_lossy().into_owned(),
+            data_dir_state: self.host.data_dir_state(&self.paths.data_dir),
         })
     }
 
@@ -206,6 +247,9 @@ impl Installer<'_> {
         let mut done: Vec<Done> = Vec::new();
         let mut binary: Option<BinaryInstalled> = None;
         let admin_name = inputs.admin.as_ref().map(|(name, _)| name.clone());
+        // L'unité telle qu'elle est avant : rétablie à l'identique en cas d'échec.
+        let previous_unit = self.service.unit_text().unwrap_or(None);
+        let was_active = observed.service_active;
         match self
             .run(plan, observed, inputs, say, &mut done, &mut binary)
             .await
@@ -218,7 +262,15 @@ impl Installer<'_> {
             }
             Err(cause) => {
                 let left_behind = self
-                    .rollback(&done, binary.as_ref(), admin_name.as_ref())
+                    .rollback(
+                        &done,
+                        &Before {
+                            binary: binary.as_ref(),
+                            created_admin: admin_name.as_ref(),
+                            unit: previous_unit.as_deref(),
+                            was_active,
+                        },
+                    )
                     .await;
                 Err(Failure { cause, left_behind })
             }
@@ -272,8 +324,10 @@ impl Installer<'_> {
         }
 
         // 4. L'identité : générée une fois, jamais modifiée (BR-INSTALL-004).
-        if !observed.data.identity {
-            // Notée avant l'appel : une création interrompue laisse des restes à retirer.
+        if !observed.data.identity && !observed.data.identity_partial {
+            // Rien n'existait : noté avant l'appel (une création interrompue laisse des restes à
+            // retirer). Une identité qui existait déjà, même à moitié, n'est jamais notée : on
+            // ne la supprime pas (le plan a d'ailleurs refusé le cas de l'identité partielle).
             done.push(Done::Created(Asset::Identity));
         }
         let identity = self.identity.load_or_create()?;
@@ -346,21 +400,21 @@ impl Installer<'_> {
 
     /// Défait ce qui a été fait, dans l'ordre inverse (`domain::install::undo_plan`). Rend ce
     /// qui n'a pas pu l'être.
-    async fn rollback(
-        &self,
-        done: &[Done],
-        binary: Option<&BinaryInstalled>,
-        created_admin: Option<&Username>,
-    ) -> Vec<String> {
+    async fn rollback(&self, done: &[Done], before: &Before<'_>) -> Vec<String> {
+        let Before {
+            binary,
+            created_admin,
+            ..
+        } = *before;
         let mut left = Vec::new();
         let paths = &self.paths;
-        let mut restart_old_service = false;
+        let mut restore_service = false;
         for undo in undo_plan(done) {
             let result: Result<(), String> = match undo {
                 Undo::Remove(Asset::Service) => self.drop_service().map_err(|e| e.to_string()),
                 Undo::Remove(Asset::DataDir) => self
-                    .host
-                    .remove_dir(&paths.data_dir)
+                    .remove_known_data()
+                    .map(|_| ())
                     .map_err(|e| e.to_string()),
                 Undo::Remove(Asset::Config) => self.remove_config().map_err(|e| e.to_string()),
                 Undo::Remove(Asset::Binary) => binary.map_or(Ok(()), |installed| {
@@ -386,7 +440,7 @@ impl Installer<'_> {
                 // Le service tournait avec l'ancien binaire : il repart dessus une fois celui-ci
                 // rétabli (en dernier).
                 Undo::Restore(Asset::Service) => {
-                    restart_old_service = true;
+                    restore_service = true;
                     Ok(())
                 }
                 Undo::Restore(_) => Ok(()),
@@ -395,10 +449,35 @@ impl Installer<'_> {
                 left.push(detail);
             }
         }
-        if restart_old_service && let Err(error) = self.service.restart() {
-            left.push(error.to_string());
+        if restore_service {
+            // L'unité d'avant, telle quelle ; le service reprend l'état d'avant : relancé s'il
+            // tournait, arrêté sinon.
+            let restored = match before.unit {
+                Some(text) => self.service.restore_unit(text),
+                None => Ok(()),
+            }
+            .and_then(|()| {
+                if before.was_active {
+                    self.service.restart()
+                } else {
+                    self.service.stop()
+                }
+            });
+            if let Err(error) = restored {
+                left.push(error.to_string());
+            }
         }
         left
+    }
+
+    /// Retire les fichiers que Hearth connaît dans le dossier de données, puis le dossier s'il est
+    /// vide. Rend les noms de ce qui reste (fichiers qui ne sont pas à Hearth : intacts).
+    fn remove_known_data(&self) -> Result<Vec<String>, HostError> {
+        for name in DATA_FILES {
+            self.host.remove_file(&self.paths.data_dir.join(name))?;
+        }
+        self.host.remove_dir_if_empty(&self.paths.data_dir)?;
+        self.host.list_dir(&self.paths.data_dir)
     }
 
     fn remove_files(&self, names: &[&str]) -> Result<(), String> {
@@ -426,9 +505,10 @@ impl Installer<'_> {
 
     /// Désinstalle selon le plan (BR-INSTALL-011). Chaque étape est tentée même si une autre a
     /// échoué ; ce qui n'a pas pu être retiré est rendu, pour un nettoyage manuel.
-    pub fn uninstall(&self, plan: &UninstallPlan) -> Vec<String> {
+    pub fn uninstall(&self, plan: &UninstallPlan) -> Uninstalled {
         let paths = &self.paths;
         let mut failed = Vec::new();
+        let mut foreign = Vec::new();
         let mut attempt = |result: Result<(), String>| {
             if let Err(detail) = result {
                 failed.push(detail);
@@ -446,16 +526,15 @@ impl Installer<'_> {
             );
         }
         if plan.remove_data {
-            attempt(
-                self.host
-                    .remove_dir(&paths.data_dir)
-                    .map_err(|e| e.to_string()),
-            );
+            match self.remove_known_data() {
+                Ok(left) => foreign = left,
+                Err(error) => attempt(Err(error.to_string())),
+            }
         }
         if plan.remove_config {
             attempt(self.remove_config().map_err(|e| e.to_string()));
         }
-        failed
+        Uninstalled { failed, foreign }
     }
 }
 

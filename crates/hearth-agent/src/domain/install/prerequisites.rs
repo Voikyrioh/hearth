@@ -9,6 +9,43 @@ use super::platform::{SUPPORTED_ARCHITECTURES, parse_arch};
 /// un remplacement atomique), la base et le journal (jusqu'à 50 000 entrées).
 pub const MIN_FREE_BYTES: u64 = 256 * 1024 * 1024;
 
+/// Le dossier de données tel qu'il est sur le disque.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DataDirState {
+    pub exists: bool,
+    /// Appartient à root (sans objet s'il n'existe pas).
+    pub owned_by_root: bool,
+    /// Fermé aux autres utilisateurs (0700, sans objet s'il n'existe pas).
+    pub private: bool,
+}
+
+impl DataDirState {
+    pub const ABSENT: Self = Self {
+        exists: false,
+        owned_by_root: true,
+        private: true,
+    };
+}
+
+/// Pourquoi un chemin de l'installation est refusé : il finit dans une unité systemd et dans des
+/// suppressions faites en root, il doit être sans surprise.
+pub fn unsafe_path_reason(path: &str) -> Option<&'static str> {
+    if !path.starts_with('/') {
+        return Some("le chemin doit être absolu");
+    }
+    if path.split('/').any(|part| part == "..") {
+        return Some("le chemin ne doit pas contenir « .. »");
+    }
+    if path.len() > 200
+        || !path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/_.-+@:".contains(c))
+    {
+        return Some("seuls les lettres, chiffres et / _ . - + @ : sont acceptés");
+    }
+    None
+}
+
 /// Ce que l'adaptateur a observé.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prerequisites {
@@ -22,6 +59,9 @@ pub struct Prerequisites {
     pub port_taken: bool,
     /// Espace libre sur le disque du dossier de données.
     pub free_bytes: u64,
+    pub data_dir: String,
+    pub config: String,
+    pub data_dir_state: DataDirState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -33,9 +73,23 @@ pub enum Blocker {
     #[error("L'installation est prise en charge sous Linux seulement.")]
     UnsupportedOs { os: String },
     #[error(
-        "Cette architecture n'est pas prise en charge. Architectures supportées : {SUPPORTED_ARCHITECTURES}."
+        "Cette architecture n'est pas prise en charge. Architecture supportée : {SUPPORTED_ARCHITECTURES} (arm64 viendra plus tard)."
     )]
     UnsupportedArch { arch: String },
+    #[error("Le {what} ({path}) n'est pas utilisable : {reason}. Rien n'a été modifié.")]
+    BadPath {
+        what: &'static str,
+        path: String,
+        reason: &'static str,
+    },
+    #[error(
+        "Le dossier de données existe mais n'appartient pas à root. Corrige-le (chown root) ou choisis un autre dossier. Rien n'a été modifié."
+    )]
+    DataDirNotRoot,
+    #[error(
+        "Le dossier de données est ouvert à d'autres utilisateurs. Corrige-le (chmod 700) ou choisis un autre dossier. Rien n'a été modifié."
+    )]
+    DataDirOpen,
     #[error("Le port configuré est déjà utilisé. Relance en choisissant un autre port.")]
     PortTaken { port: u16 },
     #[error("Espace disque insuffisant : {free_mib} Mio libres, {needed_mib} Mio nécessaires.")]
@@ -65,6 +119,26 @@ pub fn check_prerequisites(found: &Prerequisites) -> Result<(), Blocker> {
             arch: found.arch.clone(),
         });
     }
+    for (what, path) in [
+        ("dossier de données", &found.data_dir),
+        ("fichier de configuration", &found.config),
+    ] {
+        if let Some(reason) = unsafe_path_reason(path) {
+            return Err(Blocker::BadPath {
+                what,
+                path: path.clone(),
+                reason,
+            });
+        }
+    }
+    if found.data_dir_state.exists {
+        if !found.data_dir_state.owned_by_root {
+            return Err(Blocker::DataDirNotRoot);
+        }
+        if !found.data_dir_state.private {
+            return Err(Blocker::DataDirOpen);
+        }
+    }
     if found.port_taken {
         return Err(Blocker::PortTaken { port: found.port });
     }
@@ -89,7 +163,74 @@ mod tests {
             port: 7341,
             port_taken: false,
             free_bytes: 10 * MIN_FREE_BYTES,
+            data_dir: "/var/lib/hearth".into(),
+            config: "/etc/hearth/agent.toml".into(),
+            data_dir_state: DataDirState::ABSENT,
         }
+    }
+
+    #[test]
+    fn a_data_dir_or_config_path_must_be_absolute_plain_and_without_dots() {
+        for bad in [
+            "relative/dir",
+            "/var/lib/hearth dir",
+            "/var/lib/../etc",
+            "/srv/h;rm",
+            "",
+            "/a
+b",
+        ] {
+            let found = Prerequisites {
+                data_dir: bad.into(),
+                ..ok()
+            };
+            assert!(
+                matches!(check_prerequisites(&found), Err(Blocker::BadPath { .. })),
+                "{bad:?}"
+            );
+        }
+        let found = Prerequisites {
+            config: "agent.toml".into(),
+            ..ok()
+        };
+        assert!(matches!(
+            check_prerequisites(&found),
+            Err(Blocker::BadPath {
+                what: "fichier de configuration",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn an_existing_data_dir_must_belong_to_root_and_be_private() {
+        let found = Prerequisites {
+            data_dir_state: DataDirState {
+                exists: true,
+                owned_by_root: false,
+                private: true,
+            },
+            ..ok()
+        };
+        assert_eq!(check_prerequisites(&found), Err(Blocker::DataDirNotRoot));
+        let found = Prerequisites {
+            data_dir_state: DataDirState {
+                exists: true,
+                owned_by_root: true,
+                private: false,
+            },
+            ..ok()
+        };
+        assert_eq!(check_prerequisites(&found), Err(Blocker::DataDirOpen));
+        let found = Prerequisites {
+            data_dir_state: DataDirState {
+                exists: true,
+                owned_by_root: true,
+                private: true,
+            },
+            ..ok()
+        };
+        assert_eq!(check_prerequisites(&found), Ok(()));
     }
 
     #[test]
@@ -99,7 +240,10 @@ mod tests {
             arch: "aarch64".into(),
             ..ok()
         };
-        assert_eq!(check_prerequisites(&arm), Ok(()));
+        assert!(matches!(
+            check_prerequisites(&arm),
+            Err(Blocker::UnsupportedArch { .. })
+        ));
     }
 
     #[test]
@@ -128,7 +272,7 @@ mod tests {
         let error = check_prerequisites(&found).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Cette architecture n'est pas prise en charge. Architectures supportées : x86_64, arm64."
+            "Cette architecture n'est pas prise en charge. Architecture supportée : x86_64 (arm64 viendra plus tard)."
         );
     }
 
@@ -186,6 +330,9 @@ mod tests {
             port: 80,
             port_taken: true,
             free_bytes: 0,
+            data_dir: "/var/lib/hearth".into(),
+            config: "/etc/hearth/agent.toml".into(),
+            data_dir_state: DataDirState::ABSENT,
         };
         assert!(matches!(
             check_prerequisites(&found),

@@ -6,7 +6,7 @@ use std::time::Duration;
 use hearth_proto::fingerprint::Fingerprint;
 use thiserror::Error;
 
-use crate::domain::install::{BinaryState, DataState};
+use crate::domain::install::{BinaryState, DataDirState, DataState};
 
 /// Les endroits fixes de l'installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,10 +139,14 @@ pub trait InstallHost: Send + Sync {
     /// Supprime un fichier (sans erreur s'il n'existe pas).
     fn remove_file(&self, path: &Path) -> Result<(), HostError>;
 
-    /// Supprime un dossier et son contenu (sans erreur s'il n'existe pas).
-    fn remove_dir(&self, path: &Path) -> Result<(), HostError>;
+    /// Les noms de ce que contient un dossier (vide s'il n'existe pas).
+    fn list_dir(&self, path: &Path) -> Result<Vec<String>, HostError>;
 
-    /// Supprime un dossier seulement s'il est vide (sans erreur sinon).
+    /// Le dossier de données tel qu'il est : existe, propriétaire, droits. Aucune écriture.
+    fn data_dir_state(&self, path: &Path) -> DataDirState;
+
+    /// Supprime un dossier seulement s'il est vide (sans erreur sinon). **Jamais de suppression
+    /// récursive** : un chemin qui vient de la configuration n'est pas digne d'un `rm -r` en root.
     fn remove_dir_if_empty(&self, path: &Path) -> Result<(), HostError>;
 
     /// Attend que l'agent réponde sur `GET /api/v1/hello` en HTTPS, et rend l'empreinte du

@@ -36,6 +36,14 @@ pub enum Command {
     /// Désinstalle l'agent : arrête et retire le service et le binaire ; les comptes, le journal
     /// et la configuration sont conservés ou supprimés selon le choix.
     Uninstall(UninstallArgs),
+    /// Fabrique le haché Argon2id (format PHC) d'un mot de passe, pour `HEARTH_ADMIN_PASSWORD_HASH` :
+    /// le mot de passe est saisi sans écho avec confirmation, le haché est écrit sur la sortie
+    /// standard. Le mot de passe n'apparaît jamais sur une ligne de commande.
+    HashPassword {
+        /// Le compte auquel le mot de passe est destiné (le mot de passe ne doit pas le contenir).
+        #[arg(long, value_name = "NOM")]
+        user: String,
+    },
     /// Gère les comptes directement sur le serveur, sans réseau (mêmes règles que l'interface).
     Account {
         #[command(subcommand)]
@@ -215,6 +223,20 @@ mod tests {
         assert!(uninstall(&["hearth-agent", "uninstall", "--keep-data"]).keep_data);
         assert!(
             Cli::try_parse_from(["hearth-agent", "uninstall", "--keep-data", "--purge"]).is_err()
+        );
+    }
+
+    #[test]
+    fn hash_password_needs_the_account_name_and_takes_no_password() {
+        assert_eq!(
+            Cli::parse_from(["hearth-agent", "hash-password", "--user", "marie"]).command(),
+            Command::HashPassword {
+                user: "marie".into()
+            }
+        );
+        assert!(Cli::try_parse_from(["hearth-agent", "hash-password"]).is_err());
+        assert!(
+            Cli::try_parse_from(["hearth-agent", "hash-password", "--user", "marie", "x"]).is_err()
         );
     }
 

@@ -56,6 +56,12 @@ pub struct InstallPlan {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum PlanError {
+    /// Une partie de l'identité manque : on ne la régénère jamais en silence (l'empreinte ne doit
+    /// pas changer) et on ne supprime rien. Rien n'est écrit.
+    #[error(
+        "L'identité du serveur est incomplète dans le dossier de données : le certificat, la clé et l'identifiant d'installation doivent exister ensemble. Rien n'a été modifié. Restaure-les depuis une sauvegarde ; si tu acceptes une nouvelle empreinte (les clients devront la réapprouver), supprime ces trois fichiers toi-même puis relance l'installation."
+    )]
+    IdentityIncomplete,
     /// On ne rétrograde pas : le binaire installé est plus récent que celui qu'on installe.
     #[error(
         "Une version plus récente de l'agent ({installed}) est déjà installée : la version {target} ne la remplace pas. Aucune modification n'a été apportée à ta machine."
@@ -65,6 +71,9 @@ pub enum PlanError {
 
 /// Décide ce qu'il faut faire d'après ce qui est observé, pour installer la version `target`.
 pub fn plan_install(observed: &Observed, target: Version) -> Result<InstallPlan, PlanError> {
+    if observed.data.identity_partial {
+        return Err(PlanError::IdentityIncomplete);
+    }
     if let BinaryState::Present {
         version: Some(installed),
         ..
@@ -171,6 +180,7 @@ mod tests {
                 dir_exists: true,
                 identity: true,
                 database: true,
+                ..DataState::default()
             },
             config_exists: true,
             admin_accounts: 2,
@@ -249,6 +259,30 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_identity_is_refused_before_anything_and_never_regenerated() {
+        let mut observed = blank();
+        observed.data.dir_exists = true;
+        observed.data.identity_partial = true;
+        assert_eq!(
+            plan_install(&observed, TARGET),
+            Err(PlanError::IdentityIncomplete)
+        );
+        // Même au milieu d'une installation par ailleurs complète.
+        let mut full = complete(TARGET, true, true);
+        full.data.identity = false;
+        full.data.identity_partial = true;
+        assert_eq!(
+            plan_install(&full, TARGET),
+            Err(PlanError::IdentityIncomplete)
+        );
+        assert!(
+            PlanError::IdentityIncomplete
+                .to_string()
+                .contains("Rien n'a été modifié")
+        );
+    }
+
+    #[test]
     fn a_damaged_installation_is_repaired_and_keeps_what_is_there() {
         // Binaire absent, données là.
         let mut observed = complete(TARGET, false, false);
@@ -297,6 +331,7 @@ mod tests {
             dir_exists: true,
             identity: true,
             database: true,
+            ..DataState::default()
         };
         observed.admin_accounts = 1;
         observed.config_exists = true;
@@ -314,6 +349,7 @@ mod tests {
             dir_exists: true,
             identity: true,
             database: true,
+            ..DataState::default()
         };
         let plan = plan_install(&observed, TARGET).unwrap();
         assert_eq!(plan.kind, InstallKind::Repair);

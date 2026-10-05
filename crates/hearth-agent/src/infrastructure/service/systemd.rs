@@ -8,7 +8,9 @@
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+
+use crate::infrastructure::install::scrub::scrubbed;
 
 use crate::application::ports::{ServiceError, ServiceKind, ServiceManager, ServiceSpec};
 
@@ -43,7 +45,7 @@ impl Systemd {
     }
 
     fn run(&self, args: &[&str]) -> Result<(), ServiceError> {
-        let output = Command::new(&self.systemctl)
+        let output = scrubbed(&self.systemctl)
             .args(args)
             .stdin(Stdio::null())
             .output()
@@ -135,11 +137,18 @@ Restart=always
 RestartSec=5
 # Les fichiers créés par l'agent ne sont lisibles que par root.
 UMask=0077
-# Durcissement : l'agent tourne en root (il pilotera Docker et l'alimentation, voir ADR-0012),
-# mais ne peut ni gagner de nouveaux privilèges, ni modifier le système, ni toucher aux
-# noyaux, horloge et groupes de contrôle. Il n'écrit que dans son dossier de données et dans
-# le dossier de son binaire (mise à jour).
+# Garde-fous, pas une barrière (ADR-0012) : l'agent tourne en root parce qu'il pilotera Docker
+# (son socket) et l'alimentation. Ce que l'unité retire : les capacités sans rapport avec ces
+# besoins (SYS_ADMIN, SYS_PTRACE, NET_ADMIN, SYS_MODULE...), les appels système hors d'un service
+# ordinaire, les espaces de noms, les familles d'adresses inutiles, l'écriture dans /usr, /etc et
+# /boot, et le gain de privilèges. Ce qu'elle ne retire pas : root garde l'accès à tout fichier
+# (DAC_OVERRIDE) et au socket de Docker, c'est-à-dire, en pratique, à la machine.
 NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_KILL CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SYS_BOOT
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 ProtectSystem=full
 ProtectHome=read-only
 ReadWritePaths={data_dir} {binary_dir}
@@ -172,7 +181,7 @@ impl ServiceManager for Systemd {
         if !self.unit_path.exists() {
             return Ok(false);
         }
-        let status = Command::new(&self.systemctl)
+        let status = scrubbed(&self.systemctl)
             .args(["is-active", "--quiet", UNIT_NAME])
             .stdin(Stdio::null())
             .status()
@@ -188,6 +197,19 @@ impl ServiceManager for Systemd {
         self.write_unit(&text)?;
         self.run(&["daemon-reload"])?;
         self.run(&["enable", "--now", UNIT_NAME])
+    }
+
+    fn unit_text(&self) -> Result<Option<String>, ServiceError> {
+        match std::fs::read_to_string(&self.unit_path) {
+            Ok(text) => Ok(Some(text)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(self.unit_error(error)),
+        }
+    }
+
+    fn restore_unit(&self, text: &str) -> Result<(), ServiceError> {
+        self.write_unit(text)?;
+        self.run(&["daemon-reload"])
     }
 
     fn restart(&self) -> Result<(), ServiceError> {
@@ -293,6 +315,10 @@ mod tests {
         let text = render_unit(&spec()).unwrap();
         for directive in [
             "NoNewPrivileges=yes",
+            "CapabilityBoundingSet=CAP_CHOWN",
+            "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
+            "RestrictNamespaces=yes",
+            "SystemCallFilter=@system-service",
             "ProtectSystem=full",
             "ProtectHome=read-only",
             "PrivateTmp=yes",
@@ -309,6 +335,42 @@ mod tests {
         for forbidden in ["PASSWORD", "HASH", "Environment", "argon2", "Secret"] {
             assert!(!text.contains(forbidden), "{forbidden}");
         }
+    }
+
+    #[test]
+    fn the_capability_set_leaves_out_what_the_agent_will_never_need() {
+        let text = render_unit(&spec()).unwrap();
+        let line = text
+            .lines()
+            .find(|line| line.starts_with("CapabilityBoundingSet="))
+            .expect("ligne des capacités");
+        for dropped in [
+            "CAP_SYS_ADMIN",
+            "CAP_SYS_PTRACE",
+            "CAP_NET_ADMIN",
+            "CAP_SYS_MODULE",
+            "CAP_SYS_RAWIO",
+        ] {
+            assert!(!line.contains(dropped), "{dropped}");
+        }
+    }
+
+    #[test]
+    fn the_unit_text_can_be_read_and_restored_as_it_was() {
+        let fake = Fake::new();
+        assert_eq!(fake.systemd.unit_text().unwrap(), None);
+        fake.systemd.install(&spec()).unwrap();
+        let before = fake.systemd.unit_text().unwrap().expect("unité");
+        let mut other = spec();
+        other.config = PathBuf::from("/etc/hearth/other.toml");
+        fake.systemd.install(&other).unwrap();
+        assert_ne!(fake.systemd.unit_text().unwrap().unwrap(), before);
+        fake.systemd.restore_unit(&before).unwrap();
+        assert_eq!(fake.systemd.unit_text().unwrap().unwrap(), before);
+        assert_eq!(
+            fake.calls().last().map(String::as_str),
+            Some("daemon-reload")
+        );
     }
 
     #[test]

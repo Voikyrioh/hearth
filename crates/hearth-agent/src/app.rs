@@ -329,6 +329,7 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
     match cli.command() {
         Command::Install(args) => return install::run_install(&cli, &args).await,
         Command::Uninstall(args) => return install::run_uninstall(&cli, &args).await,
+        Command::HashPassword { user } => return install::run_hash_password(&user).await,
         _ => {}
     }
     let config = load_config(&cli)?;
@@ -351,7 +352,7 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
             account::execute(&action, &service, &passwords, &mut std::io::stdout()).await?;
             Ok(())
         }
-        Command::Install(_) | Command::Uninstall(_) => Ok(()),
+        Command::Install(_) | Command::Uninstall(_) | Command::HashPassword { .. } => Ok(()),
         Command::Serve => {
             // Migrations appliquées avant d'accepter la moindre connexion.
             let running = start(&config).await?;
