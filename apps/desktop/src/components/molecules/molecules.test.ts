@@ -237,6 +237,32 @@ describe("ConfirmDialog", () => {
     trigger.remove();
   });
 
+  it("gives the focus back when unmounted while still open (route change)", async () => {
+    const trigger = document.createElement("button");
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const w = mount(ConfirmDialog, {
+      props: { open: true, title: "t", message: "m", confirmLabel: "ok" },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(document.activeElement).not.toBe(trigger);
+    w.unmount();
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
+
+  it("tells the parent when the browser closes the dialog by itself, so open stays coherent", async () => {
+    const w = open();
+    await flushPromises();
+    dialog()?.dispatchEvent(new Event("close"));
+    expect(w.emitted("cancel")).toHaveLength(1);
+    // Fermeture voulue par le parent (open passe à faux) : pas d'annulation en écho.
+    await w.setProps({ open: false });
+    await flushPromises();
+    expect(w.emitted("cancel")).toHaveLength(1);
+  });
+
   it("uses a solid destructive button only for a destructive confirmation", async () => {
     open(true);
     await flushPromises();

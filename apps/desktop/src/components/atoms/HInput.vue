@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import { computed, useId } from "vue";
-import { type NeedsLink, useNeedsLink } from "@/composables/useNeedsLink";
-import HTooltip from "./HTooltip.vue";
 
 // Champ texte : libellé toujours visible, aide, erreur sous le champ (`aria-invalid`,
 // `aria-describedby`), focus braise. Le slot `suffix` accueille une action (ex. afficher
@@ -17,7 +15,6 @@ const props = withDefaults(
     autocomplete?: string;
     disabled?: boolean;
     mono?: boolean;
-    needsLink?: NeedsLink;
   }>(),
   {
     type: "text",
@@ -27,7 +24,6 @@ const props = withDefaults(
     autocomplete: "off",
     disabled: false,
     mono: false,
-    needsLink: undefined,
   },
 );
 
@@ -36,9 +32,6 @@ defineEmits<{ "update:modelValue": [value: string] }>();
 const id = useId();
 const helpId = `${id}-help`;
 const errorId = `${id}-error`;
-// Besoin du serveur : le champ devient lecture seule (il garde le focus) et dit pourquoi.
-const linkReason = useNeedsLink(() => props.needsLink);
-const locked = computed(() => linkReason.value !== null);
 const describedBy = computed(() => {
   const ids = [props.error ? errorId : null, props.help ? helpId : null].filter(Boolean);
   return ids.length > 0 ? ids.join(" ") : undefined;
@@ -48,9 +41,7 @@ const describedBy = computed(() => {
 <template>
   <div class="field">
     <label class="field__label" :for="id">{{ label }}</label>
-    <HTooltip :text="linkReason ?? undefined" placement="start">
-      <template #default="{ describedby }">
-    <div :class="['field__box', { 'field__box--error': error, 'field__box--disabled': disabled || locked }]">
+    <div :class="['field__box', { 'field__box--error': error, 'field__box--disabled': disabled }]">
       <input
         :id="id"
         :class="['field__input', { 'field__input--mono': mono }]"
@@ -60,15 +51,11 @@ const describedBy = computed(() => {
         :autocomplete="autocomplete"
         :disabled="disabled"
         :aria-invalid="error ? 'true' : undefined"
-        :readonly="locked"
-        :aria-disabled="locked ? 'true' : undefined"
-        :aria-describedby="[describedBy, describedby].filter(Boolean).join(' ') || undefined"
+        :aria-describedby="describedBy"
         @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       />
       <slot name="suffix" />
     </div>
-      </template>
-    </HTooltip>
     <p v-if="error" :id="errorId" class="field__error" role="alert">{{ error }}</p>
     <p v-if="help" :id="helpId" class="field__help">{{ help }}</p>
   </div>

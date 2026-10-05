@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, useId, watch } from "vue";
+import { nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import { t } from "@/i18n";
 
@@ -52,6 +52,18 @@ watch(
   },
   { immediate: true, flush: "post" },
 );
+
+// Démonté pendant qu'il est ouvert (changement de route) : le focus revient quand même.
+onBeforeUnmount(() => {
+  opener?.focus();
+  opener = null;
+});
+
+// Fermeture native (sans passer par nos boutons ni Échap) : on le dit au parent pour que
+// `open` reste cohérent avec ce que l'écran montre.
+function onNativeClose() {
+  if (props.open) emit("cancel");
+}
 </script>
 
 <template>
@@ -64,6 +76,7 @@ watch(
       :aria-labelledby="titleId"
       :aria-describedby="messageId"
       @cancel.prevent="emit('cancel')"
+      @close="onNativeClose"
     >
       <h2 :id="titleId" class="dialog__title">{{ title }}</h2>
       <p :id="messageId" class="dialog__message">{{ message }}</p>
