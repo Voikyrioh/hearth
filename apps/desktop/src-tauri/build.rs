@@ -24,6 +24,7 @@ const COMMANDS: &[&str] = &[
     "ack_link_notices",
     "list_unread_operations",
     "ack_unread_operations",
+    "get_dashboard",
 ];
 
 fn main() {

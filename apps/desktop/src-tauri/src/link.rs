@@ -25,6 +25,7 @@ use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::product::DEFAULT_PORT;
 use serde::Serialize;
 
+use crate::dashboard::{DashBook, SnapshotEvent, events as dash_events, snapshot as dash_snapshot};
 use crate::link_dto::{
     FingerprintEvent, LinkFailure, LinkStateDto, NoticeEvent, NoticeKind, OperationEventDto,
     OutcomeDto, ProbeDto, ServerDto, ServersEvent, StateBook, events, parse_fingerprint,
@@ -193,6 +194,8 @@ impl EventSink for PendingBook {
 pub struct LinkRuntime {
     manager: LinkManager,
     book: Mutex<StateBook>,
+    /// Série du processeur par serveur, pour le niveau « tenu 30 s » (BR-DASH-004).
+    dash: Mutex<DashBook>,
     last_servers: Mutex<Option<Vec<ServerDto>>>,
     pending: Arc<PendingBook>,
     /// Dernière empreinte lue par une sonde, par adresse : seule une empreinte que cette
@@ -229,6 +232,7 @@ impl LinkRuntime {
         Ok(Self {
             manager,
             book: Mutex::new(StateBook::default()),
+            dash: Mutex::new(DashBook::default()),
             last_servers: Mutex::new(None),
             pending,
             probes: Mutex::new(HashMap::new()),
@@ -244,6 +248,26 @@ impl LinkRuntime {
     }
 
     // ── Lecture ────────────────────────────────────────────────────────────────────────────
+
+    fn dash(&self) -> std::sync::MutexGuard<'_, DashBook> {
+        self.dash.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Dernière vue connue de la machine d'un serveur (identité, historique de 5 minutes, niveaux
+    /// du dernier échantillon) : en mémoire, sinon la dernière sauvegardée sur disque, donc
+    /// disponible hors ligne et avant la première connexion de la session (BR-DASH-009). `None`
+    /// tant qu'aucune identité n'a été reçue.
+    pub async fn dashboard(&self, server_id: &str) -> Result<Option<SnapshotEvent>, LinkFailure> {
+        let id = Self::id(server_id)?;
+        let Some(view) = self.manager.last_known(&id).await? else {
+            return Ok(None);
+        };
+        let Some(machine) = view.machine else {
+            return Ok(None);
+        };
+        let (event, _) = dash_snapshot(server_id, &machine, &view.history, now_ms());
+        Ok(Some(event))
+    }
 
     pub fn servers(&self) -> Vec<ServerDto> {
         servers_list(&self.manager.servers())
@@ -475,6 +499,7 @@ impl LinkRuntime {
         let id = Self::id(server_id)?;
         self.manager.remove_server(&id).await?;
         self.book().forget(&id);
+        self.dash().forget(id.as_str());
         self.pending.forget(&id);
         self.publish_servers(sink);
         Ok(())
@@ -499,7 +524,31 @@ impl LinkRuntime {
     /// suivants).
     pub async fn forward(&self, mut stream: EventStream, sink: &dyn UiSink) {
         while let Some(event) = stream.recv().await {
+            let lagged = matches!(event, Event::Lagged { .. });
             self.relay(event, sink);
+            if lagged {
+                self.resync_dashboards(sink).await;
+            }
+        }
+    }
+
+    /// Après un retard d'écoute, des instantanés ont pu être perdus : la dernière vue connue de
+    /// chaque serveur est réannoncée et la série du processeur repart d'elle.
+    pub async fn resync_dashboards(&self, sink: &dyn UiSink) {
+        for record in self.manager.servers() {
+            let Ok(id) = ServerId::parse(record.id.as_str()) else {
+                continue;
+            };
+            let Ok(Some(view)) = self.manager.last_known(&id).await else {
+                continue;
+            };
+            let Some(machine) = view.machine else {
+                continue;
+            };
+            let snapshot = self
+                .dash()
+                .on_snapshot(id.as_str(), &machine, &view.history, now_ms());
+            send(sink, dash_events::SNAPSHOT, &snapshot);
         }
     }
 
@@ -564,12 +613,33 @@ impl LinkRuntime {
                     send(sink, events::FINGERPRINT, &alert);
                 }
             }
-            Event::SessionEnded { .. }
-            | Event::Metrics { .. }
-            | Event::Snapshot { .. }
-            | Event::Audit { .. } => {}
+            // Mesures : chaque seconde, avec les niveaux d'alerte déjà décidés (hearth-proto).
+            Event::Metrics { server, sample } => {
+                let metrics = self.dash().on_metrics(server.as_str(), &sample, now_ms());
+                send(sink, dash_events::METRICS, &metrics);
+            }
+            Event::Snapshot {
+                server,
+                machine,
+                history,
+            } => {
+                let snapshot =
+                    self.dash()
+                        .on_snapshot(server.as_str(), &machine, &history, now_ms());
+                send(sink, dash_events::SNAPSHOT, &snapshot);
+            }
+            Event::SessionEnded { .. } | Event::Audit { .. } => {}
         }
     }
+}
+
+/// Maintenant, en millisecondes depuis l'époque (repli d'un échantillon à la date illisible).
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
+        .unwrap_or(0)
 }
 
 /// Nom du poste annoncé à l'agent (`X-Hearth-Client`) : `{ordinateur}/{version}`.

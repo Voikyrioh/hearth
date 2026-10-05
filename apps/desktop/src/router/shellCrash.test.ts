@@ -93,7 +93,7 @@ describe("a render error inside the shell itself", () => {
       expect(root.querySelector(gone)).toBeNull();
       for (const selector of kept) expect(root.querySelector(selector), selector).not.toBeNull();
       // La page est affichée, l'application répond encore.
-      expect(root.textContent).toContain("Bientôt disponible");
+      expect(root.textContent).toContain("Chargement des mesures");
       bridge.setState("forge", "offline");
       await flushPromises();
       if (name !== "AppHeader") {

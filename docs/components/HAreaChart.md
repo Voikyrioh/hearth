@@ -1,0 +1,9 @@
+# HAreaChart
+
+Atome · `apps/desktop/src/components/atoms/HAreaChart.vue`
+
+Courbe pleine en SVG pur (pas d'uPlot, ADR-0015) : trait 2 px, remplissage dégradé de la couleur à 45 % vers transparent, point d'extrémité plein, pas de grille. Plusieurs séries se superposent. Un pas sans mesure (`v` nul) est un TROU : le trait s'interrompt, jamais un zéro (BR-DASH-008).
+
+- Props : `series` (`{ points, tone: 'ac' | 'cool' }[]`), `max` (borne haute ou `null` : suit la plus grande valeur), `label`
+- Événements et slots : aucun
+- Notes : `role="img"` avec `label`. Jetons : `--ac`, `--cool`, `--chart-fill-opacity`, `--chart-min-height`. Tests : `components/dashboard.test.ts`.

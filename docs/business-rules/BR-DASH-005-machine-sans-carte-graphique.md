@@ -5,7 +5,7 @@ titre: Une machine sans carte graphique affiche la section avec « Non disponibl
 statut: partielle
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-005), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-005 — Une machine sans carte graphique affiche la section avec « Non disponible sur cette machine »
@@ -27,5 +27,9 @@ Côté agent : une machine sans carte graphique mesurable a `capabilities.gpu = 
 ## Règles liées
 - BR-DASH-007
 
+## Interface
+- `components/organisms/GpuCard.vue` : section toujours là ; `capabilities.gpu` faux : « Non disponible sur cette machine ». Tests : `pages/Dashboard.test.ts` (serveur « salon »), `e2e/dashboard.spec.ts`.
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

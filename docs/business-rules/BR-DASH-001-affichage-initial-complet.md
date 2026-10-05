@@ -5,7 +5,7 @@ titre: Le tableau de bord affiche l'état complet de la machine dès sa premièr
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-001), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-001 — Le tableau de bord affiche l'état complet de la machine dès sa première ouverture
@@ -28,5 +28,9 @@ Dès qu'un client s'abonne à `metrics`, l'agent envoie un `snapshot` : identit�
 ## Règles liées
 - BR-DASH-002, BR-DASH-010, BR-DASH-011
 
+## Interface
+- `pages/Dashboard.vue` assemble les huit sections (`MachineCard`, `CpuCard`, `MemoryCard`, `GpuCard`, `NetworkCard`, `DisksCard`, `TemperaturesCard`) dans `StaleSurface` ; `stores/dashboard.ts` rejoue la dernière vue connue à l'abonnement (commande `get_dashboard`, `src-tauri/src/link.rs::LinkRuntime::dashboard`), donc le tableau s'affiche dès l'ouverture, même hors ligne. Chargement : « Chargement des mesures » tant que l'identité n'est pas arrivée, lien connecté. Tests : `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`, `src-tauri/tests/dashboard_runtime.rs`.
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

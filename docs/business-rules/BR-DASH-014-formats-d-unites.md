@@ -5,7 +5,7 @@ titre: Les nombres suivent les unités : pourcentages entiers, Go à une décima
 statut: partielle
 invariant: false
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-014), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-014 — Les nombres suivent les unités : pourcentages entiers, Go à une décimale, débit adaptatif, durée longue
@@ -25,5 +25,9 @@ Côté agent : valeurs brutes et stables, sans mise en forme : charges en pource
 ## Règles liées
 - BR-DASH-002
 
+## Interface
+- `dashboard/format.ts` (gabarits et unités dans `i18n/fr.ts`) : `formatPercent` (entier TRONQUÉ : « 85 % » ne s'affiche que si le seuil de 85 est atteint), `formatGb` (Go à une décimale, puissances de 1024), `formatRate` (Go/s, Mo/s, Ko/s, o/s), `formatUptime` (3 j 4 h 12 min, 2 h 30 min). Tests : `dashboard/format.test.ts`.
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).
