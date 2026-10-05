@@ -8,6 +8,7 @@ use std::time::Instant;
 use tauri::{AppHandle, State};
 
 use crate::alerts::Alerts;
+use crate::link::LinkRuntime;
 
 use crate::domain::{
     FRONTEND_MESSAGE_MAX_CHARS, FrontendErrorLimiter, Settings, single_line, truncate_chars,
@@ -88,6 +89,10 @@ pub fn set_notify_on_link_change(
 /// notification reflète son état (BR-RESIL-016).
 #[tauri::command]
 #[specta::specta]
-pub fn set_displayed_server(alerts: State<'_, Arc<Alerts>>, server_id: Option<String>) {
-    alerts.set_displayed(server_id.as_deref());
+pub fn set_displayed_server(
+    alerts: State<'_, Arc<Alerts>>,
+    link: State<'_, Arc<LinkRuntime>>,
+    server_id: Option<String>,
+) {
+    alerts.set_displayed(link.known_server(server_id).as_deref());
 }

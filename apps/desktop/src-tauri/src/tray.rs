@@ -9,8 +9,9 @@ use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt as _;
 
 use crate::alerts::{Notifier, TrayPort};
+use crate::badge::paint_badge;
 use crate::domain::{MENU_OPEN, MENU_QUIT, TrayAction, tray_action};
-use crate::presence::{TrayStatus, paint_badge};
+use crate::presence::TrayStatus;
 use crate::{texts, window};
 
 /// Flamme seule, une couleur (`hearth-logo-small.svg`), lisible à 16 px.

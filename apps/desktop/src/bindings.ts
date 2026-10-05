@@ -24,11 +24,6 @@ export const commands = {
 	 *  notification reflète son état (BR-RESIL-016).
 	 */
 	setDisplayedServer: (serverId: string | null) => __TAURI_INVOKE<void>("set_displayed_server", { serverId }),
-	/**
-	 *  Envoie une action à un serveur : refusée sans rien envoyer hors « Connecté » ; résultat inconnu si
-	 *  le lien tombe avant la réponse (jamais rejouée, l'issue arrive par `link://operation`).
-	 */
-	runAction: (serverId: string, action: ActionInput) => typedError<ActionResultDto, LinkFailure>(__TAURI_INVOKE("run_action", { serverId, action })),
 	listServers: () => __TAURI_INVOKE<ServerDto[]>("list_servers"),
 	listLinkStates: () => __TAURI_INVOKE<LinkStateDto[]>("list_link_states"),
 	probeServer: (host: string, port: number | null) => typedError<ProbeDto, LinkFailure>(__TAURI_INVOKE("probe_server", { host, port })),
@@ -52,28 +47,6 @@ export const commands = {
 };
 
 /* Types */
-/**
- *  Une action que l'interface demande à un serveur (jamais journalisée : le corps peut porter un
- *  mot de passe). `body` : texte JSON.
- */
-export type ActionInput = {
-	method: ActionMethod,
-	path: string,
-	body: string | null,
-};
-
-/**  Méthode HTTP d'une action envoyée à un serveur. */
-export type ActionMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-
-/**
- *  Réponse à une action : l'agent a répondu (succès ou refus, c'est `status` qui le dit), ou le lien
- *  est tombé avant la réponse (BR-RESIL-009) : l'issue arrivera par `link://operation`, et l'action
- *  n'est jamais rejouée.
- */
-export type ActionResultDto = { kind: "completed"; status: number; 
-/**  Texte JSON de la réponse. */
-body: string } | { kind: "unknown"; opId: string };
-
 /**
  *  Ce que l'assistant envoie à sa dernière étape : le serveur confirmé et les identifiants. Pas de
  *  `Debug` : il porte un mot de passe.

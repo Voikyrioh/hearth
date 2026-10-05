@@ -27,7 +27,6 @@ const COMMANDS: &[&str] = &[
     "get_notify_on_link_change",
     "set_notify_on_link_change",
     "set_displayed_server",
-    "run_action",
 ];
 
 fn main() {

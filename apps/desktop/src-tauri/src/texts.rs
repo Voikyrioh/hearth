@@ -20,6 +20,7 @@ pub fn link_alert_body(name: &str, kind: AlertKind, suppressed: u32) -> String {
     let head = match kind {
         AlertKind::Offline => format!("{name} est hors ligne."),
         AlertKind::Back => format!("{name} est de nouveau connecté."),
+        AlertKind::Failures(n) => format!("{name} : Reconnexion échouée {n} fois."),
     };
     if suppressed == 0 {
         head

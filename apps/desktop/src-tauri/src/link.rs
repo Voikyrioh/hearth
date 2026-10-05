@@ -19,27 +19,23 @@ use hearth_link::domain::event::Event;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::{Blocked, LinkState};
-use hearth_link::ports::transport::Method;
 use hearth_link::ports::{EventSink, Vault};
-use hearth_link::{
-    ActionOutcome, ActionRequest, EventStream, LinkConfig, LinkError, LinkManager, NewServer,
-    ServerUpdate,
-};
+use hearth_link::{EventStream, LinkConfig, LinkError, LinkManager, NewServer, ServerUpdate};
 use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::product::DEFAULT_PORT;
 use serde::Serialize;
 
 use crate::link_dto::{
-    ActionInput, ActionMethod, ActionResultDto, FingerprintEvent, LinkFailure, LinkStateDto,
-    NoticeEvent, NoticeKind, OperationEventDto, OutcomeDto, ProbeDto, ServerDto, ServersEvent,
-    StateBook, events, parse_fingerprint, servers_list,
+    FingerprintEvent, LinkFailure, LinkStateDto, NoticeEvent, NoticeKind, OperationEventDto,
+    OutcomeDto, ProbeDto, ServerDto, ServersEvent, StateBook, events, parse_fingerprint,
+    servers_list,
 };
 
 /// Ce que la coquille fait des changements d'état du lien en dehors de la fenêtre : notifications
 /// système et icône de la zone de notification (BR-RESIL-015, 016). Appelé à chaque événement
 /// d'état, dans l'ordre ; ne doit jamais bloquer.
 pub trait StateObserver: Send + Sync {
-    fn on_state(&self, server: &str, name: &str, state: LinkState);
+    fn on_state(&self, server: &str, name: &str, state: LinkState, failed_attempts: u32);
     fn on_removed(&self, server: &str);
 }
 
@@ -54,10 +50,6 @@ fn send<T: Serialize>(sink: &dyn UiSink, event: &str, payload: &T) {
         Err(error) => tracing::error!(event, %error, "événement illisible, abandonné"),
     }
 }
-
-/// Bornes d'une action venue de l'interface.
-const MAX_ACTION_PATH: usize = 512;
-const MAX_ACTION_BODY: usize = 64 * 1024;
 
 /// Avis et issues d'actions retenus au plus, tant que l'interface ne les a pas acquittés.
 const MAX_RETAINED: usize = 100;
@@ -261,21 +253,25 @@ impl LinkRuntime {
             return;
         }
         for (id, info) in self.manager.states() {
-            self.observe(&id, info.state);
+            self.observe(&id, info.state, info.failed_attempts);
         }
     }
 
-    fn observe(&self, server: &ServerId, state: LinkState) {
+    /// Un serveur absent du carnet ne s'observe pas : un état encore dans la file quand
+    /// `remove_server` a déjà oublié le serveur ne le réinscrit nulle part (icône, limiteur).
+    fn observe(&self, server: &ServerId, state: LinkState, failed_attempts: u32) {
         let Some(observer) = self.observer.get() else {
             return;
         };
-        let name = self
+        let Some(record) = self
             .manager
             .servers()
             .into_iter()
             .find(|record| &record.id == server)
-            .map_or_else(|| server.to_string(), |record| record.name);
-        observer.on_state(server.as_str(), &name, state);
+        else {
+            return;
+        };
+        observer.on_state(server.as_str(), &record.name, state, failed_attempts);
     }
 
     pub fn manager(&self) -> &LinkManager {
@@ -287,6 +283,12 @@ impl LinkRuntime {
     }
 
     // ── Lecture ────────────────────────────────────────────────────────────────────────────
+
+    /// Un identifiant qui n'est pas dans le carnet vaut « aucun » : la fenêtre ne dicte pas à
+    /// l'icône un serveur qui n'existe pas.
+    pub fn known_server(&self, id: Option<String>) -> Option<String> {
+        id.filter(|id| self.servers().iter().any(|server| &server.id == id))
+    }
 
     pub fn servers(&self) -> Vec<ServerDto> {
         servers_list(&self.manager.servers())
@@ -449,61 +451,6 @@ impl LinkRuntime {
         Ok(())
     }
 
-    /// Envoie une action à un serveur (BR-RESIL-008, 009). Hors « Connecté » : `NotConnected`, rien
-    /// n'est parti. Si le lien tombe avant la réponse : `Unknown` (jamais rejouée), l'issue arrive
-    /// plus tard par `link://operation`. Chemin borné à ce que l'API sait servir : absolu, sans
-    /// `..`, sans caractère de contrôle.
-    pub async fn execute(
-        &self,
-        server_id: &str,
-        input: ActionInput,
-    ) -> Result<ActionResultDto, LinkFailure> {
-        let invalid = || LinkFailure::InvalidInput {
-            field: crate::link_dto::InvalidField::Other,
-        };
-        let path_ok = input.path.starts_with('/')
-            && input.path.len() <= MAX_ACTION_PATH
-            && !input.path.contains("..")
-            && !input.path.chars().any(char::is_control);
-        if !path_ok {
-            return Err(invalid());
-        }
-        let body = match input.body.as_deref() {
-            None => None,
-            Some(text) if text.len() <= MAX_ACTION_BODY => {
-                Some(serde_json::from_str(text).map_err(|_| invalid())?)
-            }
-            Some(_) => return Err(invalid()),
-        };
-        let method = match input.method {
-            ActionMethod::Get => Method::Get,
-            ActionMethod::Post => Method::Post,
-            ActionMethod::Put => Method::Put,
-            ActionMethod::Patch => Method::Patch,
-            ActionMethod::Delete => Method::Delete,
-        };
-        let outcome = self
-            .manager
-            .execute(
-                &Self::id(server_id)?,
-                ActionRequest {
-                    method,
-                    path: input.path,
-                    body,
-                },
-            )
-            .await?;
-        Ok(match outcome {
-            ActionOutcome::Completed { status, body, .. } => ActionResultDto::Completed {
-                status,
-                body: body.to_string(),
-            },
-            ActionOutcome::ResultUnknown { id } => ActionResultDto::Unknown {
-                op_id: id.as_str().to_owned(),
-            },
-        })
-    }
-
     pub fn retry_now(&self, server_id: &str) -> Result<(), LinkFailure> {
         Ok(self.manager.retry_now(&Self::id(server_id)?)?)
     }
@@ -608,7 +555,7 @@ impl LinkRuntime {
         match event {
             Event::State { server, info } => {
                 let state = self.book().apply(&server, &info);
-                self.observe(&server, info.state);
+                self.observe(&server, info.state, info.failed_attempts);
                 if let Some(state) = state {
                     send(sink, events::STATE, &state);
                 }

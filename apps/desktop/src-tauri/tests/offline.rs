@@ -23,11 +23,13 @@ use agent::{PASSWORD, TestAgent};
 use hearth_agent::domain::accounts::Role;
 use hearth_desktop_lib::alerts::{Alerts, Notifier, TrayPort};
 use hearth_desktop_lib::link::{LinkRuntime, UiSink};
-use hearth_desktop_lib::link_dto::{ActionInput, ActionMethod, ActionResultDto, LinkFailure};
 use hearth_desktop_lib::presence::TrayStatus;
 use hearth_desktop_lib::vault::{CredentialBackend, CredentialVault};
-use hearth_link::LinkConfig;
+use hearth_link::domain::event::Event;
+use hearth_link::domain::pending_ops::OperationId;
 use hearth_link::domain::state::{LinkState, Thresholds};
+use hearth_link::ports::transport::Method;
+use hearth_link::{ActionOutcome, ActionRequest, LinkConfig, LinkError};
 use proxy::FaultProxy;
 use serde_json::Value;
 
@@ -166,6 +168,7 @@ struct Rig {
     spy: Arc<Spy>,
     clock: Arc<AtomicU64>,
     alerts: Arc<Alerts>,
+    secrets: Arc<Memory>,
     id: String,
     _dir: tempfile::TempDir,
 }
@@ -176,7 +179,7 @@ async fn rig(config: LinkConfig) -> Rig {
     let proxy = FaultProxy::start(agent.addr).await;
     let dir = tempfile::tempdir().unwrap();
     let secrets = Arc::new(Memory::default());
-    let vault = Arc::new(CredentialVault::new(Shared(secrets)));
+    let vault = Arc::new(CredentialVault::new(Shared(secrets.clone())));
     let runtime = Arc::new(
         LinkRuntime::open_with(dir.path(), vault, "poste-test/0.1", config)
             .await
@@ -221,6 +224,7 @@ async fn rig(config: LinkConfig) -> Rig {
         spy,
         clock,
         alerts,
+        secrets,
         id,
         _dir: dir,
     };
@@ -247,17 +251,19 @@ impl Rig {
     }
 }
 
-/// Une action réelle de l'API : changer le mot de passe du compte (`current` doit être le bon).
-fn change_password(current: &str, new: &str) -> ActionInput {
-    ActionInput {
-        method: ActionMethod::Put,
+/// Une action réelle de l'API : changer le mot de passe du compte (`current` doit être le bon). La
+/// coquille n'expose aucune commande générique (ADR-0016) : ce test passe par la bibliothèque, comme
+/// le fera chaque commande typée.
+fn change_password(current: &str, new: &str) -> ActionRequest {
+    ActionRequest {
+        method: Method::Put,
         path: "/me/password".into(),
-        body: Some(format!(r#"{{"current":"{current}","password":"{new}"}}"#)),
+        body: Some(serde_json::json!({ "current": current, "password": new })),
     }
 }
 
-fn ping() -> ActionInput {
-    change_password(PASSWORD, "New-Password-12")
+fn server_id(rig: &Rig) -> hearth_link::domain::server::ServerId {
+    hearth_link::domain::server::ServerId::parse(&rig.id).unwrap()
 }
 
 #[tokio::test]
@@ -298,26 +304,20 @@ async fn a_long_cut_shows_reconnecting_then_offline_notifies_once_and_turns_the_
     // Les tentatives continuent : pas une notification de plus.
     rig.wait_attempts(2).await;
     assert_eq!(rig.spy.notes().len(), 1);
-    // Le retour : icône verte, et la notification « de retour » (sa propre limite).
+    // Le retour : icône verte tout de suite ; la notification « de retour » respecte la limite d'UNE
+    // par minute et par serveur (spec) : elle part à l'échéance.
     rig.proxy.heal();
     rig.wait_for(LinkState::Connected).await;
     eventually("icône verte", || {
         rig.spy.last_status() == Some(TrayStatus::Connected)
     })
     .await;
-    assert_eq!(
-        rig.spy.notes(),
-        ["forge est hors ligne.", "forge est de nouveau connecté."]
-    );
-    // Une deuxième coupure dans la minute : retenue, jamais perdue ; elle part à l'échéance.
-    rig.proxy.cut();
-    rig.wait_for(LinkState::Offline).await;
-    assert_eq!(rig.spy.notes().len(), 2, "limite d'une par minute");
+    assert_eq!(rig.spy.notes().len(), 1, "limite d'une par minute");
     rig.clock.store(60_000, Ordering::SeqCst);
     rig.alerts.tick();
     assert_eq!(
-        rig.spy.notes().last().unwrap(),
-        "forge est hors ligne. Le lien a changé 1 fois depuis la dernière alerte."
+        rig.spy.notes(),
+        ["forge est hors ligne.", "forge est de nouveau connecté."]
     );
 }
 
@@ -326,34 +326,49 @@ async fn an_action_is_refused_without_anything_sent_when_the_link_is_not_connect
     let rig = rig(config(true, true)).await;
     rig.proxy.cut();
     rig.wait_for(LinkState::Offline).await;
-    let result = rig.runtime.execute(&rig.id, ping()).await;
-    assert_eq!(result.unwrap_err(), LinkFailure::NotConnected);
+    let result = rig
+        .runtime
+        .manager()
+        .execute(
+            &server_id(&rig),
+            change_password(PASSWORD, "New-Password-12"),
+        )
+        .await;
+    assert_eq!(result.unwrap_err(), LinkError::NotConnected);
 }
 
 #[tokio::test]
 async fn an_action_cut_before_the_answer_is_unknown_never_replayed_and_its_outcome_comes_back() {
     let rig = rig(config(true, true)).await;
+    let id = server_id(&rig);
     // La réponse correcte quand le lien tient (le mot de passe devient `New-Password-12`).
-    match rig.runtime.execute(&rig.id, ping()).await.unwrap() {
-        ActionResultDto::Completed { status, .. } => assert_eq!(status, 200),
+    match rig
+        .runtime
+        .manager()
+        .execute(&id, change_password(PASSWORD, "New-Password-12"))
+        .await
+        .unwrap()
+    {
+        ActionOutcome::Completed { status, .. } => assert_eq!(status, 200),
         other => panic!("réponse attendue, reçue {other:?}"),
     }
     // L'agent retient l'action : « en cours » côté agent tant que le test ne la relâche pas.
     rig.agent.hold_actions();
     let started = rig.agent.verifications_started();
     let runtime = rig.runtime.clone();
-    let id = rig.id.clone();
+    let task_id = id.clone();
     let call = tokio::spawn(async move {
         runtime
+            .manager()
             .execute(
-                &id,
+                &task_id,
                 change_password("New-Password-12", "Another-Password-34"),
             )
             .await
     });
     rig.agent.wait_action_started(started).await;
     rig.proxy.cut();
-    let ActionResultDto::Unknown { op_id } = tokio::time::timeout(GUARD, call)
+    let ActionOutcome::ResultUnknown { id: operation } = tokio::time::timeout(GUARD, call)
         .await
         .expect("l'appel ne reste pas suspendu")
         .unwrap()
@@ -361,6 +376,7 @@ async fn an_action_cut_before_the_answer_is_unknown_never_replayed_and_its_outco
     else {
         panic!("résultat inconnu attendu");
     };
+    let op_id = OperationId::as_str(&operation).to_owned();
     // Jamais rejouée : l'agent n'a vu qu'une seule exécution de cette action.
     assert_eq!(rig.agent.verifications_started(), started + 1);
     // L'agent finit pendant la coupure ; le lien revient ; l'issue arrive à l'écran, une fois.
@@ -386,24 +402,63 @@ async fn an_action_cut_before_the_answer_is_unknown_never_replayed_and_its_outco
 }
 
 #[tokio::test]
-async fn an_invalid_action_is_refused_before_it_leaves_the_pc() {
+async fn an_expired_session_with_a_remembered_password_reconnects_without_showing_anything() {
+    // BR-RESIL-013 côté coquille : ni état à l'écran, ni notification, ni changement d'icône ; la
+    // session est renouvelée au coffre (« Je te reconnecte. » n'a pas d'écran).
     let rig = rig(config(false, false)).await;
-    for path in ["me/password", "/../etc/passwd", "/a\nb"] {
-        let bad = ActionInput {
-            path: path.into(),
-            ..ping()
-        };
-        assert!(matches!(
-            rig.runtime.execute(&rig.id, bad).await.unwrap_err(),
-            LinkFailure::InvalidInput { .. }
-        ));
-    }
-    let bad_body = ActionInput {
-        body: Some("{pas du json".into()),
-        ..ping()
-    };
-    assert!(matches!(
-        rig.runtime.execute(&rig.id, bad_body).await.unwrap_err(),
-        LinkFailure::InvalidInput { .. }
-    ));
+    let key = format!("Hearth/{}/token", rig.id);
+    let old_token = rig.secrets.0.lock().unwrap().get(&key).cloned().unwrap();
+    let mark = rig.screen.mark();
+    let notes = rig.spy.notes().len();
+    let icons = rig.spy.icons.lock().unwrap().len();
+    rig.agent.clock.advance(time::Duration::days(31));
+    eventually("jeton renouvelé au coffre", || {
+        rig.secrets
+            .0
+            .lock()
+            .unwrap()
+            .get(&key)
+            .is_some_and(|token| *token != old_token)
+    })
+    .await;
+    rig.wait_for(LinkState::Connected).await;
+    assert_eq!(rig.screen.states_since(mark), Vec::<String>::new());
+    assert_eq!(rig.spy.notes().len(), notes, "aucune notification");
+    assert_eq!(
+        rig.spy.icons.lock().unwrap().len(),
+        icons,
+        "icône inchangée"
+    );
+    assert_eq!(rig.agent.sessions_open("marie").await, 1);
+}
+
+#[tokio::test]
+async fn a_state_still_queued_when_the_server_is_removed_does_not_bring_it_back() {
+    let rig = rig(config(false, false)).await;
+    let id = server_id(&rig);
+    let info = rig.runtime.manager().state(&id).unwrap();
+    rig.runtime
+        .remove_server(&rig.id, &*rig.screen)
+        .await
+        .unwrap();
+    assert_eq!(rig.spy.last_status(), Some(TrayStatus::Idle));
+    let icons = rig.spy.icons.lock().unwrap().len();
+    // L'événement d'état arrive APRÈS la suppression (il était encore dans la file).
+    rig.runtime
+        .relay(Event::State { server: id, info }, &*rig.screen);
+    assert_eq!(rig.spy.icons.lock().unwrap().len(), icons);
+    assert_eq!(rig.spy.last_status(), Some(TrayStatus::Idle));
+    rig.alerts.tick();
+    assert_eq!(rig.spy.notes().len(), 0);
+}
+
+#[tokio::test]
+async fn the_displayed_server_must_be_in_the_book() {
+    let rig = rig(config(false, false)).await;
+    assert_eq!(
+        rig.runtime.known_server(Some(rig.id.clone())),
+        Some(rig.id.clone())
+    );
+    assert_eq!(rig.runtime.known_server(Some("inconnu".into())), None);
+    assert_eq!(rig.runtime.known_server(None), None);
 }

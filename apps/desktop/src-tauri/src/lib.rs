@@ -3,6 +3,7 @@
 //! tout le réseau vivra dans `hearth-link` (ADR-0002).
 
 pub mod alerts;
+pub mod badge;
 mod commands;
 pub mod domain;
 pub mod error;
@@ -45,7 +46,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_notify_on_link_change,
             commands::set_notify_on_link_change,
             commands::set_displayed_server,
-            link_commands::run_action,
             link_commands::list_servers,
             link_commands::list_link_states,
             link_commands::probe_server,
@@ -67,7 +67,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<link_dto::OperationEventDto>()
         .typ::<link_dto::FingerprintEvent>()
         .typ::<link_dto::NoticeEvent>()
-        .typ::<link_dto::ActionResultDto>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.

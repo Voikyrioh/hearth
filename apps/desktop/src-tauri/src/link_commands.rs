@@ -8,8 +8,8 @@ use tauri::{AppHandle, Emitter as _, Runtime, State};
 
 use crate::link::{LinkRuntime, UiSink};
 use crate::link_dto::{
-    ActionInput, ActionResultDto, AddServerInput, FingerprintEvent, LinkFailure, LinkStateDto,
-    LoginDto, NoticeEvent, OperationEventDto, ProbeDto, ServerDto,
+    AddServerInput, FingerprintEvent, LinkFailure, LinkStateDto, LoginDto, NoticeEvent,
+    OperationEventDto, ProbeDto, ServerDto,
 };
 
 /// Les événements de la liaison vont à la fenêtre.
@@ -186,16 +186,4 @@ pub async fn forget_credentials(
     server_id: String,
 ) -> Result<(), LinkFailure> {
     link.forget_credentials(&server_id, &TauriSink(app)).await
-}
-
-/// Envoie une action à un serveur : refusée sans rien envoyer hors « Connecté » ; résultat inconnu si
-/// le lien tombe avant la réponse (jamais rejouée, l'issue arrive par `link://operation`).
-#[tauri::command]
-#[specta::specta]
-pub async fn run_action(
-    link: Runtime_<'_>,
-    server_id: String,
-    action: ActionInput,
-) -> Result<ActionResultDto, LinkFailure> {
-    link.execute(&server_id, action).await
 }
