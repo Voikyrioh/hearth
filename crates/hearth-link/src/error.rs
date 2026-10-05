@@ -3,6 +3,7 @@
 use hearth_proto::error::ErrorCode;
 use thiserror::Error;
 
+use crate::domain::book::BookError;
 use crate::domain::compat::Compatibility;
 use crate::ports::transport::{ApiError, TransportError};
 
@@ -12,6 +13,12 @@ pub enum LinkError {
     UnknownServer,
     #[error("ce serveur est déjà enregistré")]
     AlreadyExists,
+    /// Un autre serveur du carnet porte déjà ce nom (BR-CONN-008).
+    #[error("un serveur porte déjà ce nom")]
+    NameTaken,
+    /// L'adresse change : l'empreinte doit être relue et confirmée de nouveau (BR-CONN-009).
+    #[error("nouvelle vérification de l'empreinte requise")]
+    VerificationRequired,
     #[error("paramètre invalide : {0}")]
     InvalidInput(&'static str),
     /// Le lien n'est pas « Connecté » : rien n'a été envoyé (BR-RESIL-008).
@@ -50,6 +57,19 @@ pub enum LinkError {
     TaskRestarted,
     #[error("la bibliothèque est arrêtée")]
     Stopped,
+}
+
+impl From<BookError> for LinkError {
+    fn from(error: BookError) -> Self {
+        match error {
+            BookError::NameRequired | BookError::NameTooLong => {
+                Self::InvalidInput("nom du serveur")
+            }
+            BookError::NameTaken => Self::NameTaken,
+            BookError::BadAddress => Self::InvalidInput("adresse du serveur"),
+            BookError::BadPort => Self::InvalidInput("port du serveur"),
+        }
+    }
 }
 
 impl From<TransportError> for LinkError {

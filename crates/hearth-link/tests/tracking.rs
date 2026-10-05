@@ -494,7 +494,7 @@ async fn a_write_that_never_ends_does_not_send_the_action_either() {
     let (rig, id) = connected(Disk::Hanging, false).await;
     let started = Instant::now();
     let result = rig.manager.execute(&id, change_password()).await;
-    assert_eq!(result.unwrap_err(), LinkError::TrackingUnavailable);
+    assert_eq!(result.unwrap_err(), LinkError::TrackingSlow);
     assert!(
         started.elapsed() < Duration::from_secs(3),
         "borné par le délai court"

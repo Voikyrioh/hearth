@@ -33,6 +33,7 @@ use crate::adapters::{
     FileOperationStore, FileServerStore, FileSnapshotStore, HttpTransport, HttpTransportConfig,
     OsRng, SystemClock, SystemNetWatcher,
 };
+use crate::domain::book;
 use crate::domain::compat::{self, Compatibility};
 use crate::domain::event::StateInfo;
 use crate::domain::pending_ops::OperationId;
@@ -268,6 +269,18 @@ pub struct NewServer {
     pub mac_addresses: Vec<String>,
 }
 
+/// Modification d'un serveur du carnet (nom, couleur, adresse). Si l'adresse change,
+/// `fingerprint` est l'empreinte relue (`probe`) et confirmée de nouveau par l'utilisateur
+/// (BR-CONN-009) : sans elle, la modification est refusée.
+#[derive(Debug, Clone)]
+pub struct ServerUpdate {
+    pub name: String,
+    pub color: String,
+    pub host: String,
+    pub port: u16,
+    pub fingerprint: Option<Fingerprint>,
+}
+
 /// Résultat de la première prise de contact.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProbeResult {
@@ -403,7 +416,7 @@ impl LinkManager {
     /// Première prise de contact : l'empreinte du certificat et l'identité de l'agent, sans
     /// authentification (BR-CONN-001, 011). L'utilisateur confirme l'empreinte avant `add_server`.
     pub async fn probe(&self, host: &str, port: u16) -> Result<ProbeResult, LinkError> {
-        validate_address(host, port)?;
+        book::check_address(host, port)?;
         let target = Target {
             host: host.to_owned(),
             port,
@@ -423,22 +436,20 @@ impl LinkManager {
     /// Enregistre un serveur dont l'empreinte a été confirmée. Il reste « Session expirée »
     /// (en attente de connexion) jusqu'à `login`.
     pub async fn add_server(&self, new: NewServer) -> Result<ServerId, LinkError> {
-        validate_address(&new.host, new.port)?;
-        let name = new.name.trim();
-        if name.is_empty() || name.chars().count() > 64 {
-            return Err(LinkError::InvalidInput("nom du serveur"));
-        }
-        let duplicate = self.servers().iter().any(|existing| {
+        book::check_address(&new.host, new.port)?;
+        let known = self.servers();
+        let duplicate = known.iter().any(|existing| {
             existing.host.eq_ignore_ascii_case(&new.host) && existing.port == new.port
         });
         if duplicate {
             return Err(LinkError::AlreadyExists);
         }
+        let name = book::check_name(&new.name, &known)?;
         let id = ServerId::parse(&ulid::Ulid::generate().to_string())
             .map_err(|_| LinkError::Protocol("identifiant".into()))?;
         let record = ServerRecord {
             id: id.clone(),
-            name: name.to_owned(),
+            name,
             color: new.color,
             host: new.host,
             port: new.port,
@@ -456,6 +467,53 @@ impl LinkManager {
             .map_err(|e| LinkError::Store(e.0))?;
         spawn_server(deps, &self.inner.registry, record, None, Start::SignedOut);
         Ok(id)
+    }
+
+    /// Modifie un serveur du carnet. Les identifiants mémorisés sont conservés. Si l'adresse
+    /// change (BR-CONN-009), la nouvelle empreinte confirmée remplace l'ancienne et le lien repart
+    /// vers la nouvelle adresse ; un nom identique à celui d'un autre serveur est refusé
+    /// (BR-CONN-008).
+    pub async fn update_server(
+        &self,
+        id: &ServerId,
+        update: ServerUpdate,
+    ) -> Result<ServerRecord, LinkError> {
+        let (commands, shared) = self.handle(id)?;
+        book::check_address(&update.host, update.port)?;
+        let known = self.servers();
+        let others: Vec<&ServerRecord> = known.iter().filter(|other| &other.id != id).collect();
+        if others
+            .iter()
+            .any(|other| other.host.eq_ignore_ascii_case(&update.host) && other.port == update.port)
+        {
+            return Err(LinkError::AlreadyExists);
+        }
+        let name = book::check_name(&update.name, others.iter().copied())?;
+        let mut record = shared.record();
+        let moved = book::address_changed(&record, &update.host, update.port);
+        if moved {
+            record.fingerprint = update.fingerprint.ok_or(LinkError::VerificationRequired)?;
+        }
+        record.name = name;
+        record.color = update.color;
+        record.host = update.host;
+        record.port = update.port;
+        self.inner
+            .deps
+            .servers
+            .save(&record)
+            .await
+            .map_err(|e| LinkError::Store(e.0))?;
+        shared.set_record(record.clone());
+        if moved {
+            // Autre adresse, autre identité possible : les clés d'opération ne disent plus rien ;
+            // une tentative repart vers la nouvelle adresse, épinglée sur la nouvelle empreinte.
+            commands
+                .send(Command::FingerprintAccepted)
+                .await
+                .map_err(|_| LinkError::Stopped)?;
+        }
+        Ok(record)
     }
 
     /// Ouvre une session (`POST /sessions`) sur la connexion épinglée, mémorise le jeton au coffre
@@ -781,17 +839,6 @@ fn spawn_server(
             join,
         },
     );
-}
-
-fn validate_address(host: &str, port: u16) -> Result<(), LinkError> {
-    let bad_char = |c: char| c.is_whitespace() || matches!(c, '/' | '\\' | '?' | '#' | '@');
-    if host.is_empty() || host.len() > 253 || host.chars().any(bad_char) {
-        return Err(LinkError::InvalidInput("adresse du serveur"));
-    }
-    if port == 0 {
-        return Err(LinkError::InvalidInput("port du serveur"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ use hearth_link::domain::compat::Compatibility;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::state::LinkState;
 use hearth_link::ports::vault::{SecretKind, Vault as _};
-use hearth_link::{LinkError, NewServer};
+use hearth_link::{LinkError, NewServer, ServerUpdate};
 use hearth_proto::fingerprint::Fingerprint;
 use support::{
     JumpClock, Options, PASSWORD, Recorder, ScriptedNet, TestAgent, WAIT, World, fast_config,
@@ -323,11 +323,9 @@ async fn each_server_has_its_own_independent_link() {
         .probe("127.0.0.1", second_proxy.port())
         .await
         .unwrap();
-    let second = world
-        .manager
-        .add_server(server(second_proxy.port(), probe.fingerprint))
-        .await
-        .unwrap();
+    let mut second_server = server(second_proxy.port(), probe.fingerprint);
+    second_server.name = "Salon".into();
+    let second = world.manager.add_server(second_server).await.unwrap();
     let mark = world.recorder.mark();
     world
         .manager
@@ -382,4 +380,105 @@ async fn an_unreadable_server_book_does_not_prevent_starting() {
     )
     .await;
     assert!(manager.servers().is_empty());
+}
+
+#[tokio::test]
+async fn two_servers_cannot_share_a_name_even_with_another_case() {
+    let first = TestAgent::install().await;
+    let second = TestAgent::install().await;
+    let (manager, _dir, _vault) = bare_manager().await;
+    let one = manager.probe("127.0.0.1", first.addr.port()).await.unwrap();
+    let two = manager
+        .probe("127.0.0.1", second.addr.port())
+        .await
+        .unwrap();
+    manager
+        .add_server(server(first.addr.port(), one.fingerprint))
+        .await
+        .unwrap();
+    let mut same = server(second.addr.port(), two.fingerprint);
+    same.name = " forge ".into();
+    assert_eq!(
+        manager.add_server(same).await.unwrap_err(),
+        LinkError::NameTaken
+    );
+    let mut other = server(second.addr.port(), two.fingerprint);
+    other.name = "Salon".into();
+    let id = manager.add_server(other).await.unwrap();
+    // Renommer en un nom déjà pris est refusé ; garder son propre nom est permis.
+    let update = |name: &str| ServerUpdate {
+        name: name.into(),
+        color: "#f7768e".into(),
+        host: "127.0.0.1".into(),
+        port: second.addr.port(),
+        fingerprint: None,
+    };
+    assert_eq!(
+        manager
+            .update_server(&id, update("FORGE"))
+            .await
+            .unwrap_err(),
+        LinkError::NameTaken
+    );
+    let renamed = manager.update_server(&id, update("Salon")).await.unwrap();
+    assert_eq!(renamed.color, "#f7768e");
+    let renamed = manager.update_server(&id, update("Cave")).await.unwrap();
+    assert_eq!(renamed.name, "Cave");
+}
+
+#[tokio::test]
+async fn changing_the_address_demands_a_new_fingerprint_and_keeps_the_remembered_password() {
+    let first = TestAgent::install().await;
+    first.create_account("marie", Role::Admin).await;
+    let second = TestAgent::install().await;
+    second.create_account("marie", Role::Admin).await;
+    let (manager, dir, vault) = bare_manager().await;
+    let one = manager.probe("127.0.0.1", first.addr.port()).await.unwrap();
+    let id = manager
+        .add_server(server(first.addr.port(), one.fingerprint))
+        .await
+        .unwrap();
+    manager
+        .login(&id, "marie", Secret::from(PASSWORD), true)
+        .await
+        .unwrap();
+    let moved = |fingerprint| ServerUpdate {
+        name: "Forge".into(),
+        color: "#7aa2f7".into(),
+        host: "127.0.0.1".into(),
+        port: second.addr.port(),
+        fingerprint,
+    };
+    // Sans nouvelle empreinte confirmée, rien ne change.
+    assert_eq!(
+        manager.update_server(&id, moved(None)).await.unwrap_err(),
+        LinkError::VerificationRequired
+    );
+    assert_eq!(manager.servers()[0].port, first.addr.port());
+    // Avec l'empreinte relue et confirmée de la nouvelle adresse : elle est épinglée.
+    let two = manager
+        .probe("127.0.0.1", second.addr.port())
+        .await
+        .unwrap();
+    let record = manager
+        .update_server(&id, moved(Some(two.fingerprint)))
+        .await
+        .unwrap();
+    assert_eq!(record.port, second.addr.port());
+    assert_eq!(record.fingerprint, two.fingerprint);
+    assert!(record.remember && record.username == "marie");
+    assert!(vault.get(&id, SecretKind::Password).unwrap().is_some());
+    let book = std::fs::read_to_string(dir.path().join("servers.json")).unwrap();
+    assert!(book.contains(&two.fingerprint.to_hex()));
+    // L'adresse d'un autre serveur du carnet est refusée.
+    let other_one = manager.probe("127.0.0.1", first.addr.port()).await.unwrap();
+    let mut elsewhere = server(first.addr.port(), other_one.fingerprint);
+    elsewhere.name = "Autre".into();
+    manager.add_server(elsewhere).await.unwrap();
+    let mut onto_it = moved(Some(one.fingerprint));
+    onto_it.port = first.addr.port();
+    assert_eq!(
+        manager.update_server(&id, onto_it).await.unwrap_err(),
+        LinkError::AlreadyExists
+    );
 }
