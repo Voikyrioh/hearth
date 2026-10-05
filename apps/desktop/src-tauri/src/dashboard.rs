@@ -48,7 +48,7 @@ impl From<Level> for LevelDto {
     }
 }
 
-fn bytes(value: u64) -> f64 {
+fn number(value: u64) -> f64 {
     value as f64
 }
 
@@ -127,9 +127,9 @@ impl From<&MachineResponse> for MachineDto {
                 model: machine.cpu.model.clone(),
                 physical_cores: machine.cpu.physical_cores,
                 logical_cores: machine.cpu.logical_cores,
-                frequency_mhz: machine.cpu.frequency_mhz.map(bytes),
+                frequency_mhz: machine.cpu.frequency_mhz.map(number),
             },
-            memory_total_bytes: bytes(machine.memory_total_bytes),
+            memory_total_bytes: number(machine.memory_total_bytes),
             disks: machine
                 .disks
                 .iter()
@@ -137,7 +137,7 @@ impl From<&MachineResponse> for MachineDto {
                     name: disk.name.clone(),
                     mount: disk.mount.clone(),
                     fs: disk.fs.clone(),
-                    total_bytes: bytes(disk.total_bytes),
+                    total_bytes: number(disk.total_bytes),
                     removable: disk.removable,
                 })
                 .collect(),
@@ -146,7 +146,7 @@ impl From<&MachineResponse> for MachineDto {
                 .iter()
                 .map(|gpu| GpuInfoDto {
                     name: gpu.name.clone(),
-                    memory_total_bytes: gpu.memory_total_bytes.map(bytes),
+                    memory_total_bytes: gpu.memory_total_bytes.map(number),
                 })
                 .collect(),
             capabilities: CapabilitiesDto {
@@ -219,12 +219,12 @@ impl SampleDto {
     fn new(sample: &Sample, at_ms: i64) -> Self {
         Self {
             at: at_ms as f64,
-            uptime_s: bytes(sample.uptime_s),
+            uptime_s: number(sample.uptime_s),
             cpu: round1(sample.cpu),
             cores: sample.cores.iter().map(|core| round1(*core)).collect(),
             mem: MemoryDto {
-                used_bytes: bytes(sample.mem.used_bytes),
-                total_bytes: bytes(sample.mem.total_bytes),
+                used_bytes: number(sample.mem.used_bytes),
+                total_bytes: number(sample.mem.total_bytes),
             },
             disks: sample
                 .disks
@@ -232,13 +232,13 @@ impl SampleDto {
                 .map(|disk| DiskSampleDto {
                     name: disk.name.clone(),
                     mount: disk.mount.clone(),
-                    used_bytes: bytes(disk.used_bytes),
-                    total_bytes: bytes(disk.total_bytes),
+                    used_bytes: number(disk.used_bytes),
+                    total_bytes: number(disk.total_bytes),
                 })
                 .collect(),
             net: sample.net.map(|net| NetDto {
-                up_bytes_per_s: bytes(net.up_bytes_per_s),
-                down_bytes_per_s: bytes(net.down_bytes_per_s),
+                up_bytes_per_s: number(net.up_bytes_per_s),
+                down_bytes_per_s: number(net.down_bytes_per_s),
             }),
             gpus: sample
                 .gpus
@@ -246,8 +246,8 @@ impl SampleDto {
                 .map(|gpu| GpuSampleDto {
                     name: gpu.name.clone(),
                     load_percent: gpu.load_percent.map(round1),
-                    memory_used_bytes: gpu.memory_used_bytes.map(bytes),
-                    memory_total_bytes: gpu.memory_total_bytes.map(bytes),
+                    memory_used_bytes: gpu.memory_used_bytes.map(number),
+                    memory_total_bytes: gpu.memory_total_bytes.map(number),
                     temp_c: gpu.temp_c.map(round1),
                 })
                 .collect(),
@@ -341,13 +341,15 @@ pub struct SnapshotEvent {
     pub levels: Option<LevelsDto>,
 }
 
-/// Les points de la série du processeur : l'instant ne recule jamais (l'horloge murale de l'agent
-/// peut reculer, son ordre d'envoi non).
-fn cpu_points(samples: &[Sample], at: &[i64]) -> Vec<CpuPoint> {
+/// Les points de la série du processeur d'un historique : l'écart entre deux points est celui de
+/// l'agent, mais la série est ramenée à l'instant de réception (le dernier point est « maintenant ») :
+/// une horloge de l'agent qui recule ou qui diffère de celle du poste ne fausse pas les 30 s.
+fn cpu_points(samples: &[Sample], at: &[i64], now_ms: i64) -> Vec<CpuPoint> {
+    let shift = at.last().map_or(0, |last| now_ms.saturating_sub(*last));
     let mut out = Vec::with_capacity(samples.len());
     let mut last = i64::MIN;
     for (sample, at_ms) in samples.iter().zip(at) {
-        let at_ms = (*at_ms).max(last.saturating_add(1));
+        let at_ms = at_ms.saturating_add(shift).max(last.saturating_add(1));
         last = at_ms;
         out.push(CpuPoint {
             at_ms,
@@ -374,7 +376,7 @@ pub fn snapshot(
     now_ms: i64,
 ) -> (SnapshotEvent, Vec<CpuPoint>) {
     let at = millis_of(history, now_ms);
-    let series = cpu_points(history, &at);
+    let series = cpu_points(history, &at, now_ms);
     let last_levels = history
         .last()
         .map(|sample| levels(sample, cpu_level(&series)));
@@ -419,9 +421,9 @@ impl DashBook {
     /// Un échantillon en direct : niveaux à jour, série du processeur prolongée.
     pub fn on_metrics(&mut self, server_id: &str, sample: &Sample, now_ms: i64) -> MetricsEvent {
         let series = self.cpu.entry(server_id.to_owned()).or_default();
-        let mut at_ms = sample_millis(sample, now_ms);
+        // Instant de RÉCEPTION : la série du processeur ne dépend pas de l'horloge de l'agent.
+        let mut at_ms = now_ms;
         if let Some(last) = series.back() {
-            // L'horloge murale de l'agent a pu reculer : l'ordre d'arrivée fait foi.
             at_ms = at_ms.max(last.at_ms.saturating_add(1));
         }
         series.push_back(CpuPoint {
@@ -434,7 +436,7 @@ impl DashBook {
         let level = cpu_level(series.make_contiguous());
         MetricsEvent {
             server_id: server_id.to_owned(),
-            sample: SampleDto::new(sample, at_ms),
+            sample: SampleDto::new(sample, sample_millis(sample, now_ms)),
             levels: levels(sample, level),
         }
     }

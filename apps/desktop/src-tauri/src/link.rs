@@ -524,7 +524,31 @@ impl LinkRuntime {
     /// suivants).
     pub async fn forward(&self, mut stream: EventStream, sink: &dyn UiSink) {
         while let Some(event) = stream.recv().await {
+            let lagged = matches!(event, Event::Lagged { .. });
             self.relay(event, sink);
+            if lagged {
+                self.resync_dashboards(sink).await;
+            }
+        }
+    }
+
+    /// Après un retard d'écoute, des instantanés ont pu être perdus : la dernière vue connue de
+    /// chaque serveur est réannoncée et la série du processeur repart d'elle.
+    pub async fn resync_dashboards(&self, sink: &dyn UiSink) {
+        for record in self.manager.servers() {
+            let Ok(id) = ServerId::parse(record.id.as_str()) else {
+                continue;
+            };
+            let Ok(Some(view)) = self.manager.last_known(&id).await else {
+                continue;
+            };
+            let Some(machine) = view.machine else {
+                continue;
+            };
+            let snapshot = self
+                .dash()
+                .on_snapshot(id.as_str(), &machine, &view.history, now_ms());
+            send(sink, dash_events::SNAPSHOT, &snapshot);
         }
     }
 

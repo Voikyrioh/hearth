@@ -119,16 +119,28 @@ fn the_processor_level_counts_only_once_held_for_thirty_seconds() {
     let mut last = LevelDto::Normal;
     // 96 % à chaque seconde : normal jusqu'à la trentième seconde incluse, puis critique.
     for second in 0..=29 {
-        last = book.on_metrics("srv", &sample(second, 96.0), 0).levels.cpu;
+        last = book
+            .on_metrics("srv", &sample(second, 96.0), i64::from(second) * 1000)
+            .levels
+            .cpu;
         assert_eq!(last, LevelDto::Normal, "seconde {second}");
     }
     assert_eq!(last, LevelDto::Normal);
-    let held = book.on_metrics("srv", &sample(30, 96.0), 0).levels.cpu;
+    let held = book
+        .on_metrics("srv", &sample(30, 96.0), i64::from(30) * 1000)
+        .levels
+        .cpu;
     assert_eq!(held, LevelDto::Critical);
     // Un creux sous le seuil remet le compte à zéro.
-    let dip = book.on_metrics("srv", &sample(31, 10.0), 0).levels.cpu;
+    let dip = book
+        .on_metrics("srv", &sample(31, 10.0), i64::from(31) * 1000)
+        .levels
+        .cpu;
     assert_eq!(dip, LevelDto::Normal);
-    let again = book.on_metrics("srv", &sample(32, 96.0), 0).levels.cpu;
+    let again = book
+        .on_metrics("srv", &sample(32, 96.0), i64::from(32) * 1000)
+        .levels
+        .cpu;
     assert_eq!(again, LevelDto::Normal);
 }
 
@@ -136,10 +148,13 @@ fn the_processor_level_counts_only_once_held_for_thirty_seconds() {
 fn a_gap_in_the_live_series_breaks_the_hold() {
     let mut book = DashBook::default();
     for second in 0..=40 {
-        book.on_metrics("srv", &sample(second, 90.0), 0);
+        book.on_metrics("srv", &sample(second, 90.0), i64::from(second) * 1000);
     }
     // Le lien est resté coupé 20 s : on ne peut plus affirmer que la charge est restée là.
-    let after = book.on_metrics("srv", &sample(61, 90.0), 0).levels.cpu;
+    let after = book
+        .on_metrics("srv", &sample(61, 90.0), i64::from(61) * 1000)
+        .levels
+        .cpu;
     assert_eq!(after, LevelDto::Normal);
 }
 
@@ -147,19 +162,25 @@ fn a_gap_in_the_live_series_breaks_the_hold() {
 fn servers_do_not_share_their_series() {
     let mut book = DashBook::default();
     for second in 0..=30 {
-        book.on_metrics("a", &sample(second, 90.0), 0);
+        book.on_metrics("a", &sample(second, 90.0), i64::from(second) * 1000);
     }
     assert_eq!(
-        book.on_metrics("a", &sample(31, 90.0), 0).levels.cpu,
+        book.on_metrics("a", &sample(31, 90.0), i64::from(31) * 1000)
+            .levels
+            .cpu,
         LevelDto::Attention
     );
     assert_eq!(
-        book.on_metrics("b", &sample(31, 90.0), 0).levels.cpu,
+        book.on_metrics("b", &sample(31, 90.0), i64::from(31) * 1000)
+            .levels
+            .cpu,
         LevelDto::Normal
     );
     book.forget("a");
     assert_eq!(
-        book.on_metrics("a", &sample(32, 90.0), 0).levels.cpu,
+        book.on_metrics("a", &sample(32, 90.0), i64::from(32) * 1000)
+            .levels
+            .cpu,
         LevelDto::Normal
     );
 }
@@ -168,22 +189,54 @@ fn servers_do_not_share_their_series() {
 fn a_snapshot_resumes_the_series_so_the_hold_survives_a_reconnection() {
     let mut book = DashBook::default();
     let history: Vec<Sample> = (0..=30).map(|second| sample(second, 97.0)).collect();
-    let event = book.on_snapshot("srv", &machine(false, false), &history, 0);
+    let event = book.on_snapshot("srv", &machine(false, false), &history, 30_000);
     assert_eq!(event.levels.unwrap().cpu, LevelDto::Critical);
     assert_eq!(event.history.len(), 31);
     // La suite en direct prolonge la même série.
     assert_eq!(
-        book.on_metrics("srv", &sample(31, 97.0), 0).levels.cpu,
+        book.on_metrics("srv", &sample(31, 97.0), i64::from(31) * 1000)
+            .levels
+            .cpu,
         LevelDto::Critical
     );
 }
 
 #[test]
-fn a_wall_clock_that_goes_back_never_goes_back_in_the_series() {
+fn the_hold_follows_the_reception_instant_not_the_clock_of_the_agent() {
     let mut book = DashBook::default();
-    let first = book.on_metrics("srv", &sample(10, 10.0), 0);
-    let back = book.on_metrics("srv", &sample(5, 10.0), 0);
-    assert!(back.sample.at > first.sample.at);
+    let mut level = LevelDto::Normal;
+    // L'horloge de l'agent recule d'une heure en plein milieu : les 30 s se comptent à la réception.
+    for second in 0..=30u32 {
+        let mut s = sample(second, 96.0);
+        if second >= 10 {
+            s.at = "2026-10-04T09:00:00.000Z".into();
+        }
+        level = book
+            .on_metrics("srv", &s, i64::from(second) * 1000)
+            .levels
+            .cpu;
+    }
+    assert_eq!(level, LevelDto::Critical);
+}
+
+#[test]
+fn levels_and_measures_have_the_same_lengths() {
+    let mut s = sample(0, 5.0);
+    s.gpus = vec![GpuSample {
+        name: "g".into(),
+        load_percent: None,
+        memory_used_bytes: None,
+        memory_total_bytes: None,
+        temp_c: None,
+    }];
+    s.temps = vec![TempSample {
+        label: "t".into(),
+        celsius: 40.0,
+    }];
+    let event = DashBook::default().on_metrics("srv", &s, 0);
+    assert_eq!(event.levels.disks.len(), event.sample.disks.len());
+    assert_eq!(event.levels.gpus.len(), event.sample.gpus.len());
+    assert_eq!(event.levels.temps.len(), event.sample.temps.len());
 }
 
 #[test]

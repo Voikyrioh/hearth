@@ -191,3 +191,19 @@ async fn an_unknown_server_has_no_dashboard() {
         Err(LinkFailure::UnknownServer)
     ));
 }
+
+#[tokio::test]
+async fn after_a_lag_the_last_view_of_every_server_is_announced_again() {
+    let (_agent, runtime, sink, _secrets, _dir, id) = connected().await;
+    eventually("une vue enregistrée", || {
+        !sink.of("link://snapshot").is_empty() && sink.of("link://metrics").len() >= 2
+    })
+    .await;
+    let before = sink.of("link://snapshot").len();
+    runtime.resync_dashboards(&*sink).await;
+    let snapshots = sink.of("link://snapshot");
+    assert!(snapshots.len() > before);
+    let last = snapshots.last().unwrap();
+    assert_eq!(last["serverId"], id.as_str());
+    assert_eq!(last["machine"]["name"], "forge-test");
+}
