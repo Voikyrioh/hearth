@@ -28,14 +28,25 @@ async fn bare_manager() -> (
     tempfile::TempDir,
     Arc<MemoryVault>,
 ) {
+    bare_manager_with(support::transport()).await
+}
+
+async fn bare_manager_with(
+    transport: hearth_link::adapters::HttpTransport,
+) -> (
+    hearth_link::LinkManager,
+    tempfile::TempDir,
+    Arc<MemoryVault>,
+) {
     let dir = tempfile::tempdir().unwrap();
     let vault = Arc::new(MemoryVault::new());
-    let manager = start_manager(
+    let manager = support::start_manager_with(
         dir.path(),
         vault.clone(),
         Arc::new(ScriptedNet::new()),
         Arc::new(JumpClock::new()),
         fast_config(),
+        transport,
     )
     .await;
     (manager, dir, vault)
@@ -72,7 +83,8 @@ async fn the_probe_reads_the_identity_and_the_fingerprint_without_authenticating
 
 #[tokio::test]
 async fn the_probe_of_something_that_is_not_an_agent_fails_cleanly() {
-    let (manager, _dir, _vault) = bare_manager().await;
+    // Délai de connexion court : c'est l'objet du test (un serveur muet).
+    let (manager, _dir, _vault) = bare_manager_with(support::short_transport()).await;
     // Rien n'écoute.
     let closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = closed.local_addr().unwrap().port();

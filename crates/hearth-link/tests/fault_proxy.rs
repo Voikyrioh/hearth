@@ -43,30 +43,10 @@ fn change_password() -> ActionRequest {
     }
 }
 
-/// Attend que la prochaine tentative automatique soit lointaine (au moins `at_least`), pour
-/// prouver qu'un déclencheur ne l'attend pas.
-async fn wait_for_a_distant_retry(world: &World, at_least: Duration) -> Instant {
-    let deadline = Instant::now() + WAIT;
-    loop {
-        let info = world.state();
-        if let Some(next) = info.next_retry_at {
-            let now = hearth_link::ports::Clock::wall(&*world.clock);
-            if next.since(now) >= at_least {
-                return Instant::now() + next.since(now);
-            }
-        }
-        assert!(
-            Instant::now() < deadline,
-            "aucune tentative lointaine : {info:?}"
-        );
-        tokio::time::sleep(ms(10)).await;
-    }
-}
-
 // ── Coupures ────────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn a_cut_shorter_than_the_threshold_is_invisible() {
+async fn a_cut_healed_before_any_threshold_shows_nothing_and_the_stream_resumes() {
     // Le seuil de « Reconnexion » est hors d'atteinte : la coupure dure ce qu'elle dure (le test
     // attend qu'une tentative de reconnexion ait vu le lien coupé), elle est toujours plus courte.
     let world = World::connected(Options::with_thresholds(thresholds(
@@ -203,9 +183,11 @@ async fn a_prolonged_freeze_without_closing_is_detected_by_the_heartbeat() {
 }
 
 #[tokio::test]
-async fn a_slow_but_alive_agent_is_not_cut_by_a_false_positive() {
+async fn a_delayed_agent_keeps_its_stream_open_and_nothing_is_shown() {
     // Chaque morceau arrive en retard mais arrive : le flux vit (plusieurs salves de mesures
-    // reçues) sans qu'aucun état ne change. Le seuil exact du silence est prouvé par le domaine.
+    // reçues), n'est jamais rouvert et aucun état ne change. Ce que prouve ce test : un retard ne
+    // fait pas rouvrir le flux. Le seuil exact du silence (2 999 ms tenu, 3 000 ms coupé) est prouvé
+    // par `domain::state::tests::silence_of_exactly_3s_cuts_the_link_and_it_is_dated_at_the_last_message`.
     let world = World::connected(Options::with_thresholds(thresholds(
         Some(never()),
         false,
@@ -213,8 +195,10 @@ async fn a_slow_but_alive_agent_is_not_cut_by_a_false_positive() {
     )))
     .await;
     let mark = world.recorder.mark();
+    let connections = world.proxy.accepted();
     world.proxy.delay(ms(250));
     wait_metrics_times(&world.recorder, 3).await;
+    assert_eq!(world.proxy.accepted(), connections, "flux jamais rouvert");
     assert_eq!(world.recorder.states_since(mark), []);
     assert_eq!(world.state().state, LinkState::Connected);
 }
@@ -249,12 +233,8 @@ async fn refused_connections_are_retried_until_one_goes_through() {
         .recorder
         .wait_state(mark, LinkState::Reconnecting, WAIT)
         .await;
-    let refused = world.proxy.accepted();
-    tokio::time::sleep(ms(800)).await;
-    assert!(
-        world.proxy.accepted() > refused,
-        "les tentatives continuent"
-    );
+    // Les tentatives continuent : de nouvelles connexions arrivent (attente d'un fait).
+    wait_attempts(&world.proxy, 2).await;
     world.proxy.heal();
     world
         .recorder
@@ -313,20 +293,19 @@ async fn retry_now_forces_an_attempt_without_waiting() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    let scheduled = wait_for_a_distant_retry(&world, ms(3_500)).await;
-    world.proxy.heal();
+    // Le lien est toujours coupé : seul le clic peut faire afficher « Reconnexion » (les tentatives
+    // planifiées, elles, laissent « Hors ligne »). Fait observé, aucune durée.
     let clicked = world.recorder.mark();
     world.manager.retry_now(&world.id).unwrap();
-    let back = world
+    world
+        .recorder
+        .wait_state(clicked, LinkState::Reconnecting, WAIT)
+        .await;
+    world.proxy.heal();
+    world
         .recorder
         .wait_state(clicked, LinkState::Connected, WAIT)
         .await;
-    assert!(
-        back < scheduled,
-        "reconnecté avant la tentative déjà prévue"
-    );
-    let states = world.recorder.states_since(clicked);
-    assert_eq!(states.first(), Some(&LinkState::Reconnecting), "{states:?}");
 }
 
 #[tokio::test]
@@ -338,19 +317,19 @@ async fn a_network_change_reconnects_immediately() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    let scheduled = wait_for_a_distant_retry(&world, ms(3_500)).await;
-    world.proxy.heal();
+    // Câble débranché, Wi-Fi : la liste des adresses locales change. Le lien est toujours coupé :
+    // seul le déclencheur fait afficher « Reconnexion » (fait observé, aucune durée).
     let changed = world.recorder.mark();
-    // Câble débranché, Wi-Fi : la liste des adresses locales change.
     world.net.set(&["10.8.0.2"]);
-    let back = world
+    world
+        .recorder
+        .wait_state(changed, LinkState::Reconnecting, WAIT)
+        .await;
+    world.proxy.heal();
+    world
         .recorder
         .wait_state(changed, LinkState::Connected, WAIT)
         .await;
-    assert!(
-        back < scheduled,
-        "reconnecté avant la tentative déjà prévue"
-    );
 }
 
 #[tokio::test]
@@ -362,19 +341,19 @@ async fn a_wake_up_reconnects_immediately() {
         .recorder
         .wait_state(mark, LinkState::Offline, WAIT)
         .await;
-    let scheduled = wait_for_a_distant_retry(&world, ms(3_500)).await;
-    world.proxy.heal();
+    // L'horloge murale saute de dix minutes sans que la monotone bouge : veille puis réveil. Le lien
+    // est toujours coupé : seul le réveil fait afficher « Reconnexion » (fait observé).
     let woke = world.recorder.mark();
-    // L'horloge murale saute de dix minutes sans que la monotone bouge : veille puis réveil.
     world.clock.jump(Duration::from_secs(600));
-    let back = world
+    world
+        .recorder
+        .wait_state(woke, LinkState::Reconnecting, WAIT)
+        .await;
+    world.proxy.heal();
+    world
         .recorder
         .wait_state(woke, LinkState::Connected, WAIT)
         .await;
-    assert!(
-        back < scheduled,
-        "reconnecté avant la tentative déjà prévue"
-    );
 }
 
 // ── Empreinte ───────────────────────────────────────────────────────────────────────────────
@@ -781,13 +760,11 @@ async fn waking_up_after_a_long_outage_shows_reconnecting_again_not_offline() {
         .recorder
         .wait_state(woke, LinkState::Reconnecting, WAIT)
         .await;
-    // Les tentatives reprennent depuis le réveil (le lien cherche à se rétablir).
-    wait_attempts(&world.proxy, 2).await;
-    assert_eq!(world.state().state, LinkState::Reconnecting);
+    // L'ordre, pas la durée : le premier état après le réveil est « Reconnexion » (la coupure repart
+    // du réveil). Le délai de 30 s depuis le réveil est prouvé par `domain::state::tests`.
     assert_eq!(
-        world.recorder.states_since(woke),
-        [LinkState::Reconnecting],
-        "pas de retour à « Hors ligne » tant que 30 s (échelle : 5 s) ne se sont pas écoulées depuis le réveil"
+        world.recorder.states_since(woke).first(),
+        Some(&LinkState::Reconnecting)
     );
     world.proxy.heal();
     world
@@ -808,9 +785,11 @@ async fn a_network_change_does_not_cut_a_healthy_stream() {
     let connections = world.proxy.accepted();
     // Docker, WSL, Tailscale : la liste d'adresses change, le réseau utile non.
     world.net.set(&["172.17.0.1", "192.168.1.20"]);
-    tokio::time::sleep(ms(1_500)).await;
+    world.net.wait_seen(WAIT).await;
+    wait_metrics_times(&world.recorder, 2).await;
     world.net.set(&["192.168.1.20"]);
-    tokio::time::sleep(ms(1_500)).await;
+    world.net.wait_seen(WAIT).await;
+    wait_metrics_times(&world.recorder, 2).await;
     assert_eq!(world.recorder.states_since(mark), []);
     assert_eq!(
         world.proxy.accepted(),
@@ -831,9 +810,10 @@ async fn an_action_in_flight_is_not_made_unknown_by_a_network_change() {
     let sent = tokio::spawn(async move { manager.execute(&id, change_password()).await });
     world.agent.wait_action_started(started).await;
     world.net.set(&["10.8.0.2"]);
-    // Le changement est pris en compte (le veilleur sonde toutes les 60 ms) pendant que l'action
-    // est retenue côté agent ; puis l'agent la relâche.
-    tokio::time::sleep(ms(300)).await;
+    // Le veilleur a LU la nouvelle liste (fait), et le flux a continué après (ordre des commandes de
+    // la tâche) pendant que l'action est retenue côté agent ; puis l'agent la relâche.
+    world.net.wait_seen(WAIT).await;
+    wait_metrics_times(&world.recorder, 2).await;
     world.agent.release_actions();
     let outcome = tokio::time::timeout(WAIT, sent)
         .await

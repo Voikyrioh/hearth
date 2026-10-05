@@ -370,8 +370,13 @@ impl Runner {
             Command::LoginRefused => self.input(Input::LoginRefused).await,
             Command::LoggedOut => {
                 self.input(Input::LoggedOut).await;
-                // Après l'arrêt de toute tentative : un jeton obtenu entre-temps n'a plus d'objet.
-                let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
+                // Après l'arrêt de toute tentative : un jeton obtenu pendant la déconnexion n'a plus
+                // d'objet. FIX:01M46G7Z0ZP43T53M2F5KG4VKS — sauf si une connexion est déjà passée
+                // (le carnet ne dit plus « déconnecté ») : le jeton du coffre est alors le sien, et
+                // la tâche est seulement en retard sur la commande.
+                if self.shared.record().signed_out {
+                    let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
+                }
             }
             Command::Execute {
                 key,
