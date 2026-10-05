@@ -17,12 +17,12 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.95"
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo fmt --all -- --check
       # La coquille Tauri est vérifiée par le job `desktop` (Windows, WebView2) : pas de bibliothèques système sous Linux.
       - run: cargo clippy --workspace --exclude hearth-desktop --all-targets -- -D warnings
@@ -31,17 +31,17 @@ jobs:
   desktop:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.95"
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Interface (installation, Biome, types, Vitest, build)
         working-directory: apps/desktop
         run: |
@@ -58,9 +58,51 @@ jobs:
       - name: Installateur NSIS
         working-directory: apps/desktop
         run: npm run tauri build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: hearth-windows-installer
           path: target/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 7
+
+  # Le binaire de l'agent (statique, musl), l'installation de bout en bout dans un conteneur avec
+  # systemd, et les scripts de deploy/. Les conteneurs sont ceux de `cargo xtask` ; leur cache
+  # (registre Cargo et dossier de cibles) est un dossier de l'hôte, mis en cache d'une exécution
+  # à l'autre.
+  agent-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HEARTH_XTASK_CACHE: ${{ github.workspace }}/.xtask-cache
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .xtask-cache
+          key: xtask-agent-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: xtask-agent-${{ runner.os }}-
+      - name: Scripts de deploy/ (shellcheck)
+        run: cargo xtask shellcheck
+      - name: Binaire statique de l'agent (musl)
+        run: cargo xtask agent
+      - name: Installation de bout en bout (Debian + systemd)
+        run: cargo xtask e2e-install
+      - name: Somme SHA-256 du binaire
+        run: sha256sum hearth-agent > hearth-agent.sha256 && cat hearth-agent.sha256
+        working-directory: target/dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hearth-agent-linux-x86_64
+          path: |
+            target/dist/hearth-agent
+            target/dist/hearth-agent.sha256
+          if-no-files-found: error
+          retention-days: 7
+      # Le conteneur écrit le cache en root : rendu à l'utilisateur pour que la sauvegarde le lise.
+      - name: Droits du cache
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .xtask-cache || true

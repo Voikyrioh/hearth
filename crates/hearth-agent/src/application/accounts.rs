@@ -144,6 +144,32 @@ impl AccountService {
         let password =
             PlainPassword::new(password, &username).map_err(AccountError::WeakPassword)?;
         let hash = self.hasher.hash(&password).await?;
+        self.insert_new(username, hash, role, by).await
+    }
+
+    /// Comme `create`, avec un haché Argon2id (format PHC) déjà calculé : installation non
+    /// interactive (`HEARTH_ADMIN_PASSWORD_HASH`). Le mot de passe n'est jamais connu de l'agent ;
+    /// les règles de complexité ne peuvent donc pas s'y appliquer, seul le format du haché est
+    /// contrôlé.
+    pub async fn create_with_hash(
+        &self,
+        username: &str,
+        hash: Secret,
+        role: Role,
+        by: &Actor,
+    ) -> Result<AccountView, AccountError> {
+        let username = Username::parse(username)?;
+        self.hasher.validate_hash(&hash)?;
+        self.insert_new(username, hash, role, by).await
+    }
+
+    async fn insert_new(
+        &self,
+        username: Username,
+        hash: Secret,
+        role: Role,
+        by: &Actor,
+    ) -> Result<AccountView, AccountError> {
         let now = self.clock.now();
         let account = Account {
             id: AccountId::new(self.ids.new_id()),

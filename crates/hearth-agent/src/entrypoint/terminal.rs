@@ -1,7 +1,10 @@
 //! Saisie du mot de passe au terminal, sans écho, avec confirmation ; ou valeur fournie par la
 //! variable d'environnement `HEARTH_ACCOUNT_PASSWORD` pour l'automatisation.
 
+use std::io::{self, BufRead, Write};
+
 use super::account::{AccountCliError, PasswordInput};
+use super::install::Prompter;
 use crate::domain::secret::Secret;
 
 pub const ENV_ACCOUNT_PASSWORD: &str = "HEARTH_ACCOUNT_PASSWORD";
@@ -30,6 +33,29 @@ impl PasswordInput for TerminalPasswords {
         let first = prompt("Mot de passe : ")?;
         let second = prompt("Confirme le mot de passe : ")?;
         confirmed(first, second)
+    }
+}
+
+/// Questions de l'installation au terminal : réponses visibles sur stdin, mots de passe sans
+/// écho (rpassword).
+pub struct TerminalPrompter;
+
+impl Prompter for TerminalPrompter {
+    fn line(&mut self, label: &str) -> io::Result<String> {
+        print!("{label} ");
+        io::stdout().flush()?;
+        let mut answer = String::new();
+        if io::stdin().lock().read_line(&mut answer)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "plus rien à lire : aucune réponse n'est possible sans terminal",
+            ));
+        }
+        Ok(answer.trim_end_matches(['\r', '\n']).to_owned())
+    }
+
+    fn secret(&mut self, label: &str) -> io::Result<Secret> {
+        rpassword::prompt_password(format!("{label} ")).map(Secret::new)
     }
 }
 

@@ -6,7 +6,7 @@ Cas : mot de passe administrateur perdu, ou aucun compte administrateur ne reste
 
 - Un accès shell sur le serveur qui héberge l'agent. L'accès au serveur est le facteur de confiance : qui peut lancer la commande peut reprendre la main.
 - Le binaire `hearth-agent` (même version que l'agent en service).
-- **Lance toujours la commande sous le compte qui fait tourner le service, avec le dossier de données du service** (`--data-dir`, `/var/lib/hearth` par défaut). Lancée en root, elle crée `hearth.db-wal` et `hearth.db-shm` appartenant à root : l'agent ne pourrait plus écrire dans sa base. Si cela arrive, remets le propriétaire (`chown <utilisateur-de-l-agent> <dossier>/hearth.db*`) avant de redémarrer l'agent.
+- **Lance la commande sous le compte qui fait tourner le service, avec le dossier de données du service** (`--data-dir`, `/var/lib/hearth` par défaut). Le service installé par `hearth-agent install` tourne en root (ADR-0012) : `sudo hearth-agent account …` convient. Si tu as installé l'agent sous un autre compte, lance la commande sous ce compte : lancée en root, elle crée `hearth.db-wal` et `hearth.db-shm` appartenant à root et l'agent ne pourrait plus écrire dans sa base (remets alors le propriétaire avec `chown <utilisateur-de-l-agent> <dossier>/hearth.db*` avant de redémarrer l'agent).
 - Le mot de passe se saisit au clavier, sans écho. Ne le tape jamais sur la ligne de commande ni dans une variable exportée à la main (l'historique du shell le garderait). Avec `ssh`, ajoute `-t` pour avoir un terminal.
 
 ## Étapes

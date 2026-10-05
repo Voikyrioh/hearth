@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod audit;
 pub mod hello;
+pub mod install;
 pub mod maintenance;
 pub mod metrics;
 pub mod operations;

@@ -343,6 +343,11 @@ mod tests {
             .collect();
         assert_eq!(overflow.len(), 1);
         assert_eq!(overflow[0].repeat_count, 500);
+        assert_eq!(
+            overflow[0].actor.account, None,
+            "les comptes diffèrent : aucun"
+        );
+        assert_eq!(overflow[0].target, Target::None);
         assert_eq!(summaries.len(), 1, "les groupes sans répétition s'oublient");
         assert_eq!(filter.tracked(), 0);
     }

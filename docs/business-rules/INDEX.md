@@ -13,6 +13,17 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-RESIL-012](./BR-RESIL-012-session-expiree-glissante.md) — Session glissante 30 jours, jeton stocké haché — `domain/sessions.rs::check`, `domain/session_token.rs` — invariant ✓
 - [BR-RESIL-014](./BR-RESIL-014-acces-revoque.md) — Session fermée par l'administration : SESSION_REVOKED — `domain/sessions.rs::check` — invariant ✓
 - [BR-INSTALL-004](./BR-INSTALL-004-empreinte-generee-une-fois.md) — Empreinte générée une seule fois, jamais modifiée — `domain/identity_policy.rs::decide` — invariant ✓
+- [BR-INSTALL-001](./BR-INSTALL-001-droits-administration.md) — Seuls les administrateurs de la machine installent — `domain/install/prerequisites.rs::check_rights` — invariant ✓
+- [BR-INSTALL-002](./BR-INSTALL-002-premier-compte-obligatoire.md) — Une première installation crée le premier compte administrateur — `domain/install/plan.rs::plan_install` — invariant ✓
+- [BR-INSTALL-003](./BR-INSTALL-003-reinstallation-conserve-les-donnees.md) — Réinstallation : comptes, journal, empreinte et configuration conservés — `domain/install/plan.rs::plan_install` — invariant ✓
+- [BR-INSTALL-005](./BR-INSTALL-005-service-au-demarrage.md) — Le service démarre avec le système (systemd, ou installation gérée) — `infrastructure/service/systemd.rs::render_unit` — invariant ✓
+- [BR-INSTALL-006](./BR-INSTALL-006-prerequis-avant-toute-ecriture.md) — Un prérequis manquant arrête l'installation sans rien écrire — `domain/install/prerequisites.rs::check_prerequisites` — invariant ✓
+- [BR-INSTALL-007](./BR-INSTALL-007-reinstallation-meme-version-sans-interruption.md) — Même version : le service n'est pas interrompu inutilement — `domain/install/plan.rs::plan_install` — invariant ✓
+- [BR-INSTALL-008](./BR-INSTALL-008-interruption-laisse-la-machine-comme-avant.md) — Erreur ou interruption : la machine revient à l'état d'avant — `domain/install/rollback.rs::undo_plan` — invariant ✓
+- [BR-INSTALL-009](./BR-INSTALL-009-format-identifiant-premier-compte.md) — Identifiant du premier compte : 3 à 32 caractères, minuscules, chiffres, tiret, underscore — `domain/install/credentials.rs::parse_admin_name` — invariant ✓
+- [BR-INSTALL-010](./BR-INSTALL-010-format-mot-de-passe-premier-compte.md) — Mot de passe du premier compte : 12 caractères, majuscule, minuscule, chiffre — `domain/install/credentials.rs::check_admin_password` — invariant ✓
+- [BR-INSTALL-011](./BR-INSTALL-011-desinstallation-conserver-ou-supprimer.md) — Désinstallation : conserver ou supprimer comptes, journal et configuration — `domain/install/uninstall.rs::uninstall_plan` — invariant ✓
+- [BR-INSTALL-012](./BR-INSTALL-012-architecture-prise-en-charge.md) — Architectures prises en charge : x86_64 et arm64 — `domain/install/platform.rs::parse_arch` — invariant ✓
 - [BR-ACCT-001](./BR-ACCT-001-creation-compte.md) — Un compte est créé avec un identifiant unique, un mot de passe et un rôle — `application/accounts.rs::AccountService::create` — —
 - [BR-ACCT-002](./BR-ACCT-002-format-identifiant.md) — Identifiant : 3 à 32 caractères, minuscules, chiffres, tiret, underscore — `domain/accounts/username.rs::Username::parse` — ✓
 - [BR-ACCT-003](./BR-ACCT-003-unicite-insensible-casse.md) — Identifiant unique, insensible à la casse — `domain/accounts/username.rs::Username::parse` — ✓
