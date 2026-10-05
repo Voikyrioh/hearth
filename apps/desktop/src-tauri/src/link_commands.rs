@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter as _, Runtime, State};
 
+use crate::dashboard::SnapshotEvent;
 use crate::link::{LinkRuntime, UiSink};
 use crate::link_dto::{
     AddServerInput, FingerprintEvent, LinkFailure, LinkStateDto, LoginDto, NoticeEvent,
@@ -186,4 +187,15 @@ pub async fn forget_credentials(
     server_id: String,
 ) -> Result<(), LinkFailure> {
     link.forget_credentials(&server_id, &TauriSink(app)).await
+}
+
+/// Dernière vue connue de la machine d'un serveur (tableau de bord) : à lire après l'abonnement à
+/// `link://snapshot` et `link://metrics`. `None` tant qu'aucune identité n'a été reçue.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_dashboard(
+    link: Runtime_<'_>,
+    server_id: String,
+) -> Result<Option<SnapshotEvent>, LinkFailure> {
+    link.dashboard(&server_id).await
 }
