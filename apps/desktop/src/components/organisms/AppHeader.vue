@@ -28,7 +28,7 @@ const link = useLinkStore();
 .head__title {
   font-size: var(--fs-h1);
   font-weight: var(--fw-bold);
-  line-height: 1;
+  line-height: var(--lh-title);
 }
 
 .head__gap {

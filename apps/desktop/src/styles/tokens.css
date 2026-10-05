@@ -14,8 +14,6 @@
   --tx2: #b3a19c;
   --tx3: #7d6c68;
   --ac: #ff7b3d;
-  --ac2: #ff4f7a;
-  --cool: #5fd0c0;
   --ok: #7ed39a;
   --warn: #ffc04d;
   --crit: #ff5a5a;
@@ -44,15 +42,13 @@
   --font-title: "Sora", system-ui, sans-serif;
   --font-body: "Instrument Sans", system-ui, sans-serif;
   --font-mono: "DM Mono", ui-monospace, monospace;
-  --fs-label: 11px;
   --fs-small: 12px;
   --fs-body: 13.5px;
   --fs-lead: 15px;
   --fs-h3: 19px;
-  --fs-h2: 27px;
   --fs-h1: 30px;
   --lh-body: 1.4;
-  --ls-label: 0.07em;
+  --lh-title: 1;
   --ls-title: -0.02em;
   --fw-regular: 400;
   --fw-medium: 500;
