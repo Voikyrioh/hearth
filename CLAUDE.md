@@ -67,7 +67,7 @@ Le cache Cargo du conteneur est un volume nommé (`hearth-xtask-cargo`, `hearth-
 
 ## Mise à jour du client (HRT-16)
 
-Greffon `tauri-plugin-updater` en API Rust seule (aucune permission côté web), flux `latest.json` des GitHub Releases du dépôt public, clé publique embarquée `apps/desktop/src-tauri/update-key.pub` (clé de DÉVELOPPEMENT sans clé secrète tant que Voiky n'a pas mis la sienne ; jamais de clé secrète dans le dépôt). Vérification au lancement puis 24 h au plus, état dans `update.json` côté Rust (pas de `localStorage`). Publication : `docs/runbooks/publier-une-version-du-client.md` (flux `publish-client`, déclenché à la main, brouillon). `cargo xtask client-release-check` / `client-manifest`. Règles `BR-UPDATE-001` à `010`, `025`, `026` ; décision `docs/adr/ADR-0017-mise-a-jour-du-client.md`.
+Greffon `tauri-plugin-updater` en API Rust seule (aucune permission côté web), flux `latest.json` des GitHub Releases du dépôt public, clé publique embarquée `apps/desktop/src-tauri/update-key.pub` (clé de DÉVELOPPEMENT sans clé secrète tant que Voiky n'a pas mis la sienne ; jamais de clé secrète dans le dépôt). Vérification au lancement puis 24 h au plus, état dans `update.json` côté Rust (pas de `localStorage`). Publication : `docs/runbooks/publier-une-version-du-client.md` (flux `publish-client`, déclenché à la main, brouillon). `cargo xtask client-release-check` / `client-version` / `client-sign` / `client-manifest` (la clé secrète n'est donnée qu'à `client-sign`, dans le job de signature du flux). Règles `BR-UPDATE-001` à `010`, `025`, `026` ; décision `docs/adr/ADR-0017-mise-a-jour-du-client.md`.
 
 ## Règles
 

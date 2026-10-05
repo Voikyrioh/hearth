@@ -25,15 +25,15 @@ La clé publique du dépôt (`apps/desktop/src-tauri/update-key.pub`) est une cl
 3. Créer les deux secrets du dépôt (Réglages > Secrets and variables > Actions, ou en ligne de commande) :
    ```sh
    gh secret set HEARTH_CLIENT_SIGNING_KEY < ~/.hearth/client-update.key
-   gh secret set HEARTH_CLIENT_SIGNING_KEY_PASSWORD         # le mot de passe de la clé (vide si aucune)
+   gh secret set HEARTH_CLIENT_SIGNING_KEY_PASSWORD         # le mot de passe de la clé : OBLIGATOIRE (la signature est refusée sans mot de passe ; choisis-en un à la génération)
    ```
 4. Sauvegarder `~/.hearth/client-update.key` et son mot de passe ailleurs (gestionnaire de mots de passe) : sans elle, plus aucune mise à jour possible.
 
 ## Publier une version
 
-1. Choisir la version `X.Y.Z` (pas de préversion). La changer à **deux** endroits, dans une PR : `version` de `[workspace.package]` du `Cargo.toml` racine et `version` de `apps/desktop/package.json`. Le flux refuse une version qui n'est pas celle du dépôt.
-2. Fusionner la PR, puis : Actions > **publish-client** > Run workflow, avec la version et les notes de version (texte brut : elles s'affichent telles quelles dans le client, en une liste de lignes par exemple).
-3. Le flux : garde de publication, construction de l'installateur NSIS (`Hearth_X.Y.Z_x64-setup.exe`), signature (`tauri signer sign`, secrets ci-dessus), fabrication de `latest.json` (`cargo xtask client-manifest`), création du **brouillon** de release `vX.Y.Z` avec les trois fichiers (installateur, `.sig`, `latest.json`).
+1. Choisir la version `X.Y.Z` (pas de préversion). La changer à **deux** endroits, dans une PR : `version` de `[workspace.package]` du `Cargo.toml` racine et `version` de `apps/desktop/package.json`. C'est la SEULE source du numéro : le flux ne demande aucune version dans son formulaire, il lit celle du dépôt (`cargo xtask client-version`), donc le numéro signé est celui du binaire construit.
+2. Fusionner la PR, puis : Actions > **publish-client** > Run workflow, **depuis `main`** (le flux refuse toute autre branche : le binaire signé doit venir de ce qui est fusionné), avec les notes de version (texte brut : elles s'affichent telles quelles dans le client, en une liste de lignes par exemple).
+3. Le flux, en deux jobs : **`build`** (aucun secret) : garde de publication, construction de l'installateur NSIS (`Hearth_X.Y.Z_x64-setup.exe`), installateur passé en artefact. **`sign`** (installe aucune dépendance npm) : compile `xtask`, puis une seule étape voit la clé secrète : `cargo xtask client-sign` signe avec la version dans le commentaire signé (`version:X.Y.Z`) et RELIT la signature contre `update-key.pub` (une clé secrète qui n'est pas la paire du fichier du dépôt est refusée ici, avant toute publication) ; `client-manifest` revérifie, puis écrit `latest.json` ; enfin le **brouillon** de release `vX.Y.Z`, étiqueté sur le commit construit (`--target`), avec les trois fichiers (installateur, `.sig`, `latest.json`).
 4. Ouvrir le brouillon, vérifier les trois fichiers et les notes, puis **Publish release**. À partir de là, `releases/latest/download/latest.json` annonce la version aux clients (au plus une vérification par jour et par client, ou leur « Vérifier maintenant »).
 
 Retirer une version publiée par erreur : repasser la release en brouillon ou la supprimer ; les clients qui l'ont déjà installée ne reviennent pas en arrière (jamais de rétrogradation, ADR-0017) : publier une version suivante qui corrige.
@@ -42,18 +42,22 @@ Retirer une version publiée par erreur : repasser la release en brouillon ou la
 
 Rien de ce qui suit n'a pu être vérifié sans vraie release ; le faire avec deux versions consécutives :
 
-1. Publier `0.1.1` après avoir remplacé la clé (client `0.1.0` construit AVEC ta clé installé sur un poste).
+1. La première publication est `0.1.0` PAR LE FLUX (le client `0.1.0` des tests locaux n'a pas ta clé et ne peut pas être mis à jour). Installe cet installateur `0.1.0` sur un poste, puis publie `0.1.1` par le flux.
 2. Sur ce poste : « Vérifier maintenant » dans Réglages doit annoncer `0.1.1` et ses notes ; « Plus tard » masque le bandeau ; « Mettre à jour maintenant » télécharge, installe et relance le client en `0.1.1`.
 3. Contrôler après la relance : les serveurs enregistrés et leurs mots de passe sont là, les réglages aussi, et **l'entrée de démarrage avec Windows** (clé `Run` de l'utilisateur) existe toujours si elle était activée (BR-UPDATE-005).
 4. Contrôler `%APPDATA%\fr.voikyrioh.hearth\update.json` : la dernière vérification et la version qui tourne y sont ; le journal du client (`logs/`) contient « clé de mise à jour de développement » seulement pour un client construit avec la clé du dépôt.
 5. Refus : signer une copie de l'installateur avec une AUTRE clé, la poser dans une release brouillon de test, ou modifier un octet : le client doit répondre « Mise à jour corrompue. Refusée. » et rien ne doit s'installer.
+6. Contrôler le `.sig` publié : décodé (base64), son commentaire de confiance porte `version:X.Y.Z` (`client-sign` l'impose, c'est vérifiable à l'œil).
+7. **Sortie du client** (le greffon fait `exit(0)` juste après avoir lancé l'installateur, sans crochet de notre côté) : (a) la relance reprend les arguments du processus : un client lancé par Windows avec `--minimized` doit revenir caché dans la zone de notification après un clic sur « Mettre à jour maintenant » ; (b) `installer/hooks.nsh` : si le contrôle « disque insuffisant » refuse en mode passif, le client est fermé et non relancé (l'ancienne version reste installée) : noter ce que tu vois.
 
 ## Si ça ne marche pas
 
 | Constat | Cause probable | Que faire |
 |---|---|---|
 | Le flux s'arrête à « Garde de publication » | `update-key.pub` est la clé de développement, ou la version demandée n'est pas celle de `Cargo.toml`/`package.json` | suivre le message |
-| « le secret HEARTH_CLIENT_SIGNING_KEY n'existe pas » | secret absent | créer les secrets (prérequis 3) |
+| `client-sign` : « HEARTH_CLIENT_SIGNING_KEY est absent ou vide », « mot de passe obligatoire », « clé secrète illisible » | secret absent, mot de passe vide ou faux | créer ou corriger les secrets (prérequis 3) |
+| `client-sign` ou `client-manifest` : « la signature ne correspond pas à update-key.pub » | la clé secrète des secrets n'est pas la paire de la clé publique du dépôt | remettre la bonne clé publique (prérequis 2) ou la bonne clé secrète |
+| Le flux ne démarre pas / ne fait rien | lancé depuis une autre branche que `main` | Run workflow depuis `main` |
 | Le client ne voit jamais la mise à jour | release encore en brouillon ; ou publiée comme préversion ; ou `latest.json` sans l'entrée `windows-x86_64` ; ou dernière vérification il y a moins de 24 h | publier la release (hors préversion) ; « Vérifier maintenant » |
 | « Mise à jour corrompue. Refusée. » alors que le fichier est bon | le client a été construit avec une autre clé publique que celle qui a signé (clé de développement du dépôt, ou ancienne clé) | réinstaller à la main un client construit avec la bonne clé |
 | « Téléchargement interrompu. » | coupure, ou GitHub répond en erreur ; ou l'adresse de `latest.json` pointe un fichier absent de la release | « Réessayer » ; vérifier que les trois fichiers sont joints au brouillon publié |
@@ -61,8 +65,9 @@ Rien de ce qui suit n'a pu être vérifié sans vraie release ; le faire avec de
 
 ## Limites connues
 
-- Le manifeste `latest.json` n'est pas signé (HTTPS vers GitHub) ; seul l'installateur l'est. La source de l'installateur est restreinte au dépôt et la version annoncée doit être plus récente. L'option `requireSignedVersion` du greffon (version annoncée = version signée) est désactivée : à activer dans `tauri.conf.json` (`plugins.updater.requireSignedVersion: true`) après avoir vérifié que la signature produite par `tauri signer sign` porte `version:X.Y.Z` dans son commentaire de confiance (`minisign -V` ou ouvrir le `.sig` décodé).
-- Une vérification qui échoue (PC sans réseau au démarrage de Windows) compte pour la journée : la suivante est le lendemain, ou « Vérifier maintenant ».
+- Le manifeste `latest.json` n'est pas signé (HTTPS vers GitHub) ; seul l'installateur l'est. Un manifeste forgé ne peut pas rejouer un ancien installateur sous un numéro plus grand : le client exige que la version annoncée soit celle du commentaire signé (`requireSignedVersion`, activé). Toute release doit donc venir du flux `publish-client` ; un installateur signé par un autre outil, sans version, est refusé par les clients.
+- Au plus une requête de vérification automatique par 24 h. Sans réseau (aucune requête partie) la vérification est retentée à l'heure suivante, sans consommer la journée ; un échec après émission (GitHub muet, réponse invalide) consomme la journée : prochaine tentative le lendemain, ou « Vérifier maintenant » (au plus une fois par 30 s).
+- Le `latest.json` de `releases/latest` est unique : ne publie jamais comme « dernière release » une release qui n'en porte pas avec l'entrée `windows-x86_64` (une release de l'agent seule rendrait le client muet) ; la mise à jour de l'agent depuis le client est à décider (ADR-0017, décision 8).
 - Windows 64 bits seulement.
 
 ## Vérifier de bout en bout (développement)
