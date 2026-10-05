@@ -69,6 +69,11 @@ jobs:
         run: |
           cargo clippy -p hearth-desktop --all-targets -- -D warnings
           cargo test -p hearth-desktop
+      # Le coffre réel : le Gestionnaire d'identification de ce Windows jetable (clé exacte `Hearth/{id}`,
+      # secret absent, remplacement, effacement). Marqué `ignore` pour ne pas écrire dans la session
+      # d'un poste de développement par défaut.
+      - name: Coffre Windows (Gestionnaire d'identification)
+        run: cargo test -p hearth-desktop --test vault -- --ignored
       # Le livrable du ticket : l'installateur doit se construire à chaque PR.
       - name: Installateur NSIS
         working-directory: apps/desktop

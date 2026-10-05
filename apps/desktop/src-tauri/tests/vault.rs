@@ -104,6 +104,16 @@ fn the_windows_credential_manager_stores_reads_and_erases_a_secret() {
             .expose(),
         "Secret-é-1234"
     );
+    // La clé exacte dans le Gestionnaire d'identification : `Hearth/{id}`.
+    let listed = std::process::Command::new("cmdkey")
+        .arg(format!("/list:Hearth/{id}"))
+        .output()
+        .unwrap();
+    let listed = String::from_utf8_lossy(&listed.stdout).to_lowercase();
+    assert!(
+        listed.contains(&format!("hearth/{id}").to_lowercase()),
+        "{listed}"
+    );
     vault
         .put(&id, SecretKind::Password, &Secret::from("Remplacé"))
         .unwrap();
