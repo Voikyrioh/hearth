@@ -115,12 +115,26 @@ describe("settings store", () => {
     const store = useSettingsStore();
     await store.openLogsFolder();
     expect(calls).toEqual([{ cmd: "open_logs_folder", args: {} }]);
-    expect(store.error).toBeNull();
+    expect(store.logsError).toBeNull();
 
     bridge(() => {
       throw { kind: "logs", message: "droits" };
     });
     await store.openLogsFolder();
-    expect(store.error).toBe("errors.logs");
+    expect(store.logsError).toBe("errors.logs");
+    expect(store.error).toBeNull();
+  });
+
+  it("does not clear a settings read error when the logs folder opens fine", async () => {
+    bridge((cmd) => {
+      if (cmd === "get_settings") throw { kind: "store", message: "x" };
+      return "0.1.0";
+    });
+    const store = useSettingsStore();
+    await store.load();
+    expect(store.error).toBe("errors.store");
+    await store.openLogsFolder();
+    expect(store.error).toBe("errors.store");
+    expect(store.logsError).toBeNull();
   });
 });

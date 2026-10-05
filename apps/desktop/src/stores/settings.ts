@@ -14,6 +14,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const saving = ref(false);
   const version = ref<string | null>(null);
   const error = ref<MessageKey | null>(null);
+  const logsError = ref<MessageKey | null>(null);
 
   async function load() {
     try {
@@ -57,9 +58,9 @@ export const useSettingsStore = defineStore("settings", () => {
   async function openLogsFolder() {
     try {
       const result = await commands.openLogsFolder();
-      error.value = result.status === "ok" ? null : errorKey(result.error.kind);
+      logsError.value = result.status === "ok" ? null : errorKey(result.error.kind);
     } catch {
-      error.value = errorKey("logs");
+      logsError.value = errorKey("logs");
     }
   }
 
@@ -69,6 +70,7 @@ export const useSettingsStore = defineStore("settings", () => {
     saving,
     version,
     error,
+    logsError,
     load,
     setLaunchAtStartup,
     openLogsFolder,

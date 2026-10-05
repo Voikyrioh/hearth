@@ -38,6 +38,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
           {{ t("settings.openLogs") }}
         </HButton>
       </SettingRow>
+      <p v-if="settings.logsError" class="settings__error" role="alert">{{ t(settings.logsError) }}</p>
       <p class="settings__version">
         {{ t("settings.version") }}
         <span class="settings__mono">{{
