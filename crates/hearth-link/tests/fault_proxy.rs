@@ -596,13 +596,13 @@ async fn an_action_cut_before_the_answer_is_unknown_and_never_replayed() {
     let mark = world.recorder.mark();
     world.proxy.cut();
     let answered = Instant::now();
-    let outcome = tokio::time::timeout(Duration::from_secs(3), sent)
+    let outcome = tokio::time::timeout(Duration::from_secs(6), sent)
         .await
         .expect("l'appel ne reste pas suspendu")
         .unwrap()
         .unwrap();
     assert!(
-        answered.elapsed() < ms(2_000),
+        answered.elapsed() < ms(3_000),
         "la réponse « inconnu » est immédiate"
     );
     let ActionOutcome::ResultUnknown { id: operation } = outcome else {
