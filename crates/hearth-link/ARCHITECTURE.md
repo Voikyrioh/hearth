@@ -7,7 +7,7 @@ src/
 ├── lib.rs           → réexporte la façade (`LinkManager`, `LinkConfig`, `Ports`, `ActionRequest`, `ActionOutcome`, `NewServer`, `ProbeResult`, `ServerUpdate`, `LoginInfo`, `EventStream`, `LinkError`)
 ├── error.rs         → `LinkError` : erreurs publiques typées, jamais de secret dans un message
 ├── domain/          → Règles pures : pas d'E/S, pas d'horloge propre (le temps est un paramètre), pas de tokio
-│   ├── book.rs      → règles du carnet : `check_name` (nom requis, 255 caractères au plus, unique sans tenir compte de la casse, BR-CONN-008), `check_address` (IPv4, IPv6, nom, port ; BR-CONN-008), `check_username`, `check_mac_addresses` (filtre et tronque, jamais un refus), `address_changed` (BR-CONN-009)
+│   ├── book.rs      → règles du carnet : `check_name` (nom requis, 255 caractères au plus, unique sans tenir compte de la casse, BR-CONN-008), `check_address` (IPv4, IPv6, nom, port ; BR-CONN-008), `check_username`, `check_mac_addresses` (filtre, retire les doublons et tronque en gardant d'abord les adresses des cartes réelles, jamais un refus), `address_changed` (BR-CONN-009)
 │   ├── agent_identity.rs → `check_product` : seul un `/hello` annonçant `product = "hearth"` est un agent (BR-CONN-012)
 │   ├── state.rs     → `LinkMachine` : machine à états `Connected | Reconnecting | Offline | SessionExpired | AccessRevoked` pilotée par des `Input` (trafic, silence, erreur de transport, tentative réussie, 401 expiré, 401 révoqué, empreinte différente, versions incompatibles, « Réessayer maintenant », réveil, changement de réseau, connexion, déconnexion, arrêt) ; rend des `Effect` (lancer une tentative, reconnexion silencieuse, fermer le flux, résoudre les opérations). Seuils 3 s / 30 s exacts à la milliseconde, `Thresholds` injectables. `state/tests.rs` : une ligne du tableau des transitions de la spec = un test `rowNN_…`
 │   ├── backoff.rs   → délais 0,5 s, 1 s, 2 s, 4 s, 8 s, 15 s, 30 s, 30 s… avec ± 20 % d'aléa (source d'aléa fournie), plafond dur de 30 s, remise à zéro sur succès
@@ -36,7 +36,8 @@ src/
     └── events.rs    → diffusion des événements (canal borné, `EventStream`, `Event::Lagged` pour un abonné en retard)
 tests/
 ├── support/         → agent réel dans le processus (`agent.rs`), mandataire TCP à pannes (`proxy.rs`), `World` (agent + mandataire + `LinkManager`), `Recorder`
-├── fault_proxy.rs   → résilience de bout en bout (seuils divisés par 6) : coupures de 1, 10 et 40 s, redémarrage, agent réinstallé, sessions révoquée / expirée, actions coupées (trois issues), « Réessayer maintenant », réseau, réveil, gel, lien lent
+├── fault_proxy.rs   → résilience de bout en bout (seuils divisés par 6) : coupures courtes, longues, redémarrage, agent réinstallé, sessions révoquée / expirée, actions coupées (trois issues), « Réessayer maintenant », réseau, réveil, gel, lien lent. Déterministe (HRT-12) : aucune assertion de vitesse, attentes sur des faits (états, événements, connexions reçues, action arrivée chez l'agent), seuils du lien hors d'atteinte quand le scénario n'en dépend pas, agent qui retient les actions (`hold_actions`)
+├── tracking.rs      → suivi des actions sur disque, déconnexion contre fin de session, reprise après panique : transport et disque simulés, portes ouvertes par le test (`Disk::Gated`, `Gate`), jamais de durée ; `GUARD` = délai de garde
 ├── pinning.rs       → première prise de contact, épinglage, session, carnet, reprise après redémarrage, serveurs indépendants
 └── robustness.rs    → transport simulé aux réponses aléatoires et absurdes, des milliers d'itérations en temps virtuel : ni panique, ni blocage, état borné
 ```
@@ -63,3 +64,5 @@ Le début d'une coupure est le dernier message reçu (silence de 3 s) ou l'erreu
 - Aucun mot de passe ni jeton dans un journal, un message d'erreur ou un `Debug` : `Secret` (effacement à la libération). Les types du protocole qui portent un secret ont déjà un `Debug` masqué ; le mot de passe d'une requête de connexion est effacé après usage.
 - La confirmation de l'empreinte est faite par l'utilisateur (interface) ; la bibliothèque garantit seulement que rien d'authentifié ne part avant, et que rien ne part si elle a changé (BR-CONN-001, 002, 003, 011).
 - Dépendances et limites : `docs/adr/ADR-0011-dependances-liaison.md`.
+- Tests à temps réel : aucune assertion de vitesse (un test qui dépend de la rapidité de la machine est un test instable). Un scénario attend un fait observable, une porte ou un compteur ; les délais de garde (`GUARD`, `WAIT`) ne servent qu'à ne pas bloquer à jamais. Preuve : chaque suite relancée 20 fois sous charge CPU (HRT-12).
+- Au démarrage, un serveur marqué « se souvenir » sans mot de passe au coffre repasse à `remember = false` (FIX-01M46G800Z47XQ8R64G2MDC4NP) ; `logout` n'efface pas le jeton d'une connexion intervenue pendant son appel réseau (FIX-01M46G7Z0ZP43T53M2F5KG4VKS).
