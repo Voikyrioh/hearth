@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+mod install;
+
 use crate::application::accounts::AccountService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
 use crate::application::hello::HelloService;
@@ -22,6 +24,7 @@ use crate::application::sessions::SessionService;
 use crate::entrypoint::account::{self, AccountCliError};
 use crate::entrypoint::cli::{Cli, Command};
 use crate::entrypoint::http::{self, AppState, ServerError, ServerHandle};
+use crate::entrypoint::install::InstallCliError;
 use crate::entrypoint::signal::shutdown_signal;
 use crate::entrypoint::tasks::{self, BackgroundTask};
 use crate::entrypoint::terminal::TerminalPasswords;
@@ -55,6 +58,12 @@ pub enum AppError {
     Hash(#[from] HashError),
     #[error(transparent)]
     Account(#[from] AccountCliError),
+    #[error(transparent)]
+    Install(#[from] InstallCliError),
+    #[error("chemin du binaire en cours d'exécution introuvable : {0}")]
+    CurrentExe(std::io::Error),
+    #[error(transparent)]
+    Version(crate::domain::install::VersionError),
     #[error(transparent)]
     Server(#[from] ServerError),
     #[error(transparent)]
@@ -315,6 +324,13 @@ pub async fn start_with_metering(
 
 /// Exécute la commande demandée sur la ligne de commande.
 pub async fn run(cli: Cli) -> Result<(), AppError> {
+    // Installer et désinstaller observent avant d'écrire : ils ne passent pas par la création du
+    // dossier de données ci-dessous.
+    match cli.command() {
+        Command::Install(args) => return install::run_install(&cli, &args).await,
+        Command::Uninstall(args) => return install::run_uninstall(&cli, &args).await,
+        _ => {}
+    }
     let config = load_config(&cli)?;
     // Un seul endroit crée le dossier de données et en contrôle les droits, avant que la base
     // ou le magasin d'identité n'y écrive.
@@ -335,6 +351,7 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
             account::execute(&action, &service, &passwords, &mut std::io::stdout()).await?;
             Ok(())
         }
+        Command::Install(_) | Command::Uninstall(_) => Ok(()),
         Command::Serve => {
             // Migrations appliquées avant d'accepter la moindre connexion.
             let running = start(&config).await?;

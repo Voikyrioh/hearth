@@ -12,7 +12,11 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     // `fingerprint` et `account` écrivent leur résultat sur la sortie standard : journaux à part.
     let command = cli.command();
-    let is_account = matches!(command, Command::Account { .. });
+    // `install` et `uninstall` parlent à la personne qui les a tapées : journaux à part aussi.
+    let is_account = matches!(
+        command,
+        Command::Account { .. } | Command::Install(_) | Command::Uninstall(_)
+    );
     logging::init(command == Command::Fingerprint || is_account);
 
     match app::run(cli).await {

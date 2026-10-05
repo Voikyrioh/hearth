@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 use crate::domain::accounts::Role;
 
@@ -28,11 +28,49 @@ pub enum Command {
     Serve,
     /// Affiche l'empreinte du certificat, en créant l'identité si elle n'existe pas encore.
     Fingerprint,
+    /// Installe l'agent sur ce serveur : binaire, configuration, identité, premier compte,
+    /// service au démarrage. Droits d'administration requis. Sans terminal, tout se règle par les
+    /// variables HEARTH_ADMIN_USER, HEARTH_ADMIN_PASSWORD (ou HEARTH_ADMIN_PASSWORD_HASH,
+    /// haché Argon2id au format PHC) et HEARTH_PORT.
+    Install(InstallArgs),
+    /// Désinstalle l'agent : arrête et retire le service et le binaire ; les comptes, le journal
+    /// et la configuration sont conservés ou supprimés selon le choix.
+    Uninstall(UninstallArgs),
     /// Gère les comptes directement sur le serveur, sans réseau (mêmes règles que l'interface).
     Account {
         #[command(subcommand)]
         action: AccountAction,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct InstallArgs {
+    /// Port d'écoute (7341 par défaut). Prioritaire sur HEARTH_PORT.
+    #[arg(long, value_name = "PORT")]
+    pub port: Option<String>,
+    /// Installation gérée par le système (NixOS par exemple) : aucune unité n'est écrite, le
+    /// binaire n'est pas copié.
+    #[arg(long)]
+    pub managed: bool,
+    /// Ne pose aucune question : tout vient des variables et des options.
+    #[arg(long, short = 'y')]
+    pub yes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct UninstallArgs {
+    /// Conserve les comptes, le journal, l'identité et la configuration.
+    #[arg(long, conflicts_with = "purge")]
+    pub keep_data: bool,
+    /// Supprime aussi les comptes, le journal, l'identité et la configuration.
+    #[arg(long)]
+    pub purge: bool,
+    /// Ne pose aucune question (sans --purge, les données sont conservées).
+    #[arg(long, short = 'y')]
+    pub yes: bool,
+    /// Installation gérée par le système : le binaire n'est pas retiré.
+    #[arg(long)]
+    pub managed: bool,
 }
 
 /// Opérations sur les comptes. Le mot de passe est demandé sans écho avec confirmation, ou lu
@@ -134,6 +172,56 @@ mod tests {
                 username: "marie".into()
             }
         );
+    }
+
+    #[test]
+    fn install_options_are_parsed() {
+        let install = |args: &[&str]| match Cli::parse_from(args).command() {
+            Command::Install(args) => args,
+            other => panic!("attendu : install, reçu {other:?}"),
+        };
+        assert_eq!(
+            install(&["hearth-agent", "install"]),
+            InstallArgs {
+                port: None,
+                managed: false,
+                yes: false
+            }
+        );
+        assert_eq!(
+            install(&[
+                "hearth-agent",
+                "install",
+                "--port",
+                "9000",
+                "--managed",
+                "--yes"
+            ]),
+            InstallArgs {
+                port: Some("9000".into()),
+                managed: true,
+                yes: true
+            }
+        );
+    }
+
+    #[test]
+    fn uninstall_options_are_parsed_and_the_two_choices_exclude_each_other() {
+        let uninstall = |args: &[&str]| match Cli::parse_from(args).command() {
+            Command::Uninstall(args) => args,
+            other => panic!("attendu : uninstall, reçu {other:?}"),
+        };
+        assert!(uninstall(&["hearth-agent", "uninstall", "--purge", "-y"]).purge);
+        assert!(uninstall(&["hearth-agent", "uninstall", "--keep-data"]).keep_data);
+        assert!(
+            Cli::try_parse_from(["hearth-agent", "uninstall", "--keep-data", "--purge"]).is_err()
+        );
+    }
+
+    #[test]
+    fn the_admin_password_is_never_an_argument_of_install() {
+        assert!(Cli::try_parse_from(["hearth-agent", "install", "--admin-password", "x"]).is_err());
+        assert!(Cli::try_parse_from(["hearth-agent", "install", "--password", "x"]).is_err());
     }
 
     #[test]
