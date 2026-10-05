@@ -12,11 +12,9 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use super::domain::{
-    self, Candidate, DownloadPolicy, Rejection, Release, UpdateRecord, validate_candidate,
-};
+use super::domain::{self, Candidate, DownloadPolicy, Rejection, UpdateRecord, validate_candidate};
 use super::dto::{AvailableDto, UpdateFailure, UpdatePhase, UpdateStateDto};
-use super::ports::{Clock, DownloadError, Feed, StateSink, UpdateStore};
+use super::ports::{Clock, DownloadError, Feed, StateSink, UpdateStore, VerifiedInstaller};
 
 /// Pourquoi une installation ne démarre pas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -137,14 +135,20 @@ impl UpdateService {
 
     async fn check(&self, automatic: bool) -> UpdateStateDto {
         let started = self.clock.now_ms();
+        let previous_request;
         {
             let mut inner = self.lock();
             if inner.phase != UpdatePhase::Idle {
                 return self.dto(&inner);
             }
-            if automatic && !domain::check_is_due(started, inner.record.last_attempt_at) {
+            if automatic && !domain::check_is_due(started, inner.record.last_request_at) {
                 return self.dto(&inner);
             }
+            if !automatic && !domain::manual_check_allowed(started, inner.record.last_attempt_at) {
+                return self.dto(&inner);
+            }
+            previous_request = inner.record.last_request_at;
+            inner.record.last_request_at = Some(started);
             inner.phase = UpdatePhase::Checking;
             inner.record.last_attempt_at = Some(started);
             self.persist(&inner);
@@ -153,6 +157,11 @@ impl UpdateService {
         let outcome = self.feed.check().await;
         let mut inner = self.lock();
         let before = inner.record.available.clone();
+        // Aucune requête n'a pu partir (pas de réseau) : le quota de 24 h n'est pas consommé, la
+        // vérification sera tentée quand le réseau sera là (BR-UPDATE-001, point b).
+        if matches!(&outcome, Err(error) if error.no_request_sent) {
+            inner.record.last_request_at = previous_request;
+        }
         if self.absorb(&mut inner.record, outcome, started) && inner.record.available != before {
             inner.failure = None;
         }
@@ -172,7 +181,7 @@ impl UpdateService {
     ) -> bool {
         let release = match outcome {
             Err(error) => {
-                tracing::debug!(%error, "vérification des mises à jour sans réponse");
+                tracing::debug!(%error, no_request = error.no_request_sent, "vérification des mises à jour sans réponse");
                 return false;
             }
             Ok(None) => None,
@@ -257,14 +266,14 @@ impl UpdateService {
             }
         }
         match result {
-            Ok(bytes) => {
+            Ok(installer) => {
                 {
                     let mut inner = self.lock();
                     inner.phase = UpdatePhase::Installing;
                     inner.progress = None;
                     self.publish(&mut inner);
                 }
-                if let Err(error) = self.feed.install(&version, bytes) {
+                if let Err(error) = self.feed.install(&version, installer) {
                     tracing::error!(%error, "installation de la mise à jour impossible");
                     self.settle(Some(failure_of(&error)));
                 }
@@ -276,14 +285,7 @@ impl UpdateService {
         }
     }
 
-    /// `begin_install` puis `run_install` (pour les tests et les appelants qui attendent).
-    pub async fn install(&self) -> Result<(), InstallRefusal> {
-        self.begin_install()?;
-        self.run_install().await;
-        Ok(())
-    }
-
-    async fn download(&self, version: &str) -> Result<Vec<u8>, DownloadError> {
+    async fn download(&self, version: &str) -> Result<VerifiedInstaller, DownloadError> {
         let mut last = Some(0u8);
         let mut report = |received: u64, total: Option<u64>| {
             let percent = total
@@ -304,6 +306,7 @@ impl UpdateService {
         let outcome = self.feed.check().await;
         let mut inner = self.lock();
         inner.record.last_attempt_at = Some(started);
+        inner.record.last_request_at = Some(started);
         let valid = self.absorb(&mut inner.record, outcome, started);
         self.persist(&inner);
         match (&inner.record.available, valid) {
@@ -343,10 +346,6 @@ impl UpdateService {
             self.tick().await;
             tokio::time::sleep(period).await;
         }
-    }
-
-    pub fn current_release(&self) -> Option<Release> {
-        self.lock().record.available.clone()
     }
 }
 

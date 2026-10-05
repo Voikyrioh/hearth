@@ -48,14 +48,17 @@ pub fn install<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
         .app_data_dir()
         .map_err(|error| format!("dossier de données : {error}"))?;
     let handle = app.handle().clone();
-    let feed = TauriFeed::production(handle.clone())
+    // Une seule politique de source, partagée : le service refuse une annonce qui ne la respecte pas,
+    // l'adaptateur ne retient ni ne télécharge rien d'autre et durcit les redirections avec elle.
+    let policy = domain::DownloadPolicy::github_releases();
+    let feed = TauriFeed::production(handle.clone(), policy.clone())
         .map_err(|error| format!("adresse du flux de versions : {error}"))?;
     let service = Arc::new(UpdateService::new(
         Arc::new(SystemClock),
         Arc::new(FileUpdateStore::new(&dir)),
         Arc::new(feed),
         Arc::new(TauriStateSink(handle)),
-        domain::DownloadPolicy::github_releases(),
+        policy,
         &app.package_info().version.to_string(),
     ));
     if feed::embedded_key_is_development() {

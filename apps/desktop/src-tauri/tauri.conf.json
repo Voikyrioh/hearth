@@ -31,6 +31,7 @@
   "plugins": {
     "updater": {
       "pubkey": "",
+      "requireSignedVersion": true,
       "windows": {
         "installMode": "passive"
       }

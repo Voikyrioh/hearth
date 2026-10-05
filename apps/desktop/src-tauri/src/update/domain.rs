@@ -22,6 +22,14 @@ pub const FEED_URL: &str =
 pub const DOWNLOAD_HOST: &str = "github.com";
 pub const DOWNLOAD_PATH_PREFIX: &str = "/Voikyrioh/hearth/releases/download/";
 
+/// Au plus 3 redirections à l'adresse de l'installateur : `releases/download/…` de github.com
+/// redirige une fois vers le stockage des releases (`release-assets.githubusercontent.com`, relevé
+/// sur les en-têtes d'une release publique d'un autre dépôt, requête de lecture) ; une marge de deux.
+pub const MAX_REDIRECTS: usize = 3;
+/// Une vérification manuelle ne repart pas moins de 30 s après la précédente tentative (une page
+/// compromise ne peut pas boucler sur la requête vers GitHub).
+pub const MANUAL_CHECK_MIN_INTERVAL_MS: i64 = 30_000;
+
 /// Les notes de version sont du texte affiché tel quel, jamais du HTML ; bornées.
 pub const NOTES_MAX_CHARS: usize = 8_000;
 /// Une signature minisign encodée fait quelques centaines d'octets.
@@ -32,9 +40,12 @@ pub const SIGNATURE_MAX_LEN: usize = 4_096;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UpdateRecord {
-    /// Dernière vérification commencée (automatique ou manuelle), réussie ou non : c'est elle qui
-    /// borne la fréquence.
+    /// Dernière vérification commencée (automatique ou manuelle), réussie ou non.
     pub last_attempt_at: Option<i64>,
+    /// Dernière vérification qui a ÉMIS une requête (réponse ou non) : c'est elle, et elle seule, qui
+    /// consomme le quota d'une vérification automatique par 24 h. Une tentative sans réseau (aucune
+    /// requête partie) ne la change pas.
+    pub last_request_at: Option<i64>,
     /// Dernière vérification qui a obtenu une réponse valable (« Dernière vérification »).
     pub last_success_at: Option<i64>,
     /// Le bandeau est masqué jusque-là (« Plus tard »).
@@ -67,6 +78,11 @@ pub struct DownloadPolicy {
     host: String,
     port: Option<u16>,
     path_prefix: String,
+    /// Chaque redirection doit être en HTTPS (toujours vrai en production).
+    redirects_https_only: bool,
+    /// Hôtes permis APRÈS le premier saut : l'hôte de la source et, pour GitHub, son stockage.
+    redirect_hosts: Vec<&'static str>,
+    redirect_host_suffixes: Vec<&'static str>,
 }
 
 impl DownloadPolicy {
@@ -77,6 +93,9 @@ impl DownloadPolicy {
             host: DOWNLOAD_HOST.to_owned(),
             port: None,
             path_prefix: DOWNLOAD_PATH_PREFIX.to_owned(),
+            redirects_https_only: true,
+            redirect_hosts: vec![DOWNLOAD_HOST],
+            redirect_host_suffixes: vec![".githubusercontent.com"],
         }
     }
 
@@ -89,7 +108,48 @@ impl DownloadPolicy {
             host: "127.0.0.1".to_owned(),
             port: Some(port),
             path_prefix: "/".to_owned(),
+            redirects_https_only: false,
+            redirect_hosts: vec!["127.0.0.1"],
+            redirect_host_suffixes: vec![],
         }
+    }
+
+    /// Comme `local_for_tests`, mais avec la règle de production sur les redirections : HTTPS
+    /// obligatoire à chaque saut (un saut vers `http://` est refusé).
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub fn local_strict_redirects_for_tests(port: u16) -> Self {
+        Self {
+            redirects_https_only: true,
+            ..Self::local_for_tests(port)
+        }
+    }
+
+    /// Une redirection de l'installateur est-elle suivie ? `hops` = redirections déjà suivies.
+    /// HTTPS à chaque saut, nombre borné, hôtes de GitHub seulement (production).
+    pub fn allows_redirect(&self, target: &Url, hops: usize) -> bool {
+        if hops >= MAX_REDIRECTS {
+            return false;
+        }
+        if self.redirects_https_only && target.scheme() != "https" {
+            return false;
+        }
+        if !target.username().is_empty() || target.password().is_some() {
+            return false;
+        }
+        let Some(host) = target.host_str() else {
+            return false;
+        };
+        self.redirect_hosts.contains(&host)
+            || self
+                .redirect_host_suffixes
+                .iter()
+                .any(|suffix| host.ends_with(suffix))
+    }
+
+    /// L'installateur n'est téléchargé qu'en HTTPS quand la source l'est.
+    pub fn https_only(&self) -> bool {
+        self.scheme == "https"
     }
 
     /// L'adresse est-elle une source permise d'installateur ?
@@ -127,9 +187,11 @@ pub fn validate_candidate(
         .map_err(|_| Rejection::Malformed("version du client illisible"))?;
     let version = semver::Version::parse(candidate.version.trim_start_matches('v'))
         .map_err(|_| Rejection::Malformed("numéro de version"))?;
-    if !version.pre.is_empty() {
-        // Une préversion n'est jamais proposée par le flux des versions publiées.
-        return Err(Rejection::Malformed("préversion"));
+    if !version.pre.is_empty() || !version.build.is_empty() {
+        // Ni préversion ni métadonnées de construction (`0.1.0+1` se classe au-dessus de `0.1.0`).
+        return Err(Rejection::Malformed(
+            "préversion ou métadonnées de construction",
+        ));
     }
     if version <= current {
         return Err(Rejection::NotNewer);
@@ -200,10 +262,10 @@ pub fn forget_installed(record: &mut UpdateRecord, current: &str) {
     }
 }
 
-/// Dans combien de temps la prochaine vérification automatique sera permise (0 si maintenant).
-pub fn millis_until_due(now: i64, last_attempt_at: Option<i64>) -> i64 {
+/// « Vérifier maintenant » est-il permis (pas de tentative dans les 30 dernières secondes) ?
+pub fn manual_check_allowed(now: i64, last_attempt_at: Option<i64>) -> bool {
     match last_attempt_at {
-        Some(last) if last <= now => (CHECK_INTERVAL_MS - (now - last)).max(0),
-        _ => 0,
+        Some(last) if last <= now => now - last >= MANUAL_CHECK_MIN_INTERVAL_MS,
+        _ => true,
     }
 }

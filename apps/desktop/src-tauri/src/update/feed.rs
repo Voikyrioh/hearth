@@ -19,7 +19,7 @@ use tauri_plugin_updater::{Update, UpdaterExt as _};
 use url::Url;
 
 use super::domain::{Candidate, DownloadPolicy, FEED_URL};
-use super::ports::{DownloadError, Feed, FeedError};
+use super::ports::{DownloadError, Feed, FeedError, VerifiedInstaller};
 
 /// La clé publique de signature (fichier `.pub` de minisign), embarquée à la compilation. Aucune
 /// clé ne se lit sur le disque de la machine : qui peut écrire un fichier sur le PC ne peut pas
@@ -93,15 +93,12 @@ pub struct TauriFeed<R: Runtime> {
 
 impl<R: Runtime> TauriFeed<R> {
     /// Production : le flux des GitHub Releases du dépôt public, fixé à la compilation.
-    pub fn production(app: AppHandle<R>) -> Result<Self, url::ParseError> {
-        Ok(Self::with_endpoint(
-            app,
-            Url::parse(FEED_URL)?,
-            DownloadPolicy::github_releases(),
-        ))
+    pub fn production(app: AppHandle<R>, policy: DownloadPolicy) -> Result<Self, url::ParseError> {
+        Ok(Self::with_endpoint(app, Url::parse(FEED_URL)?, policy))
     }
 
     /// Flux et source choisis (tests contre un serveur de versions local).
+    #[doc(hidden)]
     pub fn with_endpoint(app: AppHandle<R>, endpoint: Url, policy: DownloadPolicy) -> Self {
         Self {
             app,
@@ -134,8 +131,14 @@ fn same_version(a: &str, b: &str) -> bool {
     }
 }
 
-fn feed_error(error: impl std::fmt::Display) -> FeedError {
-    FeedError(error.to_string())
+fn feed_error(error: tauri_plugin_updater::Error) -> FeedError {
+    // Connexion ou résolution du nom impossible : aucune requête n'est partie (pas de réseau).
+    let no_request = matches!(&error, tauri_plugin_updater::Error::Reqwest(e) if e.is_connect());
+    if no_request {
+        FeedError::offline(error.to_string())
+    } else {
+        FeedError::failed(error.to_string())
+    }
 }
 
 /// Range une erreur du greffon : signature, contenu ou format refusés (corrompu), coupure
@@ -158,6 +161,31 @@ pub fn classify(error: &tauri_plugin_updater::Error) -> DownloadError {
     }
 }
 
+/// Durcit le client HTTP du greffon (vérification ET téléchargement) : HTTPS partout quand la
+/// source l'est, et, à chaque redirection, HTTPS, hôtes de GitHub et au plus `MAX_REDIRECTS` sauts
+/// (`DownloadPolicy::allows_redirect`). Sans cela reqwest suivrait 10 redirections vers n'importe
+/// quel hôte, en clair compris.
+fn harden(
+    policy: &DownloadPolicy,
+) -> impl Fn(reqwest::ClientBuilder) -> reqwest::ClientBuilder + Send + Sync + 'static {
+    let policy = policy.clone();
+    move |builder| {
+        let rules = policy.clone();
+        let builder = builder.redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if rules.allows_redirect(attempt.url(), attempt.previous().len()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }));
+        if policy.https_only() {
+            builder.https_only(true)
+        } else {
+            builder
+        }
+    }
+}
+
 #[async_trait]
 impl<R: Runtime> Feed for TauriFeed<R> {
     async fn check(&self) -> Result<Option<Candidate>, FeedError> {
@@ -167,6 +195,7 @@ impl<R: Runtime> Feed for TauriFeed<R> {
             .endpoints(vec![self.endpoint.clone()])
             .map_err(feed_error)?
             .timeout(CHECK_TIMEOUT)
+            .configure_client(harden(&self.policy))
             .build()
             .map_err(feed_error)?;
         let Some(mut update) = updater.check().await.map_err(feed_error)? else {
@@ -189,7 +218,7 @@ impl<R: Runtime> Feed for TauriFeed<R> {
         &self,
         version: &str,
         progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
-    ) -> Result<Vec<u8>, DownloadError> {
+    ) -> Result<VerifiedInstaller, DownloadError> {
         let update = self.staged_for(version).ok_or(DownloadError::NotStaged)?;
         let mut received = 0u64;
         update
@@ -201,11 +230,14 @@ impl<R: Runtime> Feed for TauriFeed<R> {
                 || {},
             )
             .await
+            .map(VerifiedInstaller::new)
             .map_err(|error| classify(&error))
     }
 
-    fn install(&self, version: &str, bytes: Vec<u8>) -> Result<(), DownloadError> {
+    fn install(&self, version: &str, installer: VerifiedInstaller) -> Result<(), DownloadError> {
         let update = self.staged_for(version).ok_or(DownloadError::NotStaged)?;
-        update.install(bytes).map_err(|error| classify(&error))
+        update
+            .install(installer.into_bytes())
+            .map_err(|error| classify(&error))
     }
 }
