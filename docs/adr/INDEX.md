@@ -13,3 +13,4 @@ Décisions d'architecture et conventions. Chaque ADR référence les ADR globale
 | [ADR-0007](./ADR-0007-machine-a-etats-du-lien.md) | architecture | Machine à états du lien : seuils 3s/30s, reconnexion sans fin | acceptée | 2026-10-04 |
 | [ADR-0008](./ADR-0008-mises-a-jour-signees.md) | securite | Mises à jour agent signées (minisign), superviseur et retour arrière | acceptée | 2026-10-04 |
 | [ADR-0009](./ADR-0009-dependances-agent.md) | librairie | Dépendances de l'agent : axum, rustls + ring, rcgen, clap, toml, tower-http, sqlx, argon2 (pas d'aws-lc ni d'OpenSSL) | acceptée | 2026-10-04 |
+| [ADR-0011](./ADR-0011-dependances-liaison.md) | librairie | Dépendances de la bibliothèque de liaison : reqwest, rustls + ring, tokio-rustls, tokio-tungstenite, futures-util, if-addrs (pas d'aws-lc ni d'OpenSSL) | acceptée | 2026-10-05 |

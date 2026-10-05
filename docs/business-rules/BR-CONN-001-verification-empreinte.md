@@ -32,7 +32,7 @@ La confirmation par l'utilisateur relève du client (`hearth-link`, interface) ;
 
 ## Règles liées
 - BR-INSTALL-004 (l'empreinte ne change jamais après la première installation).
-- BR-CONN-002 (mémorisation côté client, futur HRT-07).
+- BR-CONN-002 (mémorisation et vérification côté client, `hearth-link`), BR-CONN-003 (empreinte changée), BR-CONN-011 (rien n'est envoyé avant confirmation).
 
 ## Historique
 - 2026-10-04 — création (HRT-02, session 2026-10-04-hearth-creation).

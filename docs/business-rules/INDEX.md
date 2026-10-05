@@ -9,9 +9,29 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-CONN-007](./BR-CONN-007-tentatives-par-identifiant-et-adresse.md) — Tentatives comptées par identifiant et adresse du client — `domain/lockout.rs::AttemptKey::new` — —
 - [BR-CONN-013](./BR-CONN-013-message-de-connexion-generique.md) — Refus de connexion générique, même chemin identifiant inconnu / mot de passe faux — `application/sessions.rs::SessionService::login` — invariant ✓
 - [BR-CONN-014](./BR-CONN-014-incompatibilite-de-version.md) — Version d'interface incompatible : 426 et qui met à jour — `domain/compat.rs::check` — invariant ✓
-- [BR-RESIL-010](./BR-RESIL-010-operation-rejouee-sans-reexecution.md) — Clé d'opération rejouée : premier résultat, sans ré-exécution — `domain/operations.rs::classify` — invariant ✓
+- [BR-RESIL-010](./BR-RESIL-010-operation-rejouee-sans-reexecution.md) — Clé d'opération rejouée : premier résultat, sans ré-exécution — `domain/operations.rs::classify` ; client : `hearth-link domain/pending_ops.rs::PendingOps::resolve` — invariant ✓
 - [BR-RESIL-012](./BR-RESIL-012-session-expiree-glissante.md) — Session glissante 30 jours, jeton stocké haché — `domain/sessions.rs::check`, `domain/session_token.rs` — invariant ✓
 - [BR-RESIL-014](./BR-RESIL-014-acces-revoque.md) — Session fermée par l'administration : SESSION_REVOKED — `domain/sessions.rs::check` — invariant ✓
+- [BR-CONN-002](./BR-CONN-002-empreinte-memorisee-et-verifiee.md) — L'empreinte confirmée est mémorisée et vérifiée à chaque connexion — crates/hearth-link/src/domain/pinning.rs::decide — invariant ✓
+- [BR-CONN-003](./BR-CONN-003-empreinte-changee-blocage.md) — Empreinte changée : blocage, aucune requête authentifiée n'est envoyée — crates/hearth-link/src/domain/state.rs::LinkMachine::handle — invariant ✓
+- [BR-CONN-011](./BR-CONN-011-aucun-identifiant-avant-confirmation.md) — Aucun identifiant n'est envoyé avant la confirmation de l'empreinte — crates/hearth-link/src/domain/pinning.rs::PinDecision::allows_credentials — invariant ✓
+- [BR-RESIL-001](./BR-RESIL-001-etat-du-lien-toujours-visible.md) — L'état du lien est toujours visible dans l'en-tête — à venir, HRT-12 — —
+- [BR-RESIL-002](./BR-RESIL-002-coupure-sous-3s-silencieuse.md) — Une coupure de moins de 3 secondes ne change rien à l'écran — crates/hearth-link/src/domain/state.rs::LinkMachine::handle — invariant ✓
+- [BR-RESIL-003](./BR-RESIL-003-reconnexion-de-3-a-30-secondes.md) — De 3 à 30 secondes de coupure, l'état du lien est « Reconnexion en cours » — crates/hearth-link/src/domain/state.rs::LinkMachine::derive_down — invariant ✓
+- [BR-RESIL-004](./BR-RESIL-004-hors-ligne-apres-30-secondes.md) — Au-delà de 30 secondes de coupure, l'état du lien est « Hors ligne » — crates/hearth-link/src/domain/state.rs::LinkMachine::derive_down — invariant ✓
+- [BR-RESIL-005](./BR-RESIL-005-reconnexion-sans-fin-espacee.md) — Le client se reconnecte sans fin, avec des délais de 0,5 s à 30 s — crates/hearth-link/src/domain/backoff.rs::Backoff::{next_delay, reset} — invariant ✓
+- [BR-RESIL-006](./BR-RESIL-006-reconnexion-immediate-reveil-reseau.md) — Au réveil du PC ou au changement de réseau, le client retente tout de suite — crates/hearth-link/src/domain/triggers.rs::{detect_wake, network_changed} — invariant ✓
+- [BR-RESIL-007](./BR-RESIL-007-donnees-perimees-conservees.md) — Hors « Connecté », les dernières données restent affichées, marquées périmées — à venir, HRT-12 — —
+- [BR-RESIL-008](./BR-RESIL-008-actions-desactivees-hors-connexion.md) — Hors « Connecté », les actions qui demandent le serveur sont désactivées — à venir, HRT-12 — —
+- [BR-RESIL-009](./BR-RESIL-009-action-incertaine-jamais-rejouee.md) — Une action coupée avant sa réponse est « résultat inconnu » et n'est jamais rejouée — crates/hearth-link/src/domain/pending_ops.rs::PendingOps::{register, complete, link_lost} — invariant ✓
+- [BR-RESIL-011](./BR-RESIL-011-aucune-fenetre-d-erreur-bloquante.md) — Aucune fenêtre d'erreur bloquante lors d'une perte de lien — à venir, HRT-12 — —
+- [BR-RESIL-013](./BR-RESIL-013-reconnexion-silencieuse-apres-expiration.md) — Session expirée et mot de passe mémorisé : reconnexion sans ressaisie — crates/hearth-link/src/domain/state.rs::LinkMachine::on_session_expired — invariant ✓
+- [BR-RESIL-015](./BR-RESIL-015-notifications-systeme-limitees.md) — Notifications système optionnelles, une par minute et par serveur — à venir, HRT-12 — —
+- [BR-RESIL-016](./BR-RESIL-016-icone-zone-de-notification.md) — L'icône de la zone de notification reflète l'état du lien — à venir, HRT-12 — —
+- [BR-RESIL-017](./BR-RESIL-017-session-longue-sans-degradation.md) — Une session de plusieurs jours, serveur éteint puis rallumé, ne consomme pas de ressources en plus — crates/hearth-link/src/domain/server.rs::HISTORY_CAP — invariant ✓
+- [BR-RESIL-018](./BR-RESIL-018-agregation-des-notifications.md) — Coupures répétées : les notifications s'agrègent — à venir, HRT-12 — —
+- [BR-RESIL-019](./BR-RESIL-019-comportement-identique-tous-roles.md) — Le comportement du lien ne dépend pas du rôle du compte — crates/hearth-link/src/domain/state.rs::Input — invariant ✓
+- [BR-RESIL-020](./BR-RESIL-020-etat-de-lien-par-serveur.md) — Chaque serveur enregistré a son propre état de lien, indépendant des autres — crates/hearth-link/src/manager/mod.rs::LinkManager::{state, states} — invariant ✓
 - [BR-INSTALL-004](./BR-INSTALL-004-empreinte-generee-une-fois.md) — Empreinte générée une seule fois, jamais modifiée — `domain/identity_policy.rs::decide` — invariant ✓
 - [BR-ACCT-001](./BR-ACCT-001-creation-compte.md) — Un compte est créé avec un identifiant unique, un mot de passe et un rôle — `application/accounts.rs::AccountService::create` — —
 - [BR-ACCT-002](./BR-ACCT-002-format-identifiant.md) — Identifiant : 3 à 32 caractères, minuscules, chiffres, tiret, underscore — `domain/accounts/username.rs::Username::parse` — ✓

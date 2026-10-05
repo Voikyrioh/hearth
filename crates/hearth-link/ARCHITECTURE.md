@@ -1,0 +1,51 @@
+# Architecture — hearth-link
+
+Bibliothèque cliente, sans interface : elle tient le lien avec un agent quoi qu'il arrive (coupure, redémarrage du serveur, veille du PC, changement de réseau) et dit toujours clairement dans quel état il est. Le client Tauri et l'interface Vue ne parlent à l'agent que par elle (`CLAUDE.md` : « le client ne parle à l'agent que par `hearth-link` »). Hexagonale : `domain` ne connaît rien d'autre ; `ports` décrivent ce dont la bibliothèque a besoin ; `adapters` les remplissent ; `manager` (façade) assemble le tout. Aucune fonction publique ne panique ni ne bloque indéfiniment : tout rend un `Result` typé, sous délai.
+
+```
+src/
+├── lib.rs           → réexporte la façade (`LinkManager`, `LinkConfig`, `Ports`, `ActionRequest`, `ActionOutcome`, `NewServer`, `ProbeResult`, `LoginInfo`, `EventStream`, `LinkError`)
+├── error.rs         → `LinkError` : erreurs publiques typées, jamais de secret dans un message
+├── domain/          → Règles pures : pas d'E/S, pas d'horloge propre (le temps est un paramètre), pas de tokio
+│   ├── state.rs     → `LinkMachine` : machine à états `Connected | Reconnecting | Offline | SessionExpired | AccessRevoked` pilotée par des `Input` (trafic, silence, erreur de transport, tentative réussie, 401 expiré, 401 révoqué, empreinte différente, versions incompatibles, « Réessayer maintenant », réveil, changement de réseau, connexion, déconnexion, arrêt) ; rend des `Effect` (lancer une tentative, reconnexion silencieuse, fermer le flux, résoudre les opérations). Seuils 3 s / 30 s exacts à la milliseconde, `Thresholds` injectables. `state/tests.rs` : une ligne du tableau des transitions de la spec = un test `rowNN_…`
+│   ├── backoff.rs   → délais 0,5 s, 1 s, 2 s, 4 s, 8 s, 15 s, 30 s, 30 s… avec ± 20 % d'aléa (source d'aléa fournie), plafond dur de 30 s, remise à zéro sur succès
+│   ├── pending_ops.rs → `PendingOps` : une action envoyée porte une clé d'opération ; si le lien tombe avant la réponse elle passe à « résultat inconnu » et n'est jamais rejouée ; au retour du lien, `resolve` range la réponse de `GET /operations/{id}` en trois issues (`Outcome`)
+│   ├── pinning.rs   → `decide` : première connexion / identique / différente ; `allows_credentials`
+│   ├── compat.rs    → plage de versions de `/hello` : compatible / mettre à jour le client / mettre à jour l'agent
+│   ├── triggers.rs  → `detect_wake` (saut d'horloge > 5 s), `network_changed` (liste d'adresses locales)
+│   ├── event.rs     → `Event` (état du lien avec `since`, `last_contact_at`, `next_retry_at` ; mesures ; instantané ; issue d'opération ; fin de session ; empreinte changée ; audit), `StateInfo`
+│   ├── server.rs    → `ServerId`, `ServerRecord` (entrée du carnet, sans secret), `LastKnown` (dernière vue, bornée)
+│   ├── secret.rs    → `Secret` : effacé de la mémoire à la libération, `Debug` masqué
+│   └── time.rs      → `Mono` (instant monotone) et `WallTime` (date murale), arithmétique saturante
+├── ports/           → `Transport` (hello, login, logout, requête authentifiée, opération, ouverture du flux), `StreamConn`, `Vault`, `ServerStore`, `SnapshotStore`, `Clock`, `Rng`, `NetWatcher`, `EventSink`
+├── adapters/        → Monde réel
+│   ├── tls.rs       → vérificateurs rustls sur mesure : mode « sonde » (accepte tout certificat, rend l'empreinte, pour le premier `/hello`) et mode « épinglé » (refuse toute empreinte différente, quelle que soit la chaîne ou le nom) ; TLS 1.3 seul ; la signature de la poignée de main est vérifiée dans les deux modes
+│   ├── http_transport.rs → `HttpTransport` : `reqwest` (rustls, fournisseur `ring`) pour les requêtes, `tokio-tungstenite` sur `tokio-rustls` pour le flux ; en-têtes `X-Hearth-Api`, `X-Hearth-Client`, `Authorization`, `Idempotency-Key` ; délais de connexion, de requête et d'envoi ; corps et messages bornés ; une connexion neuve par appel
+│   ├── file_store.rs → carnet (`servers.json`) et dernières vues (`snapshots/{id}.json`) en JSON, écriture atomique (fichier temporaire, synchronisation, renommage) ; fichier illisible ignoré avec avertissement et mis de côté en `.corrupt`
+│   ├── memory_vault.rs → coffre en mémoire (tests) ; le coffre Windows vient avec l'application
+│   ├── system.rs    → `SystemClock`, `TokioClock` (temps virtuel des tests), `OsRng`
+│   └── net_watch.rs → `SystemNetWatcher` : adresses locales (crate `if-addrs`)
+└── manager/         → Façade
+    ├── mod.rs       → `LinkManager` : `probe`, `add_server`, `login`, `logout`, `remove_server`, `state`, `states`, `servers`, `subscribe`, `retry_now`, `accept_fingerprint`, `execute`, `last_known`, `task_restarts`, `shutdown` ; `LinkConfig` (durées par défaut = spec) ; `Ports` (tout ce qui vient du monde extérieur)
+    ├── task.rs      → la tâche d'un serveur : seule propriétaire de la machine à états, du flux, des opérations en suspens ; une boucle `select!` (commandes, flux, tentatives, résultats internes, échéance de la machine, battement) ; supervisée sous `catch_unwind` : une panique est journalisée, comptée, et le lien repart `Offline` avec une nouvelle tentative
+    ├── attempt.rs   → une tentative (flux, authentification, instantané), la reconnexion silencieuse, la relecture d'une opération : tâches abandonnables qui rendent un résultat, sans toucher à la machine
+    ├── watchers.rs  → veilleurs globaux : réveil (contrôle d'horloge chaque seconde) et changement de réseau (adresses sondées toutes les 5 s)
+    └── events.rs    → diffusion des événements (canal borné, `EventStream`)
+tests/
+├── support/         → agent réel dans le processus (`agent.rs`), mandataire TCP à pannes (`proxy.rs`), `World` (agent + mandataire + `LinkManager`), `Recorder`
+├── fault_proxy.rs   → résilience de bout en bout (seuils divisés par 6) : coupures de 1, 10 et 40 s, redémarrage, agent réinstallé, sessions révoquée / expirée, actions coupées (trois issues), « Réessayer maintenant », réseau, réveil, gel, lien lent
+├── pinning.rs       → première prise de contact, épinglage, session, carnet, reprise après redémarrage, serveurs indépendants
+└── robustness.rs    → transport simulé aux réponses aléatoires et absurdes, des milliers d'itérations en temps virtuel : ni panique, ni blocage, état borné
+```
+
+## Machine à états en bref
+
+Le début d'une coupure est le dernier message reçu (silence de 3 s) ou l'erreur de transport. Moins de 3 s : l'état affiché ne change pas ; de 3 s à 30 s : `Reconnecting` ; 30 s et plus : `Offline`, les tentatives continuent sans fin (première tentative tout de suite, puis 0,5 s, 1 s… 30 s). `SessionExpired` et `AccessRevoked` n'ont aucune tentative automatique ; une empreinte changée ou des versions incompatibles s'affichent `Offline` avec `blocked` renseigné et arrêtent les tentatives. Détail et justification : ADR-0007, fiches `BR-RESIL-*`.
+
+## Règles de la bibliothèque
+
+- `domain/` : aucune E/S, aucun tokio, aucune dépendance vers reqwest, rustls, fichiers.
+- `unwrap`, `expect`, `panic!`, `unreachable!`, indexation qui peut paniquer, arithmétique qui peut déborder : interdits hors tests (lint en erreur, `Mono` et `WallTime` saturent).
+- Aucun mot de passe ni jeton dans un journal, un message d'erreur ou un `Debug` : `Secret` (effacement à la libération). Les types du protocole qui portent un secret ont déjà un `Debug` masqué ; le mot de passe d'une requête de connexion est effacé après usage.
+- La confirmation de l'empreinte est faite par l'utilisateur (interface) ; la bibliothèque garantit seulement que rien d'authentifié ne part avant, et que rien ne part si elle a changé (BR-CONN-001, 002, 003, 011).
+- Dépendances et limites : `docs/adr/ADR-0011-dependances-liaison.md`.

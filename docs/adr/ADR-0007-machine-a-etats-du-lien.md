@@ -83,7 +83,7 @@ Après reconnexion : `GET /operations/{id}` pour chacune ; timeout > 24 h → ab
 
 ## Conséquences
 
-- Implémentation : trait `LinkStateMachine` dans `crates/hearth-link/src/state_machine.rs`.
+- Implémentation : `LinkMachine` dans `crates/hearth-link/src/domain/state.rs` (pure : événements et instant en entrée, effets en sortie).
 - Tests : mandataire à pannes (coupe, retarde, fige) + assertions transitions.
 - Battement : client ping toutes les 2 s, server pong ; pas de pong 3 s → lien réputé coupé.
 
@@ -93,3 +93,12 @@ Après reconnexion : `GET /operations/{id}` pour chacune ; timeout > 24 h → ab
 - Exponential backoff + jitter : https://aws.amazon.com/fr/blogs/architecture/exponential-backoff-and-jitter/
 - Tokio task supervision : https://tokio.rs/
 - ADR-0007 globale (tests) : `orga-global/docs/adr/ADR-0007-*.md`
+
+## Précisions d'implémentation (HRT-07)
+
+- **Début de la coupure** : le dernier message reçu quand c'est un silence de 3 s qui la révèle, l'instant de l'erreur quand c'est une erreur de socket. L'état affiché est dérivé de la durée de coupure : moins de 3 s, inchangé ; de 3 s à 30 s, `Reconnecting` ; 30 s et plus, `Offline` (seuils exacts à la milliseconde, injectables pour les tests).
+- **Tentatives** : la première part tout de suite après la perte ; les suivantes sont espacées de 0,5 s, 1 s, 2 s, 4 s, 8 s, 15 s, 30 s, 30 s… avec ± 20 % d'aléa, le plafond de 30 s étant une borne dure (l'aléa ne le dépasse pas). Un déclencheur (« Réessayer maintenant », réveil, changement de réseau) lance une tentative immédiate sans remettre la suite à zéro ; depuis `Offline`, il affiche `Reconnecting` jusqu'à l'échec de la tentative.
+- **Empreinte changée, versions incompatibles** : pas d'état `OfflineByFingerprint` ; l'état affiché est `Offline` avec `blocked` renseigné (`FingerprintChanged`, `IncompatibleVersion`), aucune tentative planifiée, seul « Réessayer maintenant » ou l'acceptation de la nouvelle empreinte relance.
+- **Démarrage** : avec une session mémorisée, l'état affiché est `Reconnecting` tout de suite (jamais un faux « Connecté ») ; sans session, `SessionExpired`.
+- **Supervision** : une panique dans la tâche d'un serveur est capturée, journalisée, comptée, et le lien repart `Offline` avec une nouvelle tentative.
+- **Opérations** : `running` est relu au plus 5 fois (500 ms d'écart), puis « résultat inconnu » ; `failed` (refus `4xx` retenu par l'agent) vaut « non exécuté » ; `interrupted` vaut « résultat inconnu » ; au-delà de 24 h, abandon en « résultat inconnu ».
