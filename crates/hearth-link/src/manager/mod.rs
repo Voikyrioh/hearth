@@ -459,6 +459,7 @@ impl LinkManager {
             mac_addresses: new.mac_addresses,
             last_contact_at: None,
             signed_out: false,
+            role: None,
         };
         let deps = &self.inner.deps;
         deps.servers
@@ -577,6 +578,7 @@ impl LinkManager {
         record.username = username.to_owned();
         record.remember = remember;
         record.signed_out = false;
+        record.role = Some(response.account.role);
         shared.set_record(record.clone());
         deps.servers
             .save(&record)
@@ -624,6 +626,27 @@ impl LinkManager {
             .save(&record)
             .await
             .map_err(|e| LinkError::Store(e.0))
+    }
+
+    /// Oubli des identifiants : le mot de passe mémorisé est effacé du coffre et « se souvenir »
+    /// repasse à faux. La session en cours n'est pas touchée ; à son expiration, l'utilisateur
+    /// devra se reconnecter à la main (BR-CONN-004). Sans effet si rien n'était mémorisé.
+    pub async fn forget_credentials(&self, id: &ServerId) -> Result<(), LinkError> {
+        let (_, shared) = self.handle(id)?;
+        let deps = &self.inner.deps;
+        deps.vault
+            .delete(id, SecretKind::Password)
+            .map_err(|e| LinkError::Vault(e.0))?;
+        let mut record = shared.record();
+        if record.remember {
+            record.remember = false;
+            shared.set_record(record.clone());
+            deps.servers
+                .save(&record)
+                .await
+                .map_err(|e| LinkError::Store(e.0))?;
+        }
+        Ok(())
     }
 
     /// Retire le serveur : tâche arrêtée, secrets, carnet et dernière vue effacés.

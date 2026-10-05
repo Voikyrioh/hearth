@@ -628,6 +628,7 @@ fn record(signed_out: bool) -> ServerRecord {
         mac_addresses: vec![],
         last_contact_at: None,
         signed_out,
+        role: None,
     }
 }
 

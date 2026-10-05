@@ -305,6 +305,7 @@ mod tests {
             mac_addresses: vec![],
             last_contact_at: None,
             signed_out: false,
+            role: None,
         }
     }
 

@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
 use hearth_proto::fingerprint::Fingerprint;
@@ -80,6 +81,10 @@ pub struct ServerRecord {
     /// (BR-CONN-016). Le mot de passe mémorisé, lui, est conservé.
     #[serde(default)]
     pub signed_out: bool,
+    /// Rôle du compte à la dernière connexion de l'utilisateur : l'interface ferme les écrans
+    /// d'administration au rôle lecture seule. `None` tant qu'on ne s'est jamais connecté.
+    #[serde(default)]
+    pub role: Option<RoleName>,
 }
 
 mod fingerprint_hex {
@@ -144,6 +149,7 @@ mod tests {
             mac_addresses: vec!["AA:BB:CC:DD:EE:FF".into()],
             last_contact_at: Some(WallTime::from_millis(1_790_000_000_000)),
             signed_out: true,
+            role: Some(RoleName::Readonly),
         };
         let text = serde_json::to_string(&record).unwrap();
         assert!(text.contains(&"ab".repeat(32)), "{text}");

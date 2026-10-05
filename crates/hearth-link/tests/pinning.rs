@@ -482,3 +482,40 @@ async fn changing_the_address_demands_a_new_fingerprint_and_keeps_the_remembered
         LinkError::AlreadyExists
     );
 }
+
+#[tokio::test]
+async fn forgetting_the_credentials_erases_the_password_but_keeps_the_session() {
+    let world = World::connected(Options {
+        remember: true,
+        ..Options::default()
+    })
+    .await;
+    assert!(
+        world
+            .vault
+            .get(&world.id, SecretKind::Password)
+            .unwrap()
+            .is_some()
+    );
+    world.manager.forget_credentials(&world.id).await.unwrap();
+    assert!(
+        world
+            .vault
+            .get(&world.id, SecretKind::Password)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        world
+            .vault
+            .get(&world.id, SecretKind::Token)
+            .unwrap()
+            .is_some()
+    );
+    assert!(!world.manager.servers()[0].remember);
+    assert_eq!(world.state().state, LinkState::Connected);
+    let book = std::fs::read_to_string(world.dir.path().join("servers.json")).unwrap();
+    assert!(book.contains("\"remember\": false") || book.contains("\"remember\":false"));
+    // Idempotent.
+    world.manager.forget_credentials(&world.id).await.unwrap();
+}

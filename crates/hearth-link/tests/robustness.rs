@@ -794,6 +794,7 @@ async fn a_server_that_always_fails_keeps_being_retried_with_bounded_state() {
         mac_addresses: vec![],
         last_contact_at: None,
         signed_out: false,
+        role: None,
     };
     ServerStore::save(&*store, &record).await.unwrap();
     // Une session mémorisée : le client essaie de se connecter au démarrage.
