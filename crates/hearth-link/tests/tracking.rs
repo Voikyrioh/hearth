@@ -316,8 +316,6 @@ struct Store {
     disk: Mutex<Disk>,
     servers: Mutex<Vec<ServerRecord>>,
     operations: Mutex<Vec<PendingOp>>,
-    /// Instant de la fin de la dernière écriture des opérations.
-    written_at: Mutex<Option<Instant>>,
     /// `Disk::Gated` : une écriture attend à la porte / la porte est ouverte.
     gate_reached: AtomicBool,
     gate_open: AtomicBool,
@@ -329,7 +327,6 @@ impl Store {
             disk: Mutex::new(disk),
             servers: Mutex::new(Vec::new()),
             operations: Mutex::new(Vec::new()),
-            written_at: Mutex::new(None),
             gate_reached: AtomicBool::new(false),
             gate_open: AtomicBool::new(false),
         })
@@ -392,7 +389,6 @@ impl OperationStore for Store {
             Disk::Normal => {}
         }
         *self.operations.lock().unwrap() = operations.to_vec();
-        *self.written_at.lock().unwrap() = Some(Instant::now());
         Ok(())
     }
     async fn remove(&self, _: &ServerId) -> Result<(), StoreError> {
@@ -756,6 +752,47 @@ async fn a_session_end_frame_racing_a_logout_never_triggers_a_silent_reconnectio
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_task_late_on_a_logout_never_erases_the_token_of_a_login_that_already_came_in() {
+    // FIX:01M46G7Z0ZP43T53M2F5KG4VKS : la tâche, retenue par la destination d'événements, traite la
+    // commande de déconnexion APRÈS qu'une connexion a rangé son jeton.
+    let gate = Arc::new(Gate::default());
+    let (rig, id) = connected_with(Disk::Normal, true, Some(gate.clone())).await;
+    gate.block_next.store(true, Ordering::SeqCst);
+    rig.script.snapshot_next.store(true, Ordering::SeqCst);
+    rig.script.wake.notify_one();
+    wait_until("tâche retenue", || gate.reached.load(Ordering::SeqCst)).await;
+    // La déconnexion part (sa commande attend dans la file de la tâche) et reste en vol côté réseau.
+    rig.script.logout_hold.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let logout = tokio::spawn(async move { manager.logout(&task_id).await });
+    wait_until("déconnexion en vol", || {
+        rig.script.logout_in_flight.load(Ordering::SeqCst)
+    })
+    .await;
+    // Une connexion passe pendant ce temps : jeton neuf au coffre, carnet « connecté ».
+    rig.manager
+        .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap();
+    let fresh = rig.vault.get(&id, SecretKind::Token).unwrap().unwrap();
+    // Seulement maintenant la tâche se réveille et lit la commande de déconnexion.
+    gate.release.store(true, Ordering::SeqCst);
+    rig.script.logout_hold.store(false, Ordering::SeqCst);
+    tokio::time::timeout(GUARD, logout)
+        .await
+        .expect("la déconnexion se termine")
+        .unwrap()
+        .unwrap();
+    wait_state(&rig.manager, &id, LinkState::Connected).await;
+    assert_eq!(
+        rig.vault.get(&id, SecretKind::Token).unwrap(),
+        Some(fresh),
+        "le jeton de la connexion est intact"
+    );
+}
+
 // ── Reprise après panique ───────────────────────────────────────────────────────────────────
 
 fn record(signed_out: bool) -> ServerRecord {
@@ -783,7 +820,6 @@ async fn a_remembered_login_without_a_password_in_the_vault_is_not_promised_at_s
     store.servers.lock().unwrap().push(record(true));
     let vault = Arc::new(MemoryVault::new());
     let manager = start(&script, &store, &vault, None).await;
-    let id = ServerId::parse("srv").unwrap();
     assert!(!manager.servers()[0].remember, "pas de case cochée à tort");
     assert!(
         !store.servers.lock().unwrap()[0].remember,
@@ -809,7 +845,6 @@ async fn a_remembered_login_without_a_password_in_the_vault_is_not_promised_at_s
         .map(|s| s.id)
         .collect();
     assert_eq!(remembered, [ServerId::parse("kept").unwrap()]);
-    let _ = id;
 }
 
 #[tokio::test]

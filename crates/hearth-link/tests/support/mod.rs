@@ -53,22 +53,44 @@ pub fn fast_config() -> LinkConfig {
 }
 
 /// Réseau scripté : la liste des adresses locales est celle qu'on y met.
-pub struct ScriptedNet(Mutex<BTreeSet<IpAddr>>);
+pub struct ScriptedNet {
+    addresses: Mutex<BTreeSet<IpAddr>>,
+    /// Lectures de la liste faites par le veilleur depuis le dernier `set`.
+    reads_since_set: std::sync::atomic::AtomicU64,
+}
 
 impl ScriptedNet {
     pub fn new() -> Self {
-        Self(Mutex::new(["192.168.1.20".parse().unwrap()].into()))
+        Self {
+            addresses: Mutex::new(["192.168.1.20".parse().unwrap()].into()),
+            reads_since_set: std::sync::atomic::AtomicU64::new(0),
+        }
     }
 
     pub fn set(&self, addresses: &[&str]) {
-        *self.0.lock().unwrap() = addresses.iter().map(|a| a.parse().unwrap()).collect();
+        *self.addresses.lock().unwrap() = addresses.iter().map(|a| a.parse().unwrap()).collect();
+        self.reads_since_set.store(0, Ordering::SeqCst);
+    }
+
+    /// Attend que le veilleur ait lu la liste au moins DEUX fois depuis le dernier `set` : la
+    /// première lecture a vu le changement, la seconde ne commence qu'une fois la première traitée.
+    pub async fn wait_seen(&self, limit: Duration) {
+        let deadline = Instant::now() + limit;
+        while self.reads_since_set.load(Ordering::SeqCst) < 2 {
+            assert!(
+                Instant::now() < deadline,
+                "le veilleur n'a pas relu le réseau"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
     }
 }
 
 #[async_trait]
 impl NetWatcher for ScriptedNet {
     async fn addresses(&self) -> Result<BTreeSet<IpAddr>, NetError> {
-        Ok(self.0.lock().unwrap().clone())
+        self.reads_since_set.fetch_add(1, Ordering::SeqCst);
+        Ok(self.addresses.lock().unwrap().clone())
     }
 }
 
@@ -230,9 +252,20 @@ pub async fn start_manager(
     clock: Arc<JumpClock>,
     config: LinkConfig,
 ) -> LinkManager {
+    start_manager_with(dir, vault, net, clock, config, transport()).await
+}
+
+pub async fn start_manager_with(
+    dir: &std::path::Path,
+    vault: Arc<MemoryVault>,
+    net: Arc<ScriptedNet>,
+    clock: Arc<JumpClock>,
+    config: LinkConfig,
+    transport: HttpTransport,
+) -> LinkManager {
     LinkManager::start(
         Ports {
-            transport: Arc::new(transport()),
+            transport: Arc::new(transport),
             vault,
             servers: Arc::new(FileServerStore::new(dir.join("servers.json"))),
             snapshots: Arc::new(FileSnapshotStore::new(dir.join("snapshots"))),
@@ -251,6 +284,17 @@ pub async fn start_manager(
 pub fn transport() -> HttpTransport {
     HttpTransport::new(HttpTransportConfig {
         connect_timeout: Duration::from_secs(10),
+        request_timeout: Duration::from_secs(30),
+        send_timeout: Duration::from_secs(10),
+        client_name: "poste-test/0.1".into(),
+    })
+}
+
+/// Transport au délai de connexion court : pour le test dont c'est l'objet (une sonde qui n'obtient
+/// jamais de réponse doit échouer sans attendre le délai généreux des autres tests).
+pub fn short_transport() -> HttpTransport {
+    HttpTransport::new(HttpTransportConfig {
+        connect_timeout: Duration::from_millis(500),
         request_timeout: Duration::from_secs(30),
         send_timeout: Duration::from_secs(10),
         client_name: "poste-test/0.1".into(),
