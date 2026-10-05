@@ -40,7 +40,8 @@ async fn every_reserved_route_refuses_a_caller_without_a_session() {
     let api = Api::new(&env);
     for endpoint in ENDPOINTS
         .iter()
-        .filter(|endpoint| endpoint.access != Access::Public)
+        // Le flux s'authentifie par son premier message : voir `tests/stream_https.rs`.
+        .filter(|endpoint| !matches!(endpoint.access, Access::Public | Access::FirstMessage))
     {
         let path = concrete(endpoint.path);
         let reply = api
@@ -887,4 +888,90 @@ async fn a_tracked_body_over_one_mebibyte_is_413_not_422() {
         .send()
         .await;
     assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Mesures : /machine, /metrics/history, /stream (BR-DASH-010, BR-DASH-013)
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn both_roles_see_the_machine_and_its_history_identically() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let readonly = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
+
+    let for_admin = api.get("/machine").token(&admin).send().await;
+    let for_readonly = api.get("/machine").token(&readonly).send().await;
+    assert_eq!(for_admin.status, StatusCode::OK);
+    assert_eq!(for_admin.body, for_readonly.body);
+    assert_eq!(for_admin.body["name"], "forge-test");
+    assert_eq!(for_admin.body["capabilities"]["gpu"], true);
+    assert_eq!(for_admin.body["capabilities"]["temps"], false);
+    assert_eq!(for_admin.body["gpus"][0]["name"], "Test GPU");
+
+    for token in [&admin, &readonly] {
+        let reply = api.get("/metrics/history").token(token).send().await;
+        assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+        assert_eq!(reply.body["window"], "5m", "5 minutes par défaut");
+        assert_eq!(reply.body["step_s"], 1);
+        assert_eq!(reply.body["samples"], json!([]), "rien n'est encore mesuré");
+    }
+}
+
+#[tokio::test]
+async fn the_history_windows_are_one_five_and_sixty_minutes() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let token = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
+    for (window, step) in [("1m", 1), ("5m", 1), ("1h", 10)] {
+        let reply = api
+            .get(&format!("/metrics/history?window={window}"))
+            .token(&token)
+            .send()
+            .await;
+        assert_eq!(reply.status, StatusCode::OK, "{window}");
+        assert_eq!(reply.body["window"], window);
+        assert_eq!(reply.body["step_s"], step, "{window}");
+    }
+    for bad in ["2m", "", "1H", "60m"] {
+        let reply = api
+            .get(&format!("/metrics/history?window={bad}"))
+            .token(&token)
+            .send()
+            .await;
+        assert_eq!(
+            (reply.status, reply.code()),
+            (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR"),
+            "{bad:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_machine_routes_check_the_interface_version_like_the_others() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let token = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
+    for path in ["/machine", "/metrics/history", "/stream"] {
+        let reply = api.get(path).token(&token).version(Some("2")).send().await;
+        assert_eq!(
+            (reply.status, reply.code()),
+            (StatusCode::UPGRADE_REQUIRED, "INCOMPATIBLE_VERSION"),
+            "{path}"
+        );
+        let reply = api.get(path).token(&token).version(None).send().await;
+        assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn the_stream_route_without_an_upgrade_explains_itself() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let reply = api.get("/stream").send().await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR")
+    );
 }

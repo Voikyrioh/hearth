@@ -2,6 +2,7 @@
 //! Aucune règle métier.
 
 pub mod argon2;
+pub mod audit_feed;
 pub mod clock;
 pub mod config;
 pub mod data_dir;

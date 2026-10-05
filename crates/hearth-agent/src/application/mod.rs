@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod hello;
 pub mod maintenance;
+pub mod metrics;
 pub mod operations;
 pub mod ports;
 pub mod sessions;

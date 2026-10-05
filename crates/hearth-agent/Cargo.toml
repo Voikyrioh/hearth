@@ -34,6 +34,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
+sysinfo.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 time.workspace = true
@@ -46,8 +47,10 @@ ulid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
 tempfile.workspace = true
 tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
 tower.workspace = true
 # TLS 1.2 n'est activé que pour vérifier que l'agent le refuse.
 rustls = { workspace = true, features = ["tls12"] }
