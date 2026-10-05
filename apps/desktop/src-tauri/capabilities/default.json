@@ -7,6 +7,7 @@
     "allow-get-settings",
     "allow-set-launch-at-startup",
     "allow-get-app-version",
-    "allow-open-logs-folder"
+    "allow-open-logs-folder",
+    "allow-log-frontend-error"
   ]
 }

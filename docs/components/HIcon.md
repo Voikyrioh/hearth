@@ -2,8 +2,8 @@
 
 Atome · `apps/desktop/src/components/atoms/HIcon.vue`
 
-Icône SVG en trait (24 px de grille, `currentColor`). Sans `label` : `aria-hidden`. Avec `label` : `role="img"`.
+Jeu d'icônes SVG en trait (grille 24, `currentColor`) : un nom = quelques tracés. Sans `label` : `aria-hidden`. Avec `label` : `role="img"`. Aucun symbole typographique (⚙, ⚠) dans l'interface.
 
-- Props : `name` (`plus`, `settings`), `label` (optionnel)
+- Props : `name` (`plus`, `settings`, `alert`, `info`, `check`, `close`, `refresh`, `server`, `eye`, `eye-off`), `label` (optionnel), `size` (`md` 20 px, `sm` 16 px)
 - Événements et slots : aucun
-- Notes : Ajouter une icône = un cas de plus dans `IconName` et le gabarit. Tests : `HLogo.test.ts`.
+- Notes : Ajouter une icône = une entrée de plus dans `ICONS`. Tests : `atoms.test.ts`.

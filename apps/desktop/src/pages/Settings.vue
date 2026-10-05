@@ -58,7 +58,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
 
 .settings__title {
   font-size: var(--fs-h1);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .settings__panel {
@@ -72,7 +72,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
 
 .settings__section {
   font-size: var(--fs-h3);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .settings__error {
@@ -83,7 +83,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
 .settings__version {
   margin-top: var(--space-4);
   padding-top: var(--space-4);
-  border-top: 1px solid var(--bd);
+  border-top: var(--border-width) solid var(--bd);
   color: var(--tx2);
 }
 

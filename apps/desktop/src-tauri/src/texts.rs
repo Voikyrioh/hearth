@@ -9,6 +9,15 @@ pub const MENU_OPEN_LABEL: &str = "Ouvrir Hearth";
 pub const MENU_QUIT_LABEL: &str = "Quitter";
 pub const CLOSE_HINT: &str = "Hearth continue de fonctionner. Clique sur l'icône pour rouvrir.";
 pub const STARTUP_FAILED_TITLE: &str = "Hearth n'a pas pu démarrer";
+pub const PANIC_TITLE: &str = "Hearth a rencontré une erreur grave";
+
+/// Corps de la boîte de message affichée quand une panique ne peut pas être
+/// écrite au journal.
+pub fn panic_body(panic: &str) -> String {
+    format!(
+        "Hearth doit se fermer, et le journal n'est pas disponible pour garder la trace de l'erreur.\n\n{panic}"
+    )
+}
 
 /// Corps de la boîte de message affichée quand le démarrage échoue. Si le
 /// journal n'a pas pu s'ouvrir, on le dit au lieu de renvoyer vers un fichier

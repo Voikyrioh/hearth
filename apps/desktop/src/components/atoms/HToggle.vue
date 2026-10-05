@@ -1,16 +1,29 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { type NeedsLink, useNeedsLink } from "@/composables/useNeedsLink";
+import HTooltip from "./HTooltip.vue";
 
-// Même convention que HButton : désactivé = `aria-disabled` (focus conservé, raison dans
-// `hint`). `busy` bloque un second clic pendant qu'une commande tourne.
+// Même convention que HButton : désactivé = `aria-disabled` (focus conservé), l'état final
+// se calcule ici (`disabled` OU `busy` OU `needsLink`) et l'explication s'affiche par infobulle.
+// `busy` bloque un second clic pendant qu'une commande tourne.
+defineOptions({ inheritAttrs: false });
+
 const props = withDefaults(
-  defineProps<{ modelValue: boolean; disabled?: boolean; busy?: boolean; hint?: string }>(),
-  { disabled: false, busy: false, hint: undefined },
+  defineProps<{
+    modelValue: boolean;
+    disabled?: boolean;
+    busy?: boolean;
+    needsLink?: NeedsLink;
+    hint?: string;
+  }>(),
+  { disabled: false, busy: false, needsLink: undefined, hint: undefined },
 );
 
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
 
-const inert = computed(() => props.disabled || props.busy);
+const linkReason = useNeedsLink(() => props.needsLink);
+const inert = computed(() => props.disabled || props.busy || linkReason.value !== null);
+const tip = computed(() => linkReason.value ?? (props.disabled ? props.hint : undefined));
 
 function onClick() {
   if (inert.value) return;
@@ -19,18 +32,23 @@ function onClick() {
 </script>
 
 <template>
-  <button
-    type="button"
-    role="switch"
-    :class="['toggle', { 'toggle--on': modelValue, 'toggle--disabled': disabled, 'toggle--busy': busy }]"
-    :aria-checked="modelValue"
-    :aria-disabled="inert ? 'true' : undefined"
-    :aria-busy="busy ? 'true' : undefined"
-    :title="hint"
-    @click="onClick"
-  >
-    <span class="toggle__knob" />
-  </button>
+  <HTooltip :text="tip" placement="end">
+    <template #default="{ describedby }">
+      <button
+        v-bind="$attrs"
+        type="button"
+        role="switch"
+        :class="['toggle', { 'toggle--on': modelValue, 'toggle--busy': busy }]"
+        :aria-checked="modelValue"
+        :aria-disabled="inert ? 'true' : undefined"
+        :aria-busy="busy ? 'true' : undefined"
+        :aria-describedby="describedby"
+        @click="onClick"
+      >
+        <span class="toggle__knob" />
+      </button>
+    </template>
+  </HTooltip>
 </template>
 
 <style scoped>
@@ -40,7 +58,7 @@ function onClick() {
   width: var(--toggle-width);
   height: var(--toggle-height);
   padding: 0;
-  border: 1px solid var(--bd);
+  border: var(--border-width) solid var(--bd);
   border-radius: var(--radius-pill);
   background: var(--bg);
   cursor: pointer;
@@ -50,11 +68,6 @@ function onClick() {
 .toggle--on {
   border-color: var(--ac);
   background: var(--ac);
-}
-
-.toggle--disabled {
-  opacity: var(--opacity-disabled);
-  cursor: not-allowed;
 }
 
 .toggle--busy {

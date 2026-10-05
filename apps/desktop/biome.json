@@ -1,7 +1,16 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
-    "includes": ["**", "!**/src/bindings.ts", "!**/src-tauri", "!**/dist"]
+    "includes": [
+      "**",
+      "!**/src/bindings.ts",
+      "!**/src-tauri",
+      "!**/dist",
+      "!**/dist-e2e",
+      "!**/test-results",
+      "!**/playwright-report",
+      "!**/e2e/screenshots"
+    ]
   },
   "formatter": {
     "enabled": true,

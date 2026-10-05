@@ -10,6 +10,12 @@ export const commands = {
 	setLaunchAtStartup: (enabled: boolean) => typedError<Settings, AppError>(__TAURI_INVOKE("set_launch_at_startup", { enabled })),
 	getAppVersion: () => __TAURI_INVOKE<string>("get_app_version"),
 	openLogsFolder: () => typedError<null, AppError>(__TAURI_INVOKE("open_logs_folder")),
+	/**
+	 *  Erreur de l'interface (gestionnaire global Vue, rejet de promesse) à écrire au
+	 *  journal du client. Jamais d'erreur en retour : l'interface ne doit pas
+	 *  échouer en rapportant un échec. Message borné en taille, débit limité.
+	 */
+	logFrontendError: (source: string, message: string) => __TAURI_INVOKE<void>("log_frontend_error", { source, message }),
 };
 
 /* Types */

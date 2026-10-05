@@ -11,8 +11,8 @@ describe("Welcome (BR-CLIENT-013)", () => {
   });
 
   it("offers the button but keeps it inactive with a tooltip", () => {
-    const button = mount(Welcome).get("button");
-    expect(button.attributes("aria-disabled")).toBe("true");
-    expect(button.attributes("title")).toBe("Bientôt disponible");
+    const wrapper = mount(Welcome);
+    expect(wrapper.get("button").attributes("aria-disabled")).toBe("true");
+    expect(wrapper.get('[role="tooltip"]').text()).toBe("Bientôt disponible");
   });
 });

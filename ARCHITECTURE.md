@@ -24,7 +24,7 @@ crates/
 └── xtask/           → Tâches build : `agent` (binaire statique en conteneur), `e2e-install` (installation de bout en bout en conteneur systemd), `shellcheck` ; empaquetage et manifeste à venir
 
 apps/
-├── desktop/src-tauri/  → Coquille Tauri : fenêtre, instance unique, zone de notification, démarrage Windows, réglages locaux (livré HRT-08) ; coffre, mises à jour, relais à venir [apps/desktop/ARCHITECTURE.md]
+├── desktop/src-tauri/  → Coquille Tauri : fenêtre, instance unique, zone de notification, démarrage Windows, réglages locaux (livré HRT-08) ; coffre, mises à jour, relais à venir ; interface : design system Braise, coquille (barre, navigation, en-tête, bandeau), pont de liaison simulé (HRT-09) [apps/desktop/ARCHITECTURE.md]
 ├── desktop/src/        → Interface Vue 3 : écran de premier lancement, réglages, jetons Braise, textes (`i18n/fr.ts`), pont Tauri typé (`bindings.ts`) ; affichage d'état et saisies à venir
 └── deploy/             → `install.sh` (installation en une commande, POSIX sh) ; `e2e/` (image Debian + systemd, scénario de bout en bout)
 
@@ -50,7 +50,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 - Tests : `cargo test` (domain seul) + `cargo test --test '*' ` (intégration) + `npx vitest` (front composants) + `npx playwright test` (e2e navigateur).
 - Lint : `cargo clippy -- -D warnings` + `cargo fmt --check` + `npx biome check`.
 - Build agent : `cargo xtask agent` (conteneur Alpine, cible musl, vérifié statique, taille et SHA-256 affichés ; `target/dist/hearth-agent`). Installation de bout en bout : `cargo xtask e2e-install` (Docker). Scripts : `cargo xtask shellcheck`. Installer : `sudo sh deploy/install.sh --binary ./hearth-agent` (`docs/runbooks/installer-agent.md`).
-- Build client : `cd apps/desktop && npm run tauri build` (Windows NSIS : `target/release/bundle/nsis/Hearth_<version>_x64-setup.exe`). Interface seule : `npm run lint`, `npm run typecheck`, `npm test` dans `apps/desktop`.
+- Build client : `cd apps/desktop && npm run tauri build` (Windows NSIS : `target/release/bundle/nsis/Hearth_<version>_x64-setup.exe`). Interface seule : `npm run lint`, `npm run typecheck`, `npm test`, `npm run e2e` (Playwright) dans `apps/desktop`.
 - Comptes sur le serveur (sans réseau) : `cargo run --bin hearth-agent -- --data-dir ./.dev-data account add marie --role admin` (mot de passe demandé sans écho, ou `HEARTH_ACCOUNT_PASSWORD`), puis `account list|passwd|role|remove|revoke` ; runbook `docs/runbooks/recuperer-acces-administrateur.md`. Régénérer `.sqlx/` après une requête ou migration modifiée : voir `CLAUDE.md`.
 - Run local agent : `RUST_LOG=debug cargo run --bin hearth-agent -- serve --data-dir ./.dev-data` ; empreinte : `cargo run --bin hearth-agent -- fingerprint --data-dir ./.dev-data`. Configuration : `agent.toml` (`--config`, `HEARTH_CONFIG`) puis variables `HEARTH_PORT`, `HEARTH_LISTEN_ADDR`, `HEARTH_DATA_DIR`, `HEARTH_MANAGED`, puis `--data-dir`. Journaux : `HEARTH_LOG_FORMAT=json|text` (texte en terminal, JSON sinon), niveau par `RUST_LOG`. `nvidia-smi` (cartes NVIDIA) : variable `HEARTH_NVIDIA_SMI` (chemin explicite), sinon `PATH`, sinon `/run/current-system/sw/bin/nvidia-smi`, `/usr/bin/nvidia-smi`, `/usr/local/bin/nvidia-smi` ; introuvable, un message `info` puis une nouvelle recherche toutes les 60 s. Dossier de données par défaut : `/var/lib/hearth` (Linux), `%LOCALAPPDATA%\hearth-agent` (Windows, mode dev).
 
