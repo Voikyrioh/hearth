@@ -23,7 +23,7 @@ La requête suivie s'exécute dans une tâche détachée, dans le span de la req
 - `crates/hearth-agent/src/domain/operations.rs::{classify, RequestFingerprint::of, OperationKey::parse}`.
 - `crates/hearth-agent/src/application/operations.rs::OperationService`.
 - `crates/hearth-agent/src/entrypoint/http/operations.rs::{track, get}` — suivi (posé par `auth::guard` pour les routes `tracked`) et route `GET /operations/{id}` ; `application/operations.rs::OperationService::interrupt_running` — appelé par `app::start_with`.
-- Côté client (HRT-07) : `crates/hearth-link/src/domain/pending_ops.rs::PendingOps::{register, link_lost, to_resolve, resolve}` — la clé voyage dans `Idempotency-Key`, l'action coupée est « résultat inconnu » et n'est jamais rejouée ; au retour du lien, `GET /operations/{id}` donne l'une des trois issues (`Outcome` : fait pendant la coupure, non exécuté, résultat inconnu). `succeeded` donne « fait pendant la coupure » ; `404` et `failed` donnent « non exécuté » ; `interrupted`, `running` après 5 relectures et toute opération de plus de 24 h donnent « résultat inconnu ».
+- Côté client (HRT-07) : `crates/hearth-link/src/domain/pending_ops.rs::PendingOps::{register, link_lost, to_resolve, resolve}` — la clé voyage dans `Idempotency-Key`, l'action coupée est « résultat inconnu » et n'est jamais rejouée ; au retour du lien, `GET /operations/{id}` donne l'une des trois issues (`Outcome` : fait pendant la coupure, non exécuté, résultat inconnu). `succeeded` donne « fait pendant la coupure » ; `404` et `failed` donnent « non exécuté » ; `interrupted`, `running` après 5 relectures et toute opération de plus de 24 h donnent « résultat inconnu ». Si la session suivante est celle d'un **autre compte**, ou après acceptation d'une nouvelle empreinte, les clés d'opération ne disent plus rien : toutes sont soldées en « résultat inconnu » sans interroger l'agent (jamais « non exécuté » par erreur ; `PendingOps::settle_all`).
 
 ## Vérification
 - Tests : `domain::operations::tests` ; `tests/sessions_use_cases.rs` (clé liée à la requête, par compte, interruption) ; `tests/http_api.rs::a_key_reused_for_another_request_is_refused_without_running` ; `tests/sessions_https.rs::replaying_an_operation_key_returns_the_first_result_without_running_again`, `::a_client_that_cuts_before_the_answer_still_gets_its_result_recorded`, `::an_operation_left_running_by_a_previous_run_is_interrupted_at_startup`.
@@ -40,3 +40,4 @@ La requête suivie s'exécute dans une tâche détachée, dans le span de la req
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-05 — côté client ajouté (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 — précisé (HRT-07, review Stephen round 1).

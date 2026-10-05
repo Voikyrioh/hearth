@@ -11,7 +11,7 @@ maj: 2026-10-05
 # BR-RESIL-001 — L'état du lien est toujours visible dans l'en-tête
 
 ## Règle
-L'indicateur d'état du lien du serveur affiché est visible en permanence dans l'en-tête, quelle que soit la vue. La bibliothèque fournit l'état (`LinkState`) et l'événement d'état (`since`, `last_contact_at`, `next_retry_at`) ; l'indicateur lui-même est de l'interface.
+L'indicateur d'état du lien du serveur affiché est visible en permanence dans l'en-tête, quelle que soit la vue. La bibliothèque fournit l'état (`LinkState`) et l'événement d'état (`since`, `last_contact_at`, `next_retry_at`, `reason`) ; l'indicateur lui-même est de l'interface.
 
 Statut : à venir, HRT-12 (états hors ligne de l'interface).
 
@@ -29,3 +29,4 @@ Statut : à venir, HRT-12 (états hors ligne de l'interface).
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 — précisé (HRT-07, review Stephen round 1).

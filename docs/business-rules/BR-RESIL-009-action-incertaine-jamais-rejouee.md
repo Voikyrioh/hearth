@@ -11,7 +11,7 @@ maj: 2026-10-05
 # BR-RESIL-009 — Une action coupée avant sa réponse est « résultat inconnu » et n'est jamais rejouée
 
 ## Règle
-Une action envoyée porte une clé d'opération (`Idempotency-Key`, un ULID). Si le lien tombe avant la réponse, l'appelant reçoit tout de suite « résultat inconnu » avec la clé, l'opération reste suivie, et la bibliothèque ne la renvoie **jamais** d'elle-même : seul l'utilisateur peut relancer. Hors « Connecté », `execute` refuse sans rien envoyer (BR-RESIL-008). Le nombre d'opérations suivies est borné (256).
+Une action envoyée porte une clé d'opération (`Idempotency-Key`, un ULID). Si le lien tombe avant la réponse, l'appelant reçoit tout de suite « résultat inconnu » avec la clé, l'opération reste suivie, et la bibliothèque ne la renvoie **jamais** d'elle-même : seul l'utilisateur peut relancer. Hors « Connecté », `execute` refuse sans rien envoyer (BR-RESIL-008). Le nombre d'opérations suivies est borné (256). La clé est choisie par la façade : si la requête dépasse son délai, ou si l'appelant abandonne l'attente, `execute` rend (ou la tâche retient) `ResultUnknown` avec la clé, jamais un simple délai dépassé, et l'opération reste suivie. Les opérations en suspens sont écrites sur disque (un fichier par serveur, écriture atomique, 24 h au plus comme l'agent) et survivent à un redémarrage de l'application ; elles sont relues au premier retour du lien.
 
 ## Application (code)
 - `crates/hearth-link/src/domain/pending_ops.rs::PendingOps::{register, complete, link_lost}`.
@@ -19,7 +19,7 @@ Une action envoyée porte une clé d'opération (`Idempotency-Key`, un ULID). Si
 
 ## Vérification
 - Tests : `domain::pending_ops::tests::a_dropped_link_makes_in_flight_operations_unknown_and_nothing_replays_them`, `::a_response_before_the_link_drops_forgets_the_operation`, `::the_number_of_tracked_operations_is_bounded`.
-- Intégration : `tests/fault_proxy.rs::an_action_cut_before_the_answer_is_unknown_and_never_replayed`, `::an_action_is_refused_without_sending_anything_when_the_link_is_not_connected`, `::a_completed_action_returns_the_agent_answer_even_when_it_is_a_refusal`.
+- Intégration : `tests/fault_proxy.rs::an_action_cut_before_the_answer_is_unknown_and_never_replayed`, `::an_action_is_refused_without_sending_anything_when_the_link_is_not_connected`, `::a_completed_action_returns_the_agent_answer_even_when_it_is_a_refusal`, `::an_abandoned_action_stays_tracked_and_its_outcome_is_announced`, `::an_unknown_operation_survives_a_restart_of_the_application` ; `domain::pending_ops::tests::pending_operations_survive_a_restart_as_unknown_and_old_ones_are_dropped`.
 
 ## Cas limites
 - Un résultat connu (réponse reçue, même une erreur 4xx) n'est pas « inconnu ».
@@ -30,3 +30,4 @@ Une action envoyée porte une clé d'opération (`Idempotency-Key`, un ULID). Si
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 — précisé (HRT-07, review Stephen round 1).

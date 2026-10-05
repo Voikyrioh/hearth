@@ -11,7 +11,7 @@ maj: 2026-10-05
 # BR-RESIL-017 — Une session de plusieurs jours, serveur éteint puis rallumé, ne consomme pas de ressources en plus
 
 ## Règle
-Tout ce que la bibliothèque retient est borné : la dernière vue (300 échantillons, `HISTORY_CAP`), les opérations en suspens (256, `MAX_PENDING`, abandon après 24 h), le délai entre deux tentatives (30 s au plus), le canal d'événements (1 024, un abonné lent perd les plus anciens), un message de flux (4 Mio). Un serveur hors ligne depuis des jours reçoit une tentative toutes les 30 s environ, avec un seul événement par tentative ; chaque cycle éteint puis rallumé est une coupure comme une autre.
+Tout ce que la bibliothèque retient est borné : la dernière vue (300 échantillons, `HISTORY_CAP`), les opérations en suspens (256, `MAX_PENDING`, abandon après 24 h), le délai entre deux tentatives (30 s au plus), le fichier des opérations en suspens (même borne), le canal d'événements (1 024 : un abonné lent reçoit `Event::Lagged` et relit `states()`), un message de flux (4 Mio). Un serveur hors ligne depuis des jours reçoit une tentative toutes les 30 s environ, avec un seul événement par tentative ; chaque cycle éteint puis rallumé est une coupure comme une autre.
 
 ## Application (code)
 - `crates/hearth-link/src/domain/server.rs::HISTORY_CAP`, `domain/pending_ops.rs::{MAX_PENDING, ABANDON_AFTER}`, `domain/backoff.rs::MAX_DELAY`.
@@ -29,3 +29,4 @@ Tout ce que la bibliothèque retient est borné : la dernière vue (300 échanti
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 — précisé (HRT-07, review Stephen round 1).

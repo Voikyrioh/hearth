@@ -32,6 +32,12 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-RESIL-018](./BR-RESIL-018-agregation-des-notifications.md) — Coupures répétées : les notifications s'agrègent — à venir, HRT-12 — —
 - [BR-RESIL-019](./BR-RESIL-019-comportement-identique-tous-roles.md) — Le comportement du lien ne dépend pas du rôle du compte — crates/hearth-link/src/domain/state.rs::Input — invariant ✓
 - [BR-RESIL-020](./BR-RESIL-020-etat-de-lien-par-serveur.md) — Chaque serveur enregistré a son propre état de lien, indépendant des autres — crates/hearth-link/src/manager/mod.rs::LinkManager::{state, states} — invariant ✓
+- [BR-CONN-009](./BR-CONN-009-changement-d-adresse-nouvelle-verification.md) — Modifier l'adresse d'un serveur enregistré impose une nouvelle vérification de l'empreinte — à venir — —
+- [BR-CONN-010](./BR-CONN-010-suppression-efface-les-secrets.md) — Supprimer un serveur efface aussi ses identifiants mémorisés du coffre — crates/hearth-link/src/manager/mod.rs::LinkManager::remove_server — invariant ✓
+- [BR-CONN-012](./BR-CONN-012-aucun-identifiant-hors-agent-hearth.md) — Aucun identifiant n'est envoyé si le serveur n'est pas un agent Hearth — crates/hearth-link/src/domain/agent_identity.rs::check_product — invariant ✓
+- [BR-CONN-015](./BR-CONN-015-plusieurs-serveurs-simultanes.md) — Plusieurs serveurs peuvent être connectés en même temps ; basculer ne ferme rien — crates/hearth-link/src/manager/mod.rs::LinkManager::{states, servers} — invariant ✓
+- [BR-CONN-016](./BR-CONN-016-deconnexion-garde-le-mot-de-passe-memorise.md) — La déconnexion ferme la session et efface le jeton, pas le mot de passe mémorisé — crates/hearth-link/src/domain/state.rs::LinkMachine — invariant ✓
+- [BR-CONN-017](./BR-CONN-017-mot-de-passe-memorise-refuse.md) — Mot de passe mémorisé devenu invalide : retour au formulaire, pas « Accès révoqué » — crates/hearth-link/src/domain/state.rs::LinkMachine — invariant ✓
 - [BR-INSTALL-004](./BR-INSTALL-004-empreinte-generee-une-fois.md) — Empreinte générée une seule fois, jamais modifiée — `domain/identity_policy.rs::decide` — invariant ✓
 - [BR-ACCT-001](./BR-ACCT-001-creation-compte.md) — Un compte est créé avec un identifiant unique, un mot de passe et un rôle — `application/accounts.rs::AccountService::create` — —
 - [BR-ACCT-002](./BR-ACCT-002-format-identifiant.md) — Identifiant : 3 à 32 caractères, minuscules, chiffres, tiret, underscore — `domain/accounts/username.rs::Username::parse` — ✓

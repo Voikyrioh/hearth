@@ -11,7 +11,7 @@ maj: 2026-10-05
 # BR-RESIL-006 — Au réveil du PC ou au changement de réseau, le client retente tout de suite
 
 ## Règle
-Un saut d'horloge de plus de 5 s (réveil de veille) ou un changement de la liste des adresses réseau locales (sondée toutes les 5 s) déclenche une tentative immédiate, quels que soient les délais en cours. Depuis « Connecté », un réveil compte la coupure depuis le dernier message reçu (le PC dormait) ; un changement de réseau rouvre le lien sans attendre que l'ancienne connexion meure.
+Un saut d'horloge de plus de 5 s (réveil de veille) ou un changement de la liste des adresses réseau locales (sondée toutes les 5 s) déclenche une tentative immédiate, quels que soient les délais en cours. Au réveil, la coupure est comptée **à partir du réveil**, quel que soit l'état de départ (« Connecté », « Reconnexion en cours », « Hors ligne ») : l'état est « Reconnexion en cours » (tentative immédiate) et ne devient « Hors ligne » que si 30 s s'écoulent après le réveil sans succès (pas de bandeau hors ligne chaque matin). Un changement de réseau ne coupe **pas** un flux sain (Docker, WSL, Tailscale changent la liste d'adresses sans que le réseau utile bouge) : depuis « Connecté » il avance la vérification (ping immédiat, échéance de silence raccourcie à un tiers) et les actions en vol ne deviennent pas « inconnues » ; hors « Connecté » il lance une tentative immédiate.
 
 ## Application (code)
 - `crates/hearth-link/src/domain/triggers.rs::{detect_wake, network_changed}`.
@@ -19,8 +19,8 @@ Un saut d'horloge de plus de 5 s (réveil de veille) ou un changement de la list
 - Sondes : `crates/hearth-link/src/adapters/net_watch.rs`, `crates/hearth-link/src/manager/watchers.rs`.
 
 ## Vérification
-- Tests : `domain::triggers::tests`, `domain::state::tests::row14_offline_wake_or_network_change_shows_reconnecting_and_attempts_at_once`, `::waking_while_connected_counts_the_outage_from_the_last_message`, `::a_network_change_while_connected_reopens_the_link_quietly`.
-- Intégration : `tests/fault_proxy.rs::a_network_change_reconnects_immediately`, `::a_wake_up_reconnects_immediately`.
+- Tests : `domain::triggers::tests`, `domain::state::tests::row14_offline_wake_or_network_change_shows_reconnecting_and_attempts_at_once`, `::waking_while_connected_counts_the_outage_from_the_wake_up_not_from_the_last_message`, `::waking_while_offline_restarts_the_outage_clock_at_the_wake_up`, `::waking_while_reconnecting_attempts_at_once_and_restarts_the_clock`, `::a_network_change_while_connected_does_not_cut_a_healthy_stream`, `::a_network_change_with_no_answer_cuts_the_link_after_the_shortened_deadline`.
+- Intégration : `tests/fault_proxy.rs::a_network_change_reconnects_immediately`, `::a_wake_up_reconnects_immediately`, `::waking_up_after_a_long_outage_shows_reconnecting_again_not_offline`, `::a_network_change_does_not_cut_a_healthy_stream`, `::an_action_in_flight_is_not_made_unknown_by_a_network_change`.
 
 ## Cas limites
 - Une horloge murale réglée en arrière n'est pas un réveil.
@@ -31,3 +31,4 @@ Un saut d'horloge de plus de 5 s (réveil de veille) ou un changement de la list
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 — précisé (HRT-07, review Stephen round 1).

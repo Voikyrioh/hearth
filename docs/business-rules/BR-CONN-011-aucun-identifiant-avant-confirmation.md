@@ -15,10 +15,10 @@ maj: 2026-10-05
 
 ## Application (code)
 - `crates/hearth-link/src/domain/pinning.rs::PinDecision::allows_credentials`.
-- `crates/hearth-link/src/adapters/http_transport.rs` : `Pin::Probe` réservé à `hello`, `Pin::Pinned` pour tout le reste.
+- `crates/hearth-link/src/adapters/http_transport.rs::require_pinned` : `Pin::Probe` est refusé **par l'adaptateur** pour tout sauf `hello` (connexion, déconnexion, requêtes, relecture d'opération, flux) : la protection ne dépend pas de la discipline du gestionnaire.
 
 ## Vérification
-- Tests : `domain::pinning::tests::a_different_fingerprint_blocks_and_sends_nothing`, `::no_stored_fingerprint_is_a_first_connection` ; `tests/pinning.rs`.
+- Tests : `domain::pinning::tests::a_different_fingerprint_blocks_and_sends_nothing`, `::no_stored_fingerprint_is_a_first_connection` ; `tests/pinning.rs` ; `adapters::http_transport::tests::the_probe_mode_is_refused_for_everything_but_hello`.
 
 ## Cas limites
 - Après une empreinte changée, aucune requête authentifiée ne part (BR-CONN-003).
@@ -28,3 +28,4 @@ maj: 2026-10-05
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-05 — précisé (HRT-07, review Stephen round 1).
