@@ -1,9 +1,21 @@
 import type { LinkBridge } from "./bridge";
 import { NullLinkBridge } from "./null";
-import { SimulatedLinkBridge } from "./simulated";
+import { SAMPLE_AGENT, SimulatedLinkBridge } from "./simulated";
+import { TauriLinkBridge } from "./tauri";
 
 export type { LinkBridge } from "./bridge";
-export { SAMPLE_SERVERS, SimulatedLinkBridge, type SimulatedOptions } from "./simulated";
+export * from "./messages";
+export {
+  groupFingerprint,
+  OTHER_FINGERPRINT,
+  SAMPLE_AGENT,
+  SAMPLE_FINGERPRINT,
+  SAMPLE_SERVERS,
+  type SimAgent,
+  SimulatedLinkBridge,
+  type SimulatedOptions,
+} from "./simulated";
+export { TauriLinkBridge } from "./tauri";
 export * from "./types";
 
 let current: LinkBridge | null = null;
@@ -25,16 +37,22 @@ function insideTauri(): boolean {
 
 /**
  * Point de branchement : choisit le pont de l'application.
+ * - Fenêtre Tauri : le pont réel (commandes et événements `link://*` de la coquille, qui les
+ *   tient de `hearth-link`).
  * - Navigateur en mode développement (`vite`) : pont simulé, pilotable (panneau de
- *   développement, `window.__hearthSim`). Ce code est retiré du binaire livré.
- * - Sinon : pont vide. Le pont réel (commandes et événements `link://*` de
- *   `hearth-link`) sera branché ici par le ticket qui fusionne la bibliothèque de liaison.
+ *   développement, `window.__hearthSim`), avec un agent d'exemple (`SAMPLE_AGENT`). Ce code est
+ *   retiré du binaire livré.
+ * - Sinon (build livré servi dans un navigateur) : pont vide, où toute commande échoue.
  */
 export function createLinkBridge(): LinkBridge {
-  if (import.meta.env.DEV && !insideTauri()) {
+  if (insideTauri()) return new TauriLinkBridge();
+  if (import.meta.env.DEV) {
     // `?servers=none` : navigateur de revue sans serveur enregistré (écran d'accueil).
     const none = new URLSearchParams(window.location.search).get("servers") === "none";
-    const simulated = new SimulatedLinkBridge(none ? { servers: [] } : {});
+    const simulated = new SimulatedLinkBridge({
+      ...(none ? { servers: [] } : {}),
+      agents: [SAMPLE_AGENT],
+    });
     (window as unknown as { __hearthSim?: SimulatedLinkBridge }).__hearthSim = simulated;
     return simulated;
   }

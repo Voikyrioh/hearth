@@ -71,7 +71,13 @@ export type LinkFailure =
 /**  Identifiant ou mot de passe refusé, sans dire lequel (BR-CONN-013). */
 { kind: "invalid_credentials" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "fingerprint_changed" } | { kind: "name_taken" } | { kind: "already_exists" } | 
 /**  Champ invalide : `name`, `address`, `port` ou `credentials`. */
-{ kind: "invalid_input"; field: InvalidField } | { kind: "verification_required" } | { kind: "unknown_server" } | { kind: "storage" } | { kind: "vault" } | { kind: "internal" };
+{ kind: "invalid_input"; field: InvalidField } | { kind: "verification_required" } | { kind: "unknown_server" } | { kind: "storage" } | { kind: "vault" } | 
+/**  Le lien n'est pas « Connecté » : rien n'a été envoyé (BR-RESIL-008). */
+{ kind: "not_connected" } | 
+/**  Le suivi de l'action n'a pas pu être écrit sur le disque : l'action n'a PAS été lancée. */
+{ kind: "tracking_unavailable" } | 
+/**  Le disque est trop lent pour écrire le suivi à temps : l'action n'a PAS été lancée. */
+{ kind: "tracking_slow" } | { kind: "internal" };
 
 /**
  *  État du lien d'un serveur (`link://state`). `seq` croît strictement par serveur : l'interface

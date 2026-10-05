@@ -1,4 +1,15 @@
-import type { LinkStateEvent, OperationEvent, ServerInfo, Unsubscribe } from "./types";
+import type {
+  FingerprintChange,
+  LinkNotice,
+  LinkStateEvent,
+  NewServerInput,
+  OperationEvent,
+  ProbeResult,
+  Role,
+  ServerEdit,
+  ServerInfo,
+  Unsubscribe,
+} from "./types";
 
 /**
  * Pont entre l'interface et la liaison avec les serveurs. L'interface ne connaît que
@@ -13,6 +24,7 @@ import type { LinkStateEvent, OperationEvent, ServerInfo, Unsubscribe } from "./
  *   tard avant que la promesse ne se résolve) : il n'y a donc pas de « lecture initiale »
  *   séparée, et aucune fenêtre où un ajout ou une suppression serait perdu ;
  * - un implémenteur réel s'abonne d'abord aux événements, puis envoie l'instantané ;
+ * - toute commande qui échoue rejette avec une `LinkCommandError` (échec typé, sans texte) ;
  * - `LinkStateEvent.seq` croît strictement par serveur : l'interface écarte tout événement dont
  *   `seq` n'est pas supérieur au dernier connu (rejeu d'un instantané compris).
  */
@@ -25,4 +37,30 @@ export interface LinkBridge {
   retryNow(serverId: string): Promise<void>;
   /** Issues d'opérations incertaines (`link://operation`). Pas de rejeu. */
   onOperation(listener: (event: OperationEvent) => void): Promise<Unsubscribe>;
+  /** Alertes d'empreinte changée (`link://fingerprint`, BR-CONN-003). Pas de rejeu. */
+  onFingerprintChanged(listener: (change: FingerprintChange) => void): Promise<Unsubscribe>;
+  /** Avis de la liaison (`link://notice`) : suivis d'actions perdus, écoute en retard. Pas de rejeu. */
+  onNotice(listener: (notice: LinkNotice) => void): Promise<Unsubscribe>;
+
+  /** Première prise de contact : l'empreinte à faire confirmer. Aucun identifiant n'est envoyé (BR-CONN-011). */
+  probeServer(host: string, port: number | null): Promise<ProbeResult>;
+  /** Enregistre le serveur dont l'empreinte vient d'être confirmée (BR-CONN-002). */
+  addServer(input: NewServerInput): Promise<ServerInfo>;
+  /** Ouvre la session ; `remember` : mot de passe au coffre de Windows (BR-CONN-004). */
+  login(
+    serverId: string,
+    username: string,
+    password: string,
+    remember: boolean,
+  ): Promise<{ role: Role }>;
+  /** Déconnexion volontaire : le mot de passe mémorisé est conservé (BR-CONN-016). */
+  logout(serverId: string): Promise<void>;
+  /** L'utilisateur accepte la nouvelle empreinte `fingerprint` (forme complète). */
+  acceptFingerprint(serverId: string, fingerprint: string): Promise<void>;
+  /** Modifie nom, couleur, adresse. Une autre adresse exige l'empreinte confirmée de nouveau (BR-CONN-009). */
+  updateServer(serverId: string, edit: ServerEdit): Promise<ServerInfo>;
+  /** Retire le serveur et efface ses secrets (BR-CONN-010). */
+  removeServer(serverId: string): Promise<void>;
+  /** Efface le mot de passe mémorisé ; la session en cours continue. */
+  forgetCredentials(serverId: string): Promise<void>;
 }

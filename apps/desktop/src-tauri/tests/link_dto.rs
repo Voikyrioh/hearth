@@ -183,6 +183,12 @@ fn library_errors_become_typed_failures_without_any_text() {
     );
     assert_eq!(failure(LinkError::NameTaken), LinkFailure::NameTaken);
     assert_eq!(
+        failure(LinkError::TrackingUnavailable),
+        LinkFailure::TrackingUnavailable
+    );
+    assert_eq!(failure(LinkError::TrackingSlow), LinkFailure::TrackingSlow);
+    assert_eq!(failure(LinkError::NotConnected), LinkFailure::NotConnected);
+    assert_eq!(
         failure(LinkError::FingerprintChanged),
         LinkFailure::FingerprintChanged
     );

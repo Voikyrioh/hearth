@@ -36,6 +36,21 @@ function allowed(now: number): boolean {
 }
 
 /**
+ * Écrit l'erreur au journal du client (une ligne, bornée en taille et en débit), sans aucune
+ * notification. Ne lève jamais. Sert quand l'appelant montre déjà son propre message clair.
+ */
+export function logUiError(error: unknown, source: string): void {
+  if (!allowed(Date.now())) return;
+  const message = describe(error).slice(0, MAX_REPORT_CHARS);
+  try {
+    // Hors de l'application (navigateur de revue), la commande n'existe pas : on ignore.
+    void commands.logFrontendError(source, message).catch(() => {});
+  } catch {
+    // Pont Tauri absent : sans effet.
+  }
+}
+
+/**
  * Une erreur de l'interface (composant, rejet de promesse, erreur globale) : notification
  * discrète (compteur si elle se répète, jamais d'écran bloquant) puis ligne dans le
  * journal du client. Ne lève jamais : rapporter un échec ne doit pas en causer un autre.
@@ -46,12 +61,5 @@ export function reportUiError(error: unknown, source: string): void {
   } catch {
     // Pas de magasin (démarrage très précoce) : le journal reste tenté ci-dessous.
   }
-  if (!allowed(Date.now())) return;
-  const message = describe(error).slice(0, MAX_REPORT_CHARS);
-  try {
-    // Hors de l'application (navigateur de revue), la commande n'existe pas : on ignore.
-    void commands.logFrontendError(source, message).catch(() => {});
-  } catch {
-    // Pont Tauri absent : sans effet.
-  }
+  logUiError(error, source);
 }

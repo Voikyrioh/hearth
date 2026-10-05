@@ -408,6 +408,15 @@ pub enum LinkFailure {
     Storage,
     #[error("coffre de Windows inaccessible")]
     Vault,
+    /// Le lien n'est pas « Connecté » : rien n'a été envoyé (BR-RESIL-008).
+    #[error("lien non établi")]
+    NotConnected,
+    /// Le suivi de l'action n'a pas pu être écrit sur le disque : l'action n'a PAS été lancée.
+    #[error("suivi de l'action impossible")]
+    TrackingUnavailable,
+    /// Le disque est trop lent pour écrire le suivi à temps : l'action n'a PAS été lancée.
+    #[error("disque trop lent")]
+    TrackingSlow,
     #[error("incident interne")]
     Internal,
 }
@@ -451,11 +460,11 @@ impl From<LinkError> for LinkFailure {
             LinkError::Protocol(_) => Self::NotAgent,
             LinkError::Store(_) => Self::Storage,
             LinkError::Vault(_) => Self::Vault,
+            LinkError::NotConnected => Self::NotConnected,
+            LinkError::TrackingUnavailable => Self::TrackingUnavailable,
+            LinkError::TrackingSlow => Self::TrackingSlow,
             LinkError::Rejected(_)
-            | LinkError::NotConnected
             | LinkError::TooManyPending
-            | LinkError::TrackingUnavailable
-            | LinkError::TrackingSlow
             | LinkError::TaskRestarted
             | LinkError::Stopped => Self::Internal,
         }
