@@ -128,8 +128,6 @@ pub struct Services {
     pub audit_sink: Arc<dyn AuditSink>,
     /// Le même, pour écrire les synthèses des événements répétés (`flush`).
     pub audit_recorder: Arc<AuditRecorder>,
-    /// Diffusion interne des entrées du journal, pour le flux temps réel.
-    pub audit_feed: Arc<dyn AuditFeed>,
 }
 
 /// Agent démarré : le serveur, la partie publique de son identité et ses tâches de fond.
@@ -215,6 +213,7 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             adapters.ids.clone(),
             adapters.tokens.clone(),
             trail.clone(),
+            recorder.clone(),
         )),
         operations: Arc::new(OperationService::new(
             Arc::new(SqliteOperationRepo::new(pool.clone())),
@@ -228,7 +227,6 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
         )),
         audit_sink: recorder.clone(),
         audit_recorder: recorder,
-        audit_feed: feed,
     }
 }
 
@@ -287,7 +285,7 @@ pub async fn start_with_metering(
     ));
     // L'identité de la machine est lue avant de servir : les premières requêtes la trouvent prête.
     metrics.warm_up().await;
-    let stream = StreamContext::new(services.audit_feed.clone(), metering.stream);
+    let stream = StreamContext::new(metering.stream);
     let closing = stream.clone();
     let router = http::router(AppState {
         hello: Arc::new(hello),

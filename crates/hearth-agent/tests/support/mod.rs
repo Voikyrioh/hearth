@@ -184,6 +184,12 @@ pub async fn env() -> Env {
         feed.clone() as Arc<dyn AuditFeed>,
         maintenance.clone(),
     ));
+    let audit_recorder = Arc::new(hearth_agent::application::audit::AuditRecorder::new(
+        store.clone(),
+        clock.clone(),
+        trail.clone(),
+    ));
+    let audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink> = audit_recorder.clone();
     let service = Arc::new(AccountService::new(
         accounts.clone(),
         session_repo.clone(),
@@ -203,6 +209,7 @@ pub async fn env() -> Env {
         ids,
         tokens,
         trail.clone(),
+        audit_sink.clone(),
     ));
     let operations = Arc::new(OperationService::new(
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
@@ -213,12 +220,6 @@ pub async fn env() -> Env {
         Arc::new(SqliteAuditRepo::new(db.pool().clone())),
         feed.clone(),
     ));
-    let audit_recorder = Arc::new(hearth_agent::application::audit::AuditRecorder::new(
-        store,
-        clock.clone(),
-        trail.clone(),
-    ));
-    let audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink> = audit_recorder.clone();
     Env {
         dir,
         db,
