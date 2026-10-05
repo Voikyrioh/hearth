@@ -11,16 +11,16 @@ maj: 2026-10-05
 # BR-RESIL-015 — Notifications système optionnelles, une par minute et par serveur
 
 ## Règle
-Les notifications Windows (passage « Hors ligne », retour « Connecté ») sont désactivables et limitées à UNE de chaque nature par minute et par serveur ; ce qui est retenu par la limite part à l'échéance, une fois, avec le nombre de changements absorbés (agrégation) ; une situation déjà annoncée n'est jamais répétée. Elles s'appuient sur l'événement d'état de la bibliothèque ; la limitation et le réglage sont de la coquille Tauri. Réglage « Notifier quand un serveur devient hors ligne ou revient » : activé par défaut.
+Les notifications Windows signalent le passage à « Hors ligne » ou le retour à « Connecté », sont désactivables dans les réglages, et sont limitées à UNE par minute et par serveur (texte de la spec, toutes natures confondues). Ce que la limite retient n'est pas perdu : seule la dernière situation compte, elle est annoncée à l'échéance, une fois, avec le nombre de changements absorbés en plus ; une situation déjà annoncée n'est jamais répétée. Tant que le serveur reste « Hors ligne », un palier de 5 échecs de reconnexion (BR-RESIL-018) en fait une de plus au plus par palier, jamais une par tentative, toujours sous la même limite. Elles s'appuient sur l'événement d'état de la bibliothèque ; la limitation et le réglage sont de la coquille Tauri. Réglage « Notifier quand un serveur devient hors ligne ou revient » : activé par défaut.
 
 ## Application (code)
 - Données fournies par `crates/hearth-link/src/domain/state.rs::LinkMachine::status` et par les événements d'état du `LinkManager` (`link.rs::LinkRuntime::relay` les passe à l'observateur).
-- Règle pure : `apps/desktop/src-tauri/src/presence.rs::NotificationGate::{observe, poll}` (fenêtre `NOTIFY_WINDOW_MS` = 60 s par nature et par serveur).
+- Règle pure : `apps/desktop/src-tauri/src/presence.rs::NotificationGate::{observe, poll}` (fenêtre `NOTIFY_WINDOW_MS` = 60 s par serveur, `FAILURE_STEP` = 5).
 - Colle : `apps/desktop/src-tauri/src/alerts.rs::Alerts` (observateur d'états `link.rs::StateObserver`, minuteur de 5 s dans `lib.rs::install_link`), notification par `tray.rs::TauriNotifier` (greffon de notifications).
 - Réglage : `settings.rs::{notify_on_link_change, set_notify_on_link_change}`, commandes `get_notify_on_link_change` / `set_notify_on_link_change`, case de `pages/Settings.vue` (section « Notifications »).
 
 ## Vérification
-- Règle : `apps/desktop/src-tauri/tests/presence.rs` (une de chaque nature par minute, dix coupures en 40 s, retenue annoncée avec son compte, situation déjà annoncée, indépendance des serveurs, mémoire bornée sur trois jours).
+- Règle : `apps/desktop/src-tauri/tests/presence.rs` (une seule fenêtre d'une minute par serveur, retour retenu puis annoncé, dix coupures en 40 s, retenue annoncée avec son compte, situation déjà annoncée, paliers d'échecs une fois chacun, nouvelle coupure, indépendance des serveurs, mémoire bornée sur trois jours).
 - Colle : `apps/desktop/src-tauri/tests/alerts.rs` (textes, minuteur, réglage coupé : plus rien ne part, serveurs indépendants). Contre un vrai agent : `apps/desktop/src-tauri/tests/offline.rs``::a_long_cut_shows_reconnecting_then_offline_notifies_once_and_turns_the_icon_red_then_green`.
 - Interface : `pages/Settings.test.ts`, `apps/desktop/e2e/offline.spec.ts` (« réglages »).
 
@@ -33,3 +33,5 @@ Les notifications Windows (passage « Hors ligne », retour « Connecté ») son
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 : implémentée (HRT-12) : limiteur, agrégation, réglage, notification système.
+- 2026-10-05 : remise au texte de la spec (revue HRT-12) : UNE notification par minute et par serveur, toutes natures confondues ; paliers d'échecs.
+- 2026-10-05 : remise au texte de la spec (revue HRT-12) : UNE notification par minute et par serveur, toutes natures confondues ; paliers d'échecs.

@@ -15,11 +15,11 @@ L'icône change en temps réel avec l'état du lien du serveur affiché : la fla
 
 ## Application (code)
 - Données fournies par `crates/hearth-link/src/domain/state.rs::LinkMachine::status` et par les événements d'état du `LinkManager` (`link.rs::LinkRuntime::relay` les passe à l'observateur).
-- Règle pure : `apps/desktop/src-tauri/src/presence.rs::{TrayStatus, LinkPresence::reflected, paint_badge}`.
+- Règle pure : `apps/desktop/src-tauri/src/presence.rs::{TrayStatus, LinkPresence::reflected}` ; dessin de la pastille : `badge.rs::paint_badge` (couleurs = jetons de `tokens.css`, relues par `tests/badge.rs::the_badge_colors_follow_the_design_tokens`).
 - Colle : `alerts.rs::Alerts` (redessine seulement si l'état ou l'infobulle change), `tray.rs::TauriTray` (icône et infobulle du greffon tray) ; le serveur affiché vient de l'interface (`App.vue` → `LinkBridge::setDisplayedServer` → commande `set_displayed_server`).
 
 ## Vérification
-- Règle : `apps/desktop/src-tauri/tests/presence.rs::the_tray_follows_the_displayed_server`, `::every_state_has_a_status_and_the_colors_follow_the_pill`, `::the_badge_is_painted_in_the_bottom_right_corner_only`.
+- Règle : `apps/desktop/src-tauri/tests/presence.rs::the_tray_follows_the_displayed_server`, `::every_state_has_a_status` ; `tests/badge.rs` (couleurs, pastille dans le coin bas droit).
 - Colle : `apps/desktop/src-tauri/tests/alerts.rs::the_icon_follows_the_displayed_server_with_a_tooltip_and_is_only_redrawn_on_change`, `::removing_the_displayed_server_falls_back_then_goes_neutral`. Contre un vrai agent : `apps/desktop/src-tauri/tests/offline.rs`.
 
 ## Cas limites
@@ -31,3 +31,4 @@ L'icône change en temps réel avec l'état du lien du serveur affiché : la fla
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 : implémentée (HRT-12) : pastille de couleur sur l'icône, infobulle, suivi du serveur affiché. Reste à voir sur une vraie zone de notification Windows (rendu à 16 px, thème clair).
+- 2026-10-05 : le dessin de la pastille sort des règles pures (`badge.rs`) ; `set_displayed_server` ne retient qu'un serveur du carnet ; un état tardif ne réinscrit pas un serveur supprimé (revue HRT-12).

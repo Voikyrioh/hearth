@@ -18,12 +18,12 @@ Quand la même notification (même type, même texte) est émise plusieurs fois,
   - `Status::failed_attempts` fourni par `crates/hearth-link/src/domain/state.rs::LinkMachine::status` et par les événements du `LinkManager`.
 - Interface :
   - `apps/desktop/src/stores/toasts.ts::push` (déduplication par type et texte, `count`) ; affichage `apps/desktop/src/components/molecules/ToastStack.vue` (`toast__count`).
-- Interface : notification à clé (`toasts.ts::push` avec `key`, `dismissKey`) : « {serveur} : Reconnexion échouée {n} fois. » se met à jour sur place à partir de 3 échecs consécutifs (`link.ts::RECONNECT_FAILURE_NOTICE_FROM`) et disparaît au retour du lien. Coquille : l'agrégation des notifications système est dans `presence.rs::NotificationGate` (BR-RESIL-015).
+- Interface : notification à clé (`toasts.ts::push` avec `key`, `dismissKey`) : « {serveur} : Reconnexion échouée {n} fois. » est mise à jour sur place à chaque PALIER de 5 échecs consécutifs (5, 10, 15 : `link.ts::RECONNECT_FAILURE_STEP`), jamais à chaque tentative, et disparaît quand le lien revient. Coquille : au plus une notification système par palier franchi tant que le serveur reste « Hors ligne », sous la limite d'une par minute et par serveur (`presence.rs::NotificationGate`, BR-RESIL-015).
 
 ## Vérification
 - Interface : `link-stores.test.ts::counts a repeated notification instead of stacking it`, `::does not merge the same text of another kind`, `::dismisses on its own after the lifetime, and a repeat renews it`, `molecules.test.ts::turns a repeated notification into a counter`, `errors.test.ts::bounds the rate`, `e2e/shell.spec.ts`.
 - Bibliothèque : voir les tests des règles BR-RESIL-002 à BR-RESIL-005 (compteur d'échecs consécutifs).
-- Interface : `apps/desktop/src/stores/offline.test.ts``::compte les échecs dans UNE notification par serveur, qui monte sur place`, `apps/desktop/e2e/offline.spec.ts` (« coupures répétées »).
+- Interface : `offline.test.ts::compte les échecs dans UNE notification par serveur, mise à jour à chaque palier de 5, jamais à chaque tentative`, `e2e/offline.spec.ts` (« coupures répétées »).
 
 ## Cas limites
 - Les notifications masquées par la limite de 3 gardent leur compteur.

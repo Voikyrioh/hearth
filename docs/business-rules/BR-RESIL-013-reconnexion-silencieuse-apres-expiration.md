@@ -20,6 +20,7 @@ Quand l'agent répond `SESSION_EXPIRED` (au retour du lien ou par un message `se
 ## Vérification
 - Tests : `domain::state::tests::an_expired_session_with_a_saved_password_reconnects_silently`, `::a_silent_reconnection_that_hits_refused_credentials_means_access_revoked`, `::a_silent_reconnection_that_cannot_reach_the_server_keeps_the_reauth_step`.
 - Intégration : `tests/fault_proxy.rs::an_expired_session_with_a_saved_password_reconnects_silently`.
+- Coquille, contre un vrai agent : `apps/desktop/src-tauri/tests/offline.rs::an_expired_session_with_a_remembered_password_reconnects_without_showing_anything` (aucun état à l'écran, aucune notification, icône inchangée, jeton renouvelé au coffre).
 - Interface : `apps/desktop/e2e/offline.spec.ts` (« session expirée »).
 
 ## Cas limites
@@ -35,3 +36,4 @@ Quand l'agent répond `SESSION_EXPIRED` (au retour du lien ou par un message `se
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — précisé (HRT-07, review Stephen round 1).
 - 2026-10-05 : panneau sans mot de passe mémorisé (HRT-12).
+- 2026-10-05 : divergence assumée avec le tableau des messages de la spec (ligne « Je te reconnecte. », identifiants mémorisés) : la règle BR-RESIL-013 (« sans ressaisie », l'état affiché ne change pas) prime, il n'y a donc aucun écran pour ce message ; preuve côté coquille ajoutée (revue HRT-12).

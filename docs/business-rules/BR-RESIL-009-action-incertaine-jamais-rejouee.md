@@ -16,7 +16,7 @@ Une action envoyée porte une clé d'opération (`Idempotency-Key`, un ULID). Si
 ## Application (code)
 - `crates/hearth-link/src/domain/pending_ops.rs::PendingOps::{register, complete, link_lost}`.
 - `crates/hearth-link/src/manager/task.rs` : `execute` (clé, suivi, réponse « inconnu » à la coupure).
-- Interface : `apps/desktop/src/composables/useServerAction.ts` (message « Le résultat de cette action n'est pas connu. » puis « Vérifie l'état du serveur, puis relance l'action si besoin. », jamais de rejeu) ; commande `run_action` de la coquille (`ActionResultDto::Unknown { opId }`).
+- Interface : `apps/desktop/src/composables/useServerAction.ts` (message « Le résultat de cette action n'est pas connu. » puis « Vérifie l'état du serveur, puis relance l'action si besoin. », jamais de rejeu) ; chaque commande typée à venir rend `ActionResult::unknown { opId }` (ADR-0016).
 
 ## Vérification
 - Tests : `domain::pending_ops::tests::a_dropped_link_makes_in_flight_operations_unknown_and_nothing_replays_them`, `::a_response_before_the_link_drops_forgets_the_operation`, `::the_number_of_tracked_operations_is_bounded`.

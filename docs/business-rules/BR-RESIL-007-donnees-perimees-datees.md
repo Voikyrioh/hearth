@@ -19,7 +19,7 @@ Tant que le lien n'est pas « Connecté » (reconnexion, hors ligne, session exp
 - Interface :
   - `apps/desktop/src/components/molecules/StaleSurface.vue` (désaturation, `data-stale`) et `StaleStamp.vue` (âge) ; `apps/desktop/src/composables/format.ts::formatSeen` ; horloge partagée `composables/useNow.ts`.
   - Utilisé par `ComingSoonPanel` (Dashboard, Accounts, Audit), puis par les vraies cartes des tickets suivants.
-- Interface : chaque page enveloppe son contenu de `StaleSurface` (désaturation, opacité `--opacity-stale` = 0,62, âge `StaleStamp` « Vu il y a X min » actualisé par `useNow`) quand `useCurrentServer().isConnected` est faux ; la logique générique est dans ces deux molécules, les pages n'ont rien d'autre à écrire.
+- Interface : c'est le GABARIT du serveur (`ServerLayout`) qui enveloppe toute page de `StaleSurface` (désaturation, opacité `--opacity-stale` = 0,62, âge `StaleStamp` « Vu il y a X min » actualisé par `useNow`) quand le lien n'est pas « Connecté » : une page présente ou à venir ne peut pas l'oublier, et ne l'enveloppe pas elle-même. Test : `shell.test.ts::dims and dates EVERY page of a server from the layout` (parcourt les routes du routeur).
 
 ## Vérification
 - Interface : `molecules.test.ts::StaleStamp`, `::StaleSurface`, `format.test.ts::formatSeen`, `shell.test.ts::goes connected -> reconnecting -> offline -> back`, `e2e/shell.spec.ts`.
@@ -39,3 +39,4 @@ Tant que le lien n'est pas « Connecté » (reconnexion, hors ligne, session exp
 - 2026-10-05 — création de la partie interface (HRT-09, session 2026-10-04-hearth-creation). Portée par l'interface ; le calcul des états est dans `hearth-link` (ADR-0007).
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
 - 2026-10-05 : vérifications de bout en bout (HRT-12).
+- 2026-10-05 : garantie structurelle : `StaleSurface` dans le gabarit du serveur, plus par convention de page (revue HRT-12).

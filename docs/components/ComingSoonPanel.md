@@ -7,3 +7,5 @@ Carte « Bientôt disponible » des vues dont le ticket suit (tableau de bord, c
 - Props : `stale`, `lastContactAt`
 - Événements et slots : aucun
 - Notes : À supprimer quand les vraies cartes arrivent. Tests : `shell.test.ts`.
+
+- HRT-12 : n'enveloppe plus rien de périmé lui-même : c'est `ServerLayout` qui le fait pour toute page.

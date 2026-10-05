@@ -18,7 +18,7 @@ Toute action qui a besoin du serveur est désactivée tant que le lien du serveu
   - Refus d'envoi hors « Connecté » (`LinkError::NotConnected`, voir BR-RESIL-009) ; état fourni par `crates/hearth-link/src/domain/state.rs::LinkMachine::status` et par les événements du `LinkManager`.
 - Interface :
   - `apps/desktop/src/composables/useNeedsLink.ts::useNeedsLink` ; `apps/desktop/src/components/atoms/HButton.vue`, `HToggle.vue` (prop `needsLink`) ; `HTooltip.vue` ; textes `fr.ts` groupe `needs` ; usage `apps/desktop/src/pages/Accounts.vue`, `Audit.vue`.
-- Interface : `useServerAction` (le composable que tout bouton d'action utilisera) ; le bouton porte `needs-link`. Pont : `LinkBridge::runAction` refuse avec `not_connected` hors « Connecté » sans rien envoyer ; coquille : commande `run_action` (`link.rs::LinkRuntime::execute`).
+- Interface : `useServerAction.run(perform)` (le composable que tout bouton d'action utilisera, `perform` appelle UNE commande typée du pont) ; le bouton porte `needs-link`. Hors « Connecté », la bibliothèque refuse sans rien envoyer (`LinkError::NotConnected`, `LinkManager::execute`). Aucune commande générique n'existe dans la coquille (ADR-0016).
 
 ## Vérification
 - Interface : `HButton.test.ts::needs-link on HButton and HToggle` (4 états, busy et lien combinés, focus clavier et infobulle, rôle, serveur courant seul, HToggle), `shell.test.ts::disables the header action of Comptes`, `e2e/shell.spec.ts`.
@@ -38,4 +38,4 @@ Toute action qui a besoin du serveur est désactivée tant que le lien du serveu
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — création de la partie interface (HRT-09, session 2026-10-04-hearth-creation). Portée par l'interface ; le calcul des états est dans `hearth-link` (ADR-0007).
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
-- 2026-10-05 : commande `run_action` et composable `useServerAction` (HRT-12).
+- 2026-10-05 : composable `useServerAction` (HRT-12) ; la commande générique `run_action` est retirée (revue : une commande typée par action, ADR-0016).
