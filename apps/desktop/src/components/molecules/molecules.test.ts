@@ -164,8 +164,10 @@ describe("ToastStack", () => {
 });
 
 describe("ConfirmDialog", () => {
+  let wrapper: ReturnType<typeof mount> | null = null;
+
   function open(destructive = true) {
-    return mount(ConfirmDialog, {
+    wrapper = mount(ConfirmDialog, {
       props: {
         open: true,
         title: "Supprimer le compte ?",
@@ -175,59 +177,81 @@ describe("ConfirmDialog", () => {
       },
       attachTo: document.body,
     });
+    return wrapper;
   }
+  const dialog = () => document.body.querySelector("dialog");
+  const buttons = () => [...(dialog()?.querySelectorAll("button") ?? [])];
 
-  it("is a labelled modal dialog", () => {
-    const wrapper = open();
-    const dialog = wrapper.get('[role="alertdialog"]');
-    expect(dialog.attributes("aria-modal")).toBe("true");
-    expect(wrapper.get("h2").text()).toBe("Supprimer le compte ?");
-    expect(dialog.attributes("aria-labelledby")).toBe(wrapper.get("h2").attributes("id"));
-    wrapper.unmount();
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  it("is a native modal <dialog>, opened with showModal(), teleported into body and labelled", async () => {
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, "showModal");
+    open();
+    await flushPromises();
+    const el = dialog();
+    expect(el).not.toBeNull();
+    expect(el?.parentElement).toBe(document.body);
+    expect(showModal).toHaveBeenCalledTimes(1);
+    expect(el?.hasAttribute("open")).toBe(true);
+    expect(el?.getAttribute("role")).toBe("alertdialog");
+    expect(el?.querySelector("h2")?.textContent).toBe("Supprimer le compte ?");
+    expect(el?.getAttribute("aria-labelledby")).toBe(el?.querySelector("h2")?.id);
   });
 
   it("puts the safe button (Annuler) in focus by default", async () => {
-    const wrapper = open();
+    open();
     await flushPromises();
     expect(document.activeElement?.textContent?.trim()).toBe("Annuler");
-    wrapper.unmount();
   });
 
-  it("cancels on Escape and confirms only through its button", async () => {
-    const wrapper = open();
-    await wrapper.get(".scrim").trigger("keydown", { key: "Escape" });
-    expect(wrapper.emitted("cancel")).toHaveLength(1);
-    await wrapper.findAll("button")[1]?.trigger("click");
-    expect(wrapper.emitted("confirm")).toHaveLength(1);
-    wrapper.unmount();
-  });
-
-  it("traps the focus: Tab on the last control goes back to the first", async () => {
-    const wrapper = open();
+  it("cancels on the native cancel event (Escape) without closing by itself, and confirms only through its button", async () => {
+    const w = open();
     await flushPromises();
-    const [cancel, confirm] = wrapper.findAll("button");
-    (confirm?.element as HTMLElement | undefined)?.focus();
-    await wrapper.get(".scrim").trigger("keydown", { key: "Tab" });
-    expect(document.activeElement).toBe(cancel?.element);
-    await wrapper.get(".scrim").trigger("keydown", { key: "Tab", shiftKey: true });
-    expect(document.activeElement).toBe(confirm?.element);
-    wrapper.unmount();
+    const event = new Event("cancel", { cancelable: true });
+    dialog()?.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(w.emitted("cancel")).toHaveLength(1);
+    buttons()[1]?.click();
+    expect(w.emitted("confirm")).toHaveLength(1);
   });
 
-  it("uses a solid destructive button only for a destructive confirmation", () => {
-    const destructive = open(true);
-    expect(destructive.findAll("button")[1]?.classes()).toContain("btn--solid");
-    destructive.unmount();
-    const plain = open(false);
-    expect(plain.findAll("button")[1]?.classes()).toContain("btn--primary");
-    plain.unmount();
+  it("gives the focus back to the element that opened it", async () => {
+    const trigger = document.createElement("button");
+    document.body.appendChild(trigger);
+    trigger.focus();
+    const w = mount(ConfirmDialog, {
+      props: { open: false, title: "t", message: "m", confirmLabel: "ok" },
+      attachTo: document.body,
+    });
+    await w.setProps({ open: true });
+    await flushPromises();
+    expect(document.activeElement).not.toBe(trigger);
+    await w.setProps({ open: false });
+    await flushPromises();
+    expect(document.activeElement).toBe(trigger);
+    expect(dialog()).toBeNull();
+    w.unmount();
+    trigger.remove();
+  });
+
+  it("uses a solid destructive button only for a destructive confirmation", async () => {
+    open(true);
+    await flushPromises();
+    expect(buttons()[1]?.classList.contains("btn--solid")).toBe(true);
+    wrapper?.unmount();
+    open(false);
+    await flushPromises();
+    expect(buttons()[1]?.classList.contains("btn--primary")).toBe(true);
   });
 
   it("renders nothing when closed", () => {
-    const wrapper = mount(ConfirmDialog, {
+    wrapper = mount(ConfirmDialog, {
       props: { open: false, title: "t", message: "m", confirmLabel: "ok" },
     });
-    expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false);
+    expect(dialog()).toBeNull();
   });
 });
 
