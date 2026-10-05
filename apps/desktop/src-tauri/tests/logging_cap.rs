@@ -105,3 +105,23 @@ fn an_unavailable_journal_is_reported_so_the_panic_can_be_shown() {
     std::fs::write(&blocker, "x").unwrap();
     assert!(!write_panic_report(Some(&blocker.join("logs")), "x"));
 }
+
+#[test]
+fn the_cap_sees_the_real_size_of_a_file_that_is_still_open() {
+    let dir = tempfile::tempdir().unwrap();
+    write_log(dir.path(), "hearth.2026-10-04.log", 100, 100);
+    // Le fichier du jour reste ouvert en écriture pendant le calcul (comme l'appender).
+    let mut current = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.path().join("hearth.2026-10-05.log"))
+        .unwrap();
+    current.write_all(&[b'x'; 1000]).unwrap();
+    assert!(
+        enforce_cap(dir.path(), 500),
+        "1000 octets dépassent le plafond"
+    );
+    assert!(!dir.path().join("hearth.2026-10-04.log").exists());
+    assert!(dir.path().join("hearth.2026-10-05.log").exists());
+    current.write_all(b"encore").unwrap();
+}

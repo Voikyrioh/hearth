@@ -240,7 +240,10 @@ fn list_logs(dir: &Path) -> Vec<LogFile> {
             if !(name.starts_with(FILE_PREFIX) && name.ends_with(FILE_SUFFIX)) {
                 return None;
             }
-            let meta = entry.metadata().ok()?;
+            // `std::fs::metadata` sur le chemin, pas `DirEntry::metadata` : sous Windows les
+            // métadonnées d'une entrée de dossier ne suivent pas la taille d'un fichier encore
+            // ouvert en écriture (celui du jour).
+            let meta = std::fs::metadata(entry.path()).ok()?;
             Some(LogFile {
                 name,
                 len: meta.len(),

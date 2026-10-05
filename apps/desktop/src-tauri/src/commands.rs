@@ -6,7 +6,9 @@ use std::time::Instant;
 
 use tauri::AppHandle;
 
-use crate::domain::{FRONTEND_MESSAGE_MAX_CHARS, FrontendErrorLimiter, Settings, truncate_chars};
+use crate::domain::{
+    FRONTEND_MESSAGE_MAX_CHARS, FrontendErrorLimiter, Settings, single_line, truncate_chars,
+};
 use crate::error::AppError;
 use crate::{logging, settings};
 
@@ -53,8 +55,8 @@ pub fn log_frontend_error(source: String, message: String) {
         .unwrap_or(false);
     if allowed {
         tracing::error!(
-            source = %truncate_chars(&source, 64),
-            message = %truncate_chars(&message, FRONTEND_MESSAGE_MAX_CHARS),
+            source = %single_line(&truncate_chars(&source, 64)),
+            message = %single_line(&truncate_chars(&message, FRONTEND_MESSAGE_MAX_CHARS)),
             "erreur de l'interface"
         );
     }

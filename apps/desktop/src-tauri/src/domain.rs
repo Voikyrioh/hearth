@@ -87,6 +87,23 @@ pub fn truncate_chars(text: &str, max: usize) -> String {
     cut
 }
 
+/// Une entrée de journal = une ligne : retours à la ligne et caractères de contrôle d'un
+/// texte venu de l'interface sont neutralisés (`\n` littéral, `?` pour les autres), sinon
+/// un message pourrait fabriquer de fausses lignes de journal.
+pub fn single_line(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push('?'),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Limiteur de débit des erreurs remontées par l'interface : une boucle d'erreurs
 /// côté web ne doit pas remplir le journal. Fenêtre fixe ; l'horloge est passée
 /// en paramètre (secondes écoulées depuis un instant de référence) pour rester pure.

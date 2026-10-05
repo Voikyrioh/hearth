@@ -76,3 +76,11 @@ fn frontend_errors_are_rate_limited_per_window() {
         "nouvelle fenêtre"
     );
 }
+
+#[test]
+fn a_frontend_text_cannot_forge_log_lines() {
+    assert_eq!(single_line("a\nb\r\nc\td"), "a\\nb\\r\\nc\\td");
+    assert_eq!(single_line("x\u{1b}[31my\u{0}"), "x?[31my?");
+    assert_eq!(single_line("accentué œ"), "accentué œ");
+    assert!(!single_line("l1\nl2").contains('\n'));
+}
