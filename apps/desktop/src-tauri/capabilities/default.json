@@ -25,6 +25,7 @@
     "allow-ack-link-notices",
     "allow-list-unread-operations",
     "allow-ack-unread-operations",
+    "allow-get-dashboard",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

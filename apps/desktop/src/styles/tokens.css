@@ -14,6 +14,8 @@
   --tx2: #b3a19c;
   --tx3: #7d6c68;
   --ac: #ff7b3d;
+  --ac2: #ff4f7a;
+  --cool: #5fd0c0;
   --ok: #7ed39a;
   --warn: #ffc04d;
   --crit: #ff5a5a;
@@ -50,6 +52,7 @@
   --lh-body: 1.4;
   --lh-title: 1;
   --ls-title: -0.02em;
+  --ls-label: 0.07em;
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
@@ -107,6 +110,13 @@
   --toggle-knob: 20px;
   --toggle-inset: 2px;
   --toggle-travel: 18px;
+  --gauge-size: 132px;
+  --gauge-size-sm: 104px;
+  --glow-radius: 7px;
+  --chart-fill-opacity: 0.45;
+  --card-gap: 14px;
+  --chart-min-height: 64px;
+  --bars-height: 56px;
 
   /* États */
   --opacity-disabled: 0.45;

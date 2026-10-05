@@ -5,7 +5,7 @@ titre: Un disque monté ou retiré apparaît ou disparaît automatiquement
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-012), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-012 — Un disque monté ou retiré apparaît ou disparaît automatiquement
@@ -27,5 +27,9 @@ La liste des disques est relue à chaque échantillon (`disks` de chaque `metric
 ## Règles liées
 - BR-DASH-001
 
+## Interface
+- `DisksCard.vue` et `MachineCard.vue` lisent la liste des disques de l'échantillon courant, pas l'identité en cache ; le nombre de barres de `CoreBars` suit celui des cœurs de l'échantillon. Tests : `pages/Dashboard.test.ts`.
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

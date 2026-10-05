@@ -1,4 +1,5 @@
 import type { LinkBridge } from "./bridge";
+import type { MachineEvent } from "./machine";
 import {
   type FingerprintChange,
   LinkCommandError,
@@ -30,6 +31,12 @@ export class NullLinkBridge implements LinkBridge {
     return () => {};
   }
   async onNotice(_listener: (notice: LinkNotice) => void): Promise<Unsubscribe> {
+    return () => {};
+  }
+  async onMachine(
+    _serverId: string,
+    _listener: (event: MachineEvent) => void,
+  ): Promise<Unsubscribe> {
     return () => {};
   }
   private unavailable(): never {

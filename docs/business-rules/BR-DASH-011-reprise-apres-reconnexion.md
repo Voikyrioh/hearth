@@ -5,7 +5,7 @@ titre: Après une reconnexion, les valeurs reprennent en direct sans déformer l
 statut: partielle
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-tableau-de-bord-machine.md (BR-DASH-011), technique-socle §2, §3, §7, §10, HRT-06
-maj: 2026-10-04
+maj: 2026-10-05
 ---
 
 # BR-DASH-011 — Après une reconnexion, les valeurs reprennent en direct sans déformer les courbes
@@ -26,5 +26,9 @@ Côté agent : à chaque abonnement, le `snapshot` rend l'historique jusqu'au de
 ## Règles liées
 - BR-DASH-004, BR-DASH-009, BR-DASH-010
 
+## Interface
+- `SampleRing::merge` : l'instantané qui suit une reconnexion remplace ce qu'il recouvre et garde le plus ancien et le plus récent ; les courbes se terminent au dernier échantillon (elles ne glissent pas pendant la coupure). Tests : `dashboard/series.test.ts`, `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`.
+
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
+- 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

@@ -4,12 +4,15 @@ import {
   commands,
   type FingerprintEvent,
   type LinkStateDto,
+  type MetricsEvent,
   type NoticeEvent,
   type OperationEventDto,
   type ServerDto,
   type ServersEvent,
+  type SnapshotEvent,
 } from "@/bindings";
 import type { LinkBridge } from "./bridge";
+import { type MachineEvent, toMetrics, toView } from "./machine";
 import {
   type FingerprintChange,
   LinkCommandError,
@@ -33,6 +36,8 @@ export const LINK_EVENTS = {
   operation: "link://operation",
   fingerprint: "link://fingerprint",
   notice: "link://notice",
+  snapshot: "link://snapshot",
+  metrics: "link://metrics",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -118,6 +123,39 @@ export class TauriLinkBridge implements LinkBridge {
       throw error;
     }
     return unlisten;
+  }
+
+  async onMachine(serverId: string, listener: (event: MachineEvent) => void): Promise<Unsubscribe> {
+    const unlisteners: Unsubscribe[] = [];
+    const release = () => {
+      for (const unlisten of unlisteners) unlisten();
+    };
+    try {
+      unlisteners.push(
+        await listen<SnapshotEvent>(LINK_EVENTS.snapshot, (event) => {
+          if (event.payload.serverId !== serverId) return;
+          const view = toView(event.payload);
+          if (view) listener({ kind: "view", view });
+        }),
+      );
+      unlisteners.push(
+        await listen<MetricsEvent>(LINK_EVENTS.metrics, (event) => {
+          if (event.payload.serverId !== serverId) return;
+          const metrics = toMetrics(event.payload);
+          if (metrics) listener({ kind: "metrics", metrics });
+        }),
+      );
+      // Écoute posée d'abord, lecture ensuite. Rien n'est jeté : la vue lue complète ce que le flux
+      // a déjà apporté (le récepteur recolle par instant), et l'identité de la machine arrive
+      // toujours, même si des échantillons l'ont précédée.
+      const last = unwrap(await commands.getDashboard(serverId));
+      const view = last ? toView(last) : null;
+      if (view) listener({ kind: "view", view });
+    } catch (error) {
+      release();
+      throw error;
+    }
+    return release;
   }
 
   async retryNow(serverId: string): Promise<void> {

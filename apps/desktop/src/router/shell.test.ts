@@ -99,14 +99,17 @@ describe("shell of a server", () => {
     expect(wrapper.find('nav[aria-label="Navigation du serveur"]').exists()).toBe(true);
     expect(wrapper.get("h1").text()).toBe("Tableau de bord");
     expect(wrapper.get(".head [role=status]").text()).toBe("Connecté");
-    expect(wrapper.text()).toContain("Bientôt disponible");
+    // Aucune mesure n'est encore arrivée : le chargement du tableau de bord (HRT-11).
+    expect(wrapper.text()).toContain("Chargement des mesures");
     expect(wrapper.find(".banner").exists()).toBe(false);
     expect(wrapper.find('[data-stale="true"]').exists()).toBe(false);
     wrapper.unmount();
   });
 
   it("goes connected -> reconnecting -> offline -> back: pill, banner, stale data", async () => {
-    const { wrapper, bridge } = await boot("/servers/forge/dashboard");
+    // « Comptes » : page encore « Bientôt disponible », qui passe par `StaleSurface` ; le tableau
+    // de bord a ses propres tests (`dashboard.test.ts`).
+    const { wrapper, bridge } = await boot("/servers/forge/accounts");
     bridge.setState("forge", "reconnecting");
     await flushPromises();
     expect(wrapper.get(".head [role=status]").text()).toBe("Reconnexion…");
@@ -205,7 +208,7 @@ describe("error containment: the shell is never replaced", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
 
   it("a rejecting action (retryNow) leaves the shell and the page intact, with a discreet notification", async () => {
-    const { wrapper, bridge } = await boot("/servers/forge/dashboard");
+    const { wrapper, bridge } = await boot("/servers/forge/accounts");
     vi.spyOn(bridge, "retryNow").mockRejectedValue(new Error("liaison en panne"));
     bridge.setState("forge", "offline");
     await flushPromises();

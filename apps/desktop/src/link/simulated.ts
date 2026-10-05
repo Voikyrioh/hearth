@@ -1,4 +1,6 @@
 import type { LinkBridge } from "./bridge";
+import type { MachineEvent } from "./machine";
+import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import {
   DEFAULT_PORT,
   type FingerprintChange,
@@ -78,6 +80,12 @@ export interface SimulatedOptions {
   retryDelayMs?: number;
   /** Délai simulé des commandes réseau (sonde, connexion) ; 0 = immédiat. */
   latencyMs?: number;
+  /**
+   * Mesures en direct : un échantillon par seconde et cinq minutes d'historique déjà là
+   * (navigateur de développement). Sans cela, aucune mesure ne part seule : les tests pilotent
+   * `bridge.machine` à la main.
+   */
+  liveMetrics?: boolean;
 }
 
 /** 8 groupes de 4 caractères hexadécimaux majuscules (les 16 premiers octets). */
@@ -123,6 +131,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly calls: string[] = [];
   /** Dernier mot de passe mémorisé « au coffre » par serveur (observable dans les tests). */
   readonly vault = new Map<string, string>();
+  /** Les machines simulées : mesures plausibles, niveaux pilotables (tableau de bord). */
+  readonly machine: SimulatedMachine;
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -130,6 +140,16 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.latencyMs = options.latencyMs ?? 0;
     this.agents = (options.agents ?? []).map((agent) => ({ ...agent }));
     this.servers = (options.servers ?? SAMPLE_SERVERS).map((server) => ({ ...server }));
+    this.machine = new SimulatedMachine({
+      now: this.now,
+      connected: (id) => this.events.get(id)?.state === "connected",
+      // Le serveur « salon » est un boîtier sans carte graphique ni sonde : de quoi voir les états vides.
+      machines: { salon: bareMachine("nas-salon") },
+    });
+    if (options.liveMetrics) {
+      for (const server of this.servers) this.machine.prefill(server.id, 300);
+      this.machine.start();
+    }
     for (const server of this.servers) {
       this.events.set(server.id, this.connectedEvent(server.id));
       const agent = this.agentAt(server.host, server.port);
@@ -147,6 +167,10 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.stateListeners.add(listener);
     for (const event of this.events.values()) listener({ ...event });
     return () => void this.stateListeners.delete(listener);
+  }
+
+  async onMachine(serverId: string, listener: (event: MachineEvent) => void): Promise<Unsubscribe> {
+    return this.machine.subscribe(serverId, listener);
   }
 
   async retryNow(serverId: string): Promise<void> {
@@ -373,6 +397,10 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.events.set(serverId, event);
     if (event.blocked !== "fingerprint_changed") this.alerts.delete(serverId);
     for (const listener of [...this.stateListeners]) listener({ ...event });
+    // Le lien est revenu : l'agent renvoie son identité et son historique (BR-DASH-011).
+    if (state === "connected" && previous && previous.state !== "connected") {
+      this.machine.resync(serverId);
+    }
   }
 
   /** Émet une issue d'opération. */
