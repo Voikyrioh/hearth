@@ -9,9 +9,16 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-CONN-007](./BR-CONN-007-tentatives-par-identifiant-et-adresse.md) — Tentatives comptées par identifiant et adresse du client — `domain/lockout.rs::AttemptKey::new` — —
 - [BR-CONN-013](./BR-CONN-013-message-de-connexion-generique.md) — Refus de connexion générique, même chemin identifiant inconnu / mot de passe faux — `application/sessions.rs::SessionService::login` — invariant ✓
 - [BR-CONN-014](./BR-CONN-014-incompatibilite-de-version.md) — Version d'interface incompatible : 426 et qui met à jour — `domain/compat.rs::check` — invariant ✓
+- [BR-RESIL-001](./BR-RESIL-001-etat-du-lien-toujours-visible.md) — L'état du lien du serveur affiché est toujours visible dans l'en-tête — apps/desktop/src (voir la fiche) — —
+- [BR-RESIL-004](./BR-RESIL-004-bandeau-hors-ligne.md) — « Hors ligne » : bandeau avec l'heure du dernier contact et « Réessayer maintenant » — apps/desktop/src (voir la fiche) — —
+- [BR-RESIL-007](./BR-RESIL-007-donnees-perimees-datees.md) — Hors « Connecté », les dernières données restent affichées, désaturées et datées — apps/desktop/src (voir la fiche) — —
+- [BR-RESIL-008](./BR-RESIL-008-actions-desactivees-expliquees.md) — Hors « Connecté », les actions qui exigent le serveur sont désactivées et expliquées — apps/desktop/src (voir la fiche) — —
 - [BR-RESIL-010](./BR-RESIL-010-operation-rejouee-sans-reexecution.md) — Clé d'opération rejouée : premier résultat, sans ré-exécution — `domain/operations.rs::classify` — invariant ✓
 - [BR-RESIL-012](./BR-RESIL-012-session-expiree-glissante.md) — Session glissante 30 jours, jeton stocké haché — `domain/sessions.rs::check`, `domain/session_token.rs` — invariant ✓
 - [BR-RESIL-014](./BR-RESIL-014-acces-revoque.md) — Session fermée par l'administration : SESSION_REVOKED — `domain/sessions.rs::check` — invariant ✓
+- [BR-RESIL-011](./BR-RESIL-011-notifications-jamais-bloquantes.md) — Aucune fenêtre bloquante pour une perte de lien ou une erreur ; notifications discrètes — apps/desktop/src (voir la fiche) — —
+- [BR-RESIL-018](./BR-RESIL-018-notifications-agregees-par-compteur.md) — Une même notification répétée devient un compteur — apps/desktop/src (voir la fiche) — —
+- [BR-RESIL-020](./BR-RESIL-020-etat-du-lien-par-serveur.md) — Chaque serveur a son propre état de lien, indépendant — apps/desktop/src (voir la fiche) — —
 - [BR-INSTALL-004](./BR-INSTALL-004-empreinte-generee-une-fois.md) — Empreinte générée une seule fois, jamais modifiée — `domain/identity_policy.rs::decide` — invariant ✓
 - [BR-ACCT-001](./BR-ACCT-001-creation-compte.md) — Un compte est créé avec un identifiant unique, un mot de passe et un rôle — `application/accounts.rs::AccountService::create` — —
 - [BR-ACCT-002](./BR-ACCT-002-format-identifiant.md) — Identifiant : 3 à 32 caractères, minuscules, chiffres, tiret, underscore — `domain/accounts/username.rs::Username::parse` — ✓

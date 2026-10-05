@@ -29,6 +29,9 @@ Le jeton est 32 octets aléatoires du système, rendu au client en hexadécimal 
 - L'expiration est exclusive : une session dont l'expiration est exactement `maintenant` est expirée.
 - Horloge qui recule : aucun renouvellement.
 
+## Affichage dans le client
+- État « Session expirée » : pastille `apps/desktop/src/components/molecules/LinkStatePill.vue`, actions désactivées par `v-needs-link` (BR-RESIL-001, 008).
+
 ## Règles liées
 - BR-RESIL-014, BR-ACCT-008 à BR-ACCT-011 (fermetures de sessions).
 

@@ -14,7 +14,7 @@ maj: 2026-10-04
 Premier lancement, aucun serveur : écran « Bienvenue dans Hearth », texte « Ajoute ton premier serveur pour commencer. », bouton « Ajouter un serveur ». Le bouton reste inactif, avec une infobulle, tant que l'assistant d'ajout n'existe pas. Aucune liste de serveurs n'est affichée.
 
 ## Application (code)
-- `apps/desktop/src/pages/Welcome.vue` (textes dans `src/i18n/fr.ts`, clés `welcome.*`) ; page route `/` dans `src/router/index.ts`.
+- `apps/desktop/src/pages/Welcome.vue` (textes dans `src/i18n/fr.ts`, clés `welcome.*`) ; page route `/welcome` dans `src/router/index.ts`.
 - HORS DOMAIN : règle d'affichage portée par la vue ; la décision « aucun serveur » sera dans le store des serveurs (HRT à venir).
 
 ## Vérification

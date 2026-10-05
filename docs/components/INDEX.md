@@ -1,77 +1,67 @@
 # Composants — Hearth
 
-Interface Vue 3, atomic design. Aucune logique réseau dans la vue ; tout reçu par événements Tauri typés. Composants partagent l'état Pinia (stores link, settings, servers).
+Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe par le pont de liaison (`src/link/`, interface `LinkBridge`) et les stores Pinia `servers`, `link`, `toasts`. Une fiche par composant.
 
-## Atoms
+## Atomes
 
-- [`HButton`](./HButton.md) — Bouton actionnable (primary, secondary, danger, disabled). **Livré (HRT-08).**
-- `HInput` — Champ texte avec validation de format.
-- `HPasswordInput` — Champ mot de passe (affiche/masque, règles visualisées).
-- `HBadge` — Libellé statut (color, taille).
-- [`HIcon`](./HIcon.md) — Icône SVG (role sémantique). **Livré (HRT-08).**
-- [`HLogo`](./HLogo.md) — Logo Hearth (flamme dans un âtre), tailles sm/md/lg, version simplifiée en petit. **Livré (HRT-08).**
-- `HTooltip` — Bulle d'explication (position, délai).
-- `HSpinner` — Indicateur chargement (taille).
-- [`HToggle`](./HToggle.md) — Interrupteur booléen (label, disabled). **Livré (HRT-08).**
-- `HSegmented` — Groupe boutons mutuellement exclusifs (options[]).
+- [`HButton`](./HButton.md) — Bouton (principal, secondaire, destructeur, icône ; tailles ; occupé).
+- [`HInput`](./HInput.md) — Champ texte (libellé, aide, erreur, focus braise).
+- [`HPasswordInput`](./HPasswordInput.md) — Champ mot de passe (afficher/masquer).
+- [`HCheckbox`](./HCheckbox.md) — Case à cocher.
+- [`HTag`](./HTag.md) — Étiquette courte.
+- [`HIcon`](./HIcon.md) — Jeu d'icônes SVG.
+- [`HLogo`](./HLogo.md) — Logo Hearth.
+- [`HTooltip`](./HTooltip.md) — Bulle d'explication (survol, focus).
+- [`HSpinner`](./HSpinner.md) — Indicateur d'attente.
+- [`HToggle`](./HToggle.md) — Interrupteur booléen.
+- [`HSegmented`](./HSegmented.md) — Choix exclusif (radiogroup).
 
-## Molecules
+## Molécules
 
-- `LinkStatePill` — Affiche état du lien (Connected, Reconnecting, Offline, SessionExpired, AccessRevoked ; styles + texte).
-- `ServerAvatar` — Boîte avec couleur serveur + icône (clickable).
-- `Gauge` — Jauge circulaire (value 0-100, seuil warn/alert, label).
-- `Sparkline` — Courbe mini historique, pas d'axes.
-- `TimeSeriesChart` — Courbe uPlot axes + legend (responsive, 1 Hz).
-- `StaleStamp` — « Vu il y a 2 min » (color warn si > 5 min).
-- `ToastStack` — Notifications empilées (dédoublonnage par compteur auto-dismiss).
-- `FingerprintBlock` — Affiche empreinte 8 blocs 4 hex majuscules (monospace, copyable).
-- `PasswordRules` — Affiche règles mot de passe (checklist, couleur per-rule).
-- `ConfirmDialog` — Modal confirmation action destructrice (title, message, boutons).
-- [`EmptyState`](./EmptyState.md) — Placeholder quand liste vide (icône, texte, CTA optionnelle). **Livré (HRT-08).**
-- [`SettingRow`](./SettingRow.md) — Ligne de réglage : libellé, aide, contrôle nommé par `aria-labelledby`. **Livré (HRT-08).**
+- [`LinkStatePill`](./LinkStatePill.md) — Pastille d'état du lien (5 états).
+- [`ServerAvatar`](./ServerAvatar.md) — Avatar de serveur (initiales, anneau, pastille d'état).
+- [`StaleStamp`](./StaleStamp.md) — « Vu il y a 12 s », en direct.
+- [`StaleSurface`](./StaleSurface.md) — Enveloppe des données périmées (désaturées et datées).
+- [`ToastStack`](./ToastStack.md) — Notifications empilées (3 visibles, compteur).
+- [`ConfirmDialog`](./ConfirmDialog.md) — Confirmation modale (piège à focus, défaut sûr).
+- [`ErrorBoundary`](./ErrorBoundary.md) — Frontière d'erreur d'une page.
+- [`EmptyState`](./EmptyState.md) — Placeholder de vue vide.
+- [`SettingRow`](./SettingRow.md) — Ligne de réglage.
+- [`ComingSoonPanel`](./ComingSoonPanel.md) — Carte « Bientôt disponible ».
 
-## Organisms
+## Organismes
 
-- [`ServerRail`](./ServerRail.md) — Rail gauche : liste serveurs avec avatar + nom, état lien badge. **Livré (HRT-08).**
-- `ServerNav` — Onglets serveur sélectionné (Dashboard, Comptes, Audit, Réglages).
-- `AppHeader` — Barre haut : logo Hearth, info serveur connecté, bouton paramètres.
-- `OfflineBanner` — Banneau alerte haut si lien pas Connected (raison, bouton relancer).
-- `AddServerWizard` — Modal multi-étapes (adresse → probe → empreinte → login).
-- `FingerprintAlert` — Modal alerte blocante si empreinte change (explication, bouton retirer serveur).
-- `MachineCards` — Cartes par section système (CPU, mémoire, disques, réseau, GPU).
-- `AccountTable` — Tableau comptes (colonnes : username, rôle, session ouvertes, dernier login ; actions edit/delete si admin).
-- `AccountForm` — Formulaire création/édition compte (username, password + règles, select rôle).
-- `AuditTable` — Tableau audit (colonnes : heure, acteur, action, cible, résultat, raison ; paginé curseur).
-- `AuditFilters` — Contrôles filtres audit (account, action, outcome, date range, recherche texte).
-- `UpdatePanel` — Info statut mise à jour agent (version courant, en cours, dernier résultat ; bouton lancer).
-- `AgentUpdateSteps` — Timeline étapes mise à jour (télécharge, vérifie, arrête, échange, redémarre, vérif superviseur).
+- [`ServerRail`](./ServerRail.md) — Barre des serveurs.
+- [`ServerNav`](./ServerNav.md) — Navigation du serveur.
+- [`AppHeader`](./AppHeader.md) — En-tête avec pastille du lien.
+- [`OfflineBanner`](./OfflineBanner.md) — Bandeau hors ligne.
+- [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
+
+## Gabarits
+
+- [`ServerLayout`](./ServerLayout.md) — Gabarit d'un serveur : navigation, en-tête, bandeau, page.
 
 ## Pages
 
-- [`Welcome`](./Welcome.md) — Page accueil (aucun serveur) : présentation, bouton « Ajouter serveur » → AddServerWizard. **Livré (HRT-08).**
-- `Dashboard` — Page tableau de bord (sélection serveur + ServerNav affiche Dashboard).
-- `Accounts` — Page comptes (ServerNav + Accounts tab ; table + form création).
-- `Audit` — Page audit (ServerNav + Audit tab ; filters + table pagination).
-- [`Settings`](./Settings.md) — Page réglages (ServerNav + Settings tab ; langue, log path, à propos). **Livré (HRT-08).**
+- [`Welcome`](./Welcome.md) — Accueil (aucun serveur).
+- [`Dashboard`](./Dashboard.md) — Tableau de bord (à venir).
+- [`Accounts`](./Accounts.md) — Comptes (à venir).
+- [`Audit`](./Audit.md) — Journal d'activité (à venir).
+- [`Settings`](./Settings.md) — Réglages.
 
-Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `pages/`, `stores/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
+## Directive
 
-## Directive v-needs-link
+- [`v-needs-link`](./v-needs-link.md) — désactive et explique toute action qui exige le lien ou un rôle.
 
-Appliquée à boutons/inputs pour désactiver si :
-- Lien pas Connected (toute raison : offline, expired, revoked, reconnecting).
-- Rôle insuffisant (BR-RESIL-008).
+## À venir (autres tickets)
 
-Exemple :
-```vue
-<HButton v-needs-link="linkState" @click="deleteAccount">Supprimer</HButton>
-```
+`Gauge`, `Sparkline`, `TimeSeriesChart`, `FingerprintBlock`, `PasswordRules`, `AddServerWizard`, `FingerprintAlert`, `MachineCards`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `UpdatePanel`, `AgentUpdateSteps`.
 
-Affiche infobulle explicative du blocage.
+Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `layouts/`, `pages/`, `directives/`, `stores/`, `link/`, `errors/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
 
 ## Conventions
 
-- Tous textes → module `src/i18n/fr.ts` + `t(clé)` (clés par chemin, `welcome.title`). Le raccordement à `vue-translate` est repoussé (voir ADR-0010).
-- Aucun texte en dur.
-- Styles via jetons CSS : `src/styles/tokens.css` est l'unique source (couleurs, espacements, rayons, polices, mouvement) ; zéro `style=` en ligne.
-- Responsive : 1920 px + 2560 px pour captures Nora.
+- Tous textes → module `src/i18n/fr.ts` + `t(clé, { paramètres })` (clés par chemin, `welcome.title`). Le raccordement à `vue-translate` est repoussé (voir ADR-0010).
+- Aucun texte en dur. Aucun `style=` en ligne : une valeur visuelle = un jeton de `src/styles/tokens.css` (la couleur d'un serveur est un numéro de palette).
+- Désactivé = `aria-disabled` (jamais `disabled` natif : le focus clavier est conservé). Pour le lien et le rôle : `v-needs-link`, nulle part ailleurs.
+- Responsive : captures 1366, 1920 et 2560 px (`npm run e2e`, `apps/desktop/e2e/screenshots/`, non commitées).
