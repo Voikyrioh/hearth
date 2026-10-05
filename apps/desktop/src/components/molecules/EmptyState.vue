@@ -33,7 +33,7 @@ withDefaults(defineProps<{ title: string; text: string; heading?: "h1" | "h2" }>
 
 .empty__title {
   font-size: var(--fs-h1);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .empty__text {

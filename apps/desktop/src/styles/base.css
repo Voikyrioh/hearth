@@ -26,7 +26,7 @@ h2,
 h3 {
   margin: 0;
   font-family: var(--font-title);
-  letter-spacing: -0.02em;
+  letter-spacing: var(--ls-title);
 }
 
 p {
@@ -51,8 +51,8 @@ button {
 
 /* Focus clavier : contour 2 px décalé de 2 px sur tout élément interactif. */
 :focus-visible {
-  outline: 2px solid var(--tx);
-  outline-offset: 2px;
+  outline: var(--focus-ring) solid var(--tx);
+  outline-offset: var(--focus-offset);
 }
 
 @media (prefers-reduced-motion: reduce) {

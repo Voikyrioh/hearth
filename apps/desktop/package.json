@@ -9,7 +9,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "lint": "biome check .",
+    "lint": "biome check . && node scripts/check-style.mjs",
     "format": "biome check --write .",
     "test": "vitest run",
     "e2e": "npm run build && playwright test",

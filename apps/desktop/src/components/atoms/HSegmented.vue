@@ -76,6 +76,6 @@ function move(delta: number) {
 .seg__item--on {
   background: var(--card-2);
   color: var(--tx);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 </style>

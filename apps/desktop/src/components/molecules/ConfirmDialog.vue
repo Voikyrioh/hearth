@@ -101,7 +101,7 @@ watch(
 
 .dialog__title {
   font-size: var(--fs-h3);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .dialog__message {

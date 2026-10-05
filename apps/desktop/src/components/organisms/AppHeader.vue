@@ -27,7 +27,7 @@ const link = useLinkStore();
 
 .head__title {
   font-size: var(--fs-h1);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   line-height: 1;
 }
 

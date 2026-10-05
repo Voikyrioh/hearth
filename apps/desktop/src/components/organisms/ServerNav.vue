@@ -75,7 +75,7 @@ const nav = ref<HTMLElement | null>(null);
   overflow: hidden;
   font-family: var(--font-title);
   font-size: var(--fs-h3);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -91,7 +91,7 @@ const nav = ref<HTMLElement | null>(null);
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-half);
 }
 
 .nav__item {
@@ -107,9 +107,9 @@ const nav = ref<HTMLElement | null>(null);
   content: "";
   width: var(--nav-puck);
   height: var(--nav-puck);
-  border-radius: 2px;
+  border-radius: var(--radius-puck);
   background: currentColor;
-  opacity: 0.5;
+  opacity: var(--opacity-muted);
 }
 
 .nav__item:hover {

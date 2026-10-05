@@ -30,11 +30,11 @@ const label = computed(() => t(LABELS[props.state]));
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 6px var(--space-3);
+  padding: var(--space-1p5) var(--space-3);
   border: var(--border-width) solid var(--bd);
   border-radius: var(--radius-pill);
   background: var(--card);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   white-space: nowrap;
 }
 

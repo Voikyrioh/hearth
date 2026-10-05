@@ -85,7 +85,7 @@ function onClick(event: MouseEvent) {
   padding: 0 var(--space-4);
   border: var(--border-width) solid transparent;
   border-radius: var(--radius-control);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   white-space: nowrap;
   cursor: pointer;
   transition:
@@ -97,7 +97,7 @@ function onClick(event: MouseEvent) {
   min-height: var(--control-sm);
   padding: 0 var(--space-3);
   font-size: var(--fs-small);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .btn--lg {

@@ -12,7 +12,7 @@ withDefaults(defineProps<{ tone?: "neutral" | "accent" | "ok" | "warn" | "crit" 
 <style scoped>
 .tag {
   display: inline-block;
-  padding: 2px var(--space-2);
+  padding: var(--space-half) var(--space-2);
   border: var(--border-width) solid var(--bd);
   border-radius: var(--radius-pill);
   color: var(--tx2);

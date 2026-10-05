@@ -53,7 +53,7 @@ const open = ref(false);
   background: var(--card-2);
   color: var(--tx);
   font-size: var(--fs-small);
-  font-weight: 400;
+  font-weight: var(--fw-regular);
   white-space: normal;
   pointer-events: none;
 }

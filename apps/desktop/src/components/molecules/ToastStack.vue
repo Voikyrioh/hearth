@@ -88,7 +88,7 @@ const ICONS: Record<ToastKind, IconName> = {
 }
 
 .toast__count {
-  padding: 2px var(--space-2);
+  padding: var(--space-half) var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--bd);
   color: var(--tx2);

@@ -49,7 +49,7 @@ const label = computed(() =>
   color: var(--tx2);
   font-family: var(--font-title);
   font-size: var(--fs-small);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .avatar--active {
