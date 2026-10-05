@@ -25,6 +25,13 @@ pub trait PasswordHasher: Send + Sync {
     /// de passe actuel a pu être défini sous d'autres règles.
     async fn verify(&self, password: &Secret, hash: &Secret) -> Result<bool, HashError>;
 
+    /// Contrôle qu'un haché fourni tout fait (installation non interactive : haché PHC Argon2id)
+    /// est lisible et de la bonne famille. Refuse par défaut : seul un adaptateur qui sait
+    /// lire le format l'accepte.
+    fn validate_hash(&self, _hash: &Secret) -> Result<(), HashError> {
+        Err(HashError::MalformedHash)
+    }
+
     /// Haché factice, de mêmes paramètres que les vrais et qu'aucun mot de passe ne produit :
     /// la connexion d'un identifiant inconnu le vérifie pour suivre le même chemin, et prendre
     /// le même temps, qu'un mot de passe faux (BR-CONN-013).

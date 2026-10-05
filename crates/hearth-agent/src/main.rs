@@ -12,8 +12,19 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     // `fingerprint` et `account` écrivent leur résultat sur la sortie standard : journaux à part.
     let command = cli.command();
-    let is_account = matches!(command, Command::Account { .. });
-    logging::init(command == Command::Fingerprint || is_account);
+    // `install`, `uninstall` et `account` parlent à la personne qui les a tapées : journaux à part
+    // (sortie d'erreur), et muets pour l'installation.
+    let is_install = matches!(command, Command::Install(_) | Command::Uninstall(_));
+    let is_account = is_install
+        || matches!(
+            command,
+            Command::Account { .. } | Command::HashPassword { .. }
+        );
+    if is_install {
+        logging::init_quiet(true);
+    } else {
+        logging::init(command == Command::Fingerprint || is_account);
+    }
 
     match app::run(cli).await {
         Ok(()) => ExitCode::SUCCESS,

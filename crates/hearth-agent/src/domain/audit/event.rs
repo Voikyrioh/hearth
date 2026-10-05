@@ -317,8 +317,12 @@ impl AuditEvent {
     }
 
     /// L'entrée de synthèse de débordement : `count` événements de natures trop variées, regroupés
-    /// en une entrée (la dernière occurrence donne le compte, l'origine, l'action et la cible).
+    /// en une entrée. Ils viennent de comptes et visent des cibles différents : **la synthèse n'a
+    /// ni compte ni cible** (ceux de la dernière occurrence ne diraient rien des autres) ; elle
+    /// garde l'action, l'origine et la date de la dernière occurrence.
     pub fn as_overflow(mut self, count: u32) -> Self {
+        self.actor.account = None;
+        self.target = Target::None;
         self.outcome = match self.outcome {
             Outcome::Denied(_) => Outcome::Denied(Reason::TooVaried),
             _ => Outcome::Failed(Reason::TooVaried),

@@ -11,7 +11,7 @@ use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use hearth_agent::application::hello::HelloService;
 use hearth_agent::application::metrics::MetricsService;
-use hearth_agent::application::ports::{AuditFeed, MachineInfo};
+use hearth_agent::application::ports::MachineInfo;
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::install_id::InstallId;
 use hearth_agent::entrypoint::http::{AppState, router};
@@ -53,10 +53,7 @@ pub fn state(env: &Env) -> AppState {
             env.clock.clone(),
             Arc::new(SystemMonotonic::new()),
         )),
-        stream: StreamContext::new(
-            env.feed.clone() as Arc<dyn AuditFeed>,
-            StreamSettings::default(),
-        ),
+        stream: StreamContext::new(StreamSettings::default()),
     }
 }
 

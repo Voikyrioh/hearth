@@ -15,6 +15,7 @@ use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, timeout};
 
 use super::{Permit, StreamSettings};
+use crate::application::audit::AuditService;
 use crate::application::sessions::{AuthError, CurrentSession};
 use crate::domain::audit::AuditRecord;
 use crate::domain::metrics::Sample;
@@ -237,7 +238,9 @@ async fn serve(socket: &mut WebSocket, state: &AppState, mut permit: Permit) -> 
                         // Le rôle a pu changer pendant le flux (`change_role` ne ferme pas les
                         // sessions) : le sujet `audit` se perd avec le droit de le lire.
                         session = current;
-                        if subscriptions.audit.is_some() && !session.account.role.can_read_audit() {
+                        if subscriptions.audit.is_some()
+                            && AuditService::ensure_reader(session.account.role).is_err()
+                        {
                             subscriptions.audit = None;
                             let notice = error_message(
                                 ErrorCode::ForbiddenRole,
@@ -392,8 +395,8 @@ async fn metrics_snapshot(state: &AppState, subscriptions: &mut Subscriptions) -
 
 /// Remplace les abonnements par les sujets demandés ; rend les messages à envoyer. S'abonner à
 /// `metrics` répond par un `snapshot` (identité et historique des 5 dernières minutes) ;
-/// s'abonner à `audit` est réservé aux administrateurs (`Role::can_read_audit`, la règle du
-/// journal : `domain::audit::can_read_journal`).
+/// s'abonner à `audit` est réservé aux administrateurs (`AuditService::subscribe`, qui porte
+/// la règle du journal, `domain::audit::can_read_journal`).
 async fn subscribe(
     state: &AppState,
     session: &CurrentSession,
@@ -409,13 +412,13 @@ async fn subscribe(
         out.push(metrics_snapshot(state, subscriptions).await);
     }
     if topics.contains(&Topic::Audit) {
-        if session.account.role.can_read_audit() {
-            subscriptions.audit = Some(state.stream.audit.subscribe());
-        } else {
-            out.push(error_message(
+        // Le seul chemin d'abonnement : `AuditService::subscribe` contrôle le rôle (BR-AUDIT-001).
+        match state.audit.subscribe(session.account.role) {
+            Ok(receiver) => subscriptions.audit = Some(receiver),
+            Err(_) => out.push(error_message(
                 ErrorCode::ForbiddenRole,
                 "Le journal d'activité est réservé aux administrateurs",
-            ));
+            )),
         }
     }
     // `session` est toujours reçu : s'y abonner est sans effet.

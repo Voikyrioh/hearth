@@ -88,8 +88,9 @@ pub struct AuditEventItem {
     pub outcome: OutcomeName,
     /// Pourquoi, pour un refus ou un échec (« … (999 autres fois en 1 min) » pour une synthèse).
     pub reason: Option<String>,
-    /// Entrée de synthèse : combien d'autres fois le même événement (même compte, même origine,
-    /// même action, même résultat) s'est produit dans la minute ; 0 pour une entrée ordinaire.
+    /// Entrée de synthèse : combien d'autres fois le même événement (même compte ou « anonyme »,
+    /// même action, même résultat, même cible et même raison, **jamais l'origine**) s'est produit
+    /// dans la minute ; l'origine affichée est celle de la dernière occurrence ; 0 pour une entrée ordinaire.
     pub repeat_count: u32,
 }
 

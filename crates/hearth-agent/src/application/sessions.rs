@@ -14,8 +14,8 @@ use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use super::accounts::AccountView;
 use super::audit::{AuditTrail, Pending};
 use super::ports::{
-    AccountRepo, Clock, HashError, IdGen, LoginAttemptRepo, PasswordHasher, SessionRepo, Store,
-    StoreError, TokenGen, TokenGenError,
+    AccountRepo, AuditSink, Clock, HashError, IdGen, LoginAttemptRepo, PasswordHasher, SessionRepo,
+    Store, StoreError, TokenGen, TokenGenError,
 };
 use crate::domain::accounts::Username;
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
@@ -93,6 +93,9 @@ pub struct SessionService {
     ids: Arc<dyn IdGen>,
     tokens: Arc<dyn TokenGen>,
     trail: Arc<AuditTrail>,
+    /// Les connexions refusées : écrites hors transaction, par le même regroupement que les autres
+    /// refus (BR-AUDIT-007), jamais une par une.
+    sink: Arc<dyn AuditSink>,
     turns: Turns,
 }
 
@@ -184,6 +187,7 @@ impl SessionService {
         ids: Arc<dyn IdGen>,
         tokens: Arc<dyn TokenGen>,
         trail: Arc<AuditTrail>,
+        sink: Arc<dyn AuditSink>,
     ) -> Self {
         Self {
             accounts,
@@ -195,6 +199,7 @@ impl SessionService {
             ids,
             tokens,
             trail,
+            sink,
             turns: Turns::default(),
         }
     }
@@ -230,7 +235,7 @@ impl SessionService {
             .await;
         // Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de
         // passe tapé au mauvais endroit, BR-AUDIT-005) ni le mot de passe. Le journal d'activité
-        // consigne connexions et verrouillages (écrits dans la transaction de la tentative).
+        // consigne connexions et verrouillages (le succès dans la transaction de la tentative, les refus par le regroupement).
         match &result {
             Err(LoginError::InvalidCredentials) => tracing::warn!(
                 addr = %client.addr,
@@ -305,10 +310,15 @@ impl SessionService {
             tx.login_attempts()
                 .save(address, &address_next, now)
                 .await?;
-            // Journal (BR-AUDIT-003, 005, 006, 007), dans la transaction des compteurs : la
-            // tentative refusée, avec le compte visé seulement s'il existe (la raison est la même
-            // que l'identifiant existe ou non, et l'identifiant saisi n'est jamais retenu),
-            // puis le blocage qu'elle a éventuellement déclenché.
+            tx.commit().await?;
+            // Journal (BR-AUDIT-003, 005, 006, 007), une fois les compteurs validés : la tentative
+            // refusée, avec le compte visé seulement s'il existe (la raison est la même que
+            // l'identifiant existe ou non, et l'identifiant saisi n'est jamais retenu), puis le
+            // blocage qu'elle a éventuellement déclenché. **Par le regroupement des refus**
+            // (`AuditSink`) : la clé est le compte (ou « anonyme »), l'action, le résultat et la
+            // raison, jamais l'adresse. Une rafale de refus depuis de nombreuses adresses n'écrit
+            // qu'un premier refus et une synthèse (qui garde l'origine de la dernière occurrence),
+            // et ne chasse pas l'historique du journal.
             let wait = longest_wait(&[pair_decision, address_decision]);
             let actor = Actor::new(targeted, Origin::client(Some(&client.name), &client.addr));
             let reason = if Username::parse(username).is_err() {
@@ -316,29 +326,26 @@ impl SessionService {
             } else {
                 Reason::InvalidCredentials
             };
-            let mut journal = Pending::default();
-            let denied = AuditEvent::new(
-                now,
-                actor.clone(),
-                AuditAction::Login,
-                Target::None,
-                Outcome::Denied(reason),
-            );
-            journal.record(&mut *tx, denied).await?;
-            if let Some(retry_after) = wait {
-                let locked = AuditEvent::new(
-                    now,
-                    actor,
-                    AuditAction::LoginLocked,
+            self.sink
+                .record(
+                    actor.clone(),
+                    AuditAction::Login,
                     Target::None,
-                    Outcome::Denied(Reason::TooManyAttempts {
-                        retry_after_s: retry_after_seconds(retry_after),
-                    }),
-                );
-                journal.record(&mut *tx, locked).await?;
+                    Outcome::Denied(reason),
+                )
+                .await;
+            if let Some(retry_after) = wait {
+                self.sink
+                    .record(
+                        actor,
+                        AuditAction::LoginLocked,
+                        Target::None,
+                        Outcome::Denied(Reason::TooManyAttempts {
+                            retry_after_s: retry_after_seconds(retry_after),
+                        }),
+                    )
+                    .await;
             }
-            tx.commit().await?;
-            journal.publish(&self.trail);
             return Err(match wait {
                 Some(retry_after) => LoginError::TooManyAttempts { retry_after },
                 None => LoginError::InvalidCredentials,
