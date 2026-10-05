@@ -22,7 +22,8 @@ use hearth_link::ports::server_store::StoreError;
 use hearth_link::ports::transport::{
     ApiRequest, ApiResponse, Frame, Method, Probed, StreamConn, Target, Transport, TransportError,
 };
-use hearth_link::ports::{EventSink, OperationStore, ServerStore, SnapshotStore, Vault as _};
+use hearth_link::ports::vault::{SecretKind, VaultError};
+use hearth_link::ports::{EventSink, OperationStore, ServerStore, SnapshotStore, Vault};
 use hearth_link::{
     ActionOutcome, ActionRequest, LinkConfig, LinkError, LinkManager, NewServer, Ports,
 };
@@ -65,6 +66,19 @@ struct Script {
     flood: tokio::sync::Semaphore,
     wake: tokio::sync::Notify,
     snapshot_next: AtomicBool,
+    /// Si posé : la prochaine lecture du flux échoue (le lien tombe), une seule fois.
+    fail_stream: AtomicBool,
+    /// Si posé : la relecture d'une opération répond 404 (l'agent ne l'a jamais reçue).
+    lookup_missing: AtomicBool,
+    /// Si posé : `login` attend d'être relâché (connexion en vol).
+    login_hold: AtomicBool,
+    login_in_flight: AtomicBool,
+    /// Rôle que le serveur donne au compte à la prochaine connexion.
+    next_role: Mutex<RoleName>,
+    /// Si posé : `logout` attend d'être relâché (déconnexion en vol).
+    logout_hold: AtomicBool,
+    logout_in_flight: AtomicBool,
+    logouts: AtomicUsize,
 }
 
 impl Script {
@@ -82,6 +96,14 @@ impl Script {
             flood: tokio::sync::Semaphore::new(1 << 40),
             wake: tokio::sync::Notify::new(),
             snapshot_next: AtomicBool::new(false),
+            fail_stream: AtomicBool::new(false),
+            lookup_missing: AtomicBool::new(false),
+            login_hold: AtomicBool::new(false),
+            login_in_flight: AtomicBool::new(false),
+            next_role: Mutex::new(RoleName::Admin),
+            logout_hold: AtomicBool::new(false),
+            logout_in_flight: AtomicBool::new(false),
+            logouts: AtomicUsize::new(0),
         })
     }
 }
@@ -132,18 +154,31 @@ impl Transport for Mock {
 
     async fn login(&self, _: &Target, _: &LoginRequest) -> Result<LoginResponse, TransportError> {
         let n = self.0.logins.fetch_add(1, Ordering::SeqCst);
+        if self.0.login_hold.load(Ordering::SeqCst) {
+            self.0.login_in_flight.store(true, Ordering::SeqCst);
+            while self.0.login_hold.load(Ordering::SeqCst) {
+                tokio::time::sleep(ms(5)).await;
+            }
+        }
         Ok(LoginResponse {
             token: format!("{:064x}", n + 1),
             expires_at: "x".into(),
             account: AccountInfo {
                 id: "A".into(),
                 username: "marie".into(),
-                role: RoleName::Admin,
+                role: *self.0.next_role.lock().unwrap(),
             },
         })
     }
 
     async fn logout(&self, _: &Target, _: &Secret) -> Result<(), TransportError> {
+        self.0.logouts.fetch_add(1, Ordering::SeqCst);
+        if self.0.logout_hold.load(Ordering::SeqCst) {
+            self.0.logout_in_flight.store(true, Ordering::SeqCst);
+            while self.0.logout_hold.load(Ordering::SeqCst) {
+                tokio::time::sleep(ms(5)).await;
+            }
+        }
         Ok(())
     }
 
@@ -173,6 +208,16 @@ impl Transport for Mock {
         _: &Secret,
         id: &OperationId,
     ) -> Result<OperationResponse, TransportError> {
+        if self.0.lookup_missing.load(Ordering::SeqCst) {
+            return Err(TransportError::Api(
+                hearth_link::ports::transport::ApiError {
+                    status: 404,
+                    code: None,
+                    details: json!({}),
+                    retry_after_s: None,
+                },
+            ));
+        }
         Ok(OperationResponse {
             id: id.as_str().into(),
             kind: "PUT /x".into(),
@@ -210,6 +255,9 @@ impl StreamConn for Stream {
                 machine: machine(),
                 history: vec![],
             })));
+        }
+        if self.script.fail_stream.swap(false, Ordering::SeqCst) {
+            return Err(TransportError::Closed(None));
         }
         if !self.script.expire_next.load(Ordering::SeqCst)
             && !self.script.snapshot_next.load(Ordering::SeqCst)
@@ -253,6 +301,8 @@ enum Disk {
     Hanging,
     /// Chaque écriture des opérations dure ce temps.
     Slow(Duration),
+    /// L'écriture attend que le test ouvre la porte (`Store::gate_open`) : aucune horloge.
+    Gated,
 }
 
 struct Store {
@@ -261,6 +311,9 @@ struct Store {
     operations: Mutex<Vec<PendingOp>>,
     /// Instant de la fin de la dernière écriture des opérations.
     written_at: Mutex<Option<Instant>>,
+    /// `Disk::Gated` : une écriture attend à la porte / la porte est ouverte.
+    gate_reached: AtomicBool,
+    gate_open: AtomicBool,
 }
 
 impl Store {
@@ -270,6 +323,8 @@ impl Store {
             servers: Mutex::new(Vec::new()),
             operations: Mutex::new(Vec::new()),
             written_at: Mutex::new(None),
+            gate_reached: AtomicBool::new(false),
+            gate_open: AtomicBool::new(false),
         })
     }
 
@@ -322,6 +377,12 @@ impl OperationStore for Store {
             Disk::Failing => return Err(StoreError("disque plein".into())),
             Disk::Hanging => std::future::pending::<()>().await,
             Disk::Slow(delay) => tokio::time::sleep(delay).await,
+            Disk::Gated => {
+                self.gate_reached.store(true, Ordering::SeqCst);
+                while !self.gate_open.load(Ordering::SeqCst) {
+                    tokio::time::sleep(ms(2)).await;
+                }
+            }
             Disk::Normal => {}
         }
         *self.operations.lock().unwrap() = operations.to_vec();
@@ -715,4 +776,280 @@ async fn an_agent_flooding_the_stream_starves_neither_commands_nor_the_heartbeat
         message: String::new(),
         details: json!({}),
     };
+}
+
+// ── Suivi d'une action retenue par le disque, lien coupé (review PR 12) ──────────────────────
+
+#[tokio::test]
+async fn a_link_cut_while_the_tracking_is_written_ends_as_not_executed_exactly_once() {
+    // Écriture du suivi retenue à une porte, ouverte par le test : aucune horloge dans le scénario.
+    let (rig, id) = connected(Disk::Normal, false).await;
+    *rig.store.disk.lock().unwrap() = Disk::Gated;
+    rig.script.lookup_missing.store(true, Ordering::SeqCst);
+    let mut events = rig.manager.subscribe();
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
+    // L'écriture est arrivée à la porte : la requête n'est pas partie. Le lien tombe maintenant.
+    wait_until("écriture du suivi à la porte", || {
+        rig.store.gate_reached.load(Ordering::SeqCst)
+    })
+    .await;
+    rig.script.fail_stream.store(true, Ordering::SeqCst);
+    let outcome = tokio::time::timeout(Duration::from_secs(5), call)
+        .await
+        .expect("l'appelant est libéré par la coupure")
+        .unwrap()
+        .unwrap();
+    let ActionOutcome::ResultUnknown { id: operation } = outcome else {
+        panic!("résultat inconnu attendu, vu {outcome:?}");
+    };
+    // On relâche l'écriture ; le lien revient ; l'agent ne connaît pas l'opération.
+    rig.store.gate_open.store(true, Ordering::SeqCst);
+    let announced = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(Event::Operation { id, outcome, .. }) = events.recv().await {
+                return (id, outcome);
+            }
+        }
+    })
+    .await
+    .expect("l'issue est annoncée au retour du lien");
+    assert_eq!(announced, (operation, Outcome::NotExecuted));
+    // Plus aucune autre issue : le suivi est soldé, rien d'autre n'attend dans le flux.
+    wait_until("suivi soldé sur disque", || rig.store.tracked() == 0).await;
+    wait_state(&rig.manager, &id, LinkState::Connected).await;
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    while let Some(event) = events.try_recv() {
+        assert!(
+            !matches!(event, Event::Operation { .. }),
+            "une seule issue, pas {event:?}"
+        );
+    }
+    assert_eq!(
+        rig.script.requests.load(Ordering::SeqCst),
+        0,
+        "la requête n'est jamais partie"
+    );
+}
+
+/// Attend une condition sans horloge de scénario (simple surveillance, 10 s au plus).
+async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !condition() {
+        assert!(Instant::now() < deadline, "attendu : {what}");
+        tokio::time::sleep(ms(2)).await;
+    }
+}
+
+// ── Déconnexion : le réseau hors verrou (review PR 12, round 2) ──────────────────────────────
+
+#[tokio::test]
+async fn a_slow_logout_does_not_hold_back_a_removal() {
+    let (rig, id) = connected(Disk::Normal, true).await;
+    rig.script.logout_hold.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let logout = tokio::spawn(async move { manager.logout(&task_id).await });
+    wait_until("déconnexion en vol", || {
+        rig.script.logout_in_flight.load(Ordering::SeqCst)
+    })
+    .await;
+    // La suppression n'attend pas le serveur injoignable : elle se termine alors que le réseau tient.
+    tokio::time::timeout(Duration::from_secs(5), rig.manager.remove_server(&id))
+        .await
+        .expect("la suppression ne reste pas derrière l'appel réseau")
+        .unwrap();
+    rig.script.logout_hold.store(false, Ordering::SeqCst);
+    assert_eq!(logout.await.unwrap().unwrap_err(), LinkError::UnknownServer);
+    assert!(rig.vault.get(&id, SecretKind::Token).unwrap().is_none());
+    assert!(rig.store.servers.lock().unwrap().is_empty());
+}
+
+// ── Suppression contre connexion en vol (review PR 12, bloquant 2) ───────────────────────────
+
+#[tokio::test]
+async fn a_server_removed_while_a_login_is_in_flight_is_never_written_back() {
+    let (rig, id) = connected(Disk::Normal, true).await;
+    rig.script.login_hold.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let login = tokio::spawn(async move {
+        manager
+            .login(&task_id, "marie", Secret::from("Correct-Horse-9"), true)
+            .await
+    });
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !rig.script.login_in_flight.load(Ordering::SeqCst) {
+        assert!(
+            Instant::now() < deadline,
+            "la connexion devrait être en vol"
+        );
+        tokio::time::sleep(ms(5)).await;
+    }
+    // Suppression pendant l'échange avec le réseau, puis la connexion repart.
+    rig.manager.remove_server(&id).await.unwrap();
+    rig.script.login_hold.store(false, Ordering::SeqCst);
+    let result = login.await.unwrap();
+    assert_eq!(result.unwrap_err(), LinkError::UnknownServer);
+    assert!(rig.vault.get(&id, SecretKind::Token).unwrap().is_none());
+    assert!(rig.vault.get(&id, SecretKind::Password).unwrap().is_none());
+    assert!(rig.store.servers.lock().unwrap().is_empty(), "carnet vide");
+    // Au prochain lancement rien ne revient.
+    rig.manager.shutdown().await;
+    let script = Script::new();
+    let manager = start(&script, &rig.store, &rig.vault, None).await;
+    assert!(manager.servers().is_empty());
+}
+
+// ── Coffre qui refuse d'effacer (review PR 12) ───────────────────────────────────────────────
+
+/// Coffre dont l'effacement du mot de passe échoue.
+struct StubbornVault(MemoryVault);
+
+impl Vault for StubbornVault {
+    fn get(&self, s: &ServerId, k: SecretKind) -> Result<Option<Secret>, VaultError> {
+        self.0.get(s, k)
+    }
+    fn put(&self, s: &ServerId, k: SecretKind, v: &Secret) -> Result<(), VaultError> {
+        self.0.put(s, k, v)
+    }
+    fn delete(&self, s: &ServerId, k: SecretKind) -> Result<(), VaultError> {
+        if k == SecretKind::Password {
+            return Err(VaultError("refusé".into()));
+        }
+        self.0.delete(s, k)
+    }
+}
+
+#[tokio::test]
+async fn a_vault_that_refuses_to_erase_keeps_the_server_and_says_so() {
+    let script = Script::new();
+    let store = Store::new(Disk::Normal);
+    let vault = Arc::new(StubbornVault(MemoryVault::new()));
+    let manager = LinkManager::start(
+        Ports {
+            transport: Arc::new(Mock(script.clone())),
+            vault: vault.clone(),
+            servers: store.clone(),
+            snapshots: store.clone(),
+            operations: store.clone(),
+            clock: Arc::new(SystemClock::new()),
+            rng: Arc::new(OsRng::default()),
+            net: Arc::new(NoNet),
+            extra_sink: None,
+        },
+        config(),
+    )
+    .await
+    .unwrap();
+    let id = manager
+        .add_server(NewServer {
+            name: "Mock".into(),
+            color: "1".into(),
+            host: "mock.test".into(),
+            port: 7341,
+            fingerprint: Fingerprint::from_bytes([7; 32]),
+            mac_addresses: vec![],
+        })
+        .await
+        .unwrap();
+    manager
+        .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap();
+    let error = manager.remove_server(&id).await.unwrap_err();
+    assert!(matches!(error, LinkError::Vault(_)), "{error:?}");
+    // Rien n'est dit « supprimé » : le serveur est toujours là, avec son mot de passe.
+    assert_eq!(manager.servers().len(), 1);
+    assert_eq!(store.servers.lock().unwrap().len(), 1);
+    assert!(vault.get(&id, SecretKind::Password).unwrap().is_some());
+    wait_state(&manager, &id, LinkState::Connected).await;
+}
+
+// ── Rôle rafraîchi à la reconnexion silencieuse (review PR 12) ───────────────────────────────
+
+#[tokio::test]
+async fn a_silent_reconnection_refreshes_the_role_of_the_account() {
+    let (rig, id) = connected(Disk::Normal, true).await;
+    assert_eq!(
+        rig.manager.servers()[0].role,
+        Some(RoleName::Admin),
+        "rôle de la connexion"
+    );
+    *rig.script.next_role.lock().unwrap() = RoleName::Readonly;
+    rig.script.expire_next.store(true, Ordering::SeqCst);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while rig.script.logins.load(Ordering::SeqCst) < 2 {
+        assert!(
+            Instant::now() < deadline,
+            "reconnexion silencieuse attendue"
+        );
+        tokio::time::sleep(ms(10)).await;
+    }
+    wait_state(&rig.manager, &id, LinkState::Connected).await;
+    assert_eq!(rig.manager.servers()[0].role, Some(RoleName::Readonly));
+    let saved = rig.store.servers.lock().unwrap()[0].role;
+    assert_eq!(saved, Some(RoleName::Readonly), "gardé au carnet");
+}
+
+// ── Première connexion : un coffre qui refuse ne laisse ni secret ni serveur (round 2) ────────
+
+/// Coffre qui refuse d'écrire.
+struct ClosedVault;
+
+impl Vault for ClosedVault {
+    fn get(&self, _: &ServerId, _: SecretKind) -> Result<Option<Secret>, VaultError> {
+        Ok(None)
+    }
+    fn put(&self, _: &ServerId, _: SecretKind, _: &Secret) -> Result<(), VaultError> {
+        Err(VaultError("fermé".into()))
+    }
+    fn delete(&self, _: &ServerId, _: SecretKind) -> Result<(), VaultError> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_vault_that_refuses_to_write_leaves_no_server_and_closes_the_new_session() {
+    let script = Script::new();
+    let store = Store::new(Disk::Normal);
+    let manager = LinkManager::start(
+        Ports {
+            transport: Arc::new(Mock(script.clone())),
+            vault: Arc::new(ClosedVault),
+            servers: store.clone(),
+            snapshots: store.clone(),
+            operations: store.clone(),
+            clock: Arc::new(SystemClock::new()),
+            rng: Arc::new(OsRng::default()),
+            net: Arc::new(NoNet),
+            extra_sink: None,
+        },
+        config(),
+    )
+    .await
+    .unwrap();
+    let new = NewServer {
+        name: "Mock".into(),
+        color: "1".into(),
+        host: "mock.test".into(),
+        port: 7341,
+        fingerprint: Fingerprint::from_bytes([7; 32]),
+        mac_addresses: vec![],
+    };
+    let error = manager
+        .add_and_login(new, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, LinkError::Vault(_)), "{error:?}");
+    assert!(manager.servers().is_empty());
+    assert!(store.servers.lock().unwrap().is_empty());
+    assert_eq!(
+        script.logouts.load(Ordering::SeqCst),
+        1,
+        "la session obtenue est refermée côté serveur"
+    );
 }

@@ -35,6 +35,12 @@ function fill(wizard: ReturnType<typeof useAddServer>, host = "192.168.1.50", na
   wizard.host.value = host;
 }
 
+async function toLogin(wizard: ReturnType<typeof useAddServer>) {
+  fill(wizard);
+  await wizard.next();
+  wizard.confirm();
+}
+
 beforeEach(() =>
   vi.useFakeTimers({
     toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
@@ -116,23 +122,21 @@ describe("add-server wizard, step 1", () => {
 });
 
 describe("add-server wizard, steps 2 and 3", () => {
-  it("probes, shows the fingerprint in 8 groups, registers on « Confirmer », then connects", async () => {
+  it("probes, shows the fingerprint, and registers only when the login succeeds", async () => {
     const { wizard, bridge, servers } = await setup();
     fill(wizard);
     await wizard.next();
     expect(wizard.step.value).toBe("fingerprint");
     expect(wizard.probe.value?.display.split(" ")).toHaveLength(8);
-    // Rien n'est enregistré, aucun identifiant n'est parti avant la confirmation (BR-CONN-001, 011).
-    expect(servers.servers).toHaveLength(0);
-    expect(bridge.calls.some((call) => call.startsWith("login"))).toBe(false);
-
-    await wizard.confirm();
+    // Rien n'est enregistré avant la connexion, ni à la sonde ni à « Confirmer » (BR-CONN-001, 011).
+    wizard.confirm();
     expect(wizard.step.value).toBe("login");
-    expect(servers.servers).toHaveLength(1);
-    expect(servers.servers[0]?.name).toBe("Atelier");
+    expect(servers.servers).toHaveLength(0);
+    expect(bridge.calls).toEqual(["probe 192.168.1.50:7341"]);
 
     const id = await wizard.login({ username: "marie", password: PASSWORD, remember: true });
-    expect(id).toBe(wizard.serverId.value);
+    expect(servers.servers).toHaveLength(1);
+    expect(id).toBe(servers.servers[0]?.id);
     expect(servers.servers[0]).toMatchObject({ username: "marie", remember: true, role: "admin" });
     expect(bridge.vault.get(id ?? "")).toBe(PASSWORD);
     expect(useToastsStore().items.at(-1)?.message).toBe("Connecté à Atelier.");
@@ -150,15 +154,15 @@ describe("add-server wizard, steps 2 and 3", () => {
     expect(bridge.calls).toEqual(["probe 192.168.1.50:7341"]);
   });
 
-  it("answers a wrong password with the generic message, then lets the user retry", async () => {
-    const { wizard } = await setup();
-    fill(wizard);
-    await wizard.next();
-    await wizard.confirm();
+  it("leaves nothing behind after a wrong password, then connects on the retry", async () => {
+    const { wizard, servers, bridge } = await setup();
+    await toLogin(wizard);
     expect(
       await wizard.login({ username: "marie", password: "faux-faux-1", remember: true }),
     ).toBeNull();
     expect(wizard.loginError.value).toBe("Identifiant ou mot de passe incorrect.");
+    expect(servers.servers).toHaveLength(0);
+    expect(bridge.vault.size).toBe(0);
     expect(await wizard.login({ username: "inconnu", password: "x", remember: true })).toBeNull();
     // Même texte pour un identifiant inconnu (BR-CONN-013).
     expect(wizard.loginError.value).toBe("Identifiant ou mot de passe incorrect.");
@@ -166,13 +170,12 @@ describe("add-server wizard, steps 2 and 3", () => {
       await wizard.login({ username: "marie", password: PASSWORD, remember: false }),
     ).not.toBeNull();
     expect(wizard.loginError.value).toBeNull();
+    expect(servers.servers).toHaveLength(1);
   });
 
   it("starts a visible countdown after too many attempts and refuses to try meanwhile", async () => {
     const { wizard, bridge } = await setup();
-    fill(wizard);
-    await wizard.next();
-    await wizard.confirm();
+    await toLogin(wizard);
     for (let i = 0; i < 5; i += 1) {
       await wizard.login({ username: "marie", password: `faux-${i}`, remember: true });
     }
@@ -180,50 +183,29 @@ describe("add-server wizard, steps 2 and 3", () => {
       await wizard.login({ username: "marie", password: PASSWORD, remember: true }),
     ).toBeNull();
     expect(wizard.lockedSeconds.value).toBe(30);
-    const attempts = bridge.calls.filter((call) => call.startsWith("login")).length;
+    const attempts = bridge.calls.filter((call) => call.startsWith("add-and-login")).length;
     await vi.advanceTimersByTimeAsync(3000);
     expect(wizard.lockedSeconds.value).toBe(27);
     expect(
       await wizard.login({ username: "marie", password: PASSWORD, remember: true }),
     ).toBeNull();
-    expect(bridge.calls.filter((call) => call.startsWith("login")).length).toBe(attempts);
+    expect(bridge.calls.filter((call) => call.startsWith("add-and-login")).length).toBe(attempts);
   });
 
-  it("removes the server it registered when going back, and keeps the typed values", async () => {
+  it("goes back to the typed values without having registered or removed anything", async () => {
     const { wizard, servers, bridge } = await setup();
-    fill(wizard);
-    await wizard.next();
-    await wizard.confirm();
-    expect(servers.servers).toHaveLength(1);
-    await wizard.back();
-    expect(servers.servers).toHaveLength(0);
+    await toLogin(wizard);
+    wizard.back();
     expect(wizard.step.value).toBe("address");
     expect(wizard.name.value).toBe("Atelier");
-    expect(bridge.calls.at(-1)).toMatch(/^remove /);
-  });
-
-  it("leaves nothing behind when the user quits at step 3, but keeps a connected server", async () => {
-    const quit = await setup();
-    fill(quit.wizard);
-    await quit.wizard.next();
-    await quit.wizard.confirm();
-    await quit.wizard.abandon();
-    expect(quit.servers.servers).toHaveLength(0);
-
-    const done = await setup();
-    fill(done.wizard);
-    await done.wizard.next();
-    await done.wizard.confirm();
-    await done.wizard.login({ username: "marie", password: PASSWORD, remember: true });
-    await done.wizard.abandon();
-    expect(done.servers.servers).toHaveLength(1);
+    expect(servers.servers).toHaveLength(0);
+    expect(bridge.calls).toEqual(["probe 192.168.1.50:7341"]);
   });
 
   it("tells a taken name from the library back to step 1", async () => {
     const { wizard, bridge } = await setup();
-    fill(wizard);
-    await wizard.next();
-    // Un autre serveur du même nom apparaît entre la sonde et la confirmation.
+    await toLogin(wizard);
+    // Un autre serveur du même nom apparaît entre la sonde et la connexion.
     bridge.seedServer({
       id: "x",
       name: "Atelier",
@@ -235,23 +217,22 @@ describe("add-server wizard, steps 2 and 3", () => {
       username: "",
       remember: false,
     });
-    await wizard.confirm();
+    await wizard.login({ username: "marie", password: PASSWORD, remember: true });
     expect(wizard.step.value).toBe("address");
     expect(wizard.errors.value.name).toBe("Un serveur porte déjà ce nom");
   });
 });
 
 describe("pinned fingerprint in the simulated network", () => {
-  it("refuses to register a server whose identity differs from the confirmed one", async () => {
-    const { wizard, bridge } = await setup();
-    fill(wizard);
-    await wizard.next();
-    bridge.addAgent({ ...SAMPLE_AGENT, host: "192.168.1.50", fingerprint: OTHER_FINGERPRINT });
-    // Le réseau simulé répond maintenant avec l'autre agent en premier : l'ancien est retiré.
+  it("registers nothing when the server no longer presents the confirmed identity", async () => {
+    const { wizard, bridge, servers } = await setup();
+    await toLogin(wizard);
     const agents = (bridge as unknown as { agents: SimAgent[] }).agents;
-    agents.shift();
-    await wizard.confirm();
+    agents.splice(0, agents.length, { ...SAMPLE_AGENT, fingerprint: OTHER_FINGERPRINT });
+    await wizard.login({ username: "marie", password: PASSWORD, remember: true });
     expect(wizard.step.value).toBe("address");
     expect(wizard.cardMessage.value).toBe("Une erreur est survenue. Réessaie.");
+    expect(servers.servers).toHaveLength(0);
+    expect(bridge.vault.size).toBe(0);
   });
 });

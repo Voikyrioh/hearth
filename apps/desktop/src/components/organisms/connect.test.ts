@@ -67,7 +67,8 @@ describe("AddServerWizard", () => {
     expect(buttons).toEqual(["Refuser", "Confirmer"]);
     await wrapper.findAll("button")[1]?.trigger("click");
     await flushPromises();
-    expect(servers.servers).toHaveLength(1);
+    // « Confirmer » n'enregistre rien : le serveur n'existe qu'à la connexion réussie.
+    expect(servers.servers).toHaveLength(0);
     expect(wrapper.get("h1").text()).toBe("Connecte-toi");
     const remember = wrapper.get("input[type=checkbox]");
     expect((remember.element as HTMLInputElement).checked).toBe(true);
@@ -80,6 +81,7 @@ describe("AddServerWizard", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("Identifiant ou mot de passe incorrect.");
     expect(wrapper.emitted("done")).toBeUndefined();
+    expect(servers.servers).toHaveLength(0);
     await wrapper.findAll("input:not([type=checkbox])")[1]?.setValue(PASSWORD);
     await wrapper.get("form").trigger("submit");
     await flushPromises();
@@ -107,15 +109,17 @@ describe("AddServerWizard", () => {
     expect(wrapper.get("h1").text()).toBe("Ajouter un serveur");
   });
 
-  it("removes the server it registered when the wizard is closed at step 3", async () => {
-    const { wrapper, servers } = await wizard();
+  it("leaves nothing behind when the wizard is closed at step 3", async () => {
+    const { wrapper, servers, bridge } = await wizard();
     await reachFingerprint(wrapper);
     await wrapper.findAll("button")[1]?.trigger("click");
     await flushPromises();
-    expect(servers.servers).toHaveLength(1);
     wrapper.unmount();
     await flushPromises();
     expect(servers.servers).toHaveLength(0);
+    expect(
+      bridge.calls.some((call) => call.startsWith("add-and-login") || call.startsWith("remove")),
+    ).toBe(false);
   });
 });
 

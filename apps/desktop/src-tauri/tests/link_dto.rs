@@ -2,15 +2,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use hearth_desktop_lib::link_dto::{
-    BlockedDto, LinkFailure, LinkStateName, ReasonDto, RoleDto, ServerDto, StateBook, color_number,
-    servers_list,
+    BlockedDto, InvalidField, LinkFailure, LinkStateName, ReasonDto, RoleDto, ServerDto, StateBook,
+    color_number, servers_list,
 };
-use hearth_link::LinkError;
 use hearth_link::domain::compat::Compatibility;
 use hearth_link::domain::event::StateInfo;
 use hearth_link::domain::server::{ServerId, ServerRecord};
 use hearth_link::domain::state::{Blocked, LinkState, Reason};
 use hearth_link::domain::time::WallTime;
+use hearth_link::{InputField, LinkError};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::error::UpgradeTarget;
 use hearth_proto::fingerprint::Fingerprint;
@@ -192,10 +192,18 @@ fn library_errors_become_typed_failures_without_any_text() {
         failure(LinkError::FingerprintChanged),
         LinkFailure::FingerprintChanged
     );
-    assert!(matches!(
-        failure(LinkError::InvalidInput("port du serveur")),
-        LinkFailure::InvalidInput { .. }
-    ));
+    assert_eq!(
+        failure(LinkError::InvalidInput(InputField::Port)),
+        LinkFailure::InvalidInput {
+            field: InvalidField::Port
+        }
+    );
+    assert_eq!(
+        failure(LinkError::InvalidInput(InputField::Name)),
+        LinkFailure::InvalidInput {
+            field: InvalidField::Name
+        }
+    );
     // Aucun message ne contient de détail réseau ni de secret : la sérialisation n'a que `kind`.
     let text = serde_json::to_string(&failure(LinkError::Vault("secret-xyz".into()))).unwrap();
     assert_eq!(text, r#"{"kind":"vault"}"#);

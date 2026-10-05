@@ -3,7 +3,14 @@
 //! l'interface. Aucune règle ici : elles sont dans `hearth-link` (`domain/`). Rien de ce module
 //! ne dépend de Tauri : le relais écrit dans un [`UiSink`] (la fenêtre en production, un
 //! enregistreur dans les tests).
+//!
+//! Un événement n'est qu'un signal de changement : ce qui doit survivre à une interface qui arrive
+//! après lui (alerte d'empreinte en attente, suivis perdus, issues d'actions annoncées avant le
+//! chargement de la fenêtre) est un ÉTAT tenu ici par [`PendingBook`], branché sur la liaison avant
+//! le lancement de ses tâches et relu par l'interface à l'abonnement (`list_fingerprint_alerts`,
+//! `take_link_notices`, `take_unread_operations`).
 
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -11,15 +18,17 @@ use hearth_link::domain::compat::Compatibility;
 use hearth_link::domain::event::Event;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
-use hearth_link::ports::Vault;
+use hearth_link::domain::state::Blocked;
+use hearth_link::ports::{EventSink, Vault};
 use hearth_link::{EventStream, LinkConfig, LinkError, LinkManager, NewServer, ServerUpdate};
+use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::product::DEFAULT_PORT;
 use serde::Serialize;
 
 use crate::link_dto::{
-    FingerprintEvent, LinkFailure, LinkStateDto, LoginDto, NoticeEvent, NoticeKind,
-    OperationEventDto, OutcomeDto, ProbeDto, RoleDto, ServerDto, ServersEvent, SessionEndedEvent,
-    StateBook, events, parse_fingerprint, servers_list,
+    FingerprintEvent, LinkFailure, LinkStateDto, NoticeEvent, NoticeKind, OperationEventDto,
+    OutcomeDto, ProbeDto, ServerDto, ServersEvent, StateBook, events, parse_fingerprint,
+    servers_list,
 };
 
 /// Où partent les événements pour l'interface.
@@ -34,10 +43,161 @@ fn send<T: Serialize>(sink: &dyn UiSink, event: &str, payload: &T) {
     }
 }
 
+/// Avis et issues d'actions retenus au plus, tant que l'interface ne les a pas acquittés.
+const MAX_RETAINED: usize = 100;
+
+#[derive(Default)]
+struct Pending {
+    /// Alerte d'empreinte en attente de décision, par serveur : un état, rejoué à chaque lecture.
+    alerts: HashMap<String, FingerprintEvent>,
+    /// Avis (suivis perdus) pas encore acquittés par l'interface.
+    notices: Vec<NoticeEvent>,
+    /// Issues d'actions pas encore acquittées par l'interface (par `opId`).
+    operations: VecDeque<OperationEventDto>,
+    next_notice: u32,
+}
+
+/// L'état de la liaison que l'interface doit pouvoir relire après coup. Branché comme destination
+/// d'événements de la liaison dès son ouverture : aucun événement ne lui échappe, même celui d'une
+/// tâche qui démarre avant que la fenêtre n'existe.
+///
+/// Les avis et les issues sont retenus jusqu'à un ACQUITTEMENT explicite par identifiant : une
+/// lecture ne détruit rien (un abonnement qui échoue puis recommence retrouve tout), et
+/// l'interface écarte les doublons par ces identifiants (un signal en direct et la lecture d'état
+/// peuvent porter le même avis).
+#[derive(Default)]
+pub struct PendingBook {
+    inner: Mutex<Pending>,
+}
+
+impl PendingBook {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Pending> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Alertes d'empreinte en attente (BR-CONN-003), levées quand le blocage se lève.
+    pub fn alerts(&self) -> Vec<FingerprintEvent> {
+        let mut alerts: Vec<FingerprintEvent> = self.lock().alerts.values().cloned().collect();
+        alerts.sort_by(|a, b| a.server_id.cmp(&b.server_id));
+        alerts
+    }
+
+    pub fn alert_of(&self, server: &str) -> Option<FingerprintEvent> {
+        self.lock().alerts.get(server).cloned()
+    }
+
+    /// Avis retenus, jusqu'à leur acquittement.
+    pub fn notices(&self) -> Vec<NoticeEvent> {
+        self.lock().notices.clone()
+    }
+
+    /// Numéro de l'avis retenu pour ce serveur (0 si aucun) : le signal en direct porte le même.
+    pub fn notice_id(&self, server: &str) -> u32 {
+        self.lock()
+            .notices
+            .iter()
+            .rfind(|notice| notice.server_id.as_deref() == Some(server))
+            .map_or(0, |notice| notice.id)
+    }
+
+    pub fn ack_notices(&self, ids: &[u32]) {
+        self.lock()
+            .notices
+            .retain(|notice| !ids.contains(&notice.id));
+    }
+
+    /// Issues d'actions retenues, jusqu'à leur acquittement.
+    pub fn operations(&self) -> Vec<OperationEventDto> {
+        self.lock().operations.iter().cloned().collect()
+    }
+
+    pub fn ack_operations(&self, op_ids: &[String]) {
+        self.lock()
+            .operations
+            .retain(|operation| !op_ids.contains(&operation.op_id));
+    }
+
+    /// Le serveur est retiré : plus rien ne le concerne.
+    pub fn forget(&self, server: &ServerId) {
+        let mut pending = self.lock();
+        pending.alerts.remove(server.as_str());
+        pending
+            .notices
+            .retain(|notice| notice.server_id.as_deref() != Some(server.as_str()));
+        pending
+            .operations
+            .retain(|operation| operation.server_id != server.as_str());
+    }
+}
+
+impl EventSink for PendingBook {
+    fn emit(&self, event: Event) {
+        match event {
+            Event::FingerprintChanged {
+                server,
+                expected,
+                presented,
+            } => {
+                let alert = FingerprintEvent::new(&server, &expected, &presented);
+                self.lock().alerts.insert(server.to_string(), alert);
+            }
+            Event::State { server, info } => {
+                if info.blocked != Some(Blocked::FingerprintChanged) {
+                    self.lock().alerts.remove(server.as_str());
+                }
+            }
+            Event::OperationsLost { server } => {
+                let mut pending = self.lock();
+                let name = server.to_string();
+                if !pending
+                    .notices
+                    .iter()
+                    .any(|notice| notice.server_id.as_deref() == Some(name.as_str()))
+                {
+                    pending.next_notice = pending.next_notice.wrapping_add(1).max(1);
+                    let id = pending.next_notice;
+                    if pending.notices.len() >= MAX_RETAINED {
+                        pending.notices.remove(0);
+                    }
+                    pending.notices.push(NoticeEvent {
+                        id,
+                        kind: NoticeKind::OperationsLost,
+                        server_id: Some(name),
+                    });
+                }
+            }
+            Event::Operation {
+                server,
+                id,
+                outcome,
+            } => {
+                let mut pending = self.lock();
+                if pending.operations.len() >= MAX_RETAINED {
+                    pending.operations.pop_front();
+                }
+                pending.operations.push_back(OperationEventDto {
+                    op_id: id.as_str().to_owned(),
+                    server_id: server.to_string(),
+                    outcome: OutcomeDto::from(&outcome),
+                });
+            }
+            Event::Lagged { .. }
+            | Event::Metrics { .. }
+            | Event::Snapshot { .. }
+            | Event::SessionEnded { .. }
+            | Event::Audit { .. } => {}
+        }
+    }
+}
+
 pub struct LinkRuntime {
     manager: LinkManager,
     book: Mutex<StateBook>,
     last_servers: Mutex<Option<Vec<ServerDto>>>,
+    pending: Arc<PendingBook>,
+    /// Dernière empreinte lue par une sonde, par adresse : seule une empreinte que cette
+    /// application a vue sur la machine peut être confirmée, enregistrée ou épinglée.
+    probes: Mutex<HashMap<(String, u16), Fingerprint>>,
 }
 
 impl LinkRuntime {
@@ -48,17 +208,31 @@ impl LinkRuntime {
         vault: Arc<dyn Vault>,
         client_name: &str,
     ) -> Result<Self, LinkError> {
-        let manager =
-            LinkManager::open(data_dir, vault, client_name, LinkConfig::default()).await?;
-        Ok(Self::new(manager))
+        Self::open_with(data_dir, vault, client_name, LinkConfig::default()).await
     }
 
-    pub fn new(manager: LinkManager) -> Self {
-        Self {
+    pub async fn open_with(
+        data_dir: &Path,
+        vault: Arc<dyn Vault>,
+        client_name: &str,
+        config: LinkConfig,
+    ) -> Result<Self, LinkError> {
+        let pending = Arc::new(PendingBook::default());
+        let manager = LinkManager::open_with_sink(
+            data_dir,
+            vault,
+            client_name,
+            config,
+            Some(pending.clone()),
+        )
+        .await?;
+        Ok(Self {
             manager,
             book: Mutex::new(StateBook::default()),
             last_servers: Mutex::new(None),
-        }
+            pending,
+            probes: Mutex::new(HashMap::new()),
+        })
     }
 
     pub fn manager(&self) -> &LinkManager {
@@ -79,6 +253,29 @@ impl LinkRuntime {
         self.book().snapshot(&self.manager.states())
     }
 
+    /// Alertes d'empreinte en attente : à lire après l'abonnement, comme `states`.
+    pub fn fingerprint_alerts(&self) -> Vec<FingerprintEvent> {
+        self.pending.alerts()
+    }
+
+    /// Avis retenus et non acquittés (lecture non destructive).
+    pub fn notices(&self) -> Vec<NoticeEvent> {
+        self.pending.notices()
+    }
+
+    pub fn ack_notices(&self, ids: &[u32]) {
+        self.pending.ack_notices(ids);
+    }
+
+    /// Issues d'actions retenues et non acquittées (lecture non destructive).
+    pub fn operations(&self) -> Vec<OperationEventDto> {
+        self.pending.operations()
+    }
+
+    pub fn ack_operations(&self, op_ids: &[String]) {
+        self.pending.ack_operations(op_ids);
+    }
+
     /// Annonce la liste des serveurs si elle diffère de la dernière annoncée.
     pub fn publish_servers(&self, sink: &dyn UiSink) {
         let servers = self.servers();
@@ -97,17 +294,32 @@ impl LinkRuntime {
 
     // ── Commandes ──────────────────────────────────────────────────────────────────────────
 
+    fn probe_key(host: &str, port: u16) -> (String, u16) {
+        (host.trim().to_lowercase(), port)
+    }
+
+    /// Une empreinte n'est acceptée que si une sonde de cette application l'a lue à cette adresse.
+    fn probed(&self, host: &str, port: u16, fingerprint: &Fingerprint) -> Result<(), LinkFailure> {
+        let probes = self.probes.lock().unwrap_or_else(PoisonError::into_inner);
+        match probes.get(&Self::probe_key(host, port)) {
+            Some(seen) if seen == fingerprint => Ok(()),
+            _ => Err(LinkFailure::VerificationRequired),
+        }
+    }
+
     /// Première prise de contact : l'empreinte à faire confirmer (BR-CONN-001, 011, 012).
     pub async fn probe(&self, host: &str, port: Option<u16>) -> Result<ProbeDto, LinkFailure> {
-        let probe = self
-            .manager
-            .probe(host.trim(), port.unwrap_or(DEFAULT_PORT))
-            .await?;
+        let port = port.unwrap_or(DEFAULT_PORT);
+        let probe = self.manager.probe(host.trim(), port).await?;
         match probe.compatibility {
             Compatibility::Compatible => {}
             Compatibility::UpdateClient => return Err(LinkFailure::IncompatibleClient),
             Compatibility::UpdateAgent => return Err(LinkFailure::IncompatibleAgent),
         }
+        self.probes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(Self::probe_key(host, port), probe.fingerprint);
         Ok(ProbeDto {
             fingerprint: probe.fingerprint.to_hex(),
             display: probe.fingerprint.short(),
@@ -117,9 +329,11 @@ impl LinkRuntime {
         })
     }
 
-    /// Enregistre le serveur dont l'empreinte vient d'être confirmée (BR-CONN-002).
+    /// Fin de l'assistant : contacte l'adresse épinglée sur l'empreinte confirmée, ouvre la session
+    /// et SEULEMENT si elle réussit enregistre le serveur, son empreinte et ses secrets
+    /// (BR-CONN-002, 004). Un échec ou un abandon ne laisse rien.
     #[allow(clippy::too_many_arguments)]
-    pub async fn add_server(
+    pub async fn add_and_login(
         &self,
         name: String,
         color: u8,
@@ -127,19 +341,29 @@ impl LinkRuntime {
         port: Option<u16>,
         fingerprint: &str,
         mac_addresses: Vec<String>,
+        username: &str,
+        password: String,
+        remember: bool,
         sink: &dyn UiSink,
     ) -> Result<ServerDto, LinkFailure> {
         let fingerprint = parse_fingerprint(fingerprint)?;
-        let id = self
+        let port = port.unwrap_or(DEFAULT_PORT);
+        self.probed(&host, port, &fingerprint)?;
+        let (id, _) = self
             .manager
-            .add_server(NewServer {
-                name,
-                color: color.clamp(1, 8).to_string(),
-                host: host.trim().to_owned(),
-                port: port.unwrap_or(DEFAULT_PORT),
-                fingerprint,
-                mac_addresses,
-            })
+            .add_and_login(
+                NewServer {
+                    name,
+                    color: color.clamp(1, 8).to_string(),
+                    host: host.trim().to_owned(),
+                    port,
+                    fingerprint,
+                    mac_addresses,
+                },
+                username,
+                Secret::new(password),
+                remember,
+            )
             .await?;
         self.publish_servers(sink);
         self.server(&id)
@@ -163,15 +387,15 @@ impl LinkRuntime {
         password: String,
         remember: bool,
         sink: &dyn UiSink,
-    ) -> Result<LoginDto, LinkFailure> {
+    ) -> Result<crate::link_dto::LoginDto, LinkFailure> {
         let id = Self::id(server_id)?;
         let info = self
             .manager
             .login(&id, username, Secret::new(password), remember)
             .await?;
         self.publish_servers(sink);
-        Ok(LoginDto {
-            role: RoleDto::from(info.account.role),
+        Ok(crate::link_dto::LoginDto {
+            role: crate::link_dto::RoleDto::from(info.account.role),
             username: info.account.username,
         })
     }
@@ -186,16 +410,28 @@ impl LinkRuntime {
         Ok(self.manager.retry_now(&Self::id(server_id)?)?)
     }
 
+    /// L'utilisateur accepte la nouvelle empreinte (BR-CONN-003). Seule l'empreinte que la liaison
+    /// a présentée ET que l'interface a affichée est acceptée : la commande reçoit l'empreinte
+    /// affichée et la compare à celle en attente (la bibliothèque la compare aussi).
     pub async fn accept_fingerprint(
         &self,
         server_id: &str,
         fingerprint: &str,
     ) -> Result<(), LinkFailure> {
-        let fingerprint = parse_fingerprint(fingerprint)?;
-        Ok(self
-            .manager
-            .accept_fingerprint(&Self::id(server_id)?, fingerprint)
-            .await?)
+        let id = Self::id(server_id)?;
+        let alert = self
+            .pending
+            .alert_of(id.as_str())
+            .ok_or(LinkFailure::VerificationRequired)?;
+        // Celle que l'utilisateur a sous les yeux doit être celle qui attend : si un signal a sauté,
+        // l'interface en montre peut-être une autre.
+        let shown = parse_fingerprint(fingerprint)?;
+        let waiting = parse_fingerprint(&alert.presented_hex)?;
+        if shown != waiting {
+            return Err(LinkFailure::VerificationRequired);
+        }
+        self.manager.accept_fingerprint(&id, waiting).await?;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -210,7 +446,11 @@ impl LinkRuntime {
         sink: &dyn UiSink,
     ) -> Result<ServerDto, LinkFailure> {
         let id = Self::id(server_id)?;
+        let port = port.unwrap_or(DEFAULT_PORT);
         let fingerprint = fingerprint.as_deref().map(parse_fingerprint).transpose()?;
+        if let Some(seen) = &fingerprint {
+            self.probed(&host, port, seen)?;
+        }
         self.manager
             .update_server(
                 &id,
@@ -218,7 +458,7 @@ impl LinkRuntime {
                     name,
                     color: color.clamp(1, 8).to_string(),
                     host: host.trim().to_owned(),
-                    port: port.unwrap_or(DEFAULT_PORT),
+                    port,
                     fingerprint,
                 },
             )
@@ -235,6 +475,7 @@ impl LinkRuntime {
         let id = Self::id(server_id)?;
         self.manager.remove_server(&id).await?;
         self.book().forget(&id);
+        self.pending.forget(&id);
         self.publish_servers(sink);
         Ok(())
     }
@@ -253,7 +494,7 @@ impl LinkRuntime {
 
     // ── Relais des événements ──────────────────────────────────────────────────────────────
 
-    /// Traduit les événements de la liaison en événements pour l'interface, jusqu'à l'arrêt de la
+    /// Traduit les événements de la liaison en signaux pour l'interface, jusqu'à l'arrêt de la
     /// bibliothèque. Les mesures et le journal d'activité ne sont pas relayés ici (tickets
     /// suivants).
     pub async fn forward(&self, mut stream: EventStream, sink: &dyn UiSink) {
@@ -285,6 +526,7 @@ impl LinkRuntime {
                     outcome: OutcomeDto::from(&outcome),
                 },
             ),
+            // Un signal : l'alerte elle-même est un état (`PendingBook`), relu à l'abonnement.
             Event::FingerprintChanged {
                 server,
                 expected,
@@ -294,18 +536,11 @@ impl LinkRuntime {
                 events::FINGERPRINT,
                 &FingerprintEvent::new(&server, &expected, &presented),
             ),
-            Event::SessionEnded { server, kind } => send(
-                sink,
-                events::SESSION_ENDED,
-                &SessionEndedEvent {
-                    server_id: server.to_string(),
-                    kind: kind.into(),
-                },
-            ),
             Event::OperationsLost { server } => send(
                 sink,
                 events::NOTICE,
                 &NoticeEvent {
+                    id: self.pending.notice_id(server.as_str()),
                     kind: NoticeKind::OperationsLost,
                     server_id: Some(server.to_string()),
                 },
@@ -315,16 +550,24 @@ impl LinkRuntime {
                     sink,
                     events::NOTICE,
                     &NoticeEvent {
+                        id: 0,
                         kind: NoticeKind::Lagged,
                         server_id: None,
                     },
                 );
-                // Des changements d'état ont pu être perdus : on réannonce l'état courant.
+                // Des signaux ont pu être perdus : on réannonce tout l'état courant, états des
+                // liens ET alertes d'empreinte en attente (jamais d'alerte introuvable).
                 for state in self.states() {
                     send(sink, events::STATE, &state);
                 }
+                for alert in self.pending.alerts() {
+                    send(sink, events::FINGERPRINT, &alert);
+                }
             }
-            Event::Metrics { .. } | Event::Snapshot { .. } | Event::Audit { .. } => {}
+            Event::SessionEnded { .. }
+            | Event::Metrics { .. }
+            | Event::Snapshot { .. }
+            | Event::Audit { .. } => {}
         }
     }
 }

@@ -7,7 +7,10 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter as _, Runtime, State};
 
 use crate::link::{LinkRuntime, UiSink};
-use crate::link_dto::{LinkFailure, LinkStateDto, LoginDto, ProbeDto, ServerDto};
+use crate::link_dto::{
+    AddServerInput, FingerprintEvent, LinkFailure, LinkStateDto, LoginDto, NoticeEvent,
+    OperationEventDto, ProbeDto, ServerDto,
+};
 
 /// Les événements de la liaison vont à la fenêtre.
 pub struct TauriSink<R: Runtime>(pub AppHandle<R>);
@@ -44,26 +47,24 @@ pub async fn probe_server(
     link.probe(&host, port).await
 }
 
+/// Fin de l'assistant d'ajout : le serveur n'est enregistré que si la connexion réussit.
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
-pub async fn add_server(
+pub async fn add_and_login(
     app: AppHandle,
     link: Runtime_<'_>,
-    name: String,
-    color: u8,
-    host: String,
-    port: Option<u16>,
-    fingerprint: String,
-    mac_addresses: Vec<String>,
+    input: AddServerInput,
 ) -> Result<ServerDto, LinkFailure> {
-    link.add_server(
-        name,
-        color,
-        host,
-        port,
-        &fingerprint,
-        mac_addresses,
+    link.add_and_login(
+        input.name,
+        input.color,
+        input.host,
+        input.port,
+        &input.fingerprint,
+        input.mac_addresses,
+        &input.username,
+        input.password,
+        input.remember,
         &TauriSink(app),
     )
     .await
@@ -107,6 +108,39 @@ pub async fn accept_fingerprint(
     fingerprint: String,
 ) -> Result<(), LinkFailure> {
     link.accept_fingerprint(&server_id, &fingerprint).await
+}
+
+/// Alertes d'empreinte en attente de décision : à lire après l'abonnement à `link://fingerprint`.
+#[tauri::command]
+#[specta::specta]
+pub fn list_fingerprint_alerts(link: Runtime_<'_>) -> Vec<FingerprintEvent> {
+    link.fingerprint_alerts()
+}
+
+/// Avis de la liaison retenus tant qu'ils ne sont pas acquittés (lecture non destructive).
+#[tauri::command]
+#[specta::specta]
+pub fn list_link_notices(link: Runtime_<'_>) -> Vec<NoticeEvent> {
+    link.notices()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn ack_link_notices(link: Runtime_<'_>, ids: Vec<u32>) {
+    link.ack_notices(&ids);
+}
+
+/// Issues d'actions retenues tant qu'elles ne sont pas acquittées (lecture non destructive).
+#[tauri::command]
+#[specta::specta]
+pub fn list_unread_operations(link: Runtime_<'_>) -> Vec<OperationEventDto> {
+    link.operations()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn ack_unread_operations(link: Runtime_<'_>, op_ids: Vec<String>) {
+    link.ack_operations(&op_ids);
 }
 
 #[tauri::command]

@@ -99,6 +99,19 @@ test("empreinte refusée : aucun serveur n'est enregistré ; acceptée ensuite :
   await expect(page.locator("a[data-server]")).toHaveCount(1);
 });
 
+test("quitter l'assistant avant la connexion ne laisse aucun serveur", async ({ page }) => {
+  await page.goto("/?servers=none&nodev#/servers/new");
+  await fillAddress(page, "Atelier", "192.168.1.50");
+  await page.getByRole("button", { name: "Suivant" }).click();
+  await page.getByRole("button", { name: "Confirmer" }).click();
+  await expect(page.getByRole("heading", { name: "Connecte-toi" })).toBeVisible();
+  // Rien n'existe encore : ni dans la barre, ni au carnet, ni au coffre simulé.
+  await expect(page.locator("a[data-server]")).toHaveCount(0);
+  await page.getByRole("link", { name: "Accueil" }).click();
+  await expect(page.getByRole("heading", { name: "Bienvenue dans Hearth" })).toBeVisible();
+  await expect(page.locator("a[data-server]")).toHaveCount(0);
+});
+
 test("empreinte changée : alerte bloquante, refusée puis acceptée", async ({ page }) => {
   await page.goto("/?nodev#/servers/forge/dashboard");
   await expect(page.getByRole("status").filter({ hasText: "Connecté" })).toBeVisible();

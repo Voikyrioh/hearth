@@ -7,7 +7,7 @@ src/
 ├── lib.rs           → réexporte la façade (`LinkManager`, `LinkConfig`, `Ports`, `ActionRequest`, `ActionOutcome`, `NewServer`, `ProbeResult`, `ServerUpdate`, `LoginInfo`, `EventStream`, `LinkError`)
 ├── error.rs         → `LinkError` : erreurs publiques typées, jamais de secret dans un message
 ├── domain/          → Règles pures : pas d'E/S, pas d'horloge propre (le temps est un paramètre), pas de tokio
-│   ├── book.rs      → règles du carnet : `check_name` (nom requis, 255 caractères au plus, unique sans tenir compte de la casse, BR-CONN-008), `check_address` (IPv4, IPv6, nom, port ; BR-CONN-008), `address_changed` (BR-CONN-009)
+│   ├── book.rs      → règles du carnet : `check_name` (nom requis, 255 caractères au plus, unique sans tenir compte de la casse, BR-CONN-008), `check_address` (IPv4, IPv6, nom, port ; BR-CONN-008), `check_username`, `check_mac_addresses` (filtre et tronque, jamais un refus), `address_changed` (BR-CONN-009)
 │   ├── agent_identity.rs → `check_product` : seul un `/hello` annonçant `product = "hearth"` est un agent (BR-CONN-012)
 │   ├── state.rs     → `LinkMachine` : machine à états `Connected | Reconnecting | Offline | SessionExpired | AccessRevoked` pilotée par des `Input` (trafic, silence, erreur de transport, tentative réussie, 401 expiré, 401 révoqué, empreinte différente, versions incompatibles, « Réessayer maintenant », réveil, changement de réseau, connexion, déconnexion, arrêt) ; rend des `Effect` (lancer une tentative, reconnexion silencieuse, fermer le flux, résoudre les opérations). Seuils 3 s / 30 s exacts à la milliseconde, `Thresholds` injectables. `state/tests.rs` : une ligne du tableau des transitions de la spec = un test `rowNN_…`
 │   ├── backoff.rs   → délais 0,5 s, 1 s, 2 s, 4 s, 8 s, 15 s, 30 s, 30 s… avec ± 20 % d'aléa (source d'aléa fournie), plafond dur de 30 s, remise à zéro sur succès
@@ -28,7 +28,7 @@ src/
 │   ├── system.rs    → `SystemClock`, `TokioClock` (temps virtuel des tests), `OsRng`
 │   └── net_watch.rs → `SystemNetWatcher` : adresses locales (crate `if-addrs`)
 └── manager/         → Façade
-    ├── mod.rs       → `LinkManager` : `probe`, `add_server`, `update_server` (nom, couleur, adresse : une autre adresse exige l'empreinte confirmée de nouveau), `login`, `logout`, `forget_credentials` (oubli du mot de passe mémorisé), `remove_server`, `state`, `states`, `servers`, `subscribe`, `retry_now`, `accept_fingerprint`, `execute`, `last_known`, `task_restarts`, `shutdown` ; `LinkConfig` (durées par défaut = spec) ; `Ports` (tout ce qui vient du monde extérieur)
+    ├── mod.rs       → `LinkManager` (écritures d'un même serveur sous un verrou par serveur, une suppression gagne toujours ; `open_with_sink` branche une destination d'événements avant le lancement des tâches) : `probe`, `add_server`, `add_and_login` (première connexion : le serveur n'est enregistré qu'au succès), `update_server` (nom, couleur, adresse : une autre adresse exige l'empreinte confirmée de nouveau), `login`, `logout`, `forget_credentials` (oubli du mot de passe mémorisé), `remove_server`, `state`, `states`, `servers`, `subscribe`, `retry_now`, `accept_fingerprint`, `execute`, `last_known`, `task_restarts`, `shutdown` ; `LinkConfig` (durées par défaut = spec) ; `Ports` (tout ce qui vient du monde extérieur)
     ├── task.rs      → la tâche d'un serveur : seule propriétaire de la machine à états, du flux, des opérations en suspens ; une boucle `select!` (commandes, flux, tentatives, résultats internes, échéance de la machine, battement) ; supervisée sous `catch_unwind` : une panique est journalisée, comptée, et le lien repart `Offline` avec une nouvelle tentative
     ├── attempt.rs   → une tentative (flux, authentification, instantané), la reconnexion silencieuse, la relecture d'une opération : tâches abandonnables qui rendent un résultat, sans toucher à la machine
     ├── watchers.rs  → veilleurs globaux : réveil (contrôle d'horloge chaque seconde) et changement de réseau (adresses sondées toutes les 5 s)
@@ -53,7 +53,7 @@ Le début d'une coupure est le dernier message reçu (silence de 3 s) ou l'erreu
 - `Event::OperationsLost` : le fichier des suivis était illisible (mis de côté en `.corrupt`), des suivis ont pu être perdus.
 - Contrôle des références : `cargo xtask br-check` (CI) vérifie que toute référence `BR-…` du code et des docs a sa fiche.
 - Modification de l'adresse d'un serveur enregistré : `LinkManager::update_server`, nouvelle vérification de l'empreinte exigée (BR-CONN-009).
-- `LinkError::TrackingSlow` : le disque n'a pas écrit le suivi d'une action à temps (distinct de `TrackingUnavailable`, écriture en échec) ; dans les deux cas l'action n'est pas partie. Si le lien tombe pendant cette écriture, `Event::Operation` annonce « non exécuté » (la requête n'est jamais partie).
+- `LinkError::InvalidInput(InputField)` porte le champ refusé (jamais un texte). `LinkError::TrackingSlow` : le disque n'a pas écrit le suivi d'une action à temps (distinct de `TrackingUnavailable`, écriture en échec) ; dans les deux cas l'action n'est pas partie. Si le lien tombe pendant cette écriture, `Event::Operation` annonce « non exécuté » (la requête n'est jamais partie).
 
 ## Règles de la bibliothèque
 

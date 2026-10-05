@@ -22,11 +22,13 @@ export const ADD_STEPS: readonly AddStep[] = ["address", "fingerprint", "login"]
 /**
  * L'assistant d'ajout de serveur en 3 temps (BR-CONN-001, 002, 004, 011, 012) :
  * 1. nom, adresse, port, couleur : « Suivant » sonde l'adresse (aucun identifiant n'est envoyé) ;
- * 2. l'empreinte s'affiche : « Confirmer » l'enregistre (elle est épinglée), « Refuser » n'ajoute rien ;
- * 3. identifiant et mot de passe : « Se connecter » ouvre la session, « Précédent » retire le serveur
- *    qui vient d'être enregistré (les saisies de l'étape 1 sont gardées).
- * Quitter pendant le 3e temps (`abandon`) retire aussi le serveur : une saisie abandonnée ne laisse
- * rien derrière elle. Toute la logique est ici, le composant `AddServerWizard` ne fait qu'afficher.
+ * 2. l'empreinte s'affiche : « Confirmer » passe aux identifiants, « Refuser » n'ajoute rien ;
+ * 3. identifiant et mot de passe : « Se connecter » contacte le serveur sur l'empreinte confirmée,
+ *    ouvre la session et SEULEMENT si elle réussit enregistre le serveur, son empreinte et ses
+ *    secrets. Tant que la connexion n'a pas réussi rien n'existe hors de l'écran : « Précédent »,
+ *    « Annuler » ou fermer la fenêtre ne laissent rien derrière eux ; une application tuée pendant l'écriture laisse au
+ *    pire un serveur sans session (visible, supprimable), jamais un secret orphelin.
+ * Toute la logique est ici, le composant `AddServerWizard` ne fait qu'afficher.
  */
 export function useAddServer() {
   const servers = useServersStore();
@@ -40,8 +42,7 @@ export function useAddServer() {
   const color = ref<ServerColor>(1);
   const touched = ref({ name: false, host: false, port: false });
   const probe = ref<ProbeResult | null>(null);
-  const serverId = ref<string | null>(null);
-  const busy = ref<"probe" | "add" | "login" | null>(null);
+  const busy = ref<"probe" | "login" | null>(null);
   /** Échec de la sonde ou de l'enregistrement, affiché sous le champ de l'adresse. */
   const hostFailure = ref<string | null>(null);
   /** Échec du nom (déjà pris, vu par la liaison), affiché sous le champ du nom. */
@@ -51,7 +52,6 @@ export function useAddServer() {
   /** Serveur déjà enregistré à cette adresse : on propose d'ouvrir l'entrée existante. */
   const existing = ref<ServerInfo | null>(null);
   const loginError = ref<string | null>(null);
-  let connected = false;
 
   const othersNames = computed(() => servers.servers);
   const errors = computed(() => ({
@@ -120,35 +120,9 @@ export function useAddServer() {
     }
   }
 
-  /** Temps 2 : l'utilisateur confirme l'empreinte, le serveur est enregistré avec elle. */
-  async function confirm(): Promise<void> {
-    const found = probe.value;
-    if (!found || busy.value) return;
-    busy.value = "add";
-    try {
-      const server = await getLinkBridge().addServer({
-        name: name.value.trim(),
-        color: color.value,
-        host: host.value.trim(),
-        port: parsePort(port.value) ?? null,
-        fingerprint: found.fingerprint,
-        macAddresses: found.macAddresses,
-      });
-      serverId.value = server.id;
-      step.value = "login";
-    } catch (error) {
-      const failure = failureOf(error);
-      probe.value = null;
-      step.value = "address";
-      if (failure?.kind === "name_taken") nameFailure.value = t("validation.nameTaken");
-      else if (failure?.kind === "already_exists") {
-        existing.value =
-          serverAt(servers.servers, host.value, parsePort(port.value) ?? null) ?? null;
-        cardMessage.value = existing.value ? null : t("connect.existing");
-      } else cardMessage.value = failure ? failureText(failure) : t("failure.generic");
-    } finally {
-      busy.value = null;
-    }
+  /** Temps 2 : l'utilisateur confirme l'empreinte ; elle est enregistrée avec le serveur à la connexion. */
+  function confirm(): void {
+    if (probe.value && !busy.value) step.value = "login";
   }
 
   /** Temps 2 : « Refuser » : rien n'est enregistré, aucun identifiant n'est parti. */
@@ -157,49 +131,61 @@ export function useAddServer() {
     step.value = "address";
   }
 
-  /** Retire le serveur enregistré au temps 2 (sans bruit : le résultat ne change rien pour l'utilisateur). */
-  async function dropRegistered(): Promise<void> {
-    const id = serverId.value;
-    serverId.value = null;
-    if (id === null) return;
-    try {
-      await getLinkBridge().removeServer(id);
-    } catch {
-      // Déjà retiré, ou liaison indisponible : rien de plus à faire ici.
-    }
-  }
-
-  /** Temps 3 vers 1 : « Précédent ». */
-  async function back(): Promise<void> {
+  /** Temps 3 vers 1 : « Précédent ». Rien n'existe encore : on revient simplement aux saisies. */
+  function back(): void {
     if (busy.value) return;
-    await dropRegistered();
     probe.value = null;
     loginError.value = null;
     step.value = "address";
   }
 
-  /** Temps 3 : ouvre la session. Rend l'identifiant du serveur en cas de succès. */
+  /** Temps 3 : connecte et enregistre. Rend l'identifiant du serveur en cas de succès. */
   async function login(entry: {
     username: string;
     password: string;
     remember: boolean;
   }): Promise<string | null> {
-    const id = serverId.value;
-    if (id === null || busy.value || countdown.active.value) return null;
+    const found = probe.value;
+    if (!found || busy.value || countdown.active.value) return null;
     loginError.value = null;
     busy.value = "login";
     try {
-      await getLinkBridge().login(id, entry.username, entry.password, entry.remember);
-      connected = true;
-      toasts.push({
-        kind: "success",
-        message: t("connect.connectedTo", { name: name.value.trim() }),
+      const server = await getLinkBridge().addAndLogin({
+        name: name.value.trim(),
+        color: color.value,
+        host: host.value.trim(),
+        port: parsePort(port.value) ?? null,
+        fingerprint: found.fingerprint,
+        macAddresses: found.macAddresses,
+        username: entry.username,
+        password: entry.password,
+        remember: entry.remember,
       });
-      return id;
+      toasts.push({ kind: "success", message: t("connect.connectedTo", { name: server.name }) });
+      return server.id;
     } catch (error) {
       const failure = failureOf(error);
       if (failure?.kind === "too_many_attempts") {
         countdown.start(failure.retry_after_s);
+      } else if (failure?.kind === "name_taken") {
+        // Un autre serveur du même nom est apparu : retour aux saisies, nom signalé.
+        probe.value = null;
+        step.value = "address";
+        nameFailure.value = t("validation.nameTaken");
+      } else if (failure?.kind === "already_exists") {
+        probe.value = null;
+        step.value = "address";
+        existing.value =
+          serverAt(servers.servers, host.value, parsePort(port.value) ?? null) ?? null;
+        cardMessage.value = existing.value ? null : t("connect.existing");
+      } else if (
+        failure?.kind === "fingerprint_changed" ||
+        failure?.kind === "verification_required"
+      ) {
+        // Le serveur ne présente plus l'empreinte confirmée : on recommence la vérification.
+        probe.value = null;
+        step.value = "address";
+        cardMessage.value = t("failure.generic");
       } else {
         loginError.value = failure ? failureText(failure) : t("failure.generic");
       }
@@ -207,11 +193,6 @@ export function useAddServer() {
     } finally {
       busy.value = null;
     }
-  }
-
-  /** L'utilisateur quitte l'assistant : un serveur enregistré mais jamais connecté est retiré. */
-  async function abandon(): Promise<void> {
-    if (!connected) await dropRegistered();
   }
 
   return {
@@ -222,7 +203,6 @@ export function useAddServer() {
     color,
     touched,
     probe,
-    serverId,
     busy,
     errors,
     canNext,
@@ -236,6 +216,5 @@ export function useAddServer() {
     refuse,
     back,
     login,
-    abandon,
   };
 }

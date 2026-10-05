@@ -37,7 +37,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 
 ## Flux principaux
 
-- **Première connexion** : Client → probe (TLS sans confiance) → `/hello` → empreinte cert → confirmation utilisateur (assistant en 3 temps ; le serveur est enregistré à « Confirmer ») → `POST /sessions` (`X-Hearth-Api`, Argon2id, verrouillage progressif) → jeton (haché en base, session glissante 30 jours) → WebSocket `/stream` (jeton dans le premier message, snapshot puis mesures chaque seconde). Secrets au coffre Windows (`Hearth/{id}`).
+- **Première connexion** : Client → probe (TLS sans confiance) → `/hello` → empreinte cert → confirmation utilisateur (assistant en 3 temps ; le serveur n'est enregistré qu'à la connexion réussie) → `POST /sessions` (`X-Hearth-Api`, Argon2id, verrouillage progressif) → jeton (haché en base, session glissante 30 jours) → WebSocket `/stream` (jeton dans le premier message, snapshot puis mesures chaque seconde). Secrets au coffre Windows (`Hearth/{id}`).
 - **Action pendant coupure réseau** : Client envoie action avec `Idempotency-Key:ULID` → lien coupé → Client affiche « Reconnexion… » (après 3 s) → tentatives espacées (0,5 s → 30 s) → lien rétabli → vérification état opération → résultat ou relance.
 - **Mise à jour agent** : Admin → POST `/agent/update` → télécharge, vérifie minisign → superviseur lance détaché → arrêt ancien, échange binaires, redémarrage → vérification 60 s → succès ou rollback.
 

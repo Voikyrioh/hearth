@@ -478,6 +478,7 @@ impl Runner {
                 history,
             } => {
                 self.stream = Some(stream);
+                self.shared.clear_presented();
                 let now = self.deps.clock.mono();
                 let effects = self.machine.handle(now, Input::Connected);
                 if effects.contains(&Effect::ResolvePending) {
@@ -497,6 +498,7 @@ impl Runner {
             AttemptResult::RetryAfter(delay) => self.input(Input::RetryAfter(delay)).await,
             AttemptResult::Fingerprint { presented } => {
                 let expected = self.shared.record().fingerprint;
+                self.shared.set_presented(presented);
                 self.deps.sink.emit(Event::FingerprintChanged {
                     server: self.id.clone(),
                     expected,
@@ -505,7 +507,15 @@ impl Runner {
                 self.input(Input::FingerprintChanged).await;
             }
             AttemptResult::Incompatible(target) => self.input(Input::Incompatible(target)).await,
-            AttemptResult::Reauthenticated => self.input(Input::Reauthenticated).await,
+            AttemptResult::Reauthenticated { role } => {
+                let mut record = self.shared.record();
+                if record.role != Some(role) {
+                    record.role = Some(role);
+                    self.shared.set_record(record.clone());
+                    self.persister.save_record(record);
+                }
+                self.input(Input::Reauthenticated).await;
+            }
         }
     }
 
@@ -836,6 +846,7 @@ impl Runner {
                     .reply
                     .send(Ok(ActionOutcome::ResultUnknown { id: id.clone() }));
                 let expected = self.shared.record().fingerprint;
+                self.shared.set_presented(presented);
                 self.deps.sink.emit(Event::FingerprintChanged {
                     server: self.id.clone(),
                     expected,
@@ -860,26 +871,18 @@ impl Runner {
 
     /// Le suivi n'a pas pu être écrit : l'action n'est pas partie, l'appelant le sait.
     fn on_not_sent(&mut self, id: &OperationId, slow: bool) {
-        match self.waiters.remove(id) {
-            Some(waiter) => {
-                let error = if slow {
-                    LinkError::TrackingSlow
-                } else {
-                    LinkError::TrackingUnavailable
-                };
-                let _ = waiter.reply.send(Err(error));
-            }
-            None => {
-                // Le lien est tombé pendant l'écriture : l'appelant a déjà reçu « résultat
-                // inconnu » avec cette clé. La requête n'est jamais partie : on le lui dit
-                // (« Non exécuté, tu peux relancer ») au lieu de laisser l'issue manquante.
-                self.deps.sink.emit(Event::Operation {
-                    server: self.id.clone(),
-                    id: id.clone(),
-                    outcome: Outcome::NotExecuted,
-                });
-            }
-        }
+        // Sans preneur, le lien est tombé avant que ce message ne soit lu : l'appelant a déjà
+        // « résultat inconnu » et l'opération reste suivie. Rien à faire ici : la relecture au
+        // retour du lien (`NotFound`) dira « non exécuté », une seule fois.
+        let Some(waiter) = self.waiters.remove(id) else {
+            return;
+        };
+        let error = if slow {
+            LinkError::TrackingSlow
+        } else {
+            LinkError::TrackingUnavailable
+        };
+        let _ = waiter.reply.send(Err(error));
         self.pending.complete(id);
         self.persist_operations();
     }

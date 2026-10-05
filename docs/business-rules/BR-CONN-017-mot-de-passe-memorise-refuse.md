@@ -20,6 +20,8 @@ Si la reconnexion silencieuse reçoit `INVALID_CREDENTIALS` (mot de passe chang�
 ## Interface (coquille et vue)
 - `components/organisms/ReconnectPanel.vue` : raison `stored_password_refused` : formulaire de connexion, identifiant prérempli, aucun message bloquant. Test : `src/components/organisms/connect.test.ts::shows no blocking message when the remembered password was refused`.
 
+- Rôle : la reconnexion silencieuse rafraîchit le rôle du compte au carnet (un administrateur rétrogradé perd les écrans d'administration sans nouvelle saisie) ; `manager/attempt.rs` (`Reauthenticated { role }`), test `tests/tracking.rs::a_silent_reconnection_refreshes_the_role_of_the_account`.
+
 ## Vérification
 - Tests : `domain::state::tests::every_stopped_state_carries_its_reason`, `manager::attempt::tests::each_refusal_has_its_own_outcome` ; `crates/hearth-link/tests/fault_proxy.rs::a_stored_password_that_is_refused_asks_for_the_login_form_not_access_revoked`.
 

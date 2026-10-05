@@ -107,6 +107,12 @@ export class SimulatedLinkBridge implements LinkBridge {
   private readonly retryDelayMs: number;
   private readonly latencyMs: number;
   private readonly agents: SimAgent[];
+  /** Alertes d'empreinte en attente de décision (un état, rejoué à l'abonnement). */
+  private readonly alerts = new Map<string, FingerprintChange>();
+  /** Annoncés avant tout abonné : rejoués une seule fois au premier abonnement. */
+  private unreadNotices: LinkNotice[] = [];
+  private noticeIds = 0;
+  private unreadOperations: OperationEvent[] = [];
   /** Empreinte épinglée de chaque serveur du carnet. */
   private readonly pins = new Map<string, string>();
   private readonly failedLogins = new Map<string, number>();
@@ -153,16 +159,23 @@ export class SimulatedLinkBridge implements LinkBridge {
 
   async onOperation(listener: (event: OperationEvent) => void): Promise<Unsubscribe> {
     this.operationListeners.add(listener);
+    const unread = this.unreadOperations;
+    this.unreadOperations = [];
+    for (const event of unread) listener({ ...event });
     return () => void this.operationListeners.delete(listener);
   }
 
   async onFingerprintChanged(listener: (change: FingerprintChange) => void): Promise<Unsubscribe> {
     this.fingerprintListeners.add(listener);
+    for (const change of this.alerts.values()) listener({ ...change });
     return () => void this.fingerprintListeners.delete(listener);
   }
 
   async onNotice(listener: (notice: LinkNotice) => void): Promise<Unsubscribe> {
     this.noticeListeners.add(listener);
+    const unread = this.unreadNotices;
+    this.unreadNotices = [];
+    for (const notice of unread) listener({ ...notice });
     return () => void this.noticeListeners.delete(listener);
   }
 
@@ -184,8 +197,8 @@ export class SimulatedLinkBridge implements LinkBridge {
     };
   }
 
-  async addServer(input: NewServerInput): Promise<ServerInfo> {
-    this.calls.push(`add ${input.name}`);
+  async addAndLogin(input: NewServerInput): Promise<ServerInfo> {
+    this.calls.push(`add-and-login ${input.name} remember=${input.remember}`);
     await this.delay();
     const port = input.port ?? DEFAULT_PORT;
     if (
@@ -197,9 +210,21 @@ export class SimulatedLinkBridge implements LinkBridge {
       throw this.fail({ kind: "name_taken" });
     }
     const agent = this.agentAt(input.host, port);
-    if (!agent || agent.fingerprint !== input.fingerprint) {
-      throw this.fail({ kind: "fingerprint_changed" });
+    if (!agent) throw this.fail({ kind: "unreachable" });
+    // Contact épinglé sur l'empreinte confirmée : une autre identité est refusée avant tout identifiant.
+    if (agent.fingerprint !== input.fingerprint) throw this.fail({ kind: "fingerprint_changed" });
+    const key = `${input.host.toLowerCase()}:${port}`;
+    const failed = this.failedLogins.get(key) ?? 0;
+    if (failed >= MAX_FAILED_LOGINS) {
+      throw this.fail({ kind: "too_many_attempts", retry_after_s: THROTTLE_SECONDS });
     }
+    const user = agent.users?.[input.username.trim()];
+    if (!user || user.password !== input.password) {
+      this.failedLogins.set(key, failed + 1);
+      throw this.fail({ kind: "invalid_credentials" });
+    }
+    this.failedLogins.set(key, 0);
+    // La connexion a réussi : seulement maintenant le serveur, son empreinte et ses secrets existent.
     const server: ServerInfo = {
       id: `sim-${this.nextServer++}`,
       name: input.name.trim(),
@@ -207,15 +232,15 @@ export class SimulatedLinkBridge implements LinkBridge {
       host: input.host,
       port,
       color: input.color,
-      role: "readonly",
-      username: "",
-      remember: false,
+      role: user.role,
+      username: input.username.trim(),
+      remember: input.remember,
     };
     this.pins.set(server.id, input.fingerprint);
+    if (input.remember) this.vault.set(server.id, input.password);
     this.servers = [...this.servers, server];
     this.emitServers();
-    // Un serveur tout juste ajouté attend sa première connexion.
-    this.publish(server.id, "session_expired", { reason: "no_session" });
+    this.publish(server.id, "connected");
     return { ...server };
   }
 
@@ -259,9 +284,14 @@ export class SimulatedLinkBridge implements LinkBridge {
   async acceptFingerprint(serverId: string, fingerprint: string): Promise<void> {
     this.calls.push(`accept ${serverId}`);
     const server = this.requireServer(serverId);
-    this.pins.set(serverId, fingerprint);
+    const alert = this.alerts.get(serverId);
+    if (!alert || alert.presentedHex !== fingerprint) {
+      throw this.fail({ kind: "verification_required" });
+    }
+    this.pins.set(serverId, alert.presentedHex);
+    this.alerts.delete(serverId);
     const agent = this.agentAt(server.host, server.port);
-    if (agent && agent.fingerprint === fingerprint) this.publish(serverId, "connected");
+    if (agent && agent.fingerprint === alert.presentedHex) this.publish(serverId, "connected");
   }
 
   async updateServer(serverId: string, edit: ServerEdit): Promise<ServerInfo> {
@@ -304,6 +334,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.dropServer(serverId);
     this.vault.delete(serverId);
     this.pins.delete(serverId);
+    this.alerts.delete(serverId);
   }
 
   async forgetCredentials(serverId: string): Promise<void> {
@@ -340,17 +371,21 @@ export class SimulatedLinkBridge implements LinkBridge {
       failedAttempts: extra.failedAttempts ?? 0,
     };
     this.events.set(serverId, event);
+    if (event.blocked !== "fingerprint_changed") this.alerts.delete(serverId);
     for (const listener of [...this.stateListeners]) listener({ ...event });
   }
 
   /** Émet une issue d'opération. */
   emitOperation(event: OperationEvent): void {
+    if (this.operationListeners.size === 0) this.unreadOperations.push({ ...event });
     for (const listener of [...this.operationListeners]) listener({ ...event });
   }
 
   /** Émet un avis de la liaison. */
-  emitNotice(notice: LinkNotice): void {
-    for (const listener of [...this.noticeListeners]) listener({ ...notice });
+  emitNotice(notice: Omit<LinkNotice, "id"> & { id?: number }): void {
+    const full: LinkNotice = { ...notice, id: notice.id ?? ++this.noticeIds };
+    if (this.noticeListeners.size === 0) this.unreadNotices.push({ ...full });
+    for (const listener of [...this.noticeListeners]) listener({ ...full });
   }
 
   /** Ajoute un agent au réseau simulé. */
@@ -374,6 +409,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       presented: groupFingerprint(newFingerprint),
       presentedHex: newFingerprint,
     };
+    this.alerts.set(serverId, change);
     for (const listener of [...this.fingerprintListeners]) listener({ ...change });
   }
 

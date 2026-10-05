@@ -22,7 +22,7 @@ La confirmation par l'utilisateur relève du client (`hearth-link`, interface) ;
 - `crates/hearth-agent/src/app.rs::run` — sous-commande `fingerprint` : affiche la forme courte.
 
 ## Interface (coquille et vue)
-- `apps/desktop/src/components/molecules/FingerprintBlock.vue` : l'empreinte en 8 groupes de 4 sur 2 lignes ; `components/organisms/AddServerWizard.vue` (2e temps « Vérifie l'identité du serveur », boutons « Refuser » / « Confirmer ») ; logique : `composables/useAddServer.ts` (`next`, `confirm`, `refuse`).
+- `apps/desktop/src/components/molecules/FingerprintBlock.vue` : l'empreinte en 8 groupes de 4 sur 2 lignes ; `components/organisms/AddServerWizard.vue` (2e temps « Vérifie l'identité du serveur », boutons « Refuser » / « Confirmer ») ; logique : `composables/useAddServer.ts` (`next`, `confirm`, `refuse`) ; « Confirmer » ne fait qu'avancer aux identifiants, l'enregistrement a lieu à la connexion réussie.
 - Tests : `src/composables/useAddServer.test.ts`, `src/components/organisms/connect.test.ts`, `e2e/connect.spec.ts` (empreinte refusée puis acceptée).
 
 ## Vérification

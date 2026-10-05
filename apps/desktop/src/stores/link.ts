@@ -127,12 +127,23 @@ export const useLinkStore = defineStore("link", () => {
 
   function onFingerprint(change: FingerprintChange) {
     alerts.value = { ...alerts.value, [change.serverId]: change };
-    const { [change.serverId]: _old, ...rest } = dismissed.value;
-    dismissed.value = rest;
+    // Une alerte déjà refusée ne rouvre pas à un rejeu ; une empreinte différente, si.
+    if (dismissed.value[change.serverId] !== change.presentedHex) {
+      const { [change.serverId]: _old, ...rest } = dismissed.value;
+      dismissed.value = rest;
+    }
   }
+
+  // Avis déjà montrés (signal en direct et lecture d'état peuvent porter le même) : bornés.
+  const seenNotices = new Set<number>();
 
   function onNotice(notice: LinkNotice) {
     if (notice.kind !== "operations_lost") return;
+    if (notice.id > 0) {
+      if (seenNotices.has(notice.id)) return;
+      seenNotices.add(notice.id);
+      if (seenNotices.size > 200) seenNotices.delete(seenNotices.values().next().value as number);
+    }
     const name = notice.serverId ? (servers.byId(notice.serverId)?.name ?? notice.serverId) : "";
     toasts.push({ kind: "warn", message: t("bridge.operationsLost", { server: name }) });
   }
@@ -165,6 +176,8 @@ export const useLinkStore = defineStore("link", () => {
   }
 
   function onOperation(event: OperationEvent) {
+    // Le même `opId` ne se montre qu'une fois (signal en direct et lecture d'état).
+    if (event.opId in operations.value) return;
     record(event, Date.now());
     const name = servers.byId(event.serverId)?.name ?? event.serverId;
     toasts.push({

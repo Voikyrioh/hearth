@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
 import HButton from "@/components/atoms/HButton.vue";
 import HInput from "@/components/atoms/HInput.vue";
@@ -32,8 +32,8 @@ async function onLogin(entry: { username: string; password: string; remember: bo
   else login.value?.clearPassword();
 }
 
-async function cancel() {
-  await wizard.abandon();
+// Rien n'existe tant que la connexion n'a pas réussi : annuler ne défait rien.
+function cancel() {
   emit("cancel");
 }
 
@@ -41,9 +41,6 @@ function refuse() {
   wizard.refuse();
   emit("cancel");
 }
-
-// Quitter l'assistant (navigation) pendant le 3e temps : le serveur enregistré est retiré.
-onBeforeUnmount(() => void wizard.abandon());
 </script>
 
 <template>
@@ -125,10 +122,10 @@ onBeforeUnmount(() => void wizard.abandon());
       />
       <p class="wizard__help">{{ t("connect.fingerprintHelp") }}</p>
       <div class="wizard__actions">
-        <HButton variant="secondary" :disabled="wizard.busy.value === 'add'" @click="refuse">
+        <HButton variant="secondary" @click="refuse">
           {{ t("connect.refuseFingerprint") }}
         </HButton>
-        <HButton :busy="wizard.busy.value === 'add'" @click="wizard.confirm()">
+        <HButton @click="wizard.confirm()">
           {{ t("connect.confirmFingerprint") }}
         </HButton>
       </div>

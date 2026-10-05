@@ -24,6 +24,44 @@ pub enum BookError {
     BadAddress,
     #[error("port invalide")]
     BadPort,
+    #[error("identifiant invalide")]
+    BadUsername,
+}
+
+/// Longueur maximale de l'identifiant d'un compte gardé au carnet.
+pub const USERNAME_MAX_CHARS: usize = 64;
+/// Nombre maximal d'adresses MAC gardées pour un serveur.
+pub const MAC_MAX: usize = 16;
+
+/// Identifiant nettoyé (espaces de bord retirés) : non vide, borné, sans caractère de contrôle.
+pub fn check_username(username: &str) -> Result<String, BookError> {
+    let username = username.trim();
+    let bad = username.is_empty()
+        || username.chars().count() > USERNAME_MAX_CHARS
+        || username.chars().any(char::is_control);
+    if bad {
+        return Err(BookError::BadUsername);
+    }
+    Ok(username.to_owned())
+}
+
+/// Adresses MAC annoncées par l'agent : elles viennent de lui, pas de l'utilisateur, et une machine
+/// avec Docker en annonce des dizaines. On garde les valides (six paires hexadécimales, rendues en
+/// majuscules), dans l'ordre annoncé, au plus [`MAC_MAX`] ; le reste est écarté, jamais un refus.
+pub fn check_mac_addresses(macs: &[String]) -> Vec<String> {
+    macs.iter()
+        .filter(|mac| is_mac(mac))
+        .take(MAC_MAX)
+        .map(|mac| mac.to_ascii_uppercase())
+        .collect()
+}
+
+fn is_mac(mac: &str) -> bool {
+    let groups: Vec<&str> = mac.split(':').collect();
+    groups.len() == 6
+        && groups
+            .iter()
+            .all(|g| g.len() == 2 && g.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 /// Nom nettoyé (espaces de bord retirés) si valide, et unique parmi les autres serveurs
@@ -175,6 +213,48 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn a_username_is_trimmed_and_bounded() {
+        assert_eq!(check_username("  marie "), Ok("marie".to_owned()));
+        for bad in ["", "   ", "a\nb", &"x".repeat(65)] {
+            assert_eq!(check_username(bad), Err(BookError::BadUsername), "{bad:?}");
+        }
+        assert!(check_username(&"x".repeat(64)).is_ok());
+    }
+
+    #[test]
+    fn mac_addresses_are_filtered_and_truncated_never_refused() {
+        assert_eq!(
+            check_mac_addresses(&["aa:bb:cc:dd:ee:0f".to_owned()]),
+            vec!["AA:BB:CC:DD:EE:0F".to_owned()]
+        );
+        assert!(check_mac_addresses(&[]).is_empty());
+        // Les entrées mal formées sont écartées, les bonnes gardées, dans l'ordre.
+        let mixed: Vec<String> = [
+            "",
+            "aa:bb",
+            "aa:bb:cc:dd:ee:gg",
+            "11:22:33:44:55:66",
+            "aabbccddeeff",
+        ]
+        .iter()
+        .map(|m| (*m).to_owned())
+        .collect();
+        assert_eq!(
+            check_mac_addresses(&mixed),
+            vec!["11:22:33:44:55:66".to_owned()]
+        );
+        // Quarante interfaces : les seize premières valides.
+        let many: Vec<String> = (0..40).map(|n| format!("02:00:00:00:00:{n:02x}")).collect();
+        let kept = check_mac_addresses(&many);
+        assert_eq!(kept.len(), MAC_MAX);
+        assert_eq!(kept[0], "02:00:00:00:00:00");
+        assert_eq!(
+            kept[MAC_MAX - 1],
+            format!("02:00:00:00:00:{:02X}", MAC_MAX - 1)
+        );
     }
 
     #[test]

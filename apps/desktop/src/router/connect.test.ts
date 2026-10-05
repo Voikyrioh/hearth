@@ -118,4 +118,30 @@ describe("changed identity at the application level", () => {
     await flushPromises();
     expect(wrapper.find("section form").exists()).toBe(false);
   });
+
+  it("does not carry what was typed for one server over to another (review PR 12)", async () => {
+    const { bridge, router, wrapper } = await mountApp();
+    await router.push("/servers/forge/dashboard");
+    await flushPromises();
+    bridge.publish("forge", "session_expired", { reason: "expired" });
+    bridge.publish("salon", "session_expired", { reason: "expired" });
+    await flushPromises();
+    const username = () =>
+      (wrapper.get('section form input[autocomplete="username"]').element as HTMLInputElement)
+        .value;
+    const password = () =>
+      (wrapper.get('input[autocomplete="current-password"]').element as HTMLInputElement).value;
+    expect(username()).toBe("marie");
+    await wrapper.get('input[autocomplete="current-password"]').setValue("mot-de-passe-de-forge");
+    // Un mauvais essai laisse une erreur et un compte à rebours possibles : ils sont à CE serveur.
+    await router.push("/servers/salon/dashboard");
+    await flushPromises();
+    expect(username()).toBe("paul");
+    expect(password()).toBe("");
+    // Revenir ne rend pas la saisie non plus.
+    await router.push("/servers/forge/dashboard");
+    await flushPromises();
+    expect(password()).toBe("");
+    expect(bridge.calls.some((call) => call.startsWith("login"))).toBe(false);
+  });
 });

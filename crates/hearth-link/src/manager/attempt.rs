@@ -38,8 +38,11 @@ pub(crate) enum AttemptResult {
         presented: Fingerprint,
     },
     Incompatible(UpgradeTarget),
-    /// La reconnexion silencieuse a rouvert une session.
-    Reauthenticated,
+    /// La reconnexion silencieuse a rouvert une session ; `role` est celui que le serveur donne
+    /// maintenant au compte (un administrateur rétrogradé le perd sans nouvelle saisie).
+    Reauthenticated {
+        role: hearth_proto::api::accounts::RoleName,
+    },
 }
 
 /// Classe l'échec d'une ouverture de connexion ou d'une requête.
@@ -189,7 +192,9 @@ async fn reauthenticate_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
             // Le jeton passe dans un `Secret` sans copie : la réponse n'en garde rien.
             let token = Secret::new(std::mem::take(&mut response.token));
             match deps.vault.put(&id, SecretKind::Token, &token) {
-                Ok(()) => AttemptResult::Reauthenticated,
+                Ok(()) => AttemptResult::Reauthenticated {
+                    role: response.account.role,
+                },
                 Err(error) => {
                     tracing::warn!(server = %id, %error, "jeton non mémorisé");
                     AttemptResult::Failed

@@ -41,7 +41,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             link_commands::list_servers,
             link_commands::list_link_states,
             link_commands::probe_server,
-            link_commands::add_server,
+            link_commands::add_and_login,
             link_commands::login,
             link_commands::logout,
             link_commands::retry_now,
@@ -49,11 +49,15 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             link_commands::update_server,
             link_commands::remove_server,
             link_commands::forget_credentials,
+            link_commands::list_fingerprint_alerts,
+            link_commands::list_link_notices,
+            link_commands::ack_link_notices,
+            link_commands::list_unread_operations,
+            link_commands::ack_unread_operations,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()
         .typ::<link_dto::FingerprintEvent>()
-        .typ::<link_dto::SessionEndedEvent>()
         .typ::<link_dto::NoticeEvent>()
 }
 

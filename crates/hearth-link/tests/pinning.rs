@@ -156,7 +156,7 @@ async fn a_wrong_password_gets_the_generic_refusal_and_stores_nothing() {
             .login(&id, "", Secret::from(PASSWORD), false)
             .await
             .unwrap_err(),
-        LinkError::InvalidInput("identifiant ou mot de passe vide")
+        LinkError::InvalidInput(hearth_link::InputField::Credentials)
     );
 }
 
@@ -518,4 +518,141 @@ async fn forgetting_the_credentials_erases_the_password_but_keeps_the_session() 
     assert!(book.contains("\"remember\": false") || book.contains("\"remember\":false"));
     // Idempotent.
     world.manager.forget_credentials(&world.id).await.unwrap();
+}
+
+// ── Première connexion : le serveur n'entre au carnet qu'au succès (review PR 12) ─────────────
+
+#[tokio::test]
+async fn a_server_is_registered_only_when_its_first_login_succeeds() {
+    let agent = TestAgent::install().await;
+    agent.create_account("marie", Role::Admin).await;
+    let (manager, dir, vault) = bare_manager().await;
+    let probe = manager.probe("127.0.0.1", agent.addr.port()).await.unwrap();
+    let new = || server(agent.addr.port(), probe.fingerprint);
+
+    // Mot de passe refusé : rien au carnet, rien au coffre, aucun fichier.
+    let refused = manager
+        .add_and_login(new(), "marie", Secret::from("Mauvais-mot-de-passe-1"), true)
+        .await;
+    assert_eq!(refused.unwrap_err(), LinkError::InvalidCredentials);
+    assert!(manager.servers().is_empty());
+    assert!(!dir.path().join("servers.json").exists());
+    // Une autre empreinte que celle confirmée : refus avant tout identifiant.
+    let mut other = new();
+    other.fingerprint = Fingerprint::from_bytes([9; 32]);
+    let wrong = manager
+        .add_and_login(other, "marie", Secret::from(PASSWORD), true)
+        .await;
+    assert_eq!(wrong.unwrap_err(), LinkError::FingerprintChanged);
+    assert_eq!(agent.sessions_open("marie").await, 0);
+    assert!(manager.servers().is_empty());
+    // Saisies hors bornes.
+    assert!(matches!(
+        manager
+            .add_and_login(new(), "  ", Secret::from(PASSWORD), true)
+            .await,
+        Err(LinkError::InvalidInput(
+            hearth_link::InputField::Credentials
+        ))
+    ));
+
+    // Succès : tout est écrit d'un coup.
+    let (id, info) = manager
+        .add_and_login(new(), "marie", Secret::from(PASSWORD), true)
+        .await
+        .unwrap();
+    assert_eq!(info.account.username, "marie");
+    let record = manager.servers().pop().unwrap();
+    assert_eq!(record.id, id);
+    assert_eq!(record.fingerprint, probe.fingerprint);
+    assert!(record.remember);
+    assert_eq!(
+        record.role,
+        Some(hearth_proto::api::accounts::RoleName::Admin)
+    );
+    assert!(vault.get(&id, SecretKind::Token).unwrap().is_some());
+    assert!(vault.get(&id, SecretKind::Password).unwrap().is_some());
+    let book = std::fs::read_to_string(dir.path().join("servers.json")).unwrap();
+    assert!(book.contains(id.as_str()));
+    // Deux fois la même adresse ou le même nom : refusé.
+    assert_eq!(
+        manager
+            .add_and_login(new(), "marie", Secret::from(PASSWORD), true)
+            .await
+            .unwrap_err(),
+        LinkError::AlreadyExists
+    );
+}
+
+#[tokio::test]
+async fn an_agent_announcing_forty_interfaces_can_still_be_added_and_the_book_keeps_a_bounded_list()
+{
+    let agent = TestAgent::install().await;
+    agent.create_account("marie", Role::Admin).await;
+    let (manager, _dir, _vault) = bare_manager().await;
+    let probe = manager.probe("127.0.0.1", agent.addr.port()).await.unwrap();
+    let mut new = server(agent.addr.port(), probe.fingerprint);
+    // Un hôte Docker : une interface par conteneur, et quelques entrées illisibles.
+    new.mac_addresses = (0..40)
+        .map(|n| format!("02:42:ac:11:00:{n:02x}"))
+        .chain(["pas une adresse".to_owned()])
+        .collect();
+    let (id, _) = manager
+        .add_and_login(new, "marie", Secret::from(PASSWORD), true)
+        .await
+        .expect("la liste d'interfaces ne bloque jamais l'ajout");
+    let record = manager.servers().into_iter().find(|s| s.id == id).unwrap();
+    assert_eq!(record.mac_addresses.len(), 16);
+    assert_eq!(record.mac_addresses[0], "02:42:AC:11:00:00");
+}
+
+#[tokio::test]
+async fn only_the_fingerprint_the_server_presented_can_be_accepted() {
+    use hearth_link::domain::event::Event;
+    let world = World::connected(Options {
+        remember: true,
+        ..Options::default()
+    })
+    .await;
+    // Rien n'attend de décision : aucune empreinte ne s'accepte.
+    assert_eq!(
+        world
+            .manager
+            .accept_fingerprint(&world.id, Fingerprint::from_bytes([5; 32]))
+            .await
+            .unwrap_err(),
+        LinkError::InvalidInput(hearth_link::InputField::Fingerprint)
+    );
+    let reinstalled = TestAgent::install().await;
+    reinstalled.create_account("marie", Role::Admin).await;
+    let mark = world.recorder.mark();
+    world.proxy.cut();
+    world.proxy.set_target(reinstalled.addr);
+    world.proxy.heal();
+    let (_, event) = world
+        .recorder
+        .wait_for(mark, "empreinte changée", WAIT, |e| {
+            matches!(e, Event::FingerprintChanged { .. })
+        })
+        .await;
+    let Event::FingerprintChanged { presented, .. } = event else {
+        unreachable!()
+    };
+    // Une autre empreinte que celle affichée : refusée, et rien ne change.
+    assert_eq!(
+        world
+            .manager
+            .accept_fingerprint(&world.id, Fingerprint::from_bytes([6; 32]))
+            .await
+            .unwrap_err(),
+        LinkError::InvalidInput(hearth_link::InputField::Fingerprint)
+    );
+    assert_eq!(world.manager.servers()[0].fingerprint, world.fingerprint);
+    // Celle qui est présentée : acceptée.
+    world
+        .manager
+        .accept_fingerprint(&world.id, presented)
+        .await
+        .unwrap();
+    assert_eq!(world.manager.servers()[0].fingerprint, presented);
 }

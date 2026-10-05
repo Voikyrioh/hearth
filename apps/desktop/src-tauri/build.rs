@@ -11,7 +11,7 @@ const COMMANDS: &[&str] = &[
     "list_servers",
     "list_link_states",
     "probe_server",
-    "add_server",
+    "add_and_login",
     "login",
     "logout",
     "retry_now",
@@ -19,6 +19,11 @@ const COMMANDS: &[&str] = &[
     "update_server",
     "remove_server",
     "forget_credentials",
+    "list_fingerprint_alerts",
+    "list_link_notices",
+    "ack_link_notices",
+    "list_unread_operations",
+    "ack_unread_operations",
 ];
 
 fn main() {

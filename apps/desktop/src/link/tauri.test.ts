@@ -1,6 +1,6 @@
 import { emit } from "@tauri-apps/api/event";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LinkStateDto, ServerDto } from "@/bindings";
 import { LINK_EVENTS, TauriLinkBridge, toServerInfo, toStateEvent } from "./tauri";
 import { LinkCommandError } from "./types";
@@ -93,8 +93,8 @@ describe("TauriLinkBridge", () => {
     expect(states).toEqual([4, 5]);
   });
 
-  it("delivers the fingerprint alert, the operation outcomes and the notices", async () => {
-    ipc(() => undefined);
+  it("delivers the fingerprint alert, the operation outcomes and the notices live", async () => {
+    ipc(() => []);
     const bridge = new TauriLinkBridge();
     const got: string[] = [];
     await bridge.onFingerprintChanged((c) => got.push(`fp:${c.presentedHex}`));
@@ -107,8 +107,52 @@ describe("TauriLinkBridge", () => {
       presentedHex: "bb".repeat(32),
     });
     await emit(LINK_EVENTS.operation, { opId: "o1", serverId: "01J9", outcome: "unknown" });
-    await emit(LINK_EVENTS.notice, { kind: "operations_lost", serverId: "01J9" });
+    await emit(LINK_EVENTS.notice, { id: 3, kind: "operations_lost", serverId: "01J9" });
     expect(got).toEqual([`fp:${"bb".repeat(32)}`, "op:unknown", "notice:operations_lost"]);
+  });
+
+  it("replays what the shell kept for a listener that arrives after the event (review PR 12)", async () => {
+    const alert = {
+      serverId: "01J9",
+      expected: "AAAA",
+      presented: "BBBB",
+      presentedHex: "bb".repeat(32),
+    };
+    const calls = ipc((cmd) => {
+      switch (cmd) {
+        case "list_fingerprint_alerts":
+          return [alert];
+        case "list_link_notices":
+          return [{ id: 7, kind: "operations_lost", serverId: "01J9" }];
+        case "list_unread_operations":
+          return [{ opId: "o1", serverId: "01J9", outcome: "not_executed" }];
+        default:
+          return undefined;
+      }
+    });
+    const bridge = new TauriLinkBridge();
+    const got: string[] = [];
+    await bridge.onFingerprintChanged((c) => got.push(`fp:${c.serverId}`));
+    await bridge.onOperation((o) => got.push(`op:${o.outcome}`));
+    await bridge.onNotice((n) => got.push(`notice:${n.kind}`));
+    expect(got).toEqual(["fp:01J9", "op:not_executed", "notice:operations_lost"]);
+    // Remis à l'écouteur, puis acquittés par identifiant (la lecture ne détruit rien).
+    await vi.waitFor(() => {
+      const acks = calls.filter((call) => call.cmd.startsWith("ack_"));
+      expect(acks.map((call) => call.cmd).sort()).toEqual([
+        "ack_link_notices",
+        "ack_unread_operations",
+      ]);
+      expect(acks.find((call) => call.cmd === "ack_link_notices")?.args).toEqual({ ids: [7] });
+      expect(acks.find((call) => call.cmd === "ack_unread_operations")?.args).toEqual({
+        opIds: ["o1"],
+      });
+    });
+    // S'abonner d'abord, puis lire : aucun événement ne tombe entre les deux.
+    const order = calls.map((call) => call.cmd);
+    expect(order.indexOf("plugin:event|listen")).toBeLessThan(
+      order.indexOf("list_fingerprint_alerts"),
+    );
   });
 
   it("sends each command with the arguments of the shell and returns typed results", async () => {
@@ -122,7 +166,7 @@ describe("TauriLinkBridge", () => {
             agentVersion: "0.1.0",
             macAddresses: ["AA:BB"],
           };
-        case "add_server":
+        case "add_and_login":
         case "update_server":
           return forge;
         case "login":
@@ -133,13 +177,16 @@ describe("TauriLinkBridge", () => {
     });
     const bridge = new TauriLinkBridge();
     expect((await bridge.probeServer("forge.lan", null)).machineName).toBe("forge");
-    const added = await bridge.addServer({
+    const added = await bridge.addAndLogin({
       name: "Forge",
       color: 3,
       host: "forge.lan",
       port: null,
       fingerprint: "ab".repeat(32),
       macAddresses: ["AA:BB"],
+      username: "marie",
+      password: "Mot-de-passe-1",
+      remember: true,
     });
     expect(added.id).toBe("01J9");
     expect(await bridge.login("01J9", "marie", "Mot-de-passe-1", true)).toEqual({
@@ -159,7 +206,7 @@ describe("TauriLinkBridge", () => {
     await bridge.forgetCredentials("01J9");
     expect(calls.map((c) => c.cmd)).toEqual([
       "probe_server",
-      "add_server",
+      "add_and_login",
       "login",
       "logout",
       "retry_now",
@@ -170,13 +217,19 @@ describe("TauriLinkBridge", () => {
     ]);
     expect(calls[0]?.args).toEqual({ host: "forge.lan", port: null });
     expect(calls[1]?.args).toEqual({
-      name: "Forge",
-      color: 3,
-      host: "forge.lan",
-      port: null,
-      fingerprint: "ab".repeat(32),
-      macAddresses: ["AA:BB"],
+      input: {
+        name: "Forge",
+        color: 3,
+        host: "forge.lan",
+        port: null,
+        fingerprint: "ab".repeat(32),
+        macAddresses: ["AA:BB"],
+        username: "marie",
+        password: "Mot-de-passe-1",
+        remember: true,
+      },
     });
+    expect(calls[5]?.args).toEqual({ serverId: "01J9", fingerprint: "cd".repeat(32) });
     expect(calls[2]?.args).toEqual({
       serverId: "01J9",
       username: "marie",

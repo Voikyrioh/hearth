@@ -19,6 +19,11 @@ import type {
  *
  * Contrat des abonnements (calqué sur `listen` de Tauri, qui rend une promesse) :
  * - chaque `on...` rend une PROMESSE de désabonnement ;
+ * - `onFingerprintChanged` rejoue les alertes d'empreinte en attente de décision, `onNotice` et
+ *   `onOperation` rejouent ce qui est retenu et non acquitté : un événement n'est qu'un signal,
+ *   l'état qui compte se relit à l'abonnement. Une lecture ne détruit rien ; l'écouteur est suivi
+ *   d'un acquittement par identifiant, et peut recevoir deux fois le même avis (signal et lecture) :
+ *   le récepteur dédoublonne ;
  * - `onServersChanged` et `onLinkState` REJOUENT l'état courant à l'abonnement (le
  *   récepteur est appelé avec la liste ou avec l'événement de chaque serveur, au plus
  *   tard avant que la promesse ne se résolve) : il n'y a donc pas de « lecture initiale »
@@ -35,17 +40,22 @@ export interface LinkBridge {
   onLinkState(listener: (event: LinkStateEvent) => void): Promise<Unsubscribe>;
   /** « Réessayer maintenant » : relance une tentative immédiate (BR-RESIL-005). */
   retryNow(serverId: string): Promise<void>;
-  /** Issues d'opérations incertaines (`link://operation`). Pas de rejeu. */
+  /** Issues d'opérations incertaines (`link://operation`) ; rejoue celles d'avant l'abonnement, une fois. */
   onOperation(listener: (event: OperationEvent) => void): Promise<Unsubscribe>;
-  /** Alertes d'empreinte changée (`link://fingerprint`, BR-CONN-003). Pas de rejeu. */
+  /** Alertes d'empreinte changée (`link://fingerprint`, BR-CONN-003) ; rejoue celles en attente de décision. */
   onFingerprintChanged(listener: (change: FingerprintChange) => void): Promise<Unsubscribe>;
-  /** Avis de la liaison (`link://notice`) : suivis d'actions perdus, écoute en retard. Pas de rejeu. */
+  /** Avis de la liaison (`link://notice`) : suivis d'actions perdus, écoute en retard ; rejoue les non lus, une fois. */
   onNotice(listener: (notice: LinkNotice) => void): Promise<Unsubscribe>;
 
   /** Première prise de contact : l'empreinte à faire confirmer. Aucun identifiant n'est envoyé (BR-CONN-011). */
   probeServer(host: string, port: number | null): Promise<ProbeResult>;
-  /** Enregistre le serveur dont l'empreinte vient d'être confirmée (BR-CONN-002). */
-  addServer(input: NewServerInput): Promise<ServerInfo>;
+  /**
+   * Fin de l'assistant : contacte le serveur épinglé sur l'empreinte confirmée, ouvre la session,
+   * et SEULEMENT si elle réussit enregistre le serveur, son empreinte et ses secrets (BR-CONN-002,
+   * 004). Un échec ou un abandon ne laisse rien ; une application tuée pendant l'écriture laisse au pire un
+   * serveur sans session, jamais un secret orphelin.
+   */
+  addAndLogin(input: NewServerInput): Promise<ServerInfo>;
   /** Ouvre la session ; `remember` : mot de passe au coffre de Windows (BR-CONN-004). */
   login(
     serverId: string,
@@ -55,7 +65,10 @@ export interface LinkBridge {
   ): Promise<{ role: Role }>;
   /** Déconnexion volontaire : le mot de passe mémorisé est conservé (BR-CONN-016). */
   logout(serverId: string): Promise<void>;
-  /** L'utilisateur accepte la nouvelle empreinte `fingerprint` (forme complète). */
+  /**
+   * L'utilisateur accepte la nouvelle empreinte `fingerprint` (celle qu'il a sous les yeux, forme
+   * complète) : refusée si ce n'est pas celle que le serveur a présentée et qui attend.
+   */
   acceptFingerprint(serverId: string, fingerprint: string): Promise<void>;
   /** Modifie nom, couleur, adresse. Une autre adresse exige l'empreinte confirmée de nouveau (BR-CONN-009). */
   updateServer(serverId: string, edit: ServerEdit): Promise<ServerInfo>;

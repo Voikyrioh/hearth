@@ -93,6 +93,8 @@ export interface FingerprintChange {
 
 /** Événement `link://notice` : quelque chose que la liaison veut dire sans qu'on le lui demande. */
 export interface LinkNotice {
+  /** Numéro de l'avis retenu par la coquille (acquittement, dédoublonnage) ; 0 : non retenu. */
+  id: number;
   /** Les suivis d'actions étaient illisibles / l'écoute a pris du retard. */
   kind: "operations_lost" | "lagged";
   serverId: string | null;
@@ -109,15 +111,22 @@ export interface ProbeResult {
   macAddresses: string[];
 }
 
+/**
+ * Ce que l'assistant envoie à sa dernière étape : le serveur dont l'empreinte vient d'être
+ * confirmée et les identifiants. Le serveur n'est enregistré que si la connexion réussit.
+ */
 export interface NewServerInput {
   name: string;
   color: ServerColor;
   host: string;
   /** `null` : port par défaut. */
   port: number | null;
-  /** Empreinte confirmée par l'utilisateur, forme complète. */
+  /** Empreinte confirmée par l'utilisateur, forme complète (celle de la dernière sonde). */
   fingerprint: string;
   macAddresses: string[];
+  username: string;
+  password: string;
+  remember: boolean;
 }
 
 export interface ServerEdit {

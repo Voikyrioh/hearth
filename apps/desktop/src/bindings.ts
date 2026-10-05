@@ -19,7 +19,8 @@ export const commands = {
 	listServers: () => __TAURI_INVOKE<ServerDto[]>("list_servers"),
 	listLinkStates: () => __TAURI_INVOKE<LinkStateDto[]>("list_link_states"),
 	probeServer: (host: string, port: number | null) => typedError<ProbeDto, LinkFailure>(__TAURI_INVOKE("probe_server", { host, port })),
-	addServer: (name: string, color: number, host: string, port: number | null, fingerprint: string, macAddresses: string[]) => typedError<ServerDto, LinkFailure>(__TAURI_INVOKE("add_server", { name, color, host, port, fingerprint, macAddresses })),
+	/**  Fin de l'assistant d'ajout : le serveur n'est enregistré que si la connexion réussit. */
+	addAndLogin: (input: AddServerInput) => typedError<ServerDto, LinkFailure>(__TAURI_INVOKE("add_and_login", { input })),
 	login: (serverId: string, username: string, password: string, remember: boolean) => typedError<LoginDto, LinkFailure>(__TAURI_INVOKE("login", { serverId, username, password, remember })),
 	logout: (serverId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("logout", { serverId })),
 	retryNow: (serverId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("retry_now", { serverId })),
@@ -27,9 +28,34 @@ export const commands = {
 	updateServer: (serverId: string, name: string, color: number, host: string, port: number | null, fingerprint: string | null) => typedError<ServerDto, LinkFailure>(__TAURI_INVOKE("update_server", { serverId, name, color, host, port, fingerprint })),
 	removeServer: (serverId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("remove_server", { serverId })),
 	forgetCredentials: (serverId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("forget_credentials", { serverId })),
+	/**  Alertes d'empreinte en attente de décision : à lire après l'abonnement à `link://fingerprint`. */
+	listFingerprintAlerts: () => __TAURI_INVOKE<FingerprintEvent[]>("list_fingerprint_alerts"),
+	/**  Avis de la liaison retenus tant qu'ils ne sont pas acquittés (lecture non destructive). */
+	listLinkNotices: () => __TAURI_INVOKE<NoticeEvent[]>("list_link_notices"),
+	ackLinkNotices: (ids: number[]) => __TAURI_INVOKE<void>("ack_link_notices", { ids }),
+	/**  Issues d'actions retenues tant qu'elles ne sont pas acquittées (lecture non destructive). */
+	listUnreadOperations: () => __TAURI_INVOKE<OperationEventDto[]>("list_unread_operations"),
+	ackUnreadOperations: (opIds: string[]) => __TAURI_INVOKE<void>("ack_unread_operations", { opIds }),
 };
 
 /* Types */
+/**
+ *  Ce que l'assistant envoie à sa dernière étape : le serveur confirmé et les identifiants. Pas de
+ *  `Debug` : il porte un mot de passe.
+ */
+export type AddServerInput = {
+	name: string,
+	color: number,
+	host: string,
+	port: number | null,
+	/**  Empreinte confirmée par l'utilisateur, forme complète : celle de la dernière sonde. */
+	fingerprint: string,
+	macAddresses: string[],
+	username: string,
+	password: string,
+	remember: boolean,
+};
+
 /**
  *  Erreur d'une commande. Sérialisée `{ kind, message }` côté TypeScript ;
  *  l'interface choisit son texte d'après `kind`.
@@ -103,6 +129,8 @@ export type LoginDto = {
 };
 
 export type NoticeEvent = {
+	/**  Numéro de l'avis retenu par la coquille (acquittement, dédoublonnage) ; 0 : non retenu. */
+	id: number,
 	kind: NoticeKind,
 	serverId: string | null,
 };
@@ -154,13 +182,6 @@ export type ServerDto = {
 
 export type ServersEvent = {
 	servers: ServerDto[],
-};
-
-export type SessionEndDto = "expired" | "revoked" | "stored_password_refused";
-
-export type SessionEndedEvent = {
-	serverId: string,
-	kind: SessionEndDto,
 };
 
 /**

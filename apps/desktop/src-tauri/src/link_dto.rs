@@ -5,18 +5,18 @@
 
 use std::collections::HashMap;
 
-use hearth_link::LinkError;
 use hearth_link::domain::book::BookError;
 use hearth_link::domain::compat::Compatibility;
-use hearth_link::domain::event::{SessionEnd, StateInfo};
+use hearth_link::domain::event::StateInfo;
 use hearth_link::domain::pending_ops::Outcome;
 use hearth_link::domain::server::{ServerId, ServerRecord};
 use hearth_link::domain::state::{Blocked, LinkState, Reason};
+use hearth_link::{InputField, LinkError};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::error::UpgradeTarget;
 use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::product::DEFAULT_PORT;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 
 /// Noms des événements Tauri (conception technique, section 9).
@@ -25,7 +25,6 @@ pub mod events {
     pub const STATE: &str = "link://state";
     pub const OPERATION: &str = "link://operation";
     pub const FINGERPRINT: &str = "link://fingerprint";
-    pub const SESSION_ENDED: &str = "link://session-ended";
     pub const NOTICE: &str = "link://notice";
 }
 
@@ -268,24 +267,6 @@ impl From<&Outcome> for OutcomeDto {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionEndDto {
-    Expired,
-    Revoked,
-    StoredPasswordRefused,
-}
-
-impl From<SessionEnd> for SessionEndDto {
-    fn from(end: SessionEnd) -> Self {
-        match end {
-            SessionEnd::Expired => Self::Expired,
-            SessionEnd::Revoked => Self::Revoked,
-            SessionEnd::StoredPasswordRefused => Self::StoredPasswordRefused,
-        }
-    }
-}
-
 // ── Charges des événements ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
@@ -325,13 +306,6 @@ impl FingerprintEvent {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionEndedEvent {
-    pub server_id: String,
-    pub kind: SessionEndDto,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum NoticeKind {
@@ -344,6 +318,8 @@ pub enum NoticeKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct NoticeEvent {
+    /// Numéro de l'avis retenu par la coquille (acquittement, dédoublonnage) ; 0 : non retenu.
+    pub id: u32,
     pub kind: NoticeKind,
     pub server_id: Option<String>,
 }
@@ -368,6 +344,23 @@ pub struct ProbeDto {
 pub struct LoginDto {
     pub role: RoleDto,
     pub username: String,
+}
+
+/// Ce que l'assistant envoie à sa dernière étape : le serveur confirmé et les identifiants. Pas de
+/// `Debug` : il porte un mot de passe.
+#[derive(Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AddServerInput {
+    pub name: String,
+    pub color: u8,
+    pub host: String,
+    pub port: Option<u16>,
+    /// Empreinte confirmée par l'utilisateur, forme complète : celle de la dernière sonde.
+    pub fingerprint: String,
+    pub mac_addresses: Vec<String>,
+    pub username: String,
+    pub password: String,
+    pub remember: bool,
 }
 
 /// Échec d'une commande de liaison, sans texte : l'interface choisit le message d'après `kind`.
@@ -439,13 +432,13 @@ impl From<LinkError> for LinkFailure {
             LinkError::AlreadyExists => Self::AlreadyExists,
             LinkError::NameTaken => Self::NameTaken,
             LinkError::VerificationRequired => Self::VerificationRequired,
-            LinkError::InvalidInput(what) => Self::InvalidInput {
-                field: match what {
-                    "nom du serveur" => InvalidField::Name,
-                    "adresse du serveur" => InvalidField::Address,
-                    "port du serveur" => InvalidField::Port,
-                    "identifiant ou mot de passe vide" => InvalidField::Credentials,
-                    _ => InvalidField::Other,
+            LinkError::InvalidInput(field) => Self::InvalidInput {
+                field: match field {
+                    InputField::Name => InvalidField::Name,
+                    InputField::Address => InvalidField::Address,
+                    InputField::Port => InvalidField::Port,
+                    InputField::Credentials => InvalidField::Credentials,
+                    InputField::Fingerprint => InvalidField::Fingerprint,
                 },
             },
             LinkError::FingerprintChanged => Self::FingerprintChanged,

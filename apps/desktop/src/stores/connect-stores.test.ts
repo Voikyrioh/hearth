@@ -120,6 +120,36 @@ describe("fingerprint alerts (BR-CONN-003)", () => {
     expect(link.pendingAlert("forge")).toBeUndefined();
   });
 
+  it("finds a blocking alert that was raised before the interface listened (review PR 12)", async () => {
+    const ctx = freshBridge({ agents: [{ ...SAMPLE_AGENT, host: "192.168.1.120" }] });
+    // L'identité change pendant que l'application démarre : aucun abonné, aucun événement reçu.
+    ctx.bridge.reinstallAgent("forge", OTHER_FINGERPRINT);
+    const link = useLinkStore();
+    expect(link.pendingAlert("forge")).toBeUndefined();
+    await link.start();
+    expect(link.eventOf("forge")).toMatchObject({ blocked: "fingerprint_changed" });
+    expect(link.pendingAlert("forge")?.presentedHex).toBe(OTHER_FINGERPRINT);
+    // « Voir l'alerte » la rouvre après un refus, y compris au rejeu d'un nouvel abonnement.
+    link.dismissAlert("forge");
+    expect(link.pendingAlert("forge")).toBeUndefined();
+    link.reopenAlert("forge");
+    expect(link.pendingAlert("forge")?.presentedHex).toBe(OTHER_FINGERPRINT);
+    await link.acceptAlert("forge");
+    expect(link.pendingAlert("forge")).toBeUndefined();
+    expect(link.eventOf("forge")).toMatchObject({ state: "connected", blocked: null });
+  });
+
+  it("keeps a refused alert closed when the same alert is replayed", async () => {
+    const ctx = freshBridge({ agents: [{ ...SAMPLE_AGENT, host: "192.168.1.120" }] });
+    const link = useLinkStore();
+    await link.start();
+    ctx.bridge.reinstallAgent("forge", OTHER_FINGERPRINT);
+    link.dismissAlert("forge");
+    link.stop();
+    await link.start();
+    expect(link.pendingAlert("forge")).toBeUndefined();
+  });
+
   it("drops the alert when the block is lifted by anything else", async () => {
     const { bridge, link } = await started();
     bridge.reinstallAgent("forge", OTHER_FINGERPRINT);
@@ -129,6 +159,22 @@ describe("fingerprint alerts (BR-CONN-003)", () => {
 });
 
 describe("notices of the library", () => {
+  it("shows a notice announced before the interface listened (review PR 12)", async () => {
+    const { bridge } = freshBridge();
+    bridge.emitNotice({ kind: "operations_lost", serverId: "forge" });
+    expect(useToastsStore().items).toHaveLength(0);
+    const link = useLinkStore();
+    await link.start();
+    expect(useToastsStore().items.at(-1)?.message).toBe(
+      "forge : le suivi de certaines actions a été perdu. Vérifie l'état du serveur avant de relancer.",
+    );
+    // Une fois lu, un nouvel abonnement ne le rejoue pas.
+    link.stop();
+    useToastsStore().clear();
+    await link.start();
+    expect(useToastsStore().items).toHaveLength(0);
+  });
+
   it("tells which server lost its pending-action files, without a blocking window", async () => {
     const { bridge } = freshBridge();
     const link = useLinkStore();
@@ -140,6 +186,11 @@ describe("notices of the library", () => {
       message:
         "forge : le suivi de certaines actions a été perdu. Vérifie l'état du serveur avant de relancer.",
     });
+    // Le même avis reçu deux fois (signal en direct et lecture d'état) ne se montre qu'une fois.
+    bridge.emitNotice({ id: 42, kind: "operations_lost", serverId: "forge" });
+    bridge.emitNotice({ id: 42, kind: "operations_lost", serverId: "forge" });
+    expect(useToastsStore().items.filter((t) => t.message.startsWith("forge")).length).toBe(1);
+    expect(useToastsStore().items.find((t) => t.message.startsWith("forge"))?.count).toBe(2); // le premier avis, puis un seul pour le numéro 42
     // « Écoute en retard » n'est pas un message pour l'utilisateur.
     bridge.emitNotice({ kind: "lagged", serverId: null });
     expect(useToastsStore().items).toHaveLength(1);

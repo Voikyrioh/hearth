@@ -38,7 +38,7 @@ export class NullLinkBridge implements LinkBridge {
   async probeServer(): Promise<never> {
     return this.unavailable();
   }
-  async addServer(): Promise<never> {
+  async addAndLogin(): Promise<never> {
     return this.unavailable();
   }
   async login(): Promise<never> {

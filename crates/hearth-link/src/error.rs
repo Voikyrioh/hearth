@@ -7,6 +7,16 @@ use crate::domain::book::BookError;
 use crate::domain::compat::Compatibility;
 use crate::ports::transport::{ApiError, TransportError};
 
+/// Le champ d'une saisie refusée (jamais un texte : l'interface choisit son message).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputField {
+    Name,
+    Address,
+    Port,
+    Credentials,
+    Fingerprint,
+}
+
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum LinkError {
     #[error("serveur inconnu")]
@@ -19,8 +29,8 @@ pub enum LinkError {
     /// L'adresse change : l'empreinte doit être relue et confirmée de nouveau (BR-CONN-009).
     #[error("nouvelle vérification de l'empreinte requise")]
     VerificationRequired,
-    #[error("paramètre invalide : {0}")]
-    InvalidInput(&'static str),
+    #[error("paramètre invalide : {0:?}")]
+    InvalidInput(InputField),
     /// Le lien n'est pas « Connecté » : rien n'a été envoyé (BR-RESIL-008).
     #[error("le lien avec le serveur n'est pas établi")]
     NotConnected,
@@ -63,11 +73,12 @@ impl From<BookError> for LinkError {
     fn from(error: BookError) -> Self {
         match error {
             BookError::NameRequired | BookError::NameTooLong => {
-                Self::InvalidInput("nom du serveur")
+                Self::InvalidInput(InputField::Name)
             }
             BookError::NameTaken => Self::NameTaken,
-            BookError::BadAddress => Self::InvalidInput("adresse du serveur"),
-            BookError::BadPort => Self::InvalidInput("port du serveur"),
+            BookError::BadAddress => Self::InvalidInput(InputField::Address),
+            BookError::BadPort => Self::InvalidInput(InputField::Port),
+            BookError::BadUsername => Self::InvalidInput(InputField::Credentials),
         }
     }
 }

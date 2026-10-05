@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import LoginForm from "@/components/organisms/LoginForm.vue";
-import { useCountdown } from "@/composables/useCountdown";
+import { useReconnect } from "@/composables/useReconnect";
 import { t } from "@/i18n";
-import { failureMessage, failureOf, getLinkBridge, type Reason, type ServerInfo } from "@/link";
+import type { Reason, ServerInfo } from "@/link";
 
 // Serveur enregistré sans session : session expirée, déconnexion volontaire, première connexion
 // interrompue, ou mot de passe mémorisé devenu invalide. Le formulaire de connexion remplace la
 // page, identifiant prérempli. Mot de passe mémorisé refusé : aucun message bloquant, juste le
-// formulaire (BR-CONN-017). Accès révoqué : rien à saisir, on dit à qui s'adresser.
+// formulaire (BR-CONN-017). Accès révoqué : rien à saisir, on dit à qui s'adresser. Le panneau est
+// recréé pour chaque serveur (`:key` du gabarit) : la saisie d'un serveur ne part jamais vers un autre.
 const props = defineProps<{ server: ServerInfo; reason: Reason | null; revoked?: boolean }>();
 
-const countdown = useCountdown();
-const busy = ref(false);
-const error = ref<string | null>(null);
+const reconnect = useReconnect(() => props.server);
 const form = ref<InstanceType<typeof LoginForm> | null>(null);
 
 const notice = computed(() => {
@@ -22,19 +21,8 @@ const notice = computed(() => {
 });
 
 async function submit(entry: { username: string; password: string; remember: boolean }) {
-  if (busy.value || countdown.active.value) return;
-  error.value = null;
-  busy.value = true;
-  try {
-    await getLinkBridge().login(props.server.id, entry.username, entry.password, entry.remember);
-  } catch (failure) {
-    const reason = failureOf(failure);
-    if (reason?.kind === "too_many_attempts") countdown.start(reason.retry_after_s);
-    else error.value = reason ? failureMessage(reason) : t("failure.generic");
-    form.value?.clearPassword();
-  } finally {
-    busy.value = false;
-  }
+  const connected = await reconnect.submit(entry);
+  if (!connected) form.value?.clearPassword();
 }
 </script>
 
@@ -46,9 +34,9 @@ async function submit(entry: { username: string; password: string; remember: boo
       v-if="!revoked"
       ref="form"
       :username="server.username"
-      :busy="busy"
-      :error="error"
-      :locked-seconds="countdown.remaining.value"
+      :busy="reconnect.busy.value"
+      :error="reconnect.error.value"
+      :locked-seconds="reconnect.lockedSeconds.value"
       :remember="server.remember || reason !== 'stored_password_refused'"
       @submit="submit"
     />

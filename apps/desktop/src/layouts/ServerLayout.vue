@@ -49,6 +49,7 @@ const title = computed(() => (route.meta.title ? t(route.meta.title) : ""));
         <!-- Sans session : le formulaire de connexion, au-dessus de la dernière vue (périmée). -->
         <ReconnectPanel
           v-if="state === 'session_expired' || state === 'access_revoked'"
+          :key="server.id"
           :server="server"
           :reason="event?.reason ?? null"
           :revoked="state === 'access_revoked'"

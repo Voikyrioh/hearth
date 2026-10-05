@@ -12,7 +12,7 @@
     "allow-list-servers",
     "allow-list-link-states",
     "allow-probe-server",
-    "allow-add-server",
+    "allow-add-and-login",
     "allow-login",
     "allow-logout",
     "allow-retry-now",
@@ -20,6 +20,11 @@
     "allow-update-server",
     "allow-remove-server",
     "allow-forget-credentials",
+    "allow-list-fingerprint-alerts",
+    "allow-list-link-notices",
+    "allow-ack-link-notices",
+    "allow-list-unread-operations",
+    "allow-ack-unread-operations",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

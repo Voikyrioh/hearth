@@ -42,10 +42,10 @@ const LABELS: Record<LinkState, MessageKey> = {
       </div>
     </div>
     <div class="dev__buttons">
-      <HButton variant="ghost" size="sm" @click="sim.emitOperation({ opId: 'sim', serverId: servers.current?.id ?? servers.first?.id ?? '', outcome: 'done' })">
+      <HButton variant="ghost" size="sm" @click="sim.emitOperation({ opId: `sim${Date.now()}`, serverId: servers.current?.id ?? servers.first?.id ?? '', outcome: 'done' })">
         {{ t("operation.done") }}
       </HButton>
-      <HButton variant="ghost" size="sm" @click="sim.emitOperation({ opId: 'sim', serverId: servers.current?.id ?? servers.first?.id ?? '', outcome: 'unknown' })">
+      <HButton variant="ghost" size="sm" @click="sim.emitOperation({ opId: `sim${Date.now()}`, serverId: servers.current?.id ?? servers.first?.id ?? '', outcome: 'unknown' })">
         {{ t("operation.unknown") }}
       </HButton>
     </div>

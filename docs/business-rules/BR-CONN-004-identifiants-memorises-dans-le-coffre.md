@@ -22,10 +22,11 @@ Le mot de passe n'est mémorisé que si l'utilisateur coche « Se souvenir de mo
 - `apps/desktop/src/components/organisms/LoginForm.vue` : case « Se souvenir de moi sur ce PC », cochée par défaut ; `pages/Servers.vue` : « Oublier mes identifiants ».
 
 ## Vérification
-- Tests : `crates/hearth-link/tests/pinning.rs::forgetting_the_credentials_erases_the_password_but_keeps_the_session`, `::servers_are_validated_listed_and_removed_with_their_secrets` ; `apps/desktop/src-tauri/tests/vault.rs` (clés, aller-retour, effacement ; `the_windows_credential_manager_stores_reads_and_erases_a_secret` contre le vrai Gestionnaire, `--ignored`) ; `tests/link_runtime.rs::the_wizard_flow_registers_connects_remembers_forgets_and_removes` (coffre sous `Hearth/{id}`) ; `src/pages/Servers.test.ts`, `e2e/connect.spec.ts` (oubli des identifiants).
+- Tests : `crates/hearth-link/tests/pinning.rs::forgetting_the_credentials_erases_the_password_but_keeps_the_session`, `::servers_are_validated_listed_and_removed_with_their_secrets` ; `apps/desktop/src-tauri/tests/vault.rs` (clés, aller-retour, effacement ; `the_windows_credential_manager_stores_reads_and_erases_a_secret` contre le vrai Gestionnaire, `--ignored`, lancé par le job Windows de la CI) ; `tests/link_runtime.rs::the_wizard_registers_only_on_a_successful_login_then_remembers_forgets_and_removes` (coffre sous `Hearth/{id}`, rien après un refus) ; `src/pages/Servers.test.ts`, `e2e/connect.spec.ts` (oubli des identifiants).
 - À la main : Gestionnaire d'identification de Windows, identifiants génériques `Hearth/…`.
 
 ## Cas limites
+- Écriture de la première connexion : carnet d'abord, secrets ensuite ; une application tuée entre les deux laisse un serveur sans session (visible, supprimable), jamais un secret orphelin ; un échec défait tout et referme la session obtenue (`tracking.rs::a_vault_that_refuses_to_write_leaves_no_server_and_closes_the_new_session`).
 - Un refus de connexion n'écrit rien au coffre.
 - Coffre inaccessible : l'erreur ne contient aucun secret ; la connexion échoue (`vault`), l'utilisateur est invité à réessayer.
 

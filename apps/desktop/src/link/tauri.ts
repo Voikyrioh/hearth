@@ -124,34 +124,63 @@ export class TauriLinkBridge implements LinkBridge {
     unwrap(await commands.retryNow(serverId));
   }
 
+  /**
+   * S'abonne d'abord, puis rejoue ce que la coquille a retenu : un événement n'est qu'un signal, il
+   * peut être parti avant que cette interface n'écoute (lancement de l'application). Chaque avis
+   * ou issue reçu, en direct ou rejoué, est acquitté après avoir été remis à l'écouteur.
+   */
+  private async subscribeAndReplay<T>(
+    name: string,
+    listener: (payload: T) => void,
+    replay: () => Promise<T[]>,
+    acknowledge?: (payload: T) => Promise<unknown>,
+  ): Promise<Unsubscribe> {
+    const deliver = (payload: T) => {
+      listener(payload);
+      // L'acquittement est au mieux : une perte ne fait que rejouer (l'écouteur dédoublonne).
+      void acknowledge?.(payload)?.catch(() => {});
+    };
+    const unlisten = await listen<T>(name, (event) => deliver(event.payload));
+    try {
+      for (const payload of await replay()) deliver(payload);
+    } catch (error) {
+      unlisten();
+      throw error;
+    }
+    return unlisten;
+  }
+
   async onOperation(listener: (event: OperationEvent) => void): Promise<Unsubscribe> {
-    return listen<OperationEventDto>(LINK_EVENTS.operation, (event) => listener(event.payload));
+    return this.subscribeAndReplay<OperationEventDto>(
+      LINK_EVENTS.operation,
+      listener,
+      () => commands.listUnreadOperations(),
+      (event) => commands.ackUnreadOperations([event.opId]),
+    );
   }
 
   async onFingerprintChanged(listener: (change: FingerprintChange) => void): Promise<Unsubscribe> {
-    return listen<FingerprintEvent>(LINK_EVENTS.fingerprint, (event) => listener(event.payload));
+    // Une alerte est un état, pas un avis : rejouée à chaque abonnement, jamais acquittée.
+    return this.subscribeAndReplay<FingerprintEvent>(LINK_EVENTS.fingerprint, listener, () =>
+      commands.listFingerprintAlerts(),
+    );
   }
 
   async onNotice(listener: (notice: LinkNotice) => void): Promise<Unsubscribe> {
-    return listen<NoticeEvent>(LINK_EVENTS.notice, (event) => listener(event.payload));
+    return this.subscribeAndReplay<NoticeEvent>(
+      LINK_EVENTS.notice,
+      listener,
+      () => commands.listLinkNotices(),
+      (notice) => (notice.id > 0 ? commands.ackLinkNotices([notice.id]) : Promise.resolve()),
+    );
   }
 
   async probeServer(host: string, port: number | null): Promise<ProbeResult> {
     return unwrap(await commands.probeServer(host, port));
   }
 
-  async addServer(input: NewServerInput): Promise<ServerInfo> {
-    const dto = unwrap(
-      await commands.addServer(
-        input.name,
-        input.color,
-        input.host,
-        input.port,
-        input.fingerprint,
-        input.macAddresses,
-      ),
-    );
-    return toServerInfo(dto);
+  async addAndLogin(input: NewServerInput): Promise<ServerInfo> {
+    return toServerInfo(unwrap(await commands.addAndLogin(input)));
   }
 
   async login(
