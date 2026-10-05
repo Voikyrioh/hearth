@@ -88,7 +88,7 @@ impl Rng for OsRng {
         let mixed = u64::from(nanos)
             .wrapping_mul(0x9E37_79B9_7F4A_7C15)
             .wrapping_add(tick.wrapping_mul(0xBF58_476D_1CE4_E5B9));
-        (mixed >> 16) as u32
+        u32::try_from(mixed >> 32).unwrap_or(0)
     }
 }
 

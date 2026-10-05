@@ -710,16 +710,17 @@ impl Runner {
 
 /// Faut-il annoncer ce changement ? Oui si l'état affiché ou le blocage change. Tant que l'état
 /// affiché est « Connecté » (coupure encore invisible), rien ne s'annonce : ni nouvelle date de
-/// tentative ni compteur. Hors « Connecté », une nouvelle date de tentative ou un échec de plus
-/// s'annoncent (compte à rebours, BR-RESIL-018). Le dernier contact, qui bouge à chaque
-/// message, ne compte jamais.
+/// tentative ni compteur. Hors « Connecté », on annonce chaque nouvelle date de tentative (compte
+/// à rebours) et chaque échec de plus (BR-RESIL-018) ; le passage « tentative en cours » (plus de
+/// date) n'est pas un événement de plus : il y en a un par tentative, pas deux. Le dernier
+/// contact, qui bouge à chaque message, ne compte jamais.
 fn display_changed(previous: &Status, now: &Status) -> bool {
     if previous.state != now.state || previous.blocked != now.blocked || previous.since != now.since
     {
         return true;
     }
     now.state != LinkState::Connected
-        && (previous.next_retry_at != now.next_retry_at
+        && ((now.next_retry_at.is_some() && previous.next_retry_at != now.next_retry_at)
             || previous.failed_attempts != now.failed_attempts)
 }
 
