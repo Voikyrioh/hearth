@@ -16,6 +16,7 @@
 use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 
+use super::login_origin::origin;
 use super::text::is_unsafe_char;
 
 /// Nombre d'échecs qui déclenche la première attente.
@@ -35,6 +36,10 @@ pub const ADDRESS_WINDOW: Duration = Duration::minutes(10);
 /// gardé en mémoire.
 pub const MAX_WAITING_PER_ADDRESS: usize = 8;
 
+/// Lignes de `login_attempts` gardées au plus (couples et origines) ; au-delà, on oublie d'abord
+/// celles sans attente en cours, de moins d'échecs, les plus anciennes (ADR-0022).
+pub const MAX_TRACKED_ATTEMPTS: usize = 50_000;
+
 /// Un compteur sans activité depuis ce délai (et sans attente en cours) est oublié (BR-CONN-006).
 pub const ATTEMPT_RETENTION: Duration = Duration::hours(24);
 
@@ -52,37 +57,56 @@ const MAX_KEY_PART: usize = 64;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AttemptKey(String);
 
+/// Empreinte (16 octets en hexadécimal) de l'identifiant saisi, normalisé : minuscules, espaces
+/// autour retirés, sans caractère de contrôle, séparateur de ligne Unicode ni caractère de format
+/// (bidirectionnel…), 64 caractères au plus. Les traces (une ligne de journal) et la clé ne
+/// peuvent donc pas être forgées par l'identifiant.
+fn username_fingerprint(username: &str) -> String {
+    let username: String = username
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|&c| !is_unsafe_char(c))
+        .take(MAX_KEY_PART)
+        .collect();
+    let digest = Sha256::digest(username.as_bytes());
+    digest[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 impl AttemptKey {
     pub fn new(username: &str, addr: &str) -> Self {
-        // Sans caractère de contrôle, séparateur de ligne Unicode ni caractère de format
-        // (bidirectionnel…) : la clé et les traces (une ligne de journal) ne peuvent pas être
-        // forgées par l'identifiant, et le séparateur ne peut pas y apparaître.
-        let username: String = username
-            .trim()
-            .to_lowercase()
-            .chars()
-            .filter(|&c| !is_unsafe_char(c))
-            .take(MAX_KEY_PART)
-            .collect();
         let addr: String = addr.chars().take(MAX_KEY_PART).collect();
-        let digest = Sha256::digest(username.as_bytes());
-        let fingerprint: String = digest[..16]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        Self(format!("{fingerprint}{SEPARATOR}{addr}"))
+        Self(format!(
+            "{}{SEPARATOR}{addr}",
+            username_fingerprint(username)
+        ))
     }
 
-    /// Clé du compteur par adresse seule. Ne peut pas coïncider avec une clé de couple (celles-ci
-    /// contiennent toujours le séparateur, jamais une adresse).
+    /// Clé du compteur par **origine** (ADR-0022) : l'adresse IPv4, ou le préfixe /64 d'une
+    /// adresse IPv6 (un appareil change d'adresse IPv6 à volonté dans son /64). Ne peut pas
+    /// coïncider avec une clé de couple (celles-ci contiennent toujours le séparateur, jamais une
+    /// adresse).
     pub fn address(addr: &str) -> Self {
-        let addr: String = addr.chars().take(MAX_KEY_PART).collect();
-        Self(format!("addr:{addr}"))
+        Self(format!("addr:{}", origin(addr)))
+    }
+
+    /// Clé du ralentissement par identifiant (ADR-0022) : l'empreinte seule, jamais l'identifiant
+    /// en clair ; elle ne coïncide ni avec une clé de couple ni avec une clé d'origine.
+    pub fn identifier(username: &str) -> Self {
+        Self(format!("ident:{}", username_fingerprint(username)))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Lignes de `login_attempts` à oublier pour revenir sous `MAX_TRACKED_ATTEMPTS`.
+pub fn attempts_excess(count: usize) -> usize {
+    count.saturating_sub(MAX_TRACKED_ATTEMPTS)
 }
 
 /// Une connexion de plus peut-elle faire la queue pour son adresse ? `in_flight` = connexions
@@ -541,6 +565,12 @@ mod tests {
     }
 
     #[test]
+    fn the_attempts_table_is_bounded() {
+        assert_eq!(attempts_excess(MAX_TRACKED_ATTEMPTS), 0);
+        assert_eq!(attempts_excess(MAX_TRACKED_ATTEMPTS + 3), 3);
+    }
+
+    #[test]
     fn one_connection_runs_and_eight_wait_the_ninth_waiter_is_refused() {
         assert!(admits_in_queue(0), "la première s'exécute");
         assert!(admits_in_queue(1), "première en attente");
@@ -553,6 +583,42 @@ mod tests {
             "neuvième : refusée"
         );
         assert!(!admits_in_queue(usize::MAX));
+    }
+
+    #[test]
+    fn the_address_counter_groups_an_ipv6_slash_64_and_keeps_ipv4_addresses_apart() {
+        assert_eq!(
+            AttemptKey::address("2001:db8:0:1::5"),
+            AttemptKey::address("2001:db8:0:1:aaaa:bbbb:cccc:dddd")
+        );
+        assert_ne!(
+            AttemptKey::address("2001:db8:0:1::5"),
+            AttemptKey::address("2001:db8:0:2::5")
+        );
+        assert_ne!(
+            AttemptKey::address("10.0.0.1"),
+            AttemptKey::address("10.0.0.2")
+        );
+        assert_eq!(AttemptKey::address("10.0.0.1").as_str(), "addr:10.0.0.1");
+    }
+
+    #[test]
+    fn the_pair_counter_stays_per_exact_address() {
+        assert_ne!(
+            AttemptKey::new("marie", "2001:db8:0:1::5"),
+            AttemptKey::new("marie", "2001:db8:0:1::6")
+        );
+    }
+
+    #[test]
+    fn the_identifier_key_is_the_fingerprint_alone_and_ignores_case_and_spaces() {
+        let key = AttemptKey::identifier(" Marie ");
+        assert_eq!(key, AttemptKey::identifier("marie"));
+        assert_ne!(key, AttemptKey::identifier("paul"));
+        assert!(!key.as_str().to_lowercase().contains("marie"));
+        assert!(key.as_str().starts_with("ident:"));
+        assert_ne!(key, AttemptKey::new("marie", ""));
+        assert_ne!(key, AttemptKey::address("marie"));
     }
 
     #[test]

@@ -212,3 +212,6 @@ Appel client = `crates/hearth-link/src/` (lib réutilisable).
 Routes HTTP = `crates/hearth-agent/src/entrypoint/http/`.
 Entrypoint CLI = `crates/hearth-agent/src/entrypoint/cli.rs`.
 Front Vue = `apps/desktop/src/pages/` (par user story).
+- [BR-CONN-018](./BR-CONN-018-ralentissement-par-identifiant.md) — Un identifiant attaqué depuis de nombreuses adresses est ralenti (2 s doublées, plafond 2 min), jamais bloqué — `domain/identifier_slowdown.rs::record_failure` — invariant ✓
+- [BR-CONN-019](./BR-CONN-019-adresses-connues-d-un-compte.md) — Une adresse connue d'un compte (connexion réussie, 8 par compte, 30 jours) évite le ralentissement des autres mais ne donne aucun droit — `domain/known_address.rs::learn`, `domain/login_policy.rs::admit` — invariant ✓
+- [BR-CONN-020](./BR-CONN-020-places-reservees-aux-adresses-connues.md) — Connexions en cours (32, dont 8 réservées) et attentes du flux (16, dont 4 réservées) réservées en priorité aux adresses connues — `domain/login_policy.rs::admits_login`, `domain/stream.rs::admit_pending` — invariant ✓

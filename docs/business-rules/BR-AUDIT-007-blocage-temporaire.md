@@ -5,7 +5,7 @@ titre: Le blocage temporaire d'un compte est journalisé
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-journal-activite.md (BR-AUDIT-007), HRT-05
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-AUDIT-007 — Le blocage temporaire d'un compte est journalisé
@@ -37,5 +37,9 @@ Garde-fou : au plus 1 024 groupes suivis. Avec cette clé un compte n'en produit
 ## Règles liées
 - BR-CONN-006, BR-CONN-007, BR-AUDIT-003.
 
+## Complément HRT-20 (énoncé ci-dessus INCHANGÉ, repris de la version validée)
+Précision seulement : le ralentissement par identifiant (BR-CONN-018) déclenche la même entrée « Blocage temporaire » (le 11e échec). Les tentatives **refusées à cause de ce ralentissement** restent **comptées** au journal : une entrée « Connexion refusée, raison « trop de tentatives, attente de N s » » puis une synthèse au compte exact (même regroupement par fenêtre de 60 secondes que les autres refus), sans identifiant saisi, avec le compte visé seulement s'il existe. Le journal ne devient pas muet pendant une attaque, et reste borné. Les tentatives refusées pendant une attente du seul couple ou de la seule origine restent hors journal, comme décrit ci-dessus. Test exact : `tests/audit_use_cases.rs::refused_logins_from_many_addresses_are_all_counted_in_bounded_entries` (400 tentatives : 5 entrées, comptes 0, 10, 0, 388 et le blocage).
+
 ## Historique
 - 2026-10-04 — création (HRT-05, session 2026-10-04-hearth-creation).
+- 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).

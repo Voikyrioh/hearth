@@ -36,6 +36,11 @@ pub const MAX_PENDING_TOTAL: usize = 16;
 /// Connexions en attente d'authentification depuis une même adresse.
 pub const MAX_PENDING_PER_ADDRESS: usize = 2;
 
+/// Places d'attente d'authentification réservées aux adresses déjà connues (qui ont une session
+/// valide ou une connexion réussie récente, ADR-0022) : un inconnu n'en prend jamais plus de
+/// `MAX_PENDING_TOTAL - RESERVED_PENDING_FOR_KNOWN`, les autres restent pour un client légitime.
+pub const RESERVED_PENDING_FOR_KNOWN: usize = 4;
+
 /// Délai minimal entre deux `subscribe` d'une même connexion : chacun coûte un `snapshot`.
 pub const MIN_SUBSCRIBE_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -50,6 +55,53 @@ pub fn is_new(last_sent: Option<MonoDuration>, mono: MonoDuration) -> bool {
 /// (une adresse pour les connexions en attente, un compte pour les flux) ?
 pub fn within_caps(open_total: usize, open_own: usize, max_total: usize, max_own: usize) -> bool {
     open_total < max_total && open_own < max_own
+}
+
+/// Places d'attente réservées aux adresses connues pour un plafond total donné : au plus
+/// `RESERVED_PENDING_FOR_KNOWN`, et jamais plus du quart du total (un plafond réduit, en test, ne
+/// laisse pas les inconnus sans place).
+pub fn reserved_for_known(max_total: usize) -> usize {
+    RESERVED_PENDING_FOR_KNOWN.min(max_total / 4)
+}
+
+/// L'adresse d'une connexion en attente est-elle déjà connue de l'agent ?
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    Unknown,
+    Known,
+}
+
+/// Pourquoi une place d'attente est refusée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingRefusal {
+    /// Cette adresse a déjà tout son quota : une adresse connue n'y échappe pas.
+    AddressFull,
+    /// L'agent n'a plus de place pour ce type d'adresse (les inconnues s'arrêtent avant les
+    /// places réservées).
+    Saturated,
+}
+
+/// Une connexion de plus peut-elle attendre son `auth` ? `total` : connexions déjà en attente,
+/// `own` : celles de la même adresse. Une adresse connue peut prendre les places réservées.
+pub fn admit_pending(
+    total: usize,
+    own: usize,
+    standing: Standing,
+    max_total: usize,
+    reserved_for_known: usize,
+    max_own: usize,
+) -> Result<(), PendingRefusal> {
+    if own >= max_own {
+        return Err(PendingRefusal::AddressFull);
+    }
+    let ceiling = match standing {
+        Standing::Known => max_total,
+        Standing::Unknown => max_total.saturating_sub(reserved_for_known),
+    };
+    if total >= ceiling {
+        return Err(PendingRefusal::Saturated);
+    }
+    Ok(())
 }
 
 /// Un `subscribe` est-il admis, sachant le temps écoulé depuis le précédent de la connexion ?
@@ -89,6 +141,55 @@ mod tests {
     fn the_pre_authentication_quota_is_small_and_distinct() {
         assert_eq!(MAX_PENDING_PER_ADDRESS, 2);
         const { assert!(MAX_PENDING_TOTAL < MAX_STREAMS_TOTAL) };
+    }
+
+    #[test]
+    fn unknown_addresses_stop_before_the_places_reserved_for_known_ones() {
+        let (total, reserved, own) = (MAX_PENDING_TOTAL, RESERVED_PENDING_FOR_KNOWN, 2);
+        let ceiling = total - reserved;
+        let admit = |count, standing, own_count| {
+            admit_pending(count, own_count, standing, total, reserved, own)
+        };
+        assert_eq!(admit(ceiling - 1, Standing::Unknown, 0), Ok(()));
+        assert_eq!(
+            admit(ceiling, Standing::Unknown, 0),
+            Err(PendingRefusal::Saturated)
+        );
+        assert_eq!(admit(ceiling, Standing::Known, 0), Ok(()), "place réservée");
+        assert_eq!(admit(total - 1, Standing::Known, 0), Ok(()));
+        assert_eq!(
+            admit(total, Standing::Known, 0),
+            Err(PendingRefusal::Saturated)
+        );
+    }
+
+    #[test]
+    fn a_known_address_keeps_its_own_per_address_quota() {
+        assert_eq!(
+            admit_pending(0, 2, Standing::Known, 16, 4, 2),
+            Err(PendingRefusal::AddressFull)
+        );
+        assert_eq!(
+            admit_pending(0, 2, Standing::Unknown, 16, 4, 2),
+            Err(PendingRefusal::AddressFull)
+        );
+    }
+
+    #[test]
+    fn the_reservation_is_four_places_of_sixteen_and_never_more_than_a_quarter() {
+        assert_eq!(
+            reserved_for_known(MAX_PENDING_TOTAL),
+            RESERVED_PENDING_FOR_KNOWN
+        );
+        assert_eq!(reserved_for_known(3), 0);
+        assert_eq!(reserved_for_known(8), 2);
+        assert_eq!(reserved_for_known(0), 0);
+    }
+
+    #[test]
+    fn the_reservation_leaves_room_to_the_unknown() {
+        const { assert!(RESERVED_PENDING_FOR_KNOWN > 0) };
+        const { assert!(MAX_PENDING_TOTAL - RESERVED_PENDING_FOR_KNOWN >= MAX_PENDING_PER_ADDRESS) };
     }
 
     #[test]
