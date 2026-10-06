@@ -24,9 +24,13 @@ pub mod action {
     pub const ACCOUNTS_READ: &str = "accounts.read";
     pub const AUDIT_READ: &str = "audit.read";
     pub const AGENT_UPDATE: &str = "agent.update";
+    /// Un poste de confiance est inscrit par une connexion par mot de passe (HRT-22).
+    pub const DEVICE_ENROLL: &str = "device.enroll";
+    /// Un poste de confiance est retiré par son titulaire (HRT-22).
+    pub const DEVICE_REMOVE: &str = "device.remove";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 12] = [
+    pub const ALL: [&str; 14] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -39,6 +43,8 @@ pub mod action {
         ACCOUNTS_READ,
         AUDIT_READ,
         AGENT_UPDATE,
+        DEVICE_ENROLL,
+        DEVICE_REMOVE,
     ];
 }
 

@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::audit::AuditEventItem;
 use crate::api::machine::MachineResponse;
 use crate::api::metrics::Sample;
+use crate::api::sessions::DeviceProof;
 use crate::api::update::UpdateProgress;
 use crate::error::ErrorDetail;
 
@@ -68,6 +69,36 @@ impl fmt::Debug for ClientMessage {
                 f.debug_struct("Subscribe").field("topics", topics).finish()
             }
             Self::Ping { n } => f.debug_struct("Ping").field("n", n).finish(),
+        }
+    }
+}
+
+/// Le premier message `auth` avec, en option, la preuve de la clé d'appareil (HRT-22) : sur le
+/// fil, le même objet que `ClientMessage::Auth` plus `device`. Un client sans clé envoie `auth`
+/// avec le jeton seul et l'agent le lit comme avant. L'agent lit le premier message par ce type ;
+/// `ClientMessage::Auth` reste celui des clients existants.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SignedAuth {
+    Auth {
+        token: String,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "crate::api::sessions::lenient_proof"
+        )]
+        device: Option<DeviceProof>,
+    },
+}
+
+impl fmt::Debug for SignedAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Auth { device, .. } => f
+                .debug_struct("Auth")
+                .field("token", &"***")
+                .field("device", device)
+                .finish(),
         }
     }
 }
@@ -236,6 +267,52 @@ mod tests {
             token: "secret-token".into(),
         };
         assert!(!format!("{message:?}").contains("secret-token"));
+    }
+
+    #[test]
+    fn the_first_message_reads_with_or_without_a_device_proof() {
+        let plain: SignedAuth =
+            serde_json::from_value(json!({ "type": "auth", "token": "abc" })).expect("auth");
+        assert_eq!(
+            plain,
+            SignedAuth::Auth {
+                token: "abc".into(),
+                device: None
+            }
+        );
+        let signed: SignedAuth = serde_json::from_value(json!({
+            "type": "auth", "token": "abc",
+            "device": { "algorithm": "ed25519", "public_key": "k", "challenge": "c", "signature": "s" }
+        }))
+        .expect("auth signé");
+        let SignedAuth::Auth { device, .. } = &signed;
+        assert_eq!(
+            device.as_ref().map(|d| d.algorithm.as_str()),
+            Some("ed25519")
+        );
+        // Le message avec preuve se lit encore comme l'ancien : le champ en plus est ignoré.
+        let old: ClientMessage = serde_json::from_value(json!({
+            "type": "auth", "token": "abc", "device": { "algorithm": "ed25519" }
+        }))
+        .expect("ancien type");
+        assert_eq!(
+            old,
+            ClientMessage::Auth {
+                token: "abc".into()
+            }
+        );
+        // Une preuve de la mauvaise forme est une preuve absente, jamais un auth refusé.
+        let bad: SignedAuth =
+            serde_json::from_value(json!({ "type": "auth", "token": "abc", "device": 5 }))
+                .expect("auth tolérant");
+        let SignedAuth::Auth { device, .. } = &bad;
+        assert!(device.is_none());
+        // Un autre type de message n'est jamais pris pour un auth.
+        assert!(
+            serde_json::from_value::<SignedAuth>(json!({ "type": "subscribe", "topics": [] }))
+                .is_err()
+        );
+        assert!(!format!("{signed:?}").contains("abc"));
     }
 
     #[test]
