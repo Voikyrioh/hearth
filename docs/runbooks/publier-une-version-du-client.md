@@ -22,10 +22,10 @@ La clé publique du dépôt (`apps/desktop/src-tauri/update-key.pub`) est une cl
    cp ~/.hearth/client-update.key.pub apps/desktop/src-tauri/update-key.pub
    ```
    Puis commit et PR comme d'habitude. Un client construit AVANT ce remplacement n'acceptera jamais une release signée par ta clé : il faut le réinstaller une fois à la main (même règle que pour l'agent). Changer de clé plus tard = réinstaller à la main tous les clients.
-3. Créer les deux secrets du dépôt (Réglages > Secrets and variables > Actions, ou en ligne de commande) :
+3. **Créer l'environnement `release`** (Réglages > Environments > New environment, nom exact `release`), AVANT la première exécution : *Required reviewers* (toi), *Deployment branches* limité à `main`. Le job `sign` le déclare ; sans lui, la garde « main seulement » du flux n'arrête qu'une erreur, pas quelqu'un qui a l'écriture sur le dépôt (il peut lancer le flux depuis sa branche, garde retirée comprise), et GitHub créerait un environnement SANS protection à la première exécution. Puis créer les deux secrets comme secrets de cet ENVIRONNEMENT (pas du dépôt) :
    ```sh
-   gh secret set HEARTH_CLIENT_SIGNING_KEY < ~/.hearth/client-update.key
-   gh secret set HEARTH_CLIENT_SIGNING_KEY_PASSWORD         # le mot de passe de la clé : OBLIGATOIRE (la signature est refusée sans mot de passe ; choisis-en un à la génération)
+   gh secret set HEARTH_CLIENT_SIGNING_KEY --env release < ~/.hearth/client-update.key
+   gh secret set HEARTH_CLIENT_SIGNING_KEY_PASSWORD --env release         # le mot de passe de la clé : OBLIGATOIRE (la signature est refusée sans mot de passe ; choisis-en un à la génération)
    ```
 4. Sauvegarder `~/.hearth/client-update.key` et son mot de passe ailleurs (gestionnaire de mots de passe) : sans elle, plus aucune mise à jour possible.
 
@@ -37,6 +37,13 @@ La clé publique du dépôt (`apps/desktop/src-tauri/update-key.pub`) est une cl
 4. Ouvrir le brouillon, vérifier les trois fichiers et les notes, puis **Publish release**. À partir de là, `releases/latest/download/latest.json` annonce la version aux clients (au plus une vérification par jour et par client, ou leur « Vérifier maintenant »).
 
 Retirer une version publiée par erreur : repasser la release en brouillon ou la supprimer ; les clients qui l'ont déjà installée ne reviennent pas en arrière (jamais de rétrogradation, ADR-0017) : publier une version suivante qui corrige.
+
+## Ce que la séparation en deux jobs protège, et ce qu'elle ne protège pas
+
+- La clé secrète n'est vue que par l'étape `client-sign` du job `sign` (et elle exige l'approbation de l'environnement `release`). Les scripts de construction (`npm ci`, `build.rs` de tout l'arbre Cargo du client) tournent dans `build`, SANS secret.
+- Les scripts de construction des dépendances de `xtask` (`cargo build -p xtask --locked`, arbre Cargo verrouillé et réduit) tournent dans `sign` juste AVANT l'étape qui reçoit la clé, mais sans la clé.
+- **`sign` signe ce que `build` a produit.** Une dépendance compromise pendant `build` obtient donc UNE release signée (en brouillon). Avant d'approuver l'environnement, **relis le journal du job `build`** (dépendances installées, étapes, durée) ; avant de publier le brouillon, relis ses fichiers.
+- L'artefact de `build` ne peut pas venir d'une autre exécution (portée de l'exécution).
 
 ## Premier essai (à faire une fois, avant de compter dessus)
 
@@ -55,7 +62,8 @@ Rien de ce qui suit n'a pu être vérifié sans vraie release ; le faire avec de
 | Constat | Cause probable | Que faire |
 |---|---|---|
 | Le flux s'arrête à « Garde de publication » | `update-key.pub` est la clé de développement, ou la version demandée n'est pas celle de `Cargo.toml`/`package.json` | suivre le message |
-| `client-sign` : « HEARTH_CLIENT_SIGNING_KEY est absent ou vide », « mot de passe obligatoire », « clé secrète illisible » | secret absent, mot de passe vide ou faux | créer ou corriger les secrets (prérequis 3) |
+| `client-sign` : « HEARTH_CLIENT_SIGNING_KEY est absent ou vide », « mot de passe obligatoire », « clé secrète illisible » | secret absent (ou posé dans le dépôt et non dans l'environnement `release`), mot de passe vide ou faux | créer ou corriger les secrets de l'environnement (prérequis 3) |
+| Le job `sign` attend | l'approbation de l'environnement `release` | l'approuver, après relecture du journal de `build` |
 | `client-sign` ou `client-manifest` : « la signature ne correspond pas à update-key.pub » | la clé secrète des secrets n'est pas la paire de la clé publique du dépôt | remettre la bonne clé publique (prérequis 2) ou la bonne clé secrète |
 | Le flux ne démarre pas / ne fait rien | lancé depuis une autre branche que `main` | Run workflow depuis `main` |
 | Le client ne voit jamais la mise à jour | release encore en brouillon ; ou publiée comme préversion ; ou `latest.json` sans l'entrée `windows-x86_64` ; ou dernière vérification il y a moins de 24 h | publier la release (hors préversion) ; « Vérifier maintenant » |
@@ -66,7 +74,8 @@ Rien de ce qui suit n'a pu être vérifié sans vraie release ; le faire avec de
 ## Limites connues
 
 - Le manifeste `latest.json` n'est pas signé (HTTPS vers GitHub) ; seul l'installateur l'est. Un manifeste forgé ne peut pas rejouer un ancien installateur sous un numéro plus grand : le client exige que la version annoncée soit celle du commentaire signé (`requireSignedVersion`, activé). Toute release doit donc venir du flux `publish-client` ; un installateur signé par un autre outil, sans version, est refusé par les clients.
-- Au plus une requête de vérification automatique par 24 h. Sans réseau (aucune requête partie) la vérification est retentée à l'heure suivante, sans consommer la journée ; un échec après émission (GitHub muet, réponse invalide) consomme la journée : prochaine tentative le lendemain, ou « Vérifier maintenant » (au plus une fois par 30 s).
+- Au plus une requête de vérification automatique par 24 h, et au plus 3 tentatives réseau automatiques par 24 h glissantes quoi qu'il arrive. Seul un échec de résolution du nom ou de connexion TCP au PREMIER hôte rend la journée (retentée au battement horaire, dans la limite des 3) ; échec TLS, échec à un saut suivant, délai dépassé, réponse invalide la consomment : prochaine tentative le lendemain, ou « Vérifier maintenant » (au plus une fois par 30 s).
+- Redirections : HTTPS à chaque saut, au plus 5 (GitHub en fait 2 aujourd'hui), AUCUNE liste d'hôtes sur les sauts suivants (ADR-0017 : la signature protège le contenu, HTTPS le transport).
 - Le `latest.json` de `releases/latest` est unique : ne publie jamais comme « dernière release » une release qui n'en porte pas avec l'entrée `windows-x86_64` (une release de l'agent seule rendrait le client muet) ; la mise à jour de l'agent depuis le client est à décider (ADR-0017, décision 8).
 - Windows 64 bits seulement.
 

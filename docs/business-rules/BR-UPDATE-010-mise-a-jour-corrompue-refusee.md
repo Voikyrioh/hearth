@@ -18,7 +18,7 @@ Un fichier dont la signature ne correspond pas (modifié, tronqué, signé par u
 - `apps/desktop/src-tauri/src/update/service.rs::UpdateService::run_install` (jamais d'appel à `Feed::install` après un refus).
 
 ## Vérification
-- `apps/desktop/src-tauri/tests/update_feed.rs` : `a_signature_from_another_key_is_refused_as_corrupted`, `a_file_altered_after_signing_is_refused_as_corrupted`, `a_complete_but_shorter_file_is_refused_as_corrupted`, `a_garbage_signature_is_refused_as_corrupted`, `an_old_installer_validly_signed_for_another_version_is_refused_when_announced_newer`, `a_signature_without_a_version_is_refused`, `end_to_end_a_tampered_installer_is_refused_with_the_corrupted_failure`.
+- `apps/desktop/src-tauri/tests/update_feed.rs` : `a_signature_from_another_key_is_refused_as_corrupted`, `a_file_altered_after_signing_is_refused_as_corrupted`, `a_complete_but_shorter_file_is_refused_as_corrupted`, `a_garbage_signature_is_refused_as_corrupted`, `an_old_installer_validly_signed_for_another_version_is_refused_when_announced_newer`, `a_signature_without_a_version_is_refused`, `the_same_release_with_a_signed_version_that_does_not_match_is_refused` (signé par le code de publication), `end_to_end_a_tampered_installer_is_refused_with_the_corrupted_failure`.
 - `apps/desktop/src-tauri/tests/update_service.rs` : `a_corrupted_update_is_refused_and_never_installed`.
 - `apps/desktop/e2e/updates.spec.ts` : « mise à jour corrompue : refusée avec le message exact ».
 
