@@ -316,16 +316,19 @@ async fn the_constraints_of_the_new_tables_hold() {
 
 #[tokio::test]
 async fn the_migration_replays_and_the_previous_agent_restarts_on_the_copy_taken_before_the_swap() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("hearth.db");
+    let root = tempfile::tempdir().unwrap();
+    // Un sous-dossier : l'agent refuse un dossier de données ouvert aux autres (0755) et crée le sien en 0700.
+    let dir = root.path().join("data");
+    hearth_agent::infrastructure::data_dir::ensure(&dir).unwrap();
+    let path = dir.join("hearth.db");
     let pool = database_at_0004(&path).await;
     pool.close().await;
     // Le superviseur copie la base service arrêté, avant l'échange (BR-UPDATE-029).
-    let copy = dir.path().join("hearth.db.before-swap");
+    let copy = root.path().join("hearth.db.before-swap");
     std::fs::copy(&path, &copy).unwrap();
 
     // Le nouvel agent démarre : 0005 s'applique, les données restent. Redémarrer ne rejoue rien.
-    let database = Database::open(dir.path()).await.unwrap();
+    let database = Database::open(dir.as_path()).await.unwrap();
     sqlx::query(
         "INSERT INTO trusted_devices (id, account_id, key_id, algorithm, public_key, name,
                                       created_at, last_proved_at, last_addr)
@@ -336,7 +339,7 @@ async fn the_migration_replays_and_the_previous_agent_restarts_on_the_copy_taken
     .await
     .unwrap();
     database.pool().close().await;
-    let again = Database::open(dir.path()).await.unwrap();
+    let again = Database::open(dir.as_path()).await.unwrap();
     let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM trusted_devices")
         .fetch_one(again.pool())
         .await
@@ -354,7 +357,7 @@ async fn the_migration_replays_and_the_previous_agent_restarts_on_the_copy_taken
     // toutes ses données ...
     std::fs::copy(&copy, &path).unwrap();
     for suffix in ["-wal", "-shm"] {
-        let _ = std::fs::remove_file(dir.path().join(format!("hearth.db{suffix}")));
+        let _ = std::fs::remove_file(dir.join(format!("hearth.db{suffix}")));
     }
     let restored = open(&path).await;
     migrator_up_to(4)
@@ -368,7 +371,7 @@ async fn the_migration_replays_and_the_previous_agent_restarts_on_the_copy_taken
     assert_eq!(accounts, 2);
     restored.close().await;
     // ... et le nouvel agent, à la mise à jour suivante, rejoue 0005 sans erreur.
-    let replayed = Database::open(dir.path()).await.unwrap();
+    let replayed = Database::open(dir.as_path()).await.unwrap();
     let attack: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attack_mode")
         .fetch_one(replayed.pool())
         .await
