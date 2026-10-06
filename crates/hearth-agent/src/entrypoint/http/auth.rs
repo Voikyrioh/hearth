@@ -163,7 +163,16 @@ async fn authenticate(state: &AppState, parts: &Parts) -> Result<CurrentSession,
             "Jeton de session absent ou illisible",
         )
     })?;
-    Ok(state.sessions.authenticate(token).await?)
+    // L'adresse de la connexion TCP : l'usage d'une session depuis une adresse déjà retenue la
+    // rafraîchit (HRT-22). Jamais lue d'un en-tête de mandataire.
+    let addr = match origin_of(parts).addr() {
+        Some(addr) if !addr.is_empty() => Some(addr.to_owned()),
+        _ => None,
+    };
+    Ok(match addr {
+        Some(addr) => state.sessions.authenticate_at(token, &addr).await?,
+        None => state.sessions.authenticate(token).await?,
+    })
 }
 
 /// Un niveau d'accès autorise-t-il ce compte ?
