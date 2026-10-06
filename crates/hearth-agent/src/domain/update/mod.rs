@@ -10,6 +10,7 @@ mod orphan;
 mod progress;
 mod record;
 mod rollback;
+mod space;
 mod supervise;
 mod target;
 
@@ -17,6 +18,7 @@ pub use orphan::{Leftovers, Orphan, classify_orphan};
 pub use progress::PercentTracker;
 pub use record::{Job, Requester, SupervisorState, UpdateRecord};
 pub use rollback::{RollbackStep, rollback_plan};
+pub use space::{SpaceRefusal, check_space, required_space};
 pub use supervise::{Answer, CHECK_POLL, CHECK_WINDOW, STOP_GRACE, Verdict, check_verdict};
 pub use target::{
     MAX_BINARY_BYTES, UpdateInput, UpdateRefusal, UpdateTarget, host_is_local, is_local_address,

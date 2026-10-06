@@ -294,15 +294,39 @@ pub struct Rig {
 impl Rig {
     /// `allowed` : la mise à jour à distance est possible (ni gérée, ni sans systemd).
     pub fn new(env: &Env, allowed: bool, gated: bool) -> Self {
-        Self::build(env, allowed, gated, MemHost::new(Version::new(0, 2, 0)))
+        Self::build(
+            env,
+            allowed,
+            gated,
+            MemHost::new(Version::new(0, 2, 0)),
+            None,
+        )
+    }
+
+    /// Un banc dont la surveillance ne patiente que quelques millisecondes pour un superviseur
+    /// absent (la patience réelle est de 30 secondes).
+    pub fn impatient(env: &Env) -> Self {
+        Self::build(
+            env,
+            true,
+            false,
+            MemHost::new(Version::new(0, 2, 0)),
+            Some(Duration::from_millis(30)),
+        )
     }
 
     /// Un autre service sur la même machine (le même dossier `update/`).
     pub fn with_host(env: &Env, allowed: bool, host: Arc<MemHost>) -> Self {
-        Self::build(env, allowed, false, host)
+        Self::build(env, allowed, false, host, None)
     }
 
-    fn build(env: &Env, allowed: bool, gated: bool, host: Arc<MemHost>) -> Self {
+    fn build(
+        env: &Env,
+        allowed: bool,
+        gated: bool,
+        host: Arc<MemHost>,
+        patience: Option<Duration>,
+    ) -> Self {
         let keys = Arc::new(Keys::generate());
         let verifier: Arc<dyn SignatureVerifier> =
             Arc::new(MinisignVerifier::new(&keys.public).expect("clé"));
@@ -326,6 +350,7 @@ impl Rig {
                     check_window: Duration::from_millis(50),
                     poll: Duration::from_millis(5),
                     watch: Duration::from_millis(5),
+                    patience: patience.unwrap_or(Duration::from_secs(30)),
                 },
                 allow_local_addresses: false,
             },
@@ -366,6 +391,7 @@ impl Rig {
                 check_window: Duration::from_millis(50),
                 poll: Duration::from_millis(5),
                 watch: Duration::from_millis(5),
+                patience: Duration::from_secs(30),
             },
         }
     }

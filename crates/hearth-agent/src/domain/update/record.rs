@@ -85,7 +85,9 @@ pub struct SupervisorState {
 /// Le dernier résultat, écrit par le superviseur (ou par l'agent pour un échec avant l'échange).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateRecord {
-    pub version: String,
+    /// La version visée ; `None` quand elle ne se sait pas (trace de travail illisible).
+    #[serde(default, with = "version_text")]
+    pub version: Option<String>,
     pub previous: String,
     pub outcome: UpdateOutcome,
     #[serde(default)]
@@ -104,11 +106,29 @@ pub struct UpdateRecord {
     pub reported: bool,
 }
 
+/// La version visée sur le disque : une **chaîne** (vide quand elle est inconnue), jamais `null` ni
+/// une clé absente, pour qu'un agent d'AVANT cette version relise un `last.json` écrit par un plus
+/// récent (retour arrière : l'ancien binaire relit le fichier du nouveau). Vide, `null` ou absente
+/// se relisent comme « inconnue ».
+mod version_text {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &Option<String>, out: S) -> Result<S::Ok, S::Error> {
+        out.serialize_str(value.as_deref().unwrap_or(""))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
+        let text = Option::<String>::deserialize(input)?;
+        Ok(text.filter(|text| !text.is_empty()))
+    }
+}
+
 impl UpdateRecord {
     /// Ce que l'API rend.
     pub fn to_result(&self) -> UpdateResult {
         UpdateResult {
-            version: self.version.clone(),
+            version: self.version.clone().unwrap_or_default(),
+            version_unknown: self.version.is_none(),
             previous: self.previous.clone(),
             outcome: self.outcome,
             reason: self.reason,
@@ -133,7 +153,7 @@ mod tests {
     #[test]
     fn the_result_carries_what_the_api_documents() {
         let record = UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::RolledBack,
             reason: Some(UpdateReason::NoAnswer),
@@ -148,6 +168,43 @@ mod tests {
         assert_eq!(result.reason, Some(UpdateReason::NoAnswer));
         assert_eq!(result.version, "0.2.0");
         assert_eq!(result.previous, "0.1.0");
+    }
+
+    #[test]
+    fn an_unknown_version_is_absent_never_a_text_that_looks_like_a_version() {
+        let record = UpdateRecord {
+            version: None,
+            previous: "0.1.0".into(),
+            outcome: UpdateOutcome::Failed,
+            reason: Some(UpdateReason::Interrupted),
+            at: "2026-10-05T10:00:00Z".into(),
+            requested_by: None,
+            client_name: None,
+            client_addr: None,
+            reported: false,
+        };
+        let result = record.to_result();
+        assert_eq!(result.version, "");
+        assert!(result.version_unknown);
+        // Sur le disque : une chaîne vide (un agent d'avant lit toujours `version` comme un texte).
+        let written = serde_json::to_value(&record).unwrap();
+        assert_eq!(written["version"], serde_json::json!(""));
+        #[derive(serde::Deserialize)]
+        struct OlderRecord {
+            version: String,
+        }
+        let older: OlderRecord = serde_json::from_value(written).unwrap();
+        assert_eq!(older.version, "");
+        // Écrit puis relu sur le disque : l'absence reste une absence.
+        let back: UpdateRecord =
+            serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+        assert_eq!(back.version, None);
+        // Un résultat ordinaire n'est pas marqué.
+        let known = UpdateRecord {
+            version: Some("0.2.0".into()),
+            ..record
+        };
+        assert!(!known.to_result().version_unknown);
     }
 
     #[test]

@@ -305,6 +305,69 @@ mod tests {
         assert!(open.is_ok());
     }
 
+    /// Le filtre ne doit pas sur-bloquer : des serveurs publics légitimes (IPv4, IPv6, noms, ports)
+    /// passent, y compris les voisins immédiats des plages refusées.
+    #[test]
+    fn legitimate_public_addresses_names_and_ports_are_accepted() {
+        for url in [
+            // IPv4 publiques.
+            "https://1.1.1.1/x",
+            "https://8.8.8.8:443/x",
+            "https://9.9.9.9/x",
+            "https://93.184.216.34/x",
+            "https://140.82.112.3/x",
+            "https://11.0.0.1/x",
+            // Voisins immédiats des plages refusées.
+            "https://9.255.255.255/x",
+            "https://126.255.255.255/x",
+            "https://128.0.0.1/x",
+            "https://172.15.255.255/x",
+            "https://172.32.0.0/x",
+            "https://192.167.255.255/x",
+            "https://192.169.0.1/x",
+            "https://169.253.255.255/x",
+            "https://169.255.0.1/x",
+            "https://100.63.255.255/x",
+            "https://100.128.0.1/x",
+            // IPv6 publiques.
+            "https://[2001:4860:4860::8888]/x",
+            "https://[2606:4700:4700::1111]/x",
+            "https://[2a00:1450:4007:80f::200e]/x",
+            "https://[2606:4700::1111]:8443/x",
+            "https://[fbff::1]/x",
+            "https://[fe7f::1]/x",
+            // Adresses encapsulées dont l'IPv4 est publique.
+            "https://[::ffff:8.8.8.8]/x",
+            "https://[64:ff9b::808:808]/x",
+            // Noms ordinaires, y compris ceux qui ressemblent à une adresse ou à `localhost`.
+            "https://example.org/x",
+            "https://example.org./x",
+            "https://EXEMPLE.Org/x",
+            "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent",
+            "https://objects.githubusercontent.com/x",
+            "https://downloads.exemple.fr/hearth/agent",
+            "https://localhost.example.org/x",
+            "https://notlocalhost.example/x",
+            "https://mylocalhost.com/x",
+            "https://127.example.org/x",
+            "https://10.example.org/x",
+            "https://192-168-1-10.example.org/x",
+            "https://1e100.net/x",
+            "https://xn--bcher-kva.example/x",
+            "https://bücher.example/x",
+            // Ports.
+            "https://example.org:443/x",
+            "https://example.org:8443/x",
+            "https://example.org:65535/x",
+            "https://8.8.8.8:8443/x",
+        ] {
+            assert!(
+                plan(true, false, UpdateInput { url, ..input() }).is_ok(),
+                "{url} : refusée à tort"
+            );
+        }
+    }
+
     #[test]
     fn a_newer_version_over_https_with_a_checksum_is_accepted_and_the_sum_is_lowercased() {
         let target = plan(true, false, input()).unwrap();

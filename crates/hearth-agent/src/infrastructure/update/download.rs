@@ -114,6 +114,12 @@ fn build_client(source: &Roots, allow_local: bool) -> Result<reqwest::Client, St
         .with_root_certificates(roots)
         .with_no_client_auth();
     let mut builder = reqwest::Client::builder()
+        // FIX:01M47XJXQ0GHV77FN4J6R1NXPZ (docs/bugs/FIX-01M47XJXQ0GHV77FN4J6R1NXPZ.md)
+        // Aucun proxy d'environnement (HTTPS_PROXY, ALL_PROXY...) : avec un proxy, le nom de l'hôte
+        // partirait au proxy, qui le résoudrait lui-même, et le filtre d'adresses appliqué après
+        // résolution (BR-UPDATE-027) ne verrait plus rien. Un serveur derrière un proxy sortant ne
+        // peut pas se mettre à jour à distance : c'est assumé.
+        .no_proxy()
         .use_preconfigured_tls(config)
         .https_only(true)
         .redirect(Policy::custom(move |attempt| {

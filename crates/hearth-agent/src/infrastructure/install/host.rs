@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use super::probe;
 use super::scrub::scrubbed;
 use crate::application::ports::{
-    Answered, BinaryInstalled, ConfigSpec, HostError, HostFacts, InstallHost, InstallLock,
-    InstallPaths,
+    Answered, BinaryInstalled, ConfigSpec, FreeSpace, HostError, HostFacts, InstallHost,
+    InstallLock, InstallPaths, UpdateHostError,
 };
 use crate::domain::install::{
     BinaryState, DATABASE_FILE, DataDirState, DataState, IDENTITY_CONTENT_FILES, Version,
@@ -23,6 +23,7 @@ use crate::domain::install::{
 };
 use crate::infrastructure::config;
 use crate::infrastructure::data_dir;
+use crate::infrastructure::file_lock::{HeldLock, LockError};
 
 /// Pause entre deux essais pendant qu'on attend l'agent.
 const RETRY: Duration = Duration::from_millis(300);
@@ -36,6 +37,13 @@ fn io_error(action: &'static str, path: &Path) -> impl FnOnce(io::Error) -> Host
         action,
         path,
         source,
+    }
+}
+
+impl FreeSpace for SystemHost {
+    fn free_bytes(&self, path: &Path) -> Result<u64, UpdateHostError> {
+        InstallHost::free_bytes(self, path)
+            .map_err(|error| UpdateHostError::Other(error.to_string()))
     }
 }
 
@@ -79,6 +87,13 @@ impl InstallHost for SystemHost {
             .stdin(Stdio::null())
             .output()
             .map_err(io_error("lecture de l'espace libre", existing))?;
+        if !output.status.success() {
+            return Err(HostError::Other(format!(
+                "df a échoué pour {} ({})",
+                existing.display(),
+                output.status
+            )));
+        }
         parse_df(&String::from_utf8_lossy(&output.stdout)).ok_or_else(|| {
             HostError::Other(format!(
                 "espace libre illisible pour {}",
@@ -130,12 +145,10 @@ impl InstallHost for SystemHost {
         let file = options
             .open(path)
             .map_err(io_error("ouverture du verrou d'installation", path))?;
-        match file.try_lock() {
-            Ok(()) => Ok(InstallLock(Box::new(HeldLock(file)))),
-            Err(fs::TryLockError::WouldBlock) => Err(HostError::AlreadyRunning),
-            Err(fs::TryLockError::Error(error)) => {
-                Err(io_error("verrou d'installation", path)(error))
-            }
+        match HeldLock::acquire(file, Duration::ZERO, Duration::ZERO) {
+            Ok(held) => Ok(InstallLock(Box::new(held))),
+            Err(LockError::Busy) => Err(HostError::AlreadyRunning),
+            Err(LockError::Io(error)) => Err(io_error("verrou d'installation", path)(error)),
         }
     }
 
@@ -383,26 +396,6 @@ fn parse_df(output: &str) -> Option<u64> {
     let line = output.lines().nth(1)?;
     let kib: u64 = line.split_whitespace().nth(3)?.parse().ok()?;
     kib.checked_mul(1024)
-}
-
-/// Le verrou tenu : relâché **explicitement** à la destruction, pas seulement par la fermeture du
-/// descripteur.
-///
-/// Un `flock` appartient à la description de fichier ouverte, pas au descripteur. Si un autre
-/// thread lance un sous-processus à cet instant, l'enfant porte une copie du descripteur entre le
-/// `fork` et l'`exec` (qui le ferme : `O_CLOEXEC`) ; fermer le nôtre ne suffit alors pas, le
-/// verrou reste pris le temps de cet `exec`, et l'opération suivante est refusée à tort.
-/// `unlock` agit sur la description : elle libère le verrou quels que soient les copies vivantes.
-struct HeldLock(File);
-
-impl Drop for HeldLock {
-    fn drop(&mut self) {
-        // FIX:01M46N01GMK08NXQHCZ28A2KQ1 : relâche le verrou même si un enfant en cours de
-        // lancement garde encore une copie du descripteur (docs/bugs/FIX-01M46N01GMK08NXQHCZ28A2KQ1.md).
-        // Échec ignoré : la fermeture qui suit le relâche de toute façon, et on ne panique pas
-        // dans un `drop`.
-        let _ = self.0.unlock();
-    }
 }
 
 #[cfg(test)]
@@ -668,17 +661,12 @@ mod unix_tests {
     fn the_install_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive() {
         let dir = tempfile::tempdir().expect("dossier");
         let path = dir.path().join("install.lock");
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&path)
-            .expect("ouverture");
-        file.try_lock().expect("verrou pris");
+        let lock = SystemHost.lock(&path).expect("verrou pris");
         // Même description de fichier ouverte, comme le descripteur hérité par un enfant forké.
-        let child_copy = file.try_clone().expect("copie du descripteur");
+        let held = lock.0.downcast::<HeldLock>().expect("un verrou partagé");
+        let child_copy = held.descriptor_copy();
 
-        drop(HeldLock(file));
+        drop(held);
 
         assert!(
             SystemHost.lock(&path).is_ok(),

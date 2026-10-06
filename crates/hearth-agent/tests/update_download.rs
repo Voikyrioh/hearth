@@ -188,3 +188,71 @@ async fn exotic_spellings_of_a_local_address_are_refused_before_any_connection()
         );
     }
 }
+
+/// Le sous-processus de `an_environment_proxy_is_never_used_...` : il tourne avec `HTTPS_PROXY`,
+/// `HTTP_PROXY` et `ALL_PROXY` posés vers un « proxy » qui compte les connexions (l'environnement
+/// d'un processus ne se modifie pas en Rust sûr : le test se relance lui-même avec cet
+/// environnement). Lancé seul, il ne fait rien.
+#[tokio::test]
+async fn proxy_child_probe() {
+    if std::env::var("HEARTH_PROXY_CHILD").as_deref() != Ok("1") {
+        return;
+    }
+    assert!(
+        std::env::var("HTTPS_PROXY").is_ok(),
+        "le proxy doit être posé dans cet environnement"
+    );
+    let server = serve().await;
+    // Adresses locales permises (bout en bout) : le serveur est joint DIRECTEMENT. Un client qui
+    // suivrait HTTPS_PROXY enverrait sa demande au proxy et échouerait.
+    let open = HttpsDownloader::with_roots(vec![server.root.clone()], true);
+    let direct = open.fetch(&url(&server, "/ok"), 1024, &|_, _| {}).await;
+    assert_eq!(direct.unwrap(), BODY, "joint sans passer par le proxy");
+    // Filtre actif : l'adresse locale est refusée avant toute connexion, proxy ou non.
+    let strict = HttpsDownloader::with_roots(vec![server.root.clone()], false);
+    let literal = format!("https://127.0.0.1:{}/ok", server.port);
+    let refused = strict.fetch(&literal, 1024, &|_, _| {}).await;
+    assert!(
+        matches!(&refused, Err(FetchError::Failed(detail)) if detail.contains("locale ou privée")),
+        "{refused:?}"
+    );
+}
+
+// FIX:01M47XJXQ0GHV77FN4J6R1NXPZ
+#[test]
+fn an_environment_proxy_is_never_used_so_the_address_filter_cannot_be_bypassed() {
+    // BR-UPDATE-027 : avec un proxy, le nom de l'hôte partirait au proxy qui le résoudrait lui-même,
+    // et le filtre d'adresses appliqué après résolution ne verrait rien. Le client n'utilise
+    // aucun proxy d'environnement.
+    let proxy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    proxy.set_nonblocking(true).unwrap();
+    let address = format!("http://{}", proxy.local_addr().unwrap());
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "proxy_child_probe", "--nocapture"])
+        .env("HEARTH_PROXY_CHILD", "1")
+        .env("HTTPS_PROXY", &address)
+        .env("https_proxy", &address)
+        .env("HTTP_PROXY", &address)
+        .env("ALL_PROXY", &address)
+        .env("http_proxy", &address)
+        .env("all_proxy", &address)
+        .env_remove("NO_PROXY")
+        .env_remove("no_proxy")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+        "le sous-processus a bien tourné : {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    match proxy.accept() {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        other => panic!("une connexion est partie vers le proxy : {other:?}"),
+    }
+}

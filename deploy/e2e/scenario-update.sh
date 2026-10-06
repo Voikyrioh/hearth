@@ -175,7 +175,7 @@ ok "signature d'une autre clé : 422 BAD_SIGNATURE, rien téléchargé, rien éc
 # Somme fausse (signature de la bonne clé, bon fichier) : refusée après téléchargement, avant toute écriture.
 WRONG_SUM=$(python3 -c 'import json,sys; b=json.loads(sys.argv[1]); b["sha256"]="0"*64; print(json.dumps(b))' "$(request_body 0.2.0 "$NEW_URL" /dist/new.minisig /dist/hearth-agent-new)")
 code=$(api POST /agent/update "$ADMIN" -d "$WRONG_SUM")
-[ "$code" = 202 ] || die "la demande à somme fausse est acceptée puis échoue (reçu $code)"
+[ "$code" = 202 ] || die "la demande à somme fausse est acceptée puis échoue (reçu $code : $(cat "$OUT.body"))"
 wait_done 60
 [ "$(body_field last.outcome)" = failed ] && [ "$(body_field last.reason)" = bad_checksum ] || die "une somme fausse devrait donner failed/bad_checksum : $(cat "$OUT.body")"
 [ ! -e "$DATA/update/hearth-agent.new" ] || die "un binaire à somme fausse a été déposé"

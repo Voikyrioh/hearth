@@ -347,7 +347,7 @@ async fn the_result_written_by_the_supervisor_is_announced_once_and_journaled_on
     // Le superviseur a écrit « réussi » ; le nouvel agent démarre.
     rig.host.with(|s| {
         s.last = Some(UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::Succeeded,
             reason: None,
@@ -379,7 +379,7 @@ async fn a_rolled_back_update_is_announced_with_its_reason_and_journaled_as_fail
     let rig = Rig::new(&env, true, false);
     rig.host.with(|s| {
         s.last = Some(UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::RolledBack,
             reason: Some(UpdateReason::NoAnswer),
@@ -421,7 +421,7 @@ async fn the_result_survives_the_loss_of_the_service_itself() {
     let rig = Rig::new(&env, true, false);
     rig.host.with(|s| {
         s.last = Some(UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::Succeeded,
             reason: None,
@@ -527,9 +527,18 @@ fn orphan_job() -> hearth_agent::domain::update::Job {
     }
 }
 
+/// Le travail d'une mise à jour dont l'échange a eu lieu : la version visée est celle de l'agent
+/// qui démarre (le nouvel agent), la sauvegarde de l'ancien binaire est restée.
+fn swapped_job() -> hearth_agent::domain::update::Job {
+    hearth_agent::domain::update::Job {
+        version: CURRENT.to_string(),
+        ..orphan_job()
+    }
+}
+
 fn record(outcome: UpdateOutcome, reason: Option<UpdateReason>) -> UpdateRecord {
     UpdateRecord {
-        version: "0.2.0".into(),
+        version: Some("0.2.0".into()),
         previous: "0.1.0".into(),
         outcome,
         reason,
@@ -626,7 +635,7 @@ async fn a_swap_nobody_concluded_is_taken_over_by_a_recovery_supervisor() {
     let rig = Rig::new(&env, true, false);
     rig.host.with(|s| {
         s.state = Some(intent(UpdateStep::Check));
-        s.job = Some(orphan_job());
+        s.job = Some(swapped_job());
         s.existing
             .push("/usr/local/bin/.hearth-agent.previous".into());
     });
@@ -653,7 +662,7 @@ async fn the_result_of_a_recovery_is_announced_and_journaled_once_it_is_written(
     let rig = Rig::new(&env, true, false);
     rig.host.with(|s| {
         s.state = Some(intent(UpdateStep::Check));
-        s.job = Some(orphan_job());
+        s.job = Some(swapped_job());
         s.existing
             .push("/usr/local/bin/.hearth-agent.previous".into());
     });
@@ -809,6 +818,9 @@ async fn an_unreadable_trace_is_a_work_to_conclude_never_nothing() {
             UpdateReason::Interrupted
         };
         assert_eq!(done.reason, Some(expected), "backup = {backup}");
+        assert_eq!(done.version, "", "version inconnue : vide sur le flux");
+        let last = rig.service.last().unwrap();
+        assert!(last.version_unknown && last.version.is_empty(), "{last:?}");
         rig.host.with(|s| {
             if backup {
                 assert!(
@@ -853,4 +865,199 @@ async fn the_agent_that_comes_back_relays_the_supervisor_state_without_rewriting
     rig.host
         .running
         .store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Attend (au plus 5 s) qu'une condition sur la machine simulée devienne vraie.
+async fn until(rig: &Rig, condition: impl Fn(&support::update::MemState) -> bool) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !rig.host.with(|state| condition(state)) {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("état attendu");
+}
+
+#[tokio::test]
+async fn a_supervisor_that_dies_after_the_swap_is_taken_over_never_declared_failed() {
+    // FIX:01M47PHYR8MD87HAXY9PARQXAN
+    // Le superviseur travaillait (la surveillance le voit vivant), puis il meurt sans résultat
+    // alors que les binaires sont déjà échangés : la patience ne dit pas « échec du superviseur »
+    // (le nouvel agent est en place, l'ancien est gardé), elle suit la même règle qu'au démarrage.
+    let env = env().await;
+    let rig = Rig::impatient(&env);
+    rig.host
+        .running
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(swapped_job());
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+    });
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    rig.host
+        .running
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    until(&rig, |s| !s.launched.is_empty()).await;
+    rig.host.with(|s| {
+        assert!(s.job.as_ref().unwrap().recover, "superviseur de reprise");
+        assert!(s.last.is_none(), "aucun échec écrit");
+    });
+    while let Ok(progress) = events.try_recv() {
+        assert_ne!(progress.step, UpdateStep::Done, "{progress:?}");
+    }
+    assert!(journal(&env).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_supervisor_that_never_shows_up_ends_as_a_launch_failure_after_the_patience() {
+    let env = env().await;
+    let rig = Rig::impatient(&env);
+    rig.host
+        .running
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    rig.host
+        .with(|s| s.state = Some(intent(UpdateStep::Restart)));
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    rig.host
+        .running
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+    assert_eq!(done.outcome, Some(UpdateOutcome::Failed));
+    assert_eq!(done.reason, Some(UpdateReason::SupervisorLaunch));
+    assert_eq!(journal(&env).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_third_version_put_in_by_hand_is_never_rolled_back_over_nor_its_database_restored() {
+    // FIX:01M47N6Z485TWN2H770KQ5H80R : la mise à jour 0.0.9 vers 0.2.0 a été laissée en cours
+    // (sauvegarde de l'ancien binaire, copie de la base) ; l'administrateur a installé à la main
+    // une TROISIÈME version, 0.1.0 (ni l'ancienne, ni la visée). Le démarrage ne doit ni lancer
+    // une reprise (qui remettrait l'ancien binaire et la copie PÉRIMÉE de la base sur son travail)
+    // ni toucher à la base : il conclut, retire les traces et rend la main.
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(orphan_job());
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+        s.db_copy = true;
+    });
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+    assert_eq!(done.outcome, Some(UpdateOutcome::Failed));
+    assert_eq!(done.reason, Some(UpdateReason::Interrupted));
+    rig.host.with(|s| {
+        assert!(s.launched.is_empty(), "aucun superviseur de reprise");
+        assert_eq!(s.db_restores, 0, "la base n'est jamais recopiée");
+        assert!(!s.db_copy, "la copie périmée est retirée");
+        assert!(
+            s.removed
+                .iter()
+                .any(|p| p.ends_with(".hearth-agent.previous"))
+        );
+        assert!(s.state.is_none() && s.job.is_none());
+    });
+    assert_eq!(journal(&env).await.len(), 1);
+    // Un démarrage de plus : plus rien à conclure.
+    rig.service.resume().await;
+    assert_eq!(journal(&env).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_recovery_supervisor_that_says_nothing_is_tried_once_then_concluded_for_good() {
+    // Revue r1, bloquant 1 : la patience relançait la reprise à chaque tour, sans fin
+    // (`in_progress` vrai pour toujours). Une seule tentative, puis une conclusion lisible.
+    let env = env().await;
+    let rig = Rig::impatient(&env);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(swapped_job());
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+        s.db_copy = true;
+    });
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    // Le superviseur de reprise ne produit jamais de résultat : la patience le constate.
+    let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+    assert_eq!(done.outcome, Some(UpdateOutcome::Failed));
+    assert_eq!(done.reason, Some(UpdateReason::RollbackFailed));
+    // Plusieurs patiences de plus : rien ne repart.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    rig.host.with(|s| {
+        assert_eq!(s.launched.len(), 1, "exactement un lancement");
+        assert!(
+            s.db_copy,
+            "la copie de la base est gardée pour la reprise à la main"
+        );
+        assert!(
+            s.existing
+                .iter()
+                .any(|p| p.ends_with(".hearth-agent.previous")),
+            "la sauvegarde de l'ancien binaire est gardée"
+        );
+        assert!(
+            s.job.is_none() && s.state.is_none(),
+            "traces de travail retirées"
+        );
+        assert_eq!(s.db_restores, 0, "aucune base remise");
+    });
+    assert!(!rig.service.status().in_progress, "plus rien en cours");
+    assert_eq!(journal(&env).await.len(), 1, "une entrée au journal");
+    // Un redémarrage de l'agent ensuite : aucune nouvelle tentative automatique.
+    rig.service.resume().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    rig.host.with(|s| assert_eq!(s.launched.len(), 1));
+    assert_eq!(journal(&env).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_work_whose_versions_do_not_read_restores_nothing_erases_nothing_and_never_loops() {
+    // Revue r1, bloquant 2 : version visée illisible (boucle) ou version d'avant illisible (retour
+    // arrière avec copie périmée). Dans le doute : copies gardées, conclu « à reprendre à la main ».
+    for (version, previous) in [("x", "0.0.9"), ("0.2.0", "?")] {
+        let env = env().await;
+        let rig = Rig::impatient(&env);
+        rig.host.with(|s| {
+            s.state = Some(intent(UpdateStep::Check));
+            let mut job = swapped_job();
+            job.version = version.into();
+            job.previous = previous.into();
+            s.job = Some(job);
+            s.existing
+                .push("/usr/local/bin/.hearth-agent.previous".into());
+            s.db_copy = true;
+        });
+        let mut events = rig.feed_receiver();
+        rig.service.resume().await;
+        let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+        assert_eq!(
+            done.reason,
+            Some(UpdateReason::RollbackFailed),
+            "{version} {previous}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        rig.host.with(|s| {
+            assert!(
+                s.launched.is_empty(),
+                "aucune reprise : {version} {previous}"
+            );
+            assert_eq!(s.db_restores, 0);
+            assert!(s.db_copy, "copie gardée");
+            assert!(
+                s.existing
+                    .iter()
+                    .any(|p| p.ends_with(".hearth-agent.previous")),
+                "sauvegarde gardée"
+            );
+        });
+        assert!(!rig.service.status().in_progress);
+        assert_eq!(journal(&env).await.len(), 1);
+    }
 }
