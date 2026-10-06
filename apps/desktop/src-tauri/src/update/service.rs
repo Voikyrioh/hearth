@@ -141,13 +141,23 @@ impl UpdateService {
             if inner.phase != UpdatePhase::Idle {
                 return self.dto(&inner);
             }
-            if automatic && !domain::check_is_due(started, inner.record.last_request_at) {
+            if automatic
+                && !domain::automatic_check_allowed(
+                    started,
+                    inner.record.last_request_at,
+                    &inner.record.automatic_attempts,
+                )
+            {
                 return self.dto(&inner);
             }
             if !automatic && !domain::manual_check_allowed(started, inner.record.last_attempt_at) {
                 return self.dto(&inner);
             }
             previous_request = inner.record.last_request_at;
+            if automatic {
+                inner.record.automatic_attempts =
+                    domain::with_attempt(started, &inner.record.automatic_attempts);
+            }
             inner.record.last_request_at = Some(started);
             inner.phase = UpdatePhase::Checking;
             inner.record.last_attempt_at = Some(started);

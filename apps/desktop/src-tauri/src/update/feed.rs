@@ -7,7 +7,8 @@
 //! (`capabilities/default.json` n'en accorde aucune), l'adresse du flux et la clé sont des
 //! constantes de la compilation.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -87,6 +88,7 @@ pub struct TauriFeed<R: Runtime> {
     app: AppHandle<R>,
     endpoint: Url,
     policy: DownloadPolicy,
+    check_timeout: Duration,
     /// La dernière annonce dont la source est permise : celle que `download` utilise.
     staged: Mutex<Option<Update>>,
 }
@@ -104,8 +106,16 @@ impl<R: Runtime> TauriFeed<R> {
             app,
             endpoint,
             policy,
+            check_timeout: CHECK_TIMEOUT,
             staged: Mutex::new(None),
         }
+    }
+
+    /// Délai de la vérification (tests : un serveur qui ne répond jamais).
+    #[doc(hidden)]
+    pub fn with_check_timeout(mut self, timeout: Duration) -> Self {
+        self.check_timeout = timeout;
+        self
     }
 
     fn staged_for(&self, version: &str) -> Option<Update> {
@@ -131,14 +141,50 @@ fn same_version(a: &str, b: &str) -> bool {
     }
 }
 
-fn feed_error(error: tauri_plugin_updater::Error) -> FeedError {
-    // Connexion ou résolution du nom impossible : aucune requête n'est partie (pas de réseau).
-    let no_request = matches!(&error, tauri_plugin_updater::Error::Reqwest(e) if e.is_connect());
-    if no_request {
+/// Rend le quota de 24 h seulement quand RIEN n'a eu lieu avec le PREMIER hôte : échec de résolution
+/// du nom ou de connexion TCP à l'adresse du flux, et rien d'autre. Échec TLS, échec à un saut
+/// suivant, délai dépassé, réponse invalide : le quota est consommé. Dans le doute : consommé.
+fn feed_error(error: tauri_plugin_updater::Error, redirected: bool) -> FeedError {
+    if !redirected && is_no_connection(&error) {
         FeedError::offline(error.to_string())
     } else {
         FeedError::failed(error.to_string())
     }
+}
+
+/// `redirected` : le premier hôte a répondu par une redirection (reqwest garde l'adresse de départ dans
+/// l'erreur d'un saut suivant : seul ce drapeau dit que l'échec est celui d'un second saut).
+fn is_no_connection(error: &tauri_plugin_updater::Error) -> bool {
+    let tauri_plugin_updater::Error::Reqwest(e) = error else {
+        return false;
+    };
+    if !e.is_connect() || e.is_timeout() {
+        return false;
+    }
+    // La chaîne des causes : une erreur d'E/S de connexion (refusée, réseau injoignable…) ou de
+    // résolution du nom. Une erreur TLS ou toute autre cause ne passe pas.
+    let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
+    while let Some(cause) = source {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            use std::io::ErrorKind::*;
+            if matches!(
+                io.kind(),
+                ConnectionRefused | NetworkUnreachable | HostUnreachable | AddrNotAvailable
+            ) {
+                return true;
+            }
+        }
+        let text = cause.to_string().to_lowercase();
+        if text.contains("dns error")
+            || text.contains("failed to lookup")
+            || text.contains("no such host")
+            || text.contains("name or service not known")
+        {
+            return true;
+        }
+        source = cause.source();
+    }
+    false
 }
 
 /// Range une erreur du greffon : signature, contenu ou format refusés (corrompu), coupure
@@ -162,16 +208,18 @@ pub fn classify(error: &tauri_plugin_updater::Error) -> DownloadError {
 }
 
 /// Durcit le client HTTP du greffon (vérification ET téléchargement) : HTTPS partout quand la
-/// source l'est, et, à chaque redirection, HTTPS, hôtes de GitHub et au plus `MAX_REDIRECTS` sauts
-/// (`DownloadPolicy::allows_redirect`). Sans cela reqwest suivrait 10 redirections vers n'importe
-/// quel hôte, en clair compris.
+/// source l'est, et, à chaque redirection, HTTPS et au plus `MAX_REDIRECTS` sauts
+/// (`DownloadPolicy::allows_redirect`). Sans cela reqwest suivrait 10 redirections, en clair compris.
 fn harden(
     policy: &DownloadPolicy,
+    redirected: Arc<AtomicBool>,
 ) -> impl Fn(reqwest::ClientBuilder) -> reqwest::ClientBuilder + Send + Sync + 'static {
     let policy = policy.clone();
     move |builder| {
         let rules = policy.clone();
+        let redirected = redirected.clone();
         let builder = builder.redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            redirected.store(true, Ordering::SeqCst);
             if rules.allows_redirect(attempt.url(), attempt.previous().len()) {
                 attempt.follow()
             } else {
@@ -189,16 +237,21 @@ fn harden(
 #[async_trait]
 impl<R: Runtime> Feed for TauriFeed<R> {
     async fn check(&self) -> Result<Option<Candidate>, FeedError> {
+        let redirected = Arc::new(AtomicBool::new(false));
         let updater = self
             .app
             .updater_builder()
             .endpoints(vec![self.endpoint.clone()])
-            .map_err(feed_error)?
-            .timeout(CHECK_TIMEOUT)
-            .configure_client(harden(&self.policy))
+            .map_err(|error| feed_error(error, false))?
+            .timeout(self.check_timeout)
+            .configure_client(harden(&self.policy, redirected.clone()))
             .build()
-            .map_err(feed_error)?;
-        let Some(mut update) = updater.check().await.map_err(feed_error)? else {
+            .map_err(|error| feed_error(error, false))?;
+        let Some(mut update) = updater
+            .check()
+            .await
+            .map_err(|error| feed_error(error, redirected.load(Ordering::SeqCst)))?
+        else {
             self.stage(None);
             return Ok(None);
         };

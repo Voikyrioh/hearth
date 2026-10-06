@@ -22,10 +22,16 @@ pub const FEED_URL: &str =
 pub const DOWNLOAD_HOST: &str = "github.com";
 pub const DOWNLOAD_PATH_PREFIX: &str = "/Voikyrioh/hearth/releases/download/";
 
-/// Au plus 3 redirections à l'adresse de l'installateur : `releases/download/…` de github.com
-/// redirige une fois vers le stockage des releases (`release-assets.githubusercontent.com`, relevé
-/// sur les en-têtes d'une release publique d'un autre dépôt, requête de lecture) ; une marge de deux.
-pub const MAX_REDIRECTS: usize = 3;
+/// Nombre de redirections suivies au plus, pour le manifeste comme pour l'installateur. GitHub en
+/// fait déjà DEUX aujourd'hui (`releases/latest/download/…` vers `releases/download/vN/…`, puis vers
+/// le stockage des releases, relevé sur les en-têtes d'une release publique d'un autre dépôt). La
+/// borne est large exprès : un saut de plus chez GitHub ne doit pas rendre muets tous les clients
+/// installés, sans correctif possible puisque le correctif passerait par ce même canal. C'est le
+/// rang de la redirection (la 1re, la 2e…) qui est borné, l'adresse de départ n'est pas comptée.
+pub const MAX_REDIRECTS: usize = 5;
+/// Tentatives réseau AUTOMATIQUES au plus par 24 h glissantes, quoi qu'il arrive (réussies, échouées,
+/// sans réseau) : plafond dur, compté et persisté, indépendant du classement des erreurs.
+pub const MAX_AUTOMATIC_ATTEMPTS_PER_DAY: usize = 3;
 /// Une vérification manuelle ne repart pas moins de 30 s après la précédente tentative (une page
 /// compromise ne peut pas boucler sur la requête vers GitHub).
 pub const MANUAL_CHECK_MIN_INTERVAL_MS: i64 = 30_000;
@@ -46,6 +52,9 @@ pub struct UpdateRecord {
     /// consomme le quota d'une vérification automatique par 24 h. Une tentative sans réseau (aucune
     /// requête partie) ne la change pas.
     pub last_request_at: Option<i64>,
+    /// Instants des tentatives réseau AUTOMATIQUES des dernières 24 h (plafond dur,
+    /// `MAX_AUTOMATIC_ATTEMPTS_PER_DAY`).
+    pub automatic_attempts: Vec<i64>,
     /// Dernière vérification qui a obtenu une réponse valable (« Dernière vérification »).
     pub last_success_at: Option<i64>,
     /// Le bandeau est masqué jusque-là (« Plus tard »).
@@ -80,9 +89,6 @@ pub struct DownloadPolicy {
     path_prefix: String,
     /// Chaque redirection doit être en HTTPS (toujours vrai en production).
     redirects_https_only: bool,
-    /// Hôtes permis APRÈS le premier saut : l'hôte de la source et, pour GitHub, son stockage.
-    redirect_hosts: Vec<&'static str>,
-    redirect_host_suffixes: Vec<&'static str>,
 }
 
 impl DownloadPolicy {
@@ -94,8 +100,6 @@ impl DownloadPolicy {
             port: None,
             path_prefix: DOWNLOAD_PATH_PREFIX.to_owned(),
             redirects_https_only: true,
-            redirect_hosts: vec![DOWNLOAD_HOST],
-            redirect_host_suffixes: vec![".githubusercontent.com"],
         }
     }
 
@@ -109,8 +113,6 @@ impl DownloadPolicy {
             port: Some(port),
             path_prefix: "/".to_owned(),
             redirects_https_only: false,
-            redirect_hosts: vec!["127.0.0.1"],
-            redirect_host_suffixes: vec![],
         }
     }
 
@@ -125,26 +127,17 @@ impl DownloadPolicy {
         }
     }
 
-    /// Une redirection de l'installateur est-elle suivie ? `hops` = redirections déjà suivies.
-    /// HTTPS à chaque saut, nombre borné, hôtes de GitHub seulement (production).
-    pub fn allows_redirect(&self, target: &Url, hops: usize) -> bool {
-        if hops >= MAX_REDIRECTS {
-            return false;
-        }
-        if self.redirects_https_only && target.scheme() != "https" {
-            return false;
-        }
-        if !target.username().is_empty() || target.password().is_some() {
-            return false;
-        }
-        let Some(host) = target.host_str() else {
-            return false;
-        };
-        self.redirect_hosts.contains(&host)
-            || self
-                .redirect_host_suffixes
-                .iter()
-                .any(|suffix| host.ends_with(suffix))
+    /// Une redirection est-elle suivie (manifeste et installateur) ? `rank` = rang de cette
+    /// redirection (1 pour la première) : au plus `MAX_REDIRECTS`. HTTPS à chaque saut. AUCUNE liste
+    /// d'hôtes sur les sauts suivants : la signature (clé embarquée + version signée) protège le
+    /// contenu, HTTPS protège le transport, et une liste ferait taire tous les clients au premier
+    /// changement de domaine de stockage chez GitHub (ADR-0017).
+    pub fn allows_redirect(&self, target: &Url, rank: usize) -> bool {
+        rank <= MAX_REDIRECTS
+            && (!self.redirects_https_only || target.scheme() == "https")
+            && target.username().is_empty()
+            && target.password().is_none()
+            && target.host_str().is_some()
     }
 
     /// L'installateur n'est téléchargé qu'en HTTPS quand la source l'est.
@@ -230,6 +223,32 @@ pub fn check_is_due(now: i64, last_attempt_at: Option<i64>) -> bool {
         Some(last) if last > now => true,
         Some(last) => now - last >= CHECK_INTERVAL_MS,
     }
+}
+
+/// Tentatives automatiques encore dans la fenêtre glissante de 24 h.
+pub fn attempts_in_window(now: i64, attempts: &[i64]) -> usize {
+    attempts
+        .iter()
+        .filter(|at| **at <= now && now - **at < CHECK_INTERVAL_MS)
+        .count()
+}
+
+/// Une vérification automatique est-elle permise ? La règle des 24 h depuis la dernière requête
+/// (`check_is_due`) ET le plafond dur de tentatives par 24 h glissantes.
+pub fn automatic_check_allowed(now: i64, last_request_at: Option<i64>, attempts: &[i64]) -> bool {
+    check_is_due(now, last_request_at)
+        && attempts_in_window(now, attempts) < MAX_AUTOMATIC_ATTEMPTS_PER_DAY
+}
+
+/// Les tentatives de la fenêtre, plus celle de `now`.
+pub fn with_attempt(now: i64, attempts: &[i64]) -> Vec<i64> {
+    let mut kept: Vec<i64> = attempts
+        .iter()
+        .copied()
+        .filter(|at| *at <= now && now - *at < CHECK_INTERVAL_MS)
+        .collect();
+    kept.push(now);
+    kept
 }
 
 /// Le bandeau est-il masqué par un « Plus tard » (BR-UPDATE-006) ? Un report ne dépasse jamais
