@@ -18,7 +18,7 @@ Quand la même notification (même type, même texte) est émise plusieurs fois,
   - `Status::failed_attempts` fourni par `crates/hearth-link/src/domain/state.rs::LinkMachine::status` et par les événements du `LinkManager`.
 - Interface :
   - `apps/desktop/src/stores/toasts.ts::push` (déduplication par type et texte, `count`) ; affichage `apps/desktop/src/components/molecules/ToastStack.vue` (`toast__count`).
-- Interface : notification à clé (`toasts.ts::push` avec `key`, `dismissKey`) : « {serveur} : Reconnexion échouée {n} fois. » est mise à jour sur place à chaque PALIER de 5 échecs consécutifs (5, 10, 15 : `link.ts::RECONNECT_FAILURE_STEP`), jamais à chaque tentative, et disparaît quand le lien revient. Coquille : au plus une notification système par palier franchi tant que le serveur reste « Hors ligne », sous la limite d'une par minute et par serveur (`presence.rs::NotificationGate`, BR-RESIL-015).
+- Interface : notification à clé (`toasts.ts::push` avec `key`, `dismissKey`) : « {serveur} : Reconnexion échouée {n} fois. » est mise à jour sur place à chaque PALIER de 5 échecs consécutifs (5, 10, 15 : `link.ts::RECONNECT_FAILURE_STEP`), jamais à chaque tentative, et disparaît quand le lien revient. Coquille : AUCUNE notification système pour les échecs répétés (seuls « Hors ligne » et le retour notifient, BR-RESIL-015) : une panne continue n'ajoute rien, quelle que soit sa durée. Le palier et l'entrée sont remis à zéro dès que l'état n'est plus « Reconnexion » ou « Hors ligne » (retour, session expirée, accès révoqué) et à la suppression du serveur (`link.ts`).
 
 ## Vérification
 - Interface : `link-stores.test.ts::counts a repeated notification instead of stacking it`, `::does not merge the same text of another kind`, `::dismisses on its own after the lifetime, and a repeat renews it`, `molecules.test.ts::turns a repeated notification into a counter`, `errors.test.ts::bounds the rate`, `e2e/shell.spec.ts`.
@@ -36,3 +36,4 @@ Quand la même notification (même type, même texte) est émise plusieurs fois,
 - 2026-10-05 — création de la partie interface (HRT-09, session 2026-10-04-hearth-creation). Portée par l'interface ; le calcul des états est dans `hearth-link` (ADR-0007).
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
 - 2026-10-05 : compteur d'échecs de reconnexion, une notification par serveur (HRT-12).
+- 2026-10-06 : paliers remis à zéro hors panne et à la suppression d'un serveur ; plus de notification système pour les échecs (revue round 2).

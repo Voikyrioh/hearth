@@ -61,6 +61,23 @@ describe("coupures répétées (BR-RESIL-018)", () => {
     expect(toasts.items).toHaveLength(2);
   });
 
+  it("repart de zéro après une session expirée et oublie un serveur supprimé", async () => {
+    const { bridge, servers } = await startedApp();
+    const toasts = useToastsStore();
+    bridge.publish("forge", "offline", { failedAttempts: 10 });
+    expect(toasts.items).toHaveLength(1);
+    // Session expirée : la panne est finie, la notification part, le palier aussi.
+    bridge.publish("forge", "session_expired", { reason: "expired", failedAttempts: 0 });
+    expect(toasts.items).toHaveLength(0);
+    bridge.publish("forge", "offline", { failedAttempts: 5 });
+    expect(toasts.items[0]?.message).toBe("forge : Reconnexion échouée 5 fois.");
+    // Serveur supprimé : la notification et son palier sont retirés.
+    bridge.dropServer("forge");
+    await flushPromises();
+    expect(servers.byId("forge")).toBeUndefined();
+    expect(toasts.items).toHaveLength(0);
+  });
+
   it("ne dit rien d'une coupure courte, ni d'une session expirée ou d'un accès révoqué", async () => {
     const { bridge } = await startedApp();
     const toasts = useToastsStore();

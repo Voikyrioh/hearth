@@ -85,22 +85,21 @@ fn going_offline_notifies_at_once_and_the_return_leaves_on_the_tick_after_the_wi
 }
 
 #[test]
-fn a_failure_step_while_offline_notifies_once_with_the_spec_text() {
+fn repeated_failures_never_notify_the_system_however_long_the_server_stays_off() {
     let (alerts, spy, clock) = setup(true);
     alerts.on_state("a", "forge", LinkState::Offline, 5);
     assert_eq!(spy.bodies(), ["forge est hors ligne."]);
-    // Une tentative toutes les 30 s : aucune notification avant le palier suivant.
-    for (n, at) in [(6, 30_000), (7, 60_000), (8, 90_000), (9, 120_000)] {
-        clock.store(at, Ordering::SeqCst);
+    // Une semaine éteint, une tentative toutes les 30 s : le compteur d'échecs monte, aucune
+    // notification système de plus (le compteur vit dans les notifications de l'application).
+    for n in 6..20_000_u32 {
+        clock.store(u64::from(n) * 30_000, Ordering::SeqCst);
         alerts.on_state("a", "forge", LinkState::Offline, n);
+        alerts.tick();
     }
     assert_eq!(spy.bodies().len(), 1);
-    clock.store(150_000, Ordering::SeqCst);
-    alerts.on_state("a", "forge", LinkState::Offline, 10);
-    assert_eq!(
-        spy.bodies().last().unwrap(),
-        "forge : Reconnexion échouée 10 fois."
-    );
+    clock.store(20_000 * 30_000, Ordering::SeqCst);
+    alerts.on_state("a", "forge", LinkState::Connected, 0);
+    assert_eq!(spy.bodies().len(), 2);
 }
 
 #[test]

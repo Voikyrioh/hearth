@@ -136,14 +136,28 @@ export const useLinkStore = defineStore("link", () => {
   // du lien.
   const failureSteps = new Map<string, number>();
 
+  // Un serveur supprimé n'a plus de palier (la session peut durer des jours : rien ne s'accumule).
+  watch(
+    () => servers.servers.map((server) => server.id),
+    (ids) => {
+      for (const id of [...failureSteps.keys()]) {
+        if (!ids.includes(id)) {
+          failureSteps.delete(id);
+          toasts.dismissKey(`reconnect:${id}`);
+        }
+      }
+    },
+  );
+
   function reportReconnectFailures(event: LinkStateEvent) {
     const key = `reconnect:${event.serverId}`;
-    if (event.state === "connected") {
+    if (event.state !== "reconnecting" && event.state !== "offline") {
+      // Connecté, session expirée, accès révoqué : la panne est finie (le compteur d'échecs repart
+      // de zéro), le palier et la notification de cette panne ne valent plus.
       failureSteps.delete(event.serverId);
       toasts.dismissKey(key);
       return;
     }
-    if (event.state !== "reconnecting" && event.state !== "offline") return;
     const step = Math.floor(event.failedAttempts / RECONNECT_FAILURE_STEP);
     if (step <= (failureSteps.get(event.serverId) ?? 0)) return;
     failureSteps.set(event.serverId, step);

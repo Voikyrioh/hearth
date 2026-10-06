@@ -137,7 +137,7 @@ impl Alerts {
 }
 
 impl StateObserver for Alerts {
-    fn on_state(&self, server: &str, name: &str, state: LinkState, failed_attempts: u32) {
+    fn on_state(&self, server: &str, name: &str, state: LinkState, _failed_attempts: u32) {
         let now = (self.now_ms)();
         let (body, tray) = {
             let mut inner = self.lock();
@@ -146,7 +146,7 @@ impl StateObserver for Alerts {
             let body = if self.is_enabled() {
                 inner
                     .gate
-                    .observe(server, state, failed_attempts, now)
+                    .observe(server, state, now)
                     .map(|alert| Self::text_of(&inner, alert))
             } else {
                 None

@@ -2,7 +2,7 @@
 //! est un paramètre.
 //!
 //! - [`NotificationGate`] : les notifications système du lien (passage « Hors ligne », retour
-//!   « Connecté », paliers d'échecs de reconnexion), au plus UNE par minute et par serveur, agrégées
+//!   « Connecté »), au plus UNE par minute et par serveur, agrégées
 //!   (BR-RESIL-015, 018) ;
 //! - [`LinkPresence`] : l'état affiché par l'icône de la zone de notification (BR-RESIL-016).
 //!
@@ -16,10 +16,6 @@ use hearth_link::domain::state::LinkState;
 /// confondues (BR-RESIL-015).
 pub const NOTIFY_WINDOW_MS: u64 = 60_000;
 
-/// Palier d'échecs de reconnexion : une notification (dans l'application) et au plus une
-/// notification système par palier franchi, jamais une par tentative (BR-RESIL-018).
-pub const FAILURE_STEP: u32 = 5;
-
 /// Ce que la notification annonce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlertKind {
@@ -27,9 +23,6 @@ pub enum AlertKind {
     Offline,
     /// Le serveur est de nouveau « Connecté » après avoir été « Hors ligne ».
     Back,
-    /// Le serveur est toujours « Hors ligne » et un palier d'échecs de reconnexion est franchi
-    /// (nombre d'échecs du palier : 5, 10, 15…).
-    Failures(u32),
 }
 
 /// Une notification à montrer. `suppressed` : combien de changements d'état ont été absorbés par la
@@ -53,10 +46,6 @@ struct ServerGate {
     wanted: Option<AlertKind>,
     /// Changements d'état absorbés depuis la dernière notification partie.
     suppressed: u32,
-    /// Palier d'échecs déjà couvert par une notification partie.
-    last_step: u32,
-    /// Palier d'échecs du dernier état « Hors ligne » vu.
-    step_now: u32,
 }
 
 impl ServerGate {
@@ -75,9 +64,12 @@ impl ServerGate {
 /// - une notification que la limite retient n'est pas perdue : seule la DERNIÈRE situation compte,
 ///   [`NotificationGate::poll`] l'annonce à l'échéance, une fois, avec le nombre de changements
 ///   absorbés en plus ;
-/// - « Hors ligne » et le retour « Connecté » qui le suit notifient ; tant que le serveur reste
-///   « Hors ligne », chaque palier de [`FAILURE_STEP`] échecs franchi en fait une de plus ; la
-///   reconnexion, la session expirée et l'accès révoqué n'en font pas.
+/// - seuls deux CHANGEMENTS d'état du lien notifient : « Hors ligne » et le retour « Connecté » qui le
+///   suit. Une panne qui dure ne produit rien de plus, quelle que soit sa durée : le nombre de
+///   notifications système est borné (une pour la panne, une au retour), indépendant du temps. Les
+///   échecs de reconnexion répétés ne notifient JAMAIS le système : leur compteur vit dans les
+///   notifications discrètes de l'application (BR-RESIL-018) ; la reconnexion, la session expirée et
+///   l'accès révoqué ne notifient pas non plus.
 ///
 /// La mémoire est bornée par le nombre de serveurs (`forget` à la suppression d'un serveur).
 #[derive(Debug, Default)]
@@ -86,47 +78,17 @@ pub struct NotificationGate {
 }
 
 impl NotificationGate {
-    /// Un serveur est passé dans `state` à l'instant `now_ms`, avec `failed_attempts` échecs de
-    /// reconnexion consécutifs.
-    pub fn observe(
-        &mut self,
-        server: &str,
-        state: LinkState,
-        failed_attempts: u32,
-        now_ms: u64,
-    ) -> Option<Alert> {
+    /// Un serveur est passé dans `state` à l'instant `now_ms`.
+    pub fn observe(&mut self, server: &str, state: LinkState, now_ms: u64) -> Option<Alert> {
         let gate = self.servers.entry(server.to_owned()).or_default();
         let kind = match state {
             LinkState::Offline => {
                 gate.offline_seen = true;
-                let step = failed_attempts / FAILURE_STEP;
-                gate.step_now = step;
-                let announced = matches!(
-                    gate.last_kind,
-                    Some(AlertKind::Offline | AlertKind::Failures(_))
-                );
-                if !announced {
-                    AlertKind::Offline
-                } else if step > gate.last_step {
-                    AlertKind::Failures(step * FAILURE_STEP)
-                } else {
-                    // Même situation que celle déjà annoncée : ce qui était retenu est périmé.
-                    if gate.wanted.take().is_some() {
-                        gate.suppressed = gate.suppressed.saturating_add(1);
-                    }
-                    return None;
-                }
+                AlertKind::Offline
             }
             LinkState::Connected if gate.offline_seen => {
                 gate.offline_seen = false;
-                gate.last_step = 0;
-                gate.step_now = 0;
                 AlertKind::Back
-            }
-            LinkState::Connected => {
-                gate.last_step = 0;
-                gate.step_now = 0;
-                return None;
             }
             // Reconnexion, session expirée, accès révoqué : on ne parle pas, et ce qui était
             // retenu reste ce qu'il est (la prochaine situation tranchera).
@@ -200,11 +162,6 @@ fn send(
     gate.last_kind = Some(kind);
     gate.wanted = None;
     gate.suppressed = 0;
-    gate.last_step = match kind {
-        AlertKind::Failures(n) => n / FAILURE_STEP,
-        AlertKind::Offline => gate.step_now,
-        AlertKind::Back => 0,
-    };
     alert
 }
 
