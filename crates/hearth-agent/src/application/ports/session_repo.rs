@@ -18,6 +18,14 @@ pub trait SessionRepo: Send + Sync {
 
     /// Ce jeton a-t-il appartenu à une session fermée par l'administration (BR-RESIL-014) ?
     async fn is_revoked(&self, hash: &TokenHash) -> Result<bool, StoreError>;
+
+    /// Une session encore ouverte à `now` a-t-elle été ouverte depuis cette adresse (exacte,
+    /// canonique), pour n'importe quel compte ? Sert aux places d'attente du flux (ADR-0022).
+    async fn has_open_session_from(
+        &self,
+        address: &str,
+        now: OffsetDateTime,
+    ) -> Result<bool, StoreError>;
 }
 
 /// Les sessions vues de l'intérieur d'une unité de travail. Un seul chemin pour fermer des

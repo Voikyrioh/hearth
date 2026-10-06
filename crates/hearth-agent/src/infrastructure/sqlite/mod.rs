@@ -313,7 +313,7 @@ mod tests {
         Database::open(dir.path()).await.unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM sqlite_master WHERE type = 'table'              AND name IN ('accounts', 'sessions', 'meta', 'login_attempts', 'operations', 'revoked_sessions', 'audit_events', 'audit_fts') ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type = 'table'              AND name IN ('accounts', 'sessions', 'meta', 'login_attempts', 'operations', 'revoked_sessions', 'audit_events', 'audit_fts', 'known_addresses', 'identifier_slowdowns') ORDER BY name",
         )
         .fetch_all(db.pool())
         .await
@@ -324,6 +324,8 @@ mod tests {
                 "accounts",
                 "audit_events",
                 "audit_fts",
+                "identifier_slowdowns",
+                "known_addresses",
                 "login_attempts",
                 "meta",
                 "operations",

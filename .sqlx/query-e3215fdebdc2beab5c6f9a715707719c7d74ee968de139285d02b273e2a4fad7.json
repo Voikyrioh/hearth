@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM login_attempts WHERE key IN (\n                 SELECT key FROM login_attempts\n                 ORDER BY (locked_until IS NOT NULL AND locked_until > ?) ASC,\n                          failures ASC, updated_at ASC\n                 LIMIT ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e3215fdebdc2beab5c6f9a715707719c7d74ee968de139285d02b273e2a4fad7"
+}
