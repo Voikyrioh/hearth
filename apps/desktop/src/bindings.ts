@@ -100,6 +100,24 @@ export const commands = {
 	closeAccountSessions: (serverId: string, accountId: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("close_account_sessions", { serverId, accountId })),
 	/**  Supprime un compte. `confirmation` : l'identifiant retapé quand on supprime son propre compte. */
 	deleteAccount: (serverId: string, accountId: string, confirmation: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("delete_account", { serverId, accountId, confirmation })),
+	/**
+	 *  L'état de la mise à jour de l'agent d'un serveur : version, installation gérée, mise à jour en
+	 *  cours, dernier résultat, et la version disponible dans le flux de versions. Une lecture : sans
+	 *  suivi, refaite par l'interface au retour du lien (BR-UPDATE-017).
+	 */
+	getAgentUpdate: (serverId: string) => typedError<AgentUpdateView, LinkFailure>(__TAURI_INVOKE("get_agent_update", { serverId })),
+	/**
+	 *  « Mettre à jour l'agent » : l'administrateur a confirmé `version`, celle qu'il a vue. La cible
+	 *  (adresse, signature, somme) est celle que la coquille retient ; l'agent décide du rôle, de la
+	 *  signature, de la somme et de l'adresse. Une action : clé d'opération, résultat inconnu à la
+	 *  coupure, jamais rejouée.
+	 */
+	updateAgent: (serverId: string, version: string) => typedError<AgentUpdateOutcome, LinkFailure>(__TAURI_INVOKE("update_agent", { serverId, version })),
+	/**
+	 *  Note que le résultat daté `at` de ce serveur a été annoncé : il ne le sera plus, même après un
+	 *  redémarrage du client (BR-UPDATE-015). Ne parle pas à l'agent.
+	 */
+	ackAgentResult: (serverId: string, at: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("ack_agent_result", { serverId, at })),
 };
 
 /* Types */
@@ -188,6 +206,114 @@ export type AddServerInput = {
 	username: string,
 	password: string,
 	remember: boolean,
+};
+
+/**  Une version plus récente que l'agent est disponible (BR-UPDATE-022). Seulement son numéro. */
+export type AgentAvailableDto = {
+	version: string,
+};
+
+/**  Événement `agent-update://progress` : une progression reçue du flux d'un serveur. */
+export type AgentUpdateEvent = {
+	serverId: string,
+	progress: AgentUpdateProgressDto,
+};
+
+/**  Issue de la demande de mise à jour de l'agent. */
+export type AgentUpdateOutcome = 
+/**  L'agent a accepté : la mise à jour s'exécute chez lui, l'avancement arrive par le flux. */
+{ kind: "accepted"; version: string } | { kind: "refused"; refusal: AgentUpdateRefusal } | 
+/**
+ *  Le lien est tombé avant la réponse : on ne sait pas, la demande n'est JAMAIS rejouée.
+ *  L'issue arrive par `link://operation` sous cet identifiant ; l'état se relit au retour du lien.
+ */
+{ kind: "unknown"; op_id: string };
+
+export type AgentUpdateOutcomeDto = "succeeded" | "rolled_back" | "failed";
+
+/**  Où en est la mise à jour en cours. */
+export type AgentUpdateProgressDto = {
+	version: string,
+	step: AgentUpdateStepDto,
+	/**  0 à 100, pour l'étape `download` seulement. */
+	percent: number | null,
+	/**  Pour l'étape `done` seulement. */
+	outcome: AgentUpdateOutcomeDto | null,
+	reason: AgentUpdateReasonDto | null,
+};
+
+/**
+ *  Pourquoi une mise à jour n'a pas abouti. `Unknown` : une raison qu'un agent plus récent ajoute
+ *  et que ce client ne connaît pas (jamais une erreur de lecture).
+ */
+export type AgentUpdateReasonDto = "unreachable" | "download_failed" | "bad_checksum" | "bad_signature" | "bad_binary" | "staging" | "swap" | "supervisor_launch" | "no_answer" | "identity_changed" | "interrupted" | "rollback_failed" | "unknown";
+
+/**
+ *  Pourquoi la demande n'a pas été acceptée. Sans texte : l'interface choisit le message d'après
+ *  `kind`. Le refus de rôle de l'agent est `LinkFailure::Forbidden` (une seule façon de le dire).
+ */
+export type AgentUpdateRefusal = 
+/**  Installation gérée par le système (ou sans systemd) : aucune mise à jour à distance. */
+{ kind: "managed_install" } | 
+/**  Une mise à jour est déjà en cours (BR-UPDATE-012). */
+{ kind: "in_progress" } | 
+/**  La signature de la cible est refusée par l'agent, avant tout téléchargement. */
+{ kind: "bad_signature" } | 
+/**  Un champ de la cible est refusé par l'agent (`version`, `url`, `sha256`, `signature`). */
+{ kind: "invalid_target" } | 
+/**  Le flux de versions ne propose aucune version à ce client (rien n'a été envoyé). */
+{ kind: "no_target" } | 
+/**
+ *  La version que l'utilisateur a vue n'est plus celle que le client retient (rien n'a été
+ *  envoyé) : relire l'état et confirmer de nouveau.
+ */
+{ kind: "target_changed" } | 
+/**
+ *  La version retenue n'est pas plus récente que l'agent (rien n'a été envoyé : jamais de
+ *  rétrogradation).
+ */
+{ kind: "not_newer" } | { kind: "other" };
+
+/**  Le dernier résultat connu (survit au redémarrage de l'agent). */
+export type AgentUpdateResultDto = {
+	/**
+	 *  La version visée ; `None` quand elle ne se sait pas (trace de travail illisible conclue au
+	 *  démarrage) : le texte affiché n'a alors pas de numéro.
+	 */
+	version: string | null,
+	previous: string,
+	outcome: AgentUpdateOutcomeDto,
+	reason: AgentUpdateReasonDto | null,
+	/**  RFC 3339, UTC (celui de l'agent) : l'interface le met en forme. */
+	at: string,
+	/**
+	 *  Le résultat date de moins de 24 h : il est annoncé comme un message (BR-UPDATE-017) ; plus
+	 *  ancien, il n'est qu'une ligne d'historique. Décidé ici : l'interface ne calcule aucune date.
+	 */
+	recent: boolean,
+	/**
+	 *  Ce résultat (sa date `at`) a déjà été annoncé à l'utilisateur, par ce client ou avant son
+	 *  dernier redémarrage : il ne l'est qu'une fois (`ack_agent_result`).
+	 */
+	announced: boolean,
+};
+
+export type AgentUpdateStepDto = "download" | "verify" | "install" | "restart" | "check" | "done";
+
+/**  L'état de la mise à jour de l'agent d'un serveur, relu à la demande (affichage, retour du lien). */
+export type AgentUpdateView = {
+	/**  La version de l'agent qui répond (BR-UPDATE-022). */
+	current: string,
+	/**  Installation gérée par le système (ou sans systemd) : pas de mise à jour à distance. */
+	managed: boolean,
+	inProgress: boolean,
+	progress: AgentUpdateProgressDto | null,
+	last: AgentUpdateResultDto | null,
+	/**
+	 *  La version disponible dans le flux de versions, strictement plus récente que `current` ;
+	 *  `None` si le flux n'en propose pas, ou si l'installation est gérée (aucun bouton à montrer).
+	 */
+	available: AgentAvailableDto | null,
 };
 
 /**

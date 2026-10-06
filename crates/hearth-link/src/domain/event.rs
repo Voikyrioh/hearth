@@ -5,6 +5,7 @@ use std::sync::Arc;
 use hearth_proto::api::audit::AuditEventItem;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
+use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::fingerprint::Fingerprint;
 
 use super::pending_ops::{OperationId, Outcome};
@@ -108,6 +109,12 @@ pub enum Event {
         server: ServerId,
         event: Arc<AuditEventItem>,
     },
+    /// Progression de la mise à jour de l'agent (sujet `update`, tout compte) : l'état courant à
+    /// chaque connexion, puis chaque changement d'étape ou de pourcentage (HRT-17).
+    AgentUpdate {
+        server: ServerId,
+        progress: Arc<UpdateProgress>,
+    },
 }
 
 impl Event {
@@ -122,7 +129,8 @@ impl Event {
             | Self::Operation { server, .. }
             | Self::SessionEnded { server, .. }
             | Self::FingerprintChanged { server, .. }
-            | Self::Audit { server, .. } => Some(server),
+            | Self::Audit { server, .. }
+            | Self::AgentUpdate { server, .. } => Some(server),
         }
     }
 }

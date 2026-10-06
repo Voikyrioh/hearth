@@ -53,14 +53,21 @@ pub fn install<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
     let policy = domain::DownloadPolicy::github_releases();
     let feed = TauriFeed::production(handle.clone(), policy.clone())
         .map_err(|error| format!("adresse du flux de versions : {error}"))?;
-    let service = Arc::new(UpdateService::new(
-        Arc::new(SystemClock),
-        Arc::new(FileUpdateStore::new(&dir)),
-        Arc::new(feed),
-        Arc::new(TauriStateSink(handle)),
-        policy,
-        &app.package_info().version.to_string(),
-    ));
+    // La cible de l'agent n'est lue que si un serveur est enregistré (la liaison est ouverte avant).
+    let link = app
+        .try_state::<Arc<crate::link::LinkRuntime>>()
+        .map(|link| link.inner().clone());
+    let service = Arc::new(
+        UpdateService::new(
+            Arc::new(SystemClock),
+            Arc::new(FileUpdateStore::new(&dir)),
+            Arc::new(feed),
+            Arc::new(TauriStateSink(handle)),
+            policy,
+            &app.package_info().version.to_string(),
+        )
+        .with_agent_wanted(move || link.as_ref().is_none_or(|link| !link.servers().is_empty())),
+    );
     if feed::embedded_key_is_development() {
         tracing::warn!("clé de mise à jour de développement : aucune mise à jour ne sera acceptée");
     }

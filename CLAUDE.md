@@ -69,6 +69,10 @@ Le cache Cargo du conteneur est un volume nommé (`hearth-xtask-cargo`, `hearth-
 
 Greffon `tauri-plugin-updater` en API Rust seule (aucune permission côté web), flux `latest.json` des GitHub Releases du dépôt public, clé publique embarquée `apps/desktop/src-tauri/update-key.pub` (clé de DÉVELOPPEMENT sans clé secrète tant que Voiky n'a pas mis la sienne ; jamais de clé secrète dans le dépôt). Vérification au lancement puis 24 h au plus, état dans `update.json` côté Rust (pas de `localStorage`). Publication : `docs/runbooks/publier-une-version-du-client.md` (flux `publish-client`, déclenché à la main, brouillon). `cargo xtask client-release-check` / `client-version` / `client-sign` / `client-manifest` (la clé secrète n'est donnée qu'à `client-sign`, dans le job de signature du flux). Règles `BR-UPDATE-001` à `010`, `025`, `026` ; décision `docs/adr/ADR-0017-mise-a-jour-du-client.md`.
 
+## Mise à jour de l'agent depuis le client (HRT-17, lot interface)
+
+Le CLIENT lit la cible de l'agent dans la section `agent` du `latest.json` (ADR-0021), dans la MÊME requête que son propre flux (`version_comparator` du greffon) : toujours UNE requête par vérification (BR-UPDATE-001). La WebView ne fournit NI adresse, NI signature, NI somme : `update_agent(server_id, version)` ne reçoit que le numéro vu ; la coquille valide la cible (HTTPS public des releases du dépôt, jamais de rétrogradation) et construit la requête. L'agent reste l'arbitre (rôle, signature, somme). Le redémarrage annoncé par l'agent est une coupure ATTENDUE dans `hearth-link` (2 minutes, « Reconnexion… », sans alarme). Publication : `cargo xtask agent-manifest` puis ajout à la main à la release (runbook `docs/runbooks/mettre-a-jour-agent.md`). Règles `BR-UPDATE-020` à `023`.
+
 ## Règles
 
 - Architecture hexagonale dans `hearth-agent` et `hearth-link` : `domain/` sans E/S ni dépendance vers axum, SQLx, système. Ports dans `application/ports/`.

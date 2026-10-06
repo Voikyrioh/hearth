@@ -7,6 +7,7 @@ use std::time::Duration;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
 use hearth_proto::api::sessions::LoginRequest;
+use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, UpgradeTarget};
 use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, Topic};
@@ -19,12 +20,18 @@ use crate::domain::secret::Secret;
 use crate::ports::transport::{Frame, StreamConn, TransportError};
 use crate::ports::vault::SecretKind;
 
+/// Messages de mise à jour retenus au plus pendant l'attente de l'instantané.
+const MAX_EARLY_UPDATES: usize = 8;
+
 pub(crate) enum AttemptResult {
     /// Flux ouvert, authentifié, instantané reçu.
     Ready {
         stream: Box<dyn StreamConn>,
         machine: Box<MachineResponse>,
         history: Vec<Sample>,
+        /// État de la mise à jour de l'agent reçu AVANT l'instantané (l'ordre des sujets est celui
+        /// de l'agent) : il n'est pas perdu.
+        updates: Vec<UpdateProgress>,
     },
     /// Échec passager (réseau, délai, serveur occupé…) : on réessaiera.
     Failed,
@@ -111,11 +118,14 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
     if let ClientMessage::Auth { mut token } = auth {
         token.zeroize();
     }
-    let mut topics = vec![Topic::Metrics, Topic::Session];
+    // Le sujet `update` est ouvert à tout compte : le serveur annonce ainsi son redémarrage de mise
+    // à jour (coupure attendue, BR-UPDATE-014) et son avancement.
+    let mut topics = vec![Topic::Metrics, Topic::Session, Topic::Update];
     if deps.config.subscribe_audit {
         topics.push(Topic::Audit);
     }
     let _ = stream.send(&ClientMessage::Subscribe { topics }).await;
+    let mut updates = Vec::new();
     loop {
         match stream.recv().await {
             Ok(Frame::Message(message)) => match *message {
@@ -124,6 +134,7 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                         stream,
                         machine: Box::new(machine),
                         history,
+                        updates,
                     };
                 }
                 ServerMessage::Error(detail) => match detail.code {
@@ -140,6 +151,14 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                         SessionNotice::Expired => AttemptResult::SessionExpired,
                         SessionNotice::Revoked => AttemptResult::Revoked,
                     };
+                }
+                // Au plus quelques-uns : un agent bavard ne remplit pas la mémoire d'une tentative.
+                // Les plus récents : seul le dernier dit l'état.
+                ServerMessage::Update(progress) => {
+                    if updates.len() >= MAX_EARLY_UPDATES {
+                        updates.remove(0);
+                    }
+                    updates.push(progress);
                 }
                 _ => {}
             },

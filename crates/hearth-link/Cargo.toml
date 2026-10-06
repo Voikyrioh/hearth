@@ -29,7 +29,9 @@ zeroize.workspace = true
 
 [dev-dependencies]
 hearth-agent = { path = "../hearth-agent" }
+minisign.workspace = true
 rcgen.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 time.workspace = true

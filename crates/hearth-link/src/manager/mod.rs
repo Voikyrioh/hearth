@@ -6,6 +6,7 @@
 //! l'interface en commandes. Les règles sont dans `domain/`.
 
 mod accounts;
+mod agent_update;
 mod attempt;
 mod audit;
 mod events;

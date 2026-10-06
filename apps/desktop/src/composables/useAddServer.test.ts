@@ -110,13 +110,13 @@ describe("add-server wizard, step 1", () => {
     fill(wizard);
     await wizard.next();
     expect(wizard.cardMessage.value).toBe(
-      "L'agent de ce serveur est trop ancien. Mets à jour l'agent sur le serveur.",
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent.",
     );
     fill(wizard, "10.0.0.2");
     wizard.edited();
     await wizard.next();
     expect(wizard.cardMessage.value).toBe(
-      "Le client est trop ancien. Mets à jour le client sur ce PC.",
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour le client.",
     );
   });
 });

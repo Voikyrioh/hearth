@@ -5,7 +5,7 @@ titre: Comptes, journal et empreinte survivent à la mise à jour
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-mises-a-jour.md (BR-UPDATE-018), HRT-17
-maj: 2026-10-05
+maj: 2026-10-06
 ---
 
 # BR-UPDATE-018 : Comptes, journal et empreinte survivent à la mise à jour
@@ -22,6 +22,10 @@ La mise à jour ne touche qu'au binaire : jamais à la base (comptes, sessions, 
 - `tests/update_supervisor.rs::the_data_beside_the_binary_is_never_touched`, `a_new_agent_with_another_certificate_is_rolled_back_at_once`.
 - `deploy/e2e/scenario-update.sh` (empreinte avant et après, nombre de comptes, connexion, journal).
 
+## Interface (HRT-17, lot interface)
+- Rien à afficher de plus : la session du client reprend au retour du lien et la liste des comptes et le journal se relisent comme d'habitude. L'écran ne promet rien d'autre que le résultat de la mise à jour.
+- Tests : `crates/hearth-link/tests/agent_update.rs::a_restart_announced_by_the_agent_is_an_expected_cut_then_the_result_is_read_back` (le lien revient « Connecté » sur la même session après le redémarrage de l'agent).
+
 ## Cas limites
 - Une migration de base livrée avec la nouvelle version s'applique au démarrage du nouvel agent ; le retour en arrière remet l'ancien binaire, qui refuse de démarrer sur une base migrée (voir le runbook de mise à jour).
 
@@ -30,3 +34,4 @@ La mise à jour ne touche qu'au binaire : jamais à la base (comptes, sessions, 
 
 ## Historique
 - 2026-10-05 : création (HRT-17, lot agent, session 2026-10-04-hearth-creation).
+- 2026-10-06 : section Interface (HRT-17, lot interface, session 2026-10-04-hearth-creation, T28).

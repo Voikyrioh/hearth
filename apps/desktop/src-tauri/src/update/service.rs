@@ -15,6 +15,7 @@ use std::time::Duration;
 use super::domain::{self, Candidate, DownloadPolicy, Rejection, UpdateRecord, validate_candidate};
 use super::dto::{AvailableDto, UpdateFailure, UpdatePhase, UpdateStateDto};
 use super::ports::{Clock, DownloadError, Feed, StateSink, UpdateStore, VerifiedInstaller};
+use crate::agent_update::domain::{AgentCandidate, AgentTarget, validate_target};
 
 /// Pourquoi une installation ne démarre pas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -42,7 +43,24 @@ pub struct UpdateService {
     sink: Arc<dyn StateSink>,
     policy: DownloadPolicy,
     current_version: String,
+    /// Y a-t-il un serveur dont l'agent peut se mettre à jour ? Sans serveur enregistré, la cible de
+    /// l'agent n'est pas lue (requête inutile).
+    agent_wanted: Box<dyn Fn() -> bool + Send + Sync>,
+    /// Pour chaque serveur, la date du dernier résultat que la coquille a ELLE-MÊME lu chez l'agent :
+    /// seul celui-là peut être acquitté (jamais une valeur de la WebView). Mémoire seulement.
+    read_results: Mutex<std::collections::HashMap<String, String>>,
     inner: Mutex<Inner>,
+}
+
+/// Pourquoi un acquittement de résultat est refusé.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum AckRefusal {
+    #[error("serveur inconnu")]
+    UnknownServer,
+    #[error("date illisible")]
+    InvalidDate,
+    #[error("ce n'est pas le résultat lu pour ce serveur")]
+    NotTheResultRead,
 }
 
 impl UpdateService {
@@ -64,6 +82,8 @@ impl UpdateService {
             sink,
             policy,
             current_version: current_version.to_owned(),
+            agent_wanted: Box::new(|| true),
+            read_results: Mutex::new(std::collections::HashMap::new()),
             inner: Mutex::new(Inner {
                 record,
                 phase: UpdatePhase::Idle,
@@ -73,6 +93,65 @@ impl UpdateService {
                 last_banner,
             }),
         }
+    }
+
+    /// Branche la question « un serveur est-il enregistré ? » (la racine de composition la pose).
+    pub fn with_agent_wanted(mut self, wanted: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        self.agent_wanted = Box::new(wanted);
+        self
+    }
+
+    /// Le dernier résultat annoncé de ce serveur (sa date `at`), s'il y en a un.
+    pub fn agent_result_seen(&self, server: &str) -> Option<String> {
+        self.lock().record.agent_results_seen.get(server).cloned()
+    }
+
+    /// La coquille vient de lire ce résultat chez l'agent : lui seul pourra être acquitté.
+    pub fn note_agent_result_read(&self, server: &str, at: &str) {
+        self.read_results
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(server.to_owned(), at.to_owned());
+    }
+
+    /// Note que le résultat daté `at` de ce serveur a été annoncé : il ne le sera plus, même après un
+    /// redémarrage du client. `known` : les serveurs du carnet. Refusé (et rien n'est écrit) si le
+    /// serveur n'est pas du carnet, si `at` n'est pas une date RFC 3339, ou si ce n'est pas la date du
+    /// résultat que la coquille a lu pour ce serveur. Une entrée par serveur du carnet au plus : celles
+    /// des serveurs supprimés sont retirées.
+    pub fn ack_agent_result(
+        &self,
+        server: &str,
+        at: &str,
+        known: &[String],
+    ) -> Result<(), AckRefusal> {
+        use time::OffsetDateTime;
+        use time::format_description::well_known::Rfc3339;
+        if !known.iter().any(|id| id == server) {
+            return Err(AckRefusal::UnknownServer);
+        }
+        let parsed = OffsetDateTime::parse(at, &Rfc3339).map_err(|_| AckRefusal::InvalidDate)?;
+        let read = self
+            .read_results
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(server)
+            .and_then(|read| OffsetDateTime::parse(read, &Rfc3339).ok());
+        if read != Some(parsed) {
+            return Err(AckRefusal::NotTheResultRead);
+        }
+        let mut inner = self.lock();
+        let seen = &mut inner.record.agent_results_seen;
+        seen.retain(|id, _| known.contains(id));
+        let newer = seen
+            .get(server)
+            .and_then(|known| OffsetDateTime::parse(known, &Rfc3339).ok())
+            .is_none_or(|known| known < parsed);
+        if newer {
+            seen.insert(server.to_owned(), at.to_owned());
+        }
+        self.persist(&inner);
+        Ok(())
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -165,7 +244,18 @@ impl UpdateService {
             self.publish(&mut inner);
         }
         let outcome = self.feed.check().await;
+        // La cible de l'agent vient de la MÊME requête (section `agent` du manifeste que `check` vient
+        // de lire, ADR-0021) : `check_agent` ne fait aucun accès réseau. Sans requête partie pour le
+        // client (pas de réseau), il n'y a rien à lire ; sans serveur enregistré, rien n'est retenu.
+        let agent_outcome = match &outcome {
+            Err(error) if error.no_request_sent => None,
+            _ if !(self.agent_wanted)() => None,
+            _ => Some(self.feed.check_agent().await),
+        };
         let mut inner = self.lock();
+        if let Some(agent_outcome) = agent_outcome {
+            self.absorb_agent(&mut inner.record, agent_outcome);
+        }
         let before = inner.record.available.clone();
         // Aucune requête n'a pu partir (pas de réseau) : le quota de 24 h n'est pas consommé, la
         // vérification sera tentée quand le réseau sera là (BR-UPDATE-001, point b).
@@ -209,6 +299,42 @@ impl UpdateService {
         record.available = release;
         record.last_success_at = Some(started);
         true
+    }
+
+    /// Range la cible de l'agent lue dans la section `agent` du `latest.json` : une cible valable remplace la précédente ;
+    /// un fichier sans entrée (ou refusé par les règles) l'efface, une erreur de lecture la garde.
+    /// Silencieux comme le reste de la vérification (BR-UPDATE-007, 008).
+    fn absorb_agent(
+        &self,
+        record: &mut UpdateRecord,
+        outcome: Result<Option<AgentCandidate>, super::ports::FeedError>,
+    ) {
+        match outcome {
+            Err(error) => {
+                // `info` : le journal est plafonné à ce niveau, une lecture qui échoue toujours doit s'y voir
+                // (au plus une ligne par tentative, 3 par jour).
+                tracing::info!(%error, "cible de l'agent non lue");
+            }
+            Ok(None) => record.agent = None,
+            Ok(Some(candidate)) => match validate_target(&candidate, &self.policy) {
+                Ok(target) => record.agent = Some((&target).into()),
+                Err(rejection) => {
+                    tracing::warn!(%rejection, "cible de l'agent refusée");
+                    record.agent = None;
+                }
+            },
+        }
+    }
+
+    /// La cible de l'agent retenue, VALIDÉE de nouveau (le fichier d'état se modifie à la main) :
+    /// `None` si aucune, ou si elle ne passe plus les règles.
+    pub fn agent_target(&self) -> Option<AgentTarget> {
+        let inner = self.lock();
+        inner
+            .record
+            .agent
+            .as_ref()
+            .and_then(|record| AgentTarget::from_record(record, &self.policy).ok())
     }
 
     /// « Plus tard » : le bandeau disparaît jusqu'au lendemain (BR-UPDATE-006).

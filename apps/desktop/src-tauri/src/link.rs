@@ -194,6 +194,7 @@ impl EventSink for PendingBook {
             | Event::Metrics { .. }
             | Event::Snapshot { .. }
             | Event::SessionEnded { .. }
+            | Event::AgentUpdate { .. }
             | Event::Audit { .. } => {}
         }
     }
@@ -693,6 +694,18 @@ impl LinkRuntime {
                     &crate::audit::live(&server, &event),
                 );
             }
+            // Progression de la mise à jour de l'agent (HRT-17) : un signal par message du flux, que
+            // l'interface rattache au serveur ; l'état qui compte se relit (`get_agent_update`).
+            Event::AgentUpdate { server, progress } => send(
+                sink,
+                crate::agent_update::dto::PROGRESS_EVENT,
+                &crate::agent_update::dto::AgentUpdateEvent {
+                    server_id: server.to_string(),
+                    progress: crate::agent_update::dto::AgentUpdateProgressDto::from(
+                        progress.as_ref(),
+                    ),
+                },
+            ),
             Event::SessionEnded { .. } => {}
         }
     }

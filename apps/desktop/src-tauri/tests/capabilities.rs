@@ -89,3 +89,107 @@ fn no_exposed_command_takes_a_free_route_method_or_body() {
         "les commandes de bindings.ts n'ont pas été lues ({seen})"
     );
 }
+
+/// La liste EXPECTED des commandes de la fenêtre et de leurs paramètres TYPÉS : toute commande ou tout
+/// paramètre ajouté, retiré ou retypé fait échouer ce test, qui force une relecture explicite (la garde
+/// par NOM de paramètre ne voit pas un `string` libre qui n'a pas un nom interdit). Règle de relecture
+/// d'un paramètre `string` : c'est un identifiant que la coquille VALIDE côté Rust (serveur du carnet,
+/// compte, version qu'elle compare à ce qu'elle tient) ; jamais une adresse, une signature, une somme, une
+/// date ou une valeur que la coquille écrirait telle quelle sur le disque ou enverrait telle quelle.
+const EXPECTED: &[(&str, &str)] = &[
+    ("getSettings", ""),
+    ("setLaunchAtStartup", "enabled: boolean"),
+    ("getAppVersion", ""),
+    ("openLogsFolder", ""),
+    ("logFrontendError", "source: string, message: string"),
+    ("getNotifyOnLinkChange", ""),
+    ("setNotifyOnLinkChange", "enabled: boolean"),
+    ("setDisplayedServer", "serverId: string | null"),
+    ("listServers", ""),
+    ("listLinkStates", ""),
+    ("probeServer", "host: string, port: number | null"),
+    ("addAndLogin", "input: AddServerInput"),
+    (
+        "login",
+        "serverId: string, username: string, password: string, remember: boolean",
+    ),
+    ("logout", "serverId: string"),
+    ("retryNow", "serverId: string"),
+    ("acceptFingerprint", "serverId: string, fingerprint: string"),
+    (
+        "updateServer",
+        "serverId: string, name: string, color: number, host: string, port: number | null, fingerprint: string | null",
+    ),
+    ("removeServer", "serverId: string"),
+    ("forgetCredentials", "serverId: string"),
+    ("listFingerprintAlerts", ""),
+    ("listLinkNotices", ""),
+    ("ackLinkNotices", "ids: number[]"),
+    ("listUnreadOperations", ""),
+    ("ackUnreadOperations", "opIds: string[]"),
+    (
+        "readAudit",
+        "serverId: string, filter: AuditFilterDto, before: number | null",
+    ),
+    ("exportAudit", "serverId: string, filter: AuditFilterDto"),
+    ("getUpdateState", ""),
+    ("checkForUpdates", ""),
+    ("postponeUpdate", ""),
+    ("installUpdate", ""),
+    ("checkAccountInput", "username: string, password: string"),
+    ("listAccounts", "serverId: string"),
+    (
+        "createAccount",
+        "serverId: string, username: string, password: string, role: RoleDto",
+    ),
+    (
+        "changeAccountRole",
+        "serverId: string, accountId: string, role: RoleDto",
+    ),
+    (
+        "setAccountPassword",
+        "serverId: string, accountId: string, password: string",
+    ),
+    (
+        "changeOwnPassword",
+        "serverId: string, current: string, password: string",
+    ),
+    (
+        "closeAccountSessions",
+        "serverId: string, accountId: string",
+    ),
+    (
+        "deleteAccount",
+        "serverId: string, accountId: string, confirmation: string | null",
+    ),
+    ("getAgentUpdate", "serverId: string"),
+    ("updateAgent", "serverId: string, version: string"),
+    ("ackAgentResult", "serverId: string, at: string"),
+];
+
+#[test]
+fn the_commands_and_their_typed_parameters_are_exactly_the_reviewed_list() {
+    let bindings =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/bindings.ts"))
+            .unwrap();
+    let mut found: Vec<(String, String)> = bindings
+        .lines()
+        .filter(|l| l.contains("__TAURI_INVOKE"))
+        .filter_map(|line| {
+            let line = line.trim();
+            let (name, rest) = line.split_once(": (")?;
+            let (args, _) = rest.split_once(") =>")?;
+            Some((name.to_owned(), args.to_owned()))
+        })
+        .collect();
+    let mut expected: Vec<(String, String)> = EXPECTED
+        .iter()
+        .map(|(n, a)| ((*n).to_owned(), (*a).to_owned()))
+        .collect();
+    found.sort();
+    expected.sort();
+    assert_eq!(
+        found, expected,
+        "une commande ou un paramètre a changé : relis-le (aucun texte libre écrit tel quel, aucune adresse, signature, somme) puis mets à jour EXPECTED"
+    );
+}
