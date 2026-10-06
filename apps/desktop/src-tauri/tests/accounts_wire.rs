@@ -269,3 +269,69 @@ fn the_live_check_is_the_rule_of_the_agent() {
     assert_eq!(check.username, Some(UsernameProblemDto::Empty));
     assert_eq!(check.password, [PasswordRuleDto::Required]);
 }
+
+// ── Le coffre après un changement de SON mot de passe : liste fermée des cas « ancien remis » ──
+
+fn refused(refusal: AccountRefusal) -> Result<AccountOutcome, LinkFailure> {
+    Ok(AccountOutcome::Refused { refusal })
+}
+
+#[test]
+fn the_old_password_stands_after_an_explicit_refusal_of_the_agent() {
+    use hearth_desktop_lib::accounts::service::old_password_stands;
+    assert!(old_password_stands(&refused(AccountRefusal::WrongPassword)));
+    assert!(old_password_stands(&refused(
+        AccountRefusal::WeakPassword {
+            rules: vec![PasswordRuleDto::Digit]
+        }
+    )));
+    assert!(old_password_stands(&Err(LinkFailure::Forbidden)));
+}
+
+#[test]
+fn the_old_password_stands_when_the_request_provably_never_left() {
+    use hearth_desktop_lib::accounts::service::old_password_stands;
+    for failure in [
+        LinkFailure::NotConnected,
+        LinkFailure::TrackingUnavailable,
+        LinkFailure::TrackingSlow,
+    ] {
+        assert!(old_password_stands(&Err(failure.clone())), "{failure:?}");
+    }
+}
+
+#[test]
+fn the_entry_is_erased_when_the_result_is_unknown_or_the_answer_unreadable() {
+    use hearth_desktop_lib::accounts::service::old_password_stands;
+    assert!(!old_password_stands(&Ok(AccountOutcome::Unknown {
+        op_id: "OP".into()
+    })));
+    // Réponse 2xx illisible : classée `NotAgent`, l'agent a pu exécuter l'action.
+    assert!(!old_password_stands(&Err(LinkFailure::NotAgent)));
+    // Tâche redémarrée ou arrêtée : `Internal`.
+    assert!(!old_password_stands(&Err(LinkFailure::Internal)));
+    assert!(!old_password_stands(&Err(LinkFailure::Unreachable)));
+    assert!(!old_password_stands(&Err(LinkFailure::Storage)));
+}
+
+#[test]
+fn the_entry_is_erased_after_any_refusal_that_does_not_prove_nothing_changed() {
+    use hearth_desktop_lib::accounts::service::old_password_stands;
+    for refusal in [
+        AccountRefusal::Conflict,
+        AccountRefusal::Busy,
+        AccountRefusal::NotFound,
+        AccountRefusal::SessionEnded,
+        AccountRefusal::SessionRevoked,
+        AccountRefusal::Other,
+        AccountRefusal::UsernameTaken,
+        AccountRefusal::LastAdmin,
+        AccountRefusal::ConfirmationMismatch,
+        AccountRefusal::InvalidUsername { problem: None },
+    ] {
+        assert!(
+            !old_password_stands(&refused(refusal.clone())),
+            "{refusal:?}"
+        );
+    }
+}

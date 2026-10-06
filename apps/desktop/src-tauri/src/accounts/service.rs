@@ -7,7 +7,7 @@ use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::{ActionOutcome, LinkManager};
 
-use super::dto::{AccountInputCheck, AccountListDto, AccountOutcome};
+use super::dto::{AccountInputCheck, AccountListDto, AccountOutcome, AccountRefusal};
 use super::wire::{self, Planned, Stop};
 use crate::link_dto::{LinkFailure, RoleDto};
 
@@ -114,21 +114,71 @@ pub async fn change_own_password(
     if planned.is_err() {
         return send(manager, id, planned).await;
     }
-    let previous = manager.take_remembered_password(id)?;
+    let previous = manager.take_remembered_password(id).await?;
     let result = send(manager, id, planned).await;
     match &result {
         Ok(AccountOutcome::Done { .. }) => {
             // Coffre en échec : l'entrée reste effacée, jamais fausse.
-            let _ = manager.remember_password(id, password);
+            let _ = manager.remember_password(id, password).await;
         }
-        Ok(AccountOutcome::Unknown { .. }) => {}
-        Ok(AccountOutcome::Refused { .. }) | Err(_) => {
-            if let Some(previous) = previous {
-                let _ = manager.remember_password(id, &previous);
+        other => {
+            // Liste FERMÉE des cas où l'ancien mot de passe est remis ; tout le reste efface.
+            if old_password_stands(other)
+                && let Some(previous) = previous
+            {
+                let _ = manager.remember_password(id, &previous).await;
             }
         }
     }
     result
+}
+
+/// L'ancien mot de passe est-il encore le bon ? SEULEMENT si l'agent a refusé de façon EXPLICITE
+/// (une réponse d'erreur comprise qui dit que rien n'a changé) ou si la requête n'est prouvablement
+/// pas partie. Tout le reste (résultat inconnu, erreur de protocole, tâche redémarrée, conflit,
+/// réponse illisible…) = on ne sait pas : l'entrée du coffre reste EFFACÉE et l'utilisateur
+/// ressaisira. Les `match` sont EXHAUSTIFS, sans `_` : un nouveau cas d'erreur ne compile pas
+/// sans qu'on choisisse son côté, et on choisit « efface ».
+pub fn old_password_stands(result: &Result<AccountOutcome, LinkFailure>) -> bool {
+    match result {
+        Ok(AccountOutcome::Refused { refusal }) => match refusal {
+            // Refus explicites, avant toute exécution : le mot de passe n'a pas changé.
+            AccountRefusal::WrongPassword | AccountRefusal::WeakPassword { .. } => true,
+            AccountRefusal::InvalidUsername { .. }
+            | AccountRefusal::UsernameTaken
+            | AccountRefusal::LastAdmin
+            | AccountRefusal::NotFound
+            | AccountRefusal::ConfirmationMismatch
+            | AccountRefusal::Conflict
+            | AccountRefusal::Busy
+            | AccountRefusal::SessionEnded
+            | AccountRefusal::SessionRevoked
+            | AccountRefusal::Other => false,
+        },
+        Ok(AccountOutcome::Done { .. } | AccountOutcome::Unknown { .. }) => false,
+        Err(failure) => match failure {
+            // Rien n'est parti (hors « Connecté », suivi impossible) ou refus de rôle de l'agent.
+            LinkFailure::NotConnected
+            | LinkFailure::TrackingUnavailable
+            | LinkFailure::TrackingSlow
+            | LinkFailure::Forbidden => true,
+            LinkFailure::Unreachable
+            | LinkFailure::NotAgent
+            | LinkFailure::IncompatibleAgent
+            | LinkFailure::IncompatibleClient
+            | LinkFailure::InvalidCredentials
+            | LinkFailure::TooManyAttempts { .. }
+            | LinkFailure::FingerprintChanged
+            | LinkFailure::NameTaken
+            | LinkFailure::AlreadyExists
+            | LinkFailure::InvalidInput { .. }
+            | LinkFailure::VerificationRequired
+            | LinkFailure::UnknownServer
+            | LinkFailure::Storage
+            | LinkFailure::Vault
+            | LinkFailure::Internal => false,
+        },
+    }
 }
 
 pub async fn close_sessions(

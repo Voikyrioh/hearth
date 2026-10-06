@@ -855,3 +855,28 @@ async fn an_own_password_change_cut_before_its_answer_leaves_the_vault_entry_era
     );
     agent.release_actions();
 }
+
+#[tokio::test]
+async fn a_change_refused_because_the_link_is_down_puts_the_old_entry_back() {
+    let agent = TestAgent::install().await;
+    agent.create_account("marie", Role::Admin).await;
+    let proxy = FaultProxy::start(agent.addr).await;
+    let admin = client_with(proxy.port(), "marie", PASSWORD, config(true, true), true).await;
+    let before = admin.remembered();
+    assert!(before.is_some());
+    proxy.cut();
+    admin.wait_for(LinkState::Offline).await;
+    let result = service::change_own_password(
+        admin.runtime.manager(),
+        &admin.id,
+        &Secret::new(PASSWORD),
+        &Secret::new(NEW_PASSWORD),
+    )
+    .await;
+    assert_eq!(result.unwrap_err(), LinkFailure::NotConnected);
+    assert_eq!(
+        admin.remembered(),
+        before,
+        "rien n'est parti : l'ancien est remis"
+    );
+}
