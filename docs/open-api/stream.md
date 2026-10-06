@@ -48,10 +48,10 @@ L'agent s'abonne aux échantillons **avant** de lire l'historique du `snapshot`,
 
 Deux quotas distincts :
 
-- **Connexions pas encore authentifiées** (en attente de leur `auth`) : au plus **2 par adresse** et **16 au total**. Au-delà : refus dès l'ouverture, `503 BUSY` au format d'erreur (avec `Retry-After`). La place est rendue dès que l'`auth` réussit, ou à la fermeture quelle qu'en soit la cause (délai de 5 s, coupure, erreur d'authentification).
+- **Connexions pas encore authentifiées** (en attente de leur `auth`) : au plus **2 par adresse** et **16 au total**, dont **4 places réservées** aux adresses déjà connues (une session ouverte, ou une connexion réussie depuis moins de 30 jours, BR-CONN-020) : un inconnu n'en prend jamais plus de 12. Au-delà : refus dès l'ouverture, `503 BUSY` au format d'erreur (avec `Retry-After`). La place est rendue dès que l'`auth` réussit, ou à la fermeture quelle qu'en soit la cause (délai de 5 s, coupure, erreur d'authentification).
 - **Flux authentifiés** : au plus **32 au total** et **4 par compte**. La place n'est prise qu'après un `auth` réussi ; au-delà, message `error` `BUSY` puis fermeture (`1008`). Un flux fermé rend sa place.
 
-Un anonyme muet ne prend donc jamais la place d'un flux authentifié ; il ne peut qu'occuper les places d'attente de **sa** propre adresse (2) et, avec des adresses multiples, jusqu'à 16 places d'attente pendant 5 s chacune.
+Un anonyme muet ne prend donc jamais la place d'un flux authentifié ; il ne peut qu'occuper les places d'attente de **sa** propre adresse (2) et, avec des adresses multiples, jusqu'à 12 places d'attente pendant 5 s chacune : les 4 dernières restent à ceux qui ont déjà une session (ADR-0022).
 
 Chaque connexion est une tâche indépendante. Les échantillons passent par un canal de diffusion borné : un abonné lent perd les plus anciens, il ne ralentit ni l'échantillonnage ni les autres. Un message qui ne part pas en 10 s fait abandonner le client.
 
