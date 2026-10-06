@@ -5,6 +5,7 @@ use super::StoreError;
 use crate::domain::accounts::AccountId;
 use crate::domain::session_token::TokenHash;
 use crate::domain::sessions::{Session, SessionClosure, SessionId};
+use crate::domain::trust::DeviceId;
 
 /// Lecture des sessions. Toute écriture passe par `UnitOfWork::sessions`.
 #[async_trait]
@@ -51,6 +52,21 @@ pub trait SessionTx: Send {
         &mut self,
         account: &AccountId,
         closure: &SessionClosure,
+        at: OffsetDateTime,
+    ) -> Result<u64, StoreError>;
+
+    /// Rattache la session au poste dont la clé l'a ouverte ou prouvée (HRT-22).
+    async fn bind_device(
+        &mut self,
+        session: &SessionId,
+        device: &DeviceId,
+    ) -> Result<(), StoreError>;
+
+    /// Ferme les sessions de ce poste (retrait d'un poste) : leurs jetons sont retenus comme
+    /// révoqués à la date `at`, comme pour une fermeture par l'administration ; rend leur nombre.
+    async fn close_device(
+        &mut self,
+        device: &DeviceId,
         at: OffsetDateTime,
     ) -> Result<u64, StoreError>;
 

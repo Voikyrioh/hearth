@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT address, last_success_at FROM known_addresses WHERE account_id = ?",
+  "query": "SELECT address,\n                  MAX(last_success_at, COALESCE(last_used_at, last_success_at)) AS \"last_success_at!: String\"\n           FROM known_addresses WHERE account_id = ?",
   "describe": {
     "columns": [
       {
@@ -15,15 +15,10 @@
         }
       },
       {
-        "name": "last_success_at",
+        "name": "last_success_at!: String",
         "ordinal": 1,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "known_addresses",
-            "name": "last_success_at"
-          }
-        }
+        "type_info": "Null",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -31,8 +26,8 @@
     },
     "nullable": [
       false,
-      false
+      null
     ]
   },
-  "hash": "477a8dd95f2acd83ef6384036e342c16449121f3cb2defd0a14b2146c668c1d2"
+  "hash": "7312482189928e83ef54045592194840df37f9735f5827f6e3e96b038892ca4a"
 }

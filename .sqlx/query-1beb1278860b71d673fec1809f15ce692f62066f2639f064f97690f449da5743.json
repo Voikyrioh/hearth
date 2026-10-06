@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE known_addresses SET last_used_at = ? WHERE account_id = ? AND address = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "1beb1278860b71d673fec1809f15ce692f62066f2639f064f97690f449da5743"
+}

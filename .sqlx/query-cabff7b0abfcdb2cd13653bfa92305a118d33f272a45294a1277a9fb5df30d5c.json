@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT address FROM known_addresses WHERE account_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "address",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "known_addresses",
+            "name": "address"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cabff7b0abfcdb2cd13653bfa92305a118d33f272a45294a1277a9fb5df30d5c"
+}

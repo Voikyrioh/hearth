@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 
 use super::{
-    AccountTx, AuditTx, KnownAddressTx, LoginAttemptTx, OperationTx, SessionTx, StoreError,
+    AccountTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx, OperationTx, SessionTx,
+    StoreError,
 };
 
 /// Point d'entrée des écritures. Le magasin est neutre : il ne porte aucun sujet (comptes,
@@ -29,6 +30,8 @@ pub trait UnitOfWork: Send {
     fn login_attempts(&mut self) -> &mut dyn LoginAttemptTx;
 
     fn known_addresses(&mut self) -> &mut dyn KnownAddressTx;
+
+    fn devices(&mut self) -> &mut dyn DeviceTx;
 
     fn operations(&mut self) -> &mut dyn OperationTx;
 

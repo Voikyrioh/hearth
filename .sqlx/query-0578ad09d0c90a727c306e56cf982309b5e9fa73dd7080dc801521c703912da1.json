@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO known_addresses (account_id, address, last_success_at)\n                 VALUES (?, ?, ?)\n                 ON CONFLICT (account_id, address) DO UPDATE\n                 SET last_success_at = excluded.last_success_at\n                 WHERE excluded.last_success_at >\n                       MAX(known_addresses.last_success_at,\n                           COALESCE(known_addresses.last_used_at, known_addresses.last_success_at))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "0578ad09d0c90a727c306e56cf982309b5e9fa73dd7080dc801521c703912da1"
+}

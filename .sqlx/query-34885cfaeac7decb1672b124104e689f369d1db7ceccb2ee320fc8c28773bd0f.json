@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT 1 AS \"found!: i64\" FROM known_addresses WHERE address = ? AND last_success_at > ? LIMIT 1",
+  "query": "SELECT 1 AS \"found!: i64\" FROM known_addresses WHERE address = ?\n           AND MAX(last_success_at, COALESCE(last_used_at, last_success_at)) > ? LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "0e9fbb120158219a7e6e548a6bbb240c523ea08876f4cc34e48817319ad4846b"
+  "hash": "34885cfaeac7decb1672b124104e689f369d1db7ceccb2ee320fc8c28773bd0f"
 }

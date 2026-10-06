@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO trusted_devices\n                 (id, account_id, key_id, algorithm, public_key, name, created_at, last_proved_at, last_addr)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "7fb05cb53146147a70598fe6b211d00e03bdcbd44acce721584c31c60c2828e6"
+}
