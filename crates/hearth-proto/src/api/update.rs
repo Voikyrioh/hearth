@@ -65,6 +65,10 @@ pub enum UpdateReason {
     Interrupted,
     /// Le retour en arrière lui-même a échoué : à reprendre à la main (voir le runbook).
     RollbackFailed,
+    /// Une raison que ce client ne connaît pas (ajoutée par un agent plus récent). Tolérée à la
+    /// lecture : une raison nouvelle ne casse pas un client déjà installé.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Corps de `POST /agent/update` : la cible, telle que le flux de versions la publie. L'agent
@@ -202,6 +206,18 @@ mod tests {
         );
         let back: AgentUpdateStatus = serde_json::from_value(value).unwrap();
         assert_eq!(back, status);
+    }
+
+    #[test]
+    fn a_reason_added_by_a_newer_agent_is_read_as_unknown_not_as_an_error() {
+        let reason: UpdateReason = serde_json::from_value(json!("no_space_left")).unwrap();
+        assert_eq!(reason, UpdateReason::Unknown);
+        let result: UpdateResult = serde_json::from_value(json!({
+            "version": "0.2.0", "previous": "0.1.0", "outcome": "failed",
+            "reason": "something_new", "at": "2026-10-05T10:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(result.reason, Some(UpdateReason::Unknown));
     }
 
     #[test]

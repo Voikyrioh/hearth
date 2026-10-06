@@ -86,7 +86,7 @@ pub struct SupervisorState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateRecord {
     /// La version visée ; `None` quand elle ne se sait pas (trace de travail illisible).
-    #[serde(default)]
+    #[serde(default, with = "version_text")]
     pub version: Option<String>,
     pub previous: String,
     pub outcome: UpdateOutcome,
@@ -104,6 +104,23 @@ pub struct UpdateRecord {
     /// seconde.
     #[serde(default)]
     pub reported: bool,
+}
+
+/// La version visée sur le disque : une **chaîne** (vide quand elle est inconnue), jamais `null` ni
+/// une clé absente, pour qu'un agent d'AVANT cette version relise un `last.json` écrit par un plus
+/// récent (retour arrière : l'ancien binaire relit le fichier du nouveau). Vide, `null` ou absente
+/// se relisent comme « inconnue ».
+mod version_text {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &Option<String>, out: S) -> Result<S::Ok, S::Error> {
+        out.serialize_str(value.as_deref().unwrap_or(""))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
+        let text = Option::<String>::deserialize(input)?;
+        Ok(text.filter(|text| !text.is_empty()))
+    }
 }
 
 impl UpdateRecord {
@@ -169,6 +186,15 @@ mod tests {
         let result = record.to_result();
         assert_eq!(result.version, "");
         assert!(result.version_unknown);
+        // Sur le disque : une chaîne vide (un agent d'avant lit toujours `version` comme un texte).
+        let written = serde_json::to_value(&record).unwrap();
+        assert_eq!(written["version"], serde_json::json!(""));
+        #[derive(serde::Deserialize)]
+        struct OlderRecord {
+            version: String,
+        }
+        let older: OlderRecord = serde_json::from_value(written).unwrap();
+        assert_eq!(older.version, "");
         // Écrit puis relu sur le disque : l'absence reste une absence.
         let back: UpdateRecord =
             serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
