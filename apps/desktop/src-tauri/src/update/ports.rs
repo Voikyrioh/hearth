@@ -5,6 +5,7 @@ use async_trait::async_trait;
 
 use super::domain::{Candidate, UpdateRecord};
 use super::dto::UpdateStateDto;
+use crate::agent_update::domain::AgentCandidate;
 
 /// Horloge murale en millisecondes depuis l'époque (injectée : les règles de fréquence et de
 /// report se testent sans attendre).
@@ -25,6 +26,15 @@ pub trait UpdateStore: Send + Sync {
 pub trait Feed: Send + Sync {
     /// Interroge le flux. `Ok(None)` : le flux ne propose rien de plus récent.
     async fn check(&self) -> Result<Option<Candidate>, FeedError>;
+
+    /// Lit le fichier de cibles de l'AGENT (`agent.json`, même release que le flux du client,
+    /// ADR-0021). `Ok(None)` : pas de fichier, ou sans entrée pour l'agent : rien à proposer. Une
+    /// erreur laisse la cible précédente en place. Une seule requête, faite par le service juste
+    /// après celle du client, dans la MÊME tentative (jamais seule, jamais hors de la règle des
+    /// 24 h). Par défaut : rien (les faux ports des tests du client n'en font pas).
+    async fn check_agent(&self) -> Result<Option<AgentCandidate>, FeedError> {
+        Ok(None)
+    }
 
     /// Télécharge l'installateur de `version` (celui de la dernière annonce rendue par `check`) et
     /// vérifie sa signature contre la clé embarquée. Rien n'est écrit sur le disque avant que la

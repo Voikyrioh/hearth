@@ -3,6 +3,7 @@
 //! tout le réseau vivra dans `hearth-link` (ADR-0002).
 
 pub mod accounts;
+pub mod agent_update;
 pub mod alerts;
 pub mod audit;
 pub mod badge;
@@ -81,6 +82,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             accounts::commands::change_own_password,
             accounts::commands::close_account_sessions,
             accounts::commands::delete_account,
+            agent_update::commands::get_agent_update,
+            agent_update::commands::update_agent,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()
@@ -91,6 +94,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<audit::AuditLiveEvent>()
         .typ::<update::dto::UpdateStateDto>()
         .typ::<accounts::dto::AccountOutcome>()
+        .typ::<agent_update::dto::AgentUpdateEvent>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.

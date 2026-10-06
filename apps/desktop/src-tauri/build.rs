@@ -42,6 +42,8 @@ const COMMANDS: &[&str] = &[
     "change_own_password",
     "close_account_sessions",
     "delete_account",
+    "get_agent_update",
+    "update_agent",
 ];
 
 fn main() {

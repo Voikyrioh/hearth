@@ -21,6 +21,9 @@ use url::Url;
 
 use super::domain::{Candidate, DownloadPolicy, FEED_URL};
 use super::ports::{DownloadError, Feed, FeedError, VerifiedInstaller};
+use crate::agent_update::domain::{
+    AGENT_FEED_URL, AgentCandidate, MANIFEST_MAX_BYTES, parse_manifest,
+};
 
 /// La clé publique de signature (fichier `.pub` de minisign), embarquée à la compilation. Aucune
 /// clé ne se lit sur le disque de la machine : qui peut écrire un fichier sur le PC ne peut pas
@@ -87,6 +90,8 @@ pub fn plugin_with_key<R: Runtime>(
 pub struct TauriFeed<R: Runtime> {
     app: AppHandle<R>,
     endpoint: Url,
+    /// Le fichier de cibles de l'agent ; absent : aucune lecture (tests du greffon seul).
+    agent_endpoint: Option<Url>,
     policy: DownloadPolicy,
     check_timeout: Duration,
     /// La dernière annonce dont la source est permise : celle que `download` utilise.
@@ -96,7 +101,15 @@ pub struct TauriFeed<R: Runtime> {
 impl<R: Runtime> TauriFeed<R> {
     /// Production : le flux des GitHub Releases du dépôt public, fixé à la compilation.
     pub fn production(app: AppHandle<R>, policy: DownloadPolicy) -> Result<Self, url::ParseError> {
-        Ok(Self::with_endpoint(app, Url::parse(FEED_URL)?, policy))
+        Ok(Self::with_endpoint(app, Url::parse(FEED_URL)?, policy)
+            .with_agent_endpoint(Url::parse(AGENT_FEED_URL)?))
+    }
+
+    /// Adresse du fichier de cibles de l'agent (production : constante ; tests : serveur local).
+    #[doc(hidden)]
+    pub fn with_agent_endpoint(mut self, endpoint: Url) -> Self {
+        self.agent_endpoint = Some(endpoint);
+        self
     }
 
     /// Flux et source choisis (tests contre un serveur de versions local).
@@ -105,6 +118,7 @@ impl<R: Runtime> TauriFeed<R> {
         Self {
             app,
             endpoint,
+            agent_endpoint: None,
             policy,
             check_timeout: CHECK_TIMEOUT,
             staged: Mutex::new(None),
@@ -129,6 +143,13 @@ impl<R: Runtime> TauriFeed<R> {
     fn stage(&self, update: Option<Update>) {
         *self.staged.lock().unwrap_or_else(PoisonError::into_inner) = update;
     }
+}
+
+/// `reqwest` (fonction `rustls-no-provider`) n'installe aucun fournisseur de cryptographie : celui
+/// du processus est `ring`, le seul compilé (ni `aws-lc` ni OpenSSL, ADR-0011). Déjà installé par un
+/// autre composant : rien à faire.
+fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 fn same_version(a: &str, b: &str) -> bool {
@@ -265,6 +286,47 @@ impl<R: Runtime> Feed for TauriFeed<R> {
         // Une annonce dont la source n'est pas permise ne sera jamais téléchargée.
         self.stage(self.policy.allows(&update.download_url).then_some(update));
         Ok(Some(candidate))
+    }
+
+    async fn check_agent(&self) -> Result<Option<AgentCandidate>, FeedError> {
+        let Some(endpoint) = self.agent_endpoint.clone() else {
+            return Ok(None);
+        };
+        install_crypto_provider();
+        // Mêmes règles que le flux du client : HTTPS partout, redirections bornées et en HTTPS.
+        let client =
+            harden(&self.policy, Arc::new(AtomicBool::new(false)))(reqwest::Client::builder())
+                .timeout(self.check_timeout)
+                .build()
+                .map_err(|error| FeedError::failed(error.to_string()))?;
+        let mut response = client
+            .get(endpoint)
+            .send()
+            .await
+            .map_err(|error| FeedError::failed(error.to_string()))?;
+        // Aucun fichier de cibles dans cette release : rien à proposer, pas une panne.
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            return Err(FeedError::failed(format!(
+                "fichier de cibles : réponse {}",
+                response.status()
+            )));
+        }
+        // Lu par morceaux, borné : un serveur qui n'arrête pas d'envoyer ne remplit pas la mémoire.
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| FeedError::failed(error.to_string()))?
+        {
+            if body.len() + chunk.len() > MANIFEST_MAX_BYTES {
+                return Err(FeedError::failed("fichier de cibles trop volumineux"));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        parse_manifest(&body).map_err(|error| FeedError::failed(error.to_string()))
     }
 
     async fn download(

@@ -43,6 +43,8 @@
     "allow-change-own-password",
     "allow-close-account-sessions",
     "allow-delete-account",
+    "allow-get-agent-update",
+    "allow-update-agent",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

@@ -15,6 +15,7 @@ use std::time::Duration;
 use super::domain::{self, Candidate, DownloadPolicy, Rejection, UpdateRecord, validate_candidate};
 use super::dto::{AvailableDto, UpdateFailure, UpdatePhase, UpdateStateDto};
 use super::ports::{Clock, DownloadError, Feed, StateSink, UpdateStore, VerifiedInstaller};
+use crate::agent_update::domain::{AgentCandidate, AgentTarget, validate_target};
 
 /// Pourquoi une installation ne démarre pas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -165,7 +166,17 @@ impl UpdateService {
             self.publish(&mut inner);
         }
         let outcome = self.feed.check().await;
+        // La cible de l'agent se lit dans la MÊME tentative : une requête de plus vers le même hôte,
+        // jamais une tentative de plus (ADR-0021). Sans requête partie pour le client (pas de
+        // réseau), rien n'est tenté non plus.
+        let agent_outcome = match &outcome {
+            Err(error) if error.no_request_sent => None,
+            _ => Some(self.feed.check_agent().await),
+        };
         let mut inner = self.lock();
+        if let Some(agent_outcome) = agent_outcome {
+            self.absorb_agent(&mut inner.record, agent_outcome);
+        }
         let before = inner.record.available.clone();
         // Aucune requête n'a pu partir (pas de réseau) : le quota de 24 h n'est pas consommé, la
         // vérification sera tentée quand le réseau sera là (BR-UPDATE-001, point b).
@@ -209,6 +220,40 @@ impl UpdateService {
         record.available = release;
         record.last_success_at = Some(started);
         true
+    }
+
+    /// Range la cible de l'agent lue dans `agent.json` : une cible valable remplace la précédente ;
+    /// un fichier sans entrée (ou refusé par les règles) l'efface, une erreur de lecture la garde.
+    /// Silencieux comme le reste de la vérification (BR-UPDATE-007, 008).
+    fn absorb_agent(
+        &self,
+        record: &mut UpdateRecord,
+        outcome: Result<Option<AgentCandidate>, super::ports::FeedError>,
+    ) {
+        match outcome {
+            Err(error) => {
+                tracing::debug!(%error, "cible de l'agent non lue");
+            }
+            Ok(None) => record.agent = None,
+            Ok(Some(candidate)) => match validate_target(&candidate, &self.policy) {
+                Ok(target) => record.agent = Some((&target).into()),
+                Err(rejection) => {
+                    tracing::warn!(%rejection, "cible de l'agent refusée");
+                    record.agent = None;
+                }
+            },
+        }
+    }
+
+    /// La cible de l'agent retenue, VALIDÉE de nouveau (le fichier d'état se modifie à la main) :
+    /// `None` si aucune, ou si elle ne passe plus les règles.
+    pub fn agent_target(&self) -> Option<AgentTarget> {
+        let inner = self.lock();
+        inner
+            .record
+            .agent
+            .as_ref()
+            .and_then(|record| AgentTarget::from_record(record, &self.policy).ok())
     }
 
     /// « Plus tard » : le bandeau disparaît jusqu'au lendemain (BR-UPDATE-006).

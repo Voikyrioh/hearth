@@ -278,6 +278,7 @@ fn the_record_survives_a_json_round_trip_and_tolerates_missing_fields() {
             version: "1.1.0".to_owned(),
             notes: "n".to_owned(),
         }),
+        agent: None,
     };
     let text = serde_json::to_string(&record).unwrap();
     assert_eq!(serde_json::from_str::<UpdateRecord>(&text).unwrap(), record);
