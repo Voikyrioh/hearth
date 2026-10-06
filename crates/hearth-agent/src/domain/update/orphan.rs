@@ -51,6 +51,10 @@ pub enum Orphan {
     /// `failed` / `interrupted`, traces retirées, **sans jamais toucher à la base**.
     // FIX:01M47N6Z485TWN2H770KQ5H80R : docs/bugs/FIX-01M47N6Z485TWN2H770KQ5H80R.md
     ForeignVersion(Job),
+    /// Une reprise a déjà été lancée pour cet échange (`job.recover`) et n'a rien conclu : elle n'est
+    /// pas relancée (BR-UPDATE-028). Conclu `failed` / `rollback_failed`, copies gardées pour la
+    /// reprise à la main, traces de travail retirées.
+    RecoveryAlreadyTried(Job),
     /// La nouvelle version tourne et les binaires ont été échangés sans que personne conclue :
     /// reprise par un superviseur (contrôle du binaire en place, sinon retour exact).
     AfterSwap(Job),
@@ -76,25 +80,40 @@ pub fn classify_orphan(leftovers: &Leftovers, supervising: bool, current: Versio
             let previous = Version::parse(&job.previous).ok();
             if leftovers.backup_present {
                 match (version, previous) {
-                    // Le binaire en place est celui qui a été visé : le contrôle tranche.
-                    (Some(target), _) if target == current => Orphan::AfterSwap(job.clone()),
+                    // Le binaire en place est celui qui a été visé : le contrôle tranche, UNE fois.
+                    // Une reprise déjà lancée (`job.recover` écrit sur le disque) qui n'a rien conclu
+                    // n'est jamais relancée : sans cela, une reprise muette bouclerait.
+                    (Some(target), Some(_)) if target == current => {
+                        if job.recover {
+                            Orphan::RecoveryAlreadyTried(job.clone())
+                        } else {
+                            Orphan::AfterSwap(job.clone())
+                        }
+                    }
                     // L'ancienne version tourne déjà.
-                    (_, Some(before)) if before == current => {
+                    (Some(_), Some(before)) if before == current => {
                         Orphan::AlreadyRolledBack(job.clone())
                     }
                     // Ni l'une ni l'autre : le binaire a été remplacé à la main.
                     (Some(_), Some(_)) => Orphan::ForeignVersion(job.clone()),
-                    // Un travail dont les versions ne se lisent pas : le contrôle tranche.
-                    _ => Orphan::AfterSwap(job.clone()),
-                }
-            } else if version == Some(current) {
-                Orphan::Completed {
-                    version: job.version.clone(),
-                    previous: job.previous.clone(),
-                    requester: job.requester(),
+                    // Une version qui ne se lit pas : on ne devine pas. Rien n'est restauré ni
+                    // effacé, la reprise est à faire à la main.
+                    _ => Orphan::Unreadable {
+                        backup_present: true,
+                    },
                 }
             } else {
-                Orphan::LaunchedNoSwap(job.clone())
+                match version {
+                    Some(target) if target == current => Orphan::Completed {
+                        version: job.version.clone(),
+                        previous: job.previous.clone(),
+                        requester: job.requester(),
+                    },
+                    Some(_) => Orphan::LaunchedNoSwap(job.clone()),
+                    None => Orphan::Unreadable {
+                        backup_present: false,
+                    },
+                }
             }
         }
         (None, Some(state)) => {
@@ -282,18 +301,6 @@ mod tests {
             classify_orphan(&left, false, Version::new(0, 9, 9)),
             Orphan::ForeignVersion(job())
         );
-        // Des versions qui ne se lisent pas ne sont pas un remplacement : le contrôle tranche.
-        let mut broken = job();
-        broken.version = "x".into();
-        let left = Leftovers {
-            job: Some(broken.clone()),
-            backup_present: true,
-            ..Leftovers::default()
-        };
-        assert_eq!(
-            classify_orphan(&left, false, Version::new(0, 9, 9)),
-            Orphan::AfterSwap(broken)
-        );
     }
 
     #[test]
@@ -308,6 +315,201 @@ mod tests {
                 classify_orphan(&left, false, OLD),
                 Orphan::Unreadable { backup_present }
             );
+        }
+    }
+
+    // ---- Table de vérité (T27) : une ligne = un test. Entrées : `job.json` (absent / lisible /
+    // versions illisibles), `state.json`, sauvegarde du binaire, version en place, `recover`.
+    // Aucune ligne ne boucle (`AfterSwap` seulement une fois, jamais si `recover`), ne restaure
+    // une copie périmée (seul `AfterSwap` peut remettre la base, par le retour arrière de CE
+    // travail) ni ne laisse un ancien binaire devant une base migrée.
+
+    fn left(job: Option<Job>, state: bool, backup_present: bool) -> Leftovers {
+        Leftovers {
+            state: state.then(|| state_of(UpdateStep::Check)),
+            job,
+            backup_present,
+            unreadable: false,
+        }
+    }
+
+    fn state_of(step: UpdateStep) -> SupervisorState {
+        state(step)
+    }
+
+    fn job_with(version: &str, previous: &str, recover: bool) -> Job {
+        let mut job = job();
+        job.version = version.into();
+        job.previous = previous.into();
+        job.recover = recover;
+        job
+    }
+
+    macro_rules! row {
+        ($name:ident, $left:expr, $current:expr, $expected:pat) => {
+            #[test]
+            fn $name() {
+                let got = classify_orphan(&$left, false, $current);
+                assert!(matches!(got, $expected), "{got:?}");
+            }
+        };
+    }
+
+    const THIRD: Version = Version::new(0, 9, 9);
+
+    row!(
+        row_01_nothing_at_all,
+        left(None, false, false),
+        OLD,
+        Orphan::None
+    );
+    row!(
+        row_02_nothing_but_a_backup_left,
+        left(None, false, true),
+        OLD,
+        Orphan::None
+    );
+    row!(
+        row_03_intent_only_new_running,
+        left(None, true, false),
+        NEW,
+        Orphan::Completed { .. }
+    );
+    row!(
+        row_04_intent_only_other_running,
+        left(None, true, false),
+        OLD,
+        Orphan::BeforeLaunch { .. }
+    );
+    row!(
+        row_05_job_no_backup_new_running,
+        left(Some(job()), true, false),
+        NEW,
+        Orphan::Completed { .. }
+    );
+    row!(
+        row_06_job_no_backup_other_running,
+        left(Some(job()), true, false),
+        OLD,
+        Orphan::LaunchedNoSwap(_)
+    );
+    row!(
+        row_07_job_no_backup_third_running,
+        left(Some(job()), true, false),
+        THIRD,
+        Orphan::LaunchedNoSwap(_)
+    );
+    row!(
+        row_08_job_backup_new_running_first_time,
+        left(Some(job()), true, true),
+        NEW,
+        Orphan::AfterSwap(_)
+    );
+    row!(
+        row_09_job_backup_new_running_recovery_already_tried,
+        left(Some(job_with("0.2.0", "0.1.0", true)), true, true),
+        NEW,
+        Orphan::RecoveryAlreadyTried(_)
+    );
+    row!(
+        row_10_job_backup_old_running,
+        left(Some(job()), true, true),
+        OLD,
+        Orphan::AlreadyRolledBack(_)
+    );
+    row!(
+        row_11_job_backup_old_running_after_a_recovery,
+        left(Some(job_with("0.2.0", "0.1.0", true)), true, true),
+        OLD,
+        Orphan::AlreadyRolledBack(_)
+    );
+    row!(
+        row_12_job_backup_third_running,
+        left(Some(job()), true, true),
+        THIRD,
+        Orphan::ForeignVersion(_)
+    );
+    row!(
+        row_13_target_unreadable_backup_new_looking,
+        left(Some(job_with("x", "0.1.0", false)), true, true),
+        NEW,
+        Orphan::Unreadable {
+            backup_present: true
+        }
+    );
+    row!(
+        row_14_target_unreadable_backup_any_version,
+        left(Some(job_with("x", "0.1.0", true)), true, true),
+        THIRD,
+        Orphan::Unreadable {
+            backup_present: true
+        }
+    );
+    row!(
+        row_15_previous_unreadable_backup_other_than_target,
+        left(Some(job_with("0.2.0", "?", false)), true, true),
+        THIRD,
+        Orphan::Unreadable {
+            backup_present: true
+        }
+    );
+    row!(
+        row_16_previous_unreadable_backup_target_running,
+        left(Some(job_with("0.2.0", "?", false)), true, true),
+        NEW,
+        Orphan::Unreadable {
+            backup_present: true
+        }
+    );
+    row!(
+        row_17_target_unreadable_no_backup,
+        left(Some(job_with("x", "0.1.0", false)), true, false),
+        OLD,
+        Orphan::Unreadable {
+            backup_present: false
+        }
+    );
+    row!(
+        row_18_previous_unreadable_no_backup_other_running,
+        left(Some(job_with("0.2.0", "?", false)), true, false),
+        THIRD,
+        Orphan::LaunchedNoSwap(_)
+    );
+
+    #[test]
+    fn no_combination_loops_or_restores_a_stale_copy() {
+        // Exhaustif : tout ce que `AfterSwap` (seule porte vers la remise de la base) exige.
+        let versions = ["0.2.0", "0.1.0", "x"];
+        for version in versions {
+            for previous in versions {
+                for recover in [false, true] {
+                    for backup in [false, true] {
+                        for current in [OLD, NEW, THIRD] {
+                            let job = job_with(version, previous, recover);
+                            let got =
+                                classify_orphan(&left(Some(job), true, backup), false, current);
+                            if matches!(got, Orphan::AfterSwap(_)) {
+                                assert!(
+                                    backup
+                                        && !recover
+                                        && version == current.to_string()
+                                        && previous != "x",
+                                    "AfterSwap à tort : {version} {previous} recover={recover} backup={backup} {current:?}"
+                                );
+                            }
+                            if backup && (version == "x" || previous == "x") {
+                                assert_eq!(
+                                    got,
+                                    Orphan::Unreadable {
+                                        backup_present: true
+                                    },
+                                    "{version} {previous}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

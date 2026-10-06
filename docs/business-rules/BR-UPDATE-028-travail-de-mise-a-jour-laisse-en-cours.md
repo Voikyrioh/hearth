@@ -26,8 +26,13 @@ Dès sa demande, la mise à jour laisse une trace (`update/state.json` : version
 
 ## Cas limites
 - Si le nouveau binaire ne démarre pas du tout (superviseur tué, puis serveur redémarré), personne ne tourne pour conclure : reprise à la main (runbook ; étude d'une unité de reprise dans l'ADR-0014, 2026-10-06).
-- Une version illisible dans le travail n'est pas un remplacement : le contrôle de la reprise tranche.
-- Un résultat `rollback_failed` laisse les traces : le démarrage suivant retente la reprise.
+- **Une version illisible dans le travail** (visée ou d'avant), avec la sauvegarde présente : jamais de reprise ni de retour arrière (une reprise attendrait une version qui ne répondra pas, puis remettrait une copie périmée de la base) : conclu `failed` / `rollback_failed`, version inconnue, **copies gardées**, entrée au journal ; reprise à la main (runbook). Sans sauvegarde et version visée illisible : `failed` / `interrupted`.
+- **Une reprise est tentée UNE fois par échange** : le travail de reprise est écrit avec `recover` ; une reprise qui n'a rien conclu (superviseur de reprise muet, tué) n'est jamais relancée, ni par la patience ni par un redémarrage : conclu `failed` / `rollback_failed`, copies (ancien binaire, base d'avant) **gardées** pour la reprise à la main, traces de travail (`job.json`, `state.json`) retirées, entrée au journal, verrou libéré. Sans cela, une reprise muette bouclerait (régression relevée en review de la PR #21).
+- Par `install.sh --binary`, l'installation utilise le même chemin de sauvegarde et le retire à la fin : le démarrage suivant voit « pas de sauvegarde, une autre version tourne » (`LaunchedNoSwap`), pas `ForeignVersion` ; même résultat visible (`failed` / `interrupted`, base intacte, copies retirées). `ForeignVersion` ne sert que pour un binaire copié à la main alors que la sauvegarde existe.
+- La patience de la surveillance conclut un superviseur qui a travaillé sans rien échanger comme le démarrage (`failed` / `interrupted`, avec les versions du travail) ; `supervisor_launch` ne reste que si le travail n'a jamais été écrit.
+
+## Table de vérité de `classify_orphan`
+Voir la tâche T27 (une ligne = un test `row_NN_*` de `domain::update::orphan::tests`, plus `no_combination_loops_or_restores_a_stale_copy`, exhaustif). Seul `AfterSwap` peut remettre la base, par le retour arrière de CE travail, une seule fois.
 
 ## Règles liées
 - BR-UPDATE-015, BR-UPDATE-018, ADR-0014

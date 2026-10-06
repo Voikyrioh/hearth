@@ -968,3 +968,96 @@ async fn a_third_version_put_in_by_hand_is_never_rolled_back_over_nor_its_databa
     rig.service.resume().await;
     assert_eq!(journal(&env).await.len(), 1);
 }
+
+#[tokio::test]
+async fn a_recovery_supervisor_that_says_nothing_is_tried_once_then_concluded_for_good() {
+    // Revue r1, bloquant 1 : la patience relançait la reprise à chaque tour, sans fin
+    // (`in_progress` vrai pour toujours). Une seule tentative, puis une conclusion lisible.
+    let env = env().await;
+    let rig = Rig::impatient(&env);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(swapped_job());
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+        s.db_copy = true;
+    });
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    // Le superviseur de reprise ne produit jamais de résultat : la patience le constate.
+    let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+    assert_eq!(done.outcome, Some(UpdateOutcome::Failed));
+    assert_eq!(done.reason, Some(UpdateReason::RollbackFailed));
+    // Plusieurs patiences de plus : rien ne repart.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    rig.host.with(|s| {
+        assert_eq!(s.launched.len(), 1, "exactement un lancement");
+        assert!(
+            s.db_copy,
+            "la copie de la base est gardée pour la reprise à la main"
+        );
+        assert!(
+            s.existing
+                .iter()
+                .any(|p| p.ends_with(".hearth-agent.previous")),
+            "la sauvegarde de l'ancien binaire est gardée"
+        );
+        assert!(
+            s.job.is_none() && s.state.is_none(),
+            "traces de travail retirées"
+        );
+        assert_eq!(s.db_restores, 0, "aucune base remise");
+    });
+    assert!(!rig.service.status().in_progress, "plus rien en cours");
+    assert_eq!(journal(&env).await.len(), 1, "une entrée au journal");
+    // Un redémarrage de l'agent ensuite : aucune nouvelle tentative automatique.
+    rig.service.resume().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    rig.host.with(|s| assert_eq!(s.launched.len(), 1));
+    assert_eq!(journal(&env).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_work_whose_versions_do_not_read_restores_nothing_erases_nothing_and_never_loops() {
+    // Revue r1, bloquant 2 : version visée illisible (boucle) ou version d'avant illisible (retour
+    // arrière avec copie périmée). Dans le doute : copies gardées, conclu « à reprendre à la main ».
+    for (version, previous) in [("x", "0.0.9"), ("0.2.0", "?")] {
+        let env = env().await;
+        let rig = Rig::impatient(&env);
+        rig.host.with(|s| {
+            s.state = Some(intent(UpdateStep::Check));
+            let mut job = swapped_job();
+            job.version = version.into();
+            job.previous = previous.into();
+            s.job = Some(job);
+            s.existing
+                .push("/usr/local/bin/.hearth-agent.previous".into());
+            s.db_copy = true;
+        });
+        let mut events = rig.feed_receiver();
+        rig.service.resume().await;
+        let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+        assert_eq!(
+            done.reason,
+            Some(UpdateReason::RollbackFailed),
+            "{version} {previous}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        rig.host.with(|s| {
+            assert!(
+                s.launched.is_empty(),
+                "aucune reprise : {version} {previous}"
+            );
+            assert_eq!(s.db_restores, 0);
+            assert!(s.db_copy, "copie gardée");
+            assert!(
+                s.existing
+                    .iter()
+                    .any(|p| p.ends_with(".hearth-agent.previous")),
+                "sauvegarde gardée"
+            );
+        });
+        assert!(!rig.service.status().in_progress);
+        assert_eq!(journal(&env).await.len(), 1);
+    }
+}

@@ -577,6 +577,31 @@ impl UpdateService {
                     .await;
             }
             Orphan::AfterSwap(job) => self.recover(job).await,
+            Orphan::RecoveryAlreadyTried(job) => {
+                // Une reprise a déjà été lancée pour cet échange et n'a rien conclu : pas de
+                // seconde, jamais de boucle. Les copies (ancien binaire, base d'avant) restent
+                // pour la reprise à la main ; seules les traces de travail sont retirées.
+                tracing::error!(
+                    version = %job.version,
+                    "la reprise de la mise à jour n'a rien conclu : à reprendre à la main (runbook), copies gardées"
+                );
+                self.host.discard_work_files();
+                let record = UpdateRecord {
+                    version: Some(job.version.clone()),
+                    previous: job.previous.clone(),
+                    outcome: UpdateOutcome::Failed,
+                    reason: Some(UpdateReason::RollbackFailed),
+                    at: self.now_text(),
+                    requested_by: job.requested_by.clone(),
+                    client_name: job.client_name.clone(),
+                    client_addr: job.client_addr.clone(),
+                    reported: false,
+                };
+                if let Err(error) = self.host.write_last(&record) {
+                    tracing::error!(%error, "résultat de mise à jour non écrit");
+                }
+                self.report(record).await;
+            }
             Orphan::Completed {
                 version,
                 previous,
@@ -659,12 +684,13 @@ impl UpdateService {
     /// La surveillance ne voit plus de superviseur et n'a rien à annoncer depuis trop longtemps.
     /// Ce n'est pas une raison de conclure « échec » à l'aveugle : les traces sur le disque
     /// disent où en est le travail (binaires déjà échangés, nouvelle version déjà en place...) et
-    /// la décision est celle du démarrage (`classify_orphan`). Seul « rien n'a été échangé » est
-    /// un échec du lancement du superviseur.
+    /// la décision est celle du démarrage (`classify_orphan`). Seul « le superviseur n'a jamais écrit
+    /// son travail » est un échec du lancement ; un superviseur qui a travaillé sans rien échanger
+    /// (ou dont le retour arrière est fait) est conclu comme au démarrage : `failed` / `interrupted`.
     async fn give_up_on_supervisor(self: &Arc<Self>, version: &Version, requester: &Requester) {
         let leftovers = self.read_leftovers();
         match classify_orphan(&leftovers, false, self.current) {
-            Orphan::None | Orphan::BeforeLaunch { .. } | Orphan::LaunchedNoSwap(_) => {
+            Orphan::None | Orphan::BeforeLaunch { .. } => {
                 let target_text = version.to_string();
                 tracing::error!(version = %target_text, "le superviseur n'a pas donné de résultat");
                 // Le demandeur est celui de la mise à jour (le journal ne l'attribue pas à la ligne
