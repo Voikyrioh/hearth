@@ -43,7 +43,7 @@ use crate::domain::server::{LastKnown, ServerId, ServerRecord};
 use crate::domain::state::{LinkState, Reason, Start, Thresholds};
 use crate::domain::time::WallTime;
 use crate::error::{InputField, LinkError};
-use crate::ports::transport::{Method, Pin, Target};
+use crate::ports::transport::{Method, Pin, Target, TransportError};
 use crate::ports::vault::SecretKind;
 use crate::ports::{
     Clock, EventSink, NetWatcher, OperationStore, Rng, ServerStore, SnapshotStore, Transport, Vault,
@@ -372,6 +372,14 @@ pub enum ActionOutcome {
     /// coupure », « non exécuté », « résultat inconnu ») arrive plus tard par
     /// `Event::Operation`. L'action n'est jamais rejouée.
     ResultUnknown { id: OperationId },
+}
+
+/// Réponse d'une lecture (`LinkManager::fetch`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FetchResponse {
+    pub status: u16,
+    /// `Value::Null` si la réponse n'a pas de corps.
+    pub body: Value,
 }
 
 #[derive(Clone)]
@@ -1047,6 +1055,42 @@ impl LinkManager {
         };
         guard.id = None;
         result
+    }
+
+    /// Lit une ressource du serveur (`GET`, chemin relatif à `/api/v1`) : aucune clé d'opération,
+    /// aucun suivi sur disque, rien à relire au retour du lien (une lecture sans effet n'a pas
+    /// d'issue incertaine). Hors « Connecté », `NotConnected` sans rien envoyer. Toute réponse de
+    /// l'agent, même un refus, est un `Ok` : c'est `status` qui le dit.
+    pub async fn fetch(&self, id: &ServerId, path: &str) -> Result<FetchResponse, LinkError> {
+        let (_, shared) = self.handle(id)?;
+        if shared.state.borrow().state != LinkState::Connected {
+            return Err(LinkError::NotConnected);
+        }
+        let token = self
+            .inner
+            .deps
+            .vault
+            .get(id, SecretKind::Token)
+            .map_err(|e| LinkError::Vault(e.0))?
+            .ok_or(LinkError::NotConnected)?;
+        let request = crate::ports::transport::ApiRequest {
+            method: Method::Get,
+            path: path.to_owned(),
+            body: None,
+            idempotency_key: None,
+        };
+        let deps = &self.inner.deps;
+        let target = shared.target();
+        let call = timeout(
+            deps.config.request_timeout,
+            deps.transport.request(&target, &token, &request),
+        );
+        let response =
+            attempt::guarded(async { call.await.unwrap_or(Err(TransportError::Timeout)) }).await?;
+        Ok(FetchResponse {
+            status: response.status,
+            body: response.body,
+        })
     }
 
     /// Dernière vue connue du serveur (en mémoire, sinon la dernière sauvegardée).
