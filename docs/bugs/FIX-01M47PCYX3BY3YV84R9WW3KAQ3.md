@@ -13,6 +13,9 @@ Supprimer son propre compte (ou fermer ses propres sessions, ou définir son mot
 ## Cause root
 L'agent révoque la session pendant l'action ; l'avis de révocation arrive par le flux et peut croiser la réponse HTTP. S'il gagne, la machine à états passe à « Accès révoqué » et son effet `MarkPendingUnknown` rendait « résultat inconnu » à l'appelant (`task.rs`, `mark_pending_unknown`) alors que la requête était partie et que sa réponse allait arriver. Cause établie par un test déterministe (`tracking.rs`) : avis livré avant la réponse, retenue à une porte ; sans correction l'appelant est libéré par l'avis.
 
+## Second ordre (round 3) : la fermeture de l'agent arrivait comme une « connexion réinitialisée »
+Après la correction de l'avis, 1 à 3 exécutions sur 24 sous charge restaient « inconnu ». Cause établie par trace : `frame error Io("connection reset")` puis `mark_pending_unknown state=Connected`. À la fin de la session l'agent envoyait l'avis puis la trame de fermeture (code 1008), puis lâchait la connexion TCP alors que des données du client (ses battements) n'étaient pas lues : le système réinitialise la connexion, et la réinitialisation EFFACE côté client l'avis et la trame de fermeture non lus. Le client voyait une perte de lien et marquait l'action « inconnu » alors que sa réponse HTTP arrivait.
+
 ## Impacté
 Depuis HRT-12 (BR-RESIL-009, 010) : toute action qui termine sa propre session.
 
@@ -20,6 +23,7 @@ Depuis HRT-12 (BR-RESIL-009, 010) : toute action qui termine sa propre session.
 Aucun.
 
 ## Correction
+Agent (`entrypoint/ws/connection.rs`, `run`) : fermeture ÉLÉGANTE, on lit jusqu'à la réponse du client à la trame de fermeture (borné par `send_timeout`) avant de lâcher la connexion : plus de réinitialisation, l'avis et la trame arrivent toujours. Bibliothèque (`task.rs`) : une trame de fermeture AVEC code autre que 1001 (« l'agent s'arrête ») est une fin délibérée par l'agent, la requête en vol garde sa réponse ; toute autre fin (erreur d'E/S, fermeture sans trame, arrêt de l'agent, silence du battement) reste une perte de lien : « inconnu » tout de suite (BR-RESIL-009 inchangée). Table des entrelacements testée ligne par ligne (`tracking.rs::row_*`).
 Quand c'est l'AGENT qui met fin à la session (expirée ou révoquée, hors déconnexion voulue), le lien n'est pas tombé : les requêtes en vol ne sont plus marquées « inconnu » par l'avis. Une réponse qui arrive garde son résultat ; sans réponse, la requête s'arrête à `request_timeout` (déjà borné par la tâche) et l'issue est « inconnu ». Rien n'est rejoué. Alternatives écartées : allonger un délai, accepter « inconnu » dans le test.
 
 ## Références

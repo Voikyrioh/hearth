@@ -55,6 +55,19 @@ pub async fn run(mut socket: WebSocket, state: AppState, permit: Permit) {
             socket.send(Message::Close(Some(frame))),
         )
         .await;
+        // FIX:01M47PCYX3BY3YV84R9WW3KAQ3 — fermeture ÉLÉGANTE : on attend la réponse du client à la
+        // trame de fermeture avant de lâcher la connexion. Fermer tout de suite avec des données du
+        // client encore non lues (ses battements) fait réinitialiser la connexion TCP, et la
+        // réinitialisation efface côté client l'avis de fin de session et la trame de fermeture non lus :
+        // le client croit à une perte de lien (docs/bugs/FIX-01M47PCYX3BY3YV84R9WW3KAQ3.md).
+        let _ = timeout(state.stream.settings.send_timeout, async {
+            while let Some(Ok(message)) = socket.recv().await {
+                if matches!(message, Message::Close(_)) {
+                    break;
+                }
+            }
+        })
+        .await;
     }
 }
 

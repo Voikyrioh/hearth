@@ -24,6 +24,9 @@ Une action envoyée porte une clé d'opération (`Idempotency-Key`, un ULID). Si
 - Coquille, contre un vrai agent : `apps/desktop/src-tauri/tests/offline.rs``::an_action_cut_before_the_answer_is_unknown_never_replayed_and_its_outcome_comes_back` (l'agent ne voit qu'une exécution).
 - Interface : `apps/desktop/src/stores/offline.test.ts``::dit que le résultat n'est pas connu, ne rejoue jamais…`, `apps/desktop/e2e/offline.spec.ts` (« action lancée à la coupure »).
 
+## Bibliothèque : fin délibérée par l'agent contre perte de lien
+L'énoncé de la règle ne change pas. Précision : une requête DÉJÀ PARTIE garde sa réponse (bornée par `request_timeout`, jamais rejouée) quand c'est l'AGENT qui met fin au flux de façon délibérée : avis de fin de session, ou trame de fermeture reçue avec un code autre que 1001 (l'agent s'arrête, redémarrage ou mise à jour : pas délibéré du point de vue d'une action). Toute autre fin du flux (erreur d'E/S, fermeture sans trame, réinitialisation, silence détecté par le battement) reste une perte de lien : « résultat inconnu » TOUT DE SUITE. Dans le doute : perte de lien. Table des cas : `tests/tracking.rs::row_*` ; correction de l'agent (fermeture élégante) : FIX-01M47PCYX3BY3YV84R9WW3KAQ3.
+
 ## Cas limites
 - Un résultat connu (réponse reçue, même une erreur 4xx) n'est pas « inconnu ».
 - Jamais de rejeu automatique, même si l'agent répondrait « non exécuté » : l'utilisateur décide.
