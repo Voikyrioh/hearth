@@ -119,6 +119,18 @@
   --chart-min-height: 64px;
   --bars-height: 56px;
 
+  /* Journal d'activité */
+  --audit-row-height: 44px;
+  --audit-columns: 156px 104px minmax(170px, 1.2fr) minmax(150px, 1fr) minmax(120px, 1fr) 92px
+    minmax(130px, 1fr);
+  --audit-table-min: 1020px;
+  --audit-menu-width: 260px;
+  --audit-menu-max: 300px;
+  --audit-search-min: 240px;
+  --audit-field-min: 160px;
+  --audit-scroll-height: max(360px, calc(100vh - 460px));
+  --audit-detail-width: 560px;
+
   /* États */
   --opacity-disabled: 0.45;
   --opacity-stale: 0.62;
