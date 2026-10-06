@@ -5,7 +5,7 @@ titre: La mise à jour continue côté serveur malgré une coupure réseau
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-mises-a-jour.md (BR-UPDATE-017), HRT-17
-maj: 2026-10-05
+maj: 2026-10-06
 ---
 
 # BR-UPDATE-017 : La mise à jour continue côté serveur malgré une coupure réseau
@@ -24,6 +24,11 @@ La mise à jour s'exécute dans une tâche détachée de la requête (réponse `
 - `tests/update_stream.rs::a_client_that_subscribes_in_the_middle_gets_the_current_step_then_the_result`.
 - `infrastructure::update::host::tests::the_last_result_and_the_state_survive_a_new_host_on_the_same_directory`.
 
+## Interface (HRT-17, lot interface)
+- Au retour du lien, l'interface relit l'état et le dernier résultat (`get_agent_update` : `GET /agent/update` puis `GET /agent/update/last`) et affiche le résultat réel : message si le résultat date de moins de 24 h (`recent`, décidé par la coquille), simple ligne d'historique sinon. Une lecture plus ancienne qu'un événement reçu depuis ne l'écrase pas ; une lecture qui échoue garde la dernière sans message.
+- Code : `apps/desktop/src/stores/agentUpdates.ts` (`refresh`, surveillance des retours du lien), `apps/desktop/src-tauri/src/agent_update/service.rs::{view, is_recent}`, `crates/hearth-link/src/manager/agent_update.rs`.
+- Tests : `crates/hearth-link/tests/agent_update.rs::a_restart_announced_by_the_agent_is_an_expected_cut_then_the_result_is_read_back` ; `apps/desktop/src-tauri/tests/agent_update_runtime.rs` (`the_agent_stays_the_arbiter…`, `a_result_is_recent_for_a_day…`) ; `apps/desktop/src/stores/agentUpdates.test.ts` ; `apps/desktop/src/components/organisms/agentUpdate.test.ts`, `apps/desktop/e2e/agent-update.spec.ts` (« keeps the steps through a cut of the link… »).
+
 ## Cas limites
 - Le serveur qui redémarre pendant la mise à jour avant le lancement du superviseur : aucun résultat (l'agent n'a pas changé) ; après : le superviseur termine seul.
 
@@ -32,3 +37,4 @@ La mise à jour s'exécute dans une tâche détachée de la requête (réponse `
 
 ## Historique
 - 2026-10-05 : création (HRT-17, lot agent, session 2026-10-04-hearth-creation).
+- 2026-10-06 : section Interface (HRT-17, lot interface, session 2026-10-04-hearth-creation, T28).

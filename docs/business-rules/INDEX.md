@@ -118,10 +118,19 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-UPDATE-008](./BR-UPDATE-008-service-de-versions-muet-abandon-silencieux.md) — Service de versions muet : abandon silencieux, retenté plus tard — `update/service.rs::UpdateService::absorb` — invariant —
 - [BR-UPDATE-009](./BR-UPDATE-009-telechargement-interrompu-relancable.md) — Téléchargement interrompu : relançable, la version en cours reste utilisable — `update/feed.rs::classify` — invariant —
 - [BR-UPDATE-010](./BR-UPDATE-010-mise-a-jour-corrompue-refusee.md) — Mise à jour corrompue : refusée, la version en cours reste utilisable — `update/feed.rs::classify` — invariant ✓
-- [BR-UPDATE-025](./BR-UPDATE-025-versions-dans-les-reglages.md) — Les réglages affichent la version du client (celle de l'agent viendra avec son écran) — `pages/Settings.vue`, `UpdatePanel.vue` — invariant —
+- [BR-UPDATE-025](./BR-UPDATE-025-versions-dans-les-reglages.md) — Les réglages affichent la version du client et celle de l'agent de chaque serveur — `pages/Settings.vue`, `UpdatePanel.vue`, `AgentUpdateCard.vue` — invariant —
 - [BR-UPDATE-026](./BR-UPDATE-026-verifier-maintenant.md) — « Vérifier maintenant » force une vérification, hors de la règle des 24 h — `update/service.rs::UpdateService::check_now` — invariant —
 
 ### UPDATE (agent, HRT-17)
+
+Côté interface du client (HRT-17, lot interface) :
+
+- [BR-UPDATE-020](./BR-UPDATE-020-versions-incompatibles-quel-cote-mettre-a-jour.md) — Versions incompatibles : le message dit lequel mettre à jour, avec le bouton qui convient (client seulement) — `OfflineBanner.vue`, `AgentUpdateCard.vue` — invariant —
+- [BR-UPDATE-021](./BR-UPDATE-021-versions-incompatibles-lecture-seule.md) — Versions incompatibles et compte Lecture seule : demander à un administrateur — `OfflineBanner.vue`, `AgentUpdateCard.vue` — invariant —
+- [BR-UPDATE-022](./BR-UPDATE-022-version-de-l-agent-et-version-disponible.md) — Version de l'agent et version disponible (jamais de rétrogradation) — `agent_update/domain.rs::is_newer`, `agent_update/service.rs::view` — invariant —
+- [BR-UPDATE-023](./BR-UPDATE-023-mention-mise-a-jour-disponible-dans-la-liste.md) — « Mise à jour disponible » seulement sur le serveur concerné, dans la liste — `ServerRow.vue`, `stores/agentUpdates.ts::withUpdate` — invariant —
+
+Côté agent :
 
 - [BR-UPDATE-011](./BR-UPDATE-011-seul-admin-met-a-jour-agent.md) — Seul un administrateur déclenche la mise à jour de l'agent — `entrypoint/http/mod.rs::ENDPOINTS` — invariant ✓
 - [BR-UPDATE-012](./BR-UPDATE-012-une-seule-mise-a-jour-a-la-fois.md) — Une seule mise à jour de l'agent à la fois — `domain/update/target.rs::plan_update` — invariant ✓
@@ -138,7 +147,7 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-UPDATE-028](./BR-UPDATE-028-travail-de-mise-a-jour-laisse-en-cours.md) — Un travail de mise à jour laissé en cours est conclu au démarrage — `domain/update/orphan.rs::classify_orphan` — invariant ✓
 - [BR-UPDATE-029](./BR-UPDATE-029-retour-arriere-ne-laisse-pas-une-base-migree.md) — Un retour arrière ne laisse jamais un ancien binaire devant une base déjà migrée — `domain/update/space.rs::check_space`, `application/update_supervisor.rs::Supervisor::{run, roll_back}` — invariant ✓
 
-Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent côté client (versions incompatibles, version de l'agent, mention « Mise à jour disponible » : HRT-18) : fiches à venir. Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée).
+Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent côté client (HRT-17, lot interface). Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée).
 
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
@@ -149,7 +158,7 @@ Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent 
 | **RESIL** | Résilience du lien : reconnexion, opérations idempotentes, instantanés, affichage état | 20 | us-lien-resilient |
 | **ACCT** | Gestion comptes : création, suppression, rôles, mots de passe, dernier administrateur | 16 | us-gerer-comptes |
 | **AUDIT** | Journal d'activité : logging, filtrage, recherche FTS5, purge, export CSV | 21 | us-journal-activite |
-| **UPDATE** | Mises à jour agent et client : flux de versions, signatures minisign, superviseur, rollback | 29 (25 livrées : côté client 001 à 010, 025, 026 ; côté agent 011 à 019, 024, 027 à 029) | us-mises-a-jour |
+| **UPDATE** | Mises à jour agent et client : flux de versions, signatures minisign, superviseur, rollback | 29 (29 livrées : côté client 001 à 010, 020 à 023, 025, 026 ; côté agent 011 à 019, 024, 027 à 029) | us-mises-a-jour |
 
 ## Comment documenter une règle
 

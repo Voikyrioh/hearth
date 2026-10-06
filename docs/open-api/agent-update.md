@@ -81,4 +81,30 @@ Toutes ces erreurs sont consignées au journal d'activité (action `agent.update
 { "type": "update", "version": "0.2.0", "step": "download", "percent": 35, "outcome": null, "reason": null }
 ```
 
-Un client qui ne connaît pas ce type de trame l'ignore. Pendant `restart`, la connexion se coupe ; à son retour, `GET /agent/update` et `GET /agent/update/last` disent où elle en est et comment elle s'est terminée. Détails du flux : [stream.md](./stream.md).
+Un client qui ne connaît pas ce type de trame l'ignore. Le client actuel la lit comme `ServerMessage::Update` (même forme à plat que ci-dessus : ADR-0021) ; l'agent l'envoie encore sous le nom `UpdateMessage`, identique sur le fil. Pendant `restart`, la connexion se coupe ; à son retour, `GET /agent/update` et `GET /agent/update/last` disent où elle en est et comment elle s'est terminée. Détails du flux : [stream.md](./stream.md).
+
+## Consommation par le client (HRT-17, lot interface, ADR-0021)
+
+Ce que le client fait de ce contrat, pour qui écrit un autre client ou diagnostique :
+
+- **La cible vient du client, jamais de l'interface** : le client lit `agent.json` dans la dernière release publiée de `Voikyrioh/hearth` (`https://github.com/Voikyrioh/hearth/releases/latest/download/agent.json`), dans la même tentative que son propre flux de versions (au plus une tentative automatique par 24 h, ADR-0017), et ne transmet à `POST /agent/update` que ce qu'il y a lu après l'avoir validé (version `X.Y.Z` plus récente que `current`, adresse HTTPS publique des releases du dépôt, signature, somme). Format du fichier :
+
+```json
+{
+  "version": "0.2.0",
+  "pub_date": "2026-10-06T10:00:00Z",
+  "platforms": {
+    "linux-x86_64": {
+      "url": "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64",
+      "signature": "untrusted comment: …\nRUQ…\ntrusted comment: …\n…",
+      "sha256": "ab12…(64 caractères hexadécimaux)"
+    }
+  }
+}
+```
+
+  Fabriqué par `cargo xtask agent-manifest` (qui vérifie la signature contre la clé embarquée dans l'agent). Absent (404) ou sans entrée `linux-x86_64` : rien n'est proposé.
+- **Lectures** : `GET /agent/update` puis `GET /agent/update/last` à chaque connexion du lien (BR-UPDATE-017) ; `last.version_unknown` se lit « version inconnue » (aucun numéro affiché). Sujet `update` abonné à chaque connexion : l'état courant arrive d'abord.
+- **Action** : `POST /agent/update` par l'action typée du client (clé d'opération `Idempotency-Key`, résultat inconnu à la coupure, jamais rejouée). Refus lus par leur code : `FORBIDDEN_ROLE` (échec « rôle »), `MANAGED_INSTALL`, `OPERATION_IN_PROGRESS`, `BAD_SIGNATURE`, `VALIDATION_ERROR` ; le texte du message de l'agent n'est jamais affiché.
+- **Coupure attendue** : après l'étape `restart`, la fermeture du flux (code 1001) est une coupure attendue pendant 2 minutes (BR-UPDATE-014).
+- **Versions incompatibles** : toute route sauf `/hello` répond `426` hors plage (BR-CONN-014) ; le client ne peut donc pas mettre à jour un agent trop ancien (ADR-0021).

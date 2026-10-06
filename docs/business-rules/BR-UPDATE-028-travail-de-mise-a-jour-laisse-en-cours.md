@@ -24,6 +24,10 @@ Dès sa demande, la mise à jour laisse une trace (`update/state.json` : version
 - `tests/update_supervisor.rs` : `a_recovery_keeps_a_new_agent_that_answers_and_never_stops_the_service`, `a_recovery_puts_back_the_exact_old_binary_and_database_when_the_new_agent_does_not_hold`.
 - `deploy/e2e/scenario-update.sh` (superviseur tué après l'échange, agent redémarré).
 
+## Interface (HRT-17, lot interface)
+- Raison `interrupted` : « La mise à jour de l'agent a été interrompue. Vérifie la version de l'agent. » ; version visée inconnue (`version_unknown`) : le texte n'a aucun numéro. Une raison inconnue d'un agent plus récent est lue `unknown` : « La mise à jour de l'agent n'a pas abouti. L'agent n'a pas changé. »
+- Code : `apps/desktop/src/agentUpdate/messages.ts::resultMessage`, `apps/desktop/src-tauri/src/agent_update/dto.rs::UpdateResultDto`. Tests : `messages.test.ts`, `apps/desktop/src/components/organisms/agentUpdate.test.ts`, `apps/desktop/e2e/agent-update.spec.ts` (« says nothing of the version… »).
+
 ## Cas limites
 - Si le nouveau binaire ne démarre pas du tout (superviseur tué, puis serveur redémarré), personne ne tourne pour conclure : reprise à la main (runbook ; étude d'une unité de reprise dans l'ADR-0014, 2026-10-06).
 - **Une version illisible dans le travail** (visée ou d'avant), avec la sauvegarde présente : jamais de reprise ni de retour arrière (une reprise attendrait une version qui ne répondra pas, puis remettrait une copie périmée de la base) : conclu `failed` / `rollback_failed`, version inconnue, **copies gardées**, entrée au journal ; reprise à la main (runbook). Sans sauvegarde et version visée illisible : `failed` / `interrupted`.
@@ -40,3 +44,4 @@ Voir la tâche T27 (une ligne = un test `row_NN_*` de `domain::update::orphan::t
 ## Historique
 - 2026-10-05 : création (HRT-17, suite de la revue de code).
 - 2026-10-06 : la patience de la surveillance passe par `classify_orphan` ; cas d'une troisième version (FIX-01M47N6Z485TWN2H770KQ5H80R).
+- 2026-10-06 : section Interface (HRT-17, lot interface, session 2026-10-04-hearth-creation, T28).

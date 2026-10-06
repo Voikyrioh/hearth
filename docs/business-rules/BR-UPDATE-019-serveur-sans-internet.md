@@ -5,7 +5,7 @@ titre: Serveur sans accès à Internet : l'agent actuel continue de fonctionner
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-mises-a-jour.md (BR-UPDATE-019), HRT-17
-maj: 2026-10-05
+maj: 2026-10-06
 ---
 
 # BR-UPDATE-019 : Serveur sans accès à Internet : l'agent actuel continue de fonctionner
@@ -21,6 +21,10 @@ Si le serveur ne peut pas joindre l'adresse du binaire (résolution, connexion, 
 - `tests/update_use_cases.rs::an_unreachable_server_or_a_failed_download_ends_with_a_reason_and_the_agent_is_unchanged`.
 - `infrastructure::update::download::tests::an_unreachable_address_is_reported_as_such`, `tests/update_download.rs`.
 
+## Interface (HRT-17, lot interface)
+- Raison `unreachable` : « Le serveur n'a pas accès à Internet pour télécharger la mise à jour de l'agent. » (texte de la spécification) ; l'agent actuel continue, la mise à jour reste proposée.
+- Code : `apps/desktop/src/agentUpdate/messages.ts::resultMessage`. Tests : `messages.test.ts`, `apps/desktop/src/components/organisms/agentUpdate.test.ts`, `apps/desktop/e2e/agent-update.spec.ts`.
+
 ## Cas limites
 - Un certificat que le système ne reconnaît pas est une erreur de connexion : même raison `unreachable`.
 
@@ -29,3 +33,4 @@ Si le serveur ne peut pas joindre l'adresse du binaire (résolution, connexion, 
 
 ## Historique
 - 2026-10-05 : création (HRT-17, lot agent, session 2026-10-04-hearth-creation).
+- 2026-10-06 : section Interface (HRT-17, lot interface, session 2026-10-04-hearth-creation, T28).
