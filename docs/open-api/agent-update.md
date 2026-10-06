@@ -1,6 +1,6 @@
 # Mise à jour de l'agent : `/agent/update`, `/agent/update/last`
 
-Mettre l'agent à jour à distance, avec retour arrière automatique (HRT-17). Types : `hearth-proto::api::update`. Code : `crates/hearth-agent/src/entrypoint/http/update.rs`, cas d'usage `application/update.rs`, superviseur `application/update_supervisor.rs`. Règles : `BR-UPDATE-011` à `BR-UPDATE-019` et `BR-UPDATE-024` (`docs/business-rules/`). Décisions : ADR-0008, ADR-0014. Procédure d'exploitation : `docs/runbooks/mettre-a-jour-agent.md`.
+Mettre l'agent à jour à distance, avec retour arrière automatique (HRT-17). Types : `hearth-proto::api::update`. Code : `crates/hearth-agent/src/entrypoint/http/update.rs`, cas d'usage `application/update.rs`, superviseur `application/update_supervisor.rs`. Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024` et `BR-UPDATE-027` à `BR-UPDATE-029` (`docs/business-rules/`). Décisions : ADR-0008, ADR-0014. Procédure d'exploitation : `docs/runbooks/mettre-a-jour-agent.md`.
 
 La mise à jour s'exécute **côté serveur** : `POST` répond `202` tout de suite, le client suit l'avancement par le flux (sujet `update`) ou par `GET /agent/update`, et lit le résultat par `GET /agent/update/last` quand il revient après une coupure ou un redémarrage de l'agent.
 
@@ -21,7 +21,7 @@ La mise à jour s'exécute **côté serveur** : `POST` répond `202` tout de sui
 
 - `current` : la version de l'agent qui répond. `managed` : `true` si l'installation est gérée par le système (`--managed`) **ou** si l'agent ne tourne pas sous systemd : pas de mise à jour à distance.
 - `in_progress` : une mise à jour travaille (dans ce processus, ou un superviseur tient le verrou après un redémarrage). `progress` : où elle en est (`null` sinon). Après le redémarrage de l'agent, `progress.step` vaut `check`.
-- `last` : le dernier résultat (`null` si aucune mise à jour n'a jamais eu lieu).
+- `last` : le dernier résultat (`null` si aucune mise à jour n'a jamais eu lieu). Quand la version visée **ne se sait pas** (une trace de travail illisible a été conclue au démarrage), `version` est la chaîne vide et la clé `version_unknown: true` est présente : `last: { "version": "", "version_unknown": true, "previous": "0.1.0", "outcome": "failed", "reason": "interrupted", "at": "…" }`. **Ajout compatible** : pour un résultat ordinaire (version connue), la clé `version_unknown` est **absente** et la forme est celle d'avant ; un client qui l'ignore voit une version vide. Sur le flux, le message `done` d'une version inconnue porte aussi `version: ""` : relire `GET /agent/update/last`.
 
 ## `GET /api/v1/agent/update/last`
 
@@ -42,7 +42,7 @@ La mise à jour s'exécute **côté serveur** : `POST` répond `202` tout de sui
 ```
 
   - `version` : `X.Y.Z`, **strictement plus récente** que `current`.
-  - `url` : HTTPS seulement, sans identifiant dans l'adresse, 2048 caractères au plus. **Adresse publique** : bouclage, privées, lien-local et partagées refusées (`422 VALIDATION_ERROR`, `details.field = "url"`, « adresse locale ou privée refusée »), aussi après résolution du nom et à chaque redirection (BR-UPDATE-027). Les redirections sont suivies une à une et doivent rester en HTTPS.
+  - `url` : HTTPS seulement, sans identifiant dans l'adresse, 2048 caractères au plus. **Adresse publique** : bouclage, privées, lien-local et partagées refusées (`422 VALIDATION_ERROR`, `details.field = "url"`, « adresse locale ou privée refusée »), aussi après résolution du nom et à chaque redirection (BR-UPDATE-027). Les redirections sont suivies une à une et doivent rester en HTTPS. Le serveur télécharge **directement** : aucun proxy d'environnement (`HTTPS_PROXY`...) n'est utilisé, sinon le filtre des adresses serait contourné ; un serveur qui ne sort que par un proxy ne peut pas se mettre à jour à distance (`unreachable`).
   - `signature` : le contenu du fichier `.minisig` de minisign, ou son encodage base64 (le format de Tauri). Elle doit être faite par la clé publique **embarquée** dans l'agent.
   - `sha256` : somme du binaire, hexadécimale.
 - `202` : `{ "version": "0.2.0", "step": "download" }`. L'avancement suit sur le flux.
@@ -71,7 +71,7 @@ Toutes ces erreurs sont consignées au journal d'activité (action `agent.update
 |---|---|---|
 | `succeeded` | le nouvel agent répond avec la nouvelle version et le même certificat | |
 | `rolled_back` | le nouvel agent n'a pas répondu en 60 s (ou a changé de certificat) : l'ancien binaire est revenu, identique octet pour octet | `no_answer`, `identity_changed` |
-| `failed` | rien n'a changé sur le serveur | `unreachable` (pas d'accès à Internet, BR-UPDATE-019), `download_failed`, `bad_checksum`, `bad_signature`, `bad_binary`, `staging`, `swap`, `supervisor_launch`, `interrupted` (l'agent s'est arrêté pendant la mise à jour avant l'échange des binaires : conclue au démarrage suivant, BR-UPDATE-028), `rollback_failed` (le retour arrière lui-même a échoué : voir le runbook) |
+| `failed` | rien n'a changé sur le serveur | `unreachable` (pas d'accès à Internet, BR-UPDATE-019), `download_failed`, `bad_checksum`, `bad_signature`, `bad_binary`, `staging`, `swap` (aussi : pas assez de place pour copier la base, ou place impossible à mesurer, BR-UPDATE-029), `supervisor_launch`, `interrupted` (l'agent s'est arrêté pendant la mise à jour avant l'échange des binaires, ou une version tierce a été posée à la main par-dessus une mise à jour laissée en cours : conclue au démarrage suivant, BR-UPDATE-028), `rollback_failed` (le retour arrière lui-même a échoué : voir le runbook) |
 
 ## Flux temps réel : sujet `update`
 

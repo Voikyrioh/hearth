@@ -134,9 +134,9 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-UPDATE-019](./BR-UPDATE-019-serveur-sans-internet.md) — Serveur sans accès à Internet : l'agent actuel continue de fonctionner — `infrastructure/update/download.rs::{HttpsDownloader::fetch, map_error}` — invariant ✗
 - [BR-UPDATE-024](./BR-UPDATE-024-refus-de-mise-a-jour-consignes-au-journal.md) — Les refus de mise à jour sont consignés au journal d'activité — `entrypoint/http/auth.rs::{guard, failure_of}` — invariant ✗
 
-- [BR-UPDATE-027](./BR-UPDATE-027-adresse-de-telechargement-publique-et-https.md) — Le serveur ne télécharge qu'en HTTPS, depuis une adresse publique — `domain/update/target.rs::{is_local_address, plan_update}` — invariant ✓
+- [BR-UPDATE-027](./BR-UPDATE-027-adresse-de-telechargement-publique-et-https.md) — Le serveur ne télécharge qu'en HTTPS, depuis une adresse publique — `domain/update/target.rs::{host_is_local, is_local_address, plan_update}` — invariant ✓
 - [BR-UPDATE-028](./BR-UPDATE-028-travail-de-mise-a-jour-laisse-en-cours.md) — Un travail de mise à jour laissé en cours est conclu au démarrage — `domain/update/orphan.rs::classify_orphan` — invariant ✓
-- [BR-UPDATE-029](./BR-UPDATE-029-retour-arriere-ne-laisse-pas-une-base-migree.md) — Un retour arrière ne laisse jamais un ancien binaire devant une base déjà migrée — `application/update_supervisor.rs::Supervisor::{run, roll_back}` — invariant ✓
+- [BR-UPDATE-029](./BR-UPDATE-029-retour-arriere-ne-laisse-pas-une-base-migree.md) — Un retour arrière ne laisse jamais un ancien binaire devant une base déjà migrée — `domain/update/space.rs::check_space`, `application/update_supervisor.rs::Supervisor::{run, roll_back}` — invariant ✓
 
 Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent côté client (versions incompatibles, version de l'agent, mention « Mise à jour disponible » : HRT-18) : fiches à venir. Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée).
 

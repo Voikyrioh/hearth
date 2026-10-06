@@ -1,10 +1,12 @@
 # Mettre l'agent à jour à distance
 
-Procédure d'exploitation de la mise à jour de l'agent (HRT-17). Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024`. Décisions : ADR-0008, ADR-0014. Contrat : `docs/open-api/agent-update.md`.
+Procédure d'exploitation de la mise à jour de l'agent (HRT-17). Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024`, `BR-UPDATE-027` à `BR-UPDATE-029`. Décisions : ADR-0008, ADR-0014. Contrat : `docs/open-api/agent-update.md`.
 
 ## En bref
 
 Un administrateur demande la mise à jour depuis le client (écran livré avec HRT-17 côté client). L'agent télécharge le binaire en HTTPS, vérifie la somme SHA-256 et la signature minisign **avant d'écrire quoi que ce soit**, lance un superviseur détaché, qui arrête le service, échange les binaires, redémarre et attend 60 secondes que le nouvel agent réponde avec la nouvelle version et le même certificat. Sinon, l'ancien binaire revient, **identique octet pour octet**. Comptes, sessions, journal et empreinte ne sont pas touchés.
+
+**Pas de proxy** : le serveur télécharge directement, il n'utilise jamais `HTTPS_PROXY` ni `ALL_PROXY` (BR-UPDATE-027 : un proxy résoudrait le nom lui-même et contournerait le filtre des adresses). Un serveur qui ne sort que par un proxy sortant ne peut pas se mettre à jour à distance (`unreachable`) : c'est assumé, mets-le à jour par `install.sh --binary`.
 
 Pas de mise à jour à distance si l'installation est gérée par le système (`--managed`, NixOS) ou sans systemd : mettre à jour par la configuration du système, ou par `install.sh --binary` (BR-INSTALL-007).
 
@@ -41,7 +43,8 @@ Changer la clé = réinstaller à la main les agents existants (ils n'acceptent 
 | `rolled_back` / `identity_changed` | le nouvel agent présentait un autre certificat | ne pas forcer : l'empreinte ne doit jamais changer (BR-INSTALL-004) ; vérifier le dossier de données de la nouvelle version. |
 | `failed` / `unreachable` | le serveur n'a pas joint l'adresse (pas d'Internet, DNS, certificat inconnu) | tester `curl -v <url>` depuis le serveur ; l'agent continue de tourner. |
 | `failed` / `download_failed`, `bad_checksum`, `bad_signature`, `bad_binary` | fichier absent, coupé, altéré, d'une autre clé, ou qui n'annonce pas la version visée | vérifier la publication ; rien n'a été écrit. |
-| `failed` / `staging`, `swap`, `supervisor_launch` | disque plein, droits, `systemd-run` absent | `df -h /var/lib/hearth`, `systemctl status`, `journalctl` ; l'agent n'a pas changé. |
+| `failed` / `staging`, `swap`, `supervisor_launch` | disque plein, droits, `systemd-run` absent ; pour `swap` aussi : pas assez de place pour copier la base (deux fois sa taille, plus 1 Mio) **ou espace libre impossible à mesurer** (`df` absent ou illisible : refus, jamais « assez de place ») | `df -h /var/lib/hearth`, `systemctl status`, `journalctl -u hearth-agent-update` ; l'agent n'a pas changé. |
+| `failed` / `interrupted` | la mise à jour a été laissée en cours puis conclue au démarrage, **ou** une version tierce a été posée à la main par-dessus (voir « Reprise vers une troisième version ») | relire `GET /agent/update/last`. Si la version visée est vide (`version_unknown`), une trace de travail était illisible : voir « Reprise à la main ». |
 | `failed` / `rollback_failed` | le retour arrière lui-même a échoué | voir ci-dessous. |
 
 ## Mise à jour interrompue (redémarrage du serveur, agent ou superviseur tué)
@@ -63,6 +66,23 @@ Après la reprise à la main, **redémarre l'agent** (`systemctl restart hearth-
 
 Si la base a été migrée par la nouvelle version, remettre aussi sa copie d'avant l'échange (`/var/lib/hearth/update/hearth.db.before`, et `hearth.db-wal.before` s'il existe), service arrêté : `cp -p /var/lib/hearth/update/hearth.db.before /var/lib/hearth/hearth.db` et supprimer `hearth.db-wal` et `hearth.db-shm`. Sans cette copie (retour arrière déjà fait par le superviseur : elle est retirée), l'ancien binaire refuse de démarrer sur une base migrée (« migration inconnue » dans `journalctl -u hearth-agent`) : remettre la **nouvelle** version (`install.sh --binary`). Une mise à jour interrompue par un redémarrage du serveur : relire `/api/v1/agent/update` ; si `in_progress` reste vrai plus de quelques minutes, `systemctl status hearth-agent-update` puis `systemctl stop hearth-agent-update`.
 
+## Reprise vers une troisième version (ni l'ancienne ni la nouvelle)
+
+Cas : la mise à jour de 0.1.0 vers 0.2.0 est restée en cours (nouvel agent muet, superviseur tué, `rollback_failed`) et tu poses à la main une version 0.3.0, qui n'est ni l'une ni l'autre (`install.sh --binary`, ou une copie du binaire).
+
+Ce que l'agent fait au démarrage suivant (BR-UPDATE-028) : il voit qu'une version qui n'est ni la visée ni celle d'avant tourne. Il **ne lance aucune reprise** et ne remet **ni l'ancien binaire ni la copie de la base** : la mise à jour est conclue `failed` / `interrupted` (entrée au journal d'activité, au nom de qui l'avait demandée), et il **retire** la sauvegarde de l'ancien binaire (`.hearth-agent.previous`), la copie de la base (`update/hearth.db.before`, `update/hearth.db-wal.before` s'il existe) et les traces (`update/job.json`, `update/state.json`). La base vivante n'est jamais touchée : comptes, sessions et journal écrits depuis l'échange sont gardés.
+
+Conséquence : une fois ce démarrage passé, il n'y a plus de chemin de retour automatique vers 0.1.0 ni de copie de la base d'avant l'échange.
+
+Marche à suivre :
+
+1. **Avant de poser la 0.3.0**, si tu veux garder un retour possible : service arrêté, copie `hearth.db*` du dossier de données et, si tu veux l'état d'avant l'échange, `update/hearth.db.before` et `.hearth-agent.previous`, ailleurs que dans `update/` (ils seront supprimés).
+2. Pose la 0.3.0 (`install.sh --binary`) et laisse l'agent démarrer.
+3. Vérifie : `curl -sk https://127.0.0.1:7341/api/v1/hello` (version 0.3.0), `GET /api/v1/agent/update/last` (`failed` / `interrupted`), et que `update/` ne contient plus ni `job.json`, ni `state.json`, ni `hearth.db.before`.
+4. Si la 0.3.0 refuse de démarrer sur la base (« migration inconnue » dans `journalctl -u hearth-agent`) : remets la copie que tu as gardée à l'étape 1, service arrêté, supprime `hearth.db-wal` et `hearth.db-shm`, puis redémarre.
+
+Tu peux aussi supprimer toi-même les traces avant de poser la version tierce (les cinq fichiers ci-dessus) : l'agent n'aura alors rien à conclure.
+
 ## Dépannage du lancement
 
 - `supervisor_launch` immédiat : `systemd-run` absent du `PATH` du service, ou **dossier de données monté `noexec`** (le superviseur et le binaire déposé s'exécutent depuis `/var/lib/hearth/update/`) ; `journalctl -u hearth-agent` donne la cause. Remonter le dossier sans `noexec`, ou mettre à jour par `install.sh --binary`.
@@ -74,6 +94,7 @@ Si la base a été migrée par la nouvelle version, remettre aussi sa copie d'av
 - L'unité systemd n'est pas réécrite par une mise à jour : si une nouvelle version change le durcissement, lancer ensuite `sudo hearth-agent install` (réparation, données conservées).
 - La mise à jour **vers une version plus ancienne** est refusée (`VALIDATION_ERROR`, champ `version`).
 - Un serveur de versions qui ne parle que TLS 1.2 est refusé (ADR-0014).
+- **Double panne** : si le superviseur est tué après l'échange **et** que le nouveau binaire ne démarre pas du tout, personne ne tourne pour conclure et le service reste à terre : reprise à la main ci-dessus (copier `.hearth-agent.previous`, puis la copie de la base si la base a été migrée). Une reprise automatique est à l'étude (ADR-0014, section du 2026-10-06).
 - À vérifier sur la vraie machine (NixOS avec carte NVIDIA) : voir `contexts/hearth/sessions/2026-10-04-hearth-creation/tasks/T20-hrt-17-maj-agent.md`. En installation gérée, la mise à jour passe par la configuration NixOS, pas par cette procédure.
 
 ## Vérifier de bout en bout (développement)
