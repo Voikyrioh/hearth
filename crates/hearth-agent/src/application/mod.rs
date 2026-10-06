@@ -9,5 +9,6 @@ pub mod metrics;
 pub mod operations;
 pub mod ports;
 pub mod sessions;
+pub mod trust;
 pub mod update;
 pub mod update_supervisor;
