@@ -39,22 +39,29 @@ export function useAccountActions(serverId: () => string) {
     toasts.push({ kind: "success", message });
   }
 
+  /**
+   * Relit la liste d'un serveur SEULEMENT si elle l'est déjà : un compte Lecture seule qui change son
+   * mot de passe ne demande jamais `GET /accounts` (l'agent le consignerait comme un accès refusé).
+   */
+  function reloadIfRead() {
+    if (accounts.of(serverId())) void accounts.load(serverId());
+  }
+
   async function perform(
     call: () => Promise<AccountOutcome>,
     onDone: (outcome: Extract<AccountOutcome, { kind: "done" }>) => void,
+    rereads = true,
   ): Promise<AccountReport> {
     const result = await action.run(call, { unknownMessage: "accounts.unknownResult" });
     if (!result) return { kind: "failed" };
     if (result.kind === "done") {
       onDone(result);
-      void accounts.load(serverId());
+      if (rereads) reloadIfRead();
       return { kind: "done", sessionsClosed: result.sessionsClosed };
     }
     if (result.kind === "refused") {
       // La liste affichée est périmée (compte disparu, rôle changé ailleurs) : on la relit.
-      if (["not_found", "last_admin", "forbidden"].includes(result.refusal.kind)) {
-        void accounts.load(serverId());
-      }
+      if (["not_found", "last_admin", "forbidden"].includes(result.refusal.kind)) reloadIfRead();
       return { kind: "refused", refusal: result.refusal };
     }
     return { kind: "unknown" };
@@ -82,7 +89,7 @@ export function useAccountActions(serverId: () => string) {
 
     setPassword(account: Account, password: string) {
       return perform(
-        () => bridge().setAccountPassword(serverId(), account.id, account.username, password),
+        () => bridge().setAccountPassword(serverId(), account.id, password),
         () => success(t("accounts.passwordChanged")),
       );
     },
@@ -91,6 +98,8 @@ export function useAccountActions(serverId: () => string) {
       return perform(
         () => bridge().changeOwnPassword(serverId(), current, password),
         () => success(t("accounts.passwordChanged")),
+        // Changer son mot de passe ne change pas la liste.
+        false,
       );
     },
 

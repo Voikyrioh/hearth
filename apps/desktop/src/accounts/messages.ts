@@ -68,6 +68,8 @@ export function refusalMessage(refusal: AccountRefusal, self = false): string {
       return t("accounts.busy");
     case "session_ended":
       return t("accounts.sessionEnded");
+    case "session_revoked":
+      return t("accounts.sessionRevoked");
     case "other":
       return t("failure.generic");
   }

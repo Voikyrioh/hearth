@@ -124,8 +124,10 @@ pub enum AccountRefusal {
     Conflict,
     /// L'agent est saturé : réessayer dans un instant.
     Busy,
-    /// La session a pris fin pendant l'action : l'état du lien le dit.
+    /// La session a expiré pendant l'action : l'état du lien le dit.
     SessionEnded,
+    /// La session a été fermée (changement de mot de passe, suppression, révocation).
+    SessionRevoked,
     Other,
 }
 
@@ -154,6 +156,13 @@ pub enum AccountOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AccountListDto {
-    Listed { accounts: Vec<AccountDto> },
-    Refused { refusal: AccountRefusal },
+    /// `me` : l'identifiant de l'AGENT du compte de la session courante (jamais une comparaison de
+    /// texte côté interface pour savoir « qui est moi »).
+    Listed {
+        accounts: Vec<AccountDto>,
+        me: String,
+    },
+    Refused {
+        refusal: AccountRefusal,
+    },
 }

@@ -28,7 +28,7 @@ describe("account commands of the real bridge", () => {
     await bridge.checkAccountInput("marie", "Secret-Pass-12");
     await bridge.createAccount("s1", "paul", "Secret-Pass-12", "readonly");
     await bridge.changeAccountRole("s1", "A1", "admin");
-    await bridge.setAccountPassword("s1", "A1", "paul", "Secret-Pass-12");
+    await bridge.setAccountPassword("s1", "A1", "Secret-Pass-12");
     await bridge.changeOwnPassword("s1", "Old-Secret-12", "Secret-Pass-12");
     await bridge.closeAccountSessions("s1", "A1");
     await bridge.deleteAccount("s1", "A1", "marie");
@@ -41,7 +41,7 @@ describe("account commands of the real bridge", () => {
       { cmd: "change_account_role", args: { serverId: "s1", accountId: "A1", role: "admin" } },
       {
         cmd: "set_account_password",
-        args: { serverId: "s1", accountId: "A1", username: "paul", password: "Secret-Pass-12" },
+        args: { serverId: "s1", accountId: "A1", password: "Secret-Pass-12" },
       },
       {
         cmd: "change_own_password",

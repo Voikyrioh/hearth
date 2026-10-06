@@ -21,8 +21,13 @@ import type {
  */
 export function simulatedCheckInput(username: string, password: string): AccountInputCheck {
   const problem = usernameProblem(username);
-  const normalized = problem === null ? username.toLowerCase() : "";
+  const normalized = problem === null ? asciiLower(username) : "";
   return { username: problem, password: unmetRules(password, normalized) };
+}
+
+/** Minuscules ASCII seulement, comme `eq_ignore_ascii_case` de l'agent (pas `toLowerCase`, qui replie aussi le signe kelvin). */
+function asciiLower(text: string): string {
+  return text.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
 function usernameProblem(raw: string): UsernameProblem | null {
@@ -39,9 +44,9 @@ function unmetRules(password: string, username: string): PasswordRule[] {
   const unmet: PasswordRule[] = [];
   if ([...password].length < 12) unmet.push("min_length");
   if (!/[0-9]/.test(password)) unmet.push("digit");
-  if (!/\p{Ll}/u.test(password)) unmet.push("lowercase");
-  if (!/\p{Lu}/u.test(password)) unmet.push("uppercase");
-  if (username !== "" && password.toLowerCase().includes(username)) unmet.push("contains_username");
+  if (!/\p{Lowercase}/u.test(password)) unmet.push("lowercase");
+  if (!/\p{Uppercase}/u.test(password)) unmet.push("uppercase");
+  if (username !== "" && asciiLower(password).includes(username)) unmet.push("contains_username");
   return unmet;
 }
 
@@ -89,7 +94,7 @@ export class SimulatedAccounts {
       book = [
         {
           id: this.newId(),
-          username: server.username,
+          username: server.username.toLowerCase(),
           role: server.role,
           createdAt: at(30 * day),
           lastLoginAt: at(0),
@@ -136,8 +141,15 @@ export class SimulatedAccounts {
     };
   }
 
+  /** Le compte de la session : l'agent simulé normalise l'identifiant saisi, comme le vrai. */
   private me(server: ServerInfo): SimAccount | undefined {
-    return this.book(server).find((account) => account.username === server.username);
+    const typed = server.username.toLowerCase();
+    return this.book(server).find((account) => account.username === typed);
+  }
+
+  /** L'identifiant de l'agent du compte de la session (`GET /me`). */
+  meId(server: ServerInfo): string {
+    return this.me(server)?.id ?? "";
   }
 
   /** L'agent refuse tout compte Lecture seule, même client contourné (BR-ACCT-014). */
@@ -187,20 +199,15 @@ export class SimulatedAccounts {
     return done(null, 0);
   }
 
-  setPassword(
-    server: ServerInfo,
-    accountId: string,
-    username: string,
-    password: string,
-  ): SimAccountResult {
+  setPassword(server: ServerInfo, accountId: string, password: string): SimAccountResult {
     if (this.forbidden(server)) return refuse({ kind: "forbidden" });
     const account = this.book(server).find((a) => a.id === accountId);
     if (!account) return refuse({ kind: "not_found" });
-    const rules = simulatedCheckInput(username, password).password;
+    const rules = simulatedCheckInput(account.username, password).password;
     if (rules.length > 0) return refuse({ kind: "weak_password", rules });
     const closed = account.sessions;
     account.sessions = 0;
-    return done(null, closed, account.username === server.username);
+    return done(null, closed, account.id === this.me(server)?.id);
   }
 
   /** Le titulaire change son mot de passe : l'ancien est vérifié par `currentIsRight`. */
@@ -208,7 +215,7 @@ export class SimulatedAccounts {
     const me = this.me(server);
     if (!me) return refuse({ kind: "not_found" });
     if (!currentIsRight) return refuse({ kind: "wrong_password" });
-    const rules = simulatedCheckInput(server.username, password).password;
+    const rules = simulatedCheckInput(me.username, password).password;
     if (rules.length > 0) return refuse({ kind: "weak_password", rules });
     const closed = Math.max(0, me.sessions - 1);
     me.sessions = Math.min(me.sessions, 1);
@@ -221,7 +228,7 @@ export class SimulatedAccounts {
     if (!account) return refuse({ kind: "not_found" });
     const closed = account.sessions;
     account.sessions = 0;
-    return done(null, closed, account.username === server.username);
+    return done(null, closed, account.id === this.me(server)?.id);
   }
 
   delete(server: ServerInfo, accountId: string, confirmation: string | null): SimAccountResult {
@@ -229,7 +236,7 @@ export class SimulatedAccounts {
     const book = this.book(server);
     const account = book.find((a) => a.id === accountId);
     if (!account) return refuse({ kind: "not_found" });
-    const self = account.username === server.username;
+    const self = account.id === this.me(server)?.id;
     if (self && (confirmation ?? "").trim().toLowerCase() !== account.username) {
       return refuse({ kind: "confirmation_mismatch" });
     }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { refusalMessage, roleLabel } from "@/accounts/messages";
 import HButton from "@/components/atoms/HButton.vue";
 import HInput from "@/components/atoms/HInput.vue";
@@ -10,6 +10,7 @@ import { useAccountActions } from "@/composables/useAccountActions";
 import { t } from "@/i18n";
 import { getLinkBridge, type ServerInfo } from "@/link";
 import { useAccountsStore } from "@/stores/accounts";
+import { useLinkStore } from "@/stores/link";
 
 // Mon compte sur UN serveur (réglages, tous les rôles) : changer son mot de passe (ferme les autres
 // sessions, garde celle-ci) et, pour un administrateur, supprimer son propre compte (confirmation
@@ -19,12 +20,16 @@ import { useAccountsStore } from "@/stores/accounts";
 const props = defineProps<{ server: ServerInfo }>();
 
 const accounts = useAccountsStore();
+const link = useLinkStore();
+const connected = computed(() => link.stateOf(props.server.id) === "connected");
 const actions = useAccountActions(() => props.server.id);
 
 const changing = ref(false);
 const removing = ref(false);
 const retyped = ref("");
 const error = ref<string | undefined>();
+/** Toute la séquence (relecture de la liste PUIS suppression) : un second envoi n'est pas possible. */
+const working = ref(false);
 
 watch(removing, () => {
   retyped.value = "";
@@ -32,12 +37,21 @@ watch(removing, () => {
 });
 
 async function confirmRemove() {
+  if (working.value) return;
+  working.value = true;
+  try {
+    await remove();
+  } finally {
+    working.value = false;
+  }
+}
+
+async function remove() {
   error.value = undefined;
-  // L'identifiant technique du compte vient de la liste de l'agent (une lecture, sans suivi).
+  // Mon compte = celui que l'AGENT donne pour cette session (jamais une comparaison de texte).
   await accounts.load(props.server.id);
-  const mine = accounts
-    .of(props.server.id)
-    ?.accounts.find((account) => account.username === props.server.username);
+  const entry = accounts.of(props.server.id);
+  const mine = entry?.accounts.find((account) => account.id === entry.me);
   if (!mine) {
     error.value = refusalMessage({ kind: "not_found" });
     return;
@@ -65,7 +79,9 @@ async function confirmRemove() {
       <h3 class="mine__title">{{ server.name }}</h3>
       <HTag :tone="server.role === 'admin' ? 'accent' : 'neutral'">{{ roleLabel(server.role) }}</HTag>
     </header>
-    <p class="mine__as">{{ t("settings.connectedAs", { username: server.username }) }}</p>
+    <p class="mine__as">
+      {{ t(connected ? "settings.connectedAs" : "settings.lastAccount", { username: server.username }) }}
+    </p>
     <div class="mine__actions">
       <HButton variant="secondary" :needs-link="{ server: server.id }" @click="changing = true">
         {{ t("accounts.changeOwnPassword") }}
@@ -84,6 +100,7 @@ async function confirmRemove() {
       :open="changing"
       :server-id="server.id"
       :username="server.username"
+      own
       @close="changing = false"
     />
     <FormDialog
@@ -91,7 +108,7 @@ async function confirmRemove() {
       :title="t('accounts.removeOwnTitle')"
       :submit-label="t('accounts.removeOwn')"
       :can-submit="retyped.trim() !== ''"
-      :busy="actions.busy.value"
+      :busy="working || actions.busy.value"
       :error="error"
       destructive
       @submit="confirmRemove"

@@ -106,11 +106,10 @@ export interface LinkBridge {
     role: Role,
   ): Promise<AccountOutcome>;
   changeAccountRole(serverId: string, accountId: string, role: Role): Promise<AccountOutcome>;
-  /** Un administrateur définit le mot de passe d'un AUTRE compte ; `username` : l'identifiant de ce compte. */
+  /** Un administrateur définit le mot de passe d'un AUTRE compte (la règle « sans l'identifiant » est jugée par l'agent). */
   setAccountPassword(
     serverId: string,
     accountId: string,
-    username: string,
     password: string,
   ): Promise<AccountOutcome>;
   /** Le titulaire change son mot de passe : ferme ses autres sessions, garde la courante. */

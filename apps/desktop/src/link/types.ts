@@ -228,6 +228,7 @@ export type AccountRefusal =
   | { kind: "conflict" }
   | { kind: "busy" }
   | { kind: "session_ended" }
+  | { kind: "session_revoked" }
   | { kind: "other" };
 
 /**
@@ -240,5 +241,6 @@ export type AccountOutcome =
   | { kind: "unknown"; opId: string };
 
 export type AccountList =
-  | { kind: "listed"; accounts: Account[] }
+  /** `me` : l'identifiant de l'AGENT du compte de la session (jamais une comparaison de texte). */
+  | { kind: "listed"; accounts: Account[]; me: string }
   | { kind: "refused"; refusal: AccountRefusal };

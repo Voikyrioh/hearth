@@ -20,6 +20,7 @@ Le titulaire saisit l'ancien mot de passe puis le nouveau. Les autres sessions d
 
 ## Interface (HRT-13)
 `PasswordDialog.vue` en mode propre (ancien, nouveau, confirmation) depuis la ligne « toi » de la page Comptes et la section « Mon compte » des réglages (`OwnAccountCard.vue`, tous les rôles) → commande `change_own_password` (`PUT /me/password`). Ancien incorrect : « L'ancien mot de passe est incorrect » sous le champ. Test : `accounts_runtime.rs::changing_your_own_password_asks_for_the_old_one_and_keeps_the_current_session`.
+Le mot de passe mémorisé au coffre suit (`apps/desktop/src-tauri/src/accounts/service.rs::change_own_password`, `LinkManager::take_remembered_password` / `::remember_password`) : retiré avant l'envoi ; réussi, remplacé par le nouveau (si « se souvenir ») ; refusé, remis ; résultat inconnu, effacé. Tests : `accounts_runtime.rs::after_changing_your_own_password_the_vault_follows_and_the_silent_reconnection_succeeds`, `::without_remember_nothing_is_written_to_the_vault_and_a_refusal_restores_the_old_entry`, `::an_own_password_change_cut_before_its_answer_leaves_the_vault_entry_erased_not_wrong`.
 
 ## Vérification
 - Tests : `domain::sessions::tests::own_password_change_keeps_the_current_session`, `own_password_change_without_current_session_closes_everything` ; `crates/hearth-agent/tests/accounts_use_cases.rs::changing_your_own_password_keeps_only_the_current_session`, `a_wrong_old_password_changes_nothing`, `a_password_changed_between_verification_and_write_is_not_overwritten`.

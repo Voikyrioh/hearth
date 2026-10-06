@@ -18,6 +18,8 @@ const props = defineProps<{
   open: boolean;
   serverId: string;
   username: string;
+  /** Mode « mon mot de passe » (ancien puis nouveau) ; sinon `account` est le compte visé. */
+  own: boolean;
   account?: Account | null;
 }>();
 const emit = defineEmits<{ close: [] }>();
@@ -30,7 +32,7 @@ const confirmationTouched = ref(false);
 const error = ref<string | undefined>();
 const currentError = ref<string | undefined>();
 
-const own = computed(() => !props.account);
+const own = computed(() => props.own);
 const rules = useAccountRules(toRef(props, "username"), password);
 const actions = useAccountActions(() => props.serverId);
 

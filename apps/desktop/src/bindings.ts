@@ -70,16 +70,22 @@ export const commands = {
 	 *  réseau. L'agent reste l'arbitre à l'envoi.
 	 */
 	checkAccountInput: (username: string, password: string) => __TAURI_INVOKE<AccountInputCheck>("check_account_input", { username, password }),
-	/**  La liste des comptes (administrateurs ; l'agent refuse les autres). */
+	/**
+	 *  La liste des comptes (administrateurs ; l'agent refuse les autres) et l'identifiant de l'agent
+	 *  du compte de la session.
+	 */
 	listAccounts: (serverId: string) => typedError<AccountListDto, LinkFailure>(__TAURI_INVOKE("list_accounts", { serverId })),
 	createAccount: (serverId: string, username: string, password: string, role: RoleDto) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("create_account", { serverId, username, password, role })),
 	changeAccountRole: (serverId: string, accountId: string, role: RoleDto) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_account_role", { serverId, accountId, role })),
 	/**
-	 *  Un administrateur définit le mot de passe d'un autre compte (ferme ses sessions). `username` est
-	 *  l'identifiant de ce compte : la règle « ne contient pas l'identifiant ».
+	 *  Un administrateur définit le mot de passe d'un autre compte (ferme ses sessions). La règle « ne
+	 *  contient pas l'identifiant » est celle de l'agent, qui lit le compte lui-même.
 	 */
-	setAccountPassword: (serverId: string, accountId: string, username: string, password: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("set_account_password", { serverId, accountId, username, password })),
-	/**  Le titulaire change son propre mot de passe (ferme ses AUTRES sessions, garde la courante). */
+	setAccountPassword: (serverId: string, accountId: string, password: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("set_account_password", { serverId, accountId, password })),
+	/**
+	 *  Le titulaire change son propre mot de passe (ferme ses AUTRES sessions, garde la courante) ;
+	 *  le mot de passe mémorisé au coffre suit (voir `service::change_own_password`).
+	 */
 	changeOwnPassword: (serverId: string, current: string, password: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_own_password", { serverId, current, password })),
 	closeAccountSessions: (serverId: string, accountId: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("close_account_sessions", { serverId, accountId })),
 	/**  Supprime un compte. `confirmation` : l'identifiant retapé quand on supprime son propre compte. */
@@ -110,7 +116,12 @@ export type AccountInputCheck = {
 };
 
 /**  Résultat de la lecture de la liste. */
-export type AccountListDto = { kind: "listed"; accounts: AccountDto[] } | { kind: "refused"; refusal: AccountRefusal };
+export type AccountListDto = 
+/**
+ *  `me` : l'identifiant de l'AGENT du compte de la session courante (jamais une comparaison de
+ *  texte côté interface pour savoir « qui est moi »).
+ */
+{ kind: "listed"; accounts: AccountDto[]; me: string } | { kind: "refused"; refusal: AccountRefusal };
 
 /**  Issue d'une action de compte. */
 export type AccountOutcome = 
@@ -147,8 +158,10 @@ export type AccountRefusal =
 { kind: "conflict" } | 
 /**  L'agent est saturé : réessayer dans un instant. */
 { kind: "busy" } | 
-/**  La session a pris fin pendant l'action : l'état du lien le dit. */
-{ kind: "session_ended" } | { kind: "other" };
+/**  La session a expiré pendant l'action : l'état du lien le dit. */
+{ kind: "session_ended" } | 
+/**  La session a été fermée (changement de mot de passe, suppression, révocation). */
+{ kind: "session_revoked" } | { kind: "other" };
 
 /**
  *  Ce que l'assistant envoie à sa dernière étape : le serveur confirmé et les identifiants. Pas de

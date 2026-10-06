@@ -83,6 +83,9 @@ test("création : critères du mot de passe en direct (coche et croix), bouton i
   await expect(page.getByRole("heading", { name: "Créer un compte" })).toBeVisible();
   const create = dialog(page).getByRole("button", { name: "Créer", exact: true });
   await expect(create).toHaveAttribute("aria-disabled", "true");
+  // Rien n'est saisi : aucun critère n'est « Respecté », tout est neutre.
+  await expect(dialog(page).locator('[data-rule][data-met="pending"]')).toHaveCount(5);
+  await expect(dialog(page).getByText("Respecté", { exact: true })).toHaveCount(0);
   // L'identifiant : message sous le champ dès qu'il est invalide.
   await dialog(page).getByLabel("Identifiant").fill("a b");
   await expect(
@@ -191,7 +194,7 @@ test("mot de passe d'un autre compte : fenêtre, critères, succès", async ({ p
     "false",
   );
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
-  await dialog(page).getByLabel("Confirmer le nouveau mot de passe").fill(GOOD);
+  await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Changer le mot de passe" }).click();
   await expect(page.locator(".toast")).toContainText("Mot de passe changé");
   await expect(dialog(page)).toHaveCount(0);
@@ -254,13 +257,13 @@ test("section personnelle des réglages : tous les rôles changent leur mot de p
   await expect(page.getByRole("heading", { name: "Changer mon mot de passe" })).toBeVisible();
   await dialog(page).getByLabel("Ancien mot de passe").fill("Mauvais-Mot-De-Passe-1");
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
-  await dialog(page).getByLabel("Confirmer le nouveau mot de passe").fill(GOOD);
+  await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Changer le mot de passe" }).click();
   await expect(dialog(page).getByText("L'ancien mot de passe est incorrect")).toBeVisible();
   await expect(dialog(page).getByLabel("Ancien mot de passe")).toHaveValue("");
   await dialog(page).getByLabel("Ancien mot de passe").fill("Correct-Horse-9");
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
-  await dialog(page).getByLabel("Confirmer le nouveau mot de passe").fill(GOOD);
+  await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Changer le mot de passe" }).click();
   await expect(page.locator(".toast")).toContainText("Mot de passe changé");
 });

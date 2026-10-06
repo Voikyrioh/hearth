@@ -87,7 +87,7 @@ describe("AccountTable", () => {
     const { useServersStore } = await import("@/stores/servers");
     useServersStore().setCurrent("forge");
     return mount(AccountTable, {
-      props: { accounts: list, me: "marie" },
+      props: { accounts: list, meId: "MARIE" },
       global: { plugins: [pinia] },
       attachTo: document.body,
     });
@@ -302,7 +302,7 @@ describe("PasswordDialog", () => {
   async function open(props: { username: string; account?: Account | null }) {
     const ctx = await dialogContext();
     const wrapper = mount(PasswordDialog, {
-      props: { open: true, serverId: "forge", ...props },
+      props: { open: true, serverId: "forge", own: !props.account, ...props },
       global: { plugins: [ctx.pinia] },
       attachTo: document.body,
     });
@@ -410,5 +410,14 @@ describe("OwnAccountCard (réglages, tous les rôles)", () => {
     );
     expect(bridge.calls.filter((c) => c.startsWith("account delete"))).toHaveLength(2);
     wrapper.unmount();
+  });
+});
+
+describe("PasswordRules : état vide (review PR #19)", () => {
+  it("shows no criterion as « Respecté » while nothing is typed", () => {
+    const wrapper = mount(PasswordRules, { props: { unmet: ["required"], touched: false } });
+    expect(wrapper.text()).not.toContain("Respecté");
+    expect(wrapper.findAll("li").every((li) => li.attributes("data-met") === "pending")).toBe(true);
+    expect(wrapper.text()).toContain("Pas encore saisi");
   });
 });

@@ -12,7 +12,9 @@ import type { Account, Role } from "@/link";
 // (`needs-link`, BR-RESIL-008) : le bouton se désactive et dit pourquoi ; l'agent reste l'arbitre.
 // Sur sa propre ligne : « Changer mon mot de passe » seulement (design). Le dernier administrateur
 // ne peut être ni rétrogradé ni supprimé : les deux boutons sont grisés avec l'explication.
-const props = defineProps<{ accounts: readonly Account[]; me: string }>();
+// `meId` : l'identifiant de l'AGENT du compte de la session (jamais une comparaison de texte avec
+// ce qui a été tapé à la connexion). `busy` : une action est en cours, aucune autre ne part.
+const props = defineProps<{ accounts: readonly Account[]; meId: string; busy?: boolean }>();
 
 const emit = defineEmits<{
   changeRole: [account: Account, role: Role];
@@ -72,7 +74,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
           <th scope="row">
             <div class="table__name">
               {{ account.username }}
-              <HTag v-if="account.username === me" tone="neutral">{{ t("accounts.you") }}</HTag>
+              <HTag v-if="account.id === meId" tone="neutral">{{ t("accounts.you") }}</HTag>
             </div>
           </th>
           <td :data-editing="editing === account.id ? '' : undefined">
@@ -94,8 +96,14 @@ const named = (label: string, account: Account) => `${label} ${account.username}
           <td class="table__num">{{ account.sessionsOpen }}</td>
           <td>
             <div class="table__actions">
-              <template v-if="account.username === me">
-                <HButton size="sm" variant="secondary" needs-link @click="emit('changeOwnPassword')">
+              <template v-if="account.id === meId">
+                <HButton
+                  size="sm"
+                  variant="secondary"
+                  needs-link
+                  :disabled="busy"
+                  @click="emit('changeOwnPassword')"
+                >
                   {{ t("accounts.changeOwnPassword") }}
                 </HButton>
               </template>
@@ -104,8 +112,8 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                   size="sm"
                   variant="secondary"
                   :needs-link="ADMIN"
-                  :disabled="isLastAdmin(account)"
-                  :hint="t('accounts.lastAdmin')"
+                  :disabled="busy || isLastAdmin(account)"
+                  :hint="isLastAdmin(account) ? t('accounts.lastAdmin') : undefined"
                   :aria-label="named(t('accounts.changeRole'), account)"
                   @click="startEditing(account)"
                 >
@@ -115,6 +123,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                   size="sm"
                   variant="secondary"
                   :needs-link="ADMIN"
+                  :disabled="busy"
                   :aria-label="named(t('accounts.password'), account)"
                   @click="emit('changePassword', account)"
                 >
@@ -124,7 +133,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                   size="sm"
                   variant="secondary"
                   :needs-link="ADMIN"
-                  :disabled="account.sessionsOpen === 0"
+                  :disabled="busy || account.sessionsOpen === 0"
                   :aria-label="named(sessionsLabel(account), account)"
                   @click="emit('closeSessions', account)"
                 >
@@ -134,8 +143,8 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                   size="sm"
                   variant="danger"
                   :needs-link="ADMIN"
-                  :disabled="isLastAdmin(account)"
-                  :hint="t('accounts.lastAdmin')"
+                  :disabled="busy || isLastAdmin(account)"
+                  :hint="isLastAdmin(account) ? t('accounts.lastAdmin') : undefined"
                   :aria-label="named(t('accounts.remove'), account)"
                   @click="emit('remove', account)"
                 >

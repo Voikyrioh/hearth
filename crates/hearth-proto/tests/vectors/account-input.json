@@ -12,5 +12,12 @@
   { "username": "marie", "password": "abcdefghij12", "usernameProblem": null, "passwordRules": ["uppercase"] },
   { "username": "marie", "password": "123456", "usernameProblem": null, "passwordRules": ["min_length", "lowercase", "uppercase"] },
   { "username": "marie", "password": "Éééééééééé1", "usernameProblem": null, "passwordRules": ["min_length"] },
-  { "username": "ma", "password": "xxMAxxxxxxxx1A", "usernameProblem": "too_short", "passwordRules": [] }
+  { "username": "ma", "password": "xxMAxxxxxxxx1A", "usernameProblem": "too_short", "passwordRules": [] },
+  {"username": "abc", "password": "Qwertyuiop12", "usernameProblem": null, "passwordRules": []},
+  {"username": "abcdefghijklmnopqrstuvwxyz012345", "password": "Abcdefghij12", "usernameProblem": null, "passwordRules": []},
+  {"username": "a-b_c", "password": "Abcdefghij12", "usernameProblem": null, "passwordRules": []},
+  {"username": "marie", "password": "Abcdefghi1😀", "usernameProblem": null, "passwordRules": ["min_length"]},
+  {"username": "marie", "password": "ªBCDEFGHIJK1", "usernameProblem": null, "passwordRules": []},
+  {"username": "marie", "password": "abcdefghijk1Ⓐ", "usernameProblem": null, "passwordRules": []},
+  {"username": "kelvin", "password": "xxKelvinxx12A", "usernameProblem": null, "passwordRules": []}
 ]

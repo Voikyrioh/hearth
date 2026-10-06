@@ -1,10 +1,12 @@
 //! Commandes de comptes exposées à l'interface (liste blanche : `build.rs` et
 //! `capabilities/default.json`). UNE commande par action (ADR-0016) : paramètres métier typés, la
 //! méthode et le chemin sont construits côté Rust (`wire`). Aucune logique ici : chaque commande
-//! délègue au service. Aucun mot de passe n'est journalisé ni renvoyé.
+//! délègue au service. Un mot de passe est enveloppé dans un `Secret` dès l'entrée (effacé à la
+//! libération) ; aucun n'est journalisé ni renvoyé.
 
 use std::sync::Arc;
 
+use hearth_link::domain::secret::Secret;
 use tauri::State;
 
 use super::dto::{AccountInputCheck, AccountListDto, AccountOutcome};
@@ -19,10 +21,11 @@ type Runtime_<'a> = State<'a, Arc<LinkRuntime>>;
 #[tauri::command]
 #[specta::specta]
 pub fn check_account_input(username: String, password: String) -> AccountInputCheck {
-    service::check_input(&username, &password)
+    service::check_input(&username, &Secret::new(password))
 }
 
-/// La liste des comptes (administrateurs ; l'agent refuse les autres).
+/// La liste des comptes (administrateurs ; l'agent refuse les autres) et l'identifiant de l'agent
+/// du compte de la session.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_accounts(
@@ -42,7 +45,7 @@ pub async fn create_account(
     role: RoleDto,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
-    service::create(link.manager(), &id, &username, &password, role).await
+    service::create(link.manager(), &id, &username, &Secret::new(password), role).await
 }
 
 #[tauri::command]
@@ -57,22 +60,22 @@ pub async fn change_account_role(
     service::change_role(link.manager(), &id, &account_id, role).await
 }
 
-/// Un administrateur définit le mot de passe d'un autre compte (ferme ses sessions). `username` est
-/// l'identifiant de ce compte : la règle « ne contient pas l'identifiant ».
+/// Un administrateur définit le mot de passe d'un autre compte (ferme ses sessions). La règle « ne
+/// contient pas l'identifiant » est celle de l'agent, qui lit le compte lui-même.
 #[tauri::command]
 #[specta::specta]
 pub async fn set_account_password(
     link: Runtime_<'_>,
     server_id: String,
     account_id: String,
-    username: String,
     password: String,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
-    service::set_password(link.manager(), &id, &account_id, &username, &password).await
+    service::set_password(link.manager(), &id, &account_id, &Secret::new(password)).await
 }
 
-/// Le titulaire change son propre mot de passe (ferme ses AUTRES sessions, garde la courante).
+/// Le titulaire change son propre mot de passe (ferme ses AUTRES sessions, garde la courante) ;
+/// le mot de passe mémorisé au coffre suit (voir `service::change_own_password`).
 #[tauri::command]
 #[specta::specta]
 pub async fn change_own_password(
@@ -82,7 +85,13 @@ pub async fn change_own_password(
     password: String,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
-    service::change_own_password(link.manager(), &id, &current, &password).await
+    service::change_own_password(
+        link.manager(),
+        &id,
+        &Secret::new(current),
+        &Secret::new(password),
+    )
+    .await
 }
 
 #[tauri::command]

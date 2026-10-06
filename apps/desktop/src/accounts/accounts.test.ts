@@ -45,7 +45,7 @@ describe("accounts store", () => {
     });
     vi.spyOn(bridge, "listAccounts").mockImplementationOnce(async () => {
       await gate;
-      return { kind: "listed" as const, accounts: [] };
+      return { kind: "listed" as const, accounts: [], me: "" };
     });
     const first = store.load("forge");
     const second = store.load("forge");
@@ -75,6 +75,7 @@ describe("account actions", () => {
   it("creates an account: success announced, list re-read, no password kept anywhere", async () => {
     const { bridge, pinia } = await startedApp();
     const store = useAccountsStore();
+    await store.load("forge");
     const toasts = useToastsStore();
     const actions = useAccountActions(() => "forge");
     const report = await actions.create("sophie", GOOD, "readonly");
@@ -90,6 +91,7 @@ describe("account actions", () => {
 
   it("returns a refusal for the caller to show, and re-reads a stale list", async () => {
     const { bridge } = await startedApp();
+    await useAccountsStore().load("forge");
     const actions = useAccountActions(() => "forge");
     const taken = await actions.create("PAUL", GOOD, "readonly");
     expect(taken).toEqual({ kind: "refused", refusal: { kind: "username_taken" } });
@@ -105,7 +107,7 @@ describe("account actions", () => {
       "readonly",
     );
     expect(last).toEqual({ kind: "refused", refusal: { kind: "last_admin" } });
-    expect(bridge.calls.filter((c) => c === "account list")).toHaveLength(1);
+    expect(bridge.calls.filter((c) => c === "account list")).toHaveLength(2);
   });
 
   it("announces the sessions closed and the role changed with the texts of the specification", async () => {

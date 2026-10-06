@@ -20,6 +20,7 @@ Un administrateur qui supprime son propre compte doit retaper son identifiant (i
 
 ## Interface (HRT-13)
 « Supprimer mon compte » (section « Mon compte » des réglages, administrateurs) → `FormDialog` « Supprimer ton compte ? » : champ « Retape ton identifiant pour confirmer » ; l'interface n'évalue pas la correspondance, l'agent compare (`DELETE /accounts/{id}` avec `confirmation`) : « L'identifiant ne correspond pas, réessaye ». Au succès, le mot de passe mémorisé du compte disparu est oublié et le lien passe à « Accès révoqué ». Test : `accounts_runtime.rs::deleting_your_own_account_asks_for_your_username_and_ends_your_session`.
+« Mon compte » est trouvé par l'identifiant de l'agent de la session (`list_accounts` rend `me`), jamais par comparaison de texte avec la saisie de connexion.
 
 ## Vérification
 - Tests : `domain::accounts::self_deletion::tests` ; `crates/hearth-agent/tests/accounts_use_cases.rs::deleting_your_own_account_requires_your_username`.

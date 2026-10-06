@@ -19,6 +19,7 @@ Un compte lecture seule ne voit pas la gestion des comptes ; il peut uniquement 
 
 ## Interface (HRT-13)
 Aucune entrée « Comptes » dans `ServerNav.vue` et route fermée par `router/index.ts::redirectFor` (`adminOnly`) ; la section personnelle des réglages reste ouverte à tous les rôles. Tests : `Accounts.test.ts::has no « Comptes » entry in the menu of a read-only account`, `e2e/accounts.spec.ts` (lecture seule).
+Un compte Lecture seule qui change son mot de passe n'envoie jamais `GET /accounts` (aucun refus consigné pour un parcours permis) : `AccountsReview.test.ts`, `accounts_runtime.rs::a_read_only_account_changing_its_own_password_leaves_no_denial_in_the_journal`.
 
 ## Vérification
 - Tests : `domain::accounts::role::tests::only_an_administrator_manages_accounts` ; `tests/http_api.rs::every_admin_route_refuses_a_read_only_account_and_changes_nothing` (balayage de `ENDPOINTS`) ; `tests/sessions_https.rs::a_read_only_account_cannot_manage_accounts_over_tls`.

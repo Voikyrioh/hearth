@@ -28,7 +28,8 @@ const actions = useAccountActions(() => serverId.value);
 
 const entry = computed(() => store.of(serverId.value));
 const accounts = computed(() => entry.value?.accounts ?? []);
-const me = computed(() => server.value?.username ?? "");
+const meId = computed(() => entry.value?.me ?? "");
+const myUsername = computed(() => server.value?.username ?? "");
 
 watch(
   serverId,
@@ -120,7 +121,8 @@ async function confirmRemove() {
   <AccountTable
     v-else
     :accounts="accounts"
-    :me="me"
+    :me-id="meId"
+    :busy="actions.busy.value"
     @change-role="changeRole"
     @change-password="passwordFor = $event"
     @change-own-password="ownPassword = true"
@@ -133,13 +135,15 @@ async function confirmRemove() {
     :open="passwordFor !== null"
     :server-id="serverId"
     :username="passwordFor?.username ?? ''"
+    :own="false"
     :account="passwordFor"
     @close="passwordFor = null"
   />
   <PasswordDialog
     :open="ownPassword"
     :server-id="serverId"
-    :username="me"
+    :username="myUsername"
+    own
     @close="ownPassword = false"
   />
   <ConfirmDialog

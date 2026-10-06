@@ -8,7 +8,17 @@ import type { PasswordRule } from "@/link";
 // pour les lecteurs d'écran, jamais la couleur seule. `unmet` vient de l'agent (règle de
 // `hearth-proto`, évaluée par la coquille) : ce composant n'en connaît aucune. Avant la première
 // saisie (`touched` faux) les critères sont montrés en retrait, sans rouge.
-defineProps<{ unmet: readonly PasswordRule[]; touched: boolean }>();
+// `required` (rien n'est saisi) veut dire « rien n'est encore évalué » : aucun critère n'est alors
+// « Respecté », tout est neutre. C'est ICI, à un seul endroit, que l'état vide est traité.
+const props = defineProps<{ unmet: readonly PasswordRule[]; touched: boolean }>();
+
+type CriterionState = "met" | "unmet" | "idle" | "pending";
+
+function stateOf(rule: PasswordRule): CriterionState {
+  if (props.unmet.includes("required")) return "pending";
+  if (!props.unmet.includes(rule)) return "met";
+  return props.touched ? "unmet" : "idle";
+}
 </script>
 
 <template>
@@ -16,16 +26,19 @@ defineProps<{ unmet: readonly PasswordRule[]; touched: boolean }>();
     <li
       v-for="rule in PASSWORD_CRITERIA"
       :key="rule"
-      :class="[
-        'rules__item',
-        unmet.includes(rule) ? (touched ? 'rules__item--unmet' : 'rules__item--idle') : 'rules__item--met',
-      ]"
+      :class="['rules__item', `rules__item--${stateOf(rule)}`]"
       :data-rule="rule"
-      :data-met="unmet.includes(rule) ? 'false' : 'true'"
+      :data-met="stateOf(rule) === 'met' ? 'true' : stateOf(rule) === 'pending' ? 'pending' : 'false'"
     >
-      <HIcon :name="unmet.includes(rule) ? 'close' : 'check'" size="sm" />
+      <HIcon :name="stateOf(rule) === 'met' ? 'check' : 'close'" size="sm" />
       <span>{{ ruleText(rule) }}</span>
-      <span class="sr-only">{{ unmet.includes(rule) ? t("accounts.unmet") : t("accounts.met") }}</span>
+      <span class="sr-only">{{
+        stateOf(rule) === "met"
+          ? t("accounts.met")
+          : stateOf(rule) === "pending"
+            ? t("accounts.pending")
+            : t("accounts.unmet")
+      }}</span>
     </li>
   </ul>
 </template>
@@ -55,7 +68,8 @@ defineProps<{ unmet: readonly PasswordRule[]; touched: boolean }>();
   color: var(--crit);
 }
 
-.rules__item--idle {
+.rules__item--idle,
+.rules__item--pending {
   color: var(--tx3);
 }
 </style>

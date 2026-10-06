@@ -22,6 +22,8 @@ Deux comptes « marie » et « MARIE » ne peuvent pas coexister. L'identifiant 
 ## Interface (HRT-13)
 L'unicité n'est jamais jugée par l'interface : l'agent refuse `USERNAME_TAKEN`, affiché « Cet identifiant est déjà utilisé » sous le champ, formulaire conservé (`CreateAccountDialog.vue`). Test : `accounts_runtime.rs::a_taken_username_a_bad_format_and_a_weak_password_are_refused`.
 
+- Le carnet du client garde l'identifiant que l'agent a normalisé, pas la saisie (FIX-01M47H8VFFS2TNYJ3YNSDZTTKG) : `LinkManager::add_and_login` et `::login`.
+
 ## Vérification
 - Tests : `domain::accounts::username::tests::uppercase_is_normalized_so_uniqueness_ignores_case` ; `crates/hearth-agent/tests/accounts_use_cases.rs::usernames_are_unique_whatever_the_case` ; `crates/hearth-agent/tests/accounts_repo.rs::the_database_refuses_two_usernames_differing_by_case`.
 

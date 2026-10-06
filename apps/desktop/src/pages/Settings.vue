@@ -26,60 +26,60 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
   <main class="settings">
     <h1 class="settings__title">{{ t("settings.title") }}</h1>
     <div class="settings__columns">
-    <div class="settings__column">
-    <section class="settings__panel">
-      <h2 class="settings__section">{{ t("settings.sectionGeneral") }}</h2>
-      <p v-if="settings.error" class="settings__error" role="alert">{{ t(settings.error) }}</p>
-      <SettingRow
-        :label="t('settings.launchAtStartup')"
-        :help="t('settings.launchAtStartupHelp')"
-        v-slot="{ labelId }"
-      >
-        <HToggle
-          :aria-labelledby="labelId"
-          :model-value="settings.launchAtStartup"
-          :disabled="!settings.loaded"
-          :busy="settings.saving"
-          :hint="toggleHint"
-          @update:model-value="settings.setLaunchAtStartup"
-        />
-      </SettingRow>
-      <SettingRow :label="t('settings.logs')" :help="t('settings.logsHelp')">
-        <HButton variant="secondary" @click="settings.openLogsFolder">
-          {{ t("settings.openLogs") }}
-        </HButton>
-      </SettingRow>
-      <p v-if="settings.logsError" class="settings__error" role="alert">{{ t(settings.logsError) }}</p>
-    </section>
-    <section class="settings__panel">
-      <h2 class="settings__section">{{ t("settings.sectionClient") }}</h2>
-      <SettingRow
-        :label="t('settings.notifyOnLinkChange')"
-        :help="t('settings.notifyOnLinkChangeHelp')"
-        v-slot="{ labelId }"
-      >
-        <HToggle
-          :aria-labelledby="labelId"
-          :model-value="settings.notifyOnLinkChange"
-          :disabled="!settings.loaded"
-          :busy="settings.saving"
-          :hint="toggleHint"
-          @update:model-value="settings.setNotifyOnLinkChange"
-        />
-      </SettingRow>
-      <p class="settings__version">
-        {{ t("settings.version") }}
-        <span class="settings__mono">{{
-          settings.version ?? t("settings.versionUnavailable")
-        }}</span>
-      </p>
-    </section>
-    <UpdatePanel />
-    </div>
-    <div v-if="servers.servers.length > 0" class="settings__column">
-      <h2 class="settings__section settings__section--column">{{ t("settings.sectionAccount") }}</h2>
-      <OwnAccountCard v-for="server in servers.servers" :key="server.id" :server="server" />
-    </div>
+      <div class="settings__column">
+        <section class="settings__panel">
+          <h2 class="settings__section">{{ t("settings.sectionGeneral") }}</h2>
+          <p v-if="settings.error" class="settings__error" role="alert">{{ t(settings.error) }}</p>
+          <SettingRow
+            :label="t('settings.launchAtStartup')"
+            :help="t('settings.launchAtStartupHelp')"
+            v-slot="{ labelId }"
+          >
+            <HToggle
+              :aria-labelledby="labelId"
+              :model-value="settings.launchAtStartup"
+              :disabled="!settings.loaded"
+              :busy="settings.saving"
+              :hint="toggleHint"
+              @update:model-value="settings.setLaunchAtStartup"
+            />
+          </SettingRow>
+          <SettingRow :label="t('settings.logs')" :help="t('settings.logsHelp')">
+            <HButton variant="secondary" @click="settings.openLogsFolder">
+              {{ t("settings.openLogs") }}
+            </HButton>
+          </SettingRow>
+          <p v-if="settings.logsError" class="settings__error" role="alert">{{ t(settings.logsError) }}</p>
+        </section>
+        <section class="settings__panel">
+          <h2 class="settings__section">{{ t("settings.sectionClient") }}</h2>
+          <SettingRow
+            :label="t('settings.notifyOnLinkChange')"
+            :help="t('settings.notifyOnLinkChangeHelp')"
+            v-slot="{ labelId }"
+          >
+            <HToggle
+              :aria-labelledby="labelId"
+              :model-value="settings.notifyOnLinkChange"
+              :disabled="!settings.loaded"
+              :busy="settings.saving"
+              :hint="toggleHint"
+              @update:model-value="settings.setNotifyOnLinkChange"
+            />
+          </SettingRow>
+          <p class="settings__version">
+            {{ t("settings.version") }}
+            <span class="settings__mono">{{
+              settings.version ?? t("settings.versionUnavailable")
+            }}</span>
+          </p>
+        </section>
+        <UpdatePanel />
+      </div>
+      <div v-if="servers.servers.length > 0" class="settings__column">
+        <h2 class="settings__section settings__section--column">{{ t("settings.sectionAccount") }}</h2>
+        <OwnAccountCard v-for="server in servers.servers" :key="server.id" :server="server" />
+      </div>
     </div>
   </main>
 </template>

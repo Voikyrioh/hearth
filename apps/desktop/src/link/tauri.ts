@@ -316,11 +316,10 @@ export class TauriLinkBridge implements LinkBridge {
   async setAccountPassword(
     serverId: string,
     accountId: string,
-    username: string,
     password: string,
   ): Promise<AccountOutcome> {
     return toAccountOutcome(
-      unwrap(await commands.setAccountPassword(serverId, accountId, username, password)),
+      unwrap(await commands.setAccountPassword(serverId, accountId, password)),
     );
   }
 

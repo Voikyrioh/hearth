@@ -140,12 +140,12 @@ pub fn change_role(account: &str, role: RoleDto) -> Result<Planned, LinkFailure>
     })
 }
 
-/// `PUT /accounts/{id}/password` : `username` est celui du compte visé (la règle « ne contient pas
-/// l'identifiant »).
-pub fn set_password(account: &str, username: &str, password: &str) -> Result<Planned, Stop> {
+/// `PUT /accounts/{id}/password`. La règle « ne contient pas l'identifiant » est jugée par l'agent,
+/// qui lit le compte lui-même, et par la saisie en direct (`check_account_input`) : ici seules les
+/// règles qui ne dépendent pas de l'identifiant sont contrôlées avant l'envoi.
+pub fn set_password(account: &str, password: &str) -> Result<Planned, Stop> {
     let account = account_id(account)?;
-    let normalized = check_username(username).unwrap_or_default();
-    if let Some(refusal) = weak(unmet_password_rules(password, &normalized)) {
+    if let Some(refusal) = weak(unmet_password_rules(password, "")) {
         return Err(refusal.into());
     }
     Ok(Planned {
@@ -209,8 +209,19 @@ pub fn delete(account: &str, confirmation: Option<String>) -> Result<Planned, Li
     })
 }
 
-/// Le chemin de la liste (lecture).
+/// Les chemins des lectures : la liste, et le compte de la session courante.
 pub const LIST_PATH: &str = "/accounts";
+pub const ME_PATH: &str = "/me";
+
+/// L'identifiant de l'agent du compte de la session, lu dans la réponse de `GET /me`.
+pub fn me_id(status: u16, body: &Value) -> Result<String, LinkFailure> {
+    if !(200..300).contains(&status) {
+        return Err(LinkFailure::NotAgent);
+    }
+    serde_json::from_value::<hearth_proto::api::sessions::MeResponse>(body.clone())
+        .map(|me| me.account.id)
+        .map_err(|_| LinkFailure::NotAgent)
+}
 
 /// Ce que dit un refus de l'agent : le code stable de l'erreur, jamais son texte.
 pub fn refusal_from_error(status: u16, body: &Value) -> AccountRefusal {
@@ -230,9 +241,8 @@ pub fn refusal_from_error(status: u16, body: &Value) -> AccountRefusal {
         ErrorCode::NotFound => AccountRefusal::NotFound,
         ErrorCode::Conflict => AccountRefusal::Conflict,
         ErrorCode::Busy => AccountRefusal::Busy,
-        ErrorCode::Unauthenticated | ErrorCode::SessionExpired | ErrorCode::SessionRevoked => {
-            AccountRefusal::SessionEnded
-        }
+        ErrorCode::Unauthenticated | ErrorCode::SessionExpired => AccountRefusal::SessionEnded,
+        ErrorCode::SessionRevoked => AccountRefusal::SessionRevoked,
         ErrorCode::WeakPassword => {
             let rules = error.details["rules"]
                 .as_array()
@@ -288,7 +298,7 @@ pub fn interpret(expect: Expect, status: u16, body: &Value) -> Result<AccountOut
 }
 
 /// La réponse de la lecture de la liste.
-pub fn interpret_list(status: u16, body: &Value) -> Result<AccountListDto, LinkFailure> {
+pub fn interpret_list(status: u16, body: &Value, me: &str) -> Result<AccountListDto, LinkFailure> {
     if !(200..300).contains(&status) {
         return Ok(AccountListDto::Refused {
             refusal: refusal_from_error(status, body),
@@ -298,5 +308,6 @@ pub fn interpret_list(status: u16, body: &Value) -> Result<AccountListDto, LinkF
         serde_json::from_value(body.clone()).map_err(|_| LinkFailure::NotAgent)?;
     Ok(AccountListDto::Listed {
         accounts: list.accounts.into_iter().map(AccountDto::from).collect(),
+        me: me.to_owned(),
     })
 }

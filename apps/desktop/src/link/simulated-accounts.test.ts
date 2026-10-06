@@ -66,7 +66,7 @@ describe("the simulated agent applies the rules of the real one", () => {
       accounts.changeRole(readonly, "B", "admin"),
       accounts.closeSessions(readonly, "B"),
       accounts.delete(readonly, "B", null),
-      accounts.setPassword(readonly, "B", "paul", GOOD),
+      accounts.setPassword(readonly, "B", GOOD),
     ]) {
       expect(result.outcome).toEqual({ kind: "refused", refusal: { kind: "forbidden" } });
     }

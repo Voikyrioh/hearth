@@ -437,7 +437,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.calls.push("account list");
     const accounts = this.accounts.list(server);
     return accounts
-      ? { kind: "listed", accounts }
+      ? { kind: "listed", accounts, me: this.accounts.meId(server) }
       : { kind: "refused", refusal: { kind: "forbidden" } };
   }
 
@@ -461,11 +461,10 @@ export class SimulatedLinkBridge implements LinkBridge {
   setAccountPassword(
     serverId: string,
     accountId: string,
-    username: string,
     password: string,
   ): Promise<AccountOutcome> {
     return this.accountAction(serverId, `password ${accountId}`, (server) =>
-      this.accounts.setPassword(server, accountId, username, password),
+      this.accounts.setPassword(server, accountId, password),
     );
   }
 

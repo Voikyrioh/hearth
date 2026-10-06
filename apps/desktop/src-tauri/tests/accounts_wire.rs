@@ -38,7 +38,7 @@ fn each_action_builds_its_own_method_path_and_body() {
     assert_eq!(role.request.body.unwrap(), json!({ "role": "admin" }));
     assert_eq!(role.expect, Expect::Nothing);
 
-    let password = planned(wire::set_password("ABC123", "paul", GOOD));
+    let password = planned(wire::set_password("ABC123", GOOD));
     assert_eq!(password.request.method, Method::Put);
     assert_eq!(password.request.path, "/accounts/ABC123/password");
     assert_eq!(password.request.body.unwrap(), json!({ "password": GOOD }));
@@ -94,7 +94,7 @@ fn an_account_identifier_can_never_leave_the_path() {
         assert_eq!(wire::delete(bad, None).unwrap_err(), expected, "{bad:?}");
         assert!(
             matches!(
-                wire::set_password(bad, "paul", GOOD),
+                wire::set_password(bad, GOOD),
                 Err(Stop::Failed(f)) if f == expected
             ),
             "{bad:?}"
@@ -121,10 +121,17 @@ fn an_invalid_input_is_refused_locally_before_anything_is_sent() {
         ),
         other => panic!("{other:?}"),
     }
-    match wire::set_password("ABC", "paul", "xxPaulxxxxxx12A") {
-        Err(Stop::Refused(AccountRefusal::WeakPassword { rules })) => {
-            assert_eq!(rules, [PasswordRuleDto::ContainsUsername]);
-        }
+    // « ne contient pas l'identifiant » : l'agent le juge (il lit le compte lui-même), pas la coquille.
+    assert!(wire::set_password("ABC", "xxPaulxxxxxx12A").is_ok());
+    match wire::set_password("ABC", "abc") {
+        Err(Stop::Refused(AccountRefusal::WeakPassword { rules })) => assert_eq!(
+            rules,
+            [
+                PasswordRuleDto::MinLength,
+                PasswordRuleDto::Digit,
+                PasswordRuleDto::Uppercase
+            ]
+        ),
         other => panic!("{other:?}"),
     }
     match wire::change_own_password("marie", "x", "") {
@@ -149,7 +156,7 @@ fn every_refusal_of_the_agent_is_told_by_its_code() {
         (404, "NOT_FOUND", AccountRefusal::NotFound),
         (409, "CONFLICT", AccountRefusal::Conflict),
         (503, "BUSY", AccountRefusal::Busy),
-        (401, "SESSION_REVOKED", AccountRefusal::SessionEnded),
+        (401, "SESSION_REVOKED", AccountRefusal::SessionRevoked),
         (401, "SESSION_EXPIRED", AccountRefusal::SessionEnded),
         (500, "INTERNAL_ERROR", AccountRefusal::Other),
     ];
@@ -242,8 +249,9 @@ fn the_list_is_read_or_refused() {
         { "id": "A2", "username": "paul", "role": "readonly",
           "created_at": "2026-10-04T11:00:00.000Z", "last_login_at": null, "sessions_open": 0 }
     ]});
-    match wire::interpret_list(200, &body).unwrap() {
-        AccountListDto::Listed { accounts } => {
+    match wire::interpret_list(200, &body, "A1").unwrap() {
+        AccountListDto::Listed { accounts, me } => {
+            assert_eq!(me, "A1");
             assert_eq!(accounts.len(), 2);
             assert_eq!(accounts[0].sessions_open, 2);
             assert_eq!(accounts[1].role, RoleDto::Readonly);
@@ -251,7 +259,7 @@ fn the_list_is_read_or_refused() {
         other => panic!("{other:?}"),
     }
     assert_eq!(
-        wire::interpret_list(403, &error("FORBIDDEN_ROLE", json!({}))).unwrap(),
+        wire::interpret_list(403, &error("FORBIDDEN_ROLE", json!({})), "").unwrap(),
         AccountListDto::Refused {
             refusal: AccountRefusal::Forbidden
         }
@@ -272,10 +280,16 @@ fn no_password_shows_in_the_debug_of_a_planned_action_nor_of_a_refusal() {
 
 #[test]
 fn the_live_check_is_the_rule_of_the_agent() {
-    let check = hearth_desktop_lib::accounts::service::check_input("Marie", "xxmariexx12A");
+    let check = hearth_desktop_lib::accounts::service::check_input(
+        "Marie",
+        &hearth_link::domain::secret::Secret::new("xxmariexx12A"),
+    );
     assert_eq!(check.username, None);
     assert_eq!(check.password, [PasswordRuleDto::ContainsUsername]);
-    let check = hearth_desktop_lib::accounts::service::check_input("", "");
+    let check = hearth_desktop_lib::accounts::service::check_input(
+        "",
+        &hearth_link::domain::secret::Secret::new(""),
+    );
     assert_eq!(check.username, Some(UsernameProblemDto::Empty));
     assert_eq!(check.password, [PasswordRuleDto::Required]);
 }

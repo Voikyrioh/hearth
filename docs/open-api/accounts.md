@@ -69,10 +69,10 @@ Le client Windows n'écrit jamais ces routes depuis la WebView : chaque action a
 
 | Commande | Route | Clé d'opération |
 |---|---|---|
-| `list_accounts(server_id)` | `GET /accounts` | non (lecture, `LinkManager::fetch`, sans suivi) |
+| `list_accounts(server_id)` | `GET /accounts` puis `GET /me` (l'identifiant de l'agent du compte de la session, rendu avec la liste) | non (lectures, `LinkManager::fetch`, sans suivi) |
 | `create_account(server_id, username, password, role)` | `POST /accounts` | oui |
 | `change_account_role(server_id, account_id, role)` | `PATCH /accounts/{id}` | oui |
-| `set_account_password(server_id, account_id, username, password)` | `PUT /accounts/{id}/password` | oui |
+| `set_account_password(server_id, account_id, password)` | `PUT /accounts/{id}/password` | oui |
 | `change_own_password(server_id, current, password)` | `PUT /me/password` | oui |
 | `close_account_sessions(server_id, account_id)` | `DELETE /accounts/{id}/sessions` | oui |
 | `delete_account(server_id, account_id, confirmation)` | `DELETE /accounts/{id}` | oui |

@@ -26,6 +26,7 @@ use hearth_desktop_lib::link::{LinkRuntime, UiSink};
 use hearth_desktop_lib::link_dto::{InvalidField, LinkFailure, RoleDto};
 use hearth_desktop_lib::vault::{CredentialBackend, CredentialVault};
 use hearth_link::LinkConfig;
+use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::{LinkState, Thresholds};
 use proxy::FaultProxy;
@@ -100,13 +101,24 @@ fn config(reconnecting: bool, offline: bool) -> LinkConfig {
 struct Client {
     runtime: Arc<LinkRuntime>,
     id: ServerId,
+    secrets: Arc<Memory>,
     _dir: tempfile::TempDir,
 }
 
 async fn client(port: u16, username: &str, password: &str, config: LinkConfig) -> Client {
+    client_with(port, username, password, config, false).await
+}
+
+async fn client_with(
+    port: u16,
+    username: &str,
+    password: &str,
+    config: LinkConfig,
+    remember: bool,
+) -> Client {
     let dir = tempfile::tempdir().unwrap();
     let secrets = Arc::new(Memory::default());
-    let vault = Arc::new(CredentialVault::new(Shared(secrets)));
+    let vault = Arc::new(CredentialVault::new(Shared(secrets.clone())));
     let runtime = Arc::new(
         LinkRuntime::open_with(dir.path(), vault, "poste-test/0.1", config)
             .await
@@ -123,7 +135,7 @@ async fn client(port: u16, username: &str, password: &str, config: LinkConfig) -
             probe.mac_addresses,
             username,
             password.into(),
-            false,
+            remember,
             &Nowhere,
         )
         .await
@@ -132,6 +144,7 @@ async fn client(port: u16, username: &str, password: &str, config: LinkConfig) -
     let client = Client {
         runtime,
         id,
+        secrets,
         _dir: dir,
     };
     client.wait_for(LinkState::Connected).await;
@@ -154,7 +167,7 @@ impl Client {
 
     async fn accounts(&self) -> Vec<AccountDto> {
         match self.list().await {
-            AccountListDto::Listed { accounts } => accounts,
+            AccountListDto::Listed { accounts, .. } => accounts,
             other => panic!("liste attendue, reçu {other:?}"),
         }
     }
@@ -168,9 +181,15 @@ impl Client {
     }
 
     async fn create(&self, username: &str, password: &str, role: RoleDto) -> AccountOutcome {
-        service::create(self.runtime.manager(), &self.id, username, password, role)
-            .await
-            .unwrap()
+        service::create(
+            self.runtime.manager(),
+            &self.id,
+            username,
+            &Secret::new(password),
+            role,
+        )
+        .await
+        .unwrap()
     }
 
     async fn set_role(&self, account: &str, role: RoleDto) -> AccountOutcome {
@@ -184,8 +203,7 @@ impl Client {
             self.runtime.manager(),
             &self.id,
             &account.id,
-            &account.username,
-            password,
+            &Secret::new(password),
         )
         .await
         .unwrap()
@@ -209,9 +227,14 @@ impl Client {
     }
 
     async fn change_own_password(&self, current: &str, password: &str) -> AccountOutcome {
-        service::change_own_password(self.runtime.manager(), &self.id, current, password)
-            .await
-            .unwrap()
+        service::change_own_password(
+            self.runtime.manager(),
+            &self.id,
+            &Secret::new(current),
+            &Secret::new(password),
+        )
+        .await
+        .unwrap()
     }
 }
 
@@ -433,7 +456,7 @@ async fn deleting_your_own_account_asks_for_your_username_and_ends_your_session(
     assert!(closed >= 1);
     // La session du compte supprimé n'est plus : l'agent le dit, l'interface s'en tient là.
     match admin.list().await {
-        AccountListDto::Refused { refusal } => assert_eq!(refusal, AccountRefusal::SessionEnded),
+        AccountListDto::Refused { refusal } => assert_eq!(refusal, AccountRefusal::SessionRevoked),
         other => panic!("session terminée attendue, reçu {other:?}"),
     }
 }
@@ -558,7 +581,13 @@ async fn an_action_cut_before_its_answer_is_unknown_never_replayed_and_its_outco
     let runtime = admin.runtime.clone();
     let server = admin.id.clone();
     let call = tokio::spawn(async move {
-        service::change_own_password(runtime.manager(), &server, PASSWORD, NEW_PASSWORD).await
+        service::change_own_password(
+            runtime.manager(),
+            &server,
+            &Secret::new(PASSWORD),
+            &Secret::new(NEW_PASSWORD),
+        )
+        .await
     });
     agent.wait_action_started(started).await;
     proxy.cut();
@@ -622,7 +651,7 @@ async fn an_action_is_refused_without_anything_sent_when_the_link_is_not_connect
         admin.runtime.manager(),
         &admin.id,
         "paul",
-        NEW_PASSWORD,
+        &Secret::new(NEW_PASSWORD),
         RoleDto::Readonly,
     )
     .await;
@@ -630,4 +659,196 @@ async fn an_action_is_refused_without_anything_sent_when_the_link_is_not_connect
     let listed = service::list(admin.runtime.manager(), &admin.id).await;
     assert_eq!(listed.unwrap_err(), LinkFailure::NotConnected);
     assert_eq!(agent.verifications_started(), started, "rien n'est parti");
+}
+
+impl Client {
+    /// Ce que le coffre garde pour le mot de passe mémorisé de ce serveur.
+    fn remembered(&self) -> Option<Vec<u8>> {
+        let key = format!("Hearth/{}", self.id);
+        self.secrets.0.lock().unwrap().get(&key).cloned()
+    }
+
+    fn token(&self) -> Option<Vec<u8>> {
+        let key = format!("Hearth/{}/token", self.id);
+        self.secrets.0.lock().unwrap().get(&key).cloned()
+    }
+}
+
+/// FIX:01M47H8VFFS2TNYJ3YNSDZTTKG : connecté en « Marie », le carnet garde « marie » (l'identifiant
+/// de l'agent), et « moi » est l'identifiant de l'agent de la session, jamais une comparaison de texte.
+#[tokio::test]
+async fn a_login_typed_in_capitals_keeps_the_identifier_of_the_agent_and_me_is_its_account_id() {
+    let agent = TestAgent::install().await;
+    agent.create_account("marie", Role::Admin).await;
+    agent.create_account("paul", Role::ReadOnly).await;
+    let admin = client(agent.addr.port(), "Marie", PASSWORD, config(false, false)).await;
+    let record = admin
+        .runtime
+        .manager()
+        .servers()
+        .into_iter()
+        .find(|r| r.id == admin.id)
+        .unwrap();
+    assert_eq!(record.username, "marie");
+    let AccountListDto::Listed { accounts, me } = admin.list().await else {
+        panic!("liste attendue");
+    };
+    let marie = accounts.iter().find(|a| a.username == "marie").unwrap();
+    assert_eq!(me, marie.id);
+    let paul = accounts.iter().find(|a| a.username == "paul").unwrap();
+    assert_ne!(me, paul.id);
+}
+
+/// Un compte Lecture seule qui change son mot de passe n'envoie aucun GET /accounts : le journal
+/// de l'agent ne contient aucun refus pour ce parcours permis.
+#[tokio::test]
+async fn a_read_only_account_changing_its_own_password_leaves_no_denial_in_the_journal() {
+    let (agent, admin) = rig().await;
+    done(admin.create("paul", NEW_PASSWORD, RoleDto::Readonly).await);
+    let readonly = client(
+        agent.addr.port(),
+        "paul",
+        NEW_PASSWORD,
+        config(false, false),
+    )
+    .await;
+    let (_, closed) = done(
+        readonly
+            .change_own_password(NEW_PASSWORD, "Another-Long-Pass-91")
+            .await,
+    );
+    assert_eq!(closed, 0);
+    agent.services.audit_recorder.flush_all().await;
+    let page = agent
+        .services
+        .audit
+        .search(
+            Role::Admin,
+            &hearth_agent::domain::audit::AuditFilter::new(Default::default()).unwrap(),
+        )
+        .await
+        .unwrap();
+    let denied = page
+        .records
+        .iter()
+        .filter(|r| r.outcome == hearth_agent::domain::audit::OutcomeKind::Denied)
+        .count();
+    assert_eq!(denied, 0, "{:?}", page.records);
+}
+
+/// Après SON changement de mot de passe, le coffre reçoit le nouveau (si « se souvenir »), et la
+/// reconnexion silencieuse suivante réussit sans essai refusé.
+#[tokio::test]
+async fn after_changing_your_own_password_the_vault_follows_and_the_silent_reconnection_succeeds() {
+    let agent = TestAgent::install().await;
+    agent.create_account("marie", Role::Admin).await;
+    let admin = client_with(
+        agent.addr.port(),
+        "marie",
+        PASSWORD,
+        config(false, false),
+        true,
+    )
+    .await;
+    assert_eq!(admin.remembered(), Some(PASSWORD.as_bytes().to_vec()));
+    done(admin.change_own_password(PASSWORD, NEW_PASSWORD).await);
+    assert_eq!(admin.remembered(), Some(NEW_PASSWORD.as_bytes().to_vec()));
+    // Une session expirée : la reconnexion silencieuse part avec le NOUVEAU mot de passe.
+    let old_token = admin.token().unwrap();
+    agent.clock.advance(time::Duration::days(31));
+    eventually("jeton renouvelé au coffre", || {
+        admin.token().is_some_and(|token| token != old_token)
+    })
+    .await;
+    admin.wait_for(LinkState::Connected).await;
+    agent.services.audit_recorder.flush_all().await;
+    let page = agent
+        .services
+        .audit
+        .search(
+            Role::Admin,
+            &hearth_agent::domain::audit::AuditFilter::new(Default::default()).unwrap(),
+        )
+        .await
+        .unwrap();
+    let failed = page
+        .records
+        .iter()
+        .filter(|r| r.outcome != hearth_agent::domain::audit::OutcomeKind::Ok)
+        .count();
+    assert_eq!(failed, 0, "aucun essai refusé : {:?}", page.records);
+}
+
+#[tokio::test]
+async fn without_remember_nothing_is_written_to_the_vault_and_a_refusal_restores_the_old_entry() {
+    let agent = TestAgent::install().await;
+    agent.create_account("marie", Role::Admin).await;
+    let plain = client(agent.addr.port(), "marie", PASSWORD, config(false, false)).await;
+    done(plain.change_own_password(PASSWORD, NEW_PASSWORD).await);
+    assert_eq!(plain.remembered(), None, "rien n'y est écrit");
+    // « Se souvenir » actif : un refus (ancien mot de passe faux) remet l'entrée telle qu'elle était.
+    let remembered = client_with(
+        agent.addr.port(),
+        "marie",
+        NEW_PASSWORD,
+        config(false, false),
+        true,
+    )
+    .await;
+    let wrong = remembered
+        .change_own_password("Not-The-Old-One-1", "Another-Long-Pass-91")
+        .await;
+    assert_eq!(refused(&wrong), &AccountRefusal::WrongPassword);
+    assert_eq!(
+        remembered.remembered(),
+        Some(NEW_PASSWORD.as_bytes().to_vec())
+    );
+    // Refus local (mot de passe faible) : rien n'est parti, l'entrée est intacte.
+    let weak = remembered.change_own_password(NEW_PASSWORD, "abc").await;
+    assert!(matches!(
+        refused(&weak),
+        AccountRefusal::WeakPassword { .. }
+    ));
+    assert_eq!(
+        remembered.remembered(),
+        Some(NEW_PASSWORD.as_bytes().to_vec())
+    );
+}
+
+#[tokio::test]
+async fn an_own_password_change_cut_before_its_answer_leaves_the_vault_entry_erased_not_wrong() {
+    let agent = TestAgent::install().await;
+    agent.create_account("marie", Role::Admin).await;
+    let proxy = FaultProxy::start(agent.addr).await;
+    let admin = client_with(proxy.port(), "marie", PASSWORD, config(true, true), true).await;
+    assert!(admin.remembered().is_some());
+    agent.hold_actions();
+    let started = agent.verifications_started();
+    let runtime = admin.runtime.clone();
+    let server = admin.id.clone();
+    let call = tokio::spawn(async move {
+        service::change_own_password(
+            runtime.manager(),
+            &server,
+            &Secret::new(PASSWORD),
+            &Secret::new(NEW_PASSWORD),
+        )
+        .await
+    });
+    agent.wait_action_started(started).await;
+    // En route, l'entrée est déjà effacée : une application tuée ici n'aurait jamais l'ancien.
+    assert_eq!(admin.remembered(), None);
+    proxy.cut();
+    let outcome = tokio::time::timeout(GUARD, call)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(outcome, AccountOutcome::Unknown { .. }));
+    assert_eq!(
+        admin.remembered(),
+        None,
+        "ni l'ancien ni le nouveau : on ne sait pas"
+    );
+    agent.release_actions();
 }
