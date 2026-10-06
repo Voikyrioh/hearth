@@ -257,14 +257,9 @@ async fn a_restart_announced_by_the_agent_is_an_expected_cut_then_the_result_is_
         [LinkState::Reconnecting, LinkState::Connected],
         "ni « Hors ligne » ni autre état pendant la coupure attendue"
     );
-    // Le résultat est annoncé sur le flux, puis relu par les deux lectures typées.
-    let (_, done) = world
-        .recorder
-        .wait_for(cut, "le résultat", WAIT, |e| {
-            update_event(e, UpdateStep::Done)
-        })
-        .await;
-    assert_eq!(progress_of(done).outcome, Some(UpdateOutcome::Succeeded));
+    // Le résultat se RELIT par les deux lectures typées (BR-UPDATE-017). Il n'est pas attendu sur le
+    // flux : le nouvel agent l'annonce dès son démarrage, souvent AVANT que le client ne se soit
+    // abonné de nouveau, et l'état courant d'un abonnement ne rejoue que ce qui est en cours.
     let last = world
         .manager
         .agent_update_last(&world.id)
