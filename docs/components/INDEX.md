@@ -14,6 +14,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`HTooltip`](./HTooltip.md) — Bulle d'explication (survol, focus).
 - [`HSpinner`](./HSpinner.md) — Indicateur d'attente.
 - [`HToggle`](./HToggle.md) — Interrupteur booléen.
+- [`HSelect`](./HSelect.md) — Liste déroulante native (un choix).
 - [`HSegmented`](./HSegmented.md) — Choix exclusif (radiogroup).
 - [`HGaugeArc`](./HGaugeArc.md) — Arc de jauge de 270° (SVG).
 - [`HAreaChart`](./HAreaChart.md) — Courbe pleine à une ou deux séries (SVG), trous pour les mesures absentes.
@@ -24,6 +25,8 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 
 - [`LinkStatePill`](./LinkStatePill.md) — Pastille d'état du lien (5 états).
 - [`ServerAvatar`](./ServerAvatar.md) — Avatar de serveur (initiales, anneau, pastille d'état).
+- [`MultiSelect`](./MultiSelect.md) — Liste déroulante à choix multiple (cases à cocher).
+- [`AuditDetailDialog`](./AuditDetailDialog.md) — Une entrée du journal en entier.
 - [`StaleStamp`](./StaleStamp.md) — « Vu il y a 12 s », en direct.
 - [`StaleSurface`](./StaleSurface.md) — Enveloppe des données périmées (désaturées et datées).
 - [`ToastStack`](./ToastStack.md) — Notifications empilées (3 visibles, compteur).
@@ -46,6 +49,8 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 
 ## Organismes
 
+- [`AuditFilters`](./AuditFilters.md) — Filtres du journal (recherche, comptes, types, résultats, période).
+- [`AuditTable`](./AuditTable.md) — Tableau du journal : grille accessible, virtualisée, rafales regroupées.
 - [`ServerRail`](./ServerRail.md) — Barre des serveurs.
 - [`ServerNav`](./ServerNav.md) — Navigation du serveur.
 - [`AppHeader`](./AppHeader.md) — En-tête avec pastille du lien.

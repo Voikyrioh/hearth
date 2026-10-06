@@ -2,10 +2,10 @@
 id: BR-AUDIT-019
 domaine: AUDIT
 titre: L'indicateur de conservation est toujours visible
-statut: à venir (HRT-14)
+statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-journal-activite.md (BR-AUDIT-019), HRT-05
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-AUDIT-019 — L'indicateur de conservation est toujours visible
@@ -15,9 +15,13 @@ Côté interface : « Journal conservé pendant 90 jours ou 50 000 entrées ». 
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/audit/policy.rs::{RETENTION, MAX_ENTRIES}`.
+- `apps/desktop/src/pages/Audit.vue` et `apps/desktop/src/i18n/fr.ts::audit.retention`
+
+## Interface
+Sous le tableau, en permanence : « Journal conservé pendant 90 jours ou 50 000 entrées ».
 
 ## Vérification
-- Règle d'interface : vérifiée avec l'écran du journal (HRT-14).
+- `apps/desktop/src/pages/audit.test.ts` (« montre le tableau… »).
 
 ## Cas limites
 - Si la conservation change, le texte de l'interface doit changer avec elle.
@@ -27,3 +31,4 @@ Côté interface : « Journal conservé pendant 90 jours ou 50 000 entrées ». 
 
 ## Historique
 - 2026-10-04 — création (HRT-05, session 2026-10-04-hearth-creation).
+- 2026-10-06 — section « Interface » et pointeurs du client (HRT-14, session 2026-10-04-hearth-creation).

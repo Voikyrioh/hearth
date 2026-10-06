@@ -5,7 +5,7 @@ titre: Un refus d'accès au journal est lui-même journalisé
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-journal-activite.md (BR-AUDIT-021), HRT-05
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-AUDIT-021 — Un refus d'accès au journal est lui-même journalisé
@@ -19,10 +19,14 @@ Quand un compte lecture seule demande le journal ou son export, la réponse est 
 - `crates/hearth-agent/src/domain/audit/action.rs::AuditAction::AuditRead`.
 - `crates/hearth-agent/src/domain/audit/policy.rs::is_journaled`.
 
+## Interface
+Le client ne l'implémente pas : il n'y a pas de bouton, la garde du routeur ferme la page au rôle Lecture seule. Si une lecture arrive quand même, l'agent consigne le refus (action « Tentative de lecture du journal ») et le client l'affiche comme échec typé.
+
 ## Vérification
 - `crates/hearth-agent/tests/audit_https.rs::a_read_only_account_is_refused_and_its_attempts_are_journaled`.
 - `crates/hearth-agent/tests/http_api.rs::every_admin_route_refuses_a_read_only_account_and_changes_nothing` (une entrée refusée par route de la table).
 - `entrypoint::http::tests::every_route_that_modifies_or_is_reserved_has_a_journal_action`.
+- `crates/hearth-link/tests/audit.rs::a_read_only_account_is_refused_and_the_refusal_is_itself_journaled`.
 
 ## Cas limites
 - Le message du `403` dépend de la route : celui du journal parle du journal, celui des routes de comptes de la gestion des comptes (`auth::forbidden_message`).
@@ -34,3 +38,4 @@ Quand un compte lecture seule demande le journal ou son export, la réponse est 
 
 ## Historique
 - 2026-10-04 — création (HRT-05, session 2026-10-04-hearth-creation).
+- 2026-10-06 — section « Interface » et pointeurs du client (HRT-14, session 2026-10-04-hearth-creation).
