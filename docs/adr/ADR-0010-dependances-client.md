@@ -51,7 +51,7 @@ HRT-08 pose la coquille Windows du client (`apps/desktop`). ADR-0002 a choisi Ta
 - `installer/hooks.nsh` : contrôle de Windows 10 64 bits et de 50 Mo libres avant toute écriture (BR-CLIENT-014), dans `.onGUIInit` et dans une section masquée placée avant celles du modèle (WebView2, copie) : un refus ne laisse rien sur la machine, mode silencieux compris. Le modèle n'a pas de crochet plus tôt.
 - `installer/French.nsh` : remplace le fichier français de Tauri pour tutoyer et reformuler la case de désinstallation.
 - Désinstallation : le modèle NSIS de Tauri arrête l'application, retire l'entrée de démarrage et propose la case d'effacement des données ; la page à deux boutons « Garder mes serveurs » / « Tout effacer » de la spec exigerait un modèle NSIS entier sur mesure, trop coûteux à maintenir : la case « Tout effacer : ... » (décochée = tout garder) en tient lieu.
-- La case de démarrage avec Windows à l'installation (BR-CLIENT-006) n'est pas dans l'installateur : le réglage existe dans l'application (BR-CLIENT-007). Suivi : ticket HRT-21 (page d'options NSIS sur mesure).
+- La case de démarrage avec Windows à l'installation (BR-CLIENT-006) est dans l'installateur depuis HRT-21 (ADR-0026) ; le réglage de l'application (BR-CLIENT-007) lit la même entrée.
 - La case « Tout effacer » promet d'effacer aussi les mots de passe mémorisés, mais le modèle ne supprime que des dossiers : quand le coffre Windows arrivera, la désinstallation devra y effacer les identifiants (note dans `installer/French.nsh`).
 
 ## Contrat du pont de liaison (interface ⇄ `hearth-link`)
