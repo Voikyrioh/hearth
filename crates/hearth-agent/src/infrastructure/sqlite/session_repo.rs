@@ -97,6 +97,23 @@ impl SessionRepo for SqliteSessionRepo {
         .map_err(storage(RESOURCE))?;
         Ok(found.is_some())
     }
+
+    async fn has_open_session_from(
+        &self,
+        address: &str,
+        now: OffsetDateTime,
+    ) -> Result<bool, StoreError> {
+        let now = format_date(RESOURCE, now)?;
+        let found = sqlx::query_scalar!(
+            r#"SELECT 1 AS "found!: i64" FROM sessions WHERE client_addr = ? AND expires_at > ? LIMIT 1"#,
+            address,
+            now
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(found.is_some())
+    }
 }
 
 #[async_trait]

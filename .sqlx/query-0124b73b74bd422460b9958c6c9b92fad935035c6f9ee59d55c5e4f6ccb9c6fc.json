@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM known_addresses WHERE account_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "0124b73b74bd422460b9958c6c9b92fad935035c6f9ee59d55c5e4f6ccb9c6fc"
+}

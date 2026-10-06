@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT address, last_success_at FROM known_addresses WHERE account_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "address",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "known_addresses",
+            "name": "address"
+          }
+        }
+      },
+      {
+        "name": "last_success_at",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "known_addresses",
+            "name": "last_success_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "477a8dd95f2acd83ef6384036e342c16449121f3cb2defd0a14b2146c668c1d2"
+}

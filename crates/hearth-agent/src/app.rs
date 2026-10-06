@@ -40,8 +40,8 @@ use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::sqlite::{
-    Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteLoginAttemptRepo,
-    SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
+    Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteKnownAddressRepo,
+    SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
 };
 use crate::infrastructure::system::gpu;
 use crate::infrastructure::system::{SysinfoProbe, SystemMachineInfo};
@@ -223,6 +223,7 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             accounts_repo,
             sessions_repo,
             Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
+            Arc::new(SqliteKnownAddressRepo::new(pool.clone())),
             store.clone(),
             adapters.hasher.clone(),
             adapters.clock.clone(),

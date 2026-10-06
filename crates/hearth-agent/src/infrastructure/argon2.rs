@@ -193,6 +193,16 @@ mod tests {
         PlainPassword::new(Secret::from(value), &Username::parse("marie").unwrap()).unwrap()
     }
 
+    #[test]
+    fn the_login_ceiling_stays_under_the_hasher_capacity() {
+        // Une connexion admise ne reçoit jamais `503 BUSY` du hacheur (ADR-0022).
+        const {
+            assert!(
+                crate::domain::login_policy::MAX_LOGINS_IN_FLIGHT <= MAX_CONCURRENT + MAX_WAITING
+            )
+        };
+    }
+
     #[tokio::test]
     async fn hash_is_argon2id_with_the_owasp_parameters() {
         let hasher = Argon2Hasher::new().unwrap();

@@ -12,6 +12,7 @@ mod gpu_probe;
 mod id_gen;
 mod identity_store;
 mod install_host;
+mod known_address_repo;
 mod login_attempt_repo;
 mod machine_info;
 mod monotonic_clock;
@@ -37,6 +38,7 @@ pub use install_host::{
     Answered, BinaryInstalled, ConfigSpec, HostError, HostFacts, InstallHost, InstallLock,
     InstallPaths,
 };
+pub use known_address_repo::{KnownAddressRepo, KnownAddressTx};
 pub use login_attempt_repo::{LoginAttemptRepo, LoginAttemptTx};
 pub use machine_info::MachineInfo;
 pub use monotonic_clock::MonotonicClock;

@@ -5,7 +5,7 @@ titre: Après 5 échecs de connexion, une attente doublée à chaque échec (pla
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-connecter-serveur.md (BR-CONN-006), technique-socle §6-7, HRT-04
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-CONN-006 — Verrouillage progressif des connexions
@@ -31,5 +31,10 @@ Un compteur sans activité depuis 24 h (`domain::lockout::ATTEMPT_RETENTION`, et
 ## Règles liées
 - BR-CONN-007, BR-CONN-013.
 
+## Complément HRT-20 (énoncé ci-dessus INCHANGÉ, repris de la version validée)
+Précision seulement : le compteur du couple identifiant + adresse s'applique aussi à une adresse connue du compte (BR-CONN-019) : la connaître ne dispense ni du mot de passe ni de ce compteur. Un troisième compteur, par identifiant, complète celui-ci (BR-CONN-007, BR-CONN-018).
+
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
+- 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).
+- 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).

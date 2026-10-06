@@ -4,10 +4,14 @@
 pub mod accounts;
 pub mod audit;
 pub mod compat;
+pub mod eviction;
+pub mod identifier_slowdown;
 pub mod identity_policy;
 pub mod install;
 pub mod install_id;
+pub mod known_address;
 pub mod lockout;
+pub mod login_policy;
 pub mod machine;
 pub mod metrics;
 pub mod operations;

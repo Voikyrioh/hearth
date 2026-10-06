@@ -458,6 +458,37 @@ async fn silent_anonymous_connections_never_take_a_stream_place() {
 }
 
 #[tokio::test]
+async fn an_unknown_address_never_takes_the_waiting_places_reserved_for_known_ones() {
+    let env = env().await;
+    let mut config = metering();
+    // Quotas d'attente de production (16 au total, dont 4 réservées) ; une seule adresse peut les
+    // prendre toutes ; les anonymes ne sont pas coupés pendant le test.
+    config.stream.auth_timeout = Duration::from_secs(60);
+    config.stream.max_pending_per_address = 16;
+    let agent = https::start_metered(&env, config).await;
+    let status = |result: Result<WsClient, support::ws::Refused>| result.err().map(|r| r.status);
+
+    // Cette adresse n'a ni session ni connexion réussie : elle n'a droit qu'aux 12 places hors
+    // réserve, la 13e est refusée (503 BUSY).
+    let mut silent = Vec::new();
+    for _ in 0..12 {
+        silent.push(ws::open(&agent).await);
+    }
+    assert_eq!(status(ws::connect(&agent, Some("1")).await), Some(503));
+
+    // Un client se connecte (session ouverte depuis cette adresse) : l'adresse est connue, elle
+    // prend les places réservées (4). L'agent est alors plein pour tous.
+    let _token = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    for _ in 0..4 {
+        silent.push(ws::open(&agent).await);
+    }
+    assert_eq!(status(ws::connect(&agent, Some("1")).await), Some(503));
+
+    drop(silent);
+    agent.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_card_appearing_after_the_snapshot_gets_the_subscriber_a_new_snapshot() {
     let env = env().await;
     let gpu = Arc::new(ToggleGpu::default());

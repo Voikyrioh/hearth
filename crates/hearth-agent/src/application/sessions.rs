@@ -14,14 +14,16 @@ use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use super::accounts::AccountView;
 use super::audit::{AuditTrail, Pending};
 use super::ports::{
-    AccountRepo, AuditSink, Clock, HashError, IdGen, LoginAttemptRepo, PasswordHasher, SessionRepo,
-    Store, StoreError, TokenGen, TokenGenError,
+    AccountRepo, AuditSink, Clock, HashError, IdGen, KnownAddressRepo, LoginAttemptRepo,
+    PasswordHasher, SessionRepo, Store, StoreError, TokenGen, TokenGenError,
 };
 use crate::domain::accounts::Username;
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
-use crate::domain::lockout::{
-    AttemptKey, LockoutDecision, LockoutEvent, LockoutState, admits_in_queue, retry_after_seconds,
-    step, step_address,
+use crate::domain::identifier_slowdown;
+use crate::domain::known_address::{self, canonical, is_known};
+use crate::domain::lockout::{AttemptKey, LockoutState, retry_after_seconds};
+use crate::domain::login_policy::{
+    LoginState, QueueRefusal, Verdict, admit, admit_login, conclude,
 };
 use crate::domain::secret::Secret;
 use crate::domain::session_token::SessionToken;
@@ -87,6 +89,7 @@ pub struct SessionService {
     accounts: Arc<dyn AccountRepo>,
     sessions: Arc<dyn SessionRepo>,
     attempts: Arc<dyn LoginAttemptRepo>,
+    known: Arc<dyn KnownAddressRepo>,
     store: Arc<dyn Store>,
     hasher: Arc<dyn PasswordHasher>,
     clock: Arc<dyn Clock>,
@@ -99,10 +102,18 @@ pub struct SessionService {
     turns: Turns,
 }
 
-/// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, et une file
-/// d'attente bornée (`domain::lockout::admits_in_queue`).
+/// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, une file
+/// d'attente bornée par adresse et un plafond global dont une part est réservée aux adresses déjà
+/// connues (`domain::login_policy::admit_login`, ADR-0022).
 #[derive(Default)]
-struct Turns(Mutex<HashMap<String, Slot>>);
+struct Turns(Mutex<TurnState>);
+
+#[derive(Default)]
+struct TurnState {
+    slots: HashMap<String, Slot>,
+    /// Connexions admises, toutes adresses confondues (en cours et en attente).
+    total: usize,
+}
 
 /// Une adresse : son verrou, et combien de connexions elle a d'admises (en cours et en attente).
 #[derive(Default)]
@@ -116,29 +127,34 @@ struct Slot {
 struct Turn<'a> {
     turns: &'a Turns,
     key: String,
+    mutex: Arc<AsyncMutex<()>>,
     guard: Option<OwnedMutexGuard<()>>,
 }
 
-impl Turns {
-    /// Prend place dans la file de `key` et attend son tour ; `None` si la file de l'adresse est
-    /// pleine (refus immédiat).
-    async fn lock(&self, key: &str) -> Option<Turn<'_>> {
-        let mutex = {
-            let mut map = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            let slot = map.entry(key.to_owned()).or_default();
-            if !admits_in_queue(slot.in_flight) {
-                return None;
-            }
-            slot.in_flight += 1;
-            slot.mutex.clone()
-        };
-        let mut turn = Turn {
+impl<'a> Turns {
+    /// Prend une place dans la file de `key` (sans attendre son tour) ; refusée si la file de
+    /// l'adresse ou le plafond global est atteint. `known` : l'adresse peut prendre les places
+    /// réservées.
+    fn admit(&'a self, key: &str, known: bool) -> Result<Turn<'a>, QueueRefusal> {
+        let mut state = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let own = state.slots.get(key).map_or(0, |slot| slot.in_flight);
+        admit_login(state.total, own, known)?;
+        state.total += 1;
+        let slot = state.slots.entry(key.to_owned()).or_default();
+        slot.in_flight += 1;
+        Ok(Turn {
             turns: self,
             key: key.to_owned(),
+            mutex: slot.mutex.clone(),
             guard: None,
-        };
-        turn.guard = Some(mutex.lock_owned().await);
-        Some(turn)
+        })
+    }
+}
+
+impl Turn<'_> {
+    /// Attend son tour.
+    async fn wait(&mut self) {
+        self.guard = Some(self.mutex.clone().lock_owned().await);
     }
 }
 
@@ -146,33 +162,25 @@ impl Drop for Turn<'_> {
     fn drop(&mut self) {
         // Rend le tour, puis la place ; oublie l'entrée si plus personne ne l'attend.
         self.guard.take();
-        let mut map = self.turns.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(slot) = map.get_mut(&self.key) {
+        let mut state = self.turns.0.lock().unwrap_or_else(PoisonError::into_inner);
+        state.total = state.total.saturating_sub(1);
+        if let Some(slot) = state.slots.get_mut(&self.key) {
             slot.in_flight = slot.in_flight.saturating_sub(1);
             if slot.in_flight == 0 {
-                map.remove(&self.key);
+                state.slots.remove(&self.key);
             }
         }
     }
 }
 
-/// Attente la plus longue imposée par l'une des décisions, s'il y en a une.
-fn longest_wait(decisions: &[LockoutDecision]) -> Option<Duration> {
-    decisions
-        .iter()
-        .filter_map(|decision| match decision {
-            LockoutDecision::Blocked { retry_after } => Some(*retry_after),
-            LockoutDecision::Allowed => None,
-        })
-        .max()
-}
-
-/// La tentative est-elle admise ? Sinon, l'attente à annoncer (la plus longue des deux compteurs).
-fn admission(pair: LockoutState, address: LockoutState, now: OffsetDateTime) -> Option<Duration> {
-    longest_wait(&[
-        step(pair, LockoutEvent::Attempt, now).1,
-        step_address(address, LockoutEvent::Attempt, now).1,
-    ])
+/// Les clés des trois compteurs d'une tentative.
+struct Keys {
+    pair: AttemptKey,
+    address: AttemptKey,
+    identifier: AttemptKey,
+    /// L'identifiant tel que la base le connaît (pour les adresses connues) : même forme que celle
+    /// que `Username::parse` donne, sinon la valeur saisie (qui ne correspond à aucun compte).
+    username: String,
 }
 
 impl SessionService {
@@ -181,6 +189,7 @@ impl SessionService {
         accounts: Arc<dyn AccountRepo>,
         sessions: Arc<dyn SessionRepo>,
         attempts: Arc<dyn LoginAttemptRepo>,
+        known: Arc<dyn KnownAddressRepo>,
         store: Arc<dyn Store>,
         hasher: Arc<dyn PasswordHasher>,
         clock: Arc<dyn Clock>,
@@ -193,6 +202,7 @@ impl SessionService {
             accounts,
             sessions,
             attempts,
+            known,
             store,
             hasher,
             clock,
@@ -218,21 +228,36 @@ impl SessionService {
         password: Secret,
         client: &ClientInfo,
     ) -> Result<LoginOutcome, LoginError> {
-        let pair = AttemptKey::new(username, &client.addr);
-        let address = AttemptKey::address(&client.addr);
-        // Un seul tour, par adresse : le couple contient l'adresse, deux connexions du même couple
-        // sont donc déjà sérialisées par le tour de leur adresse.
-        let Some(_turn) = self.turns.lock(address.as_str()).await else {
+        let keys = Keys {
+            pair: AttemptKey::new(username, &client.addr),
+            address: AttemptKey::address(&client.addr),
+            identifier: AttemptKey::identifier(username),
+            username: Username::parse(username)
+                .map_or_else(|_| username.to_owned(), |parsed| parsed.as_str().to_owned()),
+        };
+        // Un seul tour, par adresse exacte : le couple contient l'adresse, deux connexions du même
+        // couple sont donc déjà sérialisées par le tour de leur adresse. Comme pour le flux, une
+        // adresse est d'abord admise comme inconnue ; seule la saturation fait lire en base si elle
+        // est déjà connue (d'un compte quelconque) et peut prendre une place réservée : la décision
+        // ne dépend jamais de l'identifiant saisi (ADR-0022, BR-CONN-013).
+        let admitted = match self.turns.admit(&canonical(&client.addr), false) {
+            Err(QueueRefusal::Saturated)
+                if self.address_is_known(&client.addr).await.unwrap_or(false) =>
+            {
+                self.turns.admit(&canonical(&client.addr), true)
+            }
+            other => other,
+        };
+        let Ok(mut turn) = admitted else {
             tracing::warn!(
                 addr = %client.addr,
                 reason = "queue_full",
-                "connexion refusée : trop de connexions en attente pour cette adresse"
+                "connexion refusée : trop de connexions en attente"
             );
             return Err(LoginError::Busy);
         };
-        let result = self
-            .login_in_turn(username, password, client, &pair, &address)
-            .await;
+        turn.wait().await;
+        let result = self.login_in_turn(username, password, client, &keys).await;
         // Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de
         // passe tapé au mauvais endroit, BR-AUDIT-005) ni le mot de passe. Le journal d'activité
         // consigne connexions et verrouillages (le succès dans la transaction de la tentative, les refus par le regroupement).
@@ -258,14 +283,20 @@ impl SessionService {
         username: &str,
         password: Secret,
         client: &ClientInfo,
-        pair: &AttemptKey,
-        address: &AttemptKey,
+        keys: &Keys,
     ) -> Result<LoginOutcome, LoginError> {
-        // 1. Admission : pendant une attente, on ne vérifie même pas le mot de passe.
+        // 1. Admission : pendant une attente du couple ou de l'adresse, on ne vérifie même pas le
+        //    mot de passe. Le ralentissement par identifiant, lui, refuse APRÈS la vérification
+        //    (étape 3) : même chemin et même durée pour un identifiant existant ou non.
         let now = self.clock.now();
-        let pair_state = self.attempts.get(pair).await?;
-        let address_state = self.attempts.get(address).await?;
-        if let Some(retry_after) = admission(pair_state, address_state, now) {
+        let early = LoginState {
+            pair: self.attempts.get(&keys.pair).await?,
+            address: self.attempts.get(&keys.address).await?,
+            identifier: identifier_slowdown::Slowdown::default(),
+            known: false,
+            seen: false,
+        };
+        if let Some(retry_after) = admit(&early, now) {
             return Err(LoginError::TooManyAttempts { retry_after });
         }
 
@@ -290,11 +321,21 @@ impl SessionService {
         //    un mot de passe changé entre-temps ne connecte pas.
         let mut tx = self.store.begin().await?;
         let now = self.clock.now();
-        let pair_state = tx.login_attempts().get(pair).await?;
-        let address_state = tx.login_attempts().get(address).await?;
-        if let Some(retry_after) = admission(pair_state, address_state, now) {
-            return Err(LoginError::TooManyAttempts { retry_after });
-        }
+        let known = {
+            let list = tx.known_addresses().of_username(&keys.username).await?;
+            is_known(&list, &client.addr, now)
+        };
+        let before = LoginState {
+            pair: tx.login_attempts().get(&keys.pair).await?,
+            address: tx.login_attempts().get(&keys.address).await?,
+            identifier: tx.login_attempts().identifier(&keys.identifier).await?,
+            known,
+            // Connue d'un compte quelconque : lue pour tout identifiant, existant ou non.
+            seen: tx
+                .known_addresses()
+                .address_is_known(&canonical(&client.addr), known_address::cutoff(now))
+                .await?,
+        };
         let account =
             match verified_account {
                 Some(account) => tx.accounts().find(&account.id).await?.filter(|current| {
@@ -302,58 +343,104 @@ impl SessionService {
                 }),
                 None => None,
             };
-        let Some(account) = account else {
-            let (pair_next, pair_decision) = step(pair_state, LockoutEvent::Failed, now);
-            let (address_next, address_decision) =
-                step_address(address_state, LockoutEvent::Failed, now);
-            tx.login_attempts().save(pair, &pair_next, now).await?;
+        let (after, verdict) = conclude(before, account.is_some(), now);
+        // Écrit ce qui a changé ; une ligne neuve peut dépasser la borne de la table.
+        let vacant = LoginState {
+            pair: LockoutState::default(),
+            address: LockoutState::default(),
+            identifier: identifier_slowdown::Slowdown::default(),
+            known,
+            seen: before.seen,
+        };
+        if after.pair != before.pair || matches!(verdict, Verdict::Granted) {
             tx.login_attempts()
-                .save(address, &address_next, now)
+                .save(&keys.pair, &after.pair, now)
                 .await?;
-            tx.commit().await?;
-            // Journal (BR-AUDIT-003, 005, 006, 007), une fois les compteurs validés : la tentative
-            // refusée, avec le compte visé seulement s'il existe (la raison est la même que
-            // l'identifiant existe ou non, et l'identifiant saisi n'est jamais retenu), puis le
-            // blocage qu'elle a éventuellement déclenché. **Par le regroupement des refus**
-            // (`AuditSink`) : la clé est le compte (ou « anonyme »), l'action, le résultat et la
-            // raison, jamais l'adresse. Une rafale de refus depuis de nombreuses adresses n'écrit
-            // qu'un premier refus et une synthèse (qui garde l'origine de la dernière occurrence),
-            // et ne chasse pas l'historique du journal.
-            let wait = longest_wait(&[pair_decision, address_decision]);
-            let actor = Actor::new(targeted, Origin::client(Some(&client.name), &client.addr));
-            let reason = if Username::parse(username).is_err() {
-                Reason::InvalidIdentifier
-            } else {
-                Reason::InvalidCredentials
-            };
-            self.sink
-                .record(
-                    actor.clone(),
-                    AuditAction::Login,
-                    Target::None,
-                    Outcome::Denied(reason),
+        }
+        if after.address != before.address {
+            tx.login_attempts()
+                .save(&keys.address, &after.address, now)
+                .await?;
+        }
+        if after.identifier != before.identifier {
+            tx.login_attempts()
+                .save_identifier(&keys.identifier, &after.identifier)
+                .await?;
+        }
+        if before.pair == vacant.pair || before.address == vacant.address {
+            tx.login_attempts().trim(now).await?;
+        }
+        if before.identifier == vacant.identifier && after.identifier != before.identifier {
+            tx.login_attempts().trim_identifiers(now).await?;
+        }
+
+        match verdict {
+            Verdict::Granted => {}
+            Verdict::Blocked(retry_after) => {
+                // Rien n'est compté : on libère la transaction avant tout autre accès.
+                tx.commit().await?;
+                return Err(LoginError::TooManyAttempts { retry_after });
+            }
+            Verdict::Slowed(retry_after) => {
+                tx.commit().await?;
+                self.journal_refusal(
+                    targeted,
+                    client,
+                    Outcome::Denied(Reason::TooManyAttempts {
+                        retry_after_s: retry_after_seconds(retry_after),
+                    }),
                 )
                 .await;
-            if let Some(retry_after) = wait {
-                self.sink
-                    .record(
-                        actor,
-                        AuditAction::LoginLocked,
-                        Target::None,
-                        Outcome::Denied(Reason::TooManyAttempts {
-                            retry_after_s: retry_after_seconds(retry_after),
-                        }),
-                    )
-                    .await;
+                return Err(LoginError::TooManyAttempts { retry_after });
             }
-            return Err(match wait {
-                Some(retry_after) => LoginError::TooManyAttempts { retry_after },
-                None => LoginError::InvalidCredentials,
-            });
+            Verdict::Failed(wait) => {
+                tx.commit().await?;
+                // Journal (BR-AUDIT-003, 005, 006, 007), une fois les compteurs validés : la
+                // tentative refusée, avec le compte visé seulement s'il existe (la raison est la
+                // même que l'identifiant existe ou non, et l'identifiant saisi n'est jamais
+                // retenu), puis le blocage qu'elle a éventuellement déclenché. **Par le
+                // regroupement des refus** (`AuditSink`) : la clé ne contient jamais l'adresse ni
+                // une durée. Une rafale de refus depuis de nombreuses adresses n'écrit qu'un
+                // premier refus et une synthèse, et ne chasse pas l'historique du journal.
+                let reason = if Username::parse(username).is_err() {
+                    Reason::InvalidIdentifier
+                } else {
+                    Reason::InvalidCredentials
+                };
+                self.journal_refusal(targeted.clone(), client, Outcome::Denied(reason))
+                    .await;
+                if let Some(retry_after) = wait {
+                    let actor =
+                        Actor::new(targeted, Origin::client(Some(&client.name), &client.addr));
+                    self.sink
+                        .record(
+                            actor,
+                            AuditAction::LoginLocked,
+                            Target::None,
+                            Outcome::Denied(Reason::TooManyAttempts {
+                                retry_after_s: retry_after_seconds(retry_after),
+                            }),
+                        )
+                        .await;
+                }
+                return Err(match wait {
+                    Some(retry_after) => LoginError::TooManyAttempts { retry_after },
+                    None => LoginError::InvalidCredentials,
+                });
+            }
+        }
+        let Some(account) = account else {
+            // Inatteignable : `Granted` suppose un mot de passe vérifié sur un compte existant.
+            return Err(LoginError::InvalidCredentials);
         };
 
-        let (reset, _) = step(pair_state, LockoutEvent::Succeeded, now);
-        tx.login_attempts().save(pair, &reset, now).await?;
+        // Connexion réussie : cette adresse devient (ou reste) connue de ce compte, et seulement
+        // ainsi (ADR-0022).
+        let remembered = tx.known_addresses().of_account(&account.id).await?;
+        let remembered = known_address::learn(remembered, &client.addr, now);
+        tx.known_addresses()
+            .replace(&account.id, &remembered)
+            .await?;
         let token = self.tokens.generate()?;
         let session = Session {
             id: SessionId::new(self.ids.new_id()),
@@ -390,6 +477,39 @@ impl SessionService {
             expires_at: session.expires_at,
             account: view,
         })
+    }
+
+    /// Écrit un refus de connexion au journal, par le regroupement des refus (une entrée puis une
+    /// synthèse au compte exact, BR-AUDIT-007). Ni l'identifiant saisi ni le mot de passe ne sont
+    /// retenus ; le compte visé n'est renseigné que s'il existe (BR-AUDIT-006).
+    async fn journal_refusal(
+        &self,
+        targeted: Option<Username>,
+        client: &ClientInfo,
+        outcome: Outcome,
+    ) {
+        self.sink
+            .record(
+                Actor::new(targeted, Origin::client(Some(&client.name), &client.addr)),
+                AuditAction::Login,
+                Target::None,
+                outcome,
+            )
+            .await;
+    }
+
+    /// Cette adresse a-t-elle déjà une session valide, ou une connexion réussie dans les
+    /// 30 derniers jours, pour un compte quelconque ? Sert aux places d'attente du flux
+    /// temps réel, réservées en priorité aux adresses connues (ADR-0022, BR-CONN-020).
+    pub async fn address_is_known(&self, addr: &str) -> Result<bool, StoreError> {
+        let now = self.clock.now();
+        let addr = canonical(addr);
+        if self.sessions.has_open_session_from(&addr, now).await? {
+            return Ok(true);
+        }
+        self.known
+            .address_is_known(&addr, known_address::cutoff(now))
+            .await
     }
 
     /// Reconnaît la session du jeton présenté et repousse son expiration (expiration

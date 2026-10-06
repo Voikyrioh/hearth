@@ -71,7 +71,7 @@ docs/              → INDEX.md (adr, business-rules, open-api, components, bugs
 | la résilience du lien (états, seuils, tentatives) | `crates/hearth-link/src/domain/state.rs`, `domain/backoff.rs`, `docs/business-rules/BR-RESIL-*.md` et `docs/adr/ADR-0007-machine-a-etats-du-lien.md` |
 | les tests de résilience (mandataire à pannes) | `crates/hearth-link/tests/fault_proxy.rs` et `tests/support/proxy.rs` |
 | une action coupée avant sa réponse | `crates/hearth-link/src/domain/pending_ops.rs` et `docs/business-rules/BR-RESIL-009-*.md`, `BR-RESIL-010-*.md` |
-| un cas d'authentification | `docs/adr/ADR-0005-tls-epingle.md`, `crates/hearth-agent/src/application/sessions.rs` et `domain/{sessions,lockout,session_token}.rs` |
+| un cas d'authentification | `docs/adr/ADR-0005-tls-epingle.md`, `crates/hearth-agent/src/application/sessions.rs` et `domain/{sessions,lockout,login_policy,known_address,identifier_slowdown,session_token}.rs` ; verrouillage : `docs/adr/ADR-0022-verrouillage-adresses-connues-et-ralentissement-par-identifiant.md` |
 | l'épinglage de l'empreinte côté client | `crates/hearth-link/src/adapters/tls.rs`, `domain/pinning.rs` et `docs/business-rules/BR-CONN-002-*.md`, `BR-CONN-003-*.md` |
 | le pont réel de l'application, le coffre Windows | `apps/desktop/src-tauri/src/link.rs`, `link_dto.rs`, `vault.rs` et `docs/adr/ADR-0013-pont-de-liaison-et-coffre-windows.md` |
 | la mise à jour du client (vérification, report, installation signée) | `apps/desktop/src-tauri/src/update/`, `src/stores/updates.ts`, `src/updates/`, `docs/business-rules/BR-UPDATE-001-*.md` à `010`, `docs/adr/ADR-0017-mise-a-jour-du-client.md` et `docs/runbooks/publier-une-version-du-client.md` |

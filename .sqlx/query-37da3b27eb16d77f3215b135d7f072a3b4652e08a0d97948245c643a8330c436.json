@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO known_addresses (account_id, address, last_success_at)\n                 VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "37da3b27eb16d77f3215b135d7f072a3b4652e08a0d97948245c643a8330c436"
+}

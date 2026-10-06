@@ -5,7 +5,7 @@ titre: Les tentatives échouées sont comptées par identifiant et adresse, et p
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-connecter-serveur.md (BR-CONN-007, « par compte et par serveur »), technique-socle §6, HRT-04
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-CONN-007 — Deux compteurs d'échecs de connexion
@@ -35,7 +35,15 @@ Une tentative est refusée dès que l'un des deux compteurs est en attente ; la 
 ## Règles liées
 - BR-CONN-006, BR-CONN-013.
 
+## Complément HRT-20 (énoncé ci-dessus INCHANGÉ, repris de la version validée)
+**À valider par le détenteur du produit.** Les compteurs 1 (couple) et 2 (adresse seule) restent **par adresse exacte, en IPv4 comme en IPv6** (aucun regroupement par préfixe /64, décision du détenteur) et s'appliquent à toute adresse, connue ou non. Ajouts de HRT-20 :
+1. **Troisième compteur, par identifiant**, toutes adresses confondues (BR-CONN-018) : ralentissement croissant, plafond 2 minutes, jamais un blocage. Il remplace la « limite connue » ci-dessus sur le contournement par changement d'adresse (« aucun plafond par identifiant seul n'existe… ») : la brèche est fermée sans que l'on puisse verrouiller un compte à distance.
+2. **Plafond global** des connexions en cours : 32, dont 8 réservées aux adresses déjà connues (BR-CONN-020). La file par adresse (huit en attente) est inchangée.
+Code ajouté : `domain/login_policy.rs::{admit, conclude}`, `domain/lockout.rs::AttemptKey::identifier`. Tests : `domain::login_policy::tests`, `tests/login_lockout.rs`.
+
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-04 — compteur par adresse seule ajouté, limites écrites (review Stephen, HRT-04).
 - 2026-10-04 — file d'attente bornée par adresse (`429`), nettoyage de l'identifiant étendu aux séparateurs Unicode et caractères de format (suivis review HRT-04, HRT-05).
+- 2026-10-06 — compléments HRT-20 (section ajoutée à valider, énoncé conservé tel quel ; ADR-0022).
+- 2026-10-06 — compléments HRT-20 (section ajoutée à valider, énoncé conservé tel quel ; ADR-0022).

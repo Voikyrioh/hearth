@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use super::ports::{Clock, Store, StoreError};
 use crate::domain::audit::{PURGE_BATCH, excess_entries, retention_cutoff};
+use crate::domain::identifier_slowdown::RESET_AFTER;
+use crate::domain::known_address;
 use crate::domain::lockout::ATTEMPT_RETENTION;
 use crate::domain::operations::RETENTION as OPERATION_RETENTION;
 use crate::domain::sessions::REVOCATION_RETENTION;
@@ -18,6 +20,8 @@ pub struct PurgeReport {
     pub sessions: u64,
     pub revocations: u64,
     pub login_attempts: u64,
+    pub identifier_slowdowns: u64,
+    pub known_addresses: u64,
     pub operations: u64,
     pub audit_events: u64,
 }
@@ -79,6 +83,16 @@ impl MaintenanceService {
             login_attempts: tx
                 .login_attempts()
                 .purge_inactive(now - ATTEMPT_RETENTION, now)
+                .await?,
+            // Ralentissements par identifiant (sans échec depuis le délai de remise à zéro) et
+            // adresses connues expirées (ADR-0022).
+            identifier_slowdowns: tx
+                .login_attempts()
+                .purge_identifiers(now - RESET_AFTER, now)
+                .await?,
+            known_addresses: tx
+                .known_addresses()
+                .purge(known_address::cutoff(now))
                 .await?,
             operations: tx.operations().purge(now - OPERATION_RETENTION).await?,
             // Le journal se purge à part, par lots (voir `purge_journal`).
