@@ -22,6 +22,7 @@ mod client_release;
 mod docker;
 mod e2e;
 mod e2e_update;
+mod release_core;
 mod shellcheck;
 
 use std::process::ExitCode;

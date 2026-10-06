@@ -15,6 +15,7 @@ fn record() -> UpdateRecord {
     UpdateRecord {
         last_attempt_at: Some(1_800_000_000_000),
         last_request_at: Some(1_800_000_000_000),
+        automatic_attempts: vec![1_799_999_000_000, 1_800_000_000_000],
         last_success_at: Some(1_799_999_999_000),
         postponed_until: Some(1_800_086_400_000),
         available: Some(Release {

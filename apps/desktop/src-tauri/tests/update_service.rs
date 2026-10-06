@@ -234,13 +234,13 @@ async fn a_failed_attempt_counts_it_is_not_retried_before_the_next_day() {
 #[tokio::test]
 async fn an_attempt_that_could_not_send_a_request_does_not_use_the_daily_quota() {
     let rig = rig();
-    // Windows démarre, le réseau n'est pas prêt : trois heures de battements sans réseau.
-    for _ in 0..3 {
+    // Windows démarre, le réseau n'est pas prêt : deux battements horaires sans réseau.
+    for _ in 0..2 {
         script_check(&rig, offline());
         rig.service.tick().await;
         rig.clock.advance(HOUR);
     }
-    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 3);
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 2);
     let state = rig.service.state();
     assert_eq!(state.last_checked_at, None);
     assert!(state.failure.is_none());
@@ -249,7 +249,7 @@ async fn an_attempt_that_could_not_send_a_request_does_not_use_the_daily_quota()
     // Le réseau revient : la vérification a lieu tout de suite, sans attendre 24 h.
     script_check(&rig, Ok(Some(candidate("1.1.0"))));
     rig.service.tick().await;
-    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 4);
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 3);
     assert!(rig.service.state().banner_visible);
 
     // Et c'est la seule requête partie de la journée (au plus une par 24 h).
@@ -257,7 +257,45 @@ async fn an_attempt_that_could_not_send_a_request_does_not_use_the_daily_quota()
         rig.clock.advance(HOUR);
         rig.service.tick().await;
     }
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn the_hard_cap_stops_automatic_attempts_even_when_none_sent_a_request() {
+    let rig = rig();
+    // Réseau absent toute la journée : 3 tentatives au plus par 24 h glissantes, pas 24.
+    for _ in 0..24 {
+        script_check(&rig, offline());
+        rig.service.tick().await;
+        rig.clock.advance(HOUR);
+    }
+    assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 3);
+    // Le plafond est persisté : un redémarrage ne le remet pas à zéro.
+    let again = rig_with(rig.store.load());
+    again.clock.advance(2 * HOUR);
+    script_check(&again, offline());
+    again.service.tick().await;
+    assert_eq!(again.feed.check_calls.load(Ordering::SeqCst), 0);
+    // La fenêtre glisse : 24 h après la première tentative, une place se libère.
+    rig.clock.advance(HOUR);
+    script_check(&rig, Ok(None));
+    rig.service.tick().await;
     assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn failures_that_reached_the_first_host_use_the_quota_and_the_cap_counts_them() {
+    // Échec TLS, second saut, délai dépassé, réponse invalide : tous `failed`, quota consommé.
+    for message in ["tls", "second saut", "délai dépassé", "réponse invalide"] {
+        let rig = rig();
+        script_check(&rig, Err(FeedError::failed(message)));
+        rig.service.tick().await;
+        for _ in 0..23 {
+            rig.clock.advance(HOUR);
+            rig.service.tick().await;
+        }
+        assert_eq!(rig.feed.check_calls.load(Ordering::SeqCst), 1, "{message}");
+    }
 }
 
 #[tokio::test]

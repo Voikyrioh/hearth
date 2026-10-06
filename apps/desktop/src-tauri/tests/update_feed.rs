@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use hearth_desktop_lib::update::domain::{Candidate, DownloadPolicy, UpdateRecord};
+use hearth_desktop_lib::update::domain::{Candidate, DownloadPolicy, MAX_REDIRECTS, UpdateRecord};
 use hearth_desktop_lib::update::dto::{UpdateFailure, UpdatePhase, UpdateStateDto};
 use hearth_desktop_lib::update::feed::{TARGET, TauriFeed, plugin_with_key};
 use hearth_desktop_lib::update::ports::{
@@ -40,6 +40,8 @@ enum Reply {
     Status(u16),
     /// Redirige (302) vers cette adresse.
     Redirect(String),
+    /// Accepte la connexion et ne répond jamais.
+    Hang,
 }
 
 struct Server {
@@ -81,11 +83,16 @@ impl Server {
                         .to_owned();
                     hits.lock().unwrap().push(path.clone());
                     let reply = routes.lock().unwrap().get(&path).cloned();
+                    if matches!(reply, Some(Reply::Hang)) {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        return;
+                    }
                     let response: Vec<u8> = match reply {
                         None | Some(Reply::Status(404)) => {
                             b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                                 .to_vec()
                         }
+                        Some(Reply::Hang) => unreachable!(),
                         Some(Reply::Redirect(to)) => format!(
                             "HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         )
@@ -126,6 +133,23 @@ impl Server {
 
     fn serve(&self, path: &str, reply: Reply) {
         self.routes.lock().unwrap().insert(path.to_owned(), reply);
+    }
+
+    /// `n` redirections de `start` à `end` : start, start~1, …, start~(n-1), end.
+    fn chain(&self, start: &str, n: usize, end: &str) {
+        for step in 0..n {
+            let from = if step == 0 {
+                start.to_owned()
+            } else {
+                format!("{start}~{step}")
+            };
+            let to = if step + 1 == n {
+                end.to_owned()
+            } else {
+                format!("{start}~{}", step + 1)
+            };
+            self.serve(&from, Reply::Redirect(self.url(&to)));
+        }
     }
 
     fn hits(&self, path: &str) -> usize {
@@ -208,6 +232,10 @@ fn manifest(version: &str, url: &str, signature: &str) -> Vec<u8> {
 /// Application simulée : Tauri y fixe la version du client à 0.1.0 (`mock_context`), c'est donc
 /// la « version en cours » du greffon dans ces tests.
 fn app(key: &TestKey) -> tauri::App<MockRuntime> {
+    app_for_public_file(&key.public_file())
+}
+
+fn app_for_public_file(public_file: &str) -> tauri::App<MockRuntime> {
     let mut context = mock_context(noop_assets());
     // La configuration du greffon est celle de `tauri.conf.json` (dont `requireSignedVersion`) et
     // non une copie : ce que les tests éprouvent est ce qui est livré.
@@ -224,7 +252,7 @@ fn app(key: &TestKey) -> tauri::App<MockRuntime> {
         .0
         .insert("updater".to_owned(), config["plugins"]["updater"].clone());
     mock_builder()
-        .plugin(plugin_with_key::<MockRuntime>(&key.public_file()))
+        .plugin(plugin_with_key::<MockRuntime>(public_file))
         .build(context)
         .unwrap()
 }
@@ -848,17 +876,219 @@ async fn a_redirect_is_followed_when_the_policy_allows_the_hop() {
 }
 
 #[tokio::test]
-async fn a_redirect_loop_stops_at_the_hop_limit() {
+async fn the_installer_follows_exactly_the_maximum_number_of_redirects() {
+    let key = TestKey::new();
+    let file = installer(2_000);
+    for (redirects, accepted) in [(MAX_REDIRECTS, true), (MAX_REDIRECTS + 1, false), (2, true)] {
+        let server = Server::start().await;
+        server.serve("/real.exe", Reply::Ok(file.clone()));
+        server.chain("/setup.exe", redirects, "/real.exe");
+        let app = app(&key);
+        let (feed, _) = staged(&key, &server, &app, &key.sign(&file, "1.1.0")).await;
+        let outcome = no_progress(&feed, "1.1.0").await;
+        assert_eq!(
+            outcome.is_ok(),
+            accepted,
+            "{redirects} redirections : {outcome:?}"
+        );
+        assert_eq!(server.hits("/real.exe") == 1, accepted, "{redirects}");
+    }
+}
+
+#[tokio::test]
+async fn the_manifest_follows_the_same_bound_and_works_behind_githubs_two_redirects() {
+    let key = TestKey::new();
+    let file = installer(500);
+    let signature = key.sign(&file, "1.1.0");
+    for (redirects, accepted) in [(2, true), (MAX_REDIRECTS, true), (MAX_REDIRECTS + 1, false)] {
+        let server = Server::start().await;
+        server.serve(
+            "/manifest.json",
+            Reply::Ok(manifest("1.1.0", &server.url("/setup.exe"), &signature)),
+        );
+        server.chain("/latest.json", redirects, "/manifest.json");
+        let app = app(&key);
+        let outcome = feed_for(&app, &server).check().await;
+        assert_eq!(
+            outcome.is_ok(),
+            accepted,
+            "{redirects} redirections : {:?}",
+            outcome.map(|c| c.map(|c| c.version))
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_redirect_to_another_host_over_the_allowed_scheme_is_followed() {
+    // `localhost` n'est pas `127.0.0.1` : un autre hôte, suivi (aucune liste d'hôtes).
     let key = TestKey::new();
     let server = Server::start().await;
-    let file = installer(100);
-    server.serve("/setup.exe", Reply::Redirect(server.url("/setup.exe")));
+    let file = installer(1_000);
+    server.serve("/real.exe", Reply::Ok(file.clone()));
+    server.serve(
+        "/setup.exe",
+        Reply::Redirect(format!("http://localhost:{}/real.exe", server.port)),
+    );
     let app = app(&key);
     let (feed, _) = staged(&key, &server, &app, &key.sign(&file, "1.1.0")).await;
-    assert!(no_progress(&feed, "1.1.0").await.is_err());
-    assert!(
-        server.hits("/setup.exe") <= 5,
-        "{}",
-        server.hits("/setup.exe")
+    assert_eq!(no_progress(&feed, "1.1.0").await.unwrap(), file);
+}
+
+#[tokio::test]
+async fn a_plain_http_redirect_is_refused_for_the_manifest_too() {
+    let key = TestKey::new();
+    let server = Server::start().await;
+    server.serve("/real.json", Reply::Ok(b"{}".to_vec()));
+    server.serve("/latest.json", Reply::Redirect(server.url("/real.json")));
+    let app = app(&key);
+    let feed = TauriFeed::with_endpoint(
+        app.handle().clone(),
+        Url::parse(&server.url("/latest.json")).unwrap(),
+        DownloadPolicy::local_strict_redirects_for_tests(server.port),
     );
+    assert!(feed.check().await.is_err());
+    assert_eq!(server.hits("/real.json"), 0);
+}
+
+// ---- classement « aucune requête partie » : strictement le premier hôte, TCP ou nom -----------------
+
+#[tokio::test]
+async fn only_a_failed_name_or_connection_to_the_first_host_gives_the_quota_back() {
+    let key = TestKey::new();
+    let app = app(&key);
+    let server = Server::start().await;
+    let closed = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+
+    // Premier hôte injoignable : hors ligne (quota rendu).
+    let feed = TauriFeed::with_endpoint(
+        app.handle().clone(),
+        Url::parse(&format!("http://127.0.0.1:{closed}/latest.json")).unwrap(),
+        DownloadPolicy::local_for_tests(closed),
+    );
+    assert!(feed.check().await.unwrap_err().no_request_sent);
+
+    // Le premier hôte répond, c'est le SECOND saut qui ne se connecte pas : quota consommé.
+    server.serve(
+        "/latest.json",
+        Reply::Redirect(format!("http://127.0.0.1:{closed}/x")),
+    );
+    let error = feed_for(&app, &server).check().await.unwrap_err();
+    assert!(!error.no_request_sent, "{error:?}");
+
+    // Échec TLS (poignée de main contre un serveur qui parle en clair) : quota consommé.
+    let tls = TauriFeed::with_endpoint(
+        app.handle().clone(),
+        Url::parse(&format!("https://127.0.0.1:{}/latest.json", server.port)).unwrap(),
+        DownloadPolicy::local_for_tests(server.port),
+    );
+    let error = tls.check().await.unwrap_err();
+    assert!(!error.no_request_sent, "{error:?}");
+
+    // Délai dépassé après connexion : quota consommé.
+    server.serve("/hang.json", Reply::Hang);
+    let slow = TauriFeed::with_endpoint(
+        app.handle().clone(),
+        Url::parse(&server.url("/hang.json")).unwrap(),
+        DownloadPolicy::local_for_tests(server.port),
+    )
+    .with_check_timeout(std::time::Duration::from_millis(300));
+    let error = slow.check().await.unwrap_err();
+    assert!(!error.no_request_sent, "{error:?}");
+
+    // Réponse invalide : quota consommé.
+    server.serve("/bad.json", Reply::Ok(b"pas du json".to_vec()));
+    let bad = TauriFeed::with_endpoint(
+        app.handle().clone(),
+        Url::parse(&server.url("/bad.json")).unwrap(),
+        DownloadPolicy::local_for_tests(server.port),
+    );
+    assert!(!bad.check().await.unwrap_err().no_request_sent);
+}
+
+// ---- le VRAI code de publication (`cargo xtask client-sign` / `client-manifest`) ------------------------
+
+#[allow(dead_code)]
+#[path = "../../../../xtask/src/release_core.rs"]
+mod release_core;
+
+/// Fabrique une release comme le flux : clé chiffrée (comme celle de `tauri signer generate`),
+/// signature par `sign_installer`, manifeste par `manifest_for` (la même fonction que
+/// `client-manifest`, avec la racine d'adresses locale).
+fn publish_like_the_workflow(
+    server: &Server,
+    secret_file: &str,
+    signed_version: &str,
+    announced_version: &str,
+    file: &[u8],
+) {
+    let signature = release_core::sign_installer(
+        secret_file,
+        "mot de passe jetable",
+        file,
+        &format!("Hearth_{signed_version}_x64-setup.exe"),
+        signed_version,
+        1_800_000_000,
+    )
+    .unwrap();
+    let prefix = server.url("/releases/download/");
+    let url = server.url(&format!(
+        "/releases/download/v{announced_version}/Hearth_{announced_version}_x64-setup.exe"
+    ));
+    let text = release_core::manifest_for(
+        &prefix,
+        announced_version,
+        "Notes.",
+        &signature,
+        &url,
+        "2026-10-05T20:00:00Z",
+    )
+    .unwrap();
+    server.serve("/latest.json", Reply::Ok(text.into_bytes()));
+    server.serve(
+        &format!(
+            "/releases/download/v{announced_version}/Hearth_{announced_version}_x64-setup.exe"
+        ),
+        Reply::Ok(file.to_vec()),
+    );
+}
+
+#[tokio::test]
+async fn a_release_made_by_the_publication_code_is_accepted_by_the_real_plugin() {
+    let pair =
+        minisign::KeyPair::generate_encrypted_keypair(Some("mot de passe jetable".to_owned()))
+            .unwrap();
+    let secret_file = pair.sk.to_box(None).unwrap().to_string();
+    let public_file = pair.pk.to_box().unwrap().to_string();
+    let file = installer(20_000);
+    let server = Server::start().await;
+    publish_like_the_workflow(&server, &secret_file, "1.1.0", "1.1.0", &file);
+    let app = app_for_public_file(&public_file);
+    let feed = feed_for(&app, &server);
+
+    let candidate = feed.check().await.unwrap().unwrap();
+    assert_eq!(candidate.version, "1.1.0");
+    assert_eq!(no_progress(&feed, "1.1.0").await.unwrap(), file);
+}
+
+#[tokio::test]
+async fn the_same_release_with_a_signed_version_that_does_not_match_is_refused() {
+    let pair =
+        minisign::KeyPair::generate_encrypted_keypair(Some("mot de passe jetable".to_owned()))
+            .unwrap();
+    let secret_file = pair.sk.to_box(None).unwrap().to_string();
+    let public_file = pair.pk.to_box().unwrap().to_string();
+    let file = installer(20_000);
+    let server = Server::start().await;
+    // Signé pour la 1.0.9, annoncé 1.1.0 par le manifeste.
+    publish_like_the_workflow(&server, &secret_file, "1.0.9", "1.1.0", &file);
+    let app = app_for_public_file(&public_file);
+    let feed = feed_for(&app, &server);
+    feed.check().await.unwrap().unwrap();
+
+    let error = no_progress(&feed, "1.1.0").await.unwrap_err();
+
+    assert!(matches!(error, DownloadError::Corrupted(_)), "{error:?}");
 }

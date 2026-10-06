@@ -3,9 +3,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
 use hearth_desktop_lib::update::domain::{
-    CHECK_INTERVAL_MS, Candidate, DownloadPolicy, FEED_URL, NOTES_MAX_CHARS, POSTPONE_MS,
-    Rejection, Release, UpdateRecord, banner_visible, check_is_due, clean_notes, forget_installed,
-    is_postponed, manual_check_allowed, postponed_until, validate_candidate,
+    CHECK_INTERVAL_MS, Candidate, DownloadPolicy, FEED_URL, MAX_AUTOMATIC_ATTEMPTS_PER_DAY,
+    MAX_REDIRECTS, NOTES_MAX_CHARS, POSTPONE_MS, Rejection, Release, UpdateRecord,
+    attempts_in_window, automatic_check_allowed, banner_visible, check_is_due, clean_notes,
+    forget_installed, is_postponed, manual_check_allowed, postponed_until, validate_candidate,
+    with_attempt,
 };
 
 const HOUR: i64 = 60 * 60 * 1000;
@@ -39,26 +41,49 @@ fn a_manual_check_waits_thirty_seconds_after_the_previous_attempt() {
 }
 
 #[test]
-fn redirects_of_the_installer_stay_https_on_github_and_bounded() {
+fn redirects_are_https_at_every_rank_bounded_exactly_and_not_limited_to_hosts() {
     let policy = DownloadPolicy::github_releases();
-    let ok = |url: &str, hops: usize| policy.allows_redirect(&url::Url::parse(url).unwrap(), hops);
-    assert!(ok(
-        "https://github.com/Voikyrioh/hearth/releases/download/v1/x.exe",
-        0
-    ));
-    assert!(ok(
-        "https://release-assets.githubusercontent.com/github-production-release-asset/1/x",
-        1
-    ));
-    assert!(ok("https://objects.githubusercontent.com/x", 2));
-    assert!(!ok("https://objects.githubusercontent.com/x", 3)); // trop de sauts
-    assert!(!ok("http://github.com/x", 0)); // en clair
-    assert!(!ok("http://objects.githubusercontent.com/x", 0));
-    assert!(!ok("https://example.com/x", 0)); // autre hôte
-    assert!(!ok("https://githubusercontent.com.evil.test/x", 0));
-    assert!(!ok("https://evilgithubusercontent.com/x", 0));
-    assert!(!ok("https://user:pw@github.com/x", 0));
+    let ok = |url: &str, rank: usize| policy.allows_redirect(&url::Url::parse(url).unwrap(), rank);
+    // Le rang 1 est la première redirection : l'adresse de départ n'est pas comptée.
+    for rank in 1..=MAX_REDIRECTS {
+        assert!(ok("https://github.com/x", rank), "rang {rank}");
+    }
+    assert!(!ok("https://github.com/x", MAX_REDIRECTS + 1));
+    assert_eq!(MAX_REDIRECTS, 5, "marge réelle : GitHub en fait déjà 2");
+    // HTTPS à n'importe quel rang.
+    for rank in 1..=MAX_REDIRECTS {
+        assert!(!ok("http://github.com/x", rank), "http au rang {rank}");
+        assert!(!ok("http://objects.githubusercontent.com/x", rank));
+    }
+    // Aucune liste d'hôtes sur les sauts : un autre hôte en HTTPS est suivi (la signature et HTTPS
+    // protègent, une liste ferait taire le parc au premier changement de stockage chez GitHub).
+    assert!(ok("https://release-assets.githubusercontent.com/x", 2));
+    assert!(ok("https://un-autre-stockage.example/x", 2));
+    // Pas d'identifiants dans l'adresse.
+    assert!(!ok("https://user:pw@github.com/x", 1));
     assert!(policy.https_only());
+}
+
+#[test]
+fn at_most_three_automatic_attempts_per_sliding_day_whatever_their_outcome() {
+    let day = 24 * HOUR;
+    assert_eq!(MAX_AUTOMATIC_ATTEMPTS_PER_DAY, 3);
+    assert!(automatic_check_allowed(NOW, None, &[]));
+    // Trois tentatives dans la fenêtre : plus aucune, même sans requête partie.
+    let three = [NOW - 5 * HOUR, NOW - 3 * HOUR, NOW - HOUR];
+    assert_eq!(attempts_in_window(NOW, &three), 3);
+    assert!(!automatic_check_allowed(NOW, None, &three));
+    // La fenêtre glisse : la plus ancienne sort 24 h après elle.
+    assert!(!automatic_check_allowed(NOW + 18 * HOUR, None, &three));
+    assert!(automatic_check_allowed(NOW + 19 * HOUR, None, &three));
+    // Une tentative future (horloge corrigée) ne compte pas.
+    assert_eq!(attempts_in_window(NOW, &[NOW + HOUR]), 0);
+    // La règle des 24 h depuis la dernière requête reste valable en plus.
+    assert!(!automatic_check_allowed(NOW, Some(NOW - HOUR), &[]));
+    assert!(automatic_check_allowed(NOW, Some(NOW - day), &[]));
+    // On garde la fenêtre et on y ajoute l'instant.
+    let kept = with_attempt(NOW, &[NOW - 2 * day, NOW - HOUR]);
+    assert_eq!(kept, [NOW - HOUR, NOW]);
 }
 
 #[test]
@@ -246,6 +271,7 @@ fn the_record_survives_a_json_round_trip_and_tolerates_missing_fields() {
     let record = UpdateRecord {
         last_attempt_at: Some(NOW),
         last_request_at: Some(NOW),
+        automatic_attempts: vec![NOW - 1, NOW],
         last_success_at: Some(NOW - 1),
         postponed_until: Some(NOW + HOUR),
         available: Some(Release {
