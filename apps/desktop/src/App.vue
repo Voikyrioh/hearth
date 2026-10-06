@@ -28,6 +28,9 @@ useUpdatesStore()
 const DevLinkPanel = import.meta.env.DEV
   ? defineAsyncComponent(() => import("@/components/organisms/DevLinkPanel.vue"))
   : null;
+const DevActionPanel = import.meta.env.DEV
+  ? defineAsyncComponent(() => import("@/components/organisms/DevActionPanel.vue"))
+  : null;
 
 // Liste des serveurs illisible : message à l'écran et bouton pour réessayer.
 const reloading = ref(false);
@@ -89,6 +92,7 @@ async function accept(serverId: string) {
     @accept="accept(alert.server.id)"
   />
   <component :is="DevLinkPanel" v-if="DevLinkPanel" />
+  <component :is="DevActionPanel" v-if="DevActionPanel" />
 </template>
 
 <style scoped>

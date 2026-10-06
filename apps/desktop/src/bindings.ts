@@ -16,6 +16,14 @@ export const commands = {
 	 *  échouer en rapportant un échec. Message borné en taille, débit limité.
 	 */
 	logFrontendError: (source: string, message: string) => __TAURI_INVOKE<void>("log_frontend_error", { source, message }),
+	/**  Réglage « Notifier quand un serveur devient hors ligne ou revient » (BR-RESIL-015) : activé par défaut. */
+	getNotifyOnLinkChange: () => typedError<boolean, AppError>(__TAURI_INVOKE("get_notify_on_link_change")),
+	setNotifyOnLinkChange: (enabled: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("set_notify_on_link_change", { enabled })),
+	/**
+	 *  Le serveur affiché dans la fenêtre (`None` : aucun, réglages par exemple) : l'icône de la zone de
+	 *  notification reflète son état (BR-RESIL-016).
+	 */
+	setDisplayedServer: (serverId: string | null) => __TAURI_INVOKE<void>("set_displayed_server", { serverId }),
 	listServers: () => __TAURI_INVOKE<ServerDto[]>("list_servers"),
 	listLinkStates: () => __TAURI_INVOKE<LinkStateDto[]>("list_link_states"),
 	probeServer: (host: string, port: number | null) => typedError<ProbeDto, LinkFailure>(__TAURI_INVOKE("probe_server", { host, port })),

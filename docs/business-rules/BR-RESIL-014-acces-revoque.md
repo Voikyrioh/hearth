@@ -21,12 +21,14 @@ Quand les sessions d'un compte sont fermées par un changement de mot de passe (
 ## Vérification
 - Tests : `domain::sessions::tests::a_revoked_token_ends_as_revoked` ; `tests/sessions_https.rs::a_session_is_revoked_when_its_password_changes`.
 - Tests côté client : `domain::state::tests::row12_connected_account_revoked_shows_access_revoked_and_stops_trying`, `::row13_access_revoked_then_another_account_is_connected` ; `crates/hearth-link/tests/fault_proxy.rs::a_session_revoked_during_the_stream_shows_access_revoked_and_stops`.
+- Interface : `apps/desktop/e2e/offline.spec.ts` (« accès révoqué »), `connect.test.ts::ReconnectPanel`.
 
 ## Cas limites
 - Passé 90 jours, la trace est purgée : le jeton reçoit `SESSION_EXPIRED`, la reconnexion silencieuse échoue alors avec `INVALID_CREDENTIALS` côté client (« Accès révoqué » quand même).
 
 ## Affichage dans le client
 - État « Accès révoqué » : pastille `apps/desktop/src/components/molecules/LinkStatePill.vue`, actions désactivées par la prop `needsLink` (BR-RESIL-001, 008).
+- Panneau `ReconnectPanel` (HRT-12) : « Ton compte n'est plus accessible. », « Connecte-toi avec un compte valide. », bouton « Utiliser un autre compte » qui ouvre le formulaire, identifiant vide ; aucune reconnexion automatique.
 
 ## Règles liées
 - BR-RESIL-013.
@@ -36,3 +38,4 @@ Quand les sessions d'un compte sont fermées par un changement de mot de passe (
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-05 — côté client ajouté (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — précisé (HRT-07, review Stephen round 1).
+- 2026-10-05 : panneau d'accès révoqué et « Utiliser un autre compte » (HRT-12).

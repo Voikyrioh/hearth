@@ -27,6 +27,8 @@ Part de l'interface : un seul minuteur d'une seconde pour tout l'affichage de l'
 ## Vérification
 - Bibliothèque : `crates/hearth-link/tests/robustness.rs::a_server_that_always_fails_keeps_being_retried_with_bounded_state` (deux jours de coupure en temps virtuel), `::random_errors_and_malformed_answers_never_panic_nor_block_seed_1` (et `_2`, `_3` : dernière vue bornée, aucune tâche relancée) ; `domain::pending_ops::tests::the_number_of_tracked_operations_is_bounded`.
 - Interface : `link-stores.test.ts::can be dismissed by hand and never grows without bound`, `::keeps the outcome by opId ... bounded in count and age`, `errors.test.ts::bounds the rate`, `molecules.test.ts::StaleStamp` (mise à jour en direct puis démontage), `src-tauri/tests/domain.rs::frontend_errors_are_rate_limited_per_window`.
+- Coquille : `apps/desktop/src-tauri/tests/presence.rs::a_long_session_keeps_one_entry_per_server`, `::forgetting_a_server_bounds_the_memory`.
+- Interface : `apps/desktop/src/stores/offline.test.ts``::ne fait grossir ni les notifications, ni les états, ni les issues` (trois jours de coupures sur deux serveurs).
 
 ## Cas limites
 - Un `snapshot` de plusieurs milliers d'échantillons est ramené à `HISTORY_CAP`.
@@ -41,3 +43,4 @@ Part de l'interface : un seul minuteur d'une seconde pour tout l'affichage de l'
 - 2026-10-05 — précisé (HRT-07, review Stephen round 1).
 - 2026-10-05 — création de la partie interface (HRT-09, revue Stephen round 1 : références sans fiche). Portée par l'interface pour ce qui la concerne ; la reconnexion elle-même est dans `hearth-link` (ADR-0007).
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
+- 2026-10-05 : bornes de la coquille et de l'interface vérifiées (HRT-12).

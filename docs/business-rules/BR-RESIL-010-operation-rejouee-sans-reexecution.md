@@ -28,6 +28,8 @@ La requête suivie s'exécute dans une tâche détachée, dans le span de la req
 ## Vérification
 - Tests : `domain::operations::tests` ; `tests/sessions_use_cases.rs` (clé liée à la requête, par compte, interruption) ; `tests/http_api.rs::a_key_reused_for_another_request_is_refused_without_running` ; `tests/sessions_https.rs::replaying_an_operation_key_returns_the_first_result_without_running_again`, `::a_client_that_cuts_before_the_answer_still_gets_its_result_recorded`, `::an_operation_left_running_by_a_previous_run_is_interrupted_at_startup`.
 - Tests côté client : `domain::pending_ops::tests` (une issue par réponse de l'agent) ; `crates/hearth-link/tests/fault_proxy.rs::an_action_cut_before_the_answer_is_unknown_and_never_replayed` (fait pendant la coupure), `::an_action_that_never_reached_the_agent_is_announced_as_not_executed`, `::an_action_interrupted_by_the_agent_stopping_stays_unknown`.
+- Coquille : `apps/desktop/src-tauri/tests/offline.rs``::an_action_cut_before_the_answer_is_unknown_never_replayed_and_its_outcome_comes_back` (une seule issue `link://operation`, « done »).
+- Interface : `apps/desktop/src/stores/offline.test.ts``::annonce les trois issues avec les textes de la spec`.
 
 ## Cas limites
 - `POST /sessions` n'est pas suivi par clé : son résultat contient un jeton, qu'on ne conserve pas en base (les jetons n'y sont qu'en empreinte). Rejouer une connexion crée une nouvelle session.
@@ -35,6 +37,7 @@ La requête suivie s'exécute dans une tâche détachée, dans le span de la req
 
 ## Affichage dans le client
 - L'interface annonce l'issue par une notification discrète : `apps/desktop/src/stores/link.ts` (`OPERATION_TEXTS`), voir BR-RESIL-011.
+- Les trois issues s'affichent en notification discrète nommant le serveur : « Fait pendant la coupure. », « Non exécuté. Tu peux relancer. », « Résultat inconnu. Vérifie l'état du serveur. » (`stores/link.ts::onOperation`, textes `operation.*`).
 
 ## Règles liées
 - BR-RESIL-009 (côté client : jamais de rejeu automatique).
@@ -44,3 +47,4 @@ La requête suivie s'exécute dans une tâche détachée, dans le span de la req
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-05 — côté client ajouté (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — précisé (HRT-07, review Stephen round 1).
+- 2026-10-05 : vérifications de la coquille et de l'interface (HRT-12).

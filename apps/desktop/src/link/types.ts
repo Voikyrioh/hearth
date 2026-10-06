@@ -172,3 +172,14 @@ export class LinkCommandError extends Error {
 }
 
 export type Unsubscribe = () => void;
+
+/**
+ * Résultat d'une action typée envoyée à un serveur (une commande de la coquille par action, la
+ * méthode et le chemin sont construits côté Rust : l'interface n'écrit jamais une route) : l'agent a
+ * répondu (`completed`, `status` dit succès ou refus), ou le lien est tombé avant la réponse
+ * (`unknown`, BR-RESIL-009) : l'action n'est jamais rejouée, l'issue arrive plus tard par
+ * `link://operation` sous cet `opId`.
+ */
+export type ActionResult =
+  | { kind: "completed"; status: number; body: string }
+  | { kind: "unknown"; opId: string };

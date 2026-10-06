@@ -86,4 +86,9 @@ export interface LinkBridge {
   removeServer(serverId: string): Promise<void>;
   /** Efface le mot de passe mémorisé ; la session en cours continue. */
   forgetCredentials(serverId: string): Promise<void>;
+
+  // Les actions (créer un compte, mettre à jour l'agent…) arrivent avec leurs tickets, UNE commande
+  // typée chacune : aucune commande générique « envoie cette requête » (ADR-0013, ADR-0016).
+  /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
+  setDisplayedServer(serverId: string | null): Promise<void>;
 }

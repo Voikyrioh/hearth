@@ -40,6 +40,23 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
         </HButton>
       </SettingRow>
       <p v-if="settings.logsError" class="settings__error" role="alert">{{ t(settings.logsError) }}</p>
+      <h2 class="settings__section settings__section--spaced">
+        {{ t("settings.sectionNotifications") }}
+      </h2>
+      <SettingRow
+        :label="t('settings.notifyOnLinkChange')"
+        :help="t('settings.notifyOnLinkChangeHelp')"
+        v-slot="{ labelId }"
+      >
+        <HToggle
+          :aria-labelledby="labelId"
+          :model-value="settings.notifyOnLinkChange"
+          :disabled="!settings.loaded"
+          :busy="settings.saving"
+          :hint="toggleHint"
+          @update:model-value="settings.setNotifyOnLinkChange"
+        />
+      </SettingRow>
       <p class="settings__version">
         {{ t("settings.version") }}
         <span class="settings__mono">{{
@@ -75,6 +92,10 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
 .settings__section {
   font-size: var(--fs-h3);
   font-weight: var(--fw-semibold);
+}
+
+.settings__section--spaced {
+  margin-top: var(--space-5);
 }
 
 .settings__error {

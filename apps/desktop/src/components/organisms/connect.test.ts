@@ -237,7 +237,9 @@ describe("ReconnectPanel", () => {
       props: { server, reason: "expired" },
       global: ctx.global,
     });
-    expect(wrapper.text()).toContain("Session expirée. Reconnecte-toi.");
+    expect(wrapper.text()).toContain("Ta session a expiré.");
+    expect(wrapper.text()).toContain("Rentre ton mot de passe pour reprendre.");
+    expect(wrapper.get("button[type=submit]").text()).toBe("Me reconnecter");
     expect((wrapper.get("input").element as HTMLInputElement).value).toBe("marie");
   });
 
@@ -251,14 +253,19 @@ describe("ReconnectPanel", () => {
     expect(wrapper.find("form").exists()).toBe(true);
   });
 
-  it("only says who to contact when access was revoked", async () => {
+  it("explains a revoked access and only opens the form for « Utiliser un autre compte »", async () => {
     const ctx = await context();
     const wrapper = mount(ReconnectPanel, {
       props: { server, reason: "revoked", revoked: true },
       global: ctx.global,
     });
-    expect(wrapper.text()).toContain("Accès révoqué. Contact l'administrateur.");
+    expect(wrapper.text()).toContain("Ton compte n'est plus accessible.");
+    expect(wrapper.text()).toContain("Connecte-toi avec un compte valide.");
     expect(wrapper.find("form").exists()).toBe(false);
+    await wrapper.get("button").trigger("click");
+    expect(wrapper.text()).toContain("Se connecter");
+    // L'ancien identifiant n'est pas repris : c'est un autre compte.
+    expect((wrapper.get("input").element as HTMLInputElement).value).toBe("");
   });
 });
 

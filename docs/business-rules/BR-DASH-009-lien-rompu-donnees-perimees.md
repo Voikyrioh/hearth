@@ -26,7 +26,7 @@ Côté agent : chaque échantillon porte l'instant `at` de la mesure (RFC 3339 U
 - BR-DASH-011
 
 ## Interface
-- `pages/Dashboard.vue` enveloppe la grille dans `StaleSurface` (désaturée, opacité .62, « Vu il y a … ») quand le lien n'est pas « Connecté » ; le store garde l'identité, le dernier échantillon et l'historique. Au démarrage hors ligne, `get_dashboard` rend la dernière vue du disque. Tests : `pages/Dashboard.test.ts`, `src-tauri/tests/dashboard_runtime.rs`, `e2e/dashboard.spec.ts`.
+- `layouts/ServerLayout.vue` enveloppe la page (donc la grille) dans `StaleSurface` (une seule fois, la page ne le fait plus, BR-RESIL-007) (désaturée, opacité .62, « Vu il y a … ») quand le lien n'est pas « Connecté » ; le store garde l'identité, le dernier échantillon et l'historique. Au démarrage hors ligne, `get_dashboard` rend la dernière vue du disque. Tests : `pages/Dashboard.test.ts`, `src-tauri/tests/dashboard_runtime.rs`, `e2e/dashboard.spec.ts`.
 
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).

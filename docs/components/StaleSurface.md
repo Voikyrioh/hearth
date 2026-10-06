@@ -7,3 +7,5 @@ Enveloppe commune des données périmées : quand `stale`, le contenu est désat
 - Props : `stale`, `lastContactAt`
 - Événements et slots : slot par défaut
 - Notes : Pose `data-stale="true"`. Jetons : `--grayscale-stale`, `--opacity-stale`. Tests : `molecules.test.ts`, `shell.test.ts`.
+
+- HRT-12 : monté UNE fois par `ServerLayout` autour de la page (désaturation, opacité 0,62, âge en direct) quand le lien n'est pas « Connecté » : une page ne l'enveloppe pas elle-même (BR-RESIL-007). Vérifié par `shell.test.ts` (toutes les routes) et `e2e/offline.spec.ts`.

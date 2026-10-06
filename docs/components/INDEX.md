@@ -59,6 +59,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`ServerEditForm`](./ServerEditForm.md) — Modification d'un serveur (nom, couleur, adresse).
 - [`ServerRow`](./ServerRow.md) — Ligne du carnet de serveurs.
 - [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
+- [`DevActionPanel`](./DevActionPanel.md) — Bouton d'action de développement (`useServerAction`, `needs-link`).
 - [`MachineCard`](./MachineCard.md) — Sections Machine et Durée de fonctionnement.
 - [`CpuCard`](./CpuCard.md) — Section Processeur (jauge, courbe, cœurs).
 - [`MemoryCard`](./MemoryCard.md) — Section Mémoire.

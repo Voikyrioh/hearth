@@ -19,10 +19,12 @@ Tant que le lien n'est pas « Connecté » (reconnexion, hors ligne, session exp
 - Interface :
   - `apps/desktop/src/components/molecules/StaleSurface.vue` (désaturation, `data-stale`) et `StaleStamp.vue` (âge) ; `apps/desktop/src/composables/format.ts::formatSeen` ; horloge partagée `composables/useNow.ts`.
   - Utilisé par `ComingSoonPanel` (Dashboard, Accounts, Audit), puis par les vraies cartes des tickets suivants.
+- Interface : c'est le GABARIT du serveur (`ServerLayout`) qui enveloppe toute page de `StaleSurface` (désaturation, opacité `--opacity-stale` = 0,62, âge `StaleStamp` « Vu il y a X min » actualisé par `useNow`) quand le lien n'est pas « Connecté » : une page présente ou à venir ne peut pas l'oublier, et ne l'enveloppe pas elle-même. Test : `shell.test.ts::dims and dates EVERY page of a server from the layout` (parcourt les routes du routeur).
 
 ## Vérification
 - Interface : `molecules.test.ts::StaleStamp`, `::StaleSurface`, `format.test.ts::formatSeen`, `shell.test.ts::goes connected -> reconnecting -> offline -> back`, `e2e/shell.spec.ts`.
 - Bibliothèque : tests de la dernière vue conservée (voir BR-RESIL-017).
+- Interface : `apps/desktop/e2e/offline.spec.ts` (opacité mesurée entre 0,5 et 0,7, âge affiché, pages « Comptes » et « Journal d'activité »).
 
 ## Cas limites
 - Horloge reculée : l'âge ne devient jamais négatif (« Vu il y a 0 s »).
@@ -36,3 +38,5 @@ Tant que le lien n'est pas « Connecté » (reconnexion, hors ligne, session exp
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — création de la partie interface (HRT-09, session 2026-10-04-hearth-creation). Portée par l'interface ; le calcul des états est dans `hearth-link` (ADR-0007).
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
+- 2026-10-05 : vérifications de bout en bout (HRT-12).
+- 2026-10-05 : garantie structurelle : `StaleSurface` dans le gabarit du serveur, plus par convention de page (revue HRT-12).

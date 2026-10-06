@@ -29,7 +29,7 @@ Dès qu'un client s'abonne à `metrics`, l'agent envoie un `snapshot` : identit�
 - BR-DASH-002, BR-DASH-010, BR-DASH-011
 
 ## Interface
-- `pages/Dashboard.vue` assemble les huit sections (`MachineCard`, `CpuCard`, `MemoryCard`, `GpuCard`, `NetworkCard`, `DisksCard`, `TemperaturesCard`) dans `StaleSurface` ; `stores/dashboard.ts` rejoue la dernière vue connue à l'abonnement (commande `get_dashboard`, `src-tauri/src/link.rs::LinkRuntime::dashboard`), donc le tableau s'affiche dès l'ouverture, même hors ligne. Chargement : « Chargement des mesures » tant que l'identité n'est pas arrivée, lien connecté. Tests : `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`, `src-tauri/tests/dashboard_runtime.rs`.
+- `pages/Dashboard.vue` assemble les huit sections (`MachineCard`, `CpuCard`, `MemoryCard`, `GpuCard`, `NetworkCard`, `DisksCard`, `TemperaturesCard`) ; le gabarit `ServerLayout` les enveloppe de `StaleSurface` ; `stores/dashboard.ts` rejoue la dernière vue connue à l'abonnement (commande `get_dashboard`, `src-tauri/src/link.rs::LinkRuntime::dashboard`), donc le tableau s'affiche dès l'ouverture, même hors ligne. Chargement : « Chargement des mesures » tant que l'identité n'est pas arrivée, lien connecté. Tests : `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`, `src-tauri/tests/dashboard_runtime.rs`.
 
 ## Historique
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).

@@ -11,7 +11,7 @@ maj: 2026-10-05
 # BR-RESIL-013 — Session expirée et mot de passe mémorisé : reconnexion sans ressaisie
 
 ## Règle
-Quand l'agent répond `SESSION_EXPIRED` (au retour du lien ou par un message `session` du flux) et que le mot de passe est au coffre, la bibliothèque rouvre une session en silence (l'état affiché ne change pas) puis rouvre le flux. Si le mot de passe est refusé (`INVALID_CREDENTIALS`), l'accès est révoqué. Sans mot de passe mémorisé, l'état passe à `SessionExpired` ; le panneau de saisie relève de l'interface (à venir, HRT-12) et la reconnexion se fait par `login`.
+Quand l'agent répond `SESSION_EXPIRED` (au retour du lien ou par un message `session` du flux) et que le mot de passe est au coffre, la bibliothèque rouvre une session en silence (l'état affiché ne change pas) puis rouvre le flux. Si le mot de passe est refusé (`INVALID_CREDENTIALS`), l'accès est révoqué. Sans mot de passe mémorisé, l'état passe à `SessionExpired` ; le panneau de saisie relève de l'interface (`ReconnectPanel`, HRT-12) et la reconnexion se fait par `login`. Avec un mot de passe mémorisé qui marche, l'interface n'affiche rien : « Je te reconnecte. » de la spec n'a pas d'écran, la reconnexion est silencieuse par construction.
 
 ## Application (code)
 - `crates/hearth-link/src/domain/state.rs::LinkMachine::on_session_expired` (`Input::SessionExpired { can_reauth }`, effet `Effect::Reauthenticate`), `::on_reauthenticated`.
@@ -20,6 +20,8 @@ Quand l'agent répond `SESSION_EXPIRED` (au retour du lien ou par un message `se
 ## Vérification
 - Tests : `domain::state::tests::an_expired_session_with_a_saved_password_reconnects_silently`, `::a_silent_reconnection_that_hits_refused_credentials_means_access_revoked`, `::a_silent_reconnection_that_cannot_reach_the_server_keeps_the_reauth_step`.
 - Intégration : `tests/fault_proxy.rs::an_expired_session_with_a_saved_password_reconnects_silently`.
+- Coquille, contre un vrai agent : `apps/desktop/src-tauri/tests/offline.rs::an_expired_session_with_a_remembered_password_reconnects_without_showing_anything` (aucun état à l'écran, aucune notification, icône inchangée, jeton renouvelé au coffre).
+- Interface : `apps/desktop/e2e/offline.spec.ts` (« session expirée »).
 
 ## Cas limites
 - `429 TOO_MANY_ATTEMPTS` ou `503 BUSY` avec `retry_after_s` : la prochaine tentative n'a pas lieu avant ce délai (plafonné à 1 h), ni avant le délai habituel s'il est plus long ; on ne renvoie pas un login toutes les 30 s pendant le verrouillage (`Input::RetryAfter`, test : `domain::state::tests::a_server_that_says_to_wait_delays_the_next_attempt`).
@@ -33,3 +35,5 @@ Quand l'agent répond `SESSION_EXPIRED` (au retour du lien ou par un message `se
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — précisé (HRT-07, review Stephen round 1).
+- 2026-10-05 : panneau sans mot de passe mémorisé (HRT-12).
+- 2026-10-05 : divergence assumée avec le tableau des messages de la spec (ligne « Je te reconnecte. », identifiants mémorisés) : la règle BR-RESIL-013 (« sans ressaisie », l'état affiché ne change pas) prime, il n'y a donc aucun écran pour ce message ; preuve côté coquille ajoutée (revue HRT-12).

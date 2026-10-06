@@ -260,4 +260,8 @@ export class TauriLinkBridge implements LinkBridge {
   async forgetCredentials(serverId: string): Promise<void> {
     unwrap(await commands.forgetCredentials(serverId));
   }
+
+  async setDisplayedServer(serverId: string | null): Promise<void> {
+    await commands.setDisplayedServer(serverId);
+  }
 }

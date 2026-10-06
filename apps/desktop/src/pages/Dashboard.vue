@@ -3,7 +3,6 @@ import { computed, watch } from "vue";
 import HSegmented from "@/components/atoms/HSegmented.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
-import StaleSurface from "@/components/molecules/StaleSurface.vue";
 import CpuCard from "@/components/organisms/CpuCard.vue";
 import DisksCard from "@/components/organisms/DisksCard.vue";
 import GpuCard from "@/components/organisms/GpuCard.vue";
@@ -18,9 +17,9 @@ import { useDashboardStore } from "@/stores/dashboard";
 
 // Tableau de bord d'un serveur : sa machine en direct (BR-DASH-001, 002). Les mesures viennent du
 // pont (`useDashboardStore`), les niveaux d'alerte sont décidés par la coquille. Quand le lien
-// n'est pas « Connecté », les dernières valeurs restent, grisées et datées (`StaleSurface`,
+// n'est pas « Connecté », les dernières valeurs restent, grisées et datées (`StaleSurface` du gabarit,
 // BR-DASH-009). Les deux rôles voient la même chose (BR-DASH-013).
-const { server, isConnected, lastContactAt } = useCurrentServer();
+const { server, isConnected } = useCurrentServer();
 const store = useDashboardStore();
 
 watch(
@@ -59,7 +58,7 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
     :text="failed ? '' : t('dash.waitingText')"
     heading="h2"
   />
-  <StaleSurface v-else-if="entry" :stale="!isConnected" :last-contact-at="lastContactAt">
+  <template v-else-if="entry">
     <div class="dash">
       <div class="dash__bar">
         <HSegmented
@@ -81,7 +80,7 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
         </div>
       </div>
     </div>
-  </StaleSurface>
+  </template>
 </template>
 
 <style scoped>

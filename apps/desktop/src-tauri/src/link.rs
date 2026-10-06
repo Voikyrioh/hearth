@@ -18,7 +18,7 @@ use hearth_link::domain::compat::Compatibility;
 use hearth_link::domain::event::Event;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
-use hearth_link::domain::state::Blocked;
+use hearth_link::domain::state::{Blocked, LinkState};
 use hearth_link::ports::{EventSink, Vault};
 use hearth_link::{EventStream, LinkConfig, LinkError, LinkManager, NewServer, ServerUpdate};
 use hearth_proto::fingerprint::Fingerprint;
@@ -31,6 +31,14 @@ use crate::link_dto::{
     OutcomeDto, ProbeDto, ServerDto, ServersEvent, StateBook, events, parse_fingerprint,
     servers_list,
 };
+
+/// Ce que la coquille fait des changements d'état du lien en dehors de la fenêtre : notifications
+/// système et icône de la zone de notification (BR-RESIL-015, 016). Appelé à chaque événement
+/// d'état, dans l'ordre ; ne doit jamais bloquer.
+pub trait StateObserver: Send + Sync {
+    fn on_state(&self, server: &str, name: &str, state: LinkState, failed_attempts: u32);
+    fn on_removed(&self, server: &str);
+}
 
 /// Où partent les événements pour l'interface.
 pub trait UiSink: Send + Sync {
@@ -201,6 +209,8 @@ pub struct LinkRuntime {
     /// Dernière empreinte lue par une sonde, par adresse : seule une empreinte que cette
     /// application a vue sur la machine peut être confirmée, enregistrée ou épinglée.
     probes: Mutex<HashMap<(String, u16), Fingerprint>>,
+    /// Notifications système et icône : branchés une fois, au démarrage de la coquille.
+    observer: std::sync::OnceLock<Arc<dyn StateObserver>>,
 }
 
 impl LinkRuntime {
@@ -236,7 +246,36 @@ impl LinkRuntime {
             last_servers: Mutex::new(None),
             pending,
             probes: Mutex::new(HashMap::new()),
+            observer: std::sync::OnceLock::new(),
         })
+    }
+
+    /// Branche l'observateur des états (une seule fois) et lui donne tout de suite l'état courant
+    /// de chaque serveur : un état annoncé avant son branchement ne lui échappe pas.
+    pub fn set_observer(&self, observer: Arc<dyn StateObserver>) {
+        if self.observer.set(observer).is_err() {
+            return;
+        }
+        for (id, info) in self.manager.states() {
+            self.observe(&id, info.state, info.failed_attempts);
+        }
+    }
+
+    /// Un serveur absent du carnet ne s'observe pas : un état encore dans la file quand
+    /// `remove_server` a déjà oublié le serveur ne le réinscrit nulle part (icône, limiteur).
+    fn observe(&self, server: &ServerId, state: LinkState, failed_attempts: u32) {
+        let Some(observer) = self.observer.get() else {
+            return;
+        };
+        let Some(record) = self
+            .manager
+            .servers()
+            .into_iter()
+            .find(|record| &record.id == server)
+        else {
+            return;
+        };
+        observer.on_state(server.as_str(), &record.name, state, failed_attempts);
     }
 
     pub fn manager(&self) -> &LinkManager {
@@ -248,6 +287,12 @@ impl LinkRuntime {
     }
 
     // ── Lecture ────────────────────────────────────────────────────────────────────────────
+
+    /// Un identifiant qui n'est pas dans le carnet vaut « aucun » : la fenêtre ne dicte pas à
+    /// l'icône un serveur qui n'existe pas.
+    pub fn known_server(&self, id: Option<String>) -> Option<String> {
+        id.filter(|id| self.servers().iter().any(|server| &server.id == id))
+    }
 
     fn dash(&self) -> std::sync::MutexGuard<'_, DashBook> {
         self.dash.lock().unwrap_or_else(PoisonError::into_inner)
@@ -501,6 +546,9 @@ impl LinkRuntime {
         self.book().forget(&id);
         self.dash().forget(id.as_str());
         self.pending.forget(&id);
+        if let Some(observer) = self.observer.get() {
+            observer.on_removed(id.as_str());
+        }
         self.publish_servers(sink);
         Ok(())
     }
@@ -556,6 +604,7 @@ impl LinkRuntime {
         match event {
             Event::State { server, info } => {
                 let state = self.book().apply(&server, &info);
+                self.observe(&server, info.state, info.failed_attempts);
                 if let Some(state) = state {
                     send(sink, events::STATE, &state);
                 }

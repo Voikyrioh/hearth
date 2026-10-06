@@ -2,6 +2,7 @@ import type { LinkBridge } from "./bridge";
 import type { MachineEvent } from "./machine";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import {
+  type ActionResult,
   DEFAULT_PORT,
   type FingerprintChange,
   LinkCommandError,
@@ -131,6 +132,16 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly calls: string[] = [];
   /** Dernier mot de passe mémorisé « au coffre » par serveur (observable dans les tests). */
   readonly vault = new Map<string, string>();
+  /**
+   * Ce que fait la prochaine action : `ok` répond 200 ; `cut` coupe le lien avant la réponse
+   * (« Reconnexion… », résultat inconnu, BR-RESIL-009).
+   */
+  actionMode: "ok" | "cut" = "ok";
+  /** Dernière clé d'opération donnée à une action restée sans réponse (observable dans les tests). */
+  lastUnknownOpId: string | null = null;
+  /** Serveur affiché dans la fenêtre, tel que la coquille l'a reçu (observable dans les tests). */
+  displayedServer: string | null = null;
+  private nextOperation = 1;
   /** Les machines simulées : mesures plausibles, niveaux pilotables (tableau de bord). */
   readonly machine: SimulatedMachine;
 
@@ -366,6 +377,30 @@ export class SimulatedLinkBridge implements LinkBridge {
     const server = this.requireServer(serverId);
     this.vault.delete(serverId);
     this.replaceServer({ ...server, remember: false });
+  }
+
+  /**
+   * Action d'essai du navigateur de développement (panneau `DevActionPanel`) : n'existe que dans le
+   * pont simulé, jamais dans le pont réel ni dans le binaire livré.
+   */
+  async runDevAction(serverId: string): Promise<ActionResult> {
+    this.calls.push("action dev-ping");
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    if (this.actionMode === "cut") {
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return { kind: "completed", status: 200, body: "{}" };
+  }
+
+  async setDisplayedServer(serverId: string | null): Promise<void> {
+    this.displayedServer = serverId;
   }
 
   // --- Pilotage (code de test, panneau de développement) ---

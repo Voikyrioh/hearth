@@ -264,3 +264,15 @@ describe("TauriLinkBridge", () => {
     await expect(bridge.onServersChanged(() => {})).rejects.toThrow("coquille en panne");
   });
 });
+
+describe("TauriLinkBridge : serveur affiché (HRT-12)", () => {
+  it("tells the shell which server is displayed", async () => {
+    const calls = ipc(() => undefined);
+    const bridge = new TauriLinkBridge();
+    await bridge.setDisplayedServer("01J9");
+    await bridge.setDisplayedServer(null);
+    expect(
+      calls.filter((call) => call.cmd === "set_displayed_server").map((call) => call.args),
+    ).toEqual([{ serverId: "01J9" }, { serverId: null }]);
+  });
+});

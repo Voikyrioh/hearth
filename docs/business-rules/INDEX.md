@@ -29,8 +29,8 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-RESIL-009](./BR-RESIL-009-action-incertaine-jamais-rejouee.md) — Une action coupée avant sa réponse est « résultat inconnu » et n'est jamais rejouée — crates/hearth-link/src/domain/pending_ops.rs::PendingOps::{register, complete, link_lost} — invariant ✓
 - [BR-RESIL-011](./BR-RESIL-011-notifications-jamais-bloquantes.md) — Aucune fenêtre bloquante pour une perte de lien ou une erreur ; notifications discrètes — bibliothèque : états et événements typés, jamais d'erreur bloquante ; interface : apps/desktop/src/stores/toasts.ts — —
 - [BR-RESIL-013](./BR-RESIL-013-reconnexion-silencieuse-apres-expiration.md) — Session expirée et mot de passe mémorisé : reconnexion sans ressaisie — crates/hearth-link/src/domain/state.rs::LinkMachine::on_session_expired — invariant ✓
-- [BR-RESIL-015](./BR-RESIL-015-notifications-systeme-limitees.md) — Notifications système optionnelles, une par minute et par serveur — à venir, HRT-12 — —
-- [BR-RESIL-016](./BR-RESIL-016-icone-zone-de-notification.md) — L'icône de la zone de notification reflète l'état du lien — à venir, HRT-12 — —
+- [BR-RESIL-015](./BR-RESIL-015-notifications-systeme-limitees.md) — Notifications système optionnelles, une par minute et par serveur — active — —
+- [BR-RESIL-016](./BR-RESIL-016-icone-zone-de-notification.md) — L'icône de la zone de notification reflète l'état du lien — active — —
 - [BR-RESIL-017](./BR-RESIL-017-session-longue-hors-ligne-sans-croissance.md) — Une session de plusieurs jours hors ligne ne fait grossir ni la bibliothèque ni l'interface — crates/hearth-link/src/domain/server.rs::HISTORY_CAP ; interface : apps/desktop/src/composables/useNow.ts — invariant ✓
 - [BR-RESIL-018](./BR-RESIL-018-notifications-agregees-par-compteur.md) — Coupures répétées : une même notification répétée devient un compteur — bibliothèque : Status::failed_attempts ; interface : apps/desktop/src/stores/toasts.ts::push — —
 - [BR-RESIL-019](./BR-RESIL-019-comportement-identique-tous-roles.md) — Le comportement du lien ne dépend pas du rôle du compte — crates/hearth-link/src/domain/state.rs::Input — invariant ✓

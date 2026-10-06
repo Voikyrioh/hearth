@@ -32,6 +32,14 @@ pub fn flag_from(value: Option<&serde_json::Value>) -> bool {
     value.and_then(serde_json::Value::as_bool).unwrap_or(false)
 }
 
+/// Comme [`flag_from`], avec une valeur par défaut quand le réglage est absent ou mal typé
+/// (« Notifier quand un serveur devient hors ligne ou revient » : activé par défaut).
+pub fn flag_or(value: Option<&serde_json::Value>, default: bool) -> bool {
+    value
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(default)
+}
+
 /// Seule la fenêtre principale se cache dans la zone de notification : toute
 /// autre fenêtre se ferme normalement (BR-CLIENT-004).
 pub fn hides_on_close(window_label: &str) -> bool {

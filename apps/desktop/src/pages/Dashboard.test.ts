@@ -1,5 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defineComponent, h } from "vue";
+import { RouterView } from "vue-router";
 import { sampleMachine } from "@/link";
 import Dashboard from "@/pages/Dashboard.vue";
 import { useDashboardStore } from "@/stores/dashboard";
@@ -19,6 +21,20 @@ async function open(serverId = "forge", prefill = 300) {
   if (prefill > 0) ctx.bridge.machine.prefill(serverId, prefill);
   useServersStore().setCurrent(serverId);
   const wrapper = mount(Dashboard, { global: ctx.global });
+  await flushPromises();
+  return { ...ctx, wrapper, store: useDashboardStore() };
+}
+
+/**
+ * Le tableau de bord DANS le gabarit du serveur : c'est lui qui pose `StaleSurface` (BR-RESIL-007,
+ * BR-DASH-009), la page ne l'enveloppe pas elle-même.
+ */
+async function openInLayout(serverId = "forge", prefill = 300) {
+  const ctx = await mountContext();
+  if (prefill > 0) ctx.bridge.machine.prefill(serverId, prefill);
+  await ctx.router.push(`/servers/${serverId}/dashboard`);
+  await ctx.router.isReady();
+  const wrapper = mount(defineComponent({ render: () => h(RouterView) }), { global: ctx.global });
   await flushPromises();
   return { ...ctx, wrapper, store: useDashboardStore() };
 }
@@ -339,7 +355,7 @@ describe("live changes (BR-DASH-012)", () => {
 
 describe("link not connected (BR-DASH-009, 011)", () => {
   it("keeps the last values, greyed and dated, and resumes live when the link returns", async () => {
-    const ctx = await open();
+    const ctx = await openInLayout();
     await second(ctx, 3);
     const before = ctx.wrapper.text();
     expect(ctx.wrapper.find('[data-stale="true"]').exists()).toBe(false);
@@ -350,6 +366,9 @@ describe("link not connected (BR-DASH-009, 011)", () => {
     // Les dernières valeurs restent là, aucune n'est vidée ni remplacée.
     expect(ctx.wrapper.text()).toContain("Charge globale");
     expect(ctx.wrapper.text()).toContain("NixOS 25.05");
+    // Un seul marquage « périmé » et une seule date, posés par le gabarit.
+    expect(ctx.wrapper.findAll('[data-stale="true"]')).toHaveLength(1);
+    expect(ctx.wrapper.findAll(".surface__stamp")).toHaveLength(1);
     expect(ctx.wrapper.get(".surface__stamp").text()).toMatch(/^Vu il y a \d+ s$/);
     expect(before).toContain("Mémoire");
 
@@ -376,7 +395,7 @@ describe("link not connected (BR-DASH-009, 011)", () => {
   });
 
   it("shows the last known view even if the link never came up in this session", async () => {
-    const ctx = await open("forge", 300);
+    const ctx = await openInLayout("forge", 300);
     ctx.bridge.setState("forge", "offline");
     await flushPromises();
     expect(ctx.wrapper.text()).toContain("Charge globale");

@@ -66,4 +66,5 @@ export class NullLinkBridge implements LinkBridge {
   async forgetCredentials(): Promise<never> {
     return this.unavailable();
   }
+  async setDisplayedServer(): Promise<void> {}
 }

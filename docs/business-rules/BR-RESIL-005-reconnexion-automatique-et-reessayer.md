@@ -21,7 +21,7 @@ Part de l'interface : le bouton du bandeau hors ligne appelle `LinkBridge.retryN
   - `crates/hearth-link/src/domain/state.rs::LinkMachine::on_transport_failed` (planifie la prochaine tentative), `::on_tick` (la lance).
 - Interface :
   - `apps/desktop/src/link/bridge.ts::LinkBridge.retryNow` (contrat) ; `apps/desktop/src/stores/link.ts::retryNow` ; `apps/desktop/src/components/organisms/OfflineBanner.vue` (bouton, événement `retry`) ; `apps/desktop/src/layouts/ServerLayout.vue` (branche `retry` au store).
-  - Implémentation simulée : `apps/desktop/src/link/simulated.ts::SimulatedLinkBridge.retryNow`. Reste à faire : brancher le pont réel (`hearth-link`) à l'interface, ticket suivant (la version interface disait « le pont réel et les intervalles : ticket `hearth-link` » ; les intervalles existent maintenant dans la bibliothèque).
+  - Implémentation simulée : `apps/desktop/src/link/simulated.ts::SimulatedLinkBridge.retryNow`. Fait : le pont réel `TauriLinkBridge::retryNow` appelle la commande `retry_now` de la coquille, qui appelle `LinkManager::retry_now` (HRT-10) ; les intervalles sont ceux de la bibliothèque.
 
 ## Vérification
 - Bibliothèque : `domain::backoff::tests` (suite, remise à zéro, aléa borné à ± 20 %, plafond), `domain::state::tests::the_first_attempt_is_immediate_then_delays_follow_the_sequence`, `::a_success_restarts_the_delays_from_half_a_second`, `::row08_server_dead_for_ten_minutes_stays_offline_and_keeps_trying`, `::jitter_is_applied_and_bounded_by_the_cap`, `::a_trigger_while_an_attempt_is_running_restarts_it`.
@@ -39,3 +39,4 @@ Part de l'interface : le bouton du bandeau hors ligne appelle `LinkBridge.retryN
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — création de la partie interface (HRT-09, revue Stephen round 1 : références sans fiche). Portée par l'interface pour ce qui la concerne ; la reconnexion elle-même est dans `hearth-link` (ADR-0007).
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
+- 2026-10-05 : note « reste à faire » soldée (HRT-12).

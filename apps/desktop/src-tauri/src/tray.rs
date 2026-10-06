@@ -6,11 +6,60 @@ use tauri::menu::{Menu, MenuEvent, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Runtime};
 
+use tauri_plugin_notification::NotificationExt as _;
+
+use crate::alerts::{Notifier, TrayPort};
+use crate::badge::paint_badge;
 use crate::domain::{MENU_OPEN, MENU_QUIT, TrayAction, tray_action};
+use crate::presence::TrayStatus;
 use crate::{texts, window};
 
 /// Flamme seule, une couleur (`hearth-logo-small.svg`), lisible à 16 px.
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray.png");
+
+/// Montre l'état du lien dans la zone de notification : la flamme et une pastille verte, orange ou
+/// rouge (BR-RESIL-016), l'infobulle disant quel serveur et quel état. Un échec est journalisé,
+/// jamais fatal.
+pub struct TauriTray<R: Runtime>(pub AppHandle<R>);
+
+impl<R: Runtime> TrayPort for TauriTray<R> {
+    fn show(&self, status: TrayStatus, tooltip: &str) {
+        let Some(tray) = self.0.tray_by_id(TRAY_ID) else {
+            return;
+        };
+        match Image::from_bytes(TRAY_ICON) {
+            Ok(base) => {
+                let rgba = paint_badge(base.rgba(), base.width(), base.height(), status);
+                let icon = Image::new_owned(rgba, base.width(), base.height());
+                if let Err(error) = tray.set_icon(Some(icon)) {
+                    tracing::warn!(%error, "icône de la zone de notification non mise à jour");
+                }
+            }
+            Err(error) => tracing::warn!(%error, "icône de base illisible"),
+        }
+        if let Err(error) = tray.set_tooltip(Some(tooltip)) {
+            tracing::warn!(%error, "infobulle de la zone de notification non mise à jour");
+        }
+    }
+}
+
+/// Notifications système du lien, par le greffon de notifications.
+pub struct TauriNotifier<R: Runtime>(pub AppHandle<R>);
+
+impl<R: Runtime> Notifier for TauriNotifier<R> {
+    fn notify(&self, title: &str, body: &str) {
+        if let Err(error) = self
+            .0
+            .notification()
+            .builder()
+            .title(title)
+            .body(body)
+            .show()
+        {
+            tracing::warn!(%error, "notification du lien refusée");
+        }
+    }
+}
 
 /// Identifiant de l'icône (pour la retirer si le démarrage échoue ensuite).
 pub const TRAY_ID: &str = "hearth";

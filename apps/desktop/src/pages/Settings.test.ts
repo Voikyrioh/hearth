@@ -86,4 +86,30 @@ describe("Settings page", () => {
     expect(wrapper.text()).toContain("indisponible");
     expect(wrapper.get('[role="switch"]').attributes("aria-disabled")).toBeUndefined();
   });
+
+  it("offers the link notifications option, on by default, and changes it through the typed command", async () => {
+    const seen: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "get_notify_on_link_change") return true;
+      if (cmd === "set_notify_on_link_change") {
+        seen.push(args);
+        return (args as { enabled: boolean }).enabled;
+      }
+      return cmd === "get_settings" ? { launchAtStartup: false } : "0.1.0";
+    });
+    const wrapper = mount(Settings);
+    await flushPromises();
+    const headings = wrapper.findAll("h2").map((h) => h.text());
+    expect(headings).toEqual(["Général", "Notifications", "Mises à jour"]);
+    const toggle = wrapper.findAll('[role="switch"]')[1];
+    const labelId = toggle?.attributes("aria-labelledby") ?? "";
+    expect(wrapper.get(`[id="${labelId}"]`).text()).toBe(
+      "Notifier quand un serveur devient hors ligne ou revient",
+    );
+    expect(toggle?.attributes("aria-checked")).toBe("true");
+    await toggle?.trigger("click");
+    await flushPromises();
+    expect(seen).toEqual([{ enabled: false }]);
+    expect(wrapper.findAll('[role="switch"]')[1]?.attributes("aria-checked")).toBe("false");
+  });
 });

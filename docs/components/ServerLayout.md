@@ -7,3 +7,5 @@ Gabarit d'un serveur (`/servers/:id`) : `ServerNav` à gauche ; à droite `AppHe
 - Props : aucune
 - Événements et slots : slot : `RouterView` (pages enfants)
 - Notes : Tests : `shell.test.ts`.
+
+- HRT-12 : enveloppe la page de `StaleSurface` (données périmées, BR-RESIL-007) ; le panneau de reconnexion et le bandeau restent HORS de la surface désaturée.
