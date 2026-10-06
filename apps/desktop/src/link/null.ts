@@ -67,4 +67,28 @@ export class NullLinkBridge implements LinkBridge {
     return this.unavailable();
   }
   async setDisplayedServer(): Promise<void> {}
+  async checkAccountInput(): Promise<never> {
+    return this.unavailable();
+  }
+  async listAccounts(): Promise<never> {
+    return this.unavailable();
+  }
+  async createAccount(): Promise<never> {
+    return this.unavailable();
+  }
+  async changeAccountRole(): Promise<never> {
+    return this.unavailable();
+  }
+  async setAccountPassword(): Promise<never> {
+    return this.unavailable();
+  }
+  async changeOwnPassword(): Promise<never> {
+    return this.unavailable();
+  }
+  async closeAccountSessions(): Promise<never> {
+    return this.unavailable();
+  }
+  async deleteAccount(): Promise<never> {
+    return this.unavailable();
+  }
 }

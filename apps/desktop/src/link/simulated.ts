@@ -1,7 +1,15 @@
 import type { LinkBridge } from "./bridge";
 import type { MachineEvent } from "./machine";
+import {
+  type SimAccountResult,
+  SimulatedAccounts,
+  simulatedCheckInput,
+} from "./simulated-accounts";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import {
+  type AccountInputCheck,
+  type AccountList,
+  type AccountOutcome,
   type ActionResult,
   DEFAULT_PORT,
   type FingerprintChange,
@@ -144,11 +152,22 @@ export class SimulatedLinkBridge implements LinkBridge {
   private nextOperation = 1;
   /** Les machines simulées : mesures plausibles, niveaux pilotables (tableau de bord). */
   readonly machine: SimulatedMachine;
+  /** Les comptes simulés de chaque serveur (HRT-13) : amorçage des tests (`accounts.seed`). */
+  readonly accounts: SimulatedAccounts;
+  /** Mot de passe actuel de l'utilisateur, par serveur (« Correct-Horse-9 » tant qu'il n'a pas changé). */
+  private readonly ownPasswords = new Map<string, string>();
+  /**
+   * Une action de compte coupée (`actionMode = "cut"`) a-t-elle été exécutée par l'agent avant la
+   * coupure ? Vrai : « fait pendant la coupure » ; faux : « non exécuté ». Dans les deux cas
+   * l'interface reçoit « résultat inconnu ». Le mode revient à `ok` après une coupure.
+   */
+  executeBeforeCut = true;
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
     this.retryDelayMs = options.retryDelayMs ?? 1500;
     this.latencyMs = options.latencyMs ?? 0;
+    this.accounts = new SimulatedAccounts(this.now);
     this.agents = (options.agents ?? []).map((agent) => ({ ...agent }));
     this.servers = (options.servers ?? SAMPLE_SERVERS).map((server) => ({ ...server }));
     this.machine = new SimulatedMachine({
@@ -401,6 +420,108 @@ export class SimulatedLinkBridge implements LinkBridge {
 
   async setDisplayedServer(serverId: string | null): Promise<void> {
     this.displayedServer = serverId;
+  }
+
+  // --- Comptes (HRT-13) : mêmes règles que l'agent ; `calls` ne contient jamais un mot de passe ---
+
+  async checkAccountInput(username: string, password: string): Promise<AccountInputCheck> {
+    return simulatedCheckInput(username, password);
+  }
+
+  async listAccounts(serverId: string): Promise<AccountList> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("account list");
+    const accounts = this.accounts.list(server);
+    return accounts
+      ? { kind: "listed", accounts }
+      : { kind: "refused", refusal: { kind: "forbidden" } };
+  }
+
+  createAccount(
+    serverId: string,
+    username: string,
+    password: string,
+    role: Role,
+  ): Promise<AccountOutcome> {
+    return this.accountAction(serverId, `create ${username}`, (server) =>
+      this.accounts.create(server, username, password, role),
+    );
+  }
+
+  changeAccountRole(serverId: string, accountId: string, role: Role): Promise<AccountOutcome> {
+    return this.accountAction(serverId, `role ${accountId} ${role}`, (server) =>
+      this.accounts.changeRole(server, accountId, role),
+    );
+  }
+
+  setAccountPassword(
+    serverId: string,
+    accountId: string,
+    username: string,
+    password: string,
+  ): Promise<AccountOutcome> {
+    return this.accountAction(serverId, `password ${accountId}`, (server) =>
+      this.accounts.setPassword(server, accountId, username, password),
+    );
+  }
+
+  changeOwnPassword(serverId: string, current: string, password: string): Promise<AccountOutcome> {
+    return this.accountAction(serverId, "own-password", (server) => {
+      const right = current === (this.ownPasswords.get(serverId) ?? "Correct-Horse-9");
+      const result = this.accounts.changeOwn(server, right, password);
+      if (result.outcome.kind === "done") this.ownPasswords.set(serverId, password);
+      return result;
+    });
+  }
+
+  closeAccountSessions(serverId: string, accountId: string): Promise<AccountOutcome> {
+    return this.accountAction(serverId, `sessions ${accountId}`, (server) =>
+      this.accounts.closeSessions(server, accountId),
+    );
+  }
+
+  deleteAccount(
+    serverId: string,
+    accountId: string,
+    confirmation: string | null,
+  ): Promise<AccountOutcome> {
+    return this.accountAction(serverId, `delete ${accountId}`, (server) =>
+      this.accounts.delete(server, accountId, confirmation),
+    );
+  }
+
+  /** Toute action de compte : hors « Connecté » rien ne part ; coupée avant la réponse, jamais rejouée. */
+  private async accountAction(
+    serverId: string,
+    label: string,
+    run: (server: ServerInfo) => SimAccountResult,
+  ): Promise<AccountOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    // Comme le vrai pont : hors « Connecté » rien ne part, donc rien n'est noté.
+    this.calls.push(`account ${label}`);
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) this.settle(serverId, run(server));
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return this.settle(serverId, run(server));
+  }
+
+  /** Sa propre session fermée par l'action (mot de passe, suppression) : « Accès révoqué ». */
+  private settle(serverId: string, result: SimAccountResult): AccountOutcome {
+    if (result.ended) this.publish(serverId, "access_revoked", { reason: "revoked" });
+    return result.outcome;
   }
 
   // --- Pilotage (code de test, panneau de développement) ---

@@ -1,6 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import {
+  type AccountListDto,
   type LinkFailure as BoundFailure,
+  type AccountOutcome as BoundOutcome,
   commands,
   type FingerprintEvent,
   type LinkStateDto,
@@ -14,6 +16,9 @@ import {
 import type { LinkBridge } from "./bridge";
 import { type MachineEvent, toMetrics, toView } from "./machine";
 import {
+  type AccountInputCheck,
+  type AccountList,
+  type AccountOutcome,
   type FingerprintChange,
   LinkCommandError,
   type LinkNotice,
@@ -71,6 +76,22 @@ export function toStateEvent(dto: LinkStateDto, now: () => number = Date.now): L
     reason: dto.reason,
     failedAttempts: dto.failedAttempts,
   };
+}
+
+/** L'issue d'une action de compte, avec les noms de champs de l'interface. */
+export function toAccountOutcome(dto: BoundOutcome): AccountOutcome {
+  switch (dto.kind) {
+    case "done":
+      return { kind: "done", account: dto.account, sessionsClosed: dto.sessions_closed };
+    case "refused":
+      return dto;
+    case "unknown":
+      return { kind: "unknown", opId: dto.op_id };
+  }
+}
+
+export function toAccountList(dto: AccountListDto): AccountList {
+  return dto;
 }
 
 type Result<T> = { status: "ok"; data: T } | { status: "error"; error: BoundFailure };
@@ -263,5 +284,65 @@ export class TauriLinkBridge implements LinkBridge {
 
   async setDisplayedServer(serverId: string | null): Promise<void> {
     await commands.setDisplayedServer(serverId);
+  }
+
+  async checkAccountInput(username: string, password: string): Promise<AccountInputCheck> {
+    return commands.checkAccountInput(username, password);
+  }
+
+  async listAccounts(serverId: string): Promise<AccountList> {
+    return toAccountList(unwrap(await commands.listAccounts(serverId)));
+  }
+
+  async createAccount(
+    serverId: string,
+    username: string,
+    password: string,
+    role: Role,
+  ): Promise<AccountOutcome> {
+    return toAccountOutcome(
+      unwrap(await commands.createAccount(serverId, username, password, role)),
+    );
+  }
+
+  async changeAccountRole(
+    serverId: string,
+    accountId: string,
+    role: Role,
+  ): Promise<AccountOutcome> {
+    return toAccountOutcome(unwrap(await commands.changeAccountRole(serverId, accountId, role)));
+  }
+
+  async setAccountPassword(
+    serverId: string,
+    accountId: string,
+    username: string,
+    password: string,
+  ): Promise<AccountOutcome> {
+    return toAccountOutcome(
+      unwrap(await commands.setAccountPassword(serverId, accountId, username, password)),
+    );
+  }
+
+  async changeOwnPassword(
+    serverId: string,
+    current: string,
+    password: string,
+  ): Promise<AccountOutcome> {
+    return toAccountOutcome(unwrap(await commands.changeOwnPassword(serverId, current, password)));
+  }
+
+  async closeAccountSessions(serverId: string, accountId: string): Promise<AccountOutcome> {
+    return toAccountOutcome(unwrap(await commands.closeAccountSessions(serverId, accountId)));
+  }
+
+  async deleteAccount(
+    serverId: string,
+    accountId: string,
+    confirmation: string | null,
+  ): Promise<AccountOutcome> {
+    return toAccountOutcome(
+      unwrap(await commands.deleteAccount(serverId, accountId, confirmation)),
+    );
   }
 }
