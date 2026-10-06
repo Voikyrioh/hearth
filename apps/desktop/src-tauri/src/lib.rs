@@ -3,6 +3,7 @@
 //! tout le réseau vivra dans `hearth-link` (ADR-0002).
 
 pub mod alerts;
+pub mod audit;
 pub mod badge;
 mod commands;
 pub mod dashboard;
@@ -65,6 +66,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             link_commands::list_unread_operations,
             link_commands::ack_unread_operations,
             link_commands::get_dashboard,
+            link_commands::read_audit,
+            link_commands::export_audit,
             update::commands::get_update_state,
             update::commands::check_for_updates,
             update::commands::postpone_update,
@@ -76,6 +79,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<link_dto::NoticeEvent>()
         .typ::<dashboard::MetricsEvent>()
         .typ::<dashboard::SnapshotEvent>()
+        .typ::<audit::AuditLiveEvent>()
         .typ::<update::dto::UpdateStateDto>()
 }
 

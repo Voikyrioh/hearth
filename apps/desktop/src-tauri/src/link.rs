@@ -221,7 +221,13 @@ impl LinkRuntime {
         vault: Arc<dyn Vault>,
         client_name: &str,
     ) -> Result<Self, LinkError> {
-        Self::open_with(data_dir, vault, client_name, LinkConfig::default()).await
+        // Le journal d'activité en direct (HRT-14) : un compte lecture seule se voit refuser ce seul
+        // sujet par l'agent, le reste du flux est pris (BR-AUDIT-001).
+        let config = LinkConfig {
+            subscribe_audit: true,
+            ..LinkConfig::default()
+        };
+        Self::open_with(data_dir, vault, client_name, config).await
     }
 
     pub async fn open_with(
@@ -677,7 +683,15 @@ impl LinkRuntime {
                         .on_snapshot(server.as_str(), &machine, &history, now_ms());
                 send(sink, dash_events::SNAPSHOT, &snapshot);
             }
-            Event::SessionEnded { .. } | Event::Audit { .. } => {}
+            // Une entrée du journal, en direct (HRT-14) : la page la fusionne à sa liste.
+            Event::Audit { server, event } => {
+                send(
+                    sink,
+                    crate::audit::EVENT,
+                    &crate::audit::live(&server, &event),
+                );
+            }
+            Event::SessionEnded { .. } => {}
         }
     }
 }

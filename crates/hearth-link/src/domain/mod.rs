@@ -1,6 +1,7 @@
 //! Règles de la liaison : pures, sans E/S, sans horloge propre (le temps est un paramètre).
 
 pub mod agent_identity;
+pub mod audit_query;
 pub mod backoff;
 pub mod book;
 pub mod compat;

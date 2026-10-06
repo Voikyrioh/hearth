@@ -15,6 +15,8 @@ pub enum InputField {
     Port,
     Credentials,
     Fingerprint,
+    /// Un filtre de lecture refusé (journal d'activité).
+    Filter,
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
