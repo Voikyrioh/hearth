@@ -32,6 +32,10 @@ use time::{Duration as TimeDuration, OffsetDateTime};
 
 pub const PASSWORD: &str = "Correct-Horse-9";
 
+/// Fabrique les adaptateurs de mise à jour de l'agent (faux téléchargeur, machine en mémoire) : un
+/// agent redémarré (`restart`) en reçoit de nouveaux, branchés sur les MÊMES objets partagés.
+pub type UpdatingFactory = Arc<dyn Fn() -> hearth_agent::app::Updating + Send + Sync>;
+
 /// Qui demande, pour le journal d'activité : l'administrateur d'un poste du réseau.
 fn by() -> &'static Actor {
     static BY: std::sync::OnceLock<Actor> = std::sync::OnceLock::new();
@@ -196,12 +200,19 @@ pub struct TestAgent {
     adapters: Adapters,
     pub services: Services,
     running: Option<RunningAgent>,
+    updating: Option<UpdatingFactory>,
     pub addr: SocketAddr,
 }
 
 impl TestAgent {
     /// Nouvelle installation : nouveau dossier, donc nouvelle identité (nouveau certificat).
     pub async fn install() -> Self {
+        Self::install_with(None).await
+    }
+
+    /// Comme `install`, avec des adaptateurs de mise à jour fabriqués par `updating` (sans eux :
+    /// ceux de la production, qui refusent la mise à jour hors systemd).
+    pub async fn install_with(updating: Option<UpdatingFactory>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let clock = Arc::new(TestClock(Mutex::new(
@@ -228,6 +239,7 @@ impl TestAgent {
             adapters,
             services,
             running: None,
+            updating,
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         };
         agent.start().await;
@@ -241,7 +253,11 @@ impl TestAgent {
             data_dir: self.dir.path().to_owned(),
             managed: false,
         };
-        let running = app::start_with_metering(&config, &self.db, &self.adapters, metering())
+        let updating = match &self.updating {
+            Some(make) => make(),
+            None => app::Updating::production(&config).unwrap(),
+        };
+        let running = app::start_with_all(&config, &self.db, &self.adapters, metering(), updating)
             .await
             .unwrap();
         self.addr = running.server.local_addr();

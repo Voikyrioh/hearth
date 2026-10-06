@@ -5,6 +5,7 @@
 
 pub mod agent;
 pub mod proxy;
+pub mod update_rig;
 
 use std::collections::BTreeSet;
 use std::net::IpAddr;
@@ -252,6 +253,9 @@ pub struct Options {
     pub remember: bool,
     pub role: Role,
     pub config: LinkConfig,
+    /// Adaptateurs de mise à jour de l'agent (`update_rig::Rig::updating`) ; sans eux, ceux de la
+    /// production.
+    pub updating: Option<agent::UpdatingFactory>,
 }
 
 impl Default for Options {
@@ -260,6 +264,7 @@ impl Default for Options {
             remember: false,
             role: Role::Admin,
             config: fast_config(),
+            updating: None,
         }
     }
 }
@@ -325,7 +330,7 @@ pub fn short_transport() -> HttpTransport {
 impl World {
     /// Agent installé, compte « marie », mandataire, `LinkManager` connecté.
     pub async fn connected(options: Options) -> Self {
-        let agent = TestAgent::install().await;
+        let agent = TestAgent::install_with(options.updating).await;
         agent.create_account("marie", options.role).await;
         let proxy = FaultProxy::start(agent.addr).await;
         let dir = tempfile::tempdir().unwrap();

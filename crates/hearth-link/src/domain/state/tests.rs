@@ -966,6 +966,8 @@ fn every_input_in_every_phase_is_handled_without_panicking_or_spinning() {
         Input::LoginSucceeded,
         Input::LoginRefused,
         Input::LoggedOut,
+        Input::RestartAnnounced,
+        Input::RestartEnded,
     ];
     // Suite pseudo-aléatoire déterministe : la machine ne doit jamais paniquer, et ses échéances
     // doivent toujours être consommables (pas de boucle active).
@@ -1009,4 +1011,86 @@ fn a_silent_reauthentication_does_not_forget_that_the_pc_already_woke() {
         since,
         "un seul report par coupure, même après une session expirée"
     );
+}
+
+// ── Redémarrage annoncé par l'agent (mise à jour, BR-UPDATE-014) ────────────────────────────
+
+#[test]
+fn an_announced_restart_shows_reconnecting_at_once_and_never_offline_inside_the_window() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::RestartAnnounced);
+    rig.send_at(10_100, Input::TransportFailed);
+    // Coupure annoncée : « Reconnexion en cours » tout de suite, sans les 3 s de « Connecté ».
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    // Là où une panne ordinaire passerait « Hors ligne » (30 s), ici non.
+    rig.run_failing_until(10_100 + 30_000);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    // Jusqu'à la dernière milliseconde de la fenêtre de 2 minutes (comptée depuis l'annonce).
+    rig.run_failing_until(10_000 + 120_000 - 1);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    // Aucun échec n'est compté à l'utilisateur pendant la coupure attendue.
+    assert_eq!(rig.machine.status().failed_attempts, 0);
+    // Passé la fenêtre sans retour : une panne comme une autre.
+    rig.run_failing_until(10_000 + 120_000);
+    assert_eq!(rig.state(), LinkState::Offline);
+    assert_eq!(rig.since(), 130_000);
+    assert!(rig.machine.status().failed_attempts > 0);
+}
+
+#[test]
+fn the_new_agent_answering_ends_the_expected_cut_and_the_next_cut_is_an_ordinary_one() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::RestartAnnounced);
+    rig.send_at(10_100, Input::TransportFailed);
+    rig.run_failing_until(14_000);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    rig.send_at(14_500, Input::Connected);
+    assert_eq!(rig.state(), LinkState::Connected);
+    // Une vraie panne ensuite, dans les 2 minutes de l'annonce : « Hors ligne » à 30 s comme avant.
+    rig.send_at(20_000, Input::TransportFailed);
+    rig.run_failing_until(20_000 + 30_000);
+    assert_eq!(rig.state(), LinkState::Offline);
+}
+
+#[test]
+fn the_end_of_the_update_lifts_the_expectation_and_a_stopped_link_forgets_it() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::RestartAnnounced);
+    rig.send_at(10_100, Input::RestartEnded);
+    rig.send_at(10_200, Input::TransportFailed);
+    rig.run_failing_until(10_200 + 30_000);
+    assert_eq!(rig.state(), LinkState::Offline, "plus de coupure attendue");
+    // Une session fermée par l'administration n'est pas une coupure attendue.
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::RestartAnnounced);
+    rig.send_at(10_100, Input::AccessRevoked);
+    assert_eq!(rig.state(), LinkState::AccessRevoked);
+}
+
+#[test]
+fn the_expected_cut_has_exact_deadlines_and_none_is_left_over() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::RestartAnnounced);
+    rig.send_at(10_100, Input::TransportFailed);
+    rig.advance_to(10_100 + 1);
+    // La prochaine échéance de « Hors ligne » est la fin de la fenêtre, jamais avant.
+    let mut seen = Vec::new();
+    for _ in 0..50 {
+        let Some(deadline) = rig.machine.deadline() else {
+            break;
+        };
+        seen.push(deadline.as_millis());
+        if deadline.as_millis() >= 130_000 {
+            break;
+        }
+        rig.now = rig.now.max(deadline.as_millis());
+        if rig.send(Input::Tick).contains(&Effect::StartAttempt) {
+            rig.send(Input::TransportFailed);
+        }
+    }
+    assert!(
+        seen.iter().all(|at| *at <= 130_000),
+        "aucune échéance au-delà de la fin de fenêtre : {seen:?}"
+    );
+    assert_eq!(rig.state(), LinkState::Reconnecting);
 }

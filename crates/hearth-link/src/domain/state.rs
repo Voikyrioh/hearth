@@ -15,6 +15,15 @@
 //! tests de résilience les réduisent pour rester rapides ; les valeurs par défaut sont celles de
 //! la spec.
 //!
+//! # Redémarrage annoncé (mise à jour de l'agent, BR-UPDATE-014)
+//! Quand l'agent annonce `restart` sur le flux de mise à jour ([`Input::RestartAnnounced`]), la
+//! coupure qui suit est ATTENDUE : pendant [`Thresholds::restart_window`] (2 minutes : les 60 s de
+//! contrôle du nouvel agent, un éventuel retour arrière, une marge), le lien s'affiche
+//! « Reconnexion en cours » dès la coupure, ne passe pas à « Hors ligne », et ne compte pas
+//! d'échec de reconnexion (donc ni notification système de panne, ni avis « reconnexion échouée »).
+//! Passé ce délai sans retour de l'agent, la coupure est une panne comme une autre. Le retour du
+//! lien ([`Input::Connected`]) ou la fin de la mise à jour ([`Input::RestartEnded`]) lève l'attente.
+//!
 //! # Tentatives
 //! La première tentative suit immédiatement la perte ; les suivantes sont espacées par
 //! [`Backoff`] (0,5 s, 1 s, 2 s, 4 s, 8 s, 15 s, 30 s, 30 s…). Un déclencheur (« Réessayer
@@ -33,12 +42,18 @@ pub const SILENCE: Duration = Duration::from_secs(3);
 pub const RECONNECTING_AFTER: Duration = Duration::from_secs(3);
 /// Coupure à partir de laquelle l'état affiché passe à « Hors ligne ».
 pub const OFFLINE_AFTER: Duration = Duration::from_secs(30);
+/// Durée d'une coupure annoncée par l'agent (redémarrage pour mise à jour) : 60 s de contrôle du
+/// nouvel agent, le retour arrière éventuel (arrêt, remise de l'ancien binaire, démarrage), une marge.
+pub const RESTART_WINDOW: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Thresholds {
     pub silence: Duration,
     pub reconnecting_after: Duration,
     pub offline_after: Duration,
+    /// Durée pendant laquelle une coupure annoncée par l'agent (redémarrage de mise à jour) reste
+    /// « Reconnexion en cours » (BR-UPDATE-014).
+    pub restart_window: Duration,
     /// Diviseur des délais de reconnexion : 1 en production, plus pour les tests rapides.
     pub backoff_divisor: u32,
 }
@@ -49,6 +64,7 @@ impl Default for Thresholds {
             silence: SILENCE,
             reconnecting_after: RECONNECTING_AFTER,
             offline_after: OFFLINE_AFTER,
+            restart_window: RESTART_WINDOW,
             backoff_divisor: 1,
         }
     }
@@ -63,6 +79,7 @@ impl Thresholds {
             silence: SILENCE / divisor,
             reconnecting_after: RECONNECTING_AFTER / divisor,
             offline_after: OFFLINE_AFTER / divisor,
+            restart_window: RESTART_WINDOW / divisor,
             backoff_divisor: divisor,
         }
     }
@@ -144,6 +161,11 @@ pub enum Input {
     LoginRefused,
     /// L'utilisateur s'est déconnecté.
     LoggedOut,
+    /// L'agent a annoncé `restart` sur le flux de mise à jour : sa coupure est attendue
+    /// (BR-UPDATE-014).
+    RestartAnnounced,
+    /// La mise à jour est terminée (étape `done`) : plus de coupure attendue.
+    RestartEnded,
     /// Arrêt de l'application.
     Shutdown,
 }
@@ -254,6 +276,10 @@ pub struct LinkMachine {
     shown: LinkState,
     shown_since: Mono,
     last_contact: Option<Mono>,
+    /// Jusqu'à quand une coupure est attendue (redémarrage annoncé par l'agent).
+    restart_until: Option<Mono>,
+    /// La coupure attendue est en cours à l'instant du dernier calcul de l'état affiché.
+    restart_active: bool,
 }
 
 impl std::fmt::Debug for LinkMachine {
@@ -314,6 +340,8 @@ impl LinkMachine {
             shown,
             shown_since: now,
             last_contact: None,
+            restart_until: None,
+            restart_active: false,
         }
     }
 
@@ -336,7 +364,13 @@ impl LinkMachine {
             since: self.shown_since,
             last_contact: self.last_contact,
             next_retry_at,
-            failed_attempts: self.backoff.failures(),
+            // Une coupure annoncée ne compte aucun échec : ni avis « reconnexion échouée », ni
+            // notification de panne (BR-UPDATE-014).
+            failed_attempts: if self.restart_active {
+                0
+            } else {
+                self.backoff.failures()
+            },
         }
     }
 
@@ -367,7 +401,7 @@ impl LinkMachine {
                     offer(outage.since.after(self.thresholds.reconnecting_after));
                 }
                 if self.shown != LinkState::Offline && !outage.manual {
-                    offer(outage.since.after(self.thresholds.offline_after));
+                    offer(self.offline_at(&outage));
                 }
                 next
             }
@@ -425,6 +459,12 @@ impl LinkMachine {
             Input::LoggedOut => {
                 self.stop_trying(now, Phase::Expired(Reason::UserDisconnected), &mut effects);
             }
+            Input::RestartAnnounced => {
+                if matches!(self.phase, Phase::Up { .. } | Phase::Down(_)) {
+                    self.restart_until = Some(now.after(self.thresholds.restart_window));
+                }
+            }
+            Input::RestartEnded => self.restart_until = None,
             Input::Shutdown => {
                 self.phase = Phase::Stopped;
                 effects.extend([Effect::AbortAttempt, Effect::CloseStream, Effect::Stop]);
@@ -472,6 +512,8 @@ impl LinkMachine {
 
     fn on_connected(&mut self, now: Mono, effects: &mut Vec<Effect>) {
         if matches!(self.phase, Phase::Down(_)) {
+            // Le nouvel agent répond : la coupure attendue est finie.
+            self.restart_until = None;
             self.phase = Phase::Up {
                 last_traffic: now,
                 check_by: None,
@@ -677,6 +719,7 @@ impl LinkMachine {
             return;
         }
         self.phase = phase;
+        self.restart_until = None;
         effects.extend([
             Effect::AbortAttempt,
             Effect::CloseStream,
@@ -694,20 +737,30 @@ impl LinkMachine {
             Phase::Blocked(_) => (LinkState::Offline, now),
             Phase::Stopped => return,
         };
+        self.restart_active = self.restart_until.is_some_and(|until| now < until)
+            && matches!(self.phase, Phase::Down(_));
         if derived != self.shown {
             self.shown = derived;
             self.shown_since = at.min(now);
         }
     }
 
+    /// Instant où une coupure devient « Hors ligne » : le seuil, repoussé jusqu'à la fin d'une
+    /// coupure attendue (redémarrage annoncé par l'agent).
+    fn offline_at(&self, outage: &Outage) -> Mono {
+        let at = outage.since.after(self.thresholds.offline_after);
+        self.restart_until.map_or(at, |until| at.max(until))
+    }
+
     /// État affiché pendant une coupure, et l'instant exact où il l'est devenu.
     fn derive_down(&self, outage: Outage, now: Mono) -> (LinkState, Mono) {
         let elapsed = now.since(outage.since);
-        let offline_at = outage.since.after(self.thresholds.offline_after);
+        let offline_at = self.offline_at(&outage);
         let reconnecting_at = outage.since.after(self.thresholds.reconnecting_after);
-        if elapsed >= self.thresholds.offline_after && !outage.manual {
+        let expected = self.restart_until.is_some_and(|until| now < until);
+        if now >= offline_at && !outage.manual {
             (LinkState::Offline, offline_at)
-        } else if outage.manual || outage.unproven {
+        } else if outage.manual || outage.unproven || expected {
             (LinkState::Reconnecting, now)
         } else if elapsed >= self.thresholds.reconnecting_after {
             (LinkState::Reconnecting, reconnecting_at)

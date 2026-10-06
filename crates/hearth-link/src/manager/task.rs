@@ -15,6 +15,7 @@ use std::time::Duration;
 use futures_util::FutureExt as _;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
+use hearth_proto::api::update::{UpdateProgress, UpdateStep};
 use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice};
 use tokio::sync::{mpsc, oneshot};
@@ -468,7 +469,24 @@ impl Runner {
                 _ => {}
             },
             ServerMessage::Pong { .. } => {}
+            ServerMessage::Update(progress) => self.on_update(progress).await,
         }
+    }
+
+    /// Progression de la mise à jour de l'agent : annoncée à l'interface ; `restart` rend la
+    /// coupure qui suit attendue (« Reconnexion… » sans alarme), `done` lève l'attente
+    /// (BR-UPDATE-014).
+    async fn on_update(&mut self, progress: UpdateProgress) {
+        match progress.step {
+            UpdateStep::Restart => self.input(Input::RestartAnnounced).await,
+            UpdateStep::Done => self.input(Input::RestartEnded).await,
+            UpdateStep::Download | UpdateStep::Verify | UpdateStep::Install | UpdateStep::Check => {
+            }
+        }
+        self.deps.sink.emit(Event::AgentUpdate {
+            server: self.id.clone(),
+            progress: Arc::new(progress),
+        });
     }
 
     fn install_snapshot(&mut self, machine: MachineResponse, history: Vec<Sample>) {
@@ -500,6 +518,7 @@ impl Runner {
                 stream,
                 machine,
                 history,
+                updates,
             } => {
                 self.stream = Some(stream);
                 self.shared.clear_presented();
@@ -508,6 +527,12 @@ impl Runner {
                 if effects.contains(&Effect::ResolvePending) {
                     self.last_contact = Some(self.deps.clock.wall());
                     self.install_snapshot(*machine, history);
+                    for progress in updates {
+                        self.deps.sink.emit(Event::AgentUpdate {
+                            server: self.id.clone(),
+                            progress: Arc::new(progress),
+                        });
+                    }
                 } else {
                     // Résultat périmé (déconnexion entre-temps) : on ne le garde pas.
                     self.stream = None;
