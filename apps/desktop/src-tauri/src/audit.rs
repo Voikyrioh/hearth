@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use hearth_link::adapters::file_store::write_atomic;
 use hearth_link::domain::audit_query::{
     ActionKind, AuditFilter, FilterError, PAGE_SIZE, RawFilter,
 };
@@ -25,6 +26,9 @@ use crate::link_dto::{InvalidField, LinkFailure};
 
 /// Événement d'une entrée du journal reçue en direct.
 pub const EVENT: &str = "link://audit";
+
+/// Événement « le flux a perdu des entrées » (retard de la liaison) : la page relit la tête du journal.
+pub const GAP_EVENT: &str = "link://audit-gap";
 
 /// Nom de fichier proposé à l'enregistrement.
 pub const SUGGESTED_FILE_NAME: &str = "journal-hearth.csv";
@@ -279,7 +283,10 @@ pub async fn export(
             truncated: file.truncated,
         });
     };
-    if let Err(error) = tokio::fs::write(&destination, &file.bytes).await {
+    // Écriture atomique (fichier temporaire à côté, synchronisation, renommage) : un export
+    // interrompu ne laisse jamais un CSV tronqué qui ressemble à un journal complet, et un export
+    // précédent que l'utilisateur a accepté d'écraser n'est remplacé qu'une fois le nouveau entier.
+    if let Err(error) = write_atomic(&destination, &file.bytes).await {
         tracing::warn!(%error, "export du journal : fichier non écrit");
         return Err(LinkFailure::Storage);
     }

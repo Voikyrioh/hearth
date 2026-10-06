@@ -650,6 +650,8 @@ impl LinkRuntime {
                 },
             ),
             Event::Lagged { .. } => {
+                // Des entrées du journal ont pu être perdues : la page relit la tête (HRT-14).
+                send(sink, crate::audit::GAP_EVENT, &serde_json::json!({}));
                 send(
                     sink,
                     events::NOTICE,

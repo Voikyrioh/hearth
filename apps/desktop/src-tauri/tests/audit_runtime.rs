@@ -355,6 +355,54 @@ async fn the_export_goes_where_the_user_chose_and_nowhere_else() {
     assert_eq!(entries.len(), 1);
 }
 
+fn names_in(dir: &std::path::Path) -> Vec<std::ffi::OsString> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect()
+}
+
+#[tokio::test]
+async fn an_export_replaces_the_previous_file_whole_and_leaves_no_temporary_file() {
+    let rig = rig(Role::Admin).await;
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("journal.csv");
+    std::fs::write(&target, "ancien contenu ".repeat(10_000)).unwrap();
+    let chooser = Chooser::new(Some(target.clone()));
+    let result = audit::export(&rig.runtime, &rig.server, filter(), &chooser)
+        .await
+        .unwrap();
+    assert!(result.saved);
+    let text = std::fs::read_to_string(&target).unwrap();
+    assert!(text.starts_with('\u{feff}'), "le nouveau fichier, entier");
+    assert!(!text.contains("ancien contenu"));
+    assert!(
+        text.ends_with("\r\n"),
+        "un fichier complet finit par une fin de ligne"
+    );
+    assert_eq!(names_in(dir.path()).len(), 1, "aucun fichier temporaire");
+}
+
+#[tokio::test]
+async fn a_failed_write_keeps_what_was_there_and_leaves_no_temporary_file() {
+    let rig = rig(Role::Admin).await;
+    let dir = tempfile::tempdir().unwrap();
+    // Le renommage final échoue (la destination est un dossier non vide) : rien n'est détruit.
+    let target = dir.path().join("journal.csv");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("precieux.txt"), "à garder").unwrap();
+    let chooser = Chooser::new(Some(target.clone()));
+    let failed = audit::export(&rig.runtime, &rig.server, filter(), &chooser)
+        .await
+        .unwrap_err();
+    assert_eq!(failed, LinkFailure::Storage);
+    assert_eq!(
+        std::fs::read_to_string(target.join("precieux.txt")).unwrap(),
+        "à garder"
+    );
+    assert_eq!(names_in(dir.path()).len(), 1, "aucun fichier temporaire");
+}
+
 #[tokio::test]
 async fn cancelling_the_save_dialog_writes_nothing_and_a_bad_destination_is_a_storage_failure() {
     let rig = rig(Role::Admin).await;
@@ -414,7 +462,13 @@ async fn entries_written_by_the_agent_reach_the_window_as_link_audit_events() {
 #[tokio::test]
 async fn a_read_only_account_receives_no_audit_event() {
     let rig = rig(Role::ReadOnly).await;
+    let before = rig.sink.of("link://metrics").len();
     rig.agent.create_account("paul", Role::ReadOnly).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Pas de sommeil : on attend un FAIT, dix mesures de plus sur ce même flux APRÈS l'écriture de
+    // l'entrée (si l'agent la lui envoyait, elle serait passée devant).
+    eventually("dix mesures de plus sur le flux", || {
+        rig.sink.of("link://metrics").len() >= before + 10
+    })
+    .await;
     assert!(rig.sink.of(audit::EVENT).is_empty());
 }
