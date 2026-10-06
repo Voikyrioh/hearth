@@ -9,8 +9,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use hearth_proto::fingerprint::Fingerprint;
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
@@ -20,6 +19,7 @@ use time::{Duration as TimeDuration, OffsetDateTime};
 use crate::application::ports::{IdentityError, IdentityStore, PublicIdentity};
 use crate::domain::identity_policy::{self, IdentityAction, StoreObservation};
 use crate::domain::install_id::InstallId;
+use crate::infrastructure::file_lock::{HeldLock, LockError};
 
 use crate::domain::install::{
     CERT_FILE, IDENTITY_LOCK_FILE as LOCK_FILE, INSTALL_ID_FILE, KEY_FILE, is_identity_temporary,
@@ -197,10 +197,10 @@ impl IdentityStore for FileIdentityStore {
     }
 }
 
-/// Verrou exclusif entre processus sur `identity.lock`. Le noyau le relâche quand le fichier
-/// est fermé ou que le processus meurt : aucun nettoyage à faire, même après un arrêt brutal.
+/// Verrou exclusif entre processus sur `identity.lock` (brique partagée `file_lock`) : relâché
+/// explicitement à la destruction, et par le noyau si le processus meurt.
 struct CreationLock {
-    _file: fs::File,
+    _held: HeldLock,
 }
 
 impl CreationLock {
@@ -211,20 +211,13 @@ impl CreationLock {
             .truncate(false)
             .open(path)
             .map_err(storage(path))?;
-        let deadline = Instant::now() + timeout;
-        loop {
-            match file.try_lock() {
-                Ok(()) => return Ok(Self { _file: file }),
-                Err(fs::TryLockError::WouldBlock) => {
-                    if Instant::now() >= deadline {
-                        tracing::warn!(path = %path.display(), "verrou de création tenu par un autre processus");
-                        return Err(IdentityError::LockTimeout);
-                    }
-                    // Le démarrage est synchrone : une courte attente bloquante suffit.
-                    thread::sleep(LOCK_RETRY);
-                }
-                Err(fs::TryLockError::Error(e)) => return Err(storage(path)(e)),
+        match HeldLock::acquire(file, timeout, LOCK_RETRY) {
+            Ok(held) => Ok(Self { _held: held }),
+            Err(LockError::Busy) => {
+                tracing::warn!(path = %path.display(), "verrou de création tenu par un autre processus");
+                Err(IdentityError::LockTimeout)
             }
+            Err(LockError::Io(error)) => Err(storage(path)(error)),
         }
     }
 }
@@ -305,6 +298,8 @@ fn write_file(path: &Path, bytes: &[u8], private: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::sync::Barrier;
+    use std::thread;
+    use std::time::Instant;
 
     use super::*;
     use crate::domain::identity_policy::IdentityPart;
@@ -326,6 +321,22 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         false
+    }
+
+    /// FIX:01M46N01GMK08NXQHCZ28A2KQ1 : un enfant en cours de lancement porte une copie du
+    /// descripteur ; elle ne retient pas le verrou de création après sa libération.
+    #[test]
+    fn the_creation_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive() {
+        let dir = tempfile::tempdir().expect("dossier");
+        let path = dir.path().join(LOCK_FILE);
+        let lock = CreationLock::acquire(&path, Duration::ZERO).expect("pris");
+        let child_copy = lock._held.descriptor_copy();
+        drop(lock);
+        assert!(
+            CreationLock::acquire(&path, Duration::ZERO).is_ok(),
+            "libre alors que la copie vit encore"
+        );
+        drop(child_copy);
     }
 
     fn cert_fingerprint(dir: &Path) -> Fingerprint {

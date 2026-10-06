@@ -6,6 +6,7 @@ pub mod audit_feed;
 pub mod clock;
 pub mod config;
 pub mod data_dir;
+pub mod file_lock;
 pub mod ids;
 pub mod install;
 pub mod logging;

@@ -11,7 +11,7 @@
 //! y compris un processus « détaché » qui en fait partie).
 
 use std::ffi::OsString;
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -27,6 +27,7 @@ use crate::domain::install::{
     UPDATE_SUPERVISOR_FILE, UPDATE_WAL_BACKUP_FILE, Version,
 };
 use crate::domain::update::{Job, SupervisorState, UpdateRecord};
+use crate::infrastructure::file_lock::{HeldLock, LockError};
 use crate::infrastructure::install::scrub::scrubbed;
 
 /// Nom de l'unité transitoire du superviseur : un seul à la fois, par construction.
@@ -171,13 +172,10 @@ impl UpdateHost for FsUpdateHost {
         else {
             return false;
         };
-        match file.try_lock() {
-            Ok(()) => {
-                let _ = file.unlock();
-                false
-            }
-            Err(TryLockError::WouldBlock) => true,
-            Err(TryLockError::Error(_)) => false,
+        // Pris puis aussitôt relâché (explicitement, à la destruction du verrou).
+        match HeldLock::acquire(file, Duration::ZERO, Duration::ZERO) {
+            Ok(_) | Err(LockError::Io(_)) => false,
+            Err(LockError::Busy) => true,
         }
     }
 
@@ -185,21 +183,13 @@ impl UpdateHost for FsUpdateHost {
         let file = self.lock_file()?;
         // Il insiste une seconde : un test de l'agent (`supervisor_running`) tient le verrou un
         // instant, et le superviseur ne doit pas renoncer à cause de lui.
-        let deadline = Instant::now() + LOCK_PATIENCE;
-        loop {
-            match file.try_lock() {
-                Ok(()) => return Ok(SupervisorLock(Box::new(file))),
-                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
-                    std::thread::sleep(LOCK_RETRY);
-                }
-                Err(TryLockError::WouldBlock) => return Err(UpdateHostError::AlreadyRunning),
-                Err(TryLockError::Error(source)) => {
-                    return Err(Self::io(
-                        "verrou du superviseur",
-                        &self.path(UPDATE_LOCK_FILE),
-                    )(source));
-                }
-            }
+        match HeldLock::acquire(file, LOCK_PATIENCE, LOCK_RETRY) {
+            Ok(held) => Ok(SupervisorLock(Box::new(held))),
+            Err(LockError::Busy) => Err(UpdateHostError::AlreadyRunning),
+            Err(LockError::Io(source)) => Err(Self::io(
+                "verrou du superviseur",
+                &self.path(UPDATE_LOCK_FILE),
+            )(source)),
         }
     }
 
@@ -681,6 +671,23 @@ mod tests {
         drop(lock);
         assert!(!host.supervisor_running(), "relâché avec le processus");
         assert!(host.take_supervisor_lock().is_ok());
+    }
+
+    /// FIX:01M46N01GMK08NXQHCZ28A2KQ1 : un enfant en cours de lancement porte une copie du
+    /// descripteur ; elle ne retient pas le verrou du superviseur après sa libération.
+    #[test]
+    fn the_supervisor_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive() {
+        let (_dir, host) = host();
+        let lock = host.take_supervisor_lock().unwrap();
+        let held = lock.0.downcast::<HeldLock>().expect("un verrou partagé");
+        let child_copy = held.descriptor_copy();
+        drop(held);
+        assert!(
+            !host.supervisor_running(),
+            "libre alors que la copie vit encore"
+        );
+        assert!(host.take_supervisor_lock().is_ok());
+        drop(child_copy);
     }
 
     #[test]
