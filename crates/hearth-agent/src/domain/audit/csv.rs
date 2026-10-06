@@ -5,60 +5,52 @@
 //! retour chariot serait lue comme une formule par un tableur ; elle est précédée d'une
 //! apostrophe (neutralisée avant d'être mise entre guillemets).
 
+use hearth_proto::api::audit::OutcomeName;
+use hearth_proto::api::audit_csv::{self, Row};
 use time::UtcOffset;
 use time::format_description::well_known::Rfc3339;
 
-use super::event::AuditRecord;
+use super::event::{AuditRecord, OutcomeKind};
 
-/// Marque d'ordre des octets UTF-8 : sans elle Excel lit les accents de travers.
-pub const BOM: &str = "\u{feff}";
-pub const SEPARATOR: char = ';';
-
-const HEADER: [&str; 7] = [
-    "Date et heure",
-    "Compte",
-    "Origine",
-    "Action",
-    "Cible",
-    "Résultat",
-    "Raison",
-];
+pub use hearth_proto::api::audit_csv::{BOM, SEPARATOR};
 
 /// Une valeur prête pour une cellule : la neutralisation de l'injection de formule vit à UN seul
 /// endroit, `hearth_proto::api::audit_csv::field` (partagée avec la liaison cliente).
 pub fn field(value: &str) -> String {
-    hearth_proto::api::audit_csv::field(value)
+    audit_csv::field(value)
 }
 
-fn line(cells: &[String]) -> String {
-    let mut line = cells.join(&SEPARATOR.to_string());
-    line.push_str("\r\n");
-    line
-}
-
-/// Le fichier : marque d'ordre des octets, en-tête, une ligne par entrée dans l'ordre donné.
-/// Les dates sont en UTC (RFC 3339), sans ambiguïté de fuseau.
-pub fn render(records: &[AuditRecord]) -> String {
-    let mut out = String::from(BOM);
-    out.push_str(&line(&HEADER.map(field)));
-    for record in records {
-        let date = record
-            .at
-            .to_offset(UtcOffset::UTC)
-            .format(&Rfc3339)
-            .unwrap_or_default();
-        let outcome = record.outcome.label();
-        out.push_str(&line(&[
-            field(&date),
-            field(record.account.as_deref().unwrap_or("")),
-            field(&record.origin_text()),
-            field(&record.action_label),
-            field(record.target.as_deref().unwrap_or("")),
-            field(outcome),
-            field(record.reason.as_deref().unwrap_or("")),
-        ]));
+fn name_of(outcome: OutcomeKind) -> OutcomeName {
+    match outcome {
+        OutcomeKind::Ok => OutcomeName::Ok,
+        OutcomeKind::Denied => OutcomeName::Denied,
+        OutcomeKind::Failed => OutcomeName::Failed,
     }
-    out
+}
+
+/// Le fichier : en-tête, séparateur, fins de ligne, colonnes et libellés sont ceux de
+/// `hearth_proto::api::audit_csv::render` (une seule description). Dates en UTC (RFC 3339).
+pub fn render(records: &[AuditRecord]) -> String {
+    let dates: Vec<String> = records
+        .iter()
+        .map(|record| {
+            record
+                .at
+                .to_offset(UtcOffset::UTC)
+                .format(&Rfc3339)
+                .unwrap_or_default()
+        })
+        .collect();
+    let origins: Vec<String> = records.iter().map(AuditRecord::origin_text).collect();
+    audit_csv::render(records.iter().enumerate().map(|(i, record)| Row {
+        date: &dates[i],
+        account: record.account.as_deref(),
+        origin: &origins[i],
+        action_label: &record.action_label,
+        target: record.target.as_deref(),
+        outcome: name_of(record.outcome),
+        reason: record.reason.as_deref(),
+    }))
 }
 
 #[cfg(test)]

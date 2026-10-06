@@ -27,7 +27,13 @@ pub const HEADER: [&str; 7] = [
 /// elle est précédée d'une apostrophe, puis mise entre guillemets si elle contient le séparateur,
 /// un guillemet ou un saut de ligne.
 pub fn field(value: &str) -> String {
-    let neutralized = if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+    // Les espaces de tête ne sauvent pas la valeur : certains tableurs les ignorent avant de lire
+    // une formule. On regarde donc le premier caractère qui n'est pas un espace.
+    let neutralized = if value.starts_with(['\t', '\r'])
+        || value
+            .trim_start_matches(char::is_whitespace)
+            .starts_with(['=', '+', '-', '@'])
+    {
         format!("'{value}")
     } else {
         value.to_owned()
@@ -55,22 +61,49 @@ pub fn outcome_label(outcome: OutcomeName) -> &'static str {
     }
 }
 
+/// Une ligne du fichier, avant mise en cellules. UNE seule description des colonnes pour tout le
+/// dépôt : l'agent (ses enregistrements) et la liaison cliente (les entrées du fil) la remplissent.
+#[derive(Debug, Clone, Copy)]
+pub struct Row<'a> {
+    /// Date en UTC (RFC 3339).
+    pub date: &'a str,
+    pub account: Option<&'a str>,
+    pub origin: &'a str,
+    pub action_label: &'a str,
+    pub target: Option<&'a str>,
+    pub outcome: OutcomeName,
+    pub reason: Option<&'a str>,
+}
+
 /// Le fichier : marque d'ordre des octets, en-tête, une ligne par entrée dans l'ordre donné.
-pub fn render_items(items: &[AuditEventItem]) -> String {
+pub fn render<'a>(rows: impl IntoIterator<Item = Row<'a>>) -> String {
     let mut out = String::from(BOM);
     out.push_str(&line(&HEADER.map(field)));
-    for item in items {
+    for row in rows {
         out.push_str(&line(&[
-            field(&item.at),
-            field(item.account.as_deref().unwrap_or("")),
-            field(&item.origin.text),
-            field(&item.action_label),
-            field(item.target.as_deref().unwrap_or("")),
-            field(outcome_label(item.outcome)),
-            field(item.reason.as_deref().unwrap_or("")),
+            field(row.date),
+            field(row.account.unwrap_or("")),
+            field(row.origin),
+            field(row.action_label),
+            field(row.target.unwrap_or("")),
+            field(outcome_label(row.outcome)),
+            field(row.reason.unwrap_or("")),
         ]));
     }
     out
+}
+
+/// Le fichier d'entrées du fil (même rendu que celui de l'agent, par construction).
+pub fn render_items(items: &[AuditEventItem]) -> String {
+    render(items.iter().map(|item| Row {
+        date: &item.at,
+        account: item.account.as_deref(),
+        origin: &item.origin.text,
+        action_label: &item.action_label,
+        target: item.target.as_deref(),
+        outcome: item.outcome,
+        reason: item.reason.as_deref(),
+    }))
 }
 
 #[cfg(test)]
@@ -108,6 +141,15 @@ mod tests {
             );
         }
         assert_eq!(field("=a;b"), "\"'=a;b\"");
+        // Espaces (ordinaires ou insécables) puis un déclencheur : neutralisé aussi.
+        for value in [" =1+1", "  @SUM(A1)", "\u{a0}-1", " \t=1", "\n=1"] {
+            let cell = field(value);
+            assert!(
+                cell.trim_matches('"').starts_with('\''),
+                "{value:?} -> {cell:?}"
+            );
+        }
+        assert_eq!(field(" a=b"), " a=b");
         assert_eq!(field("a=b"), "a=b");
         assert_eq!(field("marie"), "marie");
     }

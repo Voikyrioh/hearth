@@ -9,6 +9,7 @@
 //! une requête par rectangle (actions × résultats) et [`merge_pages`] recolle les pages sans rien
 //! perdre ni doubler.
 
+use hearth_proto::api::audit::action;
 use hearth_proto::api::audit::{AuditEventItem, AuditQuery, AuditResponse, OutcomeName};
 
 /// Comptes retenus au plus dans un filtre.
@@ -37,35 +38,41 @@ pub enum ActionKind {
     Denied,
 }
 
+/// Gestion des comptes : création, suppression, rôle, mots de passe, sessions.
+const ACCOUNT_CODES: [&str; 6] = [
+    action::ACCOUNT_CREATE,
+    action::ACCOUNT_DELETE,
+    action::ACCOUNT_ROLE,
+    action::ACCOUNT_PASSWORD,
+    action::ACCOUNT_PASSWORD_OWN,
+    action::SESSIONS_REVOKE,
+];
+
+/// « Action refusée » : tout ce qui n'est pas une connexion, refusé faute de droits.
+const DENIED_CODES: [&str; 10] = [
+    action::LOGOUT,
+    action::ACCOUNT_CREATE,
+    action::ACCOUNT_DELETE,
+    action::ACCOUNT_ROLE,
+    action::ACCOUNT_PASSWORD,
+    action::ACCOUNT_PASSWORD_OWN,
+    action::SESSIONS_REVOKE,
+    action::ACCOUNTS_READ,
+    action::AUDIT_READ,
+    action::AGENT_UPDATE,
+];
+
 const ALL_OUTCOMES: [OutcomeName; 3] = [OutcomeName::Ok, OutcomeName::Denied, OutcomeName::Failed];
 
 impl ActionKind {
     /// Codes d'action de l'agent couverts.
     fn codes(self) -> &'static [&'static str] {
         match self {
-            Self::LoginOk => &["login"],
-            Self::LoginDenied => &["login", "login.locked"],
-            Self::Accounts => &[
-                "account.create",
-                "account.delete",
-                "account.role",
-                "account.password",
-                "account.password.own",
-                "sessions.revoke",
-            ],
-            Self::Update => &["agent.update"],
-            Self::Denied => &[
-                "logout",
-                "account.create",
-                "account.delete",
-                "account.role",
-                "account.password",
-                "account.password.own",
-                "sessions.revoke",
-                "accounts.read",
-                "audit.read",
-                "agent.update",
-            ],
+            Self::LoginOk => &[action::LOGIN],
+            Self::LoginDenied => &[action::LOGIN, action::LOGIN_LOCKED],
+            Self::Accounts => &ACCOUNT_CODES,
+            Self::Update => &[action::AGENT_UPDATE],
+            Self::Denied => &DENIED_CODES,
         }
     }
 
@@ -410,6 +417,31 @@ mod tests {
         AuditResponse {
             events: ids.iter().map(|id| item(*id)).collect(),
             next_before: next,
+        }
+    }
+
+    #[test]
+    fn every_action_of_the_catalogue_belongs_to_a_kind_of_the_interface() {
+        let kinds = [
+            ActionKind::LoginOk,
+            ActionKind::LoginDenied,
+            ActionKind::Accounts,
+            ActionKind::Update,
+            ActionKind::Denied,
+        ];
+        for code in action::ALL {
+            assert!(
+                kinds.iter().any(|kind| kind.codes().contains(&code)),
+                "le code {code} n'est dans aucun type d'action : l'interface ne pourrait pas le filtrer"
+            );
+        }
+        for kind in kinds {
+            for code in kind.codes() {
+                assert!(
+                    action::ALL.contains(code),
+                    "code inconnu du catalogue : {code}"
+                );
+            }
         }
     }
 

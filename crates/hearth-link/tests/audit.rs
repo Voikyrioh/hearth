@@ -13,7 +13,7 @@ use hearth_link::domain::audit_query::{ActionKind, AuditFilter, RawFilter};
 use hearth_link::domain::event::Event;
 use hearth_link::domain::secret::Secret;
 use hearth_link::ports::Transport as _;
-use hearth_link::ports::transport::{Pin, Target};
+use hearth_link::ports::transport::{ApiRequest, Method, Pin, Target};
 use hearth_link::{LinkConfig, LinkError};
 use hearth_proto::api::audit::{AuditEventItem, OutcomeName};
 use hearth_proto::api::sessions::LoginRequest;
@@ -524,4 +524,120 @@ async fn nothing_is_sent_before_the_link_is_connected_or_with_an_invalid_cursor(
         .unwrap_err();
     assert_eq!(error, LinkError::NotConnected);
     let _ = PASSWORD;
+}
+
+/// Un compte lecture seule tente une création de compte : refusé faute de droits, donc consigné
+/// (« Action refusée »).
+async fn denied_account_creation(world: &World, reader: &str) {
+    world.agent.create_account(reader, Role::ReadOnly).await;
+    let target = Target {
+        host: "127.0.0.1".into(),
+        port: world.proxy.port(),
+        pin: Pin::Pinned(world.fingerprint),
+    };
+    let transport = support::transport();
+    let session = transport
+        .login(
+            &target,
+            &LoginRequest {
+                username: reader.into(),
+                password: PASSWORD.into(),
+            },
+        )
+        .await
+        .unwrap();
+    let response = transport
+        .request(
+            &target,
+            &Secret::from(session.token.as_str()),
+            &ApiRequest {
+                method: Method::Post,
+                path: "/accounts".into(),
+                body: Some(serde_json::json!({
+                    "username": "intrus", "password": "Correct-Horse-9", "role": "admin"
+                })),
+                idempotency_key: Some(ulid::Ulid::generate().to_string()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status, 403);
+}
+
+#[tokio::test]
+async fn overlapping_kinds_are_asked_separately_and_each_entry_comes_once() {
+    let world = admin().await;
+    world.agent.create_account("paul", Role::ReadOnly).await;
+    denied_account_creation(&world, "lecteur").await;
+    // « Gestion des comptes » (tous résultats) et « Action refusée » (refus seulement) se recouvrent
+    // sur la tentative refusée de création de compte.
+    let overlapping = filter(RawFilter {
+        kinds: vec![ActionKind::Accounts, ActionKind::Denied],
+        ..RawFilter::default()
+    });
+    let union = everything(&world, &overlapping).await;
+    assert!(sorted_without_duplicates(&union));
+    let all = everything(&world, &none()).await;
+    let expected: HashSet<i64> = all
+        .iter()
+        .filter(|e| {
+            e.action.starts_with("account.")
+                || e.action == "sessions.revoke"
+                || (e.outcome == OutcomeName::Denied
+                    && e.action != "login"
+                    && e.action != "login.locked")
+        })
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(union.iter().map(|e| e.id).collect::<HashSet<_>>(), expected);
+    assert!(
+        union
+            .iter()
+            .any(|e| e.action == "account.create" && e.outcome == OutcomeName::Denied),
+        "la tentative refusée est là, une seule fois"
+    );
+    // Pages minuscules : même résultat, aucun doublon aux jointures.
+    let mut walked = Vec::new();
+    let mut before = None;
+    loop {
+        let page = world
+            .manager
+            .audit_page(&world.id, &overlapping, before, 1)
+            .await
+            .unwrap();
+        walked.extend(page.events);
+        match page.next_before {
+            Some(next) => before = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(
+        walked.iter().map(|e| e.id).collect::<Vec<_>>(),
+        union.iter().map(|e| e.id).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn the_export_of_one_request_and_of_several_are_the_same_file_byte_for_byte() {
+    let world = admin().await;
+    world.agent.create_account("paul", Role::ReadOnly).await;
+    world.agent.create_account("-cmd", Role::ReadOnly).await;
+    // Un seul type : UNE requête, le fichier est celui de l'agent.
+    let single = filter(RawFilter {
+        kinds: vec![ActionKind::Accounts],
+        ..RawFilter::default()
+    });
+    let agent_file = world
+        .manager
+        .audit_export(&world.id, &single)
+        .await
+        .unwrap();
+    // Le même résultat relu par pages puis rendu par le rendu partagé de la liaison.
+    let items = everything(&world, &single).await;
+    let client_file = hearth_proto::api::audit_csv::render_items(&items);
+    assert_eq!(
+        String::from_utf8(agent_file.bytes).unwrap(),
+        client_file,
+        "un seul rendu : l'agent et la liaison produisent les mêmes octets"
+    );
 }

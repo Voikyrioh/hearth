@@ -181,10 +181,58 @@ impl LinkManager {
         let calls = plan
             .iter()
             .map(|query| self.audit_get(target, token, query, before, limit));
-        let mut pages = Vec::with_capacity(plan.len());
-        for page in join_all(calls).await {
-            pages.push(page?);
+        join_pages(join_all(calls).await, usize::from(limit))
+    }
+}
+
+/// Recolle les réponses des requêtes d'un même plan : TOUT OU RIEN. Une seule qui échoue fait échouer
+/// la page entière, jamais un résultat partiel présenté comme complet.
+fn join_pages(
+    results: Vec<Result<AuditResponse, LinkError>>,
+    limit: usize,
+) -> Result<AuditResponse, LinkError> {
+    let mut pages = Vec::with_capacity(results.len());
+    for page in results {
+        pages.push(page?);
+    }
+    Ok(audit_query::merge_pages(pages, limit))
+}
+
+#[cfg(test)]
+mod tests {
+    use hearth_proto::api::audit::{AuditOrigin, OriginKindName, OutcomeName};
+
+    use super::*;
+
+    fn item(id: i64) -> AuditEventItem {
+        AuditEventItem {
+            id,
+            at: "2026-10-04T10:30:15Z".into(),
+            account: None,
+            origin: AuditOrigin {
+                kind: OriginKindName::Cli,
+                name: None,
+                addr: None,
+                text: "ligne de commande du serveur".into(),
+            },
+            action: "login".into(),
+            action_label: "Connexion".into(),
+            target: None,
+            outcome: OutcomeName::Ok,
+            reason: None,
+            repeat_count: 0,
         }
-        Ok(audit_query::merge_pages(pages, usize::from(limit)))
+    }
+
+    #[test]
+    fn one_failing_request_of_several_fails_the_whole_page() {
+        let ok = AuditResponse {
+            events: vec![item(9), item(7)],
+            next_before: None,
+        };
+        let results = vec![Ok(ok.clone()), Err(LinkError::Timeout), Ok(ok.clone())];
+        assert_eq!(join_pages(results, 100), Err(LinkError::Timeout));
+        let all_ok = join_pages(vec![Ok(ok.clone()), Ok(ok)], 100).unwrap();
+        assert_eq!(all_ok.events.len(), 2, "doublons retirés");
     }
 }
