@@ -10,6 +10,9 @@ use serde_json::json;
 
 /// Cible du manifeste : doit rester celle du client (`update/feed.rs::TARGET`).
 pub const TARGET: &str = "windows-x86_64";
+/// Entrée de l'agent dans `agent.json` : doit rester celle que le client lit
+/// (`agent_update/domain.rs::AGENT_PLATFORM`).
+pub const AGENT_TARGET: &str = "linux-x86_64";
 /// Marque du commentaire de la clé de développement (`update/feed.rs::DEV_KEY_MARK`).
 pub const DEV_KEY_MARK: &str = "DEV public key";
 /// Les installateurs ne sont téléchargés que de ce dépôt (`update/domain.rs`).
@@ -184,6 +187,82 @@ pub fn manifest_for(
         "notes": notes.trim(),
         "pub_date": pub_date,
         "platforms": { TARGET: { "signature": signature, "url": url } },
+    }))
+    .map_err(|error| error.to_string())
+}
+
+/// La signature d'un binaire de l'AGENT (faite à la main par `minisign -S`, ADR-0014) : le contenu du
+/// fichier `.minisig`, ou son encodage base64, vérifié contre la clé publique embarquée dans l'agent.
+/// Le commentaire de confiance n'est pas contrôlé : l'agent ne l'exige pas (il contrôle la version en
+/// exécutant le binaire).
+pub fn verify_agent_signature(
+    public_key_file: &str,
+    signature: &str,
+    data: &[u8],
+) -> Result<(), String> {
+    let public = minisign::PublicKeyBox::from_string(&decode_key_file(public_key_file))
+        .and_then(minisign::PublicKeyBox::into_public_key)
+        .map_err(|error| format!("clé publique de l'agent illisible : {error}"))?;
+    let text = signature_text(signature)?;
+    let signature = minisign::SignatureBox::from_string(&text)
+        .map_err(|error| format!("signature illisible : {error}"))?;
+    minisign::verify(&public, &signature, Cursor::new(data), true, false, true).map_err(|_| {
+        "la signature ne correspond pas à crates/hearth-agent/update-key.pub : le binaire n'a pas été signé par la paire de la clé embarquée dans l'agent, ou le fichier a changé".to_owned()
+    })
+}
+
+/// Le texte d'une signature minisign : tel quel, ou décodé s'il est en base64.
+fn signature_text(signature: &str) -> Result<String, String> {
+    let signature = signature.trim();
+    if signature.starts_with("untrusted comment:") {
+        return Ok(signature.to_owned());
+    }
+    let bytes = STANDARD
+        .decode(signature.split_whitespace().collect::<String>())
+        .map_err(|_| "signature : ni un fichier .minisig ni du base64".to_owned())?;
+    let text = String::from_utf8(bytes).map_err(|_| "signature : pas du texte".to_owned())?;
+    if text.trim().starts_with("untrusted comment:") {
+        Ok(text.trim().to_owned())
+    } else {
+        Err("signature : pas une signature minisign".to_owned())
+    }
+}
+
+/// Le fichier de cibles de l'agent (`agent.json`), à joindre à la même release que `latest.json`
+/// (ADR-0021) : `version`, `pub_date`, et l'entrée `linux-x86_64` (`url`, `signature`, `sha256`).
+/// `sha256` est la somme du binaire, en hexadécimal : l'agent exige la signature ET la somme.
+pub fn agent_manifest(
+    prefix: &str,
+    version: &str,
+    signature: &str,
+    sha256: &str,
+    url: &str,
+    pub_date: &str,
+) -> Result<String, String> {
+    check_version(version)?;
+    let signature = signature_text(signature)?;
+    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("somme SHA-256 : 64 caractères hexadécimaux attendus".to_owned());
+    }
+    let expected = format!("{prefix}v{version}/");
+    if !url.starts_with(&expected) {
+        return Err(format!("l'adresse doit commencer par {expected}"));
+    }
+    if time::OffsetDateTime::parse(pub_date, &time::format_description::well_known::Rfc3339)
+        .is_err()
+    {
+        return Err(format!("date « {pub_date} » : attendu RFC 3339"));
+    }
+    serde_json::to_string_pretty(&json!({
+        "version": version,
+        "pub_date": pub_date,
+        "platforms": {
+            AGENT_TARGET: {
+                "url": url,
+                "signature": signature,
+                "sha256": sha256.to_ascii_lowercase(),
+            }
+        },
     }))
     .map_err(|error| error.to_string())
 }
