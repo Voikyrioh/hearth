@@ -4,9 +4,14 @@ import type { LinkState } from "@/link";
 import { useLinkStore } from "@/stores/link";
 import { useServersStore } from "@/stores/servers";
 
-/** `needs-link` d'un composant : `true`, ou `{ role: 'admin' }` pour exiger aussi le rôle administrateur. */
+/**
+ * `needs-link` d'un composant : `true`, ou `{ role: 'admin' }` pour exiger aussi le rôle
+ * administrateur. `server` : l'identifiant du serveur concerné quand la page n'est pas celle d'un
+ * serveur (les réglages listent tous les serveurs) ; sinon, le serveur affiché.
+ */
 export interface NeedsLinkOptions {
   role?: "admin";
+  server?: string;
 }
 export type NeedsLink = boolean | NeedsLinkOptions | undefined;
 
@@ -31,7 +36,8 @@ export function useNeedsLink(source: () => NeedsLink): ComputedRef<string | null
     // Les stores ne sont touchés que si le composant exige le serveur.
     const servers = useServersStore();
     const link = useLinkStore();
-    const server = servers.current;
+    const server =
+      typeof wanted === "object" && wanted.server ? servers.byId(wanted.server) : servers.current;
     if (!server) return t("needs.noServer");
     if (typeof wanted === "object" && wanted.role === "admin" && server.role !== "admin") {
       return t("needs.role");

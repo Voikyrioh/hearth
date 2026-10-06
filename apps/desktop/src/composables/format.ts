@@ -29,3 +29,17 @@ export function initials(name: string): string {
   if (first && second) return (first.charAt(0) + second.charAt(0)).toUpperCase();
   return (first ?? "?").slice(0, 2).toUpperCase();
 }
+
+/** Date locale courte : « 04/10/2026 ». */
+export function formatDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+/** Date et heure locales courtes : « 05/10/2026 08h00 ». */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${formatDate(iso)} ${formatClock(date.getTime())}`;
+}
