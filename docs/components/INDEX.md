@@ -20,6 +20,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`HAreaChart`](./HAreaChart.md) — Courbe pleine à une ou deux séries (SVG), trous pour les mesures absentes.
 - [`HBars`](./HBars.md) — Barres verticales (SVG), une par cœur.
 - [`HMeter`](./HMeter.md) — Jauge linéaire (SVG), occupation d'un disque.
+- [`HSelect`](./HSelect.md) — Liste déroulante native (libellé, masquable).
 
 ## Molécules
 
@@ -31,6 +32,8 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`StaleSurface`](./StaleSurface.md) — Enveloppe des données périmées (désaturées et datées).
 - [`ToastStack`](./ToastStack.md) — Notifications empilées (3 visibles, compteur).
 - [`ConfirmDialog`](./ConfirmDialog.md) — Confirmation modale (piège à focus, défaut sûr).
+- [`FormDialog`](./FormDialog.md) — Fenêtre de formulaire (champs figés pendant l'envoi, erreur dans la fenêtre).
+- [`PasswordRules`](./PasswordRules.md) — Critères du mot de passe en direct (coche ou croix et texte).
 - [`ReleaseNotesDialog`](./ReleaseNotesDialog.md) — Notes de version en texte brut (boîte modale).
 - [`ErrorBoundary`](./ErrorBoundary.md) — Frontière d'erreur d'une page.
 - [`EmptyState`](./EmptyState.md) — Placeholder de vue vide.
@@ -65,6 +68,10 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`ServerRow`](./ServerRow.md) — Ligne du carnet de serveurs.
 - [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
 - [`DevActionPanel`](./DevActionPanel.md) — Bouton d'action de développement (`useServerAction`, `needs-link`).
+- [`AccountTable`](./AccountTable.md) — Tableau des comptes et actions de ligne.
+- [`CreateAccountDialog`](./CreateAccountDialog.md) — Création d'un compte (validation en direct).
+- [`PasswordDialog`](./PasswordDialog.md) — Changement de mot de passe (le sien ou celui d'un autre compte).
+- [`OwnAccountCard`](./OwnAccountCard.md) — « Mon compte » d'un serveur dans les réglages.
 - [`MachineCard`](./MachineCard.md) — Sections Machine et Durée de fonctionnement.
 - [`CpuCard`](./CpuCard.md) — Section Processeur (jauge, courbe, cœurs).
 - [`MemoryCard`](./MemoryCard.md) — Section Mémoire.
@@ -84,7 +91,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`AddServer`](./AddServer.md) — Ajout d'un serveur (assistant).
 - [`Servers`](./Servers.md) — Carnet de serveurs.
 - [`Dashboard`](./Dashboard.md) — Tableau de bord : la machine en direct (jauges, courbes, seuils, matériel absent).
-- [`Accounts`](./Accounts.md) — Comptes (à venir).
+- [`Accounts`](./Accounts.md) — Comptes (administrateurs) : liste, création, rôle, mots de passe, sessions, suppression.
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
 - [`Settings`](./Settings.md) — Réglages.
 
@@ -94,7 +101,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 
 ## À venir (autres tickets)
 
-`Sparkline` (non retenu : les courbes de chaque carte suffisent), `PasswordRules`, `AccountTable`, `AccountForm`, `AuditTable`, `AuditFilters`, `AgentUpdateSteps`.
+`Sparkline` (non retenu : les courbes de chaque carte suffisent), `AuditTable`, `AuditFilters`, `AgentUpdateSteps`.
 
 Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,organisms}`, `layouts/`, `pages/`, `composables/`, `stores/`, `link/`, `errors/`, `router/`, `i18n/`, `styles/`). Pont Tauri typé : `src/bindings.ts` (généré, ne pas éditer).
 

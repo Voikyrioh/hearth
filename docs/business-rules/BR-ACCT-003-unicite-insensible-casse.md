@@ -5,7 +5,7 @@ titre: L'identifiant est unique et insensible à la casse
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-gerer-comptes.md (BR-ACCT-003), HRT-03
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-ACCT-003 — L'identifiant est unique et insensible à la casse
@@ -14,9 +14,15 @@ maj: 2026-10-04
 Deux comptes « marie » et « MARIE » ne peuvent pas coexister. L'identifiant est normalisé en minuscules à la saisie ; la colonne `accounts.username` est unique (collation `NOCASE`). Message : « Cet identifiant est déjà utilisé ».
 
 ## Application (code)
+- `crates/hearth-proto/src/account_rules.rs::check_username` — la normalisation en minuscules, SOURCE UNIQUE (HRT-13) : l'agent, sa ligne de commande et la commande `check_account_input` du client l'appellent ; le domaine de l'agent n'en garde qu'un appel.
 - `crates/hearth-agent/src/domain/accounts/username.rs::Username::parse` — normalise en minuscules ASCII (une saisie « MARIE » devient « marie »).
 - `crates/hearth-agent/migrations/0001_accounts_sessions_meta.sql` — `username TEXT NOT NULL UNIQUE COLLATE NOCASE` : filet de sécurité contre une insertion concurrente.
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::create` — refuse avec `AccountError::UsernameTaken` (vérification dans la transaction d'écriture, violation d'unicité rendue par le dépôt en `StoreError::Duplicate`).
+
+## Interface (HRT-13)
+L'unicité n'est jamais jugée par l'interface : l'agent refuse `USERNAME_TAKEN`, affiché « Cet identifiant est déjà utilisé » sous le champ, formulaire conservé (`CreateAccountDialog.vue`). Test : `accounts_runtime.rs::a_taken_username_a_bad_format_and_a_weak_password_are_refused`.
+
+- Le carnet du client garde l'identifiant que l'agent a normalisé, pas la saisie (FIX-01M47H8VFFS2TNYJ3YNSDZTTKG) : `LinkManager::add_and_login` et `::login`.
 
 ## Vérification
 - Tests : `domain::accounts::username::tests::uppercase_is_normalized_so_uniqueness_ignores_case` ; `crates/hearth-agent/tests/accounts_use_cases.rs::usernames_are_unique_whatever_the_case` ; `crates/hearth-agent/tests/accounts_repo.rs::the_database_refuses_two_usernames_differing_by_case`.
@@ -29,3 +35,4 @@ Deux comptes « marie » et « MARIE » ne peuvent pas coexister. L'identifiant 
 
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
+- 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).

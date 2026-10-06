@@ -8,6 +8,9 @@ defineProps<{
   modelValue: T;
   label: string;
   options: readonly { value: T; label: string }[];
+  /** Libellé masqué à l'écran (une cellule de tableau le porte déjà), lu par les lecteurs d'écran. */
+  hideLabel?: boolean;
+  disabled?: boolean;
 }>();
 
 defineEmits<{ "update:modelValue": [value: T] }>();
@@ -17,12 +20,13 @@ const id = useId();
 
 <template>
   <div class="select">
-    <label class="select__label" :for="id">{{ label }}</label>
+    <label :class="hideLabel ? 'sr-only' : 'select__label'" :for="id">{{ label }}</label>
     <div class="select__box">
       <select
         :id="id"
         class="select__input"
         :value="modelValue"
+        :disabled="disabled"
         @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value as T)"
       >
         <option v-for="option in options" :key="option.value" :value="option.value">

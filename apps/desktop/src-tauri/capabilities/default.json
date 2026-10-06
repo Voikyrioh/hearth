@@ -35,6 +35,14 @@
     "allow-check-for-updates",
     "allow-postpone-update",
     "allow-install-update",
+    "allow-check-account-input",
+    "allow-list-accounts",
+    "allow-create-account",
+    "allow-change-account-role",
+    "allow-set-account-password",
+    "allow-change-own-password",
+    "allow-close-account-sessions",
+    "allow-delete-account",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

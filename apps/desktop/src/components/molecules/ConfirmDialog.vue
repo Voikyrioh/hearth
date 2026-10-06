@@ -15,8 +15,12 @@ const props = withDefaults(
     confirmLabel: string;
     cancelLabel?: string;
     destructive?: boolean;
+    /** Action en cours : les deux boutons attendent, la fenêtre ne se ferme pas. */
+    busy?: boolean;
+    /** Échec de l'action : montré DANS la fenêtre, qui reste ouverte (annuler ou réessayer). */
+    error?: string;
   }>(),
-  { cancelLabel: undefined, destructive: false },
+  { cancelLabel: undefined, destructive: false, busy: false, error: undefined },
 );
 
 const emit = defineEmits<{ confirm: []; cancel: [] }>();
@@ -75,18 +79,20 @@ function onNativeClose() {
       role="alertdialog"
       :aria-labelledby="titleId"
       :aria-describedby="messageId"
-      @cancel.prevent="emit('cancel')"
+      @cancel.prevent="busy || emit('cancel')"
       @close="onNativeClose"
     >
       <h2 :id="titleId" class="dialog__title">{{ title }}</h2>
       <p :id="messageId" class="dialog__message">{{ message }}</p>
+      <p v-if="error" class="dialog__error" role="alert">{{ error }}</p>
       <div class="dialog__actions">
-        <HButton ref="cancelButton" variant="secondary" @click="emit('cancel')">
+        <HButton ref="cancelButton" variant="secondary" :disabled="busy" @click="emit('cancel')">
           {{ cancelLabel ?? t("common.cancel") }}
         </HButton>
         <HButton
           :variant="destructive ? 'danger' : 'primary'"
           :solid="destructive"
+          :busy="busy"
           @click="emit('confirm')"
         >
           {{ confirmLabel }}
@@ -120,6 +126,11 @@ function onNativeClose() {
 .dialog__message {
   margin-top: var(--space-3);
   color: var(--tx2);
+}
+
+.dialog__error {
+  margin-top: var(--space-3);
+  color: var(--crit);
 }
 
 .dialog__actions {

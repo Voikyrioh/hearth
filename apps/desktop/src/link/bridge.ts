@@ -1,6 +1,9 @@
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { MachineEvent } from "./machine";
 import type {
+  AccountInputCheck,
+  AccountList,
+  AccountOutcome,
   FingerprintChange,
   LinkNotice,
   LinkStateEvent,
@@ -88,8 +91,38 @@ export interface LinkBridge {
   /** Efface le mot de passe mémorisé ; la session en cours continue. */
   forgetCredentials(serverId: string): Promise<void>;
 
-  // Les actions (créer un compte, mettre à jour l'agent…) arrivent avec leurs tickets, UNE commande
-  // typée chacune : aucune commande générique « envoie cette requête » (ADR-0013, ADR-0016).
+  // Les actions arrivent avec leurs tickets, UNE commande typée chacune : aucune commande générique
+  // « envoie cette requête » (ADR-0013, ADR-0016). Comptes (HRT-13) : la méthode et le chemin sont
+  // construits côté Rust ; un mot de passe ne traverse que ces paramètres (jamais un état, un
+  // journal, un événement) ; l'agent est l'arbitre du rôle : un refus arrive en `refused`.
+
+  /** Saisie en direct d'un identifiant et d'un mot de passe : la règle est celle de l'agent (`hearth-proto`), sans réseau. */
+  checkAccountInput(username: string, password: string): Promise<AccountInputCheck>;
+  /** Liste des comptes (une lecture : sans suivi, rien à relire au retour du lien). */
+  listAccounts(serverId: string): Promise<AccountList>;
+  createAccount(
+    serverId: string,
+    username: string,
+    password: string,
+    role: Role,
+  ): Promise<AccountOutcome>;
+  changeAccountRole(serverId: string, accountId: string, role: Role): Promise<AccountOutcome>;
+  /** Un administrateur définit le mot de passe d'un AUTRE compte (la règle « sans l'identifiant » est jugée par l'agent). */
+  setAccountPassword(
+    serverId: string,
+    accountId: string,
+    password: string,
+  ): Promise<AccountOutcome>;
+  /** Le titulaire change son mot de passe : ferme ses autres sessions, garde la courante. */
+  changeOwnPassword(serverId: string, current: string, password: string): Promise<AccountOutcome>;
+  closeAccountSessions(serverId: string, accountId: string): Promise<AccountOutcome>;
+  /** `confirmation` : l'identifiant retapé quand on supprime son propre compte (BR-ACCT-012). */
+  deleteAccount(
+    serverId: string,
+    accountId: string,
+    confirmation: string | null,
+  ): Promise<AccountOutcome>;
+
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;
 

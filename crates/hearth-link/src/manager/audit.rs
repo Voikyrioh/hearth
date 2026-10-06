@@ -36,7 +36,7 @@ impl From<FilterError> for LinkError {
 }
 
 /// Un refus de l'agent, lu dans son enveloppe d'erreur.
-fn rejection(body: &Value) -> LinkError {
+pub(super) fn rejection(body: &Value) -> LinkError {
     let code = serde_json::from_value::<ErrorBody>(body.clone())
         .ok()
         .map(|body| body.error.code);
@@ -45,7 +45,7 @@ fn rejection(body: &Value) -> LinkError {
 
 impl LinkManager {
     /// Hors « Connecté » : `NotConnected`. Sinon, la cible et le jeton de ce serveur.
-    fn audit_credentials(
+    pub(super) fn credentials(
         &self,
         id: &ServerId,
     ) -> Result<(Target, crate::domain::secret::Secret), LinkError> {
@@ -65,15 +65,15 @@ impl LinkManager {
         Ok((target, token))
     }
 
-    async fn audit_get(
+    /// Un GET authentifié sur un chemin CONSTRUIT PAR UN CODE TYPÉ (jamais fourni par l'appelant de
+    /// la bibliothèque) : délai borné, tout refus (hors 2xx) rendu en erreur typée. Partagé par les
+    /// lectures du journal et des comptes.
+    pub(super) async fn typed_get(
         &self,
         target: &Target,
         token: &crate::domain::secret::Secret,
-        query: &AuditQuery,
-        before: Option<i64>,
-        limit: u8,
-    ) -> Result<AuditResponse, LinkError> {
-        let path = audit_query::path(query, Some((before, limit)))?;
+        path: String,
+    ) -> Result<Value, LinkError> {
         let request = ApiRequest {
             method: Method::Get,
             path,
@@ -90,7 +90,20 @@ impl LinkManager {
         if !(200..300).contains(&response.status) {
             return Err(rejection(&response.body));
         }
-        serde_json::from_value(response.body)
+        Ok(response.body)
+    }
+
+    async fn audit_get(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        query: &AuditQuery,
+        before: Option<i64>,
+        limit: u8,
+    ) -> Result<AuditResponse, LinkError> {
+        let path = audit_query::path(query, Some((before, limit)))?;
+        let body = self.typed_get(target, token, path).await?;
+        serde_json::from_value(body)
             .map_err(|e| LinkError::Protocol(format!("page du journal illisible : {e}")))
     }
 
@@ -103,7 +116,7 @@ impl LinkManager {
         before: Option<i64>,
         limit: u8,
     ) -> Result<AuditResponse, LinkError> {
-        let (target, token) = self.audit_credentials(id)?;
+        let (target, token) = self.credentials(id)?;
         let limit = limit.clamp(1, PAGE_SIZE);
         let plan = filter.plan();
         self.audit_page_with(&target, &token, &plan, before, limit)
@@ -119,7 +132,7 @@ impl LinkManager {
         id: &ServerId,
         filter: &AuditFilter,
     ) -> Result<AuditExportFile, LinkError> {
-        let (target, token) = self.audit_credentials(id)?;
+        let (target, token) = self.credentials(id)?;
         let plan = filter.plan();
         let deps = &self.inner.deps;
         match plan.as_slice() {

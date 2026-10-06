@@ -5,6 +5,7 @@
 //! (`task.rs`), les veilleurs de réveil et de réseau (`watchers.rs`) et traduit les appels de
 //! l'interface en commandes. Les règles sont dans `domain/`.
 
+mod accounts;
 mod attempt;
 mod audit;
 mod events;
@@ -27,6 +28,7 @@ use tokio::sync::{OwnedMutexGuard, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
+pub use accounts::AccountsRead;
 pub use audit::AuditExportFile;
 pub use events::EventStream;
 use events::Fanout;
@@ -656,6 +658,8 @@ impl LinkManager {
                 return Err(error);
             }
         };
+        // FIX:01M47H8VFFS2TNYJ3YNSDZTTKG — le carnet garde l'identifiant que l'AGENT a rendu, pas la saisie (docs/bugs/FIX-01M47H8VFFS2TNYJ3YNSDZTTKG.md)
+        let username = response.account.username.clone();
         let record = Self::new_record(
             new,
             name,
@@ -812,7 +816,8 @@ impl LinkManager {
         // Un autre compte : les clés d'opération de l'ancien ne disent plus rien.
         let account_changed =
             !record.username.is_empty() && !record.username.eq_ignore_ascii_case(&username);
-        record.username = username;
+        // FIX:01M47H8VFFS2TNYJ3YNSDZTTKG — l'identifiant rendu par l'agent, pas la saisie (docs/bugs/FIX-01M47H8VFFS2TNYJ3YNSDZTTKG.md)
+        record.username = response.account.username.clone();
         record.remember = remember;
         record.signed_out = false;
         record.role = Some(response.account.role);
@@ -1015,6 +1020,48 @@ impl LinkManager {
             .send(Command::FingerprintAccepted)
             .await
             .map_err(|_| LinkError::Stopped)
+    }
+
+    /// Avant une action qui change le mot de passe du compte connecté : retire le mot de passe
+    /// mémorisé du coffre (si « se souvenir » est actif pour ce serveur) et le rend, pour le remettre
+    /// si l'action n'a pas eu lieu. Ainsi une application tuée en route laisse une entrée EFFACÉE,
+    /// jamais une entrée fausse. `None` : rien n'était mémorisé, rien n'est touché.
+    pub async fn take_remembered_password(
+        &self,
+        id: &ServerId,
+    ) -> Result<Option<Secret>, LinkError> {
+        // Sous le verrou d'écriture du serveur, comme `login` et `remove_server` : jamais un
+        // mot de passe écrit pour un serveur supprimé ou en train de changer de compte.
+        let locked = self.lock(id).await?;
+        if !locked.shared.record().remember {
+            return Ok(None);
+        }
+        let vault = &self.inner.deps.vault;
+        let stored = vault
+            .get(id, SecretKind::Password)
+            .map_err(|e| LinkError::Vault(e.0))?;
+        vault
+            .delete(id, SecretKind::Password)
+            .map_err(|e| LinkError::Vault(e.0))?;
+        Ok(stored)
+    }
+
+    /// Range au coffre le mot de passe du compte connecté, seulement si « se souvenir » est actif
+    /// pour ce serveur (sinon rien n'y est écrit). Sous le verrou d'écriture du serveur.
+    pub async fn remember_password(
+        &self,
+        id: &ServerId,
+        password: &Secret,
+    ) -> Result<(), LinkError> {
+        let locked = self.lock(id).await?;
+        if !locked.shared.record().remember {
+            return Ok(());
+        }
+        self.inner
+            .deps
+            .vault
+            .put(id, SecretKind::Password, password)
+            .map_err(|e| LinkError::Vault(e.0))
     }
 
     /// Envoie une action au serveur. Hors « Connecté », `NotConnected` sans rien envoyer. Si le

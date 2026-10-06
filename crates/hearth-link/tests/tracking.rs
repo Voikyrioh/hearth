@@ -11,7 +11,7 @@
 
 use std::collections::BTreeSet;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -71,6 +71,18 @@ struct Script {
     /// Ce que la requête voit du disque au moment où elle part.
     on_request: Mutex<Option<Box<dyn Fn() + Send>>>,
     request_hangs: AtomicBool,
+    /// Si posé : la requête d'une action attend d'être relâchée (réponse retenue à une porte).
+    request_hold: AtomicBool,
+    /// Réveille les requêtes retenues (aucun sondage, aucune durée).
+    request_release: tokio::sync::Notify,
+    /// Si posé : la requête retenue échoue (erreur de transport) au lieu de répondre.
+    request_error: AtomicBool,
+    /// Code de fermeture que rend la prochaine lecture du flux (0 : aucun), une seule fois.
+    close_code_next: AtomicU32,
+    /// Si posé : l'envoi d'un battement échoue (silence vu par le battement).
+    fail_ping: AtomicBool,
+    /// Si posé : la prochaine lecture du flux rend « session révoquée » (une seule fois).
+    revoke_next: AtomicBool,
     lookup: Mutex<OperationStatus>,
     flood: tokio::sync::Semaphore,
     wake: tokio::sync::Notify,
@@ -101,6 +113,12 @@ impl Script {
             expire_next: AtomicBool::new(false),
             on_request: Mutex::new(None),
             request_hangs: AtomicBool::new(false),
+            request_hold: AtomicBool::new(false),
+            request_release: tokio::sync::Notify::new(),
+            request_error: AtomicBool::new(false),
+            close_code_next: AtomicU32::new(0),
+            fail_ping: AtomicBool::new(false),
+            revoke_next: AtomicBool::new(false),
             lookup: Mutex::new(OperationStatus::Succeeded),
             flood: tokio::sync::Semaphore::new(1 << 40),
             wake: tokio::sync::Notify::new(),
@@ -204,6 +222,18 @@ impl Transport for Mock {
         if self.0.request_hangs.load(Ordering::SeqCst) {
             std::future::pending::<()>().await;
         }
+        loop {
+            let released = self.0.request_release.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
+            if !self.0.request_hold.load(Ordering::SeqCst) {
+                break;
+            }
+            released.await;
+        }
+        if self.0.request_error.load(Ordering::SeqCst) {
+            return Err(TransportError::Io("requête coupée".into()));
+        }
         Ok(ApiResponse {
             status: 200,
             body: json!({}),
@@ -253,6 +283,9 @@ struct Stream {
 impl StreamConn for Stream {
     async fn send(&mut self, message: &ClientMessage) -> Result<(), TransportError> {
         if matches!(message, ClientMessage::Ping { .. }) {
+            if self.script.fail_ping.load(Ordering::SeqCst) {
+                return Err(TransportError::Io("battement perdu".into()));
+            }
             self.script.pings.fetch_add(1, Ordering::SeqCst);
         }
         Ok(())
@@ -268,7 +301,13 @@ impl StreamConn for Stream {
         if self.script.fail_stream.swap(false, Ordering::SeqCst) {
             return Err(TransportError::Closed(None));
         }
+        let code = self.script.close_code_next.swap(0, Ordering::SeqCst);
+        if code != 0 {
+            return Err(TransportError::Closed(Some(u16::try_from(code).unwrap())));
+        }
         if !self.script.expire_next.load(Ordering::SeqCst)
+            && !self.script.revoke_next.load(Ordering::SeqCst)
+            && self.script.close_code_next.load(Ordering::SeqCst) == 0
             && !self.script.snapshot_next.load(Ordering::SeqCst)
         {
             tokio::select! {
@@ -280,6 +319,11 @@ impl StreamConn for Stream {
             return Ok(Frame::Message(Box::new(ServerMessage::Snapshot {
                 machine: machine(),
                 history: vec![],
+            })));
+        }
+        if self.script.revoke_next.swap(false, Ordering::SeqCst) {
+            return Ok(Frame::Message(Box::new(ServerMessage::Session {
+                kind: SessionNotice::Revoked,
             })));
         }
         if self.script.expire_next.swap(false, Ordering::SeqCst) {
@@ -1364,4 +1408,246 @@ async fn a_vault_that_refuses_to_write_leaves_no_server_and_closes_the_new_sessi
         1,
         "la session obtenue est refermée côté serveur"
     );
+}
+
+// ── Une action en vol face à la fin du flux ou de la session (FIX:01M47PCYX3BY3YV84R9WW3KAQ3) ─────
+//
+// Table : { cause } × { réponse }. Cause : avis de fin de session, trame de fermeture avec code
+// (1008), arrêt de l'agent (1001), fermeture sans trame (erreur d'E/S), silence vu par le battement.
+// Réponse : reçue AVANT la cause, APRÈS (retenue à une porte), JAMAIS reçue, erreur de transport de la
+// requête. Règle : l'agent met fin DÉLIBÉRÉMENT au flux (avis, trame avec code autre que 1001) : la
+// requête garde sa réponse ; toute autre perte est une perte de lien : « inconnu » tout de suite.
+// Jamais rejouée ; rien de suspendu au-delà du délai de la requête ; le suivi est soldé.
+
+#[derive(Clone, Copy, Debug)]
+enum Cause {
+    SessionNotice,
+    CloseFrame1008,
+    AgentGoingAway1001,
+    NoFrame,
+    HeartbeatSilence,
+}
+
+impl Cause {
+    /// L'agent a mis fin au flux de façon délibérée : la requête en vol garde sa réponse.
+    fn spares_the_request(self) -> bool {
+        matches!(self, Self::SessionNotice | Self::CloseFrame1008)
+    }
+
+    fn trigger(self, script: &Script) {
+        match self {
+            Self::SessionNotice => script.revoke_next.store(true, Ordering::SeqCst),
+            Self::CloseFrame1008 => script.close_code_next.store(1008, Ordering::SeqCst),
+            Self::AgentGoingAway1001 => script.close_code_next.store(1001, Ordering::SeqCst),
+            Self::NoFrame => script.fail_stream.store(true, Ordering::SeqCst),
+            Self::HeartbeatSilence => script.fail_ping.store(true, Ordering::SeqCst),
+        }
+        script.wake.notify_one();
+    }
+
+    /// Le fait observable qui dit que la cause a été traitée par la bibliothèque.
+    async fn wait_handled(self, rig: &Rig, id: &ServerId) {
+        match self {
+            Self::SessionNotice => wait_state(&rig.manager, id, LinkState::AccessRevoked).await,
+            _ => {
+                wait_until("le flux est rouvert", || {
+                    rig.script.opens.load(Ordering::SeqCst) >= 2
+                })
+                .await;
+            }
+        }
+    }
+}
+
+const CAUSES: [Cause; 5] = [
+    Cause::SessionNotice,
+    Cause::CloseFrame1008,
+    Cause::AgentGoingAway1001,
+    Cause::NoFrame,
+    Cause::HeartbeatSilence,
+];
+
+fn self_ending_action() -> ActionRequest {
+    ActionRequest {
+        method: Method::Delete,
+        path: "/accounts/A".into(),
+        body: Some(json!({ "confirmation": "marie" })),
+    }
+}
+
+fn is_unknown(outcome: &ActionOutcome) -> bool {
+    matches!(outcome, ActionOutcome::ResultUnknown { .. })
+}
+
+fn is_done(outcome: &ActionOutcome) -> bool {
+    matches!(outcome, ActionOutcome::Completed { status: 200, .. })
+}
+
+/// Le suivi sur disque est soldé : un résultat connu n'y reste pas « inconnu », et une issue
+/// « inconnue » est relue au retour du lien (l'agent répond « fait ») puis soldée.
+async fn assert_tracking_settles(rig: &Rig, id: &ServerId) {
+    wait_state(&rig.manager, id, LinkState::Connected).await;
+    wait_until("suivi soldé sur disque", || rig.store.tracked() == 0).await;
+}
+
+/// Réponse reçue AVANT la cause : le résultat est connu, la cause n'y change rien.
+#[tokio::test]
+async fn row_response_before_the_cause_keeps_its_result_for_every_cause() {
+    for cause in CAUSES {
+        let (rig, id) = connected(Disk::Normal, false).await;
+        let outcome = rig
+            .manager
+            .execute(&id, self_ending_action())
+            .await
+            .unwrap();
+        assert!(is_done(&outcome), "{cause:?} : {outcome:?}");
+        cause.trigger(&rig.script);
+        assert_eq!(rig.script.requests.load(Ordering::SeqCst), 1, "{cause:?}");
+        wait_until("suivi soldé sur disque", || rig.store.tracked() == 0).await;
+    }
+}
+
+/// Réponse APRÈS la cause (retenue à une porte, ouverte par le test).
+#[tokio::test]
+async fn row_response_after_the_cause() {
+    for cause in CAUSES {
+        let (rig, id) = connected(Disk::Normal, false).await;
+        rig.script.request_hold.store(true, Ordering::SeqCst);
+        let manager = rig.manager.clone();
+        let task_id = id.clone();
+        let call =
+            tokio::spawn(async move { manager.execute(&task_id, self_ending_action()).await });
+        wait_until("requête partie", || {
+            rig.script.requests.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        cause.trigger(&rig.script);
+        cause.wait_handled(&rig, &id).await;
+        // Fin délibérée par l'agent : l'appelant attend encore la réponse. Perte de lien : il a déjà
+        // « inconnu », tout de suite, sans attendre quoi que ce soit.
+        assert_eq!(
+            call.is_finished(),
+            !cause.spares_the_request(),
+            "{cause:?} : appelant libéré à la cause"
+        );
+        rig.script.request_hold.store(false, Ordering::SeqCst);
+        rig.script.request_release.notify_waiters();
+        let outcome = tokio::time::timeout(GUARD, call)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        if cause.spares_the_request() {
+            assert!(is_done(&outcome), "{cause:?} : {outcome:?}");
+        } else {
+            assert!(is_unknown(&outcome), "{cause:?} : {outcome:?}");
+        }
+        assert_eq!(
+            rig.script.requests.load(Ordering::SeqCst),
+            1,
+            "{cause:?} : rejouée"
+        );
+        if cause.spares_the_request() {
+            // Résultat connu : le suivi est soldé sans attendre un retour du lien.
+            wait_until("suivi soldé sur disque", || rig.store.tracked() == 0).await;
+        } else {
+            assert_tracking_settles(&rig, &id).await;
+        }
+    }
+}
+
+/// Réponse JAMAIS reçue : « inconnu », borné par le délai de la requête (réglé à 1 ms ici, aucune
+/// assertion de vitesse), jamais rejoué, rien de suspendu.
+#[tokio::test]
+async fn row_response_never_comes() {
+    for cause in CAUSES {
+        let (rig, id) = connected_config(
+            Disk::Normal,
+            false,
+            None,
+            LinkConfig {
+                request_timeout: ms(1),
+                ..config()
+            },
+        )
+        .await;
+        rig.script.request_hangs.store(true, Ordering::SeqCst);
+        let manager = rig.manager.clone();
+        let task_id = id.clone();
+        let call =
+            tokio::spawn(async move { manager.execute(&task_id, self_ending_action()).await });
+        wait_until("requête partie", || {
+            rig.script.requests.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        cause.trigger(&rig.script);
+        let outcome = tokio::time::timeout(GUARD, call)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(is_unknown(&outcome), "{cause:?} : {outcome:?}");
+        assert_eq!(
+            rig.script.requests.load(Ordering::SeqCst),
+            1,
+            "{cause:?} : rejouée"
+        );
+    }
+}
+
+/// La requête elle-même échoue (erreur de transport) : « inconnu », quelle que soit la cause.
+#[tokio::test]
+async fn row_request_transport_error() {
+    for cause in CAUSES {
+        let (rig, id) = connected(Disk::Normal, false).await;
+        rig.script.request_hold.store(true, Ordering::SeqCst);
+        rig.script.request_error.store(true, Ordering::SeqCst);
+        let manager = rig.manager.clone();
+        let task_id = id.clone();
+        let call =
+            tokio::spawn(async move { manager.execute(&task_id, self_ending_action()).await });
+        wait_until("requête partie", || {
+            rig.script.requests.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        cause.trigger(&rig.script);
+        cause.wait_handled(&rig, &id).await;
+        rig.script.request_hold.store(false, Ordering::SeqCst);
+        rig.script.request_release.notify_waiters();
+        let outcome = tokio::time::timeout(GUARD, call)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(is_unknown(&outcome), "{cause:?} : {outcome:?}");
+        assert_eq!(
+            rig.script.requests.load(Ordering::SeqCst),
+            1,
+            "{cause:?} : rejouée"
+        );
+    }
+}
+
+/// Changer son propre mot de passe : l'agent garde la session courante, aucun avis ne la termine ;
+/// la réponse, même retenue, arrive en « fait » et le lien reste « Connecté ».
+#[tokio::test]
+async fn an_action_that_keeps_its_session_completes_and_the_link_stays_connected() {
+    let (rig, id) = connected(Disk::Normal, false).await;
+    rig.script.request_hold.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
+    wait_until("requête partie", || {
+        rig.script.requests.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    rig.script.request_hold.store(false, Ordering::SeqCst);
+    rig.script.request_release.notify_waiters();
+    let outcome = tokio::time::timeout(GUARD, call)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(is_done(&outcome));
+    assert_eq!(rig.manager.state(&id).unwrap().state, LinkState::Connected);
 }

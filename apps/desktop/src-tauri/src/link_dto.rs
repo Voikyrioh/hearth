@@ -28,7 +28,7 @@ pub mod events {
     pub const NOTICE: &str = "link://notice";
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum RoleDto {
     Admin,

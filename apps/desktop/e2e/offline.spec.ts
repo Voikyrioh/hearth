@@ -205,7 +205,7 @@ test("coupures répétées : une seule notification, son compteur monte", async 
 
 test("réglages : l'option de notifications du lien est proposée", async ({ page }) => {
   await page.goto("/?nodev#/settings");
-  await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Client" })).toBeVisible();
   await expect(
     page.getByText("Notifier quand un serveur devient hors ligne ou revient"),
   ).toBeVisible();

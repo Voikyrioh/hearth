@@ -1,65 +1,19 @@
 //! Règles du mot de passe d'un compte (BR-ACCT-004 et BR-ACCT-005).
 
-use thiserror::Error;
+use hearth_proto::account_rules::{PASSWORD_MIN_LEN, unmet_password_rules};
 
 use super::username::Username;
 use crate::domain::secret::Secret;
 
-pub const MIN_LEN: usize = 12;
+pub use hearth_proto::account_rules::PasswordRule;
 
-/// Une règle de mot de passe non respectée. Le message est celui de la spécification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum PasswordRule {
-    #[error("Le mot de passe est requis")]
-    Required,
-    #[error("Le mot de passe doit contenir au moins 12 caractères")]
-    MinLength,
-    #[error("Le mot de passe doit contenir au moins un chiffre")]
-    Digit,
-    #[error("Le mot de passe doit contenir au moins une minuscule")]
-    Lowercase,
-    #[error("Le mot de passe doit contenir au moins une majuscule")]
-    Uppercase,
-    #[error("Le mot de passe ne doit pas contenir l'identifiant")]
-    ContainsUsername,
-}
+pub const MIN_LEN: usize = PASSWORD_MIN_LEN;
 
 /// Liste des règles non respectées par `password` pour le compte `username`.
 /// Vide si le mot de passe est conforme. Un mot de passe vide ne rend que `Required`.
+/// La règle vit dans `hearth-proto` (une seule source, partagée avec le client).
 pub fn unmet_rules(password: &str, username: &Username) -> Vec<PasswordRule> {
-    if password.is_empty() {
-        return vec![PasswordRule::Required];
-    }
-    let mut unmet = Vec::new();
-    if password.chars().count() < MIN_LEN {
-        unmet.push(PasswordRule::MinLength);
-    }
-    if !password.chars().any(|c| c.is_ascii_digit()) {
-        unmet.push(PasswordRule::Digit);
-    }
-    if !password.chars().any(char::is_lowercase) {
-        unmet.push(PasswordRule::Lowercase);
-    }
-    if !password.chars().any(char::is_uppercase) {
-        unmet.push(PasswordRule::Uppercase);
-    }
-    if contains_ignore_ascii_case(password, username.as_str()) {
-        unmet.push(PasswordRule::ContainsUsername);
-    }
-    unmet
-}
-
-/// L'identifiant est en ASCII : la comparaison se fait octet par octet, sans copie (donc sans
-/// copie en clair du mot de passe à effacer).
-fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
-    let needle = needle.as_bytes();
-    if needle.is_empty() {
-        return false;
-    }
-    haystack
-        .as_bytes()
-        .windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle))
+    unmet_password_rules(password, username.as_str())
 }
 
 /// Mot de passe refusé : toutes les règles non respectées, une par ligne à l'affichage.

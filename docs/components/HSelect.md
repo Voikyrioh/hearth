@@ -4,6 +4,6 @@ Atome · `apps/desktop/src/components/atoms/HSelect.vue`
 
 Liste déroulante native (clavier, lecteurs d'écran) aux couleurs Braise : un choix parmi quelques options, libellé au-dessus.
 
-- Props : `modelValue`, `label`, `options` (`{ value, label }[]`)
+- Props : `modelValue`, `label`, `options` (`{ value, label }[]`), `hideLabel` (libellé lu par les lecteurs d'écran seulement), `disabled`
 - Événements et slots : `update:modelValue`
 - Notes : Générique (`T extends string`).

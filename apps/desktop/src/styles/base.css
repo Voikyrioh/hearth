@@ -63,3 +63,13 @@ button {
     transition: none !important;
   }
 }
+
+/* Texte pour les lecteurs d'écran seulement (l'état d'un critère ne repose jamais sur l'icône ni la couleur seules). */
+.sr-only {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

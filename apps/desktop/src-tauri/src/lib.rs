@@ -2,6 +2,7 @@
 //! unique, démarrage avec Windows, réglages locaux. Aucun accès réseau ici :
 //! tout le réseau vivra dans `hearth-link` (ADR-0002).
 
+pub mod accounts;
 pub mod alerts;
 pub mod audit;
 pub mod badge;
@@ -72,6 +73,14 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             update::commands::check_for_updates,
             update::commands::postpone_update,
             update::commands::install_update,
+            accounts::commands::check_account_input,
+            accounts::commands::list_accounts,
+            accounts::commands::create_account,
+            accounts::commands::change_account_role,
+            accounts::commands::set_account_password,
+            accounts::commands::change_own_password,
+            accounts::commands::close_account_sessions,
+            accounts::commands::delete_account,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()
@@ -81,6 +90,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<dashboard::SnapshotEvent>()
         .typ::<audit::AuditLiveEvent>()
         .typ::<update::dto::UpdateStateDto>()
+        .typ::<accounts::dto::AccountOutcome>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.

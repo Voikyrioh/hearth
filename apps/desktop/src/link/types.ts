@@ -184,3 +184,68 @@ export type Unsubscribe = () => void;
 export type ActionResult =
   | { kind: "completed"; status: number; body: string }
   | { kind: "unknown"; opId: string };
+
+// --- Comptes (HRT-13) ---
+
+/** Un compte du serveur, tel que l'agent le liste (jamais un mot de passe ni un haché). */
+export interface Account {
+  id: string;
+  username: string;
+  role: Role;
+  /** RFC 3339, UTC. */
+  createdAt: string;
+  /** `null` : jamais connecté. */
+  lastLoginAt: string | null;
+  sessionsOpen: number;
+}
+
+export type UsernameProblem = "empty" | "too_short" | "too_long" | "invalid_chars";
+
+/** Règles d'un mot de passe, dans l'ordre d'affichage. La règle est celle de `hearth-proto`. */
+export type PasswordRule =
+  | "required"
+  | "min_length"
+  | "digit"
+  | "lowercase"
+  | "uppercase"
+  | "contains_username";
+
+/** Verdict de la saisie en direct : l'agent reste l'arbitre à l'envoi. */
+export interface AccountInputCheck {
+  username: UsernameProblem | null;
+  password: PasswordRule[];
+}
+
+/** Pourquoi l'agent (ou la validation locale, avant tout envoi) a refusé. */
+export type AccountRefusal =
+  | { kind: "invalid_username"; problem: UsernameProblem | null }
+  | { kind: "weak_password"; rules: PasswordRule[] }
+  | { kind: "username_taken" }
+  | { kind: "wrong_password" }
+  | { kind: "last_admin" }
+  | { kind: "not_found" }
+  | { kind: "confirmation_mismatch" }
+  | { kind: "conflict" }
+  | { kind: "busy" }
+  | { kind: "session_ended" }
+  | { kind: "session_revoked" }
+  | { kind: "other" };
+
+/**
+ * Issue d'une action de compte : exécutée (`done`), refusée (`refused`), ou lien coupé avant la
+ * réponse (`unknown`, BR-RESIL-009) : jamais rejouée, l'issue arrive par `link://operation`.
+ */
+export type AccountOutcome =
+  | { kind: "done"; account: Account | null; sessionsClosed: number }
+  | { kind: "refused"; refusal: AccountRefusal }
+  | { kind: "unknown"; opId: string };
+
+/**
+ * La liste des comptes et qui est « moi » : `me`, l'identifiant de l'AGENT du compte de la session
+ * (jamais une comparaison de texte). Un refus de rôle de l'agent est l'échec typé `forbidden`
+ * (`LinkFailure`), la seule façon de dire « accès refusé ».
+ */
+export interface AccountList {
+  accounts: Account[];
+  me: string;
+}

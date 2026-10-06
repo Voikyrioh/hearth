@@ -64,6 +64,10 @@ pub(crate) enum Command {
 }
 
 /// Messages que les tâches filles (requêtes, relectures) envoient à la boucle.
+/// Code de fermeture WebSocket « l'agent s'arrête » (1001) : redémarrage ou mise à jour, PAS une fin
+/// de session délibérée du point de vue d'une action.
+const CLOSE_GOING_AWAY: u16 = 1001;
+
 enum Internal {
     OpResponse {
         id: OperationId,
@@ -187,6 +191,8 @@ struct Runner {
     persister: Persister,
     frames_in_row: u32,
     ping_failed: bool,
+    /// Vrai le temps de traiter une fermeture DÉLIBÉRÉE du flux par l'agent (trame avec code).
+    agent_closed_stream: bool,
     stopped: bool,
 }
 
@@ -228,6 +234,7 @@ impl Runner {
             published: None,
             ping_n: 0,
             ping_failed: false,
+            agent_closed_stream: false,
             frames_in_row: 0,
             done: None,
             stopped: false,
@@ -402,6 +409,15 @@ impl Runner {
             }
             Ok(Frame::Other) => self.traffic(),
             // Le flux reste en place jusqu'à l'effet `CloseStream` de la machine.
+            // FIX:01M47PCYX3BY3YV84R9WW3KAQ3 — une trame de fermeture AVEC code, autre que « l'agent
+            // s'arrête » (1001), est une fin DÉLIBÉRÉE par l'agent : les requêtes en vol répondent
+            // encore. Toute autre fin (erreur d'E/S, fermeture sans trame, arrêt de l'agent) reste
+            // une perte de lien : « résultat inconnu » tout de suite (BR-RESIL-009).
+            Err(TransportError::Closed(Some(code))) if code != CLOSE_GOING_AWAY => {
+                self.agent_closed_stream = true;
+                self.input(Input::TransportFailed).await;
+                self.agent_closed_stream = false;
+            }
             Err(_) => self.input(Input::TransportFailed).await,
         }
     }
@@ -666,7 +682,12 @@ impl Runner {
                         self.persist(true);
                     }
                 }
-                Effect::MarkPendingUnknown => self.mark_pending_unknown(),
+                Effect::MarkPendingUnknown => {
+                    // FIX:01M47PCYX3BY3YV84R9WW3KAQ3 — une action dont la requête est partie et dont la réponse arrive garde SON résultat même si l'avis de fin de session (qu'elle a provoquée : fermer ses sessions, supprimer son compte, changer son mot de passe par la route d'administration) la devance sur le flux ; sans réponse, l'issue reste « inconnu » dans le délai de la requête (docs/bugs/FIX-01M47PCYX3BY3YV84R9WW3KAQ3.md)
+                    if !(self.session_ended_by_server() || self.agent_closed_stream) {
+                        self.mark_pending_unknown();
+                    }
+                }
                 Effect::ResolvePending => self.resolve_pending(),
                 Effect::Stop => self.stopped = true,
             }
@@ -689,6 +710,16 @@ impl Runner {
         if let Some(handle) = self.attempt.take() {
             handle.abort();
         }
+    }
+
+    /// L'agent a mis fin à la session (expirée, ou fermée/révoquée) : le lien, lui, n'est pas tombé,
+    /// les requêtes en vol répondent encore. Une déconnexion voulue par l'utilisateur n'en est pas une.
+    fn session_ended_by_server(&self) -> bool {
+        let status = self.machine.status();
+        matches!(
+            status.state,
+            LinkState::SessionExpired | LinkState::AccessRevoked
+        ) && status.reason != Some(Reason::UserDisconnected)
     }
 
     /// Le lien est tombé : chaque action en vol devient « résultat inconnu » ; ses appelants le

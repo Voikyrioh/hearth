@@ -30,6 +30,7 @@ export default defineConfig({
         "offline.spec.ts",
         "audit.spec.ts",
         "updates.spec.ts",
+        "accounts.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },

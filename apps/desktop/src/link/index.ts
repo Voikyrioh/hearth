@@ -17,6 +17,7 @@ export {
   SimulatedLinkBridge,
   type SimulatedOptions,
 } from "./simulated";
+export { SimulatedAccounts, simulatedCheckInput } from "./simulated-accounts";
 export { SimulatedAudit } from "./simulated-audit";
 export { bareMachine, type Pinnable, SimulatedMachine, sampleMachine } from "./simulated-machine";
 export { TauriLinkBridge } from "./tauri";

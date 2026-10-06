@@ -5,7 +5,7 @@ titre: Le mot de passe fait au moins 12 caractères avec majuscule, minuscule et
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-gerer-comptes.md (BR-ACCT-004), HRT-03
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-ACCT-004 — Le mot de passe fait au moins 12 caractères avec majuscule, minuscule et chiffre
@@ -14,9 +14,13 @@ maj: 2026-10-04
 Minimum 12 caractères, dont au moins une majuscule, une minuscule et un chiffre. La fonction rend **toutes** les règles non respectées (pour l'affichage en direct), dans l'ordre : longueur, chiffre, minuscule, majuscule, identifiant. Un mot de passe vide ne rend que « Le mot de passe est requis ». Le mot de passe est ensuite haché en Argon2id (m = 19 Mio, t = 2, p = 1).
 
 ## Application (code)
+- `crates/hearth-proto/src/account_rules.rs::unmet_password_rules` — la règle de complexité, SOURCE UNIQUE (HRT-13) : l'agent, sa ligne de commande et la commande `check_account_input` du client l'appellent ; le domaine de l'agent n'en garde qu'un appel.
 - `crates/hearth-agent/src/domain/accounts/password.rs::unmet_rules` — liste pure des règles non respectées.
 - `crates/hearth-agent/src/domain/accounts/password.rs::PlainPassword::new` — seul moyen de fabriquer un mot de passe à hacher ; refuse avec `PasswordRejected { rules }`.
 - `crates/hearth-agent/src/infrastructure/argon2.rs::Argon2Hasher` — hachage (hors du runtime asynchrone).
+
+## Interface (HRT-13)
+`PasswordRules.vue` : les cinq critères avec coche ou croix ET texte lisible par un lecteur d'écran, évalués en direct par `check_account_input` (`hearth_proto::account_rules::unmet_password_rules`, source unique avec l'agent) ; « Créer » et « Changer le mot de passe » restent inertes tant qu'un critère manque. Test : `components/organisms/accounts.test.ts` (`PasswordRules`, `CreateAccountDialog`).
 
 ## Vérification
 - Tests : `domain::accounts::password::tests` (limite 11/12, chaque classe, ordre, longueur en caractères) ; `infrastructure::argon2::tests`.
@@ -31,3 +35,4 @@ Minimum 12 caractères, dont au moins une majuscule, une minuscule et un chiffre
 
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
+- 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).

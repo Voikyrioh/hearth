@@ -34,6 +34,14 @@ const COMMANDS: &[&str] = &[
     "check_for_updates",
     "postpone_update",
     "install_update",
+    "check_account_input",
+    "list_accounts",
+    "create_account",
+    "change_account_role",
+    "set_account_password",
+    "change_own_password",
+    "close_account_sessions",
+    "delete_account",
 ];
 
 fn main() {

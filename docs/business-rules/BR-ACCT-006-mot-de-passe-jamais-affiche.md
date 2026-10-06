@@ -5,7 +5,7 @@ titre: Aucun mot de passe existant ne peut être affiché ni récupéré
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-gerer-comptes.md (BR-ACCT-006), HRT-03
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-ACCT-006 — Aucun mot de passe existant ne peut être affiché ni récupéré
@@ -19,6 +19,9 @@ Un mot de passe n'est jamais rendu en clair après sa création : l'agent ne con
 - `crates/hearth-agent/src/application/ports/password_hasher.rs::PasswordHasher` — ne manipule que des `Secret`.
 - `crates/hearth-agent/src/application/accounts.rs::AccountView` — ce que rendent les cas d'usage : le haché n'en fait pas partie.
 
+## Interface (HRT-13)
+Aucun mot de passe dans un état Pinia, un journal du pont, une notification, un événement Tauri, un `Debug` ou un message d'erreur ; champs vidés après chaque envoi (réussi ou non) et à la fermeture de la fenêtre (`CreateAccountDialog.vue`, `PasswordDialog.vue`). Tests : `accounts.test.ts::creates an account: success announced, list re-read, no password kept anywhere`, `accounts_wire.rs::no_password_shows_in_the_debug_of_a_planned_action_nor_of_a_refusal`, `accounts_runtime.rs` (réponse de création sans mot de passe).
+
 ## Vérification
 - Tests : `domain::secret::tests` ; `domain::accounts::password::tests::debug_of_a_plain_password_does_not_reveal_it` ; `crates/hearth-agent/tests/accounts_use_cases.rs::errors_never_contain_the_password`.
 
@@ -31,3 +34,4 @@ Un mot de passe n'est jamais rendu en clair après sa création : l'agent ne con
 
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
+- 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
