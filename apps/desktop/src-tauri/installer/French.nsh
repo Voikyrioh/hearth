@@ -34,3 +34,7 @@ LangString deleteAppData ${LANG_FRENCH} "Tout effacer : supprimer aussi mes serv
 ; Contrôles d'avant installation (BR-CLIENT-014), appelés par hooks.nsh.
 LangString hearthWindowsTooOld ${LANG_FRENCH} "Hearth a besoin de Windows 10 ou plus récent, en 64 bits. Ta version ne fonctionne pas."
 LangString hearthDiskTooSmall ${LANG_FRENCH} "Il manque de la place. Libère au moins 50 Mo. Espace disponible : $R8 Mo."
+; Lancement au démarrage de Windows (HRT-21, BR-CLIENT-006), case de la page d'accueil, décochée par défaut.
+LangString hearthAutostartLabel ${LANG_FRENCH} "Lancer Hearth au démarrage de Windows"
+LangString hearthAutostartHelp ${LANG_FRENCH} "Hearth s'ouvre tout seul quand tu ouvres ta session, réduit près de l'horloge. Tu pourras changer ce choix à tout moment dans les réglages de l'application."
+LangString hearthWelcomeText ${LANG_FRENCH} "Cet assistant installe ${PRODUCTNAME} pour toi seul, sans droits administrateur.$\r$\n$\r$\nClique sur Suivant pour continuer."
