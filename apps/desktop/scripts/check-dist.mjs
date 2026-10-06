@@ -6,6 +6,8 @@ import { join } from "node:path";
 const FORBIDDEN = [
   "SimulatedLinkBridge",
   "__hearthSim",
+  "SimulatedUpdateBridge",
+  "__hearthUpdateSim",
   "DevLinkPanel",
   "Simulation du lien",
   "nas-salon",

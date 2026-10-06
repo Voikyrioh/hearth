@@ -46,6 +46,17 @@ export const commands = {
 	history: SampleDto[],
 	levels: LevelsDto | null,
 } | null, LinkFailure>(__TAURI_INVOKE("get_dashboard", { serverId })),
+	/**  L'état courant (au démarrage de l'interface, et pour rattraper un événement manqué). */
+	getUpdateState: () => __TAURI_INVOKE<UpdateStateDto>("get_update_state"),
+	/**  « Vérifier maintenant » (BR-UPDATE-026). */
+	checkForUpdates: () => __TAURI_INVOKE<UpdateStateDto>("check_for_updates"),
+	/**  « Plus tard » : le bandeau disparaît 24 h (BR-UPDATE-006). */
+	postponeUpdate: () => __TAURI_INVOKE<UpdateStateDto>("postpone_update"),
+	/**
+	 *  « Mettre à jour maintenant » : le seul chemin vers une installation (BR-UPDATE-002). Rend la
+	 *  main tout de suite ; l'avancement et l'issue arrivent par `update://state`.
+	 */
+	installUpdate: () => __TAURI_INVOKE<UpdateStateDto>("install_update"),
 };
 
 /* Types */
@@ -77,6 +88,12 @@ export type AppError =
 { kind: "autostart"; message: string } | 
 /**  Dossier des journaux impossible à créer ou à ouvrir. */
 { kind: "logs"; message: string };
+
+export type AvailableDto = {
+	version: string,
+	/**  Texte brut (jamais du HTML) ; vide si la release n'en porte pas. */
+	notes: string,
+};
 
 export type BlockedDto = "fingerprint_changed" | "incompatible_agent" | "incompatible_client";
 
@@ -326,6 +343,45 @@ export type SnapshotEvent = {
 export type TempDto = {
 	label: string,
 	celsius: number | null,
+};
+
+/**
+ *  Pourquoi la dernière mise à jour demandée n'a pas abouti. La version en cours reste utilisable
+ *  dans tous les cas.
+ */
+export type UpdateFailure = 
+/**  BR-UPDATE-009 : coupure ; relançable. */
+"interrupted" | 
+/**  BR-UPDATE-010 : signature ou contenu refusés. */
+"corrupted" | 
+/**  Autre échec. */
+"failed";
+
+export type UpdatePhase = "idle" | 
+/**  Interrogation du flux de versions. */
+"checking" | 
+/**  Téléchargement de l'installateur (signature vérifiée à la fin, avant toute écriture). */
+"downloading" | 
+/**  Installateur lancé : le client va se fermer et se relancer. */
+"installing";
+
+export type UpdateStateDto = {
+	/**  Croît à chaque publication : l'interface écarte tout état plus ancien que le dernier vu. */
+	seq: number,
+	currentVersion: string,
+	phase: UpdatePhase,
+	/**  Avancement du téléchargement, 0 à 100 ; absent hors téléchargement. */
+	progress: number | null,
+	available: AvailableDto | null,
+	/**  Le bandeau « Nouvelle version disponible » doit être affiché (BR-UPDATE-003, 006). */
+	bannerVisible: boolean,
+	/**  Le bandeau reparaît à cette date (« Plus tard »). */
+	postponedUntil: number | null,
+	/**  Dernière vérification qui a obtenu une réponse (BR-UPDATE-007). */
+	lastCheckedAt: number | null,
+	/**  La dernière vérification a réussi et rien de plus récent n'existe : « Tu es à jour ». */
+	upToDate: boolean,
+	failure: UpdateFailure | null,
 };
 
 /* Tauri Specta runtime */

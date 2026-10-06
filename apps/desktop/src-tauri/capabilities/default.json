@@ -26,6 +26,10 @@
     "allow-list-unread-operations",
     "allow-ack-unread-operations",
     "allow-get-dashboard",
+    "allow-get-update-state",
+    "allow-check-for-updates",
+    "allow-postpone-update",
+    "allow-install-update",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

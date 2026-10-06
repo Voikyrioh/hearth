@@ -65,6 +65,10 @@ Le cache Cargo du conteneur est un volume nommé (`hearth-xtask-cargo`, `hearth-
 
 `hearth-agent install [--port N] [--managed] [--yes]` et `uninstall [--keep-data|--purge] [--yes]` : interactif, ou sans question par `HEARTH_ADMIN_USER`, `HEARTH_ADMIN_PASSWORD` (ou `HEARTH_ADMIN_PASSWORD_HASH`), `HEARTH_PORT`. Droits d'administration requis. Le mot de passe n'est jamais un argument ni un exemple de ligne de commande (`hearth-agent hash-password --user NOM` fabrique le haché pour `HEARTH_ADMIN_PASSWORD_HASH`). Téléchargement : HTTPS et SHA-256 obligatoires ; x86_64 seulement. Règles `BR-INSTALL-*`, runbook `docs/runbooks/installer-agent.md`, décision `docs/adr/ADR-0012-service-systeme.md`. Mise à jour à distance (HRT-17) : `docs/runbooks/mettre-a-jour-agent.md`, ADR-0014, règles `BR-UPDATE-011` à `019`, `024` et `027` à `029` ; la clé publique de signature est embarquée (`crates/hearth-agent/update-key.pub`, sans clé secrète tant que Voiky n'a pas généré la sienne). Tout le code d'installation compile sous Windows mais ne s'exécute que sous Linux ; les tests de l'adaptateur systemd utilisent un faux `systemctl`.
 
+## Mise à jour du client (HRT-16)
+
+Greffon `tauri-plugin-updater` en API Rust seule (aucune permission côté web), flux `latest.json` des GitHub Releases du dépôt public, clé publique embarquée `apps/desktop/src-tauri/update-key.pub` (clé de DÉVELOPPEMENT sans clé secrète tant que Voiky n'a pas mis la sienne ; jamais de clé secrète dans le dépôt). Vérification au lancement puis 24 h au plus, état dans `update.json` côté Rust (pas de `localStorage`). Publication : `docs/runbooks/publier-une-version-du-client.md` (flux `publish-client`, déclenché à la main, brouillon). `cargo xtask client-release-check` / `client-version` / `client-sign` / `client-manifest` (la clé secrète n'est donnée qu'à `client-sign`, dans le job de signature du flux). Règles `BR-UPDATE-001` à `010`, `025`, `026` ; décision `docs/adr/ADR-0017-mise-a-jour-du-client.md`.
+
 ## Règles
 
 - Architecture hexagonale dans `hearth-agent` et `hearth-link` : `domain/` sans E/S ni dépendance vers axum, SQLx, système. Ports dans `application/ports/`.

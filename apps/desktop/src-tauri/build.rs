@@ -25,6 +25,10 @@ const COMMANDS: &[&str] = &[
     "list_unread_operations",
     "ack_unread_operations",
     "get_dashboard",
+    "get_update_state",
+    "check_for_updates",
+    "postpone_update",
+    "install_update",
 ];
 
 fn main() {

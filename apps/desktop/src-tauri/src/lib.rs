@@ -13,6 +13,7 @@ pub mod logging;
 pub mod settings;
 pub mod texts;
 mod tray;
+pub mod update;
 pub mod vault;
 pub mod window;
 
@@ -56,6 +57,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             link_commands::list_unread_operations,
             link_commands::ack_unread_operations,
             link_commands::get_dashboard,
+            update::commands::get_update_state,
+            update::commands::check_for_updates,
+            update::commands::postpone_update,
+            update::commands::install_update,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()
@@ -63,6 +68,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<link_dto::NoticeEvent>()
         .typ::<dashboard::MetricsEvent>()
         .typ::<dashboard::SnapshotEvent>()
+        .typ::<update::dto::UpdateStateDto>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.
@@ -172,11 +178,16 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(update::feed::plugin())
         .invoke_handler(builder.invoke_handler())
         .on_window_event(window::on_window_event)
         .setup(|app| {
             if let Err(error) = install_link(app) {
                 fail_startup(&error);
+            }
+            // La mise à jour ne bloque jamais le démarrage : sans elle, le client reste utilisable.
+            if let Err(error) = update::install(app) {
+                tracing::error!(%error, "mise à jour du client indisponible");
             }
             let minimized = domain::is_minimized_launch(std::env::args());
             start_or_report(app.handle(), minimized, tray::build, |reason| {
