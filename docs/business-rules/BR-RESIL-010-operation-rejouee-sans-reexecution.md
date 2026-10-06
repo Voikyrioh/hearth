@@ -48,3 +48,4 @@ La requête suivie s'exécute dans une tâche détachée, dans le span de la req
 - 2026-10-05 — côté client ajouté (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — précisé (HRT-07, review Stephen round 1).
 - 2026-10-05 : vérifications de la coquille et de l'interface (HRT-12).
+- 2026-10-06 : premier appelant de production de `useServerAction` (HRT-13) : `apps/desktop/src/composables/useAccountActions.ts` (une commande typée par action de compte, ADR-0018) ; texte de coupure propre à l'écran des comptes (`accounts.unknownResult`), liste relue au retour du lien. Tests : `apps/desktop/src/pages/Accounts.test.ts`, `apps/desktop/e2e/accounts.spec.ts`, `apps/desktop/src-tauri/tests/accounts_runtime.rs::an_action_cut_before_its_answer_is_unknown_never_replayed_and_its_outcome_comes_back`.
