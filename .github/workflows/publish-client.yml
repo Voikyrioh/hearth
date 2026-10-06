@@ -11,15 +11,20 @@ name: publish-client
 # La version publiée est celle de `Cargo.toml` (`cargo xtask client-version`) : rien n'est saisi à la main
 # dans le formulaire, donc le numéro signé est celui du binaire construit.
 #
-# Secrets du dépôt à créer avant la première exécution (jamais dans un fichier du dépôt) :
+# Secrets à créer avant la première exécution, comme secrets de l'ENVIRONNEMENT `release` (jamais dans un
+# fichier du dépôt) :
 #   HEARTH_CLIENT_SIGNING_KEY            contenu du fichier de clé secrète (`tauri signer generate`)
 #   HEARTH_CLIENT_SIGNING_KEY_PASSWORD   son mot de passe (obligatoire)
 # Et la clé PUBLIQUE correspondante dans apps/desktop/src-tauri/update-key.pub, commitée AVANT : le
 # contrôle `client-release-check` refuse la clé de développement du dépôt, et `client-sign` refuse une
 # clé secrète qui n'est pas la paire de ce fichier.
 #
-# Cran suivant, à décider par Voiky : un environnement GitHub `release` avec approbation, qui porterait
-# les deux secrets à la place du dépôt.
+# Ce que la garde `main` NE ferme PAS : elle arrête une erreur, pas quelqu'un qui a l'écriture (le
+# formulaire choisit la branche, donc le fichier de flux de cette branche, garde retirée comprise). Seul
+# l'environnement GitHub `release` ferme cela : le job `sign` le DÉCLARE, et le détenteur du dépôt doit
+# le créer AVANT la première exécution, avec approbation obligatoire et restriction à la branche `main`,
+# et y ranger les deux secrets (secrets d'ENVIRONNEMENT, pas de dépôt). Voir le runbook.
+# Sans cet environnement protégé, GitHub en crée un sans protection à la première exécution.
 
 on:
   workflow_dispatch:
@@ -86,6 +91,7 @@ jobs:
   sign:
     needs: build
     if: github.ref == 'refs/heads/main'
+    environment: release
     runs-on: windows-latest
     timeout-minutes: 30
     permissions:
