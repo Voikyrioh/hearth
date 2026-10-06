@@ -37,8 +37,8 @@ use crate::domain::update::{
     plan_update,
 };
 
-/// Combien de temps le service attend un superviseur qui devait travailler avant d'y renoncer
-/// (il n'a pas démarré, ou il est mort sans écrire de résultat).
+/// Combien de temps le service attend, par défaut, un superviseur qui devait travailler avant d'y
+/// renoncer (il n'a pas démarré, ou il est mort sans écrire de résultat).
 const SUPERVISOR_PATIENCE: Duration = Duration::from_secs(30);
 
 /// Ce que l'agent sait de lui-même pour se mettre à jour.
@@ -66,6 +66,9 @@ pub struct Timing {
     pub poll: Duration,
     /// Pas de la surveillance du superviseur par l'agent.
     pub watch: Duration,
+    /// Combien de temps la surveillance attend un superviseur absent avant de conclure d'après les
+    /// traces laissées sur le disque.
+    pub patience: Duration,
 }
 
 impl Default for Timing {
@@ -75,6 +78,7 @@ impl Default for Timing {
             check_window: CHECK_WINDOW,
             poll: crate::domain::update::CHECK_POLL,
             watch: Duration::from_secs(1),
+            patience: SUPERVISOR_PATIENCE,
         }
     }
 }
@@ -500,26 +504,8 @@ impl UpdateService {
                 if service.report_pending().await {
                     return;
                 }
-                if started.elapsed() > SUPERVISOR_PATIENCE {
-                    // Le superviseur n'a rien écrit : on ne reste pas « en cours » pour toujours.
-                    let target_text = version.to_string();
-                    tracing::error!(version = %target_text, "le superviseur n'a pas donné de résultat");
-                    // Le demandeur est celui de la mise à jour (le journal ne l'attribue pas à la ligne
-                    // de commande), et le dépôt est nettoyé.
-                    service.host.clear_staging();
-                    let record = UpdateRecord {
-                        version: target_text,
-                        previous: service.current.to_string(),
-                        outcome: UpdateOutcome::Failed,
-                        reason: Some(UpdateReason::SupervisorLaunch),
-                        at: service.now_text(),
-                        requested_by: requester.by.clone(),
-                        client_name: requester.name.clone(),
-                        client_addr: requester.addr.clone(),
-                        reported: false,
-                    };
-                    let _ = service.host.write_last(&record);
-                    service.report(record).await;
+                if started.elapsed() > service.env.timing.patience {
+                    service.give_up_on_supervisor(&version, &requester).await;
                     return;
                 }
             }
@@ -558,16 +544,27 @@ impl UpdateService {
             self.watch(version, requester.unwrap_or_default());
             return;
         }
-        // Illisible n'est pas absent : une trace qui ne se lit pas est un travail à conclure.
+        let leftovers = self.read_leftovers();
+        let orphan = classify_orphan(&leftovers, false, self.current);
+        self.conclude_orphan(orphan).await;
+    }
+
+    /// Ce que le dossier `update/` contient. Illisible n'est pas absent : une trace qui ne se lit
+    /// pas est un travail à conclure.
+    fn read_leftovers(&self) -> Leftovers {
         let job = self.host.read_job();
         let state = self.host.read_state();
-        let leftovers = Leftovers {
+        Leftovers {
             unreadable: job.is_err() || state.is_err(),
             state: state.ok().flatten(),
             job: job.ok().flatten(),
             backup_present: self.host.path_exists(&self.env.backup),
-        };
-        match classify_orphan(&leftovers, false, self.current) {
+        }
+    }
+
+    /// Conclut ce qu'un travail laissé en cours (BR-UPDATE-028) a laissé derrière lui.
+    async fn conclude_orphan(self: &Arc<Self>, orphan: Orphan) {
+        match orphan {
             Orphan::None => {}
             Orphan::BeforeLaunch {
                 version,
@@ -629,6 +626,40 @@ impl UpdateService {
                 }
                 self.report(record).await;
             }
+        }
+    }
+
+    // FIX:01M47PHYR8MD87HAXY9PARQXAN : la patience ne conclut plus « échec du superviseur » à
+    // l'aveugle (docs/bugs/FIX-01M47PHYR8MD87HAXY9PARQXAN.md).
+    /// La surveillance ne voit plus de superviseur et n'a rien à annoncer depuis trop longtemps.
+    /// Ce n'est pas une raison de conclure « échec » à l'aveugle : les traces sur le disque
+    /// disent où en est le travail (binaires déjà échangés, nouvelle version déjà en place...) et
+    /// la décision est celle du démarrage (`classify_orphan`). Seul « rien n'a été échangé » est
+    /// un échec du lancement du superviseur.
+    async fn give_up_on_supervisor(self: &Arc<Self>, version: &Version, requester: &Requester) {
+        let leftovers = self.read_leftovers();
+        match classify_orphan(&leftovers, false, self.current) {
+            Orphan::None | Orphan::BeforeLaunch { .. } | Orphan::LaunchedNoSwap(_) => {
+                let target_text = version.to_string();
+                tracing::error!(version = %target_text, "le superviseur n'a pas donné de résultat");
+                // Le demandeur est celui de la mise à jour (le journal ne l'attribue pas à la ligne
+                // de commande), et le dépôt est nettoyé.
+                self.host.clear_staging();
+                let record = UpdateRecord {
+                    version: target_text,
+                    previous: self.current.to_string(),
+                    outcome: UpdateOutcome::Failed,
+                    reason: Some(UpdateReason::SupervisorLaunch),
+                    at: self.now_text(),
+                    requested_by: requester.by.clone(),
+                    client_name: requester.name.clone(),
+                    client_addr: requester.addr.clone(),
+                    reported: false,
+                };
+                let _ = self.host.write_last(&record);
+                self.report(record).await;
+            }
+            other => self.conclude_orphan(other).await,
         }
     }
 

@@ -527,6 +527,15 @@ fn orphan_job() -> hearth_agent::domain::update::Job {
     }
 }
 
+/// Le travail d'une mise à jour dont l'échange a eu lieu : la version visée est celle de l'agent
+/// qui démarre (le nouvel agent), la sauvegarde de l'ancien binaire est restée.
+fn swapped_job() -> hearth_agent::domain::update::Job {
+    hearth_agent::domain::update::Job {
+        version: CURRENT.to_string(),
+        ..orphan_job()
+    }
+}
+
 fn record(outcome: UpdateOutcome, reason: Option<UpdateReason>) -> UpdateRecord {
     UpdateRecord {
         version: "0.2.0".into(),
@@ -626,7 +635,7 @@ async fn a_swap_nobody_concluded_is_taken_over_by_a_recovery_supervisor() {
     let rig = Rig::new(&env, true, false);
     rig.host.with(|s| {
         s.state = Some(intent(UpdateStep::Check));
-        s.job = Some(orphan_job());
+        s.job = Some(swapped_job());
         s.existing
             .push("/usr/local/bin/.hearth-agent.previous".into());
     });
@@ -653,7 +662,7 @@ async fn the_result_of_a_recovery_is_announced_and_journaled_once_it_is_written(
     let rig = Rig::new(&env, true, false);
     rig.host.with(|s| {
         s.state = Some(intent(UpdateStep::Check));
-        s.job = Some(orphan_job());
+        s.job = Some(swapped_job());
         s.existing
             .push("/usr/local/bin/.hearth-agent.previous".into());
     });
@@ -853,4 +862,68 @@ async fn the_agent_that_comes_back_relays_the_supervisor_state_without_rewriting
     rig.host
         .running
         .store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Attend (au plus 5 s) qu'une condition sur la machine simulée devienne vraie.
+async fn until(rig: &Rig, condition: impl Fn(&support::update::MemState) -> bool) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !rig.host.with(|state| condition(state)) {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("état attendu");
+}
+
+#[tokio::test]
+async fn a_supervisor_that_dies_after_the_swap_is_taken_over_never_declared_failed() {
+    // FIX:01M47PHYR8MD87HAXY9PARQXAN
+    // Le superviseur travaillait (la surveillance le voit vivant), puis il meurt sans résultat
+    // alors que les binaires sont déjà échangés : la patience ne dit pas « échec du superviseur »
+    // (le nouvel agent est en place, l'ancien est gardé), elle suit la même règle qu'au démarrage.
+    let env = env().await;
+    let rig = Rig::impatient(&env);
+    rig.host
+        .running
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(swapped_job());
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+    });
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    rig.host
+        .running
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    until(&rig, |s| !s.launched.is_empty()).await;
+    rig.host.with(|s| {
+        assert!(s.job.as_ref().unwrap().recover, "superviseur de reprise");
+        assert!(s.last.is_none(), "aucun échec écrit");
+    });
+    while let Ok(progress) = events.try_recv() {
+        assert_ne!(progress.step, UpdateStep::Done, "{progress:?}");
+    }
+    assert!(journal(&env).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_supervisor_that_never_shows_up_ends_as_a_launch_failure_after_the_patience() {
+    let env = env().await;
+    let rig = Rig::impatient(&env);
+    rig.host
+        .running
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    rig.host
+        .with(|s| s.state = Some(intent(UpdateStep::Restart)));
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    rig.host
+        .running
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+    assert_eq!(done.outcome, Some(UpdateOutcome::Failed));
+    assert_eq!(done.reason, Some(UpdateReason::SupervisorLaunch));
+    assert_eq!(journal(&env).await.len(), 1);
 }
