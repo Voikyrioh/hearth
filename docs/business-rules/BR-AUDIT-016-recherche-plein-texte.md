@@ -5,7 +5,7 @@ titre: La recherche plein texte porte sur tous les champs visibles
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-journal-activite.md (BR-AUDIT-016), HRT-05
-maj: 2026-10-04
+maj: 2026-10-06
 ---
 
 # BR-AUDIT-016 — La recherche plein texte porte sur tous les champs visibles
@@ -17,12 +17,19 @@ maj: 2026-10-04
 - `crates/hearth-agent/src/domain/audit/filter.rs::SearchQuery::parse`.
 - `crates/hearth-agent/migrations/0003_audit_events.sql` (table `audit_fts`, FTS5 en contenu externe, tenue à jour par déclencheurs).
 - `crates/hearth-agent/src/infrastructure/sqlite/audit_repo.rs::SqliteAuditRepo::search`.
+- `crates/hearth-link/src/domain/audit_query.rs::AuditFilter::new` (texte borné à 200 caractères, caractères de contrôle remplacés, jamais une requête)
+- `apps/desktop/src/components/organisms/AuditFilters.vue` (champ « Rechercher »)
+
+## Interface
+Le champ « Rechercher » envoie un TEXTE à l'agent, qui cherche (compte, adresse IP, nom du poste, action, cible, raison ; sans casse ni accents ; plusieurs mots = ET). L'interface ne recopie aucune règle de recherche : les entrées reçues en direct sont filtrées par l'agent.
 
 ## Vérification
 - `domain::audit::filter::tests` (échappement, bornes).
 - `crates/hearth-agent/tests/audit_repo.rs::the_search_finds_every_visible_field_regardless_of_case_and_accents`.
 - `crates/hearth-agent/tests/audit_repo.rs::special_characters_in_the_search_are_text_never_a_query`.
 - `crates/hearth-agent/tests/audit_repo.rs::the_purge_removes_by_age_and_then_by_count_and_keeps_the_search_in_step`.
+- `crates/hearth-link/tests/audit.rs::the_search_is_a_text_never_a_query`.
+- `apps/desktop/src/stores/audit.test.ts` (« la recherche est celle de l'agent »).
 
 ## Cas limites
 - Au plus 8 mots de 64 caractères pris en compte.
@@ -33,3 +40,4 @@ maj: 2026-10-04
 
 ## Historique
 - 2026-10-04 — création (HRT-05, session 2026-10-04-hearth-creation).
+- 2026-10-06 — section « Interface » et pointeurs du client (HRT-14, session 2026-10-04-hearth-creation).

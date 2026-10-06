@@ -157,6 +157,7 @@ export type LinkFailure =
   | { kind: "storage" }
   | { kind: "vault" }
   | { kind: "not_connected" }
+  | { kind: "forbidden" }
   | { kind: "tracking_unavailable" }
   | { kind: "tracking_slow" }
   | { kind: "internal" };

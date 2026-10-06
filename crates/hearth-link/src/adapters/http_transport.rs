@@ -35,12 +35,14 @@ use crate::domain::agent_identity;
 use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
 use crate::ports::transport::{
-    ApiError, ApiRequest, ApiResponse, Frame, Method, Pin, Probed, StreamConn, Target, Transport,
-    TransportError,
+    ApiError, ApiRequest, ApiResponse, AuditExport, Frame, Method, Pin, Probed, StreamConn, Target,
+    Transport, TransportError,
 };
 
 /// Taille maximale d'une réponse HTTP lue (un `GET /metrics/history` en tient largement).
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
+/// Taille maximale d'un export du journal (10 000 entrées au plus, quelques centaines d'octets chacune).
+const MAX_EXPORT_BYTES: usize = 16 * 1024 * 1024;
 /// Taille maximale d'un message du flux (le `snapshot` porte cinq minutes d'historique).
 const MAX_STREAM_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 
@@ -107,6 +109,15 @@ impl HttpTransport {
         target: &Target,
         call: Call<'_>,
     ) -> Result<(u16, HeaderMap, Vec<u8>), TransportError> {
+        self.send_limited(target, call, MAX_BODY_BYTES).await
+    }
+
+    async fn send_limited(
+        &self,
+        target: &Target,
+        call: Call<'_>,
+        max_body: usize,
+    ) -> Result<(u16, HeaderMap, Vec<u8>), TransportError> {
         let Call {
             method,
             path,
@@ -156,7 +167,7 @@ impl HttpTransport {
         let response_headers = response.headers().clone();
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|e| map_error(e, &state))? {
-            if bytes.len().saturating_add(chunk.len()) > MAX_BODY_BYTES {
+            if bytes.len().saturating_add(chunk.len()) > max_body {
                 return Err(TransportError::Protocol("réponse trop volumineuse".into()));
             }
             bytes.extend_from_slice(&chunk);
@@ -276,6 +287,33 @@ impl Transport for HttpTransport {
             status,
             body,
             replayed,
+        })
+    }
+
+    async fn export_audit(
+        &self,
+        target: &Target,
+        token: &Secret,
+        path: &str,
+    ) -> Result<AuditExport, TransportError> {
+        let call = Call {
+            method: Method::Get,
+            path,
+            token: Some(token),
+            idempotency_key: None,
+            body: None,
+        };
+        let (status, headers, bytes) = self.send_limited(target, call, MAX_EXPORT_BYTES).await?;
+        if !(200..300).contains(&status) {
+            return Err(TransportError::Api(api_error(status, &headers, &bytes)));
+        }
+        let truncated = headers
+            .get(hearth_proto::api::audit::EXPORT_TRUNCATED_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+        Ok(AuditExport {
+            body: bytes,
+            truncated,
         })
     }
 

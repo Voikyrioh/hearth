@@ -83,3 +83,16 @@ Mêmes filtres (sans `before` ni `limit`). `200` : le résultat filtré en CSV, 
 | Les sous-commandes `account …` | Les succès, avec l'origine « ligne de commande du serveur ». |
 
 Une entrée écrite dans la transaction d'une action en partage le sort : si son écriture échoue, l'action n'est pas validée (erreur interne). Hors transaction (refus et échecs relevés par la couche d'accès), un échec d'écriture est tracé en `error` et ne change rien pour l'appelant. Les tentatives de connexion refusées pendant une attente, et celles qui débordent la file d'une adresse, ne sont pas consignées (le blocage l'est, une fois). Conservation : 90 jours ou 50 000 entrées (BR-AUDIT-008).
+
+## Côté client (HRT-14)
+
+L'interface ne parle jamais à ces routes : elle passe par deux commandes typées de la coquille (ADR-0013, 0016, 0019), qui construisent la méthode (`GET`), le chemin et la requête encodée dans `hearth-link` (`domain/audit_query.rs`) à partir d'un filtre validé.
+
+| Commande | Paramètres | Résultat |
+|---|---|---|
+| `read_audit` | `serverId`, `filter` (`accounts`, `kinds`, `outcomes`, `fromS`, `toS`, `text`), `before` (curseur, ou rien) | `AuditPageDto` : `events` (100 au plus, plus récente d'abord), `nextBefore` ; échecs typés : `forbidden` (rôle), `not_connected`, `invalid_input`, `unreachable`… |
+| `export_audit` | `serverId`, `filter` | `AuditExportDto` : `saved` (faux si l'utilisateur ferme la boîte d'enregistrement), `truncated` ; le fichier est choisi dans la boîte du système, jamais par la page |
+
+Événement `link://audit` : `{ serverId, event }`, une entrée du flux (sujet `audit`, administrateurs), même forme que `GET /audit`. Événement `link://audit-gap` (`{}`) : la liaison a perdu des événements (retard d'écoute), l'interface relit la tête du journal. Le flux peut aussi perdre des entrées côté agent sans le dire : les identifiants croissent sans être garantis consécutifs, la continuité se vérifie par lecture.
+
+Les types d'action du filtre (« Connexion réussie », « Connexion refusée », « Gestion des comptes », « Mise à jour de l'agent », « Action refusée ») couplent une action et un résultat : le client envoie une requête par rectangle (actions × résultats) et recolle les pages ; l'export suit la même règle (une requête : le fichier de l'agent ; plusieurs : même rendu, `hearth_proto::api::audit_csv`). La neutralisation des formules est celle de `audit_csv::field`, une seule fois.

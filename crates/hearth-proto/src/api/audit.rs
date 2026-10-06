@@ -8,6 +8,40 @@ use serde::{Deserialize, Serialize};
 /// plus récentes du résultat (plafond atteint).
 pub const EXPORT_TRUNCATED_HEADER: &str = "x-hearth-export-truncated";
 
+/// Catalogue des codes d'action du journal : UNE source pour l'agent (`AuditAction::code`), le filtre
+/// `action=` et la liaison cliente (`hearth-link`, types d'action de l'interface). Un code ajouté ici
+/// sans être rangé dans un type d'action du client fait échouer un test de `hearth-link`.
+pub mod action {
+    pub const LOGIN: &str = "login";
+    pub const LOGIN_LOCKED: &str = "login.locked";
+    pub const LOGOUT: &str = "logout";
+    pub const ACCOUNT_CREATE: &str = "account.create";
+    pub const ACCOUNT_DELETE: &str = "account.delete";
+    pub const ACCOUNT_ROLE: &str = "account.role";
+    pub const ACCOUNT_PASSWORD: &str = "account.password";
+    pub const ACCOUNT_PASSWORD_OWN: &str = "account.password.own";
+    pub const SESSIONS_REVOKE: &str = "sessions.revoke";
+    pub const ACCOUNTS_READ: &str = "accounts.read";
+    pub const AUDIT_READ: &str = "audit.read";
+    pub const AGENT_UPDATE: &str = "agent.update";
+
+    /// Tous les codes, dans l'ordre du catalogue.
+    pub const ALL: [&str; 12] = [
+        LOGIN,
+        LOGIN_LOCKED,
+        LOGOUT,
+        ACCOUNT_CREATE,
+        ACCOUNT_DELETE,
+        ACCOUNT_ROLE,
+        ACCOUNT_PASSWORD,
+        ACCOUNT_PASSWORD_OWN,
+        SESSIONS_REVOKE,
+        ACCOUNTS_READ,
+        AUDIT_READ,
+        AGENT_UPDATE,
+    ];
+}
+
 /// Paramètres de requête des deux routes, tels qu'ils arrivent : des textes, contrôlés par
 /// l'agent. Un filtre à plusieurs valeurs sépare celles-ci par des virgules.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

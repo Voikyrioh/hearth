@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import {
+  type AuditLiveEvent,
   type LinkFailure as BoundFailure,
   commands,
   type FingerprintEvent,
@@ -11,6 +12,8 @@ import {
   type ServersEvent,
   type SnapshotEvent,
 } from "@/bindings";
+import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
+import { toAuditFilterDto, toAuditLive, toAuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
 import { type MachineEvent, toMetrics, toView } from "./machine";
 import {
@@ -38,6 +41,8 @@ export const LINK_EVENTS = {
   notice: "link://notice",
   snapshot: "link://snapshot",
   metrics: "link://metrics",
+  audit: "link://audit",
+  auditGap: "link://audit-gap",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -263,5 +268,42 @@ export class TauriLinkBridge implements LinkBridge {
 
   async setDisplayedServer(serverId: string | null): Promise<void> {
     await commands.setDisplayedServer(serverId);
+  }
+
+  async readAudit(
+    serverId: string,
+    filter: AuditFilter,
+    before: number | null,
+  ): Promise<AuditPage> {
+    return toAuditPage(
+      unwrap(await commands.readAudit(serverId, toAuditFilterDto(filter), before)),
+    );
+  }
+
+  async exportAudit(serverId: string, filter: AuditFilter): Promise<AuditExportResult> {
+    return unwrap(await commands.exportAudit(serverId, toAuditFilterDto(filter)));
+  }
+
+  async onAudit(
+    serverId: string,
+    listener: (entry: AuditEntry) => void,
+    onGap: () => void = () => {},
+  ): Promise<Unsubscribe> {
+    const off: Unsubscribe[] = [];
+    try {
+      off.push(
+        await listen<AuditLiveEvent>(LINK_EVENTS.audit, (event) => {
+          const live = toAuditLive(event.payload);
+          if (live && live.serverId === serverId) listener(live.entry);
+        }),
+      );
+      off.push(await listen(LINK_EVENTS.auditGap, () => onGap()));
+    } catch (error) {
+      for (const stop of off) stop();
+      throw error;
+    }
+    return () => {
+      for (const stop of off) stop();
+    };
   }
 }

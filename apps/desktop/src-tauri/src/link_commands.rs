@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter as _, Runtime, State};
 
+use crate::audit::{self, AuditExportDto, AuditFilterDto, AuditPageDto};
 use crate::dashboard::SnapshotEvent;
 use crate::link::{LinkRuntime, UiSink};
 use crate::link_dto::{
@@ -198,4 +199,30 @@ pub async fn get_dashboard(
     server_id: String,
 ) -> Result<Option<SnapshotEvent>, LinkFailure> {
     link.dashboard(&server_id).await
+}
+
+/// Une page du journal d'activité (administrateurs seulement, BR-AUDIT-001). Le filtre est TYPÉ et
+/// validé côté Rust ; la route, la méthode et l'adresse sont construites côté Rust (ADR-0013, 0016).
+#[tauri::command]
+#[specta::specta]
+pub async fn read_audit(
+    link: Runtime_<'_>,
+    server_id: String,
+    filter: AuditFilterDto,
+    before: Option<f64>,
+) -> Result<AuditPageDto, LinkFailure> {
+    audit::read_page(&link, &server_id, filter, before).await
+}
+
+/// Exporte le résultat filtré en CSV : le fichier est choisi PAR L'UTILISATEUR dans la boîte de
+/// dialogue native d'enregistrement, jamais par la page (ADR-0019).
+#[tauri::command]
+#[specta::specta]
+pub async fn export_audit(
+    window: tauri::WebviewWindow,
+    link: Runtime_<'_>,
+    server_id: String,
+    filter: AuditFilterDto,
+) -> Result<AuditExportDto, LinkFailure> {
+    audit::export(&link, &server_id, filter, &audit::NativeSaveDialog(window)).await
 }

@@ -78,17 +78,17 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-AUDIT-007](./BR-AUDIT-007-blocage-temporaire.md) — Le blocage temporaire d'un compte est journalisé — `application/sessions.rs::SessionService::login_in_turn` — —
 - [BR-AUDIT-008](./BR-AUDIT-008-conservation-journal.md) — Le journal est conservé 90 jours ou 50 000 entrées — `domain/audit/policy.rs::{RETENTION, MAX_ENTRIES, retention_cutoff, excess_entries}` — invariant ✓
 - [BR-AUDIT-009](./BR-AUDIT-009-immutabilite-journal.md) — Le journal ne se modifie ni ne se vide depuis le client — `migrations/0003_audit_events.sql` — invariant ✓
-- [BR-AUDIT-010](./BR-AUDIT-010-affichage-temps-reel.md) — Les nouvelles entrées arrivent en direct — `application/ports/audit_sink.rs::AuditFeed` — —
-- [BR-AUDIT-011](./BR-AUDIT-011-donnees-perimees.md) — Données périmées quand le lien est coupé — — — —
-- [BR-AUDIT-012](./BR-AUDIT-012-fuseau-horaire-client.md) — L'heure s'affiche dans le fuseau du PC client — `entrypoint/http/wire.rs::date` — —
-- [BR-AUDIT-013](./BR-AUDIT-013-regroupement-rafales.md) — Les refus en rafale sont regroupés à l'affichage — — — —
-- [BR-AUDIT-014](./BR-AUDIT-014-gestion-filtres.md) — Les filtres appliqués restent visibles et se réinitialisent en un clic — `domain/audit/filter.rs::{AuditFilter, RawFilter}` — —
-- [BR-AUDIT-015](./BR-AUDIT-015-filtres-multi-valeurs-periode.md) — Compte, action et résultat acceptent plusieurs valeurs ; une période à la fois — `domain/audit/filter.rs::AuditFilter::new` — —
-- [BR-AUDIT-016](./BR-AUDIT-016-recherche-plein-texte.md) — La recherche plein texte porte sur tous les champs visibles — `domain/audit/filter.rs::SearchQuery::parse` — —
-- [BR-AUDIT-017](./BR-AUDIT-017-export-resultat-filtre.md) — L'export porte sur le résultat filtré — `domain/audit/csv.rs::{render, field}` — —
-- [BR-AUDIT-018](./BR-AUDIT-018-resultat-vide.md) — Aucun événement : message et bouton d'effacement — `application/audit.rs::AuditService::search` — —
-- [BR-AUDIT-019](./BR-AUDIT-019-indicateur-conservation.md) — L'indicateur de conservation est toujours visible — `domain/audit/policy.rs::{RETENTION, MAX_ENTRIES}` — —
-- [BR-AUDIT-020](./BR-AUDIT-020-rechargement-manuel.md) — Rechargement manuel quand le lien est coupé — — — —
+- [BR-AUDIT-010](./BR-AUDIT-010-affichage-temps-reel.md) — Les nouvelles entrées arrivent en direct — `application/ports/audit_sink.rs::AuditFeed` ; interface : apps/desktop/src/stores/audit.ts::useAuditStore — —
+- [BR-AUDIT-011](./BR-AUDIT-011-donnees-perimees.md) — Données périmées quand le lien est coupé — interface : apps/desktop/src/stores/audit.ts::{resume, catchUp} — —
+- [BR-AUDIT-012](./BR-AUDIT-012-fuseau-horaire-client.md) — L'heure s'affiche dans le fuseau du PC client — `entrypoint/http/wire.rs::date` ; interface : apps/desktop/src/audit/format.ts::formatWhen — —
+- [BR-AUDIT-013](./BR-AUDIT-013-regroupement-rafales.md) — Les refus en rafale sont regroupés à l'affichage — interface : apps/desktop/src/audit/grouping.ts::groupBursts — —
+- [BR-AUDIT-014](./BR-AUDIT-014-gestion-filtres.md) — Les filtres appliqués restent visibles et se réinitialisent en un clic — `domain/audit/filter.rs::{AuditFilter, RawFilter}` ; interface : apps/desktop/src/audit/filters.ts — —
+- [BR-AUDIT-015](./BR-AUDIT-015-filtres-multi-valeurs-periode.md) — Compte, action et résultat acceptent plusieurs valeurs ; une période à la fois — `domain/audit/filter.rs::AuditFilter::new` ; crates/hearth-link/src/domain/audit_query.rs::AuditFilter::plan — —
+- [BR-AUDIT-016](./BR-AUDIT-016-recherche-plein-texte.md) — La recherche plein texte porte sur tous les champs visibles — `domain/audit/filter.rs::SearchQuery::parse` ; crates/hearth-link/src/domain/audit_query.rs::AuditFilter::new — —
+- [BR-AUDIT-017](./BR-AUDIT-017-export-resultat-filtre.md) — L'export porte sur le résultat filtré — `domain/audit/csv.rs::{render, field}` ; crates/hearth-proto/src/api/audit_csv.rs::field — —
+- [BR-AUDIT-018](./BR-AUDIT-018-resultat-vide.md) — Aucun événement : message et bouton d'effacement — `application/audit.rs::AuditService::search` ; interface : apps/desktop/src/pages/Audit.vue — —
+- [BR-AUDIT-019](./BR-AUDIT-019-indicateur-conservation.md) — L'indicateur de conservation est toujours visible — `domain/audit/policy.rs::{RETENTION, MAX_ENTRIES}` ; interface : apps/desktop/src/pages/Audit.vue — —
+- [BR-AUDIT-020](./BR-AUDIT-020-rechargement-manuel.md) — Rechargement manuel quand le lien est coupé — interface : apps/desktop/src/stores/audit.ts::reloadManually — —
 - [BR-AUDIT-021](./BR-AUDIT-021-journalisation-refus-acces.md) — Un refus d'accès au journal est lui-même journalisé — `entrypoint/http/mod.rs::ENDPOINTS` — invariant ✓
 - [BR-DASH-001](./BR-DASH-001-affichage-initial-complet.md) — Le tableau de bord affiche l'état complet de la machine dès sa première ouverture — `application/metrics.rs::MetricsService::{identity, history}, entrypoint/ws/connection.rs` — invariant ✓
 - [BR-DASH-002](./BR-DASH-002-rafraichissement-chaque-seconde.md) — Les mesures sont rafraîchies automatiquement chaque seconde — `entrypoint/tasks.rs::spawn_sampler, application/metrics.rs::MetricsService::sample_once` — invariant ✓

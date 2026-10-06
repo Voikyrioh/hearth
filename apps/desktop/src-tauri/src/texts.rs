@@ -13,6 +13,9 @@ pub const MENU_OPEN_LABEL: &str = "Ouvrir Hearth";
 pub const MENU_QUIT_LABEL: &str = "Quitter";
 pub const CLOSE_HINT: &str = "Hearth continue de fonctionner. Clique sur l'icône pour rouvrir.";
 pub const STARTUP_FAILED_TITLE: &str = "Hearth n'a pas pu démarrer";
+/// Boîte d'enregistrement de l'export du journal (HRT-14).
+pub const EXPORT_DIALOG_TITLE: &str = "Exporter le journal";
+pub const EXPORT_FILTER_NAME: &str = "Tableur (CSV)";
 /// Notification système du lien (BR-RESIL-015) : `{Nom} est hors ligne.` / `{Nom} est de nouveau
 /// connecté.` ; si des changements ont été absorbés par la limite d'une par minute, le nombre
 /// est ajouté (texte hors spec, BR-RESIL-018).

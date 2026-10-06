@@ -1,3 +1,4 @@
+import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { MachineEvent } from "./machine";
 import type {
   FingerprintChange,
@@ -91,4 +92,24 @@ export interface LinkBridge {
   // typée chacune : aucune commande générique « envoie cette requête » (ADR-0013, ADR-0016).
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;
+
+  // Journal d'activité (HRT-14) : UNE commande typée par lecture, aucune route ni aucun paramètre
+  // libre (ADR-0013, 0016). Réservé aux administrateurs : un refus est `forbidden`.
+  /** Une page du journal filtré, de la plus récente à la plus ancienne ; `before` : curseur (`nextBefore`). */
+  readAudit(serverId: string, filter: AuditFilter, before: number | null): Promise<AuditPage>;
+  /**
+   * Exporte le résultat filtré en CSV : la boîte de dialogue d'enregistrement est celle du système,
+   * l'utilisateur choisit le fichier ; l'interface ne désigne aucun chemin.
+   */
+  exportAudit(serverId: string, filter: AuditFilter): Promise<AuditExportResult>;
+  /**
+   * Entrées du journal reçues en direct (`link://audit`). Rien n'est rejoué : ce qui a été manqué
+   * pendant une coupure se rattrape par `readAudit` (le récepteur dédoublonne par `id`). `onGap` : le
+   * flux a PERDU des entrées (avis de retard de la liaison, `link://audit-gap`) : le récepteur relit.
+   */
+  onAudit(
+    serverId: string,
+    listener: (entry: AuditEntry) => void,
+    onGap?: () => void,
+  ): Promise<Unsubscribe>;
 }

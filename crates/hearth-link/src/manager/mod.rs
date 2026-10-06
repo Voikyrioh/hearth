@@ -6,6 +6,7 @@
 //! l'interface en commandes. Les règles sont dans `domain/`.
 
 mod attempt;
+mod audit;
 mod events;
 mod persist;
 mod task;
@@ -26,6 +27,7 @@ use tokio::sync::{OwnedMutexGuard, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
+pub use audit::AuditExportFile;
 pub use events::EventStream;
 use events::Fanout;
 use task::Command;
