@@ -71,7 +71,7 @@ Greffon `tauri-plugin-updater` en API Rust seule (aucune permission côté web),
 
 ## Mise à jour de l'agent depuis le client (HRT-17, lot interface)
 
-Le CLIENT lit la cible de l'agent (`agent.json`, même release que `latest.json`, ADR-0021) dans la MÊME tentative que son propre flux : une requête de plus vers le même hôte, aucune tentative de plus. La WebView ne fournit NI adresse, NI signature, NI somme : `update_agent(server_id, version)` ne reçoit que le numéro vu ; la coquille valide la cible (HTTPS public des releases du dépôt, jamais de rétrogradation) et construit la requête. L'agent reste l'arbitre (rôle, signature, somme). Le redémarrage annoncé par l'agent est une coupure ATTENDUE dans `hearth-link` (2 minutes, « Reconnexion… », sans alarme). Publication : `cargo xtask agent-manifest` puis ajout à la main à la release (runbook `docs/runbooks/mettre-a-jour-agent.md`). Règles `BR-UPDATE-020` à `023`.
+Le CLIENT lit la cible de l'agent dans la section `agent` du `latest.json` (ADR-0021), dans la MÊME requête que son propre flux (`version_comparator` du greffon) : toujours UNE requête par vérification (BR-UPDATE-001). La WebView ne fournit NI adresse, NI signature, NI somme : `update_agent(server_id, version)` ne reçoit que le numéro vu ; la coquille valide la cible (HTTPS public des releases du dépôt, jamais de rétrogradation) et construit la requête. L'agent reste l'arbitre (rôle, signature, somme). Le redémarrage annoncé par l'agent est une coupure ATTENDUE dans `hearth-link` (2 minutes, « Reconnexion… », sans alarme). Publication : `cargo xtask agent-manifest` puis ajout à la main à la release (runbook `docs/runbooks/mettre-a-jour-agent.md`). Règles `BR-UPDATE-020` à `023`.
 
 ## Règles
 

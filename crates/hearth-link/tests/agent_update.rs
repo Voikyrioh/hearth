@@ -21,7 +21,7 @@ use hearth_link::ports::transport::{ApiRequest, Method, Pin, Target};
 use hearth_link::{ActionOutcome, ActionRequest, LinkConfig, LinkError};
 use hearth_proto::api::sessions::LoginRequest;
 use hearth_proto::api::update::{UpdateOutcome, UpdateProgress, UpdateStep};
-use support::update_rig::{Rig, rig};
+use support::update_rig::{self, Rig, rig};
 use support::{Options, PASSWORD, SCALE, WAIT, World, never};
 
 const BINARY: &[u8] = b"nouvel agent";
@@ -31,7 +31,7 @@ fn options(rig: &Arc<Rig>, role: Role, config: LinkConfig) -> Options {
     Options {
         role,
         config,
-        updating: Some(Arc::new(move || rig.updating())),
+        updating: Some(update_rig::factory(rig)),
         ..Options::default()
     }
 }
@@ -254,17 +254,8 @@ async fn a_restart_announced_by_the_agent_is_an_expected_cut_then_the_result_is_
     assert_eq!(world.recorder.states_since(cut), [LinkState::Reconnecting]);
 
     // Le nouvel agent revient (résultat écrit par le superviseur, jamais annoncé).
-    // L'ancien agent, arrêté, a encore sa surveillance en tâche de fond (le banc n'a pas de vrai
-    // superviseur) : elle conclut « interrompue » à son rythme. On attend cette conclusion (un fait),
-    // puis le superviseur simulé écrit SON résultat par-dessus, avant le démarrage du nouvel agent.
-    let started = std::time::Instant::now();
-    while rig.host.with(|state| state.last.is_none()) {
-        assert!(
-            started.elapsed() < WAIT,
-            "délai dépassé en attendant : la conclusion de l'ancien agent"
-        );
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    // Le superviseur simulé écrit SON résultat avant le démarrage du nouvel agent. Aucune attente : la
+    // surveillance de l'ancien agent ne s'éveille jamais (`update_rig::factory`).
     rig.host.with(|state| state.last = Some(succeeded_record()));
     world.agent.restart().await;
     world.proxy.set_target(world.agent.addr);

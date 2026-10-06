@@ -14,6 +14,7 @@ use super::service;
 use crate::link::LinkRuntime;
 use crate::link_dto::LinkFailure;
 use crate::update::SharedUpdates;
+use crate::update::service::AckRefusal;
 
 type Runtime_<'a> = State<'a, Arc<LinkRuntime>>;
 
@@ -40,24 +41,43 @@ pub async fn get_agent_update(
     let seen = updates
         .as_ref()
         .and_then(|updates| updates.agent_result_seen(&server_id));
-    service::view(
+    let view = service::view(
         link.manager(),
         &service::server(&server_id)?,
         target.as_ref(),
         now_seconds(),
         seen.as_deref(),
     )
-    .await
+    .await?;
+    // Le résultat que la coquille tient pour ce serveur : le seul que `ack_agent_result` acceptera.
+    if let (Some(updates), Some(last)) = (updates.as_ref(), view.last.as_ref()) {
+        updates.note_agent_result_read(&server_id, &last.at);
+    }
+    Ok(view)
 }
 
 /// Note que le résultat daté `at` de ce serveur a été annoncé : il ne le sera plus, même après un
 /// redémarrage du client (BR-UPDATE-015). Ne parle pas à l'agent.
 #[tauri::command]
 #[specta::specta]
-pub fn ack_agent_result(app: AppHandle, server_id: String, at: String) {
-    if let Some(updates) = app.try_state::<SharedUpdates>() {
-        updates.ack_agent_result(&server_id, &at);
-    }
+pub fn ack_agent_result(
+    app: AppHandle,
+    link: Runtime_<'_>,
+    server_id: String,
+    at: String,
+) -> Result<(), LinkFailure> {
+    let Some(updates) = app.try_state::<SharedUpdates>() else {
+        return Ok(());
+    };
+    let known: Vec<String> = link.servers().into_iter().map(|server| server.id).collect();
+    updates
+        .ack_agent_result(&server_id, &at, &known)
+        .map_err(|refusal| match refusal {
+            AckRefusal::UnknownServer => LinkFailure::UnknownServer,
+            AckRefusal::InvalidDate | AckRefusal::NotTheResultRead => LinkFailure::InvalidInput {
+                field: crate::link_dto::InvalidField::Other,
+            },
+        })
 }
 
 /// « Mettre à jour l'agent » : l'administrateur a confirmé `version`, celle qu'il a vue. La cible

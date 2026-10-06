@@ -11,7 +11,7 @@ maj: 2026-10-06
 # BR-UPDATE-026 : « Vérifier maintenant » force une vérification des mises à jour
 
 ## Règle
-Le bouton « Vérifier maintenant » des réglages lance une vérification à tout moment, hors de la règle des 24 h (BR-UPDATE-001), et la fait compter comme la dernière tentative. Pendant la vérification le bouton est désactivé et dit « Vérification en cours… » ; une seule vérification à la fois. Résultat : « Tu es à jour » ou la version trouvée (avec « Notes de version » et « Mettre à jour maintenant »), et la date de la vérification ; sans réponse, aucune erreur, la date précédente reste (BR-UPDATE-007). Il n'installe jamais rien de lui-même. La vérification lit AUSSI la cible de l'agent (`agent.json`, ADR-0021), dans la même tentative : une requête de plus vers le même hôte, aucune tentative de plus.
+Le bouton « Vérifier maintenant » des réglages lance une vérification à tout moment, hors de la règle des 24 h (BR-UPDATE-001), et la fait compter comme la dernière tentative. Pendant la vérification le bouton est désactivé et dit « Vérification en cours… » ; une seule vérification à la fois. Résultat : « Tu es à jour » ou la version trouvée (avec « Notes de version » et « Mettre à jour maintenant »), et la date de la vérification ; sans réponse, aucune erreur, la date précédente reste (BR-UPDATE-007). Il n'installe jamais rien de lui-même. La vérification lit AUSSI la cible de l'agent, dans la section `agent` du même `latest.json` (ADR-0021) : la même requête, rien de plus.
 
 ## Application (code)
 - `apps/desktop/src-tauri/src/update/commands.rs::check_for_updates`.

@@ -117,7 +117,7 @@ export const commands = {
 	 *  Note que le résultat daté `at` de ce serveur a été annoncé : il ne le sera plus, même après un
 	 *  redémarrage du client (BR-UPDATE-015). Ne parle pas à l'agent.
 	 */
-	ackAgentResult: (serverId: string, at: string) => __TAURI_INVOKE<void>("ack_agent_result", { serverId, at }),
+	ackAgentResult: (serverId: string, at: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("ack_agent_result", { serverId, at })),
 };
 
 /* Types */

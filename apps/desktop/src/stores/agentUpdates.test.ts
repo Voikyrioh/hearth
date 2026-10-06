@@ -266,4 +266,24 @@ describe("l'annonce du résultat vient de la relecture, une seule fois", () => {
     await store.refresh("forge");
     expect(toasts.items).toEqual([]);
   });
+
+  it("announces a result even when the comparison of the two clocks says it is not recent", async () => {
+    const { bridge, toasts } = await startedAt(clocked());
+    // Serveur très en avance (ou en retard) sur le PC : `recent` est faux, le résultat n'est pas perdu.
+    bridge.agentUpdates.seed("forge", {
+      last: {
+        version: "0.2.0",
+        previous: "0.1.0",
+        outcome: "succeeded",
+        reason: null,
+        at: "2026-10-09T10:00:00Z",
+        recent: false,
+        announced: false,
+      },
+    });
+    await backOnline(bridge);
+    expect(toasts.items.map((toast) => toast.kind)).toEqual(["success"]);
+    await backOnline(bridge);
+    expect(toasts.items).toHaveLength(1);
+  });
 });

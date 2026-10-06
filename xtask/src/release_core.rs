@@ -10,7 +10,7 @@ use serde_json::json;
 
 /// Cible du manifeste : doit rester celle du client (`update/feed.rs::TARGET`).
 pub const TARGET: &str = "windows-x86_64";
-/// Entrée de l'agent dans `agent.json` : doit rester celle que le client lit
+/// Entrée de l'agent dans la section `agent` du `latest.json` : doit rester celle que le client lit
 /// (`agent_update/domain.rs::AGENT_PLATFORM`).
 pub const AGENT_TARGET: &str = "linux-x86_64";
 /// Marque du commentaire de la clé de développement (`update/feed.rs::DEV_KEY_MARK`).
@@ -193,7 +193,7 @@ pub fn manifest_for(
 
 /// La version demandée doit être celle du dépôt (`[workspace.package]`), seule source du numéro : l'agent
 /// construit par `cargo xtask agent` porte cette version (il la vérifie), et c'est celle qu'il annoncera
-/// en s'exécutant. Un `agent.json` « 0.3.0 » posé sur un binaire 0.2.0 serait refusé (`bad_binary`) par
+/// en s'exécutant. Une section `agent` « 0.3.0 » posée sur un binaire 0.2.0 serait refusé (`bad_binary`) par
 /// chaque agent, puis reproposé sans fin.
 pub fn check_repository_version(requested: &str, cargo_toml: &str) -> Result<(), String> {
     let repository = workspace_version(cargo_toml).ok_or("version du dépôt illisible")?;
@@ -243,17 +243,16 @@ fn signature_text(signature: &str) -> Result<String, String> {
     }
 }
 
-/// Le fichier de cibles de l'agent (`agent.json`), à joindre à la même release que `latest.json`
-/// (ADR-0021) : `version`, `pub_date`, et l'entrée `linux-x86_64` (`url`, `signature`, `sha256`).
-/// `sha256` est la somme du binaire, en hexadécimal : l'agent exige la signature ET la somme.
-pub fn agent_manifest(
+/// La section `agent` à ajouter au manifeste `latest.json` du client (ADR-0021) : `version` et l'entrée
+/// `linux-x86_64` (`url`, `signature`, `sha256`). `sha256` est la somme du binaire, en hexadécimal :
+/// l'agent exige la signature ET la somme.
+pub fn agent_section(
     prefix: &str,
     version: &str,
     signature: &str,
     sha256: &str,
     url: &str,
-    pub_date: &str,
-) -> Result<String, String> {
+) -> Result<serde_json::Value, String> {
     check_version(version)?;
     let signature = signature_text(signature)?;
     if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -263,21 +262,28 @@ pub fn agent_manifest(
     if !url.starts_with(&expected) {
         return Err(format!("l'adresse doit commencer par {expected}"));
     }
-    if time::OffsetDateTime::parse(pub_date, &time::format_description::well_known::Rfc3339)
-        .is_err()
-    {
-        return Err(format!("date « {pub_date} » : attendu RFC 3339"));
-    }
-    serde_json::to_string_pretty(&json!({
+    Ok(json!({
         "version": version,
-        "pub_date": pub_date,
         "platforms": {
-            AGENT_TARGET: {
-                "url": url,
-                "signature": signature,
-                "sha256": sha256.to_ascii_lowercase(),
-            }
+            AGENT_TARGET: { "url": url, "signature": signature, "sha256": sha256.to_ascii_lowercase() }
         },
     }))
-    .map_err(|error| error.to_string())
+}
+
+/// Ajoute (ou remplace) la section `agent` d'un `latest.json` DÉJÀ valable pour le client : un seul
+/// manifeste cohérent, jamais une section de l'agent sans le manifeste du client (version et entrée
+/// `windows-x86_64` exigées), et le reste du fichier est conservé tel quel.
+pub fn add_agent_section(manifest: &str, section: serde_json::Value) -> Result<String, String> {
+    let mut value: serde_json::Value = serde_json::from_str(manifest)
+        .map_err(|error| format!("latest.json illisible : {error}"))?;
+    let client_ok = value["version"].is_string()
+        && value["platforms"][TARGET]["url"].is_string()
+        && value["platforms"][TARGET]["signature"].is_string();
+    if !client_ok {
+        return Err(format!(
+            "latest.json n'est pas un manifeste du client valable (version et entrée {TARGET} attendues) : fabrique-le d'abord avec client-manifest"
+        ));
+    }
+    value["agent"] = section;
+    serde_json::to_string_pretty(&value).map_err(|error| error.to_string())
 }

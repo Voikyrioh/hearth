@@ -7,7 +7,7 @@
 
 use hearth_desktop_lib::agent_update::domain::{
     AGENT_PLATFORM, AgentCandidate, AgentTarget, AgentTargetRecord, MANIFEST_MAX_BYTES,
-    ManifestError, TargetRejection, host_is_local, is_local_ip, is_newer, parse_manifest,
+    ManifestError, TargetRejection, host_is_local, is_local_ip, is_newer, parse_agent_section,
     validate_target,
 };
 use hearth_desktop_lib::update::domain::DownloadPolicy;
@@ -267,45 +267,53 @@ fn the_record_uses_camel_case_and_old_files_without_a_target_still_read() {
     assert!(old.agent.is_none());
 }
 
-fn manifest(version: &str, entry: serde_json::Value) -> Vec<u8> {
-    serde_json::to_vec(&json!({
-        "version": version,
-        "pub_date": "2026-10-06T10:00:00Z",
-        "platforms": { AGENT_PLATFORM: entry }
-    }))
-    .unwrap()
+/// Un `latest.json` du client portant une section `agent`.
+fn manifest(version: &str, entry: serde_json::Value) -> serde_json::Value {
+    json!({
+        "version": "9.9.9",
+        "notes": "Notes du client.",
+        "platforms": { "windows-x86_64": { "url": "https://x", "signature": "s" } },
+        "agent": { "version": version, "platforms": { AGENT_PLATFORM: entry } }
+    })
 }
 
 #[test]
-fn the_manifest_gives_one_candidate_for_the_platform_of_the_agent() {
-    let bytes = manifest(
+fn the_agent_section_gives_one_candidate_for_the_platform_of_the_agent() {
+    let value = manifest(
         "0.2.0",
         json!({ "url": URL, "signature": SIGNATURE, "sha256": sha() }),
     );
-    assert_eq!(parse_manifest(&bytes).unwrap(), Some(candidate()));
+    assert_eq!(parse_agent_section(&value).unwrap(), Some(candidate()));
 }
 
 #[test]
-fn a_manifest_without_an_entry_for_the_agent_offers_nothing_and_a_broken_one_is_an_error() {
-    // Le manifeste du client seul : pas d'entrée de l'agent, ce n'est pas une panne.
-    let client_only = serde_json::to_vec(&json!({
-        "version": "0.2.0",
+fn a_manifest_without_an_agent_section_offers_nothing_and_a_broken_one_is_an_error() {
+    // Le manifeste du client seul : pas de section de l'agent, ce n'est pas une panne.
+    let client_only = json!({
+        "version": "9.9.9",
         "platforms": { "windows-x86_64": { "url": "https://x", "signature": "s" } }
-    }))
-    .unwrap();
-    assert_eq!(parse_manifest(&client_only).unwrap(), None);
-    assert_eq!(parse_manifest(b"{}").unwrap(), None);
+    });
+    assert_eq!(parse_agent_section(&client_only).unwrap(), None);
+    assert_eq!(parse_agent_section(&json!({})).unwrap(), None);
+    // Une section sans entrée pour la plateforme de l'agent : rien à proposer.
+    assert_eq!(
+        parse_agent_section(&json!({ "agent": { "version": "0.2.0", "platforms": {} } })).unwrap(),
+        None
+    );
     // L'entrée existe mais il manque des champs : illisible.
     assert_eq!(
-        parse_manifest(&manifest("0.2.0", json!({ "url": URL }))).unwrap_err(),
+        parse_agent_section(&manifest("0.2.0", json!({ "url": URL }))).unwrap_err(),
         ManifestError::Unreadable
     );
+    let no_version = json!({ "agent": { "platforms": { AGENT_PLATFORM: { "url": URL, "signature": SIGNATURE, "sha256": sha() } } } });
     assert_eq!(
-        parse_manifest(b"pas du json").unwrap_err(),
+        parse_agent_section(&no_version).unwrap_err(),
         ManifestError::Unreadable
     );
+    let huge =
+        json!({ "agent": { "version": "0.2.0", "padding": "x".repeat(MANIFEST_MAX_BYTES + 1) } });
     assert_eq!(
-        parse_manifest(&vec![b' '; MANIFEST_MAX_BYTES + 1]).unwrap_err(),
+        parse_agent_section(&huge).unwrap_err(),
         ManifestError::TooLarge
     );
 }

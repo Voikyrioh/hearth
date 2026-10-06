@@ -63,7 +63,7 @@ pub struct UpdateRecord {
     pub postponed_until: Option<i64>,
     /// Version plus récente connue à la dernière vérification réussie.
     pub available: Option<Release>,
-    /// La cible de l'AGENT lue dans `agent.json`, à la même vérification (ADR-0021). Relue et
+    /// La cible de l'AGENT lue dans la section `agent` du `latest.json`, par la même requête (ADR-0021). Relue et
     /// validée de nouveau à chaque usage : ce fichier se modifie à la main.
     pub agent: Option<AgentTargetRecord>,
     /// Pour chaque serveur, la date (`at`) du dernier résultat de mise à jour de l'agent déjà ANNONCÉ à
@@ -71,9 +71,6 @@ pub struct UpdateRecord {
     /// (HRT-17). Borné à `MAX_SEEN_RESULTS` serveurs.
     pub agent_results_seen: std::collections::BTreeMap<String, String>,
 }
-
-/// Serveurs dont on garde le dernier résultat annoncé.
-pub const MAX_SEEN_RESULTS: usize = 64;
 
 /// Une version annoncée et acceptée par les règles ci-dessous.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -144,13 +144,16 @@ export const useAgentUpdatesStore = defineStore("agentUpdates", () => {
    */
   function announceIfNew(serverId: string, view: AgentUpdateView) {
     const last = view.last;
-    if (!last?.recent || last.announced || view.inProgress) return;
+    // Ne dépend PAS de `recent` (comparaison de l'horloge de l'agent et de celle du PC) : un résultat jamais
+    // annoncé s'annonce, jamais perdu pour un décalage d'horloge.
+    if (!last || last.announced || view.inProgress) return;
     const key = `${serverId}|${resultKey(last)}`;
     if (announced.has(key)) return;
     announced.add(key);
     void getLinkBridge()
       .ackAgentResult(serverId, last.at)
-      .catch(() => {});
+      // Une note qui ne s'écrit pas = une réannonce à chaque lancement : on le journalise.
+      .catch((error) => logUiError(error, "agent-update:ack"));
     const server = servers.byId(serverId);
     const result = last;
     const tone = resultTone(result);

@@ -26,12 +26,18 @@ pub fn server(text: &str) -> Result<ServerId, LinkFailure> {
     ServerId::parse(text).map_err(|_| LinkFailure::UnknownServer)
 }
 
-/// Le résultat date-t-il de moins de 24 h (`now` en secondes depuis l'époque) ? Une date illisible
-/// ou dans le futur n'est pas « récente ».
+/// Tolérance sur le FUTUR : l'horloge d'un serveur maison est souvent en avance de quelques secondes ou
+/// minutes sur celle du PC. Une date au plus 1 h dans le futur est celle d'un résultat qui vient d'être écrit.
+pub const FUTURE_TOLERANCE_SECONDS: i64 = 3600;
+
+/// Le résultat date-t-il de moins de 24 h (`now` en secondes depuis l'époque) ? La date est celle de
+/// l'agent, `now` celle du PC : deux horloges, d'où la tolérance sur le futur. Une date illisible, plus
+/// ancienne que 24 h ou plus de 1 h dans le futur n'est pas « récente » (simple ligne d'historique) ;
+/// l'ANNONCE d'un résultat ne dépend pas de cette comparaison (elle ne dépend que de sa date notée).
 pub fn is_recent(at: &str, now: i64) -> bool {
     OffsetDateTime::parse(at, &Rfc3339).is_ok_and(|at| {
         let age = now - at.unix_timestamp();
-        (0..=RECENT_RESULT_SECONDS).contains(&age)
+        (-FUTURE_TOLERANCE_SECONDS..=RECENT_RESULT_SECONDS).contains(&age)
     })
 }
 

@@ -1,7 +1,7 @@
 //! HRT-17, ADR-0021 : la cible de l'agent dans le flux de versions. D'abord le service du client
 //! avec des ports simulés (une lecture de la cible par vérification, jamais seule ni en plus du
 //! quota, silence sur échec, cible refusée jamais retenue, fichier d'état modifié à la main), puis
-//! l'adaptateur réel contre un serveur local (fichier `agent.json`, 404, trop gros, redirections
+//! l'adaptateur réel avec le vrai greffon contre un serveur local (section `agent` du `latest.json`, UNE requête, client à jour jamais proposé, section absente ou trop grosse, section
 //! bornées, aucune requête sans adresse configurée). Horloge injectée : aucun test n'attend.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
@@ -14,7 +14,7 @@ use hearth_desktop_lib::agent_update::domain::{
     AGENT_PLATFORM, AgentCandidate, AgentTargetRecord, MANIFEST_MAX_BYTES,
 };
 use hearth_desktop_lib::update::domain::{
-    Candidate, DownloadPolicy, MAX_AUTOMATIC_ATTEMPTS_PER_DAY, MAX_REDIRECTS, UpdateRecord,
+    Candidate, DownloadPolicy, MAX_AUTOMATIC_ATTEMPTS_PER_DAY, UpdateRecord,
 };
 use hearth_desktop_lib::update::dto::UpdateStateDto;
 use hearth_desktop_lib::update::feed::TauriFeed;
@@ -321,41 +321,137 @@ async fn without_a_registered_server_the_agent_file_is_not_read() {
     assert_eq!(feed.agent_calls.load(Ordering::SeqCst), 0);
 }
 
+fn service_on(store: &Arc<MemStore>) -> UpdateService {
+    UpdateService::new(
+        Arc::new(FakeClock(AtomicI64::new(START))),
+        store.clone(),
+        Arc::new(FakeFeed::default()),
+        Arc::new(Quiet),
+        DownloadPolicy::github_releases(),
+        "0.1.0",
+    )
+}
+
+fn known(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|id| (*id).to_owned()).collect()
+}
+
 #[tokio::test]
 async fn an_announced_result_is_noted_by_its_date_and_survives_a_restart_of_the_client() {
+    use hearth_desktop_lib::update::service::AckRefusal;
     let store = Arc::new(MemStore::default());
-    let make = |store: &Arc<MemStore>| {
-        UpdateService::new(
-            Arc::new(FakeClock(AtomicI64::new(START))),
-            store.clone(),
-            Arc::new(FakeFeed::default()),
-            Arc::new(Quiet),
-            DownloadPolicy::github_releases(),
-            "0.1.0",
-        )
-    };
-    let service = make(&store);
+    let service = service_on(&store);
+    let carnet = known(&["forge", "salon"]);
     assert_eq!(service.agent_result_seen("forge"), None);
-    service.ack_agent_result("forge", "2026-10-06T10:00:00Z");
-    // Une date plus ancienne ne remplace pas la plus récente.
-    service.ack_agent_result("forge", "2026-10-05T10:00:00Z");
+    // La coquille lit le résultat chez l'agent, puis seulement celui-là peut être acquitté.
+    service.note_agent_result_read("forge", "2026-10-06T10:00:00Z");
+    service
+        .ack_agent_result("forge", "2026-10-06T10:00:00Z", &carnet)
+        .unwrap();
     assert_eq!(
         service.agent_result_seen("forge").as_deref(),
         Some("2026-10-06T10:00:00Z")
     );
     // Le client redémarre : la note est lue sur le disque, par serveur.
-    let again = make(&store);
+    let again = service_on(&store);
     assert_eq!(
         again.agent_result_seen("forge").as_deref(),
         Some("2026-10-06T10:00:00Z")
     );
     assert_eq!(again.agent_result_seen("salon"), None);
-    // Un résultat suivant (autre date, même issue) est un autre résultat.
-    again.ack_agent_result("forge", "2026-10-07T10:00:00Z");
+    // Un résultat suivant (autre date, même issue) est un autre résultat, lu puis acquitté.
+    again.note_agent_result_read("forge", "2026-10-07T10:00:00Z");
+    again
+        .ack_agent_result("forge", "2026-10-07T10:00:00Z", &carnet)
+        .unwrap();
     assert_eq!(
         again.agent_result_seen("forge").as_deref(),
         Some("2026-10-07T10:00:00Z")
     );
+    // Une date plus ancienne lue ensuite ne fait pas reculer la note.
+    again.note_agent_result_read("forge", "2026-10-05T10:00:00Z");
+    again
+        .ack_agent_result("forge", "2026-10-05T10:00:00Z", &carnet)
+        .unwrap();
+    assert_eq!(
+        again.agent_result_seen("forge").as_deref(),
+        Some("2026-10-07T10:00:00Z")
+    );
+    let _ = AckRefusal::UnknownServer;
+}
+
+#[tokio::test]
+async fn an_acknowledgement_that_is_not_the_result_the_shell_read_is_refused_and_writes_nothing() {
+    use hearth_desktop_lib::update::service::AckRefusal;
+    let store = Arc::new(MemStore::default());
+    let service = service_on(&store);
+    let carnet = known(&["forge"]);
+    service.note_agent_result_read("forge", "2026-10-06T10:00:00Z");
+    let before = store.load();
+    // Serveur inconnu du carnet.
+    assert_eq!(
+        service.ack_agent_result("inconnu", "2026-10-06T10:00:00Z", &carnet),
+        Err(AckRefusal::UnknownServer)
+    );
+    // Dates invalides.
+    for bad in ["", "9999", "hier", "2026-10-06", "2026-13-45T00:00:00Z"] {
+        assert_eq!(
+            service.ack_agent_result("forge", bad, &carnet),
+            Err(AckRefusal::InvalidDate),
+            "{bad}"
+        );
+    }
+    // Date valide qui n'est PAS celle du résultat lu (une date « 9999 » ne peut pas empoisonner la note).
+    for other in [
+        "9999-12-31T23:59:59Z",
+        "2026-10-06T10:00:01Z",
+        "2000-01-01T00:00:00Z",
+    ] {
+        assert_eq!(
+            service.ack_agent_result("forge", other, &carnet),
+            Err(AckRefusal::NotTheResultRead),
+            "{other}"
+        );
+    }
+    // Un serveur dont aucun résultat n'a été lu : rien à acquitter.
+    assert_eq!(
+        service.ack_agent_result("salon", "2026-10-06T10:00:00Z", &known(&["forge", "salon"])),
+        Err(AckRefusal::NotTheResultRead)
+    );
+    assert_eq!(store.load(), before, "rien n'a été écrit");
+    assert_eq!(service.agent_result_seen("forge"), None);
+}
+
+#[tokio::test]
+async fn the_notes_file_never_grows_beyond_the_registered_servers_and_forgets_removed_ones() {
+    let store = Arc::new(MemStore::default());
+    let service = service_on(&store);
+    let at = "2026-10-06T10:00:00Z";
+    for id in ["a", "b", "c"] {
+        service.note_agent_result_read(id, at);
+        service
+            .ack_agent_result(id, at, &known(&["a", "b", "c"]))
+            .unwrap();
+    }
+    assert_eq!(store.load().agent_results_seen.len(), 3);
+    // Des identifiants inventés par une page ne sont pas du carnet : refusés, aucune entrée de plus.
+    for n in 0..200 {
+        let id = format!("faux{n}");
+        service.note_agent_result_read(&id, at);
+        assert!(
+            service
+                .ack_agent_result(&id, at, &known(&["a", "b", "c"]))
+                .is_err()
+        );
+    }
+    assert_eq!(store.load().agent_results_seen.len(), 3);
+    // Le serveur « c » est supprimé : son entrée part au prochain acquittement.
+    service.note_agent_result_read("a", "2026-10-07T10:00:00Z");
+    service
+        .ack_agent_result("a", "2026-10-07T10:00:00Z", &known(&["a", "b"]))
+        .unwrap();
+    let kept: Vec<String> = store.load().agent_results_seen.keys().cloned().collect();
+    assert_eq!(kept, ["a", "b"]);
 }
 
 // ---- l'adaptateur réel contre un serveur local ----------------------------------------------------
@@ -364,7 +460,6 @@ async fn an_announced_result_is_noted_by_its_date_and_survives_a_restart_of_the_
 enum Reply {
     Ok(Vec<u8>),
     Status(u16),
-    Redirect(String),
 }
 
 struct Server {
@@ -405,10 +500,6 @@ impl Server {
                             "HTTP/1.1 {code} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         )
                         .into_bytes(),
-                        Some(Reply::Redirect(to)) => format!(
-                            "HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                        )
-                        .into_bytes(),
                         Some(Reply::Ok(body)) => {
                             let mut out = format!(
                                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -440,167 +531,176 @@ impl Server {
     }
 }
 
+/// Application simulée avec le VRAI greffon de mise à jour, configuré comme dans `tauri.conf.json` (dont
+/// `requireSignedVersion`) : la version du client y est 0.1.0 (`mock_context`).
 fn app() -> tauri::App<MockRuntime> {
-    mock_builder().build(mock_context(noop_assets())).unwrap()
+    use hearth_desktop_lib::update::feed::plugin_with_key;
+    let public = minisign::KeyPair::generate_unencrypted_keypair()
+        .unwrap()
+        .pk
+        .to_box()
+        .unwrap()
+        .to_string();
+    let mut context = mock_context(noop_assets());
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    context
+        .config_mut()
+        .plugins
+        .0
+        .insert("updater".to_owned(), config["plugins"]["updater"].clone());
+    mock_builder()
+        .plugin(plugin_with_key::<MockRuntime>(&public))
+        .build(context)
+        .unwrap()
 }
 
-fn manifest() -> Vec<u8> {
+fn agent_section() -> serde_json::Value {
     json!({
         "version": "0.2.0",
-        "pub_date": "2026-10-06T10:00:00Z",
         "platforms": { AGENT_PLATFORM: { "url": URL, "signature": SIGNATURE, "sha256": "ab".repeat(32) } }
     })
-    .to_string()
-    .into_bytes()
 }
 
-fn feed(app: &tauri::App<MockRuntime>, server: &Server, path: &str) -> TauriFeed<MockRuntime> {
+/// Le `latest.json` d'un client en `version`, avec ou sans section de l'agent.
+fn latest(server: &Server, version: &str, agent: Option<serde_json::Value>) -> Vec<u8> {
+    let mut value = json!({
+        "version": version,
+        "notes": "Notes.",
+        "pub_date": "2026-10-06T10:00:00Z",
+        "platforms": { "windows-x86_64": { "signature": "c2ln", "url": server.url("/Hearth.exe").to_string() } }
+    });
+    if let Some(agent) = agent {
+        value["agent"] = agent;
+    }
+    value.to_string().into_bytes()
+}
+
+fn feed_of(app: &tauri::App<MockRuntime>, server: &Server, path: &str) -> TauriFeed<MockRuntime> {
     TauriFeed::with_endpoint(
         app.handle().clone(),
-        server.url("/latest.json"),
+        server.url(path),
         DownloadPolicy::local_for_tests(server.port),
     )
-    .with_agent_endpoint(server.url(path))
-}
-
-/// Avec la règle de production sur les redirections : HTTPS à chaque saut.
-fn strict_feed(
-    app: &tauri::App<MockRuntime>,
-    server: &Server,
-    path: &str,
-) -> TauriFeed<MockRuntime> {
-    TauriFeed::with_endpoint(
-        app.handle().clone(),
-        server.url("/latest.json"),
-        DownloadPolicy::local_strict_redirects_for_tests(server.port),
-    )
-    .with_agent_endpoint(server.url(path))
 }
 
 #[tokio::test]
-async fn the_real_adapter_reads_the_agent_file_of_the_release() {
+async fn one_request_gives_the_client_announcement_and_the_agent_section() {
     let server = Server::start().await;
-    server.serve("/agent.json", Reply::Ok(manifest()));
+    server.serve(
+        "/latest.json",
+        Reply::Ok(latest(&server, "1.1.0", Some(agent_section()))),
+    );
     let app = app();
-    let found = feed(&app, &server, "/agent.json")
-        .check_agent()
+    let feed = feed_of(&app, &server, "/latest.json");
+    let announced = feed
+        .check()
         .await
-        .unwrap();
-    assert_eq!(found, Some(candidate()));
-    assert_eq!(server.hits(), 1, "une seule requête");
-}
-
-#[tokio::test]
-async fn a_release_without_the_agent_file_is_not_a_failure_and_other_statuses_are() {
-    let server = Server::start().await;
-    let app = app();
-    // 404 : rien à proposer.
+        .unwrap()
+        .expect("une version du client plus récente");
+    assert_eq!(announced.version, "1.1.0");
+    assert_eq!(feed.check_agent().await.unwrap(), Some(candidate()));
     assert_eq!(
-        feed(&app, &server, "/absent.json")
-            .check_agent()
-            .await
-            .unwrap(),
-        None
-    );
-    // 500 : une erreur (la cible précédente est gardée par le service).
-    server.serve("/broken.json", Reply::Status(500));
-    assert!(
-        feed(&app, &server, "/broken.json")
-            .check_agent()
-            .await
-            .is_err()
-    );
-    // Illisible, ou trop gros : une erreur, jamais une cible.
-    server.serve("/junk.json", Reply::Ok(b"pas du json".to_vec()));
-    assert!(
-        feed(&app, &server, "/junk.json")
-            .check_agent()
-            .await
-            .is_err()
-    );
-    server.serve("/huge.json", Reply::Ok(vec![b' '; MANIFEST_MAX_BYTES + 10]));
-    assert!(
-        feed(&app, &server, "/huge.json")
-            .check_agent()
-            .await
-            .is_err()
-    );
-    // Le manifeste du client seul (sans entrée de l'agent) : rien à proposer.
-    server.serve(
-        "/client-only.json",
-        Reply::Ok(
-            json!({ "version": "0.2.0", "platforms": { "windows-x86_64": { "url": "https://x", "signature": "s" } } })
-                .to_string()
-                .into_bytes(),
-        ),
-    );
-    assert_eq!(
-        feed(&app, &server, "/client-only.json")
-            .check_agent()
-            .await
-            .unwrap(),
-        None
+        server.hits(),
+        1,
+        "UNE requête par vérification : le client ET l'agent"
     );
 }
 
 #[tokio::test]
-async fn without_a_configured_address_no_request_is_ever_made() {
+async fn a_client_that_is_up_to_date_is_never_proposed_a_version_but_the_agent_section_is_read() {
+    // Le comparateur du greffon rend le manifeste toujours ; le client, lui, ignore une version égale
+    // ou inférieure (jamais de mise à jour ni d'annonce à tort, jamais de rétrogradation).
+    for version in ["0.1.0", "0.0.9", "0.0.1"] {
+        let server = Server::start().await;
+        server.serve(
+            "/latest.json",
+            Reply::Ok(latest(&server, version, Some(agent_section()))),
+        );
+        let app = app();
+        let feed = feed_of(&app, &server, "/latest.json");
+        assert!(feed.check().await.unwrap().is_none(), "client en {version}");
+        assert_eq!(
+            feed.check_agent().await.unwrap(),
+            Some(candidate()),
+            "client en {version}"
+        );
+        assert_eq!(server.hits(), 1);
+        // Rien n'est retenu pour être téléchargé.
+        let mut progress = |_: u64, _: Option<u64>| {};
+        assert!(matches!(
+            feed.download(version, &mut progress).await,
+            Err(DownloadError::NotStaged)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn a_manifest_without_an_agent_section_offers_nothing_for_the_agent() {
     let server = Server::start().await;
+    server.serve("/latest.json", Reply::Ok(latest(&server, "1.1.0", None)));
     let app = app();
-    let feed = TauriFeed::with_endpoint(
-        app.handle().clone(),
-        server.url("/latest.json"),
-        DownloadPolicy::local_strict_redirects_for_tests(server.port),
-    );
+    let feed = feed_of(&app, &server, "/latest.json");
+    assert!(feed.check().await.unwrap().is_some());
     assert_eq!(feed.check_agent().await.unwrap(), None);
-    assert_eq!(server.hits(), 0);
 }
 
 #[tokio::test]
-async fn redirections_are_bounded_and_must_stay_https_like_the_client_feed() {
+async fn a_broken_or_oversized_agent_section_is_an_error_that_does_not_touch_the_client_check() {
+    for section in [
+        json!({ "version": "0.2.0", "platforms": { AGENT_PLATFORM: { "url": URL } } }),
+        json!({ "version": "0.2.0", "padding": "x".repeat(MANIFEST_MAX_BYTES + 1) }),
+    ] {
+        let server = Server::start().await;
+        server.serve(
+            "/latest.json",
+            Reply::Ok(latest(&server, "1.1.0", Some(section))),
+        );
+        let app = app();
+        let feed = feed_of(&app, &server, "/latest.json");
+        assert!(
+            feed.check().await.unwrap().is_some(),
+            "le client est annoncé quand même"
+        );
+        assert!(feed.check_agent().await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn a_failed_client_check_leaves_no_agent_section_to_use() {
     let server = Server::start().await;
+    server.serve("/latest.json", Reply::Status(500));
     let app = app();
-    // MAX_REDIRECTS sauts : suivis jusqu'au fichier ; un de plus : refusé.
-    let chain = |start: &str, n: usize| {
-        for step in 0..n {
-            let from = if step == 0 {
-                start.to_owned()
-            } else {
-                format!("{start}~{step}")
-            };
-            let to = if step + 1 == n {
-                "/agent.json".to_owned()
-            } else {
-                format!("{start}~{}", step + 1)
-            };
-            server.serve(&from, Reply::Redirect(server.url(&to).to_string()));
-        }
-    };
-    server.serve("/agent.json", Reply::Ok(manifest()));
-    chain("/ok", MAX_REDIRECTS);
-    assert_eq!(
-        feed(&app, &server, "/ok").check_agent().await.unwrap(),
-        Some(candidate())
-    );
-    chain("/too-many", MAX_REDIRECTS + 1);
+    let feed = feed_of(&app, &server, "/latest.json");
+    assert!(feed.check().await.is_err());
     assert!(
-        feed(&app, &server, "/too-many")
-            .check_agent()
-            .await
-            .is_err()
+        feed.check_agent().await.is_err(),
+        "erreur : la cible précédente est gardée"
     );
-    // Un saut vers `http://` est refusé par la politique de production sur les redirections.
+    // Et une lecture de l'agent avant toute vérification n'invente rien non plus.
+    let fresh = feed_of(&app, &server, "/latest.json");
+    assert!(fresh.check_agent().await.is_err());
+}
+
+#[tokio::test]
+async fn the_agent_section_of_an_older_manifest_is_not_reused_after_a_new_check() {
+    let server = Server::start().await;
     server.serve(
-        "/to-http",
-        Reply::Redirect(server.url("/agent.json").to_string()),
+        "/latest.json",
+        Reply::Ok(latest(&server, "1.1.0", Some(agent_section()))),
     );
-    assert!(
-        strict_feed(&app, &server, "/to-http")
-            .check_agent()
-            .await
-            .is_err(),
-        "redirection en clair refusée"
-    );
+    let app = app();
+    let feed = feed_of(&app, &server, "/latest.json");
+    feed.check().await.unwrap();
+    assert!(feed.check_agent().await.unwrap().is_some());
+    server.serve("/latest.json", Reply::Ok(latest(&server, "1.1.0", None)));
+    feed.check().await.unwrap();
+    assert_eq!(feed.check_agent().await.unwrap(), None);
 }
 
 // ---- le VRAI code de publication (`cargo xtask agent-manifest`) lu par le client -------------------
@@ -609,9 +709,9 @@ async fn redirections_are_bounded_and_must_stay_https_like_the_client_feed() {
 #[path = "../../../../xtask/src/release_core.rs"]
 mod release_core;
 
-#[test]
-fn the_manifest_made_by_the_publication_code_is_read_and_retained_by_the_client() {
-    use hearth_desktop_lib::agent_update::domain::{parse_manifest, validate_target};
+#[tokio::test]
+async fn the_section_made_by_the_publication_code_is_read_and_retained_by_the_client() {
+    use hearth_desktop_lib::agent_update::domain::validate_target;
     let keys = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
     let public = keys.pk.to_box().unwrap().to_string();
     let binary = b"hearth-agent 0.2.0";
@@ -627,24 +727,32 @@ fn the_manifest_made_by_the_publication_code_is_read_and_retained_by_the_client(
     // Ce que l'agent exigera : la signature se vérifie contre SA clé.
     release_core::verify_agent_signature(&public, &signature, binary).unwrap();
     let sha = "ab".repeat(32);
-    let text = release_core::agent_manifest(
+    let section = release_core::agent_section(
         "https://github.com/Voikyrioh/hearth/releases/download/",
         "0.2.0",
         &signature,
         &sha,
         URL,
-        "2026-10-06T10:00:00Z",
     )
     .unwrap();
-    // Le client lit ce même fichier, et retient la cible avec la politique de production.
-    let candidate = parse_manifest(text.as_bytes())
+    // Le manifeste du client (celui de `client-manifest`), puis la section ajoutée : UN seul fichier.
+    let server = Server::start().await;
+    let client = String::from_utf8(latest(&server, "1.1.0", None)).unwrap();
+    let merged = release_core::add_agent_section(&client, section).unwrap();
+    server.serve("/latest.json", Reply::Ok(merged.into_bytes()));
+    let app = app();
+    let feed = feed_of(&app, &server, "/latest.json");
+    assert_eq!(feed.check().await.unwrap().unwrap().version, "1.1.0");
+    let found = feed
+        .check_agent()
+        .await
         .unwrap()
-        .expect("entrée de l'agent");
-    let target = validate_target(&candidate, &DownloadPolicy::github_releases()).unwrap();
+        .expect("section de l'agent");
+    let target = validate_target(&found, &DownloadPolicy::github_releases()).unwrap();
     assert_eq!(target.version().to_string(), "0.2.0");
     assert_eq!(target.url().as_str(), URL);
     assert_eq!(target.sha256(), sha);
     assert!(target.signature().starts_with("untrusted comment:"));
-    // L'entrée du manifeste du client n'est pas celle de l'agent : les deux fichiers ne se mélangent pas.
+    assert_eq!(server.hits(), 1);
     assert_ne!(release_core::AGENT_TARGET, release_core::TARGET);
 }

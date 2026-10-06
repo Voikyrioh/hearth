@@ -21,9 +21,7 @@ use url::Url;
 
 use super::domain::{Candidate, DownloadPolicy, FEED_URL};
 use super::ports::{DownloadError, Feed, FeedError, VerifiedInstaller};
-use crate::agent_update::domain::{
-    AGENT_FEED_URL, AgentCandidate, MANIFEST_MAX_BYTES, parse_manifest,
-};
+use crate::agent_update::domain::{AgentCandidate, parse_agent_section};
 
 /// La clé publique de signature (fichier `.pub` de minisign), embarquée à la compilation. Aucune
 /// clé ne se lit sur le disque de la machine : qui peut écrire un fichier sur le PC ne peut pas
@@ -90,8 +88,8 @@ pub fn plugin_with_key<R: Runtime>(
 pub struct TauriFeed<R: Runtime> {
     app: AppHandle<R>,
     endpoint: Url,
-    /// Le fichier de cibles de l'agent ; absent : aucune lecture (tests du greffon seul).
-    agent_endpoint: Option<Url>,
+    /// La section de l'agent du DERNIER `latest.json` lu par `check` (ADR-0021) : aucune requête de plus.
+    agent_section: Mutex<Option<Result<Option<AgentCandidate>, FeedError>>>,
     policy: DownloadPolicy,
     check_timeout: Duration,
     /// La dernière annonce dont la source est permise : celle que `download` utilise.
@@ -101,15 +99,7 @@ pub struct TauriFeed<R: Runtime> {
 impl<R: Runtime> TauriFeed<R> {
     /// Production : le flux des GitHub Releases du dépôt public, fixé à la compilation.
     pub fn production(app: AppHandle<R>, policy: DownloadPolicy) -> Result<Self, url::ParseError> {
-        Ok(Self::with_endpoint(app, Url::parse(FEED_URL)?, policy)
-            .with_agent_endpoint(Url::parse(AGENT_FEED_URL)?))
-    }
-
-    /// Adresse du fichier de cibles de l'agent (production : constante ; tests : serveur local).
-    #[doc(hidden)]
-    pub fn with_agent_endpoint(mut self, endpoint: Url) -> Self {
-        self.agent_endpoint = Some(endpoint);
-        self
+        Ok(Self::with_endpoint(app, Url::parse(FEED_URL)?, policy))
     }
 
     /// Flux et source choisis (tests contre un serveur de versions local).
@@ -118,7 +108,7 @@ impl<R: Runtime> TauriFeed<R> {
         Self {
             app,
             endpoint,
-            agent_endpoint: None,
+            agent_section: Mutex::new(None),
             policy,
             check_timeout: CHECK_TIMEOUT,
             staged: Mutex::new(None),
@@ -143,13 +133,6 @@ impl<R: Runtime> TauriFeed<R> {
     fn stage(&self, update: Option<Update>) {
         *self.staged.lock().unwrap_or_else(PoisonError::into_inner) = update;
     }
-}
-
-/// `reqwest` (fonction `rustls-no-provider`) n'installe aucun fournisseur de cryptographie : celui
-/// du processus est `ring`, le seul compilé (ni `aws-lc` ni OpenSSL, ADR-0011). Déjà installé par un
-/// autre composant : rien à faire.
-fn install_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 fn same_version(a: &str, b: &str) -> bool {
@@ -258,6 +241,10 @@ fn harden(
 #[async_trait]
 impl<R: Runtime> Feed for TauriFeed<R> {
     async fn check(&self) -> Result<Option<Candidate>, FeedError> {
+        *self
+            .agent_section
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
         let redirected = Arc::new(AtomicBool::new(false));
         let updater = self
             .app
@@ -266,16 +253,40 @@ impl<R: Runtime> Feed for TauriFeed<R> {
             .map_err(|error| feed_error(error, false))?
             .timeout(self.check_timeout)
             .configure_client(harden(&self.policy, redirected.clone()))
+            // Le greffon ne rend le manifeste (`raw_json`, avec la section de l'agent) que pour une version
+            // qu'il juge à installer : on lui demande de le rendre TOUJOURS, et la comparaison des versions
+            // se fait ici, plus bas (jamais de mise à jour ni d'annonce du CLIENT à tort, ADR-0021).
+            .version_comparator(|_current, _remote| true)
             .build()
             .map_err(|error| feed_error(error, false))?;
-        let Some(mut update) = updater
+        let outcome = updater
             .check()
             .await
-            .map_err(|error| feed_error(error, redirected.load(Ordering::SeqCst)))?
-        else {
+            .map_err(|error| feed_error(error, redirected.load(Ordering::SeqCst)))?;
+        let Some(mut update) = outcome else {
             self.stage(None);
             return Ok(None);
         };
+        // La section de l'agent, lue dans le MÊME manifeste (une seule requête par vérification).
+        *self
+            .agent_section
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(
+            parse_agent_section(&update.raw_json)
+                .map_err(|error| FeedError::failed(error.to_string())),
+        );
+        // Version égale ou inférieure à celle du client : ignorée, comme le greffon seul le faisait.
+        let newer = match (
+            semver::Version::parse(update.version.trim_start_matches('v')),
+            semver::Version::parse(&update.current_version),
+        ) {
+            (Ok(remote), Ok(current)) => remote > current,
+            _ => false,
+        };
+        if !newer {
+            self.stage(None);
+            return Ok(None);
+        }
         update.timeout = Some(DOWNLOAD_TIMEOUT);
         let candidate = Candidate {
             version: update.version.clone(),
@@ -289,44 +300,12 @@ impl<R: Runtime> Feed for TauriFeed<R> {
     }
 
     async fn check_agent(&self) -> Result<Option<AgentCandidate>, FeedError> {
-        let Some(endpoint) = self.agent_endpoint.clone() else {
-            return Ok(None);
-        };
-        install_crypto_provider();
-        // Mêmes règles que le flux du client : HTTPS partout, redirections bornées et en HTTPS.
-        let client =
-            harden(&self.policy, Arc::new(AtomicBool::new(false)))(reqwest::Client::builder())
-                .timeout(self.check_timeout)
-                .build()
-                .map_err(|error| FeedError::failed(error.to_string()))?;
-        let mut response = client
-            .get(endpoint)
-            .send()
-            .await
-            .map_err(|error| FeedError::failed(error.to_string()))?;
-        // Aucun fichier de cibles dans cette release : rien à proposer, pas une panne.
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        if !response.status().is_success() {
-            return Err(FeedError::failed(format!(
-                "fichier de cibles : réponse {}",
-                response.status()
-            )));
-        }
-        // Lu par morceaux, borné : un serveur qui n'arrête pas d'envoyer ne remplit pas la mémoire.
-        let mut body = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|error| FeedError::failed(error.to_string()))?
-        {
-            if body.len() + chunk.len() > MANIFEST_MAX_BYTES {
-                return Err(FeedError::failed("fichier de cibles trop volumineux"));
-            }
-            body.extend_from_slice(&chunk);
-        }
-        parse_manifest(&body).map_err(|error| FeedError::failed(error.to_string()))
+        // Aucune requête : la section vient du manifeste que `check` vient de lire.
+        self.agent_section
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| Err(FeedError::failed("manifeste non lu")))
     }
 
     async fn download(

@@ -11,7 +11,7 @@
 //! - `br-check` : toute référence `BR-…` du code et des docs a sa fiche.
 //! - `client-release-check`, `client-manifest` : publication du client (HRT-16, runbook
 //!   `publier-une-version-du-client`).
-//! - `agent-manifest` : fichier de cibles de l'agent `agent.json`, signature vérifiée contre la clé
+//! - `agent-manifest` : section `agent` du `latest.json`, signature vérifiée contre la clé
 //!   embarquée dans l'agent (HRT-17, ADR-0021, runbook `mettre-a-jour-agent`).
 //!
 //! Aucune commande n'est lancée par un interpréteur avec une chaîne construite : les programmes
@@ -39,7 +39,7 @@ fn main() -> ExitCode {
   shellcheck    contrôle les scripts de deploy/ avec shellcheck (en conteneur)\n  br-check      toute référence BR-… du code et des docs a sa fiche
   client-release-check  refuse la clé de développement et une version qui n'est pas celle du dépôt
   client-version        la version du dépôt (seule source du numéro publié)\n  client-sign           signe l'installateur avec la clé des variables d'environnement (version dans la signature)\n  client-manifest       vérifie la signature puis écrit latest.json (manifeste du greffon de mise à jour du client)
-  agent-manifest        vérifie la signature de l'agent contre sa clé embarquée puis écrit agent.json (cible de la mise à jour de l'agent)"
+  agent-manifest        vérifie la signature de l'agent contre sa clé embarquée puis ajoute la section `agent` à latest.json (cible de la mise à jour de l'agent)"
             );
             return ExitCode::SUCCESS;
         }

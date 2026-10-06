@@ -201,7 +201,7 @@ struct World {
 async fn world(allowed: bool, gated: bool) -> World {
     let rig = Arc::new(rig(allowed, gated));
     let factory = rig.clone();
-    let agent = TestAgent::install_with(Some(Arc::new(move || factory.updating()))).await;
+    let agent = TestAgent::install_with(Some(update_rig::factory(factory))).await;
     agent.create_account("marie", Role::Admin).await;
     agent.create_account("lucas", Role::ReadOnly).await;
     World { agent, rig }
@@ -421,7 +421,13 @@ fn a_result_is_recent_for_a_day_and_an_unreadable_or_future_date_is_not() {
     assert!(service::is_recent(&at(23 * 3600), now));
     assert!(service::is_recent(&at(24 * 3600), now));
     assert!(!service::is_recent(&at(24 * 3600 + 1), now));
-    assert!(!service::is_recent(&at(-5), now), "dans le futur");
+    // Une date un peu dans le futur est celle d'un serveur en avance : récente (tolérance explicite,
+    // `a_server_clock_a_little_ahead_or_behind…`) ; au-delà de la tolérance, non.
+    assert!(service::is_recent(&at(-5), now), "serveur en avance de 5 s");
+    assert!(
+        !service::is_recent(&at(-(2 * 24 * 3600)), now),
+        "très loin dans le futur"
+    );
     assert!(!service::is_recent("hier", now));
     assert!(!service::is_recent("", now));
 }
@@ -497,4 +503,42 @@ async fn an_update_request_cut_before_its_answer_is_unknown_and_never_replayed()
     .await;
     assert!(world.rig.downloader.fetched.lock().unwrap().is_empty());
     assert!(!client.view(Some(&target)).await.in_progress);
+}
+
+#[test]
+fn a_server_clock_a_little_ahead_or_behind_never_loses_a_fresh_result() {
+    // Horloges injectées : `at` est la date du SERVEUR, `now` celle du PC. Un serveur maison est
+    // souvent en avance de quelques secondes ou minutes sur un PC Windows.
+    let now = 1_790_000_000;
+    let at = |server_minus_pc: i64| {
+        time::OffsetDateTime::from_unix_timestamp(now + server_minus_pc)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
+    };
+    // Serveur en avance de 1 s et de 5 min : le résultat vient d'être écrit, il est récent.
+    assert!(service::is_recent(&at(1), now), "serveur en avance de 1 s");
+    assert!(
+        service::is_recent(&at(300), now),
+        "serveur en avance de 5 min"
+    );
+    // Serveur en retard de 5 min : le résultat a 5 minutes pour le PC.
+    assert!(
+        service::is_recent(&at(-300), now),
+        "serveur en retard de 5 min"
+    );
+    // Au-delà de la tolérance (1 h) sur le futur, ou de 24 h sur le passé : pas « récent » (une ligne
+    // d'historique) ; l'ANNONCE, elle, ne dépend pas de cette comparaison (store de l'interface).
+    assert!(service::is_recent(
+        &at(service::FUTURE_TOLERANCE_SECONDS),
+        now
+    ));
+    assert!(!service::is_recent(
+        &at(service::FUTURE_TOLERANCE_SECONDS + 1),
+        now
+    ));
+    assert!(
+        !service::is_recent(&at(2 * 24 * 3600), now),
+        "serveur en avance de 2 jours"
+    );
 }

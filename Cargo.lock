@@ -2119,7 +2119,6 @@ dependencies = [
  "minisign",
  "reqwest",
  "rfd",
- "rustls",
  "semver",
  "serde",
  "serde_json",

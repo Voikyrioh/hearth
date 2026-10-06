@@ -87,23 +87,26 @@ Un client qui ne connaît pas ce type de trame l'ignore. Le client actuel la lit
 
 Ce que le client fait de ce contrat, pour qui écrit un autre client ou diagnostique :
 
-- **La cible vient du client, jamais de l'interface** : le client lit `agent.json` dans la dernière release publiée de `Voikyrioh/hearth` (`https://github.com/Voikyrioh/hearth/releases/latest/download/agent.json`), dans la même tentative que son propre flux de versions (au plus une tentative automatique par 24 h, ADR-0017), et ne transmet à `POST /agent/update` que ce qu'il y a lu après l'avoir validé (version `X.Y.Z` plus récente que `current`, adresse HTTPS publique des releases du dépôt, signature, somme). Format du fichier :
+- **La cible vient du client, jamais de l'interface** : le client lit la section `agent` du `latest.json` de la dernière release publiée de `Voikyrioh/hearth`, dans la MÊME requête que son propre flux de versions (une vérification = une requête, au plus une par 24 h, ADR-0017 et ADR-0021), et ne transmet à `POST /agent/update` que ce qu'il y a lu après l'avoir validé (version `X.Y.Z` plus récente que `current`, adresse HTTPS publique des releases du dépôt, signature, somme). Section du manifeste :
 
 ```json
 {
-  "version": "0.2.0",
-  "pub_date": "2026-10-06T10:00:00Z",
-  "platforms": {
-    "linux-x86_64": {
-      "url": "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64",
-      "signature": "untrusted comment: …\nRUQ…\ntrusted comment: …\n…",
-      "sha256": "ab12…(64 caractères hexadécimaux)"
+  "version": "1.2.0",
+  "platforms": { "windows-x86_64": { "url": "…", "signature": "…" } },
+  "agent": {
+    "version": "0.2.0",
+    "platforms": {
+      "linux-x86_64": {
+        "url": "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64",
+        "signature": "untrusted comment: …\nRUQ…\ntrusted comment: …\n…",
+        "sha256": "ab12…(64 caractères hexadécimaux)"
+      }
     }
   }
 }
 ```
 
-  Fabriqué par `cargo xtask agent-manifest` (qui vérifie la signature contre la clé embarquée dans l'agent). Absent (404) ou sans entrée `linux-x86_64` : rien n'est proposé.
+  Ajoutée par `cargo xtask agent-manifest` (qui vérifie la signature contre la clé embarquée dans l'agent). Absente, ou sans entrée `linux-x86_64` : rien n'est proposé.
 - **Lectures** : `GET /agent/update` puis `GET /agent/update/last` à chaque connexion du lien (BR-UPDATE-017) ; `last.version_unknown` se lit « version inconnue » (aucun numéro affiché). Sujet `update` abonné à chaque connexion : l'état courant arrive d'abord.
 - **Action** : `POST /agent/update` par l'action typée du client (clé d'opération `Idempotency-Key`, résultat inconnu à la coupure, jamais rejouée). Refus lus par leur code : `FORBIDDEN_ROLE` (échec « rôle »), `MANAGED_INSTALL`, `OPERATION_IN_PROGRESS`, `BAD_SIGNATURE`, `VALIDATION_ERROR` ; le texte du message de l'agent n'est jamais affiché.
 - **Coupure attendue** : après l'étape `restart`, la fermeture du flux (code 1001) est une coupure attendue pendant 2 minutes (BR-UPDATE-014).

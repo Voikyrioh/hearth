@@ -16,13 +16,9 @@ use url::{Host, Url};
 
 use crate::update::domain::{DownloadPolicy, SIGNATURE_MAX_LEN};
 
-/// Adresse du fichier de cibles de l'agent : fixée à la compilation, jamais saisie (ADR-0021). Le
-/// même dépôt public que le flux du client, la même release (`releases/latest`).
-pub const AGENT_FEED_URL: &str =
-    "https://github.com/Voikyrioh/hearth/releases/latest/download/agent.json";
 /// Entrée du fichier de cibles : l'agent est un binaire statique Linux x86_64 (ADR-0003).
 pub const AGENT_PLATFORM: &str = "linux-x86_64";
-/// Taille maximale du fichier de cibles : quelques centaines d'octets en pratique.
+/// Taille maximale de la section de l'agent : quelques centaines d'octets en pratique.
 pub const MANIFEST_MAX_BYTES: usize = 64 * 1024;
 /// Longueur maximale de l'adresse du binaire (celle que l'agent accepte).
 pub const URL_MAX_LEN: usize = 2048;
@@ -259,15 +255,20 @@ pub fn is_newer(current: &str, target: &AgentTarget) -> bool {
         .is_ok_and(|current| current.pre.is_empty() && target.version > current)
 }
 
-/// Ce que lit le service du manifeste des cibles (`agent.json`) : JSON ordinaire, une entrée par
-/// plateforme. Un fichier absent ou sans l'entrée de l'agent n'est pas une erreur : rien à proposer.
-pub fn parse_manifest(bytes: &[u8]) -> Result<Option<AgentCandidate>, ManifestError> {
-    if bytes.len() > MANIFEST_MAX_BYTES {
+/// La section `agent` du manifeste `latest.json` (ADR-0021) : `{ "version", "platforms": { "linux-x86_64":
+/// { "url", "signature", "sha256" } } }`. Absente : rien à proposer (pas une erreur). Présente mais
+/// incomplète ou trop volumineuse : une erreur (la cible précédente est gardée). Le reste du manifeste
+/// (celui du client) n'est pas lu ici.
+pub fn parse_agent_section(
+    manifest: &serde_json::Value,
+) -> Result<Option<AgentCandidate>, ManifestError> {
+    let Some(section) = manifest.get("agent") else {
+        return Ok(None);
+    };
+    if section.to_string().len() > MANIFEST_MAX_BYTES {
         return Err(ManifestError::TooLarge);
     }
-    let value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|_| ManifestError::Unreadable)?;
-    let Some(entry) = value
+    let Some(entry) = section
         .get("platforms")
         .and_then(|platforms| platforms.get(AGENT_PLATFORM))
     else {
@@ -280,7 +281,7 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Option<AgentCandidate>, ManifestEr
             .map(str::to_owned)
     };
     match (
-        text(&value, "version"),
+        text(section, "version"),
         text(entry, "url"),
         text(entry, "signature"),
         text(entry, "sha256"),
@@ -297,8 +298,8 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Option<AgentCandidate>, ManifestEr
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ManifestError {
-    #[error("fichier de cibles trop volumineux")]
+    #[error("section de l'agent trop volumineuse")]
     TooLarge,
-    #[error("fichier de cibles illisible")]
+    #[error("section de l'agent illisible")]
     Unreadable,
 }

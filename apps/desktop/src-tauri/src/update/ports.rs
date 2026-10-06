@@ -27,11 +27,11 @@ pub trait Feed: Send + Sync {
     /// Interroge le flux. `Ok(None)` : le flux ne propose rien de plus récent.
     async fn check(&self) -> Result<Option<Candidate>, FeedError>;
 
-    /// Lit le fichier de cibles de l'AGENT (`agent.json`, même release que le flux du client,
-    /// ADR-0021). `Ok(None)` : pas de fichier, ou sans entrée pour l'agent : rien à proposer. Une
-    /// erreur laisse la cible précédente en place. Une seule requête, faite par le service juste
-    /// après celle du client, dans la MÊME tentative (jamais seule, jamais hors de la règle des
-    /// 24 h). Par défaut : rien (les faux ports des tests du client n'en font pas).
+    /// La section `agent` du `latest.json` que `check` vient de lire (ADR-0021) : AUCUNE requête, la
+    /// même que celle du client (une vérification = une requête). `Ok(None)` : pas de section, ou sans
+    /// entrée pour l'agent : rien à proposer. Une erreur (section illisible, vérification du client en
+    /// échec) laisse la cible précédente. Par défaut : une erreur silencieuse (les faux ports des tests
+    /// du client n'en font pas).
     async fn check_agent(&self) -> Result<Option<AgentCandidate>, FeedError> {
         // Non pris en charge : une erreur, qui laisse la cible précédente (jamais « rien à proposer »).
         Err(FeedError::failed(
@@ -55,7 +55,7 @@ pub trait Feed: Send + Sync {
 
 /// Pourquoi une vérification n'a rien donné. Jamais montré à l'interface (BR-UPDATE-007, 008) :
 /// seul le journal en garde la raison.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("{message}")]
 pub struct FeedError {
     /// Aucune requête n'a pu partir (pas de réseau : connexion ou résolution du nom impossible).
