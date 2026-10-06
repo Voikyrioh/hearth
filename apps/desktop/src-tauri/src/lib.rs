@@ -84,6 +84,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             accounts::commands::delete_account,
             agent_update::commands::get_agent_update,
             agent_update::commands::update_agent,
+            agent_update::commands::ack_agent_result,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()

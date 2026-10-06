@@ -35,16 +35,29 @@ pub async fn get_agent_update(
     link: Runtime_<'_>,
     server_id: String,
 ) -> Result<AgentUpdateView, LinkFailure> {
-    let target = app
-        .try_state::<SharedUpdates>()
-        .and_then(|updates| updates.agent_target());
+    let updates = app.try_state::<SharedUpdates>();
+    let target = updates.as_ref().and_then(|updates| updates.agent_target());
+    let seen = updates
+        .as_ref()
+        .and_then(|updates| updates.agent_result_seen(&server_id));
     service::view(
         link.manager(),
         &service::server(&server_id)?,
         target.as_ref(),
         now_seconds(),
+        seen.as_deref(),
     )
     .await
+}
+
+/// Note que le résultat daté `at` de ce serveur a été annoncé : il ne le sera plus, même après un
+/// redémarrage du client (BR-UPDATE-015). Ne parle pas à l'agent.
+#[tauri::command]
+#[specta::specta]
+pub fn ack_agent_result(app: AppHandle, server_id: String, at: String) {
+    if let Some(updates) = app.try_state::<SharedUpdates>() {
+        updates.ack_agent_result(&server_id, &at);
+    }
 }
 
 /// « Mettre à jour l'agent » : l'administrateur a confirmé `version`, celle qu'il a vue. La cible

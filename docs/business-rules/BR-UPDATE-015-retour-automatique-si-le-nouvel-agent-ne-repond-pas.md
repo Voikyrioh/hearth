@@ -26,7 +26,8 @@ Le superviseur (une copie de l'ancien binaire, détachée du service) arrête le
 
 ## Interface (HRT-17, lot interface)
 - Retour arrière : « Mise à jour de l'agent annulée. Le nouvel agent n'a pas répondu. Retour à la version précédente. » (texte de la spécification), ton « annulé » ; la version affichée est celle d'avant et la mise à jour reste proposée. Raison `identity_changed` : texte propre sans inventer la raison pour les autres.
-- Code : `apps/desktop/src/agentUpdate/messages.ts::resultMessage`, `apps/desktop/src/stores/agentUpdates.ts`.
+- Le résultat est annoncé UNE fois (notification discrète + carte), par la RELECTURE et non par l'étape `done` du flux (le nouvel agent l'annonce souvent avant le réabonnement) ; la coquille note sa date `at` (`ack_agent_result`) : pas de réannonce après un redémarrage du client.
+- Code : `apps/desktop/src/agentUpdate/messages.ts::resultMessage`, `apps/desktop/src/stores/agentUpdates.ts::announceIfNew`, `apps/desktop/src-tauri/src/update/service.rs::{agent_result_seen, ack_agent_result}`.
 - Tests : `apps/desktop/src/agentUpdate/messages.test.ts` ; `apps/desktop/src/components/organisms/agentUpdate.test.ts`, `apps/desktop/e2e/agent-update.spec.ts` (« retour arrière »).
 
 ## Cas limites

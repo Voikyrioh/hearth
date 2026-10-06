@@ -34,13 +34,9 @@ interface Entry {
   dismissed: string | null;
 }
 
-/** Une clé qui désigne un résultat, d'où qu'il vienne (le flux en direct ou la lecture). */
-function resultKey(result: {
-  outcome: string;
-  reason: string | null;
-  version: string | null;
-}): string {
-  return [result.outcome, result.reason ?? "", result.version ?? ""].join("|");
+/** Ce qui rend un résultat UNIQUE : sa date `at` (celle de l'agent), avec son issue et sa version. */
+function resultKey(result: UpdateResult): string {
+  return [result.at, result.outcome, result.reason ?? "", result.version ?? ""].join("|");
 }
 
 /**
@@ -56,6 +52,8 @@ function resultKey(result: {
 export const useAgentUpdatesStore = defineStore("agentUpdates", () => {
   const byServer = ref<Record<string, Entry>>({});
   const reads = new Map<string, number>();
+  /** Résultats déjà annoncés pendant cette session (la coquille garde ceux d'avant : `announced`). */
+  const announced = new Set<string>();
   /** Événements reçus par serveur : une lecture commencée avant le dernier ne l'écrase pas. */
   const eventCounts = new Map<string, number>();
   const link = useLinkStore();
@@ -89,20 +87,14 @@ export const useAgentUpdatesStore = defineStore("agentUpdates", () => {
 
   function noticeOf(serverId: string): ResultNotice | null {
     const known = entry(serverId);
-    const fromLast = (result: UpdateResult): ResultNotice => ({
-      key: resultKey(result),
-      tone: resultTone(result),
-      message: resultMessage(result),
-    });
-    let notice: ResultNotice | null = null;
-    const live = known.live;
-    if (live?.step === "done" && live.outcome) {
-      const result = { outcome: live.outcome, reason: live.reason, version: live.version || null };
-      notice = { key: resultKey(result), tone: resultTone(result), message: resultMessage(result) };
-    } else if (known.view?.last?.recent && !runningOf(serverId)) {
-      notice = fromLast(known.view.last);
-    }
-    return notice && notice.key !== known.dismissed ? notice : null;
+    // Le résultat vient de la RELECTURE (le flux n'est qu'un signal) ; en attendant elle, après `done`,
+    // l'ancien résultat n'est pas remontré.
+    const last = known.view?.last;
+    if (!last?.recent || runningOf(serverId) || known.live?.step === "done") return null;
+    const key = resultKey(last);
+    return key === known.dismissed
+      ? null
+      : { key, tone: resultTone(last), message: resultMessage(last) };
   }
 
   /** Lit (ou relit) l'état chez l'agent ; une réponse plus ancienne que la dernière demandée est écartée. */
@@ -124,6 +116,7 @@ export const useAgentUpdatesStore = defineStore("agentUpdates", () => {
         if (live && (live.step !== "done" || view.last)) patch.live = null;
       }
       put(serverId, patch);
+      announceIfNew(serverId, view);
     } catch (error) {
       if (reads.get(serverId) !== ticket) return;
       // Lien coupé ou serveur parti : la dernière lecture reste (la carte le dit, sans alarme).
@@ -137,24 +130,29 @@ export const useAgentUpdatesStore = defineStore("agentUpdates", () => {
     eventCounts.set(serverId, (eventCounts.get(serverId) ?? 0) + 1);
     // Une nouvelle mise à jour (première étape) : le résultat précédent, même identique, se
     // montrera de nouveau à sa fin.
-    const fresh = progress.step === "download" && entry(serverId).live?.step !== "download";
-    put(serverId, { live: progress, ...(fresh ? { dismissed: null } : {}) });
-    if (progress.step === "done") {
-      announce(serverId, progress);
-      // Le dernier résultat et la version de l'agent se relisent (BR-UPDATE-017).
-      void refresh(serverId);
-    }
+    put(serverId, { live: progress });
+    // La fin n'est qu'un SIGNAL : le résultat et la version de l'agent se relisent (BR-UPDATE-017) et
+    // c'est la relecture qui l'annonce, une seule fois (`announceIfNew`).
+    if (progress.step === "done") void refresh(serverId);
   }
 
-  /** Une notification discrète à la fin (l'utilisateur est peut-être ailleurs que dans les réglages). */
-  function announce(serverId: string, progress: UpdateProgress) {
-    if (!progress.outcome) return;
+  /**
+   * Annonce le dernier résultat s'il est récent, fini et jamais annoncé : une notification discrète (l'utilisateur
+   * est peut-être ailleurs que dans les réglages), puis la coquille le note par sa date, pour qu'aucun
+   * relancement du client ne le réannonce. Couvre la relance de l'application pendant la mise à jour et
+   * une mise à jour lancée par un autre administrateur.
+   */
+  function announceIfNew(serverId: string, view: AgentUpdateView) {
+    const last = view.last;
+    if (!last?.recent || last.announced || view.inProgress) return;
+    const key = `${serverId}|${resultKey(last)}`;
+    if (announced.has(key)) return;
+    announced.add(key);
+    void getLinkBridge()
+      .ackAgentResult(serverId, last.at)
+      .catch(() => {});
     const server = servers.byId(serverId);
-    const result = {
-      outcome: progress.outcome,
-      reason: progress.reason,
-      version: progress.version || null,
-    };
+    const result = last;
     const tone = resultTone(result);
     toasts.push({
       kind: tone === "ok" ? "success" : tone === "warn" ? "warn" : "error",
@@ -169,7 +167,6 @@ export const useAgentUpdatesStore = defineStore("agentUpdates", () => {
   function begin(serverId: string, version: string) {
     put(serverId, {
       live: { version, step: "download", percent: null, outcome: null, reason: null },
-      dismissed: null,
     });
   }
 
@@ -222,6 +219,7 @@ export const useAgentUpdatesStore = defineStore("agentUpdates", () => {
     byServer.value = {};
     reads.clear();
     eventCounts.clear();
+    announced.clear();
   }
 
   /** Les serveurs qui ont une mise à jour de l'agent disponible (BR-UPDATE-023). */

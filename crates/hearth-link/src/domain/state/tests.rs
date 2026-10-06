@@ -1094,3 +1094,23 @@ fn the_expected_cut_has_exact_deadlines_and_none_is_left_over() {
     );
     assert_eq!(rig.state(), LinkState::Reconnecting);
 }
+
+#[test]
+fn a_cut_just_before_the_end_of_the_window_never_shows_connected_again_before_reconnecting() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::RestartAnnounced);
+    // Coupure à 119 s de l'annonce, la fenêtre (120 s) expire 1 s plus tard.
+    rig.send_at(129_000, Input::TransportFailed);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    // Les tentatives (une par échéance) recalculent l'état : aucune ne le remet à « Connecté ».
+    rig.run_failing_until(131_000);
+    assert_ne!(
+        rig.state(),
+        LinkState::Connected,
+        "la fin de la fenêtre ne remet pas « Connecté » : la coupure dure déjà"
+    );
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    // Puis une panne ordinaire : « Hors ligne » 30 s après le début de la coupure.
+    rig.run_failing_until(129_000 + 30_000);
+    assert_eq!(rig.state(), LinkState::Offline);
+}

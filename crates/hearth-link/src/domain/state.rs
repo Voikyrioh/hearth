@@ -686,9 +686,13 @@ impl LinkMachine {
     /// Début d'une coupure à `since` : première tentative tout de suite.
     fn lose(&mut self, since: Mono, effects: &mut Vec<Effect>) {
         self.backoff.reset();
+        // Une coupure commencée pendant la fenêtre d'un redémarrage annoncé reste « Reconnexion en
+        // cours » jusqu'à son terme, même si la fenêtre expire dans les 3 secondes qui suivent
+        // (sinon l'état repasserait à « Connecté » avant de redevenir « Reconnexion »).
+        let announced = self.restart_until.is_some_and(|until| since < until);
         self.phase = Phase::Down(Outage {
             since,
-            unproven: false,
+            unproven: announced,
             manual: false,
             step: Step::Reconnect,
             in_flight: true,

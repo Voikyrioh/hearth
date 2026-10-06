@@ -43,17 +43,14 @@ pub async fn view(
     id: &ServerId,
     target: Option<&AgentTarget>,
     now: i64,
+    seen: Option<&str>,
 ) -> Result<AgentUpdateView, LinkFailure> {
+    // `GET /agent/update` porte déjà le dernier résultat (BR-UPDATE-017) : une seule lecture. `seen` :
+    // la date du dernier résultat déjà annoncé à l'utilisateur pour ce serveur.
     let status = manager.agent_update_status(id).await?;
-    // Le dernier résultat est relu à part (c'est lui que le retour du lien veut voir) ; si cette
-    // seconde lecture échoue, celui de l'état fait foi.
-    let last = manager
-        .agent_update_last(id)
-        .await
-        .unwrap_or_else(|_| status.last.clone());
-    let last = last.map(|result| {
+    let last = status.last.as_ref().map(|result| {
         let recent = is_recent(&result.at, now);
-        AgentUpdateResultDto::new(&result, recent)
+        AgentUpdateResultDto::new(result, recent, seen == Some(result.at.as_str()))
     });
     let available = target
         .filter(|target| is_newer(&status.current, target))

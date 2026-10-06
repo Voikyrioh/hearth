@@ -153,7 +153,11 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                     };
                 }
                 // Au plus quelques-uns : un agent bavard ne remplit pas la mémoire d'une tentative.
-                ServerMessage::Update(progress) if updates.len() < MAX_EARLY_UPDATES => {
+                // Les plus récents : seul le dernier dit l'état.
+                ServerMessage::Update(progress) => {
+                    if updates.len() >= MAX_EARLY_UPDATES {
+                        updates.remove(0);
+                    }
                     updates.push(progress);
                 }
                 _ => {}

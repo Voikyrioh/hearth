@@ -59,6 +59,8 @@ export interface UpdateResult {
   at: string;
   /** Moins de 24 h (décidé par la coquille) : annoncé comme un message ; sinon, une ligne d'historique. */
   recent: boolean;
+  /** Déjà annoncé à l'utilisateur (la coquille note la date, même après un redémarrage du client). */
+  announced: boolean;
 }
 
 /** L'état de la mise à jour de l'agent d'un serveur. */

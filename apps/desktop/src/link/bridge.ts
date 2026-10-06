@@ -131,6 +131,8 @@ export interface LinkBridge {
 
   /** L'état de la mise à jour de l'agent : version, installation gérée, en cours, dernier résultat, version disponible. Une lecture : refaite au retour du lien. */
   getAgentUpdate(serverId: string): Promise<AgentUpdateView>;
+  /** Note que le résultat daté `at` a été annoncé : il ne le sera plus, même après un redémarrage du client. Ne parle pas à l'agent. */
+  ackAgentResult(serverId: string, at: string): Promise<void>;
   /** « Mettre à jour l'agent » : une action (clé d'opération, résultat inconnu à la coupure, jamais rejouée). */
   updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome>;
   /** La progression de la mise à jour d'un agent (`agent-update://progress`) ; rien n'est rejoué : l'état se relit (`getAgentUpdate`). */

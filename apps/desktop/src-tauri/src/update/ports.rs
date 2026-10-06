@@ -33,7 +33,10 @@ pub trait Feed: Send + Sync {
     /// après celle du client, dans la MÊME tentative (jamais seule, jamais hors de la règle des
     /// 24 h). Par défaut : rien (les faux ports des tests du client n'en font pas).
     async fn check_agent(&self) -> Result<Option<AgentCandidate>, FeedError> {
-        Ok(None)
+        // Non pris en charge : une erreur, qui laisse la cible précédente (jamais « rien à proposer »).
+        Err(FeedError::failed(
+            "lecture de la cible de l'agent non prise en charge",
+        ))
     }
 
     /// Télécharge l'installateur de `version` (celui de la dernière annonce rendue par `check`) et

@@ -63,7 +63,12 @@ describe("le bouton « Mettre à jour l'agent »", () => {
     expect(wrapper.get("h3").text()).toBe("État du serveur : forge");
     expect(wrapper.get("[data-agent-versions]").text()).toContain("Agent 0.1.0");
     expect(wrapper.get("[data-agent-tag]").text()).toBe("Mise à jour disponible");
-    expect(wrapper.get("[data-agent-available]").text()).toContain("0.2.0");
+    expect(wrapper.get("[data-agent-available]").text()).toBe(
+      "Mise à jour disponible pour l'agent",
+    );
+    expect(wrapper.get("[data-agent-versions]").text()).toBe(
+      "Client indisponible · Agent 0.1.0 · Disponible 0.2.0",
+    );
     const button = update(wrapper);
     expect(button.text()).toBe("Mettre à jour l'agent");
     expect(button.attributes("aria-disabled")).toBeUndefined();
@@ -220,6 +225,7 @@ describe("l'avancement : étapes discrètes, une à la fois", () => {
         reason: null,
         at: new Date().toISOString(),
         recent: true,
+        announced: false,
       },
     });
     bridge.setState("forge", "reconnecting");
@@ -249,7 +255,7 @@ describe("les résultats, avec les textes de la spécification", () => {
     ["failed", "bad_checksum", "crit", "corrompu"],
     ["failed", "bad_signature", "crit", "La signature de la mise à jour de l'agent est refusée."],
     ["failed", "interrupted", "crit", "interrompue"],
-    ["failed", "rollback_failed", "crit", "le retour à la version précédente a échoué"],
+    ["failed", "rollback_failed", "crit", "le retour à la version précédente n'est pas confirmé"],
     ["failed", "unknown", "crit", "n'a pas abouti"],
   ] as const)("%s / %s", async (outcome, reason, tone, text) => {
     const { wrapper, bridge } = await card();
@@ -303,6 +309,7 @@ describe("les résultats, avec les textes de la spécification", () => {
         reason: null,
         at: "2026-09-01T10:00:00Z",
         recent: false,
+        announced: false,
       },
     });
     await store.refresh("forge");

@@ -44,6 +44,7 @@ const COMMANDS: &[&str] = &[
     "delete_account",
     "get_agent_update",
     "update_agent",
+    "ack_agent_result",
 ];
 
 fn main() {

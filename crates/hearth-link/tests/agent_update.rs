@@ -188,6 +188,18 @@ fn impatient_thresholds() -> LinkConfig {
     }
 }
 
+/// Attend qu'une tentative de plus ait atteint le mandataire (un fait), avec une garde qui dit quoi.
+async fn wait_attempt(world: &World, before: u64) {
+    let started = std::time::Instant::now();
+    while world.proxy.accepted() == before {
+        assert!(
+            started.elapsed() < WAIT,
+            "délai dépassé en attendant : une tentative de connexion de plus"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 fn succeeded_record() -> UpdateRecord {
     UpdateRecord {
         version: Some("0.2.0".to_owned()),
@@ -231,9 +243,7 @@ async fn a_restart_announced_by_the_agent_is_an_expected_cut_then_the_result_is_
     for _ in 0..3 {
         let before = world.proxy.accepted();
         world.manager.retry_now(&world.id).unwrap();
-        while world.proxy.accepted() == before {
-            tokio::task::yield_now().await;
-        }
+        wait_attempt(&world, before).await;
     }
     let info = world.state();
     assert_eq!(info.state, LinkState::Reconnecting);
@@ -244,6 +254,17 @@ async fn a_restart_announced_by_the_agent_is_an_expected_cut_then_the_result_is_
     assert_eq!(world.recorder.states_since(cut), [LinkState::Reconnecting]);
 
     // Le nouvel agent revient (résultat écrit par le superviseur, jamais annoncé).
+    // L'ancien agent, arrêté, a encore sa surveillance en tâche de fond (le banc n'a pas de vrai
+    // superviseur) : elle conclut « interrompue » à son rythme. On attend cette conclusion (un fait),
+    // puis le superviseur simulé écrit SON résultat par-dessus, avant le démarrage du nouvel agent.
+    let started = std::time::Instant::now();
+    while rig.host.with(|state| state.last.is_none()) {
+        assert!(
+            started.elapsed() < WAIT,
+            "délai dépassé en attendant : la conclusion de l'ancien agent"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     rig.host.with(|state| state.last = Some(succeeded_record()));
     world.agent.restart().await;
     world.proxy.set_target(world.agent.addr);
@@ -266,7 +287,7 @@ async fn a_restart_announced_by_the_agent_is_an_expected_cut_then_the_result_is_
         .await
         .unwrap()
         .expect("un dernier résultat");
-    assert_eq!(last.outcome, UpdateOutcome::Succeeded);
+    assert_eq!(last.outcome, UpdateOutcome::Succeeded, "{last:?}");
     assert_eq!(last.version, "0.2.0");
     let status = world.manager.agent_update_status(&world.id).await.unwrap();
     assert_eq!(status.last.unwrap().outcome, UpdateOutcome::Succeeded);
@@ -343,4 +364,48 @@ async fn a_read_only_account_sees_an_update_started_by_someone_else_and_every_co
         })
         .await;
     rig.release_gate();
+}
+
+#[tokio::test]
+async fn a_client_that_connects_during_the_restart_step_expects_the_cut_too() {
+    let rig = Arc::new(rig(true, true));
+    let mut world = World::connected(options(&rig, Role::Admin, impatient_thresholds())).await;
+    let mark = world.recorder.mark();
+    start_update(&world, &rig).await;
+    rig.release_gate();
+    world
+        .recorder
+        .wait_for(mark, "le redémarrage annoncé", WAIT, |e| {
+            update_event(e, UpdateStep::Restart)
+        })
+        .await;
+    // Le lien tombe puis revient PENDANT l'étape `restart` : le retour du lien lève l'attente, et
+    // l'agent envoie l'état courant (`restart`) avant l'instantané : il la rouvre.
+    let back = world.recorder.mark();
+    world.proxy.cut();
+    world.proxy.heal();
+    world.manager.retry_now(&world.id).unwrap();
+    world
+        .recorder
+        .wait_state(back, LinkState::Connected, WAIT)
+        .await;
+    let cut = world.recorder.mark();
+    world.agent.stop().await;
+    world
+        .recorder
+        .wait_state(cut, LinkState::Reconnecting, WAIT)
+        .await;
+    let before = world.proxy.accepted();
+    world.manager.retry_now(&world.id).unwrap();
+    wait_attempt(&world, before).await;
+    let info = world.state();
+    assert_eq!(info.state, LinkState::Reconnecting);
+    assert_eq!(info.failed_attempts, 0);
+    assert!(
+        !world
+            .recorder
+            .states_since(cut)
+            .contains(&LinkState::Offline),
+        "jamais « Hors ligne » : la coupure annoncée est attendue"
+    );
 }

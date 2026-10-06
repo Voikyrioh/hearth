@@ -158,7 +158,7 @@ Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent 
 | **RESIL** | Résilience du lien : reconnexion, opérations idempotentes, instantanés, affichage état | 20 | us-lien-resilient |
 | **ACCT** | Gestion comptes : création, suppression, rôles, mots de passe, dernier administrateur | 16 | us-gerer-comptes |
 | **AUDIT** | Journal d'activité : logging, filtrage, recherche FTS5, purge, export CSV | 21 | us-journal-activite |
-| **UPDATE** | Mises à jour agent et client : flux de versions, signatures minisign, superviseur, rollback | 29 (29 livrées : côté client 001 à 010, 020 à 023, 025, 026 ; côté agent 011 à 019, 024, 027 à 029) | us-mises-a-jour |
+| **UPDATE** | Mises à jour agent et client : flux de versions, signatures minisign, superviseur, rollback | 29 (28 livrées et 020 à moitié, tenue pour le client seulement : côté client 001 à 010, 021 à 023, 025, 026 ; côté agent 011 à 019, 024, 027 à 029) | us-mises-a-jour |
 
 ## Comment documenter une règle
 

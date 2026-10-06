@@ -49,11 +49,15 @@ pub fn run_manifest(args: &[String]) -> Result<(), String> {
         .map_err(|error| format!("{signature_path} : {error}"))?;
     let key = std::fs::read_to_string(root()?.join("crates/hearth-agent/update-key.pub"))
         .map_err(|error| format!("update-key.pub de l'agent : {error}"))?;
+    let version = required(args, "--version")?;
+    let cargo = std::fs::read_to_string(root()?.join("Cargo.toml"))
+        .map_err(|error| format!("Cargo.toml : {error}"))?;
+    check_repository_version(&version, &cargo)?;
     // Ce que l'agent refuserait n'est jamais publié : signature vérifiée contre SA clé embarquée.
     verify_agent_signature(&key, &signature, &binary)?;
     let text = agent_manifest(
         DOWNLOAD_PREFIX,
-        &required(args, "--version")?,
+        &version,
         &signature,
         &sha256_hex(&binary),
         &required(args, "--url")?,
@@ -110,6 +114,27 @@ mod tests {
         );
         assert!(verify_agent_signature(&public, &signature, b"autre").is_err());
         assert!(verify_agent_signature(&public, "pas une signature", data).is_err());
+    }
+
+    #[test]
+    fn the_version_must_be_the_one_of_the_repository() {
+        let toml = "[workspace.package]
+version = \"0.2.0\"
+";
+        assert!(check_repository_version("0.2.0", toml).is_ok());
+        assert!(
+            check_repository_version("0.3.0", toml)
+                .unwrap_err()
+                .contains("0.2.0")
+        );
+        assert!(
+            check_repository_version(
+                "0.2.0",
+                "[package]
+"
+            )
+            .is_err()
+        );
     }
 
     #[test]

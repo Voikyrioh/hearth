@@ -96,6 +96,7 @@ export class NullLinkBridge implements LinkBridge {
   async getAgentUpdate(): Promise<never> {
     return this.unavailable();
   }
+  async ackAgentResult(): Promise<void> {}
   async updateAgent(): Promise<never> {
     return this.unavailable();
   }

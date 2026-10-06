@@ -527,11 +527,10 @@ impl Runner {
                 if effects.contains(&Effect::ResolvePending) {
                     self.last_contact = Some(self.deps.clock.wall());
                     self.install_snapshot(*machine, history);
+                    // Comme un message du flux : un client qui se connecte PENDANT l'étape `restart`
+                    // ouvre la fenêtre de coupure attendue (BR-UPDATE-014).
                     for progress in updates {
-                        self.deps.sink.emit(Event::AgentUpdate {
-                            server: self.id.clone(),
-                            progress: Arc::new(progress),
-                        });
+                        self.on_update(progress).await;
                     }
                 } else {
                     // Résultat périmé (déconnexion entre-temps) : on ne le garde pas.

@@ -113,6 +113,11 @@ export const commands = {
 	 *  coupure, jamais rejouée.
 	 */
 	updateAgent: (serverId: string, version: string) => typedError<AgentUpdateOutcome, LinkFailure>(__TAURI_INVOKE("update_agent", { serverId, version })),
+	/**
+	 *  Note que le résultat daté `at` de ce serveur a été annoncé : il ne le sera plus, même après un
+	 *  redémarrage du client (BR-UPDATE-015). Ne parle pas à l'agent.
+	 */
+	ackAgentResult: (serverId: string, at: string) => __TAURI_INVOKE<void>("ack_agent_result", { serverId, at }),
 };
 
 /* Types */
@@ -286,6 +291,11 @@ export type AgentUpdateResultDto = {
 	 *  ancien, il n'est qu'une ligne d'historique. Décidé ici : l'interface ne calcule aucune date.
 	 */
 	recent: boolean,
+	/**
+	 *  Ce résultat (sa date `at`) a déjà été annoncé à l'utilisateur, par ce client ou avant son
+	 *  dernier redémarrage : il ne l'est qu'une fois (`ack_agent_result`).
+	 */
+	announced: boolean,
 };
 
 export type AgentUpdateStepDto = "download" | "verify" | "install" | "restart" | "check" | "done";

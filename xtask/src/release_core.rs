@@ -191,6 +191,21 @@ pub fn manifest_for(
     .map_err(|error| error.to_string())
 }
 
+/// La version demandée doit être celle du dépôt (`[workspace.package]`), seule source du numéro : l'agent
+/// construit par `cargo xtask agent` porte cette version (il la vérifie), et c'est celle qu'il annoncera
+/// en s'exécutant. Un `agent.json` « 0.3.0 » posé sur un binaire 0.2.0 serait refusé (`bad_binary`) par
+/// chaque agent, puis reproposé sans fin.
+pub fn check_repository_version(requested: &str, cargo_toml: &str) -> Result<(), String> {
+    let repository = workspace_version(cargo_toml).ok_or("version du dépôt illisible")?;
+    if requested == repository {
+        Ok(())
+    } else {
+        Err(format!(
+            "la version demandée ({requested}) n'est pas celle du dépôt ({repository}) : l'agent construit porte la version de [workspace.package] dans Cargo.toml"
+        ))
+    }
+}
+
 /// La signature d'un binaire de l'AGENT (faite à la main par `minisign -S`, ADR-0014) : le contenu du
 /// fichier `.minisig`, ou son encodage base64, vérifié contre la clé publique embarquée dans l'agent.
 /// Le commentaire de confiance n'est pas contrôlé : l'agent ne l'exige pas (il contrôle la version en

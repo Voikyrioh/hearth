@@ -303,6 +303,61 @@ async fn the_interface_state_of_the_client_update_carries_nothing_of_the_agent_t
     assert!(!text.contains(&"ab".repeat(32)), "{text}");
 }
 
+#[tokio::test]
+async fn without_a_registered_server_the_agent_file_is_not_read() {
+    let clock = Arc::new(FakeClock(AtomicI64::new(START)));
+    let feed = Arc::new(FakeFeed::default());
+    let service = UpdateService::new(
+        clock,
+        Arc::new(MemStore::default()),
+        feed.clone(),
+        Arc::new(Quiet),
+        DownloadPolicy::github_releases(),
+        "0.1.0",
+    )
+    .with_agent_wanted(|| false);
+    service.check_now().await;
+    assert_eq!(feed.check_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(feed.agent_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn an_announced_result_is_noted_by_its_date_and_survives_a_restart_of_the_client() {
+    let store = Arc::new(MemStore::default());
+    let make = |store: &Arc<MemStore>| {
+        UpdateService::new(
+            Arc::new(FakeClock(AtomicI64::new(START))),
+            store.clone(),
+            Arc::new(FakeFeed::default()),
+            Arc::new(Quiet),
+            DownloadPolicy::github_releases(),
+            "0.1.0",
+        )
+    };
+    let service = make(&store);
+    assert_eq!(service.agent_result_seen("forge"), None);
+    service.ack_agent_result("forge", "2026-10-06T10:00:00Z");
+    // Une date plus ancienne ne remplace pas la plus récente.
+    service.ack_agent_result("forge", "2026-10-05T10:00:00Z");
+    assert_eq!(
+        service.agent_result_seen("forge").as_deref(),
+        Some("2026-10-06T10:00:00Z")
+    );
+    // Le client redémarre : la note est lue sur le disque, par serveur.
+    let again = make(&store);
+    assert_eq!(
+        again.agent_result_seen("forge").as_deref(),
+        Some("2026-10-06T10:00:00Z")
+    );
+    assert_eq!(again.agent_result_seen("salon"), None);
+    // Un résultat suivant (autre date, même issue) est un autre résultat.
+    again.ack_agent_result("forge", "2026-10-07T10:00:00Z");
+    assert_eq!(
+        again.agent_result_seen("forge").as_deref(),
+        Some("2026-10-07T10:00:00Z")
+    );
+}
+
 // ---- l'adaptateur réel contre un serveur local ----------------------------------------------------
 
 #[derive(Clone)]

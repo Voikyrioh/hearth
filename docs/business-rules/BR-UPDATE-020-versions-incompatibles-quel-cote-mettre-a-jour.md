@@ -11,7 +11,7 @@ maj: 2026-10-06
 # BR-UPDATE-020 : Versions incompatibles : le message dit lequel mettre à jour, avec le bouton qui convient
 
 ## Règle
-Quand les versions du client et de l'agent ne sont plus compatibles (BR-CONN-014), un message dit lequel mettre à jour : « Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent. » ou « … Mets à jour le client. ». Client trop ancien : le bouton du bandeau lance la mise à jour du client (HRT-16, `Mettre à jour le client`), ou la cherche (`Chercher une mise à jour du client`) s'il n'y en a pas d'annoncée. Agent trop ancien : le message seul. **Limite** : le client ne peut pas mettre à jour l'agent dans ce cas, car l'agent répond `426 INCOMPATIBLE_VERSION` à toute route sauf `/hello` (BR-CONN-014) : ni session ni demande de mise à jour ne passent ; lever cette limite demande un changement de l'agent (ADR-0021). Le message est aussi celui de l'assistant d'ajout de serveur et de la carte « État du serveur ».
+Quand les versions du client et de l'agent ne sont plus compatibles (BR-CONN-014), un message dit lequel mettre à jour : « Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent. » ou « … Mets à jour le client. ». Client trop ancien : le bouton du bandeau lance la mise à jour du client (HRT-16, `Mettre à jour le client`), ou la cherche (`Chercher une mise à jour du client`) s'il n'y en a pas d'annoncée. Agent trop ancien : le message seul. **Tenue pour le client seulement.** **Limite** : le client ne peut pas mettre à jour l'agent dans ce cas, car l'agent répond `426 INCOMPATIBLE_VERSION` à toute route sauf `/hello` (BR-CONN-014) : ni session ni demande de mise à jour ne passent ; lever cette limite demande un changement de l'agent (ADR-0021). Le message est aussi celui de l'assistant d'ajout de serveur et de la carte « État du serveur ».
 
 ## Application (code)
 - `apps/desktop/src/components/organisms/OfflineBanner.vue` (texte selon `blocked` et le rôle, bouton du client), `apps/desktop/src/layouts/ServerLayout.vue` (`clientAction`).
@@ -22,6 +22,7 @@ Quand les versions du client et de l'agent ne sont plus compatibles (BR-CONN-014
 - `apps/desktop/src/components/organisms/connect.test.ts` (« says which side to update… ») ; `apps/desktop/src/composables/useAddServer.test.ts` ; `apps/desktop/src/components/organisms/agentUpdate.test.ts` (« versions incompatibles ») ; `apps/desktop/e2e/agent-update.spec.ts`.
 
 ## Cas limites
+- **Garde** : ne jamais relever `API_MIN_SUPPORTED` (`hearth-proto/src/version.rs`) tant que l'agent n'accepte pas la demande de mise à jour d'un client plus récent ; sinon le premier changement cassant laisse tous les serveurs à reprendre à la main. Ticket de suivi (canal de mise à jour au contrat gelé, côté agent et liaison) à créer par le coordinateur avant ce relèvement.
 - Aucune mise à jour de l'agent depuis l'application tant que les versions sont incompatibles (limite ci-dessus).
 
 ## Règles liées

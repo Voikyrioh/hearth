@@ -57,6 +57,8 @@ export class SimulatedAgentUpdates {
   private readonly states = new Map<string, SimAgentUpdateState>();
   private readonly listeners = new Set<(event: AgentUpdateEvent) => void>();
   private readonly deps: Deps;
+  /** Dernière date de résultat annoncée, par serveur (la coquille la garde, même après un redémarrage). */
+  readonly acked = new Map<string, string>();
 
   constructor(deps: Deps) {
     this.deps = deps;
@@ -84,7 +86,9 @@ export class SimulatedAgentUpdates {
       managed: state.managed,
       inProgress: state.progress !== null,
       progress: state.progress ? { ...state.progress } : null,
-      last: state.last ? { ...state.last } : null,
+      last: state.last
+        ? { ...state.last, announced: this.acked.get(serverId) === state.last.at }
+        : null,
       available:
         state.target && !state.managed && newer(state.target, state.current)
           ? { version: state.target }
@@ -126,7 +130,12 @@ export class SimulatedAgentUpdates {
   }
 
   /** L'agent conclut : son résultat est écrit, l'étape `done` annoncée, le lien revient. */
-  complete(serverId: string, outcome: UpdateOutcome, reason: UpdateReason | null = null): void {
+  complete(
+    serverId: string,
+    outcome: UpdateOutcome,
+    reason: UpdateReason | null = null,
+    signal = true,
+  ): void {
     const state = this.stateOf(serverId);
     const version = state.progress?.version ?? state.target ?? state.current;
     const previous = state.current;
@@ -138,10 +147,15 @@ export class SimulatedAgentUpdates {
       reason,
       at: new Date(this.deps.now()).toISOString(),
       recent: true,
+      announced: false,
     };
     state.progress = null;
     this.deps.publishLink(serverId, "connected");
-    this.listenersEmit(serverId, { version, step: "done", percent: null, outcome, reason });
+    // `signal` faux : le nouvel agent a annoncé `done` avant que le client se réabonne, aucun signal ne
+    // lui parvient ; le résultat ne se lit que par la relecture.
+    if (signal) {
+      this.listenersEmit(serverId, { version, step: "done", percent: null, outcome, reason });
+    }
   }
 
   /** Le résultat est celui d'une version qui ne se sait pas (trace illisible conclue au démarrage). */
@@ -155,6 +169,7 @@ export class SimulatedAgentUpdates {
       reason,
       at: new Date(this.deps.now()).toISOString(),
       recent: true,
+      announced: false,
     };
     state.progress = null;
     this.listenersEmit(serverId, {

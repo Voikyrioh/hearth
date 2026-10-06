@@ -45,6 +45,7 @@
     "allow-delete-account",
     "allow-get-agent-update",
     "allow-update-agent",
+    "allow-ack-agent-result",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

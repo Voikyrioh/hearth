@@ -46,11 +46,11 @@ const title = computed(() => (route.meta.title ? t(route.meta.title) : ""));
         :last-contact-at="lastContactAt"
         :blocked="event?.blocked ?? null"
         :role="server.role"
-        :client-action="updates.available ? 'install' : 'check'"
+        :client-action="updates.clientAction"
         :client-busy="updates.busy || updates.checking"
         @retry="link.retryNow(server.id)"
         @alert="link.reopenAlert(server.id)"
-        @client="updates.available ? updates.install() : updates.checkNow()"
+        @client="updates.fixClient()"
       />
       <div class="layout__content">
         <!-- Sans session : le formulaire de connexion, au-dessus de la dernière vue (périmée). -->

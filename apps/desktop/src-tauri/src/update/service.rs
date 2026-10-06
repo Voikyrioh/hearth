@@ -43,6 +43,9 @@ pub struct UpdateService {
     sink: Arc<dyn StateSink>,
     policy: DownloadPolicy,
     current_version: String,
+    /// Y a-t-il un serveur dont l'agent peut se mettre à jour ? Sans serveur enregistré, la cible de
+    /// l'agent n'est pas lue (requête inutile).
+    agent_wanted: Box<dyn Fn() -> bool + Send + Sync>,
     inner: Mutex<Inner>,
 }
 
@@ -65,6 +68,7 @@ impl UpdateService {
             sink,
             policy,
             current_version: current_version.to_owned(),
+            agent_wanted: Box::new(|| true),
             inner: Mutex::new(Inner {
                 record,
                 phase: UpdatePhase::Idle,
@@ -74,6 +78,35 @@ impl UpdateService {
                 last_banner,
             }),
         }
+    }
+
+    /// Branche la question « un serveur est-il enregistré ? » (la racine de composition la pose).
+    pub fn with_agent_wanted(mut self, wanted: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        self.agent_wanted = Box::new(wanted);
+        self
+    }
+
+    /// Le dernier résultat annoncé de ce serveur (sa date `at`), s'il y en a un.
+    pub fn agent_result_seen(&self, server: &str) -> Option<String> {
+        self.lock().record.agent_results_seen.get(server).cloned()
+    }
+
+    /// Note que le résultat daté `at` de ce serveur a été annoncé : il ne le sera plus (même après un
+    /// redémarrage du client). Une date plus ancienne que celle déjà notée ne la remplace pas.
+    pub fn ack_agent_result(&self, server: &str, at: &str) {
+        let mut inner = self.lock();
+        let seen = &mut inner.record.agent_results_seen;
+        if seen.get(server).is_some_and(|known| known.as_str() >= at) {
+            return;
+        }
+        if seen.len() >= domain::MAX_SEEN_RESULTS
+            && !seen.contains_key(server)
+            && let Some(oldest) = seen.keys().next().cloned()
+        {
+            seen.remove(&oldest);
+        }
+        seen.insert(server.to_owned(), at.to_owned());
+        self.persist(&inner);
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -171,6 +204,7 @@ impl UpdateService {
         // réseau), rien n'est tenté non plus.
         let agent_outcome = match &outcome {
             Err(error) if error.no_request_sent => None,
+            _ if !(self.agent_wanted)() => None,
             _ => Some(self.feed.check_agent().await),
         };
         let mut inner = self.lock();
@@ -232,7 +266,9 @@ impl UpdateService {
     ) {
         match outcome {
             Err(error) => {
-                tracing::debug!(%error, "cible de l'agent non lue");
+                // `info` : le journal est plafonné à ce niveau, une lecture qui échoue toujours doit s'y voir
+                // (au plus une ligne par tentative, 3 par jour).
+                tracing::info!(%error, "cible de l'agent non lue");
             }
             Ok(None) => record.agent = None,
             Ok(Some(candidate)) => match validate_target(&candidate, &self.policy) {

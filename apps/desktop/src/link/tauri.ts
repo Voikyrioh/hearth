@@ -362,6 +362,10 @@ export class TauriLinkBridge implements LinkBridge {
     return unwrap(await commands.getAgentUpdate(serverId));
   }
 
+  async ackAgentResult(serverId: string, at: string): Promise<void> {
+    await commands.ackAgentResult(serverId, at);
+  }
+
   async updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome> {
     return toAgentUpdateOutcome(unwrap(await commands.updateAgent(serverId, version)));
   }

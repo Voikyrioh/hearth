@@ -470,10 +470,10 @@ export const fr = {
     versions: "Client {client} · Agent {agent}",
     versionsAvailable: "Client {client} · Agent {agent} · Disponible {available}",
     tag: "Mise à jour disponible",
-    availableText: "Une version plus récente de l'agent est disponible : {version}.",
+    availableText: "Mise à jour disponible pour l'agent",
+    runningLost: "Le serveur ne répond plus. L'état de la mise à jour sera relu à son retour.",
     upToDate: "L'agent est à jour.",
     unavailable: "Indisponible tant que le serveur n'est pas connecté.",
-    reading: "Lecture de l'état de l'agent…",
     readFailed: "Impossible de lire l'état de la mise à jour de l'agent.",
     button: "Mettre à jour l'agent",
     readOnlyHint: "Seul un administrateur peut mettre à jour l'agent",
@@ -522,8 +522,8 @@ export const fr = {
     resultInterrupted:
       "La mise à jour de l'agent a été interrompue. Vérifie la version de l'agent.",
     resultRollbackFailed:
-      "Mise à jour de l'agent annulée, mais le retour à la version précédente a échoué. Reprends la main sur le serveur (guide « Mettre à jour l'agent »).",
-    resultFailed: "La mise à jour de l'agent n'a pas abouti. L'agent n'a pas changé.",
+      "La mise à jour de l'agent n'a pas pu être menée à bout, et le retour à la version précédente n'est pas confirmé. Vérifie l'agent sur le serveur (guide « Mettre à jour l'agent »).",
+    resultFailed: "La mise à jour de l'agent n'a pas abouti.",
     dismiss: "Compris",
     historySucceeded: "Dernière mise à jour de l'agent : réussie ({when}).",
     historyRolledBack:
@@ -537,17 +537,11 @@ export const fr = {
       "Aucune version de l'agent n'est connue. Vérifie les mises à jour dans les réglages.",
     refusedTargetChanged: "La version proposée a changé. Relis l'état, puis confirme de nouveau.",
     refusedNotNewer: "L'agent est déjà à jour.",
-    refusedOther: "La mise à jour de l'agent a été refusée. L'agent n'a pas changé.",
+    refusedOther: "La mise à jour de l'agent a été refusée.",
     forbidden: "Seul un administrateur peut mettre à jour l'agent",
     unknownResult:
       "Le lien est tombé avant la réponse du serveur : on ne sait pas si la mise à jour a démarré. Rien n'est relancé.",
     toastDone: "{server} : {message}",
-    incompatibleAgent:
-      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent.",
-    incompatibleAgentReadonly:
-      "Les versions du client et de l'agent ne sont pas compatibles. Demande à un administrateur de mettre à jour l'agent.",
-    incompatibleClient:
-      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour le client.",
   },
   settings: {
     title: "Réglages",

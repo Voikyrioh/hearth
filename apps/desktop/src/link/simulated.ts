@@ -550,6 +550,12 @@ export class SimulatedLinkBridge implements LinkBridge {
     return this.agentUpdates.view(serverId);
   }
 
+  async ackAgentResult(serverId: string, at: string): Promise<void> {
+    this.requireServer(serverId);
+    this.calls.push(`agent-update ack ${at}`);
+    this.agentUpdates.acked.set(serverId, at);
+  }
+
   async updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome> {
     const server = this.requireServer(serverId);
     await this.delay();

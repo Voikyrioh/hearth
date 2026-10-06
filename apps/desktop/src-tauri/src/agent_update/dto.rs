@@ -134,10 +134,13 @@ pub struct AgentUpdateResultDto {
     /// Le résultat date de moins de 24 h : il est annoncé comme un message (BR-UPDATE-017) ; plus
     /// ancien, il n'est qu'une ligne d'historique. Décidé ici : l'interface ne calcule aucune date.
     pub recent: bool,
+    /// Ce résultat (sa date `at`) a déjà été annoncé à l'utilisateur, par ce client ou avant son
+    /// dernier redémarrage : il ne l'est qu'une fois (`ack_agent_result`).
+    pub announced: bool,
 }
 
 impl AgentUpdateResultDto {
-    pub fn new(result: &UpdateResult, recent: bool) -> Self {
+    pub fn new(result: &UpdateResult, recent: bool, announced: bool) -> Self {
         Self {
             version: (!result.version_unknown && !result.version.is_empty())
                 .then(|| result.version.clone()),
@@ -146,6 +149,7 @@ impl AgentUpdateResultDto {
             reason: result.reason.map(Into::into),
             at: result.at.clone(),
             recent,
+            announced,
         }
     }
 }

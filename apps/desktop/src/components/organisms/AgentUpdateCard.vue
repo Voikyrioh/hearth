@@ -57,18 +57,21 @@ const compat = computed(() =>
     : null,
 );
 const compatMessage = computed(() => {
-  if (compat.value === "incompatible_client") return t("agentUpdate.incompatibleClient");
-  return t(
-    isAdmin.value ? "agentUpdate.incompatibleAgent" : "agentUpdate.incompatibleAgentReadonly",
-  );
+  if (compat.value === "incompatible_client") return t("link.clientTooOld");
+  return t(isAdmin.value ? "link.agentTooOld" : "link.agentTooOldReadonly");
 });
 
-const versions = computed(() =>
-  t("agentUpdate.versions", {
+const versions = computed(() => {
+  const params = {
     client: settings.version ?? t("settings.versionUnavailable"),
     agent: view.value?.current ?? t("settings.versionUnavailable"),
-  }),
-);
+  };
+  return available.value
+    ? t("agentUpdate.versionsAvailable", { ...params, available: available.value.version })
+    : t("agentUpdate.versions", params);
+});
+/** Le serveur ne répond plus en pleine mise à jour : la carte ne dit pas ce qu'elle ne sait plus. */
+const silent = computed(() => state.value === "offline");
 
 /** Le bouton existe quand une version plus récente est disponible ; il est inerte sans droit ou pendant l'opération. */
 const showButton = computed(() => available.value !== null && view.value?.managed === false);
@@ -119,7 +122,7 @@ async function confirm() {
     </header>
     <p class="agent__versions" data-agent-versions>{{ versions }}</p>
     <p v-if="available && !running && !compat" class="agent__available" data-agent-available>
-      {{ t("agentUpdate.availableText", { version: available.version }) }}
+      {{ t("agentUpdate.availableText") }}
     </p>
 
     <p v-if="compat" class="agent__incompat" role="alert" data-agent-incompat>{{ compatMessage }}</p>
@@ -141,11 +144,16 @@ async function confirm() {
     </p>
 
     <div v-if="running" class="agent__progress" data-agent-running>
-      <p class="agent__sentence" role="status" data-agent-progress>
-        {{ progressSentence(step, progress?.percent ?? null) }}
+      <p v-if="silent" class="agent__sentence" role="status" data-agent-lost>
+        {{ t("agentUpdate.runningLost") }}
       </p>
-      <AgentUpdateSteps :step="step" :percent="progress?.percent ?? null" />
-      <p class="agent__cut">{{ t("agentUpdate.cutAnnounce") }}</p>
+      <template v-else>
+        <p class="agent__sentence" role="status" data-agent-progress>
+          {{ progressSentence(step, progress?.percent ?? null) }}
+        </p>
+        <AgentUpdateSteps :step="step" :percent="progress?.percent ?? null" />
+        <p class="agent__cut">{{ t("agentUpdate.cutAnnounce") }}</p>
+      </template>
     </div>
 
     <div

@@ -34,13 +34,15 @@ Le client (HRT-17, lot interface) propose « Mettre à jour l'agent » quand `ag
 1. Construire et signer le binaire (étapes 1 et 2 ci-dessus). Le nom du binaire publié est `hearth-agent-linux-x86_64` (copie de `target/dist/hearth-agent`), la signature `hearth-agent-linux-x86_64.minisig`.
 2. Fabriquer `agent.json` (aucun secret ; la signature est vérifiée contre `crates/hearth-agent/update-key.pub`, la clé embarquée dans l'agent : une signature que l'agent refuserait n'est pas publiée) :
    ```sh
+   # --version DOIT être la version du dépôt ([workspace.package] de Cargo.toml) : celle du binaire construit
    cargo xtask agent-manifest --version X.Y.Z \
      --binary-file hearth-agent-linux-x86_64 --signature-file hearth-agent-linux-x86_64.minisig \
      --url https://github.com/Voikyrioh/hearth/releases/download/vX.Y.Z/hearth-agent-linux-x86_64 \
      --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --out agent.json
    ```
 3. Joindre les TROIS fichiers (`hearth-agent-linux-x86_64`, `.minisig`, `agent.json`) à la release `vX.Y.Z` de `Voikyrioh/hearth`, avec `latest.json` du client (flux `publish-client`, runbook `publier-une-version-du-client.md`), AVANT de la publier : `gh release upload vX.Y.Z hearth-agent-linux-x86_64 hearth-agent-linux-x86_64.minisig agent.json` sur le brouillon. Le flux `publish-client` ne joint pas ces fichiers et ne signe jamais l'agent.
-4. Toute release qui doit rester « dernière » porte `latest.json` ET `agent.json` : l'adresse `releases/latest/download/agent.json` suit la dernière release publiée. Une release du client seul (agent inchangé) reprend l'`agent.json` précédent (même version d'agent : rien de « disponible » pour les agents à jour) ; sans `agent.json`, le client ne propose plus rien pour l'agent et reste utilisable.
+   Avant de publier, vérifier que les TROIS fichiers sont bien sur le brouillon : `gh release view vX.Y.Z --json assets --jq '.assets[].name'` doit lister `hearth-agent-linux-x86_64`, `hearth-agent-linux-x86_64.minisig` et `agent.json` (sans `agent.json`, le client ne propose rien ; oublié sur une release « dernière », il retire la proposition à tous). Le numéro de l'adresse du binaire est celui de l'AGENT, le nom de la release (`vX.Y.Z`) celui qui porte le client : ils peuvent différer, `agent-manifest` exige que l'adresse commence par `…/releases/download/v{version}/` avec `--version` donné.
+4. Toute release qui doit rester « dernière » porte `latest.json` ET `agent.json` : l'adresse `releases/latest/download/agent.json` suit la dernière release publiée. Une release du client seul (agent inchangé) reprend l'`agent.json` précédent (`gh release download vANCIENNE --pattern agent.json`, puis `gh release upload` sur le brouillon ; même version d'agent : rien de « disponible » pour les agents à jour) ; sans `agent.json`, le client ne propose plus rien pour l'agent et reste utilisable.
 5. Contrôler après publication : « Vérifier maintenant » dans les réglages d'un client dont l'agent est plus ancien fait apparaître « Mise à jour disponible » sur la carte du serveur ; un agent déjà à jour ne montre rien. Le client ne propose jamais une version plus ancienne ou égale, ni une adresse qui n'est pas HTTPS, publique et dans les releases du dépôt.
 
 ## Suivre une mise à jour

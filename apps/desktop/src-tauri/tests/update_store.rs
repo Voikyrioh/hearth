@@ -30,6 +30,7 @@ fn record() -> UpdateRecord {
             signature: "untrusted comment: s".to_owned(),
             sha256: "ab".repeat(32),
         }),
+        agent_results_seen: [("s1".to_owned(), "2026-10-06T10:00:00Z".to_owned())].into(),
     }
 }
 

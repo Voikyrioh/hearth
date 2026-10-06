@@ -49,16 +49,6 @@ const text = computed(() => {
       {{ t("link.seeAlert") }}
     </HButton>
     <HButton
-      v-else-if="blocked === 'incompatible_client' && clientAction === 'install'"
-      variant="secondary"
-      size="sm"
-      :busy="clientBusy"
-      data-update-client
-      @click="$emit('client')"
-    >
-      {{ t("link.updateClient") }}
-    </HButton>
-    <HButton
       v-else-if="blocked === 'incompatible_client'"
       variant="secondary"
       size="sm"
@@ -66,9 +56,8 @@ const text = computed(() => {
       data-update-client
       @click="$emit('client')"
     >
-      {{ t("link.checkClient") }}
+      {{ t(clientAction === "install" ? "link.updateClient" : "link.checkClient") }}
     </HButton>
-    <span v-else-if="blocked === 'incompatible_agent'" />
     <HButton v-else variant="secondary" size="sm" @click="$emit('retry')">
       <HIcon name="refresh" size="sm" />
       {{ t("link.retryNow") }}

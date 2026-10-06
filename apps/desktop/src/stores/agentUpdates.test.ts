@@ -133,7 +133,9 @@ describe("le flux de progression", () => {
     expect(store.runningOf("forge")).toBe(true);
     bridge.agentUpdates.complete("forge", "failed", "unreachable");
     expect(store.runningOf("forge")).toBe(false);
-    expect(store.noticeOf("forge")?.tone).toBe("crit");
+    // Le résultat vient de la relecture (le signal `done` ne fait que la déclencher) : en attendant, rien
+    // n'est montré, ni l'ancien résultat ni un résultat inventé par le signal.
+    expect(store.noticeOf("forge")).toBeNull();
     await flushPromises();
     expect(store.noticeOf("forge")?.tone).toBe("crit");
   });
@@ -173,5 +175,95 @@ describe("un échec typé", () => {
     const { bridge } = await started();
     bridge.setState("forge", "offline");
     await expect(bridge.getAgentUpdate("forge")).rejects.toBeInstanceOf(LinkCommandError);
+  });
+});
+
+describe("l'annonce du résultat vient de la relecture, une seule fois", () => {
+  function clocked() {
+    let at = Date.parse("2026-10-06T10:00:00Z");
+    return () => {
+      at += 60_000;
+      return at;
+    };
+  }
+
+  async function startedAt(now: () => number) {
+    const ctx = await mountContext({ now });
+    const store = useAgentUpdatesStore();
+    await store.start();
+    await flushPromises();
+    return { ...ctx, store, toasts: useToastsStore() };
+  }
+
+  async function backOnline(bridge: SimulatedLinkBridge) {
+    bridge.setState("forge", "offline");
+    await flushPromises();
+    bridge.setState("forge", "connected");
+    await flushPromises();
+  }
+
+  it("announces a result whose `done` was never seen on the stream, when the link returns", async () => {
+    const { bridge, toasts } = await startedAt(clocked());
+    bridge.agentUpdates.seed("forge", { progress: progress("verify") });
+    // Le nouvel agent a annoncé `done` avant le réabonnement : aucun signal ne parvient au client.
+    bridge.agentUpdates.complete("forge", "rolled_back", "no_answer", false);
+    await flushPromises();
+    expect(toasts.items).toEqual([]);
+    await backOnline(bridge);
+    expect(toasts.items.map((toast) => toast.message)).toEqual([
+      "forge : Mise à jour de l'agent annulée. Le nouvel agent n'a pas répondu. Retour à la version précédente.",
+    ]);
+    expect(bridge.calls.filter((call) => call.startsWith("agent-update ack "))).toHaveLength(1);
+    // Une nouvelle lecture (retour du lien suivant) ne l'annonce pas de nouveau.
+    await backOnline(bridge);
+    expect(toasts.items).toHaveLength(1);
+  });
+
+  it("announces two successive results of the same outcome twice, one each", async () => {
+    const { bridge, toasts } = await startedAt(clocked());
+    for (let round = 1; round <= 2; round += 1) {
+      bridge.agentUpdates.seed("forge", { progress: progress("verify") });
+      bridge.agentUpdates.complete("forge", "failed", "unreachable", false);
+      await backOnline(bridge);
+      toasts.clear();
+      // Le même résultat relu ne repart pas.
+      await backOnline(bridge);
+      expect(toasts.items).toEqual([]);
+      expect(bridge.calls.filter((call) => call.startsWith("agent-update ack "))).toHaveLength(
+        round,
+      );
+    }
+  });
+
+  it("does not announce again a result already seen before the client was relaunched", async () => {
+    const { bridge, store, toasts } = await startedAt(clocked());
+    bridge.agentUpdates.complete("forge", "succeeded", null, false);
+    await backOnline(bridge);
+    expect(toasts.items).toHaveLength(1);
+    // Relance du client : le store repart de zéro, la coquille (ici le pont) se souvient.
+    store.reset();
+    toasts.clear();
+    await store.start();
+    await flushPromises();
+    expect(toasts.items).toEqual([]);
+    // Un résultat plus récent, lui, est annoncé.
+    bridge.agentUpdates.complete("forge", "succeeded", null, false);
+    await backOnline(bridge);
+    expect(toasts.items).toHaveLength(1);
+  });
+
+  it("announces a result of an update launched by another administrator, never followed here", async () => {
+    const { bridge, toasts } = await startedAt(clocked());
+    bridge.agentUpdates.complete("forge", "failed", "bad_checksum", false);
+    await backOnline(bridge);
+    expect(toasts.items.map((toast) => toast.kind)).toEqual(["error"]);
+  });
+
+  it("does not announce a result while an update is still running", async () => {
+    const { bridge, toasts, store } = await startedAt(clocked());
+    bridge.agentUpdates.complete("forge", "succeeded", null, false);
+    bridge.agentUpdates.seed("forge", { progress: progress("download", 10) });
+    await store.refresh("forge");
+    expect(toasts.items).toEqual([]);
   });
 });

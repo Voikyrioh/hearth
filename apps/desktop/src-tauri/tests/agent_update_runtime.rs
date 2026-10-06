@@ -11,6 +11,8 @@
 
 #[path = "../../../../crates/hearth-link/tests/support/agent.rs"]
 mod agent;
+#[path = "../../../../crates/hearth-link/tests/support/proxy.rs"]
+mod proxy;
 #[path = "../../../../crates/hearth-link/tests/support/update_rig.rs"]
 mod update_rig;
 
@@ -33,6 +35,7 @@ use hearth_desktop_lib::vault::{CredentialBackend, CredentialVault};
 use hearth_link::LinkConfig;
 use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::LinkState;
+use proxy::FaultProxy;
 use update_rig::{Rig, rig, sha256_hex};
 
 const GUARD: Duration = Duration::from_secs(60);
@@ -125,10 +128,14 @@ struct Client {
     runtime: Arc<LinkRuntime>,
     id: ServerId,
     ui: Recorder,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 async fn client(agent: &TestAgent, username: &str) -> Client {
+    client_via(agent.addr.port(), username).await
+}
+
+async fn client_via(port: u16, username: &str) -> Client {
     let dir = tempfile::tempdir().unwrap();
     let vault = Arc::new(CredentialVault::new(Shared(Arc::new(Memory::default()))));
     let runtime = Arc::new(
@@ -137,7 +144,6 @@ async fn client(agent: &TestAgent, username: &str) -> Client {
             .unwrap(),
     );
     let ui = Recorder::default();
-    let port = agent.addr.port();
     let probe = runtime.probe("127.0.0.1", Some(port)).await.unwrap();
     let server = runtime
         .add_and_login(
@@ -168,7 +174,7 @@ async fn client(agent: &TestAgent, username: &str) -> Client {
         runtime,
         id,
         ui,
-        _dir: dir,
+        dir,
     }
 }
 
@@ -203,7 +209,7 @@ async fn world(allowed: bool, gated: bool) -> World {
 
 impl Client {
     async fn view(&self, target: Option<&AgentTarget>) -> AgentUpdateView {
-        service::view(self.runtime.manager(), &self.id, target, NOW)
+        service::view(self.runtime.manager(), &self.id, target, NOW, None)
             .await
             .unwrap()
     }
@@ -387,6 +393,7 @@ async fn the_agent_stays_the_arbiter_of_a_target_with_a_wrong_checksum() {
         None,
         // « Maintenant » vu par le serveur : l'horloge pilotée du banc (1 790 000 000 s + 100 s).
         NOW,
+        None,
     )
     .await
     .unwrap();
@@ -417,4 +424,77 @@ fn a_result_is_recent_for_a_day_and_an_unreadable_or_future_date_is_not() {
     assert!(!service::is_recent(&at(-5), now), "dans le futur");
     assert!(!service::is_recent("hier", now));
     assert!(!service::is_recent("", now));
+}
+
+#[tokio::test]
+async fn a_result_never_seen_on_the_stream_is_read_as_not_announced_until_it_is_acknowledged() {
+    let world = world(true, false).await;
+    let client = client(&world.agent, "marie").await;
+    // La mise à jour se termine chez l'agent sans que le client soit là pour voir `done` sur le flux.
+    let wrong = target_for(&world.rig, "0.2.0", Some("11".repeat(32)));
+    client.start(Some(&wrong), "0.2.0").await.unwrap();
+    eventually("la fin chez l'agent", || {
+        world.rig.host.with(|state| state.last.is_some())
+    })
+    .await;
+    let read = |seen: Option<&str>| {
+        let (runtime, id) = (client.runtime.clone(), client.id.clone());
+        let seen = seen.map(str::to_owned);
+        async move {
+            service::view(runtime.manager(), &id, None, NOW, seen.as_deref())
+                .await
+                .unwrap()
+        }
+    };
+    let first = read(None).await.last.expect("un résultat");
+    assert!(
+        !first.announced,
+        "jamais annoncé tant que personne ne l'a noté"
+    );
+    // Noté par sa date : annoncé, y compris pour une lecture après un redémarrage du client.
+    assert!(read(Some(&first.at)).await.last.unwrap().announced);
+    // Un AUTRE résultat (autre date) n'est pas couvert par la note du précédent.
+    assert!(
+        !read(Some("2026-01-01T00:00:00Z"))
+            .await
+            .last
+            .unwrap()
+            .announced
+    );
+}
+
+#[tokio::test]
+async fn an_update_request_cut_before_its_answer_is_unknown_and_never_replayed() {
+    let world = world(true, false).await;
+    let proxy = FaultProxy::start(world.agent.addr).await;
+    let client = client_via(proxy.port(), "marie").await;
+    let target = target_for(&world.rig, "0.2.0", None);
+    // Rien ne passe : la demande reste sans réponse ; on la coupe une fois son suivi écrit.
+    proxy.freeze();
+    let (runtime, id, held) = (client.runtime.clone(), client.id.clone(), target.clone());
+    let call = tokio::spawn(async move { service::send(runtime.manager(), &id, &held).await });
+    let tracking = client.dir.path().join("operations");
+    eventually("le suivi de l'action écrit", || {
+        std::fs::read_dir(&tracking).is_ok_and(|mut entries| entries.next().is_some())
+    })
+    .await;
+    proxy.cut();
+    let outcome = tokio::time::timeout(GUARD, call)
+        .await
+        .expect("l'appel ne reste pas suspendu")
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(outcome, AgentUpdateOutcome::Unknown { .. }),
+        "{outcome:?}"
+    );
+    // Jamais rejouée : le lien revient, l'agent n'a reçu aucune demande.
+    proxy.heal();
+    client.runtime.manager().retry_now(&client.id).unwrap();
+    eventually("le lien revenu", || {
+        client.runtime.manager().state(&client.id).unwrap().state == LinkState::Connected
+    })
+    .await;
+    assert!(world.rig.downloader.fetched.lock().unwrap().is_empty());
+    assert!(!client.view(Some(&target)).await.in_progress);
 }
