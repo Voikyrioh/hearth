@@ -599,6 +599,28 @@ impl UpdateService {
                 )
                 .await;
             }
+            Orphan::ForeignVersion(job) => {
+                // FIX:01M47N6Z485TWN2H770KQ5H80R : une version posée à la main n'est jamais
+                // défaite. Ni reprise, ni remise de la base : la sauvegarde de l'ancien binaire et
+                // la copie périmée de la base sont retirées avec les traces.
+                tracing::warn!(
+                    current = %self.current,
+                    version = %job.version,
+                    previous = %job.previous,
+                    "une autre version que celles de la mise à jour tourne : mise à jour conclue sans retour arrière"
+                );
+                if let Err(error) = self.host.remove_path(&job.backup) {
+                    tracing::warn!(%error, "sauvegarde de l'ancien binaire non retirée");
+                }
+                self.conclude_found(
+                    job.version.clone(),
+                    job.previous.clone(),
+                    job.requester(),
+                    UpdateOutcome::Failed,
+                    Some(UpdateReason::Interrupted),
+                )
+                .await;
+            }
             Orphan::Unreadable { backup_present } => {
                 tracing::error!("trace de mise à jour illisible");
                 self.host.discard_work_files();

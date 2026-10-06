@@ -45,7 +45,13 @@ pub enum Orphan {
     /// résultat n'a pas été écrit, ou reprise à la main) : conclu `rolled_back`, traces retirées,
     /// **sans jamais toucher à la base**, qui a vécu depuis.
     AlreadyRolledBack(Job),
-    /// Les binaires ont été échangés, ni la nouvelle ni l'ancienne version ne tourne comme prévu :
+    /// Une TROISIÈME version tourne (ni la visée, ni celle d'avant) alors que la sauvegarde est
+    /// restée : quelqu'un a remplacé le binaire à la main. Ni reprise (elle remettrait l'ancien
+    /// binaire et la copie PÉRIMÉE de la base sur son travail), ni retour arrière : conclu
+    /// `failed` / `interrupted`, traces retirées, **sans jamais toucher à la base**.
+    // FIX:01M47N6Z485TWN2H770KQ5H80R : docs/bugs/FIX-01M47N6Z485TWN2H770KQ5H80R.md
+    ForeignVersion(Job),
+    /// La nouvelle version tourne et les binaires ont été échangés sans que personne conclue :
     /// reprise par un superviseur (contrôle du binaire en place, sinon retour exact).
     AfterSwap(Job),
     /// Une trace ne se lit pas : conclu sans deviner. Si l'ancien binaire est gardé, la reprise est
@@ -69,10 +75,17 @@ pub fn classify_orphan(leftovers: &Leftovers, supervising: bool, current: Versio
             let version = Version::parse(&job.version).ok();
             let previous = Version::parse(&job.previous).ok();
             if leftovers.backup_present {
-                if previous == Some(current) && version != Some(current) {
-                    Orphan::AlreadyRolledBack(job.clone())
-                } else {
-                    Orphan::AfterSwap(job.clone())
+                match (version, previous) {
+                    // Le binaire en place est celui qui a été visé : le contrôle tranche.
+                    (Some(target), _) if target == current => Orphan::AfterSwap(job.clone()),
+                    // L'ancienne version tourne déjà.
+                    (_, Some(before)) if before == current => {
+                        Orphan::AlreadyRolledBack(job.clone())
+                    }
+                    // Ni l'une ni l'autre : le binaire a été remplacé à la main.
+                    (Some(_), Some(_)) => Orphan::ForeignVersion(job.clone()),
+                    // Un travail dont les versions ne se lisent pas : le contrôle tranche.
+                    _ => Orphan::AfterSwap(job.clone()),
                 }
             } else if version == Some(current) {
                 Orphan::Completed {
@@ -203,14 +216,12 @@ mod tests {
                 backup_present: true,
                 unreadable: false,
             };
-            // La nouvelle version tourne, ou une autre : le contrôle tranche.
-            for current in [NEW, Version::new(0, 9, 9)] {
-                assert_eq!(
-                    classify_orphan(&left, false, current),
-                    Orphan::AfterSwap(job()),
-                    "{step:?}"
-                );
-            }
+            // La nouvelle version tourne : son contrôle tranche.
+            assert_eq!(
+                classify_orphan(&left, false, NEW),
+                Orphan::AfterSwap(job()),
+                "{step:?}"
+            );
         }
         let left = Leftovers {
             job: Some(job()),
@@ -254,6 +265,34 @@ mod tests {
         assert_eq!(
             classify_orphan(&left, false, OLD),
             Orphan::AlreadyRolledBack(job())
+        );
+    }
+
+    #[test]
+    fn a_third_version_with_the_backup_left_is_never_recovered_nor_rolled_back() {
+        // FIX:01M47N6Z485TWN2H770KQ5H80R : 0.1.0 vers 0.2.0 laissée en cours, puis 0.9.9
+        // installée à la main : la reprise remettrait 0.1.0 et la copie périmée de la base.
+        let left = Leftovers {
+            state: Some(state(UpdateStep::Check)),
+            job: Some(job()),
+            backup_present: true,
+            unreadable: false,
+        };
+        assert_eq!(
+            classify_orphan(&left, false, Version::new(0, 9, 9)),
+            Orphan::ForeignVersion(job())
+        );
+        // Des versions qui ne se lisent pas ne sont pas un remplacement : le contrôle tranche.
+        let mut broken = job();
+        broken.version = "x".into();
+        let left = Leftovers {
+            job: Some(broken.clone()),
+            backup_present: true,
+            ..Leftovers::default()
+        };
+        assert_eq!(
+            classify_orphan(&left, false, Version::new(0, 9, 9)),
+            Orphan::AfterSwap(broken)
         );
     }
 

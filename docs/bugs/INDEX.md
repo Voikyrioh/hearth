@@ -15,6 +15,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M46G800Z47XQ8R64G2MDC4NP](./FIX-01M46G800Z47XQ8R64G2MDC4NP.md) | « Se souvenir » restait coché sans mot de passe au coffre après une application tuée pendant l'ajout | 2026-10-05 |
 | [FIX-01M46N01GMK08NXQHCZ28A2KQ1](./FIX-01M46N01GMK08NXQHCZ28A2KQ1.md) | Une désinstallation lancée juste après une installation pouvait être refusée à tort (verrou relâché trop tard) | 2026-10-05 |
 | [FIX-01M47PHYR8MD87HAXY9PARQXAN](./FIX-01M47PHYR8MD87HAXY9PARQXAN.md) | La patience de la surveillance concluait « échec du superviseur » même quand l'échange des binaires avait eu lieu | 2026-10-06 |
+| [FIX-01M47N6Z485TWN2H770KQ5H80R](./FIX-01M47N6Z485TWN2H770KQ5H80R.md) | Une version posée à la main par-dessus une mise à jour laissée en cours était défaite au démarrage (ancien binaire et copie périmée de la base remis) | 2026-10-06 |
 
 À créer lors de tout bugfix conformément à `skills/bugfix/SKILL.md` et `docs/code-rules.md`.
 

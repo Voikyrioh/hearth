@@ -927,3 +927,41 @@ async fn a_supervisor_that_never_shows_up_ends_as_a_launch_failure_after_the_pat
     assert_eq!(done.reason, Some(UpdateReason::SupervisorLaunch));
     assert_eq!(journal(&env).await.len(), 1);
 }
+
+#[tokio::test]
+async fn a_third_version_put_in_by_hand_is_never_rolled_back_over_nor_its_database_restored() {
+    // FIX:01M47N6Z485TWN2H770KQ5H80R : la mise à jour 0.0.9 vers 0.2.0 a été laissée en cours
+    // (sauvegarde de l'ancien binaire, copie de la base) ; l'administrateur a installé à la main
+    // une TROISIÈME version, 0.1.0 (ni l'ancienne, ni la visée). Le démarrage ne doit ni lancer
+    // une reprise (qui remettrait l'ancien binaire et la copie PÉRIMÉE de la base sur son travail)
+    // ni toucher à la base : il conclut, retire les traces et rend la main.
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(orphan_job());
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+        s.db_copy = true;
+    });
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+    assert_eq!(done.outcome, Some(UpdateOutcome::Failed));
+    assert_eq!(done.reason, Some(UpdateReason::Interrupted));
+    rig.host.with(|s| {
+        assert!(s.launched.is_empty(), "aucun superviseur de reprise");
+        assert_eq!(s.db_restores, 0, "la base n'est jamais recopiée");
+        assert!(!s.db_copy, "la copie périmée est retirée");
+        assert!(
+            s.removed
+                .iter()
+                .any(|p| p.ends_with(".hearth-agent.previous"))
+        );
+        assert!(s.state.is_none() && s.job.is_none());
+    });
+    assert_eq!(journal(&env).await.len(), 1);
+    // Un démarrage de plus : plus rien à conclure.
+    rig.service.resume().await;
+    assert_eq!(journal(&env).await.len(), 1);
+}
