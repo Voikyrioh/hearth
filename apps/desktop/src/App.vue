@@ -9,6 +9,7 @@ import ServerRail from "@/components/organisms/ServerRail.vue";
 import UpdateBanner from "@/components/organisms/UpdateBanner.vue";
 import { reportUiError } from "@/errors/report";
 import { failureMessage, failureOf } from "@/link";
+import { useAgentUpdatesStore } from "@/stores/agentUpdates";
 import { useLinkStore } from "@/stores/link";
 import { useServersStore } from "@/stores/servers";
 import { useToastsStore } from "@/stores/toasts";
@@ -23,6 +24,12 @@ link.start().catch((error) => reportUiError(error, "link:start"));
 useUpdatesStore()
   .start()
   .catch((error) => reportUiError(error, "updates:start"));
+
+// Mise à jour de l'agent de chaque serveur (HRT-17) : la progression arrive du flux, l'état se relit
+// à chaque retour du lien.
+useAgentUpdatesStore()
+  .start()
+  .catch((error) => reportUiError(error, "agent-update:start"));
 
 // Panneau de simulation : seulement en mode développement (retiré du binaire livré).
 const DevLinkPanel = import.meta.env.DEV

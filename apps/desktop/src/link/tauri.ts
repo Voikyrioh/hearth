@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   type AccountListDto,
   type AuditLiveEvent,
+  type AgentUpdateEvent as BoundAgentUpdateEvent,
   type LinkFailure as BoundFailure,
   type AccountOutcome as BoundOutcome,
   commands,
@@ -14,6 +15,12 @@ import {
   type ServersEvent,
   type SnapshotEvent,
 } from "@/bindings";
+import {
+  type AgentUpdateEvent,
+  type AgentUpdateOutcome,
+  type AgentUpdateView,
+  toAgentUpdateOutcome,
+} from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import { toAuditFilterDto, toAuditLive, toAuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
@@ -48,6 +55,7 @@ export const LINK_EVENTS = {
   metrics: "link://metrics",
   audit: "link://audit",
   auditGap: "link://audit-gap",
+  agentUpdate: "agent-update://progress",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -347,6 +355,21 @@ export class TauriLinkBridge implements LinkBridge {
   ): Promise<AccountOutcome> {
     return toAccountOutcome(
       unwrap(await commands.deleteAccount(serverId, accountId, confirmation)),
+    );
+  }
+
+  async getAgentUpdate(serverId: string): Promise<AgentUpdateView> {
+    return unwrap(await commands.getAgentUpdate(serverId));
+  }
+
+  async updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome> {
+    return toAgentUpdateOutcome(unwrap(await commands.updateAgent(serverId, version)));
+  }
+
+  async onAgentUpdate(listener: (event: AgentUpdateEvent) => void): Promise<Unsubscribe> {
+    // Un signal par message du flux : rien n'est rejoué, l'état qui compte se relit par la lecture.
+    return listen<BoundAgentUpdateEvent>(LINK_EVENTS.agentUpdate, (event) =>
+      listener(event.payload),
     );
   }
 

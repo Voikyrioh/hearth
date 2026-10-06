@@ -3,6 +3,7 @@ import { computed, onMounted } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HToggle from "@/components/atoms/HToggle.vue";
 import SettingRow from "@/components/molecules/SettingRow.vue";
+import AgentUpdateCard from "@/components/organisms/AgentUpdateCard.vue";
 import OwnAccountCard from "@/components/organisms/OwnAccountCard.vue";
 import UpdatePanel from "@/components/organisms/UpdatePanel.vue";
 import { t } from "@/i18n";
@@ -10,7 +11,8 @@ import { useServersStore } from "@/stores/servers";
 import { useSettingsStore } from "@/stores/settings";
 
 // Réglages, dans l'ordre du design (design-ecrans-socle.md) : à gauche « Général », « Client »,
-// « Mises à jour » ; à droite « Mon compte », une carte par serveur (le design y met l'état de chaque
+// « Mises à jour » ; à droite, « État du serveur : {nom} » (versions, mise à jour de l'agent, HRT-17),
+// une carte par serveur enregistré, puis « Mon compte », une carte par serveur (le design y met l'état de chaque
 // serveur ; le compte de l'utilisateur sur ce serveur en est le prolongement naturel, et c'est la
 // seule place accessible au rôle Lecture seule, qui n'a pas la page Comptes). « Notifications » est
 // une préférence du CLIENT : elle vit dans la section « Client », avec la version.
@@ -77,6 +79,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
         <UpdatePanel />
       </div>
       <div v-if="servers.servers.length > 0" class="settings__column">
+        <AgentUpdateCard v-for="server in servers.servers" :key="server.id" :server="server" />
         <h2 class="settings__section settings__section--column">{{ t("settings.sectionAccount") }}</h2>
         <OwnAccountCard v-for="server in servers.servers" :key="server.id" :server="server" />
       </div>

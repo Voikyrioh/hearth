@@ -1,3 +1,4 @@
+import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
 import type { MachineEvent } from "./machine";
@@ -6,6 +7,7 @@ import {
   SimulatedAccounts,
   simulatedCheckInput,
 } from "./simulated-accounts";
+import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import {
@@ -166,6 +168,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   executeBeforeCut = true;
   /** Le journal d'activité simulé (filtre, pagination, direct : comme l'agent). */
   readonly audit: SimulatedAudit;
+  /** La mise à jour de l'agent simulée (HRT-17) : état par serveur, étapes pilotables par le test. */
+  readonly agentUpdates: SimulatedAgentUpdates;
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -179,6 +183,10 @@ export class SimulatedLinkBridge implements LinkBridge {
       connected: (id) => this.events.get(id)?.state === "connected",
       // Le serveur « salon » est un boîtier sans carte graphique ni sonde : de quoi voir les états vides.
       machines: { salon: bareMachine("nas-salon") },
+    });
+    this.agentUpdates = new SimulatedAgentUpdates({
+      now: this.now,
+      publishLink: (id, state) => this.publish(id, state),
     });
     this.audit = new SimulatedAudit({
       now: this.now,
@@ -528,6 +536,44 @@ export class SimulatedLinkBridge implements LinkBridge {
   private settle(serverId: string, result: SimAccountResult): AccountOutcome {
     if (result.ended) this.publish(serverId, "access_revoked", { reason: "revoked" });
     return result.outcome;
+  }
+
+  // --- Mise à jour de l'agent (HRT-17) ---
+
+  async getAgentUpdate(serverId: string): Promise<AgentUpdateView> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("agent-update read");
+    return this.agentUpdates.view(serverId);
+  }
+
+  async updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    // Comme le vrai pont : hors « Connecté » rien ne part, donc rien n'est noté. La cible n'est
+    // jamais fournie par l'interface : seulement le numéro de version que l'utilisateur a vu.
+    this.calls.push(`agent-update ${version}`);
+    // L'agent est l'arbitre du rôle : un compte Lecture seule est refusé chez lui.
+    if (server.role !== "admin") throw this.fail({ kind: "forbidden" });
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) this.agentUpdates.start(serverId, version);
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return this.agentUpdates.start(serverId, version);
+  }
+
+  async onAgentUpdate(listener: (event: AgentUpdateEvent) => void): Promise<Unsubscribe> {
+    return this.agentUpdates.subscribe(listener);
   }
 
   async readAudit(

@@ -1,3 +1,4 @@
+import type { AgentUpdateEvent } from "./agent-update";
 import type { AuditEntry } from "./audit";
 import type { LinkBridge } from "./bridge";
 import type { MachineEvent } from "./machine";
@@ -91,6 +92,15 @@ export class NullLinkBridge implements LinkBridge {
   }
   async deleteAccount(): Promise<never> {
     return this.unavailable();
+  }
+  async getAgentUpdate(): Promise<never> {
+    return this.unavailable();
+  }
+  async updateAgent(): Promise<never> {
+    return this.unavailable();
+  }
+  async onAgentUpdate(_listener: (event: AgentUpdateEvent) => void): Promise<Unsubscribe> {
+    return () => {};
   }
   async readAudit(): Promise<never> {
     return this.unavailable();
