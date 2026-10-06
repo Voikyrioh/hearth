@@ -100,7 +100,7 @@ describe("Settings page", () => {
     const wrapper = mount(Settings);
     await flushPromises();
     const headings = wrapper.findAll("h2").map((h) => h.text());
-    expect(headings).toEqual(["Général", "Notifications"]);
+    expect(headings).toEqual(["Général", "Notifications", "Mises à jour"]);
     const toggle = wrapper.findAll('[role="switch"]')[1];
     const labelId = toggle?.attributes("aria-labelledby") ?? "";
     expect(wrapper.get(`[id="${labelId}"]`).text()).toBe(

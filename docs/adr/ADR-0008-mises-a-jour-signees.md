@@ -97,3 +97,17 @@ Les écarts avec l'esquisse ci-dessus, décidés à la réalisation (voir ADR-00
 - Tauri updater (même pattern) : https://docs.rs/tauri-plugin-updater/latest/tauri_plugin_updater/
 - systemd service : https://www.freedesktop.org/software/systemd/man/systemd.service.html
 - ADR-0008 globale (sécurité) : `orga-global/docs/adr/ADR-0008-*.md`
+
+## Amendement du 2026-10-05 : amendée par ADR-0017 (HRT-16, mise à jour du client)
+
+L'histoire ci-dessus reste écrite telle quelle ; voici ce que HRT-16 a changé et ce qui reste vrai.
+
+**Ce qui change pour le CLIENT** (ADR-0017) :
+- le flux n'est pas « hébergé configurablement » : l'adresse est une CONSTANTE de la compilation, `https://github.com/Voikyrioh/hearth/releases/latest/download/latest.json` (GitHub Releases du dépôt public) ;
+- le format du manifeste est celui du greffon de mise à jour de Tauri (`version`, `notes`, `pub_date`, `platforms.windows-x86_64.{signature,url}`), pas l'objet `{client, agent}` de l'esquisse ci-dessus, que le greffon ne lit pas ;
+- l'installateur est téléchargé en mémoire, sa signature (clé publique du fichier `apps/desktop/src-tauri/update-key.pub`, embarquée) est vérifiée avant toute écriture, et la version annoncée doit être celle du commentaire signé (`requireSignedVersion`) ;
+- le client lit lui-même le flux ; l'agent n'a pas à le faire.
+
+**Ce qui reste vrai pour l'AGENT** (ADR-0014) : la clé publique de l'agent est embarquée dans l'agent (`crates/hearth-agent/update-key.pub`, distincte de celle du client), il vérifie somme et signature avant d'écrire, le client lui transmet `{ version, url, signature, sha256 }`, superviseur et retour arrière en 60 s. La section « Flux de versions » ci-dessus décrit une cible, non un fichier existant pour l'agent.
+
+**Où l'agent trouvera sa cible** : pas encore décidé, à reprendre par le lot interface de HRT-17. Contraintes établies par HRT-16 : le greffon du client ne rend le manifeste que lorsqu'une version plus récente du CLIENT existe (donc une section `agent` du même `latest.json` n'est pas lisible quand le client est à jour) ; `releases/latest` est unique, une release de l'agent seule ne doit pas retirer l'entrée `windows-x86_64` ; `client-manifest` réécrit le fichier entier. Pistes : un fichier `agent.json` dans la même release, lu par une requête supplémentaire du client (à rapprocher de la règle d'une requête par jour), ou une section `agent` fusionnée par `client-manifest`. Voir ADR-0017, décision 8.

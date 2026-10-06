@@ -1,0 +1,153 @@
+name: publish-client
+
+# Publication du client Windows (HRT-16, ADR-0017, runbook docs/runbooks/publier-une-version-du-client.md).
+#
+# DÉCLENCHÉ À LA MAIN SEULEMENT (Actions, « Run workflow »), et seulement depuis `main` : aucun push, aucune
+# PR, aucune étiquette ne le lance. Il construit l'installateur NSIS (job `build`, SANS aucun secret), puis
+# le signe avec la clé SECRÈTE des secrets du dépôt et crée une release BROUILLON (job `sign`, SANS
+# installation de dépendances npm). Le client ne voit la release qu'une fois que tu l'as publiée à la main
+# (le flux `releases/latest` ne propose jamais un brouillon).
+#
+# La version publiée est celle de `Cargo.toml` (`cargo xtask client-version`) : rien n'est saisi à la main
+# dans le formulaire, donc le numéro signé est celui du binaire construit.
+#
+# Secrets à créer avant la première exécution, comme secrets de l'ENVIRONNEMENT `release` (jamais dans un
+# fichier du dépôt) :
+#   HEARTH_CLIENT_SIGNING_KEY            contenu du fichier de clé secrète (`tauri signer generate`)
+#   HEARTH_CLIENT_SIGNING_KEY_PASSWORD   son mot de passe (obligatoire)
+# Et la clé PUBLIQUE correspondante dans apps/desktop/src-tauri/update-key.pub, commitée AVANT : le
+# contrôle `client-release-check` refuse la clé de développement du dépôt, et `client-sign` refuse une
+# clé secrète qui n'est pas la paire de ce fichier.
+#
+# Ce que la garde `main` NE ferme PAS : elle arrête une erreur, pas quelqu'un qui a l'écriture (le
+# formulaire choisit la branche, donc le fichier de flux de cette branche, garde retirée comprise). Seul
+# l'environnement GitHub `release` ferme cela : le job `sign` le DÉCLARE, et le détenteur du dépôt doit
+# le créer AVANT la première exécution, avec approbation obligatoire et restriction à la branche `main`,
+# et y ranger les deux secrets (secrets d'ENVIRONNEMENT, pas de dépôt). Voir le runbook.
+# Sans cet environnement protégé, GitHub en crée un sans protection à la première exécution.
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Notes de version (texte brut, affiché tel quel dans le client)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Seulement depuis la branche principale : le binaire signé doit venir de ce qui est fusionné.
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # Garde de publication : la clé publique du dépôt n'est pas celle de développement, les versions de
+      # Cargo.toml et de package.json sont les mêmes. Avant toute fabrication.
+      - name: Garde de publication
+        shell: bash
+        run: cargo xtask client-release-check
+
+      - name: Version du dépôt
+        id: version
+        shell: bash
+        run: echo "version=$(cargo xtask client-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Installateur NSIS
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          npm ci
+          npm run tauri build
+
+      - name: Installateur présent
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: test -f "target/release/bundle/nsis/Hearth_${VERSION}_x64-setup.exe"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hearth-client-installer
+          path: target/release/bundle/nsis/Hearth_${{ steps.version.outputs.version }}_x64-setup.exe
+          if-no-files-found: error
+          retention-days: 3
+
+  sign:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment: release
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.95"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: hearth-client-installer
+          path: installer
+
+      # Aucun secret ici : on compile `xtask` (ses dépendances Cargo seulement, pas de npm) AVANT de
+      # donner les secrets à l'étape qui signe, qui n'exécute plus que le binaire déjà construit.
+      - name: Outil de signature
+        shell: bash
+        run: cargo build -p xtask --locked
+
+      - name: Signature de l'installateur (seule étape qui voit la clé secrète)
+        shell: bash
+        env:
+          HEARTH_CLIENT_SIGNING_KEY: ${{ secrets.HEARTH_CLIENT_SIGNING_KEY }}
+          HEARTH_CLIENT_SIGNING_KEY_PASSWORD: ${{ secrets.HEARTH_CLIENT_SIGNING_KEY_PASSWORD }}
+        run: |
+          target/debug/xtask client-sign \
+            --installer "installer/Hearth_${VERSION}_x64-setup.exe" \
+            --version "$VERSION"
+
+      - name: Manifeste latest.json
+        shell: bash
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          printf '%s' "$NOTES" > installer/notes.txt
+          target/debug/xtask client-manifest \
+            --version "$VERSION" \
+            --installer-file "installer/Hearth_${VERSION}_x64-setup.exe" \
+            --notes-file installer/notes.txt \
+            --signature-file "installer/Hearth_${VERSION}_x64-setup.exe.sig" \
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/Hearth_${VERSION}_x64-setup.exe" \
+            --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --out installer/latest.json
+
+      # BROUILLON, étiqueté sur le commit construit : à relire et à publier à la main depuis la page des
+      # releases. L'étiquette pointe la source du binaire (dépôt AGPL).
+      - name: Release brouillon
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${VERSION}" --draft --target "$GITHUB_SHA" \
+            --title "Hearth ${VERSION}" --notes-file installer/notes.txt \
+            "installer/Hearth_${VERSION}_x64-setup.exe" \
+            "installer/Hearth_${VERSION}_x64-setup.exe.sig" \
+            installer/latest.json

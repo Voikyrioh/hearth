@@ -213,3 +213,40 @@ test("réglages : l'option de notifications du lien est proposée", async ({ pag
     page.getByText("Une notification Windows au plus par minute et par serveur."),
   ).toBeVisible();
 });
+
+test("mise à jour du client disponible ET serveur hors ligne : deux bandeaux empilés, sans recouvrement", async ({
+  page,
+}) => {
+  await page.goto("/?nodev#/servers/forge/accounts");
+  await page.evaluate(() => {
+    const update = (window as unknown as { __hearthUpdateSim: { setFeed(r: unknown): void } })
+      .__hearthUpdateSim;
+    update.setFeed({ version: "1.1.0", notes: "Corrections" });
+  });
+  // « Vérifier maintenant » est aux réglages : on annonce la version depuis la page des réglages, puis
+  // on revient sur le serveur (le bandeau est global).
+  await page.goto("/?nodev#/settings");
+  await page.getByRole("button", { name: "Vérifier maintenant" }).click();
+  await expect(page.locator("[data-update-banner]")).toBeVisible();
+  await page.goto("/?nodev#/servers/forge/accounts");
+  await publish(page, "forge", "offline");
+  const update = page.locator("[data-update-banner]");
+  const offline = page.getByText(/Serveur hors ligne\./);
+  await expect(update).toBeVisible();
+  await expect(offline).toBeVisible();
+  for (const width of [1366, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    const a = await update.boundingBox();
+    const b = await page.locator(".banner").boundingBox();
+    expect(a && b).toBeTruthy();
+    if (a && b) {
+      // Empilés : celui de la mise à jour (global) au-dessus, celui du lien dans la page, sans recouvrement.
+      expect(a.y + a.height).toBeLessThanOrEqual(b.y + 1);
+      expect(Math.abs(a.x - b.x)).toBeLessThan(400);
+    }
+    await expect(page.locator(".head").getByRole("status")).toHaveText("Hors ligne");
+  }
+  // Deux régions « status » (polies), aucune région « alert » : l'une ne coupe pas la parole à l'autre.
+  await expect(page.locator('[role="alert"]')).toHaveCount(0);
+  await page.screenshot({ path: "e2e/screenshots/maj-et-hors-ligne-1366.png" });
+});

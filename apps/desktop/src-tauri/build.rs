@@ -28,6 +28,10 @@ const COMMANDS: &[&str] = &[
     "set_notify_on_link_change",
     "set_displayed_server",
     "get_dashboard",
+    "get_update_state",
+    "check_for_updates",
+    "postpone_update",
+    "install_update",
 ];
 
 fn main() {

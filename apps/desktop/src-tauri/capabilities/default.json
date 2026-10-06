@@ -29,6 +29,10 @@
     "allow-set-notify-on-link-change",
     "allow-set-displayed-server",
     "allow-get-dashboard",
+    "allow-get-update-state",
+    "allow-check-for-updates",
+    "allow-postpone-update",
+    "allow-install-update",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

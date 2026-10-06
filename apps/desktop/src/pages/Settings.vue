@@ -3,6 +3,7 @@ import { computed, onMounted } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HToggle from "@/components/atoms/HToggle.vue";
 import SettingRow from "@/components/molecules/SettingRow.vue";
+import UpdatePanel from "@/components/organisms/UpdatePanel.vue";
 import { t } from "@/i18n";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -63,6 +64,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
         }}</span>
       </p>
     </section>
+    <UpdatePanel />
   </main>
 </template>
 

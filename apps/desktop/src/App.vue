@@ -6,17 +6,23 @@ import ErrorBoundary from "@/components/molecules/ErrorBoundary.vue";
 import ToastStack from "@/components/molecules/ToastStack.vue";
 import FingerprintAlert from "@/components/organisms/FingerprintAlert.vue";
 import ServerRail from "@/components/organisms/ServerRail.vue";
+import UpdateBanner from "@/components/organisms/UpdateBanner.vue";
 import { reportUiError } from "@/errors/report";
 import { failureMessage, failureOf } from "@/link";
 import { useLinkStore } from "@/stores/link";
 import { useServersStore } from "@/stores/servers";
 import { useToastsStore } from "@/stores/toasts";
+import { useUpdatesStore } from "@/stores/updates";
 
 // L'interface écoute le pont de liaison dès le démarrage (états des liens, issues d'opérations).
 const link = useLinkStore();
 const servers = useServersStore();
 const toasts = useToastsStore();
 link.start().catch((error) => reportUiError(error, "link:start"));
+// Mise à jour du client : l'état vient de la coquille, le bandeau s'affiche seulement si elle le décide.
+useUpdatesStore()
+  .start()
+  .catch((error) => reportUiError(error, "updates:start"));
 
 // Panneau de simulation : seulement en mode développement (retiré du binaire livré).
 const DevLinkPanel = import.meta.env.DEV
@@ -65,6 +71,7 @@ async function accept(serverId: string) {
   <div class="shell">
     <ServerRail />
     <div class="shell__content">
+      <UpdateBanner />
       <BridgeDownBanner v-if="servers.loadFailed" :busy="reloading" @retry="reload" />
       <!-- La coquille (barre des serveurs, ci-dessus) n'est dans aucune frontière. Les vues d'un serveur
            ont leur propre frontière DANS le gabarit, sous l'en-tête : navigation, pastille du lien et
