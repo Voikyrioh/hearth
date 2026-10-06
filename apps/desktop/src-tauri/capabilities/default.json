@@ -29,6 +29,8 @@
     "allow-set-notify-on-link-change",
     "allow-set-displayed-server",
     "allow-get-dashboard",
+    "allow-read-audit",
+    "allow-export-audit",
     "allow-get-update-state",
     "allow-check-for-updates",
     "allow-postpone-update",

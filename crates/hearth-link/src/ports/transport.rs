@@ -85,6 +85,14 @@ pub struct ApiResponse {
     pub replayed: bool,
 }
 
+/// Le fichier de l'export du journal tel que l'agent l'a produit (déjà neutralisé).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditExport {
+    pub body: Vec<u8>,
+    /// Le plafond de l'agent est atteint : seules les entrées les plus récentes y sont.
+    pub truncated: bool,
+}
+
 /// Réponse d'erreur de l'agent (`{ "error": { code, message, details } }`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApiError {
@@ -171,6 +179,17 @@ pub trait Transport: Send + Sync {
         token: &Secret,
         request: &ApiRequest,
     ) -> Result<ApiResponse, TransportError>;
+
+    /// `GET /audit/export…` : le corps brut (CSV), `path` construit par la bibliothèque. Un refus
+    /// est une `TransportError::Api`. Par défaut non pris en charge (transports simulés).
+    async fn export_audit(
+        &self,
+        _target: &Target,
+        _token: &Secret,
+        _path: &str,
+    ) -> Result<AuditExport, TransportError> {
+        Err(TransportError::Protocol("export non pris en charge".into()))
+    }
 
     /// `GET /operations/{id}`. Un `404` est une `TransportError::Api` (« jamais reçue »).
     async fn operation(

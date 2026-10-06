@@ -1,12 +1,13 @@
-import type {
-  Account,
-  AccountInputCheck,
-  AccountOutcome,
-  AccountRefusal,
-  PasswordRule,
-  Role,
-  ServerInfo,
-  UsernameProblem,
+import {
+  type Account,
+  type AccountInputCheck,
+  type AccountOutcome,
+  type AccountRefusal,
+  LinkCommandError,
+  type PasswordRule,
+  type Role,
+  type ServerInfo,
+  type UsernameProblem,
 } from "./types";
 
 /**
@@ -157,14 +158,14 @@ export class SimulatedAccounts {
     return server.role !== "admin";
   }
 
-  /** `null` : la liste est refusée (Lecture seule). */
-  list(server: ServerInfo): Account[] | null {
-    if (this.forbidden(server)) return null;
+  /** Lecture seule : l'agent refuse (`forbidden`, la seule façon de dire « accès refusé »). */
+  list(server: ServerInfo): Account[] {
+    if (this.forbidden(server)) throw new LinkCommandError({ kind: "forbidden" });
     return this.book(server).map((account) => this.view(account));
   }
 
   create(server: ServerInfo, username: string, password: string, role: Role): SimAccountResult {
-    if (this.forbidden(server)) return refuse({ kind: "forbidden" });
+    if (this.forbidden(server)) throw new LinkCommandError({ kind: "forbidden" });
     const check = simulatedCheckInput(username, password);
     if (check.username) return refuse({ kind: "invalid_username", problem: check.username });
     if (check.password.length > 0) return refuse({ kind: "weak_password", rules: check.password });
@@ -189,7 +190,7 @@ export class SimulatedAccounts {
   }
 
   changeRole(server: ServerInfo, accountId: string, role: Role): SimAccountResult {
-    if (this.forbidden(server)) return refuse({ kind: "forbidden" });
+    if (this.forbidden(server)) throw new LinkCommandError({ kind: "forbidden" });
     const account = this.book(server).find((a) => a.id === accountId);
     if (!account) return refuse({ kind: "not_found" });
     if (account.role === "admin" && role !== "admin" && this.adminCount(server) <= 1) {
@@ -200,7 +201,7 @@ export class SimulatedAccounts {
   }
 
   setPassword(server: ServerInfo, accountId: string, password: string): SimAccountResult {
-    if (this.forbidden(server)) return refuse({ kind: "forbidden" });
+    if (this.forbidden(server)) throw new LinkCommandError({ kind: "forbidden" });
     const account = this.book(server).find((a) => a.id === accountId);
     if (!account) return refuse({ kind: "not_found" });
     const rules = simulatedCheckInput(account.username, password).password;
@@ -223,7 +224,7 @@ export class SimulatedAccounts {
   }
 
   closeSessions(server: ServerInfo, accountId: string): SimAccountResult {
-    if (this.forbidden(server)) return refuse({ kind: "forbidden" });
+    if (this.forbidden(server)) throw new LinkCommandError({ kind: "forbidden" });
     const account = this.book(server).find((a) => a.id === accountId);
     if (!account) return refuse({ kind: "not_found" });
     const closed = account.sessions;
@@ -232,7 +233,7 @@ export class SimulatedAccounts {
   }
 
   delete(server: ServerInfo, accountId: string, confirmation: string | null): SimAccountResult {
-    if (this.forbidden(server)) return refuse({ kind: "forbidden" });
+    if (this.forbidden(server)) throw new LinkCommandError({ kind: "forbidden" });
     const book = this.book(server);
     const account = book.find((a) => a.id === accountId);
     if (!account) return refuse({ kind: "not_found" });

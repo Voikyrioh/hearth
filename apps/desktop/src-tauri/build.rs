@@ -28,6 +28,8 @@ const COMMANDS: &[&str] = &[
     "set_notify_on_link_change",
     "set_displayed_server",
     "get_dashboard",
+    "read_audit",
+    "export_audit",
     "get_update_state",
     "check_for_updates",
     "postpone_update",

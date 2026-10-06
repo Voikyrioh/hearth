@@ -100,7 +100,7 @@ async function confirmRemove() {
   </Teleport>
 
   <p v-if="entry?.status === 'refused'" class="accounts__notice" role="alert">
-    {{ entry.refusal ? refusalMessage(entry.refusal) : t("accounts.forbidden") }}
+    {{ t("accounts.forbidden") }}
   </p>
   <div v-else-if="!entry || (entry.status === 'loading' && accounts.length === 0)" class="accounts__wait">
     <HSpinner :label="t('common.loading')" />

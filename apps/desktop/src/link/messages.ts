@@ -47,6 +47,8 @@ export function failureMessage(failure: LinkFailure, seconds?: number): string {
       return t("failure.trackingSlow");
     case "not_connected":
       return t("failure.notConnected");
+    case "forbidden":
+      return t("failure.forbidden");
     case "unknown_server":
       return t("failure.unknownServer");
     case "fingerprint_changed":

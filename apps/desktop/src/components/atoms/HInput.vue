@@ -8,7 +8,7 @@ const props = withDefaults(
   defineProps<{
     modelValue: string;
     label: string;
-    type?: "text" | "password" | "search";
+    type?: "text" | "password" | "search" | "date";
     help?: string;
     error?: string;
     placeholder?: string;

@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { reportUiError } from "@/errors/report";
-import { type Account, type AccountRefusal, failureOf, getLinkBridge } from "@/link";
+import { type Account, failureOf, getLinkBridge } from "@/link";
 
 /**
  * La liste des comptes de chaque serveur, telle que l'agent l'a rendue (jamais un mot de passe ni un
@@ -16,7 +16,6 @@ export interface ServerAccounts {
   accounts: Account[];
   /** Identifiant de l'agent du compte de la session ; vide tant que la liste n'a pas été lue. */
   me: string;
-  refusal: AccountRefusal | null;
 }
 
 export const useAccountsStore = defineStore("accounts", () => {
@@ -41,27 +40,22 @@ export const useAccountsStore = defineStore("accounts", () => {
         status: "loading",
         accounts: known?.accounts ?? [],
         me: known?.me ?? "",
-        refusal: null,
       });
     }
     try {
       const list = await getLinkBridge().listAccounts(serverId);
       if (reads.get(serverId) !== ticket) return;
-      if (list.kind === "listed") {
-        put(serverId, { status: "ready", accounts: list.accounts, me: list.me, refusal: null });
-      } else {
-        put(serverId, { status: "refused", accounts: [], me: "", refusal: list.refusal });
-      }
+      put(serverId, { status: "ready", accounts: list.accounts, me: list.me });
     } catch (error) {
       if (reads.get(serverId) !== ticket) return;
+      // L'agent refuse le rôle (`forbidden`, la seule façon de dire « accès refusé ») : rien à montrer.
+      if (failureOf(error)?.kind === "forbidden") {
+        put(serverId, { status: "refused", accounts: [], me: "" });
+        return;
+      }
       // Lien coupé ou serveur parti : la dernière liste connue reste (le gabarit la désature).
       const current = byServer.value[serverId];
-      put(serverId, {
-        status: "error",
-        accounts: current?.accounts ?? [],
-        me: current?.me ?? "",
-        refusal: null,
-      });
+      put(serverId, { status: "error", accounts: current?.accounts ?? [], me: current?.me ?? "" });
       if (!failureOf(error)) reportUiError(error, "accounts:load");
     }
   }

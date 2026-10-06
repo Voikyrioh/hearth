@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use hearth_desktop_lib::accounts::dto::{
-    AccountListDto, AccountOutcome, AccountRefusal, PasswordRuleDto, UsernameProblemDto,
+    AccountOutcome, AccountRefusal, PasswordRuleDto, UsernameProblemDto,
 };
 use hearth_desktop_lib::accounts::wire::{self, Expect, Stop};
 use hearth_desktop_lib::link_dto::{InvalidField, LinkFailure, RoleDto};
@@ -149,7 +149,6 @@ fn error(status_code: &str, details: Value) -> Value {
 #[test]
 fn every_refusal_of_the_agent_is_told_by_its_code() {
     let cases = [
-        (403, "FORBIDDEN_ROLE", AccountRefusal::Forbidden),
         (409, "USERNAME_TAKEN", AccountRefusal::UsernameTaken),
         (422, "WRONG_PASSWORD", AccountRefusal::WrongPassword),
         (409, "LAST_ADMIN", AccountRefusal::LastAdmin),
@@ -194,12 +193,15 @@ fn every_refusal_of_the_agent_is_told_by_its_code() {
             refusal: AccountRefusal::InvalidUsername { problem: None }
         }
     );
-    // Un corps qui n'est pas au format d'erreur : on se fie au statut, jamais au texte.
+    // Un corps qui n'est pas au format d'erreur : on se fie au statut, jamais au texte. Le refus de
+    // rôle est `LinkFailure::Forbidden`, comme pour la lecture (une seule façon de le dire).
     assert_eq!(
-        wire::interpret(Expect::Closed, 403, &json!("<html>")).unwrap(),
-        AccountOutcome::Refused {
-            refusal: AccountRefusal::Forbidden
-        }
+        wire::interpret(Expect::Closed, 403, &json!("<html>")).unwrap_err(),
+        LinkFailure::Forbidden
+    );
+    assert_eq!(
+        wire::interpret(Expect::Closed, 403, &error("FORBIDDEN_ROLE", json!({}))).unwrap_err(),
+        LinkFailure::Forbidden
     );
 }
 
@@ -237,32 +239,6 @@ fn a_success_is_read_in_the_shape_the_action_expects() {
     assert_eq!(
         wire::interpret(Expect::Closed, 200, &json!({ "autre": 1 })).unwrap_err(),
         LinkFailure::NotAgent
-    );
-}
-
-#[test]
-fn the_list_is_read_or_refused() {
-    let body = json!({ "accounts": [
-        { "id": "A1", "username": "marie", "role": "admin",
-          "created_at": "2026-10-04T10:30:15.250Z", "last_login_at": "2026-10-05T08:00:00.000Z",
-          "sessions_open": 2 },
-        { "id": "A2", "username": "paul", "role": "readonly",
-          "created_at": "2026-10-04T11:00:00.000Z", "last_login_at": null, "sessions_open": 0 }
-    ]});
-    match wire::interpret_list(200, &body, "A1").unwrap() {
-        AccountListDto::Listed { accounts, me } => {
-            assert_eq!(me, "A1");
-            assert_eq!(accounts.len(), 2);
-            assert_eq!(accounts[0].sessions_open, 2);
-            assert_eq!(accounts[1].role, RoleDto::Readonly);
-        }
-        other => panic!("{other:?}"),
-    }
-    assert_eq!(
-        wire::interpret_list(403, &error("FORBIDDEN_ROLE", json!({})), "").unwrap(),
-        AccountListDto::Refused {
-            refusal: AccountRefusal::Forbidden
-        }
     );
 }
 

@@ -54,6 +54,16 @@ export const commands = {
 	history: SampleDto[],
 	levels: LevelsDto | null,
 } | null, LinkFailure>(__TAURI_INVOKE("get_dashboard", { serverId })),
+	/**
+	 *  Une page du journal d'activité (administrateurs seulement, BR-AUDIT-001). Le filtre est TYPÉ et
+	 *  validé côté Rust ; la route, la méthode et l'adresse sont construites côté Rust (ADR-0013, 0016).
+	 */
+	readAudit: (serverId: string, filter: AuditFilterDto, before: number | null) => typedError<AuditPageDto, LinkFailure>(__TAURI_INVOKE("read_audit", { serverId, filter, before })),
+	/**
+	 *  Exporte le résultat filtré en CSV : le fichier est choisi PAR L'UTILISATEUR dans la boîte de
+	 *  dialogue native d'enregistrement, jamais par la page (ADR-0019).
+	 */
+	exportAudit: (serverId: string, filter: AuditFilterDto) => typedError<AuditExportDto, LinkFailure>(__TAURI_INVOKE("export_audit", { serverId, filter })),
 	/**  L'état courant (au démarrage de l'interface, et pour rattraper un événement manqué). */
 	getUpdateState: () => __TAURI_INVOKE<UpdateStateDto>("get_update_state"),
 	/**  « Vérifier maintenant » (BR-UPDATE-026). */
@@ -115,13 +125,15 @@ export type AccountInputCheck = {
 	password: PasswordRuleDto[],
 };
 
-/**  Résultat de la lecture de la liste. */
-export type AccountListDto = 
 /**
- *  `me` : l'identifiant de l'AGENT du compte de la session courante (jamais une comparaison de
- *  texte côté interface pour savoir « qui est moi »).
+ *  La liste des comptes et qui est « moi » : l'identifiant de l'AGENT du compte de la session (jamais
+ *  une comparaison de texte côté interface). Un refus de rôle de l'agent est `LinkFailure::Forbidden`
+ *  (une seule façon de dire « accès refusé »).
  */
-{ kind: "listed"; accounts: AccountDto[]; me: string } | { kind: "refused"; refusal: AccountRefusal };
+export type AccountListDto = {
+	accounts: AccountDto[],
+	me: string,
+};
 
 /**  Issue d'une action de compte. */
 export type AccountOutcome = 
@@ -142,8 +154,6 @@ export type AccountOutcome =
  *  choisit le message d'après `kind`.
  */
 export type AccountRefusal = 
-/**  Rôle insuffisant (BR-ACCT-013, 014) : l'agent est l'arbitre, même si le client est contourné. */
-{ kind: "forbidden" } | 
 /**  Identifiant au mauvais format : `problem` renseigné quand la validation locale l'a vu. */
 { kind: "invalid_username"; problem: UsernameProblemDto | null } | 
 /**  Mot de passe refusé : toutes les règles non respectées. */
@@ -191,6 +201,70 @@ export type AppError =
 { kind: "autostart"; message: string } | 
 /**  Dossier des journaux impossible à créer ou à ouvrir. */
 { kind: "logs"; message: string };
+
+/**
+ *  Une entrée du journal. `at` : RFC 3339 en UTC, la source (l'interface l'affiche dans le fuseau du
+ *  poste, BR-AUDIT-012). Toute valeur est du texte non fiable (saisi par des tiers).
+ */
+export type AuditEntryDto = {
+	id: number | null,
+	at: string,
+	account: string | null,
+	origin: AuditOriginDto,
+	action: string,
+	actionLabel: string,
+	target: string | null,
+	outcome: AuditOutcomeDto,
+	reason: string | null,
+	repeatCount: number,
+};
+
+/**  Issue d'un export : enregistré, ou abandonné dans la boîte de dialogue. */
+export type AuditExportDto = {
+	/**  `false` : l'utilisateur a fermé la boîte de dialogue, rien n'est écrit. */
+	saved: boolean,
+	/**  Seules les 10 000 entrées les plus récentes du résultat sont dans le fichier. */
+	truncated: boolean,
+};
+
+/**  Le filtre demandé par l'interface (BR-AUDIT-014, 015, 016). Dates : secondes depuis l'époque. */
+export type AuditFilterDto = {
+	accounts: string[],
+	kinds: AuditKindDto[],
+	outcomes: AuditOutcomeDto[],
+	fromS: number | null,
+	toS: number | null,
+	text: string | null,
+};
+
+/**  Type d'action du filtre (liste fermée de la spec). */
+export type AuditKindDto = "login_ok" | "login_denied" | "accounts" | "update" | "denied";
+
+/**  Une entrée reçue en direct (`link://audit`). */
+export type AuditLiveEvent = {
+	serverId: string,
+	event: AuditEntryDto,
+};
+
+/**  D'où vient l'action. */
+export type AuditOriginDto = {
+	kind: AuditOriginKindDto,
+	name: string | null,
+	addr: string | null,
+	/**  Le texte à afficher, fourni par l'agent. */
+	text: string,
+};
+
+export type AuditOriginKindDto = "client" | "cli" | "assistant";
+
+export type AuditOutcomeDto = "ok" | "denied" | "failed";
+
+/**  Une page du journal filtré, de la plus récente à la plus ancienne. */
+export type AuditPageDto = {
+	events: AuditEntryDto[],
+	/**  Curseur de la page suivante (absent à la fin). */
+	nextBefore: number | null,
+};
 
 export type AvailableDto = {
 	version: string,
@@ -290,6 +364,8 @@ export type LinkFailure =
 { kind: "invalid_input"; field: InvalidField } | { kind: "verification_required" } | { kind: "unknown_server" } | { kind: "storage" } | { kind: "vault" } | 
 /**  Le lien n'est pas « Connecté » : rien n'a été envoyé (BR-RESIL-008). */
 { kind: "not_connected" } | 
+/**  Le rôle du compte ne suffit pas (le serveur a répondu `FORBIDDEN_ROLE`, BR-AUDIT-001). */
+{ kind: "forbidden" } | 
 /**  Le suivi de l'action n'a pas pu être écrit sur le disque : l'action n'a PAS été lancée. */
 { kind: "tracking_unavailable" } | 
 /**  Le disque est trop lent pour écrire le suivi à temps : l'action n'a PAS été lancée. */

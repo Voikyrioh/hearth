@@ -16,6 +16,8 @@ export interface RunOptions {
    * suggestion de vérifier l'état.
    */
   unknownMessage?: MessageKey;
+  /** Le texte du refus de rôle de l'agent (`forbidden`) propre à l'écran ; sinon celui de `failureMessage`. */
+  forbiddenMessage?: MessageKey;
 }
 
 /**
@@ -50,8 +52,13 @@ export function useServerAction() {
       return result;
     } catch (error) {
       const failure = failureOf(error);
-      if (failure) toasts.push({ kind: "error", message: failureMessage(failure) });
-      else reportUiError(error, "action");
+      if (failure) {
+        const message =
+          failure.kind === "forbidden" && options.forbiddenMessage
+            ? t(options.forbiddenMessage)
+            : failureMessage(failure);
+        toasts.push({ kind: "error", message });
+      } else reportUiError(error, "action");
       return null;
     } finally {
       busy.value = false;

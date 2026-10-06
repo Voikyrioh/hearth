@@ -52,7 +52,10 @@ export function useAccountActions(serverId: () => string) {
     onDone: (outcome: Extract<AccountOutcome, { kind: "done" }>) => void,
     rereads = true,
   ): Promise<AccountReport> {
-    const result = await action.run(call, { unknownMessage: "accounts.unknownResult" });
+    const result = await action.run(call, {
+      unknownMessage: "accounts.unknownResult",
+      forbiddenMessage: "accounts.forbidden",
+    });
     if (!result) return { kind: "failed" };
     if (result.kind === "done") {
       onDone(result);
@@ -61,7 +64,7 @@ export function useAccountActions(serverId: () => string) {
     }
     if (result.kind === "refused") {
       // La liste affichée est périmée (compte disparu, rôle changé ailleurs) : on la relit.
-      if (["not_found", "last_admin", "forbidden"].includes(result.refusal.kind)) reloadIfRead();
+      if (["not_found", "last_admin"].includes(result.refusal.kind)) reloadIfRead();
       return { kind: "refused", refusal: result.refusal };
     }
     return { kind: "unknown" };

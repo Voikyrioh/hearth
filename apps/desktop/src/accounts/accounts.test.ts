@@ -22,7 +22,6 @@ describe("accounts store", () => {
     expect(store.of("salon")).toMatchObject({
       status: "refused",
       accounts: [],
-      refusal: { kind: "forbidden" },
     });
     expect(bridge.calls.filter((call) => call === "account list")).toHaveLength(2);
   });
@@ -157,9 +156,6 @@ describe("refusal texts", () => {
     );
     expect(refusalMessage({ kind: "last_admin" }, true)).toBe(
       "Tu es le dernier administrateur, ce compte ne peut pas être supprimé",
-    );
-    expect(refusalMessage({ kind: "forbidden" })).toBe(
-      "Tu n'as pas la permission pour accéder à la gestion des comptes",
     );
     expect(refusalMessage({ kind: "wrong_password" })).toBe("L'ancien mot de passe est incorrect");
     expect(refusalMessage({ kind: "confirmation_mismatch" })).toBe(

@@ -8,17 +8,14 @@ use hearth_proto::account_rules::{
     InputCheck, PasswordRule, check_input, check_username, unmet_password_rules,
 };
 use hearth_proto::api::accounts::{
-    AccountItem, AccountsResponse, ChangeOwnPasswordRequest, ChangeRoleRequest,
-    CreateAccountRequest, DeleteAccountRequest, RoleName, SessionsClosedResponse,
-    SetPasswordRequest,
+    AccountItem, ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest,
+    DeleteAccountRequest, RoleName, SessionsClosedResponse, SetPasswordRequest,
 };
 use hearth_proto::error::{ErrorBody, ErrorCode};
 use serde::Serialize;
 use serde_json::Value;
 
-use super::dto::{
-    AccountDto, AccountListDto, AccountOutcome, AccountRefusal, PasswordRuleDto, UsernameProblemDto,
-};
+use super::dto::{AccountDto, AccountOutcome, AccountRefusal, PasswordRuleDto, UsernameProblemDto};
 use crate::link_dto::{InvalidField, LinkFailure, RoleDto};
 
 /// Plus long qu'un identifiant de compte (un ULID : 26 caractères).
@@ -209,32 +206,19 @@ pub fn delete(account: &str, confirmation: Option<String>) -> Result<Planned, Li
     })
 }
 
-/// Les chemins des lectures : la liste, et le compte de la session courante.
-pub const LIST_PATH: &str = "/accounts";
-pub const ME_PATH: &str = "/me";
-
-/// L'identifiant de l'agent du compte de la session, lu dans la réponse de `GET /me`.
-pub fn me_id(status: u16, body: &Value) -> Result<String, LinkFailure> {
-    if !(200..300).contains(&status) {
-        return Err(LinkFailure::NotAgent);
-    }
-    serde_json::from_value::<hearth_proto::api::sessions::MeResponse>(body.clone())
-        .map(|me| me.account.id)
-        .map_err(|_| LinkFailure::NotAgent)
-}
-
 /// Ce que dit un refus de l'agent : le code stable de l'erreur, jamais son texte.
-pub fn refusal_from_error(status: u16, body: &Value) -> AccountRefusal {
+/// Le refus de rôle est `LinkFailure::Forbidden` (une seule façon de le dire dans l'interface).
+pub fn refusal_from_error(status: u16, body: &Value) -> Result<AccountRefusal, LinkFailure> {
     let Ok(error) = serde_json::from_value::<ErrorBody>(body.clone()) else {
         return match status {
-            403 => AccountRefusal::Forbidden,
-            404 => AccountRefusal::NotFound,
-            _ => AccountRefusal::Other,
+            403 => Err(LinkFailure::Forbidden),
+            404 => Ok(AccountRefusal::NotFound),
+            _ => Ok(AccountRefusal::Other),
         };
     };
     let error = error.error;
-    match error.code {
-        ErrorCode::ForbiddenRole => AccountRefusal::Forbidden,
+    Ok(match error.code {
+        ErrorCode::ForbiddenRole => return Err(LinkFailure::Forbidden),
         ErrorCode::UsernameTaken => AccountRefusal::UsernameTaken,
         ErrorCode::WrongPassword => AccountRefusal::WrongPassword,
         ErrorCode::LastAdmin => AccountRefusal::LastAdmin,
@@ -263,14 +247,14 @@ pub fn refusal_from_error(status: u16, body: &Value) -> AccountRefusal {
             _ => AccountRefusal::Other,
         },
         _ => AccountRefusal::Other,
-    }
+    })
 }
 
 /// La réponse de l'agent à une action : succès (2xx, forme attendue) ou refus typé.
 pub fn interpret(expect: Expect, status: u16, body: &Value) -> Result<AccountOutcome, LinkFailure> {
     if !(200..300).contains(&status) {
         return Ok(AccountOutcome::Refused {
-            refusal: refusal_from_error(status, body),
+            refusal: refusal_from_error(status, body)?,
         });
     }
     match expect {
@@ -295,19 +279,4 @@ pub fn interpret(expect: Expect, status: u16, body: &Value) -> Result<AccountOut
             sessions_closed: 0,
         }),
     }
-}
-
-/// La réponse de la lecture de la liste.
-pub fn interpret_list(status: u16, body: &Value, me: &str) -> Result<AccountListDto, LinkFailure> {
-    if !(200..300).contains(&status) {
-        return Ok(AccountListDto::Refused {
-            refusal: refusal_from_error(status, body),
-        });
-    }
-    let list: AccountsResponse =
-        serde_json::from_value(body.clone()).map_err(|_| LinkFailure::NotAgent)?;
-    Ok(AccountListDto::Listed {
-        accounts: list.accounts.into_iter().map(AccountDto::from).collect(),
-        me: me.to_owned(),
-    })
 }

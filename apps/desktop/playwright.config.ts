@@ -28,6 +28,7 @@ export default defineConfig({
         "connect.spec.ts",
         "dashboard.spec.ts",
         "offline.spec.ts",
+        "audit.spec.ts",
         "updates.spec.ts",
         "accounts.spec.ts",
       ],

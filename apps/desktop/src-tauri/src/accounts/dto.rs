@@ -102,8 +102,6 @@ impl From<InputCheck> for AccountInputCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AccountRefusal {
-    /// Rôle insuffisant (BR-ACCT-013, 014) : l'agent est l'arbitre, même si le client est contourné.
-    Forbidden,
     /// Identifiant au mauvais format : `problem` renseigné quand la validation locale l'a vu.
     InvalidUsername {
         problem: Option<UsernameProblemDto>,
@@ -152,17 +150,11 @@ pub enum AccountOutcome {
     },
 }
 
-/// Résultat de la lecture de la liste.
+/// La liste des comptes et qui est « moi » : l'identifiant de l'AGENT du compte de la session (jamais
+/// une comparaison de texte côté interface). Un refus de rôle de l'agent est `LinkFailure::Forbidden`
+/// (une seule façon de dire « accès refusé »).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AccountListDto {
-    /// `me` : l'identifiant de l'AGENT du compte de la session courante (jamais une comparaison de
-    /// texte côté interface pour savoir « qui est moi »).
-    Listed {
-        accounts: Vec<AccountDto>,
-        me: String,
-    },
-    Refused {
-        refusal: AccountRefusal,
-    },
+pub struct AccountListDto {
+    pub accounts: Vec<AccountDto>,
+    pub me: String,
 }

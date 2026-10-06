@@ -2,8 +2,8 @@
 
 Atome · `apps/desktop/src/components/atoms/HSelect.vue`
 
-Liste déroulante native (clavier et lecteurs d'écran), libellé toujours présent, masqué à l'écran avec `hideLabel` quand le contexte le porte (cellule de tableau).
+Liste déroulante native (clavier, lecteurs d'écran) aux couleurs Braise : un choix parmi quelques options, libellé au-dessus.
 
-- Props : `modelValue`, `label`, `options` (`{ value, label }`), `hideLabel`, `disabled`
-- Événements et slots : Événement `update:modelValue`
-- Notes : Rôle d'un compte (`CreateAccountDialog`, `AccountTable`). Test : `accounts.test.ts`.
+- Props : `modelValue`, `label`, `options` (`{ value, label }[]`), `hideLabel` (libellé lu par les lecteurs d'écran seulement), `disabled`
+- Événements et slots : `update:modelValue`
+- Notes : Générique (`T extends string`).

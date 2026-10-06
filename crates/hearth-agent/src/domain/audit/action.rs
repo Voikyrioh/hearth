@@ -1,6 +1,8 @@
 //! Catalogue des actions du journal (BR-AUDIT-003) : un code stable (filtre, stockage) et un
 //! libellé (ce que l'administrateur lit, ce que la recherche plein texte trouve).
 
+use hearth_proto::api::audit::action;
+
 /// Ce qu'une entrée du journal raconte. Le résultat (réussi, refusé, échoué) est à part : une
 /// connexion refusée est l'action `Login` avec le résultat « refusé ».
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,21 +43,21 @@ impl AuditAction {
         Self::AgentUpdate,
     ];
 
-    /// Code stable : celui du stockage et du filtre `action=`.
+    /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
     pub fn code(self) -> &'static str {
         match self {
-            Self::Login => "login",
-            Self::LoginLocked => "login.locked",
-            Self::Logout => "logout",
-            Self::AccountCreate => "account.create",
-            Self::AccountDelete => "account.delete",
-            Self::AccountRole => "account.role",
-            Self::AccountPassword => "account.password",
-            Self::OwnPassword => "account.password.own",
-            Self::SessionsRevoke => "sessions.revoke",
-            Self::AccountsRead => "accounts.read",
-            Self::AuditRead => "audit.read",
-            Self::AgentUpdate => "agent.update",
+            Self::Login => action::LOGIN,
+            Self::LoginLocked => action::LOGIN_LOCKED,
+            Self::Logout => action::LOGOUT,
+            Self::AccountCreate => action::ACCOUNT_CREATE,
+            Self::AccountDelete => action::ACCOUNT_DELETE,
+            Self::AccountRole => action::ACCOUNT_ROLE,
+            Self::AccountPassword => action::ACCOUNT_PASSWORD,
+            Self::OwnPassword => action::ACCOUNT_PASSWORD_OWN,
+            Self::SessionsRevoke => action::SESSIONS_REVOKE,
+            Self::AccountsRead => action::ACCOUNTS_READ,
+            Self::AuditRead => action::AUDIT_READ,
+            Self::AgentUpdate => action::AGENT_UPDATE,
         }
     }
 
@@ -103,6 +105,12 @@ mod tests {
         }
         assert_eq!(AuditAction::from_code("inconnue"), None);
         assert_eq!(AuditAction::from_code(""), None);
+    }
+
+    #[test]
+    fn the_catalogue_of_the_protocol_lists_exactly_the_codes_of_the_agent() {
+        let ours: Vec<&str> = AuditAction::ALL.iter().map(|a| a.code()).collect();
+        assert_eq!(ours, action::ALL.to_vec());
     }
 
     #[test]

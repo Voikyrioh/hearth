@@ -404,6 +404,9 @@ pub enum LinkFailure {
     /// Le lien n'est pas « Connecté » : rien n'a été envoyé (BR-RESIL-008).
     #[error("lien non établi")]
     NotConnected,
+    /// Le rôle du compte ne suffit pas (le serveur a répondu `FORBIDDEN_ROLE`, BR-AUDIT-001).
+    #[error("rôle insuffisant")]
+    Forbidden,
     /// Le suivi de l'action n'a pas pu être écrit sur le disque : l'action n'a PAS été lancée.
     #[error("suivi de l'action impossible")]
     TrackingUnavailable,
@@ -439,6 +442,7 @@ impl From<LinkError> for LinkFailure {
                     InputField::Port => InvalidField::Port,
                     InputField::Credentials => InvalidField::Credentials,
                     InputField::Fingerprint => InvalidField::Fingerprint,
+                    InputField::Filter => InvalidField::Other,
                 },
             },
             LinkError::FingerprintChanged => Self::FingerprintChanged,
@@ -456,6 +460,9 @@ impl From<LinkError> for LinkFailure {
             LinkError::NotConnected => Self::NotConnected,
             LinkError::TrackingUnavailable => Self::TrackingUnavailable,
             LinkError::TrackingSlow => Self::TrackingSlow,
+            LinkError::Rejected(Some(hearth_proto::error::ErrorCode::ForbiddenRole)) => {
+                Self::Forbidden
+            }
             LinkError::Rejected(_)
             | LinkError::TooManyPending
             | LinkError::TaskRestarted

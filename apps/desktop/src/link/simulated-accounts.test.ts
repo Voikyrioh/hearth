@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SimulatedAccounts, simulatedCheckInput } from "./simulated-accounts";
-import type { AccountInputCheck, ServerInfo } from "./types";
+import { type AccountInputCheck, LinkCommandError, type ServerInfo } from "./types";
 
 // Les mêmes vecteurs que le test Rust `hearth-proto::account_rules::the_shared_vectors_hold` : la
 // règle de format est celle de l'agent, ce simulateur n'en est qu'une réplique de navigateur ; si
@@ -57,18 +57,19 @@ function fresh() {
 }
 
 describe("the simulated agent applies the rules of the real one", () => {
-  it("refuses everything to a read-only account, even a forced call (BR-ACCT-014)", () => {
+  it("refuses everything to a read-only account with the typed `forbidden`, even a forced call (BR-ACCT-014)", () => {
     const accounts = fresh();
     const readonly = { ...server, role: "readonly" as const };
-    expect(accounts.list(readonly)).toBeNull();
-    for (const result of [
-      accounts.create(readonly, "lea", GOOD, "readonly"),
-      accounts.changeRole(readonly, "B", "admin"),
-      accounts.closeSessions(readonly, "B"),
-      accounts.delete(readonly, "B", null),
-      accounts.setPassword(readonly, "B", GOOD),
+    const forbidden = new LinkCommandError({ kind: "forbidden" });
+    for (const call of [
+      () => accounts.list(readonly),
+      () => accounts.create(readonly, "lea", GOOD, "readonly"),
+      () => accounts.changeRole(readonly, "B", "admin"),
+      () => accounts.closeSessions(readonly, "B"),
+      () => accounts.delete(readonly, "B", null),
+      () => accounts.setPassword(readonly, "B", GOOD),
     ]) {
-      expect(result.outcome).toEqual({ kind: "refused", refusal: { kind: "forbidden" } });
+      expect(call).toThrow(forbidden);
     }
   });
 

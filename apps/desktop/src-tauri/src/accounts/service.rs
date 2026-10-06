@@ -53,17 +53,15 @@ pub fn check_input(username: &str, password: &Secret) -> AccountInputCheck {
     hearth_proto::account_rules::check_input(username, password.expose()).into()
 }
 
-/// La liste, et qui est « moi » : l'identifiant de l'AGENT du compte de la session (`GET /me`),
-/// lu seulement quand la liste l'a été (un compte Lecture seule n'envoie jamais `GET /accounts`
-/// pour rien : l'agent le consignerait comme un accès refusé).
+/// La liste, et qui est « moi » : l'identifiant de l'AGENT du compte de la session. Lecture typée de
+/// la bibliothèque (`LinkManager::accounts_list`) : un compte Lecture seule est refusé par l'agent
+/// (`LinkFailure::Forbidden`), et le compte de la session n'est lu que si la liste l'a été.
 pub async fn list(manager: &LinkManager, id: &ServerId) -> Result<AccountListDto, LinkFailure> {
-    let response = manager.fetch(id, wire::LIST_PATH).await?;
-    if !(200..300).contains(&response.status) {
-        return wire::interpret_list(response.status, &response.body, "");
-    }
-    let me = manager.fetch(id, wire::ME_PATH).await?;
-    let me = wire::me_id(me.status, &me.body)?;
-    wire::interpret_list(response.status, &response.body, &me)
+    let read = manager.accounts_list(id).await?;
+    Ok(AccountListDto {
+        accounts: read.accounts.into_iter().map(Into::into).collect(),
+        me: read.me,
+    })
 }
 
 pub async fn create(

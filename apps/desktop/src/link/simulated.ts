@@ -1,3 +1,4 @@
+import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
 import type { MachineEvent } from "./machine";
 import {
@@ -5,6 +6,7 @@ import {
   SimulatedAccounts,
   simulatedCheckInput,
 } from "./simulated-accounts";
+import { SimulatedAudit } from "./simulated-audit";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import {
   type AccountInputCheck,
@@ -162,6 +164,8 @@ export class SimulatedLinkBridge implements LinkBridge {
    * l'interface reçoit « résultat inconnu ». Le mode revient à `ok` après une coupure.
    */
   executeBeforeCut = true;
+  /** Le journal d'activité simulé (filtre, pagination, direct : comme l'agent). */
+  readonly audit: SimulatedAudit;
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -176,7 +180,13 @@ export class SimulatedLinkBridge implements LinkBridge {
       // Le serveur « salon » est un boîtier sans carte graphique ni sonde : de quoi voir les états vides.
       machines: { salon: bareMachine("nas-salon") },
     });
+    this.audit = new SimulatedAudit({
+      now: this.now,
+      connected: (id) => this.events.get(id)?.state === "connected",
+      role: (id) => this.servers.find((server) => server.id === id)?.role ?? "readonly",
+    });
     if (options.liveMetrics) {
+      this.audit.seed("forge", 250);
       for (const server of this.servers) this.machine.prefill(server.id, 300);
       this.machine.start();
     }
@@ -435,10 +445,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       throw this.fail({ kind: "not_connected" });
     }
     this.calls.push("account list");
-    const accounts = this.accounts.list(server);
-    return accounts
-      ? { kind: "listed", accounts, me: this.accounts.meId(server) }
-      : { kind: "refused", refusal: { kind: "forbidden" } };
+    return { accounts: this.accounts.list(server), me: this.accounts.meId(server) };
   }
 
   createAccount(
@@ -521,6 +528,28 @@ export class SimulatedLinkBridge implements LinkBridge {
   private settle(serverId: string, result: SimAccountResult): AccountOutcome {
     if (result.ended) this.publish(serverId, "access_revoked", { reason: "revoked" });
     return result.outcome;
+  }
+
+  async readAudit(
+    serverId: string,
+    filter: AuditFilter,
+    before: number | null,
+  ): Promise<AuditPage> {
+    this.calls.push(`readAudit ${serverId}`);
+    return this.audit.read(serverId, filter, before);
+  }
+
+  async exportAudit(serverId: string, filter: AuditFilter): Promise<AuditExportResult> {
+    this.calls.push(`exportAudit ${serverId}`);
+    return this.audit.export(serverId, filter);
+  }
+
+  async onAudit(
+    serverId: string,
+    listener: (entry: AuditEntry) => void,
+    onGap: () => void = () => {},
+  ): Promise<Unsubscribe> {
+    return this.audit.subscribe(serverId, listener, onGap);
   }
 
   // --- Pilotage (code de test, panneau de développement) ---

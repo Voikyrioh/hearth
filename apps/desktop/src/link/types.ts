@@ -157,6 +157,7 @@ export type LinkFailure =
   | { kind: "storage" }
   | { kind: "vault" }
   | { kind: "not_connected" }
+  | { kind: "forbidden" }
   | { kind: "tracking_unavailable" }
   | { kind: "tracking_slow" }
   | { kind: "internal" };
@@ -217,7 +218,6 @@ export interface AccountInputCheck {
 
 /** Pourquoi l'agent (ou la validation locale, avant tout envoi) a refusé. */
 export type AccountRefusal =
-  | { kind: "forbidden" }
   | { kind: "invalid_username"; problem: UsernameProblem | null }
   | { kind: "weak_password"; rules: PasswordRule[] }
   | { kind: "username_taken" }
@@ -240,7 +240,12 @@ export type AccountOutcome =
   | { kind: "refused"; refusal: AccountRefusal }
   | { kind: "unknown"; opId: string };
 
-export type AccountList =
-  /** `me` : l'identifiant de l'AGENT du compte de la session (jamais une comparaison de texte). */
-  | { kind: "listed"; accounts: Account[]; me: string }
-  | { kind: "refused"; refusal: AccountRefusal };
+/**
+ * La liste des comptes et qui est « moi » : `me`, l'identifiant de l'AGENT du compte de la session
+ * (jamais une comparaison de texte). Un refus de rôle de l'agent est l'échec typé `forbidden`
+ * (`LinkFailure`), la seule façon de dire « accès refusé ».
+ */
+export interface AccountList {
+  accounts: Account[];
+  me: string;
+}

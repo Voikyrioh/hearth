@@ -44,8 +44,6 @@ export function roleLabel(role: Role): string {
  */
 export function refusalMessage(refusal: AccountRefusal, self = false): string {
   switch (refusal.kind) {
-    case "forbidden":
-      return t("accounts.forbidden");
     case "invalid_username":
       return usernameProblemText(refusal.problem ?? "invalid_chars");
     case "weak_password": {

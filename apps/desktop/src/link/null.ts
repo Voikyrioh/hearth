@@ -1,3 +1,4 @@
+import type { AuditEntry } from "./audit";
 import type { LinkBridge } from "./bridge";
 import type { MachineEvent } from "./machine";
 import {
@@ -90,5 +91,18 @@ export class NullLinkBridge implements LinkBridge {
   }
   async deleteAccount(): Promise<never> {
     return this.unavailable();
+  }
+  async readAudit(): Promise<never> {
+    return this.unavailable();
+  }
+  async exportAudit(): Promise<never> {
+    return this.unavailable();
+  }
+  async onAudit(
+    _serverId: string,
+    _listener: (entry: AuditEntry) => void,
+    _onGap?: () => void,
+  ): Promise<Unsubscribe> {
+    return () => {};
   }
 }

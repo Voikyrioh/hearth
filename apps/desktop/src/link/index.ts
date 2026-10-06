@@ -3,6 +3,7 @@ import { NullLinkBridge } from "./null";
 import { SAMPLE_AGENT, SimulatedLinkBridge } from "./simulated";
 import { TauriLinkBridge } from "./tauri";
 
+export * from "./audit";
 export type { LinkBridge } from "./bridge";
 export * from "./machine";
 export * from "./messages";
@@ -17,6 +18,7 @@ export {
   type SimulatedOptions,
 } from "./simulated";
 export { SimulatedAccounts, simulatedCheckInput } from "./simulated-accounts";
+export { SimulatedAudit } from "./simulated-audit";
 export { bareMachine, type Pinnable, SimulatedMachine, sampleMachine } from "./simulated-machine";
 export { TauriLinkBridge } from "./tauri";
 export * from "./types";

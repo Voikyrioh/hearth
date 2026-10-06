@@ -1,6 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "@/App.vue";
+import { LinkCommandError } from "@/link";
 import { useToastsStore } from "@/stores/toasts";
 import { mountContext } from "@/test/mount";
 
@@ -53,10 +54,9 @@ describe("Comptes (administrateurs)", () => {
 
   it("shows the refusal of the agent when a read-only account forces the list, without a list", async () => {
     const ctx = await mountContext();
-    vi.spyOn(ctx.bridge, "listAccounts").mockResolvedValue({
-      kind: "refused",
-      refusal: { kind: "forbidden" },
-    });
+    vi.spyOn(ctx.bridge, "listAccounts").mockRejectedValue(
+      new LinkCommandError({ kind: "forbidden" }),
+    );
     await ctx.router.push("/servers/forge/accounts");
     await ctx.router.isReady();
     const wrapper = mount(App, { global: ctx.global, attachTo: document.body });

@@ -159,17 +159,12 @@ impl Client {
         .await;
     }
 
-    async fn list(&self) -> AccountListDto {
-        service::list(self.runtime.manager(), &self.id)
-            .await
-            .unwrap()
+    async fn list(&self) -> Result<AccountListDto, LinkFailure> {
+        service::list(self.runtime.manager(), &self.id).await
     }
 
     async fn accounts(&self) -> Vec<AccountDto> {
-        match self.list().await {
-            AccountListDto::Listed { accounts, .. } => accounts,
-            other => panic!("liste attendue, reçu {other:?}"),
-        }
+        self.list().await.unwrap().accounts
     }
 
     async fn account(&self, username: &str) -> AccountDto {
@@ -180,7 +175,12 @@ impl Client {
             .unwrap_or_else(|| panic!("compte {username} absent de la liste"))
     }
 
-    async fn create(&self, username: &str, password: &str, role: RoleDto) -> AccountOutcome {
+    async fn create(
+        &self,
+        username: &str,
+        password: &str,
+        role: RoleDto,
+    ) -> Result<AccountOutcome, LinkFailure> {
         service::create(
             self.runtime.manager(),
             &self.id,
@@ -189,16 +189,17 @@ impl Client {
             role,
         )
         .await
-        .unwrap()
     }
 
-    async fn set_role(&self, account: &str, role: RoleDto) -> AccountOutcome {
-        service::change_role(self.runtime.manager(), &self.id, account, role)
-            .await
-            .unwrap()
+    async fn set_role(&self, account: &str, role: RoleDto) -> Result<AccountOutcome, LinkFailure> {
+        service::change_role(self.runtime.manager(), &self.id, account, role).await
     }
 
-    async fn set_password(&self, account: &AccountDto, password: &str) -> AccountOutcome {
+    async fn set_password(
+        &self,
+        account: &AccountDto,
+        password: &str,
+    ) -> Result<AccountOutcome, LinkFailure> {
         service::set_password(
             self.runtime.manager(),
             &self.id,
@@ -206,16 +207,17 @@ impl Client {
             &Secret::new(password),
         )
         .await
-        .unwrap()
     }
 
-    async fn close_sessions(&self, account: &str) -> AccountOutcome {
-        service::close_sessions(self.runtime.manager(), &self.id, account)
-            .await
-            .unwrap()
+    async fn close_sessions(&self, account: &str) -> Result<AccountOutcome, LinkFailure> {
+        service::close_sessions(self.runtime.manager(), &self.id, account).await
     }
 
-    async fn delete(&self, account: &str, confirmation: Option<&str>) -> AccountOutcome {
+    async fn delete(
+        &self,
+        account: &str,
+        confirmation: Option<&str>,
+    ) -> Result<AccountOutcome, LinkFailure> {
         service::delete(
             self.runtime.manager(),
             &self.id,
@@ -223,10 +225,13 @@ impl Client {
             confirmation.map(str::to_owned),
         )
         .await
-        .unwrap()
     }
 
-    async fn change_own_password(&self, current: &str, password: &str) -> AccountOutcome {
+    async fn change_own_password(
+        &self,
+        current: &str,
+        password: &str,
+    ) -> Result<AccountOutcome, LinkFailure> {
         service::change_own_password(
             self.runtime.manager(),
             &self.id,
@@ -234,19 +239,18 @@ impl Client {
             &Secret::new(password),
         )
         .await
-        .unwrap()
     }
 }
 
-fn refused(outcome: &AccountOutcome) -> &AccountRefusal {
-    match outcome {
+fn refused(outcome: &Result<AccountOutcome, LinkFailure>) -> &AccountRefusal {
+    match outcome.as_ref().unwrap() {
         AccountOutcome::Refused { refusal } => refusal,
         other => panic!("refus attendu, reçu {other:?}"),
     }
 }
 
-fn done(outcome: AccountOutcome) -> (Option<AccountDto>, u32) {
-    match outcome {
+fn done(outcome: Result<AccountOutcome, LinkFailure>) -> (Option<AccountDto>, u32) {
+    match outcome.unwrap() {
         AccountOutcome::Done {
             account,
             sessions_closed,
@@ -350,12 +354,7 @@ async fn roles_change_and_the_last_administrator_can_be_neither_demoted_nor_remo
     // Deux administrateurs : marie peut maintenant être rétrogradée ; l'agent applique le nouveau
     // rôle tout de suite, même à la session ouverte avec l'ancien (le client n'est pas l'arbitre).
     done(admin.set_role(&marie.id, RoleDto::Readonly).await);
-    assert_eq!(
-        admin.list().await,
-        AccountListDto::Refused {
-            refusal: AccountRefusal::Forbidden
-        }
-    );
+    assert_eq!(admin.list().await.unwrap_err(), LinkFailure::Forbidden);
 }
 
 #[tokio::test]
@@ -455,10 +454,7 @@ async fn deleting_your_own_account_asks_for_your_username_and_ends_your_session(
     let (_, closed) = done(admin.delete(&marie.id, Some("marie")).await);
     assert!(closed >= 1);
     // La session du compte supprimé n'est plus : l'agent le dit, l'interface s'en tient là.
-    match admin.list().await {
-        AccountListDto::Refused { refusal } => assert_eq!(refusal, AccountRefusal::SessionRevoked),
-        other => panic!("session terminée attendue, reçu {other:?}"),
-    }
+    assert!(admin.list().await.is_err(), "la session est fermée");
 }
 
 #[tokio::test]
@@ -509,30 +505,39 @@ async fn a_read_only_account_that_forces_every_call_is_refused_by_the_agent() {
     )
     .await;
 
-    let forbidden = AccountRefusal::Forbidden;
+    // Le refus de rôle est `LinkFailure::Forbidden` (une seule façon de le dire), pour la lecture
+    // comme pour chaque action.
+    let forbidden = LinkFailure::Forbidden;
+    assert_eq!(readonly.list().await.unwrap_err(), forbidden);
     assert_eq!(
-        readonly.list().await,
-        AccountListDto::Refused {
-            refusal: AccountRefusal::Forbidden
-        }
+        readonly
+            .create("lea", NEW_PASSWORD, RoleDto::Admin)
+            .await
+            .unwrap_err(),
+        forbidden
     );
     assert_eq!(
-        refused(&readonly.create("lea", NEW_PASSWORD, RoleDto::Admin).await),
-        &forbidden
+        readonly
+            .set_role(&paul.id, RoleDto::Admin)
+            .await
+            .unwrap_err(),
+        forbidden
     );
     assert_eq!(
-        refused(&readonly.set_role(&paul.id, RoleDto::Admin).await),
-        &forbidden
+        readonly
+            .set_password(&marie, "Another-Long-Pass-91")
+            .await
+            .unwrap_err(),
+        forbidden
     );
     assert_eq!(
-        refused(&readonly.set_password(&marie, "Another-Long-Pass-91").await),
-        &forbidden
+        readonly.close_sessions(&marie.id).await.unwrap_err(),
+        forbidden
     );
     assert_eq!(
-        refused(&readonly.close_sessions(&marie.id).await),
-        &forbidden
+        readonly.delete(&marie.id, None).await.unwrap_err(),
+        forbidden
     );
-    assert_eq!(refused(&readonly.delete(&marie.id, None).await), &forbidden);
     // Chaque refus est consigné au journal de l'agent, au nom de ce compte (BR-ACCT-016,
     // BR-AUDIT-003) : six appels refusés, six entrées « refusé ».
     agent.services.audit_recorder.flush_all().await;
@@ -690,9 +695,7 @@ async fn a_login_typed_in_capitals_keeps_the_identifier_of_the_agent_and_me_is_i
         .find(|r| r.id == admin.id)
         .unwrap();
     assert_eq!(record.username, "marie");
-    let AccountListDto::Listed { accounts, me } = admin.list().await else {
-        panic!("liste attendue");
-    };
+    let AccountListDto { accounts, me } = admin.list().await.unwrap();
     let marie = accounts.iter().find(|a| a.username == "marie").unwrap();
     assert_eq!(me, marie.id);
     let paul = accounts.iter().find(|a| a.username == "paul").unwrap();
