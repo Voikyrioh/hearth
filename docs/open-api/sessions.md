@@ -30,10 +30,10 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 | Statut | Code | Quand |
 |---|---|---|
 | 401 | `INVALID_CREDENTIALS` | Identifiant inconnu **ou** mot de passe faux, sans distinction (BR-CONN-013). |
-| 429 | `TOO_MANY_ATTEMPTS` | 5 échecs pour ce couple identifiant + adresse, ou 20 échecs en 10 minutes pour cette adresse tous identifiants confondus ; `details.retry_after_s` (BR-CONN-006, BR-CONN-007). Même le bon mot de passe est refusé pendant l'attente. |
+| 429 | `TOO_MANY_ATTEMPTS` | 5 échecs pour ce couple identifiant + adresse, 20 échecs en 10 minutes pour cette origine (adresse IPv4, ou préfixe /64 en IPv6) tous identifiants confondus, ou, depuis une adresse que ce compte ne connaît pas, plus de 10 échecs sur cet identifiant (attente de 2 s doublée, au plus 2 minutes) ; `details.retry_after_s` (BR-CONN-006, BR-CONN-007, BR-CONN-018). La réponse est la même quel que soit le compteur et que l'identifiant existe ou non. Même le bon mot de passe est refusé pendant l'attente, sauf depuis une adresse connue du compte pour les deux derniers compteurs (BR-CONN-019). |
 | 422 | `VALIDATION_ERROR` | Corps illisible ou champ manquant, ou `X-Hearth-Api` absent. |
 | 503 | `BUSY` | Trop de vérifications de mot de passe en cours : réessayer après `Retry-After` (1 s). |
-| 429 | `TOO_MANY_ATTEMPTS` | Aussi quand plus de huit connexions attendent déjà pour la même adresse : `details.retry_after_s = 1`. |
+| 429 | `TOO_MANY_ATTEMPTS` | Aussi quand plus de huit connexions attendent déjà pour la même adresse, ou quand l'agent a déjà 32 connexions en cours (24 pour une adresse inconnue du compte : 8 places sont réservées aux adresses connues, BR-CONN-020) : `details.retry_after_s = 1`. |
 | 426 | `INCOMPATIBLE_VERSION` | Version d'interface hors plage ; `details.upgrade` : `client` ou `agent` (BR-CONN-014). |
 
 ## `DELETE /api/v1/sessions/current` : se déconnecter
@@ -66,6 +66,6 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 
 ## Règles
 
-- BR-CONN-006, BR-CONN-007, BR-CONN-013, BR-CONN-014, BR-RESIL-012, BR-RESIL-014.
+- BR-CONN-006, BR-CONN-007, BR-CONN-013, BR-CONN-014, BR-CONN-018, BR-CONN-019, BR-CONN-020, BR-RESIL-012, BR-RESIL-014. Décision : ADR-0022.
 - L'adresse du client est celle de la connexion TCP ; `X-Forwarded-For` et `Forwarded` sont ignorés.
 - Jamais de jeton, de mot de passe ni de haché dans un journal ou un message d'erreur.
