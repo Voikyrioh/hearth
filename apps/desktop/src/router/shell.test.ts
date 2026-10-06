@@ -107,8 +107,8 @@ describe("shell of a server", () => {
   });
 
   it("goes connected -> reconnecting -> offline -> back: pill, banner, stale data", async () => {
-    // « Comptes » : page encore « Bientôt disponible », qui passe par `StaleSurface` ; le tableau
-    // de bord a ses propres tests (`dashboard.test.ts`).
+    // « Comptes » : une page qui passe par `StaleSurface` comme les autres ; le tableau de bord a ses
+    // propres tests (`dashboard.test.ts`).
     const { wrapper, bridge } = await boot("/servers/forge/accounts");
     bridge.setState("forge", "reconnecting");
     await flushPromises();
@@ -155,7 +155,9 @@ describe("shell of a server", () => {
     bridge.setState("forge", "connected");
     await flushPromises();
     await action().trigger("click");
-    expect(wrapper.get(".toast").text()).toContain("Bientôt disponible");
+    await flushPromises();
+    // Connecté : le bouton ouvre la fenêtre de création (HRT-13).
+    expect(document.body.textContent).toContain("Créer un compte");
     wrapper.unmount();
   });
 
@@ -219,7 +221,7 @@ describe("error containment: the shell is never replaced", () => {
     expect(wrapper.find('nav[aria-label="Navigation du serveur"]').exists()).toBe(true);
     expect(wrapper.get(".head [role=status]").text()).toBe("Hors ligne");
     expect(wrapper.find(".banner").exists()).toBe(true);
-    expect(wrapper.text()).toContain("Bientôt disponible");
+    expect(wrapper.text()).toContain("Identifiant");
     expect(wrapper.get(".toast").text()).toContain("problème est survenu");
     wrapper.unmount();
   });

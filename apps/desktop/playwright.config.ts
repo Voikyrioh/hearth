@@ -29,6 +29,7 @@ export default defineConfig({
         "dashboard.spec.ts",
         "offline.spec.ts",
         "updates.spec.ts",
+        "accounts.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },

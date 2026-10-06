@@ -3,11 +3,19 @@ import { computed, onMounted } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HToggle from "@/components/atoms/HToggle.vue";
 import SettingRow from "@/components/molecules/SettingRow.vue";
+import OwnAccountCard from "@/components/organisms/OwnAccountCard.vue";
 import UpdatePanel from "@/components/organisms/UpdatePanel.vue";
 import { t } from "@/i18n";
+import { useServersStore } from "@/stores/servers";
 import { useSettingsStore } from "@/stores/settings";
 
+// Réglages, dans l'ordre du design (design-ecrans-socle.md) : à gauche « Général », « Client »,
+// « Mises à jour » ; à droite « Mon compte », une carte par serveur (le design y met l'état de chaque
+// serveur ; le compte de l'utilisateur sur ce serveur en est le prolongement naturel, et c'est la
+// seule place accessible au rôle Lecture seule, qui n'a pas la page Comptes). « Notifications » est
+// une préférence du CLIENT : elle vit dans la section « Client », avec la version.
 const settings = useSettingsStore();
+const servers = useServersStore();
 
 onMounted(() => settings.load());
 
@@ -17,6 +25,8 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
 <template>
   <main class="settings">
     <h1 class="settings__title">{{ t("settings.title") }}</h1>
+    <div class="settings__columns">
+    <div class="settings__column">
     <section class="settings__panel">
       <h2 class="settings__section">{{ t("settings.sectionGeneral") }}</h2>
       <p v-if="settings.error" class="settings__error" role="alert">{{ t(settings.error) }}</p>
@@ -40,9 +50,9 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
         </HButton>
       </SettingRow>
       <p v-if="settings.logsError" class="settings__error" role="alert">{{ t(settings.logsError) }}</p>
-      <h2 class="settings__section settings__section--spaced">
-        {{ t("settings.sectionNotifications") }}
-      </h2>
+    </section>
+    <section class="settings__panel">
+      <h2 class="settings__section">{{ t("settings.sectionClient") }}</h2>
       <SettingRow
         :label="t('settings.notifyOnLinkChange')"
         :help="t('settings.notifyOnLinkChangeHelp')"
@@ -65,6 +75,12 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
       </p>
     </section>
     <UpdatePanel />
+    </div>
+    <div v-if="servers.servers.length > 0" class="settings__column">
+      <h2 class="settings__section settings__section--column">{{ t("settings.sectionAccount") }}</h2>
+      <OwnAccountCard v-for="server in servers.servers" :key="server.id" :server="server" />
+    </div>
+    </div>
   </main>
 </template>
 
@@ -80,8 +96,18 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
   font-weight: var(--fw-semibold);
 }
 
+.settings__columns {
+  display: grid;
+  grid-template-columns: minmax(0, var(--panel-max)) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.settings__column {
+  min-width: 0;
+}
+
 .settings__panel {
-  max-width: var(--panel-max);
   margin-top: var(--space-5);
   padding: var(--space-5);
   border-radius: var(--radius-card);
@@ -94,7 +120,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
   font-weight: var(--fw-semibold);
 }
 
-.settings__section--spaced {
+.settings__section--column {
   margin-top: var(--space-5);
 }
 

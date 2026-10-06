@@ -109,7 +109,9 @@ test("connecté, reconnexion, hors ligne puis retour", async ({ page }) => {
   await expect(page.locator('[data-stale="true"]')).toHaveCount(0);
   await expect(action).not.toHaveAttribute("aria-disabled", "true");
   await action.click();
-  await expect(page.locator(".toast")).toContainText("Bientôt disponible");
+  // Connecté : le bouton ouvre la fenêtre de création (HRT-13) ; on la referme.
+  await expect(page.getByRole("dialog", { name: "Créer un compte" })).toBeVisible();
+  await page.getByRole("button", { name: "Annuler" }).click();
 
   for (const state of ["session_expired", "access_revoked"] as const) {
     await setLink(page, "forge", state);
