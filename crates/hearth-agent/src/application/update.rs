@@ -37,8 +37,8 @@ use crate::domain::update::{
     plan_update,
 };
 
-/// Combien de temps le service attend un superviseur qui devait travailler avant d'y renoncer
-/// (il n'a pas démarré, ou il est mort sans écrire de résultat).
+/// Combien de temps le service attend, par défaut, un superviseur qui devait travailler avant d'y
+/// renoncer (il n'a pas démarré, ou il est mort sans écrire de résultat).
 const SUPERVISOR_PATIENCE: Duration = Duration::from_secs(30);
 
 /// Ce que l'agent sait de lui-même pour se mettre à jour.
@@ -66,6 +66,9 @@ pub struct Timing {
     pub poll: Duration,
     /// Pas de la surveillance du superviseur par l'agent.
     pub watch: Duration,
+    /// Combien de temps la surveillance attend un superviseur absent avant de conclure d'après les
+    /// traces laissées sur le disque.
+    pub patience: Duration,
 }
 
 impl Default for Timing {
@@ -75,6 +78,7 @@ impl Default for Timing {
             check_window: CHECK_WINDOW,
             poll: crate::domain::update::CHECK_POLL,
             watch: Duration::from_secs(1),
+            patience: SUPERVISOR_PATIENCE,
         }
     }
 }
@@ -442,7 +446,7 @@ impl UpdateService {
         tracing::warn!(?reason, version = %target.version, "mise à jour de l'agent échouée");
         self.host.clear_staging();
         let record = UpdateRecord {
-            version: target.version.to_string(),
+            version: Some(target.version.to_string()),
             previous: self.current.to_string(),
             outcome: UpdateOutcome::Failed,
             reason: Some(reason),
@@ -470,7 +474,8 @@ impl UpdateService {
     fn finish(&self, record: &UpdateRecord) {
         self.running().progress = None;
         self.feed.publish(UpdateProgress {
-            version: record.version.clone(),
+            // Sur le flux, une version inconnue est vide (`GET /agent/update/last` dit pourquoi).
+            version: record.version.clone().unwrap_or_default(),
             step: UpdateStep::Done,
             percent: None,
             outcome: Some(record.outcome),
@@ -500,26 +505,8 @@ impl UpdateService {
                 if service.report_pending().await {
                     return;
                 }
-                if started.elapsed() > SUPERVISOR_PATIENCE {
-                    // Le superviseur n'a rien écrit : on ne reste pas « en cours » pour toujours.
-                    let target_text = version.to_string();
-                    tracing::error!(version = %target_text, "le superviseur n'a pas donné de résultat");
-                    // Le demandeur est celui de la mise à jour (le journal ne l'attribue pas à la ligne
-                    // de commande), et le dépôt est nettoyé.
-                    service.host.clear_staging();
-                    let record = UpdateRecord {
-                        version: target_text,
-                        previous: service.current.to_string(),
-                        outcome: UpdateOutcome::Failed,
-                        reason: Some(UpdateReason::SupervisorLaunch),
-                        at: service.now_text(),
-                        requested_by: requester.by.clone(),
-                        client_name: requester.name.clone(),
-                        client_addr: requester.addr.clone(),
-                        reported: false,
-                    };
-                    let _ = service.host.write_last(&record);
-                    service.report(record).await;
+                if started.elapsed() > service.env.timing.patience {
+                    service.give_up_on_supervisor(&version, &requester).await;
                     return;
                 }
             }
@@ -558,16 +545,27 @@ impl UpdateService {
             self.watch(version, requester.unwrap_or_default());
             return;
         }
-        // Illisible n'est pas absent : une trace qui ne se lit pas est un travail à conclure.
+        let leftovers = self.read_leftovers();
+        let orphan = classify_orphan(&leftovers, false, self.current);
+        self.conclude_orphan(orphan).await;
+    }
+
+    /// Ce que le dossier `update/` contient. Illisible n'est pas absent : une trace qui ne se lit
+    /// pas est un travail à conclure.
+    fn read_leftovers(&self) -> Leftovers {
         let job = self.host.read_job();
         let state = self.host.read_state();
-        let leftovers = Leftovers {
+        Leftovers {
             unreadable: job.is_err() || state.is_err(),
             state: state.ok().flatten(),
             job: job.ok().flatten(),
             backup_present: self.host.path_exists(&self.env.backup),
-        };
-        match classify_orphan(&leftovers, false, self.current) {
+        }
+    }
+
+    /// Conclut ce qu'un travail laissé en cours (BR-UPDATE-028) a laissé derrière lui.
+    async fn conclude_orphan(self: &Arc<Self>, orphan: Orphan) {
+        match orphan {
             Orphan::None => {}
             Orphan::BeforeLaunch {
                 version,
@@ -579,6 +577,31 @@ impl UpdateService {
                     .await;
             }
             Orphan::AfterSwap(job) => self.recover(job).await,
+            Orphan::RecoveryAlreadyTried(job) => {
+                // Une reprise a déjà été lancée pour cet échange et n'a rien conclu : pas de
+                // seconde, jamais de boucle. Les copies (ancien binaire, base d'avant) restent
+                // pour la reprise à la main ; seules les traces de travail sont retirées.
+                tracing::error!(
+                    version = %job.version,
+                    "la reprise de la mise à jour n'a rien conclu : à reprendre à la main (runbook), copies gardées"
+                );
+                self.host.discard_work_files();
+                let record = UpdateRecord {
+                    version: Some(job.version.clone()),
+                    previous: job.previous.clone(),
+                    outcome: UpdateOutcome::Failed,
+                    reason: Some(UpdateReason::RollbackFailed),
+                    at: self.now_text(),
+                    requested_by: job.requested_by.clone(),
+                    client_name: job.client_name.clone(),
+                    client_addr: job.client_addr.clone(),
+                    reported: false,
+                };
+                if let Err(error) = self.host.write_last(&record) {
+                    tracing::error!(%error, "résultat de mise à jour non écrit");
+                }
+                self.report(record).await;
+            }
             Orphan::Completed {
                 version,
                 previous,
@@ -602,6 +625,28 @@ impl UpdateService {
                 )
                 .await;
             }
+            Orphan::ForeignVersion(job) => {
+                // FIX:01M47N6Z485TWN2H770KQ5H80R : une version posée à la main n'est jamais
+                // défaite. Ni reprise, ni remise de la base : la sauvegarde de l'ancien binaire et
+                // la copie périmée de la base sont retirées avec les traces.
+                tracing::warn!(
+                    current = %self.current,
+                    version = %job.version,
+                    previous = %job.previous,
+                    "une autre version que celles de la mise à jour tourne : mise à jour conclue sans retour arrière"
+                );
+                if let Err(error) = self.host.remove_path(&job.backup) {
+                    tracing::warn!(%error, "sauvegarde de l'ancien binaire non retirée");
+                }
+                self.conclude_found(
+                    job.version.clone(),
+                    job.previous.clone(),
+                    job.requester(),
+                    UpdateOutcome::Failed,
+                    Some(UpdateReason::Interrupted),
+                )
+                .await;
+            }
             Orphan::Unreadable { backup_present } => {
                 tracing::error!("trace de mise à jour illisible");
                 self.host.discard_work_files();
@@ -614,7 +659,9 @@ impl UpdateService {
                     (UpdateOutcome::Failed, UpdateReason::Interrupted)
                 };
                 let record = UpdateRecord {
-                    version: "inconnue".into(),
+                    // Une trace illisible ne dit pas quelle version était visée : absente, jamais un texte
+                    // qui ressemble à une version.
+                    version: None,
                     previous: self.current.to_string(),
                     outcome,
                     reason: Some(reason),
@@ -632,11 +679,46 @@ impl UpdateService {
         }
     }
 
+    // FIX:01M47PHYR8MD87HAXY9PARQXAN : la patience ne conclut plus « échec du superviseur » à
+    // l'aveugle (docs/bugs/FIX-01M47PHYR8MD87HAXY9PARQXAN.md).
+    /// La surveillance ne voit plus de superviseur et n'a rien à annoncer depuis trop longtemps.
+    /// Ce n'est pas une raison de conclure « échec » à l'aveugle : les traces sur le disque
+    /// disent où en est le travail (binaires déjà échangés, nouvelle version déjà en place...) et
+    /// la décision est celle du démarrage (`classify_orphan`). Seul « le superviseur n'a jamais écrit
+    /// son travail » est un échec du lancement ; un superviseur qui a travaillé sans rien échanger
+    /// (ou dont le retour arrière est fait) est conclu comme au démarrage : `failed` / `interrupted`.
+    async fn give_up_on_supervisor(self: &Arc<Self>, version: &Version, requester: &Requester) {
+        let leftovers = self.read_leftovers();
+        match classify_orphan(&leftovers, false, self.current) {
+            Orphan::None | Orphan::BeforeLaunch { .. } => {
+                let target_text = version.to_string();
+                tracing::error!(version = %target_text, "le superviseur n'a pas donné de résultat");
+                // Le demandeur est celui de la mise à jour (le journal ne l'attribue pas à la ligne
+                // de commande), et le dépôt est nettoyé.
+                self.host.clear_staging();
+                let record = UpdateRecord {
+                    version: Some(target_text),
+                    previous: self.current.to_string(),
+                    outcome: UpdateOutcome::Failed,
+                    reason: Some(UpdateReason::SupervisorLaunch),
+                    at: self.now_text(),
+                    requested_by: requester.by.clone(),
+                    client_name: requester.name.clone(),
+                    client_addr: requester.addr.clone(),
+                    reported: false,
+                };
+                let _ = self.host.write_last(&record);
+                self.report(record).await;
+            }
+            other => self.conclude_orphan(other).await,
+        }
+    }
+
     /// Conclut une mise à jour interrompue avant l'échange : rien n'a changé sur le serveur.
     async fn abandon(&self, version: String, previous: String, requester: Requester) {
         tracing::warn!(%version, "mise à jour interrompue avant l'échange des binaires, abandonnée");
         let record = UpdateRecord {
-            version,
+            version: Some(version),
             previous,
             outcome: UpdateOutcome::Failed,
             reason: Some(UpdateReason::Interrupted),
@@ -666,7 +748,7 @@ impl UpdateService {
         reason: Option<UpdateReason>,
     ) {
         let record = UpdateRecord {
-            version,
+            version: Some(version),
             previous,
             outcome,
             reason,
@@ -744,7 +826,10 @@ impl UpdateService {
             .record(
                 actor,
                 AuditAction::AgentUpdate,
-                Target::AgentVersion(record.version.clone()),
+                record
+                    .version
+                    .clone()
+                    .map_or(Target::None, Target::AgentVersion),
                 outcome,
             )
             .await;

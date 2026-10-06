@@ -16,12 +16,14 @@ use hearth_proto::fingerprint::Fingerprint;
 use thiserror::Error;
 
 use super::ports::{
-    BinaryInstalled, Clock, HelloProbe, InstallHost, ServiceManager, UpdateHost, UpdateHostError,
+    BinaryInstalled, Clock, FreeSpace, HelloProbe, InstallHost, ServiceManager, UpdateHost,
+    UpdateHostError,
 };
 use super::update::format_time;
 use crate::domain::install::Version;
 use crate::domain::update::{
-    Answer, Job, RollbackStep, SupervisorState, UpdateRecord, Verdict, check_verdict, rollback_plan,
+    Answer, Job, RollbackStep, SupervisorState, UpdateRecord, Verdict, check_space, check_verdict,
+    rollback_plan,
 };
 
 #[derive(Debug, Error)]
@@ -42,6 +44,8 @@ pub struct Supervised {
 pub struct Supervisor<'a> {
     pub host: &'a dyn UpdateHost,
     pub install: &'a dyn InstallHost,
+    /// L'espace libre (un port à part : les tests n'interrogent jamais le vrai disque).
+    pub space: &'a dyn FreeSpace,
     pub service: &'a dyn ServiceManager,
     pub probe: &'a dyn HelloProbe,
     pub clock: &'a dyn Clock,
@@ -69,13 +73,19 @@ impl Supervisor<'_> {
         // L'ancien agent finit d'annoncer « redémarrage » à ses clients avant d'être arrêté.
         std::thread::sleep(Duration::from_millis(job.grace_ms));
 
+        // 0. La place pour la copie de la base se contrôle AVANT d'arrêter le service : un refus
+        // prévisible ne coûte ni coupure ni redémarrage, l'ancien agent n'a jamais cessé de tourner.
+        if let Err(detail) = self.check_space() {
+            tracing::error!(%detail, "copie de la base refusée, échange non tenté");
+            self.host.clear_staging();
+            return Ok(self.conclude(job, UpdateOutcome::Failed, Some(UpdateReason::Swap)));
+        }
         // 1. Arrêt, copie de la base (service arrêté : aucune écriture en cours), puis échange :
         // l'ancien binaire est gardé de côté (`job.backup`).
         let swapped = self
             .service
             .stop()
             .map_err(|e| e.to_string())
-            .and_then(|()| self.check_space())
             .and_then(|()| self.host.backup_database().map_err(|e| e.to_string()))
             .and_then(|()| {
                 self.install
@@ -248,15 +258,13 @@ impl Supervisor<'_> {
     }
 
     /// Assez de place pour la copie de la base (deux fois sa taille, une marge) : sinon l'échange
-    /// n'a pas lieu et l'ancien agent repart.
+    /// n'a pas lieu et l'ancien agent repart. Une place impossible à mesurer est un refus.
     fn check_space(&self) -> Result<(), String> {
-        let needed = self.host.database_size().saturating_mul(2) + 1024 * 1024;
-        match self.install.free_bytes(&self.host.data_dir()) {
-            Ok(free) if free < needed => Err(format!(
-                "espace disque insuffisant pour copier la base ({free} octets libres, {needed} nécessaires)"
-            )),
-            _ => Ok(()),
-        }
+        let free = self
+            .space
+            .free_bytes(&self.host.data_dir())
+            .map_err(|error| error.to_string());
+        check_space(self.host.database_size(), free).map_err(|refusal| refusal.to_string())
     }
 
     fn state(&self, job: &Job, step: UpdateStep) {
@@ -279,7 +287,7 @@ impl Supervisor<'_> {
         reason: Option<UpdateReason>,
     ) -> Supervised {
         let record = UpdateRecord {
-            version: job.version.clone(),
+            version: Some(job.version.clone()),
             previous: job.previous.clone(),
             outcome,
             reason,

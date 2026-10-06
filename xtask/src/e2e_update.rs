@@ -27,6 +27,19 @@ pub fn run() -> Result<(), String> {
     fs::create_dir_all(&dist)
         .map_err(|error| format!("création de {} impossible : {error}", dist.display()))?;
 
+    // Deux exécutions en même temps se réécriraient la clé de test pendant que l'autre construit
+    // ses agents (la demande « somme fausse » prendrait 422 au lieu de 202) : un verrou de fichier,
+    // relâché par le système à la fin du processus, même tué.
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(work.join("lock"))
+        .map_err(|error| format!("verrou de e2e-update illisible : {error}"))?;
+    lock.try_lock().map_err(|_| {
+        "une autre exécution de e2e-update est en cours (target/e2e-update/lock)".to_owned()
+    })?;
+
     println!("clés minisign jetables...");
     let ours = minisign::KeyPair::generate_unencrypted_keypair()
         .map_err(|error| format!("génération de clé impossible : {error}"))?;

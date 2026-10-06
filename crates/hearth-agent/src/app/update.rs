@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::AppError;
-use crate::application::ports::{Clock, InstallHost, ServiceManager, UpdateFeed};
+use crate::application::ports::{Clock, FreeSpace, InstallHost, ServiceManager, UpdateFeed};
 use crate::application::update::{Timing, UpdateAdapters, UpdateEnv, UpdateService};
 use crate::application::update_supervisor::{SuperviseError, Supervised, Supervisor};
 use crate::domain::install::Version;
@@ -116,6 +116,7 @@ pub fn run_supervisor(job_path: &Path) -> Result<(), AppError> {
     let supervisor = Supervisor {
         host: &host,
         install: &install as &dyn InstallHost,
+        space: &install as &dyn FreeSpace,
         service: &service as &dyn ServiceManager,
         probe: &probe,
         clock: &clock,

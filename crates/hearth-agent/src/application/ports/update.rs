@@ -79,6 +79,14 @@ pub enum UpdateHostError {
 /// Le superviseur en cours : tant que cet objet existe, le verrou est tenu.
 pub struct SupervisorLock(#[allow(dead_code)] pub Box<dyn std::any::Any + Send>);
 
+/// L'espace libre sous un chemin : le port que le superviseur interroge avant de copier la base
+/// (jamais de vrai disque dans ses tests unitaires).
+pub trait FreeSpace: Send + Sync {
+    /// Octets disponibles sous `path` (ou son plus proche ancêtre existant) ; l'échec de la
+    /// mesure est une erreur, jamais « beaucoup de place ».
+    fn free_bytes(&self, path: &Path) -> Result<u64, UpdateHostError>;
+}
+
 /// La machine vue par la mise à jour : les fichiers de `update/` dans le dossier de données, et
 /// le lancement du superviseur détaché.
 pub trait UpdateHost: Send + Sync {

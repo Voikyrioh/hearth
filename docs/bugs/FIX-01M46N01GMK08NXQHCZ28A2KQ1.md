@@ -26,7 +26,7 @@ Relancer.
 ## Correction
 `HeldLock` (même fichier) : `Drop` appelle `File::unlock()` (`flock(LOCK_UN)`), qui libère le verrou pour **toutes** les copies de la description. Le verrou n'est pas affaibli : toujours exclusif, pris par `try_lock`, relâché à la destruction. Rejeté : attente, relance, ouverture du verrou en `O_CLOEXEC` seul (déjà le cas, ne couvre pas la fenêtre fork/exec).
 Non-régression : `infrastructure::install::host::unix_tests::the_install_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive` (copie du descripteur = enfant forké ; rouge avant, vert après, déterministe).
-Non traité (hors périmètre) : mêmes `try_lock` dans `infrastructure/update/host.rs` et `infrastructure/tls/identity.rs`, exposés à la même fenêtre.
+Suite (2026-10-06, HRT-17, tâche T27) : `HeldLock` est devenu une brique partagée (`crates/hearth-agent/src/infrastructure/file_lock.rs`, `HeldLock::acquire`) et le même relâchement explicite s'applique au verrou du superviseur (`infrastructure/update/host.rs`) et au verrou de création de l'identité TLS (`infrastructure/tls/identity.rs`). Exclusivité entre processus inchangée. Non-régression, une par verrou (copie du descripteur vivante, rouge sans le `unlock`, vérifié sous Linux) : `file_lock::tests::the_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive`, `infrastructure::update::host::tests::the_supervisor_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive`, `infrastructure::tls::identity::tests::the_creation_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive`. Le test de l'installation passe par `SystemHost::lock`.
 
 ## Références
 - Ticket : HRT-15 (installation), suivi de HRT-17

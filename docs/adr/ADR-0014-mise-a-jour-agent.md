@@ -63,6 +63,34 @@ ADR-0008 fixe le principe (flux de versions signé, superviseur, retour arrière
 - `cargo xtask e2e-update` rejoue sur une vraie machine systemd : signature d'une autre clé refusée avant toute écriture, mise à jour réussie (comptes, journal, empreinte intacts), agent muet (retour automatique, binaire identique), deuxième demande refusée.
 - Générer la clé de publication, signer et publier : `docs/runbooks/mettre-a-jour-agent.md`.
 
+## Suivis de la review du lot agent (2026-10-06)
+
+Décisions prises en traitant les suivis de HRT-17 (tâche T27) :
+
+- **Aucun proxy d'environnement** pour le téléchargement (`.no_proxy()`). Avec `HTTPS_PROXY`, le nom de l'hôte part au proxy, qui le résout lui-même : le filtre d'adresses appliqué après résolution (BR-UPDATE-027) ne voit plus rien. Un serveur qui ne sort que par un proxy sortant ne peut pas se mettre à jour à distance : assumé (mise à jour par `install.sh --binary`). Test : `an_environment_proxy_is_never_used_so_the_address_filter_cannot_be_bypassed` (le test se relance avec le proxy posé, car l'environnement d'un processus ne se modifie pas en Rust sûr).
+- **L'espace libre est un port** (`FreeSpace`) et la décision est pure (`domain/update/space.rs::check_space`) : assez, pas assez, **impossible à mesurer** ; ce dernier cas est un refus, jamais « assez de place » (l'ancien code avalait l'erreur). Aucun test du superviseur ne lit plus le vrai disque : c'était la cause des 9 tests rouges (voir T27 : un disque presque plein, pas l'utilisateur root, les faisait échouer).
+- **`HeldLock` est une brique partagée** (`infrastructure/file_lock.rs`) : verrou exclusif entre processus, relâché explicitement à la destruction même si une copie du descripteur vit encore (FIX-01M46N01GMK08NXQHCZ28A2KQ1). L'installation, la mise à jour et l'identité TLS l'utilisent ; la sémantique d'exclusivité entre processus ne change pas.
+- **La patience de la surveillance passe par `classify_orphan`** : un superviseur absent n'est plus conclu « échec du lancement » à l'aveugle (une version déjà échangée, ou la version visée déjà en place, étaient mal conclues).
+- **Une version tierce posée à la main n'est jamais défaite** (FIX-01M47N6Z485TWN2H770KQ5H80R) : `Orphan::ForeignVersion`, conclusion `failed` / `interrupted`, traces et copies retirées, base intacte.
+- **Contrat** : une version visée inconnue est explicite (`version_unknown`, clé absente quand la version est connue), plus une chaîne « inconnue » qui ressemble à une version.
+
+### Étude (pas de code dans cette passe) : la double panne
+
+**Situation.** Le superviseur est tué après l'échange des binaires **et** le nouveau binaire ne démarre pas du tout (migration qui échoue, bibliothèque absente). `classify_orphan` ne s'exécute que dans un agent qui tourne : personne ne conclut, le service reste à terre jusqu'à la reprise à la main (runbook).
+
+**Premier réflexe écarté : `OnFailure=`.** L'unité (ADR-0012) a `Restart=always` et `RestartSec=5`. Les limites par défaut de systemd (5 démarrages en 10 s) ne sont jamais atteintes avec un redémarrage toutes les 5 s : l'unité ne passe jamais en `failed` et `OnFailure=` ne se déclenche pas. Le déclencheur doit donc être le temps, pas l'échec (à vérifier sur une vraie machine, non rejoué ici).
+
+**Avis de la review (PR #21) : la minuterie par minute proposée d'abord a trois trous.**
+1. Après un `rollback_failed` les traces restent : la minuterie retenterait un retour arrière chaque minute, sans fin, y compris pendant qu'on répare à la main. Il faudrait un compteur ou un marqueur d'essai (comme `job.recover` : une tentative par échange, désormais en place dans l'agent).
+2. Un service arrêté exprès par l'administrateur, avec des traces restantes : `/hello` muet donc retour arrière et copie de base périmée remise. « Muet » ne suffit pas : il faut l'âge du travail, l'étape écrite et la version du binaire installé (`classify_orphan` sans agent qui tourne).
+3. Les machines déjà installées n'ont pas les unités et une mise à jour ne les écrit pas.
+
+**Recommandation reformulée : essayer d'abord `Restart=on-failure` sur l'unité transitoire du superviseur** (`systemd-run --property=Restart=on-failure` ; le travail est reprenable, le verrou est exclusif, une tentative par échange). Il couvre « superviseur tué » sans rien installer ni toucher à ADR-0012, et vaut pour les machines déjà installées. Il ne survit pas à un redémarrage du serveur : la minuterie statique (unités écrites par l'installation, avec compteur d'essai, âge du travail et version installée comme garde-fous) ne serait à construire que si ce cas compte. Faisable sans casser le durcissement ni l'installation gérée (sans objet : pas de mise à jour à distance).
+
+**À vérifier sur une vraie machine avant de décider :** (a) qu'une unité transitoire `Restart=on-failure` est relancée après un `kill -9` du superviseur et qu'elle n'est pas collectée (`--collect`) avant ; (b) que `Restart=always` + `RestartSec=5` de l'agent ne passe jamais en `failed` (raisonnement sur les limites par défaut, non rejoué) ; (c) le comportement après un redémarrage du serveur en pleine mise à jour ; (d) qu'un nouveau binaire qui ne démarre pas du tout est repris sans boucle (une seule tentative).
+
+**Décision attendue** (avec le détenteur du produit) : `Restart=on-failure` sur le superviseur seul, minuterie statique, ou rien (runbook seul).
+
 ## Références
 
 - ADR-0008 (principe), ADR-0012 (unité durcie), `systemd-run(1)`, https://jedisct1.github.io/minisign/
