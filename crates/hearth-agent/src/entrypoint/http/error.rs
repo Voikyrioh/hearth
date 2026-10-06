@@ -11,7 +11,6 @@ use crate::application::accounts::AccountError;
 use crate::application::audit::AuditError;
 use crate::application::ports::{HashError, StoreError};
 use crate::application::sessions::{AuthError, LoginError};
-use crate::domain::accounts::PasswordRule;
 use crate::domain::compat::Incompatibility;
 use crate::domain::lockout::retry_after_seconds;
 use crate::domain::sessions::SessionEnd;
@@ -140,25 +139,13 @@ impl From<LoginError> for ApiError {
     }
 }
 
-/// Code stable d'une règle de mot de passe, dans `details.rules` de `WEAK_PASSWORD`.
-fn rule_code(rule: PasswordRule) -> &'static str {
-    match rule {
-        PasswordRule::Required => "required",
-        PasswordRule::MinLength => "min_length",
-        PasswordRule::Digit => "digit",
-        PasswordRule::Lowercase => "lowercase",
-        PasswordRule::Uppercase => "uppercase",
-        PasswordRule::ContainsUsername => "contains_username",
-    }
-}
-
 impl From<AccountError> for ApiError {
     fn from(error: AccountError) -> Self {
         let message = error.to_string();
         match error {
             AccountError::Username(_) => Self::invalid("username", message),
             AccountError::WeakPassword(rejected) => {
-                let rules: Vec<&str> = rejected.rules.iter().copied().map(rule_code).collect();
+                let rules: Vec<&str> = rejected.rules.iter().map(|rule| rule.code()).collect();
                 Self(ErrorBody::weak_password(&rules, message))
             }
             AccountError::UsernameTaken => Self::new(ErrorCode::UsernameTaken, message),
@@ -215,7 +202,7 @@ pub async fn method_not_allowed() -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::accounts::PasswordRejected;
+    use crate::domain::accounts::{PasswordRejected, PasswordRule};
     use time::Duration;
 
     #[test]

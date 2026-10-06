@@ -2,50 +2,25 @@
 
 use std::fmt;
 
-use thiserror::Error;
+use hearth_proto::account_rules::{USERNAME_MAX_LEN, USERNAME_MIN_LEN, check_username};
 
-pub const MIN_LEN: usize = 3;
-pub const MAX_LEN: usize = 32;
+pub use hearth_proto::account_rules::UsernameProblem as UsernameError;
+
+pub const MIN_LEN: usize = USERNAME_MIN_LEN;
+pub const MAX_LEN: usize = USERNAME_MAX_LEN;
 
 /// Identifiant normalisé : minuscules, chiffres, tiret, underscore, 3 à 32 caractères.
 ///
 /// La saisie est ramenée en minuscules avant contrôle, ce qui rend l'unicité insensible à la
-/// casse (« MARIE » et « marie » sont le même identifiant).
+/// casse (« MARIE » et « marie » sont le même identifiant). Les règles vivent dans
+/// `hearth-proto` (une seule source, partagée avec le client).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Username(String);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum UsernameError {
-    #[error("L'identifiant est requis")]
-    Empty,
-    #[error("L'identifiant doit contenir au moins 3 caractères")]
-    TooShort,
-    #[error("L'identifiant doit contenir au plus 32 caractères")]
-    TooLong,
-    #[error("L'identifiant contient des caractères non autorisés")]
-    InvalidChars,
-}
 
 impl Username {
     /// BR-ACCT-002 : contrôle du format. BR-ACCT-003 : normalisation en minuscules.
     pub fn parse(raw: &str) -> Result<Self, UsernameError> {
-        if raw.is_empty() {
-            return Err(UsernameError::Empty);
-        }
-        let normalized = raw.to_ascii_lowercase();
-        let allowed =
-            |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_';
-        if !normalized.chars().all(allowed) {
-            return Err(UsernameError::InvalidChars);
-        }
-        let len = normalized.chars().count();
-        if len < MIN_LEN {
-            return Err(UsernameError::TooShort);
-        }
-        if len > MAX_LEN {
-            return Err(UsernameError::TooLong);
-        }
-        Ok(Self(normalized))
+        check_username(raw).map(Self)
     }
 
     pub fn as_str(&self) -> &str {
