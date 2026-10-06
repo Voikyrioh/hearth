@@ -93,6 +93,9 @@ fn config(reconnecting: bool, offline: bool) -> LinkConfig {
         },
         attempt_timeout: Duration::from_secs(30),
         request_timeout: Duration::from_secs(30),
+        // Écriture du suivi d'une action : jamais un délai qui dépend de la charge de la machine
+        // (le test ne prouve pas la lenteur d'un disque, c'est `tracking.rs` qui s'en charge).
+        persist_timeout: Duration::from_secs(120),
         ..LinkConfig::default()
     }
 }

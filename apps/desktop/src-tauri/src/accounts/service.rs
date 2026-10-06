@@ -142,15 +142,20 @@ pub async fn change_own_password(
 pub fn old_password_stands(result: &Result<AccountOutcome, LinkFailure>) -> bool {
     match result {
         Ok(AccountOutcome::Refused { refusal }) => match refusal {
-            // Refus explicites, avant toute exécution : le mot de passe n'a pas changé.
-            AccountRefusal::WrongPassword | AccountRefusal::WeakPassword { .. } => true,
+            // Refus explicites, avant toute exécution : le mot de passe n'a pas changé. `Busy` :
+            // l'agent le rend quand le plafond de calculs de mot de passe est atteint
+            // (`infrastructure/argon2.rs::acquire`), pour la vérification de l'ancien mot de passe ou
+            // le hachage du nouveau (`application/accounts.rs:310` et `:317`), TOUS DEUX avant
+            // `apply_password` (`:318`), la seule écriture : rien n'a été exécuté.
+            AccountRefusal::WrongPassword
+            | AccountRefusal::WeakPassword { .. }
+            | AccountRefusal::Busy => true,
             AccountRefusal::InvalidUsername { .. }
             | AccountRefusal::UsernameTaken
             | AccountRefusal::LastAdmin
             | AccountRefusal::NotFound
             | AccountRefusal::ConfirmationMismatch
             | AccountRefusal::Conflict
-            | AccountRefusal::Busy
             | AccountRefusal::SessionEnded
             | AccountRefusal::SessionRevoked
             | AccountRefusal::Other => false,

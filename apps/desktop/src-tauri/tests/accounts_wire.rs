@@ -286,6 +286,8 @@ fn the_old_password_stands_after_an_explicit_refusal_of_the_agent() {
         }
     )));
     assert!(old_password_stands(&Err(LinkFailure::Forbidden)));
+    // « Occupé » : rendu avant toute écriture (calcul de mot de passe refusé, `accounts.rs:310`/`:317`).
+    assert!(old_password_stands(&refused(AccountRefusal::Busy)));
 }
 
 #[test]
@@ -319,7 +321,6 @@ fn the_entry_is_erased_after_any_refusal_that_does_not_prove_nothing_changed() {
     use hearth_desktop_lib::accounts::service::old_password_stands;
     for refusal in [
         AccountRefusal::Conflict,
-        AccountRefusal::Busy,
         AccountRefusal::NotFound,
         AccountRefusal::SessionEnded,
         AccountRefusal::SessionRevoked,
