@@ -67,14 +67,63 @@ Function HearthRefuse
   ${EndIf}
 FunctionEnd
 
+; $R0 = 1 si le Gestionnaire des tâches n'a PAS désactivé l'entrée. Même lecture que
+; auto-launch 0.6.0 (`is_task_manager_enabled`, ruche HKCU) : valeur absente, clé absente,
+; ou moins de 8 octets = activée ; sinon activée seulement si les 8 derniers octets
+; sont nuls (le premier octet 02 = activé, 03 = désactivé, suivi de la date).
+Function HearthTaskManagerEnabled
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  StrCpy $R0 1
+  System::Call 'advapi32::RegOpenKeyExW(p 0x80000001, w "${HEARTH_STARTUP_APPROVED_KEY}", i 0, i 0x20019, *p .r1) i .r0'
+  ${If} $0 = 0
+    System::Call 'advapi32::RegQueryValueExW(p r1, w "${HEARTH_RUN_VALUE}", p 0, p 0, p 0, *i .r2) i .r0'
+    ${If} $0 = 0
+    ${AndIf} $2 >= 8
+      System::Alloc $2
+      Pop $3
+      System::Call 'advapi32::RegQueryValueExW(p r1, w "${HEARTH_RUN_VALUE}", p 0, p 0, p r3, *i r2r2) i .r0'
+      ${If} $0 = 0
+        IntOp $4 $3 + $2
+        IntOp $4 $4 - 8
+        System::Call 'kernel32::RtlMoveMemory(*i .r5, p r4, i 4)'
+        IntOp $4 $4 + 4
+        System::Call 'kernel32::RtlMoveMemory(*i .r6, p r4, i 4)'
+        ${If} $5 <> 0
+        ${OrIf} $6 <> 0
+          StrCpy $R0 0
+        ${EndIf}
+      ${EndIf}
+      System::Free $3
+    ${EndIf}
+    System::Call 'advapi32::RegCloseKey(p r1)'
+  ${EndIf}
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
 Function HearthGuiInit
-  ; Entrée de démarrage déjà présente ? Lue avant toute page : la page de
-  ; réinstallation peut désinstaller l'ancienne version (et son entrée) ensuite.
+  ; Démarrage déjà activé ? (entrée `Run` présente ET non désactivée dans le Gestionnaire
+  ; des tâches, comme le lit le greffon.) Lu avant toute page : la page de réinstallation
+  ; peut désinstaller l'ancienne version (et son entrée) ensuite.
   StrCpy $HearthAutostartWas 0
   ClearErrors
-  ReadRegStr $R0 HKCU "${HEARTH_RUN_KEY}" "${HEARTH_RUN_VALUE}"
+  ReadRegStr $R1 HKCU "${HEARTH_RUN_KEY}" "${HEARTH_RUN_VALUE}"
   ${IfNot} ${Errors}
-    StrCpy $HearthAutostartWas 1
+    Call HearthTaskManagerEnabled
+    ${If} $R0 = 1
+      StrCpy $HearthAutostartWas 1
+    ${EndIf}
   ${EndIf}
   Call HearthPreflight
   ${If} $R9 != ""
@@ -96,11 +145,20 @@ SectionEnd
 ; retrait de l'entrée de démarrage et la case « Tout effacer » sont assurés par
 ; le modèle NSIS de Tauri (voir ADR-0010) ; rien à ajouter ici.
 
-; Page d'accueil : la case, décochée sauf si l'entrée existe déjà (réinstallation
+; Page d'accueil : la case, décochée sauf si le démarrage est déjà activé (réinstallation
 ; manuelle : on propose l'état actuel, on ne le change pas dans le dos de l'utilisateur).
 ; Retour en arrière puis avance : le choix déjà fait est conservé.
+; Mise en page (unités de boîte de dialogue, donc la même à 100, 125 et 150 % d'échelle) :
+; le contrôle de texte du modèle (120u 45u 195u 130u) est laissé VIDE (MUI_WELCOMEPAGE_TEXT
+; ci-dessous) et le texte d'accueil est redessiné plus court, pour que rien ne se recouvre :
+;   texte d'accueil   120u  55u 195u  55u  (jusqu'à 110u)
+;   case              120u 118u 195u  12u  (130u)
+;   aide              134u 134u 181u  50u  (jusqu'à 184u, la page fait 193u)
 Function HearthWelcomeShow
-  ${NSD_CreateCheckbox} 120u 122u 195u 12u "$(hearthAutostartLabel)"
+  ${NSD_CreateLabel} 120u 55u 195u 55u "$(hearthWelcomeText)"
+  Pop $R0
+  SetCtlColors $R0 "000000" "FFFFFF"
+  ${NSD_CreateCheckbox} 120u 118u 195u 12u "$(hearthAutostartLabel)"
   Pop $HearthAutostartBox
   SetCtlColors $HearthAutostartBox "000000" "FFFFFF"
   ${If} $HearthAutostartShown = 1
@@ -110,7 +168,7 @@ Function HearthWelcomeShow
   ${ElseIf} $HearthAutostartWas = 1
     ${NSD_Check} $HearthAutostartBox
   ${EndIf}
-  ${NSD_CreateLabel} 134u 136u 181u 40u "$(hearthAutostartHelp)"
+  ${NSD_CreateLabel} 134u 134u 181u 50u "$(hearthAutostartHelp)"
   Pop $R0
   SetCtlColors $R0 "595959" "FFFFFF"
 FunctionEnd
@@ -120,22 +178,23 @@ Function HearthWelcomeLeave
   StrCpy $HearthAutostartShown 1
 FunctionEnd
 
-; Texte d'accueil court (tutoiement) : il laisse la place de la case sous lui.
-!define MUI_WELCOMEPAGE_TEXT "$(hearthWelcomeText)"
+!define MUI_WELCOMEPAGE_TEXT " "
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW HearthWelcomeShow
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE HearthWelcomeLeave
 
-; Appliqué à la fin de la copie des fichiers, seulement si la case a été vue.
+; Appliqué à la fin de la copie des fichiers, seulement si la case a été vue. Cochée : l'entrée
+; est écrite comme le fait le greffon (même valeur, SANS guillemets, et « activé » dans le
+; Gestionnaire des tâches). Décochée : retirée seulement si le démarrage était activé ; une entrée
+; désactivée à la main dans le Gestionnaire des tâches n'est pas touchée.
 !macro NSIS_HOOK_POSTINSTALL
   !if "${PRODUCTNAME}" != "${HEARTH_RUN_VALUE}"
     !error "HEARTH_RUN_VALUE ne correspond plus au nom du produit : l'entrée de démarrage ne serait plus celle de l'application"
   !endif
   ${If} $HearthAutostartShown = 1
     ${If} $HearthAutostartWanted = 1
-      WriteRegStr HKCU "${HEARTH_RUN_KEY}" "${HEARTH_RUN_VALUE}" '"$INSTDIR\${MAINBINARYNAME}.exe" ${HEARTH_MINIMIZED_FLAG}'
-      ; Même geste que le greffon : active dans le Gestionnaire des tâches.
+      WriteRegStr HKCU "${HEARTH_RUN_KEY}" "${HEARTH_RUN_VALUE}" "$INSTDIR\${MAINBINARYNAME}.exe ${HEARTH_MINIMIZED_FLAG}"
       WriteRegBin HKCU "${HEARTH_STARTUP_APPROVED_KEY}" "${HEARTH_RUN_VALUE}" 020000000000000000000000
-    ${Else}
+    ${ElseIf} $HearthAutostartWas = 1
       DeleteRegValue HKCU "${HEARTH_RUN_KEY}" "${HEARTH_RUN_VALUE}"
     ${EndIf}
   ${EndIf}

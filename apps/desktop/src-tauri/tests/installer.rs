@@ -78,30 +78,126 @@ fn the_checkbox_is_unchecked_unless_the_entry_already_exists() {
     assert!(show.contains("$(hearthAutostartHelp)"));
 }
 
+/// Bloc `${If} condition` … `${EndIf}` correspondant (profondeur comptée), bornes comprises.
+fn if_block(text: &str, opening: &str) -> String {
+    let start = text
+        .find(opening)
+        .unwrap_or_else(|| panic!("{opening} absent"));
+    let mut depth = 0_i32;
+    let mut at = start;
+    while at < text.len() {
+        let rest = &text[at..];
+        if rest.starts_with("${If}") || rest.starts_with("${IfNot}") {
+            depth += 1;
+        } else if rest.starts_with("${EndIf}") {
+            depth -= 1;
+            if depth == 0 {
+                return text[start..at + "${EndIf}".len()].to_owned();
+            }
+        }
+        at += 1;
+    }
+    panic!("bloc {opening} non fermé");
+}
+
 #[test]
 fn the_registry_is_only_touched_when_the_page_was_seen() {
     let script = hooks();
     let hook = post_install(&script);
     // Silencieux (/S) et mise à jour automatique (/UPDATE /P) n'affichent pas la page d'accueil :
-    // `Shown` reste vide et le crochet ne fait RIEN. Toute écriture du registre est sous ce garde.
-    let guard = hook.find("${If} $HearthAutostartShown = 1").unwrap();
+    // `Shown` reste vide et le crochet ne fait RIEN. Toute écriture du registre est DANS le
+    // bloc gardé par `Shown`, pas seulement après lui.
+    let guarded = if_block(&hook, "${If} $HearthAutostartShown = 1");
     for write in ["WriteRegStr", "WriteRegBin", "DeleteRegValue"] {
-        for (at, _) in hook.match_indices(write) {
-            assert!(at > guard, "{write} hors du garde de la page");
-        }
+        assert_eq!(
+            hook.matches(write).count(),
+            guarded.matches(write).count(),
+            "{write} hors du bloc gardé par la page"
+        );
+        assert!(guarded.contains(write));
     }
-    // Et rien d'autre dans le fichier n'écrit dans le registre (la lecture au démarrage de
-    // l'interface est un `ReadRegStr`).
+    // Rien d'autre dans le fichier n'écrit dans le registre (la lecture au démarrage de
+    // l'interface ne fait que lire).
     let outside = script.replace(&hook, "");
-    for write in ["WriteReg", "DeleteReg"] {
+    for write in ["WriteReg", "DeleteReg", "RegSetValue", "RegDeleteValue"] {
         assert!(
             !outside.contains(write),
             "{write} hors du crochet POSTINSTALL"
         );
     }
-    // Cochée : l'entrée est écrite avec le drapeau ; décochée : elle est retirée.
-    assert!(hook.contains("${HEARTH_MINIMIZED_FLAG}"));
-    assert!(hook.contains("$HearthAutostartWanted = 1"));
+    // Cochée : écrite ; décochée : retirée seulement si le démarrage était activé.
+    assert!(guarded.contains("${If} $HearthAutostartWanted = 1"));
+    assert!(guarded.contains("${ElseIf} $HearthAutostartWas = 1"));
+    // Valeur strictement celle du greffon : `chemin --minimized`, sans guillemets.
+    assert!(guarded.contains(r#""$INSTDIR\${MAINBINARYNAME}.exe ${HEARTH_MINIMIZED_FLAG}""#));
+}
+
+#[test]
+fn the_initial_state_follows_the_task_manager_like_the_plugin() {
+    let script = hooks();
+    let init = function_body(&script, "HearthGuiInit");
+    // « Activé » = entrée présente ET non désactivée dans le Gestionnaire des tâches.
+    assert!(init.contains("Call HearthTaskManagerEnabled"));
+    assert!(init.contains("StrCpy $HearthAutostartWas 1"));
+    let read = function_body(&script, "HearthTaskManagerEnabled");
+    assert!(read.contains("${HEARTH_STARTUP_APPROVED_KEY}"));
+    assert!(
+        read.contains("$2 >= 8"),
+        "au moins 8 octets, comme auto-launch"
+    );
+    assert!(read.contains("StrCpy $R0 0"));
+}
+
+/// Rectangles `120u 118u 195u 12u` des contrôles créés par la page : (haut, bas, gauche, droite).
+fn created_rectangles(script: &str) -> Vec<(u32, u32, u32, u32)> {
+    let show = function_body(script, "HearthWelcomeShow");
+    show.lines()
+        .filter(|line| line.contains("${NSD_Create"))
+        .map(|line| {
+            let numbers: Vec<u32> = line
+                .split_whitespace()
+                .filter_map(|word| word.strip_suffix('u')?.parse().ok())
+                .collect();
+            assert_eq!(numbers.len(), 4, "{line}");
+            (
+                numbers[1],
+                numbers[1] + numbers[3],
+                numbers[0],
+                numbers[0] + numbers[2],
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_welcome_page_controls_do_not_overlap_and_fit_the_dialog() {
+    let script = hooks();
+    let boxes = created_rectangles(&script);
+    assert_eq!(boxes.len(), 3, "texte d'accueil, case, aide");
+    for (index, a) in boxes.iter().enumerate() {
+        for b in &boxes[index + 1..] {
+            let separate = a.1 <= b.0 || b.1 <= a.0 || a.3 <= b.2 || b.3 <= a.2;
+            assert!(separate, "{a:?} recouvre {b:?}");
+        }
+        // Page d'accueil de MUI2 : 193u de haut, 315u de large (Welcome.nsh).
+        assert!(a.1 <= 193 && a.3 <= 315, "{a:?} déborde de la page");
+    }
+    // Le contrôle de texte du modèle (120u 45u 195u 130u, fond opaque) est laissé vide : c'est
+    // le texte redessiné ci-dessus qui porte la phrase, sous le titre (qui finit à 48u).
+    assert!(script.contains(r#"!define MUI_WELCOMEPAGE_TEXT " ""#));
+    assert!(boxes.iter().all(|b| b.0 >= 48));
+}
+
+#[test]
+fn the_template_read_is_the_one_of_the_locked_tool_version() {
+    // Le script dépend de l'ordre des pages, de `SkipIfPassive` et des crochets du modèle NSIS
+    // embarqué dans @tauri-apps/cli, relu à la version 2.12.1. Une montée de version doit
+    // forcer une nouvelle lecture de installer.nsi (puis ce test et l'ADR-0026).
+    let lock: serde_json::Value = serde_json::from_str(&read("../package-lock.json")).unwrap();
+    assert_eq!(
+        lock["packages"]["node_modules/@tauri-apps/cli"]["version"], "2.12.1",
+        "relire le modèle NSIS de la nouvelle version (page d'accueil, SkipIfPassive,          NSIS_HOOK_POSTINSTALL), puis mettre ce test à jour"
+    );
 }
 
 #[test]

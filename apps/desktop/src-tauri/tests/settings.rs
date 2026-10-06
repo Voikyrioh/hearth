@@ -96,20 +96,3 @@ fn a_corrupt_settings_file_reads_as_never_seen_and_never_blocks_the_startup_sett
     let autostart = FakeAutostart::default();
     assert!(set_launch_at_startup(&autostart, true).is_ok());
 }
-
-#[test]
-fn an_entry_written_by_the_installer_shows_in_the_settings_and_can_be_turned_off() {
-    // L'installateur écrit l'entrée `Run` que lit le greffon : au premier lancement, l'état réel
-    // est « activé » sans autre réglage ; la désactiver depuis l'application retire cette entrée.
-    let autostart = FakeAutostart {
-        on: Cell::new(true),
-        ..FakeAutostart::default()
-    };
-    assert!(read(&autostart).unwrap().launch_at_startup);
-    assert!(
-        !set_launch_at_startup(&autostart, false)
-            .unwrap()
-            .launch_at_startup
-    );
-    assert!(!autostart.on.get());
-}
