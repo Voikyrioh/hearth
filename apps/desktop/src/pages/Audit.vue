@@ -47,7 +47,9 @@ const count = computed(() => {
 });
 const newLabel = computed(() =>
   audit.pendingOverflow
-    ? t("audit.newEntriesMore", { n: audit.newCount })
+    ? audit.newCount === 0
+      ? t("audit.newEntriesUnknown")
+      : t("audit.newEntriesMore", { n: audit.newCount })
     : audit.newCount === 1
       ? t("audit.newEntriesOne")
       : t("audit.newEntries", { n: audit.newCount }),
@@ -140,7 +142,7 @@ const reasonText = computed(() =>
 
     <div v-if="failed && !forbidden" class="audit__error" role="alert">
       <span>{{ reasonText }}</span>
-      <HButton variant="ghost" size="sm" @click="audit.reload()">{{ t("common.retry") }}</HButton>
+      <HButton variant="ghost" size="sm" @click="audit.retry()">{{ t("common.retry") }}</HButton>
     </div>
 
     <div class="audit__meta">
@@ -181,6 +183,11 @@ const reasonText = computed(() =>
           <HButton variant="secondary" @click="clear">{{ t("audit.clear") }}</HButton>
         </template>
       </EmptyState>
+    </div>
+
+    <div v-if="audit.loadMoreFailed" class="audit__error" role="alert">
+      <span>{{ t("audit.moreFailed") }}</span>
+      <HButton variant="ghost" size="sm" @click="audit.loadMore()">{{ t("common.retry") }}</HButton>
     </div>
 
     <p v-if="audit.windowFull" class="audit__note">

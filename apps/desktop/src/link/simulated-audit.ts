@@ -72,6 +72,7 @@ export type NewAuditEntry = Partial<Omit<AuditEntry, "id" | "at" | "atMs">> & { 
 export class SimulatedAudit {
   private readonly journals = new Map<string, AuditEntry[]>();
   private readonly listeners = new Map<string, Set<(entry: AuditEntry) => void>>();
+  private readonly gapListeners = new Map<string, Set<() => void>>();
   private nextId = 1;
   /** Lectures reçues (observable dans les tests) : filtre, curseur. */
   readonly reads: { serverId: string; filter: AuditFilter; before: number | null }[] = [];
@@ -99,8 +100,11 @@ export class SimulatedAudit {
     this.journals.set(serverId, []);
   }
 
-  /** Une entrée écrite maintenant (ou à `atMs`) ; envoyée en direct si le lien est établi. */
-  add(serverId: string, partial: NewAuditEntry = {}): AuditEntry {
+  /**
+   * Une entrée écrite maintenant (ou à `atMs`) ; envoyée en direct si le lien est établi.
+   * `deliver: false` : le flux la PERD sans le dire (retard du canal), seule une lecture la retrouve.
+   */
+  add(serverId: string, partial: NewAuditEntry = {}, deliver = true): AuditEntry {
     const atMs = partial.atMs ?? this.options.now();
     const action = partial.action ?? "login";
     const entry: AuditEntry = {
@@ -123,7 +127,7 @@ export class SimulatedAudit {
     };
     this.journal(serverId).push(entry);
     // Un lien coupé ne livre rien : l'entrée sera à rattraper par une lecture.
-    if (this.options.connected(serverId)) {
+    if (deliver && this.options.connected(serverId)) {
       for (const listener of [...(this.listeners.get(serverId) ?? [])]) listener({ ...entry });
     }
     return entry;
@@ -247,14 +251,35 @@ export class SimulatedAudit {
     return { saved: this.exportMode === "save", truncated: this.exportTruncated };
   }
 
-  subscribe(serverId: string, listener: (entry: AuditEntry) => void): Unsubscribe {
+  subscribe(
+    serverId: string,
+    listener: (entry: AuditEntry) => void,
+    onGap: () => void = () => {},
+  ): Unsubscribe {
+    // Une inscription = un enrobage distinct (comme `listen` de Tauri) : se désabonner n'en retire qu'une.
+    const wrapped = (entry: AuditEntry) => listener(entry);
+    const wrappedGap = () => onGap();
     let set = this.listeners.get(serverId);
     if (!set) {
       set = new Set();
       this.listeners.set(serverId, set);
     }
-    set.add(listener);
-    return () => void set.delete(listener);
+    set.add(wrapped);
+    let gaps = this.gapListeners.get(serverId);
+    if (!gaps) {
+      gaps = new Set();
+      this.gapListeners.set(serverId, gaps);
+    }
+    gaps.add(wrappedGap);
+    return () => {
+      set.delete(wrapped);
+      gaps.delete(wrappedGap);
+    };
+  }
+
+  /** L'avis « le flux a perdu des entrées » (`link://audit-gap`). */
+  gap(serverId: string): void {
+    for (const listener of [...(this.gapListeners.get(serverId) ?? [])]) listener();
   }
 
   /** Nombre d'écouteurs du direct sur un serveur (les tests vérifient qu'on se désabonne). */

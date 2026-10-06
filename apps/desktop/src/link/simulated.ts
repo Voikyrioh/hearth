@@ -427,8 +427,12 @@ export class SimulatedLinkBridge implements LinkBridge {
     return this.audit.export(serverId, filter);
   }
 
-  async onAudit(serverId: string, listener: (entry: AuditEntry) => void): Promise<Unsubscribe> {
-    return this.audit.subscribe(serverId, listener);
+  async onAudit(
+    serverId: string,
+    listener: (entry: AuditEntry) => void,
+    onGap: () => void = () => {},
+  ): Promise<Unsubscribe> {
+    return this.audit.subscribe(serverId, listener, onGap);
   }
 
   // --- Pilotage (code de test, panneau de développement) ---

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AuditEntry, AuditFilter } from "@/link";
 import {
   emptyDraft,
@@ -11,7 +11,13 @@ import {
   sameDraft,
 } from "./filters";
 import { formatWhen } from "./format";
-import { BURST_MIN_ATTEMPTS, BURST_WINDOW_MS, groupBursts } from "./grouping";
+import {
+  attemptsOf,
+  BURST_MIN_ATTEMPTS,
+  BURST_WINDOW_MS,
+  groupBursts,
+  OVERFLOW_REASON_PREFIX,
+} from "./grouping";
 import { displayRows } from "./rows";
 import { CELL_MAX_CHARS, CONTROL_MARK, clip, safeText } from "./text";
 
@@ -107,15 +113,108 @@ describe("regroupement des rafales (BR-AUDIT-013)", () => {
     expect(locked?.kind === "entry" && locked.entry.action).toBe("login.locked");
   });
 
-  it("compte pour 1 + N les répétitions que l'agent a déjà condensées", () => {
-    const list = [
-      entry({ at: T0 + 20_000, repeatCount: 3 }),
-      entry({ at: T0 + 10_000, repeatCount: 0 }),
-      entry({ at: T0, repeatCount: 0 }),
-    ];
-    const grouped = groupBursts(list);
+  it("le compte est EXACT : l'entrée de synthèse de l'agent EST la dernière occurrence, son repeat_count la compte déjà", () => {
+    // L'agent : 3 refus de même clé dans la minute = la première entrée + UNE synthèse à repeat_count 2.
+    const three = [entry({ at: T0 + 20_000, repeatCount: 2 }), entry({ at: T0 })];
+    expect(three.reduce((sum, e) => sum + attemptsOf(e), 0)).toBe(3);
+    // 3 vraies tentatives : sous le seuil de 5, pas de rafale (avec « 1 + repeat_count » on en aurait vu 4).
+    expect(groupBursts(three).every((row) => row.kind === "entry")).toBe(true);
+    // 5 vraies tentatives (1 + 4) : une rafale de 5, ni 4 ni 6.
+    const five = [entry({ at: T0 + 20_000, repeatCount: 4 }), entry({ at: T0 })];
+    const grouped = groupBursts(five);
     expect(grouped).toHaveLength(1);
-    expect(grouped[0]?.kind === "burst" && grouped[0].attempts).toBe(6);
+    expect(grouped[0]?.kind === "burst" && grouped[0].attempts).toBe(5);
+    // Plusieurs fenêtres de l'agent dans la rafale : aucune occurrence comptée deux fois ni oubliée.
+    const windows = [
+      entry({ at: T0 + 100_000, repeatCount: 7 }),
+      entry({ at: T0 + 90_000 }),
+      entry({ at: T0 + 40_000, repeatCount: 3 }),
+      entry({ at: T0 + 10_000 }),
+    ];
+    const merged = groupBursts(windows);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.kind === "burst" && merged[0].attempts).toBe(1 + 3 + 1 + 7);
+  });
+
+  it("l'adresse n'est affirmée que si elle est certaine : une synthèse (clé sans adresse) la retire du libellé", () => {
+    const ordinary = groupBursts(refusals(5, 5000));
+    expect(ordinary[0]?.kind === "burst" && ordinary[0].addr).toBe("203.0.113.9");
+    const withSummary = groupBursts([
+      entry({ at: T0 + 30_000, repeatCount: 4 }),
+      entry({ at: T0 }),
+    ]);
+    expect(withSummary[0]?.kind).toBe("burst");
+    expect(withSummary[0]?.kind === "burst" && withSummary[0].addr).toBeNull();
+  });
+
+  it("une synthèse dont la dernière occurrence vient d'une autre adresse n'entre pas dans la rafale d'une adresse", () => {
+    const other = {
+      kind: "client" as const,
+      name: null,
+      addr: "198.51.100.4",
+      text: "198.51.100.4 (inconnu)",
+    };
+    const list = [entry({ at: T0 + 50_000, repeatCount: 9, origin: other }), ...refusals(5, 5000)];
+    const grouped = groupBursts(list);
+    expect(grouped[0]).toEqual({ kind: "entry", entry: list[0] });
+    expect(grouped[1]?.kind).toBe("burst");
+    expect(grouped[1]?.kind === "burst" && grouped[1].addr).toBe("203.0.113.9");
+  });
+
+  it("l'entrée de débordement de l'agent (« activité trop variée ») n'est jamais absorbée", () => {
+    const overflow = entry({
+      at: T0 + 30_000,
+      repeatCount: 400,
+      reason: `${OVERFLOW_REASON_PREFIX}, 400 événements regroupés`,
+    });
+    const list = [overflow, ...refusals(5, 5000)];
+    const grouped = groupBursts(list);
+    expect(grouped[0]).toEqual({ kind: "entry", entry: overflow });
+    expect(grouped.filter((row) => row.kind === "burst")).toHaveLength(1);
+  });
+
+  it("un groupe à cheval sur deux pages : la rafale du bas n'est pas groupée tant qu'il en reste à charger, puis le compte est exact", () => {
+    const all = refusals(8, 5000);
+    const page1 = all.slice(0, 6);
+    const page2 = all.slice(6);
+    // Page 1 seule, suite à charger : un décompte partiel serait faux, on ne regroupe pas.
+    expect(groupBursts(page1, false).every((row) => row.kind === "entry")).toBe(true);
+    // Les deux pages : 8 tentatives exactes.
+    const whole = groupBursts([...page1, ...page2], true);
+    expect(whole).toHaveLength(1);
+    expect(whole[0]?.kind === "burst" && whole[0].attempts).toBe(8);
+    // Une rafale qui ne touche pas le bas est groupée même si la suite reste à charger.
+    const calm = entry({ at: T0 - 60 * 60_000, outcome: "ok", reason: null });
+    const above = groupBursts([...page1, calm], false);
+    expect(above.some((row) => row.kind === "burst")).toBe(true);
+  });
+
+  it("à la limite d'affichage (suite à charger) rien ne prétend un compte partiel", () => {
+    const list = refusals(30, 1000);
+    expect(groupBursts(list, false).every((row) => row.kind === "entry")).toBe(true);
+    expect(groupBursts(list, true).filter((row) => row.kind === "burst").length).toBeGreaterThan(0);
+  });
+
+  it("une réussite ou une action d'un autre type au milieu des refus n'est jamais absorbée et coupe la rafale", () => {
+    const list = refusals(10, 3000);
+    const logout = entry({
+      at: T0 + 12_000,
+      action: "logout",
+      actionLabel: "Déconnexion",
+      outcome: "ok",
+      reason: null,
+      account: "marie",
+    });
+    const mixed = [...list.slice(0, 5), logout, ...list.slice(5)];
+    const grouped = groupBursts(mixed);
+    const shownIds = grouped.flatMap((row) =>
+      row.kind === "entry" ? [row.entry.id] : row.entries.map((e) => e.id),
+    );
+    expect(shownIds).toEqual(mixed.map((e) => e.id));
+    expect(grouped.some((row) => row.kind === "entry" && row.entry.id === logout.id)).toBe(true);
+    for (const row of grouped) {
+      if (row.kind === "burst") expect(row.entries.every((e) => e.action === "login")).toBe(true);
+    }
   });
 
   it("une seule entrée de synthèse n'est pas un regroupement : elle s'affiche seule avec sa raison", () => {
@@ -132,12 +231,30 @@ describe("regroupement des rafales (BR-AUDIT-013)", () => {
     expect(after[1]).toEqual(before[0]);
   });
 
+  it("l'état déployé survit à l'arrivée d'une entrée en tête et d'une page sous la rafale", () => {
+    const list = refusals(6, 5000);
+    const expanded = new Set(list.map((e) => e.id));
+    const fresh = entry({ at: T0 + 25_000 });
+    const withTop = displayRows([fresh, ...list], expanded);
+    // La nouvelle tentative rejoint la rafale (même adresse, dans les 2 minutes) : elle reste déployée.
+    expect(
+      withTop
+        .filter((row) => row.type === "burst")
+        .every((row) => row.type === "burst" && row.expanded),
+    ).toBe(true);
+    const older = entry({ at: T0 - 5000 });
+    const withBelow = displayRows([...list, older], expanded);
+    expect(
+      withBelow
+        .filter((row) => row.type === "burst")
+        .every((row) => row.type === "burst" && row.expanded),
+    ).toBe(true);
+  });
+
   it("déployer une rafale montre chaque tentative juste dessous, dans l'ordre", () => {
     const list = refusals(5, 5000);
-    const grouped = groupBursts(list);
-    const key = grouped[0]?.kind === "burst" ? grouped[0].key : "";
     const closed = displayRows(list, new Set());
-    const open = displayRows(list, new Set([key]));
+    const open = displayRows(list, new Set([list[0]?.id ?? 0]));
     expect(closed).toHaveLength(1);
     expect(open).toHaveLength(6);
     expect(open.slice(1).map((row) => (row.type === "entry" ? row.entry.id : 0))).toEqual(
@@ -161,15 +278,15 @@ describe("filtres (BR-AUDIT-014, 015)", () => {
     expect(hasAnyFilter(draft({ text: "   " }))).toBe(false);
   });
 
-  it("« Aujourd'hui » commence à minuit local, les périodes glissantes à maintenant moins 7 ou 30 jours", () => {
+  it("« Aujourd'hui » commence à minuit local, 7 et 30 jours au début du jour d'il y a 7 ou 30 jours", () => {
     const today = resolveFilter(draft({ period: "today" }), NOW);
     expect(today?.fromS).toBe(Math.floor(new Date(2026, 9, 4, 0, 0, 0).getTime() / 1000));
     expect(today?.toS).toBeNull();
     expect(resolveFilter(draft({ period: "week" }), NOW)?.fromS).toBe(
-      Math.floor((NOW - 7 * 86_400_000) / 1000),
+      Math.floor(new Date(2026, 9, 4 - 7, 0, 0, 0).getTime() / 1000),
     );
     expect(resolveFilter(draft({ period: "month" }), NOW)?.fromS).toBe(
-      Math.floor((NOW - 30 * 86_400_000) / 1000),
+      Math.floor(new Date(2026, 9, 4 - 30, 0, 0, 0).getTime() / 1000),
     );
   });
 
@@ -248,5 +365,82 @@ describe("fuseau horaire (BR-AUDIT-012)", () => {
     expect(formatWhen(at, "Europe/Paris")).toBe("04/10/2026 12:30:15");
     expect(formatWhen(at, "America/New_York")).toBe("04/10/2026 06:30:15");
     expect(formatWhen(Number.NaN)).toBeNull();
+  });
+});
+
+describe("jours au calendrier du fuseau du PC (changements d'heure)", () => {
+  const saved = process.env.TZ;
+  afterEach(() => {
+    if (saved === undefined) process.env.TZ = undefined as unknown as string;
+    else process.env.TZ = saved;
+    if (saved === undefined) Reflect.deleteProperty(process.env, "TZ");
+  });
+
+  const secondsOf = (y: number, m: number, d: number, h = 0, mi = 0, se = 0) =>
+    Math.floor(new Date(y, m - 1, d, h, mi, se).getTime() / 1000);
+
+  it("fin au jour du retour à l'heure d'hiver (25/10/2026, 25 h) : la dernière seconde du jour est incluse", () => {
+    process.env.TZ = "Europe/Paris";
+    const filter = resolveFilter(
+      { ...emptyDraft(), period: "custom", fromDate: "2026-10-24", toDate: "2026-10-25" },
+      new Date(2026, 9, 27, 12).getTime(),
+    );
+    expect(filter?.toS).toBe(secondsOf(2026, 10, 25, 23, 59, 59));
+    // Le jour dure 25 h : de minuit local à minuit local, 25 * 3600 secondes.
+    expect((filter?.toS ?? 0) + 1 - secondsOf(2026, 10, 25)).toBe(25 * 3600);
+  });
+
+  it("fin au jour du passage à l'heure d'été (29/03/2026, 23 h) : rien du lendemain n'est inclus", () => {
+    process.env.TZ = "Europe/Paris";
+    const filter = resolveFilter(
+      { ...emptyDraft(), period: "custom", fromDate: "2026-03-28", toDate: "2026-03-29" },
+      new Date(2026, 2, 31, 12).getTime(),
+    );
+    expect(filter?.toS).toBe(secondsOf(2026, 3, 29, 23, 59, 59));
+    expect((filter?.toS ?? 0) + 1 - secondsOf(2026, 3, 29)).toBe(23 * 3600);
+    expect((filter?.toS ?? 0) + 1).toBe(secondsOf(2026, 3, 30));
+  });
+
+  it("« Aujourd'hui », 7 jours, 30 jours et la limite de 90 jours tombent à minuit local malgré un changement d'heure", () => {
+    process.env.TZ = "Europe/Paris";
+    // Le 26/10/2026 : 7 jours avant, c'est le 19 ; 30 jours avant, le 26/09 ; 90 jours avant, le 28/07.
+    const now = new Date(2026, 9, 26, 15, 30).getTime();
+    expect(resolveFilter({ ...emptyDraft(), period: "today" }, now)?.fromS).toBe(
+      secondsOf(2026, 10, 26),
+    );
+    expect(resolveFilter({ ...emptyDraft(), period: "week" }, now)?.fromS).toBe(
+      secondsOf(2026, 10, 19),
+    );
+    expect(resolveFilter({ ...emptyDraft(), period: "month" }, now)?.fromS).toBe(
+      secondsOf(2026, 9, 26),
+    );
+    expect(
+      periodError({ ...emptyDraft(), period: "custom", fromDate: "2026-07-28" }, now),
+    ).toBeNull();
+    expect(periodError({ ...emptyDraft(), period: "custom", fromDate: "2026-07-27" }, now)).toBe(
+      "tooOld",
+    );
+    // Le 29/03/2026 : le début du jour et le début de « il y a 7 jours » restent à minuit.
+    const spring = new Date(2026, 2, 29, 10).getTime();
+    expect(resolveFilter({ ...emptyDraft(), period: "week" }, spring)?.fromS).toBe(
+      secondsOf(2026, 3, 22),
+    );
+  });
+
+  it("à minuit pile : le jour qui commence est « aujourd'hui », celui qui finit s'arrête à 23:59:59", () => {
+    process.env.TZ = "Europe/Paris";
+    const midnight = new Date(2026, 9, 5, 0, 0, 0).getTime();
+    expect(resolveFilter({ ...emptyDraft(), period: "today" }, midnight)?.fromS).toBe(
+      secondsOf(2026, 10, 5),
+    );
+    const justBefore = new Date(2026, 9, 4, 23, 59, 59).getTime();
+    expect(resolveFilter({ ...emptyDraft(), period: "today" }, justBefore)?.fromS).toBe(
+      secondsOf(2026, 10, 4),
+    );
+  });
+
+  it("le texte de recherche est borné comme celui de la coquille (200 caractères), sans erreur", () => {
+    const filter = resolveFilter({ ...emptyDraft(), text: `  ${"é".repeat(300)}  ` }, Date.now());
+    expect(Array.from(filter?.text ?? "")).toHaveLength(200);
   });
 });

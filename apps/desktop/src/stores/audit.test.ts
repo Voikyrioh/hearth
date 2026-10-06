@@ -5,7 +5,9 @@ import { type AuditEntry, setLinkBridge } from "@/link";
 import { startedApp } from "@/test/app";
 import {
   AUDIT_LIVE_DEBOUNCE_MS,
+  AUDIT_LIVE_MAX_WAIT_MS,
   AUDIT_PENDING_MAX,
+  AUDIT_VERIFY_EVERY_MS,
   AUDIT_WINDOW_MAX,
   mergeDesc,
   useAuditStore,
@@ -173,7 +175,9 @@ describe("direct (BR-AUDIT-010)", () => {
     expect(audit.pendingOverflow).toBe(true);
     await audit.showPending();
     expect(audit.pendingOverflow).toBe(false);
-    expect(audit.entries).toHaveLength(100 + AUDIT_PENDING_MAX + 50);
+    // La tête se relit (la plus récente du journal en haut) ; le reste se charge en descendant.
+    expect(audit.entries[0]?.id).toBe(150 + AUDIT_PENDING_MAX + 50);
+    expect(audit.hasMoreBelow).toBe(true);
     expect(strictlyDescendingWithoutDuplicates(audit.entries)).toBe(true);
   });
 
@@ -382,5 +386,192 @@ describe("mergeDesc", () => {
     const make = (id: number) => ({ id }) as AuditEntry;
     const merged = mergeDesc([make(5), make(3)], [make(4), make(5), make(6)]);
     expect(merged.map((e) => e.id)).toEqual([6, 5, 4, 3]);
+  });
+});
+
+describe("continuité vérifiée (le journal est une preuve)", () => {
+  async function settle(ms = AUDIT_LIVE_DEBOUNCE_MS + 50) {
+    await vi.advanceTimersByTimeAsync(ms);
+    await flushPromises();
+  }
+
+  it("une entrée perdue au milieu d'une rafale : la suivante la révèle, la relecture comble le trou à sa place", async () => {
+    const { audit, bridge } = await opened(120);
+    const a = bridge.audit.add("forge", { actionLabel: "A", action: "logout" });
+    const lost = bridge.audit.add("forge", { actionLabel: "Perdue", action: "logout" }, false);
+    const c = bridge.audit.add("forge", { actionLabel: "C", action: "logout" });
+    // Tout de suite : la liste montre A et C, mais le doute est connu (rien ne prouve la continuité).
+    expect(ids(audit.entries).slice(0, 2)).toEqual([c.id, a.id]);
+    expect(audit.unverified).toBe(true);
+    await settle();
+    expect(ids(audit.entries).slice(0, 3)).toEqual([c.id, lost.id, a.id]);
+    expect(strictlyDescendingWithoutDuplicates(audit.entries)).toBe(true);
+    expect(audit.unverified).toBe(false);
+  });
+
+  it("le trou est comblé à sa place même quand l'utilisateur a défilé", async () => {
+    const { audit, bridge } = await opened(120);
+    audit.setAtTop(false);
+    bridge.audit.add("forge");
+    bridge.audit.add("forge", {}, false);
+    bridge.audit.add("forge");
+    await settle();
+    await audit.showPending();
+    expect(strictlyDescendingWithoutDuplicates(audit.entries)).toBe(true);
+    expect(audit.entries).toHaveLength(103);
+  });
+
+  it("un avis de retard du flux (Lagged) déclenche la relecture même sans entrée suivante", async () => {
+    const { audit, bridge } = await opened(60);
+    const lost = bridge.audit.add("forge", {}, false);
+    expect(ids(audit.entries)).not.toContain(lost.id);
+    bridge.audit.gap("forge");
+    await settle();
+    expect(audit.entries[0]?.id).toBe(lost.id);
+  });
+
+  it("la dernière entrée perdue sans avis ni suivante est retrouvée par la vérification périodique", async () => {
+    const { audit, bridge } = await opened(60);
+    const lost = bridge.audit.add("forge", {}, false);
+    await settle();
+    expect(ids(audit.entries)).not.toContain(lost.id);
+    await vi.advanceTimersByTimeAsync(AUDIT_VERIFY_EVERY_MS + 100);
+    await flushPromises();
+    expect(audit.entries[0]?.id).toBe(lost.id);
+  });
+
+  it("la vérification périodique ne se fait pas hors « Connecté » (aucune relecture automatique pendant la coupure)", async () => {
+    const { audit, bridge } = await opened(20);
+    bridge.setState("forge", "offline");
+    const reads = bridge.audit.reads.length;
+    await vi.advanceTimersByTimeAsync(AUDIT_VERIFY_EVERY_MS * 3);
+    expect(bridge.audit.reads).toHaveLength(reads);
+    expect(audit.status).toBe("ready");
+  });
+
+  it("un rattrapage qui échoue SE VOIT : état d'erreur, liste gardée, le doute reste ; « Réessayer » comble", async () => {
+    const { audit, bridge } = await opened(60);
+    const lost = bridge.audit.add("forge", {}, false);
+    bridge.audit.failReads = true;
+    const next = bridge.audit.add("forge");
+    await settle();
+    expect(audit.status).toBe("error");
+    expect(audit.unverified).toBe(true);
+    expect(audit.entries[0]?.id).toBe(next.id);
+    expect(ids(audit.entries)).not.toContain(lost.id);
+    // Une autre entrée en direct ne fait pas croire que tout va bien.
+    bridge.audit.add("forge");
+    await settle();
+    expect(audit.status).toBe("error");
+    bridge.audit.failReads = false;
+    await audit.retry();
+    await flushPromises();
+    expect(audit.status).toBe("ready");
+    expect(ids(audit.entries)).toContain(lost.id);
+    expect(audit.unverified).toBe(false);
+    expect(strictlyDescendingWithoutDuplicates(audit.entries)).toBe(true);
+  });
+
+  it("coupure puis retour SANS entrée manquée : rien ne change ; AVEC : elles sont ajoutées", async () => {
+    const { audit, bridge } = await opened(60);
+    const before = ids(audit.entries);
+    bridge.setState("forge", "offline");
+    bridge.setState("forge", "connected");
+    audit.resume();
+    await flushPromises();
+    expect(ids(audit.entries)).toEqual(before);
+    bridge.setState("forge", "offline");
+    const missed = bridge.audit.add("forge", {}, false);
+    bridge.setState("forge", "connected");
+    audit.resume();
+    await flushPromises();
+    expect(audit.entries[0]?.id).toBe(missed.id);
+    expect(audit.entries).toHaveLength(before.length + 1);
+  });
+
+  it("un trou de plus de 10 pages, utilisateur en haut : la liste repart de la tête en silence", async () => {
+    const { audit, bridge } = await opened(150);
+    const signal = audit.topSignal;
+    bridge.setState("forge", "offline");
+    for (let i = 0; i < 1100; i += 1) bridge.audit.add("forge", {}, false);
+    bridge.setState("forge", "connected");
+    audit.resume();
+    await flushPromises();
+    expect(audit.topSignal).toBe(signal);
+    expect(audit.status).toBe("ready");
+    expect(audit.entries[0]?.id).toBe(150 + 1100);
+    expect(strictlyDescendingWithoutDuplicates(audit.entries)).toBe(true);
+  });
+
+  it("un trou de plus de 10 pages, utilisateur plus bas : ce qu'il lit n'est PAS remplacé, le bouton le propose", async () => {
+    const { audit, bridge } = await opened(150);
+    audit.setAtTop(false);
+    const reading = ids(audit.entries);
+    bridge.setState("forge", "offline");
+    for (let i = 0; i < 1100; i += 1) bridge.audit.add("forge", {}, false);
+    bridge.setState("forge", "connected");
+    audit.resume();
+    await flushPromises();
+    expect(ids(audit.entries)).toEqual(reading);
+    expect(audit.pendingOverflow).toBe(true);
+    await audit.showPending();
+    expect(audit.entries[0]?.id).toBe(150 + 1100);
+    expect(audit.pendingOverflow).toBe(false);
+  });
+
+  it("anti-rebond avec attente maximale : un flux continu sous filtre n'empêche pas l'affichage", async () => {
+    const { audit, bridge } = await opened(40);
+    await audit.apply({ ...emptyDraft(), accounts: ["marie"] });
+    const reads = bridge.audit.reads.length;
+    const first = bridge.audit.add("forge", { account: "marie" });
+    // Une entrée toutes les 100 ms (jamais 300 ms de calme) pendant bien plus que l'attente maximale.
+    for (let i = 0; i < 25; i += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+      if (i === 21) expect(ids(audit.entries)).toContain(first.id);
+      bridge.audit.add("forge", { account: "marie" });
+    }
+    await flushPromises();
+    expect(ids(audit.entries)).toContain(first.id);
+    expect(bridge.audit.reads.length - reads).toBeLessThanOrEqual(4);
+    expect(AUDIT_LIVE_MAX_WAIT_MS).toBe(2000);
+  });
+
+  it("deux ouvertures rapprochées A, B, A : une seule écoute vivante, celle de A", async () => {
+    const ctx = await startedApp();
+    ctx.bridge.audit.seed("forge", 5);
+    const audit = useAuditStore();
+    const first = audit.open("forge");
+    const second = audit.open("salon");
+    const third = audit.open("forge");
+    await Promise.all([first, second, third]);
+    await flushPromises();
+    expect(ctx.bridge.audit.listenerCount("forge")).toBe(1);
+    expect(ctx.bridge.audit.listenerCount("salon")).toBe(0);
+    expect(audit.serverId).toBe("forge");
+    await audit.close();
+    expect(ctx.bridge.audit.listenerCount("forge")).toBe(0);
+  });
+
+  it("un chargement de la suite qui échoue se voit et se réessaie", async () => {
+    const { audit, bridge } = await opened(250);
+    bridge.audit.failReads = true;
+    await audit.loadMore();
+    expect(audit.loadMoreFailed).toBe(true);
+    expect(audit.entries).toHaveLength(100);
+    bridge.audit.failReads = false;
+    await audit.loadMore();
+    expect(audit.loadMoreFailed).toBe(false);
+    expect(audit.entries).toHaveLength(200);
+  });
+
+  it("« Aujourd'hui » appliqué puis minuit passé : la période est recalculée à la relecture", async () => {
+    vi.setSystemTime(new Date(2026, 9, 4, 23, 50));
+    const { audit, bridge } = await opened(40);
+    await audit.apply({ ...emptyDraft(), period: "today" }, Date.now());
+    expect(audit.applied.fromS).toBe(Math.floor(new Date(2026, 9, 4).getTime() / 1000));
+    vi.setSystemTime(new Date(2026, 9, 5, 0, 10));
+    bridge.audit.add("forge");
+    await settle();
+    expect(audit.applied.fromS).toBe(Math.floor(new Date(2026, 9, 5).getTime() / 1000));
   });
 });

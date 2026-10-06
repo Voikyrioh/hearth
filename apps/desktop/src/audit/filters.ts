@@ -44,12 +44,23 @@ export function emptyDraft(): FilterDraft {
 
 export type PeriodError = "reversed" | "tooOld" | "incomplete" | null;
 
-const DAY_MS = 86_400_000;
+/**
+ * Les jours se comptent au CALENDRIER du fuseau du PC, jamais par addition de 86 400 000 ms : un jour
+ * de changement d'heure dure 23 h ou 25 h.
+ */
 
 /** Début du jour local qui contient `ms`. */
-function startOfDay(ms: number): number {
+export function startOfDay(ms: number): number {
   const date = new Date(ms);
   date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+/** Début du jour local `days` jours après (ou avant, si négatif) celui qui contient `ms`. */
+export function startOfDayPlus(ms: number, days: number): number {
+  const date = new Date(ms);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + days);
   return date.getTime();
 }
 
@@ -73,7 +84,7 @@ export function periodError(draft: FilterDraft, now: number): PeriodError {
   if ((draft.fromDate !== "" && from === null) || (draft.toDate !== "" && to === null)) {
     return "incomplete";
   }
-  const oldest = startOfDay(now) - RETENTION_DAYS * DAY_MS;
+  const oldest = startOfDayPlus(now, -RETENTION_DAYS);
   if ((from !== null && from < oldest) || (to !== null && to < oldest)) return "tooOld";
   if (from !== null && to !== null && to < from) return "reversed";
   return null;
@@ -87,15 +98,16 @@ export function resolveFilter(draft: FilterDraft, now: number): AuditFilter | nu
   if (draft.period === "today") {
     fromS = Math.floor(startOfDay(now) / 1000);
   } else if (draft.period === "week") {
-    fromS = Math.floor((now - 7 * DAY_MS) / 1000);
+    // Au jour près : le début du jour d'il y a 7 jours (le filtre ne bouge pas avant minuit).
+    fromS = Math.floor(startOfDayPlus(now, -7) / 1000);
   } else if (draft.period === "month") {
-    fromS = Math.floor((now - 30 * DAY_MS) / 1000);
+    fromS = Math.floor(startOfDayPlus(now, -30) / 1000);
   } else if (draft.period === "custom") {
     const from = draft.fromDate === "" ? null : parseLocalDay(draft.fromDate);
     const to = draft.toDate === "" ? null : parseLocalDay(draft.toDate);
     if (from !== null) fromS = Math.floor(from / 1000);
     // La fin est INCLUSE : jusqu'à la dernière seconde du jour choisi.
-    if (to !== null) toS = Math.floor((to + DAY_MS) / 1000) - 1;
+    if (to !== null) toS = Math.floor(startOfDayPlus(to, 1) / 1000) - 1;
   }
   return {
     accounts: [...draft.accounts],
@@ -103,8 +115,16 @@ export function resolveFilter(draft: FilterDraft, now: number): AuditFilter | nu
     outcomes: AUDIT_OUTCOMES.filter((outcome) => draft.outcomes.includes(outcome)),
     fromS,
     toS,
-    text: draft.text.trim(),
+    text: boundedText(draft.text),
   };
+}
+
+/** Longueur maximale du texte de recherche envoyé (celle de la coquille). */
+export const SEARCH_MAX_CHARS = 200;
+
+/** Le texte de recherche sans espaces de bord, tronqué (par caractères) à la borne de la coquille. */
+function boundedText(text: string): string {
+  return Array.from(text.trim()).slice(0, SEARCH_MAX_CHARS).join("").trim();
 }
 
 /** Vrai quand le filtre ne retient rien de particulier : toute entrée correspond. */

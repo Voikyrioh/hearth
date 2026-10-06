@@ -42,6 +42,7 @@ export const LINK_EVENTS = {
   snapshot: "link://snapshot",
   metrics: "link://metrics",
   audit: "link://audit",
+  auditGap: "link://audit-gap",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -283,10 +284,26 @@ export class TauriLinkBridge implements LinkBridge {
     return unwrap(await commands.exportAudit(serverId, toAuditFilterDto(filter)));
   }
 
-  async onAudit(serverId: string, listener: (entry: AuditEntry) => void): Promise<Unsubscribe> {
-    return listen<AuditLiveEvent>(LINK_EVENTS.audit, (event) => {
-      const live = toAuditLive(event.payload);
-      if (live && live.serverId === serverId) listener(live.entry);
-    });
+  async onAudit(
+    serverId: string,
+    listener: (entry: AuditEntry) => void,
+    onGap: () => void = () => {},
+  ): Promise<Unsubscribe> {
+    const off: Unsubscribe[] = [];
+    try {
+      off.push(
+        await listen<AuditLiveEvent>(LINK_EVENTS.audit, (event) => {
+          const live = toAuditLive(event.payload);
+          if (live && live.serverId === serverId) listener(live.entry);
+        }),
+      );
+      off.push(await listen(LINK_EVENTS.auditGap, () => onGap()));
+    } catch (error) {
+      for (const stop of off) stop();
+      throw error;
+    }
+    return () => {
+      for (const stop of off) stop();
+    };
   }
 }

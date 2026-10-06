@@ -320,6 +320,8 @@ export const fr = {
     count: "{n} événements",
     countMore: "{n} événements ou plus",
     loadFailed: "Impossible de charger le journal",
+    moreFailed: "Impossible de charger les entrées plus anciennes",
+    newEntriesUnknown: "Nouvelles entrées",
     resetFailed: "Impossible de réinitialiser les filtres",
     exportFailed: "Impossible de générer l'export",
     exportDone: "Export terminé",
@@ -339,9 +341,7 @@ export const fr = {
     burstExpand: "Déployer : {summary}",
     burstCollapse: "Replier : {summary}",
     burstFrom: "depuis {addr}",
-    repeated: "{n} autres fois",
     details: "Détail de l'entrée",
-    detailOpen: "Voir l'entrée complète",
     detailSource: "Date source (UTC)",
     detailId: "Numéro",
     windowFull:

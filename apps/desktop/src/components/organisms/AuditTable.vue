@@ -35,14 +35,14 @@ const FALLBACK_ROW_HEIGHT = 44;
 const scroller = ref<HTMLElement | null>(null);
 const body = ref<HTMLElement | null>(null);
 const frame = ref<HTMLElement | null>(null);
-const expanded = ref<ReadonlySet<string>>(new Set());
+const expanded = ref<ReadonlySet<number>>(new Set());
 const activeKey = ref<string | null>(null);
 const range = ref({ start: 0, end: 40 });
 let rowHeight = FALLBACK_ROW_HEIGHT;
 let wasAtTop = true;
 let observer: ResizeObserver | null = null;
 
-const rows = computed(() => displayRows(props.entries, expanded.value));
+const rows = computed(() => displayRows(props.entries, expanded.value, !props.hasMore));
 const visible = computed(() =>
   rows.value.slice(range.value.start, range.value.end).map((row, offset) => ({
     row,
@@ -130,10 +130,13 @@ watch(
   },
 );
 
-function toggleBurst(key: string) {
+/** Déploie ou replie une rafale : tous ses membres entrent dans l'ensemble ou en sortent. */
+function toggleBurst(row: Extract<(typeof rows.value)[number], { type: "burst" }>) {
   const next = new Set(expanded.value);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
+  for (const entry of row.burst.entries) {
+    if (row.expanded) next.delete(entry.id);
+    else next.add(entry.id);
+  }
   expanded.value = next;
 }
 
@@ -162,7 +165,7 @@ function activate(index: number) {
   const row = rows.value[index];
   if (!row) return;
   activeKey.value = row.key;
-  if (row.type === "burst") toggleBurst(row.key);
+  if (row.type === "burst") toggleBurst(row);
   else emit("open", row.entry);
 }
 
@@ -190,13 +193,13 @@ function onKeydown(event: KeyboardEvent) {
     case "ArrowRight": {
       const row = rows.value[index];
       if (!(row && row.type === "burst" && !row.expanded)) return;
-      toggleBurst(row.key);
+      toggleBurst(row);
       break;
     }
     case "ArrowLeft": {
       const row = rows.value[index];
       if (!(row && row.type === "burst" && row.expanded)) return;
-      toggleBurst(row.key);
+      toggleBurst(row);
       break;
     }
     case "Enter":
@@ -257,7 +260,7 @@ defineExpose({ rows });
                 <div class="table__burst" role="gridcell" :aria-colspan="COLUMNS.length">
                   <HIcon :name="row.expanded ? 'chevron-down' : 'chevron-right'" size="sm" />
                   <span class="table__burst-text">{{ burstLabel(row.burst.attempts, row.burst.minutes) }}</span>
-                  <span class="table__muted">{{ t("audit.burstFrom", { addr: plain(row.burst.addr) }) }}</span>
+                  <span v-if="row.burst.addr" class="table__muted">{{ t("audit.burstFrom", { addr: plain(row.burst.addr) }) }}</span>
                   <span class="table__sr">{{
                     t(row.expanded ? "audit.burstCollapse" : "audit.burstExpand", { summary: summaryOf(index) })
                   }}</span>

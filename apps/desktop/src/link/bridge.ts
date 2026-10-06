@@ -104,7 +104,12 @@ export interface LinkBridge {
   exportAudit(serverId: string, filter: AuditFilter): Promise<AuditExportResult>;
   /**
    * Entrées du journal reçues en direct (`link://audit`). Rien n'est rejoué : ce qui a été manqué
-   * pendant une coupure se rattrape par `readAudit` (le récepteur dédoublonne par `id`).
+   * pendant une coupure se rattrape par `readAudit` (le récepteur dédoublonne par `id`). `onGap` : le
+   * flux a PERDU des entrées (avis de retard de la liaison, `link://audit-gap`) : le récepteur relit.
    */
-  onAudit(serverId: string, listener: (entry: AuditEntry) => void): Promise<Unsubscribe>;
+  onAudit(
+    serverId: string,
+    listener: (entry: AuditEntry) => void,
+    onGap?: () => void,
+  ): Promise<Unsubscribe>;
 }

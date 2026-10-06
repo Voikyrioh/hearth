@@ -74,7 +74,11 @@ export class NullLinkBridge implements LinkBridge {
   async exportAudit(): Promise<never> {
     return this.unavailable();
   }
-  async onAudit(_serverId: string, _listener: (entry: AuditEntry) => void): Promise<Unsubscribe> {
+  async onAudit(
+    _serverId: string,
+    _listener: (entry: AuditEntry) => void,
+    _onGap?: () => void,
+  ): Promise<Unsubscribe> {
     return () => {};
   }
 }
