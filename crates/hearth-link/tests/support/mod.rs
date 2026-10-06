@@ -35,12 +35,35 @@ pub use proxy::FaultProxy;
 /// Facteur de réduction des durées du produit.
 pub const SCALE: u32 = 6;
 
+/// Configuration par défaut des scénarios : AUCUN délai de la bibliothèque ne peut être atteint par la
+/// seule lenteur de la machine (silence du lien, battement, seuils « Reconnexion » et « Hors ligne »
+/// hors d'atteinte ; la coupure d'un mandataire se voit par l'erreur de transport, pas par le
+/// silence). Les scénarios qui ÉPROUVENT un délai le disent : `silence_config()` (gel), ou
+/// `Options::with_thresholds` avec les seuils voulus.
 pub fn fast_config() -> LinkConfig {
+    LinkConfig {
+        thresholds: thresholds(Some(never()), true, true),
+        heartbeat_period: Duration::from_secs(5),
+        ..scaled_config()
+    }
+}
+
+/// Seuils à l'échelle des tests, silence et battement compris : seulement pour les scénarios qui
+/// éprouvent la détection d'un flux muet (agent figé, trou noir).
+pub fn silence_config() -> LinkConfig {
     LinkConfig {
         thresholds: Thresholds::scaled(SCALE),
         heartbeat_period: Duration::from_millis(333),
-        attempt_timeout: Duration::from_millis(1_500),
-        request_timeout: Duration::from_millis(1_500),
+        ..scaled_config()
+    }
+}
+
+fn scaled_config() -> LinkConfig {
+    LinkConfig {
+        // Délais de garde des échanges : très larges, pour qu'une machine saturée ne transforme
+        // jamais une réponse lente en échec.
+        attempt_timeout: Duration::from_secs(30),
+        request_timeout: Duration::from_secs(30),
         net_poll_period: Duration::from_millis(60),
         wake_check_period: Duration::from_millis(50),
         snapshot_save_period: Duration::from_millis(200),
@@ -51,22 +74,44 @@ pub fn fast_config() -> LinkConfig {
 }
 
 /// Réseau scripté : la liste des adresses locales est celle qu'on y met.
-pub struct ScriptedNet(Mutex<BTreeSet<IpAddr>>);
+pub struct ScriptedNet {
+    addresses: Mutex<BTreeSet<IpAddr>>,
+    /// Lectures de la liste faites par le veilleur depuis le dernier `set`.
+    reads_since_set: std::sync::atomic::AtomicU64,
+}
 
 impl ScriptedNet {
     pub fn new() -> Self {
-        Self(Mutex::new(["192.168.1.20".parse().unwrap()].into()))
+        Self {
+            addresses: Mutex::new(["192.168.1.20".parse().unwrap()].into()),
+            reads_since_set: std::sync::atomic::AtomicU64::new(0),
+        }
     }
 
     pub fn set(&self, addresses: &[&str]) {
-        *self.0.lock().unwrap() = addresses.iter().map(|a| a.parse().unwrap()).collect();
+        *self.addresses.lock().unwrap() = addresses.iter().map(|a| a.parse().unwrap()).collect();
+        self.reads_since_set.store(0, Ordering::SeqCst);
+    }
+
+    /// Attend que le veilleur ait lu la liste au moins DEUX fois depuis le dernier `set` : la
+    /// première lecture a vu le changement, la seconde ne commence qu'une fois la première traitée.
+    pub async fn wait_seen(&self, limit: Duration) {
+        let deadline = Instant::now() + limit;
+        while self.reads_since_set.load(Ordering::SeqCst) < 2 {
+            assert!(
+                Instant::now() < deadline,
+                "le veilleur n'a pas relu le réseau"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
     }
 }
 
 #[async_trait]
 impl NetWatcher for ScriptedNet {
     async fn addresses(&self) -> Result<BTreeSet<IpAddr>, NetError> {
-        Ok(self.0.lock().unwrap().clone())
+        self.reads_since_set.fetch_add(1, Ordering::SeqCst);
+        Ok(self.addresses.lock().unwrap().clone())
     }
 }
 
@@ -228,9 +273,20 @@ pub async fn start_manager(
     clock: Arc<JumpClock>,
     config: LinkConfig,
 ) -> LinkManager {
+    start_manager_with(dir, vault, net, clock, config, transport()).await
+}
+
+pub async fn start_manager_with(
+    dir: &std::path::Path,
+    vault: Arc<MemoryVault>,
+    net: Arc<ScriptedNet>,
+    clock: Arc<JumpClock>,
+    config: LinkConfig,
+    transport: HttpTransport,
+) -> LinkManager {
     LinkManager::start(
         Ports {
-            transport: Arc::new(transport()),
+            transport: Arc::new(transport),
             vault,
             servers: Arc::new(FileServerStore::new(dir.join("servers.json"))),
             snapshots: Arc::new(FileSnapshotStore::new(dir.join("snapshots"))),
@@ -248,9 +304,20 @@ pub async fn start_manager(
 
 pub fn transport() -> HttpTransport {
     HttpTransport::new(HttpTransportConfig {
-        connect_timeout: Duration::from_millis(1_000),
-        request_timeout: Duration::from_millis(1_500),
-        send_timeout: Duration::from_millis(1_000),
+        connect_timeout: Duration::from_secs(10),
+        request_timeout: Duration::from_secs(30),
+        send_timeout: Duration::from_secs(10),
+        client_name: "poste-test/0.1".into(),
+    })
+}
+
+/// Transport au délai de connexion court : pour le test dont c'est l'objet (une sonde qui n'obtient
+/// jamais de réponse doit échouer sans attendre le délai généreux des autres tests).
+pub fn short_transport() -> HttpTransport {
+    HttpTransport::new(HttpTransportConfig {
+        connect_timeout: Duration::from_millis(500),
+        request_timeout: Duration::from_secs(30),
+        send_timeout: Duration::from_secs(10),
         client_name: "poste-test/0.1".into(),
     })
 }
@@ -292,10 +359,8 @@ impl World {
             .login(&id, "marie", Secret::from(PASSWORD), options.remember)
             .await
             .unwrap();
-        recorder
-            .wait_state(mark, LinkState::Connected, Duration::from_secs(5))
-            .await;
-        recorder.wait_metrics(mark, Duration::from_secs(5)).await;
+        recorder.wait_state(mark, LinkState::Connected, WAIT).await;
+        recorder.wait_metrics(mark, WAIT).await;
         Self {
             agent,
             proxy,
@@ -315,9 +380,89 @@ impl World {
     }
 }
 
-pub const WAIT: Duration = Duration::from_secs(10);
+/// Délai de garde des attentes : un test bloqué échoue au bout de ce temps. Jamais une assertion
+/// de vitesse : chaque attente porte sur un fait observable (état, événement, compteur).
+pub const WAIT: Duration = Duration::from_secs(60);
+
+/// Seuils si larges qu'aucune machine ne peut les franchir par hasard : le lien n'affiche jamais
+/// rien tant que le test ne le provoque pas (les seuils exacts sont prouvés par `domain/state`).
+pub fn never() -> Duration {
+    Duration::from_secs(3_600)
+}
+
+/// Les seuils de l'échelle des tests, dont certains sont relevés à « jamais » : `silence`
+/// (sinon un calcul retardé de 0,5 s passe pour une coupure), `reconnecting_after` et
+/// `offline_after` selon ce que le scénario attend.
+pub fn thresholds(silence: Option<Duration>, reconnecting: bool, offline: bool) -> Thresholds {
+    let base = Thresholds::scaled(SCALE);
+    Thresholds {
+        silence: silence.unwrap_or(base.silence),
+        reconnecting_after: if reconnecting {
+            base.reconnecting_after
+        } else {
+            never()
+        },
+        offline_after: if offline {
+            base.offline_after
+        } else {
+            never() * 2
+        },
+        ..base
+    }
+}
+
+impl Options {
+    /// Scénario qui éprouve la détection d'un flux muet : silence et battement à l'échelle.
+    pub fn silent_link() -> Self {
+        Self {
+            config: silence_config(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_thresholds(thresholds: Thresholds) -> Self {
+        Self {
+            config: LinkConfig {
+                thresholds,
+                ..fast_config()
+            },
+            ..Self::default()
+        }
+    }
+}
+
+/// Attend `n` salves de mesures de plus (le flux vit, quelle que soit la vitesse de la machine).
+pub async fn wait_metrics_times(recorder: &Recorder, n: usize) {
+    for _ in 0..n {
+        let mark = recorder.mark();
+        recorder.wait_metrics(mark, WAIT).await;
+    }
+}
+
+/// Attend que le mandataire ait reçu `n` connexions de plus (le lien tente de se rétablir).
+pub async fn wait_attempts(proxy: &FaultProxy, n: u64) {
+    let target = proxy.accepted() + n;
+    let deadline = Instant::now() + WAIT;
+    while proxy.accepted() < target {
+        assert!(Instant::now() < deadline, "aucune nouvelle tentative");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
 
 /// Durée réelle d'une durée du produit à l'échelle des tests.
 pub fn scaled(real: Duration) -> Duration {
     real / SCALE
+}
+
+/// Attend que l'action arrive chez l'agent ; si `execute` rend avant, dit ce qu'il a rendu (au lieu
+/// d'attendre pour rien jusqu'au délai de garde).
+pub async fn wait_started_or_returned<T: std::fmt::Debug>(
+    agent: &TestAgent,
+    baseline: u32,
+    call: &mut tokio::task::JoinHandle<T>,
+) {
+    tokio::select! {
+        () = agent.wait_action_started(baseline) => {}
+        returned = &mut *call => panic!("execute a rendu avant l'arrivée chez l'agent : {returned:?}"),
+    }
 }

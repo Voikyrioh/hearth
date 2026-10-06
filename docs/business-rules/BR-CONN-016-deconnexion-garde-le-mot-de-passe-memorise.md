@@ -16,12 +16,14 @@ maj: 2026-10-05
 ## Application (code)
 - `crates/hearth-link/src/domain/state.rs::LinkMachine` (`Input::LoggedOut`, `Reason::UserDisconnected`, `Start::Disconnected`).
 - `crates/hearth-link/src/manager/mod.rs::LinkManager::logout`, `initial_start` ; `domain/server.rs::ServerRecord::signed_out`.
+- Une connexion intervenue pendant l'appel réseau de la déconnexion n'est pas défaite : à la reprise du verrou, `LinkManager::logout` n'efface le jeton que si le carnet dit encore « déconnecté » et si le jeton du coffre est celui qu'il vient de fermer (FIX-01M46G7Z0ZP43T53M2F5KG4VKS).
 
 ## Interface (coquille et vue)
 - `pages/Servers.vue` : bouton « Se déconnecter » (visible seulement connecté), le mot de passe mémorisé reste ; `components/organisms/ReconnectPanel.vue` rouvre le formulaire de connexion. Tests : `src/pages/Servers.test.ts`, `e2e/connect.spec.ts`.
 
 ## Vérification
 - Tests : `domain::state::tests::logging_out_stops_everything_and_shows_session_expired`, `::every_stopped_state_carries_its_reason` ; `crates/hearth-link/tests/pinning.rs::logout_closes_the_session_but_keeps_the_remembered_password`.
+- `crates/hearth-link/tests/tracking.rs::a_slow_logout_never_erases_the_token_of_a_login_that_came_in_between`.
 
 ## Cas limites
 - Le jeton est effacé même si le serveur est injoignable.
@@ -33,3 +35,4 @@ maj: 2026-10-05
 ## Historique
 - 2026-10-05 — création (HRT-07, review Stephen round 1).
 - 2026-10-05 : section Interface (HRT-10).
+- 2026-10-05 : fin de `logout` et reconnexion concurrente (HRT-12, FIX-01M46G7Z0ZP43T53M2F5KG4VKS).

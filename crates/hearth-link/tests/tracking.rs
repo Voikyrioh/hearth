@@ -1,5 +1,11 @@
 //! Suivi des actions sur disque (persister PUIS envoyer), déconnexion contre une fin de session,
-//! reprise après panique, équité de la boucle : transport simulé et stockage simulé, temps réel.
+//! reprise après panique, équité de la boucle : transport simulé et stockage simulé.
+//!
+//! Déterminisme (HRT-12) : aucune assertion ne dépend de la vitesse de la machine. Les seuils de
+//! silence du lien et le délai d'écriture du suivi sont très larges (une machine saturée ne peut
+//! pas les franchir par hasard) ; chaque scénario attend un FAIT observable (porte atteinte,
+//! compteur, état) et non une durée ; les délais de garde (`GUARD`) ne servent qu'à ne pas
+//! laisser un test bloqué à jamais.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -40,6 +46,9 @@ use serde_json::json;
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
+
+/// Délai de garde : un test bloqué échoue au bout de ce temps, jamais une assertion de vitesse.
+const GUARD: Duration = Duration::from_secs(60);
 
 // ── Transport simulé ────────────────────────────────────────────────────────────────────────
 
@@ -299,8 +308,6 @@ enum Disk {
     Failing,
     /// Chaque écriture des opérations ne finit jamais.
     Hanging,
-    /// Chaque écriture des opérations dure ce temps.
-    Slow(Duration),
     /// L'écriture attend que le test ouvre la porte (`Store::gate_open`) : aucune horloge.
     Gated,
 }
@@ -309,8 +316,6 @@ struct Store {
     disk: Mutex<Disk>,
     servers: Mutex<Vec<ServerRecord>>,
     operations: Mutex<Vec<PendingOp>>,
-    /// Instant de la fin de la dernière écriture des opérations.
-    written_at: Mutex<Option<Instant>>,
     /// `Disk::Gated` : une écriture attend à la porte / la porte est ouverte.
     gate_reached: AtomicBool,
     gate_open: AtomicBool,
@@ -322,7 +327,6 @@ impl Store {
             disk: Mutex::new(disk),
             servers: Mutex::new(Vec::new()),
             operations: Mutex::new(Vec::new()),
-            written_at: Mutex::new(None),
             gate_reached: AtomicBool::new(false),
             gate_open: AtomicBool::new(false),
         })
@@ -376,7 +380,6 @@ impl OperationStore for Store {
         match disk {
             Disk::Failing => return Err(StoreError("disque plein".into())),
             Disk::Hanging => std::future::pending::<()>().await,
-            Disk::Slow(delay) => tokio::time::sleep(delay).await,
             Disk::Gated => {
                 self.gate_reached.store(true, Ordering::SeqCst);
                 while !self.gate_open.load(Ordering::SeqCst) {
@@ -386,7 +389,6 @@ impl OperationStore for Store {
             Disk::Normal => {}
         }
         *self.operations.lock().unwrap() = operations.to_vec();
-        *self.written_at.lock().unwrap() = Some(Instant::now());
         Ok(())
     }
     async fn remove(&self, _: &ServerId) -> Result<(), StoreError> {
@@ -419,24 +421,44 @@ impl EventSink for Bomb {
 }
 
 /// Destination d'événements qui retient la tâche du serveur (un fil bloqué) au prochain
-/// événement : de quoi mettre une trame et une commande en attente ensemble.
+/// événement : de quoi mettre une trame et une commande en attente ensemble. La tâche est
+/// relâchée par le test (`release`), jamais par une durée.
 #[derive(Default)]
 struct Gate {
     block_next: AtomicBool,
+    reached: AtomicBool,
+    release: AtomicBool,
 }
 
 impl EventSink for Gate {
     fn emit(&self, _: Event) {
         if self.block_next.swap(false, Ordering::SeqCst) {
-            std::thread::sleep(ms(500));
+            self.reached.store(true, Ordering::SeqCst);
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !self.release.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::sleep(ms(1));
+            }
         }
     }
 }
 
 fn config() -> LinkConfig {
+    config_with(Duration::from_secs(120))
+}
+
+/// `persist_timeout` : très large par défaut (un disque simulé retenu par le test ne doit jamais
+/// atteindre le délai) ; court seulement pour le test dont c'est précisément l'objet.
+fn config_with(persist_timeout: Duration) -> LinkConfig {
+    let hour = Duration::from_secs(3_600);
     LinkConfig {
+        thresholds: hearth_link::domain::state::Thresholds {
+            silence: hour,
+            reconnecting_after: hour,
+            offline_after: hour * 2,
+            ..hearth_link::domain::state::Thresholds::default()
+        },
         heartbeat_period: ms(100),
-        persist_timeout: ms(600),
+        persist_timeout,
         restart_delay: ms(20),
         net_poll_period: Duration::from_secs(3_600),
         wake_check_period: Duration::from_secs(3_600),
@@ -457,6 +479,16 @@ async fn start(
     vault: &Arc<MemoryVault>,
     bomb: Option<Arc<dyn EventSink>>,
 ) -> LinkManager {
+    start_with(script, store, vault, bomb, config()).await
+}
+
+async fn start_with(
+    script: &Arc<Script>,
+    store: &Arc<Store>,
+    vault: &Arc<MemoryVault>,
+    bomb: Option<Arc<dyn EventSink>>,
+    config: LinkConfig,
+) -> LinkManager {
     LinkManager::start(
         Ports {
             transport: Arc::new(Mock(script.clone())),
@@ -469,7 +501,7 @@ async fn start(
             net: Arc::new(NoNet),
             extra_sink: bomb,
         },
-        config(),
+        config,
     )
     .await
     .unwrap()
@@ -484,10 +516,19 @@ async fn connected_with(
     remember: bool,
     sink: Option<Arc<dyn EventSink>>,
 ) -> (Rig, ServerId) {
+    connected_config(disk, remember, sink, config()).await
+}
+
+async fn connected_config(
+    disk: Disk,
+    remember: bool,
+    sink: Option<Arc<dyn EventSink>>,
+    config: LinkConfig,
+) -> (Rig, ServerId) {
     let script = Script::new();
     let store = Store::new(disk);
     let vault = Arc::new(MemoryVault::new());
-    let manager = start(&script, &store, &vault, sink).await;
+    let manager = start_with(&script, &store, &vault, sink, config).await;
     let id = manager
         .add_server(NewServer {
             name: "Mock".into(),
@@ -516,7 +557,7 @@ async fn connected_with(
 }
 
 async fn wait_state(manager: &LinkManager, id: &ServerId, state: LinkState) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + GUARD;
     while manager.state(id).unwrap().state != state {
         assert!(
             Instant::now() < deadline,
@@ -552,45 +593,59 @@ async fn a_failed_write_means_the_action_is_not_sent_and_the_caller_is_told() {
 
 #[tokio::test]
 async fn a_write_that_never_ends_does_not_send_the_action_either() {
-    let (rig, id) = connected(Disk::Hanging, false).await;
-    let started = Instant::now();
-    let result = rig.manager.execute(&id, change_password()).await;
+    // Délai d'écriture court : c'est lui qu'on éprouve (plus il est dépassé, mieux c'est : aucune
+    // assertion de durée, seulement « l'appel se termine, en TrackingSlow »).
+    let (rig, id) = connected_config(Disk::Hanging, false, None, config_with(ms(300))).await;
+    let result = tokio::time::timeout(GUARD, rig.manager.execute(&id, change_password()))
+        .await
+        .expect("l'appel est borné par le délai d'écriture");
     assert_eq!(result.unwrap_err(), LinkError::TrackingSlow);
-    assert!(
-        started.elapsed() < Duration::from_secs(3),
-        "borné par le délai court"
-    );
     assert_eq!(rig.script.requests.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
 async fn a_slow_write_delays_the_request_until_it_is_done() {
-    let (rig, id) = connected(Disk::Slow(ms(300)), false).await;
-    let sent_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-    let slot = sent_at.clone();
+    // Écriture retenue à une porte ouverte par le test : aucune horloge dans le scénario.
+    let (rig, id) = connected(Disk::Gated, false).await;
+    // Ce que le disque contient au moment où la requête part (le suivi doit déjà y être).
+    let seen_on_disk = Arc::new(AtomicUsize::new(usize::MAX));
+    let seen = seen_on_disk.clone();
+    let store = rig.store.clone();
     *rig.script.on_request.lock().unwrap() = Some(Box::new(move || {
-        *slot.lock().unwrap() = Some(Instant::now());
+        seen.store(store.tracked(), Ordering::SeqCst);
     }));
-    let started = Instant::now();
-    let outcome = rig.manager.execute(&id, change_password()).await.unwrap();
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
+    wait_until("écriture du suivi à la porte", || {
+        rig.store.gate_reached.load(Ordering::SeqCst)
+    })
+    .await;
+    // Tant que la porte est fermée (le disque n'a pas fini), la requête ne peut pas partir : on
+    // laisse les tâches tourner à volonté, c'est un ordre de causalité et non une durée.
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        rig.script.requests.load(Ordering::SeqCst),
+        0,
+        "la requête attend l'écriture du suivi"
+    );
+    assert_eq!(rig.store.tracked(), 0, "rien d'écrit porte fermée");
+    rig.store.gate_open.store(true, Ordering::SeqCst);
+    let outcome = tokio::time::timeout(GUARD, call)
+        .await
+        .expect("l'action se termine une fois l'écriture finie")
+        .unwrap()
+        .unwrap();
     assert!(matches!(
         outcome,
         ActionOutcome::Completed { status: 200, .. }
     ));
-    let sent = sent_at.lock().unwrap().expect("la requête est partie");
-    let written = rig
-        .store
-        .written_at
-        .lock()
-        .unwrap()
-        .expect("le suivi est écrit");
-    assert!(
-        sent >= written,
+    assert_eq!(
+        seen_on_disk.load(Ordering::SeqCst),
+        1,
         "la requête n'est partie qu'après l'écriture du suivi"
-    );
-    assert!(
-        sent - started >= ms(250),
-        "elle a bien attendu l'écriture lente"
     );
 }
 
@@ -608,11 +663,10 @@ async fn a_crash_right_after_the_send_leaves_the_operation_on_disk_for_the_resta
     let manager = rig.manager.clone();
     let task_id = id.clone();
     let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while rig.script.requests.load(Ordering::SeqCst) == 0 {
-        assert!(Instant::now() < deadline);
-        tokio::time::sleep(ms(10)).await;
-    }
+    wait_until("la requête est partie", || {
+        rig.script.requests.load(Ordering::SeqCst) > 0
+    })
+    .await;
     assert_eq!(
         seen_on_disk.load(Ordering::SeqCst),
         1,
@@ -626,7 +680,7 @@ async fn a_crash_right_after_the_send_leaves_the_operation_on_disk_for_the_resta
     let script = Script::new();
     let manager = start(&script, &rig.store, &rig.vault, None).await;
     let mut events = manager.subscribe();
-    let (_, outcome) = tokio::time::timeout(Duration::from_secs(5), async {
+    let (_, outcome) = tokio::time::timeout(GUARD, async {
         loop {
             if let Some(Event::Operation { outcome, .. }) = events.recv().await {
                 return ((), outcome);
@@ -653,25 +707,224 @@ async fn a_session_end_frame_racing_a_logout_never_triggers_a_silent_reconnectio
     // lue la première (`biased`) : sans la lecture de `signed_out`, elle relancerait une session.
     gate.block_next.store(true, Ordering::SeqCst);
     rig.script.snapshot_next.store(true, Ordering::SeqCst);
-    rig.script.wake.notify_waiters();
-    tokio::time::sleep(ms(150)).await;
+    // `notify_one` garde un permis : la lecture du flux le prend même si elle n'attend pas encore.
+    rig.script.wake.notify_one();
+    wait_until("tâche retenue par la destination d'événements", || {
+        gate.reached.load(Ordering::SeqCst)
+    })
+    .await;
     rig.script.expire_next.store(true, Ordering::SeqCst);
-    rig.manager.logout(&id).await.unwrap();
-    tokio::time::sleep(ms(900)).await;
+    // La déconnexion démarre pendant que la tâche est retenue ; le test ne la relâche qu'une fois
+    // la déconnexion notée.
+    let logout = {
+        let manager = rig.manager.clone();
+        let task_id = id.clone();
+        tokio::spawn(async move { manager.logout(&task_id).await })
+    };
+    // Précondition de la course : la déconnexion est notée (le carnet dit « déconnecté », sous
+    // verrou, avant même l'envoi de la commande). Tant que ce n'est pas fait, on ne relâche pas.
+    wait_until("déconnexion notée au carnet", || {
+        rig.manager.servers().iter().any(|record| record.signed_out)
+    })
+    .await;
+    gate.release.store(true, Ordering::SeqCst);
+    tokio::time::timeout(GUARD, logout)
+        .await
+        .expect("la déconnexion se termine")
+        .unwrap()
+        .unwrap();
+    // Le fait attendu : l'état final est « déconnecté par l'utilisateur » ; l'absence de session
+    // silencieuse se lit au compteur de connexions, relevé une fois l'état atteint.
+    wait_until("état déconnecté par l'utilisateur", || {
+        let info = rig.manager.state(&id).unwrap();
+        info.state == LinkState::SessionExpired && info.reason == Some(Reason::UserDisconnected)
+    })
+    .await;
     assert_eq!(
         rig.script.logins.load(Ordering::SeqCst),
         logins,
         "aucune reconnexion silencieuse"
     );
-    let info = rig.manager.state(&id).unwrap();
-    assert_eq!(info.state, LinkState::SessionExpired);
-    assert_eq!(info.reason, Some(Reason::UserDisconnected));
     assert!(
         rig.vault
             .get(&id, hearth_link::ports::vault::SecretKind::Token)
             .unwrap()
             .is_none()
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_task_late_on_a_logout_never_erases_the_token_of_a_login_that_already_came_in() {
+    // FIX:01M46G7Z0ZP43T53M2F5KG4VKS : la tâche, retenue par la destination d'événements, traite la
+    // commande de déconnexion APRÈS qu'une connexion a rangé son jeton.
+    let gate = Arc::new(Gate::default());
+    let (rig, id) = connected_with(Disk::Normal, true, Some(gate.clone())).await;
+    gate.block_next.store(true, Ordering::SeqCst);
+    rig.script.snapshot_next.store(true, Ordering::SeqCst);
+    rig.script.wake.notify_one();
+    wait_until("tâche retenue", || gate.reached.load(Ordering::SeqCst)).await;
+    // La déconnexion part (sa commande attend dans la file de la tâche) et reste en vol côté réseau.
+    rig.script.logout_hold.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let logout = tokio::spawn(async move { manager.logout(&task_id).await });
+    wait_until("déconnexion en vol", || {
+        rig.script.logout_in_flight.load(Ordering::SeqCst)
+    })
+    .await;
+    // Une connexion passe pendant ce temps : jeton neuf au coffre, carnet « connecté ».
+    rig.manager
+        .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap();
+    let fresh = rig.vault.get(&id, SecretKind::Token).unwrap().unwrap();
+    // Seulement maintenant la tâche se réveille et lit la commande de déconnexion.
+    gate.release.store(true, Ordering::SeqCst);
+    rig.script.logout_hold.store(false, Ordering::SeqCst);
+    tokio::time::timeout(GUARD, logout)
+        .await
+        .expect("la déconnexion se termine")
+        .unwrap()
+        .unwrap();
+    wait_state(&rig.manager, &id, LinkState::Connected).await;
+    assert_eq!(
+        rig.vault.get(&id, SecretKind::Token).unwrap(),
+        Some(fresh),
+        "le jeton de la connexion est intact"
+    );
+}
+
+/// Coffre qui retient `login` APRÈS qu'il a rangé son jeton et avant qu'il lève « déconnecté » : la
+/// fenêtre que la fiche FIX-01M46G7Z0ZP43T53M2F5KG4VKS disait « réduite, pas fermée ».
+struct HoldingVault {
+    inner: MemoryVault,
+    hold_after_token_put: AtomicBool,
+    reached: AtomicBool,
+    release: AtomicBool,
+}
+
+impl Vault for HoldingVault {
+    fn get(&self, s: &ServerId, k: SecretKind) -> Result<Option<Secret>, VaultError> {
+        self.inner.get(s, k)
+    }
+    fn put(&self, s: &ServerId, k: SecretKind, v: &Secret) -> Result<(), VaultError> {
+        self.inner.put(s, k, v)?;
+        if k == SecretKind::Token && self.hold_after_token_put.swap(false, Ordering::SeqCst) {
+            self.reached.store(true, Ordering::SeqCst);
+            // Garde : si le test échoue avant de relâcher, le fil ne reste pas bloqué à jamais.
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !self.release.load(Ordering::SeqCst) && Instant::now() < deadline {
+                std::thread::sleep(ms(1));
+            }
+        }
+        Ok(())
+    }
+    fn delete(&self, s: &ServerId, k: SecretKind) -> Result<(), VaultError> {
+        self.inner.delete(s, k)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_late_task_never_erases_a_token_stored_by_a_login_that_has_not_yet_cleared_signed_out() {
+    // La fenêtre entière : `login` a rangé son jeton, n'a pas encore levé « déconnecté », et la
+    // tâche (en retard sur la commande de déconnexion) traite `LoggedOut` JUSTE À CE MOMENT. Lecture
+    // et effacement de la tâche, rangement et drapeau de `login` : sous le même verrou d'écriture.
+    let script = Script::new();
+    let store = Store::new(Disk::Normal);
+    let vault = Arc::new(HoldingVault {
+        inner: MemoryVault::new(),
+        hold_after_token_put: AtomicBool::new(false),
+        reached: AtomicBool::new(false),
+        release: AtomicBool::new(false),
+    });
+    let gate = Arc::new(Gate::default());
+    let manager = LinkManager::start(
+        Ports {
+            transport: Arc::new(Mock(script.clone())),
+            vault: vault.clone(),
+            servers: store.clone(),
+            snapshots: store.clone(),
+            operations: store.clone(),
+            clock: Arc::new(SystemClock::new()),
+            rng: Arc::new(OsRng::default()),
+            net: Arc::new(NoNet),
+            extra_sink: Some(gate.clone()),
+        },
+        config(),
+    )
+    .await
+    .unwrap();
+    let id = manager
+        .add_server(NewServer {
+            name: "Mock".into(),
+            color: "1".into(),
+            host: "mock.test".into(),
+            port: 7341,
+            fingerprint: Fingerprint::from_bytes([7; 32]),
+            mac_addresses: vec![],
+        })
+        .await
+        .unwrap();
+    manager
+        .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap();
+    wait_state(&manager, &id, LinkState::Connected).await;
+    // La tâche est retenue ; la déconnexion part et reste en vol côté réseau (sa commande attend).
+    gate.block_next.store(true, Ordering::SeqCst);
+    script.snapshot_next.store(true, Ordering::SeqCst);
+    script.wake.notify_one();
+    wait_until("tâche retenue", || gate.reached.load(Ordering::SeqCst)).await;
+    script.logout_hold.store(true, Ordering::SeqCst);
+    let logout = {
+        let manager = manager.clone();
+        let id = id.clone();
+        tokio::spawn(async move { manager.logout(&id).await })
+    };
+    wait_until("déconnexion en vol", || {
+        script.logout_in_flight.load(Ordering::SeqCst)
+    })
+    .await;
+    // `login` range son jeton puis reste retenu avant de lever « déconnecté ».
+    vault.hold_after_token_put.store(true, Ordering::SeqCst);
+    let login = {
+        let manager = manager.clone();
+        let id = id.clone();
+        tokio::spawn(async move {
+            manager
+                .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+                .await
+        })
+    };
+    wait_until("jeton rangé, drapeau pas encore levé", || {
+        vault.reached.load(Ordering::SeqCst)
+    })
+    .await;
+    // La tâche se réveille et traite la déconnexion pendant cette fenêtre.
+    gate.release.store(true, Ordering::SeqCst);
+    wait_until("déconnexion traitée par la tâche", || {
+        let info = manager.state(&id).unwrap();
+        info.state == LinkState::SessionExpired && info.reason == Some(Reason::UserDisconnected)
+    })
+    .await;
+    // Fenêtre d'observation d'une absence : la tâche n'efface rien tant que `login` tient le verrou.
+    tokio::time::sleep(ms(200)).await;
+    let fresh = vault.get(&id, SecretKind::Token).unwrap();
+    assert!(fresh.is_some(), "le jeton neuf est encore là");
+    vault.release.store(true, Ordering::SeqCst);
+    script.logout_hold.store(false, Ordering::SeqCst);
+    tokio::time::timeout(GUARD, login)
+        .await
+        .expect("la connexion se termine")
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(GUARD, logout)
+        .await
+        .expect("la déconnexion se termine")
+        .unwrap()
+        .unwrap();
+    wait_state(&manager, &id, LinkState::Connected).await;
+    assert_eq!(vault.get(&id, SecretKind::Token).unwrap(), fresh);
 }
 
 // ── Reprise après panique ───────────────────────────────────────────────────────────────────
@@ -694,6 +947,41 @@ fn record(signed_out: bool) -> ServerRecord {
 }
 
 #[tokio::test]
+async fn a_remembered_login_without_a_password_in_the_vault_is_not_promised_at_startup() {
+    // Application tuée pendant l'ajout : le carnet dit « se souvenir », le coffre n'a rien.
+    let script = Script::new();
+    let store = Store::new(Disk::Normal);
+    store.servers.lock().unwrap().push(record(true));
+    let vault = Arc::new(MemoryVault::new());
+    let manager = start(&script, &store, &vault, None).await;
+    assert!(!manager.servers()[0].remember, "pas de case cochée à tort");
+    assert!(
+        !store.servers.lock().unwrap()[0].remember,
+        "corrigé aussi sur disque"
+    );
+    // Un mot de passe bien au coffre garde sa promesse.
+    let mut kept = record(true);
+    kept.id = ServerId::parse("kept").unwrap();
+    store.servers.lock().unwrap().push(kept);
+    vault
+        .put(
+            &ServerId::parse("kept").unwrap(),
+            SecretKind::Password,
+            &Secret::from("p"),
+        )
+        .unwrap();
+    manager.shutdown().await;
+    let manager = start(&script, &store, &vault, None).await;
+    let remembered: Vec<_> = manager
+        .servers()
+        .into_iter()
+        .filter(|s| s.remember)
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(remembered, [ServerId::parse("kept").unwrap()]);
+}
+
+#[tokio::test]
 async fn after_a_panic_a_disconnected_server_stays_disconnected() {
     let script = Script::new();
     let store = Store::new(Disk::Normal);
@@ -710,12 +998,14 @@ async fn after_a_panic_a_disconnected_server_stays_disconnected() {
     bomb.armed.store(true, Ordering::SeqCst);
     let manager = start(&script, &store, &vault, Some(bomb as Arc<dyn EventSink>)).await;
     let id = ServerId::parse("srv").unwrap();
-    tokio::time::sleep(ms(600)).await;
-    assert_eq!(
-        manager.task_restarts(&id).unwrap(),
-        1,
-        "la tâche a bien paniqué une fois"
-    );
+    wait_until("la tâche a paniqué puis repris", || {
+        manager.task_restarts(&id).unwrap() == 1
+    })
+    .await;
+    wait_until("état déconnecté après la reprise", || {
+        manager.state(&id).unwrap().state == LinkState::SessionExpired
+    })
+    .await;
     let info = manager.state(&id).unwrap();
     assert_eq!(info.state, LinkState::SessionExpired);
     assert_eq!(info.reason, Some(Reason::UserDisconnected));
@@ -754,22 +1044,19 @@ async fn after_a_panic_a_connected_server_restarts_offline_and_retries() {
 async fn an_agent_flooding_the_stream_starves_neither_commands_nor_the_heartbeat() {
     let (rig, id) = connected(Disk::Normal, false).await;
     *rig.script.mode.lock().unwrap() = StreamMode::Flood;
-    tokio::time::sleep(ms(300)).await;
     let pings = rig.script.pings.load(Ordering::SeqCst);
     // Une commande passe malgré le flot ininterrompu de trames.
-    let outcome = tokio::time::timeout(
-        Duration::from_secs(5),
-        rig.manager.execute(&id, change_password()),
-    )
-    .await
-    .expect("la commande n'est pas affamée par le flot de trames")
-    .unwrap();
+    let outcome = tokio::time::timeout(GUARD, rig.manager.execute(&id, change_password()))
+        .await
+        .expect("la commande n'est pas affamée par le flot de trames")
+        .unwrap();
     assert!(matches!(outcome, ActionOutcome::Completed { .. }));
-    tokio::time::sleep(ms(600)).await;
-    assert!(
-        rig.script.pings.load(Ordering::SeqCst) >= pings + 3,
-        "le battement continue pendant le flot"
-    );
+    // Le battement continue pendant le flot : trois battements de plus, quel que soit le temps
+    // que cela prend sur la machine.
+    wait_until("le battement continue pendant le flot", || {
+        rig.script.pings.load(Ordering::SeqCst) >= pings + 3
+    })
+    .await;
     assert_eq!(rig.manager.state(&id).unwrap().state, LinkState::Connected);
     let _ = ErrorDetail {
         code: ErrorCode::Busy,
@@ -796,7 +1083,7 @@ async fn a_link_cut_while_the_tracking_is_written_ends_as_not_executed_exactly_o
     })
     .await;
     rig.script.fail_stream.store(true, Ordering::SeqCst);
-    let outcome = tokio::time::timeout(Duration::from_secs(5), call)
+    let outcome = tokio::time::timeout(GUARD, call)
         .await
         .expect("l'appelant est libéré par la coupure")
         .unwrap()
@@ -806,7 +1093,7 @@ async fn a_link_cut_while_the_tracking_is_written_ends_as_not_executed_exactly_o
     };
     // On relâche l'écriture ; le lien revient ; l'agent ne connaît pas l'opération.
     rig.store.gate_open.store(true, Ordering::SeqCst);
-    let announced = tokio::time::timeout(Duration::from_secs(10), async {
+    let announced = tokio::time::timeout(GUARD, async {
         loop {
             if let Some(Event::Operation { id, outcome, .. }) = events.recv().await {
                 return (id, outcome);
@@ -835,9 +1122,9 @@ async fn a_link_cut_while_the_tracking_is_written_ends_as_not_executed_exactly_o
     );
 }
 
-/// Attend une condition sans horloge de scénario (simple surveillance, 10 s au plus).
+/// Attend une condition sans horloge de scénario (simple surveillance, garde de `GUARD`).
 async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + GUARD;
     while !condition() {
         assert!(Instant::now() < deadline, "attendu : {what}");
         tokio::time::sleep(ms(2)).await;
@@ -858,7 +1145,7 @@ async fn a_slow_logout_does_not_hold_back_a_removal() {
     })
     .await;
     // La suppression n'attend pas le serveur injoignable : elle se termine alors que le réseau tient.
-    tokio::time::timeout(Duration::from_secs(5), rig.manager.remove_server(&id))
+    tokio::time::timeout(GUARD, rig.manager.remove_server(&id))
         .await
         .expect("la suppression ne reste pas derrière l'appel réseau")
         .unwrap();
@@ -866,6 +1153,39 @@ async fn a_slow_logout_does_not_hold_back_a_removal() {
     assert_eq!(logout.await.unwrap().unwrap_err(), LinkError::UnknownServer);
     assert!(rig.vault.get(&id, SecretKind::Token).unwrap().is_none());
     assert!(rig.store.servers.lock().unwrap().is_empty());
+}
+
+// ── Déconnexion lente contre reconnexion (FIX-01M46G7Z0ZP43T53M2F5KG4VKS) ─────────────────────
+
+#[tokio::test]
+async fn a_slow_logout_never_erases_the_token_of_a_login_that_came_in_between() {
+    let (rig, id) = connected(Disk::Normal, true).await;
+    rig.script.logout_hold.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let logout = tokio::spawn(async move { manager.logout(&task_id).await });
+    wait_until("déconnexion en vol", || {
+        rig.script.logout_in_flight.load(Ordering::SeqCst)
+    })
+    .await;
+    // Pendant l'appel réseau de la déconnexion, l'utilisateur se reconnecte : jeton neuf au coffre.
+    rig.manager
+        .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap();
+    let fresh = rig.vault.get(&id, SecretKind::Token).unwrap().unwrap();
+    rig.script.logout_hold.store(false, Ordering::SeqCst);
+    logout.await.unwrap().unwrap();
+    assert_eq!(
+        rig.vault.get(&id, SecretKind::Token).unwrap(),
+        Some(fresh),
+        "le jeton de la nouvelle session est intact"
+    );
+    assert!(
+        !rig.store.servers.lock().unwrap()[0].signed_out,
+        "le carnet dit toujours « connecté »"
+    );
+    wait_state(&rig.manager, &id, LinkState::Connected).await;
 }
 
 // ── Suppression contre connexion en vol (review PR 12, bloquant 2) ───────────────────────────
@@ -881,14 +1201,10 @@ async fn a_server_removed_while_a_login_is_in_flight_is_never_written_back() {
             .login(&task_id, "marie", Secret::from("Correct-Horse-9"), true)
             .await
     });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !rig.script.login_in_flight.load(Ordering::SeqCst) {
-        assert!(
-            Instant::now() < deadline,
-            "la connexion devrait être en vol"
-        );
-        tokio::time::sleep(ms(5)).await;
-    }
+    wait_until("la connexion est en vol", || {
+        rig.script.login_in_flight.load(Ordering::SeqCst)
+    })
+    .await;
     // Suppression pendant l'échange avec le réseau, puis la connexion repart.
     rig.manager.remove_server(&id).await.unwrap();
     rig.script.login_hold.store(false, Ordering::SeqCst);
@@ -981,14 +1297,10 @@ async fn a_silent_reconnection_refreshes_the_role_of_the_account() {
     );
     *rig.script.next_role.lock().unwrap() = RoleName::Readonly;
     rig.script.expire_next.store(true, Ordering::SeqCst);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while rig.script.logins.load(Ordering::SeqCst) < 2 {
-        assert!(
-            Instant::now() < deadline,
-            "reconnexion silencieuse attendue"
-        );
-        tokio::time::sleep(ms(10)).await;
-    }
+    wait_until("reconnexion silencieuse", || {
+        rig.script.logins.load(Ordering::SeqCst) >= 2
+    })
+    .await;
     wait_state(&rig.manager, &id, LinkState::Connected).await;
     assert_eq!(rig.manager.servers()[0].role, Some(RoleName::Readonly));
     let saved = rig.store.servers.lock().unwrap()[0].role;
