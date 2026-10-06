@@ -49,6 +49,6 @@ pub use system_probe::{ProbeError, SystemProbe};
 pub use token_gen::{TokenGen, TokenGenError};
 pub use unit_of_work::{Store, UnitOfWork};
 pub use update::{
-    Downloader, FetchError, Greeting, HelloProbe, SignatureError, SignatureVerifier,
+    Downloader, FetchError, FreeSpace, Greeting, HelloProbe, SignatureError, SignatureVerifier,
     SupervisorLock, UpdateFeed, UpdateHost, UpdateHostError,
 };

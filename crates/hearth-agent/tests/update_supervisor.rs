@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use hearth_agent::application::ports::{
-    Greeting, HelloProbe, ServiceError, ServiceKind, ServiceManager, ServiceSpec, UpdateHost,
-    UpdateHostError,
+    FreeSpace, Greeting, HelloProbe, ServiceError, ServiceKind, ServiceManager, ServiceSpec,
+    UpdateHost, UpdateHostError,
 };
 use hearth_agent::application::update_supervisor::{SuperviseError, Supervisor};
 use hearth_agent::domain::install::Version;
@@ -146,8 +146,23 @@ impl HelloProbe for FakeAgent {
     }
 }
 
+/// L'espace libre qu'on dit : jamais le vrai disque (un disque presque plein de la machine de
+/// test ne doit pas faire échouer la copie de la base, ni l'inverse).
+struct FakeSpace(Mutex<Result<u64, String>>);
+
+impl FreeSpace for FakeSpace {
+    fn free_bytes(&self, _path: &Path) -> Result<u64, UpdateHostError> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .map_err(UpdateHostError::Other)
+    }
+}
+
 struct Bench {
     dir: tempfile::TempDir,
+    space: FakeSpace,
     job: Job,
     host: FsUpdateHost,
     service: FakeService,
@@ -190,6 +205,7 @@ impl Bench {
             ..ServiceState::default()
         }));
         Self {
+            space: FakeSpace(Mutex::new(Ok(1 << 30))),
             agent: FakeAgent {
                 binary,
                 service: service_state.clone(),
@@ -207,6 +223,7 @@ impl Bench {
         Supervisor {
             host: &self.host,
             install: &SystemHost,
+            space: &self.space,
             service: &self.service,
             probe: &self.agent,
             clock: &SystemClock,
@@ -315,6 +332,32 @@ fn a_swap_that_cannot_happen_leaves_the_old_binary_and_restarts_the_service() {
     assert_eq!(bench.binary(), OLD);
     assert!(bench.service.state().active, "le service est relancé");
     assert_eq!(bench.leftovers(), ["hearth-agent"]);
+}
+
+#[test]
+fn not_enough_room_for_the_database_copy_leaves_everything_as_it_was() {
+    let bench = Bench::new(Some(b"new-good"));
+    *bench.space.0.lock().unwrap() = Ok(1024);
+    let done = bench.run().unwrap();
+    assert_eq!(done.outcome, UpdateOutcome::Failed);
+    assert_eq!(done.reason, Some(UpdateReason::Swap));
+    assert_eq!(bench.binary(), OLD, "aucun échange");
+    assert!(bench.service.state().active, "l'ancien agent repart");
+    assert_eq!(bench.service.state().calls, ["stop", "restart"]);
+    assert_eq!(bench.leftovers(), ["hearth-agent"], "ni copie ni dépôt");
+}
+
+#[test]
+fn a_room_that_cannot_be_measured_refuses_before_any_swap_like_a_full_disk() {
+    let bench = Bench::new(Some(b"new-good"));
+    *bench.space.0.lock().unwrap() = Err("df introuvable".into());
+    let done = bench.run().unwrap();
+    assert_eq!(done.outcome, UpdateOutcome::Failed);
+    assert_eq!(done.reason, Some(UpdateReason::Swap));
+    assert_eq!(bench.binary(), OLD, "aucun échange");
+    assert!(bench.service.state().active);
+    assert_eq!(bench.service.state().calls, ["stop", "restart"]);
+    assert_eq!(bench.leftovers(), ["hearth-agent"], "ni copie ni dépôt");
 }
 
 #[test]

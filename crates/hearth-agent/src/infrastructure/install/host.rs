@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 use super::probe;
 use super::scrub::scrubbed;
 use crate::application::ports::{
-    Answered, BinaryInstalled, ConfigSpec, HostError, HostFacts, InstallHost, InstallLock,
-    InstallPaths,
+    Answered, BinaryInstalled, ConfigSpec, FreeSpace, HostError, HostFacts, InstallHost,
+    InstallLock, InstallPaths, UpdateHostError,
 };
 use crate::domain::install::{
     BinaryState, DATABASE_FILE, DataDirState, DataState, IDENTITY_CONTENT_FILES, Version,
@@ -37,6 +37,13 @@ fn io_error(action: &'static str, path: &Path) -> impl FnOnce(io::Error) -> Host
         action,
         path,
         source,
+    }
+}
+
+impl FreeSpace for SystemHost {
+    fn free_bytes(&self, path: &Path) -> Result<u64, UpdateHostError> {
+        InstallHost::free_bytes(self, path)
+            .map_err(|error| UpdateHostError::Other(error.to_string()))
     }
 }
 
