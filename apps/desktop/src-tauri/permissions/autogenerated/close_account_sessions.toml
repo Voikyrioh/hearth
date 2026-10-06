@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-account-sessions"
+description = "Enables the close_account_sessions command without any pre-configured scope."
+commands.allow = ["close_account_sessions"]
+
+[[permission]]
+identifier = "deny-close-account-sessions"
+description = "Denies the close_account_sessions command without any pre-configured scope."
+commands.deny = ["close_account_sessions"]

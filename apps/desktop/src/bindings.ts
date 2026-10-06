@@ -65,9 +65,91 @@ export const commands = {
 	 *  main tout de suite ; l'avancement et l'issue arrivent par `update://state`.
 	 */
 	installUpdate: () => __TAURI_INVOKE<UpdateStateDto>("install_update"),
+	/**
+	 *  Saisie en direct d'un identifiant et d'un mot de passe : règles de `hearth-proto`, aucun
+	 *  réseau. L'agent reste l'arbitre à l'envoi.
+	 */
+	checkAccountInput: (username: string, password: string) => __TAURI_INVOKE<AccountInputCheck>("check_account_input", { username, password }),
+	/**  La liste des comptes (administrateurs ; l'agent refuse les autres). */
+	listAccounts: (serverId: string) => typedError<AccountListDto, LinkFailure>(__TAURI_INVOKE("list_accounts", { serverId })),
+	createAccount: (serverId: string, username: string, password: string, role: RoleDto) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("create_account", { serverId, username, password, role })),
+	changeAccountRole: (serverId: string, accountId: string, role: RoleDto) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_account_role", { serverId, accountId, role })),
+	/**
+	 *  Un administrateur définit le mot de passe d'un autre compte (ferme ses sessions). `username` est
+	 *  l'identifiant de ce compte : la règle « ne contient pas l'identifiant ».
+	 */
+	setAccountPassword: (serverId: string, accountId: string, username: string, password: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("set_account_password", { serverId, accountId, username, password })),
+	/**  Le titulaire change son propre mot de passe (ferme ses AUTRES sessions, garde la courante). */
+	changeOwnPassword: (serverId: string, current: string, password: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_own_password", { serverId, current, password })),
+	closeAccountSessions: (serverId: string, accountId: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("close_account_sessions", { serverId, accountId })),
+	/**  Supprime un compte. `confirmation` : l'identifiant retapé quand on supprime son propre compte. */
+	deleteAccount: (serverId: string, accountId: string, confirmation: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("delete_account", { serverId, accountId, confirmation })),
 };
 
 /* Types */
+/**
+ *  Un compte de la liste d'administration. Les dates sont celles de l'agent (RFC 3339, UTC) ;
+ *  l'interface les met en forme.
+ */
+export type AccountDto = {
+	id: string,
+	username: string,
+	role: RoleDto,
+	createdAt: string,
+	lastLoginAt: string | null,
+	sessionsOpen: number,
+};
+
+/**
+ *  Verdict de la saisie en direct (`check_account_input`) : la règle est celle de `hearth-proto`,
+ *  la même que celle de l'agent.
+ */
+export type AccountInputCheck = {
+	username: UsernameProblemDto | null,
+	password: PasswordRuleDto[],
+};
+
+/**  Résultat de la lecture de la liste. */
+export type AccountListDto = { kind: "listed"; accounts: AccountDto[] } | { kind: "refused"; refusal: AccountRefusal };
+
+/**  Issue d'une action de compte. */
+export type AccountOutcome = 
+/**
+ *  L'agent a exécuté l'action. `account` : le compte créé ; `sessions_closed` : sessions
+ *  fermées (0 si l'action n'en ferme pas).
+ */
+{ kind: "done"; account: AccountDto | null; sessions_closed: number } | { kind: "refused"; refusal: AccountRefusal } | 
+/**
+ *  Le lien est tombé avant la réponse : on ne sait pas, l'action n'est JAMAIS rejouée.
+ *  L'issue arrive par `link://operation` sous cet identifiant ; la liste se relit au retour du
+ *  lien.
+ */
+{ kind: "unknown"; op_id: string };
+
+/**
+ *  Pourquoi l'agent (ou la validation locale, avant tout envoi) a refusé. Sans texte : l'interface
+ *  choisit le message d'après `kind`.
+ */
+export type AccountRefusal = 
+/**  Rôle insuffisant (BR-ACCT-013, 014) : l'agent est l'arbitre, même si le client est contourné. */
+{ kind: "forbidden" } | 
+/**  Identifiant au mauvais format : `problem` renseigné quand la validation locale l'a vu. */
+{ kind: "invalid_username"; problem: UsernameProblemDto | null } | 
+/**  Mot de passe refusé : toutes les règles non respectées. */
+{ kind: "weak_password"; rules: PasswordRuleDto[] } | { kind: "username_taken" } | 
+/**  L'ancien mot de passe est incorrect. */
+{ kind: "wrong_password" } | 
+/**  Il doit toujours rester au moins un administrateur (BR-ACCT-007). */
+{ kind: "last_admin" } | { kind: "not_found" } | 
+/**  L'identifiant retapé pour supprimer son propre compte ne correspond pas (BR-ACCT-012). */
+{ kind: "confirmation_mismatch" } | 
+/**  Le mot de passe a changé entre la vérification et l'écriture : réessayer. */
+{ kind: "conflict" } | 
+/**  L'agent est saturé : réessayer dans un instant. */
+{ kind: "busy" } | 
+/**  La session a pris fin pendant l'action : l'état du lien le dit. */
+{ kind: "session_ended" } | { kind: "other" };
+
 /**
  *  Ce que l'assistant envoie à sa dernière étape : le serveur confirmé et les identifiants. Pas de
  *  `Debug` : il porte un mot de passe.
@@ -279,6 +361,8 @@ export type OsDto = {
 
 export type OutcomeDto = "done" | "not_executed" | "unknown";
 
+export type PasswordRuleDto = "required" | "min_length" | "digit" | "lowercase" | "uppercase" | "contains_username";
+
 /**  Première prise de contact : l'empreinte à faire confirmer. */
 export type ProbeDto = {
 	/**  Forme complète (64 caractères hexadécimaux), à renvoyer à `add_server`. */
@@ -391,6 +475,8 @@ export type UpdateStateDto = {
 	upToDate: boolean,
 	failure: UpdateFailure | null,
 };
+
+export type UsernameProblemDto = "empty" | "too_short" | "too_long" | "invalid_chars";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
