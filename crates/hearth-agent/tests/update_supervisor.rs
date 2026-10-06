@@ -342,8 +342,14 @@ fn not_enough_room_for_the_database_copy_leaves_everything_as_it_was() {
     assert_eq!(done.outcome, UpdateOutcome::Failed);
     assert_eq!(done.reason, Some(UpdateReason::Swap));
     assert_eq!(bench.binary(), OLD, "aucun échange");
-    assert!(bench.service.state().active, "l'ancien agent repart");
-    assert_eq!(bench.service.state().calls, ["stop", "restart"]);
+    assert!(
+        bench.service.state().active,
+        "l'ancien agent n'a jamais cessé de tourner"
+    );
+    assert!(
+        bench.service.state().calls.is_empty(),
+        "ni arrêt ni redémarrage"
+    );
     assert_eq!(bench.leftovers(), ["hearth-agent"], "ni copie ni dépôt");
 }
 
@@ -356,7 +362,10 @@ fn a_room_that_cannot_be_measured_refuses_before_any_swap_like_a_full_disk() {
     assert_eq!(done.reason, Some(UpdateReason::Swap));
     assert_eq!(bench.binary(), OLD, "aucun échange");
     assert!(bench.service.state().active);
-    assert_eq!(bench.service.state().calls, ["stop", "restart"]);
+    assert!(
+        bench.service.state().calls.is_empty(),
+        "ni arrêt ni redémarrage"
+    );
     assert_eq!(bench.leftovers(), ["hearth-agent"], "ni copie ni dépôt");
 }
 

@@ -73,13 +73,19 @@ impl Supervisor<'_> {
         // L'ancien agent finit d'annoncer « redémarrage » à ses clients avant d'être arrêté.
         std::thread::sleep(Duration::from_millis(job.grace_ms));
 
+        // 0. La place pour la copie de la base se contrôle AVANT d'arrêter le service : un refus
+        // prévisible ne coûte ni coupure ni redémarrage, l'ancien agent n'a jamais cessé de tourner.
+        if let Err(detail) = self.check_space() {
+            tracing::error!(%detail, "copie de la base refusée, échange non tenté");
+            self.host.clear_staging();
+            return Ok(self.conclude(job, UpdateOutcome::Failed, Some(UpdateReason::Swap)));
+        }
         // 1. Arrêt, copie de la base (service arrêté : aucune écriture en cours), puis échange :
         // l'ancien binaire est gardé de côté (`job.backup`).
         let swapped = self
             .service
             .stop()
             .map_err(|e| e.to_string())
-            .and_then(|()| self.check_space())
             .and_then(|()| self.host.backup_database().map_err(|e| e.to_string()))
             .and_then(|()| {
                 self.install

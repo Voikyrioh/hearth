@@ -87,6 +87,13 @@ impl InstallHost for SystemHost {
             .stdin(Stdio::null())
             .output()
             .map_err(io_error("lecture de l'espace libre", existing))?;
+        if !output.status.success() {
+            return Err(HostError::Other(format!(
+                "df a échoué pour {} ({})",
+                existing.display(),
+                output.status
+            )));
+        }
         parse_df(&String::from_utf8_lossy(&output.stdout)).ok_or_else(|| {
             HostError::Other(format!(
                 "espace libre illisible pour {}",
