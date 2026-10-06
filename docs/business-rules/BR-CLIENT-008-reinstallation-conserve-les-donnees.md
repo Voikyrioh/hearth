@@ -11,7 +11,7 @@ maj: 2026-10-07
 # BR-CLIENT-008 — Réinstaller par-dessus une version existante conserve serveurs et réglages
 
 ## Règle
-Relancer l'installateur remplace les fichiers de l'application mais ne touche ni au dossier de données (`%APPDATA%\fr.voikyrioh.hearth`) ni à l'entrée de démarrage (la page d'installation du démarrage de Windows, BR-CLIENT-006, n'existe pas en mise à jour automatique ni en silencieux : le choix déjà fait dans l'application n'est jamais écrasé). L'application n'est pas relancée automatiquement lors d'une mise à jour.
+Relancer l'installateur remplace les fichiers de l'application mais ne touche pas au dossier de données (`%APPDATA%\fr.voikyrioh.hearth`). L'entrée de démarrage n'est touchée que par la case de la page d'accueil (BR-CLIENT-006), et cette page n'existe ni en silencieux (`/S`) ni en mise à jour automatique (`/UPDATE /P`) : dans ces deux cas le choix déjà fait dans l'application n'est jamais écrasé. Seule exception, voulue : à la main, avec l'interface, la case arrive dans l'état actuel du démarrage et l'utilisateur peut le changer (décocher retire l'entrée). L'application n'est pas relancée automatiquement lors d'une mise à jour.
 
 ## Application (code)
 - Comportement du modèle NSIS de Tauri (aucun fichier de données n'est écrit ni supprimé hors désinstallation avec case cochée) ; aucune fonction `domain/` : règle d'empaquetage.
