@@ -8,7 +8,7 @@
 //! Palier : le 5e échec impose 1 minute d'attente, chaque échec suivant (fait après l'attente)
 //! la double, plafonnée à 15 minutes. Un succès remet tout à zéro.
 //!
-//! Second compteur, par adresse seule et tous identifiants confondus (`step_address`) : 20
+//! Second compteur, par adresse exacte et tous identifiants confondus (`step_address`) : 20
 //! échecs en 10 minutes bloquent l'adresse, mêmes paliers doublés, même plafond. Il ferme le
 //! balayage d'identifiants (un identifiant différent par requête échappe au compteur par couple).
 //! Un succès ne le remet pas à zéro : un attaquant intercalerait sinon une connexion valide.
@@ -16,7 +16,6 @@
 use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 
-use super::login_origin::origin;
 use super::text::is_unsafe_char;
 
 /// Nombre d'échecs qui déclenche la première attente.
@@ -36,7 +35,7 @@ pub const ADDRESS_WINDOW: Duration = Duration::minutes(10);
 /// gardé en mémoire.
 pub const MAX_WAITING_PER_ADDRESS: usize = 8;
 
-/// Lignes de `login_attempts` gardées au plus (couples et origines) ; au-delà, on oublie d'abord
+/// Lignes de `login_attempts` gardées au plus (couples et adresses) ; au-delà, on oublie d'abord
 /// celles sans attente en cours, de moins d'échecs, les plus anciennes (ADR-0022).
 pub const MAX_TRACKED_ATTEMPTS: usize = 50_000;
 
@@ -85,16 +84,18 @@ impl AttemptKey {
         ))
     }
 
-    /// Clé du compteur par **origine** (ADR-0022) : l'adresse IPv4, ou le préfixe /64 d'une
-    /// adresse IPv6 (un appareil change d'adresse IPv6 à volonté dans son /64). Ne peut pas
-    /// coïncider avec une clé de couple (celles-ci contiennent toujours le séparateur, jamais une
-    /// adresse).
+    /// Clé du compteur par adresse seule. Ne peut pas coïncider avec une clé de couple (celles-ci
+    /// contiennent toujours le séparateur, jamais une adresse). L'adresse est **exacte** : en IPv6
+    /// le préfixe n'est pas regroupé (décision du détenteur, HRT-20 : un appareil du foyer ne doit
+    /// pas bloquer les autres postes de son préfixe ; l'identifiant visé est ralenti de toute façon,
+    /// BR-CONN-018).
     pub fn address(addr: &str) -> Self {
-        Self(format!("addr:{}", origin(addr)))
+        let addr: String = addr.chars().take(MAX_KEY_PART).collect();
+        Self(format!("addr:{addr}"))
     }
 
     /// Clé du ralentissement par identifiant (ADR-0022) : l'empreinte seule, jamais l'identifiant
-    /// en clair ; elle ne coïncide ni avec une clé de couple ni avec une clé d'origine.
+    /// en clair ; elle ne coïncide ni avec une clé de couple ni avec une clé d'adresse.
     pub fn identifier(username: &str) -> Self {
         Self(format!("ident:{}", username_fingerprint(username)))
     }
@@ -586,28 +587,17 @@ mod tests {
     }
 
     #[test]
-    fn the_address_counter_groups_an_ipv6_slash_64_and_keeps_ipv4_addresses_apart() {
-        assert_eq!(
-            AttemptKey::address("2001:db8:0:1::5"),
-            AttemptKey::address("2001:db8:0:1:aaaa:bbbb:cccc:dddd")
-        );
-        assert_ne!(
-            AttemptKey::address("2001:db8:0:1::5"),
-            AttemptKey::address("2001:db8:0:2::5")
-        );
+    fn the_address_counter_is_per_exact_address_in_ipv4_and_in_ipv6() {
         assert_ne!(
             AttemptKey::address("10.0.0.1"),
             AttemptKey::address("10.0.0.2")
         );
-        assert_eq!(AttemptKey::address("10.0.0.1").as_str(), "addr:10.0.0.1");
-    }
-
-    #[test]
-    fn the_pair_counter_stays_per_exact_address() {
         assert_ne!(
-            AttemptKey::new("marie", "2001:db8:0:1::5"),
-            AttemptKey::new("marie", "2001:db8:0:1::6")
+            AttemptKey::address("2001:db8:0:1::5"),
+            AttemptKey::address("2001:db8:0:1::6"),
+            "pas de regroupement par préfixe"
         );
+        assert_eq!(AttemptKey::address("10.0.0.1").as_str(), "addr:10.0.0.1");
     }
 
     #[test]

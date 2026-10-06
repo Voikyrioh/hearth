@@ -32,8 +32,9 @@ Un compteur sans activité depuis 24 h (`domain::lockout::ATTEMPT_RETENTION`, et
 - BR-CONN-007, BR-CONN-013.
 
 ## Complément HRT-20 (énoncé ci-dessus INCHANGÉ, repris de la version validée)
-Précision seulement : le compteur du couple identifiant + adresse s'applique aussi à une adresse connue du compte (BR-CONN-019) ; la connaître ne dispense ni du mot de passe ni de ce compteur. Deux autres compteurs complètent celui-ci : par origine (BR-CONN-007) et par identifiant (BR-CONN-018).
+Précision seulement : le compteur du couple identifiant + adresse s'applique aussi à une adresse connue du compte (BR-CONN-019) : la connaître ne dispense ni du mot de passe ni de ce compteur. Un troisième compteur, par identifiant, complète celui-ci (BR-CONN-007, BR-CONN-018).
 
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
+- 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).
 - 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).

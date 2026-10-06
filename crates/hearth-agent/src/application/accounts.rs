@@ -379,7 +379,7 @@ impl AccountService {
             .await?;
         // Sessions fermées par l'administration : les adresses connues du compte sont oubliées
         // (ADR-0022).
-        tx.login_attempts().forget_known(id).await?;
+        tx.known_addresses().forget(id).await?;
         let mut journal = Pending::default();
         let event = self.succeeded(
             by,
@@ -434,7 +434,7 @@ impl AccountService {
             .close(id, &closure_on_password_change(change), now)
             .await?;
         // Mot de passe changé : les adresses connues du compte sont oubliées (ADR-0022).
-        tx.login_attempts().forget_known(id).await?;
+        tx.known_addresses().forget(id).await?;
         let mut journal = Pending::default();
         let event = self.succeeded(by, action, Target::Account(current.username.clone()));
         journal.record(&mut *tx, event).await?;

@@ -37,9 +37,14 @@ Garde-fou : au plus 1 024 groupes suivis. Avec cette clé un compte n'en produit
 ## Règles liées
 - BR-CONN-006, BR-CONN-007, BR-AUDIT-003.
 
-## Complément HRT-20 (énoncé ci-dessus INCHANGÉ, repris de la version validée)
-Précision seulement : le ralentissement par identifiant (BR-CONN-018) déclenche la même entrée « Blocage temporaire » (le 11e échec). Les tentatives **refusées à cause de ce ralentissement** restent **comptées** au journal : une entrée « Connexion refusée, raison « trop de tentatives, attente de N s » » puis une synthèse au compte exact (même regroupement par fenêtre de 60 secondes que les autres refus), sans identifiant saisi, avec le compte visé seulement s'il existe. Le journal ne devient pas muet pendant une attaque, et reste borné. Les tentatives refusées pendant une attente du seul couple ou de la seule origine restent hors journal, comme décrit ci-dessus. Test exact : `tests/audit_use_cases.rs::refused_logins_from_many_addresses_are_all_counted_in_bounded_entries` (400 tentatives : 5 entrées, comptes 0, 10, 0, 388 et le blocage).
+## Complément HRT-20 : CHANGEMENT de la règle de la ligne « Les tentatives refusées pendant l'attente ne sont pas journalisées » (À VALIDER)
+L'énoncé ci-dessus est conservé tel quel. **Ce complément y déroge** pour un seul cas : les tentatives refusées à cause du **ralentissement par identifiant** (BR-CONN-018) sont **comptées** au journal, au lieu d'être ignorées. Raison : une attaque depuis de nombreuses adresses est précisément ce que le journal doit montrer. Le journal reste borné : la clé de regroupement ne contient **aucune donnée variable** (la durée d'attente n'en fait pas partie, `Reason::group_text`), on obtient une entrée « Connexion refusée, raison « trop de tentatives, attente de N s » » puis une synthèse au compte exact par fenêtre de 60 secondes, sans identifiant saisi, avec le compte visé seulement s'il existe. Trois heures d'attaque (une tentative toutes les 15 secondes depuis des adresses toujours neuves) laissent 541 entrées exactement et comptent les 720 tentatives ; environ 1 260 pour sept heures, sur 50 000. Le 11e échec écrit aussi « Blocage temporaire ». Les refus dus au seul compteur du couple ou de l'adresse restent hors journal.
+
+**Option si le détenteur refuse ce changement** : ne pas journaliser les refus ralentis (comme les autres attentes) ; le journal ne montre alors que les 10 premiers refus, le blocage et les échecs admis à chaque fin d'attente.
+
+Tests : `tests/login_review.rs::an_attack_of_hours_leaves_a_bounded_journal_with_the_exact_count_of_attempts` (horloge qui avance), `tests/audit_use_cases.rs::{refused_logins_from_many_addresses_leave_one_entry_and_one_summary, refused_logins_from_many_addresses_are_all_counted_in_bounded_entries}`, `domain::audit::event::tests::the_group_text_of_a_lock_does_not_carry_the_wait`.
 
 ## Historique
 - 2026-10-04 — création (HRT-05, session 2026-10-04-hearth-creation).
 - 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).
+- 2026-10-06 — complément HRT-20 : refus ralentis comptés, durée hors de la clé de regroupement (changement à valider).

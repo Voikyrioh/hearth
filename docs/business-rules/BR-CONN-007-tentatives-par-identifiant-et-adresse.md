@@ -36,16 +36,14 @@ Une tentative est refusée dès que l'un des deux compteurs est en attente ; la 
 - BR-CONN-006, BR-CONN-013.
 
 ## Complément HRT-20 (énoncé ci-dessus INCHANGÉ, repris de la version validée)
-**À valider par le détenteur du produit** : ces compléments répondent au ticket HRT-20 et à sa conception (ADR-0022) mais touchent la lettre de l'énoncé ci-dessus.
-1. **Origine** : le compteur « par adresse seule » (2) compte par origine : l'adresse IPv4, ou le **préfixe /64** d'une adresse IPv6. Sans cela, un appareil qui change d'adresse IPv6 dans son /64 (adresses temporaires) regagne 20 échecs à chaque fois. Le compteur du couple (1) et la file d'attente restent par adresse exacte.
-2. **Adresse connue du compte visé** (BR-CONN-019) : le compteur par origine ne s'applique pas à elle et ses échecs ne le nourrissent pas ; le compteur du couple reste en place. Sans cela, le /64 partagé d'un foyer permettrait à un attaquant de bloquer l'administrateur sur son poste habituel.
-3. **Troisième compteur, par identifiant** (BR-CONN-018) : ralentissement croissant, plafond 2 minutes, jamais un blocage. Il remplace la « limite connue » ci-dessus (« aucun plafond par identifiant seul n'existe… ») : le contournement par changement d'adresse est fermé, sans que l'on puisse verrouiller un compte à distance.
-4. **Plafond global** des connexions en cours : 32, dont 8 réservées aux adresses connues (BR-CONN-020) ; la file par adresse (huit en attente) est inchangée.
-
-Code ajouté : `domain/login_policy.rs::{admit, after_failure, after_success}`, `domain/login_origin.rs::origin`, `domain/lockout.rs::AttemptKey::identifier`. Tests : `domain::login_policy::tests`, `tests/login_lockout.rs`.
+**À valider par le détenteur du produit.** Les compteurs 1 (couple) et 2 (adresse seule) restent **par adresse exacte, en IPv4 comme en IPv6** (aucun regroupement par préfixe /64, décision du détenteur) et s'appliquent à toute adresse, connue ou non. Ajouts de HRT-20 :
+1. **Troisième compteur, par identifiant**, toutes adresses confondues (BR-CONN-018) : ralentissement croissant, plafond 2 minutes, jamais un blocage. Il remplace la « limite connue » ci-dessus sur le contournement par changement d'adresse (« aucun plafond par identifiant seul n'existe… ») : la brèche est fermée sans que l'on puisse verrouiller un compte à distance.
+2. **Plafond global** des connexions en cours : 32, dont 8 réservées aux adresses déjà connues (BR-CONN-020). La file par adresse (huit en attente) est inchangée.
+Code ajouté : `domain/login_policy.rs::{admit, conclude}`, `domain/lockout.rs::AttemptKey::identifier`. Tests : `domain::login_policy::tests`, `tests/login_lockout.rs`.
 
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-04 — compteur par adresse seule ajouté, limites écrites (review Stephen, HRT-04).
 - 2026-10-04 — file d'attente bornée par adresse (`429`), nettoyage de l'identifiant étendu aux séparateurs Unicode et caractères de format (suivis review HRT-04, HRT-05).
+- 2026-10-06 — compléments HRT-20 (section ajoutée à valider, énoncé conservé tel quel ; ADR-0022).
 - 2026-10-06 — compléments HRT-20 (section ajoutée à valider, énoncé conservé tel quel ; ADR-0022).

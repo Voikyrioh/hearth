@@ -1,5 +1,5 @@
 //! Compteurs de tentatives de connexion en SQLite (verrouillage progressif, BR-CONN-006),
-//! ralentissement par identifiant et adresses connues des comptes (ADR-0022).
+//! et ralentissement par identifiant (ADR-0022).
 
 use async_trait::async_trait;
 use sqlx::{SqliteConnection, SqlitePool};
@@ -8,9 +8,7 @@ use time::OffsetDateTime;
 use super::convert::{format_date, parse_date, storage};
 use super::store::SqliteUnitOfWork;
 use crate::application::ports::{LoginAttemptRepo, LoginAttemptTx, StoreError};
-use crate::domain::accounts::AccountId;
 use crate::domain::identifier_slowdown::{self, Slowdown};
-use crate::domain::known_address::KnownAddress;
 use crate::domain::lockout::{AttemptKey, LockoutState, MAX_TRACKED_ATTEMPTS, attempts_excess};
 
 const RESOURCE: &str = "login_attempts";
@@ -87,39 +85,6 @@ async fn identifier(conn: &mut SqliteConnection, key: &AttemptKey) -> Result<Slo
     })
 }
 
-struct KnownRow {
-    address: String,
-    last_success_at: String,
-}
-
-fn known_list(rows: Vec<KnownRow>) -> Result<Vec<KnownAddress>, StoreError> {
-    rows.into_iter()
-        .map(|row| {
-            Ok(KnownAddress {
-                address: row.address,
-                last_success_at: parse_date(RESOURCE, &row.last_success_at)?,
-            })
-        })
-        .collect()
-}
-
-/// Jointure sur l'identifiant : la même requête, que le compte existe ou non (liste vide).
-async fn known_addresses_of(
-    conn: &mut SqliteConnection,
-    username: &str,
-) -> Result<Vec<KnownAddress>, StoreError> {
-    let rows = sqlx::query_as!(
-        KnownRow,
-        "SELECT k.address, k.last_success_at FROM known_addresses k
-         JOIN accounts a ON a.id = k.account_id WHERE a.username = ?",
-        username
-    )
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(storage(RESOURCE))?;
-    known_list(rows)
-}
-
 #[async_trait]
 impl LoginAttemptRepo for SqliteLoginAttemptRepo {
     async fn get(&self, key: &AttemptKey) -> Result<LockoutState, StoreError> {
@@ -130,28 +95,6 @@ impl LoginAttemptRepo for SqliteLoginAttemptRepo {
     async fn identifier(&self, key: &AttemptKey) -> Result<Slowdown, StoreError> {
         let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
         identifier(&mut conn, key).await
-    }
-
-    async fn known_addresses_of(&self, username: &str) -> Result<Vec<KnownAddress>, StoreError> {
-        let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
-        known_addresses_of(&mut conn, username).await
-    }
-
-    async fn address_is_known(
-        &self,
-        address: &str,
-        since: OffsetDateTime,
-    ) -> Result<bool, StoreError> {
-        let since = format_date(RESOURCE, since)?;
-        let found = sqlx::query_scalar!(
-            r#"SELECT 1 AS "found!: i64" FROM known_addresses WHERE address = ? AND last_success_at > ? LIMIT 1"#,
-            address,
-            since
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(storage(RESOURCE))?;
-        Ok(found.is_some())
     }
 }
 
@@ -224,7 +167,8 @@ impl LoginAttemptTx for SqliteUnitOfWork {
         }
         let limit = i64::try_from(excess).unwrap_or(i64::MAX);
         let now = format_date(RESOURCE, now)?;
-        // Une attente en cours est gardée en dernier : un flot de clés neuves ne l'efface pas.
+        // Même ordre que `domain::eviction::rank` : sans attente en cours d'abord, puis moins
+        // d'échecs, puis les plus anciennes.
         let result = sqlx::query!(
             "DELETE FROM login_attempts WHERE key IN (
                  SELECT key FROM login_attempts
@@ -271,9 +215,10 @@ impl LoginAttemptTx for SqliteUnitOfWork {
         .execute(&mut *self.tx)
         .await
         .map_err(storage(RESOURCE))?;
-        // Borne : les identifiants les moins attaqués, les plus anciens, partent d'abord. Un flot
-        // d'identifiants inventés (un échec chacun) évince ses propres lignes, pas celle de
-        // l'identifiant réellement attaqué.
+        Ok(())
+    }
+
+    async fn trim_identifiers(&mut self, now: OffsetDateTime) -> Result<u64, StoreError> {
         let count = sqlx::query_scalar!("SELECT COUNT(*) FROM identifier_slowdowns")
             .fetch_one(&mut *self.tx)
             .await
@@ -281,19 +226,26 @@ impl LoginAttemptTx for SqliteUnitOfWork {
         let excess = identifier_slowdown::excess(
             usize::try_from(count).unwrap_or(identifier_slowdown::MAX_TRACKED),
         );
-        if excess > 0 {
-            let limit = i64::try_from(excess).unwrap_or(i64::MAX);
-            sqlx::query!(
-                "DELETE FROM identifier_slowdowns WHERE key IN (
-                     SELECT key FROM identifier_slowdowns
-                     ORDER BY failures ASC, last_failure_at ASC LIMIT ?)",
-                limit
-            )
-            .execute(&mut *self.tx)
-            .await
-            .map_err(storage(RESOURCE))?;
+        if excess == 0 {
+            return Ok(0);
         }
-        Ok(())
+        let limit = i64::try_from(excess).unwrap_or(i64::MAX);
+        let now = format_date(RESOURCE, now)?;
+        // Même ordre que `domain::eviction::rank` : sans attente en cours d'abord, puis moins
+        // d'échecs, puis les plus anciens.
+        let result = sqlx::query!(
+            "DELETE FROM identifier_slowdowns WHERE key IN (
+                 SELECT key FROM identifier_slowdowns
+                 ORDER BY (wait_until IS NOT NULL AND wait_until > ?) ASC,
+                          failures ASC, last_failure_at ASC
+                 LIMIT ?)",
+            now,
+            limit
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(result.rows_affected())
     }
 
     async fn purge_identifiers(
@@ -308,79 +260,6 @@ impl LoginAttemptTx for SqliteUnitOfWork {
              WHERE last_failure_at < ? AND (wait_until IS NULL OR wait_until <= ?)",
             before,
             now
-        )
-        .execute(&mut *self.tx)
-        .await
-        .map_err(storage(RESOURCE))?;
-        Ok(result.rows_affected())
-    }
-
-    async fn known_addresses_of(
-        &mut self,
-        username: &str,
-    ) -> Result<Vec<KnownAddress>, StoreError> {
-        known_addresses_of(&mut self.tx, username).await
-    }
-
-    async fn known_addresses(
-        &mut self,
-        account: &AccountId,
-    ) -> Result<Vec<KnownAddress>, StoreError> {
-        let rows = sqlx::query_as!(
-            KnownRow,
-            "SELECT address, last_success_at FROM known_addresses WHERE account_id = ?",
-            account.as_str()
-        )
-        .fetch_all(&mut *self.tx)
-        .await
-        .map_err(storage(RESOURCE))?;
-        known_list(rows)
-    }
-
-    async fn replace_known(
-        &mut self,
-        account: &AccountId,
-        list: &[KnownAddress],
-    ) -> Result<(), StoreError> {
-        sqlx::query!(
-            "DELETE FROM known_addresses WHERE account_id = ?",
-            account.as_str()
-        )
-        .execute(&mut *self.tx)
-        .await
-        .map_err(storage(RESOURCE))?;
-        for entry in list {
-            let last_success_at = format_date(RESOURCE, entry.last_success_at)?;
-            sqlx::query!(
-                "INSERT INTO known_addresses (account_id, address, last_success_at)
-                 VALUES (?, ?, ?)",
-                account.as_str(),
-                entry.address,
-                last_success_at
-            )
-            .execute(&mut *self.tx)
-            .await
-            .map_err(storage(RESOURCE))?;
-        }
-        Ok(())
-    }
-
-    async fn forget_known(&mut self, account: &AccountId) -> Result<(), StoreError> {
-        sqlx::query!(
-            "DELETE FROM known_addresses WHERE account_id = ?",
-            account.as_str()
-        )
-        .execute(&mut *self.tx)
-        .await
-        .map_err(storage(RESOURCE))?;
-        Ok(())
-    }
-
-    async fn purge_known(&mut self, before: OffsetDateTime) -> Result<u64, StoreError> {
-        let before = format_date(RESOURCE, before)?;
-        let result = sqlx::query!(
-            "DELETE FROM known_addresses WHERE last_success_at < ?",
-            before
         )
         .execute(&mut *self.tx)
         .await

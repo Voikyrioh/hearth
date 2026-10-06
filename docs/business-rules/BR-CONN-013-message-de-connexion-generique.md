@@ -30,9 +30,14 @@ Un identifiant inconnu et un mot de passe faux produisent exactement la même r�
 - BR-CONN-006, BR-CONN-007.
 
 ## Complément HRT-20 (énoncé ci-dessus INCHANGÉ, repris de la version validée)
-Précision seulement : le ralentissement par identifiant (BR-CONN-018) s'applique à l'identique à un identifiant inexistant (mêmes compteurs, mêmes écritures, mêmes attentes annoncées, même trace au journal), et la lecture des adresses connues (BR-CONN-019) est la même requête pour un identifiant existant ou non (jointure sur l'identifiant, zéro ligne si le compte n'existe pas). Test : `tests/login_lockout.rs::an_existing_and_a_missing_identifier_get_the_same_answers_the_same_path_and_the_same_trace` (mêmes réponses sur le fil : code, en-têtes, corps ; mêmes vérifications, dont le haché factice ; mêmes lignes écrites ; même trace, hors le compte visé que BR-AUDIT-006 ne nomme que s'il existe) et `::an_unknown_identifier_is_looked_up_with_the_same_query_as_a_known_one`.
+Précision seulement. Le ralentissement par identifiant (BR-CONN-018) s'applique à l'identique à un identifiant inexistant : mêmes compteurs, mêmes écritures, mêmes attentes annoncées, même trace au journal, et il refuse **après** la vérification du mot de passe (haché factice si l'identifiant n'existe pas), donc même durée. Aucune exemption des compteurs du couple et de l'adresse pour une adresse connue (BR-CONN-019). Les échecs d'une adresse connue d'un compte **quelconque** ne nourrissent pas le ralentissement, que l'identifiant existe ou non, et pendant l'attente un mot de passe faux compte dans le couple pour tout le monde : la progression des compteurs ne dit pas si une adresse est connue du compte visé. La réservation de places des connexions en cours dépend de l'adresse seule (BR-CONN-020).
+
+**Reste observable, par construction** : le titulaire du mot de passe, depuis une adresse connue de son compte, passe pendant l'attente du ralentissement ; personne d'autre ne peut le constater sans ce mot de passe.
+
+Tests : `tests/login_review.rs::{twenty_requests_from_a_known_address_do_not_tell_an_existing_identifier_from_a_missing_one, a_slowed_identifier_answers_a_known_address_like_a_missing_one_unless_the_password_is_right}` (la suite de 21 requêtes du reviewer, rouge avant correction), `tests/login_lockout.rs::{an_existing_and_a_missing_identifier_get_the_same_answers_the_same_path_and_the_same_trace, an_unknown_identifier_is_looked_up_with_the_same_query_as_a_known_one}`.
 
 ## Historique
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-05 : section Interface (HRT-10).
+- 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).
 - 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).

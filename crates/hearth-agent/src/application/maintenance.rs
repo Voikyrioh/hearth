@@ -91,8 +91,8 @@ impl MaintenanceService {
                 .purge_identifiers(now - RESET_AFTER, now)
                 .await?,
             known_addresses: tx
-                .login_attempts()
-                .purge_known(known_address::cutoff(now))
+                .known_addresses()
+                .purge(known_address::cutoff(now))
                 .await?,
             operations: tx.operations().purge(now - OPERATION_RETENTION).await?,
             // Le journal se purge à part, par lots (voir `purge_journal`).

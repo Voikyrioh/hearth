@@ -1,6 +1,6 @@
 ---
 id: ADR-0022
-titre: Verrouillage de connexion : ralentissement par identifiant, adresses connues d'un compte, origine IPv6 en /64, places réservées
+titre: Verrouillage de connexion : ralentissement par identifiant et adresses connues d'un compte (modèle PROVISOIRE)
 type: securite
 statut: acceptée
 date: 2026-10-06
@@ -11,72 +11,78 @@ liens: [ADR-0004, ADR-0006, BR-CONN-006, BR-CONN-007, BR-CONN-013, BR-CONN-018, 
 
 # ADR-0022 : Verrouillage de connexion résistant au changement d'adresse
 
+> **PROVISOIRE.** Le mécanisme « adresse connue » décrit ici (points 1 et 4) **sera remplacé par l'identité d'appareil par clé** (échange de clé à la connexion, pour garantir que c'est bien le client d'origine qui opère ; conception à venir, ticket à part). Il est livré tel quel, avec ses limites connues (voir « Limites connues »). Le ralentissement par identifiant (point 2) ne dépend pas de ce choix.
+
 ## Contexte
 
-Le verrouillage (BR-CONN-006 et 007) compte les échecs par couple (identifiant, adresse) et par adresse seule. Sur un réseau local, un appareil qui change d'adresse (alias IPv4, adresses IPv6 temporaires d'un même préfixe) regagne cinq essais à chaque fois : le verrouillage ne protège plus rien. Verrouiller par **compte** fermerait la brèche mais donnerait à n'importe quel appareil du réseau (invité, objet connecté) le pouvoir d'enfermer l'administrateur hors de son propre serveur : c'est la pire issue possible d'un durcissement, et elle est exclue.
-
-Le seul mur entre un appareil du réseau et un accès administrateur à un agent qui tourne en root est ce verrouillage. Il doit donc ralentir l'attaque **sans jamais** pouvoir être retourné contre l'utilisateur légitime.
+Le verrouillage (BR-CONN-006 et 007) compte les échecs par couple (identifiant, adresse) et par adresse seule. Sur un réseau local, un appareil qui change d'adresse (alias IPv4, adresses IPv6 temporaires) regagne cinq essais à chaque fois : le verrouillage ne protège plus rien. Verrouiller par **compte** fermerait la brèche mais donnerait à n'importe quel appareil du réseau (invité, objet connecté) le pouvoir d'enfermer l'administrateur hors de son propre serveur : c'est la pire issue possible d'un durcissement, et elle est exclue.
 
 ## Décision
 
-Trois mécanismes, tous des fonctions pures du domaine (horloge injectée, aucune E/S) : `domain/login_policy.rs` (la décision), `domain/identifier_slowdown.rs` (la courbe), `domain/known_address.rs` (les adresses connues), `domain/login_origin.rs` (adresse, origine).
+Fonctions pures du domaine (horloge injectée, aucune E/S) : `domain/login_policy.rs` (la décision), `domain/identifier_slowdown.rs` (la courbe), `domain/known_address.rs` (les adresses connues), `domain/eviction.rs` (l'ordre d'éviction des tables bornées).
 
-### 1. Adresse connue d'un compte
+### 1. Adresse connue d'un compte (provisoire)
 
-- **Acquisition** : une adresse devient connue d'un compte **uniquement** par une connexion **réussie** de ce compte depuis cette adresse (mot de passe vérifié, dans la transaction qui ouvre la session). Aucune autre voie : ni une tentative échouée, ni la lecture d'un journal, ni une session d'un autre compte.
-- **Forme** : l'adresse **exacte** de la connexion TCP, en forme canonique (une IPv4 reçue sur une socket double pile est ramenée à IPv4). En IPv6 c'est l'adresse complète (/128), **jamais** le préfixe : sinon tout appareil du réseau domestique, qui partage le /64, serait « connu » de tous les comptes, et la brèche serait rouverte en IPv6.
-- **Stockage** : table SQLite `known_addresses (account_id, address, last_success_at)`, clé primaire (compte, adresse), suppression en cascade avec le compte. Elle survit au redémarrage (sans elle, redémarrer l'agent effacerait la liste, et l'administrateur serait ralenti pendant une attaque juste après une mise à jour de l'agent).
-- **Durée** : 30 jours après la dernière connexion réussie depuis cette adresse (la durée de vie glissante d'une session, BR-RESIL-012). Chaque connexion réussie la rafraîchit. Purgée par la tâche de maintenance.
-- **Nombre** : 8 par compte. Au-delà, la moins récemment réussie est oubliée (`known_address::learn`, fonction pure).
-- **Oubli** : session fermée par l'administration (BR-ACCT-011), mot de passe changé (par l'administrateur ou par le titulaire, BR-ACCT-008 et 009) : **toutes** les adresses connues du compte sont oubliées dans la même transaction. Compte supprimé : suppression en cascade. La déconnexion simple (BR-CONN) ne les oublie pas. Après un changement de mot de passe, la prochaine connexion réussie rapprend l'adresse.
-- **Droit donné** : **aucun**. Une adresse connue n'ouvre aucune session et ne dispense jamais du mot de passe. Elle évite seulement d'être ralenti par **les échecs des autres** (points 2 et 4). Les échecs faits depuis une adresse connue ne nourrissent ni le ralentissement par identifiant ni le compteur par origine : ils ne comptent que dans le compteur du couple (identifiant, adresse), qui reste en place pour cette adresse (5 échecs, attente doublée, plafond 15 minutes).
-- **Migration** : à l'installation de la migration, les adresses des sessions encore valides sont reprises comme adresses connues (au plus 8 par compte), pour que l'administrateur ne perde pas son poste habituel à la mise à jour de l'agent.
+- **Acquisition** : une adresse devient connue d'un compte **uniquement** par une connexion **réussie** de ce compte depuis cette adresse (mot de passe vérifié, dans la transaction qui ouvre la session).
+- **Forme** : l'adresse **exacte** de la connexion TCP, canonique (en IPv6 l'adresse complète, **jamais un préfixe**). **Aucun regroupement des adresses IPv6 en /64** (décision du détenteur) : le compteur du couple et le compteur par adresse restent par adresse exacte, comme avant HRT-20.
+- **Stockage** : table SQLite `known_addresses`, suppression en cascade avec le compte ; survit au redémarrage. **Durée** : 30 jours après la dernière connexion réussie. **Nombre** : 8 par compte (la moins récente est oubliée). **Oubli** : sessions fermées par l'administration, mot de passe changé (par l'administrateur ou par le titulaire), compte supprimé.
+- **Droit donné** : **aucun**. Une adresse connue ne dispense jamais du mot de passe. Son seul effet : le titulaire du mot de passe, depuis une adresse connue de son compte, **passe malgré l'attente** du ralentissement par identifiant. Les compteurs du couple et de l'adresse s'appliquent à elle comme à toute autre.
+- **Reprise** à la migration : les adresses des sessions encore valides.
 
 ### 2. Ralentissement par identifiant (jamais un blocage)
 
-Un compteur par **identifiant saisi** (empreinte SHA-256 de l'identifiant normalisé, comme la clé du couple : jamais l'identifiant en clair), qu'il existe ou non. Il compte les échecs venus d'une adresse **non connue de ce compte**.
+Un compteur par **identifiant saisi** (empreinte SHA-256 de l'identifiant normalisé, jamais l'identifiant en clair ; qu'il existe ou non), tous clients confondus. Il compte les échecs venus d'adresses inconnues de **tous** les comptes.
 
-- 10 échecs « gratuits » (le compteur du couple verrouille déjà au 5e depuis une même adresse : une personne qui se trompe ne le voit jamais).
-- À partir du 11e échec, attente avant la tentative suivante : 2 s, 4 s, 8 s, 16 s, 32 s, 64 s, puis **120 s, plafond explicite** (`identifier_slowdown::MAX_DELAY`). L'attente n'est **jamais** supérieure à 2 minutes et ne devient jamais un blocage : même contre une attaque continue, une tentative est possible toutes les 2 minutes.
-- Le compteur repart à zéro après 30 minutes sans échec. Un succès ne le remet pas à zéro (un attaquant qui possède un compte intercalerait sinon une connexion valide ; un succès n'est de toute façon pas un échec).
-- Ce que fait l'attaquant qui change d'adresse : il garde ses essais par adresse, mais l'identifiant visé le ralentit quelle que soit l'adresse. Débit maximal contre un identifiant : environ 60 essais par heure (10 essais gratuits, puis une tentative toutes les 2 minutes ; chaque fenêtre de 30 minutes sans échec en rend 10).
-- Ce que voit l'attaquant : `429 TOO_MANY_ATTEMPTS` avec `details.retry_after_s`, **la même réponse** que pour les autres attentes (couple, adresse). Rien n'indique quel compteur a joué.
-- Ce que voit l'utilisateur légitime : sur une adresse connue, rien (le compteur ne lui est jamais appliqué). Sur une nouvelle adresse pendant une attaque, la même attente, au plus 2 minutes.
-- Limite assumée : un utilisateur légitime sur une adresse **nouvelle**, pendant une attaque soutenue sur son identifiant, peut perdre la course contre l'attaquant au moment où l'attente expire. Il n'est pas bloqué définitivement, mais il peut attendre longtemps. Parade : se connecter d'abord depuis un poste connu (qui ne subit jamais le compteur) ou, sur le serveur, la ligne de commande (`hearth-agent account`).
+- 10 échecs gratuits, puis attente avant la tentative suivante : 2 s, 4 s, 8 s, 16 s, 32 s, 64 s, puis **120 s, plafond explicite**. Remise à zéro après 30 minutes sans échec. Un succès ne le remet pas à zéro.
+- **Le refus se fait APRÈS la vérification du mot de passe** (contre un haché factice si l'identifiant n'existe pas), pour que le chemin, la durée et la réponse soient les mêmes pour un identifiant existant ou non, depuis n'importe quelle adresse (BR-CONN-013). Contrepartie : une tentative ralentie coûte un calcul Argon2, que borne le plafond des connexions en cours (point 4).
+- Pendant l'attente : `429 TOO_MANY_ATTEMPTS` avec `details.retry_after_s`, **la même réponse** que pour toute autre attente. Un mot de passe faux compte dans le compteur du couple pour tout le monde ; un mot de passe juste depuis une adresse inconnue du compte est refusé sans rien compter ; un mot de passe juste depuis une adresse connue du compte passe.
+- **Horloge** : une attente qui se termine à plus de 120 s devant `maintenant` ne peut venir que d'une horloge reculée ; elle est ramenée à `maintenant + 120 s` (jamais plus que le plafond, jamais zéro) et la correction est écrite. Une horloge avancée met fin aux attentes. Les dates sont murales et persistées (une attente doit survivre à un redémarrage, ce qu'une horloge monotone ne fait pas).
 
-### 3. Origine : l'IPv6 compte par préfixe /64
+### 3. Adresses exactes, jamais un préfixe
 
-Le compteur par adresse seule (BR-CONN-007, 20 échecs en 10 minutes) compte par **origine** : l'adresse IPv4, ou le préfixe /64 d'une adresse IPv6. Un appareil qui change d'adresse IPv6 dans son /64 (adresses temporaires, SLAAC) reste la même origine. Le compteur du couple (identifiant, adresse) et la file d'attente restent par adresse exacte.
-
-Une origine partagée est un risque : sur un réseau domestique tous les appareils IPv6 partagent le /64, un attaquant ferait donc bloquer **tous** les appareils (administrateur compris). C'est pourquoi une connexion faite depuis une adresse connue **du compte visé** ne passe pas par le compteur par origine : l'administrateur sur son poste habituel n'est jamais bloqué par le compteur d'origine, ni par ses voisins de préfixe, ni par un attaquant.
+Le compteur du couple (identifiant, adresse), celui de l'adresse seule et la file d'attente sont par **adresse exacte**. Un appareil qui change d'adresse IPv6 regagne des essais par adresse, mais le ralentissement par identifiant (point 2) ne dépend d'aucune adresse : c'est lui qui ferme la brèche. Regrouper en /64 aurait permis à un appareil du foyer de bloquer tous les postes non encore connus de son préfixe.
 
 ### 4. Plafonds et places réservées
 
-- **Connexions en cours** (en attente de leur tour ou en vérification) : une par adresse en cours de traitement et huit en attente au plus (existant), et **32 au total**, dont **8 réservées aux adresses connues du compte visé** (les inconnues ne dépassent pas 24). Au-delà : refus immédiat `429 TOO_MANY_ATTEMPTS`, `retry_after_s = 1`, mot de passe non gardé. 32 reste inférieur à la capacité du hacheur (4 calculs et 32 en attente, ADR-0009) : une connexion admise ne reçoit jamais `503 BUSY` du hacheur, et un attaquant ne peut pas saturer le hacheur au point d'en priver l'administrateur.
-- **Places d'attente du flux temps réel** (suivi de la review de HRT-06) : 16 au total, 2 par adresse (existant), dont **4 réservées** aux adresses déjà connues (qui ont une session valide ou une connexion réussie dans les 30 jours). Un inconnu ne dépasse pas 12 places en attente. C'est la même notion d'adresse connue : le flux n'a pas de compte avant son premier message `auth`, la connaissance est donc par adresse seule, sans effet autre que la place.
-- **Tables bornées** : `identifier_slowdowns` 10 000 lignes, `login_attempts` 50 000 lignes. Au dépassement, on oublie d'abord les lignes **sans attente en cours**, de moins d'échecs, les plus anciennes (`identifier_slowdown::excess`, tri dans l'adaptateur) : un flot d'identifiants inventés (une ligne chacun, un échec) évince ses propres lignes, pas celle de l'identifiant réellement attaqué, qui en compte beaucoup. `known_addresses` : 8 par compte. En mémoire, les tables du tour par adresse et du flux ne dépassent jamais les plafonds ci-dessus.
+- **Connexions en cours** : une traitée et huit en attente par adresse (existant), et **32 au total**, dont **8 réservées aux adresses déjà connues** (d'un compte quelconque : une connexion réussie récente, ou une session valide) : une adresse inconnue n'en prend jamais plus de 24. La décision ne dépend **jamais de l'identifiant saisi** (sinon la réservation serait un oracle d'existence). Comme pour le flux, la lecture en base n'a lieu qu'en saturation. 32 reste inférieur à la capacité du hacheur (4 calculs et 32 en attente, ADR-0009). Au-delà : refus immédiat `429`, `retry_after_s = 1`.
+- **Places d'attente du flux temps réel** : 16 au total, 2 par adresse, dont **4 réservées** aux adresses connues. Suivi de la review de HRT-06 rattaché à ce ticket ; même notion d'adresse connue, aucun effet autre que la place.
+- **Tables bornées** : `identifier_slowdowns` 10 000 lignes, `login_attempts` 50 000, `known_addresses` 8 par compte. Au dépassement, **un seul ordre d'éviction pour les deux premières** (`domain::eviction::rank`) : d'abord les lignes **sans attente en cours**, puis **moins d'échecs**, puis **les plus anciennes**. La borne est vérifiée seulement quand une ligne a été créée.
 
 ## Menaces traitées nommément
 
 | Menace | Traitement |
 |---|---|
-| **Usurpation d'une adresse connue** (réseau local) | Une adresse IP n'est pas une identité : la connaître ne donne aucun droit. Le mot de passe reste exigé ; le compteur du couple (identifiant, adresse) reste en place pour cette adresse (au plus 5 essais avant 1 minute d'attente, doublée jusqu'à 15 minutes) ; l'usurpateur ne peut apprendre l'adresse à aucun compte (acquisition par succès seulement) ; ses échecs ne nourrissent ni le ralentissement ni le compteur d'origine (ils ne gênent donc personne d'autre). Usurper une adresse en TCP exige d'être en position d'interception : le pire résultat est de consommer le compteur du couple de la victime pendant au plus 15 minutes (limite existante). |
-| **Énumération d'identifiants par le temps de réponse** (BR-CONN-013) | Un identifiant inconnu suit **le même chemin** qu'un identifiant connu : même lecture des adresses connues (une jointure sur l'identifiant, qui rend zéro ligne pour un inconnu), même vérification contre un haché factice, mêmes écritures (ralentissement, couple, origine) dans la même transaction, même réponse. Le ralentissement par identifiant joue **de la même façon** pour un identifiant qui n'existe pas : l'attente annoncée ne révèle pas son existence. Test : mêmes compteurs et mêmes réponses pour un identifiant existant et inexistant, mêmes entrées de journal (BR-AUDIT-006). |
-| **Épuisement de mémoire** (identifiants ou adresses en grand nombre) | Tables SQLite bornées avec éviction (point 4), tours par adresse et places du flux bornés, 8 adresses connues par compte, clés de longueur bornée (64 caractères d'identifiant, empreinte de 16 octets). |
-| **Saturation de la file de hachage Argon2** | Plafond global de 32 connexions en cours avec 8 places réservées aux adresses connues (inférieur à la capacité du hacheur) ; le refus d'une attente (couple, origine, identifiant) se fait **avant** le calcul Argon2, donc une attaque ralentie ne coûte plus de calcul. |
-| **IPv6** | Origine = /64 pour le compteur par adresse (point 3) ; adresse connue = adresse exacte (point 1) ; le ralentissement par identifiant ne dépend d'aucune adresse. |
-| **Horloge** | L'horloge est injectée (`Clock`). Les attentes sont des dates persistées (une attente doit survivre à un redémarrage : une horloge monotone ne se persiste pas). Garde-fous : une attente restante est toujours ramenée au plafond (`MAX_DELAY`), donc une horloge reculée ne fabrique jamais un blocage long ; un dernier échec « dans le futur » est traité comme maintenant ; une horloge avancée met fin aux attentes (aucun blocage). Les tests n'utilisent aucune durée réelle ni `sleep`. |
+| **Usurpation d'une adresse connue** | Une adresse IP n'est pas une identité : la connaître ne donne aucun droit. Le mot de passe reste exigé ; les compteurs du couple et de l'adresse s'appliquent ; pendant l'attente de l'identifiant, chaque mot de passe faux compte dans le couple (5 essais puis 1 minute doublée, plafond 15 minutes). Usurper en TCP exige une position d'interception. |
+| **Énumération d'identifiants** (BR-CONN-013) | Aucune exemption des compteurs du couple et de l'adresse. Le ralentissement par identifiant refuse après vérification, pour tous. Il ne compte pas les échecs d'une adresse connue d'un compte **quelconque**, que l'identifiant existe ou non, et un mot de passe faux compte dans le couple pour tout le monde pendant l'attente : la progression des compteurs ne dit pas si une adresse est connue du compte visé. La réservation de places dépend de l'adresse seule. Tests : `tests/login_review.rs` (la suite de 21 requêtes du reviewer, rouge avant correction ; le scénario d'attente), `tests/login_lockout.rs::an_existing_and_a_missing_identifier_...`. Reste observable, par construction : le titulaire du mot de passe, depuis une adresse connue de son compte, passe pendant l'attente. |
+| **Épuisement de mémoire** | Tables SQLite bornées avec un ordre d'éviction unique ; tours par adresse et places du flux bornés ; 8 adresses connues par compte ; clés de longueur bornée. |
+| **Saturation de la file de hachage Argon2** | Plafond de 32 connexions en cours (8 réservées) inférieur à la capacité du hacheur. Une tentative ralentie coûte un calcul : le plafond le borne ; l'administrateur sur une adresse connue garde ses places. |
+| **IPv6** | Pas de regroupement par préfixe. Le changement d'adresse est fermé par le ralentissement par identifiant, qui ne dépend d'aucune adresse. |
+| **Horloge** | Horloge injectée ; attente ramenée au plafond en cas de recul, correction persistée ; fin des attentes en cas d'avance brutale. Tests : recul d'une heure, d'un an, avance d'un an. |
+| **Journal** | Chaque tentative refusée à cause du ralentissement est comptée (une entrée puis une synthèse au compte exact). La clé de regroupement ne contient **aucune donnée variable** (`Reason::group_text` : la durée d'attente n'en fait pas partie, la synthèse garde celle de la dernière occurrence) : trois heures d'attaque, une tentative toutes les 15 secondes depuis des adresses toujours neuves, laissent 541 entrées exactement et comptent les 720 tentatives (environ 1 260 entrées pour sept heures, sur 50 000). |
+
+## Essais offerts à un attaquant contre un identifiant (par le calcul, vérifié par les tests de la courbe)
+
+- **Avant HRT-20** : 5 par adresse puis 6 de plus dans l'heure, sans plafond par identifiant ; en IPv6, borné par le seul hacheur (quelques centaines de milliers par heure, non mesuré).
+- **Après, en changeant d'adresse (IPv4 ou IPv6)** : **45 la première heure** (10 gratuits, 6 pendant la montée de 126 s, 29 au plafond de 120 s), puis **30 par heure** en continu (31 à 32 par heure en alternant pauses de 30 minutes et salves).
+- **Après, avec usurpation des 8 adresses connues du compte** (pire cas) : par adresse usurpée, 11 la première heure puis 4 par heure (le compteur du couple seul : « jamais un droit » est tenu). Total : 45 + 88 = **133 la première heure, puis 30 + 32 = 62 par heure**.
+
+## Limites connues (modèle provisoire, à reprendre dans la conception de l'identité d'appareil)
+
+- **Session de plus de 30 jours** : l'adresse n'est rafraîchie que par une connexion, jamais par l'usage de la session (qui glisse 30 jours à chaque requête). Un poste qui n'a pas rouvert de connexion depuis plus de 30 jours n'est plus connu. La reprise de la migration prend la date de création de la session, pas sa dernière activité.
+- **Adresse IPv6 temporaire qui change** : la nouvelle adresse n'est connue qu'à la prochaine connexion réussie, pas à l'usage de la session ouverte.
+- **Changement de son propre mot de passe** : les adresses connues du compte sont oubliées, y compris celle de la session que le titulaire garde ; la prochaine connexion réussie la rapprend.
+- **Poste jamais vu** : un poste que le compte ne connaît pas, pendant une attaque continue contre son identifiant, est ralenti, voire privé d'essais tant que l'attaque dure (il peut perdre la course contre l'attaquant à chaque fin d'attente). Deux voies de secours : un poste déjà connu du compte, ou la commande `hearth-agent account` sur le serveur (`docs/runbooks/recuperer-acces-administrateur.md`).
+- Qui usurpe l'adresse connue épuise le compteur du couple et bloque ce poste jusqu'à 15 minutes, renouvelable (limite existante avant HRT-20).
 
 ## Conséquences
 
-- Nouvelle migration `0004_known_addresses_identifier_slowdowns.sql` (additive : deux tables et une reprise des sessions valides), compatible avec une base déjà installée. `.sqlx/` régénéré.
-- BR-CONN-007 reçoit une section de compléments **à valider** (origine /64, adresse connue exemptée du compteur par origine, troisième compteur) ; les énoncés de BR-CONN-006, 013 et BR-AUDIT-007 sont inchangés (sections ajoutées). Nouvelles fiches : BR-CONN-018 (ralentissement par identifiant), BR-CONN-019 (adresses connues d'un compte), BR-CONN-020 (plafond des connexions et places réservées).
-- Aucun nouveau code d'erreur. Journal : le 11e échec écrit « Blocage temporaire » (comme tout déclenchement d'attente), et **chaque tentative refusée à cause du ralentissement reste comptée** (une entrée puis une synthèse au compte exact, regroupement existant, raison « trop de tentatives, attente de N s », aucun champ libre) : le journal ne devient pas muet pendant une attaque. Les refus dus au seul couple ou à la seule origine restent hors journal (BR-AUDIT-007 inchangée).
-- Limites : voir « Limite assumée » (point 2) ; un attaquant qui possède déjà le mot de passe n'est pas concerné ; derrière un mandataire toutes les connexions partagent une adresse (inchangé, l'agent n'est pas prévu pour cela).
+- Migration `0004_known_addresses_identifier_slowdowns.sql` (additive : deux tables et une reprise des sessions valides). `.sqlx/` régénéré.
+- BR-CONN-007 reçoit une section de compléments **à valider** (troisième compteur, plafond global) ; les énoncés de BR-CONN-006, 013 et BR-AUDIT-007 sont inchangés, sauf le changement de règle signalé dans BR-AUDIT-007 (refus ralentis comptés), **à valider**. Nouvelles fiches : BR-CONN-018, 019, 020.
+- Journal : le 11e échec écrit « Blocage temporaire » ; aucune nouvelle raison, aucun champ libre.
 
 ## Alternatives rejetées
 
 - **Verrou par compte** : un appareil du réseau enfermerait l'administrateur dehors.
-- **Adresse connue par préfixe /64** : tout appareil du foyer deviendrait connu.
-- **Adresse connue sans durée ni limite** : liste qui grossit, et adresses obsolètes qui gardent un droit d'exemption.
+- **Origine IPv6 en /64** : un appareil du foyer bloquerait tous les postes non encore connus du préfixe ; le ralentissement par identifiant suffit.
+- **Exemption des adresses connues des compteurs par adresse et par identifiant** : un oracle d'existence d'un identifiant.
 - **Blocage au-delà d'un seuil par identifiant** : retourné contre l'utilisateur légitime ; le plafond de 2 minutes garde toujours une porte ouverte.

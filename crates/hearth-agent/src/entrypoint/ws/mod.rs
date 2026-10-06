@@ -156,12 +156,30 @@ impl StreamContext {
         }
     }
 
-    /// Réserve une place d'attente d'authentification pour une adresse **inconnue** : refusée si
-    /// l'adresse a déjà tout son quota, ou si l'agent n'a plus de place hors des places réservées
-    /// aux adresses connues.
-    #[cfg(test)]
-    pub(crate) fn try_wait(&self, address: IpAddr) -> Option<Permit> {
-        self.try_wait_as(address, Standing::Unknown).ok()
+    /// Réserve une place d'attente d'authentification : d'abord comme adresse inconnue ; seule la
+    /// saturation fait demander (`is_known`) si l'adresse est déjà connue (une session valide, ou
+    /// une authentification réussie récente), auquel cas elle peut prendre l'une des places
+    /// réservées (ADR-0022). Une adresse qui a déjà tout son quota est refusée sans lecture.
+    pub(crate) async fn wait_for_place<F, Fut>(
+        &self,
+        address: IpAddr,
+        is_known: F,
+    ) -> Option<Permit>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        match self.try_wait_as(address, Standing::Unknown) {
+            Ok(permit) => Some(permit),
+            Err(PendingRefusal::AddressFull) => None,
+            Err(PendingRefusal::Saturated) => {
+                if is_known().await {
+                    self.try_wait_as(address, Standing::Known).ok()
+                } else {
+                    None
+                }
+            }
+        }
     }
 
     /// Réserve une place d'attente d'authentification pour cette adresse. Une adresse connue (une
@@ -219,21 +237,20 @@ pub async fn stream(
     // Quota des connexions pas encore authentifiées : par adresse et au total. Refus au format
     // d'erreur de l'API, `503 BUSY` (avec `Retry-After`).
     let ip = peer.ip().to_canonical();
-    let permit = match state.stream.try_wait_as(ip, Standing::Unknown) {
-        Ok(permit) => Some(permit),
-        Err(PendingRefusal::AddressFull) => None,
-        // Plus de place hors des places réservées : une adresse déjà connue (session valide ou
-        // connexion réussie récente) peut prendre l'une des places réservées. Cette lecture n'a
-        // lieu qu'en saturation. Une erreur de lecture vaut « inconnue » : on refuse.
-        Err(PendingRefusal::Saturated) => match state.sessions.address_is_known(&ip.to_string()).await {
-            Ok(true) => state.stream.try_wait_as(ip, Standing::Known).ok(),
-            Ok(false) => None,
-            Err(error) => {
-                tracing::warn!(%error, "lecture des adresses connues impossible : place d'attente refusée");
-                None
-            }
-        },
-    }
+    let sessions = state.sessions.clone();
+    let permit = state
+        .stream
+        .wait_for_place(ip, || async move {
+            // Une erreur de lecture vaut « inconnue » : on refuse.
+            sessions
+                .address_is_known(&ip.to_string())
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "lecture des adresses connues impossible : place refusée");
+                    false
+                })
+        })
+        .await
     .ok_or_else(|| {
         ApiError::new(
             ErrorCode::Busy,
@@ -261,15 +278,25 @@ mod tests {
     #[test]
     fn an_address_holds_at_most_two_waiting_places_and_gives_them_back() {
         let context = context(StreamSettings::default());
-        let first = context.try_wait(ip(1)).expect("première attente");
-        let _second = context.try_wait(ip(1)).expect("deuxième attente");
+        let first = context
+            .try_wait_as(ip(1), Standing::Unknown)
+            .expect("première attente");
+        let _second = context
+            .try_wait_as(ip(1), Standing::Unknown)
+            .expect("deuxième attente");
         assert!(
-            context.try_wait(ip(1)).is_none(),
+            context.try_wait_as(ip(1), Standing::Unknown).ok().is_none(),
             "3e attente de la même adresse"
         );
-        assert!(context.try_wait(ip(2)).is_some(), "une autre adresse passe");
+        assert!(
+            context.try_wait_as(ip(2), Standing::Unknown).ok().is_some(),
+            "une autre adresse passe"
+        );
         drop(first);
-        assert!(context.try_wait(ip(1)).is_some(), "place d'attente rendue");
+        assert!(
+            context.try_wait_as(ip(1), Standing::Unknown).ok().is_some(),
+            "place d'attente rendue"
+        );
     }
 
     #[test]
@@ -277,22 +304,37 @@ mod tests {
         let context = context(StreamSettings::default());
         // Des anonymes muets depuis des adresses inconnues : ils s'arrêtent avant les places
         // réservées aux adresses connues (12 sur 16), le quota d'attente des inconnus est plein...
-        let mut anonymous: Vec<_> = (1..=16).filter_map(|n| context.try_wait(ip(n))).collect();
+        let mut anonymous: Vec<_> = (1..=16)
+            .filter_map(|n| context.try_wait_as(ip(n), Standing::Unknown).ok())
+            .collect();
         assert_eq!(anonymous.len(), 12);
-        assert!(context.try_wait(ip(100)).is_none(), "attente pleine");
+        assert!(
+            context
+                .try_wait_as(ip(100), Standing::Unknown)
+                .ok()
+                .is_none(),
+            "attente pleine"
+        );
         // ... mais aucune place de flux n'est prise : un client déjà connecté (en attente) qui
         // s'authentifie obtient la sienne.
         let mut legit = anonymous.pop().expect("un client");
         assert!(legit.authenticate("marie", 32, 4));
         // Sa place d'attente est rendue : une adresse de plus peut attendre.
-        assert!(context.try_wait(ip(101)).is_some());
+        assert!(
+            context
+                .try_wait_as(ip(101), Standing::Unknown)
+                .ok()
+                .is_some()
+        );
     }
 
     #[test]
     fn unknown_addresses_never_take_the_waiting_places_reserved_for_known_ones() {
         let context = context(StreamSettings::default());
         let unknown_ceiling = MAX_PENDING_TOTAL - RESERVED_PENDING_FOR_KNOWN;
-        let held: Vec<_> = (1..=12).filter_map(|n| context.try_wait(ip(n))).collect();
+        let held: Vec<_> = (1..=12)
+            .filter_map(|n| context.try_wait_as(ip(n), Standing::Unknown).ok())
+            .collect();
         assert_eq!(held.len(), unknown_ceiling);
         // Un inconnu de plus : refusé parce que l'agent est saturé pour les inconnus.
         assert_eq!(
@@ -337,7 +379,9 @@ mod tests {
     #[test]
     fn stream_places_are_capped_in_total_and_per_account() {
         let context = context(StreamSettings::default());
-        let mut permits: Vec<_> = (1..=5).filter_map(|n| context.try_wait(ip(n))).collect();
+        let mut permits: Vec<_> = (1..=5)
+            .filter_map(|n| context.try_wait_as(ip(n), Standing::Unknown).ok())
+            .collect();
         for permit in permits.iter_mut().take(4) {
             assert!(permit.authenticate("marie", 6, 4));
         }
@@ -349,15 +393,17 @@ mod tests {
         assert!(fifth.authenticate("lucas", 6, 4), "un autre compte passe");
         // Un flux fermé rend sa place.
         permits.remove(0);
-        let mut again = context.try_wait(ip(9)).expect("attente");
+        let mut again = context
+            .try_wait_as(ip(9), Standing::Unknown)
+            .expect("attente");
         assert!(again.authenticate("marie", 6, 4));
     }
 
     #[test]
     fn the_total_of_streams_is_capped() {
         let context = context(StreamSettings::default());
-        let mut a = context.try_wait(ip(1)).unwrap();
-        let mut b = context.try_wait(ip(2)).unwrap();
+        let mut a = context.try_wait_as(ip(1), Standing::Unknown).ok().unwrap();
+        let mut b = context.try_wait_as(ip(2), Standing::Unknown).ok().unwrap();
         assert!(a.authenticate("marie", 1, 4));
         assert!(!b.authenticate("lucas", 1, 4), "agent plein");
     }

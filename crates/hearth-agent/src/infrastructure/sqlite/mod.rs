@@ -8,6 +8,7 @@
 mod account_repo;
 mod audit_repo;
 mod convert;
+mod known_address_repo;
 mod login_attempt_repo;
 mod operation_repo;
 mod session_repo;
@@ -24,6 +25,7 @@ use super::data_dir;
 
 pub use account_repo::SqliteAccountRepo;
 pub use audit_repo::SqliteAuditRepo;
+pub use known_address_repo::SqliteKnownAddressRepo;
 pub use login_attempt_repo::SqliteLoginAttemptRepo;
 pub use operation_repo::SqliteOperationRepo;
 pub use session_repo::SqliteSessionRepo;

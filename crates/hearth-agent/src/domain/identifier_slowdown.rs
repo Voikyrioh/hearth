@@ -32,14 +32,28 @@ pub struct Slowdown {
     pub last_failure_at: Option<OffsetDateTime>,
 }
 
-/// Attente restante à `now`, jamais plus que `MAX_DELAY` (une horloge reculée ne fabrique pas un
-/// blocage long). `None` : pas d'attente.
-pub fn remaining(state: &Slowdown, now: OffsetDateTime) -> Option<Duration> {
-    state
+/// L'état observé à `now`, **ramené à ce qu'une attente légitime peut être** : une attente qui se
+/// termine à plus de `MAX_DELAY` de `now` ne peut venir que d'une horloge qui a reculé (une
+/// attente légitime n'est jamais plus loin devant `now` que son plafond). Elle est alors ramenée
+/// à `now + MAX_DELAY` : un recul d'horloge ne prolonge jamais une attente au-delà du plafond, ni
+/// ne la raccourcit à zéro. Rend l'état normalisé (à réécrire s'il a changé) et l'attente
+/// restante, `None` s'il n'y en a pas. Une horloge avancée met fin aux attentes (aucun blocage).
+pub fn observe(state: &Slowdown, now: OffsetDateTime) -> (Slowdown, Option<Duration>) {
+    let ceiling = now + MAX_DELAY;
+    let normalized = Slowdown {
+        wait_until: state.wait_until.map(|until| until.min(ceiling)),
+        ..*state
+    };
+    let wait = normalized
         .wait_until
         .map(|until| until - now)
-        .filter(|wait| *wait > Duration::ZERO)
-        .map(|wait| wait.min(MAX_DELAY))
+        .filter(|wait| *wait > Duration::ZERO);
+    (normalized, wait)
+}
+
+/// Attente restante à `now` (voir `observe`).
+pub fn remaining(state: &Slowdown, now: OffsetDateTime) -> Option<Duration> {
+    observe(state, now).1
 }
 
 /// Attente imposée par l'échec numéro `failures`.
@@ -172,13 +186,22 @@ mod tests {
     }
 
     #[test]
-    fn a_clock_set_back_never_makes_the_wait_longer_than_the_cap() {
-        let state = Slowdown {
-            failures: 50,
-            wait_until: Some(t0() + Duration::days(3)),
-            last_failure_at: Some(t0() + Duration::days(3)),
-        };
-        assert_eq!(remaining(&state, t0()), Some(MAX_DELAY));
+    fn a_clock_set_back_never_extends_the_wait_beyond_the_cap_nor_cuts_it_to_zero() {
+        // Une attente posée à t0 (2 s) ; l'horloge recule ensuite d'une heure, puis d'un an.
+        for set_back in [Duration::hours(1), Duration::days(365)] {
+            let state = Slowdown {
+                failures: 11,
+                wait_until: Some(t0() + Duration::seconds(2)),
+                last_failure_at: Some(t0()),
+            };
+            let now = t0() - set_back;
+            let (normalized, wait) = observe(&state, now);
+            assert_eq!(wait, Some(MAX_DELAY), "ni zéro, ni plus que le plafond");
+            assert_eq!(normalized.wait_until, Some(now + MAX_DELAY));
+            // L'attente ainsi ramenée se termine bien au plafond, même si l'horloge reste reculée.
+            let later = now + MAX_DELAY;
+            assert_eq!(remaining(&normalized, later), None);
+        }
     }
 
     #[test]

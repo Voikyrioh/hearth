@@ -5,9 +5,9 @@
 //! évite seulement d'être ralenti par les échecs des autres. Fonctions pures : le stockage lit la
 //! liste du compte, appelle `learn`, réécrit.
 
-use time::{Duration, OffsetDateTime};
+use std::net::IpAddr;
 
-use super::login_origin::canonical;
+use time::{Duration, OffsetDateTime};
 
 /// Adresses connues au plus par compte ; au-delà, la moins récemment réussie est oubliée.
 pub const MAX_PER_ACCOUNT: usize = 8;
@@ -15,6 +15,20 @@ pub const MAX_PER_ACCOUNT: usize = 8;
 /// Durée de validité d'une adresse connue, comptée depuis sa dernière connexion réussie : celle
 /// de la session glissante (BR-RESIL-012).
 pub const VALIDITY: Duration = Duration::days(30);
+
+/// Longueur maximale (en caractères) retenue d'une adresse qui n'est pas une adresse IP : borne la
+/// taille des valeurs si quelque chose d'inattendu arrivait.
+const MAX_RAW_LEN: usize = 64;
+
+/// Forme canonique de l'adresse (une IPv4 reçue sur une socket double pile est ramenée à IPv4 ;
+/// une IPv6 reste complète, jamais un préfixe). Une valeur qui n'est pas une adresse IP est gardée
+/// telle quelle, tronquée.
+pub fn canonical(addr: &str) -> String {
+    match addr.trim().parse::<IpAddr>() {
+        Ok(ip) => ip.to_canonical().to_string(),
+        Err(_) => addr.chars().take(MAX_RAW_LEN).collect(),
+    }
+}
 
 /// Une adresse connue d'un compte et sa dernière connexion réussie.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,6 +192,23 @@ mod tests {
         let list = learn(full, "10.0.1.1", t0());
         assert!(is_known(&list, "10.0.1.1", t0()));
         assert_eq!(list.len(), MAX_PER_ACCOUNT);
+    }
+
+    #[test]
+    fn ipv6_spellings_give_the_same_canonical_address_and_a_prefix_is_never_one() {
+        assert_eq!(
+            canonical("2001:DB8:0:1:0:0:0:5"),
+            canonical("2001:db8:0:1::5")
+        );
+        assert_ne!(canonical("2001:db8:0:1::5"), canonical("2001:db8:0:1::6"));
+        assert_eq!(canonical("::ffff:10.0.0.7"), "10.0.0.7");
+    }
+
+    #[test]
+    fn a_value_that_is_not_an_address_stays_bounded() {
+        let long = "x".repeat(10_000);
+        assert_eq!(canonical(&long).chars().count(), MAX_RAW_LEN);
+        assert_eq!(canonical("pas-une-adresse"), "pas-une-adresse");
     }
 
     #[test]

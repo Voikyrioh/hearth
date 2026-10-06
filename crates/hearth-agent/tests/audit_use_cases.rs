@@ -840,6 +840,37 @@ async fn targeting_three_accounts_in_a_minute_leaves_a_trace_for_each() {
 }
 
 #[tokio::test]
+async fn refused_logins_from_many_addresses_leave_one_entry_and_one_summary() {
+    // Le vrai chemin de production : des connexions refusées (identifiant inconnu), chacune d'une
+    // adresse différente, donc hors de portée du verrouillage par adresse. Scénario d'origine,
+    // assertions d'origine ; seul l'identifiant varie à chaque tentative (400 identifiants, 400
+    // adresses distinctes), puisqu'un même identifiant attaqué depuis 400 adresses est désormais
+    // ralenti (HRT-20, BR-CONN-018, voir le test suivant).
+    let env = env().await;
+    for n in 0..400 {
+        let error = env
+            .sessions
+            .login(
+                &format!("fantome{n}"),
+                secret(WRONG),
+                &client_at(&format!("2001:db8::{n:x}")),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, LoginError::InvalidCredentials), "{error:?}");
+    }
+    env.clock.advance(time::Duration::seconds(61));
+    env.audit_recorder.flush().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), 2, "un premier refus et une synthèse");
+    assert_eq!(records[0].repeat_count, 0);
+    assert_eq!(records[1].repeat_count, 399);
+    assert_eq!(records[1].account, None);
+    // La synthèse garde l'origine de la dernière occurrence.
+    assert_eq!(records[1].origin_addr.as_deref(), Some("2001:db8::18f"));
+}
+
+#[tokio::test]
 async fn refused_logins_from_many_addresses_are_all_counted_in_bounded_entries() {
     // Le vrai chemin de production : 400 connexions refusées (identifiant inconnu), chacune d'une
     // adresse différente d'un même /64. Ce test existait pour « 2 entrées exactement » quand rien

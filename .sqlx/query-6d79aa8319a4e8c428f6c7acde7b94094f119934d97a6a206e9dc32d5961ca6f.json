@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM identifier_slowdowns WHERE key IN (\n                 SELECT key FROM identifier_slowdowns\n                 ORDER BY (wait_until IS NOT NULL AND wait_until > ?) ASC,\n                          failures ASC, last_failure_at ASC\n                 LIMIT ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "6d79aa8319a4e8c428f6c7acde7b94094f119934d97a6a206e9dc32d5961ca6f"
+}

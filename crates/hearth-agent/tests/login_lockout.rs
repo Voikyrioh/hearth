@@ -10,7 +10,7 @@ mod support;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hearth_agent::application::ports::{Clock, HashError, LoginAttemptRepo, PasswordHasher, Store};
+use hearth_agent::application::ports::{Clock, HashError, KnownAddressRepo, PasswordHasher, Store};
 use hearth_agent::application::sessions::{LoginError, LoginOutcome, SessionService};
 use hearth_agent::domain::accounts::{PlainPassword, Role};
 use hearth_agent::domain::identifier_slowdown::{self, FREE_FAILURES, MAX_DELAY};
@@ -20,7 +20,8 @@ use hearth_agent::domain::login_policy::{MAX_LOGINS_IN_FLIGHT, RESERVED_FOR_KNOW
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::{
-    SqliteAccountRepo, SqliteLoginAttemptRepo, SqliteSessionRepo, SqliteStore,
+    SqliteAccountRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteSessionRepo,
+    SqliteStore,
 };
 use support::{CLIENT_ADDR, Env, PASSWORD, by, client_at, env, secret};
 use time::Duration;
@@ -91,11 +92,12 @@ async fn an_identifier_attacked_from_many_addresses_is_slowed_with_a_growing_del
         let error = wrong(&env, "marie", &addr(FREE_FAILURES + index)).await;
         assert_eq!(waited(&error), Some(expected), "échec {}", 11 + index);
 
-        // Pendant l'attente, une adresse encore jamais vue est refusée sans vérification.
+        // Pendant l'attente, une adresse encore jamais vue est refusée APRÈS la vérification
+        // (même chemin et même durée que l'identifiant existe ou non, BR-CONN-013).
         let verifications = env.hasher.verifications();
         let during = wrong(&env, "marie", &addr(500 + index)).await;
         assert_eq!(waited(&during), Some(expected));
-        assert_eq!(env.hasher.verifications(), verifications);
+        assert_eq!(env.hasher.verifications(), verifications + 1);
         previous = Duration::seconds(expected);
     }
     assert_eq!(
@@ -188,38 +190,36 @@ async fn the_admin_on_a_known_address_can_always_log_in_during_the_attack() {
 }
 
 #[tokio::test]
-async fn a_known_address_is_not_blocked_by_the_origin_counter_of_its_ipv6_prefix() {
+async fn ipv6_addresses_of_one_prefix_are_counted_one_by_one_never_as_a_prefix() {
+    // Décision du détenteur (HRT-20) : pas de regroupement en /64. Vingt échecs depuis vingt
+    // adresses d'un même préfixe ne bloquent aucune adresse du préfixe.
     let env = env().await;
     env.create("marie", Role::Admin).await;
-    let home = "2001:db8:0:1::5";
-    right(&env, "marie", home)
-        .await
-        .expect("première connexion");
-
-    // 20 échecs d'identifiants variés, depuis 20 adresses du même /64 : l'origine est bloquée.
     for n in 0..20 {
         let from = format!("2001:db8:0:1:aaaa::{:x}", n + 1);
         let error = wrong(&env, &format!("inconnu{n}"), &from).await;
-        if n < 19 {
-            assert!(
-                matches!(error, LoginError::InvalidCredentials),
-                "{n} : {error:?}"
-            );
-        } else {
-            assert_eq!(waited(&error), Some(60), "le 20e échec bloque l'origine");
-        }
+        assert!(
+            matches!(error, LoginError::InvalidCredentials),
+            "{n} : {error:?}"
+        );
     }
-    // Une adresse neuve du même /64 est bloquée avec elle (l'origine est le /64).
-    let neighbour = right(&env, "marie", "2001:db8:0:1::6").await.unwrap_err();
-    assert!(waited(&neighbour).is_some(), "{neighbour:?}");
-    // Une autre origine n'est pas touchée.
-    assert!(right(&env, "marie", "2001:db8:0:2::5").await.is_ok());
-    // L'adresse connue, elle, passe : le compteur d'origine ne s'applique pas à elle.
-    assert!(right(&env, "marie", home).await.is_ok());
+    assert!(right(&env, "marie", "2001:db8:0:1::6").await.is_ok());
+    // Chaque adresse a son propre compteur : vingt adresses, vingt lignes, plus celle de marie.
+    let rows: Vec<String> =
+        sqlx::query_scalar("SELECT key FROM login_attempts WHERE key LIKE 'addr:%'")
+            .fetch_all(env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(rows.len(), 20, "{rows:?}");
+    assert!(rows.iter().all(|key| !key.contains("/64")));
 }
 
 #[tokio::test]
-async fn a_known_address_never_feeds_the_origin_or_the_identifier_counters() {
+async fn failures_from_a_known_address_count_in_the_pair_and_the_address_but_not_in_the_identifier()
+{
+    // Le couple et l'adresse comptent tout échec (aucune exemption : sinon une adresse connue
+    // serait un oracle d'existence, BR-CONN-013). Le ralentissement par identifiant ne compte que
+    // les adresses inconnues de tous les comptes (même règle pour un identifiant inexistant).
     let env = env().await;
     env.create("marie", Role::Admin).await;
     right(&env, "marie", CLIENT_ADDR)
@@ -230,12 +230,12 @@ async fn a_known_address_never_feeds_the_origin_or_the_identifier_counters() {
         assert!(matches!(error, LoginError::InvalidCredentials));
     }
     assert_eq!(count(&env, "identifier_slowdowns").await, 0);
-    let rows: Vec<String> = sqlx::query_scalar("SELECT key FROM login_attempts")
+    let rows: Vec<String> = sqlx::query_scalar("SELECT key FROM login_attempts ORDER BY key")
         .fetch_all(env.db.pool())
         .await
         .unwrap();
-    assert_eq!(rows.len(), 1, "seulement le couple : {rows:?}");
-    assert!(!rows[0].starts_with("addr:"));
+    assert_eq!(rows.len(), 2, "le couple et l'adresse : {rows:?}");
+    assert!(rows.iter().any(|key| key.starts_with("addr:")));
 }
 
 // ---- adresse connue usurpée : aucun droit
@@ -292,8 +292,9 @@ async fn an_address_becomes_known_only_by_a_successful_login_of_that_account() {
     // paul se connecte depuis 10.9.9.9 : l'adresse est connue de paul, pas de marie.
     right(&env, "paul", "10.9.9.9").await.expect("paul");
     assert_eq!(count(&env, "known_addresses").await, 1);
-    // Neuf échecs de plus (le premier était déjà compté) : le prochain subit le ralentissement.
-    for n in 0..FREE_FAILURES - 1 {
+    // Dix échecs de plus depuis des adresses inconnues (le premier était déjà compté) : le
+    // ralentissement de « marie » est enclenché.
+    for n in 0..FREE_FAILURES {
         wrong(&env, "marie", &addr(n)).await;
     }
     let from_pauls_address = wrong(&env, "marie", "10.9.9.9").await;
@@ -461,6 +462,7 @@ async fn the_slowdown_and_the_known_addresses_survive_a_restart_of_the_agent() {
         Arc::new(SqliteAccountRepo::new(pool.clone())),
         Arc::new(SqliteSessionRepo::new(pool.clone())),
         Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
+        Arc::new(SqliteKnownAddressRepo::new(pool.clone())),
         Arc::new(SqliteStore::new(pool)),
         env.hasher.clone(),
         env.clock.clone(),
@@ -558,7 +560,7 @@ async fn run(username: &str, exists: bool) -> Run {
         .iter()
         .map(|record| record.account.clone())
         .collect();
-    let trace = records
+    let mut trace: Vec<TraceLine> = records
         .into_iter()
         .map(|record| {
             (
@@ -570,6 +572,7 @@ async fn run(username: &str, exists: bool) -> Run {
             )
         })
         .collect();
+    trace.sort();
     Run {
         wire,
         displays,
@@ -628,10 +631,10 @@ async fn an_unknown_identifier_is_looked_up_with_the_same_query_as_a_known_one()
     let env = env().await;
     env.create("marie", Role::Admin).await;
     right(&env, "marie", CLIENT_ADDR).await.expect("connexion");
-    let repo = SqliteLoginAttemptRepo::new(env.db.pool().clone());
-    assert_eq!(repo.known_addresses_of("marie").await.unwrap().len(), 1);
-    assert_eq!(repo.known_addresses_of("MARIE").await.unwrap().len(), 1);
-    assert!(repo.known_addresses_of("fantome").await.unwrap().is_empty());
+    let repo = SqliteKnownAddressRepo::new(env.db.pool().clone());
+    assert_eq!(repo.of_username("marie").await.unwrap().len(), 1);
+    assert_eq!(repo.of_username("MARIE").await.unwrap().len(), 1);
+    assert!(repo.of_username("fantome").await.unwrap().is_empty());
 }
 
 // ---- plafonds et tables bornées
@@ -679,6 +682,7 @@ async fn unknown_addresses_never_take_the_places_reserved_for_known_ones() {
         Arc::new(SqliteAccountRepo::new(pool.clone())),
         Arc::new(SqliteSessionRepo::new(pool.clone())),
         Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
+        Arc::new(SqliteKnownAddressRepo::new(pool.clone())),
         Arc::new(SqliteStore::new(pool)),
         Arc::new(GatedHasher {
             inner: env.hasher.clone(),
@@ -787,6 +791,7 @@ async fn the_identifier_table_is_bounded_and_keeps_the_identifier_really_attacke
         .save_identifier(&attacked, &state)
         .await
         .unwrap();
+    tx.login_attempts().trim_identifiers(now).await.unwrap();
     // Un flot de nouveaux identifiants évince ses propres lignes.
     for n in 0..5 {
         let key = AttemptKey::identifier(&format!("nouveau{n}"));
@@ -799,6 +804,7 @@ async fn the_identifier_table_is_bounded_and_keeps_the_identifier_really_attacke
             .save_identifier(&key, &one)
             .await
             .unwrap();
+        tx.login_attempts().trim_identifiers(now).await.unwrap();
     }
     let kept = tx.login_attempts().identifier(&attacked).await.unwrap();
     tx.commit().await.unwrap();

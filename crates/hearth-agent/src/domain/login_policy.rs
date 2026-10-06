@@ -4,13 +4,20 @@
 //! Fonctions pures, sans E/S, horloge en paramètre. Le cas d'usage lit les états, appelle ces
 //! fonctions, écrit les états rendus.
 //!
-//! - Le compteur du **couple** (identifiant, adresse exacte) s'applique toujours, y compris à une
-//!   adresse connue : la connaître ne dispense jamais du mot de passe, et ne protège pas des
-//!   essais répétés depuis cette adresse.
-//! - Le compteur par **origine** (adresse IPv4, préfixe /64 IPv6) et le ralentissement par
-//!   **identifiant** ne s'appliquent qu'aux adresses **non connues** du compte visé. Les échecs
-//!   d'une adresse connue ne les nourrissent pas non plus : usurper une adresse connue ne gêne
-//!   personne d'autre.
+//! - Le compteur du **couple** (identifiant, adresse exacte) et celui de l'**adresse** (exacte)
+//!   refusent avant toute vérification, comme avant HRT-20, quel que soit l'identifiant.
+//! - Le ralentissement par **identifiant** (BR-CONN-018) ne refuse **qu'après** la vérification du
+//!   mot de passe, que l'identifiant existe ou non (un haché factice sinon) : le même chemin, la
+//!   même durée, la même réponse pour tout le monde. Seul le titulaire du mot de passe, depuis une
+//!   adresse connue de son compte, passe malgré l'attente (BR-CONN-019). Pour tous les autres, rien
+//!   d'observable ne distingue un identifiant existant d'un identifiant inexistant (BR-CONN-013),
+//!   même depuis une adresse connue.
+//! - Les échecs sont comptés **de la même façon** pour tous, que l'identifiant existe ou non. Les
+//!   compteurs du couple et de l'adresse comptent tout échec. Le ralentissement par identifiant ne
+//!   compte que les échecs d'une adresse inconnue de tous les comptes. Pendant une attente de
+//!   l'identifiant, un mot de passe faux compte dans le couple pour tout le monde (le nombre
+//!   d'essais d'une adresse connue usurpée reste borné) ; un mot de passe juste depuis une adresse
+//!   inconnue du compte est refusé sans rien compter.
 
 use time::{Duration, OffsetDateTime};
 
@@ -23,21 +30,40 @@ use super::lockout::{
 /// Inférieur à la capacité du hacheur (4 calculs et 32 en attente, ADR-0009) : une connexion
 /// admise ne reçoit jamais `503 BUSY` du hacheur.
 pub const MAX_LOGINS_IN_FLIGHT: usize = 32;
-/// Places de ce total réservées aux adresses connues du compte visé : les autres n'en prennent
-/// jamais plus de `MAX_LOGINS_IN_FLIGHT - RESERVED_FOR_KNOWN`.
+/// Places de ce total réservées aux adresses déjà connues (d'un compte quelconque) : les autres
+/// n'en prennent jamais plus de `MAX_LOGINS_IN_FLIGHT - RESERVED_FOR_KNOWN`.
 pub const RESERVED_FOR_KNOWN: usize = 8;
 
 /// Ce que l'on sait au moment d'une tentative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Standing {
+pub struct LoginState {
     /// Couple identifiant + adresse exacte.
     pub pair: LockoutState,
-    /// Origine de l'adresse (tous identifiants confondus).
-    pub origin: LockoutState,
+    /// Adresse exacte (tous identifiants confondus).
+    pub address: LockoutState,
     /// Identifiant saisi (tous clients confondus).
     pub identifier: Slowdown,
     /// L'adresse est-elle connue du compte visé ? Faux pour un identifiant qui n'existe pas.
     pub known: bool,
+    /// L'adresse est-elle connue d'un compte QUELCONQUE ? Les échecs d'une telle adresse ne nourrissent
+    /// pas le ralentissement par identifiant, que l'identifiant existe ou non : sinon la
+    /// progression du compteur dirait si l'adresse est connue du compte visé (BR-CONN-013).
+    pub seen: bool,
+}
+
+/// Issue d'une tentative, une fois le mot de passe vérifié.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    /// Connexion accordée.
+    Granted,
+    /// Mot de passe faux (ou identifiant inconnu) : échec compté ; attente éventuelle annoncée.
+    Failed(Option<Duration>),
+    /// Refusée parce que l'identifiant est ralenti, quel que soit le mot de passe : attente
+    /// annoncée.
+    Slowed(Duration),
+    /// Refusée par le compteur du couple ou de l'adresse (relu dans la transaction) : rien n'est
+    /// compté.
+    Blocked(Duration),
 }
 
 /// Attente la plus longue imposée par l'une des décisions, s'il y en a une.
@@ -51,72 +77,120 @@ pub fn longest_wait(decisions: &[LockoutDecision]) -> Option<Duration> {
         .max()
 }
 
-fn longest(waits: [Option<Duration>; 3]) -> Option<Duration> {
-    waits.into_iter().flatten().max()
-}
-
 fn wait_of(decision: LockoutDecision) -> Option<Duration> {
     longest_wait(&[decision])
 }
 
-/// La tentative est-elle admise avant même de vérifier le mot de passe ? `None` : oui. Sinon,
-/// l'attente à annoncer (la plus longue des attentes qui s'appliquent).
-pub fn admit(standing: &Standing, now: OffsetDateTime) -> Option<Duration> {
-    let pair = wait_of(step(standing.pair, LockoutEvent::Attempt, now).1);
-    if standing.known {
-        return pair;
-    }
-    longest([
-        pair,
-        wait_of(step_address(standing.origin, LockoutEvent::Attempt, now).1),
-        identifier_slowdown::remaining(&standing.identifier, now),
+fn longest(waits: &[Option<Duration>]) -> Option<Duration> {
+    waits.iter().copied().flatten().max()
+}
+
+/// La tentative est-elle admise avant même de vérifier le mot de passe (compteurs du couple et de
+/// l'adresse) ? `None` : oui. Sinon l'attente à annoncer. Le ralentissement par identifiant ne
+/// joue pas ici (voir `conclude`).
+pub fn admit(state: &LoginState, now: OffsetDateTime) -> Option<Duration> {
+    longest(&[
+        wait_of(step(state.pair, LockoutEvent::Attempt, now).1),
+        wait_of(step_address(state.address, LockoutEvent::Attempt, now).1),
     ])
 }
 
-/// Le mot de passe (ou l'identifiant) était faux. Rend les nouveaux états et l'attente que cet
-/// échec impose, s'il y en a une (elle est annoncée à la réponse qui le refuse).
-pub fn after_failure(standing: Standing, now: OffsetDateTime) -> (Standing, Option<Duration>) {
-    let (pair, pair_decision) = step(standing.pair, LockoutEvent::Failed, now);
-    if standing.known {
-        return (Standing { pair, ..standing }, wait_of(pair_decision));
+/// L'issue de la tentative, le mot de passe vérifié (`verified`, toujours faux pour un identifiant
+/// qui n'existe pas). Rend les états à écrire et l'issue.
+pub fn conclude(state: LoginState, verified: bool, now: OffsetDateTime) -> (LoginState, Verdict) {
+    if let Some(wait) = admit(&state, now) {
+        return (state, Verdict::Blocked(wait));
     }
-    let (origin, origin_decision) = step_address(standing.origin, LockoutEvent::Failed, now);
-    let (identifier, identifier_wait) =
-        identifier_slowdown::record_failure(standing.identifier, now);
+    let (identifier, ident_wait) = identifier_slowdown::observe(&state.identifier, now);
+    let state = LoginState {
+        identifier,
+        ..state
+    };
+
+    if let Some(slowed) = ident_wait {
+        // L'identifiant est ralenti. Seul le titulaire du mot de passe, depuis une adresse connue
+        // de son compte, passe.
+        if verified && state.known {
+            return (success(state, now), Verdict::Granted);
+        }
+        // Refus identique pour tous. Un mot de passe faux compte dans le couple, pour tout le monde :
+        // le nombre d'essais d'une adresse connue usurpée reste borné par ce compteur, et rien ne
+        // distingue un identifiant existant d'un identifiant inexistant.
+        if !verified {
+            let (pair, decision) = step(state.pair, LockoutEvent::Failed, now);
+            let wait = longest(&[Some(slowed), wait_of(decision)]).unwrap_or(slowed);
+            return (LoginState { pair, ..state }, Verdict::Slowed(wait));
+        }
+        return (state, Verdict::Slowed(slowed));
+    }
+
+    if verified {
+        return (success(state, now), Verdict::Granted);
+    }
+    // Échec compté de la même façon pour tous ; le ralentissement par identifiant ne compte que
+    // les adresses inconnues de tous les comptes.
+    let (pair, pair_decision) = step(state.pair, LockoutEvent::Failed, now);
+    let (address, address_decision) = step_address(state.address, LockoutEvent::Failed, now);
+    let (identifier, identifier_wait) = if state.seen {
+        (state.identifier, None)
+    } else {
+        identifier_slowdown::record_failure(state.identifier, now)
+    };
     (
-        Standing {
+        LoginState {
             pair,
-            origin,
+            address,
             identifier,
-            known: false,
+            ..state
         },
-        longest([
+        Verdict::Failed(longest(&[
             wait_of(pair_decision),
-            wait_of(origin_decision),
+            wait_of(address_decision),
             identifier_wait,
-        ]),
+        ])),
     )
 }
 
-/// La connexion a réussi : seul le compteur du couple repart à zéro. Le compteur par origine et
-/// le ralentissement par identifiant ne se remettent pas à zéro par un succès (un attaquant
-/// intercalerait sinon une connexion valide) : ils s'éteignent avec le temps.
-pub fn after_success(standing: Standing, now: OffsetDateTime) -> Standing {
-    let (pair, _) = step(standing.pair, LockoutEvent::Succeeded, now);
-    Standing { pair, ..standing }
+/// Seul le compteur du couple repart à zéro. Le compteur par adresse et le ralentissement par
+/// identifiant ne se remettent pas à zéro par un succès (un attaquant intercalerait sinon une
+/// connexion valide) : ils s'éteignent avec le temps.
+fn success(state: LoginState, now: OffsetDateTime) -> LoginState {
+    let (pair, _) = step(state.pair, LockoutEvent::Succeeded, now);
+    LoginState { pair, ..state }
+}
+
+/// Pourquoi une connexion n'est pas admise dans la file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueRefusal {
+    /// Cette adresse a déjà tout son quota (une en cours, huit en attente).
+    AddressFull,
+    /// L'agent n'a plus de place pour ce type d'adresse (les inconnues s'arrêtent avant les
+    /// places réservées).
+    Saturated,
 }
 
 /// Une connexion de plus peut-elle être admise ? `total` : connexions déjà en cours, toutes
 /// adresses confondues ; `address_in_flight` : celles de cette adresse (celle en cours de
-/// traitement comprise). Les adresses inconnues ne prennent pas les places réservées aux
-/// adresses connues.
-pub fn admits_login(total: usize, address_in_flight: usize, known: bool) -> bool {
+/// traitement comprise). `known` : l'adresse est déjà connue de l'agent (une session valide, ou une
+/// authentification réussie récente, d'un compte quelconque) : elle peut prendre les places
+/// réservées. La décision ne dépend donc jamais de l'identifiant saisi (BR-CONN-013).
+pub fn admit_login(
+    total: usize,
+    address_in_flight: usize,
+    known: bool,
+) -> Result<(), QueueRefusal> {
+    if !admits_in_queue(address_in_flight) {
+        return Err(QueueRefusal::AddressFull);
+    }
     let ceiling = if known {
         MAX_LOGINS_IN_FLIGHT
     } else {
         MAX_LOGINS_IN_FLIGHT - RESERVED_FOR_KNOWN
     };
-    total < ceiling && admits_in_queue(address_in_flight)
+    if total >= ceiling {
+        return Err(QueueRefusal::Saturated);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -130,17 +204,19 @@ mod tests {
         OffsetDateTime::UNIX_EPOCH + Duration::days(20_000)
     }
 
-    fn fresh(known: bool) -> Standing {
-        Standing {
+    /// Un état neuf ; une adresse connue du compte est forcément connue d'un compte.
+    fn fresh(known: bool) -> LoginState {
+        LoginState {
             pair: LockoutState::default(),
-            origin: LockoutState::default(),
+            address: LockoutState::default(),
             identifier: Slowdown::default(),
             known,
+            seen: known,
         }
     }
 
     /// Une attaque : `count` échecs venus d'adresses toutes différentes (un couple neuf et une
-    /// origine neuve à chaque fois), contre le même identifiant. Chaque échec est fait quand
+    /// adresse neuve à chaque fois), contre le même identifiant. Chaque échec est fait quand
     /// l'attente de l'identifiant est finie (l'attaquant n'attend que ce qu'il doit). Rend l'état
     /// de l'identifiant, l'instant du dernier échec, et les attentes imposées.
     fn attack_from_many_addresses(count: u32) -> (Slowdown, OffsetDateTime, Vec<Option<Duration>>) {
@@ -149,12 +225,15 @@ mod tests {
         let mut last = t0();
         let mut waits = vec![];
         for _ in 0..count {
-            let standing = Standing {
+            let state = LoginState {
                 identifier,
                 ..fresh(false)
             };
-            assert_eq!(admit(&standing, now), None, "l'attaquant est admis");
-            let (next, wait) = after_failure(standing, now);
+            let (next, verdict) = conclude(state, false, now);
+            let wait = match verdict {
+                Verdict::Failed(wait) => wait,
+                other => panic!("l'attaquant est admis et échoue : {other:?}"),
+            };
             identifier = next.identifier;
             waits.push(wait);
             last = now;
@@ -180,13 +259,25 @@ mod tests {
     }
 
     #[test]
-    fn the_slowdown_applies_to_a_brand_new_address() {
+    fn the_slowdown_refuses_a_brand_new_address_even_with_the_right_password() {
         let (identifier, last, _) = attack_from_many_addresses(12);
-        let newcomer = Standing {
+        let newcomer = LoginState {
             identifier,
             ..fresh(false)
         };
-        assert!(admit(&newcomer, last + Duration::seconds(1)).is_some());
+        let at = last + Duration::seconds(1);
+        let (next, verdict) = conclude(newcomer, true, at);
+        assert!(matches!(verdict, Verdict::Slowed(_)), "{verdict:?}");
+        assert_eq!(
+            next, newcomer,
+            "un mot de passe juste n'est pas un échec : rien n'est compté"
+        );
+        let (next, verdict) = conclude(newcomer, false, at);
+        assert!(matches!(verdict, Verdict::Slowed(_)), "{verdict:?}");
+        assert_eq!(
+            next.pair.failures, 1,
+            "un mot de passe faux compte dans le couple"
+        );
     }
 
     #[test]
@@ -196,161 +287,210 @@ mod tests {
             waits.last().copied().flatten(),
             Some(Duration::seconds(120))
         );
-        let standing = Standing {
+        let until = identifier.wait_until.expect("attente");
+        assert_eq!(until - last, Duration::seconds(120));
+        let state = LoginState {
             identifier,
             ..fresh(false)
         };
-        let until = identifier.wait_until.expect("attente");
-        assert_eq!(until - last, Duration::seconds(120));
-        assert_eq!(
-            admit(&standing, until),
-            None,
-            "une tentative reste possible"
-        );
+        let (_, verdict) = conclude(state, true, until);
+        assert_eq!(verdict, Verdict::Granted, "une tentative reste possible");
     }
 
     #[test]
-    fn a_known_address_is_never_slowed_by_the_failures_of_others() {
+    fn the_owner_of_the_password_on_a_known_address_passes_during_the_attack() {
         let (identifier, last, _) = attack_from_many_addresses(30);
         let during_the_wait = last + Duration::seconds(1);
-        let attacked = Standing {
+        let state = LoginState {
             identifier,
             ..fresh(true)
         };
-        assert_eq!(admit(&attacked, during_the_wait), None);
-        let stranger = Standing {
-            known: false,
-            ..attacked
-        };
-        assert!(admit(&stranger, during_the_wait).is_some());
+        assert_eq!(conclude(state, true, during_the_wait).1, Verdict::Granted);
     }
 
     #[test]
-    fn a_known_address_is_never_blocked_by_the_origin_counter() {
-        let mut origin = LockoutState::default();
-        let mut now = t0();
-        for _ in 0..ADDRESS_FAILURES_BEFORE_LOCK {
-            (origin, _) = step_address(origin, LockoutEvent::Failed, now);
-            now += Duration::seconds(1);
-        }
-        assert!(origin.locked_until.is_some(), "l'origine est bloquée");
-        let known = Standing {
-            origin,
+    fn a_wrong_password_during_the_wait_counts_in_the_pair_whoever_sends_it() {
+        let (identifier, last, _) = attack_from_many_addresses(30);
+        let at = last + Duration::seconds(1);
+        let known = LoginState {
+            identifier,
             ..fresh(true)
         };
-        assert_eq!(admit(&known, now), None);
-        let stranger = Standing {
+        let unknown = LoginState {
             known: false,
+            seen: false,
             ..known
         };
-        assert!(admit(&stranger, now).is_some());
+        let (after_known, verdict_known) = conclude(known, false, at);
+        let (after_unknown, verdict_unknown) = conclude(unknown, false, at);
+        // Même réponse, même compteur touché : rien ne distingue un compte à adresse connue d'un
+        // identifiant inexistant.
+        assert_eq!(verdict_known, verdict_unknown);
+        assert!(matches!(verdict_known, Verdict::Slowed(_)));
+        assert_eq!(after_known.pair.failures, 1);
+        assert_eq!(after_unknown.pair.failures, 1);
+        assert_eq!(after_known.address, LockoutState::default());
+        assert_eq!(after_unknown.address, LockoutState::default());
+    }
+
+    #[test]
+    fn a_spoofed_known_address_has_a_bounded_number_of_guesses_during_the_wait() {
+        let (identifier, last, _) = attack_from_many_addresses(30);
+        let mut state = LoginState {
+            identifier,
+            ..fresh(true)
+        };
+        let now = last + Duration::seconds(1);
+        let mut guesses = 0;
+        loop {
+            if admit(&state, now).is_some() {
+                break;
+            }
+            let (next, verdict) = conclude(state, false, now);
+            assert!(matches!(verdict, Verdict::Slowed(_) | Verdict::Failed(_)));
+            state = next;
+            guesses += 1;
+            assert!(guesses <= FAILURES_BEFORE_LOCK, "le couple verrouille");
+        }
+        assert_eq!(guesses, FAILURES_BEFORE_LOCK);
+    }
+
+    #[test]
+    fn a_failure_from_an_address_known_to_an_account_does_not_feed_the_identifier() {
+        // Que l'identifiant existe (adresse connue de SON compte) ou non (adresse connue d'un autre
+        // compte, `known` faux, `seen` vrai) : le même compteur est touché, de la même façon.
+        let of_the_account = fresh(true);
+        let of_another = LoginState {
+            known: false,
+            seen: true,
+            ..fresh(false)
+        };
+        let (a, verdict_a) = conclude(of_the_account, false, t0());
+        let (b, verdict_b) = conclude(of_another, false, t0());
+        assert_eq!(verdict_a, verdict_b);
+        assert_eq!(a.identifier, Slowdown::default());
+        assert_eq!(b.identifier, Slowdown::default());
+        assert_eq!((a.pair, a.address), (b.pair, b.address));
+        // Une adresse inconnue de tous nourrit le ralentissement.
+        let (c, _) = conclude(fresh(false), false, t0());
+        assert_eq!(c.identifier.failures, 1);
+    }
+
+    #[test]
+    fn a_known_address_is_blocked_by_its_own_address_counter_like_any_other() {
+        // Aucune exemption du compteur par adresse : pas d'oracle d'existence (BR-CONN-013).
+        let mut address = LockoutState::default();
+        let mut now = t0();
+        for _ in 0..ADDRESS_FAILURES_BEFORE_LOCK {
+            (address, _) = step_address(address, LockoutEvent::Failed, now);
+            now += Duration::seconds(1);
+        }
+        for known in [true, false] {
+            let state = LoginState {
+                address,
+                ..fresh(known)
+            };
+            assert!(admit(&state, now).is_some(), "known = {known}");
+        }
     }
 
     #[test]
     fn a_known_address_keeps_the_pair_counter_with_a_wrong_password() {
-        // Adresse connue usurpée : chaque essai à mauvais mot de passe compte dans le couple.
-        let mut standing = fresh(true);
+        let mut state = fresh(true);
         let mut now = t0();
-        let mut wait = None;
+        let mut verdict = Verdict::Granted;
         for _ in 0..FAILURES_BEFORE_LOCK {
-            (standing, wait) = after_failure(standing, now);
+            (state, verdict) = conclude(state, false, now);
             now += Duration::seconds(1);
         }
-        assert_eq!(wait, Some(Duration::seconds(60)));
-        assert!(admit(&standing, now).is_some(), "le couple verrouille");
-        let wait = admit(&standing, now).expect("attente");
+        assert_eq!(verdict, Verdict::Failed(Some(Duration::seconds(60))));
+        let wait = admit(&state, now).expect("le couple verrouille");
         assert!(wait <= MAX_LOCK);
+        assert!(matches!(conclude(state, true, now).1, Verdict::Blocked(_)));
     }
 
     #[test]
-    fn the_failures_of_a_known_address_feed_neither_the_origin_nor_the_identifier() {
-        let mut standing = fresh(true);
-        let now = t0();
-        for _ in 0..4 {
-            (standing, _) = after_failure(standing, now);
+    fn an_existing_and_a_missing_identifier_get_the_same_verdicts_from_the_same_states() {
+        // L'existence du compte n'entre que par `known` et par `verified`, tous deux faux pour un
+        // identifiant inexistant : mêmes états, mêmes issues.
+        let (identifier, last, _) = attack_from_many_addresses(14);
+        for at in [
+            t0(),
+            last + Duration::seconds(1),
+            last + Duration::minutes(5),
+        ] {
+            // Adresse connue d'un autre compte : même issue pour « marie » et pour « fantome ».
+            let state = LoginState {
+                identifier,
+                seen: true,
+                ..fresh(false)
+            };
+            assert_eq!(conclude(state, false, at), conclude(state, false, at));
         }
-        assert_eq!(standing.origin, LockoutState::default());
-        assert_eq!(standing.identifier, Slowdown::default());
-        assert_eq!(standing.pair.failures, 4);
-    }
-
-    #[test]
-    fn an_unknown_address_feeds_the_three_counters() {
-        let (standing, _) = after_failure(fresh(false), t0());
-        assert_eq!(standing.pair.failures, 1);
-        assert_eq!(standing.origin.failures, 1);
-        assert_eq!(standing.identifier.failures, 1);
-    }
-
-    #[test]
-    fn a_non_existent_identifier_is_slowed_exactly_like_an_existing_one() {
-        // Même état, même entrée : aucune différence possible. L'existence du compte n'entre que
-        // par `known`, qui est faux dans les deux cas pour une adresse jamais connectée.
-        let existing = after_failure(fresh(false), t0());
-        let missing = after_failure(fresh(false), t0());
-        assert_eq!(existing, missing);
-        let (identifier, _, existing_waits) = attack_from_many_addresses(14);
-        let (identifier_again, _, missing_waits) = attack_from_many_addresses(14);
-        assert_eq!(identifier, identifier_again);
-        assert_eq!(existing_waits, missing_waits);
     }
 
     #[test]
     fn a_success_resets_only_the_pair_counter() {
-        let mut standing = fresh(false);
+        let mut state = fresh(false);
         for _ in 0..4 {
-            (standing, _) = after_failure(standing, t0());
+            (state, _) = conclude(state, false, t0());
         }
-        let after = after_success(standing, t0());
+        let (after, verdict) = conclude(state, true, t0());
+        assert_eq!(verdict, Verdict::Granted);
         assert_eq!(after.pair, LockoutState::default());
-        assert_eq!(after.origin, standing.origin);
-        assert_eq!(after.identifier, standing.identifier);
+        assert_eq!(after.address, state.address);
+        assert_eq!(after.identifier, state.identifier);
     }
 
     #[test]
-    fn the_announced_wait_is_the_longest_of_the_applicable_waits() {
+    fn the_announced_wait_of_a_failure_is_the_longest_of_the_applicable_waits() {
         let identifier = Slowdown {
             failures: 20,
-            wait_until: Some(t0() + Duration::seconds(90)),
+            wait_until: None,
             last_failure_at: Some(t0()),
         };
-        let origin = LockoutState {
-            failures: 20,
-            locked_until: Some(t0() + Duration::seconds(30)),
-            window_started_at: Some(t0()),
-        };
-        let standing = Standing {
+        let state = LoginState {
             identifier,
-            origin,
             ..fresh(false)
         };
-        assert_eq!(admit(&standing, t0()), Some(Duration::seconds(90)));
+        let (_, verdict) = conclude(state, false, t0() + Duration::seconds(1));
+        // 21e échec : 2 s * 2^9 plafonné à 120 s.
+        assert_eq!(verdict, Verdict::Failed(Some(Duration::seconds(120))));
     }
 
     #[test]
     fn unknown_addresses_never_take_the_places_reserved_for_known_ones() {
         let ceiling = MAX_LOGINS_IN_FLIGHT - RESERVED_FOR_KNOWN;
-        assert!(admits_login(ceiling - 1, 0, false));
-        assert!(!admits_login(ceiling, 0, false), "plafond des inconnues");
-        assert!(admits_login(ceiling, 0, true), "place réservée");
-        assert!(admits_login(MAX_LOGINS_IN_FLIGHT - 1, 0, true));
-        assert!(
-            !admits_login(MAX_LOGINS_IN_FLIGHT, 0, true),
+        assert_eq!(admit_login(ceiling - 1, 0, false), Ok(()));
+        assert_eq!(
+            admit_login(ceiling, 0, false),
+            Err(QueueRefusal::Saturated),
+            "plafond des inconnues"
+        );
+        assert_eq!(admit_login(ceiling, 0, true), Ok(()), "place réservée");
+        assert_eq!(admit_login(MAX_LOGINS_IN_FLIGHT - 1, 0, true), Ok(()));
+        assert_eq!(
+            admit_login(MAX_LOGINS_IN_FLIGHT, 0, true),
+            Err(QueueRefusal::Saturated),
             "plafond total"
         );
     }
 
     #[test]
     fn the_per_address_queue_still_applies_to_known_addresses() {
-        assert!(admits_login(0, MAX_WAITING_PER_ADDRESS, true));
-        assert!(!admits_login(0, MAX_WAITING_PER_ADDRESS + 1, true));
-        assert!(!admits_login(0, MAX_WAITING_PER_ADDRESS + 1, false));
+        assert_eq!(admit_login(0, MAX_WAITING_PER_ADDRESS, true), Ok(()));
+        for known in [true, false] {
+            assert_eq!(
+                admit_login(0, MAX_WAITING_PER_ADDRESS + 1, known),
+                Err(QueueRefusal::AddressFull)
+            );
+        }
     }
 
     #[test]
-    fn the_reservation_leaves_room_to_the_unknown_and_stays_under_the_hasher() {
+    fn the_reservation_leaves_room_to_the_unknown() {
         const { assert!(RESERVED_FOR_KNOWN > 0) };
         const { assert!(MAX_LOGINS_IN_FLIGHT > RESERVED_FOR_KNOWN) };
-        assert!(admits_login(0, 0, false));
+        assert_eq!(admit_login(0, 0, false), Ok(()));
     }
 }

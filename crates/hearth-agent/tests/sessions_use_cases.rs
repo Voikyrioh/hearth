@@ -720,7 +720,8 @@ async fn a_password_changed_between_verification_and_session_creation_does_not_l
     use hearth_agent::application::sessions::SessionService;
     use hearth_agent::infrastructure::random::OsTokenGen;
     use hearth_agent::infrastructure::sqlite::{
-        SqliteAccountRepo, SqliteLoginAttemptRepo, SqliteSessionRepo, SqliteStore,
+        SqliteAccountRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteSessionRepo,
+        SqliteStore,
     };
 
     let env = env().await;
@@ -730,6 +731,7 @@ async fn a_password_changed_between_verification_and_session_creation_does_not_l
         Arc::new(SqliteAccountRepo::new(pool.clone())),
         Arc::new(SqliteSessionRepo::new(pool.clone())),
         Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
+        Arc::new(SqliteKnownAddressRepo::new(pool.clone())),
         Arc::new(SqliteStore::new(pool.clone())),
         Arc::new(ChangingHasher {
             inner: env.hasher.clone(),

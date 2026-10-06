@@ -31,8 +31,8 @@ use hearth_agent::infrastructure::argon2::Argon2Hasher;
 use hearth_agent::infrastructure::audit_feed::BroadcastAuditFeed;
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::{
-    Database, SqliteAccountRepo, SqliteAuditRepo, SqliteLoginAttemptRepo, SqliteOperationRepo,
-    SqliteSessionRepo, SqliteStore,
+    Database, SqliteAccountRepo, SqliteAuditRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo,
+    SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
 };
 use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
@@ -204,6 +204,7 @@ pub async fn env() -> Env {
         accounts,
         session_repo,
         Arc::new(SqliteLoginAttemptRepo::new(db.pool().clone())),
+        Arc::new(SqliteKnownAddressRepo::new(db.pool().clone())),
         store.clone(),
         hasher.clone(),
         clock.clone(),
