@@ -262,7 +262,7 @@ fn a_new_agent_that_answers_with_the_new_version_and_the_same_certificate_succee
     let last = bench.host.read_last().unwrap().unwrap();
     assert_eq!(last.outcome, UpdateOutcome::Succeeded);
     assert_eq!(
-        (last.version.as_str(), last.previous.as_str()),
+        (last.version.as_deref().unwrap(), last.previous.as_str()),
         ("0.2.0", "0.1.0")
     );
     assert_eq!(last.requested_by.as_deref(), Some("marie"));

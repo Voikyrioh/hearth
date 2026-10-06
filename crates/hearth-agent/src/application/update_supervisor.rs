@@ -281,7 +281,7 @@ impl Supervisor<'_> {
         reason: Option<UpdateReason>,
     ) -> Supervised {
         let record = UpdateRecord {
-            version: job.version.clone(),
+            version: Some(job.version.clone()),
             previous: job.previous.clone(),
             outcome,
             reason,

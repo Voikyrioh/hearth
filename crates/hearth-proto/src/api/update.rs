@@ -92,13 +92,22 @@ pub struct AgentUpdateAccepted {
 /// Le résultat de la dernière mise à jour. Il survit au redémarrage de l'agent (fichier).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateResult {
-    /// La version visée.
+    /// La version visée ; vide quand `version_unknown` est vrai.
     pub version: String,
+    /// La version visée ne se sait pas (trace de travail illisible) : `version` est alors vide.
+    /// Absent de la réponse quand la version est connue (ajout compatible : ni changement de
+    /// type, ni clé nouvelle pour un résultat ordinaire).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub version_unknown: bool,
     /// La version qui tournait avant.
     pub previous: String,
     pub outcome: UpdateOutcome,
     pub reason: Option<UpdateReason>,
     pub at: String,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Où en est la mise à jour en cours.
@@ -193,6 +202,43 @@ mod tests {
         );
         let back: AgentUpdateStatus = serde_json::from_value(value).unwrap();
         assert_eq!(back, status);
+    }
+
+    #[test]
+    fn a_known_version_adds_no_key_to_the_result_and_an_unknown_one_says_so() {
+        let known = UpdateResult {
+            version: "0.2.0".into(),
+            version_unknown: false,
+            previous: "0.1.0".into(),
+            outcome: UpdateOutcome::Succeeded,
+            reason: None,
+            at: "2026-10-05T10:00:00Z".into(),
+        };
+        // Exactement la forme documentée avant l'ajout : aucune clé nouvelle.
+        assert_eq!(
+            serde_json::to_value(&known).unwrap(),
+            json!({
+                "version": "0.2.0",
+                "previous": "0.1.0",
+                "outcome": "succeeded",
+                "reason": null,
+                "at": "2026-10-05T10:00:00Z"
+            })
+        );
+        let old = serde_json::to_value(&known).unwrap();
+        assert_eq!(serde_json::from_value::<UpdateResult>(old).unwrap(), known);
+        let unknown = UpdateResult {
+            version: String::new(),
+            version_unknown: true,
+            ..known
+        };
+        let value = serde_json::to_value(&unknown).unwrap();
+        assert_eq!(value["version"], json!(""));
+        assert_eq!(value["version_unknown"], json!(true));
+        assert_eq!(
+            serde_json::from_value::<UpdateResult>(value).unwrap(),
+            unknown
+        );
     }
 
     #[test]

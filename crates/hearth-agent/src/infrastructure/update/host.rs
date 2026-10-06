@@ -511,7 +511,7 @@ mod tests {
         let (dir, host) = host();
         assert_eq!(host.read_last().unwrap(), None);
         let record = UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::Succeeded,
             reason: None,
@@ -549,7 +549,7 @@ mod tests {
         })
         .unwrap();
         host.write_last(&UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::Failed,
             reason: None,

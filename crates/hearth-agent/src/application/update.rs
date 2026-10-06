@@ -446,7 +446,7 @@ impl UpdateService {
         tracing::warn!(?reason, version = %target.version, "mise à jour de l'agent échouée");
         self.host.clear_staging();
         let record = UpdateRecord {
-            version: target.version.to_string(),
+            version: Some(target.version.to_string()),
             previous: self.current.to_string(),
             outcome: UpdateOutcome::Failed,
             reason: Some(reason),
@@ -474,7 +474,8 @@ impl UpdateService {
     fn finish(&self, record: &UpdateRecord) {
         self.running().progress = None;
         self.feed.publish(UpdateProgress {
-            version: record.version.clone(),
+            // Sur le flux, une version inconnue est vide (`GET /agent/update/last` dit pourquoi).
+            version: record.version.clone().unwrap_or_default(),
             step: UpdateStep::Done,
             percent: None,
             outcome: Some(record.outcome),
@@ -633,7 +634,9 @@ impl UpdateService {
                     (UpdateOutcome::Failed, UpdateReason::Interrupted)
                 };
                 let record = UpdateRecord {
-                    version: "inconnue".into(),
+                    // Une trace illisible ne dit pas quelle version était visée : absente, jamais un texte
+                    // qui ressemble à une version.
+                    version: None,
                     previous: self.current.to_string(),
                     outcome,
                     reason: Some(reason),
@@ -668,7 +671,7 @@ impl UpdateService {
                 // de commande), et le dépôt est nettoyé.
                 self.host.clear_staging();
                 let record = UpdateRecord {
-                    version: target_text,
+                    version: Some(target_text),
                     previous: self.current.to_string(),
                     outcome: UpdateOutcome::Failed,
                     reason: Some(UpdateReason::SupervisorLaunch),
@@ -689,7 +692,7 @@ impl UpdateService {
     async fn abandon(&self, version: String, previous: String, requester: Requester) {
         tracing::warn!(%version, "mise à jour interrompue avant l'échange des binaires, abandonnée");
         let record = UpdateRecord {
-            version,
+            version: Some(version),
             previous,
             outcome: UpdateOutcome::Failed,
             reason: Some(UpdateReason::Interrupted),
@@ -719,7 +722,7 @@ impl UpdateService {
         reason: Option<UpdateReason>,
     ) {
         let record = UpdateRecord {
-            version,
+            version: Some(version),
             previous,
             outcome,
             reason,
@@ -797,7 +800,10 @@ impl UpdateService {
             .record(
                 actor,
                 AuditAction::AgentUpdate,
-                Target::AgentVersion(record.version.clone()),
+                record
+                    .version
+                    .clone()
+                    .map_or(Target::None, Target::AgentVersion),
                 outcome,
             )
             .await;

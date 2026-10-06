@@ -347,7 +347,7 @@ async fn the_result_written_by_the_supervisor_is_announced_once_and_journaled_on
     // Le superviseur a écrit « réussi » ; le nouvel agent démarre.
     rig.host.with(|s| {
         s.last = Some(UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::Succeeded,
             reason: None,
@@ -379,7 +379,7 @@ async fn a_rolled_back_update_is_announced_with_its_reason_and_journaled_as_fail
     let rig = Rig::new(&env, true, false);
     rig.host.with(|s| {
         s.last = Some(UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::RolledBack,
             reason: Some(UpdateReason::NoAnswer),
@@ -421,7 +421,7 @@ async fn the_result_survives_the_loss_of_the_service_itself() {
     let rig = Rig::new(&env, true, false);
     rig.host.with(|s| {
         s.last = Some(UpdateRecord {
-            version: "0.2.0".into(),
+            version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::Succeeded,
             reason: None,
@@ -538,7 +538,7 @@ fn swapped_job() -> hearth_agent::domain::update::Job {
 
 fn record(outcome: UpdateOutcome, reason: Option<UpdateReason>) -> UpdateRecord {
     UpdateRecord {
-        version: "0.2.0".into(),
+        version: Some("0.2.0".into()),
         previous: "0.1.0".into(),
         outcome,
         reason,
@@ -818,6 +818,9 @@ async fn an_unreadable_trace_is_a_work_to_conclude_never_nothing() {
             UpdateReason::Interrupted
         };
         assert_eq!(done.reason, Some(expected), "backup = {backup}");
+        assert_eq!(done.version, "", "version inconnue : vide sur le flux");
+        let last = rig.service.last().unwrap();
+        assert!(last.version_unknown && last.version.is_empty(), "{last:?}");
         rig.host.with(|s| {
             if backup {
                 assert!(
