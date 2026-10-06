@@ -43,7 +43,7 @@ Changer la clé = réinstaller à la main les agents existants (ils n'acceptent 
 | `rolled_back` / `identity_changed` | le nouvel agent présentait un autre certificat | ne pas forcer : l'empreinte ne doit jamais changer (BR-INSTALL-004) ; vérifier le dossier de données de la nouvelle version. |
 | `failed` / `unreachable` | le serveur n'a pas joint l'adresse (pas d'Internet, DNS, certificat inconnu) | tester `curl -v <url>` depuis le serveur ; l'agent continue de tourner. |
 | `failed` / `download_failed`, `bad_checksum`, `bad_signature`, `bad_binary` | fichier absent, coupé, altéré, d'une autre clé, ou qui n'annonce pas la version visée | vérifier la publication ; rien n'a été écrit. |
-| `failed` / `staging`, `swap`, `supervisor_launch` | disque plein, droits, `systemd-run` absent ; pour `swap` aussi : pas assez de place pour copier la base (deux fois sa taille, plus 1 Mio) **ou espace libre impossible à mesurer** (`df` absent ou illisible : refus, jamais « assez de place ») | `df -h /var/lib/hearth`, `systemctl status`, `journalctl -u hearth-agent-update` ; l'agent n'a pas changé. |
+| `failed` / `staging`, `swap`, `supervisor_launch` | disque plein, droits, `systemd-run` absent ; pour `swap` aussi : pas assez de place pour copier la base (deux fois sa taille, plus 1 Mio) **ou espace libre impossible à mesurer** (`df` absent ou illisible : refus, jamais « assez de place ») | `df -h /var/lib/hearth`, `systemctl status`, `journalctl -u hearth-agent-update` ; l'agent n'a pas changé. Le contrôle de place précède l'arrêt du service ; la place mesurée est celle d'un utilisateur ordinaire (`df`) : un disque réduit à la réserve de root est refusé par prudence. |
 | `failed` / `interrupted` | la mise à jour a été laissée en cours puis conclue au démarrage, **ou** une version tierce a été posée à la main par-dessus (voir « Reprise vers une troisième version ») | relire `GET /agent/update/last`. Si la version visée est vide (`version_unknown`), une trace de travail était illisible : voir « Reprise à la main ». |
 | `failed` / `rollback_failed` | le retour arrière lui-même a échoué | voir ci-dessous. |
 
@@ -81,7 +81,15 @@ Marche à suivre :
 3. Vérifie : `curl -sk https://127.0.0.1:7341/api/v1/hello` (version 0.3.0), `GET /api/v1/agent/update/last` (`failed` / `interrupted`), et que `update/` ne contient plus ni `job.json`, ni `state.json`, ni `hearth.db.before`.
 4. Si la 0.3.0 refuse de démarrer sur la base (« migration inconnue » dans `journalctl -u hearth-agent`) : remets la copie que tu as gardée à l'étape 1, service arrêté, supprime `hearth.db-wal` et `hearth.db-shm`, puis redémarre.
 
+Par `install.sh --binary`, l'installation utilise le même chemin de sauvegarde et le retire à la fin : le démarrage suivant conclut pareil (`failed` / `interrupted`, base intacte, copies retirées), par un autre chemin du code. `ForeignVersion` ne sert que pour un binaire copié à la main.
+
 Tu peux aussi supprimer toi-même les traces avant de poser la version tierce (les cinq fichiers ci-dessus) : l'agent n'aura alors rien à conclure.
+
+## Reprise restée sans résultat (`rollback_failed` après une reprise)
+
+Au démarrage, si la mise à jour est restée en cours, l'agent tente **une seule** reprise automatique par échange. Si le superviseur de reprise ne conclut rien, ou si des numéros de version du travail sont illisibles, l'agent **ne relance rien** : résultat `failed` / `rollback_failed` (version « inconnue » si la trace est illisible), au journal d'activité. Les **copies sont gardées** (`.hearth-agent.previous`, `update/hearth.db.before`) ; seules `job.json` et `state.json` sont retirées. Reprise à la main : « Reprise à la main » ci-dessus.
+
+Note : après un retour à la main vers un agent plus ancien, `update/last.json` reste lisible par lui (la version inconnue y est une chaîne vide, jamais `null`).
 
 ## Dépannage du lancement
 
