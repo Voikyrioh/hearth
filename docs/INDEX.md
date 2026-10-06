@@ -8,7 +8,7 @@ Maj : 2026-10-06. Point d'entrée obligatoire des agents (recherche, dev, concep
 | [business-rules/](./business-rules/INDEX.md) | Règles domaines : INSTALL, CLIENT, CONN, DASH, RESIL, ACCT, AUDIT, UPDATE (139 fiches : BR-CONN-001 à 017 ; BR-RESIL-001 à 020 ; BR-INSTALL-001 à 012 ; BR-CLIENT-001 à 011, 013, 014 ; BR-ACCT-001 à 016 ; BR-DASH-001 à 015 ; BR-AUDIT-001 à 021 ; BR-UPDATE-001 à 019, 024 à 029) | avant tout dev/fix sur une histoire |
 | [open-api/](./open-api/INDEX.md) | 24 endpoints : session, compte, mesures (machine, historique, flux WebSocket), audit, mise à jour de l'agent | avant de toucher une route / un client |
 | [components/](./components/INDEX.md) | 78 fiches : atomes, molécules, organismes (dont les cartes du tableau de bord), gabarit, pages, règle `needsLink` | avant de créer un composant / une page |
-| [bugs/](./bugs/INDEX.md) | 11 fiches FIX:ULID (installation de l'agent : sqlite, wget, activation au démarrage, CAP_MKNOD, purge, dossier de données ; liaison : adresses MAC, `logout` concurrent, « se souvenir » sans secret, identifiant du carnet) | avant de modifier une zone marquée `FIX:` |
+| [bugs/](./bugs/INDEX.md) | 12 fiches FIX:ULID (installation de l'agent : sqlite, wget, activation au démarrage, CAP_MKNOD, purge, dossier de données ; liaison : adresses MAC, `logout` concurrent, « se souvenir » sans secret, identifiant du carnet, fin de session devançant la réponse) | avant de modifier une zone marquée `FIX:` |
 | [runbooks/](./runbooks/INDEX.md) | Procédures opérationnelles : installer l'agent, le mettre à jour à distance, publier une version du client, récupérer l'accès administrateur | accès perdu, diagnostics |
 
 ## Globales (orga-global)

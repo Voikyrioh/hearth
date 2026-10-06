@@ -666,7 +666,12 @@ impl Runner {
                         self.persist(true);
                     }
                 }
-                Effect::MarkPendingUnknown => self.mark_pending_unknown(),
+                Effect::MarkPendingUnknown => {
+                    // FIX:01M47PCYX3BY3YV84R9WW3KAQ3 — une action dont la requête est partie et dont la réponse arrive garde SON résultat même si l'avis de fin de session (qu'elle a provoquée : fermer ses sessions, supprimer son compte, changer son mot de passe par la route d'administration) la devance sur le flux ; sans réponse, l'issue reste « inconnu » dans le délai de la requête (docs/bugs/FIX-01M47PCYX3BY3YV84R9WW3KAQ3.md)
+                    if !self.session_ended_by_server() {
+                        self.mark_pending_unknown();
+                    }
+                }
                 Effect::ResolvePending => self.resolve_pending(),
                 Effect::Stop => self.stopped = true,
             }
@@ -689,6 +694,16 @@ impl Runner {
         if let Some(handle) = self.attempt.take() {
             handle.abort();
         }
+    }
+
+    /// L'agent a mis fin à la session (expirée, ou fermée/révoquée) : le lien, lui, n'est pas tombé,
+    /// les requêtes en vol répondent encore. Une déconnexion voulue par l'utilisateur n'en est pas une.
+    fn session_ended_by_server(&self) -> bool {
+        let status = self.machine.status();
+        matches!(
+            status.state,
+            LinkState::SessionExpired | LinkState::AccessRevoked
+        ) && status.reason != Some(Reason::UserDisconnected)
     }
 
     /// Le lien est tombé : chaque action en vol devient « résultat inconnu » ; ses appelants le

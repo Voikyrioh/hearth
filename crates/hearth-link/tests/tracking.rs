@@ -71,6 +71,10 @@ struct Script {
     /// Ce que la requête voit du disque au moment où elle part.
     on_request: Mutex<Option<Box<dyn Fn() + Send>>>,
     request_hangs: AtomicBool,
+    /// Si posé : la requête d'une action attend d'être relâchée (réponse retenue à une porte).
+    request_hold: AtomicBool,
+    /// Si posé : la prochaine lecture du flux rend « session révoquée » (une seule fois).
+    revoke_next: AtomicBool,
     lookup: Mutex<OperationStatus>,
     flood: tokio::sync::Semaphore,
     wake: tokio::sync::Notify,
@@ -101,6 +105,8 @@ impl Script {
             expire_next: AtomicBool::new(false),
             on_request: Mutex::new(None),
             request_hangs: AtomicBool::new(false),
+            request_hold: AtomicBool::new(false),
+            revoke_next: AtomicBool::new(false),
             lookup: Mutex::new(OperationStatus::Succeeded),
             flood: tokio::sync::Semaphore::new(1 << 40),
             wake: tokio::sync::Notify::new(),
@@ -204,6 +210,9 @@ impl Transport for Mock {
         if self.0.request_hangs.load(Ordering::SeqCst) {
             std::future::pending::<()>().await;
         }
+        while self.0.request_hold.load(Ordering::SeqCst) {
+            tokio::time::sleep(ms(2)).await;
+        }
         Ok(ApiResponse {
             status: 200,
             body: json!({}),
@@ -269,6 +278,7 @@ impl StreamConn for Stream {
             return Err(TransportError::Closed(None));
         }
         if !self.script.expire_next.load(Ordering::SeqCst)
+            && !self.script.revoke_next.load(Ordering::SeqCst)
             && !self.script.snapshot_next.load(Ordering::SeqCst)
         {
             tokio::select! {
@@ -280,6 +290,11 @@ impl StreamConn for Stream {
             return Ok(Frame::Message(Box::new(ServerMessage::Snapshot {
                 machine: machine(),
                 history: vec![],
+            })));
+        }
+        if self.script.revoke_next.swap(false, Ordering::SeqCst) {
+            return Ok(Frame::Message(Box::new(ServerMessage::Session {
+                kind: SessionNotice::Revoked,
             })));
         }
         if self.script.expire_next.swap(false, Ordering::SeqCst) {
@@ -1364,4 +1379,140 @@ async fn a_vault_that_refuses_to_write_leaves_no_server_and_closes_the_new_sessi
         1,
         "la session obtenue est refermée côté serveur"
     );
+}
+
+// ── Une action qui termine sa propre session (FIX:01M47PCYX3BY3YV84R9WW3KAQ3) ───────────────────
+
+fn own_session_ending_actions() -> Vec<ActionRequest> {
+    vec![
+        // Fermer ses propres sessions.
+        ActionRequest {
+            method: Method::Delete,
+            path: "/accounts/A/sessions".into(),
+            body: None,
+        },
+        // Supprimer son propre compte.
+        ActionRequest {
+            method: Method::Delete,
+            path: "/accounts/A".into(),
+            body: Some(json!({ "confirmation": "marie" })),
+        },
+        // Définir son propre mot de passe par la route d'administration : toutes ses sessions.
+        ActionRequest {
+            method: Method::Put,
+            path: "/accounts/A/password".into(),
+            body: Some(json!({ "password": "b" })),
+        },
+    ]
+}
+
+/// L'avis de fin de session croise la réponse de l'action qui l'a provoquée : il arrive PREMIER sur
+/// le flux, la réponse HTTP ensuite (retenue à une porte, aucune durée). La requête est partie et sa
+/// réponse arrive : l'action garde CE résultat (« fait »), jamais « résultat inconnu ».
+#[tokio::test]
+async fn a_session_end_notice_before_the_response_never_turns_a_delivered_result_into_unknown() {
+    for action in own_session_ending_actions() {
+        let (rig, id) = connected(Disk::Normal, false).await;
+        rig.script.request_hold.store(true, Ordering::SeqCst);
+        let manager = rig.manager.clone();
+        let task_id = id.clone();
+        let label = action.path.clone();
+        let call = tokio::spawn(async move { manager.execute(&task_id, action).await });
+        wait_until("requête partie", || {
+            rig.script.requests.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        // L'avis de fin de session passe avant la réponse.
+        rig.script.revoke_next.store(true, Ordering::SeqCst);
+        rig.script.wake.notify_one();
+        wait_state(&rig.manager, &id, LinkState::AccessRevoked).await;
+        assert!(
+            !call.is_finished(),
+            "{label} : l'appelant attend encore la réponse"
+        );
+        rig.script.request_hold.store(false, Ordering::SeqCst);
+        let outcome = tokio::time::timeout(GUARD, call)
+            .await
+            .expect("l'appelant est libéré par la réponse")
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(outcome, ActionOutcome::Completed { status: 200, .. }),
+            "{label} : {outcome:?}"
+        );
+        assert_eq!(
+            rig.script.requests.load(Ordering::SeqCst),
+            1,
+            "{label} : jamais rejouée"
+        );
+    }
+}
+
+/// Si la réponse n'arrive JAMAIS après la fin de session, l'issue reste « inconnu », dans le délai
+/// de la requête (borné), sans rien rejouer ni rien laisser suspendu.
+#[tokio::test]
+async fn a_response_that_never_comes_after_the_session_ended_stays_unknown_within_the_request_timeout()
+ {
+    let (rig, id) = connected_config(
+        Disk::Normal,
+        false,
+        None,
+        LinkConfig {
+            request_timeout: ms(300),
+            ..config()
+        },
+    )
+    .await;
+    rig.script.request_hangs.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let action = own_session_ending_actions().remove(0);
+    let call = tokio::spawn(async move { manager.execute(&task_id, action).await });
+    wait_until("requête partie", || {
+        rig.script.requests.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    rig.script.revoke_next.store(true, Ordering::SeqCst);
+    rig.script.wake.notify_one();
+    wait_state(&rig.manager, &id, LinkState::AccessRevoked).await;
+    let outcome = tokio::time::timeout(GUARD, call)
+        .await
+        .expect("rien ne reste suspendu")
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(outcome, ActionOutcome::ResultUnknown { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        rig.script.requests.load(Ordering::SeqCst),
+        1,
+        "jamais rejouée"
+    );
+}
+
+/// Changer son propre mot de passe : l'agent garde la session courante, aucun avis ne la termine ;
+/// la réponse, même retenue, arrive en « fait » et le lien reste « Connecté ».
+#[tokio::test]
+async fn an_action_that_keeps_its_session_completes_and_the_link_stays_connected() {
+    let (rig, id) = connected(Disk::Normal, false).await;
+    rig.script.request_hold.store(true, Ordering::SeqCst);
+    let manager = rig.manager.clone();
+    let task_id = id.clone();
+    let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
+    wait_until("requête partie", || {
+        rig.script.requests.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    rig.script.request_hold.store(false, Ordering::SeqCst);
+    let outcome = tokio::time::timeout(GUARD, call)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        ActionOutcome::Completed { status: 200, .. }
+    ));
+    assert_eq!(rig.manager.state(&id).unwrap().state, LinkState::Connected);
 }
