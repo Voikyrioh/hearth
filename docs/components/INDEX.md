@@ -72,6 +72,8 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`CreateAccountDialog`](./CreateAccountDialog.md) — Création d'un compte (validation en direct).
 - [`PasswordDialog`](./PasswordDialog.md) — Changement de mot de passe (le sien ou celui d'un autre compte).
 - [`OwnAccountCard`](./OwnAccountCard.md) — « Mon compte » d'un serveur dans les réglages.
+- [`AgentUpdateCard`](./AgentUpdateCard.md) — « État du serveur : {nom} » : versions, mise à jour de l'agent, étapes, résultat.
+- [`AgentUpdateSteps`](./AgentUpdateSteps.md) — Les étapes d'une mise à jour de l'agent (téléchargement, vérification, installation, redémarrage, contrôle).
 - [`MachineCard`](./MachineCard.md) — Sections Machine et Durée de fonctionnement.
 - [`CpuCard`](./CpuCard.md) — Section Processeur (jauge, courbe, cœurs).
 - [`MemoryCard`](./MemoryCard.md) — Section Mémoire.

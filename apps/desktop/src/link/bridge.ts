@@ -1,3 +1,4 @@
+import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { MachineEvent } from "./machine";
 import type {
@@ -122,6 +123,20 @@ export interface LinkBridge {
     accountId: string,
     confirmation: string | null,
   ): Promise<AccountOutcome>;
+
+  // Mise à jour de l'agent (HRT-17) : UNE commande typée par lecture ou action. L'interface ne fournit
+  // NI adresse, NI signature, NI somme : la coquille tient la cible de sa propre lecture du flux de
+  // versions ; `version` n'est que le numéro que l'utilisateur a sous les yeux (refusé s'il n'est plus
+  // celui que la coquille retient). L'agent reste l'arbitre du rôle (refus = échec `forbidden`).
+
+  /** L'état de la mise à jour de l'agent : version, installation gérée, en cours, dernier résultat, version disponible. Une lecture : refaite au retour du lien. */
+  getAgentUpdate(serverId: string): Promise<AgentUpdateView>;
+  /** Note que le résultat daté `at` a été annoncé : il ne le sera plus, même après un redémarrage du client. Ne parle pas à l'agent. */
+  ackAgentResult(serverId: string, at: string): Promise<void>;
+  /** « Mettre à jour l'agent » : une action (clé d'opération, résultat inconnu à la coupure, jamais rejouée). */
+  updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome>;
+  /** La progression de la mise à jour d'un agent (`agent-update://progress`) ; rien n'est rejoué : l'état se relit (`getAgentUpdate`). */
+  onAgentUpdate(listener: (event: AgentUpdateEvent) => void): Promise<Unsubscribe>;
 
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;

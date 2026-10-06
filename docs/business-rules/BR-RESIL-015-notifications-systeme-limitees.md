@@ -35,3 +35,4 @@ Les notifications Windows signalent le passage à « Hors ligne » ou le retour 
 - 2026-10-05 : implémentée (HRT-12) : limiteur, agrégation, réglage, notification système.
 - 2026-10-05 : remise au texte de la spec (revue HRT-12) : UNE notification par minute et par serveur, toutes natures confondues ; paliers d'échecs.
 - 2026-10-06 : plus aucune notification système pour les échecs répétés (revue round 2 : un serveur éteint la nuit en aurait produit ~570 par jour) ; invariant borné testé sur 24 h et 7 jours.
+- 2026-10-06 : une coupure ATTENDUE (redémarrage annoncé par l'agent pour sa mise à jour, BR-UPDATE-014) ne passe pas « Hors ligne » pendant 2 minutes : aucune notification Windows de panne (HRT-17, ADR-0021).

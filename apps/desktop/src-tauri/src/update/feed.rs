@@ -21,6 +21,7 @@ use url::Url;
 
 use super::domain::{Candidate, DownloadPolicy, FEED_URL};
 use super::ports::{DownloadError, Feed, FeedError, VerifiedInstaller};
+use crate::agent_update::domain::{AgentCandidate, parse_agent_section};
 
 /// La clé publique de signature (fichier `.pub` de minisign), embarquée à la compilation. Aucune
 /// clé ne se lit sur le disque de la machine : qui peut écrire un fichier sur le PC ne peut pas
@@ -87,6 +88,8 @@ pub fn plugin_with_key<R: Runtime>(
 pub struct TauriFeed<R: Runtime> {
     app: AppHandle<R>,
     endpoint: Url,
+    /// La section de l'agent du DERNIER `latest.json` lu par `check` (ADR-0021) : aucune requête de plus.
+    agent_section: Mutex<Option<Result<Option<AgentCandidate>, FeedError>>>,
     policy: DownloadPolicy,
     check_timeout: Duration,
     /// La dernière annonce dont la source est permise : celle que `download` utilise.
@@ -105,6 +108,7 @@ impl<R: Runtime> TauriFeed<R> {
         Self {
             app,
             endpoint,
+            agent_section: Mutex::new(None),
             policy,
             check_timeout: CHECK_TIMEOUT,
             staged: Mutex::new(None),
@@ -237,6 +241,10 @@ fn harden(
 #[async_trait]
 impl<R: Runtime> Feed for TauriFeed<R> {
     async fn check(&self) -> Result<Option<Candidate>, FeedError> {
+        *self
+            .agent_section
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
         let redirected = Arc::new(AtomicBool::new(false));
         let updater = self
             .app
@@ -245,16 +253,40 @@ impl<R: Runtime> Feed for TauriFeed<R> {
             .map_err(|error| feed_error(error, false))?
             .timeout(self.check_timeout)
             .configure_client(harden(&self.policy, redirected.clone()))
+            // Le greffon ne rend le manifeste (`raw_json`, avec la section de l'agent) que pour une version
+            // qu'il juge à installer : on lui demande de le rendre TOUJOURS, et la comparaison des versions
+            // se fait ici, plus bas (jamais de mise à jour ni d'annonce du CLIENT à tort, ADR-0021).
+            .version_comparator(|_current, _remote| true)
             .build()
             .map_err(|error| feed_error(error, false))?;
-        let Some(mut update) = updater
+        let outcome = updater
             .check()
             .await
-            .map_err(|error| feed_error(error, redirected.load(Ordering::SeqCst)))?
-        else {
+            .map_err(|error| feed_error(error, redirected.load(Ordering::SeqCst)))?;
+        let Some(mut update) = outcome else {
             self.stage(None);
             return Ok(None);
         };
+        // La section de l'agent, lue dans le MÊME manifeste (une seule requête par vérification).
+        *self
+            .agent_section
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(
+            parse_agent_section(&update.raw_json)
+                .map_err(|error| FeedError::failed(error.to_string())),
+        );
+        // Version égale ou inférieure à celle du client : ignorée, comme le greffon seul le faisait.
+        let newer = match (
+            semver::Version::parse(update.version.trim_start_matches('v')),
+            semver::Version::parse(&update.current_version),
+        ) {
+            (Ok(remote), Ok(current)) => remote > current,
+            _ => false,
+        };
+        if !newer {
+            self.stage(None);
+            return Ok(None);
+        }
         update.timeout = Some(DOWNLOAD_TIMEOUT);
         let candidate = Candidate {
             version: update.version.clone(),
@@ -265,6 +297,15 @@ impl<R: Runtime> Feed for TauriFeed<R> {
         // Une annonce dont la source n'est pas permise ne sera jamais téléchargée.
         self.stage(self.policy.allows(&update.download_url).then_some(update));
         Ok(Some(candidate))
+    }
+
+    async fn check_agent(&self) -> Result<Option<AgentCandidate>, FeedError> {
+        // Aucune requête : la section vient du manifeste que `check` vient de lire.
+        self.agent_section
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| Err(FeedError::failed("manifeste non lu")))
     }
 
     async fn download(

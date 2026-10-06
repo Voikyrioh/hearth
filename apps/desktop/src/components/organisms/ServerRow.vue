@@ -7,6 +7,7 @@ import LinkStatePill from "@/components/molecules/LinkStatePill.vue";
 import ServerAvatar from "@/components/molecules/ServerAvatar.vue";
 import { t } from "@/i18n";
 import type { ServerInfo } from "@/link";
+import { useAgentUpdatesStore } from "@/stores/agentUpdates";
 import { useLinkStore } from "@/stores/link";
 
 // Une ligne du carnet de serveurs : nom, couleur, adresse, état du lien, et les actions du
@@ -18,6 +19,9 @@ defineEmits<{ edit: []; remove: []; disconnect: []; forget: [] }>();
 
 const link = useLinkStore();
 const state = computed(() => link.stateOf(props.server.id));
+// Seul le serveur qui a une mise à jour de l'agent disponible le dit (BR-UPDATE-023).
+const agents = useAgentUpdatesStore();
+const updateAvailable = computed(() => agents.withUpdate.includes(props.server.id));
 </script>
 
 <template>
@@ -34,6 +38,7 @@ const state = computed(() => link.stateOf(props.server.id));
       <span class="row__address">{{ server.address }}</span>
     </div>
     <HTag v-if="server.remember" tone="neutral">{{ t("connect.rememberedBadge") }}</HTag>
+    <HTag v-if="updateAvailable" tone="accent" data-update-available>{{ t("agentUpdate.tag") }}</HTag>
     <LinkStatePill :state="state" />
     <div class="row__actions">
       <HButton v-if="state === 'connected'" variant="secondary" size="sm" @click="$emit('disconnect')">

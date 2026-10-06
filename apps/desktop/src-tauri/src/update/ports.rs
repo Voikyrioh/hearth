@@ -5,6 +5,7 @@ use async_trait::async_trait;
 
 use super::domain::{Candidate, UpdateRecord};
 use super::dto::UpdateStateDto;
+use crate::agent_update::domain::AgentCandidate;
 
 /// Horloge murale en millisecondes depuis l'époque (injectée : les règles de fréquence et de
 /// report se testent sans attendre).
@@ -26,6 +27,18 @@ pub trait Feed: Send + Sync {
     /// Interroge le flux. `Ok(None)` : le flux ne propose rien de plus récent.
     async fn check(&self) -> Result<Option<Candidate>, FeedError>;
 
+    /// La section `agent` du `latest.json` que `check` vient de lire (ADR-0021) : AUCUNE requête, la
+    /// même que celle du client (une vérification = une requête). `Ok(None)` : pas de section, ou sans
+    /// entrée pour l'agent : rien à proposer. Une erreur (section illisible, vérification du client en
+    /// échec) laisse la cible précédente. Par défaut : une erreur silencieuse (les faux ports des tests
+    /// du client n'en font pas).
+    async fn check_agent(&self) -> Result<Option<AgentCandidate>, FeedError> {
+        // Non pris en charge : une erreur, qui laisse la cible précédente (jamais « rien à proposer »).
+        Err(FeedError::failed(
+            "lecture de la cible de l'agent non prise en charge",
+        ))
+    }
+
     /// Télécharge l'installateur de `version` (celui de la dernière annonce rendue par `check`) et
     /// vérifie sa signature contre la clé embarquée. Rien n'est écrit sur le disque avant que la
     /// signature soit bonne. `progress(reçus, total)`.
@@ -42,7 +55,7 @@ pub trait Feed: Send + Sync {
 
 /// Pourquoi une vérification n'a rien donné. Jamais montré à l'interface (BR-UPDATE-007, 008) :
 /// seul le journal en garde la raison.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("{message}")]
 pub struct FeedError {
     /// Aucune requête n'a pu partir (pas de réseau : connexion ou résolution du nom impossible).

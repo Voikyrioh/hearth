@@ -281,16 +281,25 @@ describe("OfflineBanner when attempts are suspended", () => {
     expect(wrapper.emitted("alert")).toHaveLength(1);
   });
 
-  it("says which side is too old, with the spec texts", () => {
+  it("says which side to update, with the spec texts (BR-UPDATE-020, 021)", () => {
     const agent = mount(OfflineBanner, {
       props: { lastContactAt: null, blocked: "incompatible_agent" },
     });
     expect(agent.text()).toContain(
-      "L'agent de ce serveur est trop ancien. Mets à jour l'agent sur le serveur.",
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent.",
+    );
+    // Un compte Lecture seule ne peut pas : il le demande à un administrateur.
+    const readonly = mount(OfflineBanner, {
+      props: { lastContactAt: null, blocked: "incompatible_agent", role: "readonly" },
+    });
+    expect(readonly.text()).toContain(
+      "Les versions du client et de l'agent ne sont pas compatibles. Demande à un administrateur de mettre à jour l'agent.",
     );
     const client = mount(OfflineBanner, {
       props: { lastContactAt: null, blocked: "incompatible_client" },
     });
-    expect(client.text()).toContain("Le client est trop ancien. Mets à jour le client sur ce PC.");
+    expect(client.text()).toContain(
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour le client.",
+    );
   });
 });

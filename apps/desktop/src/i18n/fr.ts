@@ -130,8 +130,14 @@ export const fr = {
     fingerprintBanner:
       "L'identité de ce serveur a changé. La connexion est suspendue tant que tu n'as pas tranché.",
     seeAlert: "Voir l'alerte",
-    agentTooOld: "L'agent de ce serveur est trop ancien. Mets à jour l'agent sur le serveur.",
-    clientTooOld: "Le client est trop ancien. Mets à jour le client sur ce PC.",
+    agentTooOld:
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent.",
+    agentTooOldReadonly:
+      "Les versions du client et de l'agent ne sont pas compatibles. Demande à un administrateur de mettre à jour l'agent.",
+    clientTooOld:
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour le client.",
+    updateClient: "Mettre à jour le client",
+    checkClient: "Chercher une mise à jour du client",
   },
   needs: {
     reconnecting: "Indisponible pendant la reconnexion au serveur.",
@@ -260,8 +266,10 @@ export const fr = {
     notAgent: "Cette adresse ne répond pas comme un agent Hearth. Vérifie l'adresse.",
     invalidCredentials: "Identifiant ou mot de passe incorrect.",
     tooManyAttempts: "Trop de tentatives. Attends {n} s avant de réessayer.",
-    agentTooOld: "L'agent de ce serveur est trop ancien. Mets à jour l'agent sur le serveur.",
-    clientTooOld: "Le client est trop ancien. Mets à jour le client sur ce PC.",
+    agentTooOld:
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent.",
+    clientTooOld:
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour le client.",
     storage: "Hearth n'a pas pu écrire sur ce PC. Réessaie.",
     vault: "Le coffre de Windows n'est pas accessible. Réessaie.",
     trackingUnavailable:
@@ -456,6 +464,84 @@ export const fr = {
     agoHours: "il y a {n} heures",
     agoDay: "il y a 1 jour",
     agoDays: "il y a {n} jours",
+  },
+  agentUpdate: {
+    cardTitle: "État du serveur : {name}",
+    versions: "Client {client} · Agent {agent}",
+    versionsAvailable: "Client {client} · Agent {agent} · Disponible {available}",
+    tag: "Mise à jour disponible",
+    availableText: "Mise à jour disponible pour l'agent",
+    runningLost: "Le serveur ne répond plus. L'état de la mise à jour sera relu à son retour.",
+    upToDate: "L'agent est à jour.",
+    unavailable: "Indisponible tant que le serveur n'est pas connecté.",
+    readFailed: "Impossible de lire l'état de la mise à jour de l'agent.",
+    button: "Mettre à jour l'agent",
+    readOnlyHint: "Seul un administrateur peut mettre à jour l'agent",
+    confirmTitle: "Mettre à jour l'agent ?",
+    confirmMessage: "Cette opération redémarrera l'agent brièvement.",
+    confirmYes: "Oui, mettre à jour",
+    managed:
+      "Cette installation est gérée par le système : l'agent ne se met pas à jour à distance. Mets-le à jour par la configuration du système.",
+    progress: "Mise à jour de l'agent en cours. Étape : {step}…",
+    cutAnnounce: "Le lien avec le serveur sera coupé brièvement pendant le redémarrage.",
+    stepsLabel: "Étapes de la mise à jour de l'agent",
+    stepDownload: "Téléchargement…",
+    stepDownloadPercent: "Téléchargement : {percent} %",
+    stepVerify: "Vérification…",
+    stepInstall: "Installation…",
+    stepRestart: "Redémarrage…",
+    stepCheck: "Contrôle…",
+    stepDone: "faite",
+    stepNow: "en cours",
+    stepLater: "à venir",
+    nowDownload: "téléchargement",
+    nowDownloadPercent: "téléchargement ({percent} %)",
+    nowVerify: "vérification",
+    nowInstall: "installation",
+    nowRestart: "redémarrage",
+    nowCheck: "contrôle",
+    resultSucceeded: "Mise à jour de l'agent réussie. L'agent est en version {version}.",
+    resultSucceededNoVersion: "Mise à jour de l'agent réussie.",
+    resultNoAnswer:
+      "Mise à jour de l'agent annulée. Le nouvel agent n'a pas répondu. Retour à la version précédente.",
+    resultIdentityChanged:
+      "Mise à jour de l'agent annulée. Le nouvel agent n'avait pas la même identité. Retour à la version précédente.",
+    resultRolledBack: "Mise à jour de l'agent annulée. Retour à la version précédente.",
+    resultUnreachable:
+      "Le serveur n'a pas accès à Internet pour télécharger la mise à jour de l'agent.",
+    resultDownloadFailed:
+      "Le téléchargement de la mise à jour de l'agent a échoué. L'agent n'a pas changé.",
+    resultBadChecksum:
+      "Le fichier de mise à jour de l'agent est corrompu (somme incorrecte). Refusé : l'agent n'a pas changé.",
+    resultBadSignature:
+      "La signature de la mise à jour de l'agent est refusée. Rien n'a été modifié.",
+    resultBadBinary:
+      "Le fichier de mise à jour n'est pas un agent utilisable sur ce serveur. L'agent n'a pas changé.",
+    resultNotInstalled:
+      "La mise à jour de l'agent n'a pas pu être installée sur le serveur. L'agent n'a pas changé.",
+    resultInterrupted:
+      "La mise à jour de l'agent a été interrompue. Vérifie la version de l'agent.",
+    resultRollbackFailed:
+      "La mise à jour de l'agent n'a pas pu être menée à bout, et le retour à la version précédente n'est pas confirmé. Vérifie l'agent sur le serveur (guide « Mettre à jour l'agent »).",
+    resultFailed: "La mise à jour de l'agent n'a pas abouti.",
+    dismiss: "Compris",
+    historySucceeded: "Dernière mise à jour de l'agent : réussie ({when}).",
+    historyRolledBack:
+      "Dernière mise à jour de l'agent : annulée, retour à la version précédente ({when}).",
+    historyFailed: "Dernière mise à jour de l'agent : échouée ({when}).",
+    refusedInProgress: "Une mise à jour de l'agent est déjà en cours. Réessaye plus tard.",
+    refusedBadSignature:
+      "La signature de la mise à jour est refusée. Rien n'a été téléchargé ni modifié.",
+    refusedInvalidTarget: "Le serveur a refusé cette mise à jour. L'agent n'a pas changé.",
+    refusedNoTarget:
+      "Aucune version de l'agent n'est connue. Vérifie les mises à jour dans les réglages.",
+    refusedTargetChanged: "La version proposée a changé. Relis l'état, puis confirme de nouveau.",
+    refusedNotNewer: "L'agent est déjà à jour.",
+    refusedOther: "La mise à jour de l'agent a été refusée.",
+    forbidden: "Seul un administrateur peut mettre à jour l'agent",
+    unknownResult:
+      "Le lien est tombé avant la réponse du serveur : on ne sait pas si la mise à jour a démarré. Rien n'est relancé.",
+    toastDone: "{server} : {message}",
   },
   settings: {
     title: "Réglages",

@@ -10,6 +10,9 @@ use serde_json::json;
 
 /// Cible du manifeste : doit rester celle du client (`update/feed.rs::TARGET`).
 pub const TARGET: &str = "windows-x86_64";
+/// Entrée de l'agent dans la section `agent` du `latest.json` : doit rester celle que le client lit
+/// (`agent_update/domain.rs::AGENT_PLATFORM`).
+pub const AGENT_TARGET: &str = "linux-x86_64";
 /// Marque du commentaire de la clé de développement (`update/feed.rs::DEV_KEY_MARK`).
 pub const DEV_KEY_MARK: &str = "DEV public key";
 /// Les installateurs ne sont téléchargés que de ce dépôt (`update/domain.rs`).
@@ -186,4 +189,101 @@ pub fn manifest_for(
         "platforms": { TARGET: { "signature": signature, "url": url } },
     }))
     .map_err(|error| error.to_string())
+}
+
+/// La version demandée doit être celle du dépôt (`[workspace.package]`), seule source du numéro : l'agent
+/// construit par `cargo xtask agent` porte cette version (il la vérifie), et c'est celle qu'il annoncera
+/// en s'exécutant. Une section `agent` « 0.3.0 » posée sur un binaire 0.2.0 serait refusé (`bad_binary`) par
+/// chaque agent, puis reproposé sans fin.
+pub fn check_repository_version(requested: &str, cargo_toml: &str) -> Result<(), String> {
+    let repository = workspace_version(cargo_toml).ok_or("version du dépôt illisible")?;
+    if requested == repository {
+        Ok(())
+    } else {
+        Err(format!(
+            "la version demandée ({requested}) n'est pas celle du dépôt ({repository}) : l'agent construit porte la version de [workspace.package] dans Cargo.toml"
+        ))
+    }
+}
+
+/// La signature d'un binaire de l'AGENT (faite à la main par `minisign -S`, ADR-0014) : le contenu du
+/// fichier `.minisig`, ou son encodage base64, vérifié contre la clé publique embarquée dans l'agent.
+/// Le commentaire de confiance n'est pas contrôlé : l'agent ne l'exige pas (il contrôle la version en
+/// exécutant le binaire).
+pub fn verify_agent_signature(
+    public_key_file: &str,
+    signature: &str,
+    data: &[u8],
+) -> Result<(), String> {
+    let public = minisign::PublicKeyBox::from_string(&decode_key_file(public_key_file))
+        .and_then(minisign::PublicKeyBox::into_public_key)
+        .map_err(|error| format!("clé publique de l'agent illisible : {error}"))?;
+    let text = signature_text(signature)?;
+    let signature = minisign::SignatureBox::from_string(&text)
+        .map_err(|error| format!("signature illisible : {error}"))?;
+    minisign::verify(&public, &signature, Cursor::new(data), true, false, true).map_err(|_| {
+        "la signature ne correspond pas à crates/hearth-agent/update-key.pub : le binaire n'a pas été signé par la paire de la clé embarquée dans l'agent, ou le fichier a changé".to_owned()
+    })
+}
+
+/// Le texte d'une signature minisign : tel quel, ou décodé s'il est en base64.
+fn signature_text(signature: &str) -> Result<String, String> {
+    let signature = signature.trim();
+    if signature.starts_with("untrusted comment:") {
+        return Ok(signature.to_owned());
+    }
+    let bytes = STANDARD
+        .decode(signature.split_whitespace().collect::<String>())
+        .map_err(|_| "signature : ni un fichier .minisig ni du base64".to_owned())?;
+    let text = String::from_utf8(bytes).map_err(|_| "signature : pas du texte".to_owned())?;
+    if text.trim().starts_with("untrusted comment:") {
+        Ok(text.trim().to_owned())
+    } else {
+        Err("signature : pas une signature minisign".to_owned())
+    }
+}
+
+/// La section `agent` à ajouter au manifeste `latest.json` du client (ADR-0021) : `version` et l'entrée
+/// `linux-x86_64` (`url`, `signature`, `sha256`). `sha256` est la somme du binaire, en hexadécimal :
+/// l'agent exige la signature ET la somme.
+pub fn agent_section(
+    prefix: &str,
+    version: &str,
+    signature: &str,
+    sha256: &str,
+    url: &str,
+) -> Result<serde_json::Value, String> {
+    check_version(version)?;
+    let signature = signature_text(signature)?;
+    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("somme SHA-256 : 64 caractères hexadécimaux attendus".to_owned());
+    }
+    let expected = format!("{prefix}v{version}/");
+    if !url.starts_with(&expected) {
+        return Err(format!("l'adresse doit commencer par {expected}"));
+    }
+    Ok(json!({
+        "version": version,
+        "platforms": {
+            AGENT_TARGET: { "url": url, "signature": signature, "sha256": sha256.to_ascii_lowercase() }
+        },
+    }))
+}
+
+/// Ajoute (ou remplace) la section `agent` d'un `latest.json` DÉJÀ valable pour le client : un seul
+/// manifeste cohérent, jamais une section de l'agent sans le manifeste du client (version et entrée
+/// `windows-x86_64` exigées), et le reste du fichier est conservé tel quel.
+pub fn add_agent_section(manifest: &str, section: serde_json::Value) -> Result<String, String> {
+    let mut value: serde_json::Value = serde_json::from_str(manifest)
+        .map_err(|error| format!("latest.json illisible : {error}"))?;
+    let client_ok = value["version"].is_string()
+        && value["platforms"][TARGET]["url"].is_string()
+        && value["platforms"][TARGET]["signature"].is_string();
+    if !client_ok {
+        return Err(format!(
+            "latest.json n'est pas un manifeste du client valable (version et entrée {TARGET} attendues) : fabrique-le d'abord avec client-manifest"
+        ));
+    }
+    value["agent"] = section;
+    serde_json::to_string_pretty(&value).map_err(|error| error.to_string())
 }

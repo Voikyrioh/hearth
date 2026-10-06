@@ -11,6 +11,7 @@ import { useCurrentServer } from "@/composables/useCurrentServer";
 import { t } from "@/i18n";
 import { useLinkStore } from "@/stores/link";
 import { useServersStore } from "@/stores/servers";
+import { useUpdatesStore } from "@/stores/updates";
 
 // Gabarit d'un serveur : navigation à gauche ; à droite en-tête (titre + état du lien, hors
 // de la frontière d'erreur : toujours visible), bandeau hors ligne, puis la page dans sa
@@ -19,6 +20,7 @@ import { useServersStore } from "@/stores/servers";
 const route = useRoute();
 const servers = useServersStore();
 const link = useLinkStore();
+const updates = useUpdatesStore();
 const { server, state, lastContactAt } = useCurrentServer();
 const event = computed(() => (server.value ? link.eventOf(server.value.id) : undefined));
 
@@ -43,8 +45,12 @@ const title = computed(() => (route.meta.title ? t(route.meta.title) : ""));
         v-if="state === 'offline'"
         :last-contact-at="lastContactAt"
         :blocked="event?.blocked ?? null"
+        :role="server.role"
+        :client-action="updates.clientAction"
+        :client-busy="updates.busy || updates.checking"
         @retry="link.retryNow(server.id)"
         @alert="link.reopenAlert(server.id)"
+        @client="updates.fixClient()"
       />
       <div class="layout__content">
         <!-- Sans session : le formulaire de connexion, au-dessus de la dernière vue (périmée). -->

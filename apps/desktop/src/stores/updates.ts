@@ -95,5 +95,24 @@ export const useUpdatesStore = defineStore("updates", () => {
     return run(() => getUpdateBridge().install());
   }
 
-  return { state, checking, banner, available, busy, start, stop, checkNow, postpone, install };
+  /** Client trop ancien pour le serveur : installer la version annoncée, ou en chercher une. */
+  const clientAction = computed<"install" | "check">(() => (available.value ? "install" : "check"));
+  function fixClient() {
+    return available.value ? install() : checkNow();
+  }
+
+  return {
+    state,
+    checking,
+    banner,
+    available,
+    busy,
+    clientAction,
+    start,
+    stop,
+    checkNow,
+    postpone,
+    install,
+    fixClient,
+  };
 });

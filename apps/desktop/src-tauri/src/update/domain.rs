@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::agent_update::domain::AgentTargetRecord;
+
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// Intervalle minimal entre deux vérifications automatiques (BR-UPDATE-001).
@@ -61,6 +63,13 @@ pub struct UpdateRecord {
     pub postponed_until: Option<i64>,
     /// Version plus récente connue à la dernière vérification réussie.
     pub available: Option<Release>,
+    /// La cible de l'AGENT lue dans la section `agent` du `latest.json`, par la même requête (ADR-0021). Relue et
+    /// validée de nouveau à chaque usage : ce fichier se modifie à la main.
+    pub agent: Option<AgentTargetRecord>,
+    /// Pour chaque serveur, la date (`at`) du dernier résultat de mise à jour de l'agent déjà ANNONCÉ à
+    /// l'utilisateur : un résultat est annoncé une seule fois, même après un redémarrage du client
+    /// (HRT-17). Borné à `MAX_SEEN_RESULTS` serveurs.
+    pub agent_results_seen: std::collections::BTreeMap<String, String>,
 }
 
 /// Une version annoncée et acceptée par les règles ci-dessous.
@@ -113,6 +122,20 @@ impl DownloadPolicy {
             port: Some(port),
             path_prefix: "/".to_owned(),
             redirects_https_only: false,
+        }
+    }
+
+    /// Un hôte public de test en HTTPS (la cible de l'agent d'un test contre un vrai agent dont le
+    /// téléchargeur est simulé) : n'existe pas dans un binaire de publication.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub fn host_for_tests(host: &str) -> Self {
+        Self {
+            scheme: "https",
+            host: host.to_owned(),
+            port: None,
+            path_prefix: "/".to_owned(),
+            redirects_https_only: true,
         }
     }
 

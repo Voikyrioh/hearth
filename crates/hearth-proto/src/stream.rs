@@ -80,9 +80,11 @@ pub enum SessionNotice {
     Expired,
 }
 
-/// Message du sujet `update`, envoyé à part des `ServerMessage` : un client qui ne le connaît pas
-/// l'ignore (trame de type inconnu), ce qui laisse `ServerMessage` inchangé. Les champs de
-/// [`UpdateProgress`] sont à plat à côté de `type`.
+/// Message du sujet `update` tel que l'AGENT l'envoie. Sur le fil, il est identique à
+/// [`ServerMessage::Update`] (même `type`, mêmes champs à plat, voir le test
+/// `the_two_shapes_of_an_update_message_are_the_same_on_the_wire`) : l'agent garde ce type tant
+/// qu'il n'est pas touché pour autre chose, le CLIENT lit `ServerMessage::Update` (ADR-0021). Un
+/// client plus ancien, qui ne connaît pas la variante, lit la trame comme inconnue et l'ignore.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UpdateMessage {
@@ -112,6 +114,10 @@ pub enum ServerMessage {
     Pong {
         n: u64,
     },
+    /// Progression de la mise à jour de l'agent (sujet `update`) : l'état courant à l'abonnement,
+    /// puis un message par changement d'étape ou de pourcentage entier. Les champs de
+    /// [`UpdateProgress`] sont à plat à côté de `type`, comme ceux de `Metrics`.
+    Update(UpdateProgress),
     /// Erreur du protocole (mêmes codes que l'API HTTP) ; l'agent ferme ensuite le flux quand
     /// l'erreur est fatale (authentification), pas quand il s'agit d'un message mal formé.
     Error(ErrorDetail),
@@ -143,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn an_update_message_is_flat_next_to_its_type_and_old_clients_ignore_it() {
+    fn the_two_shapes_of_an_update_message_are_the_same_on_the_wire() {
         let message = UpdateMessage::Update(UpdateProgress {
             version: "0.2.0".into(),
             step: crate::api::update::UpdateStep::Download,
@@ -155,8 +161,24 @@ mod tests {
         assert_eq!(value["type"], "update");
         assert_eq!(value["step"], "download");
         assert_eq!(value["percent"], 35);
-        // `ServerMessage` ne le connaît pas : l'ancien client le lit comme une trame inconnue.
-        assert!(serde_json::from_value::<ServerMessage>(value.clone()).is_err());
+        // `ServerMessage` le connaît aussi (ADR-0021) : même forme sur le fil, le client lit l'une
+        // ou l'autre ; un client plus ancien le lit comme une trame inconnue.
+        let ServerMessage::Update(progress) =
+            serde_json::from_value::<ServerMessage>(value.clone()).expect("server message")
+        else {
+            panic!("variante inattendue");
+        };
+        assert_eq!(UpdateMessage::Update(progress.clone()), message);
+        assert_eq!(
+            serde_json::to_value(ServerMessage::Update(progress)).expect("json"),
+            value
+        );
+        // Un type que ni l'un ni l'autre ne connaît (un sujet futur) reste une erreur de lecture,
+        // que la bibliothèque de liaison traite comme une trame sans intérêt.
+        assert!(
+            serde_json::from_value::<ServerMessage>(json!({ "type": "something_new", "x": 1 }))
+                .is_err()
+        );
         assert_eq!(
             serde_json::from_value::<UpdateMessage>(value).expect("update"),
             message

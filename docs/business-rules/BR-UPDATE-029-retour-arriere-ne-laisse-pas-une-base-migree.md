@@ -23,6 +23,10 @@ Service arrêté, avant l'échange des binaires, le superviseur copie la base (`
 - `domain::update::space::tests` (les trois cas), `tests/update_supervisor.rs` : `not_enough_room_for_the_database_copy_leaves_everything_as_it_was`, `a_room_that_cannot_be_measured_refuses_before_any_swap_like_a_full_disk` (espace simulé : aucun test ne lit le vrai disque), `domain::update::rollback::tests`, `infrastructure::update::host::tests` (copie atomique, remise une seule fois, remise impossible : base vivante intacte), `tests/update_use_cases.rs::the_old_version_already_running_with_the_traces_left_is_concluded_without_touching_the_database` (le scénario de la reprise à la main).
 - `tests/update_supervisor.rs` : `a_rollback_puts_the_database_back_as_it_was_before_the_swap`, `a_success_keeps_the_migrated_database_and_drops_its_copy`, `a_recovery_puts_back_the_exact_old_binary_and_database_when_the_new_agent_does_not_hold`.
 
+## Interface (HRT-17, lot interface)
+- Raisons `swap` (dont « pas assez de place pour copier la base ») : « La mise à jour de l'agent n'a pas pu être installée sur le serveur. L'agent n'a pas changé. » ; `rollback_failed` : le texte dit de reprendre la main sur le serveur (guide « Mettre à jour l'agent »).
+- Code : `apps/desktop/src/agentUpdate/messages.ts::resultMessage`. Tests : `messages.test.ts`.
+
 ## Cas limites
 - Sans base (première installation) : rien à copier ni à remettre.
 - La copie se prend service arrêté : la base est fermée (journal vide).
@@ -33,3 +37,4 @@ Service arrêté, avant l'échange des binaires, le superviseur copie la base (`
 ## Historique
 - 2026-10-05 : création (HRT-17, suite de la revue de code).
 - 2026-10-06 : l'espace impossible à mesurer est un refus, port `FreeSpace`, décision dans `domain/` (HRT-17, suivis de la review). La base n'est remise que par le retour arrière de CE travail (FIX-01M47N6Z485TWN2H770KQ5H80R : jamais sous une version posée à la main).
+- 2026-10-06 : section Interface (HRT-17, lot interface, session 2026-10-04-hearth-creation, T28).

@@ -37,3 +37,4 @@ Quand la même notification (même type, même texte) est émise plusieurs fois,
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
 - 2026-10-05 : compteur d'échecs de reconnexion, une notification par serveur (HRT-12).
 - 2026-10-06 : paliers remis à zéro hors panne et à la suppression d'un serveur ; plus de notification système pour les échecs (revue round 2).
+- 2026-10-06 : une coupure ATTENDUE (redémarrage annoncé par l'agent, BR-UPDATE-014) ne compte aucun échec de reconnexion pendant 2 minutes : aucun avis « Reconnexion échouée » (HRT-17, ADR-0021).

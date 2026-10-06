@@ -63,4 +63,5 @@ tempfile.workspace = true
 hearth-agent = { path = "../../../crates/hearth-agent" }
 async-trait.workspace = true
 minisign.workspace = true
+sha2.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

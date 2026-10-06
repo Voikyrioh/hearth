@@ -24,6 +24,10 @@ Le binaire d'une mise à jour se télécharge en HTTPS seulement (aucune redirec
 - `tests/update_use_cases.rs::a_local_or_private_address_is_refused_before_anything_is_downloaded`.
 - `tests/update_download.rs` : `an_environment_proxy_is_never_used_so_the_address_filter_cannot_be_bypassed` (le test se relance avec `HTTPS_PROXY` posé vers un faux proxy : le serveur est joint directement, le filtre s'applique, aucune connexion ne part vers le proxy), `exotic_spellings_of_a_local_address_are_refused_before_any_connection`, `local_and_private_addresses_are_refused_by_name_and_by_literal_unless_allowed`, `a_redirect_to_clear_text_is_refused`.
 
+## Interface (HRT-17, lot interface)
+- Le client ne transmet jamais une adresse que l'agent refuserait : `domain::validate_target` refuse une adresse non HTTPS, avec identifiant ou fragment, locale ou privée (bouclage, privées, lien local, partagées, noms internes), hors des releases du dépôt public, et une version non `X.Y.Z` (ADR-0021). L'adresse vient du flux de versions lu par la coquille, jamais de l'interface ; l'agent refait tout.
+- Code : `apps/desktop/src-tauri/src/agent_update/domain.rs::{validate_target, host_is_local}`. Tests : `apps/desktop/src-tauri/tests/agent_update_domain.rs`, `agent_target_feed.rs`.
+
 ## Cas limites
 - Un nom public qui pointe vers le réseau local est refusé à la résolution. Un serveur de versions interne (LAN) n'est pas pris en charge : l'héberger sur une adresse publique, ou mettre à jour par `install.sh --binary`.
 
@@ -33,3 +37,4 @@ Le binaire d'une mise à jour se télécharge en HTTPS seulement (aucune redirec
 ## Historique
 - 2026-10-05 : création (HRT-17, suite de la revue de code).
 - 2026-10-06 : aucun proxy d'environnement ; table des cas acceptés (HRT-17, suivis de la review).
+- 2026-10-06 : section Interface (HRT-17, lot interface, session 2026-10-04-hearth-creation, T28).

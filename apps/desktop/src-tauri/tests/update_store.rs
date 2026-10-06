@@ -22,6 +22,15 @@ fn record() -> UpdateRecord {
             version: "1.1.0".to_owned(),
             notes: "Notes.".to_owned(),
         }),
+        // La cible de l'agent (HRT-17) survit aussi au redémarrage du client.
+        agent: Some(hearth_desktop_lib::agent_update::domain::AgentTargetRecord {
+            version: "0.2.0".to_owned(),
+            url: "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64"
+                .to_owned(),
+            signature: "untrusted comment: s".to_owned(),
+            sha256: "ab".repeat(32),
+        }),
+        agent_results_seen: [("s1".to_owned(), "2026-10-06T10:00:00Z".to_owned())].into(),
     }
 }
 
