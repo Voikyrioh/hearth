@@ -73,6 +73,9 @@ enum Internal {
         id: OperationId,
         lookup: Lookup,
     },
+    /// Efface le jeton d'une session fermée par `logout`, dès que le verrou d'écriture du serveur est
+    /// libre (FIX:01M46G7Z0ZP43T53M2F5KG4VKS).
+    EraseToken,
     /// Le suivi n'a pas pu être écrit sur disque à temps : la requête n'est PAS partie.
     NotSent {
         id: OperationId,
@@ -370,8 +373,13 @@ impl Runner {
             Command::LoginRefused => self.input(Input::LoginRefused).await,
             Command::LoggedOut => {
                 self.input(Input::LoggedOut).await;
-                // Après l'arrêt de toute tentative : un jeton obtenu entre-temps n'a plus d'objet.
-                let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
+                // Après l'arrêt de toute tentative : un jeton obtenu pendant la déconnexion n'a plus
+                // d'objet. FIX:01M46G7Z0ZP43T53M2F5KG4VKS — sauf si une connexion est déjà passée
+                // (le carnet ne dit plus « déconnecté ») : le jeton du coffre est alors le sien, et
+                // la tâche est seulement en retard sur la commande.
+                if !self.erase_token_if_signed_out() {
+                    let _ = self.internal_tx.try_send(Internal::EraseToken);
+                }
             }
             Command::Execute {
                 key,
@@ -524,7 +532,28 @@ impl Runner {
             Internal::OpResponse { id, result } => self.on_op_response(id, result).await,
             Internal::Lookup { id, lookup } => self.on_lookup(id, lookup),
             Internal::NotSent { id, slow } => self.on_not_sent(&id, slow),
+            Internal::EraseToken => {
+                if !self.erase_token_if_signed_out() {
+                    // Une connexion ou une déconnexion tient le verrou : on réessaie dans un instant,
+                    // sans jamais attendre le verrou (celui qui le tient peut attendre cette boucle).
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    let _ = self.internal_tx.try_send(Internal::EraseToken);
+                }
+            }
         }
+    }
+
+    /// Efface le jeton si le carnet dit encore « déconnecté », LECTURE ET EFFACEMENT sous le verrou
+    /// d'écriture du serveur, le même que celui de `login` qui range son jeton PUIS lève « déconnecté » :
+    /// une connexion ne peut plus s'intercaler. Faux si le verrou est pris (à refaire).
+    fn erase_token_if_signed_out(&self) -> bool {
+        let Ok(_guard) = self.shared.writers.clone().try_lock_owned() else {
+            return false;
+        };
+        if self.shared.record().signed_out {
+            let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
+        }
+        true
     }
 
     async fn on_heartbeat(&mut self) {

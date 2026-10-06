@@ -444,7 +444,17 @@ impl LinkManager {
             .list()
             .await
             .map_err(|e| LinkError::Store(e.0))?;
-        for record in records {
+        for mut record in records {
+            // FIX:01M46G800Z47XQ8R64G2MDC4NP — « se souvenir » sans mot de passe au coffre (application tuée
+            // pendant l'ajout) : le carnet ne le promet plus (docs/bugs/FIX-01M46G800Z47XQ8R64G2MDC4NP.md)
+            if record.remember
+                && matches!(deps.vault.get(&record.id, SecretKind::Password), Ok(None))
+            {
+                record.remember = false;
+                if let Err(error) = deps.servers.save(&record).await {
+                    tracing::warn!(%error, "carnet : « se souvenir » non corrigé sur disque");
+                }
+            }
             let last_known = deps.snapshots.load(&record.id).await.ok().flatten();
             let start = initial_start(&deps, &record.id, record.signed_out);
             spawn_server(&deps, &registry, record, last_known, start);
@@ -854,6 +864,12 @@ impl LinkManager {
         }
         // Le serveur a pu être supprimé pendant l'appel : alors rien à écrire.
         let locked = self.lock(id).await?;
+        // FIX:01M46G7Z0ZP43T53M2F5KG4VKS — `login` remet « déconnecté » à faux sous ce même verrou en
+        // rangeant son jeton : s'il est passé pendant l'appel réseau, le jeton du coffre est le sien
+        // (docs/bugs/FIX-01M46G7Z0ZP43T53M2F5KG4VKS.md)
+        if !locked.shared.record().signed_out {
+            return Ok(());
+        }
         deps.vault
             .delete(id, SecretKind::Token)
             .map_err(|e| LinkError::Vault(e.0))?;

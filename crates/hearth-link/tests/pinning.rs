@@ -28,14 +28,25 @@ async fn bare_manager() -> (
     tempfile::TempDir,
     Arc<MemoryVault>,
 ) {
+    bare_manager_with(support::transport()).await
+}
+
+async fn bare_manager_with(
+    transport: hearth_link::adapters::HttpTransport,
+) -> (
+    hearth_link::LinkManager,
+    tempfile::TempDir,
+    Arc<MemoryVault>,
+) {
     let dir = tempfile::tempdir().unwrap();
     let vault = Arc::new(MemoryVault::new());
-    let manager = start_manager(
+    let manager = support::start_manager_with(
         dir.path(),
         vault.clone(),
         Arc::new(ScriptedNet::new()),
         Arc::new(JumpClock::new()),
         fast_config(),
+        transport,
     )
     .await;
     (manager, dir, vault)
@@ -72,7 +83,8 @@ async fn the_probe_reads_the_identity_and_the_fingerprint_without_authenticating
 
 #[tokio::test]
 async fn the_probe_of_something_that_is_not_an_agent_fails_cleanly() {
-    let (manager, _dir, _vault) = bare_manager().await;
+    // Délai de connexion court : c'est l'objet du test (un serveur muet).
+    let (manager, _dir, _vault) = bare_manager_with(support::short_transport()).await;
     // Rien n'écoute.
     let closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = closed.local_addr().unwrap().port();
@@ -106,12 +118,12 @@ async fn the_probe_of_something_that_is_not_an_agent_fails_cleanly() {
             held.push(socket);
         }
     });
-    let started = std::time::Instant::now();
-    assert!(manager.probe("127.0.0.1", silent_port).await.is_err());
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "la sonde ne bloque pas"
-    );
+    // « Ne bloque pas » : la sonde finit en erreur (son délai propre), sans assertion de durée ;
+    // `WAIT` n'est qu'un délai de garde.
+    let probed = tokio::time::timeout(WAIT, manager.probe("127.0.0.1", silent_port))
+        .await
+        .expect("la sonde ne bloque pas");
+    assert!(probed.is_err());
 }
 
 #[tokio::test]
@@ -286,8 +298,22 @@ async fn logout_closes_the_session_but_keeps_the_remembered_password() {
 #[tokio::test]
 async fn the_application_resumes_a_saved_session_after_a_restart() {
     let world = World::connected(Options::default()).await;
-    // Laisse le temps de sauvegarder la dernière vue, puis ferme l'application.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Attend que la dernière vue soit sauvegardée (fichier relu), puis ferme l'application.
+    let on_disk = hearth_link::adapters::FileSnapshotStore::new(world.dir.path().join("snapshots"));
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let saved = hearth_link::ports::SnapshotStore::load(&on_disk, &world.id)
+            .await
+            .unwrap();
+        if saved.is_some_and(|last| last.machine.is_some() && !last.history.is_empty()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "la dernière vue n'est jamais sauvegardée"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     world.manager.shutdown().await;
     drop(world.manager);
 
@@ -487,7 +513,12 @@ async fn changing_the_address_demands_a_new_fingerprint_and_keeps_the_remembered
 async fn forgetting_the_credentials_erases_the_password_but_keeps_the_session() {
     let world = World::connected(Options {
         remember: true,
-        ..Options::default()
+        // Seuils du lien hors d'atteinte : « Connecté » ne dépend pas de la vitesse du runner.
+        ..support::Options::with_thresholds(support::thresholds(
+            Some(support::never()),
+            false,
+            false,
+        ))
     })
     .await;
     assert!(
