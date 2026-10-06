@@ -1,6 +1,6 @@
 # Sessions : `/sessions`, `/me`
 
-Connexion, déconnexion et compte courant. Code : `crates/hearth-agent/src/entrypoint/http/sessions.rs` (handlers), `application/sessions.rs` (cas d'usage), `domain/{lockout,sessions,session_token}.rs` (règles). Types du fil : `hearth-proto::api::sessions`.
+Connexion, déconnexion, compte courant et défi de la clé d'appareil. Code : `crates/hearth-agent/src/entrypoint/http/sessions.rs` (handlers), `application/sessions.rs` (cas d'usage), `domain/{lockout,sessions,session_token}.rs` (règles). Types du fil : `hearth-proto::api::sessions`.
 
 Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir « Conventions » dans l'[index](./INDEX.md).
 
@@ -9,7 +9,22 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 - **Authentification** : aucune. **Rôle** : aucun.
 - **Suivi par clé** : non (la réponse contient un jeton, qu'on ne conserve pas en base).
 - **En-têtes** : `X-Hearth-Api`, `X-Hearth-Client: poste/version` (nom du poste, 128 caractères au plus, `inconnu` si absent).
-- **Corps** : `{ "username": "marie", "password": "…" }` (l'identifiant est insensible à la casse).
+- **Corps** : `{ "username": "marie", "password": "…" }` (l'identifiant est insensible à la casse), plus, en option, la preuve de la clé d'appareil :
+
+```json
+{
+  "username": "marie",
+  "password": "…",
+  "device": {
+    "algorithm": "ed25519",
+    "public_key": "base64 de 32 octets",
+    "challenge": "le défi reçu de POST /sessions/challenge, tel quel",
+    "signature": "base64 de 64 octets"
+  }
+}
+```
+
+  `device` est **optionnel** (HRT-22, ADR-0023, BR-TRUST-004 et 005). Absent, illisible (mauvaise forme), invalide (signature fausse, défi expiré, rejoué, forgé, d'un autre usage, d'un autre identifiant, d'une autre adresse, signé pour un autre serveur) : la connexion se déroule **exactement comme sans clé**, jamais une erreur propre à la clé. La clé ne change aucune décision d'accès : elle n'est prise en compte qu'**après** un mot de passe juste, dans la transaction de la connexion.
 
 ### Réponse `201`
 
@@ -17,9 +32,12 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 {
   "token": "9f2c…64 caractères hexadécimaux…",
   "expires_at": "2026-11-03T10:30:15.25Z",
-  "account": { "id": "01J9ZY0G3Q8M2K6W4T7V5N1B9D", "username": "marie", "role": "admin" }
+  "account": { "id": "01J9ZY0G3Q8M2K6W4T7V5N1B9D", "username": "marie", "role": "admin" },
+  "device": "enrolled"
 }
 ```
+
+- `device` (absent quand aucune clé n'a été prise en compte : pas de clé, preuve invalide, clé inscrite pour un autre compte) : `enrolled` (clé inscrite par cette connexion), `proven` (clé déjà inscrite, preuve valide), `limit` (le compte a déjà 8 postes : rien n'est inscrit, aucune éviction), `deferred` (preuve valide, inscription gelée pendant le mode attaque). Un client qui ne connaît pas le champ l'ignore.
 
 - `token` : 32 octets aléatoires du système, en hexadécimal minuscule. Rendu une seule fois. L'agent n'en garde que le SHA-256 (BR-RESIL-012). À envoyer en `Authorization: Bearer <token>`.
 - `expires_at` : fin de la session si elle reste inactive ; l'activité la repousse (30 jours glissants).
@@ -35,6 +53,25 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 | 503 | `BUSY` | Trop de vérifications de mot de passe en cours : réessayer après `Retry-After` (1 s). |
 | 429 | `TOO_MANY_ATTEMPTS` | Aussi quand plus de huit connexions attendent déjà pour la même adresse, ou quand l'agent a déjà 32 connexions en cours (24 pour une adresse inconnue du compte : 8 places sont réservées aux adresses connues, BR-CONN-020) : `details.retry_after_s = 1`. |
 | 426 | `INCOMPATIBLE_VERSION` | Version d'interface hors plage ; `details.upgrade` : `client` ou `agent` (BR-CONN-014). |
+
+## `POST /api/v1/sessions/challenge` : demander un défi pour la clé d'appareil
+
+- **Authentification** : aucune. **Rôle** : aucun. **Suivi par clé** : non. **Journal** : non. En-tête `X-Hearth-Api` exigé.
+- **Corps** : `{ "username": "marie", "purpose": "login" }`. `username` : la saisie, **existante ou non** ; `purpose` : `login` (connexion), `session` (ouverture du flux), `attack_mode` (activation ou désactivation du mode attaque, usage défini dès maintenant, utilisé par HRT-25).
+- **Réponse `200`**, identique que l'identifiant existe ou non (même code, mêmes en-têtes, même forme et même taille) :
+
+```json
+{ "challenge": "base64 de 56 octets", "expires_in_s": 60 }
+```
+
+- **Sans état et sans lecture en base** : le défi est `nonce (16) || émission (8, millisecondes monotones) || HMAC-SHA256 (32)`, recalculé à la vérification. Il vaut 60 secondes, **pour l'adresse qui l'a demandé** et pour l'usage demandé, et ne sert qu'**une fois** (consommé quand sa preuve est validée). Un redémarrage de l'agent invalide les défis en cours.
+- **Ce que le client signe** : le message de `hearth_proto::device_proof::signing_bytes` (préfixe `hearth-device-proof/1`, octet d'usage, empreinte SHA-256 du certificat du serveur épinglé, identifiant normalisé, défi, et pour les usages `session` et `attack_mode` l'empreinte du jeton). Voir [ADR-0023](../adr/ADR-0023-identite-d-appareil.md).
+
+| Statut | Code | Quand |
+|---|---|---|
+| 422 | `VALIDATION_ERROR` | Corps illisible, `purpose` inconnu, ou `X-Hearth-Api` absent. |
+| 426 | `INCOMPATIBLE_VERSION` | Version d'interface hors plage. |
+| 404 | `NOT_FOUND` | Agent d'avant cette fonction : le client en déduit « clé non prise en charge » et se connecte sans clé. |
 
 ## `DELETE /api/v1/sessions/current` : se déconnecter
 

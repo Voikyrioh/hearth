@@ -2,15 +2,18 @@
 
 Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête `Authorization: Bearer …`.
 
-24 endpoints : session, comptes, mesures, audit, mises à jour.
+27 endpoints : session, postes de confiance, comptes, mesures, audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
 | **Session** | GET | [`/hello`](./hello.md) | — | Identité de l'agent, plage de versions (l'empreinte se lit sur le certificat TLS) |
-| **Session** | POST | [`/sessions`](./sessions.md) | — | Login (username + password) → token |
+| **Session** | POST | [`/sessions`](./sessions.md) | — | Login (username + password, preuve de clé d'appareil optionnelle) → token |
+| **Session** | POST | [`/sessions/challenge`](./sessions.md) | — | Défi pour la clé d'appareil (sans état, 60 s, identique pour tout identifiant) |
 | **Session** | DELETE | [`/sessions/current`](./sessions.md) | user+ | Logout |
 | **Session** | GET | [`/me`](./sessions.md) | user+ | Compte courant + rôle |
 | **Session** | GET | [`/operations/{id}`](./operations.md) | user+ | Statut opération idempotente |
+| **Postes** | GET | [`/me/devices`](./devices.md) | user+ | Mes postes de confiance (nom, dates, dernière adresse, poste courant) |
+| **Postes** | DELETE | [`/me/devices/{id}`](./devices.md) | user+ | Retirer un poste (sa clé, son adresse retenue, ses sessions) |
 | **Mesures** | GET | [`/machine`](./machine.md) | user+ | Identité machine, specs hardware |
 | **Mesures** | GET | [`/stream`](./stream.md) | user+ (jeton dans le premier message) | WebSocket flux temps réel (snapshot + metrics chaque seconde) |
 | **Mesures** | GET | [`/metrics/history?window=1m\|5m\|1h`](./metrics.md) | user+ | Historique rééchantillonné |
@@ -56,4 +59,4 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - Client : `X-Hearth-Client: poste/version` (nom du poste, retenu avec la session).
 - Accès : chaque route est déclarée dans `ENDPOINTS` (`entrypoint/http/mod.rs`) avec son niveau (public, authentifié, administrateur, ou « premier message » pour le flux, qui s'authentifie lui-même) son suivi par clé et son action de journal (les refus et les échecs sont consignés par la couche d'accès) ; le routeur pose la couche d'accès depuis la table et un test de balayage vérifie que les routes réservées refusent l'appelant sans droit.
 - Réponses : succès = corps JSON propre à la route, sans enveloppe (ex. `/hello`) ; échec = `{ error: { code, message, details } }` (`hearth-proto::error::ErrorBody`).
-- Fiches de route détaillées : [mise à jour de l'agent](./agent-update.md), [hello](./hello.md), [sessions](./sessions.md), [comptes](./accounts.md), [opérations](./operations.md), [machine](./machine.md), [historique des mesures](./metrics.md), [flux temps réel](./stream.md), [journal](./audit.md).
+- Fiches de route détaillées : [mise à jour de l'agent](./agent-update.md), [hello](./hello.md), [sessions](./sessions.md), [postes de confiance](./devices.md), [comptes](./accounts.md), [opérations](./operations.md), [machine](./machine.md), [historique des mesures](./metrics.md), [flux temps réel](./stream.md), [journal](./audit.md).
