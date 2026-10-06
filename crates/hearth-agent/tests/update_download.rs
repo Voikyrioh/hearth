@@ -218,6 +218,7 @@ async fn proxy_child_probe() {
     );
 }
 
+// FIX:01M47XJXQ0GHV77FN4J6R1NXPZ
 #[test]
 fn an_environment_proxy_is_never_used_so_the_address_filter_cannot_be_bypassed() {
     // BR-UPDATE-027 : avec un proxy, le nom de l'hôte partirait au proxy qui le résoudrait lui-même,
@@ -233,6 +234,8 @@ fn an_environment_proxy_is_never_used_so_the_address_filter_cannot_be_bypassed()
         .env("https_proxy", &address)
         .env("HTTP_PROXY", &address)
         .env("ALL_PROXY", &address)
+        .env("http_proxy", &address)
+        .env("all_proxy", &address)
         .env_remove("NO_PROXY")
         .env_remove("no_proxy")
         .output()
