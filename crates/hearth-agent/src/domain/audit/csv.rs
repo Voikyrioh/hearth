@@ -24,19 +24,10 @@ const HEADER: [&str; 7] = [
     "Raison",
 ];
 
-/// Une valeur prête pour une cellule : neutralisée contre l'injection de formule, puis entre
-/// guillemets si elle contient le séparateur, un guillemet ou un saut de ligne.
+/// Une valeur prête pour une cellule : la neutralisation de l'injection de formule vit à UN seul
+/// endroit, `hearth_proto::api::audit_csv::field` (partagée avec la liaison cliente).
 pub fn field(value: &str) -> String {
-    let neutralized = if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
-        format!("'{value}")
-    } else {
-        value.to_owned()
-    };
-    if neutralized.contains([SEPARATOR, '"', '\n', '\r']) {
-        format!("\"{}\"", neutralized.replace('"', "\"\""))
-    } else {
-        neutralized
-    }
+    hearth_proto::api::audit_csv::field(value)
 }
 
 fn line(cells: &[String]) -> String {
