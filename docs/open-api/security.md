@@ -27,4 +27,4 @@ Voir [stream](./stream.md) : `{"type":"security","alert":{…},"attack_mode":{�
 
 ## Journal
 
-`security.alert` (« Attaque probable signalée ») : une entrée au début de l'épisode (cible « début de l'alerte », refusé « trop de tentatives, attente de N s », origine = la tentative qui l'a ouvert) et une à sa fin (cible « fin de l'alerte », réussi). Le compte est celui de l'identifiant visé ; **rien** pour un identifiant inexistant.
+`security.alert` (« Attaque probable signalée ») : une entrée au début de l'épisode (cible « début de l'alerte », refusé « trop de tentatives, attente de N s », origine = la tentative qui l'a ouvert) et une à sa fin (cible « fin de l'alerte (levée par l'agent) », réussi). Le compte est celui de l'identifiant visé ; **rien** pour un identifiant inexistant.
