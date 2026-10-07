@@ -59,6 +59,7 @@ Docker est requis (conteneurs jetables ; rien n'est installé sur le poste, jama
 ```sh
 cargo xtask agent         # binaire statique x86_64-unknown-linux-musl construit dans rust:1.95-alpine ; vérifié statique (file, readelf) ; taille et SHA-256 affichés ; sortie target/dist/hearth-agent
 cargo xtask e2e-install   # installation de bout en bout dans un conteneur Debian avec systemd (scénario deploy/e2e/scenario.sh) : install.sh, /hello, connexion, empreinte, réinstallation, désinstallation, purge, retour en arrière, installation gérée
+cargo xtask e2e-double-failure  # double panne de la mise à jour (HRT-27) sur le systemd jetable, avec le binaire de `agent` ; `deploy/e2e/double-failure-systemd.sh`
 cargo xtask e2e-update    # mise à jour de l'agent à distance de bout en bout (HRT-17) : clé minisign jetable, agent 0.1.0 puis 0.2.0, signature invalide, mise à jour réussie, agent muet (retour automatique), deuxième demande, superviseur tué après l'échange (HRT-27 : relancé par systemd, retour automatique sans geste) ; ~5 min. Double panne seule, sur un systemd quelconque (root, installe puis désinstalle l'agent) : `sudo sh deploy/e2e/double-failure-systemd.sh <hearth-agent>`
 cargo xtask shellcheck    # deploy/install.sh et les scénarios, shellcheck en conteneur
 ```

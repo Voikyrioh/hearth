@@ -134,6 +134,11 @@ jobs:
         run: cargo xtask e2e-install
       - name: Mise à jour de l'agent à distance de bout en bout (Debian + systemd, clé jetable)
         run: cargo xtask e2e-update
+      # La double panne de la mise à jour (HRT-27) sur le systemd jetable, avec le binaire construit
+      # ci-dessus : superviseur tué puis relancé, arrêt voulu jamais défait, reprises bornées, agent
+      # redémarré pendant l'attente de relance. Les `ok - …` de chaque section sont dans le journal.
+      - name: Double panne de la mise à jour de l'agent (Debian + systemd)
+        run: cargo xtask e2e-double-failure
       - name: Somme SHA-256 du binaire
         run: sha256sum hearth-agent > hearth-agent.sha256 && cat hearth-agent.sha256
         working-directory: target/dist

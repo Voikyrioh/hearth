@@ -93,6 +93,7 @@ pub fn run() -> Result<(), String> {
     crate::e2e::machine(
         &dist,
         "/deploy/e2e/scenario-update.sh",
+        &[],
         "journalctl -u hearth-agent -u hearth-agent-update --no-pager 2>/dev/null | tail -n 60 || true",
     )?;
     println!("mise à jour de l'agent à distance : vert");

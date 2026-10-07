@@ -36,6 +36,7 @@ pub fn run() -> Result<(), String> {
     machine(
         &root.join("target").join("dist"),
         "/deploy/e2e/scenario.sh",
+        &[],
         "journalctl -u hearth-agent --no-pager 2>/dev/null | tail -n 40 || true",
     )?;
     println!("bout en bout : vert");
@@ -43,9 +44,15 @@ pub fn run() -> Result<(), String> {
 }
 
 /// Démarre la machine jetable (`dist` monté sur `/dist`, `deploy/` sur `/deploy`, tous deux en
-/// lecture seule), y exécute `scenario` (un script de `/deploy`) ; si le scénario échoue, affiche
-/// `diagnostic` (une commande constante exécutée dans le conteneur). Le conteneur est supprimé.
-pub fn machine(dist: &Path, scenario: &str, diagnostic: &str) -> Result<(), String> {
+/// lecture seule), y exécute `scenario` (un script de `/deploy`) avec ces `arguments` ; si le
+/// scénario échoue, affiche `diagnostic` (une commande constante exécutée dans le conteneur). Le
+/// conteneur est supprimé.
+pub fn machine(
+    dist: &Path,
+    scenario: &str,
+    arguments: &[&str],
+    diagnostic: &str,
+) -> Result<(), String> {
     let root = docker::repo_root()?;
     let deploy = root.join("deploy");
 
@@ -93,7 +100,9 @@ pub fn machine(dist: &Path, scenario: &str, diagnostic: &str) -> Result<(), Stri
     wait_for_systemd(&name)?;
 
     println!("scénario...");
-    let result = docker::run(&args(&["exec", &name, "sh", scenario]));
+    let mut exec = args(&["exec", &name, "sh", scenario]);
+    exec.extend(arguments.iter().map(|argument| (*argument).to_owned()));
+    let result = docker::run(&exec);
     if result.is_err() {
         // Ce que dit le service, pour comprendre un échec.
         let _ = docker::run(&args(&["exec", &name, "sh", "-c", diagnostic]));
