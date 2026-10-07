@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE attack_mode\n             SET last_boot_id = ?, window_boot_id = ?, remote_reboot_boot_id = ?\n             WHERE id = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "ebf4876300d774465c8ac4cd7fbff4374ab17b233536bcfba2ceef042a81a414"
+}

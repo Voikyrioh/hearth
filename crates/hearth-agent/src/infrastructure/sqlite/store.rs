@@ -11,8 +11,8 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::convert::storage;
 use crate::application::ports::{
-    AccountTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx, OperationTx, SessionTx, Store,
-    StoreError, UnitOfWork,
+    AccountTx, AttackModeTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx, OperationTx,
+    SessionTx, Store, StoreError, UnitOfWork,
 };
 
 /// Ressource nommée par les erreurs d'ouverture et de validation d'une unité de travail : le
@@ -65,6 +65,10 @@ impl UnitOfWork for SqliteUnitOfWork {
     }
 
     fn devices(&mut self) -> &mut dyn DeviceTx {
+        self
+    }
+
+    fn attack_mode(&mut self) -> &mut dyn AttackModeTx {
         self
     }
 

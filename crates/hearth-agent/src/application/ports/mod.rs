@@ -5,8 +5,10 @@
 
 mod account_repo;
 mod admin_accounts;
+mod attack_mode_repo;
 mod audit_repo;
 mod audit_sink;
+mod boot_info;
 mod clock;
 mod device_repo;
 mod gpu_probe;
@@ -31,8 +33,10 @@ mod update;
 
 pub use account_repo::{AccountRepo, AccountTx};
 pub use admin_accounts::{AdminAccounts, AdminAccountsError, AdminCredential};
+pub use attack_mode_repo::{AttackModeRepo, AttackModeTx};
 pub use audit_repo::{AuditRepo, AuditTx};
 pub use audit_sink::{AuditFeed, AuditSink};
+pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use device_repo::{DeviceRepo, DeviceTx};
 pub use gpu_probe::GpuProbe;

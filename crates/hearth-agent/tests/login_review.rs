@@ -109,9 +109,11 @@ async fn an_attack_of_hours_with_a_new_address_each_time_leaves_a_journal_bounde
     // par fenêtre, une synthèse « N tentatives depuis M adresses » au-delà, la fenêtre de la
     // famille qui s'allonge. Cette attaque change d'adresse à CHAQUE tentative ; le nombre d'entrées
     // est borné par le TEMPS, pas par le nombre de tentatives (le test d'avant : 541 ; sans plafond
-    // par famille : 814). Valeur exacte, déterministe.
-    assert!(
-        records.len() < 541,
+    // par famille : 814). Valeur exacte, déterministe (horloge simulée) : 329 entrées, bien sous les 541
+    // d'avant (suivi de la revue de la PR #26, rendu exact avec HRT-25).
+    assert_eq!(
+        records.len(),
+        329,
         "{} entrées pour {} tentatives",
         records.len(),
         minutes * per_minute

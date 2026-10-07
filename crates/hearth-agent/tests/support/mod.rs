@@ -16,11 +16,12 @@ pub mod ws;
 
 use async_trait::async_trait;
 use hearth_agent::application::accounts::{AccountService, AccountView};
+use hearth_agent::application::attack_mode::AttackModeService;
 use hearth_agent::application::audit::AuditService;
 use hearth_agent::application::maintenance::MaintenanceService;
 use hearth_agent::application::operations::OperationService;
 use hearth_agent::application::ports::{
-    AuditFeed, Clock, HashError, IdGen, PasswordHasher, Store, TokenGen,
+    AuditFeed, BootInfo, Clock, HashError, IdGen, PasswordHasher, SecurityFeed, Store, TokenGen,
 };
 use hearth_agent::application::security::SecurityService;
 use hearth_agent::application::sessions::{ClientInfo, SessionService};
@@ -36,8 +37,9 @@ use hearth_agent::infrastructure::audit_feed::BroadcastAuditFeed;
 use hearth_agent::infrastructure::crypto::{HmacChallengeCrypto, RingProofVerifier};
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::{
-    Database, SqliteAccountRepo, SqliteAuditRepo, SqliteDeviceRepo, SqliteKnownAddressRepo,
-    SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
+    Database, SqliteAccountRepo, SqliteAttackModeRepo, SqliteAuditRepo, SqliteDeviceRepo,
+    SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo,
+    SqliteStore,
 };
 use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
@@ -82,6 +84,38 @@ impl hearth_agent::application::ports::ProofVerifier for CountingVerifier {
     fn verify(&self, algorithm: &str, public_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.inner.verify(algorithm, public_key, message, signature)
+    }
+}
+
+/// Ce que le « noyau » des tests dit du démarrage : un identifiant et un temps écoulé que le test
+/// pilote (jamais le vrai `/proc`). Au départ : le démarrage `boot-1`, la machine tourne depuis dix
+/// heures, donc aucune fenêtre de redémarrage.
+pub struct TestBoot {
+    id: Mutex<Option<String>>,
+    uptime: Mutex<Duration>,
+}
+
+impl TestBoot {
+    pub fn set_id(&self, id: Option<&str>) {
+        *self.id.lock().unwrap() = id.map(str::to_owned);
+    }
+
+    pub fn set_uptime(&self, uptime: Duration) {
+        *self.uptime.lock().unwrap() = uptime;
+    }
+
+    pub fn uptime(&self) -> Duration {
+        *self.uptime.lock().unwrap()
+    }
+}
+
+impl BootInfo for TestBoot {
+    fn boot_id(&self) -> Option<String> {
+        self.id.lock().unwrap().clone()
+    }
+
+    fn uptime(&self) -> Duration {
+        *self.uptime.lock().unwrap()
     }
 }
 
@@ -191,6 +225,11 @@ pub struct Env {
     pub security: Arc<SecurityService>,
     pub monotonic: Arc<TestMonotonic>,
     pub verifier: Arc<CountingVerifier>,
+    /// Le mode attaque, branché comme en production sur `sessions` et `security` (HRT-25) ; éteint
+    /// tant qu'un test ne l'allume pas.
+    pub attack: Arc<AttackModeService>,
+    /// Le démarrage du « noyau » des tests.
+    pub boot: Arc<TestBoot>,
 }
 
 pub const CLIENT_ADDR: &str = "10.0.0.7";
@@ -268,15 +307,34 @@ pub async fn env() -> Env {
         hearth_proto::fingerprint::Fingerprint::from_bytes(SERVER_FINGERPRINT),
         trail.clone(),
     ));
-    let security = Arc::new(SecurityService::new(
-        Arc::new(SqliteLoginAttemptRepo::new(db.pool().clone())),
-        accounts.clone(),
-        Arc::new(SqliteDeviceRepo::new(db.pool().clone())),
+    let security_feed: Arc<dyn SecurityFeed> =
+        Arc::new(hearth_agent::infrastructure::security_feed::BroadcastSecurityFeed::new());
+    let boot = Arc::new(TestBoot {
+        id: Mutex::new(Some("boot-1".to_owned())),
+        uptime: Mutex::new(Duration::hours(10)),
+    });
+    let attack = Arc::new(AttackModeService::new(
+        Arc::new(SqliteAttackModeRepo::new(db.pool().clone())),
         store.clone(),
         clock.clone(),
+        monotonic.clone(),
+        boot.clone(),
+        ids.clone(),
         trail.clone(),
-        Arc::new(hearth_agent::infrastructure::security_feed::BroadcastSecurityFeed::new()),
+        security_feed.clone(),
     ));
+    let security = Arc::new(
+        SecurityService::new(
+            Arc::new(SqliteLoginAttemptRepo::new(db.pool().clone())),
+            accounts.clone(),
+            Arc::new(SqliteDeviceRepo::new(db.pool().clone())),
+            store.clone(),
+            clock.clone(),
+            trail.clone(),
+            security_feed,
+        )
+        .with_attack(attack.clone()),
+    );
     let sessions = Arc::new(
         SessionService::new(
             accounts,
@@ -292,7 +350,8 @@ pub async fn env() -> Env {
             audit_sink.clone(),
         )
         .with_trust(trust.clone())
-        .with_security(security.clone()),
+        .with_security(security.clone())
+        .with_attack(attack.clone()),
     );
     let operations = Arc::new(OperationService::new(
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
@@ -321,6 +380,8 @@ pub async fn env() -> Env {
         security,
         monotonic,
         verifier,
+        attack,
+        boot,
     }
 }
 

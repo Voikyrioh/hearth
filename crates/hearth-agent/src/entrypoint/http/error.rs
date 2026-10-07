@@ -100,7 +100,9 @@ impl From<AuthError> for ApiError {
                 ErrorCode::Unauthenticated,
                 "Jeton de session absent ou illisible",
             ),
-            AuthError::Ended(SessionEnd::Expired) => Self::new(
+            // La même réponse, au mot près, qu'une session expirée : rien ne dit que le mode attaque est
+            // actif (BR-TRUST-013).
+            AuthError::Ended(SessionEnd::Expired) | AuthError::NotRecognized => Self::new(
                 ErrorCode::SessionExpired,
                 "Session expirée. Reconnecte-toi.",
             ),

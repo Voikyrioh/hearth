@@ -189,7 +189,15 @@ async fn serve(
     //    abonnement (BR-TRUST-008) : on s'abonne AVANT de le lire, aucun changement ne se perd.
     let mut security = Some(state.security.subscribe());
     let mut last_security: Option<SecurityView> = None;
-    if !push_security(socket, state, &session, &mut last_security).await {
+    if !push_security(
+        socket,
+        state,
+        &session,
+        &mut last_security,
+        Push::Everything,
+    )
+    .await
+    {
         return None;
     }
     let mut subscriptions = Subscriptions::default();
@@ -266,7 +274,7 @@ async fn serve(
                 // Un changement (ou des tics perdus) : la connexion relit SON état et n'envoie que
                 // ce qui a changé pour elle.
                 Ok(()) | Err(RecvError::Lagged(_)) => {
-                    if !push_security(socket, state, &session, &mut last_security).await {
+                    if !push_security(socket, state, &session, &mut last_security, Push::Everything).await {
                         return None;
                     }
                 }
@@ -299,9 +307,23 @@ async fn serve(
                         let role_changed = session.account.role != current.account.role;
                         session = current;
                         // Le rôle décide de ce que l'alerte montre (le nombre des autres comptes) :
-                        // un rôle changé pendant le flux se relit tout de suite.
-                        if role_changed
-                            && !push_security(socket, state, &session, &mut last_security).await
+                        // un rôle changé pendant le flux se relit tout de suite. Le mode attaque peut
+                        // avoir changé ailleurs (la sous-commande `attack-mode off`, un autre
+                        // processus, ne passe pas par le canal de cet agent) : il se relit à chaque
+                        // contrôle et ne part que s'il a changé. L'alerte, elle, ne part que sur un
+                        // tic du canal (son entrée de début est écrite avant).
+                        if !push_security(
+                            socket,
+                            state,
+                            &session,
+                            &mut last_security,
+                            if role_changed {
+                                Push::Everything
+                            } else {
+                                Push::AttackModeChange
+                            },
+                        )
+                        .await
                         {
                             return None;
                         }
@@ -326,11 +348,32 @@ async fn serve(
                         send(socket, &settings, &ServerMessage::Session { kind }).await;
                         return policy("session terminée");
                     }
+                    // Mode attaque : la session n'est plus reconnue depuis ce poste (ni adresse
+                    // retenue ni clé prouvée). Le même avis, mot pour mot, qu'une session expirée : rien
+                    // ne dit que le mode est actif. La session n'est pas détruite (BR-TRUST-013).
+                    Err(AuthError::NotRecognized) => {
+                        send(
+                            socket,
+                            &settings,
+                            &ServerMessage::Session { kind: SessionNotice::Expired },
+                        )
+                        .await;
+                        return policy("session terminée");
+                    }
                     Err(error) => tracing::warn!(%error, "vérification de la session du flux impossible"),
                 }
             }
         }
     }
+}
+
+/// Ce qui déclenche l'envoi de l'état de sécurité.
+#[derive(Clone, Copy)]
+enum Push {
+    /// Tout changement de l'état de ce compte (le premier envoi, un tic du canal, un rôle changé).
+    Everything,
+    /// Seulement un changement du mode attaque : le contrôle périodique de la session (HRT-25).
+    AttackModeChange,
 }
 
 /// Envoie l'état de sécurité de ce compte s'il a changé depuis le dernier envoi ; `false` si le
@@ -340,6 +383,7 @@ async fn push_security(
     state: &AppState,
     session: &CurrentSession,
     last: &mut Option<SecurityView>,
+    trigger: Push,
 ) -> bool {
     let snapshot = match state
         .security
@@ -357,6 +401,13 @@ async fn push_security(
         return true;
     };
     if last.as_ref() == Some(&view) {
+        return true;
+    }
+    if matches!(trigger, Push::AttackModeChange)
+        && last
+            .as_ref()
+            .is_some_and(|sent| sent.attack_mode == view.attack_mode)
+    {
         return true;
     }
     let sent = send(

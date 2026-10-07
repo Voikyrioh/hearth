@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO attack_trials (activation_id, account_id, kind, subject, used_at, outcome)\n             VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "172e939bacca01a7d66218545240a558ecbecc71ddc9aec458a574e4bb580fbb"
+}
