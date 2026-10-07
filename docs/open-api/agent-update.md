@@ -1,6 +1,6 @@
 # Mise à jour de l'agent : `/agent/update`, `/agent/update/last`
 
-Mettre l'agent à jour à distance, avec retour arrière automatique (HRT-17). Types : `hearth-proto::api::update`. Code : `crates/hearth-agent/src/entrypoint/http/update.rs`, cas d'usage `application/update.rs`, superviseur `application/update_supervisor.rs`. Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024` et `BR-UPDATE-027` à `BR-UPDATE-029` (`docs/business-rules/`). Décisions : ADR-0008, ADR-0014. Procédure d'exploitation : `docs/runbooks/mettre-a-jour-agent.md`.
+Mettre l'agent à jour à distance, avec retour arrière automatique (HRT-17). Types : `hearth-proto::api::update`. Code : `crates/hearth-agent/src/entrypoint/http/update.rs`, cas d'usage `application/update.rs`, superviseur `application/update_supervisor.rs`. Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024` et `BR-UPDATE-027` à `BR-UPDATE-034` (`docs/business-rules/`). Décisions : ADR-0008, ADR-0014. Procédure d'exploitation : `docs/runbooks/mettre-a-jour-agent.md`.
 
 La mise à jour s'exécute **côté serveur** : `POST` répond `202` tout de suite, le client suit l'avancement par le flux (sujet `update`) ou par `GET /agent/update`, et lit le résultat par `GET /agent/update/last` quand il revient après une coupure ou un redémarrage de l'agent.
 

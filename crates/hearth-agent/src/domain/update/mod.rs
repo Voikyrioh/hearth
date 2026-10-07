@@ -9,7 +9,7 @@
 mod orphan;
 mod progress;
 mod record;
-mod rollback;
+mod resume;
 mod space;
 mod supervise;
 mod target;
@@ -17,7 +17,10 @@ mod target;
 pub use orphan::{Leftovers, Orphan, classify_orphan};
 pub use progress::PercentTracker;
 pub use record::{Job, Requester, SupervisorState, UpdateRecord};
-pub use rollback::{RollbackStep, rollback_plan};
+pub use resume::{
+    BinaryBackup, DatabaseCopy, Entry, MAX_RESUMES, Marker, Phase, RollbackAct, RollbackFacts,
+    Stored, binary_backup, binary_restored, database_copy, enter, rollback_step, swap_done,
+};
 pub use space::{SpaceRefusal, check_space, required_space};
 pub use supervise::{Answer, CHECK_POLL, CHECK_WINDOW, STOP_GRACE, Verdict, check_verdict};
 pub use target::{

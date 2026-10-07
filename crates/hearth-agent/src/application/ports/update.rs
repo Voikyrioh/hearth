@@ -13,7 +13,7 @@ use thiserror::Error;
 use tokio::sync::broadcast;
 
 use crate::domain::install::Version;
-use crate::domain::update::{Job, SupervisorState, UpdateRecord};
+use crate::domain::update::{Job, Marker, SupervisorState, UpdateRecord};
 
 #[derive(Debug, Error)]
 pub enum FetchError {
@@ -93,6 +93,17 @@ pub trait UpdateHost: Send + Sync {
     /// Un superviseur travaille (verrou tenu).
     fn supervisor_running(&self) -> bool;
 
+    /// Un superviseur sera relancé par le système : son unité transitoire existe encore (en attente
+    /// de relance après un échec) et un marqueur d'étape vivant, sous sa borne de reprises, dit qu'il
+    /// a du travail. Le verrou est libre entre la mort du superviseur et sa relance : seul l'agent qui
+    /// démarre à cet instant le voit (HRT-27, BR-UPDATE-030). Après un redémarrage de la machine,
+    /// l'unité n'existe plus : faux.
+    fn supervisor_pending(&self) -> bool;
+
+    /// La copie du superviseur déjà déposée dans `update/`, s'il y en a une : une reprise la garde (c'est
+    /// l'ancien binaire, pas celui qu'on juge) au lieu de la réécrire avec le binaire courant.
+    fn existing_supervisor(&self) -> Option<PathBuf>;
+
     /// Prend le verrou du superviseur, ou `AlreadyRunning`.
     fn take_supervisor_lock(&self) -> Result<SupervisorLock, UpdateHostError>;
 
@@ -100,6 +111,9 @@ pub trait UpdateHost: Send + Sync {
     fn write_last(&self, record: &UpdateRecord) -> Result<(), UpdateHostError>;
 
     fn read_job(&self) -> Result<Option<Job>, UpdateHostError>;
+
+    /// Retire le marqueur d'étape : une nouvelle mise à jour repart de zéro.
+    fn discard_marker(&self);
 
     /// Ce chemin existe-t-il (la sauvegarde de l'ancien binaire, par exemple) ?
     fn path_exists(&self, path: &Path) -> bool;
@@ -119,7 +133,9 @@ pub trait UpdateHost: Send + Sync {
     fn database_copy_present(&self) -> bool;
 
     /// Remet la base telle qu'elle était avant l'échange (service arrêté) : copie dans un fichier
-    /// voisin puis renommage, **puis la copie est retirée** : elle ne sert qu'une fois.
+    /// voisin puis renommage. **La copie est gardée** jusqu'à la fin du travail (`clear_staging`) : le
+    /// superviseur peut la remettre une seconde fois (machine redémarrée au milieu du retour arrière) ;
+    /// c'est lui, par son marqueur, qui ne la remet plus une fois l'ancien binaire revenu.
     fn restore_database(&self) -> Result<(), UpdateHostError>;
 
     /// Retire un fichier (la sauvegarde de l'ancien binaire d'un retour arrière déjà fait).
@@ -127,6 +143,16 @@ pub trait UpdateHost: Send + Sync {
 
     /// Retire `state.json` et `job.json` (illisibles), sans toucher aux copies (binaire, base).
     fn discard_work_files(&self);
+
+    /// Le marqueur d'étape du superviseur (HRT-27). Illisible : `Err` (jamais confondu avec absent).
+    fn read_marker(&self) -> Result<Option<Marker>, UpdateHostError>;
+
+    /// Écrit le marqueur de façon atomique et durable : fichier voisin, `fsync` du fichier, renommage,
+    /// `fsync` du dossier. Un marqueur n'est jamais lu à moitié écrit.
+    fn write_marker(&self, marker: &Marker) -> Result<(), UpdateHostError>;
+
+    /// Ces deux fichiers ont-ils exactement le même contenu ? Faux si l'un ne se lit pas.
+    fn same_content(&self, a: &Path, b: &Path) -> bool;
 
     fn read_state(&self) -> Result<Option<SupervisorState>, UpdateHostError>;
     fn write_state(&self, state: &SupervisorState) -> Result<(), UpdateHostError>;

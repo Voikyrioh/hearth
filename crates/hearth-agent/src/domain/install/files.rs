@@ -54,6 +54,9 @@ pub const UPDATE_SUPERVISOR_FILE: &str = "supervisor";
 pub const UPDATE_JOB_FILE: &str = "job.json";
 /// Où en est le superviseur (étape en cours).
 pub const UPDATE_STATE_FILE: &str = "state.json";
+/// Le marqueur d'étape du superviseur (HRT-27) : jusqu'où il est allé, pour qu'une reprise continue
+/// sans rien refaire. Écrit par un fichier voisin puis un renommage, `fsync` du fichier et du dossier.
+pub const UPDATE_PHASE_FILE: &str = "phase.json";
 /// Le dernier résultat, qui survit au redémarrage.
 pub const UPDATE_LAST_FILE: &str = "last.json";
 /// Verrou tenu par le superviseur tant qu'il travaille (relâché par le système s'il meurt).
@@ -64,11 +67,12 @@ pub const UPDATE_DB_BACKUP_FILE: &str = "hearth.db.before";
 pub const UPDATE_WAL_BACKUP_FILE: &str = "hearth.db-wal.before";
 
 /// Ce que la mise à jour écrit dans `UPDATE_DIR` (retiré par la désinstallation avec purge).
-pub const UPDATE_FILES: [&str; 8] = [
+pub const UPDATE_FILES: [&str; 9] = [
     UPDATE_STAGED_FILE,
     UPDATE_SUPERVISOR_FILE,
     UPDATE_JOB_FILE,
     UPDATE_STATE_FILE,
+    UPDATE_PHASE_FILE,
     UPDATE_LAST_FILE,
     UPDATE_LOCK_FILE,
     UPDATE_DB_BACKUP_FILE,

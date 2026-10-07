@@ -1,6 +1,6 @@
 # Mettre l'agent à jour à distance
 
-Procédure d'exploitation de la mise à jour de l'agent (HRT-17). Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024`, `BR-UPDATE-027` à `BR-UPDATE-029`. Décisions : ADR-0008, ADR-0014. Contrat : `docs/open-api/agent-update.md`.
+Procédure d'exploitation de la mise à jour de l'agent (HRT-17). Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024`, `BR-UPDATE-027` à `BR-UPDATE-034`. Décisions : ADR-0008, ADR-0014. Contrat : `docs/open-api/agent-update.md`.
 
 ## En bref
 
@@ -48,7 +48,7 @@ Le client (HRT-17, lot interface) propose « Mettre à jour l'agent » quand la 
 
 - Depuis le client : carte « État du serveur : {nom} » des réglages, étapes `Téléchargement X %`, `Vérification…`, `Installation…`, `Redémarrage…`, `Contrôle…`.
 - Sur le serveur : `journalctl -u hearth-agent -u hearth-agent-update -f` (le superviseur est l'unité transitoire `hearth-agent-update`).
-- État : `GET /api/v1/agent/update` (en cours, étape) et `GET /api/v1/agent/update/last` (résultat, lisible après un redémarrage). Fichiers : `/var/lib/hearth/update/` (`last.json`, `state.json`, `job.json`).
+- État : `GET /api/v1/agent/update` (en cours, étape) et `GET /api/v1/agent/update/last` (résultat, lisible après un redémarrage). Fichiers : `/var/lib/hearth/update/` (`last.json`, `state.json`, `job.json`, `phase.json` : l'étape du superviseur).
 - Journal d'activité : action « Mise à jour de l'agent », avec qui l'a demandée et le résultat.
 
 ## Résultats et que faire
@@ -66,7 +66,26 @@ Le client (HRT-17, lot interface) propose « Mettre à jour l'agent » quand la 
 
 ## Mise à jour interrompue (redémarrage du serveur, agent ou superviseur tué)
 
-Au démarrage, l'agent conclut tout seul ce qui était en cours (BR-UPDATE-028) : avant l'échange des binaires, résultat `failed` / `interrupted` et dépôt nettoyé ; après l'échange, un superviseur de reprise contrôle le binaire en place et, s'il ne tient pas, remet l'ancien binaire **et la base d'avant** (BR-UPDATE-029). Le résultat se lit comme les autres (`GET /agent/update/last`) et est au journal. Cas que l'agent ne peut pas conclure : le nouveau binaire ne démarre pas du tout (personne ne tourne) : voir « Reprise à la main ».
+Au démarrage, l'agent conclut tout seul ce qui était en cours (BR-UPDATE-028) : avant l'échange des binaires, résultat `failed` / `interrupted` et dépôt nettoyé ; après l'échange, un superviseur de reprise reprend là où le précédent s'est arrêté (son marqueur `update/phase.json`), contrôle le binaire en place et, s'il ne tient pas, remet l'ancien binaire **et la base d'avant** (BR-UPDATE-029, 032, 034). Le résultat se lit comme les autres (`GET /agent/update/last`) et est au journal. Cas que l'agent ne peut pas conclure : le nouveau binaire ne démarre pas du tout **après un redémarrage de la machine** (personne ne tourne) : voir « Double panne ».
+
+## Double panne : le superviseur est tué et le nouveau binaire ne démarre pas (HRT-27)
+
+**Ce qui se passe tout seul.** Le superviseur tourne dans une unité transitoire `hearth-agent-update` qui est relancée par systemd s'il tombe en échec (`Restart=on-failure`, 2 s d'attente, au plus 6 démarrages en 10 minutes). Relancé, il lit `update/phase.json`, reprend là où il s'est arrêté et conclut : si le nouveau binaire ne répond pas, il remet l'ancien binaire et la base d'avant, relance le service, écrit `rolled_back` / `no_answer`. Aucun geste. Dans le journal : `journalctl -u hearth-agent-update` (« reprise du superviseur de mise à jour là où il s'est arrêté »). Une reprise repart du début du contrôle de 60 s.
+
+**Ce qui n'est jamais défait.** Un `systemctl stop hearth-agent` (ou toute commande d'arrêt) pendant la mise à jour : le superviseur voit le service arrêté, journalise « service arrêté à la main », sort sans rien défaire et garde l'ancien binaire, la copie de la base et le travail ; au prochain `systemctl start hearth-agent`, l'agent reprend la mise à jour comme après un redémarrage (BR-UPDATE-028). Hors mise à jour, rien ne relance jamais le service : aucune minuterie systemd, aucun `OnFailure=`. `systemctl stop hearth-agent-update` arrête le superviseur proprement : systemd ne le relance pas.
+
+**Un seul arbitre.** Tant que l'unité transitoire attend de relancer le superviseur, l'agent qui (re)démarre à cet instant surveille et ne touche à rien. Après un redémarrage de la machine, l'unité n'existe plus et c'est l'agent qui reprend.
+
+**Pas de boucle.** Au plus 3 reprises par mise à jour (compteur écrit sur le disque, il survit à l'unité transitoire ; un arrêt voulu ne compte pas). La suivante abandonne : « reprise de la mise à jour abandonnée, copies gardées » est journalisé au plus une fois (jamais deux), le résultat `failed` / `rollback_failed` est écrit et annoncé, `update/phase.json` dit `abandoned`, `job.json` et `state.json` sont retirés, l'ancien binaire (`.hearth-agent.previous`) et la copie de la base (`update/hearth.db.before`) sont **gardés**, le service est relancé tel quel (un couple binaire et base cohérent). Plus rien ne relance. Reprise à la main : « Reprise à la main » ci-dessous. Pour une nouvelle mise à jour après un abandon : remettre l'état à la main d'abord, ou poser la version voulue par `install.sh --binary` ; l'agent retire alors `phase.json` avant d'écrire le nouveau travail.
+
+**Cas d'abandon sans reprise** (copies gardées, rien d'autre n'est touché) : marqueur illisible ou d'une autre version (`phase.json` abîmé : ne le supprime pas avant d'avoir lu `journalctl` ; sans lui l'étape atteinte est inconnue), copie de la base ou sauvegarde de l'ancien binaire disparue, remise de la base impossible (disque plein : libère de la place, puis reprise à la main). L'ancien binaire n'est jamais remis devant une base qui n'a pas pu l'être.
+
+**Ce qui est couvert, et par quoi.** La CI (`agent-install`, `cargo xtask e2e-update`, Debian + systemd 252) joue la section 7 de `scenario-update.sh` : superviseur tué après l'échange, relancé par systemd, retour automatique. Les tests de l'agent (matrice de morts à chaque point, reprises bornées, abandon, arrêt voulu avec un service simulé, arbitre unique) tournent dans le job Rust. `deploy/e2e/double-failure-systemd.sh` (arrêt voulu et abandon par morts répétées sur un vrai systemd, agent redémarré dans la fenêtre de relance) est **lancé à la main sous systemd réel, dernière passe le 2026-10-07 sous WSL2 systemd 255** ; la CI ne le joue pas (suivi HRT-18). La matrice de morts prouve l'ordre des écritures et qu'une étape se rejoue (mort simulée dans le même processus) ; elle ne prouve pas la durabilité (coupure de courant, `fsync` oublié).
+
+**Ce qui reste manuel.**
+- **Le serveur a redémarré en pleine mise à jour ET le nouveau binaire ne démarre pas.** L'unité transitoire n'existe plus et aucun agent ne tourne : reprise à la main (« Reprise à la main » : `.hearth-agent.previous` et `update/hearth.db.before` sont encore là). Si le nouveau binaire démarre, l'agent reprend le marqueur et conclut seul (BR-UPDATE-034).
+- **Installation gérée par le système (NixOS) :** il n'y a pas de mise à jour à distance, donc pas de superviseur ni de reprise ; l'agent n'écrit aucune unité et le mécanisme n'en modifie aucune. Une mise à jour qui échoue se règle par la configuration du système (retour à la génération précédente).
+- **Ce qui a été fait pendant la mise à jour est perdu par un retour arrière, mode attaque compris.** L'entrée du journal d'activité du retour arrière le dit : « Un changement du mode attaque fait depuis le début de la mise à jour a pu être annulé ». Le mode attaque activé pendant les 60 s de contrôle d'un retour arrière est perdu (le retour arrière remet la base d'avant, comme les comptes et le journal écrits pendant cette fenêtre) ; l'état se relit avec `hearth-agent attack-mode status`, à réactiver depuis un client si besoin (ADR-0025).
 
 ## Reprise à la main (`rollback_failed`, ou agent mort après une mise à jour)
 
@@ -81,7 +100,7 @@ systemctl start hearth-agent && curl -sk https://127.0.0.1:7341/api/v1/hello
 
 Après la reprise à la main, **redémarre l'agent** (`systemctl restart hearth-agent`) : il constate que la version d'avant tourne, conclut la mise à jour en `rolled_back`, retire la sauvegarde de l'ancien binaire et la copie de la base, **sans jamais toucher à la base** (les comptes et le journal écrits depuis sont gardés). Ne remets la copie de la base que si l'agent d'avant refuse de démarrer.
 
-Si la base a été migrée par la nouvelle version, remettre aussi sa copie d'avant l'échange (`/var/lib/hearth/update/hearth.db.before`, et `hearth.db-wal.before` s'il existe), service arrêté : `cp -p /var/lib/hearth/update/hearth.db.before /var/lib/hearth/hearth.db` et supprimer `hearth.db-wal` et `hearth.db-shm`. Sans cette copie (retour arrière déjà fait par le superviseur : elle est retirée), l'ancien binaire refuse de démarrer sur une base migrée (« migration inconnue » dans `journalctl -u hearth-agent`) : remettre la **nouvelle** version (`install.sh --binary`). Une mise à jour interrompue par un redémarrage du serveur : relire `/api/v1/agent/update` ; si `in_progress` reste vrai plus de quelques minutes, `systemctl status hearth-agent-update` puis `systemctl stop hearth-agent-update`.
+Si la base a été migrée par la nouvelle version, remettre aussi sa copie d'avant l'échange (`/var/lib/hearth/update/hearth.db.before`, et `hearth.db-wal.before` s'il existe), service arrêté : `cp -p /var/lib/hearth/update/hearth.db.before /var/lib/hearth/hearth.db` et supprimer `hearth.db-wal` et `hearth.db-shm`. Sans cette copie (le travail est conclu : elle est retirée avec lui), l'ancien binaire refuse de démarrer sur une base migrée (« migration inconnue » dans `journalctl -u hearth-agent`) : remettre la **nouvelle** version (`install.sh --binary`). Une mise à jour interrompue par un redémarrage du serveur : relire `/api/v1/agent/update` ; si `in_progress` reste vrai plus de quelques minutes, `systemctl status hearth-agent-update` puis `systemctl stop hearth-agent-update`.
 
 ## Reprise vers une troisième version (ni l'ancienne ni la nouvelle)
 

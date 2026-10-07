@@ -13,7 +13,9 @@ use std::process::Stdio;
 use crate::domain::install::UNIT_TEMP_EXTENSION;
 use crate::infrastructure::install::scrub::scrubbed;
 
-use crate::application::ports::{ServiceError, ServiceKind, ServiceManager, ServiceSpec};
+use crate::application::ports::{
+    ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState,
+};
 
 pub const UNIT_NAME: &str = "hearth-agent.service";
 pub const UNIT_DIR: &str = "/etc/systemd/system";
@@ -92,6 +94,21 @@ impl Systemd {
             let _ = std::fs::remove_file(&temporary);
             self.unit_error(source)
         })
+    }
+}
+
+/// La ligne `ActiveState=...` de `systemctl show`, rapportée à l'état du service.
+fn parse_active_state(output: &str) -> ServiceState {
+    let value = output
+        .lines()
+        .find_map(|line| line.strip_prefix("ActiveState="))
+        .map(str::trim);
+    match value {
+        Some("active" | "reloading") => ServiceState::Active,
+        Some("activating" | "deactivating") => ServiceState::Activating,
+        Some("inactive") => ServiceState::Inactive,
+        Some("failed") => ServiceState::Failed,
+        _ => ServiceState::Unknown,
     }
 }
 
@@ -196,6 +213,26 @@ impl ServiceManager for Systemd {
         Ok(status.success())
     }
 
+    /// `systemctl show` : `ActiveState` dit si le service tourne, s'il se relance après un échec
+    /// (`activating`) ou s'il a été arrêté (`inactive`). Jamais d'erreur : un système qui ne répond
+    /// pas donne `Unknown`, que personne ne prend pour un arrêt voulu.
+    fn state(&self) -> ServiceState {
+        if !self.unit_path.exists() {
+            return ServiceState::Inactive;
+        }
+        let Ok(output) = scrubbed(&self.systemctl)
+            .args(["show", "--property=ActiveState", UNIT_NAME])
+            .stdin(Stdio::null())
+            .output()
+        else {
+            return ServiceState::Unknown;
+        };
+        if !output.status.success() {
+            return ServiceState::Unknown;
+        }
+        parse_active_state(&String::from_utf8_lossy(&output.stdout))
+    }
+
     fn is_enabled(&self) -> Result<bool, ServiceError> {
         if !self.unit_path.exists() {
             return Ok(false);
@@ -294,9 +331,10 @@ mod tests {
             std::fs::write(
                 &script,
                 format!(
-                    "#!/bin/sh\necho \"$*\" >> {log}\ncase \"$1\" in\n  is-active) [ -e {active} ] ;;\n  enable) touch {active} ;;\n  stop) rm -f {active} ;;\n  restart) touch {active} ;;\n  fail) exit 1 ;;\n  *) ;;\nesac\n",
+                    "#!/bin/sh\necho \"$*\" >> {log}\ncase \"$1\" in\n  is-active) [ -e {active} ] ;;\n  enable) touch {active} ;;\n  stop) rm -f {active} ;;\n  restart) touch {active} ;;\n  fail) exit 1 ;;\n  show) echo \"ActiveState=$(cat {state} 2>/dev/null || echo inactive)\" ;;\n  *) ;;\nesac\n",
                     log = log.display(),
-                    active = active.display()
+                    active = active.display(),
+                    state = dir.path().join("show-state").display()
                 ),
             )
             .expect("script");
@@ -470,6 +508,65 @@ mod tests {
             !fake.dir.path().join("hearth-agent.service.new").exists(),
             "pas de fichier temporaire"
         );
+    }
+
+    #[test]
+    fn the_service_state_tells_a_stop_from_a_service_that_keeps_failing() {
+        for (text, expected) in [
+            (
+                "ActiveState=active
+",
+                ServiceState::Active,
+            ),
+            (
+                "ActiveState=activating
+",
+                ServiceState::Activating,
+            ),
+            (
+                "ActiveState=inactive
+",
+                ServiceState::Inactive,
+            ),
+            (
+                "ActiveState=failed
+",
+                ServiceState::Failed,
+            ),
+            (
+                "ActiveState=quelque-chose
+",
+                ServiceState::Unknown,
+            ),
+            ("", ServiceState::Unknown),
+        ] {
+            assert_eq!(parse_active_state(text), expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn the_state_is_read_with_systemctl_show_and_a_silent_system_is_unknown() {
+        let fake = Fake::new();
+        assert_eq!(fake.systemd.state(), ServiceState::Inactive, "pas d'unité");
+        fake.systemd.install(&spec()).unwrap();
+        for (text, expected) in [
+            ("activating", ServiceState::Activating),
+            ("failed", ServiceState::Failed),
+            ("inactive", ServiceState::Inactive),
+            ("active", ServiceState::Active),
+        ] {
+            std::fs::write(fake.dir.path().join("show-state"), text).unwrap();
+            assert_eq!(fake.systemd.state(), expected, "{text}");
+            assert_eq!(
+                fake.calls().last().map(String::as_str),
+                Some("show --property=ActiveState hearth-agent.service")
+            );
+        }
+        let broken = Systemd::new(
+            fake.dir.path().join("hearth-agent.service"),
+            OsString::from("/bin/false"),
+        );
+        assert_eq!(broken.state(), ServiceState::Unknown);
     }
 
     #[test]

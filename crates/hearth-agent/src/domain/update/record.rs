@@ -40,8 +40,9 @@ pub struct Job {
     pub client_name: Option<String>,
     #[serde(default)]
     pub client_addr: Option<String>,
-    /// Reprise d'un travail orphelin (BR-UPDATE-028) : pas d'arrêt ni d'échange, seulement le
-    /// contrôle du binaire en place, ou le retour à l'ancien.
+    /// Reprise d'un travail orphelin (BR-UPDATE-028) : pas d'arrêt ni d'échange, le superviseur part
+    /// du contrôle. Un seul sens : ce drapeau ne dit PAS « reprise déjà tentée » (ce sont les reprises
+    /// comptées dans le marqueur d'étape, `Leftovers::recovery_attempts`).
     #[serde(default)]
     pub recover: bool,
 }

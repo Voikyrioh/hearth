@@ -6,6 +6,7 @@
 //! « en cours » ni ignorée. Un fichier de trace illisible n'est pas un fichier absent.
 
 use super::record::{Job, Requester, SupervisorState};
+use super::resume::MAX_RESUMES;
 use crate::domain::install::Version;
 
 /// Ce que le dossier `update/` contient au démarrage.
@@ -18,6 +19,11 @@ pub struct Leftovers {
     pub backup_present: bool,
     /// `state.json` ou `job.json` existe mais ne se lit pas.
     pub unreadable: bool,
+    /// Combien de reprises ont déjà été tentées pour cet échange : les reprises du superviseur plus les
+    /// lancements ratés de l'agent, comptés dans le marqueur d'étape (`Marker::attempts`). Sans marqueur
+    /// (agent d'avant HRT-27), un travail marqué `recover` compte pour toutes. À `MAX_RESUMES`, la reprise
+    /// n'est plus relancée (BR-UPDATE-028, BR-UPDATE-033).
+    pub recovery_attempts: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,8 +57,8 @@ pub enum Orphan {
     /// `failed` / `interrupted`, traces retirées, **sans jamais toucher à la base**.
     // FIX:01M47N6Z485TWN2H770KQ5H80R : docs/bugs/FIX-01M47N6Z485TWN2H770KQ5H80R.md
     ForeignVersion(Job),
-    /// Une reprise a déjà été lancée pour cet échange (`job.recover`) et n'a rien conclu : elle n'est
-    /// pas relancée (BR-UPDATE-028). Conclu `failed` / `rollback_failed`, copies gardées pour la
+    /// Les reprises de cet échange sont épuisées (`Leftovers::recovery_attempts` à la borne) et n'ont
+    /// rien conclu : elle n'est pas relancée (BR-UPDATE-028). Conclu `failed` / `rollback_failed`, copies gardées pour la
     /// reprise à la main, traces de travail retirées.
     RecoveryAlreadyTried(Job),
     /// La nouvelle version tourne et les binaires ont été échangés sans que personne conclue :
@@ -81,10 +87,10 @@ pub fn classify_orphan(leftovers: &Leftovers, supervising: bool, current: Versio
             if leftovers.backup_present {
                 match (version, previous) {
                     // Le binaire en place est celui qui a été visé : le contrôle tranche, UNE fois.
-                    // Une reprise déjà lancée (`job.recover` écrit sur le disque) qui n'a rien conclu
-                    // n'est jamais relancée : sans cela, une reprise muette bouclerait.
+                    // Des reprises épuisées (comptées sur le disque, dans le marqueur) qui n'ont rien
+                    // conclu ne sont jamais relancées : sans cela, une reprise muette bouclerait.
                     (Some(target), Some(_)) if target == current => {
-                        if job.recover {
+                        if leftovers.recovery_attempts >= MAX_RESUMES {
                             Orphan::RecoveryAlreadyTried(job.clone())
                         } else {
                             Orphan::AfterSwap(job.clone())
@@ -191,6 +197,7 @@ mod tests {
             job: Some(job()),
             backup_present: true,
             unreadable: false,
+            recovery_attempts: 0,
         };
         assert_eq!(classify_orphan(&left, true, NEW), Orphan::None);
     }
@@ -227,6 +234,36 @@ mod tests {
     }
 
     #[test]
+    fn a_recovery_is_tried_again_under_its_bound_and_never_at_it_whatever_the_job_says() {
+        let mut work = job();
+        work.recover = true; // ne dit rien de plus : seuls les reprises comptées font foi
+        for attempts in 0..MAX_RESUMES {
+            let left = Leftovers {
+                state: Some(state(UpdateStep::Check)),
+                job: Some(work.clone()),
+                backup_present: true,
+                unreadable: false,
+                recovery_attempts: attempts,
+            };
+            assert_eq!(
+                classify_orphan(&left, false, NEW),
+                Orphan::AfterSwap(work.clone())
+            );
+        }
+        let left = Leftovers {
+            state: Some(state(UpdateStep::Check)),
+            job: Some(job()),
+            backup_present: true,
+            unreadable: false,
+            recovery_attempts: MAX_RESUMES,
+        };
+        assert!(matches!(
+            classify_orphan(&left, false, NEW),
+            Orphan::RecoveryAlreadyTried(_)
+        ));
+    }
+
+    #[test]
     fn a_swap_nobody_concluded_is_recovered_whatever_step_was_written() {
         for step in [UpdateStep::Restart, UpdateStep::Check] {
             let left = Leftovers {
@@ -234,6 +271,7 @@ mod tests {
                 job: Some(job()),
                 backup_present: true,
                 unreadable: false,
+                recovery_attempts: 0,
             };
             // La nouvelle version tourne : son contrôle tranche.
             assert_eq!(
@@ -280,6 +318,7 @@ mod tests {
             job: Some(job()),
             backup_present: true,
             unreadable: false,
+            recovery_attempts: 0,
         };
         assert_eq!(
             classify_orphan(&left, false, OLD),
@@ -296,6 +335,7 @@ mod tests {
             job: Some(job()),
             backup_present: true,
             unreadable: false,
+            recovery_attempts: 0,
         };
         assert_eq!(
             classify_orphan(&left, false, Version::new(0, 9, 9)),
@@ -325,7 +365,14 @@ mod tests {
     // travail) ni ne laisse un ancien binaire devant une base migrée.
 
     fn left(job: Option<Job>, state: bool, backup_present: bool) -> Leftovers {
+        // Un travail `recover` sans marqueur (agent d'avant) compte pour toutes les reprises.
+        let recovery_attempts = if job.as_ref().is_some_and(|job| job.recover) {
+            MAX_RESUMES
+        } else {
+            0
+        };
         Leftovers {
+            recovery_attempts,
             state: state.then(|| state_of(UpdateStep::Check)),
             job,
             backup_present,

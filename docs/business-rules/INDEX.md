@@ -148,9 +148,15 @@ Côté agent :
 
 - [BR-UPDATE-027](./BR-UPDATE-027-adresse-de-telechargement-publique-et-https.md) — Le serveur ne télécharge qu'en HTTPS, depuis une adresse publique — `domain/update/target.rs::{host_is_local, is_local_address, plan_update}` — invariant ✓
 - [BR-UPDATE-028](./BR-UPDATE-028-travail-de-mise-a-jour-laisse-en-cours.md) — Un travail de mise à jour laissé en cours est conclu au démarrage — `domain/update/orphan.rs::classify_orphan` — invariant ✓
-- [BR-UPDATE-029](./BR-UPDATE-029-retour-arriere-ne-laisse-pas-une-base-migree.md) — Un retour arrière ne laisse jamais un ancien binaire devant une base déjà migrée — `domain/update/space.rs::check_space`, `application/update_supervisor.rs::Supervisor::{run, roll_back}` — invariant ✓
+- [BR-UPDATE-029](./BR-UPDATE-029-retour-arriere-ne-laisse-pas-une-base-migree.md) — Un retour arrière ne laisse jamais un ancien binaire devant une base déjà migrée — `domain/update/space.rs::check_space`, `domain/update/resume.rs::{Phase, binary_restored}`, `application/update_supervisor.rs::Supervisor::{run, drive}` — invariant ✓
 
-Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent côté client (HRT-17, lot interface). Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée).
+- [BR-UPDATE-030](./BR-UPDATE-030-un-superviseur-tombe-en-echec-est-relance.md) — Un superviseur tombé en échec est relancé (`Restart=on-failure`, pas de minuterie) et reprend où il s'est arrêté — `infrastructure/update/host.rs::systemd_run_arguments`, `app/update.rs::run_supervisor` — invariant ✓
+- [BR-UPDATE-031](./BR-UPDATE-031-un-arret-voulu-du-service-n-est-jamais-defait.md) — Un arrêt voulu du service n'est jamais défait par la mise à jour — `application/update_supervisor.rs::Supervisor::{check, pause}`, `infrastructure/service/systemd.rs::Systemd::state` — invariant ✓
+- [BR-UPDATE-032](./BR-UPDATE-032-le-superviseur-rejoue-ne-refait-aucune-etape.md) — Un superviseur rejoué ne refait aucune étape (marqueur durable, issues sûres) — `domain/update/resume.rs`, `application/update_supervisor.rs::Supervisor::drive` — invariant ✓
+- [BR-UPDATE-033](./BR-UPDATE-033-les-reprises-sont-bornees.md) — Les reprises sont bornées (3), puis abandon journalisé une fois, copies gardées — `domain/update/resume.rs::{MAX_RESUMES, enter}`, `application/update_supervisor.rs::Supervisor::abandon` — invariant ✓
+- [BR-UPDATE-034](./BR-UPDATE-034-machine-redemarree-pendant-une-mise-a-jour.md) — Une machine redémarrée pendant une mise à jour : l'agent qui démarre reprend le marqueur — `domain/update/resume.rs::resume_phase`, `application/update.rs::UpdateService::{resume, recover}` — invariant ✓
+
+Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent côté client (HRT-17, lot interface). Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée) ; 030 à 034 de HRT-27 (superviseur relancé et rejouable, arrêt voulu, reprises bornées, machine redémarrée).
 
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
