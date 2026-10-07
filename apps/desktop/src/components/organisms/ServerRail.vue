@@ -6,13 +6,16 @@ import HLogo from "@/components/atoms/HLogo.vue";
 import ServerAvatar from "@/components/molecules/ServerAvatar.vue";
 import { arrowNav } from "@/composables/arrowNav";
 import { t } from "@/i18n";
+import { markOf } from "@/security/mark";
 import { useLinkStore } from "@/stores/link";
+import { useSecurityStore } from "@/stores/security";
 import { useServersStore } from "@/stores/servers";
 
 // Barre des serveurs : logo, un avatar par serveur (sélection = ouvrir son tableau de bord),
 // bouton « + », réglages. Flèches haut/bas : on passe d'un contrôle au suivant.
 const servers = useServersStore();
 const link = useLinkStore();
+const security = useSecurityStore();
 const route = useRoute();
 const rail = ref<HTMLElement | null>(null);
 
@@ -45,6 +48,7 @@ function isActive(id: string): boolean {
         :color="server.color"
         :state="link.stateOf(server.id)"
         :active="isActive(server.id)"
+        :mark="markOf(security.of(server.id)?.state)"
       />
     </RouterLink>
     <RouterLink

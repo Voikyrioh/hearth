@@ -3,6 +3,7 @@ import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./au
 import type { LinkBridge } from "./bridge";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
+import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
 import {
   type SimAccountResult,
   SimulatedAccounts,
@@ -12,6 +13,7 @@ import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
 import { SimulatedDevices } from "./simulated-devices";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
+import { SimulatedSecurity } from "./simulated-security";
 import {
   type AccountInputCheck,
   type AccountList,
@@ -151,6 +153,8 @@ export class SimulatedLinkBridge implements LinkBridge {
    * (« Reconnexion… », résultat inconnu, BR-RESIL-009).
    */
   actionMode: "ok" | "cut" = "ok";
+  /** La case « Garder ce poste reconnu » de la dernière demande de changement de mot de passe (observable dans les tests). */
+  lastKeepAddress: boolean | null = null;
   /** Dernière clé d'opération donnée à une action restée sans réponse (observable dans les tests). */
   lastUnknownOpId: string | null = null;
   /** Serveur affiché dans la fenêtre, tel que la coquille l'a reçu (observable dans les tests). */
@@ -162,6 +166,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly accounts: SimulatedAccounts;
   /** Les postes de confiance simulés de chaque serveur (HRT-23) : amorçage des tests (`devices.seed`). */
   readonly devices: SimulatedDevices;
+  /** L'alerte et le mode attaque simulés (HRT-26) : pilotables par l'appelant (`security.setAlert`, `setMode`, `setDevice`). */
+  readonly security: SimulatedSecurity;
   /** Mot de passe actuel de l'utilisateur, par serveur (« Correct-Horse-9 » tant qu'il n'a pas changé). */
   private readonly ownPasswords = new Map<string, string>();
   /**
@@ -181,6 +187,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.latencyMs = options.latencyMs ?? 0;
     this.accounts = new SimulatedAccounts(this.now);
     this.devices = new SimulatedDevices(this.now);
+    this.security = new SimulatedSecurity(this.now);
     this.agents = (options.agents ?? []).map((agent) => ({ ...agent }));
     this.servers = (options.servers ?? SAMPLE_SERVERS).map((server) => ({ ...server }));
     this.machine = new SimulatedMachine({
@@ -488,7 +495,13 @@ export class SimulatedLinkBridge implements LinkBridge {
     );
   }
 
-  changeOwnPassword(serverId: string, current: string, password: string): Promise<AccountOutcome> {
+  changeOwnPassword(
+    serverId: string,
+    current: string,
+    password: string,
+    keepAddress: boolean,
+  ): Promise<AccountOutcome> {
+    this.lastKeepAddress = keepAddress;
     return this.accountAction(serverId, "own-password", (server) => {
       const right = current === (this.ownPasswords.get(serverId) ?? "Correct-Horse-9");
       const result = this.accounts.changeOwn(server, right, password);
@@ -577,6 +590,55 @@ export class SimulatedLinkBridge implements LinkBridge {
       return { kind: "unknown", opId };
     }
     return this.devices.remove(server, deviceId, password, own);
+  }
+
+  // --- Sécurité (HRT-26) : `calls` ne contient jamais un mot de passe ---
+
+  async onSecurity(listener: (state: SecurityState) => void): Promise<Unsubscribe> {
+    return this.security.subscribe(listener);
+  }
+
+  async getSecurity(serverId: string): Promise<SecurityRead> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("security read");
+    return this.security.read(serverId);
+  }
+
+  async setAttackMode(
+    serverId: string,
+    active: boolean,
+    password: string,
+  ): Promise<AttackModeOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    const own = this.ownPasswords.get(serverId) ?? "Correct-Horse-9";
+    if (this.actionMode === "cut") {
+      // Comme une action de compte : coupée avant la réponse, jamais rejouée.
+      this.actionMode = "ok";
+      this.calls.push(`attack-mode ${active ? "on" : "off"}`);
+      if (this.executeBeforeCut) {
+        try {
+          this.security.change(serverId, active, password, own, server.role);
+        } catch {
+          // Refusé avant d'avoir été exécuté : la coupure ne change rien.
+        }
+      }
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    // Sans clé au coffre rien ne part : aucune ligne dans `calls` (la commande échoue avant l'envoi).
+    const outcome = this.security.change(serverId, active, password, own, server.role);
+    this.calls.push(`attack-mode ${active ? "on" : "off"}`);
+    return outcome;
   }
 
   // --- Mise à jour de l'agent (HRT-17) ---

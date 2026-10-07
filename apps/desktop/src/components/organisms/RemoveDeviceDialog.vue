@@ -66,6 +66,7 @@ async function submit() {
   >
     <p class="remove__message">{{ t("devices.removeMessage") }}</p>
     <p class="remove__help">{{ t("devices.removePasswordHelp") }}</p>
+    <p class="remove__help" data-remove-advice>{{ t("devices.removeAdvice") }}</p>
     <HPasswordInput
       v-model="password"
       :label="t('devices.password')"

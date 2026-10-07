@@ -11,6 +11,7 @@ import { reportUiError } from "@/errors/report";
 import { failureMessage, failureOf } from "@/link";
 import { useAgentUpdatesStore } from "@/stores/agentUpdates";
 import { useLinkStore } from "@/stores/link";
+import { useSecurityStore } from "@/stores/security";
 import { useServersStore } from "@/stores/servers";
 import { useToastsStore } from "@/stores/toasts";
 import { useUpdatesStore } from "@/stores/updates";
@@ -30,6 +31,12 @@ useUpdatesStore()
 useAgentUpdatesStore()
   .start()
   .catch((error) => reportUiError(error, "agent-update:start"));
+
+// Sécurité de chaque serveur (HRT-26) : l'alerte et le mode attaque arrivent du flux, l'état se relit à
+// chaque retour du lien ; la marque d'un serveur se lit dans la barre, quelle que soit la page.
+useSecurityStore()
+  .start()
+  .catch((error) => reportUiError(error, "security:start"));
 
 // Panneau de simulation : seulement en mode développement (retiré du binaire livré).
 const DevLinkPanel = import.meta.env.DEV

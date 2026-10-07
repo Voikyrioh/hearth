@@ -97,9 +97,10 @@ export function useAccountActions(serverId: () => string) {
       );
     },
 
-    changeOwnPassword(current: string, password: string) {
+    /** `keepAddress` : la case « Garder ce poste reconnu » (Q15), décochée par défaut. */
+    changeOwnPassword(current: string, password: string, keepAddress = false) {
       return perform(
-        () => bridge().changeOwnPassword(serverId(), current, password),
+        () => bridge().changeOwnPassword(serverId(), current, password, keepAddress),
         () => success(t("accounts.passwordChanged")),
         // Changer son mot de passe ne change pas la liste.
         false,
