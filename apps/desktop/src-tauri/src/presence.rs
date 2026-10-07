@@ -6,7 +6,7 @@
 //!   (BR-RESIL-015, 018) ;
 //! - [`LinkPresence`] : l'état affiché par l'icône de la zone de notification (BR-RESIL-016).
 //!
-//! Le dessin de la pastille de l'icône n'est pas une règle : il est dans `badge.rs`.
+//! Les images de l'icône ne sont pas une règle : elles sont dans `tray_icons.rs`.
 
 use std::collections::HashMap;
 
@@ -178,6 +178,31 @@ pub enum TrayStatus {
     Critical,
 }
 
+/// L'image de l'icône de la zone de notification : une par état du lien, plus « aucun serveur »
+/// (BR-RESIL-016). `TrayStatus` garde la gravité, celle-ci dit LAQUELLE des cinq images montrer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayIcon {
+    /// Aucun serveur : l'âtre seul, en trait sourd.
+    NoServer,
+    Connected,
+    Reconnecting,
+    Offline,
+    SessionExpired,
+    AccessRevoked,
+}
+
+impl TrayIcon {
+    pub fn of(state: LinkState) -> Self {
+        match state {
+            LinkState::Connected => Self::Connected,
+            LinkState::Reconnecting => Self::Reconnecting,
+            LinkState::Offline => Self::Offline,
+            LinkState::SessionExpired => Self::SessionExpired,
+            LinkState::AccessRevoked => Self::AccessRevoked,
+        }
+    }
+}
+
 impl TrayStatus {
     pub fn of(state: LinkState) -> Self {
         match state {
@@ -248,6 +273,12 @@ impl LinkPresence {
                     .cmp(&TrayStatus::of(*b).severity())
                     .then_with(|| b_id.cmp(a_id))
             })
+    }
+
+    /// L'image de l'icône (BR-RESIL-016) : celle de l'état du serveur reflété.
+    pub fn icon(&self) -> TrayIcon {
+        self.reflected()
+            .map_or(TrayIcon::NoServer, |(_, state)| TrayIcon::of(state))
     }
 
     /// L'état de l'icône (BR-RESIL-016).

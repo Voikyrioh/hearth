@@ -9,38 +9,48 @@ use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt as _;
 
 use crate::alerts::{Notifier, TrayPort};
-use crate::badge::paint_badge;
 use crate::domain::{MENU_OPEN, MENU_QUIT, TrayAction, tray_action};
-use crate::presence::TrayStatus;
-use crate::{texts, window};
+use crate::presence::{TrayIcon as IconState, TrayStatus};
+use crate::{texts, tray_icons, window};
 
-/// Flamme seule, une couleur (`hearth-logo-small.svg`), lisible à 16 px.
-const TRAY_ICON: &[u8] = include_bytes!("../icons/tray.png");
-
-/// Montre l'état du lien dans la zone de notification : la flamme et une pastille verte, orange ou
-/// rouge (BR-RESIL-016), l'infobulle disant quel serveur et quel état. Un échec est journalisé,
-/// jamais fatal.
+/// Montre l'état du lien dans la zone de notification : une image par état (l'âtre, et dedans une
+/// flamme, un contour, une barre, un point d'exclamation ou une croix ; BR-RESIL-016, HRT-19),
+/// l'infobulle disant quel serveur et quel état. Un échec est journalisé, jamais fatal.
 pub struct TauriTray<R: Runtime>(pub AppHandle<R>);
 
 impl<R: Runtime> TrayPort for TauriTray<R> {
-    fn show(&self, status: TrayStatus, tooltip: &str) {
+    fn show_icon(&self, icon: IconState) {
         let Some(tray) = self.0.tray_by_id(TRAY_ID) else {
             return;
         };
-        match Image::from_bytes(TRAY_ICON) {
-            Ok(base) => {
-                let rgba = paint_badge(base.rgba(), base.width(), base.height(), status);
-                let icon = Image::new_owned(rgba, base.width(), base.height());
-                if let Err(error) = tray.set_icon(Some(icon)) {
+        match Image::from_bytes(tray_icons::png(icon, icon_size(&self.0))) {
+            Ok(image) => {
+                if let Err(error) = tray.set_icon(Some(image)) {
                     tracing::warn!(%error, "icône de la zone de notification non mise à jour");
                 }
             }
-            Err(error) => tracing::warn!(%error, "icône de base illisible"),
+            Err(error) => tracing::warn!(%error, "image de l'icône illisible"),
         }
+    }
+
+    fn show(&self, _status: TrayStatus, tooltip: &str) {
+        let Some(tray) = self.0.tray_by_id(TRAY_ID) else {
+            return;
+        };
         if let Err(error) = tray.set_tooltip(Some(tooltip)) {
             tracing::warn!(%error, "infobulle de la zone de notification non mise à jour");
         }
     }
+}
+
+/// Taille d'image la plus proche de l'échelle de l'écran principal (100 % : 16 px).
+fn icon_size<R: Runtime>(app: &AppHandle<R>) -> u32 {
+    let scale = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map_or(1.0, |monitor| monitor.scale_factor());
+    tray_icons::pick_size(scale)
 }
 
 /// Notifications système du lien, par le greffon de notifications.
@@ -70,7 +80,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&open, &quit])?;
 
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(Image::from_bytes(TRAY_ICON)?)
+        .icon(Image::from_bytes(tray_icons::png(
+            IconState::NoServer,
+            icon_size(app),
+        ))?)
         .tooltip(texts::APP_NAME)
         .menu(&menu)
         .show_menu_on_left_click(false)
