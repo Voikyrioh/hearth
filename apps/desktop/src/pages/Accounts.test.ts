@@ -1,6 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "@/App.vue";
+import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import { LinkCommandError } from "@/link";
 import { useToastsStore } from "@/stores/toasts";
 import { mountContext } from "@/test/mount";
@@ -81,6 +82,8 @@ describe("Comptes (administrateurs)", () => {
     expect(wrapper.findAll("button").filter((b) => b.text() === "Ajouter un compte")).toHaveLength(
       2,
     );
+    // Illustration : celle de la table des écrans (aucune tant que `accounts` y vaut null).
+    expect(wrapper.findAll(".empty__img")).toHaveLength(SCREEN_ILLUSTRATIONS.accounts ? 1 : 0);
     wrapper.unmount();
   });
 

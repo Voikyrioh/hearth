@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { expectedFile } from "../src/assets/illustrations/screens";
 
 // HRT-19 : les trois illustrations d'écran vide (accueil, journal, hors ligne), et le logo, vus
 // dans l'application aux trois largeurs de recette. Captures dans e2e/screenshots/ (non commitées).
@@ -41,7 +42,7 @@ async function expectIllustration(page: Page, name: string, width: number) {
 test("accueil : l'illustration du premier lancement", async ({ page }) => {
   await page.goto("/?servers=none&nodev");
   await expect(page.getByRole("heading", { name: "Bienvenue dans Hearth" })).toBeVisible();
-  await expectIllustration(page, "vide-premier-lancement", 280);
+  await expectIllustration(page, expectedFile("welcome"), 280);
   await shoot(page, "identite-accueil");
 });
 
@@ -50,7 +51,7 @@ test("journal vide : l'illustration du journal", async ({ page }) => {
   await sim(page, (s) => s.audit.clear("forge"));
   await page.goto("/?nodev#/servers/forge/audit");
   await expect(page.getByText("Aucune activité enregistrée pour l'instant")).toBeVisible();
-  await expectIllustration(page, "vide-journal", 220);
+  await expectIllustration(page, expectedFile("journal"), 220);
   await shoot(page, "identite-journal-vide");
 });
 
@@ -72,11 +73,6 @@ test("hors ligne sans aucune mesure : l'illustration hors ligne", async ({ page 
   await page.goto("/?nodev#/servers/salon/dashboard");
   await sim(page, (s) => s.setState("salon", "offline")); // le lien se coupe
   await expect(page.getByRole("heading", { name: "Aucune mesure pour l'instant" })).toBeVisible();
-  await expectIllustration(page, "vide-hors-ligne", 220);
+  await expectIllustration(page, expectedFile("offline"), 220);
   await shoot(page, "identite-hors-ligne");
-});
-
-test("comptes vides : sans illustration", async ({ page }) => {
-  await page.goto("/?nodev#/servers/forge/accounts");
-  await expect(page.locator(".empty__img")).toHaveCount(0);
 });

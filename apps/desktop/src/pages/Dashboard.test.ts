@@ -2,6 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 import { RouterView } from "vue-router";
+import { expectedFile } from "@/assets/illustrations/screens";
 import { sampleMachine } from "@/link";
 import Dashboard from "@/pages/Dashboard.vue";
 import { useDashboardStore } from "@/stores/dashboard";
@@ -106,7 +107,7 @@ describe("initial display (BR-DASH-001)", () => {
     await flushPromises();
     expect(ctx.wrapper.find('[role="status"]').exists()).toBe(false);
     expect(ctx.wrapper.text()).toContain("Aucune mesure pour l'instant");
-    expect(ctx.wrapper.get("img").attributes("src")).toContain("vide-hors-ligne");
+    expect(ctx.wrapper.get("img").attributes("src")).toContain(expectedFile("offline"));
     ctx.wrapper.unmount();
   });
 

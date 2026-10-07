@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import { cloneDraft, emptyDraft, type FilterDraft, hasAnyFilter, sameDraft } from "@/audit/filters";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
@@ -176,7 +177,7 @@ const reasonText = computed(() =>
       <EmptyState
         v-else-if="!failed"
         heading="h2"
-        :illustration="unfiltered ? 'journal' : undefined"
+        :illustration="unfiltered ? (SCREEN_ILLUSTRATIONS.journal ?? undefined) : undefined"
         :title="unfiltered ? t('audit.emptyAll') : t('audit.emptyFiltered')"
         :text="''"
       >

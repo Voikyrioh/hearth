@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from "vue-router";
+import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import HButton from "@/components/atoms/HButton.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import { t } from "@/i18n";
@@ -12,7 +13,7 @@ const router = useRouter();
     <EmptyState
       :title="t('welcome.title')"
       :text="t('welcome.text')"
-      illustration="firstLaunch"
+      :illustration="SCREEN_ILLUSTRATIONS.welcome ?? undefined"
       size="lg"
     >
       <template #action>
