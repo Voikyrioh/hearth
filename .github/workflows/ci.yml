@@ -84,6 +84,22 @@ jobs:
           path: target/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 7
+      # La preuve en vrai (HRT-21, BR-CLIENT-006) : l'installateur compilé est EXECUTE ici, sur le
+      # runner jetable (jamais sur un poste) : page d'accueil capturée, case cochée/décochée,
+      # installation silencieuse (/S), réinstallation et mise à jour passive (/UPDATE /P) qui
+      # ne touchent pas à l'entrée de démarrage, désinstallation. Installateur non signé, publié
+      # nulle part ailleurs que dans les artefacts de ce run.
+      - name: Installateur NSIS (exécution sur le runner jetable)
+        shell: pwsh
+        timeout-minutes: 15
+        run: ./apps/desktop/scripts/installer-ci.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: hearth-installer-evidence
+          path: installer-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Le binaire de l'agent (statique, musl), l'installation de bout en bout dans un conteneur avec
   # systemd, et les scripts de deploy/. Les conteneurs sont ceux de `cargo xtask` ; leur cache
