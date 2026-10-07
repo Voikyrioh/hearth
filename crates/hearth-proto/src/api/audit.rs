@@ -44,9 +44,11 @@ pub mod action {
     pub const ATTACK_MODE_TRIAL: &str = "attack_mode.trial";
     /// Une session présentée seule, refusée en mode attaque (HRT-25).
     pub const SESSION_REFUSED: &str = "session.refused";
+    /// Le réglage de fréquence du mot de passe d'un compte change (HRT-28).
+    pub const REAUTH_SETTING: &str = "reauth.setting";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 22] = [
+    pub const ALL: [&str; 23] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -69,6 +71,7 @@ pub mod action {
         ATTACK_MODE_RESUME,
         ATTACK_MODE_TRIAL,
         SESSION_REFUSED,
+        REAUTH_SETTING,
     ];
 }
 

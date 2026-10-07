@@ -55,6 +55,8 @@ pub enum ChallengePurpose {
     /// Retrait d'un poste de confiance (`DELETE /me/devices/{id}`) : un usage distinct de la connexion
     /// et du flux.
     DeviceRemoval,
+    /// Un acte d'administration (HRT-28) : usage `0x05`, lié à l'acte, sa cible et ses paramètres.
+    AdminAct,
 }
 
 /// Corps de `POST /sessions/challenge` (route publique, sans effet, sans lecture en base).

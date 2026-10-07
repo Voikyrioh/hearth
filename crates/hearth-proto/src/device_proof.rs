@@ -9,14 +9,24 @@
 //!
 //! ```text
 //! "hearth-device-proof/1" || 0x00
-//! || usage (1 octet : 0x01 connexion, 0x02 session, 0x03 mode attaque (réservé), 0x04 retrait d'un poste)
+//! || usage (1 octet : 0x01 connexion, 0x02 session, 0x03 mode attaque, 0x04 retrait d'un poste,
+//!    0x05 acte d'administration)
 //! || empreinte SHA-256 du certificat du serveur épinglé (32 octets)
 //! || longueur de l'identifiant normalisé (2 octets, grand-boutiste) || identifiant normalisé (UTF-8)
 //! || défi (56 octets)
-//! || usages 0x02, 0x03 et 0x04 : SHA-256 du jeton de session (32 octets)
+//! || usages 0x02, 0x03, 0x04 et 0x05 : SHA-256 du jeton de session (32 octets)
 //! || usage 0x03 : 0x01 pour activer, 0x00 pour désactiver
 //! || usage 0x04 : longueur (2) et octets de l'identifiant du poste à retirer
+//! || usage 0x05 : code de l'acte (1 octet, voir `admin_act`)
+//!                || longueur (2) || cible (identifiant technique du compte visé, vide sinon)
+//!                || nombre de paramètres (1 octet) || pour chacun : longueur (2) || octets
 //! ```
+//!
+//! Usage `0x05` (HRT-28, BR-TRUST-039) : la signature lie l'acte, sa cible, ses paramètres non secrets
+//! (jamais un mot de passe : une signature observée ne doit pas servir à en tester hors ligne), le
+//! compte (identifiant normalisé), la session (hachage du jeton), le serveur (empreinte épinglée) et un
+//! défi frais à usage unique. L'agent **reconstruit** l'acte depuis la requête ; il ne le lit jamais dans
+//! la preuve.
 //!
 //! La signature lie ainsi la preuve au serveur (une preuve obtenue par un faux serveur ne vaut
 //! rien sur le vrai), à l'identifiant, à l'usage et, pour les usages qui en ont un, au jeton : une
@@ -24,6 +34,7 @@
 
 use sha2::{Digest, Sha256};
 
+use crate::admin_act::AdminAct;
 use crate::fingerprint::Fingerprint;
 
 /// Algorithme de la clé d'appareil : seul `ed25519` existe (la colonne et le champ permettent
@@ -68,6 +79,12 @@ pub enum Binding<'a> {
         token_hash: &'a [u8; TOKEN_HASH_LEN],
         target: &'a str,
     },
+    /// Un acte d'administration (usage `0x05`, HRT-28), lié au jeton et à l'acte reconstruit : l'acte, sa
+    /// cible et ses paramètres non secrets.
+    AdminAct {
+        token_hash: &'a [u8; TOKEN_HASH_LEN],
+        act: &'a AdminAct<'a>,
+    },
 }
 
 impl Binding<'_> {
@@ -78,6 +95,7 @@ impl Binding<'_> {
             Self::Session { .. } => 0x02,
             Self::AttackMode { .. } => 0x03,
             Self::DeviceRemoval { .. } => 0x04,
+            Self::AdminAct { .. } => 0x05,
         }
     }
 }
@@ -141,6 +159,10 @@ pub fn signing_bytes(
             let length = u16::try_from(target.len()).unwrap_or(u16::MAX);
             bytes.extend_from_slice(&length.to_be_bytes());
             bytes.extend_from_slice(&target[..usize::from(length)]);
+        }
+        Binding::AdminAct { token_hash, act } => {
+            bytes.extend_from_slice(token_hash);
+            act.write_to(&mut bytes);
         }
     }
     bytes
@@ -270,6 +292,133 @@ mod tests {
             .usage(),
             3,
             "0x03 reste réservé au mode attaque"
+        );
+    }
+
+    /// Vecteur de référence de l'usage `0x05`, assemblé à la main : si la disposition change, ce test
+    /// casse, et le client avec elle (partagé par l'agent et la liaison, qui appellent la même fonction).
+    #[test]
+    fn the_admin_act_layout_is_the_documented_one() {
+        let hash = [0x55; 32];
+        let act = AdminAct::AccountRole {
+            target: "01ACCOUNT",
+            role: crate::api::accounts::RoleName::Readonly,
+        };
+        let message = signing_bytes(
+            Binding::AdminAct {
+                token_hash: &hash,
+                act: &act,
+            },
+            &fingerprint(),
+            "Marie",
+            &challenge(),
+        );
+        let mut expected = b"hearth-device-proof/1".to_vec();
+        expected.push(0x00);
+        expected.push(0x05);
+        expected.extend_from_slice(&[0xaa; 32]);
+        expected.extend_from_slice(&[0x00, 0x05]);
+        expected.extend_from_slice(b"marie");
+        expected.extend_from_slice(&challenge());
+        expected.extend_from_slice(&hash);
+        expected.push(0x02);
+        expected.extend_from_slice(&[0x00, 0x09]);
+        expected.extend_from_slice(b"01ACCOUNT");
+        expected.push(0x01);
+        expected.extend_from_slice(&[0x00, 0x08]);
+        expected.extend_from_slice(b"readonly");
+        assert_eq!(message, expected);
+        assert_eq!(
+            Binding::AdminAct {
+                token_hash: &hash,
+                act: &act
+            }
+            .usage(),
+            0x05
+        );
+    }
+
+    #[test]
+    fn an_admin_proof_binds_the_act_the_target_the_params_the_token_and_the_account() {
+        use crate::api::accounts::RoleName;
+        let (hash, other) = ([0x55; 32], [0x56; 32]);
+        let sign = |hash: &[u8; 32], act: &AdminAct<'_>, user: &str| {
+            signing_bytes(
+                Binding::AdminAct {
+                    token_hash: hash,
+                    act,
+                },
+                &fingerprint(),
+                user,
+                &challenge(),
+            )
+        };
+        let base_act = AdminAct::AccountRole {
+            target: "01A",
+            role: RoleName::Readonly,
+        };
+        let base = sign(&hash, &base_act, "marie");
+        let variants = [
+            // une autre cible, un autre rôle, un autre acte, un autre jeton, un autre compte
+            sign(
+                &hash,
+                &AdminAct::AccountRole {
+                    target: "01B",
+                    role: RoleName::Readonly,
+                },
+                "marie",
+            ),
+            sign(
+                &hash,
+                &AdminAct::AccountRole {
+                    target: "01A",
+                    role: RoleName::Admin,
+                },
+                "marie",
+            ),
+            sign(&hash, &AdminAct::AccountDelete { target: "01A" }, "marie"),
+            sign(&other, &base_act, "marie"),
+            sign(&hash, &base_act, "paul"),
+        ];
+        for variant in &variants {
+            assert_ne!(variant, &base);
+        }
+        let unique: std::collections::HashSet<_> = variants.iter().collect();
+        assert_eq!(unique.len(), variants.len());
+        // Aucun autre usage ne partage ces octets.
+        let removal = signing_bytes(
+            Binding::DeviceRemoval {
+                token_hash: &hash,
+                target: "01A",
+            },
+            &fingerprint(),
+            "marie",
+            &challenge(),
+        );
+        assert_ne!(removal, base);
+        // Le mode attaque en `0x05` : activer et désactiver ne se confondent pas.
+        assert_ne!(
+            sign(&hash, &AdminAct::AttackMode { enable: true }, "marie"),
+            sign(&hash, &AdminAct::AttackMode { enable: false }, "marie")
+        );
+        // Le préfixe de longueur empêche une cible décalée de passer pour un paramètre.
+        assert_ne!(
+            sign(
+                &hash,
+                &AdminAct::AccountCreate {
+                    username: "ab",
+                    role: RoleName::Admin
+                },
+                "marie"
+            ),
+            sign(
+                &hash,
+                &AdminAct::AccountCreate {
+                    username: "a",
+                    role: RoleName::Admin
+                },
+                "marie"
+            )
         );
     }
 

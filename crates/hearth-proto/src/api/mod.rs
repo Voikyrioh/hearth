@@ -11,6 +11,7 @@ pub mod hello;
 pub mod machine;
 pub mod metrics;
 pub mod operations;
+pub mod reauth;
 pub mod security;
 pub mod sessions;
 pub mod update;

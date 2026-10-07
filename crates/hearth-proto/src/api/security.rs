@@ -9,6 +9,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::reauth::AdminReauthInfo;
 use super::sessions::{DeviceProof, lenient_proof};
 
 /// L'alerte « attaque probable » sur l'identifiant de l'appelant (BR-TRUST-008).
@@ -124,6 +125,9 @@ pub struct SecurityResponse {
     pub alert: AlertInfo,
     pub attack_mode: AttackModeInfo,
     pub device: SessionDevice,
+    /// La confirmation des actes d'administration (HRT-28). Absent : agent d'avant ce ticket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_reauth: Option<AdminReauthInfo>,
 }
 
 #[cfg(test)]
@@ -158,6 +162,7 @@ mod tests {
             },
             attack_mode: AttackModeInfo::off(),
             device: SessionDevice::Proven,
+            admin_reauth: None,
         };
         let value = serde_json::to_value(&response).expect("json");
         assert_eq!(value["alert"]["others"], 2);
