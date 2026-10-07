@@ -31,6 +31,7 @@ L'ADR-0024 a livré NORMAL et ALERTE et une règle « 2 critères sur 3 » écri
 ## Écarts assumés par rapport à la conception
 - **La ligne du mode est relue en base à chaque décision** (une lecture d'une table d'une ligne par requête authentifiée et par connexion, mode éteint compris), alors que la conception disait « aucune lecture de plus hors mode attaque » et un état en mémoire. Raison : `hearth-agent attack-mode off` est un autre processus, il écrit la même base ; sans relecture, la voie de secours des enfermés ne vaudrait qu'au prochain redémarrage du service. Coût : faible (lecture indexée, WAL). Le noyau (`/proc`) n'est lu que si le mode est actif.
 - **Garde de réactivation sur le temps écoulé depuis le démarrage** (colonnes de la migration 0006) plutôt que sur l'horloge murale.
+- **Machine redémarrée avec l'horloge murale reculée** : après un redémarrage de la machine, la garde de réactivation retombe sur l'horloge murale ; une fin d'activation « dans le futur » compte comme récente, donc les essais ratés sont gardés tant que l'heure n'a pas rattrapé (le doute profite à la prudence : jamais plus d'essais, au pire une activation prolongée).
 - **Le flux relit le mode attaque à chaque contrôle de la session** (5 s) et ne pousse que ses changements ; le compte à rebours `resumes_in_s` n'est pas un changement (pas de message toutes les 5 s pendant la suspension).
 
 ## Conséquences et limites

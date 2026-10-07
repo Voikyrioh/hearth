@@ -7,6 +7,9 @@
 
 mod support;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use axum::http::StatusCode;
 use hearth_agent::application::ports::IdentityStore;
 use hearth_agent::domain::accounts::Role;
@@ -136,18 +139,18 @@ async fn a_read_only_account_is_refused_with_403_and_the_refusal_is_journaled() 
         "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs."
     );
     assert_eq!(active(&env).await, 0);
-    // Un seul code par geste : le refus de l'activation est consigné « refusé » sous `attack_mode.enable`,
-    // celui de la désactivation sous `attack_mode.disable`.
+    // Un refus de rôle est consigné « refusé » sous `attack_mode.enable` (geste non lu).
     let refused = journal_of(&env, "attack_mode.enable").await;
     assert_eq!(refused.len(), 1);
     assert_eq!(refused[0].0, "denied");
     assert_eq!(refused[0].1.as_deref(), Some("lucas"));
+    // Le corps n'est pas lu pour un refus de rôle : le geste n'est pas connu, la désactivation refusée
+    // est consignée sous le code par défaut, l'activation.
     let body = attack_mode_body(&api, &key, "lucas", &token, false, PASSWORD).await;
     assert_eq!(put(&api, &token, &body).await.status, StatusCode::FORBIDDEN);
-    let refused = journal_of(&env, "attack_mode.disable").await;
-    assert_eq!(refused.len(), 1);
-    assert_eq!(refused[0].0, "denied");
-    assert_eq!(journal_of(&env, "attack_mode.enable").await.len(), 1);
+    assert!(journal_of(&env, "attack_mode.disable").await.is_empty());
+    let all = journal_of(&env, "attack_mode.enable").await;
+    assert!(!all.is_empty() && all.iter().all(|entry| entry.0 == "denied"));
 }
 
 #[tokio::test]
@@ -857,4 +860,86 @@ async fn the_suspension_countdown_alone_never_sends_a_new_security_message() {
         json!("off")
     );
     agent.shutdown().await;
+}
+
+/// Une requête dont le corps signale qu'on l'a lu.
+fn watched_request(
+    token: Option<&str>,
+) -> (axum::http::Request<axum::body::Body>, Arc<AtomicBool>) {
+    let read = Arc::new(AtomicBool::new(false));
+    let flag = read.clone();
+    let stream = futures_util::stream::once(async move {
+        flag.store(true, Ordering::SeqCst);
+        Ok::<_, std::io::Error>(axum::body::Bytes::from(vec![b' '; 2 << 20]))
+    });
+    let mut builder = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/v1/security/attack-mode")
+        .header("x-hearth-api", "1")
+        .header("content-type", "application/json");
+    if let Some(token) = token {
+        builder = builder.header("authorization", format!("Bearer {token}"));
+    }
+    let mut request = builder.body(axum::body::Body::from_stream(stream)).unwrap();
+    request.extensions_mut().insert(axum::extract::ConnectInfo(
+        "10.0.0.7:40000".parse::<std::net::SocketAddr>().unwrap(),
+    ));
+    (request, read)
+}
+
+#[tokio::test]
+async fn a_request_without_a_token_or_without_the_role_makes_nobody_read_its_body() {
+    use tower::ServiceExt;
+    let env = env().await;
+    let api = Api::new(&env);
+    env.create("lucas", Role::ReadOnly).await;
+    let lucas = api.token_of("lucas").await;
+    let router = hearth_agent::entrypoint::http::router(support::api::state(&env));
+    for (token, status) in [
+        (None, StatusCode::UNAUTHORIZED),
+        (Some("pas-un-jeton"), StatusCode::UNAUTHORIZED),
+        (Some(lucas.as_str()), StatusCode::FORBIDDEN),
+    ] {
+        let (request, read) = watched_request(token);
+        let response = router.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), status, "{token:?}");
+        assert!(
+            !read.load(Ordering::SeqCst),
+            "le corps ne doit pas être lu ({token:?})"
+        );
+    }
+    // Un administrateur authentifié, lui, fait lire le corps (le geste y est).
+    let (_key, marie) = admin_with_key(&env, &api, "marie").await;
+    let (request, read) = watched_request(Some(&marie));
+    let response = router.clone().oneshot(request).await.unwrap();
+    assert!(read.load(Ordering::SeqCst));
+    assert!(response.status().is_client_error());
+    // Aucune requête d'un non authentifié ne laisse d'entrée `attack_mode.*`.
+    let by_nobody: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action LIKE 'attack_mode.%' AND account IS NULL",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(by_nobody, 0);
+}
+
+#[tokio::test]
+async fn an_authenticated_administrator_with_an_unreadable_or_missing_body_is_journaled_as_an_enable()
+ {
+    let env = env().await;
+    let api = Api::new(&env);
+    let (_key, token) = admin_with_key(&env, &api, "marie").await;
+    for raw in ["pas du json", ""] {
+        let reply = api
+            .put("/security/attack-mode")
+            .token(&token)
+            .raw_body(raw)
+            .send()
+            .await;
+        assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY, "{raw:?}");
+    }
+    let entries = journal_of(&env, "attack_mode.enable").await;
+    assert!(!entries.is_empty() && entries.iter().all(|entry| entry.0 == "failed"));
+    assert!(journal_of(&env, "attack_mode.disable").await.is_empty());
 }

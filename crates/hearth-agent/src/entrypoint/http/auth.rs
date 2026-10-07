@@ -222,7 +222,8 @@ const ATTACK_MODE_ROUTE: &str = "/security/attack-mode";
 
 /// Pour la route du mode attaque, l'action du journal est celle du geste demandé (`active` du corps :
 /// `attack_mode.enable` ou `attack_mode.disable`), pour que ses refus et ses échecs soient consignés sous
-/// le bon code. Le corps est relu tel quel par le handler.
+/// le bon code. Corps illisible, absent ou sans `active` : le geste par défaut, l'activation. Le corps
+/// est relu tel quel par le handler.
 async fn with_gesture(mut guard: GuardState, body: Body) -> (GuardState, Body) {
     if guard.route != ATTACK_MODE_ROUTE {
         return (guard, body);
@@ -245,7 +246,6 @@ async fn with_gesture(mut guard: GuardState, body: Body) -> (GuardState, Body) {
 /// La couche d'accès d'une route non publique.
 pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next) -> Response {
     let (mut parts, body) = request.into_parts();
-    let (guard, body) = with_gesture(guard, body).await;
     let session = match authenticate(&guard.app, &parts).await {
         Ok(session) => session,
         Err(error) => return error.into_response(),
@@ -262,6 +262,10 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         return ApiError::new(ErrorCode::ForbiddenRole, forbidden_message(guard.audit))
             .into_response();
     }
+    // Le corps n'est lu qu'ici, une fois la session reconnue ET le rôle admis : une requête sans jeton,
+    // ou sans le rôle, ne fait lire aucun corps. Un refus `401` n'a donc pas de geste (il n'est pas
+    // journalisé), un refus `403` non plus (consigné sous `attack_mode.enable`, le geste par défaut).
+    let (guard, body) = with_gesture(guard, body).await;
     // Pour une requête qui modifie seulement : l'action peut supprimer le compte visé, il faut le
     // nommer avant. Une lecture réussie n'écrit rien : rien à résoudre.
     let target = if guard.modifies {

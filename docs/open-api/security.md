@@ -55,6 +55,8 @@ L'objet `attack_mode` ci-dessus (état après le changement). Idempotente : acti
 
 Un administrateur dont le client n'a pas de clé inscrite (client ancien, poste non inscrit) ne peut ni activer ni désactiver depuis le client : `hearth-agent attack-mode off` sur le serveur, ou le redémarrage physique de la machine (BR-TRUST-027). Il n'existe pas de sous-commande pour activer.
 
+**Journal des refus de cette route** : le geste se lit dans `active` du corps, mais le corps n'est lu qu'une fois la session reconnue et le rôle admis. Un `401` (sans jeton ou jeton inconnu) ne lit aucun corps et n'est pas journalisé ; un `403` (rôle insuffisant) ne lit aucun corps non plus et est consigné « refusé » sous `attack_mode.enable` (geste par défaut) ; pour un administrateur authentifié dont le corps est illisible, absent ou sans `active`, le geste par défaut est l'activation (`attack_mode.enable`, « échoué », `422`).
+
 `409 POST_NOT_RECOGNIZED` n'est rendu **que par cette route**, à un administrateur déjà authentifié. Une connexion bloquée par le mode attaque n'en reçoit jamais : elle reçoit le refus d'un mot de passe faux (le journal, lui, dit « mode attaque : poste non reconnu »).
 
 ## Ce que le mode attaque change pour les autres routes

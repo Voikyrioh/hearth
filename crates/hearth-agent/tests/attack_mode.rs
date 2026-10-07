@@ -750,6 +750,78 @@ async fn two_simultaneous_attempts_on_the_same_trial_never_give_two_free_failure
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_right_and_a_wrong_password_at_the_same_time_on_one_trial_end_failed_never_twice_never_back()
+ {
+    let env = std::sync::Arc::new(booted().await);
+    enable(&env).await;
+    for round in 0..12_u32 {
+        let name = format!("race-{round}");
+        disable(&env).await;
+        env.create(&name, Role::ReadOnly).await;
+        let key = std::sync::Arc::new(DeviceKey::new());
+        keyed(&env, &key, &name, PASSWORD, "10.30.0.1")
+            .await
+            .expect("inscription");
+        pass(&env, Duration::minutes(31));
+        enable(&env).await;
+        let (a, b) = (stranger(2 * round), stranger(2 * round + 1));
+        let right = {
+            let (env, key, name) = (env.clone(), key.clone(), name.clone());
+            tokio::spawn(async move { keyed(&env, &key, &name, PASSWORD, &a).await.is_ok() })
+        };
+        let wrong = {
+            let (env, key, name) = (env.clone(), key.clone(), name.clone());
+            tokio::spawn(async move { keyed(&env, &key, &name, WRONG, &b).await.is_ok() })
+        };
+        let (_right, wrong) = (right.await.unwrap(), wrong.await.unwrap());
+        assert!(!wrong, "un mot de passe faux n'entre jamais");
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT outcome FROM attack_trials WHERE account_id IN (SELECT id FROM accounts WHERE username = ?)",
+        )
+        .bind(&name)
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+        // Quel que soit l'ordre : une seule ligne, ratée (un succès n'est jamais écrit après un échec).
+        assert_eq!(rows.len(), 1, "tour {round}");
+        assert_eq!(rows[0].0, "failed", "tour {round}");
+        env.audit_recorder.flush_all().await;
+        let denied: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_events WHERE action = 'attack_mode.trial' AND outcome = 'denied' AND account = ?",
+        )
+        .bind(&name)
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+        assert_eq!(denied, 1, "tour {round} : jamais deux échecs gratuits");
+    }
+}
+
+#[tokio::test]
+async fn an_address_alone_succeeds_then_misses_then_is_blocked() {
+    let env = booted().await;
+    paul_with_address(&env).await;
+    enable(&env).await;
+    assert!(plain(&env, "paul", PASSWORD, CLIENT_ADDR).await.is_ok());
+    assert!(
+        refused(&plain(&env, "paul", WRONG, CLIENT_ADDR).await),
+        "raté"
+    );
+    let row: (String,) = sqlx::query_as("SELECT outcome FROM attack_trials")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(row.0, "failed", "le succès d'avant devient un échec");
+    assert!(
+        denied(&plain(&env, "paul", PASSWORD, CLIENT_ADDR).await),
+        "bloqué"
+    );
+    assert_eq!(scalar(&env, "SELECT COUNT(*) FROM attack_trials").await, 1);
+    disable(&env).await;
+    assert!(plain(&env, "paul", PASSWORD, CLIENT_ADDR).await.is_ok());
+}
+
 // ---------------------------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------------------------
