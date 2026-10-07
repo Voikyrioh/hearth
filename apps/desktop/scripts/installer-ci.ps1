@@ -9,7 +9,7 @@
 # Partie 2, comportements : installation silencieuse (a), reinstallation silencieuse et mise a jour
 #   passive avec une valeur posee comme le ferait l'application (b), mise a jour passive sans valeur
 #   (c), desinstallation (d).
-param([ValidateSet('mine', 'stock')][string]$Mode = 'mine')
+$Mode = 'mine'
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $installer = (Get-ChildItem (Join-Path $root 'target\release\bundle\nsis\*.exe') | Select-Object -First 1).FullName
@@ -48,6 +48,8 @@ public static class W {
   [DllImport("user32.dll")] static extern bool EnumWindows(TopProc cb, IntPtr l);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   public static List<IntPtr> TopLevels(uint pid) { var l = new List<IntPtr>(); EnumWindows((h, x) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid) l.Add(h); return true; }, IntPtr.Zero); return l; }
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int m, IntPtr w, IntPtr l);
   [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr h, int m, IntPtr w, IntPtr l, int flags, int ms, out IntPtr res);
   [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr h, int m, IntPtr w, StringBuilder l, int flags, int ms, out IntPtr res);
@@ -163,18 +165,19 @@ function Welcome-Scenario($name, $setup, $expectedChecked) {
 }
 
 # Parcours complet : (de)coche la case si demande, passe toutes les pages, puis ferme par $close
-# ('command' : WM_COMMAND IDOK a la fenetre principale ; 'click' : BM_CLICK sur le bouton ; 'close' : WM_CLOSE).
+# ('mouse' : vrai clic de souris sur « Fermer » ; 'command' : WM_COMMAND IDOK a la fenetre principale, ce que
+# produit un clic. Constate (CI du 2026-10-07, aussi sur l'installateur SANS nos crochets) : un BM_CLICK poste et
+# un WM_CLOSE ne ferment PAS la page de fin du modele de Tauri ; c'est une limite de ces messages, pas de notre
+# script NSIS. Un installateur qui ne sort pas fait ECHOUER le job.)
 # $shortcut : laisse (ou non) cochee « Creer un raccourci sur le bureau ». Renvoie 'sortie' ou 'bloque'.
 $script:stuck = New-Object System.Collections.Generic.List[string]
 function Full-Flow($name, $toggle, $close, $shortcut) {
   $p = Start-Gui
   $main = $p.MainWindowHandle
-  if ($Mode -eq 'mine') {
-    $box = Find-Box $main
-    if ($box -eq [IntPtr]::Zero) { Fail "$name : pas de case" }
-    if ($toggle) { [void][W]::PostMessage($box, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep -Milliseconds 500 }
-    Shot (Join-Path $evidence "$Mode-$name-accueil.png") $main
-  }
+  $box = Find-Box $main
+  if ($box -eq [IntPtr]::Zero) { Fail "$name : pas de case" }
+  if ($toggle) { [void][W]::PostMessage($box, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep -Milliseconds 500 }
+  Shot (Join-Path $evidence "$Mode-$name-accueil.png") $main
   $deadline = (Get-Date).AddSeconds(240)
   $finishSince = $null
   $tick = 0
@@ -199,6 +202,14 @@ function Full-Flow($name, $toggle, $close, $shortcut) {
       switch ($close) {
         'command' { [void][W]::PostMessage($main, 0x111, [IntPtr]1, $next) }
         'close' { [void][W]::PostMessage($main, 0x10, [IntPtr]::Zero, [IntPtr]::Zero) }
+        'mouse' {
+          $r = New-Object W+RECT
+          if ([W]::GetWindowRect($next, [ref]$r)) {
+            [void][W]::SetForegroundWindow($main)
+            [void][W]::SetCursorPos([int](($r.L + $r.R) / 2), [int](($r.T + $r.B) / 2))
+            [W]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero); [W]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
+          }
+        }
         default { [void][W]::PostMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
       }
       if (((Get-Date) - $finishSince).TotalSeconds -gt 25) { break }
@@ -234,18 +245,6 @@ function Silent($arguments) {
 Note "installateur ($Mode) : $installer"
 Expect ($null -eq (Run-Value)) 'runner vierge : aucune valeur Hearth sous Run au depart'
 
-if ($Mode -eq 'stock') {
-  # Diagnostic : le meme parcours sur l'installateur SANS nos crochets (modele de Tauri seul).
-  [void](Full-Flow 'stock-clic' $false 'click' $true)
-  [void](Full-Flow 'stock-commande' $false 'command' $true)
-  [void](Full-Flow 'stock-commande-sans-raccourci' $false 'command' $false)
-  [void](Full-Flow 'stock-wmclose' $false 'close' $true)
-  Clear-Entry
-  if ($script:stuck.Count -gt 0) { Fail "l'installateur ne se ferme pas : $($script:stuck -join ' ; ')" }
-  Save-Results
-  exit 0
-}
-
 # ---- Partie 1 : la page d'accueil
 Welcome-Scenario 'accueil-neuf' { } $false
 Welcome-Scenario 'accueil-entree-activee' {
@@ -257,7 +256,7 @@ Welcome-Scenario 'accueil-entree-desactivee-gestionnaire' {
 Clear-Entry
 
 # Parcours complet, case cochee : l'entree est ecrite comme le greffon (sans guillemets, activee).
-[void](Full-Flow 'parcours-coche' $true 'command' $true)
+[void](Full-Flow 'parcours-coche' $true 'mouse' $true)
 $value = Run-Value
 Expect ($null -ne $value) 'parcours case cochee : valeur Hearth presente sous Run'
 Expect (($value -match '\.exe --minimized$') -and ($value -notmatch '"')) "parcours case cochee : valeur sans guillemets, finit par --minimized ($value)"
@@ -268,9 +267,6 @@ Expect (($approved -join ',') -eq '2,0,0,0,0,0,0,0,0,0,0,0') 'parcours case coch
 [void](Full-Flow 'reinstallation-decoche' $true 'command' $false)
 Expect ($null -eq (Run-Value)) 'reinstallation a la main, case decochee : valeur retiree'
 
-# Variantes de fermeture de la page de fin (la case reste telle quelle).
-[void](Full-Flow 'fermeture-clic' $false 'click' $true)
-[void](Full-Flow 'fermeture-wmclose' $false 'close' $true)
 
 # ---- Partie 2 : comportements sans interface
 $uninstaller = Join-Path $dir 'uninstall.exe'
@@ -319,7 +315,8 @@ Expect ($null -ne $exe) "(e) installation dans un chemin avec espace : $exe"
 $command = "$exe --minimized"
 $si = New-Object Launch+SI; $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si)
 $pi = New-Object Launch+PI
-$ok = [Launch]::CreateProcessW($null, $command, [IntPtr]::Zero, [IntPtr]::Zero, $false, 0, [IntPtr]::Zero, $null, [ref]$si, [ref]$pi)
+# [NullString]::Value : PowerShell convertirait $null en chaine vide (ERREUR 123 constatee sur la CI).
+$ok = [Launch]::CreateProcessW([NullString]::Value, $command, [IntPtr]::Zero, [IntPtr]::Zero, $false, 0, [IntPtr]::Zero, [NullString]::Value, [ref]$si, [ref]$pi)
 $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
 Start-Sleep -Seconds 3
 $started = if ($ok) { Get-Process -Id $pi.pid -ErrorAction SilentlyContinue } else { $null }
