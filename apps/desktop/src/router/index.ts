@@ -14,6 +14,7 @@ import Accounts from "@/pages/Accounts.vue";
 import AddServer from "@/pages/AddServer.vue";
 import Audit from "@/pages/Audit.vue";
 import Dashboard from "@/pages/Dashboard.vue";
+import Security from "@/pages/Security.vue";
 import Servers from "@/pages/Servers.vue";
 import Settings from "@/pages/Settings.vue";
 import Welcome from "@/pages/Welcome.vue";
@@ -32,7 +33,7 @@ declare module "vue-router" {
 
 /**
  * Routes : `/welcome` (aucun serveur), `/servers/new` (assistant d'ajout), `/servers` (carnet),
- * `/servers/:id/{dashboard,accounts,audit}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
+ * `/servers/:id/{dashboard,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
  * serveur ou l'accueil. Historique par hachage (l'application est servie depuis des fichiers).
  */
 export function createAppRouter(history: RouterHistory = createWebHashHistory()): Router {
@@ -67,6 +68,12 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
             name: "audit",
             component: Audit,
             meta: { title: "pages.audit", adminOnly: true },
+          },
+          {
+            path: "security",
+            name: "security",
+            component: Security,
+            meta: { title: "pages.security" },
           },
         ],
       },

@@ -4,10 +4,13 @@
 use async_trait::async_trait;
 use hearth_proto::api::hello::HelloResponse;
 use hearth_proto::api::operations::OperationResponse;
-use hearth_proto::api::sessions::{LoginRequest, LoginResponse};
+use hearth_proto::api::sessions::{
+    ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginRequest,
+    LoginResponse,
+};
 use hearth_proto::error::ErrorCode;
 use hearth_proto::fingerprint::Fingerprint;
-use hearth_proto::stream::{ClientMessage, ServerMessage};
+use hearth_proto::stream::{ClientMessage, ServerMessage, SignedAuth};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -154,6 +157,28 @@ pub enum Frame {
 pub trait StreamConn: Send {
     async fn send(&mut self, message: &ClientMessage) -> Result<(), TransportError>;
     async fn recv(&mut self) -> Result<Frame, TransportError>;
+
+    /// Premier message `auth` du flux, avec en option la preuve de la clé d'appareil (HRT-23,
+    /// usage `session`). Par défaut le jeton seul, comme avant : les flux simulés qui ne connaissent
+    /// pas la preuve restent valides ; le flux réel écrit le message signé.
+    async fn send_auth(&mut self, auth: &SignedAuth) -> Result<(), TransportError> {
+        let SignedAuth::Auth { token, device } = auth;
+        // Jamais une preuve retirée en silence : un flux qui ne sait pas la porter échoue, il ne se
+        // fait pas passer pour un client sans clé (le repli des types la porterait, voir ADR-0023).
+        if device.is_some() {
+            return Err(TransportError::Protocol(
+                "ce flux ne sait pas porter la preuve de la clé".into(),
+            ));
+        }
+        let mut message = ClientMessage::Auth {
+            token: token.clone(),
+        };
+        let sent = self.send(&message).await;
+        if let ClientMessage::Auth { token } = &mut message {
+            zeroize::Zeroize::zeroize(token);
+        }
+        sent
+    }
 }
 
 #[async_trait]
@@ -167,6 +192,37 @@ pub trait Transport: Send + Sync {
         target: &Target,
         request: &LoginRequest,
     ) -> Result<LoginResponse, TransportError>;
+
+    /// `POST /sessions/challenge` : un défi à signer avec la clé d'appareil (route publique, sans
+    /// effet). Un agent d'avant la fonction répond `404` (`TransportError::Api`) : la clé n'est pas
+    /// prise en charge. Par défaut, c'est cette réponse : les transports simulés qui ne connaissent
+    /// pas la clé se comportent comme un agent ancien.
+    async fn challenge(
+        &self,
+        _target: &Target,
+        _request: &ChallengeRequest,
+    ) -> Result<ChallengeResponse, TransportError> {
+        Err(TransportError::Api(ApiError {
+            status: 404,
+            code: Some(ErrorCode::NotFound),
+            details: Value::Null,
+            retry_after_s: None,
+        }))
+    }
+
+    /// `POST /sessions` avec la preuve de la clé d'appareil en option. Par défaut : la connexion
+    /// ordinaire (`login`), sans clé.
+    async fn login_with_device(
+        &self,
+        target: &Target,
+        request: &DeviceLoginRequest,
+    ) -> Result<DeviceLoginResponse, TransportError> {
+        let login = self.login(target, &request.login).await?;
+        Ok(DeviceLoginResponse {
+            login,
+            device: None,
+        })
+    }
 
     /// `DELETE /sessions/current`.
     async fn logout(&self, target: &Target, token: &Secret) -> Result<(), TransportError>;

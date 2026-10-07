@@ -10,6 +10,9 @@ use crate::domain::server::ServerId;
 pub enum SecretKind {
     Password,
     Token,
+    /// Clé privée d'appareil du serveur (PKCS#8 en base64, ADR-0023). Ne sort jamais de la
+    /// coquille Rust : ni WebView, ni journal, ni message d'erreur.
+    DeviceKey,
 }
 
 /// Le message ne contient jamais de secret.

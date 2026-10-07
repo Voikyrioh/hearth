@@ -36,6 +36,10 @@ pub enum LinkError {
     /// Le lien n'est pas « Connecté » : rien n'a été envoyé (BR-RESIL-008).
     #[error("le lien avec le serveur n'est pas établi")]
     NotConnected,
+    /// Ce PC n'a pas de clé d'appareil pour ce serveur (agent ancien, coffre vide ou en panne) :
+    /// un acte qui exige la preuve de la clé (retrait d'un poste de confiance) n'est pas parti.
+    #[error("ce PC n'a pas de clé d'appareil pour ce serveur")]
+    NoDeviceKey,
     #[error("trop d'opérations en suspens")]
     TooManyPending,
     /// Le suivi de l'action n'a pas pu être écrit sur disque : l'action n'a PAS été lancée.

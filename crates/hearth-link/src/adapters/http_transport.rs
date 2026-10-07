@@ -12,10 +12,13 @@ use async_trait::async_trait;
 use futures_util::{SinkExt as _, StreamExt as _};
 use hearth_proto::api::hello::HelloResponse;
 use hearth_proto::api::operations::OperationResponse;
-use hearth_proto::api::sessions::{LoginRequest, LoginResponse};
+use hearth_proto::api::sessions::{
+    ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginRequest,
+    LoginResponse,
+};
 use hearth_proto::error::ErrorBody;
 use hearth_proto::headers;
-use hearth_proto::stream::{ClientMessage, ServerMessage};
+use hearth_proto::stream::{ClientMessage, ServerMessage, SignedAuth};
 use hearth_proto::version::API_VERSION;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use rustls::pki_types::ServerName;
@@ -243,6 +246,34 @@ impl Transport for HttpTransport {
             .await
     }
 
+    async fn challenge(
+        &self,
+        target: &Target,
+        request: &ChallengeRequest,
+    ) -> Result<ChallengeResponse, TransportError> {
+        let body =
+            serde_json::to_value(request).map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.typed(
+            target,
+            Method::Post,
+            "/sessions/challenge",
+            None,
+            Some(&body),
+        )
+        .await
+    }
+
+    async fn login_with_device(
+        &self,
+        target: &Target,
+        request: &DeviceLoginRequest,
+    ) -> Result<DeviceLoginResponse, TransportError> {
+        let body =
+            serde_json::to_value(request).map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.typed(target, Method::Post, "/sessions", None, Some(&body))
+            .await
+    }
+
     async fn logout(&self, target: &Target, token: &Secret) -> Result<(), TransportError> {
         let call = Call {
             method: Method::Delete,
@@ -400,6 +431,22 @@ impl StreamConn for WsConn {
     async fn send(&mut self, message: &ClientMessage) -> Result<(), TransportError> {
         let text =
             serde_json::to_string(message).map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.send_text(text).await
+    }
+
+    async fn send_auth(&mut self, auth: &SignedAuth) -> Result<(), TransportError> {
+        let text =
+            serde_json::to_string(auth).map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.send_text(text).await
+    }
+
+    async fn recv(&mut self) -> Result<Frame, TransportError> {
+        self.receive().await
+    }
+}
+
+impl WsConn {
+    async fn send_text(&mut self, text: String) -> Result<(), TransportError> {
         match timeout(
             self.send_timeout,
             self.socket.send(Message::Text(text.into())),
@@ -412,7 +459,7 @@ impl StreamConn for WsConn {
         }
     }
 
-    async fn recv(&mut self) -> Result<Frame, TransportError> {
+    async fn receive(&mut self) -> Result<Frame, TransportError> {
         match self.socket.next().await {
             None => Err(TransportError::Closed(None)),
             Some(Err(error)) => Err(map_ws_error(error)),

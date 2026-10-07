@@ -466,7 +466,9 @@ impl From<LinkError> for LinkFailure {
             LinkError::Rejected(_)
             | LinkError::TooManyPending
             | LinkError::TaskRestarted
-            | LinkError::Stopped => Self::Internal,
+            | LinkError::Stopped
+            // La commande de retrait la traite avant (`devices::service::remove`) ; nulle part ailleurs elle n'existe.
+            | LinkError::NoDeviceKey => Self::Internal,
         }
     }
 }

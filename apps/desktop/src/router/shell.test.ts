@@ -290,7 +290,7 @@ describe("hors ligne (HRT-12)", () => {
 
   it("dims and dates EVERY page of a server from the layout, none can forget it (BR-RESIL-007)", async () => {
     const { bridge, router, wrapper } = await boot("/servers/forge/dashboard");
-    for (const name of ["dashboard", "accounts", "audit"]) {
+    for (const name of ["dashboard", "accounts", "audit", "security"]) {
       await router.push(`/servers/forge/${name}`);
       await flushPromises();
       expect(wrapper.findAll('[data-stale="true"]'), `${name} connecté`).toHaveLength(0);
@@ -306,7 +306,7 @@ describe("hors ligne (HRT-12)", () => {
       .getRoutes()
       .filter((route) => route.path.startsWith("/servers/:id/") && route.name)
       .map((route) => String(route.name));
-    expect(pages.sort()).toEqual(["accounts", "audit", "dashboard"]);
+    expect(pages.sort()).toEqual(["accounts", "audit", "dashboard", "security"]);
     wrapper.unmount();
   });
 });

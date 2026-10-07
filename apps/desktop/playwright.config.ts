@@ -32,6 +32,7 @@ export default defineConfig({
         "updates.spec.ts",
         "accounts.spec.ts",
         "agent-update.spec.ts",
+        "security.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-trusted-devices"
+description = "Enables the list_trusted_devices command without any pre-configured scope."
+commands.allow = ["list_trusted_devices"]
+
+[[permission]]
+identifier = "deny-list-trusted-devices"
+description = "Denies the list_trusted_devices command without any pre-configured scope."
+commands.deny = ["list_trusted_devices"]

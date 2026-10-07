@@ -1,5 +1,6 @@
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
+import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
 import type {
   AccountInputCheck,
@@ -123,6 +124,22 @@ export interface LinkBridge {
     accountId: string,
     confirmation: string | null,
   ): Promise<AccountOutcome>;
+
+  // Postes de confiance (HRT-23) : UNE commande typée par lecture ou action. L'interface ne reçoit que
+  // des noms, des dates, une adresse et des booléens : la clé de ce PC reste dans la coquille Rust.
+
+  /** Les postes de confiance du compte de la session (une lecture, refaite au retour du lien) ; `unsupported` : agent d'avant la clé d'appareil. */
+  listTrustedDevices(serverId: string): Promise<TrustedDevices>;
+  /**
+   * Retire un poste : un acte d'administration, le mot de passe actuel ET la preuve de la clé de CE PC
+   * (la coquille signe ; le mot de passe ne traverse que ce paramètre et n'est jamais gardé). Une action
+   * (clé d'opération, résultat inconnu à la coupure, jamais rejouée).
+   */
+  removeTrustedDevice(
+    serverId: string,
+    deviceId: string,
+    password: string,
+  ): Promise<DeviceRemovalOutcome>;
 
   // Mise à jour de l'agent (HRT-17) : UNE commande typée par lecture ou action. L'interface ne fournit
   // NI adresse, NI signature, NI somme : la coquille tient la cible de sa propre lecture du flux de

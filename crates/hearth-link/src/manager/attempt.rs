@@ -10,11 +10,11 @@ use hearth_proto::api::sessions::LoginRequest;
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, UpgradeTarget};
 use hearth_proto::fingerprint::Fingerprint;
-use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, Topic};
+use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, SignedAuth, Topic};
 use tokio::time::timeout;
 use zeroize::Zeroize;
 
-use super::{Deps, Shared};
+use super::{Deps, Shared, device};
 use crate::domain::pending_ops::{Lookup, OperationId};
 use crate::domain::secret::Secret;
 use crate::ports::transport::{Frame, StreamConn, TransportError};
@@ -96,6 +96,9 @@ pub(crate) async fn connect(deps: &Deps, shared: &Shared) -> AttemptResult {
 
 async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
     let id = shared.id();
+    // Client mis à jour, session déjà ouverte, mot de passe mémorisé : ce PC s'inscrit en silence
+    // (une seule fois par exécution), avant d'ouvrir le flux avec le jeton qui en résulte.
+    device::enroll_silently(deps, shared).await;
     let token = match deps.vault.get(&id, SecretKind::Token) {
         Ok(Some(token)) => token,
         Ok(None) => return AttemptResult::SessionExpired,
@@ -104,20 +107,36 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
             return AttemptResult::Failed;
         }
     };
+    // Le défi AVANT l'ouverture du flux : l'agent n'attend le premier message que quelques
+    // secondes, et le défi vaut 60 s. Sans clé, agent ancien ou défi en échec : jeton seul.
+    let proof = match device::session_proof(
+        deps,
+        &shared.target(),
+        &id,
+        &shared.record().username,
+        &token,
+    )
+    .await
+    {
+        Ok(proof) => proof,
+        // Clé présente et défi indisponible (autrement que par 404) : échec passager, on réessaie.
+        Err(device::LoginError::Transport(error)) => return classify(&error),
+        Err(device::LoginError::ChallengeUnavailable) => return AttemptResult::Failed,
+    };
     let mut stream = match deps.transport.open_stream(&shared.target()).await {
         Ok(stream) => stream,
         Err(error) => return classify(&error),
     };
     // Les erreurs d'envoi sont lues par `recv` : un refus d'authentification arrive en message
     // `error` avant la fermeture, et c'est lui qu'on veut.
-    let auth = ClientMessage::Auth {
+    let auth = SignedAuth::Auth {
         token: token.expose().to_owned(),
+        device: proof,
     };
-    let _ = stream.send(&auth).await;
+    let _ = stream.send_auth(&auth).await;
     // La copie du jeton faite pour le message est effacée dès qu'il est parti.
-    if let ClientMessage::Auth { mut token } = auth {
-        token.zeroize();
-    }
+    let SignedAuth::Auth { mut token, .. } = auth;
+    token.zeroize();
     // Le sujet `update` est ouvert à tout compte : le serveur annonce ainsi son redémarrage de mise
     // à jour (coupure attendue, BR-UPDATE-014) et son avancement.
     let mut topics = vec![Topic::Metrics, Topic::Session, Topic::Update];
@@ -176,6 +195,22 @@ pub(crate) fn login_request(username: &str, password: &Secret) -> LoginRequest {
     }
 }
 
+/// Efface les textes d'un corps JSON (un mot de passe d'action : retrait d'un poste, comptes) une fois
+/// la requête partie : même traitement que `wipe` pour la connexion.
+pub(crate) fn wipe_body(body: &mut Option<serde_json::Value>) {
+    fn wipe_value(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::String(text) => text.zeroize(),
+            serde_json::Value::Array(items) => items.iter_mut().for_each(wipe_value),
+            serde_json::Value::Object(map) => map.values_mut().for_each(wipe_value),
+            _ => {}
+        }
+    }
+    if let Some(value) = body {
+        wipe_value(value);
+    }
+}
+
 pub(crate) fn wipe(mut request: LoginRequest) {
     request.password.zeroize();
 }
@@ -184,7 +219,7 @@ pub(crate) fn wipe(mut request: LoginRequest) {
 pub(crate) async fn reauthenticate(deps: &Deps, shared: &Shared) -> AttemptResult {
     match timeout(
         deps.config.attempt_timeout,
-        reauthenticate_inner(deps, shared),
+        reauthenticate_with_key(deps, shared),
     )
     .await
     {
@@ -193,7 +228,7 @@ pub(crate) async fn reauthenticate(deps: &Deps, shared: &Shared) -> AttemptResul
     }
 }
 
-async fn reauthenticate_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
+pub(crate) async fn reauthenticate_with_key(deps: &Deps, shared: &Shared) -> AttemptResult {
     let id = shared.id();
     let password = match deps.vault.get(&id, SecretKind::Password) {
         Ok(Some(password)) => password,
@@ -203,11 +238,23 @@ async fn reauthenticate_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
             return AttemptResult::Failed;
         }
     };
-    let request = login_request(&shared.record().username, &password);
-    let outcome = deps.transport.login(&shared.target(), &request).await;
-    wipe(request);
+    // La reconnexion silencieuse passe elle aussi par la clé d'appareil : le poste est reconnu (ou
+    // inscrit, si c'est sa première connexion par mot de passe depuis la mise à jour du client).
+    let outcome = device::login(
+        deps,
+        &shared.target(),
+        Some(&id),
+        &shared.record().username,
+        &password,
+    )
+    .await;
     match outcome {
-        Ok(mut response) => {
+        Ok(authenticated) => {
+            let mut response = authenticated.response;
+            // La clé d'abord, puis le jeton (BR-TRUST-003) ; un coffre en échec ne change rien ici.
+            if let Some(key) = &authenticated.new_key {
+                device::store_new_key(deps, &id, key);
+            }
             // Le jeton passe dans un `Secret` sans copie : la réponse n'en garde rien.
             let token = Secret::new(std::mem::take(&mut response.token));
             match deps.vault.put(&id, SecretKind::Token, &token) {
@@ -222,7 +269,9 @@ async fn reauthenticate_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
         }
         // Mot de passe mémorisé refusé (`INVALID_CREDENTIALS`) : `StoredPasswordRefused`, pas de
         // nouvelle tentative (BR-CONN-017) ; un `429` donne `RetryAfter`.
-        Err(error) => classify(&error),
+        Err(device::LoginError::Transport(error)) => classify(&error),
+        // Clé présente, défi indisponible : échec passager, la tentative suivante réessaie.
+        Err(device::LoginError::ChallengeUnavailable) => AttemptResult::Failed,
     }
 }
 

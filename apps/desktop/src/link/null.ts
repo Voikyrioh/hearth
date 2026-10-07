@@ -93,6 +93,12 @@ export class NullLinkBridge implements LinkBridge {
   async deleteAccount(): Promise<never> {
     return this.unavailable();
   }
+  async listTrustedDevices(): Promise<never> {
+    return this.unavailable();
+  }
+  async removeTrustedDevice(): Promise<never> {
+    return this.unavailable();
+  }
   async getAgentUpdate(): Promise<never> {
     return this.unavailable();
   }
