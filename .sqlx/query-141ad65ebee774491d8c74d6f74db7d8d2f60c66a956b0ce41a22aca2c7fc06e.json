@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT failures, wait_until, last_failure_at FROM identifier_slowdowns WHERE key = ?",
+  "query": "SELECT failures, wait_until, last_failure_at, alerted_at FROM identifier_slowdowns WHERE key = ?",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,17 @@
             "name": "last_failure_at"
           }
         }
+      },
+      {
+        "name": "alerted_at",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "identifier_slowdowns",
+            "name": "alerted_at"
+          }
+        }
       }
     ],
     "parameters": {
@@ -43,8 +54,9 @@
     "nullable": [
       false,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "95b3d5dd4fd6d5780b0e9c2b9dd2dfe9a72df607ce490e20d8808155eba9da0f"
+  "hash": "141ad65ebee774491d8c74d6f74db7d8d2f60c66a956b0ce41a22aca2c7fc06e"
 }

@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use futures_util::StreamExt as _;
-use hearth_proto::stream::{ClientMessage, ServerMessage, Topic};
+use hearth_proto::stream::{ClientMessage, SecurityMessage, ServerMessage, Topic};
 use rustls::pki_types::ServerName;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -23,6 +23,9 @@ const WAIT: Duration = Duration::from_secs(5);
 
 pub struct WsClient {
     socket: WebSocketStream<TlsStream<TcpStream>>,
+    /// Les messages `security` (toujours envoyés, HRT-24) reçus pendant que le test lisait autre
+    /// chose : `next` les met de côté, `next_security` les rend.
+    security: std::collections::VecDeque<SecurityMessage>,
 }
 
 /// Le serveur a refusé la mise à niveau : statut HTTP et corps.
@@ -75,7 +78,10 @@ pub async fn connect_with(
             .insert("x-hearth-api", version.parse().expect("en-tête"));
     }
     match client_async(request, tls).await {
-        Ok((socket, _response)) => Ok(WsClient { socket }),
+        Ok((socket, _response)) => Ok(WsClient {
+            socket,
+            security: Default::default(),
+        }),
         Err(tokio_tungstenite::tungstenite::Error::Http(response)) => Err(Refused {
             status: response.status().as_u16(),
         }),
@@ -126,6 +132,12 @@ impl WsClient {
                 .unwrap_or(None);
             match frame {
                 Some(Message::Text(text)) => {
+                    // L'état de sécurité part toujours, sans abonnement : il n'est pas un
+                    // `ServerMessage`, les tests des autres sujets le laissent de côté.
+                    if let Ok(security) = serde_json::from_str::<SecurityMessage>(text.as_str()) {
+                        self.security.push_back(security);
+                        continue;
+                    }
                     return Ok(serde_json::from_str(text.as_str())
                         .unwrap_or_else(|error| panic!("message illisible ({error}) : {text}")));
                 }
@@ -134,6 +146,30 @@ impl WsClient {
                 }
                 Some(_) => {}
                 None => return Err(End::Dropped),
+            }
+        }
+    }
+
+    /// Prochain message `security` (l'état de sécurité du compte connecté) ; les autres messages
+    /// lus en attendant sont ignorés.
+    pub async fn next_security(&mut self) -> SecurityMessage {
+        if let Some(message) = self.security.pop_front() {
+            return message;
+        }
+        loop {
+            let frame = timeout(WAIT, self.socket.next())
+                .await
+                .expect("aucun message security dans le délai")
+                .transpose()
+                .unwrap_or(None);
+            match frame {
+                Some(Message::Text(text)) => {
+                    if let Ok(message) = serde_json::from_str::<SecurityMessage>(text.as_str()) {
+                        return message;
+                    }
+                }
+                Some(Message::Close(_)) | None => panic!("flux fermé avant le message security"),
+                Some(_) => {}
             }
         }
     }

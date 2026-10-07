@@ -958,6 +958,14 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         } else {
             None
         };
+        // Le retrait d'un poste (route précédente) ferme les sessions SANS lien du compte (HRT-24,
+        // suivi de la revue de la PR #25) : `carl` ouvre une session fraîche pour le changement de
+        // son mot de passe (sa connexion s'écrit avant la mesure).
+        let own_token = if endpoint.path == "/me/password" {
+            Some(api.token_of("carl").await)
+        } else {
+            None
+        };
         let before = successes(&env).await;
         let reply = match (endpoint.method.as_str(), endpoint.path) {
             ("POST", "/sessions") => api.login("marie", PASSWORD).await,
@@ -986,7 +994,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             }
             ("PUT", "/me/password") => {
                 api.put("/me/password")
-                    .token(&own)
+                    .token(own_token.as_deref().unwrap_or(&own))
                     .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
                     .send()
                     .await
@@ -1058,7 +1066,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         .filter(|endpoint| !endpoint.modifies() && endpoint.audit.is_none())
     {
         let path = match endpoint.path {
-            "/hello" | "/me" | "/me/devices" | "/machine" | "/metrics/history"
+            "/hello" | "/me" | "/me/devices" | "/security" | "/machine" | "/metrics/history"
             | "/agent/update" | "/agent/update/last" => endpoint.path.to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
             "/stream" => continue, // le flux se teste en WebSocket (stream_https.rs)

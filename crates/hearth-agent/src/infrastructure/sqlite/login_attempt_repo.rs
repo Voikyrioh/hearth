@@ -60,20 +60,10 @@ struct SlowdownRow {
     failures: i64,
     wait_until: Option<String>,
     last_failure_at: String,
+    alerted_at: Option<String>,
 }
 
-async fn identifier(conn: &mut SqliteConnection, key: &AttemptKey) -> Result<Slowdown, StoreError> {
-    let row = sqlx::query_as!(
-        SlowdownRow,
-        "SELECT failures, wait_until, last_failure_at FROM identifier_slowdowns WHERE key = ?",
-        key.as_str()
-    )
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(storage(RESOURCE))?;
-    let Some(row) = row else {
-        return Ok(Slowdown::default());
-    };
+fn slowdown_of(row: SlowdownRow) -> Result<Slowdown, StoreError> {
     Ok(Slowdown {
         failures: u32::try_from(row.failures).unwrap_or(u32::MAX),
         wait_until: row
@@ -82,11 +72,60 @@ async fn identifier(conn: &mut SqliteConnection, key: &AttemptKey) -> Result<Slo
             .map(|value| parse_date(RESOURCE, value))
             .transpose()?,
         last_failure_at: Some(parse_date(RESOURCE, &row.last_failure_at)?),
+        alerted_at: row
+            .alerted_at
+            .as_deref()
+            .map(|value| parse_date(RESOURCE, value))
+            .transpose()?,
     })
+}
+
+/// Les identifiants à regarder pour l'alerte : plus de `FREE_FAILURES` échecs, ou un épisode noté.
+async fn alerting(conn: &mut SqliteConnection) -> Result<Vec<(String, Slowdown)>, StoreError> {
+    let free = i64::from(identifier_slowdown::FREE_FAILURES);
+    let rows = sqlx::query!(
+        "SELECT key, failures, wait_until, last_failure_at, alerted_at
+         FROM identifier_slowdowns WHERE failures > ? OR alerted_at IS NOT NULL",
+        free
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage(RESOURCE))?;
+    rows.into_iter()
+        .map(|row| {
+            let slowdown = slowdown_of(SlowdownRow {
+                failures: row.failures,
+                wait_until: row.wait_until,
+                last_failure_at: row.last_failure_at,
+                alerted_at: row.alerted_at,
+            })?;
+            Ok((row.key, slowdown))
+        })
+        .collect()
+}
+
+async fn identifier(conn: &mut SqliteConnection, key: &AttemptKey) -> Result<Slowdown, StoreError> {
+    let row = sqlx::query_as!(
+        SlowdownRow,
+        "SELECT failures, wait_until, last_failure_at, alerted_at FROM identifier_slowdowns WHERE key = ?",
+        key.as_str()
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(storage(RESOURCE))?;
+    let Some(row) = row else {
+        return Ok(Slowdown::default());
+    };
+    slowdown_of(row)
 }
 
 #[async_trait]
 impl LoginAttemptRepo for SqliteLoginAttemptRepo {
+    async fn alerting(&self) -> Result<Vec<(String, Slowdown)>, StoreError> {
+        let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
+        alerting(&mut conn).await
+    }
+
     async fn get(&self, key: &AttemptKey) -> Result<LockoutState, StoreError> {
         let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
         get(&mut conn, key).await
@@ -202,20 +241,47 @@ impl LoginAttemptTx for SqliteUnitOfWork {
             RESOURCE,
             state.last_failure_at.unwrap_or(OffsetDateTime::UNIX_EPOCH),
         )?;
+        let alerted_at = state
+            .alerted_at
+            .map(|date| format_date(RESOURCE, date))
+            .transpose()?;
         sqlx::query!(
-            "INSERT INTO identifier_slowdowns (key, failures, wait_until, last_failure_at)
-             VALUES (?, ?, ?, ?)
+            "INSERT INTO identifier_slowdowns (key, failures, wait_until, last_failure_at, alerted_at)
+             VALUES (?, ?, ?, ?, ?)
              ON CONFLICT (key) DO UPDATE SET failures = excluded.failures,
-                 wait_until = excluded.wait_until, last_failure_at = excluded.last_failure_at",
+                 wait_until = excluded.wait_until, last_failure_at = excluded.last_failure_at,
+                 alerted_at = excluded.alerted_at",
             key.as_str(),
             failures,
             wait_until,
-            last_failure_at
+            last_failure_at,
+            alerted_at
         )
         .execute(&mut *self.tx)
         .await
         .map_err(storage(RESOURCE))?;
         Ok(())
+    }
+
+    async fn alerting(&mut self) -> Result<Vec<(String, Slowdown)>, StoreError> {
+        alerting(&mut self.tx).await
+    }
+
+    async fn end_alert(
+        &mut self,
+        key: &str,
+        alerted_at: OffsetDateTime,
+    ) -> Result<bool, StoreError> {
+        let alerted_at = format_date(RESOURCE, alerted_at)?;
+        let result = sqlx::query!(
+            "UPDATE identifier_slowdowns SET alerted_at = NULL WHERE key = ? AND alerted_at = ?",
+            key,
+            alerted_at
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(result.rows_affected() > 0)
     }
 
     async fn trim_identifiers(&mut self, now: OffsetDateTime) -> Result<u64, StoreError> {

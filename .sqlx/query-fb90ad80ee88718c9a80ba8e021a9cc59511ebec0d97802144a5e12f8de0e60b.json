@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO identifier_slowdowns (key, failures, wait_until, last_failure_at, alerted_at)\n             VALUES (?, ?, ?, ?, ?)\n             ON CONFLICT (key) DO UPDATE SET failures = excluded.failures,\n                 wait_until = excluded.wait_until, last_failure_at = excluded.last_failure_at,\n                 alerted_at = excluded.alerted_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "fb90ad80ee88718c9a80ba8e021a9cc59511ebec0d97802144a5e12f8de0e60b"
+}

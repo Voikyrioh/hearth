@@ -751,3 +751,38 @@ async fn a_wrong_password_on_a_removal_counts_like_a_login_failure_and_ends_in_a
     let login = api.login("marie", PASSWORD).await;
     assert_eq!(login.status, StatusCode::TOO_MANY_REQUESTS);
 }
+
+/// Suivi de la revue de la PR #25 (HRT-24) : un mot de passe faux à la confirmation d'un retrait laisse
+/// UNE entrée, celle du retrait (« mot de passe actuel incorrect »), et pas une connexion refusée de
+/// plus.
+#[tokio::test]
+async fn a_wrong_password_at_the_confirmation_of_a_removal_leaves_one_entry_of_the_removal_and_no_login()
+ {
+    let env = env().await;
+    let api = Api::new(&env);
+    let (a, on_a, _current, other) = two_devices(&env, &api).await;
+    let body = removal_body(&api, &a, "marie", &on_a, &other, "Mauvais-Mot-De-Passe-1").await;
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&on_a)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(reply.code(), "WRONG_PASSWORD");
+    env.audit_recorder.flush().await;
+    let entries: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT action, outcome, reason FROM audit_events WHERE outcome <> 'ok' ORDER BY id",
+    )
+    .fetch_all(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        entries,
+        vec![(
+            "device.remove".to_owned(),
+            "failed".to_owned(),
+            Some("mot de passe actuel incorrect".to_owned())
+        )]
+    );
+    assert_eq!(device_count(&env).await, 2, "rien n'est retiré");
+}

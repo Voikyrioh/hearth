@@ -485,6 +485,8 @@ impl TrustService {
         proven: &VerifiedKey,
     ) -> Result<(), RemoveError> {
         self.remove(account, current, id, by).await?;
+        // Le retour de `consume` est ignoré à dessein : le poste n'existe plus, un défi déjà pris par
+        // une requête concurrente n'ouvre plus rien.
         self.consume(account, proven);
         Ok(())
     }
@@ -515,7 +517,7 @@ impl TrustService {
             return Err(RemoveError::IsCurrent);
         }
         tx.sessions()
-            .close_device(&device.id, account, &device.last_addr, &device.name, now)
+            .close_device(&device.id, account, current, now)
             .await?;
         tx.devices().delete(&device.id).await?;
         let mut journal = Pending::default();

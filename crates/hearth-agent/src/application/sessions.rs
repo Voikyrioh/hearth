@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use hearth_proto::api::sessions::{DeviceProof, DeviceStatus};
 use hearth_proto::device_proof::Binding;
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -17,12 +18,13 @@ use super::accounts::AccountView;
 use super::audit::{AuditTrail, Pending};
 use super::ports::{
     AccountRepo, AuditSink, Clock, HashError, IdGen, KnownAddressRepo, LoginAttemptRepo,
-    PasswordHasher, SessionRepo, Store, StoreError, TokenGen, TokenGenError,
+    PasswordHasher, SessionRepo, Store, StoreError, TokenGen, TokenGenError, UnitOfWork,
 };
+use super::security::SecurityService;
 use super::trust::{DeviceLogin, RemoveError, TrustService, VerifiedKey};
-use crate::domain::accounts::Username;
+use crate::domain::accounts::{Account, Username};
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
-use crate::domain::identifier_slowdown;
+use crate::domain::identifier_slowdown::{self, AlertChange, alert_change};
 use crate::domain::known_address::{self, canonical, is_known};
 use crate::domain::lockout::{AttemptKey, LockoutState, retry_after_seconds};
 use crate::domain::login_policy::{
@@ -31,6 +33,7 @@ use crate::domain::login_policy::{
 use crate::domain::secret::Secret;
 use crate::domain::session_token::SessionToken;
 use crate::domain::sessions::{Session, SessionEnd, SessionId, check, expiry_from, renewed_expiry};
+use crate::domain::trust::{LoginCriteria, judge_login, mode_of};
 
 /// Qui se connecte : le poste (`X-Hearth-Client`) et l'adresse de la connexion.
 #[derive(Debug, Clone)]
@@ -52,11 +55,59 @@ pub struct LoginOutcome {
     pub device: Option<DeviceStatus>,
 }
 
-/// Ce qu'un passage par le chemin de la connexion accorde.
-enum Granted {
-    Session(Box<LoginOutcome>),
-    /// Mot de passe confirmé, rien d'autre (`confirm_password`).
-    Confirmed,
+/// Pourquoi on passe par le chemin de la connexion : ouvrir une session, ou seulement confirmer le
+/// mot de passe pour un acte d'administration (`confirm_password`). Ne change que ce qui s'écrit au
+/// journal pour un refus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Purpose {
+    Login,
+    Confirmation,
+}
+
+impl Purpose {
+    /// L'action du journal sous laquelle un refus est consigné.
+    fn action(self) -> AuditAction {
+        match self {
+            Self::Login => AuditAction::Login,
+            Self::Confirmation => AuditAction::DeviceRemove,
+        }
+    }
+
+    /// Un mot de passe faux est consigné ici comme une connexion refusée (jamais pour une
+    /// confirmation : la route de l'acte le consigne).
+    fn journals_wrong_password(self) -> bool {
+        self == Self::Login
+    }
+}
+
+/// Une tentative dont le mot de passe est juste et le poste admis : la transaction est ouverte, les
+/// compteurs écrits dedans, il reste à ouvrir la session (ou à valider).
+struct Passed {
+    tx: Box<dyn UnitOfWork>,
+    account: Account,
+    now: OffsetDateTime,
+    key: Option<VerifiedKey>,
+}
+
+/// Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de passe
+/// tapé au mauvais endroit, BR-AUDIT-005) ni le mot de passe. Le journal d'activité consigne
+/// connexions et verrouillages (le succès dans la transaction de la tentative, les refus par le
+/// regroupement).
+fn trace_refusal<T>(result: &Result<T, LoginError>, client: &ClientInfo) {
+    match result {
+        Err(LoginError::InvalidCredentials) => tracing::warn!(
+            addr = %client.addr,
+            reason = "invalid_credentials",
+            "connexion refusée"
+        ),
+        Err(LoginError::TooManyAttempts { retry_after }) => tracing::warn!(
+            addr = %client.addr,
+            reason = "locked",
+            retry_after_s = retry_after_seconds(*retry_after),
+            "connexion refusée : verrouillage"
+        ),
+        _ => {}
+    }
 }
 
 #[derive(Debug, Error)]
@@ -116,6 +167,8 @@ pub struct SessionService {
     /// L'identité d'appareil (HRT-22). Absente : le service se comporte exactement comme avant, les
     /// routes de défi et de postes répondent `404`.
     trust: Option<Arc<TrustService>>,
+    /// L'alerte « attaque probable » (HRT-24). Absente : rien n'est signalé, le reste est identique.
+    security: Option<Arc<SecurityService>>,
 }
 
 /// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, une file
@@ -228,6 +281,7 @@ impl SessionService {
             sink,
             turns: Turns::default(),
             trust: None,
+            security: None,
         }
     }
 
@@ -236,6 +290,18 @@ impl SessionService {
     pub fn with_trust(mut self, trust: Arc<TrustService>) -> Self {
         self.trust = Some(trust);
         self
+    }
+
+    /// Ajoute l'alerte : début et fin d'un épisode au journal et au flux (HRT-24).
+    #[must_use]
+    pub fn with_security(mut self, security: Arc<SecurityService>) -> Self {
+        self.security = Some(security);
+        self
+    }
+
+    /// L'alerte, si elle est configurée.
+    pub fn security(&self) -> Option<&Arc<SecurityService>> {
+        self.security.as_ref()
     }
 
     /// L'identité d'appareil, si elle est configurée.
@@ -261,10 +327,11 @@ impl SessionService {
             .await
     }
 
-    /// Comme `login`, avec en option la preuve de la clé d'appareil. **Une preuve ne change aucune
-    /// décision d'accès** : absente, illisible, fausse ou rejouée, la connexion se déroule comme
-    /// sans elle ; valide, elle inscrit ou date le poste dans la transaction d'une connexion
-    /// accordée, et seulement alors (HRT-22).
+    /// Comme `login`, avec en option la preuve de la clé d'appareil. La clé est un critère de la règle
+    /// « 2 critères sur 3 » (ADR-0024) : elle ne compte, et seulement en ALERTE, que pour échapper au
+    /// ralentissement, jamais pour se passer du mot de passe. Absente, illisible, fausse ou rejouée,
+    /// la connexion se déroule comme sans elle ; valide, elle inscrit ou date le poste dans la
+    /// transaction d'une connexion accordée, et seulement alors (HRT-22).
     pub async fn login_with_device(
         &self,
         username: &str,
@@ -272,14 +339,17 @@ impl SessionService {
         client: &ClientInfo,
         device: Option<&DeviceProof>,
     ) -> Result<LoginOutcome, LoginError> {
-        match self
-            .run_login(username, password, client, device, false)
-            .await?
+        let turn = self.take_turn(client).await?;
+        let result = match self
+            .verify(username, password, client, device, Purpose::Login)
+            .await
         {
-            Granted::Session(outcome) => Ok(*outcome),
-            // Inatteignable : seul le mode « confirmer » rend `Confirmed`.
-            Granted::Confirmed => Err(LoginError::InvalidCredentials),
-        }
+            Ok(passed) => self.open_session(passed, client).await,
+            Err(error) => Err(error),
+        };
+        drop(turn);
+        trace_refusal(&result, client);
+        result
     }
 
     /// Confirme le mot de passe d'un compte pour un acte d'administration (retrait d'un poste de
@@ -293,31 +363,28 @@ impl SessionService {
         password: Secret,
         client: &ClientInfo,
     ) -> Result<(), LoginError> {
-        self.run_login(username, password, client, None, true)
+        let turn = self.take_turn(client).await?;
+        let result = match self
+            .verify(username, password, client, None, Purpose::Confirmation)
             .await
-            .map(|_| ())
+        {
+            // Les compteurs sont déjà écrits (le succès remet à zéro celui du couple, comme une
+            // connexion) ; ni session, ni adresse apprise, ni entrée de connexion.
+            Ok(passed) => passed.tx.commit().await.map_err(LoginError::from),
+            Err(error) => Err(error),
+        };
+        drop(turn);
+        trace_refusal(&result, client);
+        result
     }
 
-    async fn run_login(
-        &self,
-        username: &str,
-        password: Secret,
-        client: &ClientInfo,
-        device: Option<&DeviceProof>,
-        confirm: bool,
-    ) -> Result<Granted, LoginError> {
-        let keys = Keys {
-            pair: AttemptKey::new(username, &client.addr),
-            address: AttemptKey::address(&client.addr),
-            identifier: AttemptKey::identifier(username),
-            username: Username::parse(username)
-                .map_or_else(|_| username.to_owned(), |parsed| parsed.as_str().to_owned()),
-        };
-        // Un seul tour, par adresse exacte : le couple contient l'adresse, deux connexions du même
-        // couple sont donc déjà sérialisées par le tour de leur adresse. Comme pour le flux, une
-        // adresse est d'abord admise comme inconnue ; seule la saturation fait lire en base si elle
-        // est déjà connue (d'un compte quelconque) et peut prendre une place réservée : la décision
-        // ne dépend jamais de l'identifiant saisi (ADR-0022, BR-CONN-013).
+    /// Prend sa place dans la file de l'adresse puis attend son tour. Un seul tour, par adresse
+    /// exacte : le couple contient l'adresse, deux connexions du même couple sont donc déjà
+    /// sérialisées par le tour de leur adresse. Comme pour le flux, une adresse est d'abord admise
+    /// comme inconnue ; seule la saturation fait lire en base si elle est déjà connue (d'un compte
+    /// quelconque) et peut prendre une place réservée : la décision ne dépend jamais de
+    /// l'identifiant saisi (ADR-0022, BR-CONN-013).
+    async fn take_turn(&self, client: &ClientInfo) -> Result<Turn<'_>, LoginError> {
         let admitted = match self.turns.admit(&canonical(&client.addr), false) {
             Err(QueueRefusal::Saturated)
                 if self.address_is_known(&client.addr).await.unwrap_or(false) =>
@@ -335,38 +402,27 @@ impl SessionService {
             return Err(LoginError::Busy);
         };
         turn.wait().await;
-        let result = self
-            .login_in_turn(username, password, client, &keys, device, confirm)
-            .await;
-        // Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de
-        // passe tapé au mauvais endroit, BR-AUDIT-005) ni le mot de passe. Le journal d'activité
-        // consigne connexions et verrouillages (le succès dans la transaction de la tentative, les refus par le regroupement).
-        match &result {
-            Err(LoginError::InvalidCredentials) => tracing::warn!(
-                addr = %client.addr,
-                reason = "invalid_credentials",
-                "connexion refusée"
-            ),
-            Err(LoginError::TooManyAttempts { retry_after }) => tracing::warn!(
-                addr = %client.addr,
-                reason = "locked",
-                retry_after_s = retry_after_seconds(*retry_after),
-                "connexion refusée : verrouillage"
-            ),
-            _ => {}
-        }
-        result
+        Ok(turn)
     }
 
-    async fn login_in_turn(
+    /// Du début de la tentative à son issue : admission, preuve de clé, vérification du mot de passe,
+    /// règle de reconnaissance du poste, compteurs. Rend la transaction ouverte quand la connexion
+    /// est accordée ; tout refus est déjà écrit (compteurs, journal) et rendu en erreur.
+    async fn verify(
         &self,
         username: &str,
         password: Secret,
         client: &ClientInfo,
-        keys: &Keys,
         device: Option<&DeviceProof>,
-        confirm: bool,
-    ) -> Result<Granted, LoginError> {
+        purpose: Purpose,
+    ) -> Result<Passed, LoginError> {
+        let keys = Keys {
+            pair: AttemptKey::new(username, &client.addr),
+            address: AttemptKey::address(&client.addr),
+            identifier: AttemptKey::identifier(username),
+            username: Username::parse(username)
+                .map_or_else(|_| username.to_owned(), |parsed| parsed.as_str().to_owned()),
+        };
         // 1. Admission : pendant une attente du couple ou de l'adresse, on ne vérifie même pas le
         //    mot de passe. Le ralentissement par identifiant, lui, refuse APRÈS la vérification
         //    (étape 3) : même chemin et même durée pour un identifiant existant ou non.
@@ -375,7 +431,7 @@ impl SessionService {
             pair: self.attempts.get(&keys.pair).await?,
             address: self.attempts.get(&keys.address).await?,
             identifier: identifier_slowdown::Slowdown::default(),
-            known: false,
+            escapes_slowdown: false,
             seen: false,
         };
         if let Some(retry_after) = admit(&early, now) {
@@ -383,8 +439,7 @@ impl SessionService {
         }
 
         // 1 bis. Preuve de la clé d'appareil, s'il y en a une : vérifiée sous la clé FOURNIE, donc
-        //    le même travail que l'identifiant existe ou non (HRT-22, absence d'oracle). Elle ne
-        //    décide de rien ici : seule une connexion accordée s'en sert, plus bas.
+        //    le même travail que l'identifiant existe ou non (HRT-22, absence d'oracle).
         let key: Option<VerifiedKey> = match (device, &self.trust) {
             (Some(proof), Some(trust)) => {
                 trust.verify(proof, Binding::Login, username, &client.addr)
@@ -405,6 +460,7 @@ impl SessionService {
         // Le compte visé, pour le journal, seulement s'il existe : ce n'est alors pas un mot de
         // passe tapé à la place de l'identifiant (BR-AUDIT-005, 006).
         let targeted = account.as_ref().map(|found| found.username.clone());
+        let target_id = account.as_ref().map(|found| found.id.clone());
         let verified_account = account.filter(|_| verified);
 
         // 3. Issue, dans une seule transaction : compteurs, et pour un succès la session et la
@@ -413,20 +469,46 @@ impl SessionService {
         //    un mot de passe changé entre-temps ne connecte pas.
         let mut tx = self.store.begin().await?;
         let now = self.clock.now();
-        let known = {
+        // Les lectures de la règle sont TOUTES faites, que l'identifiant existe ou non (liste vide,
+        // clé jamais celle d'un compte absent) : le travail ne dit rien de l'existence du compte.
+        let retained = {
             let list = tx.known_addresses().of_username(&keys.username).await?;
             is_known(&list, &client.addr, now)
+        };
+        let key_recognized = match &key {
+            Some(key) => match tx.devices().find_by_key(&key.key_id).await? {
+                Some(enrolled) => {
+                    target_id.as_ref() == Some(&enrolled.account)
+                        && bool::from(enrolled.public_key.ct_eq(&key.public_key))
+                }
+                None => false,
+            },
+            None => false,
         };
         let before = LoginState {
             pair: tx.login_attempts().get(&keys.pair).await?,
             address: tx.login_attempts().get(&keys.address).await?,
             identifier: tx.login_attempts().identifier(&keys.identifier).await?,
-            known,
+            escapes_slowdown: false,
             // Connue d'un compte quelconque : lue pour tout identifiant, existant ou non.
             seen: tx
                 .known_addresses()
                 .address_is_known(&canonical(&client.addr), known_address::cutoff(now))
                 .await?,
+        };
+        // La règle « 2 critères sur 3 » (ADR-0024) : fonction pure, deux booléens. « Du premier
+        // coup » : le compteur du couple est à zéro.
+        let standing = judge_login(
+            mode_of(&before.identifier, now),
+            LoginCriteria {
+                address: retained,
+                key: key_recognized,
+                first_try: before.pair.failures == 0,
+            },
+        );
+        let before = LoginState {
+            escapes_slowdown: standing.escapes_slowdown,
+            ..before
         };
         let account =
             match verified_account {
@@ -435,13 +517,13 @@ impl SessionService {
                 }),
                 None => None,
             };
-        let (after, verdict) = conclude(before, account.is_some(), now);
+        let (after, verdict) = conclude(before, account.is_some() && standing.password_counts, now);
         // Écrit ce qui a changé ; une ligne neuve peut dépasser la borne de la table.
         let vacant = LoginState {
             pair: LockoutState::default(),
             address: LockoutState::default(),
             identifier: identifier_slowdown::Slowdown::default(),
-            known,
+            escapes_slowdown: before.escapes_slowdown,
             seen: before.seen,
         };
         if after.pair != before.pair || matches!(verdict, Verdict::Granted) {
@@ -465,6 +547,7 @@ impl SessionService {
         if before.identifier == vacant.identifier && after.identifier != before.identifier {
             tx.login_attempts().trim_identifiers(now).await?;
         }
+        let alert = alert_change(&before.identifier, &after.identifier);
 
         match verdict {
             Verdict::Granted => {}
@@ -476,6 +559,7 @@ impl SessionService {
             Verdict::Slowed(retry_after) => {
                 tx.commit().await?;
                 self.journal_refusal(
+                    purpose,
                     targeted,
                     client,
                     Outcome::Denied(Reason::TooManyAttempts {
@@ -491,19 +575,31 @@ impl SessionService {
                 // tentative refusée, avec le compte visé seulement s'il existe (la raison est la
                 // même que l'identifiant existe ou non, et l'identifiant saisi n'est jamais
                 // retenu), puis le blocage qu'elle a éventuellement déclenché. **Par le
-                // regroupement des refus** (`AuditSink`) : la clé ne contient jamais l'adresse ni
-                // une durée. Une rafale de refus depuis de nombreuses adresses n'écrit qu'un
-                // premier refus et une synthèse, et ne chasse pas l'historique du journal.
+                // regroupement des refus** (`AuditSink`) : une rafale de refus depuis une même
+                // adresse n'écrit qu'un premier refus et des synthèses, et ne chasse pas
+                // l'historique du journal.
                 let reason = if Username::parse(username).is_err() {
                     Reason::InvalidIdentifier
                 } else {
                     Reason::InvalidCredentials
                 };
-                self.journal_refusal(targeted.clone(), client, Outcome::Denied(reason))
+                // Un mot de passe faux à la confirmation d'un acte est consigné par la route de
+                // l'acte (`device.remove`, « mot de passe actuel incorrect ») : pas une connexion
+                // refusée de plus.
+                if purpose.journals_wrong_password() {
+                    self.journal_refusal(
+                        purpose,
+                        targeted.clone(),
+                        client,
+                        Outcome::Denied(reason),
+                    )
                     .await;
+                }
                 if let Some(retry_after) = wait {
-                    let actor =
-                        Actor::new(targeted, Origin::client(Some(&client.name), &client.addr));
+                    let actor = Actor::new(
+                        targeted.clone(),
+                        Origin::client(Some(&client.name), &client.addr),
+                    );
                     self.sink
                         .record(
                             actor,
@@ -515,6 +611,9 @@ impl SessionService {
                         )
                         .await;
                 }
+                // L'épisode d'alerte qui commence ou finit avec cet échec (une fois par épisode,
+                // seulement pour un compte qui existe : rien pour un identifiant inexistant).
+                self.signal_alert(alert, targeted, client, wait).await;
                 return Err(match wait {
                     Some(retry_after) => LoginError::TooManyAttempts { retry_after },
                     None => LoginError::InvalidCredentials,
@@ -525,15 +624,28 @@ impl SessionService {
             // Inatteignable : `Granted` suppose un mot de passe vérifié sur un compte existant.
             return Err(LoginError::InvalidCredentials);
         };
-        if confirm {
-            // Confirmation d'un acte : les compteurs sont déjà écrits (le succès remet à zéro celui du
-            // couple, comme une connexion) ; ni session, ni adresse apprise, ni entrée de connexion.
-            tx.commit().await?;
-            return Ok(Granted::Confirmed);
-        }
+        Ok(Passed {
+            tx,
+            account,
+            now,
+            key,
+        })
+    }
 
-        // Connexion réussie : cette adresse devient (ou reste) connue de ce compte, et seulement
-        // ainsi (ADR-0022).
+    /// Le mot de passe est juste et le poste admis : cette adresse devient (ou reste) retenue pour
+    /// ce compte, et seulement ainsi (ADR-0022), la session s'ouvre, le poste à clé s'inscrit ou se
+    /// date. Une seule transaction avec les compteurs de `verify`.
+    async fn open_session(
+        &self,
+        passed: Passed,
+        client: &ClientInfo,
+    ) -> Result<LoginOutcome, LoginError> {
+        let Passed {
+            mut tx,
+            account,
+            now,
+            key,
+        } = passed;
         let remembered = tx.known_addresses().of_account(&account.id).await?;
         let remembered = known_address::learn(remembered, &client.addr, now);
         tx.known_addresses()
@@ -589,20 +701,44 @@ impl SessionService {
 
         let mut view = AccountView::from(&account);
         view.last_login_at = Some(now);
-        Ok(Granted::Session(Box::new(LoginOutcome {
+        Ok(LoginOutcome {
             token,
             session_id: session.id,
             expires_at: session.expires_at,
             account: view,
             device: device_status,
-        })))
+        })
     }
 
-    /// Écrit un refus de connexion au journal, par le regroupement des refus (une entrée puis une
-    /// synthèse au compte exact, BR-AUDIT-007). Ni l'identifiant saisi ni le mot de passe ne sont
+    /// Dit à l'alerte qu'un épisode commence ou finit pour ce compte. Un échec d'écriture ne fait
+    /// jamais échouer la connexion : il est tracé.
+    async fn signal_alert(
+        &self,
+        change: Option<AlertChange>,
+        targeted: Option<Username>,
+        client: &ClientInfo,
+        wait: Option<Duration>,
+    ) {
+        let (Some(change), Some(account), Some(security)) = (change, targeted, &self.security)
+        else {
+            return;
+        };
+        let origin = Origin::client(Some(&client.name), &client.addr);
+        let written = match change {
+            AlertChange::Started { .. } => security.alert_started(&account, origin, wait).await,
+            AlertChange::Ended => security.alert_ended(&account, origin).await,
+        };
+        if let Err(error) = written {
+            tracing::error!(%error, "entrée d'alerte non écrite");
+        }
+    }
+
+    /// Écrit un refus de connexion au journal, par le regroupement des refus (une entrée puis des
+    /// synthèses au compte exact, BR-AUDIT-007). Ni l'identifiant saisi ni le mot de passe ne sont
     /// retenus ; le compte visé n'est renseigné que s'il existe (BR-AUDIT-006).
     async fn journal_refusal(
         &self,
+        purpose: Purpose,
         targeted: Option<Username>,
         client: &ClientInfo,
         outcome: Outcome,
@@ -610,7 +746,7 @@ impl SessionService {
         self.sink
             .record(
                 Actor::new(targeted, Origin::client(Some(&client.name), &client.addr)),
-                AuditAction::Login,
+                purpose.action(),
                 Target::None,
                 outcome,
             )

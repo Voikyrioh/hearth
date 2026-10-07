@@ -163,6 +163,15 @@ pub enum Target {
     AgentVersion(String),
     /// Un poste de confiance, par le nom qu'il a annoncé (nettoyé et borné comme l'origine).
     Device(ClientName),
+    /// Début ou fin d'un épisode d'alerte sur un identifiant (HRT-24).
+    Alert(AlertPhase),
+}
+
+/// Le moment de l'épisode d'alerte que l'entrée consigne.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertPhase {
+    Started,
+    Ended,
 }
 
 impl Target {
@@ -174,6 +183,8 @@ impl Target {
             Self::Route(pattern) => Some((*pattern).to_owned()),
             Self::AgentVersion(version) => Some(format!("version {version}")),
             Self::Device(name) => Some(format!("poste {}", name.as_str())),
+            Self::Alert(AlertPhase::Started) => Some("début de l'alerte".to_owned()),
+            Self::Alert(AlertPhase::Ended) => Some("fin de l'alerte".to_owned()),
         }
     }
 }

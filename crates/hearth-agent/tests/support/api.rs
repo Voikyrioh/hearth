@@ -52,6 +52,7 @@ pub fn state_with(
         )),
         accounts: env.service.clone(),
         sessions: env.sessions.clone(),
+        security: env.security.clone(),
         operations: env.operations.clone(),
         audit: env.audit.clone(),
         sink: env.audit_sink.clone(),

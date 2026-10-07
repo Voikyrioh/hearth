@@ -105,12 +105,16 @@ async fn an_attack_of_hours_leaves_a_bounded_journal_with_the_exact_count_of_att
     // synthèse vaut ses répétitions.
     let counted: u32 = logins.iter().map(|record| record.repeat_count.max(1)).sum();
     assert_eq!(counted, minutes * per_minute);
-    // Et le nombre d'entrées reste borné par le temps, pas par le nombre de tentatives : environ
-    // trois par minute (un refus et sa synthèse, un blocage), 541 pour trois heures, soit environ
-    // 1 260 pour sept heures (le journal garde 50 000 entrées). Valeur exacte, déterministe.
+    // BR-AUDIT-007 modifiée (Q14, point 9) : l'adresse entre dans la clé de regroupement. Cette
+    // attaque change d'adresse à CHAQUE tentative : un groupe par adresse, donc plus rien ne se
+    // regroupe, et le journal compte une entrée par tentative (814 entrées pour 720 tentatives, contre
+    // 541 avec la fenêtre fixe sans adresse). C'est le risque noté par le détenteur ; la fenêtre qui
+    // s'allonge borne la même attaque depuis UNE adresse (`domain::audit::repeat`, test
+    // `three_hours_of_attack_from_one_address_write_a_few_dozen_entries_not_hundreds` : 48
+    // entrées pour 2 160 événements). Valeur exacte, déterministe.
     assert_eq!(
         records.len(),
-        541,
+        814,
         "entrées pour {} tentatives",
         minutes * per_minute
     );
@@ -200,7 +204,19 @@ async fn a_slowed_identifier_answers_a_known_address_like_a_missing_one_unless_t
     assert_eq!(marie, fantome);
     assert_eq!(marie_checks, fantome_checks);
     assert_eq!(marie_checks, 1, "même chemin : une vérification chacun");
-    // Seul le titulaire du mot de passe, depuis son poste connu, passe malgré l'attente.
+    // Marie vient de se tromper depuis son poste connu : ce n'est plus « du premier coup » et son
+    // adresse retenue seule ne suffit plus pendant l'alerte (ADR-0024, règle « 2 critères sur 3 »,
+    // BR-TRUST-001 b). Elle est ralentie, jamais bloquée : le bon mot de passe passe dès la fin de
+    // l'attente.
+    let attempt = env
+        .sessions
+        .login("marie", secret(PASSWORD), &client_at(CLIENT_ADDR))
+        .await;
+    assert!(
+        matches!(attempt, Err(LoginError::TooManyAttempts { .. })),
+        "{attempt:?}"
+    );
+    env.clock.advance(Duration::seconds(121));
     assert!(
         env.sessions
             .login("marie", secret(PASSWORD), &client_at(CLIENT_ADDR))

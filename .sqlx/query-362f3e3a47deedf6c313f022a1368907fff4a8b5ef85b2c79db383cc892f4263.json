@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM sessions\n             WHERE device_id = ?\n                OR (device_id IS NULL AND account_id = ? AND id <> ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "362f3e3a47deedf6c313f022a1368907fff4a8b5ef85b2c79db383cc892f4263"
+}
