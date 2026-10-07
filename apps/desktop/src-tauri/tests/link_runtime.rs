@@ -444,11 +444,10 @@ async fn notices_are_kept_until_acknowledged_and_reading_destroys_nothing() {
     std::fs::create_dir_all(&operations).unwrap();
     std::fs::write(operations.join(format!("{id}.json")), b"[{").unwrap();
     let (runtime, _) = open(rig.dir.path(), &rig.secrets).await;
-    // Attend que la tâche ait lu le fichier (elle le met de côté), puis lit.
-    eventually("fichier mis de côté", || {
-        operations.join(format!("{id}.json.corrupt")).exists()
-    })
-    .await;
+    // Attend l'avis lui-même. Le fichier mis de côté vient AVANT lui (la tâche met le fichier de
+    // côté en le lisant, puis seulement annonce la perte) : l'attendre ne garantit pas l'avis.
+    eventually("avis des suivis perdus", || !runtime.notices().is_empty()).await;
+    assert!(operations.join(format!("{id}.json.corrupt")).exists());
     let notices = runtime.notices();
     assert_eq!(notices.len(), 1);
     assert_eq!(notices[0].kind, NoticeKind::OperationsLost);
