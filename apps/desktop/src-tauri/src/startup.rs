@@ -92,16 +92,41 @@ impl<R: RunRegistry> Autostart for StartupEntry<R> {
     }
 }
 
+/// Ce que dit un code d'erreur du registre. `windows-registry` fabrique ses erreurs par
+/// `HRESULT::from_win32` : « introuvable » (valeur OU clé) est `0x80070002`, jamais le `2`
+/// que la bibliothèque standard classe `NotFound` (FIX:01M4B118DAFBQZYQX1E5ERY8CA : comparer le genre d'erreur
+/// d'entrée-sortie rendait toute valeur absente illisible).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistryFailure {
+    /// Valeur ou clé absente (`ERROR_FILE_NOT_FOUND`, `ERROR_PATH_NOT_FOUND`).
+    Absent,
+    /// Droits insuffisants (`ERROR_ACCESS_DENIED`).
+    AccessDenied,
+    /// Tout le reste (type inattendu, disque, etc.).
+    Other,
+}
+
+const FILE_NOT_FOUND: i32 = i32::from_ne_bytes(0x8007_0002_u32.to_ne_bytes());
+const PATH_NOT_FOUND: i32 = i32::from_ne_bytes(0x8007_0003_u32.to_ne_bytes());
+const ACCESS_DENIED: i32 = i32::from_ne_bytes(0x8007_0005_u32.to_ne_bytes());
+
+/// Classe le HRESULT d'une erreur du registre (fonction pure).
+pub const fn classify_registry_error(hresult: i32) -> RegistryFailure {
+    match hresult {
+        FILE_NOT_FOUND | PATH_NOT_FOUND => RegistryFailure::Absent,
+        ACCESS_DENIED => RegistryFailure::AccessDenied,
+        _ => RegistryFailure::Other,
+    }
+}
+
 #[cfg(windows)]
 pub use self::windows::WindowsRegistry;
 
 #[cfg(windows)]
 mod windows {
-    use std::io::ErrorKind;
-
     use windows_registry::{CURRENT_USER, Key, LOCAL_MACHINE, Type};
 
-    use super::{Hive, RunRegistry};
+    use super::{Hive, RegistryFailure, RunRegistry, classify_registry_error};
     use crate::domain::STARTUP_ENTRY_NAME;
     use crate::error::AppError;
 
@@ -109,8 +134,33 @@ mod windows {
     const APPROVED_KEY: &str =
         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
 
-    /// Le vrai registre de Windows (jamais utilisé par les tests locaux).
-    pub struct WindowsRegistry;
+    /// Le registre de Windows. Les chemins des deux clés sont réglables pour que le test du
+    /// runner de la CI travaille sur une sous-clé jetable, jamais sur la vraie clé `Run`.
+    pub struct WindowsRegistry {
+        run_key: String,
+        approved_key: String,
+    }
+
+    impl WindowsRegistry {
+        /// Les vraies clés de Windows.
+        pub fn new() -> Self {
+            Self::with_keys(RUN_KEY, APPROVED_KEY)
+        }
+
+        /// Clés de remplacement (sous `HKCU` / `HKLM`), pour les tests du runner de la CI.
+        pub fn with_keys(run_key: impl Into<String>, approved_key: impl Into<String>) -> Self {
+            Self {
+                run_key: run_key.into(),
+                approved_key: approved_key.into(),
+            }
+        }
+    }
+
+    impl Default for WindowsRegistry {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     fn root(hive: Hive) -> &'static Key {
         match hive {
@@ -119,32 +169,32 @@ mod windows {
         }
     }
 
-    fn io(error: impl Into<std::io::Error>) -> std::io::Error {
-        error.into()
+    fn failure<T>(result: &windows_registry::Result<T>) -> Option<RegistryFailure> {
+        result
+            .as_ref()
+            .err()
+            .map(|error| classify_registry_error(error.code().0))
     }
 
-    fn failed(error: std::io::Error) -> AppError {
-        AppError::Autostart(error.to_string())
+    fn failed(code: i32, message: impl std::fmt::Display) -> AppError {
+        AppError::Autostart(format!("registre : {message} (code {code:#010x})"))
     }
 
-    /// Absent (valeur ou clé) = `None`.
-    fn optional<T, E: Into<std::io::Error>>(result: Result<T, E>) -> Result<Option<T>, AppError> {
-        match result {
-            Ok(value) => Ok(Some(value)),
-            Err(error) => {
-                let error = io(error);
-                if error.kind() == ErrorKind::NotFound {
-                    Ok(None)
-                } else {
-                    Err(failed(error))
-                }
-            }
+    /// Absent (valeur ou clé) = `None` ; toute autre erreur reste une erreur typée.
+    fn optional<T>(result: windows_registry::Result<T>) -> Result<Option<T>, AppError> {
+        match failure(&result) {
+            None => Ok(result.ok()),
+            Some(RegistryFailure::Absent) => Ok(None),
+            Some(_) => Err(result.err().map_or_else(
+                || AppError::Autostart("registre".into()),
+                |error| failed(error.code().0, &error),
+            )),
         }
     }
 
     impl RunRegistry for WindowsRegistry {
         fn run_value(&self, hive: Hive) -> Result<Option<String>, AppError> {
-            match optional(root(hive).open(RUN_KEY))? {
+            match optional(root(hive).open(&self.run_key))? {
                 None => Ok(None),
                 Some(key) => optional(key.get_string(STARTUP_ENTRY_NAME)),
             }
@@ -152,40 +202,42 @@ mod windows {
 
         fn set_run_value(&self, value: &str) -> Result<(), AppError> {
             CURRENT_USER
-                .create(RUN_KEY)
+                .create(&self.run_key)
                 .and_then(|key| key.set_string(STARTUP_ENTRY_NAME, value))
-                .map_err(|error| failed(io(error)))
+                .map_err(|error| failed(error.code().0, &error))
         }
 
         fn remove_run_value(&self, hive: Hive) -> Result<(), AppError> {
-            let machine = hive == Hive::Machine;
-            let key = match optional(root(hive).options().write().open(RUN_KEY)) {
-                Ok(Some(key)) => key,
-                Ok(None) => return Ok(()),
-                // Sans droits d'administration, rien à retirer de la machine pour nous.
-                Err(_) if machine => return Ok(()),
-                Err(error) => return Err(error),
-            };
-            match optional(key.remove_value(STARTUP_ENTRY_NAME)) {
-                Ok(_) => Ok(()),
-                Err(_) if machine => Ok(()),
-                Err(error) => Err(error),
+            let opened = root(hive).options().write().open(&self.run_key);
+            // Sans droits d'administration, rien à retirer de la machine pour nous : seul
+            // « accès refusé » est avalé (et seulement sur la ruche de la machine).
+            if hive == Hive::Machine && failure(&opened) == Some(RegistryFailure::AccessDenied) {
+                return Ok(());
             }
+            let Some(key) = optional(opened)? else {
+                return Ok(());
+            };
+            let removed = key.remove_value(STARTUP_ENTRY_NAME);
+            if hive == Hive::Machine && failure(&removed) == Some(RegistryFailure::AccessDenied) {
+                return Ok(());
+            }
+            optional(removed).map(|_| ())
         }
 
         fn approved(&self, hive: Hive) -> Result<Option<Vec<u8>>, AppError> {
-            let Some(key) = optional(root(hive).open(APPROVED_KEY))? else {
+            let Some(key) = optional(root(hive).open(&self.approved_key))? else {
                 return Ok(None);
             };
             Ok(optional(key.get_value(STARTUP_ENTRY_NAME))?.map(|value| value.to_vec()))
         }
 
         fn set_approved_enabled(&self, bytes: &[u8]) -> Result<(), AppError> {
-            let Some(key) = optional(CURRENT_USER.options().write().open(APPROVED_KEY))? else {
+            let Some(key) = optional(CURRENT_USER.options().write().open(&self.approved_key))?
+            else {
                 return Ok(());
             };
             key.set_bytes(STARTUP_ENTRY_NAME, Type::Bytes, bytes)
-                .map_err(|error| failed(io(error)))
+                .map_err(|error| failed(error.code().0, &error))
         }
     }
 }
@@ -193,6 +245,13 @@ mod windows {
 /// Hors Windows (le client n'y existe pas) : le démarrage est simplement inaccessible.
 #[cfg(not(windows))]
 pub struct WindowsRegistry;
+
+#[cfg(not(windows))]
+impl WindowsRegistry {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 #[cfg(not(windows))]
 impl RunRegistry for WindowsRegistry {
@@ -225,5 +284,5 @@ pub fn current() -> Result<StartupEntry<WindowsRegistry>, AppError> {
         .into_os_string()
         .into_string()
         .map_err(|_| AppError::Autostart("chemin de l'application non UTF-8".into()))?;
-    Ok(StartupEntry::new(WindowsRegistry, exe))
+    Ok(StartupEntry::new(WindowsRegistry::new(), exe))
 }

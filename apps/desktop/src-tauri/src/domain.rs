@@ -30,8 +30,16 @@ pub fn startup_command(exe: &str) -> Result<String, StartupCommandError> {
     if exe.contains('"') {
         return Err(StartupCommandError::QuoteInPath);
     }
-    Ok(format!("\"{exe}\" {MINIMIZED_FLAG}"))
+    let command = format!("\"{exe}\" {MINIMIZED_FLAG}");
+    // Windows ignore (sans erreur) une ligne de la clé `Run` de plus de 260 caractères.
+    if command.chars().count() > RUN_VALUE_MAX_CHARS {
+        return Err(StartupCommandError::TooLong);
+    }
+    Ok(command)
 }
+
+/// Longueur maximale d'une ligne de commande de la clé `Run`.
+pub const RUN_VALUE_MAX_CHARS: usize = 260;
 
 /// Pourquoi la ligne de démarrage ne peut pas être fabriquée.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -40,6 +48,10 @@ pub enum StartupCommandError {
     EmptyPath,
     #[error("le chemin de l'application contient un guillemet")]
     QuoteInPath,
+    #[error(
+        "le chemin de l'application est trop long pour le démarrage de Windows (260 caractères)"
+    )]
+    TooLong,
 }
 
 /// Forme d'une valeur de démarrage déjà écrite.
