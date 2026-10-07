@@ -63,13 +63,12 @@ Une entrée :
 | `sessions.revoke` | Fermeture des sessions | |
 | `accounts.read` | Consultation des comptes | Seulement refusée. |
 | `audit.read` | Tentative de lecture du journal | Seulement refusée. |
-| `attack_mode.enable` | Mode attaque activé | Un administrateur, avec mot de passe et preuve de clé (BR-TRUST-028, 030). Compte : l'administrateur ; origine : son poste. |
-| `attack_mode.disable` | Mode attaque désactivé | Un administrateur (même garde), ou la ligne de commande du serveur (origine « ligne de commande ») (BR-TRUST-018, 030). |
+| `attack_mode.enable` | Mode attaque activé | Un administrateur, avec mot de passe et preuve de clé (BR-TRUST-028, 030). Compte : l'administrateur ; origine : son poste. Aussi, « refusé » ou « échoué », une activation refusée (`403` lecture seule, `409` sans preuve de clé : « mode attaque : poste non reconnu », mot de passe faux) : un seul code par geste. |
+| `attack_mode.disable` | Mode attaque désactivé | Un administrateur (même garde), ou la ligne de commande du serveur (origine « ligne de commande ») (BR-TRUST-018, 030). Aussi, « refusé » ou « échoué », une désactivation refusée. |
 | `attack_mode.auto_disable` | Mode attaque arrêté automatiquement | 30 minutes sans tentative refusée ; origine « système » (BR-TRUST-019, 030). |
 | `attack_mode.suspend` | Mode attaque suspendu (redémarrage de la machine) | La machine vient de démarrer ; origine « système » (BR-TRUST-020, 031). |
 | `attack_mode.resume` | Mode attaque repris | Fin de la fenêtre de 30 minutes ; origine « système » (BR-TRUST-031). |
 | `attack_mode.trial` | Essai unique en mode attaque | Adresse seule ou clé seule ; cible « essai sur l'adresse retenue » ou « essai sur la clé du poste » ; réussi, ou refusé « identifiants incorrects » (BR-TRUST-032). Compte : le compte visé (qui existe, par construction). 16 au plus par compte et par activation. |
-| `attack_mode.change` | Changement du mode attaque | Un changement refusé (`403` lecture seule, `409` sans preuve de clé : « mode attaque : poste non reconnu ») ou raté (mot de passe faux), consigné par la couche d'accès. |
 | `session.refused` | Session refusée (mode attaque) | Une session valide présentée seule ; regroupée par adresse (BR-AUDIT-007), jamais une entrée par requête ; « refusé : mode attaque : poste non reconnu ». |
 | `device.enroll` | Poste de confiance enregistré | Connexion par mot de passe qui inscrit la clé d'un poste (BR-TRUST-004). Compte : celui qui se connecte ; origine : le poste ; aucune cible. |
 | `device.remove` | Poste de confiance retiré | Retrait d'un poste par son titulaire (BR-TRUST-022). Cible : « poste {nom du poste retiré} ». |

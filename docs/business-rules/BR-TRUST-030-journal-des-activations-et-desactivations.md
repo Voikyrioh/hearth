@@ -11,7 +11,7 @@ maj: 2026-10-07
 # BR-TRUST-030 : Le journal d'activité enregistre toute activation et désactivation du mode attaque, manuelle ou automatique
 
 ## Règle
-Une entrée dans la transaction du changement : `attack_mode.enable` (administrateur et son poste), `attack_mode.disable` (administrateur, ou origine « ligne de commande »), `attack_mode.auto_disable` (origine **système**, `origin_kind = 'system'`, migration 0006). Un changement refusé (`403`, `409`, mot de passe faux) est consigné par la couche d'accès sous `attack_mode.change`, résultat « refusé » ou « échoué ». Activer un mode actif et désactiver un mode éteint n'écrivent rien. Aucun champ libre, aucun secret : types fermés (`AuditAction`, `Reason`, `Target`).
+Une entrée dans la transaction du changement : `attack_mode.enable` (administrateur et son poste), `attack_mode.disable` (administrateur, ou origine « ligne de commande »), `attack_mode.auto_disable` (origine **système**, `origin_kind = 'system'`, migration 0006). Un changement refusé (`403`, `409`, mot de passe faux) est consigné par la couche d'accès sous le code du geste demandé (`attack_mode.enable` ou `attack_mode.disable`, lu dans le corps), résultat « refusé » ou « échoué » : un seul code par geste. Activer un mode actif et désactiver un mode éteint n'écrivent rien. Aucun champ libre, aucun secret : types fermés (`AuditAction`, `Reason`, `Target`).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/audit/{action.rs, event.rs}` (`AuditAction::AttackMode*`, `Origin::System`).

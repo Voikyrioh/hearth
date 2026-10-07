@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO attack_trials (activation_id, account_id, kind, subject, used_at, outcome)\n                 VALUES (?, ?, ?, ?, ?, 'failed')\n                 ON CONFLICT (activation_id, account_id, kind, subject)\n                 DO UPDATE SET outcome = 'failed', used_at = excluded.used_at\n                 WHERE attack_trials.outcome <> 'failed'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "14224effdc90cb33f61c843054ffad012b6c811af5beb3d150a3a25600022615"
+}

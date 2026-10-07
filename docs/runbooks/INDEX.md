@@ -6,6 +6,7 @@ Procédures opérationnelles : installation, diagnostics, recovery.
 - [Mettre l'agent à jour à distance](./mettre-a-jour-agent.md) — clé de signature, publier une version, lancer, suivre, retour automatique, reprise à la main
 - [Publier une version du client](./publier-une-version-du-client.md) — paire de clés minisign, secrets du dépôt, flux `publish-client` (à la main, brouillon), premier essai, dépannage
 - [Récupérer l'accès administrateur](./recuperer-acces-administrateur.md) — aucun mot de passe administrateur connu, ou plus aucun compte
+- [Sortir du mode attaque depuis le serveur](./sortir-du-mode-attaque.md) — `hearth-agent attack-mode status|off`, qui peut le lancer (qui lit le dossier de données), autres sorties
 
 Structure : `{titre-court}.md` avec sections (prérequis, étapes, diagnostic, rollback).
 

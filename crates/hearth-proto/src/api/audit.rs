@@ -42,14 +42,11 @@ pub mod action {
     pub const ATTACK_MODE_RESUME: &str = "attack_mode.resume";
     /// L'essai unique d'un poste qui n'a qu'un critère, en mode attaque (HRT-25).
     pub const ATTACK_MODE_TRIAL: &str = "attack_mode.trial";
-    /// Un changement du mode attaque refusé ou raté : l'action que la couche d'accès consigne
-    /// (HRT-25). Les changements réussis sont `attack_mode.enable` et `attack_mode.disable`.
-    pub const ATTACK_MODE_CHANGE: &str = "attack_mode.change";
     /// Une session présentée seule, refusée en mode attaque (HRT-25).
     pub const SESSION_REFUSED: &str = "session.refused";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 23] = [
+    pub const ALL: [&str; 22] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -71,7 +68,6 @@ pub mod action {
         ATTACK_MODE_SUSPEND,
         ATTACK_MODE_RESUME,
         ATTACK_MODE_TRIAL,
-        ATTACK_MODE_CHANGE,
         SESSION_REFUSED,
     ];
 }

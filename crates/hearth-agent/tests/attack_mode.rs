@@ -224,11 +224,18 @@ async fn a_key_alone_after_an_address_change_has_exactly_one_trial() {
     );
     let again = keyed(&env, &key, "marie", PASSWORD, "10.5.5.5").await;
     assert!(again.is_ok(), "adresse retenue + clé : deux critères");
-    // Une autre adresse encore, la clé seule : l'essai de la clé est consommé.
+    // Une autre adresse encore, la clé seule : un essai RÉUSSI ne consomme rien (BR-TRUST-014), le
+    // poste est encore reconnu à sa prochaine connexion.
     let third = keyed(&env, &key, "marie", PASSWORD, "10.6.6.6").await;
+    assert!(third.is_ok(), "{:?}", third.err());
+    // Seul un mot de passe faux, ensuite, depuis une clé seule marque l'essai raté (le succès d'avant devient
+    // un échec) : la clé est alors bloquée jusqu'à la fin du mode.
+    let miss = keyed(&env, &key, "marie", WRONG, "10.7.7.7").await;
+    assert!(refused(&miss));
+    let blocked = keyed(&env, &key, "marie", PASSWORD, "10.8.8.8").await;
     assert!(
-        refused(&third),
-        "un seul essai par critère et par activation"
+        refused(&blocked),
+        "un seul essai raté par critère et par activation"
     );
 }
 
@@ -279,10 +286,16 @@ async fn an_address_alone_without_key_has_exactly_one_trial() {
         .await
         .unwrap();
     assert_eq!(trial, ("address".into(), "succeeded".into()));
-    // Son essai est consommé : une deuxième connexion depuis la même adresse est bloquée.
+    // Un essai réussi ne consomme rien (BR-TRUST-014) : le titulaire qui se reconnecte pendant la même
+    // activation (session perdue) entre encore.
     let second = plain(&env, "paul", PASSWORD, CLIENT_ADDR).await;
-    assert!(refused(&second));
-    // Mais la session ouverte par l'essai fonctionne (session + adresse retenue).
+    assert!(second.is_ok(), "{:?}", second.err());
+    let still: (String,) = sqlx::query_as("SELECT outcome FROM attack_trials")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(still.0, "succeeded");
+    // La session ouverte par l'essai fonctionne (session + adresse retenue).
     let token = first.unwrap().token.encode();
     assert!(
         env.sessions
@@ -679,13 +692,13 @@ async fn the_reactivation_guard_does_not_depend_on_the_wall_clock_on_the_same_bo
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn two_simultaneous_attempts_on_the_same_trial_only_one_consumes_it() {
+async fn two_simultaneous_attempts_on_the_same_trial_never_give_two_free_failures() {
     let env = std::sync::Arc::new(booted().await);
     enable(&env).await;
     // Douze comptes, chacun avec sa clé et SANS adresse retenue depuis les adresses d'attaque : la clé
     // seule a un essai. Deux tentatives simultanées (deux adresses, donc deux tours de parole distincts)
-    // visent le même essai, avec le bon mot de passe.
-    let mut winners = Vec::new();
+    // visent le même essai. Tours pairs : deux mots de passe FAUX ; tours impairs : deux mots de passe
+    // justes.
     for round in 0..12_u32 {
         let name = format!("user-{round}");
         // Compte et poste inscrits AVANT l'activation : on les inscrit en désactivant un instant.
@@ -698,34 +711,43 @@ async fn two_simultaneous_attempts_on_the_same_trial_only_one_consumes_it() {
         // Une activation distincte à chaque tour : trente minutes passent.
         pass(&env, Duration::minutes(31));
         enable(&env).await;
+        let password = if round % 2 == 0 { WRONG } else { PASSWORD };
         let (a, b) = (stranger(2 * round), stranger(2 * round + 1));
         let first = {
             let (env, key, name) = (env.clone(), key.clone(), name.clone());
-            tokio::spawn(async move { keyed(&env, &key, &name, PASSWORD, &a).await.is_ok() })
+            tokio::spawn(async move { keyed(&env, &key, &name, password, &a).await.is_ok() })
         };
         let second = {
             let (env, key, name) = (env.clone(), key.clone(), name.clone());
-            tokio::spawn(async move { keyed(&env, &key, &name, PASSWORD, &b).await.is_ok() })
+            tokio::spawn(async move { keyed(&env, &key, &name, password, &b).await.is_ok() })
         };
         let (first, second) = (first.await.unwrap(), second.await.unwrap());
-        winners.push(u8::from(first) + u8::from(second));
-        let consumed: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM attack_trials WHERE account_id IN (SELECT id FROM accounts WHERE username = ?)",
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT outcome FROM attack_trials WHERE account_id IN (SELECT id FROM accounts WHERE username = ?)",
+        )
+        .bind(&name)
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+        env.audit_recorder.flush_all().await;
+        let entries: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_events WHERE action = 'attack_mode.trial' AND account = ?",
         )
         .bind(&name)
         .fetch_one(env.db.pool())
         .await
         .unwrap();
-        assert_eq!(
-            consumed, 1,
-            "tour {round} : l'essai n'est consommé qu'une fois"
-        );
+        assert_eq!(rows.len(), 1, "tour {round} : une seule ligne d'essai");
+        assert_eq!(entries, 1, "tour {round} : un seul essai consigné");
+        if round % 2 == 0 {
+            assert!(!first && !second, "tour {round}");
+            assert_eq!(rows[0].0, "failed", "tour {round}");
+        } else {
+            // Un essai réussi ne consomme rien : les deux entrent.
+            assert!(first && second, "tour {round}");
+            assert_eq!(rows[0].0, "succeeded", "tour {round}");
+        }
     }
-    assert_eq!(
-        winners,
-        vec![1; 12],
-        "une seule tentative passe à chaque tour"
-    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1201,6 +1223,23 @@ async fn an_unrecognised_device_cannot_tell_the_mode_the_existence_of_the_identi
                 }
                 let observed = observe(situation, identifier, password).await;
                 let decoy = u64::from(identifier == "ghost");
+                // Le journal (lisible des seuls administrateurs) dit « poste non reconnu » pour une
+                // connexion bloquée sans essai en mode attaque ; tout le reste est identique.
+                let journal = if matches!(situation, Situation::Attack) {
+                    reference
+                        .journal
+                        .iter()
+                        .map(|(action, outcome, _)| {
+                            (
+                                action.clone(),
+                                outcome.clone(),
+                                Some("mode attaque : poste non reconnu".to_owned()),
+                            )
+                        })
+                        .collect()
+                } else {
+                    reference.journal.clone()
+                };
                 assert_eq!(
                     observed.hashed,
                     (1, decoy),
@@ -1215,7 +1254,7 @@ async fn an_unrecognised_device_cannot_tell_the_mode_the_existence_of_the_identi
                         hashed: reference.hashed,
                         wire: reference.wire.clone(),
                         counters: (reference.counters.0.clone(), reference.counters.1.clone()),
-                        journal: reference.journal.clone(),
+                        journal,
                         sessions: reference.sessions,
                     },
                     "{situation:?} {identifier} {password}"

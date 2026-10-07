@@ -11,7 +11,7 @@ maj: 2026-10-07
 # BR-TRUST-015 : Si l'essai unique est raté, le poste est bloqué et ne peut plus essayer tant que le mode attaque dure
 
 ## Règle
-Un mot de passe faux sur l'essai unique : l'essai est consommé (`failed`), les compteurs de connexion avancent comme pour tout mot de passe faux, l'entrée `attack_mode.trial` « refusé, identifiants incorrects » est écrite. Toute tentative suivante depuis ce critère a `password_counts = false` : le mot de passe, **même juste**, est traité comme faux, jusqu'à la fin de l'activation (fin manuelle, automatique, ou commande locale). Le poste n'est pas banni au-delà : à la fin du mode, le chemin ordinaire revient.
+Un mot de passe faux sur l'essai unique (ou, ensuite, depuis un critère dont l'essai avait réussi) : l'essai est consommé (`failed`, la ligne réussie d'avant est mise à jour), les compteurs de connexion avancent comme pour tout mot de passe faux, l'entrée `attack_mode.trial` « refusé, identifiants incorrects » est écrite. Toute tentative suivante depuis ce critère a `password_counts = false` : le mot de passe, **même juste**, est traité comme faux, jusqu'à la fin de l'activation (fin manuelle, automatique, ou commande locale). Le poste n'est pas banni au-delà : à la fin du mode, le chemin ordinaire revient.
 
 Un attaquant peut brûler l'essai d'un poste légitime en usurpant son adresse (au plus un essai par adresse retenue) : c'est le risque assumé de Q11, borné par BR-TRUST-012, et c'est ce que les voies de BR-TRUST-027 couvrent.
 

@@ -11,7 +11,7 @@ maj: 2026-10-07
 # BR-TRUST-017 : Un poste non reconnu reçoit le refus générique d'un mot de passe faux et ne distingue rien (mode actif ou non, essai accordé ou refusé, identifiant existant ou non)
 
 ## Règle
-Tous les refus d'un poste non reconnu sortent par le chemin existant du mot de passe faux : la règle fixe deux booléens (`escapes_slowdown`, `password_counts`), le cas d'usage calcule `verified' = verified && password_counts` avant la décision existante. Même code, même corps, mêmes en-têtes, même attente annoncée, mêmes calculs (Argon2 toujours, vérification de la signature sous la clé fournie), mêmes compteurs, mêmes écritures qu'un mot de passe faux ; le journal garde la raison « identifiants incorrects » (jamais « poste non reconnu » pour une connexion). `/hello` et le défi ne changent pas.
+Tous les refus d'un poste non reconnu sortent par le chemin existant du mot de passe faux : la règle fixe deux booléens (`escapes_slowdown`, `password_counts`), le cas d'usage calcule `verified' = verified && password_counts` avant la décision existante. Même code, même corps, mêmes en-têtes, même attente annoncée, mêmes calculs (Argon2 toujours, vérification de la signature sous la clé fournie), mêmes compteurs, mêmes écritures de compteurs qu'un mot de passe faux ; le journal (lisible des seuls administrateurs) porte la raison « mode attaque : poste non reconnu » pour une connexion bloquée sans essai (aucun critère, essai déjà raté) et « identifiants incorrects » sinon : c'est une écriture de journal, pas une réponse. `/hello` et le défi ne changent pas.
 
 Une session refusée reçoit la même réponse qu'une session expirée (BR-TRUST-013).
 

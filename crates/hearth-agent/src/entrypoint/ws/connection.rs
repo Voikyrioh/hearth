@@ -400,13 +400,23 @@ async fn push_security(
         tracing::warn!("état de sécurité non convertible, pas envoyé");
         return true;
     };
-    if last.as_ref() == Some(&view) {
+    // `resumes_in_s` n'est pas un changement : il baisse à chaque lecture pendant la suspension (30
+    // minutes), le client compte à rebours depuis la valeur reçue. Il part avec le prochain vrai changement.
+    let without_countdown = |view: &SecurityView| {
+        let mut view = view.clone();
+        view.attack_mode.resumes_in_s = None;
+        view
+    };
+    if last
+        .as_ref()
+        .is_some_and(|sent| without_countdown(sent) == without_countdown(&view))
+    {
         return true;
     }
     if matches!(trigger, Push::AttackModeChange)
-        && last
-            .as_ref()
-            .is_some_and(|sent| sent.attack_mode == view.attack_mode)
+        && last.as_ref().is_some_and(|sent| {
+            without_countdown(sent).attack_mode == without_countdown(&view).attack_mode
+        })
     {
         return true;
     }

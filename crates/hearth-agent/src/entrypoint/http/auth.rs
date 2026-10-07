@@ -10,6 +10,7 @@
 
 use std::net::SocketAddr;
 
+use axum::body::Body;
 use axum::extract::{ConnectInfo, FromRequestParts, Request, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
@@ -109,7 +110,7 @@ fn forbidden_message(action: Option<AuditAction>) -> &'static str {
     match action {
         Some(AuditAction::AuditRead) => "Tu n'as pas la permission de lire le journal d'activité",
         Some(AuditAction::AgentUpdate) => "Seul un administrateur peut mettre à jour l'agent",
-        Some(AuditAction::AttackModeChange) => {
+        Some(AuditAction::AttackModeEnable | AuditAction::AttackModeDisable) => {
             "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs."
         }
         _ => "Tu n'as pas la permission pour accéder à la gestion des comptes",
@@ -215,9 +216,36 @@ fn origin_of(parts: &Parts) -> Origin {
     Origin::client(name, &addr)
 }
 
+/// La route d'activation et de désactivation du mode attaque : une seule route, deux gestes, deux
+/// actions du journal.
+const ATTACK_MODE_ROUTE: &str = "/security/attack-mode";
+
+/// Pour la route du mode attaque, l'action du journal est celle du geste demandé (`active` du corps :
+/// `attack_mode.enable` ou `attack_mode.disable`), pour que ses refus et ses échecs soient consignés sous
+/// le bon code. Le corps est relu tel quel par le handler.
+async fn with_gesture(mut guard: GuardState, body: Body) -> (GuardState, Body) {
+    if guard.route != ATTACK_MODE_ROUTE {
+        return (guard, body);
+    }
+    let bytes = axum::body::to_bytes(body, 1 << 20)
+        .await
+        .unwrap_or_default();
+    let active = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| value.get("active")?.as_bool())
+        .unwrap_or(true);
+    guard.audit = Some(if active {
+        AuditAction::AttackModeEnable
+    } else {
+        AuditAction::AttackModeDisable
+    });
+    (guard, Body::from(bytes))
+}
+
 /// La couche d'accès d'une route non publique.
 pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next) -> Response {
     let (mut parts, body) = request.into_parts();
+    let (guard, body) = with_gesture(guard, body).await;
     let session = match authenticate(&guard.app, &parts).await {
         Ok(session) => session,
         Err(error) => return error.into_response(),

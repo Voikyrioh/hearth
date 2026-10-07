@@ -693,36 +693,40 @@ impl SessionService {
         }
         let alert = alert_change(&before.identifier, &after.identifier);
 
-        // L'essai unique est consommé dans la transaction de la tentative, réussi ou raté : jamais pour
-        // une tentative refusée avant d'avoir été comptée (`Blocked`).
+        // L'essai unique : seul un essai RATÉ le consomme (BR-TRUST-015) ; un essai réussi laisse le poste
+        // reconnu (BR-TRUST-014). Écrit dans la transaction de la tentative, jamais pour une tentative
+        // refusée avant d'avoir été comptée (`Blocked`) ; consigné au journal quand la ligne change.
         let mut journal = Pending::default();
         if let (Some(kind), Some((_, subject)), Some(activation), Some(account_id)) =
             (standing.trial, &trial_subject, &activation, &target_id)
             && !matches!(verdict, Verdict::Blocked(_))
         {
             let succeeded = matches!(verdict, Verdict::Granted);
-            tx.attack_mode()
+            let changed = tx
+                .attack_mode()
                 .record_trial(activation, account_id, kind, subject, now, succeeded)
                 .await?;
-            journal
-                .record(
-                    &mut *tx,
-                    AuditEvent::new(
-                        now,
-                        Actor::new(
-                            targeted.clone(),
-                            Origin::client(Some(&client.name), &client.addr),
+            if changed {
+                journal
+                    .record(
+                        &mut *tx,
+                        AuditEvent::new(
+                            now,
+                            Actor::new(
+                                targeted.clone(),
+                                Origin::client(Some(&client.name), &client.addr),
+                            ),
+                            AuditAction::AttackModeTrial,
+                            Target::Trial(kind),
+                            if succeeded {
+                                Outcome::Succeeded
+                            } else {
+                                Outcome::Denied(Reason::InvalidCredentials)
+                            },
                         ),
-                        AuditAction::AttackModeTrial,
-                        Target::Trial(kind),
-                        if succeeded {
-                            Outcome::Succeeded
-                        } else {
-                            Outcome::Denied(Reason::InvalidCredentials)
-                        },
-                    ),
-                )
-                .await?;
+                    )
+                    .await?;
+            }
         }
 
         match verdict {
@@ -756,8 +760,13 @@ impl SessionService {
                 // regroupement des refus** (`AuditSink`) : une rafale de refus depuis une même
                 // adresse n'écrit qu'un premier refus et des synthèses, et ne chasse pas
                 // l'historique du journal.
+                // Mode attaque : une connexion bloquée sans essai (aucun critère, ou essai déjà raté)
+                // porte la raison « poste non reconnu » au journal (conception 5.9, lisible des seuls
+                // administrateurs) ; la réponse au client, elle, est celle d'un mot de passe faux.
                 let reason = if Username::parse(username).is_err() {
                     Reason::InvalidIdentifier
+                } else if attacking && !standing.password_counts {
+                    Reason::NotRecognized
                 } else {
                     Reason::InvalidCredentials
                 };

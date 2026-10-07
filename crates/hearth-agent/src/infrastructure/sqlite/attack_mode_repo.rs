@@ -209,7 +209,8 @@ impl AttackModeTx for SqliteUnitOfWork {
         let kind = kind_code(kind);
         let found = sqlx::query_scalar!(
             r#"SELECT COUNT(*) AS "count!: i64" FROM attack_trials
-               WHERE activation_id = ? AND account_id = ? AND kind = ? AND subject = ?"#,
+               WHERE activation_id = ? AND account_id = ? AND kind = ? AND subject = ?
+                 AND outcome = 'failed'"#,
             activation_id,
             account.as_str(),
             kind,
@@ -229,24 +230,43 @@ impl AttackModeTx for SqliteUnitOfWork {
         subject: &str,
         at: OffsetDateTime,
         succeeded: bool,
-    ) -> Result<(), StoreError> {
+    ) -> Result<bool, StoreError> {
         let kind = kind_code(kind);
         let at = format_date(RESOURCE, at)?;
-        let outcome = if succeeded { "succeeded" } else { "failed" };
-        sqlx::query!(
-            "INSERT INTO attack_trials (activation_id, account_id, kind, subject, used_at, outcome)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            activation_id,
-            account.as_str(),
-            kind,
-            subject,
-            at,
-            outcome
-        )
-        .execute(&mut *self.tx)
-        .await
+        let result = if succeeded {
+            // Un essai réussi ne consomme rien : la ligne n'est écrite qu'une fois, un deuxième succès
+            // ne la change pas.
+            sqlx::query!(
+                "INSERT INTO attack_trials (activation_id, account_id, kind, subject, used_at, outcome)
+                 VALUES (?, ?, ?, ?, ?, 'succeeded')
+                 ON CONFLICT (activation_id, account_id, kind, subject) DO NOTHING",
+                activation_id,
+                account.as_str(),
+                kind,
+                subject,
+                at
+            )
+            .execute(&mut *self.tx)
+            .await
+        } else {
+            // Un essai raté consomme l'essai : une ligne neuve, ou le succès d'avant passe en raté.
+            sqlx::query!(
+                "INSERT INTO attack_trials (activation_id, account_id, kind, subject, used_at, outcome)
+                 VALUES (?, ?, ?, ?, ?, 'failed')
+                 ON CONFLICT (activation_id, account_id, kind, subject)
+                 DO UPDATE SET outcome = 'failed', used_at = excluded.used_at
+                 WHERE attack_trials.outcome <> 'failed'",
+                activation_id,
+                account.as_str(),
+                kind,
+                subject,
+                at
+            )
+            .execute(&mut *self.tx)
+            .await
+        }
         .map_err(storage(RESOURCE))?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     async fn purge_stale_trials(&mut self) -> Result<u64, StoreError> {

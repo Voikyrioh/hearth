@@ -9,7 +9,7 @@ Maj : 2026-10-07. Point d'entrée obligatoire des agents (recherche, dev, concep
 | [open-api/](./open-api/INDEX.md) | 29 endpoints : session (dont le défi de la clé d'appareil), postes de confiance, sécurité (dont le mode attaque), compte, mesures (machine, historique, flux WebSocket), audit, mise à jour de l'agent | avant de toucher une route / un client |
 | [components/](./components/INDEX.md) | 78 fiches : atomes, molécules, organismes (dont les cartes du tableau de bord), gabarit, pages, règle `needsLink` | avant de créer un composant / une page |
 | [bugs/](./bugs/INDEX.md) | 15 fiches FIX:ULID (installation de l'agent : sqlite, wget, activation au démarrage, CAP_MKNOD, purge, dossier de données ; liaison : adresses MAC, `logout` concurrent, « se souvenir » sans secret, identifiant du carnet, fin de session devançant la réponse) | avant de modifier une zone marquée `FIX:` |
-| [runbooks/](./runbooks/INDEX.md) | Procédures opérationnelles : installer l'agent, le mettre à jour à distance, publier une version du client, récupérer l'accès administrateur | accès perdu, diagnostics |
+| [runbooks/](./runbooks/INDEX.md) | Procédures opérationnelles : installer l'agent, le mettre à jour à distance, publier une version du client, récupérer l'accès administrateur, sortir du mode attaque | accès perdu, diagnostics |
 
 ## Globales (orga-global)
 

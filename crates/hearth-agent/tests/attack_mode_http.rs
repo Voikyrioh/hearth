@@ -136,11 +136,18 @@ async fn a_read_only_account_is_refused_with_403_and_the_refusal_is_journaled() 
         "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs."
     );
     assert_eq!(active(&env).await, 0);
-    let refused = journal_of(&env, "attack_mode.change").await;
+    // Un seul code par geste : le refus de l'activation est consigné « refusé » sous `attack_mode.enable`,
+    // celui de la désactivation sous `attack_mode.disable`.
+    let refused = journal_of(&env, "attack_mode.enable").await;
     assert_eq!(refused.len(), 1);
     assert_eq!(refused[0].0, "denied");
     assert_eq!(refused[0].1.as_deref(), Some("lucas"));
-    assert!(journal_of(&env, "attack_mode.enable").await.is_empty());
+    let body = attack_mode_body(&api, &key, "lucas", &token, false, PASSWORD).await;
+    assert_eq!(put(&api, &token, &body).await.status, StatusCode::FORBIDDEN);
+    let refused = journal_of(&env, "attack_mode.disable").await;
+    assert_eq!(refused.len(), 1);
+    assert_eq!(refused[0].0, "denied");
+    assert_eq!(journal_of(&env, "attack_mode.enable").await.len(), 1);
 }
 
 #[tokio::test]
@@ -180,15 +187,17 @@ async fn an_administrator_without_a_proved_key_is_refused_with_409_a_typed_reaso
             .await
             .unwrap();
     assert_eq!(state_after, state_before, "aucune écriture");
-    assert!(journal_of(&env, "attack_mode.enable").await.is_empty());
-    // Les refus sont consignés, comme un refus de droits.
-    let refused = journal_of(&env, "attack_mode.change").await;
-    assert_eq!(refused.len(), 2, "regroupés : une entrée puis une synthèse");
-    assert!(refused.iter().all(|entry| entry.0 == "denied"));
-    assert_eq!(
-        refused[0].2.as_deref(),
-        Some("mode attaque : poste non reconnu")
-    );
+    // Les refus sont consignés « refusé », sous le code du geste demandé.
+    for action in ["attack_mode.enable", "attack_mode.disable"] {
+        let refused = journal_of(&env, action).await;
+        assert_eq!(refused.len(), 1, "{action}");
+        assert_eq!(refused[0].0, "denied", "{action}");
+        assert_eq!(
+            refused[0].2.as_deref(),
+            Some("mode attaque : poste non reconnu"),
+            "{action}"
+        );
+    }
     // Aucune tentative de mot de passe n'a été faite : sans preuve, la session volée ne devine rien.
     assert_eq!(
         scalar(
@@ -346,7 +355,13 @@ async fn every_kind_of_wrong_proof_is_refused_with_409_and_leaves_the_mode_off()
     );
 
     assert_eq!(active(&env).await, 0);
-    assert!(journal_of(&env, "attack_mode.enable").await.is_empty());
+    assert!(
+        journal_of(&env, "attack_mode.enable")
+            .await
+            .iter()
+            .all(|entry| entry.0 == "denied"),
+        "aucune activation réussie"
+    );
 }
 
 #[tokio::test]
@@ -804,4 +819,42 @@ async fn stopping_the_service_writes_the_alert_entry_still_in_flight() {
         1,
         "l'entrée de début d'alerte n'est pas perdue à l'arrêt"
     );
+}
+
+#[tokio::test]
+async fn the_suspension_countdown_alone_never_sends_a_new_security_message() {
+    let env = env().await;
+    let agent = https::start_booted(&env, metering(), env.boot.clone()).await;
+    env.create("marie", Role::Admin).await;
+    let marie = token_from(&env, "marie", "127.0.0.1").await;
+    env.attack.on_start().await.unwrap();
+    env.attack.change(true, by(), EndHow::Manual).await.unwrap();
+    env.boot.set_id(Some("boot-2"));
+    env.boot.set_uptime(Duration::minutes(2));
+    env.attack.on_start().await.unwrap();
+    let mut stream = open_with(&agent, &json!({ "type": "auth", "token": marie }))
+        .await
+        .expect("marie");
+    let SecurityMessage::Security(first) = stream.next_security().await;
+    assert_eq!(first.attack_mode.resumes_in_s, Some(1680));
+    // Le temps écoulé avance de dix minutes, des dizaines de contrôles de la session passent (50 ms) :
+    // `resumes_in_s` change, aucun message ne part.
+    env.boot.set_uptime(Duration::minutes(12));
+    let more = tokio::time::timeout(
+        std::time::Duration::from_millis(600),
+        stream.next_security(),
+    )
+    .await;
+    assert!(more.is_err(), "un message pour le seul compte à rebours");
+    // Un vrai changement part, avec le temps restant d'alors.
+    env.attack
+        .change(false, by(), EndHow::Manual)
+        .await
+        .unwrap();
+    let SecurityMessage::Security(view) = stream.next_security().await;
+    assert_eq!(
+        serde_json::to_value(&view.attack_mode).unwrap()["state"],
+        json!("off")
+    );
+    agent.shutdown().await;
 }

@@ -47,13 +47,15 @@ L'objet `attack_mode` ci-dessus (état après le changement). Idempotente : acti
 | Code | Cas |
 |---|---|
 | `401 UNAUTHENTICATED` / `SESSION_EXPIRED` | pas de jeton ; en mode attaque, session présentée seule (BR-TRUST-013) |
-| `403 FORBIDDEN_ROLE` | compte Lecture seule (« Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs. »), consigné `attack_mode.change` |
+| `403 FORBIDDEN_ROLE` | compte Lecture seule (« Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs. »), consigné « refusé » sous `attack_mode.enable` ou `attack_mode.disable` (le geste demandé) |
 | `409 POST_NOT_RECOGNIZED` | pas de preuve valide d'une clé inscrite pour le compte appelant ; `details.field = "device"`, `details.reason` : `proof_missing` (aucune preuve, ou illisible) ou `proof_invalid` (périmée, rejouée, d'un autre usage ou de l'autre geste, d'un autre jeton, clé non inscrite ou d'un autre compte). Aucune écriture d'état ; **aucun mot de passe n'est essayé** |
 | `422 WRONG_PASSWORD` | mot de passe actuel faux : compté comme un échec de connexion (mêmes compteurs, même ralentissement) |
 | `429 TOO_MANY_ATTEMPTS` | attente du compteur du couple, de l'adresse ou de l'identifiant (`details.retry_after_s`) |
 | `422 VALIDATION_ERROR` | corps illisible (`active` manquant) |
 
 Un administrateur dont le client n'a pas de clé inscrite (client ancien, poste non inscrit) ne peut ni activer ni désactiver depuis le client : `hearth-agent attack-mode off` sur le serveur, ou le redémarrage physique de la machine (BR-TRUST-027). Il n'existe pas de sous-commande pour activer.
+
+`409 POST_NOT_RECOGNIZED` n'est rendu **que par cette route**, à un administrateur déjà authentifié. Une connexion bloquée par le mode attaque n'en reçoit jamais : elle reçoit le refus d'un mot de passe faux (le journal, lui, dit « mode attaque : poste non reconnu »).
 
 ## Ce que le mode attaque change pour les autres routes
 
@@ -63,4 +65,4 @@ Rien dans leur contrat. En mode attaque, une session valide présentée **seule*
 
 `security.alert` (« Attaque probable signalée ») : une entrée au début de l'épisode (cible « début de l'alerte », refusé « trop de tentatives, attente de N s », origine = la tentative qui l'a ouvert) et une à sa fin (cible « fin de l'alerte (levée par l'agent) », réussi, **origine « système »**). Le compte est celui de l'identifiant visé ; **rien** pour un identifiant inexistant.
 
-Mode attaque (HRT-25), voir [journal](./audit.md) : `attack_mode.enable`, `attack_mode.disable`, `attack_mode.auto_disable`, `attack_mode.suspend`, `attack_mode.resume`, `attack_mode.trial`, `attack_mode.change` (changement refusé ou raté), `session.refused`.
+Mode attaque (HRT-25), voir [journal](./audit.md) : `attack_mode.enable`, `attack_mode.disable`, `attack_mode.auto_disable`, `attack_mode.suspend`, `attack_mode.resume`, `attack_mode.trial`, `session.refused`.

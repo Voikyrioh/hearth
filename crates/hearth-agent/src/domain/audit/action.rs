@@ -30,9 +30,11 @@ pub enum AuditAction {
     DeviceRemove,
     /// Une attaque probable vise un identifiant : début ou fin de l'épisode (HRT-24, BR-TRUST-008).
     SecurityAlert,
-    /// Un administrateur active le mode attaque (HRT-25, BR-TRUST-030).
+    /// Un administrateur active le mode attaque (HRT-25, BR-TRUST-030) ; la route consigne aussi ici un
+    /// refus ou un échec de l'activation (résultat « refusé » ou « échoué »).
     AttackModeEnable,
-    /// Le mode attaque est désactivé, par un administrateur ou par la ligne de commande.
+    /// Le mode attaque est désactivé, par un administrateur ou par la ligne de commande ; la route consigne
+    /// aussi ici un refus ou un échec de la désactivation.
     AttackModeDisable,
     /// Le mode attaque s'est arrêté tout seul : 30 minutes sans tentative refusée.
     AttackModeAutoDisable,
@@ -42,15 +44,13 @@ pub enum AuditAction {
     AttackModeResume,
     /// L'essai unique d'un poste qui n'a qu'un critère (BR-TRUST-012, 032).
     AttackModeTrial,
-    /// Un changement du mode attaque refusé ou raté (l'action que la couche d'accès consigne).
-    AttackModeChange,
     /// Une session présentée seule, refusée en mode attaque (BR-TRUST-013).
     SessionRefused,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 23] = [
+    pub const ALL: [AuditAction; 22] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -72,7 +72,6 @@ impl AuditAction {
         Self::AttackModeSuspend,
         Self::AttackModeResume,
         Self::AttackModeTrial,
-        Self::AttackModeChange,
         Self::SessionRefused,
     ];
 
@@ -100,7 +99,6 @@ impl AuditAction {
             Self::AttackModeSuspend => action::ATTACK_MODE_SUSPEND,
             Self::AttackModeResume => action::ATTACK_MODE_RESUME,
             Self::AttackModeTrial => action::ATTACK_MODE_TRIAL,
-            Self::AttackModeChange => action::ATTACK_MODE_CHANGE,
             Self::SessionRefused => action::SESSION_REFUSED,
         }
     }
@@ -129,7 +127,6 @@ impl AuditAction {
             Self::AttackModeSuspend => "Mode attaque suspendu (redémarrage de la machine)",
             Self::AttackModeResume => "Mode attaque repris",
             Self::AttackModeTrial => "Essai unique en mode attaque",
-            Self::AttackModeChange => "Changement du mode attaque",
             Self::SessionRefused => "Session refusée (mode attaque)",
         }
     }

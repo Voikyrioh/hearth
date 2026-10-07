@@ -55,7 +55,8 @@ pub trait AttackModeTx: Send {
     /// La fenêtre est finie et sa reprise est consignée : la marque est effacée.
     async fn clear_window(&mut self) -> Result<(), StoreError>;
 
-    /// L'essai de ce critère est-il déjà consommé pour cette activation ?
+    /// L'essai de ce critère est-il déjà consommé pour cette activation ? Seul un essai RATÉ le consomme :
+    /// un essai réussi laisse le poste reconnu pour l'activation (BR-TRUST-014, 015).
     async fn trial_used(
         &mut self,
         activation_id: &str,
@@ -64,9 +65,10 @@ pub trait AttackModeTx: Send {
         subject: &str,
     ) -> Result<bool, StoreError>;
 
-    /// Consomme l'essai. Appelé une seule fois par critère, compte et activation : la lecture et
-    /// l'écriture sont dans la même transaction `BEGIN IMMEDIATE`, donc deux tentatives simultanées ne
-    /// le consomment pas deux fois.
+    /// Note l'issue de l'essai : un succès écrit la ligne une fois et ne consomme rien, un échec la
+    /// consomme (ligne neuve, ou le succès d'avant devient raté). La lecture et l'écriture sont dans la
+    /// même transaction `BEGIN IMMEDIATE` : deux tentatives simultanées ne donnent pas deux échecs gratuits.
+    /// Rend vrai si la ligne a changé (seule une ligne changée est consignée au journal).
     async fn record_trial(
         &mut self,
         activation_id: &str,
@@ -75,7 +77,7 @@ pub trait AttackModeTx: Send {
         subject: &str,
         at: OffsetDateTime,
         succeeded: bool,
-    ) -> Result<(), StoreError>;
+    ) -> Result<bool, StoreError>;
 
     /// Supprime les essais d'une autre activation que celle de la ligne ; rend leur nombre.
     async fn purge_stale_trials(&mut self) -> Result<u64, StoreError>;

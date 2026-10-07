@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) AS \"count!: i64\" FROM attack_trials\n               WHERE activation_id = ? AND account_id = ? AND kind = ? AND subject = ?",
+  "query": "SELECT COUNT(*) AS \"count!: i64\" FROM attack_trials\n               WHERE activation_id = ? AND account_id = ? AND kind = ? AND subject = ?\n                 AND outcome = 'failed'",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       false
     ]
   },
-  "hash": "1c560cafafd758045ba29369288cdfb2af86b3f95f60a0a194ad8f073366a201"
+  "hash": "b10e9d05709fc334ea08b1fa5cacaeb6d9a2d082a42e90bf68ad26115a08e46e"
 }
