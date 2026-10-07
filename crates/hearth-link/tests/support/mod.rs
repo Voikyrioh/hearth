@@ -25,6 +25,7 @@ use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::{LinkState, Thresholds};
 use hearth_link::domain::time::{Mono, WallTime};
 use hearth_link::ports::Clock;
+use hearth_link::ports::Transport as _;
 use hearth_link::ports::net_watcher::{NetError, NetWatcher};
 use hearth_link::{LinkConfig, LinkManager, NewServer, Ports};
 use hearth_proto::fingerprint::Fingerprint;
@@ -247,6 +248,8 @@ pub struct World {
     pub clock: Arc<JumpClock>,
     pub fingerprint: Fingerprint,
     pub dir: TempDir,
+    /// Le défi : ce qu'il répond (`set`) et ce qu'on a demandé.
+    pub spy: Arc<SpyState>,
 }
 
 pub struct Options {
@@ -256,6 +259,9 @@ pub struct Options {
     /// Adaptateurs de mise à jour de l'agent (`update_rig::Rig::updating`) ; sans eux, ceux de la
     /// production.
     pub updating: Option<agent::UpdatingFactory>,
+    /// Le client parle la clé d'appareil (défi signé, inscription). Faux par défaut : les scénarios
+    /// d'avant HRT-23 voient un agent sans défi, comme avant (`Spy::old_agent`).
+    pub device_key: bool,
 }
 
 impl Default for Options {
@@ -265,6 +271,7 @@ impl Default for Options {
             role: Role::Admin,
             config: fast_config(),
             updating: None,
+            device_key: false,
         }
     }
 }
@@ -287,11 +294,22 @@ pub async fn start_manager_with(
     net: Arc<ScriptedNet>,
     clock: Arc<JumpClock>,
     config: LinkConfig,
-    transport: HttpTransport,
+    transport: impl hearth_link::ports::Transport + 'static,
+) -> LinkManager {
+    start_manager_shared(dir, vault, net, clock, config, Arc::new(transport)).await
+}
+
+pub async fn start_manager_shared(
+    dir: &std::path::Path,
+    vault: Arc<dyn hearth_link::ports::Vault>,
+    net: Arc<ScriptedNet>,
+    clock: Arc<JumpClock>,
+    config: LinkConfig,
+    transport: Arc<dyn hearth_link::ports::Transport>,
 ) -> LinkManager {
     LinkManager::start(
         Ports {
-            transport: Arc::new(transport),
+            transport,
             vault,
             servers: Arc::new(FileServerStore::new(dir.join("servers.json"))),
             snapshots: Arc::new(FileSnapshotStore::new(dir.join("snapshots"))),
@@ -305,6 +323,283 @@ pub async fn start_manager_with(
     )
     .await
     .unwrap()
+}
+
+/// Un agent « d'avant la clé d'appareil » vu du client : tout passe par le vrai transport, sauf le
+/// défi, qui répond `404` (comme un agent ancien). Les scénarios qui ne parlent pas de la clé (les
+/// 8 fichiers de tests d'avant HRT-23) gardent ainsi exactement leur comportement d'avant : aucune clé
+/// créée, aucune inscription, donc aucune ligne de journal en plus.
+pub struct Spy {
+    inner: HttpTransport,
+    pub state: Arc<SpyState>,
+}
+
+/// Ce que le défi répond, et ce qu'on a demandé.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChallengeMode {
+    /// Le vrai agent répond.
+    Real,
+    /// Agent d'avant la clé : `404`.
+    OldAgent,
+    /// Le lien est coupé pendant le défi.
+    Unreachable,
+    /// Rend le PREMIER défi obtenu, déjà consommé ou périmé pour l'agent.
+    Replay,
+    /// Un défi de la bonne forme que l'agent n'a jamais émis (code d'authentification faux).
+    Bogus,
+}
+
+pub struct SpyState {
+    pub mode: std::sync::Mutex<ChallengeMode>,
+    /// Chaque défi demandé, dans l'ordre.
+    pub purposes: std::sync::Mutex<Vec<hearth_proto::api::sessions::ChallengePurpose>>,
+    first: std::sync::Mutex<Option<hearth_proto::api::sessions::ChallengeResponse>>,
+}
+
+impl SpyState {
+    pub fn set(&self, mode: ChallengeMode) {
+        *self.mode.lock().unwrap() = mode;
+    }
+
+    pub fn calls(&self) -> usize {
+        self.purposes.lock().unwrap().len()
+    }
+
+    pub fn calls_for(&self, purpose: hearth_proto::api::sessions::ChallengePurpose) -> usize {
+        self.purposes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| **p == purpose)
+            .count()
+    }
+}
+
+impl Spy {
+    pub fn new(inner: HttpTransport, mode: ChallengeMode) -> Self {
+        Self {
+            inner,
+            state: Arc::new(SpyState {
+                mode: std::sync::Mutex::new(mode),
+                purposes: std::sync::Mutex::new(Vec::new()),
+                first: std::sync::Mutex::new(None),
+            }),
+        }
+    }
+
+    pub fn old_agent(inner: HttpTransport) -> Self {
+        Self::new(inner, ChallengeMode::OldAgent)
+    }
+}
+
+/// Un `Spy` partagé : le test garde `state`, le gestionnaire reçoit le transport.
+pub struct SharedSpy(pub Arc<Spy>);
+
+#[async_trait]
+impl hearth_link::ports::Transport for SharedSpy {
+    async fn hello(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+    ) -> Result<hearth_link::ports::transport::Probed, hearth_link::ports::transport::TransportError>
+    {
+        self.0.hello(target).await
+    }
+
+    async fn login(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        request: &hearth_proto::api::sessions::LoginRequest,
+    ) -> Result<
+        hearth_proto::api::sessions::LoginResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.login(target, request).await
+    }
+
+    async fn challenge(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        request: &hearth_proto::api::sessions::ChallengeRequest,
+    ) -> Result<
+        hearth_proto::api::sessions::ChallengeResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.challenge(target, request).await
+    }
+
+    async fn login_with_device(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        request: &hearth_proto::api::sessions::DeviceLoginRequest,
+    ) -> Result<
+        hearth_proto::api::sessions::DeviceLoginResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.login_with_device(target, request).await
+    }
+
+    async fn logout(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+    ) -> Result<(), hearth_link::ports::transport::TransportError> {
+        self.0.logout(target, token).await
+    }
+
+    async fn request(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+        request: &hearth_link::ports::transport::ApiRequest,
+    ) -> Result<
+        hearth_link::ports::transport::ApiResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.request(target, token, request).await
+    }
+
+    async fn operation(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+        id: &hearth_link::domain::pending_ops::OperationId,
+    ) -> Result<
+        hearth_proto::api::operations::OperationResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.operation(target, token, id).await
+    }
+
+    async fn open_stream(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+    ) -> Result<
+        Box<dyn hearth_link::ports::StreamConn>,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.open_stream(target).await
+    }
+}
+
+#[async_trait]
+impl hearth_link::ports::Transport for Spy {
+    async fn challenge(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        request: &hearth_proto::api::sessions::ChallengeRequest,
+    ) -> Result<
+        hearth_proto::api::sessions::ChallengeResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        use hearth_link::ports::transport::{ApiError, TransportError};
+        self.state.purposes.lock().unwrap().push(request.purpose);
+        let mode = *self.state.mode.lock().unwrap();
+        match mode {
+            ChallengeMode::OldAgent => Err(TransportError::Api(ApiError {
+                status: 404,
+                code: Some(hearth_proto::error::ErrorCode::NotFound),
+                details: serde_json::Value::Null,
+                retry_after_s: None,
+            })),
+            ChallengeMode::Unreachable => Err(TransportError::Io("lien coupé".into())),
+            ChallengeMode::Bogus => Ok(hearth_proto::api::sessions::ChallengeResponse {
+                challenge: base64_of(&[7_u8; 56]),
+                expires_in_s: 60,
+            }),
+            ChallengeMode::Replay => {
+                let stored = self.state.first.lock().unwrap().clone();
+                match stored {
+                    Some(first) => Ok(first),
+                    None => self.real_challenge(target, request).await,
+                }
+            }
+            ChallengeMode::Real => self.real_challenge(target, request).await,
+        }
+    }
+
+    async fn login_with_device(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        request: &hearth_proto::api::sessions::DeviceLoginRequest,
+    ) -> Result<
+        hearth_proto::api::sessions::DeviceLoginResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.login_with_device(target, request).await
+    }
+
+    async fn hello(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+    ) -> Result<hearth_link::ports::transport::Probed, hearth_link::ports::transport::TransportError>
+    {
+        self.inner.hello(target).await
+    }
+
+    async fn login(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        request: &hearth_proto::api::sessions::LoginRequest,
+    ) -> Result<
+        hearth_proto::api::sessions::LoginResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.login(target, request).await
+    }
+
+    async fn logout(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+    ) -> Result<(), hearth_link::ports::transport::TransportError> {
+        self.inner.logout(target, token).await
+    }
+
+    async fn request(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+        request: &hearth_link::ports::transport::ApiRequest,
+    ) -> Result<
+        hearth_link::ports::transport::ApiResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.request(target, token, request).await
+    }
+
+    async fn export_audit(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+        path: &str,
+    ) -> Result<
+        hearth_link::ports::transport::AuditExport,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.export_audit(target, token, path).await
+    }
+
+    async fn operation(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+        id: &hearth_link::domain::pending_ops::OperationId,
+    ) -> Result<
+        hearth_proto::api::operations::OperationResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.operation(target, token, id).await
+    }
+
+    async fn open_stream(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+    ) -> Result<
+        Box<dyn hearth_link::ports::StreamConn>,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.open_stream(target).await
+    }
 }
 
 pub fn transport() -> HttpTransport {
@@ -337,12 +632,22 @@ impl World {
         let vault = Arc::new(MemoryVault::new());
         let net = Arc::new(ScriptedNet::new());
         let clock = Arc::new(JumpClock::new());
-        let manager = start_manager(
+        let spy = Arc::new(Spy::new(
+            transport(),
+            if options.device_key {
+                ChallengeMode::Real
+            } else {
+                ChallengeMode::OldAgent
+            },
+        ));
+        let transport: Arc<dyn hearth_link::ports::Transport> = Arc::new(SharedSpy(spy.clone()));
+        let manager = start_manager_shared(
             dir.path(),
             vault.clone(),
             net.clone(),
             clock.clone(),
             options.config,
+            transport,
         )
         .await;
         let recorder = Recorder::spawn(manager.subscribe());
@@ -377,6 +682,7 @@ impl World {
             clock,
             fingerprint: probe.fingerprint,
             dir,
+            spy: spy.state.clone(),
         }
     }
 
@@ -470,4 +776,27 @@ pub async fn wait_started_or_returned<T: std::fmt::Debug>(
         () = agent.wait_action_started(baseline) => {}
         returned = &mut *call => panic!("execute a rendu avant l'arrivée chez l'agent : {returned:?}"),
     }
+}
+
+impl Spy {
+    async fn real_challenge(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        request: &hearth_proto::api::sessions::ChallengeRequest,
+    ) -> Result<
+        hearth_proto::api::sessions::ChallengeResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        let response = self.inner.challenge(target, request).await?;
+        let mut first = self.state.first.lock().unwrap();
+        if first.is_none() {
+            *first = Some(response.clone());
+        }
+        Ok(response)
+    }
+}
+
+fn base64_of(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
