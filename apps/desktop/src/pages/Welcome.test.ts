@@ -25,6 +25,13 @@ describe("Welcome (BR-CLIENT-013)", () => {
     expect(wrapper.get("button").text()).toBe("Ajouter un serveur");
   });
 
+  it("draws the decorative first-launch illustration", async () => {
+    const { wrapper } = await mountWelcome();
+    const img = wrapper.get("img");
+    expect(img.attributes("alt")).toBe("");
+    expect(img.attributes("src")).toContain("vide-premier-lancement");
+  });
+
   it("opens the add-server wizard from the main button", async () => {
     const { wrapper, router } = await mountWelcome();
     expect(wrapper.get("button").attributes("aria-disabled")).toBeUndefined();

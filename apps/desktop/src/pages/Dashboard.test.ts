@@ -106,6 +106,7 @@ describe("initial display (BR-DASH-001)", () => {
     await flushPromises();
     expect(ctx.wrapper.find('[role="status"]').exists()).toBe(false);
     expect(ctx.wrapper.text()).toContain("Aucune mesure pour l'instant");
+    expect(ctx.wrapper.get("img").attributes("src")).toContain("vide-hors-ligne");
     ctx.wrapper.unmount();
   });
 

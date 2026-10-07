@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true">
+  <defs>
+    <radialGradient id="lueur">
+      <stop offset="0" stop-color="#ff7b3d" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#ff7b3d" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path d="M100 244H220" stroke="#b3a19c"/>
+  <path d="M118 222C132 222 136 186 160 186C184 186 188 222 202 222A62 62 0 0 1 118 222Z" fill="#2a2024"/>
+  <path d="M118 222C132 222 136 186 160 186C184 186 188 222 202 222" stroke="#b3a19c"/>
+  <path d="M96 120V176A64 64 0 0 0 224 176V120" stroke="#f6ece6"/>
+  <circle cx="160" cy="212" r="20" fill="url(#lueur)"/>
+  <circle cx="160" cy="212" r="5" fill="#ff7b3d"/>
+</svg>

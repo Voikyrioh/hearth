@@ -89,6 +89,7 @@ describe("page Journal d'activité", () => {
   it("journal vide : « Aucune activité enregistrée pour l'instant », sans tableau", async () => {
     const { wrapper } = await boot(0);
     expect(wrapper.text()).toContain("Aucune activité enregistrée pour l'instant");
+    expect(wrapper.get("img").attributes("src")).toContain("vide-journal");
     expect(wrapper.find('[role="grid"]').exists()).toBe(false);
     wrapper.unmount();
   });

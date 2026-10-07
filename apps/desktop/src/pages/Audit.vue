@@ -176,6 +176,7 @@ const reasonText = computed(() =>
       <EmptyState
         v-else-if="!failed"
         heading="h2"
+        :illustration="unfiltered ? 'journal' : undefined"
         :title="unfiltered ? t('audit.emptyAll') : t('audit.emptyFiltered')"
         :text="''"
       >

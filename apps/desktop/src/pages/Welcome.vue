@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from "vue-router";
 import HButton from "@/components/atoms/HButton.vue";
-import HLogo from "@/components/atoms/HLogo.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import { t } from "@/i18n";
 
@@ -10,10 +9,12 @@ const router = useRouter();
 
 <template>
   <main class="welcome">
-    <EmptyState :title="t('welcome.title')" :text="t('welcome.text')">
-      <template #illustration>
-        <HLogo size="lg" decorative />
-      </template>
+    <EmptyState
+      :title="t('welcome.title')"
+      :text="t('welcome.text')"
+      illustration="firstLaunch"
+      size="lg"
+    >
       <template #action>
         <HButton @click="router.push({ name: 'add-server' })">{{ t("welcome.addServer") }}</HButton>
       </template>

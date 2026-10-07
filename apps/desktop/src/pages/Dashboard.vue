@@ -57,6 +57,7 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
     :title="failed ? t('dash.readFailed') : t('dash.waitingTitle')"
     :text="failed ? '' : t('dash.waitingText')"
     heading="h2"
+    :illustration="failed || isConnected ? undefined : 'offline'"
   />
   <template v-else-if="entry">
     <div class="dash">
