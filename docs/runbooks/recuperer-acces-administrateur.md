@@ -42,7 +42,7 @@ L'agent exige, pour chaque acte d'administration, le mot de passe ET la preuve d
 |---|---|
 | Premier lancement après l'installation | Connecte-toi avec ton mot de passe : ce poste est inscrit, les actes sont possibles aussitôt |
 | Clé perdue (nouveau PC, coffre de Windows vidé) | Dans la fenêtre de l'acte, « Me reconnecter pour enregistrer ce poste », puis connexion par mot de passe |
-| Compte déjà à 8 postes | `hearth-agent account revoke <compte>` sur le serveur (oublie postes et adresses), puis connexion |
+| Compte déjà à 8 postes (le client dit alors « le serveur ne reconnaît pas la clé de ce poste ») | `hearth-agent account revoke <compte>` sur le serveur (oublie postes et adresses), puis connexion |
 | Mode attaque actif et aucune clé (l'inscription est gelée) | `hearth-agent attack-mode off` sur le serveur, puis connexion |
 | Client trop ancien (« mets ton client à jour ») | Mets le client à jour ; il ne dépend pas de l'agent. En attendant, chaque acte a son équivalent en ligne de commande (`account add|passwd|role|remove|revoke`) |
 
