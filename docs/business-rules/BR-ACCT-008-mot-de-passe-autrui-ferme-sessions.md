@@ -33,3 +33,4 @@ Bouton « Mot de passe » d'une ligne → `PasswordDialog.vue` (nouveau + confir
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : le mot de passe d'un autre compte accepte un membre `reauth` ; jamais couvert par l'élévation (BR-TRUST-043).

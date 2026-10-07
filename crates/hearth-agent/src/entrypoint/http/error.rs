@@ -20,6 +20,12 @@ use crate::domain::sessions::SessionEnd;
 #[derive(Debug, Clone, Copy)]
 pub struct ErrorMark(pub ErrorCode);
 
+/// Posé par la couche de confirmation des actes (`reauth.rs`) sur un refus qu'elle a consigné avec sa
+/// propre raison : la couche d'accès l'écrit tel quel au journal, à la place de la règle par code
+/// d'erreur (`auth::failure_of`).
+#[derive(Debug, Clone, Copy)]
+pub struct OutcomeMark(pub crate::domain::audit::Outcome);
+
 /// Erreur d'API : toujours rendue au format `ErrorBody`, avec le statut du code.
 #[derive(Debug)]
 pub struct ApiError(pub ErrorBody);

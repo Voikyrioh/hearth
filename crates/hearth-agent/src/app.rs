@@ -17,6 +17,7 @@ pub use update::{Updating, run_supervisor, update_service};
 use crate::application::accounts::AccountService;
 use crate::application::attack_mode::AttackModeService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
+use crate::application::elevation::Elevations;
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
@@ -336,6 +337,28 @@ fn assemble(
         Some(attack) => sessions.with_attack(attack.clone()),
         None => sessions,
     };
+    // L'élévation du mot de passe en administration (HRT-28) : en mémoire, sur l'horloge monotone,
+    // seulement quand l'identité d'appareil existe (sans clé, aucun acte ne se confirme).
+    let elevations = trust
+        .as_ref()
+        .map(|(parts, _)| Arc::new(Elevations::new(parts.monotonic.clone())));
+    let sessions = match &elevations {
+        Some(elevations) => sessions.with_elevations(elevations.clone()),
+        None => sessions,
+    };
+    let account_service = AccountService::new(
+        accounts_repo.clone(),
+        sessions_repo.clone(),
+        store.clone(),
+        adapters.hasher.clone(),
+        adapters.clock.clone(),
+        adapters.ids.clone(),
+        trail.clone(),
+    );
+    let account_service = match elevations {
+        Some(elevations) => account_service.with_elevations(elevations),
+        None => account_service,
+    };
     let sessions = match trust {
         Some((parts, crypto)) => sessions.with_trust(Arc::new(TrustService::new(
             Arc::new(SqliteDeviceRepo::new(pool.clone())),
@@ -351,15 +374,7 @@ fn assemble(
         None => sessions,
     };
     Services {
-        accounts: Arc::new(AccountService::new(
-            accounts_repo.clone(),
-            sessions_repo.clone(),
-            store.clone(),
-            adapters.hasher.clone(),
-            adapters.clock.clone(),
-            adapters.ids.clone(),
-            trail.clone(),
-        )),
+        accounts: Arc::new(account_service),
         sessions: Arc::new(sessions),
         security,
         attack,

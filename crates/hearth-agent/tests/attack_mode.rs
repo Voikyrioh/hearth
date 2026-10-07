@@ -691,6 +691,36 @@ async fn the_reactivation_guard_does_not_depend_on_the_wall_clock_on_the_same_bo
     );
 }
 
+#[tokio::test]
+async fn a_rebooted_machine_with_the_clock_set_back_a_year_drops_the_guard_after_thirty_minutes_of_uptime()
+ {
+    // HRT-28, tranche E (BR-TRUST-047).
+    let env = booted().await;
+    enable(&env).await;
+    let id = activation_id(&env).await;
+    disable(&env).await;
+    // La machine redémarre, l'heure est reculée d'un an : avant 30 minutes de marche, la garde tient.
+    reboot(&env, "boot-2", Duration::minutes(2)).await;
+    env.clock.advance(Duration::days(-365));
+    env.boot.set_uptime(Duration::minutes(29));
+    enable(&env).await;
+    assert_eq!(
+        activation_id(&env).await,
+        id,
+        "avant 30 minutes de marche, l'activation prolonge"
+    );
+    disable(&env).await;
+    // Nouvelle coupure de courant : la fin ci-dessus a eu lieu sous le démarrage précédent.
+    reboot(&env, "boot-3", Duration::minutes(2)).await;
+    env.boot.set_uptime(Duration::minutes(31));
+    enable(&env).await;
+    assert_ne!(
+        activation_id(&env).await,
+        id,
+        "après 30 minutes de marche, même heure reculée, l'activation est neuve"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_simultaneous_attempts_on_the_same_trial_never_give_two_free_failures() {
     let env = std::sync::Arc::new(booted().await);

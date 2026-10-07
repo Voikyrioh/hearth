@@ -35,3 +35,4 @@ Page Comptes (administrateurs) : bouton « Ajouter un compte » (`apps/desktop/s
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : la création accepte un membre `reauth` (BR-TRUST-036) ; exigé par HRT-30.

@@ -256,6 +256,15 @@ pub enum Reason {
     /// prouvée). Jamais écrite pour une connexion : un refus de connexion garde la raison d'un mot de
     /// passe faux, pour que rien ne distingue les états (HRT-25).
     NotRecognized,
+    /// Un acte d'administration arrive sans confirmation : le client est trop ancien (HRT-28).
+    ReauthMissing,
+    /// La confirmation d'un acte n'a pas de preuve de clé (HRT-28).
+    ProofMissing,
+    /// La preuve de clé d'un acte est invalide : autre acte, autre cible, autre compte, autre jeton,
+    /// périmée, rejouée, clé non inscrite pour le compte (HRT-28).
+    ProofInvalid,
+    /// Le mot de passe manque et l'élévation ne couvre pas l'acte (HRT-28).
+    PasswordRequired,
 }
 
 impl Reason {
@@ -296,6 +305,10 @@ impl Reason {
             }
             Self::TooVaried => "activité trop variée".to_owned(),
             Self::NotRecognized => "mode attaque : poste non reconnu".to_owned(),
+            Self::ReauthMissing => "confirmation absente : client trop ancien".to_owned(),
+            Self::ProofMissing => "preuve de clé absente".to_owned(),
+            Self::ProofInvalid => "preuve de clé invalide".to_owned(),
+            Self::PasswordRequired => "mot de passe requis".to_owned(),
         }
     }
 }
@@ -642,6 +655,11 @@ mod tests {
             Reason::Busy,
             Reason::Internal,
             Reason::TooVaried,
+            Reason::NotRecognized,
+            Reason::ReauthMissing,
+            Reason::ProofMissing,
+            Reason::ProofInvalid,
+            Reason::PasswordRequired,
         ] {
             let text = reason.text();
             assert!(!text.is_empty());

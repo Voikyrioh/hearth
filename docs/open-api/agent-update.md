@@ -29,6 +29,8 @@ La mise à jour s'exécute **côté serveur** : `POST` répond `202` tout de sui
 
 ## `POST /api/v1/agent/update` (administrateur)
 
+Accepte le membre `reauth` des actes d'administration (HRT-28) : la preuve lie la version et la somme SHA-256 ; jamais couvert par l'élévation du mot de passe (voir [sécurité](./security.md)).
+
 - **Rôle** : administrateur seulement (BR-UPDATE-011). Suivie par clé d'opération (`Idempotency-Key`) : rejouer la même clé après une coupure renvoie le même `202` sans relancer.
 - **Corps** : la cible telle que le flux de versions la publie (l'agent n'interroge jamais Internet de lui-même).
 

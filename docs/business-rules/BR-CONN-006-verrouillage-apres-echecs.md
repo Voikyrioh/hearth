@@ -38,3 +38,4 @@ Précision seulement : le compteur du couple identifiant + adresse s'applique au
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).
 - 2026-10-06 — complément HRT-20 (section ajoutée, énoncé inchangé).
+- 2026-10-07 : HRT-28 : un mot de passe faux à la confirmation d'un acte, et l'ancien mot de passe de `PUT /me/password`, comptent comme un échec de connexion (BR-TRUST-040).

@@ -119,9 +119,26 @@ pub fn judge_enrollment(
     }
 }
 
+/// Une preuve de session (ouverture du flux) peut-elle servir à cette session ? (BR-TRUST-048,
+/// FIX:01M4BK2JXE7C2SZGG7BBXTZ0TZ.) Le poste d'une session est posé à la connexion par mot de passe et
+/// n'est jamais réécrit : sur une session reliée, seule la clé de **son** poste sert ; celle d'un autre
+/// poste du compte compte comme une preuve absente. Une session sans poste accepte la clé de tout poste
+/// du compte (l'adresse est retenue, la session reste sans poste).
+pub fn session_proof_serves(linked: Option<&DeviceId>, key_device: &DeviceId) -> bool {
+    linked.is_none_or(|linked| linked == key_device)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_proof_serves_a_session_without_a_device_or_with_the_device_of_the_key_only() {
+        let (a, b) = (DeviceId::new("A"), DeviceId::new("B"));
+        assert!(session_proof_serves(None, &a));
+        assert!(session_proof_serves(Some(&a), &a));
+        assert!(!session_proof_serves(Some(&a), &b));
+    }
 
     #[test]
     fn the_truth_table_of_the_enrollment_is_exhaustive() {

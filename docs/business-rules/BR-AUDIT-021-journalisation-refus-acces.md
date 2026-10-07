@@ -39,3 +39,4 @@ Le client ne l'implémente pas : il n'y a pas de bouton, la garde du routeur fer
 ## Historique
 - 2026-10-04 — création (HRT-05, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » et pointeurs du client (HRT-14, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : nouvelles raisons de refus (confirmation absente, preuve absente, preuve invalide, mot de passe requis) ; l'attente imposée est consignée sous l'acte (BR-TRUST-046).

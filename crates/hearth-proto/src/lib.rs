@@ -1,6 +1,7 @@
 //! Types partagés du protocole entre l'agent et ses clients. Aucune E/S ici.
 
 pub mod account_rules;
+pub mod admin_act;
 pub mod api;
 pub mod device_proof;
 pub mod error;

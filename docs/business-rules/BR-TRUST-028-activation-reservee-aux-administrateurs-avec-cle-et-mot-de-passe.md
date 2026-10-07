@@ -37,3 +37,4 @@ Les actes de gestion des comptes, des sessions et la mise à jour de l'agent ne 
 ## Historique
 - 2026-10-07 : création (HRT-25, session 2026-10-04-hearth-creation, T34).
 - 2026-10-07 : côté client (HRT-26, T38) : la commande `set_attack_mode`, le champ de mot de passe de la confirmation.
+- 2026-10-07 : HRT-28 : le contrat `0x05` (BR-TRUST-036, 039) accepte la même règle, `POST_NOT_RECOGNIZED` sert désormais aussi aux autres actes ; la forme à plat `0x03` reste acceptée.

@@ -117,3 +117,7 @@ D'après le code de `ring` 0.17.14 (`src/ec/curve25519/ed25519/verification.rs`,
 
 - Pour un accès hors du réseau local : derrière un relais tous les clients partagent une adresse, et l'inscription par mot de passe seul ne suffira plus (un poste déjà reconnu devra approuver le nouveau). Cette décision ne le prévoit pas.
 - Pour authentifier chaque requête : la clé se prouve à la connexion et à l'ouverture du flux, pas à chaque appel.
+
+## Amendement HRT-28 (2026-10-07) : le poste d'une session ne change plus
+
+Le poste d'une session est posé **une fois**, par la connexion par mot de passe accordée, et n'est plus jamais réécrit. Une preuve de session (usage `0x02`) ne relie rien : sur une session reliée, seule la clé de son poste sert ; sur une session sans poste, elle fait retenir l'adresse et la session reste sans poste (BR-TRUST-007, BR-TRUST-048). Raison : « clé du poste courant » (retrait d'un poste, Q18) se contournait avec le jeton d'un poste et la clé d'un autre (correctif FIX-01M4BK2JXE7C2SZGG7BBXTZ0TZ). Rien d'autre de cette décision ne change.

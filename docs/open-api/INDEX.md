@@ -2,7 +2,9 @@
 
 Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête `Authorization: Bearer …`.
 
-29 endpoints : session, postes de confiance, sécurité, comptes, mesures, audit, mises à jour.
+**Actes d'administration** (HRT-28) : les routes qui modifient (hors déconnexion et hors retrait d'un poste, qui garde son contrat) acceptent un membre `reauth` (mot de passe + preuve de clé d'usage `0x05`) ; l'agent l'accepte sans encore l'exiger (`GET /security` : `admin_reauth.required`). Voir [sécurité](./security.md).
+
+30 endpoints : session, postes de confiance, sécurité, comptes, mesures, audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
@@ -16,6 +18,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Postes** | DELETE | [`/me/devices/{id}`](./devices.md) | user+ | Retirer un poste (sa clé, son adresse retenue, ses sessions) |
 | **Sécurité** | GET | [`/security`](./security.md) | user+ | État de sécurité du compte : alerte « attaque probable » (`own`, `since`, `others` pour un administrateur), mode attaque (`off`, `active`, `suspended` avec `resumes_in_s`, `last_end`) |
 | **Sécurité** | PUT | [`/security/attack-mode`](./security.md) | admin | Activer ou désactiver le mode attaque : mot de passe actuel et preuve d'une clé inscrite du compte (usage `0x03`, liée au jeton et au geste) ; `409 POST_NOT_RECOGNIZED` sans preuve valide |
+| **Sécurité** | PUT | [`/me/reauth`](./security.md) | user+ | Réglage de la fréquence du mot de passe en administration (`window` : 5 minutes, ou `each`) ; toujours avec mot de passe et clé (HRT-28) |
 | **Mesures** | GET | [`/machine`](./machine.md) | user+ | Identité machine, specs hardware |
 | **Mesures** | GET | [`/stream`](./stream.md) | user+ (jeton dans le premier message) | WebSocket flux temps réel (snapshot + metrics chaque seconde) |
 | **Mesures** | GET | [`/metrics/history?window=1m\|5m\|1h`](./metrics.md) | user+ | Historique rééchantillonné |

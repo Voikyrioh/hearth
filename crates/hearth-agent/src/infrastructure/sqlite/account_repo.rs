@@ -3,6 +3,7 @@
 //! `BEGIN IMMEDIATE`), pas ici.
 
 use async_trait::async_trait;
+use hearth_proto::api::reauth::ReauthMode;
 use sqlx::{SqliteConnection, SqlitePool};
 use time::OffsetDateTime;
 
@@ -11,6 +12,7 @@ use super::store::SqliteUnitOfWork;
 use crate::application::ports::{AccountRepo, AccountTx, StoreError};
 use crate::domain::accounts::{Account, AccountId, Role, Username};
 use crate::domain::secret::Secret;
+use crate::domain::trust::admin_act::{mode_from_seconds, seconds_of};
 
 pub(super) const RESOURCE: &str = "accounts";
 
@@ -113,6 +115,17 @@ impl AccountRepo for SqliteAccountRepo {
         .into_iter()
         .map(into_account)
         .collect()
+    }
+
+    async fn reauth_mode(&self, id: &AccountId) -> Result<ReauthMode, StoreError> {
+        let seconds = sqlx::query_scalar!(
+            r#"SELECT reauth_window_s AS "seconds!: i64" FROM accounts WHERE id = ?"#,
+            id.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(seconds.map_or(ReauthMode::Window, mode_from_seconds))
     }
 }
 
@@ -219,6 +232,23 @@ impl AccountTx for SqliteUnitOfWork {
             .execute(&mut *self.tx)
             .await
             .map_err(storage(RESOURCE))?;
+        Ok(())
+    }
+
+    async fn set_reauth_mode(
+        &mut self,
+        id: &AccountId,
+        mode: ReauthMode,
+    ) -> Result<(), StoreError> {
+        let seconds = seconds_of(mode);
+        sqlx::query!(
+            "UPDATE accounts SET reauth_window_s = ? WHERE id = ?",
+            seconds,
+            id.as_str()
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
         Ok(())
     }
 }

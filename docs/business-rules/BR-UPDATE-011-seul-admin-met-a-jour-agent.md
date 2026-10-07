@@ -36,3 +36,4 @@ Seul un compte administrateur peut déclencher une mise à jour de l'agent à di
 ## Historique
 - 2026-10-05 : création (HRT-17, lot agent, session 2026-10-04-hearth-creation).
 - 2026-10-06 : section Interface (HRT-17, lot interface, session 2026-10-04-hearth-creation, T28).
+- 2026-10-07 : HRT-28 : le lancement de la mise à jour accepte un membre `reauth` (BR-TRUST-036) ; jamais couvert par l'élévation (BR-TRUST-043) ; la preuve lie la version et la somme.

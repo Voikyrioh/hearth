@@ -19,6 +19,7 @@ mod error;
 mod hello;
 mod metrics;
 mod operations;
+mod reauth;
 mod security;
 mod server;
 mod sessions;
@@ -211,6 +212,15 @@ pub static ENDPOINTS: &[Endpoint] = &[
         route: || put(accounts::change_own_password),
     },
     Endpoint {
+        method: Method::PUT,
+        path: "/me/reauth",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ReauthSetting),
+        route: || put(security::set_reauth),
+    },
+    Endpoint {
         method: Method::GET,
         path: "/operations/{id}",
         access: Access::Authenticated,
@@ -354,6 +364,20 @@ pub fn router(state: AppState) -> Router {
     let mut checked = Router::new();
     for endpoint in ENDPOINTS {
         let mut route = (endpoint.route)();
+        // La confirmation des actes d'administration (HRT-28) : posée d'après la table des actes de
+        // `hearth-proto`, AVANT la couche d'accès (donc dedans : session, rôle, suivi, puis confirmation).
+        if let Some(act) =
+            hearth_proto::admin_act::route_act(endpoint.method.as_str(), endpoint.path)
+            && act.contract == hearth_proto::admin_act::Contract::Reauth
+        {
+            route = route.route_layer(middleware::from_fn_with_state(
+                reauth::ReauthState {
+                    app: state.clone(),
+                    route: act,
+                },
+                reauth::layer,
+            ));
+        }
         if !matches!(endpoint.access, Access::Public | Access::FirstMessage) {
             route = route.route_layer(middleware::from_fn_with_state(
                 auth::GuardState {
@@ -542,6 +566,81 @@ mod tests {
         assert_eq!(first_message[0].method, Method::GET);
         assert!(first_message[0].version_checked);
         assert!(!first_message[0].tracked);
+    }
+
+    /// Le test de garde de la liste des actes d'administration (HRT-28, BR-TRUST-037) : toute route
+    /// non publique qui modifie est un acte de `hearth_proto::admin_act::ROUTES` ou une exception
+    /// nommée de `NOT_AN_ACT`. Une route qui modifie ajoutée à `ENDPOINTS` sans être classée fait
+    /// échouer ce test ; la couche de confirmation est posée d'après cette même table.
+    #[test]
+    fn every_modifying_route_is_an_admin_act_or_a_named_exception() {
+        use hearth_proto::admin_act::{NOT_AN_ACT, ROUTES, is_exception, route_act};
+        for endpoint in ENDPOINTS {
+            let (method, path) = (endpoint.method.as_str(), endpoint.path);
+            let act = route_act(method, path);
+            let exception = is_exception(method, path);
+            assert!(
+                !(act.is_some() && exception),
+                "{method} {path} est à la fois un acte et une exception"
+            );
+            if endpoint.access == Access::Public {
+                assert!(
+                    act.is_none() && !exception,
+                    "{method} {path} : une route publique n'est ni un acte ni une exception"
+                );
+                continue;
+            }
+            if endpoint.modifies() {
+                assert!(
+                    act.is_some() || exception,
+                    "{method} {path} modifie quelque chose sans être classée (acte d'administration ou exception nommée de hearth-proto)"
+                );
+            }
+            if endpoint.access == Access::Admin && endpoint.modifies() {
+                assert!(
+                    act.is_some(),
+                    "{method} {path} : une route d'administrateur qui modifie est un acte"
+                );
+            }
+            // Un acte est suivi par clé d'opération et consigné.
+            if let Some(act) = act {
+                assert!(endpoint.tracked, "{method} {path}");
+                let audit = endpoint.audit.expect("un acte a une action de journal");
+                if !act.kinds.is_empty() {
+                    assert!(
+                        act.kinds
+                            .iter()
+                            .any(|kind| kind.audit_code() == audit.code()),
+                        "{method} {path} : l'action de la route n'est celle d'aucun de ses actes"
+                    );
+                }
+            }
+        }
+        // Chaque ligne de la table a sa route, et une route qui modifie.
+        for route in ROUTES {
+            assert!(
+                ENDPOINTS
+                    .iter()
+                    .any(|endpoint| endpoint.method.as_str() == route.method
+                        && endpoint.path == route.pattern
+                        && endpoint.modifies()),
+                "{} {} : ligne de ROUTES sans route",
+                route.method,
+                route.pattern
+            );
+        }
+        for exception in NOT_AN_ACT {
+            assert!(
+                ENDPOINTS
+                    .iter()
+                    .any(|endpoint| endpoint.method.as_str() == exception.method
+                        && endpoint.path == exception.pattern
+                        && endpoint.modifies()),
+                "{} {} : exception sans route",
+                exception.method,
+                exception.pattern
+            );
+        }
     }
 
     #[test]

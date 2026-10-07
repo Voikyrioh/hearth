@@ -36,3 +36,4 @@ Depuis le bandeau d'alerte ou depuis la carte « Mode attaque » de la page Séc
 
 ## Historique
 - 2026-10-07 : création (HRT-26, session 2026-10-04-hearth-creation, T38).
+- 2026-10-07 : HRT-28 : le client passera au contrat `reauth` (`0x05`) pour activer le mode attaque (HRT-30) ; l'agent accepte déjà les deux formes (BR-TRUST-036, 041).

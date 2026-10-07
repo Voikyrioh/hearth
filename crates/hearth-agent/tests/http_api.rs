@@ -1059,6 +1059,27 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     .unwrap();
                 reply
             }
+            ("PUT", "/me/reauth") => {
+                // Le réglage de fréquence du mot de passe (HRT-28) : toujours confirmé.
+                let act = hearth_proto::admin_act::AdminAct::ReauthSetting {
+                    mode: hearth_proto::api::reauth::ReauthMode::Each,
+                };
+                let body = support::device::with_reauth(
+                    &api,
+                    &marie_key,
+                    "marie",
+                    &marie_session,
+                    &act,
+                    PASSWORD,
+                    json!({ "password": "each" }),
+                )
+                .await;
+                api.put("/me/reauth")
+                    .token(&marie_session)
+                    .json(&body)
+                    .send()
+                    .await
+            }
             (method, path) => panic!("route modifiante sans scénario de réussite : {method} {path}"),
         };
         assert!(

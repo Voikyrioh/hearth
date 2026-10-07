@@ -57,7 +57,7 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 ## `POST /api/v1/sessions/challenge` : demander un défi pour la clé d'appareil
 
 - **Authentification** : aucune. **Rôle** : aucun. **Suivi par clé** : non. **Journal** : non. En-tête `X-Hearth-Api` exigé.
-- **Corps** : `{ "username": "marie", "purpose": "login" }`. `username` : la saisie, **existante ou non** ; `purpose` : `login` (connexion, octet `0x01`), `session` (ouverture du flux, `0x02`), `attack_mode` (activation ou désactivation du mode attaque, `0x03`, **réservé** : défini, utilisé par HRT-25), `device_removal` (retrait d'un poste de confiance, `0x04`, voir [postes de confiance](./devices.md)).
+- **Corps** : `{ "username": "marie", "purpose": "login" }`. `username` : la saisie, **existante ou non** ; `purpose` : `login` (connexion, octet `0x01`), `session` (ouverture du flux, `0x02`), `attack_mode` (activation ou désactivation du mode attaque en forme à plat, `0x03`), `device_removal` (retrait d'un poste de confiance, `0x04`, voir [postes de confiance](./devices.md)), `admin_act` (un acte d'administration, `0x05`, HRT-28 : voir [sécurité](./security.md), « Confirmation des actes d'administration »). Un agent d'avant HRT-28 répond `422 VALIDATION_ERROR` à `admin_act` : le client ne le demande que si `admin_reauth` est annoncé.
 - **Réponse `200`**, identique que l'identifiant existe ou non (même code, mêmes en-têtes, même forme et même taille) :
 
 ```json

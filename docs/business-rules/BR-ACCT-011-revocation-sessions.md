@@ -34,3 +34,4 @@ Bouton « Fermer les sessions » (« Fermer les <n> sessions » à partir de deu
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : la fermeture des sessions accepte un membre `reauth` (BR-TRUST-036) ; couverte par l'élévation (BR-TRUST-043).

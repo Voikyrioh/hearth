@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reauth_window_s AS \"seconds!: i64\" FROM accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "seconds!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "reauth_window_s"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2afc34e72e3f9a898592f84f15a4ddf234dd0457c0cb943f3205ba25e9f5ec75"
+}

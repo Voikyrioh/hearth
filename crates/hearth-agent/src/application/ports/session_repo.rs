@@ -55,7 +55,8 @@ pub trait SessionTx: Send {
         at: OffsetDateTime,
     ) -> Result<u64, StoreError>;
 
-    /// Rattache la session au poste dont la clé l'a ouverte ou prouvée (HRT-22).
+    /// Rattache la session au poste dont la clé l'a ouverte (HRT-22), **une seule fois** : une session
+    /// déjà reliée garde son poste (BR-TRUST-048). Appelée par la seule connexion par mot de passe.
     async fn bind_device(
         &mut self,
         session: &SessionId,

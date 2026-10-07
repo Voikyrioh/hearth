@@ -46,11 +46,14 @@ pub enum AuditAction {
     AttackModeTrial,
     /// Une session présentée seule, refusée en mode attaque (BR-TRUST-013).
     SessionRefused,
+    /// Le réglage de fréquence du mot de passe d'un compte change (HRT-28) ; la route consigne aussi ici
+    /// un refus ou un échec.
+    ReauthSetting,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 22] = [
+    pub const ALL: [AuditAction; 23] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -73,6 +76,7 @@ impl AuditAction {
         Self::AttackModeResume,
         Self::AttackModeTrial,
         Self::SessionRefused,
+        Self::ReauthSetting,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -100,6 +104,7 @@ impl AuditAction {
             Self::AttackModeResume => action::ATTACK_MODE_RESUME,
             Self::AttackModeTrial => action::ATTACK_MODE_TRIAL,
             Self::SessionRefused => action::SESSION_REFUSED,
+            Self::ReauthSetting => action::REAUTH_SETTING,
         }
     }
 
@@ -128,6 +133,7 @@ impl AuditAction {
             Self::AttackModeResume => "Mode attaque repris",
             Self::AttackModeTrial => "Essai unique en mode attaque",
             Self::SessionRefused => "Session refusée (mode attaque)",
+            Self::ReauthSetting => "Réglage de la fréquence du mot de passe",
         }
     }
 

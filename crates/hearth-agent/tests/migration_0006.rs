@@ -315,7 +315,8 @@ async fn a_database_opened_by_the_agent_is_at_0006_and_a_fresh_one_matches_the_m
         );
     }
     let version: i64 = count(fresh.pool(), "SELECT MAX(version) FROM _sqlx_migrations").await;
-    assert_eq!(version, 6);
+    // 0006 est la dernière migration de ce ticket ; une migration ultérieure (0007) peut exister.
+    assert!(version >= 6, "{version}");
 }
 
 #[tokio::test]

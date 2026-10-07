@@ -2,6 +2,7 @@
 //! BR-TRUST-003 à 005, 007, 022 à 026). Fonctions pures : le temps est un paramètre, la
 //! cryptographie et le stockage sont des ports de l'application.
 
+pub mod admin_act;
 pub mod attack_mode;
 pub mod challenge;
 pub mod device;
@@ -13,7 +14,7 @@ pub use challenge::{
 };
 pub use device::{
     DeviceId, Enrollment, NewDevice, RETENTION, TrustedDevice, cutoff, device_name,
-    judge_enrollment,
+    judge_enrollment, session_proof_serves,
 };
 pub use recognition::{
     LoginCriteria, LoginStanding, Mode, SessionStanding, TrialKind, judge_login, judge_session,
