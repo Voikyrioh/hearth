@@ -29,7 +29,7 @@ describe("account commands of the real bridge", () => {
     await bridge.createAccount("s1", "paul", "Secret-Pass-12", "readonly");
     await bridge.changeAccountRole("s1", "A1", "admin");
     await bridge.setAccountPassword("s1", "A1", "Secret-Pass-12");
-    await bridge.changeOwnPassword("s1", "Old-Secret-12", "Secret-Pass-12");
+    await bridge.changeOwnPassword("s1", "Old-Secret-12", "Secret-Pass-12", true);
     await bridge.closeAccountSessions("s1", "A1");
     await bridge.deleteAccount("s1", "A1", "marie");
     expect(calls).toEqual([
@@ -45,7 +45,12 @@ describe("account commands of the real bridge", () => {
       },
       {
         cmd: "change_own_password",
-        args: { serverId: "s1", current: "Old-Secret-12", password: "Secret-Pass-12" },
+        args: {
+          serverId: "s1",
+          current: "Old-Secret-12",
+          password: "Secret-Pass-12",
+          keepAddress: true,
+        },
       },
       { cmd: "close_account_sessions", args: { serverId: "s1", accountId: "A1" } },
       { cmd: "delete_account", args: { serverId: "s1", accountId: "A1", confirmation: "marie" } },

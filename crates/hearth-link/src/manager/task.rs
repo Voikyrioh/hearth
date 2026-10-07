@@ -15,6 +15,7 @@ use std::time::Duration;
 use futures_util::FutureExt as _;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
+use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::update::{UpdateProgress, UpdateStep};
 use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice};
@@ -408,6 +409,10 @@ impl Runner {
                 self.traffic();
                 self.on_message(*message).await;
             }
+            Ok(Frame::Security(view)) => {
+                self.traffic();
+                self.on_security(*view);
+            }
             Ok(Frame::Other) => self.traffic(),
             // Le flux reste en place jusqu'à l'effet `CloseStream` de la machine.
             // FIX:01M47PCYX3BY3YV84R9WW3KAQ3 — une trame de fermeture AVEC code, autre que « l'agent
@@ -473,6 +478,15 @@ impl Runner {
         }
     }
 
+    /// L'état de sécurité du compte (alerte, mode attaque) : annoncé tel quel à l'interface, qui le
+    /// tient (le dernier état est rejoué à son abonnement, ADR-0013 point 3).
+    fn on_security(&mut self, view: SecurityView) {
+        self.deps.sink.emit(Event::Security {
+            server: self.id.clone(),
+            view: Arc::new(view),
+        });
+    }
+
     /// Progression de la mise à jour de l'agent : annoncée à l'interface ; `restart` rend la
     /// coupure qui suit attendue (« Reconnexion… » sans alarme), `done` lève l'attente
     /// (BR-UPDATE-014).
@@ -519,6 +533,7 @@ impl Runner {
                 machine,
                 history,
                 updates,
+                security,
             } => {
                 self.stream = Some(stream);
                 self.shared.clear_presented();
@@ -531,6 +546,9 @@ impl Runner {
                     // ouvre la fenêtre de coupure attendue (BR-UPDATE-014).
                     for progress in updates {
                         self.on_update(progress).await;
+                    }
+                    if let Some(view) = security {
+                        self.on_security(*view);
                     }
                 } else {
                     // Résultat périmé (déconnexion entre-temps) : on ne le garde pas.

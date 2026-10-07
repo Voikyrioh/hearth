@@ -12,6 +12,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const launchAtStartup = ref(false);
   /** Notifications système du lien (BR-RESIL-015) : activées tant qu'on ne les a pas coupées. */
   const notifyOnLinkChange = ref(true);
+  /** Alertes de sécurité (BR-TRUST-033) : réglage séparé, activé par défaut ; ne touche jamais les bandeaux. */
+  const notifyOnSecurityAlert = ref(true);
   const loaded = ref(false);
   const saving = ref(false);
   const version = ref<string | null>(null);
@@ -39,6 +41,14 @@ export const useSettingsStore = defineStore("settings", () => {
       }
     } catch {
       // Le réglage garde sa valeur par défaut ; l'erreur de lecture des réglages le dit déjà.
+    }
+    try {
+      const security = await commands.getNotifyOnSecurityAlert();
+      if (security.status === "ok" && typeof security.data === "boolean") {
+        notifyOnSecurityAlert.value = security.data;
+      }
+    } catch {
+      // Le réglage garde sa valeur par défaut (activé).
     }
     try {
       version.value = await commands.getAppVersion();
@@ -83,6 +93,24 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function setNotifyOnSecurityAlert(enabled: boolean) {
+    if (saving.value) return;
+    saving.value = true;
+    try {
+      const result = await commands.setNotifyOnSecurityAlert(enabled);
+      if (result.status === "ok") {
+        notifyOnSecurityAlert.value = result.data;
+        error.value = null;
+      } else {
+        error.value = errorKey(result.error.kind);
+      }
+    } catch {
+      error.value = "settings.saveError";
+    } finally {
+      saving.value = false;
+    }
+  }
+
   async function openLogsFolder() {
     try {
       const result = await commands.openLogsFolder();
@@ -96,6 +124,8 @@ export const useSettingsStore = defineStore("settings", () => {
     launchAtStartup,
     notifyOnLinkChange,
     setNotifyOnLinkChange,
+    notifyOnSecurityAlert,
+    setNotifyOnSecurityAlert,
     loaded,
     saving,
     version,

@@ -1,15 +1,31 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import HIcon from "@/components/atoms/HIcon.vue";
 import { initials } from "@/composables/format";
 import { type MessageKey, t } from "@/i18n";
 import type { LinkState, ServerColor } from "@/link";
+import type { SecurityMark } from "@/security/mark";
 
 // Avatar rond d'un serveur : initiales, anneau de la couleur du serveur quand il est
 // actif, pastille d'état en bas à droite. Le nom accessible porte l'état (pas la couleur).
 const props = withDefaults(
-  defineProps<{ name: string; color: ServerColor; state: LinkState; active?: boolean }>(),
-  { active: false },
+  defineProps<{
+    name: string;
+    color: ServerColor;
+    state: LinkState;
+    active?: boolean;
+    /** Marque de sécurité (HRT-26) : mode attaque, suspendu ou alerte ; jamais la couleur seule. */
+    mark?: SecurityMark | null;
+  }>(),
+  { active: false, mark: null },
 );
+
+const MARK_LABELS: Record<SecurityMark, MessageKey> = {
+  attack: "security.markAttack",
+  suspended: "security.markSuspended",
+  alert: "security.markAlert",
+};
+const MARK_ICONS = { attack: "shield", suspended: "clock", alert: "alert" } as const;
 
 const STATE_LABELS: Record<LinkState, MessageKey> = {
   connected: "link.connected",
@@ -21,7 +37,13 @@ const STATE_LABELS: Record<LinkState, MessageKey> = {
 
 const text = computed(() => initials(props.name));
 const label = computed(() =>
-  t("server.avatarLabel", { name: props.name, state: t(STATE_LABELS[props.state]) }),
+  props.mark
+    ? t("server.avatarLabelMarked", {
+        name: props.name,
+        state: t(STATE_LABELS[props.state]),
+        mark: t(MARK_LABELS[props.mark]),
+      })
+    : t("server.avatarLabel", { name: props.name, state: t(STATE_LABELS[props.state]) }),
 );
 </script>
 
@@ -33,6 +55,9 @@ const label = computed(() =>
   >
     <span class="avatar__initials" aria-hidden="true">{{ text }}</span>
     <i :class="['avatar__state', `avatar__state--${state}`]" aria-hidden="true" />
+    <span v-if="mark" :class="['avatar__mark', `avatar__mark--${mark}`]" :data-mark="mark" aria-hidden="true">
+      <HIcon :name="MARK_ICONS[mark]" size="sm" />
+    </span>
   </span>
 </template>
 
@@ -77,6 +102,36 @@ const label = computed(() =>
   border: var(--ring-width) solid var(--side);
   border-radius: 50%;
   background: var(--ok);
+}
+
+.avatar__mark {
+  position: absolute;
+  top: calc(var(--border-width) * -1);
+  right: calc(var(--border-width) * -1);
+  display: grid;
+  place-items: center;
+  width: var(--mark-size);
+  height: var(--mark-size);
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 0 0 var(--ring-width) var(--side);
+}
+
+.avatar__mark :deep(svg) {
+  width: var(--mark-icon);
+  height: var(--mark-icon);
+}
+
+.avatar__mark--attack {
+  color: var(--ac2);
+}
+
+.avatar__mark--suspended {
+  color: var(--cool);
+}
+
+.avatar__mark--alert {
+  color: var(--warn);
 }
 
 .avatar__state--reconnecting,

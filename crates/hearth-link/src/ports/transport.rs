@@ -4,6 +4,7 @@
 use async_trait::async_trait;
 use hearth_proto::api::hello::HelloResponse;
 use hearth_proto::api::operations::OperationResponse;
+use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::sessions::{
     ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginRequest,
     LoginResponse,
@@ -147,6 +148,10 @@ impl TransportError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
     Message(Box<ServerMessage>),
+    /// Le message `security` du flux (HRT-24, HRT-26) : l'état de sécurité du compte connecté, envoyé
+    /// après l'`auth` puis à chaque changement. Il n'est pas un `ServerMessage` : un agent d'avant la
+    /// fonction n'en envoie jamais, et il se lit à part.
+    Security(Box<SecurityView>),
     /// Trame sans intérêt : contrôle, binaire, message mal formé ou inconnu. Compte comme signe
     /// de vie, jamais comme erreur.
     Other,

@@ -9,3 +9,4 @@ Gabarit d'un serveur (`/servers/:id`) : `ServerNav` à gauche ; à droite `AppHe
 - Notes : Tests : `shell.test.ts`.
 
 - HRT-12 : enveloppe la page de `StaleSurface` (données périmées, BR-RESIL-007) ; le panneau de reconnexion et le bandeau restent HORS de la surface désaturée.
+- HRT-26 : pose, sous le bandeau hors ligne et HORS de la surface périmée, `AttackModeBanner` (mode actif ou suspendu) puis `SecurityAlertBanner` (alerte), et rend l'unique `AttackModeDialog` (état `security.dialog`). Le dernier état connu reste affiché quand le lien tombe (« Dernier état connu à {heure} »).

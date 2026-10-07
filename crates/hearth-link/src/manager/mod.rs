@@ -12,6 +12,7 @@ mod audit;
 mod device;
 mod events;
 mod persist;
+mod security;
 mod task;
 mod watchers;
 
@@ -617,6 +618,10 @@ impl LinkManager {
         )
         .await;
         match outcome {
+            // Le délai coupe l'appel net et ne dit pas que l'agent n'a rien fait : s'il a inscrit le
+            // poste juste après, effacer la clé rangée pour cet appel perdrait une place sur les huit
+            // pour rien. Elle RESTE au coffre : inscrite ou reconnue à la connexion suivante (HRT-26,
+            // suivi de la PR #27 ; la connexion refusée, elle, efface bien sa clé, `device::login`).
             Err(_) => Err(hello(LinkError::Timeout)),
             Ok(Err(device::LoginError::Transport(error))) => Err(AuthFailure {
                 error: error.into(),
@@ -625,7 +630,7 @@ impl LinkManager {
             // Une clé est au coffre et le défi est indisponible : échec passager, rien n'est parti
             // (ni mot de passe, ni preuve), on ne se présente pas comme un inconnu.
             Ok(Err(device::LoginError::ChallengeUnavailable)) => Err(AuthFailure {
-                error: LinkError::Unreachable("défi de la clé d'appareil indisponible".into()),
+                error: LinkError::DeviceChallengeUnavailable,
                 refused: false,
             }),
             Ok(Ok(authenticated)) => Ok((authenticated.response, authenticated.new_key)),

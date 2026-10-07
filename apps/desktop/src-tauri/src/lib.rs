@@ -16,6 +16,7 @@ mod link_commands;
 pub mod link_dto;
 pub mod logging;
 pub mod presence;
+pub mod security;
 pub mod settings;
 pub mod startup;
 pub mod texts;
@@ -51,6 +52,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::log_frontend_error,
             commands::get_notify_on_link_change,
             commands::set_notify_on_link_change,
+            commands::get_notify_on_security_alert,
+            commands::set_notify_on_security_alert,
             commands::set_displayed_server,
             link_commands::list_servers,
             link_commands::list_link_states,
@@ -85,6 +88,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             accounts::commands::delete_account,
             devices::commands::list_trusted_devices,
             devices::commands::remove_trusted_device,
+            security::commands::get_security,
+            security::commands::list_security_states,
+            security::commands::set_attack_mode,
             agent_update::commands::get_agent_update,
             agent_update::commands::update_agent,
             agent_update::commands::ack_agent_result,
@@ -99,6 +105,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<update::dto::UpdateStateDto>()
         .typ::<accounts::dto::AccountOutcome>()
         .typ::<devices::dto::DeviceRemovalOutcome>()
+        .typ::<security::dto::SecurityEvent>()
         .typ::<agent_update::dto::AgentUpdateEvent>()
 }
 
@@ -168,6 +175,12 @@ fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
             tracing::warn!(%error, "réglage des notifications illisible : activées");
             true
         });
+    let security_enabled =
+        settings::notify_on_security_alert(app.handle(), Path::new(settings::STORE_FILE))
+            .unwrap_or_else(|error| {
+                tracing::warn!(%error, "réglage des alertes de sécurité illisible : activées");
+                true
+            });
     let started = Instant::now();
     let alerts = Arc::new(alerts::Alerts::new(
         Arc::new(tray::TauriNotifier(app.handle().clone())),
@@ -175,6 +188,7 @@ fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
         enabled,
         move || u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     ));
+    alerts.set_security_enabled(security_enabled);
     app.manage(alerts.clone());
     runtime.set_observer(alerts.clone());
     tauri::async_runtime::spawn(async move {

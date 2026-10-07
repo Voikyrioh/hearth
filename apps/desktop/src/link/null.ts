@@ -2,6 +2,7 @@ import type { AgentUpdateEvent } from "./agent-update";
 import type { AuditEntry } from "./audit";
 import type { LinkBridge } from "./bridge";
 import type { MachineEvent } from "./machine";
+import type { SecurityState } from "./security";
 import {
   type FingerprintChange,
   LinkCommandError,
@@ -99,6 +100,18 @@ export class NullLinkBridge implements LinkBridge {
   async removeTrustedDevice(): Promise<never> {
     return this.unavailable();
   }
+  async onSecurity(_listener: (state: SecurityState) => void): Promise<Unsubscribe> {
+    return () => {};
+  }
+
+  async getSecurity(): Promise<never> {
+    return this.unavailable();
+  }
+
+  async setAttackMode(): Promise<never> {
+    return this.unavailable();
+  }
+
   async getAgentUpdate(): Promise<never> {
     return this.unavailable();
   }

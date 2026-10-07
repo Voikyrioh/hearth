@@ -33,6 +33,7 @@ export default defineConfig({
         "accounts.spec.ts",
         "agent-update.spec.ts",
         "security.spec.ts",
+        "attack-mode.spec.ts",
         "identity.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },

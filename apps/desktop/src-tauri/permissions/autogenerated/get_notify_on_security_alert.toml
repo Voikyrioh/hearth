@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-notify-on-security-alert"
+description = "Enables the get_notify_on_security_alert command without any pre-configured scope."
+commands.allow = ["get_notify_on_security_alert"]
+
+[[permission]]
+identifier = "deny-get-notify-on-security-alert"
+description = "Denies the get_notify_on_security_alert command without any pre-configured scope."
+commands.deny = ["get_notify_on_security_alert"]

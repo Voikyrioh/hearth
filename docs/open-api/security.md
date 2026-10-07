@@ -68,3 +68,7 @@ Rien dans leur contrat. En mode attaque, une session valide présentée **seule*
 `security.alert` (« Attaque probable signalée ») : une entrée au début de l'épisode (cible « début de l'alerte », refusé « trop de tentatives, attente de N s », origine = la tentative qui l'a ouvert) et une à sa fin (cible « fin de l'alerte (levée par l'agent) », réussi, **origine « système »**). Le compte est celui de l'identifiant visé ; **rien** pour un identifiant inexistant.
 
 Mode attaque (HRT-25), voir [journal](./audit.md) : `attack_mode.enable`, `attack_mode.disable`, `attack_mode.auto_disable`, `attack_mode.suspend`, `attack_mode.resume`, `attack_mode.trial`, `session.refused`.
+
+## Côté client (HRT-26)
+
+Le client lit le message de flux `security` (jamais un `ServerMessage`), relit `GET /security` à chaque retour du lien et au chargement de la page Sécurité, et appelle `PUT /security/attack-mode` par la commande typée `set_attack_mode(server_id, active, password)` : la liaison demande le défi `attack_mode`, signe avec la clé du coffre (usage `0x03`, liée au jeton et au geste) et joint le mot de passe. Sans clé au coffre, rien n'est envoyé (ni défi ni écriture). Le client ne déduit jamais le geste d'une entrée de journal. ADR-0029, BR-TRUST-009, 010, 029, 033.

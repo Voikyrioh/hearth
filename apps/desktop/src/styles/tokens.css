@@ -29,6 +29,8 @@
   --crit-tint: color-mix(in srgb, var(--crit) 12%, var(--card));
   --ok-tint: color-mix(in srgb, var(--ok) 12%, var(--card));
   --warn-tint: color-mix(in srgb, var(--warn) 12%, var(--card));
+  --sec-tint: color-mix(in srgb, var(--ac2) 12%, var(--card));
+  --cool-tint: color-mix(in srgb, var(--cool) 12%, var(--card));
   --on-crit: #1c1518;
   --scrim: color-mix(in srgb, var(--bg) 72%, transparent);
 
@@ -89,6 +91,9 @@
   --spinner-size: 16px;
   --spinner-stroke: 3px;
   --ring-width: 2px;
+  --sec-edge: 4px;
+  --mark-size: 16px;
+  --mark-icon: 10px;
   --focus-ring: 2px;
   --focus-offset: 2px;
   --halo-width: 3px;

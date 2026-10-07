@@ -25,6 +25,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 ## Molécules
 
 - [`LinkStatePill`](./LinkStatePill.md) — Pastille d'état du lien (5 états).
+- [`SecurityBanner`](./SecurityBanner.md) — Base des bandeaux de sécurité (alerte, mode attaque, suspendu).
 - [`ServerAvatar`](./ServerAvatar.md) — Avatar de serveur (initiales, anneau, pastille d'état).
 - [`MultiSelect`](./MultiSelect.md) — Liste déroulante à choix multiple (cases à cocher).
 - [`AuditDetailDialog`](./AuditDetailDialog.md) — Une entrée du journal en entier.
@@ -69,6 +70,10 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
 - [`DevActionPanel`](./DevActionPanel.md) — Bouton d'action de développement (`useServerAction`, `needs-link`).
 - [`AccountTable`](./AccountTable.md) — Tableau des comptes et actions de ligne.
+- [`SecurityAlertBanner`](./SecurityAlertBanner.md) — Bandeau « Attaque probable détectée ».
+- [`AttackModeBanner`](./AttackModeBanner.md) — Bandeau « Mode attaque actif » (et suspendu).
+- [`AttackModePanel`](./AttackModePanel.md) — Carte « Mode attaque » : état, bouton, raison d'indisponibilité.
+- [`AttackModeDialog`](./AttackModeDialog.md) — Confirmation avec mot de passe de l'activation ou de la désactivation.
 - [`TrustedDeviceTable`](./TrustedDeviceTable.md) — « Tes postes de confiance » : liste, « Ce poste », « Retirer », états.
 - [`RemoveDeviceDialog`](./RemoveDeviceDialog.md) — Retrait d'un poste de confiance (mot de passe demandé).
 - [`CreateAccountDialog`](./CreateAccountDialog.md) — Création d'un compte (validation en direct).
@@ -96,7 +101,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`Servers`](./Servers.md) — Carnet de serveurs.
 - [`Dashboard`](./Dashboard.md) — Tableau de bord : la machine en direct (jauges, courbes, seuils, matériel absent).
 - [`Accounts`](./Accounts.md) — Comptes (administrateurs) : liste, création, rôle, mots de passe, sessions, suppression.
-- [`Security`](./Security.md) — Sécurité : tes postes de confiance (liste, retrait avec mot de passe).
+- [`Security`](./Security.md) — Sécurité : « Mode attaque » (carte) et tes postes de confiance (liste, retrait avec mot de passe).
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
 - [`Settings`](./Settings.md) — Réglages.
 

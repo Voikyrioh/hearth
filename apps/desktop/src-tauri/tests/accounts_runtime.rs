@@ -240,6 +240,7 @@ impl Client {
             &self.id,
             &Secret::new(current),
             &Secret::new(password),
+            false,
         )
         .await
     }
@@ -594,6 +595,7 @@ async fn an_action_cut_before_its_answer_is_unknown_never_replayed_and_its_outco
             &server,
             &Secret::new(PASSWORD),
             &Secret::new(NEW_PASSWORD),
+            false,
         )
         .await
     });
@@ -838,6 +840,7 @@ async fn an_own_password_change_cut_before_its_answer_leaves_the_vault_entry_era
             &server,
             &Secret::new(PASSWORD),
             &Secret::new(NEW_PASSWORD),
+            false,
         )
         .await
     });
@@ -874,6 +877,7 @@ async fn a_change_refused_because_the_link_is_down_puts_the_old_entry_back() {
         &admin.id,
         &Secret::new(PASSWORD),
         &Secret::new(NEW_PASSWORD),
+        false,
     )
     .await;
     assert_eq!(result.unwrap_err(), LinkFailure::NotConnected);

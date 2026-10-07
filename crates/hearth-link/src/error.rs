@@ -40,6 +40,13 @@ pub enum LinkError {
     /// un acte qui exige la preuve de la clé (retrait d'un poste de confiance) n'est pas parti.
     #[error("ce PC n'a pas de clé d'appareil pour ce serveur")]
     NoDeviceKey,
+    /// Ce PC a une clé, mais l'agent ne donne pas de défi à signer (coupure du seul défi, réponse
+    /// illisible, délai) : rien n'est parti, ni mot de passe ni preuve. Ce n'est PAS « serveur
+    /// injoignable » (le reste répond) ; il n'y a PAS de repli automatique sans clé après N échecs
+    /// (un poste reconnu se présenterait comme un inconnu) : l'utilisateur réessaie, et un repli
+    /// demandé par lui est à étudier (réglage, Q15).
+    #[error("l'agent ne donne pas de défi à signer pour la clé de ce PC")]
+    DeviceChallengeUnavailable,
     #[error("trop d'opérations en suspens")]
     TooManyPending,
     /// Le suivi de l'action n'a pas pu être écrit sur disque : l'action n'a PAS été lancée.

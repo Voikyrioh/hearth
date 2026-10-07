@@ -21,10 +21,12 @@ Les actes de gestion des comptes, des sessions et la mise à jour de l'agent ne 
 - `crates/hearth-agent/src/entrypoint/http/security.rs::set_attack_mode`.
 - `crates/hearth-agent/src/application/sessions.rs::SessionService::set_attack_mode`, `crates/hearth-agent/src/application/trust.rs::TrustService::verify_attack_mode`.
 - `hearth_proto::device_proof::{Binding::AttackMode, signing_bytes}`.
+- Client (HRT-26) : `crates/hearth-link/src/manager/security.rs::LinkManager::set_attack_mode` (défi `attack_mode`, signature d'usage `0x03`, mot de passe), `apps/desktop/src-tauri/src/security/{service,commands}.rs`.
 
 ## Vérification
 - `attack_mode_http.rs` : `a_read_only_account_is_refused_with_403_and_the_refusal_is_journaled`, `an_administrator_without_a_proved_key_is_refused_with_409_a_typed_reason_and_nothing_is_written`, `every_kind_of_wrong_proof_is_refused_with_409_and_leaves_the_mode_off` (clé non inscrite, clé d'un autre compte, autre usage, autre geste, autre jeton, périmée), `a_replayed_proof_is_refused_and_a_proof_that_did_not_serve_is_not_burned`, `a_wrong_password_counts_as_a_login_failure_with_the_same_counters_and_slowdown`, `an_administrator_with_a_proved_key_and_the_password_enables_then_disables_the_mode`, `the_route_needs_a_session_and_an_administrator`.
 - `tests/http_api.rs::every_modifying_route_leaves_exactly_one_success_entry` (balayage de `ENDPOINTS`).
+- Client : `crates/hearth-link/tests/attack_mode.rs`, `apps/desktop/src-tauri/tests/security_runtime.rs` (contre un vrai agent).
 
 ## Cas limites
 - Un poste volé (clé, session, mot de passe mémorisé au coffre) peut désactiver le mode s'il est administrateur : hors de portée de cette règle (le remède est de retirer le poste depuis un autre poste puis de changer le mot de passe).
@@ -34,3 +36,4 @@ Les actes de gestion des comptes, des sessions et la mise à jour de l'agent ne 
 
 ## Historique
 - 2026-10-07 : création (HRT-25, session 2026-10-04-hearth-creation, T34).
+- 2026-10-07 : côté client (HRT-26, T38) : la commande `set_attack_mode`, le champ de mot de passe de la confirmation.
