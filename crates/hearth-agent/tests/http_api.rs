@@ -933,6 +933,10 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     // et la preuve de la clé du poste courant (Q16).
     let carl_key = support::device::DeviceKey::new();
     let carl_session = support::device::login_token(&api, &carl_key, "carl", PASSWORD).await;
+    // `marie` ouvre une session AVEC la clé d'un poste inscrit : activer le mode attaque exige la preuve
+    // d'une clé inscrite et le mot de passe (Q14 point 3, Q16).
+    let marie_key = support::device::DeviceKey::new();
+    let marie_session = support::device::login_token(&api, &marie_key, "marie", PASSWORD).await;
 
     let successes = |env: &support::Env| {
         let pool = env.db.pool().clone();
@@ -1031,6 +1035,29 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     .token(&admin)
                     .send()
                     .await
+            }
+            ("PUT", "/security/attack-mode") => {
+                let body = support::device::attack_mode_body(
+                    &api,
+                    &marie_key,
+                    "marie",
+                    &marie_session,
+                    true,
+                    PASSWORD,
+                )
+                .await;
+                let reply = api
+                    .put("/security/attack-mode")
+                    .token(&marie_session)
+                    .json(&body)
+                    .send()
+                    .await;
+                // Le mode est éteint pour les routes suivantes du balayage.
+                sqlx::query("UPDATE attack_mode SET active = 0 WHERE id = 1")
+                    .execute(env.db.pool())
+                    .await
+                    .unwrap();
+                reply
             }
             (method, path) => panic!("route modifiante sans scénario de réussite : {method} {path}"),
         };

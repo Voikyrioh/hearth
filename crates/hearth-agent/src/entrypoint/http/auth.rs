@@ -10,6 +10,7 @@
 
 use std::net::SocketAddr;
 
+use axum::body::Body;
 use axum::extract::{ConnectInfo, FromRequestParts, Request, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
@@ -109,6 +110,9 @@ fn forbidden_message(action: Option<AuditAction>) -> &'static str {
     match action {
         Some(AuditAction::AuditRead) => "Tu n'as pas la permission de lire le journal d'activité",
         Some(AuditAction::AgentUpdate) => "Seul un administrateur peut mettre à jour l'agent",
+        Some(AuditAction::AttackModeEnable | AuditAction::AttackModeDisable) => {
+            "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs."
+        }
         _ => "Tu n'as pas la permission pour accéder à la gestion des comptes",
     }
 }
@@ -128,6 +132,8 @@ fn failure_of(code: ErrorCode) -> Option<Outcome> {
         ErrorCode::WrongPassword => Some(Outcome::Failed(Reason::WrongPassword)),
         ErrorCode::LastAdmin => Some(Outcome::Failed(Reason::LastAdmin)),
         ErrorCode::Conflict => Some(Outcome::Failed(Reason::Conflict)),
+        // Activation ou désactivation du mode attaque sans clé prouvée : un refus, pas un échec.
+        ErrorCode::PostNotRecognized => Some(Outcome::Denied(Reason::NotRecognized)),
         ErrorCode::NotFound => Some(Outcome::Failed(Reason::NotFound)),
         ErrorCode::Busy => Some(Outcome::Failed(Reason::Busy)),
         ErrorCode::InternalError => Some(Outcome::Failed(Reason::Internal)),
@@ -210,6 +216,33 @@ fn origin_of(parts: &Parts) -> Origin {
     Origin::client(name, &addr)
 }
 
+/// La route d'activation et de désactivation du mode attaque : une seule route, deux gestes, deux
+/// actions du journal.
+const ATTACK_MODE_ROUTE: &str = "/security/attack-mode";
+
+/// Pour la route du mode attaque, l'action du journal est celle du geste demandé (`active` du corps :
+/// `attack_mode.enable` ou `attack_mode.disable`), pour que ses refus et ses échecs soient consignés sous
+/// le bon code. Corps illisible, absent ou sans `active` : le geste par défaut, l'activation. Le corps
+/// est relu tel quel par le handler.
+async fn with_gesture(mut guard: GuardState, body: Body) -> (GuardState, Body) {
+    if guard.route != ATTACK_MODE_ROUTE {
+        return (guard, body);
+    }
+    let bytes = axum::body::to_bytes(body, 1 << 20)
+        .await
+        .unwrap_or_default();
+    let active = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| value.get("active")?.as_bool())
+        .unwrap_or(true);
+    guard.audit = Some(if active {
+        AuditAction::AttackModeEnable
+    } else {
+        AuditAction::AttackModeDisable
+    });
+    (guard, Body::from(bytes))
+}
+
 /// La couche d'accès d'une route non publique.
 pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next) -> Response {
     let (mut parts, body) = request.into_parts();
@@ -229,6 +262,10 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         return ApiError::new(ErrorCode::ForbiddenRole, forbidden_message(guard.audit))
             .into_response();
     }
+    // Le corps n'est lu qu'ici, une fois la session reconnue ET le rôle admis : une requête sans jeton,
+    // ou sans le rôle, ne fait lire aucun corps. Un refus `401` n'a donc pas de geste (il n'est pas
+    // journalisé), un refus `403` non plus (consigné sous `attack_mode.enable`, le geste par défaut).
+    let (guard, body) = with_gesture(guard, body).await;
     // Pour une requête qui modifie seulement : l'action peut supprimer le compte visé, il faut le
     // nommer avant. Une lecture réussie n'écrit rien : rien à résoudre.
     let target = if guard.modifies {

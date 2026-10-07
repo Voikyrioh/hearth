@@ -240,3 +240,19 @@ Appel client = `crates/hearth-link/src/` (lib réutilisable).
 Routes HTTP = `crates/hearth-agent/src/entrypoint/http/`.
 Entrypoint CLI = `crates/hearth-agent/src/entrypoint/cli.rs`.
 Front Vue = `apps/desktop/src/pages/` (par user story).
+- [BR-TRUST-011](./BR-TRUST-011-en-mode-attaque-seuls-les-postes-reconnus-passent.md) — En mode attaque, seuls les postes reconnus (deux critères avant le mot de passe) sont acceptés — `domain/trust/recognition.rs::judge_login` — invariant ✓
+- [BR-TRUST-012](./BR-TRUST-012-essai-unique-pour-une-adresse-seule-ou-une-cle-seule.md) — UN essai par critère présenté, par compte et par activation ; garde de réactivation de 30 minutes — `domain/trust/recognition.rs::judge_login`, `domain/trust/attack_mode.rs::plan_activation` — invariant ✓
+- [BR-TRUST-013](./BR-TRUST-013-session-seule-refusee-en-mode-attaque.md) — Session seule refusée en mode attaque comme une session expirée, sans essai, non détruite — `domain/trust/recognition.rs::judge_session`, `application/sessions.rs::authenticate_inner` — invariant ✓
+- [BR-TRUST-014](./BR-TRUST-014-essai-unique-reussi-le-poste-est-reconnu.md) — Essai unique réussi : le poste est reconnu, l'adresse apprise, l'inscription gelée — `application/sessions.rs::verify` — invariant ✓
+- [BR-TRUST-015](./BR-TRUST-015-essai-unique-rate-le-poste-est-bloque.md) — Essai unique raté : bloqué, le bon mot de passe ne compte plus jusqu'à la fin du mode — `domain/trust/recognition.rs::judge_login` — invariant ✓
+- [BR-TRUST-016](./BR-TRUST-016-aucun-critere-bloque-sans-essai.md) — Aucun critère : bloqué sans essai ni écriture d'essai — `domain/trust/recognition.rs::judge_login` — invariant ✓
+- [BR-TRUST-017](./BR-TRUST-017-un-poste-bloque-ne-sait-rien.md) — Un poste non reconnu reçoit le refus d'un mot de passe faux et ne distingue rien (mode, essai, identifiant) — `application/sessions.rs::verify` — invariant ✓
+- [BR-TRUST-018](./BR-TRUST-018-desactivation-manuelle-du-mode-attaque.md) — Désactivation manuelle : administrateur, mot de passe, preuve de clé liée au geste — `application/sessions.rs::set_attack_mode` — invariant ✓
+- [BR-TRUST-019](./BR-TRUST-019-sortie-automatique-du-mode-attaque.md) — Sortie automatique après 30 minutes sans tentative refusée, sur l'horloge monotone — `domain/trust/attack_mode.rs::quiet_elapsed` — invariant ✓
+- [BR-TRUST-020](./BR-TRUST-020-suspension-du-mode-attaque-au-redemarrage-de-la-machine.md) — Un démarrage de la machine suspend le mode 30 minutes (régime d'alerte), sans horloge murale — `domain/trust/attack_mode.rs::{effective, on_start}` — invariant ✓
+- [BR-TRUST-021](./BR-TRUST-021-redemarrage-du-service-ne-suspend-pas-le-mode-attaque.md) — Un redémarrage du service ou une mise à jour de l'agent ne suspend pas le mode — `domain/trust/attack_mode.rs::on_start` — invariant ✓
+- [BR-TRUST-027](./BR-TRUST-027-debouclage-perte-de-cle-et-changement-d-adresse.md) — Trois voies de sortie : autre poste reconnu, redémarrage physique, `hearth-agent attack-mode off` — `entrypoint/attack_mode.rs::execute` — —
+- [BR-TRUST-028](./BR-TRUST-028-activation-reservee-aux-administrateurs-avec-cle-et-mot-de-passe.md) — Activer ou désactiver exige un administrateur, le mot de passe actuel et la preuve d'une clé inscrite (usage 0x03, liée au jeton et au geste) — `application/sessions.rs::set_attack_mode`, `application/trust.rs::verify_attack_mode` — invariant ✓
+- [BR-TRUST-030](./BR-TRUST-030-journal-des-activations-et-desactivations.md) — Le journal enregistre activations, désactivations et sorties automatiques — `application/attack_mode.rs::change` — invariant ✓
+- [BR-TRUST-031](./BR-TRUST-031-journal-des-suspensions.md) — Le journal enregistre la suspension du mode et sa reprise — `application/attack_mode.rs::{on_start, resume}` — invariant ✓
+- [BR-TRUST-032](./BR-TRUST-032-journal-des-essais-uniques.md) — Le journal enregistre chaque essai unique et son issue, sans secret — `application/sessions.rs::verify` — invariant ✓

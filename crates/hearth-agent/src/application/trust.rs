@@ -98,6 +98,22 @@ pub enum RemoveError {
     Store(#[from] StoreError),
 }
 
+/// Pourquoi la preuve de clé d'une activation ou d'une désactivation du mode attaque est refusée
+/// (HRT-25). L'appelant est déjà authentifié (session valide, administrateur) : le dire n'est pas un
+/// oracle.
+#[derive(Debug, Error)]
+pub enum AttackProofError {
+    /// Aucune preuve n'accompagne la requête.
+    #[error("Aucune preuve de clé n'accompagne la requête")]
+    Missing,
+    /// Illisible, périmée, rejouée, d'un autre usage ou de l'autre geste, ou clé non inscrite pour ce
+    /// compte.
+    #[error("La preuve de la clé de ce poste est invalide")]
+    Invalid,
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
 /// Longueur maximale d'un identifiant de poste accepté dans une route (un ULID en fait 26) : au-delà
 /// ce n'est pas un identifiant, inutile de le chercher.
 const MAX_DEVICE_ID_LEN: usize = 64;
@@ -470,6 +486,42 @@ impl TrustService {
             || !bool::from(device.public_key.ct_eq(&key.public_key))
         {
             return Err(RemoveError::ProofInvalid);
+        }
+        Ok(key)
+    }
+
+    /// Preuve de possession d'une clé INSCRITE pour le compte de l'appelant, pour activer ou désactiver le
+    /// mode attaque depuis le client (Q14 point 3) : usage `0x03`, liée au jeton de la session et à la
+    /// valeur demandée (une preuve d'activation ne désactive pas, et inversement). **N'écrit rien** : le
+    /// défi n'est consommé (`consume`) qu'une fois le changement fait.
+    pub async fn verify_attack_mode(
+        &self,
+        account: &AccountId,
+        username: &str,
+        token_hash: &[u8; 32],
+        activate: bool,
+        proof: Option<&DeviceProof>,
+        addr: &str,
+    ) -> Result<VerifiedKey, AttackProofError> {
+        let proof = proof.ok_or(AttackProofError::Missing)?;
+        let key = self
+            .verify(
+                proof,
+                Binding::AttackMode {
+                    token_hash,
+                    activate,
+                },
+                username,
+                addr,
+            )
+            .ok_or(AttackProofError::Invalid)?;
+        let device = self
+            .devices
+            .find_by_key(&key.key_id)
+            .await?
+            .ok_or(AttackProofError::Invalid)?;
+        if device.account != *account || !bool::from(device.public_key.ct_eq(&key.public_key)) {
+            return Err(AttackProofError::Invalid);
         }
         Ok(key)
     }

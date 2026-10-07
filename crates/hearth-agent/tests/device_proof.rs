@@ -881,7 +881,12 @@ async fn the_enrolment_is_frozen_while_the_attack_mode_is_active() {
     let env = env().await;
     env.create("marie", Role::Admin).await;
     let key = DeviceKey::new();
-    sqlx::query("UPDATE attack_mode SET active = 1 WHERE id = 1")
+    // Le poste est déjà connu par son adresse : en mode attaque (HRT-25), un poste qui n'a aucun critère
+    // est bloqué avant même l'inscription, et celui-ci n'a que son adresse (un essai).
+    login(&env, "marie", PASSWORD, "10.7.7.7", None)
+        .await
+        .expect("connexion avant l'activation");
+    sqlx::query("UPDATE attack_mode SET active = 1, activation_id = 'A1' WHERE id = 1")
         .execute(env.db.pool())
         .await
         .unwrap();
@@ -889,7 +894,7 @@ async fn the_enrolment_is_frozen_while_the_attack_mode_is_active() {
     assert_eq!(outcome.device, Some(DeviceStatus::Deferred));
     assert_eq!(devices(&env).await, 0);
     env.sessions
-        .authenticate(&outcome.token.encode())
+        .authenticate_at(&outcome.token.encode(), "10.7.7.7")
         .await
         .expect("le refus n'est jamais dû à la clé : la connexion a réussi");
     sqlx::query("UPDATE attack_mode SET active = 0 WHERE id = 1")

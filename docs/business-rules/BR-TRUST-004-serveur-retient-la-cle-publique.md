@@ -17,7 +17,7 @@ Le serveur retient la clé **publique** de chaque appareil reconnu pour le recon
 - Une clé de petit ordre n'est jamais inscrite (BR-TRUST-005). La clé inscrite est comparée à celle de la preuve (à temps constant), pas seulement son empreinte. Le défi n'est consommé qu'au moment où l'inscription (ou la preuve sous une clé inscrite) sert.
 - Seule la clé publique est gardée (32 octets), avec son empreinte (`key_id`, 16 octets de SHA-256 en hexadécimal) ; jamais une clé privée.
 - Le nom du poste est celui de `X-Hearth-Client`, nettoyé (jamais un texte libre au journal). Journal : `device.enroll`, sans cible ni champ libre.
-- La clé ne change **aucune décision d'accès** dans cette version (BR-TRUST-035 : en état normal, aucune règle n'est appliquée ; la règle 2 sur 3 est HRT-24).
+- En état normal la clé ne change aucune décision d'accès (BR-TRUST-035) ; en alerte et en mode attaque elle est un des trois critères (BR-TRUST-001, 011). **Pendant le mode attaque (actif, y compris suspendu), l'inscription est gelée** : un poste admis par l'essai unique sur la seule adresse (usurpable) n'obtient pas de clé durable ; la réponse porte `device: "deferred"` et le poste est inscrit à sa première connexion par mot de passe après la fin du mode (BR-TRUST-014).
 - Le refus d'inscrire n'est jamais une erreur : la réponse porte `device` = `enrolled`, `proven`, `limit`, `deferred`, ou rien.
 
 ## Application (code)
@@ -40,3 +40,4 @@ Le serveur retient la clé **publique** de chaque appareil reconnu pour le recon
 
 ## Historique
 - 2026-10-07 : création (HRT-22, session 2026-10-04-hearth-creation, T32).
+- 2026-10-07 : HRT-25, le gel de l'inscription en mode attaque est tenu par `attack_mode.active` (T34).

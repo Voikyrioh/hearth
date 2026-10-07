@@ -2,9 +2,9 @@
 id: BR-TRUST-001
 domaine: TRUST
 titre: Un poste est reconnu s'il présente au moins deux des trois critères : adresse retenue, session valide ou authentification du premier coup, clé de l'appareil
-statut: partielle
+statut: active
 invariant: true
-source: contexts/hearth/conceptions/2026-10-06-fonctionnelle-poste-de-confiance.md (BR-TRUST-001) ; conception technique 2026-10-06 (5.3, 10) ; Q10, Q12, Q13, Q14 (point 5) ; contexts/hearth/tickets/hrt/HRT-24.md ; ADR-0024
+source: contexts/hearth/conceptions/2026-10-06-fonctionnelle-poste-de-confiance.md (BR-TRUST-001) ; conception technique 2026-10-06 (5.3, 10) ; Q10, Q11, Q12, Q13, Q14 (point 5) ; contexts/hearth/tickets/hrt/HRT-24.md, HRT-25.md ; ADR-0024, ADR-0025
 maj: 2026-10-07
 ---
 
@@ -30,12 +30,12 @@ Table de vérité d'une connexion en **ALERTE** (BR-TRUST-006 ; adresse, clé, p
 | non | oui | non | non |
 | non | non | oui ou non | non |
 
-En **NORMAL** la règle ne joue pas (BR-TRUST-035) : personne n'échappe à rien, parce que rien ne ralentit. Le **MODE ATTAQUE** (HRT-25) ajoute un troisième état et l'essai unique ; la fonction est écrite pour l'accueillir sans être réécrite.
+En **NORMAL** la règle ne joue pas (BR-TRUST-035) : personne n'échappe à rien, parce que rien ne ralentit.
 
-> **Partielle** : cette fiche couvre NORMAL et ALERTE (HRT-24, connexion par mot de passe). L'usage d'une session (« session seule ») et le mode attaque viennent avec HRT-25.
+En **MODE ATTAQUE** (HRT-25, BR-TRUST-011) la même fonction décide qui passe et qui est bloqué : deux critères avant le mot de passe, reconnu ; un seul, UN essai (BR-TRUST-012) ; aucun, bloqué sans essai (BR-TRUST-016). L'usage d'une session valide est jugé par `judge_session` : une session seule est refusée en mode attaque (BR-TRUST-013), elle fonctionne en NORMAL et en ALERTE.
 
 ## Application (code)
-- `crates/hearth-agent/src/domain/trust/recognition.rs::{judge_login, mode_of, Mode, LoginCriteria, LoginStanding}` (fonction pure).
+- `crates/hearth-agent/src/domain/trust/recognition.rs::{judge_login, judge_session, mode_of, Mode, LoginCriteria, LoginStanding, SessionStanding}` (fonctions pures).
 - `crates/hearth-agent/src/application/sessions.rs::SessionService::verify` : lit toutes les entrées de la règle pour tout identifiant (liste d'adresses vide et clé jamais reconnue pour un compte absent), appelle `judge_login`, puis `login_policy::conclude` (`escapes_slowdown` remplace le `known` provisoire de l'ADR-0022).
 - `crates/hearth-agent/src/domain/login_policy.rs::conclude`.
 
@@ -48,7 +48,8 @@ En **NORMAL** la règle ne joue pas (BR-TRUST-035) : personne n'échappe à rien
 - La preuve d'une clé non inscrite pour le compte visé ne vaut pas le critère (c).
 
 ## Règles liées
-- BR-TRUST-002, BR-TRUST-005, BR-TRUST-006, BR-TRUST-007, BR-TRUST-034, BR-TRUST-035, BR-CONN-018, BR-CONN-019, ADR-0024.
+- BR-TRUST-002, BR-TRUST-005, BR-TRUST-006, BR-TRUST-007, BR-TRUST-011, BR-TRUST-012, BR-TRUST-013, BR-TRUST-034, BR-TRUST-035, BR-CONN-018, BR-CONN-019, ADR-0024, ADR-0025.
 
 ## Historique
 - 2026-10-07 : création (HRT-24, session 2026-10-04-hearth-creation, T33).
+- 2026-10-07 : HRT-25, le mode attaque (`Mode::Attack`, essai unique, `judge_session`) complète la règle (T34).

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM attack_trials WHERE activation_id <> ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "37e4de017ee453284014a1914ee3a36d117037856aadc43257080b12dc2d5fbe"
+}

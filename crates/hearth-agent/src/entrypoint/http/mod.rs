@@ -193,6 +193,16 @@ pub static ENDPOINTS: &[Endpoint] = &[
     },
     Endpoint {
         method: Method::PUT,
+        path: "/security/attack-mode",
+        access: Access::Admin,
+        version_checked: true,
+        tracked: true,
+        // Le geste (activer ou désactiver) se lit dans le corps : la couche d'accès l'y prend.
+        audit: Some(AuditAction::AttackModeEnable),
+        route: || put(security::set_attack_mode),
+    },
+    Endpoint {
+        method: Method::PUT,
         path: "/me/password",
         access: Access::Authenticated,
         version_checked: true,

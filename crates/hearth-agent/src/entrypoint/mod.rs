@@ -3,6 +3,7 @@
 //! `app.rs`, jamais d'import de `infrastructure`.
 
 pub mod account;
+pub mod attack_mode;
 pub mod cli;
 pub mod http;
 pub mod install;

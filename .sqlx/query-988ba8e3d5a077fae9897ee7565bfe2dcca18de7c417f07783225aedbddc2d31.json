@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM attack_trials\n             WHERE activation_id IS NOT (SELECT activation_id FROM attack_mode WHERE id = 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "988ba8e3d5a077fae9897ee7565bfe2dcca18de7c417f07783225aedbddc2d31"
+}
