@@ -23,22 +23,17 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// Nom du dossier racine, sous le dossier `target` de cargo.
-pub const ROOT_NAME: &str = "hearth-test-tmp";
+#[path = "tmp_root.rs"]
+mod tmp_root;
+
+pub use tmp_root::ROOT_NAME;
 
 /// Dossier racine des dossiers de test : le `target` de cargo (repéré à son `CACHEDIR.TAG` ou à son
 /// `.rustc_info.json`, en remontant depuis l'exécutable de test), sinon `%TEMP%`.
 pub fn root() -> PathBuf {
     let base = std::env::current_exe()
         .ok()
-        .and_then(|exe| {
-            exe.ancestors()
-                .skip(1)
-                .find(|dir| {
-                    dir.join("CACHEDIR.TAG").is_file() || dir.join(".rustc_info.json").is_file()
-                })
-                .map(Path::to_path_buf)
-        })
+        .and_then(|exe| tmp_root::target_dir_of(&exe))
         .unwrap_or_else(std::env::temp_dir);
     let root = base.join(ROOT_NAME);
     std::fs::create_dir_all(&root).expect("racine des dossiers de test");
@@ -53,8 +48,35 @@ pub struct TestDir {
 
 /// Même signature que `tempfile::tempdir()` : les appels existants gardent leur `unwrap`/`expect`.
 pub fn tempdir() -> std::io::Result<TestDir> {
-    let dir = tempfile::Builder::new().tempdir_in(root())?;
+    let dir = tempfile::Builder::new()
+        .prefix(&test_prefix())
+        .tempdir_in(root())?;
     Ok(TestDir { dir: Some(dir) })
+}
+
+/// Le nom du test qui crée le dossier (le fil de test porte son nom), sinon celui du fichier de test :
+/// un dossier laissé dit d'où il vient.
+fn test_prefix() -> String {
+    let thread = std::thread::current();
+    let raw = match thread.name() {
+        Some(name) if name != "main" => name.to_owned(),
+        _ => std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .unwrap_or_default(),
+    };
+    let mut name: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    name.truncate(60);
+    format!("{name}.")
 }
 
 /// Pour les tests de mort simulée, qui font beaucoup de `fsync` : la mémoire (`/dev/shm`) quand elle
@@ -67,7 +89,9 @@ pub fn tempdir_fast() -> std::io::Result<TestDir> {
     }
     let root = shm.join(ROOT_NAME);
     std::fs::create_dir_all(&root)?;
-    let dir = tempfile::Builder::new().tempdir_in(root)?;
+    let dir = tempfile::Builder::new()
+        .prefix(&test_prefix())
+        .tempdir_in(root)?;
     Ok(TestDir { dir: Some(dir) })
 }
 
@@ -89,7 +113,9 @@ impl Drop for TestDir {
         // `keep` : sinon `TempDir::drop` réessaierait en silence, sans que personne le sache.
         let path = dir.keep();
         let _ = remove(&path);
-        DEFERRED.with(|deferred| deferred.borrow_mut().paths.push(path));
+        // `try_with` : détruit pendant la destruction des variables du fil, `with` paniquerait (et
+        // un `Drop` qui panique pendant un déroulement arrête le processus) ; pas de seconde passe alors.
+        let _ = DEFERRED.try_with(|deferred| deferred.borrow_mut().paths.push(path));
     }
 }
 

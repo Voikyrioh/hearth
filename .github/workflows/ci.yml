@@ -32,7 +32,7 @@ jobs:
       # Garde-fou des dossiers temporaires (HRT-18, T43) : les tests les créent sous
       # target/hearth-test-tmp (et /dev/shm/hearth-test-tmp) et les suppriment ; s'il en reste, un test
       # garde un fichier ouvert ou ne nettoie pas, et la suite échoue ici plutôt que de remplir un disque.
-      - run: cargo xtask test-tmp-check
+      - run: cargo xtask test-tmp-check --expect-tests
 
   desktop:
     runs-on: windows-latest
@@ -85,7 +85,7 @@ jobs:
           cargo test -p hearth-desktop
       # Garde-fou des dossiers temporaires (HRT-18, T43), voir le job `rust`.
       - name: Dossiers temporaires laissés par les tests
-        run: cargo xtask test-tmp-check
+        run: cargo xtask test-tmp-check --expect-tests
       # Le coffre réel : le Gestionnaire d'identification de ce Windows jetable (clé exacte `Hearth/{id}`,
       # secret absent, remplacement, effacement). Marqué `ignore` pour ne pas écrire dans la session
       # d'un poste de développement par défaut.

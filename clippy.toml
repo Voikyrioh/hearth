@@ -1,2 +1,14 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+
+# Dossiers temporaires des tests (HRT-18, T43) : toujours par `tests/support/tmp.rs`, qui les range sous
+# `target/hearth-test-tmp`, les nomme d'après le test et vérifie leur suppression. Seul `tmp.rs` appelle
+# `tempfile` (par `Builder::tempdir_in`, non interdit). La production ne dépend de `tempfile` nulle part
+# (dev-dependency des trois crates) ; son seul usage de `std::env::temp_dir` est le repli du dossier de
+# données du client quand `%APPDATA%` manque (`apps/desktop/src-tauri/src/logging.rs`).
+disallowed-methods = [
+    { path = "tempfile::tempdir", reason = "utiliser tests/support/tmp.rs (tmp::tempdir)" },
+    { path = "tempfile::TempDir::new", reason = "utiliser tests/support/tmp.rs (tmp::tempdir)" },
+    { path = "tempfile::TempDir::with_prefix", reason = "utiliser tests/support/tmp.rs (tmp::tempdir)" },
+    { path = "tempfile::Builder::tempdir", reason = "utiliser tests/support/tmp.rs (tmp::tempdir)" },
+]
