@@ -11,7 +11,7 @@ maj: 2026-10-04
 # BR-CLIENT-007 — Le lancement au démarrage se règle depuis l'application
 
 ## Règle
-Réglages > Général > « Lancer Hearth au démarrage de Windows » active ou désactive l'entrée de démarrage de l'utilisateur ; le changement vaut dès la session Windows suivante. L'interface affiche l'état renvoyé par le cœur Rust, pas l'état espéré ; en cas d'échec le réglage reste inchangé et un message l'indique.
+Réglages > Général > « Lancer Hearth au démarrage de Windows » active ou désactive l'entrée de démarrage de l'utilisateur ; le changement vaut dès la session Windows suivante. La valeur écrite est `"<exe>" --minimized`, entre guillemets (HRT-29, ADR-0028) ; au démarrage, une ancienne valeur sans guillemets est réécrite avec la même cible sans jamais changer le choix de l'utilisateur (absente reste absente, activée reste activée, désactivée dans le Gestionnaire des tâches reste désactivée). Code : `domain.rs::startup_command` / `migrated_run_value`, `startup.rs` (FIX:01M4B118DAFBQZYQX1E5ERY8CA). L'interface affiche l'état renvoyé par le cœur Rust, pas l'état espéré ; en cas d'échec le réglage reste inchangé et un message l'indique.
 
 ## Application (code)
 - `apps/desktop/src-tauri/src/settings.rs::set_launch_at_startup` : `enable`/`disable` du greffon puis relecture.
