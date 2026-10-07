@@ -314,3 +314,133 @@ async fn the_relay_keeps_the_last_state_and_replays_it_to_a_late_window() {
     assert_eq!(read.seq, 3);
     assert_eq!(read.device, SecurityDeviceDto::Proven);
 }
+
+/// Un agent qui EXIGE la confirmation des actes, avec `marie` Administrateur et son PC connecté.
+async fn requiring_pc() -> (TestAgent, Client) {
+    let mut agent = TestAgent::install().await;
+    agent.require_confirmation(true);
+    agent.create_account("marie", Role::Admin).await;
+    let pc = client(agent.addr.port()).await;
+    (agent, pc)
+}
+
+/// Suivi de la revue de la PR #32 : le refus d'attente (`429`) et le faux mot de passe du mode attaque
+/// ont chacun leur refus typé, de la liaison à la fenêtre.
+#[tokio::test]
+async fn wrong_passwords_are_told_one_by_one_then_as_a_typed_wait() {
+    let (_agent, pc) = requiring_pc().await;
+    let mut seen = Vec::new();
+    for _ in 0..8 {
+        let outcome = pc.set(true, "Faux-Mot-De-Passe-1").await.unwrap();
+        let waiting = matches!(
+            outcome,
+            AttackModeOutcome::Refused {
+                refusal: AttackModeRefusal::TooManyAttempts { .. }
+            }
+        );
+        seen.push(outcome);
+        if waiting {
+            break;
+        }
+    }
+    let (last, before) = seen.split_last().unwrap();
+    assert!(
+        matches!(
+            last,
+            AttackModeOutcome::Refused {
+                refusal: AttackModeRefusal::TooManyAttempts { retry_after_s }
+            } if *retry_after_s > 0
+        ),
+        "{seen:?}"
+    );
+    assert!(!before.is_empty());
+    assert!(before.iter().all(|outcome| *outcome
+        == AttackModeOutcome::Refused {
+            refusal: AttackModeRefusal::WrongPassword
+        }));
+    // Rien n'a bougé chez l'agent.
+    assert_eq!(
+        known(pc.read().await).attack_mode.state,
+        AttackModeStateDto::Off
+    );
+}
+
+#[tokio::test]
+async fn the_state_of_the_confirmation_is_read_from_the_agent_and_the_setting_is_always_confirmed()
+{
+    use hearth_desktop_lib::reauth::dto::{
+        ReauthModeDto, ReauthSettingOutcome, ReauthSettingRefusal,
+    };
+    use hearth_desktop_lib::reauth::service as reauth;
+
+    let (_agent, pc) = requiring_pc().await;
+    let state = reauth::state(pc.runtime.manager(), &pc.id).await.unwrap();
+    assert!(state.supported && state.required && state.has_device_key);
+    assert_eq!(state.mode, ReauthModeDto::Window);
+    assert_eq!(state.elevated_for_s, 0);
+
+    let set = |mode, password: &str| {
+        let manager = pc.runtime.manager();
+        let id = pc.id.clone();
+        let password = Secret::new(password);
+        async move { reauth::set_setting(manager, &id, mode, &password).await }
+    };
+    // Mot de passe faux : refusé, le réglage ne bouge pas.
+    assert_eq!(
+        set(ReauthModeDto::Each, "Faux-Mot-De-Passe-1")
+            .await
+            .unwrap(),
+        ReauthSettingOutcome::Refused {
+            refusal: ReauthSettingRefusal::WrongPassword
+        }
+    );
+    assert_eq!(
+        reauth::state(pc.runtime.manager(), &pc.id)
+            .await
+            .unwrap()
+            .mode,
+        ReauthModeDto::Window
+    );
+    assert_eq!(
+        set(ReauthModeDto::Each, PASSWORD).await.unwrap(),
+        ReauthSettingOutcome::Done {
+            mode: ReauthModeDto::Each
+        }
+    );
+    assert_eq!(
+        reauth::state(pc.runtime.manager(), &pc.id)
+            .await
+            .unwrap()
+            .mode,
+        ReauthModeDto::Each
+    );
+}
+
+#[tokio::test]
+async fn without_a_key_no_act_leaves_and_the_state_says_so() {
+    use hearth_desktop_lib::reauth::dto::ReauthModeDto;
+    use hearth_desktop_lib::reauth::service as reauth;
+
+    let (_agent, pc) = requiring_pc().await;
+    pc.secrets
+        .0
+        .lock()
+        .unwrap()
+        .remove(&credential_target(&pc.id, SecretKind::DeviceKey));
+    let state = reauth::state(pc.runtime.manager(), &pc.id).await.unwrap();
+    assert!(state.supported && !state.has_device_key);
+    assert_eq!(
+        reauth::set_setting(
+            pc.runtime.manager(),
+            &pc.id,
+            ReauthModeDto::Each,
+            &Secret::new(PASSWORD)
+        )
+        .await,
+        Err(LinkFailure::NotRecognized)
+    );
+    assert_eq!(
+        pc.set(true, PASSWORD).await,
+        Err(LinkFailure::NotRecognized)
+    );
+}

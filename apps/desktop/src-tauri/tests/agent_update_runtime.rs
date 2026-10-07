@@ -33,6 +33,7 @@ use hearth_desktop_lib::link_dto::LinkFailure;
 use hearth_desktop_lib::update::domain::DownloadPolicy;
 use hearth_desktop_lib::vault::{CredentialBackend, CredentialVault};
 use hearth_link::LinkConfig;
+use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::LinkState;
 use proxy::FaultProxy;
@@ -201,7 +202,9 @@ struct World {
 async fn world(allowed: bool, gated: bool) -> World {
     let rig = Arc::new(rig(allowed, gated));
     let factory = rig.clone();
-    let agent = TestAgent::install_with(Some(update_rig::factory(factory))).await;
+    let mut agent = TestAgent::install_with(Some(update_rig::factory(factory))).await;
+    // Un agent qui EXIGE la confirmation des actes, comme le service (HRT-30).
+    agent.require_confirmation(true);
     agent.create_account("marie", Role::Admin).await;
     agent.create_account("lucas", Role::ReadOnly).await;
     World { agent, rig }
@@ -219,7 +222,14 @@ impl Client {
         target: Option<&AgentTarget>,
         version: &str,
     ) -> Result<AgentUpdateOutcome, LinkFailure> {
-        service::start(self.runtime.manager(), &self.id, target, version).await
+        service::start(
+            self.runtime.manager(),
+            &self.id,
+            target,
+            version,
+            &Secret::new(PASSWORD),
+        )
+        .await
     }
 }
 
@@ -475,10 +485,15 @@ async fn an_update_request_cut_before_its_answer_is_unknown_and_never_replayed()
     let proxy = FaultProxy::start(world.agent.addr).await;
     let client = client_via(proxy.port(), "marie").await;
     let target = target_for(&world.rig, "0.2.0", None);
-    // Rien ne passe : la demande reste sans réponse ; on la coupe une fois son suivi écrit.
-    proxy.freeze();
+    // L'agent retient la vérification du mot de passe de confirmation : la demande reste sans réponse
+    // (le défi et la preuve sont déjà passés) ; on la coupe une fois son suivi écrit.
+    world.agent.hold_actions();
+    let started = world.agent.verifications_started();
     let (runtime, id, held) = (client.runtime.clone(), client.id.clone(), target.clone());
-    let call = tokio::spawn(async move { service::send(runtime.manager(), &id, &held).await });
+    let call = tokio::spawn(async move {
+        service::send(runtime.manager(), &id, &held, &Secret::new(PASSWORD)).await
+    });
+    world.agent.wait_action_started(started).await;
     let tracking = client.dir.path().join("operations");
     eventually("le suivi de l'action écrit", || {
         std::fs::read_dir(&tracking).is_ok_and(|mut entries| entries.next().is_some())

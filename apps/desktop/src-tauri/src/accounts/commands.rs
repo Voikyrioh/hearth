@@ -43,9 +43,19 @@ pub async fn create_account(
     username: String,
     password: String,
     role: RoleDto,
+    admin_password: Option<String>,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
-    service::create(link.manager(), &id, &username, &Secret::new(password), role).await
+    let admin_password = admin_password.map(Secret::new);
+    service::create(
+        link.manager(),
+        &id,
+        &username,
+        &Secret::new(password),
+        role,
+        admin_password.as_ref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -55,9 +65,18 @@ pub async fn change_account_role(
     server_id: String,
     account_id: String,
     role: RoleDto,
+    admin_password: Option<String>,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
-    service::change_role(link.manager(), &id, &account_id, role).await
+    let admin_password = admin_password.map(Secret::new);
+    service::change_role(
+        link.manager(),
+        &id,
+        &account_id,
+        role,
+        admin_password.as_ref(),
+    )
+    .await
 }
 
 /// Un administrateur définit le mot de passe d'un autre compte (ferme ses sessions). La règle « ne
@@ -69,9 +88,19 @@ pub async fn set_account_password(
     server_id: String,
     account_id: String,
     password: String,
+    admin_password: String,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
-    service::set_password(link.manager(), &id, &account_id, &Secret::new(password)).await
+    // Prendre le contrôle d'un compte n'est jamais couvert par l'élévation : mot de passe obligatoire.
+    let admin_password = Secret::new(admin_password);
+    service::set_password(
+        link.manager(),
+        &id,
+        &account_id,
+        &Secret::new(password),
+        Some(&admin_password),
+    )
+    .await
 }
 
 /// Le titulaire change son propre mot de passe (ferme ses AUTRES sessions, garde la courante) ;
@@ -102,9 +131,11 @@ pub async fn close_account_sessions(
     link: Runtime_<'_>,
     server_id: String,
     account_id: String,
+    admin_password: Option<String>,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
-    service::close_sessions(link.manager(), &id, &account_id).await
+    let admin_password = admin_password.map(Secret::new);
+    service::close_sessions(link.manager(), &id, &account_id, admin_password.as_ref()).await
 }
 
 /// Supprime un compte. `confirmation` : l'identifiant retapé quand on supprime son propre compte.
@@ -115,7 +146,16 @@ pub async fn delete_account(
     server_id: String,
     account_id: String,
     confirmation: Option<String>,
+    admin_password: Option<String>,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
-    service::delete(link.manager(), &id, &account_id, confirmation).await
+    let admin_password = admin_password.map(Secret::new);
+    service::delete(
+        link.manager(),
+        &id,
+        &account_id,
+        confirmation,
+        admin_password.as_ref(),
+    )
+    .await
 }

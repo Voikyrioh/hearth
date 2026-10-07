@@ -153,6 +153,9 @@ pub enum AttackModeRefusal {
     },
     /// L'agent est saturé : réessayer dans un instant.
     Busy,
+    /// L'élévation de 5 minutes s'est fermée côté agent et le mot de passe n'était pas dans la requête
+    /// (jamais le cas du mode attaque, qui n'est pas couvert : la fenêtre le redemande quand même).
+    PasswordRequired,
     /// L'agent ne connaît pas cette fonction (agent d'avant le mode attaque).
     Unsupported,
     SessionEnded,

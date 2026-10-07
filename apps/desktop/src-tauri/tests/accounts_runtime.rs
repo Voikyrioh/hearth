@@ -33,6 +33,7 @@ use proxy::FaultProxy;
 
 const GUARD: Duration = Duration::from_secs(60);
 const NEW_PASSWORD: &str = "Sunny-Walk-Home-42";
+const OTHER_PASSWORD: &str = "Another-Long-Pass-91";
 
 #[derive(Default)]
 struct Memory(Mutex<HashMap<String, Vec<u8>>>);
@@ -105,6 +106,8 @@ struct Client {
     runtime: Arc<LinkRuntime>,
     id: ServerId,
     secrets: Arc<Memory>,
+    /// Le mot de passe de la connexion : celui que les actes d'administration confirment (HRT-30).
+    password: String,
     _dir: tempfile::TempDir,
 }
 
@@ -148,6 +151,7 @@ async fn client_with(
         runtime,
         id,
         secrets,
+        password: password.to_owned(),
         _dir: dir,
     };
     client.wait_for(LinkState::Connected).await;
@@ -190,12 +194,25 @@ impl Client {
             username,
             &Secret::new(password),
             role,
+            Some(&self.admin_password()),
         )
         .await
     }
 
+    /// Le mot de passe de confirmation des actes : celui de la connexion de ce client.
+    fn admin_password(&self) -> Secret {
+        Secret::new(self.password.as_str())
+    }
+
     async fn set_role(&self, account: &str, role: RoleDto) -> Result<AccountOutcome, LinkFailure> {
-        service::change_role(self.runtime.manager(), &self.id, account, role).await
+        service::change_role(
+            self.runtime.manager(),
+            &self.id,
+            account,
+            role,
+            Some(&self.admin_password()),
+        )
+        .await
     }
 
     async fn set_password(
@@ -208,12 +225,19 @@ impl Client {
             &self.id,
             &account.id,
             &Secret::new(password),
+            Some(&self.admin_password()),
         )
         .await
     }
 
     async fn close_sessions(&self, account: &str) -> Result<AccountOutcome, LinkFailure> {
-        service::close_sessions(self.runtime.manager(), &self.id, account).await
+        service::close_sessions(
+            self.runtime.manager(),
+            &self.id,
+            account,
+            Some(&self.admin_password()),
+        )
+        .await
     }
 
     async fn delete(
@@ -226,6 +250,7 @@ impl Client {
             &self.id,
             account,
             confirmation.map(str::to_owned),
+            Some(&self.admin_password()),
         )
         .await
     }
@@ -265,7 +290,9 @@ fn done(outcome: Result<AccountOutcome, LinkFailure>) -> (Option<AccountDto>, u3
 
 /// Un agent avec `marie` (Administrateur) et son client connecté.
 async fn rig() -> (TestAgent, Client) {
-    let agent = TestAgent::install().await;
+    let mut agent = TestAgent::install().await;
+    // Un agent qui EXIGE la confirmation des actes, comme le service (HRT-30).
+    agent.require_confirmation(true);
     agent.create_account("marie", Role::Admin).await;
     let admin = client(agent.addr.port(), "marie", PASSWORD, config(false, false)).await;
     (agent, admin)
@@ -343,9 +370,15 @@ async fn roles_change_and_the_last_administrator_can_be_neither_demoted_nor_remo
         .set_role("ZZZZZZZZZZZZZZZZZZZZZZZZZZ", RoleDto::Admin)
         .await;
     assert_eq!(refused(&unknown), &AccountRefusal::NotFound);
-    let bad = service::change_role(admin.runtime.manager(), &admin.id, "../me", RoleDto::Admin)
-        .await
-        .unwrap_err();
+    let bad = service::change_role(
+        admin.runtime.manager(),
+        &admin.id,
+        "../me",
+        RoleDto::Admin,
+        Some(&admin.admin_password()),
+    )
+    .await
+    .unwrap_err();
     assert_eq!(
         bad,
         LinkFailure::InvalidInput {
@@ -663,6 +696,7 @@ async fn an_action_is_refused_without_anything_sent_when_the_link_is_not_connect
         "paul",
         &Secret::new(NEW_PASSWORD),
         RoleDto::Readonly,
+        Some(&admin.admin_password()),
     )
     .await;
     assert_eq!(created.unwrap_err(), LinkFailure::NotConnected);
@@ -886,4 +920,93 @@ async fn a_change_refused_because_the_link_is_down_puts_the_old_entry_back() {
         before,
         "rien n'est parti : l'ancien est remis"
     );
+}
+
+/// L'élévation de 5 minutes vue de la coquille (HRT-30, D2) : un mot de passe juste ouvre le délai, une
+/// action couverte passe sans mot de passe, et quand l'agent l'a fermée il le dit (`PasswordRequired`) :
+/// la fenêtre redemande, l'action repart avec un défi neuf.
+#[tokio::test]
+async fn a_covered_act_needs_no_password_during_the_elevation_and_asks_for_it_again_when_it_closes()
+{
+    use hearth_desktop_lib::reauth::dto::ReauthModeDto;
+    use hearth_desktop_lib::reauth::service as reauth;
+
+    let (_agent, admin) = rig().await;
+    assert_eq!(
+        reauth::state(admin.runtime.manager(), &admin.id)
+            .await
+            .unwrap()
+            .elevated_for_s,
+        0
+    );
+    done(admin.create("paul", NEW_PASSWORD, RoleDto::Readonly).await);
+    let elevated = reauth::state(admin.runtime.manager(), &admin.id)
+        .await
+        .unwrap()
+        .elevated_for_s;
+    assert!(elevated > 0 && elevated <= 300, "{elevated}");
+    // Pendant le délai : aucun mot de passe.
+    let paul = admin.account("paul").await;
+    let close = |password: Option<Secret>| {
+        let manager = admin.runtime.manager();
+        let id = admin.id.clone();
+        let account = paul.id.clone();
+        async move { service::close_sessions(manager, &id, &account, password.as_ref()).await }
+    };
+    done(close(None).await);
+
+    // Le réglage « à chaque action » ferme le délai : la même action sans mot de passe est refusée,
+    // `PasswordRequired`, rien n'a changé ; avec le mot de passe elle repart.
+    reauth::set_setting(
+        admin.runtime.manager(),
+        &admin.id,
+        ReauthModeDto::Each,
+        &admin.admin_password(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        refused(&close(None).await),
+        &AccountRefusal::PasswordRequired
+    );
+    done(close(Some(admin.admin_password())).await);
+}
+
+/// Un faux mot de passe de confirmation est un refus typé qui laisse la fenêtre ouverte ; l'attente de la
+/// connexion arrive ensuite en `TooManyAttempts`, jamais en erreur générique.
+#[tokio::test]
+async fn a_wrong_confirmation_password_is_a_typed_refusal_then_a_typed_wait() {
+    let (_agent, admin) = rig().await;
+    done(admin.create("paul", NEW_PASSWORD, RoleDto::Readonly).await);
+    let paul = admin.account("paul").await;
+    let mut kinds = Vec::new();
+    for _ in 0..8 {
+        // Un acte que l'élévation ne couvre jamais : le mot de passe est examiné à chaque essai.
+        let outcome = service::set_password(
+            admin.runtime.manager(),
+            &admin.id,
+            &paul.id,
+            &Secret::new(OTHER_PASSWORD),
+            Some(&Secret::new("Faux-Mot-De-Passe-1")),
+        )
+        .await;
+        let refusal = refused(&outcome).clone();
+        let waiting = matches!(refusal, AccountRefusal::TooManyAttempts { .. });
+        kinds.push(refusal);
+        if waiting {
+            break;
+        }
+    }
+    assert!(matches!(
+        kinds.last(),
+        Some(AccountRefusal::TooManyAttempts { retry_after_s }) if *retry_after_s > 0
+    ));
+    assert!(kinds.len() > 1);
+    assert!(
+        kinds[..kinds.len() - 1]
+            .iter()
+            .all(|refusal| *refusal == AccountRefusal::WrongPassword)
+    );
+    // Le mot de passe de paul n'a pas changé : ses sessions ne sont pas fermées, il se connecte encore.
+    assert_eq!(admin.accounts().await.len(), 2);
 }

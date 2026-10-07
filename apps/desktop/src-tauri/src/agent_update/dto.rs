@@ -223,6 +223,16 @@ pub enum AgentUpdateRefusal {
     /// La version retenue n'est pas plus récente que l'agent (rien n'a été envoyé : jamais de
     /// rétrogradation).
     NotNewer,
+    /// Le mot de passe de confirmation est faux (les compteurs de la connexion ont avancé).
+    WrongPassword,
+    /// L'élévation s'est fermée côté agent et le mot de passe n'était pas dans la requête.
+    PasswordRequired,
+    /// Trop d'essais de mot de passe : réessayer plus tard.
+    TooManyAttempts {
+        retry_after_s: u32,
+    },
+    /// L'agent est saturé : réessayer dans un instant.
+    Busy,
     Other,
 }
 

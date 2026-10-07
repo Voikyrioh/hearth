@@ -52,6 +52,9 @@ const COMMANDS: &[&str] = &[
     "get_agent_update",
     "update_agent",
     "ack_agent_result",
+    "get_reauth_state",
+    "reauth_covers",
+    "set_reauth_setting",
 ];
 
 fn main() {

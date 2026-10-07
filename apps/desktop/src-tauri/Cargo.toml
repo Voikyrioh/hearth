@@ -50,6 +50,7 @@ reqwest.workspace = true
 semver = "1"
 url.workspace = true
 tracing-appender = "0.2.5"
+zeroize.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 keyring-core = "1"

@@ -14,9 +14,11 @@ use hearth_proto::api::accounts::{
 use hearth_proto::error::{ErrorBody, ErrorCode};
 use serde::Serialize;
 use serde_json::Value;
+use zeroize::Zeroize;
 
 use super::dto::{AccountDto, AccountOutcome, AccountRefusal, PasswordRuleDto, UsernameProblemDto};
 use crate::link_dto::{InvalidField, LinkFailure, RoleDto};
+use crate::reauth::wire::{Confirmation, confirmation_of};
 
 /// Plus long qu'un identifiant de compte (un ULID : 26 caractères).
 const ACCOUNT_ID_MAX_LEN: usize = 64;
@@ -107,16 +109,19 @@ pub fn create(username: &str, password: &str, role: RoleDto) -> Result<Planned, 
     if let Some(refusal) = refusal_of(check_input(username, password)) {
         return Err(refusal.into());
     }
-    let body = CreateAccountRequest {
+    let mut body = CreateAccountRequest {
         username: username.to_owned(),
         password: password.to_owned(),
         role: role_name(role),
     };
+    let value = json(&body);
+    // La copie du mot de passe dans le type du fil est effacée dès que le corps est écrit.
+    body.password.zeroize();
     Ok(Planned {
         request: ActionRequest {
             method: Method::Post,
             path: "/accounts".into(),
-            body: Some(json(&body)?),
+            body: Some(value?),
         },
         expect: Expect::Account,
     })
@@ -145,13 +150,16 @@ pub fn set_password(account: &str, password: &str) -> Result<Planned, Stop> {
     if let Some(refusal) = weak(unmet_password_rules(password, "")) {
         return Err(refusal.into());
     }
+    let mut body = SetPasswordRequest {
+        password: password.to_owned(),
+    };
+    let value = json(&body);
+    body.password.zeroize();
     Ok(Planned {
         request: ActionRequest {
             method: Method::Put,
             path: format!("/accounts/{account}/password"),
-            body: Some(json(&SetPasswordRequest {
-                password: password.to_owned(),
-            })?),
+            body: Some(value?),
         },
         expect: Expect::Closed,
     })
@@ -170,15 +178,19 @@ pub fn change_own_password(
     if let Some(refusal) = weak(unmet_password_rules(password, &normalized)) {
         return Err(refusal.into());
     }
+    let mut body = ChangeOwnPasswordRequest {
+        current: current.to_owned(),
+        password: password.to_owned(),
+        keep_address,
+    };
+    let value = json(&body);
+    body.current.zeroize();
+    body.password.zeroize();
     Ok(Planned {
         request: ActionRequest {
             method: Method::Put,
             path: "/me/password".into(),
-            body: Some(json(&ChangeOwnPasswordRequest {
-                current: current.to_owned(),
-                password: password.to_owned(),
-                keep_address,
-            })?),
+            body: Some(value?),
         },
         expect: Expect::Closed,
     })
@@ -224,11 +236,22 @@ pub fn refusal_from_error(status: u16, body: &Value) -> Result<AccountRefusal, L
             _ => Ok(AccountRefusal::Other),
         };
     };
+    // Les refus de la confirmation (mot de passe faux, attente, élévation fermée, preuve non reconnue,
+    // client trop ancien) se lisent partout pareil (BR-TRUST-040, 045).
+    if let Some(confirmation) = confirmation_of(&error)? {
+        return Ok(match confirmation {
+            Confirmation::WrongPassword => AccountRefusal::WrongPassword,
+            Confirmation::PasswordRequired => AccountRefusal::PasswordRequired,
+            Confirmation::TooManyAttempts { retry_after_s } => {
+                AccountRefusal::TooManyAttempts { retry_after_s }
+            }
+            Confirmation::Busy => AccountRefusal::Busy,
+        });
+    }
     let error = error.error;
     Ok(match error.code {
         ErrorCode::ForbiddenRole => return Err(LinkFailure::Forbidden),
         ErrorCode::UsernameTaken => AccountRefusal::UsernameTaken,
-        ErrorCode::WrongPassword => AccountRefusal::WrongPassword,
         ErrorCode::LastAdmin => AccountRefusal::LastAdmin,
         ErrorCode::NotFound => AccountRefusal::NotFound,
         ErrorCode::Conflict => AccountRefusal::Conflict,
