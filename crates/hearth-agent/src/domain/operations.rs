@@ -63,14 +63,18 @@ impl fmt::Display for OperationKey {
 /// Longueur d'une empreinte : un HMAC-SHA-256, 32 octets.
 pub const FINGERPRINT_LEN: usize = 32;
 
+/// Étiquette de domaine et de version de l'encodage (HRT-32).
+const DOMAIN_LABEL: &[u8] = b"hearth/request-fingerprint/v1";
+
 /// Les trois parties d'une requête suivie, en une suite d'octets sans ambiguïté : chaque partie est
 /// précédée de sa longueur (8 octets, grand-boutiste). Déplacer une frontière entre la méthode, le
 /// chemin et le corps change la suite (`"a"` + `"bc"` n'est pas `"ab"` + `"c"`), quel que soit le
 /// contenu, y compris des octets nuls. C'est ce que l'adaptateur donne au HMAC (jamais à un
-/// haché sans clé).
+/// haché sans clé). La suite commence par une étiquette de domaine et de version : un autre usage
+/// du même secret, un jour, ne produirait pas de codes interchangeables avec ceux-ci.
 pub fn canonical_request(method: &str, path: &str, body: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(24 + method.len() + path.len() + body.len());
-    for part in [method.as_bytes(), path.as_bytes(), body] {
+    let mut out = Vec::with_capacity(48 + method.len() + path.len() + body.len());
+    for part in [DOMAIN_LABEL, method.as_bytes(), path.as_bytes(), body] {
         out.extend_from_slice(&(part.len() as u64).to_be_bytes());
         out.extend_from_slice(part);
     }

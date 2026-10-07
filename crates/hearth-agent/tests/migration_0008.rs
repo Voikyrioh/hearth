@@ -126,3 +126,117 @@ async fn an_empty_operations_table_migrates_and_the_column_stays_mandatory() {
     .await;
     assert!(refused.is_err());
 }
+
+/// Tous les octets du fichier de base et de son journal.
+fn file_bytes(dir: &Path) -> Vec<u8> {
+    let mut all = Vec::new();
+    for name in ["hearth.db", "hearth.db-wal"] {
+        if let Ok(bytes) = std::fs::read(dir.join(name)) {
+            all.extend(bytes);
+        }
+    }
+    all
+}
+
+fn count_in(haystack: &[u8], needle: &str) -> usize {
+    haystack
+        .windows(needle.len())
+        .filter(|window| *window == needle.as_bytes())
+        .count()
+}
+
+/// B1 (review r1 de la PR #39) : la migration vide la colonne, l'ouverture de la base efface les
+/// OCTETS. On lit le fichier de base et son journal, pas une requête.
+#[tokio::test]
+async fn no_old_fingerprint_is_left_in_the_database_file_or_its_journal() {
+    use hearth_agent::infrastructure::sqlite::Database;
+
+    let dir = tmp::tempdir().unwrap();
+    let hashes: Vec<String> = (0..40)
+        .map(|i| {
+            legacy_hash(
+                "PUT",
+                "/me/password",
+                format!("mot-de-passe-{i}").as_bytes(),
+            )
+        })
+        .collect();
+    {
+        let pool = open(&dir.path().join("hearth.db")).await;
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .execute(&pool)
+            .await
+            .unwrap();
+        migrator_up_to(7).run(&pool).await.unwrap();
+        for (i, hash) in hashes.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO operations (id, account_id, kind, request_hash, status, created_at)
+                 VALUES (?, 'A1', 'PUT /me/password', ?, 'succeeded', '2026-10-07T10:00:00.000Z')",
+            )
+            .bind(format!("K{i}"))
+            .bind(hash)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        // Pour que le contrôle ait un sens : avant la migration, les empreintes sont bien dans le fichier.
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let before = file_bytes(dir.path());
+        assert!(hashes.iter().all(|h| count_in(&before, h) >= 1));
+        pool.close().await;
+    }
+
+    let db = Database::open(dir.path()).await.unwrap();
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operations")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, 40, "les lignes restent");
+    db.pool().close().await;
+
+    let after = file_bytes(dir.path());
+    let found: Vec<&String> = hashes.iter().filter(|h| count_in(&after, h) > 0).collect();
+    assert!(
+        found.is_empty(),
+        "{} anciennes empreintes encore lisibles dans le fichier",
+        found.len()
+    );
+}
+
+/// Les lignes supprimées plus tard (purge des 24 heures) ne laissent pas non plus leur contenu dans
+/// les pages libres.
+#[tokio::test]
+async fn a_deleted_operation_leaves_no_bytes_behind() {
+    use hearth_agent::infrastructure::sqlite::Database;
+
+    let dir = tmp::tempdir().unwrap();
+    let db = Database::open(dir.path()).await.unwrap();
+    let hashes: Vec<String> = (0..40)
+        .map(|i| legacy_hash("POST", "/accounts", format!("secret-{i}").as_bytes()))
+        .collect();
+    for (i, hash) in hashes.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO operations (id, account_id, kind, request_hash, status, created_at)
+             VALUES (?, 'A1', 'POST /accounts', ?, 'succeeded', '2026-10-07T10:00:00.000Z')",
+        )
+        .bind(format!("K{i}"))
+        .bind(hash)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    }
+    sqlx::query("DELETE FROM operations")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    db.pool().close().await;
+    let after = file_bytes(dir.path());
+    assert!(hashes.iter().all(|h| count_in(&after, h) == 0));
+}

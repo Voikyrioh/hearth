@@ -22,8 +22,10 @@ impl HmacFingerprinter {
 
 /// Pour les chemins qui n'ont aucune requête suivie à servir (sous-commandes `account` et
 /// `attack-mode`, assemblages sans HTTP) : n'a pas de secret, ne lit ni ne crée aucun fichier, et
-/// rend toujours une empreinte effacée, égale à rien. Si une requête suivie arrivait par là, aucune
-/// clé ne serait reconnue : rien ne s'exécuterait « au cas où ».
+/// rend toujours une empreinte effacée, égale à aucune empreinte calculée. Si une requête suivie
+/// arrivait par là, une première requête sous une clé neuve s'exécuterait (aucune ligne à comparer),
+/// mais aucun rejeu ne serait reconnu : une clé déjà enregistrée répondrait `409`, jamais une
+/// seconde exécution. Inatteignable : `start_full` charge toujours le vrai secret.
 pub struct NoFingerprint;
 
 impl RequestFingerprinter for NoFingerprint {

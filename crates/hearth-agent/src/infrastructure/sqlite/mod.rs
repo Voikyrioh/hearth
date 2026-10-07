@@ -82,6 +82,9 @@ impl Database {
             .journal_mode(SqliteJournalMode::Wal)
             .synchronous(SqliteSynchronous::Normal)
             .foreign_keys(true)
+            // Une ligne supprimée ou vidée est réécrite avec des zéros dans la page (HRT-32) : une copie
+            // de la base ne garde pas le contenu d'une ligne effacée (pages libres comprises).
+            .pragma("secure_delete", "ON")
             .busy_timeout(Duration::from_secs(5));
         let pool = SqlitePoolOptions::new()
             .max_connections(4)
@@ -95,8 +98,18 @@ impl Database {
             .run(&pool)
             .await
             .map_err(|error| DatabaseError::Migrate {
-                path,
+                path: path.clone(),
                 message: error.to_string(),
+            })?;
+        // FIX:01M4BZN31A8Z8WN0WKNTCRTFFN : la migration 0008 vide la colonne, pas les octets ; l'effacement
+        // physique se fait ici, hors de sa transaction (`VACUUM` n'y tourne pas).
+        scrub_after_0008(&pool)
+            .await
+            .map_err(|error| DatabaseError::Migrate {
+                path: path.clone(),
+                message: format!(
+                    "effacement physique des anciennes empreintes impossible : {error}"
+                ),
             })?;
         Ok(Self { pool })
     }
@@ -104,6 +117,36 @@ impl Database {
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
+}
+
+/// Marque `PRAGMA user_version` : l'effacement physique des anciennes empreintes est fait.
+const SCRUBBED_VERSION: i64 = 1; // (littéral dans `scrub_after_0008`)
+
+/// Réécrit le fichier de la base et son journal pour que les empreintes effacées par la migration
+/// `0008` ne restent pas dans les pages libres ni dans le journal : `VACUUM` (reconstruit la base,
+/// le fichier rétrécit) puis point de contrôle qui tronque le journal à zéro octet. Fait une fois
+/// (`user_version`) ; si l'effacement échoue, l'agent ne démarre pas et le reprendra au démarrage
+/// suivant (la marque n'est posée qu'après). Une base neuve passe par là aussi, sans coût.
+async fn scrub_after_0008(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let applied: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 8 AND success")
+            .fetch_one(pool)
+            .await?;
+    let done: i64 = sqlx::query_scalar("PRAGMA user_version")
+        .fetch_one(pool)
+        .await?;
+    if applied == 0 || done >= SCRUBBED_VERSION {
+        return Ok(());
+    }
+    sqlx::query("VACUUM").execute(pool).await?;
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(pool)
+        .await?;
+    sqlx::query("PRAGMA user_version = 1").execute(pool).await?;
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// Nombre d'administrateurs, lu en **lecture seule** et sans migration : l'installation observe
