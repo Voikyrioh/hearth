@@ -23,9 +23,10 @@ use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, CryptoError, GpuProbe, HashError,
-    IdGen, IdentityError, IdentityStore, MonotonicClock, PasswordHasher, PublicIdentity,
-    SecurityFeed, Store, StoreError, SystemProbe, TokenGen,
+    AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, CryptoError, FingerprintSecretError,
+    FingerprintSecretStore, GpuProbe, HashError, IdGen, IdentityError, IdentityStore,
+    MonotonicClock, PasswordHasher, PublicIdentity, RequestFingerprinter, SecurityFeed, Store,
+    StoreError, SystemProbe, TokenGen,
 };
 use crate::application::security::SecurityService;
 use crate::application::sessions::SessionService;
@@ -45,6 +46,8 @@ use crate::infrastructure::clock::{SystemClock, SystemMonotonic};
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::crypto::{HmacChallengeCrypto, RingProofVerifier};
 use crate::infrastructure::data_dir;
+use crate::infrastructure::fingerprint::{HmacFingerprinter, NoFingerprint};
+use crate::infrastructure::fingerprint_secret::FileFingerprintSecretStore;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::security_feed::BroadcastSecurityFeed;
@@ -65,6 +68,8 @@ pub enum AppError {
     Identity(#[from] IdentityError),
     #[error(transparent)]
     Tls(#[from] TlsError),
+    #[error(transparent)]
+    FingerprintSecret(#[from] FingerprintSecretError),
     #[error(transparent)]
     Database(#[from] DatabaseError),
     #[error(transparent)]
@@ -154,6 +159,8 @@ pub struct TrustParts {
     pub monotonic: Arc<dyn MonotonicClock>,
     /// Ce que le noyau dit du démarrage en cours (mode attaque, HRT-25).
     pub boot: Arc<dyn BootInfo>,
+    /// L'empreinte à clé des requêtes suivies (HRT-32) : secret propre à l'installation.
+    pub fingerprinter: Arc<dyn RequestFingerprinter>,
 }
 
 /// Les cas d'usage assemblés sur une base ouverte.
@@ -281,6 +288,11 @@ fn assemble(
     attack: Option<(Arc<dyn MonotonicClock>, Arc<dyn BootInfo>)>,
 ) -> Services {
     let pool = database.pool();
+    // Sans identité d'appareil, pas de service HTTP : aucune requête suivie à reconnaître.
+    let fingerprinter: Arc<dyn RequestFingerprinter> = match &trust {
+        Some((parts, _)) => parts.fingerprinter.clone(),
+        None => Arc::new(NoFingerprint),
+    };
     let accounts_repo = Arc::new(SqliteAccountRepo::new(pool.clone()));
     let sessions_repo = Arc::new(SqliteSessionRepo::new(pool.clone()));
     let store: Arc<dyn Store> = Arc::new(SqliteStore::new(pool.clone()));
@@ -385,6 +397,7 @@ fn assemble(
             Arc::new(SqliteOperationRepo::new(pool.clone())),
             store.clone(),
             adapters.clock.clone(),
+            fingerprinter,
         )),
         maintenance,
         audit: Arc::new(AuditService::new(
@@ -467,6 +480,11 @@ pub async fn start_full(
     let store = FileIdentityStore::new(&config.data_dir);
     let identity = load_identity(&store)?;
     let tls = tls::server_config(&store)?;
+    // Le secret d'empreinte : lu, ou créé au premier démarrage. Un fichier inutilisable arrête
+    // l'agent ici, avant d'ouvrir le port (jamais régénéré en silence).
+    let fingerprinter = Arc::new(HmacFingerprinter::new(
+        &FileFingerprintSecretStore::new(&config.data_dir).load_or_create()?,
+    ));
 
     let addr = SocketAddr::new(config.listen_addr, config.port);
     let listener = TcpListener::bind(addr).map_err(|source| AppError::Bind { addr, source })?;
@@ -478,6 +496,7 @@ pub async fn start_full(
             fingerprint: identity.fingerprint,
             monotonic: metering.monotonic.clone(),
             boot,
+            fingerprinter,
         },
     )?;
     // Aucune exécution ne survit à un arrêt : les opérations restées « en cours » deviennent

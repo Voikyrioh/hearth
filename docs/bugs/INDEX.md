@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4BZN31A8Z8WN0WKNTCRTFFN](./FIX-01M4BZN31A8Z8WN0WKNTCRTFFN.md) | L'empreinte des requêtes suivies était un SHA-256 sans clé du corps, devinable hors ligne depuis la base (mots de passe) | 2026-10-07 |
 | [FIX-01M4BK2JXE7C2SZGG7BBXTZ0TZ](./FIX-01M4BK2JXE7C2SZGG7BBXTZ0TZ.md) | Le poste d'une session était réécrit par toute preuve de session valide sous la clé d'un autre poste du compte | 2026-10-07 |
 | [FIX-01M4B118DAFBQZYQX1E5ERY8CA](./FIX-01M4B118DAFBQZYQX1E5ERY8CA.md) | La valeur de démarrage de Windows était écrite sans guillemets autour du chemin (profil avec espace) | 2026-10-07 |
 | [FIX-01M47PCYX3BY3YV84R9WW3KAQ3](./FIX-01M47PCYX3BY3YV84R9WW3KAQ3.md) | L'avis de fin de session, arrivé avant la réponse, transformait le résultat d'une action en « résultat inconnu » | 2026-10-06 |

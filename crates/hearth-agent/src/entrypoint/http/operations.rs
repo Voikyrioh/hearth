@@ -33,9 +33,7 @@ use super::{ApiError, AppState};
 use crate::application::operations::OperationService;
 use crate::application::sessions::CurrentSession;
 use crate::domain::accounts::AccountId;
-use crate::domain::operations::{
-    Operation, OperationKey, OperationStatus, Replay, RequestFingerprint,
-};
+use crate::domain::operations::{Operation, OperationKey, OperationStatus, Replay};
 
 /// Taille maximale d'une requête ou d'une réponse retenue (celles de l'API sont petites).
 const MAX_BYTES: usize = 1 << 20;
@@ -99,7 +97,9 @@ pub(super) async fn track(
         }
     };
     let request_fingerprint =
-        RequestFingerprint::of(parts.method.as_str(), parts.uri.path(), &bytes);
+        state
+            .operations
+            .fingerprint(parts.method.as_str(), parts.uri.path(), &bytes);
     let kind = format!("{} {}", parts.method, parts.uri.path());
     match state
         .operations
@@ -119,6 +119,15 @@ pub(super) async fn track(
             return ApiError::new(
                 ErrorCode::Conflict,
                 "Le résultat de cette opération est inconnu : vérifie l'état avant de relancer",
+            )
+            .into_response();
+        }
+        Ok(Replay::Unverifiable) => {
+            // La migration 0008 a effacé l'empreinte de cette clé (HRT-32) : on ne peut pas dire si
+            // c'est la même requête, donc on n'exécute pas. Le résultat reste lisible.
+            return ApiError::new(
+                ErrorCode::Conflict,
+                "Cette opération date d'avant une mise à jour de l'agent et ne peut plus être reconnue : lis son état avant de relancer",
             )
             .into_response();
         }
@@ -295,13 +304,14 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::*;
+    use crate::domain::operations::RequestFingerprint;
 
     fn operation(result: &str) -> Operation {
         Operation {
             key: OperationKey::parse("K1").unwrap(),
             account: AccountId::new("A"),
             kind: "PUT /x".into(),
-            request: RequestFingerprint::of("PUT", "/x", b""),
+            request: RequestFingerprint::from_mac([1; 32]),
             status: OperationStatus::Succeeded,
             result_json: Some(result.into()),
             created_at: OffsetDateTime::UNIX_EPOCH,

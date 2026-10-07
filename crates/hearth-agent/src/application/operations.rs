@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use super::ports::{Clock, OperationRepo, Store, StoreError};
+use super::ports::{Clock, OperationRepo, RequestFingerprinter, Store, StoreError};
 use crate::domain::accounts::AccountId;
 use crate::domain::operations::{
     Operation, OperationKey, OperationStatus, Replay, RequestFingerprint, classify,
@@ -15,6 +15,7 @@ pub struct OperationService {
     operations: Arc<dyn OperationRepo>,
     store: Arc<dyn Store>,
     clock: Arc<dyn Clock>,
+    fingerprinter: Arc<dyn RequestFingerprinter>,
 }
 
 impl OperationService {
@@ -22,12 +23,19 @@ impl OperationService {
         operations: Arc<dyn OperationRepo>,
         store: Arc<dyn Store>,
         clock: Arc<dyn Clock>,
+        fingerprinter: Arc<dyn RequestFingerprinter>,
     ) -> Self {
         Self {
             operations,
             store,
             clock,
+            fingerprinter,
         }
+    }
+
+    /// L'empreinte d'une requête, clé par le secret de l'installation (HRT-32).
+    pub fn fingerprint(&self, method: &str, path: &str, body: &[u8]) -> RequestFingerprint {
+        self.fingerprinter.fingerprint(method, path, body)
     }
 
     /// Décide du sort d'une requête qui porte une clé. Pour `Replay::Execute`, la clé est

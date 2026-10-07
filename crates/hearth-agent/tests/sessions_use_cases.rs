@@ -8,7 +8,7 @@ mod support;
 use hearth_agent::application::ports::Clock;
 use hearth_agent::application::sessions::{AuthError, LoginError};
 use hearth_agent::domain::accounts::Role;
-use hearth_agent::domain::operations::{OperationKey, OperationStatus, Replay, RequestFingerprint};
+use hearth_agent::domain::operations::{OperationKey, OperationStatus, Replay};
 use hearth_agent::domain::sessions::{LIFETIME, SessionEnd};
 use support::{PASSWORD, by, client, client_at, env, secret};
 use time::Duration;
@@ -427,7 +427,7 @@ async fn the_purge_removes_expired_sessions_old_revocations_idle_counters_and_ol
         .login("marie", secret(WRONG), &client_at("10.9.9.9"))
         .await;
     let key = OperationKey::parse("OLDKEY").unwrap();
-    let request = RequestFingerprint::of("PUT", "/x", b"");
+    let request = env.operations.fingerprint("PUT", "/x", b"");
     assert_eq!(
         env.operations
             .begin(&key, &marie.id, "PUT /x", &request)
@@ -474,7 +474,7 @@ async fn an_operation_key_runs_once_and_replays_its_result() {
     let env = env().await;
     let marie = env.create("marie", Role::Admin).await;
     let key = OperationKey::parse("01J9ZY0G3Q8M2K6W4T7V5N1B9D").unwrap();
-    let request = RequestFingerprint::of("PUT", "/me/password", b"{}");
+    let request = env.operations.fingerprint("PUT", "/me/password", b"{}");
     let begin = || {
         env.operations
             .begin(&key, &marie.id, "PUT /me/password", &request)
@@ -514,8 +514,10 @@ async fn a_key_is_bound_to_its_request_and_scoped_by_account() {
     let marie = env.create("marie", Role::Admin).await;
     let paul = env.create("paul", Role::Admin).await;
     let key = OperationKey::parse("SHARED").unwrap();
-    let put = RequestFingerprint::of("PUT", "/accounts/B/password", b"{}");
-    let delete = RequestFingerprint::of("DELETE", "/accounts/B", b"");
+    let put = env
+        .operations
+        .fingerprint("PUT", "/accounts/B/password", b"{}");
+    let delete = env.operations.fingerprint("DELETE", "/accounts/B", b"");
 
     assert_eq!(
         env.operations
@@ -561,7 +563,7 @@ async fn running_operations_become_interrupted_at_startup_and_are_not_replayed()
     let marie = env.create("marie", Role::Admin).await;
     let running = OperationKey::parse("RUNNING").unwrap();
     let done = OperationKey::parse("DONE").unwrap();
-    let request = RequestFingerprint::of("PUT", "/x", b"");
+    let request = env.operations.fingerprint("PUT", "/x", b"");
     env.operations
         .begin(&running, &marie.id, "PUT /x", &request)
         .await

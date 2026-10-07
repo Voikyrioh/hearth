@@ -7,12 +7,13 @@ Suivi par clé des requêtes qui modifient, pour qu'un client qui perd le lien a
 - À mettre sur toute requête qui modifie faite par un compte connecté (`POST`, `PUT`, `PATCH`, `DELETE`). Absente : la requête s'exécute sans suivi.
 - Corps de la requête suivie : 1 Mio au plus, sinon `413 PAYLOAD_TOO_LARGE` ; un corps coupé ou illisible reste `422 VALIDATION_ERROR`.
 - Forme : 1 à 64 caractères, lettres, chiffres, tiret, souligné (un ULID en pratique). Sinon `422 VALIDATION_ERROR` (`details.field = "idempotency-key"`).
-- La clé est celle d'un compte (deux comptes peuvent choisir la même) et **liée à la requête** : méthode, chemin et SHA-256 du corps. Elle est enregistrée **avant** l'exécution, puis le résultat (statut et corps de la réponse) :
+- La clé est celle d'un compte (deux comptes peuvent choisir la même) et **liée à la requête** : méthode, chemin et corps, par une empreinte HMAC-SHA-256 clé par un secret de l'installation (BR-RESIL-021). Elle est enregistrée **avant** l'exécution, puis le résultat (statut et corps de la réponse) :
   - clé inconnue : la requête s'exécute ;
   - même clé, même requête, terminée : le premier résultat est rendu tel quel (même statut, même corps), sans ré-exécuter, avec l'en-tête `Idempotent-Replayed: true` ;
   - clé reçue dont l'exécution n'est pas finie : `409 OPERATION_IN_PROGRESS` ;
   - même clé, autre requête (autre méthode, chemin ou corps) : `422 IDEMPOTENCY_KEY_REUSED`, sans exécuter ;
-  - exécution interrompue par un arrêt de l'agent : `409 CONFLICT` (résultat inconnu : vérifier l'état avant de relancer).
+  - exécution interrompue par un arrêt de l'agent : `409 CONFLICT` (résultat inconnu : vérifier l'état avant de relancer) ;
+  - clé dont l'empreinte a été effacée par la mise à jour de l'agent (opération faite avant la migration `0008`, 24 heures au plus) : `409 CONFLICT`, sans exécuter, quel que soit son état ; `GET /operations/{id}` en donne le résultat.
 - La requête s'exécute dans une tâche détachée : si le client coupe la connexion avant la réponse, le résultat est tout de même retenu et relisible. Au démarrage de l'agent, une opération restée « en cours » passe à `interrupted`.
 - Un résultat `5xx` n'est pas retenu (la clé est oubliée : le client peut relancer). Les résultats `4xx` le sont (rejouer un refus donne le même refus).
 - `POST /sessions` n'est pas suivi : sa réponse contient un jeton, qui n'est jamais conservé en base.

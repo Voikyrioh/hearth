@@ -8,6 +8,8 @@ pub mod config;
 pub mod crypto;
 pub mod data_dir;
 pub mod file_lock;
+pub mod fingerprint;
+pub mod fingerprint_secret;
 pub mod ids;
 pub mod install;
 pub mod logging;

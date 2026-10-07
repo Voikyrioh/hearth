@@ -75,7 +75,7 @@ sudo hearth-agent uninstall --purge --yes       # plus aucune trace
 
 Après `--keep-data`, une nouvelle installation retrouve comptes et empreinte. Après `--purge`, la machine ne garde rien de l'agent (le verrou d'installation vit dans `/run`, volatil).
 
-**La purge ne supprime que les fichiers que Hearth connaît** (`cert.pem`, `key.pem`, `install_id`, `identity.lock`, `hearth.db` et ses fichiers compagnons, qui contiennent comptes et journal), puis le dossier s'il est vide ; de même pour la configuration et son dossier. Un dossier de données partagé avec autre chose garde ce qui n'est pas à Hearth : ces fichiers sont listés, jamais touchés. Aucun `rm -r` n'est fait sur un chemin venu de la configuration.
+**La purge ne supprime que les fichiers que Hearth connaît** (`cert.pem`, `key.pem`, `install_id`, `identity.lock`, `request_fingerprint.key` (le secret d'empreinte, `secret-d-empreinte.md`), `hearth.db` et ses fichiers compagnons, qui contiennent comptes et journal), puis le dossier s'il est vide ; de même pour la configuration et son dossier. Un dossier de données partagé avec autre chose garde ce qui n'est pas à Hearth : ces fichiers sont listés, jamais touchés. Aucun `rm -r` n'est fait sur un chemin venu de la configuration.
 
 ## Installation gérée par le système (NixOS, autre gestionnaire que systemd)
 
