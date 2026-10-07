@@ -17,7 +17,7 @@ maj: 2026-10-07
 
 ## Application (code)
 - Agent : `crates/hearth-agent/src/application/trust.rs::TrustService::on_login` (la clé présentée est inscrite dans la transaction de la connexion accordée).
-- Client : `crates/hearth-link/src/adapters/device_key.rs::DeviceKey::generate` (clé Ed25519 par `ring`, opaque), `ports/vault.rs::SecretKind::DeviceKey` (coffre `Hearth/{id}/device-key`), `manager/device.rs::login` (défi, preuve, création, écrite au coffre seulement après le `201` et si l'agent a pris la clé en compte), `manager/mod.rs::{add_and_login, login, remove_server}` ; coquille : `apps/desktop/src-tauri/src/vault.rs::credential_target`.
+- Client : `crates/hearth-link/src/adapters/device_key.rs::DeviceKey::generate` (clé Ed25519 par `ring`, opaque), `ports/vault.rs::SecretKind::DeviceKey` (coffre `Hearth/{id}/device-key`), `manager/device.rs::login` (défi, preuve, création : écriture du coffre éprouvée AVANT de présenter une clé neuve, effacée si la connexion n'aboutit pas), `manager/mod.rs::{add_and_login, login, remove_server}` ; coquille : `apps/desktop/src-tauri/src/vault.rs::credential_target`.
 
 ## Vérification
 - `tests/device_proof.rs::a_valid_proof_with_the_right_password_enrolls_the_device_and_learns_its_address`.

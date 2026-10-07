@@ -162,7 +162,14 @@ pub trait StreamConn: Send {
     /// usage `session`). Par défaut le jeton seul, comme avant : les flux simulés qui ne connaissent
     /// pas la preuve restent valides ; le flux réel écrit le message signé.
     async fn send_auth(&mut self, auth: &SignedAuth) -> Result<(), TransportError> {
-        let SignedAuth::Auth { token, .. } = auth;
+        let SignedAuth::Auth { token, device } = auth;
+        // Jamais une preuve retirée en silence : un flux qui ne sait pas la porter échoue, il ne se
+        // fait pas passer pour un client sans clé (le repli des types la porterait, voir ADR-0023).
+        if device.is_some() {
+            return Err(TransportError::Protocol(
+                "ce flux ne sait pas porter la preuve de la clé".into(),
+            ));
+        }
         let mut message = ClientMessage::Auth {
             token: token.clone(),
         };

@@ -109,14 +109,20 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
     };
     // Le défi AVANT l'ouverture du flux : l'agent n'attend le premier message que quelques
     // secondes, et le défi vaut 60 s. Sans clé, agent ancien ou défi en échec : jeton seul.
-    let proof = device::session_proof(
+    let proof = match device::session_proof(
         deps,
         &shared.target(),
         &id,
         &shared.record().username,
         &token,
     )
-    .await;
+    .await
+    {
+        Ok(proof) => proof,
+        // Clé présente et défi indisponible (autrement que par 404) : échec passager, on réessaie.
+        Err(device::LoginError::Transport(error)) => return classify(&error),
+        Err(device::LoginError::ChallengeUnavailable) => return AttemptResult::Failed,
+    };
     let mut stream = match deps.transport.open_stream(&shared.target()).await {
         Ok(stream) => stream,
         Err(error) => return classify(&error),
@@ -189,6 +195,22 @@ pub(crate) fn login_request(username: &str, password: &Secret) -> LoginRequest {
     }
 }
 
+/// Efface les textes d'un corps JSON (un mot de passe d'action : retrait d'un poste, comptes) une fois
+/// la requête partie : même traitement que `wipe` pour la connexion.
+pub(crate) fn wipe_body(body: &mut Option<serde_json::Value>) {
+    fn wipe_value(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::String(text) => text.zeroize(),
+            serde_json::Value::Array(items) => items.iter_mut().for_each(wipe_value),
+            serde_json::Value::Object(map) => map.values_mut().for_each(wipe_value),
+            _ => {}
+        }
+    }
+    if let Some(value) = body {
+        wipe_value(value);
+    }
+}
+
 pub(crate) fn wipe(mut request: LoginRequest) {
     request.password.zeroize();
 }
@@ -247,7 +269,9 @@ pub(crate) async fn reauthenticate_with_key(deps: &Deps, shared: &Shared) -> Att
         }
         // Mot de passe mémorisé refusé (`INVALID_CREDENTIALS`) : `StoredPasswordRefused`, pas de
         // nouvelle tentative (BR-CONN-017) ; un `429` donne `RetryAfter`.
-        Err(error) => classify(&error),
+        Err(device::LoginError::Transport(error)) => classify(&error),
+        // Clé présente, défi indisponible : échec passager, la tentative suivante réessaie.
+        Err(device::LoginError::ChallengeUnavailable) => AttemptResult::Failed,
     }
 }
 

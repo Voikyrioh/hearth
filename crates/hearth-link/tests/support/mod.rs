@@ -347,6 +347,8 @@ pub enum ChallengeMode {
     Replay,
     /// Un défi de la bonne forme que l'agent n'a jamais émis (code d'authentification faux).
     Bogus,
+    /// Une réponse que le client ne sait pas lire (pas du base64 de 56 octets).
+    Garbage,
 }
 
 pub struct SpyState {
@@ -514,6 +516,10 @@ impl hearth_link::ports::Transport for Spy {
                 retry_after_s: None,
             })),
             ChallengeMode::Unreachable => Err(TransportError::Io("lien coupé".into())),
+            ChallengeMode::Garbage => Ok(hearth_proto::api::sessions::ChallengeResponse {
+                challenge: "###".into(),
+                expires_in_s: 60,
+            }),
             ChallengeMode::Bogus => Ok(hearth_proto::api::sessions::ChallengeResponse {
                 challenge: base64_of(&[7_u8; 56]),
                 expires_in_s: 60,

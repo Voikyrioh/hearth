@@ -73,6 +73,9 @@ pub(crate) enum ChallengeAnswer {
     Unsupported,
     /// Coupure, délai, refus : on ne sait pas.
     Unavailable,
+    /// Le certificat présenté n'est plus celui qui est épinglé : ce n'est pas un défi indisponible, c'est
+    /// l'alerte d'empreinte (BR-CONN-003), à remonter telle quelle.
+    Mismatch(TransportError),
 }
 
 pub(crate) async fn ask_challenge(
@@ -96,6 +99,9 @@ pub(crate) async fn ask_challenge(
             tracing::debug!("agent sans défi : clé d'appareil non prise en charge");
             ChallengeAnswer::Unsupported
         }
+        Ok(Err(error @ TransportError::FingerprintMismatch { .. })) => {
+            ChallengeAnswer::Mismatch(error)
+        }
         Ok(Err(error)) => {
             tracing::debug!(%error, "défi indisponible : suite sans preuve");
             ChallengeAnswer::Unavailable
@@ -117,7 +123,9 @@ pub(crate) async fn request_challenge(
 ) -> Option<String> {
     match ask_challenge(deps, target, username, purpose).await {
         ChallengeAnswer::Issued(challenge) => Some(challenge),
-        ChallengeAnswer::Unsupported | ChallengeAnswer::Unavailable => None,
+        ChallengeAnswer::Unsupported
+        | ChallengeAnswer::Unavailable
+        | ChallengeAnswer::Mismatch(_) => None,
     }
 }
 
@@ -149,32 +157,88 @@ pub(crate) struct Authenticated {
     pub device: Option<DeviceStatus>,
 }
 
+/// Pourquoi une connexion avec clé n'est pas partie ou a échoué.
+pub(crate) enum LoginError {
+    Transport(TransportError),
+    /// Une clé est au coffre mais le défi n'est pas disponible autrement que par `404` (coupure,
+    /// délai, réponse illisible) : un échec passager à réessayer, PAS une connexion sans preuve (un
+    /// poste reconnu se présenterait comme un inconnu).
+    ChallengeUnavailable,
+}
+
+impl From<TransportError> for LoginError {
+    fn from(error: TransportError) -> Self {
+        Self::Transport(error)
+    }
+}
+
+/// Éprouve l'écriture du coffre AVANT de présenter une clé neuve : une clé que l'agent inscrirait
+/// mais que ce PC ne saurait pas garder serait un poste fantôme qu'il ne pourrait jamais retirer.
+/// Avec un serveur du carnet, la clé elle-même est rangée tout de suite (effacée si la connexion
+/// n'aboutit pas) ; sans (première connexion), une entrée témoin est écrite puis effacée.
+fn vault_accepts(deps: &Deps, id: Option<&ServerId>, key: &DeviceKey) -> bool {
+    let witness;
+    let target = match id {
+        Some(id) => id,
+        None => {
+            let Ok(pending) = ServerId::parse(&format!("attente-{}", ulid::Ulid::generate()))
+            else {
+                return false;
+            };
+            witness = pending;
+            &witness
+        }
+    };
+    if let Err(error) = deps
+        .vault
+        .put(target, SecretKind::DeviceKey, &key.to_secret())
+    {
+        tracing::warn!(%error, "coffre : écriture de la clé d'appareil refusée, connexion sans clé");
+        return false;
+    }
+    if id.is_none() {
+        let _ = deps.vault.delete(target, SecretKind::DeviceKey);
+    }
+    true
+}
+
 /// `POST /sessions` avec la preuve de la clé quand l'agent la connaît. `id` : le serveur du carnet
-/// (absent à la première connexion : la clé ne peut alors qu'être créée). Le mot de passe est
-/// effacé après usage.
+/// (absent à la première connexion : la clé ne peut alors qu'être créée, et elle est rendue à
+/// l'appelant). Le mot de passe est effacé après usage.
 pub(crate) async fn login(
     deps: &Deps,
     target: &Target,
     id: Option<&ServerId>,
     username: &str,
     password: &Secret,
-) -> Result<Authenticated, TransportError> {
+) -> Result<Authenticated, LoginError> {
     let state = match id {
         Some(id) => load_key(deps, id),
         None => KeyState::Absent,
     };
+    // `stored` : la clé neuve est déjà au coffre sous `id` (à effacer si la connexion n'aboutit pas).
+    let mut stored = false;
     let (key, created, challenge) = match state {
         KeyState::Unavailable => (None, false, None),
         KeyState::Present(key) => {
-            let challenge =
-                request_challenge(deps, target, username, ChallengePurpose::Login).await;
-            (Some(key), false, challenge)
+            match ask_challenge(deps, target, username, ChallengePurpose::Login).await {
+                ChallengeAnswer::Issued(challenge) => (Some(key), false, Some(challenge)),
+                // Agent ancien : connexion comme avant, la clé reste où elle est.
+                ChallengeAnswer::Unsupported => (None, false, None),
+                ChallengeAnswer::Unavailable => return Err(LoginError::ChallengeUnavailable),
+                ChallengeAnswer::Mismatch(error) => return Err(LoginError::Transport(error)),
+            }
         }
         KeyState::Absent => {
-            // Une clé n'est créée que si l'agent connaît le défi (sinon elle ne servirait à rien).
+            // Une clé n'est créée que si l'agent connaît le défi (sinon elle ne servirait à rien) et
+            // que le coffre accepte de la garder.
             match request_challenge(deps, target, username, ChallengePurpose::Login).await {
                 Some(challenge) => match DeviceKey::generate() {
-                    Ok(key) => (Some(key), true, Some(challenge)),
+                    Ok(key) if vault_accepts(deps, id, &key) => {
+                        stored = id.is_some();
+                        (Some(key), true, Some(challenge))
+                    }
+                    Ok(_) => (None, false, None),
                     Err(error) => {
                         tracing::warn!(%error, "clé d'appareil non créée : connexion sans clé");
                         (None, false, None)
@@ -190,6 +254,10 @@ pub(crate) async fn login(
         }
         _ => None,
     };
+    if key.is_some() && challenge.is_some() && proof.is_none() && !created {
+        // Défi illisible avec une clé présente : on ne rétrograde pas en connexion sans preuve.
+        return Err(LoginError::ChallengeUnavailable);
+    }
     // Sans preuve, la clé créée pour rien est jetée : rien n'est rangé qui ne serait pas inscrit.
     let created = created && proof.is_some();
     let request = DeviceLoginRequest {
@@ -198,49 +266,63 @@ pub(crate) async fn login(
     };
     let outcome = deps.transport.login_with_device(target, &request).await;
     attempt::wipe(request.login);
+    // Gardée seulement si l'agent a PRIS EN COMPTE la clé (inscrite, déjà connue, limite ou gel) : une
+    // connexion refusée ou une preuve ignorée ne laisse pas une clé au coffre.
+    let kept = matches!(&outcome, Ok(r) if r.device.is_some()) && created;
+    if stored
+        && !kept
+        && let Some(id) = id
+    {
+        let _ = deps.vault.delete(id, SecretKind::DeviceKey);
+    }
     let response = outcome?;
     Ok(Authenticated {
         response: response.login,
-        // Gardée seulement si l'agent a PRIS EN COMPTE la clé (inscrite, déjà connue, limite ou gel) : une
-        // preuve ignorée ne laisse pas une clé au coffre, la prochaine connexion en crée une.
-        new_key: if created && response.device.is_some() {
-            key
-        } else {
-            None
-        },
+        // Première connexion seulement : sans serveur au carnet, la clé est rendue pour être rangée.
+        new_key: if kept && id.is_none() { key } else { None },
         device: response.device,
     })
 }
 
-/// Range la clé créée pour une connexion réussie. Un coffre en échec n'arrête rien : la connexion a
-/// réussi, la clé sera recréée à la prochaine connexion par mot de passe.
+/// Range la clé créée pour une première connexion réussie. Si le coffre refuse maintenant (il avait
+/// accepté l'entrée témoin), le poste est inscrit sans clé gardée : une place perdue, limite
+/// acceptée (ADR-0023 point 5).
 pub(crate) fn store_new_key(deps: &Deps, id: &ServerId, key: &DeviceKey) {
     if let Err(error) = deps.vault.put(id, SecretKind::DeviceKey, &key.to_secret()) {
         tracing::warn!(server = %id, %error, "clé d'appareil non rangée au coffre");
     }
 }
 
-/// Preuve d'ouverture du flux (usage `session`, liée au jeton) ; `None` sans clé, sans défi ou
-/// avec un agent ancien : le flux s'authentifie alors par le jeton seul, comme avant.
+/// Preuve d'ouverture du flux (usage `session`, liée au jeton). `Ok(None)` : sans clé, ou agent
+/// ancien (`404`) : le flux s'authentifie par le jeton seul, comme avant. `Err` : une clé est là et
+/// le défi est indisponible autrement que par `404` : échec passager à réessayer.
 pub(crate) async fn session_proof(
     deps: &Deps,
     target: &Target,
     id: &ServerId,
     username: &str,
     token: &Secret,
-) -> Option<DeviceProof> {
+) -> Result<Option<DeviceProof>, LoginError> {
     let KeyState::Present(key) = load_key(deps, id) else {
-        return None;
+        return Ok(None);
     };
-    let fingerprint = pinned(target)?;
-    let hash = token_hash(token.expose())?;
-    let challenge = request_challenge(deps, target, username, ChallengePurpose::Session).await?;
-    key.prove(
-        Binding::Session { token_hash: &hash },
-        &fingerprint,
-        username,
-        &challenge,
-    )
+    let (Some(fingerprint), Some(hash)) = (pinned(target), token_hash(token.expose())) else {
+        return Ok(None);
+    };
+    match ask_challenge(deps, target, username, ChallengePurpose::Session).await {
+        ChallengeAnswer::Unsupported => Ok(None),
+        ChallengeAnswer::Unavailable => Err(LoginError::ChallengeUnavailable),
+        ChallengeAnswer::Mismatch(error) => Err(LoginError::Transport(error)),
+        ChallengeAnswer::Issued(challenge) => key
+            .prove(
+                Binding::Session { token_hash: &hash },
+                &fingerprint,
+                username,
+                &challenge,
+            )
+            .map(Some)
+            .ok_or(LoginError::ChallengeUnavailable),
+    }
 }
 
 /// Inscription silencieuse de ce PC, au plus UNE fois par exécution (HRT-23) : un client mis à jour
@@ -264,7 +346,7 @@ pub(crate) async fn enroll_silently(deps: &Deps, shared: &super::Shared) -> bool
     // Tant que l'agent n'a pas répondu clairement (coupure), on réessaiera à la tentative suivante ;
     // dès qu'il a répondu (défi ou « inconnu »), c'est la seule tentative de cette exécution.
     match ask_challenge(deps, &shared.target(), &username, ChallengePurpose::Login).await {
-        ChallengeAnswer::Unavailable => return false,
+        ChallengeAnswer::Unavailable | ChallengeAnswer::Mismatch(_) => return false,
         ChallengeAnswer::Unsupported => {
             shared.enrollment_tried.store(true, Ordering::SeqCst);
             return false;

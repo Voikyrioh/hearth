@@ -618,9 +618,15 @@ impl LinkManager {
         .await;
         match outcome {
             Err(_) => Err(hello(LinkError::Timeout)),
-            Ok(Err(error)) => Err(AuthFailure {
+            Ok(Err(device::LoginError::Transport(error))) => Err(AuthFailure {
                 error: error.into(),
                 refused: true,
+            }),
+            // Une clé est au coffre et le défi est indisponible : échec passager, rien n'est parti
+            // (ni mot de passe, ni preuve), on ne se présente pas comme un inconnu.
+            Ok(Err(device::LoginError::ChallengeUnavailable)) => Err(AuthFailure {
+                error: LinkError::Unreachable("défi de la clé d'appareil indisponible".into()),
+                refused: false,
             }),
             Ok(Ok(authenticated)) => Ok((authenticated.response, authenticated.new_key)),
         }

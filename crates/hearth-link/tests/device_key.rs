@@ -164,6 +164,7 @@ async fn every_stream_authentication_proves_the_key_again() {
 /// Un coffre qui compte les clés d'appareil qu'on lui range (le test lit, le gestionnaire écrit).
 struct CountingVault {
     inner: MemoryVault,
+    /// Entrées « clé d'appareil » vivantes au coffre (rangée = +1, effacée = -1).
     key_puts: std::sync::atomic::AtomicUsize,
 }
 
@@ -173,7 +174,8 @@ impl Vault for CountingVault {
     }
 
     fn put(&self, server: &ServerId, kind: SecretKind, secret: &Secret) -> Result<(), VaultError> {
-        if kind == SecretKind::DeviceKey {
+        let existed = kind == SecretKind::DeviceKey && self.inner.get(server, kind)?.is_some();
+        if kind == SecretKind::DeviceKey && !existed {
             self.key_puts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
@@ -181,6 +183,10 @@ impl Vault for CountingVault {
     }
 
     fn delete(&self, server: &ServerId, kind: SecretKind) -> Result<(), VaultError> {
+        if kind == SecretKind::DeviceKey && self.inner.get(server, kind)?.is_some() {
+            self.key_puts
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
         self.inner.delete(server, kind)
     }
 }
@@ -518,7 +524,6 @@ async fn a_challenge_the_agent_never_issued_connects_and_keeps_no_key() {
 #[tokio::test]
 async fn bad_challenges_at_each_reconnection_keep_the_link_connected_and_announce_nothing_wrong() {
     for mode in [
-        ChallengeMode::Unreachable,
         ChallengeMode::Bogus,
         ChallengeMode::Replay,
         ChallengeMode::OldAgent,
@@ -947,12 +952,240 @@ async fn the_private_key_appears_in_no_event_no_answer_no_error_no_log_and_no_de
     seen.push_str(&capture.0.lock().unwrap().join("\n"));
     // Le coffre (le test peut le lire) : c'est lui seul qui garde la clé.
     assert!(!secret.is_empty());
-    for needle in [secret.as_str(), &secret[..secret.len().min(40)], PASSWORD] {
+    // La clé sous TOUTES ses formes : le document PKCS#8 (base64, hexadécimal), sa graine de 32 octets
+    // (base64 seule, base64 URL, hexadécimal, liste d'octets avec ou sans espaces), le mot de passe.
+    use base64::Engine as _;
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(&secret)
+        .unwrap();
+    assert!(
+        der.len() > 48,
+        "PKCS#8 de ring : 16 octets d'en-tête puis la graine de 32 octets"
+    );
+    let seed = &der[16..48];
+    let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let list = format!("{seed:?}");
+    let forms = [
+        secret.clone(),
+        secret[..secret.len().min(40)].to_owned(),
+        base64::engine::general_purpose::STANDARD.encode(seed),
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(seed),
+        hex(seed),
+        hex(seed).to_uppercase(),
+        hex(&der),
+        list.clone(),
+        list.replace(", ", ","),
+        PASSWORD.to_owned(),
+    ];
+    for needle in &forms {
+        assert!(needle.len() >= 12);
         assert!(
-            !seen.contains(needle),
+            !seen.contains(needle.as_str()),
             "un secret est visible : {}",
-            &needle[..needle.len().min(8)]
+            &needle[..8]
         );
     }
     let _ = Secret::from("x");
+}
+
+#[tokio::test]
+async fn with_a_key_an_unavailable_challenge_is_a_transient_failure_never_a_proofless_connection() {
+    for mode in [ChallengeMode::Unreachable, ChallengeMode::Garbage] {
+        let world = World::connected(keyed()).await;
+        // À la connexion par mot de passe : rien n'est envoyé (pas de mot de passe, pas de preuve).
+        world.spy.set(mode);
+        let verifications = world.agent.verifications_started();
+        let error = world
+            .manager
+            .login(&world.id, "marie", Secret::from(PASSWORD), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, LinkError::Unreachable(_)),
+            "{mode:?} : {error:?}"
+        );
+        assert_eq!(
+            world.agent.verifications_started(),
+            verifications,
+            "{mode:?}"
+        );
+        // À l'ouverture du flux : le lien ne se rétablit pas sans preuve, il réessaie.
+        let mark = world.recorder.mark();
+        world.proxy.cut();
+        world
+            .recorder
+            .wait_for(
+                mark,
+                "une coupure vue",
+                WAIT,
+                |e| matches!(e, Event::State { info, .. } if info.state != LinkState::Connected),
+            )
+            .await;
+        world.proxy.heal();
+        let before = world.spy.calls_for(ChallengePurpose::Session);
+        wait_session_challenges(&world, before + 3).await;
+        assert!(
+            world.spy.calls_for(ChallengePurpose::Session) > before,
+            "{mode:?}"
+        );
+        assert_ne!(world.state().state, LinkState::Connected, "{mode:?}");
+        // Le défi revient : le lien se rétablit, rien n'a été annoncé à tort.
+        world.spy.set(ChallengeMode::Real);
+        let mark = world.recorder.mark();
+        world
+            .recorder
+            .wait_state(mark, LinkState::Connected, WAIT)
+            .await;
+        let states = world.recorder.states_since(mark);
+        assert!(
+            states.iter().all(|s| matches!(
+                s,
+                LinkState::Reconnecting | LinkState::Connected | LinkState::Offline
+            )),
+            "{mode:?} : {states:?}"
+        );
+        assert!(key_of(&world.vault, &world.id).is_some(), "{mode:?}");
+    }
+}
+
+/// Un coffre qui dit « absent » pour la clé d'appareil et refuse de l'écrire (stratégie Windows qui
+/// interdit l'enregistrement d'identifiants), le reste fonctionne.
+struct BlindWriteVault(MemoryVault);
+
+impl Vault for BlindWriteVault {
+    fn get(&self, server: &ServerId, kind: SecretKind) -> Result<Option<Secret>, VaultError> {
+        if kind == SecretKind::DeviceKey {
+            return Ok(None);
+        }
+        self.0.get(server, kind)
+    }
+
+    fn put(&self, server: &ServerId, kind: SecretKind, secret: &Secret) -> Result<(), VaultError> {
+        if kind == SecretKind::DeviceKey {
+            return Err(VaultError("écriture interdite".into()));
+        }
+        self.0.put(server, kind, secret)
+    }
+
+    fn delete(&self, server: &ServerId, kind: SecretKind) -> Result<(), VaultError> {
+        self.0.delete(server, kind)
+    }
+}
+
+#[tokio::test]
+async fn a_vault_that_reads_absent_and_refuses_to_write_never_fills_the_eight_places() {
+    let world = World::connected(keyed()).await;
+    assert_eq!(
+        world
+            .manager
+            .devices_list(&world.id)
+            .await
+            .unwrap()
+            .devices
+            .len(),
+        1
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let vault = Arc::new(BlindWriteVault(MemoryVault::new()));
+    let start = |vault: Arc<BlindWriteVault>| {
+        let path = dir.path().to_owned();
+        async move {
+            support::start_manager_shared(
+                &path,
+                vault,
+                Arc::new(ScriptedNet::new()),
+                Arc::new(JumpClock::new()),
+                fast_config(),
+                Arc::new(support::transport()),
+            )
+            .await
+        }
+    };
+    let manager = start(vault.clone()).await;
+    let probe = manager
+        .probe("127.0.0.1", world.proxy.port())
+        .await
+        .unwrap();
+    let id = manager
+        .add_server(NewServer {
+            name: "Forge".into(),
+            color: "#7aa2f7".into(),
+            host: "127.0.0.1".into(),
+            port: world.proxy.port(),
+            fingerprint: probe.fingerprint,
+            mac_addresses: vec![],
+        })
+        .await
+        .unwrap();
+    // Neuf connexions par mot de passe : aucune clé n'est présentée, aucun poste n'est inscrit.
+    for attempt in 1..=9 {
+        manager
+            .login(&id, "marie", Secret::from(PASSWORD), true)
+            .await
+            .unwrap();
+        let count = world
+            .manager
+            .devices_list(&world.id)
+            .await
+            .unwrap()
+            .devices
+            .len();
+        assert_eq!(count, 1, "connexion {attempt}");
+    }
+    // Inscription silencieuse au lancement (mot de passe mémorisé) : même chose.
+    manager.shutdown().await;
+    let manager = start(vault.clone()).await;
+    let recorder = Recorder::spawn(manager.subscribe());
+    recorder.wait_state(0, LinkState::Connected, WAIT).await;
+    assert_eq!(
+        world
+            .manager
+            .devices_list(&world.id)
+            .await
+            .unwrap()
+            .devices
+            .len(),
+        1
+    );
+    // Première connexion d'un serveur : l'entrée témoin refusée, la connexion réussit, rien d'inscrit.
+    let other = TestAgent::install().await;
+    other
+        .create_account("marie", hearth_agent::domain::accounts::Role::Admin)
+        .await;
+    let probe = manager.probe("127.0.0.1", other.addr.port()).await.unwrap();
+    let (first, _) = manager
+        .add_and_login(
+            NewServer {
+                name: "Autre".into(),
+                color: "#7aa2f7".into(),
+                host: "127.0.0.1".into(),
+                port: other.addr.port(),
+                fingerprint: probe.fingerprint,
+                mac_addresses: vec![],
+            },
+            "marie",
+            Secret::from(PASSWORD),
+            false,
+        )
+        .await
+        .unwrap();
+    // Le flux de ce serveur ouvert sans clé : aucun poste « courant » chez cet agent.
+    let mut events = manager.subscribe();
+    while manager.state(&first).unwrap().state != LinkState::Connected {
+        events.recv().await.unwrap();
+    }
+    let list = manager.devices_list(&first).await.unwrap();
+    assert!(list.devices.is_empty(), "{:?}", list.devices);
+}
+
+/// Attend (sur un fait observable : le nombre de défis demandés) que le lien ait réessayé.
+async fn wait_session_challenges(world: &World, at_least: usize) {
+    let deadline = std::time::Instant::now() + WAIT;
+    while world.spy.calls_for(ChallengePurpose::Session) < at_least {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "le lien ne réessaie pas"
+        );
+        tokio::task::yield_now().await;
+    }
 }

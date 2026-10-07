@@ -873,6 +873,9 @@ impl Runner {
                 .unwrap_or(Err(TransportError::Timeout))
             };
             let result = attempt::guarded(call).await;
+            // Le corps (qui peut porter un mot de passe) est effacé dès que la requête est partie.
+            let mut api_request = api_request;
+            attempt::wipe_body(&mut api_request.body);
             let _ = sender
                 .send(Internal::OpResponse {
                     id: operation,
