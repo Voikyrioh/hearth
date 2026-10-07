@@ -4,9 +4,10 @@ import { refusalMessage, roleLabel } from "@/accounts/messages";
 import HButton from "@/components/atoms/HButton.vue";
 import HInput from "@/components/atoms/HInput.vue";
 import HTag from "@/components/atoms/HTag.vue";
-import FormDialog from "@/components/molecules/FormDialog.vue";
+import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import PasswordDialog from "@/components/organisms/PasswordDialog.vue";
 import { useAccountActions } from "@/composables/useAccountActions";
+import type { ActReport } from "@/composables/useReauth";
 import { t } from "@/i18n";
 import { getLinkBridge, type ServerInfo } from "@/link";
 import { useAccountsStore } from "@/stores/accounts";
@@ -27,50 +28,34 @@ const actions = useAccountActions(() => props.server.id);
 const changing = ref(false);
 const removing = ref(false);
 const retyped = ref("");
-const error = ref<string | undefined>();
-/** Toute la séquence (relecture de la liste PUIS suppression) : un second envoi n'est pas possible. */
-const working = ref(false);
 
 watch(removing, () => {
   retyped.value = "";
-  error.value = undefined;
 });
 
-async function confirmRemove() {
-  if (working.value) return;
-  working.value = true;
-  try {
-    await remove();
-  } finally {
-    working.value = false;
-  }
-}
-
-async function remove() {
-  error.value = undefined;
+// Supprimer son compte est un acte d'administration confirmé comme les autres (fenêtre commune : mot de
+// passe selon ce que l'agent annonce) EN PLUS de l'identifiant retapé (BR-ACCT-012). Toute la séquence
+// (relecture de la liste PUIS suppression) passe par cette fonction : la fenêtre n'envoie qu'une fois.
+async function perform(adminPassword: string | null): Promise<ActReport> {
   // Mon compte = celui que l'AGENT donne pour cette session (jamais une comparaison de texte).
   await accounts.load(props.server.id);
   const entry = accounts.of(props.server.id);
   const mine = entry?.accounts.find((account) => account.id === entry.me);
-  if (!mine) {
-    error.value = refusalMessage({ kind: "not_found" });
-    return;
+  if (!mine) return { kind: "refused", refusal: { kind: "not_found" } };
+  const report = await actions.remove(mine, retyped.value, adminPassword);
+  if (!(report.kind === "refused" && report.refusal.kind === "password_required")) {
+    retyped.value = "";
   }
-  const report = await actions.remove(mine, retyped.value);
-  retyped.value = "";
-  if (report.kind === "refused") {
-    error.value = refusalMessage(report.refusal, true);
-    return;
-  }
-  if (report.kind === "failed") return;
-  removing.value = false;
   if (report.kind === "done") {
     // Le compte n'existe plus : ce mot de passe mémorisé ne sert plus à rien (au mieux).
     void getLinkBridge()
       .forgetCredentials(props.server.id)
       .catch(() => {});
   }
+  return report;
 }
+
+const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as never, true);
 </script>
 
 <template>
@@ -103,16 +88,17 @@ async function remove() {
       own
       @close="changing = false"
     />
-    <FormDialog
+    <AdminActDialog
       :open="removing"
+      :server-id="server.id"
+      kind="account_delete"
       :title="t('accounts.removeOwnTitle')"
       :submit-label="t('accounts.removeOwn')"
       :can-submit="retyped.trim() !== ''"
-      :busy="working || actions.busy.value"
-      :error="error"
       destructive
-      @submit="confirmRemove"
-      @cancel="removing = false"
+      :perform="perform"
+      :refusal-text="refusalText"
+      @close="removing = false"
     >
       <HInput
         v-model="retyped"
@@ -120,7 +106,7 @@ async function remove() {
         :placeholder="t('accounts.usernamePlaceholder')"
         autocomplete="off"
       />
-    </FormDialog>
+    </AdminActDialog>
   </section>
 </template>
 

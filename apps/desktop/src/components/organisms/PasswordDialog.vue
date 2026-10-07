@@ -3,8 +3,8 @@ import { computed, ref, toRef, watch } from "vue";
 import { refusalMessage } from "@/accounts/messages";
 import HCheckbox from "@/components/atoms/HCheckbox.vue";
 import HPasswordInput from "@/components/atoms/HPasswordInput.vue";
-import FormDialog from "@/components/molecules/FormDialog.vue";
 import PasswordRules from "@/components/molecules/PasswordRules.vue";
+import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import { useAccountActions } from "@/composables/useAccountActions";
 import { useAccountRules } from "@/composables/useAccountRules";
 import { t } from "@/i18n";
@@ -30,13 +30,10 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: [] }>();
 
-const current = ref("");
 const password = ref("");
 const confirmation = ref("");
 const passwordTouched = ref(false);
 const confirmationTouched = ref(false);
-const error = ref<string | undefined>();
-const currentError = ref<string | undefined>();
 
 const own = computed(() => props.own);
 const keepAddress = ref(false);
@@ -64,15 +61,12 @@ watch(
   () => props.open,
   (open) => {
     // Un mot de passe ne reste dans aucun champ une fois la fenêtre fermée.
-    current.value = "";
     password.value = "";
     confirmation.value = "";
     keepAddress.value = false;
     if (!open) return;
     passwordTouched.value = false;
     confirmationTouched.value = false;
-    error.value = undefined;
-    currentError.value = undefined;
   },
 );
 watch(password, () => {
@@ -80,10 +74,6 @@ watch(password, () => {
 });
 watch(confirmation, () => {
   confirmationTouched.value = true;
-});
-watch(current, (value) => {
-  // L'effacement après l'envoi n'efface pas l'erreur qu'il vient de provoquer.
-  if (value !== "") currentError.value = undefined;
 });
 
 const mismatch = computed(() =>
@@ -94,53 +84,45 @@ const mismatch = computed(() =>
 const canSubmit = computed(
   () =>
     rules.ready.value &&
-    (!own.value || current.value !== "") &&
     rules.check.value.password.length === 0 &&
     confirmation.value !== "" &&
     confirmation.value === password.value,
 );
 
-async function submit() {
-  error.value = undefined;
+// La confirmation est portée par la fenêtre commune des actes : pour SON mot de passe, l'ancien mot de
+// passe EST le mot de passe de confirmation (vérifié par le chemin de la connexion, BR-ACCT-009) ; pour
+// celui d'un autre compte, le mot de passe de l'administrateur (jamais couvert par le délai de 5 minutes).
+// Le nouveau mot de passe est vidé après chaque envoi, sauf si le délai s'est fermé (rien n'a été fait).
+async function perform(adminPassword: string | null) {
+  const confirmationPassword = adminPassword ?? "";
   const report = props.account
-    ? await actions.setPassword(props.account, password.value)
+    ? await actions.setPassword(props.account, password.value, confirmationPassword)
     : await actions.changeOwnPassword(
-        current.value,
+        confirmationPassword,
         password.value,
         own.value && keepAddress.value,
       );
-  current.value = "";
-  password.value = "";
-  confirmation.value = "";
-  if (report.kind === "refused") {
-    if (report.refusal.kind === "wrong_password")
-      currentError.value = refusalMessage(report.refusal);
-    else error.value = refusalMessage(report.refusal);
-    return;
+  if (!(report.kind === "refused" && report.refusal.kind === "password_required")) {
+    password.value = "";
+    confirmation.value = "";
   }
-  if (report.kind !== "failed") emit("close");
+  return report;
 }
 </script>
 
 <template>
-  <FormDialog
+  <AdminActDialog
     :open="open"
+    :server-id="serverId"
+    :kind="own ? 'account_password_own' : 'account_password'"
     :title="title"
     :submit-label="t('accounts.changePassword')"
     :can-submit="canSubmit"
-    :busy="actions.busy.value"
-    :error="error"
-    @submit="submit"
-    @cancel="emit('close')"
+    :password-label="own ? t('accounts.currentPassword') : undefined"
+    :perform="perform"
+    :refusal-text="(refusal) => refusalMessage(refusal as never)"
+    @close="emit('close')"
   >
-    <HPasswordInput
-      v-if="own"
-      v-model="current"
-      :label="t('accounts.currentPassword')"
-      :placeholder="t('accounts.currentPasswordPlaceholder')"
-      :error="currentError"
-      autocomplete="current-password"
-    />
     <HPasswordInput
       v-model="password"
       :label="t('accounts.nextPassword')"
@@ -169,7 +151,7 @@ async function submit() {
       :error="mismatch"
       autocomplete="new-password"
     />
-  </FormDialog>
+  </AdminActDialog>
 </template>
 
 <style scoped>

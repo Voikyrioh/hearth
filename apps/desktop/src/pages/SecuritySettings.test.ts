@@ -3,6 +3,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import App from "@/App.vue";
 import { useSecurityStore } from "@/stores/security";
+import { reauthField } from "@/test/confirm";
 import { mountContext } from "@/test/mount";
 import Settings from "./Settings.vue";
 
@@ -86,7 +87,7 @@ describe("Case « Garder ce poste reconnu »", () => {
   }
 
   async function submit() {
-    typeInto(document.querySelector('input[placeholder="Ancien mot de passe"]'), GOOD);
+    typeInto(reauthField(), GOOD);
     typeInto(document.querySelector('input[placeholder="Nouveau mot de passe"]'), NEXT);
     typeInto(document.querySelector('input[placeholder="Confirme le mot de passe"]'), NEXT);
     await flushPromises();
@@ -142,7 +143,7 @@ describe("Case « Garder ce poste reconnu »", () => {
     wrapper.unmount();
   });
 
-  it("warns when the attack mode is on and this PC has no key: forgetting it ends the session at once", async () => {
+  it("says a PC without a key cannot change the password from here, whatever the attack mode", async () => {
     const ctx = await mountContext();
     ctx.bridge.security.setDevice("forge", "none", false);
     ctx.bridge.security.setMode("forge", "active");
@@ -153,13 +154,13 @@ describe("Case « Garder ce poste reconnu »", () => {
     await useSecurityStore(ctx.pinia).load("forge");
     await wrapper.get('.mine[data-server="forge"] button').trigger("click");
     await flushPromises();
-    expect(document.querySelector("[data-keep-address-warn]")?.textContent).toContain(
-      "ta session sera refusée tout de suite après le changement",
-    );
-    // Cochée : plus d'avertissement.
-    document.querySelector<HTMLInputElement>("[data-keep-address] input")?.click();
-    await flushPromises();
-    expect(document.querySelector("[data-keep-address-warn]")).toBeNull();
+    // Aucun acte ne part sans la clé de ce poste : la fenêtre l'explique et propose de se reconnecter
+    // pour enregistrer ce poste (le mot de passe et la case « Garder ce poste reconnu » n'ont pas lieu).
+    const dialog = document.querySelector("dialog");
+    expect(dialog?.querySelector("[data-reauth-no-key]")).not.toBeNull();
+    expect(dialog?.textContent).toContain("Me reconnecter pour enregistrer ce poste");
+    expect(document.querySelector("[data-keep-address]")).toBeNull();
+    expect(ctx.bridge.calls.some((c) => c.startsWith("account own-password"))).toBe(false);
     wrapper.unmount();
   });
 });

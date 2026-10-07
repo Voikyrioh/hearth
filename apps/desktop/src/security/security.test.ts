@@ -33,9 +33,8 @@ describe("why the attack mode cannot be changed from here", () => {
     expect(attackModeBlock("admin", entry({ status: "unsupported", state: null }))).toBe(
       "agent_old",
     );
-    expect(attackModeBlock("admin", entry({ state: state({ device: "none" }) }))).toBe(
-      "not_enrolled",
-    );
+    // Q18 : la preuve de toute clé inscrite du compte est acceptée, la session n'a pas à être « prouvée ».
+    expect(attackModeBlock("admin", entry({ state: state({ device: "none" }) }))).toBeNull();
     expect(attackModeBlock("admin", entry({ state: state({ keyAtHand: false }) }))).toBe(
       "not_enrolled",
     );

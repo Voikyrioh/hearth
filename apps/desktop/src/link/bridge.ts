@@ -2,6 +2,7 @@ import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./ag
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
+import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
 import type {
   AccountInputCheck,
@@ -103,18 +104,34 @@ export interface LinkBridge {
   checkAccountInput(username: string, password: string): Promise<AccountInputCheck>;
   /** Liste des comptes (une lecture : sans suivi, rien à relire au retour du lien). */
   listAccounts(serverId: string): Promise<AccountList>;
+  /**
+   * Toute action d'administration (comptes, mise à jour de l'agent, mode attaque, réglage) est CONFIRMÉE
+   * (HRT-30) : `adminPassword` est le mot de passe actuel de l'administrateur, `null` seulement sous
+   * l'élévation de 5 minutes pour un acte couvert (jamais pour : mot de passe d'un autre, rôle
+   * Administrateur, mise à jour de l'agent, mode attaque, réglage). La preuve de la clé de CE PC est
+   * faite par la coquille. Sans clé au coffre l'action rejette avec `not_recognized` sans rien envoyer ;
+   * un agent qui exige la confirmation et ce client trop ancien : `incompatible_client`. Un défi neuf et
+   * une clé d'opération neuve à chaque appel.
+   */
   createAccount(
     serverId: string,
     username: string,
     password: string,
     role: Role,
+    adminPassword: string | null,
   ): Promise<AccountOutcome>;
-  changeAccountRole(serverId: string, accountId: string, role: Role): Promise<AccountOutcome>;
+  changeAccountRole(
+    serverId: string,
+    accountId: string,
+    role: Role,
+    adminPassword: string | null,
+  ): Promise<AccountOutcome>;
   /** Un administrateur définit le mot de passe d'un AUTRE compte (la règle « sans l'identifiant » est jugée par l'agent). */
   setAccountPassword(
     serverId: string,
     accountId: string,
     password: string,
+    adminPassword: string,
   ): Promise<AccountOutcome>;
   /**
    * Le titulaire change son mot de passe : ferme ses autres sessions, garde la courante.
@@ -127,13 +144,35 @@ export interface LinkBridge {
     password: string,
     keepAddress: boolean,
   ): Promise<AccountOutcome>;
-  closeAccountSessions(serverId: string, accountId: string): Promise<AccountOutcome>;
+  closeAccountSessions(
+    serverId: string,
+    accountId: string,
+    adminPassword: string | null,
+  ): Promise<AccountOutcome>;
   /** `confirmation` : l'identifiant retapé quand on supprime son propre compte (BR-ACCT-012). */
   deleteAccount(
     serverId: string,
     accountId: string,
     confirmation: string | null,
+    adminPassword: string | null,
   ): Promise<AccountOutcome>;
+
+  // Confirmation des actes (HRT-30) : UNE lecture, UN calcul, UN réglage. L'interface ne devine ni la
+  // capacité de l'agent ni l'élévation de 5 minutes : elle les lit de l'agent à l'ouverture d'une fenêtre.
+
+  /** Ce que l'agent annonce de la confirmation des actes, et si ce PC a une clé au coffre (une lecture). */
+  getReauthState(serverId: string): Promise<ReauthState>;
+  /** L'élévation de 5 minutes couvre-t-elle cet acte ? La règle est celle de l'agent (ne parle pas à l'agent). */
+  reauthCovers(kind: AdminActKind, role: Role | null): Promise<boolean>;
+  /**
+   * Change « Demander mon mot de passe » (à chaque action, ou 5 minutes) : un acte d'administration, le
+   * mot de passe actuel ET la preuve de la clé de CE PC. Jamais couvert par l'élévation.
+   */
+  setReauthSetting(
+    serverId: string,
+    mode: ReauthMode,
+    password: string,
+  ): Promise<ReauthSettingOutcome>;
 
   // Postes de confiance (HRT-23) : UNE commande typée par lecture ou action. L'interface ne reçoit que
   // des noms, des dates, une adresse et des booléens : la clé de ce PC reste dans la coquille Rust.
@@ -181,8 +220,15 @@ export interface LinkBridge {
   getAgentUpdate(serverId: string): Promise<AgentUpdateView>;
   /** Note que le résultat daté `at` a été annoncé : il ne le sera plus, même après un redémarrage du client. Ne parle pas à l'agent. */
   ackAgentResult(serverId: string, at: string): Promise<void>;
-  /** « Mettre à jour l'agent » : une action (clé d'opération, résultat inconnu à la coupure, jamais rejouée). */
-  updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome>;
+  /**
+   * « Mettre à jour l'agent » : une action (clé d'opération, résultat inconnu à la coupure, jamais
+   * rejouée). Remplace le binaire qui tourne en root : le mot de passe est toujours demandé.
+   */
+  updateAgent(
+    serverId: string,
+    version: string,
+    adminPassword: string,
+  ): Promise<AgentUpdateOutcome>;
   /** La progression de la mise à jour d'un agent (`agent-update://progress`) ; rien n'est rejoué : l'état se relit (`getAgentUpdate`). */
   onAgentUpdate(listener: (event: AgentUpdateEvent) => void): Promise<Unsubscribe>;
 

@@ -1,38 +1,20 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import HPasswordInput from "@/components/atoms/HPasswordInput.vue";
-import FormDialog from "@/components/molecules/FormDialog.vue";
+import { computed } from "vue";
+import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import { useAttackModeActions } from "@/composables/useAttackModeActions";
 import { t } from "@/i18n";
 import { attackModeRefusalMessage } from "@/security/messages";
 
-// Activation ou désactivation du mode attaque : un acte d'administration (Q14 point 3, Q16). La
-// confirmation demande le mot de passe actuel ; la preuve de la clé de ce PC, elle, est faite par la
-// coquille, sans geste de l'utilisateur. Le bouton de confirmation n'est pas destructeur : activer
-// n'est pas une destruction. Le champ est vidé après CHAQUE envoi, réussi ou non, et à chaque
-// ouverture : un mot de passe ne reste dans aucun champ ni aucun état une fois la fenêtre fermée. Un
-// refus s'affiche DANS la fenêtre (mot de passe faux : sous le champ) ; le lien coupé avant la réponse
-// ferme la fenêtre, le résultat inconnu est dit et l'action n'est jamais rejouée (BR-RESIL-009).
+// Activation ou désactivation du mode attaque : un acte d'administration (Q14 point 3, Q16), confirmé par
+// la fenêtre commune des actes (`AdminActDialog`) : le mot de passe actuel, jamais couvert par le délai
+// de 5 minutes ; la preuve de la clé de ce PC est faite par la coquille, sans geste. Le bouton de
+// confirmation n'est pas destructeur : activer n'est pas une destruction. Un refus s'affiche DANS la
+// fenêtre ; le lien coupé avant la réponse ferme la fenêtre, le résultat inconnu est dit et l'action
+// n'est jamais rejouée (BR-RESIL-009).
 const props = defineProps<{ open: boolean; serverId: string; active: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
-const password = ref("");
-const error = ref<string | undefined>();
-const passwordError = ref<string | undefined>();
 const actions = useAttackModeActions(() => props.serverId);
-
-watch(
-  () => props.open,
-  () => {
-    password.value = "";
-    error.value = undefined;
-    passwordError.value = undefined;
-  },
-);
-watch(password, (value) => {
-  // L'effacement après l'envoi n'efface pas l'erreur qu'il vient de provoquer.
-  if (value !== "") passwordError.value = undefined;
-});
 
 const title = computed(() =>
   t(props.active ? "security.confirmOnTitle" : "security.confirmOffTitle"),
@@ -42,49 +24,27 @@ const message = computed(() =>
 );
 const submitLabel = computed(() => t(props.active ? "security.activate" : "security.deactivate"));
 
-async function submit() {
-  error.value = undefined;
-  const report = await actions.change(props.active, password.value);
-  password.value = "";
-  if (report.kind === "refused") {
-    if (report.refusal.kind === "wrong_password") {
-      passwordError.value = attackModeRefusalMessage(report.refusal);
-    } else error.value = attackModeRefusalMessage(report.refusal);
-    return;
-  }
-  if (report.kind !== "failed") emit("close");
-}
+// Jamais couvert : le champ est toujours là, le mot de passe n'est jamais `null`.
+const perform = (adminPassword: string | null) => actions.change(props.active, adminPassword ?? "");
 </script>
 
 <template>
-  <FormDialog
+  <AdminActDialog
     :open="open"
+    :server-id="serverId"
+    :kind="active ? 'attack_mode_enable' : 'attack_mode_disable'"
     :title="title"
     :submit-label="submitLabel"
-    :can-submit="password !== ''"
-    :busy="actions.busy.value"
-    :error="error"
-    @submit="submit"
-    @cancel="emit('close')"
+    :perform="perform"
+    :refusal-text="(refusal) => attackModeRefusalMessage(refusal as never)"
+    @close="emit('close')"
   >
     <p class="attack__message">{{ message }}</p>
-    <p class="attack__help">{{ t("security.passwordHelp") }}</p>
-    <HPasswordInput
-      v-model="password"
-      :label="t('security.password')"
-      :placeholder="t('security.passwordPlaceholder')"
-      :error="passwordError"
-      autocomplete="current-password"
-    />
-  </FormDialog>
+  </AdminActDialog>
 </template>
 
 <style scoped>
 .attack__message {
   color: var(--tx);
-}
-
-.attack__help {
-  color: var(--tx2);
 }
 </style>

@@ -54,6 +54,10 @@ export function refusalMessage(refusal: AccountRefusal, self = false): string {
       return t("accounts.usernameTaken");
     case "wrong_password":
       return t("accounts.wrongPassword");
+    case "password_required":
+      return t("reauth.elapsed");
+    case "too_many_attempts":
+      return t("reauth.waiting", { n: refusal.retry_after_s });
     case "last_admin":
       return t(self ? "accounts.lastAdminSelf" : "accounts.lastAdmin");
     case "not_found":

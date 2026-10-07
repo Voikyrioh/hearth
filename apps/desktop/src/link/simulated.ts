@@ -3,6 +3,7 @@ import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./au
 import type { LinkBridge } from "./bridge";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
+import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
 import {
   type SimAccountResult,
@@ -13,6 +14,7 @@ import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
 import { SimulatedDevices } from "./simulated-devices";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
+import { SimulatedReauth, simulatedCovers } from "./simulated-reauth";
 import { SimulatedSecurity } from "./simulated-security";
 import {
   type AccountInputCheck,
@@ -168,6 +170,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly devices: SimulatedDevices;
   /** L'alerte et le mode attaque simulés (HRT-26) : pilotables par l'appelant (`security.setAlert`, `setMode`, `setDevice`). */
   readonly security: SimulatedSecurity;
+  /** La confirmation des actes simulée (HRT-30) : agent ancien, réglage, élévation, pilotables (`reauth.setSupported`, `setMode`, `open`). */
+  readonly reauth: SimulatedReauth;
   /** Mot de passe actuel de l'utilisateur, par serveur (« Correct-Horse-9 » tant qu'il n'a pas changé). */
   private readonly ownPasswords = new Map<string, string>();
   /**
@@ -188,6 +192,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.accounts = new SimulatedAccounts(this.now);
     this.devices = new SimulatedDevices(this.now);
     this.security = new SimulatedSecurity(this.now);
+    this.reauth = new SimulatedReauth(this.now, (id) => this.security.current(id).keyAtHand);
     this.agents = (options.agents ?? []).map((agent) => ({ ...agent }));
     this.servers = (options.servers ?? SAMPLE_SERVERS).map((server) => ({ ...server }));
     this.machine = new SimulatedMachine({
@@ -473,15 +478,27 @@ export class SimulatedLinkBridge implements LinkBridge {
     username: string,
     password: string,
     role: Role,
+    adminPassword: string | null,
   ): Promise<AccountOutcome> {
-    return this.accountAction(serverId, `create ${username}`, (server) =>
-      this.accounts.create(server, username, password, role),
+    return this.accountAction(
+      serverId,
+      `create ${username}`,
+      (server) => this.accounts.create(server, username, password, role),
+      { kind: "account_create", role, password: adminPassword },
     );
   }
 
-  changeAccountRole(serverId: string, accountId: string, role: Role): Promise<AccountOutcome> {
-    return this.accountAction(serverId, `role ${accountId} ${role}`, (server) =>
-      this.accounts.changeRole(server, accountId, role),
+  changeAccountRole(
+    serverId: string,
+    accountId: string,
+    role: Role,
+    adminPassword: string | null,
+  ): Promise<AccountOutcome> {
+    return this.accountAction(
+      serverId,
+      `role ${accountId} ${role}`,
+      (server) => this.accounts.changeRole(server, accountId, role),
+      { kind: "account_role", role, password: adminPassword },
     );
   }
 
@@ -489,9 +506,13 @@ export class SimulatedLinkBridge implements LinkBridge {
     serverId: string,
     accountId: string,
     password: string,
+    adminPassword: string,
   ): Promise<AccountOutcome> {
-    return this.accountAction(serverId, `password ${accountId}`, (server) =>
-      this.accounts.setPassword(server, accountId, password),
+    return this.accountAction(
+      serverId,
+      `password ${accountId}`,
+      (server) => this.accounts.setPassword(server, accountId, password),
+      { kind: "account_password", role: null, password: adminPassword },
     );
   }
 
@@ -502,17 +523,34 @@ export class SimulatedLinkBridge implements LinkBridge {
     keepAddress: boolean,
   ): Promise<AccountOutcome> {
     this.lastKeepAddress = keepAddress;
-    return this.accountAction(serverId, "own-password", (server) => {
-      const right = current === (this.ownPasswords.get(serverId) ?? "Correct-Horse-9");
-      const result = this.accounts.changeOwn(server, right, password);
-      if (result.outcome.kind === "done") this.ownPasswords.set(serverId, password);
-      return result;
-    });
+    return this.accountAction(
+      serverId,
+      "own-password",
+      (server) => {
+        const right = current === this.own(serverId);
+        const result = this.accounts.changeOwn(server, right, password);
+        if (result.outcome.kind === "done") {
+          this.ownPasswords.set(serverId, password);
+          // Changer son mot de passe ferme l'élévation (BR-TRUST-043).
+          this.reauth.close(serverId);
+        }
+        return result;
+      },
+      // L'ancien mot de passe EST le mot de passe de confirmation de l'acte.
+      { kind: "account_password_own", role: null, password: current },
+    );
   }
 
-  closeAccountSessions(serverId: string, accountId: string): Promise<AccountOutcome> {
-    return this.accountAction(serverId, `sessions ${accountId}`, (server) =>
-      this.accounts.closeSessions(server, accountId),
+  closeAccountSessions(
+    serverId: string,
+    accountId: string,
+    adminPassword: string | null,
+  ): Promise<AccountOutcome> {
+    return this.accountAction(
+      serverId,
+      `sessions ${accountId}`,
+      (server) => this.accounts.closeSessions(server, accountId),
+      { kind: "sessions_revoke", role: null, password: adminPassword },
     );
   }
 
@@ -520,10 +558,66 @@ export class SimulatedLinkBridge implements LinkBridge {
     serverId: string,
     accountId: string,
     confirmation: string | null,
+    adminPassword: string | null,
   ): Promise<AccountOutcome> {
-    return this.accountAction(serverId, `delete ${accountId}`, (server) =>
-      this.accounts.delete(server, accountId, confirmation),
+    return this.accountAction(
+      serverId,
+      `delete ${accountId}`,
+      (server) => this.accounts.delete(server, accountId, confirmation),
+      { kind: "account_delete", role: null, password: adminPassword },
     );
+  }
+
+  /** Mot de passe actuel de l'utilisateur de ce serveur (celui que la confirmation compare). */
+  private own(serverId: string): string {
+    return this.ownPasswords.get(serverId) ?? "Correct-Horse-9";
+  }
+
+  // --- Confirmation des actes (HRT-30) ---
+
+  async getReauthState(serverId: string): Promise<ReauthState> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("reauth read");
+    return this.reauth.state(serverId);
+  }
+
+  async reauthCovers(kind: AdminActKind, role: Role | null): Promise<boolean> {
+    return simulatedCovers(kind, role);
+  }
+
+  async setReauthSetting(
+    serverId: string,
+    mode: ReauthMode,
+    password: string,
+  ): Promise<ReauthSettingOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    const confirmation = this.reauth.confirm(
+      serverId,
+      "reauth_setting",
+      server.role,
+      password,
+      this.own(serverId),
+    );
+    this.calls.push(`reauth setting ${mode}`);
+    if (confirmation.kind === "refused") return confirmation;
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) this.reauth.setMode(serverId, mode);
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    this.reauth.setMode(serverId, mode);
+    return { kind: "done", mode };
   }
 
   /** Toute action de compte : hors « Connecté » rien ne part ; coupée avant la réponse, jamais rejouée. */
@@ -531,14 +625,24 @@ export class SimulatedLinkBridge implements LinkBridge {
     serverId: string,
     label: string,
     run: (server: ServerInfo) => SimAccountResult,
+    confirm: { kind: AdminActKind; role: Role | null; password: string | null },
   ): Promise<AccountOutcome> {
     const server = this.requireServer(serverId);
     await this.delay();
     if (this.events.get(serverId)?.state !== "connected") {
       throw this.fail({ kind: "not_connected" });
     }
+    // Sans clé au coffre la coquille ne part pas : rien n'est noté. Puis le mot de passe, comme l'agent.
+    const confirmation = this.reauth.confirm(
+      serverId,
+      confirm.kind,
+      confirm.role,
+      confirm.password,
+      this.own(serverId),
+    );
     // Comme le vrai pont : hors « Connecté » rien ne part, donc rien n'est noté.
     this.calls.push(`account ${label}`);
+    if (confirmation.kind === "refused") return confirmation;
     if (this.actionMode === "cut") {
       this.actionMode = "ok";
       if (this.executeBeforeCut) this.settle(serverId, run(server));
@@ -579,7 +683,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       throw this.fail({ kind: "not_connected" });
     }
     this.calls.push(`devices remove ${deviceId}`);
-    const own = this.ownPasswords.get(serverId) ?? "Correct-Horse-9";
+    const own = this.own(serverId);
     if (this.actionMode === "cut") {
       // Comme une action de compte : coupée avant la réponse, jamais rejouée.
       this.actionMode = "ok";
@@ -618,7 +722,22 @@ export class SimulatedLinkBridge implements LinkBridge {
     if (this.events.get(serverId)?.state !== "connected") {
       throw this.fail({ kind: "not_connected" });
     }
-    const own = this.ownPasswords.get(serverId) ?? "Correct-Horse-9";
+    const own = this.own(serverId);
+    // La confirmation d'abord (sans clé : la coquille ne part pas, `not_recognized`), jamais couverte.
+    if (this.security.current(serverId).keyAtHand) {
+      if (server.role !== "admin") throw this.fail({ kind: "forbidden" });
+      const confirmation = this.reauth.confirm(
+        serverId,
+        active ? "attack_mode_enable" : "attack_mode_disable",
+        server.role,
+        password,
+        own,
+      );
+      if (confirmation.kind === "refused") {
+        this.calls.push(`attack-mode ${active ? "on" : "off"}`);
+        return confirmation;
+      }
+    }
     if (this.actionMode === "cut") {
       // Comme une action de compte : coupée avant la réponse, jamais rejouée.
       this.actionMode = "ok";
@@ -638,6 +757,8 @@ export class SimulatedLinkBridge implements LinkBridge {
     // Sans clé au coffre rien ne part : aucune ligne dans `calls` (la commande échoue avant l'envoi).
     const outcome = this.security.change(serverId, active, password, own, server.role);
     this.calls.push(`attack-mode ${active ? "on" : "off"}`);
+    // Activer ferme toutes les élévations (BR-TRUST-043).
+    if (active && outcome.kind === "done") this.reauth.close(serverId);
     return outcome;
   }
 
@@ -659,7 +780,11 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.agentUpdates.acked.set(serverId, at);
   }
 
-  async updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome> {
+  async updateAgent(
+    serverId: string,
+    version: string,
+    adminPassword: string,
+  ): Promise<AgentUpdateOutcome> {
     const server = this.requireServer(serverId);
     await this.delay();
     if (this.events.get(serverId)?.state !== "connected") {
@@ -670,6 +795,14 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.calls.push(`agent-update ${version}`);
     // L'agent est l'arbitre du rôle : un compte Lecture seule est refusé chez lui.
     if (server.role !== "admin") throw this.fail({ kind: "forbidden" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      "agent_update",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
     if (this.actionMode === "cut") {
       this.actionMode = "ok";
       if (this.executeBeforeCut) this.agentUpdates.start(serverId, version);

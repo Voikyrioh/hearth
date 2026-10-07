@@ -226,6 +226,9 @@ export type AccountRefusal =
   | { kind: "weak_password"; rules: PasswordRule[] }
   | { kind: "username_taken" }
   | { kind: "wrong_password" }
+  /** L'élévation de 5 minutes s'est fermée côté agent : la fenêtre redemande le mot de passe. */
+  | { kind: "password_required" }
+  | { kind: "too_many_attempts"; retry_after_s: number }
   | { kind: "last_admin" }
   | { kind: "not_found" }
   | { kind: "confirmation_mismatch" }
