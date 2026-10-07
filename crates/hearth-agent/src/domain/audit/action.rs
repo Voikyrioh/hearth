@@ -30,11 +30,27 @@ pub enum AuditAction {
     DeviceRemove,
     /// Une attaque probable vise un identifiant : début ou fin de l'épisode (HRT-24, BR-TRUST-008).
     SecurityAlert,
+    /// Un administrateur active le mode attaque (HRT-25, BR-TRUST-030).
+    AttackModeEnable,
+    /// Le mode attaque est désactivé, par un administrateur ou par la ligne de commande.
+    AttackModeDisable,
+    /// Le mode attaque s'est arrêté tout seul : 30 minutes sans tentative refusée.
+    AttackModeAutoDisable,
+    /// Le mode attaque est suspendu : la machine vient de démarrer (fenêtre de 30 minutes).
+    AttackModeSuspend,
+    /// La fenêtre de redémarrage est finie : le mode attaque reprend.
+    AttackModeResume,
+    /// L'essai unique d'un poste qui n'a qu'un critère (BR-TRUST-012, 032).
+    AttackModeTrial,
+    /// Un changement du mode attaque refusé ou raté (l'action que la couche d'accès consigne).
+    AttackModeChange,
+    /// Une session présentée seule, refusée en mode attaque (BR-TRUST-013).
+    SessionRefused,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 15] = [
+    pub const ALL: [AuditAction; 23] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -50,6 +66,14 @@ impl AuditAction {
         Self::DeviceEnroll,
         Self::DeviceRemove,
         Self::SecurityAlert,
+        Self::AttackModeEnable,
+        Self::AttackModeDisable,
+        Self::AttackModeAutoDisable,
+        Self::AttackModeSuspend,
+        Self::AttackModeResume,
+        Self::AttackModeTrial,
+        Self::AttackModeChange,
+        Self::SessionRefused,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -70,6 +94,14 @@ impl AuditAction {
             Self::DeviceEnroll => action::DEVICE_ENROLL,
             Self::DeviceRemove => action::DEVICE_REMOVE,
             Self::SecurityAlert => action::SECURITY_ALERT,
+            Self::AttackModeEnable => action::ATTACK_MODE_ENABLE,
+            Self::AttackModeDisable => action::ATTACK_MODE_DISABLE,
+            Self::AttackModeAutoDisable => action::ATTACK_MODE_AUTO_DISABLE,
+            Self::AttackModeSuspend => action::ATTACK_MODE_SUSPEND,
+            Self::AttackModeResume => action::ATTACK_MODE_RESUME,
+            Self::AttackModeTrial => action::ATTACK_MODE_TRIAL,
+            Self::AttackModeChange => action::ATTACK_MODE_CHANGE,
+            Self::SessionRefused => action::SESSION_REFUSED,
         }
     }
 
@@ -91,6 +123,14 @@ impl AuditAction {
             Self::DeviceEnroll => "Poste de confiance enregistré",
             Self::DeviceRemove => "Poste de confiance retiré",
             Self::SecurityAlert => "Attaque probable signalée",
+            Self::AttackModeEnable => "Mode attaque activé",
+            Self::AttackModeDisable => "Mode attaque désactivé",
+            Self::AttackModeAutoDisable => "Mode attaque arrêté automatiquement",
+            Self::AttackModeSuspend => "Mode attaque suspendu (redémarrage de la machine)",
+            Self::AttackModeResume => "Mode attaque repris",
+            Self::AttackModeTrial => "Essai unique en mode attaque",
+            Self::AttackModeChange => "Changement du mode attaque",
+            Self::SessionRefused => "Session refusée (mode attaque)",
         }
     }
 

@@ -109,6 +109,9 @@ fn forbidden_message(action: Option<AuditAction>) -> &'static str {
     match action {
         Some(AuditAction::AuditRead) => "Tu n'as pas la permission de lire le journal d'activité",
         Some(AuditAction::AgentUpdate) => "Seul un administrateur peut mettre à jour l'agent",
+        Some(AuditAction::AttackModeChange) => {
+            "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs."
+        }
         _ => "Tu n'as pas la permission pour accéder à la gestion des comptes",
     }
 }
@@ -128,6 +131,8 @@ fn failure_of(code: ErrorCode) -> Option<Outcome> {
         ErrorCode::WrongPassword => Some(Outcome::Failed(Reason::WrongPassword)),
         ErrorCode::LastAdmin => Some(Outcome::Failed(Reason::LastAdmin)),
         ErrorCode::Conflict => Some(Outcome::Failed(Reason::Conflict)),
+        // Activation ou désactivation du mode attaque sans clé prouvée : un refus, pas un échec.
+        ErrorCode::PostNotRecognized => Some(Outcome::Denied(Reason::NotRecognized)),
         ErrorCode::NotFound => Some(Outcome::Failed(Reason::NotFound)),
         ErrorCode::Busy => Some(Outcome::Failed(Reason::Busy)),
         ErrorCode::InternalError => Some(Outcome::Failed(Reason::Internal)),

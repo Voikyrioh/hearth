@@ -46,6 +46,10 @@ pub enum ErrorCode {
     ManagedInstall,
     /// La signature minisign de la mise à jour est refusée (HRT-17).
     BadSignature,
+    /// Activer ou désactiver le mode attaque exige la preuve d'une clé inscrite du compte appelant
+    /// (HRT-25) ; `details.reason` dit ce qui manque. Un utilisateur déjà authentifié : ce n'est pas
+    /// un oracle.
+    PostNotRecognized,
 }
 
 impl ErrorCode {
@@ -64,7 +68,8 @@ impl ErrorCode {
             | Self::UsernameTaken
             | Self::LastAdmin
             | Self::Conflict
-            | Self::ManagedInstall => 409,
+            | Self::ManagedInstall
+            | Self::PostNotRecognized => 409,
             Self::ValidationError
             | Self::BadSignature
             | Self::WeakPassword
@@ -157,7 +162,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL: [(ErrorCode, &str, u16); 22] = [
+    const ALL: [(ErrorCode, &str, u16); 23] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -184,6 +189,7 @@ mod tests {
         (ErrorCode::MethodNotAllowed, "METHOD_NOT_ALLOWED", 405),
         (ErrorCode::ManagedInstall, "MANAGED_INSTALL", 409),
         (ErrorCode::BadSignature, "BAD_SIGNATURE", 422),
+        (ErrorCode::PostNotRecognized, "POST_NOT_RECOGNIZED", 409),
     ];
 
     #[test]

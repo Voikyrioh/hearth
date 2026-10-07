@@ -61,6 +61,7 @@ pub fn audit_item(record: &AuditRecord) -> Result<AuditEventItem, ApiError> {
                 OriginKind::Client => OriginKindName::Client,
                 OriginKind::CommandLine => OriginKindName::Cli,
                 OriginKind::Assistant => OriginKindName::Assistant,
+                OriginKind::System => OriginKindName::System,
             },
             name: record.origin_name.clone(),
             addr: record.origin_addr.clone(),

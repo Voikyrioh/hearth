@@ -504,6 +504,7 @@ impl SessionService {
                 address: retained,
                 key: key_recognized,
                 first_try: before.pair.failures == 0,
+                trial_used: false,
             },
         );
         let before = LoginState {

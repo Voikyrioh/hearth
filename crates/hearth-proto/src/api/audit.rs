@@ -30,9 +30,26 @@ pub mod action {
     pub const DEVICE_REMOVE: &str = "device.remove";
     /// Une attaque probable vise un identifiant : début et fin de l'épisode d'alerte (HRT-24).
     pub const SECURITY_ALERT: &str = "security.alert";
+    /// Le mode attaque est activé par un administrateur (HRT-25).
+    pub const ATTACK_MODE_ENABLE: &str = "attack_mode.enable";
+    /// Le mode attaque est désactivé : par un administrateur ou par la ligne de commande (HRT-25).
+    pub const ATTACK_MODE_DISABLE: &str = "attack_mode.disable";
+    /// Le mode attaque s'est arrêté tout seul, 30 minutes sans tentative refusée (HRT-25).
+    pub const ATTACK_MODE_AUTO_DISABLE: &str = "attack_mode.auto_disable";
+    /// Le mode attaque est suspendu 30 minutes après un démarrage de la machine (HRT-25).
+    pub const ATTACK_MODE_SUSPEND: &str = "attack_mode.suspend";
+    /// Le mode attaque reprend à la fin de la fenêtre de redémarrage (HRT-25).
+    pub const ATTACK_MODE_RESUME: &str = "attack_mode.resume";
+    /// L'essai unique d'un poste qui n'a qu'un critère, en mode attaque (HRT-25).
+    pub const ATTACK_MODE_TRIAL: &str = "attack_mode.trial";
+    /// Un changement du mode attaque refusé ou raté : l'action que la couche d'accès consigne
+    /// (HRT-25). Les changements réussis sont `attack_mode.enable` et `attack_mode.disable`.
+    pub const ATTACK_MODE_CHANGE: &str = "attack_mode.change";
+    /// Une session présentée seule, refusée en mode attaque (HRT-25).
+    pub const SESSION_REFUSED: &str = "session.refused";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 15] = [
+    pub const ALL: [&str; 23] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -48,6 +65,14 @@ pub mod action {
         DEVICE_ENROLL,
         DEVICE_REMOVE,
         SECURITY_ALERT,
+        ATTACK_MODE_ENABLE,
+        ATTACK_MODE_DISABLE,
+        ATTACK_MODE_AUTO_DISABLE,
+        ATTACK_MODE_SUSPEND,
+        ATTACK_MODE_RESUME,
+        ATTACK_MODE_TRIAL,
+        ATTACK_MODE_CHANGE,
+        SESSION_REFUSED,
     ];
 }
 
@@ -89,6 +114,8 @@ pub enum OriginKindName {
     /// Une sous-commande lancée sur le serveur.
     Cli,
     Assistant,
+    /// L'agent lui-même, sans appelant (HRT-25) : fin d'alerte, sortie automatique du mode attaque.
+    System,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

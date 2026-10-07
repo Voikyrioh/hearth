@@ -41,7 +41,10 @@ pub enum ActionKind {
 /// Gestion des comptes : création, suppression, rôle, mots de passe, sessions, et les postes de
 /// confiance d'un compte (HRT-22 : inscription et retrait, rangés ici en attendant l'écran de la
 /// liste des postes de HRT-23), et l'alerte de sécurité d'un compte (HRT-24, en attendant HRT-26).
-const ACCOUNT_CODES: [&str; 9] = [
+///
+/// Le mode attaque du serveur (HRT-25 : activation, sorties, essai unique, session refusée) y est rangé de
+/// même, un type d'action à lui viendra avec l'écran de HRT-26.
+const ACCOUNT_CODES: [&str; 17] = [
     action::ACCOUNT_CREATE,
     action::ACCOUNT_DELETE,
     action::ACCOUNT_ROLE,
@@ -51,6 +54,14 @@ const ACCOUNT_CODES: [&str; 9] = [
     action::DEVICE_ENROLL,
     action::DEVICE_REMOVE,
     action::SECURITY_ALERT,
+    action::ATTACK_MODE_ENABLE,
+    action::ATTACK_MODE_DISABLE,
+    action::ATTACK_MODE_AUTO_DISABLE,
+    action::ATTACK_MODE_SUSPEND,
+    action::ATTACK_MODE_RESUME,
+    action::ATTACK_MODE_TRIAL,
+    action::ATTACK_MODE_CHANGE,
+    action::SESSION_REFUSED,
 ];
 
 /// « Action refusée » : tout ce qui n'est pas une connexion, refusé faute de droits.
