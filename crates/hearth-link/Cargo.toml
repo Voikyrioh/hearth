@@ -9,6 +9,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Expose `LinkManager::execute_raw` aux scénarios de résilience (route d'acte sans confirmation). Jamais
+# activée par l'application : seul le dev-dependency ci-dessous la demande.
+test-support = []
+
 [dependencies]
 hearth-proto.workspace = true
 async-trait.workspace = true
@@ -31,6 +36,7 @@ ring.workspace = true
 base64.workspace = true
 
 [dev-dependencies]
+hearth-link = { path = ".", features = ["test-support"] }
 hearth-agent = { path = "../hearth-agent" }
 minisign.workspace = true
 rcgen.workspace = true

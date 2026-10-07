@@ -47,6 +47,15 @@ pub enum LinkError {
     /// demandé par lui est à étudier (réglage, Q15).
     #[error("l'agent ne donne pas de défi à signer pour la clé de ce PC")]
     DeviceChallengeUnavailable,
+    /// Une action d'administration ne part pas sans sa confirmation (mot de passe et preuve de la clé de
+    /// ce poste) : `LinkManager::execute` refuse une requête de la liste fermée des actes
+    /// (BR-TRUST-036, 037). Rien n'est parti.
+    #[error("une action d'administration ne part pas sans confirmation")]
+    ActionUnconfirmed,
+    /// La requête vise une route d'acte d'administration mais son corps ne dit pas l'acte : rien n'est
+    /// parti.
+    #[error("l'acte d'administration est illisible")]
+    UnreadableAct,
     #[error("trop d'opérations en suspens")]
     TooManyPending,
     /// Le suivi de l'action n'a pas pu être écrit sur disque : l'action n'a PAS été lancée.

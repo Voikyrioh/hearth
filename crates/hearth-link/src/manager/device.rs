@@ -463,7 +463,7 @@ impl LinkManager {
             "password": password.expose(),
             "device": proof,
         });
-        self.execute(
+        self.execute_unchecked(
             id,
             ActionRequest {
                 method: Method::Delete,

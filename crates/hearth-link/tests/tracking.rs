@@ -625,7 +625,7 @@ fn change_password() -> ActionRequest {
 #[tokio::test]
 async fn a_failed_write_means_the_action_is_not_sent_and_the_caller_is_told() {
     let (rig, id) = connected(Disk::Failing, false).await;
-    let result = rig.manager.execute(&id, change_password()).await;
+    let result = rig.manager.execute_raw(&id, change_password()).await;
     assert_eq!(result.unwrap_err(), LinkError::TrackingUnavailable);
     assert_eq!(
         rig.script.requests.load(Ordering::SeqCst),
@@ -640,7 +640,7 @@ async fn a_write_that_never_ends_does_not_send_the_action_either() {
     // Délai d'écriture court : c'est lui qu'on éprouve (plus il est dépassé, mieux c'est : aucune
     // assertion de durée, seulement « l'appel se termine, en TrackingSlow »).
     let (rig, id) = connected_config(Disk::Hanging, false, None, config_with(ms(300))).await;
-    let result = tokio::time::timeout(GUARD, rig.manager.execute(&id, change_password()))
+    let result = tokio::time::timeout(GUARD, rig.manager.execute_raw(&id, change_password()))
         .await
         .expect("l'appel est borné par le délai d'écriture");
     assert_eq!(result.unwrap_err(), LinkError::TrackingSlow);
@@ -660,7 +660,7 @@ async fn a_slow_write_delays_the_request_until_it_is_done() {
     }));
     let manager = rig.manager.clone();
     let task_id = id.clone();
-    let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
+    let call = tokio::spawn(async move { manager.execute_raw(&task_id, change_password()).await });
     wait_until("écriture du suivi à la porte", || {
         rig.store.gate_reached.load(Ordering::SeqCst)
     })
@@ -706,7 +706,7 @@ async fn a_crash_right_after_the_send_leaves_the_operation_on_disk_for_the_resta
     }));
     let manager = rig.manager.clone();
     let task_id = id.clone();
-    let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
+    let call = tokio::spawn(async move { manager.execute_raw(&task_id, change_password()).await });
     wait_until("la requête est partie", || {
         rig.script.requests.load(Ordering::SeqCst) > 0
     })
@@ -1090,7 +1090,7 @@ async fn an_agent_flooding_the_stream_starves_neither_commands_nor_the_heartbeat
     *rig.script.mode.lock().unwrap() = StreamMode::Flood;
     let pings = rig.script.pings.load(Ordering::SeqCst);
     // Une commande passe malgré le flot ininterrompu de trames.
-    let outcome = tokio::time::timeout(GUARD, rig.manager.execute(&id, change_password()))
+    let outcome = tokio::time::timeout(GUARD, rig.manager.execute_raw(&id, change_password()))
         .await
         .expect("la commande n'est pas affamée par le flot de trames")
         .unwrap();
@@ -1120,7 +1120,7 @@ async fn a_link_cut_while_the_tracking_is_written_ends_as_not_executed_exactly_o
     let mut events = rig.manager.subscribe();
     let manager = rig.manager.clone();
     let task_id = id.clone();
-    let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
+    let call = tokio::spawn(async move { manager.execute_raw(&task_id, change_password()).await });
     // L'écriture est arrivée à la porte : la requête n'est pas partie. Le lien tombe maintenant.
     wait_until("écriture du suivi à la porte", || {
         rig.store.gate_reached.load(Ordering::SeqCst)
@@ -1497,7 +1497,7 @@ async fn row_response_before_the_cause_keeps_its_result_for_every_cause() {
         let (rig, id) = connected(Disk::Normal, false).await;
         let outcome = rig
             .manager
-            .execute(&id, self_ending_action())
+            .execute_raw(&id, self_ending_action())
             .await
             .unwrap();
         assert!(is_done(&outcome), "{cause:?} : {outcome:?}");
@@ -1516,7 +1516,7 @@ async fn row_response_after_the_cause() {
         let manager = rig.manager.clone();
         let task_id = id.clone();
         let call =
-            tokio::spawn(async move { manager.execute(&task_id, self_ending_action()).await });
+            tokio::spawn(async move { manager.execute_raw(&task_id, self_ending_action()).await });
         wait_until("requête partie", || {
             rig.script.requests.load(Ordering::SeqCst) == 1
         })
@@ -1575,7 +1575,7 @@ async fn row_response_never_comes() {
         let manager = rig.manager.clone();
         let task_id = id.clone();
         let call =
-            tokio::spawn(async move { manager.execute(&task_id, self_ending_action()).await });
+            tokio::spawn(async move { manager.execute_raw(&task_id, self_ending_action()).await });
         wait_until("requête partie", || {
             rig.script.requests.load(Ordering::SeqCst) == 1
         })
@@ -1605,7 +1605,7 @@ async fn row_request_transport_error() {
         let manager = rig.manager.clone();
         let task_id = id.clone();
         let call =
-            tokio::spawn(async move { manager.execute(&task_id, self_ending_action()).await });
+            tokio::spawn(async move { manager.execute_raw(&task_id, self_ending_action()).await });
         wait_until("requête partie", || {
             rig.script.requests.load(Ordering::SeqCst) == 1
         })
@@ -1636,7 +1636,7 @@ async fn an_action_that_keeps_its_session_completes_and_the_link_stays_connected
     rig.script.request_hold.store(true, Ordering::SeqCst);
     let manager = rig.manager.clone();
     let task_id = id.clone();
-    let call = tokio::spawn(async move { manager.execute(&task_id, change_password()).await });
+    let call = tokio::spawn(async move { manager.execute_raw(&task_id, change_password()).await });
     wait_until("requête partie", || {
         rig.script.requests.load(Ordering::SeqCst) == 1
     })

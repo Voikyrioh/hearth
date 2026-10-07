@@ -69,6 +69,14 @@ pub struct ApiRequest {
     pub idempotency_key: Option<String>,
 }
 
+impl Drop for ApiRequest {
+    /// Le corps peut porter un mot de passe : effacé à la libération, même si la requête n'est jamais
+    /// partie (suivi non écrit, tâche abandonnée).
+    fn drop(&mut self) {
+        crate::domain::secret::wipe_body(&mut self.body);
+    }
+}
+
 impl std::fmt::Debug for ApiRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ApiRequest")

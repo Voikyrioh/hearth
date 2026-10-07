@@ -636,7 +636,7 @@ async fn run(seed: u64, iterations: u32) {
                         path: "/me/password".into(),
                         body: Some(deep_json(&dice, 3)),
                     };
-                    let _ = bounded("execute", manager.execute(id, action)).await;
+                    let _ = bounded("execute", manager.execute_raw(id, action)).await;
                 }
             }
             7 => {

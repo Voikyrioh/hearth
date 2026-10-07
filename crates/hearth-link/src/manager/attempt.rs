@@ -205,17 +205,7 @@ pub(crate) fn login_request(username: &str, password: &Secret) -> LoginRequest {
 /// Efface les textes d'un corps JSON (un mot de passe d'action : retrait d'un poste, comptes) une fois
 /// la requête partie : même traitement que `wipe` pour la connexion.
 pub(crate) fn wipe_body(body: &mut Option<serde_json::Value>) {
-    fn wipe_value(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::String(text) => text.zeroize(),
-            serde_json::Value::Array(items) => items.iter_mut().for_each(wipe_value),
-            serde_json::Value::Object(map) => map.values_mut().for_each(wipe_value),
-            _ => {}
-        }
-    }
-    if let Some(value) = body {
-        wipe_value(value);
-    }
+    crate::domain::secret::wipe_body(body);
 }
 
 pub(crate) fn wipe(mut request: LoginRequest) {
