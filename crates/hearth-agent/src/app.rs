@@ -189,6 +189,9 @@ pub struct RunningAgent {
     /// Mode attaque : reprise après la fenêtre de redémarrage, sortie automatique : arrêtée avec
     /// l'agent.
     pub attack_sweep: Option<BackgroundTask>,
+    /// Les sessions : les tests de la liaison y règlent si l'agent EXIGE la confirmation des actes
+    /// (`set_reauth_required`), comme le fait le service à son démarrage.
+    pub sessions: Arc<SessionService>,
     /// Écrit les synthèses du journal en attente à l'arrêt.
     audit_recorder: Arc<AuditRecorder>,
     /// Les écritures d'alerte en vol, attendues à l'arrêt.
@@ -510,6 +513,7 @@ pub async fn start_full(
         services.audit_sink.clone(),
         adapters.clock.clone(),
     )?;
+    let sessions = services.sessions.clone();
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -547,6 +551,7 @@ pub async fn start_full(
         audit_flush,
         alert_sweep,
         attack_sweep,
+        sessions,
         audit_recorder: services.audit_recorder,
         security: services.security,
     })

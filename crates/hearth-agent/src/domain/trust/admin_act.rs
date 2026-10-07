@@ -3,7 +3,6 @@
 //! paramètre (millisecondes d'horloge monotone) : aucune horloge murale, aucune E/S.
 
 use hearth_proto::admin_act::AdminAct;
-use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
 
 /// Durée de l'élévation : 5 minutes fixes depuis la saisie du mot de passe (Q19). **Non glissante** : un
@@ -37,17 +36,7 @@ pub fn elevation_remaining_s(opened_ms: u64, now_ms: u64) -> u64 {
 ///
 /// La correspondance est exhaustive : un acte de plus oblige à choisir.
 pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
-    match act {
-        AdminAct::AccountCreate { role, .. } | AdminAct::AccountRole { role, .. } => {
-            *role != RoleName::Admin
-        }
-        AdminAct::AccountDelete { .. } | AdminAct::SessionsRevoke { .. } => true,
-        AdminAct::AccountPassword { .. }
-        | AdminAct::AgentUpdate { .. }
-        | AdminAct::AttackMode { .. }
-        | AdminAct::AccountPasswordOwn
-        | AdminAct::ReauthSetting { .. } => false,
-    }
+    hearth_proto::admin_act::covered_by_elevation(act)
 }
 
 /// Le réglage d'un compte lu dans la colonne. Toute valeur inconnue est lue comme `each` (le plus strict).
@@ -70,6 +59,7 @@ pub fn seconds_of(mode: ReauthMode) -> i64 {
 #[cfg(test)]
 mod tests {
     use hearth_proto::admin_act::ActKind;
+    use hearth_proto::api::accounts::RoleName;
 
     use super::*;
 
