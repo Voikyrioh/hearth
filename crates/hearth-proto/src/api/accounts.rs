@@ -81,6 +81,11 @@ impl fmt::Debug for SetPasswordRequest {
 pub struct ChangeOwnPasswordRequest {
     pub current: String,
     pub password: String,
+    /// Garder l'adresse d'où part cette requête parmi les adresses retenues du compte (Q15,
+    /// BR-CONN-019). Absent ou faux : toutes les adresses apprises sans clé sont oubliées, celle-ci
+    /// comprise. Un client plus ancien, qui n'envoie pas le champ, garde ce comportement.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_address: bool,
 }
 
 impl fmt::Debug for ChangeOwnPasswordRequest {
@@ -88,6 +93,7 @@ impl fmt::Debug for ChangeOwnPasswordRequest {
         f.debug_struct("ChangeOwnPasswordRequest")
             .field("current", &"***")
             .field("password", &"***")
+            .field("keep_address", &self.keep_address)
             .finish()
     }
 }
@@ -133,6 +139,7 @@ mod tests {
         let own = ChangeOwnPasswordRequest {
             current: "Old-Secret-123".into(),
             password: "New-Secret-123".into(),
+            keep_address: false,
         };
         let set = SetPasswordRequest {
             password: "Another-Secret-1".into(),
@@ -144,6 +151,27 @@ mod tests {
         ] {
             assert!(!text.contains("Secret"), "{text}");
         }
+    }
+
+    #[test]
+    fn keeping_the_address_is_an_additive_field_absent_means_the_current_behaviour() {
+        let old: ChangeOwnPasswordRequest =
+            serde_json::from_value(json!({ "current": "a", "password": "b" })).unwrap();
+        assert!(
+            !old.keep_address,
+            "un client ancien garde le comportement actuel"
+        );
+        let keep: ChangeOwnPasswordRequest = serde_json::from_value(
+            json!({ "current": "a", "password": "b", "keep_address": true }),
+        )
+        .unwrap();
+        assert!(keep.keep_address);
+        // Faux : le champ n'est pas écrit, le corps reste celui d'avant.
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            json!({ "current": "a", "password": "b" })
+        );
+        assert_eq!(serde_json::to_value(&keep).unwrap()["keep_address"], true);
     }
 
     #[test]

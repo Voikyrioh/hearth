@@ -40,8 +40,8 @@ pub enum ActionKind {
 
 /// Gestion des comptes : création, suppression, rôle, mots de passe, sessions, et les postes de
 /// confiance d'un compte (HRT-22 : inscription et retrait, rangés ici en attendant l'écran de la
-/// liste des postes de HRT-23).
-const ACCOUNT_CODES: [&str; 8] = [
+/// liste des postes de HRT-23), et l'alerte de sécurité d'un compte (HRT-24, en attendant HRT-26).
+const ACCOUNT_CODES: [&str; 9] = [
     action::ACCOUNT_CREATE,
     action::ACCOUNT_DELETE,
     action::ACCOUNT_ROLE,
@@ -50,6 +50,7 @@ const ACCOUNT_CODES: [&str; 8] = [
     action::SESSIONS_REVOKE,
     action::DEVICE_ENROLL,
     action::DEVICE_REMOVE,
+    action::SECURITY_ALERT,
 ];
 
 /// « Action refusée » : tout ce qui n'est pas une connexion, refusé faute de droits.
