@@ -118,39 +118,66 @@ impl Spec {
         }
     }
 
-    /// Le même acte avec une cible ou un paramètre qui change son sens ; `None` s'il n'en a pas.
-    fn altered(&self) -> Option<Spec> {
-        Some(match self {
-            Self::Create { role, .. } => Self::Create {
-                username: "autre".into(),
-                role: *role,
-            },
-            Self::Role { role, .. } => Self::Role {
+    /// Le même acte avec, tour à tour, chaque cible ou paramètre signé qui change son sens (vide s'il n'en
+    /// a pas) : la cible, le nom, le rôle, la version, la somme, le geste, la valeur du réglage.
+    fn altered_all(&self) -> Vec<Spec> {
+        let flip = |role: RoleName| match role {
+            RoleName::Admin => RoleName::Readonly,
+            RoleName::Readonly => RoleName::Admin,
+        };
+        match self {
+            Self::Create { role, .. } => vec![
+                Self::Create {
+                    username: "autre".into(),
+                    role: *role,
+                },
+                Self::Create {
+                    username: "nouveau".into(),
+                    role: flip(*role),
+                },
+            ],
+            Self::Role { target, role } => vec![
+                Self::Role {
+                    target: "AUTRE-CIBLE".into(),
+                    role: *role,
+                },
+                Self::Role {
+                    target: target.clone(),
+                    role: flip(*role),
+                },
+            ],
+            Self::Password { .. } => vec![Self::Password {
                 target: "AUTRE-CIBLE".into(),
-                role: *role,
-            },
-            Self::Password { .. } => Self::Password {
+            }],
+            Self::Delete { .. } => vec![Self::Delete {
                 target: "AUTRE-CIBLE".into(),
-            },
-            Self::Delete { .. } => Self::Delete {
+            }],
+            Self::Revoke { .. } => vec![Self::Revoke {
                 target: "AUTRE-CIBLE".into(),
-            },
-            Self::Revoke { .. } => Self::Revoke {
-                target: "AUTRE-CIBLE".into(),
-            },
-            Self::Update { body, .. } => Self::Update {
-                version: "9.9.9".into(),
-                body: body.clone(),
-            },
-            Self::Attack { enable } => Self::Attack { enable: !enable },
-            Self::Setting { mode } => Self::Setting {
+            }],
+            Self::Update { version, body } => {
+                let mut other = body.clone();
+                other["sha256"] = json!("ab".repeat(32));
+                vec![
+                    Self::Update {
+                        version: "9.9.9".into(),
+                        body: body.clone(),
+                    },
+                    Self::Update {
+                        version: version.clone(),
+                        body: other,
+                    },
+                ]
+            }
+            Self::Attack { enable } => vec![Self::Attack { enable: !enable }],
+            Self::Setting { mode } => vec![Self::Setting {
                 mode: match mode {
                     ReauthMode::Each => ReauthMode::Window,
                     ReauthMode::Window => ReauthMode::Each,
                 },
-            },
-            Self::Own => return None,
-        })
+            }],
+            Self::Own => Vec::new(),
+        }
     }
 }
 
@@ -435,7 +462,7 @@ async fn a_proof_for_another_act_target_account_session_or_replayed_is_refused_a
         };
         refusals.push(("autre acte", b.member(who, &other_act, PASSWORD).await));
         // Une autre cible ou un autre paramètre.
-        if let Some(altered) = spec.altered() {
+        for altered in spec.altered_all() {
             refusals.push(("autre cible", b.member(who, &altered, PASSWORD).await));
         }
         // Un autre compte : le défi et la signature portent l'identifiant d'un autre.
@@ -1119,6 +1146,12 @@ async fn changing_your_own_password_asks_for_the_password_during_the_elevation_a
         "password_required",
         "propre mot de passe",
     );
+    let reply = b.act(&b.carl, &Spec::Own, PASSWORD).await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert!(
+        b.env.elevations.is_empty(),
+        "le changement du mot de passe ferme l'élévation"
+    );
 }
 
 /// Ouvre l'élévation de marie par un acte couvert et rend le numéro d'ordre pour nommer les comptes.
@@ -1500,4 +1533,228 @@ async fn the_setting_is_per_account_any_role_and_always_confirmed() {
         .await;
     assert_eq!(reason(&reply), "password_required");
     assert_eq!(b.entries(ActKind::ReauthSetting, "ok", "").await, 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Revue r1 de la PR #34
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn an_act_is_refused_when_its_challenge_cannot_be_retained_and_the_proof_never_replays() {
+    // B1 : la part du compte dans la table des défis consommés est de 64 (sa connexion en a pris un).
+    let b = bench().await;
+    open_as(&b, "fx-ouverture").await;
+    let mut created = 0;
+    let mut refused_member = None;
+    for index in 0..70 {
+        let spec = readonly_account(&format!("fx{index:02}"));
+        let member = b.member(&b.marie, &spec, "").await;
+        let reply = b
+            .send(&b.marie, &spec, Some(member.clone()), PASSWORD)
+            .await;
+        if reply.status == StatusCode::CREATED {
+            created += 1;
+        } else {
+            assert_refused_with(
+                &reply,
+                StatusCode::CONFLICT,
+                "POST_NOT_RECOGNIZED",
+                "proof_invalid",
+                "part pleine",
+            );
+            refused_member = Some((spec, member));
+            break;
+        }
+    }
+    let (spec, member) = refused_member.expect("la part du compte se remplit avant 70 actes");
+    assert!((55..64).contains(&created), "{created}");
+    let before = b.snapshot().await;
+    let again = b.send(&b.marie, &spec, Some(member), PASSWORD).await;
+    assert_eq!(reason(&again), "proof_invalid");
+    assert_eq!(
+        b.snapshot().await,
+        before,
+        "l'acte refusé n'est pas fait, ni rejoué"
+    );
+}
+
+#[tokio::test]
+async fn the_hash_verified_by_the_confirmation_is_the_one_the_password_change_replaces() {
+    let b = bench().await;
+    let carl = b.env.service.find("carl").await.unwrap().id;
+    let error = b
+        .env
+        .service
+        .change_own_password_confirmed(
+            &carl,
+            &support::secret("un-ancien-hache"),
+            support::secret(OTHER_PASSWORD),
+            None,
+            None,
+            by(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            hearth_agent::application::accounts::AccountError::PasswordChangedMeanwhile
+        ),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_flat_attack_mode_closes_the_elevations_when_it_turns_on() {
+    let b = bench().await;
+    open_as(&b, "flat-ouverte").await;
+    assert!(!b.env.elevations.is_empty());
+    let body = support::device::attack_mode_body(
+        &b.api,
+        &b.marie.key,
+        "marie",
+        &b.marie.token,
+        true,
+        PASSWORD,
+    )
+    .await;
+    let reply = b
+        .api
+        .put("/security/attack-mode")
+        .token(&b.marie.token)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert!(b.env.elevations.is_empty(), "forme à plat");
+}
+
+async fn open_as(b: &Bench, name: &str) {
+    let reply = b.act(&b.marie, &readonly_account(name), PASSWORD).await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+}
+
+#[tokio::test]
+async fn a_wrong_password_on_a_flat_form_closes_the_elevation_too() {
+    let b = bench().await;
+    open_as(&b, "ouverte").await;
+    assert!(!b.env.elevations.is_empty());
+    let body = support::device::attack_mode_body(
+        &b.api,
+        &b.marie.key,
+        "marie",
+        &b.marie.token,
+        true,
+        WRONG,
+    )
+    .await;
+    let reply = b
+        .api
+        .put("/security/attack-mode")
+        .token(&b.marie.token)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(reply.code(), "WRONG_PASSWORD");
+    assert!(b.env.elevations.is_empty());
+    // Et `PUT /me/password` sans `reauth`.
+    let b = bench().await;
+    open_as(&b, "ouverte").await;
+    let dora = b
+        .api
+        .put("/me/password")
+        .token(&b.marie.token)
+        .json(&json!({ "current": WRONG, "password": OTHER_PASSWORD }))
+        .send()
+        .await;
+    assert_eq!(dora.code(), "WRONG_PASSWORD");
+    assert!(b.env.elevations.is_empty());
+}
+
+#[tokio::test]
+async fn deleting_the_account_or_closing_its_sessions_closes_its_elevations() {
+    let b = bench().await;
+    let marie = b.env.service.find("marie").await.unwrap().id;
+    open_as(&b, "revoque").await;
+    b.env.service.revoke_sessions(&marie, by()).await.unwrap();
+    assert!(b.env.elevations.is_empty(), "fermeture des sessions");
+    // Un compte qui a une élévation, puis qui est supprimé.
+    let reply = b
+        .act(
+            &b.paul,
+            &Spec::Setting {
+                mode: ReauthMode::Window,
+            },
+            PASSWORD,
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert_eq!(b.env.elevations.len(), 1);
+    let paul = b.env.service.find("paul").await.unwrap().id;
+    b.env.service.delete(&paul, None, None, by()).await.unwrap();
+    assert!(b.env.elevations.is_empty(), "suppression du compte");
+}
+
+#[tokio::test]
+async fn a_body_with_two_reauth_members_is_unreadable_not_absent() {
+    let b = bench().await;
+    let before = b.snapshot().await;
+    let reply = b
+        .api
+        .post("/accounts")
+        .token(&b.marie.token)
+        .raw_body(&format!(
+            r#"{{"username":"double","password":"{OTHER_PASSWORD}","role":"readonly","reauth":{{}},"reauth":{{}}}}"#
+        ))
+        .send()
+        .await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{:?}",
+        reply.body
+    );
+    assert_eq!(reply.code(), "VALIDATION_ERROR");
+    assert_eq!(b.snapshot().await, before);
+}
+
+#[tokio::test]
+async fn in_attack_mode_a_typo_on_put_me_password_without_reauth_costs_the_single_trial_of_the_address()
+ {
+    // Q11 : un poste qui n'a qu'un critère (ici l'adresse retenue, session sans clé) a droit à UN essai ;
+    // raté, il est bloqué jusqu'à la fin du mode. La confirmation de l'ancien mot de passe suit la règle.
+    let b = bench().await;
+    let dora = b.env.create("dora", Role::ReadOnly).await;
+    let token = b.api.token_of("dora").await;
+    let before = b.env.hash_of(&dora.id).await;
+    b.env
+        .attack
+        .change(
+            true,
+            by(),
+            hearth_agent::domain::trust::attack_mode::EndHow::Manual,
+        )
+        .await
+        .unwrap();
+    let typo = b
+        .api
+        .put("/me/password")
+        .token(&token)
+        .json(&json!({ "current": WRONG, "password": OTHER_PASSWORD }))
+        .send()
+        .await;
+    assert_eq!(typo.code(), "WRONG_PASSWORD", "{:?}", typo.body);
+    let right = b
+        .api
+        .put("/me/password")
+        .token(&token)
+        .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
+        .send()
+        .await;
+    assert!(
+        !right.status.is_success(),
+        "l'essai est consommé : {:?}",
+        right.body
+    );
+    assert_eq!(b.env.hash_of(&dora.id).await, before);
 }

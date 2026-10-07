@@ -35,3 +35,6 @@ Aucun.
 ## Références
 - Ticket : HRT-28 (tranche F)
 - Code : `crates/hearth-agent/src/application/trust.rs` (marqueur `FIX:01M4BK2JXE7C2SZGG7BBXTZ0TZ`), `crates/hearth-agent/src/infrastructure/sqlite/session_repo.rs`, `crates/hearth-agent/src/domain/trust/device.rs`
+
+## Sessions existantes
+Aucune migration : les sessions déjà ouvertes gardent leur lien, même réécrit avant le correctif. Sans gravité : qui détient la clé du poste B et le mot de passe est, de fait, le poste B.

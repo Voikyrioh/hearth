@@ -137,11 +137,6 @@ pub async fn change_own_password(
     confirmed: Option<Extension<PasswordConfirmed>>,
     body: Result<Json<ChangeOwnPasswordRequest>, JsonRejection>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
-    if confirmed.is_none() {
-        return Err(ApiError::internal(
-            &"route sans vérification de l'ancien mot de passe",
-        ));
-    }
     let Json(request) = body?;
     // Le choix du titulaire (Q15) : garder l'adresse d'où part la requête, la connexion TCP, jamais
     // une valeur du corps ni d'un en-tête.
@@ -149,10 +144,16 @@ pub async fn change_own_password(
         .keep_address
         .then(|| by.origin.addr().map(str::to_owned))
         .flatten();
+    let Some(Extension(PasswordConfirmed(verified))) = confirmed else {
+        return Err(ApiError::internal(
+            &"route sans vérification de l'ancien mot de passe",
+        ));
+    };
     let count = state
         .accounts
         .change_own_password_confirmed(
             &caller.account.id,
+            &verified,
             Secret::from(request.password),
             Some(caller.session_id),
             keep.as_deref(),

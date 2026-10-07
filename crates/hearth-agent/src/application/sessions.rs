@@ -29,7 +29,7 @@ use super::security::SecurityService;
 use super::trust::{
     AttackProofError, DeviceLogin, InFlight, RemoveError, TrustService, VerifiedKey,
 };
-use crate::domain::accounts::{Account, AccountId, Username};
+use crate::domain::accounts::{Account, Username};
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
 use crate::domain::identifier_slowdown::{self, AlertChange, alert_change};
 use crate::domain::known_address::{self, canonical, is_known};
@@ -240,48 +240,29 @@ impl From<AttackProofError> for ReauthError {
     }
 }
 
-/// Comment la confirmation a été obtenue.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReauthMeans {
-    /// Mot de passe juste (par le chemin de la connexion) et preuve de clé.
-    PasswordKey,
-    /// Élévation en cours (BR-TRUST-043) et preuve de clé.
-    ElevationKey,
-}
-
 struct ReauthInner {
-    account: AccountId,
-    key: VerifiedKey,
-    means: ReauthMeans,
-    trust: Arc<TrustService>,
-    /// Tient le défi pendant l'acte : deux requêtes simultanées qui portent le même défi ne réussissent
-    /// pas toutes les deux.
+    /// Le haché du mot de passe réellement vérifié par le chemin de la connexion ; `None` sous élévation.
+    verified: Option<Secret>,
+    /// Tient le défi pendant l'acte (il est déjà retenu comme consommé : voir `reauthenticate`).
     _reservation: InFlight,
 }
 
-/// Un acte confirmé : le mot de passe (ou l'élévation) et la preuve de clé ont été vérifiés. Posé sur la
-/// requête par la couche `reauth`. Le défi n'est consommé que par [`Reauthenticated::finish`], quand
-/// l'acte a réussi.
+/// Un acte confirmé : le mot de passe (ou l'élévation) et la preuve de clé ont été vérifiés, et le défi
+/// est **déjà consommé** (avant l'effet de l'acte : un défi qui ne peut pas être retenu refuse l'acte).
+/// Posé sur la requête par la couche `reauth`.
 #[derive(Clone)]
 pub struct Reauthenticated(Arc<ReauthInner>);
 
 impl Reauthenticated {
-    pub fn means(&self) -> ReauthMeans {
-        self.0.means
-    }
-
-    /// L'acte a réussi : le défi est consommé, la preuve ne servira plus. Le retour de `consume` est
-    /// ignoré à dessein (une requête concurrente l'a pris : l'acte est fait).
-    pub fn finish(&self) {
-        self.0.trust.consume(&self.0.account, &self.0.key);
+    /// Le haché du mot de passe vérifié, `None` si l'élévation a tenu lieu de mot de passe.
+    pub fn verified_hash(&self) -> Option<&Secret> {
+        self.0.verified.as_ref()
     }
 }
 
 impl std::fmt::Debug for Reauthenticated {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Reauthenticated")
-            .field("means", &self.0.means)
-            .finish_non_exhaustive()
+        f.debug_struct("Reauthenticated").finish_non_exhaustive()
     }
 }
 
@@ -575,7 +556,7 @@ impl SessionService {
         password: Secret,
         client: &ClientInfo,
         action: AuditAction,
-    ) -> Result<(), LoginError> {
+    ) -> Result<Secret, LoginError> {
         self.confirm_password_proven(username, password, client, None, Purpose::Act(action))
             .await
     }
@@ -592,20 +573,38 @@ impl SessionService {
         client: &ClientInfo,
         proven: Option<VerifiedKey>,
         purpose: Purpose,
-    ) -> Result<(), LoginError> {
+    ) -> Result<Secret, LoginError> {
         let turn = self.take_turn(client).await?;
         let result = match self
             .verify(username, password, client, None, proven, purpose)
             .await
         {
             // Les compteurs sont déjà écrits (le succès remet à zéro celui du couple, comme une
-            // connexion) ; ni session, ni adresse apprise, ni entrée de connexion.
-            Ok(passed) => passed.tx.commit().await.map_err(LoginError::from),
+            // connexion) ; ni session, ni adresse apprise, ni entrée de connexion. Rend le haché
+            // réellement vérifié (la garde « mot de passe changé entre-temps » de `PUT /me/password`).
+            Ok(passed) => {
+                let verified = Secret::new(passed.account.password_hash.expose().to_owned());
+                passed
+                    .tx
+                    .commit()
+                    .await
+                    .map(|()| verified)
+                    .map_err(LoginError::from)
+            }
             Err(error) => Err(error),
         };
         drop(turn);
         trace_refusal(&result, client);
         self.note_refusal(&result);
+        // Le premier mot de passe faux du compte à une confirmation ferme ses élévations, quelle que soit
+        // la forme de l'acte (BR-TRUST-043).
+        if matches!(result, Err(LoginError::InvalidCredentials))
+            && let Some(elevations) = &self.elevations
+            && let Ok(name) = Username::parse(username)
+            && let Ok(Some(account)) = self.accounts.find_by_username(&name).await
+        {
+            elevations.close_account(&account.id);
+        }
         result
     }
 
@@ -1192,10 +1191,7 @@ impl SessionService {
         )
         .await
         .map_err(|error| AttackModeError::Password(Box::new(error)))?;
-        let status = attack.change(active, by, EndHow::Manual).await?;
-        if active && let Some(elevations) = &self.elevations {
-            elevations.close_all();
-        }
+        let status = self.change_attack_mode(attack, active, by).await?;
         // Le retour de `consume` est ignoré à dessein : le changement est fait, un défi déjà pris par une
         // requête concurrente n'ouvre plus rien (l'acte est idempotent).
         trust.consume(&session.account.id, &key);
@@ -1235,14 +1231,17 @@ impl SessionService {
             )
             .await?;
         let reservation = trust.reserve(&key).ok_or(ReauthError::ProofInvalid)?;
-        let confirmed = |means| {
-            Reauthenticated(Arc::new(ReauthInner {
-                account: session.account.id.clone(),
-                key: key.clone(),
-                means,
-                trust: trust.clone(),
+        // Le défi est retenu comme consommé AVANT l'effet de l'acte, une fois la confirmation acquise (un
+        // mot de passe faux ne le brûle pas) : s'il ne peut pas l'être (déjà pris, ou part du compte
+        // pleine), l'acte est refusé, jamais fait avec une preuve rejouable (BR-TRUST-039).
+        let confirmed = |verified: Option<Secret>| -> Result<Reauthenticated, ReauthError> {
+            if !trust.consume(&session.account.id, &key) {
+                return Err(ReauthError::ProofInvalid);
+            }
+            Ok(Reauthenticated(Arc::new(ReauthInner {
+                verified,
                 _reservation: reservation,
-            }))
+            })))
         };
         // Pendant le mode attaque (actif ou suspendu), aucune élévation n'existe.
         let attacking = match &self.attack {
@@ -1256,13 +1255,13 @@ impl SessionService {
             && let Some(elevations) = &self.elevations
             && elevations.covers(&session.session_id, &device, &client.addr)
         {
-            return Ok(confirmed(ReauthMeans::ElevationKey));
+            return confirmed(None);
         }
         if reauth.password.is_empty() {
             return Err(ReauthError::PasswordRequired);
         }
         let purpose = Purpose::Act(act_audit_action(act));
-        if let Err(error) = self
+        let verified = self
             .confirm_password_proven(
                 session.account.username.as_str(),
                 Secret::from(reauth.password.clone()),
@@ -1271,15 +1270,7 @@ impl SessionService {
                 purpose,
             )
             .await
-        {
-            // Le premier mot de passe faux du compte à une confirmation ferme ses élévations.
-            if matches!(error, LoginError::InvalidCredentials)
-                && let Some(elevations) = &self.elevations
-            {
-                elevations.close_account(&session.account.id);
-            }
-            return Err(ReauthError::Password(Box::new(error)));
-        }
+            .map_err(|error| ReauthError::Password(Box::new(error)))?;
         if windowed && let Some(elevations) = &self.elevations {
             elevations.open(
                 &session.session_id,
@@ -1288,7 +1279,7 @@ impl SessionService {
                 &client.addr,
             );
         }
-        Ok(confirmed(ReauthMeans::PasswordKey))
+        confirmed(Some(verified))
     }
 
     /// Active ou désactive le mode attaque pour un acte déjà confirmé par la couche `reauth`. Activer
@@ -1305,8 +1296,19 @@ impl SessionService {
         if !session.account.role.can_manage_accounts() {
             return Err(AttackModeError::Forbidden);
         }
+        Ok(self.change_attack_mode(attack, active, by).await?)
+    }
+
+    /// Le seul endroit où le mode attaque change par une route (forme à plat comme forme `reauth`) : il
+    /// ferme toutes les élévations, qu'on l'allume ou qu'on l'éteigne (aucune ne revit à l'extinction).
+    async fn change_attack_mode(
+        &self,
+        attack: &AttackModeService,
+        active: bool,
+        by: &Actor,
+    ) -> Result<AttackStatus, StoreError> {
         let status = attack.change(active, by, EndHow::Manual).await?;
-        if active && let Some(elevations) = &self.elevations {
+        if let Some(elevations) = &self.elevations {
             elevations.close_all();
         }
         Ok(status)

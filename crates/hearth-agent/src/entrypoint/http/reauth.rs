@@ -16,6 +16,8 @@
 //! membre `reauth` passe comme avant : un client actuel ne voit aucune différence (seule exception voulue :
 //! l'ancien mot de passe de `PUT /me/password` passe par les compteurs de la connexion).
 
+use std::sync::Arc;
+
 use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
 use axum::middleware::Next;
@@ -42,8 +44,8 @@ use crate::domain::secret::Secret;
 
 /// Posé par cette couche sur `PUT /me/password` une fois l'ancien mot de passe vérifié par le chemin de la
 /// connexion (avec ou sans `reauth`) : le handler refuse de changer le mot de passe sans lui.
-#[derive(Debug, Clone, Copy)]
-pub struct PasswordConfirmed;
+#[derive(Debug, Clone)]
+pub struct PasswordConfirmed(pub Arc<Secret>);
 
 /// Taille maximale d'un corps lu par la couche (celle de l'API).
 const MAX_BYTES: usize = 1 << 20;
@@ -119,15 +121,20 @@ impl Parsed {
 }
 
 /// Le membre `reauth` d'un corps JSON : absent (`None`), ou présent et lu avec tolérance.
-fn reauth_member(bytes: &[u8]) -> Option<Reauth> {
+/// Un corps que l'enveloppe ne sait pas lire (clé `reauth` en double, par exemple) est une erreur de
+/// lecture, jamais une absence : `Err`.
+fn reauth_member(bytes: &[u8]) -> Result<Option<Reauth>, ()> {
     #[derive(Deserialize)]
     struct Envelope {
         #[serde(default, deserialize_with = "lenient_reauth")]
         reauth: Option<Reauth>,
     }
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
     serde_json::from_slice::<Envelope>(bytes)
-        .ok()
-        .and_then(|envelope| envelope.reauth)
+        .map(|envelope| envelope.reauth)
+        .map_err(|_| ())
 }
 
 fn marked(error: ApiError, outcome: Outcome) -> Response {
@@ -196,7 +203,7 @@ fn password_refusal(error: LoginError) -> Response {
         }
         LoginError::Busy => marked(
             ApiError::from(LoginError::Busy),
-            Outcome::Denied(Reason::TooManyAttempts { retry_after_s: 1 }),
+            Outcome::Failed(Reason::Busy),
         ),
         other => ApiError::from(other).into_response(),
     }
@@ -250,7 +257,9 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
         Parsed::Attack(_) => ActKind::AttackModeDisable,
         _ => kind,
     };
-    let reauth = reauth_member(&bytes);
+    let Ok(reauth) = reauth_member(&bytes) else {
+        return ApiError::invalid("body", "Corps de requête illisible").into_response();
+    };
     match reauth {
         None if kind == ActKind::AccountPasswordOwn && !required => {
             // Client actuel : l'ancien mot de passe passe tout de même par les compteurs de la connexion
@@ -273,12 +282,14 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
                 }
                 .in_current_span(),
             );
-            match work.await {
-                Ok(Ok(())) => {}
+            let verified = match work.await {
+                Ok(Ok(verified)) => verified,
                 Ok(Err(error)) => return password_refusal(error),
                 Err(error) => return ApiError::internal(&error).into_response(),
-            }
-            parts.extensions.insert(PasswordConfirmed);
+            };
+            parts
+                .extensions
+                .insert(PasswordConfirmed(Arc::new(verified)));
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
         }
@@ -327,17 +338,18 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
                 Err(error) => return ApiError::internal(&error).into_response(),
             };
             parts.extensions.insert(confirmed.clone());
-            if kind == ActKind::AccountPasswordOwn {
+            if kind == ActKind::AccountPasswordOwn
+                && let Some(verified) = confirmed.verified_hash()
+            {
                 // Jamais couvert par l'élévation : le mot de passe vient d'être vérifié.
-                parts.extensions.insert(PasswordConfirmed);
+                parts
+                    .extensions
+                    .insert(PasswordConfirmed(Arc::new(Secret::new(
+                        verified.expose().to_owned(),
+                    ))));
             }
-            let response = next
-                .run(Request::from_parts(parts, Body::from(bytes)))
-                .await;
-            if response.status().is_success() {
-                confirmed.finish();
-            }
-            response
+            next.run(Request::from_parts(parts, Body::from(bytes)))
+                .await
         }
     }
 }

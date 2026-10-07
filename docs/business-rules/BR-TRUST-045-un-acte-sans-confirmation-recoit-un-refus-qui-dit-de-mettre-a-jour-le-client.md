@@ -1,0 +1,28 @@
+---
+id: BR-TRUST-045
+domaine: TRUST
+titre: Un acte sans confirmation reçoit un refus qui dit de mettre le client à jour ; aucun repli vers la session seule
+statut: active
+invariant: true
+source: contexts/hearth/conceptions/2026-10-07-technique-administration-mot-de-passe-et-cle.md ; contexts/hearth/tickets/hrt/HRT-28.md
+maj: 2026-10-07
+---
+
+# BR-TRUST-045 : Un acte sans confirmation reçoit un refus qui dit de mettre le client à jour ; aucun repli vers la session seule
+
+## Règle
+- Quand l'agent **exige** la confirmation (`admin_reauth.required: true`), un acte sans membre `reauth` reçoit `426 INCOMPATIBLE_VERSION` (`details.upgrade: "client"`, `details.reason: "reauth_required"`), consigné « confirmation absente : client trop ancien » ; rien n'est fait, aucun mot de passe n'est essayé. Un `reauth` présent sans preuve est autre chose : `409 proof_missing` (client récent sans clé).
+- Le mode attaque garde sa forme à plat (`0x03`) : sans `reauth`, sa route répond comme avant (preuve et mot de passe exigés par le handler). `PUT /me/reauth` est toujours exigé, même quand l'agent n'exige pas.
+- **Livré en HRT-28 : le code et son test**, l'exigence reste à `false` par défaut (`SessionService::set_reauth_required`) ; l'activer est l'affaire de HRT-30, après le client qui confirme.
+
+## Application (code)
+- `entrypoint/http/reauth.rs::{layer, too_old}` ; `application/sessions.rs::{reauth_required, set_reauth_required}`.
+
+## Vérification
+- `tests/admin_reauth.rs::{when_the_agent_requires_the_confirmation_an_act_without_reauth_is_told_to_update_the_client, the_setting_is_per_account_any_role_and_always_confirmed}`.
+
+## Règles liées
+- BR-TRUST-036, 046, ADR-0031.
+
+## Historique
+- 2026-10-07 : création (HRT-28).

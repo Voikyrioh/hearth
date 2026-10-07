@@ -72,8 +72,8 @@ Tout acte d'administration (créer un compte, changer un rôle, le mot de passe 
 ```
 
 - **Preuve** : `POST /sessions/challenge` avec `purpose: "admin_act"`, puis signature d'usage `0x05` liée à l'acte (code, cible = identifiant technique du compte visé, paramètres non secrets : compte et rôle d'une création, rôle d'un changement, version et somme d'une mise à jour, valeur du réglage), au compte, au hachage du jeton, au serveur et au défi. Octets : `hearth_proto::device_proof` et `hearth_proto::admin_act`. L'agent reconstruit l'acte depuis la requête.
-- **Mot de passe** : par le chemin de la connexion (mêmes compteurs et ralentissement). Absent sous élévation pour un acte couvert (créer un compte en lecture seule, passer un compte en lecture seule, supprimer un compte, fermer les sessions d'un compte).
-- **Ordre** : session et rôle, preuve (aucun mot de passe n'est essayé tant qu'elle n'est pas valable), mot de passe ou élévation, acte, puis le défi est consommé si la réponse est un succès.
+- **Mot de passe** : par le chemin de la connexion (mêmes compteurs et ralentissement). Absent sous élévation pour un acte couvert ; **un mot de passe fourni pour un acte couvert sous élévation n'est pas vérifié** (la preuve de clé suffit) (créer un compte en lecture seule, passer un compte en lecture seule, supprimer un compte, fermer les sessions d'un compte).
+- **Ordre** : session et rôle, preuve (aucun mot de passe n'est essayé tant qu'elle n'est pas valable), mot de passe ou élévation, acte, puis le défi est consommé avant l'effet de l'acte (un défi qui ne peut pas être retenu refuse l'acte : `proof_invalid`).
 - **Tant que `admin_reauth.required` est faux**, un acte sans `reauth` passe comme avant ; un acte avec `reauth` est vérifié.
 
 | Statut | Code | `details` | Quand |

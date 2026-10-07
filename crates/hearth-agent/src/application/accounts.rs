@@ -367,10 +367,12 @@ impl AccountService {
 
     /// Comme `change_own_password_keeping`, quand l'ancien mot de passe vient d'être vérifié **par le chemin
     /// de la connexion** (compteurs, ralentissement : HRT-28, BR-TRUST-040) : il n'est pas vérifié une
-    /// seconde fois. La garde « le mot de passe n'a pas changé entre-temps » porte sur le haché lu ici.
+    /// seconde fois. `verified` : le haché réellement vérifié par cette confirmation ; si le mot de passe a
+    /// changé depuis, `PasswordChangedMeanwhile` plutôt que d'écraser le changement.
     pub async fn change_own_password_confirmed(
         &self,
         id: &AccountId,
+        verified: &Secret,
         new_password: Secret,
         current_session: Option<SessionId>,
         keep_address: Option<&str>,
@@ -382,7 +384,7 @@ impl AccountService {
             id,
             &hash,
             PasswordChange::Own { current_session },
-            Some(&account.password_hash),
+            Some(verified),
             keep_address,
             (by, AuditAction::OwnPassword),
         )

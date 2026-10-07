@@ -1,14 +1,14 @@
 ---
 id: BR-TRUST-047
 domaine: TRUST
-titre: Aucune décision d'un acte d'administration ne dépend de l'horloge murale ; la garde de réactivation du mode attaque est bornée par le temps de marche depuis le démarrage
+titre: Le défi et l'élévation d'un acte se mesurent sur l'horloge monotone ; la garde de réactivation du mode attaque ne lit l'horloge murale qu'avant 30 minutes de marche ou si l'identifiant de démarrage est illisible
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-07-technique-administration-mot-de-passe-et-cle.md (sections 4.6 et 5, tranches D1 et E) ; contexts/hearth/tickets/hrt/HRT-28.md (suivi r2 de la PR #28) ; ADR-0025
 maj: 2026-10-07
 ---
 
-# BR-TRUST-047 : Aucune décision d'un acte ne lit l'horloge murale
+# BR-TRUST-047 : Défi et élévation sur l'horloge monotone, garde de réactivation bornée
 
 ## Règle
 - Le défi d'un acte (60 s) et l'élévation du mot de passe (5 minutes, BR-TRUST-043) se mesurent sur l'horloge monotone de l'agent : reculer ou avancer l'heure ne prolonge ni ne raccourcit rien.
