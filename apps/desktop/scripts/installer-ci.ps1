@@ -14,7 +14,8 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $installer = (Get-ChildItem (Join-Path $root 'target\release\bundle\nsis\*.exe') | Select-Object -First 1).FullName
 $evidence = Join-Path $root 'installer-evidence'
 New-Item -ItemType Directory -Force $evidence | Out-Null
-$dir = Join-Path $env:RUNNER_TEMP 'hearth-installed'
+# Chemin AVEC une espace (comme un profil Windows « Jean Dupont », HRT-29) : toutes les etapes y passent.
+$dir = Join-Path $env:RUNNER_TEMP 'hearth installed'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $approvedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
 $results = New-Object System.Collections.Generic.List[string]
@@ -254,11 +255,14 @@ Welcome-Scenario 'accueil-entree-desactivee-gestionnaire' {
 } $false
 Clear-Entry
 
-# Parcours complet, case cochee : l'entree est ecrite comme le greffon (sans guillemets, activee).
+# Parcours complet, case cochee : l'entree est ecrite comme l'application (chemin entre guillemets, activee).
 [void](Full-Flow 'parcours-coche' $true 'mouse' $true)
 $value = Run-Value
 Expect ($null -ne $value) 'parcours case cochee : valeur Hearth presente sous Run'
-Expect (($value -match '\.exe --minimized$') -and ($value -notmatch '"')) "parcours case cochee : valeur sans guillemets, finit par --minimized ($value)"
+$installedExe = (Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1).FullName
+Expect ($dir -match ' ') "parcours case cochee : le dossier d'installation contient une espace ($dir)"
+Expect ($value -ceq ('"' + $installedExe + '" --minimized')) "parcours case cochee : valeur exacte entre guillemets, chemin avec espace ($value)"
+Expect (@((Get-Item $runKey).GetValueNames() | Where-Object { $_ -like 'Hearth*' }).Count -eq 1) 'parcours case cochee : une seule valeur Hearth sous Run (jamais de seconde entree)'
 $approved = (Get-Item $approvedKey).GetValue('Hearth', $null)
 Expect (($approved -join ',') -eq '2,0,0,0,0,0,0,0,0,0,0,0') 'parcours case cochee : active dans le Gestionnaire des taches'
 
@@ -295,8 +299,8 @@ $u = Start-Process $uninstaller -ArgumentList '/S', "_?=$dir" -PassThru
 [void]$u.WaitForExit(240000)
 Expect ($null -eq (Run-Value)) '(d) desinstallation silencieuse : valeur retiree'
 
-# (e) Chemin d'installation avec une espace : la valeur sans guillemets (celle du greffon) lance-t-elle
-# la bonne application ? CreateProcess sans nom d'application essaie les prefixes jusqu'a l'espace.
+# (e) Chemin d'installation avec une espace : la valeur ENTRE GUILLEMETS (celle qu'ecrivent l'application
+# et l'installateur) lance-t-elle la bonne application ? CreateProcess la decoupe sans ambiguite.
 Add-Type @"
 using System; using System.Runtime.InteropServices;
 public static class Launch {
@@ -311,7 +315,7 @@ $sp = Start-Process $installer -ArgumentList '/S', ('/D=' + $spaced) -PassThru
 [void]$sp.WaitForExit(240000)
 $exe = (Get-ChildItem $spaced -Filter *.exe | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1).FullName
 Expect ($null -ne $exe) "(e) installation dans un chemin avec espace : $exe"
-$command = "$exe --minimized"
+$command = """$exe"" --minimized"
 $si = New-Object Launch+SI; $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si)
 $pi = New-Object Launch+PI
 # [NullString]::Value : PowerShell convertirait $null en chaine vide (ERREUR 123 constatee sur la CI).
@@ -319,8 +323,8 @@ $ok = [Launch]::CreateProcessW([NullString]::Value, $command, [IntPtr]::Zero, [I
 $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
 Start-Sleep -Seconds 3
 $started = if ($ok) { Get-Process -Id $pi.pid -ErrorAction SilentlyContinue } else { $null }
-Note "(e) valeur sans guillemets avec espace, CreateProcess(NULL, ""$command"") : ok=$ok erreur=$err processus=$($started.Path)"
-Expect ($ok -and ($started.Path -eq $exe)) '(e) la valeur sans guillemets lance bien Hearth meme avec une espace dans le chemin (CreateProcess)'
+Note "(e) valeur entre guillemets avec espace, CreateProcess(NULL, ""$command"") : ok=$ok erreur=$err processus=$($started.Path)"
+Expect ($ok -and ($started.Path -eq $exe)) '(e) la valeur entre guillemets lance bien Hearth avec une espace dans le chemin (CreateProcess)'
 if ($started) { Stop-Process -Id $pi.pid -Force }
 $su = Start-Process (Join-Path $spaced 'uninstall.exe') -ArgumentList '/S', "_?=$spaced" -PassThru
 [void]$su.WaitForExit(120000)
