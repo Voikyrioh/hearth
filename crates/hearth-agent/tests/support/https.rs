@@ -107,6 +107,33 @@ pub async fn start_metered(env: &Env, metering: Metering) -> Agent {
     start_updating(env, metering, None).await
 }
 
+/// Comme `start_metered`, avec ce que le « noyau » dit du démarrage (mode attaque, HRT-25) : jamais le
+/// vrai `/proc`.
+pub async fn start_booted(
+    env: &Env,
+    metering: Metering,
+    boot: Arc<dyn hearth_agent::application::ports::BootInfo>,
+) -> Agent {
+    let config = AgentConfig {
+        listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        port: 0,
+        data_dir: env.dir.path().to_owned(),
+        managed: false,
+    };
+    let adapters = Adapters {
+        hasher: env.hasher.clone(),
+        clock: env.clock.clone(),
+        ids: Arc::new(UlidGen),
+        tokens: Arc::new(OsTokenGen),
+    };
+    let updating = hearth_agent::app::Updating::production(&config).expect("mise à jour");
+    let running = app::start_full(&config, &env.db, &adapters, metering, updating, boot)
+        .await
+        .expect("démarrage");
+    let addr = running.server.local_addr();
+    Agent { running, addr }
+}
+
 /// Comme `start_metered`, avec ces adaptateurs de mise à jour (faux) s'il y en a.
 pub async fn start_updating(
     env: &Env,
@@ -137,6 +164,15 @@ pub async fn start_updating(
 }
 
 impl Agent {
+    /// L'arrêt du service comme le fait `run_until` : les flux, puis les écritures d'alerte en vol et
+    /// les synthèses du journal en attente sont écrites avant de rendre la main.
+    pub async fn stop_gracefully(self) {
+        self.running
+            .run_until(std::future::ready(()))
+            .await
+            .expect("arrêt");
+    }
+
     pub async fn shutdown(self) {
         self.running.server.shutdown().await.expect("arrêt");
     }

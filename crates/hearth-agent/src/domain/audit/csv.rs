@@ -74,6 +74,7 @@ mod tests {
             outcome: OutcomeKind::Ok,
             reason: None,
             repeat_count: 0,
+            repeat_addresses: 0,
         }
     }
 

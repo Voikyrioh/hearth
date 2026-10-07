@@ -15,20 +15,22 @@ mod update;
 pub use update::{Updating, run_supervisor, update_service};
 
 use crate::application::accounts::AccountService;
+use crate::application::attack_mode::AttackModeService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    AuditFeed, AuditSink, ChallengeCrypto, Clock, CryptoError, GpuProbe, HashError, IdGen,
-    IdentityError, IdentityStore, MonotonicClock, PasswordHasher, PublicIdentity, Store,
-    StoreError, SystemProbe, TokenGen,
+    AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, CryptoError, GpuProbe, HashError,
+    IdGen, IdentityError, IdentityStore, MonotonicClock, PasswordHasher, PublicIdentity,
+    SecurityFeed, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::security::SecurityService;
 use crate::application::sessions::SessionService;
 use crate::application::trust::TrustService;
 use crate::entrypoint::account::{self, AccountCliError};
+use crate::entrypoint::attack_mode as attack_mode_cli;
 use crate::entrypoint::cli::{Cli, Command};
 use crate::entrypoint::http::{self, AppState, ServerError, ServerHandle};
 use crate::entrypoint::install::InstallCliError;
@@ -46,12 +48,12 @@ use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::security_feed::BroadcastSecurityFeed;
 use crate::infrastructure::sqlite::{
-    Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteDeviceRepo,
-    SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo,
-    SqliteStore,
+    Database, DatabaseError, SqliteAccountRepo, SqliteAttackModeRepo, SqliteAuditRepo,
+    SqliteDeviceRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteOperationRepo,
+    SqliteSessionRepo, SqliteStore,
 };
 use crate::infrastructure::system::gpu;
-use crate::infrastructure::system::{SysinfoProbe, SystemMachineInfo};
+use crate::infrastructure::system::{ProcBootInfo, SysinfoProbe, SystemMachineInfo};
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
 
 #[derive(Debug, Error)]
@@ -84,6 +86,8 @@ pub enum AppError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Crypto(#[from] CryptoError),
+    #[error(transparent)]
+    AttackMode(#[from] attack_mode_cli::AttackModeCliError),
     #[error("ouverture du port {addr} impossible : {source}")]
     Bind {
         addr: SocketAddr,
@@ -147,6 +151,8 @@ impl Metering {
 pub struct TrustParts {
     pub fingerprint: Fingerprint,
     pub monotonic: Arc<dyn MonotonicClock>,
+    /// Ce que le noyau dit du démarrage en cours (mode attaque, HRT-25).
+    pub boot: Arc<dyn BootInfo>,
 }
 
 /// Les cas d'usage assemblés sur une base ouverte.
@@ -155,6 +161,8 @@ pub struct Services {
     pub sessions: Arc<SessionService>,
     /// État de sécurité et alerte (HRT-24).
     pub security: Arc<SecurityService>,
+    /// Le mode attaque (HRT-25) ; absent des services sans horloge monotone ni démarrage du noyau.
+    pub attack: Option<Arc<AttackModeService>>,
     pub operations: Arc<OperationService>,
     pub maintenance: Arc<MaintenanceService>,
     /// Lecture et export du journal d'activité.
@@ -177,8 +185,13 @@ pub struct RunningAgent {
     pub audit_flush: BackgroundTask,
     /// Fin des épisodes d'alerte (30 minutes sans échec) : arrêtée avec l'agent.
     pub alert_sweep: BackgroundTask,
+    /// Mode attaque : reprise après la fenêtre de redémarrage, sortie automatique : arrêtée avec
+    /// l'agent.
+    pub attack_sweep: Option<BackgroundTask>,
     /// Écrit les synthèses du journal en attente à l'arrêt.
     audit_recorder: Arc<AuditRecorder>,
+    /// Les écritures d'alerte en vol, attendues à l'arrêt.
+    security: Arc<SecurityService>,
 }
 
 impl RunningAgent {
@@ -190,10 +203,15 @@ impl RunningAgent {
             sampler: _sampler,
             audit_flush: _audit_flush,
             alert_sweep: _alert_sweep,
+            attack_sweep: _attack_sweep,
             audit_recorder,
+            security,
             ..
         } = self;
         let result = server.run_until(stop).await;
+        // Les entrées de début d'alerte lancées hors du chemin des requêtes sont écrites avant de
+        // rendre la main : un arrêt du service n'en perd aucune.
+        security.settle().await;
         // Les synthèses en attente ne partent pas avec la tâche : écrites avant de rendre la main.
         audit_recorder.flush_all().await;
         result
@@ -218,7 +236,21 @@ pub fn load_identity(store: &dyn IdentityStore) -> Result<PublicIdentity, AppErr
 /// sessions se comporte comme avant, et les routes du défi et des postes répondent `404`
 /// (sous-commandes `account`, qui n'ouvrent aucune session ; tests de liaison).
 pub fn services(database: &Database, adapters: &Adapters) -> Services {
-    assemble(database, adapters, None)
+    assemble(database, adapters, None, None)
+}
+
+/// Comme `services`, avec le mode attaque sur les horloges et le noyau de cette machine : ce que la
+/// sous-commande `attack-mode` assemble (aucune identité d'appareil, aucun réseau).
+pub fn services_for_attack_mode(database: &Database, adapters: &Adapters) -> Services {
+    assemble(
+        database,
+        adapters,
+        None,
+        Some((
+            Arc::new(SystemMonotonic::new()),
+            Arc::new(ProcBootInfo::new()),
+        )),
+    )
 }
 
 /// Comme `services`, avec l'identité d'appareil (HRT-22) : le défi, la preuve de clé, l'inscription
@@ -229,13 +261,20 @@ pub fn services_with_trust(
     trust: TrustParts,
 ) -> Result<Services, AppError> {
     let crypto: Arc<dyn ChallengeCrypto> = Arc::new(HmacChallengeCrypto::new()?);
-    Ok(assemble(database, adapters, Some((trust, crypto))))
+    let attack = (trust.monotonic.clone(), trust.boot.clone());
+    Ok(assemble(
+        database,
+        adapters,
+        Some((trust, crypto)),
+        Some(attack),
+    ))
 }
 
 fn assemble(
     database: &Database,
     adapters: &Adapters,
     trust: Option<(TrustParts, Arc<dyn ChallengeCrypto>)>,
+    attack: Option<(Arc<dyn MonotonicClock>, Arc<dyn BootInfo>)>,
 ) -> Services {
     let pool = database.pool();
     let accounts_repo = Arc::new(SqliteAccountRepo::new(pool.clone()));
@@ -252,15 +291,33 @@ fn assemble(
         adapters.clock.clone(),
         trail.clone(),
     ));
-    let security = Arc::new(SecurityService::new(
+    // Un seul canal de tics : le mode attaque et l'alerte parlent au même flux.
+    let security_feed: Arc<dyn SecurityFeed> = Arc::new(BroadcastSecurityFeed::new());
+    let attack = attack.map(|(monotonic, boot)| {
+        Arc::new(AttackModeService::new(
+            Arc::new(SqliteAttackModeRepo::new(pool.clone())),
+            store.clone(),
+            adapters.clock.clone(),
+            monotonic,
+            boot,
+            adapters.ids.clone(),
+            trail.clone(),
+            security_feed.clone(),
+        ))
+    });
+    let security = SecurityService::new(
         Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
         accounts_repo.clone(),
         Arc::new(SqliteDeviceRepo::new(pool.clone())),
         store.clone(),
         adapters.clock.clone(),
         trail.clone(),
-        Arc::new(BroadcastSecurityFeed::new()),
-    ));
+        security_feed,
+    );
+    let security = Arc::new(match &attack {
+        Some(attack) => security.with_attack(attack.clone()),
+        None => security,
+    });
     let sessions = SessionService::new(
         accounts_repo.clone(),
         sessions_repo.clone(),
@@ -275,6 +332,10 @@ fn assemble(
         recorder.clone(),
     )
     .with_security(security.clone());
+    let sessions = match &attack {
+        Some(attack) => sessions.with_attack(attack.clone()),
+        None => sessions,
+    };
     let sessions = match trust {
         Some((parts, crypto)) => sessions.with_trust(Arc::new(TrustService::new(
             Arc::new(SqliteDeviceRepo::new(pool.clone())),
@@ -301,6 +362,7 @@ fn assemble(
         )),
         sessions: Arc::new(sessions),
         security,
+        attack,
         operations: Arc::new(OperationService::new(
             Arc::new(SqliteOperationRepo::new(pool.clone())),
             store.clone(),
@@ -363,6 +425,27 @@ pub async fn start_with_all(
     metering: Metering,
     updating: Updating,
 ) -> Result<RunningAgent, AppError> {
+    start_full(
+        config,
+        database,
+        adapters,
+        metering,
+        updating,
+        Arc::new(ProcBootInfo::new()),
+    )
+    .await
+}
+
+/// Comme `start_with_all`, avec ce que le noyau dit du démarrage (identifiant, temps écoulé) : les tests
+/// du mode attaque et de sa fenêtre de redémarrage en injectent un faux, jamais le vrai `/proc`.
+pub async fn start_full(
+    config: &AgentConfig,
+    database: &Database,
+    adapters: &Adapters,
+    metering: Metering,
+    updating: Updating,
+    boot: Arc<dyn BootInfo>,
+) -> Result<RunningAgent, AppError> {
     let store = FileIdentityStore::new(&config.data_dir);
     let identity = load_identity(&store)?;
     let tls = tls::server_config(&store)?;
@@ -376,6 +459,7 @@ pub async fn start_with_all(
         TrustParts {
             fingerprint: identity.fingerprint,
             monotonic: metering.monotonic.clone(),
+            boot,
         },
     )?;
     // Aucune exécution ne survit à un arrêt : les opérations restées « en cours » deviennent
@@ -383,6 +467,11 @@ pub async fn start_with_all(
     let interrupted = services.operations.interrupt_running().await?;
     if interrupted > 0 {
         tracing::warn!(interrupted, "opérations interrompues par l'arrêt précédent");
+    }
+    // Le mode attaque : l'identifiant de démarrage du noyau est noté, et la fenêtre de redémarrage
+    // s'ouvre si la machine vient de démarrer, avant d'accepter la moindre requête (BR-TRUST-020).
+    if let Some(attack) = &services.attack {
+        attack.on_start().await?;
     }
     let hello = HelloService::new(
         identity.install_id.clone(),
@@ -430,7 +519,11 @@ pub async fn start_with_all(
     let sampler = tasks::spawn_sampler(metrics, metering.period);
     let audit_flush =
         tasks::spawn_audit_flush(services.audit_recorder.clone(), tasks::AUDIT_FLUSH_PERIOD);
-    let alert_sweep = tasks::spawn_alert_sweep(services.security, tasks::ALERT_SWEEP_PERIOD);
+    let alert_sweep =
+        tasks::spawn_alert_sweep(services.security.clone(), tasks::ALERT_SWEEP_PERIOD);
+    let attack_sweep = services
+        .attack
+        .map(|attack| tasks::spawn_attack_sweep(attack, tasks::ATTACK_SWEEP_PERIOD));
     Ok(RunningAgent {
         server,
         identity,
@@ -438,7 +531,9 @@ pub async fn start_with_all(
         sampler,
         audit_flush,
         alert_sweep,
+        attack_sweep,
         audit_recorder: services.audit_recorder,
+        security: services.security,
     })
 }
 
@@ -480,6 +575,15 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
             let service = account_service(&database)?;
             let passwords = TerminalPasswords::from_env(&|name| std::env::var(name).ok());
             account::execute(&action, &service, &passwords, &mut std::io::stdout()).await?;
+            Ok(())
+        }
+        Command::AttackMode { action } => {
+            let database = Database::open(&config.data_dir).await?;
+            let services = services_for_attack_mode(&database, &Adapters::production()?);
+            let Some(attack) = services.attack else {
+                return Ok(());
+            };
+            attack_mode_cli::execute(&action, &attack, &mut std::io::stdout()).await?;
             Ok(())
         }
         Command::Install(_)

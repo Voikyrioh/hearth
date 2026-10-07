@@ -5,7 +5,11 @@
 //! est visé et, pour un administrateur, **combien** d'autres comptes le sont. Un compte qui n'est pas
 //! administrateur n'apprend jamais qu'un autre identifiant est visé : `others` n'existe pas pour lui.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
+
+use super::sessions::{DeviceProof, lenient_proof};
 
 /// L'alerte « attaque probable » sur l'identifiant de l'appelant (BR-TRUST-008).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,7 +25,7 @@ pub struct AlertInfo {
     pub others: Option<u32>,
 }
 
-/// État du mode attaque du serveur (HRT-25). Avant lui, toujours `off`.
+/// État du mode attaque du serveur (HRT-25).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttackModeState {
@@ -52,7 +56,7 @@ pub struct AttackModeInfo {
 }
 
 impl AttackModeInfo {
-    /// Le mode attaque est éteint (le seul état que l'agent rend avant HRT-25).
+    /// Le mode attaque est éteint.
     pub fn off() -> Self {
         Self {
             state: AttackModeState::Off,
@@ -61,6 +65,42 @@ impl AttackModeInfo {
             last_end: None,
         }
     }
+}
+
+/// Corps de `PUT /security/attack-mode` (HRT-25). Activer comme désactiver est **un acte
+/// d'administration** (Q14 point 3, Q16) : le corps porte le **mot de passe actuel** de
+/// l'administrateur et la **preuve de possession d'une clé inscrite pour son compte** (défi
+/// `purpose: "attack_mode"`, signature d'usage `0x03` liée au jeton et à la valeur demandée).
+///
+/// Le mot de passe et la preuve ont une valeur par défaut : un champ absent ou illisible n'est pas une
+/// erreur de lecture mais un refus typé pour un utilisateur déjà authentifié.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SetAttackModeRequest {
+    /// `true` : activer ; `false` : désactiver.
+    pub active: bool,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default, deserialize_with = "lenient_proof")]
+    pub device: Option<DeviceProof>,
+}
+
+impl fmt::Debug for SetAttackModeRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SetAttackModeRequest")
+            .field("active", &self.active)
+            .field("password", &"***")
+            .field("device", &self.device)
+            .finish()
+    }
+}
+
+/// `details.reason` de `409 POST_NOT_RECOGNIZED` (`details.field` = `device`).
+pub mod attack_mode_refusal {
+    /// Aucune preuve de clé n'accompagne la requête (client sans clé, poste non inscrit).
+    pub const PROOF_MISSING: &str = "proof_missing";
+    /// La preuve manque de validité : illisible, périmée, rejouée, d'un autre usage ou de l'autre
+    /// geste, signée par une clé qui n'est pas inscrite pour le compte de l'appelant.
+    pub const PROOF_INVALID: &str = "proof_invalid";
 }
 
 /// Ce que le client voit de la sécurité du serveur : le contenu du message `security` du flux.
@@ -141,6 +181,34 @@ mod tests {
         assert_eq!(
             serde_json::to_value(AttackModeEnd::Cli).expect("json"),
             json!("cli")
+        );
+    }
+
+    #[test]
+    fn the_attack_mode_request_reads_with_missing_fields_and_hides_the_password() {
+        let bare: SetAttackModeRequest = serde_json::from_str(r#"{"active":true}"#).expect("json");
+        assert!(bare.active);
+        assert_eq!(bare.password, "");
+        assert_eq!(bare.device, None);
+        let lenient: SetAttackModeRequest =
+            serde_json::from_str(r#"{"active":false,"password":"x","device":42}"#).expect("json");
+        assert!(!lenient.active);
+        assert_eq!(
+            lenient.device, None,
+            "une preuve illisible vaut une preuve absente"
+        );
+        let shown = format!(
+            "{:?}",
+            SetAttackModeRequest {
+                active: true,
+                password: "Correct-Horse-9".into(),
+                device: None,
+            }
+        );
+        assert!(!shown.contains("Correct-Horse-9"));
+        assert!(
+            serde_json::from_str::<SetAttackModeRequest>("{}").is_err(),
+            "active est obligatoire"
         );
     }
 }

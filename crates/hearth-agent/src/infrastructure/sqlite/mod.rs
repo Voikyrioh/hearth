@@ -6,6 +6,7 @@
 //! `CLAUDE.md` pour régénérer.
 
 mod account_repo;
+mod attack_mode_repo;
 mod audit_repo;
 mod convert;
 mod device_repo;
@@ -25,6 +26,7 @@ use thiserror::Error;
 use super::data_dir;
 
 pub use account_repo::SqliteAccountRepo;
+pub use attack_mode_repo::SqliteAttackModeRepo;
 pub use audit_repo::SqliteAuditRepo;
 pub use device_repo::SqliteDeviceRepo;
 pub use known_address_repo::SqliteKnownAddressRepo;

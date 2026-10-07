@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 
+use crate::application::attack_mode::AttackModeService;
 use crate::application::audit::AuditRecorder;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::{MetricsError, MetricsService};
@@ -20,6 +21,9 @@ pub const PURGE_PERIOD: Duration = Duration::from_secs(60 * 60);
 pub const AUDIT_FLUSH_PERIOD: Duration = Duration::from_secs(15);
 /// Période de la fin des épisodes d'alerte : un épisode fini est signalé dans la minute.
 pub const ALERT_SWEEP_PERIOD: Duration = Duration::from_secs(30);
+/// Période du mode attaque : la reprise après la fenêtre de redémarrage et la sortie automatique sont
+/// constatées dans les 10 secondes, et un changement fait par la sous-commande est dit au flux.
+pub const ATTACK_SWEEP_PERIOD: Duration = Duration::from_secs(10);
 /// Période de l'échantillonnage : un échantillon par seconde (BR-DASH-002).
 pub const SAMPLE_PERIOD: Duration = Duration::from_secs(1);
 
@@ -67,6 +71,18 @@ pub fn spawn_alert_sweep(service: Arc<SecurityService>, period: Duration) -> Bac
         async move {
             if let Err(error) = service.sweep().await {
                 tracing::warn!(%error, "fin d'alerte impossible, reprise au prochain passage");
+            }
+        }
+    })
+}
+
+/// Reprise du mode attaque après la fenêtre de redémarrage, sortie automatique (HRT-25).
+pub fn spawn_attack_sweep(service: Arc<AttackModeService>, period: Duration) -> BackgroundTask {
+    every("attack-sweep", period, move || {
+        let service = service.clone();
+        async move {
+            if let Err(error) = service.sweep().await {
+                tracing::warn!(%error, "mode attaque : passage impossible, reprise au prochain");
             }
         }
     })

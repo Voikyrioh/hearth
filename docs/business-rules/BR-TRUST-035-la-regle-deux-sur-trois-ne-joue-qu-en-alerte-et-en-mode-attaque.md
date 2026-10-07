@@ -2,7 +2,7 @@
 id: BR-TRUST-035
 domaine: TRUST
 titre: La règle « 2 sur 3 » ne s'applique qu'en alerte et en mode attaque ; en état normal aucun poste n'est ralenti ni bloqué au nom de cette règle
-statut: partielle
+statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-06-fonctionnelle-poste-de-confiance.md (BR-TRUST-035, Q13) ; contexts/hearth/tickets/hrt/HRT-22.md ; ADR-0023
 maj: 2026-10-07
@@ -13,7 +13,7 @@ maj: 2026-10-07
 ## Règle
 La règle « 2 critères sur 3 » (adresse retenue, session ou mot de passe du premier coup, clé de l'appareil) ne s'applique que dans deux états : l'**alerte** (attaque probable signalée sur l'identifiant) et le **mode attaque**. En état **normal** elle ne joue pas : une session valide fonctionne, une connexion par mot de passe se fait comme d'habitude, et aucun poste n'est ralenti ni bloqué au nom de cette règle (Voiky, Q13).
 
-> **Partielle** : HRT-24 applique la règle en **ALERTE** (BR-TRUST-001, 006) et la laisse sans effet en **NORMAL** (`judge_login(Mode::Normal, _)` rend toujours `escapes_slowdown = false, password_counts = true`, et l'identifiant n'est pas ralenti : aucun comportement ne change). Le mode attaque est HRT-25 ; l'état normal, lui, ne sera jamais touché.
+La règle s'applique en **ALERTE** (BR-TRUST-001, 006) et en **MODE ATTAQUE** (BR-TRUST-011, HRT-25), et reste sans effet en **NORMAL** (`judge_login(Mode::Normal, _)` rend toujours `escapes_slowdown = false, password_counts = true, trial = None`, et l'identifiant n'est pas ralenti : aucun comportement ne change). Le mode attaque éteint, ou suspendu (fenêtre de redémarrage, BR-TRUST-020), laisse l'état de l'identifiant décider : aucune lecture de plus, aucun refus de plus.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/trust/recognition.rs::{judge_login, mode_of}` (HRT-24) ; `application/sessions.rs::SessionService::verify` appelle `judge_login` puis `login_policy::conclude`. La clé enregistre ou date le poste **après** un succès (`application/trust.rs::TrustService::on_login`, HRT-22).
@@ -27,8 +27,9 @@ La règle « 2 critères sur 3 » (adresse retenue, session ou mot de passe du p
 - Un client qui n'envoie pas de clé (le client actuel) se connecte comme avant, dans tous les états.
 
 ## Règles liées
-- BR-TRUST-004, BR-TRUST-005, ADR-0023.
+- BR-TRUST-004, BR-TRUST-005, BR-TRUST-011, BR-TRUST-020, ADR-0023, ADR-0025.
 
 ## Historique
 - 2026-10-07 : création (HRT-22, session 2026-10-04-hearth-creation, T32).
 - 2026-10-07 : HRT-24, la règle joue en ALERTE, jamais en NORMAL (T33).
+- 2026-10-07 : HRT-25, la règle décide aussi en mode attaque ; tous les tests existants tournent sans modification de leur contenu avec le mode attaque branché et éteint (T34).

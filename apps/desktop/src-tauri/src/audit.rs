@@ -58,6 +58,8 @@ pub enum AuditOriginKindDto {
     Client,
     Cli,
     Assistant,
+    // L'agent lui-même (HRT-25) : fin d'alerte, sortie automatique du mode attaque.
+    System,
 }
 
 /// Le filtre demandé par l'interface (BR-AUDIT-014, 015, 016). Dates : secondes depuis l'époque.
@@ -158,6 +160,7 @@ impl From<&AuditEventItem> for AuditEntryDto {
                     OriginKindName::Client => AuditOriginKindDto::Client,
                     OriginKindName::Cli => AuditOriginKindDto::Cli,
                     OriginKindName::Assistant => AuditOriginKindDto::Assistant,
+                    OriginKindName::System => AuditOriginKindDto::System,
                 },
                 name: item.origin.name.clone(),
                 addr: item.origin.addr.clone(),

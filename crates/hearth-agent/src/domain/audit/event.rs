@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 use super::action::AuditAction;
 use crate::domain::accounts::{Role, Username};
 use crate::domain::text::strip_unsafe;
+use crate::domain::trust::TrialKind;
 
 /// Longueur maximale (en caractères) du nom du poste retenu.
 pub const MAX_CLIENT_NAME: usize = 128;
@@ -47,6 +48,9 @@ pub enum OriginKind {
     Client,
     CommandLine,
     Assistant,
+    /// L'agent lui-même, sans appelant : fin d'une alerte, sortie automatique, suspension et reprise
+    /// du mode attaque (HRT-25).
+    System,
 }
 
 impl OriginKind {
@@ -55,13 +59,19 @@ impl OriginKind {
             Self::Client => "client",
             Self::CommandLine => "cli",
             Self::Assistant => "assistant",
+            Self::System => "system",
         }
     }
 
     pub fn from_code(code: &str) -> Option<Self> {
-        [Self::Client, Self::CommandLine, Self::Assistant]
-            .into_iter()
-            .find(|kind| kind.code() == code)
+        [
+            Self::Client,
+            Self::CommandLine,
+            Self::Assistant,
+            Self::System,
+        ]
+        .into_iter()
+        .find(|kind| kind.code() == code)
     }
 }
 
@@ -71,6 +81,7 @@ fn describe(kind: OriginKind, name: Option<&str>, addr: Option<&str>) -> String 
     match kind {
         OriginKind::CommandLine => "ligne de commande du serveur".to_owned(),
         OriginKind::Assistant => "assistant".to_owned(),
+        OriginKind::System => "agent (automatique)".to_owned(),
         OriginKind::Client => format!(
             "{} ({})",
             addr.filter(|addr| !addr.is_empty())
@@ -91,6 +102,8 @@ pub enum Origin {
     CommandLine,
     /// L'assistant.
     Assistant,
+    /// L'agent lui-même (HRT-25) : aucun appelant, aucune adresse.
+    System,
 }
 
 impl Origin {
@@ -107,20 +120,21 @@ impl Origin {
             Self::Client { .. } => OriginKind::Client,
             Self::CommandLine => OriginKind::CommandLine,
             Self::Assistant => OriginKind::Assistant,
+            Self::System => OriginKind::System,
         }
     }
 
     pub fn name(&self) -> Option<&str> {
         match self {
             Self::Client { name, .. } => name.as_ref().map(ClientName::as_str),
-            Self::CommandLine | Self::Assistant => None,
+            Self::CommandLine | Self::Assistant | Self::System => None,
         }
     }
 
     pub fn addr(&self) -> Option<&str> {
         match self {
             Self::Client { addr, .. } => Some(addr),
-            Self::CommandLine | Self::Assistant => None,
+            Self::CommandLine | Self::Assistant | Self::System => None,
         }
     }
 
@@ -147,6 +161,11 @@ impl Actor {
     pub fn command_line() -> Self {
         Self::new(None, Origin::CommandLine)
     }
+
+    /// L'agent lui-même : pas de compte, origine « système » (HRT-25).
+    pub fn system() -> Self {
+        Self::new(None, Origin::System)
+    }
 }
 
 /// Sur quoi porte l'action.
@@ -165,6 +184,8 @@ pub enum Target {
     Device(ClientName),
     /// Début ou fin d'un épisode d'alerte sur un identifiant (HRT-24).
     Alert(AlertPhase),
+    /// L'essai unique d'un critère, en mode attaque (HRT-25) : l'adresse ou la clé, jamais leur valeur.
+    Trial(TrialKind),
 }
 
 /// Le moment de l'épisode d'alerte que l'entrée consigne.
@@ -187,6 +208,8 @@ impl Target {
             Self::Alert(AlertPhase::Ended) => {
                 Some("fin de l'alerte (levée par l'agent)".to_owned())
             }
+            Self::Trial(TrialKind::Address) => Some("essai sur l'adresse retenue".to_owned()),
+            Self::Trial(TrialKind::Key) => Some("essai sur la clé du poste".to_owned()),
         }
     }
 }
@@ -229,6 +252,10 @@ pub enum Reason {
     RolledBack,
     /// Entrée de synthèse de débordement (`repeat::RepeatFilter`) : trop de groupes différents.
     TooVaried,
+    /// Mode attaque : le poste n'est pas reconnu (session présentée seule, activation sans clé
+    /// prouvée). Jamais écrite pour une connexion : un refus de connexion garde la raison d'un mot de
+    /// passe faux, pour que rien ne distingue les états (HRT-25).
+    NotRecognized,
 }
 
 impl Reason {
@@ -268,6 +295,7 @@ impl Reason {
                 "le nouvel agent n'a pas répondu, retour à la version précédente".to_owned()
             }
             Self::TooVaried => "activité trop variée".to_owned(),
+            Self::NotRecognized => "mode attaque : poste non reconnu".to_owned(),
         }
     }
 }
@@ -423,6 +451,7 @@ impl AuditEvent {
                     (_, n) => format!("{} ({n} autres fois en 1 min)", reason.text()),
                 }),
             repeat_count: self.repeat_count,
+            repeat_addresses: self.addresses,
         }
     }
 }
@@ -448,6 +477,9 @@ pub struct AuditRecord {
     pub reason: Option<String>,
     /// Autres occurrences regroupées dans cette entrée de synthèse ; 0 pour une entrée ordinaire.
     pub repeat_count: u32,
+    /// Pour une synthèse « N tentatives depuis M adresses » : M, typé (jamais relu dans le texte de la
+    /// raison) ; 0 pour toute autre entrée.
+    pub repeat_addresses: u32,
 }
 
 impl AuditRecord {

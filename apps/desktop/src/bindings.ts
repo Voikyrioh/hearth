@@ -388,7 +388,7 @@ export type AuditOriginDto = {
 	text: string,
 };
 
-export type AuditOriginKindDto = "client" | "cli" | "assistant";
+export type AuditOriginKindDto = "client" | "cli" | "assistant" | "system";
 
 export type AuditOutcomeDto = "ok" | "denied" | "failed";
 

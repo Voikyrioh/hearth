@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE attack_mode\n             SET active = 0, ended_at = ?, ended_how = ?, ended_boot_id = ?, ended_uptime_s = ?,\n                 window_boot_id = NULL\n             WHERE id = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "f337293bc449a57b9bed3fd1e9de5125885f28e7efa12f52e3e9d34019ceb931"
+}

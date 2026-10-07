@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO attack_trials (activation_id, account_id, kind, subject, used_at, outcome)\n                 VALUES (?, ?, ?, ?, ?, 'succeeded')\n                 ON CONFLICT (activation_id, account_id, kind, subject) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "383bf3a6393b42bb90fd7cf990b7a2307e9b8337a69f5224f09a6fcb4dc94a2e"
+}

@@ -9,7 +9,7 @@ import type { AuditEntryDto, AuditFilterDto, AuditLiveEvent, AuditPageDto } from
  */
 
 export type AuditOutcome = "ok" | "denied" | "failed";
-export type AuditOriginKind = "client" | "cli" | "assistant";
+export type AuditOriginKind = "client" | "cli" | "assistant" | "system";
 
 /** Types d'action du filtre (la liste fermée de la spec). */
 export const AUDIT_KINDS = ["login_ok", "login_denied", "accounts", "update", "denied"] as const;

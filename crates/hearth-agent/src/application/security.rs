@@ -19,6 +19,7 @@ use tokio::task::JoinHandle;
 use time::{Duration, OffsetDateTime};
 
 use super::accounts::AccountView;
+use super::attack_mode::{AttackModeService, AttackStatus};
 use super::audit::{AuditTrail, Pending};
 use super::ports::{
     AccountRepo, Clock, DeviceRepo, LoginAttemptRepo, SecurityFeed, Store, StoreError,
@@ -48,6 +49,9 @@ pub struct SecuritySnapshot {
     pub alert: AlertState,
     /// La session a été ouverte ou prouvée par la clé d'un poste inscrit.
     pub device_proven: bool,
+    /// Le mode attaque du serveur (HRT-25) : tout compte authentifié le voit, il n'est reconnu que s'il
+    /// a deux critères.
+    pub attack: AttackStatus,
 }
 
 pub struct SecurityService {
@@ -63,6 +67,8 @@ pub struct SecurityService {
     existing: Mutex<Option<(Instant, Arc<Vec<String>>)>>,
     /// Les écritures d'alerte lancées hors du chemin des requêtes (voir `spawn_signal`).
     pending: Mutex<Vec<JoinHandle<()>>>,
+    /// Le mode attaque (HRT-25). Absent : toujours éteint.
+    attack: Option<Arc<AttackModeService>>,
 }
 
 /// Durée de vie de la liste des comptes gardée en mémoire par `state_for`.
@@ -89,7 +95,15 @@ impl SecurityService {
             feed,
             existing: Mutex::new(None),
             pending: Mutex::new(Vec::new()),
+            attack: None,
         }
+    }
+
+    /// Ajoute le mode attaque à ce que l'état de sécurité dit (HRT-25).
+    #[must_use]
+    pub fn with_attack(mut self, attack: Arc<AttackModeService>) -> Self {
+        self.attack = Some(attack);
+        self
     }
 
     /// Les clés (`AttemptKey::identifier`) des comptes existants, relues au plus toutes les 5 s.
@@ -136,7 +150,9 @@ impl SecurityService {
             let Some(account) = account else { return };
             let written = match change {
                 AlertChange::Started { .. } => service.alert_started(&account, origin, wait).await,
-                AlertChange::Ended => service.alert_ended(&account, origin).await,
+                // La fin d'un épisode est levée par l'agent, pas par l'appareil dont la tentative l'a
+                // constatée : origine « système » (HRT-25, suivi de la revue de la PR #26).
+                AlertChange::Ended => service.alert_ended(&account, Origin::System).await,
             };
             if let Err(error) = written {
                 tracing::error!(%error, "entrée d'alerte non écrite");
@@ -202,9 +218,14 @@ impl SecurityService {
             None
         };
         let device_proven = self.devices.of_session(session).await?.is_some();
+        let attack = match &self.attack {
+            Some(attack) => attack.status().await?,
+            None => AttackStatus::off(),
+        };
         Ok(SecuritySnapshot {
             alert: AlertState { own, since, others },
             device_proven,
+            attack,
         })
     }
 
@@ -291,7 +312,7 @@ impl SecurityService {
                         &mut *tx,
                         AuditEvent::new(
                             now,
-                            Actor::new(Some(account.username.clone()), Origin::client(None, "")),
+                            Actor::new(Some(account.username.clone()), Origin::System),
                             AuditAction::SecurityAlert,
                             Target::Alert(AlertPhase::Ended),
                             Outcome::Succeeded,

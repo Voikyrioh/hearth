@@ -15,13 +15,14 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use super::accounts::AccountView;
+use super::attack_mode::{AttackModeService, AttackStatus};
 use super::audit::{AuditTrail, Pending};
 use super::ports::{
     AccountRepo, AuditSink, Clock, HashError, IdGen, KnownAddressRepo, LoginAttemptRepo,
     PasswordHasher, SessionRepo, Store, StoreError, TokenGen, TokenGenError, UnitOfWork,
 };
 use super::security::SecurityService;
-use super::trust::{DeviceLogin, RemoveError, TrustService, VerifiedKey};
+use super::trust::{AttackProofError, DeviceLogin, RemoveError, TrustService, VerifiedKey};
 use crate::domain::accounts::{Account, Username};
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
 use crate::domain::identifier_slowdown::{self, AlertChange, alert_change};
@@ -33,7 +34,11 @@ use crate::domain::login_policy::{
 use crate::domain::secret::Secret;
 use crate::domain::session_token::SessionToken;
 use crate::domain::sessions::{Session, SessionEnd, SessionId, check, expiry_from, renewed_expiry};
-use crate::domain::trust::{LoginCriteria, judge_login, mode_of};
+use crate::domain::trust::DeviceId;
+use crate::domain::trust::attack_mode::{Effective, EndHow};
+use crate::domain::trust::{
+    LoginCriteria, Mode, SessionStanding, TrialKind, judge_login, judge_session, mode_of,
+};
 
 /// Qui se connecte : le poste (`X-Hearth-Client`) et l'adresse de la connexion.
 #[derive(Debug, Clone)]
@@ -87,6 +92,9 @@ struct Passed {
     account: Account,
     now: OffsetDateTime,
     key: Option<VerifiedKey>,
+    /// Les entrées déjà écrites dans la transaction (l'essai unique du mode attaque) : diffusées une
+    /// fois la transaction validée.
+    journal: Pending,
 }
 
 /// Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de passe
@@ -137,8 +145,44 @@ pub enum AuthError {
     /// La session n'est plus utilisable : expirée, ou fermée par l'administration.
     #[error("La session n'est plus valable")]
     Ended(SessionEnd),
+    /// Mode attaque : la session est valide mais présentée seule (ni adresse retenue ni clé prouvée).
+    /// Refusée comme une session expirée, sans être détruite (Q12, Q14 point 2, BR-TRUST-013).
+    #[error("La session n'est pas reconnue depuis ce poste")]
+    NotRecognized,
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// Pourquoi le mode attaque n'a pas été changé (HRT-25).
+#[derive(Debug, Error)]
+pub enum AttackModeError {
+    /// Un compte qui ne gère pas les comptes.
+    #[error("Seul un administrateur peut changer le mode attaque")]
+    Forbidden,
+    /// Aucune preuve de clé n'accompagne la requête.
+    #[error("Aucune preuve de clé n'accompagne la requête")]
+    ProofMissing,
+    /// La preuve n'est pas celle d'une clé inscrite du compte, pour ce geste.
+    #[error("La preuve de la clé de ce poste est invalide")]
+    ProofInvalid,
+    /// Le mot de passe est refusé par le chemin de la connexion (mêmes compteurs, même ralentissement).
+    #[error(transparent)]
+    Password(Box<LoginError>),
+    /// L'agent n'a pas le mode attaque (sans identité d'appareil).
+    #[error("Le mode attaque n'est pas disponible")]
+    Unavailable,
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+impl From<AttackProofError> for AttackModeError {
+    fn from(error: AttackProofError) -> Self {
+        match error {
+            AttackProofError::Missing => Self::ProofMissing,
+            AttackProofError::Invalid => Self::ProofInvalid,
+            AttackProofError::Store(error) => Self::Store(error),
+        }
+    }
 }
 
 /// Ce que l'on sait de la session qui a présenté le jeton.
@@ -169,6 +213,8 @@ pub struct SessionService {
     trust: Option<Arc<TrustService>>,
     /// L'alerte « attaque probable » (HRT-24). Absente : rien n'est signalé, le reste est identique.
     security: Option<Arc<SecurityService>>,
+    /// Le mode attaque (HRT-25). Absent : le mode n'existe pas, le comportement est celui d'avant.
+    attack: Option<Arc<AttackModeService>>,
 }
 
 /// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, une file
@@ -282,7 +328,21 @@ impl SessionService {
             turns: Turns::default(),
             trust: None,
             security: None,
+            attack: None,
         }
+    }
+
+    /// Ajoute le mode attaque : la règle devient « qui passe et qui est bloqué » quand il est actif
+    /// (HRT-25).
+    #[must_use]
+    pub fn with_attack(mut self, attack: Arc<AttackModeService>) -> Self {
+        self.attack = Some(attack);
+        self
+    }
+
+    /// Le mode attaque, s'il est configuré.
+    pub fn attack(&self) -> Option<&Arc<AttackModeService>> {
+        self.attack.as_ref()
     }
 
     /// Ajoute l'identité d'appareil : le défi, la preuve de clé, l'inscription des postes.
@@ -341,7 +401,7 @@ impl SessionService {
     ) -> Result<LoginOutcome, LoginError> {
         let turn = self.take_turn(client).await?;
         let result = match self
-            .verify(username, password, client, device, Purpose::Login)
+            .verify(username, password, client, device, None, Purpose::Login)
             .await
         {
             Ok(passed) => self.open_session(passed, client).await,
@@ -349,7 +409,23 @@ impl SessionService {
         };
         drop(turn);
         trace_refusal(&result, client);
+        self.note_refusal(&result);
         result
+    }
+
+    /// Une tentative refusée (mot de passe faux, attente, file pleine) repousse la sortie automatique
+    /// du mode attaque (BR-TRUST-019).
+    fn note_refusal<T>(&self, result: &Result<T, LoginError>) {
+        if let Some(attack) = &self.attack
+            && matches!(
+                result,
+                Err(LoginError::InvalidCredentials
+                    | LoginError::TooManyAttempts { .. }
+                    | LoginError::Busy)
+            )
+        {
+            attack.note_refusal();
+        }
     }
 
     /// Confirme le mot de passe d'un compte pour un acte d'administration (retrait d'un poste de
@@ -363,9 +439,32 @@ impl SessionService {
         password: Secret,
         client: &ClientInfo,
     ) -> Result<(), LoginError> {
+        self.confirm_password_proven(username, password, client, None)
+            .await
+    }
+
+    /// Comme `confirm_password`, quand la preuve de la clé d'un poste inscrit du compte vient d'être
+    /// vérifiée par l'acte lui-même (retrait d'un poste, changement du mode attaque) : en mode attaque,
+    /// la clé et l'adresse retenue font deux critères et le mot de passe n'est pas jugé comme celui d'un
+    /// poste qui n'en aurait qu'un (l'administrateur ne consomme pas d'essai unique, et ne s'enferme pas
+    /// dehors en tapant mal une fois).
+    async fn confirm_password_proven(
+        &self,
+        username: &str,
+        password: Secret,
+        client: &ClientInfo,
+        proven: Option<VerifiedKey>,
+    ) -> Result<(), LoginError> {
         let turn = self.take_turn(client).await?;
         let result = match self
-            .verify(username, password, client, None, Purpose::Confirmation)
+            .verify(
+                username,
+                password,
+                client,
+                None,
+                proven,
+                Purpose::Confirmation,
+            )
             .await
         {
             // Les compteurs sont déjà écrits (le succès remet à zéro celui du couple, comme une
@@ -375,6 +474,7 @@ impl SessionService {
         };
         drop(turn);
         trace_refusal(&result, client);
+        self.note_refusal(&result);
         result
     }
 
@@ -414,6 +514,7 @@ impl SessionService {
         password: Secret,
         client: &ClientInfo,
         device: Option<&DeviceProof>,
+        proven: Option<VerifiedKey>,
         purpose: Purpose,
     ) -> Result<Passed, LoginError> {
         let keys = Keys {
@@ -440,8 +541,10 @@ impl SessionService {
 
         // 1 bis. Preuve de la clé d'appareil, s'il y en a une : vérifiée sous la clé FOURNIE, donc
         //    le même travail que l'identifiant existe ou non (HRT-22, absence d'oracle).
-        let key: Option<VerifiedKey> = match (device, &self.trust) {
-            (Some(proof), Some(trust)) => {
+        let key: Option<VerifiedKey> = match (proven, device, &self.trust) {
+            // Déjà vérifiée par l'acte d'administration qui confirme son mot de passe ici.
+            (Some(key), _, _) => Some(key),
+            (None, Some(proof), Some(trust)) => {
                 trust.verify(proof, Binding::Login, username, &client.addr)
             }
             _ => None,
@@ -475,15 +578,29 @@ impl SessionService {
             let list = tx.known_addresses().of_username(&keys.username).await?;
             is_known(&list, &client.addr, now)
         };
-        let key_recognized = match &key {
+        // Le poste dont la clé est inscrite pour CE compte (jamais pour un compte absent).
+        let key_device: Option<DeviceId> = match &key {
             Some(key) => match tx.devices().find_by_key(&key.key_id).await? {
-                Some(enrolled) => {
-                    target_id.as_ref() == Some(&enrolled.account)
-                        && bool::from(enrolled.public_key.ct_eq(&key.public_key))
+                Some(enrolled)
+                    if target_id.as_ref() == Some(&enrolled.account)
+                        && bool::from(enrolled.public_key.ct_eq(&key.public_key)) =>
+                {
+                    Some(enrolled.id)
                 }
-                None => false,
+                _ => None,
             },
-            None => false,
+            None => None,
+        };
+        let key_recognized = key_device.is_some();
+        // Le mode attaque : une lecture de la ligne unique, seulement si le service existe. Éteint ou
+        // suspendu (fenêtre de redémarrage), c'est le régime de l'identifiant qui s'applique.
+        let attack_row = match &self.attack {
+            Some(_) => Some(tx.attack_mode().load().await?),
+            None => None,
+        };
+        let attacking = match (&self.attack, &attack_row) {
+            (Some(service), Some(row)) => service.effective_of(row) == Effective::Active,
+            _ => false,
         };
         let before = LoginState {
             pair: tx.login_attempts().get(&keys.pair).await?,
@@ -498,12 +615,39 @@ impl SessionService {
         };
         // La règle « 2 critères sur 3 » (ADR-0024) : fonction pure, deux booléens. « Du premier
         // coup » : le compteur du couple est à zéro.
+        // L'essai unique : seulement quand UN critère est présenté seul (mode attaque). Lu dans la
+        // transaction `BEGIN IMMEDIATE` : deux tentatives simultanées ne le consomment pas deux fois.
+        let trial_subject: Option<(TrialKind, String)> = match (retained, &key_device) {
+            (true, None) => Some((TrialKind::Address, canonical(&client.addr))),
+            (false, Some(device)) => Some((TrialKind::Key, device.to_string())),
+            _ => None,
+        };
+        let activation = attack_row
+            .as_ref()
+            .and_then(|row| row.activation_id.clone());
+        let trial_used = match (&trial_subject, &activation, &target_id) {
+            (Some((kind, subject)), Some(activation), Some(account)) if attacking => {
+                tx.attack_mode()
+                    .trial_used(activation, account, *kind, subject)
+                    .await?
+            }
+            // Un mode actif sans identifiant d'activation n'existe pas (l'activation écrit les deux) :
+            // si la ligne l'était quand même, aucun essai n'est jamais donné (fermé, jamais ouvert).
+            (Some(_), None, _) if attacking => true,
+            _ => false,
+        };
+        let mode = if attacking {
+            Mode::Attack
+        } else {
+            mode_of(&before.identifier, now)
+        };
         let standing = judge_login(
-            mode_of(&before.identifier, now),
+            mode,
             LoginCriteria {
                 address: retained,
                 key: key_recognized,
                 first_try: before.pair.failures == 0,
+                trial_used,
             },
         );
         let before = LoginState {
@@ -549,6 +693,42 @@ impl SessionService {
         }
         let alert = alert_change(&before.identifier, &after.identifier);
 
+        // L'essai unique : seul un essai RATÉ le consomme (BR-TRUST-015) ; un essai réussi laisse le poste
+        // reconnu (BR-TRUST-014). Écrit dans la transaction de la tentative, jamais pour une tentative
+        // refusée avant d'avoir été comptée (`Blocked`) ; consigné au journal quand la ligne change.
+        let mut journal = Pending::default();
+        if let (Some(kind), Some((_, subject)), Some(activation), Some(account_id)) =
+            (standing.trial, &trial_subject, &activation, &target_id)
+            && !matches!(verdict, Verdict::Blocked(_))
+        {
+            let succeeded = matches!(verdict, Verdict::Granted);
+            let changed = tx
+                .attack_mode()
+                .record_trial(activation, account_id, kind, subject, now, succeeded)
+                .await?;
+            if changed {
+                journal
+                    .record(
+                        &mut *tx,
+                        AuditEvent::new(
+                            now,
+                            Actor::new(
+                                targeted.clone(),
+                                Origin::client(Some(&client.name), &client.addr),
+                            ),
+                            AuditAction::AttackModeTrial,
+                            Target::Trial(kind),
+                            if succeeded {
+                                Outcome::Succeeded
+                            } else {
+                                Outcome::Denied(Reason::InvalidCredentials)
+                            },
+                        ),
+                    )
+                    .await?;
+            }
+        }
+
         match verdict {
             Verdict::Granted => {}
             Verdict::Blocked(retry_after) => {
@@ -558,6 +738,7 @@ impl SessionService {
             }
             Verdict::Slowed(retry_after) => {
                 tx.commit().await?;
+                journal.publish(&self.trail);
                 self.journal_refusal(
                     purpose,
                     targeted,
@@ -571,6 +752,7 @@ impl SessionService {
             }
             Verdict::Failed(wait) => {
                 tx.commit().await?;
+                journal.publish(&self.trail);
                 // Journal (BR-AUDIT-003, 005, 006, 007), une fois les compteurs validés : la
                 // tentative refusée, avec le compte visé seulement s'il existe (la raison est la
                 // même que l'identifiant existe ou non, et l'identifiant saisi n'est jamais
@@ -578,8 +760,13 @@ impl SessionService {
                 // regroupement des refus** (`AuditSink`) : une rafale de refus depuis une même
                 // adresse n'écrit qu'un premier refus et des synthèses, et ne chasse pas
                 // l'historique du journal.
+                // Mode attaque : une connexion bloquée sans essai (aucun critère, ou essai déjà raté)
+                // porte la raison « poste non reconnu » au journal (conception 5.9, lisible des seuls
+                // administrateurs) ; la réponse au client, elle, est celle d'un mot de passe faux.
                 let reason = if Username::parse(username).is_err() {
                     Reason::InvalidIdentifier
+                } else if attacking && !standing.password_counts {
+                    Reason::NotRecognized
                 } else {
                     Reason::InvalidCredentials
                 };
@@ -629,6 +816,7 @@ impl SessionService {
             account,
             now,
             key,
+            journal,
         })
     }
 
@@ -645,6 +833,7 @@ impl SessionService {
             account,
             now,
             key,
+            mut journal,
         } = passed;
         let remembered = tx.known_addresses().of_account(&account.id).await?;
         let remembered = known_address::learn(remembered, &client.addr, now);
@@ -664,7 +853,6 @@ impl SessionService {
         };
         tx.sessions().insert(&session).await?;
         tx.accounts().record_login(&account.id, now).await?;
-        let mut journal = Pending::default();
         let succeeded = AuditEvent::new(
             now,
             Actor::new(
@@ -801,12 +989,70 @@ impl SessionService {
                 &client.addr,
             )
             .await?;
-        self.confirm_password(session.account.username.as_str(), password, client)
-            .await
-            .map_err(|error| RemoveError::Password(Box::new(error)))?;
+        self.confirm_password_proven(
+            session.account.username.as_str(),
+            password,
+            client,
+            Some(proven.clone()),
+        )
+        .await
+        .map_err(|error| RemoveError::Password(Box::new(error)))?;
         trust
             .remove_proven(&session.account.id, &session.session_id, id, by, &proven)
             .await
+    }
+
+    /// Active ou désactive le mode attaque : **un acte d'administration** (Q14 point 3, Q16). Un
+    /// administrateur, la preuve de possession d'une clé INSCRITE pour son compte (usage `0x03`, liée au
+    /// jeton et à la valeur demandée) ET son mot de passe actuel, par le chemin de la connexion (mêmes
+    /// compteurs, même ralentissement).
+    ///
+    /// Ordre : (1) le rôle ; (2) la preuve, **avant** tout mot de passe : une session volée ne devine
+    /// rien ; (3) le mot de passe ; (4) le changement, dans une transaction avec son entrée de journal ;
+    /// (5) le défi n'est consommé que si le changement a réussi. Sans preuve valide, rien n'est écrit.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn set_attack_mode(
+        &self,
+        session: &CurrentSession,
+        token: &str,
+        active: bool,
+        password: Secret,
+        proof: Option<&DeviceProof>,
+        client: &ClientInfo,
+        by: &Actor,
+    ) -> Result<AttackStatus, AttackModeError> {
+        let (Some(trust), Some(attack)) = (self.trust.as_ref(), self.attack.as_ref()) else {
+            return Err(AttackModeError::Unavailable);
+        };
+        if !session.account.role.can_manage_accounts() {
+            return Err(AttackModeError::Forbidden);
+        }
+        let token_hash = SessionToken::parse(token)
+            .map_err(|_| AttackModeError::ProofInvalid)?
+            .hash();
+        let key = trust
+            .verify_attack_mode(
+                &session.account.id,
+                session.account.username.as_str(),
+                token_hash.as_bytes(),
+                active,
+                proof,
+                &client.addr,
+            )
+            .await?;
+        self.confirm_password_proven(
+            session.account.username.as_str(),
+            password,
+            client,
+            Some(key.clone()),
+        )
+        .await
+        .map_err(|error| AttackModeError::Password(Box::new(error)))?;
+        let status = attack.change(active, by, EndHow::Manual).await?;
+        // Le retour de `consume` est ignoré à dessein : le changement est fait, un défi déjà pris par une
+        // requête concurrente n'ouvre plus rien (l'acte est idempotent).
+        trust.consume(&session.account.id, &key);
+        Ok(status)
     }
 
     /// Reconnaît la session du jeton présenté et repousse son expiration (expiration
@@ -874,6 +1120,28 @@ impl SessionService {
             ),
             _ => None,
         };
+        // Mode attaque : une session ne sert que si le poste réunit un deuxième critère, l'adresse retenue
+        // ou une clé prouvée. Présentée seule, elle est refusée comme une session expirée, sans essai,
+        // et sans être détruite (Q12). Éteint ou suspendu : aucune lecture de plus.
+        let attacking = match &self.attack {
+            Some(attack) => attack.effective().await? == Effective::Active,
+            None => false,
+        };
+        let retained = if attacking {
+            match addr {
+                Some(addr) => is_known(&self.known.of_account(&account.id).await?, addr, now),
+                None => false,
+            }
+        } else {
+            true
+        };
+        // Sans preuve, la décision est prise avant toute écriture.
+        if attacking
+            && key.is_none()
+            && judge_session(Mode::Attack, retained, false) == SessionStanding::Refused
+        {
+            return Err(self.refuse_session(&account.username, addr).await);
+        }
         let renewal = renewed_expiry(session.last_seen_at, now);
         let expires_at = if renewal.is_some() || key.is_some() {
             let mut tx = self.store.begin().await?;
@@ -888,6 +1156,14 @@ impl SessionService {
                 }
                 _ => false,
             };
+            // Une preuve qui n'a pas servi (clé non inscrite pour ce compte, défi déjà pris) ne fait pas un
+            // deuxième critère : la transaction est abandonnée, rien n'est renouvelé ni appris.
+            if attacking
+                && judge_session(Mode::Attack, retained, proved) == SessionStanding::Refused
+            {
+                drop(tx);
+                return Err(self.refuse_session(&account.username, addr).await);
+            }
             // Usage d'une session valide depuis une adresse déjà retenue : sa durée est repoussée,
             // rien n'est appris. Aussi quand la preuve présentée n'a pas servi (clé non inscrite,
             // défi déjà pris) : la session, elle, est valide.
@@ -909,6 +1185,26 @@ impl SessionService {
             session_id: session.id.clone(),
             expires_at,
         })
+    }
+
+    /// Une session valide présentée seule en mode attaque : la tentative est consignée (regroupée, jamais
+    /// une entrée par requête), la sortie automatique repart de zéro, et l'appelant reçoit la réponse
+    /// d'une session expirée (`AuthError::NotRecognized`). La session n'est ni supprimée ni marquée.
+    async fn refuse_session(&self, account: &Username, addr: Option<&str>) -> AuthError {
+        let addr = addr.unwrap_or_default();
+        tracing::warn!(%addr, reason = "session_alone", "session refusée en mode attaque");
+        if let Some(attack) = &self.attack {
+            attack.note_refusal();
+        }
+        self.sink
+            .record(
+                Actor::new(Some(account.clone()), Origin::client(None, addr)),
+                AuditAction::SessionRefused,
+                Target::None,
+                Outcome::Denied(Reason::NotRecognized),
+            )
+            .await;
+        AuthError::NotRecognized
     }
 
     /// Déconnexion explicite : supprime la session courante. `by` : le compte et l'origine de la

@@ -10,15 +10,15 @@ use hearth_agent::infrastructure::logging;
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    // `fingerprint` et `account` écrivent leur résultat sur la sortie standard : journaux à part.
+    // `fingerprint`, `account` et `attack-mode` écrivent leur résultat sur la sortie standard : journaux à part.
     let command = cli.command();
-    // `install`, `uninstall` et `account` parlent à la personne qui les a tapées : journaux à part
+    // `install`, `uninstall`, `account` et `attack-mode` parlent à la personne qui les a tapées : journaux à part
     // (sortie d'erreur), et muets pour l'installation.
     let is_install = matches!(command, Command::Install(_) | Command::Uninstall(_));
     let is_account = is_install
         || matches!(
             command,
-            Command::Account { .. } | Command::HashPassword { .. }
+            Command::Account { .. } | Command::AttackMode { .. } | Command::HashPassword { .. }
         );
     if is_install {
         logging::init_quiet(true);

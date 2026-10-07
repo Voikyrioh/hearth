@@ -60,6 +60,22 @@ pub enum Command {
         #[command(subcommand)]
         action: AccountAction,
     },
+    /// Le mode attaque, directement sur le serveur, sans réseau : voir son état, ou le désactiver (la
+    /// voie de secours d'un administrateur qui n'a pas de clé inscrite, BR-TRUST-027).
+    AttackMode {
+        #[command(subcommand)]
+        action: AttackModeAction,
+    },
+}
+
+/// Opérations sur le mode attaque. Il ne s'active que depuis un client, avec la clé d'un poste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Subcommand)]
+pub enum AttackModeAction {
+    /// Affiche l'état : éteint, actif ou suspendu (avec le temps restant), et l'identifiant de
+    /// l'activation.
+    Status,
+    /// Désactive le mode attaque (consigné au journal, comme depuis un client).
+    Off,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]

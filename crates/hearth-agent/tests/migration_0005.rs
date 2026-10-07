@@ -114,7 +114,8 @@ async fn the_migration_only_adds_and_keeps_every_row_of_a_0004_database() {
     let pool = database_at_0004(&dir.path().join("hearth.db")).await;
     let before = schema(&pool).await;
 
-    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    // La 0005 seule : les migrations suivantes (0006, HRT-25) ont leur propre test.
+    migrator_up_to(5).run(&pool).await.unwrap();
     let after = schema(&pool).await;
 
     // Additive : rien de ce que la 0004 contenait n'a disparu ni changé de type.
