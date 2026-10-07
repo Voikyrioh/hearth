@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use hearth_proto::api::reauth::ReauthMode;
 use time::OffsetDateTime;
 
 use super::StoreError;
@@ -15,6 +16,10 @@ pub trait AccountRepo: Send + Sync {
 
     /// Tous les comptes, du plus ancien au plus récent.
     async fn list(&self) -> Result<Vec<Account>, StoreError>;
+
+    /// Le réglage de fréquence du mot de passe du compte (HRT-28) ; `Window` (le défaut) pour un compte
+    /// inconnu : la décision d'accès ne s'appuie jamais sur l'existence du compte.
+    async fn reauth_mode(&self, id: &AccountId) -> Result<ReauthMode, StoreError>;
 }
 
 /// Les comptes vus de l'intérieur d'une unité de travail : lectures qui servent à décider et
@@ -48,4 +53,8 @@ pub trait AccountTx: Send {
 
     /// Supprime le compte (ses sessions suivent).
     async fn delete(&mut self, id: &AccountId) -> Result<(), StoreError>;
+
+    /// Change le réglage de fréquence du mot de passe du compte (HRT-28).
+    async fn set_reauth_mode(&mut self, id: &AccountId, mode: ReauthMode)
+    -> Result<(), StoreError>;
 }
