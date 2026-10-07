@@ -52,6 +52,9 @@ pub enum ChallengePurpose {
     Session,
     /// Activation ou désactivation du mode attaque.
     AttackMode,
+    /// Retrait d'un poste de confiance (`DELETE /me/devices/{id}`) : un usage distinct de la connexion
+    /// et du flux.
+    DeviceRemoval,
 }
 
 /// Corps de `POST /sessions/challenge` (route publique, sans effet, sans lecture en base).
@@ -245,6 +248,7 @@ mod tests {
             (ChallengePurpose::Login, "login"),
             (ChallengePurpose::Session, "session"),
             (ChallengePurpose::AttackMode, "attack_mode"),
+            (ChallengePurpose::DeviceRemoval, "device_removal"),
         ] {
             assert_eq!(
                 serde_json::to_string(&purpose).unwrap(),
