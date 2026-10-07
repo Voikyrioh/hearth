@@ -237,7 +237,12 @@ async fn the_wizard_registers_only_on_a_successful_login_then_remembers_forgets_
     assert_eq!((listed[0].color, listed[0].role), (2, RoleDto::Admin));
     assert_eq!(
         rig.secrets.keys(),
-        vec![format!("Hearth/{id}"), format!("Hearth/{id}/token")]
+        // HRT-23 : la clé d'appareil est créée à la première connexion réussie, rangée avec les autres.
+        vec![
+            format!("Hearth/{id}"),
+            format!("Hearth/{id}/device-key"),
+            format!("Hearth/{id}/token")
+        ]
     );
     let password = rig.secrets.0.lock().unwrap()[&format!("Hearth/{id}")].clone();
     assert_eq!(password, PASSWORD.as_bytes());
@@ -293,7 +298,14 @@ async fn the_wizard_registers_only_on_a_successful_login_then_remembers_forgets_
         .forget_credentials(&id, &*rig.sink)
         .await
         .unwrap();
-    assert_eq!(rig.secrets.keys(), vec![format!("Hearth/{id}/token")]);
+    // Oublier le mot de passe laisse le jeton et la clé d'appareil (HRT-23) : seul « supprimer le serveur » efface tout.
+    assert_eq!(
+        rig.secrets.keys(),
+        vec![
+            format!("Hearth/{id}/device-key"),
+            format!("Hearth/{id}/token")
+        ]
+    );
     assert!(!rig.runtime.servers()[0].remember);
 
     // Suppression : plus aucun secret, plus de serveur, plus d'état (BR-CONN-010).

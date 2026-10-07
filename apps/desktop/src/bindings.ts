@@ -100,6 +100,13 @@ export const commands = {
 	closeAccountSessions: (serverId: string, accountId: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("close_account_sessions", { serverId, accountId })),
 	/**  Supprime un compte. `confirmation` : l'identifiant retapé quand on supprime son propre compte. */
 	deleteAccount: (serverId: string, accountId: string, confirmation: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("delete_account", { serverId, accountId, confirmation })),
+	/**  Les postes de confiance du compte de la session (lecture, session seule). */
+	listTrustedDevices: (serverId: string) => typedError<TrustedDevicesDto, LinkFailure>(__TAURI_INVOKE("list_trusted_devices", { serverId })),
+	/**
+	 *  Retire un poste de confiance : acte d'administration (mot de passe actuel ET preuve de la clé de
+	 *  ce PC, Q16). `device_id` est l'identifiant rendu par la liste.
+	 */
+	removeTrustedDevice: (serverId: string, deviceId: string, password: string) => typedError<DeviceRemovalOutcome, LinkFailure>(__TAURI_INVOKE("remove_trusted_device", { serverId, deviceId, password })),
 	/**
 	 *  L'état de la mise à jour de l'agent d'un serveur : version, installation gérée, mise à jour en
 	 *  cours, dernier résultat, et la version disponible dans le flux de versions. Une lecture : sans
@@ -412,6 +419,42 @@ export type CpuInfoDto = {
 	frequencyMhz: number | null,
 };
 
+/**  Issue d'un retrait de poste. */
+export type DeviceRemovalOutcome = 
+/**  L'agent a retiré le poste (et fermé ses sessions). */
+{ kind: "done" } | { kind: "refused"; refusal: DeviceRemovalRefusal } | 
+/**
+ *  Le lien est tombé avant la réponse : on ne sait pas, l'action n'est JAMAIS rejouée. L'issue
+ *  arrive par `link://operation` sous cet identifiant ; la liste se relit au retour du lien.
+ */
+{ kind: "unknown"; op_id: string };
+
+/**  Pourquoi un retrait est refusé. Sans texte : l'interface choisit le message d'après `kind`. */
+export type DeviceRemovalRefusal = 
+/**  Le mot de passe actuel est faux. */
+{ kind: "wrong_password" } | 
+/**  C'est le poste d'où part la demande : il ne se retire pas depuis lui-même. */
+{ kind: "current_device" } | 
+/**
+ *  Ce PC n'a pas de clé inscrite (client mis à jour sans reconnexion par mot de passe, coffre
+ *  sans clé) : il ne peut rien retirer.
+ */
+{ kind: "no_device_key" } | 
+/**  L'agent n'a pas accepté la preuve de la clé (défi périmé ou rejoué, autre poste). */
+{ kind: "proof_refused" } | 
+/**  Le poste n'existe plus (déjà retiré ailleurs) : la liste se relit. */
+{ kind: "not_found" } | 
+/**  Trop d'essais de mot de passe : réessayer plus tard. */
+{ kind: "too_many_attempts"; retry_after_s: number } | 
+/**  L'agent est saturé : réessayer dans un instant. */
+{ kind: "busy" } | 
+/**  L'agent ne connaît pas cette fonction (agent d'avant la clé d'appareil). */
+{ kind: "unsupported" } | 
+/**  La session a expiré pendant l'action. */
+{ kind: "session_ended" } | 
+/**  La session a été fermée. */
+{ kind: "session_revoked" } | { kind: "other" };
+
 export type DiskInfoDto = {
 	name: string,
 	mount: string,
@@ -651,6 +694,26 @@ export type TempDto = {
 	label: string,
 	celsius: number | null,
 };
+
+/**
+ *  Un poste de confiance du compte de la session. Les dates sont celles de l'agent (RFC 3339, UTC) ;
+ *  l'interface les met en forme.
+ */
+export type TrustedDeviceDto = {
+	id: string,
+	name: string,
+	createdAt: string,
+	lastProvedAt: string,
+	lastAddr: string,
+	/**  C'est ce PC : il ne se retire pas depuis lui-même. */
+	current: boolean,
+};
+
+/**
+ *  La liste des postes, ou « cette fonction n'existe pas sur ce serveur » (agent d'avant la clé
+ *  d'appareil : l'agent répond `404`).
+ */
+export type TrustedDevicesDto = { kind: "listed"; devices: TrustedDeviceDto[]; max: number } | { kind: "unsupported" };
 
 /**
  *  Pourquoi la dernière mise à jour demandée n'a pas abouti. La version en cours reste utilisable

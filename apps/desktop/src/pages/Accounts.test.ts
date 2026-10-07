@@ -46,7 +46,7 @@ describe("Comptes (administrateurs)", () => {
   it("has no « Comptes » entry in the menu of a read-only account, and the route stays shut", async () => {
     const { wrapper, router } = await boot("/servers/salon/dashboard");
     const entries = wrapper.findAll(".nav__item").map((e) => e.text());
-    expect(entries).toEqual(["Tableau de bord"]);
+    expect(entries).toEqual(["Tableau de bord", "Sécurité"]);
     await router.push("/servers/salon/accounts");
     expect(router.currentRoute.value.fullPath).toBe("/servers/salon/dashboard");
     wrapper.unmount();

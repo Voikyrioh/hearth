@@ -17,6 +17,7 @@ pub fn credential_target(server: &ServerId, kind: SecretKind) -> String {
     match kind {
         SecretKind::Password => format!("Hearth/{server}"),
         SecretKind::Token => format!("Hearth/{server}/token"),
+        SecretKind::DeviceKey => format!("Hearth/{server}/device-key"),
     }
 }
 

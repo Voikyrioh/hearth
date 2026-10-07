@@ -42,6 +42,8 @@ const COMMANDS: &[&str] = &[
     "change_own_password",
     "close_account_sessions",
     "delete_account",
+    "list_trusted_devices",
+    "remove_trusted_device",
     "get_agent_update",
     "update_agent",
     "ack_agent_result",

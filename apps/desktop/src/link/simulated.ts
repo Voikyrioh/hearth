@@ -1,6 +1,7 @@
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
+import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
 import {
   type SimAccountResult,
@@ -9,6 +10,7 @@ import {
 } from "./simulated-accounts";
 import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
+import { SimulatedDevices } from "./simulated-devices";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import {
   type AccountInputCheck,
@@ -158,6 +160,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly machine: SimulatedMachine;
   /** Les comptes simulés de chaque serveur (HRT-13) : amorçage des tests (`accounts.seed`). */
   readonly accounts: SimulatedAccounts;
+  /** Les postes de confiance simulés de chaque serveur (HRT-23) : amorçage des tests (`devices.seed`). */
+  readonly devices: SimulatedDevices;
   /** Mot de passe actuel de l'utilisateur, par serveur (« Correct-Horse-9 » tant qu'il n'a pas changé). */
   private readonly ownPasswords = new Map<string, string>();
   /**
@@ -176,6 +180,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.retryDelayMs = options.retryDelayMs ?? 1500;
     this.latencyMs = options.latencyMs ?? 0;
     this.accounts = new SimulatedAccounts(this.now);
+    this.devices = new SimulatedDevices(this.now);
     this.agents = (options.agents ?? []).map((agent) => ({ ...agent }));
     this.servers = (options.servers ?? SAMPLE_SERVERS).map((server) => ({ ...server }));
     this.machine = new SimulatedMachine({
@@ -536,6 +541,42 @@ export class SimulatedLinkBridge implements LinkBridge {
   private settle(serverId: string, result: SimAccountResult): AccountOutcome {
     if (result.ended) this.publish(serverId, "access_revoked", { reason: "revoked" });
     return result.outcome;
+  }
+
+  // --- Postes de confiance (HRT-23) : `calls` ne contient jamais un mot de passe ---
+
+  async listTrustedDevices(serverId: string): Promise<TrustedDevices> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("devices list");
+    return this.devices.list(server);
+  }
+
+  async removeTrustedDevice(
+    serverId: string,
+    deviceId: string,
+    password: string,
+  ): Promise<DeviceRemovalOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push(`devices remove ${deviceId}`);
+    const own = this.ownPasswords.get(serverId) ?? "Correct-Horse-9";
+    if (this.actionMode === "cut") {
+      // Comme une action de compte : coupée avant la réponse, jamais rejouée.
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) this.devices.remove(server, deviceId, password, own);
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return this.devices.remove(server, deviceId, password, own);
   }
 
   // --- Mise à jour de l'agent (HRT-17) ---

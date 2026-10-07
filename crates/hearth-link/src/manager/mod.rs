@@ -9,6 +9,7 @@ mod accounts;
 mod agent_update;
 mod attempt;
 mod audit;
+mod device;
 mod events;
 mod persist;
 mod task;
@@ -35,6 +36,7 @@ pub use events::EventStream;
 use events::Fanout;
 use task::Command;
 
+use crate::adapters::DeviceKey;
 use crate::adapters::{
     FileOperationStore, FileServerStore, FileSnapshotStore, HttpTransport, HttpTransportConfig,
     OsRng, SystemClock, SystemNetWatcher,
@@ -147,6 +149,9 @@ pub(crate) struct Shared {
     /// Empreinte présentée par le serveur et en attente de décision (BR-CONN-003) : posée par la
     /// tâche AVANT d'annoncer le changement, levée quand le lien repart ou à l'acceptation.
     pub(crate) presented: Mutex<Option<Fingerprint>>,
+    /// L'inscription silencieuse de ce PC (HRT-23) a déjà été tentée pendant cette exécution : au
+    /// plus une fois, jamais de boucle.
+    pub(crate) enrollment_tried: AtomicBool,
 }
 
 impl Shared {
@@ -183,6 +188,7 @@ impl Shared {
             writers: Arc::new(tokio::sync::Mutex::new(())),
             removed: AtomicBool::new(false),
             presented: Mutex::new(None),
+            enrollment_tried: AtomicBool::new(false),
         }
     }
 
@@ -579,12 +585,17 @@ impl LinkManager {
 
     /// Prise de contact épinglée puis ouverture d'une session : la prise de contact (version
     /// compatible), puis `POST /sessions`. Rien n'est écrit ici.
+    ///
+    /// `id` : le serveur du carnet (absent à la première connexion). Avec la clé d'appareil (HRT-23) :
+    /// le défi est demandé et signé avant la connexion ; la clé créée pour l'occasion est RENDUE, à
+    /// ranger par l'appelant une fois le serveur écrit au carnet (jamais de clé orpheline).
     async fn authenticate(
         &self,
         target: &Target,
+        id: Option<&ServerId>,
         username: &str,
         password: &Secret,
-    ) -> Result<LoginResponse, AuthFailure> {
+    ) -> Result<(LoginResponse, Option<DeviceKey>), AuthFailure> {
         let deps = &self.inner.deps;
         let limit = deps.config.request_timeout;
         let hello = |error: LinkError| AuthFailure {
@@ -599,16 +610,25 @@ impl LinkManager {
         if compatibility != Compatibility::Compatible {
             return Err(hello(LinkError::Incompatible(compatibility)));
         }
-        let request = attempt::login_request(username, password);
-        let outcome = timeout(limit, deps.transport.login(target, &request)).await;
-        attempt::wipe(request);
+        // Le défi et la connexion ont chacun leur délai : le tout en a deux.
+        let outcome = timeout(
+            limit.saturating_mul(2),
+            device::login(deps, target, id, username, password),
+        )
+        .await;
         match outcome {
             Err(_) => Err(hello(LinkError::Timeout)),
-            Ok(Err(error)) => Err(AuthFailure {
+            Ok(Err(device::LoginError::Transport(error))) => Err(AuthFailure {
                 error: error.into(),
                 refused: true,
             }),
-            Ok(Ok(response)) => Ok(response),
+            // Une clé est au coffre et le défi est indisponible : échec passager, rien n'est parti
+            // (ni mot de passe, ni preuve), on ne se présente pas comme un inconnu.
+            Ok(Err(device::LoginError::ChallengeUnavailable)) => Err(AuthFailure {
+                error: LinkError::Unreachable("défi de la clé d'appareil indisponible".into()),
+                refused: false,
+            }),
+            Ok(Ok(authenticated)) => Ok((authenticated.response, authenticated.new_key)),
         }
     }
 
@@ -646,8 +666,8 @@ impl LinkManager {
             port: new.port,
             pin: Pin::Pinned(new.fingerprint),
         };
-        let mut response = self
-            .authenticate(&target, &username, &password)
+        let (mut response, new_key) = self
+            .authenticate(&target, None, &username, &password)
             .await
             .map_err(|failure| failure.error)?;
         let _book = self.inner.book.lock().await;
@@ -678,6 +698,11 @@ impl LinkManager {
             self.close_session(&target, &response.token).await;
             return Err(LinkError::Store(error.0));
         }
+        // La clé d'appareil créée pour cette connexion : seulement maintenant que le serveur existe
+        // et que la connexion a réussi, et AVANT le jeton (BR-TRUST-003).
+        if let Some(key) = &new_key {
+            device::store_new_key(deps, &id, key);
+        }
         let token = Secret::new(std::mem::take(&mut response.token));
         let stored = deps
             .vault
@@ -692,6 +717,7 @@ impl LinkManager {
         if let Err(error) = stored {
             let _ = deps.vault.delete(&id, SecretKind::Token);
             let _ = deps.vault.delete(&id, SecretKind::Password);
+            let _ = deps.vault.delete(&id, SecretKind::DeviceKey);
             let _ = deps.servers.remove(&id).await;
             let _ = timeout(
                 deps.config.request_timeout,
@@ -784,8 +810,16 @@ impl LinkManager {
         }
         let deps = &self.inner.deps;
         let target = shared.target();
-        let mut response = match self.authenticate(&target, &username, &password).await {
-            Ok(response) => response,
+        // Une clé n'appartient qu'à un compte : avec un AUTRE identifiant que celui du carnet, la clé
+        // de l'ancien compte n'est pas présentée (une nouvelle est créée, et remplace l'ancienne à
+        // la réussite), pour qu'une même clé publique ne soit jamais confiée à deux comptes.
+        let known = shared.record().username;
+        let key_of = (known.is_empty() || known.eq_ignore_ascii_case(&username)).then_some(id);
+        let (mut response, new_key) = match self
+            .authenticate(&target, key_of, &username, &password)
+            .await
+        {
+            Ok(authenticated) => authenticated,
             Err(failure) => {
                 if failure.refused {
                     let _ = commands.send(Command::LoginRefused).await;
@@ -797,6 +831,10 @@ impl LinkManager {
         let locked = self.lock(id).await?;
         let shared = &locked.shared;
         let vault_error = |e: crate::ports::vault::VaultError| LinkError::Vault(e.0);
+        // La clé créée pour cette connexion, avant le jeton ; un coffre en échec la fera recréer.
+        if let Some(key) = &new_key {
+            device::store_new_key(deps, id, key);
+        }
         deps.vault
             .put(
                 id,
@@ -935,7 +973,8 @@ impl LinkManager {
         let deps = &self.inner.deps;
         let token = deps.vault.delete(id, SecretKind::Token);
         let password = deps.vault.delete(id, SecretKind::Password);
-        if let Err(error) = token.and(password) {
+        let device_key = deps.vault.delete(id, SecretKind::DeviceKey);
+        if let Err(error) = token.and(password).and(device_key) {
             tracing::error!(server = %id, %error, "secrets non effacés : serveur remis en service");
             let record = handle.shared.record();
             let last_known = handle.shared.last_known();

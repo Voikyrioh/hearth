@@ -43,6 +43,8 @@
     "allow-change-own-password",
     "allow-close-account-sessions",
     "allow-delete-account",
+    "allow-list-trusted-devices",
+    "allow-remove-trusted-device",
     "allow-get-agent-update",
     "allow-update-agent",
     "allow-ack-agent-result",
