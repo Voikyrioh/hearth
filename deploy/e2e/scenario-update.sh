@@ -286,7 +286,9 @@ until [ "$(sha_of "$INSTALLED")" = "$(sha_of /dist/hearth-agent-next)" ]; do
     waited=$((waited + 1))
 done
 systemctl kill --signal=SIGSTOP hearth-agent-update 2>/dev/null || true
-systemctl kill --signal=SIGKILL hearth-agent-update 2>/dev/null || true
+# Un arrêt PROPRE de l'unité : systemd ne la relance pas (un SIGKILL la relancerait, `Restart=on-failure`,
+# HRT-27 : c'est la section 7). Ici, le superviseur est mort et la machine « redémarre » : personne ne le relance.
+systemctl stop hearth-agent-update 2>/dev/null || true
 systemctl reset-failed hearth-agent-update 2>/dev/null || true
 [ -e "$BACKUP" ] || die "le superviseur a conclu avant d'être tué : la sauvegarde de l'ancien binaire a disparu"
 ok "superviseur tué juste après l'échange : sauvegarde de l'ancien binaire et travail laissés"
@@ -330,5 +332,39 @@ wait_last last.reason interrupted 60
 [ ! -e "$DATA/update/state.json" ] || die "la trace d'intention reste"
 [ "$(sha_of "$INSTALLED")" = "$(sha_of /dist/hearth-agent-next)" ] || die "le binaire installé a changé"
 ok "agent tué pendant le téléchargement : tentative conclue « interrompue » au démarrage, rien d'écrit sur le binaire"
+
+# --------------------------------------------------------------------------------------------
+# 7. Double panne (HRT-27) : le superviseur est TUÉ après l'échange et le nouvel agent ne répond pas.
+#    systemd relance l'unité transitoire (`Restart=on-failure`), le superviseur reprend son marqueur et
+#    remet l'ancien binaire : le service est relevé sans geste manuel.
+# --------------------------------------------------------------------------------------------
+BIN_V021=$(sha_of "$INSTALLED")
+code=$(api POST /agent/update "$ADMIN" -d "$MUTE_BODY")
+[ "$code" = 202 ] || die "la mise à jour vers l'agent muet devrait être acceptée (202), reçu $code : $(cat "$OUT.body")"
+waited=0
+until [ "$(sha_of "$INSTALLED")" = "$(sha_of /dist/mute)" ]; do
+    [ "$waited" -lt 600 ] || die "le binaire de l'agent muet n'a jamais été installé"
+    sleep 0.1
+    waited=$((waited + 1))
+done
+systemctl kill --signal=SIGKILL hearth-agent-update 2>/dev/null || die "le superviseur n'existe plus : il a déjà conclu"
+ok "superviseur tué (SIGKILL) après l'échange : le nouvel agent ne répond pas, personne ne conclut... sauf systemd"
+# Aucun geste manuel à partir d'ici : on ne touche ni au service ni aux fichiers.
+waited=0
+until [ "$(hello_version 2>/dev/null)" = "0.2.1" ]; do
+    [ "$waited" -lt 180 ] || die "le service n'a pas été relevé seul en 180 s"
+    sleep 1
+    waited=$((waited + 1))
+done
+wait_last last.outcome rolled_back 60
+[ "$(body_field last.reason)" = no_answer ] || die "raison inattendue : $(cat "$OUT.body")"
+[ "$(sha_of "$INSTALLED")" = "$BIN_V021" ] || die "le binaire restauré n'est pas exactement l'ancien"
+[ ! -e "$BACKUP" ] || die "une sauvegarde reste après le retour arrière"
+[ "$(systemctl is-active hearth-agent)" = active ] || die "le service ne tourne pas"
+journalctl -u hearth-agent-update --no-pager | grep -qF "reprise du superviseur" || die "le superviseur n'a pas été repris par systemd"
+systemctl is-active --quiet hearth-agent-update && die "l'unité du superviseur tourne encore"
+[ ! -e "$DATA/update/phase.json" ] && [ ! -e "$DATA/update/job.json" ] || die "des traces de travail restent dans $DATA/update"
+[ "$("$INSTALLED" fingerprint)" = "$FP_BEFORE" ] || die "l'empreinte a changé"
+ok "double panne : superviseur relancé par systemd, ancien binaire remis (identique octet pour octet), service relevé sans geste manuel"
 
 echo "== mise à jour de l'agent à distance : vert"
