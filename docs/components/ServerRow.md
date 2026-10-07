@@ -7,3 +7,4 @@ Une ligne du carnet : avatar, nom (lien vers le tableau de bord), adresse, menti
 - Props : `server`
 - Événements et slots : événements `edit`, `remove`, `disconnect`, `forget`
 - Notes : Tests : `Servers.test.ts`.
+- HRT-26 : une étiquette écrite après le nom (« Mode attaque », « Mode attaque suspendu », « Alerte de sécurité ») et la marque sur l'avatar. Test : `pages/SecurityMode.test.ts`.

@@ -9,3 +9,4 @@ Réglages, dans l'ordre du design (`design-ecrans-socle.md`) : à gauche « Gén
 - Notes : D'autres sections arrivent avec leurs tickets ; la barre de sections reviendra avec la suivante. Tests : `Settings.test.ts`.
 
 - HRT-12 : réglage de notifications (rangé dans « Client » depuis HRT-13, préférence du client) : « Notifier quand un serveur devient hors ligne ou revient » (activé par défaut, BR-RESIL-015) ; commandes `get_notify_on_link_change` / `set_notify_on_link_change`.
+- HRT-26 : la section « Client » porte la ligne « Alertes de sécurité » (réglage séparé de « Notifier quand un serveur devient hors ligne ou revient », activé par défaut, BR-TRUST-033). Test : `pages/SecuritySettings.test.ts`.
