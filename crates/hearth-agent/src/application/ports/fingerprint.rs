@@ -1,4 +1,4 @@
-//! Empreinte à clé des requêtes suivies (HRT-32, ADR-0033) : deux ports. Le premier calcule
+//! Empreinte à clé des requêtes suivies (HRT-32, ADR-0034) : deux ports. Le premier calcule
 //! l'empreinte avec le secret de l'installation, que seul l'adaptateur connaît ; le second charge
 //! ce secret, ou le crée au premier démarrage.
 

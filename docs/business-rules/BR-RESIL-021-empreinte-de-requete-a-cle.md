@@ -4,7 +4,7 @@ domaine: RESIL
 titre: L'empreinte d'une requête suivie ne se calcule pas sans le secret de l'installation
 statut: active
 invariant: true
-source: review Stephen de HRT-28 (PR #34, round 1), ADR-0033, FIX-01M4BZN31A8Z8WN0WKNTCRTFFN, HRT-32
+source: review Stephen de HRT-28 (PR #34, round 1), ADR-0034, FIX-01M4BZN31A8Z8WN0WKNTCRTFFN, HRT-32
 maj: 2026-10-07
 ---
 
@@ -35,7 +35,7 @@ L'empreinte qui lie une clé d'opération à sa requête (BR-RESIL-010) est un H
 - Les sous-commandes `account` et `attack-mode` ne créent ni ne lisent le secret (`NoFingerprint`).
 
 ## Règles liées
-- BR-RESIL-010, BR-UPDATE-029, BR-INSTALL-011, ADR-0033
+- BR-RESIL-010, BR-UPDATE-029, BR-INSTALL-011, ADR-0034
 
 ## Historique
 - 2026-10-07 : création (HRT-32).

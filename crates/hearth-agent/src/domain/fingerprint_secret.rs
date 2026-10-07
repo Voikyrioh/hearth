@@ -1,4 +1,4 @@
-//! Secret d'installation qui clé l'empreinte des requêtes suivies (HRT-32, ADR-0033).
+//! Secret d'installation qui clé l'empreinte des requêtes suivies (HRT-32, ADR-0034).
 //!
 //! 32 octets aléatoires, créés une fois par installation, gardés dans un fichier à droits
 //! restreints du dossier de données, **jamais en base, au journal, dans une erreur ni dans la

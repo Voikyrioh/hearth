@@ -1,4 +1,4 @@
-//! Empreinte à clé des requêtes suivies par `ring` (HRT-32, ADR-0033) : HMAC-SHA-256 de
+//! Empreinte à clé des requêtes suivies par `ring` (HRT-32, ADR-0034) : HMAC-SHA-256 de
 //! `domain::operations::canonical_request`, clé par le secret de l'installation. `ring` est déjà
 //! compilé par `rustls` (ADR-0005, ADR-0009).
 

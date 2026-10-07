@@ -27,6 +27,7 @@ use hearth_desktop_lib::presence::{TrayIcon, TrayStatus};
 use hearth_desktop_lib::vault::{CredentialBackend, CredentialVault};
 use hearth_link::domain::event::Event;
 use hearth_link::domain::pending_ops::OperationId;
+use hearth_link::domain::secret::Secret;
 use hearth_link::domain::state::{LinkState, Thresholds};
 use hearth_link::ports::transport::Method;
 use hearth_link::{ActionOutcome, ActionRequest, LinkConfig, LinkError};
@@ -334,9 +335,10 @@ async fn an_action_is_refused_without_anything_sent_when_the_link_is_not_connect
     let result = rig
         .runtime
         .manager()
-        .execute(
+        .execute_act(
             &server_id(&rig),
             change_password(PASSWORD, "New-Password-12"),
+            Some(&Secret::from(PASSWORD)),
         )
         .await;
     assert_eq!(result.unwrap_err(), LinkError::NotConnected);
@@ -350,7 +352,11 @@ async fn an_action_cut_before_the_answer_is_unknown_never_replayed_and_its_outco
     match rig
         .runtime
         .manager()
-        .execute(&id, change_password(PASSWORD, "New-Password-12"))
+        .execute_act(
+            &id,
+            change_password(PASSWORD, "New-Password-12"),
+            Some(&Secret::from(PASSWORD)),
+        )
         .await
         .unwrap()
     {
@@ -365,9 +371,10 @@ async fn an_action_cut_before_the_answer_is_unknown_never_replayed_and_its_outco
     let call = tokio::spawn(async move {
         runtime
             .manager()
-            .execute(
+            .execute_act(
                 &task_id,
                 change_password("New-Password-12", "Another-Password-34"),
+                Some(&Secret::from("New-Password-12")),
             )
             .await
     });

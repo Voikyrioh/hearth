@@ -91,6 +91,11 @@ export type AgentUpdateRefusal =
   | { kind: "no_target" }
   | { kind: "target_changed" }
   | { kind: "not_newer" }
+  | { kind: "wrong_password" }
+  /** L'élévation de 5 minutes s'est fermée côté agent : la fenêtre redemande le mot de passe. */
+  | { kind: "password_required" }
+  | { kind: "too_many_attempts"; retry_after_s: number }
+  | { kind: "busy" }
   | { kind: "other" };
 
 /**

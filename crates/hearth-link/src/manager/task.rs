@@ -828,7 +828,7 @@ impl Runner {
     fn on_execute(
         &mut self,
         key: OperationId,
-        request: ActionRequest,
+        mut request: ActionRequest,
         reply: oneshot::Sender<Result<ActionOutcome, LinkError>>,
     ) {
         // Hors « Connecté » (flux ouvert), rien ne part (BR-RESIL-008).
@@ -859,8 +859,8 @@ impl Runner {
         let persist_timeout = self.deps.config.persist_timeout;
         let api_request = crate::ports::transport::ApiRequest {
             method: request.method,
-            path: request.path,
-            body: request.body,
+            path: std::mem::take(&mut request.path),
+            body: request.body.take(),
             idempotency_key: Some(key.as_str().to_owned()),
         };
         let deps = self.deps.clone();

@@ -10,7 +10,7 @@ pub const CERT_FILE: &str = "cert.pem";
 pub const KEY_FILE: &str = "key.pem";
 /// Identifiant stable de l'installation.
 pub const INSTALL_ID_FILE: &str = "install_id";
-/// Secret d'installation de l'empreinte des requêtes suivies (HRT-32, ADR-0033) : 32 octets, droits
+/// Secret d'installation de l'empreinte des requêtes suivies (HRT-32, ADR-0034) : 32 octets, droits
 /// 0600, créé par l'agent au premier démarrage. Hors de la base, donc hors de sa sauvegarde.
 pub const FINGERPRINT_SECRET_FILE: &str = "request_fingerprint.key";
 /// Verrou de création de l'identité.

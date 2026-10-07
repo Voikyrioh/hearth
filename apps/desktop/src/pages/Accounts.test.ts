@@ -4,6 +4,7 @@ import App from "@/App.vue";
 import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import { LinkCommandError } from "@/link";
 import { useToastsStore } from "@/stores/toasts";
+import { confirmDialog, dialogButton, typeInto } from "@/test/confirm";
 import { mountContext } from "@/test/mount";
 
 afterEach(() => {
@@ -21,17 +22,6 @@ async function boot(path = "/servers/forge/accounts") {
 
 const rows = (wrapper: VueWrapper) =>
   wrapper.findAll("tbody tr").map((row) => row.attributes("data-account"));
-
-function typeInto(el: Element | null, value: string) {
-  const input = el as HTMLInputElement;
-  input.value = value;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-const dialogButton = (label: string) =>
-  [...document.querySelectorAll<HTMLButtonElement>("dialog button")].find(
-    (b) => b.textContent?.trim() === label,
-  );
 
 const GOOD = "Sunny-Walk-Home-42";
 
@@ -95,20 +85,21 @@ describe("Comptes (administrateurs)", () => {
     typeInto(document.querySelector('input[placeholder="Mot de passe"]'), GOOD);
     typeInto(document.querySelector('input[placeholder="Confirme le mot de passe"]'), GOOD);
     await flushPromises();
-    dialogButton("Créer")?.click();
-    await flushPromises();
+    await confirmDialog("Créer");
     expect(rows(wrapper)).toEqual(["marie", "paul", "lea", "sophie"]);
     expect(useToastsStore().items.map((t) => t.message)).toContain("Compte sophie créé");
     expect(JSON.stringify(bridge.calls)).not.toContain(GOOD);
     wrapper.unmount();
   });
 
-  it("closes the sessions of an account without a confirmation and says so", async () => {
+  it("closes the sessions of an account after a confirmation that names it, and says so", async () => {
     const { wrapper } = await boot();
     const close = wrapper.get('[data-account="paul"]').findAll("button")[2];
     expect(close?.text()).toBe("Fermer les 2 sessions");
     await close?.trigger("click");
     await flushPromises();
+    expect(document.body.textContent).toContain("Fermer les sessions de paul ?");
+    await confirmDialog("Fermer les sessions");
     expect(useToastsStore().items.map((t) => t.message)).toContain("Sessions de paul fermées");
     expect(wrapper.get('[data-account="paul"] td:nth-child(5)').text()).toBe("0");
     expect(
@@ -124,6 +115,8 @@ describe("Comptes (administrateurs)", () => {
     await flushPromises();
     await paul.get("select").setValue("admin");
     await flushPromises();
+    expect(document.body.textContent).toContain("Changer le rôle de paul ?");
+    await confirmDialog("Changer le rôle");
     expect(useToastsStore().items.map((t) => t.message)).toContain(
       "paul est maintenant Administrateur",
     );
@@ -144,9 +137,7 @@ describe("Comptes (administrateurs)", () => {
     await flushPromises();
     expect(bridge.calls.some((c) => c.startsWith("account delete"))).toBe(false);
     await wrapper.get('[data-account="lea"]').findAll("button")[3]?.trigger("click");
-    await flushPromises();
-    dialogButton("Supprimer")?.click();
-    await flushPromises();
+    await confirmDialog("Supprimer");
     expect(rows(wrapper)).toEqual(["marie", "paul"]);
     expect(useToastsStore().items.map((t) => t.message)).toContain("Compte lea supprimé");
     wrapper.unmount();
@@ -168,9 +159,7 @@ describe("Comptes (administrateurs)", () => {
       { id: "J", username: "jean", role: "admin" },
     ]);
     await wrapper.get('[data-account="jean"]').findAll("button")[3]?.trigger("click");
-    await flushPromises();
-    dialogButton("Supprimer")?.click();
-    await flushPromises();
+    await confirmDialog("Supprimer");
     expect(useToastsStore().items.map((t) => t.message)).toContain(
       "Il doit toujours rester au moins un administrateur",
     );
@@ -187,9 +176,7 @@ describe("Comptes (administrateurs)", () => {
     const { wrapper, bridge } = await boot();
     bridge.actionMode = "cut";
     await wrapper.get('[data-account="lea"]').findAll("button")[3]?.trigger("click");
-    await flushPromises();
-    dialogButton("Supprimer")?.click();
-    await flushPromises();
+    await confirmDialog("Supprimer");
     const messages = useToastsStore().items.map((t) => t.message);
     expect(messages).toContain(
       "Le résultat de cette opération n'est pas connu. Elle n'a pas été rejouée automatiquement. À la reconnexion, la liste se mettra à jour.",

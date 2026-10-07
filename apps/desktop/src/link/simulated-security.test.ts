@@ -69,9 +69,11 @@ describe("the simulated security of an agent", () => {
     sim.setDevice("forge", "none", false);
     expect(failure(() => sim.change("forge", true, OWN, OWN, "admin"))).toBe("not_recognized");
     expect(failure(() => sim.change("forge", true, OWN, OWN, "readonly"))).toBe("not_recognized");
-    // Clé là, mais poste non prouvé : l'agent refuse.
+    // Clé là, même si la session n'est pas « prouvée » : l'agent accepte la preuve de TOUTE clé inscrite
+    // du compte (Q18), la clé au coffre est la seule condition côté poste.
     sim.setDevice("forge", "none", true);
-    expect(failure(() => sim.change("forge", true, OWN, OWN, "admin"))).toBe("not_recognized");
+    expect(sim.change("forge", true, OWN, OWN, "admin").kind).toBe("done");
+    sim.change("forge", false, OWN, OWN, "admin");
     sim.setDevice("forge", "proven");
     expect(failure(() => sim.change("forge", true, OWN, OWN, "readonly"))).toBe("forbidden");
     expect(sim.change("forge", true, "faux", OWN, "admin")).toEqual({

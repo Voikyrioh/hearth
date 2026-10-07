@@ -1,5 +1,5 @@
 ---
-id: ADR-0033
+id: ADR-0034
 titre: Empreinte à clé des requêtes suivies : HMAC-SHA-256 avec un secret d'installation tenu dans un fichier, hors de la base et de sa sauvegarde
 type: securite
 statut: acceptée
@@ -9,7 +9,7 @@ remplace: aucune
 liens: [BR-RESIL-010, BR-RESIL-021, BR-UPDATE-029, BR-INSTALL-011, ADR-0006, ADR-0009, ADR-0014, FIX-01M4BZN31A8Z8WN0WKNTCRTFFN, HRT-32]
 ---
 
-# ADR-0033 : L'empreinte des requêtes suivies est un HMAC à clé
+# ADR-0034 : L'empreinte des requêtes suivies est un HMAC à clé
 
 ## Contexte
 Une requête qui porte `Idempotency-Key` est liée à sa clé par une empreinte de la méthode, du chemin et du corps, gardée 24 heures en base (BR-RESIL-010). C'était un SHA-256 sans clé. Le corps de `POST /accounts`, de `PUT /accounts/{id}/password` et de `PUT /me/password` ne contient, pour un client actuel, que des mots de passe et des champs connus : qui lit la base (sauvegarde volée, accès au disque) pouvait les chercher hors ligne à pleine vitesse, sans le ralentissement d'Argon2. Trouvé par la review r1 de la PR #34 (HRT-28), défaut antérieur (FIX-01M4BZN31A8Z8WN0WKNTCRTFFN).

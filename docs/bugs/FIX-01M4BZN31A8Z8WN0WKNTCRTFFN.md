@@ -23,7 +23,7 @@ Tout agent depuis HRT-04 (suivi des opérations). Condition : lire `hearth.db`, 
 Aucun côté exploitation (la base ne doit pas sortir du serveur).
 
 ## Correction
-- Empreinte = HMAC-SHA-256 (`ring`) de `canonical_request` (longueurs préfixées), clé par un secret de 32 octets propre à l'installation, dans `request_fingerprint.key` du dossier de données (0600, créé au premier démarrage, atomique, jamais en base ni dans la sauvegarde de la base). Comparaison en temps constant. ADR-0033, BR-RESIL-021.
+- Empreinte = HMAC-SHA-256 (`ring`) de `canonical_request` (longueurs préfixées), clé par un secret de 32 octets propre à l'installation, dans `request_fingerprint.key` du dossier de données (0600, créé au premier démarrage, atomique, jamais en base ni dans la sauvegarde de la base). Comparaison en temps constant. ADR-0034, BR-RESIL-021.
 - Migration `0008` : les anciennes empreintes sont vidées (les lignes restent). La colonne vidée ne suffit pas (SQLite ne réécrit pas l'espace libéré : review r1 de la PR #39) : à l'ouverture de la base, `secure_delete=ON` sur toutes les connexions (une ligne supprimée est écrasée de zéros) puis, une fois (`PRAGMA user_version = 1`, reprise au démarrage suivant si elle échoue), `VACUUM` et point de contrôle `TRUNCATE` : le fichier est réécrit et le journal tombe à zéro octet. Une clé à l'empreinte effacée n'est jamais ré-exécutée (`Replay::Unverifiable`, `409 CONFLICT`).
 - `// FIX:01M4BZN31A8Z8WN0WKNTCRTFFN` : `domain/operations.rs::classify`, `infrastructure/fingerprint.rs`, `infrastructure/fingerprint_secret.rs`, `migrations/0008_purge_request_fingerprints.sql`.
 

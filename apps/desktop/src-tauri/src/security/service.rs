@@ -13,6 +13,7 @@ use serde_json::Value;
 use super::dto::{AttackModeDto, AttackModeOutcome, AttackModeRefusal, SecurityRead};
 use crate::link::LinkRuntime;
 use crate::link_dto::LinkFailure;
+use crate::reauth::wire::{Confirmation, confirmation_of};
 
 /// L'identifiant d'un serveur du carnet reçu de l'interface.
 pub use crate::devices::service::server;
@@ -79,19 +80,22 @@ pub fn interpret(status: u16, body: &Value) -> Result<AttackModeOutcome, LinkFai
             _ => AttackModeRefusal::Other,
         }));
     };
+    // Les refus de la confirmation (mot de passe faux, attente, preuve non reconnue, client trop ancien)
+    // se lisent partout pareil (BR-TRUST-040, 045).
+    if let Some(confirmation) = confirmation_of(&error)? {
+        return Ok(refused(match confirmation {
+            Confirmation::WrongPassword => AttackModeRefusal::WrongPassword,
+            Confirmation::PasswordRequired => AttackModeRefusal::PasswordRequired,
+            Confirmation::TooManyAttempts { retry_after_s } => {
+                AttackModeRefusal::TooManyAttempts { retry_after_s }
+            }
+            Confirmation::Busy => AttackModeRefusal::Busy,
+        }));
+    }
     let error = error.error;
     Ok(refused(match error.code {
         ErrorCode::ForbiddenRole => return Err(LinkFailure::Forbidden),
-        ErrorCode::PostNotRecognized => return Err(LinkFailure::NotRecognized),
-        ErrorCode::WrongPassword => AttackModeRefusal::WrongPassword,
         ErrorCode::NotFound => AttackModeRefusal::Unsupported,
-        ErrorCode::Busy => AttackModeRefusal::Busy,
-        ErrorCode::TooManyAttempts => AttackModeRefusal::TooManyAttempts {
-            retry_after_s: error.details["retry_after_s"]
-                .as_u64()
-                .and_then(|seconds| u32::try_from(seconds).ok())
-                .unwrap_or(60),
-        },
         ErrorCode::Unauthenticated | ErrorCode::SessionExpired => AttackModeRefusal::SessionEnded,
         ErrorCode::SessionRevoked => AttackModeRefusal::SessionRevoked,
         _ => AttackModeRefusal::Other,

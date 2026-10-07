@@ -1,6 +1,6 @@
 //! L'état de sécurité et le mode attaque contre un VRAI agent (TLS 1.3, SQLite) : événement
 //! `security` du flux, lecture de `GET /security`, activation et désactivation par le mot de passe ET
-//! la preuve de la clé de ce poste (usage `0x03`), rien d'envoyé sans clé ni hors « Connecté »,
+//! la preuve de la clé de ce poste (usage `0x05`, contrat commun des actes), rien d'envoyé sans clé ni hors « Connecté »,
 //! rôle Lecture seule. HRT-26 (ADR-0025, BR-TRUST-010, 018, 028). Aucune attente de durée.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -116,7 +116,7 @@ async fn an_administrator_with_the_key_turns_the_attack_mode_on_then_off() {
             .state,
         AttackModeState::Off
     );
-    assert_eq!(world.spy.calls_for(ChallengePurpose::AttackMode), 3);
+    assert_eq!(world.spy.calls_for(ChallengePurpose::AdminAct), 3);
 }
 
 #[tokio::test]
@@ -133,7 +133,7 @@ async fn without_a_key_nothing_is_sent_not_even_a_challenge() {
         .await
         .unwrap_err();
     assert_eq!(error, LinkError::NoDeviceKey);
-    assert_eq!(world.spy.calls_for(ChallengePurpose::AttackMode), 0);
+    assert_eq!(world.spy.calls_for(ChallengePurpose::AdminAct), 0);
 }
 
 #[tokio::test]
@@ -145,7 +145,7 @@ async fn an_empty_password_is_refused_before_any_sending() {
         .await
         .unwrap_err();
     assert!(matches!(error, LinkError::InvalidInput(_)));
-    assert_eq!(world.spy.calls_for(ChallengePurpose::AttackMode), 0);
+    assert_eq!(world.spy.calls_for(ChallengePurpose::AdminAct), 0);
 }
 
 #[tokio::test]
@@ -168,7 +168,7 @@ async fn nothing_is_sent_while_the_link_is_down() {
         .await
         .unwrap_err();
     assert_eq!(error, LinkError::NotConnected);
-    assert_eq!(world.spy.calls_for(ChallengePurpose::AttackMode), 0);
+    assert_eq!(world.spy.calls_for(ChallengePurpose::AdminAct), 0);
 }
 
 #[tokio::test]

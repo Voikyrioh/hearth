@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reauth-covers"
+description = "Enables the reauth_covers command without any pre-configured scope."
+commands.allow = ["reauth_covers"]
+
+[[permission]]
+identifier = "deny-reauth-covers"
+description = "Denies the reauth_covers command without any pre-configured scope."
+commands.deny = ["reauth_covers"]

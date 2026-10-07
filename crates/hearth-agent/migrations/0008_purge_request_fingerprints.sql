@@ -1,4 +1,4 @@
--- Empreintes des requêtes suivies (HRT-32, ADR-0033, FIX-01M4BZN31A8Z8WN0WKNTCRTFFN).
+-- Empreintes des requêtes suivies (HRT-32, ADR-0034, FIX-01M4BZN31A8Z8WN0WKNTCRTFFN).
 --
 -- Jusqu'ici `operations.request_hash` était un SHA-256 sans clé de la méthode, du chemin et du corps
 -- de la requête. Le corps de `POST /accounts`, `PUT /accounts/{id}/password` et `PUT /me/password`

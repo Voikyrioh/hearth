@@ -8,7 +8,7 @@
 //! répond « résultat inconnu » ; la même clé avec une autre requête est refusée.
 //!
 //! L'empreinte de la requête est un HMAC-SHA-256 clé par un secret propre à l'installation
-//! (HRT-32, ADR-0033) : le corps d'un `POST /accounts` ou d'un `PUT …/password` contient un mot de
+//! (HRT-32, ADR-0034) : le corps d'un `POST /accounts` ou d'un `PUT …/password` contient un mot de
 //! passe, et un haché sans clé de ce corps, lu dans une copie de la base, se devine hors ligne à
 //! pleine vitesse.
 

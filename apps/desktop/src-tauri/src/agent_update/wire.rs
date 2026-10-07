@@ -11,6 +11,7 @@ use serde_json::Value;
 use super::domain::AgentTarget;
 use super::dto::{AgentUpdateOutcome, AgentUpdateRefusal};
 use crate::link_dto::LinkFailure;
+use crate::reauth::wire::{Confirmation, confirmation_of};
 
 /// `POST /agent/update` avec la cible validée : version, adresse, signature, somme.
 pub fn start(target: &AgentTarget) -> Result<ActionRequest, LinkFailure> {
@@ -36,6 +37,17 @@ pub fn refusal_from_error(status: u16, body: &Value) -> Result<AgentUpdateRefusa
             _ => Ok(AgentUpdateRefusal::Other),
         };
     };
+    // Les refus de la confirmation se lisent partout pareil (BR-TRUST-040, 045).
+    if let Some(confirmation) = confirmation_of(&error)? {
+        return Ok(match confirmation {
+            Confirmation::WrongPassword => AgentUpdateRefusal::WrongPassword,
+            Confirmation::PasswordRequired => AgentUpdateRefusal::PasswordRequired,
+            Confirmation::TooManyAttempts { retry_after_s } => {
+                AgentUpdateRefusal::TooManyAttempts { retry_after_s }
+            }
+            Confirmation::Busy => AgentUpdateRefusal::Busy,
+        });
+    }
     Ok(match error.error.code {
         ErrorCode::ForbiddenRole => return Err(LinkFailure::Forbidden),
         ErrorCode::ManagedInstall => AgentUpdateRefusal::ManagedInstall,

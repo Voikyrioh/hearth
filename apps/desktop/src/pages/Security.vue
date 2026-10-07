@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import AttackModePanel from "@/components/organisms/AttackModePanel.vue";
+import ReauthSettingCard from "@/components/organisms/ReauthSettingCard.vue";
 import RemoveDeviceDialog from "@/components/organisms/RemoveDeviceDialog.vue";
 import TrustedDeviceTable from "@/components/organisms/TrustedDeviceTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
@@ -102,6 +103,7 @@ async function reconnect() {
       @remove="removing = $event"
       @retry="store.load(serverId)"
     />
+    <ReauthSettingCard :key="serverId" :server-id="serverId" />
     <RemoveDeviceDialog
       :open="removing !== null"
       :server-id="serverId"

@@ -58,6 +58,9 @@ async function confirm(page: Page) {
   const dialog = page.locator("dialog[open]");
   await expect(dialog.getByRole("heading", { name: "Mettre à jour l'agent ?" })).toBeVisible();
   await expect(dialog).toContainText("Cette opération redémarrera l'agent brièvement.");
+  // Remplacer le binaire de l'agent n'est jamais couvert par le délai de 5 minutes : le mot de passe est
+  // toujours demandé (HRT-30).
+  await dialog.getByLabel("Ton mot de passe").fill("Correct-Horse-9");
   await dialog.getByRole("button", { name: "Oui, mettre à jour" }).click();
 }
 

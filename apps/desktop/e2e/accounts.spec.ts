@@ -16,6 +16,8 @@ type Sim = {
 
 const WIDTHS = [1366, 1920, 2560] as const;
 const GOOD = "Sunny-Walk-Home-42";
+/** Le mot de passe du compte simulé : celui que la confirmation des actes compare (HRT-30). */
+const OWN = "Correct-Horse-9";
 
 async function shoot(page: Page, name: string) {
   for (const width of WIDTHS) {
@@ -41,6 +43,21 @@ const sim = (page: Page) => ({
 const pill = (page: Page) => page.locator(".head").getByRole("status");
 const row = (page: Page, username: string) => page.locator(`tr[data-account="${username}"]`);
 const dialog = (page: Page) => page.locator("dialog[open]");
+
+/**
+ * Confirme l'acte de la fenêtre ouverte : attend que la fenêtre ait lu ce que l'agent attend (le champ
+ * « Ton mot de passe », ou le délai de 5 minutes déjà ouvert), saisit le mot de passe s'il est demandé,
+ * puis clique sur le bouton.
+ */
+async function confirm(page: Page, label: string, password = OWN) {
+  const open = dialog(page);
+  await expect(
+    open.locator("[data-reauth-field], [data-reauth-elevated], [data-reauth-no-key]"),
+  ).toBeVisible();
+  const field = open.getByLabel("Ton mot de passe");
+  if ((await field.count()) > 0) await field.fill(password);
+  await open.getByRole("button", { name: label, exact: true }).click();
+}
 
 async function fillCreate(page: Page, username: string, password: string, confirm = password) {
   await dialog(page).getByLabel("Identifiant").fill(username);
@@ -113,6 +130,10 @@ test("création : critères du mot de passe en direct (coche et croix), bouton i
   await expect(dialog(page).getByText("Les deux mots de passe ne correspondent pas")).toBeVisible();
   await expect(create).toHaveAttribute("aria-disabled", "true");
   await dialog(page).getByLabel("Confirme le mot de passe").fill(GOOD);
+  // Tout est valide, mais l'acte demande aussi ton mot de passe : le bouton attend.
+  await expect(dialog(page).getByLabel("Ton mot de passe")).toBeVisible();
+  await expect(create).toHaveAttribute("aria-disabled", "true");
+  await dialog(page).getByLabel("Ton mot de passe").fill(OWN);
   await expect(create).not.toHaveAttribute("aria-disabled", "true");
   await shoot(page, "comptes-creation");
 });
@@ -123,7 +144,7 @@ test("création réussie : compte ajouté en bas de la liste, message de succès
   await page.goto("/?nodev#/servers/forge/accounts");
   await page.getByRole("button", { name: "Ajouter un compte" }).click();
   await fillCreate(page, "sophie", GOOD);
-  await dialog(page).getByRole("button", { name: "Créer", exact: true }).click();
+  await confirm(page, "Créer");
   await expect(dialog(page)).toHaveCount(0);
   await expect(page.locator(".toast")).toContainText("Compte sophie créé");
   await expect(page.locator("tbody tr").last()).toHaveAttribute("data-account", "sophie");
@@ -136,7 +157,7 @@ test("création refusée : identifiant déjà utilisé, formulaire conservé, mo
   await page.goto("/?nodev#/servers/forge/accounts");
   await page.getByRole("button", { name: "Ajouter un compte" }).click();
   await fillCreate(page, "PAUL", GOOD);
-  await dialog(page).getByRole("button", { name: "Créer", exact: true }).click();
+  await confirm(page, "Créer");
   await expect(dialog(page).getByText("Cet identifiant est déjà utilisé")).toBeVisible();
   await expect(dialog(page).getByLabel("Identifiant")).toHaveValue("PAUL");
   await expect(dialog(page).getByLabel("Mot de passe", { exact: true })).toHaveValue("");
@@ -158,6 +179,9 @@ test("changer le rôle par la liste déroulante, et le dernier administrateur es
     .click();
   await expect(row(page, "paul").getByRole("combobox")).toBeFocused();
   await row(page, "paul").getByRole("combobox").selectOption("admin");
+  await expect(page.getByRole("heading", { name: "Changer le rôle de paul ?" })).toBeVisible();
+  await expect(dialog(page).getByText("paul deviendra Administrateur.")).toBeVisible();
+  await confirm(page, "Changer le rôle");
   await expect(page.locator(".toast")).toContainText("paul est maintenant Administrateur");
   await expect(row(page, "paul").locator("td").nth(0)).toHaveText("Administrateur");
   // Deux administrateurs : retour à Lecture seule possible ; puis le dernier est grisé.
@@ -165,13 +189,24 @@ test("changer le rôle par la liste déroulante, et le dernier administrateur es
     .getByRole("button", { name: /^Changer le rôle/ })
     .click();
   await row(page, "paul").getByRole("combobox").selectOption("readonly");
+  // Passer en Lecture seule retire un accès : le délai de 5 minutes ouvert par le mot de passe de
+  // l'instant d'avant le couvre, la fenêtre n'a pas de champ et le dit.
+  await expect(dialog(page).locator("[data-reauth-elevated]")).toContainText(
+    "il ne t'est pas redemandé pendant encore",
+  );
+  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveCount(0);
+  await confirm(page, "Changer le rôle");
   await expect(row(page, "paul").locator("td").nth(0)).toHaveText("Lecture seule");
 });
 
-test("fermer les sessions : sans confirmation, le bouton s'éteint ensuite", async ({ page }) => {
+test("fermer les sessions : confirmation qui nomme le compte, le bouton s'éteint ensuite", async ({
+  page,
+}) => {
   await page.goto("/?nodev#/servers/forge/accounts");
   const close = row(page, "paul").getByRole("button", { name: /^Fermer les 2 sessions/ });
   await close.click();
+  await expect(page.getByRole("heading", { name: "Fermer les sessions de paul ?" })).toBeVisible();
+  await confirm(page, "Fermer les sessions");
   await expect(page.locator(".toast")).toContainText("Sessions de paul fermées");
   await expect(row(page, "paul").locator("td").nth(3)).toHaveText("0");
   await expect(
@@ -195,7 +230,8 @@ test("mot de passe d'un autre compte : fenêtre, critères, succès", async ({ p
   );
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
   await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
-  await dialog(page).getByRole("button", { name: "Changer le mot de passe" }).click();
+  // Prendre le contrôle d'un compte n'est jamais couvert par le délai : le mot de passe est demandé.
+  await confirm(page, "Changer le mot de passe");
   await expect(page.locator(".toast")).toContainText("Mot de passe changé");
   await expect(dialog(page)).toHaveCount(0);
 });
@@ -216,10 +252,7 @@ test("supprimer : confirmation qui nomme le compte, annulation sans effet, puis 
   await row(page, "lea")
     .getByRole("button", { name: /^Supprimer/ })
     .click();
-  await page
-    .locator("dialog[open]")
-    .getByRole("button", { name: "Supprimer", exact: true })
-    .click();
+  await confirm(page, "Supprimer");
   await expect(page.locator(".toast")).toContainText("Compte lea supprimé");
   await expect(row(page, "lea")).toHaveCount(0);
   await shoot(page, "comptes-apres-suppression");
@@ -259,7 +292,7 @@ test("section personnelle des réglages : tous les rôles changent leur mot de p
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
   await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Changer le mot de passe" }).click();
-  await expect(dialog(page).getByText("L'ancien mot de passe est incorrect")).toBeVisible();
+  await expect(dialog(page).getByText("Mot de passe incorrect.")).toBeVisible();
   await expect(dialog(page).getByLabel("Ancien mot de passe")).toHaveValue("");
   await dialog(page).getByLabel("Ancien mot de passe").fill("Correct-Horse-9");
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
@@ -279,10 +312,10 @@ test("supprimer son propre compte : on retape son identifiant ; le dernier admin
   await expect(page.getByRole("heading", { name: "Supprimer ton compte ?" })).toBeVisible();
   await expect(dialog(page).getByText("Retape ton identifiant pour confirmer")).toBeVisible();
   await dialog(page).getByLabel("Retape ton identifiant pour confirmer").fill("paul");
-  await dialog(page).getByRole("button", { name: "Supprimer mon compte" }).click();
+  await confirm(page, "Supprimer mon compte");
   await expect(dialog(page).getByText("L'identifiant ne correspond pas, réessaye")).toBeVisible();
   await dialog(page).getByLabel("Retape ton identifiant pour confirmer").fill("marie");
-  await dialog(page).getByRole("button", { name: "Supprimer mon compte" }).click();
+  await confirm(page, "Supprimer mon compte");
   await expect(
     dialog(page).getByText("Tu es le dernier administrateur, ce compte ne peut pas être supprimé"),
   ).toBeVisible();
@@ -319,10 +352,7 @@ test("action lancée au moment d'une coupure : résultat inconnu, jamais rejoué
   await row(page, "lea")
     .getByRole("button", { name: /^Supprimer/ })
     .click();
-  await page
-    .locator("dialog[open]")
-    .getByRole("button", { name: "Supprimer", exact: true })
-    .click();
+  await confirm(page, "Supprimer");
   const unknown = page
     .locator(".toast")
     .filter({ hasText: "Le résultat de cette opération n'est pas connu." });
@@ -360,10 +390,7 @@ test("action coupée et non exécutée : la liste relue montre que rien n'a chan
   await row(page, "lea")
     .getByRole("button", { name: /^Supprimer/ })
     .click();
-  await page
-    .locator("dialog[open]")
-    .getByRole("button", { name: "Supprimer", exact: true })
-    .click();
+  await confirm(page, "Supprimer");
   await expect(pill(page)).toHaveText("Reconnexion…");
   await page.evaluate(() => {
     const s = (window as unknown as { __hearthSim: Sim }).__hearthSim;

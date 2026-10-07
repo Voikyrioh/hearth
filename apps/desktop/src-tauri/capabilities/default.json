@@ -53,6 +53,9 @@
     "allow-get-agent-update",
     "allow-update-agent",
     "allow-ack-agent-result",
+    "allow-get-reauth-state",
+    "allow-reauth-covers",
+    "allow-set-reauth-setting",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

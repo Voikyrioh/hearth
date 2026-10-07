@@ -94,6 +94,15 @@ export class NullLinkBridge implements LinkBridge {
   async deleteAccount(): Promise<never> {
     return this.unavailable();
   }
+  async getReauthState(): Promise<never> {
+    return this.unavailable();
+  }
+  async reauthCovers(): Promise<never> {
+    return this.unavailable();
+  }
+  async setReauthSetting(): Promise<never> {
+    return this.unavailable();
+  }
   async listTrustedDevices(): Promise<never> {
     return this.unavailable();
   }

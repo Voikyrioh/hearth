@@ -131,6 +131,9 @@ pub async fn start_booted(
         .await
         .expect("démarrage");
     let addr = running.server.local_addr();
+    // Ces scénarios envoient des actes bruts (session seule) : ils gardent le régime « l'agent accepte »
+    // d'avant HRT-30. Les scénarios de l'exigence sont dans `admin_reauth.rs` et dans la liaison.
+    running.sessions.set_reauth_required(false);
     Agent { running, addr }
 }
 
@@ -160,6 +163,7 @@ pub async fn start_updating(
     }
     .expect("démarrage");
     let addr = running.server.local_addr();
+    running.sessions.set_reauth_required(false);
     Agent { running, addr }
 }
 

@@ -27,18 +27,23 @@ fn current_username(manager: &LinkManager, id: &ServerId) -> Result<String, Link
 }
 
 /// Envoie une action planifiée ; un refus de la validation locale devient un refus typé, sans rien
-/// envoyer.
+/// envoyer. TOUTE action de compte est un acte d'administration : elle part par `execute_act` (mot de
+/// passe `admin_password` s'il y en a un, ET preuve de la clé de ce poste), jamais par `execute`.
 async fn send(
     manager: &LinkManager,
     id: &ServerId,
     planned: Result<Planned, Stop>,
+    admin_password: Option<&Secret>,
 ) -> Result<AccountOutcome, LinkFailure> {
     let planned = match planned {
         Ok(planned) => planned,
         Err(Stop::Refused(refusal)) => return Ok(AccountOutcome::Refused { refusal }),
         Err(Stop::Failed(failure)) => return Err(failure),
     };
-    match manager.execute(id, planned.request).await? {
+    match manager
+        .execute_act(id, planned.request, admin_password)
+        .await?
+    {
         ActionOutcome::Completed { status, body, .. } => {
             wire::interpret(planned.expect, status, &body)
         }
@@ -70,8 +75,15 @@ pub async fn create(
     username: &str,
     password: &Secret,
     role: RoleDto,
+    admin_password: Option<&Secret>,
 ) -> Result<AccountOutcome, LinkFailure> {
-    send(manager, id, wire::create(username, password.expose(), role)).await
+    send(
+        manager,
+        id,
+        wire::create(username, password.expose(), role),
+        admin_password,
+    )
+    .await
 }
 
 pub async fn change_role(
@@ -79,11 +91,13 @@ pub async fn change_role(
     id: &ServerId,
     account: &str,
     role: RoleDto,
+    admin_password: Option<&Secret>,
 ) -> Result<AccountOutcome, LinkFailure> {
     send(
         manager,
         id,
         wire::change_role(account, role).map_err(Stop::from),
+        admin_password,
     )
     .await
 }
@@ -93,8 +107,15 @@ pub async fn set_password(
     id: &ServerId,
     account: &str,
     password: &Secret,
+    admin_password: Option<&Secret>,
 ) -> Result<AccountOutcome, LinkFailure> {
-    send(manager, id, wire::set_password(account, password.expose())).await
+    send(
+        manager,
+        id,
+        wire::set_password(account, password.expose()),
+        admin_password,
+    )
+    .await
 }
 
 /// Changement de SON mot de passe, et du mot de passe mémorisé au coffre (reconnexion silencieuse).
@@ -114,10 +135,13 @@ pub async fn change_own_password(
     let planned =
         wire::change_own_password(&username, current.expose(), password.expose(), keep_address);
     if planned.is_err() {
-        return send(manager, id, planned).await;
+        return send(manager, id, planned, Some(current)).await;
     }
     let previous = manager.take_remembered_password(id).await?;
-    let result = send(manager, id, planned).await;
+    // `current` est AUSSI le mot de passe de confirmation de l'acte : l'ancien mot de passe est ce que
+    // l'agent vérifie, par le chemin de la connexion (BR-ACCT-009). Le mot de passe mémorisé au coffre
+    // n'est lu par aucun chemin de confirmation.
+    let result = send(manager, id, planned, Some(current)).await;
     match &result {
         Ok(AccountOutcome::Done { .. }) => {
             // Coffre en échec : l'entrée reste effacée, jamais fausse.
@@ -151,7 +175,10 @@ pub fn old_password_stands(result: &Result<AccountOutcome, LinkFailure>) -> bool
             // `apply_password` (`:318`), la seule écriture : rien n'a été exécuté.
             AccountRefusal::WrongPassword
             | AccountRefusal::WeakPassword { .. }
-            | AccountRefusal::Busy => true,
+            | AccountRefusal::Busy
+            // Refus de la confirmation, avant l'exécution : élévation fermée, attente de la connexion.
+            | AccountRefusal::PasswordRequired
+            | AccountRefusal::TooManyAttempts { .. } => true,
             AccountRefusal::InvalidUsername { .. }
             | AccountRefusal::UsernameTaken
             | AccountRefusal::LastAdmin
@@ -165,14 +192,18 @@ pub fn old_password_stands(result: &Result<AccountOutcome, LinkFailure>) -> bool
         Ok(AccountOutcome::Done { .. } | AccountOutcome::Unknown { .. }) => false,
         Err(failure) => match failure {
             // Rien n'est parti (hors « Connecté », suivi impossible) ou refus de rôle de l'agent.
+            // Sans clé au coffre, preuve non reconnue, défi indisponible, client trop ancien : l'agent
+            // refuse AVANT d'exécuter (ou rien n'est parti), l'ancien mot de passe est toujours le bon.
             LinkFailure::NotConnected
             | LinkFailure::TrackingUnavailable
             | LinkFailure::TrackingSlow
-            | LinkFailure::Forbidden => true,
+            | LinkFailure::Forbidden
+            | LinkFailure::NotRecognized
+            | LinkFailure::DeviceChallengeUnavailable
+            | LinkFailure::IncompatibleClient => true,
             LinkFailure::Unreachable
             | LinkFailure::NotAgent
             | LinkFailure::IncompatibleAgent
-            | LinkFailure::IncompatibleClient
             | LinkFailure::InvalidCredentials
             | LinkFailure::TooManyAttempts { .. }
             | LinkFailure::FingerprintChanged
@@ -183,9 +214,6 @@ pub fn old_password_stands(result: &Result<AccountOutcome, LinkFailure>) -> bool
             | LinkFailure::UnknownServer
             | LinkFailure::Storage
             | LinkFailure::Vault
-            // Une action de compte ne porte pas de preuve de clé : ces deux-là n'y existent pas.
-            | LinkFailure::NotRecognized
-            | LinkFailure::DeviceChallengeUnavailable
             | LinkFailure::Internal => false,
         },
     }
@@ -195,11 +223,13 @@ pub async fn close_sessions(
     manager: &LinkManager,
     id: &ServerId,
     account: &str,
+    admin_password: Option<&Secret>,
 ) -> Result<AccountOutcome, LinkFailure> {
     send(
         manager,
         id,
         wire::close_sessions(account).map_err(Stop::from),
+        admin_password,
     )
     .await
 }
@@ -209,11 +239,13 @@ pub async fn delete(
     id: &ServerId,
     account: &str,
     confirmation: Option<String>,
+    admin_password: Option<&Secret>,
 ) -> Result<AccountOutcome, LinkFailure> {
     send(
         manager,
         id,
         wire::delete(account, confirmation).map_err(Stop::from),
+        admin_password,
     )
     .await
 }

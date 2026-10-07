@@ -1,5 +1,5 @@
 //! Le secret d'empreinte des requêtes suivies, dans un fichier du dossier de données
-//! (`request_fingerprint.key`, HRT-32, ADR-0033).
+//! (`request_fingerprint.key`, HRT-32, ADR-0034).
 //!
 //! - **Absent : créé.** 32 octets du hasard du système, écrits dans un fichier voisin ouvert en
 //!   0600 **avant** d'y écrire le moindre octet (aucune fenêtre où le contenu serait lisible),

@@ -1,6 +1,6 @@
 # Le secret d'empreinte des requêtes suivies
 
-Cas : savoir où l'agent garde le secret qui clé l'empreinte des requêtes suivies (`Idempotency-Key`), le sauvegarder, le remplacer, ou comprendre un démarrage refusé. Décision : ADR-0033 ; règle : BR-RESIL-021.
+Cas : savoir où l'agent garde le secret qui clé l'empreinte des requêtes suivies (`Idempotency-Key`), le sauvegarder, le remplacer, ou comprendre un démarrage refusé. Décision : ADR-0034 ; règle : BR-RESIL-021.
 
 ## Où il est
 

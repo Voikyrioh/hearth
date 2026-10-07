@@ -73,6 +73,9 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`SecurityAlertBanner`](./SecurityAlertBanner.md) — Bandeau « Attaque probable détectée ».
 - [`AttackModeBanner`](./AttackModeBanner.md) — Bandeau « Mode attaque actif » (et suspendu).
 - [`AttackModePanel`](./AttackModePanel.md) — Carte « Mode attaque » : état, bouton, raison d'indisponibilité.
+- [`AdminActDialog`](./AdminActDialog.md) — LA fenêtre de confirmation de tous les actes d'administration (mot de passe selon ce que l'agent annonce, délai de 5 minutes, poste sans clé).
+- [`ReauthField`](./ReauthField.md) — Le champ « Ton mot de passe » de la confirmation d'un acte.
+- [`ReauthSettingCard`](./ReauthSettingCard.md) — Ligne « Demander mon mot de passe » de la page Sécurité.
 - [`AttackModeDialog`](./AttackModeDialog.md) — Confirmation avec mot de passe de l'activation ou de la désactivation.
 - [`TrustedDeviceTable`](./TrustedDeviceTable.md) — « Tes postes de confiance » : liste, « Ce poste », « Retirer », états.
 - [`RemoveDeviceDialog`](./RemoveDeviceDialog.md) — Retrait d'un poste de confiance (mot de passe demandé).

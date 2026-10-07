@@ -266,6 +266,9 @@ pub struct Options {
     /// Le client parle la clé d'appareil (défi signé, inscription). Faux par défaut : les scénarios
     /// d'avant HRT-23 voient un agent sans défi, comme avant (`Spy::old_agent`).
     pub device_key: bool,
+    /// L'agent EXIGE la confirmation des actes d'administration (HRT-30). Faux par défaut : les scénarios
+    /// de résilience envoient des routes d'acte brutes.
+    pub reauth_required: bool,
 }
 
 impl Default for Options {
@@ -276,6 +279,7 @@ impl Default for Options {
             config: fast_config(),
             updating: None,
             device_key: false,
+            reauth_required: false,
         }
     }
 }
@@ -360,9 +364,24 @@ pub struct SpyState {
     /// Chaque défi demandé, dans l'ordre.
     pub purposes: std::sync::Mutex<Vec<hearth_proto::api::sessions::ChallengePurpose>>,
     first: std::sync::Mutex<Option<hearth_proto::api::sessions::ChallengeResponse>>,
+    /// Chaque requête qui MODIFIE (tout sauf `GET`) partie vers l'agent, dans l'ordre : méthode et chemin.
+    pub writes: std::sync::Mutex<Vec<(String, String)>>,
+    /// L'agent est vu « d'avant la confirmation des actes » : `GET /security` perd `admin_reauth`.
+    pub hide_reauth: std::sync::atomic::AtomicBool,
 }
 
 impl SpyState {
+    /// Combien de requêtes qui modifient sont parties vers l'agent.
+    pub fn write_count(&self) -> usize {
+        self.writes.lock().unwrap().len()
+    }
+
+    /// Fait passer l'agent pour un agent d'avant la confirmation des actes.
+    pub fn hide_reauth(&self, hidden: bool) {
+        self.hide_reauth
+            .store(hidden, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub fn set(&self, mode: ChallengeMode) {
         *self.mode.lock().unwrap() = mode;
     }
@@ -389,6 +408,8 @@ impl Spy {
                 mode: std::sync::Mutex::new(mode),
                 purposes: std::sync::Mutex::new(Vec::new()),
                 first: std::sync::Mutex::new(None),
+                writes: std::sync::Mutex::new(Vec::new()),
+                hide_reauth: std::sync::atomic::AtomicBool::new(false),
             }),
         }
     }
@@ -586,7 +607,25 @@ impl hearth_link::ports::Transport for Spy {
         hearth_link::ports::transport::ApiResponse,
         hearth_link::ports::transport::TransportError,
     > {
-        self.inner.request(target, token, request).await
+        use hearth_link::ports::transport::Method;
+        if request.method != Method::Get {
+            self.state
+                .writes
+                .lock()
+                .unwrap()
+                .push((request.method.as_str().to_owned(), request.path.clone()));
+        }
+        let mut response = self.inner.request(target, token, request).await?;
+        if request.path == "/security"
+            && self
+                .state
+                .hide_reauth
+                .load(std::sync::atomic::Ordering::SeqCst)
+            && let Some(object) = response.body.as_object_mut()
+        {
+            object.remove("admin_reauth");
+        }
+        Ok(response)
     }
 
     async fn export_audit(
@@ -647,7 +686,8 @@ pub fn short_transport() -> HttpTransport {
 impl World {
     /// Agent installé, compte « marie », mandataire, `LinkManager` connecté.
     pub async fn connected(options: Options) -> Self {
-        let agent = TestAgent::install_with(options.updating).await;
+        let mut agent = TestAgent::install_with(options.updating).await;
+        agent.require_confirmation(options.reauth_required);
         agent.create_account("marie", options.role).await;
         let proxy = FaultProxy::start(agent.addr).await;
         let dir = agent::tmp::tempdir().unwrap();

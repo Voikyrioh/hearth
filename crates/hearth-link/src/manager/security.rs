@@ -42,12 +42,15 @@ impl LinkManager {
         matches!(load_key(&self.inner.deps, id), KeyState::Present(_))
     }
 
-    /// Active (`active: true`) ou désactive le mode attaque : le mot de passe actuel ET la preuve de
-    /// la clé de ce poste (usage `0x03`, liée au jeton et au geste). Hors « Connecté » :
-    /// `NotConnected` sans rien envoyer. Sans clé au coffre : `NoDeviceKey` sans AUCUN appel
-    /// d'écriture (le défi n'est même pas demandé). Ensuite c'est une action ordinaire (clé
-    /// d'opération, jamais rejouée, issue `ResultUnknown` si le lien tombe). Le mot de passe n'est
-    /// jamais gardé.
+    /// Active (`active: true`) ou désactive le mode attaque : un acte d'administration, le mot de passe
+    /// actuel ET la preuve de la clé de ce poste. Hors « Connecté » : `NotConnected` sans rien envoyer.
+    /// Sans clé au coffre : `NoDeviceKey` sans AUCUN appel d'écriture (le défi n'est même pas demandé).
+    /// Ensuite c'est une action ordinaire (clé d'opération, jamais rejouée, issue `ResultUnknown` si le
+    /// lien tombe). Le mot de passe n'est jamais gardé.
+    ///
+    /// Face à un agent qui annonce `admin_reauth` : le contrat commun des actes (`reauth`, usage `0x05`).
+    /// Face à un agent d'avant : la forme livrée (champs à plat, usage `0x03`), que l'agent accepte
+    /// toujours pendant la transition (ADR-0033).
     pub async fn set_attack_mode(
         &self,
         id: &ServerId,
@@ -58,19 +61,43 @@ impl LinkManager {
             return Err(LinkError::InvalidInput(InputField::Credentials));
         }
         let (target, token) = self.credentials(id)?;
+        if self.read_admin_reauth(&target, &token).await?.is_some() {
+            let action = ActionRequest {
+                method: Method::Put,
+                path: ATTACK_MODE_PATH.to_owned(),
+                body: Some(json!({ "active": active })),
+            };
+            return self
+                .send_confirmed(id, &target, &token, action, Some(password))
+                .await;
+        }
+        self.set_attack_mode_flat(id, &target, &token, active, password)
+            .await
+    }
+
+    /// La forme livrée (HRT-26) pour un agent d'avant la confirmation des actes : mot de passe et preuve
+    /// d'usage `0x03` à plat.
+    async fn set_attack_mode_flat(
+        &self,
+        id: &ServerId,
+        target: &Target,
+        token: &Secret,
+        active: bool,
+        password: &Secret,
+    ) -> Result<ActionOutcome, LinkError> {
         let deps = &self.inner.deps;
         let KeyState::Present(key) = load_key(deps, id) else {
             return Err(LinkError::NoDeviceKey);
         };
         let (_, shared) = self.handle(id)?;
         let username = shared.record().username;
-        let fingerprint = fingerprint_of(&target)?;
+        let fingerprint = fingerprint_of(target)?;
         let hash = token_hash(token.expose())
             .ok_or_else(|| LinkError::Protocol("jeton illisible".into()))?;
         // Un défi indisponible (coupure du seul défi, délai, réponse illisible) n'est pas « serveur
         // injoignable » : rien n'est parti, ni mot de passe ni preuve, et on le dit.
         let challenge =
-            match ask_challenge(deps, &target, &username, ChallengePurpose::AttackMode).await {
+            match ask_challenge(deps, target, &username, ChallengePurpose::AttackMode).await {
                 ChallengeAnswer::Issued(challenge) => challenge,
                 ChallengeAnswer::Unsupported => {
                     return Err(LinkError::Rejected(Some(ErrorCode::NotFound)));
@@ -94,7 +121,7 @@ impl LinkManager {
             "password": password.expose(),
             "device": proof,
         });
-        self.execute(
+        self.execute_unchecked(
             id,
             ActionRequest {
                 method: Method::Put,

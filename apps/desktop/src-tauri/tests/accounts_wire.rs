@@ -27,7 +27,7 @@ fn each_action_builds_its_own_method_path_and_body() {
     assert_eq!(create.request.method, Method::Post);
     assert_eq!(create.request.path, "/accounts");
     assert_eq!(
-        create.request.body.unwrap(),
+        create.request.body.clone().unwrap(),
         json!({ "username": "marie", "password": GOOD, "role": "readonly" })
     );
     assert_eq!(create.expect, Expect::Account);
@@ -35,13 +35,19 @@ fn each_action_builds_its_own_method_path_and_body() {
     let role = wire::change_role("01J9ZY0G3Q8M2K6W4T7V5N1B9D", RoleDto::Admin).unwrap();
     assert_eq!(role.request.method, Method::Patch);
     assert_eq!(role.request.path, "/accounts/01J9ZY0G3Q8M2K6W4T7V5N1B9D");
-    assert_eq!(role.request.body.unwrap(), json!({ "role": "admin" }));
+    assert_eq!(
+        role.request.body.clone().unwrap(),
+        json!({ "role": "admin" })
+    );
     assert_eq!(role.expect, Expect::Nothing);
 
     let password = planned(wire::set_password("ABC123", GOOD));
     assert_eq!(password.request.method, Method::Put);
     assert_eq!(password.request.path, "/accounts/ABC123/password");
-    assert_eq!(password.request.body.unwrap(), json!({ "password": GOOD }));
+    assert_eq!(
+        password.request.body.clone().unwrap(),
+        json!({ "password": GOOD })
+    );
     assert_eq!(password.expect, Expect::Closed);
 
     let own = planned(wire::change_own_password(
@@ -53,7 +59,7 @@ fn each_action_builds_its_own_method_path_and_body() {
     assert_eq!(own.request.method, Method::Put);
     assert_eq!(own.request.path, "/me/password");
     assert_eq!(
-        own.request.body.unwrap(),
+        own.request.body.clone().unwrap(),
         json!({ "current": "Old-Pass-12345", "password": GOOD })
     );
 
@@ -68,7 +74,7 @@ fn each_action_builds_its_own_method_path_and_body() {
     assert_eq!(plain.request.body, None);
     let own_account = wire::delete("ABC123", Some("marie".into())).unwrap();
     assert_eq!(
-        own_account.request.body.unwrap(),
+        own_account.request.body.clone().unwrap(),
         json!({ "confirmation": "marie" })
     );
 }
@@ -356,7 +362,7 @@ fn keeping_this_pc_recognized_is_sent_only_when_the_box_is_ticked() {
         true,
     ));
     assert_eq!(
-        kept.request.body.unwrap(),
+        kept.request.body.clone().unwrap(),
         json!({ "current": "Old-Pass-12345", "password": GOOD, "keep_address": true })
     );
     // Décochée par défaut : le champ n'est pas envoyé, l'adresse est oubliée comme les autres.
@@ -370,6 +376,7 @@ fn keeping_this_pc_recognized_is_sent_only_when_the_box_is_ticked() {
         forgotten
             .request
             .body
+            .clone()
             .unwrap()
             .get("keep_address")
             .is_none()

@@ -2,6 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 import App from "@/App.vue";
 import { SAMPLE_SERVERS } from "@/link";
+import { confirmDialog, reauthField } from "@/test/confirm";
 import { mountContext } from "@/test/mount";
 
 // Review de la PR #19 : « moi » est l'identité que l'AGENT donne pour la session, jamais une
@@ -55,8 +56,7 @@ describe("« moi » vient de l'agent", () => {
     await flushPromises();
     typeInto(document.querySelector('input[placeholder="ton-identifiant"]'), "marie");
     await flushPromises();
-    document.querySelector<HTMLButtonElement>("dialog button[type=submit]")?.click();
-    await flushPromises();
+    await confirmDialog("Supprimer mon compte");
     // Le compte est bien trouvé (pas « Ce compte n'existe pas ») : l'agent répond « dernier administrateur ».
     expect(document.body.textContent).not.toContain("Ce compte n'existe pas");
     expect(document.body.textContent).toContain(
@@ -75,7 +75,7 @@ describe("changer son mot de passe ne demande jamais la liste des comptes", () =
     await flushPromises();
     await wrapper.get('.mine[data-server="salon"] button').trigger("click");
     await flushPromises();
-    typeInto(document.querySelector('input[placeholder="Ancien mot de passe"]'), "Correct-Horse-9");
+    typeInto(reauthField(), "Correct-Horse-9");
     typeInto(document.querySelector('input[placeholder="Nouveau mot de passe"]'), GOOD);
     typeInto(document.querySelector('input[placeholder="Confirme le mot de passe"]'), GOOD);
     await flushPromises();

@@ -13,6 +13,8 @@ export function attackModeRefusalMessage(refusal: AttackModeRefusal): string {
       return t("failure.tooManyAttempts", { n: refusal.retry_after_s });
     case "busy":
       return t("security.serverBusy");
+    case "password_required":
+      return t("reauth.elapsed");
     case "unsupported":
       return t("security.unsupported");
     case "session_ended":

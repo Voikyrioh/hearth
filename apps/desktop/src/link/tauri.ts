@@ -33,6 +33,13 @@ import {
 } from "./devices";
 import { type MachineEvent, toMetrics, toView } from "./machine";
 import {
+  type AdminActKind,
+  type ReauthMode,
+  type ReauthSettingOutcome,
+  type ReauthState,
+  toReauthSettingOutcome,
+} from "./reauth";
+import {
   type AttackModeOutcome,
   type SecurityRead,
   type SecurityState,
@@ -328,9 +335,10 @@ export class TauriLinkBridge implements LinkBridge {
     username: string,
     password: string,
     role: Role,
+    adminPassword: string | null,
   ): Promise<AccountOutcome> {
     return toAccountOutcome(
-      unwrap(await commands.createAccount(serverId, username, password, role)),
+      unwrap(await commands.createAccount(serverId, username, password, role, adminPassword)),
     );
   }
 
@@ -338,17 +346,21 @@ export class TauriLinkBridge implements LinkBridge {
     serverId: string,
     accountId: string,
     role: Role,
+    adminPassword: string | null,
   ): Promise<AccountOutcome> {
-    return toAccountOutcome(unwrap(await commands.changeAccountRole(serverId, accountId, role)));
+    return toAccountOutcome(
+      unwrap(await commands.changeAccountRole(serverId, accountId, role, adminPassword)),
+    );
   }
 
   async setAccountPassword(
     serverId: string,
     accountId: string,
     password: string,
+    adminPassword: string,
   ): Promise<AccountOutcome> {
     return toAccountOutcome(
-      unwrap(await commands.setAccountPassword(serverId, accountId, password)),
+      unwrap(await commands.setAccountPassword(serverId, accountId, password, adminPassword)),
     );
   }
 
@@ -363,17 +375,42 @@ export class TauriLinkBridge implements LinkBridge {
     );
   }
 
-  async closeAccountSessions(serverId: string, accountId: string): Promise<AccountOutcome> {
-    return toAccountOutcome(unwrap(await commands.closeAccountSessions(serverId, accountId)));
+  async closeAccountSessions(
+    serverId: string,
+    accountId: string,
+    adminPassword: string | null,
+  ): Promise<AccountOutcome> {
+    return toAccountOutcome(
+      unwrap(await commands.closeAccountSessions(serverId, accountId, adminPassword)),
+    );
   }
 
   async deleteAccount(
     serverId: string,
     accountId: string,
     confirmation: string | null,
+    adminPassword: string | null,
   ): Promise<AccountOutcome> {
     return toAccountOutcome(
-      unwrap(await commands.deleteAccount(serverId, accountId, confirmation)),
+      unwrap(await commands.deleteAccount(serverId, accountId, confirmation, adminPassword)),
+    );
+  }
+
+  async getReauthState(serverId: string): Promise<ReauthState> {
+    return unwrap(await commands.getReauthState(serverId));
+  }
+
+  async reauthCovers(kind: AdminActKind, role: Role | null): Promise<boolean> {
+    return commands.reauthCovers(kind, role);
+  }
+
+  async setReauthSetting(
+    serverId: string,
+    mode: ReauthMode,
+    password: string,
+  ): Promise<ReauthSettingOutcome> {
+    return toReauthSettingOutcome(
+      unwrap(await commands.setReauthSetting(serverId, mode, password)),
     );
   }
 
@@ -425,8 +462,14 @@ export class TauriLinkBridge implements LinkBridge {
     unwrap(await commands.ackAgentResult(serverId, at));
   }
 
-  async updateAgent(serverId: string, version: string): Promise<AgentUpdateOutcome> {
-    return toAgentUpdateOutcome(unwrap(await commands.updateAgent(serverId, version)));
+  async updateAgent(
+    serverId: string,
+    version: string,
+    adminPassword: string,
+  ): Promise<AgentUpdateOutcome> {
+    return toAgentUpdateOutcome(
+      unwrap(await commands.updateAgent(serverId, version, adminPassword)),
+    );
   }
 
   async onAgentUpdate(listener: (event: AgentUpdateEvent) => void): Promise<Unsubscribe> {

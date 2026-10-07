@@ -9,6 +9,8 @@ import { startedApp } from "@/test/app";
 import { refusalMessage } from "./messages";
 
 const GOOD = "Sunny-Walk-Home-42";
+/** Le mot de passe de confirmation des actes : celui du compte simulé. */
+const OWN = "Correct-Horse-9";
 
 describe("accounts store", () => {
   it("reads the list of a server and says when the agent refuses it", async () => {
@@ -77,7 +79,7 @@ describe("account actions", () => {
     await store.load("forge");
     const toasts = useToastsStore();
     const actions = useAccountActions(() => "forge");
-    const report = await actions.create("sophie", GOOD, "readonly");
+    const report = await actions.create("sophie", GOOD, "readonly", OWN);
     await flushPromises();
     expect(report).toEqual({ kind: "done", sessionsClosed: 0 });
     expect(toasts.items.map((t) => t.message)).toContain("Compte sophie créé");
@@ -92,7 +94,7 @@ describe("account actions", () => {
     const { bridge } = await startedApp();
     await useAccountsStore().load("forge");
     const actions = useAccountActions(() => "forge");
-    const taken = await actions.create("PAUL", GOOD, "readonly");
+    const taken = await actions.create("PAUL", GOOD, "readonly", OWN);
     expect(taken).toEqual({ kind: "refused", refusal: { kind: "username_taken" } });
     const last = await actions.changeRole(
       {
@@ -104,6 +106,7 @@ describe("account actions", () => {
         sessionsOpen: 1,
       },
       "readonly",
+      OWN,
     );
     expect(last).toEqual({ kind: "refused", refusal: { kind: "last_admin" } });
     expect(bridge.calls.filter((c) => c === "account list")).toHaveLength(2);
@@ -118,8 +121,8 @@ describe("account actions", () => {
     const paul = store.of("forge")?.accounts.find((a) => a.username === "paul");
     expect(paul).toBeDefined();
     if (!paul) return;
-    await actions.closeSessions(paul);
-    await actions.changeRole(paul, "admin");
+    await actions.closeSessions(paul, OWN);
+    await actions.changeRole(paul, "admin", OWN);
     const messages = toasts.items.map((t) => t.message);
     expect(messages).toContain("Sessions de paul fermées");
     expect(messages).toContain("paul est maintenant Administrateur");
@@ -130,7 +133,7 @@ describe("account actions", () => {
     const toasts = useToastsStore();
     const actions = useAccountActions(() => "forge");
     bridge.actionMode = "cut";
-    const report = await actions.create("sophie", GOOD, "readonly");
+    const report = await actions.create("sophie", GOOD, "readonly", OWN);
     expect(report).toEqual({ kind: "unknown" });
     expect(bridge.calls.filter((c) => c === "account create sophie")).toHaveLength(1);
     expect(toasts.items).toHaveLength(1);
@@ -142,7 +145,7 @@ describe("account actions", () => {
     bridge.setState("forge", "offline");
     const toasts = useToastsStore();
     const actions = useAccountActions(() => "forge");
-    const report = await actions.create("sophie", GOOD, "readonly");
+    const report = await actions.create("sophie", GOOD, "readonly", OWN);
     expect(report).toEqual({ kind: "failed" });
     expect(bridge.calls.some((c) => c.startsWith("account create"))).toBe(false);
     expect(toasts.items[0]?.kind).toBe("error");
