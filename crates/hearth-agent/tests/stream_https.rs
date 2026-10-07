@@ -14,6 +14,7 @@ use hearth_proto::api::metrics::Sample;
 use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{ServerMessage, SessionNotice, Topic};
 use serde_json::json;
+use support::device::Actor;
 use support::https::{self, Agent};
 use support::probe::{FakeSystem, ToggleGpu, fast_stream, metering, metering_with};
 use support::ws::{self, End, WsClient};
@@ -559,14 +560,32 @@ async fn a_connection_subscribes_once_per_interval_without_being_closed() {
 }
 
 /// Un administrateur crée un compte par l'API : l'agent écrit l'événement et le diffuse.
-async fn create_account(agent: &Agent, admin: &str, username: &str) {
+/// L'acte est CONFIRMÉ (mot de passe et preuve de la clé de ce poste) : l'agent écrit aussi l'ouverture du
+/// délai du mot de passe (BR-TRUST-053), diffusée avant l'entrée de la création.
+async fn create_account(agent: &Agent, admin: &Actor, username: &str) {
     let reply = agent
-        .request("POST", "/accounts")
-        .token(admin)
-        .json(&json!({ "username": username, "password": PASSWORD, "role": "readonly" }))
+        .confirmed(
+            admin,
+            "POST",
+            "/accounts",
+            json!({ "username": username, "password": PASSWORD, "role": "readonly" }),
+        )
+        .await
         .send()
         .await;
     assert_eq!(reply.status, 201, "{:?}", reply.body);
+}
+
+/// Le prochain événement du journal du flux, hors ouverture du délai du mot de passe.
+async fn next_audit(client: &mut WsClient) -> hearth_proto::api::audit::AuditEventItem {
+    loop {
+        let ServerMessage::Audit { event } = client.expect().await else {
+            panic!("un événement du journal était attendu");
+        };
+        if event.action != "reauth.elevation" {
+            return event;
+        }
+    }
 }
 
 #[tokio::test]
@@ -574,7 +593,7 @@ async fn an_administrator_demoted_during_the_stream_loses_the_audit_topic() {
     let env = env().await;
     let agent = https::start_metered(&env, metering_with(fast_stream())).await;
     // Un deuxième administrateur : on ne rétrograde pas le dernier.
-    let root = token(&env, &agent, "root", Role::Admin).await;
+    let root = agent.actor(&env, "root", Role::Admin).await;
     let marie = env.create("marie", Role::Admin).await;
     let reply = agent
         .request("POST", "/sessions")
@@ -591,9 +610,7 @@ async fn an_administrator_demoted_during_the_stream_loses_the_audit_topic() {
         .await;
     assert_eq!(client.expect().await, ServerMessage::Pong { n: 1 });
     create_account(&agent, &root, "paul").await;
-    let ServerMessage::Audit { event } = client.expect().await else {
-        panic!("un événement du journal était attendu");
-    };
+    let event = next_audit(&mut client).await;
     assert_eq!(
         (event.action.as_str(), event.target.as_deref()),
         ("account.create", Some("paul"))
@@ -663,7 +680,8 @@ async fn the_audit_topic_is_for_administrators_and_carries_the_account_creation(
     let env = env().await;
     let agent = https::start_metered(&env, metering_with(fast_stream())).await;
     let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
-    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let marie = agent.actor(&env, "marie", Role::Admin).await;
+    let admin = marie.token.clone();
 
     // Un compte lecture seule ne peut pas s'abonner ; le flux reste ouvert pour le reste.
     let mut reader = ws::open(&agent).await;
@@ -686,10 +704,8 @@ async fn the_audit_topic_is_for_administrators_and_carries_the_account_creation(
         .send(&hearth_proto::stream::ClientMessage::Ping { n: 2 })
         .await;
     assert_eq!(owner.expect().await, ServerMessage::Pong { n: 2 });
-    create_account(&agent, &admin, "paul").await;
-    let ServerMessage::Audit { event } = owner.expect().await else {
-        panic!("un événement du journal était attendu");
-    };
+    create_account(&agent, &marie, "paul").await;
+    let event = next_audit(&mut owner).await;
     assert_eq!(event.action, "account.create");
     assert_eq!(event.action_label, "Création de compte");
     assert_eq!(event.account.as_deref(), Some("marie"));
