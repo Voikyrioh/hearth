@@ -63,7 +63,8 @@ async fn free_failures(env: &Env, username: &str) {
 // ---- B1 : une attaque qui dure ne fait pas tourner le journal
 
 #[tokio::test]
-async fn an_attack_of_hours_leaves_a_bounded_journal_with_the_exact_count_of_attempts() {
+async fn an_attack_of_hours_with_a_new_address_each_time_leaves_a_journal_bounded_by_time_with_the_exact_count()
+ {
     let env = env().await;
     let minutes: u32 = 180;
     let per_minute: u32 = 4;
@@ -78,8 +79,7 @@ async fn an_attack_of_hours_leaves_a_bounded_journal_with_the_exact_count_of_att
         }
         env.audit_recorder.flush().await;
     }
-    env.clock.advance(Duration::seconds(61));
-    env.audit_recorder.flush().await;
+    env.audit_recorder.flush_all().await;
 
     // Toutes les pages du journal.
     let mut records = Vec::new();
@@ -105,18 +105,20 @@ async fn an_attack_of_hours_leaves_a_bounded_journal_with_the_exact_count_of_att
     // synthèse vaut ses répétitions.
     let counted: u32 = logins.iter().map(|record| record.repeat_count.max(1)).sum();
     assert_eq!(counted, minutes * per_minute);
-    // BR-AUDIT-007 modifiée (Q14, point 9) : l'adresse entre dans la clé de regroupement. Cette
-    // attaque change d'adresse à CHAQUE tentative : un groupe par adresse, donc plus rien ne se
-    // regroupe, et le journal compte une entrée par tentative (814 entrées pour 720 tentatives, contre
-    // 541 avec la fenêtre fixe sans adresse). C'est le risque noté par le détenteur ; la fenêtre qui
-    // s'allonge borne la même attaque depuis UNE adresse (`domain::audit::repeat`, test
-    // `three_hours_of_attack_from_one_address_write_a_few_dozen_entries_not_hundreds` : 48
-    // entrées pour 2 160 événements). Valeur exacte, déterministe.
-    assert_eq!(
+    // BR-AUDIT-007 (Q14, points 9 et 10) : un groupe par adresse, au plus 8 adresses par famille et
+    // par fenêtre, une synthèse « N tentatives depuis M adresses » au-delà, la fenêtre de la
+    // famille qui s'allonge. Cette attaque change d'adresse à CHAQUE tentative ; le nombre d'entrées
+    // est borné par le TEMPS, pas par le nombre de tentatives (le test d'avant : 541 ; sans plafond
+    // par famille : 814). Valeur exacte, déterministe.
+    assert!(
+        records.len() < 541,
+        "{} entrées pour {} tentatives",
         records.len(),
-        814,
-        "entrées pour {} tentatives",
         minutes * per_minute
+    );
+    eprintln!(
+        "MESURE login_review : {} entrées pour 720 tentatives",
+        records.len()
     );
 }
 

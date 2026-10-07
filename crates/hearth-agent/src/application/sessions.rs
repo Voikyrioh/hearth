@@ -613,7 +613,7 @@ impl SessionService {
                 }
                 // L'épisode d'alerte qui commence ou finit avec cet échec (une fois par épisode,
                 // seulement pour un compte qui existe : rien pour un identifiant inexistant).
-                self.signal_alert(alert, targeted, client, wait).await;
+                self.signal_alert(alert, targeted, client, wait);
                 return Err(match wait {
                     Some(retry_after) => LoginError::TooManyAttempts { retry_after },
                     None => LoginError::InvalidCredentials,
@@ -710,27 +710,26 @@ impl SessionService {
         })
     }
 
-    /// Dit à l'alerte qu'un épisode commence ou finit pour ce compte. Un échec d'écriture ne fait
-    /// jamais échouer la connexion : il est tracé.
-    async fn signal_alert(
+    /// Dit à l'alerte qu'un épisode commence ou finit. **Hors du chemin de la réponse** : une tâche
+    /// détachée écrit l'entrée, la tentative ne l'attend jamais. Et la tâche est lancée **de la même
+    /// façon que le compte existe ou non** (elle n'écrit rien s'il n'existe pas) : aucun écart de
+    /// travail ni de temps sur le chemin de la requête n'est observable (BR-CONN-013).
+    fn signal_alert(
         &self,
         change: Option<AlertChange>,
         targeted: Option<Username>,
         client: &ClientInfo,
         wait: Option<Duration>,
     ) {
-        let (Some(change), Some(account), Some(security)) = (change, targeted, &self.security)
-        else {
+        let (Some(change), Some(security)) = (change, &self.security) else {
             return;
         };
-        let origin = Origin::client(Some(&client.name), &client.addr);
-        let written = match change {
-            AlertChange::Started { .. } => security.alert_started(&account, origin, wait).await,
-            AlertChange::Ended => security.alert_ended(&account, origin).await,
-        };
-        if let Err(error) = written {
-            tracing::error!(%error, "entrée d'alerte non écrite");
-        }
+        security.spawn_signal(
+            change,
+            targeted,
+            Origin::client(Some(&client.name), &client.addr),
+            wait,
+        );
     }
 
     /// Écrit un refus de connexion au journal, par le regroupement des refus (une entrée puis des

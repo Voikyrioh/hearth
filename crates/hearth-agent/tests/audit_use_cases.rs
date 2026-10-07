@@ -780,7 +780,7 @@ async fn a_thousand_identical_refusals_make_two_entries() {
 }
 
 #[tokio::test]
-async fn refusals_of_different_accounts_are_not_grouped_and_a_later_one_brings_the_summary() {
+async fn refusals_of_different_accounts_are_not_grouped_and_the_next_window_of_a_group_doubles() {
     let env = env().await;
     for account in ["lucas", "paul", "carl"] {
         for _ in 0..3 {
@@ -799,6 +799,32 @@ async fn refusals_of_different_accounts_are_not_grouped_and_a_later_one_brings_t
     assert_eq!(records.len(), 6);
     assert_eq!(records.iter().filter(|r| r.repeat_count == 2).count(), 3);
     assert_eq!(records.iter().filter(|r| r.repeat_count == 0).count(), 3);
+}
+
+#[tokio::test]
+async fn five_thousand_refusals_of_one_account_with_changing_hosts_and_addresses_make_nine_entries()
+{
+    // Le cas que le plafond par famille couvre (Q14, point 10) : l'adresse change à chaque requête.
+    let env = env().await;
+    for n in 0..5000 {
+        env.audit_sink
+            .record(
+                Actor::new(
+                    Some(Username::parse("lucas").unwrap()),
+                    Origin::client(Some(&format!("poste-{n}")), &format!("2001:db8::{n:x}")),
+                ),
+                AuditAction::AuditRead,
+                Target::Route("/audit"),
+                Outcome::Denied(Reason::ReadOnly),
+            )
+            .await;
+    }
+    env.clock.advance(time::Duration::seconds(61));
+    env.audit_recorder.flush().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), 9, "huit adresses, une synthèse");
+    assert_eq!(records[8].repeat_count, 4992, "au compte exact");
+    assert_eq!(records[8].origin_name, None, "ni poste ni adresse");
 }
 
 #[tokio::test]
@@ -865,7 +891,7 @@ async fn targeting_three_accounts_in_a_minute_leaves_a_trace_for_each() {
 }
 
 #[tokio::test]
-async fn refused_logins_from_many_addresses_leave_one_entry_and_one_summary() {
+async fn refused_logins_from_many_addresses_leave_eight_entries_and_one_summary() {
     // Le vrai chemin de production : des connexions refusées (identifiant inconnu), chacune d'une
     // adresse différente, donc hors de portée du verrouillage par adresse. Scénario d'origine,
     // assertions d'origine ; seul l'identifiant varie à chaque tentative (400 identifiants, 400
@@ -887,20 +913,38 @@ async fn refused_logins_from_many_addresses_leave_one_entry_and_one_summary() {
     env.clock.advance(time::Duration::seconds(61));
     env.audit_recorder.flush().await;
     let records = every(&env).await;
-    // BR-AUDIT-007 (Q14, point 9) : l'adresse entre dans la clé de regroupement. Chaque tentative
-    // vient d'une adresse différente : un groupe par adresse, donc une entrée par tentative (le
-    // risque dit de l'ADR-0024), toutes comptées, aucune perdue.
-    assert_eq!(records.len(), 400);
-    assert!(records.iter().all(|record| record.repeat_count == 0));
+    // BR-AUDIT-007 (Q14, points 9 et 10) : un groupe par adresse, et au plus 8 adresses par famille
+    // et par fenêtre. 400 adresses : les 8 premières ont leur entrée, les 392 autres une seule
+    // synthèse « 392 tentatives depuis 256 adresses » (adresses comptées jusqu'au plafond de 256).
+    assert_eq!(records.len(), 9, "huit premiers refus et une synthèse");
     assert!(records.iter().all(|record| record.account.is_none()));
-    let addresses: std::collections::HashSet<_> = records
+    let summary = records
         .iter()
+        .find(|record| record.repeat_count > 0)
+        .unwrap();
+    assert_eq!(summary.repeat_count, 392, "aucune tentative perdue");
+    assert!(
+        summary
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("392 tentatives depuis 256 adresses")),
+        "{:?}",
+        summary.reason
+    );
+    assert_eq!(
+        summary.origin_addr.as_deref(),
+        Some(""),
+        "aucune adresse dans la synthèse"
+    );
+    let firsts: std::collections::HashSet<_> = records
+        .iter()
+        .filter(|record| record.repeat_count == 0)
         .map(|record| record.origin_addr.clone().unwrap_or_default())
         .collect();
     assert_eq!(
-        addresses.len(),
-        400,
-        "le journal dit d'où vient chaque refus"
+        firsts.len(),
+        8,
+        "le journal dit d'où viennent les huit premiers"
     );
 }
 
@@ -937,24 +981,33 @@ async fn refused_logins_from_many_addresses_are_all_counted_in_bounded_entries()
     env.clock.advance(time::Duration::seconds(61));
     env.audit_recorder.flush().await;
     let records = every(&env).await;
-    // BR-AUDIT-007 (Q14, point 9) : l'adresse entre dans la clé de regroupement. Chaque tentative
-    // vient d'une adresse différente : une entrée par tentative, aucune synthèse, aucune tentative
-    // perdue (le risque dit de l'ADR-0024). 11 refus après vérification (dont l'échec n° 11 qui
-    // déclenche l'attente), une entrée « Blocage temporaire », puis 389 refus dus au ralentissement.
-    assert!(records.iter().all(|record| record.repeat_count == 0));
+    // BR-AUDIT-007 (Q14, points 9 et 10) : trois familles (refus après vérification, blocage,
+    // refus ralentis), chacune au plus 8 entrées par adresse puis UNE synthèse. Aucune tentative
+    // n'est perdue : 11 refus après vérification (dont l'échec n° 11 qui déclenche l'attente), une
+    // entrée « Blocage temporaire », puis 389 refus dus au ralentissement.
     let slowed = "trop de tentatives, attente de 2 s";
-    let count = |action: &str, reason: &str| {
-        records
+    let total = |action: &str, reason: &str| -> (usize, u32) {
+        let of: Vec<_> = records
             .iter()
             .filter(|record| {
-                record.action == action && record.reason.as_deref().unwrap_or_default() == reason
+                record.action == action
+                    && record
+                        .reason
+                        .as_deref()
+                        .unwrap_or_default()
+                        .starts_with(reason)
             })
-            .count()
+            .collect();
+        let firsts = of.iter().filter(|record| record.repeat_count == 0).count();
+        (
+            of.len(),
+            firsts as u32 + of.iter().map(|record| record.repeat_count).sum::<u32>(),
+        )
     };
-    assert_eq!(count("login", "identifiants incorrects"), 11);
-    assert_eq!(count("login.locked", slowed), 1);
-    assert_eq!(count("login", slowed), 389);
-    assert_eq!(records.len(), 401);
+    assert_eq!(total("login", "identifiants incorrects"), (9, 11));
+    assert_eq!(total("login.locked", slowed), (1, 1));
+    assert_eq!(total("login", slowed), (9, 389));
+    assert_eq!(records.len(), 19, "bornées : 8 + 1, 1, 8 + 1");
 }
 
 #[tokio::test]

@@ -350,6 +350,7 @@ async fn observe(
     from: &str,
     proof: Option<&DeviceProof>,
 ) -> Observation {
+    env.security.settle().await;
     let (hashes, signatures, before, journal) = (
         env.hasher.verifications(),
         env.verifier.calls(),
@@ -394,6 +395,7 @@ async fn oracle_setup(alert: bool) -> (Env, DeviceKey) {
     for name in ["marie", "fantome"] {
         attack(&env, name, failures).await;
     }
+    env.security.settle().await;
     (env, key)
 }
 
@@ -434,6 +436,8 @@ async fn a_device_without_account_sees_the_same_answer_whether_the_identifier_ex
 // ---------------------------------------------------------------------------------------------
 
 async fn alert_entries(env: &Env) -> Vec<(Option<String>, Option<String>, String)> {
+    // L'entrée d'alerte est écrite hors du chemin de la requête : on attend la tâche.
+    env.security.settle().await;
     sqlx::query_as::<_, (Option<String>, Option<String>, String)>(
         "SELECT account, target, outcome FROM audit_events WHERE action = 'security.alert' ORDER BY id",
     )
@@ -480,6 +484,7 @@ async fn the_end_of_the_alert_is_signalled_once_by_the_sweep_and_a_new_episode_s
     let env = env().await;
     env.create("marie", Role::Admin).await;
     attack(&env, "marie", 11).await;
+    env.security.settle().await;
     assert_eq!(env.security.sweep().await.unwrap(), 0, "l'épisode dure");
     env.clock.advance(Duration::minutes(29));
     assert_eq!(env.security.sweep().await.unwrap(), 0);
@@ -488,7 +493,10 @@ async fn the_end_of_the_alert_is_signalled_once_by_the_sweep_and_a_new_episode_s
     assert_eq!(env.security.sweep().await.unwrap(), 0, "une seule fois");
     let entries = alert_entries(&env).await;
     assert_eq!(entries.len(), 2, "{entries:?}");
-    assert_eq!(entries[1].1.as_deref(), Some("fin de l'alerte"));
+    assert_eq!(
+        entries[1].1.as_deref(),
+        Some("fin de l'alerte (levée par l'agent)")
+    );
     assert_eq!(
         scalar(
             &env,
@@ -507,12 +515,16 @@ async fn a_counter_that_starts_over_without_a_sweep_still_ends_the_old_episode_o
     let env = env().await;
     env.create("marie", Role::Admin).await;
     attack(&env, "marie", 11).await;
+    env.security.settle().await;
     env.clock.advance(Duration::minutes(31));
     // La première tentative après 30 minutes remet le compteur à zéro : fin de l'épisode.
     let _ = wrong(&env, "marie", &stranger(500)).await;
     let entries = alert_entries(&env).await;
     assert_eq!(entries.len(), 2, "{entries:?}");
-    assert_eq!(entries[1].1.as_deref(), Some("fin de l'alerte"));
+    assert_eq!(
+        entries[1].1.as_deref(),
+        Some("fin de l'alerte (levée par l'agent)")
+    );
     assert_eq!(env.security.sweep().await.unwrap(), 0);
 }
 
@@ -663,4 +675,114 @@ async fn the_stream_always_tells_the_state_after_auth_then_on_every_change_and_o
     assert!(view.alert.own);
     assert_eq!(view.alert.others, None);
     agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Garde d'horloge et purge
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_wall_clock_set_back_or_forward_never_locks_anybody_out_and_ends_the_alert_once() {
+    let (env, key) = marie_under_attack().await;
+    // Horloge reculée d'un an : le compteur et l'alerte sont lus comme périmés (même garde que le
+    // compteur), personne n'est refusé au-delà du plafond de deux minutes, un poste reconnu passe.
+    env.clock.advance(Duration::days(-365));
+    let stranger_error = env
+        .sessions
+        .login("marie", secret(PASSWORD), &client_at("10.9.9.9"))
+        .await;
+    match stranger_error {
+        Ok(_) => {}
+        Err(LoginError::TooManyAttempts { retry_after }) => {
+            assert!(retry_after <= Duration::minutes(2), "{retry_after:?}");
+        }
+        Err(other) => panic!("{other:?}"),
+    }
+    let proof = key.login_proof(&env, "marie", CLIENT_ADDR);
+    assert!(
+        env.sessions
+            .login_with_device(
+                "marie",
+                secret(PASSWORD),
+                &client_at(CLIENT_ADDR),
+                Some(&proof)
+            )
+            .await
+            .is_ok()
+    );
+    // Horloge remise puis avancée de deux jours : l'épisode est fini, signalé UNE fois.
+    env.clock.advance(Duration::days(365 + 2));
+    assert_eq!(env.security.sweep().await.unwrap(), 1);
+    assert_eq!(env.security.sweep().await.unwrap(), 0);
+    let entries = alert_entries(&env).await;
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|e| e.1.as_deref() == Some("fin de l'alerte (levée par l'agent)"))
+            .count(),
+        1,
+        "{entries:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_purge_keeps_an_alert_in_progress_and_forgets_an_ended_one_with_its_mark() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    attack(&env, "marie", 11).await;
+    env.security.settle().await;
+    // Pendant l'alerte : la purge ne touche pas la ligne ni sa marque.
+    env.clock.advance(Duration::minutes(10));
+    env.maintenance.purge().await.unwrap();
+    assert_eq!(
+        scalar(
+            &env,
+            "SELECT COUNT(*) FROM identifier_slowdowns WHERE alerted_at IS NOT NULL"
+        )
+        .await,
+        1
+    );
+    // Finie : le balayage la consigne et efface la marque, puis la purge efface la ligne.
+    env.clock.advance(Duration::minutes(25));
+    assert_eq!(env.security.sweep().await.unwrap(), 1);
+    assert_eq!(
+        scalar(
+            &env,
+            "SELECT COUNT(*) FROM identifier_slowdowns WHERE alerted_at IS NOT NULL"
+        )
+        .await,
+        0
+    );
+    env.maintenance.purge().await.unwrap();
+    assert_eq!(
+        scalar(&env, "SELECT COUNT(*) FROM identifier_slowdowns").await,
+        0
+    );
+    assert_eq!(
+        env.security.sweep().await.unwrap(),
+        0,
+        "rien ne reste à finir"
+    );
+    assert_eq!(alert_entries(&env).await.len(), 2, "début et fin, une fois");
+}
+
+/// Hors du chemin de la réponse : l'identifiant existant ou non lance la même tâche à la 11e
+/// tentative, et la réponse est la même.
+#[tokio::test]
+async fn the_eleventh_answer_is_the_same_for_a_missing_and_an_existing_identifier_and_writes_nothing_itself()
+ {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    attack(&env, "marie", 10).await;
+    attack(&env, "fantome", 10).await;
+    let before = scalar(&env, "SELECT COUNT(*) FROM audit_events").await;
+    let marie = on_the_wire(wrong(&env, "marie", &stranger(900)).await).await;
+    let fantome = on_the_wire(wrong(&env, "fantome", &stranger(900)).await).await;
+    assert_eq!(marie, fantome);
+    // Sans attendre la tâche détachée : le chemin de la requête n'a écrit que ses deux refus.
+    let during = scalar(&env, "SELECT COUNT(*) FROM audit_events").await - before;
+    assert!(during <= 4, "{during}");
+    env.security.settle().await;
+    let entries = alert_entries(&env).await;
+    assert_eq!(entries.len(), 1, "{entries:?}");
 }

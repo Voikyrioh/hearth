@@ -184,7 +184,9 @@ impl Target {
             Self::AgentVersion(version) => Some(format!("version {version}")),
             Self::Device(name) => Some(format!("poste {}", name.as_str())),
             Self::Alert(AlertPhase::Started) => Some("début de l'alerte".to_owned()),
-            Self::Alert(AlertPhase::Ended) => Some("fin de l'alerte".to_owned()),
+            Self::Alert(AlertPhase::Ended) => {
+                Some("fin de l'alerte (levée par l'agent)".to_owned())
+            }
         }
     }
 }
@@ -337,6 +339,9 @@ pub struct AuditEvent {
     /// Pour une entrée de synthèse (`repeat::RepeatFilter`) : combien d'autres fois le même
     /// événement s'est produit dans la fenêtre ; 0 pour une entrée ordinaire.
     pub repeat_count: u32,
+    /// Pour une synthèse « N tentatives depuis M adresses » (`repeat::RepeatFilter`, plafond par clé
+    /// sans adresse) : combien d'adresses distinctes ont fait ces `repeat_count` tentatives ; 0 sinon.
+    pub addresses: u32,
 }
 
 impl AuditEvent {
@@ -354,7 +359,18 @@ impl AuditEvent {
             target,
             outcome,
             repeat_count: 0,
+            addresses: 0,
         }
+    }
+
+    /// La synthèse de `attempts` tentatives venues de `addresses` adresses distinctes qui n'ont pas eu
+    /// leur entrée par adresse (`repeat::MAX_ADDRESSES` par fenêtre). **Aucune adresse n'y est
+    /// écrite** : ni liste, ni celle de la dernière occurrence ; l'origine reste sans adresse.
+    pub fn with_addresses(mut self, attempts: u32, addresses: u32) -> Self {
+        self.actor.origin = Origin::client(None, "");
+        self.repeat_count = attempts;
+        self.addresses = addresses;
+        self
     }
 
     /// L'entrée de synthèse de `count` autres occurrences.
@@ -399,6 +415,11 @@ impl AuditEvent {
                     (Reason::TooVaried, n) => {
                         format!("{}, {n} événements regroupés", reason.text())
                     }
+                    (_, n) if self.addresses > 0 => format!(
+                        "{} ({n} tentatives depuis {} adresses)",
+                        reason.text(),
+                        self.addresses
+                    ),
                     (_, n) => format!("{} ({n} autres fois en 1 min)", reason.text()),
                 }),
             repeat_count: self.repeat_count,

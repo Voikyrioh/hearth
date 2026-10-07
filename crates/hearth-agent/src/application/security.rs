@@ -11,7 +11,10 @@
 //! n'existe pas ne déclenche rien : ni alerte ni entrée au journal.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
+
+use tokio::task::JoinHandle;
 
 use time::{Duration, OffsetDateTime};
 
@@ -24,7 +27,7 @@ use crate::domain::accounts::Username;
 use crate::domain::audit::{
     Actor, AlertPhase, AuditAction, AuditEvent, Origin, Outcome, Reason, Target,
 };
-use crate::domain::identifier_slowdown::{self, Slowdown};
+use crate::domain::identifier_slowdown::{self, AlertChange, Slowdown};
 use crate::domain::lockout::{AttemptKey, retry_after_seconds};
 use crate::domain::sessions::SessionId;
 
@@ -55,7 +58,15 @@ pub struct SecurityService {
     clock: Arc<dyn Clock>,
     trail: Arc<AuditTrail>,
     feed: Arc<dyn SecurityFeed>,
+    /// Les clés des comptes existants, relues au plus toutes les `ACCOUNTS_TTL` (chaque tic du flux
+    /// de chaque administrateur relit son état : la liste des comptes ne se relit pas à chaque fois).
+    existing: Mutex<Option<(Instant, Arc<Vec<String>>)>>,
+    /// Les écritures d'alerte lancées hors du chemin des requêtes (voir `spawn_signal`).
+    pending: Mutex<Vec<JoinHandle<()>>>,
 }
+
+/// Durée de vie de la liste des comptes gardée en mémoire par `state_for`.
+const ACCOUNTS_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl SecurityService {
     #[allow(clippy::too_many_arguments)]
@@ -76,6 +87,72 @@ impl SecurityService {
             clock,
             trail,
             feed,
+            existing: Mutex::new(None),
+            pending: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Les clés (`AttemptKey::identifier`) des comptes existants, relues au plus toutes les 5 s.
+    async fn existing_keys(&self) -> Result<Arc<Vec<String>>, StoreError> {
+        let cached = self
+            .existing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .filter(|(at, _)| at.elapsed() < ACCOUNTS_TTL)
+            .map(|(_, keys)| keys.clone());
+        if let Some(keys) = cached {
+            return Ok(keys);
+        }
+        let keys: Arc<Vec<String>> = Arc::new(
+            self.accounts
+                .list()
+                .await?
+                .iter()
+                .map(|other| {
+                    AttemptKey::identifier(other.username.as_str())
+                        .as_str()
+                        .to_owned()
+                })
+                .collect(),
+        );
+        *self.existing.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some((Instant::now(), keys.clone()));
+        Ok(keys)
+    }
+
+    /// Écrit l'entrée d'un changement d'épisode **dans une tâche détachée** : la tentative qui l'a
+    /// ouvert n'attend rien. `account` absent (identifiant inexistant) : la tâche est lancée de la
+    /// même façon et n'écrit rien. Un échec d'écriture est tracé, jamais rendu à l'appelant.
+    pub fn spawn_signal(
+        self: &Arc<Self>,
+        change: AlertChange,
+        account: Option<Username>,
+        origin: Origin,
+        wait: Option<Duration>,
+    ) {
+        let service = self.clone();
+        let handle = tokio::spawn(async move {
+            let Some(account) = account else { return };
+            let written = match change {
+                AlertChange::Started { .. } => service.alert_started(&account, origin, wait).await,
+                AlertChange::Ended => service.alert_ended(&account, origin).await,
+            };
+            if let Err(error) = written {
+                tracing::error!(%error, "entrée d'alerte non écrite");
+            }
+        });
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        pending.retain(|task| !task.is_finished());
+        pending.push(handle);
+    }
+
+    /// Attend les écritures d'alerte lancées par `spawn_signal` (les tests lisent le journal ensuite).
+    pub async fn settle(&self) {
+        let tasks: Vec<JoinHandle<()>> =
+            std::mem::take(&mut *self.pending.lock().unwrap_or_else(PoisonError::into_inner));
+        for task in tasks {
+            let _ = task.await;
         }
     }
 
@@ -110,17 +187,7 @@ impl SecurityService {
             if alerting_others == 0 {
                 Some(0)
             } else {
-                let existing: Vec<String> = self
-                    .accounts
-                    .list()
-                    .await?
-                    .iter()
-                    .map(|other| {
-                        AttemptKey::identifier(other.username.as_str())
-                            .as_str()
-                            .to_owned()
-                    })
-                    .collect();
+                let existing = self.existing_keys().await?;
                 let count = rows
                     .iter()
                     .filter(|(key, row)| {
