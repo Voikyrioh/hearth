@@ -919,6 +919,20 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     let password_victim = env.create("v-pass", Role::ReadOnly).await;
     let sessions_victim = env.create("v-sess", Role::ReadOnly).await;
     let delete_victim = env.create("v-del", Role::ReadOnly).await;
+    // Un poste de confiance de `carl`, que la route de retrait peut retirer (HRT-22).
+    let own_account = env.service.find("carl").await.unwrap().id;
+    env.insert_device(
+        &own_account,
+        "01JDEVICEOFCARL0000000000",
+        &"ab".repeat(16),
+        "poste-de-carl",
+    )
+    .await;
+
+    // `carl` ouvre aussi une session AVEC la clé d'un poste inscrit : retirer un poste exige le mot de passe
+    // et la preuve de la clé du poste courant (Q16).
+    let carl_key = support::device::DeviceKey::new();
+    let carl_session = support::device::login_token(&api, &carl_key, "carl", PASSWORD).await;
 
     let successes = |env: &support::Env| {
         let pool = env.db.pool().clone();
@@ -950,6 +964,23 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             ("DELETE", "/sessions/current") => {
                 api.delete("/sessions/current")
                     .token(logout_token.as_deref().unwrap())
+                    .send()
+                    .await
+            }
+            ("DELETE", "/me/devices/{id}") => {
+                let target = "01JDEVICEOFCARL0000000000";
+                let body = support::device::removal_body(
+                    &api,
+                    &carl_key,
+                    "carl",
+                    &carl_session,
+                    target,
+                    PASSWORD,
+                )
+                .await;
+                api.delete(&format!("/me/devices/{target}"))
+                    .token(&carl_session)
+                    .json(&body)
                     .send()
                     .await
             }
@@ -1027,10 +1058,12 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         .filter(|endpoint| !endpoint.modifies() && endpoint.audit.is_none())
     {
         let path = match endpoint.path {
-            "/hello" | "/me" | "/machine" | "/metrics/history" | "/agent/update"
-            | "/agent/update/last" => endpoint.path.to_owned(),
+            "/hello" | "/me" | "/me/devices" | "/machine" | "/metrics/history"
+            | "/agent/update" | "/agent/update/last" => endpoint.path.to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
             "/stream" => continue, // le flux se teste en WebSocket (stream_https.rs)
+            // Un POST sans effet : testé à part (device_proof.rs).
+            "/sessions/challenge" => continue,
             other => panic!("route de lecture sans scénario : {other}"),
         };
         let reply = api.get(&path).token(&admin).send().await;

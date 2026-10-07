@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, account_id, key_id, public_key, name, created_at, last_proved_at, last_addr\n             FROM trusted_devices WHERE account_id = ? AND id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "account_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "name": "key_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "key_id"
+          }
+        }
+      },
+      {
+        "name": "public_key",
+        "ordinal": 3,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "public_key"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "last_proved_at",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "last_proved_at"
+          }
+        }
+      },
+      {
+        "name": "last_addr",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "last_addr"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fe1a5c5262133db0048a894c5f02a1eaa2bd5fd2d718ed9fc6bc5bc907c5ed4e"
+}

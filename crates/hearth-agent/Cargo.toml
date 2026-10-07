@@ -33,6 +33,7 @@ minisign-verify.workspace = true
 url.workspace = true
 reqwest.workspace = true
 rcgen.workspace = true
+ring.workspace = true
 rpassword.workspace = true
 rustls.workspace = true
 rustls-native-certs.workspace = true

@@ -5,6 +5,7 @@ pub mod argon2;
 pub mod audit_feed;
 pub mod clock;
 pub mod config;
+pub mod crypto;
 pub mod data_dir;
 pub mod file_lock;
 pub mod ids;

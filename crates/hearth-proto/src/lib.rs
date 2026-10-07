@@ -2,6 +2,7 @@
 
 pub mod account_rules;
 pub mod api;
+pub mod device_proof;
 pub mod error;
 pub mod fingerprint;
 pub mod headers;

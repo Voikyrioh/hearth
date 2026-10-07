@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE sessions SET device_id = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "334cfbcdd3e94df7b868476e9d28c1c2d61c007cf0531f9d8f119fc6aa5bbf38"
+}

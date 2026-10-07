@@ -161,6 +161,8 @@ pub enum Target {
     Route(&'static str),
     /// La version visée d'une mise à jour de l'agent (`0.2.0`).
     AgentVersion(String),
+    /// Un poste de confiance, par le nom qu'il a annoncé (nettoyé et borné comme l'origine).
+    Device(ClientName),
 }
 
 impl Target {
@@ -171,6 +173,7 @@ impl Target {
             Self::AccountRole(username, role) => Some(format!("{username} ({})", role.label())),
             Self::Route(pattern) => Some((*pattern).to_owned()),
             Self::AgentVersion(version) => Some(format!("version {version}")),
+            Self::Device(name) => Some(format!("poste {}", name.as_str())),
         }
     }
 }

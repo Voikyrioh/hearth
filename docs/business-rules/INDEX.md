@@ -215,6 +215,17 @@ Première connexion vers un agent inconnu (pas dans `servers.json`).
 - [BR-CLIENT-013](./BR-CLIENT-013-ecran-de-premier-lancement.md) — Sans serveur enregistré, l'application s'ouvre sur un écran d'accueil — apps/desktop/src/pages/Welcome.vue — —
 - [BR-CLIENT-014](./BR-CLIENT-014-controles-avant-installation.md) — Windows 10 64 bits et 50 Mo libres sont vérifiés avant toute écriture — apps/desktop/src-tauri/installer/hooks.nsh — —
 
+- [BR-TRUST-003](./BR-TRUST-003-creation-de-la-cle-a-la-premiere-connexion.md) — À la première connexion réussie par mot de passe, le client crée une clé propre à l'appareil, gardée dans le coffre de Windows — —
+- [BR-TRUST-004](./BR-TRUST-004-serveur-retient-la-cle-publique.md) — Le serveur retient la clé publique de chaque appareil reconnu, inscrite dans la transaction de la connexion par mot de passe réussie — invariant ✓
+- [BR-TRUST-005](./BR-TRUST-005-preuve-de-possession-de-la-cle.md) — À chaque connexion, le client prouve qu'il possède la clé privée : défi sans état de 60 secondes, usage unique, signature liée au serveur, à l'identifiant et à l'usage — invariant ✓
+- [BR-TRUST-007](./BR-TRUST-007-mise-a-jour-de-l-adresse-retenue.md) — Le serveur retient l'adresse d'une connexion réussie ; une session valide accompagnée d'une preuve de clé fait retenir l'adresse, et l'usage d'une session la rafraîchit — —
+- [BR-TRUST-022](./BR-TRUST-022-limite-de-huit-postes-par-compte.md) — Un compte a jusqu'à 8 postes inscrits, le 9e n'est pas inscrit sans rien supprimer ; le titulaire voit la liste et en retire un — invariant ✓
+- [BR-TRUST-023](./BR-TRUST-023-la-cle-survit-au-changement-de-son-mot-de-passe.md) — Quand un utilisateur change son propre mot de passe, la clé de chacun de ses postes reconnus survit et reste valide — invariant ✓
+- [BR-TRUST-024](./BR-TRUST-024-cles-oubliees-au-changement-de-mot-de-passe-par-un-administrateur.md) — Quand un administrateur change le mot de passe d'un autre compte, ou ferme ses sessions, tous les postes reconnus de ce compte sont oubliés — invariant ✓
+- [BR-TRUST-025](./BR-TRUST-025-cles-effacees-a-la-suppression-du-compte.md) — Quand un compte est supprimé, toutes les clés de tous ses postes reconnus sont effacées du serveur — invariant ✓
+- [BR-TRUST-026](./BR-TRUST-026-la-cle-survit-a-la-reinstallation-du-client.md) — Une réinstallation ou une mise à jour du client garde la clé de l'appareil ; seule une désinstallation complète ou un nouveau PC en crée une nouvelle — —
+- [BR-TRUST-035](./BR-TRUST-035-la-regle-deux-sur-trois-ne-joue-qu-en-alerte-et-en-mode-attaque.md) — La règle 2 sur 3 ne s'applique qu'en alerte et en mode attaque ; en état normal aucun poste n'est ralenti ni bloqué au nom de cette règle (HRT-22 ne l'applique encore dans aucun état) — invariant ✓
+
 Les règles BR-CLIENT-012 (état du lien dans l'icône) et le reste de l'installateur sur mesure arrivent avec `hearth-link` et les tickets suivants.
 
 ## Pointeurs code

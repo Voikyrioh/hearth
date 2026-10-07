@@ -63,6 +63,8 @@ Une entrée :
 | `sessions.revoke` | Fermeture des sessions | |
 | `accounts.read` | Consultation des comptes | Seulement refusée. |
 | `audit.read` | Tentative de lecture du journal | Seulement refusée. |
+| `device.enroll` | Poste de confiance enregistré | Connexion par mot de passe qui inscrit la clé d'un poste (BR-TRUST-004). Compte : celui qui se connecte ; origine : le poste ; aucune cible. |
+| `device.remove` | Poste de confiance retiré | Retrait d'un poste par son titulaire (BR-TRUST-022). Cible : « poste {nom du poste retiré} ». |
 | `agent.update` | Mise à jour de l'agent | Refus (lecture seule, déjà en cours, installation gérée, signature) et résultat final de chaque mise à jour lancée : « Réussi », ou « Échoué » avec « téléchargement impossible », « signature invalide », « mise à jour échouée », « le nouvel agent n'a pas répondu, retour à la version précédente ». Cible : « version X.Y.Z » (BR-UPDATE-024). |
 
 ## `GET /api/v1/audit/export` (admin)

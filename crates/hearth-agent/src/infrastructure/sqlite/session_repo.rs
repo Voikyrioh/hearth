@@ -12,6 +12,7 @@ use crate::application::ports::{SessionRepo, SessionTx, StoreError};
 use crate::domain::accounts::AccountId;
 use crate::domain::session_token::TokenHash;
 use crate::domain::sessions::{Session, SessionClosure, SessionId};
+use crate::domain::trust::DeviceId;
 
 const RESOURCE: &str = "sessions";
 
@@ -221,6 +222,60 @@ impl SessionTx for SqliteUnitOfWork {
             }
         };
         Ok(result.map_err(storage(RESOURCE))?.rows_affected())
+    }
+
+    async fn bind_device(
+        &mut self,
+        session: &SessionId,
+        device: &DeviceId,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE sessions SET device_id = ? WHERE id = ?",
+            device.as_str(),
+            session.as_str()
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(())
+    }
+
+    async fn close_device(
+        &mut self,
+        device: &DeviceId,
+        account: &AccountId,
+        addr: &str,
+        name: &str,
+        at: OffsetDateTime,
+    ) -> Result<u64, StoreError> {
+        let at = format_date(RESOURCE, at)?;
+        sqlx::query!(
+            "INSERT OR IGNORE INTO revoked_sessions (token_hash, revoked_at)
+             SELECT token_hash, ? FROM sessions
+             WHERE device_id = ?
+                OR (device_id IS NULL AND account_id = ? AND client_addr = ? AND client_name = ?)",
+            at,
+            device.as_str(),
+            account.as_str(),
+            addr,
+            name
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        let result = sqlx::query!(
+            "DELETE FROM sessions
+             WHERE device_id = ?
+                OR (device_id IS NULL AND account_id = ? AND client_addr = ? AND client_name = ?)",
+            device.as_str(),
+            account.as_str(),
+            addr,
+            name
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(result.rows_affected())
     }
 
     async fn purge_expired(&mut self, now: OffsetDateTime) -> Result<u64, StoreError> {

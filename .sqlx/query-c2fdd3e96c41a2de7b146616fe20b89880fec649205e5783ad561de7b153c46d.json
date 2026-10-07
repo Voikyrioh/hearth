@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE trusted_devices SET last_proved_at = ?, last_addr = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c2fdd3e96c41a2de7b146616fe20b89880fec649205e5783ad561de7b153c46d"
+}

@@ -7,7 +7,11 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, FromRequestParts, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
-use hearth_proto::api::sessions::{LoginRequest, LoginResponse, MeResponse};
+use hearth_proto::api::sessions::{
+    ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginResponse,
+    MeResponse,
+};
+use hearth_proto::error::ErrorCode;
 use hearth_proto::headers;
 use tracing::Instrument;
 
@@ -37,7 +41,7 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientAddr {
 
 /// Nom du poste annoncé par le client : le nettoyage du domaine (`ClientName`), « inconnu » s'il
 /// n'en reste rien.
-fn client_name(headers: &HeaderMap) -> String {
+pub(super) fn client_name(headers: &HeaderMap) -> String {
     headers
         .get(headers::CLIENT)
         .and_then(|value| value.to_str().ok())
@@ -50,9 +54,10 @@ pub async fn login(
     State(state): State<AppState>,
     ClientAddr(addr): ClientAddr,
     request_headers: HeaderMap,
-    body: Result<Json<LoginRequest>, JsonRejection>,
-) -> Result<(StatusCode, Json<LoginResponse>), ApiError> {
-    let Json(request) = body?;
+    body: Result<Json<DeviceLoginRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<DeviceLoginResponse>), ApiError> {
+    let Json(DeviceLoginRequest { login, device }) = body?;
+    let request = login;
     let client = ClientInfo {
         name: client_name(&request_headers),
         addr,
@@ -63,7 +68,12 @@ pub async fn login(
     let attempt = tokio::spawn(
         async move {
             sessions
-                .login(&request.username, Secret::from(request.password), &client)
+                .login_with_device(
+                    &request.username,
+                    Secret::from(request.password),
+                    &client,
+                    device.as_ref(),
+                )
                 .await
         }
         .in_current_span(),
@@ -71,12 +81,36 @@ pub async fn login(
     let outcome = attempt
         .await
         .map_err(|error| ApiError::internal(&error))??;
-    let response = LoginResponse {
-        token: outcome.token.encode(),
-        expires_at: wire::date(outcome.expires_at)?,
-        account: wire::account_info(&outcome.account),
+    let response = DeviceLoginResponse {
+        login: LoginResponse {
+            token: outcome.token.encode(),
+            expires_at: wire::date(outcome.expires_at)?,
+            account: wire::account_info(&outcome.account),
+        },
+        device: outcome.device,
     };
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+/// `POST /api/v1/sessions/challenge` : rend un défi à signer avec la clé d'appareil. Route
+/// publique, **sans lecture en base** et sans état retenu : la réponse est la même pour un
+/// identifiant existant et pour un identifiant qui n'existe pas (HRT-22, absence d'oracle). Sur un
+/// agent sans identité d'appareil, `404` comme une route inconnue : c'est ce que le client lit comme
+/// « clé non prise en charge ».
+pub async fn challenge(
+    State(state): State<AppState>,
+    ClientAddr(addr): ClientAddr,
+    body: Result<Json<ChallengeRequest>, JsonRejection>,
+) -> Result<Json<ChallengeResponse>, ApiError> {
+    let trust = state
+        .sessions
+        .trust()
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "Route inconnue"))?;
+    let Json(request) = body?;
+    let response = trust
+        .issue_challenge(&request.username, request.purpose, &addr)
+        .map_err(|error| ApiError::internal(&error))?;
+    Ok(Json(response))
 }
 
 /// `DELETE /api/v1/sessions/current` : ferme la session de l'appelant.

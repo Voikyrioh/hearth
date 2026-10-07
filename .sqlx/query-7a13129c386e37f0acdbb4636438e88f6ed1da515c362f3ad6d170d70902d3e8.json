@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM trusted_devices WHERE last_proved_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7a13129c386e37f0acdbb4636438e88f6ed1da515c362f3ad6d170d70902d3e8"
+}

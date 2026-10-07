@@ -7,6 +7,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use hearth_proto::api::sessions::{DeviceProof, DeviceStatus};
+use hearth_proto::device_proof::Binding;
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -17,6 +19,7 @@ use super::ports::{
     AccountRepo, AuditSink, Clock, HashError, IdGen, KnownAddressRepo, LoginAttemptRepo,
     PasswordHasher, SessionRepo, Store, StoreError, TokenGen, TokenGenError,
 };
+use super::trust::{DeviceLogin, RemoveError, TrustService, VerifiedKey};
 use crate::domain::accounts::Username;
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
 use crate::domain::identifier_slowdown;
@@ -44,6 +47,16 @@ pub struct LoginOutcome {
     pub session_id: SessionId,
     pub expires_at: OffsetDateTime,
     pub account: AccountView,
+    /// Ce que la connexion a fait de la clé d'appareil présentée (HRT-22) ; `None` : aucune clé
+    /// prise en compte (pas de clé, preuve invalide, clé d'un autre compte).
+    pub device: Option<DeviceStatus>,
+}
+
+/// Ce qu'un passage par le chemin de la connexion accorde.
+enum Granted {
+    Session(Box<LoginOutcome>),
+    /// Mot de passe confirmé, rien d'autre (`confirm_password`).
+    Confirmed,
 }
 
 #[derive(Debug, Error)]
@@ -100,6 +113,9 @@ pub struct SessionService {
     /// refus (BR-AUDIT-007), jamais une par une.
     sink: Arc<dyn AuditSink>,
     turns: Turns,
+    /// L'identité d'appareil (HRT-22). Absente : le service se comporte exactement comme avant, les
+    /// routes de défi et de postes répondent `404`.
+    trust: Option<Arc<TrustService>>,
 }
 
 /// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, une file
@@ -211,7 +227,20 @@ impl SessionService {
             trail,
             sink,
             turns: Turns::default(),
+            trust: None,
         }
+    }
+
+    /// Ajoute l'identité d'appareil : le défi, la preuve de clé, l'inscription des postes.
+    #[must_use]
+    pub fn with_trust(mut self, trust: Arc<TrustService>) -> Self {
+        self.trust = Some(trust);
+        self
+    }
+
+    /// L'identité d'appareil, si elle est configurée.
+    pub fn trust(&self) -> Option<&Arc<TrustService>> {
+        self.trust.as_ref()
     }
 
     /// Ouvre une session. Identifiant inconnu et mot de passe faux suivent exactement le même
@@ -228,6 +257,55 @@ impl SessionService {
         password: Secret,
         client: &ClientInfo,
     ) -> Result<LoginOutcome, LoginError> {
+        self.login_with_device(username, password, client, None)
+            .await
+    }
+
+    /// Comme `login`, avec en option la preuve de la clé d'appareil. **Une preuve ne change aucune
+    /// décision d'accès** : absente, illisible, fausse ou rejouée, la connexion se déroule comme
+    /// sans elle ; valide, elle inscrit ou date le poste dans la transaction d'une connexion
+    /// accordée, et seulement alors (HRT-22).
+    pub async fn login_with_device(
+        &self,
+        username: &str,
+        password: Secret,
+        client: &ClientInfo,
+        device: Option<&DeviceProof>,
+    ) -> Result<LoginOutcome, LoginError> {
+        match self
+            .run_login(username, password, client, device, false)
+            .await?
+        {
+            Granted::Session(outcome) => Ok(*outcome),
+            // Inatteignable : seul le mode « confirmer » rend `Confirmed`.
+            Granted::Confirmed => Err(LoginError::InvalidCredentials),
+        }
+    }
+
+    /// Confirme le mot de passe d'un compte pour un acte d'administration (retrait d'un poste de
+    /// confiance, Q16) : **exactement le chemin de la connexion** (tour par adresse, admission, Argon2
+    /// contre le vrai haché, compteurs du couple, de l'adresse et de l'identifiant, ralentissement,
+    /// journal des refus), sans ouvrir de session ni apprendre d'adresse. Un mot de passe faux ici
+    /// n'offre donc aucun moyen de deviner sans limite : il compte comme un échec de connexion.
+    pub async fn confirm_password(
+        &self,
+        username: &str,
+        password: Secret,
+        client: &ClientInfo,
+    ) -> Result<(), LoginError> {
+        self.run_login(username, password, client, None, true)
+            .await
+            .map(|_| ())
+    }
+
+    async fn run_login(
+        &self,
+        username: &str,
+        password: Secret,
+        client: &ClientInfo,
+        device: Option<&DeviceProof>,
+        confirm: bool,
+    ) -> Result<Granted, LoginError> {
         let keys = Keys {
             pair: AttemptKey::new(username, &client.addr),
             address: AttemptKey::address(&client.addr),
@@ -257,7 +335,9 @@ impl SessionService {
             return Err(LoginError::Busy);
         };
         turn.wait().await;
-        let result = self.login_in_turn(username, password, client, &keys).await;
+        let result = self
+            .login_in_turn(username, password, client, &keys, device, confirm)
+            .await;
         // Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de
         // passe tapé au mauvais endroit, BR-AUDIT-005) ni le mot de passe. Le journal d'activité
         // consigne connexions et verrouillages (le succès dans la transaction de la tentative, les refus par le regroupement).
@@ -284,7 +364,9 @@ impl SessionService {
         password: Secret,
         client: &ClientInfo,
         keys: &Keys,
-    ) -> Result<LoginOutcome, LoginError> {
+        device: Option<&DeviceProof>,
+        confirm: bool,
+    ) -> Result<Granted, LoginError> {
         // 1. Admission : pendant une attente du couple ou de l'adresse, on ne vérifie même pas le
         //    mot de passe. Le ralentissement par identifiant, lui, refuse APRÈS la vérification
         //    (étape 3) : même chemin et même durée pour un identifiant existant ou non.
@@ -299,6 +381,16 @@ impl SessionService {
         if let Some(retry_after) = admit(&early, now) {
             return Err(LoginError::TooManyAttempts { retry_after });
         }
+
+        // 1 bis. Preuve de la clé d'appareil, s'il y en a une : vérifiée sous la clé FOURNIE, donc
+        //    le même travail que l'identifiant existe ou non (HRT-22, absence d'oracle). Elle ne
+        //    décide de rien ici : seule une connexion accordée s'en sert, plus bas.
+        let key: Option<VerifiedKey> = match (device, &self.trust) {
+            (Some(proof), Some(trust)) => {
+                trust.verify(proof, Binding::Login, username, &client.addr)
+            }
+            _ => None,
+        };
 
         // 2. Vérification, hors transaction (Argon2 est lent et ne doit pas tenir le verrou
         //    d'écriture). Un identifiant illisible est traité comme un identifiant inconnu.
@@ -433,6 +525,12 @@ impl SessionService {
             // Inatteignable : `Granted` suppose un mot de passe vérifié sur un compte existant.
             return Err(LoginError::InvalidCredentials);
         };
+        if confirm {
+            // Confirmation d'un acte : les compteurs sont déjà écrits (le succès remet à zéro celui du
+            // couple, comme une connexion) ; ni session, ni adresse apprise, ni entrée de connexion.
+            tx.commit().await?;
+            return Ok(Granted::Confirmed);
+        }
 
         // Connexion réussie : cette adresse devient (ou reste) connue de ce compte, et seulement
         // ainsi (ADR-0022).
@@ -466,17 +564,38 @@ impl SessionService {
             Outcome::Succeeded,
         );
         journal.record(&mut *tx, succeeded).await?;
+        // La clé d'appareil, dans la même transaction : inscrite si elle est nouvelle et qu'il y a
+        // de la place, sinon datée. C'est ici, et nulle part ailleurs, qu'un poste s'inscrit :
+        // jamais sur la seule présentation d'une session.
+        let DeviceLogin {
+            status: device_status,
+            device: device_id,
+        } = match (&key, &self.trust) {
+            (Some(key), Some(trust)) => {
+                trust
+                    .on_login(&mut *tx, &mut journal, key, &account, client, now)
+                    .await?
+            }
+            _ => DeviceLogin {
+                status: None,
+                device: None,
+            },
+        };
+        if let Some(device_id) = &device_id {
+            tx.sessions().bind_device(&session.id, device_id).await?;
+        }
         tx.commit().await?;
         journal.publish(&self.trail);
 
         let mut view = AccountView::from(&account);
         view.last_login_at = Some(now);
-        Ok(LoginOutcome {
+        Ok(Granted::Session(Box::new(LoginOutcome {
             token,
             session_id: session.id,
             expires_at: session.expires_at,
             account: view,
-        })
+            device: device_status,
+        })))
     }
 
     /// Écrit un refus de connexion au journal, par le regroupement des refus (une entrée puis une
@@ -512,9 +631,86 @@ impl SessionService {
             .await
     }
 
+    /// Retire un poste de confiance : **un acte d'administration** (Q16 : mot de passe, plus tard 2FA, ET
+    /// clé privée). Une session seule ne suffit pas.
+    ///
+    /// Ordre : (1) la preuve de possession de la clé du poste courant (usage « retrait », liée au jeton et
+    /// à l'identifiant du poste visé) : sans elle, **aucun mot de passe n'est essayé** (une session volée
+    /// ne devine rien) ; (2) le mot de passe actuel, par le chemin de la connexion (mêmes compteurs et
+    /// ralentissement) ; (3) le retrait ; (4) le défi n'est consommé que si le retrait a réussi.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn remove_device(
+        &self,
+        session: &CurrentSession,
+        token: &str,
+        id: &str,
+        password: Secret,
+        proof: Option<&DeviceProof>,
+        client: &ClientInfo,
+        by: &Actor,
+    ) -> Result<(), RemoveError> {
+        let Some(trust) = self.trust.as_ref() else {
+            return Err(RemoveError::NotFound);
+        };
+        let token_hash = SessionToken::parse(token)
+            .map_err(|_| RemoveError::ProofInvalid)?
+            .hash();
+        let proven = trust
+            .verify_removal(
+                &session.account.id,
+                session.account.username.as_str(),
+                &session.session_id,
+                token_hash.as_bytes(),
+                id,
+                proof,
+                &client.addr,
+            )
+            .await?;
+        self.confirm_password(session.account.username.as_str(), password, client)
+            .await
+            .map_err(|error| RemoveError::Password(Box::new(error)))?;
+        trust
+            .remove_proven(&session.account.id, &session.session_id, id, by, &proven)
+            .await
+    }
+
     /// Reconnaît la session du jeton présenté et repousse son expiration (expiration
     /// glissante, au plus une écriture toutes les `RENEWAL_INTERVAL`).
     pub async fn authenticate(&self, token: &str) -> Result<CurrentSession, AuthError> {
+        self.authenticate_inner(token, None, None).await
+    }
+
+    /// Comme `authenticate`, depuis cette adresse (celle de la connexion TCP). Quand la session
+    /// est renouvelée et que l'adresse est déjà retenue pour le compte, sa durée est repoussée :
+    /// un poste utilisé chaque jour ne cesse pas d'être connu au bout de 30 jours. L'usage d'une
+    /// session **n'apprend jamais** une adresse (ADR-0023).
+    pub async fn authenticate_at(
+        &self,
+        token: &str,
+        addr: &str,
+    ) -> Result<CurrentSession, AuthError> {
+        self.authenticate_inner(token, Some(addr), None).await
+    }
+
+    /// Comme `authenticate_at`, avec la preuve de la clé d'appareil du premier message du flux : si
+    /// elle est valide et que la clé est inscrite pour ce compte, l'adresse est retenue (session +
+    /// clé, BR-TRUST-007). Une preuve invalide est ignorée : le jeton seul fait ce qu'il faisait.
+    pub async fn authenticate_proved(
+        &self,
+        token: &str,
+        addr: &str,
+        proof: &DeviceProof,
+    ) -> Result<CurrentSession, AuthError> {
+        self.authenticate_inner(token, Some(addr), Some(proof))
+            .await
+    }
+
+    async fn authenticate_inner(
+        &self,
+        token: &str,
+        addr: Option<&str>,
+        proof: Option<&DeviceProof>,
+    ) -> Result<CurrentSession, AuthError> {
         let token = SessionToken::parse(token).map_err(|_| AuthError::Malformed)?;
         let hash = token.hash();
         let now = self.clock.now();
@@ -530,14 +726,48 @@ impl SessionService {
             .await?
             .ok_or(AuthError::Ended(SessionEnd::Revoked))?;
 
-        let expires_at = match renewed_expiry(session.last_seen_at, now) {
-            Some(expires_at) => {
-                let mut tx = self.store.begin().await?;
+        // La preuve de clé, liée à ce jeton et à ce compte : une preuve faite pour un autre jeton,
+        // un autre identifiant ou un autre usage ne vaut rien ici.
+        let key = match (proof, addr, &self.trust) {
+            (Some(proof), Some(addr), Some(trust)) => trust.verify(
+                proof,
+                Binding::Session {
+                    token_hash: hash.as_bytes(),
+                },
+                account.username.as_str(),
+                addr,
+            ),
+            _ => None,
+        };
+        let renewal = renewed_expiry(session.last_seen_at, now);
+        let expires_at = if renewal.is_some() || key.is_some() {
+            let mut tx = self.store.begin().await?;
+            if let Some(expires_at) = renewal {
                 tx.sessions().renew(&session.id, now, expires_at).await?;
-                tx.commit().await?;
-                expires_at
             }
-            None => session.expires_at,
+            let proved = match (&key, addr, &self.trust) {
+                (Some(key), Some(addr), Some(trust)) => {
+                    trust
+                        .on_session_proof(&mut *tx, key, &account.id, &session.id, addr, now)
+                        .await?
+                }
+                _ => false,
+            };
+            // Usage d'une session valide depuis une adresse déjà retenue : sa durée est repoussée,
+            // rien n'est appris. Aussi quand la preuve présentée n'a pas servi (clé non inscrite,
+            // défi déjà pris) : la session, elle, est valide.
+            if !proved
+                && renewal.is_some()
+                && let Some(addr) = addr
+            {
+                tx.known_addresses()
+                    .touch(&account.id, &canonical(addr), now)
+                    .await?;
+            }
+            tx.commit().await?;
+            renewal.unwrap_or(session.expires_at)
+        } else {
+            session.expires_at
         };
         Ok(CurrentSession {
             account: AccountView::from(&account),

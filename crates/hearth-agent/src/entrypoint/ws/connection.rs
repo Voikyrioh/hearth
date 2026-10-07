@@ -10,7 +10,9 @@ use std::sync::Arc;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, ErrorDetail};
-use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, Topic, UpdateMessage};
+use hearth_proto::stream::{
+    ClientMessage, ServerMessage, SessionNotice, SignedAuth, Topic, UpdateMessage,
+};
 use serde_json::Value;
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, timeout};
@@ -41,9 +43,9 @@ fn policy(reason: &'static str) -> Option<Closing> {
 }
 
 /// Sert la connexion jusqu'à sa fin, puis envoie la trame de fermeture.
-pub async fn run(mut socket: WebSocket, state: AppState, permit: Permit) {
+pub async fn run(mut socket: WebSocket, state: AppState, permit: Permit, addr: String) {
     // La place de flux est rendue à la fin de la connexion, quelle qu'en soit l'issue.
-    let closing = serve(&mut socket, &state, permit).await;
+    let closing = serve(&mut socket, &state, permit, &addr).await;
     if let Some(closing) = closing {
         let frame = CloseFrame {
             code: closing.code,
@@ -134,13 +136,18 @@ async fn next<T: Clone>(rx: &mut Option<broadcast::Receiver<T>>) -> Result<T, Re
     }
 }
 
-async fn serve(socket: &mut WebSocket, state: &AppState, mut permit: Permit) -> Option<Closing> {
+async fn serve(
+    socket: &mut WebSocket,
+    state: &AppState,
+    mut permit: Permit,
+    addr: &str,
+) -> Option<Closing> {
     let settings = state.stream.settings;
     let mut shutdown = state.stream.shutdown_signal();
 
     // 1. Authentification : le premier message, dans le délai imparti.
     let (mut session, token) = tokio::select! {
-        outcome = timeout(settings.auth_timeout, authenticate(socket, state)) => match outcome {
+        outcome = timeout(settings.auth_timeout, authenticate(socket, state, addr)) => match outcome {
             Ok(Ok(authenticated)) => authenticated,
             Ok(Err(closing)) => return closing,
             Err(_) => {
@@ -258,7 +265,7 @@ async fn serve(socket: &mut WebSocket, state: &AppState, mut permit: Permit) -> 
                 Err(RecvError::Closed) => subscriptions.update = None,
             },
             _ = check.tick() => {
-                match state.sessions.authenticate(token.expose()).await {
+                match state.sessions.authenticate_at(token.expose(), addr).await {
                     Ok(current) => {
                         // Une carte graphique apparue depuis le dernier snapshot : l'identité a
                         // changé, le client en reçoit un nouveau.
@@ -319,6 +326,7 @@ fn going_away() -> Option<Closing> {
 async fn authenticate(
     socket: &mut WebSocket,
     state: &AppState,
+    addr: &str,
 ) -> Result<(CurrentSession, Secret), Option<Closing>> {
     let settings = state.stream.settings;
     let text = loop {
@@ -329,12 +337,23 @@ async fn authenticate(
             Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return Err(None),
         }
     };
-    let Ok(ClientMessage::Auth { token }) = serde_json::from_str::<ClientMessage>(text.as_str())
+    // Le jeton, et en option la preuve de la clé d'appareil (HRT-22) : un client sans clé envoie le
+    // même message qu'avant.
+    let Ok(SignedAuth::Auth { token, device }) = serde_json::from_str::<SignedAuth>(text.as_str())
     else {
         return Err(refuse(socket, &settings).await);
     };
     let token = Secret::new(token);
-    match state.sessions.authenticate(token.expose()).await {
+    let authenticated = match &device {
+        Some(proof) => {
+            state
+                .sessions
+                .authenticate_proved(token.expose(), addr, proof)
+                .await
+        }
+        None => state.sessions.authenticate_at(token.expose(), addr).await,
+    };
+    match authenticated {
         Ok(session) => Ok((session, token)),
         Err(error) => {
             send(socket, &settings, &from_api(error.into())).await;

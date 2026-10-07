@@ -2080,6 +2080,7 @@ dependencies = [
  "minisign-verify 0.3.0",
  "rcgen",
  "reqwest",
+ "ring",
  "rpassword",
  "rustls",
  "rustls-native-certs",

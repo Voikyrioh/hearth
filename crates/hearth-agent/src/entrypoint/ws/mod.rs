@@ -260,7 +260,7 @@ pub async fn stream(
     Ok(upgrade
         .max_message_size(MAX_CLIENT_MESSAGE_BYTES)
         .max_frame_size(MAX_CLIENT_MESSAGE_BYTES)
-        .on_upgrade(move |socket| connection::run(socket, state, permit)))
+        .on_upgrade(move |socket| connection::run(socket, state, permit, ip.to_string())))
 }
 
 #[cfg(test)]

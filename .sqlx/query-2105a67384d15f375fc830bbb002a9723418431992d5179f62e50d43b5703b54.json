@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT k.address,\n                  MAX(k.last_success_at, COALESCE(k.last_used_at, k.last_success_at)) AS \"last_success_at!: String\"\n           FROM known_addresses k\n           JOIN accounts a ON a.id = k.account_id WHERE a.username = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "address",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "known_addresses",
+            "name": "address"
+          }
+        }
+      },
+      {
+        "name": "last_success_at!: String",
+        "ordinal": 1,
+        "type_info": "Null",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "2105a67384d15f375fc830bbb002a9723418431992d5179f62e50d43b5703b54"
+}
