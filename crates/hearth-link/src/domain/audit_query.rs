@@ -44,7 +44,7 @@ pub enum ActionKind {
 ///
 /// Le mode attaque du serveur (HRT-25 : activation, sorties, essai unique, session refusée) y est rangé de
 /// même, un type d'action à lui viendra avec l'écran de HRT-26.
-const ACCOUNT_CODES: [&str; 17] = [
+const ACCOUNT_CODES: [&str; 18] = [
     action::ACCOUNT_CREATE,
     action::ACCOUNT_DELETE,
     action::ACCOUNT_ROLE,
@@ -62,6 +62,7 @@ const ACCOUNT_CODES: [&str; 17] = [
     action::ATTACK_MODE_TRIAL,
     action::SESSION_REFUSED,
     action::REAUTH_SETTING,
+    action::REAUTH_ELEVATION,
 ];
 
 /// « Action refusée » : tout ce qui n'est pas une connexion, refusé faute de droits.

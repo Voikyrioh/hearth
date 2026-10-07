@@ -49,11 +49,14 @@ pub enum AuditAction {
     /// Le réglage de fréquence du mot de passe d'un compte change (HRT-28) ; la route consigne aussi ici
     /// un refus ou un échec.
     ReauthSetting,
+    /// Le délai de 5 minutes du mot de passe s'ouvre (HRT-30, BR-TRUST-053) : le compte, le poste de la clé
+    /// prouvée, l'origine ; jamais le mot de passe.
+    ReauthElevation,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 23] = [
+    pub const ALL: [AuditAction; 24] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -77,6 +80,7 @@ impl AuditAction {
         Self::AttackModeTrial,
         Self::SessionRefused,
         Self::ReauthSetting,
+        Self::ReauthElevation,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -105,6 +109,7 @@ impl AuditAction {
             Self::AttackModeTrial => action::ATTACK_MODE_TRIAL,
             Self::SessionRefused => action::SESSION_REFUSED,
             Self::ReauthSetting => action::REAUTH_SETTING,
+            Self::ReauthElevation => action::REAUTH_ELEVATION,
         }
     }
 
@@ -134,6 +139,7 @@ impl AuditAction {
             Self::AttackModeTrial => "Essai unique en mode attaque",
             Self::SessionRefused => "Session refusée (mode attaque)",
             Self::ReauthSetting => "Réglage de la fréquence du mot de passe",
+            Self::ReauthElevation => "Délai du mot de passe ouvert (5 minutes)",
         }
     }
 

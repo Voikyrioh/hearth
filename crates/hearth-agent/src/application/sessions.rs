@@ -30,7 +30,9 @@ use super::trust::{
     AttackProofError, DeviceLogin, InFlight, RemoveError, TrustService, VerifiedKey,
 };
 use crate::domain::accounts::{Account, Username};
-use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
+use crate::domain::audit::{
+    Actor, AuditAction, AuditEvent, ClientName, Origin, Outcome, Reason, Target,
+};
 use crate::domain::identifier_slowdown::{self, AlertChange, alert_change};
 use crate::domain::known_address::{self, canonical, is_known};
 use crate::domain::lockout::{AttemptKey, LockoutState, retry_after_seconds};
@@ -428,8 +430,9 @@ impl SessionService {
     }
 
     /// **Pour les bancs d'essai seulement** : `true` fait accepter un acte sans `reauth` (le régime d'avant
-    /// HRT-30, pour les scénarios qui envoient des actes bruts) ; `false` rétablit l'exigence. Aucun code
-    /// de production ne l'appelle : le service qui sert exige dès `SessionService::new`.
+    /// HRT-30, pour les scénarios qui envoient des actes bruts) ; `false` rétablit l'exigence. Derrière la
+    /// fonction cargo `test-support` : un binaire de production ne la contient pas (BR-TRUST-045).
+    #[cfg(feature = "test-support")]
     pub fn accept_unconfirmed_acts_for_tests(&self, accept: bool) {
         self.reauth_required.store(!accept, Ordering::SeqCst);
     }
@@ -1279,6 +1282,26 @@ impl SessionService {
                 &device,
                 &client.addr,
             );
+            // L'ouverture est consignée : qui (le compte), quel poste (le nom annoncé à l'inscription de
+            // la clé prouvée), d'où (l'origine), quand (l'horodatage de l'entrée). Jamais le mot de passe
+            // (BR-TRUST-053).
+            let device_name = trust
+                .list(&session.account.id, &session.session_id)
+                .await
+                .ok()
+                .and_then(|devices| devices.into_iter().find(|view| view.id == device))
+                .and_then(|view| ClientName::parse(&view.name));
+            self.sink
+                .record(
+                    Actor::new(
+                        Some(session.account.username.clone()),
+                        Origin::client(Some(&client.name), &client.addr),
+                    ),
+                    AuditAction::ReauthElevation,
+                    device_name.map_or(Target::None, Target::Device),
+                    Outcome::Succeeded,
+                )
+                .await;
         }
         confirmed(Some(verified))
     }

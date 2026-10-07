@@ -46,9 +46,11 @@ pub mod action {
     pub const SESSION_REFUSED: &str = "session.refused";
     /// Le réglage de fréquence du mot de passe d'un compte change (HRT-28).
     pub const REAUTH_SETTING: &str = "reauth.setting";
+    /// Le délai de 5 minutes du mot de passe s'ouvre : qui, quel poste, quand (HRT-30, BR-TRUST-053).
+    pub const REAUTH_ELEVATION: &str = "reauth.elevation";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 23] = [
+    pub const ALL: [&str; 24] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -72,6 +74,7 @@ pub mod action {
         ATTACK_MODE_TRIAL,
         SESSION_REFUSED,
         REAUTH_SETTING,
+        REAUTH_ELEVATION,
     ];
 }
 
