@@ -12,7 +12,7 @@ pub trait DeviceRepo: Send + Sync {
     /// Les postes d'un compte, du plus ancien au plus récent.
     async fn of_account(&self, account: &AccountId) -> Result<Vec<TrustedDevice>, StoreError>;
 
-    /// Le poste dont la session a été ouverte (ou prouvée) par sa clé, s'il y en a un.
+    /// Le poste dont la session a été ouverte par sa clé (BR-TRUST-048), s'il y en a un.
     async fn of_session(&self, session: &SessionId) -> Result<Option<DeviceId>, StoreError>;
 
     /// Le poste de cette empreinte de clé, **tous comptes confondus** : une même clé n'est jamais
@@ -33,7 +33,7 @@ pub trait DeviceTx: Send {
         id: &DeviceId,
     ) -> Result<Option<TrustedDevice>, StoreError>;
 
-    /// Le poste dont la session a été ouverte (ou prouvée) par sa clé, lu dans la transaction.
+    /// Le poste dont la session a été ouverte par sa clé (BR-TRUST-048), lu dans la transaction.
     async fn of_session(&mut self, session: &SessionId) -> Result<Option<DeviceId>, StoreError>;
 
     /// Nombre de postes du compte.

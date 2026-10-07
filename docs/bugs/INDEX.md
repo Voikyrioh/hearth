@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4BK2JXE7C2SZGG7BBXTZ0TZ](./FIX-01M4BK2JXE7C2SZGG7BBXTZ0TZ.md) | Le poste d'une session était réécrit par toute preuve de session valide sous la clé d'un autre poste du compte | 2026-10-07 |
 | [FIX-01M47PCYX3BY3YV84R9WW3KAQ3](./FIX-01M47PCYX3BY3YV84R9WW3KAQ3.md) | L'avis de fin de session, arrivé avant la réponse, transformait le résultat d'une action en « résultat inconnu » | 2026-10-06 |
 | [FIX-01M47H8VFFS2TNYJ3YNSDZTTKG](./FIX-01M47H8VFFS2TNYJ3YNSDZTTKG.md) | Le carnet gardait l'identifiant tel que saisi à la connexion, pas celui de l'agent | 2026-10-06 |
 | [FIX-01M45V0PZB5TRE3A7KQHAHJNXD](./FIX-01M45V0PZB5TRE3A7KQHAHJNXD.md) | Une erreur de lecture de la base était comptée comme « 0 administrateur » | 2026-10-05 |

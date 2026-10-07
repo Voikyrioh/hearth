@@ -13,7 +13,7 @@ pub use challenge::{
 };
 pub use device::{
     DeviceId, Enrollment, NewDevice, RETENTION, TrustedDevice, cutoff, device_name,
-    judge_enrollment,
+    judge_enrollment, session_proof_serves,
 };
 pub use recognition::{
     LoginCriteria, LoginStanding, Mode, SessionStanding, TrialKind, judge_login, judge_session,

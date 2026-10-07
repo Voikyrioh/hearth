@@ -13,7 +13,7 @@ maj: 2026-10-07
 ## Règle
 Le serveur retient l'adresse IP **exacte** d'une connexion réussie (table `known_addresses`, ADR-0022). Elle est :
 
-- **apprise** par deux preuves seulement : une connexion par mot de passe accordée (dans sa transaction ; liée au poste si une clé est prouvée), et une **session valide accompagnée d'une preuve de clé valide** (ouverture du flux, usage « session » lié au jeton) : l'adresse change, le poste reste reconnu et l'adresse retenue est mise à jour ;
+- **apprise** par deux preuves seulement : une connexion par mot de passe accordée (dans sa transaction ; liée au poste si une clé est prouvée), et une **session valide accompagnée d'une preuve de clé valide** (ouverture du flux, usage « session » lié au jeton) : l'adresse change, le poste reste reconnu et l'adresse retenue est mise à jour. **La preuve ne relie jamais la session à un poste** (BR-TRUST-048) : sur une session reliée, seule la clé de son poste sert, celle d'un autre poste du compte ne fait rien retenir ;
 - **jamais apprise par une session seule** : une session volée, rejouée ailleurs, ne fait pas retenir l'adresse du voleur ;
 - **rafraîchie** (durée repoussée, rien d'appris) quand une session valide est utilisée depuis une adresse déjà retenue, au rythme du renouvellement de session (5 minutes) : un poste utilisé chaque jour ne cesse pas d'être connu au bout de 30 jours ;
 - retenue **30 jours** après le plus récent de la dernière connexion réussie et du dernier usage reconnu ; 8 par compte ; un poste à clé n'a qu'**une** adresse à la fois (sa ligne est déplacée quand il prouve sa clé depuis une autre adresse) ; oubliée avec son poste.
@@ -40,3 +40,4 @@ Le serveur retient l'adresse IP **exacte** d'une connexion réussie (table `know
 
 ## Historique
 - 2026-10-07 : création (HRT-22, session 2026-10-04-hearth-creation, T32).
+- 2026-10-07 : HRT-28 (tranche F) : une preuve de session ne relie plus la session à un poste (BR-TRUST-048).

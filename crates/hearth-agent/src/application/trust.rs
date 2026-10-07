@@ -36,7 +36,7 @@ use crate::domain::known_address::{self, canonical};
 use crate::domain::sessions::SessionId;
 use crate::domain::trust::{
     Challenge, ConsumedChallenges, DeviceId, Enrollment, NewDevice, TrustedDevice, check_challenge,
-    device_name, has_small_order, judge_enrollment, mac_input,
+    device_name, has_small_order, judge_enrollment, mac_input, session_proof_serves,
 };
 
 /// Une clé dont la preuve est valide : authentique, fraîche, pas encore consommée, signée sous cette clé.
@@ -389,7 +389,8 @@ impl TrustService {
 
     /// Une session valide accompagnée d'une preuve de clé valide fait **retenir l'adresse**
     /// (BR-TRUST-007) : dans la transaction du renouvellement de la session. `false` si la clé
-    /// n'est pas inscrite pour ce compte (rien n'est écrit). N'inscrit jamais rien.
+    /// n'est pas inscrite pour ce compte, ou si la session est reliée à un autre poste (rien n'est
+    /// écrit, BR-TRUST-048). N'inscrit jamais rien et ne relie jamais la session à un poste.
     pub(super) async fn on_session_proof(
         &self,
         tx: &mut dyn UnitOfWork,
@@ -405,6 +406,15 @@ impl TrustService {
         if device.account != *account || !bool::from(device.public_key.ct_eq(&key.public_key)) {
             return Ok(false);
         }
+        // FIX:01M4BK2JXE7C2SZGG7BBXTZ0TZ : le poste d'une session est posé à la connexion par mot de passe
+        // et n'est plus jamais réécrit. Sur une session reliée, seule la clé de SON poste sert de
+        // preuve : celle d'un autre poste du compte compte comme une preuve absente (rien n'est appris,
+        // rien n'est écrit, le défi n'est pas retenu). Session sans poste : l'adresse est retenue, la
+        // session reste sans poste.
+        let linked = tx.devices().of_session(session).await?;
+        if !session_proof_serves(linked.as_ref(), &device.id) {
+            return Ok(false);
+        }
         // La preuve sert (session valide et clé inscrite de ce compte) : le défi est retenu.
         if !self.consume(account, key) {
             return Ok(false);
@@ -417,7 +427,6 @@ impl TrustService {
         tx.known_addresses()
             .bind_device(account, &addr, &device.id, now)
             .await?;
-        tx.sessions().bind_device(session, &device.id).await?;
         Ok(true)
     }
 

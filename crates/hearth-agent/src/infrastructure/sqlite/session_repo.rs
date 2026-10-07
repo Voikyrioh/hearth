@@ -230,7 +230,8 @@ impl SessionTx for SqliteUnitOfWork {
         device: &DeviceId,
     ) -> Result<(), StoreError> {
         sqlx::query!(
-            "UPDATE sessions SET device_id = ? WHERE id = ?",
+            // FIX:01M4BK2JXE7C2SZGG7BBXTZ0TZ : posé une fois, jamais réécrit.
+            "UPDATE sessions SET device_id = ? WHERE id = ? AND device_id IS NULL",
             device.as_str(),
             session.as_str()
         )
