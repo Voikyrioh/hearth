@@ -62,11 +62,18 @@ pub trait SessionTx: Send {
         device: &DeviceId,
     ) -> Result<(), StoreError>;
 
-    /// Ferme les sessions de ce poste (retrait d'un poste) : leurs jetons sont retenus comme
-    /// révoqués à la date `at`, comme pour une fermeture par l'administration ; rend leur nombre.
+    /// Ferme les sessions ouvertes depuis ce poste (retrait d'un poste) : celles qui lui sont liées,
+    /// et celles du même compte **sans lien à un poste** ouvertes depuis la dernière adresse et sous
+    /// le nom de ce poste (une session ouverte avant son inscription ne survit pas à son retrait ;
+    /// sur un poste volé, fermer trop vaut mieux que fermer trop peu). Leurs jetons sont retenus
+    /// comme révoqués à la date `at`, comme pour une fermeture par l'administration ; rend leur
+    /// nombre.
     async fn close_device(
         &mut self,
         device: &DeviceId,
+        account: &AccountId,
+        addr: &str,
+        name: &str,
         at: OffsetDateTime,
     ) -> Result<u64, StoreError>;
 

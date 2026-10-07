@@ -243,22 +243,38 @@ impl SessionTx for SqliteUnitOfWork {
     async fn close_device(
         &mut self,
         device: &DeviceId,
+        account: &AccountId,
+        addr: &str,
+        name: &str,
         at: OffsetDateTime,
     ) -> Result<u64, StoreError> {
         let at = format_date(RESOURCE, at)?;
         sqlx::query!(
             "INSERT OR IGNORE INTO revoked_sessions (token_hash, revoked_at)
-             SELECT token_hash, ? FROM sessions WHERE device_id = ?",
+             SELECT token_hash, ? FROM sessions
+             WHERE device_id = ?
+                OR (device_id IS NULL AND account_id = ? AND client_addr = ? AND client_name = ?)",
             at,
-            device.as_str()
+            device.as_str(),
+            account.as_str(),
+            addr,
+            name
         )
         .execute(&mut *self.tx)
         .await
         .map_err(storage(RESOURCE))?;
-        let result = sqlx::query!("DELETE FROM sessions WHERE device_id = ?", device.as_str())
-            .execute(&mut *self.tx)
-            .await
-            .map_err(storage(RESOURCE))?;
+        let result = sqlx::query!(
+            "DELETE FROM sessions
+             WHERE device_id = ?
+                OR (device_id IS NULL AND account_id = ? AND client_addr = ? AND client_name = ?)",
+            device.as_str(),
+            account.as_str(),
+            addr,
+            name
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
         Ok(result.rows_affected())
     }
 

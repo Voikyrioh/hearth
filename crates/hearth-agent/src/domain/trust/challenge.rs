@@ -4,8 +4,9 @@
 //! Un défi fait 56 octets : `nonce (16) || émission (8, millisecondes d'horloge monotone) || code
 //! (32)`. Le code est un HMAC-SHA256, calculé par un port avec une clé tirée au démarrage du
 //! service ; il lie le défi à l'usage, à l'identifiant normalisé et à l'adresse de celui qui l'a
-//! demandé. L'agent n'en garde rien : il le recalcule. Seul un défi dont la preuve a été **validée**
-//! est retenu (60 secondes, 4 096 au plus), pour qu'il ne serve qu'une fois.
+//! demandé. L'agent n'en garde rien : il le recalcule. Un défi n'est retenu qu'au moment où sa preuve
+//! **sert** (mot de passe juste ET signature valide, ou session valide ET signature valide sous une
+//! clé inscrite du compte), jamais avant : une requête non authentifiée n'écrit aucun état.
 //!
 //! Ce module ne fait aucun calcul cryptographique : il assemble les octets, juge la fraîcheur et
 //! tient l'ensemble des défis consommés. La comparaison du code se fait à temps constant.
@@ -21,8 +22,12 @@ use crate::domain::known_address::canonical;
 /// Durée de vie d'un défi, en millisecondes.
 pub const TTL_MS: u64 = 60_000;
 
-/// Défis consommés retenus au plus : un ensemble plein traite la preuve comme absente.
+/// Défis consommés retenus au plus, tous comptes confondus.
 pub const MAX_CONSUMED: usize = 4_096;
+
+/// Défis consommés retenus au plus pour un même compte : un compte authentifié ne peut occuper que
+/// sa part (un poste en consomme un à chaque connexion ou ouverture du flux, 8 postes au plus).
+pub const MAX_CONSUMED_PER_OWNER: usize = 64;
 
 const NONCE_LEN: usize = 16;
 const MAC_LEN: usize = 32;
@@ -101,11 +106,13 @@ pub fn check(
     authentic && fresh && !consumed.contains(&challenge.nonce)
 }
 
-/// Les défis dont la preuve a été validée, retenus le temps de leur validité.
+/// Les défis dont la preuve a servi, retenus le temps de leur validité, chacun au nom du compte qui
+/// s'en est servi. **Seuls des comptes authentifiés y écrivent** : la borne ne peut être atteinte que
+/// par eux, jamais par un appareil anonyme.
 #[derive(Debug, Default)]
 pub struct ConsumedChallenges {
-    /// Nonce, fin de validité (millisecondes monotones).
-    seen: HashMap<[u8; NONCE_LEN], u64>,
+    /// Nonce, (compte, fin de validité en millisecondes monotones).
+    seen: HashMap<[u8; NONCE_LEN], (String, u64)>,
 }
 
 impl ConsumedChallenges {
@@ -113,15 +120,46 @@ impl ConsumedChallenges {
         self.seen.contains_key(nonce)
     }
 
-    /// Retient ce défi. `false` si déjà retenu (rejeu) ou si l'ensemble est plein : l'appelant
-    /// traite alors la preuve comme absente. Les défis expirés sont oubliés d'abord ; un défi
-    /// expiré ne peut de toute façon plus passer `check`.
-    pub fn consume(&mut self, nonce: [u8; NONCE_LEN], now_ms: u64) -> bool {
-        self.seen.retain(|_, until| *until >= now_ms);
-        if self.seen.contains_key(&nonce) || self.seen.len() >= MAX_CONSUMED {
+    /// Retient ce défi au nom de `owner`. `false` si déjà retenu (rejeu perdu), ou si `owner` a déjà
+    /// `MAX_CONSUMED_PER_OWNER` défis valides (il ne se prive que lui-même).
+    ///
+    /// Les défis expirés sont oubliés d'abord. Ensemble plein malgré cela : on oublie le plus ancien
+    /// défi du compte qui en retient le plus, jamais on ne refuse pour tout le monde à cause d'un seul
+    /// compte (un défi oublié ne peut resservir qu'à qui a aussi le mot de passe ou une session
+    /// valide du compte concerné, dans sa minute de validité).
+    pub fn consume(&mut self, owner: &str, nonce: [u8; NONCE_LEN], now_ms: u64) -> bool {
+        self.seen.retain(|_, (_, until)| *until >= now_ms);
+        if self.seen.contains_key(&nonce) {
             return false;
         }
-        self.seen.insert(nonce, now_ms.saturating_add(TTL_MS));
+        let mut per_owner: HashMap<&str, usize> = HashMap::new();
+        for (name, _) in self.seen.values() {
+            *per_owner.entry(name.as_str()).or_insert(0) += 1;
+        }
+        if per_owner.get(owner).copied().unwrap_or(0) >= MAX_CONSUMED_PER_OWNER {
+            return false;
+        }
+        if self.seen.len() >= MAX_CONSUMED {
+            let heaviest = per_owner
+                .iter()
+                .max_by_key(|(name, count)| (**count, std::cmp::Reverse(**name)))
+                .map(|(name, _)| (*name).to_owned());
+            let oldest = heaviest.and_then(|heaviest| {
+                self.seen
+                    .iter()
+                    .filter(|(_, (name, _))| *name == heaviest)
+                    .min_by_key(|(_, (_, until))| *until)
+                    .map(|(nonce, _)| *nonce)
+            });
+            match oldest {
+                Some(oldest) => {
+                    self.seen.remove(&oldest);
+                }
+                None => return false,
+            }
+        }
+        self.seen
+            .insert(nonce, (owner.to_owned(), now_ms.saturating_add(TTL_MS)));
         true
     }
 
@@ -203,25 +241,55 @@ mod tests {
         let c = challenge(1_000);
         let mut consumed = ConsumedChallenges::default();
         assert!(check(&c, &[9; 32], 1_000, &consumed));
-        assert!(consumed.consume(c.nonce, 1_000));
+        assert!(consumed.consume("marie", c.nonce, 1_000));
         assert!(!check(&c, &[9; 32], 1_001, &consumed));
-        assert!(!consumed.consume(c.nonce, 1_001), "rejeu");
+        assert!(!consumed.consume("marie", c.nonce, 1_001), "rejeu");
+    }
+
+    fn nonce_of(index: usize) -> [u8; NONCE_LEN] {
+        let mut nonce = [0; NONCE_LEN];
+        nonce[..8].copy_from_slice(&(index as u64).to_be_bytes());
+        nonce
     }
 
     #[test]
-    fn the_consumed_set_forgets_expired_entries_and_is_bounded() {
+    fn an_owner_holds_at_most_its_share_and_only_blocks_itself() {
         let mut consumed = ConsumedChallenges::default();
-        for index in 0..MAX_CONSUMED {
-            let mut nonce = [0; NONCE_LEN];
-            nonce[..8].copy_from_slice(&(index as u64).to_be_bytes());
-            assert!(consumed.consume(nonce, 0));
+        for index in 0..MAX_CONSUMED_PER_OWNER {
+            assert!(consumed.consume("marie", nonce_of(index), 0));
+        }
+        assert!(
+            !consumed.consume("marie", nonce_of(10_000), 0),
+            "sa part est pleine"
+        );
+        assert!(
+            consumed.consume("paul", nonce_of(10_001), 0),
+            "un autre compte passe"
+        );
+        // Sa part se libère avec l'expiration de ses défis.
+        assert!(consumed.consume("marie", nonce_of(10_002), TTL_MS + 1));
+    }
+
+    #[test]
+    fn a_full_set_never_refuses_everybody_the_heaviest_owner_gives_up_its_oldest() {
+        let mut consumed = ConsumedChallenges::default();
+        // 64 comptes de 64 défis : 4 096, l'ensemble est plein.
+        for owner in 0..64 {
+            for slot in 0..MAX_CONSUMED_PER_OWNER {
+                assert!(consumed.consume(
+                    &format!("compte{owner}"),
+                    nonce_of(owner * 100 + slot),
+                    slot as u64
+                ));
+            }
         }
         assert_eq!(consumed.len(), MAX_CONSUMED);
-        // Plein : un nouveau défi n'est pas retenu, donc la preuve compte comme absente.
-        assert!(!consumed.consume([0xff; NONCE_LEN], 10));
-        // Une fois les anciens expirés, la place revient.
-        assert!(consumed.consume([0xff; NONCE_LEN], TTL_MS + 1));
-        assert_eq!(consumed.len(), 1);
+        // Un 65e compte (authentifié) n'est pas privé de son usage unique.
+        assert!(consumed.consume("nouveau", nonce_of(900_000), 100));
+        assert_eq!(consumed.len(), MAX_CONSUMED);
+        // Une fois les anciens expirés, tout se libère.
+        assert!(consumed.consume("nouveau", nonce_of(900_001), TTL_MS + 1_000));
+        assert!(consumed.len() < 10);
     }
 
     #[test]

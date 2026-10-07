@@ -4,6 +4,7 @@
 
 pub mod challenge;
 pub mod device;
+pub mod weak_key;
 
 pub use challenge::{
     Challenge, ConsumedChallenges, MAX_CONSUMED, TTL_MS, check as check_challenge, mac_input,
@@ -12,3 +13,4 @@ pub use device::{
     DeviceId, Enrollment, NewDevice, RETENTION, TrustedDevice, cutoff, device_name,
     judge_enrollment,
 };
+pub use weak_key::has_small_order;

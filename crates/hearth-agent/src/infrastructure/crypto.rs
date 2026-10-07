@@ -107,6 +107,45 @@ mod tests {
         assert!(!verifier.verify("ed25519", &[], b"", &[]));
     }
 
+    /// Ce que `ring` ne vérifie pas (ring 0.17.14, `ec/curve25519/ed25519/verification.rs`) : l'ordre de
+    /// la clé publique. Avec le point neutre et la signature (R = point neutre, S = 0), une même signature
+    /// vérifie tout message. C'est pourquoi le domaine refuse ces clés avant (`has_small_order`).
+    #[test]
+    fn ring_itself_accepts_the_neutral_point_key_so_the_domain_must_refuse_it() {
+        let mut neutral = [0_u8; 32];
+        neutral[0] = 1;
+        let mut signature = [0_u8; 64];
+        signature[0] = 1;
+        let verifier = RingProofVerifier;
+        assert!(verifier.verify("ed25519", &neutral, b"un message", &signature));
+        assert!(verifier.verify("ed25519", &neutral, b"un tout autre message", &signature));
+        assert!(crate::domain::trust::has_small_order(&neutral));
+    }
+
+    /// Ce que `ring` vérifie : S doit être réduit (< L), et R est comparé octet à octet à la valeur
+    /// recalculée : une signature rendue malléable par S + L est refusée.
+    #[test]
+    fn ring_refuses_a_non_canonical_scalar_s() {
+        let pair = key_pair();
+        let public = pair.public_key().as_ref().to_vec();
+        let signature = pair.sign(b"m");
+        // L = ordre du sous-groupe, petit-boutiste.
+        const L: [u8; 32] = [
+            0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9,
+            0xde, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+        ];
+        let mut malleated = signature.as_ref().to_vec();
+        let mut carry = 0_u16;
+        for (i, limb) in L.iter().enumerate() {
+            let total = u16::from(malleated[32 + i]) + u16::from(*limb) + carry;
+            malleated[32 + i] = (total & 0xff) as u8;
+            carry = total >> 8;
+        }
+        let verifier = RingProofVerifier;
+        assert!(verifier.verify("ed25519", &public, b"m", signature.as_ref()));
+        assert!(!verifier.verify("ed25519", &public, b"m", &malleated));
+    }
+
     #[test]
     fn the_code_depends_on_the_key_and_the_input_and_is_stable() {
         let a = HmacChallengeCrypto::with_key(&[1; 32]);

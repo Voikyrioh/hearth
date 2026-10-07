@@ -28,6 +28,7 @@ struct DeviceRow {
     id: String,
     account_id: String,
     key_id: String,
+    public_key: Vec<u8>,
     name: String,
     created_at: String,
     last_proved_at: String,
@@ -35,7 +36,13 @@ struct DeviceRow {
 }
 
 fn into_device(row: DeviceRow) -> Result<TrustedDevice, StoreError> {
+    let public_key =
+        <[u8; 32]>::try_from(row.public_key.as_slice()).map_err(|_| StoreError::Unavailable {
+            resource: RESOURCE,
+            message: format!("clé publique illisible pour le poste {}", row.id),
+        })?;
     Ok(TrustedDevice {
+        public_key,
         created_at: parse_date(RESOURCE, &row.created_at)?,
         last_proved_at: parse_date(RESOURCE, &row.last_proved_at)?,
         id: DeviceId::new(row.id),
@@ -52,7 +59,7 @@ async fn find_by_key(
 ) -> Result<Option<TrustedDevice>, StoreError> {
     sqlx::query_as!(
         DeviceRow,
-        "SELECT id, account_id, key_id, name, created_at, last_proved_at, last_addr
+        "SELECT id, account_id, key_id, public_key, name, created_at, last_proved_at, last_addr
          FROM trusted_devices WHERE key_id = ? ORDER BY created_at, id LIMIT 1",
         key_id
     )
@@ -69,7 +76,7 @@ impl DeviceRepo for SqliteDeviceRepo {
         let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
         sqlx::query_as!(
             DeviceRow,
-            "SELECT id, account_id, key_id, name, created_at, last_proved_at, last_addr
+            "SELECT id, account_id, key_id, public_key, name, created_at, last_proved_at, last_addr
              FROM trusted_devices WHERE account_id = ? ORDER BY created_at, id",
             account.as_str()
         )
@@ -112,7 +119,7 @@ impl DeviceTx for SqliteUnitOfWork {
     ) -> Result<Option<TrustedDevice>, StoreError> {
         sqlx::query_as!(
             DeviceRow,
-            "SELECT id, account_id, key_id, name, created_at, last_proved_at, last_addr
+            "SELECT id, account_id, key_id, public_key, name, created_at, last_proved_at, last_addr
              FROM trusted_devices WHERE account_id = ? AND id = ?",
             account.as_str(),
             id.as_str()
@@ -122,6 +129,17 @@ impl DeviceTx for SqliteUnitOfWork {
         .map_err(storage(RESOURCE))?
         .map(into_device)
         .transpose()
+    }
+
+    async fn of_session(&mut self, session: &SessionId) -> Result<Option<DeviceId>, StoreError> {
+        let found = sqlx::query_scalar!(
+            "SELECT device_id FROM sessions WHERE id = ?",
+            session.as_str()
+        )
+        .fetch_optional(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(found.flatten().map(DeviceId::new))
     }
 
     async fn count(&mut self, account: &AccountId) -> Result<usize, StoreError> {

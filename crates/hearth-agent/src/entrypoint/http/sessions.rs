@@ -41,7 +41,7 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientAddr {
 
 /// Nom du poste annoncé par le client : le nettoyage du domaine (`ClientName`), « inconnu » s'il
 /// n'en reste rien.
-fn client_name(headers: &HeaderMap) -> String {
+pub(super) fn client_name(headers: &HeaderMap) -> String {
     headers
         .get(headers::CLIENT)
         .and_then(|value| value.to_str().ok())

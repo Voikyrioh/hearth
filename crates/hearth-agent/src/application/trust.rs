@@ -20,6 +20,7 @@ use hearth_proto::device_proof::{
     key_id, signing_bytes,
 };
 use hearth_proto::fingerprint::Fingerprint;
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 use time::OffsetDateTime;
 
@@ -28,22 +29,24 @@ use super::ports::{
     ChallengeCrypto, Clock, CryptoError, DeviceRepo, IdGen, MonotonicClock, ProofVerifier, Store,
     StoreError, UnitOfWork,
 };
-use super::sessions::ClientInfo;
+use super::sessions::{ClientInfo, LoginError};
 use crate::domain::accounts::{Account, AccountId};
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Target};
 use crate::domain::known_address::{self, canonical};
 use crate::domain::sessions::SessionId;
 use crate::domain::trust::{
     Challenge, ConsumedChallenges, DeviceId, Enrollment, NewDevice, TrustedDevice, check_challenge,
-    device_name, judge_enrollment, mac_input,
+    device_name, has_small_order, judge_enrollment, mac_input,
 };
 
-/// Une clé dont la preuve est valide : authentique, fraîche, jamais rejouée, signée sous cette clé.
+/// Une clé dont la preuve est valide : authentique, fraîche, pas encore consommée, signée sous cette clé.
 /// Ne dit pas encore qu'elle est inscrite : c'est l'affaire de la transaction qui l'utilise.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedKey {
     pub key_id: String,
     pub public_key: [u8; PUBLIC_KEY_LEN],
+    /// Le nonce du défi signé : retenu (`TrustService::consume`) seulement quand la preuve sert.
+    pub nonce: [u8; 16],
 }
 
 /// Ce que la connexion a fait d'une clé prouvée.
@@ -81,6 +84,16 @@ pub enum RemoveError {
     /// Le poste d'où part la requête ne se retire pas depuis lui-même.
     #[error("C'est le poste que tu utilises : retire-le depuis un autre poste")]
     IsCurrent,
+    /// La session courante n'a pas de poste inscrit : ce poste ne peut rien retirer.
+    #[error("Ce poste n'a pas de clé enregistrée : retire un poste depuis un poste qui en a une")]
+    DeviceRequired,
+    /// Preuve de clé manquante, illisible, périmée, rejouée, d'un autre compte ou d'un autre poste
+    /// visé, ou qui n'est pas celle du poste courant.
+    #[error("La preuve de la clé de ce poste est absente ou invalide")]
+    ProofInvalid,
+    /// Mot de passe refusé par le chemin de la connexion (même compteurs, même ralentissement).
+    #[error(transparent)]
+    Password(Box<LoginError>),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -189,6 +202,11 @@ impl TrustService {
         let Some(public_key) = decode_exact::<PUBLIC_KEY_LEN>(&proof.public_key) else {
             return refuse("malformed");
         };
+        // Une clé de petit ordre vérifie n'importe quel message sous une signature fixe : jamais
+        // vérifiée, donc jamais inscrite ni reconnue (`ring` ne la refuse pas).
+        if has_small_order(&public_key) {
+            return refuse("weak_key");
+        }
         let Some(signature) = decode_exact::<SIGNATURE_LEN>(&proof.signature) else {
             return refuse("malformed");
         };
@@ -220,20 +238,26 @@ impl TrustService {
         {
             return refuse("signature");
         }
-        // Consommé seulement une fois la signature valide : seul un détenteur de clé peut remplir
-        // l'ensemble. Plein, ou déjà pris par une preuve concurrente : la preuve compte pour absente.
-        let accepted = self
-            .consumed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .consume(challenge.nonce, now_ms);
-        if !accepted {
-            return refuse("replay");
-        }
+        // **Aucun état n'est écrit ici** : cette fonction sert des requêtes non authentifiées, et tout
+        // le monde détient une clé jetable. Le défi n'est retenu que quand la preuve SERT
+        // (`consume`, appelée par la connexion accordée ou par la session valide).
         Some(VerifiedKey {
             key_id: key_id(&public_key),
             public_key,
+            nonce: challenge.nonce,
         })
+    }
+
+    /// Retient le défi de cette preuve au nom du compte, au moment où elle sert : mot de passe juste et
+    /// signature valide, ou session valide et signature valide sous une clé inscrite de ce compte.
+    /// `false` : le défi a déjà servi (une requête concurrente a gagné), ou le compte occupe déjà sa part
+    /// de la table (`MAX_CONSUMED_PER_OWNER`) ; la preuve compte alors pour absente. Seuls des comptes
+    /// authentifiés remplissent la table : un appareil anonyme n'y occupe aucune place.
+    pub(super) fn consume(&self, owner: &AccountId, key: &VerifiedKey) -> bool {
+        self.consumed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .consume(owner.as_str(), key.nonce, self.now_ms())
     }
 
     /// Ce que la connexion par mot de passe **accordée** fait d'une clé prouvée, dans sa transaction :
@@ -250,9 +274,11 @@ impl TrustService {
         now: OffsetDateTime,
     ) -> Result<DeviceLogin, StoreError> {
         let existing = tx.devices().find_by_key(&key.key_id).await?;
-        let owned_here = existing
-            .as_ref()
-            .is_some_and(|device| device.account == account.id);
+        // La clé inscrite est comparée à celle de la preuve (à temps constant) : l'empreinte de 16
+        // octets retrouve le poste, elle ne dit pas que c'est la même clé.
+        let owned_here = existing.as_ref().is_some_and(|device| {
+            device.account == account.id && bool::from(device.public_key.ct_eq(&key.public_key))
+        });
         let owned_elsewhere = existing.is_some() && !owned_here;
         let count = tx.devices().count(&account.id).await?;
         let frozen = tx.devices().enrollment_frozen().await?;
@@ -265,10 +291,23 @@ impl TrustService {
                         device: None,
                     });
                 };
+                // La preuve sert : le défi est retenu. Perdu (rejeu concurrent) : comme sans clé.
+                if !self.consume(&account.id, key) {
+                    return Ok(DeviceLogin {
+                        status: None,
+                        device: None,
+                    });
+                }
                 tx.devices().prove(&device.id, now, &addr).await?;
                 Some((DeviceStatus::Proven, device.id))
             }
             Enrollment::Enroll => {
+                if has_small_order(&key.public_key) || !self.consume(&account.id, key) {
+                    return Ok(DeviceLogin {
+                        status: None,
+                        device: None,
+                    });
+                }
                 let id = DeviceId::new(self.ids.new_id());
                 tx.devices()
                     .insert(&NewDevice {
@@ -347,7 +386,11 @@ impl TrustService {
         let Some(device) = tx.devices().find_by_key(&key.key_id).await? else {
             return Ok(false);
         };
-        if device.account != *account {
+        if device.account != *account || !bool::from(device.public_key.ct_eq(&key.public_key)) {
+            return Ok(false);
+        }
+        // La preuve sert (session valide et clé inscrite de ce compte) : le défi est retenu.
+        if !self.consume(account, key) {
             return Ok(false);
         }
         let addr = canonical(addr);
@@ -385,7 +428,69 @@ impl TrustService {
             .collect())
     }
 
-    /// Retire un poste du compte de l'appelant : sa clé, son adresse retenue et ses sessions
+    /// Premier temps d'un retrait (Q16 : mot de passe ET clé privée) : la preuve de possession de la clé
+    /// du poste **courant**, inscrite pour ce compte, pour l'usage « retrait » et pour CE poste visé
+    /// (`target`), liée au jeton de la session. **N'écrit rien** : le défi n'est consommé qu'une fois le
+    /// retrait réussi (`remove_proven`). Sans poste inscrit pour la session courante (client ancien) :
+    /// `DeviceRequired` ; toute autre anomalie : `ProofInvalid`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn verify_removal(
+        &self,
+        account: &AccountId,
+        username: &str,
+        session: &SessionId,
+        token_hash: &[u8; 32],
+        target: &str,
+        proof: Option<&DeviceProof>,
+        addr: &str,
+    ) -> Result<VerifiedKey, RemoveError> {
+        if target.is_empty() || target.len() > MAX_DEVICE_ID_LEN {
+            return Err(RemoveError::NotFound);
+        }
+        let Some(current) = self.devices.of_session(session).await? else {
+            return Err(RemoveError::DeviceRequired);
+        };
+        let proof = proof.ok_or(RemoveError::ProofInvalid)?;
+        let key = self
+            .verify(
+                proof,
+                Binding::DeviceRemoval { token_hash, target },
+                username,
+                addr,
+            )
+            .ok_or(RemoveError::ProofInvalid)?;
+        // La clé prouvée est celle du poste courant, inscrit pour ce compte (clé publique comparée).
+        let device = self
+            .devices
+            .find_by_key(&key.key_id)
+            .await?
+            .ok_or(RemoveError::ProofInvalid)?;
+        if device.id != current
+            || device.account != *account
+            || !bool::from(device.public_key.ct_eq(&key.public_key))
+        {
+            return Err(RemoveError::ProofInvalid);
+        }
+        Ok(key)
+    }
+
+    /// Retire le poste après que `verify_removal` et le mot de passe ont réussi, puis consomme le défi :
+    /// **seulement si le retrait a réussi**.
+    pub async fn remove_proven(
+        &self,
+        account: &AccountId,
+        current: &SessionId,
+        id: &str,
+        by: &Actor,
+        proven: &VerifiedKey,
+    ) -> Result<(), RemoveError> {
+        self.remove(account, current, id, by).await?;
+        self.consume(account, proven);
+        Ok(())
+    }
+
+    /// Retire un poste du compte de l'appelant, **sans** vérifier ni mot de passe ni preuve (réservé à
+    /// `SessionService::remove_device`, qui les exige, et aux tests d'application) : sa clé, son adresse retenue et ses sessions
     /// (un portable perdu ne garde pas une session vivante). Le poste d'où part la requête ne se
     /// retire pas depuis lui-même. Un poste d'un autre compte est « introuvable ».
     pub async fn remove(
@@ -406,10 +511,12 @@ impl TrustService {
             .get(account, &id)
             .await?
             .ok_or(RemoveError::NotFound)?;
-        if self.devices.of_session(current).await?.as_ref() == Some(&device.id) {
+        if tx.devices().of_session(current).await?.as_ref() == Some(&device.id) {
             return Err(RemoveError::IsCurrent);
         }
-        tx.sessions().close_device(&device.id, now).await?;
+        tx.sessions()
+            .close_device(&device.id, account, &device.last_addr, &device.name, now)
+            .await?;
         tx.devices().delete(&device.id).await?;
         let mut journal = Pending::default();
         journal
@@ -437,6 +544,7 @@ fn usage_of(purpose: ChallengePurpose) -> u8 {
         ChallengePurpose::Login => 0x01,
         ChallengePurpose::Session => 0x02,
         ChallengePurpose::AttackMode => 0x03,
+        ChallengePurpose::DeviceRemoval => 0x04,
     }
 }
 

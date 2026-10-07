@@ -49,6 +49,9 @@ pub struct TrustedDevice {
     pub account: AccountId,
     /// Empreinte de la clé publique (`hearth_proto::device_proof::key_id`).
     pub key_id: String,
+    /// La clé publique inscrite : comparée à celle qu'une preuve présente (l'empreinte de 16 octets ne
+    /// suffit pas à dire que c'est la même clé).
+    pub public_key: [u8; hearth_proto::device_proof::PUBLIC_KEY_LEN],
     /// Nom annoncé à l'inscription, nettoyé (jamais un texte libre au journal).
     pub name: String,
     pub created_at: OffsetDateTime,

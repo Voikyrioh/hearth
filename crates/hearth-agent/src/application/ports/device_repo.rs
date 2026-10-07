@@ -33,6 +33,9 @@ pub trait DeviceTx: Send {
         id: &DeviceId,
     ) -> Result<Option<TrustedDevice>, StoreError>;
 
+    /// Le poste dont la session a été ouverte (ou prouvée) par sa clé, lu dans la transaction.
+    async fn of_session(&mut self, session: &SessionId) -> Result<Option<DeviceId>, StoreError>;
+
     /// Nombre de postes du compte.
     async fn count(&mut self, account: &AccountId) -> Result<usize, StoreError>;
 

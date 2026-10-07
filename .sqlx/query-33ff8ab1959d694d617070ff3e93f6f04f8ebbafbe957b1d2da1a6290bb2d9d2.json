@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, account_id, key_id, name, created_at, last_proved_at, last_addr\n             FROM trusted_devices WHERE account_id = ? ORDER BY created_at, id",
+  "query": "SELECT id, account_id, key_id, public_key, name, created_at, last_proved_at, last_addr\n             FROM trusted_devices WHERE account_id = ? ORDER BY created_at, id",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,19 @@
         }
       },
       {
-        "name": "name",
+        "name": "public_key",
         "ordinal": 3,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "trusted_devices",
+            "name": "public_key"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "created_at",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "last_proved_at",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "last_addr",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -91,8 +102,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "a197e84c1559b5150e5719d7e3ed6cb1b11f2954f302858c5922d013d24edcd4"
+  "hash": "33ff8ab1959d694d617070ff3e93f6f04f8ebbafbe957b1d2da1a6290bb2d9d2"
 }
