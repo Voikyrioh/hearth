@@ -19,6 +19,9 @@ export const commands = {
 	/**  Réglage « Notifier quand un serveur devient hors ligne ou revient » (BR-RESIL-015) : activé par défaut. */
 	getNotifyOnLinkChange: () => typedError<boolean, AppError>(__TAURI_INVOKE("get_notify_on_link_change")),
 	setNotifyOnLinkChange: (enabled: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("set_notify_on_link_change", { enabled })),
+	/**  Réglage « Alertes de sécurité » (BR-TRUST-033) : activé par défaut, séparé du réglage du lien. */
+	getNotifyOnSecurityAlert: () => typedError<boolean, AppError>(__TAURI_INVOKE("get_notify_on_security_alert")),
+	setNotifyOnSecurityAlert: (enabled: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("set_notify_on_security_alert", { enabled })),
 	/**
 	 *  Le serveur affiché dans la fenêtre (`None` : aucun, réglages par exemple) : l'icône de la zone de
 	 *  notification reflète son état (BR-RESIL-016).
@@ -96,7 +99,7 @@ export const commands = {
 	 *  Le titulaire change son propre mot de passe (ferme ses AUTRES sessions, garde la courante) ;
 	 *  le mot de passe mémorisé au coffre suit (voir `service::change_own_password`).
 	 */
-	changeOwnPassword: (serverId: string, current: string, password: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_own_password", { serverId, current, password })),
+	changeOwnPassword: (serverId: string, current: string, password: string, keepAddress: boolean) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_own_password", { serverId, current, password, keepAddress })),
 	closeAccountSessions: (serverId: string, accountId: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("close_account_sessions", { serverId, accountId })),
 	/**  Supprime un compte. `confirmation` : l'identifiant retapé quand on supprime son propre compte. */
 	deleteAccount: (serverId: string, accountId: string, confirmation: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("delete_account", { serverId, accountId, confirmation })),
@@ -107,6 +110,22 @@ export const commands = {
 	 *  ce PC, Q16). `device_id` est l'identifiant rendu par la liste.
 	 */
 	removeTrustedDevice: (serverId: string, deviceId: string, password: string) => typedError<DeviceRemovalOutcome, LinkFailure>(__TAURI_INVOKE("remove_trusted_device", { serverId, deviceId, password })),
+	/**
+	 *  Lit l'état de sécurité d'un serveur (lecture, sans suivi) : alerte, mode attaque, et ce que
+	 *  l'agent dit de la session de ce poste. L'interface la refait au retour du lien.
+	 */
+	getSecurity: (serverId: string) => typedError<SecurityRead, LinkFailure>(__TAURI_INVOKE("get_security", { serverId })),
+	/**
+	 *  Le dernier état de sécurité connu de chaque serveur, sans lecture réseau : l'interface le rejoue à
+	 *  son abonnement (ADR-0013 point 3).
+	 */
+	listSecurityStates: () => __TAURI_INVOKE<SecurityEvent[]>("list_security_states"),
+	/**
+	 *  Active (`active: true`) ou désactive le mode attaque : acte d'administration (mot de passe actuel
+	 *  ET preuve de la clé de ce PC, Q14 point 3 et Q16). `NotRecognized` sans rien envoyer si ce PC n'a
+	 *  pas de clé ; `Forbidden` pour un compte Lecture seule.
+	 */
+	setAttackMode: (serverId: string, active: boolean, password: string) => typedError<AttackModeOutcome, LinkFailure>(__TAURI_INVOKE("set_attack_mode", { serverId, active, password })),
 	/**
 	 *  L'état de la mise à jour de l'agent d'un serveur : version, installation gérée, mise à jour en
 	 *  cours, dernier résultat, et la version disponible dans le flux de versions. Une lecture : sans
@@ -323,6 +342,16 @@ export type AgentUpdateView = {
 	available: AgentAvailableDto | null,
 };
 
+/**  L'alerte « attaque probable » (BR-TRUST-008). */
+export type AlertDto = {
+	/**  L'identifiant du compte connecté est visé en ce moment. */
+	own: boolean,
+	/**  Début de l'épisode (RFC 3339, UTC), seulement quand `own`. */
+	since: string | null,
+	/**  Administrateur seulement : combien d'AUTRES comptes sont visés. */
+	others: number | null,
+};
+
 /**
  *  Erreur d'une commande. Sérialisée `{ kind, message }` côté TypeScript ;
  *  l'interface choisit son texte d'après `kind`.
@@ -334,6 +363,45 @@ export type AppError =
 { kind: "autostart"; message: string } | 
 /**  Dossier des journaux impossible à créer ou à ouvrir. */
 { kind: "logs"; message: string };
+
+/**  Le mode attaque du serveur. */
+export type AttackModeDto = {
+	state: AttackModeStateDto,
+	since: string | null,
+	/**  Seulement « suspendu » : secondes avant la reprise. */
+	resumesInS: number | null,
+	lastEnd: AttackModeEndDto | null,
+};
+
+/**  Comment le dernier mode attaque s'est terminé. */
+export type AttackModeEndDto = "manual" | "auto" | "cli";
+
+/**  Issue d'une activation ou d'une désactivation. */
+export type AttackModeOutcome = 
+/**  L'agent a changé le mode (ou il l'était déjà) : l'état après le changement. */
+{ kind: "done"; attack_mode: AttackModeDto } | { kind: "refused"; refusal: AttackModeRefusal } | 
+/**
+ *  Le lien est tombé avant la réponse : on ne sait pas, l'action n'est JAMAIS rejouée. L'issue
+ *  arrive par `link://operation` sous cet identifiant ; l'état se relit au retour du lien.
+ */
+{ kind: "unknown"; op_id: string };
+
+/**
+ *  Pourquoi une activation ou une désactivation est refusée, par l'agent. Sans texte : l'interface
+ *  choisit le message d'après `kind`. Le rôle insuffisant (`LinkFailure::Forbidden`) et le poste non
+ *  reconnu (`LinkFailure::NotRecognized`) sont des échecs typés, pas des refus.
+ */
+export type AttackModeRefusal = 
+/**  Le mot de passe actuel est faux. */
+{ kind: "wrong_password" } | 
+/**  Trop d'essais de mot de passe : réessayer plus tard. */
+{ kind: "too_many_attempts"; retry_after_s: number } | 
+/**  L'agent est saturé : réessayer dans un instant. */
+{ kind: "busy" } | 
+/**  L'agent ne connaît pas cette fonction (agent d'avant le mode attaque). */
+{ kind: "unsupported" } | { kind: "session_ended" } | { kind: "session_revoked" } | { kind: "other" };
+
+export type AttackModeStateDto = "off" | "active" | "suspended";
 
 /**
  *  Une entrée du journal. `at` : RFC 3339 en UTC, la source (l'interface l'affiche dans le fuseau du
@@ -538,7 +606,18 @@ export type LinkFailure =
 /**  Le suivi de l'action n'a pas pu être écrit sur le disque : l'action n'a PAS été lancée. */
 { kind: "tracking_unavailable" } | 
 /**  Le disque est trop lent pour écrire le suivi à temps : l'action n'a PAS été lancée. */
-{ kind: "tracking_slow" } | { kind: "internal" };
+{ kind: "tracking_slow" } | 
+/**
+ *  Ce PC n'a pas de clé inscrite (ou l'agent n'a pas reconnu la preuve) : un acte qui exige la
+ *  preuve de la clé (activer ou désactiver le mode attaque, Q14 point 3) n'est pas possible
+ *  d'ici. Quand elle est rendue sans clé au coffre, rien n'est parti.
+ */
+{ kind: "not_recognized" } | 
+/**
+ *  Ce PC a une clé mais l'agent ne donne pas de défi à signer : rien n'est parti (ni mot de passe
+ *  ni preuve). Ce n'est pas un serveur injoignable.
+ */
+{ kind: "device_challenge_unavailable" } | { kind: "internal" };
 
 /**
  *  État du lien d'un serveur (`link://state`). `seq` croît strictement par serveur : l'interface
@@ -649,6 +728,33 @@ export type SampleDto = {
 	gpus: GpuSampleDto[],
 	temps: TempDto[],
 };
+
+/**
+ *  Ce que l'agent dit de la session de ce poste : prouvée par la clé d'un poste inscrit, ou non.
+ *  `Unknown` : pas encore lu (le message du flux ne le porte pas, seule la lecture le dit).
+ */
+export type SecurityDeviceDto = "proven" | "none" | "unknown";
+
+/**
+ *  L'état de sécurité d'un serveur : charge de `link://security` et de `get_security`. `seq` croît
+ *  strictement par serveur : l'interface écarte tout état dont `seq` n'est pas supérieur au dernier
+ *  connu.
+ */
+export type SecurityEvent = {
+	serverId: string,
+	seq: number,
+	alert: AlertDto,
+	attackMode: AttackModeDto,
+	device: SecurityDeviceDto,
+	/**  Ce PC garde une clé d'appareil pour ce serveur (un booléen : la clé elle-même ne sort pas). */
+	keyAtHand: boolean,
+};
+
+/**
+ *  Lecture de l'état de sécurité : l'état, ou « cette fonction n'existe pas sur ce serveur » (agent
+ *  d'avant l'alerte et le mode attaque : l'agent répond `404`).
+ */
+export type SecurityRead = { kind: "known"; snapshot: SecurityEvent } | { kind: "unsupported" };
 
 /**  Un serveur du carnet, sans secret. */
 export type ServerDto = {

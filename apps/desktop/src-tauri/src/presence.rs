@@ -23,6 +23,17 @@ pub enum AlertKind {
     Offline,
     /// Le serveur est de nouveau « Connecté » après avoir été « Hors ligne ».
     Back,
+    /// Une attaque probable vise l'identifiant (début d'un épisode d'alerte, BR-TRUST-009, 033).
+    AttackProbable,
+    /// Le mode attaque s'est arrêté tout seul (BR-TRUST-019, 033).
+    AttackModeStopped,
+}
+
+impl AlertKind {
+    /// Une notification de sécurité : elle passe avant celles du lien et son réglage est à part.
+    pub fn is_security(self) -> bool {
+        matches!(self, Self::AttackProbable | Self::AttackModeStopped)
+    }
 }
 
 /// Une notification à montrer. `suppressed` : combien de changements d'état ont été absorbés par la
@@ -46,6 +57,9 @@ struct ServerGate {
     wanted: Option<AlertKind>,
     /// Changements d'état absorbés depuis la dernière notification partie.
     suppressed: u32,
+    /// Notifications de SÉCURITÉ retenues par la limite, dans l'ordre où elles partiront (au plus une
+    /// par nature) : jamais remplacées par un changement d'état du lien (BR-TRUST-033).
+    security_wanted: Vec<AlertKind>,
 }
 
 impl ServerGate {
@@ -64,6 +78,9 @@ impl ServerGate {
 /// - une notification que la limite retient n'est pas perdue : seule la DERNIÈRE situation compte,
 ///   [`NotificationGate::poll`] l'annonce à l'échéance, une fois, avec le nombre de changements
 ///   absorbés en plus ;
+/// - les notifications de SÉCURITÉ (attaque probable, arrêt automatique du mode attaque) suivent la même
+///   limite mais ont la PRIORITÉ : retenues, elles partent à l'échéance avant toute notification du
+///   lien, que celle-ci reste retenue derrière ; un changement d'état du lien ne les remplace jamais ;
 /// - seuls deux CHANGEMENTS d'état du lien notifient : « Hors ligne » et le retour « Connecté » qui le
 ///   suit. Une panne qui dure ne produit rien de plus, quelle que soit sa durée : le nombre de
 ///   notifications système est borné (une pour la panne, une au retour), indépendant du temps. Les
@@ -106,7 +123,8 @@ impl NotificationGate {
             // Déjà retenu tel quel : la même situation réannoncée n'est pas un changement.
             return None;
         }
-        if gate.window_open(now_ms) {
+        // Une notification de sécurité retenue passe d'abord : celle du lien attend derrière elle.
+        if gate.window_open(now_ms) && gate.security_wanted.is_empty() {
             return Some(send(server, gate, kind, now_ms, false));
         }
         gate.suppressed = gate.suppressed.saturating_add(1);
@@ -114,10 +132,72 @@ impl NotificationGate {
         None
     }
 
+    /// Une nature de sécurité à annoncer pour ce serveur (début d'un épisode d'alerte, arrêt
+    /// automatique du mode attaque). Partie tout de suite si la fenêtre est ouverte, sinon retenue
+    /// (une fois par nature) et annoncée par [`NotificationGate::poll`] à l'échéance.
+    pub fn push_security(&mut self, server: &str, kind: AlertKind, now_ms: u64) -> Option<Alert> {
+        debug_assert!(kind.is_security());
+        let gate = self.servers.entry(server.to_owned()).or_default();
+        if gate.security_wanted.is_empty() && gate.window_open(now_ms) {
+            gate.last_sent_at = Some(now_ms);
+            return Some(Alert {
+                server: server.to_owned(),
+                kind,
+                suppressed: 0,
+            });
+        }
+        if !gate.security_wanted.contains(&kind) {
+            gate.security_wanted.push(kind);
+            // L'attaque probable avant l'arrêt du mode : c'est l'urgence.
+            gate.security_wanted
+                .sort_by_key(|kind| u8::from(*kind != AlertKind::AttackProbable));
+        }
+        None
+    }
+
+    /// Une notification de sécurité retenue n'a plus lieu d'être (l'épisode d'alerte est fini avant
+    /// qu'elle parte) : elle est oubliée.
+    pub fn drop_security(&mut self, server: &str, kind: AlertKind) {
+        if let Some(gate) = self.servers.get_mut(server) {
+            gate.security_wanted.retain(|wanted| *wanted != kind);
+        }
+    }
+
+    /// Le réglage des notifications du lien est coupé : ce qui était retenu pour le lien est oublié,
+    /// la sécurité reste (son réglage est à part).
+    pub fn clear_link(&mut self) {
+        for gate in self.servers.values_mut() {
+            gate.offline_seen = false;
+            gate.last_kind = None;
+            gate.wanted = None;
+            gate.suppressed = 0;
+        }
+    }
+
+    /// Le réglage « Alertes de sécurité » est coupé : ce qui était retenu est oublié.
+    pub fn clear_security(&mut self) {
+        for gate in self.servers.values_mut() {
+            gate.security_wanted.clear();
+        }
+    }
+
     /// Les notifications retenues dont l'échéance est venue (à appeler régulièrement).
     pub fn poll(&mut self, now_ms: u64) -> Vec<Alert> {
         let mut due = Vec::new();
         for (server, gate) in &mut self.servers {
+            // La sécurité d'abord : tant qu'elle attend, rien du lien ne passe devant elle.
+            if !gate.security_wanted.is_empty() {
+                if gate.window_open(now_ms) {
+                    let kind = gate.security_wanted.remove(0);
+                    gate.last_sent_at = Some(now_ms);
+                    due.push(Alert {
+                        server: server.clone(),
+                        kind,
+                        suppressed: 0,
+                    });
+                }
+                continue;
+            }
             let Some(kind) = gate.wanted else { continue };
             if gate.last_kind == Some(kind) {
                 gate.wanted = None;
@@ -163,6 +243,88 @@ fn send(
     gate.wanted = None;
     gate.suppressed = 0;
     alert
+}
+
+/// Le mode attaque tel que la détection des épisodes le lit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeKind {
+    Off,
+    Active,
+    Suspended,
+}
+
+/// Qui est visé et ce que le compte peut en faire : le texte de la notification d'attaque probable
+/// (conception design, écran D).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecurityWording {
+    /// Le titulaire, qui peut activer le mode attaque depuis ce poste.
+    Owner { username: String },
+    /// Le titulaire qui ne peut pas l'activer d'ici (Lecture seule, poste sans clé inscrite).
+    Details { username: String },
+    /// Un administrateur dont l'identifiant n'est pas visé mais d'autres comptes le sont (le nombre,
+    /// jamais un nom).
+    Others { count: u32 },
+}
+
+/// Ce que l'état de sécurité d'un serveur dit, réduit à ce qui décide d'une notification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecurityNotice {
+    pub wording: SecurityWording,
+    /// Une alerte est visible pour ce compte : son identifiant est visé, ou (administrateur) d'autres.
+    pub alert_visible: bool,
+    pub mode: ModeKind,
+    /// Le dernier mode attaque s'est terminé tout seul (`last_end: auto`).
+    pub ended_automatically: bool,
+}
+
+/// Ce qui vient de changer pour un serveur.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SecurityChanges {
+    /// Un épisode d'alerte commence : UNE notification (BR-TRUST-009).
+    pub alert_started: bool,
+    /// L'épisode est fini.
+    pub alert_ended: bool,
+    /// Le mode attaque était actif ou suspendu et s'est arrêté tout seul (BR-TRUST-019).
+    pub mode_stopped_by_agent: bool,
+}
+
+#[derive(Debug, Default)]
+struct Watched {
+    alert_on: bool,
+    mode_on: bool,
+}
+
+/// Détecte les ÉPISODES : un épisode d'alerte ne notifie qu'une fois, quel que soit le nombre de
+/// messages `security` qui le répètent ; l'arrêt automatique du mode n'est annoncé que si on l'a vu
+/// actif juste avant (jamais pour un mode arrêté avant que l'application ne l'ait connu). Pur.
+#[derive(Debug, Default)]
+pub struct SecurityWatch {
+    servers: HashMap<String, Watched>,
+}
+
+impl SecurityWatch {
+    pub fn observe(&mut self, server: &str, notice: &SecurityNotice) -> SecurityChanges {
+        let watched = self.servers.entry(server.to_owned()).or_default();
+        let mode_on = notice.mode != ModeKind::Off;
+        let changes = SecurityChanges {
+            alert_started: notice.alert_visible && !watched.alert_on,
+            alert_ended: !notice.alert_visible && watched.alert_on,
+            mode_stopped_by_agent: watched.mode_on && !mode_on && notice.ended_automatically,
+        };
+        watched.alert_on = notice.alert_visible;
+        watched.mode_on = mode_on;
+        changes
+    }
+
+    pub fn forget(&mut self, server: &str) {
+        self.servers.remove(server);
+    }
+
+    /// Nombre de serveurs suivis (tests de borne).
+    #[doc(hidden)]
+    pub fn tracked(&self) -> usize {
+        self.servers.len()
+    }
 }
 
 /// Ce que montre l'icône de la zone de notification (BR-RESIL-016).

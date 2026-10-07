@@ -152,7 +152,7 @@ const EXPECTED: &[(&str, &str)] = &[
     ),
     (
         "changeOwnPassword",
-        "serverId: string, current: string, password: string",
+        "serverId: string, current: string, password: string, keepAddress: boolean",
     ),
     (
         "closeAccountSessions",
@@ -171,6 +171,16 @@ const EXPECTED: &[(&str, &str)] = &[
         "removeTrustedDevice",
         "serverId: string, deviceId: string, password: string",
     ),
+    // HRT-26 : sécurité. `password` est le mot de passe actuel (enveloppé dans un `Secret`, jamais
+    // gardé) ; la preuve de la clé, le défi et la signature n'ont ni paramètre ni commande.
+    ("getSecurity", "serverId: string"),
+    ("listSecurityStates", ""),
+    (
+        "setAttackMode",
+        "serverId: string, active: boolean, password: string",
+    ),
+    ("getNotifyOnSecurityAlert", ""),
+    ("setNotifyOnSecurityAlert", "enabled: boolean"),
     ("getAgentUpdate", "serverId: string"),
     ("updateAgent", "serverId: string, version: string"),
     ("ackAgentResult", "serverId: string, at: string"),

@@ -85,6 +85,26 @@ pub fn set_notify_on_link_change(
     Ok(now)
 }
 
+/// Réglage « Alertes de sécurité » (BR-TRUST-033) : activé par défaut, séparé du réglage du lien.
+#[tauri::command]
+#[specta::specta]
+pub fn get_notify_on_security_alert(app: AppHandle) -> Result<bool, AppError> {
+    settings::notify_on_security_alert(&app, Path::new(settings::STORE_FILE))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_notify_on_security_alert(
+    app: AppHandle,
+    alerts: State<'_, Arc<Alerts>>,
+    enabled: bool,
+) -> Result<bool, AppError> {
+    let now =
+        settings::set_notify_on_security_alert(&app, Path::new(settings::STORE_FILE), enabled)?;
+    alerts.set_security_enabled(now);
+    Ok(now)
+}
+
 /// Le serveur affiché dans la fenêtre (`None` : aucun, réglages par exemple) : l'icône de la zone de
 /// notification reflète son état (BR-RESIL-016).
 #[tauri::command]

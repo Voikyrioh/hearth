@@ -157,8 +157,15 @@ pub fn set_password(account: &str, password: &str) -> Result<Planned, Stop> {
     })
 }
 
-/// `PUT /me/password` : `username` est celui du compte connecté (connu du carnet).
-pub fn change_own_password(username: &str, current: &str, password: &str) -> Result<Planned, Stop> {
+/// `PUT /me/password` : `username` est celui du compte connecté (connu du carnet). `keep_address` :
+/// la case « Garder ce poste reconnu » (Q15, BR-CONN-019), décochée par défaut : l'adresse d'où part
+/// la requête est oubliée comme les autres (le choix le plus strict).
+pub fn change_own_password(
+    username: &str,
+    current: &str,
+    password: &str,
+    keep_address: bool,
+) -> Result<Planned, Stop> {
     let normalized = check_username(username).unwrap_or_default();
     if let Some(refusal) = weak(unmet_password_rules(password, &normalized)) {
         return Err(refusal.into());
@@ -170,8 +177,7 @@ pub fn change_own_password(username: &str, current: &str, password: &str) -> Res
             body: Some(json(&ChangeOwnPasswordRequest {
                 current: current.to_owned(),
                 password: password.to_owned(),
-                // Le choix « garder ce poste reconnu » est câblé par HRT-26.
-                keep_address: false,
+                keep_address,
             })?),
         },
         expect: Expect::Closed,

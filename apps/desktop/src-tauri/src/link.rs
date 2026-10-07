@@ -21,6 +21,8 @@ use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::{Blocked, LinkState};
 use hearth_link::ports::{EventSink, Vault};
 use hearth_link::{EventStream, LinkConfig, LinkError, LinkManager, NewServer, ServerUpdate};
+use hearth_proto::api::accounts::RoleName;
+use hearth_proto::api::security::{AttackModeEnd, AttackModeState, SecurityResponse, SecurityView};
 use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::product::DEFAULT_PORT;
 use serde::Serialize;
@@ -31,6 +33,9 @@ use crate::link_dto::{
     OutcomeDto, ProbeDto, ServerDto, ServersEvent, StateBook, events, parse_fingerprint,
     servers_list,
 };
+use crate::presence::{ModeKind, SecurityNotice, SecurityWording};
+use crate::security::book::SecurityBook;
+use crate::security::dto::SecurityEvent;
 
 /// Ce que la coquille fait des changements d'état du lien en dehors de la fenêtre : notifications
 /// système et icône de la zone de notification (BR-RESIL-015, 016). Appelé à chaque événement
@@ -38,6 +43,9 @@ use crate::link_dto::{
 pub trait StateObserver: Send + Sync {
     fn on_state(&self, server: &str, name: &str, state: LinkState, failed_attempts: u32);
     fn on_removed(&self, server: &str);
+    /// L'état de sécurité d'un serveur a changé (message `security` du flux, HRT-26) : épisodes
+    /// d'alerte et arrêt automatique du mode attaque, pour les notifications système.
+    fn on_security(&self, server: &str, name: &str, notice: &SecurityNotice);
 }
 
 /// Où partent les événements pour l'interface.
@@ -195,6 +203,7 @@ impl EventSink for PendingBook {
             | Event::Snapshot { .. }
             | Event::SessionEnded { .. }
             | Event::AgentUpdate { .. }
+            | Event::Security { .. }
             | Event::Audit { .. } => {}
         }
     }
@@ -205,6 +214,8 @@ pub struct LinkRuntime {
     book: Mutex<StateBook>,
     /// Série du processeur par serveur, pour le niveau « tenu 30 s » (BR-DASH-004).
     dash: Mutex<DashBook>,
+    /// Dernier état de sécurité de chaque serveur, rejoué à l'abonnement (HRT-26, ADR-0013 point 3).
+    security: Mutex<SecurityBook>,
     last_servers: Mutex<Option<Vec<ServerDto>>>,
     pending: Arc<PendingBook>,
     /// Dernière empreinte lue par une sonde, par adresse : seule une empreinte que cette
@@ -250,6 +261,7 @@ impl LinkRuntime {
             manager,
             book: Mutex::new(StateBook::default()),
             dash: Mutex::new(DashBook::default()),
+            security: Mutex::new(SecurityBook::default()),
             last_servers: Mutex::new(None),
             pending,
             probes: Mutex::new(HashMap::new()),
@@ -299,6 +311,76 @@ impl LinkRuntime {
     /// l'icône un serveur qui n'existe pas.
     pub fn known_server(&self, id: Option<String>) -> Option<String> {
         id.filter(|id| self.servers().iter().any(|server| &server.id == id))
+    }
+
+    fn security_book(&self) -> std::sync::MutexGuard<'_, SecurityBook> {
+        self.security.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Ce PC garde-t-il une clé d'appareil pour ce serveur ? (un booléen : la clé ne sort pas).
+    fn key_at_hand(&self, server: &ServerId) -> bool {
+        self.manager.has_device_key(server)
+    }
+
+    /// Une lecture `GET /security` : rangée dans le carnet d'états, rendue à l'interface.
+    pub fn on_security_read(
+        &self,
+        server: &ServerId,
+        response: &SecurityResponse,
+    ) -> SecurityEvent {
+        let key = self.key_at_hand(server);
+        self.security_book().on_read(server.as_str(), response, key)
+    }
+
+    /// Le dernier état de sécurité connu de chaque serveur du carnet (rejeu à l'abonnement).
+    pub fn security_states(&self) -> Vec<SecurityEvent> {
+        let known = self.security_book().servers();
+        known
+            .into_iter()
+            .filter_map(|name| {
+                let id = ServerId::parse(&name).ok()?;
+                let key = self.key_at_hand(&id);
+                self.security_book().current(&name, key)
+            })
+            .collect()
+    }
+
+    /// Les notifications système de sécurité : ce que dit le message du flux, réduit à ce qui décide
+    /// d'une notification. Le texte dépend du rôle et de la clé de CE poste, jamais d'un nom d'un
+    /// autre compte.
+    fn observe_security(&self, server: &ServerId, view: &SecurityView) {
+        let Some(observer) = self.observer.get() else {
+            return;
+        };
+        let Some(record) = self
+            .manager
+            .servers()
+            .into_iter()
+            .find(|record| &record.id == server)
+        else {
+            return;
+        };
+        let others = view.alert.others.unwrap_or(0);
+        let can_activate = record.role == Some(RoleName::Admin) && self.key_at_hand(server);
+        let username = record.username.clone();
+        let wording = if view.alert.own && can_activate {
+            SecurityWording::Owner { username }
+        } else if view.alert.own {
+            SecurityWording::Details { username }
+        } else {
+            SecurityWording::Others { count: others }
+        };
+        let notice = SecurityNotice {
+            wording,
+            alert_visible: view.alert.own || others > 0,
+            mode: match view.attack_mode.state {
+                AttackModeState::Off => ModeKind::Off,
+                AttackModeState::Active => ModeKind::Active,
+                AttackModeState::Suspended => ModeKind::Suspended,
+            },
+            ended_automatically: view.attack_mode.last_end == Some(AttackModeEnd::Auto),
+        };
+        observer.on_security(server.as_str(), &record.name, &notice);
     }
 
     fn dash(&self) -> std::sync::MutexGuard<'_, DashBook> {
@@ -552,6 +634,7 @@ impl LinkRuntime {
         self.manager.remove_server(&id).await?;
         self.book().forget(&id);
         self.dash().forget(id.as_str());
+        self.security_book().forget(id.as_str());
         self.pending.forget(&id);
         if let Some(observer) = self.observer.get() {
             observer.on_removed(id.as_str());
@@ -706,6 +789,14 @@ impl LinkRuntime {
                     ),
                 },
             ),
+            // L'état de sécurité du compte (HRT-26) : rangé, annoncé à la fenêtre (bandeaux, page,
+            // marque du serveur) et donné aux notifications système (épisodes d'alerte).
+            Event::Security { server, view } => {
+                let key = self.key_at_hand(&server);
+                let state = self.security_book().on_stream(server.as_str(), &view, key);
+                self.observe_security(&server, &view);
+                send(sink, crate::security::dto::EVENT, &state);
+            }
             Event::SessionEnded { .. } => {}
         }
     }

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use hearth_link::domain::state::LinkState;
 
-use crate::presence::AlertKind;
+use crate::presence::{AlertKind, SecurityWording};
 
 pub const APP_NAME: &str = "Hearth";
 pub const MENU_OPEN_LABEL: &str = "Ouvrir Hearth";
@@ -23,11 +23,45 @@ pub fn link_alert_body(name: &str, kind: AlertKind, suppressed: u32) -> String {
     let head = match kind {
         AlertKind::Offline => format!("{name} est hors ligne."),
         AlertKind::Back => format!("{name} est de nouveau connecté."),
+        // Les natures de sécurité ont leur texte (`security_alert_body`) ; jamais d'agrégation.
+        AlertKind::AttackProbable | AlertKind::AttackModeStopped => {
+            return format!("{name} : alerte de sécurité.");
+        }
     };
     if suppressed == 0 {
         head
     } else {
         format!("{head} Le lien a changé {suppressed} fois depuis la dernière alerte.")
+    }
+}
+
+/// Titre d'une notification de sécurité (conception design, écran D) : `Hearth : {nom du serveur}`.
+pub fn security_title(name: &str) -> String {
+    format!("{APP_NAME} : {name}")
+}
+
+/// Corps d'une notification de sécurité (BR-TRUST-009, 019, 033). Jamais le nom d'un autre compte :
+/// l'agent n'en donne que le nombre.
+pub fn security_alert_body(kind: AlertKind, wording: Option<&SecurityWording>) -> String {
+    match kind {
+        AlertKind::AttackModeStopped => {
+            "L'attaque semble terminée. Le mode attaque s'est arrêté automatiquement.".to_owned()
+        }
+        _ => match wording {
+            Some(SecurityWording::Owner { username }) => format!(
+                "Attaque probable sur ton compte {username}. Clique pour activer le mode attaque."
+            ),
+            Some(SecurityWording::Details { username }) => {
+                format!("Attaque probable sur ton compte {username}. Clique pour voir les détails.")
+            }
+            Some(SecurityWording::Others { count: 1 }) => {
+                "Attaque probable sur 1 compte du serveur. Clique pour voir les détails.".to_owned()
+            }
+            Some(SecurityWording::Others { count }) => format!(
+                "Attaque probable sur {count} comptes du serveur. Clique pour voir les détails."
+            ),
+            None => "Attaque probable sur ton compte. Clique pour voir les détails.".to_owned(),
+        },
     }
 }
 

@@ -83,6 +83,7 @@ pub async fn change_own_password(
     server_id: String,
     current: String,
     password: String,
+    keep_address: bool,
 ) -> Result<AccountOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
     service::change_own_password(
@@ -90,6 +91,7 @@ pub async fn change_own_password(
         &id,
         &Secret::new(current),
         &Secret::new(password),
+        keep_address,
     )
     .await
 }
