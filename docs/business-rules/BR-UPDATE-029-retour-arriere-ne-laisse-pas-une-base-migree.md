@@ -28,6 +28,7 @@ Service arrêté, avant l'échange des binaires, le superviseur copie la base (`
 - Code : `apps/desktop/src/agentUpdate/messages.ts::resultMessage`. Tests : `messages.test.ts`.
 
 ## Cas limites
+- Le secret d'empreinte des requêtes suivies (`request_fingerprint.key`, BR-RESIL-021, HRT-32) n'est pas dans la base : la copie ne le contient pas, le retour arrière ne le remet ni ne le touche (il ne suit pas la base). La base d'avant revient avec ses anciennes empreintes, que l'ancien binaire sait lire ; la migration `0008` qui les efface est rejouée par la mise à jour suivante.
 - Sans base (première installation) : rien à copier ni à remettre.
 - La copie se prend service arrêté : la base est fermée (journal vide).
 
