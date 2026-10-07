@@ -84,11 +84,17 @@ mod tests {
             "n": 3
         }));
         wipe_body(&mut body);
-        let shown = body.unwrap().to_string();
-        for secret in ["Ancien-1", "Correct-Horse-9", "sig", "\"a\"", "\"b\""] {
-            assert!(!shown.contains(secret), "{shown}");
-        }
-        assert!(shown.contains("true") && shown.contains('3'));
+        // Chaque texte est vide, les clés, les booléens et les nombres sont intacts.
+        assert_eq!(
+            body.unwrap(),
+            serde_json::json!({
+                "current": "",
+                "list": ["", { "deep": "" }],
+                "reauth": { "password": "", "device": { "signature": "" } },
+                "keep_address": true,
+                "n": 3
+            })
+        );
         let mut none: Option<serde_json::Value> = None;
         wipe_body(&mut none);
     }
