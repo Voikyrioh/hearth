@@ -21,7 +21,7 @@ HRT-08 pose la coquille Windows du client (`apps/desktop`). ADR-0002 a choisi Ta
 |---|---|---|---|
 | Coquille | `tauri` 2.x (`tray-icon`, `image-png`), `tauri-build` 2.x | Décidé en ADR-0002. Fenêtre, zone de notification, CSP, NSIS. | Windows seul pour l'instant (WebView2). |
 | Instance unique | `tauri-plugin-single-instance` 2 | Officiel ; le rappel ramène la fenêtre au premier plan (BR-CLIENT-003). | Aucune. |
-| Démarrage avec Windows | `tauri-plugin-autostart` 2 | Officiel ; écrit `HKCU\...\Run` avec `--minimized` (BR-CLIENT-006/007). | La valeur porte le nom de produit « Hearth » (le modèle NSIS retire cette même valeur). |
+| Démarrage avec Windows | `windows-registry` 0.6 (code maison `startup.rs`, ADR-0028 ; le greffon `tauri-plugin-autostart` est retiré depuis HRT-29) | Écrit `HKCU\...\Run` en `"chemin" --minimized` (BR-CLIENT-006/007), ce que le greffon ne savait pas faire. | La valeur porte le nom de produit « Hearth » (le modèle NSIS retire cette même valeur). |
 | Réglages locaux | `tauri-plugin-store` 2 | Officiel ; `settings.json` dans `%APPDATA%\fr.voikyrioh.hearth`. | Dossier nommé d'après l'identifiant, pas `%APPDATA%\Hearth` comme prévu en conception. |
 | Notifications | `tauri-plugin-notification` 2 | Officiel ; explication de fermeture (BR-CLIENT-005). | Windows exige un identifiant de notification : en `tauri dev` la notification s'affiche sous une identité de substitution. |
 | Mise à jour | `tauri-plugin-updater` 2.13 (API Rust seule, `semver`, `url`, `base64`, `async-trait` ; `minisign` en dev) | Officiel ; flux GitHub Releases, signature minisign, installateur NSIS (ADR-0017). Rustls + ring, ni aws-lc ni OpenSSL. | Aucune permission du greffon côté web : seules nos commandes `*_update*` (sans adresse ni chemin). |

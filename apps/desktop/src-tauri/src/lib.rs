@@ -18,6 +18,7 @@ pub mod logging;
 pub mod presence;
 pub mod security;
 pub mod settings;
+pub mod startup;
 pub mod texts;
 mod tray;
 pub mod tray_icons;
@@ -30,7 +31,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager as _, Runtime};
-use tauri_plugin_autostart::MacosLauncher;
 use tauri_specta::{Builder, collect_commands};
 
 /// Chemin du fichier de types TypeScript généré, relatif à `src-tauri/`.
@@ -240,10 +240,6 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             window::show_main(app);
         }))
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec![domain::MINIMIZED_FLAG]),
-        ))
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(update::feed::plugin())
@@ -257,6 +253,7 @@ pub fn run() {
             if let Err(error) = update::install(app) {
                 tracing::error!(%error, "mise à jour du client indisponible");
             }
+            migrate_startup_entry();
             let minimized = domain::is_minimized_launch(std::env::args());
             start_or_report(app.handle(), minimized, tray::build, |reason| {
                 fail_startup(reason)
@@ -267,6 +264,17 @@ pub fn run() {
 
     if let Err(error) = result {
         fail_startup(&error.to_string());
+    }
+}
+
+/// HRT-29 : une valeur de démarrage écrite sans guillemets (versions précédentes) est
+/// réécrite entre guillemets, sans toucher au choix de l'utilisateur. Jamais bloquant.
+// FIX:01M4B118DAFBQZYQX1E5ERY8CA
+fn migrate_startup_entry() {
+    match startup::current().and_then(|entry| entry.migrate()) {
+        Ok(true) => tracing::info!("valeur de démarrage migrée vers la forme entre guillemets"),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "migration de la valeur de démarrage impossible"),
     }
 }
 

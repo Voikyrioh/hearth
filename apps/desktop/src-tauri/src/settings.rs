@@ -1,5 +1,5 @@
 //! Réglages locaux. Deux sources indépendantes : l'entrée de démarrage de
-//! Windows (greffon autostart, source de vérité de « Lancer Hearth au démarrage
+//! Windows (`startup.rs`, source de vérité de « Lancer Hearth au démarrage
 //! de Windows ») et un fichier du greffon store pour ce qui reste interne
 //! (explication de fermeture déjà montrée). Un fichier illisible ne bloque
 //! jamais le réglage de démarrage.
@@ -8,7 +8,6 @@ use std::path::Path;
 
 use serde_json::json;
 use tauri::{AppHandle, Runtime};
-use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_store::StoreExt as _;
 
 use crate::domain::{Settings, flag_from, flag_or};
@@ -30,22 +29,13 @@ fn store_error(error: impl std::fmt::Display) -> AppError {
     AppError::Store(error.to_string())
 }
 
-fn autostart_error(error: impl std::fmt::Display) -> AppError {
-    AppError::Autostart(error.to_string())
-}
-
 impl<R: Runtime> Autostart for AppHandle<R> {
     fn is_enabled(&self) -> Result<bool, AppError> {
-        self.autolaunch().is_enabled().map_err(autostart_error)
+        crate::startup::current()?.is_enabled()
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<(), AppError> {
-        let manager = self.autolaunch();
-        if enabled {
-            manager.enable().map_err(autostart_error)
-        } else {
-            manager.disable().map_err(autostart_error)
-        }
+        crate::startup::current()?.set_enabled(enabled)
     }
 }
 
