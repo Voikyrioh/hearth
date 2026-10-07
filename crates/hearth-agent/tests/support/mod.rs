@@ -22,6 +22,7 @@ use hearth_agent::application::attack_mode::AttackModeService;
 use hearth_agent::application::audit::AuditService;
 use hearth_agent::application::maintenance::MaintenanceService;
 use hearth_agent::application::operations::OperationService;
+use hearth_agent::application::ports::FingerprintSecretStore as _;
 use hearth_agent::application::ports::{
     AuditFeed, BootInfo, Clock, HashError, IdGen, PasswordHasher, SecurityFeed, Store, TokenGen,
 };
@@ -37,6 +38,8 @@ use hearth_agent::domain::trust::{DeviceId, NewDevice};
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
 use hearth_agent::infrastructure::audit_feed::BroadcastAuditFeed;
 use hearth_agent::infrastructure::crypto::{HmacChallengeCrypto, RingProofVerifier};
+use hearth_agent::infrastructure::fingerprint::HmacFingerprinter;
+use hearth_agent::infrastructure::fingerprint_secret::FileFingerprintSecretStore;
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::{
     Database, SqliteAccountRepo, SqliteAttackModeRepo, SqliteAuditRepo, SqliteDeviceRepo,
@@ -369,6 +372,13 @@ pub async fn env() -> Env {
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
         store.clone(),
         clock.clone(),
+        // Le secret du dossier de données, comme un agent démarré sur ce dossier (HRT-32) : un test
+        // qui enregistre une opération puis démarre l'agent parle le même secret.
+        Arc::new(HmacFingerprinter::new(
+            &FileFingerprintSecretStore::new(dir.path())
+                .load_or_create()
+                .expect("secret d'empreinte"),
+        )),
     ));
     let audit = Arc::new(AuditService::new(
         Arc::new(SqliteAuditRepo::new(db.pool().clone())),

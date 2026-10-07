@@ -698,9 +698,63 @@ async fn a_failed_result_is_replayed_too() {
     assert_eq!(state.body["status"], "failed");
 }
 
+/// FIX:01M4BZN31A8Z8WN0WKNTCRTFFN (HRT-32) : une clé dont l'empreinte a été effacée par la migration
+/// 0008 n'est jamais ré-exécutée, quel que soit son état, et son résultat reste lisible.
+#[tokio::test]
+async fn a_key_whose_fingerprint_was_erased_is_never_executed_again_but_stays_readable() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let token = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
+    let account = env.service.find("lucas").await.unwrap().id;
+    let hash_before = env.hash_of(&account).await;
+    for (key, status, result) in [
+        ("OLD-RUNNING", "running", None),
+        (
+            "OLD-DONE",
+            "succeeded",
+            Some(r#"{"status":200,"body":{"ok":true}}"#),
+        ),
+        ("OLD-CUT", "interrupted", None),
+    ] {
+        sqlx::query(
+            "INSERT INTO operations (id, account_id, kind, request_hash, status, result_json, created_at)
+             VALUES (?, ?, 'PUT /me/password', '', ?, ?, '2026-10-07T10:00:00.000Z')",
+        )
+        .bind(key)
+        .bind(account.as_str())
+        .bind(status)
+        .bind(result)
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+        let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
+        let replay = api
+            .put("/me/password")
+            .token(&token)
+            .key(key)
+            .json(&body)
+            .send()
+            .await;
+        assert_eq!(
+            (replay.status, replay.code()),
+            (StatusCode::CONFLICT, "CONFLICT"),
+            "{key}"
+        );
+        assert!(replay.headers.get("idempotent-replayed").is_none(), "{key}");
+        // Rien n'a été exécuté : le mot de passe est resté le même.
+        assert_eq!(env.hash_of(&account).await, hash_before, "{key}");
+        let state = api
+            .get(&format!("/operations/{key}"))
+            .token(&token)
+            .send()
+            .await;
+        assert_eq!(state.status, StatusCode::OK, "{key}");
+        assert_eq!(state.body["status"], status, "{key}");
+    }
+}
+
 #[tokio::test]
 async fn a_key_still_running_answers_409_and_each_account_has_its_own_keys() {
-    use hearth_agent::domain::operations::RequestFingerprint;
     let env = env().await;
     let api = Api::new(&env);
     let lucas = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
@@ -708,7 +762,9 @@ async fn a_key_still_running_answers_409_and_each_account_has_its_own_keys() {
     let lucas_account = env.service.find("lucas").await.unwrap().id;
     let key = hearth_agent::domain::operations::OperationKey::parse(KEY).unwrap();
     let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
-    let request = RequestFingerprint::of("PUT", "/me/password", body.to_string().as_bytes());
+    let request = env
+        .operations
+        .fingerprint("PUT", "/me/password", body.to_string().as_bytes());
     env.operations
         .begin(&key, &lucas_account, "PUT /me/password", &request)
         .await

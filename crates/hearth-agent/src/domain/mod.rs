@@ -5,6 +5,7 @@ pub mod accounts;
 pub mod audit;
 pub mod compat;
 pub mod eviction;
+pub mod fingerprint_secret;
 pub mod identifier_slowdown;
 pub mod identity_policy;
 pub mod install;
