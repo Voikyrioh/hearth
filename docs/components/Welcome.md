@@ -6,4 +6,4 @@ Premier lancement (BR-CLIENT-013) : illustration du premier lancement (`EmptySta
 
 - Props : aucune
 - Événements et slots : aucun
-- Notes : Illustration SVG remplaçable par fichier (HRT-19, ADR-0027). Tests : `Welcome.test.ts`, `e2e/connect.spec.ts`.
+- Notes : Illustration générée à fond transparent, choisie par le détenteur (HRT-31, ADR-0027). Tests : `Welcome.test.ts`, `e2e/connect.spec.ts`.

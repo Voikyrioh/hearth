@@ -1,0 +1,26 @@
+{
+  "renderVersion": 1,
+  "sources": {
+    "src/assets/illustrations/source/vide-premier-lancement-gemini-v1.png": "2f25ed2f7204c95b41551ac80ed5fe38429a37d19a560b8bcbdd1516826ee8b0",
+    "src/assets/illustrations/source/vide-journal-gemini-v1.png": "cef76b61517cce39db1310824aefa24bf8be081e21355b073a62b4a560ba1f14",
+    "src/assets/illustrations/source/vide-hors-ligne-gemini-v2.png": "64a055bd3e2c946b181d9813b2bfed0683b61a64a7c7b0a73fdc2a3cb45940f6",
+    "scripts/illustration-spec.mjs": "a99da7bb978f3979f05f239383675b2ca82c94fe8f4675c227df3841881c23f9"
+  },
+  "outputs": {
+    "src/assets/illustrations/vide-premier-lancement.png": {
+      "sha256": "c4e30b51f7141531a9b38511866fa1fd285860c3a55bbc19723081a86fb9b718",
+      "from": ["src/assets/illustrations/source/vide-premier-lancement-gemini-v1.png"],
+      "size": 560
+    },
+    "src/assets/illustrations/vide-journal.png": {
+      "sha256": "6343ef78d3a955ede7f9267cf5ec69a25a9bb7a2d8f48288f038e82de4c9a6ac",
+      "from": ["src/assets/illustrations/source/vide-journal-gemini-v1.png"],
+      "size": 440
+    },
+    "src/assets/illustrations/vide-hors-ligne.png": {
+      "sha256": "cf46d3f289ec733fab3ea9882d38d7d68f53925633cdea21ef335beb6e9587ab",
+      "from": ["src/assets/illustrations/source/vide-hors-ligne-gemini-v2.png"],
+      "size": 440
+    }
+  }
+}

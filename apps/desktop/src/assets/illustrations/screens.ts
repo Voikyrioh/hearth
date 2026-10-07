@@ -3,7 +3,8 @@ import type { IllustrationName } from "./index";
 // Quelle illustration pour quel écran vide : LE fichier à changer pour en ajouter, en retirer ou en
 // échanger une (`null` : aucune). Le nom doit exister dans `ILLUSTRATIONS` (`index.ts`). Les pages
 // la lisent, et leurs tests (Vitest et Playwright) aussi : rien d'autre à toucher, sauf pour un
-// NOUVEAU dessin : son fichier SVG, sa ligne dans `index.ts` et sa ligne dans `ILLUSTRATION_FILES`.
+// NOUVEAU dessin : sa source et son entrée dans `scripts/illustration-spec.mjs`, puis sa ligne dans
+// `index.ts` et dans `ILLUSTRATION_FILES` ci-dessous.
 export const SCREEN_ILLUSTRATIONS: {
   welcome: IllustrationName | null;
   journal: IllustrationName | null;
