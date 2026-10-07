@@ -69,6 +69,8 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
 - [`DevActionPanel`](./DevActionPanel.md) — Bouton d'action de développement (`useServerAction`, `needs-link`).
 - [`AccountTable`](./AccountTable.md) — Tableau des comptes et actions de ligne.
+- [`TrustedDeviceTable`](./TrustedDeviceTable.md) — « Tes postes de confiance » : liste, « Ce poste », « Retirer », états.
+- [`RemoveDeviceDialog`](./RemoveDeviceDialog.md) — Retrait d'un poste de confiance (mot de passe demandé).
 - [`CreateAccountDialog`](./CreateAccountDialog.md) — Création d'un compte (validation en direct).
 - [`PasswordDialog`](./PasswordDialog.md) — Changement de mot de passe (le sien ou celui d'un autre compte).
 - [`OwnAccountCard`](./OwnAccountCard.md) — « Mon compte » d'un serveur dans les réglages.
@@ -94,6 +96,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`Servers`](./Servers.md) — Carnet de serveurs.
 - [`Dashboard`](./Dashboard.md) — Tableau de bord : la machine en direct (jauges, courbes, seuils, matériel absent).
 - [`Accounts`](./Accounts.md) — Comptes (administrateurs) : liste, création, rôle, mots de passe, sessions, suppression.
+- [`Security`](./Security.md) — Sécurité : tes postes de confiance (liste, retrait avec mot de passe).
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
 - [`Settings`](./Settings.md) — Réglages.
 

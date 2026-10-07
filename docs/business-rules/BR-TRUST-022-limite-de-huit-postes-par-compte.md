@@ -22,6 +22,7 @@ Un compte peut avoir jusqu'à **8** postes inscrits. Un poste n'est inscrit que 
 ## Application (code)
 - `crates/hearth-agent/src/domain/trust/device.rs::{judge_enrollment, RETENTION, cutoff}` ; `hearth-proto/src/api/devices.rs::MAX_DEVICES_PER_ACCOUNT`.
 - `crates/hearth-agent/src/application/trust.rs::TrustService::{list, remove}` ; `entrypoint/http/devices.rs::{list, remove}` ; `application/maintenance.rs::MaintenanceService::purge`.
+- Client (HRT-23) : `crates/hearth-link/src/manager/device.rs::{devices_list, remove_trusted_device}` (défi `0x04` signé, mot de passe, action suivie : jamais rejouée) ; coquille : `apps/desktop/src-tauri/src/devices/` (commandes typées `list_trusted_devices`, `remove_trusted_device`, `service::interpret`) ; interface : `apps/desktop/src/pages/Security.vue`, `components/organisms/{TrustedDeviceTable,RemoveDeviceDialog}.vue` (liste, « Ce poste » marqué, « Retirer » grisé sur lui et sur un poste sans clé inscrite, 8 sur 8 avec les voies de secours, fenêtre qui demande le mot de passe).
 
 ## Vérification
 - `tests/device_proof.rs` : `the_ninth_device_is_refused_without_evicting_another_and_the_connection_still_succeeds`, `the_list_shows_only_the_own_devices_and_marks_the_current_one`, `the_current_device_cannot_be_removed_from_itself_but_another_can`, `removing_a_device_closes_its_sessions_forgets_its_address_and_is_journaled`, `a_device_identifier_that_is_not_ours_cannot_be_removed`, `the_purge_forgets_a_device_after_ninety_days_without_proof_and_detaches_its_session`.
@@ -29,11 +30,12 @@ Un compte peut avoir jusqu'à **8** postes inscrits. Un poste n'est inscrit que 
 - Voies de secours : `tests/device_proof.rs::{a_password_change_by_an_administrator_forgets_every_device_and_address, closing_the_sessions_forgets_the_devices_and_the_addresses_of_the_account}`, `tests/account_cli.rs::passwd_changes_the_password_and_closes_the_sessions`.
 - `tests/http_api.rs::every_modifying_route_leaves_exactly_one_success_entry` (le retrait laisse une seule entrée réussie).
 - HRT-24 : `tests/security_followups.rs::removing_a_device_closes_every_session_without_a_link_except_the_current_one` ; `tests/device_http.rs::a_wrong_password_at_the_confirmation_of_a_removal_leaves_one_entry_of_the_removal_and_no_login`.
+- Client (HRT-23) : `crates/hearth-link/tests/device_key.rs::{removing_a_trusted_device_needs_the_password_and_the_proof_of_this_pcs_key, removing_a_device_without_a_key_sends_nothing, a_link_cut_during_a_removal_is_unknown_and_never_replayed}` ; `apps/desktop/src-tauri/tests/devices_runtime.rs::removing_a_device_asks_for_the_password_and_proves_the_key_of_this_pc`, `tests/devices_wire.rs` ; interface : `apps/desktop/src/pages/Security.test.ts` (chaque état de la liste, retrait, mot de passe faux, coupure), `apps/desktop/e2e/security.spec.ts`.
 
 ## Cas limites
 - « Reconnu manuellement sur la liste » (texte de la spec) n'a pas d'autre sens exploitable que « retiré puis réinscrit » : pas d'éviction automatique (conception, section 18, à confirmer).
 - Un poste purgé (90 jours) laisse ses sessions ouvertes, détachées du poste.
-- **8 postes inscrits et aucun en main** (aucun poste ne peut prouver sa clé) : le client ne peut retirer rien. Voies de secours : changement du mot de passe par un administrateur, `hearth-agent account passwd` et `hearth-agent account revoke` sur le serveur (à dire dans l'aide du client, HRT-23).
+- **8 postes inscrits et aucun en main** (aucun poste ne peut prouver sa clé) : le client ne peut retirer rien. Voies de secours : changement du mot de passe par un administrateur, `hearth-agent account passwd` et `hearth-agent account revoke` sur le serveur (à dire dans l'aide du client : fait par HRT-23, `devices.limitHelp`).
 - Un mot de passe faux à la confirmation du retrait laisse **une** entrée, celle du retrait (`device.remove`, échoué, « mot de passe actuel incorrect »), et pas une connexion refusée de plus ; les compteurs sont ceux de la connexion.
 
 ## Règles liées
@@ -42,3 +44,4 @@ Un compte peut avoir jusqu'à **8** postes inscrits. Un poste n'est inscrit que 
 ## Historique
 - 2026-10-07 : création (HRT-22, session 2026-10-04-hearth-creation, T32).
 - 2026-10-07 : HRT-24 (T33) : toutes les sessions sans lien du compte sont fermées au retrait (sauf la courante), cas « 8 postes, aucun en main », entrée de journal du mot de passe faux.
+- 2026-10-07 : HRT-23 (T35) : partie client (liste, retrait avec mot de passe, aide des voies de secours).

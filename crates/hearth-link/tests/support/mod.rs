@@ -458,6 +458,18 @@ impl hearth_link::ports::Transport for SharedSpy {
         self.0.request(target, token, request).await
     }
 
+    async fn export_audit(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+        path: &str,
+    ) -> Result<
+        hearth_link::ports::transport::AuditExport,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.export_audit(target, token, path).await
+    }
+
     async fn operation(
         &self,
         target: &hearth_link::ports::transport::Target,
