@@ -2,7 +2,7 @@
 
 Les postes dont l'agent a inscrit la clé d'appareil (HRT-22, ADR-0023, BR-TRUST-004 et 022). Code : `crates/hearth-agent/src/entrypoint/http/devices.rs` (handlers), `application/trust.rs` (cas d'usage), `domain/trust/device.rs` (règles). Types du fil : `hearth-proto::api::devices`.
 
-Les deux routes exigent `X-Hearth-Api` et un jeton, et sont ouvertes à **tout rôle** : chacun ne voit et ne retire que **ses** postes. Un poste est inscrit par une connexion par mot de passe (`POST /sessions` avec `device`, voir [sessions](./sessions.md)), jamais par une de ces routes.
+Les deux routes exigent `X-Hearth-Api` et un jeton, et sont ouvertes à **tout rôle** : chacun ne voit et ne retire que **ses** postes. **Lister** se fait avec la session seule ; **retirer est un acte d'administration** (mot de passe ET clé privée, Q16). Un poste est inscrit par une connexion par mot de passe (`POST /sessions` avec `device`, voir [sessions](./sessions.md)), jamais par une de ces routes.
 
 ## `GET /api/v1/me/devices` : mes postes de confiance
 
@@ -31,16 +31,38 @@ Les deux routes exigent `X-Hearth-Api` et un jeton, et sont ouvertes à **tout r
 
 ## `DELETE /api/v1/me/devices/{id}` : retirer un poste
 
-- **Authentification** : jeton. **Rôle** : tous. **Suivi par clé** : oui (`Idempotency-Key` : rejouer rend le premier résultat). **Journal** : `device.remove`.
-- Retire le poste, **son adresse retenue et ses sessions** (elles répondent ensuite `401 SESSION_REVOKED`). Le poste peut être inscrit de nouveau par une connexion par mot de passe.
+- **Authentification** : jeton **et** corps (ci-dessous). **Rôle** : tous. **Suivi par clé** : oui (`Idempotency-Key` : rejouer rend le premier résultat). **Journal** : `device.remove`.
+- **Corps** :
+
+```json
+{
+  "password": "le mot de passe actuel du compte",
+  "device": {
+    "algorithm": "ed25519",
+    "public_key": "base64 de 32 octets : la clé du poste COURANT",
+    "challenge": "défi de POST /sessions/challenge avec purpose = device_removal",
+    "signature": "base64 de 64 octets"
+  }
+}
+```
+
+  La signature (usage `0x04`) lie le défi, l'empreinte du serveur, l'identifiant du compte, le **hachage du jeton** de la session qui fait la requête et l'**identifiant du poste visé** (celui du chemin). Le mot de passe est vérifié **par le chemin de la connexion** (mêmes compteurs d'échec, même ralentissement), **après** la preuve : sans preuve valide aucun mot de passe n'est essayé. Le défi n'est consommé que si le retrait réussit.
+- Retire le poste, **son adresse retenue et ses sessions** (elles répondent ensuite `401 SESSION_REVOKED`) : celles liées au poste, et celles du même compte sans lien à un poste ouvertes depuis sa dernière adresse sous son nom. Le poste peut être inscrit de nouveau par une connexion par mot de passe.
 - **Réponse** : `204`, sans corps.
 
 | Statut | Code | Quand |
 |---|---|---|
 | 404 | `NOT_FOUND` | Le poste n'existe pas, ou n'est pas à l'appelant (les deux cas sont indiscernables). |
-| 422 | `VALIDATION_ERROR` | C'est le poste d'où part la requête (`details.field` : `id`) : il ne se retire pas depuis lui-même. |
+| 422 | `VALIDATION_ERROR` | `details.field` = `id` : c'est le poste d'où part la requête, il ne se retire pas depuis lui-même. |
+| 422 | `VALIDATION_ERROR` | `details.field` = `device`, `details.reason` = `device_required` : la session courante n'a pas de poste inscrit (client ancien) ; retirer depuis un poste qui a une clé inscrite, ou faire changer son mot de passe par un administrateur. |
+| 422 | `VALIDATION_ERROR` | `details.field` = `device`, `details.reason` = `proof_invalid` : preuve absente, illisible, périmée, rejouée, d'un autre compte, d'une autre session, signée pour un autre poste visé, ou qui n'est pas la clé du poste courant. |
+| 422 | `WRONG_PASSWORD` | Mot de passe actuel incorrect (compté comme un échec de connexion). |
+| 429 | `TOO_MANY_ATTEMPTS` | Même attente que la connexion (`details.retry_after_s`). |
+| 503 | `BUSY` | Agent saturé de calculs de mots de passe. |
 
 Sur un agent d'avant cette fonction, les deux routes répondent `404 NOT_FOUND`.
+
+**Voies de secours** quand aucun poste inscrit ne permet de retirer : `PUT /accounts/{id}/password` par un administrateur, ou `hearth-agent account passwd` sur le serveur (oublient tous les postes et adresses du compte) ; `hearth-agent account revoke`.
 
 ## Oublis
 

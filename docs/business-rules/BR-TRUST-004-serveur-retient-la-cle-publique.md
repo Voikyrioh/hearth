@@ -14,6 +14,7 @@ maj: 2026-10-07
 Le serveur retient la clé **publique** de chaque appareil reconnu pour le reconnaître aux connexions suivantes. Un poste est inscrit **seulement** par une connexion par mot de passe accordée, dans la transaction qui ouvre la session, si la signature est valide sous la clé fournie, que la clé n'est inscrite pour aucun autre compte, que le compte a moins de 8 postes (BR-TRUST-022) et que le mode attaque n'est pas actif. **Jamais par une session seule** : une session volée ne peut pas s'offrir une clé.
 
 - Une même clé présentée deux fois est un seul poste (`proven`) ; sa dernière preuve est datée.
+- Une clé de petit ordre n'est jamais inscrite (BR-TRUST-005). La clé inscrite est comparée à celle de la preuve (à temps constant), pas seulement son empreinte. Le défi n'est consommé qu'au moment où l'inscription (ou la preuve sous une clé inscrite) sert.
 - Seule la clé publique est gardée (32 octets), avec son empreinte (`key_id`, 16 octets de SHA-256 en hexadécimal) ; jamais une clé privée.
 - Le nom du poste est celui de `X-Hearth-Client`, nettoyé (jamais un texte libre au journal). Journal : `device.enroll`, sans cible ni champ libre.
 - La clé ne change **aucune décision d'accès** dans cette version (BR-TRUST-035 : en état normal, aucune règle n'est appliquée ; la règle 2 sur 3 est HRT-24).

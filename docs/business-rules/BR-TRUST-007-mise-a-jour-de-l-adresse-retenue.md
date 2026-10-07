@@ -18,6 +18,8 @@ Le serveur retient l'adresse IP **exacte** d'une connexion réussie (table `know
 - **rafraîchie** (durée repoussée, rien d'appris) quand une session valide est utilisée depuis une adresse déjà retenue, au rythme du renouvellement de session (5 minutes) : un poste utilisé chaque jour ne cesse pas d'être connu au bout de 30 jours ;
 - retenue **30 jours** après le plus récent de la dernière connexion réussie et du dernier usage reconnu ; 8 par compte ; un poste à clé n'a qu'**une** adresse à la fois (sa ligne est déplacée quand il prouve sa clé depuis une autre adresse) ; oubliée avec son poste.
 
+**Deux postes derrière la même adresse** : la table a une ligne par (compte, adresse), liée au **dernier poste qui a prouvé** sa clé depuis elle ; les deux postes restent inscrits, chacun garde sa dernière adresse dans la liste, et le premier retrouve l'adresse à sa prochaine preuve. Une preuve valide d'une clé non inscrite ne fait rien retenir, mais la session, elle, est renouvelée et son adresse déjà retenue est repoussée.
+
 > **Partielle** : « si l'adresse change mais que le poste présente deux autres critères, il reste reconnu » est la règle 2 sur 3 (HRT-24). HRT-22 livre ce qui rend cette règle possible : l'apprentissage, le rafraîchissement et le lien au poste.
 
 ## Application (code)

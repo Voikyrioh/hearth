@@ -57,7 +57,7 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 ## `POST /api/v1/sessions/challenge` : demander un défi pour la clé d'appareil
 
 - **Authentification** : aucune. **Rôle** : aucun. **Suivi par clé** : non. **Journal** : non. En-tête `X-Hearth-Api` exigé.
-- **Corps** : `{ "username": "marie", "purpose": "login" }`. `username` : la saisie, **existante ou non** ; `purpose` : `login` (connexion), `session` (ouverture du flux), `attack_mode` (activation ou désactivation du mode attaque, usage défini dès maintenant, utilisé par HRT-25).
+- **Corps** : `{ "username": "marie", "purpose": "login" }`. `username` : la saisie, **existante ou non** ; `purpose` : `login` (connexion, octet `0x01`), `session` (ouverture du flux, `0x02`), `attack_mode` (activation ou désactivation du mode attaque, `0x03`, **réservé** : défini, utilisé par HRT-25), `device_removal` (retrait d'un poste de confiance, `0x04`, voir [postes de confiance](./devices.md)).
 - **Réponse `200`**, identique que l'identifiant existe ou non (même code, mêmes en-têtes, même forme et même taille) :
 
 ```json
