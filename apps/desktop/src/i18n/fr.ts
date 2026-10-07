@@ -210,6 +210,9 @@ export const fr = {
     noKey:
       "Pour faire cette action, ce poste doit être enregistré. Reconnecte-toi avec ton mot de passe pour l'enregistrer, puis recommence.",
     reconnect: "Me reconnecter pour enregistrer ce poste",
+    notEnrolled:
+      "Le serveur ne reconnaît pas la clé de ce poste : il n'est pas enregistré. Reconnecte-toi avec ton mot de passe pour l'enregistrer. Si ton compte a déjà 8 postes, retires-en un depuis un autre poste, ou demande à l'administrateur du serveur la commande « hearth-agent account revoke » (voir le guide « Récupérer l'accès administrateur »).",
+    passwordMissing: "Cette action demande ton mot de passe.",
     settingLabel: "Demander mon mot de passe",
     settingHelp:
       "Une saisie de ton mot de passe peut valoir 5 minutes pour les actions courantes. Les actions sensibles le redemandent toujours, et la clé de ce poste est vérifiée à chaque action.",
