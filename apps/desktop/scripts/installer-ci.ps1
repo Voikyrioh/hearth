@@ -9,7 +9,6 @@
 # Partie 2, comportements : installation silencieuse (a), reinstallation silencieuse et mise a jour
 #   passive avec une valeur posee comme le ferait l'application (b), mise a jour passive sans valeur
 #   (c), desinstallation (d).
-$Mode = 'mine'
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $installer = (Get-ChildItem (Join-Path $root 'target\release\bundle\nsis\*.exe') | Select-Object -First 1).FullName
@@ -21,9 +20,9 @@ $approvedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Startup
 $results = New-Object System.Collections.Generic.List[string]
 
 function Save-Results {
-  $results | Set-Content (Join-Path $evidence "results-$Mode.txt")
+  $results | Set-Content (Join-Path $evidence "results.txt")
   if ($env:GITHUB_STEP_SUMMARY) {
-    ("### Installateur NSIS sur le runner ($Mode)" + "`n`n" + (($results | ForEach-Object { "- $_" }) -join "`n")) | Add-Content $env:GITHUB_STEP_SUMMARY
+    ("### Installateur NSIS sur le runner" + "`n`n" + (($results | ForEach-Object { "- $_" }) -join "`n")) | Add-Content $env:GITHUB_STEP_SUMMARY
   }
 }
 function Note($text) { Write-Host $text; $results.Add($text) }
@@ -177,7 +176,7 @@ function Full-Flow($name, $toggle, $close, $shortcut) {
   $box = Find-Box $main
   if ($box -eq [IntPtr]::Zero) { Fail "$name : pas de case" }
   if ($toggle) { [void][W]::PostMessage($box, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep -Milliseconds 500 }
-  Shot (Join-Path $evidence "$Mode-$name-accueil.png") $main
+  Shot (Join-Path $evidence "$name-accueil.png") $main
   $deadline = (Get-Date).AddSeconds(240)
   $finishSince = $null
   $tick = 0
@@ -196,8 +195,8 @@ function Full-Flow($name, $toggle, $close, $shortcut) {
     if ($onFinish) {
       if ($null -eq $finishSince) {
         $finishSince = Get-Date; Start-Sleep -Seconds 3
-        Shot (Join-Path $evidence "$Mode-$name-fin.png") $main
-        Shot (Join-Path $evidence "$Mode-$name-fin-ecran.png") ([IntPtr]::Zero)
+        Shot (Join-Path $evidence "$name-fin.png") $main
+        Shot (Join-Path $evidence "$name-fin-ecran.png") ([IntPtr]::Zero)
       }
       switch ($close) {
         'command' { [void][W]::PostMessage($main, 0x111, [IntPtr]1, $next) }
@@ -216,7 +215,7 @@ function Full-Flow($name, $toggle, $close, $shortcut) {
     } elseif ($next -ne [IntPtr]::Zero) { [void][W]::PostMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
     Start-Sleep -Seconds 2
     $tick++
-    if (($tick % 6 -eq 0) -and ($tick -le 36) -and (-not $onFinish)) { Shot (Join-Path $evidence ("{0}-{1}-etape-{2:00}.png" -f $Mode, $name, $tick)) $main }
+    if (($tick % 6 -eq 0) -and ($tick -le 36) -and (-not $onFinish)) { Shot (Join-Path $evidence ("{0}-etape-{1:00}.png" -f $name, $tick)) $main }
   }
   if ($p.HasExited) {
     $secs = if ($finishSince) { [int]((Get-Date) - $finishSince).TotalSeconds } else { -1 }
@@ -224,8 +223,8 @@ function Full-Flow($name, $toggle, $close, $shortcut) {
     $result = 'sortie'
   } else {
     $tops = [W]::TopLevels([uint32]$p.Id) | ForEach-Object { "{0}:'{1}':{2}" -f [W]::Cls($_), [W]::Text($_), [W]::IsWindowVisible($_) }
-    Shot (Join-Path $evidence "$Mode-$name-bloque.png") $main
-    Shot (Join-Path $evidence "$Mode-$name-bloque-ecran.png") ([IntPtr]::Zero)
+    Shot (Join-Path $evidence "$name-bloque.png") $main
+    Shot (Join-Path $evidence "$name-bloque-ecran.png") ([IntPtr]::Zero)
     Note "BLOQUE $name ($close, raccourci=$shortcut) : l'installateur ne se ferme pas. Fenetres du processus : $($tops -join ' | ')"
     $script:stuck.Add("$name ($close, raccourci=$shortcut)")
     Stop-Process -Id $p.Id -Force
@@ -242,7 +241,7 @@ function Silent($arguments) {
   Expect ($p.ExitCode -eq 0) "installateur $($arguments -join ' ') : code de sortie $($p.ExitCode)"
 }
 
-Note "installateur ($Mode) : $installer"
+Note "installateur : $installer"
 Expect ($null -eq (Run-Value)) 'runner vierge : aucune valeur Hearth sous Run au depart'
 
 # ---- Partie 1 : la page d'accueil
