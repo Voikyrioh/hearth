@@ -292,7 +292,7 @@ impl Reason {
             Self::DownloadFailed => "téléchargement impossible".to_owned(),
             Self::UpdateFailed => "mise à jour échouée".to_owned(),
             Self::RolledBack => {
-                "le nouvel agent n'a pas répondu, retour à la version précédente".to_owned()
+                "le nouvel agent n'a pas répondu, retour à la version précédente. Un changement du mode attaque fait depuis le début de la mise à jour a pu être annulé".to_owned()
             }
             Self::TooVaried => "activité trop variée".to_owned(),
             Self::NotRecognized => "mode attaque : poste non reconnu".to_owned(),

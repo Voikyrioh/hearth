@@ -32,9 +32,9 @@ use crate::domain::audit::{Actor, AuditAction, Origin, Outcome, Reason, Target};
 use crate::domain::install::Version;
 use crate::domain::text::hex;
 use crate::domain::update::{
-    CHECK_WINDOW, Job, Leftovers, MAX_BINARY_BYTES, Orphan, PercentTracker, Requester, STOP_GRACE,
-    SupervisorState, UpdateInput, UpdateRecord, UpdateRefusal, UpdateTarget, classify_orphan,
-    plan_update,
+    CHECK_WINDOW, Job, Leftovers, MAX_BINARY_BYTES, MAX_RESUMES, Marker, Orphan, PercentTracker,
+    Phase, Requester, STOP_GRACE, SupervisorState, UpdateInput, UpdateRecord, UpdateRefusal,
+    UpdateTarget, classify_orphan, plan_update,
 };
 
 /// Combien de temps le service attend, par défaut, un superviseur qui devait travailler avant d'y
@@ -189,7 +189,7 @@ impl UpdateService {
         if let Some(progress) = self.running().progress.clone() {
             return Some(progress);
         }
-        if self.host.supervisor_running() {
+        if self.supervised() {
             let state = self.host.read_state().ok().flatten();
             return Some(match state {
                 Some(state) => UpdateProgress {
@@ -271,7 +271,7 @@ impl UpdateService {
     ) -> Result<UpdateProgress, UpdateError> {
         let begun = {
             let mut running = self.running();
-            let in_progress = running.progress.is_some() || self.host.supervisor_running();
+            let in_progress = running.progress.is_some() || self.supervised();
             match plan_update(
                 self.current,
                 self.allowed,
@@ -423,9 +423,14 @@ impl UpdateService {
         };
         let job_path = {
             let host = Arc::clone(&self.host);
-            blocking(move || host.write_job(&job))
-                .await?
-                .map_err(|_| UpdateReason::Staging)?
+            blocking(move || {
+                // Une nouvelle mise à jour repart de zéro : le marqueur d'une précédente (reprise
+                // abandonnée, copies gardées) ne s'applique pas à elle (BR-UPDATE-033).
+                host.discard_marker();
+                host.write_job(&job)
+            })
+            .await?
+            .map_err(|_| UpdateReason::Staging)?
         };
 
         // 4. Le superviseur, détaché : il arrête ce service, échange, redémarre, contrôle.
@@ -493,7 +498,7 @@ impl UpdateService {
             let mut seen: Option<UpdateStep> = None;
             loop {
                 tokio::time::sleep(service.env.timing.watch).await;
-                if service.host.supervisor_running() {
+                if service.supervised() {
                     if let Ok(Some(state)) = service.host.read_state()
                         && seen != Some(state.step)
                     {
@@ -529,7 +534,7 @@ impl UpdateService {
         }
         // Lu AVANT le résultat : un superviseur qui conclut entre les deux lectures est rattrapé
         // par `watch`, au lieu de laisser un résultat jamais annoncé.
-        let supervising = self.host.supervisor_running();
+        let supervising = self.supervised();
         if self.report_pending().await {
             return;
         }
@@ -550,16 +555,35 @@ impl UpdateService {
         self.conclude_orphan(orphan).await;
     }
 
+    /// Un superviseur travaille, ou systemd va le relancer (HRT-27). **Un seul arbitre** : tant que c'est
+    /// vrai, l'agent qui démarre surveille et ne touche ni au travail ni à la copie du superviseur ; sans
+    /// cela, un agent qui démarre dans les 2 s entre la mort du superviseur et sa relance réécrirait le
+    /// travail (`recover`) et la reprise suivante serait tenue pour « déjà tentée ».
+    fn supervised(&self) -> bool {
+        self.host.supervisor_running() || self.host.supervisor_pending()
+    }
+
     /// Ce que le dossier `update/` contient. Illisible n'est pas absent : une trace qui ne se lit
     /// pas est un travail à conclure.
     fn read_leftovers(&self) -> Leftovers {
         let job = self.host.read_job();
         let state = self.host.read_state();
+        let unreadable = job.is_err() || state.is_err();
+        let job = job.ok().flatten();
+        // « Reprises déjà tentées » est une donnée du disque, lue dans le marqueur d'étape : les reprises
+        // du superviseur plus les lancements que l'agent a ratés. Sans marqueur (agent d'avant), un
+        // travail déjà marqué `recover` compte pour toutes. Le domaine (`classify_orphan`) en décide.
+        let recovery_attempts = match self.host.read_marker() {
+            Ok(Some(marker)) => marker.attempts(),
+            _ if job.as_ref().is_some_and(|job| job.recover) => MAX_RESUMES,
+            _ => 0,
+        };
         Leftovers {
-            unreadable: job.is_err() || state.is_err(),
+            unreadable,
             state: state.ok().flatten(),
-            job: job.ok().flatten(),
+            job,
             backup_present: self.host.path_exists(&self.env.backup),
+            recovery_attempts,
         }
     }
 
@@ -586,6 +610,14 @@ impl UpdateService {
                     "la reprise de la mise à jour n'a rien conclu : à reprendre à la main (runbook), copies gardées"
                 );
                 self.host.discard_work_files();
+                // Le marqueur le dit aussi : abandonné, réglé, plus rien ne reprend.
+                if let Ok(Some(mut marker)) = self.host.read_marker() {
+                    marker.phase = Phase::Abandoned;
+                    marker.outcome = Some(UpdateOutcome::Failed);
+                    marker.reason = Some(UpdateReason::RollbackFailed);
+                    marker.settled = true;
+                    let _ = self.host.write_marker(&marker);
+                }
                 let record = UpdateRecord {
                     version: Some(job.version.clone()),
                     previous: job.previous.clone(),
@@ -773,8 +805,32 @@ impl UpdateService {
         job.recover = true;
         let requester = job.requester();
         let host = Arc::clone(&self.host);
+        let backup = self.env.backup.clone();
         let launched = blocking(move || {
-            let supervisor = host.prepare_supervisor()?;
+            // La tentative se compte AVANT le lancement, durablement : un lancement qui échoue (systemd-run
+            // absent, refusé) avance le compteur comme un superviseur repris, et à la borne l'agent conclut
+            // (BR-UPDATE-033). Sans marqueur, il est créé ici avec les copies que le disque garde.
+            match host.read_marker() {
+                Ok(Some(mut marker)) => {
+                    marker.launches += 1;
+                    host.write_marker(&marker)?;
+                }
+                Ok(None) => {
+                    let mut marker = Marker::begin(&job);
+                    marker.database_copy = host.database_copy_present();
+                    marker.backup_kept = host.path_exists(&backup);
+                    marker.launches = 1;
+                    host.write_marker(&marker)?;
+                }
+                // Marqueur illisible : le superviseur l'abandonnera sans rien deviner.
+                Err(_) => {}
+            }
+            // La copie déjà déposée est l'ANCIEN binaire (celui qu'on n'a pas à juger) : une reprise la
+            // garde ; sans elle (machine redémarrée, copie perdue), elle vient du binaire courant.
+            let supervisor = match host.existing_supervisor() {
+                Some(existing) => existing,
+                None => host.prepare_supervisor()?,
+            };
             let job_path = host.write_job(&job)?;
             host.launch(&supervisor, &job_path)
         })

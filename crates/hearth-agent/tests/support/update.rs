@@ -17,7 +17,7 @@ use hearth_agent::application::ports::{
 };
 use hearth_agent::application::update::{Timing, UpdateAdapters, UpdateEnv, UpdateService};
 use hearth_agent::domain::install::Version;
-use hearth_agent::domain::update::{Job, SupervisorState, UpdateRecord};
+use hearth_agent::domain::update::{Job, Marker, SupervisorState, UpdateRecord};
 use hearth_agent::infrastructure::update::{BroadcastUpdateFeed, MinisignVerifier};
 use hearth_proto::fingerprint::Fingerprint;
 use sha2::{Digest, Sha256};
@@ -121,6 +121,10 @@ pub struct MemState {
     /// Les traces (`state.json`, `job.json`) existent mais ne se lisent pas.
     pub unreadable: bool,
     pub removed: Vec<PathBuf>,
+    /// Le marqueur d'étape du superviseur (HRT-27).
+    pub marker: Option<Marker>,
+    /// L'unité transitoire du superviseur existe encore (en attente de relance par systemd).
+    pub unit_alive: bool,
 }
 
 /// La machine en mémoire : aucun fichier, aucun processus.
@@ -148,6 +152,14 @@ impl MemHost {
 impl UpdateHost for MemHost {
     fn supervisor_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    fn supervisor_pending(&self) -> bool {
+        self.with(|s| s.unit_alive && s.marker.as_ref().is_some_and(Marker::can_resume))
+    }
+
+    fn existing_supervisor(&self) -> Option<PathBuf> {
+        None
     }
 
     fn take_supervisor_lock(&self) -> Result<SupervisorLock, UpdateHostError> {
@@ -219,6 +231,23 @@ impl UpdateHost for MemHost {
         Ok(())
     }
 
+    fn read_marker(&self) -> Result<Option<Marker>, UpdateHostError> {
+        Ok(self.with(|s| s.marker.clone()))
+    }
+
+    fn write_marker(&self, marker: &Marker) -> Result<(), UpdateHostError> {
+        self.with(|s| s.marker = Some(marker.clone()));
+        Ok(())
+    }
+
+    fn discard_marker(&self) {
+        self.with(|s| s.marker = None);
+    }
+
+    fn same_content(&self, _a: &Path, _b: &Path) -> bool {
+        false
+    }
+
     fn read_state(&self) -> Result<Option<SupervisorState>, UpdateHostError> {
         self.with(|s| {
             if s.unreadable {
@@ -274,6 +303,7 @@ impl UpdateHost for MemHost {
             s.job = None;
             s.state = None;
             s.db_copy = false;
+            s.marker = None;
             s.cleared += 1;
         });
     }

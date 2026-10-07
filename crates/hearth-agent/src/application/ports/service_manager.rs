@@ -22,6 +22,21 @@ pub enum ServiceKind {
     Unmanaged,
 }
 
+/// Où en est le service, tel que le système le dit (HRT-27).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceState {
+    /// Il tourne.
+    Active,
+    /// Il démarre, ou attend son prochain essai après un échec (`Restart=`).
+    Activating,
+    /// Arrêté, et c'est ce qu'on lui a demandé : `systemctl stop`, ou le superviseur lui-même.
+    Inactive,
+    /// Tombé en échec (trop d'essais de démarrage).
+    Failed,
+    /// Le système ne le dit pas.
+    Unknown,
+}
+
 #[derive(Debug, Error)]
 pub enum ServiceError {
     #[error("écriture de l'unité {path} impossible : {source}")]
@@ -44,6 +59,17 @@ pub trait ServiceManager: Send + Sync {
 
     /// Le service tourne-t-il ?
     fn is_active(&self) -> Result<bool, ServiceError>;
+
+    /// L'état du service. Par défaut, `Active` ou `Inactive` d'après `is_active` ; l'adaptateur
+    /// systemd distingue un service qui échoue et se relance (`Activating`) d'un arrêt demandé
+    /// (`Inactive`) : le superviseur ne défait jamais un arrêt voulu (BR-UPDATE-031).
+    fn state(&self) -> ServiceState {
+        match self.is_active() {
+            Ok(true) => ServiceState::Active,
+            Ok(false) => ServiceState::Inactive,
+            Err(_) => ServiceState::Unknown,
+        }
+    }
 
     /// Le service démarre-t-il avec le système ?
     fn is_enabled(&self) -> Result<bool, ServiceError>;

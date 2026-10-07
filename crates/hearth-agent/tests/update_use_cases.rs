@@ -140,6 +140,31 @@ async fn a_valid_update_shows_every_step_in_order_then_hands_over_to_the_supervi
 }
 
 #[tokio::test]
+async fn a_new_update_forgets_the_marker_of_an_abandoned_one_before_its_work_is_written() {
+    // BR-UPDATE-033 : le marqueur « abandonné » d'une mise à jour précédente (même version visée)
+    // ne doit pas faire de la nouvelle un travail que le superviseur croirait déjà abandonné.
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    rig.host.with(|s| {
+        let mut marker = hearth_agent::domain::update::Marker::begin(&orphan_job());
+        marker.phase = hearth_agent::domain::update::Phase::Abandoned;
+        marker.version = "0.2.0".into();
+        s.marker = Some(marker);
+    });
+    start_valid(&rig, BINARY).await.unwrap();
+    for _ in 0..200 {
+        if rig.host.with(|s| !s.launched.is_empty()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    rig.host.with(|s| {
+        assert!(s.job.is_some(), "le travail est écrit");
+        assert!(s.marker.is_none(), "le marqueur d'avant est oublié");
+    });
+}
+
+#[tokio::test]
 async fn nothing_is_written_or_run_before_the_checksum_and_the_signature_are_verified() {
     let env = env().await;
 
@@ -407,6 +432,16 @@ async fn a_rolled_back_update_is_announced_with_its_reason_and_journaled_as_fail
         "{:?}",
         entries[0].reason
     );
+    // Ce que le retour arrière fait perdre est dit, mode attaque compris (pré-review HRT-27).
+    assert!(
+        entries[0]
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("mode attaque"),
+        "{:?}",
+        entries[0].reason
+    );
     // BR-UPDATE-016 : pas de relance automatique ; le résultat reste lisible.
     let last = rig.service.last().unwrap();
     assert_eq!(last.outcome, UpdateOutcome::RolledBack);
@@ -654,6 +689,162 @@ async fn a_swap_nobody_concluded_is_taken_over_by_a_recovery_supervisor() {
         journal(&env).await.is_empty(),
         "rien n'est annoncé avant la conclusion"
     );
+}
+
+fn live_marker(resumes: u32) -> hearth_agent::domain::update::Marker {
+    hearth_agent::domain::update::Marker {
+        phase: hearth_agent::domain::update::Phase::Checking,
+        resumes,
+        ..hearth_agent::domain::update::Marker::begin(&swapped_job())
+    }
+}
+
+/// HRT-27, pré-review Stephen (bloquant) : le superviseur vient de mourir, son unité transitoire
+/// attend de le relancer (2 s) et le verrou est libre. Le nouvel agent qui démarre à cet instant ne
+/// reprend rien : il ne réécrit ni le travail ni la copie du superviseur, et il surveille.
+#[tokio::test]
+async fn an_agent_starting_while_systemd_is_about_to_restart_the_supervisor_leaves_the_work_alone()
+{
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(swapped_job());
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+        s.marker = Some(live_marker(1));
+        s.unit_alive = true;
+    });
+    // Deux morts du superviseur, deux démarrages de l'agent entre la mort et la relance.
+    for _ in 0..2 {
+        rig.service.resume().await;
+    }
+    rig.host.with(|s| {
+        assert!(
+            s.launched.is_empty(),
+            "l'agent ne lance rien : systemd s'en charge"
+        );
+        assert!(
+            !s.supervisor_prepared,
+            "la copie du superviseur n'est pas réécrite"
+        );
+        let job = s.job.as_ref().expect("le travail reste");
+        assert!(
+            !job.recover,
+            "le travail n'est pas marqué « reprise déjà tentée »"
+        );
+        assert!(s.marker.is_some() && s.state.is_some());
+    });
+    assert!(
+        rig.service.status().in_progress,
+        "la mise à jour reste en cours"
+    );
+    assert!(journal(&env).await.is_empty(), "rien n'est conclu");
+}
+
+/// La machine a redémarré : l'unité transitoire n'existe plus. « Reprise déjà tentée » se lit dans le
+/// marqueur (reprises sous la borne), pas dans `job.recover` : l'agent relance une reprise.
+#[tokio::test]
+async fn after_a_reboot_a_recovery_that_was_tried_but_is_under_its_bound_is_launched_again() {
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(hearth_agent::domain::update::Job {
+            recover: true,
+            ..swapped_job()
+        });
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+        s.marker = Some(live_marker(1));
+        s.unit_alive = false;
+    });
+    rig.service.resume().await;
+    rig.host.with(|s| {
+        assert_eq!(s.launched.len(), 1, "une reprise est relancée");
+        assert!(s.job.as_ref().unwrap().recover);
+    });
+    assert!(journal(&env).await.is_empty(), "rien n'est conclu");
+}
+
+#[tokio::test]
+async fn a_recovery_whose_marker_reached_its_bound_is_concluded_for_good() {
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(hearth_agent::domain::update::Job {
+            recover: true,
+            ..swapped_job()
+        });
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+        s.marker = Some(live_marker(hearth_agent::domain::update::MAX_RESUMES));
+    });
+    rig.service.resume().await;
+    rig.host.with(|s| {
+        assert!(s.launched.is_empty());
+        assert!(s.job.is_none(), "traces de travail retirées");
+    });
+    assert_eq!(journal(&env).await.len(), 1);
+}
+
+/// Pré-review 2 (point 2) : un lancement de reprise qui échoue (systemd-run absent) avance le compteur du
+/// marqueur, durablement, avant la tentative. À travers des redémarrages de l'agent, la reprise est
+/// bornée, puis conclue (échec écrit, journalisé une fois) : plus de tentative toutes les 5 secondes.
+#[tokio::test]
+async fn a_recovery_whose_launch_keeps_failing_is_bounded_across_agent_restarts_then_concluded() {
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    rig.host.with(|s| {
+        s.state = Some(intent(UpdateStep::Check));
+        s.job = Some(swapped_job());
+        s.existing
+            .push("/usr/local/bin/.hearth-agent.previous".into());
+        s.fail_launch = true;
+        s.db_copy = true;
+    });
+    let bound = hearth_agent::domain::update::MAX_RESUMES;
+    for restart in 0..bound {
+        rig.service.resume().await;
+        let attempts = rig.host.with(|s| s.marker.as_ref().map(|m| m.attempts()));
+        assert_eq!(
+            attempts,
+            Some(restart + 1),
+            "la tentative est comptée avant le lancement (démarrage {restart})"
+        );
+        assert!(
+            journal(&env).await.is_empty(),
+            "pas encore conclu ({restart})"
+        );
+    }
+    // Le démarrage suivant : la borne est atteinte, la reprise est conclue pour de bon.
+    rig.service.resume().await;
+    assert_eq!(journal(&env).await.len(), 1, "une seule entrée au journal");
+    rig.host.with(|s| {
+        assert!(
+            s.job.is_none() && s.state.is_none(),
+            "traces de travail retirées"
+        );
+        assert!(
+            s.db_copy,
+            "la copie de la base est gardée pour la reprise à la main"
+        );
+        assert!(s.launched.is_empty());
+    });
+    let last = rig
+        .host
+        .with(|s| s.last.clone())
+        .expect("un résultat écrit");
+    assert_eq!(
+        (last.outcome, last.reason),
+        (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed))
+    );
+    // Les démarrages d'après ne retentent rien et ne journalisent plus.
+    for _ in 0..3 {
+        rig.service.resume().await;
+    }
+    assert_eq!(journal(&env).await.len(), 1);
 }
 
 #[tokio::test]
@@ -970,7 +1161,8 @@ async fn a_third_version_put_in_by_hand_is_never_rolled_back_over_nor_its_databa
 }
 
 #[tokio::test]
-async fn a_recovery_supervisor_that_says_nothing_is_tried_once_then_concluded_for_good() {
+async fn a_recovery_supervisor_that_says_nothing_is_tried_up_to_its_bound_then_concluded_for_good()
+{
     // Revue r1, bloquant 1 : la patience relançait la reprise à chaque tour, sans fin
     // (`in_progress` vrai pour toujours). Une seule tentative, puis une conclusion lisible.
     let env = env().await;
@@ -991,7 +1183,13 @@ async fn a_recovery_supervisor_that_says_nothing_is_tried_once_then_concluded_fo
     // Plusieurs patiences de plus : rien ne repart.
     tokio::time::sleep(Duration::from_millis(150)).await;
     rig.host.with(|s| {
-        assert_eq!(s.launched.len(), 1, "exactement un lancement");
+        // Une reprise muette n'est plus tentée « une fois » (drapeau `recover`) mais jusqu'à la borne
+        // des reprises comptées dans le marqueur (HRT-27) : puis plus rien.
+        assert_eq!(
+            s.launched.len(),
+            hearth_agent::domain::update::MAX_RESUMES as usize,
+            "autant de lancements que la borne, pas un de plus"
+        );
         assert!(
             s.db_copy,
             "la copie de la base est gardée pour la reprise à la main"
@@ -1013,7 +1211,12 @@ async fn a_recovery_supervisor_that_says_nothing_is_tried_once_then_concluded_fo
     // Un redémarrage de l'agent ensuite : aucune nouvelle tentative automatique.
     rig.service.resume().await;
     tokio::time::sleep(Duration::from_millis(100)).await;
-    rig.host.with(|s| assert_eq!(s.launched.len(), 1));
+    rig.host.with(|s| {
+        assert_eq!(
+            s.launched.len(),
+            hearth_agent::domain::update::MAX_RESUMES as usize
+        )
+    });
     assert_eq!(journal(&env).await.len(), 1);
 }
 

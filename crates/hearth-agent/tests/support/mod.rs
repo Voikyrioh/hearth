@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub mod api;
+pub mod crash;
 pub mod device;
 pub mod https;
 pub mod probe;
