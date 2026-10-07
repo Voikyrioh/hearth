@@ -622,7 +622,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_program_that_appears_later_is_found_and_feeds_the_samples() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::test_tmp::tempdir().unwrap();
         let marker = dir.path().join("runs");
         let searches = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let counter = searches.clone();
@@ -647,7 +647,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_process_that_dies_is_restarted_and_the_cards_stay_known_meanwhile() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::test_tmp::tempdir().unwrap();
         let marker = dir.path().join("runs");
         let mut launch = fast(|| Some(OsString::from("sh")), script(&marker, "sleep 0.2"));
         // Relance lente : on observe l'intervalle entre l'arrêt du processus et la relance.
@@ -669,7 +669,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_silent_process_is_killed_then_restarted_without_leaving_a_zombie() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::test_tmp::tempdir().unwrap();
         let marker = dir.path().join("runs");
         let mut launch = fast(|| Some(OsString::from("sh")), script(&marker, "sleep 60"));
         // Il imprime puis se tait : plus aucune ligne pendant 300 ms.

@@ -219,7 +219,14 @@ fn each_of_the_six_states_asks_for_its_own_image() {
     alerts.on_removed("a");
     assert_eq!(spy.last_image(), Some(TrayIcon::NoServer));
     seen.push(TrayIcon::NoServer);
-    assert_eq!(seen.len(), 6);
+    // Six demandes, six images différentes : deux états ne partagent pas la leur (la couleur seule
+    // ne doit pas les distinguer).
+    for (at, image) in seen.iter().enumerate() {
+        assert!(
+            !seen[..at].contains(image),
+            "{image:?} est demandée pour deux états différents"
+        );
+    }
 }
 
 #[test]

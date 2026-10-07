@@ -4,6 +4,8 @@
 // Fichier de test : les aides hors `#[test]` peuvent paniquer sans masquer l'échec.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::process::Command;
@@ -140,7 +142,7 @@ async fn start(dir: &Path) -> (ServerHandle, Fingerprint) {
 fn cli_fingerprint(data: &Path) -> String {
     // Le fichier de configuration vit hors du dossier de données : y poser un fichier avant le
     // premier démarrage rendrait un dossier ouvert (0755) « non vide », donc refusé.
-    let config_dir = tempfile::tempdir().expect("dossier de configuration");
+    let config_dir = tmp::tempdir().expect("dossier de configuration");
     let config = config_dir.path().join("agent.toml");
     std::fs::write(&config, "").expect("config vide");
     let output = Command::new(env!("CARGO_BIN_EXE_hearth-agent"))
@@ -159,7 +161,7 @@ fn cli_fingerprint(data: &Path) -> String {
 
 #[tokio::test]
 async fn hello_is_served_over_tls13_with_the_pinned_certificate() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tmp::tempdir().expect("tempdir");
     let (server, fingerprint) = start(dir.path()).await;
 
     let reply = get(server.local_addr(), "/api/v1/hello").await;
@@ -184,7 +186,7 @@ async fn hello_is_served_over_tls13_with_the_pinned_certificate() {
 
 #[tokio::test]
 async fn unknown_route_answers_the_error_format_over_tls() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tmp::tempdir().expect("tempdir");
     let (server, _) = start(dir.path()).await;
     let reply = get(server.local_addr(), "/api/v1/inconnue").await;
     assert_eq!(reply.status, 404);
@@ -195,7 +197,7 @@ async fn unknown_route_answers_the_error_format_over_tls() {
 
 #[tokio::test]
 async fn fingerprint_and_install_id_survive_a_restart() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tmp::tempdir().expect("tempdir");
 
     let (server, first_fingerprint) = start(dir.path()).await;
     let first = get(server.local_addr(), "/api/v1/hello").await;
@@ -214,7 +216,7 @@ async fn fingerprint_and_install_id_survive_a_restart() {
 
 #[test]
 fn fingerprint_command_creates_the_identity_when_absent() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tmp::tempdir().expect("tempdir");
     let data = dir.path().join("data");
     let first = cli_fingerprint(&data);
     let second = cli_fingerprint(&data);
@@ -225,7 +227,7 @@ fn fingerprint_command_creates_the_identity_when_absent() {
 
 #[tokio::test]
 async fn tls12_connections_are_refused_with_a_protocol_version_alert() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tmp::tempdir().expect("tempdir");
     let (server, _) = start(dir.path()).await;
     let error = connect(
         server.local_addr(),
@@ -250,7 +252,7 @@ async fn tls12_connections_are_refused_with_a_protocol_version_alert() {
 
 #[tokio::test]
 async fn wrong_method_answers_405_in_the_error_format_over_tls() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = tmp::tempdir().expect("tempdir");
     let (server, _) = start(dir.path()).await;
     let mut tls = connect(
         server.local_addr(),

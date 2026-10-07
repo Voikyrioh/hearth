@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -161,7 +163,7 @@ impl FreeSpace for FakeSpace {
 }
 
 struct Bench {
-    dir: tempfile::TempDir,
+    dir: tmp::TestDir,
     space: FakeSpace,
     job: Job,
     host: FsUpdateHost,
@@ -172,7 +174,7 @@ struct Bench {
 impl Bench {
     /// L'ancien binaire (`old`) installé et son service actif ; `staged` déposé dans `update/`.
     fn new(staged: Option<&[u8]>) -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tmp::tempdir().unwrap();
         let bin = dir.path().join("bin");
         fs::create_dir_all(&bin).unwrap();
         let binary = bin.join("hearth-agent");

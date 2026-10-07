@@ -285,6 +285,11 @@ impl OperationStore for FileOperationStore {
     }
 }
 
+/// Dossiers temporaires des tests : racine `target/hearth-test-tmp`, suppression vérifiée (T43).
+#[cfg(test)]
+#[path = "../../../hearth-agent/tests/support/tmp.rs"]
+mod test_tmp;
+
 #[cfg(test)]
 mod tests {
     use hearth_proto::fingerprint::Fingerprint;
@@ -311,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn servers_are_saved_replaced_listed_and_removed() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = test_tmp::tempdir().unwrap();
         let store = FileServerStore::new(dir.path().join("servers.json"));
         assert!(store.list().await.unwrap().is_empty());
         store.save(&record("a", "Forge")).await.unwrap();
@@ -330,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_corrupt_file_is_ignored_with_a_copy_kept_and_the_store_keeps_working() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = test_tmp::tempdir().unwrap();
         let path = dir.path().join("servers.json");
         tokio::fs::write(&path, b"{ ceci n'est pas du json")
             .await
@@ -344,7 +349,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unreadable_entry_is_skipped_but_the_others_survive() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = test_tmp::tempdir().unwrap();
         let path = dir.path().join("servers.json");
         let good = serde_json::to_value(record("a", "Forge")).unwrap();
         let file = serde_json::json!({ "version": 1, "servers": [good, { "id": "a/b" }, 42] });
@@ -357,7 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_or_truncated_file_never_panics() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = test_tmp::tempdir().unwrap();
         let path = dir.path().join("servers.json");
         for content in [
             &b""[..],
@@ -375,7 +380,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_leave_no_temporary_file_behind() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = test_tmp::tempdir().unwrap();
         let store = FileServerStore::new(dir.path().join("servers.json"));
         for n in 0..5 {
             store.save(&record("a", &format!("v{n}"))).await.unwrap();
@@ -389,7 +394,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_last_view_round_trips_and_a_corrupt_one_is_ignored() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = test_tmp::tempdir().unwrap();
         let store = FileSnapshotStore::new(dir.path().join("snapshots"));
         let id = ServerId::parse("a").unwrap();
         assert_eq!(store.load(&id).await.unwrap(), None);
@@ -410,7 +415,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_operations_file_that_cannot_be_read_is_set_aside_and_reported() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = test_tmp::tempdir().unwrap();
         let folder = dir.path().join("operations");
         let store = FileOperationStore::new(&folder);
         let id = ServerId::parse("a").unwrap();
@@ -428,7 +433,7 @@ mod tests {
     async fn pending_operations_round_trip_and_an_empty_list_erases() {
         use crate::domain::pending_ops::{OperationId, PendingOps};
         use crate::domain::time::WallTime;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = test_tmp::tempdir().unwrap();
         let folder = dir.path().join("operations");
         let store = FileOperationStore::new(&folder);
         let id = ServerId::parse("a").unwrap();

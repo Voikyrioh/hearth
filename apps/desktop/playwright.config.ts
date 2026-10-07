@@ -17,6 +17,8 @@ export default defineConfig({
   reporter: "list",
   use: {
     ...devices["Desktop Chrome"],
+    // La trace n'est gardée que pour un scénario en échec (artefact de la CI, HRT-18).
+    trace: "retain-on-failure",
     viewport: { width: 1366, height: 800 },
     colorScheme: "dark",
   },

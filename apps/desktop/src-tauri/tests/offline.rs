@@ -175,14 +175,14 @@ struct Rig {
     alerts: Arc<Alerts>,
     secrets: Arc<Memory>,
     id: String,
-    _dir: tempfile::TempDir,
+    _dir: agent::tmp::TestDir,
 }
 
 async fn rig(config: LinkConfig) -> Rig {
     let agent = TestAgent::install().await;
     agent.create_account("marie", Role::Admin).await;
     let proxy = FaultProxy::start(agent.addr).await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let secrets = Arc::new(Memory::default());
     let vault = Arc::new(CredentialVault::new(Shared(secrets.clone())));
     let runtime = Arc::new(

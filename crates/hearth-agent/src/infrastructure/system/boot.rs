@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn unreadable_files_mean_no_identifier_and_an_endless_uptime() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::test_tmp::tempdir().unwrap();
         let boot = ProcBootInfo::at(&dir.path().join("absent-1"), &dir.path().join("absent-2"));
         assert_eq!(boot.boot_id(), None);
         assert_eq!(boot.uptime(), Duration::MAX);
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn readable_files_give_the_identifier_and_the_uptime() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::test_tmp::tempdir().unwrap();
         let id = dir.path().join("boot_id");
         let up = dir.path().join("uptime");
         std::fs::write(&id, "11111111-2222-3333-4444-555555555555\n").unwrap();

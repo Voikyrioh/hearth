@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn an_amd_card_is_read_field_by_field() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_tmp::tempdir().unwrap();
         let device = card(root.path(), "card0", "0x1002\n");
         write(&device.join("device"), "0x73bf\n");
         write(&device.join("gpu_busy_percent"), "42\n");
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn an_intel_card_without_files_has_absent_fields_not_zeros() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_tmp::tempdir().unwrap();
         let device = card(root.path(), "card1", "0x8086");
         write(&device.join("product_name"), "Arc A380");
         let readings = SysfsGpuProbe::with_root(root.path()).sample();
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn one_unreadable_file_does_not_affect_the_others() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_tmp::tempdir().unwrap();
         let device = card(root.path(), "card0", "0x1002");
         write(&device.join("gpu_busy_percent"), "pas un nombre");
         write(&device.join("mem_info_vram_total"), "100");
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn connectors_render_nodes_and_nvidia_cards_are_not_listed() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::test_tmp::tempdir().unwrap();
         card(root.path(), "card0", "0x10de");
         card(root.path(), "card0-DP-1", "0x1002");
         card(root.path(), "renderD128", "0x1002");

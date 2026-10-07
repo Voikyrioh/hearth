@@ -1,6 +1,9 @@
 //! Réglages : entrée de démarrage simulée, fichier de réglages réel (runtime Tauri simulé).
 #![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
+#[path = "../../../../crates/hearth-agent/tests/support/tmp.rs"]
+mod tmp;
+
 use std::cell::Cell;
 
 use hearth_desktop_lib::error::AppError;
@@ -71,7 +74,7 @@ fn a_failing_startup_entry_is_a_typed_error() {
 
 #[test]
 fn the_close_hint_flag_is_remembered_in_the_file() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let file = dir.path().join("settings.json");
     let app = app();
     assert!(!close_hint_seen(app.handle(), &file).unwrap());
@@ -86,7 +89,7 @@ fn the_close_hint_flag_is_remembered_in_the_file() {
 
 #[test]
 fn a_corrupt_settings_file_reads_as_never_seen_and_never_blocks_the_startup_setting() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let file = dir.path().join("settings.json");
     std::fs::write(&file, "{ pas du json").unwrap();
     let app = app();

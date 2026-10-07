@@ -29,6 +29,10 @@ jobs:
       # La coquille Tauri est vérifiée par le job `desktop` (Windows, WebView2) : pas de bibliothèques système sous Linux.
       - run: cargo clippy --workspace --exclude hearth-desktop --all-targets -- -D warnings
       - run: cargo test --workspace --exclude hearth-desktop
+      # Garde-fou des dossiers temporaires (HRT-18, T43) : les tests les créent sous
+      # target/hearth-test-tmp (et /dev/shm/hearth-test-tmp) et les suppriment ; s'il en reste, un test
+      # garde un fichier ouvert ou ne nettoie pas, et la suite échoue ici plutôt que de remplir un disque.
+      - run: cargo xtask test-tmp-check
 
   desktop:
     runs-on: windows-latest
@@ -59,6 +63,16 @@ jobs:
         run: |
           npx playwright install chromium
           npm run e2e
+      # À l'échec d'un scénario : la trace (rejouable : `npx playwright show-trace`), l'état de la page
+      # (`error-context.md`), la capture et la vidéo si elles existent (HRT-18 : `audit.spec.ts:141`,
+      # cause encore inconnue, ne se voit qu'avec cela).
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: hearth-playwright-failure
+          path: apps/desktop/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: hearth-ui-screenshots
@@ -69,6 +83,9 @@ jobs:
         run: |
           cargo clippy -p hearth-desktop --all-targets -- -D warnings
           cargo test -p hearth-desktop
+      # Garde-fou des dossiers temporaires (HRT-18, T43), voir le job `rust`.
+      - name: Dossiers temporaires laissés par les tests
+        run: cargo xtask test-tmp-check
       # Le coffre réel : le Gestionnaire d'identification de ce Windows jetable (clé exacte `Hearth/{id}`,
       # secret absent, remplacement, effacement). Marqué `ignore` pour ne pas écrire dans la session
       # d'un poste de développement par défaut.

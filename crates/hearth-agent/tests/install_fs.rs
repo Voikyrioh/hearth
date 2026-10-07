@@ -8,6 +8,8 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
 use std::collections::VecDeque;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -260,7 +262,7 @@ impl Prompter for NoPrompt {
 }
 
 struct Machine {
-    root: tempfile::TempDir,
+    root: tmp::TestDir,
     paths: InstallPaths,
     service: Arc<Mutex<ServiceState>>,
     interrupted: AtomicBool,
@@ -268,7 +270,7 @@ struct Machine {
 
 impl Machine {
     fn new() -> Self {
-        let root = tempfile::tempdir().expect("dossier temporaire");
+        let root = tmp::tempdir().expect("dossier temporaire");
         let base = root.path().to_path_buf();
         std::fs::create_dir_all(base.join("bin")).expect("bin");
         std::fs::write(base.join("source"), b"binaire").expect("source");

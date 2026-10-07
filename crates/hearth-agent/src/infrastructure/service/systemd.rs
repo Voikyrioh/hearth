@@ -318,13 +318,13 @@ mod tests {
 
     /// Un faux `systemctl` : enregistre chaque appel, et garde l'état « actif » dans un fichier.
     struct Fake {
-        dir: tempfile::TempDir,
+        dir: crate::test_tmp::TestDir,
         systemd: Systemd,
     }
 
     impl Fake {
         fn new() -> Self {
-            let dir = tempfile::tempdir().expect("dossier temporaire");
+            let dir = crate::test_tmp::tempdir().expect("dossier temporaire");
             let script = dir.path().join("systemctl");
             let log = dir.path().join("calls.log");
             let active = dir.path().join("active");
@@ -623,7 +623,7 @@ mod tests {
 
     #[test]
     fn a_missing_systemctl_is_an_error_not_a_panic() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::test_tmp::tempdir().unwrap();
         let systemd = Systemd::new(
             dir.path().join("hearth-agent.service"),
             OsString::from("/nonexistent/systemctl"),

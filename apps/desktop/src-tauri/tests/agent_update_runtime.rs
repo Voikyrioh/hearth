@@ -128,7 +128,7 @@ struct Client {
     runtime: Arc<LinkRuntime>,
     id: ServerId,
     ui: Recorder,
-    dir: tempfile::TempDir,
+    dir: agent::tmp::TestDir,
 }
 
 async fn client(agent: &TestAgent, username: &str) -> Client {
@@ -136,7 +136,7 @@ async fn client(agent: &TestAgent, username: &str) -> Client {
 }
 
 async fn client_via(port: u16, username: &str) -> Client {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let vault = Arc::new(CredentialVault::new(Shared(Arc::new(Memory::default()))));
     let runtime = Arc::new(
         LinkRuntime::open_with(dir.path(), vault, "poste-test/0.1", config())
