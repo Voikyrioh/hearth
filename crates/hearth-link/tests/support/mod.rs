@@ -66,6 +66,10 @@ fn scaled_config() -> LinkConfig {
         // jamais une réponse lente en échec.
         attempt_timeout: Duration::from_secs(30),
         request_timeout: Duration::from_secs(30),
+        // Écriture du suivi d'une action (défaut du produit : 2 s réelles) : un disque de runner
+        // Windows qui cale 2 s rendait `TrackingSlow` à un test dont ce n'est pas l'objet. Le délai
+        // lui-même est éprouvé par `tracking.rs` (disque simulé retenu).
+        persist_timeout: Duration::from_secs(120),
         net_poll_period: Duration::from_millis(60),
         wake_check_period: Duration::from_millis(50),
         snapshot_save_period: Duration::from_millis(200),

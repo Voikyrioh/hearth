@@ -269,11 +269,21 @@ async fn the_wizard_registers_only_on_a_successful_login_then_remembers_forgets_
     assert_eq!(last["servers"][0]["role"], "admin");
     assert_eq!(last["servers"][0]["remember"], true);
     // Rejouer l'état courant à un nouvel abonné redonne le même numéro (rien de nouveau).
+    // Le dernier contact bouge à chaque message du flux sans qu'aucun état ne soit annoncé : s'il a
+    // bougé depuis le dernier état reçu, le contenu est nouveau et le numéro suivant est le bon
+    // (`StateBook::snapshot`) ; sinon c'est le même numéro. Les deux cas sont vérifiés exactement.
     let replay = rig.runtime.states();
     assert_eq!(replay.len(), 1);
+    let announced = rig.sink.last_state(&id).unwrap();
+    let announced_seq = announced["seq"].as_f64().unwrap();
+    let moved = replay[0].last_contact_at != announced["lastContactAt"].as_f64();
     assert_eq!(
         f64::from(replay[0].seq),
-        rig.sink.last_state(&id).unwrap()["seq"].as_f64().unwrap()
+        if moved {
+            announced_seq + 1.0
+        } else {
+            announced_seq
+        }
     );
     // La même adresse ne s'ajoute pas deux fois.
     let again = rig
@@ -444,11 +454,10 @@ async fn notices_are_kept_until_acknowledged_and_reading_destroys_nothing() {
     std::fs::create_dir_all(&operations).unwrap();
     std::fs::write(operations.join(format!("{id}.json")), b"[{").unwrap();
     let (runtime, _) = open(rig.dir.path(), &rig.secrets).await;
-    // Attend que la tâche ait lu le fichier (elle le met de côté), puis lit.
-    eventually("fichier mis de côté", || {
-        operations.join(format!("{id}.json.corrupt")).exists()
-    })
-    .await;
+    // Attend l'avis lui-même. Le fichier mis de côté vient AVANT lui (la tâche met le fichier de
+    // côté en le lisant, puis seulement annonce la perte) : l'attendre ne garantit pas l'avis.
+    eventually("avis des suivis perdus", || !runtime.notices().is_empty()).await;
+    assert!(operations.join(format!("{id}.json.corrupt")).exists());
     let notices = runtime.notices();
     assert_eq!(notices.len(), 1);
     assert_eq!(notices[0].kind, NoticeKind::OperationsLost);
