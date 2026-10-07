@@ -145,8 +145,17 @@ function Full-Flow($name, $toggle) {
   $deadline = (Get-Date).AddSeconds(240)
   $tick = 0
   while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
-    $next = [W]::GetDlgItem($main, 1)
-    if ($next -ne [IntPtr]::Zero) { [void][W]::PostMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
+    # Page de fin : decocher « Lancer Hearth » (sinon l'installateur lance l'application sur le runner).
+    $unchecked = $false
+    foreach ($h in [W]::Children($main)) {
+      if ([W]::Cls($h) -eq 'Button' -and [W]::Text($h) -eq 'Lancer Hearth' -and [W]::Ask($h, 0xF0) -eq 1) {
+        [void][W]::PostMessage($h, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); $unchecked = $true
+      }
+    }
+    if (-not $unchecked) {
+      $next = [W]::GetDlgItem($main, 1)
+      if ($next -ne [IntPtr]::Zero) { [void][W]::PostMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
+    }
     Start-Sleep -Seconds 2
     $tick++
     if ($tick % 5 -eq 0 -and $tick -le 40) { Shot (Join-Path $evidence ("{0}-etape-{1:00}.png" -f $name, $tick)) $main }

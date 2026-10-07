@@ -155,11 +155,17 @@ SectionEnd
 ;   case              120u 118u 195u  12u  (130u)
 ;   aide              134u 134u 181u  50u  (jusqu'à 184u, la page fait 193u)
 Function HearthWelcomeShow
+  ; nsDialogs insère chaque contrôle SOUS les précédents : le texte d'accueil du modèle (vidé,
+  ; mais opaque et grand) recouvrait la case, que la capture de la CI montrait invisible. Il est
+  ; donc masqué (reconnu à son texte, une seule espace). Les autres contrôles restent ceux du modèle.
+  FindWindow $R1 "#32770" "" $HWNDPARENT
+  FindWindowEx $R2 $R1 0 "Static" " "
+  ${If} $R2 <> 0
+    ShowWindow $R2 0
+  ${EndIf}
   ${NSD_CreateLabel} 120u 55u 195u 55u "$(hearthWelcomeText)"
   Pop $R0
   SetCtlColors $R0 "000000" "FFFFFF"
-  ; Pas de SetCtlColors sur la case : essayé, la case et son carré n'étaient plus dessinés
-  ; (capture de la CI) ; le thème dessine son fond d'après la page, déjà blanche.
   ${NSD_CreateCheckbox} 120u 118u 195u 12u "$(hearthAutostartLabel)"
   Pop $HearthAutostartBox
   ${If} $HearthAutostartShown = 1

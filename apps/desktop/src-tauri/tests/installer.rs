@@ -186,6 +186,11 @@ fn the_welcome_page_controls_do_not_overlap_and_fit_the_dialog() {
     // le texte redessiné ci-dessus qui porte la phrase, sous le titre (qui finit à 48u).
     assert!(script.contains(r#"!define MUI_WELCOMEPAGE_TEXT " ""#));
     assert!(boxes.iter().all(|b| b.0 >= 48));
+    // nsDialogs empile les contrôles du dessous vers le dessus dans l'ordre INVERSE de leur
+    // création : ce contrôle vide, opaque, recouvrait la case (constaté sur la capture de la CI).
+    let show = function_body(&script, "HearthWelcomeShow");
+    assert!(show.contains(r#"FindWindowEx $R2 $R1 0 "Static" " ""#));
+    assert!(show.contains("ShowWindow $R2 0"));
 }
 
 #[test]
