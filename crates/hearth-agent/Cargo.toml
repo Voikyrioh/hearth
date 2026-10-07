@@ -54,7 +54,14 @@ tracing-subscriber.workspace = true
 ulid.workspace = true
 zeroize.workspace = true
 
+[features]
+# Expose `SessionService::accept_unconfirmed_acts_for_tests` aux bancs d'essai qui envoient des actes bruts.
+# Jamais activée par un binaire de production : seul le dev-dependency ci-dessous la demande, et un test de
+# garde (`tests/test_support_guard.rs`) interdit son nom dans `src/` hors de la porte.
+test-support = []
+
 [dev-dependencies]
+hearth-agent = { path = ".", features = ["test-support"] }
 minisign.workspace = true
 futures-util.workspace = true
 tempfile.workspace = true

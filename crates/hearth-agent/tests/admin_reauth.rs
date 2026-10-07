@@ -1,9 +1,10 @@
-//! La confirmation des actes d'administration sur l'API HTTP (HRT-28, tranches A et D1, BR-TRUST-036 à
-//! 046) : le membre `reauth`, la preuve d'usage `0x05` liée à l'acte, le mot de passe par le chemin de la
+//! La confirmation des actes d'administration sur l'API HTTP (HRT-28 et HRT-30, BR-TRUST-036 à 053) : le
+//! membre `reauth`, la preuve d'usage `0x05` liée à l'acte, le mot de passe par le chemin de la
 //! connexion, l'élévation de 5 minutes. Vraie base SQLite, vraies signatures Ed25519, routeur en processus.
 //!
-//! L'agent **accepte** sans encore **exiger** (`reauth_required` faux par défaut) : un client actuel, sans
-//! `reauth`, obtient les réponses d'aujourd'hui (les tests des routes existantes ne changent pas).
+//! L'agent **exige** la confirmation dès la construction du service : le banc de ce fichier rétablit
+//! l'exigence (`accept_unconfirmed_acts_for_tests(false)`) sur un banc d'essai qui accepte les actes bruts
+//! par défaut ; un acte sans `reauth` y reçoit `426`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -1783,4 +1784,67 @@ async fn an_array_body_is_absent_and_a_null_body_is_unreadable_on_a_route_withou
         assert_eq!(reply.status, status, "{raw} : {:?}", reply.body);
         assert_eq!(b.snapshot().await, before, "{raw}");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// HRT-18 tranche 3 : l'ouverture d'une élévation est consignée (BR-TRUST-053)
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn opening_an_elevation_is_journaled_with_who_which_device_and_when_never_the_password() {
+    let b = bench().await;
+    // Un acte couvert sous élévation n'en ouvre pas une deuxième : une seule entrée par ouverture.
+    open(&b).await;
+    let reply = b.act(&b.marie, &readonly_account("deuxieme"), "").await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+    b.env.audit_recorder.flush_all().await;
+    let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT COALESCE(account, ''), COALESCE(origin_name, ''), COALESCE(target, ''), outcome, action_label FROM audit_events WHERE action = 'reauth.elevation'",
+    )
+    .fetch_all(b.env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let (account, _origin, target, outcome, label) = &rows[0];
+    assert_eq!(account, "marie");
+    assert!(
+        target.starts_with("poste "),
+        "le poste de la clé : {target}"
+    );
+    assert_eq!(outcome, "ok");
+    assert_eq!(label, "Délai du mot de passe ouvert (5 minutes)");
+    // L'horodatage est celui de l'entrée ; aucune ligne ne porte le mot de passe.
+    let dump: String = sqlx::query_scalar(
+        "SELECT json_group_array(json_object('a', account, 'n', origin_name, 'ad', origin_addr, 't', target, 'r', reason)) FROM audit_events WHERE action = 'reauth.elevation'",
+    )
+    .fetch_one(b.env.db.pool())
+    .await
+    .unwrap();
+    assert!(!dump.contains(PASSWORD), "{dump}");
+    // Un mot de passe juste ouvre le délai même pour un acte non couvert (ici le réglage, qui le referme
+    // aussitôt) : l'ouverture est consignée, une entrée de plus, au nom de paul.
+    let each = b
+        .act(
+            &b.paul,
+            &Spec::Setting {
+                mode: ReauthMode::Each,
+            },
+            PASSWORD,
+        )
+        .await;
+    assert_eq!(each.status, StatusCode::OK, "{:?}", each.body);
+    b.env.audit_recorder.flush_all().await;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE action = 'reauth.elevation'")
+            .fetch_one(b.env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(count, 2);
+    let who: Vec<String> = sqlx::query_scalar(
+        "SELECT COALESCE(account, '') FROM audit_events WHERE action = 'reauth.elevation' ORDER BY id",
+    )
+    .fetch_all(b.env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(who, ["marie", "paul"]);
 }

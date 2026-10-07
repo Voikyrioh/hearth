@@ -40,3 +40,4 @@ Sont consignés : toute connexion réussie ; toute tentative de connexion refus�
 ## Historique
 - 2026-10-04 — création (HRT-05, session 2026-10-04-hearth-creation).
 - 2026-10-07 : HRT-28 : nouvelle action `reauth.setting` ; refus de confirmation consignés sous l'action de l'acte (BR-TRUST-046).
+- 2026-10-08 : HRT-18 tranche 3 : nouvelle action `reauth.elevation` (ouverture du délai du mot de passe, BR-TRUST-053).

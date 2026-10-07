@@ -997,7 +997,11 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     let successes = |env: &support::Env| {
         let pool = env.db.pool().clone();
         async move {
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_events WHERE outcome = 'ok'")
+            // L'ouverture du délai du mot de passe a sa propre entrée (BR-TRUST-053) : elle n'est pas
+            // « l'entrée de la route ».
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM audit_events WHERE outcome = 'ok' AND action <> 'reauth.elevation'",
+            )
                 .fetch_one(&pool)
                 .await
                 .unwrap()

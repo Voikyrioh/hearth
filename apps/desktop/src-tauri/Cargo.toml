@@ -61,7 +61,7 @@ windows-registry = "0.6"
 tauri = { version = "2", features = ["test"] }
 tempfile.workspace = true
 # Tests de la liaison contre un vrai agent (support partagé avec hearth-link).
-hearth-agent = { path = "../../../crates/hearth-agent" }
+hearth-agent = { path = "../../../crates/hearth-agent", features = ["test-support"] }
 async-trait.workspace = true
 minisign.workspace = true
 sha2.workspace = true

@@ -26,3 +26,4 @@ maj: 2026-10-07
 
 ## Historique
 - 2026-10-07 : création (HRT-28, tranches A et D1).
+- 2026-10-08 : l'ouverture d'une élévation a sa propre entrée `reauth.elevation` (BR-TRUST-053).
