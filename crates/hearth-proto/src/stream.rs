@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::audit::AuditEventItem;
 use crate::api::machine::MachineResponse;
 use crate::api::metrics::Sample;
+use crate::api::security::SecurityView;
 use crate::api::sessions::DeviceProof;
 use crate::api::update::UpdateProgress;
 use crate::error::ErrorDetail;
@@ -122,6 +123,16 @@ pub enum UpdateMessage {
     Update(UpdateProgress),
 }
 
+/// Message `security` du flux (HRT-24, BR-TRUST-008) : l'état de sécurité du compte connecté, envoyé
+/// toujours (sans abonnement) une fois après l'`auth`, puis à chaque changement. Comme
+/// [`UpdateMessage`], il n'est pas un [`ServerMessage`] : un client qui ne le connaît pas l'ignore
+/// (trame inconnue).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SecurityMessage {
+    Security(SecurityView),
+}
+
 /// Messages de l'agent vers le client.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -223,6 +234,29 @@ mod tests {
                 topics: vec![Topic::Update]
             }
         );
+    }
+
+    #[test]
+    fn the_security_message_is_flat_on_the_wire_and_unknown_to_the_server_messages() {
+        use crate::api::security::{AlertInfo, AttackModeInfo};
+        let message = SecurityMessage::Security(SecurityView {
+            alert: AlertInfo {
+                own: true,
+                since: Some("2026-10-07T01:00:00Z".into()),
+                others: None,
+            },
+            attack_mode: AttackModeInfo::off(),
+        });
+        let value = serde_json::to_value(&message).expect("json");
+        assert_eq!(value["type"], "security");
+        assert_eq!(value["alert"]["own"], true);
+        assert_eq!(value["attack_mode"]["state"], "off");
+        assert_eq!(
+            serde_json::from_value::<SecurityMessage>(value.clone()).expect("security"),
+            message
+        );
+        // Un client qui ne connaît que `ServerMessage` lit la trame comme inconnue : il l'ignore.
+        assert!(serde_json::from_value::<ServerMessage>(value).is_err());
     }
 
     #[test]

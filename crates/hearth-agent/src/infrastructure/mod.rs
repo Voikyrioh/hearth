@@ -12,6 +12,7 @@ pub mod ids;
 pub mod install;
 pub mod logging;
 pub mod random;
+pub mod security_feed;
 pub mod service;
 pub mod sqlite;
 pub mod system;

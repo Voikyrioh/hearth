@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE identifier_slowdowns SET alerted_at = NULL WHERE key = ? AND alerted_at = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "63935ed7f1383edaa90453f97ab71765bc4028e0c8cc1295af350ea1f9e89924"
+}

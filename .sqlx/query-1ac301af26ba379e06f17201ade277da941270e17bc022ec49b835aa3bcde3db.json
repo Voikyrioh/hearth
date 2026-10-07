@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT key, failures, wait_until, last_failure_at, alerted_at\n         FROM identifier_slowdowns WHERE failures > ? OR alerted_at IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "key",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "identifier_slowdowns",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "name": "failures",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "identifier_slowdowns",
+            "name": "failures"
+          }
+        }
+      },
+      {
+        "name": "wait_until",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "identifier_slowdowns",
+            "name": "wait_until"
+          }
+        }
+      },
+      {
+        "name": "last_failure_at",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "identifier_slowdowns",
+            "name": "last_failure_at"
+          }
+        }
+      },
+      {
+        "name": "alerted_at",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "identifier_slowdowns",
+            "name": "alerted_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "1ac301af26ba379e06f17201ade277da941270e17bc022ec49b835aa3bcde3db"
+}

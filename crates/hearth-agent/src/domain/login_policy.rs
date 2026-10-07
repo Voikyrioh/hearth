@@ -1,5 +1,6 @@
-//! Décision d'une tentative de connexion : ce que savent les trois compteurs et la liste des
-//! adresses connues, et ce qu'il en résulte (ADR-0022, BR-CONN-006, 007, 018, 019, 020).
+//! Décision d'une tentative de connexion : ce que savent les trois compteurs et la reconnaissance du
+//! poste (règle « 2 critères sur 3 », ADR-0024), et ce qu'il en résulte (ADR-0022, ADR-0024,
+//! BR-CONN-006, 007, 018, 019, 020).
 //!
 //! Fonctions pures, sans E/S, horloge en paramètre. Le cas d'usage lit les états, appelle ces
 //! fonctions, écrit les états rendus.
@@ -8,10 +9,10 @@
 //!   refusent avant toute vérification, comme avant HRT-20, quel que soit l'identifiant.
 //! - Le ralentissement par **identifiant** (BR-CONN-018) ne refuse **qu'après** la vérification du
 //!   mot de passe, que l'identifiant existe ou non (un haché factice sinon) : le même chemin, la
-//!   même durée, la même réponse pour tout le monde. Seul le titulaire du mot de passe, depuis une
-//!   adresse connue de son compte, passe malgré l'attente (BR-CONN-019). Pour tous les autres, rien
-//!   d'observable ne distingue un identifiant existant d'un identifiant inexistant (BR-CONN-013),
-//!   même depuis une adresse connue.
+//!   même durée, la même réponse pour tout le monde. Seul le titulaire du mot de passe, depuis un
+//!   poste que la règle « 2 critères sur 3 » reconnaît (`escapes_slowdown`, BR-CONN-019), passe
+//!   malgré l'attente. Pour tous les autres, rien d'observable ne distingue un identifiant existant
+//!   d'un identifiant inexistant (BR-CONN-013), même depuis une adresse retenue.
 //! - Les échecs sont comptés **de la même façon** pour tous, que l'identifiant existe ou non. Les
 //!   compteurs du couple et de l'adresse comptent tout échec. Le ralentissement par identifiant ne
 //!   compte que les échecs d'une adresse inconnue de tous les comptes. Pendant une attente de
@@ -43,8 +44,10 @@ pub struct LoginState {
     pub address: LockoutState,
     /// Identifiant saisi (tous clients confondus).
     pub identifier: Slowdown,
-    /// L'adresse est-elle connue du compte visé ? Faux pour un identifiant qui n'existe pas.
-    pub known: bool,
+    /// Ce poste échappe-t-il au ralentissement par identifiant ? Rendu par la règle « 2 critères sur 3 »
+    /// (`trust::recognition::judge_login`, HRT-24), jamais décidé ici. Faux hors alerte (l'identifiant
+    /// n'est pas ralenti, rien à éviter) et pour un identifiant qui n'existe pas.
+    pub escapes_slowdown: bool,
     /// L'adresse est-elle connue d'un compte QUELCONQUE ? Les échecs d'une telle adresse ne nourrissent
     /// pas le ralentissement par identifiant, que l'identifiant existe ou non : sinon la
     /// progression du compteur dirait si l'adresse est connue du compte visé (BR-CONN-013).
@@ -108,9 +111,9 @@ pub fn conclude(state: LoginState, verified: bool, now: OffsetDateTime) -> (Logi
     };
 
     if let Some(slowed) = ident_wait {
-        // L'identifiant est ralenti. Seul le titulaire du mot de passe, depuis une adresse connue
-        // de son compte, passe.
-        if verified && state.known {
+        // L'identifiant est ralenti (ALERTE). Seul passe le poste que la règle « 2 critères sur 3 »
+        // reconnaît (`escapes_slowdown`), avec le bon mot de passe : le mot de passe reste exigé.
+        if verified && state.escapes_slowdown {
             return (success(state, now), Verdict::Granted);
         }
         // Refus identique pour tous. Un mot de passe faux compte dans le couple, pour tout le monde :
@@ -210,7 +213,7 @@ mod tests {
             pair: LockoutState::default(),
             address: LockoutState::default(),
             identifier: Slowdown::default(),
-            known,
+            escapes_slowdown: known,
             seen: known,
         }
     }
@@ -317,7 +320,7 @@ mod tests {
             ..fresh(true)
         };
         let unknown = LoginState {
-            known: false,
+            escapes_slowdown: false,
             seen: false,
             ..known
         };
@@ -361,7 +364,7 @@ mod tests {
         // compte, `known` faux, `seen` vrai) : le même compteur est touché, de la même façon.
         let of_the_account = fresh(true);
         let of_another = LoginState {
-            known: false,
+            escapes_slowdown: false,
             seen: true,
             ..fresh(false)
         };
@@ -448,6 +451,7 @@ mod tests {
             failures: 20,
             wait_until: None,
             last_failure_at: Some(t0()),
+            alerted_at: None,
         };
         let state = LoginState {
             identifier,

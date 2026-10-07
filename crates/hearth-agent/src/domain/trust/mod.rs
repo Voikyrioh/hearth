@@ -4,6 +4,7 @@
 
 pub mod challenge;
 pub mod device;
+pub mod recognition;
 pub mod weak_key;
 
 pub use challenge::{
@@ -13,4 +14,5 @@ pub use device::{
     DeviceId, Enrollment, NewDevice, RETENTION, TrustedDevice, cutoff, device_name,
     judge_enrollment,
 };
+pub use recognition::{LoginCriteria, LoginStanding, Mode, judge_login, mode_of};
 pub use weak_key::has_small_order;

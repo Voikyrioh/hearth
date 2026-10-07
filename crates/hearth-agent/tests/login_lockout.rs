@@ -785,6 +785,7 @@ async fn the_identifier_table_is_bounded_and_keeps_the_identifier_really_attacke
         failures: 50,
         wait_until: Some(now + Duration::seconds(30)),
         last_failure_at: Some(now),
+        alerted_at: None,
     };
     let mut tx = store.begin().await.unwrap();
     tx.login_attempts()
@@ -799,6 +800,7 @@ async fn the_identifier_table_is_bounded_and_keeps_the_identifier_really_attacke
             failures: 1,
             wait_until: None,
             last_failure_at: Some(now),
+            alerted_at: None,
         };
         tx.login_attempts()
             .save_identifier(&key, &one)

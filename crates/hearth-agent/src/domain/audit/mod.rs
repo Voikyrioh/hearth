@@ -12,12 +12,12 @@ mod repeat;
 pub use action::AuditAction;
 pub use csv::{BOM, SEPARATOR, field as csv_field, render as render_csv};
 pub use event::{
-    Actor, AuditEvent, AuditRecord, ClientName, MAX_CLIENT_NAME, Origin, OriginKind, Outcome,
-    OutcomeKind, Reason, Target,
+    Actor, AlertPhase, AuditEvent, AuditRecord, ClientName, MAX_CLIENT_NAME, Origin, OriginKind,
+    Outcome, OutcomeKind, Reason, Target,
 };
 pub use filter::{AuditFilter, FilterError, MAX_PAGE_SIZE, RawFilter, SearchQuery};
 pub use policy::{
     CAP_CHECK_EVERY, MAX_ENTRIES, PURGE_BATCH, RETENTION, RequestKind, can_read_journal,
     excess_entries, is_journaled, retention_cutoff,
 };
-pub use repeat::{MAX_TRACKED, REPEAT_WINDOW, RepeatFilter};
+pub use repeat::{MAX_TRACKED, MAX_WINDOW, QUIET_RESET, REPEAT_WINDOW, RepeatFilter};

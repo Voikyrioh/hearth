@@ -18,7 +18,7 @@ Un compteur par **identifiant saisi** (empreinte SHA-256 de l'identifiant normal
 - **10 échecs gratuits**, puis attente avant la tentative suivante : **2 s, 4 s, 8 s, 16 s, 32 s, 64 s, puis 120 s : plafond explicite**. Jamais un blocage : même sous attaque continue, une tentative reste possible à chaque fin d'attente.
 - Remise à zéro après **30 minutes sans échec**. Un succès ne la remet pas à zéro.
 - Pendant l'attente : `429 TOO_MANY_ATTEMPTS`, `details.retry_after_s`, **la même réponse** que pour toute autre attente. Le refus se fait **après la vérification** du mot de passe (haché factice si l'identifiant n'existe pas), pour que le chemin et la durée soient identiques pour un identifiant existant ou non (BR-CONN-013). Un mot de passe faux compte dans le couple (BR-CONN-006) pour tout le monde ; un mot de passe juste depuis une adresse inconnue du compte est refusé sans rien compter.
-- **Exception** : le titulaire du mot de passe, depuis une adresse connue de son compte (BR-CONN-019), passe malgré l'attente.
+- **Exception** : le poste que la règle « 2 critères sur 3 » reconnaît (BR-TRUST-001, BR-CONN-019), avec le bon mot de passe, passe malgré l'attente (HRT-24, ADR-0024). L'alerte (BR-TRUST-008) se déduit de ce compteur.
 - Horloge : une attente à plus de 120 s devant `maintenant` (horloge reculée) est ramenée à `maintenant + 120 s` et la correction est écrite ; une horloge avancée met fin à l'attente.
 - Table bornée à 10 000 identifiants, ordre d'éviction unique avec `login_attempts` (`domain::eviction::rank` : sans attente en cours d'abord, puis moins d'échecs, puis les plus anciens).
 

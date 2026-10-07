@@ -267,4 +267,21 @@ impl KnownAddressTx for SqliteUnitOfWork {
         .map_err(storage(RESOURCE))?;
         Ok(())
     }
+
+    async fn forget_without_device_except(
+        &mut self,
+        account: &AccountId,
+        keep: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "DELETE FROM known_addresses
+             WHERE account_id = ? AND device_id IS NULL AND address <> ?",
+            account.as_str(),
+            keep
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(())
+    }
 }

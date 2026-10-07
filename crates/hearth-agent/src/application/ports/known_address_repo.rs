@@ -79,4 +79,12 @@ pub trait KnownAddressTx: Send {
     /// Oublie les adresses du compte qui ne sont pas liées à un poste à clé (mot de passe changé
     /// par son titulaire : les postes à clé survivent, BR-TRUST-023).
     async fn forget_without_device(&mut self, account: &AccountId) -> Result<(), StoreError>;
+
+    /// Comme `forget_without_device`, mais l'adresse `keep` (exacte, canonique) est gardée si elle
+    /// est retenue sans clé : le titulaire a coché « garder ce poste reconnu » (Q15, BR-CONN-019).
+    async fn forget_without_device_except(
+        &mut self,
+        account: &AccountId,
+        keep: &str,
+    ) -> Result<(), StoreError>;
 }

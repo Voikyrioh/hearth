@@ -19,6 +19,7 @@ mod error;
 mod hello;
 mod metrics;
 mod operations;
+mod security;
 mod server;
 mod sessions;
 mod update;
@@ -41,12 +42,14 @@ use crate::application::hello::HelloService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::AuditSink;
+use crate::application::security::SecurityService;
 use crate::application::sessions::SessionService;
 use crate::application::update::UpdateService;
 use crate::domain::audit::AuditAction;
 use crate::entrypoint::ws::{self, StreamContext};
 
 pub use error::ApiError;
+pub(crate) use security::view as security_view;
 pub use server::{ServerError, ServerHandle, spawn};
 pub(crate) use wire::audit_item;
 
@@ -56,6 +59,8 @@ pub struct AppState {
     pub hello: Arc<HelloService>,
     pub accounts: Arc<AccountService>,
     pub sessions: Arc<SessionService>,
+    /// État de sécurité et alerte (HRT-24).
+    pub security: Arc<SecurityService>,
     pub operations: Arc<OperationService>,
     pub audit: Arc<AuditService>,
     /// Écrit au journal les refus et les échecs relevés par la couche d'accès.
@@ -176,6 +181,15 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::DeviceRemove),
         route: || delete(devices::remove),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/security",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(security::state),
     },
     Endpoint {
         method: Method::PUT,

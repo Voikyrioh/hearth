@@ -17,6 +17,8 @@ Flux temps réel : l'identité et l'historique de la machine, puis un échantill
 
 ## Sujet `update` (HRT-17)
 
+Le message `security` (HRT-24, BR-TRUST-008) n'a pas de sujet : il est **toujours envoyé** après l'`auth`, puis à chaque changement de l'état de sécurité **de ce compte** : `{"type":"security","alert":{"own":true,"since":"…","others":1},"attack_mode":{"state":"off"}}` (`others` : administrateur seulement ; voir [security.md](./security.md)). Ce type n'est pas un `ServerMessage` : un client qui ne le connaît pas l'ignore.
+
 Le sujet `update` (tout compte authentifié) diffuse la progression d'une mise à jour de l'agent à distance (BR-UPDATE-013). À l'abonnement, l'état courant s'il y a une mise à jour en cours ; puis `{"type":"update","version":"0.2.0","step":"download","percent":35,"outcome":null,"reason":null}` à chaque changement d'étape ou de pourcentage entier, et à la fin `step: "done"` avec `outcome` et `reason`. Ce type n'est pas un `ServerMessage` : un client qui ne le connaît pas l'ignore. Détails : [agent-update.md](./agent-update.md).
 
 ## Messages client → agent

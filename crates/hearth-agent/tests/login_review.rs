@@ -63,7 +63,8 @@ async fn free_failures(env: &Env, username: &str) {
 // ---- B1 : une attaque qui dure ne fait pas tourner le journal
 
 #[tokio::test]
-async fn an_attack_of_hours_leaves_a_bounded_journal_with_the_exact_count_of_attempts() {
+async fn an_attack_of_hours_with_a_new_address_each_time_leaves_a_journal_bounded_by_time_with_the_exact_count()
+ {
     let env = env().await;
     let minutes: u32 = 180;
     let per_minute: u32 = 4;
@@ -78,8 +79,7 @@ async fn an_attack_of_hours_leaves_a_bounded_journal_with_the_exact_count_of_att
         }
         env.audit_recorder.flush().await;
     }
-    env.clock.advance(Duration::seconds(61));
-    env.audit_recorder.flush().await;
+    env.audit_recorder.flush_all().await;
 
     // Toutes les pages du journal.
     let mut records = Vec::new();
@@ -105,14 +105,20 @@ async fn an_attack_of_hours_leaves_a_bounded_journal_with_the_exact_count_of_att
     // synthèse vaut ses répétitions.
     let counted: u32 = logins.iter().map(|record| record.repeat_count.max(1)).sum();
     assert_eq!(counted, minutes * per_minute);
-    // Et le nombre d'entrées reste borné par le temps, pas par le nombre de tentatives : environ
-    // trois par minute (un refus et sa synthèse, un blocage), 541 pour trois heures, soit environ
-    // 1 260 pour sept heures (le journal garde 50 000 entrées). Valeur exacte, déterministe.
-    assert_eq!(
+    // BR-AUDIT-007 (Q14, points 9 et 10) : un groupe par adresse, au plus 8 adresses par famille et
+    // par fenêtre, une synthèse « N tentatives depuis M adresses » au-delà, la fenêtre de la
+    // famille qui s'allonge. Cette attaque change d'adresse à CHAQUE tentative ; le nombre d'entrées
+    // est borné par le TEMPS, pas par le nombre de tentatives (le test d'avant : 541 ; sans plafond
+    // par famille : 814). Valeur exacte, déterministe.
+    assert!(
+        records.len() < 541,
+        "{} entrées pour {} tentatives",
         records.len(),
-        541,
-        "entrées pour {} tentatives",
         minutes * per_minute
+    );
+    eprintln!(
+        "MESURE login_review : {} entrées pour 720 tentatives",
+        records.len()
     );
 }
 
@@ -200,7 +206,19 @@ async fn a_slowed_identifier_answers_a_known_address_like_a_missing_one_unless_t
     assert_eq!(marie, fantome);
     assert_eq!(marie_checks, fantome_checks);
     assert_eq!(marie_checks, 1, "même chemin : une vérification chacun");
-    // Seul le titulaire du mot de passe, depuis son poste connu, passe malgré l'attente.
+    // Marie vient de se tromper depuis son poste connu : ce n'est plus « du premier coup » et son
+    // adresse retenue seule ne suffit plus pendant l'alerte (ADR-0024, règle « 2 critères sur 3 »,
+    // BR-TRUST-001 b). Elle est ralentie, jamais bloquée : le bon mot de passe passe dès la fin de
+    // l'attente.
+    let attempt = env
+        .sessions
+        .login("marie", secret(PASSWORD), &client_at(CLIENT_ADDR))
+        .await;
+    assert!(
+        matches!(attempt, Err(LoginError::TooManyAttempts { .. })),
+        "{attempt:?}"
+    );
+    env.clock.advance(Duration::seconds(121));
     assert!(
         env.sessions
             .login("marie", secret(PASSWORD), &client_at(CLIENT_ADDR))

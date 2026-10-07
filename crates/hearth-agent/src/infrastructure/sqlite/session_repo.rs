@@ -244,8 +244,7 @@ impl SessionTx for SqliteUnitOfWork {
         &mut self,
         device: &DeviceId,
         account: &AccountId,
-        addr: &str,
-        name: &str,
+        except: &SessionId,
         at: OffsetDateTime,
     ) -> Result<u64, StoreError> {
         let at = format_date(RESOURCE, at)?;
@@ -253,12 +252,11 @@ impl SessionTx for SqliteUnitOfWork {
             "INSERT OR IGNORE INTO revoked_sessions (token_hash, revoked_at)
              SELECT token_hash, ? FROM sessions
              WHERE device_id = ?
-                OR (device_id IS NULL AND account_id = ? AND client_addr = ? AND client_name = ?)",
+                OR (device_id IS NULL AND account_id = ? AND id <> ?)",
             at,
             device.as_str(),
             account.as_str(),
-            addr,
-            name
+            except.as_str()
         )
         .execute(&mut *self.tx)
         .await
@@ -266,11 +264,10 @@ impl SessionTx for SqliteUnitOfWork {
         let result = sqlx::query!(
             "DELETE FROM sessions
              WHERE device_id = ?
-                OR (device_id IS NULL AND account_id = ? AND client_addr = ? AND client_name = ?)",
+                OR (device_id IS NULL AND account_id = ? AND id <> ?)",
             device.as_str(),
             account.as_str(),
-            addr,
-            name
+            except.as_str()
         )
         .execute(&mut *self.tx)
         .await

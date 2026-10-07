@@ -278,18 +278,37 @@ async fn a_replayed_challenge_is_refused_the_proof_serves_once() {
     assert_eq!(devices(&env).await, 1);
 }
 
-/// Deux requêtes simultanées avec le même défi et le bon mot de passe : une seule gagne.
-#[tokio::test]
+/// Une connexion lancée sur sa propre tâche (donc, sur l'exécuteur à plusieurs fils, sur son propre fil
+/// quand il y en a de libres) : les contenants sont des `Arc`, rien n'est emprunté à la tâche du test.
+fn spawn_login(
+    env: &Env,
+    from: String,
+    proof: DeviceProof,
+) -> tokio::task::JoinHandle<Result<LoginOutcome, LoginError>> {
+    let sessions = env.sessions.clone();
+    tokio::spawn(async move {
+        sessions
+            .login_with_device("marie", secret(PASSWORD), &client_at(&from), Some(&proof))
+            .await
+    })
+}
+
+/// Deux requêtes simultanées avec le même défi et le bon mot de passe : une seule gagne. Sur un
+/// exécuteur à plusieurs fils (HRT-24, suivi de la revue de la PR #25). Le défi est lié à l'adresse et le
+/// tour par adresse met deux connexions d'une même adresse l'une derrière l'autre : la garantie tient à
+/// `consume` (vérification et insertion sous un même verrou) et à la transaction ; le test prouve le
+/// résultat, la course entre adresses est dans le test suivant.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_simultaneous_logins_with_the_same_challenge_and_the_right_password_one_wins() {
     let env = env().await;
     env.create("marie", Role::Admin).await;
     let key = DeviceKey::new();
     let proof = key.login_proof(&env, "marie", CLIENT_ADDR);
     let (a, b) = tokio::join!(
-        login(&env, "marie", PASSWORD, CLIENT_ADDR, Some(&proof)),
-        login(&env, "marie", PASSWORD, CLIENT_ADDR, Some(&proof)),
+        spawn_login(&env, CLIENT_ADDR.to_owned(), proof.clone()),
+        spawn_login(&env, CLIENT_ADDR.to_owned(), proof.clone()),
     );
-    let statuses = [a.unwrap().device, b.unwrap().device];
+    let statuses = [a.unwrap().unwrap().device, b.unwrap().unwrap().device];
     assert_eq!(
         statuses
             .iter()
@@ -306,9 +325,10 @@ async fn two_simultaneous_logins_with_the_same_challenge_and_the_right_password_
     assert_eq!(devices(&env).await, 1);
 }
 
-/// La même course sur le flux : deux ouvertures simultanées avec la même preuve de session ; la preuve
-/// rejouée ensuite ne sert plus (les sessions, elles, fonctionnent toujours).
-#[tokio::test]
+/// La même course sur le flux, **pour de vrai** (plusieurs fils, aucune file par adresse : le flux n'a pas
+/// de tour) : huit ouvertures simultanées avec la même preuve de session ; la preuve rejouée ensuite ne
+/// sert plus (les sessions, elles, fonctionnent toujours).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_simultaneous_stream_proofs_with_the_same_challenge_one_serves() {
     let env = env().await;
     env.create("marie", Role::Admin).await;
@@ -317,12 +337,19 @@ async fn two_simultaneous_stream_proofs_with_the_same_challenge_one_serves() {
     env.clock.advance(Duration::minutes(10));
     let token = outcome.token.encode();
     let proof = key.prove(&env.trust, session_binding(&outcome), "marie", "10.7.7.2");
-    let (a, b) = tokio::join!(
-        env.sessions.authenticate_proved(&token, "10.7.7.2", &proof),
-        env.sessions.authenticate_proved(&token, "10.7.7.2", &proof),
-    );
-    a.unwrap();
-    b.unwrap();
+    let tasks: Vec<_> = (0..8)
+        .map(|_| {
+            let (sessions, token, proof) = (env.sessions.clone(), token.clone(), proof.clone());
+            tokio::spawn(async move {
+                sessions
+                    .authenticate_proved(&token, "10.7.7.2", &proof)
+                    .await
+            })
+        })
+        .collect();
+    for task in tasks {
+        task.await.unwrap().unwrap();
+    }
     let rows: Vec<String> = sqlx::query_scalar("SELECT address FROM known_addresses")
         .fetch_all(env.db.pool())
         .await
@@ -1698,6 +1725,90 @@ async fn two_simultaneous_enrolments_of_the_same_key_make_one_device() {
         1,
         "une seule adresse liée"
     );
+}
+
+/// La vraie course d'inscription : six connexions de la MÊME clé, de six adresses (chacune son défi,
+/// donc aucune file commune), sur plusieurs fils. Un seul poste est inscrit, une seule connexion
+/// l'inscrit, les cinq autres le prouvent ; la clé n'a qu'une adresse retenue.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn six_simultaneous_logins_of_one_key_from_six_addresses_enrol_exactly_one_device() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let key = DeviceKey::new();
+    let tasks: Vec<_> = (1..=6)
+        .map(|n| {
+            let from = format!("10.7.7.{n}");
+            let proof = key.login_proof(&env, "marie", &from);
+            spawn_login(&env, from, proof)
+        })
+        .collect();
+    let mut statuses = Vec::new();
+    for task in tasks {
+        statuses.push(task.await.unwrap().unwrap().device);
+    }
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == Some(DeviceStatus::Enrolled))
+            .count(),
+        1,
+        "{statuses:?}"
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == Some(DeviceStatus::Proven))
+            .count(),
+        5,
+        "{statuses:?}"
+    );
+    assert_eq!(devices(&env).await, 1);
+    let bound: i64 = scalar(
+        &env,
+        "SELECT COUNT(*) FROM known_addresses WHERE device_id IS NOT NULL",
+    )
+    .await;
+    assert_eq!(bound, 1, "une seule adresse liée au poste");
+}
+
+/// Quatre nouveaux postes se disputent la dernière place (huit au plus), sur plusieurs fils : exactement
+/// un entre, les trois autres se connectent sans être inscrits, jamais plus de huit postes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn four_simultaneous_enrolments_for_the_last_place_leave_exactly_eight() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    for n in 0..7 {
+        login_with_key(&env, &DeviceKey::new(), &format!("10.7.7.{}", n + 1)).await;
+        env.clock.advance(Duration::minutes(1));
+    }
+    let tasks: Vec<_> = (0..4)
+        .map(|n| {
+            let from = format!("10.7.8.{n}");
+            let proof = DeviceKey::new().login_proof(&env, "marie", &from);
+            spawn_login(&env, from, proof)
+        })
+        .collect();
+    let mut statuses = Vec::new();
+    for task in tasks {
+        statuses.push(task.await.unwrap().unwrap().device);
+    }
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == Some(DeviceStatus::Enrolled))
+            .count(),
+        1,
+        "{statuses:?}"
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == Some(DeviceStatus::Limit))
+            .count(),
+        3,
+        "{statuses:?}"
+    );
+    assert_eq!(devices(&env).await, 8);
 }
 
 #[tokio::test]

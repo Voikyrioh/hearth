@@ -22,6 +22,7 @@ use hearth_agent::application::operations::OperationService;
 use hearth_agent::application::ports::{
     AuditFeed, Clock, HashError, IdGen, PasswordHasher, Store, TokenGen,
 };
+use hearth_agent::application::security::SecurityService;
 use hearth_agent::application::sessions::{ClientInfo, SessionService};
 use hearth_agent::application::trust::TrustService;
 use hearth_agent::domain::accounts::{AccountId, PlainPassword, Role, Username};
@@ -186,6 +187,8 @@ pub struct Env {
     pub trail: Arc<hearth_agent::application::audit::AuditTrail>,
     /// L'identité d'appareil, branchée comme en production sur `sessions`.
     pub trust: Arc<TrustService>,
+    /// L'alerte, branchée comme en production sur `sessions` (HRT-24).
+    pub security: Arc<SecurityService>,
     pub monotonic: Arc<TestMonotonic>,
     pub verifier: Arc<CountingVerifier>,
 }
@@ -265,6 +268,15 @@ pub async fn env() -> Env {
         hearth_proto::fingerprint::Fingerprint::from_bytes(SERVER_FINGERPRINT),
         trail.clone(),
     ));
+    let security = Arc::new(SecurityService::new(
+        Arc::new(SqliteLoginAttemptRepo::new(db.pool().clone())),
+        accounts.clone(),
+        Arc::new(SqliteDeviceRepo::new(db.pool().clone())),
+        store.clone(),
+        clock.clone(),
+        trail.clone(),
+        Arc::new(hearth_agent::infrastructure::security_feed::BroadcastSecurityFeed::new()),
+    ));
     let sessions = Arc::new(
         SessionService::new(
             accounts,
@@ -279,7 +291,8 @@ pub async fn env() -> Env {
             trail.clone(),
             audit_sink.clone(),
         )
-        .with_trust(trust.clone()),
+        .with_trust(trust.clone())
+        .with_security(security.clone()),
     );
     let operations = Arc::new(OperationService::new(
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
@@ -305,6 +318,7 @@ pub async fn env() -> Env {
         feed,
         trail,
         trust,
+        security,
         monotonic,
         verifier,
     }

@@ -30,6 +30,46 @@ pub struct Slowdown {
     /// Fin de l'attente en cours.
     pub wait_until: Option<OffsetDateTime>,
     pub last_failure_at: Option<OffsetDateTime>,
+    /// Début de l'épisode d'alerte (HRT-24) : l'instant où l'identifiant a commencé à être ralenti,
+    /// noté une fois par épisode. `None` : pas d'épisode signalé. Remis à `None` quand le compteur
+    /// repart de zéro ou que l'alerte s'achève (`ended`).
+    pub alerted_at: Option<OffsetDateTime>,
+}
+
+/// L'identifiant est-il en alerte à `now` (BR-TRUST-008) ? Plus de `FREE_FAILURES` échecs venus de
+/// postes inconnus et un dernier échec de moins de `RESET_AFTER` (dans un sens ou dans l'autre :
+/// une horloge très reculée ne fige pas l'alerte, comme elle ne fige pas le compteur), ou une
+/// attente en cours. Se déduit du compteur : il n'y a pas d'état d'alerte à stocker.
+pub fn is_alert(state: &Slowdown, now: OffsetDateTime) -> bool {
+    state.failures > FREE_FAILURES
+        && (remaining(state, now).is_some()
+            || state
+                .last_failure_at
+                .is_some_and(|last| (now - last).abs() < RESET_AFTER))
+}
+
+/// Une alerte signalée dont les conditions ne tiennent plus : son épisode est fini (à consigner
+/// une fois, puis `alerted_at` est effacé).
+pub fn ended(state: &Slowdown, now: OffsetDateTime) -> bool {
+    state.alerted_at.is_some() && !is_alert(state, now)
+}
+
+/// Un changement d'épisode d'alerte entre deux états du même identifiant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertChange {
+    /// L'identifiant commence à être ralenti : une attaque probable le vise.
+    Started { since: OffsetDateTime },
+    /// Le compteur est reparti de zéro : l'épisode précédent est fini.
+    Ended,
+}
+
+/// Ce que le passage de `before` à `after` change à l'épisode d'alerte.
+pub fn alert_change(before: &Slowdown, after: &Slowdown) -> Option<AlertChange> {
+    match (before.alerted_at, after.alerted_at) {
+        (None, Some(since)) => Some(AlertChange::Started { since }),
+        (Some(_), None) => Some(AlertChange::Ended),
+        _ => None,
+    }
 }
 
 /// L'état observé à `now`, **ramené à ce qu'une attente légitime peut être** : une attente qui se
@@ -79,11 +119,16 @@ pub fn record_failure(state: Slowdown, now: OffsetDateTime) -> (Slowdown, Option
         .is_none_or(|last| (now - last).abs() >= RESET_AFTER);
     let failures = if stale { 0 } else { state.failures }.saturating_add(1);
     let wait = delay_for(failures);
+    // L'épisode d'alerte commence avec la première attente et ne se note qu'une fois ; un compteur
+    // reparti de zéro en finit un.
+    let kept = if stale { None } else { state.alerted_at };
+    let alerted_at = kept.or_else(|| (failures > FREE_FAILURES).then_some(now));
     (
         Slowdown {
             failures,
             wait_until: wait.map(|delay| now + delay),
             last_failure_at: Some(now),
+            alerted_at,
         },
         wait,
     )
@@ -141,6 +186,7 @@ mod tests {
             failures: u32::MAX,
             wait_until: None,
             last_failure_at: Some(t0()),
+            alerted_at: None,
         };
         let (next, wait) = record_failure(state, t0() + Duration::seconds(1));
         assert_eq!(wait, Some(MAX_DELAY));
@@ -193,6 +239,7 @@ mod tests {
                 failures: 11,
                 wait_until: Some(t0() + Duration::seconds(2)),
                 last_failure_at: Some(t0()),
+                alerted_at: None,
             };
             let now = t0() - set_back;
             let (normalized, wait) = observe(&state, now);
@@ -210,6 +257,7 @@ mod tests {
             failures: 50,
             wait_until: None,
             last_failure_at: Some(t0() + Duration::days(3)),
+            alerted_at: None,
         };
         let (next, wait) = record_failure(state, t0());
         assert_eq!(next.failures, 1);
@@ -229,5 +277,57 @@ mod tests {
         assert_eq!(excess(MAX_TRACKED), 0);
         assert_eq!(excess(MAX_TRACKED + 7), 7);
         assert_eq!(excess(0), 0);
+    }
+
+    #[test]
+    fn the_alert_starts_with_the_first_wait_and_is_noted_once_per_episode() {
+        let mut state = Slowdown::default();
+        let mut now = t0();
+        let mut starts = 0;
+        for count in 1..=FREE_FAILURES + 6 {
+            let before = state;
+            (state, _) = record_failure(state, now);
+            if let Some(AlertChange::Started { since }) = alert_change(&before, &state) {
+                starts += 1;
+                assert_eq!(count, FREE_FAILURES + 1, "le 11e échec");
+                assert_eq!(since, now);
+            }
+            now = state.wait_until.unwrap_or(now) + Duration::seconds(1);
+        }
+        assert_eq!(starts, 1, "une seule fois par épisode");
+        assert!(state.alerted_at.is_some());
+    }
+
+    #[test]
+    fn a_counter_that_starts_over_ends_the_episode() {
+        let (state, _, _) = failures(FREE_FAILURES + 3);
+        assert!(state.alerted_at.is_some());
+        let later = state.last_failure_at.expect("dernier échec") + RESET_AFTER;
+        let (next, _) = record_failure(state, later);
+        assert_eq!(next.failures, 1);
+        assert_eq!(next.alerted_at, None);
+        assert_eq!(alert_change(&state, &next), Some(AlertChange::Ended));
+    }
+
+    #[test]
+    fn an_episode_is_ended_for_the_sweep_when_its_conditions_no_longer_hold() {
+        let (state, _, _) = failures(FREE_FAILURES + 3);
+        let last = state.last_failure_at.expect("dernier échec");
+        let until = state.wait_until.expect("attente");
+        assert!(!ended(&state, until.max(last) + Duration::minutes(29)));
+        assert!(ended(&state, until.max(last + RESET_AFTER)));
+        // Rien à finir sans épisode noté.
+        assert!(!ended(&Slowdown::default(), t0() + Duration::days(1)));
+    }
+
+    #[test]
+    fn ten_failures_are_not_an_alert_the_eleventh_is() {
+        for count in 1..=FREE_FAILURES {
+            let (state, _, _) = failures(count);
+            assert!(!is_alert(&state, t0() + Duration::seconds(1)), "{count}");
+            assert_eq!(state.alerted_at, None);
+        }
+        let (state, _, _) = failures(FREE_FAILURES + 1);
+        assert!(is_alert(&state, state.last_failure_at.expect("échec")));
     }
 }
