@@ -23,6 +23,7 @@ pub fn purpose_of(binding: &Binding<'_>) -> ChallengePurpose {
         Binding::Login => ChallengePurpose::Login,
         Binding::Session { .. } => ChallengePurpose::Session,
         Binding::AttackMode { .. } => ChallengePurpose::AttackMode,
+        Binding::DeviceRemoval { .. } => ChallengePurpose::DeviceRemoval,
     }
 }
 
@@ -89,4 +90,85 @@ impl DeviceKey {
     pub fn login_proof(&self, env: &Env, username: &str, addr: &str) -> DeviceProof {
         self.prove(&env.trust, Binding::Login, username, addr)
     }
+}
+
+/// Corps de `POST /sessions` avec la preuve de cette clé (défi demandé par la route, signé pour le
+/// serveur des tests).
+pub async fn device_login_body(
+    api: &super::api::Api,
+    key: &DeviceKey,
+    username: &str,
+    password: &str,
+) -> serde_json::Value {
+    let reply = api
+        .post("/sessions/challenge")
+        .json(&serde_json::json!({ "username": username, "purpose": "login" }))
+        .send()
+        .await;
+    let challenge = reply.body["challenge"].as_str().expect("défi").to_owned();
+    let proof = key.sign(
+        &Fingerprint::from_bytes(SERVER_FINGERPRINT),
+        Binding::Login,
+        username,
+        &challenge,
+    );
+    serde_json::json!({ "username": username, "password": password, "device": device_json(&proof) })
+}
+
+/// Ouvre une session avec la preuve de cette clé et rend son jeton.
+pub async fn login_token(
+    api: &super::api::Api,
+    key: &DeviceKey,
+    username: &str,
+    password: &str,
+) -> String {
+    let body = device_login_body(api, key, username, password).await;
+    let reply = api.post("/sessions").json(&body).send().await;
+    assert_eq!(
+        reply.status,
+        axum::http::StatusCode::CREATED,
+        "{:?}",
+        reply.body
+    );
+    reply.body["token"].as_str().expect("jeton").to_owned()
+}
+
+pub fn device_json(proof: &DeviceProof) -> serde_json::Value {
+    serde_json::json!({
+        "algorithm": proof.algorithm,
+        "public_key": proof.public_key,
+        "challenge": proof.challenge,
+        "signature": proof.signature,
+    })
+}
+
+/// Corps de `DELETE /me/devices/{target}` : le mot de passe et la preuve de possession de la clé du
+/// poste courant (usage « retrait », liée au jeton de la session `token` et au poste visé).
+pub async fn removal_body(
+    api: &super::api::Api,
+    key: &DeviceKey,
+    username: &str,
+    token: &str,
+    target: &str,
+    password: &str,
+) -> serde_json::Value {
+    let reply = api
+        .post("/sessions/challenge")
+        .json(&serde_json::json!({ "username": username, "purpose": "device_removal" }))
+        .send()
+        .await;
+    let challenge = reply.body["challenge"].as_str().expect("défi").to_owned();
+    let hash = hearth_agent::domain::session_token::SessionToken::parse(token)
+        .expect("jeton")
+        .hash();
+    let proof = key.sign(
+        &Fingerprint::from_bytes(SERVER_FINGERPRINT),
+        Binding::DeviceRemoval {
+            token_hash: hash.as_bytes(),
+            target,
+        },
+        username,
+        &challenge,
+    );
+    serde_json::json!({ "password": password, "device": device_json(&proof) })
 }

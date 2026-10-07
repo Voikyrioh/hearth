@@ -14,7 +14,7 @@ use hearth_proto::device_proof::Binding;
 use hearth_proto::fingerprint::Fingerprint;
 use serde_json::{Value, json};
 use support::api::{Api, Reply, state};
-use support::device::DeviceKey;
+use support::device::{DeviceKey, removal_body};
 use support::{PASSWORD, SERVER_FINGERPRINT, env};
 
 fn server() -> Fingerprint {
@@ -379,14 +379,12 @@ async fn a_device_is_removed_by_its_owner_only_and_never_from_itself() {
         .to_owned();
 
     // Le poste d'un autre compte, ou inexistant : 404 (indiscernables).
-    for id in [
-        paul_device.as_str(),
-        "01JINCONNUINCONNUINCONNU0",
-        "%27%20OR%201%3D1%20--",
-    ] {
+    for id in [paul_device.as_str(), "01JINCONNUINCONNUINCONNU0"] {
+        let body = removal_body(&api, &a, "marie", &on_a, id, PASSWORD).await;
         let reply = api
             .delete(&format!("/me/devices/{id}"))
             .token(&on_a)
+            .json(&body)
             .send()
             .await;
         assert_eq!(
@@ -396,15 +394,18 @@ async fn a_device_is_removed_by_its_owner_only_and_never_from_itself() {
         );
     }
     // Le poste d'où part la requête : 422.
+    let body = removal_body(&api, &a, "marie", &on_a, &current, PASSWORD).await;
     let reply = api
         .delete(&format!("/me/devices/{current}"))
         .token(&on_a)
+        .json(&body)
         .send()
         .await;
     assert_eq!(
         (reply.status, reply.code()),
         (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR")
     );
+    assert_eq!(reply.body["error"]["details"]["field"], "id");
     // Rien n'a été retiré, ni chez marie ni chez paul.
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM trusted_devices")
         .fetch_one(env.db.pool())
@@ -413,9 +414,11 @@ async fn a_device_is_removed_by_its_owner_only_and_never_from_itself() {
     assert_eq!(rows, 3);
 
     // Un autre poste de marie : 204, sa session est fermée (accès révoqué), l'autre fonctionne.
+    let body = removal_body(&api, &a, "marie", &on_a, &other, PASSWORD).await;
     let reply = api
         .delete(&format!("/me/devices/{other}"))
         .token(&on_a)
+        .json(&body)
         .send()
         .await;
     assert_eq!(reply.status, StatusCode::NO_CONTENT, "{:?}", reply.body);
@@ -448,10 +451,12 @@ async fn removing_a_device_replays_with_its_operation_key_and_leaves_one_journal
     let other = list.body["devices"][1]["id"].as_str().unwrap().to_owned();
     let key = "01J9ZY0G3Q8M2K6W4T7V5N1B9D";
 
+    let body = removal_body(&api, &a, "marie", &on_a, &other, PASSWORD).await;
     let first = api
         .delete(&format!("/me/devices/{other}"))
         .token(&on_a)
         .key(key)
+        .json(&body)
         .send()
         .await;
     assert_eq!(first.status, StatusCode::NO_CONTENT);
@@ -459,6 +464,7 @@ async fn removing_a_device_replays_with_its_operation_key_and_leaves_one_journal
         .delete(&format!("/me/devices/{other}"))
         .token(&on_a)
         .key(key)
+        .json(&body)
         .send()
         .await;
     assert_eq!(second.status, StatusCode::NO_CONTENT, "rejoué, pas un 404");
@@ -469,4 +475,279 @@ async fn removing_a_device_replays_with_its_operation_key_and_leaves_one_journal
             .await
             .unwrap();
     assert_eq!(entries, 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Retirer un poste est un acte d'administration : mot de passe ET clé privée (Q16)
+// ---------------------------------------------------------------------------------------------
+
+async fn two_devices(env: &support::Env, api: &Api) -> (DeviceKey, String, String, String) {
+    env.create("marie", Role::Admin).await;
+    let (a, b) = (DeviceKey::new(), DeviceKey::new());
+    let on_a = enrolled_token(api, &a, "marie").await;
+    env.clock.advance(time::Duration::minutes(1));
+    enrolled_token(api, &b, "marie").await;
+    let list = api.get("/me/devices").token(&on_a).send().await;
+    let current = list.body["devices"][0]["id"].as_str().unwrap().to_owned();
+    let other = list.body["devices"][1]["id"].as_str().unwrap().to_owned();
+    (a, on_a, current, other)
+}
+
+async fn device_count(env: &support::Env) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM trusted_devices")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap()
+}
+
+async fn attempts(env: &support::Env) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM login_attempts")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_stolen_session_alone_removes_nothing_and_tries_no_password() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let (_key, on_a, _current, other) = two_devices(&env, &api).await;
+    let before = attempts(&env).await;
+    // Le jeton seul : pas de corps, un corps vide, un mot de passe juste sans preuve.
+    for body in [
+        None,
+        Some(json!({})),
+        Some(json!({ "password": PASSWORD })),
+        Some(json!({ "password": PASSWORD, "device": 5 })),
+    ] {
+        let mut call = api.delete(&format!("/me/devices/{other}")).token(&on_a);
+        if let Some(body) = &body {
+            call = call.json(body);
+        }
+        let reply = call.send().await;
+        assert_eq!(
+            (reply.status, reply.code()),
+            (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR"),
+            "{body:?} : {:?}",
+            reply.body
+        );
+        if body.is_some() {
+            assert_eq!(reply.body["error"]["details"]["field"], "device");
+            assert_eq!(reply.body["error"]["details"]["reason"], "proof_invalid");
+        }
+    }
+    assert_eq!(device_count(&env).await, 2, "rien n'a été retiré");
+    assert_eq!(
+        attempts(&env).await,
+        before,
+        "sans preuve, aucun mot de passe n'est essayé : une session volée ne devine rien"
+    );
+}
+
+#[tokio::test]
+async fn a_stolen_session_and_the_password_without_the_key_removes_nothing() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let (_key, on_a, _current, other) = two_devices(&env, &api).await;
+    // Le voleur a le jeton et le mot de passe, pas la clé : il signe avec une clé à lui.
+    let thief = DeviceKey::new();
+    let body = removal_body(&api, &thief, "marie", &on_a, &other, PASSWORD).await;
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&on_a)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR")
+    );
+    assert_eq!(reply.body["error"]["details"]["reason"], "proof_invalid");
+    assert_eq!(device_count(&env).await, 2);
+}
+
+#[tokio::test]
+async fn a_session_without_an_enrolled_device_gets_a_typed_explicit_refusal() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let (key, _on_a, _current, other) = two_devices(&env, &api).await;
+    // Un client ancien : session ouverte sans clé (mot de passe seul).
+    let old = api.token_of("marie").await;
+    let body = removal_body(&api, &key, "marie", &old, &other, PASSWORD).await;
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&old)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR")
+    );
+    assert_eq!(reply.body["error"]["details"]["field"], "device");
+    assert_eq!(reply.body["error"]["details"]["reason"], "device_required");
+    assert!(
+        reply.body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("clé enregistrée")
+    );
+    assert_eq!(device_count(&env).await, 2);
+    // La lecture reste ouverte à la session seule.
+    assert_eq!(
+        api.get("/me/devices").token(&old).send().await.status,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn the_proof_of_another_account_or_for_another_device_or_session_removes_nothing() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let (a, on_a, _current, other) = two_devices(&env, &api).await;
+    env.create("paul", Role::Admin).await;
+    let paul_key = DeviceKey::new();
+    let paul = enrolled_token(&api, &paul_key, "paul").await;
+    let paul_device = api.get("/me/devices").token(&paul).send().await.body["devices"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Un autre compte : la preuve de paul (sa clé, son défi) ne retire rien chez marie.
+    let body = removal_body(&api, &paul_key, "paul", &on_a, &other, PASSWORD).await;
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&on_a)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(reply.body["error"]["details"]["reason"], "proof_invalid");
+    // Et la preuve de marie ne retire rien chez paul (le poste est « introuvable »).
+    let body = removal_body(&api, &a, "marie", &on_a, &paul_device, PASSWORD).await;
+    let reply = api
+        .delete(&format!("/me/devices/{paul_device}"))
+        .token(&on_a)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+
+    // Un autre poste visé : la preuve signée pour `other` ne retire pas un troisième poste.
+    let third = DeviceKey::new();
+    enrolled_token(&api, &third, "marie").await;
+    let list = api.get("/me/devices").token(&on_a).send().await;
+    let third_id = list.body["devices"][2]["id"].as_str().unwrap().to_owned();
+    assert_ne!(third_id, other);
+    let for_other = removal_body(&api, &a, "marie", &on_a, &other, PASSWORD).await;
+    let reply = api
+        .delete(&format!("/me/devices/{third_id}"))
+        .token(&on_a)
+        .json(&for_other)
+        .send()
+        .await;
+    assert_eq!(reply.body["error"]["details"]["reason"], "proof_invalid");
+    // Le jeton aussi est lié : la preuve faite pour une session ne vaut pas pour une autre.
+    let second_session = support::device::login_token(&api, &a, "marie", PASSWORD).await;
+    let for_first = removal_body(&api, &a, "marie", &on_a, &other, PASSWORD).await;
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&second_session)
+        .json(&for_first)
+        .send()
+        .await;
+    assert_eq!(reply.body["error"]["details"]["reason"], "proof_invalid");
+    assert_eq!(device_count(&env).await, 4, "rien n'a été retiré");
+}
+
+#[tokio::test]
+async fn a_failed_removal_does_not_burn_the_proof_and_a_served_one_is_never_replayed() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let (a, on_a, _current, other) = two_devices(&env, &api).await;
+
+    // Mot de passe faux : refusé, le défi n'est pas consommé.
+    let wrong = removal_body(&api, &a, "marie", &on_a, &other, "Mauvais-Mot-De-Passe-1").await;
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&on_a)
+        .json(&wrong)
+        .send()
+        .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "WRONG_PASSWORD")
+    );
+    assert_eq!(device_count(&env).await, 2);
+    // La même preuve, avec le bon mot de passe : le retrait réussit (le défi n'avait pas servi).
+    let mut right = wrong.clone();
+    right["password"] = json!(PASSWORD);
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&on_a)
+        .json(&right)
+        .send()
+        .await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT, "{:?}", reply.body);
+    assert_eq!(device_count(&env).await, 1);
+    // Rejouée : le défi a servi, la preuve ne vaut plus rien.
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&on_a)
+        .json(&right)
+        .send()
+        .await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR")
+    );
+    assert_eq!(reply.body["error"]["details"]["reason"], "proof_invalid");
+}
+
+#[tokio::test]
+async fn a_wrong_password_on_a_removal_counts_like_a_login_failure_and_ends_in_a_wait() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let (a, on_a, _current, other) = two_devices(&env, &api).await;
+    let body = removal_body(&api, &a, "marie", &on_a, &other, "Mauvais-Mot-De-Passe-1").await;
+    let mut codes = Vec::new();
+    for _ in 0..6 {
+        let reply = api
+            .delete(&format!("/me/devices/{other}"))
+            .token(&on_a)
+            .json(&body)
+            .send()
+            .await;
+        codes.push((reply.status.as_u16(), reply.code().to_owned()));
+    }
+    // Comme à la connexion : quatre mots de passe faux, le cinquième déclenche l'attente (429,
+    // `retry_after_s`) et la suite la subit : deviner sans limite par cette route est impossible.
+    assert!(
+        codes[..4].iter().all(|c| c.1 == "WRONG_PASSWORD"),
+        "{codes:?}"
+    );
+    assert!(
+        codes[4..]
+            .iter()
+            .all(|c| *c == (429, "TOO_MANY_ATTEMPTS".to_owned())),
+        "{codes:?}"
+    );
+    // Le bon mot de passe est lui aussi refusé pendant l'attente, comme à la connexion.
+    let mut right = body.clone();
+    right["password"] = json!(PASSWORD);
+    let reply = api
+        .delete(&format!("/me/devices/{other}"))
+        .token(&on_a)
+        .json(&right)
+        .send()
+        .await;
+    assert_eq!(reply.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        reply.body["error"]["details"]["retry_after_s"]
+            .as_u64()
+            .is_some()
+    );
+    assert_eq!(device_count(&env).await, 2);
+    // Le même identifiant ne se connecte plus non plus depuis cette adresse : mêmes compteurs.
+    let login = api.login("marie", PASSWORD).await;
+    assert_eq!(login.status, StatusCode::TOO_MANY_REQUESTS);
 }

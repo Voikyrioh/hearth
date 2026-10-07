@@ -929,6 +929,11 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     )
     .await;
 
+    // `carl` ouvre aussi une session AVEC la clé d'un poste inscrit : retirer un poste exige le mot de passe
+    // et la preuve de la clé du poste courant (Q16).
+    let carl_key = support::device::DeviceKey::new();
+    let carl_session = support::device::login_token(&api, &carl_key, "carl", PASSWORD).await;
+
     let successes = |env: &support::Env| {
         let pool = env.db.pool().clone();
         async move {
@@ -963,8 +968,19 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     .await
             }
             ("DELETE", "/me/devices/{id}") => {
-                api.delete("/me/devices/01JDEVICEOFCARL0000000000")
-                    .token(&own)
+                let target = "01JDEVICEOFCARL0000000000";
+                let body = support::device::removal_body(
+                    &api,
+                    &carl_key,
+                    "carl",
+                    &carl_session,
+                    target,
+                    PASSWORD,
+                )
+                .await;
+                api.delete(&format!("/me/devices/{target}"))
+                    .token(&carl_session)
+                    .json(&body)
                     .send()
                     .await
             }

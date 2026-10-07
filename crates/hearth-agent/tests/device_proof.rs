@@ -241,41 +241,109 @@ async fn an_expired_challenge_is_refused_and_one_at_the_limit_is_not() {
 #[tokio::test]
 async fn a_replayed_challenge_is_refused_the_proof_serves_once() {
     let env = env().await;
+    env.create("marie", Role::Admin).await;
     let key = DeviceKey::new();
     let proof = key.login_proof(&env, "marie", CLIENT_ADDR);
-    assert!(
-        env.trust
-            .verify(&proof, Binding::Login, "marie", CLIENT_ADDR)
-            .is_some()
-    );
+
+    // Vérifier une preuve n'écrit rien : seul le service qu'elle rend retient le défi.
+    for _ in 0..3 {
+        assert!(
+            env.trust
+                .verify(&proof, Binding::Login, "marie", CLIENT_ADDR)
+                .is_some()
+        );
+    }
+    // Un mot de passe faux ne consomme rien : le même défi sert ensuite avec le bon.
+    let refused = login(&env, "marie", WRONG, CLIENT_ADDR, Some(&proof))
+        .await
+        .unwrap_err();
+    assert!(matches!(refused, LoginError::InvalidCredentials));
+    let served = login(&env, "marie", PASSWORD, CLIENT_ADDR, Some(&proof))
+        .await
+        .unwrap();
+    assert_eq!(served.device, Some(DeviceStatus::Enrolled));
+    // La preuve a servi : rejouée avec le bon mot de passe, elle ne vaut plus rien (la connexion,
+    // elle, réussit comme sans clé).
+    env.clock.advance(Duration::minutes(1));
+    let replayed = login(&env, "marie", PASSWORD, CLIENT_ADDR, Some(&proof))
+        .await
+        .unwrap();
+    assert_eq!(replayed.device, None, "rejeu");
     assert!(
         env.trust
             .verify(&proof, Binding::Login, "marie", CLIENT_ADDR)
             .is_none(),
-        "la même preuve, rejouée"
+        "un défi consommé ne se vérifie plus"
     );
-    // Un défi dont la preuve a échoué n'est pas consommé : seul un détenteur de clé en consomme.
-    let other = DeviceKey::new();
-    let challenge = env
-        .trust
-        .issue_challenge("marie", ChallengePurpose::Login, CLIENT_ADDR)
-        .unwrap()
-        .challenge;
-    let mut bad = key.sign(&server(), Binding::Login, "marie", &challenge);
-    bad.signature = other
-        .sign(&server(), Binding::Login, "paul", &challenge)
-        .signature;
-    assert!(
-        env.trust
-            .verify(&bad, Binding::Login, "marie", CLIENT_ADDR)
-            .is_none()
+    assert_eq!(devices(&env).await, 1);
+}
+
+/// Deux requêtes simultanées avec le même défi et le bon mot de passe : une seule gagne.
+#[tokio::test]
+async fn two_simultaneous_logins_with_the_same_challenge_and_the_right_password_one_wins() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let key = DeviceKey::new();
+    let proof = key.login_proof(&env, "marie", CLIENT_ADDR);
+    let (a, b) = tokio::join!(
+        login(&env, "marie", PASSWORD, CLIENT_ADDR, Some(&proof)),
+        login(&env, "marie", PASSWORD, CLIENT_ADDR, Some(&proof)),
     );
-    let good = key.sign(&server(), Binding::Login, "marie", &challenge);
-    assert!(
-        env.trust
-            .verify(&good, Binding::Login, "marie", CLIENT_ADDR)
-            .is_some(),
-        "le défi n'a pas été brûlé par une preuve fausse"
+    let statuses = [a.unwrap().device, b.unwrap().device];
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == Some(DeviceStatus::Enrolled))
+            .count(),
+        1,
+        "{statuses:?}"
+    );
+    assert_eq!(
+        statuses.iter().filter(|s| s.is_none()).count(),
+        1,
+        "{statuses:?}"
+    );
+    assert_eq!(devices(&env).await, 1);
+}
+
+/// La même course sur le flux : deux ouvertures simultanées avec la même preuve de session ; la preuve
+/// rejouée ensuite ne sert plus (les sessions, elles, fonctionnent toujours).
+#[tokio::test]
+async fn two_simultaneous_stream_proofs_with_the_same_challenge_one_serves() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let key = DeviceKey::new();
+    let outcome = login_with_key(&env, &key, "10.7.7.1").await;
+    env.clock.advance(Duration::minutes(10));
+    let token = outcome.token.encode();
+    let proof = key.prove(&env.trust, session_binding(&outcome), "marie", "10.7.7.2");
+    let (a, b) = tokio::join!(
+        env.sessions.authenticate_proved(&token, "10.7.7.2", &proof),
+        env.sessions.authenticate_proved(&token, "10.7.7.2", &proof),
+    );
+    a.unwrap();
+    b.unwrap();
+    let rows: Vec<String> = sqlx::query_scalar("SELECT address FROM known_addresses")
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, vec!["10.7.7.2".to_owned()]);
+    sqlx::query("UPDATE known_addresses SET address = '10.7.7.9'")
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+    env.sessions
+        .authenticate_proved(&token, "10.7.7.2", &proof)
+        .await
+        .unwrap();
+    let rows: Vec<String> = sqlx::query_scalar("SELECT address FROM known_addresses")
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec!["10.7.7.9".to_owned()],
+        "preuve rejouée : rien n'est appris"
     );
 }
 
@@ -547,15 +615,9 @@ async fn a_right_password_with_a_false_or_missing_proof_connects_as_if_there_wer
         .await
         .expect("la session fonctionne");
 
-    // Preuves fausses : signature d'un autre message, défi rejoué, défi expiré, mauvais usage.
+    // Preuves fausses : signature d'un autre message, défi expiré, mauvais usage (le rejeu : voir plus bas).
     let expired = key.login_proof(&env, "marie", "10.7.7.4");
     env.monotonic.advance(Duration::seconds(61));
-    let replayed = key.login_proof(&env, "marie", "10.7.7.3");
-    assert!(
-        env.trust
-            .verify(&replayed, Binding::Login, "marie", "10.7.7.3")
-            .is_some()
-    );
     let wrong_usage = key.prove(
         &env.trust,
         Binding::Session {
@@ -571,7 +633,6 @@ async fn a_right_password_with_a_false_or_missing_proof_connects_as_if_there_wer
     };
     for (proof, from) in [
         (&wrong_signature, "10.7.7.2"),
-        (&replayed, "10.7.7.3"),
         (&expired, "10.7.7.4"),
         (&wrong_usage, "10.7.7.5"),
     ] {
@@ -1349,4 +1410,342 @@ async fn a_device_identifier_that_is_not_ours_cannot_be_removed() {
         assert!(matches!(error, RemoveError::NotFound), "{id:?}");
     }
     let _ = DeviceId::new("x");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Revue Stephen r1 : bloquants 1 et 2
+// ---------------------------------------------------------------------------------------------
+
+use hearth_proto::device_proof::{CHALLENGE_LEN, signing_bytes};
+
+/// Bloquant 1 : un appareil sans compte, sans mot de passe et sans clé inscrite signe avec des clés
+/// jetables. Aucune de ces tentatives ne doit retenir quoi que ce soit : la preuve d'un poste
+/// inscrit vaut toujours.
+#[tokio::test]
+async fn throwaway_keys_never_mute_the_proof_of_an_enrolled_device() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let key = DeviceKey::new();
+    assert_eq!(
+        login_with_key(&env, &key, "10.7.7.7").await.device,
+        Some(DeviceStatus::Enrolled)
+    );
+    env.clock.advance(Duration::minutes(1));
+
+    // Largement plus de 4 096 preuves valides sous des clés jetables, par la vérification seule,
+    // par des connexions au mauvais mot de passe, et par un flux de session valide.
+    let session = login(&env, "marie", PASSWORD, "10.7.7.8", None)
+        .await
+        .unwrap();
+    for n in 0..4_600 {
+        let throwaway = DeviceKey::new();
+        // Les 4 200 premières par la vérification seule (de quoi remplir 4 096 places), le reste
+        // mêlé aux deux autres chemins.
+        match if n < 4_200 { 0 } else { n % 3 } {
+            0 => {
+                let proof = throwaway.login_proof(&env, "marie", "10.7.7.9");
+                let _ = env
+                    .trust
+                    .verify(&proof, Binding::Login, "marie", "10.7.7.9");
+            }
+            1 => {
+                let proof = throwaway.login_proof(&env, "marie", "10.7.7.9");
+                let _ = login(&env, "marie", WRONG, "10.7.7.9", Some(&proof)).await;
+                env.clock.advance(Duration::minutes(10));
+            }
+            _ => {
+                let proof =
+                    throwaway.prove(&env.trust, session_binding(&session), "marie", "10.7.7.8");
+                let _ = env
+                    .sessions
+                    .authenticate_proved(&session.token.encode(), "10.7.7.8", &proof)
+                    .await;
+            }
+        }
+    }
+
+    // La preuve du poste inscrit, par la connexion comme par le flux, compte toujours.
+    let again = login_with_key(&env, &key, "10.7.7.7").await;
+    assert_eq!(again.device, Some(DeviceStatus::Proven));
+    let proof = key.prove(&env.trust, session_binding(&session), "marie", "10.7.7.20");
+    env.sessions
+        .authenticate_proved(&session.token.encode(), "10.7.7.20", &proof)
+        .await
+        .unwrap();
+    let addresses: Vec<String> =
+        sqlx::query_scalar("SELECT address FROM known_addresses WHERE device_id IS NOT NULL")
+            .fetch_all(env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(addresses, vec!["10.7.7.20".to_owned()]);
+    assert_eq!(
+        devices(&env).await,
+        1,
+        "aucune clé jetable n'a été inscrite"
+    );
+}
+
+/// Bloquant 2 : les clés de petit ordre (le point neutre en tête) vérifient n'importe quel message
+/// sous une signature fixe : jamais inscrites, jamais vérifiées.
+#[tokio::test]
+async fn a_small_order_public_key_is_never_verified_nor_enrolled() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    // Signature (R = point neutre, S = 0) : valable pour tout message sous la clé « point neutre »
+    // (ring ne la refuse pas, voir infrastructure::crypto::tests).
+    let mut signature = [0_u8; 64];
+    signature[0] = 1;
+    let weak_keys: [[u8; 32]; 3] = [
+        {
+            let mut k = [0_u8; 32];
+            k[0] = 1; // y = 1 : le point neutre (ordre 1)
+            k
+        },
+        [0_u8; 32], // y = 0 : ordre 4
+        {
+            let mut k = [0xff_u8; 32]; // y = p - 1 (ordre 2)
+            k[0] = 0xec;
+            k[31] = 0x7f;
+            k
+        },
+    ];
+    for (n, public) in weak_keys.iter().enumerate() {
+        let from = format!("10.7.8.{n}");
+        for _ in 0..2 {
+            let challenge = env
+                .trust
+                .issue_challenge("marie", ChallengePurpose::Login, &from)
+                .unwrap()
+                .challenge;
+            let proof = DeviceProof {
+                algorithm: "ed25519".into(),
+                public_key: STANDARD.encode(public),
+                challenge,
+                signature: STANDARD.encode(signature),
+            };
+            assert!(
+                env.trust
+                    .verify(&proof, Binding::Login, "marie", &from)
+                    .is_none(),
+                "clé de petit ordre {n} vérifiée"
+            );
+            let outcome = login(&env, "marie", PASSWORD, &from, Some(&proof))
+                .await
+                .expect("la connexion ne dépend pas de la clé");
+            assert_eq!(outcome.device, None, "clé de petit ordre {n} inscrite");
+            env.clock.advance(Duration::minutes(1));
+        }
+    }
+    assert_eq!(devices(&env).await, 0);
+    let _ = (CHALLENGE_LEN, signing_bytes as fn(_, _, _, _) -> _);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Suivis de la revue r1
+// ---------------------------------------------------------------------------------------------
+
+/// L'empreinte de 16 octets retrouve le poste ; la clé publique inscrite doit être celle de la preuve.
+#[tokio::test]
+async fn the_stored_public_key_is_compared_not_only_its_fingerprint() {
+    let env = env().await;
+    let account = env.create("marie", Role::Admin).await;
+    let key = DeviceKey::new();
+    // Un poste inscrit sous la même empreinte mais une autre clé publique (impossible à fabriquer par
+    // une preuve : on l'écrit directement).
+    env.insert_device(
+        &account.id,
+        "01JDEVICEOTHERKEY00000000",
+        &key.key_id(),
+        "autre",
+    )
+    .await;
+    let outcome = login_with_key(&env, &key, "10.7.7.7").await;
+    assert_eq!(outcome.device, None, "ni prouvé ni inscrit");
+    assert_eq!(devices(&env).await, 1);
+    let dates: (String, String) =
+        sqlx::query_as("SELECT created_at, last_proved_at FROM trusted_devices")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(dates.0, dates.1, "aucune preuve datée");
+    let linked: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM known_addresses WHERE device_id IS NOT NULL")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(linked, 0);
+}
+
+#[tokio::test]
+async fn removing_a_device_closes_every_session_opened_from_it_even_before_its_enrolment() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    // Une session ouverte SANS clé depuis le poste, puis l'inscription du poste (même adresse).
+    let before = login(&env, "marie", PASSWORD, "10.7.7.1", None)
+        .await
+        .unwrap();
+    let key = DeviceKey::new();
+    let enrolled = login_with_key(&env, &key, "10.7.7.1").await;
+    // Un autre poste, d'une autre adresse, et une session d'une autre adresse sans clé.
+    let other = login(&env, "marie", PASSWORD, "10.7.7.5", None)
+        .await
+        .unwrap();
+    let account = marie(&env).await;
+    let device = env
+        .trust
+        .list(&account, &enrolled.session_id)
+        .await
+        .unwrap()
+        .remove(0)
+        .id;
+    env.trust
+        .remove(&account, &other.session_id, device.as_str(), by())
+        .await
+        .unwrap();
+    for gone in [&before, &enrolled] {
+        let error = env
+            .sessions
+            .authenticate(&gone.token.encode())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, AuthError::Ended(SessionEnd::Revoked)),
+            "{error:?}"
+        );
+    }
+    env.sessions
+        .authenticate(&other.token.encode())
+        .await
+        .expect("la session d'une autre adresse reste");
+}
+
+#[tokio::test]
+async fn two_devices_behind_the_same_address_the_last_to_prove_holds_it_and_both_stay_enrolled() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let (a, b) = (DeviceKey::new(), DeviceKey::new());
+    login_with_key(&env, &a, "10.7.7.1").await;
+    env.clock.advance(Duration::minutes(1));
+    login_with_key(&env, &b, "10.7.7.1").await;
+    assert_eq!(devices(&env).await, 2, "les deux postes restent inscrits");
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT address, device_id FROM known_addresses")
+            .fetch_all(env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(rows.len(), 1, "une ligne par adresse : {rows:?}");
+    let id_of = |key: &DeviceKey| {
+        let pool = env.db.pool().clone();
+        let key_id = key.key_id();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT id FROM trusted_devices WHERE key_id = ?")
+                .bind(key_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        rows[0].1.as_deref(),
+        Some(id_of(&b).await.as_str()),
+        "le dernier qui prouve"
+    );
+    // Chacun garde sa dernière adresse dans la liste.
+    let last: Vec<String> = sqlx::query_scalar("SELECT last_addr FROM trusted_devices")
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(last, vec!["10.7.7.1".to_owned(), "10.7.7.1".to_owned()]);
+    // Le premier prouve de nouveau : l'adresse lui revient, rien n'est perdu.
+    env.clock.advance(Duration::minutes(1));
+    assert_eq!(
+        login_with_key(&env, &a, "10.7.7.1").await.device,
+        Some(DeviceStatus::Proven)
+    );
+    let holder: String = sqlx::query_scalar("SELECT device_id FROM known_addresses")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(holder, id_of(&a).await);
+}
+
+#[tokio::test]
+async fn two_simultaneous_enrolments_of_the_same_key_make_one_device() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let key = DeviceKey::new();
+    let (p1, p2) = (
+        key.login_proof(&env, "marie", "10.7.7.1"),
+        key.login_proof(&env, "marie", "10.7.7.2"),
+    );
+    let (a, b) = tokio::join!(
+        login(&env, "marie", PASSWORD, "10.7.7.1", Some(&p1)),
+        login(&env, "marie", PASSWORD, "10.7.7.2", Some(&p2)),
+    );
+    let mut statuses = [a.unwrap().device, b.unwrap().device];
+    statuses.sort_by_key(|s| format!("{s:?}"));
+    assert_eq!(
+        statuses,
+        [Some(DeviceStatus::Enrolled), Some(DeviceStatus::Proven)]
+    );
+    assert_eq!(devices(&env).await, 1);
+    let rows: Vec<Option<String>> = sqlx::query_scalar("SELECT device_id FROM known_addresses")
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.iter().filter(|r| r.is_some()).count(),
+        1,
+        "une seule adresse liée"
+    );
+}
+
+#[tokio::test]
+async fn the_eighth_and_the_ninth_enrolments_at_the_same_time_leave_exactly_eight() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    for n in 0..7 {
+        login_with_key(&env, &DeviceKey::new(), &format!("10.7.7.{}", n + 1)).await;
+        env.clock.advance(Duration::minutes(1));
+    }
+    let (k8, k9) = (DeviceKey::new(), DeviceKey::new());
+    let (p8, p9) = (
+        k8.login_proof(&env, "marie", "10.7.8.8"),
+        k9.login_proof(&env, "marie", "10.7.8.9"),
+    );
+    let (a, b) = tokio::join!(
+        login(&env, "marie", PASSWORD, "10.7.8.8", Some(&p8)),
+        login(&env, "marie", PASSWORD, "10.7.8.9", Some(&p9)),
+    );
+    let mut statuses = [a.unwrap().device, b.unwrap().device];
+    statuses.sort_by_key(|s| format!("{s:?}"));
+    assert_eq!(
+        statuses,
+        [Some(DeviceStatus::Enrolled), Some(DeviceStatus::Limit)]
+    );
+    assert_eq!(devices(&env).await, 8);
+}
+
+/// Une preuve valide d'une clé non inscrite n'empêche pas la session d'être renouvelée : l'adresse déjà
+/// retenue est repoussée ce tour-là.
+#[tokio::test]
+async fn a_proof_that_does_not_serve_still_refreshes_the_retained_address_of_the_session() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    let outcome = login(&env, "marie", PASSWORD, "10.7.7.7", None)
+        .await
+        .unwrap();
+    env.clock.advance(Duration::minutes(10));
+    let stranger = DeviceKey::new();
+    let proof = stranger.prove(&env.trust, session_binding(&outcome), "marie", "10.7.7.7");
+    env.sessions
+        .authenticate_proved(&outcome.token.encode(), "10.7.7.7", &proof)
+        .await
+        .unwrap();
+    let used: Option<String> = sqlx::query_scalar("SELECT last_used_at FROM known_addresses")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert!(used.is_some(), "adresse rafraîchie");
+    assert_eq!(devices(&env).await, 0);
 }
