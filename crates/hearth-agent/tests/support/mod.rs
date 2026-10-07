@@ -368,9 +368,7 @@ pub async fn env() -> Env {
         .with_attack(attack.clone())
         .with_elevations(elevations.clone()),
     );
-    // Les bancs d'essai d'avant HRT-30 envoient des actes bruts : régime « accepte », demandé par son nom.
-    // `admin_reauth.rs` rétablit l'exigence (`accept_unconfirmed_acts_for_tests(false)`).
-    sessions.accept_unconfirmed_acts_for_tests(true);
+    // L'agent EXIGE (régime du service) : les actes de test sont confirmés (support/device.rs, `Actor`).
     let operations = Arc::new(OperationService::new(
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
         store.clone(),
@@ -428,7 +426,6 @@ pub fn plain_sessions(env: &Env) -> SessionService {
         env.trail.clone(),
         env.audit_sink.clone(),
     );
-    sessions.accept_unconfirmed_acts_for_tests(true);
     sessions
 }
 
