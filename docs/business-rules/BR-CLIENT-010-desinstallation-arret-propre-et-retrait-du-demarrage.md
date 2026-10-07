@@ -14,7 +14,7 @@ maj: 2026-10-04
 Si Hearth tourne, l'installateur de désinstallation demande de la fermer et l'arrête avant de supprimer les fichiers. L'entrée de démarrage de Windows est retirée (hors mise à jour).
 
 ## Application (code)
-- Modèle NSIS de Tauri : `CheckIfAppIsRunning` et suppression de `HKCU\...\Run\Hearth` ; l'entrée porte le nom de produit, comme l'écrit le greffon autostart. Aucune fonction `domain/`.
+- Modèle NSIS de Tauri : `CheckIfAppIsRunning` et suppression de `HKCU\...\Run\Hearth` ; l'entrée porte le nom de produit, comme l'écrit l'application (`startup.rs`, forme entre guillemets depuis HRT-29). Aucune fonction `domain/`.
 
 ## Vérification
 - À la main : activer le démarrage, désinstaller, vérifier l'absence de la valeur `Hearth` dans `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.

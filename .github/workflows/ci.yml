@@ -74,6 +74,11 @@ jobs:
       # d'un poste de développement par défaut.
       - name: Coffre Windows (Gestionnaire d'identification)
         run: cargo test -p hearth-desktop --test vault -- --ignored
+      # Le vrai registre de ce Windows jetable (HRT-29) : valeur absente, écriture exacte, relecture,
+      # retrait, type inattendu, sur une sous-clé jetable de HKCU (jamais la vraie clé `Run`). Marqué
+      # `ignore` : il écrit dans le registre de l'utilisateur qui le lance.
+      - name: Entrée de démarrage (vrai registre, sous-clé jetable)
+        run: cargo test -p hearth-desktop --test windows_registry -- --ignored
       # Le livrable du ticket : l'installateur doit se construire à chaque PR.
       - name: Installateur NSIS
         working-directory: apps/desktop
