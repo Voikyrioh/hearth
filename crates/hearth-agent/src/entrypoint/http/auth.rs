@@ -21,7 +21,7 @@ use hearth_proto::headers;
 
 use tracing::Instrument;
 
-use super::error::ErrorMark;
+use super::error::{ErrorMark, OutcomeMark};
 use super::{Access, ApiError, AppState, operations};
 use crate::application::sessions::CurrentSession;
 use crate::domain::accounts::AccountId;
@@ -93,7 +93,7 @@ impl GuardState {
 
 /// La valeur du paramètre `name` du chemin `path` d'après le motif de la route (`/accounts/{id}`) :
 /// les segments se comparent par la fin, que le chemin porte ou non son préfixe `/api/v1`.
-fn path_param(pattern: &str, path: &str, name: &str) -> Option<String> {
+pub(super) fn path_param(pattern: &str, path: &str, name: &str) -> Option<String> {
     let wanted = format!("{{{name}}}");
     let pattern: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
     let path: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
@@ -203,7 +203,7 @@ fn allows(access: Access, session: &CurrentSession) -> bool {
 
 /// D'où vient la requête : l'adresse de la connexion TCP (jamais un en-tête de mandataire) et le
 /// nom du poste annoncé par le client.
-fn origin_of(parts: &Parts) -> Origin {
+pub(super) fn origin_of(parts: &Parts) -> Origin {
     let addr = parts
         .extensions
         .get::<ConnectInfo<SocketAddr>>()
@@ -286,11 +286,20 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
     let replayed = response
         .headers()
         .contains_key(headers::IDEMPOTENT_REPLAYED);
-    if !replayed
-        && let Some(ErrorMark(code)) = response.extensions().get::<ErrorMark>().copied()
-        && let Some(outcome) = failure_of(code)
-    {
-        guard.journal(&actor, target, outcome).await;
+    if !replayed {
+        // Un refus que la couche de confirmation a consigné avec sa propre raison passe avant la règle
+        // par code d'erreur.
+        let outcome = match response.extensions().get::<OutcomeMark>().copied() {
+            Some(OutcomeMark(outcome)) => Some(outcome),
+            None => response
+                .extensions()
+                .get::<ErrorMark>()
+                .copied()
+                .and_then(|ErrorMark(code)| failure_of(code)),
+        };
+        if let Some(outcome) = outcome {
+            guard.journal(&actor, target, outcome).await;
+        }
     }
     response
 }

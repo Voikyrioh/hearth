@@ -5,7 +5,7 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use hearth_proto::api::accounts::{
     AccountItem, AccountsResponse, ChangeOwnPasswordRequest, ChangeRoleRequest,
@@ -13,6 +13,7 @@ use hearth_proto::api::accounts::{
 };
 
 use super::auth::{Caller, Requester};
+use super::reauth::PasswordConfirmed;
 use super::{ApiError, AppState, wire};
 use crate::domain::accounts::AccountId;
 use crate::domain::secret::Secret;
@@ -126,13 +127,21 @@ pub async fn revoke_sessions(
 }
 
 /// `PUT /api/v1/me/password` : le titulaire change son mot de passe ; ses autres sessions sont
-/// fermées, la courante est gardée (BR-ACCT-009). Permis à tout rôle.
+/// fermées, la courante est gardée (BR-ACCT-009). Permis à tout rôle. L'ancien mot de passe a été vérifié
+/// par la couche de confirmation, par le chemin de la connexion (HRT-28, BR-TRUST-040) : sans cette
+/// marque, la route ne change rien.
 pub async fn change_own_password(
     State(state): State<AppState>,
     Caller(caller): Caller,
     Requester(by): Requester,
+    confirmed: Option<Extension<PasswordConfirmed>>,
     body: Result<Json<ChangeOwnPasswordRequest>, JsonRejection>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
+    if confirmed.is_none() {
+        return Err(ApiError::internal(
+            &"route sans vérification de l'ancien mot de passe",
+        ));
+    }
     let Json(request) = body?;
     // Le choix du titulaire (Q15) : garder l'adresse d'où part la requête, la connexion TCP, jamais
     // une valeur du corps ni d'un en-tête.
@@ -142,9 +151,8 @@ pub async fn change_own_password(
         .flatten();
     let count = state
         .accounts
-        .change_own_password_keeping(
+        .change_own_password_confirmed(
             &caller.account.id,
-            Secret::from(request.current),
             Secret::from(request.password),
             Some(caller.session_id),
             keep.as_deref(),
