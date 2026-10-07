@@ -36,7 +36,9 @@ export function failureMessage(failure: LinkFailure, seconds?: number): string {
           ? t("validation.hostInvalid")
           : failure.field === "port"
             ? t("validation.portInvalid")
-            : t("failure.generic");
+            : failure.field === "credentials"
+              ? t("reauth.passwordMissing")
+              : t("failure.generic");
     case "storage":
       return t("failure.storage");
     case "vault":
@@ -50,7 +52,7 @@ export function failureMessage(failure: LinkFailure, seconds?: number): string {
     case "forbidden":
       return t("failure.forbidden");
     case "not_recognized":
-      return t("security.notEnrolled");
+      return t("reauth.notEnrolled");
     case "device_challenge_unavailable":
       return t("failure.deviceChallengeUnavailable");
     case "unknown_server":

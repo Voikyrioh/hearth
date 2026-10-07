@@ -30,3 +30,4 @@ maj: 2026-10-07
 
 ## Historique
 - 2026-10-07 : création (HRT-30, tranche C).
+- 2026-10-07 (revue de la PR #38) : les voies 3 et 4 sont testées par la VRAIE ligne de commande (`hearth-agent --data-dir … account revoke`, `attack-mode off`, lancées en processus sur la base du banc) ; le message du neuvième poste (clé au coffre, non inscrite) dit la voie de secours.

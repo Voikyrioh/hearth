@@ -299,9 +299,9 @@ pub struct SessionService {
     /// L'élévation du mot de passe en administration (HRT-28). Absente : le mot de passe est demandé à
     /// chaque acte, comme avec le réglage `each`.
     elevations: Option<Arc<Elevations>>,
-    /// L'agent **exige** la confirmation des actes (`admin_reauth.required`). Faux tant qu'il ne fait que
-    /// l'accepter (HRT-28) : une requête sans `reauth` passe alors comme avant. Passe à vrai avec le
-    /// client qui confirme (HRT-30).
+    /// L'agent **exige** la confirmation des actes (`admin_reauth.required`) : VRAI dès la construction,
+    /// aucun repli vers « la session suffit ». Seuls les bancs d'essai le baissent, par une méthode au nom
+    /// explicite (`accept_unconfirmed_acts_for_tests`).
     reauth_required: AtomicBool,
 }
 
@@ -418,7 +418,7 @@ impl SessionService {
             security: None,
             attack: None,
             elevations: None,
-            reauth_required: AtomicBool::new(false),
+            reauth_required: AtomicBool::new(true),
         }
     }
 
@@ -427,10 +427,11 @@ impl SessionService {
         self.reauth_required.load(Ordering::SeqCst)
     }
 
-    /// Fait exiger (ou seulement accepter) la confirmation des actes. Faux par défaut ; l'exigence est
-    /// l'affaire de HRT-30.
-    pub fn set_reauth_required(&self, required: bool) {
-        self.reauth_required.store(required, Ordering::SeqCst);
+    /// **Pour les bancs d'essai seulement** : `true` fait accepter un acte sans `reauth` (le régime d'avant
+    /// HRT-30, pour les scénarios qui envoient des actes bruts) ; `false` rétablit l'exigence. Aucun code
+    /// de production ne l'appelle : le service qui sert exige dès `SessionService::new`.
+    pub fn accept_unconfirmed_acts_for_tests(&self, accept: bool) {
+        self.reauth_required.store(!accept, Ordering::SeqCst);
     }
 
     /// Ajoute l'élévation du mot de passe en administration (HRT-28, BR-TRUST-043).

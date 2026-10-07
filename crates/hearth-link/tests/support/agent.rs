@@ -268,7 +268,9 @@ impl TestAgent {
             .await
             .unwrap();
         self.addr = running.server.local_addr();
-        running.sessions.set_reauth_required(self.reauth_required);
+        running
+            .sessions
+            .accept_unconfirmed_acts_for_tests(!self.reauth_required);
         self.running = Some(running);
     }
 
@@ -276,7 +278,9 @@ impl TestAgent {
     pub fn require_confirmation(&mut self, required: bool) {
         self.reauth_required = required;
         if let Some(running) = &self.running {
-            running.sessions.set_reauth_required(required);
+            running
+                .sessions
+                .accept_unconfirmed_acts_for_tests(!required);
         }
     }
 
