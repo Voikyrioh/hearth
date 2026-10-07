@@ -158,9 +158,10 @@ Function HearthWelcomeShow
   ${NSD_CreateLabel} 120u 55u 195u 55u "$(hearthWelcomeText)"
   Pop $R0
   SetCtlColors $R0 "000000" "FFFFFF"
+  ; Pas de SetCtlColors sur la case : essayé, la case et son carré n'étaient plus dessinés
+  ; (capture de la CI) ; le thème dessine son fond d'après la page, déjà blanche.
   ${NSD_CreateCheckbox} 120u 118u 195u 12u "$(hearthAutostartLabel)"
   Pop $HearthAutostartBox
-  SetCtlColors $HearthAutostartBox "000000" "FFFFFF"
   ${If} $HearthAutostartShown = 1
     ${If} $HearthAutostartWanted = 1
       ${NSD_Check} $HearthAutostartBox

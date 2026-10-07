@@ -43,11 +43,14 @@ public static class W {
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
-  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int m, IntPtr w, IntPtr l);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr h, int m, IntPtr w, StringBuilder l);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr h, int m, IntPtr w, IntPtr l, int flags, int ms, out IntPtr res);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr h, int m, IntPtr w, StringBuilder l, int flags, int ms, out IntPtr res);
+  // Jamais de SendMessage nu : une fenetre de l'installateur occupee ou bloquee par une boite de dialogue ferait pendre la CI.
+  public static int Ask(IntPtr h, int m) { IntPtr r; return SendMessageTimeout(h, m, IntPtr.Zero, IntPtr.Zero, 2, 5000, out r) == IntPtr.Zero ? -1 : (int)r; }
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
   public static List<IntPtr> Children(IntPtr p) { var l = new List<IntPtr>(); EnumChildWindows(p, (h, x) => { l.Add(h); return true; }, IntPtr.Zero); return l; }
-  public static string Text(IntPtr h) { var s = new StringBuilder(2048); SendMessage(h, 0x000D, (IntPtr)2048, s); return s.ToString(); }
+  public static string Text(IntPtr h) { var s = new StringBuilder(2048); IntPtr r; SendMessageTimeout(h, 0x000D, (IntPtr)2048, s, 2, 5000, out r); return s.ToString(); }
   public static string Cls(IntPtr h) { var s = new StringBuilder(256); GetClassName(h, s, 256); return s.ToString(); }
 }
 "@
@@ -124,7 +127,7 @@ function Welcome-Scenario($name, $setup, $expectedChecked) {
       if ($a.left -lt $b.right -and $b.left -lt $a.right -and $a.top -lt $b.bottom -and $b.top -lt $a.bottom) { $overlap++ }
     } }
     Expect ($overlap -eq 0) "$name : aucun recouvrement entre les trois controles"
-    $state = [int][W]::SendMessage($box, 0xF0, [IntPtr]::Zero, [IntPtr]::Zero)
+    $state = [W]::Ask($box, 0xF0)
     $got = if ($state -eq 1) { 'cochee' } else { 'decochee' }
     $want = if ($expectedChecked) { 'cochee' } else { 'decochee' }
     Expect (($state -eq 1) -eq $expectedChecked) "$name : case $got (attendu : $want)"
@@ -137,13 +140,16 @@ function Full-Flow($name, $toggle) {
   $main = $p.MainWindowHandle
   $box = Find-Box $main
   if ($box -eq [IntPtr]::Zero) { Fail "$name : pas de case" }
-  if ($toggle) { [void][W]::SendMessage($box, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep -Milliseconds 500 }
+  if ($toggle) { [void][W]::PostMessage($box, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep -Milliseconds 500 }
   Shot (Join-Path $evidence "$name-before-next.png") $main
   $deadline = (Get-Date).AddSeconds(240)
+  $tick = 0
   while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
     $next = [W]::GetDlgItem($main, 1)
-    if ($next -ne [IntPtr]::Zero) { [void][W]::SendMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
+    if ($next -ne [IntPtr]::Zero) { [void][W]::PostMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
     Start-Sleep -Seconds 2
+    $tick++
+    if ($tick % 5 -eq 0 -and $tick -le 40) { Shot (Join-Path $evidence ("{0}-etape-{1:00}.png" -f $name, $tick)) $main }
   }
   if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Fail "$name : l'installateur ne se termine pas" }
   Get-Process | Where-Object { $_.Path -and $_.Path -like "$dir*" } | Stop-Process -Force -ErrorAction SilentlyContinue
