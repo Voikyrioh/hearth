@@ -186,8 +186,9 @@ async fn a_page_is_typed_newest_first_with_the_utc_source_and_a_cursor_that_walk
     let page = audit::read_page(&rig.runtime, &rig.server, filter(), None)
         .await
         .unwrap();
-    // 30 créations, plus la création et la connexion de marie.
-    assert_eq!(page.events.len(), 32);
+    // 30 créations, plus la création de marie, sa connexion et l'inscription de son poste (HRT-23 : la
+    // première connexion crée la clé d'appareil, que l'agent inscrit).
+    assert_eq!(page.events.len(), 33);
     let first: &AuditEntryDto = &page.events[0];
     assert_eq!(first.action, "account.create");
     assert_eq!(first.target.as_deref(), Some("compte-29"));
@@ -238,7 +239,8 @@ async fn filters_reach_the_agent_typed_and_the_kinds_of_the_spec_are_exact() {
         creations
             .events
             .iter()
-            .all(|e| e.action.starts_with("account."))
+            // Le type « Comptes » comprend l'inscription et le retrait d'un poste (`device.*`).
+            .all(|e| e.action.starts_with("account.") || e.action.starts_with("device."))
     );
     let searched = audit::read_page(
         &rig.runtime,
