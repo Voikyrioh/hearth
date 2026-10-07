@@ -472,6 +472,14 @@ impl UpdateHost for FsUpdateHost {
             UPDATE_SUPERVISOR_FILE,
         ] {
             let path = self.path(name);
+            // FIX:01M4C9YK78KHZCEH723M9NE8BQ : la copie de la base contient des données d'avant la
+            // migration 0008 (anciennes empreintes de requêtes) : écrasée de zéros avant d'être supprimée.
+            if matches!(name, UPDATE_DB_BACKUP_FILE | UPDATE_WAL_BACKUP_FILE)
+                && let Err(error) = overwrite_with_zeros(&path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(%error, path = %path.display(), "copie de la base non écrasée avant suppression");
+            }
             if let Err(error) = fs::remove_file(&path)
                 && error.kind() != std::io::ErrorKind::NotFound
             {
@@ -537,6 +545,24 @@ pub fn systemd_run_arguments(supervisor: &Path, job: &Path) -> Vec<OsString> {
     arguments.push("--job".into());
     arguments.push(job.into());
     arguments
+}
+
+/// Écrase le contenu du fichier de zéros, en place, et le synchronise (sa taille ne change pas).
+/// Meilleur effort : sur un système de fichiers à copie sur écriture ou un disque qui remappe ses
+/// blocs, l'ancien contenu peut subsister hors de portée du système.
+fn overwrite_with_zeros(path: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let len = fs::metadata(path)?.len();
+    let mut file = fs::OpenOptions::new().write(true).open(path)?;
+    let zeros = [0_u8; 64 * 1024];
+    let mut left = len;
+    while left > 0 {
+        let step = usize::try_from(left.min(zeros.len() as u64)).unwrap_or(zeros.len());
+        file.write_all(&zeros[..step])?;
+        left -= step as u64;
+    }
+    file.sync_all()
 }
 
 /// `hearth.db` devient `hearth.db.<pid>.tmp` (le même dossier : le renommage est atomique).
@@ -749,6 +775,31 @@ mod tests {
         assert!(!update.join("supervisor").exists());
         assert!(!update.join("state.json").exists());
         assert!(update.join("last.json").exists(), "le résultat reste");
+    }
+
+    /// FIX:01M4C9YK78KHZCEH723M9NE8BQ : la copie de la base et son journal sont écrasés AVANT d'être
+    /// supprimés. Un lien dur pris avant le nettoyage voit les mêmes octets : ils sont à zéro.
+    #[test]
+    fn the_database_copies_are_overwritten_with_zeros_before_removal() {
+        let (dir, host) = host();
+        let update = dir.path().join("update");
+        fs::create_dir_all(&update).unwrap();
+        let marker = b"ancienne-empreinte-0123456789abcdef".repeat(4000);
+        let mut kept = Vec::new();
+        for name in [UPDATE_DB_BACKUP_FILE, UPDATE_WAL_BACKUP_FILE] {
+            let path = update.join(name);
+            fs::write(&path, &marker).unwrap();
+            let link = update.join(format!("{name}.link"));
+            fs::hard_link(&path, &link).unwrap();
+            kept.push((path, link));
+        }
+        host.clear_staging();
+        for (path, link) in kept {
+            assert!(!path.exists());
+            let bytes = fs::read(&link).unwrap();
+            assert_eq!(bytes.len(), marker.len());
+            assert!(bytes.iter().all(|b| *b == 0), "{}", link.display());
+        }
     }
 
     #[test]

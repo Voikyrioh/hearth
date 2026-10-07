@@ -23,7 +23,7 @@ use zeroize::Zeroize;
 
 use crate::application::ports::{FingerprintSecretError, FingerprintSecretStore};
 use crate::domain::fingerprint_secret::{FingerprintSecret, SECRET_LEN};
-use crate::domain::install::FINGERPRINT_SECRET_FILE;
+use crate::domain::install::{FINGERPRINT_SECRET_FILE, is_fingerprint_secret_temporary};
 use crate::infrastructure::data_dir;
 
 pub struct FileFingerprintSecretStore {
@@ -83,6 +83,35 @@ fn read(path: &Path) -> Result<Option<FingerprintSecret>, FingerprintSecretError
     secret.map(Some).map_err(|_| wrong_size(len))
 }
 
+/// Âge à partir duquel un temporaire du secret est un reste d'un arrêt brutal : une création normale
+/// dure des millisecondes, aucun démarrage vivant ne le retient aussi longtemps.
+const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Retire les temporaires du secret (`request_fingerprint.key.<pid>.<n>.tmp`) laissés par un arrêt
+/// brutal : ils contiennent un secret en clair (0600). Sans verrou, on ne touche qu'à ceux assez
+/// vieux pour ne plus appartenir à une création en cours. Best effort : un échec n'arrête rien.
+fn remove_stale_temporaries(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !is_fingerprint_secret_temporary(&name) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= STALE_AFTER);
+        if old {
+            tracing::warn!(file = %name, "temporaire de secret orphelin supprimé");
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Écrit `bytes` dans un fichier voisin ouvert en 0600, le synchronise, et rend son chemin.
 fn write_neighbour(
     path: &Path,
@@ -127,6 +156,7 @@ impl FingerprintSecretStore for FileFingerprintSecretStore {
         }
         data_dir::ensure(&self.dir).map_err(storage(&self.dir))?;
 
+        remove_stale_temporaries(&self.dir);
         let mut bytes = [0_u8; SECRET_LEN];
         getrandom::fill(&mut bytes)
             .map_err(|error| FingerprintSecretError::Generation(error.to_string()))?;
@@ -182,6 +212,28 @@ mod tests {
         let other = private_tempdir();
         let third = store(other.path()).load_or_create().unwrap();
         assert_ne!(first.expose(), third.expose());
+    }
+
+    #[test]
+    fn an_old_orphan_temporary_is_removed_at_creation_and_a_fresh_one_is_left_alone() {
+        let dir = private_tempdir();
+        let old = dir.path().join("request_fingerprint.key.4242.0.tmp");
+        let fresh = dir.path().join("request_fingerprint.key.4243.0.tmp");
+        let other = dir.path().join("notes.tmp");
+        for path in [&old, &fresh, &other] {
+            fs::write(path, [9_u8; SECRET_LEN]).unwrap();
+        }
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        store(dir.path()).load_or_create().unwrap();
+        assert!(!old.exists(), "reste d'un arrêt brutal");
+        assert!(fresh.exists(), "peut être une création en cours");
+        assert!(other.exists(), "pas à nous");
     }
 
     #[test]
