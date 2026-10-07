@@ -10,10 +10,12 @@
 //! (`TrustService::on_login`) n'est appelée que par la connexion par mot de passe accordée, dans sa
 //! transaction.
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use hearth_proto::admin_act::AdminAct;
 use hearth_proto::api::sessions::{ChallengePurpose, ChallengeResponse, DeviceProof, DeviceStatus};
 use hearth_proto::device_proof::{
     ALGORITHM_ED25519, Binding, CHALLENGE_LEN, CHALLENGE_TTL_S, PUBLIC_KEY_LEN, SIGNATURE_LEN,
@@ -132,6 +134,26 @@ pub struct TrustService {
     /// Les défis dont la preuve a été validée : en mémoire, perdus au redémarrage (les défis en
     /// cours le sont aussi : la clé du code change).
     consumed: Mutex<ConsumedChallenges>,
+    /// Les défis dont la preuve sert une requête en cours (HRT-28) : deux requêtes simultanées qui
+    /// portent le même défi ne réussissent pas toutes les deux (`reserve`).
+    in_flight: Mutex<HashSet<[u8; 16]>>,
+}
+
+/// Réservation d'un défi par la requête d'un acte en cours : rendue à l'abandon (réussite comme échec).
+/// Le défi n'est retenu comme consommé (`TrustService::consume`) que si l'acte a réussi.
+pub struct InFlight {
+    trust: Arc<TrustService>,
+    nonce: [u8; 16],
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.trust
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.nonce);
+    }
 }
 
 impl TrustService {
@@ -158,7 +180,22 @@ impl TrustService {
             fingerprint,
             trail,
             consumed: Mutex::new(ConsumedChallenges::default()),
+            in_flight: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Réserve le défi de cette preuve pour la requête d'un acte : `None` si une autre requête le tient
+    /// déjà (la seconde est refusée comme une preuve rejouée).
+    pub(super) fn reserve(self: &Arc<Self>, key: &VerifiedKey) -> Option<InFlight> {
+        let fresh = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.nonce);
+        fresh.then(|| InFlight {
+            trust: self.clone(),
+            nonce: key.nonce,
+        })
     }
 
     fn now_ms(&self) -> u64 {
@@ -535,6 +572,35 @@ impl TrustService {
         Ok(key)
     }
 
+    /// Preuve de possession d'une clé INSCRITE pour le compte de l'appelant, pour un acte d'administration
+    /// (HRT-28, BR-TRUST-039, 041) : usage `0x05`, liée au jeton de la session et à l'acte **reconstruit
+    /// depuis la requête** (l'acte, sa cible, ses paramètres non secrets). Une clé inscrite du compte
+    /// suffit (pas forcément celle du poste de la session). **N'écrit rien** : le défi n'est consommé
+    /// (`consume`) qu'une fois l'acte réussi. Rend la clé et le poste auquel elle est inscrite.
+    pub async fn verify_act(
+        &self,
+        account: &AccountId,
+        username: &str,
+        token_hash: &[u8; 32],
+        act: &AdminAct<'_>,
+        proof: Option<&DeviceProof>,
+        addr: &str,
+    ) -> Result<(VerifiedKey, DeviceId), AttackProofError> {
+        let proof = proof.ok_or(AttackProofError::Missing)?;
+        let key = self
+            .verify(proof, Binding::AdminAct { token_hash, act }, username, addr)
+            .ok_or(AttackProofError::Invalid)?;
+        let device = self
+            .devices
+            .find_by_key(&key.key_id)
+            .await?
+            .ok_or(AttackProofError::Invalid)?;
+        if device.account != *account || !bool::from(device.public_key.ct_eq(&key.public_key)) {
+            return Err(AttackProofError::Invalid);
+        }
+        Ok((key, device.id))
+    }
+
     /// Retire le poste après que `verify_removal` et le mot de passe ont réussi, puis consomme le défi :
     /// **seulement si le retrait a réussi**.
     pub async fn remove_proven(
@@ -608,6 +674,7 @@ fn usage_of(purpose: ChallengePurpose) -> u8 {
         ChallengePurpose::Session => 0x02,
         ChallengePurpose::AttackMode => 0x03,
         ChallengePurpose::DeviceRemoval => 0x04,
+        ChallengePurpose::AdminAct => 0x05,
     }
 }
 
@@ -642,6 +709,22 @@ mod tests {
                 Binding::AttackMode {
                     token_hash: &[0; 32],
                     activate: true,
+                }
+                .usage(),
+            ),
+            (
+                ChallengePurpose::DeviceRemoval,
+                Binding::DeviceRemoval {
+                    token_hash: &[0; 32],
+                    target: "x",
+                }
+                .usage(),
+            ),
+            (
+                ChallengePurpose::AdminAct,
+                Binding::AdminAct {
+                    token_hash: &[0; 32],
+                    act: &AdminAct::AccountPasswordOwn,
                 }
                 .usage(),
             ),

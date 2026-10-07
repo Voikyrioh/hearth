@@ -5,8 +5,11 @@
 //! enchaîne et demande au stockage d'exécuter.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use hearth_proto::admin_act::AdminAct;
+use hearth_proto::api::reauth::{AdminReauthInfo, Reauth, ReauthMode};
 use hearth_proto::api::sessions::{DeviceProof, DeviceStatus};
 use hearth_proto::device_proof::Binding;
 use subtle::ConstantTimeEq;
@@ -17,13 +20,16 @@ use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use super::accounts::AccountView;
 use super::attack_mode::{AttackModeService, AttackStatus};
 use super::audit::{AuditTrail, Pending};
+use super::elevation::Elevations;
 use super::ports::{
     AccountRepo, AuditSink, Clock, HashError, IdGen, KnownAddressRepo, LoginAttemptRepo,
     PasswordHasher, SessionRepo, Store, StoreError, TokenGen, TokenGenError, UnitOfWork,
 };
 use super::security::SecurityService;
-use super::trust::{AttackProofError, DeviceLogin, RemoveError, TrustService, VerifiedKey};
-use crate::domain::accounts::{Account, Username};
+use super::trust::{
+    AttackProofError, DeviceLogin, InFlight, RemoveError, TrustService, VerifiedKey,
+};
+use crate::domain::accounts::{Account, AccountId, Username};
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Origin, Outcome, Reason, Target};
 use crate::domain::identifier_slowdown::{self, AlertChange, alert_change};
 use crate::domain::known_address::{self, canonical, is_known};
@@ -35,6 +41,7 @@ use crate::domain::secret::Secret;
 use crate::domain::session_token::SessionToken;
 use crate::domain::sessions::{Session, SessionEnd, SessionId, check, expiry_from, renewed_expiry};
 use crate::domain::trust::DeviceId;
+use crate::domain::trust::admin_act::covered_by_elevation;
 use crate::domain::trust::attack_mode::{Effective, EndHow};
 use crate::domain::trust::{
     LoginCriteria, Mode, SessionStanding, TrialKind, judge_login, judge_session, mode_of,
@@ -61,12 +68,16 @@ pub struct LoginOutcome {
 }
 
 /// Pourquoi on passe par le chemin de la connexion : ouvrir une session, ou seulement confirmer le
-/// mot de passe pour un acte d'administration (`confirm_password`). Ne change que ce qui s'écrit au
-/// journal pour un refus.
+/// mot de passe pour un acte d'administration. Ne change que ce qui s'écrit au journal pour un refus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Purpose {
     Login,
-    Confirmation,
+    /// Confirmation du retrait d'un poste ou du mode attaque à plat (contrats livrés) : l'attente imposée
+    /// est consignée ici, sous l'action de l'acte.
+    Confirmation(AuditAction),
+    /// Confirmation par la couche `reauth` (HRT-28) : la route consigne elle-même tout refus, attente
+    /// comprise (une seule entrée par refus).
+    Act(AuditAction),
 }
 
 impl Purpose {
@@ -74,7 +85,7 @@ impl Purpose {
     fn action(self) -> AuditAction {
         match self {
             Self::Login => AuditAction::Login,
-            Self::Confirmation => AuditAction::DeviceRemove,
+            Self::Confirmation(action) | Self::Act(action) => action,
         }
     }
 
@@ -82,6 +93,11 @@ impl Purpose {
     /// confirmation : la route de l'acte le consigne).
     fn journals_wrong_password(self) -> bool {
         self == Self::Login
+    }
+
+    /// L'attente imposée par le ralentissement est consignée ici (sauf quand la route le fait).
+    fn journals_throttle(self) -> bool {
+        !matches!(self, Self::Act(_))
     }
 }
 
@@ -95,6 +111,11 @@ struct Passed {
     /// Les entrées déjà écrites dans la transaction (l'essai unique du mode attaque) : diffusées une
     /// fois la transaction validée.
     journal: Pending,
+}
+
+/// L'action du journal de l'acte (catalogue de l'agent, depuis le code stable du protocole).
+fn act_audit_action(act: &AdminAct<'_>) -> AuditAction {
+    AuditAction::from_code(act.kind().audit_code()).unwrap_or(AuditAction::Login)
 }
 
 /// Trace des refus : adresse et raison, jamais l'identifiant saisi (ce peut être un mot de passe
@@ -185,6 +206,85 @@ impl From<AttackProofError> for AttackModeError {
     }
 }
 
+/// Pourquoi la confirmation d'un acte d'administration est refusée (HRT-28, BR-TRUST-036, 040). Aucune
+/// variante ne porte un secret.
+#[derive(Debug, Error)]
+pub enum ReauthError {
+    /// Aucune preuve de clé n'accompagne la confirmation. **Aucun mot de passe n'est essayé.**
+    #[error("Aucune preuve de clé n'accompagne la confirmation")]
+    ProofMissing,
+    /// La preuve n'est pas celle d'une clé inscrite du compte, pour cet acte, cette cible et cette
+    /// session, ou elle est périmée ou rejouée. **Aucun mot de passe n'est essayé.**
+    #[error("La preuve de la clé de ce poste est invalide")]
+    ProofInvalid,
+    /// Le mot de passe manque et l'élévation ne couvre pas cet acte.
+    #[error("Le mot de passe est requis pour cet acte")]
+    PasswordRequired,
+    /// Le mot de passe est refusé par le chemin de la connexion (mêmes compteurs, même ralentissement).
+    #[error(transparent)]
+    Password(Box<LoginError>),
+    /// L'agent n'a pas l'identité d'appareil.
+    #[error("Les actes confirmés ne sont pas disponibles")]
+    Unavailable,
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+impl From<AttackProofError> for ReauthError {
+    fn from(error: AttackProofError) -> Self {
+        match error {
+            AttackProofError::Missing => Self::ProofMissing,
+            AttackProofError::Invalid => Self::ProofInvalid,
+            AttackProofError::Store(error) => Self::Store(error),
+        }
+    }
+}
+
+/// Comment la confirmation a été obtenue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReauthMeans {
+    /// Mot de passe juste (par le chemin de la connexion) et preuve de clé.
+    PasswordKey,
+    /// Élévation en cours (BR-TRUST-043) et preuve de clé.
+    ElevationKey,
+}
+
+struct ReauthInner {
+    account: AccountId,
+    key: VerifiedKey,
+    means: ReauthMeans,
+    trust: Arc<TrustService>,
+    /// Tient le défi pendant l'acte : deux requêtes simultanées qui portent le même défi ne réussissent
+    /// pas toutes les deux.
+    _reservation: InFlight,
+}
+
+/// Un acte confirmé : le mot de passe (ou l'élévation) et la preuve de clé ont été vérifiés. Posé sur la
+/// requête par la couche `reauth`. Le défi n'est consommé que par [`Reauthenticated::finish`], quand
+/// l'acte a réussi.
+#[derive(Clone)]
+pub struct Reauthenticated(Arc<ReauthInner>);
+
+impl Reauthenticated {
+    pub fn means(&self) -> ReauthMeans {
+        self.0.means
+    }
+
+    /// L'acte a réussi : le défi est consommé, la preuve ne servira plus. Le retour de `consume` est
+    /// ignoré à dessein (une requête concurrente l'a pris : l'acte est fait).
+    pub fn finish(&self) {
+        self.0.trust.consume(&self.0.account, &self.0.key);
+    }
+}
+
+impl std::fmt::Debug for Reauthenticated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reauthenticated")
+            .field("means", &self.0.means)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Ce que l'on sait de la session qui a présenté le jeton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CurrentSession {
@@ -215,6 +315,13 @@ pub struct SessionService {
     security: Option<Arc<SecurityService>>,
     /// Le mode attaque (HRT-25). Absent : le mode n'existe pas, le comportement est celui d'avant.
     attack: Option<Arc<AttackModeService>>,
+    /// L'élévation du mot de passe en administration (HRT-28). Absente : le mot de passe est demandé à
+    /// chaque acte, comme avec le réglage `each`.
+    elevations: Option<Arc<Elevations>>,
+    /// L'agent **exige** la confirmation des actes (`admin_reauth.required`). Faux tant qu'il ne fait que
+    /// l'accepter (HRT-28) : une requête sans `reauth` passe alors comme avant. Passe à vrai avec le
+    /// client qui confirme (HRT-30).
+    reauth_required: AtomicBool,
 }
 
 /// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, une file
@@ -329,7 +436,32 @@ impl SessionService {
             trust: None,
             security: None,
             attack: None,
+            elevations: None,
+            reauth_required: AtomicBool::new(false),
         }
+    }
+
+    /// L'agent exige-t-il la confirmation de chaque acte ?
+    pub fn reauth_required(&self) -> bool {
+        self.reauth_required.load(Ordering::SeqCst)
+    }
+
+    /// Fait exiger (ou seulement accepter) la confirmation des actes. Faux par défaut ; l'exigence est
+    /// l'affaire de HRT-30.
+    pub fn set_reauth_required(&self, required: bool) {
+        self.reauth_required.store(required, Ordering::SeqCst);
+    }
+
+    /// Ajoute l'élévation du mot de passe en administration (HRT-28, BR-TRUST-043).
+    #[must_use]
+    pub fn with_elevations(mut self, elevations: Arc<Elevations>) -> Self {
+        self.elevations = Some(elevations);
+        self
+    }
+
+    /// L'élévation, si elle est configurée.
+    pub fn elevations(&self) -> Option<&Arc<Elevations>> {
+        self.elevations.as_ref()
     }
 
     /// Ajoute le mode attaque : la règle devient « qui passe et qui est bloqué » quand il est actif
@@ -433,13 +565,18 @@ impl SessionService {
     /// contre le vrai haché, compteurs du couple, de l'adresse et de l'identifiant, ralentissement,
     /// journal des refus), sans ouvrir de session ni apprendre d'adresse. Un mot de passe faux ici
     /// n'offre donc aucun moyen de deviner sans limite : il compte comme un échec de connexion.
+    ///
+    /// `action` : l'action du journal de l'acte confirmé. La route consigne elle-même tout refus
+    /// (`Purpose::Act`) : c'est le chemin de l'ancien mot de passe de `PUT /me/password` (HRT-28,
+    /// constat C3), qui ne passait par aucun compteur.
     pub async fn confirm_password(
         &self,
         username: &str,
         password: Secret,
         client: &ClientInfo,
+        action: AuditAction,
     ) -> Result<(), LoginError> {
-        self.confirm_password_proven(username, password, client, None)
+        self.confirm_password_proven(username, password, client, None, Purpose::Act(action))
             .await
     }
 
@@ -454,17 +591,11 @@ impl SessionService {
         password: Secret,
         client: &ClientInfo,
         proven: Option<VerifiedKey>,
+        purpose: Purpose,
     ) -> Result<(), LoginError> {
         let turn = self.take_turn(client).await?;
         let result = match self
-            .verify(
-                username,
-                password,
-                client,
-                None,
-                proven,
-                Purpose::Confirmation,
-            )
+            .verify(username, password, client, None, proven, purpose)
             .await
         {
             // Les compteurs sont déjà écrits (le succès remet à zéro celui du couple, comme une
@@ -739,15 +870,17 @@ impl SessionService {
             Verdict::Slowed(retry_after) => {
                 tx.commit().await?;
                 journal.publish(&self.trail);
-                self.journal_refusal(
-                    purpose,
-                    targeted,
-                    client,
-                    Outcome::Denied(Reason::TooManyAttempts {
-                        retry_after_s: retry_after_seconds(retry_after),
-                    }),
-                )
-                .await;
+                if purpose.journals_throttle() {
+                    self.journal_refusal(
+                        purpose,
+                        targeted,
+                        client,
+                        Outcome::Denied(Reason::TooManyAttempts {
+                            retry_after_s: retry_after_seconds(retry_after),
+                        }),
+                    )
+                    .await;
+                }
                 return Err(LoginError::TooManyAttempts { retry_after });
             }
             Verdict::Failed(wait) => {
@@ -994,12 +1127,18 @@ impl SessionService {
             password,
             client,
             Some(proven.clone()),
+            Purpose::Confirmation(AuditAction::DeviceRemove),
         )
         .await
         .map_err(|error| RemoveError::Password(Box::new(error)))?;
         trust
             .remove_proven(&session.account.id, &session.session_id, id, by, &proven)
-            .await
+            .await?;
+        // Poste retiré : l'élévation liée à ce poste se ferme (BR-TRUST-043).
+        if let Some(elevations) = &self.elevations {
+            elevations.close_device(&DeviceId::new(id));
+        }
+        Ok(())
     }
 
     /// Active ou désactive le mode attaque : **un acte d'administration** (Q14 point 3, Q16). Un
@@ -1045,14 +1184,195 @@ impl SessionService {
             password,
             client,
             Some(key.clone()),
+            Purpose::Confirmation(if active {
+                AuditAction::AttackModeEnable
+            } else {
+                AuditAction::AttackModeDisable
+            }),
         )
         .await
         .map_err(|error| AttackModeError::Password(Box::new(error)))?;
         let status = attack.change(active, by, EndHow::Manual).await?;
+        if active && let Some(elevations) = &self.elevations {
+            elevations.close_all();
+        }
         // Le retour de `consume` est ignoré à dessein : le changement est fait, un défi déjà pris par une
         // requête concurrente n'ouvre plus rien (l'acte est idempotent).
         trust.consume(&session.account.id, &key);
         Ok(status)
+    }
+
+    /// Confirme un acte d'administration (HRT-28, BR-TRUST-036, 039, 040, 041, 043) : la preuve de
+    /// possession d'une clé inscrite du compte, liée à l'acte reconstruit, **puis** le mot de passe, par
+    /// le chemin de la connexion (mêmes compteurs, même ralentissement), sauf élévation en cours.
+    ///
+    /// Ordre : (1) la preuve, **avant tout mot de passe** : une session volée, sans clé, n'essaie rien ;
+    /// (2) la réservation du défi (une seule requête simultanée par défi) ; (3) l'élévation, ou le mot de
+    /// passe. Rien n'est écrit tant que le mot de passe n'est pas vérifié, et le défi n'est consommé que
+    /// par [`Reauthenticated::finish`], après la réussite de l'acte.
+    pub async fn reauthenticate(
+        &self,
+        session: &CurrentSession,
+        token: &str,
+        act: &AdminAct<'_>,
+        reauth: &Reauth,
+        client: &ClientInfo,
+    ) -> Result<Reauthenticated, ReauthError> {
+        let Some(trust) = self.trust.as_ref() else {
+            return Err(ReauthError::Unavailable);
+        };
+        let token_hash = SessionToken::parse(token)
+            .map_err(|_| ReauthError::ProofInvalid)?
+            .hash();
+        let (key, device) = trust
+            .verify_act(
+                &session.account.id,
+                session.account.username.as_str(),
+                token_hash.as_bytes(),
+                act,
+                reauth.device.as_ref(),
+                &client.addr,
+            )
+            .await?;
+        let reservation = trust.reserve(&key).ok_or(ReauthError::ProofInvalid)?;
+        let confirmed = |means| {
+            Reauthenticated(Arc::new(ReauthInner {
+                account: session.account.id.clone(),
+                key: key.clone(),
+                means,
+                trust: trust.clone(),
+                _reservation: reservation,
+            }))
+        };
+        // Pendant le mode attaque (actif ou suspendu), aucune élévation n'existe.
+        let attacking = match &self.attack {
+            Some(attack) => attack.effective().await? != Effective::Off,
+            None => false,
+        };
+        let windowed = !attacking
+            && self.accounts.reauth_mode(&session.account.id).await? == ReauthMode::Window;
+        if windowed
+            && covered_by_elevation(act)
+            && let Some(elevations) = &self.elevations
+            && elevations.covers(&session.session_id, &device, &client.addr)
+        {
+            return Ok(confirmed(ReauthMeans::ElevationKey));
+        }
+        if reauth.password.is_empty() {
+            return Err(ReauthError::PasswordRequired);
+        }
+        let purpose = Purpose::Act(act_audit_action(act));
+        if let Err(error) = self
+            .confirm_password_proven(
+                session.account.username.as_str(),
+                Secret::from(reauth.password.clone()),
+                client,
+                Some(key.clone()),
+                purpose,
+            )
+            .await
+        {
+            // Le premier mot de passe faux du compte à une confirmation ferme ses élévations.
+            if matches!(error, LoginError::InvalidCredentials)
+                && let Some(elevations) = &self.elevations
+            {
+                elevations.close_account(&session.account.id);
+            }
+            return Err(ReauthError::Password(Box::new(error)));
+        }
+        if windowed && let Some(elevations) = &self.elevations {
+            elevations.open(
+                &session.session_id,
+                &session.account.id,
+                &device,
+                &client.addr,
+            );
+        }
+        Ok(confirmed(ReauthMeans::PasswordKey))
+    }
+
+    /// Active ou désactive le mode attaque pour un acte déjà confirmé par la couche `reauth`. Activer
+    /// ferme toutes les élévations.
+    pub async fn change_attack_mode_confirmed(
+        &self,
+        session: &CurrentSession,
+        active: bool,
+        by: &Actor,
+    ) -> Result<AttackStatus, AttackModeError> {
+        let Some(attack) = self.attack.as_ref() else {
+            return Err(AttackModeError::Unavailable);
+        };
+        if !session.account.role.can_manage_accounts() {
+            return Err(AttackModeError::Forbidden);
+        }
+        let status = attack.change(active, by, EndHow::Manual).await?;
+        if active && let Some(elevations) = &self.elevations {
+            elevations.close_all();
+        }
+        Ok(status)
+    }
+
+    /// Le réglage de fréquence du mot de passe du compte (HRT-28, BR-TRUST-042). Remettre `each` ferme
+    /// les élévations du compte.
+    pub async fn set_reauth_mode(
+        &self,
+        account: &AccountView,
+        mode: ReauthMode,
+        by: &Actor,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.store.begin().await?;
+        tx.accounts().set_reauth_mode(&account.id, mode).await?;
+        let mut journal = Pending::default();
+        journal
+            .record(
+                &mut *tx,
+                AuditEvent::new(
+                    self.clock.now(),
+                    by.clone(),
+                    AuditAction::ReauthSetting,
+                    Target::None,
+                    Outcome::Succeeded,
+                ),
+            )
+            .await?;
+        tx.commit().await?;
+        journal.publish(&self.trail);
+        if mode == ReauthMode::Each
+            && let Some(elevations) = &self.elevations
+        {
+            elevations.close_account(&account.id);
+        }
+        Ok(())
+    }
+
+    /// Ce que `GET /security` annonce de la confirmation des actes pour cette session depuis cette
+    /// adresse. `None` : l'agent n'a pas l'identité d'appareil (aucune confirmation possible).
+    pub async fn admin_reauth_info(
+        &self,
+        session: &CurrentSession,
+        addr: &str,
+        required: bool,
+    ) -> Result<Option<AdminReauthInfo>, StoreError> {
+        if self.trust.is_none() {
+            return Ok(None);
+        }
+        let mode = self.accounts.reauth_mode(&session.account.id).await?;
+        let attacking = match &self.attack {
+            Some(attack) => attack.effective().await? != Effective::Off,
+            None => false,
+        };
+        let elevated_for_s = match &self.elevations {
+            Some(elevations) if !attacking && mode == ReauthMode::Window => {
+                elevations.remaining_s(&session.session_id, addr)
+            }
+            _ => 0,
+        };
+        Ok(Some(AdminReauthInfo {
+            required,
+            factors: vec!["password".to_owned(), "device_key".to_owned()],
+            password: mode,
+            elevated_for_s,
+        }))
     }
 
     /// Reconnaît la session du jeton présenté et repousse son expiration (expiration
@@ -1210,6 +1530,9 @@ impl SessionService {
     /// Déconnexion explicite : supprime la session courante. `by` : le compte et l'origine de la
     /// requête (journal d'activité, BR-AUDIT-003).
     pub async fn logout(&self, session: &SessionId, by: &Actor) -> Result<(), StoreError> {
+        if let Some(elevations) = &self.elevations {
+            elevations.close_session(session);
+        }
         let mut tx = self.store.begin().await?;
         tx.sessions().delete(session).await?;
         let mut journal = Pending::default();

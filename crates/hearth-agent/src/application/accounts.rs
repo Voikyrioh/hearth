@@ -11,6 +11,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 
 use super::audit::{AuditTrail, Pending};
+use super::elevation::Elevations;
 use super::ports::{
     AccountRepo, Clock, HashError, IdGen, PasswordHasher, SessionRepo, Store, StoreError,
 };
@@ -90,6 +91,9 @@ pub struct AccountService {
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     trail: Arc<AuditTrail>,
+    /// L'élévation du mot de passe en administration (HRT-28) : fermée quand le mot de passe ou le rôle
+    /// du compte change, ou que le compte disparaît ou perd ses sessions (BR-TRUST-043).
+    elevations: Option<Arc<Elevations>>,
 }
 
 impl AccountService {
@@ -111,6 +115,21 @@ impl AccountService {
             clock,
             ids,
             trail,
+            elevations: None,
+        }
+    }
+
+    /// Branche l'élévation du mot de passe en administration (HRT-28).
+    #[must_use]
+    pub fn with_elevations(mut self, elevations: Arc<Elevations>) -> Self {
+        self.elevations = Some(elevations);
+        self
+    }
+
+    /// Ferme les élévations du compte : son mot de passe, son rôle ou son existence a changé.
+    fn close_elevations(&self, id: &AccountId) {
+        if let Some(elevations) = &self.elevations {
+            elevations.close_account(id);
         }
     }
 
@@ -274,6 +293,7 @@ impl AccountService {
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&self.trail);
+        self.close_elevations(id);
         Ok(())
     }
 
@@ -345,6 +365,30 @@ impl AccountService {
         .await
     }
 
+    /// Comme `change_own_password_keeping`, quand l'ancien mot de passe vient d'être vérifié **par le chemin
+    /// de la connexion** (compteurs, ralentissement : HRT-28, BR-TRUST-040) : il n'est pas vérifié une
+    /// seconde fois. La garde « le mot de passe n'a pas changé entre-temps » porte sur le haché lu ici.
+    pub async fn change_own_password_confirmed(
+        &self,
+        id: &AccountId,
+        new_password: Secret,
+        current_session: Option<SessionId>,
+        keep_address: Option<&str>,
+        by: &Actor,
+    ) -> Result<u64, AccountError> {
+        let account = self.require(id).await?;
+        let hash = self.hash_for(&account, new_password).await?;
+        self.apply_password(
+            id,
+            &hash,
+            PasswordChange::Own { current_session },
+            Some(&account.password_hash),
+            keep_address,
+            (by, AuditAction::OwnPassword),
+        )
+        .await
+    }
+
     /// BR-ACCT-007, BR-ACCT-010, BR-ACCT-012 : supprime un compte et ferme ses sessions.
     /// `acting` est le compte qui demande la suppression (absent en ligne de commande) ; s'il
     /// supprime son propre compte, `confirmation` doit être son identifiant retapé.
@@ -381,6 +425,7 @@ impl AccountService {
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&self.trail);
+        self.close_elevations(id);
         Ok(closed)
     }
 
@@ -411,6 +456,7 @@ impl AccountService {
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&self.trail);
+        self.close_elevations(id);
         Ok(closed)
     }
 
@@ -481,6 +527,7 @@ impl AccountService {
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&self.trail);
+        self.close_elevations(id);
         Ok(closed)
     }
 }
