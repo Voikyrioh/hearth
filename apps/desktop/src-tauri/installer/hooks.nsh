@@ -159,7 +159,7 @@ Function HearthWelcomeShow
   ; mais opaque et grand) recouvrait la case, que la capture de la CI montrait invisible. Il est
   ; donc masqué (reconnu à son texte, une seule espace). Les autres contrôles restent ceux du modèle.
   FindWindow $R1 "#32770" "" $HWNDPARENT
-  FindWindowEx $R2 $R1 0 "Static" " "
+  FindWindow $R2 "Static" " " $R1
   ${If} $R2 <> 0
     ShowWindow $R2 0
   ${EndIf}
