@@ -12,9 +12,10 @@
 //! connexion (ou l'élévation couvre l'acte), puis le handler, puis le défi n'est consommé que si la
 //! réponse est un succès.
 //!
-//! Tant que l'agent ne fait qu'**accepter** la confirmation (`reauth_required` faux), une requête sans
-//! membre `reauth` passe comme avant : un client actuel ne voit aucune différence (seule exception voulue :
-//! l'ancien mot de passe de `PUT /me/password` passe par les compteurs de la connexion).
+//! L'agent **exige** la confirmation dès la construction du service (`SessionService::new`) : une requête
+//! sans membre `reauth` reçoit `426` « client trop ancien », jamais un repli vers « la session suffit ».
+//! Le régime « accepte sans exiger » n'existe plus que pour les bancs d'essai qui envoient des actes bruts
+//! (`accept_unconfirmed_acts_for_tests`) ; aucun code de production ne l'active.
 
 use std::sync::Arc;
 
