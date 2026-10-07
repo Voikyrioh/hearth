@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use hearth_link::domain::state::LinkState;
 
 use crate::link::StateObserver;
-use crate::presence::{Alert, LinkPresence, NotificationGate, TrayStatus};
+use crate::presence::{Alert, LinkPresence, NotificationGate, TrayIcon, TrayStatus};
 use crate::texts;
 
 /// Affiche une notification système.
@@ -17,9 +17,13 @@ pub trait Notifier: Send + Sync {
     fn notify(&self, title: &str, body: &str);
 }
 
-/// Montre l'état dans la zone de notification (couleur de la pastille et infobulle).
+/// Montre l'état dans la zone de notification (image de l'icône et infobulle).
 pub trait TrayPort: Send + Sync {
     fn show(&self, status: TrayStatus, tooltip: &str);
+
+    /// L'image de l'icône, appelée avant `show` à chaque changement (HRT-19). Sans implémentation
+    /// par défaut : un adaptateur ou un double qui l'oublie ne compile pas.
+    fn show_icon(&self, icon: TrayIcon);
 }
 
 struct Inner {
@@ -28,7 +32,7 @@ struct Inner {
     /// Nom de chaque serveur (pour le texte des notifications), borné par le carnet.
     names: HashMap<String, String>,
     /// Ce que l'icône montre déjà : on ne la redessine que si ça change.
-    shown: Option<(TrayStatus, String)>,
+    shown: Option<(TrayStatus, TrayIcon, String)>,
 }
 
 pub struct Alerts {
@@ -114,14 +118,15 @@ impl Alerts {
         texts::link_alert_body(name, alert.kind, alert.suppressed)
     }
 
-    fn refresh_tray(inner: &mut Inner) -> Option<(TrayStatus, String)> {
+    fn refresh_tray(inner: &mut Inner) -> Option<(TrayStatus, TrayIcon, String)> {
         let status = inner.presence.status();
+        let icon = inner.presence.icon();
         let reflected = inner
             .presence
             .reflected()
             .map(|(id, state)| (inner.names.get(id).map_or(id, String::as_str), state));
         let tooltip = texts::tray_tooltip(reflected);
-        let next = (status, tooltip);
+        let next = (status, icon, tooltip);
         if inner.shown.as_ref() == Some(&next) {
             return None;
         }
@@ -129,8 +134,9 @@ impl Alerts {
         Some(next)
     }
 
-    fn apply_tray(&self, tray: Option<(TrayStatus, String)>) {
-        if let Some((status, tooltip)) = tray {
+    fn apply_tray(&self, tray: Option<(TrayStatus, TrayIcon, String)>) {
+        if let Some((status, icon, tooltip)) = tray {
+            self.tray.show_icon(icon);
             self.tray.show(status, &tooltip);
         }
     }

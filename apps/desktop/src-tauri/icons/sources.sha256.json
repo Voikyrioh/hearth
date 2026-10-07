@@ -1,0 +1,216 @@
+{
+  "renderVersion": 1,
+  "sources": {
+    "src-tauri/icons/source/logo.svg": "ad075c392282e6d99f78d95e6038967f54035ebb6d57fd2aefc2bb5e4223ac62",
+    "src-tauri/icons/source/app-icon.svg": "4de42c0518987fcff3c15081f3040a8d280e5ebac465eb71fac88b4f093178e4",
+    "src-tauri/icons/source/app-icon-16.svg": "3e3108f968b7cc26f9a4caa0c4b5fcffbc4650e54def373d4fb7729105fa5b4d",
+    "src-tauri/icons/source/tray/tray-aucun-serveur.svg": "90d1d7b7c47cd860b8fb47e28f54c7695f1ce6b08b8817fc1a23ed13f1ce5384",
+    "src-tauri/icons/source/tray/tray-connecte.svg": "acbb6bc2708ef38596dd00958a7c2cde5a4397985f58d9d25a67d360cf1a435b",
+    "src-tauri/icons/source/tray/tray-reconnexion.svg": "2b0d6e204a11451efa69c169881a9be0b74aba6c4985aa7090d7d4187d1ea29d",
+    "src-tauri/icons/source/tray/tray-hors-ligne.svg": "f95b3aec6083855306f6c75e64f5ea4d9a98554053d6b47b1133239d1ce88e56",
+    "src-tauri/icons/source/tray/tray-session-expiree.svg": "efe75e101ff0b4120b877a8d6f2558415930dbfc95876a771bc22eba8802dd80",
+    "src-tauri/icons/source/tray/tray-acces-revoque.svg": "5885b80792bba03bb944cc4ba807afd0adeb7f15f62b0ad7e4e35c692cc73c4d",
+    "scripts/icon-spec.mjs": "fe6614caea26a9ed6c0bddd6c6062de5355126ad1d6950f066fe5695d5f2ef96"
+  },
+  "palette": {
+    "bg": "#1c1518",
+    "card": "#2a2024",
+    "ac": "#ff7b3d"
+  },
+  "outputs": {
+    "src-tauri/icons/icon.ico": {
+      "sha256": "1d2c0c0b130506d0b25a603c252645b016a972c8049fa532f19da7eb0133aa62",
+      "from": [
+        "src-tauri/icons/source/app-icon-16.svg",
+        "src-tauri/icons/source/app-icon.svg"
+      ]
+    },
+    "src-tauri/icons/32x32.png": {
+      "sha256": "c652662b2b6aec8f7545ac2ce7dc59ec2fa591f78900f253ed04abd969c6b46e",
+      "from": [
+        "src-tauri/icons/source/app-icon-16.svg"
+      ]
+    },
+    "src-tauri/icons/64x64.png": {
+      "sha256": "eaa3033c663af649edb2f94549f80715a544b609f8f8249a810506fad24ad33e",
+      "from": [
+        "src-tauri/icons/source/app-icon.svg"
+      ]
+    },
+    "src-tauri/icons/128x128.png": {
+      "sha256": "db53fff8b5d3e77621f152bd9396bec189573f3be18704f8b2971dfd19df8e0e",
+      "from": [
+        "src-tauri/icons/source/app-icon.svg"
+      ]
+    },
+    "src-tauri/icons/128x128@2x.png": {
+      "sha256": "3c17fe148c28b9b4eded1ab04b4bbfa7e6ef97fdd0b6e78a24e7d98ce5839826",
+      "from": [
+        "src-tauri/icons/source/app-icon.svg"
+      ]
+    },
+    "src-tauri/icons/icon.png": {
+      "sha256": "931e3f2e997215adc81d6d7475c82a315263790d95e55c1e6969e563f7e4f03e",
+      "from": [
+        "src-tauri/icons/source/app-icon.svg"
+      ]
+    },
+    "src-tauri/installer/sidebar.bmp": {
+      "sha256": "a5f56a718758abb851c5a1f9eaa2906dd3bb80192a82d72466084501c4b46a64",
+      "from": [
+        "src-tauri/icons/source/logo.svg",
+        "palette"
+      ]
+    },
+    "public/favicon.svg": {
+      "sha256": "ad075c392282e6d99f78d95e6038967f54035ebb6d57fd2aefc2bb5e4223ac62",
+      "from": [
+        "src-tauri/icons/source/logo.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-aucun-serveur-16.png": {
+      "sha256": "98fdeb59a30e37bcf6166340ecdce1e8342a9c9ca4703ec8280f71b0e420f864",
+      "from": [
+        "src-tauri/icons/source/tray/tray-aucun-serveur.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-aucun-serveur-20.png": {
+      "sha256": "b35aa36faa4c357b427a7ba4f5ab0ff70f37f01f5321fab288d414875226b751",
+      "from": [
+        "src-tauri/icons/source/tray/tray-aucun-serveur.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-aucun-serveur-24.png": {
+      "sha256": "5522b3b68c47584c41e4beb644e008b492a336cec8e8e155d6e536bdccb393c5",
+      "from": [
+        "src-tauri/icons/source/tray/tray-aucun-serveur.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-aucun-serveur-32.png": {
+      "sha256": "5112648ab074c06db976a3e646051950ab928ca1bba29918b987e970ee0934ab",
+      "from": [
+        "src-tauri/icons/source/tray/tray-aucun-serveur.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-connecte-16.png": {
+      "sha256": "e75a377477eb676b9a75794ef2c670df0b057dcb4b4b38f9e903c69fb528fecd",
+      "from": [
+        "src-tauri/icons/source/tray/tray-connecte.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-connecte-20.png": {
+      "sha256": "92878427783bf4de5c912e0f3201b41971dacaae29dcfdef350a83121adfd5e4",
+      "from": [
+        "src-tauri/icons/source/tray/tray-connecte.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-connecte-24.png": {
+      "sha256": "a387f3263e24906a33bba29b8f050ae755efab340c26714c79f7f2d5c080d810",
+      "from": [
+        "src-tauri/icons/source/tray/tray-connecte.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-connecte-32.png": {
+      "sha256": "c5b25673c6da5f30cf062273d72f9dc7ac315d3d8fc6c84af0e1e1fc37558d07",
+      "from": [
+        "src-tauri/icons/source/tray/tray-connecte.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-reconnexion-16.png": {
+      "sha256": "40d3ddca8bcbbe29a416adcb332f25f4da72f986c66a09f5cdc733c5a40f6133",
+      "from": [
+        "src-tauri/icons/source/tray/tray-reconnexion.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-reconnexion-20.png": {
+      "sha256": "93587767da3a3be9b7a7d48f8d590765beaee70f35fe2465287a6848b6643859",
+      "from": [
+        "src-tauri/icons/source/tray/tray-reconnexion.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-reconnexion-24.png": {
+      "sha256": "acfeda5b7e187b89dcd82ba70e6324cfe15572ac2b1e0746734a757feee69eb8",
+      "from": [
+        "src-tauri/icons/source/tray/tray-reconnexion.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-reconnexion-32.png": {
+      "sha256": "4415f24740fce0af95fdeb4fa404a6aed976ca70f04bc1cb292641a7f88e8494",
+      "from": [
+        "src-tauri/icons/source/tray/tray-reconnexion.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-hors-ligne-16.png": {
+      "sha256": "75e0bfd8788cbf5713be82ee882d0185e0de6f24b124a16574fdcaec3bc035c1",
+      "from": [
+        "src-tauri/icons/source/tray/tray-hors-ligne.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-hors-ligne-20.png": {
+      "sha256": "9256345050d85b03760ad4211604161d1c3db264988fe4515f01eb96fbb9f468",
+      "from": [
+        "src-tauri/icons/source/tray/tray-hors-ligne.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-hors-ligne-24.png": {
+      "sha256": "706096615d04e8594e39a6c20c7aa261207af33e357cd01938b7fd85c626df9e",
+      "from": [
+        "src-tauri/icons/source/tray/tray-hors-ligne.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-hors-ligne-32.png": {
+      "sha256": "d07d35081dd40c4ef8e1bdbfb37be6be6feda8b096a7af370ae97255fb37edfa",
+      "from": [
+        "src-tauri/icons/source/tray/tray-hors-ligne.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-session-expiree-16.png": {
+      "sha256": "bb9d0d60bb063620034e7183016141560ad01e7faa7480f62914674396727a4b",
+      "from": [
+        "src-tauri/icons/source/tray/tray-session-expiree.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-session-expiree-20.png": {
+      "sha256": "1cf76cfcde02ce9f928781111aebb0462fbdcc6ec9cbfd967f2ba3ab8ad12c94",
+      "from": [
+        "src-tauri/icons/source/tray/tray-session-expiree.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-session-expiree-24.png": {
+      "sha256": "8efb8b77218a1f2fd2ceedbe40ef842441762b2138989041fb864d968f9ef4c3",
+      "from": [
+        "src-tauri/icons/source/tray/tray-session-expiree.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-session-expiree-32.png": {
+      "sha256": "715368f1b324546d363ee2e6391ccb5ee357846e7399d16a283b568d68dcd863",
+      "from": [
+        "src-tauri/icons/source/tray/tray-session-expiree.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-acces-revoque-16.png": {
+      "sha256": "21f2afac041f83f6a2c6779a9e0821c9563212e5f2c6b08a2da9b5c66121bd9d",
+      "from": [
+        "src-tauri/icons/source/tray/tray-acces-revoque.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-acces-revoque-20.png": {
+      "sha256": "312027ba304aa25ed59fec76376eec676975648bba7f14aa82e996f97a7c35bb",
+      "from": [
+        "src-tauri/icons/source/tray/tray-acces-revoque.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-acces-revoque-24.png": {
+      "sha256": "f235c250f4b034960d13fbeec5aa1566625b84fb0d1b1cb2f740649611b7827b",
+      "from": [
+        "src-tauri/icons/source/tray/tray-acces-revoque.svg"
+      ]
+    },
+    "src-tauri/icons/tray/tray-acces-revoque-32.png": {
+      "sha256": "5664a79cace0a078e2837ce7045299ff7b109f3c63f216ac05842d0e4c4d50b3",
+      "from": [
+        "src-tauri/icons/source/tray/tray-acces-revoque.svg"
+      ]
+    }
+  }
+}

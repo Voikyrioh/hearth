@@ -63,6 +63,7 @@
         "displayLanguageSelector": false,
         "compression": "lzma",
         "installerIcon": "icons/icon.ico",
+        "sidebarImage": "installer/sidebar.bmp",
         "installerHooks": "installer/hooks.nsh",
         "customLanguageFiles": {
           "French": "installer/French.nsh"

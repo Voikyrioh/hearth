@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App.vue";
+import { expectedFile } from "@/assets/illustrations/screens";
 import { emptyDraft } from "@/audit/filters";
 import { CONTROL_MARK } from "@/audit/text";
 import AuditDetailDialog from "@/components/molecules/AuditDetailDialog.vue";
@@ -89,6 +90,7 @@ describe("page Journal d'activité", () => {
   it("journal vide : « Aucune activité enregistrée pour l'instant », sans tableau", async () => {
     const { wrapper } = await boot(0);
     expect(wrapper.text()).toContain("Aucune activité enregistrée pour l'instant");
+    expect(wrapper.get("img").attributes("src")).toContain(expectedFile("journal"));
     expect(wrapper.find('[role="grid"]').exists()).toBe(false);
     wrapper.unmount();
   });

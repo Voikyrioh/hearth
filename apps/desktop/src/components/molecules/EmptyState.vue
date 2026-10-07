@@ -1,13 +1,31 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ title: string; text: string; heading?: "h1" | "h2" }>(), {
-  heading: "h1",
-});
+import { ILLUSTRATIONS, type IllustrationName } from "@/assets/illustrations";
+
+// « illustration » : un dessin de la collection (décoratif, texte alternatif vide, le titre dit déjà
+// tout). Le slot du même nom prime, pour un contenu qui n'est pas une illustration.
+withDefaults(
+  defineProps<{
+    title: string;
+    text: string;
+    heading?: "h1" | "h2";
+    illustration?: IllustrationName;
+    size?: "md" | "lg";
+  }>(),
+  { heading: "h1", illustration: undefined, size: "md" },
+);
 </script>
 
 <template>
   <section class="empty">
-    <div v-if="$slots.illustration" class="empty__illustration">
-      <slot name="illustration" />
+    <div v-if="$slots.illustration || illustration" class="empty__illustration">
+      <slot name="illustration">
+        <img
+          v-if="illustration"
+          :class="['empty__img', `empty__img--${size}`]"
+          :src="ILLUSTRATIONS[illustration]"
+          alt=""
+        />
+      </slot>
     </div>
     <component :is="heading" class="empty__title">{{ title }}</component>
     <p class="empty__text">{{ text }}</p>
@@ -29,6 +47,18 @@ withDefaults(defineProps<{ title: string; text: string; heading?: "h1" | "h2" }>
 
 .empty__illustration {
   margin-bottom: var(--space-5);
+}
+
+.empty__img {
+  display: block;
+}
+
+.empty__img--md {
+  width: var(--illustration-md);
+}
+
+.empty__img--lg {
+  width: var(--illustration-lg);
 }
 
 .empty__title {

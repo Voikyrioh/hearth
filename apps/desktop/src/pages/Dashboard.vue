@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
+import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import HSegmented from "@/components/atoms/HSegmented.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
@@ -57,6 +58,7 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
     :title="failed ? t('dash.readFailed') : t('dash.waitingTitle')"
     :text="failed ? '' : t('dash.waitingText')"
     heading="h2"
+    :illustration="failed || isConnected ? undefined : (SCREEN_ILLUSTRATIONS.offline ?? undefined)"
   />
   <template v-else-if="entry">
     <div class="dash">

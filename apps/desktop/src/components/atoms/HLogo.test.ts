@@ -11,11 +11,17 @@ describe("HLogo", () => {
     expect(decorative.attributes("aria-label")).toBeUndefined();
   });
 
-  it("uses the simplified drawing at small size", () => {
-    const small = mount(HLogo, { props: { size: "sm" } });
-    const large = mount(HLogo, { props: { size: "lg" } });
-    expect(small.findAll("path")[1]?.attributes("fill-rule")).toBeUndefined();
-    expect(large.findAll("path")[1]?.attributes("fill-rule")).toBe("evenodd");
+  it("draws the same round-tipped flame at every size", () => {
+    const drawings = (["sm", "md", "lg"] as const).map((size) =>
+      mount(HLogo, { props: { size } })
+        .findAll("path")
+        .map((path) => path.attributes("d")),
+    );
+    expect(drawings[0]).toEqual(drawings[1]);
+    expect(drawings[1]).toEqual(drawings[2]);
+    // Pointe ronde : un arc de rayon 14 ferme le sommet de la flamme, pas de découpe interne.
+    expect(drawings[0]?.[1]).toContain("A14 14");
+    expect(drawings[0]?.[1]?.match(/M/g)).toHaveLength(1);
   });
 });
 

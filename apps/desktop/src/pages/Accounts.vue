@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { refusalMessage } from "@/accounts/messages";
+import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import HButton from "@/components/atoms/HButton.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import ConfirmDialog from "@/components/molecules/ConfirmDialog.vue";
@@ -110,7 +111,10 @@ async function confirmRemove() {
     <HButton variant="secondary" @click="store.load(serverId)">{{ t("common.retry") }}</HButton>
   </div>
   <section v-else-if="accounts.length === 0" class="accounts__empty">
-    <EmptyState :title="t('pages.accounts')" :text="t('accounts.empty')" heading="h2">
+    <EmptyState :title="t('pages.accounts')" :text="t('accounts.empty')"
+      heading="h2"
+      :illustration="SCREEN_ILLUSTRATIONS.accounts ?? undefined"
+    >
       <template #action>
         <HButton :needs-link="{ role: 'admin' }" @click="creating = true">
           {{ t("pages.addAccount") }}

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="Hearth : session expirée">
+  <path d="M3 6V9A5 5 0 0 0 13 9V6" fill="none" stroke="#ff7b3d" stroke-width="2" stroke-linecap="round"/>
+  <path fill="#ffc04d" d="M7 3.5A1 1 0 0 1 9 3.5V7.5A1 1 0 0 1 7 7.5ZM8 9.8A1.2 1.2 0 1 1 8 12.2A1.2 1.2 0 1 1 8 9.8Z"/>
+</svg>
