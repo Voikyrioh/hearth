@@ -22,6 +22,9 @@ La valeur `Hearth` de `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` étai
 3. Règles pures dans `domain.rs` : `startup_command` (refuse un chemin vide ou contenant un guillemet), `run_value_form` (reconnaît `Quoted`, `Unquoted`, `Other`), `migrated_run_value` (décision de migration), `task_manager_allows`.
 4. **Migration** à chaque démarrage de l'application, non bloquante : une valeur `Unquoted` (forme d'avant HRT-29) est réécrite `Quoted` avec SON chemin d'origine. Jamais de création (absente reste absente), jamais de touche à `StartupApproved` (désactivée dans le Gestionnaire des tâches reste désactivée), formes inconnues laissées telles quelles. L'installateur en mode silencieux ou passif n'écrit toujours rien (ADR-0026) : c'est l'application, au premier lancement après la mise à jour, qui migre.
 
+5. **Erreurs du registre** : classées sur le HRESULT (`classify_registry_error`), jamais sur `io::ErrorKind` (la conversion de `windows-result` donne `Uncategorized` pour `0x80070002`). Le test du vrai registre (sous-clé jetable de HKCU, `#[ignore]`) tourne sur le runner de la CI seulement.
+6. **Limites assumées** : une ligne de la clé `Run` de plus de 260 caractères est ignorée par Windows sans erreur : `startup_command` la refuse (`TooLong`). L'entrée lue « activée » peut pointer vers un autre exécutable (installation déplacée, copie portable) : la migration ne change que sa forme, pas sa cible ; l'interface affiche « activé » sans vérifier que le chemin existe encore. La ruche de la machine n'est jamais migrée, seulement lue.
+
 ## Alternatives écartées
 
 - Garder le greffon et migrer seulement : l'activation depuis l'application réécrirait la forme sans guillemets.

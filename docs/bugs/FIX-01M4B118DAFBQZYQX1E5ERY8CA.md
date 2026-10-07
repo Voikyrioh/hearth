@@ -25,6 +25,9 @@ Aucun côté utilisateur (hors installation dans un dossier sans espace).
 ## Correction
 Valeur `"<exe>" --minimized` écrite par le code de l'application (`startup.rs`, greffon retiré, ADR-0028) et par le crochet NSIS. Chemin vide ou contenant un guillemet refusé. Migration au démarrage d'une ancienne valeur sans guillemets (son propre chemin conservé), sans jamais changer le choix de l'utilisateur : absente reste absente, activée reste activée, désactivée dans le Gestionnaire des tâches reste désactivée (`StartupApproved` jamais touché).
 
+## Second défaut, trouvé en review r1 (PR #31), avant toute publication
+Le premier jet de `startup.rs::optional` classait l'erreur du registre par `ErrorKind::NotFound`. `windows-registry` 0.6.1 fabrique ses erreurs par `HRESULT::from_win32` (`0x80070002` pour « introuvable », valeur OU clé : `RegOpenKeyExW` / `RegQueryValueExW` rendent `ERROR_FILE_NOT_FOUND`) et `windows-result` 0.4.1 les convertit en `io::Error::from_raw_os_error(hresult)` : `0x80070002` est alors `Uncategorized`, jamais `NotFound` (confirmé à la lecture des deux crates). Toute valeur absente devenait une erreur : `is_enabled` puis `get_settings` échouaient dans l'état par défaut. Correction : `classify_registry_error` (fonction pure sur le HRESULT : `0x80070002` et `0x80070003` = absent, `0x80070005` = accès refusé), l'accès refusé n'est avalé que pour la ruche de la machine. Test : `tests/run_entry.rs::registry_error_codes_are_classified_on_the_hresult` ; `tests/windows_registry.rs` (4 tests contre le vrai registre sur une sous-clé jetable de HKCU, `#[ignore]`, lancés par l'étape « Entrée de démarrage (vrai registre, sous-clé jetable) » du job `desktop`, jamais en local).
+
 ## Règles
 - BR-CLIENT-006 : forme de la valeur précisée (entre guillemets).
 - BR-CLIENT-007 : lecture et migration.
