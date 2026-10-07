@@ -203,7 +203,7 @@ pub struct TestAgent {
     pub services: Services,
     running: Option<RunningAgent>,
     updating: Option<UpdatingFactory>,
-    /// L'agent EXIGE la confirmation des actes (`set_reauth_required`). Faux par défaut : les scénarios de
+    /// L'agent EXIGE la confirmation des actes (`accept_unconfirmed_acts_for_tests`). Faux par défaut : les scénarios de
     /// résilience envoient des routes d'acte brutes (`execute_raw`) ; les scénarios de confirmation le
     /// règlent à vrai (`require_confirmation`), comme le service en production (HRT-30).
     reauth_required: bool,
