@@ -28,11 +28,13 @@ pub enum AuditAction {
     DeviceEnroll,
     /// Un poste de confiance est retiré par son titulaire (BR-TRUST-022).
     DeviceRemove,
+    /// Une attaque probable vise un identifiant : début ou fin de l'épisode (HRT-24, BR-TRUST-008).
+    SecurityAlert,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 14] = [
+    pub const ALL: [AuditAction; 15] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -47,6 +49,7 @@ impl AuditAction {
         Self::AgentUpdate,
         Self::DeviceEnroll,
         Self::DeviceRemove,
+        Self::SecurityAlert,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -66,6 +69,7 @@ impl AuditAction {
             Self::AgentUpdate => action::AGENT_UPDATE,
             Self::DeviceEnroll => action::DEVICE_ENROLL,
             Self::DeviceRemove => action::DEVICE_REMOVE,
+            Self::SecurityAlert => action::SECURITY_ALERT,
         }
     }
 
@@ -86,6 +90,7 @@ impl AuditAction {
             Self::AgentUpdate => "Mise à jour de l'agent",
             Self::DeviceEnroll => "Poste de confiance enregistré",
             Self::DeviceRemove => "Poste de confiance retiré",
+            Self::SecurityAlert => "Attaque probable signalée",
         }
     }
 

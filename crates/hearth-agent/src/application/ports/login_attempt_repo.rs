@@ -16,6 +16,11 @@ pub trait LoginAttemptRepo: Send + Sync {
     /// Ralentissement de l'identifiant (clé `AttemptKey::identifier`) ; vierge s'il n'a jamais
     /// échoué.
     async fn identifier(&self, key: &AttemptKey) -> Result<Slowdown, StoreError>;
+
+    /// Les identifiants qui ont plus de `FREE_FAILURES` échecs ou un épisode d'alerte noté, avec la
+    /// clé de leur ligne (`AttemptKey::as_str`) : de quoi dire lesquels sont visés (le domaine
+    /// tranche, `identifier_slowdown::is_alert`). Borné par `MAX_TRACKED`.
+    async fn alerting(&self) -> Result<Vec<(String, Slowdown)>, StoreError>;
 }
 
 #[async_trait]
@@ -43,6 +48,18 @@ pub trait LoginAttemptTx: Send {
     async fn trim(&mut self, now: OffsetDateTime) -> Result<u64, StoreError>;
 
     async fn identifier(&mut self, key: &AttemptKey) -> Result<Slowdown, StoreError>;
+
+    /// Voir `LoginAttemptRepo::alerting`, dans la transaction.
+    async fn alerting(&mut self) -> Result<Vec<(String, Slowdown)>, StoreError>;
+
+    /// Efface l'épisode d'alerte noté sur cette ligne, **si c'est bien celui-là** (`alerted_at`
+    /// inchangé) : rend `false` quand un autre passage l'a déjà fini ou qu'un nouvel épisode a
+    /// commencé. Une fin d'alerte ne se consigne donc qu'une fois.
+    async fn end_alert(
+        &mut self,
+        key: &str,
+        alerted_at: OffsetDateTime,
+    ) -> Result<bool, StoreError>;
 
     /// Enregistre le ralentissement de l'identifiant.
     async fn save_identifier(

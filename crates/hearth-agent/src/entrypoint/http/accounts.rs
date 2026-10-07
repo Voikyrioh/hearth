@@ -134,13 +134,20 @@ pub async fn change_own_password(
     body: Result<Json<ChangeOwnPasswordRequest>, JsonRejection>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
     let Json(request) = body?;
+    // Le choix du titulaire (Q15) : garder l'adresse d'où part la requête, la connexion TCP, jamais
+    // une valeur du corps ni d'un en-tête.
+    let keep = request
+        .keep_address
+        .then(|| by.origin.addr().map(str::to_owned))
+        .flatten();
     let count = state
         .accounts
-        .change_own_password(
+        .change_own_password_keeping(
             &caller.account.id,
             Secret::from(request.current),
             Secret::from(request.password),
             Some(caller.session_id),
+            keep.as_deref(),
             &by,
         )
         .await?;

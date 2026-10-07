@@ -170,6 +170,8 @@ pub fn change_own_password(username: &str, current: &str, password: &str) -> Res
             body: Some(json(&ChangeOwnPasswordRequest {
                 current: current.to_owned(),
                 password: password.to_owned(),
+                // Le choix « garder ce poste reconnu » est câblé par HRT-26.
+                keep_address: false,
             })?),
         },
         expect: Expect::Closed,

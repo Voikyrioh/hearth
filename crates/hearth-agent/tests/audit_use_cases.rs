@@ -31,6 +31,27 @@ async fn all(env: &support::Env) -> Vec<AuditRecord> {
     records
 }
 
+/// Toutes les pages du journal, du plus ancien au plus récent.
+async fn every(env: &support::Env) -> Vec<AuditRecord> {
+    let mut records = Vec::new();
+    let mut before = None;
+    loop {
+        let filter = AuditFilter::new(RawFilter {
+            before,
+            ..RawFilter::default()
+        })
+        .unwrap();
+        let page = env.audit.search(Role::Admin, &filter).await.unwrap();
+        records.extend(page.records);
+        before = page.next_before;
+        if before.is_none() {
+            break;
+        }
+    }
+    records.reverse();
+    records
+}
+
 fn compact(record: &AuditRecord) -> (String, String, Option<String>, Option<String>) {
     (
         record.action.clone(),
@@ -759,7 +780,7 @@ async fn a_thousand_identical_refusals_make_two_entries() {
 }
 
 #[tokio::test]
-async fn refusals_of_different_accounts_are_not_grouped_and_a_later_one_brings_the_summary() {
+async fn refusals_of_different_accounts_are_not_grouped_and_the_next_window_of_a_group_doubles() {
     let env = env().await;
     for account in ["lucas", "paul", "carl"] {
         for _ in 0..3 {
@@ -771,16 +792,19 @@ async fn refusals_of_different_accounts_are_not_grouped_and_a_later_one_brings_t
     env.clock.advance(time::Duration::seconds(61));
     let (actor, action, target, outcome) = denied_read("lucas", "10.0.0.9");
     env.audit_sink.record(actor, action, target, outcome).await;
-    // Les trois synthèses des groupes finis (2 autres fois chacune), puis le nouveau premier.
+    // Les trois synthèses des groupes finis (2 autres fois chacune). BR-AUDIT-007 (fenêtre qui
+    // s'allonge) : l'événement suivant de « lucas » est compté dans la fenêtre suivante, de deux
+    // minutes, il n'ouvre plus un nouveau premier.
     let records = all(&env).await;
-    assert_eq!(records.len(), 7);
+    assert_eq!(records.len(), 6);
     assert_eq!(records.iter().filter(|r| r.repeat_count == 2).count(), 3);
-    assert_eq!(records[6].repeat_count, 0);
+    assert_eq!(records.iter().filter(|r| r.repeat_count == 0).count(), 3);
 }
 
 #[tokio::test]
-async fn five_thousand_refusals_of_one_account_with_changing_hosts_and_addresses_make_two_entries()
+async fn five_thousand_refusals_of_one_account_with_changing_hosts_and_addresses_make_nine_entries()
 {
+    // Le cas que le plafond par famille couvre (Q14, point 10) : l'adresse change à chaque requête.
     let env = env().await;
     for n in 0..5000 {
         env.audit_sink
@@ -788,6 +812,33 @@ async fn five_thousand_refusals_of_one_account_with_changing_hosts_and_addresses
                 Actor::new(
                     Some(Username::parse("lucas").unwrap()),
                     Origin::client(Some(&format!("poste-{n}")), &format!("2001:db8::{n:x}")),
+                ),
+                AuditAction::AuditRead,
+                Target::Route("/audit"),
+                Outcome::Denied(Reason::ReadOnly),
+            )
+            .await;
+    }
+    env.clock.advance(time::Duration::seconds(61));
+    env.audit_recorder.flush().await;
+    let records = all(&env).await;
+    assert_eq!(records.len(), 9, "huit adresses, une synthèse");
+    assert_eq!(records[8].repeat_count, 4992, "au compte exact");
+    assert_eq!(records[8].origin_name, None, "ni poste ni adresse");
+}
+
+#[tokio::test]
+async fn five_thousand_refusals_of_one_account_from_one_address_with_changing_hosts_make_two_entries()
+ {
+    let env = env().await;
+    for n in 0..5000 {
+        env.audit_sink
+            .record(
+                Actor::new(
+                    Some(Username::parse("lucas").unwrap()),
+                    // L'adresse est dans la clé de regroupement (Q14, point 9) : seul le nom du poste
+                    // varie ici.
+                    Origin::client(Some(&format!("poste-{n}")), "2001:db8::1"),
                 ),
                 AuditAction::AuditRead,
                 Target::Route("/audit"),
@@ -840,7 +891,7 @@ async fn targeting_three_accounts_in_a_minute_leaves_a_trace_for_each() {
 }
 
 #[tokio::test]
-async fn refused_logins_from_many_addresses_leave_one_entry_and_one_summary() {
+async fn refused_logins_from_many_addresses_leave_eight_entries_and_one_summary() {
     // Le vrai chemin de production : des connexions refusées (identifiant inconnu), chacune d'une
     // adresse différente, donc hors de portée du verrouillage par adresse. Scénario d'origine,
     // assertions d'origine ; seul l'identifiant varie à chaque tentative (400 identifiants, 400
@@ -861,13 +912,40 @@ async fn refused_logins_from_many_addresses_leave_one_entry_and_one_summary() {
     }
     env.clock.advance(time::Duration::seconds(61));
     env.audit_recorder.flush().await;
-    let records = all(&env).await;
-    assert_eq!(records.len(), 2, "un premier refus et une synthèse");
-    assert_eq!(records[0].repeat_count, 0);
-    assert_eq!(records[1].repeat_count, 399);
-    assert_eq!(records[1].account, None);
-    // La synthèse garde l'origine de la dernière occurrence.
-    assert_eq!(records[1].origin_addr.as_deref(), Some("2001:db8::18f"));
+    let records = every(&env).await;
+    // BR-AUDIT-007 (Q14, points 9 et 10) : un groupe par adresse, et au plus 8 adresses par famille
+    // et par fenêtre. 400 adresses : les 8 premières ont leur entrée, les 392 autres une seule
+    // synthèse « 392 tentatives depuis 256 adresses » (adresses comptées jusqu'au plafond de 256).
+    assert_eq!(records.len(), 9, "huit premiers refus et une synthèse");
+    assert!(records.iter().all(|record| record.account.is_none()));
+    let summary = records
+        .iter()
+        .find(|record| record.repeat_count > 0)
+        .unwrap();
+    assert_eq!(summary.repeat_count, 392, "aucune tentative perdue");
+    assert!(
+        summary
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("392 tentatives depuis 256 adresses")),
+        "{:?}",
+        summary.reason
+    );
+    assert_eq!(
+        summary.origin_addr.as_deref(),
+        Some(""),
+        "aucune adresse dans la synthèse"
+    );
+    let firsts: std::collections::HashSet<_> = records
+        .iter()
+        .filter(|record| record.repeat_count == 0)
+        .map(|record| record.origin_addr.clone().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        firsts.len(),
+        8,
+        "le journal dit d'où viennent les huit premiers"
+    );
 }
 
 #[tokio::test]
@@ -902,64 +980,34 @@ async fn refused_logins_from_many_addresses_are_all_counted_in_bounded_entries()
     }
     env.clock.advance(time::Duration::seconds(61));
     env.audit_recorder.flush().await;
-    let mut seen: Vec<_> = all(&env)
-        .await
-        .into_iter()
-        .map(|record| {
-            (
-                record.action,
-                record.reason.unwrap_or_default(),
-                record.repeat_count,
-                record.account,
-                record.origin_addr.unwrap_or_default(),
-            )
-        })
-        .collect();
-    seen.sort();
+    let records = every(&env).await;
+    // BR-AUDIT-007 (Q14, points 9 et 10) : trois familles (refus après vérification, blocage,
+    // refus ralentis), chacune au plus 8 entrées par adresse puis UNE synthèse. Aucune tentative
+    // n'est perdue : 11 refus après vérification (dont l'échec n° 11 qui déclenche l'attente), une
+    // entrée « Blocage temporaire », puis 389 refus dus au ralentissement.
     let slowed = "trop de tentatives, attente de 2 s";
-    let mut expected = vec![
-        // Les dix premiers refus : le premier est écrit, les neuf suivants et l'échec n° 11 sont
-        // comptés dans la synthèse (origine de la dernière occurrence, l'échec n° 11).
+    let total = |action: &str, reason: &str| -> (usize, u32) {
+        let of: Vec<_> = records
+            .iter()
+            .filter(|record| {
+                record.action == action
+                    && record
+                        .reason
+                        .as_deref()
+                        .unwrap_or_default()
+                        .starts_with(reason)
+            })
+            .collect();
+        let firsts = of.iter().filter(|record| record.repeat_count == 0).count();
         (
-            "login".to_owned(),
-            "identifiants incorrects".to_owned(),
-            0,
-            None,
-            "2001:db8::0".to_owned(),
-        ),
-        (
-            "login".to_owned(),
-            "identifiants incorrects (10 autres fois en 1 min)".to_owned(),
-            10,
-            None,
-            "2001:db8::a".to_owned(),
-        ),
-        // L'échec n° 11 déclenche l'attente : une entrée « Blocage temporaire », écrite une fois.
-        (
-            "login.locked".to_owned(),
-            slowed.to_owned(),
-            0,
-            None,
-            "2001:db8::a".to_owned(),
-        ),
-        // Les 389 refus suivants (ralentissement) : le premier écrit, 388 comptés.
-        (
-            "login".to_owned(),
-            slowed.to_owned(),
-            0,
-            None,
-            "2001:db8::b".to_owned(),
-        ),
-        (
-            "login".to_owned(),
-            "trop de tentatives, attente de 2 s (388 autres fois en 1 min)".to_owned(),
-            388,
-            None,
-            "2001:db8::18f".to_owned(),
-        ),
-    ];
-    expected.sort();
-    assert_eq!(seen, expected);
+            of.len(),
+            firsts as u32 + of.iter().map(|record| record.repeat_count).sum::<u32>(),
+        )
+    };
+    assert_eq!(total("login", "identifiants incorrects"), (9, 11));
+    assert_eq!(total("login.locked", slowed), (1, 1));
+    assert_eq!(total("login", slowed), (9, 389));
+    assert_eq!(records.len(), 19, "bornées : 8 + 1, 1, 8 + 1");
 }
 
 #[tokio::test]

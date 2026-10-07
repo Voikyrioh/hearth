@@ -147,7 +147,12 @@ fn failure_of(code: ErrorCode) -> Option<Outcome> {
 
 /// Lit le jeton de `Authorization: Bearer <jeton>`.
 fn bearer(parts: &Parts) -> Option<&str> {
-    let value = parts.headers.get(AUTHORIZATION)?.to_str().ok()?;
+    bearer_of(&parts.headers)
+}
+
+/// Le jeton d'un en-tête `Authorization: Bearer`, lu une seule fois pour tous les appelants.
+fn bearer_of(headers: &axum::http::HeaderMap) -> Option<&str> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
     let (scheme, token) = value.split_once(' ')?;
     scheme
         .eq_ignore_ascii_case("bearer")
@@ -158,13 +163,7 @@ fn bearer(parts: &Parts) -> Option<&str> {
 /// Le jeton de `Authorization: Bearer` d'une requête, pour les routes qui lient une preuve de clé au
 /// jeton de l'appelant (retrait d'un poste).
 pub(super) fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
-    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
-    let (scheme, token) = value.split_once(' ')?;
-    scheme
-        .eq_ignore_ascii_case("bearer")
-        .then_some(token.trim())
-        .filter(|token| !token.is_empty())
-        .map(str::to_owned)
+    bearer_of(headers).map(str::to_owned)
 }
 
 /// Reconnaît l'appelant : une session valable, sinon l'erreur du protocole.

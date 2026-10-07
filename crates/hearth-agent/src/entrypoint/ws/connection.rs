@@ -8,10 +8,11 @@
 use std::sync::Arc;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
+use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, ErrorDetail};
 use hearth_proto::stream::{
-    ClientMessage, ServerMessage, SessionNotice, SignedAuth, Topic, UpdateMessage,
+    ClientMessage, SecurityMessage, ServerMessage, SessionNotice, SignedAuth, Topic, UpdateMessage,
 };
 use serde_json::Value;
 use tokio::sync::broadcast::{self, error::RecvError};
@@ -184,7 +185,13 @@ async fn serve(
         return policy("trop de flux ouverts");
     }
 
-    // 2. Flux : abonnements, échantillons, battement, session.
+    // 2. Flux : abonnements, échantillons, battement, session. L'état de sécurité part toujours, sans
+    //    abonnement (BR-TRUST-008) : on s'abonne AVANT de le lire, aucun changement ne se perd.
+    let mut security = Some(state.security.subscribe());
+    let mut last_security: Option<SecurityView> = None;
+    if !push_security(socket, state, &session, &mut last_security).await {
+        return None;
+    }
     let mut subscriptions = Subscriptions::default();
     let idle = sleep(settings.idle_timeout);
     tokio::pin!(idle);
@@ -255,6 +262,16 @@ async fn serve(
                 Err(RecvError::Lagged(missed)) => tracing::debug!(missed, "abonné lent : événements d'audit perdus"),
                 Err(RecvError::Closed) => subscriptions.audit = None,
             },
+            tick = next(&mut security) => match tick {
+                // Un changement (ou des tics perdus) : la connexion relit SON état et n'envoie que
+                // ce qui a changé pour elle.
+                Ok(()) | Err(RecvError::Lagged(_)) => {
+                    if !push_security(socket, state, &session, &mut last_security).await {
+                        return None;
+                    }
+                }
+                Err(RecvError::Closed) => security = None,
+            },
             progress = next(&mut subscriptions.update) => match progress {
                 Ok(progress) => {
                     if !send(socket, &settings, &UpdateMessage::Update(progress)).await {
@@ -279,7 +296,15 @@ async fn serve(
                         }
                         // Le rôle a pu changer pendant le flux (`change_role` ne ferme pas les
                         // sessions) : le sujet `audit` se perd avec le droit de le lire.
+                        let role_changed = session.account.role != current.account.role;
                         session = current;
+                        // Le rôle décide de ce que l'alerte montre (le nombre des autres comptes) :
+                        // un rôle changé pendant le flux se relit tout de suite.
+                        if role_changed
+                            && !push_security(socket, state, &session, &mut last_security).await
+                        {
+                            return None;
+                        }
                         if subscriptions.audit.is_some()
                             && AuditService::ensure_reader(session.account.role).is_err()
                         {
@@ -306,6 +331,42 @@ async fn serve(
             }
         }
     }
+}
+
+/// Envoie l'état de sécurité de ce compte s'il a changé depuis le dernier envoi ; `false` si le
+/// client ne reçoit plus. Une lecture impossible est tracée, jamais fatale pour le flux.
+async fn push_security(
+    socket: &mut WebSocket,
+    state: &AppState,
+    session: &CurrentSession,
+    last: &mut Option<SecurityView>,
+) -> bool {
+    let snapshot = match state
+        .security
+        .state_for(&session.account, &session.session_id)
+        .await
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            tracing::warn!(%error, "état de sécurité illisible, pas envoyé");
+            return true;
+        }
+    };
+    let Ok(view) = http::security_view(&snapshot) else {
+        tracing::warn!("état de sécurité non convertible, pas envoyé");
+        return true;
+    };
+    if last.as_ref() == Some(&view) {
+        return true;
+    }
+    let sent = send(
+        socket,
+        &state.stream.settings,
+        &SecurityMessage::Security(view.clone()),
+    )
+    .await;
+    *last = Some(view);
+    sent
 }
 
 /// Se termine quand l'arrêt de l'agent est demandé, y compris s'il l'était déjà à la création du

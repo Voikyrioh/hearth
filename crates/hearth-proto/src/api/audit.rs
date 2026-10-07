@@ -28,9 +28,11 @@ pub mod action {
     pub const DEVICE_ENROLL: &str = "device.enroll";
     /// Un poste de confiance est retiré par son titulaire (HRT-22).
     pub const DEVICE_REMOVE: &str = "device.remove";
+    /// Une attaque probable vise un identifiant : début et fin de l'épisode d'alerte (HRT-24).
+    pub const SECURITY_ALERT: &str = "security.alert";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 14] = [
+    pub const ALL: [&str; 15] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -45,6 +47,7 @@ pub mod action {
         AGENT_UPDATE,
         DEVICE_ENROLL,
         DEVICE_REMOVE,
+        SECURITY_ALERT,
     ];
 }
 

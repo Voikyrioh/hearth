@@ -13,14 +13,14 @@ maj: 2026-10-07
 ## Règle
 La règle « 2 critères sur 3 » (adresse retenue, session ou mot de passe du premier coup, clé de l'appareil) ne s'applique que dans deux états : l'**alerte** (attaque probable signalée sur l'identifiant) et le **mode attaque**. En état **normal** elle ne joue pas : une session valide fonctionne, une connexion par mot de passe se fait comme d'habitude, et aucun poste n'est ralenti ni bloqué au nom de cette règle (Voiky, Q13).
 
-> **Partielle** : HRT-22 n'applique la règle dans **aucun** état. La clé est enregistrée, prouvée et listée, et ne change encore aucune décision d'accès : le comportement de connexion est celui de la branche principale, avec ou sans clé. La règle en alerte (HRT-24) et en mode attaque (HRT-25) viendront avec leurs tickets ; l'état normal, lui, ne sera jamais touché.
+> **Partielle** : HRT-24 applique la règle en **ALERTE** (BR-TRUST-001, 006) et la laisse sans effet en **NORMAL** (`judge_login(Mode::Normal, _)` rend toujours `escapes_slowdown = false, password_counts = true`, et l'identifiant n'est pas ralenti : aucun comportement ne change). Le mode attaque est HRT-25 ; l'état normal, lui, ne sera jamais touché.
 
 ## Application (code)
-- HRT-22 : aucune décision ne lit la clé. `crates/hearth-agent/src/application/sessions.rs::SessionService::login_in_turn` appelle `login_policy::conclude` avec les mêmes entrées qu'avant ; la clé n'intervient qu'**après** un succès, pour inscrire ou dater le poste (`application/trust.rs::TrustService::on_login`).
-- La fonction pure de la règle (`domain/trust/recognition.rs`) est HRT-24.
+- `crates/hearth-agent/src/domain/trust/recognition.rs::{judge_login, mode_of}` (HRT-24) ; `application/sessions.rs::SessionService::verify` appelle `judge_login` puis `login_policy::conclude`. La clé enregistre ou date le poste **après** un succès (`application/trust.rs::TrustService::on_login`, HRT-22).
 
 ## Vérification
-- Tous les tests de connexion existants (`tests/login_lockout.rs`, `tests/login_review.rs`, `tests/sessions_use_cases.rs`, `tests/sessions_https.rs`, `tests/http_api.rs`) tournent, **sans être modifiés**, avec l'identité d'appareil branchée (`tests/support/mod.rs::env`).
+- Tous les tests de connexion existants (`tests/login_lockout.rs`, `tests/sessions_use_cases.rs`, `tests/sessions_https.rs`) tournent sans être modifiés avec l'identité d'appareil et l'alerte branchées (`tests/support/mod.rs::env`) ; les adaptations de HRT-24 (BR-AUDIT-007, BR-CONN-019, BR-TRUST-022) sont listées dans l'ADR-0024.
+- `tests/security_alert.rs::in_the_normal_state_the_rule_changes_nothing_a_stranger_connects_like_a_known_poste` ; `domain::trust::recognition::tests::in_the_normal_state_the_rule_changes_nothing_whatever_the_criteria`.
 - `tests/device_proof.rs::a_right_password_with_a_false_or_missing_proof_connects_as_if_there_were_no_key` ; `tests/device_http.rs::a_wrong_password_answers_the_same_with_a_valid_proof_a_false_one_or_none`.
 
 ## Cas limites
@@ -31,3 +31,4 @@ La règle « 2 critères sur 3 » (adresse retenue, session ou mot de passe du p
 
 ## Historique
 - 2026-10-07 : création (HRT-22, session 2026-10-04-hearth-creation, T32).
+- 2026-10-07 : HRT-24, la règle joue en ALERTE, jamais en NORMAL (T33).

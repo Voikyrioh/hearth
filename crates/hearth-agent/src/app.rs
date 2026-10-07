@@ -25,6 +25,7 @@ use crate::application::ports::{
     IdentityError, IdentityStore, MonotonicClock, PasswordHasher, PublicIdentity, Store,
     StoreError, SystemProbe, TokenGen,
 };
+use crate::application::security::SecurityService;
 use crate::application::sessions::SessionService;
 use crate::application::trust::TrustService;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -43,6 +44,7 @@ use crate::infrastructure::crypto::{HmacChallengeCrypto, RingProofVerifier};
 use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::random::OsTokenGen;
+use crate::infrastructure::security_feed::BroadcastSecurityFeed;
 use crate::infrastructure::sqlite::{
     Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteDeviceRepo,
     SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo,
@@ -151,6 +153,8 @@ pub struct TrustParts {
 pub struct Services {
     pub accounts: Arc<AccountService>,
     pub sessions: Arc<SessionService>,
+    /// État de sécurité et alerte (HRT-24).
+    pub security: Arc<SecurityService>,
     pub operations: Arc<OperationService>,
     pub maintenance: Arc<MaintenanceService>,
     /// Lecture et export du journal d'activité.
@@ -171,6 +175,8 @@ pub struct RunningAgent {
     pub sampler: BackgroundTask,
     /// Écriture des synthèses du journal : arrêtée avec l'agent.
     pub audit_flush: BackgroundTask,
+    /// Fin des épisodes d'alerte (30 minutes sans échec) : arrêtée avec l'agent.
+    pub alert_sweep: BackgroundTask,
     /// Écrit les synthèses du journal en attente à l'arrêt.
     audit_recorder: Arc<AuditRecorder>,
 }
@@ -183,6 +189,7 @@ impl RunningAgent {
             purge: _purge,
             sampler: _sampler,
             audit_flush: _audit_flush,
+            alert_sweep: _alert_sweep,
             audit_recorder,
             ..
         } = self;
@@ -245,6 +252,15 @@ fn assemble(
         adapters.clock.clone(),
         trail.clone(),
     ));
+    let security = Arc::new(SecurityService::new(
+        Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
+        accounts_repo.clone(),
+        Arc::new(SqliteDeviceRepo::new(pool.clone())),
+        store.clone(),
+        adapters.clock.clone(),
+        trail.clone(),
+        Arc::new(BroadcastSecurityFeed::new()),
+    ));
     let sessions = SessionService::new(
         accounts_repo.clone(),
         sessions_repo.clone(),
@@ -257,7 +273,8 @@ fn assemble(
         adapters.tokens.clone(),
         trail.clone(),
         recorder.clone(),
-    );
+    )
+    .with_security(security.clone());
     let sessions = match trust {
         Some((parts, crypto)) => sessions.with_trust(Arc::new(TrustService::new(
             Arc::new(SqliteDeviceRepo::new(pool.clone())),
@@ -283,6 +300,7 @@ fn assemble(
             trail.clone(),
         )),
         sessions: Arc::new(sessions),
+        security,
         operations: Arc::new(OperationService::new(
             Arc::new(SqliteOperationRepo::new(pool.clone())),
             store.clone(),
@@ -392,6 +410,7 @@ pub async fn start_with_all(
         hello: Arc::new(hello),
         accounts: services.accounts,
         sessions: services.sessions,
+        security: services.security.clone(),
         operations: services.operations,
         audit: services.audit,
         sink: services.audit_sink,
@@ -411,12 +430,14 @@ pub async fn start_with_all(
     let sampler = tasks::spawn_sampler(metrics, metering.period);
     let audit_flush =
         tasks::spawn_audit_flush(services.audit_recorder.clone(), tasks::AUDIT_FLUSH_PERIOD);
+    let alert_sweep = tasks::spawn_alert_sweep(services.security, tasks::ALERT_SWEEP_PERIOD);
     Ok(RunningAgent {
         server,
         identity,
         purge,
         sampler,
         audit_flush,
+        alert_sweep,
         audit_recorder: services.audit_recorder,
     })
 }

@@ -11,6 +11,8 @@ liens: [ADR-0004, ADR-0006, BR-CONN-006, BR-CONN-007, BR-CONN-013, BR-CONN-018, 
 
 # ADR-0022 : Verrouillage de connexion résistant au changement d'adresse
 
+> **Points 1 et 4 remplacés par l'[ADR-0024](./ADR-0024-etats-de-securite-et-regle-deux-sur-trois.md)** (HRT-24 : l'« adresse connue » devient un critère de la règle « 2 critères sur 3 »). Le texte ci-dessous est conservé tel qu'il était.
+>
 > **PROVISOIRE.** Le mécanisme « adresse connue » décrit ici (points 1 et 4) **sera remplacé par l'identité d'appareil par clé** (échange de clé à la connexion, pour garantir que c'est bien le client d'origine qui opère ; conception à venir, ticket à part). Il est livré tel quel, avec ses limites connues (voir « Limites connues »). Le ralentissement par identifiant (point 2) ne dépend pas de ce choix.
 
 ## Contexte

@@ -19,6 +19,7 @@ use crate::domain::accounts::{
     Role, Username, UsernameError, check_removal, check_role_change, confirm_self_deletion,
 };
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Outcome, Target};
+use crate::domain::known_address::canonical;
 use crate::domain::secret::Secret;
 use crate::domain::sessions::{
     PasswordChange, SessionId, closure_on_account_deletion, closure_on_password_change,
@@ -291,6 +292,7 @@ impl AccountService {
             &hash,
             PasswordChange::ByAdmin,
             None,
+            None,
             (by, AuditAction::AccountPassword),
         )
         .await
@@ -304,6 +306,23 @@ impl AccountService {
         old_password: Secret,
         new_password: Secret,
         current_session: Option<SessionId>,
+        by: &Actor,
+    ) -> Result<u64, AccountError> {
+        self.change_own_password_keeping(id, old_password, new_password, current_session, None, by)
+            .await
+    }
+
+    /// Comme `change_own_password`, avec le choix du titulaire (Q15, BR-CONN-019) : `keep_address` est
+    /// l'adresse d'où part la requête, **gardée** parmi les adresses retenues du compte si elle l'y
+    /// est ; `None` : toutes les adresses apprises sans clé sont oubliées, celle-ci comprise. Les
+    /// postes à clé et leur adresse restent dans les deux cas (BR-TRUST-023).
+    pub async fn change_own_password_keeping(
+        &self,
+        id: &AccountId,
+        old_password: Secret,
+        new_password: Secret,
+        current_session: Option<SessionId>,
+        keep_address: Option<&str>,
         by: &Actor,
     ) -> Result<u64, AccountError> {
         let account = self.require(id).await?;
@@ -320,6 +339,7 @@ impl AccountService {
             &hash,
             PasswordChange::Own { current_session },
             Some(&account.password_hash),
+            keep_address,
             (by, AuditAction::OwnPassword),
         )
         .await
@@ -414,6 +434,7 @@ impl AccountService {
         hash: &Secret,
         change: PasswordChange,
         verified_hash: Option<&Secret>,
+        keep_address: Option<&str>,
         (by, action): (&Actor, AuditAction),
     ) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
@@ -446,7 +467,14 @@ impl AccountService {
             // Mot de passe changé par son titulaire : ses postes à clé survivent, et l'adresse
             // qui leur est liée avec eux (BR-TRUST-023) ; les adresses apprises sans clé sont
             // oubliées (ADR-0022, BR-CONN-019).
-            tx.known_addresses().forget_without_device(id).await?;
+            match keep_address {
+                Some(keep) => {
+                    tx.known_addresses()
+                        .forget_without_device_except(id, &canonical(keep))
+                        .await?;
+                }
+                None => tx.known_addresses().forget_without_device(id).await?,
+            }
         }
         let mut journal = Pending::default();
         let event = self.succeeded(by, action, Target::Account(current.username.clone()));
