@@ -129,3 +129,25 @@ fn the_windows_credential_manager_stores_reads_and_erases_a_secret() {
     vault.delete(&id, SecretKind::Password).unwrap();
     assert!(vault.get(&id, SecretKind::Password).unwrap().is_none());
 }
+
+#[test]
+fn the_device_key_lives_under_hearth_slash_id_slash_device_key_and_goes_with_its_server() {
+    // HRT-23, BR-TRUST-003 : une entrée de plus au Gestionnaire d'identification, par serveur.
+    let id = ServerId::parse("01J9ZY0G3Q").unwrap();
+    assert_eq!(
+        credential_target(&id, SecretKind::DeviceKey),
+        "Hearth/01J9ZY0G3Q/device-key"
+    );
+    let vault = CredentialVault::new(Memory::default());
+    let other = ServerId::parse("autre").unwrap();
+    let key = Secret::new("MC4CAQAwBQYDK2VwBCIEIA".repeat(5));
+    vault.put(&id, SecretKind::DeviceKey, &key).unwrap();
+    vault
+        .put(&id, SecretKind::Token, &Secret::from("tok"))
+        .unwrap();
+    assert_eq!(vault.get(&id, SecretKind::DeviceKey).unwrap(), Some(key));
+    assert!(vault.get(&other, SecretKind::DeviceKey).unwrap().is_none());
+    vault.delete(&id, SecretKind::DeviceKey).unwrap();
+    assert!(vault.get(&id, SecretKind::DeviceKey).unwrap().is_none());
+    assert!(vault.get(&id, SecretKind::Token).unwrap().is_some());
+}

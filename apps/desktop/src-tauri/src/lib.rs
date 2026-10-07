@@ -9,6 +9,7 @@ pub mod audit;
 pub mod badge;
 mod commands;
 pub mod dashboard;
+pub mod devices;
 pub mod domain;
 pub mod error;
 pub mod link;
@@ -82,6 +83,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             accounts::commands::change_own_password,
             accounts::commands::close_account_sessions,
             accounts::commands::delete_account,
+            devices::commands::list_trusted_devices,
+            devices::commands::remove_trusted_device,
             agent_update::commands::get_agent_update,
             agent_update::commands::update_agent,
             agent_update::commands::ack_agent_result,
@@ -95,6 +98,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<audit::AuditLiveEvent>()
         .typ::<update::dto::UpdateStateDto>()
         .typ::<accounts::dto::AccountOutcome>()
+        .typ::<devices::dto::DeviceRemovalOutcome>()
         .typ::<agent_update::dto::AgentUpdateEvent>()
 }
 

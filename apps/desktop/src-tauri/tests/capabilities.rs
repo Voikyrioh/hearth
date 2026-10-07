@@ -162,6 +162,15 @@ const EXPECTED: &[(&str, &str)] = &[
         "deleteAccount",
         "serverId: string, accountId: string, confirmation: string | null",
     ),
+    // HRT-23 : postes de confiance. `deviceId` est un identifiant rendu par la liste, que la coquille
+    // valide (lettres et chiffres) avant de le placer dans un chemin ; `password` est le mot de passe
+    // actuel, enveloppé dans un `Secret` et jamais gardé. Aucune commande ne crée, n'exporte ni ne
+    // signe : la clé d'appareil n'a pas de commande.
+    ("listTrustedDevices", "serverId: string"),
+    (
+        "removeTrustedDevice",
+        "serverId: string, deviceId: string, password: string",
+    ),
     ("getAgentUpdate", "serverId: string"),
     ("updateAgent", "serverId: string, version: string"),
     ("ackAgentResult", "serverId: string, at: string"),
