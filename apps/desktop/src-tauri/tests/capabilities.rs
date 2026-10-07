@@ -140,15 +140,15 @@ const EXPECTED: &[(&str, &str)] = &[
     ("listAccounts", "serverId: string"),
     (
         "createAccount",
-        "serverId: string, username: string, password: string, role: RoleDto",
+        "serverId: string, username: string, password: string, role: RoleDto, adminPassword: string | null",
     ),
     (
         "changeAccountRole",
-        "serverId: string, accountId: string, role: RoleDto",
+        "serverId: string, accountId: string, role: RoleDto, adminPassword: string | null",
     ),
     (
         "setAccountPassword",
-        "serverId: string, accountId: string, password: string",
+        "serverId: string, accountId: string, password: string, adminPassword: string",
     ),
     (
         "changeOwnPassword",
@@ -156,11 +156,11 @@ const EXPECTED: &[(&str, &str)] = &[
     ),
     (
         "closeAccountSessions",
-        "serverId: string, accountId: string",
+        "serverId: string, accountId: string, adminPassword: string | null",
     ),
     (
         "deleteAccount",
-        "serverId: string, accountId: string, confirmation: string | null",
+        "serverId: string, accountId: string, confirmation: string | null, adminPassword: string | null",
     ),
     // HRT-23 : postes de confiance. `deviceId` est un identifiant rendu par la liste, que la coquille
     // valide (lettres et chiffres) avant de le placer dans un chemin ; `password` est le mot de passe
@@ -182,9 +182,148 @@ const EXPECTED: &[(&str, &str)] = &[
     ("getNotifyOnSecurityAlert", ""),
     ("setNotifyOnSecurityAlert", "enabled: boolean"),
     ("getAgentUpdate", "serverId: string"),
-    ("updateAgent", "serverId: string, version: string"),
+    (
+        "updateAgent",
+        "serverId: string, version: string, adminPassword: string",
+    ),
     ("ackAgentResult", "serverId: string, at: string"),
+    // HRT-30 : la confirmation des actes. `adminPassword` / `password` sont les mots de passe de
+    // confirmation (enveloppés dans un `Secret`, jamais gardés) ; la preuve de la clé, le défi et la
+    // signature n'ont ni paramètre ni commande. `reauthCovers` ne parle pas à l'agent.
+    ("getReauthState", "serverId: string"),
+    (
+        "reauthCovers",
+        "kind: AdminActKindDto, role: \"admin\" | \"readonly\" | null",
+    ),
+    (
+        "setReauthSetting",
+        "serverId: string, mode: ReauthModeDto, password: string",
+    ),
 ];
+
+/// Les commandes qui portent UN ACTE D'ADMINISTRATION, avec le paramètre qui porte le mot de passe de
+/// confirmation (HRT-30, BR-TRUST-036, 037). Liste fermée : une commande de plus qui modifie le serveur
+/// sans figurer ici, ou une commande d'ici sans son mot de passe, fait échouer le test. Le retrait d'un
+/// poste (`removeTrustedDevice`) garde son contrat livré (clé du poste courant) et son mot de passe
+/// `password`.
+const ADMIN_COMMANDS: &[(&str, &str)] = &[
+    ("createAccount", "adminPassword"),
+    ("changeAccountRole", "adminPassword"),
+    ("setAccountPassword", "adminPassword"),
+    ("deleteAccount", "adminPassword"),
+    ("closeAccountSessions", "adminPassword"),
+    ("updateAgent", "adminPassword"),
+    ("setAttackMode", "password"),
+    ("changeOwnPassword", "current"),
+    ("setReauthSetting", "password"),
+    ("removeTrustedDevice", "password"),
+];
+
+/// Les commandes qui ne modifient RIEN chez l'agent : lectures, réglages locaux, abonnements.
+const NOT_AN_ADMIN_ACT: &[&str] = &[
+    "getSettings",
+    "setLaunchAtStartup",
+    "getAppVersion",
+    "openLogsFolder",
+    "logFrontendError",
+    "getNotifyOnLinkChange",
+    "setNotifyOnLinkChange",
+    "setDisplayedServer",
+    "listServers",
+    "listLinkStates",
+    "probeServer",
+    "addAndLogin",
+    "login",
+    "logout",
+    "retryNow",
+    "acceptFingerprint",
+    "updateServer",
+    "removeServer",
+    "forgetCredentials",
+    "listFingerprintAlerts",
+    "listLinkNotices",
+    "ackLinkNotices",
+    "listUnreadOperations",
+    "ackUnreadOperations",
+    "readAudit",
+    "exportAudit",
+    "getUpdateState",
+    "checkForUpdates",
+    "postponeUpdate",
+    "installUpdate",
+    "checkAccountInput",
+    "listAccounts",
+    "listTrustedDevices",
+    "getSecurity",
+    "listSecurityStates",
+    "getNotifyOnSecurityAlert",
+    "setNotifyOnSecurityAlert",
+    "getAgentUpdate",
+    "ackAgentResult",
+    "getReauthState",
+    "reauthCovers",
+];
+
+/// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de
+/// confirmation, de type `string` : jamais une valeur par défaut qui ferait partir l'acte sans lui), soit
+/// une commande qui ne modifie rien chez l'agent. Une commande NOUVELLE n'est ni l'un ni l'autre : le test
+/// échoue, il faut la classer.
+#[test]
+fn every_command_is_a_listed_admin_act_with_its_password_or_a_named_non_act() {
+    for (name, args) in EXPECTED {
+        let admin = ADMIN_COMMANDS.iter().find(|(command, _)| command == name);
+        let free = NOT_AN_ADMIN_ACT.contains(name);
+        assert!(
+            admin.is_some() != free,
+            "la commande {name} doit être classée UNE fois : acte d'administration (ADMIN_COMMANDS) ou \
+             commande qui ne modifie rien chez l'agent (NOT_AN_ADMIN_ACT)"
+        );
+        if let Some((_, password)) = admin {
+            assert!(
+                args.split(", ")
+                    .any(|arg| arg.starts_with(&format!("{password}: string"))),
+                "l'acte {name} doit porter son mot de passe de confirmation `{password}` : {args}"
+            );
+        }
+    }
+    for (name, _) in ADMIN_COMMANDS {
+        assert!(
+            EXPECTED.iter().any(|(command, _)| command == name),
+            "{name} figure dans ADMIN_COMMANDS sans commande"
+        );
+    }
+}
+
+/// Aucun code de la coquille n'envoie un acte d'administration par `LinkManager::execute` (qui le refuse de
+/// toute façon) ni par `execute_raw` (réservé aux tests de la liaison) : la seule porte est `execute_act`.
+#[test]
+fn the_shell_reaches_the_agent_for_an_act_only_through_the_confirmed_door() {
+    fn walk(dir: &std::path::Path, hits: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, hits);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (number, line) in text.lines().enumerate() {
+                    let code = line.split("//").next().unwrap_or("");
+                    if code.contains(".execute(") || code.contains(".execute_raw(") {
+                        hits.push(format!("{}:{}", path.display(), number + 1));
+                    }
+                }
+            }
+        }
+    }
+    let mut hits = Vec::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut hits,
+    );
+    assert!(
+        hits.is_empty(),
+        "un acte d'administration part par `execute_act` seulement : {hits:?}"
+    );
+}
 
 #[test]
 fn the_commands_and_their_typed_parameters_are_exactly_the_reviewed_list() {

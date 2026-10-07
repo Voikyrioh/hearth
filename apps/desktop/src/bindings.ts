@@ -88,21 +88,21 @@ export const commands = {
 	 *  du compte de la session.
 	 */
 	listAccounts: (serverId: string) => typedError<AccountListDto, LinkFailure>(__TAURI_INVOKE("list_accounts", { serverId })),
-	createAccount: (serverId: string, username: string, password: string, role: RoleDto) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("create_account", { serverId, username, password, role })),
-	changeAccountRole: (serverId: string, accountId: string, role: RoleDto) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_account_role", { serverId, accountId, role })),
+	createAccount: (serverId: string, username: string, password: string, role: RoleDto, adminPassword: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("create_account", { serverId, username, password, role, adminPassword })),
+	changeAccountRole: (serverId: string, accountId: string, role: RoleDto, adminPassword: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_account_role", { serverId, accountId, role, adminPassword })),
 	/**
 	 *  Un administrateur définit le mot de passe d'un autre compte (ferme ses sessions). La règle « ne
 	 *  contient pas l'identifiant » est celle de l'agent, qui lit le compte lui-même.
 	 */
-	setAccountPassword: (serverId: string, accountId: string, password: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("set_account_password", { serverId, accountId, password })),
+	setAccountPassword: (serverId: string, accountId: string, password: string, adminPassword: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("set_account_password", { serverId, accountId, password, adminPassword })),
 	/**
 	 *  Le titulaire change son propre mot de passe (ferme ses AUTRES sessions, garde la courante) ;
 	 *  le mot de passe mémorisé au coffre suit (voir `service::change_own_password`).
 	 */
 	changeOwnPassword: (serverId: string, current: string, password: string, keepAddress: boolean) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("change_own_password", { serverId, current, password, keepAddress })),
-	closeAccountSessions: (serverId: string, accountId: string) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("close_account_sessions", { serverId, accountId })),
+	closeAccountSessions: (serverId: string, accountId: string, adminPassword: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("close_account_sessions", { serverId, accountId, adminPassword })),
 	/**  Supprime un compte. `confirmation` : l'identifiant retapé quand on supprime son propre compte. */
-	deleteAccount: (serverId: string, accountId: string, confirmation: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("delete_account", { serverId, accountId, confirmation })),
+	deleteAccount: (serverId: string, accountId: string, confirmation: string | null, adminPassword: string | null) => typedError<AccountOutcome, LinkFailure>(__TAURI_INVOKE("delete_account", { serverId, accountId, confirmation, adminPassword })),
 	/**  Les postes de confiance du compte de la session (lecture, session seule). */
 	listTrustedDevices: (serverId: string) => typedError<TrustedDevicesDto, LinkFailure>(__TAURI_INVOKE("list_trusted_devices", { serverId })),
 	/**
@@ -138,12 +138,27 @@ export const commands = {
 	 *  signature, de la somme et de l'adresse. Une action : clé d'opération, résultat inconnu à la
 	 *  coupure, jamais rejouée.
 	 */
-	updateAgent: (serverId: string, version: string) => typedError<AgentUpdateOutcome, LinkFailure>(__TAURI_INVOKE("update_agent", { serverId, version })),
+	updateAgent: (serverId: string, version: string, adminPassword: string) => typedError<AgentUpdateOutcome, LinkFailure>(__TAURI_INVOKE("update_agent", { serverId, version, adminPassword })),
 	/**
 	 *  Note que le résultat daté `at` de ce serveur a été annoncé : il ne le sera plus, même après un
 	 *  redémarrage du client (BR-UPDATE-015). Ne parle pas à l'agent.
 	 */
 	ackAgentResult: (serverId: string, at: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("ack_agent_result", { serverId, at })),
+	/**
+	 *  Ce que l'agent annonce de la confirmation des actes pour ce serveur, lu à l'instant : l'interface ne
+	 *  devine ni l'élévation ni la capacité. Une lecture, sans suivi.
+	 */
+	getReauthState: (serverId: string) => typedError<ReauthStateDto, LinkFailure>(__TAURI_INVOKE("get_reauth_state", { serverId })),
+	/**
+	 *  L'élévation de 5 minutes couvre-t-elle cet acte ? La règle est celle de l'agent, lue de
+	 *  `hearth-proto` : la fenêtre ne la recopie pas. Ne parle pas à l'agent.
+	 */
+	reauthCovers: (kind: AdminActKindDto, role: "admin" | "readonly" | null) => __TAURI_INVOKE<boolean>("reauth_covers", { kind, role }),
+	/**
+	 *  Change le réglage « Demander mon mot de passe » (à chaque action, ou 5 minutes). `password` est le
+	 *  mot de passe actuel de confirmation, la preuve de la clé de ce PC est faite par la coquille.
+	 */
+	setReauthSetting: (serverId: string, mode: ReauthModeDto, password: string) => typedError<ReauthSettingOutcome, LinkFailure>(__TAURI_INVOKE("set_reauth_setting", { serverId, mode, password })),
 };
 
 /* Types */
@@ -202,8 +217,15 @@ export type AccountRefusal =
 { kind: "invalid_username"; problem: UsernameProblemDto | null } | 
 /**  Mot de passe refusé : toutes les règles non respectées. */
 { kind: "weak_password"; rules: PasswordRuleDto[] } | { kind: "username_taken" } | 
-/**  L'ancien mot de passe est incorrect. */
+/**  Le mot de passe de confirmation (ou l'ancien mot de passe) est incorrect. */
 { kind: "wrong_password" } | 
+/**
+ *  L'élévation de 5 minutes s'est fermée côté agent et le mot de passe n'était pas dans la
+ *  requête : la fenêtre le redemande, sans perdre la saisie de l'acte.
+ */
+{ kind: "password_required" } | 
+/**  Trop d'essais de mot de passe : réessayer plus tard. */
+{ kind: "too_many_attempts"; retry_after_s: number } | 
 /**  Il doit toujours rester au moins un administrateur (BR-ACCT-007). */
 { kind: "last_admin" } | { kind: "not_found" } | 
 /**  L'identifiant retapé pour supprimer son propre compte ne correspond pas (BR-ACCT-012). */
@@ -233,6 +255,9 @@ export type AddServerInput = {
 	password: string,
 	remember: boolean,
 };
+
+/**  Le genre d'un acte d'administration, tel que la fenêtre le connaît (sans cible ni secret). */
+export type AdminActKindDto = "account_create" | "account_role" | "account_password" | "account_delete" | "sessions_revoke" | "agent_update" | "attack_mode_enable" | "attack_mode_disable" | "account_password_own" | "reauth_setting";
 
 /**  Une version plus récente que l'agent est disponible (BR-UPDATE-022). Seulement son numéro. */
 export type AgentAvailableDto = {
@@ -298,7 +323,15 @@ export type AgentUpdateRefusal =
  *  La version retenue n'est pas plus récente que l'agent (rien n'a été envoyé : jamais de
  *  rétrogradation).
  */
-{ kind: "not_newer" } | { kind: "other" };
+{ kind: "not_newer" } | 
+/**  Le mot de passe de confirmation est faux (les compteurs de la connexion ont avancé). */
+{ kind: "wrong_password" } | 
+/**  L'élévation s'est fermée côté agent et le mot de passe n'était pas dans la requête. */
+{ kind: "password_required" } | 
+/**  Trop d'essais de mot de passe : réessayer plus tard. */
+{ kind: "too_many_attempts"; retry_after_s: number } | 
+/**  L'agent est saturé : réessayer dans un instant. */
+{ kind: "busy" } | { kind: "other" };
 
 /**  Le dernier résultat connu (survit au redémarrage de l'agent). */
 export type AgentUpdateResultDto = {
@@ -398,6 +431,11 @@ export type AttackModeRefusal =
 { kind: "too_many_attempts"; retry_after_s: number } | 
 /**  L'agent est saturé : réessayer dans un instant. */
 { kind: "busy" } | 
+/**
+ *  L'élévation de 5 minutes s'est fermée côté agent et le mot de passe n'était pas dans la requête
+ *  (jamais le cas du mode attaque, qui n'est pas couvert : la fenêtre le redemande quand même).
+ */
+{ kind: "password_required" } | 
 /**  L'agent ne connaît pas cette fonction (agent d'avant le mode attaque). */
 { kind: "unsupported" } | { kind: "session_ended" } | { kind: "session_revoked" } | { kind: "other" };
 
@@ -712,6 +750,42 @@ export type ProbeDto = {
 };
 
 export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked";
+
+/**  Le réglage « Demander mon mot de passe » du compte (Q19). */
+export type ReauthModeDto = 
+/**  Une saisie vaut 5 minutes (défaut). */
+"window" | 
+/**  À chaque action. */
+"each";
+
+/**  Issue du changement de réglage. */
+export type ReauthSettingOutcome = { kind: "done"; mode: ReauthModeDto } | { kind: "refused"; refusal: ReauthSettingRefusal } | 
+/**  Le lien est tombé avant la réponse : on ne sait pas, l'action n'est JAMAIS rejouée. */
+{ kind: "unknown"; op_id: string };
+
+/**  Pourquoi l'agent a refusé le réglage. */
+export type ReauthSettingRefusal = { kind: "wrong_password" } | 
+/**  L'élévation s'est fermée entre-temps et le mot de passe n'était pas dans la requête. */
+{ kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | 
+/**  L'agent ne connaît pas le réglage (agent d'avant). */
+{ kind: "unsupported" } | { kind: "session_ended" } | { kind: "session_revoked" } | { kind: "other" };
+
+/**
+ *  L'état de la confirmation des actes pour un serveur : lu de l'agent à l'ouverture d'une fenêtre
+ *  (l'interface ne devine pas l'élévation).
+ */
+export type ReauthStateDto = {
+	/**  L'agent annonce la confirmation des actes. Faux : agent d'avant, aucune demande en plus. */
+	supported: boolean,
+	/**  L'agent l'exige (faux tant qu'il ne fait que l'accepter). */
+	required: boolean,
+	/**  Le réglage du compte. */
+	mode: ReauthModeDto,
+	/**  Secondes restantes de l'élévation de cette session depuis cette adresse ; 0 sinon. */
+	elevatedForS: number,
+	/**  Ce PC a une clé d'appareil au coffre pour ce serveur. Faux : aucun acte ne part d'ici. */
+	hasDeviceKey: boolean,
+};
 
 export type RoleDto = "admin" | "readonly";
 

@@ -476,7 +476,11 @@ impl From<LinkError> for LinkFailure {
             // le mode attaque la rend telle quelle (`NotRecognized`, rien n'est parti).
             LinkError::NoDeviceKey => Self::NotRecognized,
             LinkError::DeviceChallengeUnavailable => Self::DeviceChallengeUnavailable,
-            LinkError::Rejected(_)
+            // Jamais rendus à une commande de la coquille : toute action d'administration passe par
+            // `execute_act` (la coquille ne connaît pas `execute_raw`).
+            LinkError::ActionUnconfirmed
+            | LinkError::UnreadableAct
+            | LinkError::Rejected(_)
             | LinkError::TooManyPending
             | LinkError::TaskRestarted
             | LinkError::Stopped => Self::Internal,

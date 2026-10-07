@@ -9,6 +9,7 @@ export type { LinkBridge } from "./bridge";
 export * from "./devices";
 export * from "./machine";
 export * from "./messages";
+export * from "./reauth";
 export * from "./security";
 export {
   groupFingerprint,
@@ -25,6 +26,7 @@ export { SimulatedAgentUpdates } from "./simulated-agent-update";
 export { SimulatedAudit } from "./simulated-audit";
 export { SimulatedDevices } from "./simulated-devices";
 export { bareMachine, type Pinnable, SimulatedMachine, sampleMachine } from "./simulated-machine";
+export { SimulatedReauth } from "./simulated-reauth";
 export { SimulatedSecurity } from "./simulated-security";
 export { TauriLinkBridge } from "./tauri";
 export * from "./types";

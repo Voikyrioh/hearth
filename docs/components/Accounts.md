@@ -7,3 +7,5 @@ Comptes (HRT-13), réservée aux administrateurs (pas d'entrée de menu pour Lec
 - Props : aucune
 - Événements et slots : aucun
 - Notes : Route `/servers/:id/accounts`. Tests : `pages/Accounts.test.ts`, `shell.test.ts`, `e2e/accounts.spec.ts`.
+
+HRT-30 : changer un rôle, fermer des sessions et supprimer un compte ouvrent chacun `AdminActDialog` (kinds `account_role`, `sessions_revoke`, `account_delete`) ; plus aucune action de ligne ne part sans fenêtre.

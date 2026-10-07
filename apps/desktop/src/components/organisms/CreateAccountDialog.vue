@@ -4,8 +4,8 @@ import { refusalMessage, usernameProblemText } from "@/accounts/messages";
 import HInput from "@/components/atoms/HInput.vue";
 import HPasswordInput from "@/components/atoms/HPasswordInput.vue";
 import HSelect from "@/components/atoms/HSelect.vue";
-import FormDialog from "@/components/molecules/FormDialog.vue";
 import PasswordRules from "@/components/molecules/PasswordRules.vue";
+import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import { useAccountActions } from "@/composables/useAccountActions";
 import { useAccountRules } from "@/composables/useAccountRules";
 import { t } from "@/i18n";
@@ -25,7 +25,6 @@ const role = ref<Role>("readonly");
 const usernameTouched = ref(false);
 const passwordTouched = ref(false);
 const confirmationTouched = ref(false);
-const error = ref<string | undefined>();
 const takenError = ref<string | undefined>();
 
 const rules = useAccountRules(username, password);
@@ -48,7 +47,6 @@ watch(
     usernameTouched.value = false;
     passwordTouched.value = false;
     confirmationTouched.value = false;
-    error.value = undefined;
     takenError.value = undefined;
   },
 );
@@ -82,32 +80,41 @@ const canSubmit = computed(
     confirmation.value === password.value,
 );
 
-async function submit() {
-  error.value = undefined;
-  const report = await actions.create(username.value, password.value, role.value);
-  // Un mot de passe ne reste jamais dans un champ après l'envoi, réussi ou non.
-  password.value = "";
-  confirmation.value = "";
-  if (report.kind === "refused") {
-    if (report.refusal.kind === "username_taken") takenError.value = refusalMessage(report.refusal);
-    else error.value = refusalMessage(report.refusal);
-    return;
+// La confirmation (mot de passe, preuve de la clé) est portée par la fenêtre commune des actes. Le mot de
+// passe du NOUVEAU compte est vidé après chaque envoi, sauf si le délai de 5 minutes s'est fermé entre-temps
+// (rien n'a été fait : la fenêtre redemande le mot de passe de confirmation sans perdre la saisie).
+async function perform(adminPassword: string | null) {
+  takenError.value = undefined;
+  const report = await actions.create(username.value, password.value, role.value, adminPassword);
+  const reasked = report.kind === "refused" && report.refusal.kind === "password_required";
+  if (!reasked) {
+    password.value = "";
+    confirmation.value = "";
   }
-  // Fait, inconnu (déjà dit, jamais rejoué : la liste se relit au retour du lien) ou échec notifié.
-  if (report.kind !== "failed") emit("close");
+  if (report.kind === "refused" && report.refusal.kind === "username_taken") {
+    takenError.value = refusalMessage(report.refusal);
+  }
+  return report;
+}
+
+function refusalText(refusal: { kind: string }): string | undefined {
+  if (refusal.kind === "username_taken") return undefined;
+  return refusalMessage(refusal as never);
 }
 </script>
 
 <template>
-  <FormDialog
+  <AdminActDialog
     :open="open"
+    :server-id="serverId"
+    kind="account_create"
+    :role="role"
     :title="t('accounts.createTitle')"
     :submit-label="t('accounts.create')"
     :can-submit="canSubmit"
-    :busy="actions.busy.value"
-    :error="error"
-    @submit="submit"
-    @cancel="emit('close')"
+    :perform="perform"
+    :refusal-text="refusalText"
+    @close="emit('close')"
   >
     <HInput
       v-model="username"
@@ -131,5 +138,5 @@ async function submit() {
       autocomplete="new-password"
     />
     <HSelect v-model="role" :label="t('accounts.role')" :options="ROLES" />
-  </FormDialog>
+  </AdminActDialog>
 </template>

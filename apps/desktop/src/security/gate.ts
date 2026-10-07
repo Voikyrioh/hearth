@@ -7,7 +7,10 @@ import type { ServerSecurity } from "@/stores/security";
  * seule affichée, dans cet ordre) :
  * - `readonly` : un compte Lecture seule voit l'alerte mais l'agent lui refuse le geste ;
  * - `agent_old` : l'agent de ce serveur est d'avant l'alerte et le mode attaque ;
- * - `not_enrolled` : ce PC n'a pas de clé inscrite ou prouvée (Q14 point 3) : la coquille ne part pas ;
+ * - `not_enrolled` : ce PC n'a pas de clé d'appareil au coffre (Q14 point 3) : la coquille ne part pas.
+ *   L'agent accepte la preuve de TOUTE clé inscrite du compte (Q18, BR-TRUST-041), pas seulement celle qui
+ *   a prouvé la session : l'interface n'exige donc pas une session « prouvée », elle laisse l'agent juger
+ *   une clé qu'il ne connaîtrait pas (échec `not_recognized`, rien n'est modifié) ;
  * - `unreadable` : la lecture de l'état a échoué et ce poste n'est pas connu : on le dit et on propose de réessayer ;
  * - `pending` : l'état n'est pas encore lu (rien à dire, le bouton attend).
  * `null` : le geste est possible. L'interface n'arbitre rien : l'agent reste le juge, ceci n'est que
@@ -27,7 +30,7 @@ export function attackModeBlock(
   // dit, avec « Réessayer » (jamais un bouton muet).
   if (entry.status === "error" && (!state || state.device === "unknown")) return "unreadable";
   if (!state || state.device === "unknown") return "pending";
-  if (state.device !== "proven" || !state.keyAtHand) return "not_enrolled";
+  if (!state.keyAtHand) return "not_enrolled";
   return null;
 }
 

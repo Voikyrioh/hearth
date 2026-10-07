@@ -4,10 +4,11 @@ import { historyMessage, progressSentence, refusalMessage } from "@/agentUpdate/
 import HButton from "@/components/atoms/HButton.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import AgentUpdateSteps from "@/components/molecules/AgentUpdateSteps.vue";
-import ConfirmDialog from "@/components/molecules/ConfirmDialog.vue";
 import LinkStatePill from "@/components/molecules/LinkStatePill.vue";
+import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import { formatAgo } from "@/composables/formatAgo";
 import { useNow } from "@/composables/useNow";
+import type { ActReport } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { t } from "@/i18n";
 import { getLinkBridge, type ServerInfo } from "@/link";
@@ -84,32 +85,43 @@ const history = computed(() => {
   return historyMessage(last, Number.isNaN(at) ? "" : formatAgo(at, now.value));
 });
 
-async function confirm() {
+// Remplacer le binaire qui tourne en root : acte d'administration que le délai de 5 minutes ne couvre
+// jamais, le mot de passe est toujours demandé (fenêtre commune des actes). Un refus de la confirmation
+// reste dans la fenêtre ; les autres refus sont dits en notification et la fenêtre se ferme.
+const CONFIRMATION_REFUSALS = ["wrong_password", "password_required", "too_many_attempts", "busy"];
+
+async function perform(adminPassword: string | null): Promise<ActReport> {
   const version = available.value?.version;
-  if (!version) {
-    confirming.value = false;
-    return;
-  }
-  const result = await action.run(() => getLinkBridge().updateAgent(props.server.id, version), {
-    unknownMessage: "agentUpdate.unknownResult",
-    forbiddenMessage: "agentUpdate.forbidden",
-  });
-  confirming.value = false;
+  if (!version) return { kind: "done" };
+  const result = await action.run(
+    () => getLinkBridge().updateAgent(props.server.id, version, adminPassword ?? ""),
+    {
+      unknownMessage: "agentUpdate.unknownResult",
+      forbiddenMessage: "agentUpdate.forbidden",
+    },
+  );
   if (!result) {
     // Échec (lien coupé, refus de rôle de l'agent) : déjà notifié ; l'état se relit.
     void agents.refresh(props.server.id);
-    return;
+    return { kind: "done" };
   }
   if (result.kind === "accepted") {
     agents.begin(props.server.id, result.version);
-  } else if (result.kind === "refused") {
+    return { kind: "done" };
+  }
+  if (result.kind === "refused") {
+    if (CONFIRMATION_REFUSALS.includes(result.refusal.kind)) {
+      return { kind: "refused", refusal: result.refusal };
+    }
     toasts.push({
       kind: result.refusal.kind === "in_progress" ? "warn" : "error",
       message: refusalMessage(result.refusal),
     });
     void agents.refresh(props.server.id);
+    return { kind: "done" };
   }
   // `unknown` : déjà dit par `useServerAction`, jamais rejoué ; l'état se relit au retour du lien.
+  return { kind: "unknown" };
 }
 </script>
 
@@ -183,15 +195,17 @@ async function confirm() {
       </HButton>
     </div>
 
-    <ConfirmDialog
+    <AdminActDialog
       :open="confirming"
+      :server-id="server.id"
+      kind="agent_update"
       :title="t('agentUpdate.confirmTitle')"
-      :message="t('agentUpdate.confirmMessage')"
-      :confirm-label="t('agentUpdate.confirmYes')"
-      :busy="action.busy.value"
-      @confirm="confirm"
-      @cancel="confirming = false"
-    />
+      :submit-label="t('agentUpdate.confirmYes')"
+      :perform="perform"
+      @close="confirming = false"
+    >
+      <p>{{ t("agentUpdate.confirmMessage") }}</p>
+    </AdminActDialog>
   </section>
 </template>
 

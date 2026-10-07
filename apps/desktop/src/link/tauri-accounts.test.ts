@@ -26,22 +26,36 @@ describe("account commands of the real bridge", () => {
     );
     const bridge = new TauriLinkBridge();
     await bridge.checkAccountInput("marie", "Secret-Pass-12");
-    await bridge.createAccount("s1", "paul", "Secret-Pass-12", "readonly");
-    await bridge.changeAccountRole("s1", "A1", "admin");
-    await bridge.setAccountPassword("s1", "A1", "Secret-Pass-12");
+    await bridge.createAccount("s1", "paul", "Secret-Pass-12", "readonly", "Admin-Pass-12");
+    await bridge.changeAccountRole("s1", "A1", "admin", null);
+    await bridge.setAccountPassword("s1", "A1", "Secret-Pass-12", "Admin-Pass-12");
     await bridge.changeOwnPassword("s1", "Old-Secret-12", "Secret-Pass-12", true);
-    await bridge.closeAccountSessions("s1", "A1");
-    await bridge.deleteAccount("s1", "A1", "marie");
+    await bridge.closeAccountSessions("s1", "A1", null);
+    await bridge.deleteAccount("s1", "A1", "marie", "Admin-Pass-12");
     expect(calls).toEqual([
       { cmd: "check_account_input", args: { username: "marie", password: "Secret-Pass-12" } },
       {
         cmd: "create_account",
-        args: { serverId: "s1", username: "paul", password: "Secret-Pass-12", role: "readonly" },
+        args: {
+          serverId: "s1",
+          username: "paul",
+          password: "Secret-Pass-12",
+          role: "readonly",
+          adminPassword: "Admin-Pass-12",
+        },
       },
-      { cmd: "change_account_role", args: { serverId: "s1", accountId: "A1", role: "admin" } },
+      {
+        cmd: "change_account_role",
+        args: { serverId: "s1", accountId: "A1", role: "admin", adminPassword: null },
+      },
       {
         cmd: "set_account_password",
-        args: { serverId: "s1", accountId: "A1", password: "Secret-Pass-12" },
+        args: {
+          serverId: "s1",
+          accountId: "A1",
+          password: "Secret-Pass-12",
+          adminPassword: "Admin-Pass-12",
+        },
       },
       {
         cmd: "change_own_password",
@@ -52,8 +66,19 @@ describe("account commands of the real bridge", () => {
           keepAddress: true,
         },
       },
-      { cmd: "close_account_sessions", args: { serverId: "s1", accountId: "A1" } },
-      { cmd: "delete_account", args: { serverId: "s1", accountId: "A1", confirmation: "marie" } },
+      {
+        cmd: "close_account_sessions",
+        args: { serverId: "s1", accountId: "A1", adminPassword: null },
+      },
+      {
+        cmd: "delete_account",
+        args: {
+          serverId: "s1",
+          accountId: "A1",
+          confirmation: "marie",
+          adminPassword: "Admin-Pass-12",
+        },
+      },
     ]);
     // Jamais un chemin, une méthode ou un corps libre vers l'agent.
     for (const call of calls) {
@@ -73,9 +98,9 @@ describe("account commands of the real bridge", () => {
     mockIPC(() => {
       throw { kind: "not_connected" };
     });
-    await expect(new TauriLinkBridge().createAccount("s1", "paul", "x", "admin")).rejects.toEqual(
-      new LinkCommandError({ kind: "not_connected" }),
-    );
+    await expect(
+      new TauriLinkBridge().createAccount("s1", "paul", "x", "admin", null),
+    ).rejects.toEqual(new LinkCommandError({ kind: "not_connected" }));
   });
 });
 

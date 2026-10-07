@@ -75,24 +75,26 @@ export function useAccountActions(serverId: () => string) {
   return {
     busy: action.busy,
 
-    create(username: string, password: string, role: Role) {
+    /** `adminPassword` : le mot de passe de confirmation (`null` : délai de 5 minutes ouvert, acte couvert). */
+    create(username: string, password: string, role: Role, adminPassword: string | null) {
       return perform(
-        () => bridge().createAccount(serverId(), username, password, role),
+        () => bridge().createAccount(serverId(), username, password, role, adminPassword),
         (done) => success(t("accounts.created", { username: done.account?.username ?? username })),
       );
     },
 
-    changeRole(account: Account, role: Role) {
+    changeRole(account: Account, role: Role, adminPassword: string | null) {
       return perform(
-        () => bridge().changeAccountRole(serverId(), account.id, role),
+        () => bridge().changeAccountRole(serverId(), account.id, role, adminPassword),
         () =>
           success(t("accounts.roleChanged", { username: account.username, role: roleLabel(role) })),
       );
     },
 
-    setPassword(account: Account, password: string) {
+    /** Le mot de passe d'un autre compte : jamais couvert par le délai, `adminPassword` est toujours demandé. */
+    setPassword(account: Account, password: string, adminPassword: string) {
       return perform(
-        () => bridge().setAccountPassword(serverId(), account.id, password),
+        () => bridge().setAccountPassword(serverId(), account.id, password, adminPassword),
         () => success(t("accounts.passwordChanged")),
       );
     },
@@ -107,17 +109,17 @@ export function useAccountActions(serverId: () => string) {
       );
     },
 
-    closeSessions(account: Account) {
+    closeSessions(account: Account, adminPassword: string | null) {
       return perform(
-        () => bridge().closeAccountSessions(serverId(), account.id),
+        () => bridge().closeAccountSessions(serverId(), account.id, adminPassword),
         () => success(t("accounts.sessionsClosed", { username: account.username })),
       );
     },
 
     /** `confirmation` : l'identifiant retapé quand on supprime son propre compte (BR-ACCT-012). */
-    remove(account: Account, confirmation: string | null = null) {
+    remove(account: Account, confirmation: string | null, adminPassword: string | null) {
       return perform(
-        () => bridge().deleteAccount(serverId(), account.id, confirmation),
+        () => bridge().deleteAccount(serverId(), account.id, confirmation, adminPassword),
         () =>
           success(
             t(confirmation === null ? "accounts.removed" : "accounts.removedOwn", {

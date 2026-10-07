@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { refusalMessage } from "@/accounts/messages";
+import { refusalMessage, roleLabel } from "@/accounts/messages";
 import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import HButton from "@/components/atoms/HButton.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
-import ConfirmDialog from "@/components/molecules/ConfirmDialog.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import AccountTable from "@/components/organisms/AccountTable.vue";
+import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import CreateAccountDialog from "@/components/organisms/CreateAccountDialog.vue";
 import PasswordDialog from "@/components/organisms/PasswordDialog.vue";
 import { useAccountActions } from "@/composables/useAccountActions";
@@ -57,40 +57,42 @@ const creating = ref(false);
 const passwordFor = ref<Account | null>(null);
 const ownPassword = ref(false);
 const removing = ref<Account | null>(null);
-const removeError = ref<string | undefined>();
+const roleChange = ref<{ account: Account; role: Role } | null>(null);
+const closing = ref<Account | null>(null);
 
-async function changeRole(account: Account, role: Role) {
-  const report = await actions.changeRole(account, role);
-  actions.toastRefusal(report);
-}
-
-async function closeSessions(account: Account) {
-  const report = await actions.closeSessions(account);
-  actions.toastRefusal(report);
-}
-
-function askRemove(account: Account) {
-  removeError.value = undefined;
-  removing.value = account;
-}
-
-async function confirmRemove() {
-  const account = removing.value;
-  if (!account) return;
-  const report = await actions.remove(account);
-  if (report.kind === "refused") {
-    // Dernier administrateur : on le dit, la fenêtre se ferme, le compte est inchangé. Autre erreur :
-    // dans la fenêtre, annuler ou réessayer.
-    if (report.refusal.kind === "last_admin") {
-      actions.toastRefusal(report);
-      removing.value = null;
-    } else {
-      removeError.value = refusalMessage(report.refusal);
-    }
-    return;
+// Changer un rôle, fermer des sessions et supprimer un compte sont des actes d'administration : chacun
+// passe par la fenêtre commune de confirmation (mot de passe selon ce que l'agent annonce, clé de ce PC
+// vérifiée par la coquille). Les trois restent ouvertes sur un refus, sauf « dernier administrateur » :
+// on le dit, la fenêtre se ferme, le compte est inchangé.
+async function performRole(adminPassword: string | null) {
+  const change = roleChange.value;
+  if (!change) return { kind: "failed" as const };
+  const report = await actions.changeRole(change.account, change.role, adminPassword);
+  if (report.kind === "refused" && report.refusal.kind === "last_admin") {
+    actions.toastRefusal(report);
+    return { kind: "done" as const };
   }
-  if (report.kind !== "failed") removing.value = null;
+  return report;
 }
+
+async function performClose(adminPassword: string | null) {
+  const account = closing.value;
+  if (!account) return { kind: "failed" as const };
+  return actions.closeSessions(account, adminPassword);
+}
+
+async function performRemove(adminPassword: string | null) {
+  const account = removing.value;
+  if (!account) return { kind: "failed" as const };
+  const report = await actions.remove(account, null, adminPassword);
+  if (report.kind === "refused" && report.refusal.kind === "last_admin") {
+    actions.toastRefusal(report);
+    return { kind: "done" as const };
+  }
+  return report;
+}
+
+const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as never);
 </script>
 
 <template>
@@ -127,11 +129,11 @@ async function confirmRemove() {
     :accounts="accounts"
     :me-id="meId"
     :busy="actions.busy.value"
-    @change-role="changeRole"
+    @change-role="(account, role) => (roleChange = { account, role })"
     @change-password="passwordFor = $event"
     @change-own-password="ownPassword = true"
-    @close-sessions="closeSessions"
-    @remove="askRemove"
+    @close-sessions="closing = $event"
+    @remove="removing = $event"
   />
 
   <CreateAccountDialog :open="creating" :server-id="serverId" @close="creating = false" />
@@ -150,17 +152,51 @@ async function confirmRemove() {
     own
     @close="ownPassword = false"
   />
-  <ConfirmDialog
+  <AdminActDialog
+    :open="roleChange !== null"
+    :server-id="serverId"
+    kind="account_role"
+    :role="roleChange?.role ?? null"
+    :title="t('reauth.roleTitle', { username: roleChange?.account.username ?? '' })"
+    :submit-label="t('reauth.roleApply')"
+    :perform="performRole"
+    :refusal-text="refusalText"
+    @close="roleChange = null"
+  >
+    <p data-role-message>
+      {{
+        t("reauth.roleMessage", {
+          username: roleChange?.account.username ?? "",
+          role: roleChange ? roleLabel(roleChange.role) : "",
+        })
+      }}
+    </p>
+  </AdminActDialog>
+  <AdminActDialog
+    :open="closing !== null"
+    :server-id="serverId"
+    kind="sessions_revoke"
+    :title="t('reauth.sessionsTitle', { username: closing?.username ?? '' })"
+    :submit-label="t('reauth.sessionsApply')"
+    :perform="performClose"
+    :refusal-text="refusalText"
+    @close="closing = null"
+  >
+    <p data-sessions-message>{{ t("reauth.sessionsMessage", { username: closing?.username ?? "" }) }}</p>
+  </AdminActDialog>
+  <AdminActDialog
     :open="removing !== null"
+    :server-id="serverId"
+    kind="account_delete"
     :title="t('accounts.removeTitle')"
-    :message="t('accounts.removeMessage', { username: removing?.username ?? '' })"
-    :confirm-label="t('accounts.remove')"
-    :busy="actions.busy.value"
-    :error="removeError"
+    :submit-label="t('accounts.remove')"
     destructive
-    @confirm="confirmRemove"
-    @cancel="removing = null"
-  />
+    :perform="performRemove"
+    :refusal-text="refusalText"
+    @close="removing = null"
+  >
+    <p data-remove-message>{{ t("accounts.removeMessage", { username: removing?.username ?? "" }) }}</p>
+  </AdminActDialog>
 </template>
 
 <style scoped>

@@ -4,6 +4,7 @@ import type { SimulatedLinkBridge } from "@/link";
 import { useAgentUpdatesStore } from "@/stores/agentUpdates";
 import { useToastsStore } from "@/stores/toasts";
 import { startedApp } from "@/test/app";
+import { confirmDialog, dialogButton } from "@/test/confirm";
 import AgentUpdateCard from "./AgentUpdateCard.vue";
 
 // HRT-17, l'écran « État du serveur » : le bouton selon le rôle, la confirmation au texte exact, les
@@ -44,17 +45,10 @@ async function card(serverId: "forge" | "salon" = "forge") {
 
 const sim = (bridge: SimulatedLinkBridge) => bridge.agentUpdates;
 const update = (wrapper: VueWrapper) => wrapper.find("[data-agent-update-button]");
-const confirmButton = () =>
-  [...document.querySelectorAll<HTMLButtonElement>("dialog button")].find(
-    (button) => button.textContent?.trim() === "Oui, mettre à jour",
-  );
-
-/** Confirme la mise à jour dans la fenêtre. */
+/** Confirme la mise à jour dans la fenêtre : le mot de passe est toujours demandé (jamais couvert). */
 async function confirmUpdate(wrapper: VueWrapper) {
   await update(wrapper).trigger("click");
-  await flushPromises();
-  confirmButton()?.click();
-  await flushPromises();
+  await confirmDialog("Oui, mettre à jour");
 }
 
 describe("le bouton « Mettre à jour l'agent »", () => {
@@ -113,8 +107,9 @@ describe("le bouton « Mettre à jour l'agent »", () => {
     const labels = [...(dialog?.querySelectorAll("button") ?? [])].map((b) =>
       b.textContent?.trim(),
     );
-    expect(labels).toEqual(["Annuler", "Oui, mettre à jour"]);
-    [...(dialog?.querySelectorAll("button") ?? [])][0]?.click();
+    // Le bouton qui montre/masque le mot de passe n'a pas de texte : seuls les deux boutons de la fenêtre.
+    expect(labels.filter(Boolean)).toEqual(["Annuler", "Oui, mettre à jour"]);
+    dialogButton("Annuler")?.click();
     await flushPromises();
     expect(document.querySelector("dialog")).toBeNull();
     expect(bridge.calls.filter((call) => /^agent-update \d/.test(call)).length).toBe(0);
@@ -355,7 +350,7 @@ describe("les refus", () => {
     // Appel forcé par le code (le bouton est inerte) : l'agent est l'arbitre.
     const store = useAgentUpdatesStore();
     await store.refresh("salon");
-    await expect(bridge.updateAgent("salon", "0.2.0")).rejects.toMatchObject({
+    await expect(bridge.updateAgent("salon", "0.2.0", "Correct-Horse-9")).rejects.toMatchObject({
       failure: { kind: "forbidden" },
     });
     expect(toasts.items).toEqual([]);

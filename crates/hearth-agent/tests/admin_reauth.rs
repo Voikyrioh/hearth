@@ -16,7 +16,7 @@ use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
 use serde_json::{Value, json};
 use support::api::{Api, Reply, state_with};
-use support::device::{DeviceKey, login_token, reauth_member};
+use support::device::{DeviceKey, device_login_body, login_token, reauth_member};
 use support::update::Rig;
 use support::{Env, PASSWORD, by, env};
 use time::Duration;
@@ -1567,7 +1567,13 @@ async fn an_act_is_refused_when_its_challenge_cannot_be_retained_and_the_proof_n
         }
     }
     let (spec, member) = refused_member.expect("la part du compte se remplit avant 70 actes");
-    assert!((55..64).contains(&created), "{created}");
+    // La part du compte est de 64 défis consommés ; sa connexion en a pris un et l'ouverture un autre : les
+    // 62 premiers actes passent, le 63e est refusé. Le compte est exact, pas une borne large (suivi r2).
+    assert_eq!(
+        created,
+        hearth_agent::domain::trust::challenge::MAX_CONSUMED_PER_OWNER - 2,
+        "{created}"
+    );
     let before = b.snapshot().await;
     let again = b.send(&b.marie, &spec, Some(member), PASSWORD).await;
     assert_eq!(reason(&again), "proof_invalid");
@@ -1757,4 +1763,178 @@ async fn in_attack_mode_a_typo_on_put_me_password_without_reauth_costs_the_singl
         right.body
     );
     assert_eq!(b.env.hash_of(&dora.id).await, before);
+}
+
+// ---------------------------------------------------------------------------------------------
+// HRT-30, tranche C : l'agent EXIGE. Les voies de secours d'un compte sans poste inscrit (BR-TRUST-044),
+// chacune avec son test, sur un agent qui exige la confirmation.
+// ---------------------------------------------------------------------------------------------
+
+async fn requiring() -> Bench {
+    let b = bench().await;
+    b.env.sessions.set_reauth_required(true);
+    b
+}
+
+#[tokio::test]
+async fn rescue_first_login_after_the_install_enrolls_the_device_and_the_first_act_passes() {
+    let b = requiring().await;
+    // Base neuve : le compte de l'installation se connecte avec sa clé (inscription dans la transaction),
+    // puis agit tout de suite.
+    let first = actor(&b.env, &b.api, "install", Role::Admin).await;
+    let reply = b.act(&first, &readonly_account("premier"), PASSWORD).await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+}
+
+#[tokio::test]
+async fn rescue_a_lost_key_is_replaced_by_a_login_with_the_password_and_the_act_passes() {
+    let b = requiring().await;
+    let lost = std::sync::Arc::new(DeviceKey::new());
+    let token = login_token(&b.api, &lost, "marie", PASSWORD).await;
+    let new_pc = Actor {
+        name: "marie",
+        key: lost,
+        token,
+    };
+    let reply = b
+        .act(&new_pc, &readonly_account("apres-perte"), PASSWORD)
+        .await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+}
+
+#[tokio::test]
+async fn rescue_an_account_at_eight_devices_is_unlocked_by_the_server_command_then_a_login() {
+    let b = requiring().await;
+    b.env.create("plein", Role::Admin).await;
+    for _ in 0..hearth_proto::api::devices::MAX_DEVICES_PER_ACCOUNT {
+        login_token(&b.api, &DeviceKey::new(), "plein", PASSWORD).await;
+    }
+    // Le neuvième poste : connexion accordée mais NON inscrite ; ses actes sont refusés (aucun repli vers
+    // « la session suffit »).
+    let ninth = std::sync::Arc::new(DeviceKey::new());
+    let body = device_login_body(&b.api, &ninth, "plein", PASSWORD).await;
+    let reply = b.api.post("/sessions").json(&body).send().await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+    assert_eq!(reply.body["device"], "limit", "{:?}", reply.body);
+    let stuck = Actor {
+        name: "plein",
+        key: ninth.clone(),
+        token: reply.body["token"].as_str().unwrap().to_owned(),
+    };
+    let refused = b.act(&stuck, &readonly_account("bloque"), PASSWORD).await;
+    assert_eq!(refused.status, StatusCode::CONFLICT, "{:?}", refused.body);
+    assert_eq!(reason(&refused), "proof_invalid");
+    // `hearth-agent account revoke plein` (oublie les postes et les adresses), puis la connexion inscrit.
+    let account = b.env.service.find("plein").await.unwrap();
+    b.env
+        .service
+        .revoke_sessions(&account.id, by())
+        .await
+        .unwrap();
+    let body = device_login_body(&b.api, &ninth, "plein", PASSWORD).await;
+    let reply = b.api.post("/sessions").json(&body).send().await;
+    assert_eq!(reply.body["device"], "enrolled", "{:?}", reply.body);
+    let freed = Actor {
+        name: "plein",
+        key: ninth,
+        token: reply.body["token"].as_str().unwrap().to_owned(),
+    };
+    let reply = b.act(&freed, &readonly_account("debloque"), PASSWORD).await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+}
+
+#[tokio::test]
+async fn rescue_with_the_attack_mode_on_and_no_key_the_server_command_then_a_login_enrolls() {
+    let b = requiring().await;
+    b.env
+        .attack
+        .change(
+            true,
+            by(),
+            hearth_agent::domain::trust::attack_mode::EndHow::Manual,
+        )
+        .await
+        .unwrap();
+    // Une clé neuve pendant le mode attaque : l'inscription est gelée (rien n'est inscrit).
+    let fresh = std::sync::Arc::new(DeviceKey::new());
+    let body = device_login_body(&b.api, &fresh, "marie", PASSWORD).await;
+    let frozen = b.api.post("/sessions").json(&body).send().await;
+    assert_ne!(frozen.body["device"], "enrolled", "{:?}", frozen.body);
+    // `hearth-agent attack-mode off` (sans réseau), puis la connexion inscrit.
+    b.env
+        .attack
+        .change(
+            false,
+            by(),
+            hearth_agent::domain::trust::attack_mode::EndHow::Cli,
+        )
+        .await
+        .unwrap();
+    let body = device_login_body(&b.api, &fresh, "marie", PASSWORD).await;
+    let reply = b.api.post("/sessions").json(&body).send().await;
+    assert_eq!(reply.body["device"], "enrolled", "{:?}", reply.body);
+    let enrolled = Actor {
+        name: "marie",
+        key: fresh,
+        token: reply.body["token"].as_str().unwrap().to_owned(),
+    };
+    let reply = b
+        .act(&enrolled, &readonly_account("apres-cli"), PASSWORD)
+        .await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+}
+
+#[tokio::test]
+async fn an_old_client_is_refused_on_every_act_with_the_typed_error_and_keeps_its_reads() {
+    let b = requiring().await;
+    for kind in ActKind::ALL {
+        if matches!(kind, ActKind::AttackModeEnable | ActKind::AttackModeDisable) {
+            continue; // forme à plat tolérée : voir `when_the_agent_requires_...`
+        }
+        let spec = b.spec(kind).await;
+        let who = b.actor_for(kind);
+        let (method, path, body) = spec.request(PASSWORD);
+        let reply = b
+            .api
+            .call(method, &path)
+            .token(&who.token)
+            .json(&body)
+            .send()
+            .await;
+        assert_eq!(reply.status, StatusCode::UPGRADE_REQUIRED, "{kind:?}");
+        assert_eq!(reply.code(), "INCOMPATIBLE_VERSION", "{kind:?}");
+        assert_eq!(
+            reply.body["error"]["details"]["upgrade"], "client",
+            "{kind:?}"
+        );
+        // La session reste valable : la lecture passe (ni lien ni lecture perdus).
+        let read = b.api.get("/accounts").token(&b.marie.token).send().await;
+        assert_eq!(read.status, StatusCode::OK, "{kind:?}");
+    }
+}
+
+/// Suivi r2 : sur une route sans corps attendu, ce que l'agent fait d'un corps `[]` ou `null` est écrit ici.
+/// `[]` (une séquence vide) ne porte pas de `reauth` : « absent », donc, quand l'agent exige, un client
+/// trop ancien (`426`). `null` n'est pas un objet : corps illisible (`422`). Dans les deux cas rien n'est
+/// fait ; aucun des deux n'ouvre une voie vers « la session suffit ».
+#[tokio::test]
+async fn an_array_body_is_absent_and_a_null_body_is_unreadable_on_a_route_without_a_body_and_nothing_is_done()
+ {
+    let b = requiring().await;
+    let target = b.victim("v-corps").await;
+    for (raw, status) in [
+        ("[]", StatusCode::UPGRADE_REQUIRED),
+        ("null", StatusCode::UNPROCESSABLE_ENTITY),
+    ] {
+        let before = b.snapshot().await;
+        let reply = b
+            .api
+            .delete(&format!("/accounts/{target}/sessions"))
+            .token(&b.marie.token)
+            .raw_body(raw)
+            .send()
+            .await;
+        assert_eq!(reply.status, status, "{raw} : {:?}", reply.body);
+        assert_eq!(b.snapshot().await, before, "{raw}");
+    }
 }

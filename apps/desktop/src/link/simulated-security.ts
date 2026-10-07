@@ -158,7 +158,8 @@ export class SimulatedSecurity {
     // Sans clé au coffre : la coquille ne part pas (`NotRecognized`), même pour un Lecture seule.
     if (!book.keyAtHand) throw new LinkCommandError({ kind: "not_recognized" });
     if (role !== "admin") throw new LinkCommandError({ kind: "forbidden" });
-    if (book.device !== "proven") throw new LinkCommandError({ kind: "not_recognized" });
+    // Q18 : l'agent accepte la preuve de TOUTE clé inscrite du compte, pas seulement celle qui a prouvé
+    // la session. La clé au coffre est donc la seule condition (`keyAtHand`, déjà vérifiée).
     if (password !== own) return { kind: "refused", refusal: { kind: "wrong_password" } };
     const wasOn = book.attackMode.state !== "off";
     if (active && !wasOn) {

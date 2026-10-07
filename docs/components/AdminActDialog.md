@@ -1,0 +1,9 @@
+# AdminActDialog
+
+Organisme · `apps/desktop/src/components/organisms/AdminActDialog.vue`
+
+LA fenêtre de confirmation de tous les actes d'administration (HRT-30, BR-TRUST-036, 052) : créer un compte, changer un rôle, le mot de passe d'un autre ou le sien, supprimer un compte (le sien compris), fermer des sessions, mettre à jour l'agent, mode attaque, réglage « Demander mon mot de passe ». Habille `FormDialog` ; le slot reçoit les champs de l'acte, la fenêtre ajoute « Ton mot de passe » (`ReauthField`) selon ce que l'agent annonce, lu à chaque ouverture (`useReauth`) : agent d'avant = aucun champ ; PC sans clé = explication et bouton « Me reconnecter pour enregistrer ce poste » ; délai de 5 minutes ouvert et acte couvert = pas de champ, temps restant écrit ; sinon le champ. Le champ est vidé après chaque envoi et à chaque ouverture. Mot de passe faux ou attente : sous le champ, fenêtre ouverte. `password_required` : la fenêtre redemande le mot de passe sans perdre la saisie de l'acte. Fait ou résultat inconnu : elle se ferme (jamais rejoué).
+
+- Props : `open`, `serverId`, `kind` (genre d'acte, décide de la couverture par le délai), `role?` (rôle visé), `title`, `submitLabel`, `canSubmit?`, `destructive?`, `passwordLabel?` (nom propre du mot de passe de confirmation, « Ancien mot de passe »), `perform(adminPassword | null)` (renvoie un `ActReport`), `refusalText?` (texte des refus qui ne sont pas ceux de la confirmation)
+- Événements et slots : `close` ; slot par défaut (champs de l'acte)
+- Notes : le mot de passe ne traverse que `perform`, jamais un store. Tests : `components/organisms/adminAct.test.ts`, `e2e/reauth.spec.ts`.

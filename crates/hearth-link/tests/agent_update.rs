@@ -15,6 +15,7 @@ use std::time::Duration;
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::update::UpdateRecord;
 use hearth_link::domain::event::Event;
+use hearth_link::domain::secret::Secret;
 use hearth_link::domain::state::{LinkState, Thresholds};
 use hearth_link::ports::Transport as _;
 use hearth_link::ports::transport::{ApiRequest, Method, Pin, Target};
@@ -39,7 +40,7 @@ fn options(rig: &Arc<Rig>, role: Role, config: LinkConfig) -> Options {
 async fn start_update(world: &World, rig: &Rig) -> ActionOutcome {
     world
         .manager
-        .execute(
+        .execute_raw(
             &world.id,
             ActionRequest {
                 method: Method::Post,
@@ -49,6 +50,53 @@ async fn start_update(world: &World, rig: &Rig) -> ActionOutcome {
         )
         .await
         .unwrap()
+}
+
+/// La mise à jour est un ACTE d'administration que l'élévation ne couvre jamais : le mot de passe ET la
+/// preuve de la clé de ce poste, liée à la version visée et à la somme du binaire (HRT-30, BR-TRUST-036).
+#[tokio::test]
+async fn the_update_is_a_confirmed_act_signed_with_its_version_and_sum() {
+    let rig = Arc::new(rig(true, false));
+    let world = World::connected(Options {
+        device_key: true,
+        reauth_required: true,
+        ..options(&rig, Role::Admin, support::fast_config())
+    })
+    .await;
+    let action = |rig: &Rig| ActionRequest {
+        method: Method::Post,
+        path: "/agent/update".into(),
+        body: Some(rig.request("0.2.0", BINARY)),
+    };
+    // Jamais couvert par l'élévation : sans mot de passe, rien ne part.
+    let writes = world.spy.write_count();
+    assert_eq!(
+        world
+            .manager
+            .execute_act(&world.id, action(&rig), None)
+            .await
+            .unwrap_err(),
+        LinkError::InvalidInput(hearth_link::InputField::Credentials)
+    );
+    assert_eq!(world.spy.write_count(), writes);
+    // Une demande brute, sans confirmation, ne part pas non plus.
+    assert_eq!(
+        world
+            .manager
+            .execute(&world.id, action(&rig))
+            .await
+            .unwrap_err(),
+        LinkError::ActionUnconfirmed
+    );
+    let outcome = world
+        .manager
+        .execute_act(&world.id, action(&rig), Some(&Secret::from(PASSWORD)))
+        .await
+        .unwrap();
+    let ActionOutcome::Completed { status, .. } = outcome else {
+        panic!("réponse attendue, reçu {outcome:?}");
+    };
+    assert_eq!(status, 202);
 }
 
 fn update_event(event: &Event, step: UpdateStep) -> bool {

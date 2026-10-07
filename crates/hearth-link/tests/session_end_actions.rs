@@ -24,7 +24,7 @@ async fn world() -> (World, String) {
 }
 
 async fn run(world: &World, request: ActionRequest) -> ActionOutcome {
-    tokio::time::timeout(WAIT, world.manager.execute(&world.id, request))
+    tokio::time::timeout(WAIT, world.manager.execute_raw(&world.id, request))
         .await
         .expect("l'action rend la main")
         .unwrap()

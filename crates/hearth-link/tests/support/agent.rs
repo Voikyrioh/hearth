@@ -203,6 +203,10 @@ pub struct TestAgent {
     pub services: Services,
     running: Option<RunningAgent>,
     updating: Option<UpdatingFactory>,
+    /// L'agent EXIGE la confirmation des actes (`set_reauth_required`). Faux par défaut : les scénarios de
+    /// résilience envoient des routes d'acte brutes (`execute_raw`) ; les scénarios de confirmation le
+    /// règlent à vrai (`require_confirmation`), comme le service en production (HRT-30).
+    reauth_required: bool,
     pub addr: SocketAddr,
 }
 
@@ -242,6 +246,7 @@ impl TestAgent {
             services,
             running: None,
             updating,
+            reauth_required: false,
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         };
         agent.start().await;
@@ -263,7 +268,16 @@ impl TestAgent {
             .await
             .unwrap();
         self.addr = running.server.local_addr();
+        running.sessions.set_reauth_required(self.reauth_required);
         self.running = Some(running);
+    }
+
+    /// Règle si l'agent exige la confirmation des actes d'administration (conservé au redémarrage).
+    pub fn require_confirmation(&mut self, required: bool) {
+        self.reauth_required = required;
+        if let Some(running) = &self.running {
+            running.sessions.set_reauth_required(required);
+        }
     }
 
     /// Arrêt de l'agent (le dossier de données, donc l'identité, est conservé).

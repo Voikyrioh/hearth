@@ -26,3 +26,4 @@ maj: 2026-10-07
 
 ## Historique
 - 2026-10-07 : création (HRT-28).
+- 2026-10-07 (HRT-30, tranche C) : **l'agent exige.** `app::start_full` règle `set_reauth_required(true)` ; `GET /security` annonce `required: true`. Un client ancien garde sa connexion, son flux et ses lectures et reçoit `426` (`LinkFailure::IncompatibleClient`, « client trop ancien ») sur ses actions, jamais une erreur générique ; le refus est consigné sans secret. Le mode attaque garde la tolérance de la forme à plat `0x03` (clients livrés) ; elle tombe à la première hausse de `API_MIN_SUPPORTED` (ADR-0033). **Ordre de déploiement : le client d'abord, l'agent ensuite.** Les bancs de test qui construisent le service à la main (`SessionService::new`) n'exigent pas ; `set_reauth_required` les règle.

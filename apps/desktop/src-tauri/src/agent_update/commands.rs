@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use hearth_link::domain::secret::Secret;
 use tauri::{AppHandle, Manager as _, State};
 
 use super::dto::{AgentUpdateOutcome, AgentUpdateRefusal, AgentUpdateView};
@@ -91,6 +92,7 @@ pub async fn update_agent(
     link: Runtime_<'_>,
     server_id: String,
     version: String,
+    admin_password: String,
 ) -> Result<AgentUpdateOutcome, LinkFailure> {
     let id = service::server(&server_id)?;
     let Some(updates) = app.try_state::<SharedUpdates>() else {
@@ -100,5 +102,12 @@ pub async fn update_agent(
         });
     };
     let target = updates.agent_target();
-    service::start(link.manager(), &id, target.as_ref(), &version).await
+    service::start(
+        link.manager(),
+        &id,
+        target.as_ref(),
+        &version,
+        &Secret::new(admin_password),
+    )
+    .await
 }

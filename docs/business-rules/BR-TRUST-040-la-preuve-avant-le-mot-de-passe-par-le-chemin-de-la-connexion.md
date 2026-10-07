@@ -28,3 +28,5 @@ maj: 2026-10-07
 
 ## Historique
 - 2026-10-07 : création (HRT-28, tranche A).
+- 2026-10-07 (HRT-30) : retrait de la mention « conforme à Q11 », qui n'était pas une décision de Voiky. **Conséquence écrite** : en mode attaque, `PUT /me/password` SANS `reauth` traite le titulaire connecté (adresse retenue ET session valide) comme un poste à UN seul critère : une faute de frappe de l'ancien mot de passe consomme l'essai unique de l'adresse. Le client mis à jour envoie `reauth` pour cet acte : la confirmation passe alors par la preuve de clé (qui compte comme un critère), et la conséquence ne concerne plus que les clients d'avant. **Question ouverte posée à Voiky (pas de réponse)** : la session valide compte-t-elle comme second critère pour cette confirmation ? Le comportement livré par l'agent est gardé.
+- 2026-10-07 (HRT-30) : après un acte confirmé qui échoue, le client reprend un défi neuf ET une clé d'opération neuve (BR-TRUST-051) ; un défi consommé avant l'effet ne ressert jamais.

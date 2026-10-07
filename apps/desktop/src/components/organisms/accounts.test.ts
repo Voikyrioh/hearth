@@ -4,6 +4,7 @@ import PasswordRules from "@/components/molecules/PasswordRules.vue";
 import type { Account } from "@/link";
 import { useToastsStore } from "@/stores/toasts";
 import { startedApp } from "@/test/app";
+import { confirmDialog, OWN, reauthField } from "@/test/confirm";
 import AccountTable from "./AccountTable.vue";
 import CreateAccountDialog from "./CreateAccountDialog.vue";
 import OwnAccountCard from "./OwnAccountCard.vue";
@@ -28,8 +29,6 @@ const button = (text: string) =>
     (b) => b.textContent?.trim() === text,
   );
 const text = () => document.body.textContent ?? "";
-/** Le bouton d'envoi de la fenêtre ouverte (pas un bouton de la page qui porte le même libellé). */
-const submit = () => document.querySelector<HTMLButtonElement>("dialog button[type=submit]");
 
 function account(partial: Partial<Account> & { username: string }): Account {
   return {
@@ -245,6 +244,7 @@ describe("CreateAccountDialog", () => {
     expect(text()).toContain("Les deux mots de passe ne correspondent pas");
     expect(button("Créer")?.getAttribute("aria-disabled")).toBe("true");
     typeInto(field("Confirme le mot de passe"), GOOD);
+    typeInto(reauthField(), OWN);
     await flushPromises();
     expect(text()).not.toContain("Les deux mots de passe ne correspondent pas");
     expect(button("Créer")?.getAttribute("aria-disabled")).toBeNull();
@@ -257,8 +257,7 @@ describe("CreateAccountDialog", () => {
     typeInto(field("Mot de passe"), GOOD);
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
-    button("Créer")?.click();
-    await flushPromises();
+    await confirmDialog("Créer");
     expect(wrapper.emitted("close")).toHaveLength(1);
     expect(useToastsStore().items.map((t) => t.message)).toContain("Compte sophie créé");
     expect(bridge.calls).toContain("account create sophie");
@@ -273,8 +272,7 @@ describe("CreateAccountDialog", () => {
     typeInto(field("Mot de passe"), GOOD);
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
-    button("Créer")?.click();
-    await flushPromises();
+    await confirmDialog("Créer");
     expect(text()).toContain("Cet identifiant est déjà utilisé");
     expect(wrapper.emitted("close")).toBeUndefined();
     expect(field("ton-identifiant")?.value).toBe("paul");
@@ -291,8 +289,7 @@ describe("CreateAccountDialog", () => {
     await flushPromises();
     bridge.setState("forge", "offline");
     await flushPromises();
-    button("Créer")?.click();
-    await flushPromises();
+    await confirmDialog("Créer");
     expect(bridge.calls.some((c) => c.startsWith("account create"))).toBe(false);
     wrapper.unmount();
   });
@@ -313,18 +310,18 @@ describe("PasswordDialog", () => {
   it("asks for the old password then the new one when changing one's own password", async () => {
     const { wrapper, bridge } = await open({ username: "marie" });
     expect(text()).toContain("Changer mon mot de passe");
-    typeInto(field("Ancien mot de passe"), "Mauvais-Mot-De-Passe-1");
+    typeInto(reauthField(), "Mauvais-Mot-De-Passe-1");
     typeInto(field("Nouveau mot de passe"), GOOD);
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
     button("Changer le mot de passe")?.click();
     await flushPromises();
-    expect(text()).toContain("L'ancien mot de passe est incorrect");
+    expect(text()).toContain("Mot de passe incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
     // Les trois champs sont vidés, réussi ou non.
-    expect(field("Ancien mot de passe")?.value).toBe("");
+    expect(reauthField()?.value).toBe("");
     expect(field("Nouveau mot de passe")?.value).toBe("");
-    typeInto(field("Ancien mot de passe"), "Correct-Horse-9");
+    typeInto(reauthField(), "Correct-Horse-9");
     typeInto(field("Nouveau mot de passe"), GOOD);
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
@@ -398,13 +395,11 @@ describe("OwnAccountCard (réglages, tous les rôles)", () => {
     expect(text()).toContain("Retape ton identifiant pour confirmer");
     typeInto(field("ton-identifiant"), "paul");
     await flushPromises();
-    submit()?.click();
-    await flushPromises();
+    await confirmDialog("Supprimer mon compte");
     expect(text()).toContain("L'identifiant ne correspond pas, réessaye");
     typeInto(field("ton-identifiant"), "marie");
     await flushPromises();
-    submit()?.click();
-    await flushPromises();
+    await confirmDialog("Supprimer mon compte");
     expect(text()).toContain(
       "Tu es le dernier administrateur, ce compte ne peut pas être supprimé",
     );

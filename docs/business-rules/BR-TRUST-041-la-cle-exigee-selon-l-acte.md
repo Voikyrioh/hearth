@@ -30,3 +30,4 @@ La clé d'un autre poste inscrit du même compte est acceptée pour le mode atta
 
 ## Historique
 - 2026-10-07 : création (HRT-28, tranche A ; décision Q18).
+- 2026-10-07 (HRT-30) : l'interface (`security/gate.ts`) n'exige plus une session « prouvée » pour le mode attaque : l'agent accepte la preuve de TOUTE clé inscrite du compte (Q18), seule la clé au coffre de ce PC est vérifiée côté client ; une clé que l'agent ne connaîtrait pas est refusée par lui (`not_recognized`, rien n'est modifié).

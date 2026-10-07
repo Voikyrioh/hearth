@@ -111,8 +111,15 @@ pub enum AccountRefusal {
         rules: Vec<PasswordRuleDto>,
     },
     UsernameTaken,
-    /// L'ancien mot de passe est incorrect.
+    /// Le mot de passe de confirmation (ou l'ancien mot de passe) est incorrect.
     WrongPassword,
+    /// L'élévation de 5 minutes s'est fermée côté agent et le mot de passe n'était pas dans la
+    /// requête : la fenêtre le redemande, sans perdre la saisie de l'acte.
+    PasswordRequired,
+    /// Trop d'essais de mot de passe : réessayer plus tard.
+    TooManyAttempts {
+        retry_after_s: u32,
+    },
     /// Il doit toujours rester au moins un administrateur (BR-ACCT-007).
     LastAdmin,
     NotFound,

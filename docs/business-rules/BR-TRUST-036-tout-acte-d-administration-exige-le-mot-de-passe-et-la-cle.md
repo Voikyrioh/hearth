@@ -28,3 +28,4 @@ maj: 2026-10-07
 
 ## Historique
 - 2026-10-07 : création (HRT-28, tranche A).
+- 2026-10-07 : le client confirme (HRT-30, tranche B) : `hearth-link` `execute_act` ajoute `reauth` (BR-TRUST-049, 050, 051), toutes les fenêtres d'acte passent par `AdminActDialog` (BR-TRUST-052). Le mode attaque passe au contrat commun (`0x05`) face à un agent qui annonce `admin_reauth` ; la forme à plat (`0x03`) reste pour un agent d'avant et est toujours acceptée par l'agent pendant la transition (ADR-0033).

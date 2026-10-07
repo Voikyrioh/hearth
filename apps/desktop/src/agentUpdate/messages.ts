@@ -104,7 +104,7 @@ export function historyMessage(result: ResultLike, when: string): string {
   return t(key, { when });
 }
 
-const REFUSALS: Record<AgentUpdateRefusal["kind"], MessageKey> = {
+const REFUSALS: Record<Exclude<AgentUpdateRefusal["kind"], "too_many_attempts">, MessageKey> = {
   managed_install: "agentUpdate.managed",
   in_progress: "agentUpdate.refusedInProgress",
   bad_signature: "agentUpdate.refusedBadSignature",
@@ -112,10 +112,16 @@ const REFUSALS: Record<AgentUpdateRefusal["kind"], MessageKey> = {
   no_target: "agentUpdate.refusedNoTarget",
   target_changed: "agentUpdate.refusedTargetChanged",
   not_newer: "agentUpdate.refusedNotNewer",
+  wrong_password: "reauth.wrongPassword",
+  password_required: "reauth.elapsed",
+  busy: "reauth.busy",
   other: "agentUpdate.refusedOther",
 };
 
 /** Le message d'un refus de la demande (jamais le texte de l'agent). */
 export function refusalMessage(refusal: AgentUpdateRefusal): string {
+  if (refusal.kind === "too_many_attempts") {
+    return t("reauth.waiting", { n: refusal.retry_after_s });
+  }
   return t(REFUSALS[refusal.kind]);
 }

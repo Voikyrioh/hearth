@@ -191,6 +191,27 @@ impl AdminAct<'_> {
     }
 }
 
+/// L'élévation du mot de passe peut-elle remplacer la saisie pour cet acte ? **Source unique** de la
+/// règle (BR-TRUST-043), lue par l'agent (qui décide) et par la liaison cliente (qui sait s'il faut
+/// demander le mot de passe). **Jamais** pour : changer un mot de passe (le sien ou celui d'un autre),
+/// activer ou désactiver le mode attaque, lancer la mise à jour de l'agent, changer le réglage, donner
+/// le rôle Administrateur (changement de rôle ou création). Elle couvre ce qui retire ou limite un
+/// accès : créer un compte en lecture seule, passer un compte en lecture seule, supprimer un compte,
+/// fermer les sessions d'un compte. Correspondance exhaustive : un acte de plus oblige à choisir.
+pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
+    match act {
+        AdminAct::AccountCreate { role, .. } | AdminAct::AccountRole { role, .. } => {
+            *role != RoleName::Admin
+        }
+        AdminAct::AccountDelete { .. } | AdminAct::SessionsRevoke { .. } => true,
+        AdminAct::AccountPassword { .. }
+        | AdminAct::AgentUpdate { .. }
+        | AdminAct::AttackMode { .. }
+        | AdminAct::AccountPasswordOwn
+        | AdminAct::ReauthSetting { .. } => false,
+    }
+}
+
 /// Une ligne de la table des actes : méthode, motif de la route (celui de `ENDPOINTS`), les actes que la
 /// route porte (deux pour le mode attaque, aucun pour le retrait d'un poste), son contrat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

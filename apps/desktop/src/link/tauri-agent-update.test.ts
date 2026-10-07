@@ -40,9 +40,14 @@ describe("les commandes de mise à jour de l'agent du pont réel", () => {
 
   it("demande la mise à jour avec le serveur et le NUMÉRO de version, jamais une adresse, une signature ni une somme", async () => {
     const calls = ipc(() => ({ kind: "accepted", version: "0.2.0" }));
-    const outcome = await new TauriLinkBridge().updateAgent("s1", "0.2.0");
+    const outcome = await new TauriLinkBridge().updateAgent("s1", "0.2.0", "Admin-Pass-12");
     expect(outcome).toEqual({ kind: "accepted", version: "0.2.0" });
-    expect(calls).toEqual([{ cmd: "update_agent", args: { serverId: "s1", version: "0.2.0" } }]);
+    expect(calls).toEqual([
+      {
+        cmd: "update_agent",
+        args: { serverId: "s1", version: "0.2.0", adminPassword: "Admin-Pass-12" },
+      },
+    ]);
     for (const free of ["path", "method", "body", "url", "signature", "sha256", "headers"]) {
       expect(Object.keys(calls[0]?.args ?? {})).not.toContain(free);
     }
@@ -52,7 +57,7 @@ describe("les commandes de mise à jour de l'agent du pont réel", () => {
     mockIPC(() => {
       throw { kind: "forbidden" };
     });
-    await expect(new TauriLinkBridge().updateAgent("s1", "0.2.0")).rejects.toEqual(
+    await expect(new TauriLinkBridge().updateAgent("s1", "0.2.0", "x")).rejects.toEqual(
       new LinkCommandError({ kind: "forbidden" }),
     );
   });

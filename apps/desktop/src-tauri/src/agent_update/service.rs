@@ -5,6 +5,7 @@
 //! client sait avant d'envoyer : rien n'est proposé ni envoyé sans cible, ni qui rétrograde, ni qui
 //! n'est plus celle que l'utilisateur a vue.
 
+use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::{ActionOutcome, LinkManager};
 use time::OffsetDateTime;
@@ -75,6 +76,7 @@ pub async fn start(
     id: &ServerId,
     target: Option<&AgentTarget>,
     version: &str,
+    admin_password: &Secret,
 ) -> Result<AgentUpdateOutcome, LinkFailure> {
     let Some(target) = target else {
         return Ok(refused(AgentUpdateRefusal::NoTarget));
@@ -87,7 +89,7 @@ pub async fn start(
     if !is_newer(&status.current, target) {
         return Ok(refused(AgentUpdateRefusal::NotNewer));
     }
-    send(manager, id, target).await
+    send(manager, id, target, admin_password).await
 }
 
 /// Envoie la demande (la cible est déjà validée) : l'issue est celle de l'agent, ou « inconnue » si
@@ -96,8 +98,14 @@ pub async fn send(
     manager: &LinkManager,
     id: &ServerId,
     target: &AgentTarget,
+    admin_password: &Secret,
 ) -> Result<AgentUpdateOutcome, LinkFailure> {
-    match manager.execute(id, wire::start(target)?).await? {
+    // Remplacer le binaire qui tourne en root : jamais couvert par l'élévation, mot de passe obligatoire,
+    // plus la preuve de la clé de ce poste (faite par la liaison).
+    match manager
+        .execute_act(id, wire::start(target)?, Some(admin_password))
+        .await?
+    {
         ActionOutcome::Completed { status, body, .. } => wire::interpret(status, &body),
         ActionOutcome::ResultUnknown { id } => Ok(AgentUpdateOutcome::Unknown {
             op_id: id.as_str().to_owned(),

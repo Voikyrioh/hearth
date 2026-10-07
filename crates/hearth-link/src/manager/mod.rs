@@ -12,6 +12,7 @@ mod audit;
 mod device;
 mod events;
 mod persist;
+mod reauth;
 mod security;
 mod task;
 mod watchers;
@@ -35,6 +36,7 @@ pub use accounts::AccountsRead;
 pub use audit::AuditExportFile;
 pub use events::EventStream;
 use events::Fanout;
+pub use reauth::ReauthState;
 use task::Command;
 
 use crate::adapters::DeviceKey;
@@ -359,6 +361,15 @@ pub struct ActionRequest {
     pub method: Method,
     pub path: String,
     pub body: Option<Value>,
+}
+
+impl Drop for ActionRequest {
+    /// Le corps d'une action d'administration porte le mot de passe de confirmation : ses textes sont
+    /// effacés à la libération de la requête, quelle que soit la sortie (partie, refusée avant l'envoi,
+    /// abandonnée), pas seulement quand elle est partie (BR-TRUST-040).
+    fn drop(&mut self) {
+        attempt::wipe_body(&mut self.body);
+    }
 }
 
 impl std::fmt::Debug for ActionRequest {
@@ -1114,6 +1125,40 @@ impl LinkManager {
     /// clé d'opération : l'action n'est jamais rejouée, l'issue arrive par `Event::Operation`.
     /// Si l'appelant abandonne l'attente, l'opération reste suivie de la même façon.
     pub async fn execute(
+        &self,
+        id: &ServerId,
+        action: ActionRequest,
+    ) -> Result<ActionOutcome, LinkError> {
+        // La liste fermée des actes d'administration ne passe JAMAIS par ici : `execute_act` est la seule
+        // porte (mot de passe et preuve de la clé de ce poste, BR-TRUST-036, 037). Une route de la liste,
+        // lisible ou non, est refusée sans rien envoyer.
+        match crate::domain::act::classify(
+            action.method.as_str(),
+            &action.path,
+            action.body.as_ref(),
+        ) {
+            Ok(crate::domain::act::Route::Free) => {}
+            Ok(_) | Err(_) => return Err(LinkError::ActionUnconfirmed),
+        }
+        self.execute_unchecked(id, action).await
+    }
+
+    /// Comme `execute`, SANS la garde de la liste fermée. Pour les scénarios de résilience (clé
+    /// d'opération, coupure, rejeu) qui exercent le transport avec une route d'acte brute : jamais
+    /// compilé dans l'application.
+    #[cfg(feature = "test-support")]
+    pub async fn execute_raw(
+        &self,
+        id: &ServerId,
+        action: ActionRequest,
+    ) -> Result<ActionOutcome, LinkError> {
+        self.execute_unchecked(id, action).await
+    }
+
+    /// L'envoi d'une action : clé d'opération, suivi sur disque, jamais rejouée. Appelé par `execute`
+    /// (requêtes libres), par `execute_act` (actes confirmés) et par les deux fonctions qui gardent leur
+    /// contrat livré (retrait d'un poste, mode attaque d'un agent ancien).
+    pub(crate) async fn execute_unchecked(
         &self,
         id: &ServerId,
         action: ActionRequest,
