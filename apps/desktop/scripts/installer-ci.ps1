@@ -9,6 +9,7 @@
 # Partie 2, comportements : installation silencieuse (a), reinstallation silencieuse et mise a jour
 #   passive avec une valeur posee comme le ferait l'application (b), mise a jour passive sans valeur
 #   (c), desinstallation (d).
+param([ValidateSet('mine', 'stock')][string]$Mode = 'mine')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $installer = (Get-ChildItem (Join-Path $root 'target\release\bundle\nsis\*.exe') | Select-Object -First 1).FullName
@@ -20,9 +21,9 @@ $approvedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Startup
 $results = New-Object System.Collections.Generic.List[string]
 
 function Save-Results {
-  $results | Set-Content (Join-Path $evidence 'results.txt')
+  $results | Set-Content (Join-Path $evidence "results-$Mode.txt")
   if ($env:GITHUB_STEP_SUMMARY) {
-    ('### Installateur NSIS sur le runner' + "`n`n" + (($results | ForEach-Object { "- $_" }) -join "`n")) | Add-Content $env:GITHUB_STEP_SUMMARY
+    ("### Installateur NSIS sur le runner ($Mode)" + "`n`n" + (($results | ForEach-Object { "- $_" }) -join "`n")) | Add-Content $env:GITHUB_STEP_SUMMARY
   }
 }
 function Note($text) { Write-Host $text; $results.Add($text) }
@@ -43,6 +44,10 @@ public static class W {
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
+  public delegate bool TopProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(TopProc cb, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  public static List<IntPtr> TopLevels(uint pid) { var l = new List<IntPtr>(); EnumWindows((h, x) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid) l.Add(h); return true; }, IntPtr.Zero); return l; }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int m, IntPtr w, IntPtr l);
   [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr h, int m, IntPtr w, IntPtr l, int flags, int ms, out IntPtr res);
   [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr SendMessageTimeout(IntPtr h, int m, IntPtr w, StringBuilder l, int flags, int ms, out IntPtr res);
@@ -108,6 +113,20 @@ function Controls($main, $path) {
   return $rows
 }
 
+# Pixels sombres dans un rectangle de l'ECRAN : une case dessinee en a (bordure, coche, texte),
+# une zone recouverte ou vide n'en a aucun. IsWindowVisible ne voit pas un recouvrement, les pixels si.
+function Ink($left, $top, $width, $height) {
+  $bmp = New-Object System.Drawing.Bitmap $width, $height
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.CopyFromScreen($left, $top, 0, 0, (New-Object System.Drawing.Size $width, $height))
+  $dark = 0
+  for ($x = 0; $x -lt $width; $x++) { for ($y = 0; $y -lt $height; $y++) {
+    $c = $bmp.GetPixel($x, $y); if (($c.R + $c.G + $c.B) -lt 450) { $dark++ }
+  } }
+  $g.Dispose(); $bmp.Dispose()
+  return $dark
+}
+
 function Welcome-Scenario($name, $setup, $expectedChecked) {
   Clear-Entry; & $setup
   $p = Start-Gui
@@ -127,6 +146,15 @@ function Welcome-Scenario($name, $setup, $expectedChecked) {
       if ($a.left -lt $b.right -and $b.left -lt $a.right -and $a.top -lt $b.bottom -and $b.top -lt $a.bottom) { $overlap++ }
     } }
     Expect ($overlap -eq 0) "$name : aucun recouvrement entre les trois controles"
+    # Aucun AUTRE controle visible (hors dialogue de page) ne recouvre la case.
+    $b = $rows | Where-Object { $_.handle -eq $box.ToInt64() }
+    $covering = @($rows | Where-Object {
+      $_.visible -and $_.handle -ne $box.ToInt64() -and $_.class -ne '#32770' -and ($_.right - $_.left) -gt 0 -and
+      $_.left -lt $b.right -and $b.left -lt $_.right -and $_.top -lt $b.bottom -and $b.top -lt $_.bottom })
+    Expect ($covering.Count -eq 0) "$name : aucun controle visible ne recouvre la case ($(($covering | ForEach-Object { $_.class + ':' + $_.text }) -join ', '))"
+    # Et les pixels le confirment : le carre de la case et son texte sont dessines.
+    $ink = Ink $b.left $b.top ($b.right - $b.left) ($b.bottom - $b.top)
+    Expect ($ink -ge 20) "$name : la case est dessinee a l'ecran ($ink pixels sombres)"
     $state = [W]::Ask($box, 0xF0)
     $got = if ($state -eq 1) { 'cochee' } else { 'decochee' }
     $want = if ($expectedChecked) { 'cochee' } else { 'decochee' }
@@ -134,43 +162,67 @@ function Welcome-Scenario($name, $setup, $expectedChecked) {
   } finally { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }; Start-Sleep -Seconds 2 }
 }
 
-# Parcours complet : (de)coche la case si demande, clique Suivant jusqu'a la fin.
-function Full-Flow($name, $toggle) {
+# Parcours complet : (de)coche la case si demande, passe toutes les pages, puis ferme par $close
+# ('command' : WM_COMMAND IDOK a la fenetre principale ; 'click' : BM_CLICK sur le bouton ; 'close' : WM_CLOSE).
+# $shortcut : laisse (ou non) cochee « Creer un raccourci sur le bureau ». Renvoie 'sortie' ou 'bloque'.
+$script:stuck = New-Object System.Collections.Generic.List[string]
+function Full-Flow($name, $toggle, $close, $shortcut) {
   $p = Start-Gui
   $main = $p.MainWindowHandle
-  $box = Find-Box $main
-  if ($box -eq [IntPtr]::Zero) { Fail "$name : pas de case" }
-  if ($toggle) { [void][W]::PostMessage($box, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep -Milliseconds 500 }
-  Shot (Join-Path $evidence "$name-before-next.png") $main
+  if ($Mode -eq 'mine') {
+    $box = Find-Box $main
+    if ($box -eq [IntPtr]::Zero) { Fail "$name : pas de case" }
+    if ($toggle) { [void][W]::PostMessage($box, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep -Milliseconds 500 }
+    Shot (Join-Path $evidence "$Mode-$name-accueil.png") $main
+  }
   $deadline = (Get-Date).AddSeconds(240)
-  $tick = 0
   $finishSince = $null
+  $tick = 0
   while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
-    # Page de fin : decocher « Lancer Hearth » (sinon l'installateur lance l'application sur le runner).
-    $unchecked = $false
+    $onFinish = $false
     foreach ($h in [W]::Children($main)) {
-      if ([W]::Cls($h) -eq 'Button' -and [W]::Text($h) -eq 'Lancer Hearth') {
-        if ($null -eq $finishSince) { $finishSince = Get-Date }
-        if ([W]::Ask($h, 0xF0) -eq 1) { [void][W]::PostMessage($h, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); $unchecked = $true }
+      if ([W]::Cls($h) -ne 'Button') { continue }
+      $t = [W]::Text($h)
+      if ($t -eq 'Lancer Hearth') {
+        $onFinish = $true
+        if ([W]::Ask($h, 0xF0) -eq 1) { [void][W]::PostMessage($h, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
       }
+      if ((-not $shortcut) -and ($t -like 'Cr*er un raccourci*') -and ([W]::Ask($h, 0xF0) -eq 1)) { [void][W]::PostMessage($h, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
     }
-    # Tout est ecrit avant la page de fin (crochet POSTINSTALL) : si « Fermer » ne ferme pas sur le
-    # runner, on le note et on tue l'installateur apres 20 s pour passer aux verifications.
-    if ($null -ne $finishSince -and ((Get-Date) - $finishSince).TotalSeconds -gt 20) {
-      Note "$name : page de fin atteinte, « Fermer » sans effet apres 20 s sur le runner : installateur arrete"
-      Stop-Process -Id $p.Id -Force; break
-    }
-    if (-not $unchecked) {
-      $next = [W]::GetDlgItem($main, 1)
-      if ($next -ne [IntPtr]::Zero) { [void][W]::PostMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
-    }
+    $next = [W]::GetDlgItem($main, 1)
+    if ($onFinish) {
+      if ($null -eq $finishSince) {
+        $finishSince = Get-Date; Start-Sleep -Seconds 3
+        Shot (Join-Path $evidence "$Mode-$name-fin.png") $main
+        Shot (Join-Path $evidence "$Mode-$name-fin-ecran.png") ([IntPtr]::Zero)
+      }
+      switch ($close) {
+        'command' { [void][W]::PostMessage($main, 0x111, [IntPtr]1, $next) }
+        'close' { [void][W]::PostMessage($main, 0x10, [IntPtr]::Zero, [IntPtr]::Zero) }
+        default { [void][W]::PostMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
+      }
+      if (((Get-Date) - $finishSince).TotalSeconds -gt 25) { break }
+    } elseif ($next -ne [IntPtr]::Zero) { [void][W]::PostMessage($next, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero) }
     Start-Sleep -Seconds 2
     $tick++
-    if ($tick % 5 -eq 0 -and $tick -le 40) { Shot (Join-Path $evidence ("{0}-etape-{1:00}.png" -f $name, $tick)) $main }
+    if (($tick % 6 -eq 0) -and ($tick -le 36) -and (-not $onFinish)) { Shot (Join-Path $evidence ("{0}-{1}-etape-{2:00}.png" -f $Mode, $name, $tick)) $main }
   }
-  if (-not $p.HasExited -and $null -eq $finishSince) { Stop-Process -Id $p.Id -Force; Fail "$name : l'installateur ne se termine pas" }
+  if ($p.HasExited) {
+    $secs = if ($finishSince) { [int]((Get-Date) - $finishSince).TotalSeconds } else { -1 }
+    Note "$name ($close, raccourci=$shortcut) : l'installateur se ferme ($secs s apres la page de fin, code $($p.ExitCode))"
+    $result = 'sortie'
+  } else {
+    $tops = [W]::TopLevels([uint32]$p.Id) | ForEach-Object { "{0}:'{1}':{2}" -f [W]::Cls($_), [W]::Text($_), [W]::IsWindowVisible($_) }
+    Shot (Join-Path $evidence "$Mode-$name-bloque.png") $main
+    Shot (Join-Path $evidence "$Mode-$name-bloque-ecran.png") ([IntPtr]::Zero)
+    Note "BLOQUE $name ($close, raccourci=$shortcut) : l'installateur ne se ferme pas. Fenetres du processus : $($tops -join ' | ')"
+    $script:stuck.Add("$name ($close, raccourci=$shortcut)")
+    Stop-Process -Id $p.Id -Force
+    $result = 'bloque'
+  }
   Start-Sleep -Seconds 2
   Get-Process | Where-Object { $_.Path -and $_.Path -like "$dir*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+  return $result
 }
 
 function Silent($arguments) {
@@ -179,8 +231,20 @@ function Silent($arguments) {
   Expect ($p.ExitCode -eq 0) "installateur $($arguments -join ' ') : code de sortie $($p.ExitCode)"
 }
 
-Note "installateur : $installer"
+Note "installateur ($Mode) : $installer"
 Expect ($null -eq (Run-Value)) 'runner vierge : aucune valeur Hearth sous Run au depart'
+
+if ($Mode -eq 'stock') {
+  # Diagnostic : le meme parcours sur l'installateur SANS nos crochets (modele de Tauri seul).
+  [void](Full-Flow 'stock-clic' $false 'click' $true)
+  [void](Full-Flow 'stock-commande' $false 'command' $true)
+  [void](Full-Flow 'stock-commande-sans-raccourci' $false 'command' $false)
+  [void](Full-Flow 'stock-wmclose' $false 'close' $true)
+  Clear-Entry
+  if ($script:stuck.Count -gt 0) { Fail "l'installateur ne se ferme pas : $($script:stuck -join ' ; ')" }
+  Save-Results
+  exit 0
+}
 
 # ---- Partie 1 : la page d'accueil
 Welcome-Scenario 'accueil-neuf' { } $false
@@ -193,7 +257,7 @@ Welcome-Scenario 'accueil-entree-desactivee-gestionnaire' {
 Clear-Entry
 
 # Parcours complet, case cochee : l'entree est ecrite comme le greffon (sans guillemets, activee).
-Full-Flow 'parcours-coche' $true
+[void](Full-Flow 'parcours-coche' $true 'command' $true)
 $value = Run-Value
 Expect ($null -ne $value) 'parcours case cochee : valeur Hearth presente sous Run'
 Expect (($value -match '\.exe --minimized$') -and ($value -notmatch '"')) "parcours case cochee : valeur sans guillemets, finit par --minimized ($value)"
@@ -201,8 +265,12 @@ $approved = (Get-Item $approvedKey).GetValue('Hearth', $null)
 Expect (($approved -join ',') -eq '2,0,0,0,0,0,0,0,0,0,0,0') 'parcours case cochee : active dans le Gestionnaire des taches'
 
 # Reinstallation a la main : la case arrive cochee (entree activee) ; la decocher retire l'entree.
-Full-Flow 'parcours-decoche-reinstallation' $true
+[void](Full-Flow 'reinstallation-decoche' $true 'command' $false)
 Expect ($null -eq (Run-Value)) 'reinstallation a la main, case decochee : valeur retiree'
+
+# Variantes de fermeture de la page de fin (la case reste telle quelle).
+[void](Full-Flow 'fermeture-clic' $false 'click' $true)
+[void](Full-Flow 'fermeture-wmclose' $false 'close' $true)
 
 # ---- Partie 2 : comportements sans interface
 $uninstaller = Join-Path $dir 'uninstall.exe'
@@ -232,5 +300,35 @@ $u = Start-Process $uninstaller -ArgumentList '/S', "_?=$dir" -PassThru
 [void]$u.WaitForExit(240000)
 Expect ($null -eq (Run-Value)) '(d) desinstallation silencieuse : valeur retiree'
 
+# (e) Chemin d'installation avec une espace : la valeur sans guillemets (celle du greffon) lance-t-elle
+# la bonne application ? CreateProcess sans nom d'application essaie les prefixes jusqu'a l'espace.
+Add-Type @"
+using System; using System.Runtime.InteropServices;
+public static class Launch {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] public struct SI { public int cb; public string r, d, t; public int x, y, w, h, cx, cy, fa, fl; public short sw, cb2; public IntPtr lr, i, o, e; }
+  [StructLayout(LayoutKind.Sequential)] public struct PI { public IntPtr hp, ht; public int pid, tid; }
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool CreateProcessW(string app, string cmd, IntPtr pa, IntPtr ta, bool inh, int flags, IntPtr env, string cwd, ref SI si, out PI pi);
+}
+"@
+$spaced = Join-Path $env:RUNNER_TEMP 'Jean Dupont\AppData\Local\Hearth'
+New-Item -ItemType Directory -Force $spaced | Out-Null
+$sp = Start-Process $installer -ArgumentList '/S', ('/D=' + $spaced) -PassThru
+[void]$sp.WaitForExit(240000)
+$exe = (Get-ChildItem $spaced -Filter *.exe | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1).FullName
+Expect ($null -ne $exe) "(e) installation dans un chemin avec espace : $exe"
+$command = "$exe --minimized"
+$si = New-Object Launch+SI; $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si)
+$pi = New-Object Launch+PI
+$ok = [Launch]::CreateProcessW($null, $command, [IntPtr]::Zero, [IntPtr]::Zero, $false, 0, [IntPtr]::Zero, $null, [ref]$si, [ref]$pi)
+$err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+Start-Sleep -Seconds 3
+$started = if ($ok) { Get-Process -Id $pi.pid -ErrorAction SilentlyContinue } else { $null }
+Note "(e) valeur sans guillemets avec espace, CreateProcess(NULL, ""$command"") : ok=$ok erreur=$err processus=$($started.Path)"
+Expect ($ok -and ($started.Path -eq $exe)) '(e) la valeur sans guillemets lance bien Hearth meme avec une espace dans le chemin (CreateProcess)'
+if ($started) { Stop-Process -Id $pi.pid -Force }
+$su = Start-Process (Join-Path $spaced 'uninstall.exe') -ArgumentList '/S', "_?=$spaced" -PassThru
+[void]$su.WaitForExit(120000)
+
 Clear-Entry
+if ($script:stuck.Count -gt 0) { Fail "l'installateur ne se ferme pas : $($script:stuck -join ' ; ')" }
 Save-Results

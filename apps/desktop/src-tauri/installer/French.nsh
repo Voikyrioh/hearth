@@ -38,3 +38,4 @@ LangString hearthDiskTooSmall ${LANG_FRENCH} "Il manque de la place. Libère au 
 LangString hearthAutostartLabel ${LANG_FRENCH} "Lancer Hearth au démarrage de Windows"
 LangString hearthAutostartHelp ${LANG_FRENCH} "Hearth s'ouvre tout seul quand tu ouvres ta session, réduit près de l'horloge. Tu pourras changer ce choix à tout moment dans les réglages de l'application."
 LangString hearthWelcomeText ${LANG_FRENCH} "Cet assistant installe ${PRODUCTNAME} pour toi seul, sans droits administrateur.$\r$\n$\r$\nClique sur Suivant pour continuer."
+LangString hearthFinishText ${LANG_FRENCH} "${PRODUCTNAME} a été installé sur ton ordinateur.$\r$\n$\r$\nClique sur Fermer pour quitter le programme d'installation."

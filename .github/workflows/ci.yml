@@ -93,6 +93,21 @@ jobs:
         shell: pwsh
         timeout-minutes: 15
         run: ./apps/desktop/scripts/installer-ci.ps1
+      # Diagnostic (HRT-21) : le même parcours sur l'installateur SANS nos crochets (modèle de Tauri
+      # seul), pour savoir si un défaut de la page de fin existait avant cette PR.
+      - name: Installateur NSIS sans nos crochets (construction)
+        if: always()
+        shell: pwsh
+        timeout-minutes: 10
+        working-directory: apps/desktop
+        run: |
+          Set-Content -Path stock.json -Value '{"bundle":{"windows":{"nsis":{"installerHooks":null}}}}'
+          npm run tauri bundle -- --bundles nsis --config stock.json
+      - name: Installateur NSIS sans nos crochets (parcours)
+        if: always()
+        shell: pwsh
+        timeout-minutes: 15
+        run: ./apps/desktop/scripts/installer-ci.ps1 -Mode stock
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

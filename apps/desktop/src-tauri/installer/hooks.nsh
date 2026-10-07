@@ -154,10 +154,21 @@ SectionEnd
 ;   texte d'accueil   120u  55u 195u  55u  (jusqu'à 110u)
 ;   case              120u 118u 195u  12u  (130u)
 ;   aide              134u 134u 181u  50u  (jusqu'à 184u, la page fait 193u)
+!searchparse /noerrors /file "${NSISDIR}\Contrib\Modern UI 2\Pages\Welcome.nsh" "Var mui.WelcomePage.Text" HEARTH_MUI_TEXT_VAR
+!ifndef HEARTH_MUI_TEXT_VAR
+  !error "MUI2 ne déclare plus mui.WelcomePage.Text : relire la page d'accueil de MUI2 (hooks.nsh, HearthWelcomeShow)"
+!endif
+!searchparse /noerrors /file "${NSISDIR}\Contrib\Modern UI 2\Pages\Welcome.nsh" "195u 130u" HEARTH_MUI_TEXT_BOX
+!ifndef HEARTH_MUI_TEXT_BOX
+  !error "MUI2 ne crée plus son texte d'accueil en 195u 130u : relire hooks.nsh (HearthWelcomeShow)"
+!endif
 Function HearthWelcomeShow
   ; nsDialogs insère chaque contrôle SOUS les précédents : le texte d'accueil du modèle (vidé,
   ; mais opaque et grand) recouvrait la case, que la capture de la CI montrait invisible. Il est
-  ; donc masqué (reconnu à son texte, une seule espace). Les autres contrôles restent ceux du modèle.
+  ; donc masqué. MUI2 en garde la poignée dans $mui.WelcomePage.Text, mais cette variable n'est
+  ; déclarée qu'à l'insertion de la page, APRÈS ce fichier (inutilisable ici) : on retrouve le
+  ; contrôle à son texte (une seule espace, défini plus bas). Si MUI2 changeait, la compilation
+  ; échoue (gardes ci-dessous) et la CI vérifie que la case n'est recouverte par rien.
   FindWindow $R1 "#32770" "" $HWNDPARENT
   FindWindow $R2 "Static" " " $R1
   ${If} $R2 <> 0
@@ -187,6 +198,8 @@ Function HearthWelcomeLeave
 FunctionEnd
 
 !define MUI_WELCOMEPAGE_TEXT " "
+; Page de fin en tutoiement (textes par défaut de MUI : vouvoiement). Consommé par la seule page de fin.
+!define MUI_FINISHPAGE_TEXT "$(hearthFinishText)"
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW HearthWelcomeShow
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE HearthWelcomeLeave
 

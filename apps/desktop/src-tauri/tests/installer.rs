@@ -133,7 +133,10 @@ fn the_registry_is_only_touched_when_the_page_was_seen() {
 }
 
 #[test]
-fn the_initial_state_follows_the_task_manager_like_the_plugin() {
+fn the_script_text_mentions_the_task_manager_state_like_the_plugin_presence_only() {
+    // Ne prouve QUE la présence des lectures dans le texte du script. Le comportement réel (case
+    // décochée quand le Gestionnaire des tâches a désactivé l'entrée) est prouvé par le scénario
+    // `accueil-entree-desactivee-gestionnaire` de scripts/installer-ci.ps1 sur le runner de la CI.
     let script = hooks();
     let init = function_body(&script, "HearthGuiInit");
     // « Activé » = entrée présente ET non désactivée dans le Gestionnaire des tâches.
@@ -191,6 +194,11 @@ fn the_welcome_page_controls_do_not_overlap_and_fit_the_dialog() {
     let show = function_body(&script, "HearthWelcomeShow");
     assert!(show.contains(r#"FindWindow $R2 "Static" " " $R1"#));
     assert!(show.contains("ShowWindow $R2 0"));
+    // Gardes de compilation : MUI2 doit toujours déclarer la variable du texte et le créer en 195u 130u.
+    assert!(script.contains("Var mui.WelcomePage.Text"));
+    assert!(script.contains(r#""195u 130u" HEARTH_MUI_TEXT_BOX"#));
+    // Page de fin en tutoiement : texte défini par le fichier de langue.
+    assert!(script.contains(r#"!define MUI_FINISHPAGE_TEXT "$(hearthFinishText)""#));
 }
 
 #[test]
@@ -229,9 +237,10 @@ fn the_texts_are_french_informal_and_complete() {
         .filter(|line| {
             line.starts_with("LangString hearthAutostart")
                 || line.starts_with("LangString hearthWelcomeText")
+                || line.starts_with("LangString hearthFinishText")
         })
         .collect();
-    assert_eq!(added.len(), 3);
+    assert_eq!(added.len(), 4);
     for line in &added {
         assert!(!line.contains('\u{2014}'), "tiret cadratin : {line}");
         for formal in ["vous", "votre", "vos ", "Cliquez"] {
