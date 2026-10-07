@@ -144,13 +144,21 @@ function Full-Flow($name, $toggle) {
   Shot (Join-Path $evidence "$name-before-next.png") $main
   $deadline = (Get-Date).AddSeconds(240)
   $tick = 0
+  $finishSince = $null
   while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
     # Page de fin : decocher « Lancer Hearth » (sinon l'installateur lance l'application sur le runner).
     $unchecked = $false
     foreach ($h in [W]::Children($main)) {
-      if ([W]::Cls($h) -eq 'Button' -and [W]::Text($h) -eq 'Lancer Hearth' -and [W]::Ask($h, 0xF0) -eq 1) {
-        [void][W]::PostMessage($h, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); $unchecked = $true
+      if ([W]::Cls($h) -eq 'Button' -and [W]::Text($h) -eq 'Lancer Hearth') {
+        if ($null -eq $finishSince) { $finishSince = Get-Date }
+        if ([W]::Ask($h, 0xF0) -eq 1) { [void][W]::PostMessage($h, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); $unchecked = $true }
       }
+    }
+    # Tout est ecrit avant la page de fin (crochet POSTINSTALL) : si « Fermer » ne ferme pas sur le
+    # runner, on le note et on tue l'installateur apres 20 s pour passer aux verifications.
+    if ($null -ne $finishSince -and ((Get-Date) - $finishSince).TotalSeconds -gt 20) {
+      Note "$name : page de fin atteinte, « Fermer » sans effet apres 20 s sur le runner : installateur arrete"
+      Stop-Process -Id $p.Id -Force; break
     }
     if (-not $unchecked) {
       $next = [W]::GetDlgItem($main, 1)
@@ -160,7 +168,8 @@ function Full-Flow($name, $toggle) {
     $tick++
     if ($tick % 5 -eq 0 -and $tick -le 40) { Shot (Join-Path $evidence ("{0}-etape-{1:00}.png" -f $name, $tick)) $main }
   }
-  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Fail "$name : l'installateur ne se termine pas" }
+  if (-not $p.HasExited -and $null -eq $finishSince) { Stop-Process -Id $p.Id -Force; Fail "$name : l'installateur ne se termine pas" }
+  Start-Sleep -Seconds 2
   Get-Process | Where-Object { $_.Path -and $_.Path -like "$dir*" } | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 

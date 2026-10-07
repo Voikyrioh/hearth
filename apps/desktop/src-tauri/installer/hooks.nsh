@@ -168,6 +168,7 @@ Function HearthWelcomeShow
   SetCtlColors $R0 "000000" "FFFFFF"
   ${NSD_CreateCheckbox} 120u 118u 195u 12u "$(hearthAutostartLabel)"
   Pop $HearthAutostartBox
+  SetCtlColors $HearthAutostartBox "000000" "FFFFFF"
   ${If} $HearthAutostartShown = 1
     ${If} $HearthAutostartWanted = 1
       ${NSD_Check} $HearthAutostartBox
