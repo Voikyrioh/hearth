@@ -37,13 +37,13 @@ apps/desktop/
 │   ├── update-key.pub   → Clé publique de signature des mises à jour, EMBARQUÉE à la compilation (clé de DÉVELOPPEMENT sans clé secrète tant que Voiky n'a pas mis la sienne ; runbook `publier-une-version-du-client`)
 │   ├── capabilities/    → Liste blanche de permissions de la fenêtre `main`
 │   ├── installer/       → `sidebar.bmp` (bandeau latéral, 164 × 314, GÉNÉRÉ) ; crochets NSIS (`hooks.nsh` : contrôles d'avant installation ; case « Lancer Hearth au démarrage de Windows » sur la page d'accueil, écrite dans l'entrée `Run` seulement si la page a été vue, HRT-21, ADR-0026) et textes français (`French.nsh`)
-│   ├── icons/           → Icônes GÉNÉRÉES (`npm run build:icons`, ADR-0027) depuis les SVG de `icons/source/` (logo, monochromes, `app-icon.svg` et `app-icon-16.svg`, `tray/` : six états) : `icon.ico` (trames 16, 24, 32, 48, 64, 256), PNG de Tauri, `tray/tray-<état>-<taille>.png`
+│   ├── icons/           → Icônes GÉNÉRÉES (`npm run build:icons`, ADR-0027) depuis les SVG de `icons/source/` (logo, monochromes, `app-icon.svg` et `app-icon-16.svg`, `tray/` : six états) : `icon.ico` (trames 16, 24, 32, 48, 64, 256), PNG de Tauri, `tray/tray-<état>-<taille>.png`, `sources.sha256.json` (empreintes des sources, vérifiées par `identity-sync.test.ts`)
 │   ├── build.rs         → Liste blanche des commandes (`AppManifest`), manifeste Windows des tests
 │   └── tauri.conf.json  → Fenêtre 1280 × 800 (min 1100 × 680, fond `#1c1518`), CSP stricte, NSIS par utilisateur
 ├── src/
 │   ├── bindings.ts      → GÉNÉRÉ par tauri-specta (ne pas éditer ; `HEARTH_REGEN_BINDINGS=1 cargo test -p hearth-desktop`)
 │   ├── i18n/            → `fr.ts` (tous les textes, typés) et `t(clé, paramètres)`
-│   ├── assets/          → `illustrations/` : SVG des écrans vides (premier lancement, journal, hors ligne), remplaçables par fichier, `index.ts` ; `identity.test.ts` (fichiers, trames ICO, dimensions, états distincts, palette)
+│   ├── assets/          → `illustrations/` : SVG des écrans vides (premier lancement, journal, hors ligne), remplaçables par fichier, `index.ts`, `screens.ts` (quelle illustration pour quel écran, « Comptes » compris) ; `png-decode.ts` (décodeur PNG des tests) ; `identity-sync.test.ts` (images contre sources, contenu, une seule source de tracé du logo) ; `identity.test.ts` (fichiers, trames ICO, dimensions, états distincts, palette)
 │   ├── styles/          → `tokens.css` (jetons Braise, source unique), `base.css`, `fonts.css` (polices embarquées)
 │   ├── audit/           → Journal d'activité, règles PURES : `grouping.ts` (rafales de refus, UNE source), `filters.ts` (brouillon, période, filtre demandé), `rows.ts` (lignes à plat), `text.ts` (texte non fiable : contrôle, troncature), `format.ts` (fuseau du PC)
 │   ├── dashboard/       → `series.ts` (anneau d'échantillons borné à 3 600, rééchantillonnage 1 s/1 s/10 s, mesures tracées), `format.ts` (unités BR-DASH-014)
