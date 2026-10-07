@@ -269,11 +269,21 @@ async fn the_wizard_registers_only_on_a_successful_login_then_remembers_forgets_
     assert_eq!(last["servers"][0]["role"], "admin");
     assert_eq!(last["servers"][0]["remember"], true);
     // Rejouer l'état courant à un nouvel abonné redonne le même numéro (rien de nouveau).
+    // Le dernier contact bouge à chaque message du flux sans qu'aucun état ne soit annoncé : s'il a
+    // bougé depuis le dernier état reçu, le contenu est nouveau et le numéro suivant est le bon
+    // (`StateBook::snapshot`) ; sinon c'est le même numéro. Les deux cas sont vérifiés exactement.
     let replay = rig.runtime.states();
     assert_eq!(replay.len(), 1);
+    let announced = rig.sink.last_state(&id).unwrap();
+    let announced_seq = announced["seq"].as_f64().unwrap();
+    let moved = replay[0].last_contact_at != announced["lastContactAt"].as_f64();
     assert_eq!(
         f64::from(replay[0].seq),
-        rig.sink.last_state(&id).unwrap()["seq"].as_f64().unwrap()
+        if moved {
+            announced_seq + 1.0
+        } else {
+            announced_seq
+        }
     );
     // La même adresse ne s'ajoute pas deux fois.
     let again = rig
