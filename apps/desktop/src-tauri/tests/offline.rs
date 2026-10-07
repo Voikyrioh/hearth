@@ -23,7 +23,7 @@ use agent::{PASSWORD, TestAgent};
 use hearth_agent::domain::accounts::Role;
 use hearth_desktop_lib::alerts::{Alerts, Notifier, TrayPort};
 use hearth_desktop_lib::link::{LinkRuntime, UiSink};
-use hearth_desktop_lib::presence::TrayStatus;
+use hearth_desktop_lib::presence::{TrayIcon, TrayStatus};
 use hearth_desktop_lib::vault::{CredentialBackend, CredentialVault};
 use hearth_link::domain::event::Event;
 use hearth_link::domain::pending_ops::OperationId;
@@ -109,6 +109,8 @@ impl Notifier for Spy {
 }
 
 impl TrayPort for Spy {
+    fn show_icon(&self, _icon: TrayIcon) {}
+
     fn show(&self, status: TrayStatus, tooltip: &str) {
         self.icons
             .lock()

@@ -21,9 +21,9 @@ pub trait Notifier: Send + Sync {
 pub trait TrayPort: Send + Sync {
     fn show(&self, status: TrayStatus, tooltip: &str);
 
-    /// L'image de l'icône, appelée avant `show` à chaque changement (HRT-19). Par défaut, rien :
-    /// les espions des tests n'observent que la gravité et l'infobulle.
-    fn show_icon(&self, _icon: TrayIcon) {}
+    /// L'image de l'icône, appelée avant `show` à chaque changement (HRT-19). Sans implémentation
+    /// par défaut : un adaptateur ou un double qui l'oublie ne compile pas.
+    fn show_icon(&self, icon: TrayIcon);
 }
 
 struct Inner {

@@ -7,13 +7,14 @@ use std::sync::{Arc, Mutex};
 
 use hearth_desktop_lib::alerts::{Alerts, Notifier, TrayPort};
 use hearth_desktop_lib::link::StateObserver;
-use hearth_desktop_lib::presence::{NOTIFY_WINDOW_MS, TrayStatus};
+use hearth_desktop_lib::presence::{NOTIFY_WINDOW_MS, TrayIcon, TrayStatus};
 use hearth_link::domain::state::LinkState;
 
 #[derive(Default)]
 struct Spy {
     notes: Mutex<Vec<(String, String)>>,
     icons: Mutex<Vec<(TrayStatus, String)>>,
+    images: Mutex<Vec<TrayIcon>>,
 }
 
 impl Notifier for Spy {
@@ -26,6 +27,10 @@ impl Notifier for Spy {
 }
 
 impl TrayPort for Spy {
+    fn show_icon(&self, icon: TrayIcon) {
+        self.images.lock().unwrap().push(icon);
+    }
+
     fn show(&self, status: TrayStatus, tooltip: &str) {
         self.icons
             .lock()
@@ -42,6 +47,10 @@ impl Spy {
             .iter()
             .map(|(_, body)| body.clone())
             .collect()
+    }
+
+    fn last_image(&self) -> Option<TrayIcon> {
+        self.images.lock().unwrap().last().copied()
     }
 
     fn last_icon(&self) -> Option<(TrayStatus, String)> {
@@ -190,6 +199,27 @@ fn the_icon_follows_the_displayed_server_with_a_tooltip_and_is_only_redrawn_on_c
     );
     alerts.on_state("a", "forge", LinkState::AccessRevoked, 0);
     assert_eq!(spy.last_icon().unwrap().0, TrayStatus::Critical);
+}
+
+#[test]
+fn each_of_the_six_states_asks_for_its_own_image() {
+    let (alerts, spy, _) = setup(true);
+    let mut seen = Vec::new();
+    for (state, expected) in [
+        (LinkState::Connected, TrayIcon::Connected),
+        (LinkState::Reconnecting, TrayIcon::Reconnecting),
+        (LinkState::Offline, TrayIcon::Offline),
+        (LinkState::SessionExpired, TrayIcon::SessionExpired),
+        (LinkState::AccessRevoked, TrayIcon::AccessRevoked),
+    ] {
+        alerts.on_state("a", "forge", state, 0);
+        assert_eq!(spy.last_image(), Some(expected), "{state:?}");
+        seen.push(expected);
+    }
+    alerts.on_removed("a");
+    assert_eq!(spy.last_image(), Some(TrayIcon::NoServer));
+    seen.push(TrayIcon::NoServer);
+    assert_eq!(seen.len(), 6);
 }
 
 #[test]
