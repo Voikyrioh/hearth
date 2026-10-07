@@ -1,11 +1,13 @@
 //! Sous-commandes `account …` : le vrai binaire, lancé en processus sur un dossier temporaire.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
 use std::path::Path;
 use std::process::{Command, Output};
 
 use hearth_agent::infrastructure::sqlite::{DATABASE_FILE, Database};
-use tempfile::TempDir;
+use tmp::TestDir;
 
 const PASSWORD: &str = "Correct-Horse-9";
 
@@ -50,8 +52,8 @@ fn hearth(dir: &Path, args: &[&str], password: Option<&str>) -> Run {
     }
 }
 
-fn data_dir() -> TempDir {
-    tempfile::tempdir().expect("dossier temporaire")
+fn data_dir() -> TestDir {
+    tmp::tempdir().expect("dossier temporaire")
 }
 
 fn add(dir: &Path, username: &str, role: &str) -> Run {

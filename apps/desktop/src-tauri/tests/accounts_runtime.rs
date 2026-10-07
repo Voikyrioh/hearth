@@ -108,7 +108,7 @@ struct Client {
     secrets: Arc<Memory>,
     /// Le mot de passe de la connexion : celui que les actes d'administration confirment (HRT-30).
     password: String,
-    _dir: tempfile::TempDir,
+    _dir: agent::tmp::TestDir,
 }
 
 async fn client(port: u16, username: &str, password: &str, config: LinkConfig) -> Client {
@@ -122,7 +122,7 @@ async fn client_with(
     config: LinkConfig,
     remember: bool,
 ) -> Client {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let secrets = Arc::new(Memory::default());
     let vault = Arc::new(CredentialVault::new(Shared(secrets.clone())));
     let runtime = Arc::new(

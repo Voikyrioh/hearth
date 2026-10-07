@@ -4,6 +4,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -110,7 +112,7 @@ async fn schema(pool: &SqlitePool) -> BTreeSet<(String, Column)> {
 
 #[tokio::test]
 async fn the_migration_only_adds_and_keeps_every_row_of_a_0004_database() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let pool = database_at_0004(&dir.path().join("hearth.db")).await;
     let before = schema(&pool).await;
 
@@ -197,7 +199,7 @@ async fn the_migration_only_adds_and_keeps_every_row_of_a_0004_database() {
 
 #[tokio::test]
 async fn what_the_previous_agent_writes_is_still_valid_on_the_migrated_schema() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let pool = database_at_0004(&dir.path().join("hearth.db")).await;
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     // Les écritures de l'agent d'avant (colonnes de la 0004 seulement) passent telles quelles.
@@ -228,7 +230,7 @@ async fn what_the_previous_agent_writes_is_still_valid_on_the_migrated_schema() 
 
 #[tokio::test]
 async fn the_constraints_of_the_new_tables_hold() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let pool = database_at_0004(&dir.path().join("hearth.db")).await;
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     let device = |id: &'static str, account: &'static str, key: &'static str| {
@@ -317,7 +319,7 @@ async fn the_constraints_of_the_new_tables_hold() {
 
 #[tokio::test]
 async fn the_migration_replays_and_the_previous_agent_restarts_on_the_copy_taken_before_the_swap() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tmp::tempdir().unwrap();
     // Un sous-dossier : l'agent refuse un dossier de données ouvert aux autres (0755) et crée le sien en 0700.
     let dir = root.path().join("data");
     hearth_agent::infrastructure::data_dir::ensure(&dir).unwrap();

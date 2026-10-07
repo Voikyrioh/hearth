@@ -247,7 +247,15 @@ wait_for "le superviseur conclut" 150 unit_gone
 wait_for "l'ancien agent répond" 60 sh -c "[ \"\$(curl -sk --max-time 3 $BASE/hello | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"agent_version\"])')\" = '$OLD_VERSION' ]"
 [ "$(systemctl is-active hearth-agent)" = active ] || die "le service n'est pas actif"
 [ ! -e "$UPD/job.json" ] || die "le travail reste"
-ok "agent redémarré pendant l'attente de relance, deux fois : ni travail ni superviseur réécrits, retour arrière fait par le superviseur ($(python3 -c 'import json; d=json.load(open("'"$UPD"'/last.json")); print(d["outcome"], d.get("reason"))'))"
+# Le résultat attendu est « failed / rollback_failed », et ce n'est PAS un retour arrière raté : l'adresse
+# de contrôle (127.0.0.1:7999) est muette pour le nouvel agent comme pour l'ancien, donc le superviseur,
+# après avoir remis l'ancien binaire, ne peut pas confirmer qu'il répond et l'annonce « rollback_failed ».
+# Le retour arrière lui-même est prouvé juste au-dessus (somme de l'ancien binaire, version annoncée par
+# l'ancien agent, service actif). Exiger ce résultat exact, au lieu de l'afficher, garde le scénario honnête :
+# un autre résultat (par exemple « succeeded ») voudrait dire que le contrôle n'a pas eu lieu comme prévu.
+last=$(python3 -c 'import json; d=json.load(open("'"$UPD"'/last.json")); print(d["outcome"], d.get("reason"))')
+[ "$last" = "failed rollback_failed" ] || die "résultat attendu : failed rollback_failed (adresse de contrôle muette), obtenu : $last"
+ok "agent redémarré pendant l'attente de relance, deux fois : ni travail ni superviseur réécrits, retour arrière fait par le superviseur, résultat $last"
 reset_server
 fi
 

@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn the_installed_file_is_read_back_by_the_agent() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let path = dir.path().join("agent.toml");
         std::fs::write(
             &path,
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn a_missing_or_broken_file_has_no_port() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         assert_eq!(read_port(&dir.path().join("none.toml")), None);
         let bad = dir.path().join("bad.toml");
         std::fs::write(&bad, "port = [").expect("write");
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn defaults_apply_without_any_source() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let cli = cli_with_empty_file(dir.path());
         let env = env_of(&[("LOCALAPPDATA", "C:/Users/test/AppData/Local")]);
         let config = load(&cli, &env).expect("config");
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn file_overrides_defaults() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let cli = cli_with_empty_file(dir.path());
         let env = env_of(&[]);
         std::fs::write(
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn env_overrides_file() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let cli = cli_with_empty_file(dir.path());
         std::fs::write(
             dir.path().join("agent.toml"),
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn cli_data_dir_overrides_env_and_file() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let mut cli = cli_with_empty_file(dir.path());
         cli.data_dir = Some(PathBuf::from("/cli/data"));
         let env = env_of(&[(ENV_DATA_DIR, "/env/data")]);
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn config_path_can_come_from_the_environment() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let path = dir.path().join("elsewhere.toml");
         std::fs::write(&path, "port = 9200\n").expect("write");
         let path_text = path.to_string_lossy().into_owned();
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn explicit_missing_file_is_an_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let cli = CliOverrides {
             config_path: Some(dir.path().join("absent.toml")),
             data_dir: Some(PathBuf::from("/d")),
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn bad_values_are_reported() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let cli = cli_with_empty_file(dir.path());
         let err = load(&cli, &env_of(&[(ENV_PORT, "abc"), (ENV_DATA_DIR, "/d")]))
             .expect_err("port invalide");
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn unknown_keys_in_the_file_are_rejected() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
         let cli = cli_with_empty_file(dir.path());
         std::fs::write(dir.path().join("agent.toml"), "prot = 1\n").expect("write");
         let err = load(&cli, &env_of(&[(ENV_DATA_DIR, "/d")])).expect_err("clé inconnue");

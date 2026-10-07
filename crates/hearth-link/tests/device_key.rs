@@ -45,11 +45,11 @@ struct SecondPc {
     id: ServerId,
     vault: Arc<MemoryVault>,
     recorder: Recorder,
-    _dir: tempfile::TempDir,
+    _dir: support::agent::tmp::TestDir,
 }
 
 async fn second_pc(world: &World) -> SecondPc {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::agent::tmp::tempdir().unwrap();
     let vault = Arc::new(MemoryVault::new());
     let manager = support::start_manager(
         dir.path(),
@@ -197,7 +197,7 @@ async fn a_refused_connection_leaves_no_key_behind() {
     agent
         .create_account("marie", hearth_agent::domain::accounts::Role::Admin)
         .await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::agent::tmp::tempdir().unwrap();
     let vault = Arc::new(CountingVault {
         inner: MemoryVault::new(),
         key_puts: std::sync::atomic::AtomicUsize::new(0),
@@ -440,7 +440,7 @@ async fn a_vault_that_fails_for_the_key_never_stops_the_connection() {
     agent
         .create_account("marie", hearth_agent::domain::accounts::Role::Admin)
         .await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::agent::tmp::tempdir().unwrap();
     let manager = LinkManager::start(
         Ports {
             transport: Arc::new(support::transport()),
@@ -553,7 +553,7 @@ struct Unlogged {
     vault: Arc<MemoryVault>,
     /// Vrai : la requête de connexion ne répond jamais (le délai de l'appel la coupe).
     hang: Arc<std::sync::atomic::AtomicBool>,
-    _dir: tempfile::TempDir,
+    _dir: support::agent::tmp::TestDir,
 }
 
 /// Un deuxième PC dont le serveur est au carnet mais où personne ne s'est encore connecté.
@@ -563,7 +563,7 @@ async fn second_pc_without_login(world: &World) -> Unlogged {
 
 async fn second_pc_without_login_with(world: &World, config: hearth_link::LinkConfig) -> Unlogged {
     let hang = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::agent::tmp::tempdir().unwrap();
     let vault = Arc::new(MemoryVault::new());
     let spy = Arc::new(support::Spy::new(support::transport(), ChallengeMode::Real));
     // Le défi de ce PC suit le mode du test (le `Spy` du monde est partagé par `state`).
@@ -1099,7 +1099,7 @@ async fn a_vault_that_reads_absent_and_refuses_to_write_never_fills_the_eight_pl
             .len(),
         1
     );
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::agent::tmp::tempdir().unwrap();
     let vault = Arc::new(BlindWriteVault(MemoryVault::new()));
     let start = |vault: Arc<BlindWriteVault>| {
         let path = dir.path().to_owned();
@@ -1238,7 +1238,7 @@ async fn the_witness_entry_of_a_first_connection_never_holds_the_real_private_ke
     agent
         .create_account("marie", hearth_agent::domain::accounts::Role::Admin)
         .await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::agent::tmp::tempdir().unwrap();
     let vault = Arc::new(WitnessVault {
         inner: MemoryVault::new(),
         witnessed: Mutex::new(Vec::new()),

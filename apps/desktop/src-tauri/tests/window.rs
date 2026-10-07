@@ -3,6 +3,9 @@
 //! sur `domain::hides_on_close` (testé) et la garde de `on_window_event`.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
+#[path = "../../../../crates/hearth-agent/tests/support/tmp.rs"]
+mod tmp;
+
 use std::cell::Cell;
 
 use hearth_desktop_lib::settings::close_hint_seen;
@@ -26,7 +29,7 @@ fn open(app: &tauri::App<MockRuntime>, label: &str) -> tauri::WebviewWindow<Mock
 
 #[test]
 fn closing_main_hides_it_and_explains_only_once() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let file = dir.path().join("settings.json");
     let app = app();
     let main = open(&app, "main");
@@ -47,7 +50,7 @@ fn closing_main_hides_it_and_explains_only_once() {
 #[test]
 fn a_corrupt_settings_file_is_treated_as_missing_so_the_explanation_is_given_once_and_the_file_rewritten()
  {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let file = dir.path().join("settings.json");
     std::fs::write(&file, "{ pas du json").unwrap();
     let app = app();

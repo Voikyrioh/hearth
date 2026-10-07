@@ -453,7 +453,7 @@ impl InstallHost for CrashInstall {
 // ---------------------------------------------------------------------------------------------
 
 pub struct World {
-    pub dir: tempfile::TempDir,
+    pub dir: super::tmp::TestDir,
     pub job: Job,
     pub crash: Arc<Crash>,
     pub machine: Arc<Machine>,
@@ -471,11 +471,7 @@ impl World {
         // être de la mémoire (`/dev/shm`, où `fsync` ne coûte rien) quand il existe. Les `fsync` du code
         // réel (`FsUpdateHost`) restent ; seul le support de stockage du test change (la matrice de
         // morts prenait ~120 s sur un disque virtuel lent).
-        let dir = if Path::new("/dev/shm").is_dir() {
-            tempfile::Builder::new().tempdir_in("/dev/shm").unwrap()
-        } else {
-            tempfile::tempdir().unwrap()
-        };
+        let dir = super::tmp::tempdir_fast().unwrap();
         let bin = dir.path().join("bin");
         fs::create_dir_all(&bin).unwrap();
         let binary = bin.join("hearth-agent");

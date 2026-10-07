@@ -100,10 +100,10 @@ pub fn ensure_private_file(path: &Path) -> io::Result<()> {
 }
 
 /// Dossier temporaire de test aux droits d'un vrai dossier de données (0700 sous Unix) :
-/// `tempfile::tempdir()` crée des dossiers 0755, que `ensure` refuse quand ils ont du contenu.
+/// `crate::test_tmp::tempdir()` crée des dossiers 0755, que `ensure` refuse quand ils ont du contenu.
 #[cfg(test)]
-pub(crate) fn private_tempdir() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+pub(crate) fn private_tempdir() -> crate::test_tmp::TestDir {
+    let dir = crate::test_tmp::tempdir().expect("dossier temporaire");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

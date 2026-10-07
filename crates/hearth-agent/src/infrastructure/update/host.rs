@@ -608,8 +608,8 @@ mod tests {
 
     use super::*;
 
-    fn host() -> (tempfile::TempDir, FsUpdateHost) {
-        let dir = tempfile::tempdir().unwrap();
+    fn host() -> (crate::test_tmp::TestDir, FsUpdateHost) {
+        let dir = crate::test_tmp::tempdir().unwrap();
         let exe = dir.path().join("agent-courant");
         fs::write(&exe, b"binaire courant").unwrap();
         let host = FsUpdateHost::new(dir.path(), exe, Launcher::Detached);

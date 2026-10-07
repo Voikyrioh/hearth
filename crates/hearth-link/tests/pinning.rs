@@ -25,7 +25,7 @@ use tokio::net::TcpListener;
 
 async fn bare_manager() -> (
     hearth_link::LinkManager,
-    tempfile::TempDir,
+    support::agent::tmp::TestDir,
     Arc<MemoryVault>,
 ) {
     bare_manager_with(support::transport()).await
@@ -35,10 +35,10 @@ async fn bare_manager_with(
     transport: hearth_link::adapters::HttpTransport,
 ) -> (
     hearth_link::LinkManager,
-    tempfile::TempDir,
+    support::agent::tmp::TestDir,
     Arc<MemoryVault>,
 ) {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::agent::tmp::tempdir().unwrap();
     let vault = Arc::new(MemoryVault::new());
     let manager = support::start_manager_with(
         dir.path(),
@@ -395,7 +395,7 @@ async fn each_server_has_its_own_independent_link() {
 
 #[tokio::test]
 async fn an_unreadable_server_book_does_not_prevent_starting() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = support::agent::tmp::tempdir().unwrap();
     std::fs::write(dir.path().join("servers.json"), b"\xff\xfe{ pas du json").unwrap();
     let manager = start_manager(
         dir.path(),
