@@ -338,8 +338,10 @@ ok "l'empreinte affichée est celle du certificat servi"
 [ "$(stat -c %a /var/lib/hearth)" = 700 ] || die "dossier de données : droits $(stat -c %a /var/lib/hearth)"
 [ "$(stat -c %a /var/lib/hearth/key.pem)" = 600 ] || die "key.pem : droits $(stat -c %a /var/lib/hearth/key.pem)"
 [ "$(stat -c %a /var/lib/hearth/hearth.db)" = 600 ] || die "hearth.db : droits $(stat -c %a /var/lib/hearth/hearth.db)"
+[ "$(stat -c %a /var/lib/hearth/request_fingerprint.key)" = 600 ] || die "request_fingerprint.key : droits $(stat -c %a /var/lib/hearth/request_fingerprint.key)"
+[ "$(stat -c %s /var/lib/hearth/request_fingerprint.key)" = 32 ] || die "request_fingerprint.key : taille $(stat -c %s /var/lib/hearth/request_fingerprint.key)"
 [ "$(stat -c %a $INSTALLED)" = 755 ] || die "binaire : droits $(stat -c %a $INSTALLED)"
-ok "droits : données 0700, clé et base 0600, binaire 0755"
+ok "droits : données 0700, clé, secret d'empreinte (32 octets) et base 0600, binaire 0755"
 ! journalctl -u hearth-agent --no-pager 2>/dev/null | grep -qF "$PW" || die "le mot de passe est dans les journaux"
 ok "aucun mot de passe dans les journaux du service"
 
@@ -423,7 +425,7 @@ printf 'pas à Hearth' >/var/lib/hearth/notes.txt
 run "$INSTALLED" uninstall --purge --yes || die "la désinstallation avec purge a échoué"
 must_say "n'ont pas été touchés : notes.txt"
 [ "$(cat /var/lib/hearth/notes.txt)" = "pas à Hearth" ] || die "un fichier qui n'est pas à Hearth a été touché par la purge"
-for f in cert.pem key.pem install_id hearth.db; do
+for f in cert.pem key.pem install_id request_fingerprint.key hearth.db; do
     [ ! -e "/var/lib/hearth/$f" ] || die "la purge a laissé $f"
 done
 [ ! -e "$INSTALLED" ] && [ ! -e /etc/hearth ] && [ ! -e "$UNIT" ] || die "la purge a laissé le binaire, la configuration ou l'unité"

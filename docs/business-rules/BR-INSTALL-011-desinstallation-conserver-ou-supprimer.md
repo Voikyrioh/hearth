@@ -27,6 +27,9 @@ maj: 2026-10-05
 - Données laissées par une désinstallation précédente : `uninstall --purge` les retire même si l'agent n'est plus installé.
 - Installation gérée : le binaire fourni par le système n'est pas retiré.
 
+## Fichier du secret d'empreinte
+`uninstall --purge` efface aussi `request_fingerprint.key` et ses temporaires (`DATA_FILES`, `is_fingerprint_secret_temporary`, BR-RESIL-021, HRT-32) ; `--keep-data` le conserve avec la base.
+
 ## Règles liées
 - BR-INSTALL-003
 

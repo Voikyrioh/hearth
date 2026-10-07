@@ -342,13 +342,15 @@ async fn a_client_that_cuts_before_the_answer_still_gets_its_result_recorded() {
 
 #[tokio::test]
 async fn an_operation_left_running_by_a_previous_run_is_interrupted_at_startup() {
-    use hearth_agent::domain::operations::{OperationKey, RequestFingerprint};
+    use hearth_agent::domain::operations::OperationKey;
 
     let env = env().await;
     let lucas = env.create("lucas", Role::ReadOnly).await;
     let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
     let key = OperationKey::parse(KEY).unwrap();
-    let request = RequestFingerprint::of("PUT", "/me/password", body.to_string().as_bytes());
+    let request = env
+        .operations
+        .fingerprint("PUT", "/me/password", body.to_string().as_bytes());
     env.operations
         .begin(&key, &lucas.id, "PUT /me/password", &request)
         .await

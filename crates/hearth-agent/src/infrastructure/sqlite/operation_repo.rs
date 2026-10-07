@@ -48,7 +48,7 @@ fn into_operation(row: OperationRow) -> Result<Operation, StoreError> {
         key,
         account: AccountId::new(row.account_id),
         kind: row.kind,
-        request: RequestFingerprint::from_stored(row.request_hash),
+        request: RequestFingerprint::from_stored(&row.request_hash),
         status,
         result_json: row.result_json,
         created_at: parse_date(RESOURCE, &row.created_at)?,
@@ -103,6 +103,7 @@ impl OperationTx for SqliteUnitOfWork {
 
     async fn insert(&mut self, operation: &Operation) -> Result<(), StoreError> {
         let created_at = format_date(RESOURCE, operation.created_at)?;
+        let request_hash = operation.request.to_stored();
         let finished_at = operation
             .finished_at
             .map(|date| format_date(RESOURCE, date))
@@ -113,7 +114,7 @@ impl OperationTx for SqliteUnitOfWork {
             operation.key.as_str(),
             operation.account.as_str(),
             operation.kind,
-            operation.request.as_str(),
+            request_hash,
             operation.status.as_str(),
             operation.result_json,
             created_at,
