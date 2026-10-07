@@ -25,3 +25,4 @@ maj: 2026-10-07
 
 ## Historique
 - 2026-10-07 : création (HRT-28).
+- 2026-10-07 (HRT-30) : inchangée, toujours à remontrer à Voiky (question 1 de la conception : lire le journal doit-il demander le mot de passe et la clé ?). Le client ne demande rien pour ces lectures.
