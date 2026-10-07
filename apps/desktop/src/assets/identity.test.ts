@@ -11,7 +11,6 @@ import { ICO_FRAMES, TRAY_SIZES, TRAY_STATES } from "../../scripts/icon-spec.mjs
 const desktop = join(import.meta.dirname, "..", "..");
 const icons = join(desktop, "src-tauri", "icons");
 const source = join(icons, "source");
-const illustrations = join(import.meta.dirname, "illustrations");
 
 const BIBLE = ["#1c1518", "#2a2024", "#f6ece6", "#b3a19c", "#ff7b3d", "#ff4f7a", "#5fd0c0"];
 const STATES = ["#7ed39a", "#ffc04d", "#ff5a5a"];
@@ -115,9 +114,9 @@ describe("l'icône de la zone de notification", () => {
 });
 
 describe("les SVG", () => {
-  const all = [...svgFiles(source), ...svgFiles(illustrations)];
+  const all = svgFiles(source);
 
-  it("existent : logo, icônes, trois monochromes, six états, trois illustrations", () => {
+  it("existent : logo, icônes, trois monochromes, six états", () => {
     for (const name of [
       "logo.svg",
       "app-icon.svg",
@@ -129,13 +128,10 @@ describe("les SVG", () => {
     ]) {
       expect(existsSync(join(source, name)), name).toBe(true);
     }
-    for (const name of ["vide-premier-lancement", "vide-journal", "vide-hors-ligne"]) {
-      expect(existsSync(join(illustrations, `${name}.svg`)), name).toBe(true);
-    }
   });
 
   it("n'utilisent que les couleurs de la bible (et les trois couleurs d'état pour l'icône de notification)", () => {
-    expect(all.length).toBeGreaterThanOrEqual(16);
+    expect(all.length).toBeGreaterThanOrEqual(13);
     for (const path of all) {
       const text = readFileSync(path, "utf8");
       const colors = (text.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).map((c) => c.toLowerCase());

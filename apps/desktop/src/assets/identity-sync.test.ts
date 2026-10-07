@@ -3,8 +3,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ICO_FRAMES, RENDER_VERSION, TRAY_SIZES, TRAY_STATES } from "../../scripts/icon-spec.mjs";
+import {
+  ILLUSTRATIONS as ILLUSTRATION_SPECS,
+  RENDER_VERSION as ILLUSTRATIONS_RENDER_VERSION,
+  OUTPUT_SCALE,
+} from "../../scripts/illustration-spec.mjs";
 import { ILLUSTRATIONS } from "./illustrations";
-import { SCREEN_ILLUSTRATIONS } from "./illustrations/screens";
+import { ILLUSTRATION_FILES, SCREEN_ILLUSTRATIONS } from "./illustrations/screens";
 import { decodePng } from "./png-decode";
 
 // HRT-19 : les images générées sont bien celles de leurs sources, et ne sont pas vides.
@@ -172,10 +177,105 @@ describe("le logo n'a qu'une source de tracé", () => {
   });
 });
 
+describe("les illustrations des écrans vides (HRT-31)", () => {
+  const illustrations = join(desktop, "src", "assets", "illustrations");
+  const record = JSON.parse(
+    readFileSync(join(illustrations, "illustrations.sha256.json"), "utf8"),
+  ) as {
+    renderVersion: number;
+    sources: Record<string, string>;
+    outputs: Record<string, { sha256: string; from: string[]; size: number }>;
+  };
+  const sha = (data: Buffer | string) => createHash("sha256").update(data).digest("hex");
+  const outputPath = (name: string) => `src/assets/illustrations/${name}.png`;
+
+  it("a la version du rendu du script", () => {
+    expect(record.renderVersion, "RENDER_VERSION a changé : npm run build:illustrations").toBe(
+      ILLUSTRATIONS_RENDER_VERSION,
+    );
+  });
+
+  it("a l'empreinte de chaque source (image générée, spécification) relevée à la dernière génération", () => {
+    expect(Object.keys(record.sources)).toHaveLength(ILLUSTRATION_SPECS.length + 1);
+    for (const [path, expected] of Object.entries(record.sources)) {
+      const data = readFileSync(join(desktop, path));
+      const actual = sha(
+        path.endsWith(".mjs") ? data.toString("utf8").replaceAll("\r\n", "\n") : data,
+      );
+      expect(actual, `${path} a changé : npm run build:illustrations`).toBe(expected);
+    }
+  });
+
+  it("a, pour chaque illustration, une image produite à jour de sa source", () => {
+    for (const { name, source, display } of ILLUSTRATION_SPECS) {
+      const output = record.outputs[outputPath(name)];
+      expect(output, `${name} : absente de l'empreinte`).toBeDefined();
+      expect(output?.from, name).toEqual([`src/assets/illustrations/source/${source}`]);
+      expect(output?.size, name).toBe(display * OUTPUT_SCALE);
+      const actual = sha(readFileSync(join(desktop, outputPath(name))));
+      expect(actual, `${name}.png retouchée, vide ou périmée : npm run build:illustrations`).toBe(
+        output?.sha256,
+      );
+    }
+    expect(Object.keys(record.outputs)).toHaveLength(ILLUSTRATION_SPECS.length);
+  });
+
+  describe("le contenu de chaque image", () => {
+    const near = (rgba: Uint8Array, i: number, hex: string, tolerance: number) =>
+      [1, 3, 5].every(
+        (at, k) =>
+          Math.abs((rgba[i + k] ?? 0) - Number.parseInt(hex.slice(at, at + 2), 16)) <= tolerance,
+      );
+
+    for (const { name, display } of ILLUSTRATION_SPECS) {
+      it(`${name} : fond transparent, trait clair, braise, lueur partielle, poids raisonnable`, () => {
+        const buffer = readFileSync(join(desktop, outputPath(name)));
+        const { width, height, rgba } = decodePng(buffer);
+        expect([width, height]).toEqual([display * OUTPUT_SCALE, display * OUTPUT_SCALE]);
+        const alpha = (x: number, y: number) => rgba[(y * width + x) * 4 + 3] ?? 255;
+        const spots: [number, number][] = [
+          [0, 0],
+          [width - 1, 0],
+          [0, height - 1],
+          [width - 1, height - 1],
+          [width >> 1, 2],
+          [width >> 1, height - 3],
+        ];
+        for (const [x, y] of spots) {
+          expect(alpha(x, y), `${name} : fond opaque en (${x}, ${y})`).toBe(0);
+        }
+        let opaque = 0;
+        let partial = 0;
+        let cream = 0;
+        let ember = 0;
+        for (let i = 0; i < rgba.length; i += 4) {
+          const a = rgba[i + 3] ?? 0;
+          if (a >= 200) {
+            opaque += 1;
+            if (near(rgba, i, "#f6ece6", 14)) cream += 1;
+            if (near(rgba, i, "#ff7b3d", 45)) ember += 1;
+          } else if (a > 0) partial += 1;
+        }
+        expect(opaque, `${name} : image vide`).toBeGreaterThan(1000);
+        expect(opaque, `${name} : fond non retiré`).toBeLessThan(width * height * 0.2);
+        expect(cream, `${name} : trait clair`).toBeGreaterThan(300);
+        expect(ember, `${name} : braise`).toBeGreaterThan(30);
+        expect(partial, `${name} : lueur et bords doux`).toBeGreaterThan(500);
+        expect(buffer.length, `${name} : poids`).toBeLessThan(80 * 1024);
+      });
+    }
+  });
+});
+
 describe("la table des illustrations par écran", () => {
   it("ne cite que des illustrations qui existent, pour les quatre écrans", () => {
     for (const [screen, name] of Object.entries(SCREEN_ILLUSTRATIONS)) {
       if (name !== null) expect(ILLUSTRATIONS, screen).toHaveProperty(name);
+    }
+    // Chaque fragment de fichier attendu (e2e) est celui d'une image produite.
+    const produced = ILLUSTRATION_SPECS.map((spec) => spec.name);
+    for (const [name, fragment] of Object.entries(ILLUSTRATION_FILES)) {
+      expect(produced, name).toContain(fragment);
     }
     expect(Object.keys(SCREEN_ILLUSTRATIONS).sort()).toEqual([
       "accounts",
