@@ -179,7 +179,8 @@ pub enum Activation {
 /// La garde se mesure sur le temps écoulé depuis le démarrage du noyau quand c'est le même démarrage
 /// que celui de la fin ; sinon (machine redémarrée, identifiant illisible) sur l'horloge murale, et une
 /// date de fin dans le futur (horloge reculée) compte comme récente : le doute profite à la prudence
-/// (moins d'essais, jamais plus).
+/// (moins d'essais, jamais plus). **Borne** (HRT-28, BR-TRUST-047) : machine redémarrée et identifiant
+/// lisible, la garde tombe après `REARM` de marche même si l'heure a été reculée.
 pub fn plan_activation(stored: &Stored, boot: &Boot, now: OffsetDateTime) -> Activation {
     if stored.active {
         return Activation::Already;
@@ -197,7 +198,18 @@ pub fn plan_activation(stored: &Stored, boot: &Boot, now: OffsetDateTime) -> Act
             // Même démarrage : le temps écoulé ne recule jamais.
             boot.uptime - ended < REARM
         }
-        None => stored.ended_at.is_some_and(|ended| now - ended < REARM),
+        None => {
+            let wall_recent = stored.ended_at.is_some_and(|ended| now - ended < REARM);
+            // Machine redémarrée depuis la fin (démarrage lisible et différent) : la fin a eu lieu AVANT
+            // ce démarrage, donc le temps écoulé depuis elle est au moins le temps de marche. Passé
+            // `REARM` de marche, la garde tombe, quelle que soit l'heure murale (BR-TRUST-047). Avant,
+            // l'horloge murale ne peut que rallonger la garde (une fin « dans le futur » est récente).
+            let other_boot = matches!(
+                (&boot.id, &stored.ended_boot_id),
+                (Some(current), Some(ended)) if current != ended
+            );
+            wall_recent && (!other_boot || boot.uptime < REARM)
+        }
     };
     if recent {
         Activation::Prolong
@@ -546,6 +558,48 @@ mod tests {
         assert_eq!(
             plan_activation(&old, &boot(None, 3), at()),
             Activation::Fresh
+        );
+    }
+
+    #[test]
+    fn a_rebooted_machine_with_the_clock_set_back_keeps_the_guard_for_thirty_minutes_of_uptime_only()
+     {
+        // Fin sous le démarrage B1 ; la machine redémarre (B2) et l'heure est reculée d'un an.
+        let stored = ended(EndHow::Manual, Some("B1"), Some(600), 10);
+        let back = Duration::days(-365);
+        let before = boot(Some("B2"), 29);
+        let after = boot(Some("B2"), 31);
+        assert_eq!(
+            plan_activation(&stored, &before, at() + back),
+            Activation::Prolong,
+            "avant 30 minutes de marche, la garde tient"
+        );
+        assert_eq!(
+            plan_activation(&stored, &after, at() + back),
+            Activation::Fresh,
+            "après 30 minutes de marche, l'heure reculée ne la tient plus"
+        );
+        // Même scénario avec une heure avancée, ou honnête : jamais plus tôt qu'avant la borne.
+        for skew in [Duration::days(365), Duration::ZERO, Duration::hours(-5)] {
+            assert_eq!(
+                plan_activation(&stored, &after, at() + skew),
+                Activation::Fresh
+            );
+        }
+        // Même démarrage : inchangé (le temps de marche seul décide, l'heure murale est sans effet).
+        let same = ended(EndHow::Manual, Some("B1"), Some(600), 10);
+        let recent = Boot {
+            id: Some("B1".into()),
+            uptime: Duration::seconds(600) + Duration::minutes(5),
+        };
+        assert_eq!(
+            plan_activation(&same, &recent, at() + back),
+            Activation::Prolong
+        );
+        // Identifiant de démarrage illisible : l'horloge murale seule, comme avant.
+        assert_eq!(
+            plan_activation(&stored, &boot(None, 31), at() + back),
+            Activation::Prolong
         );
     }
 
