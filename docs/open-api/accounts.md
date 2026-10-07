@@ -49,7 +49,7 @@ Ferme toutes les sessions du compte sans toucher à son mot de passe (BR-ACCT-01
 
 ## `PUT /api/v1/me/password` (tout rôle)
 
-Corps : `{ "current": "…", "password": "…" }`. `200` : `{ "sessions_closed": n }` : les **autres** sessions sont fermées, la session courante est gardée (BR-ACCT-009).
+Corps : `{ "current": "…", "password": "…", "keep_address": false }`. `keep_address` est **facultatif** (Q15, BR-CONN-019) : absent ou faux, toutes les adresses retenues du compte sans clé sont oubliées, celle d'où part la requête comprise ; vrai, l'adresse d'où part la requête (la connexion TCP, jamais une valeur du corps) est gardée si elle est retenue, les autres oubliées. Les adresses liées à un poste à clé restent dans les deux cas (BR-TRUST-023). `200` : `{ "sessions_closed": n }` : les **autres** sessions sont fermées, la session courante est gardée (BR-ACCT-009).
 
 | Statut | Code | Quand |
 |---|---|---|

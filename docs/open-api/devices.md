@@ -26,6 +26,7 @@ Les deux routes exigent `X-Hearth-Api` et un jeton, et sont ouvertes à **tout r
 }
 ```
 
+- Retirer un poste ferme aussi toutes les sessions du compte sans lien à un poste, sauf la courante (HRT-24, BR-TRUST-022).
 - Du plus ancien au plus récent. `name` : le nom annoncé à l'inscription (`X-Hearth-Client`, nettoyé, `inconnu` sinon). `last_proved_at` / `last_addr` : la dernière preuve de la clé (connexion ou ouverture du flux). `current` : le poste de la session qui fait la requête (aucun poste n'est courant pour une session ouverte sans clé).
 - **Jamais** une clé publique, une empreinte de clé, un défi ou une signature.
 
