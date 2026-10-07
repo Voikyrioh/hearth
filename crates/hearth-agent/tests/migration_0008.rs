@@ -189,6 +189,12 @@ async fn no_old_fingerprint_is_left_in_the_database_file_or_its_journal() {
         pool.close().await;
     }
 
+    // Un dossier de données porte les droits 0700 (l'agent refuse un dossier ouvert qui a du contenu).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let db = Database::open(dir.path()).await.unwrap();
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operations")
         .fetch_one(db.pool())
