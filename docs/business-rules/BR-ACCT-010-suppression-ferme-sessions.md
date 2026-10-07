@@ -33,3 +33,4 @@ Bouton « Supprimer » → `ConfirmDialog` qui nomme le compte (« Supprimer le 
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : la suppression accepte un membre `reauth` (BR-TRUST-036) ; couverte par l'élévation (BR-TRUST-043).

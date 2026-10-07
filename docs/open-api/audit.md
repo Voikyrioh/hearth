@@ -85,6 +85,8 @@ Mêmes filtres (sans `before` ni `limit`). `200` : le résultat filtré en CSV, 
 
 ## Journalisation
 
+Depuis HRT-28 : action `reauth.setting` (« Réglage de la fréquence du mot de passe ») ; les refus de confirmation d'un acte sont consignés sous l'action de l'acte avec les raisons « confirmation absente : client trop ancien », « preuve de clé absente », « preuve de clé invalide », « mot de passe requis », « mot de passe actuel incorrect », « trop de tentatives, attente de N s » (BR-TRUST-046). Aucun secret.
+
 | Qui écrit | Quoi |
 |---|---|
 | Les cas d'usage, dans la transaction de l'action | Les succès : création, suppression, rôle, mots de passe, fermeture de sessions, connexion réussie, connexion refusée, blocage, déconnexion. |

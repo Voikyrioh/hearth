@@ -32,3 +32,4 @@ Sur le serveur lui-même : `hearth-agent attack-mode off` (BR-TRUST-027), `last_
 ## Historique
 - 2026-10-07 : création (HRT-25, session 2026-10-04-hearth-creation, T34).
 - 2026-10-07 : côté client (HRT-26, T38) : le bouton « Désactiver le mode attaque » de la carte, même confirmation avec mot de passe, mêmes raisons d'indisponibilité que l'activation (BR-TRUST-010, 029) ; message « Mode attaque désactivé. » ; `src/pages/SecurityMode.test.ts` (« deactivates with the same confirmation »), `apps/desktop/src-tauri/tests/security_runtime.rs::an_administrator_with_the_key_activates_then_deactivates_with_the_password`.
+- 2026-10-07 : HRT-28 : la désactivation accepte aussi le contrat `reauth` (`0x05`), même règle de clé (BR-TRUST-041) ; une activation ferme toutes les élévations (BR-TRUST-043).

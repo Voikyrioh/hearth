@@ -47,3 +47,4 @@ Code ajouté : `domain/login_policy.rs::{admit, conclude}`, `domain/lockout.rs::
 - 2026-10-04 — file d'attente bornée par adresse (`429`), nettoyage de l'identifiant étendu aux séparateurs Unicode et caractères de format (suivis review HRT-04, HRT-05).
 - 2026-10-06 — compléments HRT-20 (section ajoutée à valider, énoncé conservé tel quel ; ADR-0022).
 - 2026-10-06 — compléments HRT-20 (section ajoutée à valider, énoncé conservé tel quel ; ADR-0022).
+- 2026-10-07 : HRT-28 : les confirmations d'actes avancent les mêmes compteurs (couple, adresse, identifiant), BR-TRUST-040.

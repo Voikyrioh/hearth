@@ -36,3 +36,4 @@ Un compte administrateur ne peut être ni supprimé ni rétrogradé s'il est le 
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : changement de rôle et suppression acceptent un membre `reauth` (BR-TRUST-036) ; donner le rôle Administrateur n'est jamais couvert par l'élévation (BR-TRUST-043).

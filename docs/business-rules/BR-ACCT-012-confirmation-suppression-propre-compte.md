@@ -34,3 +34,4 @@ Un administrateur qui supprime son propre compte doit retaper son identifiant (i
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : l'identifiant retapé reste exigé à côté du membre `reauth` (BR-TRUST-036).

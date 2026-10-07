@@ -35,3 +35,4 @@ Sont consignés sous l'action « Mise à jour de l'agent » (`agent.update`) : l
 ## Historique
 - 2026-10-05 : création (HRT-17, lot agent, session 2026-10-04-hearth-creation).
 - 2026-10-06 : section Interface (HRT-17, lot interface, session 2026-10-04-hearth-creation, T28).
+- 2026-10-07 : HRT-28 : les refus de confirmation de la mise à jour sont consignés sous `agent.update` (BR-TRUST-046).

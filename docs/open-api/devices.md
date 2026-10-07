@@ -32,6 +32,8 @@ Les deux routes exigent `X-Hearth-Api` et un jeton, et sont ouvertes à **tout r
 
 ## `DELETE /api/v1/me/devices/{id}` : retirer un poste
 
+Garde son contrat (champs `password` et `device` à plat, usage `0x04`, clé du **poste courant**, Q18) : la couche de confirmation des autres actes ne s'y pose pas. « Poste courant » est le poste relié à la session à la connexion par mot de passe, jamais réécrit par une preuve de session (BR-TRUST-048).
+
 - **Authentification** : jeton **et** corps (ci-dessous). **Rôle** : tous. **Suivi par clé** : oui (`Idempotency-Key` : rejouer rend le premier résultat). **Journal** : `device.remove`.
 - **Corps** :
 

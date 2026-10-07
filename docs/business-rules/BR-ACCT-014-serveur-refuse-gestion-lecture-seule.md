@@ -33,3 +33,4 @@ L'interface masque, elle ne protège pas : un compte Lecture seule qui force l'a
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-04 — appliquée aux routes (HRT-04).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : le rôle est vérifié avant la confirmation (`403` avant tout `reauth`).

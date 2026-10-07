@@ -12,7 +12,8 @@ L'état de sécurité du compte connecté (HRT-24, ADR-0024, BR-TRUST-008) et le
 {
   "alert": { "own": true, "since": "2026-10-07T01:04:11Z", "others": 1 },
   "attack_mode": { "state": "off" },
-  "device": "proven"
+  "device": "proven",
+  "admin_reauth": { "required": false, "factors": ["password", "device_key"], "password": "window", "elevated_for_s": 0 }
 }
 ```
 
@@ -24,7 +25,8 @@ L'état de sécurité du compte connecté (HRT-24, ADR-0024, BR-TRUST-008) et le
   - `resumes_in_s` : seulement `suspended` : les secondes restantes de la fenêtre (arrondies à la seconde supérieure, mesurées sur le temps écoulé depuis le démarrage du noyau, jamais sur l'horloge murale).
   - `last_end` : seulement `off`, comment la dernière activation s'est terminée : `manual` (depuis le client), `auto` (30 minutes sans tentative refusée), `cli` (`hearth-agent attack-mode off`).
   - Exemples : `{"state":"off"}`, `{"state":"active","since":"2026-10-07T01:00:00Z"}`, `{"state":"suspended","since":"…","resumes_in_s":1200}`, `{"state":"off","last_end":"auto"}`.
-- `device` : `proven` si la session a été ouverte ou prouvée par la clé d'un poste inscrit, `none` sinon.
+- `device` : `proven` si la session a été ouverte ou prouvée par la clé d'un poste inscrit, `none` sinon. Le poste d'une session est posé à la connexion par mot de passe et n'est jamais réécrit par une preuve de session (BR-TRUST-048).
+- `admin_reauth` (HRT-28) : la confirmation des actes d'administration. **Absent : agent d'avant ce ticket** (le client agit comme avant, sans rien confirmer). `required` : l'agent **exige** la confirmation (`false` tant qu'il ne fait que l'accepter ; `true` quand le client qui confirme est livré, HRT-30). `factors` : ce qu'il faut réunir (`password`, `device_key`). `password` : le réglage du compte, `window` (défaut, une saisie pour 5 minutes) ou `each` (à chaque action). `elevated_for_s` : secondes restantes de l'élévation de **cette session depuis cette adresse**, 0 sinon (indicatif : l'agent décide à l'acte).
 
 ## Message de flux `security`
 
@@ -58,6 +60,36 @@ Un administrateur dont le client n'a pas de clé inscrite (client ancien, poste 
 **Journal des refus de cette route** : le geste se lit dans `active` du corps, mais le corps n'est lu qu'une fois la session reconnue et le rôle admis. Un `401` (sans jeton ou jeton inconnu) ne lit aucun corps et n'est pas journalisé ; un `403` (rôle insuffisant) ne lit aucun corps non plus et est consigné « refusé » sous `attack_mode.enable` (geste par défaut) ; pour un administrateur authentifié dont le corps est illisible, absent ou sans `active`, le geste par défaut est l'activation (`attack_mode.enable`, « échoué », `422`).
 
 `409 POST_NOT_RECOGNIZED` n'est rendu **que par cette route**, à un administrateur déjà authentifié. Une connexion bloquée par le mode attaque n'en reçoit jamais : elle reçoit le refus d'un mot de passe faux (le journal, lui, dit « mode attaque : poste non reconnu »).
+
+Depuis HRT-28, cette route accepte **aussi** le contrat commun des actes (membre `reauth`, usage `0x05`, voir « Confirmation des actes d'administration » ci-dessous) : la clé exigée est la même (une clé inscrite du compte), les réponses sont celles ci-dessus. La forme à plat (usage `0x03`) reste acceptée pour les clients livrés.
+
+## Confirmation des actes d'administration (HRT-28, ADR-0031, ADR-0032)
+
+Tout acte d'administration (créer un compte, changer un rôle, le mot de passe d'un compte, supprimer un compte, fermer ses sessions, lancer la mise à jour de l'agent, activer ou désactiver le mode attaque, changer son propre mot de passe, régler la fréquence du mot de passe) accepte un membre `reauth` dans son corps :
+
+```json
+{ "reauth": { "password": "…", "device": { "algorithm": "ed25519", "public_key": "…", "challenge": "…", "signature": "…" } } }
+```
+
+- **Preuve** : `POST /sessions/challenge` avec `purpose: "admin_act"`, puis signature d'usage `0x05` liée à l'acte (code, cible = identifiant technique du compte visé, paramètres non secrets : compte et rôle d'une création, rôle d'un changement, version et somme d'une mise à jour, valeur du réglage), au compte, au hachage du jeton, au serveur et au défi. Octets : `hearth_proto::device_proof` et `hearth_proto::admin_act`. L'agent reconstruit l'acte depuis la requête.
+- **Mot de passe** : par le chemin de la connexion (mêmes compteurs et ralentissement). Absent sous élévation pour un acte couvert (créer un compte en lecture seule, passer un compte en lecture seule, supprimer un compte, fermer les sessions d'un compte).
+- **Ordre** : session et rôle, preuve (aucun mot de passe n'est essayé tant qu'elle n'est pas valable), mot de passe ou élévation, acte, puis le défi est consommé si la réponse est un succès.
+- **Tant que `admin_reauth.required` est faux**, un acte sans `reauth` passe comme avant ; un acte avec `reauth` est vérifié.
+
+| Statut | Code | `details` | Quand |
+|---|---|---|---|
+| 409 | `POST_NOT_RECOGNIZED` | `field: "reauth.device"`, `reason: "proof_missing"` | `reauth` présent sans preuve lisible |
+| 409 | `POST_NOT_RECOGNIZED` | `field: "reauth.device"`, `reason: "proof_invalid"` | preuve d'un autre acte, d'une autre cible, d'un autre compte, d'une autre session, périmée, rejouée, clé non inscrite pour le compte |
+| 409 | `POST_NOT_RECOGNIZED` | `field: "reauth.password"`, `reason: "password_required"` | élévation absente ou fermée, ou acte non couvert, et mot de passe absent |
+| 422 | `WRONG_PASSWORD` | | mot de passe faux (compté comme un échec de connexion) |
+| 429 | `TOO_MANY_ATTEMPTS` | `retry_after_s` | attente du chemin de la connexion |
+| 426 | `INCOMPATIBLE_VERSION` | `upgrade: "client"`, `reason: "reauth_required"` | acte sans `reauth` quand l'agent l'exige (HRT-30) ; toujours pour `PUT /me/reauth` |
+
+Les codes propres à chaque acte (`USERNAME_TAKEN`, `LAST_ADMIN`, `WEAK_PASSWORD`, `BAD_SIGNATURE`, `MANAGED_INSTALL`, `OPERATION_IN_PROGRESS`, `NOT_FOUND`) ne sont rendus qu'après une confirmation réussie. Le retrait d'un poste garde son contrat et ses réponses (voir [postes de confiance](./devices.md)).
+
+## `PUT /api/v1/me/reauth` : le réglage de fréquence du mot de passe
+
+Tout rôle, suivie par clé d'opération. Corps : `{ "password": "window" | "each", "reauth": { … } }` (`password` porte le **réglage** ; le mot de passe de confirmation est dans `reauth`). **Toujours confirmé** (mot de passe et preuve de clé, jamais l'élévation) : acte `0x0B`. `200` : l'objet `admin_reauth`. Passer à `each` ferme les élévations du compte. Journal : `reauth.setting`.
 
 ## Ce que le mode attaque change pour les autres routes
 

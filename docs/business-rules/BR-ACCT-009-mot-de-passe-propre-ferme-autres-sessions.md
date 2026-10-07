@@ -36,3 +36,4 @@ Le mot de passe mémorisé au coffre suit (`apps/desktop/src-tauri/src/accounts/
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-07 : HRT-28 : l'ancien mot de passe passe par le chemin de la connexion (compteurs, ralentissement) dans tous les cas, avec ou sans `reauth` (BR-TRUST-040) ; il est le mot de passe de la confirmation quand `reauth` est présent.
