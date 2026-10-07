@@ -24,6 +24,7 @@ pub fn purpose_of(binding: &Binding<'_>) -> ChallengePurpose {
         Binding::Session { .. } => ChallengePurpose::Session,
         Binding::AttackMode { .. } => ChallengePurpose::AttackMode,
         Binding::DeviceRemoval { .. } => ChallengePurpose::DeviceRemoval,
+        Binding::AdminAct { .. } => ChallengePurpose::AdminAct,
     }
 }
 
@@ -202,4 +203,54 @@ pub async fn attack_mode_body(
         &challenge,
     );
     serde_json::json!({ "active": active, "password": password, "device": device_json(&proof) })
+}
+
+/// Le membre `reauth` d'un acte d'administration (HRT-28) : le mot de passe (vide : absent) et la preuve
+/// d'usage `0x05` de cette clé, liée au jeton de la session `token` et à l'acte `act` (défi demandé à la
+/// route, signé pour le serveur des tests).
+pub async fn reauth_member(
+    api: &super::api::Api,
+    key: &DeviceKey,
+    username: &str,
+    token: &str,
+    act: &hearth_proto::admin_act::AdminAct<'_>,
+    password: &str,
+) -> serde_json::Value {
+    let reply = api
+        .post("/sessions/challenge")
+        .json(&serde_json::json!({ "username": username, "purpose": "admin_act" }))
+        .send()
+        .await;
+    let challenge = reply.body["challenge"].as_str().expect("défi").to_owned();
+    let hash = hearth_agent::domain::session_token::SessionToken::parse(token)
+        .expect("jeton")
+        .hash();
+    let proof = key.sign(
+        &Fingerprint::from_bytes(SERVER_FINGERPRINT),
+        Binding::AdminAct {
+            token_hash: hash.as_bytes(),
+            act,
+        },
+        username,
+        &challenge,
+    );
+    let mut member = serde_json::json!({ "device": device_json(&proof) });
+    if !password.is_empty() {
+        member["password"] = serde_json::Value::String(password.to_owned());
+    }
+    member
+}
+
+/// Le corps `body` d'un acte, augmenté de son membre `reauth`.
+pub async fn with_reauth(
+    api: &super::api::Api,
+    key: &DeviceKey,
+    username: &str,
+    token: &str,
+    act: &hearth_proto::admin_act::AdminAct<'_>,
+    password: &str,
+    mut body: serde_json::Value,
+) -> serde_json::Value {
+    body["reauth"] = reauth_member(api, key, username, token, act, password).await;
+    body
 }

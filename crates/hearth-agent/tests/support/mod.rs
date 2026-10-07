@@ -225,6 +225,8 @@ pub struct Env {
     /// L'alerte, branchée comme en production sur `sessions` (HRT-24).
     pub security: Arc<SecurityService>,
     pub monotonic: Arc<TestMonotonic>,
+    /// L'élévation du mot de passe en administration, branchée comme en production (HRT-28).
+    pub elevations: Arc<hearth_agent::application::elevation::Elevations>,
     pub verifier: Arc<CountingVerifier>,
     /// Le mode attaque, branché comme en production sur `sessions` et `security` (HRT-25) ; éteint
     /// tant qu'un test ne l'allume pas.
@@ -283,16 +285,23 @@ pub async fn env() -> Env {
         trail.clone(),
     ));
     let audit_sink: Arc<dyn hearth_agent::application::ports::AuditSink> = audit_recorder.clone();
-    let service = Arc::new(AccountService::new(
-        accounts.clone(),
-        session_repo.clone(),
-        store.clone(),
-        hasher.clone(),
-        clock.clone(),
-        ids.clone(),
-        trail.clone(),
-    ));
     let monotonic = Arc::new(TestMonotonic(AtomicU64::new(1_000)));
+    // L'élévation du mot de passe en administration (HRT-28), branchée comme en production.
+    let elevations = Arc::new(hearth_agent::application::elevation::Elevations::new(
+        monotonic.clone(),
+    ));
+    let service = Arc::new(
+        AccountService::new(
+            accounts.clone(),
+            session_repo.clone(),
+            store.clone(),
+            hasher.clone(),
+            clock.clone(),
+            ids.clone(),
+            trail.clone(),
+        )
+        .with_elevations(elevations.clone()),
+    );
     let verifier = Arc::new(CountingVerifier {
         inner: RingProofVerifier,
         calls: AtomicU64::new(0),
@@ -352,7 +361,8 @@ pub async fn env() -> Env {
         )
         .with_trust(trust.clone())
         .with_security(security.clone())
-        .with_attack(attack.clone()),
+        .with_attack(attack.clone())
+        .with_elevations(elevations.clone()),
     );
     let operations = Arc::new(OperationService::new(
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
@@ -380,6 +390,7 @@ pub async fn env() -> Env {
         trust,
         security,
         monotonic,
+        elevations,
         verifier,
         attack,
         boot,
