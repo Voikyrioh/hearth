@@ -73,6 +73,14 @@ print(json.dumps({"version": sys.argv[1], "url": sys.argv[2], "signature": sig, 
 
 sha_of() { sha256sum "$1" | cut -d ' ' -f 1; }
 
+# L'agent EXIGE la confirmation des actes d'administration (HRT-30, ADR-0033) : mot de passe ET preuve de la
+# clé d'un poste inscrit. `confirmed` ajoute le membre `reauth` à un corps de mise à jour (défi neuf, preuve
+# liée à la version et à la somme, jeton de la session ADMIN). La clé de ce « poste » est inscrite une fois.
+KEYFILE=/tmp/e2e-device.pem
+confirmed() {
+    printf '%s' "$1" | python3 /deploy/e2e/admin_act.py confirm 127.0.0.1 "$PORT" "$ADMIN" "$USER_NAME" "$PW" "$KEYFILE"
+}
+
 # Attend que la mise à jour en cours soit terminée (état « en cours » tombé, résultat présent).
 wait_done() {
     waited=0
@@ -142,6 +150,7 @@ run env HEARTH_ACCOUNT_PASSWORD=$PW "$INSTALLED" account add $RO_NAME --role rea
 ADMIN=$(token_of $USER_NAME)
 READONLY=$(token_of $RO_NAME)
 [ -n "$ADMIN" ] && [ -n "$READONLY" ] || die "connexion impossible"
+[ "$(python3 /deploy/e2e/admin_act.py enroll 127.0.0.1 "$PORT" "$USER_NAME" "$PW" "$KEYFILE")" = enrolled ] || die "la clé de ce poste n'a pas été inscrite"
 FP_BEFORE=$("$INSTALLED" fingerprint)
 BIN_BEFORE=$(sha_of "$INSTALLED")
 ACCOUNTS_BEFORE=$(api GET /accounts "$ADMIN" >/dev/null; python3 -c 'import json; print(len(json.load(open("/tmp/out.body"))["accounts"]))')
@@ -161,9 +170,15 @@ code=$(api POST /agent/update "$READONLY" -d "$BODY")
 [ "$code" = 403 ] && [ "$(body_field error.code)" = FORBIDDEN_ROLE ] || die "un compte en lecture seule devrait recevoir 403 FORBIDDEN_ROLE (reçu $code)"
 ok "compte en lecture seule : 403 FORBIDDEN_ROLE"
 
+# Un client qui n'envoie pas la confirmation (session seule) : l'agent EXIGE, « client trop ancien », rien n'est fait.
+code=$(api POST /agent/update "$ADMIN" -d "$BODY")
+[ "$code" = 426 ] && [ "$(body_field error.code)" = INCOMPATIBLE_VERSION ] && [ "$(body_field error.details.reason)" = reauth_required ]     || die "une demande sans confirmation devrait recevoir 426 INCOMPATIBLE_VERSION reauth_required (reçu $code : $(cat "$OUT.body"))"
+[ ! -e "$DATA/update" ] || die "$DATA/update existe : quelque chose a été écrit pour une demande non confirmée"
+ok "mise à jour sans confirmation : 426 client trop ancien, rien d'écrit"
+
 : >/tmp/https.log
 BAD=$(request_body 0.2.0 "$NEW_URL" /dist/new.other.minisig /dist/hearth-agent-new)
-code=$(api POST /agent/update "$ADMIN" -d "$BAD")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$BAD")")
 [ "$code" = 422 ] && [ "$(body_field error.code)" = BAD_SIGNATURE ] || die "une signature d'une autre clé devrait recevoir 422 BAD_SIGNATURE (reçu $code : $(cat "$OUT.body"))"
 [ ! -e "$DATA/update" ] || die "$DATA/update existe : quelque chose a été écrit avant la vérification"
 [ ! -s /tmp/https.log ] || die "le fichier a été téléchargé malgré la signature invalide : $(cat /tmp/https.log)"
@@ -174,7 +189,7 @@ ok "signature d'une autre clé : 422 BAD_SIGNATURE, rien téléchargé, rien éc
 
 # Somme fausse (signature de la bonne clé, bon fichier) : refusée après téléchargement, avant toute écriture.
 WRONG_SUM=$(python3 -c 'import json,sys; b=json.loads(sys.argv[1]); b["sha256"]="0"*64; print(json.dumps(b))' "$(request_body 0.2.0 "$NEW_URL" /dist/new.minisig /dist/hearth-agent-new)")
-code=$(api POST /agent/update "$ADMIN" -d "$WRONG_SUM")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$WRONG_SUM")")
 [ "$code" = 202 ] || die "la demande à somme fausse est acceptée puis échoue (reçu $code : $(cat "$OUT.body"))"
 wait_done 60
 [ "$(body_field last.outcome)" = failed ] && [ "$(body_field last.reason)" = bad_checksum ] || die "une somme fausse devrait donner failed/bad_checksum : $(cat "$OUT.body")"
@@ -185,7 +200,7 @@ ok "somme fausse : refusée avant toute écriture du binaire, agent inchangé"
 # --------------------------------------------------------------------------------------------
 # 2. Mise à jour réussie : comptes, journal et empreinte survivent
 # --------------------------------------------------------------------------------------------
-code=$(api POST /agent/update "$ADMIN" -d "$BODY")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$BODY")")
 [ "$code" = 202 ] || die "la mise à jour valable devrait être acceptée (202), reçu $code : $(cat "$OUT.body")"
 [ "$(body_field step)" = download ] || die "la première étape devrait être le téléchargement"
 wait_done 120
@@ -219,7 +234,7 @@ ok "comptes, sessions et journal intacts ; le journal garde la mise à jour réu
 # --------------------------------------------------------------------------------------------
 BIN_V2=$(sha_of "$INSTALLED")
 MUTE_BODY=$(request_body 0.3.0 "$MUTE_URL" /dist/mute.minisig /dist/mute)
-code=$(api POST /agent/update "$ADMIN" -d "$MUTE_BODY")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$MUTE_BODY")")
 [ "$code" = 202 ] || die "la mise à jour vers l'agent muet devrait être acceptée (202), reçu $code : $(cat "$OUT.body")"
 # On attend, sur condition (pas sur une durée), que le binaire installé soit celui de l'agent muet :
 # l'ancien agent est alors arrêté et remplacé, puis /hello ne répond pas.
@@ -253,10 +268,10 @@ ok "agent muet : retour automatique à l'ancien binaire (identique octet pour oc
 # 4. Une seule mise à jour à la fois
 # --------------------------------------------------------------------------------------------
 SLOW_BODY=$(request_body 0.9.0 "$SLOW_URL" /dist/new.minisig /dist/hearth-agent-new)
-code=$(api POST /agent/update "$ADMIN" -d "$SLOW_BODY")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$SLOW_BODY")")
 [ "$code" = 202 ] || die "la mise à jour lente devrait être acceptée (reçu $code : $(cat "$OUT.body"))"
 sleep 1
-code=$(api POST /agent/update "$ADMIN" -d "$SLOW_BODY")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$SLOW_BODY")")
 [ "$code" = 409 ] && [ "$(body_field error.code)" = OPERATION_IN_PROGRESS ] || die "la deuxième demande devrait recevoir 409 OPERATION_IN_PROGRESS (reçu $code)"
 [ "$(body_field error.message)" = "Une mise à jour de l'agent est déjà en cours. Réessaye plus tard." ] || die "message inattendu : $(cat "$OUT.body")"
 [ "$(api GET /agent/update "$READONLY")" = 200 ] && [ "$(body_field in_progress)" = true ] || die "l'état devrait dire « en cours »"
@@ -276,7 +291,7 @@ ok "deuxième demande pendant une mise à jour : 409 OPERATION_IN_PROGRESS, cons
 # 5. Superviseur tué après l'échange des binaires : le démarrage suivant conclut (BR-UPDATE-028)
 # --------------------------------------------------------------------------------------------
 NEXT_BODY=$(request_body 0.2.1 "$NEXT_URL" /dist/next.minisig /dist/hearth-agent-next)
-code=$(api POST /agent/update "$ADMIN" -d "$NEXT_BODY")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$NEXT_BODY")")
 [ "$code" = 202 ] || die "la mise à jour vers 0.2.1 devrait être acceptée (reçu $code : $(cat "$OUT.body"))"
 # Dès que le binaire est échangé, le superviseur est gelé puis tué : il ne conclura jamais.
 waited=0
@@ -317,7 +332,7 @@ ok "mise à jour orpheline : conclue au démarrage (réussite), sauvegarde retir
 # --------------------------------------------------------------------------------------------
 # 6. Agent tué pendant le téléchargement : la tentative est conclue « interrompue » au démarrage
 # --------------------------------------------------------------------------------------------
-code=$(api POST /agent/update "$ADMIN" -d "$SLOW_BODY")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$SLOW_BODY")")
 [ "$code" = 202 ] || die "la mise à jour lente devrait être acceptée (reçu $code : $(cat "$OUT.body"))"
 sleep 2
 systemctl kill --signal=SIGKILL hearth-agent
@@ -339,7 +354,7 @@ ok "agent tué pendant le téléchargement : tentative conclue « interrompue »
 #    remet l'ancien binaire : le service est relevé sans geste manuel.
 # --------------------------------------------------------------------------------------------
 BIN_V021=$(sha_of "$INSTALLED")
-code=$(api POST /agent/update "$ADMIN" -d "$MUTE_BODY")
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$MUTE_BODY")")
 [ "$code" = 202 ] || die "la mise à jour vers l'agent muet devrait être acceptée (202), reçu $code : $(cat "$OUT.body")"
 waited=0
 until [ "$(sha_of "$INSTALLED")" = "$(sha_of /dist/mute)" ]; do
