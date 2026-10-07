@@ -7,3 +7,5 @@ Création d'un compte : « Identifiant », « Mot de passe » (avec `PasswordRul
 - Props : `open`, `serverId`
 - Événements et slots : Événement `close`
 - Notes : BR-ACCT-001 à 005. Test : `accounts.test.ts`.
+
+HRT-30 : habillée par `AdminActDialog` (kind `account_create`, rôle visé = rôle choisi : donner « Administrateur » n'est jamais couvert par le délai) ; la saisie est gardée si le délai se ferme entre-temps.

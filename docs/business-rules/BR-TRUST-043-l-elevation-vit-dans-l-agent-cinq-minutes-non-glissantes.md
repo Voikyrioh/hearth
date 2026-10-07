@@ -28,3 +28,4 @@ maj: 2026-10-07
 
 ## Historique
 - 2026-10-07 : création (HRT-28, tranche D1 ; décision Q19 ; liste des actes exclus : choix de Claude à remontrer à Voiky).
+- 2026-10-07 (HRT-30) : la règle de couverture `covered_by_elevation` est déplacée dans `hearth_proto::admin_act` (source unique lue par l'agent, qui décide, et par le client, qui sait s'il faut demander le mot de passe) ; `domain/trust/admin_act.rs::covered_by_elevation` la délègue. Le client lit l'élévation de l'agent à chaque ouverture de fenêtre (BR-TRUST-052).

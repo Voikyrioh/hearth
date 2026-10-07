@@ -7,3 +7,5 @@ Confirmation de l'activation ou de la désactivation du mode attaque (HRT-26, Q1
 - Props : `open`, `serverId`, `active` (le geste demandé)
 - Événements et slots : `close`
 - Notes : rendue par `ServerLayout` (une seule, état `security.dialog` du store). Passe par `useAttackModeActions` (donc `useServerAction`). Tests : `pages/SecurityMode.test.ts`.
+
+HRT-30 : habillée par `AdminActDialog` (kind `attack_mode_enable` / `attack_mode_disable`, jamais couvert par le délai) ; contrat commun des actes (`0x05`) face à un agent qui l'annonce.

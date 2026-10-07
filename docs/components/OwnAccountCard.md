@@ -7,3 +7,5 @@ Carte « Mon compte » d'un serveur dans les réglages (tous les rôles) : nom d
 - Props : `server`
 - Événements et slots : Aucun
 - Notes : BR-ACCT-009, 012, 013. Test : `accounts.test.ts`, `SettingsAccounts.test.ts`.
+
+HRT-30 : la suppression de son compte passe par `AdminActDialog` (kind `account_delete`) EN PLUS de l'identifiant retapé.
