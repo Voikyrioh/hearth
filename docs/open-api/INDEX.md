@@ -2,7 +2,7 @@
 
 Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête `Authorization: Bearer …`.
 
-28 endpoints : session, postes de confiance, sécurité, comptes, mesures, audit, mises à jour.
+29 endpoints : session, postes de confiance, sécurité, comptes, mesures, audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
@@ -14,7 +14,8 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Session** | GET | [`/operations/{id}`](./operations.md) | user+ | Statut opération idempotente |
 | **Postes** | GET | [`/me/devices`](./devices.md) | user+ | Mes postes de confiance (nom, dates, dernière adresse, poste courant) |
 | **Postes** | DELETE | [`/me/devices/{id}`](./devices.md) | user+ | Retirer un poste (sa clé, son adresse retenue, ses sessions) |
-| **Sécurité** | GET | [`/security`](./security.md) | user+ | État de sécurité du compte : alerte « attaque probable » (`own`, `since`, `others` pour un administrateur), mode attaque (toujours `off` avant HRT-25) |
+| **Sécurité** | GET | [`/security`](./security.md) | user+ | État de sécurité du compte : alerte « attaque probable » (`own`, `since`, `others` pour un administrateur), mode attaque (`off`, `active`, `suspended` avec `resumes_in_s`, `last_end`) |
+| **Sécurité** | PUT | [`/security/attack-mode`](./security.md) | admin | Activer ou désactiver le mode attaque : mot de passe actuel et preuve d'une clé inscrite du compte (usage `0x03`, liée au jeton et au geste) ; `409 POST_NOT_RECOGNIZED` sans preuve valide |
 | **Mesures** | GET | [`/machine`](./machine.md) | user+ | Identité machine, specs hardware |
 | **Mesures** | GET | [`/stream`](./stream.md) | user+ (jeton dans le premier message) | WebSocket flux temps réel (snapshot + metrics chaque seconde) |
 | **Mesures** | GET | [`/metrics/history?window=1m\|5m\|1h`](./metrics.md) | user+ | Historique rééchantillonné |
@@ -33,6 +34,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **CLI** | `hearth-agent install` | — | — | Installation interactive (env var override) |
 | **CLI** | `hearth-agent uninstall` | — | — | Désinstallation |
 | **CLI** | `hearth-agent account` | — | — | Sous-cmds : add, list, passwd, role, remove, revoke |
+| **CLI** | `hearth-agent attack-mode` | — | — | Sous-cmds : status, off (voie de secours sans réseau, root) ; pas d'activation |
 | **CLI** | `hearth-agent fingerprint` | — | — | Affiche empreinte certificat |
 
 ## Codes d'erreur transverses
@@ -48,6 +50,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - `426 INCOMPATIBLE_VERSION` : client/agent incompatibles
 - `429 TOO_MANY_ATTEMPTS` : trop de tentatives (login verrouillé), `details.retry_after_s`
 - `409 USERNAME_TAKEN`, `409 LAST_ADMIN`, `409 CONFLICT` ; `422 WEAK_PASSWORD` (`details.rules`), `422 WRONG_PASSWORD` : voir [comptes](./accounts.md)
+- `409 POST_NOT_RECOGNIZED` : activer ou désactiver le mode attaque sans preuve valide d'une clé inscrite pour le compte appelant (`details.reason`) : voir [sécurité](./security.md)
 - `422 IDEMPOTENCY_KEY_REUSED` : la clé d'opération a déjà servi pour une autre requête
 - `413 PAYLOAD_TOO_LARGE` : corps d'une requête suivie au-delà de 1 Mio
 - `503 BUSY` : agent saturé (calculs de mots de passe), en-tête `Retry-After`

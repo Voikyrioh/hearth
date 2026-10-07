@@ -50,6 +50,8 @@ Si `cargo sqlx` manque ou n'a pas le pilote SQLite : `cargo install sqlx-cli --n
 
 `hearth-agent account add|list|passwd|role|remove|revoke` (voir `docs/runbooks/recuperer-acces-administrateur.md`). Le mot de passe n'est jamais un argument : saisie sans écho, ou `HEARTH_ACCOUNT_PASSWORD`.
 
+`hearth-agent attack-mode status|off` (HRT-25, ADR-0025) : l'état du mode attaque, et sa désactivation directement sur le serveur, sans réseau (voie de secours d'un administrateur qui ne peut pas prouver de clé depuis le client). Il n'existe pas de sous-commande pour l'activer.
+
 ## Binaire de l'agent, installation (HRT-15)
 
 Docker est requis (conteneurs jetables ; rien n'est installé sur le poste, jamais sur un vrai serveur).
