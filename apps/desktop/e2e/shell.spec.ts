@@ -52,12 +52,13 @@ test("coquille avec deux serveurs", async ({ page }) => {
     "Tableau de bord",
     "Comptes",
     "Journal d'activité",
+    "Sécurité",
   ]);
 
-  // Le serveur en lecture seule n'a ni « Comptes » ni « Journal d'activité ».
+  // Le serveur en lecture seule n'a ni « Comptes » ni « Journal d'activité » (mais « Sécurité »).
   await rail.locator('a[data-server="salon"]').click();
   await expect(page).toHaveURL(/#\/servers\/salon\/dashboard$/);
-  await expect(nav.getByRole("link")).toHaveText(["Tableau de bord"]);
+  await expect(nav.getByRole("link")).toHaveText(["Tableau de bord", "Sécurité"]);
   await page.goto("/?nodev#/servers/salon/accounts");
   await expect(page).toHaveURL(/#\/servers\/salon\/dashboard$/);
 
@@ -138,7 +139,7 @@ test("clavier : focus visible et flèches dans la barre et la navigation", async
   await page.keyboard.press("ArrowDown");
   await expect(nav.getByRole("link", { name: "Comptes" })).toBeFocused();
   await page.keyboard.press("End");
-  await expect(nav.getByRole("link", { name: "Journal d'activité" })).toBeFocused();
+  await expect(nav.getByRole("link", { name: "Sécurité" })).toBeFocused();
 });
 
 test("mouvement réduit : la pastille de reconnexion ne clignote pas", async ({ page }) => {

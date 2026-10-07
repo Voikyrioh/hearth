@@ -6,11 +6,12 @@ import { type MessageKey, t } from "@/i18n";
 import type { ServerInfo } from "@/link";
 
 // Navigation du serveur : nom, adresse en chasse fixe, entrées de vue. « Comptes » et
-// « Journal d'activité » n'existent pas pour le rôle Lecture seule (BR-ACCT-013).
+// « Journal d'activité » n'existent pas pour le rôle Lecture seule (BR-ACCT-013) ; « Sécurité » est
+// ouverte à tous (chacun gère ses propres postes de confiance, HRT-23).
 const props = defineProps<{ server: ServerInfo }>();
 
 interface Entry {
-  route: "dashboard" | "accounts" | "audit";
+  route: "dashboard" | "accounts" | "audit" | "security";
   label: MessageKey;
   adminOnly: boolean;
 }
@@ -19,6 +20,7 @@ const ENTRIES: Entry[] = [
   { route: "dashboard", label: "nav.dashboard", adminOnly: false },
   { route: "accounts", label: "nav.accounts", adminOnly: true },
   { route: "audit", label: "nav.audit", adminOnly: true },
+  { route: "security", label: "nav.security", adminOnly: false },
 ];
 
 const entries = computed(() =>

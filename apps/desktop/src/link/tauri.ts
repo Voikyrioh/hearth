@@ -24,6 +24,12 @@ import {
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import { toAuditFilterDto, toAuditLive, toAuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
+import {
+  type DeviceRemovalOutcome,
+  type TrustedDevices,
+  toDeviceRemovalOutcome,
+  toTrustedDevices,
+} from "./devices";
 import { type MachineEvent, toMetrics, toView } from "./machine";
 import {
   type AccountInputCheck,
@@ -355,6 +361,20 @@ export class TauriLinkBridge implements LinkBridge {
   ): Promise<AccountOutcome> {
     return toAccountOutcome(
       unwrap(await commands.deleteAccount(serverId, accountId, confirmation)),
+    );
+  }
+
+  async listTrustedDevices(serverId: string): Promise<TrustedDevices> {
+    return toTrustedDevices(unwrap(await commands.listTrustedDevices(serverId)));
+  }
+
+  async removeTrustedDevice(
+    serverId: string,
+    deviceId: string,
+    password: string,
+  ): Promise<DeviceRemovalOutcome> {
+    return toDeviceRemovalOutcome(
+      unwrap(await commands.removeTrustedDevice(serverId, deviceId, password)),
     );
   }
 

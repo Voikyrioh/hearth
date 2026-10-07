@@ -99,6 +99,7 @@
   --field-pad-y: 10px;
   --field-pad-x: 12px;
   --content-max: 420px;
+  --column-max: 880px;
   --wizard-width: 520px;
   --swatch-size: 28px;
   --fs-fingerprint: 20px;
