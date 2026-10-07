@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { failureMessage } from "./messages";
 import { SimulatedReauth, simulatedCovers } from "./simulated-reauth";
 import { LinkCommandError } from "./types";
 
@@ -84,5 +85,17 @@ describe("la confirmation simulée applique les règles de l'agent", () => {
     reauth.setMode("s", "each");
     reauth.confirm("s", "account_delete", null, OWN, OWN);
     expect(reauth.state("s").elevatedForS).toBe(0);
+  });
+});
+
+describe("les textes d'une clé non reconnue et d'un mot de passe manquant", () => {
+  it("tells a key the server does not know how to get enrolled, with the 8-devices way out", () => {
+    const text = failureMessage({ kind: "not_recognized" });
+    expect(text).toContain("n'est pas enregistré");
+    expect(text).toContain("8 postes");
+    expect(text).toContain("hearth-agent account revoke");
+    expect(failureMessage({ kind: "invalid_input", field: "credentials" })).toBe(
+      "Cette action demande ton mot de passe.",
+    );
   });
 });
