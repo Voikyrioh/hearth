@@ -216,6 +216,8 @@ async fn actor(env: &Env, api: &Api, name: &'static str, role: Role) -> Actor {
 
 async fn bench() -> Bench {
     let env = env().await;
+    // Ces scénarios éprouvent l'agent qui EXIGE (le service qui sert) : l'exigence est rétablie.
+    env.sessions.accept_unconfirmed_acts_for_tests(false);
     let rig = Rig::new(&env, true, true);
     let api = Api::from_state(state_with(&env, rig.service.clone()));
     let marie = actor(&env, &api, "marie", Role::Admin).await;
@@ -390,37 +392,6 @@ fn assert_refused_with(reply: &Reply, status: StatusCode, code: &str, why: &str,
 // ---------------------------------------------------------------------------------------------
 // Tranche A : le contrat accepté
 // ---------------------------------------------------------------------------------------------
-
-#[tokio::test]
-async fn a_current_client_without_reauth_gets_todays_answers_while_the_agent_does_not_require_it() {
-    let b = bench().await;
-    // Une session seule, sans `reauth` : la création passe comme avant.
-    let reply = b
-        .api
-        .post("/accounts")
-        .token(&b.marie.token)
-        .json(&json!({ "username": "ancien", "password": OTHER_PASSWORD, "role": "readonly" }))
-        .send()
-        .await;
-    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
-    // Un rôle insuffisant reste un `403`, avant toute confirmation.
-    let reply = b
-        .api
-        .post("/accounts")
-        .token(&b.carl.token)
-        .json(&json!({ "username": "x", "password": OTHER_PASSWORD, "role": "readonly" }))
-        .send()
-        .await;
-    assert_eq!(reply.status, StatusCode::FORBIDDEN);
-    // `GET /security` annonce la capacité, sans l'exiger.
-    let reply = b.api.get("/security").token(&b.marie.token).send().await;
-    assert_eq!(reply.status, StatusCode::OK);
-    let info = &reply.body["admin_reauth"];
-    assert_eq!(info["required"], false);
-    assert_eq!(info["factors"], json!(["password", "device_key"]));
-    assert_eq!(info["password"], "window");
-    assert_eq!(info["elevated_for_s"], 0);
-}
 
 #[tokio::test]
 async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_success_entry() {
@@ -654,78 +625,6 @@ async fn a_wrong_password_at_the_confirmation_counts_as_a_login_failure_and_the_
 }
 
 #[tokio::test]
-async fn the_old_password_of_put_me_password_goes_through_the_login_counters_even_without_reauth() {
-    let b = bench().await;
-    let dora = b.env.create("dora", Role::ReadOnly).await;
-    let token = b.api.token_of("dora").await;
-    let before: String = b.env.hash_of(&dora.id).await;
-    let failures = b.failures().await;
-    for attempt in 1..=4 {
-        let reply = b
-            .api
-            .put("/me/password")
-            .token(&token)
-            .json(&json!({ "current": WRONG, "password": OTHER_PASSWORD }))
-            .send()
-            .await;
-        assert_eq!(reply.code(), "WRONG_PASSWORD", "{:?}", reply.body);
-        assert_eq!(
-            b.failures().await,
-            failures + attempt,
-            "compté comme un échec de connexion"
-        );
-    }
-    let reply = b
-        .api
-        .put("/me/password")
-        .token(&token)
-        .json(&json!({ "current": WRONG, "password": OTHER_PASSWORD }))
-        .send()
-        .await;
-    assert!(
-        matches!(reply.status.as_u16(), 422 | 429),
-        "{:?}",
-        reply.body
-    );
-    // Le bon mot de passe attend, comme à la connexion : plus de devinette sans limite.
-    let reply = b
-        .api
-        .put("/me/password")
-        .token(&token)
-        .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
-        .send()
-        .await;
-    assert_eq!(
-        reply.status,
-        StatusCode::TOO_MANY_REQUESTS,
-        "{:?}",
-        reply.body
-    );
-    assert_eq!(
-        b.env.hash_of(&dora.id).await,
-        before,
-        "le mot de passe n'a pas changé"
-    );
-}
-
-#[tokio::test]
-async fn the_old_password_of_put_me_password_still_works_without_reauth_when_it_is_right() {
-    let b = bench().await;
-    let dora = b.env.create("dora", Role::ReadOnly).await;
-    let token = b.api.token_of("dora").await;
-    let before = b.env.hash_of(&dora.id).await;
-    let reply = b
-        .api
-        .put("/me/password")
-        .token(&token)
-        .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
-        .send()
-        .await;
-    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
-    assert_ne!(b.env.hash_of(&dora.id).await, before);
-}
-
-#[tokio::test]
 async fn with_reauth_the_old_password_of_the_body_must_be_the_confirmed_one() {
     let b = bench().await;
     let spec = Spec::Own;
@@ -853,7 +752,6 @@ async fn the_journal_keeps_no_password_no_challenge_no_signature_and_no_key() {
 async fn when_the_agent_requires_the_confirmation_an_act_without_reauth_is_told_to_update_the_client()
  {
     let b = bench().await;
-    b.env.sessions.set_reauth_required(true);
     let reply = b.api.get("/security").token(&b.marie.token).send().await;
     assert_eq!(reply.body["admin_reauth"]["required"], true);
     for kind in ActKind::ALL {
@@ -900,7 +798,6 @@ async fn when_the_agent_requires_the_confirmation_an_act_without_reauth_is_told_
 async fn the_removal_of_a_device_keeps_its_delivered_contract_even_when_the_agent_requires_the_confirmation()
  {
     let b = bench().await;
-    b.env.sessions.set_reauth_required(true);
     let second = DeviceKey::new();
     login_token(&b.api, &second, "marie", PASSWORD).await;
     let devices = b.api.get("/me/devices").token(&b.marie.token).send().await;
@@ -1663,18 +1560,6 @@ async fn a_wrong_password_on_a_flat_form_closes_the_elevation_too() {
         .await;
     assert_eq!(reply.code(), "WRONG_PASSWORD");
     assert!(b.env.elevations.is_empty());
-    // Et `PUT /me/password` sans `reauth`.
-    let b = bench().await;
-    open_as(&b, "ouverte").await;
-    let dora = b
-        .api
-        .put("/me/password")
-        .token(&b.marie.token)
-        .json(&json!({ "current": WRONG, "password": OTHER_PASSWORD }))
-        .send()
-        .await;
-    assert_eq!(dora.code(), "WRONG_PASSWORD");
-    assert!(b.env.elevations.is_empty());
 }
 
 #[tokio::test]
@@ -1724,61 +1609,33 @@ async fn a_body_with_two_reauth_members_is_unreadable_not_absent() {
     assert_eq!(b.snapshot().await, before);
 }
 
-#[tokio::test]
-async fn in_attack_mode_a_typo_on_put_me_password_without_reauth_costs_the_single_trial_of_the_address()
- {
-    // Q11 : un poste qui n'a qu'un critère (ici l'adresse retenue, session sans clé) a droit à UN essai ;
-    // raté, il est bloqué jusqu'à la fin du mode. La confirmation de l'ancien mot de passe suit la règle.
-    let b = bench().await;
-    let dora = b.env.create("dora", Role::ReadOnly).await;
-    let token = b.api.token_of("dora").await;
-    let before = b.env.hash_of(&dora.id).await;
-    b.env
-        .attack
-        .change(
-            true,
-            by(),
-            hearth_agent::domain::trust::attack_mode::EndHow::Manual,
-        )
-        .await
-        .unwrap();
-    let typo = b
-        .api
-        .put("/me/password")
-        .token(&token)
-        .json(&json!({ "current": WRONG, "password": OTHER_PASSWORD }))
-        .send()
-        .await;
-    assert_eq!(typo.code(), "WRONG_PASSWORD", "{:?}", typo.body);
-    let right = b
-        .api
-        .put("/me/password")
-        .token(&token)
-        .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
-        .send()
-        .await;
-    assert!(
-        !right.status.is_success(),
-        "l'essai est consommé : {:?}",
-        right.body
-    );
-    assert_eq!(b.env.hash_of(&dora.id).await, before);
-}
-
 // ---------------------------------------------------------------------------------------------
 // HRT-30, tranche C : l'agent EXIGE. Les voies de secours d'un compte sans poste inscrit (BR-TRUST-044),
 // chacune avec son test, sur un agent qui exige la confirmation.
 // ---------------------------------------------------------------------------------------------
 
-async fn requiring() -> Bench {
-    let b = bench().await;
-    b.env.sessions.set_reauth_required(true);
-    b
+/// La VRAIE ligne de commande du serveur (`hearth-agent --data-dir ... <sous-commande>`), lancée en
+/// processus sur la base du banc, sans réseau : c'est la voie de secours que le runbook écrit (BR-TRUST-044).
+fn server_command(b: &Bench, args: &[&str]) {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_hearth-agent"))
+        .arg("--data-dir")
+        .arg(b.env.dir.path())
+        .args(args)
+        .env_remove("HEARTH_CONFIG")
+        .env_remove("HEARTH_DATA_DIR")
+        .output()
+        .expect("lancement de hearth-agent");
+    assert!(
+        output.status.success(),
+        "{args:?} : {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[tokio::test]
 async fn rescue_first_login_after_the_install_enrolls_the_device_and_the_first_act_passes() {
-    let b = requiring().await;
+    let b = bench().await;
     // Base neuve : le compte de l'installation se connecte avec sa clé (inscription dans la transaction),
     // puis agit tout de suite.
     let first = actor(&b.env, &b.api, "install", Role::Admin).await;
@@ -1788,7 +1645,7 @@ async fn rescue_first_login_after_the_install_enrolls_the_device_and_the_first_a
 
 #[tokio::test]
 async fn rescue_a_lost_key_is_replaced_by_a_login_with_the_password_and_the_act_passes() {
-    let b = requiring().await;
+    let b = bench().await;
     let lost = std::sync::Arc::new(DeviceKey::new());
     let token = login_token(&b.api, &lost, "marie", PASSWORD).await;
     let new_pc = Actor {
@@ -1803,8 +1660,9 @@ async fn rescue_a_lost_key_is_replaced_by_a_login_with_the_password_and_the_act_
 }
 
 #[tokio::test]
-async fn rescue_an_account_at_eight_devices_is_unlocked_by_the_server_command_then_a_login() {
-    let b = requiring().await;
+async fn rescue_an_account_at_eight_devices_is_unlocked_by_the_real_account_revoke_command_then_a_login()
+ {
+    let b = bench().await;
     b.env.create("plein", Role::Admin).await;
     for _ in 0..hearth_proto::api::devices::MAX_DEVICES_PER_ACCOUNT {
         login_token(&b.api, &DeviceKey::new(), "plein", PASSWORD).await;
@@ -1825,12 +1683,7 @@ async fn rescue_an_account_at_eight_devices_is_unlocked_by_the_server_command_th
     assert_eq!(refused.status, StatusCode::CONFLICT, "{:?}", refused.body);
     assert_eq!(reason(&refused), "proof_invalid");
     // `hearth-agent account revoke plein` (oublie les postes et les adresses), puis la connexion inscrit.
-    let account = b.env.service.find("plein").await.unwrap();
-    b.env
-        .service
-        .revoke_sessions(&account.id, by())
-        .await
-        .unwrap();
+    server_command(&b, &["account", "revoke", "plein"]);
     let body = device_login_body(&b.api, &ninth, "plein", PASSWORD).await;
     let reply = b.api.post("/sessions").json(&body).send().await;
     assert_eq!(reply.body["device"], "enrolled", "{:?}", reply.body);
@@ -1844,8 +1697,9 @@ async fn rescue_an_account_at_eight_devices_is_unlocked_by_the_server_command_th
 }
 
 #[tokio::test]
-async fn rescue_with_the_attack_mode_on_and_no_key_the_server_command_then_a_login_enrolls() {
-    let b = requiring().await;
+async fn rescue_with_the_attack_mode_on_and_no_key_the_real_attack_mode_off_command_then_a_login_enrolls()
+ {
+    let b = bench().await;
     b.env
         .attack
         .change(
@@ -1860,16 +1714,8 @@ async fn rescue_with_the_attack_mode_on_and_no_key_the_server_command_then_a_log
     let body = device_login_body(&b.api, &fresh, "marie", PASSWORD).await;
     let frozen = b.api.post("/sessions").json(&body).send().await;
     assert_ne!(frozen.body["device"], "enrolled", "{:?}", frozen.body);
-    // `hearth-agent attack-mode off` (sans réseau), puis la connexion inscrit.
-    b.env
-        .attack
-        .change(
-            false,
-            by(),
-            hearth_agent::domain::trust::attack_mode::EndHow::Cli,
-        )
-        .await
-        .unwrap();
+    // `hearth-agent attack-mode off` (la vraie sous-commande, sans réseau), puis la connexion inscrit.
+    server_command(&b, &["attack-mode", "off"]);
     let body = device_login_body(&b.api, &fresh, "marie", PASSWORD).await;
     let reply = b.api.post("/sessions").json(&body).send().await;
     assert_eq!(reply.body["device"], "enrolled", "{:?}", reply.body);
@@ -1886,7 +1732,7 @@ async fn rescue_with_the_attack_mode_on_and_no_key_the_server_command_then_a_log
 
 #[tokio::test]
 async fn an_old_client_is_refused_on_every_act_with_the_typed_error_and_keeps_its_reads() {
-    let b = requiring().await;
+    let b = bench().await;
     for kind in ActKind::ALL {
         if matches!(kind, ActKind::AttackModeEnable | ActKind::AttackModeDisable) {
             continue; // forme à plat tolérée : voir `when_the_agent_requires_...`
@@ -1920,7 +1766,7 @@ async fn an_old_client_is_refused_on_every_act_with_the_typed_error_and_keeps_it
 #[tokio::test]
 async fn an_array_body_is_absent_and_a_null_body_is_unreadable_on_a_route_without_a_body_and_nothing_is_done()
  {
-    let b = requiring().await;
+    let b = bench().await;
     let target = b.victim("v-corps").await;
     for (raw, status) in [
         ("[]", StatusCode::UPGRADE_REQUIRED),
