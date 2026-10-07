@@ -15,7 +15,7 @@ Le superviseur (une copie de l'ancien binaire, détachée du service) arrête le
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/update/supervise.rs::check_verdict` (fonction pure : temps écoulé, dernière réponse, verdict).
-- `crates/hearth-agent/src/application/update_supervisor.rs::Supervisor::{run, roll_back}`.
+- `crates/hearth-agent/src/application/update_supervisor.rs::Supervisor::{run, drive, check}`.
 - `crates/hearth-agent/src/application/install.rs` n'est pas concerné ; l'échange réutilise `InstallHost::{install_binary, restore_binary, discard_backup}` (BR-INSTALL-008).
 - `crates/hearth-agent/src/infrastructure/update/host.rs::FsUpdateHost::launch` (`systemd-run`, unité transitoire hors du groupe de contrôle du service).
 

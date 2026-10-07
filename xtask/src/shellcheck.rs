@@ -19,6 +19,7 @@ pub fn run() -> Result<(), String> {
         "/mnt/install.sh",
         "/mnt/e2e/scenario.sh",
         "/mnt/e2e/scenario-update.sh",
+        "/mnt/e2e/double-failure-systemd.sh",
     ]));
     docker::run(&command)?;
     println!("shellcheck : aucun avertissement");

@@ -23,10 +23,10 @@ use serde::de::DeserializeOwned;
 use crate::application::ports::{SupervisorLock, UpdateHost, UpdateHostError};
 use crate::domain::install::{
     DATABASE_FILE, DATABASE_FILES, UPDATE_DB_BACKUP_FILE, UPDATE_DIR, UPDATE_JOB_FILE,
-    UPDATE_LAST_FILE, UPDATE_LOCK_FILE, UPDATE_STAGED_FILE, UPDATE_STATE_FILE,
+    UPDATE_LAST_FILE, UPDATE_LOCK_FILE, UPDATE_PHASE_FILE, UPDATE_STAGED_FILE, UPDATE_STATE_FILE,
     UPDATE_SUPERVISOR_FILE, UPDATE_WAL_BACKUP_FILE, Version,
 };
-use crate::domain::update::{Job, SupervisorState, UpdateRecord};
+use crate::domain::update::{Job, Marker, SupervisorState, UpdateRecord};
 use crate::infrastructure::file_lock::{HeldLock, LockError};
 use crate::infrastructure::install::scrub::scrubbed;
 
@@ -57,6 +57,8 @@ pub struct FsUpdateHost {
     /// Le binaire en cours d'exécution, copié pour jouer le superviseur.
     current_exe: PathBuf,
     launcher: Launcher,
+    /// `systemctl` (l'état de l'unité transitoire du superviseur).
+    systemctl: OsString,
 }
 
 impl FsUpdateHost {
@@ -66,6 +68,35 @@ impl FsUpdateHost {
             dir: data_dir.join(UPDATE_DIR),
             current_exe,
             launcher,
+            systemctl: OsString::from("systemctl"),
+        }
+    }
+
+    /// Un autre `systemctl` (tests).
+    pub fn with_systemctl(mut self, systemctl: OsString) -> Self {
+        self.systemctl = systemctl;
+        self
+    }
+
+    /// L'unité transitoire du superviseur existe et sera (ou est) exécutée : `active`, `activating`
+    /// (dont l'attente d'une relance après un échec). Faux sans systemd, ou si le système ne répond pas.
+    fn supervisor_unit_alive(&self) -> bool {
+        if !matches!(self.launcher, Launcher::SystemdRun(_)) {
+            return false;
+        }
+        let output = scrubbed(&self.systemctl)
+            .args([
+                "show",
+                "--property=ActiveState",
+                &format!("{SUPERVISOR_UNIT}.service"),
+            ])
+            .stdin(Stdio::null())
+            .output();
+        match output {
+            Ok(output) if output.status.success() => {
+                unit_will_run(&String::from_utf8_lossy(&output.stdout))
+            }
+            _ => false,
         }
     }
 
@@ -179,6 +210,18 @@ impl UpdateHost for FsUpdateHost {
         }
     }
 
+    fn supervisor_pending(&self) -> bool {
+        // Le marqueur d'abord (une lecture de fichier) : sans travail vivant sous sa borne, inutile
+        // d'interroger systemd.
+        matches!(self.read_marker(), Ok(Some(marker)) if marker.can_resume())
+            && self.supervisor_unit_alive()
+    }
+
+    fn existing_supervisor(&self) -> Option<PathBuf> {
+        let path = self.path(UPDATE_SUPERVISOR_FILE);
+        path.is_file().then_some(path)
+    }
+
     fn take_supervisor_lock(&self) -> Result<SupervisorLock, UpdateHostError> {
         let file = self.lock_file()?;
         // Il insiste une seconde : un test de l'agent (`supervisor_running`) tient le verrou un
@@ -203,6 +246,26 @@ impl UpdateHost for FsUpdateHost {
 
     fn read_state(&self) -> Result<Option<SupervisorState>, UpdateHostError> {
         self.read_json(UPDATE_STATE_FILE)
+    }
+
+    fn read_marker(&self) -> Result<Option<Marker>, UpdateHostError> {
+        self.read_json(UPDATE_PHASE_FILE)
+    }
+
+    /// `write_atomic` : fichier voisin, `fsync` du fichier, renommage, `fsync` du dossier.
+    fn write_marker(&self, marker: &Marker) -> Result<(), UpdateHostError> {
+        self.write_json(UPDATE_PHASE_FILE, marker).map(|_| ())
+    }
+
+    fn discard_marker(&self) {
+        let _ = fs::remove_file(self.path(UPDATE_PHASE_FILE));
+    }
+
+    fn same_content(&self, a: &Path, b: &Path) -> bool {
+        match (fs::read(a), fs::read(b)) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
     }
 
     fn read_job(&self) -> Result<Option<Job>, UpdateHostError> {
@@ -310,10 +373,11 @@ impl UpdateHost for FsUpdateHost {
             fs::rename(&staged_wal, &wal).map_err(Self::io("restauration du journal", &wal))?;
         }
         sync_dir(&self.data_dir);
-        // 3. Elle ne sert qu'une fois : retirée tout de suite, une reprise ultérieure ne peut pas
-        // recopier une base périmée par-dessus ce qui s'est écrit depuis (BR-UPDATE-029).
-        let _ = fs::remove_file(&saved);
-        let _ = fs::remove_file(&saved_wal);
+        // 3. La copie est GARDÉE jusqu'à la fin du travail (`clear_staging`) : un retour arrière
+        // interrompu entre la remise de la base et celle du binaire, puis une machine redémarrée, a
+        // vu le nouveau binaire migrer de nouveau la base remise ; la reprise la remet une seconde
+        // fois. « Une seule fois » est tenu par le marqueur du superviseur (BR-UPDATE-029, 032) :
+        // la base ne se remet plus dès que l'ancien binaire est revenu.
         Ok(())
     }
 
@@ -375,24 +439,7 @@ impl UpdateHost for FsUpdateHost {
         match &self.launcher {
             Launcher::SystemdRun(program) => {
                 let output = scrubbed(program)
-                    .arg("--unit")
-                    .arg(SUPERVISOR_UNIT)
-                    .arg("--description")
-                    .arg("Mise à jour de l'agent Hearth")
-                    .arg("--collect")
-                    .arg("--quiet")
-                    // Échoue tout de suite si le binaire ne s'exécute pas (dossier de données
-                    // monté `noexec`) au lieu de répondre « lancé ».
-                    .arg("--service-type=exec")
-                    // Durcissement de l'unité transitoire : le superviseur écrit dans le dossier
-                    // du binaire et dans `update/`, lance `systemctl`, rien d'autre.
-                    .arg("--property=NoNewPrivileges=yes")
-                    .arg("--property=PrivateTmp=yes")
-                    .arg("--property=ProtectHome=yes")
-                    .arg(supervisor)
-                    .arg("update-supervise")
-                    .arg("--job")
-                    .arg(job)
+                    .args(systemd_run_arguments(supervisor, job))
                     .stdin(Stdio::null())
                     .output()
                     .map_err(Self::io("lancement de systemd-run", supervisor))?;
@@ -410,14 +457,19 @@ impl UpdateHost for FsUpdateHost {
         }
     }
 
+    /// L'ORDRE compte : le superviseur peut être tué au milieu du nettoyage et relancé. Le travail
+    /// (`job.json`) part avant le marqueur : une relance sans travail ne fait rien, une relance avec
+    /// travail et sans marqueur recommencerait la mise à jour. La copie du superviseur part en
+    /// dernier (c'est l'exécutable de l'unité qui le relance).
     fn clear_staging(&self) {
         for name in [
             UPDATE_STAGED_FILE,
-            UPDATE_SUPERVISOR_FILE,
-            UPDATE_JOB_FILE,
             UPDATE_STATE_FILE,
             UPDATE_DB_BACKUP_FILE,
             UPDATE_WAL_BACKUP_FILE,
+            UPDATE_JOB_FILE,
+            UPDATE_PHASE_FILE,
+            UPDATE_SUPERVISOR_FILE,
         ] {
             let path = self.path(name);
             if let Err(error) = fs::remove_file(&path)
@@ -427,6 +479,64 @@ impl UpdateHost for FsUpdateHost {
             }
         }
     }
+}
+
+/// `ActiveState` d'une unité transitoire : elle tourne ou attend sa relance.
+fn unit_will_run(output: &str) -> bool {
+    output
+        .lines()
+        .find_map(|line| line.strip_prefix("ActiveState="))
+        .is_some_and(|state| matches!(state.trim(), "active" | "activating" | "reloading"))
+}
+
+/// Combien de secondes systemd attend avant de relancer un superviseur tombé en échec.
+pub const SUPERVISOR_RESTART_SECS: u64 = 2;
+/// Garde-fou de systemd, **derrière** celui du superviseur (`MAX_RESUMES`) : plus de lancements que
+/// cela dans la fenêtre et l'unité reste en échec. Le compteur de systemd se perd avec l'unité
+/// transitoire, d'où le compteur du superviseur, écrit sur le disque.
+pub const SUPERVISOR_START_BURST: u32 = 6;
+pub const SUPERVISOR_START_WINDOW_SECS: u64 = 600;
+
+/// Les arguments de `systemd-run` qui lancent le superviseur (BR-UPDATE-030) : une unité
+/// transitoire, hors du groupe de contrôle du service, **relancée si elle tombe en échec**
+/// (`Restart=on-failure` : processus tué, code de sortie non nul) et jamais autrement (une sortie
+/// réussie, ou `systemctl stop` de cette unité, ne la relance pas). Aucune minuterie : rien de
+/// périodique, rien qui survive à la fin du travail (`--collect`).
+pub fn systemd_run_arguments(supervisor: &Path, job: &Path) -> Vec<OsString> {
+    let mut arguments: Vec<OsString> = [
+        "--unit",
+        SUPERVISOR_UNIT,
+        "--description",
+        "Mise à jour de l'agent Hearth",
+        "--collect",
+        "--quiet",
+        // Échoue tout de suite si le binaire ne s'exécute pas (dossier de données monté `noexec`)
+        // au lieu de répondre « lancé ».
+        "--service-type=exec",
+        // Un superviseur tué ou tombé en échec est relancé : il est rejouable (marqueur d'étape).
+        "--property=Restart=on-failure",
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect();
+    arguments.push(format!("--property=RestartSec={SUPERVISOR_RESTART_SECS}").into());
+    arguments
+        .push(format!("--property=StartLimitIntervalSec={SUPERVISOR_START_WINDOW_SECS}").into());
+    arguments.push(format!("--property=StartLimitBurst={SUPERVISOR_START_BURST}").into());
+    // Durcissement de l'unité transitoire : le superviseur écrit dans le dossier du binaire et dans
+    // `update/`, lance `systemctl`, rien d'autre.
+    for property in [
+        "--property=NoNewPrivileges=yes",
+        "--property=PrivateTmp=yes",
+        "--property=ProtectHome=yes",
+    ] {
+        arguments.push(property.into());
+    }
+    arguments.push(supervisor.into());
+    arguments.push("update-supervise".into());
+    arguments.push("--job".into());
+    arguments.push(job.into());
+    arguments
 }
 
 /// `hearth.db` devient `hearth.db.<pid>.tmp` (le même dossier : le renommage est atomique).
@@ -504,6 +614,79 @@ mod tests {
         fs::write(&exe, b"binaire courant").unwrap();
         let host = FsUpdateHost::new(dir.path(), exe, Launcher::Detached);
         (dir, host)
+    }
+
+    #[test]
+    fn a_unit_waiting_for_its_restart_will_run_and_a_gone_or_failed_one_will_not() {
+        assert!(unit_will_run(
+            "ActiveState=activating
+"
+        ));
+        assert!(unit_will_run(
+            "ActiveState=active
+"
+        ));
+        assert!(!unit_will_run(
+            "ActiveState=inactive
+"
+        ));
+        assert!(!unit_will_run(
+            "ActiveState=failed
+"
+        ));
+        assert!(!unit_will_run(""));
+    }
+
+    #[test]
+    fn without_systemd_no_supervisor_is_ever_pending() {
+        let (_dir, host) = host();
+        assert!(!host.supervisor_pending());
+    }
+
+    #[test]
+    fn the_supervisor_unit_restarts_on_failure_only_and_never_on_a_timer() {
+        let arguments: Vec<String> = systemd_run_arguments(
+            Path::new("/d/update/supervisor"),
+            Path::new("/d/update/job.json"),
+        )
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+        for expected in [
+            "--property=Restart=on-failure",
+            "--property=RestartSec=2",
+            "--property=StartLimitBurst=6",
+            "--property=StartLimitIntervalSec=600",
+            "--collect",
+            "--service-type=exec",
+            "--property=NoNewPrivileges=yes",
+        ] {
+            assert!(
+                arguments.iter().any(|a| a == expected),
+                "{expected} : {arguments:?}"
+            );
+        }
+        for forbidden in [
+            "--on-",
+            "--timer",
+            "Restart=always",
+            "OnFailure",
+            "OnCalendar",
+        ] {
+            assert!(
+                !arguments.iter().any(|a| a.contains(forbidden)),
+                "{forbidden} : {arguments:?}"
+            );
+        }
+        assert_eq!(
+            arguments[arguments.len() - 4..],
+            [
+                "/d/update/supervisor",
+                "update-supervise",
+                "--job",
+                "/d/update/job.json"
+            ]
+        );
     }
 
     #[test]
@@ -612,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn the_database_is_restored_once_then_the_copy_is_gone_and_a_later_restore_changes_nothing() {
+    fn the_database_is_restored_and_the_copy_is_kept_until_the_work_is_cleared() {
         let (dir, host) = host();
         let db = dir.path().join("hearth.db");
         fs::write(&db, b"avant").unwrap();
@@ -626,18 +809,23 @@ mod tests {
         assert!(!dir.path().join("hearth.db-wal").exists());
         assert!(!dir.path().join("hearth.db-shm").exists());
         assert!(
-            !host.database_copy_present(),
-            "la copie ne sert qu'une fois"
+            host.database_copy_present(),
+            "la copie est gardée : une reprise peut devoir la remettre une seconde fois"
         );
         assert!(
             names(dir.path()).iter().all(|n| !n.ends_with(".tmp")),
             "{:?}",
             names(dir.path())
         );
-        // Les écritures d'après le retour arrière ne sont jamais écrasées par une copie périmée.
-        fs::write(&db, b"ecritures-d-apres").unwrap();
+        // Le nouveau binaire, redémarré avec la machine, a migré de nouveau la base remise : la
+        // reprise la remet une seconde fois, à l'identique.
+        fs::write(&db, b"migree-de-nouveau").unwrap();
         host.restore_database().unwrap();
-        assert_eq!(fs::read(&db).unwrap(), b"ecritures-d-apres");
+        assert_eq!(fs::read(&db).unwrap(), b"avant");
+        // Elle part avec le reste du travail (BR-UPDATE-029 : « une seule fois » est tenu par le
+        // marqueur du superviseur, `tests/update_supervisor_resume.rs`).
+        host.clear_staging();
+        assert!(!host.database_copy_present());
     }
 
     #[test]

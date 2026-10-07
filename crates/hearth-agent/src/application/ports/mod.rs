@@ -54,7 +54,7 @@ pub use operation_repo::{OperationRepo, OperationTx};
 pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
 pub use security_feed::SecurityFeed;
-pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec};
+pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState};
 pub use session_repo::{SessionRepo, SessionTx};
 pub use store_error::StoreError;
 pub use system_probe::{ProbeError, SystemProbe};
