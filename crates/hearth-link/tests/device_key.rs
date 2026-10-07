@@ -369,7 +369,8 @@ async fn a_client_updated_with_a_remembered_password_enrolls_silently_once() {
     let list = manager.devices_list(&world.id).await.unwrap();
     assert_eq!(list.devices.len(), 1);
     assert!(list.devices[0].current, "ce poste est inscrit");
-    assert_eq!(world.agent.sessions_open("marie").await, sessions + 1);
+    // L'ancienne session est fermée chez l'agent : une seule session ouverte, pas deux.
+    assert_eq!(world.agent.sessions_open("marie").await, sessions);
     // Pas une deuxième fois, même après une coupure.
     let mark = recorder.mark();
     world.proxy.cut();
@@ -384,7 +385,7 @@ async fn a_client_updated_with_a_remembered_password_enrolls_silently_once() {
     let mark = recorder.mark();
     world.proxy.heal();
     recorder.wait_state(mark, LinkState::Connected, WAIT).await;
-    assert_eq!(world.agent.sessions_open("marie").await, sessions + 1);
+    assert_eq!(world.agent.sessions_open("marie").await, sessions);
     assert_eq!(
         manager.devices_list(&world.id).await.unwrap().devices.len(),
         1
@@ -550,11 +551,18 @@ struct Unlogged {
     manager: LinkManager,
     id: ServerId,
     vault: Arc<MemoryVault>,
+    /// Vrai : la requête de connexion ne répond jamais (le délai de l'appel la coupe).
+    hang: Arc<std::sync::atomic::AtomicBool>,
     _dir: tempfile::TempDir,
 }
 
 /// Un deuxième PC dont le serveur est au carnet mais où personne ne s'est encore connecté.
 async fn second_pc_without_login(world: &World) -> Unlogged {
+    second_pc_without_login_with(world, fast_config()).await
+}
+
+async fn second_pc_without_login_with(world: &World, config: hearth_link::LinkConfig) -> Unlogged {
+    let hang = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let dir = tempfile::tempdir().unwrap();
     let vault = Arc::new(MemoryVault::new());
     let spy = Arc::new(support::Spy::new(support::transport(), ChallengeMode::Real));
@@ -564,10 +572,11 @@ async fn second_pc_without_login(world: &World) -> Unlogged {
         vault.clone(),
         Arc::new(ScriptedNet::new()),
         Arc::new(JumpClock::new()),
-        fast_config(),
+        config,
         Arc::new(WorldSpy {
             inner: support::SharedSpy(spy),
             mode: world.spy.clone(),
+            hang: hang.clone(),
         }),
     )
     .await;
@@ -590,6 +599,7 @@ async fn second_pc_without_login(world: &World) -> Unlogged {
         manager,
         id,
         vault,
+        hang,
         _dir: dir,
     }
 }
@@ -598,6 +608,7 @@ async fn second_pc_without_login(world: &World) -> Unlogged {
 struct WorldSpy {
     inner: support::SharedSpy,
     mode: Arc<support::SpyState>,
+    hang: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[async_trait::async_trait]
@@ -642,6 +653,9 @@ impl hearth_link::ports::Transport for WorldSpy {
         hearth_proto::api::sessions::DeviceLoginResponse,
         hearth_link::ports::transport::TransportError,
     > {
+        if self.hang.load(std::sync::atomic::Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         self.inner.login_with_device(target, request).await
     }
 
@@ -1001,7 +1015,7 @@ async fn with_a_key_an_unavailable_challenge_is_a_transient_failure_never_a_proo
             .await
             .unwrap_err();
         assert!(
-            matches!(error, LinkError::Unreachable(_)),
+            matches!(error, LinkError::DeviceChallengeUnavailable),
             "{mode:?} : {error:?}"
         );
         assert_eq!(
@@ -1188,4 +1202,119 @@ async fn wait_session_challenges(world: &World, at_least: usize) {
         );
         tokio::task::yield_now().await;
     }
+}
+
+// ── Entrée témoin du coffre ────────────────────────────────────────────────────────────────
+
+/// Un coffre qui retient tout ce qui est écrit sous un identifiant provisoire (`attente-…`).
+struct WitnessVault {
+    inner: MemoryVault,
+    witnessed: Mutex<Vec<String>>,
+}
+
+impl Vault for WitnessVault {
+    fn get(&self, server: &ServerId, kind: SecretKind) -> Result<Option<Secret>, VaultError> {
+        self.inner.get(server, kind)
+    }
+
+    fn put(&self, server: &ServerId, kind: SecretKind, secret: &Secret) -> Result<(), VaultError> {
+        if server.as_str().starts_with("attente-") {
+            self.witnessed
+                .lock()
+                .unwrap()
+                .push(secret.expose().to_owned());
+        }
+        self.inner.put(server, kind, secret)
+    }
+
+    fn delete(&self, server: &ServerId, kind: SecretKind) -> Result<(), VaultError> {
+        self.inner.delete(server, kind)
+    }
+}
+
+#[tokio::test]
+async fn the_witness_entry_of_a_first_connection_never_holds_the_real_private_key() {
+    let agent = TestAgent::install().await;
+    agent
+        .create_account("marie", hearth_agent::domain::accounts::Role::Admin)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let vault = Arc::new(WitnessVault {
+        inner: MemoryVault::new(),
+        witnessed: Mutex::new(Vec::new()),
+    });
+    let manager = support::start_manager_shared(
+        dir.path(),
+        vault.clone(),
+        Arc::new(ScriptedNet::new()),
+        Arc::new(JumpClock::new()),
+        fast_config(),
+        Arc::new(support::SharedSpy(Arc::new(support::Spy::new(
+            support::transport(),
+            ChallengeMode::Real,
+        )))),
+    )
+    .await;
+    let probe = manager.probe("127.0.0.1", agent.addr.port()).await.unwrap();
+    let (id, _) = manager
+        .add_and_login(
+            NewServer {
+                name: "Forge".into(),
+                color: "#7aa2f7".into(),
+                host: "127.0.0.1".into(),
+                port: agent.addr.port(),
+                fingerprint: probe.fingerprint,
+                mac_addresses: vec![],
+            },
+            "marie",
+            Secret::from(PASSWORD),
+            false,
+        )
+        .await
+        .unwrap();
+    let real = vault
+        .get(&id, SecretKind::DeviceKey)
+        .unwrap()
+        .expect("la clé est rangée sous le vrai identifiant")
+        .expose()
+        .to_owned();
+    let witnessed = vault.witnessed.lock().unwrap().clone();
+    assert_eq!(witnessed.len(), 1, "une seule entrée témoin");
+    assert_ne!(witnessed[0], real, "la valeur du témoin n'est pas la clé");
+    assert_eq!(witnessed[0].len(), real.len(), "même longueur");
+    manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_call_abandoned_by_its_deadline_keeps_the_key_it_may_have_enrolled() {
+    let world = World::connected(keyed()).await;
+    let config = hearth_link::LinkConfig {
+        request_timeout: std::time::Duration::from_millis(300),
+        ..fast_config()
+    };
+    let pc = second_pc_without_login_with(&world, config).await;
+    pc.hang.store(true, std::sync::atomic::Ordering::SeqCst);
+    let error = pc
+        .manager
+        .login(&pc.id, "marie", Secret::from(PASSWORD), false)
+        .await
+        .unwrap_err();
+    assert_eq!(error, LinkError::Timeout);
+    // Le délai ne dit pas que l'agent n'a rien fait : la clé reste (inscrite ou reconnue à la
+    // connexion suivante) ; l'effacer perdrait une place sur les huit si le poste a été inscrit.
+    assert!(
+        key_of(&pc.vault, &pc.id).is_some(),
+        "la clé rangée pour cet appel reste au coffre"
+    );
+    // Ici l'agent n'a rien reçu : un seul poste, celui du monde.
+    assert_eq!(
+        world
+            .manager
+            .devices_list(&world.id)
+            .await
+            .unwrap()
+            .devices
+            .len(),
+        1
+    );
 }
