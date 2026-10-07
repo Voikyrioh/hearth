@@ -5,8 +5,8 @@ import { ICO_FRAMES, TRAY_SIZES, TRAY_STATES } from "../../scripts/icon-spec.mjs
 
 // HRT-19 : l'identité visuelle livrée. Fichiers présents, dimensions exactes, cinq états distincts,
 // couleurs des SVG dans la palette de la bible graphique (+ les trois couleurs d'état de l'interface
-// pour l'icône de notification). Les sources sont les SVG ; les images en sont générées
-// (`npm run build:icons`) : si un SVG change sans régénération, la comparaison des images casse.
+// pour l'icône de notification). Les images sont générées des SVG (`npm run build:icons`) ; leur accord
+// avec les sources et leur contenu sont contrôlés dans `identity-sync.test.ts` (empreintes des sources).
 
 const desktop = join(import.meta.dirname, "..", "..");
 const icons = join(desktop, "src-tauri", "icons");

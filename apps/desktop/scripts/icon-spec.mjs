@@ -17,3 +17,7 @@ export const ICO_FRAMES = [
   { size: 64, svg: "app-icon.svg" },
   { size: 256, svg: "app-icon.svg" },
 ];
+// Version du rendu : à monter À LA MAIN quand `build-icons.mjs` change ce qu'il produit (mise en
+// page du bandeau, assemblage de l'ICO, tailles). Inscrite dans `sources.sha256.json` ; le test la
+// compare, donc l'oublier après un changement de rendu se voit à la relecture du diff, pas à un test.
+export const RENDER_VERSION = 1;

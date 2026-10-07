@@ -7,16 +7,26 @@
 //
 // Les fichiers générés sont versionnés (le build Tauri les lit tels quels) ; un test relit leurs
 // dimensions et trames. Changer un dessin : remplacer le SVG source, relancer, commiter.
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
-import { ICO_FRAMES, TRAY_SIZES, TRAY_STATES } from "./icon-spec.mjs";
+import { ICO_FRAMES, RENDER_VERSION, TRAY_SIZES, TRAY_STATES } from "./icon-spec.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const icons = join(root, "src-tauri", "icons");
 const source = join(icons, "source");
 const installer = join(root, "src-tauri", "installer");
+
+/** Couleur d'un jeton du thème (`--nom: #rrggbb;` dans tokens.css) : source unique des couleurs du bandeau. */
+export function token(css, name) {
+  const match = css.match(new RegExp(String.raw`--${name}:\s*(#[0-9a-fA-F]{6})\s*;`));
+  if (!match) throw new Error(`jeton --${name} absent de tokens.css`);
+  return match[1].toLowerCase();
+}
+
+export const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
 
 const svgUri = (name) =>
   `data:image/svg+xml;base64,${readFileSync(join(source, name)).toString("base64")}`;
@@ -74,6 +84,8 @@ const write = (path, data) => {
 };
 
 async function main() {
+  const css = readFileSync(join(root, "src", "styles", "tokens.css"), "utf8");
+  const colors = { bg: token(css, "bg"), card: token(css, "card"), ac: token(css, "ac") };
   const browser = await chromium.launch();
   const page = await browser.newPage();
   await page.setContent("<canvas id=c></canvas>");
@@ -119,7 +131,7 @@ async function main() {
 
   // Bandeau de l'installateur NSIS : 164 × 314, fond de l'app, la braise au centre, le logo au-dessus.
   const sidebar = await page.evaluate(
-    async ([uri]) => {
+    async ([uri, colors]) => {
       const img = new Image();
       img.src = uri;
       await img.decode();
@@ -128,25 +140,84 @@ async function main() {
       canvas.width = w;
       canvas.height = h;
       const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#1c1518";
+      ctx.fillStyle = colors.bg;
       ctx.fillRect(0, 0, w, h);
       const glow = ctx.createRadialGradient(w / 2, 120, 4, w / 2, 120, 120);
-      glow.addColorStop(0, "rgba(255,123,61,0.30)");
-      glow.addColorStop(1, "rgba(255,123,61,0)");
+      const [red, green, blue] = [1, 3, 5].map((i) =>
+        Number.parseInt(colors.ac.slice(i, i + 2), 16),
+      );
+      glow.addColorStop(0, `rgba(${red},${green},${blue},0.30)`);
+      glow.addColorStop(1, `rgba(${red},${green},${blue},0)`);
       ctx.fillStyle = glow;
       ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, (w - 96) / 2, 72, 96, 96);
-      ctx.fillStyle = "#2a2024";
+      ctx.fillStyle = colors.card;
       ctx.fillRect(0, h - 6, w, 6);
-      ctx.fillStyle = "#ff7b3d";
+      ctx.fillStyle = colors.ac;
       ctx.fillRect(0, h - 6, 48, 6);
       return Array.from(ctx.getImageData(0, 0, w, h).data);
     },
-    [svgUri("logo.svg")],
+    [svgUri("logo.svg"), colors],
   );
   write(join(installer, "sidebar.bmp"), buildBmp(164, 314, sidebar));
 
+  // Favicon : le logo, copié tel quel (une seule source de tracé, `logo.svg`).
+  write(join(root, "public", "favicon.svg"), readFileSync(join(source, "logo.svg")));
+
+  writeFingerprints(colors);
   await browser.close();
+}
+
+/**
+ * Empreintes écrites dans `icons/sources.sha256.json` : celles des SOURCES (SVG, spécification),
+ * la version du rendu, et celle de chaque image PRODUITE avec les sources dont elle dépend.
+ * `src/assets/identity-sync.test.ts` les recalcule : une source changée sans régénération, ou une
+ * image retouchée ou échangée à la main, fait échouer le test. L'empreinte d'une image vaut pour le
+ * fichier commité (le test ne régénère rien) : le rendu de Chromium n'a pas à être stable d'une
+ * version à l'autre. `RENDER_VERSION` (icon-spec.mjs) se monte à la main quand le rendu change.
+ */
+function writeFingerprints(colors) {
+  // Fins de ligne normalisées pour le texte (checkout Windows ou Linux, même empreinte).
+  const hash = (path) => {
+    const bytes = readFileSync(join(root, path));
+    return sha256(
+      /\.(svg|mjs)$/.test(path) ? bytes.toString("utf8").replaceAll("\r\n", "\n") : bytes,
+    );
+  };
+  const svgs = [
+    "logo.svg",
+    "app-icon.svg",
+    "app-icon-16.svg",
+    ...TRAY_STATES.map((state) => `tray/tray-${state}.svg`),
+  ].map((name) => `src-tauri/icons/source/${name}`);
+  const sources = {};
+  for (const path of [...svgs, "scripts/icon-spec.mjs"]) sources[path] = hash(path);
+  const app16 = "src-tauri/icons/source/app-icon-16.svg";
+  const app = "src-tauri/icons/source/app-icon.svg";
+  const logo = "src-tauri/icons/source/logo.svg";
+  const from = {
+    "src-tauri/icons/icon.ico": [app16, app],
+    "src-tauri/icons/32x32.png": [app16],
+    "src-tauri/icons/64x64.png": [app],
+    "src-tauri/icons/128x128.png": [app],
+    "src-tauri/icons/128x128@2x.png": [app],
+    "src-tauri/icons/icon.png": [app],
+    "src-tauri/installer/sidebar.bmp": [logo, "palette"],
+    "public/favicon.svg": [logo],
+  };
+  for (const state of TRAY_STATES) {
+    for (const size of TRAY_SIZES) {
+      from[`src-tauri/icons/tray/tray-${state}-${size}.png`] = [
+        `src-tauri/icons/source/tray/tray-${state}.svg`,
+      ];
+    }
+  }
+  const outputs = {};
+  for (const [path, depends] of Object.entries(from)) {
+    outputs[path] = { sha256: hash(path), from: depends };
+  }
+  const record = { renderVersion: RENDER_VERSION, sources, palette: colors, outputs };
+  write(join(icons, "sources.sha256.json"), `${JSON.stringify(record, null, 2)}\n`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
