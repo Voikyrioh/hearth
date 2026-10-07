@@ -11,6 +11,7 @@ import {
   type MetricsEvent,
   type NoticeEvent,
   type OperationEventDto,
+  type SecurityEvent,
   type ServerDto,
   type ServersEvent,
   type SnapshotEvent,
@@ -31,6 +32,14 @@ import {
   toTrustedDevices,
 } from "./devices";
 import { type MachineEvent, toMetrics, toView } from "./machine";
+import {
+  type AttackModeOutcome,
+  type SecurityRead,
+  type SecurityState,
+  toAttackModeOutcome,
+  toSecurityRead,
+  toSecurityState,
+} from "./security";
 import {
   type AccountInputCheck,
   type AccountList,
@@ -62,6 +71,7 @@ export const LINK_EVENTS = {
   audit: "link://audit",
   auditGap: "link://audit-gap",
   agentUpdate: "agent-update://progress",
+  security: "link://security",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -346,8 +356,11 @@ export class TauriLinkBridge implements LinkBridge {
     serverId: string,
     current: string,
     password: string,
+    keepAddress: boolean,
   ): Promise<AccountOutcome> {
-    return toAccountOutcome(unwrap(await commands.changeOwnPassword(serverId, current, password)));
+    return toAccountOutcome(
+      unwrap(await commands.changeOwnPassword(serverId, current, password, keepAddress)),
+    );
   }
 
   async closeAccountSessions(serverId: string, accountId: string): Promise<AccountOutcome> {
@@ -376,6 +389,32 @@ export class TauriLinkBridge implements LinkBridge {
     return toDeviceRemovalOutcome(
       unwrap(await commands.removeTrustedDevice(serverId, deviceId, password)),
     );
+  }
+
+  async onSecurity(listener: (state: SecurityState) => void): Promise<Unsubscribe> {
+    // Écoute posée D'ABORD, dernier état connu lu ensuite : aucune fenêtre où un état est perdu.
+    const unlisten = await listen<SecurityEvent>(LINK_EVENTS.security, (event) =>
+      listener(toSecurityState(event.payload)),
+    );
+    try {
+      for (const state of await commands.listSecurityStates()) listener(toSecurityState(state));
+    } catch (error) {
+      unlisten();
+      throw error;
+    }
+    return unlisten;
+  }
+
+  async getSecurity(serverId: string): Promise<SecurityRead> {
+    return toSecurityRead(unwrap(await commands.getSecurity(serverId)));
+  }
+
+  async setAttackMode(
+    serverId: string,
+    active: boolean,
+    password: string,
+  ): Promise<AttackModeOutcome> {
+    return toAttackModeOutcome(unwrap(await commands.setAttackMode(serverId, active, password)));
   }
 
   async getAgentUpdate(serverId: string): Promise<AgentUpdateView> {

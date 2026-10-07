@@ -2,6 +2,7 @@ import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./ag
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
+import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
 import type {
   AccountInputCheck,
   AccountList,
@@ -115,8 +116,17 @@ export interface LinkBridge {
     accountId: string,
     password: string,
   ): Promise<AccountOutcome>;
-  /** Le titulaire change son mot de passe : ferme ses autres sessions, garde la courante. */
-  changeOwnPassword(serverId: string, current: string, password: string): Promise<AccountOutcome>;
+  /**
+   * Le titulaire change son mot de passe : ferme ses autres sessions, garde la courante.
+   * `keepAddress` : la case « Garder ce poste reconnu » (Q15, BR-CONN-019), décochée par défaut :
+   * l'adresse d'où part la demande est oubliée comme les autres.
+   */
+  changeOwnPassword(
+    serverId: string,
+    current: string,
+    password: string,
+    keepAddress: boolean,
+  ): Promise<AccountOutcome>;
   closeAccountSessions(serverId: string, accountId: string): Promise<AccountOutcome>;
   /** `confirmation` : l'identifiant retapé quand on supprime son propre compte (BR-ACCT-012). */
   deleteAccount(
@@ -140,6 +150,27 @@ export interface LinkBridge {
     deviceId: string,
     password: string,
   ): Promise<DeviceRemovalOutcome>;
+
+  // Sécurité (HRT-26) : UNE commande typée par lecture ou action. L'interface ne reçoit que des états,
+  // des dates, des compteurs et des booléens : la clé de ce PC reste dans la coquille Rust.
+
+  /**
+   * L'état de sécurité de chaque serveur (`link://security`) : l'alerte « attaque probable » et le mode
+   * attaque, rejoués à l'abonnement (le dernier état connu), puis à chaque changement. `seq` croît
+   * strictement par serveur : le récepteur écarte tout état dont `seq` n'est pas supérieur au dernier
+   * connu. `device` vaut `unknown` dans ces états : seule la lecture (`getSecurity`) le dit.
+   */
+  onSecurity(listener: (state: SecurityState) => void): Promise<Unsubscribe>;
+  /** Lit l'état de sécurité (une lecture, refaite au retour du lien) ; `unsupported` : agent d'avant la fonction. */
+  getSecurity(serverId: string): Promise<SecurityRead>;
+  /**
+   * Active (`active: true`) ou désactive le mode attaque : un acte d'administration, le mot de passe
+   * actuel ET la preuve de la clé de CE PC (la coquille signe ; le mot de passe ne traverse que ce
+   * paramètre et n'est jamais gardé). Rejette avec `not_recognized` sans rien envoyer si ce PC n'a pas
+   * de clé, avec `forbidden` pour un compte Lecture seule. Une action (clé d'opération, résultat
+   * inconnu à la coupure, jamais rejouée).
+   */
+  setAttackMode(serverId: string, active: boolean, password: string): Promise<AttackModeOutcome>;
 
   // Mise à jour de l'agent (HRT-17) : UNE commande typée par lecture ou action. L'interface ne fournit
   // NI adresse, NI signature, NI somme : la coquille tient la cible de sa propre lecture du flux de

@@ -69,6 +69,20 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
               @update:model-value="settings.setNotifyOnLinkChange"
             />
           </SettingRow>
+          <SettingRow
+            :label="t('settings.notifyOnSecurityAlert')"
+            :help="t('settings.notifyOnSecurityAlertHelp')"
+            v-slot="{ labelId }"
+          >
+            <HToggle
+              :aria-labelledby="labelId"
+              :model-value="settings.notifyOnSecurityAlert"
+              :disabled="!settings.loaded"
+              :busy="settings.saving"
+              :hint="toggleHint"
+              @update:model-value="settings.setNotifyOnSecurityAlert"
+            />
+          </SettingRow>
           <p class="settings__version">
             {{ t("settings.version") }}
             <span class="settings__mono">{{

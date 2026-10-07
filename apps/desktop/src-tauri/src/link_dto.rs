@@ -413,6 +413,15 @@ pub enum LinkFailure {
     /// Le disque est trop lent pour écrire le suivi à temps : l'action n'a PAS été lancée.
     #[error("disque trop lent")]
     TrackingSlow,
+    /// Ce PC n'a pas de clé inscrite (ou l'agent n'a pas reconnu la preuve) : un acte qui exige la
+    /// preuve de la clé (activer ou désactiver le mode attaque, Q14 point 3) n'est pas possible
+    /// d'ici. Quand elle est rendue sans clé au coffre, rien n'est parti.
+    #[error("poste non reconnu")]
+    NotRecognized,
+    /// Ce PC a une clé mais l'agent ne donne pas de défi à signer : rien n'est parti (ni mot de passe
+    /// ni preuve). Ce n'est pas un serveur injoignable.
+    #[error("défi de la clé indisponible")]
+    DeviceChallengeUnavailable,
     #[error("incident interne")]
     Internal,
 }
@@ -463,12 +472,14 @@ impl From<LinkError> for LinkFailure {
             LinkError::Rejected(Some(hearth_proto::error::ErrorCode::ForbiddenRole)) => {
                 Self::Forbidden
             }
+            // Sans clé au coffre : le retrait d'un poste la traite avant (`devices::service::removed`),
+            // le mode attaque la rend telle quelle (`NotRecognized`, rien n'est parti).
+            LinkError::NoDeviceKey => Self::NotRecognized,
+            LinkError::DeviceChallengeUnavailable => Self::DeviceChallengeUnavailable,
             LinkError::Rejected(_)
             | LinkError::TooManyPending
             | LinkError::TaskRestarted
-            | LinkError::Stopped
-            // La commande de retrait la traite avant (`devices::service::remove`) ; nulle part ailleurs elle n'existe.
-            | LinkError::NoDeviceKey => Self::Internal,
+            | LinkError::Stopped => Self::Internal,
         }
     }
 }

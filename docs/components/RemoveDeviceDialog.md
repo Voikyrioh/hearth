@@ -7,3 +7,4 @@ Confirmation du retrait d'un poste de confiance (HRT-23, Q16 : un acte d'adminis
 - Props : `open`, `serverId`, `device` (`TrustedDevice | null`)
 - Événements et slots : `close`
 - Notes : passe par `useDeviceActions` (donc `useServerAction`). Tests : `pages/Security.test.ts`, `e2e/security.spec.ts`.
+- HRT-26 : la fenêtre dit aussi « Change aussi ton mot de passe si ce poste n'est plus à toi » (un poste retiré depuis un autre PC peut se reconnaître à sa prochaine connexion par mot de passe).

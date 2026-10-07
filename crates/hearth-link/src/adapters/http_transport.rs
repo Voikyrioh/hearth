@@ -18,7 +18,7 @@ use hearth_proto::api::sessions::{
 };
 use hearth_proto::error::ErrorBody;
 use hearth_proto::headers;
-use hearth_proto::stream::{ClientMessage, ServerMessage, SignedAuth};
+use hearth_proto::stream::{ClientMessage, SecurityMessage, ServerMessage, SignedAuth};
 use hearth_proto::version::API_VERSION;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use rustls::pki_types::ServerName;
@@ -469,8 +469,12 @@ impl WsConn {
             Some(Ok(Message::Text(text))) => {
                 Ok(match serde_json::from_str::<ServerMessage>(text.as_str()) {
                     Ok(message) => Frame::Message(Box::new(message)),
-                    // Message mal formé ou d'un type inconnu : on l'ignore, le lien vit.
-                    Err(_) => Frame::Other,
+                    // L'état de sécurité n'est pas un `ServerMessage` (HRT-24) : lu à part.
+                    Err(_) => match serde_json::from_str::<SecurityMessage>(text.as_str()) {
+                        Ok(SecurityMessage::Security(view)) => Frame::Security(Box::new(view)),
+                        // Message mal formé ou d'un type inconnu : on l'ignore, le lien vit.
+                        Err(_) => Frame::Other,
+                    },
                 })
             }
             Some(Ok(_)) => Ok(Frame::Other),

@@ -108,9 +108,11 @@ pub async fn change_own_password(
     id: &ServerId,
     current: &Secret,
     password: &Secret,
+    keep_address: bool,
 ) -> Result<AccountOutcome, LinkFailure> {
     let username = current_username(manager, id)?;
-    let planned = wire::change_own_password(&username, current.expose(), password.expose());
+    let planned =
+        wire::change_own_password(&username, current.expose(), password.expose(), keep_address);
     if planned.is_err() {
         return send(manager, id, planned).await;
     }
@@ -181,6 +183,9 @@ pub fn old_password_stands(result: &Result<AccountOutcome, LinkFailure>) -> bool
             | LinkFailure::UnknownServer
             | LinkFailure::Storage
             | LinkFailure::Vault
+            // Une action de compte ne porte pas de preuve de clé : ces deux-là n'y existent pas.
+            | LinkFailure::NotRecognized
+            | LinkFailure::DeviceChallengeUnavailable
             | LinkFailure::Internal => false,
         },
     }

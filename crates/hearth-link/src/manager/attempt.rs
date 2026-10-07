@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
+use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::sessions::LoginRequest;
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, UpgradeTarget};
@@ -32,6 +33,8 @@ pub(crate) enum AttemptResult {
         /// État de la mise à jour de l'agent reçu AVANT l'instantané (l'ordre des sujets est celui
         /// de l'agent) : il n'est pas perdu.
         updates: Vec<UpdateProgress>,
+        /// Dernier état de sécurité reçu AVANT l'instantané (le message suit l'`auth`).
+        security: Option<Box<SecurityView>>,
     },
     /// Échec passager (réseau, délai, serveur occupé…) : on réessaiera.
     Failed,
@@ -145,6 +148,7 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
     }
     let _ = stream.send(&ClientMessage::Subscribe { topics }).await;
     let mut updates = Vec::new();
+    let mut security = None;
     loop {
         match stream.recv().await {
             Ok(Frame::Message(message)) => match *message {
@@ -154,6 +158,7 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                         machine: Box::new(machine),
                         history,
                         updates,
+                        security,
                     };
                 }
                 ServerMessage::Error(detail) => match detail.code {
@@ -181,6 +186,8 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                 }
                 _ => {}
             },
+            // Seul le dernier dit l'état.
+            Ok(Frame::Security(view)) => security = Some(view),
             Ok(Frame::Other) => {}
             Err(_) => return AttemptResult::Failed,
         }

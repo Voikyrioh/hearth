@@ -44,7 +44,12 @@ fn each_action_builds_its_own_method_path_and_body() {
     assert_eq!(password.request.body.unwrap(), json!({ "password": GOOD }));
     assert_eq!(password.expect, Expect::Closed);
 
-    let own = planned(wire::change_own_password("marie", "Old-Pass-12345", GOOD));
+    let own = planned(wire::change_own_password(
+        "marie",
+        "Old-Pass-12345",
+        GOOD,
+        false,
+    ));
     assert_eq!(own.request.method, Method::Put);
     assert_eq!(own.request.path, "/me/password");
     assert_eq!(
@@ -134,7 +139,7 @@ fn an_invalid_input_is_refused_locally_before_anything_is_sent() {
         ),
         other => panic!("{other:?}"),
     }
-    match wire::change_own_password("marie", "x", "") {
+    match wire::change_own_password("marie", "x", "", false) {
         Err(Stop::Refused(AccountRefusal::WeakPassword { rules })) => {
             assert_eq!(rules, [PasswordRuleDto::Required]);
         }
@@ -245,7 +250,12 @@ fn a_success_is_read_in_the_shape_the_action_expects() {
 #[test]
 fn no_password_shows_in_the_debug_of_a_planned_action_nor_of_a_refusal() {
     let create = planned(wire::create("marie", GOOD, RoleDto::Admin));
-    let own = planned(wire::change_own_password("marie", "Old-Pass-12345", GOOD));
+    let own = planned(wire::change_own_password(
+        "marie",
+        "Old-Pass-12345",
+        GOOD,
+        false,
+    ));
     let text = format!("{create:?} {own:?}");
     for secret in [GOOD, "Old-Pass-12345"] {
         assert!(!text.contains(secret), "{text}");
@@ -335,4 +345,33 @@ fn the_entry_is_erased_after_any_refusal_that_does_not_prove_nothing_changed() {
             "{refusal:?}"
         );
     }
+}
+
+#[test]
+fn keeping_this_pc_recognized_is_sent_only_when_the_box_is_ticked() {
+    let kept = planned(wire::change_own_password(
+        "marie",
+        "Old-Pass-12345",
+        GOOD,
+        true,
+    ));
+    assert_eq!(
+        kept.request.body.unwrap(),
+        json!({ "current": "Old-Pass-12345", "password": GOOD, "keep_address": true })
+    );
+    // Décochée par défaut : le champ n'est pas envoyé, l'adresse est oubliée comme les autres.
+    let forgotten = planned(wire::change_own_password(
+        "marie",
+        "Old-Pass-12345",
+        GOOD,
+        false,
+    ));
+    assert!(
+        forgotten
+            .request
+            .body
+            .unwrap()
+            .get("keep_address")
+            .is_none()
+    );
 }

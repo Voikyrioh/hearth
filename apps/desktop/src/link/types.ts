@@ -160,6 +160,10 @@ export type LinkFailure =
   | { kind: "forbidden" }
   | { kind: "tracking_unavailable" }
   | { kind: "tracking_slow" }
+  /** Ce PC n'a pas de clé inscrite ou prouvée : le mode attaque ne se change pas d'ici (Q14 point 3). */
+  | { kind: "not_recognized" }
+  /** Ce PC a une clé mais l'agent ne donne pas de défi à signer : rien n'est parti. */
+  | { kind: "device_challenge_unavailable" }
   | { kind: "internal" };
 
 /** Erreur d'une commande de liaison, porteuse de l'échec typé. */

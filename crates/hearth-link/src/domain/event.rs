@@ -5,6 +5,7 @@ use std::sync::Arc;
 use hearth_proto::api::audit::AuditEventItem;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
+use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::fingerprint::Fingerprint;
 
@@ -115,6 +116,12 @@ pub enum Event {
         server: ServerId,
         progress: Arc<UpdateProgress>,
     },
+    /// État de sécurité du compte connecté (message `security` du flux, HRT-26) : une fois après
+    /// l'authentification, puis à chaque changement (début ou fin d'une alerte, mode attaque).
+    Security {
+        server: ServerId,
+        view: Arc<SecurityView>,
+    },
 }
 
 impl Event {
@@ -130,7 +137,8 @@ impl Event {
             | Self::SessionEnded { server, .. }
             | Self::FingerprintChanged { server, .. }
             | Self::Audit { server, .. }
-            | Self::AgentUpdate { server, .. } => Some(server),
+            | Self::AgentUpdate { server, .. }
+            | Self::Security { server, .. } => Some(server),
         }
     }
 }

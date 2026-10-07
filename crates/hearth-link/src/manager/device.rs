@@ -7,7 +7,9 @@
 //! - la clé privée ne sort pas d'ici : aucune fonction publique ne la rend, ne la journalise ni ne
 //!   la met dans une erreur ;
 //! - la clé n'est écrite au coffre qu'APRÈS la réponse `201` d'une connexion (`Authenticated::new_key`) :
-//!   une connexion refusée ne laisse aucune clé orpheline ;
+//!   une connexion REFUSÉE ne laisse aucune clé orpheline ; un délai qui coupe l'appel, lui, laisse la
+//!   clé rangée (l'agent a pu inscrire le poste juste après : elle est inscrite ou reconnue à la
+//!   connexion suivante, l'effacer perdrait une place sur les huit) ;
 //! - un agent qui ne connaît pas le défi (`404`), un défi qui échoue, un coffre en panne : la
 //!   connexion continue SANS preuve, jamais une erreur propre à la clé, jamais une boucle.
 
@@ -59,7 +61,7 @@ pub(crate) fn load_key(deps: &Deps, id: &ServerId) -> KeyState {
     }
 }
 
-fn pinned(target: &Target) -> Option<Fingerprint> {
+pub(crate) fn pinned(target: &Target) -> Option<Fingerprint> {
     match target.pin {
         Pin::Pinned(fingerprint) => Some(fingerprint),
         Pin::Probe => None,
@@ -189,10 +191,14 @@ fn vault_accepts(deps: &Deps, id: Option<&ServerId>, key: &DeviceKey) -> bool {
             &witness
         }
     };
-    if let Err(error) = deps
-        .vault
-        .put(target, SecretKind::DeviceKey, &key.to_secret())
-    {
+    // L'entrée témoin n'est qu'un essai d'écriture : elle reçoit une valeur factice de la MÊME longueur,
+    // jamais la vraie clé privée (dont l'effacement ne serait pas vérifié).
+    let value = if id.is_some() {
+        key.to_secret()
+    } else {
+        Secret::new("0".repeat(key.to_secret().expose().len()))
+    };
+    if let Err(error) = deps.vault.put(target, SecretKind::DeviceKey, &value) {
         tracing::warn!(%error, "coffre : écriture de la clé d'appareil refusée, connexion sans clé");
         return false;
     }
@@ -353,10 +359,33 @@ pub(crate) async fn enroll_silently(deps: &Deps, shared: &super::Shared) -> bool
         }
         ChallengeAnswer::Issued(_) => shared.enrollment_tried.store(true, Ordering::SeqCst),
     }
-    matches!(
+    // La session d'avant l'inscription : elle reste ouverte chez l'agent tant qu'on ne la ferme pas
+    // (HRT-26, suivi de la review de la PR #27). Lue avant que le jeton neuf ne la remplace.
+    let old_token = deps.vault.get(&id, SecretKind::Token).ok().flatten();
+    let enrolled = matches!(
         attempt::reauthenticate_with_key(deps, shared).await,
         attempt::AttemptResult::Reauthenticated { .. }
+    );
+    if enrolled && let Some(old) = old_token {
+        close_replaced_session(deps, &shared.target(), &old).await;
+    }
+    enrolled
+}
+
+/// Ferme chez l'agent la session que l'inscription silencieuse vient de remplacer : au mieux, jamais
+/// une erreur (une session déjà morte répond `401`, un agent injoignable ne retarde rien de plus que
+/// le délai d'une requête). Le jeton fermé est effacé de la mémoire en sortie.
+async fn close_replaced_session(deps: &Deps, target: &Target, old: &Secret) {
+    match timeout(
+        deps.config.request_timeout,
+        deps.transport.logout(target, old),
     )
+    .await
+    {
+        Ok(Ok(())) => tracing::debug!("session d'avant l'inscription fermée"),
+        Ok(Err(error)) => tracing::debug!(%error, "session d'avant l'inscription non fermée"),
+        Err(_) => tracing::debug!("fermeture de la session d'avant l'inscription trop longue"),
+    }
 }
 
 impl LinkManager {

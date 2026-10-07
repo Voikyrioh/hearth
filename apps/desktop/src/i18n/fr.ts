@@ -41,6 +41,12 @@ export const fr = {
     changePassword: "Changer le mot de passe",
     currentPassword: "Ancien mot de passe",
     currentPasswordPlaceholder: "Ancien mot de passe",
+    keepAddress: "Garder ce poste reconnu",
+    keepAddressHelp:
+      "Coché, le serveur continue de reconnaître ce poste par son adresse après le changement. Décoché, il l'oublie avec celles des autres postes.",
+    keepAddressOldAgent: "Disponible quand l'agent de ce serveur est à jour.",
+    keepAddressAttackNoKey:
+      "Le mode attaque est actif et ce poste n'a pas de clé enregistrée : si tu ne le gardes pas reconnu, ta session sera refusée tout de suite après le changement.",
     nextPassword: "Nouveau mot de passe",
     nextPasswordPlaceholder: "Nouveau mot de passe",
     confirmNextPassword: "Confirme le nouveau mot de passe",
@@ -107,12 +113,84 @@ export const fr = {
     removeMessage:
       "Es-tu sûr de vouloir retirer ce poste ? Tu ne pourras plus te connecter depuis ce poste sans avoir un mot de passe valide.",
     removePasswordHelp: "Pour retirer un poste, confirme ton mot de passe.",
+    removeAdvice:
+      "Change aussi ton mot de passe si ce poste n'est plus à toi : un poste retiré depuis un autre PC peut se reconnaître à sa prochaine connexion par mot de passe.",
     password: "Ton mot de passe",
     passwordPlaceholder: "Mot de passe",
     removed: "Ce poste a été retiré de ta liste de postes de confiance.",
     wrongPassword: "Mot de passe incorrect.",
     proofRefused: "Le serveur n'a pas reconnu ce poste. Réessaie dans un instant.",
     notFound: "Ce poste n'existe plus.",
+  },
+  security: {
+    loading: "Chargement de l'état de sécurité…",
+    alertTitle: "Attaque probable détectée",
+    alertOwn:
+      "Une attaque probable vise ton identifiant. Clique pour plus d'infos et activer le mode attaque.",
+    alertOwnAndOne: "Une attaque probable vise ton identifiant et 1 autre compte.",
+    alertOwnAndMany: "Une attaque probable vise ton identifiant et {n} autres comptes.",
+    alertOthersOne: "Une attaque probable vise 1 compte de ce serveur.",
+    alertOthersMany: "Une attaque probable vise {n} comptes de ce serveur.",
+    alertReadonly: "Tu vois l'alerte, mais seul un administrateur peut activer le mode attaque.",
+    alertReadonlyHint:
+      "Tu vois l'alerte mais ne peux pas activer le mode attaque. Contacte un administrateur.",
+    moreInfo: "Plus d'infos",
+    activate: "Activer le mode attaque",
+    deactivate: "Désactiver le mode attaque",
+    modeActive: "Mode attaque actif",
+    modeSuspendedTitle: "Mode attaque suspendu",
+    modeText:
+      "Seuls les postes reconnus peuvent se connecter. Un poste connu par un seul signe a droit à un essai.",
+    bannerSuspended: "Le serveur a redémarré. Le mode attaque reprend dans {n} min.",
+    bannerSuspendedSoon: "Le serveur a redémarré. Le mode attaque reprend dans moins d'une minute.",
+    seePage: "Voir la page Sécurité",
+    lastKnown: "Dernier état connu à {time}.",
+    panelTitle: "Mode attaque",
+    stateOff: "Inactif",
+    stateOn: "Actif",
+    stateSuspended: "Suspendu",
+    suspendedText:
+      "Le mode attaque est suspendu après le redémarrage du serveur. Il reprend dans {n} min.",
+    suspendedSoon:
+      "Le mode attaque est suspendu après le redémarrage du serveur. Il reprend dans moins d'une minute.",
+    autoEndNote:
+      "Le mode s'arrête tout seul après 30 minutes sans tentative refusée. Un poste légitime que le mode bloque et qui réessaie repousse cette fin autant que l'attaquant.",
+    attackNoteAddress:
+      "Un poste connu seulement par son adresse est bloqué dès qu'un essai raté a eu lieu depuis cette adresse, même si son titulaire tape le bon mot de passe au même moment.",
+    attackNoteChallenge:
+      "Si l'adresse d'un poste change entre le moment où il demande à être reconnu et sa connexion, sa preuve est ignorée.",
+    confirmOnTitle: "Activer le mode attaque ?",
+    confirmOnMessage:
+      "Seuls les postes reconnus pourront se connecter, sur tous les comptes de ce serveur. Un poste connu par un seul signe aura droit à un essai. Les autres seront refusés. Le mode s'arrête tout seul quand l'attaque semble terminée.",
+    confirmOffTitle: "Désactiver le mode attaque ?",
+    confirmOffMessage:
+      "Les postes non reconnus pourront de nouveau essayer de se connecter. Si l'attaque continue, tu pourras le réactiver.",
+    passwordHelp:
+      "Pour changer le mode attaque, confirme ton mot de passe. La clé de ce poste est vérifiée en même temps.",
+    password: "Ton mot de passe",
+    passwordPlaceholder: "Mot de passe",
+    enabled:
+      "Mode attaque activé. Seuls les postes reconnus peuvent se connecter. Un poste connu par un seul signe a droit à un essai.",
+    disabled: "Mode attaque désactivé.",
+    autoStopped: "L'attaque semble terminée. Le mode attaque s'est arrêté automatiquement.",
+    resumed: "Le mode attaque reprend après 30 minutes de suspension.",
+    noPermission:
+      "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs.",
+    agentTooOld:
+      "L'agent de ce serveur est trop ancien pour avoir un mode attaque. Mets-le à jour, puis reviens ici.",
+    notEnrolled:
+      "Ce poste n'est pas encore enregistré, tu ne peux donc pas changer le mode attaque d'ici. Mets ton client à jour, puis reconnecte-toi avec ton mot de passe pour enregistrer ce poste. En attendant, tu peux utiliser la commande sur le serveur.",
+    reconnect: "Se reconnecter",
+    serverBusy: "Le serveur ne répond pas. Réessaie dans un instant.",
+    wrongPassword: "Mot de passe incorrect.",
+    unsupported: "Cette fonction n'existe pas encore sur ce serveur. Mets l'agent à jour.",
+    loadFailed: "Impossible de lire l'état de sécurité de ce serveur.",
+    markAttack: "mode attaque actif",
+    markSuspended: "mode attaque suspendu",
+    markAlert: "alerte de sécurité",
+    tagAttack: "Mode attaque",
+    tagSuspended: "Mode attaque suspendu",
+    tagAlert: "Alerte de sécurité",
   },
   common: {
     comingSoon: "Bientôt disponible",
@@ -190,6 +268,7 @@ export const fr = {
   },
   server: {
     avatarLabel: "{name}, {state}",
+    avatarLabelMarked: "{name}, {state}, {mark}",
     roleReadonly: "Lecture seule",
     roleAdmin: "Administrateur",
   },
@@ -212,7 +291,7 @@ export const fr = {
     dashboard: "Tableau de bord",
     accounts: "Comptes",
     audit: "Journal d'activité",
-    security: "Sécurité",
+    security: "Sécurité et mode attaque",
     addAccount: "Ajouter un compte",
     export: "Exporter",
     soonTitle: "Bientôt disponible",
@@ -313,6 +392,8 @@ export const fr = {
     notConnected: "Indisponible tant que le lien avec le serveur n'est pas établi.",
     unknownServer: "Ce serveur n'est plus dans ta liste.",
     forbidden: "Ton compte n'a pas le droit de faire cela.",
+    deviceChallengeUnavailable:
+      "Le serveur ne donne pas, pour l'instant, de quoi reconnaître ce PC. Rien n'a été envoyé. Réessaie dans un instant.",
     generic: "Une erreur est survenue. Réessaie.",
   },
   fingerprintAlert: {
@@ -589,6 +670,9 @@ export const fr = {
     lastAccount: "Dernier compte utilisé : {username}",
     notifyOnLinkChange: "Notifier quand un serveur devient hors ligne ou revient",
     notifyOnLinkChangeHelp: "Une notification Windows au plus par minute et par serveur.",
+    notifyOnSecurityAlert: "Alertes de sécurité",
+    notifyOnSecurityAlertHelp:
+      "Une notification Windows quand une attaque probable vise ton identifiant, et quand le mode attaque s'arrête tout seul.",
     logs: "Journaux",
     logsHelp: "Les journaux aident à comprendre un problème.",
     openLogs: "Ouvrir le dossier des journaux",

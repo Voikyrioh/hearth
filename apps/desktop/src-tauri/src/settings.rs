@@ -18,6 +18,7 @@ use crate::error::AppError;
 pub const STORE_FILE: &str = "settings.json";
 const KEY_CLOSE_HINT_SEEN: &str = "closeHintSeen";
 const KEY_NOTIFY_ON_LINK_CHANGE: &str = "notifyOnLinkChange";
+const KEY_NOTIFY_ON_SECURITY_ALERT: &str = "notifyOnSecurityAlert";
 
 /// Entrée de démarrage de Windows (port, pour pouvoir la simuler en test).
 pub trait Autostart {
@@ -85,6 +86,35 @@ pub fn set_notify_on_link_change<R: Runtime>(
     store.set(KEY_NOTIFY_ON_LINK_CHANGE, json!(enabled));
     store.save().map_err(store_error)?;
     Ok(flag_or(store.get(KEY_NOTIFY_ON_LINK_CHANGE).as_ref(), true))
+}
+
+/// Alertes de sécurité (BR-TRUST-033, HRT-26) : une notification système quand une attaque probable
+/// vise l'identifiant et quand le mode attaque s'arrête tout seul. Réglage SÉPARÉ de celui du lien,
+/// activé par défaut ; il ne touche jamais les bandeaux de l'interface.
+pub fn notify_on_security_alert<R: Runtime>(
+    app: &AppHandle<R>,
+    file: &Path,
+) -> Result<bool, AppError> {
+    let store = app.store(file).map_err(store_error)?;
+    Ok(flag_or(
+        store.get(KEY_NOTIFY_ON_SECURITY_ALERT).as_ref(),
+        true,
+    ))
+}
+
+/// Active ou désactive les alertes de sécurité, puis relit l'état réel.
+pub fn set_notify_on_security_alert<R: Runtime>(
+    app: &AppHandle<R>,
+    file: &Path,
+    enabled: bool,
+) -> Result<bool, AppError> {
+    let store = app.store(file).map_err(store_error)?;
+    store.set(KEY_NOTIFY_ON_SECURITY_ALERT, json!(enabled));
+    store.save().map_err(store_error)?;
+    Ok(flag_or(
+        store.get(KEY_NOTIFY_ON_SECURITY_ALERT).as_ref(),
+        true,
+    ))
 }
 
 /// L'explication de fermeture a-t-elle déjà été demandée au système ?

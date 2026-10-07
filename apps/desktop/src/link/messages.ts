@@ -49,6 +49,10 @@ export function failureMessage(failure: LinkFailure, seconds?: number): string {
       return t("failure.notConnected");
     case "forbidden":
       return t("failure.forbidden");
+    case "not_recognized":
+      return t("security.notEnrolled");
+    case "device_challenge_unavailable":
+      return t("failure.deviceChallengeUnavailable");
     case "unknown_server":
       return t("failure.unknownServer");
     case "fingerprint_changed":

@@ -1,0 +1,107 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import HIcon from "@/components/atoms/HIcon.vue";
+
+// Base commune des bandeaux de sécurité (conception design, écran B) : un ton (`alert` : attaque
+// probable, contour complet ambre ; `attack` : mode attaque actif, filet gauche rose ; `suspended` :
+// mode suspendu, filet gauche turquoise), un pictogramme, un titre ÉCRIT (le sens ne repose jamais sur
+// la couleur seule), un texte, des actions. Aucune logique : `tone` choisit le jeton et le pictogramme.
+// `stamp` : « Dernier état connu à {heure} » quand le lien n'est pas « Connecté » (le bandeau ne
+// s'estompe pas, il dit seulement ce qu'il sait). Seul le bandeau d'alerte est `role="alert"` (une
+// attaque qui apparaît mérite d'être annoncée, une fois) ; les autres sont `role="status"`.
+const props = defineProps<{
+  tone: "alert" | "attack" | "suspended";
+  title: string;
+  stamp?: string;
+}>();
+
+const icon = computed(() =>
+  props.tone === "alert" ? "alert" : props.tone === "attack" ? "shield" : "clock",
+);
+</script>
+
+<template>
+  <section
+    :class="['banner', `banner--${tone}`]"
+    :role="tone === 'alert' ? 'alert' : 'status'"
+    :aria-label="title"
+  >
+    <HIcon class="banner__icon" :name="icon" />
+    <div class="banner__body">
+      <h2 class="banner__title">{{ title }}</h2>
+      <p class="banner__text"><slot /></p>
+      <p v-if="stamp" class="banner__stamp">{{ stamp }}</p>
+    </div>
+    <div class="banner__actions"><slot name="actions" /></div>
+  </section>
+</template>
+
+<style scoped>
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-control);
+}
+
+.banner--alert {
+  border: var(--border-width) solid var(--warn);
+  background: var(--warn-tint);
+}
+
+.banner--attack {
+  border-left: var(--sec-edge) solid var(--ac2);
+  background: var(--sec-tint);
+}
+
+.banner--suspended {
+  border-left: var(--sec-edge) solid var(--cool);
+  background: var(--cool-tint);
+}
+
+.banner__icon {
+  margin-top: var(--space-half);
+}
+
+.banner--alert .banner__icon {
+  color: var(--warn);
+}
+
+.banner--attack .banner__icon {
+  color: var(--ac2);
+}
+
+.banner--suspended .banner__icon {
+  color: var(--cool);
+}
+
+.banner__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.banner__title {
+  font-family: var(--font-title);
+  font-size: var(--fs-lead);
+  font-weight: var(--fw-semibold);
+}
+
+.banner__text {
+  color: var(--tx);
+}
+
+.banner__stamp {
+  color: var(--tx2);
+  font-size: var(--fs-small);
+}
+
+.banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+</style>
