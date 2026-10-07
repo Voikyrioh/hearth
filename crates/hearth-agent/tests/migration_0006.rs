@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -91,7 +93,7 @@ async fn columns(pool: &SqlitePool, table: &str) -> BTreeSet<Column> {
 
 #[tokio::test]
 async fn the_migration_keeps_every_row_and_every_column_of_a_0005_database_and_only_adds() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let pool = database_at_0005(&dir.path().join("hearth.db")).await;
     let audit_before = columns(&pool, "audit_events").await;
     let attack_before = columns(&pool, "attack_mode").await;
@@ -176,7 +178,7 @@ async fn the_migration_keeps_every_row_and_every_column_of_a_0005_database_and_o
 
 #[tokio::test]
 async fn the_system_origin_is_accepted_and_the_journal_keeps_its_guarantees() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let pool = database_at_0005(&dir.path().join("hearth.db")).await;
     // Avant : l'origine « système » est refusée par la contrainte.
     assert!(
@@ -261,7 +263,7 @@ async fn the_system_origin_is_accepted_and_the_journal_keeps_its_guarantees() {
 #[tokio::test]
 async fn the_migration_can_be_replayed_and_the_previous_agent_still_writes_on_the_migrated_schema()
 {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let pool = database_at_0005(&dir.path().join("hearth.db")).await;
     migrator_up_to(6).run(&pool).await.unwrap();
     // Rejouée : rien ne change, rien ne casse.
@@ -302,10 +304,10 @@ async fn the_migration_can_be_replayed_and_the_previous_agent_still_writes_on_th
 #[tokio::test]
 async fn a_database_opened_by_the_agent_is_at_0006_and_a_fresh_one_matches_the_migrated_one() {
     use hearth_agent::infrastructure::sqlite::Database;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let migrated = database_at_0005(&dir.path().join("old.db")).await;
     migrator_up_to(6).run(&migrated).await.unwrap();
-    let fresh_dir = tempfile::tempdir().unwrap();
+    let fresh_dir = tmp::tempdir().unwrap();
     let fresh = Database::open(fresh_dir.path()).await.unwrap();
     for table in ["audit_events", "attack_mode", "attack_trials", "sessions"] {
         assert_eq!(
@@ -323,7 +325,7 @@ async fn the_copy_taken_before_the_swap_comes_back_intact_after_a_rollback_and_m
     // Le superviseur de la mise à jour remet la copie de la base d'avant l'échange quand le nouvel agent
     // ne répond pas (BR-UPDATE-029) : l'agent précédent (0005) la retrouve telle quelle, et un nouvel
     // essai de mise à jour applique de nouveau la 0006.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let path = dir.path().join("hearth.db");
     let backup = dir.path().join("hearth.db.avant-echange");
     let pool = database_at_0005(&path).await;

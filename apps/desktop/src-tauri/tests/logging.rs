@@ -2,6 +2,9 @@
 //! Le journal et le crochet de panique sont globaux au processus : un seul test les initialise.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
+#[path = "../../../../crates/hearth-agent/tests/support/tmp.rs"]
+mod tmp;
+
 use std::path::Path;
 
 use hearth_desktop_lib::logging::{KEPT_FILES, MAX_TOTAL_BYTES, enforce_cap, init_in, log_dir};
@@ -16,7 +19,7 @@ fn read_all(dir: &Path) -> String {
 
 #[test]
 fn logs_go_to_a_rotating_file_and_panics_are_recorded() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     init_in(dir.path()).unwrap();
 
     tracing::info!("ligne de test");
@@ -73,7 +76,7 @@ fn the_startup_failure_message_says_when_the_log_could_not_be_written() {
 
 #[test]
 fn an_unwritable_log_dir_is_an_error() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let blocker = dir.path().join("fichier");
     std::fs::write(&blocker, "x").unwrap();
     // Un fichier à la place du dossier : impossible d'y écrire un journal.
@@ -82,7 +85,7 @@ fn an_unwritable_log_dir_is_an_error() {
 
 #[test]
 fn the_oldest_logs_are_deleted_past_the_total_cap_but_never_the_newest() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     for day in ["2026-10-01", "2026-10-02", "2026-10-03"] {
         std::fs::write(
             dir.path().join(format!("hearth.{day}.log")),

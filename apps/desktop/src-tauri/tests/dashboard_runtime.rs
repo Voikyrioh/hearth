@@ -97,12 +97,12 @@ async fn connected() -> (
     Arc<LinkRuntime>,
     Arc<Recorder>,
     Arc<Memory>,
-    tempfile::TempDir,
+    agent::tmp::TestDir,
     String,
 ) {
     let agent = TestAgent::install().await;
     agent.create_account("marie", Role::Admin).await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let secrets = Arc::new(Memory::default());
     let (runtime, sink) = open(dir.path(), &secrets).await;
     let port = agent.addr.port();

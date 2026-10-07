@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use agent::tmp::TestDir;
 use async_trait::async_trait;
 use hearth_agent::domain::accounts::Role;
 use hearth_link::adapters::{
@@ -29,7 +30,6 @@ use hearth_link::ports::Transport as _;
 use hearth_link::ports::net_watcher::{NetError, NetWatcher};
 use hearth_link::{LinkConfig, LinkManager, NewServer, Ports};
 use hearth_proto::fingerprint::Fingerprint;
-use tempfile::TempDir;
 
 pub use agent::{PASSWORD, TestAgent};
 pub use proxy::FaultProxy;
@@ -251,7 +251,7 @@ pub struct World {
     pub net: Arc<ScriptedNet>,
     pub clock: Arc<JumpClock>,
     pub fingerprint: Fingerprint,
-    pub dir: TempDir,
+    pub dir: TestDir,
     /// Le défi : ce qu'il répond (`set`) et ce qu'on a demandé.
     pub spy: Arc<SpyState>,
 }
@@ -650,7 +650,7 @@ impl World {
         let agent = TestAgent::install_with(options.updating).await;
         agent.create_account("marie", options.role).await;
         let proxy = FaultProxy::start(agent.addr).await;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = agent::tmp::tempdir().unwrap();
         let vault = Arc::new(MemoryVault::new());
         let net = Arc::new(ScriptedNet::new());
         let clock = Arc::new(JumpClock::new());

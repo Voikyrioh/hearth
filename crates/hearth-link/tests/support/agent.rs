@@ -3,6 +3,9 @@
 //! 20 ms) et l'horloge de l'agent est pilotable (pour faire expirer une session).
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "../../../hearth-agent/tests/support/tmp.rs"]
+pub mod tmp;
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,7 +30,6 @@ use hearth_agent::infrastructure::config::AgentConfig;
 use hearth_agent::infrastructure::ids::UlidGen;
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::Database;
-use tempfile::TempDir;
 use time::{Duration as TimeDuration, OffsetDateTime};
 
 pub const PASSWORD: &str = "Correct-Horse-9";
@@ -193,7 +195,7 @@ fn metering() -> Metering {
 }
 
 pub struct TestAgent {
-    dir: TempDir,
+    dir: tmp::TestDir,
     db: Database,
     pub clock: Arc<TestClock>,
     pub hasher: Arc<SlowHasher>,
@@ -213,7 +215,7 @@ impl TestAgent {
     /// Comme `install`, avec des adaptateurs de mise à jour fabriqués par `updating` (sans eux :
     /// ceux de la production, qui refusent la mise à jour hors systemd).
     pub async fn install_with(updating: Option<UpdatingFactory>) -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tmp::tempdir().unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let clock = Arc::new(TestClock(Mutex::new(
             OffsetDateTime::UNIX_EPOCH + TimeDuration::seconds(1_790_000_000),

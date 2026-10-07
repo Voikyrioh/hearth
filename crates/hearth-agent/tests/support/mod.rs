@@ -12,6 +12,7 @@ pub mod crash;
 pub mod device;
 pub mod https;
 pub mod probe;
+pub mod tmp;
 pub mod update;
 pub mod ws;
 
@@ -42,8 +43,8 @@ use hearth_agent::infrastructure::sqlite::{
     SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo,
     SqliteStore,
 };
-use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
+use tmp::TestDir;
 
 pub const PASSWORD: &str = "Correct-Horse-9";
 
@@ -207,7 +208,7 @@ impl PasswordHasher for CountingHasher {
 }
 
 pub struct Env {
-    pub dir: TempDir,
+    pub dir: TestDir,
     pub db: Database,
     pub clock: Arc<TestClock>,
     pub hasher: Arc<CountingHasher>,
@@ -262,7 +263,7 @@ pub fn start_time() -> OffsetDateTime {
 }
 
 pub async fn env() -> Env {
-    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let dir = tmp::tempdir().expect("dossier temporaire");
     let db = Database::open(dir.path()).await.expect("base");
     let clock = Arc::new(TestClock(Mutex::new(start_time())));
     let hasher = Arc::new(CountingHasher::new());

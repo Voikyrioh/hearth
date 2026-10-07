@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn identical_files_are_recognised_by_their_bytes() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let (a, b, c) = (
             dir.path().join("a"),
             dir.path().join("b"),
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn the_config_is_written_once_and_never_overwritten() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let path = dir.path().join("etc").join("agent.toml");
         let host = SystemHost;
         let first = ConfigSpec {
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn a_directory_is_listed_by_name_and_never_removed_with_its_content() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let host = SystemHost;
         assert_eq!(
             host.list_dir(&dir.path().join("none")).expect("absent"),
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn removing_what_is_absent_is_not_an_error() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let host = SystemHost;
         host.remove_file(&dir.path().join("none")).expect("fichier");
         host.remove_dir_if_empty(&dir.path().join("none"))
@@ -513,7 +513,7 @@ mod unix_tests {
 
     #[test]
     fn a_first_binary_is_installed_executable_without_leftovers() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let (source, dest, backup) = (
             dir.path().join("source"),
             dir.path().join("hearth-agent"),
@@ -541,7 +541,7 @@ mod unix_tests {
 
     #[test]
     fn replacing_a_binary_keeps_the_old_one_aside_and_restoring_brings_it_back() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let (source, dest, backup) = (
             dir.path().join("source"),
             dir.path().join("hearth-agent"),
@@ -565,7 +565,7 @@ mod unix_tests {
 
     #[test]
     fn restoring_after_a_first_install_removes_the_binary() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let (source, dest, backup) = (
             dir.path().join("source"),
             dir.path().join("hearth-agent"),
@@ -583,7 +583,7 @@ mod unix_tests {
 
     #[test]
     fn a_failed_copy_leaves_no_temporary_and_the_old_binary_in_place() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let dest = dir.path().join("hearth-agent");
         write(&dest, b"ancien");
         let error = SystemHost
@@ -600,7 +600,7 @@ mod unix_tests {
 
     #[test]
     fn the_version_is_read_from_the_installed_binary() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let script = dir.path().join("hearth-agent");
         write(&script, b"#!/bin/sh\necho 'hearth-agent 3.4.5'\n");
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("droits");
@@ -613,7 +613,7 @@ mod unix_tests {
 
     #[test]
     fn inspect_describes_what_is_on_disk_and_changes_nothing() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let paths = InstallPaths {
             binary: dir.path().join("hearth-agent"),
             config: dir.path().join("agent.toml"),
@@ -646,7 +646,7 @@ mod unix_tests {
 
     #[test]
     fn a_second_installation_cannot_take_the_lock() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let path = dir.path().join("install.lock");
         let first = SystemHost.lock(&path).expect("premier verrou");
         let second = SystemHost.lock(&path);
@@ -659,7 +659,7 @@ mod unix_tests {
     /// porte une copie du descripteur ; elle ne doit pas retenir le verrou après sa libération.
     #[test]
     fn the_install_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let path = dir.path().join("install.lock");
         let lock = SystemHost.lock(&path).expect("verrou pris");
         // Même description de fichier ouverte, comme le descripteur hérité par un enfant forké.
@@ -677,7 +677,7 @@ mod unix_tests {
 
     #[test]
     fn the_data_dir_is_created_private() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let data = dir.path().join("hearth");
         assert!(SystemHost.ensure_data_dir(&data).expect("création"));
         let mode = std::fs::metadata(&data).expect("méta").permissions().mode() & 0o777;

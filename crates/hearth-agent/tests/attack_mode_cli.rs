@@ -4,12 +4,14 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
 use std::path::Path;
 use std::process::Command;
 
 use hearth_agent::infrastructure::sqlite::Database;
 use sqlx::Row;
-use tempfile::TempDir;
+use tmp::TestDir;
 
 struct Run {
     code: Option<i32>,
@@ -34,8 +36,8 @@ fn hearth(dir: &Path, args: &[&str]) -> Run {
     }
 }
 
-async fn database() -> (TempDir, Database) {
-    let dir = tempfile::tempdir().unwrap();
+async fn database() -> (TestDir, Database) {
+    let dir = tmp::tempdir().unwrap();
     let db = Database::open(dir.path()).await.unwrap();
     (dir, db)
 }
@@ -108,7 +110,7 @@ async fn status_tells_the_mode_and_the_activation_and_off_ends_it_with_a_journal
 
 #[test]
 fn there_is_no_subcommand_to_enable_the_mode() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     for args in [&["on"][..], &["enable"][..], &["activate"][..]] {
         let run = hearth(dir.path(), args);
         assert_ne!(run.code, Some(0), "{args:?}");

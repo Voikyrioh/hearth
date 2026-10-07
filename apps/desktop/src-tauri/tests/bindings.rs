@@ -2,6 +2,9 @@
 //! Régénération : `HEARTH_REGEN_BINDINGS=1 cargo test -p hearth-desktop`.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
+#[path = "../../../../crates/hearth-agent/tests/support/tmp.rs"]
+mod tmp;
+
 use hearth_desktop_lib::{BINDINGS_PATH, specta_builder, typescript};
 
 fn normalize(text: String) -> String {
@@ -10,7 +13,7 @@ fn normalize(text: String) -> String {
 
 #[test]
 fn bindings_file_is_up_to_date() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let out = dir.path().join("bindings.ts");
     specta_builder().export(typescript(), &out).unwrap();
     let fresh = normalize(std::fs::read_to_string(&out).unwrap());

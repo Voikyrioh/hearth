@@ -84,7 +84,7 @@ mod tests {
     /// est encore vivante.
     #[test]
     fn the_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let path = dir.path().join("a.lock");
         let held = HeldLock::acquire(open(&path), Duration::ZERO, Duration::ZERO).expect("pris");
         let copy = held.descriptor_copy();
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn a_lock_held_elsewhere_is_busy_and_free_again_once_dropped() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let path = dir.path().join("b.lock");
         let held = HeldLock::acquire(open(&path), Duration::ZERO, Duration::ZERO).expect("pris");
         let refused = HeldLock::acquire(open(&path), Duration::ZERO, Duration::ZERO);
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn a_lock_released_during_the_patience_is_taken() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let path = dir.path().join("c.lock");
         let held = HeldLock::acquire(open(&path), Duration::ZERO, Duration::ZERO).expect("pris");
         let releaser = thread::spawn(move || {

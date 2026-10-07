@@ -111,14 +111,14 @@ struct Rig {
     sink: Arc<Recorder>,
     server: String,
     fingerprint: String,
-    _dir: tempfile::TempDir,
+    _dir: agent::tmp::TestDir,
 }
 
 async fn rig(role: Role) -> Rig {
     let agent = TestAgent::install().await;
     agent.create_account("marie", role).await;
     let proxy = FaultProxy::start(agent.addr).await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let vault = Arc::new(CredentialVault::new(Memory::default()));
     let config = LinkConfig {
         subscribe_audit: true,
@@ -308,7 +308,7 @@ async fn a_read_only_account_gets_a_typed_refusal_and_no_file() {
         .await
         .unwrap_err();
     assert_eq!(refused, LinkFailure::Forbidden);
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let target = dir.path().join("journal.csv");
     let chooser = Chooser::new(Some(target.clone()));
     let export = audit::export(&rig.runtime, &rig.server, filter(), &chooser)
@@ -324,7 +324,7 @@ async fn a_read_only_account_gets_a_typed_refusal_and_no_file() {
 async fn the_export_goes_where_the_user_chose_and_nowhere_else() {
     let rig = rig(Role::Admin).await;
     rig.agent.create_account("-cmd-calc", Role::ReadOnly).await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let target = dir.path().join("choisi par l-utilisateur.csv");
     let chooser = Chooser::new(Some(target.clone()));
     let result = audit::export(
@@ -367,7 +367,7 @@ fn names_in(dir: &std::path::Path) -> Vec<std::ffi::OsString> {
 #[tokio::test]
 async fn an_export_replaces_the_previous_file_whole_and_leaves_no_temporary_file() {
     let rig = rig(Role::Admin).await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let target = dir.path().join("journal.csv");
     std::fs::write(&target, "ancien contenu ".repeat(10_000)).unwrap();
     let chooser = Chooser::new(Some(target.clone()));
@@ -388,7 +388,7 @@ async fn an_export_replaces_the_previous_file_whole_and_leaves_no_temporary_file
 #[tokio::test]
 async fn a_failed_write_keeps_what_was_there_and_leaves_no_temporary_file() {
     let rig = rig(Role::Admin).await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     // Le renommage final échoue (la destination est un dossier non vide) : rien n'est détruit.
     let target = dir.path().join("journal.csv");
     std::fs::create_dir(&target).unwrap();
@@ -413,7 +413,7 @@ async fn cancelling_the_save_dialog_writes_nothing_and_a_bad_destination_is_a_st
         .unwrap();
     assert!(!cancelled.saved);
     // Une « destination » qui est un dossier : l'écriture échoue, l'échec est typé.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let failed = audit::export(
         &rig.runtime,
         &rig.server,

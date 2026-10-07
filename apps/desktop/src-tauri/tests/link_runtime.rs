@@ -104,7 +104,7 @@ struct Rig {
     runtime: Arc<LinkRuntime>,
     sink: Arc<Recorder>,
     secrets: Arc<Memory>,
-    dir: tempfile::TempDir,
+    dir: agent::tmp::TestDir,
 }
 
 fn vault(secrets: &Arc<Memory>) -> Arc<CredentialVault<Shared>> {
@@ -128,7 +128,7 @@ async fn rig() -> Rig {
     let agent = TestAgent::install().await;
     agent.create_account("marie", Role::Admin).await;
     let proxy = FaultProxy::start(agent.addr).await;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = agent::tmp::tempdir().unwrap();
     let secrets = Arc::new(Memory::default());
     let (runtime, sink) = open(dir.path(), &secrets).await;
     Rig {

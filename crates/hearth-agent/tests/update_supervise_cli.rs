@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -46,7 +48,7 @@ fn job(dir: &Path) -> Job {
 
 #[test]
 fn a_job_that_is_not_there_is_nothing_to_resume_and_exits_zero() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     fs::create_dir(dir.path().join("update")).unwrap();
     let output = supervise(&dir.path().join("update").join("job.json"));
     assert!(output.status.success(), "{output:?}");
@@ -54,7 +56,7 @@ fn a_job_that_is_not_there_is_nothing_to_resume_and_exits_zero() {
 
 #[test]
 fn a_job_that_cannot_be_read_exits_zero_and_says_so_once_on_stderr() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let update = dir.path().join("update");
     fs::create_dir(&update).unwrap();
     fs::write(update.join("job.json"), b"{pas du json").unwrap();
@@ -76,7 +78,7 @@ fn a_job_that_cannot_be_read_exits_zero_and_says_so_once_on_stderr() {
 
 #[test]
 fn a_job_with_an_unreadable_field_exits_zero_and_writes_a_failed_result_with_its_version() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let update = dir.path().join("update");
     fs::create_dir(&update).unwrap();
     let mut work = job(dir.path());
@@ -96,7 +98,7 @@ fn a_job_with_an_unreadable_field_exits_zero_and_writes_a_failed_result_with_its
 #[cfg(unix)]
 #[test]
 fn another_supervisor_at_work_is_refused_without_a_restart_loop() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let host = FsUpdateHost::new(dir.path(), dir.path().join("agent"), Launcher::Detached);
     let path = host.write_job(&job(dir.path())).unwrap();
     let _held = host.take_supervisor_lock().unwrap();

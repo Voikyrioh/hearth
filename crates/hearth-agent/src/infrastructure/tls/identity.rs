@@ -327,7 +327,7 @@ mod tests {
     /// descripteur ; elle ne retient pas le verrou de création après sa libération.
     #[test]
     fn the_creation_lock_is_released_while_a_copy_of_its_descriptor_is_still_alive() {
-        let dir = tempfile::tempdir().expect("dossier");
+        let dir = crate::test_tmp::tempdir().expect("dossier");
         let path = dir.path().join(LOCK_FILE);
         let lock = CreationLock::acquire(&path, Duration::ZERO).expect("pris");
         let child_copy = lock._held.descriptor_copy();

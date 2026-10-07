@@ -3,6 +3,9 @@
 //! à jour, la configuration n'ouvre aucun contournement (HTTP, certificats, adresse).
 #![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
+#[path = "../../../../crates/hearth-agent/tests/support/tmp.rs"]
+mod tmp;
+
 use hearth_desktop_lib::update::domain::{Release, UpdateRecord};
 use hearth_desktop_lib::update::feed::{
     DEV_KEY_MARK, EMBEDDED_PUBLIC_KEY, embedded_key_is_development, is_development_key,
@@ -36,7 +39,7 @@ fn record() -> UpdateRecord {
 
 #[test]
 fn a_missing_file_is_the_default_state() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     assert_eq!(
         FileUpdateStore::new(dir.path()).load(),
         UpdateRecord::default()
@@ -45,7 +48,7 @@ fn a_missing_file_is_the_default_state() {
 
 #[test]
 fn the_state_is_written_and_read_back() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let store = FileUpdateStore::new(dir.path());
     store.save(&record()).unwrap();
     assert_eq!(FileUpdateStore::new(dir.path()).load(), record());
@@ -59,7 +62,7 @@ fn the_state_is_written_and_read_back() {
 
 #[test]
 fn a_corrupt_file_never_blocks_the_client() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     std::fs::write(dir.path().join(FILE_NAME), b"{ pas du json").unwrap();
     assert_eq!(
         FileUpdateStore::new(dir.path()).load(),
@@ -69,7 +72,7 @@ fn a_corrupt_file_never_blocks_the_client() {
 
 #[test]
 fn saving_creates_the_data_directory_and_replaces_the_previous_state() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let nested = dir.path().join("a").join("b");
     let store = FileUpdateStore::new(&nested);
     store.save(&UpdateRecord::default()).unwrap();
