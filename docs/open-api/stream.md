@@ -8,7 +8,7 @@ Flux temps réel : l'identité et l'historique de la machine, puis un échantill
 
 ## Déroulement
 
-1. Le client ouvre le WebSocket et envoie `{"type":"auth","token":"…"}` **dans les 5 s**. Sinon, ou jeton refusé : message `error` puis fermeture (code `1008`).
+1. Le client ouvre le WebSocket et envoie `{"type":"auth","token":"…"}` **dans les 5 s** ; il peut y joindre `"device": { "algorithm", "public_key", "challenge", "signature" }`, la preuve de sa clé d'appareil (usage `session`, liée au jeton ; défi demandé à `POST /sessions/challenge` avec `purpose: "session"`). Sinon, ou jeton refusé : message `error` puis fermeture (code `1008`). Une preuve absente, illisible ou invalide est ignorée : le jeton seul fait ce qu'il faisait. Une preuve valide d'une clé inscrite pour le compte fait **retenir l'adresse de la connexion** (session + clé, BR-TRUST-007) ; la session seule n'apprend jamais d'adresse.
 2. Le client envoie `{"type":"subscribe","topics":["metrics","session"]}` (`audit` en plus pour un administrateur). Chaque `subscribe` **remplace** les abonnements. S'abonner à `metrics` répond par un `snapshot` puis un `metrics` à chaque échantillon.
    Au plus un `subscribe` par seconde et par connexion : au-delà, message `error` `BUSY` sans fermeture (chacun coûte un `snapshot`).
 3. Le client envoie `{"type":"ping","n":1}` (toutes les 2 s) ; l'agent répond `{"type":"pong","n":1}`. Sans aucun message du client pendant 30 s, l'agent ferme (`1008`).
@@ -23,7 +23,7 @@ Le sujet `update` (tout compte authentifié) diffuse la progression d'une mise �
 
 | `type` | Champs | Rôle |
 |---|---|---|
-| `auth` | `token` | Jeton de session, **premier message obligatoire**. Jamais journalisé. |
+| `auth` | `token`, `device` (optionnel) | Jeton de session, **premier message obligatoire**. Jamais journalisé. `device` : la preuve de la clé d'appareil (voir « Déroulement »). |
 | `subscribe` | `topics[]` (`metrics`, `audit`, `session`) | Remplace les abonnements. `audit` pour un compte lecture seule : message `error` `FORBIDDEN_ROLE`, le reste est pris. `session` est toujours reçu : s'y abonner est sans effet. |
 | `ping` | `n` | Battement. |
 
@@ -48,10 +48,10 @@ L'agent s'abonne aux échantillons **avant** de lire l'historique du `snapshot`,
 
 Deux quotas distincts :
 
-- **Connexions pas encore authentifiées** (en attente de leur `auth`) : au plus **2 par adresse** et **16 au total**. Au-delà : refus dès l'ouverture, `503 BUSY` au format d'erreur (avec `Retry-After`). La place est rendue dès que l'`auth` réussit, ou à la fermeture quelle qu'en soit la cause (délai de 5 s, coupure, erreur d'authentification).
+- **Connexions pas encore authentifiées** (en attente de leur `auth`) : au plus **2 par adresse** et **16 au total**, dont **4 places réservées** aux adresses déjà connues (une session ouverte, ou une connexion réussie depuis moins de 30 jours, BR-CONN-020) : un inconnu n'en prend jamais plus de 12. Au-delà : refus dès l'ouverture, `503 BUSY` au format d'erreur (avec `Retry-After`). La place est rendue dès que l'`auth` réussit, ou à la fermeture quelle qu'en soit la cause (délai de 5 s, coupure, erreur d'authentification).
 - **Flux authentifiés** : au plus **32 au total** et **4 par compte**. La place n'est prise qu'après un `auth` réussi ; au-delà, message `error` `BUSY` puis fermeture (`1008`). Un flux fermé rend sa place.
 
-Un anonyme muet ne prend donc jamais la place d'un flux authentifié ; il ne peut qu'occuper les places d'attente de **sa** propre adresse (2) et, avec des adresses multiples, jusqu'à 16 places d'attente pendant 5 s chacune.
+Un anonyme muet ne prend donc jamais la place d'un flux authentifié ; il ne peut qu'occuper les places d'attente de **sa** propre adresse (2) et, avec des adresses multiples, jusqu'à 12 places d'attente pendant 5 s chacune : les 4 dernières restent à ceux qui ont déjà une session (ADR-0022).
 
 Chaque connexion est une tâche indépendante. Les échantillons passent par un canal de diffusion borné : un abonné lent perd les plus anciens, il ne ralentit ni l'échantillonnage ni les autres. Un message qui ne part pas en 10 s fait abandonner le client.
 

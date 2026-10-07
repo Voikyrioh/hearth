@@ -14,6 +14,7 @@
 mod accounts;
 mod audit;
 mod auth;
+mod devices;
 mod error;
 mod hello;
 mod metrics;
@@ -98,10 +99,16 @@ pub struct Endpoint {
     route: fn() -> MethodRouter<AppState>,
 }
 
+/// Les routes `POST` qui ne modifient rien : un calcul sans effet ni écriture (le défi de la clé
+/// d'appareil). Elles n'ont ni action de journal ni entrée de réussite.
+const READ_ONLY_POSTS: &[&str] = &["/sessions/challenge"];
+
 impl Endpoint {
     /// La route modifie-t-elle quelque chose ?
     pub fn modifies(&self) -> bool {
-        !matches!(self.method, Method::GET | Method::HEAD | Method::OPTIONS)
+        let reads = matches!(self.method, Method::GET | Method::HEAD | Method::OPTIONS)
+            || (self.method == Method::POST && READ_ONLY_POSTS.contains(&self.path));
+        !reads
     }
 }
 
@@ -126,6 +133,15 @@ pub static ENDPOINTS: &[Endpoint] = &[
         route: || post(sessions::login),
     },
     Endpoint {
+        method: Method::POST,
+        path: "/sessions/challenge",
+        access: Access::Public,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || post(sessions::challenge),
+    },
+    Endpoint {
         method: Method::DELETE,
         path: "/sessions/current",
         access: Access::Authenticated,
@@ -142,6 +158,24 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: false,
         audit: None,
         route: || get(sessions::me),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/me/devices",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(devices::list),
+    },
+    Endpoint {
+        method: Method::DELETE,
+        path: "/me/devices/{id}",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::DeviceRemove),
+        route: || delete(devices::remove),
     },
     Endpoint {
         method: Method::PUT,
@@ -388,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn only_hello_and_the_login_are_public() {
+    fn only_hello_the_login_and_its_challenge_are_public() {
         let public: Vec<_> = ENDPOINTS
             .iter()
             .filter(|endpoint| endpoint.access == Access::Public)
@@ -396,8 +430,33 @@ mod tests {
             .collect();
         assert_eq!(
             public,
-            vec![(Method::GET, "/hello"), (Method::POST, "/sessions")]
+            vec![
+                (Method::GET, "/hello"),
+                (Method::POST, "/sessions"),
+                (Method::POST, "/sessions/challenge"),
+            ]
         );
+    }
+
+    #[test]
+    fn the_challenge_is_a_post_that_modifies_nothing_and_writes_no_journal_entry() {
+        let challenge = ENDPOINTS
+            .iter()
+            .find(|endpoint| endpoint.path == "/sessions/challenge")
+            .unwrap();
+        assert_eq!(challenge.method, Method::POST);
+        assert!(!challenge.modifies());
+        assert!(!challenge.tracked);
+        assert_eq!(challenge.audit, None);
+        // Aucune autre route POST n'est exemptée par erreur.
+        for endpoint in ENDPOINTS.iter().filter(|e| e.method == Method::POST) {
+            assert_eq!(
+                endpoint.modifies(),
+                endpoint.path != "/sessions/challenge",
+                "{}",
+                endpoint.path
+            );
+        }
     }
 
     #[test]

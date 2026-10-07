@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub mod api;
+pub mod device;
 pub mod https;
 pub mod probe;
 pub mod update;
@@ -22,22 +23,66 @@ use hearth_agent::application::ports::{
     AuditFeed, Clock, HashError, IdGen, PasswordHasher, Store, TokenGen,
 };
 use hearth_agent::application::sessions::{ClientInfo, SessionService};
+use hearth_agent::application::trust::TrustService;
 use hearth_agent::domain::accounts::{AccountId, PlainPassword, Role, Username};
 use hearth_agent::domain::audit::{Actor, Origin};
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::session_token::SessionToken;
 use hearth_agent::domain::sessions::{Session, SessionId};
+use hearth_agent::domain::trust::{DeviceId, NewDevice};
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
 use hearth_agent::infrastructure::audit_feed::BroadcastAuditFeed;
+use hearth_agent::infrastructure::crypto::{HmacChallengeCrypto, RingProofVerifier};
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::{
-    Database, SqliteAccountRepo, SqliteAuditRepo, SqliteLoginAttemptRepo, SqliteOperationRepo,
-    SqliteSessionRepo, SqliteStore,
+    Database, SqliteAccountRepo, SqliteAuditRepo, SqliteDeviceRepo, SqliteKnownAddressRepo,
+    SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
 };
 use tempfile::TempDir;
 use time::{Duration, OffsetDateTime};
 
 pub const PASSWORD: &str = "Correct-Horse-9";
+
+/// L'empreinte du certificat du « serveur » des tests : celle que les preuves signent.
+pub const SERVER_FINGERPRINT: [u8; 32] = [0xa5; 32];
+
+/// Horloge monotone pilotée : les défis expirent quand le test le décide.
+pub struct TestMonotonic(AtomicU64);
+
+impl TestMonotonic {
+    pub fn advance(&self, by: Duration) {
+        self.0.fetch_add(
+            u64::try_from(by.whole_milliseconds()).unwrap_or(0),
+            Ordering::SeqCst,
+        );
+    }
+}
+
+impl hearth_agent::application::ports::MonotonicClock for TestMonotonic {
+    fn elapsed(&self) -> Duration {
+        Duration::milliseconds(i64::try_from(self.0.load(Ordering::SeqCst)).unwrap_or(0))
+    }
+}
+
+/// Vérificateur de signatures qui compte ses appels : prouve que deux chemins de connexion font le
+/// même travail coûteux.
+pub struct CountingVerifier {
+    inner: RingProofVerifier,
+    pub calls: AtomicU64,
+}
+
+impl CountingVerifier {
+    pub fn calls(&self) -> u64 {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl hearth_agent::application::ports::ProofVerifier for CountingVerifier {
+    fn verify(&self, algorithm: &str, public_key: &[u8], message: &[u8], signature: &[u8]) -> bool {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.verify(algorithm, public_key, message, signature)
+    }
+}
 
 pub struct TestClock(Mutex<OffsetDateTime>);
 
@@ -139,6 +184,10 @@ pub struct Env {
     pub audit_recorder: Arc<hearth_agent::application::audit::AuditRecorder>,
     pub feed: Arc<BroadcastAuditFeed>,
     pub trail: Arc<hearth_agent::application::audit::AuditTrail>,
+    /// L'identité d'appareil, branchée comme en production sur `sessions`.
+    pub trust: Arc<TrustService>,
+    pub monotonic: Arc<TestMonotonic>,
+    pub verifier: Arc<CountingVerifier>,
 }
 
 pub const CLIENT_ADDR: &str = "10.0.0.7";
@@ -200,18 +249,38 @@ pub async fn env() -> Env {
         ids.clone(),
         trail.clone(),
     ));
-    let sessions = Arc::new(SessionService::new(
-        accounts,
-        session_repo,
-        Arc::new(SqliteLoginAttemptRepo::new(db.pool().clone())),
+    let monotonic = Arc::new(TestMonotonic(AtomicU64::new(1_000)));
+    let verifier = Arc::new(CountingVerifier {
+        inner: RingProofVerifier,
+        calls: AtomicU64::new(0),
+    });
+    let trust = Arc::new(TrustService::new(
+        Arc::new(SqliteDeviceRepo::new(db.pool().clone())),
         store.clone(),
-        hasher.clone(),
+        verifier.clone(),
+        Arc::new(HmacChallengeCrypto::new().expect("hasard")),
+        monotonic.clone(),
         clock.clone(),
-        ids,
-        tokens,
+        ids.clone(),
+        hearth_proto::fingerprint::Fingerprint::from_bytes(SERVER_FINGERPRINT),
         trail.clone(),
-        audit_sink.clone(),
     ));
+    let sessions = Arc::new(
+        SessionService::new(
+            accounts,
+            session_repo,
+            Arc::new(SqliteLoginAttemptRepo::new(db.pool().clone())),
+            Arc::new(SqliteKnownAddressRepo::new(db.pool().clone())),
+            store.clone(),
+            hasher.clone(),
+            clock.clone(),
+            ids,
+            tokens,
+            trail.clone(),
+            audit_sink.clone(),
+        )
+        .with_trust(trust.clone()),
+    );
     let operations = Arc::new(OperationService::new(
         Arc::new(SqliteOperationRepo::new(db.pool().clone())),
         store.clone(),
@@ -235,7 +304,29 @@ pub async fn env() -> Env {
         audit_recorder,
         feed,
         trail,
+        trust,
+        monotonic,
+        verifier,
     }
+}
+
+/// Un service des sessions SANS identité d'appareil : le comportement d'un agent qui n'a pas la
+/// fonction (sous-commandes `account`), et celui de tous les tests d'avant HRT-22.
+pub fn plain_sessions(env: &Env) -> SessionService {
+    let pool = env.db.pool().clone();
+    SessionService::new(
+        Arc::new(SqliteAccountRepo::new(pool.clone())),
+        Arc::new(SqliteSessionRepo::new(pool.clone())),
+        Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
+        Arc::new(SqliteKnownAddressRepo::new(pool.clone())),
+        Arc::new(SqliteStore::new(pool)),
+        env.hasher.clone(),
+        env.clock.clone(),
+        Arc::new(SequentialIds::starting_at(10_000)),
+        Arc::new(OsTokenGen),
+        env.trail.clone(),
+        env.audit_sink.clone(),
+    )
 }
 
 pub fn secret(value: &str) -> Secret {
@@ -270,6 +361,25 @@ impl Env {
         let store = SqliteStore::new(self.db.pool().clone());
         let mut tx = store.begin().await.expect("unité de travail");
         tx.sessions().insert(&session).await.expect("session");
+        tx.commit().await.expect("validation");
+    }
+
+    /// Inscrit un poste de confiance par la fonction d'écriture de production (`DeviceTx::insert`).
+    pub async fn insert_device(&self, account: &AccountId, id: &str, key_id: &str, name: &str) {
+        let store = SqliteStore::new(self.db.pool().clone());
+        let mut tx = store.begin().await.expect("unité de travail");
+        tx.devices()
+            .insert(&NewDevice {
+                id: DeviceId::new(id),
+                account: account.clone(),
+                key_id: key_id.to_owned(),
+                public_key: [7; 32],
+                name: name.to_owned(),
+                now: self.clock.now(),
+                addr: "10.0.0.7".to_owned(),
+            })
+            .await
+            .expect("poste");
         tx.commit().await.expect("validation");
     }
 

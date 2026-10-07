@@ -67,6 +67,11 @@ impl TokenHash {
     pub fn from_hex(text: &str) -> Result<Self, InvalidToken> {
         decode_hex(text).map(Self)
     }
+
+    /// Les 32 octets de l'empreinte : ce que la preuve de clé d'une session lie au jeton (HRT-22).
+    pub fn as_bytes(&self) -> &[u8; TOKEN_LEN] {
+        &self.0
+    }
 }
 
 impl PartialEq for TokenHash {

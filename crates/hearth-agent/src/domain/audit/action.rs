@@ -24,11 +24,15 @@ pub enum AuditAction {
     /// Lecture du journal : consignée seulement quand elle est refusée (BR-AUDIT-021).
     AuditRead,
     AgentUpdate,
+    /// Un poste de confiance est inscrit par une connexion par mot de passe (BR-TRUST-004).
+    DeviceEnroll,
+    /// Un poste de confiance est retiré par son titulaire (BR-TRUST-022).
+    DeviceRemove,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 12] = [
+    pub const ALL: [AuditAction; 14] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -41,6 +45,8 @@ impl AuditAction {
         Self::AccountsRead,
         Self::AuditRead,
         Self::AgentUpdate,
+        Self::DeviceEnroll,
+        Self::DeviceRemove,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -58,6 +64,8 @@ impl AuditAction {
             Self::AccountsRead => action::ACCOUNTS_READ,
             Self::AuditRead => action::AUDIT_READ,
             Self::AgentUpdate => action::AGENT_UPDATE,
+            Self::DeviceEnroll => action::DEVICE_ENROLL,
+            Self::DeviceRemove => action::DEVICE_REMOVE,
         }
     }
 
@@ -76,6 +84,8 @@ impl AuditAction {
             Self::AccountsRead => "Consultation des comptes",
             Self::AuditRead => "Tentative de lecture du journal",
             Self::AgentUpdate => "Mise à jour de l'agent",
+            Self::DeviceEnroll => "Poste de confiance enregistré",
+            Self::DeviceRemove => "Poste de confiance retiré",
         }
     }
 

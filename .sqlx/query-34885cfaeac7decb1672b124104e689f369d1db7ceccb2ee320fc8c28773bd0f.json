@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT 1 AS \"found!: i64\" FROM known_addresses WHERE address = ?\n           AND MAX(last_success_at, COALESCE(last_used_at, last_success_at)) > ? LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "found!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "34885cfaeac7decb1672b124104e689f369d1db7ceccb2ee320fc8c28773bd0f"
+}

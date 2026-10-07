@@ -54,6 +54,8 @@ url = "2"
 minisign = "0.10"
 rustls-native-certs = "0.8"
 base64 = "0.22"
+# Déjà dans l'arbre (rustls, rcgen) : en dépendance directe pour la clé d'appareil (ADR-0023).
+ring = "0.17"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

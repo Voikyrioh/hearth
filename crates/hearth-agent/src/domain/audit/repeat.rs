@@ -45,7 +45,8 @@ impl Key {
             action: event.action,
             outcome: event.outcome.kind(),
             target: event.target.text(),
-            reason: event.outcome.reason().map(|reason| reason.text()),
+            // Raison SANS donnée variable : la durée d'une attente ne fait pas un groupe neuf.
+            reason: event.outcome.reason().map(|reason| reason.group_text()),
         }
     }
 }

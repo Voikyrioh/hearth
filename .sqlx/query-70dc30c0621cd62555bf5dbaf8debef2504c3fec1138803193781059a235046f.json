@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM identifier_slowdowns\n             WHERE last_failure_at < ? AND (wait_until IS NULL OR wait_until <= ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "70dc30c0621cd62555bf5dbaf8debef2504c3fec1138803193781059a235046f"
+}

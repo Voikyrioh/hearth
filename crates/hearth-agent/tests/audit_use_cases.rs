@@ -842,13 +842,16 @@ async fn targeting_three_accounts_in_a_minute_leaves_a_trace_for_each() {
 #[tokio::test]
 async fn refused_logins_from_many_addresses_leave_one_entry_and_one_summary() {
     // Le vrai chemin de production : des connexions refusées (identifiant inconnu), chacune d'une
-    // adresse différente, donc hors de portée du verrouillage par adresse.
+    // adresse différente, donc hors de portée du verrouillage par adresse. Scénario d'origine,
+    // assertions d'origine ; seul l'identifiant varie à chaque tentative (400 identifiants, 400
+    // adresses distinctes), puisqu'un même identifiant attaqué depuis 400 adresses est désormais
+    // ralenti (HRT-20, BR-CONN-018, voir le test suivant).
     let env = env().await;
     for n in 0..400 {
         let error = env
             .sessions
             .login(
-                "fantome",
+                &format!("fantome{n}"),
                 secret(WRONG),
                 &client_at(&format!("2001:db8::{n:x}")),
             )
@@ -865,6 +868,98 @@ async fn refused_logins_from_many_addresses_leave_one_entry_and_one_summary() {
     assert_eq!(records[1].account, None);
     // La synthèse garde l'origine de la dernière occurrence.
     assert_eq!(records[1].origin_addr.as_deref(), Some("2001:db8::18f"));
+}
+
+#[tokio::test]
+async fn refused_logins_from_many_addresses_are_all_counted_in_bounded_entries() {
+    // Le vrai chemin de production : 400 connexions refusées (identifiant inconnu), chacune d'une
+    // adresse différente d'un même /64. Ce test existait pour « 2 entrées exactement » quand rien
+    // ne limitait une telle attaque ; depuis HRT-20 (BR-CONN-018) l'identifiant est ralenti au
+    // 11e échec. Le journal reste borné ET COMPTE CHAQUE TENTATIVE : 10 refus après vérification,
+    // l'échec qui déclenche l'attente, puis 389 refus dus au ralentissement.
+    let env = env().await;
+    for n in 0..400_u32 {
+        let error = env
+            .sessions
+            .login(
+                "fantome",
+                secret(WRONG),
+                &client_at(&format!("2001:db8::{n:x}")),
+            )
+            .await
+            .unwrap_err();
+        if n < 10 {
+            assert!(
+                matches!(error, LoginError::InvalidCredentials),
+                "{n} : {error:?}"
+            );
+        } else {
+            assert!(
+                matches!(error, LoginError::TooManyAttempts { retry_after } if retry_after == time::Duration::seconds(2)),
+                "{n} : {error:?}"
+            );
+        }
+    }
+    env.clock.advance(time::Duration::seconds(61));
+    env.audit_recorder.flush().await;
+    let mut seen: Vec<_> = all(&env)
+        .await
+        .into_iter()
+        .map(|record| {
+            (
+                record.action,
+                record.reason.unwrap_or_default(),
+                record.repeat_count,
+                record.account,
+                record.origin_addr.unwrap_or_default(),
+            )
+        })
+        .collect();
+    seen.sort();
+    let slowed = "trop de tentatives, attente de 2 s";
+    let mut expected = vec![
+        // Les dix premiers refus : le premier est écrit, les neuf suivants et l'échec n° 11 sont
+        // comptés dans la synthèse (origine de la dernière occurrence, l'échec n° 11).
+        (
+            "login".to_owned(),
+            "identifiants incorrects".to_owned(),
+            0,
+            None,
+            "2001:db8::0".to_owned(),
+        ),
+        (
+            "login".to_owned(),
+            "identifiants incorrects (10 autres fois en 1 min)".to_owned(),
+            10,
+            None,
+            "2001:db8::a".to_owned(),
+        ),
+        // L'échec n° 11 déclenche l'attente : une entrée « Blocage temporaire », écrite une fois.
+        (
+            "login.locked".to_owned(),
+            slowed.to_owned(),
+            0,
+            None,
+            "2001:db8::a".to_owned(),
+        ),
+        // Les 389 refus suivants (ralentissement) : le premier écrit, 388 comptés.
+        (
+            "login".to_owned(),
+            slowed.to_owned(),
+            0,
+            None,
+            "2001:db8::b".to_owned(),
+        ),
+        (
+            "login".to_owned(),
+            "trop de tentatives, attente de 2 s (388 autres fois en 1 min)".to_owned(),
+            388,
+            None,
+            "2001:db8::18f".to_owned(),
+        ),
+    ];
+    expected.sort();
+    assert_eq!(seen, expected);
 }
 
 #[tokio::test]

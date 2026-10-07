@@ -161,6 +161,8 @@ pub enum Target {
     Route(&'static str),
     /// La version visée d'une mise à jour de l'agent (`0.2.0`).
     AgentVersion(String),
+    /// Un poste de confiance, par le nom qu'il a annoncé (nettoyé et borné comme l'origine).
+    Device(ClientName),
 }
 
 impl Target {
@@ -171,6 +173,7 @@ impl Target {
             Self::AccountRole(username, role) => Some(format!("{username} ({})", role.label())),
             Self::Route(pattern) => Some((*pattern).to_owned()),
             Self::AgentVersion(version) => Some(format!("version {version}")),
+            Self::Device(name) => Some(format!("poste {}", name.as_str())),
         }
     }
 }
@@ -216,6 +219,16 @@ pub enum Reason {
 }
 
 impl Reason {
+    /// Texte de la raison **sans donnée variable**, pour la clé de regroupement des refus
+    /// (`repeat::RepeatFilter`) : la durée d'une attente change à chaque seconde, elle ne doit
+    /// pas faire un groupe neuf (donc une entrée neuve) à chaque tentative.
+    pub fn group_text(self) -> String {
+        match self {
+            Self::TooManyAttempts { .. } => "trop de tentatives".to_owned(),
+            other => other.text(),
+        }
+    }
+
     /// Texte lu après le résultat : « Refusé : lecture seule ».
     pub fn text(self) -> String {
         match self {
@@ -527,6 +540,19 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn the_group_text_of_a_lock_does_not_carry_the_wait() {
+        assert_eq!(
+            Reason::TooManyAttempts { retry_after_s: 60 }.group_text(),
+            Reason::TooManyAttempts { retry_after_s: 7 }.group_text()
+        );
+        assert_eq!(
+            Reason::ReadOnly.group_text(),
+            Reason::ReadOnly.text(),
+            "les autres raisons sont inchangées"
+        );
     }
 
     #[test]

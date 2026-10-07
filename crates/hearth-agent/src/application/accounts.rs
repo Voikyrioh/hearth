@@ -377,6 +377,11 @@ impl AccountService {
             .sessions()
             .close(id, &closure_on_revocation(), self.clock.now())
             .await?;
+        // Sessions fermées par l'administration : les postes de confiance et les adresses connues
+        // du compte sont oubliés (ADR-0022, ADR-0023) : « fermer les sessions » est le geste pour un
+        // poste volé.
+        tx.devices().forget_all(id).await?;
+        tx.known_addresses().forget(id).await?;
         let mut journal = Pending::default();
         let event = self.succeeded(
             by,
@@ -425,11 +430,24 @@ impl AccountService {
             return Err(AccountError::PasswordChangedMeanwhile);
         }
         let now = self.clock.now();
+        let by_admin = matches!(change, PasswordChange::ByAdmin);
         tx.accounts().set_password(id, hash, now).await?;
         let closed = tx
             .sessions()
             .close(id, &closure_on_password_change(change), now)
             .await?;
+        if by_admin {
+            // Mot de passe changé par un administrateur : tous les postes de confiance et toutes
+            // les adresses retenues du compte sont oubliés (BR-TRUST-024, ADR-0022). Les postes
+            // d'abord : leurs adresses partent avec eux.
+            tx.devices().forget_all(id).await?;
+            tx.known_addresses().forget(id).await?;
+        } else {
+            // Mot de passe changé par son titulaire : ses postes à clé survivent, et l'adresse
+            // qui leur est liée avec eux (BR-TRUST-023) ; les adresses apprises sans clé sont
+            // oubliées (ADR-0022, BR-CONN-019).
+            tx.known_addresses().forget_without_device(id).await?;
+        }
         let mut journal = Pending::default();
         let event = self.succeeded(by, action, Target::Account(current.username.clone()));
         journal.record(&mut *tx, event).await?;

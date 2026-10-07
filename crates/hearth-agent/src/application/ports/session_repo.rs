@@ -5,6 +5,7 @@ use super::StoreError;
 use crate::domain::accounts::AccountId;
 use crate::domain::session_token::TokenHash;
 use crate::domain::sessions::{Session, SessionClosure, SessionId};
+use crate::domain::trust::DeviceId;
 
 /// Lecture des sessions. Toute écriture passe par `UnitOfWork::sessions`.
 #[async_trait]
@@ -18,6 +19,14 @@ pub trait SessionRepo: Send + Sync {
 
     /// Ce jeton a-t-il appartenu à une session fermée par l'administration (BR-RESIL-014) ?
     async fn is_revoked(&self, hash: &TokenHash) -> Result<bool, StoreError>;
+
+    /// Une session encore ouverte à `now` a-t-elle été ouverte depuis cette adresse (exacte,
+    /// canonique), pour n'importe quel compte ? Sert aux places d'attente du flux (ADR-0022).
+    async fn has_open_session_from(
+        &self,
+        address: &str,
+        now: OffsetDateTime,
+    ) -> Result<bool, StoreError>;
 }
 
 /// Les sessions vues de l'intérieur d'une unité de travail. Un seul chemin pour fermer des
@@ -43,6 +52,28 @@ pub trait SessionTx: Send {
         &mut self,
         account: &AccountId,
         closure: &SessionClosure,
+        at: OffsetDateTime,
+    ) -> Result<u64, StoreError>;
+
+    /// Rattache la session au poste dont la clé l'a ouverte ou prouvée (HRT-22).
+    async fn bind_device(
+        &mut self,
+        session: &SessionId,
+        device: &DeviceId,
+    ) -> Result<(), StoreError>;
+
+    /// Ferme les sessions ouvertes depuis ce poste (retrait d'un poste) : celles qui lui sont liées,
+    /// et celles du même compte **sans lien à un poste** ouvertes depuis la dernière adresse et sous
+    /// le nom de ce poste (une session ouverte avant son inscription ne survit pas à son retrait ;
+    /// sur un poste volé, fermer trop vaut mieux que fermer trop peu). Leurs jetons sont retenus
+    /// comme révoqués à la date `at`, comme pour une fermeture par l'administration ; rend leur
+    /// nombre.
+    async fn close_device(
+        &mut self,
+        device: &DeviceId,
+        account: &AccountId,
+        addr: &str,
+        name: &str,
         at: OffsetDateTime,
     ) -> Result<u64, StoreError>;
 

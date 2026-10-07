@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM known_addresses\n             WHERE device_id = ? AND NOT (account_id = ? AND address = ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "af8a3b18285650f3b6ad4642ed6ff45bd92e87c424a2615db6fc86b0824ad361"
+}

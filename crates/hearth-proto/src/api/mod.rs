@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod audit;
 pub mod audit_csv;
+pub mod devices;
 pub mod hello;
 pub mod machine;
 pub mod metrics;

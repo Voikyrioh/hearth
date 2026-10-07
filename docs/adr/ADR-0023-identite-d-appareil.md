@@ -1,0 +1,107 @@
+---
+id: ADR-0023
+titre: Identité d'appareil : clé Ed25519 par ring, une clé par serveur du carnet, défi sans état, message signé, inscription par mot de passe seulement
+type: securite
+statut: acceptée
+date: 2026-10-07
+portee: projet
+remplace: —
+liens: [ADR-0004, ADR-0005, ADR-0006, ADR-0009, ADR-0011, ADR-0022, BR-TRUST-003, BR-TRUST-004, BR-TRUST-005, BR-TRUST-007, BR-TRUST-022, BR-TRUST-023, BR-TRUST-024, BR-TRUST-025, BR-TRUST-026, BR-CONN-013, BR-UPDATE-029, conception technique 2026-10-06 (poste de confiance) sections 0, 3, 5.1, 5.3, 5.4, 7, 8, Q9 à Q14, HRT-22]
+---
+
+# ADR-0023 : Identité d'appareil
+
+## Contexte
+
+Le détenteur veut garantir « pour pas cher » que c'est bien le client d'origine qui opère depuis l'adresse retenue par le serveur (Q9), et prépare une règle « 2 critères sur 3 » (adresse retenue, session ou mot de passe du premier coup, clé de l'appareil) qui décidera plus tard qui échappe au ralentissement et, en mode attaque, qui passe (Q10 à Q13). Cet ADR couvre le premier maillon, livré par HRT-22 : **le serveur sait vérifier qu'une connexion vient d'une clé d'appareil qu'il a inscrite**. La clé **ne change encore aucune décision d'accès** : elle est enregistrée, prouvée et listée (BR-TRUST-035 : en état normal, aucune règle n'est appliquée). La règle elle-même est HRT-24, le mode attaque HRT-25.
+
+L'agent est un binaire statique qui tourne en root sur un serveur du réseau local ; le client parle à l'agent par `hearth-link`, qui épingle l'empreinte de son certificat (ADR-0005). Les adresses IP ne sont pas une identité sur un réseau local (usurpation d'adresse).
+
+## Décision
+
+### 1. Une clé Ed25519, par `ring`
+
+- **Algorithme** : Ed25519 (signature déterministe de 64 octets, clé publique de 32 octets), par la crate `ring` 0.17. `ring` est **déjà compilée** par `rustls` (`features = ["ring"]`, ADR-0005) : la déclarer en dépendance **directe** de `hearth-agent` n'ajoute aucun code compilé, aucun paquet à `Cargo.lock`, et respecte les ADR-0009 et ADR-0011 (**ni OpenSSL ni aws-lc**). `unsafe_code = "forbid"` tient : l'`unsafe` est dans la dépendance. L'agent n'emploie que `ring::signature::{ED25519, UnparsedPublicKey}` (vérification) et `ring::hmac` (code des défis) ; la création et la signature (côté client, `hearth-link`) arrivent avec HRT-23, qui déclarera `ring` à son tour.
+- **Une clé par serveur du carnet** (couple installation du client, serveur, compte), jamais une clé commune à tous les serveurs : deux agents ne pourraient pas relier leurs comptes par la clé publique, et retirer un serveur retire sa clé. Le client la garde au Gestionnaire d'identification de Windows (HRT-23).
+- **Côté agent** : seule la clé **publique** est gardée (`trusted_devices.public_key`, 32 octets), avec son empreinte `key_id` (16 premiers octets du SHA-256, 32 caractères hexadécimaux) et la colonne `algorithm` (porte ouverte vers P-256, l'algorithme des puces de sécurité des téléphones et du TPM de Windows, sans migration destructive).
+- **Limite dite** : la clé est un secret **logiciel**, rangé au même endroit que le jeton de session. Un programme qui tourne sous le compte Windows de l'utilisateur peut lire les deux. Elle protège contre un jeton qui fuit seul (journal, copie de mémoire, base de l'agent), pas contre un poste compromis.
+
+### 2. Preuve par défi-réponse applicatif
+
+- **Route** : `POST /sessions/challenge { username, purpose }`, publique, **pour tout identifiant** existant ou non, depuis toute adresse. **Aucune lecture en base, aucun état retenu** : la réponse est la même pour tout identifiant (BR-CONN-013) et un flot de demandes ne remplit rien.
+- **Défi sans état**, 56 octets : `nonce (16) || émission en millisecondes d'horloge monotone (8) || code (32)`, `code = HMAC-SHA256(k, "hearth-challenge/1" || usage || nonce || émission || SHA-256(identifiant normalisé) || adresse canonique du demandeur)`. `k` : 32 octets tirés au démarrage du service. Valable **60 secondes** (horloge monotone : le réglage de l'heure n'y change rien) ; un redémarrage du service invalide les défis en cours (le client en redemande un). Le défi n'est valable que depuis l'adresse qui l'a demandé et pour l'usage demandé.
+- **Usage unique : le défi n'est consommé que quand la preuve SERT, jamais avant.** Une requête non authentifiée **n'écrit aucun état** : tout le monde détient une clé (il suffit d'en tirer une), donc « signature valide sous la clé fournie » ne prouve rien et ne doit pas occuper de place (revue de la PR 25 : 4 096 preuves sous des clés jetables, en 60 secondes, auraient rendu muette la preuve de tout poste inscrit ; la première rédaction de cette décision, comme la conception 5.1, avait ce défaut). La vérification (`TrustService::verify`) est donc pure ; le défi est retenu (`TrustService::consume`) au moment où la preuve sert : à la connexion, mot de passe juste ET signature valide (inscription d'une nouvelle clé, ou preuve sous une clé déjà inscrite pour le compte) ; sur le flux, session valide ET signature valide sous une clé inscrite pour ce compte. Une tentative refusée ne consomme rien (rejouer un défi avec un mauvais mot de passe ne donne rien, et ne le brûle pas). Deux requêtes simultanées avec le même défi : la consommation se fait sous verrou, une seule gagne, l'autre se déroule comme sans clé.
+- **Bornes de la table des défis consommés** (60 secondes de vie, **4 096 au plus, 64 par compte**) : seuls des comptes authentifiés peuvent y écrire, donc seuls eux peuvent l'atteindre. Un compte qui occupe sa part (64) ne se prive que lui-même. Table pleine malgré l'expiration : le compte qui retient le plus de défis perd le plus ancien (jamais un refus pour tout le monde à cause d'un seul compte) ; un défi oublié ne peut resservir qu'à qui a aussi le mot de passe ou une session valide du compte, dans sa minute de validité. La consommation après réponse ne rouvre pas d'oracle : un mot de passe faux se déroule à l'identique avec une preuve valide, fausse ou absente (même `401`, même calcul Argon2, une seule vérification de signature si une preuve est fournie, aucune écriture).
+- **Message signé** (source unique : `hearth_proto::device_proof::signing_bytes`, partagée par l'agent et la liaison) :
+
+  ```
+  "hearth-device-proof/1" || 0x00 || usage (0x01 connexion, 0x02 session, 0x03 mode attaque, 0x04 retrait d'un poste)
+  || SHA-256 du certificat du serveur (32) || longueur (2) + identifiant normalisé || défi (56)
+  || usages 0x02, 0x03 et 0x04 : SHA-256 du jeton (32) || usage 0x03 : 0x01 activer / 0x00 désactiver
+  || usage 0x04 : longueur (2) + identifiant du poste visé
+  ```
+
+  **Table des usages** (un octet distinct par geste ; aucun ne réutilise celui d'un autre) :
+
+  | Octet | `purpose` du défi | Geste | Lié en plus à | État |
+  |---|---|---|---|---|
+  | `0x01` | `login` | connexion par mot de passe | (rien) | livré (HRT-22) |
+  | `0x02` | `session` | ouverture du flux d'une session | jeton | livré (HRT-22) |
+  | `0x03` | `attack_mode` | activer ou désactiver le mode attaque | jeton, geste | **réservé**, défini, non utilisé (HRT-25) |
+  | `0x04` | `device_removal` | retirer un poste de confiance | jeton, identifiant du poste visé | livré (HRT-22, Q16) |
+
+  Elle lie la preuve à l'**empreinte du certificat épinglé** (une preuve obtenue par un faux serveur ne vaut rien sur le vrai ; dit honnêtement : c'est un lien avec l'identité du serveur, pas avec la session TLS elle-même), à l'**identifiant**, à l'**usage** (une preuve de connexion ne sert pas à authentifier un flux), et pour les usages 0x02 et 0x03 au **jeton**. L'usage 0x03 est défini dès cette version (HRT-25) ; l'agent le sait déjà vérifier.
+- **Vérification** : toujours **sous la clé publique fournie** (le même travail que l'identifiant existe ou non, que la clé soit connue ou non), puis recherche de la clé inscrite. Le code se compare à **temps constant** (`subtle`), de même que la clé publique inscrite et celle de la preuve (l'empreinte de 16 octets retrouve le poste, elle ne dit pas que c'est la même clé). **Les clés de petit ordre sont refusées avant toute vérification** (voir « Ce que `ring` vérifie »). Toute entrée mal formée (longueur, alphabet, algorithme) est refusée sans panique ; aucune raison n'est dite à l'appelant (traces `warn` : adresse et raison, jamais l'identifiant ni la clé).
+- **Jamais une erreur** : `device` absent, illisible ou invalide dans `POST /sessions` ou dans le premier message du flux : la connexion se déroule comme sans clé. Aucun code d'erreur nouveau.
+
+### 3. Inscription par mot de passe seulement
+
+- Un poste est inscrit **dans la transaction de la connexion par mot de passe accordée** (`TrustService::on_login`, appelée par `SessionService::login_in_turn` seulement), si la signature est valide sous la clé fournie, la clé n'est inscrite pour aucun autre compte, le compte a moins de 8 postes et le mode attaque n'est pas actif. **Jamais par une session seule** : une route « inscris ma clé » protégée par le jeton laisserait le voleur d'une session s'offrir une clé, donc deux critères sur trois. Conséquence : un client déjà connecté n'est inscrit qu'à sa prochaine connexion par mot de passe.
+- **8 postes par compte, le 9e refusé sans éviction** (`device: "limit"`). Une même clé présentée deux fois est un seul poste (`proven`). Une clé déjà confiée à un autre compte n'est pas inscrite (jamais deux comptes pour une clé). Inscription gelée pendant le mode attaque (`deferred`) : lue dans la ligne unique `attack_mode`, que HRT-25 écrira.
+- **Retrait** (`DELETE /me/devices/{id}`) : **un acte d'administration** (Q16 : « administration = mot de passe, plus tard 2FA, et clé privée »). Une session seule ne suffit pas : la requête porte (1) la **preuve de possession de la clé du poste COURANT**, inscrite pour le compte, d'usage `0x04`, liée au jeton et à l'identifiant du poste visé (une preuve capturée ne retire pas un autre poste, ni depuis une autre session), puis (2) le **mot de passe actuel**, vérifié par le chemin même de la connexion (`SessionService::confirm_password` : tour par adresse, admission, Argon2, compteurs du couple, de l'adresse et de l'identifiant, ralentissement ; sans session ni adresse apprise). **La preuve est vérifiée avant le mot de passe** : sans clé, aucun mot de passe n'est essayé (une session volée ne devine rien) ; avec la clé, un mot de passe faux compte comme un échec de connexion (jusqu'à `429`). Le défi n'est consommé que si le retrait réussit. Un utilisateur authentifié dont la session n'a pas de poste inscrit (client ancien) reçoit un refus typé explicite (`422`, `details.reason = device_required`) : ce n'est pas un oracle, il est connecté. Le retrait ferme les sessions du poste (liées à lui, et celles du même compte sans lien ouvertes depuis sa dernière adresse sous son nom), son adresse retenue, et ne se fait pas depuis le poste lui-même. **Voies de secours quand plus aucun poste inscrit ne permet de retirer** : le changement du mot de passe du compte par un administrateur (`PUT /accounts/{id}/password`) ou par la commande `hearth-agent account passwd` sur le serveur oublient tous les postes et adresses du compte ; `hearth-agent account revoke` et « fermer les sessions » aussi. La lecture (`GET /me/devices`) reste ouverte à la session seule. Oubli : 90 jours sans preuve (purge) ; mot de passe changé par un administrateur, sessions fermées par un administrateur, compte supprimé : tous les postes et toutes les adresses du compte ; mot de passe changé par le titulaire : les postes à clé survivent (BR-TRUST-023).
+- **Adresses retenues** (table `known_addresses` de l'ADR-0022, étendue) : apprises par une connexion par mot de passe accordée, et par une session valide **accompagnée d'une preuve de clé valide** (ouverture du flux, BR-TRUST-007) ; **jamais par une session seule** ; rafraîchies (durée repoussée, rien d'appris) par l'usage d'une session depuis une adresse déjà retenue, au rythme du renouvellement de session (5 minutes). Un poste à clé n'a qu'une adresse à la fois.
+
+### 4. Une migration, toute la story
+
+`0005_trusted_devices_attack_mode.sql` crée `trusted_devices`, `attack_mode` (ligne 1, inactive) et `attack_trials`, et ajoute des colonnes nulles à `known_addresses`, `identifier_slowdowns` et `sessions` : toute la story en une seule migration, **additive** sur la 0004. Les tables et colonnes que HRT-22 n'utilise pas encore (mode attaque, alerte) attendent leurs tickets. Un ancien binaire devant la base migrée refuserait de démarrer (migration inconnue) : le retour arrière remet la copie d'avant l'échange (BR-UPDATE-029), les postes inscrits pendant la fenêtre de contrôle sont perdus et réinscrits à la prochaine connexion par mot de passe.
+
+### Versions
+
+`hearth_proto::version::API_VERSION` ne change pas : c'est le client qui met à jour l'agent, un client récent doit toujours parler à un agent ancien. Tout est ajouté (une route, des champs optionnels, un type de premier message de flux). Un agent d'avant répond `404` au défi : le client en déduit « clé non prise en charge ». Les types du fil sont **additifs** (`DeviceLoginRequest`, `DeviceLoginResponse`, `SignedAuth`) et les types existants (`LoginRequest`, `LoginResponse`, `ClientMessage`) ne changent pas : le client actuel, qui n'envoie pas de clé, compile et se comporte comme avant ; HRT-23 choisira de les fusionner ou de les employer.
+
+## Ce que `ring` vérifie et ne vérifie pas
+
+D'après le code de `ring` 0.17.14 (`src/ec/curve25519/ed25519/verification.rs`, lu, non déduit de la documentation publique, qui ne détaille pas ces points) :
+
+- **Vérifié** : la clé publique et la signature ont la bonne longueur ; la clé se décode en un point de la courbe (un point hors courbe est refusé) ; le scalaire **S est réduit** (< L, `Scalar::from_bytes_checked`) : une signature rendue malléable par S + L est refusée (test `ring_refuses_a_non_canonical_scalar_s`) ; R est **recalculé puis comparé octet à octet** à celui de la signature : un R non canonique est refusé.
+- **Non vérifié** : **l'ordre de la clé publique**. Avec la clé « point neutre » (encodage `01 00 … 00`) et la signature (R = point neutre, S = 0), la vérification est vraie pour **tout** message (test `ring_itself_accepts_the_neutral_point_key_so_the_domain_must_refuse_it`). Aucun contrôle non plus sur le caractère canonique de l'encodage de la clé.
+- **Décision** : le domaine refuse les clés de petit ordre **avant** toute vérification, donc à la connexion, à l'inscription (qui exige une preuve vérifiée) et à l'ouverture du flux (`domain/trust/weak_key.rs::has_small_order`). Liste : les huit points de petit ordre d'Ed25519 (ordre 1, 2, 4, 8 : sous-groupe de torsion, cofacteur 8) et leurs encodages non canoniques, c'est-à-dire sept valeurs de `y` (0, 1, p - 1, p, p + 1, y8, p - y8, avec p = 2^255 - 19 ; `y8` d'ordre 8 vérifié par le calcul sur l'équation de la courbe) et les deux valeurs du bit de signe, telles que la bibliothèque de référence de libsodium (`has_small_order`) les liste. Refuser un sur-ensemble de ces points ne refuse jamais une clé honnête (probabilité d'environ 2^-250 pour une clé tirée au hasard). Test avec le point neutre et deux autres points de petit ordre (ordre 4 et ordre 2), plus tous les encodages de la liste en test du domaine.
+- **Non couvert** : un Ed25519 « strict » (RFC 8032 section 8.4, rejet des clés et R non canoniques, vérification cofactorielle) n'est pas ce que `ring` offre ; ce risque est borné ici par le refus des clés de petit ordre et par le fait que la clé ne donne aucun accès seule (le mot de passe reste exigé).
+
+## Alternatives écartées
+
+- **Authentification mutuelle TLS** (la clé d'appareil comme certificat client). C'était l'alternative sérieuse : elle lie la preuve à la session TLS elle-même et couvre chaque requête. Écartée : il faut remonter le certificat du pair jusqu'aux handlers à travers `axum-server` (non vérifié), `rcgen` côté client pour fabriquer le certificat, et tout mandataire ou relais futur qui termine TLS (accès hors du réseau local) casse le mécanisme. La preuve applicative traverse un relais, se teste avec les doubles de `Transport` existants et ne touche ni à `axum-server` ni à `reqwest`.
+- **Liaison par l'exportateur de clé TLS 1.3** (le client signe une valeur dérivée de la session). Élégant, mais ni `reqwest` ni `axum-server` ne donnent accès à la connexion `rustls` (non vérifié).
+- **Signature d'un horodatage sans défi** : elle exige des horloges accordées entre le PC et un serveur maison, ce que rien ne garantit.
+- **Table de défis en mémoire** : bornée, elle se remplit ; un appareil du réseau priverait l'administrateur du critère « clé ». Le défi sans état n'a pas ce défaut.
+- **Signature de chaque requête** (à la manière de DPoP) : un compteur ou des horloges accordées, pour un gain nul puisque la règle accepte déjà « session + adresse retenue ».
+- **`minisign-verify`** (déjà dans l'agent) : format de signature de fichiers, pas un protocole d'authentification.
+- **ECDSA P-256 par `ring`, `ed25519-dalek`** : P-256 est gardé comme porte ouverte (colonne `algorithm`) ; `ed25519-dalek` est une dépendance cryptographique de plus pour rien.
+- **Clé commune à tous les serveurs** : voir 1.
+
+## Conséquences
+
+- **Positives** : la clé est vérifiable sans lecture en base ni état par défi ; aucune différence de réponse entre un identifiant existant et un autre (les tests comptent les appels du hacheur et du vérificateur) ; aucune dépendance compilée de plus.
+- **Limites dites** : clé logicielle (voir 1) ; la preuve n'est pas liée à la session TLS elle-même ; une clé n'est pas liée à du matériel (aucune attestation) ; le chemin de connexion n'est pas à durée strictement constante (une vérification Ed25519 de plus quand une preuve est fournie, de l'ordre de la dizaine de microsecondes sous un calcul Argon2 de plusieurs dizaines de millisecondes) ; le défi d'une connexion refusée est consommé (le client en redemande un).
+- **Hors périmètre de cet ADR** : les trois états (normal, alerte, mode attaque), la règle 2 sur 3 branchée sur la décision de connexion, l'essai unique, le mode attaque et sa garde (ADR à venir, HRT-24 et HRT-25), tout le code client (HRT-23).
+
+## Mise à jour des tableaux de dépendances
+
+- **ADR-0009** (agent) : `ring` 0.17 est en dépendance **directe** de `hearth-agent` (vérification Ed25519, HMAC des défis) ; déjà compilé par `rustls`.
+- **ADR-0011** (liaison) : `ring` 0.17 sera en dépendance directe de `hearth-link` (création et signature de la clé d'appareil, HRT-23) ; déjà compilé par `rustls`.
+- `cargo tree -i aws-lc-rs` et `cargo tree -i openssl` ne trouvent toujours rien.
+
+## Quand ne PAS l'utiliser
+
+- Pour un accès hors du réseau local : derrière un relais tous les clients partagent une adresse, et l'inscription par mot de passe seul ne suffira plus (un poste déjà reconnu devra approuver le nouveau). Cette décision ne le prévoit pas.
+- Pour authentifier chaque requête : la clé se prouve à la connexion et à l'ouverture du flux, pas à chaque appel.

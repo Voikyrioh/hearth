@@ -38,14 +38,18 @@ pub enum ActionKind {
     Denied,
 }
 
-/// Gestion des comptes : création, suppression, rôle, mots de passe, sessions.
-const ACCOUNT_CODES: [&str; 6] = [
+/// Gestion des comptes : création, suppression, rôle, mots de passe, sessions, et les postes de
+/// confiance d'un compte (HRT-22 : inscription et retrait, rangés ici en attendant l'écran de la
+/// liste des postes de HRT-23).
+const ACCOUNT_CODES: [&str; 8] = [
     action::ACCOUNT_CREATE,
     action::ACCOUNT_DELETE,
     action::ACCOUNT_ROLE,
     action::ACCOUNT_PASSWORD,
     action::ACCOUNT_PASSWORD_OWN,
     action::SESSIONS_REVOKE,
+    action::DEVICE_ENROLL,
+    action::DEVICE_REMOVE,
 ];
 
 /// « Action refusée » : tout ce qui n'est pas une connexion, refusé faute de droits.

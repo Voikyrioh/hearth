@@ -6,6 +6,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 use std::time::Duration;
 
+use hearth_proto::fingerprint::Fingerprint;
 use thiserror::Error;
 
 mod install;
@@ -20,10 +21,12 @@ use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    AuditFeed, AuditSink, Clock, GpuProbe, HashError, IdGen, IdentityError, IdentityStore,
-    MonotonicClock, PasswordHasher, PublicIdentity, Store, StoreError, SystemProbe, TokenGen,
+    AuditFeed, AuditSink, ChallengeCrypto, Clock, CryptoError, GpuProbe, HashError, IdGen,
+    IdentityError, IdentityStore, MonotonicClock, PasswordHasher, PublicIdentity, Store,
+    StoreError, SystemProbe, TokenGen,
 };
 use crate::application::sessions::SessionService;
+use crate::application::trust::TrustService;
 use crate::entrypoint::account::{self, AccountCliError};
 use crate::entrypoint::cli::{Cli, Command};
 use crate::entrypoint::http::{self, AppState, ServerError, ServerHandle};
@@ -36,12 +39,14 @@ use crate::infrastructure::argon2::Argon2Hasher;
 use crate::infrastructure::audit_feed::BroadcastAuditFeed;
 use crate::infrastructure::clock::{SystemClock, SystemMonotonic};
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
+use crate::infrastructure::crypto::{HmacChallengeCrypto, RingProofVerifier};
 use crate::infrastructure::data_dir;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::sqlite::{
-    Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteLoginAttemptRepo,
-    SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
+    Database, DatabaseError, SqliteAccountRepo, SqliteAuditRepo, SqliteDeviceRepo,
+    SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteOperationRepo, SqliteSessionRepo,
+    SqliteStore,
 };
 use crate::infrastructure::system::gpu;
 use crate::infrastructure::system::{SysinfoProbe, SystemMachineInfo};
@@ -75,6 +80,8 @@ pub enum AppError {
     Server(#[from] ServerError),
     #[error(transparent)]
     Store(#[from] StoreError),
+    #[error(transparent)]
+    Crypto(#[from] CryptoError),
     #[error("ouverture du port {addr} impossible : {source}")]
     Bind {
         addr: SocketAddr,
@@ -130,6 +137,14 @@ impl Metering {
             stream: StreamSettings::default(),
         }
     }
+}
+
+/// Ce qu'il faut à l'identité d'appareil (HRT-22) et que seul le démarrage du serveur connaît :
+/// l'empreinte du certificat que le client épingle (celle que la preuve signe) et l'horloge
+/// monotone qui borne la vie d'un défi.
+pub struct TrustParts {
+    pub fingerprint: Fingerprint,
+    pub monotonic: Arc<dyn MonotonicClock>,
 }
 
 /// Les cas d'usage assemblés sur une base ouverte.
@@ -192,8 +207,29 @@ pub fn load_identity(store: &dyn IdentityStore) -> Result<PublicIdentity, AppErr
     Ok(store.load_or_create()?)
 }
 
-/// Assemble les cas d'usage sur la base ouverte.
+/// Assemble les cas d'usage sur la base ouverte, **sans** identité d'appareil : le service des
+/// sessions se comporte comme avant, et les routes du défi et des postes répondent `404`
+/// (sous-commandes `account`, qui n'ouvrent aucune session ; tests de liaison).
 pub fn services(database: &Database, adapters: &Adapters) -> Services {
+    assemble(database, adapters, None)
+}
+
+/// Comme `services`, avec l'identité d'appareil (HRT-22) : le défi, la preuve de clé, l'inscription
+/// des postes. C'est ce que démarre le serveur.
+pub fn services_with_trust(
+    database: &Database,
+    adapters: &Adapters,
+    trust: TrustParts,
+) -> Result<Services, AppError> {
+    let crypto: Arc<dyn ChallengeCrypto> = Arc::new(HmacChallengeCrypto::new()?);
+    Ok(assemble(database, adapters, Some((trust, crypto))))
+}
+
+fn assemble(
+    database: &Database,
+    adapters: &Adapters,
+    trust: Option<(TrustParts, Arc<dyn ChallengeCrypto>)>,
+) -> Services {
     let pool = database.pool();
     let accounts_repo = Arc::new(SqliteAccountRepo::new(pool.clone()));
     let sessions_repo = Arc::new(SqliteSessionRepo::new(pool.clone()));
@@ -209,6 +245,33 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
         adapters.clock.clone(),
         trail.clone(),
     ));
+    let sessions = SessionService::new(
+        accounts_repo.clone(),
+        sessions_repo.clone(),
+        Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
+        Arc::new(SqliteKnownAddressRepo::new(pool.clone())),
+        store.clone(),
+        adapters.hasher.clone(),
+        adapters.clock.clone(),
+        adapters.ids.clone(),
+        adapters.tokens.clone(),
+        trail.clone(),
+        recorder.clone(),
+    );
+    let sessions = match trust {
+        Some((parts, crypto)) => sessions.with_trust(Arc::new(TrustService::new(
+            Arc::new(SqliteDeviceRepo::new(pool.clone())),
+            store.clone(),
+            Arc::new(RingProofVerifier),
+            crypto,
+            parts.monotonic,
+            adapters.clock.clone(),
+            adapters.ids.clone(),
+            parts.fingerprint,
+            trail.clone(),
+        ))),
+        None => sessions,
+    };
     Services {
         accounts: Arc::new(AccountService::new(
             accounts_repo.clone(),
@@ -219,18 +282,7 @@ pub fn services(database: &Database, adapters: &Adapters) -> Services {
             adapters.ids.clone(),
             trail.clone(),
         )),
-        sessions: Arc::new(SessionService::new(
-            accounts_repo,
-            sessions_repo,
-            Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
-            store.clone(),
-            adapters.hasher.clone(),
-            adapters.clock.clone(),
-            adapters.ids.clone(),
-            adapters.tokens.clone(),
-            trail.clone(),
-            recorder.clone(),
-        )),
+        sessions: Arc::new(sessions),
         operations: Arc::new(OperationService::new(
             Arc::new(SqliteOperationRepo::new(pool.clone())),
             store.clone(),
@@ -300,7 +352,14 @@ pub async fn start_with_all(
     let addr = SocketAddr::new(config.listen_addr, config.port);
     let listener = TcpListener::bind(addr).map_err(|source| AppError::Bind { addr, source })?;
 
-    let services = services(database, adapters);
+    let services = services_with_trust(
+        database,
+        adapters,
+        TrustParts {
+            fingerprint: identity.fingerprint,
+            monotonic: metering.monotonic.clone(),
+        },
+    )?;
     // Aucune exécution ne survit à un arrêt : les opérations restées « en cours » deviennent
     // « interrompues » avant d'accepter la moindre requête.
     let interrupted = services.operations.interrupt_running().await?;
