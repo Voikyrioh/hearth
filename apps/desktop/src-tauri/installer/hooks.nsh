@@ -19,8 +19,10 @@
 !define HEARTH_MIN_FREE_MB 50
 
 ; Lancement au démarrage de Windows (HRT-21, BR-CLIENT-006). Une seule source de
-; vérité : l'entrée `Run` de l'utilisateur que le greffon autostart de l'application
-; lit et écrit (nom de valeur = nom du produit, argument --minimized). L'installateur
+; vérité : l'entrée `Run` de l'utilisateur que l'application lit et écrit (startup.rs ;
+; nom de valeur = nom du produit ; valeur `"chemin" --minimized`, chemin ENTRE GUILLEMETS :
+; le chemin par défaut contient une espace dès que le profil Windows en contient une, HRT-29).
+; L'installateur
 ; n'ajoute aucun réglage à lui : il écrit ou retire cette entrée.
 ; Voie retenue (ADR-0026) : le modèle de Tauri n'accepte pas de page sur mesure
 ; (les crochets sont inclus AVANT les pages) ; la case est donc ajoutée à la page
@@ -204,8 +206,8 @@ FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE HearthWelcomeLeave
 
 ; Appliqué à la fin de la copie des fichiers, seulement si la case a été vue. Cochée : l'entrée
-; est écrite comme le fait le greffon (même valeur, SANS guillemets, et « activé » dans le
-; Gestionnaire des tâches). Décochée : retirée seulement si le démarrage était activé ; une entrée
+; est écrite comme le fait l'application (même valeur, chemin ENTRE GUILLEMETS puis --minimized, HRT-29,
+; et « activé » dans le Gestionnaire des tâches). Décochée : retirée seulement si le démarrage était activé ; une entrée
 ; désactivée à la main dans le Gestionnaire des tâches n'est pas touchée.
 !macro NSIS_HOOK_POSTINSTALL
   !if "${PRODUCTNAME}" != "${HEARTH_RUN_VALUE}"
@@ -213,7 +215,7 @@ FunctionEnd
   !endif
   ${If} $HearthAutostartShown = 1
     ${If} $HearthAutostartWanted = 1
-      WriteRegStr HKCU "${HEARTH_RUN_KEY}" "${HEARTH_RUN_VALUE}" "$INSTDIR\${MAINBINARYNAME}.exe ${HEARTH_MINIMIZED_FLAG}"
+      WriteRegStr HKCU "${HEARTH_RUN_KEY}" "${HEARTH_RUN_VALUE}" '"$INSTDIR\${MAINBINARYNAME}.exe" ${HEARTH_MINIMIZED_FLAG}'
       WriteRegBin HKCU "${HEARTH_STARTUP_APPROVED_KEY}" "${HEARTH_RUN_VALUE}" 020000000000000000000000
     ${ElseIf} $HearthAutostartWas = 1
       DeleteRegValue HKCU "${HEARTH_RUN_KEY}" "${HEARTH_RUN_VALUE}"

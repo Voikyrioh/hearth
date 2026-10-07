@@ -47,7 +47,7 @@ fn define(script: &str, name: &str) -> String {
 fn the_installer_writes_the_same_startup_entry_as_the_app() {
     let script = hooks();
     let config: serde_json::Value = serde_json::from_str(&read("tauri.conf.json")).unwrap();
-    // Le greffon autostart nomme l'entrée d'après le nom du produit et la place sous `Run`.
+    // L'application (startup.rs) nomme l'entrée d'après le nom du produit et la place sous `Run`.
     assert_eq!(
         define(&script, "HEARTH_RUN_VALUE"),
         config["productName"].as_str().unwrap()
@@ -128,8 +128,13 @@ fn the_registry_is_only_touched_when_the_page_was_seen() {
     // Cochée : écrite ; décochée : retirée seulement si le démarrage était activé.
     assert!(guarded.contains("${If} $HearthAutostartWanted = 1"));
     assert!(guarded.contains("${ElseIf} $HearthAutostartWas = 1"));
-    // Valeur strictement celle du greffon : `chemin --minimized`, sans guillemets.
-    assert!(guarded.contains(r#""$INSTDIR\${MAINBINARYNAME}.exe ${HEARTH_MINIMIZED_FLAG}""#));
+    // Valeur strictement celle de l'application (HRT-29) : `"chemin" --minimized`, chemin
+    // ENTRE GUILLEMETS (chaîne NSIS entre apostrophes pour garder les guillemets).
+    assert!(guarded.contains(r#"'"$INSTDIR\${MAINBINARYNAME}.exe" ${HEARTH_MINIMIZED_FLAG}'"#));
+    assert!(
+        !guarded.contains(r#""$INSTDIR\${MAINBINARYNAME}.exe ${HEARTH_MINIMIZED_FLAG}""#),
+        "forme sans guillemets de l'ancien greffon"
+    );
 }
 
 #[test]
