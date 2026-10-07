@@ -4,6 +4,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/tmp.rs"]
+mod tmp;
+
 use std::path::Path;
 
 use sqlx::SqlitePool;
@@ -36,7 +39,7 @@ async fn open(path: &Path) -> SqlitePool {
 
 #[tokio::test]
 async fn existing_accounts_get_the_default_window_and_the_value_is_bounded() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let pool = open(&dir.path().join("hearth.db")).await;
     migrator_up_to(6).run(&pool).await.unwrap();
     sqlx::query(
@@ -82,7 +85,7 @@ async fn existing_accounts_get_the_default_window_and_the_value_is_bounded() {
 #[tokio::test]
 async fn a_database_opened_by_the_agent_is_at_least_at_0007() {
     use hearth_agent::infrastructure::sqlite::Database;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tmp::tempdir().unwrap();
     let fresh = Database::open(dir.path()).await.unwrap();
     let version: i64 = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
         .fetch_one(fresh.pool())

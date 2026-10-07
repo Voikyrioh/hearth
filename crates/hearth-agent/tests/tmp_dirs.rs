@@ -64,3 +64,18 @@ fn a_directory_with_an_open_file_is_removed_when_the_test_thread_exits() {
 
     assert!(!path.exists(), "{}", path.display());
 }
+
+#[test]
+fn a_leftover_directory_is_named_after_the_test_that_created_it() {
+    let dir = tmp::tempdir().unwrap();
+    let name = dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        name.starts_with("a_leftover_directory_is_named_after_the_test_that_created_it."),
+        "{name}"
+    );
+}
