@@ -11,6 +11,7 @@ import CreateAccountDialog from "@/components/organisms/CreateAccountDialog.vue"
 import PasswordDialog from "@/components/organisms/PasswordDialog.vue";
 import { useAccountActions } from "@/composables/useAccountActions";
 import { useCurrentServer } from "@/composables/useCurrentServer";
+import { useNotLoadedText } from "@/composables/useNotLoadedText";
 import { usePageData } from "@/composables/usePageData";
 import { t } from "@/i18n";
 import type { Account, Role } from "@/link";
@@ -22,7 +23,8 @@ import { useLinkStore } from "@/stores/link";
 // Toute action passe par `useAccountActions` (donc `useServerAction` : désactivée et expliquée hors
 // « Connecté », résultat inconnu à la coupure, jamais rejouée). La liste se relit à chaque retour du
 // lien et à chaque issue d'opération incertaine : jamais d'état supposé.
-const { server, state, isConnected } = useCurrentServer();
+const { server, state } = useCurrentServer();
+const notLoaded = useNotLoadedText();
 const store = useAccountsStore();
 const link = useLinkStore();
 const serverId = computed(() => server.value?.id ?? "");
@@ -113,11 +115,11 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
   </div>
   <!-- Serveur injoignable : « pas encore chargé », sans second « Réessayer » (le bandeau a le sien) ; HRT-38 (C46). -->
   <p
-    v-else-if="entry.status === 'error' && accounts.length === 0 && !isConnected"
+    v-else-if="entry.status === 'error' && accounts.length === 0 && notLoaded"
     class="accounts__notice accounts__notice--pending"
     data-not-loaded-yet
   >
-    {{ t("link.notLoadedYet") }}
+    {{ notLoaded }}
   </p>
   <div v-else-if="entry.status === 'error' && accounts.length === 0" class="accounts__notice">
     <p role="alert">{{ t("accounts.loadFailed") }}</p>

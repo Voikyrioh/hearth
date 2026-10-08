@@ -61,6 +61,32 @@ describe("une page jamais chargée, serveur hors ligne", () => {
     wrapper.unmount();
   });
 
+  // La cause est dite avec justesse : le serveur « reviendra » seulement quand il ne répond pas ; en session
+  // expirée ou accès révoqué il répond, c'est la session qui manque ; connecté, c'est un vrai échec avec « Réessayer ».
+  it.each([
+    ["offline", NOT_LOADED],
+    ["reconnecting", NOT_LOADED],
+    ["session_expired", "Pas encore chargé, sera disponible une fois ta session rétablie."],
+    ["access_revoked", "Pas encore chargé, sera disponible une fois ta session rétablie."],
+  ] as const)(
+    "Comptes jamais lu, état « %s » : la phrase qui dit la bonne cause",
+    async (state, text) => {
+      const { wrapper, bridge } = await bootBroken("/servers/forge/accounts");
+      bridge.setState("forge", state);
+      await flushPromises();
+      expect(wrapper.get("[data-not-loaded-yet]").text()).toBe(text);
+      wrapper.unmount();
+    },
+  );
+
+  it("Comptes jamais lu, serveur connecté : l'échec est dit avec son « Réessayer »", async () => {
+    const { wrapper } = await bootBroken("/servers/forge/accounts");
+    expect(wrapper.find("[data-not-loaded-yet]").exists()).toBe(false);
+    expect(wrapper.text()).toContain("Impossible de lire la liste des comptes.");
+    expect(retries(wrapper.findAll("button").map((b) => b.text()))).toEqual(["Réessayer"]);
+    wrapper.unmount();
+  });
+
   it("une page déjà lue garde son estampille « Vu il y a… » hors ligne", async () => {
     const ctx = await mountContext();
     await ctx.router.push("/servers/forge/accounts");

@@ -275,6 +275,21 @@ describe("AdminActDialog", () => {
     wrapper.unmount();
   });
 
+  // La moitié INTERFACE du chemin « Poste non enregistré » : le geste déconnecte, ce qui ramène la connexion par mot
+  // de passe. Que cette connexion inscrive la clé est prouvé côté Rust (`crates/hearth-link/tests/device_key.rs::
+  // the_first_password_login_creates_the_key_and_the_agent_enrolls_this_pc`), pas par ce lot ni par le pont simulé.
+  it("« Me reconnecter » disconnects, which brings back the password login (HRT-40, C41)", async () => {
+    const { wrapper, bridge } = await open();
+    bridge.security.setDevice("forge", "none", false);
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+    (document.querySelector("[data-reauth-reconnect]") as HTMLElement).click();
+    await flushPromises();
+    expect(bridge.calls).toContain("logout forge");
+    wrapper.unmount();
+  });
+
   it("says it cannot read what the server expects, and offers to retry", async () => {
     const ctx = await startedApp();
     ctx.bridge.setState("forge", "offline");

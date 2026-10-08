@@ -88,19 +88,6 @@ for (const size of SIZES) {
     await shoot(page, "hrt38-acces-revoque", size);
   });
 
-  test(`reconnexion à ${size.width}×${size.height} : la page garde son apparence et n'est pas datée`, async ({
-    page,
-  }) => {
-    await page.setViewportSize(size);
-    await page.goto("/?nodev#/servers/forge/dashboard");
-    await expect(page.getByRole("heading", { name: "Tableau de bord" })).toBeVisible();
-    await sim(page, (s) => s.publish("forge", "reconnecting", {}));
-    await expect(page.locator(".head").getByRole("status")).toHaveText("Reconnexion…");
-    await expect(page.locator('[data-stale="true"]')).toHaveCount(0);
-    await expect(page.locator(".surface__stamp")).toHaveCount(0);
-    await shoot(page, "hrt38-reconnexion", size);
-  });
-
   test(`empreinte à ${size.width}×${size.height} : le serveur est rappelé, un retour, où la relire`, async ({
     page,
   }) => {

@@ -298,6 +298,7 @@ export const fr = {
     askPassword: "Rentre ton mot de passe pour reprendre.",
     reconnectAction: "Me reconnecter",
     notLoadedYet: "Pas encore chargé, sera disponible quand le serveur reviendra.",
+    notLoadedSession: "Pas encore chargé, sera disponible une fois ta session rétablie.",
     revokedTitle: "Accès révoqué sur {name}",
     revokedNotice:
       "Ton compte n'est plus accessible sur ce serveur : il a pu être supprimé ou désactivé, ou son mot de passe a changé.",

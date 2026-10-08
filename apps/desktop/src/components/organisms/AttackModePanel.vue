@@ -4,7 +4,7 @@ import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import { formatDateTime } from "@/composables/format";
-import { useCurrentServer } from "@/composables/useCurrentServer";
+import { useNotLoadedText } from "@/composables/useNotLoadedText";
 import { t } from "@/i18n";
 import type { AttackMode } from "@/link";
 import { type AttackModeBlock, blockMessageKey } from "@/security/gate";
@@ -31,13 +31,13 @@ defineEmits<{ change: []; reconnect: []; retry: [] }>();
 
 // HRT-38 (C46) : hors ligne, « état illisible » est faux et « Réessayer » double celui du bandeau : la carte dit
 // seulement que l'état n'est pas encore chargé.
-const { isConnected } = useCurrentServer();
-const notLoaded = computed(() => props.block === "unreadable" && !isConnected.value);
+const notLoadedText = useNotLoadedText();
+const notLoaded = computed(() => props.block === "unreadable" && notLoadedText.value !== null);
 
 const on = computed(() => props.mode.state !== "off");
 const suspended = computed(() => props.mode.state === "suspended");
 const reason = computed(() => {
-  if (notLoaded.value) return t("link.notLoadedYet");
+  if (notLoaded.value) return notLoadedText.value ?? undefined;
   const key = blockMessageKey(props.block);
   return key ? t(key) : undefined;
 });
