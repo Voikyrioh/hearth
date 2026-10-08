@@ -61,7 +61,7 @@ describe("Sécurité : le mode attaque", () => {
     await toggle(wrapper).trigger("click");
     await flushPromises();
     expect(dialog()?.textContent).toContain("Activer le mode attaque ?");
-    expect(dialog()?.textContent).toContain("confirme ton mot de passe");
+    expect(dialog()?.textContent).toContain("redonne ton mot de passe");
     // Le bouton attend le mot de passe.
     expect(dialogButton("Activer le mode attaque")?.getAttribute("aria-disabled")).toBe("true");
     await confirm(GOOD);
@@ -83,7 +83,7 @@ describe("Sécurité : le mode attaque", () => {
     await flushPromises();
     await confirm("Faux-Mot-De-Passe-1");
     expect(dialog()).not.toBeNull();
-    expect(dialog()?.textContent).toContain("Mot de passe incorrect.");
+    expect(dialog()?.textContent).toContain("Mot de passe actuel incorrect.");
     expect(dialog()?.querySelector<HTMLInputElement>("input[type=password]")?.value).toBe("");
     expect(bridge.security.current("forge").attackMode.state).toBe("off");
     // Aucun mot de passe dans le journal des commandes.
