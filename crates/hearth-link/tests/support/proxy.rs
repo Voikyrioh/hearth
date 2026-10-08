@@ -6,6 +6,8 @@
 //! - `close` : ferme proprement (FIN) les connexions ouvertes, les nouvelles passent ;
 //! - `freeze` : accepte mais ne transmet plus rien, dans aucun sens, sans fermer (trou noir) ;
 //! - `delay` : retarde chaque morceau transmis ;
+//! - `freeze_from(n)` : comme `freeze`, mais seulement à partir de la connexion numéro `n` (compte de
+//!   `accepted`) : les requêtes précédentes passent, celle-là part dans le vide ;
 //! - `refuse` : accepte puis ferme aussitôt les nouvelles connexions ;
 //! - `heal` : tout redevient normal ; les connexions gelées ou coupées sont **jetées** (un lien
 //!   gelé ne revient jamais : ce que le client y avait écrit n'arrive jamais à l'agent).
@@ -40,6 +42,8 @@ struct Ctl {
     kill: watch::Sender<Kill>,
     delay_ms: AtomicU64,
     accepted: AtomicU64,
+    /// Numéro (de `accepted`) à partir duquel les nouvelles connexions sont gelées ; `u64::MAX` : jamais.
+    freeze_at: AtomicU64,
 }
 
 pub struct FaultProxy {
@@ -62,6 +66,7 @@ impl FaultProxy {
             .0,
             delay_ms: AtomicU64::new(0),
             accepted: AtomicU64::new(0),
+            freeze_at: AtomicU64::new(u64::MAX),
         });
         let task = tokio::spawn(accept_loop(listener, ctl.clone()));
         Self { addr, ctl, task }
@@ -113,6 +118,12 @@ impl FaultProxy {
         self.ctl.mode.send_replace(Mode::Freeze);
     }
 
+    /// Gèle les connexions à partir de la `n`-ième reçue depuis le démarrage (`accepted() + 1` : la
+    /// prochaine). Celles d'avant passent.
+    pub fn freeze_from(&self, n: u64) {
+        self.ctl.freeze_at.store(n, Ordering::SeqCst);
+    }
+
     /// Retarde chaque morceau transmis.
     pub fn delay(&self, delay: Duration) {
         self.ctl
@@ -124,6 +135,7 @@ impl FaultProxy {
     pub fn heal(&self) {
         self.kill_all(false);
         self.ctl.delay_ms.store(0, Ordering::SeqCst);
+        self.ctl.freeze_at.store(u64::MAX, Ordering::SeqCst);
         self.ctl.mode.send_replace(Mode::Pass);
     }
 }
@@ -140,7 +152,10 @@ async fn accept_loop(listener: TcpListener, ctl: Arc<Ctl>) {
         let Ok((client, _)) = listener.accept().await else {
             return;
         };
-        ctl.accepted.fetch_add(1, Ordering::SeqCst);
+        let number = ctl.accepted.fetch_add(1, Ordering::SeqCst) + 1;
+        if number >= ctl.freeze_at.load(Ordering::SeqCst) {
+            ctl.mode.send_replace(Mode::Freeze);
+        }
         if *ctl.mode.borrow() == Mode::Refuse {
             drop(client);
             continue;

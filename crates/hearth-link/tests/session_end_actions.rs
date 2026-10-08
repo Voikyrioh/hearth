@@ -10,6 +10,7 @@
 mod support;
 
 use hearth_agent::domain::accounts::Role;
+use hearth_link::domain::secret::Secret;
 use hearth_link::domain::state::LinkState;
 use hearth_link::ports::transport::Method;
 use hearth_link::{ActionOutcome, ActionRequest};
@@ -17,17 +18,22 @@ use serde_json::json;
 use support::{Options, WAIT, World};
 
 async fn world() -> (World, String) {
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     world.agent.create_account("paul", Role::Admin).await;
     let me = world.manager.accounts_list(&world.id).await.unwrap().me;
     (world, me)
 }
 
 async fn run(world: &World, request: ActionRequest) -> ActionOutcome {
-    tokio::time::timeout(WAIT, world.manager.execute_raw(&world.id, request))
-        .await
-        .expect("l'action rend la main")
-        .unwrap()
+    tokio::time::timeout(
+        WAIT,
+        world
+            .manager
+            .execute_act(&world.id, request, Some(&Secret::from(support::PASSWORD))),
+    )
+    .await
+    .expect("l'action rend la main")
+    .unwrap()
 }
 
 fn assert_completed(outcome: &ActionOutcome) {
