@@ -6,4 +6,4 @@ Tableau de bord d'un serveur : sa machine en direct (HRT-11). Suit le serveur co
 
 - Props : aucune
 - Événements et slots : aucun
-- Notes : Route `/servers/:id/dashboard`. Grille : Machine (3) + Durée de fonctionnement, Processeur (5), Mémoire (4) ; Carte graphique (5), Réseau (4), Disques + Températures (3) ; 6 puis 12 colonnes sous 1200 et 800 px. Tests : `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`.
+- Notes : Route `/servers/:id/dashboard`. Grille PAR CONTENEUR (largeur de la page, pas de la fenêtre) : au-dessus de 1300 px, 12 colonnes : Machine (3) + Durée de fonctionnement, Processeur (5), Mémoire (4) + Températures empilée dessous ; Carte graphique (5), Réseau (4), Disques (3) ; de 700 à 1300 px, 6 colonnes (Machine + Processeur, Mémoire + Réseau, Carte graphique et Disques pleine largeur) ; sous 700 px, une colonne. Les cartes d'une rangée ont la même hauteur. Un chargement de plus de 3 s dit « Mesures en cours de chargement… » et propose « Réessayer » (HRT-34, FIX-01M4D1K9GV5X6MJTHDB8RYPMS6). Tests : `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`.

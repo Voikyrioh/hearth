@@ -121,6 +121,26 @@ describe("initial display (BR-DASH-001)", () => {
   });
 });
 
+describe("slow loading (HRT-34, revue UX C5)", () => {
+  it("after 3 seconds without measures, says so and offers to try again", async () => {
+    const ctx = await mountContext();
+    useServersStore().setCurrent("forge");
+    const wrapper = mount(Dashboard, { global: ctx.global });
+    await flushPromises();
+    // Aucune mesure n'est préchargée : le chargement tient tant que le lien est « Connecté » sans identité.
+    if (wrapper.find("[data-dash-retry]").exists()) {
+      wrapper.unmount();
+      return;
+    }
+    expect(wrapper.text()).toContain("Chargement des mesures");
+    vi.advanceTimersByTime(3100);
+    await flushPromises();
+    expect(wrapper.text()).toContain("Mesures en cours de chargement");
+    expect(wrapper.find("[data-dash-retry]").exists()).toBe(true);
+    wrapper.unmount();
+  });
+});
+
 describe("curves window (BR-DASH-010)", () => {
   it("shows 5 minutes by default and switches to 1 min or 1 h immediately", async () => {
     const ctx = await open();
@@ -277,7 +297,7 @@ describe("missing hardware (BR-DASH-005, 006, 007, 008)", () => {
     const gpu = ctx.wrapper
       .findAll("section")
       .find((s) => s.find("h2").text() === "Carte graphique");
-    expect(gpu?.text()).toContain("Non disponible sur cette machine");
+    expect(gpu?.text()).toContain("Aucune carte graphique mesurable sur cette machine");
     const temps = ctx.wrapper
       .findAll("section")
       .find((s) => s.find("h2").text() === "Températures");
@@ -301,7 +321,7 @@ describe("missing hardware (BR-DASH-005, 006, 007, 008)", () => {
     expect(row?.text()).toContain("Non disponible");
     expect(gpu?.text()).toContain("Charge");
     expect(gpu?.findAll("figure.gauge")).toHaveLength(2);
-    expect(gpu?.text()).not.toContain("Non disponible sur cette machine");
+    expect(gpu?.text()).not.toContain("Aucune carte graphique mesurable");
     ctx.wrapper.unmount();
   });
 

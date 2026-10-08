@@ -19,7 +19,7 @@ const indexes = computed(() => {
 
 <template>
   <DashCard :title="t('dash.gpu')">
-    <p v-if="!present" class="gpu-card__none">{{ t("dash.notOnMachine") }}</p>
+    <p v-if="!present" class="gpu-card__none">{{ t("dash.noGpu") }}<!-- FIX:01M4D1K8675QMBAFTM76XF4XJC --></p>
     <template v-else>
       <GpuPanel v-for="index in indexes" :key="index" :entry="entry" :index="index" />
     </template>
