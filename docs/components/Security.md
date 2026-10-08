@@ -9,3 +9,4 @@ Sécurité d'un serveur (HRT-23, HRT-26), titre « Sécurité et mode attaque »
 - Notes : Route `/servers/:id/security`, entrée « Sécurité » de `ServerNav` pour tous les rôles. Tests : `pages/Security.test.ts`, `pages/SecurityMode.test.ts`, `router/shell.test.ts`, `e2e/security.spec.ts`, `e2e/attack-mode.spec.ts`.
 
 HRT-30 : sous « Tes postes de confiance », la ligne « Demander mon mot de passe » (`ReauthSettingCard`).
+- HRT-42 : à partir de 1 820 px de fenêtre (1 500 px de page), deux colonnes (état et mode attaque / postes et confirmation) bornées à 1 520 px ; au-dessous une colonne de 880 px. FIX:01M4EDC0FVT0ZHGASFEMWX7066. Décision de Claude, à confirmer par Voiky (conception grand écran, décisions 3 à 6).

@@ -91,6 +91,7 @@ async function reconnect() {
 
 <template>
   <div class="security">
+    <div class="security__col">
     <SecurityAlertCard
       v-if="securityEntry?.state && alertVisible(securityEntry.state.alert)"
       :alert="securityEntry.state.alert"
@@ -108,6 +109,9 @@ async function reconnect() {
       @reconnect="reconnect"
       @retry="security.load(serverId)"
     />
+    <ErasurePendingNote v-if="securityEntry?.state?.erasurePending && server?.role === 'admin'" />
+    </div>
+    <div class="security__col">
     <TrustedDeviceTable
       :status="entry?.status ?? 'loading'"
       :devices="entry?.devices ?? []"
@@ -116,7 +120,7 @@ async function reconnect() {
       @retry="store.load(serverId)"
     />
     <ReauthSettingCard :key="serverId" :server-id="serverId" />
-    <ErasurePendingNote v-if="securityEntry?.state?.erasurePending && server?.role === 'admin'" />
+    </div>
     <RemoveDeviceDialog
       :open="removing !== null"
       :server-id="serverId"
@@ -132,5 +136,29 @@ async function reconnect() {
   flex-direction: column;
   gap: var(--card-gap);
   max-width: var(--column-max);
+}
+
+/* Une colonne : les deux groupes se suivent comme avant. */
+.security__col {
+  display: contents;
+}
+
+/* FIX:01M4EDC0FVT0ZHGASFEMWX7066 */
+/* HRT-42 : à partir de 1 500 px de page (fenêtre de 1 820 px : barre des serveurs, navigation et marges en moins), deux colonnes :
+   l'état et le mode attaque, puis les postes et la confirmation. */
+@media (min-width: 1820px) {
+  .security {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    max-width: var(--page-max-security);
+  }
+
+  .security__col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--card-gap);
+    min-width: 0;
+  }
 }
 </style>

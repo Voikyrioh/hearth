@@ -124,6 +124,15 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
   min-width: 0;
 }
 
+/* FIX:01M4EDC0FVT0ZHGASFEMWX7066 */
+/* HRT-42 : sur grand écran, deux colonnes de largeur égale, bornées (au-dessous, rien ne change). */
+@media (min-width: 1700px) {
+  .settings__columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: var(--page-max-settings);
+  }
+}
+
 .settings__panel {
   margin-top: var(--space-5);
   padding: var(--space-5);

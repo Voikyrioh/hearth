@@ -165,6 +165,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
 <style scoped>
 .table-wrap {
   container: accounts / inline-size;
+  max-width: var(--table-max);
   overflow-x: auto;
   border-radius: var(--radius-card);
   background: var(--card);

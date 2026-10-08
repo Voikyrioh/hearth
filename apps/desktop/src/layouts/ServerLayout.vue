@@ -137,6 +137,7 @@ function openSecurityPage() {
 .layout__main {
   display: flex;
   flex: 1;
+  max-width: calc(var(--page-max) + var(--page-pad) * 2);
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
