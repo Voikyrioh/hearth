@@ -127,6 +127,10 @@ describe("l'avancement : étapes discrètes, une à la fois", () => {
   it("shows the five steps with the download percentage, then the restart as « Reconnexion… » without any error", async () => {
     const ctx = await card();
     const { wrapper, bridge, toasts } = ctx;
+    // Avant l'opération la région vivante existe déjà, VIDE : le texte y arrivera ensuite.
+    const region = wrapper.get("[data-agent-announce]");
+    expect(region.text()).toBe("");
+    expect(region.attributes("role")).toBe("status");
     await confirmUpdate(wrapper);
     // Acceptée : les étapes s'affichent tout de suite.
     expect(wrapper.get("[data-agent-progress]").text()).toBe("Mise à jour de l'agent en cours.");
@@ -139,6 +143,9 @@ describe("l'avancement : étapes discrètes, une à la fois", () => {
       wrapper.findAll("[data-agent-steps] li").map((li) => li.attributes("data-state"));
     expect(states()).toEqual(["now", "later", "later", "later", "later"]);
     expect(wrapper.get('[data-step="download"]').text()).toContain("Téléchargement : 35 %");
+    // La MÊME région vivante qu'avant l'opération (un texte posé dans une région créée avec lui n'est pas
+    // toujours annoncé : première étape).
+    expect(wrapper.get("[data-agent-announce]").element).toBe(region.element);
     // L'étape reste annoncée aux lecteurs d'écran : une région vivante polie, qui suit l'étape courante.
     const announce = () => wrapper.get("[data-agent-announce]");
     expect(announce().attributes("aria-live")).toBe("polite");

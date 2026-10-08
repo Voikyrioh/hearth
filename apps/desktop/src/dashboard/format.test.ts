@@ -30,8 +30,9 @@ describe("formats (BR-DASH-014)", () => {
     expect(formatGb(64 * GIB)).toBe("64 Go");
     expect(formatGb(999.9 * GIB)).toBe("999,9 Go");
     // Tout en binaire, comme l'Explorateur Windows : 1 To = 1 024 Go (décision de Claude du 2026-10-08).
-    expect(formatGb(1000 * GIB)).toBe("1000 Go");
-    expect(formatGb(1023 * GIB)).toBe("1023 Go");
+    // Milliers : espace fine insécable (U+202F), comme en français correct.
+    expect(formatGb(1023 * GIB)).toBe("1 023 Go");
+    expect(formatGb(1000 * GIB)).toBe("1 000 Go");
     expect(formatGb(1023.96 * GIB)).toBe("1 To");
     expect(formatGb(1024 * GIB)).toBe("1 To");
     expect(formatGb(1536 * GIB)).toBe("1,5 To");

@@ -20,10 +20,17 @@ export function formatPercent(value: number | null): string {
   return value === null ? t("dash.unavailable") : t("dash.unitPercent", { n: Math.floor(value) });
 }
 
-/** Une décimale, VIRGULE française, sans « ,0 » inutile : `64`, `12,5` (HRT-46, C12). FIX:01M4DPR4FFVCMZN0KPEA4JVCC8 */
+const FRENCH_NUMBER = new Intl.NumberFormat("fr-FR", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
+
+/**
+ * Une décimale, VIRGULE française, sans « ,0 » inutile, milliers séparés par une espace fine insécable (U+202F) :
+ * `64`, `12,5`, `1 023` (HRT-46, C12). FIX:01M4DPR4FFVCMZN0KPEA4JVCC8
+ */
 export function decimal(value: number): string {
-  const text = value.toFixed(1);
-  return (text.endsWith(".0") ? text.slice(0, -2) : text).replace(".", ",");
+  return FRENCH_NUMBER.format(Number(value.toFixed(1)));
 }
 
 /**

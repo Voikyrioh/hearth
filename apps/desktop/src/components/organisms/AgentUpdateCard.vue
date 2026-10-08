@@ -78,6 +78,10 @@ const versions = computed(() => {
 });
 /** Le serveur ne répond plus en pleine mise à jour : la carte ne dit pas ce qu'elle ne sait plus. */
 const silent = computed(() => state.value === "offline");
+/** Vide hors mise à jour (et quand le serveur ne répond plus) : le texte arrive dans une région déjà présente. */
+const announcement = computed(() =>
+  running.value && !silent.value ? stepAnnouncement(step.value) : "",
+);
 
 /** Le bouton existe quand une version plus récente est disponible ; il est inerte sans droit ou pendant l'opération. */
 // Pendant la mise à jour, le bouton disparaît (HRT-46, C43, FIX:01M4E48N732694TTFSRQF1C4KG) : les étapes disent où elle en est.
@@ -141,6 +145,9 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
       <LinkStatePill :state="state" />
     </header>
     <p class="agent__versions" data-agent-versions>{{ versions }}</p>
+    <!-- Annonce polie de l'étape courante (lecteurs d'écran), invisible : l'œil lit la liste des étapes. La région
+         existe TOUJOURS, vide : un texte posé dans une région créée avec lui n'est pas toujours annoncé. -->
+    <p class="sr-only" role="status" aria-live="polite" data-agent-announce>{{ announcement }}</p>
 
     <p v-if="compat" class="agent__incompat" role="alert" data-agent-incompat>{{ compatMessage }}</p>
     <p v-else-if="view?.managed" class="agent__note" data-agent-managed>
@@ -166,10 +173,6 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
       </p>
       <template v-else>
         <p class="agent__sentence" data-agent-progress>{{ progressSentence() }}</p>
-        <!-- Annonce polie de l'étape courante (lecteurs d'écran), invisible : l'œil lit la liste des étapes. -->
-        <p class="sr-only" role="status" aria-live="polite" data-agent-announce>
-          {{ stepAnnouncement(step) }}
-        </p>
         <AgentUpdateSteps :step="step" :percent="progress?.percent ?? null" />
         <p class="agent__cut">{{ t("agentUpdate.cutAnnounce") }}</p>
       </template>
