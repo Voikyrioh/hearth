@@ -44,6 +44,8 @@ const icon = computed(() =>
   gap: var(--space-3);
   padding: var(--space-half) var(--space-4);
   border-radius: var(--radius-control);
+  /* FIX:01M4DJZAPV5ECT10JJ5JWNM8A6 : le bandeau a la largeur du contenu, pas de la fenêtre (C35) */
+  max-width: var(--column-max);
 }
 
 .banner--alert {
@@ -77,9 +79,10 @@ const icon = computed(() =>
   color: var(--cool);
 }
 
+/* L'action suit le message (elle n'est plus reléguée à l'extrême droite de la fenêtre). */
 .banner__body {
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 var(--space-3);

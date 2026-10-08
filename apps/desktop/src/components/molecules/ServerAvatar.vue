@@ -106,8 +106,9 @@ const label = computed(() =>
 
 .avatar__mark {
   position: absolute;
-  top: calc(var(--border-width) * -1);
-  right: calc(var(--border-width) * -1);
+  /* FIX:01M4DJZAXMGAXW5PPQBMQVC96Y : la marque dépasse du coin, elle ne recouvre plus les initiales (C38) */
+  top: var(--mark-offset);
+  right: var(--mark-offset);
   display: grid;
   place-items: center;
   width: var(--mark-size);
