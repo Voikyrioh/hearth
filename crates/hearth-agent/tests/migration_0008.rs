@@ -246,3 +246,62 @@ async fn a_deleted_operation_leaves_no_bytes_behind() {
     let after = file_bytes(dir.path());
     assert!(hashes.iter().all(|h| count_in(&after, h) == 0));
 }
+
+/// Ce que seul `VACUUM` efface : les restes d'AVANT la migration, des lignes supprimées par un
+/// ancien binaire (sans `secure_delete`) et restées dans les pages libres. La migration ne les
+/// touche pas, l'ouverture de la base doit les réécrire.
+#[tokio::test]
+async fn rows_deleted_by_an_old_binary_do_not_survive_the_open() {
+    use hearth_agent::infrastructure::sqlite::Database;
+
+    let dir = tmp::tempdir().unwrap();
+    let hashes: Vec<String> = (0..40)
+        .map(|i| legacy_hash("POST", "/accounts", format!("supprime-{i}").as_bytes()))
+        .collect();
+    {
+        let pool = open(&dir.path().join("hearth.db")).await;
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA secure_delete = OFF")
+            .execute(&pool)
+            .await
+            .unwrap();
+        migrator_up_to(7).run(&pool).await.unwrap();
+        for (i, hash) in hashes.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO operations (id, account_id, kind, request_hash, status, created_at)
+                 VALUES (?, 'A1', 'POST /accounts', ?, 'succeeded', '2026-10-07T10:00:00.000Z')",
+            )
+            .bind(format!("K{i}"))
+            .bind(hash)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query("DELETE FROM operations")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let before = file_bytes(dir.path());
+        assert!(
+            hashes.iter().all(|h| count_in(&before, h) >= 1),
+            "les restes sont bien dans le fichier avant l'ouverture"
+        );
+        pool.close().await;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let db = Database::open(dir.path()).await.unwrap();
+    db.pool().close().await;
+    let after = file_bytes(dir.path());
+    assert!(hashes.iter().all(|h| count_in(&after, h) == 0));
+}
