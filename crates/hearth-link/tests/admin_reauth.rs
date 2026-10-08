@@ -561,13 +561,13 @@ async fn an_agent_that_does_not_announce_the_confirmation_gets_no_act_and_no_pas
         )
         .await
         .unwrap_err();
-    assert!(matches!(error, LinkError::Protocol(_)), "{error:?}");
+    assert!(matches!(error, LinkError::Incompatible(_)), "{error:?}");
     let error = world
         .manager
         .set_attack_mode(&world.id, true, &Secret::from(PASSWORD))
         .await
         .unwrap_err();
-    assert!(matches!(error, LinkError::Protocol(_)), "{error:?}");
+    assert!(matches!(error, LinkError::Incompatible(_)), "{error:?}");
     assert_eq!(world.spy.calls(), challenges, "aucun défi");
     assert_eq!(world.spy.write_count(), writes, "aucune écriture");
 }

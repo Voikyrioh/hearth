@@ -206,6 +206,8 @@ export const fr = {
     busy: "Le serveur est occupé. Réessaie dans un instant.",
     loading: "Lecture de ce que le serveur attend de toi…",
     stateFailed: "Impossible de lire ce que le serveur attend de toi.",
+    agentTooOld:
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent.",
     noKeyTitle: "Ce poste n'est pas encore enregistré",
     noKey:
       "Pour faire cette action, ce poste doit être enregistré. Reconnecte-toi avec ton mot de passe pour l'enregistrer, puis recommence.",

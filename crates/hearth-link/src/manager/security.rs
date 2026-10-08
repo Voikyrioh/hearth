@@ -11,6 +11,7 @@ use serde_json::json;
 
 use super::device::{KeyState, load_key};
 use super::{ActionOutcome, ActionRequest, LinkManager};
+use crate::domain::compat::Compatibility;
 use crate::domain::secret::Secret;
 use crate::domain::server::ServerId;
 use crate::error::{InputField, LinkError};
@@ -45,7 +46,7 @@ impl LinkManager {
     /// lien tombe). Le mot de passe n'est jamais gardé.
     ///
     /// Le contrat commun des actes (`reauth`, usage `0x05`). Un agent qui n'annonce pas `admin_reauth`
-    /// n'est pas un agent de cette famille : `Protocol`, rien n'est envoyé.
+    /// n'est pas un agent de cette famille : `Incompatible(UpdateAgent)`, rien n'est envoyé.
     pub async fn set_attack_mode(
         &self,
         id: &ServerId,
@@ -57,9 +58,7 @@ impl LinkManager {
         }
         let (target, token) = self.credentials(id)?;
         if self.read_admin_reauth(&target, &token).await?.is_none() {
-            return Err(LinkError::Protocol(
-                "l'agent n'annonce pas la confirmation des actes".into(),
-            ));
+            return Err(LinkError::Incompatible(Compatibility::UpdateAgent));
         }
         let action = ActionRequest {
             method: Method::Put,

@@ -775,7 +775,7 @@ export type ReauthSettingRefusal = { kind: "wrong_password" } |
  *  (l'interface ne devine pas l'élévation).
  */
 export type ReauthStateDto = {
-	/**  L'agent annonce la confirmation des actes. Faux : agent d'avant, aucune demande en plus. */
+	/**  L'agent annonce la confirmation des actes. Faux : aucun acte ne lui part (agent à mettre à jour). */
 	supported: boolean,
 	/**  L'agent l'exige (faux tant qu'il ne fait que l'accepter). */
 	required: boolean,

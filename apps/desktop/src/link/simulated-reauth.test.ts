@@ -69,10 +69,12 @@ describe("la confirmation simulée applique les règles de l'agent", () => {
     ]);
   });
 
-  it("leaves nothing to confirm to an old agent, and sends nothing without a key", () => {
+  it("sends no act to an agent that does not announce the confirmation, and none without a key", () => {
     const old = sim();
     old.reauth.setSupported("s", false);
-    expect(old.reauth.confirm("s", "agent_update", null, null, OWN)).toEqual({ kind: "ok" });
+    expect(() => old.reauth.confirm("s", "agent_update", null, null, OWN)).toThrow(
+      LinkCommandError,
+    );
     expect(old.reauth.state("s").supported).toBe(false);
     const keyless = sim(false);
     expect(() => keyless.reauth.confirm("s", "account_delete", null, OWN, OWN)).toThrow(

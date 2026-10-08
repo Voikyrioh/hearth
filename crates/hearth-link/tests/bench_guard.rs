@@ -9,6 +9,10 @@ use std::path::{Path, PathBuf};
 
 /// Fichier de test -> nombre d'appels à `accepting_bare_acts()`.
 const ALLOWED: &[(&str, usize)] = &[
+    // Les deux définitions du banc (champ, valeur par défaut, constructeur, relais vers l'agent). Une aide
+    // ajoutée sous `support/` qui baisserait le banc sous un autre nom change ces nombres ou en ajoute une.
+    ("agent.rs", 5),
+    ("mod.rs", 5),
     // 9 scénarios de résilience (action coupée, interrompue, abandonnée, redémarrage...).
     ("fault_proxy.rs", 9),
     // 5 scénarios de fin de session, tous par `world()`.
@@ -21,9 +25,7 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         if path.is_dir() {
-            if path.file_name().is_some_and(|name| name != "support") {
-                rust_files(&path, out);
-            }
+            rust_files(&path, out);
         } else if path.extension().is_some_and(|ext| ext == "rs") {
             out.push(path);
         }

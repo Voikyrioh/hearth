@@ -22,7 +22,7 @@ export type AdminActKind = AdminActKindDto;
 /**
  * Ce que l'agent annonce, lu à l'ouverture d'une fenêtre : l'interface ne devine pas l'élévation de
  * 5 minutes, elle la lit de l'agent.
- * - `supported` faux : agent d'avant la confirmation des actes, aucune demande en plus ;
+ * - `supported` faux : l'agent n'annonce pas la confirmation des actes, la liaison ne lui envoie aucun acte ;
  * - `hasDeviceKey` faux : ce PC n'a pas de clé au coffre, aucun acte ne part d'ici (se reconnecter par
  *   mot de passe pour enregistrer ce poste) ;
  * - `elevatedForS` : secondes restantes du délai de cette session depuis cette adresse (0 : fermé).
