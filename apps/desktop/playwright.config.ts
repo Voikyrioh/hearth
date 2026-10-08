@@ -40,6 +40,7 @@ export default defineConfig({
         "hrt43-44.spec.ts",
         "reauth.spec.ts",
         "identity.spec.ts",
+        "hrt39-security.spec.ts",
         "hrt33-keyboard.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },

@@ -35,6 +35,7 @@ const EVENT: SecurityEvent = {
   },
   device: "proven",
   keyAtHand: true,
+  erasurePending: false,
 };
 
 describe("security commands of the real bridge", () => {

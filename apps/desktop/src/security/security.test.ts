@@ -12,6 +12,7 @@ function state(patch: Partial<SecurityState> = {}): SecurityState {
     attackMode: { state: "off", since: null, resumesInS: null, lastEnd: null },
     device: "proven",
     keyAtHand: true,
+    erasurePending: false,
     ...patch,
   };
 }

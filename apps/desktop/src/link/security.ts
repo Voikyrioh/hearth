@@ -51,6 +51,8 @@ export interface SecurityState {
   device: SecurityDevice;
   /** Ce PC garde une clé d'appareil pour ce serveur (un booléen : la clé elle-même ne sort pas). */
   keyAtHand: boolean;
+  /** L'agent dit que l'effacement physique des anciennes empreintes de requêtes est en attente (administrateur seulement). */
+  erasurePending: boolean;
 }
 
 /** La lecture, ou « l'agent ne connaît pas cette fonction » (agent d'avant l'alerte et le mode attaque). */
@@ -82,6 +84,7 @@ export function toSecurityState(dto: SecurityEvent): SecurityState {
     attackMode: toAttackMode(dto.attackMode),
     device: dto.device,
     keyAtHand: dto.keyAtHand,
+    erasurePending: dto.erasurePending,
   };
 }
 

@@ -36,7 +36,7 @@ const text = computed(() => {
   >
     {{ text }}
     <template #actions>
-      <HButton v-if="!onPage" variant="ghost" size="sm" data-security-open @click="$emit('open')">
+      <HButton v-if="!onPage" variant="secondary" size="sm" data-security-open @click="$emit('open')">
         {{ t("security.seePage") }}
       </HButton>
     </template>

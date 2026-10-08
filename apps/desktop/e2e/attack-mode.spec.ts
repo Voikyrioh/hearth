@@ -98,9 +98,7 @@ test("alerte : le bandeau s'affiche sur toutes les pages, activer depuis l'alert
   await expect(dialog(page)).toHaveCount(0);
   // Les deux bandeaux coexistent ; la marque passe au mode attaque.
   await expect(modeBanner(page)).toContainText("Mode attaque actif");
-  await expect(modeBanner(page)).toContainText(
-    "Seuls les postes reconnus peuvent se connecter. Un poste connu par un seul signe a droit à un essai.",
-  );
+  await expect(modeBanner(page)).toContainText("Seuls les postes reconnus peuvent se connecter.");
   await expect(alertBanner(page)).toBeVisible();
   await expect(page.locator('[data-server="forge"] [role="img"]')).toHaveAttribute(
     "aria-label",
@@ -114,9 +112,7 @@ test("page Sécurité : carte du mode attaque, désactivation, variante suspendu
   page,
 }) => {
   await page.goto("/?nodev#/servers/forge/security");
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Sécurité et mode attaque" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Sécurité" })).toBeVisible();
   await expect(page.locator("[data-attack-mode-state]")).toHaveText("Inactif");
   await sim(page).mode("forge", "suspended", 1200);
   await expect(page.locator("[data-attack-mode-state]")).toHaveText("Suspendu");

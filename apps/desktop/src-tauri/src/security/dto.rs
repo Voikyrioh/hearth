@@ -128,6 +128,9 @@ pub struct SecurityEvent {
     pub device: SecurityDeviceDto,
     /// Ce PC garde une clé d'appareil pour ce serveur (un booléen : la clé elle-même ne sort pas).
     pub key_at_hand: bool,
+    /// L'agent dit que l'effacement physique des anciennes empreintes de requêtes est en attente (HRT-32,
+    /// ADR-0034) : il ne le dit qu'aux administrateurs, et la dernière lecture fait foi (le flux ne le porte pas).
+    pub erasure_pending: bool,
 }
 
 /// Lecture de l'état de sécurité : l'état, ou « cette fonction n'existe pas sur ce serveur » (agent

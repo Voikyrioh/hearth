@@ -93,6 +93,7 @@
   --ring-width: 2px;
   --sec-edge: 4px;
   --mark-size: 16px;
+  --mark-offset: -8px;
   --mark-icon: 10px;
   --focus-ring: 2px;
   --focus-offset: 2px;
