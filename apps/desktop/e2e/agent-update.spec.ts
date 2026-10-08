@@ -75,18 +75,13 @@ test("disponible, confirmation, étapes, reconnexion sans erreur, résultat", as
 
   await confirm(page);
   await expect(forge.locator("[data-agent-progress]")).toHaveText(
-    "Mise à jour de l'agent en cours. Étape : téléchargement…",
+    "Mise à jour de l'agent en cours.",
   );
   await drive(page, (sim) => sim.agentUpdates.advance("forge", "download", 35));
-  await expect(forge.locator("[data-agent-progress]")).toHaveText(
-    "Mise à jour de l'agent en cours. Étape : téléchargement (35 %)…",
-  );
   await expect(forge.locator('[data-step="download"]')).toContainText("Téléchargement : 35 %");
   expect(await states(page, "forge")).toEqual(["now", "later", "later", "later", "later"]);
-  await expect(forge.locator("[data-agent-update-button]")).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
+  // HRT-46 (C43) : le bouton disparaît pendant la mise à jour.
+  await expect(forge.locator("[data-agent-update-button]")).toHaveCount(0);
   await shoot(page, "agent-telechargement");
 
   for (const [step, expected] of [

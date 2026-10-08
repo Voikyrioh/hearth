@@ -47,9 +47,10 @@ const book = useServerBook();
         />
       </template>
     </ul>
+    <!-- FIX:01M4DPR45X80GAYPS8MJ4RPZ8E : la fenêtre nomme le serveur à supprimer. -->
     <ConfirmDialog
       :open="book.removing.value !== null"
-      :title="t('connect.removeTitle')"
+      :title="t('connect.removeTitle', { name: book.removing.value?.name ?? '' })"
       :message="t('connect.removeText')"
       :confirm-label="t('connect.removeConfirm')"
       :cancel-label="t('connect.removeCancel')"

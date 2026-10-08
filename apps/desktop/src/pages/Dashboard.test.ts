@@ -82,17 +82,17 @@ describe("initial display (BR-DASH-001)", () => {
     const text = ctx.wrapper.text();
     expect(text).toContain("NixOS 25.05");
     expect(text).toContain("AMD Ryzen 9 7950X");
-    expect(text).toContain("64.0 Go");
+    expect(text).toContain("64 Go");
     expect(text).toMatch(/\d+ %/);
     expect(text).toMatch(/\d+ j \d+ h \d+ min/);
     expect(text).toContain("Charge globale");
     expect(text).toContain("Utilisée / Totale");
     expect(text).toContain("Utilisé / Total");
-    expect(text).toMatch(/Libre : \d+\.\d Go/);
+    expect(text).toMatch(/Libre : [\d,]+ (Go|To)/);
     expect(text).toContain("Mémoire vidéo");
     expect(text).toContain("Montant");
     expect(text).toContain("Descendant");
-    expect(text).toMatch(/\d+\.\d Mo\/s|\d+ Ko\/s/);
+    expect(text).toMatch(/[\d,]+ Mo\/s|\d+ Ko\/s/);
     expect(ctx.wrapper.findAll(".bars__bar")).toHaveLength(16);
     // Jauges : processeur, mémoire, charge et mémoire vidéo de la carte graphique.
     expect(ctx.wrapper.findAll("figure.gauge")).toHaveLength(4);

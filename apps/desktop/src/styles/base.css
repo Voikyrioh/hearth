@@ -4,6 +4,48 @@
   box-sizing: border-box;
 }
 
+/* HRT-37, FIX:01M4DPR3YFC0AQC1D3D20KSY04 : thème sombre pour les contrôles natifs, et barres de défilement fines et discrètes partout (jamais la barre blanche du système). */
+:root {
+  color-scheme: dark;
+}
+
+/*
+ * Chromium (WebView2) : ses propriétés normalisées `scrollbar-width` et `scrollbar-color` ÉCRASERAIENT les
+ * pseudo-éléments et empêcheraient la poignée de s'éclaircir au survol. Il prend donc les pseudo-éléments ; les
+ * autres moteurs prennent les propriétés normalisées. Les deux sont gardés, jamais appliqués ensemble.
+ */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+  }
+}
+
+@supports selector(::-webkit-scrollbar) {
+  ::-webkit-scrollbar {
+    width: var(--scroll-size);
+    height: var(--scroll-size);
+    background: var(--scroll-track);
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: var(--scroll-track);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: var(--scroll-gap) solid transparent;
+    border-radius: var(--radius-control);
+    background: var(--scroll-thumb);
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scroll-thumb-hover);
+    background-clip: padding-box;
+  }
+}
+
 html,
 body,
 #app {

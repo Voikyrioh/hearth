@@ -440,3 +440,243 @@ for (const size of SIZES) {
     await shoot(page, "hrt44-suppression", size.width, size.height);
   });
 }
+
+// ── HRT-37 : des barres de défilement sombres, une seule par écran ─────────────────────────────────
+
+const SCROLL_PAGES = [
+  ["tableau de bord", "#/servers/forge/dashboard"],
+  ["Comptes", "#/servers/forge/accounts"],
+  ["Sécurité", "#/servers/forge/security"],
+  ["Mes serveurs", "#/servers"],
+  ["Ajouter un serveur", "#/servers/new"],
+  ["Réglages", "#/settings"],
+] as const;
+
+for (const size of SIZES) {
+  test(`barres de défilement à ${size.width}×${size.height} : sombres, et jamais deux à la fois`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    for (const [name, hash] of SCROLL_PAGES) {
+      await page.goto(`/?nodev${hash}`);
+      await page.waitForTimeout(300);
+      const scrolling = await page.evaluate(() => {
+        const found: { who: string; color: string; ratio: number }[] = [];
+        const lum = (rgb: string) => {
+          const [r = 0, g = 0, b = 0] = (rgb.match(/[\d.]+/g) ?? []).map(Number);
+          const f = (v: number) => {
+            const c = v / 255;
+            return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          };
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+        };
+        const ratio = (a: string, b2: string) => {
+          const [hi = 0, lo = 0] = [lum(a), lum(b2)].sort((x, y) => y - x);
+          return (hi + 0.05) / (lo + 0.05);
+        };
+        const surface = getComputedStyle(document.body).backgroundColor;
+        for (const el of document.querySelectorAll("*")) {
+          const style = getComputedStyle(el);
+          if (/(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 1) {
+            // La poignée DESSINÉE (pseudo-élément pris par Chromium) contre le fond de la page.
+            const thumb = getComputedStyle(el, "::-webkit-scrollbar-thumb").backgroundColor;
+            found.push({
+              who: `${el.tagName}.${(el as HTMLElement).className}`,
+              color: thumb,
+              ratio: ratio(thumb, surface),
+            });
+          }
+        }
+        return found;
+      });
+      expect(scrolling.length, `${name} : une seule zone qui défile`).toBeLessThanOrEqual(1);
+      for (const area of scrolling) {
+        expect(
+          area.ratio,
+          `${name} : poignée de ${area.who} (${area.color}) à 3 pour 1`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+    // Quelle que soit la page : le thème du navigateur est sombre (contrôles natifs) et la barre est fine.
+    await page.goto("/?nodev#/settings");
+    const root = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      return {
+        scheme: style.colorScheme,
+        width: getComputedStyle(document.documentElement, "::-webkit-scrollbar").width,
+      };
+    });
+    expect(root.scheme).toBe("dark");
+    expect(root.width).toBe("12px");
+    await shoot(page, "hrt37-reglages", size.width, size.height);
+    await page.goto("/?nodev#/servers/forge/dashboard");
+    await page.waitForTimeout(300);
+    await shoot(page, "hrt37-tableau-de-bord", size.width, size.height);
+  });
+}
+
+// ── HRT-45 : barre des serveurs, des noms et des couleurs qui servent ───────────────────────────────
+
+for (const size of SIZES) {
+  test(`barre des serveurs à ${size.width}×${size.height} : un nom au survol de chaque outil, la couleur de chaque serveur`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/dashboard");
+    const rail = page.getByRole("navigation", { name: "Serveurs" });
+    const targets = [
+      {
+        link: rail.getByRole("link", { name: "Ajouter un serveur", exact: true }),
+        text: "Ajouter un serveur",
+        name: "Ajouter un serveur",
+        shot: "ajouter",
+      },
+      {
+        link: rail.getByRole("link", { name: "Mes serveurs", exact: true }),
+        text: "Mes serveurs",
+        name: "Mes serveurs",
+        shot: "mes",
+      },
+      {
+        link: rail.getByRole("link", { name: "Réglages", exact: true }),
+        text: "Réglages",
+        name: "Réglages",
+        shot: "réglages",
+      },
+      {
+        link: rail.locator('[data-server="forge"]'),
+        text: "forge",
+        name: /^forge, Connecté/,
+        shot: "serveur-forge",
+      },
+      {
+        link: rail.locator('[data-server="salon"]'),
+        text: "nas-salon",
+        name: /^nas-salon, Connecté/,
+        shot: "serveur-salon",
+      },
+    ];
+    for (const { link, text, name, shot } of targets) {
+      await link.hover();
+      const tip = link.locator("[data-rail-tip]");
+      await expect(tip, text).toBeVisible();
+      await expect(tip, text).toHaveText(text);
+      // Une seule annonce : un nom accessible, aucune description, aucun `title`, la bulle cachée aux lecteurs d'écran.
+      await expect(link, text).toHaveAccessibleName(name);
+      await expect(link, text).toHaveAccessibleDescription("");
+      await expect(link, text).not.toHaveAttribute("title", /.*/);
+      await expect(tip, text).toHaveAttribute("aria-hidden", "true");
+      const box = await tip.boundingBox();
+      expect(box, text).not.toBeNull();
+      const b = box ?? { x: 0, y: 0, width: 0, height: 0 };
+      expect(b.x >= 0 && b.y >= 0, `${text} : bulle dans la fenêtre (haut, gauche)`).toBe(true);
+      expect(
+        b.x + b.width <= size.width && b.y + b.height <= size.height,
+        `${text} : bulle dans la fenêtre (bas, droite)`,
+      ).toBe(true);
+      // Aucune intersection avec un autre bouton de la barre (ni avatar, ni outil, ni logo).
+      const others = await rail.locator("[data-rail-item]").evaluateAll((items) =>
+        items
+          .filter((item) => !item.matches(":hover"))
+          .map((item) => item.getBoundingClientRect())
+          .map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })),
+      );
+      for (const o of others) {
+        const overlap =
+          b.x < o.x + o.w && b.x + b.width > o.x && b.y < o.y + o.h && b.y + b.height > o.y;
+        expect(overlap, `${text} : la bulle ne recouvre aucune autre icône`).toBe(false);
+      }
+      await shoot(page, `hrt45-infobulle-${shot}`, size.width, size.height);
+    }
+    // La couleur choisie se voit aussi sur le serveur FERMÉ (salon n'est pas le serveur ouvert).
+    const idle = await rail
+      .locator('[data-server="salon"] [role="img"]')
+      .evaluate((el) => getComputedStyle(el).borderTopColor);
+    const common = await page.evaluate(() => {
+      const el = document.createElement("i");
+      el.style.color = getComputedStyle(document.documentElement).getPropertyValue("--bd");
+      document.body.append(el);
+      const rgb = getComputedStyle(el).color;
+      el.remove();
+      return rgb;
+    });
+    expect(idle, "le contour du serveur fermé n'est plus le gris commun").not.toBe(common);
+    await shoot(page, "hrt45-barre", size.width, size.height);
+  });
+
+  test(`suppression d'un serveur à ${size.width}×${size.height} : la fenêtre le nomme`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers");
+    await page
+      .locator("li", { hasText: "nas-salon" })
+      .getByRole("button", { name: "Supprimer" })
+      .first()
+      .click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog.getByRole("heading", { name: "Supprimer nas-salon ?" })).toBeVisible();
+    await shoot(page, "hrt45-suppression", size.width, size.height);
+  });
+}
+
+// ── HRT-46 : textes et nombres en français correct ──────────────────────────────────────────────────
+
+for (const size of SIZES) {
+  test(`tableau de bord à ${size.width}×${size.height} : virgule, pas de « ,0 », jamais « 4000.0 Go »`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/dashboard");
+    await page.waitForTimeout(500);
+    const text = await page.locator("body").innerText();
+    expect(text).not.toMatch(/\d\.\d+ ?(Go|To|GHz|Mo\/s)/);
+    expect(text).not.toMatch(/\d,0 (Go|To|GHz)/);
+    expect(text).toMatch(/\d+(,\d)? (Go|To)/);
+    await shoot(page, "hrt46-tableau-de-bord", size.width, size.height);
+  });
+
+  test(`ajout d'un serveur à ${size.width}×${size.height} : le port faux donne la plage admise`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/new");
+    await page.getByLabel("Nom du serveur").fill("Atelier");
+    await page.getByLabel("Adresse IP ou nom").fill("10.0.0.5");
+    await page.getByLabel("Port (optionnel)").fill("99999");
+    await expect(page.getByText("Port invalide. Plage admise : 1–⁠65535")).toBeVisible();
+    await shoot(page, "hrt46-port", size.width, size.height);
+  });
+
+  test(`mise à jour de l'agent à ${size.width}×${size.height} : étape dite une fois, finie sans points, bouton retiré`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/settings");
+    const forge = page.locator('[data-agent-card][data-server="forge"]');
+    await expect(forge).toBeVisible();
+    // Avant : la mention, le bouton, et pas une phrase de plus qui redit la mention.
+    await expect(forge.locator("[data-agent-tag]")).toHaveText("Mise à jour disponible");
+    await expect(forge.getByText("Mise à jour disponible pour l'agent")).toHaveCount(0);
+    await shoot(page, "hrt46-maj-disponible", size.width, size.height);
+    await forge.locator("[data-agent-update-button]").click();
+    const dialog = page.locator("dialog[open]");
+    await dialog.getByLabel("Ton mot de passe").fill("Correct-Horse-9");
+    await dialog.getByRole("button", { name: "Oui, mettre à jour" }).click();
+    await page.evaluate(() => {
+      const bridge = (
+        window as unknown as {
+          __hearthSim: { agentUpdates: { advance(id: string, step: string): void } };
+        }
+      ).__hearthSim;
+      bridge.agentUpdates.advance("forge", "verify");
+    });
+    await expect(forge.locator("[data-agent-update-button]")).toHaveCount(0);
+    await expect(forge.locator("[data-agent-progress]")).toHaveText(
+      "Mise à jour de l'agent en cours.",
+    );
+    await expect(forge.locator('[data-step="download"]')).toHaveText(/^Téléchargement(?!…)/);
+    await expect(forge.locator('[data-step="verify"]')).toContainText("Vérification…");
+    await shoot(page, "hrt46-maj-en-cours", size.width, size.height);
+  });
+}

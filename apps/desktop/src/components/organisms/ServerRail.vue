@@ -52,8 +52,11 @@ function isActive(id: string): boolean {
           :active="isActive(server.id)"
           :mark="markOf(security.of(server.id)?.state)"
         />
+        <span class="rail__tip" aria-hidden="true" data-rail-tip>{{ server.name }}</span>
       </RouterLink>
     </div>
+    <!-- HRT-45 (C49), FIX:01M4DPR45X80GAYPS8MJ4RPZ8E : chaque lien de la barre dit son nom au survol et au focus clavier. La bulle est
+         VISUELLE seulement (`aria-hidden`) : le nom accessible du lien (étiquette ou avatar) est dit une fois, ni bulle décrite ni `title`. -->
     <RouterLink
       class="rail__link rail__link--tool"
       :to="{ name: 'add-server' }"
@@ -62,6 +65,7 @@ function isActive(id: string): boolean {
       data-rail-add
     >
       <HIcon name="plus" />
+      <span class="rail__tip" aria-hidden="true" data-rail-tip>{{ t("rail.addServer") }}</span>
     </RouterLink>
     <RouterLink
       v-if="servers.servers.length > 0"
@@ -72,6 +76,7 @@ function isActive(id: string): boolean {
       data-rail-servers
     >
       <HIcon name="server" />
+      <span class="rail__tip" aria-hidden="true" data-rail-tip>{{ t("rail.servers") }}</span>
     </RouterLink>
     <RouterLink
       class="rail__link rail__link--tool"
@@ -80,6 +85,7 @@ function isActive(id: string): boolean {
       data-rail-item
     >
       <HIcon name="settings" />
+      <span class="rail__tip" aria-hidden="true" data-rail-tip>{{ t("rail.settings") }}</span>
     </RouterLink>
   </nav>
 </template>
@@ -104,6 +110,33 @@ function isActive(id: string): boolean {
   min-width: var(--target-size);
   min-height: var(--target-size);
   border-radius: var(--radius-control);
+}
+
+/*
+ * Bulle de nom (HRT-45, C49), visuelle seulement. `position: fixed` : elle n'est pas rognée par la liste qui défile ;
+ * sa position verticale est celle de l'emplacement statique dans le lien (flex, centré), la horizontale est posée
+ * juste à droite de la barre : jamais sur une autre icône de la barre.
+ */
+.rail__tip {
+  position: fixed;
+  left: calc(var(--rail-width) + var(--space-2));
+  z-index: var(--z-tooltip);
+  display: none;
+  width: max-content;
+  max-width: var(--tooltip-max);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--bd);
+  border-radius: var(--radius-control);
+  background: var(--card-2);
+  color: var(--tx);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-regular);
+  pointer-events: none;
+}
+
+.rail__link:hover .rail__tip,
+.rail__link:focus-visible .rail__tip {
+  display: block;
 }
 
 .rail__link--tool {

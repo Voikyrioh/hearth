@@ -43,7 +43,8 @@ describe("ServerRail", () => {
     const servers = wrapper.findAll("a[data-server]");
     expect(servers.map((a) => a.attributes("data-server"))).toEqual(["forge", "salon"]);
     expect(servers[0]?.attributes("href")).toBe("/servers/forge/dashboard");
-    expect(servers[0]?.text()).toBe("FO");
+    expect(servers[0]?.find(".avatar__initials").text()).toBe("FO");
+    expect(servers[0]?.get("[data-rail-tip]").text()).toBe("forge");
   });
 
   it("marks the selected server (ring + aria-current) and only that one", async () => {
