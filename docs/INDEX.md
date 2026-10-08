@@ -1,6 +1,6 @@
 # Docs — Hearth
 
-Maj : 2026-10-07. Point d'entrée obligatoire des agents (recherche, dev, conception). `ARCHITECTURE.md` = carte du code.
+Maj : 2026-10-09. Point d'entrée obligatoire des agents (recherche, dev, conception). `ARCHITECTURE.md` = carte du code.
 
 | Dossier | Contenu | Quand le consulter |
 |---|---|---|
@@ -9,8 +9,13 @@ Maj : 2026-10-07. Point d'entrée obligatoire des agents (recherche, dev, concep
 | [open-api/](./open-api/INDEX.md) | 30 endpoints : session (dont le défi de la clé d'appareil), postes de confiance, sécurité (dont le mode attaque), compte, mesures (machine, historique, flux WebSocket), audit, mise à jour de l'agent | avant de toucher une route / un client |
 | [components/](./components/INDEX.md) | 91 fiches : atomes, molécules, organismes (dont les cartes du tableau de bord), gabarit, pages, règle `needsLink` | avant de créer un composant / une page |
 | [bugs/](./bugs/INDEX.md) | 90 fiches FIX:ULID (seconde passe : journal dans sa carte et en-têtes alignés, bandeaux de sécurité à la largeur de la page, en-tête de Comptes borné, légendes des courbes, curseur après Échap, pastille de « Mes serveurs » ; grand écran : bornes de largeur, Réglages et Sécurité en deux colonnes ; restes de la revue UX : courbe qui récite, raison sous le bouton, retrait d'un poste, jargon, relance du filtre tapé ; tableau de bord : courbes lisibles, jauges braise, pas d'estampille sans mesure ; comptes : repère du rôle en cours, en-tête sans chasse fixe ; journal : recherche à la frappe, textes lisibles ; comptes : actions sur une ligne, boutons de dialogue visibles ; interface : écrans vides et panneaux centrés, rien ne se chevauche ni ne se coupe à 1100-1366 px ; tableau de bord : grille, titres, carte graphique absente, chargement lent ; historique d'une heure : maximum par pas ; tableau de bord : maximum par pas, trou réel, identité, troncature, horloge ; démarrage de Windows : chemin avec espace ; installation de l'agent : sqlite, wget, activation au démarrage, CAP_MKNOD, purge, dossier de données ; liaison : adresses MAC, `logout` concurrent, « se souvenir » sans secret, identifiant du carnet, fin de session devançant la réponse ; agent : le poste d'une session réécrit par une preuve de session, empreinte des requêtes suivies sans clé ; page Sécurité : titre, textes, marque, bandeaux, note d'effacement ; interface : barres de défilement, barre des serveurs, nombres et textes en français ; interface : hors ligne dit une fois, fenêtres d'action impossible, étape Empreinte) | avant de modifier une zone marquée `FIX:` |
-| [guides/](./guides/INDEX.md) | Tests des parcours clés du lien : critère par critère et transition par transition, le test qui le prouve | avant de toucher au lien, à ses tests ou de clore HRT-18 |
+| [guides/](./guides/INDEX.md) | Installer Hearth pas à pas (tutoriel pour qui n'a jamais ouvert un terminal) ; tests des parcours clés du lien : critère par critère et transition par transition, le test qui le prouve | installer Hearth ; avant de toucher au lien, à ses tests ou de clore HRT-18 |
 | [runbooks/](./runbooks/INDEX.md) | Procédures opérationnelles : installer l'agent, le mettre à jour à distance, publier une version du client, récupérer l'accès administrateur, sortir du mode attaque, le secret d'empreinte des requêtes suivies | accès perdu, diagnostics |
+
+## Hors dossiers
+
+- [`../README.md`](../README.md) : présentation publique du projet.
+- `assets/` : logo et captures d'écran du README et des guides.
 
 ## Globales (orga-global)
 
