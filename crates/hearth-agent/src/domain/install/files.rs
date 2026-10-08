@@ -84,16 +84,23 @@ pub const UPDATE_FILES: [&str; 9] = [
     UPDATE_WAL_BACKUP_FILE,
 ];
 
+/// Suffixe de la copie de la base pendant son écrasement (`hearth.db.before.erasing`, HRT-32) : la
+/// copie est renommée AVANT d'être écrasée, pour qu'un fichier de zéros ne porte jamais le nom que
+/// la remise de la base lit.
+pub const ERASING_SUFFIX: &str = ".erasing";
+
 /// Temporaire d'écriture d'un fichier de la mise à jour (`last.json.<pid>.tmp`) : seulement un nom
 /// que Hearth écrit, jamais un `*.tmp` quelconque.
 pub fn is_update_temporary(name: &str) -> bool {
-    name.strip_suffix(".tmp").is_some_and(|stem| {
-        UPDATE_FILES.iter().any(|file| {
-            stem.strip_prefix(file)
-                .and_then(|rest| rest.strip_prefix('.'))
-                .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()))
+    name.strip_suffix(ERASING_SUFFIX)
+        .is_some_and(|stem| stem == UPDATE_DB_BACKUP_FILE || stem == UPDATE_WAL_BACKUP_FILE)
+        || name.strip_suffix(".tmp").is_some_and(|stem| {
+            UPDATE_FILES.iter().any(|file| {
+                stem.strip_prefix(file)
+                    .and_then(|rest| rest.strip_prefix('.'))
+                    .is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()))
+            })
         })
-    })
 }
 
 /// Début du nom d'un binaire en cours de copie : `.hearth-agent.new-<pid>`.
@@ -158,6 +165,9 @@ mod tests {
     fn an_update_temporary_is_a_known_name_a_process_number_and_tmp_nothing_else() {
         assert!(is_update_temporary("last.json.4242.tmp"));
         assert!(is_update_temporary("hearth-agent.new.7.tmp"));
+        assert!(is_update_temporary("hearth.db.before.erasing"));
+        assert!(is_update_temporary("hearth.db-wal.before.erasing"));
+        assert!(!is_update_temporary("last.json.erasing"));
         for name in [
             "notes.tmp",
             "last.json.tmp",
