@@ -264,3 +264,41 @@ fn the_texts_are_french_informal_and_complete() {
         );
     }
 }
+
+// HRT-47 (S6) : le dossier d'installation mémorisé n'est proposé que s'il contient l'exécutable ; sinon le dossier
+// par défaut. Le script le fait avant tout contrôle du dossier, en écran graphique ET en silencieux (la CI le joue :
+// `scripts/installer-ci.ps1`, cas (f)).
+#[test]
+fn a_remembered_install_folder_is_only_kept_when_it_still_holds_hearth() {
+    let script = hooks();
+    let check = function_body(&script, "HearthRememberedDir");
+    assert!(check.contains(r#"ReadRegStr $R6 HKCU "${HEARTH_PRODUCT_KEY}" """#));
+    assert!(check.contains(r#"${IfNot} ${FileExists} "$R6\${HEARTH_MAIN_EXE}""#));
+    assert!(check.contains(r#"StrCpy $INSTDIR "${HEARTH_DEFAULT_DIR}""#));
+    assert_eq!(
+        define(&script, "HEARTH_PRODUCT_KEY"),
+        r"Software\Voikyrioh\Hearth"
+    );
+    assert_eq!(
+        define(&script, "HEARTH_DEFAULT_DIR"),
+        r"$LOCALAPPDATA\Hearth"
+    );
+    // Le nom de l'exécutable est celui du binaire de la coquille.
+    let manifest = read("Cargo.toml");
+    assert!(manifest.contains(&format!(
+        "name = \"{}\"",
+        define(&script, "HEARTH_MAIN_EXE").trim_end_matches(".exe")
+    )));
+    // Avant le contrôle du disque, dans les deux voies : écran graphique (avant la première page) et section masquée.
+    for entry in [function_body(&script, "HearthGuiInit"), {
+        let start = script.find("Section \"-HearthPreflight\"").unwrap();
+        script[start..start + 200].to_owned()
+    }] {
+        let remembered = entry.find("Call HearthRememberedDir").unwrap();
+        let preflight = entry.find("Call HearthPreflight").unwrap();
+        assert!(remembered < preflight);
+    }
+    assert!(
+        post_install(&script).contains(r#"!if "${MAINBINARYNAME}.exe" != "${HEARTH_MAIN_EXE}""#)
+    );
+}

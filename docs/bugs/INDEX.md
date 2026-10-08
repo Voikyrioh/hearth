@@ -4,6 +4,8 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4EPVMJGC21SAKM7YBP4S7S9](./FIX-01M4EPVMJGC21SAKM7YBP4S7S9.md) | L'installateur proposait un ancien dossier qui n'existait plus (S6) | 2026-10-08 |
+| [FIX-01M4EPVM3MK6PDHQDYKQGQB09R](./FIX-01M4EPVM3MK6PDHQDYKQGQB09R.md) | Un volume overlay de Docker rendu comme un disque (S1a) | 2026-10-08 |
 | [FIX-01M4EHYN77QBS7F7T5FCTRH6R5](./FIX-01M4EHYN77QBS7F7T5FCTRH6R5.md) | Journal à 1280 : le tableau dépassait sa carte, deux barres horizontales empilées, « Raison » coupée (D1) | 2026-10-08 |
 | [FIX-01M4EHYNER6SJ3ZZVH286TD3FB](./FIX-01M4EHYNER6SJ3ZZVH286TD3FB.md) | Journal : en-têtes décalés de 4 à 10 px de leurs colonnes avec une barre de défilement classique (C31) | 2026-10-08 |
 | [FIX-01M4EHYNPBB8TZ89DRRZ7TRH0A](./FIX-01M4EHYNPBB8TZ89DRRZ7TRH0A.md) | Les bandeaux de sécurité étaient bornés à 880 px au-dessus d'une page plus large, boutons empilés contre les bords (D2) | 2026-10-08 |

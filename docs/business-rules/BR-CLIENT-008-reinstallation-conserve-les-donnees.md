@@ -25,5 +25,8 @@ Relancer l'installateur remplace les fichiers de l'application mais ne touche pa
 ## Règles liées
 - BR-CLIENT-009
 
+## Dossier d'installation proposé (HRT-47, S6, FIX-01M4EPVMJGC21SAKM7YBP4S7S9)
+Sans /D, l'installateur propose le dossier mémorisé sous `HKCU\Software\Voikyrioh\Hearth` seulement s'il existe et contient l'exécutable (`hearth-desktop.exe`) ; sinon le dossier par défaut (`%LOCALAPPDATA%\Hearth`). Code : `apps/desktop/src-tauri/installer/hooks.nsh::HearthRememberedDir` (écran graphique et installation silencieuse). Preuve : `scripts/installer-ci.ps1`, cas (f), et `tests/installer.rs` (lecture du script).
+
 ## Historique
 - 2026-10-04 — création (HRT-08, session 2026-10-04-hearth-creation).

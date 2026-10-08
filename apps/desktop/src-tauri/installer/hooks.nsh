@@ -41,10 +41,34 @@
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
 
+; Dossier d'installation mémorisé (HRT-47, S6, FIX-01M4EPVMJGC21SAKM7YBP4S7S9). Le modèle de Tauri (mode utilisateur) propose,
+; quand aucun /D n'est donné, le dossier lu sous `HKCU\Software\Voikyrioh\Hearth` sans vérifier qu'il existe encore ni
+; qu'il contient Hearth (un dossier temporaire ou effacé était proposé). Ce dossier n'est gardé que s'il contient
+; l'exécutable ; sinon le dossier par défaut du modèle (`$LOCALAPPDATA\Hearth`). Limite : un /D explicite qui désigne
+; exactement le dossier mémorisé, vide, est aussi ramené au dossier par défaut (le script ne voit pas /D).
+; Le nom de l'exécutable est répété ici (MAINBINARYNAME n'est défini qu'après ce fichier) : un garde de compilation
+; (crochet POSTINSTALL) le compare au vrai.
+!define HEARTH_PRODUCT_KEY "Software\Voikyrioh\Hearth"
+!define HEARTH_MAIN_EXE "hearth-desktop.exe"
+!define HEARTH_DEFAULT_DIR "$LOCALAPPDATA\Hearth"
+
 Var HearthAutostartWas
 Var HearthAutostartBox
 Var HearthAutostartShown
 Var HearthAutostartWanted
+
+; Écarte le dossier mémorisé qui n'existe plus ou ne contient pas Hearth (S6). Appelée avant tout contrôle du dossier
+; (écran graphique : avant la première page ; silencieux : section masquée ci-dessous, seule voie).
+Function HearthRememberedDir
+  ClearErrors
+  ReadRegStr $R6 HKCU "${HEARTH_PRODUCT_KEY}" ""
+  ${If} $R6 != ""
+  ${AndIf} $R6 == $INSTDIR
+    ${IfNot} ${FileExists} "$R6\${HEARTH_MAIN_EXE}"
+      StrCpy $INSTDIR "${HEARTH_DEFAULT_DIR}"
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
 
 ; Résultat dans $R9 : "" (tout va bien), "os" ou "disk" ; Mo libres dans $R8.
 Function HearthPreflight
@@ -127,6 +151,7 @@ Function HearthGuiInit
       StrCpy $HearthAutostartWas 1
     ${EndIf}
   ${EndIf}
+  Call HearthRememberedDir
   Call HearthPreflight
   ${If} $R9 != ""
     Call HearthRefuse
@@ -136,6 +161,7 @@ FunctionEnd
 !define MUI_CUSTOMFUNCTION_GUIINIT HearthGuiInit
 
 Section "-HearthPreflight"
+  Call HearthRememberedDir
   Call HearthPreflight
   ${If} $R9 != ""
     Call HearthRefuse
@@ -210,6 +236,9 @@ FunctionEnd
 ; et « activé » dans le Gestionnaire des tâches). Décochée : retirée seulement si le démarrage était activé ; une entrée
 ; désactivée à la main dans le Gestionnaire des tâches n'est pas touchée.
 !macro NSIS_HOOK_POSTINSTALL
+  !if "${MAINBINARYNAME}.exe" != "${HEARTH_MAIN_EXE}"
+    !error "HEARTH_MAIN_EXE ne correspond plus à l'exécutable du produit : le dossier mémorisé ne serait plus reconnu"
+  !endif
   !if "${PRODUCTNAME}" != "${HEARTH_RUN_VALUE}"
     !error "HEARTH_RUN_VALUE ne correspond plus au nom du produit : l'entrée de démarrage ne serait plus celle de l'application"
   !endif
