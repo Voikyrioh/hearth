@@ -111,6 +111,15 @@ watch(draft, (current, previous) => {
   } else void apply();
 });
 
+// FIX:01M4ECZK55R0HTKS7SQH4WZ1ZZ
+// HRT-43 : après un échec de lecture, le filtre tapé n'est pas appliqué (la liste affichée est celle d'avant) ; l'écran le
+// dit et « Réessayer » relance le filtre TAPÉ, pas l'ancien.
+const notApplied = computed(() => failed.value && dirty.value);
+function retry() {
+  if (notApplied.value) void apply();
+  else void audit.retry();
+}
+
 /** Entrée dans la recherche : tout de suite, et le délai de frappe déjà armé est annulé (une seule lecture). */
 function submit() {
   clearTimeout(searchTimer);
@@ -164,8 +173,8 @@ const reasonText = computed(() =>
     <!-- FIX:01M4E5D447SRCNGAQY4PP006HC (C30) : hors ligne, le bandeau du gabarit dit « Serveur hors ligne » et porte « Réessayer
          maintenant », l'estampille du gabarit dit que la liste n'est pas à jour : rien d'autre ici. -->
     <div v-if="failed && !forbidden && isConnected" class="audit__error" role="alert">
-      <span>{{ reasonText }}</span>
-      <HButton variant="ghost" size="sm" @click="audit.retry()">{{ t("common.retry") }}</HButton>
+      <span>{{ notApplied ? t("audit.notApplied", { reason: reasonText }) : reasonText }}</span>
+      <HButton variant="ghost" size="sm" @click="retry">{{ t("common.retry") }}</HButton>
     </div>
 
     <p

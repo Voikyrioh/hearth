@@ -117,7 +117,8 @@ export const fr = {
     removeTitle: "Retirer {name} ?",
     removeMessage:
       "Es-tu sûr de vouloir retirer ce poste ? Tu ne pourras plus te connecter depuis ce poste sans avoir un mot de passe valide.",
-    removePasswordHelp: "Pour retirer un poste, confirme ton mot de passe.",
+    // FIX:01M4ECZJVHHJA1MNQ2E4FSFJ0K (C34) : voir plus bas « security.attackNote* » ; garde `plainLanguage.test.ts`.
+    removeAdviceTitle: "Si ce poste n'est plus à toi",
     removeAdvice:
       "Change aussi ton mot de passe si ce poste n'est plus à toi : un poste retiré depuis un autre PC peut se reconnaître à sa prochaine connexion par mot de passe.",
     password: "Ton mot de passe",
@@ -147,7 +148,7 @@ export const fr = {
     modeText: "Seuls les postes reconnus peuvent se connecter.",
     // FIX:01M4DJZAFYE77R5MKKA2NV6CE3 (C34) : éteint, la carte dit ce que le mode FERA ; actif, ce qui se passe.
     modeTextOff:
-      "Le mode attaque permet de ne laisser se connecter que les postes reconnus, le temps d'une attaque. Un poste à moitié reconnu aurait droit à un seul essai. Tu peux l'activer si une attaque est en cours.",
+      "Le mode attaque permet de ne laisser se connecter que les postes reconnus, le temps d'une attaque. Un poste que le serveur ne connaît que par son adresse n'aurait droit qu'à un seul essai. Tu peux l'activer si une attaque est en cours.",
     modeTextOn: "Le mode attaque est actif : seuls les postes reconnus peuvent se connecter.",
     modeTextOnSince:
       "Le mode attaque est actif depuis {time} : seuls les postes reconnus peuvent se connecter.",
@@ -189,7 +190,7 @@ export const fr = {
       "Si l'adresse d'un poste change entre le moment où il demande à être reconnu et sa connexion, sa preuve est ignorée.",
     confirmOnTitle: "Activer le mode attaque ?",
     confirmOnMessage:
-      "Seuls les postes reconnus pourront se connecter, sur tous les comptes de ce serveur. Un poste à moitié reconnu aura droit à un seul essai. Les autres seront refusés. Le mode s'arrête tout seul quand l'attaque semble terminée.",
+      "Seuls les postes reconnus pourront se connecter, sur tous les comptes de ce serveur. Un poste que le serveur ne connaît que par son adresse n'aura droit qu'à un seul essai. Les autres seront refusés. Le mode s'arrête tout seul quand l'attaque semble terminée.",
     confirmOffTitle: "Désactiver le mode attaque ?",
     confirmOffMessage:
       "Les postes non reconnus pourront de nouveau essayer de se connecter. Si l'attaque continue, tu pourras le réactiver.",
@@ -506,6 +507,7 @@ export const fr = {
     span1h: "Dernière heure",
     scaleTo: "0 à {max}",
     chartSummary: "Dernière valeur {last}, minimum {min}, maximum {max}, sur {span}",
+    chartKeys: "Flèches pour parcourir les valeurs",
     chartSummaryNamed: "{name} : dernière valeur {last}, minimum {min}, maximum {max}",
     onSpan: "sur {span}",
     legendDisk: "Courbe : disque le plus plein (%)",
@@ -610,6 +612,7 @@ export const fr = {
     countMore: "{n} événements ou plus",
     loadFailed: "Impossible de charger le journal",
     moreFailed: "Impossible de charger les entrées plus anciennes",
+    notApplied: "Ta recherche n'est pas appliquée. {reason}",
     newEntriesUnknown: "Nouvelles entrées",
     resetFailed: "Impossible de réinitialiser les filtres",
     exportFailed: "Impossible de générer l'export",

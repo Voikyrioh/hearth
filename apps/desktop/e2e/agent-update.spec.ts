@@ -210,7 +210,7 @@ test("action coupée avant la réponse : résultat inconnu, jamais rejouée", as
   expect(again).toBe(1);
 });
 
-test("lecture seule : bouton désactivé, infobulle exacte, aucune confirmation", async ({
+test("lecture seule : bouton désactivé, raison écrite dessous, aucune confirmation", async ({
   page,
 }) => {
   await open(page);
@@ -218,10 +218,11 @@ test("lecture seule : bouton désactivé, infobulle exacte, aucune confirmation"
   const button = salon.locator("[data-agent-update-button]");
   await expect(button).toBeVisible();
   await expect(button).toHaveAttribute("aria-disabled", "true");
-  await button.hover();
-  await expect(salon.getByRole("tooltip")).toHaveText(
+  // La raison est écrite sous le bouton, sans infobulle en double.
+  await expect(salon.locator("[data-button-reason]")).toHaveText(
     "Seul un administrateur peut mettre à jour l'agent",
   );
+  await expect(salon.getByRole("tooltip")).toHaveCount(0);
   await button.click({ force: true });
   await expect(page.locator("dialog[open]")).toHaveCount(0);
   await shoot(page, "agent-lecture-seule");
