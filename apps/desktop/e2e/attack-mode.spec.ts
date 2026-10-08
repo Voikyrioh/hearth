@@ -91,7 +91,7 @@ test("alerte : le bandeau s'affiche sur toutes les pages, activer depuis l'alert
   // Mauvais mot de passe : refusé DANS la fenêtre, le champ est vidé.
   await dialog(page).getByLabel("Ton mot de passe").fill("Faux-Mot-De-Passe-1");
   await dialog(page).getByRole("button", { name: "Activer le mode attaque" }).click();
-  await expect(dialog(page)).toContainText("Mot de passe incorrect.");
+  await expect(dialog(page)).toContainText("Mot de passe actuel incorrect.");
   await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveValue("");
   await dialog(page).getByLabel("Ton mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Activer le mode attaque" }).click();
@@ -213,7 +213,9 @@ test("changer son mot de passe : la case « Garder ce poste reconnu » est déco
   await page.locator('.mine[data-server="forge"]').getByRole("button").first().click();
   const box = dialog(page).getByLabel("Garder ce poste reconnu");
   await expect(box).not.toBeChecked();
-  await expect(dialog(page)).toContainText("Décoché, il l'oublie avec celles des autres postes.");
+  await expect(dialog(page)).toContainText(
+    "Si la case est cochée, ce poste restera reconnu après le changement de mot de passe.",
+  );
   await box.check();
   await expect(box).toBeChecked();
   await shoot(page, "attaque-garder-poste");

@@ -82,7 +82,7 @@ describe("account actions", () => {
     const report = await actions.create("sophie", GOOD, "readonly", OWN);
     await flushPromises();
     expect(report).toEqual({ kind: "done", sessionsClosed: 0 });
-    expect(toasts.items.map((t) => t.message)).toContain("Compte sophie créé");
+    expect(toasts.items.map((t) => t.message)).toContain("Compte sophie créé.");
     expect(store.of("forge")?.accounts.map((a) => a.username)).toContain("sophie");
     // Aucun mot de passe dans le journal du pont, dans les notifications, ni dans l'état Pinia.
     expect(JSON.stringify(bridge.calls)).not.toContain(GOOD);
@@ -124,8 +124,8 @@ describe("account actions", () => {
     await actions.closeSessions(paul, OWN);
     await actions.changeRole(paul, "admin", OWN);
     const messages = toasts.items.map((t) => t.message);
-    expect(messages).toContain("Sessions de paul fermées");
-    expect(messages).toContain("paul est maintenant Administrateur");
+    expect(messages).toContain("Sessions de paul fermées.");
+    expect(messages).toContain("paul est maintenant Administrateur.");
   });
 
   it("an action cut before its answer is unknown, said once, never replayed; the list is re-read when the link is back", async () => {

@@ -132,7 +132,7 @@ async function perform(adminPassword: string | null) {
       autocomplete="new-password"
     />
     <PasswordRules :unmet="rules.check.value.password" :touched="passwordTouched" />
-    <template v-if="own">
+    <template v-if="own" #after>
       <HCheckbox
         v-model="keepAddress"
         :label="t('accounts.keepAddress')"

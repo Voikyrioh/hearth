@@ -101,7 +101,7 @@ describe("Case « Garder ce poste reconnu »", () => {
     expect(box?.checked).toBe(false);
     expect(document.querySelector("dialog")?.textContent).toContain("Garder ce poste reconnu");
     expect(document.querySelector("[data-keep-address-help]")?.textContent).toContain(
-      "Décoché, il l'oublie avec celles des autres postes.",
+      "Si la case est cochée, ce poste restera reconnu après le changement de mot de passe.",
     );
     await submit();
     expect(bridge.lastKeepAddress).toBe(false);

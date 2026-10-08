@@ -121,7 +121,7 @@ describe("AccountTable", () => {
     const paul = wrapper.get('[data-account="paul"]');
     expect(paul.findAll("button").map((b) => b.text())).toEqual([
       "Changer le rôle",
-      "Mot de passe",
+      "Changer le mot de passe",
       "Fermer les 2 sessions",
       "Supprimer",
     ]);
@@ -221,7 +221,9 @@ describe("CreateAccountDialog", () => {
     const { wrapper } = await open();
     typeInto(field("ex. camille"), "a b");
     await flushPromises();
-    expect(text()).toContain("L'identifiant contient des caractères non autorisés");
+    expect(text()).toContain(
+      "L'identifiant ne peut contenir que des lettres, des chiffres, des tirets et des tirets bas.",
+    );
     typeInto(field("ex. camille"), "marie2");
     typeInto(field("Celui que ce compte utilisera"), "abc");
     await flushPromises();
@@ -264,7 +266,7 @@ describe("CreateAccountDialog", () => {
     await flushPromises();
     await confirmDialog("Créer");
     expect(wrapper.emitted("close")).toHaveLength(1);
-    expect(useToastsStore().items.map((t) => t.message)).toContain("Compte sophie créé");
+    expect(useToastsStore().items.map((t) => t.message)).toContain("Compte sophie créé.");
     expect(bridge.calls).toContain("account create sophie");
     expect(JSON.stringify(bridge.calls)).not.toContain(GOOD);
     expect(field("Celui que ce compte utilisera")?.value ?? "").toBe("");
@@ -315,7 +317,7 @@ describe("CreateAccountDialog", () => {
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
     await confirmDialog("Créer", "Mauvais-Mot-De-Passe-1");
-    expect(text()).toContain("Mot de passe incorrect.");
+    expect(text()).toContain("Mot de passe actuel incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
     expect(reauthField()?.value).toBe("");
     // Le curseur revient dans la confirmation vidée : le prochain geste est de la retaper.
@@ -371,7 +373,7 @@ describe("PasswordDialog", () => {
     await flushPromises();
     button("Changer le mot de passe")?.click();
     await flushPromises();
-    expect(text()).toContain("Mot de passe incorrect.");
+    expect(text()).toContain("Mot de passe actuel incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
     // C18 : seul le mot de passe de confirmation est vidé ; le nouveau mot de passe est gardé.
     expect(reauthField()?.value).toBe("");
@@ -382,7 +384,7 @@ describe("PasswordDialog", () => {
     button("Changer le mot de passe")?.click();
     await flushPromises();
     expect(wrapper.emitted("close")).toHaveLength(1);
-    expect(useToastsStore().items.map((t) => t.message)).toContain("Mot de passe changé");
+    expect(useToastsStore().items.map((t) => t.message)).toContain("Mot de passe changé.");
     expect(JSON.stringify(bridge.calls)).not.toContain(GOOD);
     wrapper.unmount();
   });

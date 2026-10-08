@@ -222,6 +222,7 @@ async function submit() {
         :help="notice ? undefined : t('reauth.help')"
         :error="passwordError"
       />
+      <slot name="after" />
     </template>
   </FormDialog>
 </template>

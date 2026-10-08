@@ -88,7 +88,7 @@ describe("Comptes (administrateurs)", () => {
     await flushPromises();
     await confirmDialog("Créer");
     expect(rows(wrapper)).toEqual(["marie", "paul", "lea", "sophie"]);
-    expect(useToastsStore().items.map((t) => t.message)).toContain("Compte sophie créé");
+    expect(useToastsStore().items.map((t) => t.message)).toContain("Compte sophie créé.");
     expect(JSON.stringify(bridge.calls)).not.toContain(GOOD);
     wrapper.unmount();
   });
@@ -101,7 +101,7 @@ describe("Comptes (administrateurs)", () => {
     await flushPromises();
     expect(document.body.textContent).toContain("Fermer les sessions de paul ?");
     await confirmDialog("Fermer les sessions");
-    expect(useToastsStore().items.map((t) => t.message)).toContain("Sessions de paul fermées");
+    expect(useToastsStore().items.map((t) => t.message)).toContain("Sessions de paul fermées.");
     expect(wrapper.get('[data-account="paul"] td:nth-child(5)').text()).toBe("0");
     expect(
       wrapper.get('[data-account="paul"]').findAll("button")[2]?.attributes("aria-disabled"),
@@ -119,7 +119,7 @@ describe("Comptes (administrateurs)", () => {
     expect(document.body.textContent).toContain("Changer le rôle de paul ?");
     await confirmDialog("Changer le rôle");
     expect(useToastsStore().items.map((t) => t.message)).toContain(
-      "paul est maintenant Administrateur",
+      "paul est maintenant Administrateur.",
     );
     expect(wrapper.get('[data-account="paul"] td:nth-child(2)').text()).toBe("Administrateur");
     wrapper.unmount();
@@ -131,7 +131,7 @@ describe("Comptes (administrateurs)", () => {
     await flushPromises();
     expect(document.body.textContent).toContain("Supprimer le compte ?");
     expect(document.body.textContent).toContain(
-      "Supprimer le compte lea ? Cette action est irréversible.",
+      "Le compte lea et ses sessions seront supprimés. Cette action est irréversible.",
     );
     // Annuler : rien n'est parti.
     dialogButton("Annuler")?.click();
@@ -140,7 +140,7 @@ describe("Comptes (administrateurs)", () => {
     await wrapper.get('[data-account="lea"]').findAll("button")[3]?.trigger("click");
     await confirmDialog("Supprimer");
     expect(rows(wrapper)).toEqual(["marie", "paul"]);
-    expect(useToastsStore().items.map((t) => t.message)).toContain("Compte lea supprimé");
+    expect(useToastsStore().items.map((t) => t.message)).toContain("Compte lea supprimé.");
     wrapper.unmount();
   });
 

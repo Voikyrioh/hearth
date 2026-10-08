@@ -68,6 +68,8 @@ async function fillCreate(page: Page, username: string, password: string, confir
 test("la page Comptes : tableau, colonnes, étiquette « toi », actions de la ligne", async ({
   page,
 }) => {
+  // Large : la colonne « Créé le » est masquée sous 1100 px de tableau (HRT-36, C21).
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto("/?nodev#/servers/forge/accounts");
   await expect(page.getByRole("heading", { level: 1, name: "Comptes" })).toBeVisible();
   const headers = page.locator("thead th");
@@ -83,7 +85,7 @@ test("la page Comptes : tableau, colonnes, étiquette « toi », actions de la l
   await expect(row(page, "marie").getByRole("button")).toHaveText(["Changer mon mot de passe"]);
   await expect(row(page, "paul").getByRole("button")).toHaveText([
     "Changer le rôle",
-    "Mot de passe",
+    "Changer le mot de passe",
     "Fermer les 2 sessions",
     "Supprimer",
   ]);
@@ -106,7 +108,9 @@ test("création : critères du mot de passe en direct (coche et croix), bouton i
   // L'identifiant : message sous le champ dès qu'il est invalide.
   await dialog(page).getByLabel("Identifiant").fill("a b");
   await expect(
-    dialog(page).getByText("L'identifiant contient des caractères non autorisés"),
+    dialog(page).getByText(
+      "L'identifiant ne peut contenir que des lettres, des chiffres, des tirets et des tirets bas.",
+    ),
   ).toBeVisible();
   await dialog(page).getByLabel("Identifiant").fill("sophie");
   await expect(dialog(page).getByText("L'identifiant contient")).toHaveCount(0);
@@ -146,7 +150,7 @@ test("création réussie : compte ajouté en bas de la liste, message de succès
   await fillCreate(page, "sophie", GOOD);
   await confirm(page, "Créer");
   await expect(dialog(page)).toHaveCount(0);
-  await expect(page.locator(".toast")).toContainText("Compte sophie créé");
+  await expect(page.locator(".toast")).toContainText("Compte sophie créé.");
   await expect(page.locator("tbody tr").last()).toHaveAttribute("data-account", "sophie");
   expect(JSON.stringify(await sim(page).calls())).not.toContain(GOOD);
 });
@@ -182,7 +186,7 @@ test("changer le rôle par la liste déroulante, et le dernier administrateur es
   await expect(page.getByRole("heading", { name: "Changer le rôle de paul ?" })).toBeVisible();
   await expect(dialog(page).getByText("paul deviendra Administrateur.")).toBeVisible();
   await confirm(page, "Changer le rôle");
-  await expect(page.locator(".toast")).toContainText("paul est maintenant Administrateur");
+  await expect(page.locator(".toast")).toContainText("paul est maintenant Administrateur.");
   await expect(row(page, "paul").locator("td").nth(0)).toHaveText("Administrateur");
   // Deux administrateurs : retour à Lecture seule possible ; puis le dernier est grisé.
   await row(page, "paul")
@@ -192,7 +196,7 @@ test("changer le rôle par la liste déroulante, et le dernier administrateur es
   // Passer en Lecture seule retire un accès : le délai de 5 minutes ouvert par le mot de passe de
   // l'instant d'avant le couvre, la fenêtre n'a pas de champ et le dit.
   await expect(dialog(page).locator("[data-reauth-elevated]")).toContainText(
-    "il ne t'est pas redemandé pendant encore",
+    "Il te sera redemandé dans",
   );
   await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveCount(0);
   await confirm(page, "Changer le rôle");
@@ -207,7 +211,7 @@ test("fermer les sessions : confirmation qui nomme le compte, le bouton s'étein
   await close.click();
   await expect(page.getByRole("heading", { name: "Fermer les sessions de paul ?" })).toBeVisible();
   await confirm(page, "Fermer les sessions");
-  await expect(page.locator(".toast")).toContainText("Sessions de paul fermées");
+  await expect(page.locator(".toast")).toContainText("Sessions de paul fermées.");
   await expect(row(page, "paul").locator("td").nth(3)).toHaveText("0");
   await expect(
     row(page, "paul").getByRole("button", { name: /^Fermer les sessions/ }),
@@ -217,7 +221,7 @@ test("fermer les sessions : confirmation qui nomme le compte, le bouton s'étein
 test("mot de passe d'un autre compte : fenêtre, critères, succès", async ({ page }) => {
   await page.goto("/?nodev#/servers/forge/accounts");
   await row(page, "paul")
-    .getByRole("button", { name: /^Mot de passe/ })
+    .getByRole("button", { name: /^Changer le mot de passe/ })
     .click();
   await expect(
     page.getByRole("heading", { name: "Changer le mot de passe de paul" }),
@@ -232,7 +236,7 @@ test("mot de passe d'un autre compte : fenêtre, critères, succès", async ({ p
   await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   // Prendre le contrôle d'un compte n'est jamais couvert par le délai : le mot de passe est demandé.
   await confirm(page, "Changer le mot de passe");
-  await expect(page.locator(".toast")).toContainText("Mot de passe changé");
+  await expect(page.locator(".toast")).toContainText("Mot de passe changé.");
   await expect(dialog(page)).toHaveCount(0);
 });
 
@@ -245,7 +249,9 @@ test("supprimer : confirmation qui nomme le compte, annulation sans effet, puis 
     .click();
   await expect(page.getByRole("heading", { name: "Supprimer le compte ?" })).toBeVisible();
   await expect(
-    page.getByText("Supprimer le compte lea ? Cette action est irréversible."),
+    page.getByText(
+      "Le compte lea et ses sessions seront supprimés. Cette action est irréversible.",
+    ),
   ).toBeVisible();
   await page.getByRole("button", { name: "Annuler" }).click();
   await expect(row(page, "lea")).toHaveCount(1);
@@ -253,7 +259,7 @@ test("supprimer : confirmation qui nomme le compte, annulation sans effet, puis 
     .getByRole("button", { name: /^Supprimer/ })
     .click();
   await confirm(page, "Supprimer");
-  await expect(page.locator(".toast")).toContainText("Compte lea supprimé");
+  await expect(page.locator(".toast")).toContainText("Compte lea supprimé.");
   await expect(row(page, "lea")).toHaveCount(0);
   await shoot(page, "comptes-apres-suppression");
 });
@@ -292,13 +298,13 @@ test("section personnelle des réglages : tous les rôles changent leur mot de p
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
   await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Changer le mot de passe" }).click();
-  await expect(dialog(page).getByText("Mot de passe incorrect.")).toBeVisible();
+  await expect(dialog(page).getByText("Mot de passe actuel incorrect.")).toBeVisible();
   await expect(dialog(page).getByLabel("Ancien mot de passe")).toHaveValue("");
   await dialog(page).getByLabel("Ancien mot de passe").fill("Correct-Horse-9");
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
   await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Changer le mot de passe" }).click();
-  await expect(page.locator(".toast")).toContainText("Mot de passe changé");
+  await expect(page.locator(".toast")).toContainText("Mot de passe changé.");
 });
 
 test("supprimer son propre compte : on retape son identifiant ; le dernier administrateur est refusé", async ({
