@@ -114,7 +114,19 @@ test("le chemin long est tronqué au milieu, complet au clavier", async ({ page 
   const shown = await mid.innerText();
   expect(shown.startsWith("/var/lib")).toBe(true);
   expect(shown.endsWith("1826482b")).toBe(true);
-  expect(await mid.getAttribute("aria-label")).toBe(full);
+  // Texte COMPLET pour un lecteur d'écran : tout ce qui n'est pas masqué (`aria-hidden`) se lit en entier, sans rôle inventé.
+  const readable = await mid.evaluate((el) => {
+    const parts: string[] = [];
+    const walk = (node: Node) => {
+      if (node.nodeType === 3) parts.push(node.textContent ?? "");
+      else if (node instanceof Element && node.getAttribute("aria-hidden") !== "true")
+        node.childNodes.forEach(walk);
+    };
+    walk(el);
+    return { text: parts.join(""), role: el.getAttribute("role") };
+  });
+  expect(readable.text).toBe(full);
+  expect(readable.role).toBeNull();
   await mid.focus();
   await expect(page.getByRole("tooltip").filter({ hasText: full })).toBeVisible();
   // La carte Machine l'écrit aussi sans déborder.
