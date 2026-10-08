@@ -89,7 +89,8 @@ const describedBy = computed(() => {
 
 .field__box:focus-within {
   border-color: var(--ac);
-  box-shadow: 0 0 0 var(--halo-width) var(--focus-halo);
+  /* FIX:01M4EPX90N9QNNPCHVNB6MCDDF (S3) : le halo est DESSINÉ DEDANS : il ne dépasse jamais l'axe gauche du contenu. */
+  box-shadow: inset 0 0 0 var(--halo-width) var(--focus-halo);
 }
 
 .field__box--error,

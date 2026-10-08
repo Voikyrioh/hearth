@@ -7,3 +7,4 @@ Section « Disques » : par disque, occupation (jauge linéaire, pourcentage, ma
 - Props : `entry`
 - Événements et slots : aucun
 - Notes : Tests : `pages/Dashboard.test.ts`.
+- HRT-47 (S1b) : nom et point de montage en `HMiddleText` (jamais en colonne ni hors de la carte), pourcentage sur une ligne. FIX:01M4EPX88BTXFX1PX7E57WGK38.

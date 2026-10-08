@@ -157,6 +157,9 @@ function isActive(id: string): boolean {
   gap: var(--space-3);
   min-height: 0;
   width: 100%;
+  /* FIX:01M4EPX8PWN1RRX8A4HZGTKF0E (HRT-47, S2) : de l'air autour des avatars, sinon l'anneau du serveur sélectionné (4 px hors de l'avatar) est rogné. */
+  padding: var(--space-2) 0;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 </style>

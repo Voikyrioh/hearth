@@ -7,3 +7,4 @@ Palette des 8 couleurs de serveur : `radiogroup` de pastilles rondes, la sélect
 - Props : `modelValue` (1 à 8), `label`, `disabled`
 - Événements et slots : événement `update:modelValue`
 - Notes : Jetons `--server-1` à `--server-8`. Tests : `connect.test.ts`, `Servers.test.ts`.
+- HRT-47 (S3) : la rangée est décalée de la largeur de l'anneau de sélection : l'anneau ne sort pas de la colonne des champs. FIX:01M4EPX90N9QNNPCHVNB6MCDDF.
