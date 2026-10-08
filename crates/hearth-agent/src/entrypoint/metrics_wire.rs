@@ -76,6 +76,25 @@ pub fn sample(sample: &DomainSample) -> Sample {
     }
 }
 
+pub fn peak(peak: &crate::domain::metrics::StepPeak) -> hearth_proto::api::metrics::StepPeak {
+    hearth_proto::api::metrics::StepPeak {
+        cpu: peak.cpu,
+        mem_used_bytes: peak.mem_used_bytes,
+        net: peak.net.map(|net| NetSample {
+            up_bytes_per_s: net.up_bytes_per_s,
+            down_bytes_per_s: net.down_bytes_per_s,
+        }),
+        gpus: peak
+            .gpus
+            .iter()
+            .map(|gpu| hearth_proto::api::metrics::GpuPeak {
+                load_percent: gpu.load_percent,
+                memory_used_bytes: gpu.memory_used_bytes,
+            })
+            .collect(),
+    }
+}
+
 pub fn machine(identity: &MachineIdentity) -> MachineResponse {
     let capabilities = identity.capabilities();
     MachineResponse {

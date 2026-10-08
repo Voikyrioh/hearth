@@ -5,12 +5,39 @@
 //! rend la même fin à 1 échantillon par 10 secondes (moyennes). Seuls les échantillons PLUS ANCIENS que le
 //! premier de l'instantané sont gardés : l'heure ne remplace jamais le détail à la seconde.
 
-use hearth_proto::api::metrics::Sample;
+use hearth_proto::api::metrics::{Sample, StepPeak};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 fn at_of(sample: &Sample) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(&sample.at, &Rfc3339).ok()
+}
+
+/// Remplace, dans chaque échantillon de l'heure (une MOYENNE de 10 s), les mesures tracées par le MAXIMUM de son
+/// pas (`peaks`, un par échantillon, même ordre) : le client trace le maximum sur la fenêtre d'une heure, comme
+/// en direct, donc un pic d'une seconde ne disparaît pas quand il vieillit. Si l'agent ne rend pas de maxima
+/// (agent plus ancien) ou pas autant que d'échantillons, les moyennes restent telles quelles.
+// FIX:01M4CY8BVM3MV9769QWNDNW7VT
+pub fn with_peaks(mut samples: Vec<Sample>, peaks: &[StepPeak]) -> Vec<Sample> {
+    if peaks.len() != samples.len() {
+        return samples;
+    }
+    for (sample, peak) in samples.iter_mut().zip(peaks) {
+        sample.cpu = peak.cpu;
+        sample.mem.used_bytes = peak.mem_used_bytes;
+        if peak.net.is_some() {
+            sample.net = peak.net;
+        }
+        for (gpu, peak) in sample.gpus.iter_mut().zip(&peak.gpus) {
+            if peak.load_percent.is_some() {
+                gpu.load_percent = peak.load_percent;
+            }
+            if peak.memory_used_bytes.is_some() {
+                gpu.memory_used_bytes = peak.memory_used_bytes;
+            }
+        }
+    }
+    samples
 }
 
 /// Les échantillons de `hour` strictement plus anciens que le premier de `snapshot` (tous, si
@@ -63,6 +90,46 @@ mod tests {
         let kept = older_than_snapshot(hour, &snapshot);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].at, "2026-10-08T09:59:50Z");
+    }
+
+    #[test]
+    fn the_peaks_replace_the_means_so_a_spike_is_not_lost_and_a_missing_or_short_list_changes_nothing()
+     {
+        use hearth_proto::api::metrics::{GpuPeak, GpuSample, NetSample};
+        let mut mean = at("2026-10-08T09:00:00Z");
+        mean.cpu = 19.0;
+        mean.gpus = vec![GpuSample {
+            name: "g".into(),
+            load_percent: Some(20.0),
+            memory_used_bytes: Some(5),
+            memory_total_bytes: Some(10),
+            temp_c: None,
+        }];
+        let peak = StepPeak {
+            cpu: 100.0,
+            mem_used_bytes: 7,
+            net: Some(NetSample {
+                up_bytes_per_s: 3,
+                down_bytes_per_s: 4,
+            }),
+            gpus: vec![GpuPeak {
+                load_percent: Some(90.0),
+                memory_used_bytes: None,
+            }],
+        };
+        let out = with_peaks(vec![mean.clone()], std::slice::from_ref(&peak));
+        assert_eq!(out[0].cpu, 100.0);
+        assert_eq!(out[0].mem.used_bytes, 7);
+        assert_eq!(out[0].gpus[0].load_percent, Some(90.0));
+        assert_eq!(
+            out[0].gpus[0].memory_used_bytes,
+            Some(5),
+            "sans maximum, la moyenne reste"
+        );
+        assert_eq!(out[0].net.map(|n| n.down_bytes_per_s), Some(4));
+        // Aucun maximum (agent plus ancien) ou une liste d'une autre longueur : les moyennes, intactes.
+        assert_eq!(with_peaks(vec![mean.clone()], &[])[0].cpu, 19.0);
+        assert_eq!(with_peaks(vec![mean.clone(), mean], &[peak])[0].cpu, 19.0);
     }
 
     #[test]
