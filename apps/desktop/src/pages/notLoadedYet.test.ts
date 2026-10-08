@@ -21,6 +21,7 @@ async function bootBroken(path: string) {
   ctx.bridge.listAccounts = async () => down();
   ctx.bridge.getSecurity = async () => down();
   ctx.bridge.listTrustedDevices = async () => down();
+  ctx.bridge.readAudit = async () => down();
   await ctx.router.push(path);
   await ctx.router.isReady();
   const wrapper = mount(App, { global: ctx.global, attachTo: document.body });
@@ -58,6 +59,30 @@ describe("une page jamais chargée, serveur hors ligne", () => {
       "Réessayer maintenant",
     ]);
     expect(wrapper.find(".surface__stamp").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  // Le bloquant de la review de la PR #57 : le Journal jamais lu, serveur hors ligne, n'était plus qu'un cadre vide sous une
+  // estampille. Un message, un seul, et pas de « Vu il y a… ».
+  it("Journal jamais lu, serveur hors ligne : « pas encore chargé » une fois, un seul « Réessayer », aucune estampille", async () => {
+    const { wrapper, bridge } = await bootBroken("/servers/forge/audit");
+    bridge.setState("forge", "offline");
+    await flushPromises();
+    expect(wrapper.get("[data-not-loaded-yet]").text()).toBe(NOT_LOADED);
+    expect(wrapper.text()).not.toContain("Impossible de charger le journal");
+    expect(wrapper.text()).not.toContain("Aucun événement");
+    expect(retries(wrapper.findAll("button").map((b) => b.text()))).toEqual([
+      "Réessayer maintenant",
+    ]);
+    expect(wrapper.find(".surface__stamp").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("Journal jamais lu, serveur connecté : l'échec est dit avec son « Réessayer »", async () => {
+    const { wrapper } = await bootBroken("/servers/forge/audit");
+    expect(wrapper.find("[data-not-loaded-yet]").exists()).toBe(false);
+    expect(wrapper.find(".audit__error").exists()).toBe(true);
+    expect(retries(wrapper.findAll("button").map((b) => b.text()))).toEqual(["Réessayer"]);
     wrapper.unmount();
   });
 

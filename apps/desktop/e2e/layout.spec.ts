@@ -226,7 +226,7 @@ for (const size of SIZES) {
 }
 
 for (const size of [SIZES[1], SIZES[2]]) {
-  test(`journal à ${size.width}×${size.height} : les filtres tiennent sur une ligne, bouton compris`, async ({
+  test(`journal à ${size.width}×${size.height} : les filtres tiennent sur une ligne`, async ({
     page,
   }) => {
     await page.setViewportSize(size);
@@ -234,12 +234,7 @@ for (const size of [SIZES[1], SIZES[2]]) {
     await expect(page.locator("form.filters")).toBeVisible();
     const filters = (await boxesOf(page, "form.filters"))[0];
     expect(filters?.h ?? 999, "carte de filtres").toBeLessThanOrEqual(150);
-    const controls = await boxesOf(
-      page,
-      "form.filters input, form.filters select, form.filters button[type='submit']",
-    );
-    const apply = await boxesOf(page, "form.filters button[type='submit']");
-    expect(apply.length).toBe(1);
+    const controls = await boxesOf(page, "form.filters input, form.filters select");
     const ys = controls.map((control) => Math.round(control.y + control.h / 2));
     expect(Math.max(...ys) - Math.min(...ys), "tous sur la même ligne").toBeLessThanOrEqual(40);
     await shoot(page, "hrt36-journal", size.width, size.height);

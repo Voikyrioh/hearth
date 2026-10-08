@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, ref, shallowRef } from "vue";
 import { cloneDraft, type FilterDraft, isUnfiltered, resolveFilter } from "@/audit/filters";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
@@ -27,8 +27,6 @@ export const AUDIT_LIVE_DEBOUNCE_MS = 300;
 export const AUDIT_LIVE_MAX_WAIT_MS = 2000;
 /** Vérification périodique de la tête (lien établi) : répare ce que le flux a perdu sans le dire. */
 export const AUDIT_VERIFY_EVERY_MS = 30_000;
-/** Attente d'un « Rechargement manuel » avant de dire que le serveur est toujours injoignable. */
-export const AUDIT_RELOAD_WAIT_MS = 5000;
 /** Intervalle minimal entre deux annonces de nouvelles entrées aux lecteurs d'écran. */
 export const AUDIT_ANNOUNCE_MS = 2000;
 const KNOWN_ACCOUNTS_MAX = 200;
@@ -96,7 +94,6 @@ export const useAuditStore = defineStore("audit", () => {
   const windowFull = ref(false);
   const knownAccounts = ref<string[]>([]);
   const exporting = ref(false);
-  const reloading = ref(false);
   /** Compteur : la page remonte en haut de la liste quand il change. */
   const topSignal = ref(0);
   /** Dernière annonce pour les lecteurs d'écran (« 3 nouvelles entrées »). */
@@ -120,6 +117,10 @@ export const useAuditStore = defineStore("audit", () => {
   let verifiedTop = 0;
   /** Le brouillon appliqué : les périodes relatives se recalculent quand le jour change. */
   let appliedDraft: FilterDraft | null = null;
+  // Le dernier filtre dont la lecture a RÉUSSI (celui de la liste affichée) : c'est lui qu'on restaure
+  // après un échec, jamais un filtre posé par une application dépassée qui n'a pas abouti.
+  let confirmedFilter: AuditFilter = { ...EMPTY_AUDIT_FILTER };
+  let confirmedDraft: FilterDraft | null = null;
 
   const newCount = computed(() => pending.value.length);
   const hasMoreBelow = computed(() => nextBefore.value !== null);
@@ -221,12 +222,13 @@ export const useAuditStore = defineStore("audit", () => {
   }
 
   /**
-   * Reprend la liste à zéro avec le filtre appliqué. `silent` : relecture interne (rattrapage), sans
+   * Reprend la liste à zéro avec le filtre appliqué. `superseded` : une lecture plus récente a pris la
+   * main (ce n'est PAS un échec : l'appelant ne restaure rien et ne notifie rien). `silent` : relecture interne (rattrapage), sans
    * spinner et sans remonter l'utilisateur en haut de la liste.
    */
-  async function load(options: { silent?: boolean } = {}): Promise<boolean> {
+  async function load(options: { silent?: boolean } = {}): Promise<"ok" | "failed" | "superseded"> {
     const id = serverId.value;
-    if (id === null) return false;
+    if (id === null) return "failed";
     generation += 1;
     const mine = generation;
     if (!options.silent) status.value = "loading";
@@ -235,7 +237,7 @@ export const useAuditStore = defineStore("audit", () => {
     liveBuffer = [];
     try {
       const page = await bridge().readAudit(id, plain(applied.value), null);
-      if (mine !== generation) return false;
+      if (mine !== generation) return "superseded";
       const buffered = liveBuffer ?? [];
       liveBuffer = null;
       nextBefore.value = page.nextBefore;
@@ -245,15 +247,17 @@ export const useAuditStore = defineStore("audit", () => {
       verifiedTop = page.events[0]?.id ?? 0;
       setEntries(mergeDesc(page.events, isUnfiltered(applied.value) ? buffered : []));
       status.value = "ready";
+      confirmedFilter = applied.value;
+      confirmedDraft = appliedDraft;
       if (!options.silent) topSignal.value += 1;
       // Ce qui est arrivé pendant la lecture n'est pas confirmé : une relecture le vérifie.
       if (buffered.length > 0) scheduleCatchUp();
-      return true;
+      return "ok";
     } catch (error) {
-      if (mine !== generation) return false;
+      if (mine !== generation) return "superseded";
       liveBuffer = null;
       fail(error);
-      return false;
+      return "failed";
     }
   }
 
@@ -399,6 +403,8 @@ export const useAuditStore = defineStore("audit", () => {
     serverId.value = id;
     applied.value = { ...EMPTY_AUDIT_FILTER };
     appliedDraft = null;
+    confirmedFilter = applied.value;
+    confirmedDraft = null;
     openSeq += 1;
     const mine = openSeq;
     // Écoute posée d'abord, lecture ensuite : aucune entrée ne tombe entre les deux.
@@ -455,43 +461,40 @@ export const useAuditStore = defineStore("audit", () => {
     catchAgain = false;
     resumed = false;
     verifiedTop = 0;
-    reloading.value = false;
     exporting.value = false;
   }
 
   /**
-   * « Appliquer les filtres ». `invalid` : la période est invalide, rien n'est lancé. `failed` : la
+   * l'application d'un filtre. `invalid` : la période est invalide, rien n'est lancé. `failed` : la
    * lecture a échoué, les filtres précédents et la liste affichée restent (BR-AUDIT-014).
    */
   async function apply(
     draft: FilterDraft,
     now: number = Date.now(),
-  ): Promise<"applied" | "invalid" | "failed"> {
+  ): Promise<"applied" | "invalid" | "failed" | "superseded"> {
     const filter = resolveFilter(cloneDraft(draft), now);
     if (!filter) return "invalid";
-    const previous = applied.value;
-    const previousDraft = appliedDraft;
     applied.value = filter;
     appliedDraft = cloneDraft(draft);
-    const ok = await load();
-    if (ok) return "applied";
-    applied.value = previous;
-    appliedDraft = previousDraft;
+    const outcome = await load();
+    if (outcome === "ok") return "applied";
+    // Dépassée par une application plus récente : son filtre est déjà posé, on n'y touche pas.
+    if (outcome === "superseded") return "superseded";
+    applied.value = confirmedFilter;
+    appliedDraft = confirmedDraft;
     return "failed";
   }
 
   /** « Effacer les filtres » : tout le journal ; `false` si la lecture échoue (l'état précédent reste). */
   async function clearFilters(): Promise<boolean> {
-    const previous = applied.value;
-    const previousDraft = appliedDraft;
     applied.value = { ...EMPTY_AUDIT_FILTER };
     appliedDraft = null;
-    const ok = await load();
-    if (!ok) {
-      applied.value = previous;
-      appliedDraft = previousDraft;
+    const outcome = await load();
+    if (outcome === "failed") {
+      applied.value = confirmedFilter;
+      appliedDraft = confirmedDraft;
     }
-    return ok;
+    return outcome !== "failed";
   }
 
   /** « Réessayer » après un échec : relit ce qui manque (la liste affichée est gardée) ou tout. */
@@ -539,49 +542,6 @@ export const useAuditStore = defineStore("audit", () => {
     if (value && (pending.value.length > 0 || pendingOverflow.value)) void showPending();
   }
 
-  /** Attend « Connecté » sans interroger en boucle : l'état du lien est réactif. */
-  function untilConnected(id: string, ms: number): Promise<boolean> {
-    const link = useLinkStore();
-    if (link.stateOf(id) === "connected") return Promise.resolve(true);
-    return new Promise((resolve) => {
-      const stop = watch(
-        () => link.stateOf(id),
-        (state) => {
-          if (state !== "connected") return;
-          stop();
-          clearTimeout(timer);
-          resolve(true);
-        },
-      );
-      const timer = setTimeout(() => {
-        stop();
-        resolve(false);
-      }, ms);
-    });
-  }
-
-  /** « Rechargement manuel » (BR-AUDIT-020) : une tentative de reconnexion, puis la relecture. */
-  async function reloadManually(): Promise<void> {
-    const id = serverId.value;
-    if (id === null || reloading.value) return;
-    reloading.value = true;
-    const link = useLinkStore();
-    try {
-      await link.retryNow(id);
-      const connected = await untilConnected(id, AUDIT_RELOAD_WAIT_MS);
-      if (serverId.value !== id) return;
-      if (!connected) {
-        useToastsStore().push({ kind: "info", message: t("audit.stillUnreachable") });
-      }
-      // Connecté : `resume` (appelé par la page au changement d'état) fait la relecture.
-    } catch (error) {
-      logUiError(error, "audit");
-      useToastsStore().push({ kind: "info", message: t("audit.stillUnreachable") });
-    } finally {
-      reloading.value = false;
-    }
-  }
-
   /** « Exporter » : le résultat filtré APPLIQUÉ, dans un fichier choisi par l'utilisateur. */
   async function exportCsv(): Promise<void> {
     const id = serverId.value;
@@ -620,7 +580,6 @@ export const useAuditStore = defineStore("audit", () => {
     unverified,
     knownAccounts,
     exporting,
-    reloading,
     topSignal,
     announcement,
     open,
@@ -632,7 +591,6 @@ export const useAuditStore = defineStore("audit", () => {
     resume,
     showPending,
     setAtTop,
-    reloadManually,
     exportCsv,
   };
 });

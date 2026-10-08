@@ -62,14 +62,11 @@ test("le tableau, ses colonnes, le compteur et l'indicateur de conservation", as
 
 test("filtres : appliquer, recherche, plusieurs valeurs, effacer d'un clic", async ({ page }) => {
   await open(page);
-  const apply = page.getByRole("button", { name: /Appliquer les filtres/ });
-  await expect(apply).toHaveAttribute("aria-disabled", "true");
+  // Plus de bouton « Appliquer » : la recherche s'applique à la frappe.
+  await expect(page.getByRole("button", { name: /Appliquer/ })).toHaveCount(0);
   await page.getByRole("searchbox", { name: "Rechercher" }).fill("léa");
-  await expect(apply).not.toHaveAttribute("aria-disabled", "true");
-  // Les filtres modifiés ne s'appliquent pas tant qu'on n'a pas cliqué.
-  await expect(page.getByText("100 événements ou plus")).toBeVisible();
-  await apply.click();
   await expect(page.getByText(/événements( ou plus)?$/).first()).toBeVisible();
+  await expect(page.getByText("100 événements ou plus")).toHaveCount(0, { timeout: 3000 });
   const accounts = await page
     .locator('[role="row"][data-row-key] [role="gridcell"]:nth-child(2)')
     .allTextContents();
@@ -83,7 +80,6 @@ test("filtres : appliquer, recherche, plusieurs valeurs, effacer d'un clic", asy
   await page.getByRole("button", { name: /^Résultat/ }).click();
   await page.getByLabel("Refusé").check();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: /Appliquer les filtres/ }).click();
   await expect(page.getByText("Aucun événement ne correspond")).toBeVisible();
 
   // Effacer : un seul clic, tout revient.
@@ -105,10 +101,6 @@ test("période personnalisée : messages de la spec, puis application", async ({
   await page.getByLabel("Du", { exact: true }).fill(day(-1));
   await page.getByLabel("Au", { exact: true }).fill(day(-3));
   await expect(page.getByText("La fin de la période doit suivre le début")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Appliquer les filtres/ })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
   await page.getByLabel("Du", { exact: true }).fill("2001-01-01");
   await expect(page.getByText("La date dépasse l'historique conservé (90 jours)")).toBeVisible();
   await page.getByLabel("Période").selectOption("today");
@@ -175,7 +167,8 @@ test("direct : en haut l'entrée apparaît ; défilé, un bouton « N nouvelles 
 test("un filtre actif vaut aussi pour le direct", async ({ page }) => {
   await open(page);
   await page.getByRole("searchbox", { name: "Rechercher" }).fill("léa");
-  await page.getByRole("button", { name: /Appliquer les filtres/ }).click();
+  await expect(page.getByRole("button", { name: "Effacer les filtres" })).toBeVisible();
+  await expect(page.locator("[role=row][data-row-key]").first()).toBeVisible();
   await sim(page, (s) => {
     s.audit.add("forge", { account: "paul", actionLabel: "Hors filtre", action: "logout" });
     s.audit.add("forge", { account: "léa", actionLabel: "Dans le filtre", action: "logout" });

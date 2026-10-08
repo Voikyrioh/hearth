@@ -92,7 +92,7 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-AUDIT-017](./BR-AUDIT-017-export-resultat-filtre.md) — L'export porte sur le résultat filtré — `domain/audit/csv.rs::{render, field}` ; crates/hearth-proto/src/api/audit_csv.rs::field — —
 - [BR-AUDIT-018](./BR-AUDIT-018-resultat-vide.md) — Aucun événement : message et bouton d'effacement — `application/audit.rs::AuditService::search` ; interface : apps/desktop/src/pages/Audit.vue — —
 - [BR-AUDIT-019](./BR-AUDIT-019-indicateur-conservation.md) — L'indicateur de conservation est toujours visible — `domain/audit/policy.rs::{RETENTION, MAX_ENTRIES}` ; interface : apps/desktop/src/pages/Audit.vue — —
-- [BR-AUDIT-020](./BR-AUDIT-020-rechargement-manuel.md) — Rechargement manuel quand le lien est coupé — interface : apps/desktop/src/stores/audit.ts::reloadManually — —
+- [BR-AUDIT-020](./BR-AUDIT-020-rechargement-manuel.md) — Rechargement manuel quand le lien est coupé — interface : apps/desktop/src/components/organisms/OfflineBanner.vue (« Réessayer maintenant ») — —
 - [BR-AUDIT-021](./BR-AUDIT-021-journalisation-refus-acces.md) — Un refus d'accès au journal est lui-même journalisé — `entrypoint/http/mod.rs::ENDPOINTS` — invariant ✓
 - [BR-DASH-001](./BR-DASH-001-affichage-initial-complet.md) — Le tableau de bord affiche l'état complet de la machine dès sa première ouverture — `application/metrics.rs::MetricsService::{identity, history}, entrypoint/ws/connection.rs` — invariant ✓
 - [BR-DASH-002](./BR-DASH-002-rafraichissement-chaque-seconde.md) — Les mesures sont rafraîchies automatiquement chaque seconde — `entrypoint/tasks.rs::spawn_sampler, application/metrics.rs::MetricsService::sample_once` — invariant ✓
