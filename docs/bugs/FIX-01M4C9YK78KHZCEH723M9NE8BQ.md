@@ -23,7 +23,7 @@ Toute mise à jour de l'agent faite avec le code de la PR #39 (jamais publié).
 Aucun.
 
 ## Correction
-`clear_staging` écrase de zéros, en place, avec `fsync`, la copie de la base et son journal avant de les supprimer (`overwrite_with_zeros`). Meilleur effort : sur un système de fichiers à copie sur écriture ou un disque qui remappe ses blocs, l'ancien contenu peut subsister. `// FIX:01M4C9YK78KHZCEH723M9NE8BQ`. Hors périmètre, dit : un retour arrière remet la base d'avant telle quelle (anciennes empreintes comprises), puis la `0008` et son effacement physique rejouent à la mise à jour suivante ; une purge de désinstallation supprime sans écraser.
+`clear_staging` renomme la copie de la base et son journal en `.erasing` (un fichier de zéros ne porte jamais le nom que la remise de la base lit), les écrase de zéros en place avec `fsync`, puis les supprime (`erase_copy`) ; un `.erasing` laissé par une panne est fini au nettoyage suivant ; un lien symbolique n'est jamais suivi (le lien est retiré, sa cible intacte) ; si l'écrasement échoue, la suppression a lieu quand même. Une mise à jour abandonnée garde ses copies en clair, exprès, jusqu'au geste de l'opérateur. Meilleur effort : sur un système de fichiers à copie sur écriture ou un disque qui remappe ses blocs, l'ancien contenu peut subsister. `// FIX:01M4C9YK78KHZCEH723M9NE8BQ`. Hors périmètre, dit : un retour arrière remet la base d'avant telle quelle (anciennes empreintes comprises), puis la `0008` et son effacement physique rejouent à la mise à jour suivante ; une purge de désinstallation supprime sans écraser.
 
 ## Règles
 - BR-UPDATE-029 (note), BR-RESIL-021 (précisée).

@@ -22,9 +22,9 @@ use serde::de::DeserializeOwned;
 
 use crate::application::ports::{SupervisorLock, UpdateHost, UpdateHostError};
 use crate::domain::install::{
-    DATABASE_FILE, DATABASE_FILES, UPDATE_DB_BACKUP_FILE, UPDATE_DIR, UPDATE_JOB_FILE,
-    UPDATE_LAST_FILE, UPDATE_LOCK_FILE, UPDATE_PHASE_FILE, UPDATE_STAGED_FILE, UPDATE_STATE_FILE,
-    UPDATE_SUPERVISOR_FILE, UPDATE_WAL_BACKUP_FILE, Version,
+    DATABASE_FILE, DATABASE_FILES, ERASING_SUFFIX, UPDATE_DB_BACKUP_FILE, UPDATE_DIR,
+    UPDATE_JOB_FILE, UPDATE_LAST_FILE, UPDATE_LOCK_FILE, UPDATE_PHASE_FILE, UPDATE_STAGED_FILE,
+    UPDATE_STATE_FILE, UPDATE_SUPERVISOR_FILE, UPDATE_WAL_BACKUP_FILE, Version,
 };
 use crate::domain::update::{Job, Marker, SupervisorState, UpdateRecord};
 use crate::infrastructure::file_lock::{HeldLock, LockError};
@@ -473,12 +473,12 @@ impl UpdateHost for FsUpdateHost {
         ] {
             let path = self.path(name);
             // FIX:01M4C9YK78KHZCEH723M9NE8BQ : la copie de la base contient des données d'avant la
-            // migration 0008 (anciennes empreintes de requêtes) : écrasée de zéros avant d'être supprimée.
-            if matches!(name, UPDATE_DB_BACKUP_FILE | UPDATE_WAL_BACKUP_FILE)
-                && let Err(error) = overwrite_with_zeros(&path)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(%error, path = %path.display(), "copie de la base non écrasée avant suppression");
+            // migration 0008 (anciennes empreintes de requêtes) : renommée, écrasée de zéros, puis
+            // supprimée. Si l'écrasement échoue la suppression a lieu quand même : on ne garde pas
+            // un fichier sensible pour une raison d'écrasement.
+            if matches!(name, UPDATE_DB_BACKUP_FILE | UPDATE_WAL_BACKUP_FILE) {
+                erase_copy(&path);
+                continue;
             }
             if let Err(error) = fs::remove_file(&path)
                 && error.kind() != std::io::ErrorKind::NotFound
@@ -547,12 +547,56 @@ pub fn systemd_run_arguments(supervisor: &Path, job: &Path) -> Vec<OsString> {
     arguments
 }
 
+/// Efface une copie de la base : reprend d'abord un `.erasing` laissé par une panne, puis RENOMME la
+/// copie (un fichier de zéros ne porte jamais le nom que `restore_database` lit), l'écrase de zéros
+/// et la supprime. Un lien symbolique n'est jamais suivi : le lien est retiré, sa cible n'est pas
+/// touchée. Les échecs sont journalisés, jamais fatals.
+fn erase_copy(path: &Path) {
+    let mut erasing = path.as_os_str().to_owned();
+    erasing.push(ERASING_SUFFIX);
+    let erasing = PathBuf::from(erasing);
+    if erasing.symlink_metadata().is_ok() {
+        finish_erasing(&erasing);
+    }
+    match path.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            tracing::warn!(path = %path.display(), "lien symbolique à la place de la copie de la base : retiré sans le suivre");
+            let _ = fs::remove_file(path);
+        }
+        Ok(_) => match fs::rename(path, &erasing) {
+            Ok(()) => finish_erasing(&erasing),
+            Err(error) => {
+                tracing::warn!(%error, path = %path.display(), "copie de la base non renommée avant écrasement");
+                finish_erasing(path);
+            }
+        },
+        Err(_) => {}
+    }
+}
+
+fn finish_erasing(path: &Path) {
+    if let Err(error) = overwrite_with_zeros(path) {
+        tracing::warn!(%error, path = %path.display(), "copie de la base non écrasée avant suppression");
+    }
+    if let Err(error) = fs::remove_file(path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%error, path = %path.display(), "copie de la base non retirée");
+    }
+}
+
 /// Écrase le contenu du fichier de zéros, en place, et le synchronise (sa taille ne change pas).
 /// Meilleur effort : sur un système de fichiers à copie sur écriture ou un disque qui remappe ses
 /// blocs, l'ancien contenu peut subsister hors de portée du système.
 fn overwrite_with_zeros(path: &Path) -> std::io::Result<()> {
     use std::io::Write;
 
+    if fs::symlink_metadata(path)?.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "lien symbolique refusé",
+        ));
+    }
     let len = fs::metadata(path)?.len();
     let mut file = fs::OpenOptions::new().write(true).open(path)?;
     let zeros = [0_u8; 64 * 1024];
@@ -800,6 +844,61 @@ mod tests {
             assert_eq!(bytes.len(), marker.len());
             assert!(bytes.iter().all(|b| *b == 0), "{}", link.display());
         }
+    }
+
+    /// Panne au milieu de l'effacement : le `.erasing` laissé est repris et fini au nettoyage suivant,
+    /// et la copie ne porte jamais son nom d'origine pendant l'écrasement.
+    #[test]
+    fn an_interrupted_erasure_is_finished_at_the_next_cleanup() {
+        let (dir, host) = host();
+        let update = dir.path().join("update");
+        fs::create_dir_all(&update).unwrap();
+        let marker = b"ancienne-empreinte-0123456789abcdef".repeat(2000);
+        let leftover = update.join("hearth.db.before.erasing");
+        fs::write(&leftover, &marker).unwrap();
+        let link = update.join("leftover.link");
+        fs::hard_link(&leftover, &link).unwrap();
+        host.clear_staging();
+        assert!(!leftover.exists());
+        assert!(!update.join(UPDATE_DB_BACKUP_FILE).exists());
+        assert!(fs::read(&link).unwrap().iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn the_copy_is_renamed_before_it_is_overwritten() {
+        let (dir, _host) = host();
+        let update = dir.path().join("update");
+        fs::create_dir_all(&update).unwrap();
+        let path = update.join(UPDATE_DB_BACKUP_FILE);
+        fs::write(&path, b"x".repeat(1000)).unwrap();
+        let link = update.join("watch.link");
+        fs::hard_link(&path, &link).unwrap();
+        // Après le renommage seul, plus rien ne porte le nom lu par la remise de la base.
+        let mut erasing = path.as_os_str().to_owned();
+        erasing.push(ERASING_SUFFIX);
+        fs::rename(&path, &erasing).unwrap();
+        assert!(!path.exists());
+        assert_eq!(fs::read(&link).unwrap(), b"x".repeat(1000));
+        erase_copy(&path);
+        // Le nom d'origine n'existe pas, le `.erasing` repris est fini.
+        assert!(!path.exists());
+        assert!(fs::read(&link).unwrap().iter().all(|b| *b == 0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_is_never_followed_or_overwritten() {
+        let (dir, host) = host();
+        let update = dir.path().join("update");
+        fs::create_dir_all(&update).unwrap();
+        let target = dir.path().join("precieux");
+        fs::write(&target, b"ne pas toucher").unwrap();
+        let link = update.join(UPDATE_DB_BACKUP_FILE);
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(overwrite_with_zeros(&link).is_err());
+        host.clear_staging();
+        assert!(link.symlink_metadata().is_err(), "le lien est retiré");
+        assert_eq!(fs::read(&target).unwrap(), b"ne pas toucher");
     }
 
     #[test]

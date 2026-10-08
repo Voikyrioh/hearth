@@ -103,14 +103,10 @@ impl Database {
             })?;
         // FIX:01M4BZN31A8Z8WN0WKNTCRTFFN : la migration 0008 vide la colonne, pas les octets ; l'effacement
         // physique se fait ici, hors de sa transaction (`VACUUM` n'y tourne pas).
-        scrub_after_0008(&pool)
-            .await
-            .map_err(|error| DatabaseError::Migrate {
-                path: path.clone(),
-                message: format!(
-                    "effacement physique des anciennes empreintes impossible : {error}"
-                ),
-            })?;
+        // Jamais bloquant : un point de contrôle retenu ou un `VACUUM` impossible (disque plein) ne
+        // doivent pas mettre le serveur hors service. Avertissement, pas de marque, reprise au
+        // démarrage suivant.
+        scrub_or_warn(&pool, &path).await;
         Ok(Self { pool })
     }
 
@@ -134,9 +130,7 @@ enum ScrubError {
     Sql(#[from] sqlx::Error),
     /// Le point de contrôle n'a pas pu tronquer le journal (un autre lecteur le retient) : les
     /// anciennes trames y sont encore. Pas de marque, reprise au prochain démarrage.
-    #[error(
-        "le journal de la base est retenu par un autre processus ; réessaie au prochain démarrage"
-    )]
+    #[error("le journal de la base est retenu par un autre processus")]
     JournalBusy,
 }
 
@@ -150,10 +144,27 @@ async fn truncate_journal(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
     Ok(busy == 0)
 }
 
+/// Lance l'effacement et ne propage jamais son échec : rend `false` (et avertit) si la marque n'a pas
+/// été posée. Le message ne dit rien de sensible (le chemin du fichier et la cause technique seuls).
+async fn scrub_or_warn(pool: &SqlitePool, path: &Path) -> bool {
+    match scrub_after_0008(pool).await {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(
+                file = %path.display(),
+                %error,
+                "effacement physique des anciennes empreintes différé : l'agent démarre, l'effacement sera retenté au prochain démarrage"
+            );
+            false
+        }
+    }
+}
+
 /// Réécrit le fichier de la base et son journal pour que les empreintes effacées par la migration
 /// `0008` ne restent pas dans les pages libres ni dans le journal : `VACUUM` (reconstruit la base,
 /// le fichier rétrécit) puis point de contrôle qui tronque le journal à zéro octet. Fait une fois
-/// (`user_version`) ; si l'effacement échoue ou reste partiel, l'agent ne démarre pas et le reprend
+/// (`user_version`) ; si l'effacement échoue ou reste partiel, l'agent démarre quand même (voir
+/// `scrub_or_warn`) et le reprend
 /// au démarrage suivant (la marque n'est posée qu'après un point de contrôle complet). Une base
 /// neuve passe par là aussi, sans coût.
 // FIX:01M4C9YKCVPDFSSJ2EYMZSRSPM : le résultat « occupé » du point de contrôle est lu avant la marque.
@@ -473,5 +484,61 @@ mod tests {
         drop(held);
         scrub_after_0008(&writer).await.unwrap();
         assert_eq!(user_version(&writer).await, SCRUBBED_VERSION);
+    }
+
+    // Règle (ADR-0034) : un effacement qui échoue ne met jamais le serveur hors service.
+    #[tokio::test]
+    async fn a_busy_journal_never_stops_the_database_from_opening_and_the_next_open_retries() {
+        let dir = crate::infrastructure::data_dir::private_tempdir();
+        let path = dir.path().join(DATABASE_FILE);
+        // Une base d'avant la 0008, avec un lecteur qui tient un instantané.
+        let writer = raw_pool(&path).await;
+        let mut migrator = sqlx::migrate!("./migrations");
+        migrator.migrations = migrator
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 7)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        migrator.run(&writer).await.unwrap();
+        let reader = raw_pool(&path).await;
+        let mut held = reader.acquire().await.unwrap();
+        sqlx::query("BEGIN").execute(&mut *held).await.unwrap();
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM operations")
+            .fetch_one(&mut *held)
+            .await
+            .unwrap();
+        writer.close().await;
+
+        let db = Database::open(dir.path()).await.expect("l'agent démarre");
+        assert_eq!(user_version(db.pool()).await, 0, "pas de marque");
+        db.pool().close().await;
+
+        sqlx::query("ROLLBACK").execute(&mut *held).await.unwrap();
+        drop(held);
+        reader.close().await;
+        let db = Database::open(dir.path()).await.unwrap();
+        assert_eq!(user_version(db.pool()).await, SCRUBBED_VERSION, "retenté");
+    }
+
+    // Même règle pour un `VACUUM` impossible (disque plein, base en lecture seule).
+    #[tokio::test]
+    async fn a_vacuum_that_cannot_run_is_a_warning_not_a_failure() {
+        let dir = crate::infrastructure::data_dir::private_tempdir();
+        let path = dir.path().join(DATABASE_FILE);
+        let db = Database::open(dir.path()).await.unwrap();
+        sqlx::query("PRAGMA user_version = 0")
+            .execute(db.pool())
+            .await
+            .unwrap();
+        db.pool().close().await;
+        let read_only = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().filename(&path).read_only(true))
+            .await
+            .unwrap();
+        assert!(!scrub_or_warn(&read_only, &path).await);
+        assert!(scrub_after_0008(&read_only).await.is_err());
     }
 }

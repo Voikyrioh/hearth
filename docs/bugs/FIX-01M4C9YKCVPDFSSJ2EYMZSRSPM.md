@@ -23,7 +23,7 @@ Code de la PR #39 (HRT-32) seulement, jamais publié. Condition : une sous-comma
 Aucun nécessaire.
 
 ## Correction
-`truncate_journal` lit `busy` ; occupé : `ScrubError::JournalBusy`, l'agent ne démarre pas, pas de marque, reprise au démarrage suivant. `// FIX:01M4C9YKCVPDFSSJ2EYMZSRSPM` dans `infrastructure/sqlite/mod.rs`. La constante de la marque est l'unique source de la valeur écrite.
+`truncate_journal` lit `busy` ; occupé : `ScrubError::JournalBusy`, pas de marque. L'agent **démarre quand même** (`scrub_or_warn` : avertissement au journal), l'effacement est repris au démarrage suivant. `// FIX:01M4C9YKCVPDFSSJ2EYMZSRSPM` dans `infrastructure/sqlite/mod.rs`. La constante de la marque est l'unique source de la valeur écrite.
 
 ## Règles
 - BR-RESIL-021 (précisée).
