@@ -267,7 +267,9 @@ pub struct Options {
     /// d'avant HRT-23 voient un agent sans défi, comme avant (`Spy::old_agent`).
     pub device_key: bool,
     /// Réponse scriptée de `GET /metrics/history?window=1h` (l'agent vient de démarrer : son anneau est vide).
-    pub hour: Option<hearth_proto::api::metrics::HistoryResponse>,
+    pub hours: Vec<hearth_proto::api::metrics::HistoryResponse>,
+    /// La PREMIÈRE lecture de l'heure ne répond pas tant que le test ne la libère pas (`hour_release`).
+    pub hour_hold_first: bool,
     /// La lecture de l'heure échoue (agent sans la route, délai) : la connexion s'ouvre quand même.
     pub hour_fails: bool,
 }
@@ -280,7 +282,8 @@ impl Default for Options {
             config: fast_config(),
             updating: None,
             device_key: false,
-            hour: None,
+            hours: Vec::new(),
+            hour_hold_first: false,
             hour_fails: false,
         }
     }
@@ -371,7 +374,10 @@ pub struct SpyState {
     /// L'agent est vu « d'avant la confirmation des actes » : `GET /security` perd `admin_reauth`.
     pub hide_reauth: std::sync::atomic::AtomicBool,
     /// Réponse scriptée de `GET /metrics/history?window=1h` (le vrai agent vient de démarrer : son anneau est vide).
-    pub scripted_hour: std::sync::Mutex<Option<hearth_proto::api::metrics::HistoryResponse>>,
+    pub scripted_hour: std::sync::Mutex<Vec<hearth_proto::api::metrics::HistoryResponse>>,
+    pub hour_hold_first: std::sync::atomic::AtomicBool,
+    pub hour_release: tokio::sync::Notify,
+    pub hour_calls: std::sync::atomic::AtomicUsize,
     /// La lecture de l'heure rend une erreur de transport.
     pub hour_fails: std::sync::atomic::AtomicBool,
 }
@@ -416,7 +422,10 @@ impl Spy {
                 first: std::sync::Mutex::new(None),
                 writes: std::sync::Mutex::new(Vec::new()),
                 hide_reauth: std::sync::atomic::AtomicBool::new(false),
-                scripted_hour: std::sync::Mutex::new(None),
+                scripted_hour: std::sync::Mutex::new(Vec::new()),
+                hour_hold_first: std::sync::atomic::AtomicBool::new(false),
+                hour_release: tokio::sync::Notify::new(),
+                hour_calls: std::sync::atomic::AtomicUsize::new(0),
                 hour_fails: std::sync::atomic::AtomicBool::new(false),
             }),
         }
@@ -665,8 +674,23 @@ impl hearth_link::ports::Transport for Spy {
             ));
         }
         // Un historique scripté (le banc ne peut pas vieillir l'anneau de l'agent), sinon le vrai.
-        if let Some(scripted) = self.state.scripted_hour.lock().unwrap().clone() {
-            return Ok(scripted);
+        let call = self
+            .state
+            .hour_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call == 0
+            && self
+                .state
+                .hour_hold_first
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            self.state.hour_release.notified().await;
+        }
+        {
+            let scripted = self.state.scripted_hour.lock().unwrap();
+            if let Some(response) = scripted.get(call).or_else(|| scripted.last()) {
+                return Ok(response.clone());
+            }
         }
         self.inner.hour_history(target, token).await
     }
@@ -744,7 +768,10 @@ impl World {
                 ChallengeMode::OldAgent
             },
         ));
-        *spy.state.scripted_hour.lock().unwrap() = options.hour.clone();
+        *spy.state.scripted_hour.lock().unwrap() = options.hours.clone();
+        spy.state
+            .hour_hold_first
+            .store(options.hour_hold_first, std::sync::atomic::Ordering::SeqCst);
         spy.state
             .hour_fails
             .store(options.hour_fails, std::sync::atomic::Ordering::SeqCst);

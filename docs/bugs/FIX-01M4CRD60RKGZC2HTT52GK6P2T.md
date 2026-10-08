@@ -11,7 +11,7 @@ date_correction: 2026-10-08
 Un saut de l'horloge murale (changement d'heure, synchronisation, réglage à la main) pouvait casser ou fausser la tenue de 30 s du niveau du processeur.
 
 ## Reproduction
-Par construction : `now_ms()` ne recule plus. Le test `the_hour_before_the_snapshot_is_kept…` (tests/dashboard.rs) et les tests de la série passent un `now_ms` explicite.
+`apps/desktop/src-tauri/tests/dashboard.rs::now_reads_the_wall_clock_once_then_only_follows_the_monotonic_clock` : rouge si on revient à une lecture de l'horloge murale à chaque appel (la source murale est alors lue plusieurs fois).
 
 ## Cause root
 `now_ms()` lisait `SystemTime::now()` à chaque appel.
@@ -23,7 +23,7 @@ Le tableau de bord (HRT-11, PR #14), jamais publié.
 Aucun.
 
 ## Correction
-`now_ms()` lit l'horloge murale UNE fois puis avance sur l'horloge monotone (`Instant`) : elle ne recule jamais. `// FIX:01M4CRD60RKGZC2HTT52GK6P2T`.
+`now_ms()` s'appuie sur `dashboard::MonoMs` : l'horloge murale lue UNE fois puis l'horloge monotone (`Instant`), elle ne recule jamais. `// FIX:01M4CRD60RKGZC2HTT52GK6P2T`.
 
 ## Règles
 - BR-DASH-004 (note).

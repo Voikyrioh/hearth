@@ -817,16 +817,21 @@ impl LinkRuntime {
 fn now_ms() -> i64 {
     use std::sync::OnceLock;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
-    static START: OnceLock<(Instant, i64)> = OnceLock::new();
-    let (start, base) = START.get_or_init(|| {
-        let wall = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .ok()
-            .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
-            .unwrap_or(0);
-        (Instant::now(), wall)
-    });
-    base.saturating_add(i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX))
+    static CLOCK: OnceLock<crate::dashboard::MonoMs> = OnceLock::new();
+    CLOCK
+        .get_or_init(|| {
+            crate::dashboard::MonoMs::new(
+                || {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .ok()
+                        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
+                        .unwrap_or(0)
+                },
+                Instant::now(),
+            )
+        })
+        .at(Instant::now())
 }
 
 /// Nom du poste annoncé à l'agent (`X-Hearth-Client`) : `{ordinateur}/{version}`.

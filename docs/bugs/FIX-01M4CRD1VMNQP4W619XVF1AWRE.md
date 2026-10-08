@@ -34,3 +34,6 @@ Aucun.
 ## Références
 - Ticket : HRT-18 (suites de la review HRT-11, rounds 2 et 3)
 - Code : `apps/desktop/src/dashboard/series.ts`
+
+## Limite dite
+- L'heure retenue d'une connexion reste en place si la relecture suivante échoue : elle est rejouée devant un instantané plus récent avec un vide entre les deux (le vide est vrai).

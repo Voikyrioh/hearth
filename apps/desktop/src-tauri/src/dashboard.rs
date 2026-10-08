@@ -342,6 +342,33 @@ pub struct SnapshotEvent {
     pub levels: Option<LevelsDto>,
 }
 
+/// « Maintenant » en millisecondes qui ne recule jamais : l'horloge MURALE lue UNE seule fois à la construction,
+/// puis l'horloge MONOTONE (`Instant`). La série du processeur et le repli d'un échantillon à la date illisible
+/// ne suivent donc pas un saut de l'horloge murale (changement d'heure, synchronisation, réglage à la main).
+/// FIX:01M4CRD60RKGZC2HTT52GK6P2T
+#[derive(Debug, Clone, Copy)]
+pub struct MonoMs {
+    start: std::time::Instant,
+    base_ms: i64,
+}
+
+impl MonoMs {
+    /// `wall` n'est appelée qu'ici, une fois.
+    pub fn new(wall: impl FnOnce() -> i64, start: std::time::Instant) -> Self {
+        Self {
+            start,
+            base_ms: wall(),
+        }
+    }
+
+    /// Les millisecondes à l'instant `now` : la base murale plus le temps écoulé sur l'horloge monotone.
+    pub fn at(&self, now: std::time::Instant) -> i64 {
+        let elapsed = now.saturating_duration_since(self.start).as_millis();
+        self.base_ms
+            .saturating_add(i64::try_from(elapsed).unwrap_or(i64::MAX))
+    }
+}
+
 /// L'heure écoulée avant l'instantané (`link://history`), à 1 échantillon par 10 secondes : le tableau de bord
 /// amorce sa courbe d'une heure dès l'ouverture (BR-DASH-010). Plus ancienne que l'instantané.
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]

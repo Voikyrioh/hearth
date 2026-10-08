@@ -88,9 +88,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
   function apply(serverId: string, event: MachineEvent) {
     const target = entry(serverId);
     if (event.kind === "history") {
-      // L'heure écoulée avant l'instantané : elle ne remplace que ce qu'elle recouvre et ne touche ni
-      // l'identité ni le dernier échantillon (BR-DASH-010).
-      target.ring.merge(event.history);
+      // L'heure écoulée avant l'instantané : elle ne comble que ce que l'anneau n'a pas (plus ancien, trous),
+      // ne remplace jamais un échantillon reçu en direct et ne touche ni l'identité ni le dernier échantillon
+      // (BR-DASH-010).
+      target.ring.fill(event.history);
       target.tick += 1;
       return;
     }

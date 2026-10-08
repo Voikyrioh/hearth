@@ -358,3 +358,25 @@ fn the_hour_before_the_snapshot_is_kept_replayed_with_the_view_and_kept_out_of_t
     let (view, _) = snapshot("srv", &machine, &view_samples, 0);
     assert_eq!(book.with_older(view).history.len(), 6);
 }
+
+/// FIX:01M4CRD60RKGZC2HTT52GK6P2T : « maintenant » lit l'horloge murale UNE fois, puis avance sur l'horloge
+/// monotone. Rougit si on revient à une lecture murale à chaque appel (la source serait appelée plusieurs fois et
+/// le temps suivrait ses sauts).
+#[test]
+fn now_reads_the_wall_clock_once_then_only_follows_the_monotonic_clock() {
+    use hearth_desktop_lib::dashboard::MonoMs;
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+    let reads = Cell::new(0);
+    let start = Instant::now();
+    let clock = MonoMs::new(
+        || {
+            reads.set(reads.get() + 1);
+            1_790_000_000_000
+        },
+        start,
+    );
+    assert_eq!(clock.at(start), 1_790_000_000_000);
+    assert_eq!(clock.at(start + Duration::from_secs(5)), 1_790_000_005_000);
+    assert_eq!(reads.get(), 1, "l'horloge murale n'est lue qu'une fois");
+}

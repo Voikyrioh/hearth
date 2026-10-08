@@ -80,6 +80,28 @@ export class SampleRing {
     this.items = [...older, ...incoming, ...newer].slice(-RING_CAP);
   }
 
+  /**
+   * Comble ce que l'anneau n'a pas avec une heure lue à part (moyennes de l'agent, un échantillon par 10 s) :
+   * ce qui est plus ancien que son premier échantillon et les trous. Un point n'est gardé que si aucun
+   * échantillon de l'anneau n'est à moins de `BRIDGE_MS` de lui : elle ne remplace JAMAIS un point reçu en
+   * direct (un pic à 100 % vu à la seconde ne retombe pas à la moyenne de son pas à une reconnexion).
+   */
+  fill(history: readonly MachineSample[]): void {
+    const have = this.items;
+    const kept: MachineSample[] = [];
+    let cursor = 0;
+    for (const sample of history) {
+      while (cursor < have.length && (have[cursor]?.at ?? 0) < sample.at - BRIDGE_MS) cursor += 1;
+      const near = have[cursor];
+      if (near && near.at <= sample.at + BRIDGE_MS) continue;
+      const previous = kept.at(-1);
+      if (previous && sample.at <= previous.at) continue;
+      kept.push(sample);
+    }
+    if (kept.length === 0) return;
+    this.items = [...have, ...kept].sort((a, b) => a.at - b.at).slice(-RING_CAP);
+  }
+
   clear(): void {
     this.items = [];
   }
