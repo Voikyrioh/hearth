@@ -196,8 +196,8 @@ pub struct RunningAgent {
     /// Mode attaque : reprise après la fenêtre de redémarrage, sortie automatique : arrêtée avec
     /// l'agent.
     pub attack_sweep: Option<BackgroundTask>,
-    /// Les sessions : les tests de la liaison y règlent si l'agent EXIGE la confirmation des actes
-    /// (`accept_unconfirmed_acts_for_tests`) ; le service exige dès sa construction.
+    /// Les sessions : l'agent EXIGE la confirmation des actes
+    /// dès la construction du service : aucun réglage, aucune porte, même en test.
     pub sessions: Arc<SessionService>,
     /// Écrit les synthèses du journal en attente à l'arrêt.
     audit_recorder: Arc<AuditRecorder>,

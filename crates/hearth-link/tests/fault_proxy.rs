@@ -35,6 +35,11 @@ fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
 
+/// Le mot de passe de confirmation de l'acte (celui de « marie »).
+fn password() -> Secret {
+    Secret::from(PASSWORD)
+}
+
 fn change_password() -> ActionRequest {
     ActionRequest {
         method: Method::Put,
@@ -634,13 +639,17 @@ async fn an_expired_session_without_a_saved_password_asks_for_it_then_login_reco
 #[tokio::test]
 async fn an_action_cut_before_the_answer_is_unknown_and_never_replayed() {
     // Issue 1 : l'agent a exécuté pendant la coupure.
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     // L'agent retient l'action : « en cours » tant que le test ne la relâche pas.
     world.agent.hold_actions();
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let mut sent = tokio::spawn(async move { manager.execute_raw(&id, change_password()).await });
+    let mut sent = tokio::spawn(async move {
+        manager
+            .execute_act(&id, change_password(), Some(&password()))
+            .await
+    });
     support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     let mark = world.recorder.mark();
     world.proxy.cut();
@@ -680,12 +689,14 @@ async fn an_action_cut_before_the_answer_is_unknown_and_never_replayed() {
 
 #[tokio::test]
 async fn an_action_that_never_reached_the_agent_is_announced_as_not_executed() {
-    let world = World::connected(Options::silent_link().accepting_bare_acts()).await;
+    let world = World::connected(Options::silent_link().with_device_key()).await;
     // Trou noir : la requête part dans le vide, l'agent ne la reçoit jamais.
-    world.proxy.freeze();
+    // Les deux lectures qui précèdent l'acte (état de sécurité, défi) passent ; la requête de l'acte, la
+    // troisième connexion, part dans le vide.
+    world.proxy.freeze_from(world.proxy.accepted() + 3);
     let outcome = world
         .manager
-        .execute_raw(&world.id, change_password())
+        .execute_act(&world.id, change_password(), Some(&password()))
         .await
         .unwrap();
     let ActionOutcome::ResultUnknown { id: operation } = outcome else {
@@ -715,13 +726,17 @@ async fn an_action_that_never_reached_the_agent_is_announced_as_not_executed() {
 
 #[tokio::test]
 async fn an_action_interrupted_by_the_agent_stopping_stays_unknown() {
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     // Retenue pour de bon : l'agent « s'arrête » en pleine exécution, l'action ne finit jamais.
     world.agent.hold_actions();
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let mut sent = tokio::spawn(async move { manager.execute_raw(&id, change_password()).await });
+    let mut sent = tokio::spawn(async move {
+        manager
+            .execute_act(&id, change_password(), Some(&password()))
+            .await
+    });
     support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     let mark = world.recorder.mark();
     world.proxy.cut();
@@ -753,7 +768,7 @@ async fn an_action_interrupted_by_the_agent_stopping_stays_unknown() {
 
 #[tokio::test]
 async fn an_action_is_refused_without_sending_anything_when_the_link_is_not_connected() {
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     let mark = world.recorder.mark();
     world.proxy.cut();
     world
@@ -762,20 +777,27 @@ async fn an_action_is_refused_without_sending_anything_when_the_link_is_not_conn
         .await;
     let result = world
         .manager
-        .execute_raw(&world.id, change_password())
+        .execute_act(&world.id, change_password(), Some(&password()))
         .await;
     assert_eq!(result.unwrap_err(), LinkError::NotConnected);
 }
 
 #[tokio::test]
 async fn a_completed_action_returns_the_agent_answer_even_when_it_is_a_refusal() {
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     let wrong = ActionRequest {
         method: Method::Put,
         path: "/me/password".into(),
         body: Some(json!({ "current": "Not-The-Password-1", "password": "New-Password-12" })),
     };
-    match world.manager.execute_raw(&world.id, wrong).await.unwrap() {
+    // Le mot de passe de confirmation est le faux aussi : l'agent le refuse (422), comme à la connexion.
+    let bad = Secret::from("Not-The-Password-1");
+    match world
+        .manager
+        .execute_act(&world.id, wrong, Some(&bad))
+        .await
+        .unwrap()
+    {
         ActionOutcome::Completed { status, body, .. } => {
             assert_eq!(status, 422);
             assert_eq!(body["error"]["code"], "WRONG_PASSWORD");
@@ -784,7 +806,7 @@ async fn a_completed_action_returns_the_agent_answer_even_when_it_is_a_refusal()
     }
     match world
         .manager
-        .execute_raw(&world.id, change_password())
+        .execute_act(&world.id, change_password(), Some(&password()))
         .await
         .unwrap()
     {
@@ -822,12 +844,16 @@ async fn a_network_change_does_not_cut_a_healthy_stream() {
 
 #[tokio::test]
 async fn an_action_in_flight_is_not_made_unknown_by_a_network_change() {
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     world.agent.hold_actions();
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let mut sent = tokio::spawn(async move { manager.execute_raw(&id, change_password()).await });
+    let mut sent = tokio::spawn(async move {
+        manager
+            .execute_act(&id, change_password(), Some(&password()))
+            .await
+    });
     support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     world.net.set(&["10.8.0.2"]);
     // Le veilleur a LU la nouvelle liste (fait), et le flux a continué après (ordre des commandes de
@@ -848,13 +874,17 @@ async fn an_action_in_flight_is_not_made_unknown_by_a_network_change() {
 
 #[tokio::test]
 async fn an_abandoned_action_stays_tracked_and_its_outcome_is_announced() {
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     world.agent.hold_actions();
     let started = world.agent.verifications_started();
     let mark = world.recorder.mark();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let mut sent = tokio::spawn(async move { manager.execute_raw(&id, change_password()).await });
+    let mut sent = tokio::spawn(async move {
+        manager
+            .execute_act(&id, change_password(), Some(&password()))
+            .await
+    });
     support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     // L'appelant n'attend plus (fenêtre fermée, délai) : la requête est partie, elle reste suivie.
     sent.abort();
@@ -876,12 +906,16 @@ async fn an_abandoned_action_stays_tracked_and_its_outcome_is_announced() {
 
 #[tokio::test]
 async fn an_unknown_operation_survives_a_restart_of_the_application() {
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     world.agent.hold_actions();
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let mut sent = tokio::spawn(async move { manager.execute_raw(&id, change_password()).await });
+    let mut sent = tokio::spawn(async move {
+        manager
+            .execute_act(&id, change_password(), Some(&password()))
+            .await
+    });
     support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     world.proxy.cut();
     let ActionOutcome::ResultUnknown { id: operation } = sent.await.unwrap().unwrap() else {
@@ -975,13 +1009,17 @@ async fn a_stall_of_the_whole_machine_cannot_cut_the_link_of_a_scenario() {
     // la machine plus long le fait atteindre (mesuré : `execute` rend « résultat inconnu » sans que
     // l'action parte, état « Reconnexion »). La configuration par défaut des scénarios met donc tous
     // les délais hors d'atteinte : un arrêt de 1,2 s ne change rien.
-    let world = World::connected(Options::default().accepting_bare_acts()).await;
+    let world = World::connected(Options::default().with_device_key()).await;
     std::thread::sleep(ms(1_200));
     world.agent.hold_actions();
     let started = world.agent.verifications_started();
     let manager = world.manager.clone();
     let id = world.id.clone();
-    let mut sent = tokio::spawn(async move { manager.execute_raw(&id, change_password()).await });
+    let mut sent = tokio::spawn(async move {
+        manager
+            .execute_act(&id, change_password(), Some(&password()))
+            .await
+    });
     support::wait_started_or_returned(&world.agent, started, &mut sent).await;
     assert_eq!(world.state().state, LinkState::Connected);
     world.agent.release_actions();

@@ -44,7 +44,6 @@ tests/
 ├── fault_proxy.rs   → résilience de bout en bout (seuils divisés par 6) : coupures courtes, longues, redémarrage, agent réinstallé, sessions révoquée / expirée, actions coupées (trois issues), « Réessayer maintenant », réseau, réveil, gel, lien lent. Déterministe (HRT-12) : aucune assertion de vitesse, attentes sur des faits (états, événements, connexions reçues, action arrivée chez l'agent), seuils du lien hors d'atteinte quand le scénario n'en dépend pas, agent qui retient les actions (`hold_actions`)
 ├── tracking.rs      → suivi des actions sur disque, déconnexion contre fin de session, reprise après panique : transport et disque simulés, portes ouvertes par le test (`Disk::Gated`, `Gate`), jamais de durée ; `GUARD` = délai de garde
 ├── pinning.rs       → première prise de contact, épinglage, session, carnet, reprise après redémarrage, serveurs indépendants
-├── bench_guard.rs   → garde du banc (HRT-18 tranche 5) : le banc EXIGE la confirmation par défaut ; liste fermée des fichiers qui l'abaissent (`accepting_bare_acts`) et de leur nombre d'appels
 └── robustness.rs    → transport simulé aux réponses aléatoires et absurdes, des milliers d'itérations en temps virtuel : ni panique, ni blocage, état borné
 ```
 

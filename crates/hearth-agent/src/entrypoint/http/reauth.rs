@@ -242,9 +242,6 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
         Err(_) => return ApiError::invalid("body", "Corps de requête illisible").into_response(),
     };
     let sessions = state.app.sessions.clone();
-    // Lu seulement sous la porte des bancs d'essai : en production l'exigence est le défaut du service.
-    #[cfg(feature = "test-support")]
-    let required = sessions.reauth_required() || kind == ActKind::ReauthSetting;
     let client = ClientInfo {
         name: client_name(&parts.headers),
         addr: origin_of(&parts).addr().unwrap_or_default().to_owned(),
@@ -264,50 +261,6 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
         return ApiError::invalid("body", "Corps de requête illisible").into_response();
     };
     match reauth {
-        #[cfg(feature = "test-support")]
-        None if kind == ActKind::AccountPasswordOwn && !required => {
-            parts
-                .extensions
-                .insert(crate::application::sessions::Reauthenticated::unconfirmed());
-            // Client actuel : l'ancien mot de passe passe tout de même par les compteurs de la connexion
-            // (constat C3), puis le handler fait comme avant.
-            let Parsed::Own(request) = parsed else {
-                return next
-                    .run(Request::from_parts(parts, Body::from(bytes)))
-                    .await;
-            };
-            let work = tokio::spawn(
-                async move {
-                    sessions
-                        .confirm_password(
-                            caller.0.account.username.as_str(),
-                            Secret::from(request.current),
-                            &client,
-                            crate::domain::audit::AuditAction::OwnPassword,
-                        )
-                        .await
-                }
-                .in_current_span(),
-            );
-            let verified = match work.await {
-                Ok(Ok(verified)) => verified,
-                Ok(Err(error)) => return password_refusal(error),
-                Err(error) => return ApiError::internal(&error).into_response(),
-            };
-            parts
-                .extensions
-                .insert(PasswordConfirmed(Arc::new(verified)));
-            next.run(Request::from_parts(parts, Body::from(bytes)))
-                .await
-        }
-        #[cfg(feature = "test-support")]
-        None if !required => {
-            parts
-                .extensions
-                .insert(crate::application::sessions::Reauthenticated::unconfirmed());
-            next.run(Request::from_parts(parts, Body::from(bytes)))
-                .await
-        }
         None => too_old(),
         Some(reauth) => {
             // Changer son mot de passe : l'ancien mot de passe du corps est celui de la confirmation.

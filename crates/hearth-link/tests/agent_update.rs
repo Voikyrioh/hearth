@@ -17,10 +17,9 @@ use hearth_agent::domain::update::UpdateRecord;
 use hearth_link::domain::event::Event;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::state::{LinkState, Thresholds};
-use hearth_link::ports::Transport as _;
-use hearth_link::ports::transport::{ApiRequest, Method, Pin, Target};
+
+use hearth_link::ports::transport::Method;
 use hearth_link::{ActionOutcome, ActionRequest, LinkConfig, LinkError};
-use hearth_proto::api::sessions::LoginRequest;
 use hearth_proto::api::update::{UpdateOutcome, UpdateProgress, UpdateStep};
 use support::update_rig::{self, Rig, rig};
 use support::{Options, PASSWORD, SCALE, WAIT, World, never};
@@ -347,44 +346,56 @@ async fn an_ordinary_cut_with_the_same_thresholds_is_offline_at_once() {
 async fn a_read_only_account_sees_an_update_started_by_someone_else_and_every_connection_gets_the_current_step()
  {
     let rig = Arc::new(rig(true, true));
-    // Un autre administrateur lance la mise à jour par une session brute (sans confirmation) : le banc l'accepte.
-    let world = World::connected(
-        options(&rig, Role::ReadOnly, support::fast_config()).accepting_bare_acts(),
+    let world = World::connected(options(&rig, Role::ReadOnly, support::fast_config())).await;
+    // Un autre administrateur, avec son propre poste (sa clé, sa liaison), lance la mise à jour : un acte
+    // CONFIRMÉ, comme tous les autres.
+    world.agent.create_account("paul", Role::Admin).await;
+    let paul_dir = support::agent::tmp::tempdir().unwrap();
+    let paul = support::start_manager(
+        paul_dir.path(),
+        Arc::new(hearth_link::adapters::MemoryVault::new()),
+        Arc::new(support::ScriptedNet::new()),
+        Arc::new(support::JumpClock::new()),
+        support::fast_config(),
     )
     .await;
-    // Un autre administrateur lance la mise à jour, par sa propre session.
-    world.agent.create_account("paul", Role::Admin).await;
-    let transport = support::transport();
-    let target = Target {
-        host: "127.0.0.1".into(),
-        port: world.proxy.port(),
-        pin: Pin::Pinned(world.fingerprint),
-    };
-    let login = transport
-        .login(
-            &target,
-            &LoginRequest {
-                username: "paul".into(),
-                password: PASSWORD.into(),
-            },
-        )
+    let probe = paul.probe("127.0.0.1", world.proxy.port()).await.unwrap();
+    let paul_id = paul
+        .add_server(hearth_link::NewServer {
+            name: "Forge".into(),
+            color: "#7aa2f7".into(),
+            host: "127.0.0.1".into(),
+            port: world.proxy.port(),
+            fingerprint: probe.fingerprint,
+            mac_addresses: probe.hello.mac_addresses.clone(),
+        })
         .await
         .unwrap();
+    let paul_events = support::Recorder::spawn(paul.subscribe());
+    let paul_mark = paul_events.mark();
+    paul.login(&paul_id, "paul", Secret::from(PASSWORD), false)
+        .await
+        .unwrap();
+    paul_events
+        .wait_state(paul_mark, LinkState::Connected, WAIT)
+        .await;
     let mark = world.recorder.mark();
-    let reply = transport
-        .request(
-            &target,
-            &hearth_link::domain::secret::Secret::from(login.token.as_str()),
-            &ApiRequest {
+    let outcome = paul
+        .execute_act(
+            &paul_id,
+            ActionRequest {
                 method: Method::Post,
                 path: "/agent/update".into(),
                 body: Some(rig.request("0.2.0", BINARY)),
-                idempotency_key: None,
             },
+            Some(&Secret::from(PASSWORD)),
         )
         .await
         .unwrap();
-    assert_eq!(reply.status, 202);
+    let ActionOutcome::Completed { status, .. } = outcome else {
+        panic!("réponse attendue, reçu {outcome:?}");
+    };
+    assert_eq!(status, 202);
     world
         .recorder
         .wait_for(
