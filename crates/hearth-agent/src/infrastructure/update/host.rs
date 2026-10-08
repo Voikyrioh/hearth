@@ -547,6 +547,23 @@ pub fn systemd_run_arguments(supervisor: &Path, job: &Path) -> Vec<OsString> {
     arguments
 }
 
+/// Au démarrage du service : finit les `.erasing` laissés par une panne pendant l'effacement de la copie de la
+/// base de la mise à jour (`update/hearth.db.before.erasing`, son journal) : écrasés de zéros puis supprimés.
+/// Ne touche à rien d'autre : une copie encore sous son nom d'origine est celle d'un travail en cours.
+// FIX:01M4D6KNXEFG8DH4K9JXBJ98MA
+pub fn finish_interrupted_erasures(data_dir: &Path) {
+    let update = data_dir.join(UPDATE_DIR);
+    for name in [UPDATE_DB_BACKUP_FILE, UPDATE_WAL_BACKUP_FILE] {
+        let mut leftover = update.join(name).into_os_string();
+        leftover.push(ERASING_SUFFIX);
+        let leftover = PathBuf::from(leftover);
+        if leftover.symlink_metadata().is_ok() {
+            tracing::warn!(path = %leftover.display(), "effacement de la copie de la base interrompu : fini au démarrage");
+            finish_erasing(&leftover, &overwrite_with_zeros);
+        }
+    }
+}
+
 /// Efface une copie de la base : reprend d'abord un `.erasing` laissé par une panne, puis RENOMME la
 /// copie (un fichier de zéros ne porte jamais le nom que `restore_database` lit), l'écrase de zéros
 /// et la supprime. Un lien symbolique n'est jamais suivi : le lien est retiré, sa cible n'est pas
@@ -873,6 +890,26 @@ mod tests {
 
     /// L'ORDRE : au moment où l'écrasement s'exécute, la copie ne porte plus son nom d'origine (celui que
     /// la remise de la base lit) ; elle porte `.erasing`. Puis elle est supprimée.
+    /// FIX:01M4D6KNXEFG8DH4K9JXBJ98MA : au démarrage du service, un `.erasing` orphelin est fini (zéros puis
+    /// suppression) sans attendre la mise à jour suivante ; une copie sous son nom d'origine n'est pas touchée.
+    #[test]
+    fn an_orphan_erasing_file_is_finished_at_service_start_and_a_live_copy_is_left_alone() {
+        let (dir, _host) = host();
+        let update = dir.path().join("update");
+        fs::create_dir_all(&update).unwrap();
+        let marker = b"ancienne-empreinte-0123456789abcdef".repeat(500);
+        let orphan = update.join("hearth.db.before.erasing");
+        fs::write(&orphan, &marker).unwrap();
+        let link = update.join("orphan.link");
+        fs::hard_link(&orphan, &link).unwrap();
+        let live = update.join(UPDATE_DB_BACKUP_FILE);
+        fs::write(&live, b"copie d'un travail en cours").unwrap();
+        finish_interrupted_erasures(dir.path());
+        assert!(!orphan.exists());
+        assert!(fs::read(&link).unwrap().iter().all(|b| *b == 0));
+        assert_eq!(fs::read(&live).unwrap(), b"copie d'un travail en cours");
+    }
+
     #[test]
     fn the_copy_is_renamed_before_it_is_overwritten() {
         let (dir, _host) = host();

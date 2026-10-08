@@ -212,6 +212,7 @@ async fn the_peaks_of_the_agent_replace_the_means_in_the_hour_announced() {
         mem_used_bytes: 2,
         net: None,
         gpus: vec![],
+        temps: vec![],
     }];
     let world = World::connected(Options {
         hours: vec![response],

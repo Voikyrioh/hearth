@@ -16,6 +16,7 @@ use tokio::time::timeout;
 use zeroize::Zeroize;
 
 use super::{Deps, Shared, device};
+use crate::domain::history::PeaksFit;
 use crate::domain::pending_ops::{Lookup, OperationId};
 use crate::domain::secret::Secret;
 use crate::ports::transport::{Frame, StreamConn, TransportError};
@@ -89,6 +90,14 @@ fn upgrade_target(details: &serde_json::Value) -> UpgradeTarget {
         .unwrap_or(UpgradeTarget::Client)
 }
 
+const NOTE_ABSENT: u8 = 1;
+const NOTE_MISMATCH: u8 = 2;
+
+/// Vrai la PREMIÈRE fois qu'un bit est posé (un bit par genre de remarque, indépendants).
+fn first_note(noted: &std::sync::atomic::AtomicU8, bit: u8) -> bool {
+    noted.fetch_or(bit, std::sync::atomic::Ordering::SeqCst) & bit == 0
+}
+
 /// Lit l'heure écoulée (`GET /metrics/history?window=1h`) et ne garde que ce qui précède l'instantané. Hors de
 /// toute tentative de connexion : le lien est déjà « Connecté » et le direct coule ; la tâche du serveur la lance
 /// à part, bornée par `request_timeout`, et l'abandonne si le lien retombe. Un échec (agent sans la route, délai,
@@ -107,7 +116,23 @@ pub(crate) async fn read_hour(deps: &Deps, shared: &Shared, snapshot: &[Sample])
     .await;
     match read {
         Ok(Ok(response)) => {
-            // Les maxima de chaque pas à la place des moyennes : un pic d'une seconde reste visible.
+            // Les maxima de chaque pas à la place des moyennes : un pic d'une seconde reste visible. Quand ils
+            // manquent ou n'ont pas la bonne longueur, la courbe d'une heure montre les moyennes : c'est dit
+            // au journal, une fois par exécution et par serveur (pas à chaque reconnexion). Des maxima
+            // simplement ABSENTS sont le cas d'un agent plus ancien légitime : `info`. De mauvaise longueur,
+            // c'est un défaut : `warn`.
+            // FIX:01M4D6KNC8G4T68J25J7DXMMNM
+            match crate::domain::history::peaks_fit(&response.samples, &response.peaks) {
+                PeaksFit::Absent { samples } if first_note(&shared.peaks_noted, NOTE_ABSENT) => {
+                    tracing::info!(server = %id, samples, "l'agent ne rend pas les maxima de l'heure : la courbe d'une heure montre les moyennes");
+                }
+                PeaksFit::Mismatch { samples, peaks }
+                    if first_note(&shared.peaks_noted, NOTE_MISMATCH) =>
+                {
+                    tracing::warn!(server = %id, samples, peaks, "maxima de l'heure de longueur inattendue ignorés : la courbe d'une heure montre les moyennes");
+                }
+                _ => {}
+            }
             let samples = crate::domain::history::with_peaks(response.samples, &response.peaks);
             crate::domain::history::older_than_snapshot(samples, snapshot)
         }
@@ -403,5 +428,24 @@ mod tests {
             }),
             AttemptResult::Fingerprint { .. }
         ));
+    }
+}
+
+#[cfg(test)]
+mod peaks_note_tests {
+    use std::sync::atomic::AtomicU8;
+
+    use super::*;
+
+    #[test]
+    fn each_kind_of_remark_is_written_once_and_independently() {
+        let noted = AtomicU8::new(0);
+        assert!(first_note(&noted, NOTE_ABSENT));
+        assert!(!first_note(&noted, NOTE_ABSENT), "pas à chaque reconnexion");
+        assert!(
+            first_note(&noted, NOTE_MISMATCH),
+            "l'autre genre garde son tour"
+        );
+        assert!(!first_note(&noted, NOTE_MISMATCH));
     }
 }

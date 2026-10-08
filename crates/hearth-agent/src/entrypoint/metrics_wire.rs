@@ -90,6 +90,15 @@ pub fn peak(peak: &crate::domain::metrics::StepPeak) -> hearth_proto::api::metri
             .map(|gpu| hearth_proto::api::metrics::GpuPeak {
                 load_percent: gpu.load_percent,
                 memory_used_bytes: gpu.memory_used_bytes,
+                temp_c: gpu.temp_c,
+            })
+            .collect(),
+        temps: peak
+            .temps
+            .iter()
+            .map(|temp| hearth_proto::api::metrics::TempPeak {
+                label: temp.label.clone(),
+                celsius: temp.celsius,
             })
             .collect(),
     }

@@ -61,11 +61,63 @@ pub struct Database {
     pool: SqlitePool,
 }
 
+/// La base telle que le SERVICE l'obtient : ouverte par `Database::open_for_service`, qui a repris l'effacement
+/// physique des anciennes empreintes. Le câblage du service (`app::start_*`) n'accepte que ce type : il ne peut
+/// donc plus passer par `open` (l'effacement ne serait jamais repris et `erasure_pending` mentirait).
+/// FIX:01M4D6KNHSZ39EY28XEFAV722X
+#[derive(Debug, Clone)]
+pub struct ServiceDatabase {
+    database: Database,
+    /// L'effacement a échoué à cette ouverture et sera retenté au prochain démarrage du service.
+    erasure_pending: bool,
+}
+
+impl ServiceDatabase {
+    pub fn database(&self) -> &Database {
+        &self.database
+    }
+
+    pub fn pool(&self) -> &SqlitePool {
+        self.database.pool()
+    }
+
+    /// L'effacement physique des anciennes empreintes est en attente (échec à l'ouverture du service).
+    pub fn erasure_pending(&self) -> bool {
+        self.erasure_pending
+    }
+
+    /// Pour les bancs d'essai qui ouvrent eux-mêmes leur base (`Database::open`) : rien n'est repris, rien
+    /// n'est en attente. Jamais appelé par le code de production (`tests/service_database_guard.rs`).
+    pub fn adopt(database: Database) -> Self {
+        Self {
+            database,
+            erasure_pending: false,
+        }
+    }
+}
+
 impl Database {
     /// Ouvre `hearth.db` dans `data_dir` (créé au besoin) : mode WAL, clés étrangères actives,
     /// puis applique les migrations embarquées. Plusieurs processus peuvent ouvrir la même base :
     /// un écrivain attend l'autre (délai de 5 s).
     pub async fn open(data_dir: &Path) -> Result<Self, DatabaseError> {
+        Ok(Self::open_with(data_dir, false).await?.0)
+    }
+
+    /// Comme `open`, pour le DÉMARRAGE DU SERVICE : seul lui reprend l'effacement physique des anciennes
+    /// empreintes (`VACUUM`, point de contrôle). Les sous-commandes (`account revoke`, `attack-mode off`…)
+    /// ouvrent la base sans le retenter à chaque lancement.
+    // FIX:01M4D6KNHSZ39EY28XEFAV722X
+    pub async fn open_for_service(data_dir: &Path) -> Result<ServiceDatabase, DatabaseError> {
+        let database = Self::open_with(data_dir, true).await?;
+        Ok(ServiceDatabase {
+            erasure_pending: database.1,
+            database: database.0,
+        })
+    }
+
+    /// Ouvre la base ; rend aussi si l'effacement de reprise est resté en attente (jamais pour `scrub = false`).
+    async fn open_with(data_dir: &Path, scrub: bool) -> Result<(Self, bool), DatabaseError> {
         data_dir::ensure(data_dir).map_err(|source| DatabaseError::DataDir {
             path: data_dir.to_owned(),
             source,
@@ -106,8 +158,8 @@ impl Database {
         // Jamais bloquant : un point de contrôle retenu ou un `VACUUM` impossible (disque plein) ne
         // doivent pas mettre le serveur hors service. Avertissement, pas de marque, reprise au
         // démarrage suivant.
-        scrub_or_warn(&pool, &path).await;
-        Ok(Self { pool })
+        let erasure_pending = scrub && !scrub_or_warn(&pool, &path).await;
+        Ok((Self { pool }, erasure_pending))
     }
 
     pub fn pool(&self) -> &SqlitePool {
@@ -511,15 +563,19 @@ mod tests {
             .unwrap();
         writer.close().await;
 
-        let db = Database::open(dir.path()).await.expect("l'agent démarre");
+        let db = Database::open_for_service(dir.path())
+            .await
+            .expect("l'agent démarre");
         assert_eq!(user_version(db.pool()).await, 0, "pas de marque");
+        assert!(db.erasure_pending(), "l'effacement différé est signalé");
         db.pool().close().await;
 
         sqlx::query("ROLLBACK").execute(&mut *held).await.unwrap();
         drop(held);
         reader.close().await;
-        let db = Database::open(dir.path()).await.unwrap();
+        let db = Database::open_for_service(dir.path()).await.unwrap();
         assert_eq!(user_version(db.pool()).await, SCRUBBED_VERSION, "retenté");
+        assert!(!db.erasure_pending());
     }
 
     // Même règle pour un `VACUUM` impossible (disque plein, base en lecture seule).
@@ -540,5 +596,36 @@ mod tests {
             .unwrap();
         assert!(!scrub_or_warn(&read_only, &path).await);
         assert!(scrub_after_0008(&read_only).await.is_err());
+    }
+
+    // FIX:01M4D6KNHSZ39EY28XEFAV722X : seul le démarrage du service reprend l'effacement ; une sous-commande
+    // (`account revoke`, `attack-mode off`…) ouvre la base sans `VACUUM`.
+    #[tokio::test]
+    async fn only_the_service_start_retries_the_erasure_not_a_command_line_open() {
+        let dir = crate::infrastructure::data_dir::private_tempdir();
+        let path = dir.path().join(DATABASE_FILE);
+        let writer = raw_pool(&path).await;
+        let mut migrator = sqlx::migrate!("./migrations");
+        migrator.migrations = migrator
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 7)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        migrator.run(&writer).await.unwrap();
+        writer.close().await;
+
+        let command_line = Database::open(dir.path()).await.unwrap();
+        assert_eq!(
+            user_version(command_line.pool()).await,
+            0,
+            "aucun VACUUM, aucune marque"
+        );
+        command_line.pool().close().await;
+
+        let service = Database::open_for_service(dir.path()).await.unwrap();
+        assert_eq!(user_version(service.pool()).await, SCRUBBED_VERSION);
+        assert!(!service.erasure_pending());
     }
 }

@@ -18,6 +18,7 @@ use super::{ApiError, AppState, wire};
 use crate::application::attack_mode::AttackStatus;
 use crate::application::security::SecuritySnapshot;
 use crate::application::sessions::{AttackModeError, Reauthenticated};
+use crate::domain::accounts::Role;
 use crate::domain::trust::attack_mode::{Effective, EndHow};
 
 /// L'alerte que le client voit, depuis ce que le service sait.
@@ -92,6 +93,8 @@ pub async fn state(
             SessionDevice::None
         },
         admin_reauth,
+        // FIX:01M4D6KNQRS959ZRJ38TJBQE6N : l'effacement différé est visible de l'administrateur, pas seulement au journal.
+        erasure_pending: state.erasure_pending && caller.account.role == Role::Admin,
     }))
 }
 

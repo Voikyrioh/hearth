@@ -1324,6 +1324,104 @@ async fn the_history_windows_are_one_five_and_sixty_minutes() {
     }
 }
 
+/// FIX:01M4CY8BVM3MV9769QWNDNW7VT (suite, review r1 de la PR #48) : la ROUTE rend `peaks` sur l'heure, un
+/// maximum par échantillon ; elle n'en rend pas sur les fenêtres à une seconde. Rouge si elle cesse d'en rendre :
+/// le client retomberait en silence sur les moyennes.
+#[tokio::test]
+async fn the_hour_window_route_hands_back_one_peak_per_sample_and_short_windows_none() {
+    use std::sync::Arc;
+
+    use hearth_agent::application::metrics::MetricsService;
+    use hearth_agent::application::ports::MonotonicClock as _;
+    use support::probe::{FakeGpu, FakeSystem};
+    use time::Duration;
+
+    let env = env().await;
+    let metrics = Arc::new(MetricsService::new(
+        Arc::new(FakeSystem::default()),
+        Arc::new(FakeGpu),
+        env.clock.clone(),
+        env.monotonic.clone(),
+    ));
+    // Deux pas de 10 s pleins, un échantillon par seconde, temps piloté (aucune attente).
+    let start = env.monotonic.elapsed().whole_seconds();
+    env.monotonic
+        .advance(Duration::seconds(10 - start.rem_euclid(10)));
+    for _ in 0..20 {
+        metrics.sample_once().await.unwrap();
+        env.clock.advance(Duration::seconds(1));
+        env.monotonic.advance(Duration::seconds(1));
+    }
+    let mut state = support::api::state(&env);
+    state.metrics = metrics;
+    let api = Api::from_state(state);
+    let token = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
+
+    let hour = api
+        .get("/metrics/history?window=1h")
+        .token(&token)
+        .send()
+        .await;
+    assert_eq!(hour.status, StatusCode::OK, "{:?}", hour.body);
+    let samples = hour.body["samples"].as_array().unwrap();
+    let peaks = hour.body["peaks"]
+        .as_array()
+        .expect("la route rend `peaks`");
+    assert_eq!(samples.len(), 2);
+    assert_eq!(peaks.len(), samples.len(), "un maximum par échantillon");
+    for (mean, peak) in samples.iter().zip(peaks) {
+        assert!(peak["cpu"].as_f64().unwrap() >= mean["cpu"].as_f64().unwrap());
+        assert!(
+            peak["mem_used_bytes"].as_u64().unwrap() >= mean["mem"]["used_bytes"].as_u64().unwrap()
+        );
+    }
+    for window in ["1m", "5m"] {
+        let reply = api
+            .get(&format!("/metrics/history?window={window}"))
+            .token(&token)
+            .send()
+            .await;
+        assert_eq!(reply.status, StatusCode::OK, "{window}");
+        assert!(
+            !reply.body["samples"].as_array().unwrap().is_empty(),
+            "{window}"
+        );
+        assert!(
+            reply.body.get("peaks").is_none(),
+            "{window} : à une seconde, pas de maxima"
+        );
+    }
+}
+
+/// FIX:01M4D6KNQRS959ZRJ38TJBQE6N : l'effacement différé des anciennes empreintes se lit dans l'état de l'agent,
+/// pour l'administrateur seulement ; absent quand rien n'est en attente.
+#[tokio::test]
+async fn a_deferred_erasure_is_told_to_administrators_only_and_absent_otherwise() {
+    let env = env().await;
+    let calm = Api::new(&env);
+    let admin = env.account_with_token(&calm, "marie", Role::Admin).await;
+    let reply = calm.get("/security").token(&admin).send().await;
+    assert!(
+        reply.body.get("erasure_pending").is_none(),
+        "rien en attente : champ absent"
+    );
+
+    let mut state = support::api::state(&env);
+    state.erasure_pending = true;
+    let pending = Api::from_state(state);
+    let readonly = env
+        .account_with_token(&pending, "lucas", Role::ReadOnly)
+        .await;
+    let admin = env.account_with_token(&pending, "chef", Role::Admin).await;
+    let seen = pending.get("/security").token(&admin).send().await;
+    assert_eq!(seen.body["erasure_pending"], true);
+    let hidden = pending.get("/security").token(&readonly).send().await;
+    assert!(
+        hidden.body.get("erasure_pending").is_none(),
+        "jamais pour un compte lecture seule"
+    );
+}
+
 #[tokio::test]
 async fn the_machine_routes_check_the_interface_version_like_the_others() {
     let env = env().await;

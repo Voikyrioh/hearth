@@ -8,5 +8,5 @@ mod minisign;
 
 pub use download::HttpsDownloader;
 pub use feed::BroadcastUpdateFeed;
-pub use host::{FsUpdateHost, Launcher, SUPERVISOR_UNIT};
+pub use host::{FsUpdateHost, Launcher, SUPERVISOR_UNIT, finish_interrupted_erasures};
 pub use minisign::{EMBEDDED_PUBLIC_KEY, MinisignVerifier};

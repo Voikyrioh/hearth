@@ -9,6 +9,7 @@ use hearth_agent::app::{self, Adapters, Metering, RunningAgent};
 use hearth_agent::infrastructure::config::AgentConfig;
 use hearth_agent::infrastructure::ids::UlidGen;
 use hearth_agent::infrastructure::random::OsTokenGen;
+use hearth_agent::infrastructure::sqlite::ServiceDatabase;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, ring};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -127,9 +128,16 @@ pub async fn start_booted(
         tokens: Arc::new(OsTokenGen),
     };
     let updating = hearth_agent::app::Updating::production(&config).expect("mise à jour");
-    let running = app::start_full(&config, &env.db, &adapters, metering, updating, boot)
-        .await
-        .expect("démarrage");
+    let running = app::start_full(
+        &config,
+        &ServiceDatabase::adopt(env.db.clone()),
+        &adapters,
+        metering,
+        updating,
+        boot,
+    )
+    .await
+    .expect("démarrage");
     let addr = running.server.local_addr();
     Agent { running, addr }
 }
@@ -154,9 +162,24 @@ pub async fn start_updating(
     };
     let running = match updating {
         Some(updating) => {
-            app::start_with_all(&config, &env.db, &adapters, metering, updating).await
+            app::start_with_all(
+                &config,
+                &ServiceDatabase::adopt(env.db.clone()),
+                &adapters,
+                metering,
+                updating,
+            )
+            .await
         }
-        None => app::start_with_metering(&config, &env.db, &adapters, metering).await,
+        None => {
+            app::start_with_metering(
+                &config,
+                &ServiceDatabase::adopt(env.db.clone()),
+                &adapters,
+                metering,
+            )
+            .await
+        }
     }
     .expect("démarrage");
     let addr = running.server.local_addr();
