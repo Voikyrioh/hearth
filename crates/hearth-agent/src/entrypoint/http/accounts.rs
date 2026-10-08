@@ -15,6 +15,7 @@ use hearth_proto::api::accounts::{
 use super::auth::{Caller, Requester};
 use super::reauth::PasswordConfirmed;
 use super::{ApiError, AppState, wire};
+use crate::application::sessions::Reauthenticated;
 use crate::domain::accounts::AccountId;
 use crate::domain::secret::Secret;
 
@@ -39,6 +40,7 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<AccountsResponse
 /// `POST /api/v1/accounts` : crée un compte.
 pub async fn create(
     State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
     Requester(by): Requester,
     body: Result<Json<CreateAccountRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<AccountItem>), ApiError> {
@@ -58,6 +60,7 @@ pub async fn create(
 /// `PATCH /api/v1/accounts/{id}` : change le rôle (jamais celui du dernier administrateur).
 pub async fn change_role(
     State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
     Requester(by): Requester,
     Path(id): Path<String>,
     body: Result<Json<ChangeRoleRequest>, JsonRejection>,
@@ -74,6 +77,7 @@ pub async fn change_role(
 /// propre compte retape son identifiant (`confirmation`, BR-ACCT-012).
 pub async fn delete(
     State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
     Caller(caller): Caller,
     Requester(by): Requester,
     Path(id): Path<String>,
@@ -101,6 +105,7 @@ pub async fn delete(
 /// ses sessions sont fermées (BR-ACCT-008).
 pub async fn set_password(
     State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
     Requester(by): Requester,
     Path(id): Path<String>,
     body: Result<Json<SetPasswordRequest>, JsonRejection>,
@@ -116,6 +121,7 @@ pub async fn set_password(
 /// `DELETE /api/v1/accounts/{id}/sessions` : ferme toutes les sessions du compte (BR-ACCT-011).
 pub async fn revoke_sessions(
     State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
     Requester(by): Requester,
     Path(id): Path<String>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
@@ -132,6 +138,7 @@ pub async fn revoke_sessions(
 /// marque, la route ne change rien.
 pub async fn change_own_password(
     State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
     Caller(caller): Caller,
     Requester(by): Requester,
     confirmed: Option<Extension<PasswordConfirmed>>,

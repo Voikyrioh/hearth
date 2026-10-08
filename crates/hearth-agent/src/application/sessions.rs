@@ -227,7 +227,7 @@ struct ReauthInner {
     /// Le haché du mot de passe réellement vérifié par le chemin de la connexion ; `None` sous élévation.
     verified: Option<Secret>,
     /// Tient le défi pendant l'acte (il est déjà retenu comme consommé : voir `reauthenticate`).
-    _reservation: InFlight,
+    _reservation: Option<InFlight>,
 }
 
 /// Un acte confirmé : le mot de passe (ou l'élévation) et la preuve de clé ont été vérifiés, et le défi
@@ -237,6 +237,17 @@ struct ReauthInner {
 pub struct Reauthenticated(Arc<ReauthInner>);
 
 impl Reauthenticated {
+    /// Le marqueur d'un acte accepté SANS confirmation, posé par la couche `reauth` pour les seuls bancs
+    /// d'essai qui baissent l'exigence. Derrière la fonction cargo `test-support` : un binaire de production
+    /// ne le contient pas, et aucun handler d'acte ne travaille sans ce type (BR-TRUST-045).
+    #[cfg(feature = "test-support")]
+    pub fn unconfirmed() -> Self {
+        Self(Arc::new(ReauthInner {
+            verified: None,
+            _reservation: None,
+        }))
+    }
+
     /// Le haché du mot de passe vérifié, `None` si l'élévation a tenu lieu de mot de passe.
     pub fn verified_hash(&self) -> Option<&Secret> {
         self.0.verified.as_ref()
@@ -1167,7 +1178,7 @@ impl SessionService {
             }
             Ok(Reauthenticated(Arc::new(ReauthInner {
                 verified,
-                _reservation: reservation,
+                _reservation: Some(reservation),
             })))
         };
         // Pendant le mode attaque (actif ou suspendu), aucune élévation n'existe.

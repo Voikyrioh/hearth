@@ -103,6 +103,7 @@ pub async fn set_attack_mode(
     State(state): State<AppState>,
     Caller(caller): Caller,
     Requester(by): Requester,
+    _confirmed: Extension<Reauthenticated>,
     body: Result<Json<SetAttackModeRequest>, JsonRejection>,
 ) -> Result<Json<AttackModeInfo>, ApiError> {
     let Json(request) = body?;
@@ -135,13 +136,10 @@ pub async fn set_reauth(
     ClientAddr(addr): ClientAddr,
     Caller(caller): Caller,
     Requester(by): Requester,
-    confirmed: Option<Extension<Reauthenticated>>,
+    _confirmed: Extension<Reauthenticated>,
     body: Result<Json<SetReauthRequest>, JsonRejection>,
 ) -> Result<Json<AdminReauthInfo>, ApiError> {
     let Json(request) = body?;
-    if confirmed.is_none() {
-        return Err(ApiError::internal(&"réglage sans confirmation"));
-    }
     state
         .sessions
         .set_reauth_mode(&caller.account, request.password, &by)

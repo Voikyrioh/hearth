@@ -159,3 +159,52 @@ fn only_dev_dependencies_of_the_workspace_members_ask_for_the_test_support_featu
             .unwrap();
     assert!(!root.contains("test-support"), "racine du workspace");
 }
+
+/// Défense en profondeur (HRT-18 tranche 5) : la couche `reauth` n'est pas la seule garde d'un acte. Le
+/// handler de CHAQUE route de la liste fermée des actes (`hearth_proto::admin_act::ROUTES`) prend
+/// `Extension<Reauthenticated>` dans sa signature : sans la confirmation posée par la couche (ou, sous la
+/// porte des bancs d'essai, son marqueur `unconfirmed`), il ne s'exécute pas.
+#[test]
+fn every_act_route_handler_takes_the_reauthenticated_extension_in_its_signature() {
+    let http = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/entrypoint/http");
+    let table = std::fs::read_to_string(http.join("mod.rs")).unwrap();
+    let mut checked = 0;
+    // Le retrait d'un poste garde son contrat livré (`0x04`) et sa propre garde : hors de cette liste.
+    let acts = || {
+        hearth_proto::admin_act::ROUTES
+            .iter()
+            .filter(|route| route.contract == hearth_proto::admin_act::Contract::Reauth)
+    };
+    for route in acts() {
+        // Le bloc `Endpoint { … }` de cette route (méthode puis chemin).
+        let block = table
+            .split("Endpoint {")
+            .find(|block| {
+                block.contains(&format!("path: \"{}\"", route.pattern))
+                    && block.contains(&format!("method: Method::{}", route.method))
+            })
+            .unwrap_or_else(|| panic!("route absente de ENDPOINTS : {route:?}"));
+        let handler = block
+            .split("route: || ")
+            .nth(1)
+            .and_then(|rest| rest.split('(').nth(1))
+            .and_then(|rest| rest.split(')').next())
+            .unwrap_or_else(|| panic!("handler illisible : {route:?}"));
+        let (module, name) = handler.split_once("::").unwrap();
+        let source = std::fs::read_to_string(http.join(format!("{module}.rs"))).unwrap();
+        let signature = source
+            .split(&format!("pub async fn {name}("))
+            .nth(1)
+            .and_then(|rest| rest.split(") ->").next())
+            .unwrap_or_else(|| panic!("signature introuvable : {handler}"));
+        assert!(
+            signature.contains("Extension<") && signature.contains("Reauthenticated>"),
+            "le handler {handler} ({} {}) ne prend pas `Extension<Reauthenticated>` : {signature}",
+            route.method,
+            route.pattern
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, acts().count());
+    assert!(checked >= 9, "la liste des actes est lue en entier");
+}
