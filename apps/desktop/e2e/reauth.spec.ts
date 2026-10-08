@@ -167,7 +167,7 @@ test("poste sans clé : rien ne part, l'écran dit quoi faire et propose de se r
   await shoot(page, "reauth-sans-cle");
 });
 
-test("agent d'avant la confirmation : aucune demande en plus, tout part comme avant", async ({
+test("agent qui n'annonce pas la confirmation : aucun acte, la fenêtre dit de mettre l'agent à jour", async ({
   page,
 }) => {
   await page.goto("/?nodev#/servers/forge/accounts");
@@ -176,14 +176,14 @@ test("agent d'avant la confirmation : aucune demande en plus, tout part comme av
     .getByRole("button", { name: /^Supprimer/ })
     .click();
   const open = dialog(page);
-  // L'agent ne demande rien : le bouton s'allume sans mot de passe, il n'y a pas de champ.
-  await expect(open.getByRole("button", { name: "Supprimer", exact: true })).not.toHaveAttribute(
+  // Comme la liaison : aucun acte ne part, ni champ ni bouton d'envoi, l'écran le dit.
+  await expect(open.locator("[data-reauth-agent-old]")).toContainText("Mets à jour l'agent");
+  await expect(open.getByLabel("Ton mot de passe")).toHaveCount(0);
+  await expect(open.getByRole("button", { name: "Supprimer", exact: true })).toHaveAttribute(
     "aria-disabled",
     "true",
   );
-  await expect(open.getByLabel("Ton mot de passe")).toHaveCount(0);
-  await open.getByRole("button", { name: "Supprimer", exact: true }).click();
-  await expect(page.locator(".toast")).toContainText("Compte lea supprimé");
+  expect((await calls(page)).filter((call) => call.startsWith("account delete"))).toHaveLength(0);
 });
 
 test("page Sécurité : la ligne « Demander mon mot de passe » se lit et se change avec le mot de passe", async ({

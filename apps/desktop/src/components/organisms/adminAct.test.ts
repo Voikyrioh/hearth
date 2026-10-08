@@ -184,7 +184,7 @@ describe("AdminActDialog", () => {
     wrapper.unmount();
   });
 
-  it("asks nothing more from an agent from before the confirmation, and sends the act as it always did", async () => {
+  it("says to update an agent that does not announce the confirmation, and sends nothing", async () => {
     const ctx = await startedApp();
     ctx.bridge.reauth.setSupported("forge", false);
     const perform = vi.fn(async (): Promise<ActReport> => ({ kind: "done" }));
@@ -203,9 +203,12 @@ describe("AdminActDialog", () => {
     await flushPromises();
     expect(reauthField()).toBeNull();
     expect(document.querySelector("[data-reauth-elevated]")).toBeNull();
+    expect(document.querySelector("[data-reauth-agent-old]")?.textContent).toContain(
+      "Mets à jour l'agent",
+    );
     dialogButton("Fermer")?.click();
     await flushPromises();
-    expect(perform).toHaveBeenCalledWith(null);
+    expect(perform).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 

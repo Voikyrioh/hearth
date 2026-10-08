@@ -182,30 +182,11 @@ pub enum AttackModeError {
     /// Un compte qui ne gère pas les comptes.
     #[error("Seul un administrateur peut changer le mode attaque")]
     Forbidden,
-    /// Aucune preuve de clé n'accompagne la requête.
-    #[error("Aucune preuve de clé n'accompagne la requête")]
-    ProofMissing,
-    /// La preuve n'est pas celle d'une clé inscrite du compte, pour ce geste.
-    #[error("La preuve de la clé de ce poste est invalide")]
-    ProofInvalid,
-    /// Le mot de passe est refusé par le chemin de la connexion (mêmes compteurs, même ralentissement).
-    #[error(transparent)]
-    Password(Box<LoginError>),
     /// L'agent n'a pas le mode attaque (sans identité d'appareil).
     #[error("Le mode attaque n'est pas disponible")]
     Unavailable,
     #[error(transparent)]
     Store(#[from] StoreError),
-}
-
-impl From<AttackProofError> for AttackModeError {
-    fn from(error: AttackProofError) -> Self {
-        match error {
-            AttackProofError::Missing => Self::ProofMissing,
-            AttackProofError::Invalid => Self::ProofInvalid,
-            AttackProofError::Store(error) => Self::Store(error),
-        }
-    }
 }
 
 /// Pourquoi la confirmation d'un acte d'administration est refusée (HRT-28, BR-TRUST-036, 040). Aucune
@@ -246,7 +227,7 @@ struct ReauthInner {
     /// Le haché du mot de passe réellement vérifié par le chemin de la connexion ; `None` sous élévation.
     verified: Option<Secret>,
     /// Tient le défi pendant l'acte (il est déjà retenu comme consommé : voir `reauthenticate`).
-    _reservation: InFlight,
+    _reservation: Option<InFlight>,
 }
 
 /// Un acte confirmé : le mot de passe (ou l'élévation) et la preuve de clé ont été vérifiés, et le défi
@@ -256,6 +237,17 @@ struct ReauthInner {
 pub struct Reauthenticated(Arc<ReauthInner>);
 
 impl Reauthenticated {
+    /// Le marqueur d'un acte accepté SANS confirmation, posé par la couche `reauth` pour les seuls bancs
+    /// d'essai qui baissent l'exigence. Derrière la fonction cargo `test-support` : un binaire de production
+    /// ne le contient pas, et aucun handler d'acte ne travaille sans ce type (BR-TRUST-045).
+    #[cfg(feature = "test-support")]
+    pub fn unconfirmed() -> Self {
+        Self(Arc::new(ReauthInner {
+            verified: None,
+            _reservation: None,
+        }))
+    }
+
     /// Le haché du mot de passe vérifié, `None` si l'élévation a tenu lieu de mot de passe.
     pub fn verified_hash(&self) -> Option<&Secret> {
         self.0.verified.as_ref()
@@ -1144,64 +1136,6 @@ impl SessionService {
         Ok(())
     }
 
-    /// Active ou désactive le mode attaque : **un acte d'administration** (Q14 point 3, Q16). Un
-    /// administrateur, la preuve de possession d'une clé INSCRITE pour son compte (usage `0x03`, liée au
-    /// jeton et à la valeur demandée) ET son mot de passe actuel, par le chemin de la connexion (mêmes
-    /// compteurs, même ralentissement).
-    ///
-    /// Ordre : (1) le rôle ; (2) la preuve, **avant** tout mot de passe : une session volée ne devine
-    /// rien ; (3) le mot de passe ; (4) le changement, dans une transaction avec son entrée de journal ;
-    /// (5) le défi n'est consommé que si le changement a réussi. Sans preuve valide, rien n'est écrit.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn set_attack_mode(
-        &self,
-        session: &CurrentSession,
-        token: &str,
-        active: bool,
-        password: Secret,
-        proof: Option<&DeviceProof>,
-        client: &ClientInfo,
-        by: &Actor,
-    ) -> Result<AttackStatus, AttackModeError> {
-        let (Some(trust), Some(attack)) = (self.trust.as_ref(), self.attack.as_ref()) else {
-            return Err(AttackModeError::Unavailable);
-        };
-        if !session.account.role.can_manage_accounts() {
-            return Err(AttackModeError::Forbidden);
-        }
-        let token_hash = SessionToken::parse(token)
-            .map_err(|_| AttackModeError::ProofInvalid)?
-            .hash();
-        let key = trust
-            .verify_attack_mode(
-                &session.account.id,
-                session.account.username.as_str(),
-                token_hash.as_bytes(),
-                active,
-                proof,
-                &client.addr,
-            )
-            .await?;
-        self.confirm_password_proven(
-            session.account.username.as_str(),
-            password,
-            client,
-            Some(key.clone()),
-            Purpose::Confirmation(if active {
-                AuditAction::AttackModeEnable
-            } else {
-                AuditAction::AttackModeDisable
-            }),
-        )
-        .await
-        .map_err(|error| AttackModeError::Password(Box::new(error)))?;
-        let status = self.change_attack_mode(attack, active, by).await?;
-        // Le retour de `consume` est ignoré à dessein : le changement est fait, un défi déjà pris par une
-        // requête concurrente n'ouvre plus rien (l'acte est idempotent).
-        trust.consume(&session.account.id, &key);
-        Ok(status)
-    }
-
     /// Confirme un acte d'administration (HRT-28, BR-TRUST-036, 039, 040, 041, 043) : la preuve de
     /// possession d'une clé inscrite du compte, liée à l'acte reconstruit, **puis** le mot de passe, par
     /// le chemin de la connexion (mêmes compteurs, même ralentissement), sauf élévation en cours.
@@ -1244,7 +1178,7 @@ impl SessionService {
             }
             Ok(Reauthenticated(Arc::new(ReauthInner {
                 verified,
-                _reservation: reservation,
+                _reservation: Some(reservation),
             })))
         };
         // Pendant le mode attaque (actif ou suspendu), aucune élévation n'existe.

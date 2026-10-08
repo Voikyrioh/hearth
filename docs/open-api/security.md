@@ -34,13 +34,13 @@ Voir [stream](./stream.md) : `{"type":"security","alert":{…},"attack_mode":{�
 
 ## `PUT /api/v1/security/attack-mode`
 
-Active ou désactive le mode attaque. **Administrateur** (`Access::Admin`), suivie par clé d'opération. **Un acte d'administration** (Q14 point 3, Q16) : le corps porte le mot de passe actuel ET la preuve de possession d'une clé **inscrite pour le compte appelant** ; activer comme désactiver (BR-TRUST-018, 028).
+Active ou désactive le mode attaque. **Administrateur** (`Access::Admin`), suivie par clé d'opération. **Un acte d'administration** (Q14 point 3, Q16) : le contrat commun des actes, voir « Confirmation des actes d'administration » ci-dessous. Le corps porte le geste et le membre `reauth` (mot de passe actuel ET preuve de possession d'une clé **inscrite pour le compte appelant**, usage `0x05`) ; activer comme désactiver (BR-TRUST-018, 028). Il n'existe plus de forme à plat (mot de passe et preuve dans le corps, usage `0x03`, défi `attack_mode`) : elle a été retirée avant toute publication (HRT-18 tranche 5, ADR-0033).
 
 ```json
-{ "active": true, "password": "…", "device": { "algorithm": "ed25519", "public_key": "…", "challenge": "…", "signature": "…" } }
+{ "active": true, "reauth": { "password": "…", "device": { "algorithm": "ed25519", "public_key": "…", "challenge": "…", "signature": "…" } } }
 ```
 
-La preuve : `POST /sessions/challenge` avec `purpose: "attack_mode"`, puis signature d'usage `0x03` liée à l'empreinte du certificat du serveur, à l'identifiant, au **hachage du jeton** de la session appelante et à la **valeur demandée** (`0x01` activer, `0x00` désactiver) : une preuve d'activation ne désactive pas, et inversement. Défi de 60 secondes, usage unique, consommé seulement si le changement a réussi (un mot de passe faux ne brûle pas la preuve). Détail des octets : `hearth_proto::device_proof`.
+La preuve : `POST /sessions/challenge` avec `purpose: "admin_act"`, signature d'usage `0x05` liée à l'acte `AttackMode { enable }` (activer et désactiver ne se confondent pas) et au hachage du jeton. Défi de 60 secondes, usage unique, consommé seulement si le changement a réussi. Détail des octets : `hearth_proto::device_proof`.
 
 ### Réponse `200`
 L'objet `attack_mode` ci-dessus (état après le changement). Idempotente : activer un mode actif, désactiver un mode éteint ne change rien et n'écrit rien.
@@ -50,6 +50,7 @@ L'objet `attack_mode` ci-dessus (état après le changement). Idempotente : acti
 |---|---|
 | `401 UNAUTHENTICATED` / `SESSION_EXPIRED` | pas de jeton ; en mode attaque, session présentée seule (BR-TRUST-013) |
 | `403 FORBIDDEN_ROLE` | compte Lecture seule (« Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs. »), consigné « refusé » sous `attack_mode.enable` ou `attack_mode.disable` (le geste demandé) |
+| `426 INCOMPATIBLE_VERSION` | pas de membre `reauth` (`details.reason: reauth_required`, `details.upgrade: client`) : rien n'est fait, aucun mot de passe n'est essayé |
 | `409 POST_NOT_RECOGNIZED` | pas de preuve valide d'une clé inscrite pour le compte appelant ; `details.field = "device"`, `details.reason` : `proof_missing` (aucune preuve, ou illisible) ou `proof_invalid` (périmée, rejouée, d'un autre usage ou de l'autre geste, d'un autre jeton, clé non inscrite ou d'un autre compte). Aucune écriture d'état ; **aucun mot de passe n'est essayé** |
 | `422 WRONG_PASSWORD` | mot de passe actuel faux : compté comme un échec de connexion (mêmes compteurs, même ralentissement) |
 | `429 TOO_MANY_ATTEMPTS` | attente du compteur du couple, de l'adresse ou de l'identifiant (`details.retry_after_s`) |
@@ -61,7 +62,7 @@ Un administrateur dont le client n'a pas de clé inscrite (client ancien, poste 
 
 `409 POST_NOT_RECOGNIZED` n'est rendu **que par cette route**, à un administrateur déjà authentifié. Une connexion bloquée par le mode attaque n'en reçoit jamais : elle reçoit le refus d'un mot de passe faux (le journal, lui, dit « mode attaque : poste non reconnu »).
 
-Depuis HRT-28, cette route accepte **aussi** le contrat commun des actes (membre `reauth`, usage `0x05`, voir « Confirmation des actes d'administration » ci-dessous) : la clé exigée est la même (une clé inscrite du compte), les réponses sont celles ci-dessus. La forme à plat (usage `0x03`) reste acceptée pour les clients livrés.
+La clé exigée est une clé inscrite du compte appelant ; les réponses sont celles ci-dessus.
 
 ## Confirmation des actes d'administration (HRT-28, ADR-0031, ADR-0032)
 
@@ -103,4 +104,4 @@ Mode attaque (HRT-25), voir [journal](./audit.md) : `attack_mode.enable`, `attac
 
 ## Côté client (HRT-26)
 
-Le client lit le message de flux `security` (jamais un `ServerMessage`), relit `GET /security` à chaque retour du lien et au chargement de la page Sécurité, et appelle `PUT /security/attack-mode` par la commande typée `set_attack_mode(server_id, active, password)` : la liaison demande le défi `attack_mode`, signe avec la clé du coffre (usage `0x03`, liée au jeton et au geste) et joint le mot de passe. Sans clé au coffre, rien n'est envoyé (ni défi ni écriture). Le client ne déduit jamais le geste d'une entrée de journal. ADR-0029, BR-TRUST-009, 010, 029, 033.
+Le client lit le message de flux `security` (jamais un `ServerMessage`), relit `GET /security` à chaque retour du lien et au chargement de la page Sécurité, et appelle `PUT /security/attack-mode` par la commande typée `set_attack_mode(server_id, active, password)` : la liaison demande le défi `admin_act`, signe avec la clé du coffre (usage `0x05`, liée au jeton et à l'acte) et joint le mot de passe dans `reauth`. Sans clé au coffre, rien n'est envoyé (ni défi ni écriture). Le client ne déduit jamais le geste d'une entrée de journal. ADR-0029, BR-TRUST-009, 010, 029, 033.

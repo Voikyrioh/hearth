@@ -764,30 +764,19 @@ async fn when_the_agent_requires_the_confirmation_an_act_without_reauth_is_told_
             .json(&body)
             .send()
             .await;
-        if matches!(kind, ActKind::AttackModeEnable | ActKind::AttackModeDisable) {
-            // Le mode attaque garde sa forme à plat (usage `0x03`), aussi stricte : sans preuve, refus.
-            assert_refused_with(
-                &reply,
-                StatusCode::CONFLICT,
-                "POST_NOT_RECOGNIZED",
-                "proof_missing",
-                &format!("{kind:?}"),
-            );
-        } else {
-            assert_eq!(
-                reply.status,
-                StatusCode::UPGRADE_REQUIRED,
-                "{kind:?} : {:?}",
-                reply.body
-            );
-            assert_eq!(reply.code(), "INCOMPATIBLE_VERSION");
-            assert_eq!(reply.body["error"]["details"]["upgrade"], "client");
-            assert_eq!(reason(&reply), "reauth_required");
-            assert!(
-                b.entries(kind, "denied", "confirmation absente").await >= 1,
-                "{kind:?}"
-            );
-        }
+        assert_eq!(
+            reply.status,
+            StatusCode::UPGRADE_REQUIRED,
+            "{kind:?} : {:?}",
+            reply.body
+        );
+        assert_eq!(reply.code(), "INCOMPATIBLE_VERSION");
+        assert_eq!(reply.body["error"]["details"]["upgrade"], "client");
+        assert_eq!(reason(&reply), "reauth_required");
+        assert!(
+            b.entries(kind, "denied", "confirmation absente").await >= 1,
+            "{kind:?}"
+        );
         assert_eq!(b.snapshot().await, before, "{kind:?} : rien n'a changé");
     }
 }
@@ -1505,57 +1494,17 @@ async fn the_hash_verified_by_the_confirmation_is_the_one_the_password_change_re
     );
 }
 
-#[tokio::test]
-async fn the_flat_attack_mode_closes_the_elevations_when_it_turns_on() {
-    let b = bench().await;
-    open_as(&b, "flat-ouverte").await;
-    assert!(!b.env.elevations.is_empty());
-    let body = support::device::attack_mode_body(
-        &b.api,
-        &b.marie.key,
-        "marie",
-        &b.marie.token,
-        true,
-        PASSWORD,
-    )
-    .await;
-    let reply = b
-        .api
-        .put("/security/attack-mode")
-        .token(&b.marie.token)
-        .json(&body)
-        .send()
-        .await;
-    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
-    assert!(b.env.elevations.is_empty(), "forme à plat");
-}
-
 async fn open_as(b: &Bench, name: &str) {
     let reply = b.act(&b.marie, &readonly_account(name), PASSWORD).await;
     assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
 }
 
 #[tokio::test]
-async fn a_wrong_password_on_a_flat_form_closes_the_elevation_too() {
+async fn a_wrong_password_on_the_attack_mode_closes_the_elevation_too() {
     let b = bench().await;
     open_as(&b, "ouverte").await;
     assert!(!b.env.elevations.is_empty());
-    let body = support::device::attack_mode_body(
-        &b.api,
-        &b.marie.key,
-        "marie",
-        &b.marie.token,
-        true,
-        WRONG,
-    )
-    .await;
-    let reply = b
-        .api
-        .put("/security/attack-mode")
-        .token(&b.marie.token)
-        .json(&body)
-        .send()
-        .await;
+    let reply = b.act(&b.marie, &Spec::Attack { enable: true }, WRONG).await;
     assert_eq!(reply.code(), "WRONG_PASSWORD");
     assert!(b.env.elevations.is_empty());
 }
@@ -1732,9 +1681,6 @@ async fn rescue_with_the_attack_mode_on_and_no_key_the_real_attack_mode_off_comm
 async fn an_old_client_is_refused_on_every_act_with_the_typed_error_and_keeps_its_reads() {
     let b = bench().await;
     for kind in ActKind::ALL {
-        if matches!(kind, ActKind::AttackModeEnable | ActKind::AttackModeDisable) {
-            continue; // forme à plat tolérée : voir `when_the_agent_requires_...`
-        }
         let spec = b.spec(kind).await;
         let who = b.actor_for(kind);
         let (method, path, body) = spec.request(PASSWORD);

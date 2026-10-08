@@ -55,7 +55,7 @@ pub enum AdminActKindDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ReauthStateDto {
-    /// L'agent annonce la confirmation des actes. Faux : agent d'avant, aucune demande en plus.
+    /// L'agent annonce la confirmation des actes. Faux : aucun acte ne lui part (agent à mettre à jour).
     pub supported: bool,
     /// L'agent l'exige (faux tant qu'il ne fait que l'accepter).
     pub required: bool,

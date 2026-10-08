@@ -12,7 +12,7 @@ import { useToastsStore } from "@/stores/toasts";
 // Ligne de réglage « Demander mon mot de passe » de la page Sécurité (HRT-30, D2, Q19) : « Toutes les
 // 5 minutes » (défaut) ou « À chaque action ». La valeur est LUE de l'agent (réglage du compte, tenu par
 // l'agent) ; la changer est elle-même un acte d'administration, toujours confirmé (mot de passe, jamais
-// couvert par le délai, et clé de ce PC) par la fenêtre commune des actes. Absente face à un agent d'avant
+// couvert par le délai, et clé de ce PC) par la fenêtre commune des actes. Absente face à un agent qui n'annonce pas
 // la confirmation des actes : il n'y a rien à régler.
 const props = defineProps<{ serverId: string }>();
 

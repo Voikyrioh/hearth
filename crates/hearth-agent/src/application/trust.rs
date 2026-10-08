@@ -536,42 +536,6 @@ impl TrustService {
         Ok(key)
     }
 
-    /// Preuve de possession d'une clé INSCRITE pour le compte de l'appelant, pour activer ou désactiver le
-    /// mode attaque depuis le client (Q14 point 3) : usage `0x03`, liée au jeton de la session et à la
-    /// valeur demandée (une preuve d'activation ne désactive pas, et inversement). **N'écrit rien** : le
-    /// défi n'est consommé (`consume`) qu'une fois le changement fait.
-    pub async fn verify_attack_mode(
-        &self,
-        account: &AccountId,
-        username: &str,
-        token_hash: &[u8; 32],
-        activate: bool,
-        proof: Option<&DeviceProof>,
-        addr: &str,
-    ) -> Result<VerifiedKey, AttackProofError> {
-        let proof = proof.ok_or(AttackProofError::Missing)?;
-        let key = self
-            .verify(
-                proof,
-                Binding::AttackMode {
-                    token_hash,
-                    activate,
-                },
-                username,
-                addr,
-            )
-            .ok_or(AttackProofError::Invalid)?;
-        let device = self
-            .devices
-            .find_by_key(&key.key_id)
-            .await?
-            .ok_or(AttackProofError::Invalid)?;
-        if device.account != *account || !bool::from(device.public_key.ct_eq(&key.public_key)) {
-            return Err(AttackProofError::Invalid);
-        }
-        Ok(key)
-    }
-
     /// Preuve de possession d'une clé INSCRITE pour le compte de l'appelant, pour un acte d'administration
     /// (HRT-28, BR-TRUST-039, 041) : usage `0x05`, liée au jeton de la session et à l'acte **reconstruit
     /// depuis la requête** (l'acte, sa cible, ses paramètres non secrets). Une clé inscrite du compte
@@ -672,7 +636,6 @@ fn usage_of(purpose: ChallengePurpose) -> u8 {
     match purpose {
         ChallengePurpose::Login => 0x01,
         ChallengePurpose::Session => 0x02,
-        ChallengePurpose::AttackMode => 0x03,
         ChallengePurpose::DeviceRemoval => 0x04,
         ChallengePurpose::AdminAct => 0x05,
     }
@@ -701,14 +664,6 @@ mod tests {
                 ChallengePurpose::Session,
                 Binding::Session {
                     token_hash: &[0; 32],
-                }
-                .usage(),
-            ),
-            (
-                ChallengePurpose::AttackMode,
-                Binding::AttackMode {
-                    token_hash: &[0; 32],
-                    activate: true,
                 }
                 .usage(),
             ),

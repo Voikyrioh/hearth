@@ -22,7 +22,6 @@ pub fn purpose_of(binding: &Binding<'_>) -> ChallengePurpose {
     match binding {
         Binding::Login => ChallengePurpose::Login,
         Binding::Session { .. } => ChallengePurpose::Session,
-        Binding::AttackMode { .. } => ChallengePurpose::AttackMode,
         Binding::DeviceRemoval { .. } => ChallengePurpose::DeviceRemoval,
         Binding::AdminAct { .. } => ChallengePurpose::AdminAct,
     }
@@ -172,37 +171,6 @@ pub async fn removal_body(
         &challenge,
     );
     serde_json::json!({ "password": password, "device": device_json(&proof) })
-}
-
-/// Corps de `PUT /security/attack-mode` : le mot de passe et la preuve de possession d'une clé inscrite
-/// (usage `0x03`, liée au jeton de la session `token` et au geste demandé, `active`).
-pub async fn attack_mode_body(
-    api: &super::api::Api,
-    key: &DeviceKey,
-    username: &str,
-    token: &str,
-    active: bool,
-    password: &str,
-) -> serde_json::Value {
-    let reply = api
-        .post("/sessions/challenge")
-        .json(&serde_json::json!({ "username": username, "purpose": "attack_mode" }))
-        .send()
-        .await;
-    let challenge = reply.body["challenge"].as_str().expect("défi").to_owned();
-    let hash = hearth_agent::domain::session_token::SessionToken::parse(token)
-        .expect("jeton")
-        .hash();
-    let proof = key.sign(
-        &Fingerprint::from_bytes(SERVER_FINGERPRINT),
-        Binding::AttackMode {
-            token_hash: hash.as_bytes(),
-            activate: active,
-        },
-        username,
-        &challenge,
-    );
-    serde_json::json!({ "active": active, "password": password, "device": device_json(&proof) })
 }
 
 /// Le membre `reauth` d'un acte d'administration (HRT-28) : le mot de passe (vide : absent) et la preuve

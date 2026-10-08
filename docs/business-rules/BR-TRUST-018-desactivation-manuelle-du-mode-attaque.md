@@ -11,7 +11,7 @@ maj: 2026-10-07
 # BR-TRUST-018 : Désactiver le mode attaque à la main depuis le client : administrateur, mot de passe actuel, preuve de clé du poste, comme l'activation
 
 ## Règle
-`PUT /security/attack-mode {"active": false, "password", "device"}` : mêmes conditions que l'activation (BR-TRUST-028). La preuve (usage `0x03`) est liée au jeton de la session ET au geste : une preuve d'activation ne désactive pas, et inversement. Désactiver pendant la fenêtre de redémarrage est possible et le mode n'est pas rouvert après (BR-TRUST-020). Idempotent : désactiver un mode éteint ne change rien et n'écrit rien. Consigné `attack_mode.disable` (BR-TRUST-030), `last_end: "manual"`.
+`PUT /security/attack-mode {"active": false, "reauth": {…}}` : mêmes conditions que l'activation (BR-TRUST-028). La preuve (usage `0x05`) est liée au jeton de la session ET à l'acte (`AttackMode { enable }`) : une preuve d'activation ne désactive pas, et inversement. Désactiver pendant la fenêtre de redémarrage est possible et le mode n'est pas rouvert après (BR-TRUST-020). Idempotent : désactiver un mode éteint ne change rien et n'écrit rien. Consigné `attack_mode.disable` (BR-TRUST-030), `last_end: "manual"`.
 
 Sur le serveur lui-même : `hearth-agent attack-mode off` (BR-TRUST-027), `last_end: "cli"`.
 

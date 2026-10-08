@@ -5,22 +5,19 @@
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, State};
-use axum::http::HeaderMap;
 use hearth_proto::api::reauth::{AdminReauthInfo, SetReauthRequest};
 use hearth_proto::api::security::{
     AlertInfo, AttackModeEnd, AttackModeInfo, AttackModeState, SecurityResponse, SecurityView,
-    SessionDevice, SetAttackModeRequest, attack_mode_refusal,
+    SessionDevice, SetAttackModeRequest,
 };
-use hearth_proto::error::{ErrorBody, ErrorCode};
-use tracing::Instrument;
+use hearth_proto::error::ErrorCode;
 
-use super::auth::{Caller, Requester, bearer_token};
+use super::auth::{Caller, Requester};
 use super::sessions::ClientAddr;
 use super::{ApiError, AppState, wire};
 use crate::application::attack_mode::AttackStatus;
 use crate::application::security::SecuritySnapshot;
-use crate::application::sessions::{AttackModeError, ClientInfo, LoginError, Reauthenticated};
-use crate::domain::secret::Secret;
+use crate::application::sessions::{AttackModeError, Reauthenticated};
 use crate::domain::trust::attack_mode::{Effective, EndHow};
 
 /// L'alerte que le client voit, depuis ce que le service sait.
@@ -99,61 +96,23 @@ pub async fn state(
 }
 
 /// `PUT /api/v1/security/attack-mode` : active ou désactive le mode attaque (administrateur). **Un acte
-/// d'administration** (Q14 point 3, Q16) : le corps porte le mot de passe actuel et la preuve de
-/// possession d'une clé inscrite pour le compte (`purpose: "attack_mode"`, liée au jeton et à la valeur
-/// demandée). Sans preuve valide : `409 POST_NOT_RECOGNIZED` (`details.reason`), rien n'est écrit.
-/// Mot de passe faux : `422 WRONG_PASSWORD` ou `429` (mêmes compteurs que la connexion). Idempotente.
+/// d'administration** (Q14 point 3, Q16) : la couche `reauth` exige le membre `reauth` (mot de passe actuel
+/// et preuve d'une clé inscrite, usage `0x05`) ; sans lui, `426`. Idempotente. Il n'existe plus de forme
+/// à plat (usage `0x03`).
 pub async fn set_attack_mode(
     State(state): State<AppState>,
-    ClientAddr(addr): ClientAddr,
     Caller(caller): Caller,
     Requester(by): Requester,
-    confirmed: Option<Extension<Reauthenticated>>,
-    request_headers: HeaderMap,
+    _confirmed: Extension<Reauthenticated>,
     body: Result<Json<SetAttackModeRequest>, JsonRejection>,
 ) -> Result<Json<AttackModeInfo>, ApiError> {
     let Json(request) = body?;
     // Confirmé par la couche `reauth` (contrat `reauth`, usage `0x05`) : preuve et mot de passe sont déjà
-    // vérifiés, il ne reste que le changement (HRT-28).
-    if confirmed.is_some() {
-        let status = state
-            .sessions
-            .change_attack_mode_confirmed(&caller, request.active, &by)
-            .await
-            .map_err(attack_mode_error)?;
-        return Ok(Json(attack_info(&status)?));
-    }
-    let token = bearer_token(&request_headers).ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::Unauthenticated,
-            "Jeton de session absent ou illisible",
-        )
-    })?;
-    let client = ClientInfo {
-        name: super::sessions::client_name(&request_headers),
-        addr,
-    };
-    // Le mot de passe est compté même si le client coupe (comme la connexion) : tâche détachée.
-    let sessions = state.sessions.clone();
-    let work = tokio::spawn(
-        async move {
-            sessions
-                .set_attack_mode(
-                    &caller,
-                    &token,
-                    request.active,
-                    Secret::from(request.password),
-                    request.device.as_ref(),
-                    &client,
-                    &by,
-                )
-                .await
-        }
-        .in_current_span(),
-    );
-    let status = work
+    // vérifiés, il ne reste que le changement (HRT-28). Il n'existe plus de forme à plat (usage `0x03`).
+    let status = state
+        .sessions
+        .change_attack_mode_confirmed(&caller, request.active, &by)
         .await
-        .map_err(|error| ApiError::internal(&error))?
         .map_err(attack_mode_error)?;
     Ok(Json(attack_info(&status)?))
 }
@@ -164,21 +123,6 @@ fn attack_mode_error(error: AttackModeError) -> ApiError {
             ErrorCode::ForbiddenRole,
             "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs.",
         ),
-        AttackModeError::ProofMissing => refusal(
-            attack_mode_refusal::PROOF_MISSING,
-            "Pour changer le mode attaque, ce poste doit prouver sa clé. Utilise un poste dont la clé est enregistrée, ou la commande sur le serveur.",
-        ),
-        AttackModeError::ProofInvalid => refusal(
-            attack_mode_refusal::PROOF_INVALID,
-            "La preuve de la clé de ce poste est absente ou invalide : redemande un défi et signe-le.",
-        ),
-        AttackModeError::Password(error) => match *error {
-            // Un administrateur authentifié : « mot de passe actuel incorrect », pas un 401.
-            LoginError::InvalidCredentials => {
-                ApiError::new(ErrorCode::WrongPassword, "Mot de passe actuel incorrect.")
-            }
-            other => ApiError::from(other),
-        },
         AttackModeError::Unavailable => ApiError::new(ErrorCode::NotFound, "Route inconnue"),
         AttackModeError::Store(error) => ApiError::internal(&error),
     }
@@ -192,13 +136,10 @@ pub async fn set_reauth(
     ClientAddr(addr): ClientAddr,
     Caller(caller): Caller,
     Requester(by): Requester,
-    confirmed: Option<Extension<Reauthenticated>>,
+    _confirmed: Extension<Reauthenticated>,
     body: Result<Json<SetReauthRequest>, JsonRejection>,
 ) -> Result<Json<AdminReauthInfo>, ApiError> {
     let Json(request) = body?;
-    if confirmed.is_none() {
-        return Err(ApiError::internal(&"réglage sans confirmation"));
-    }
     state
         .sessions
         .set_reauth_mode(&caller.account, request.password, &by)
@@ -211,12 +152,4 @@ pub async fn set_reauth(
         .map_err(|error| ApiError::internal(&error))?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "Route inconnue"))?;
     Ok(Json(info))
-}
-
-fn refusal(reason: &str, message: &str) -> ApiError {
-    ApiError(ErrorBody::with_details(
-        ErrorCode::PostNotRecognized,
-        message,
-        serde_json::json!({ "field": "device", "reason": reason }),
-    ))
 }

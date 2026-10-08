@@ -12,7 +12,7 @@ maj: 2026-10-07
 
 ## Règle
 - Un acte d'administration porte un membre `reauth` (`password`, `device`) dans le corps. La couche de confirmation, posée par le routeur sur chaque route d'acte, vérifie la preuve de clé puis le mot de passe avant le handler.
-- **L'agent exige dès la construction du service** (`SessionService::new`, `admin_reauth.required: true`) : une requête sans membre `reauth` reçoit `426 INCOMPATIBLE_VERSION` (`reason: reauth_required`) ; une requête qui en porte un est vérifiée jusqu'au bout. Seuls les bancs d'essai peuvent le baisser, par `accept_unconfirmed_acts_for_tests`. Le mode attaque garde en plus sa forme à plat (usage `0x03`), aussi stricte.
+- **L'agent exige dès la construction du service** (`SessionService::new`, `admin_reauth.required: true`) : une requête sans membre `reauth` reçoit `426 INCOMPATIBLE_VERSION` (`reason: reauth_required`) ; une requête qui en porte un est vérifiée jusqu'au bout. Seuls les bancs d'essai peuvent le baisser, par `accept_unconfirmed_acts_for_tests`. Le mode attaque n'a plus de forme à plat (retirée en HRT-18 tranche 5).
 - Le réglage de fréquence (`PUT /me/reauth`) est toujours confirmé, dès la tranche A.
 - Le retrait d'un poste garde son contrat livré (`0x04`, champs à plat, clé du poste courant : BR-TRUST-022, BR-TRUST-041).
 - Aucun repli : une confirmation présente mais sans preuve valable ne retombe jamais sur « session et rôle ».
@@ -28,4 +28,4 @@ maj: 2026-10-07
 
 ## Historique
 - 2026-10-07 : création (HRT-28, tranche A).
-- 2026-10-07 : le client confirme (HRT-30, tranche B) : `hearth-link` `execute_act` ajoute `reauth` (BR-TRUST-049, 050, 051), toutes les fenêtres d'acte passent par `AdminActDialog` (BR-TRUST-052). Le mode attaque passe au contrat commun (`0x05`) face à un agent qui annonce `admin_reauth` ; la forme à plat (`0x03`) reste pour un agent d'avant et est toujours acceptée par l'agent pendant la transition (ADR-0033).
+- 2026-10-07 : le client confirme (HRT-30, tranche B) : `hearth-link` `execute_act` ajoute `reauth` (BR-TRUST-049, 050, 051), toutes les fenêtres d'acte passent par `AdminActDialog` (BR-TRUST-052). Le mode attaque passe au contrat commun (`0x05`) face à un agent qui annonce `admin_reauth` ; la forme à plat (`0x03`) a été retirée en HRT-18 tranche 5 (ADR-0033).
