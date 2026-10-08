@@ -11,6 +11,7 @@ import CreateAccountDialog from "@/components/organisms/CreateAccountDialog.vue"
 import PasswordDialog from "@/components/organisms/PasswordDialog.vue";
 import { useAccountActions } from "@/composables/useAccountActions";
 import { useCurrentServer } from "@/composables/useCurrentServer";
+import { usePageData } from "@/composables/usePageData";
 import { t } from "@/i18n";
 import type { Account, Role } from "@/link";
 import { useAccountsStore } from "@/stores/accounts";
@@ -21,13 +22,15 @@ import { useLinkStore } from "@/stores/link";
 // Toute action passe par `useAccountActions` (donc `useServerAction` : désactivée et expliquée hors
 // « Connecté », résultat inconnu à la coupure, jamais rejouée). La liste se relit à chaque retour du
 // lien et à chaque issue d'opération incertaine : jamais d'état supposé.
-const { server, state } = useCurrentServer();
+const { server, state, isConnected } = useCurrentServer();
 const store = useAccountsStore();
 const link = useLinkStore();
 const serverId = computed(() => server.value?.id ?? "");
 const actions = useAccountActions(() => serverId.value);
 
 const entry = computed(() => store.of(serverId.value));
+// FIX:01M4E5D4JY66T0ETEMRY1DZQZK (C46) : sans liste lue, la page n'a rien à dater (pas de « Vu il y a… »).
+usePageData(() => entry.value?.status === "ready" || (entry.value?.accounts.length ?? 0) > 0);
 const accounts = computed(() => entry.value?.accounts ?? []);
 const meId = computed(() => entry.value?.me ?? "");
 const myUsername = computed(() => server.value?.username ?? "");
@@ -108,6 +111,14 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
   <div v-else-if="!entry || (entry.status === 'loading' && accounts.length === 0)" class="accounts__wait">
     <HSpinner :label="t('common.loading')" />
   </div>
+  <!-- Serveur injoignable : « pas encore chargé », sans second « Réessayer » (le bandeau a le sien) ; HRT-38 (C46). -->
+  <p
+    v-else-if="entry.status === 'error' && accounts.length === 0 && !isConnected"
+    class="accounts__notice accounts__notice--pending"
+    data-not-loaded-yet
+  >
+    {{ t("link.notLoadedYet") }}
+  </p>
   <div v-else-if="entry.status === 'error' && accounts.length === 0" class="accounts__notice">
     <p role="alert">{{ t("accounts.loadFailed") }}</p>
     <HButton variant="secondary" @click="store.load(serverId)">{{ t("common.retry") }}</HButton>
@@ -219,5 +230,9 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
   background: var(--card);
   box-shadow: var(--card-edge);
   color: var(--crit);
+}
+
+.accounts__notice--pending {
+  color: var(--tx2);
 }
 </style>

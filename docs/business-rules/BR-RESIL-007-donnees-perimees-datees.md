@@ -11,7 +11,7 @@ maj: 2026-10-05
 # BR-RESIL-007 — Hors « Connecté », les dernières données restent affichées, désaturées et datées
 
 ## Règle
-Tant que le lien n'est pas « Connecté » (reconnexion, hors ligne, session expirée, accès révoqué), les vues gardent les dernières données connues, désaturées (`grayscale(.85)`, opacité .62), avec leur âge : « Vu il y a 12 s » / « Vu il y a 2 min » / « Vu il y a 3 h » / « Vu il y a 2 j », mis à jour en direct. Un seul mécanisme : `StaleSurface`. Les données ne sont jamais retirées. La bibliothèque conserve la dernière vue connue et sa date (`SnapshotStore`, `LinkManager::last_known`) ; le marquage visuel est de l'interface.
+Tant que le lien n'est pas « Connecté » (hors ligne, session expirée, accès révoqué ; PAS pendant « Reconnexion… » : de 3 à 30 s seule la pastille change, la page garde son apparence et n'est pas datée, HRT-38 C48, FIX-01M4E5D5GCK02241BMJ1PRGPPN), les vues gardent les dernières données connues, désaturées (`grayscale(.85)`, opacité .62), avec leur âge : « Vu il y a 12 s » / « Vu il y a 2 min » / « Vu il y a 3 h » / « Vu il y a 2 j », mis à jour en direct. Un seul mécanisme : `StaleSurface`. Les données ne sont jamais retirées. La bibliothèque conserve la dernière vue connue et sa date (`SnapshotStore`, `LinkManager::last_known`) ; le marquage visuel est de l'interface.
 
 ## Application (code)
 - Bibliothèque :
@@ -40,3 +40,4 @@ Tant que le lien n'est pas « Connecté » (reconnexion, hors ligne, session exp
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
 - 2026-10-05 : vérifications de bout en bout (HRT-12).
 - 2026-10-05 : garantie structurelle : `StaleSurface` dans le gabarit du serveur, plus par convention de page (revue HRT-12).
+- 2026-10-08 : pas de désaturation ni d'estampille pendant « Reconnexion… » ; pas d'estampille pour une page qui n'a rien lu (`usePageData`) ; le Journal n'ajoute plus son propre bloc périmé (HRT-38).

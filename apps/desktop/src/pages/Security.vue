@@ -7,6 +7,7 @@ import RemoveDeviceDialog from "@/components/organisms/RemoveDeviceDialog.vue";
 import SecurityAlertCard from "@/components/organisms/SecurityAlertCard.vue";
 import TrustedDeviceTable from "@/components/organisms/TrustedDeviceTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
+import { usePageData } from "@/composables/usePageData";
 import { useResumeMinutes } from "@/composables/useResumeMinutes";
 import { reportUiError } from "@/errors/report";
 import { type AttackMode, alertVisible, getLinkBridge, type TrustedDevice } from "@/link";
@@ -29,6 +30,8 @@ const serverId = computed(() => server.value?.id ?? "");
 
 const entry = computed(() => store.of(serverId.value));
 const securityEntry = computed(() => security.of(serverId.value));
+// FIX:01M4E5D4JY66T0ETEMRY1DZQZK (C46) : ni état de sécurité ni postes lus : la page n'a rien à dater.
+usePageData(() => securityEntry.value?.status === "ready" || entry.value?.status === "ready");
 const mode = computed<AttackMode>(
   () =>
     securityEntry.value?.state?.attackMode ?? {

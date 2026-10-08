@@ -6,7 +6,6 @@ import { cloneDraft, emptyDraft, type FilterDraft, hasAnyFilter, sameDraft } fro
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
-import HTag from "@/components/atoms/HTag.vue";
 import AuditDetailDialog from "@/components/molecules/AuditDetailDialog.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import AuditFilters from "@/components/organisms/AuditFilters.vue";
@@ -133,15 +132,9 @@ const reasonText = computed(() =>
       @clear="clear"
     />
 
-    <div v-if="!isConnected" class="audit__stale" role="status">
-      <HTag tone="warn">{{ t("audit.staleBadge") }}</HTag>
-      <span>{{ t("audit.stale") }}</span>
-      <HButton variant="ghost" size="sm" :busy="audit.reloading" @click="audit.reloadManually()">
-        {{ audit.reloading ? t("audit.reloadingNow") : t("audit.reload") }}
-      </HButton>
-    </div>
-
-    <div v-if="failed && !forbidden" class="audit__error" role="alert">
+    <!-- FIX:01M4E5D447SRCNGAQY4PP006HC (C30) : hors ligne, le bandeau du gabarit dit « Serveur hors ligne » et porte « Réessayer
+         maintenant », l'estampille du gabarit dit que la liste n'est pas à jour : rien d'autre ici. -->
+    <div v-if="failed && !forbidden && isConnected" class="audit__error" role="alert">
       <span>{{ reasonText }}</span>
       <HButton variant="ghost" size="sm" @click="audit.retry()">{{ t("common.retry") }}</HButton>
     </div>
@@ -211,7 +204,6 @@ const reasonText = computed(() =>
   gap: var(--space-4);
 }
 
-.audit__stale,
 .audit__error {
   display: flex;
   align-items: center;

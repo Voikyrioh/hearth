@@ -403,7 +403,13 @@ describe("link not connected (BR-DASH-009, 011)", () => {
     const before = ctx.wrapper.text();
     expect(ctx.wrapper.find('[data-stale="true"]').exists()).toBe(false);
 
+    // HRT-38 (C48) : en reconnexion (3 à 30 s) la page garde son apparence, sans date ; elle ne s'estompe
+    // qu'à partir de « Hors ligne ».
     ctx.bridge.setState("forge", "reconnecting");
+    await flushPromises();
+    expect(ctx.wrapper.find('[data-stale="true"]').exists()).toBe(false);
+    expect(ctx.wrapper.find(".surface__stamp").exists()).toBe(false);
+    ctx.bridge.setState("forge", "offline");
     await flushPromises();
     expect(ctx.wrapper.find('[data-stale="true"]').exists()).toBe(true);
     // Les dernières valeurs restent là, aucune n'est vidée ni remplacée.

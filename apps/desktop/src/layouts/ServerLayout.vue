@@ -12,6 +12,7 @@ import SecurityAlertBanner from "@/components/organisms/SecurityAlertBanner.vue"
 import ServerNav from "@/components/organisms/ServerNav.vue";
 import { formatClock } from "@/composables/format";
 import { useCurrentServer } from "@/composables/useCurrentServer";
+import { providePageData } from "@/composables/usePageData";
 import { useResumeMinutes } from "@/composables/useResumeMinutes";
 import { t } from "@/i18n";
 import { alertVisible, modeOn } from "@/link";
@@ -33,6 +34,10 @@ const security = useSecurityStore();
 const link = useLinkStore();
 const updates = useUpdatesStore();
 const { server, state, lastContactAt } = useCurrentServer();
+const pageHasData = providePageData();
+// FIX:01M4E5D5GCK02241BMJ1PRGPPN (C48) : pendant la reconnexion (3 à 30 s) la page garde son apparence : « pastille Reconnexion…, rien d'autre »
+// (BR-RESIL-003). Elle ne s'estompe et ne se date qu'à partir de « Hors ligne », session expirée ou accès révoqué.
+const stale = computed(() => state.value !== "connected" && state.value !== "reconnecting");
 const event = computed(() => (server.value ? link.eventOf(server.value.id) : undefined));
 
 watch(
@@ -117,7 +122,7 @@ function openSecurityPage() {
         />
         <!-- Données périmées (BR-RESIL-007) : c'est le GABARIT qui désature et date la page, pour
              toute page présente et à venir ; une page ne l'enveloppe pas elle-même. -->
-        <StaleSurface :stale="state !== 'connected'" :last-contact-at="lastContactAt">
+        <StaleSurface :stale="stale" :last-contact-at="lastContactAt" :stamped="pageHasData">
           <ErrorBoundary :reset-key="route.fullPath"><RouterView /></ErrorBoundary>
         </StaleSurface>
       </div>

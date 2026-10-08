@@ -113,7 +113,9 @@ describe("shell of a server", () => {
     bridge.setState("forge", "reconnecting");
     await flushPromises();
     expect(wrapper.get(".head [role=status]").text()).toBe("Reconnexion…");
-    expect(wrapper.find('[data-stale="true"]').exists()).toBe(true);
+    // HRT-38 (C48) : « pastille Reconnexion…, rien d'autre » : la page garde son apparence et n'est pas datée.
+    expect(wrapper.find('[data-stale="true"]').exists()).toBe(false);
+    expect(wrapper.find(".surface__stamp").exists()).toBe(false);
     expect(wrapper.find(".banner").exists()).toBe(false);
 
     bridge.setState("forge", "offline");

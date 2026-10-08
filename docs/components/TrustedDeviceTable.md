@@ -9,3 +9,4 @@ Organisme · `apps/desktop/src/components/organisms/TrustedDeviceTable.vue`
 - Props : `status` (`loading | ready | unsupported | error`), `devices` (`TrustedDevice[]`), `max`, `busy`
 - Événements et slots : `remove(device)`, `retry`
 - Notes : aucune clé, empreinte de clé, défi ni signature n'existe côté interface (noms, dates, adresse, booléens). Tests : `pages/Security.test.ts`, `e2e/security.spec.ts`.
+- HRT-38 (C46) : hors « Connecté », une liste jamais lue dit « Pas encore chargé, sera disponible quand le serveur reviendra. » sans « Réessayer ».

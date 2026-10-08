@@ -231,7 +231,9 @@ export const fr = {
     busy: "Le serveur est occupé. Réessaie dans un instant.",
     loading: "Lecture de ce que le serveur attend de toi…",
     stateFailed: "Impossible de lire ce que le serveur attend de toi.",
-    noKeyTitle: "Ce poste n'est pas encore enregistré",
+    agentOldTitle: "Mise à jour requise",
+    goSettings: "Aller aux réglages",
+    noKeyTitle: "Poste non enregistré",
     noKey:
       "Pour faire cette action, ce poste doit être enregistré. Reconnecte-toi avec ton mot de passe pour l'enregistrer, puis recommence.",
     reconnect: "Me reconnecter pour enregistrer ce poste",
@@ -295,8 +297,12 @@ export const fr = {
     sessionExpiredNotice: "Ta session a expiré.",
     askPassword: "Rentre ton mot de passe pour reprendre.",
     reconnectAction: "Me reconnecter",
-    revokedNotice: "Ton compte n'est plus accessible.",
-    revokedHint: "Connecte-toi avec un compte valide.",
+    notLoadedYet: "Pas encore chargé, sera disponible quand le serveur reviendra.",
+    revokedTitle: "Accès révoqué sur {name}",
+    revokedNotice:
+      "Ton compte n'est plus accessible sur ce serveur : il a pu être supprimé ou désactivé, ou son mot de passe a changé.",
+    revokedHint:
+      "Demande à l'administrateur du serveur de rétablir ton compte, ou connecte-toi avec un autre compte.",
     useAnotherAccount: "Utiliser un autre compte",
     staleHelp: "Les données affichées proviennent de la dernière connexion et ne sont pas à jour.",
     seenSeconds: "Vu il y a {n} s",
@@ -402,6 +408,10 @@ export const fr = {
     verifyTitle: "Vérifie l'identité du serveur",
     fingerprintLabel: "Empreinte du serveur :",
     fingerprintHelp: "Compare avec l'empreinte affichée à la fin de l'installation de l'agent.",
+    fingerprintWhere:
+      "Pour la relire plus tard, lance « sudo hearth-agent fingerprint » sur le serveur.",
+    fingerprintRefuseHelp:
+      "Refuser annule l'ajout : rien n'est enregistré. « Précédent » te ramène à l'adresse pour la corriger.",
     confirmFingerprint: "Confirmer",
     refuseFingerprint: "Refuser",
     loginTitle: "Connecte-toi",
