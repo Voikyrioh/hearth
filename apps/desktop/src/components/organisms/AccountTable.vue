@@ -174,7 +174,6 @@ const named = (label: string, account: Account) => `${label} ${account.username}
 
 .table th,
 .table td {
-  /* FIX:01M4D4FTZX89X3Z6MATEQ0KCN7 : jamais de bouton coupé : les cellules et les actions passent à la ligne proprement (pré-revue HRT-35/36) */
   padding: var(--space-3) var(--space-4);
   border-bottom: var(--border-width) solid var(--bd);
   text-align: left;
@@ -207,10 +206,8 @@ const named = (label: string, account: Account) => `${label} ${account.username}
 }
 
 .table__actions {
-  /* Les actions passent à la ligne DANS leur cellule plutôt que de sortir du tableau (pré-revue HRT-35/36). */
   display: flex;
   flex-wrap: wrap;
-  white-space: normal;
   justify-content: flex-end;
   gap: var(--space-2);
 }

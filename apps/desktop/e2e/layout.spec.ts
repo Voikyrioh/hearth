@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 
 // HRT-35 et HRT-36 : écrans vides et panneaux centrés, rien ne se chevauche ni ne se coupe quand la fenêtre
-// rétrécit (revue UX du 2026-10-08, C20 en partie, C21, C25, C27, C29, C33, C37, C45, C50, C51). Pont SIMULÉ.
+// rétrécit (revue UX du 2026-10-08, C20 en partie, C21 (NON corrigé : seulement aucun bouton coupé), C25, C27, C29, C33, C37, C45, C50, C51). Pont SIMULÉ.
 // Assertions de GÉOMÉTRIE (boîtes mesurées dans le navigateur), aux tailles 1100×680, 1280×800, 1366×800,
 // 1920×1080 et 2560×1440 quand la taille compte.
 
@@ -195,7 +195,7 @@ for (const size of SIZES) {
 // ── HRT-36 : rien ne se chevauche ni ne se coupe ─────────────────────────────────────────────
 
 for (const size of SIZES) {
-  test(`comptes à ${size.width}×${size.height} : une ligne par compte, actions sur une ligne`, async ({
+  test(`comptes à ${size.width}×${size.height} : aucun bouton d'action coupé (entièrement dans le tableau)`, async ({
     page,
   }) => {
     await page.setViewportSize(size);

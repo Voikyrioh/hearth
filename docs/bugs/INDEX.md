@@ -11,7 +11,6 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M4D4FZQ6BWTJJK1MYCCYMFDE](./FIX-01M4D4FZQ6BWTJJK1MYCCYMFDE.md) | Beaucoup de serveurs : le bas de la barre sortait de l'écran (C50) | 2026-10-08 |
 | [FIX-01M4D4FY4G650RBNJ3W7NSP947](./FIX-01M4D4FY4G650RBNJ3W7NSP947.md) | Mode attaque + alerte : 170 px de bandeaux empilés sur toutes les pages (C37) | 2026-10-08 |
 | [FIX-01M4D4FWJBQ360DF7FB9RWFZCM](./FIX-01M4D4FWJBQ360DF7FB9RWFZCM.md) | « Demander mon mot de passe » : le sélecteur se cassait sur trois lignes (C33) | 2026-10-08 |
-| [FIX-01M4D4FTZX89X3Z6MATEQ0KCN7](./FIX-01M4D4FTZX89X3Z6MATEQ0KCN7.md) | Les actions d'un compte passaient sur deux lignes à 1280 et 1366 (C21) | 2026-10-08 |
 | [FIX-01M4D4FSDN82D1PNC7YQEERDNB](./FIX-01M4D4FSDN82D1PNC7YQEERDNB.md) | Page Comptes vide : « Comptes » deux fois et « Ajouter un compte » deux fois (C25) | 2026-10-08 |
 | [FIX-01M4D4FQRZ2QTRT57HMM6TAPBE](./FIX-01M4D4FQRZ2QTRT57HMM6TAPBE.md) | Le panneau de session expirée se posait en haut à gauche et repoussait la dernière vue (C45) | 2026-10-08 |
 | [FIX-01M4D4FP65X3TZW6JQAZ5YK7EX](./FIX-01M4D4FP65X3TZW6JQAZ5YK7EX.md) | Les écrans vides étaient plaqués à gauche, titre cassé, deux tiers de l'écran vides (C27) | 2026-10-08 |
