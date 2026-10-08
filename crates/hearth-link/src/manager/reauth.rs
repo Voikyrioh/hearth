@@ -13,7 +13,8 @@
 //!   clé ou l'ancien défi rendrait le même refus (BR-TRUST-046) ;
 //! - **le mot de passe ne vit que le temps de l'appel** : `Secret` effacé à la libération, copie du corps
 //!   effacée à la libération de la requête (`ActionRequest`, `ApiRequest`) ;
-//! - **face à un agent ancien** (sans `admin_reauth`) : rien ne change, l'acte part comme avant.
+//! - **un agent qui n'annonce pas `admin_reauth`** n'est pas de cette famille (aucune version d'avant n'a
+//!   été publiée) : `Protocol`, rien n'est envoyé.
 
 use hearth_proto::admin_act::covered_by_elevation;
 use hearth_proto::api::reauth::AdminReauthInfo;
@@ -37,7 +38,7 @@ const SECURITY_PATH: &str = "/security";
 /// clé au coffre.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReauthState {
-    /// `None` : agent d'avant la confirmation des actes (aucune demande en plus, tout part comme avant).
+    /// `None` : l'agent n'annonce pas la confirmation des actes (aucun acte ne lui part).
     pub agent: Option<AdminReauthInfo>,
     /// Ce PC a une clé d'appareil au coffre pour ce serveur (un booléen : la clé ne sort pas).
     pub has_device_key: bool,
@@ -82,7 +83,7 @@ impl LinkManager {
     /// `ResultUnknown` si le lien tombe).
     ///
     /// - hors « Connecté » : `NotConnected` sans rien envoyer ;
-    /// - agent sans `admin_reauth` : l'acte part comme avant, `password` est ignoré ;
+    /// - agent sans `admin_reauth` : `Protocol`, rien n'est envoyé ;
     /// - sans clé au coffre : `NoDeviceKey`, ni défi ni acte ne part ;
     /// - un acte non couvert par l'élévation sans mot de passe : `InvalidInput(Credentials)` ;
     /// - défi indisponible : `DeviceChallengeUnavailable`, rien d'autre n'est parti.
@@ -103,9 +104,11 @@ impl LinkManager {
                 return Err(LinkError::UnreadableAct);
             }
         }
-        let Some(_announced) = self.read_admin_reauth(&target, &token).await? else {
-            return self.execute_unchecked(id, action).await;
-        };
+        if self.read_admin_reauth(&target, &token).await?.is_none() {
+            return Err(LinkError::Protocol(
+                "l'agent n'annonce pas la confirmation des actes".into(),
+            ));
+        }
         self.send_confirmed(id, &target, &token, action, password)
             .await
     }

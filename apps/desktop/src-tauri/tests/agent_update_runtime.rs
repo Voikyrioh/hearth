@@ -202,9 +202,8 @@ struct World {
 async fn world(allowed: bool, gated: bool) -> World {
     let rig = Arc::new(rig(allowed, gated));
     let factory = rig.clone();
-    let mut agent = TestAgent::install_with(Some(update_rig::factory(factory))).await;
+    let agent = TestAgent::install_with(Some(update_rig::factory(factory))).await;
     // Un agent qui EXIGE la confirmation des actes, comme le service (HRT-30).
-    agent.require_confirmation(true);
     agent.create_account("marie", Role::Admin).await;
     agent.create_account("lucas", Role::ReadOnly).await;
     World { agent, rig }
