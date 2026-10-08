@@ -4,6 +4,13 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4E5D3N2QCVCD494WC6S8WRD](./FIX-01M4E5D3N2QCVCD494WC6S8WRD.md) | Action impossible : la fenêtre garde sa question et un bouton grisé, sans chemin (C40, C41) | 2026-10-08 |
+| [FIX-01M4E5D447SRCNGAQY4PP006HC](./FIX-01M4E5D447SRCNGAQY4PP006HC.md) | Hors ligne : trois messages et trois gestes pour la même information (C30) | 2026-10-08 |
+| [FIX-01M4E5D4JY66T0ETEMRY1DZQZK](./FIX-01M4E5D4JY66T0ETEMRY1DZQZK.md) | Page jamais chargée hors ligne : erreur, deuxième « Réessayer » et « Vu il y a… » sans rien vu (C46) | 2026-10-08 |
+| [FIX-01M4E5D51P81MQQYR9PBB3TF22](./FIX-01M4E5D51P81MQQYR9PBB3TF22.md) | Accès révoqué : « Connecte-toi à forge » alors qu'on ne peut pas (C47) | 2026-10-08 |
+| [FIX-01M4E5D5GCK02241BMJ1PRGPPN](./FIX-01M4E5D5GCK02241BMJ1PRGPPN.md) | Reconnexion : la page se désature et se date dès la première seconde (C48) | 2026-10-08 |
+| [FIX-01M4E5D5Z5MBSD639B5NPX81GC](./FIX-01M4E5D5Z5MBSD639B5NPX81GC.md) | Étape « Empreinte » : quel serveur, où relire l'empreinte, que fait « Refuser » (C3) | 2026-10-08 |
+| [FIX-01M4E5D6DYHHX9CBBVDYAFEWMZ](./FIX-01M4E5D6DYHHX9CBBVDYAFEWMZ.md) | Bouton grisé : la raison seulement au survol (C42) | 2026-10-08 |
 | [FIX-01M4DJZBAQBTJ55NAA62BNQASH](./FIX-01M4DJZBAQBTJ55NAA62BNQASH.md) | Le menu disait « Sécurité », la page « Sécurité et mode attaque » (C39) | 2026-10-08 |
 | [FIX-01M4DNFDC9KF9FXYJ0H2TC2JKX](./FIX-01M4DNFDC9KF9FXYJ0H2TC2JKX.md) | L'effacement en attente se lisait sous une autre session ou chez un non-administrateur | 2026-10-08 |
 | [FIX-01M4DJZB43SA08NE46DGEZK213](./FIX-01M4DJZB43SA08NE46DGEZK213.md) | « Plus d'infos » ne donnait aucune information sur l'alerte (C36) | 2026-10-08 |
