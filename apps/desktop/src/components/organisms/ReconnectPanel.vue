@@ -40,7 +40,20 @@ async function focusForm() {
   await nextTick();
   form.value?.focusFirstEmpty();
 }
-onMounted(focusForm);
+// À l'ouverture seulement si le curseur n'est dans aucun champ : ce que l'utilisateur est en train de taper
+// ailleurs (une autre page, un autre serveur) n'est jamais volé par un panneau qui apparaît.
+function cursorInAField(): boolean {
+  const active = document.activeElement;
+  return (
+    active instanceof HTMLInputElement ||
+    active instanceof HTMLTextAreaElement ||
+    active instanceof HTMLSelectElement ||
+    (active instanceof HTMLElement && active.isContentEditable)
+  );
+}
+onMounted(() => {
+  if (!cursorInAField()) void focusForm();
+});
 watch(showForm, (shown) => {
   if (shown) void focusForm();
 });

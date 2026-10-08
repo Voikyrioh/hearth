@@ -279,6 +279,23 @@ describe("ReconnectPanel", () => {
     wrapper.unmount();
   });
 
+  // Garde du curseur : un panneau qui apparaît ne vole pas le champ où l'utilisateur est déjà en train de taper.
+  it("does not steal the cursor from a field the user is already typing in", async () => {
+    const ctx = await context([SAMPLE_AGENT], "none");
+    const elsewhere = document.createElement("input");
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    const wrapper = mount(ReconnectPanel, {
+      props: { server, reason: "expired" },
+      global: ctx.global,
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(document.activeElement).toBe(elsewhere);
+    wrapper.unmount();
+    elsewhere.remove();
+  });
+
   it("shows no blocking message when the remembered password was refused (BR-CONN-017)", async () => {
     const ctx = await context();
     const wrapper = mount(ReconnectPanel, {
