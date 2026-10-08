@@ -329,6 +329,88 @@ if ($started) { Stop-Process -Id $pi.pid -Force }
 $su = Start-Process (Join-Path $spaced 'uninstall.exe') -ArgumentList '/S', "_?=$spaced" -PassThru
 [void]$su.WaitForExit(120000)
 
+# (f) Dossier d'installation MEMORISE (HRT-47, S6) : l'installateur sans /D propose le dossier lu sous
+# HKCU\Software\Voikyrioh\Hearth seulement s'il contient encore Hearth ; sinon le dossier par defaut.
+$productKey = 'HKCU:\Software\Voikyrioh\Hearth'
+$defaultDir = Join-Path $env:LOCALAPPDATA 'Hearth'
+function Remember($path) {
+  New-Item -Path $productKey -Force | Out-Null
+  Set-ItemProperty -Path $productKey -Name '(default)' -Value $path
+}
+function Silent-Remembered {
+  $p = Start-Process $installer -ArgumentList '/S' -PassThru
+  if (-not $p.WaitForExit(240000)) { $p.Kill(); Fail 'installateur /S sans /D : delai depasse' }
+  Expect ($p.ExitCode -eq 0) "installateur /S sans /D : code de sortie $($p.ExitCode)"
+}
+function Uninstall-At($path) {
+  $u = Join-Path $path 'uninstall.exe'
+  if (Test-Path $u) { Start-Process $u -ArgumentList '/S', "_?=$path" -Wait }
+  if (Test-Path $path) { Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue }
+  if (Test-Path $productKey) { Remove-Item $productKey -Recurse -Force }
+}
+$hasHearth = { param($path) @(Get-ChildItem $path -Filter *.exe -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'uninstall*' }).Count -ge 1 }
+
+# (f1) dossier memorise qui n'existe plus : le dossier par defaut
+$ghost = Join-Path $env:RUNNER_TEMP 'absent\Hearth'
+Remember $ghost
+Silent-Remembered
+Expect (& $hasHearth $defaultDir) "(f1) dossier memorise absent : installe dans le dossier par defaut ($defaultDir)"
+Expect (-not (Test-Path $ghost)) "(f1) dossier memorise absent : rien n'est cree la-bas ($ghost)"
+Expect ((Get-ItemProperty $productKey).'(default)' -ceq $defaultDir) '(f1) la cle memorise maintenant le dossier par defaut'
+Uninstall-At $defaultDir
+
+# (f2) dossier memorise qui existe mais ne contient pas Hearth (dossier temporaire d'un essai) : le dossier par defaut
+$empty = Join-Path $env:RUNNER_TEMP 'temporary-folder'
+New-Item -ItemType Directory -Force $empty | Out-Null
+Remember $empty
+Silent-Remembered
+Expect (& $hasHearth $defaultDir) '(f2) dossier memorise sans Hearth : installe dans le dossier par defaut'
+Expect (-not (& $hasHearth $empty)) '(f2) dossier memorise sans Hearth : il reste vide'
+Uninstall-At $defaultDir
+Remove-Item $empty -Recurse -Force -ErrorAction SilentlyContinue
+
+# (f3) dossier memorise qui contient Hearth (installation faite en /D, avec espace) : il est repris
+$kept = Join-Path $env:RUNNER_TEMP 'kept hearth'
+$k = Start-Process $installer -ArgumentList '/S', ('/D=' + $kept) -PassThru
+[void]$k.WaitForExit(240000)
+Expect ((Get-ItemProperty $productKey).'(default)' -ceq $kept) '(f3) la cle memorise le dossier choisi'
+Silent-Remembered
+Expect (-not (Test-Path $defaultDir)) '(f3) dossier memorise avec Hearth : repris tel quel, rien dans le dossier par defaut'
+Uninstall-At $kept
+
+# (f4) Un dossier CHOISI (/D) gagne toujours sur le dossier memorise, meme s'il est valide : installation dans le
+# dossier choisi, le dossier memorise reste intact (le choix a l'ecran suit la meme voie : le script ne retouche
+# jamais $INSTDIR apres la page de choix, voir tests/installer.rs).
+$remembered = Join-Path $env:RUNNER_TEMP 'remembered hearth'
+$r = Start-Process $installer -ArgumentList '/S', ('/D=' + $remembered) -PassThru
+[void]$r.WaitForExit(240000)
+Expect (& $hasHearth $remembered) '(f4) dossier memorise valide installe'
+$chosen = Join-Path $env:RUNNER_TEMP 'chosen hearth'
+$c = Start-Process $installer -ArgumentList '/S', ('/D=' + $chosen) -PassThru
+[void]$c.WaitForExit(240000)
+Expect (& $hasHearth $chosen) '(f4) dossier choisi (/D) different du memorise : installation dans le dossier choisi'
+Expect (-not (Test-Path $defaultDir)) '(f4) rien dans le dossier par defaut'
+Uninstall-At $chosen
+Uninstall-At $remembered
+
+# (f5) Le dossier memorise INVALIDE ne fait jamais perdre un /D= : (a) /D= different du memorise ; (b) /D= EGAL au
+# memorise (cas vu en CI : cle laissee par une installation dont le dossier a disparu, puis installation silencieuse
+# dans ce meme dossier). Dans les deux cas l'installation est faite dans le dossier demande.
+$stale = Join-Path $env:RUNNER_TEMP 'stale hearth'
+$other = Join-Path $env:RUNNER_TEMP 'other hearth'
+Remember $stale
+$o = Start-Process $installer -ArgumentList '/S', ('/D=' + $other) -PassThru
+[void]$o.WaitForExit(240000)
+Expect (& $hasHearth $other) '(f5a) dossier memorise invalide + /D=autre : installation dans le dossier demande'
+Expect (-not (Test-Path $stale)) '(f5a) le dossier memorise invalide n''est pas cree'
+Uninstall-At $other
+Remember $stale
+$s = Start-Process $installer -ArgumentList '/S', ('/D=' + $stale) -PassThru
+[void]$s.WaitForExit(240000)
+Expect (& $hasHearth $stale) '(f5b) dossier memorise invalide + /D= le meme dossier : /D= gagne, installation faite la'
+Expect (-not (Test-Path $defaultDir)) '(f5b) rien dans le dossier par defaut'
+Uninstall-At $stale
+
 Clear-Entry
 if ($script:stuck.Count -gt 0) { Fail "l'installateur ne se ferme pas : $($script:stuck -join ' ; ')" }
 Save-Results

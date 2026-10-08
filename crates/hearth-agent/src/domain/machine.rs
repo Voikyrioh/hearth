@@ -100,6 +100,8 @@ const SERVICE_FILESYSTEMS: &[&str] = &[
     "hugetlbfs",
     "mqueue",
     "nsfs",
+    "overlay",
+    "overlayfs",
     "proc",
     "pstore",
     "ramfs",
@@ -118,12 +120,31 @@ pub fn is_real_filesystem(fs: &str) -> bool {
     !SERVICE_FILESYSTEMS.contains(&fs.as_str())
 }
 
-/// Les disques à montrer parmi les volumes listés : systèmes de fichiers de service, volumes de
-/// taille nulle et doublons (un même volume monté à plusieurs endroits, ou lié par `bind`) sont
-/// retirés ; on garde le point de montage le plus court. Résultat trié par point de montage.
+/// Ce volume est-il porté par un périphérique bloc réel (BR-DASH-016) ? Sous Linux et macOS le système donne le
+/// périphérique (`/dev/sda2`, `/dev/mapper/…`) : un volume sans périphérique de ce genre (overlay de Docker,
+/// partage réseau, FUSE) n'est pas un disque ; un jeu de données ZFS n'a pas de chemin `/dev` et en est un. Sous
+/// Windows (lettre de lecteur) l'étiquette du volume ne se juge pas : il l'est.
+/// FIX:01M4EPVM3MK6PDHQDYKQGQB09R (HRT-47, S1a).
+fn carried_by_block_device(volume: &Volume) -> bool {
+    if !volume.mount.starts_with('/') {
+        return true;
+    }
+    volume.name.starts_with("/dev/")
+        || volume
+            .fs
+            .as_deref()
+            .is_some_and(|fs| fs.trim().eq_ignore_ascii_case("zfs"))
+}
+
+/// Les disques à montrer parmi les volumes listés (BR-DASH-012, BR-DASH-016) : systèmes de fichiers de service,
+/// volumes qui ne sont pas portés par un périphérique bloc réel, volumes de taille nulle et doublons (un même
+/// périphérique monté à plusieurs endroits, ou lié par `bind`, dont `/nix/store` en lecture seule) sont retirés ;
+/// on garde le point de montage le plus court. Résultat trié par point de montage.
 pub fn visible_volumes(mut volumes: Vec<Volume>) -> Vec<Volume> {
     volumes.retain(|volume| {
-        volume.total_bytes > 0 && volume.fs.as_deref().is_none_or(is_real_filesystem)
+        volume.total_bytes > 0
+            && volume.fs.as_deref().is_none_or(is_real_filesystem)
+            && carried_by_block_device(volume)
     });
     volumes.sort_by(|a, b| {
         a.mount
@@ -138,7 +159,14 @@ pub fn visible_volumes(mut volumes: Vec<Volume>) -> Vec<Volume> {
         } else {
             &volume.name
         };
-        seen.insert((device.clone(), volume.total_bytes, volume.available_bytes))
+        // Un périphérique `/dev/…` est UN disque, quelle que soit la place libre lue à chaque montage ; les autres
+        // (étiquettes Windows, jeux ZFS) se distinguent aussi par leur taille.
+        let key = if device.starts_with("/dev/") {
+            (device.clone(), 0, 0)
+        } else {
+            (device.clone(), volume.total_bytes, volume.available_bytes)
+        };
+        seen.insert(key)
     });
     volumes.sort_by(|a, b| a.mount.cmp(&b.mount));
     volumes
@@ -231,12 +259,12 @@ mod tests {
             "cgroup2",
             "squashfs",
             " devtmpfs ",
+            "overlay",
+            "overlayfs",
         ] {
             assert!(!is_real_filesystem(fs), "{fs}");
         }
-        for fs in [
-            "ext4", "btrfs", "xfs", "NTFS", "exfat", "overlay", "zfs", "",
-        ] {
+        for fs in ["ext4", "btrfs", "xfs", "NTFS", "exfat", "zfs", ""] {
             assert!(is_real_filesystem(fs), "{fs}");
         }
     }
@@ -253,6 +281,148 @@ mod tests {
         let kept = visible_volumes(volumes);
         let mounts: Vec<_> = kept.iter().map(|v| v.mount.as_str()).collect();
         assert_eq!(mounts, ["/", "/mnt/data"]);
+    }
+
+    /// `/proc/mounts` de la forge, relevé en lecture seule le 2026-10-08 (NixOS, Docker avec containerd) : périphérique,
+    /// point de montage, type. Les options sont sans objet ici. Trois `overlay` de Docker, deux montages de
+    /// `/dev/sda2` (dont `/nix/store` en lecture seule), `/dev/sda1` sur `/boot`, et tous les pseudo-systèmes.
+    const FORGE_PROC_MOUNTS: &[(&str, &str, &str)] = &[
+        ("/dev/sda2", "/", "ext4"),
+        ("tmpfs", "/run", "tmpfs"),
+        ("devtmpfs", "/dev", "devtmpfs"),
+        ("devpts", "/dev/pts", "devpts"),
+        ("tmpfs", "/dev/shm", "tmpfs"),
+        ("proc", "/proc", "proc"),
+        ("ramfs", "/run/keys", "ramfs"),
+        ("sysfs", "/sys", "sysfs"),
+        ("/dev/sda2", "/nix/store", "ext4"),
+        ("none", "/run/secrets.d", "ramfs"),
+        ("securityfs", "/sys/kernel/security", "securityfs"),
+        ("cgroup2", "/sys/fs/cgroup", "cgroup2"),
+        ("none", "/sys/fs/pstore", "pstore"),
+        ("efivarfs", "/sys/firmware/efi/efivars", "efivarfs"),
+        ("bpf", "/sys/fs/bpf", "bpf"),
+        ("tracefs", "/sys/kernel/tracing", "tracefs"),
+        ("hugetlbfs", "/dev/hugepages", "hugetlbfs"),
+        ("mqueue", "/dev/mqueue", "mqueue"),
+        ("debugfs", "/sys/kernel/debug", "debugfs"),
+        ("configfs", "/sys/kernel/config", "configfs"),
+        ("fusectl", "/sys/fs/fuse/connections", "fusectl"),
+        ("tmpfs", "/run/wrappers", "tmpfs"),
+        ("/dev/sda1", "/boot", "vfat"),
+        ("none", "/run/credentials/systemd-journald.service", "tmpfs"),
+        (
+            "overlay",
+            "/var/lib/docker/rootfs/overlayfs/d2699f1bd5785277a814c03a28d8e04461303a113782c2e86306cc73c51eb9e7",
+            "overlay",
+        ),
+        (
+            "overlay",
+            "/var/lib/docker/rootfs/overlayfs/d3dac7934addc8aea3bf80ba3f9d40f7bd2d66ef0db9333e8970fcb2b75f7e25",
+            "overlay",
+        ),
+        ("nsfs", "/run/docker/netns/7974d03fac03", "nsfs"),
+        ("nsfs", "/run/docker/netns/adddcc70a6b8", "nsfs"),
+        (
+            "overlay",
+            "/var/lib/docker/rootfs/overlayfs/516ea538beeb5e0443f9fa80d43d3f8c4c7b5fb99d71715882d9cb491826482b",
+            "overlay",
+        ),
+        ("nsfs", "/run/docker/netns/74278818cdc8", "nsfs"),
+        ("tmpfs", "/run/user/1000", "tmpfs"),
+    ];
+
+    // BR-DASH-016 : la vraie table de montage de la forge au premier smoke (2026-10-08). Les tailles sont celles de la
+    // capture pour `/` et ses montages (`/`, `/nix/store`, les overlay : mêmes octets) ; tout le reste est mis à une
+    // taille NON nulle, pour que seuls le type et le périphérique décident (sysinfo rend 0 pour la plupart des pseudo-systèmes).
+    fn forge_volumes() -> Vec<Volume> {
+        FORGE_PROC_MOUNTS
+            .iter()
+            .map(|(device, mount, fs)| match *device {
+                "/dev/sda1" => volume(device, mount, fs, 500, 450),
+                "/dev/sda2" => volume(device, mount, fs, 1000, 400),
+                "overlay" => volume(device, mount, fs, 1000, 400),
+                _ => volume(device, mount, fs, 64, 64),
+            })
+            .collect()
+    }
+
+    fn mounts(kept: Vec<Volume>) -> Vec<String> {
+        kept.into_iter().map(|v| v.mount).collect()
+    }
+
+    #[test]
+    fn the_real_mount_table_of_the_forge_gives_exactly_two_disks() {
+        assert_eq!(FORGE_PROC_MOUNTS.len(), 31);
+        assert_eq!(
+            FORGE_PROC_MOUNTS
+                .iter()
+                .filter(|(device, _, _)| *device == "overlay")
+                .count(),
+            3
+        );
+        assert_eq!(mounts(visible_volumes(forge_volumes())), ["/", "/boot"]);
+    }
+
+    #[test]
+    fn the_overlays_of_the_forge_are_not_disks_even_alone() {
+        let overlays: Vec<Volume> = forge_volumes()
+            .into_iter()
+            .filter(|v| v.fs.as_deref() == Some("overlay"))
+            .collect();
+        assert_eq!(overlays.len(), 3);
+        assert!(visible_volumes(overlays).is_empty());
+    }
+
+    #[test]
+    fn only_filesystems_carried_by_a_block_device_are_disks() {
+        let volumes = vec![
+            volume("/dev/sda2", "/", "ext4", 1000, 400),
+            volume("/dev/mapper/vg-data", "/mnt/data", "xfs", 2000, 500),
+            volume("tank/home", "/home", "zfs", 3000, 900),
+            volume(
+                "overlay",
+                "/var/lib/docker/overlay2/x/merged",
+                "overlay",
+                1000,
+                400,
+            ),
+            volume(
+                "overlay",
+                "/run/containerd/io.containerd/x",
+                "overlayfs",
+                1000,
+                400,
+            ),
+            volume(
+                "shm",
+                "/var/lib/docker/containers/x/mounts/shm",
+                "tmpfs",
+                64,
+                64,
+            ),
+            volume("devtmpfs", "/dev", "devtmpfs", 8000, 8000),
+            volume("/dev/loop3", "/run/snap/core", "squashfs", 100, 0),
+            volume("nas:/export", "/mnt/nas", "nfs4", 9000, 100),
+            volume("gvfsd-fuse", "/run/user/1000/gvfs", "fuse.gvfsd-fuse", 1, 1),
+        ];
+        assert_eq!(
+            mounts(visible_volumes(volumes)),
+            ["/", "/home", "/mnt/data"]
+        );
+    }
+
+    #[test]
+    fn nixos_read_only_store_and_bind_mounts_do_not_double_the_root() {
+        // `/nix/store` est monté en lecture seule sur le même périphérique que `/` ; la place libre peut
+        // différer d'une lecture à l'autre : le périphérique seul décide.
+        let volumes = vec![
+            volume("/dev/sda2", "/nix/store", "ext4", 1000, 399),
+            volume("/dev/sda2", "/", "ext4", 1000, 400),
+            volume("/dev/sda2", "/etc/hosts", "ext4", 1000, 401),
+            volume("/dev/sda1", "/boot", "vfat", 500, 450),
+        ];
+        assert_eq!(mounts(visible_volumes(volumes)), ["/", "/boot"]);
     }
 
     #[test]

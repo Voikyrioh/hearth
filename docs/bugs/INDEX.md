@@ -4,6 +4,8 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4EPVMJGC21SAKM7YBP4S7S9](./FIX-01M4EPVMJGC21SAKM7YBP4S7S9.md) | L'installateur proposait un ancien dossier qui n'existait plus (S6) | 2026-10-08 |
+| [FIX-01M4EPVM3MK6PDHQDYKQGQB09R](./FIX-01M4EPVM3MK6PDHQDYKQGQB09R.md) | Un volume overlay de Docker rendu comme un disque (S1a) | 2026-10-08 |
 | [FIX-01M4EPX90N9QNNPCHVNB6MCDDF](./FIX-01M4EPX90N9QNNPCHVNB6MCDDF.md) | Ajout d'un serveur : les éléments n'étaient pas alignés pareil à gauche (anneau de couleur, halo de focus, chiffres des étapes) (S3) | 2026-10-09 |
 | [FIX-01M4EPX88BTXFX1PX7E57WGK38](./FIX-01M4EPX88BTXFX1PX7E57WGK38.md) | Un point de montage ou un nom de sonde long sortait de sa carte, un nom court s'écrivait en colonne (S1b) | 2026-10-08 |
 | [FIX-01M4EPX8PWN1RRX8A4HZGTKF0E](./FIX-01M4EPX8PWN1RRX8A4HZGTKF0E.md) | L'anneau du serveur sélectionné était rogné dans la barre des serveurs (S2) | 2026-10-08 |
