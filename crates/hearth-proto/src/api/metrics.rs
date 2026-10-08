@@ -66,7 +66,10 @@ pub struct Sample {
 }
 
 /// Le MAXIMUM de chaque mesure tracée sur un pas d'une fenêtre rééchantillonnée (`1h`, pas de 10 s), rendu à
-/// côté de la moyenne : un pic d'une seconde ne disparaît pas quand il vieillit (BR-DASH-010).
+/// côté de la moyenne : un pic d'une seconde ne disparaît pas quand il vieillit (BR-DASH-010). Les mesures
+/// qui ont un maximum : processeur global, mémoire utilisée, débits, charge, mémoire et température de chaque
+/// carte graphique, température de chaque sonde. Les cœurs et les disques ne sont pas tracés sur l'heure : ils
+/// n'ont pas de maximum et gardent leur moyenne.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepPeak {
     /// Charge globale maximale du pas.
@@ -76,12 +79,26 @@ pub struct StepPeak {
     pub net: Option<NetSample>,
     /// Une entrée par carte graphique du dernier échantillon du pas, dans le même ordre.
     pub gpus: Vec<GpuPeak>,
+    /// Une entrée par sonde du dernier échantillon du pas, dans le même ordre (champ ajouté : absent chez un
+    /// agent plus ancien, ignoré par un client plus ancien).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub temps: Vec<TempPeak>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuPeak {
     pub load_percent: Option<f32>,
     pub memory_used_bytes: Option<u64>,
+    /// Température maximale de la carte (champ ajouté).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp_c: Option<f32>,
+}
+
+/// La température maximale d'une sonde sur le pas.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TempPeak {
+    pub label: String,
+    pub celsius: f32,
 }
 
 /// Fenêtre d'historique demandée (`window=1m|5m|1h`, BR-DASH-010).
@@ -166,6 +183,11 @@ mod tests {
             gpus: vec![GpuPeak {
                 load_percent: Some(90.0),
                 memory_used_bytes: None,
+                temp_c: Some(71.0),
+            }],
+            temps: vec![TempPeak {
+                label: "coretemp Package id 0".into(),
+                celsius: 88.0,
             }],
         }];
         let text = serde_json::to_string(&response).unwrap();
@@ -173,9 +195,24 @@ mod tests {
             serde_json::from_str::<HistoryResponse>(&text).unwrap(),
             response
         );
-        // Un lecteur plus ancien (sans le champ) ignore `peaks` : il lit les moyennes de `samples`.
-        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert!(value["samples"].is_array() && value["peaks"].is_array());
+        // Un lecteur plus ancien (qui ne connaît pas le champ) ignore `peaks` et lit les moyennes de `samples` :
+        // on le joue pour de bon avec un type qui n'a que les anciens champs.
+        #[derive(Deserialize)]
+        struct OlderReader {
+            window: HistoryWindow,
+            step_s: u32,
+            samples: Vec<Sample>,
+        }
+        let older: OlderReader = serde_json::from_str(&text).unwrap();
+        assert_eq!(older.window, HistoryWindow::OneHour);
+        assert_eq!(older.step_s, 10);
+        assert_eq!(older.samples, response.samples);
+        // Un pic sans les champs ajoutés (agent d'avant les températures) se lit : champs absents.
+        let before: StepPeak = serde_json::from_str(
+            r#"{"cpu":1.0,"mem_used_bytes":2,"net":null,"gpus":[{"load_percent":1.0,"memory_used_bytes":null}]}"#,
+        )
+        .unwrap();
+        assert!(before.temps.is_empty() && before.gpus[0].temp_c.is_none());
     }
 
     #[test]

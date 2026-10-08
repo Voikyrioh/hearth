@@ -155,6 +155,9 @@ pub(crate) struct Shared {
     /// L'inscription silencieuse de ce PC (HRT-23) a déjà été tentée pendant cette exécution : au
     /// plus une fois, jamais de boucle.
     pub(crate) enrollment_tried: AtomicBool,
+    /// Journal des maxima de l'heure déjà écrit (bit 1 : absents, bit 2 : de mauvaise longueur) : une fois par
+    /// exécution et par serveur, jamais à chaque reconnexion.
+    pub(crate) peaks_noted: std::sync::atomic::AtomicU8,
 }
 
 impl Shared {
@@ -192,6 +195,7 @@ impl Shared {
             removed: AtomicBool::new(false),
             presented: Mutex::new(None),
             enrollment_tried: AtomicBool::new(false),
+            peaks_noted: std::sync::atomic::AtomicU8::new(0),
         }
     }
 
