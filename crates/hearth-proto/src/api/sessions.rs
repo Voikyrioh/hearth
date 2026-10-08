@@ -50,8 +50,6 @@ pub enum ChallengePurpose {
     Login,
     /// Ouverture du flux d'une session.
     Session,
-    /// Activation ou désactivation du mode attaque.
-    AttackMode,
     /// Retrait d'un poste de confiance (`DELETE /me/devices/{id}`) : un usage distinct de la connexion
     /// et du flux.
     DeviceRemoval,
@@ -249,7 +247,6 @@ mod tests {
         for (purpose, name) in [
             (ChallengePurpose::Login, "login"),
             (ChallengePurpose::Session, "session"),
-            (ChallengePurpose::AttackMode, "attack_mode"),
             (ChallengePurpose::DeviceRemoval, "device_removal"),
         ] {
             assert_eq!(

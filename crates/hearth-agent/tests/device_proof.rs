@@ -107,15 +107,15 @@ async fn a_proof_for_one_usage_identifier_server_or_address_is_worth_nothing_for
     let key = DeviceKey::new();
     let token_hash = [0x42; 32];
 
-    // Usage : une preuve de connexion ne vaut ni pour authentifier un flux ni pour le mode attaque.
+    // Usage : une preuve de connexion ne vaut ni pour authentifier un flux ni pour retirer un poste.
     let login_proof = key.login_proof(&env, "marie", CLIENT_ADDR);
     for binding in [
         Binding::Session {
             token_hash: &token_hash,
         },
-        Binding::AttackMode {
+        Binding::DeviceRemoval {
             token_hash: &token_hash,
-            activate: true,
+            target: "x",
         },
     ] {
         assert!(
@@ -152,12 +152,12 @@ async fn a_proof_for_one_usage_identifier_server_or_address_is_worth_nothing_for
             )
             .is_none()
     );
-    // Geste du mode attaque : une preuve d'activation ne vaut pas pour la désactivation.
+    // Poste visé : une preuve de retrait d'un poste ne vaut pas pour le retrait d'un autre.
     let on = key.prove(
         &env.trust,
-        Binding::AttackMode {
+        Binding::DeviceRemoval {
             token_hash: &token_hash,
-            activate: true,
+            target: "A",
         },
         "marie",
         CLIENT_ADDR,
@@ -166,9 +166,9 @@ async fn a_proof_for_one_usage_identifier_server_or_address_is_worth_nothing_for
         env.trust
             .verify(
                 &on,
-                Binding::AttackMode {
+                Binding::DeviceRemoval {
                     token_hash: &token_hash,
-                    activate: false
+                    target: "B"
                 },
                 "marie",
                 CLIENT_ADDR
@@ -538,7 +538,7 @@ async fn the_challenge_reads_nothing_in_the_database_and_is_the_same_for_any_ide
         for purpose in [
             ChallengePurpose::Login,
             ChallengePurpose::Session,
-            ChallengePurpose::AttackMode,
+            ChallengePurpose::DeviceRemoval,
         ] {
             let response = env
                 .trust

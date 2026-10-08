@@ -79,7 +79,7 @@ async fn the_challenge_answers_the_same_for_an_existing_and_a_missing_identifier
 
     let mut seen = Vec::new();
     for username in ["marie", "paul", "fantome", "MARIE", "x", &"y".repeat(9_000)] {
-        for purpose in ["login", "session", "attack_mode"] {
+        for purpose in ["login", "session", "device_removal"] {
             let reply = challenge(&api, username, purpose).await;
             assert_eq!(reply.status, StatusCode::OK, "{username} {purpose}");
             let object = reply.body.as_object().unwrap();

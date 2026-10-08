@@ -294,12 +294,6 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
         }
-        // Le mode attaque garde sa forme à plat (usage `0x03`) : le handler vérifie preuve et mot de
-        // passe lui-même, aussi strictement.
-        None if matches!(kind, ActKind::AttackModeEnable | ActKind::AttackModeDisable) => {
-            next.run(Request::from_parts(parts, Body::from(bytes)))
-                .await
-        }
         None if !required => {
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
