@@ -380,6 +380,9 @@ pub struct SpyState {
     pub hour_calls: std::sync::atomic::AtomicUsize,
     /// La lecture de l'heure rend une erreur de transport.
     pub hour_fails: std::sync::atomic::AtomicBool,
+    /// Lectures retenues abandonnees (futur jete avant liberation) et lectures retenues terminees.
+    pub hour_aborted: std::sync::atomic::AtomicUsize,
+    pub hour_completed: std::sync::atomic::AtomicUsize,
 }
 
 impl SpyState {
@@ -426,6 +429,8 @@ impl Spy {
                 hour_hold_first: std::sync::atomic::AtomicBool::new(false),
                 hour_release: tokio::sync::Notify::new(),
                 hour_calls: std::sync::atomic::AtomicUsize::new(0),
+                hour_aborted: std::sync::atomic::AtomicUsize::new(0),
+                hour_completed: std::sync::atomic::AtomicUsize::new(0),
                 hour_fails: std::sync::atomic::AtomicBool::new(false),
             }),
         }
@@ -684,7 +689,21 @@ impl hearth_link::ports::Transport for Spy {
                 .hour_hold_first
                 .load(std::sync::atomic::Ordering::SeqCst)
         {
+            // Si le futur est jete pendant l'attente (tache de lecture abandonnee), le fait est compte.
+            struct Waiting<'a>(&'a std::sync::atomic::AtomicUsize, bool);
+            impl Drop for Waiting<'_> {
+                fn drop(&mut self) {
+                    if self.1 {
+                        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+            let mut waiting = Waiting(&self.state.hour_aborted, true);
             self.state.hour_release.notified().await;
+            waiting.1 = false;
+            self.state
+                .hour_completed
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
         {
             let scripted = self.state.scripted_hour.lock().unwrap();

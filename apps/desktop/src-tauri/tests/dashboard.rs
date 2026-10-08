@@ -380,3 +380,21 @@ fn now_reads_the_wall_clock_once_then_only_follows_the_monotonic_clock() {
     assert_eq!(clock.at(start + Duration::from_secs(5)), 1_790_000_005_000);
     assert_eq!(reads.get(), 1, "l'horloge murale n'est lue qu'une fois");
 }
+
+/// `now_ms()` lui-même : lu plusieurs fois, il ne recule jamais et avance avec l'horloge monotone (sa base est
+/// l'horloge murale lue une seule fois : un saut de l'horloge murale ne le touche pas, ce que `MonoMs` prouve
+/// ci-dessus avec une source murale injectée).
+#[test]
+fn now_ms_never_goes_back() {
+    use hearth_desktop_lib::dashboard::now_ms;
+    let mut previous = now_ms();
+    for _ in 0..1000 {
+        let next = now_ms();
+        assert!(next >= previous);
+        previous = next;
+    }
+    assert!(
+        previous > 1_700_000_000_000,
+        "une date plausible (base murale)"
+    );
+}

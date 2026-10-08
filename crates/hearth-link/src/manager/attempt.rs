@@ -106,7 +106,11 @@ pub(crate) async fn read_hour(deps: &Deps, shared: &Shared, snapshot: &[Sample])
     )
     .await;
     match read {
-        Ok(Ok(response)) => crate::domain::history::older_than_snapshot(response.samples, snapshot),
+        Ok(Ok(response)) => {
+            // Les maxima de chaque pas à la place des moyennes : un pic d'une seconde reste visible.
+            let samples = crate::domain::history::with_peaks(response.samples, &response.peaks);
+            crate::domain::history::older_than_snapshot(samples, snapshot)
+        }
         Ok(Err(error)) => {
             tracing::info!(server = %id, %error, "historique d'une heure illisible : la courbe se remplit depuis l'ouverture");
             Vec::new()
