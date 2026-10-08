@@ -283,21 +283,95 @@ mod tests {
         assert_eq!(mounts, ["/", "/mnt/data"]);
     }
 
-    const OVERLAY_MOUNT: &str = "/var/lib/docker/rootfs/overlayfs/516ea538a4b3c6d7e8f90123456789abcdef0123456789abcdef0123456789ab";
+    /// `/proc/mounts` de la forge, relevé en lecture seule le 2026-10-08 (NixOS, Docker avec containerd) : périphérique,
+    /// point de montage, type. Les options sont sans objet ici. Trois `overlay` de Docker, deux montages de
+    /// `/dev/sda2` (dont `/nix/store` en lecture seule), `/dev/sda1` sur `/boot`, et tous les pseudo-systèmes.
+    const FORGE_PROC_MOUNTS: &[(&str, &str, &str)] = &[
+        ("/dev/sda2", "/", "ext4"),
+        ("tmpfs", "/run", "tmpfs"),
+        ("devtmpfs", "/dev", "devtmpfs"),
+        ("devpts", "/dev/pts", "devpts"),
+        ("tmpfs", "/dev/shm", "tmpfs"),
+        ("proc", "/proc", "proc"),
+        ("ramfs", "/run/keys", "ramfs"),
+        ("sysfs", "/sys", "sysfs"),
+        ("/dev/sda2", "/nix/store", "ext4"),
+        ("none", "/run/secrets.d", "ramfs"),
+        ("securityfs", "/sys/kernel/security", "securityfs"),
+        ("cgroup2", "/sys/fs/cgroup", "cgroup2"),
+        ("none", "/sys/fs/pstore", "pstore"),
+        ("efivarfs", "/sys/firmware/efi/efivars", "efivarfs"),
+        ("bpf", "/sys/fs/bpf", "bpf"),
+        ("tracefs", "/sys/kernel/tracing", "tracefs"),
+        ("hugetlbfs", "/dev/hugepages", "hugetlbfs"),
+        ("mqueue", "/dev/mqueue", "mqueue"),
+        ("debugfs", "/sys/kernel/debug", "debugfs"),
+        ("configfs", "/sys/kernel/config", "configfs"),
+        ("fusectl", "/sys/fs/fuse/connections", "fusectl"),
+        ("tmpfs", "/run/wrappers", "tmpfs"),
+        ("/dev/sda1", "/boot", "vfat"),
+        ("none", "/run/credentials/systemd-journald.service", "tmpfs"),
+        (
+            "overlay",
+            "/var/lib/docker/rootfs/overlayfs/d2699f1bd5785277a814c03a28d8e04461303a113782c2e86306cc73c51eb9e7",
+            "overlay",
+        ),
+        (
+            "overlay",
+            "/var/lib/docker/rootfs/overlayfs/d3dac7934addc8aea3bf80ba3f9d40f7bd2d66ef0db9333e8970fcb2b75f7e25",
+            "overlay",
+        ),
+        ("nsfs", "/run/docker/netns/7974d03fac03", "nsfs"),
+        ("nsfs", "/run/docker/netns/adddcc70a6b8", "nsfs"),
+        (
+            "overlay",
+            "/var/lib/docker/rootfs/overlayfs/516ea538beeb5e0443f9fa80d43d3f8c4c7b5fb99d71715882d9cb491826482b",
+            "overlay",
+        ),
+        ("nsfs", "/run/docker/netns/74278818cdc8", "nsfs"),
+        ("tmpfs", "/run/user/1000", "tmpfs"),
+    ];
+
+    // BR-DASH-016 : la vraie table de montage de la forge au premier smoke (2026-10-08). Les tailles sont celles de la
+    // capture pour `/` et ses montages (`/`, `/nix/store`, les overlay : mêmes octets) ; tout le reste est mis à une
+    // taille NON nulle, pour que seuls le type et le périphérique décident (sysinfo rend 0 pour la plupart des pseudo-systèmes).
+    fn forge_volumes() -> Vec<Volume> {
+        FORGE_PROC_MOUNTS
+            .iter()
+            .map(|(device, mount, fs)| match *device {
+                "/dev/sda1" => volume(device, mount, fs, 500, 450),
+                "/dev/sda2" => volume(device, mount, fs, 1000, 400),
+                "overlay" => volume(device, mount, fs, 1000, 400),
+                _ => volume(device, mount, fs, 64, 64),
+            })
+            .collect()
+    }
 
     fn mounts(kept: Vec<Volume>) -> Vec<String> {
         kept.into_iter().map(|v| v.mount).collect()
     }
 
-    // BR-DASH-016 : la table de montage de la forge au premier smoke (2026-10-08, NixOS avec Docker).
     #[test]
-    fn the_docker_overlay_of_the_forge_is_not_a_disk() {
-        let volumes = vec![
-            volume("/dev/sda2", "/", "ext4", 1000, 400),
-            volume("/dev/sda1", "/boot", "vfat", 500, 450),
-            volume("overlay", OVERLAY_MOUNT, "overlay", 1000, 400),
-        ];
-        assert_eq!(mounts(visible_volumes(volumes)), ["/", "/boot"]);
+    fn the_real_mount_table_of_the_forge_gives_exactly_two_disks() {
+        assert_eq!(FORGE_PROC_MOUNTS.len(), 31);
+        assert_eq!(
+            FORGE_PROC_MOUNTS
+                .iter()
+                .filter(|(device, _, _)| *device == "overlay")
+                .count(),
+            3
+        );
+        assert_eq!(mounts(visible_volumes(forge_volumes())), ["/", "/boot"]);
+    }
+
+    #[test]
+    fn the_overlays_of_the_forge_are_not_disks_even_alone() {
+        let overlays: Vec<Volume> = forge_volumes()
+            .into_iter()
+            .filter(|v| v.fs.as_deref() == Some("overlay"))
+            .collect();
+        assert_eq!(overlays.len(), 3);
+        assert!(visible_volumes(overlays).is_empty());
     }
 
     #[test]

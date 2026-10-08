@@ -23,7 +23,7 @@ Installateur Windows, écran graphique et installation silencieuse. Source : pre
 Aucun.
 
 ## Correction
-`HearthRememberedDir` (hooks.nsh) : le dossier mémorisé n'est gardé que s'il contient `hearth-desktop.exe` ; sinon dossier par défaut. Limite : un /D explicite égal au dossier mémorisé vide est aussi ramené au défaut.
+`HearthRememberedDir` (hooks.nsh) : le dossier mémorisé n'est gardé que s'il contient `hearth-desktop.exe` ; sinon dossier par défaut. Le dossier mémorisé n'est jamais retouché après la page de choix (le choix à l'écran gagne, review de la PR #62) : seul le silencieux le corrige dans la section masquée. Limite : un `/D` explicite égal au dossier mémorisé vide est aussi ramené au défaut (même phrase dans BR-CLIENT-008).
 
 ## Règles
 - BR-CLIENT-008 complétée.

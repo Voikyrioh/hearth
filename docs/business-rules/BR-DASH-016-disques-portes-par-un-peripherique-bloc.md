@@ -23,7 +23,7 @@ La liste des disques (identité de la machine, échantillons, carte « Disque le
 - `crates/hearth-agent/src/infrastructure/system/sysinfo_probe.rs::to_volumes` : la même liste alimente l'identité, les échantillons (donc « disque le plus plein ») et le rééchantillonnage de l'historique.
 
 ## Vérification
-- `domain::machine::tests` : table de montage de la forge (`/dev/sda2 /`, `/dev/sda1 /boot`, `overlay …/rootfs/overlayfs/<64 hex>`), table de pseudo-systèmes, NixOS et montages de liaison, étiquettes Windows.
+- `domain::machine::tests` : la table de montage RÉELLE de la forge (31 lignes de `/proc/mounts` relevées le 2026-10-08 : `/dev/sda2 /`, `/dev/sda2 /nix/store` en lecture seule, `/dev/sda1 /boot`, trois `overlay` de Docker, pseudo-systèmes) : exactement `/` et `/boot`, table de pseudo-systèmes, NixOS et montages de liaison, étiquettes Windows.
 
 ## Cas limites
 - Un volume dont le périphérique n'est pas lisible sous Linux (nom vide) n'est pas rendu : on ne montre pas ce qu'on ne sait pas rattacher à un disque (BR-DASH-012 gardait un nom inconnu ; un nom vide sous un point de montage `/` n'est plus un disque).

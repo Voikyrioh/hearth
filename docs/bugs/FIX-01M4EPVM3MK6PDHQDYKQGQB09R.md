@@ -11,7 +11,7 @@ date_correction: 2026-10-08
 Une ligne `overlay` montée sur `/var/lib/docker/rootfs/overlayfs/<64 hex>`, avec les mêmes octets que `/`, apparaissait dans la carte Disques et dans la ligne « Disques » de la carte Machine.
 
 ## Reproduction
-`domain::machine::tests::the_docker_overlay_of_the_forge_is_not_a_disk` et deux autres (rouges avant), table de montage de la capture du smoke.
+`domain::machine::tests::the_real_mount_table_of_the_forge_gives_exactly_two_disks` (31 lignes de `/proc/mounts` de la forge relevées le 2026-10-08, trois overlay : deux disques attendus) et d'autres (rouges avant). Pourquoi Voiky ne voyait qu'UN overlay sur trois : l'ancienne clé de doublon (nom, taille, place libre) fusionnait les trois, qui portent le même nom `overlay` et les mêmes octets que `/`.
 
 ## Cause root
 `overlay` était déclaré système de fichiers « réel » (test compris) et aucune règle ne demandait un périphérique bloc.

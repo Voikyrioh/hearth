@@ -58,7 +58,8 @@ Var HearthAutostartShown
 Var HearthAutostartWanted
 
 ; Écarte le dossier mémorisé qui n'existe plus ou ne contient pas Hearth (S6). Appelée avant tout contrôle du dossier
-; (écran graphique : avant la première page ; silencieux : section masquée ci-dessous, seule voie).
+; (écran graphique : avant la première page, jamais après : le choix de l'utilisateur gagne ; silencieux : section
+; masquée ci-dessous, seule voie).
 Function HearthRememberedDir
   ClearErrors
   ReadRegStr $R6 HKCU "${HEARTH_PRODUCT_KEY}" ""
@@ -161,7 +162,11 @@ FunctionEnd
 !define MUI_CUSTOMFUNCTION_GUIINIT HearthGuiInit
 
 Section "-HearthPreflight"
-  Call HearthRememberedDir
+  ; Le dossier mémorisé n'est qu'une valeur PROPOSÉE avant la page de choix : en écran graphique ce que
+  ; l'utilisateur a choisi ou passé par /D gagne toujours (la page est déjà passée), donc seulement en silencieux.
+  ${If} ${Silent}
+    Call HearthRememberedDir
+  ${EndIf}
   Call HearthPreflight
   ${If} $R9 != ""
     Call HearthRefuse

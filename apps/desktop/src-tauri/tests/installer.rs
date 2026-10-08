@@ -292,7 +292,7 @@ fn a_remembered_install_folder_is_only_kept_when_it_still_holds_hearth() {
     // Avant le contrôle du disque, dans les deux voies : écran graphique (avant la première page) et section masquée.
     for entry in [function_body(&script, "HearthGuiInit"), {
         let start = script.find("Section \"-HearthPreflight\"").unwrap();
-        script[start..start + 200].to_owned()
+        script[start..start + script[start..].find("SectionEnd").unwrap()].to_owned()
     }] {
         let remembered = entry.find("Call HearthRememberedDir").unwrap();
         let preflight = entry.find("Call HearthPreflight").unwrap();
@@ -301,4 +301,21 @@ fn a_remembered_install_folder_is_only_kept_when_it_still_holds_hearth() {
     assert!(
         post_install(&script).contains(r#"!if "${MAINBINARYNAME}.exe" != "${HEARTH_MAIN_EXE}""#)
     );
+}
+
+// Le dossier mémorisé n'est qu'une PROPOSITION avant la page de choix : après cette page (section masquée), il ne
+// corrige plus que l'installation silencieuse ; ce que l'utilisateur a choisi à l'écran n'est jamais écrasé.
+#[test]
+fn the_remembered_folder_never_overrides_a_folder_chosen_on_screen() {
+    let script = hooks();
+    let start = script.find("Section \"-HearthPreflight\"").unwrap();
+    let section = &script[start..start + script[start..].find("SectionEnd").unwrap()];
+    let call = section.find("Call HearthRememberedDir").unwrap();
+    let guard = section.find("${If} ${Silent}").unwrap();
+    assert!(
+        guard < call,
+        "l'appel de la section n'a lieu qu'en silencieux"
+    );
+    // Un seul autre appel : avant la première page, jamais après.
+    assert_eq!(script.matches("Call HearthRememberedDir").count(), 2);
 }

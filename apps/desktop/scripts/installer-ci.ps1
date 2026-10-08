@@ -378,6 +378,21 @@ Silent-Remembered
 Expect (-not (Test-Path $defaultDir)) '(f3) dossier memorise avec Hearth : repris tel quel, rien dans le dossier par defaut'
 Uninstall-At $kept
 
+# (f4) Un dossier CHOISI (/D) gagne toujours sur le dossier memorise, meme s'il est valide : installation dans le
+# dossier choisi, le dossier memorise reste intact (le choix a l'ecran suit la meme voie : le script ne retouche
+# jamais $INSTDIR apres la page de choix, voir tests/installer.rs).
+$remembered = Join-Path $env:RUNNER_TEMP 'remembered hearth'
+$r = Start-Process $installer -ArgumentList '/S', ('/D=' + $remembered) -PassThru
+[void]$r.WaitForExit(240000)
+Expect (& $hasHearth $remembered) '(f4) dossier memorise valide installe'
+$chosen = Join-Path $env:RUNNER_TEMP 'chosen hearth'
+$c = Start-Process $installer -ArgumentList '/S', ('/D=' + $chosen) -PassThru
+[void]$c.WaitForExit(240000)
+Expect (& $hasHearth $chosen) '(f4) dossier choisi (/D) different du memorise : installation dans le dossier choisi'
+Expect (-not (Test-Path $defaultDir)) '(f4) rien dans le dossier par defaut'
+Uninstall-At $chosen
+Uninstall-At $remembered
+
 Clear-Entry
 if ($script:stuck.Count -gt 0) { Fail "l'installateur ne se ferme pas : $($script:stuck -join ' ; ')" }
 Save-Results
