@@ -89,6 +89,30 @@ async function apply() {
   else if (result === "failed") toasts.push({ kind: "error", message: t("audit.loadFailed") });
 }
 
+// FIX:01M4DNJ42ETVYR5Y01YNVPW715 (C28) : plus de bouton « Appliquer » (décision à confirmer par Voiky, HRT-43) :
+// la recherche s'applique 350 ms après la frappe, un choix de liste tout de suite, une période personnalisée
+// dès que ses deux dates sont valides (`apply` ne lance rien si la période est invalide). Un seul chemin :
+// chaque changement de brouillon relance au plus UNE lecture (le délai de frappe est annulé par un choix).
+const SEARCH_DELAY_MS = 350;
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+watch(draft, (current, previous) => {
+  clearTimeout(searchTimer);
+  if (!dirty.value) return;
+  const textOnly = sameDraft({ ...current, text: previous.text }, previous);
+  if (textOnly) {
+    searchTimer = setTimeout(() => {
+      if (dirty.value) void apply();
+    }, SEARCH_DELAY_MS);
+  } else void apply();
+});
+
+/** Entrée dans la recherche : tout de suite, et le délai de frappe déjà armé est annulé (une seule lecture). */
+function submit() {
+  clearTimeout(searchTimer);
+  if (dirty.value) void apply();
+}
+onBeforeUnmount(() => clearTimeout(searchTimer));
+
 async function clear() {
   const ok = await audit.clearFilters();
   if (ok) {
@@ -125,11 +149,10 @@ const reasonText = computed(() =>
     <AuditFilters
       v-model:draft="draft"
       :accounts="audit.knownAccounts"
-      :dirty="dirty"
       :active="active"
       :busy="loading"
       :now="now"
-      @apply="apply"
+      @apply="submit"
       @clear="clear"
     />
 
@@ -147,7 +170,7 @@ const reasonText = computed(() =>
     </div>
 
     <div class="audit__meta">
-      <span v-if="!empty" class="audit__count">{{ count }}</span>
+      <span v-if="!empty" class="audit__count" role="status">{{ count }}</span>
       <HSpinner v-if="loading" :label="t('audit.loading')" />
     </div>
 
@@ -180,11 +203,7 @@ const reasonText = computed(() =>
         :illustration="unfiltered ? (SCREEN_ILLUSTRATIONS.journal ?? undefined) : undefined"
         :title="unfiltered ? t('audit.emptyAll') : t('audit.emptyFiltered')"
         :text="''"
-      >
-        <template v-if="!unfiltered" #action>
-          <HButton variant="secondary" @click="clear">{{ t("audit.clear") }}</HButton>
-        </template>
-      </EmptyState>
+      />
     </div>
 
     <div v-if="audit.loadMoreFailed" class="audit__error" role="alert">
@@ -206,9 +225,9 @@ const reasonText = computed(() =>
 .audit {
   position: relative;
   display: flex;
-  flex: 1 0 auto;
+  flex: 1 1 0;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .audit__stale,
@@ -238,7 +257,7 @@ const reasonText = computed(() =>
 .audit__area {
   position: relative;
   display: flex;
-  flex: 1 0 auto;
+  flex: 1 1 0;
   flex-direction: column;
 }
 

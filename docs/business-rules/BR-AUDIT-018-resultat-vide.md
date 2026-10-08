@@ -22,7 +22,7 @@ Sans filtre : « Aucune activité enregistrée pour l'instant » ; avec filtre o
 
 ## Vérification
 - `crates/hearth-agent/tests/audit_repo.rs::the_search_finds_every_visible_field_regardless_of_case_and_accents` (recherche sans résultat).
-- `apps/desktop/src/pages/audit.test.ts` (« journal vide », « Appliquer attend une modification… »).
+- `apps/desktop/src/pages/audit.test.ts` (« journal vide », « pas de bouton Appliquer… »).
 - `apps/desktop/e2e/audit.spec.ts` (« journal vide », « filtres »).
 
 ## Cas limites

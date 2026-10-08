@@ -327,7 +327,7 @@ describe("filtres (BR-AUDIT-014, 015)", () => {
     expect(filter?.accounts).toEqual(["paul"]);
   });
 
-  it("le bouton « Appliquer » attend une vraie différence", () => {
+  it("un brouillon identique à l'appliqué ne relance rien", () => {
     const a = draft({ kinds: ["login_ok", "update"] });
     expect(sameDraft(a, draft({ kinds: ["update", "login_ok"] }))).toBe(true);
     expect(sameDraft(a, draft({ kinds: ["login_ok"] }))).toBe(false);
