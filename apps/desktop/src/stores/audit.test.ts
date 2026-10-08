@@ -379,6 +379,31 @@ describe("cycle de vie", () => {
     await flushPromises();
     expect(audit.entries.every((entry) => entry.account === "marie")).toBe(true);
   });
+  it("deux applications qui se chevauchent : la première, résolue en dernier, ne restaure rien et ne notifie rien", async () => {
+    const ctx = await startedApp();
+    ctx.bridge.audit.seed("forge", 40);
+    const audit = useAuditStore();
+    await audit.open("forge");
+    await flushPromises();
+    const original = ctx.bridge.readAudit.bind(ctx.bridge);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    ctx.bridge.readAudit = async (...args) => {
+      if (args[1].accounts.includes("paul")) await gate;
+      return original(...args);
+    };
+    const slow = audit.apply({ ...emptyDraft(), accounts: ["paul"] });
+    const fast = audit.apply({ ...emptyDraft(), accounts: ["marie"] });
+    expect(await fast).toBe("applied");
+    release();
+    // Dépassée : ni « failed » (qui ferait notifier une erreur), ni restauration du filtre d'avant.
+    expect(await slow).toBe("superseded");
+    await flushPromises();
+    expect(audit.applied.accounts).toEqual(["marie"]);
+    expect(audit.status).toBe("ready");
+  });
 });
 
 describe("mergeDesc", () => {

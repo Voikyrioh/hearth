@@ -221,12 +221,13 @@ export const useAuditStore = defineStore("audit", () => {
   }
 
   /**
-   * Reprend la liste à zéro avec le filtre appliqué. `silent` : relecture interne (rattrapage), sans
+   * Reprend la liste à zéro avec le filtre appliqué. `superseded` : une lecture plus récente a pris la
+   * main (ce n'est PAS un échec : l'appelant ne restaure rien et ne notifie rien). `silent` : relecture interne (rattrapage), sans
    * spinner et sans remonter l'utilisateur en haut de la liste.
    */
-  async function load(options: { silent?: boolean } = {}): Promise<boolean> {
+  async function load(options: { silent?: boolean } = {}): Promise<"ok" | "failed" | "superseded"> {
     const id = serverId.value;
-    if (id === null) return false;
+    if (id === null) return "failed";
     generation += 1;
     const mine = generation;
     if (!options.silent) status.value = "loading";
@@ -235,7 +236,7 @@ export const useAuditStore = defineStore("audit", () => {
     liveBuffer = [];
     try {
       const page = await bridge().readAudit(id, plain(applied.value), null);
-      if (mine !== generation) return false;
+      if (mine !== generation) return "superseded";
       const buffered = liveBuffer ?? [];
       liveBuffer = null;
       nextBefore.value = page.nextBefore;
@@ -248,12 +249,12 @@ export const useAuditStore = defineStore("audit", () => {
       if (!options.silent) topSignal.value += 1;
       // Ce qui est arrivé pendant la lecture n'est pas confirmé : une relecture le vérifie.
       if (buffered.length > 0) scheduleCatchUp();
-      return true;
+      return "ok";
     } catch (error) {
-      if (mine !== generation) return false;
+      if (mine !== generation) return "superseded";
       liveBuffer = null;
       fail(error);
-      return false;
+      return "failed";
     }
   }
 
@@ -460,21 +461,23 @@ export const useAuditStore = defineStore("audit", () => {
   }
 
   /**
-   * « Appliquer les filtres ». `invalid` : la période est invalide, rien n'est lancé. `failed` : la
+   * l'application d'un filtre. `invalid` : la période est invalide, rien n'est lancé. `failed` : la
    * lecture a échoué, les filtres précédents et la liste affichée restent (BR-AUDIT-014).
    */
   async function apply(
     draft: FilterDraft,
     now: number = Date.now(),
-  ): Promise<"applied" | "invalid" | "failed"> {
+  ): Promise<"applied" | "invalid" | "failed" | "superseded"> {
     const filter = resolveFilter(cloneDraft(draft), now);
     if (!filter) return "invalid";
     const previous = applied.value;
     const previousDraft = appliedDraft;
     applied.value = filter;
     appliedDraft = cloneDraft(draft);
-    const ok = await load();
-    if (ok) return "applied";
+    const outcome = await load();
+    if (outcome === "ok") return "applied";
+    // Dépassée par une application plus récente : son filtre est déjà posé, on n'y touche pas.
+    if (outcome === "superseded") return "superseded";
     applied.value = previous;
     appliedDraft = previousDraft;
     return "failed";
@@ -486,12 +489,12 @@ export const useAuditStore = defineStore("audit", () => {
     const previousDraft = appliedDraft;
     applied.value = { ...EMPTY_AUDIT_FILTER };
     appliedDraft = null;
-    const ok = await load();
-    if (!ok) {
+    const outcome = await load();
+    if (outcome === "failed") {
       applied.value = previous;
       appliedDraft = previousDraft;
     }
-    return ok;
+    return outcome !== "failed";
   }
 
   /** « Réessayer » après un échec : relit ce qui manque (la liste affichée est gardée) ou tout. */
