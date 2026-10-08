@@ -64,6 +64,7 @@ pub fn state_with(
         )),
         update,
         stream: StreamContext::new(StreamSettings::default()),
+        erasure_pending: false,
     }
 }
 

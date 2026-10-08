@@ -13,11 +13,39 @@ fn at_of(sample: &Sample) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(&sample.at, &Rfc3339).ok()
 }
 
+/// Ce que l'agent a rendu comme maxima par rapport aux échantillons de l'heure : de quoi décider d'un journal
+/// visible quand la correction ne peut pas s'appliquer (un repli silencieux laisserait la courbe sur les
+/// moyennes sans que personne le voie).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeaksFit {
+    /// Rien à corriger : aucun échantillon.
+    NoSamples,
+    /// Un maximum par échantillon : appliqués.
+    Matching,
+    /// Aucun maximum (agent plus ancien, ou route qui a cessé d'en rendre).
+    Absent { samples: usize },
+    /// Un nombre de maxima différent du nombre d'échantillons : ignorés.
+    Mismatch { samples: usize, peaks: usize },
+}
+
+pub fn peaks_fit(samples: &[Sample], peaks: &[StepPeak]) -> PeaksFit {
+    match (samples.len(), peaks.len()) {
+        (0, _) => PeaksFit::NoSamples,
+        (n, p) if n == p => PeaksFit::Matching,
+        (n, 0) => PeaksFit::Absent { samples: n },
+        (n, p) => PeaksFit::Mismatch {
+            samples: n,
+            peaks: p,
+        },
+    }
+}
+
 /// Remplace, dans chaque échantillon de l'heure (une MOYENNE de 10 s), les mesures tracées par le MAXIMUM de son
 /// pas (`peaks`, un par échantillon, même ordre) : le client trace le maximum sur la fenêtre d'une heure, comme
 /// en direct, donc un pic d'une seconde ne disparaît pas quand il vieillit. Si l'agent ne rend pas de maxima
 /// (agent plus ancien) ou pas autant que d'échantillons, les moyennes restent telles quelles.
 // FIX:01M4CY8BVM3MV9769QWNDNW7VT
+// FIX:01M4D6KNC8G4T68J25J7DXMMNM : `peaks_fit` dit si les maxima s'appliquent (journal de `read_hour`).
 pub fn with_peaks(mut samples: Vec<Sample>, peaks: &[StepPeak]) -> Vec<Sample> {
     if peaks.len() != samples.len() {
         return samples;
@@ -34,6 +62,17 @@ pub fn with_peaks(mut samples: Vec<Sample>, peaks: &[StepPeak]) -> Vec<Sample> {
             }
             if peak.memory_used_bytes.is_some() {
                 gpu.memory_used_bytes = peak.memory_used_bytes;
+            }
+            if peak.temp_c.is_some() {
+                gpu.temp_c = peak.temp_c;
+            }
+        }
+        // Les sondes sont rendues dans le même ordre que celles de l'échantillon (deux sondes homonymes
+        // comprises) : on les apparie par rang, le nom ne servant qu'à refuser un décalage.
+        // FIX:01M4D6KN655K009FC3JR9H70VN
+        for (temp, peak) in sample.temps.iter_mut().zip(&peak.temps) {
+            if temp.label == peak.label {
+                temp.celsius = peak.celsius;
             }
         }
     }
@@ -95,7 +134,7 @@ mod tests {
     #[test]
     fn the_peaks_replace_the_means_so_a_spike_is_not_lost_and_a_missing_or_short_list_changes_nothing()
      {
-        use hearth_proto::api::metrics::{GpuPeak, GpuSample, NetSample};
+        use hearth_proto::api::metrics::{GpuPeak, GpuSample, NetSample, TempPeak, TempSample};
         let mut mean = at("2026-10-08T09:00:00Z");
         mean.cpu = 19.0;
         mean.gpus = vec![GpuSample {
@@ -103,8 +142,18 @@ mod tests {
             load_percent: Some(20.0),
             memory_used_bytes: Some(5),
             memory_total_bytes: Some(10),
-            temp_c: None,
+            temp_c: Some(50.0),
         }];
+        mean.temps = vec![
+            TempSample {
+                label: "cpu".into(),
+                celsius: 45.0,
+            },
+            TempSample {
+                label: "ssd".into(),
+                celsius: 30.0,
+            },
+        ];
         let peak = StepPeak {
             cpu: 100.0,
             mem_used_bytes: 7,
@@ -115,9 +164,27 @@ mod tests {
             gpus: vec![GpuPeak {
                 load_percent: Some(90.0),
                 memory_used_bytes: None,
+                temp_c: Some(80.0),
             }],
+            temps: vec![
+                TempPeak {
+                    label: "cpu".into(),
+                    celsius: 95.0,
+                },
+                // Une sonde qui ne porte pas le même nom que celle de l'échantillon : ignorée.
+                TempPeak {
+                    label: "autre".into(),
+                    celsius: 99.0,
+                },
+            ],
         };
         let out = with_peaks(vec![mean.clone()], std::slice::from_ref(&peak));
+        assert_eq!(out[0].gpus[0].temp_c, Some(80.0), "température de la carte");
+        assert_eq!(out[0].temps[0].celsius, 95.0, "température de la sonde");
+        assert_eq!(
+            out[0].temps[1].celsius, 30.0,
+            "autre sonde : moyenne gardée"
+        );
         assert_eq!(out[0].cpu, 100.0);
         assert_eq!(out[0].mem.used_bytes, 7);
         assert_eq!(out[0].gpus[0].load_percent, Some(90.0));
@@ -130,6 +197,28 @@ mod tests {
         // Aucun maximum (agent plus ancien) ou une liste d'une autre longueur : les moyennes, intactes.
         assert_eq!(with_peaks(vec![mean.clone()], &[])[0].cpu, 19.0);
         assert_eq!(with_peaks(vec![mean.clone(), mean], &[peak])[0].cpu, 19.0);
+    }
+
+    #[test]
+    fn the_fit_of_the_peaks_tells_a_missing_or_short_list_so_it_can_be_logged() {
+        let two = vec![at("2026-10-08T09:00:00Z"), at("2026-10-08T09:00:10Z")];
+        let one = vec![StepPeak {
+            cpu: 1.0,
+            mem_used_bytes: 1,
+            net: None,
+            gpus: vec![],
+            temps: vec![],
+        }];
+        assert_eq!(peaks_fit(&[], &[]), PeaksFit::NoSamples);
+        assert_eq!(peaks_fit(&two, &[]), PeaksFit::Absent { samples: 2 });
+        assert_eq!(
+            peaks_fit(&two, &one),
+            PeaksFit::Mismatch {
+                samples: 2,
+                peaks: 1
+            }
+        );
+        assert_eq!(peaks_fit(&two[..1], &one), PeaksFit::Matching);
     }
 
     #[test]

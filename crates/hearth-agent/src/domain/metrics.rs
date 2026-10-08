@@ -223,19 +223,48 @@ pub fn window_samples(raw: Vec<Arc<Sample>>, window: HistoryWindow) -> Vec<Arc<S
         .collect()
 }
 
-/// Le maximum de chaque mesure tracée sur un pas (voir [`peaks`]).
+/// Le maximum de chaque mesure tracée sur la fenêtre d'une heure par un pas (voir [`peaks`]) : processeur global,
+/// mémoire utilisée, débits, charge, mémoire et température de chaque carte graphique, température de chaque
+/// sonde. Les cœurs et les disques ne sont pas tracés sur l'heure : ils n'ont pas de maximum ici.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StepPeak {
     pub cpu: f32,
     pub mem_used_bytes: u64,
     pub net: Option<NetRate>,
     pub gpus: Vec<GpuPeak>,
+    /// Une entrée par sonde du dernier échantillon du pas, dans le même ordre.
+    pub temps: Vec<TempPeak>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GpuPeak {
     pub load_percent: Option<f32>,
     pub memory_used_bytes: Option<u64>,
+    pub temp_c: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TempPeak {
+    pub label: String,
+    pub celsius: f32,
+}
+
+/// Le rang d'une sonde parmi celles qui portent le même nom (la première `coretemp` vaut 0, la deuxième 1…) :
+/// avec le nom, c'est ce qui la reconnaît d'un échantillon à l'autre.
+fn rank_among_same_label(temps: &[TempReading], index: usize) -> usize {
+    temps[..index]
+        .iter()
+        .filter(|probe| probe.label == temps[index].label)
+        .count()
+}
+
+/// La sonde de ce nom et de ce rang dans un échantillon, s'il y en a une.
+fn probe_of_rank<'a>(
+    temps: &'a [TempReading],
+    label: &str,
+    rank: usize,
+) -> Option<&'a TempReading> {
+    temps.iter().filter(|probe| probe.label == label).nth(rank)
 }
 
 /// Découpe une série en groupes consécutifs de même pas (les pas sont alignés sur les secondes de l'horloge
@@ -293,6 +322,27 @@ pub fn peaks<S: Borrow<Sample>>(samples: &[S], step_s: u32) -> Vec<StepPeak> {
                     GpuPeak {
                         load_percent: max_f32(&mut same().filter_map(|g| g.load_percent)),
                         memory_used_bytes: same().filter_map(|g| g.memory_used_bytes).max(),
+                        temp_c: max_f32(&mut same().filter_map(|g| g.temp_c)),
+                    }
+                })
+                .collect();
+            // FIX:01M4D6KN655K009FC3JR9H70VN : le maximum de chaque sonde, la sonde étant reconnue par son nom ET
+            // son rang parmi les sondes du même nom (deux sondes homonymes ne se mélangent pas).
+            let temps = last
+                .temps
+                .iter()
+                .enumerate()
+                .map(|(index, temp)| {
+                    let rank = rank_among_same_label(&last.temps, index);
+                    TempPeak {
+                        label: temp.label.clone(),
+                        celsius: max_f32(
+                            &mut group
+                                .iter()
+                                .filter_map(|s| probe_of_rank(&s.borrow().temps, &temp.label, rank))
+                                .map(|t| t.celsius),
+                        )
+                        .unwrap_or(temp.celsius),
                     }
                 })
                 .collect();
@@ -305,6 +355,7 @@ pub fn peaks<S: Borrow<Sample>>(samples: &[S], step_s: u32) -> Vec<StepPeak> {
                     .unwrap_or(last.mem.used_bytes),
                 net,
                 gpus,
+                temps,
             })
         })
         .collect()
@@ -417,16 +468,19 @@ fn average(group: &[&Sample]) -> Sample {
     let temps = last
         .temps
         .iter()
-        .map(|temp| TempReading {
-            label: temp.label.clone(),
-            celsius: mean_f32(
-                group
-                    .iter()
-                    .flat_map(|s| s.temps.iter())
-                    .filter(|t| t.label == temp.label)
-                    .map(|t| t.celsius),
-            )
-            .unwrap_or(temp.celsius),
+        .enumerate()
+        .map(|(index, temp)| {
+            let rank = rank_among_same_label(&last.temps, index);
+            TempReading {
+                label: temp.label.clone(),
+                celsius: mean_f32(
+                    group
+                        .iter()
+                        .filter_map(|s| probe_of_rank(&s.temps, &temp.label, rank))
+                        .map(|t| t.celsius),
+                )
+                .unwrap_or(temp.celsius),
+            }
         })
         .collect();
     Sample {
@@ -542,6 +596,70 @@ mod tests {
         );
         assert_eq!(max[0].gpus[0].load_percent, Some(80.0));
         assert_eq!(max[0].gpus[0].memory_used_bytes, Some(10));
+    }
+
+    /// Les températures sont tracées sur l'heure comme le reste : elles ont leur maximum par pas (la moyenne
+    /// masquerait un coup de chaud d'une seconde).
+    #[test]
+    fn the_peak_of_a_step_keeps_the_hottest_second_of_each_probe_and_of_the_gpu() {
+        let reading = |label: &str, celsius: f32| TempReading {
+            label: label.into(),
+            celsius,
+        };
+        let gpu = |temp: Option<f32>| GpuReading {
+            name: "g".into(),
+            load_percent: None,
+            memory_used_bytes: None,
+            memory_total_bytes: Some(100),
+            temp_c: temp,
+        };
+        let mut a = sample(0, 1.0);
+        a.temps = vec![reading("cpu", 45.0), reading("ssd", 30.0)];
+        a.gpus = vec![gpu(Some(60.0))];
+        let mut hot = sample(1, 1.0);
+        hot.temps = vec![reading("cpu", 92.0), reading("ssd", 31.0)];
+        hot.gpus = vec![gpu(Some(85.0))];
+        let mut b = sample(2, 1.0);
+        b.temps = vec![reading("cpu", 46.0), reading("ssd", 29.0)];
+        b.gpus = vec![gpu(None)];
+        let mean = resample(&[a.clone(), hot.clone(), b.clone()], 10);
+        let max = peaks(&[a, hot, b], 10);
+        assert_eq!(max[0].temps.len(), 2);
+        assert_eq!(max[0].temps[0].label, "cpu");
+        assert_eq!(
+            max[0].temps[0].celsius, 92.0,
+            "le coup de chaud d'une seconde"
+        );
+        assert!(
+            mean[0].temps[0].celsius < 70.0,
+            "la moyenne le masque : {}",
+            mean[0].temps[0].celsius
+        );
+        assert_eq!(max[0].temps[1].celsius, 31.0);
+        assert_eq!(max[0].gpus[0].temp_c, Some(85.0));
+    }
+
+    /// FIX:01M4D6KN655K009FC3JR9H70VN : deux sondes qui portent le même nom ne se mélangent ni dans la moyenne
+    /// ni dans le maximum.
+    #[test]
+    fn two_probes_with_the_same_name_are_never_mixed() {
+        let reading = |celsius: f32| TempReading {
+            label: "nvme".into(),
+            celsius,
+        };
+        let mut a = sample(0, 1.0);
+        a.temps = vec![reading(30.0), reading(60.0)];
+        let mut b = sample(1, 1.0);
+        b.temps = vec![reading(34.0), reading(50.0)];
+        let max = peaks(&[a.clone(), b.clone()], 10);
+        assert_eq!(max[0].temps[0].celsius, 34.0, "la première sonde nvme");
+        assert_eq!(
+            max[0].temps[1].celsius, 60.0,
+            "la deuxième, pas mélangée à la première"
+        );
+        let mean = resample(&[a, b], 10);
+        assert_eq!(mean[0].temps[0].celsius, 32.0);
+        assert_eq!(mean[0].temps[1].celsius, 55.0);
     }
 
     #[test]
