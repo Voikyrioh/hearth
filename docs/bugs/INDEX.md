@@ -4,6 +4,8 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4DKQWTWVNDXFPWJ5SE88SN7](./FIX-01M4DKQWTWVNDXFPWJ5SE88SN7.md) | Les actions d'un compte passaient sur deux lignes à 1280 et 1366 (C21) | 2026-10-08 |
+| [FIX-01M4DKQV9ZT6XQF6P7ER02HFYZ](./FIX-01M4DKQV9ZT6XQF6P7ER02HFYZ.md) | Les boutons d'une fenêtre de dialogue sortaient de l'écran à 1100×680 (C20) | 2026-10-08 |
 | [FIX-01M4D4Y22QGBWNKKJTK8K3X12A](./FIX-01M4D4Y22QGBWNKKJTK8K3X12A.md) | Le nom accessible du chargement ne suivait pas le texte affiché (retour de revue HRT-34) | 2026-10-08 |
 | [FIX-01M4D4Y0D7YFWCV6R1GEHXZGPB](./FIX-01M4D4Y0D7YFWCV6R1GEHXZGPB.md) | Tableau de bord : jauges perdues dans un grand vide à 1920 et 2560 (retour de revue HRT-34) | 2026-10-08 |
 | [FIX-01M4D4H25X7PN4SH2N7DC3REGS](./FIX-01M4D4H25X7PN4SH2N7DC3REGS.md) | Les filtres du journal prenaient le quart de l'écran à 1280 et 1366 (C29) | 2026-10-08 |
