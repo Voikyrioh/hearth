@@ -81,8 +81,8 @@ describe("Comptes (administrateurs)", () => {
     const { wrapper, bridge } = await boot();
     await wrapper.get("#header-actions button").trigger("click");
     await flushPromises();
-    typeInto(document.querySelector('input[placeholder="ton-identifiant"]'), "sophie");
-    typeInto(document.querySelector('input[placeholder="Mot de passe"]'), GOOD);
+    typeInto(document.querySelector('input[placeholder="ex. camille"]'), "sophie");
+    typeInto(document.querySelector('input[placeholder="Celui que ce compte utilisera"]'), GOOD);
     typeInto(document.querySelector('input[placeholder="Confirme le mot de passe"]'), GOOD);
     await flushPromises();
     await confirmDialog("Créer");

@@ -31,10 +31,11 @@ test("ajout d'un serveur en trois temps, de l'accueil au tableau de bord", async
   await page.getByRole("button", { name: "Ajouter un serveur" }).click();
   await expect(page).toHaveURL(/#\/servers\/new$/);
 
-  // Temps 1 : « Suivant » inactif tant que le formulaire n'est pas valide.
+  // Temps 1 : « Suivant » n'est jamais grisé sans raison (C1) ; le curseur est dans le nom (C2).
   await expect(page.getByRole("heading", { name: "Ajouter un serveur" })).toBeVisible();
   const next = page.getByRole("button", { name: "Suivant" });
-  await expect(next).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByLabel("Nom du serveur")).toBeFocused();
+  await expect(next).not.toHaveAttribute("aria-disabled", "true");
   await expect(page.getByLabel("Port (optionnel)")).toHaveAttribute("placeholder", "7341");
   await fillAddress(page, "Atelier", "pas une adresse");
   await expect(page.getByText("Cette adresse n'est pas valide")).toBeVisible();

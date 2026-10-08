@@ -203,10 +203,15 @@ describe("CreateAccountDialog", () => {
   it("opens with an empty form, the labels of the specification and « Créer » inert", async () => {
     const { wrapper } = await open();
     expect(text()).toContain("Créer un compte");
-    for (const label of ["Identifiant", "Mot de passe", "Confirme le mot de passe", "Rôle"]) {
+    for (const label of [
+      "Identifiant",
+      "Mot de passe du nouveau compte",
+      "Confirme le mot de passe du compte",
+      "Rôle",
+    ]) {
       expect(text()).toContain(label);
     }
-    expect(field("ton-identifiant")?.value).toBe("");
+    expect(field("ex. camille")?.value).toBe("");
     expect(button("Créer")?.getAttribute("aria-disabled")).toBe("true");
     expect(document.querySelector("select")?.value).toBe("readonly");
     wrapper.unmount();
@@ -214,18 +219,18 @@ describe("CreateAccountDialog", () => {
 
   it("validates the identifier and the password live, with the rule of the agent", async () => {
     const { wrapper } = await open();
-    typeInto(field("ton-identifiant"), "a b");
+    typeInto(field("ex. camille"), "a b");
     await flushPromises();
     expect(text()).toContain("L'identifiant contient des caractères non autorisés");
-    typeInto(field("ton-identifiant"), "marie2");
-    typeInto(field("Mot de passe"), "abc");
+    typeInto(field("ex. camille"), "marie2");
+    typeInto(field("Celui que ce compte utilisera"), "abc");
     await flushPromises();
     expect(text()).not.toContain("L'identifiant contient");
     const unmet = [...document.querySelectorAll('[data-met="false"]')].map((li) =>
       li.getAttribute("data-rule"),
     );
     expect(unmet).toEqual(["min_length", "digit", "uppercase"]);
-    typeInto(field("Mot de passe"), "xxMarie2xxxx1A");
+    typeInto(field("Celui que ce compte utilisera"), "xxMarie2xxxx1A");
     await flushPromises();
     expect(
       [...document.querySelectorAll('[data-met="false"]')].map((li) =>
@@ -237,8 +242,8 @@ describe("CreateAccountDialog", () => {
 
   it("says when the confirmation differs and only enables « Créer » when everything is valid", async () => {
     const { wrapper } = await open();
-    typeInto(field("ton-identifiant"), "sophie");
-    typeInto(field("Mot de passe"), GOOD);
+    typeInto(field("ex. camille"), "sophie");
+    typeInto(field("Celui que ce compte utilisera"), GOOD);
     typeInto(field("Confirme le mot de passe"), "autre");
     await flushPromises();
     expect(text()).toContain("Les deux mots de passe ne correspondent pas");
@@ -253,8 +258,8 @@ describe("CreateAccountDialog", () => {
 
   it("creates the account, closes, announces it, and keeps no password in the DOM", async () => {
     const { wrapper, bridge } = await open();
-    typeInto(field("ton-identifiant"), "sophie");
-    typeInto(field("Mot de passe"), GOOD);
+    typeInto(field("ex. camille"), "sophie");
+    typeInto(field("Celui que ce compte utilisera"), GOOD);
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
     await confirmDialog("Créer");
@@ -262,35 +267,74 @@ describe("CreateAccountDialog", () => {
     expect(useToastsStore().items.map((t) => t.message)).toContain("Compte sophie créé");
     expect(bridge.calls).toContain("account create sophie");
     expect(JSON.stringify(bridge.calls)).not.toContain(GOOD);
-    expect(field("Mot de passe")?.value ?? "").toBe("");
+    expect(field("Celui que ce compte utilisera")?.value ?? "").toBe("");
     wrapper.unmount();
   });
 
-  it("shows « Cet identifiant est déjà utilisé » under the field, keeps the identifier and empties the passwords", async () => {
+  it("shows « Cet identifiant est déjà utilisé » under the field, keeps the whole entry", async () => {
     const { wrapper } = await open();
-    typeInto(field("ton-identifiant"), "paul");
-    typeInto(field("Mot de passe"), GOOD);
+    typeInto(field("ex. camille"), "paul");
+    typeInto(field("Celui que ce compte utilisera"), GOOD);
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
     await confirmDialog("Créer");
     expect(text()).toContain("Cet identifiant est déjà utilisé");
     expect(wrapper.emitted("close")).toBeUndefined();
-    expect(field("ton-identifiant")?.value).toBe("paul");
-    expect(field("Mot de passe")?.value).toBe("");
-    expect(field("Confirme le mot de passe")?.value).toBe("");
+    expect(field("ex. camille")?.value).toBe("paul");
+    // C18 : un refus garde la saisie du nouveau compte (seule la confirmation est à refaire).
+    expect(field("Celui que ce compte utilisera")?.value).toBe(GOOD);
+    expect(field("Confirme le mot de passe")?.value).toBe(GOOD);
     wrapper.unmount();
   });
 
   it("does not send anything when the link is cut before the click, and says why", async () => {
     const { wrapper, bridge } = await open();
-    typeInto(field("ton-identifiant"), "sophie");
-    typeInto(field("Mot de passe"), GOOD);
+    typeInto(field("ex. camille"), "sophie");
+    typeInto(field("Celui que ce compte utilisera"), GOOD);
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
     bridge.setState("forge", "offline");
     await flushPromises();
     await confirmDialog("Créer");
     expect(bridge.calls.some((c) => c.startsWith("account create"))).toBe(false);
+    wrapper.unmount();
+  });
+  // FIX:01M4D0RHZE7JFMV700JKA3DM1R (C17, C56) : le curseur est dans le PREMIER champ à remplir.
+  it("puts the cursor in the identifier field, not in the confirmation at the end", async () => {
+    const { wrapper } = await open();
+    await flushPromises();
+    expect(document.activeElement).toBe(field("ex. camille"));
+    wrapper.unmount();
+  });
+
+  // FIX:01M4D0RJB17YE0F26QFXGJ2WEV (C18) : un mot de passe de confirmation faux ne vide que la confirmation.
+  it("keeps the whole entry of the new account when the confirmation password is wrong", async () => {
+    const { wrapper } = await open();
+    typeInto(field("ex. camille"), "sophie");
+    typeInto(field("Celui que ce compte utilisera"), GOOD);
+    typeInto(field("Confirme le mot de passe"), GOOD);
+    await flushPromises();
+    await confirmDialog("Créer", "Mauvais-Mot-De-Passe-1");
+    expect(text()).toContain("Mot de passe incorrect.");
+    expect(wrapper.emitted("close")).toBeUndefined();
+    expect(reauthField()?.value).toBe("");
+    expect(field("ex. camille")?.value).toBe("sophie");
+    expect(field("Celui que ce compte utilisera")?.value).toBe(GOOD);
+    expect(field("Confirme le mot de passe")?.value).toBe(GOOD);
+    // Seule la confirmation est à refaire.
+    await confirmDialog("Créer");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  // FIX:01M4D0RJJNZK7NGDMSFBE18Q29 (C19) : chaque mot de passe dit à qui il est.
+  it("names whose password each field asks for", async () => {
+    const { wrapper } = await open();
+    const placeholders = [
+      ...document.querySelectorAll<HTMLInputElement>("dialog input[type=password]"),
+    ].map((input) => input.placeholder);
+    expect(new Set(placeholders).size).toBe(placeholders.length);
+    expect(field("ton-identifiant")).toBeNull();
     wrapper.unmount();
   });
 });
@@ -307,6 +351,14 @@ describe("PasswordDialog", () => {
     return { ...ctx, wrapper };
   }
 
+  // FIX:01M4D0RHZE7JFMV700JKA3DM1R (C17) : le curseur va dans « Nouveau mot de passe », pas dans l'ancien.
+  it("puts the cursor in the new password field when changing one's own password", async () => {
+    const { wrapper } = await open({ username: "marie" });
+    await flushPromises();
+    expect(document.activeElement).toBe(field("Nouveau mot de passe"));
+    wrapper.unmount();
+  });
+
   it("asks for the old password then the new one when changing one's own password", async () => {
     const { wrapper, bridge } = await open({ username: "marie" });
     expect(text()).toContain("Changer mon mot de passe");
@@ -318,12 +370,11 @@ describe("PasswordDialog", () => {
     await flushPromises();
     expect(text()).toContain("Mot de passe incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
-    // Les trois champs sont vidés, réussi ou non.
+    // C18 : seul le mot de passe de confirmation est vidé ; le nouveau mot de passe est gardé.
     expect(reauthField()?.value).toBe("");
-    expect(field("Nouveau mot de passe")?.value).toBe("");
+    expect(field("Nouveau mot de passe")?.value).toBe(GOOD);
+    expect(field("Confirme le mot de passe")?.value).toBe(GOOD);
     typeInto(reauthField(), "Correct-Horse-9");
-    typeInto(field("Nouveau mot de passe"), GOOD);
-    typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
     button("Changer le mot de passe")?.click();
     await flushPromises();

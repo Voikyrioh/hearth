@@ -67,6 +67,7 @@ const error = ref<string | undefined>();
 const notice = ref<string | undefined>();
 const sending = ref(false);
 const field = ref<InstanceType<typeof ReauthField> | null>(null);
+const acts = ref<HTMLElement | null>(null);
 
 watch(
   () => props.open,
@@ -85,16 +86,36 @@ watch(password, (value) => {
   if (value !== "") passwordError.value = undefined;
 });
 
-// Le champ apparaît une fois l'état lu : si le focus n'est dans aucun champ (fenêtre sans champ d'acte),
-// il y va, comme dans les autres fenêtres à mot de passe.
+// Où va le curseur une fois l'état lu (FIX:01M4D0RHZE7JFMV700JKA3DM1R, C17, C56) : dans le PREMIER champ à
+// remplir de la fenêtre (identifiant, nouveau mot de passe…), jamais dans la confirmation qui vient à la fin ;
+// une fenêtre sans champ d'acte (confirmation simple) met le curseur dans « Ton mot de passe ». Le curseur
+// n'est déplacé que s'il n'est dans aucun champ : ce que l'utilisateur a déjà commencé à taper ne bouge pas.
 watch(
-  () => props.open && reauth.ready.value && reauth.needsPassword.value && !reauth.keyMissing.value,
-  async (shown) => {
-    if (!shown) return;
+  () => props.open && reauth.ready.value && !reauth.keyMissing.value && !reauth.agentTooOld.value,
+  async (ready) => {
+    if (!ready) return;
     await nextTick();
-    if (!(document.activeElement instanceof HTMLInputElement)) field.value?.focus();
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLSelectElement) return;
+    const first = firstActField();
+    if (first) first.focus();
+    else if (reauth.needsPassword.value) field.value?.focus();
   },
 );
+
+/** Le premier champ de saisie de l'acte (hors confirmation, qui est toujours le dernier). */
+function firstActField(): HTMLElement | null {
+  const form = acts.value?.closest("fieldset");
+  const candidates = form?.querySelectorAll<HTMLElement>(
+    "input:not([type=hidden]), select, textarea",
+  );
+  for (const element of candidates ?? []) {
+    if (element.closest("[data-reauth-field]")) continue;
+    if (element instanceof HTMLInputElement && element.type === "checkbox") continue;
+    return element;
+  }
+  return null;
+}
 
 const awaiting = computed(() => !reauth.ready.value && !reauth.failed.value);
 const askPassword = computed(
@@ -183,7 +204,9 @@ async function submit() {
       </HButton>
     </div>
     <template v-else>
-      <slot />
+      <div ref="acts" class="admin__acts">
+        <slot />
+      </div>
       <p v-if="notice" class="admin__notice" role="status" data-reauth-notice>{{ notice }}</p>
       <p v-if="reauth.elevated.value" class="admin__help" data-reauth-elevated>
         {{ t("reauth.elevated", { time: reauth.clock.value }) }}
@@ -201,6 +224,12 @@ async function submit() {
 </template>
 
 <style scoped>
+.admin__acts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
 .admin__wait {
   display: flex;
   justify-content: center;

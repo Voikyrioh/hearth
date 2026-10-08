@@ -97,7 +97,7 @@ test("le délai s'est fermé chez l'agent : la fenêtre redemande le mot de pass
   const first = await ready(page);
   await first.getByLabel("Ton mot de passe").fill(OWN);
   await first.getByLabel("Identifiant").fill("sophie");
-  await first.getByLabel("Mot de passe", { exact: true }).fill(GOOD);
+  await first.getByLabel("Mot de passe du nouveau compte").fill(GOOD);
   await first.getByLabel("Confirme le mot de passe").fill(GOOD);
   await first.getByRole("button", { name: "Créer", exact: true }).click();
   await expect(dialog(page)).toHaveCount(0);
@@ -106,7 +106,7 @@ test("le délai s'est fermé chez l'agent : la fenêtre redemande le mot de pass
   const second = await ready(page);
   await expect(second.getByLabel("Ton mot de passe")).toHaveCount(0);
   await second.getByLabel("Identifiant").fill("marc");
-  await second.getByLabel("Mot de passe", { exact: true }).fill(GOOD);
+  await second.getByLabel("Mot de passe du nouveau compte").fill(GOOD);
   await second.getByLabel("Confirme le mot de passe").fill(GOOD);
   // … mais il se ferme chez l'agent avant l'envoi.
   await simReauth(page, "close");
@@ -114,7 +114,7 @@ test("le délai s'est fermé chez l'agent : la fenêtre redemande le mot de pass
   await expect(second.getByText("Le délai est terminé.")).toBeVisible();
   await expect(second.getByLabel("Ton mot de passe")).toBeVisible();
   await expect(second.getByLabel("Identifiant")).toHaveValue("marc");
-  await expect(second.getByLabel("Mot de passe", { exact: true })).toHaveValue(GOOD);
+  await expect(second.getByLabel("Mot de passe du nouveau compte")).toHaveValue(GOOD);
   await second.getByLabel("Ton mot de passe").fill(OWN);
   await second.getByRole("button", { name: "Créer", exact: true }).click();
   await expect(page.locator(".toast").filter({ hasText: "Compte marc créé" })).toBeVisible();

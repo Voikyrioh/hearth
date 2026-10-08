@@ -13,8 +13,8 @@ import type { Role } from "@/link";
 
 // Création d'un compte : identifiant, mot de passe, confirmation, rôle. La validation en direct est
 // celle de l'agent (commande `check_account_input`, jamais une copie ici) ; l'agent reste l'arbitre
-// à l'envoi. Les mots de passe sont vidés après CHAQUE envoi, réussi ou non ; l'identifiant et le
-// rôle restent si l'agent a refusé. Rôle par défaut : Lecture seule (le moindre privilège).
+// à l'envoi. Les mots de passe du nouveau compte sont vidés après un envoi non refusé ; sur un refus tout
+// reste (seule la confirmation est à refaire, C18) ; l'identifiant et le rôle restent. Rôle par défaut : Lecture seule (le moindre privilège).
 const props = defineProps<{ open: boolean; serverId: string }>();
 const emit = defineEmits<{ close: [] }>();
 
@@ -86,8 +86,11 @@ const canSubmit = computed(
 async function perform(adminPassword: string | null) {
   takenError.value = undefined;
   const report = await actions.create(username.value, password.value, role.value, adminPassword);
-  const reasked = report.kind === "refused" && report.refusal.kind === "password_required";
-  if (!reasked) {
+  // FIX:01M4D0RJB17YE0F26QFXGJ2WEV (C18) : un refus (mot de passe de confirmation faux, attente, délai fermé,
+  // identifiant pris…) garde la saisie du nouveau compte ; la fenêtre ne vide que le mot de passe de
+  // confirmation. Les mots de passe du nouveau compte ne sont vidés que si l'acte a été envoyé sans
+  // refus (fait, résultat inconnu, échec).
+  if (report.kind !== "refused") {
     password.value = "";
     confirmation.value = "";
   }
@@ -116,10 +119,11 @@ function refusalText(refusal: { kind: string }): string | undefined {
     :refusal-text="refusalText"
     @close="emit('close')"
   >
+    <!-- FIX:01M4D0RJJNZK7NGDMSFBE18Q29 (C19) : chaque mot de passe dit à qui il est, l'exemple d'identifiant est neutre. -->
     <HInput
       v-model="username"
       :label="t('accounts.username')"
-      :placeholder="t('accounts.usernamePlaceholder')"
+      :placeholder="t('accounts.newUsernamePlaceholder')"
       :error="usernameError"
       autocomplete="off"
     />

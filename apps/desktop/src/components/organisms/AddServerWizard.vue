@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import HButton from "@/components/atoms/HButton.vue";
 import HInput from "@/components/atoms/HInput.vue";
@@ -17,6 +17,7 @@ const emit = defineEmits<{ cancel: []; done: [serverId: string] }>();
 
 const wizard = useAddServer();
 const login = ref<InstanceType<typeof LoginForm> | null>(null);
+const root = ref<HTMLElement | null>(null);
 
 const stepIndex = computed(() => ADD_STEPS.indexOf(wizard.step.value));
 const stepNames = computed(() => [
@@ -32,6 +33,22 @@ async function onLogin(entry: { username: string; password: string; remember: bo
   else login.value?.clearPassword();
 }
 
+// FIX:01M4D0RJ5EMX3TG1TJB0EJ5EYP (C2) : à chaque étape qui a un champ, le curseur est dans le premier.
+async function focusFirstField() {
+  await nextTick();
+  root.value?.querySelector<HTMLElement>("input:not([type=hidden]):not(:disabled)")?.focus();
+}
+onMounted(focusFirstField);
+watch(() => wizard.step.value, focusFirstField);
+
+// FIX:01M4D0RJ5EMX3TG1TJB0EJ5EYP (C1) : « Suivant » n'est jamais grisé sans raison. Un champ manquant ou
+// faux est dit sous le champ et le curseur y va, au clic comme à Entrée.
+async function submitAddress() {
+  await wizard.next();
+  await nextTick();
+  root.value?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+}
+
 // Rien n'existe tant que la connexion n'a pas réussi : annuler ne défait rien.
 function cancel() {
   emit("cancel");
@@ -44,7 +61,7 @@ function refuse() {
 </script>
 
 <template>
-  <section class="wizard" :aria-labelledby="'wizard-title'">
+  <section ref="root" class="wizard" :aria-labelledby="'wizard-title'">
     <StepTrail :steps="stepNames" :current="stepIndex" :label="t('connect.stepsLabel')" />
 
     <!-- Temps 1 : nom, adresse, port, couleur -->
@@ -52,7 +69,7 @@ function refuse() {
       v-if="wizard.step.value === 'address'"
       class="wizard__form"
       novalidate
-      @submit.prevent="wizard.next()"
+      @submit.prevent="submitAddress"
     >
       <h1 id="wizard-title" class="wizard__title">{{ t("connect.addTitle") }}</h1>
       <HInput
@@ -107,7 +124,7 @@ function refuse() {
         <HButton variant="secondary" :disabled="checking" @click="cancel">
           {{ t("connect.cancel") }}
         </HButton>
-        <HButton type="submit" :busy="checking" :disabled="!wizard.canNext.value">
+        <HButton type="submit" :busy="checking">
           {{ t("connect.next") }}
         </HButton>
       </div>
