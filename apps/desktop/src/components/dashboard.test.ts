@@ -219,6 +219,31 @@ describe("molecules", () => {
     expect(wrapper.find(".chart__tip").exists()).toBe(false);
   });
 
+  it("a focused chart does not speak every second: no value text until the user moves the marker", async () => {
+    const make = (last: number) => [
+      { t: 1_000, v: 10 },
+      { t: 2_000, v: last },
+    ];
+    const wrapper = mount(HAreaChart, {
+      props: {
+        series: [{ points: make(20), tone: "ac" as const }],
+        max: 100,
+        label: "Charge",
+        format: (v: number) => `${v} %`,
+      },
+    });
+    const stop = wrapper.get(".chart-box");
+    expect(stop.attributes("aria-valuetext")).toBeUndefined();
+    await wrapper.setProps({ series: [{ points: make(55), tone: "ac" as const }] });
+    expect(stop.attributes("aria-valuetext")).toBeUndefined();
+    await stop.trigger("keydown", { key: "ArrowLeft" });
+    const posed = stop.attributes("aria-valuetext");
+    expect(posed).toMatch(/^10 %, /);
+    // Le repère posé garde son texte même quand la fenêtre glisse dessous.
+    await wrapper.setProps({ series: [{ points: make(80), tone: "ac" as const }] });
+    expect(stop.attributes("aria-valuetext")).toBe(posed);
+  });
+
   it("a gauge at the normal level is not drawn with the alert gradient", () => {
     const wrapper = mount(HGaugeArc, { props: { ratio: 0.22, level: "normal" } });
     expect(wrapper.find("linearGradient").exists()).toBe(false);

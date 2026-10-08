@@ -153,6 +153,31 @@ describe("page Journal d'activité", () => {
     wrapper.unmount();
   });
 
+  it("après un échec de lecture, dit que la recherche tapée n'est pas appliquée, et « Réessayer » relance la recherche tapée", async () => {
+    const { wrapper, bridge } = await boot(60);
+    const original = bridge.readAudit.bind(bridge);
+    const seen: string[] = [];
+    let broken = true;
+    bridge.readAudit = async (...args) => {
+      seen.push(args[1].text ?? "");
+      if (broken && args[1].text) throw new Error("lien coupé");
+      return original(...args);
+    };
+    await wrapper.find('input[type="search"]').setValue("marie");
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    const banner = wrapper.get(".audit__error");
+    expect(banner.text()).toContain("Ta recherche n'est pas appliquée");
+    broken = false;
+    seen.length = 0;
+    await banner.get("button").trigger("click");
+    await flushPromises();
+    // Relance le filtre TAPÉ, pas l'ancien (aucun filtre).
+    expect(seen).toEqual(["marie"]);
+    expect(wrapper.find(".audit__error").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("une rafale de refus arrive en direct : regroupée « X tentatives refusées en Y min », déployable", async () => {
     const { wrapper, bridge } = await boot(30);
     bridge.audit.addBurst("forge", 6, "203.0.113.9", 10_000);

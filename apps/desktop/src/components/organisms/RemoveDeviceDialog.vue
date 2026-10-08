@@ -65,8 +65,6 @@ async function submit() {
     @cancel="emit('close')"
   >
     <p class="remove__message">{{ t("devices.removeMessage") }}</p>
-    <p class="remove__help">{{ t("devices.removePasswordHelp") }}</p>
-    <p class="remove__help" data-remove-advice>{{ t("devices.removeAdvice") }}</p>
     <HPasswordInput
       v-model="password"
       :label="t('devices.password')"
@@ -74,6 +72,11 @@ async function submit() {
       :error="passwordError"
       autocomplete="current-password"
     />
+    <!-- FIX:01M4ECZJKG6MQ2C65TZP25WSPD -->
+    <details class="remove__more">
+      <summary>{{ t("devices.removeAdviceTitle") }}</summary>
+      <p class="remove__help" data-remove-advice>{{ t("devices.removeAdvice") }}</p>
+    </details>
   </FormDialog>
 </template>
 
@@ -84,5 +87,10 @@ async function submit() {
 
 .remove__help {
   color: var(--tx2);
+}
+
+.remove__more summary {
+  cursor: pointer;
+  color: var(--ac);
 }
 </style>

@@ -10,3 +10,4 @@ Journal d'activité (HRT-14), réservé aux administrateurs : carte de filtres (
 - HRT-38 (C46) : journal jamais lu hors « Connecté » : « Pas encore chargé… » (par état du lien), pas d'estampille (`usePageData`).
 - HRT-38 (C30) : plus de bloc « Périmé / Données périmées / Rechargement manuel » ni de message d'échec hors « Connecté » : le bandeau et l'estampille du gabarit suffisent.
 - HRT-43 : la recherche s'applique seule 350 ms après la frappe ; les listes s'appliquent au choix, une période personnalisée dès que ses deux dates sont valides, sans bouton « Appliquer » ; l'état « Aucun événement ne correspond » n'a plus son propre « Effacer les filtres ». FIX:01M4DNJ42ETVYR5Y01YNVPW715. Test : `e2e/hrt43-44.spec.ts`.
+- HRT-43 : après un échec de lecture, « Ta recherche n'est pas appliquée. … » et « Réessayer » relance la recherche tapée. FIX:01M4ECZK55R0HTKS7SQH4WZ1ZZ.

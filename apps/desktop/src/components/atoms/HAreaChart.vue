@@ -125,7 +125,10 @@ function onKey(event: KeyboardEvent) {
   show(Math.min(last, Math.max(0, next)));
 }
 
-const valueText = computed(() => hover.value?.text ?? textAt(count.value - 1) ?? "");
+// FIX:01M4ECZJ34NZE9Z9P4YATK707H
+// Sans repère posé : aucun texte de valeur (la dernière valeur change chaque seconde, un lecteur d'écran la réciterait
+// à chaque mesure). Avec un repère : le texte figé au moment où l'utilisateur l'a déplacé (revue de la PR #58).
+const valueText = computed(() => hover.value?.text);
 interface Drawn {
   tone: ChartSeries["tone"];
   line: string;
