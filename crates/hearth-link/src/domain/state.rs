@@ -513,7 +513,6 @@ impl LinkMachine {
             {
                 outage.in_flight = true;
                 outage.next_attempt_at = None;
-                end_probe(&mut outage);
                 effects.push(step_effect(outage.step));
                 self.phase = Phase::Down(outage);
             }
@@ -709,6 +708,8 @@ impl LinkMachine {
                 }
                 outage.in_flight = true;
                 outage.next_attempt_at = None;
+                // Le déclencheur remplace la vérification du seuil par une tentative ordinaire.
+                end_probe(&mut outage);
                 effects.push(step_effect(outage.step));
                 self.phase = Phase::Down(outage);
             }

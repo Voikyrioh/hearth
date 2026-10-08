@@ -231,12 +231,18 @@ fn a_silent_probe_cannot_hold_the_screen_on_connected_past_its_bound() {
 }
 
 /// Une vérification qui se conclut autrement que par son échec (réponse « attends ») ne laisse rien
-/// derrière elle : l'échec de la tentative suivante calcule son délai.
+/// derrière elle : l'échec de la tentative suivante calcule son délai. La réponse arrive AVANT la
+/// borne (13 500 ms) : seul `end_probe` de ce chemin peut remettre le drapeau à zéro.
 #[test]
 fn a_probe_ended_by_a_wait_answer_does_not_make_the_next_failure_skip_its_delay() {
     let mut rig = rig_with_a_silent_probe();
     rig.send_at(13_100, Input::RetryAfter(Duration::from_secs(60)));
-    assert_eq!(rig.state(), LinkState::Reconnecting);
+    // La borne (13 500 ms) rattraperait un drapeau resté levé : on regarde donc l'état interne tout de
+    // suite, avant elle.
+    assert!(
+        matches!(rig.machine.phase, Phase::Down(o) if !o.probe && o.probe_until.is_none() && o.resume_at.is_none()),
+        "la vérification n'a rien laissé derrière elle"
+    );
     assert_eq!(
         rig.machine.status().next_retry_at,
         Some(Mono::from_millis(73_100))
@@ -253,14 +259,22 @@ fn a_probe_ended_by_a_wait_answer_does_not_make_the_next_failure_skip_its_delay(
 
 /// Un déclencheur (réseau, réveil, « Réessayer ») pendant la vérification la remplace par une
 /// tentative ordinaire : son échec calcule son délai, il ne reprend pas l'instant planifié d'avant.
+/// Le déclencheur ET l'échec arrivent AVANT la borne (13 500 ms) : seul `end_probe` du déclencheur
+/// peut empêcher l'échec d'être pris pour celui de la vérification, qui reprendrait l'instant planifié
+/// d'avant (13 500 ms) au lieu de calculer un délai.
 #[test]
 fn a_trigger_during_the_probe_makes_it_an_ordinary_attempt() {
     for trigger in [Input::NetworkChanged, Input::Woke, Input::RetryNow] {
         let mut rig = rig_with_a_silent_probe();
         rig.send_at(13_100, trigger);
-        rig.send_at(14_000, Input::TransportFailed);
+        assert!(
+            matches!(rig.machine.phase, Phase::Down(o) if !o.probe && o.probe_until.is_none() && o.resume_at.is_none()),
+            "{trigger:?} : la vérification n'a rien laissé derrière elle"
+        );
+        rig.send_at(13_300, Input::TransportFailed);
         let next = rig.machine.status().next_retry_at.unwrap().as_millis();
-        assert!(next > rig.now, "{trigger:?} : {next} contre {}", rig.now);
+        // Échec ordinaire : un délai du backoff (au moins 0,4 s) à partir de l'échec.
+        assert!(next >= 13_300 + 400, "{trigger:?} : {next}");
     }
 }
 
