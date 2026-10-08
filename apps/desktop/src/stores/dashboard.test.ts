@@ -96,6 +96,66 @@ describe("dashboard store", () => {
     expect(store.of("forge")?.machine?.name).toBe("aujourd'hui");
   });
 
+  it("a view without any sample (identity only) does not overwrite the identity of a live snapshot", async () => {
+    const { bridge } = await startedApp();
+    let deliver: Parameters<typeof bridge.onMachine>[1] = () => {};
+    vi.spyOn(bridge, "onMachine").mockImplementation(async (_id, listener) => {
+      deliver = listener;
+      return () => {};
+    });
+    const store = useDashboardStore();
+    await store.follow("forge");
+    const now = Date.now();
+    const levels: SampleLevels = { cpu: "normal", mem: "normal", disks: [], gpus: [], temps: [] };
+    const view = (name: string, history: ReturnType<typeof makeSample>[]) => ({
+      kind: "view" as const,
+      view: { serverId: "forge", machine: makeMachine({ name }), history, levels },
+    });
+    deliver(view("aujourd'hui", [makeSample(now), makeSample(now + 1000)]));
+    deliver(view("hier", []));
+    expect(store.of("forge")?.machine?.name).toBe("aujourd'hui");
+    // Sans rien de connu encore, la même vue vide est prise (pas d'écran sans identité).
+    store.forget("forge");
+    await store.follow("forge");
+    deliver(view("première", []));
+    expect(store.of("forge")?.machine?.name).toBe("première");
+  });
+
+  it("the hour read at the opening fills the ring before the snapshot without touching identity or latest", async () => {
+    const { bridge } = await startedApp();
+    let deliver: Parameters<typeof bridge.onMachine>[1] = () => {};
+    vi.spyOn(bridge, "onMachine").mockImplementation(async (_id, listener) => {
+      deliver = listener;
+      return () => {};
+    });
+    const store = useDashboardStore();
+    await store.follow("forge");
+    const now = Date.now();
+    const levels: SampleLevels = { cpu: "normal", mem: "normal", disks: [], gpus: [], temps: [] };
+    const snapshot = Array.from({ length: 300 }, (_, i) => makeSample(now - 300_000 + i * 1000));
+    deliver({
+      kind: "view",
+      view: {
+        serverId: "forge",
+        machine: makeMachine({ name: "forge" }),
+        history: snapshot,
+        levels,
+      },
+    });
+    const entry = store.of("forge");
+    const latest = entry?.latest;
+    const hour = Array.from({ length: 330 }, (_, i) => makeSample(now - 3_600_000 + i * 10_000));
+    deliver({ kind: "history", history: hour });
+    expect(entry?.ring.length).toBe(630);
+    expect(entry?.ring.first?.at).toBe(now - 3_600_000);
+    expect(entry?.ring.last?.at).toBe(snapshot.at(-1)?.at);
+    expect(entry?.latest).toBe(latest);
+    expect(entry?.machine?.name).toBe("forge");
+    // Rejoué (nouvelle connexion) : rien n'est doublé.
+    deliver({ kind: "history", history: hour });
+    expect(entry?.ring.length).toBe(630);
+  });
+
   it("is bounded to an hour of samples", async () => {
     const { bridge } = await startedApp();
     bridge.machine.prefill("forge", 10);

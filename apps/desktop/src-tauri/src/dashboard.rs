@@ -25,6 +25,7 @@ use time::format_description::well_known::Rfc3339;
 pub mod events {
     pub const SNAPSHOT: &str = "link://snapshot";
     pub const METRICS: &str = "link://metrics";
+    pub const HISTORY: &str = "link://history";
 }
 
 /// Points du processeur gardés par serveur : de quoi tenir [`CPU_HOLD_MS`] à 1 Hz avec de la marge.
@@ -341,6 +342,15 @@ pub struct SnapshotEvent {
     pub levels: Option<LevelsDto>,
 }
 
+/// L'heure écoulée avant l'instantané (`link://history`), à 1 échantillon par 10 secondes : le tableau de bord
+/// amorce sa courbe d'une heure dès l'ouverture (BR-DASH-010). Plus ancienne que l'instantané.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEvent {
+    pub server_id: String,
+    pub history: Vec<SampleDto>,
+}
+
 /// Les points de la série du processeur d'un historique : l'écart entre deux points est celui de
 /// l'agent, mais la série est ramenée à l'instant de réception (le dernier point est « maintenant ») :
 /// une horloge de l'agent qui recule ou qui diffère de celle du poste ne fausse pas les 30 s.
@@ -398,6 +408,9 @@ pub fn snapshot(
 #[derive(Debug, Default)]
 pub struct DashBook {
     cpu: HashMap<String, VecDeque<CpuPoint>>,
+    /// L'heure avant l'instantané, par serveur : rejouée avec la dernière vue à une interface qui s'ouvre
+    /// après la connexion (un événement n'est qu'un signal). Jamais mêlée à la série du processeur.
+    older: HashMap<String, Vec<SampleDto>>,
 }
 
 impl DashBook {
@@ -441,7 +454,37 @@ impl DashBook {
         }
     }
 
+    /// L'heure écoulée avant l'instantané d'une connexion : retenue pour être rejouée, annoncée à l'interface.
+    pub fn on_history(&mut self, server_id: &str, samples: &[Sample], now_ms: i64) -> HistoryEvent {
+        let history: Vec<SampleDto> = samples
+            .iter()
+            .map(|sample| SampleDto::new(sample, sample_millis(sample, now_ms)))
+            .collect();
+        self.older.insert(server_id.to_owned(), history.clone());
+        HistoryEvent {
+            server_id: server_id.to_owned(),
+            history,
+        }
+    }
+
+    /// Ajoute à une vue l'heure retenue qui la précède (strictement plus ancienne que son premier échantillon).
+    pub fn with_older(&self, mut view: SnapshotEvent) -> SnapshotEvent {
+        let Some(older) = self.older.get(&view.server_id) else {
+            return view;
+        };
+        let limit = view.history.first().map_or(f64::INFINITY, |first| first.at);
+        let mut history: Vec<SampleDto> = older
+            .iter()
+            .filter(|sample| sample.at < limit)
+            .cloned()
+            .collect();
+        history.append(&mut view.history);
+        view.history = history;
+        view
+    }
+
     pub fn forget(&mut self, server_id: &str) {
         self.cpu.remove(server_id);
+        self.older.remove(server_id);
     }
 }

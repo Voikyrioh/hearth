@@ -212,7 +212,10 @@ export class SimulatedLinkBridge implements LinkBridge {
     });
     if (options.liveMetrics) {
       this.audit.seed("forge", 250);
-      for (const server of this.servers) this.machine.prefill(server.id, 300);
+      for (const server of this.servers) {
+        this.machine.prefillHour(server.id);
+        this.machine.prefill(server.id, 300);
+      }
       this.machine.start();
     }
     for (const server of this.servers) {

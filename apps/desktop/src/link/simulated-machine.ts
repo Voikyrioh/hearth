@@ -84,6 +84,8 @@ export function bareMachine(name: string): MachineInfo {
 interface Track {
   machine: MachineInfo;
   history: MachineSample[];
+  /** L'heure d'avant l'instantané (1 échantillon par 10 s), lue à la connexion comme le fait la liaison. */
+  older: MachineSample[];
   levels: SampleLevels | null;
   pins: Partial<Record<Pinnable, Level>>;
   /** La carte graphique n'expose pas sa température (BR-DASH-007). */
@@ -117,6 +119,7 @@ export class SimulatedMachine {
       track = {
         machine: this.machines[serverId] ?? sampleMachine(serverId),
         history: [],
+        older: [],
         levels: null,
         pins: {},
         gpuTempMissing: false,
@@ -134,7 +137,7 @@ export class SimulatedMachine {
     return {
       serverId,
       machine: track.machine,
-      history: track.history.map((sample) => ({ ...sample })),
+      history: [...track.older, ...track.history].map((sample) => ({ ...sample })),
       levels: track.levels,
     };
   }
@@ -152,6 +155,21 @@ export class SimulatedMachine {
     const view = this.viewOf(serverId);
     if (view) listener({ kind: "view", view });
     return () => void track.listeners.delete(listener);
+  }
+
+  /**
+   * Remplit l'heure qui précède l'instantané de 5 minutes (un échantillon par 10 s, de il y a une heure à
+   * il y a 5 minutes) : l'agent la rend par `GET /metrics/history?window=1h`, la liaison l'amorce à la
+   * connexion (BR-DASH-010). À appeler AVANT `prefill`.
+   */
+  prefillHour(serverId: string): void {
+    const track = this.track(serverId);
+    const end = this.now();
+    for (let back = 3600; back > 300; back -= 10) {
+      const sample = this.generate(track, end - back * 1000);
+      track.history.pop();
+      track.older.push(sample);
+    }
   }
 
   /** Remplit l'historique de `seconds` secondes passées (un échantillon par seconde), sans rien annoncer. */

@@ -11,6 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::{SinkExt as _, StreamExt as _};
 use hearth_proto::api::hello::HelloResponse;
+use hearth_proto::api::metrics::HistoryResponse;
 use hearth_proto::api::operations::OperationResponse;
 use hearth_proto::api::sessions::{
     ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginRequest,
@@ -319,6 +320,26 @@ impl Transport for HttpTransport {
             body,
             replayed,
         })
+    }
+
+    async fn hour_history(
+        &self,
+        target: &Target,
+        token: &Secret,
+    ) -> Result<HistoryResponse, TransportError> {
+        let call = Call {
+            method: Method::Get,
+            path: "/metrics/history?window=1h",
+            token: Some(token),
+            idempotency_key: None,
+            body: None,
+        };
+        let (status, headers, bytes) = self.send_limited(target, call, MAX_BODY_BYTES).await?;
+        if !(200..300).contains(&status) {
+            return Err(TransportError::Api(api_error(status, &headers, &bytes)));
+        }
+        serde_json::from_slice(&bytes)
+            .map_err(|e| TransportError::Protocol(format!("historique illisible : {e}")))
     }
 
     async fn export_audit(

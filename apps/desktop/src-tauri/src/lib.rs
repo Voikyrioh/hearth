@@ -105,6 +105,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<link_dto::NoticeEvent>()
         .typ::<dashboard::MetricsEvent>()
         .typ::<dashboard::SnapshotEvent>()
+        .typ::<dashboard::HistoryEvent>()
         .typ::<audit::AuditLiveEvent>()
         .typ::<update::dto::UpdateStateDto>()
         .typ::<accounts::dto::AccountOutcome>()

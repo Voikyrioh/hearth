@@ -30,6 +30,8 @@ pub(crate) enum AttemptResult {
         stream: Box<dyn StreamConn>,
         machine: Box<MachineResponse>,
         history: Vec<Sample>,
+        /// L'heure écoulée avant l'instantané (vide si la lecture a échoué ou si rien n'est plus ancien).
+        older: Vec<Sample>,
         /// État de la mise à jour de l'agent reçu AVANT l'instantané (l'ordre des sujets est celui
         /// de l'agent) : il n'est pas perdu.
         updates: Vec<UpdateProgress>,
@@ -89,6 +91,30 @@ fn upgrade_target(details: &serde_json::Value) -> UpgradeTarget {
         .unwrap_or(UpgradeTarget::Client)
 }
 
+/// Lit l'heure écoulée (`GET /metrics/history?window=1h`) et ne garde que ce qui précède l'instantané. Un
+/// échec (agent sans la route, délai, réponse illisible) n'est jamais fatal : la connexion s'ouvre avec
+/// l'instantané seul et la courbe d'une heure se remplit depuis l'ouverture, comme avant.
+async fn hour_before(
+    deps: &Deps,
+    shared: &Shared,
+    token: &Secret,
+    snapshot: &[Sample],
+) -> Vec<Sample> {
+    let read = timeout(
+        deps.config.request_timeout,
+        deps.transport.hour_history(&shared.target(), token),
+    )
+    .await;
+    match read {
+        Ok(Ok(response)) => crate::domain::history::older_than_snapshot(response.samples, snapshot),
+        Ok(Err(error)) => {
+            tracing::debug!(server = %shared.id(), %error, "historique d'une heure illisible");
+            Vec::new()
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Ouvre le flux, s'authentifie avec le jeton du coffre et attend l'instantané.
 pub(crate) async fn connect(deps: &Deps, shared: &Shared) -> AttemptResult {
     match timeout(deps.config.attempt_timeout, connect_inner(deps, shared)).await {
@@ -138,8 +164,10 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
     };
     let _ = stream.send_auth(&auth).await;
     // La copie du jeton faite pour le message est effacée dès qu'il est parti.
-    let SignedAuth::Auth { mut token, .. } = auth;
-    token.zeroize();
+    let SignedAuth::Auth {
+        token: mut sent, ..
+    } = auth;
+    sent.zeroize();
     // Le sujet `update` est ouvert à tout compte : le serveur annonce ainsi son redémarrage de mise
     // à jour (coupure attendue, BR-UPDATE-014) et son avancement.
     let mut topics = vec![Topic::Metrics, Topic::Session, Topic::Update];
@@ -153,10 +181,12 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
         match stream.recv().await {
             Ok(Frame::Message(message)) => match *message {
                 ServerMessage::Snapshot { machine, history } => {
+                    let older = hour_before(deps, shared, &token, &history).await;
                     return AttemptResult::Ready {
                         stream,
                         machine: Box::new(machine),
                         history,
+                        older,
                         updates,
                         security,
                     };

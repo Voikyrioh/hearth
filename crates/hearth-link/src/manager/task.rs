@@ -532,6 +532,7 @@ impl Runner {
                 stream,
                 machine,
                 history,
+                older,
                 updates,
                 security,
             } => {
@@ -542,6 +543,14 @@ impl Runner {
                 if effects.contains(&Effect::ResolvePending) {
                     self.last_contact = Some(self.deps.clock.wall());
                     self.install_snapshot(*machine, history);
+                    // L'heure d'avant l'instantané : annoncée après lui (jamais persistée, jamais mêlée à la
+                    // série du processeur de la coquille).
+                    if !older.is_empty() {
+                        self.deps.sink.emit(Event::History {
+                            server: self.id.clone(),
+                            samples: Arc::new(older),
+                        });
+                    }
                     // Comme un message du flux : un client qui se connecte PENDANT l'étape `restart`
                     // ouvre la fenêtre de coupure attendue (BR-UPDATE-014).
                     for progress in updates {

@@ -10,8 +10,8 @@ publish.workspace = true
 workspace = true
 
 [features]
-# Expose `LinkManager::execute_raw` aux scénarios de résilience (route d'acte sans confirmation). Jamais
-# activée par l'application : seul le dev-dependency ci-dessous la demande.
+# Expose `LinkManager::execute_raw` (requête brute sur une route d'acte, sans confirmation) aux tests : un
+# agent la refuse (`426`). Jamais activée par l'application : seul le dev-dependency ci-dessous la demande.
 test-support = []
 
 [dependencies]
@@ -34,6 +34,7 @@ zeroize.workspace = true
 # Déjà dans l'arbre (rustls, agent) : dépendances directes pour la clé d'appareil (ADR-0023).
 ring.workspace = true
 base64.workspace = true
+time.workspace = true
 
 [dev-dependencies]
 hearth-link = { path = ".", features = ["test-support"] }
@@ -43,4 +44,3 @@ rcgen.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
-time.workspace = true

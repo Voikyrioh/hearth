@@ -201,6 +201,7 @@ impl EventSink for PendingBook {
             Event::Lagged { .. }
             | Event::Metrics { .. }
             | Event::Snapshot { .. }
+            | Event::History { .. }
             | Event::SessionEnded { .. }
             | Event::AgentUpdate { .. }
             | Event::Security { .. }
@@ -400,7 +401,8 @@ impl LinkRuntime {
             return Ok(None);
         };
         let (event, _) = dash_snapshot(server_id, &machine, &view.history, now_ms());
-        Ok(Some(event))
+        // Avec l'heure d'avant l'instantané, si elle a été lue : la courbe est remplie dès l'ouverture.
+        Ok(Some(self.dash().with_older(event)))
     }
 
     pub fn servers(&self) -> Vec<ServerDto> {
@@ -686,6 +688,7 @@ impl LinkRuntime {
             let snapshot = self
                 .dash()
                 .on_snapshot(id.as_str(), &machine, &view.history, now_ms());
+            let snapshot = self.dash().with_older(snapshot);
             send(sink, dash_events::SNAPSHOT, &snapshot);
         }
     }
@@ -769,6 +772,11 @@ impl LinkRuntime {
                         .on_snapshot(server.as_str(), &machine, &history, now_ms());
                 send(sink, dash_events::SNAPSHOT, &snapshot);
             }
+            // L'heure écoulée avant l'instantané (lue à la connexion) : retenue et annoncée.
+            Event::History { server, samples } => {
+                let history = self.dash().on_history(server.as_str(), &samples, now_ms());
+                send(sink, dash_events::HISTORY, &history);
+            }
             // Une entrée du journal, en direct (HRT-14) : la page la fusionne à sa liste.
             Event::Audit { server, event } => {
                 send(
@@ -802,13 +810,23 @@ impl LinkRuntime {
     }
 }
 
-/// Maintenant, en millisecondes depuis l'époque (repli d'un échantillon à la date illisible).
+/// Maintenant, en millisecondes : l'horloge MURALE lue UNE fois au premier appel, puis l'horloge MONOTONE.
+/// La série du processeur et le repli d'un échantillon à la date illisible ne doivent pas suivre un saut de
+/// l'horloge murale (changement d'heure, synchronisation, réglage à la main) : ce « maintenant » ne recule
+/// jamais et avance d'une seconde par seconde (FIX:01M4CRD60RKGZC2HTT52GK6P2T).
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
-        .unwrap_or(0)
+    use std::sync::OnceLock;
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    static START: OnceLock<(Instant, i64)> = OnceLock::new();
+    let (start, base) = START.get_or_init(|| {
+        let wall = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
+            .unwrap_or(0);
+        (Instant::now(), wall)
+    });
+    base.saturating_add(i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX))
 }
 
 /// Nom du poste annoncé à l'agent (`X-Hearth-Client`) : `{ordinateur}/{version}`.
