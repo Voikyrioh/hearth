@@ -76,7 +76,7 @@ test("connecté, reconnexion, hors ligne puis retour", async ({ page }) => {
 
   await setLink(page, "forge", "reconnecting");
   await expect(pill).toHaveText("Reconnexion…");
-  await expect(page.locator('[data-stale="true"]')).toHaveCount(0);
+  await expect(page.locator('[data-stale="true"]')).toHaveCount(1);
   await expect(page.getByText("Serveur hors ligne.")).toHaveCount(0);
 
   await setLink(page, "forge", "offline");

@@ -35,9 +35,7 @@ const link = useLinkStore();
 const updates = useUpdatesStore();
 const { server, state, lastContactAt } = useCurrentServer();
 const pageHasData = providePageData();
-// FIX:01M4E5D5GCK02241BMJ1PRGPPN (C48) : pendant la reconnexion (3 à 30 s) la page garde son apparence : « pastille Reconnexion…, rien d'autre »
-// (BR-RESIL-003). Elle ne s'estompe et ne se date qu'à partir de « Hors ligne », session expirée ou accès révoqué.
-const stale = computed(() => state.value !== "connected" && state.value !== "reconnecting");
+const stale = computed(() => state.value !== "connected");
 const event = computed(() => (server.value ? link.eventOf(server.value.id) : undefined));
 
 watch(

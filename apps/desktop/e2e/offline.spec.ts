@@ -61,9 +61,9 @@ test("reconnexion : discrète, sans bandeau ni fenêtre, actions expliquées", a
   await expect(page.getByRole("tooltip")).toHaveText(
     "Indisponible pendant la reconnexion au serveur.",
   );
-  // Les dernières données restent là, sans changer d'apparence ni être datées pendant la reconnexion (HRT-38, C48).
-  await expect(page.locator('[data-stale="true"]')).toHaveCount(0);
-  await expect(page.getByText(/^Vu il y a \d+ s$/)).toHaveCount(0);
+  // Les dernières données restent là, désaturées, avec leur âge.
+  await expect(page.locator('[data-stale="true"]')).toHaveCount(1);
+  await expect(page.getByText(/^Vu il y a \d+ s$/)).toBeVisible();
 });
 
 test("hors ligne : bandeau, données périmées, retour du lien", async ({ page }) => {
