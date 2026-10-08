@@ -2,7 +2,7 @@
 
 Molécule · `apps/desktop/src/components/molecules/ServerAvatar.vue`
 
-Avatar rond d'un serveur : initiales, anneau de la couleur du serveur quand il est actif, pastille d'état du lien en bas à droite. Le nom accessible est « {nom}, {état} » : l'état ne dépend pas de la couleur.
+Avatar rond d'un serveur : initiales, contour et teinte de la couleur du serveur (tous les serveurs, ouverts ou non, HRT-45), double anneau quand il est actif, pastille d'état du lien en bas à droite. Le nom accessible est « {nom}, {état} » : l'état ne dépend pas de la couleur.
 
 - Props : `name`, `color` (1 à 8 : jetons `--server-1` à `--server-8`), `state`, `active`, `mark` (HRT-26 : `attack`, `suspended` ou `alert`, ou rien)
 - Événements et slots : aucun

@@ -90,7 +90,7 @@ describe("server book", () => {
     await button(row(wrapper, "forge"), "Supprimer").trigger("click");
     await flushPromises();
     const dialog = document.body.querySelector("dialog");
-    expect(dialog?.textContent).toContain("Supprimer ce serveur ?");
+    expect(dialog?.textContent).toContain("Supprimer forge ?");
     expect(dialog?.textContent).toContain("Ses identifiants mémorisés seront aussi supprimés.");
     const buttons = [...(dialog?.querySelectorAll("button") ?? [])];
     expect(buttons.map((b) => b.textContent?.trim())).toEqual(["Annuler", "Supprimer"]);
