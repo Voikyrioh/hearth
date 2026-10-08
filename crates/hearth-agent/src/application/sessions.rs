@@ -5,7 +5,6 @@
 //! enchaîne et demande au stockage d'exécuter.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use hearth_proto::admin_act::AdminAct;
@@ -227,7 +226,7 @@ struct ReauthInner {
     /// Le haché du mot de passe réellement vérifié par le chemin de la connexion ; `None` sous élévation.
     verified: Option<Secret>,
     /// Tient le défi pendant l'acte (il est déjà retenu comme consommé : voir `reauthenticate`).
-    _reservation: Option<InFlight>,
+    _reservation: InFlight,
 }
 
 /// Un acte confirmé : le mot de passe (ou l'élévation) et la preuve de clé ont été vérifiés, et le défi
@@ -237,17 +236,6 @@ struct ReauthInner {
 pub struct Reauthenticated(Arc<ReauthInner>);
 
 impl Reauthenticated {
-    /// Le marqueur d'un acte accepté SANS confirmation, posé par la couche `reauth` pour les seuls bancs
-    /// d'essai qui baissent l'exigence. Derrière la fonction cargo `test-support` : un binaire de production
-    /// ne le contient pas, et aucun handler d'acte ne travaille sans ce type (BR-TRUST-045).
-    #[cfg(feature = "test-support")]
-    pub fn unconfirmed() -> Self {
-        Self(Arc::new(ReauthInner {
-            verified: None,
-            _reservation: None,
-        }))
-    }
-
     /// Le haché du mot de passe vérifié, `None` si l'élévation a tenu lieu de mot de passe.
     pub fn verified_hash(&self) -> Option<&Secret> {
         self.0.verified.as_ref()
@@ -293,10 +281,6 @@ pub struct SessionService {
     /// L'élévation du mot de passe en administration (HRT-28). Absente : le mot de passe est demandé à
     /// chaque acte, comme avec le réglage `each`.
     elevations: Option<Arc<Elevations>>,
-    /// L'agent **exige** la confirmation des actes (`admin_reauth.required`) : VRAI dès la construction,
-    /// aucun repli vers « la session suffit ». Seuls les bancs d'essai le baissent, par une méthode au nom
-    /// explicite (`accept_unconfirmed_acts_for_tests`).
-    reauth_required: AtomicBool,
 }
 
 /// Tours de parole par adresse : une seule connexion à la fois pour une même adresse, une file
@@ -412,21 +396,7 @@ impl SessionService {
             security: None,
             attack: None,
             elevations: None,
-            reauth_required: AtomicBool::new(true),
         }
-    }
-
-    /// L'agent exige-t-il la confirmation de chaque acte ?
-    pub fn reauth_required(&self) -> bool {
-        self.reauth_required.load(Ordering::SeqCst)
-    }
-
-    /// **Pour les bancs d'essai seulement** : `true` fait accepter un acte sans `reauth` (le régime d'avant
-    /// HRT-30, pour les scénarios qui envoient des actes bruts) ; `false` rétablit l'exigence. Derrière la
-    /// fonction cargo `test-support` : un binaire de production ne la contient pas (BR-TRUST-045).
-    #[cfg(feature = "test-support")]
-    pub fn accept_unconfirmed_acts_for_tests(&self, accept: bool) {
-        self.reauth_required.store(!accept, Ordering::SeqCst);
     }
 
     /// Ajoute l'élévation du mot de passe en administration (HRT-28, BR-TRUST-043).
@@ -1178,7 +1148,7 @@ impl SessionService {
             }
             Ok(Reauthenticated(Arc::new(ReauthInner {
                 verified,
-                _reservation: Some(reservation),
+                _reservation: reservation,
             })))
         };
         // Pendant le mode attaque (actif ou suspendu), aucune élévation n'existe.

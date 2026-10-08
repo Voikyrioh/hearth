@@ -12,7 +12,7 @@ maj: 2026-10-07
 
 ## Règle
 - Un acte d'administration porte un membre `reauth` (`password`, `device`) dans le corps. La couche de confirmation, posée par le routeur sur chaque route d'acte, vérifie la preuve de clé puis le mot de passe avant le handler.
-- **L'agent exige dès la construction du service** (`SessionService::new`, `admin_reauth.required: true`) : une requête sans membre `reauth` reçoit `426 INCOMPATIBLE_VERSION` (`reason: reauth_required`) ; une requête qui en porte un est vérifiée jusqu'au bout. Seuls les bancs d'essai peuvent le baisser, par `accept_unconfirmed_acts_for_tests`. Le mode attaque n'a plus de forme à plat (retirée en HRT-18 tranche 5).
+- **L'agent exige dès la construction du service** (`SessionService::new`, `admin_reauth.required: true`) : une requête sans membre `reauth` reçoit `426 INCOMPATIBLE_VERSION` (`reason: reauth_required`) ; une requête qui en porte un est vérifiée jusqu'au bout. Rien ne peut le baisser, même en test (HRT-18 tranche 7). Le mode attaque n'a plus de forme à plat (retirée en HRT-18 tranche 5).
 - Le réglage de fréquence (`PUT /me/reauth`) est toujours confirmé, dès la tranche A.
 - Le retrait d'un poste garde son contrat livré (`0x04`, champs à plat, clé du poste courant : BR-TRUST-022, BR-TRUST-041).
 - Aucun repli : une confirmation présente mais sans preuve valable ne retombe jamais sur « session et rôle ».
