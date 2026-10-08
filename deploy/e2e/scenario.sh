@@ -340,7 +340,8 @@ authed "$BASE/machine" | grep -q '"capabilities"' || die "/machine ne rend pas l
 SAMPLES=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
     authed "$BASE/metrics/history?window=1m" >"$OUT.metrics"
-    if grep -q '"cpu"' "$OUT.metrics" && grep -q '"mem"' "$OUT.metrics"; then SAMPLES=1; break; fi
+    # Au moins un échantillon (la liste vide `"samples":[]` ne compte pas), avec processeur et mémoire.
+    if grep -Eq '"samples": *\[ *\{' "$OUT.metrics" && grep -q '"cpu"' "$OUT.metrics" && grep -q '"mem"' "$OUT.metrics"; then SAMPLES=1; break; fi
     sleep 1
 done
 [ "$SAMPLES" = 1 ] || die "aucun échantillon de mesures après 10 s : $(cat "$OUT.metrics")"

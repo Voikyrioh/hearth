@@ -45,6 +45,8 @@ use tokio::time::Instant;
 #[derive(Default)]
 struct Host {
     up: AtomicBool,
+    /// L'hôte ne répond plus du tout (ni refus ni flux) : les tentatives restent sans réponse.
+    mute: AtomicBool,
     attempts: Mutex<Vec<Instant>>,
 }
 
@@ -158,6 +160,9 @@ impl Transport for Scripted {
     async fn open_stream(&self, target: &Target) -> Result<Box<dyn StreamConn>, TransportError> {
         let host = self.0.host(&target.host);
         host.attempts.lock().unwrap().push(Instant::now());
+        if host.mute.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         if !host.up.load(Ordering::SeqCst) {
             return Err(TransportError::Connect("injoignable".into()));
         }
@@ -500,6 +505,35 @@ async fn a_cut_healed_at_3_1_seconds_shows_reconnecting_then_connected() {
         .map(|(state, _)| state)
         .collect();
     assert_eq!(shown, [LinkState::Reconnecting, LinkState::Connected]);
+}
+
+/// FIX:01M4CJEQS88NZWCQ129XDP91MT (review r1) : un serveur qu'on redémarre refuse, puis ne répond plus
+/// du tout. La vérification du seuil reste sans réponse : « Reconnexion » est tout de même montrée à 3 s
+/// (datée du seuil, émise à la borne de la vérification, 0,5 s), et « Hors ligne » à 30 s.
+#[tokio::test(start_paused = true)]
+async fn a_host_that_refuses_then_goes_silent_shows_reconnecting_at_3_seconds() {
+    let bench = Bench::start().await;
+    let id = bench.connected_server("a.test").await;
+    let host = bench.hosts.host("a.test");
+
+    let cut = Instant::now();
+    host.up.store(false, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    host.mute.store(true, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(40)).await;
+    let states = bench.states_since(&id, cut);
+    let kinds: Vec<LinkState> = states.iter().map(|(state, _)| *state).collect();
+    assert_eq!(kinds, [LinkState::Reconnecting, LinkState::Offline]);
+    assert!(
+        near(states[0].1 - cut, 3_500, 200),
+        "Reconnexion émise à {:?}",
+        states[0].1 - cut
+    );
+    assert!(
+        near(states[1].1 - cut, 30_000, 300),
+        "Hors ligne à {:?}",
+        states[1].1 - cut
+    );
 }
 
 #[tokio::test(start_paused = true)]

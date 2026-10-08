@@ -29,7 +29,7 @@ Légende des couches :
 | # | Ligne de la spec | Domaine (`state/tests.rs`) | Contre un vrai agent / gestionnaire |
 |---|---|---|---|
 | 1 | Connecté, coupure < 3 s : rien ne change | `row01_connected_cut_under_3s_changes_nothing` | mandataire `a_cut_healed_before_any_threshold_shows_nothing_and_the_stream_resumes` ; temps virtuel `a_cut_healed_at_2_9_seconds_shows_nothing` et `a_cut_healed_at_3_1_seconds_shows_reconnecting_then_connected` |
-| 2 | Connecté, coupure 3 à 30 s : « Reconnexion » | `row02_connected_cut_between_3s_and_30s_shows_reconnecting` | mandataire `a_ten_second_cut_shows_reconnecting_then_connected` ; temps virtuel `the_link_shows_reconnecting_at_3_seconds_and_offline_at_30_then_comes_back` (3,0 s à 300 ms près) |
+| 2 | Connecté, coupure 3 à 30 s : « Reconnexion » | `row02_connected_cut_between_3s_and_30s_shows_reconnecting` | mandataire `a_ten_second_cut_shows_reconnecting_then_connected` ; temps virtuel `the_link_shows_reconnecting_at_3_seconds_and_offline_at_30_then_comes_back` (3,0 s à 300 ms près) ; **cas du serveur qu'on redémarre (refus puis silence)** : domaine `a_silent_probe_cannot_hold_the_screen_on_connected_past_its_bound`, temps virtuel `a_host_that_refuses_then_goes_silent_shows_reconnecting_at_3_seconds` (émise à 3,5 s au plus, datée de 3 s) |
 | 3 | Connecté, coupure > 30 s : « Hors ligne » | `row03_connected_cut_over_30s_shows_offline` | mandataire `a_long_cut_goes_offline_then_comes_back` ; temps virtuel (30,0 s à 300 ms près) |
 | 4 | Reconnexion, lien rétabli avant 30 s : « Connecté » | `row04_reconnecting_then_link_back_before_30s_is_connected` | mandataire `a_ten_second_cut_shows_reconnecting_then_connected` ; temps virtuel `each_of_several_servers_has_its_own_clock_and_state` (serveur « b ») |
 | 5 | Reconnexion, pas de réponse > 30 s : « Hors ligne » | `row05_reconnecting_with_no_answer_for_30s_goes_offline` | mandataire `a_freeze_goes_through_reconnecting_then_offline_in_that_order` |
@@ -46,6 +46,7 @@ Légende des couches :
 
 ## Écarts constatés
 
+- **Chemins ajoutés par le correctif du seuil (critères 3 et 7)** : vérification sans réponse (`a_silent_probe_cannot_hold_the_screen_on_connected_past_its_bound`), vérification conclue par « attends » (`a_probe_ended_by_a_wait_answer_does_not_make_the_next_failure_skip_its_delay`), déclencheur pendant la vérification (`a_trigger_during_the_probe_makes_it_an_ordinary_attempt`), « Hors ligne » toujours à 30 s (même premier test et `link_timing.rs`).
 - **Corrigé dans cette tranche (FIX-01M4CJEQS88NZWCQ129XDP91MT)** : une coupure rétablie entre 1,5 s et 3,5 s faisait clignoter « Reconnexion en cours » (tentatives à 0,5 / 1,5 / 3,5 s). Désormais « Reconnexion » n'est montrée qu'après 3 s de coupure continue : une vérification part à 3 s pile, hors de la suite des délais (BR-RESIL-002). Prouvé en temps virtuel : coupure à 2,9 s = aucun état émis, à 3,1 s = Reconnexion puis Connecté (`link_timing.rs`), et au domaine (`state/tests.rs`).
 - La ligne 15 est mesurée (< 10 s) en temps simulé seulement ; le test contre un vrai agent vérifie la séquence des états sans durée.
 - Playwright et `agent-install` ne tournent qu'en CI (aucun navigateur ni Docker utilisé en local pour cette tranche).
