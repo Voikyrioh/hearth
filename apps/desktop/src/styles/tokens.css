@@ -144,9 +144,10 @@
 
   /* Journal d'activité */
   --audit-row-height: 44px;
-  --audit-columns: 156px 104px minmax(170px, 1.2fr) minmax(150px, 1fr) minmax(120px, 1fr) 92px
-    minmax(130px, 1fr);
-  --audit-table-min: 1020px;
+  --audit-columns: 156px 104px minmax(140px, 1.2fr) minmax(130px, 1fr) minmax(110px, 1fr) 92px
+    minmax(110px, 1fr);
+  /* FIX:01M4EHYN77QBS7F7T5FCTRH6R5 (D1) : 842 px de colonnes + 6 écarts de 12 px + 2 marges de 16 px : le tableau tient dans la carte d'une page de 960 px (fenêtre de 1 280 px). */
+  --audit-table-min: 950px;
   --audit-menu-width: 260px;
   --audit-menu-max: 300px;
   --audit-search-min: 240px;

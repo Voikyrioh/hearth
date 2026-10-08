@@ -256,7 +256,7 @@ for (const size of [SIZES[1], SIZES[3]]) {
   });
 }
 
-test("mode attaque et alerte à 1366×800 : les bandeaux tiennent en 80 px", async ({ page }) => {
+test("mode attaque et alerte à 1366×800 : les bandeaux tiennent en 84 px", async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 800 });
   await page.goto("/?nodev#/servers/forge/dashboard");
   await drive(page, (sim) => {
@@ -266,7 +266,9 @@ test("mode attaque et alerte à 1366×800 : les bandeaux tiennent en 80 px", asy
   await expect(page.locator("section.banner")).toHaveCount(2);
   const banners = await boxesOf(page, "section.banner");
   const total = banners.reduce((sum, banner) => sum + banner.h, 0);
-  expect(total, "hauteur cumulée des bandeaux").toBeLessThanOrEqual(80);
+  // 80 px avant la seconde passe UX ; D2 demande de l'air autour des boutons (4 px en haut et en bas de chaque bandeau),
+  // soit 2 × 2 px de plus pour deux bandeaux (82 px mesurés) : le plafond passe à 84 px, pas davantage.
+  expect(total, "hauteur cumulée des bandeaux").toBeLessThanOrEqual(84);
   await shoot(page, "hrt36-bandeaux", 1366, 800);
 });
 

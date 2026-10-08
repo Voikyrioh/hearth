@@ -42,10 +42,10 @@ const icon = computed(() =>
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-half) var(--space-4);
+  padding: var(--space-1) var(--space-4);
   border-radius: var(--radius-control);
-  /* FIX:01M4DJZAPV5ECT10JJ5JWNM8A6 : le bandeau a la largeur du contenu, pas de la fenêtre (C35) */
-  max-width: var(--column-max);
+  /* FIX:01M4DJZAPV5ECT10JJ5JWNM8A6 (C35) puis FIX:01M4EHYNPBB8TZ89DRRZ7TRH0A : le bandeau a la largeur du CONTENU de la page (même borne que la page,
+     HRT-42), jamais celle d'une colonne de 880 px posée au-dessus d'une page plus large. */
 }
 
 .banner--alert {
@@ -106,7 +106,8 @@ const icon = computed(() =>
 
 .banner__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
+  flex-wrap: nowrap;
   gap: var(--space-2);
 }
 </style>

@@ -22,7 +22,7 @@ for (const size of SIZES) {
     page,
   }) => {
     await open(page, size);
-    const spans = await page.locator(".series .series__span").allInnerTexts();
+    const spans = await page.locator(".series .series__span-full").allTextContents();
     const scales = await page.locator(".series .series__scale").allInnerTexts();
     const charts = await page.locator(".series").count();
     expect(charts).toBeGreaterThanOrEqual(5);

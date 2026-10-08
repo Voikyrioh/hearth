@@ -42,6 +42,17 @@ async function startEditing(account: Account) {
   root.value?.querySelector<HTMLSelectElement>("[data-editing] select")?.focus();
 }
 
+// FIX:01M4EHYPD658X22RH4SFV0TDVE : Échap referme la liste et rend le curseur au bouton « Changer le rôle » d'où elle est partie.
+async function cancelEditing(account: Account) {
+  editing.value = null;
+  await nextTick();
+  root.value
+    ?.querySelector<HTMLElement>(
+      `tr[data-account="${account.username}"] button[aria-label^="${t("accounts.changeRole")}"]`,
+    )
+    ?.focus();
+}
+
 function chooseRole(account: Account, role: Role) {
   editing.value = null;
   if (role !== account.role) emit("changeRole", account, role);
@@ -81,7 +92,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
             }}</span>
           </th>
           <td :data-editing="editing === account.id ? '' : undefined">
-            <div v-if="editing === account.id" @focusout="editing = null" @keydown.esc="editing = null">
+            <div v-if="editing === account.id" @focusout="editing = null" @keydown.esc="cancelEditing(account)">
               <HSelect
                 :model-value="account.role"
                 :label="t('accounts.role')"

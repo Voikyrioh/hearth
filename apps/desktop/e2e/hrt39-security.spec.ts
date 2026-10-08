@@ -36,8 +36,11 @@ for (const width of [1100, 1366, 1920, 2560]) {
     await expect(page.locator("[data-security-alert]")).toBeVisible();
     const banner = await page.locator("[data-security-alert]").boundingBox();
     const card = await page.locator("[data-attack-mode-panel]").boundingBox();
-    expect(banner?.width ?? 0).toBeLessThanOrEqual(880 + 2);
-    expect(banner?.x ?? 0).toBeCloseTo(card?.x ?? -1, 0);
+    // D2 (seconde passe) : le bandeau a la largeur du CONTENU de la page (même borne que la page), plus celle d'une colonne de 880 px.
+    const content = await page.locator(".layout__content").boundingBox();
+    expect(Math.abs((banner?.width ?? 0) - (content?.width ?? -1))).toBeLessThanOrEqual(2);
+    expect(banner?.x ?? 0).toBeCloseTo(content?.x ?? -1, 0);
+    expect(card?.x ?? 0).toBeGreaterThanOrEqual(content?.x ?? 0);
     // Sur la page, « Activer le mode attaque » n'existe qu'une fois (dans la carte « Ce qui se passe »).
     await expect(page.getByRole("button", { name: "Activer le mode attaque" })).toHaveCount(1);
     await expect(page.locator("[data-attack-mode-toggle]")).toHaveCount(1);
@@ -47,7 +50,7 @@ for (const width of [1100, 1366, 1920, 2560]) {
       .first()
       .boundingBox()
       .catch(() => null);
-    if (mode) expect(mode.width).toBeLessThanOrEqual(880 + 2);
+    if (mode) expect(Math.abs(mode.width - (content?.width ?? 0))).toBeLessThanOrEqual(2);
   });
 }
 

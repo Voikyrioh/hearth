@@ -4,6 +4,13 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4EHYN77QBS7F7T5FCTRH6R5](./FIX-01M4EHYN77QBS7F7T5FCTRH6R5.md) | Journal à 1280 : le tableau dépassait sa carte, deux barres horizontales empilées, « Raison » coupée (D1) | 2026-10-08 |
+| [FIX-01M4EHYNER6SJ3ZZVH286TD3FB](./FIX-01M4EHYNER6SJ3ZZVH286TD3FB.md) | Journal : en-têtes décalés de 4 à 10 px de leurs colonnes avec une barre de défilement classique (C31) | 2026-10-08 |
+| [FIX-01M4EHYNPBB8TZ89DRRZ7TRH0A](./FIX-01M4EHYNPBB8TZ89DRRZ7TRH0A.md) | Les bandeaux de sécurité étaient bornés à 880 px au-dessus d'une page plus large, boutons empilés contre les bords (D2) | 2026-10-08 |
+| [FIX-01M4EHYNXY72JB4KW0994J85AB](./FIX-01M4EHYNXY72JB4KW0994J85AB.md) | Comptes : l'en-tête de page débordait du tableau borné à 1 400 px (D3) | 2026-10-08 |
+| [FIX-01M4EHYP5JP846FGWCXJ41ET32](./FIX-01M4EHYP5JP846FGWCXJ41ET32.md) | À 1100, les légendes des courbes passaient sur deux lignes (D4) | 2026-10-08 |
+| [FIX-01M4EHYPD658X22RH4SFV0TDVE](./FIX-01M4EHYPD658X22RH4SFV0TDVE.md) | Comptes : Échap sur « Changer le rôle » laissait le curseur nulle part (D6) | 2026-10-08 |
+| [FIX-01M4EHYPMVHR2TY39G3BQ7ZJZA](./FIX-01M4EHYPMVHR2TY39G3BQ7ZJZA.md) | « Mes serveurs » : la pastille d'état passait seule à la ligne (D8) | 2026-10-08 |
 | [FIX-01M4EDC0FVT0ZHGASFEMWX7066](./FIX-01M4EDC0FVT0ZHGASFEMWX7066.md) | Réglages et Sécurité : une colonne étroite, une colonne étirée, et du contenu sans borne à 1920 et 2560 (C44, C55 en partie) | 2026-10-08 |
 | [FIX-01M4ECZJ34NZE9Z9P4YATK707H](./FIX-01M4ECZJ34NZE9Z9P4YATK707H.md) | Une courbe qui a le focus récitait une valeur par seconde (suivi de la revue de #58) | 2026-10-08 |
 | [FIX-01M4ECZJBH94ABZXSTNNFFGZ5P](./FIX-01M4ECZJBH94ABZXSTNNFFGZ5P.md) | Un bouton grisé n'expliquait sa raison qu'au survol (C42) | 2026-10-08 |

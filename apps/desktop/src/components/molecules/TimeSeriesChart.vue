@@ -31,6 +31,12 @@ const SPAN_KEYS: Record<WindowKey, MessageKey> = {
   "1h": "dash.span1h",
 };
 const span = computed(() => t(SPAN_KEYS[props.window]));
+const SHORT_KEYS: Record<WindowKey, MessageKey> = {
+  "1m": "dash.window1m",
+  "5m": "dash.window5m",
+  "1h": "dash.window1h",
+};
+const spanShort = computed(() => t(SHORT_KEYS[props.window]));
 const scale = computed(() =>
   t("dash.scaleTo", { max: props.format(ceilingOf(props.series, props.max, props.atLeast)) }),
 );
@@ -66,7 +72,10 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
     <div class="series__head">
       <p v-if="legend" class="series__legend">{{ legend }}</p>
       <div class="series__line">
-        <span class="series__span">{{ span }}</span>
+        <span class="series__span">
+          <span class="series__span-full">{{ span }}</span>
+          <span class="series__span-short" aria-hidden="true">{{ spanShort }}</span>
+        </span>
         <span class="series__scale">{{ scale }}</span>
       </div>
     </div>
@@ -86,6 +95,7 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
 
 <style scoped>
 .series {
+  container: series / inline-size;
   position: relative;
   display: flex;
   flex: 1 1 auto;
@@ -114,6 +124,26 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
   display: flex;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+.series__span,
+.series__scale {
+  white-space: nowrap;
+}
+
+/* FIX:01M4EHYP5JP846FGWCXJ41ET32 : chez une courbe étroite (fenêtre de 1 100 px), la durée s'écrit « 5 min » et reste sur une ligne. */
+.series__span-short {
+  display: none;
+}
+
+@container series (max-width: 260px) {
+  .series__span-full {
+    display: none;
+  }
+
+  .series__span-short {
+    display: inline;
+  }
 }
 
 .series__scale {

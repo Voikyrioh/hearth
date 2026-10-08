@@ -37,7 +37,7 @@ for (const size of [...SMALL, ...WIDE]) {
       await expect(page.locator(".layout__content")).toBeVisible();
       const main = await box(page, ".layout__main");
       expect(main.w, `${name} : largeur du contenu`).toBeLessThanOrEqual(1760 + 48 + 1);
-      if (size.width <= 1920) {
+      if (size.width <= 1920 && name !== "accounts") {
         // Jusqu'à 1920 la page est plus étroite que la borne : rien ne change (toute la place disponible).
         expect(main.w, `${name} : toute la place`).toBeGreaterThan(size.width - 272 - 2);
       }
