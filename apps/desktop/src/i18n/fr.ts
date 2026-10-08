@@ -452,6 +452,10 @@ export const fr = {
     noProbes:
       "Sondes non disponibles sur cette machine. Ce matériel n'expose pas sa température au système.",
     loading: "Chargement des mesures",
+    loadingSlow: "Mesures en cours de chargement…",
+    retryLoading: "Réessayer",
+    noGpu:
+      "Aucune carte graphique mesurable sur cette machine. Le matériel n'en expose pas, ou son pilote ne rend pas de mesure.",
     waitingTitle: "Aucune mesure pour l'instant",
     waitingText: "Le tableau de bord s'affichera dès que le serveur sera joignable.",
     readFailed: "Les mesures de ce serveur ne peuvent pas être lues pour le moment.",

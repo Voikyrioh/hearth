@@ -47,12 +47,17 @@ const covered = useCoverage(props.entry);
 <style scoped>
 .cpu {
   display: flex;
-  align-items: center;
+  flex: 3 1 auto;
+  align-items: stretch;
   gap: var(--space-4);
 }
 
 .cpu__chart {
   flex: 1;
   min-width: 0;
+}
+
+.cpu :deep(.gauge) {
+  align-self: center;
 }
 </style>

@@ -66,6 +66,10 @@ const uptime = computed(() => formatUptime(props.entry.latest?.sample.uptimeS ??
   min-width: 0;
 }
 
+.machine > :first-child {
+  flex: 1;
+}
+
 .machine__rows {
   display: flex;
   flex-direction: column;

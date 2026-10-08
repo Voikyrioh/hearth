@@ -53,8 +53,9 @@ const width = computed(() => Math.max(1, props.values.length * (BAR + GAP) - GAP
 <style scoped>
 .bars {
   display: block;
+  flex: 1 1 var(--bars-height);
   width: 100%;
-  height: var(--bars-height);
+  min-height: var(--bars-height);
 }
 
 .bars__bar {

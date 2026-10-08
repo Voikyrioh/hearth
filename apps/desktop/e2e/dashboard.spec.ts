@@ -175,10 +175,127 @@ test("une machine sans carte graphique ni sonde garde ses sections, avec leur ex
   page,
 }) => {
   await page.goto("/?nodev#/servers/salon/dashboard");
-  await expect(section(page, "Carte graphique")).toContainText("Non disponible sur cette machine");
+  await expect(section(page, "Carte graphique")).toContainText(
+    "Aucune carte graphique mesurable sur cette machine",
+  );
   await expect(section(page, "Températures")).toContainText(
     "Sondes non disponibles sur cette machine. Ce matériel n'expose pas sa température au système.",
   );
   await expect(section(page, "Processeur")).toBeVisible();
   await shoot(page, "tableau-de-bord-sans-materiel");
 });
+
+// HRT-34 : la grille se remplit sans trou ni chevauchement, aux cinq tailles (revue UX C6, C7, C14).
+const LAYOUT_SIZES = [
+  { width: 1100, height: 680 },
+  { width: 1280, height: 800 },
+  { width: 1366, height: 800 },
+  { width: 1920, height: 1080 },
+  { width: 2560, height: 1440 },
+] as const;
+
+for (const size of LAYOUT_SIZES) {
+  test(`tableau de bord à ${size.width}×${size.height} : rien ne se chevauche, une rangée = une hauteur, courbes lisibles`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/dashboard");
+    await expect(page.getByRole("heading", { name: "Processeur", exact: true })).toBeVisible();
+    const boxes = await page.locator("section.card").evaluateAll((cards) =>
+      cards.map((card) => {
+        const rect = card.getBoundingClientRect();
+        const title = card.querySelector("h2");
+        return {
+          title: title?.textContent ?? "",
+          x: rect.x,
+          y: rect.y + window.scrollY,
+          w: rect.width,
+          h: rect.height,
+          titleLines: title ? Math.round(title.getBoundingClientRect().height / 16) : 0,
+        };
+      }),
+    );
+    expect(boxes.length).toBeGreaterThanOrEqual(7);
+    // Aucun chevauchement entre deux cartes.
+    for (const a of boxes) {
+      for (const b of boxes) {
+        if (a === b) continue;
+        const overlap =
+          a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1;
+        expect(overlap, `${a.title} chevauche ${b.title}`).toBe(false);
+      }
+    }
+    // Une rangée = une hauteur : les cartes qui commencent à la même ordonnée (hors colonnes empilées, dont
+    // la somme des hauteurs compte) finissent à la même ordonnée que la plus haute de leur rangée.
+    const rows = new Map<number, typeof boxes>();
+    for (const box of boxes) {
+      const key = Math.round(box.y / 4) * 4;
+      rows.set(key, [...(rows.get(key) ?? []), box]);
+    }
+    const grid = await page.locator(".dash__grid").boundingBox();
+    expect(grid).not.toBeNull();
+    for (const group of rows.values()) {
+      const bottoms = group.map((box) => Math.round(box.y + box.h));
+      // Les cartes d'une même rangée se terminent à moins de 2 px près, sauf une colonne empilée qui
+      // contient plusieurs cartes (sa dernière carte se termine, elle, avec la rangée).
+      const last = Math.max(...bottoms);
+      for (const box of group) {
+        const stackedUnder = boxes.some(
+          (other) => other !== box && Math.abs(other.x - box.x) < 2 && other.y > box.y,
+        );
+        if (!stackedUnder) {
+          expect(Math.abs(box.y + box.h - last), `${box.title} finit avec sa rangée`).toBeLessThan(
+            3,
+          );
+        }
+      }
+    }
+    // REMPLISSAGE (revue UX C7) : dans chaque carte, l'espace vide sous le dernier élément de contenu ne dépasse
+    // pas le remplissage normal de la carte (32 px de tolérance) : les trous ne passent pas DANS les cartes.
+    const gaps = await page.locator("section.card").evaluateAll((cards) =>
+      cards.map((card) => {
+        const box = card.getBoundingClientRect();
+        const padding = Number.parseFloat(getComputedStyle(card).paddingBottom);
+        let bottom = 0;
+        for (const element of card.querySelectorAll("*")) {
+          const rect = element.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) bottom = Math.max(bottom, rect.bottom);
+        }
+        return {
+          title: card.querySelector("h2")?.textContent ?? "",
+          empty: Math.round(box.bottom - bottom - padding),
+        };
+      }),
+    );
+    for (const gap of gaps) {
+      expect(gap.empty, `${gap.title} : vide sous son contenu`).toBeLessThanOrEqual(32);
+    }
+    // Pas de titre cassé sur plusieurs lignes, courbes d'au moins 150 px de large.
+    for (const box of boxes) expect(box.titleLines, box.title).toBeLessThanOrEqual(1);
+    const charts = await page
+      .locator("svg.chart")
+      .evaluateAll((svgs) => svgs.map((svg) => svg.getBoundingClientRect().width));
+    for (const width of charts) expect(width).toBeGreaterThanOrEqual(150);
+    // À 1920 et plus, l'essentiel tient sans défiler.
+    if (size.width >= 1920) {
+      const needed = [
+        "Processeur",
+        "Mémoire",
+        "Carte graphique",
+        "Réseau",
+        "Disques",
+        "Températures",
+      ];
+      for (const title of needed) {
+        const box = boxes.find((b) => b.title.toLowerCase() === title.toLowerCase());
+        expect(box, title).toBeDefined();
+        expect((box?.y ?? 0) + (box?.h ?? 0), `${title} visible sans défiler`).toBeLessThanOrEqual(
+          size.height,
+        );
+      }
+    }
+    await page.screenshot({
+      path: `e2e/screenshots/hrt34-tableau-de-bord-${size.width}x${size.height}.png`,
+    });
+  });
+}
