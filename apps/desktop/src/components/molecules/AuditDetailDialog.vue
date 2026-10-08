@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
-import { originOf, outcomeLabel, whenOf } from "@/audit/format";
+import { capitalize, originOf, outcomeLabel, sourceOf, whenOf } from "@/audit/format";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import { t } from "@/i18n";
@@ -20,17 +20,19 @@ let opener: HTMLElement | null = null;
 const fields = computed(() => {
   const entry = props.entry;
   if (!entry) return [];
-  return [
+  // HRT-43 (C32) : pas de ligne vide (cible ou raison absentes) ; source lisible, raison avec majuscule.
+  const rows: Array<readonly [string, string]> = [
     [t("audit.colWhen"), whenOf(entry)],
-    [t("audit.detailSource"), safeText(entry.at)],
+    [t("audit.detailSource"), sourceOf(entry)],
     [t("audit.colAccount"), safeText(entry.account)],
     [t("audit.colOrigin"), originOf(entry)],
     [t("audit.colAction"), safeText(entry.actionLabel)],
     [t("audit.colTarget"), safeText(entry.target)],
     [t("audit.colOutcome"), outcomeLabel(entry.outcome)],
-    [t("audit.colReason"), safeText(entry.reason)],
+    [t("audit.colReason"), capitalize(safeText(entry.reason))],
     [t("audit.detailId"), String(entry.id)],
-  ] as const;
+  ];
+  return rows.filter(([, value]) => value.trim() !== "");
 });
 
 watch(

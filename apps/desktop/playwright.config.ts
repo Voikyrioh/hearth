@@ -37,6 +37,7 @@ export default defineConfig({
         "security.spec.ts",
         "attack-mode.spec.ts",
         "layout.spec.ts",
+        "hrt43-44.spec.ts",
         "reauth.spec.ts",
         "identity.spec.ts",
         "hrt33-keyboard.spec.ts",

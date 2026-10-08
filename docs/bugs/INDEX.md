@@ -4,6 +4,10 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4DNJ3P75DN25714EBCH2EY2](./FIX-01M4DNJ3P75DN25714EBCH2EY2.md) | Le rôle en cours de changement ne se distinguait pas des autres cellules (C22) | 2026-10-08 |
+| [FIX-01M4DNJ3W899Y50NPSRQ8W8ZVN](./FIX-01M4DNJ3W899Y50NPSRQ8W8ZVN.md) | L'en-tête « Sessions ouvertes » était en chasse fixe, les autres non (C26) | 2026-10-08 |
+| [FIX-01M4DNJ42ETVYR5Y01YNVPW715](./FIX-01M4DNJ42ETVYR5Y01YNVPW715.md) | Dans le journal, la recherche ne filtrait qu'avec Entrée ou le bouton éloigné (C28) | 2026-10-08 |
+| [FIX-01M4DNJ97KCR694M9JT5B7R67B](./FIX-01M4DNJ97KCR694M9JT5B7R67B.md) | Journal : textes bruts, raison en minuscules, lignes vides, horodatage ISO (C32) | 2026-10-08 |
 | [FIX-01M4DKQWTWVNDXFPWJ5SE88SN7](./FIX-01M4DKQWTWVNDXFPWJ5SE88SN7.md) | Les actions d'un compte passaient sur deux lignes à 1280 et 1366 (C21) | 2026-10-08 |
 | [FIX-01M4DKQV9ZT6XQF6P7ER02HFYZ](./FIX-01M4DKQV9ZT6XQF6P7ER02HFYZ.md) | Les boutons d'une fenêtre de dialogue sortaient de l'écran à 1100×680 (C20) | 2026-10-08 |
 | [FIX-01M4D4Y22QGBWNKKJTK8K3X12A](./FIX-01M4D4Y22QGBWNKKJTK8K3X12A.md) | Le nom accessible du chargement ne suivait pas le texte affiché (retour de revue HRT-34) | 2026-10-08 |

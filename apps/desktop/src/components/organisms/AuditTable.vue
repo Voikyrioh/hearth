@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { burstLabel, originOf, outcomeLabel, whenOf } from "@/audit/format";
+import { burstLabel, capitalize, originOf, outcomeLabel, whenOf } from "@/audit/format";
 import { displayRows } from "@/audit/rows";
 import { clip, safeText } from "@/audit/text";
 import HIcon from "@/components/atoms/HIcon.vue";
@@ -287,8 +287,8 @@ defineExpose({ rows });
                     {{ outcomeLabel(row.entry.outcome) }}
                   </HTag>
                 </div>
-                <div class="table__td" role="gridcell" :title="plain(row.entry.reason)">
-                  {{ clip(row.entry.reason).text }}
+                <div class="table__td" role="gridcell" :title="plain(capitalize(row.entry.reason))">
+                  {{ clip(capitalize(row.entry.reason)).text }}
                 </div>
               </template>
             </div>
@@ -303,8 +303,11 @@ defineExpose({ rows });
 </template>
 
 <style scoped>
+/* HRT-37 : le tableau prend la hauteur qui reste et défile lui-même ; la page ne défile pas (une seule barre). */
 .table {
   display: flex;
+  flex: 1 1 0;
+  min-height: calc(var(--audit-row-height) * 5);
   overflow-x: auto;
   border-radius: var(--radius-card);
   background: var(--card);
@@ -339,7 +342,8 @@ defineExpose({ rows });
 
 .table__scroll {
   position: relative;
-  height: var(--audit-scroll-height);
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
 }
 

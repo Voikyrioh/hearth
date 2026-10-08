@@ -51,7 +51,11 @@ test("chaque acte d'une fenêtre demande « Ton mot de passe » quand l'agent l'
     .click();
   const open = await ready(page);
   await expect(open.getByLabel("Ton mot de passe")).toBeVisible();
-  await expect(open.getByText("Pour confirmer, redonne ton mot de passe.")).toBeVisible();
+  await expect(
+    open.getByText(
+      "Pour confirmer, redonne ton mot de passe. La clé de ce poste est vérifiée en même temps.",
+    ),
+  ).toBeVisible();
   await expect(open.getByRole("button", { name: "Changer le mot de passe" })).toHaveAttribute(
     "aria-disabled",
     "true",

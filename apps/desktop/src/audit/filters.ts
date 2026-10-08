@@ -150,7 +150,7 @@ export function hasAnyFilter(draft: FilterDraft): boolean {
   );
 }
 
-/** Deux brouillons disent-ils la même chose ? (le bouton « Appliquer » attend une différence). */
+/** Deux brouillons disent-ils la même chose ? (un brouillon identique à l'appliqué ne relance rien). */
 export function sameDraft(a: FilterDraft, b: FilterDraft): boolean {
   const sameSet = (x: readonly string[], y: readonly string[]) =>
     x.length === y.length && x.every((value) => y.includes(value));

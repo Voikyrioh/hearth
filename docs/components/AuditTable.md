@@ -7,3 +7,4 @@ Tableau du journal : grille ARIA (`grid`, en-têtes, `aria-rowcount`, `aria-busy
 - Props : `entries`, `busy`, `hasMore`, `loadingMore`, `scrollSignal`
 - Événements et slots : `atTop`, `loadMore`, `open`
 - Notes : Les dimensions sont posées en propriétés CSS (jamais `style=`). Tests : `pages/audit.test.ts`, `e2e/audit.spec.ts`.
+- HRT-43 : la raison s'affiche avec une majuscule (`capitalize`). Alignement des en-têtes (C31) : non reproduit (garde `e2e/hrt43-44.spec.ts`, vert avant et après).
