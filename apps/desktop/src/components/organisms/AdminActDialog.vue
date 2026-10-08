@@ -173,7 +173,7 @@ async function submit() {
       <HButton variant="secondary" @click="reauth.load()">{{ t("common.retry") }}</HButton>
     </div>
     <div v-else-if="reauth.agentTooOld.value" class="admin__state" data-reauth-agent-old>
-      <p role="alert" class="admin__alert">{{ t("reauth.agentTooOld") }}</p>
+      <p role="alert" class="admin__alert">{{ t("failure.agentTooOld") }}</p>
     </div>
     <div v-else-if="reauth.keyMissing.value" class="admin__state" data-reauth-no-key>
       <p class="admin__title">{{ t("reauth.noKeyTitle") }}</p>
