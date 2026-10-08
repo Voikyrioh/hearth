@@ -161,8 +161,10 @@ function patch(change: Partial<FilterDraft>) {
 
 <style scoped>
 .filters {
+  /* FIX:01M4D4H25X7PN4SH2N7DC3REGS : filtres sur une ligne, bouton compris (revue UX C29) */
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-card);
@@ -171,6 +173,7 @@ function patch(change: Partial<FilterDraft>) {
 }
 
 .filters__title {
+  flex: 0 0 100%;
   color: var(--tx2);
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
@@ -179,27 +182,22 @@ function patch(change: Partial<FilterDraft>) {
 }
 
 .filters__row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
+  display: contents;
 }
 
-.filters__row--end {
-  align-items: flex-end;
-}
 
 .filters__search {
-  flex: 2 1 var(--audit-search-min);
+  flex: 2 1 calc(var(--audit-search-min) / 2);
   min-width: 0;
 }
 
 .filters__field {
-  flex: 1 1 var(--audit-field-min);
+  flex: 1 1 calc(var(--audit-field-min) / 2);
   min-width: 0;
 }
 
 .filters__gap {
-  flex: 1;
+  display: none;
 }
 
 .filters__dot {

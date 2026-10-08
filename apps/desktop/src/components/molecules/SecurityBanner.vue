@@ -38,10 +38,11 @@ const icon = computed(() =>
 
 <style scoped>
 .banner {
+  /* FIX:01M4D4FY4G650RBNJ3W7NSP947 : un bandeau tient sur une ligne, titre, texte et date côte à côte (revue UX C37) */
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-half) var(--space-4);
   border-radius: var(--radius-control);
 }
 
@@ -61,7 +62,7 @@ const icon = computed(() =>
 }
 
 .banner__icon {
-  margin-top: var(--space-half);
+  flex: none;
 }
 
 .banner--alert .banner__icon {
@@ -79,8 +80,9 @@ const icon = computed(() =>
 .banner__body {
   display: flex;
   flex: 1;
-  flex-direction: column;
-  gap: var(--space-1);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
   min-width: 0;
 }
 

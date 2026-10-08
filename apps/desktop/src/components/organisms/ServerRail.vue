@@ -34,23 +34,26 @@ function isActive(id: string): boolean {
     <RouterLink class="rail__link" to="/" :aria-label="t('rail.home')" data-rail-item>
       <HLogo size="sm" decorative />
     </RouterLink>
-    <RouterLink
-      v-for="server in servers.servers"
-      :key="server.id"
-      class="rail__link"
-      :to="{ name: 'dashboard', params: { id: server.id } }"
-      :aria-current="isActive(server.id) ? 'true' : undefined"
-      :data-server="server.id"
-      data-rail-item
-    >
-      <ServerAvatar
-        :name="server.name"
-        :color="server.color"
-        :state="link.stateOf(server.id)"
-        :active="isActive(server.id)"
-        :mark="markOf(security.of(server.id)?.state)"
-      />
-    </RouterLink>
+    <!-- FIX:01M4D4FZQ6BWTJJK1MYCCYMFDE : la liste est scrollable, « + », « Mes serveurs » et « Réglages » restent fixes. -->
+    <div class="rail__list">
+      <RouterLink
+        v-for="server in servers.servers"
+        :key="server.id"
+        class="rail__link"
+        :to="{ name: 'dashboard', params: { id: server.id } }"
+        :aria-current="isActive(server.id) ? 'true' : undefined"
+        :data-server="server.id"
+        data-rail-item
+      >
+        <ServerAvatar
+          :name="server.name"
+          :color="server.color"
+          :state="link.stateOf(server.id)"
+          :active="isActive(server.id)"
+          :mark="markOf(security.of(server.id)?.state)"
+        />
+      </RouterLink>
+    </div>
     <RouterLink
       class="rail__link rail__link--tool"
       :to="{ name: 'add-server' }"
@@ -70,7 +73,6 @@ function isActive(id: string): boolean {
     >
       <HIcon name="server" />
     </RouterLink>
-    <span class="rail__spacer" />
     <RouterLink
       class="rail__link rail__link--tool"
       to="/settings"
@@ -114,7 +116,14 @@ function isActive(id: string): boolean {
   color: var(--tx);
 }
 
-.rail__spacer {
-  flex: 1;
+.rail__list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
 }
 </style>
