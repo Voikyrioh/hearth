@@ -55,11 +55,13 @@ const uptime = computed(() => formatUptime(props.entry.latest?.sample.uptimeS ??
         <dt class="machine__label">{{ t("dash.disks") }}</dt>
         <dd class="machine__value">
           <span v-if="disks.length === 0">{{ t("dash.unavailable") }}</span>
-          <!-- FIX:01M4EPX88BTXFX1PX7E57WGK38 : un rang par disque, point de montage tronqué au milieu, taille alignée à droite. -->
-          <span v-for="disk in disks" :key="disk.key" class="machine__disk" data-machine-disk>
-            <HMiddleText class="machine__mount" :text="disk.mount" />
-            <span class="machine__size">{{ disk.size }}</span>
-          </span>
+          <!-- FIX:01M4EPX88BTXFX1PX7E57WGK38 : une liste, un rang par disque (point de montage tronqué au milieu, puis taille alignée à droite). -->
+          <ul v-else class="machine__disks">
+            <li v-for="disk in disks" :key="disk.key" class="machine__disk" data-machine-disk>
+              <HMiddleText class="machine__mount" :text="disk.mount" />
+              <span class="machine__size">{{ disk.size }}</span>
+            </li>
+          </ul>
         </dd>
       </dl>
     </DashCard>
@@ -99,6 +101,8 @@ const uptime = computed(() => formatUptime(props.entry.latest?.sample.uptimeS ??
   flex-direction: column;
   min-width: 0;
   margin: 0;
+  /* Une valeur longue d'un seul tenant (nom de machine, modèle de processeur) se coupe proprement dans sa colonne. */
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -106,6 +110,14 @@ const uptime = computed(() => formatUptime(props.entry.latest?.sample.uptimeS ??
 .machine__detail {
   color: var(--tx2);
   font-size: var(--fs-small);
+}
+
+.machine__disks {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .machine__disk {

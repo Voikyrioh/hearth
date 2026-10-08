@@ -89,3 +89,54 @@ for (const size of SIZES) {
     expect(m.detail).toMatch(/GHz/);
   });
 }
+
+// Une valeur longue d'un seul tenant (nom de machine, modèle de processeur) est coupée proprement, jamais en débordement.
+for (const size of SIZES) {
+  test(`carte Machine à ${size.width}×${size.height} : une valeur longue sans coupure ne déborde pas, les disques sont une liste`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/dashboard");
+    await longDisk(page);
+    await page.evaluate(() => {
+      const sim = (
+        window as unknown as {
+          __hearthSim: {
+            machine: {
+              machineOf(id: string): { name: string; cpu: { model: string } };
+              setMachine(id: string, machine: unknown): void;
+            };
+          };
+        }
+      ).__hearthSim.machine;
+      const machine = sim.machineOf("forge");
+      sim.setMachine("forge", {
+        ...machine,
+        name: "serveur-de-stockage-principal-de-la-salle-informatique-du-premier-etage",
+        cpu: {
+          ...machine.cpu,
+          model: "AMD-Ryzen-Threadripper-PRO-7995WX-96-Core-Processor-Workstation-Edition",
+        },
+      });
+    });
+    const card = page
+      .locator("section.card", { has: page.getByRole("heading", { name: "Machine" }) })
+      .first();
+    await expect(card.getByText("serveur-de-stockage")).toBeVisible();
+    await expect(card.locator("[data-machine-disk]")).toHaveCount(3);
+    const m = await card.evaluate((el) => {
+      const cardBox = el.getBoundingClientRect();
+      const outside = Array.from(el.querySelectorAll("*")).filter((node) => {
+        const box = node.getBoundingClientRect();
+        return box.width > 0 && box.right > cardBox.right + 1;
+      }).length;
+      const list = el.querySelector("dd ul");
+      return {
+        outside,
+        items: list ? Array.from(list.children).map((child) => child.tagName) : [],
+      };
+    });
+    expect(m.outside, "éléments hors de la carte").toBe(0);
+    expect(m.items, "une liste, un li par disque").toEqual(["LI", "LI", "LI"]);
+  });
+}
