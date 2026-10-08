@@ -23,7 +23,7 @@ L'interface du client (revue UX du 2026-10-08), jamais publiée.
 Aucun.
 
 ## Correction
-Aucun texte de valeur tant que l'utilisateur ne déplace pas le repère ; le texte posé reste figé quand la fenêtre glisse. Les séparateurs de milliers du formateur sont écrits en échappement (`\u202F`, `\u00A0`), gardés par un test de la source. `// FIX:01M4ECZJ34NZE9Z9P4YATK707H`.
+Sans repère posé, une consigne fixe (« Flèches pour parcourir les valeurs », jamais un nombre brut ni une valeur qui change ; plus d'`aria-valuenow`) ; le texte posé reste figé quand la fenêtre glisse. Les séparateurs de milliers du formateur sont écrits en échappement (`\u202F`, `\u00A0`), gardés par un test de la source. `// FIX:01M4ECZJ34NZE9Z9P4YATK707H`.
 
 ## Règles
 - Aucune règle métier modifiée.

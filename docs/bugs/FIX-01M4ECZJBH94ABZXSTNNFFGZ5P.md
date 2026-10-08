@@ -8,7 +8,7 @@ date_correction: 2026-10-08
 # FIX-01M4ECZJBH94ABZXSTNNFFGZ5P : Un bouton grisé n'expliquait sa raison qu'au survol (C42)
 
 ## Symptôme
-« Mettre à jour l'agent » (lecture seule), le mode attaque, « Changer mon mot de passe » et « Supprimer mon compte » hors ligne ou sans le rôle : la raison n'apparaissait qu'au survol.
+« Mettre à jour l'agent » (lecture seule), « Changer mon mot de passe » et « Supprimer mon compte » hors ligne ou sans le rôle : la raison n'apparaissait qu'au survol.
 
 ## Reproduction
 `e2e/hrtx.spec.ts` « la raison d'un bouton grisé est écrite sous le bouton » aux 5 tailles. Rouge avant : aucun texte sous le bouton.
@@ -23,7 +23,7 @@ L'interface du client (revue UX du 2026-10-08), jamais publiée.
 Aucun.
 
 ## Correction
-`reason-below` sur le bouton de l'agent, le basculement du mode attaque et les deux boutons de « Mon compte ». Non adoptés, par choix : les boutons des lignes de tableau (comptes, postes de confiance : une raison par ligne noierait le tableau), les boutons de l'en-tête de page (Ajouter un compte, Exporter) et les actions des bandeaux de sécurité (même raison écrite sur la page Sécurité). `// FIX:01M4ECZJBH94ABZXSTNNFFGZ5P`.
+`reason-below` sur le bouton de l'agent et les deux boutons de « Mon compte » (le mode attaque écrivait déjà sa raison). Quand la raison est écrite sous le bouton, `HButton` ne rend plus d'infobulle et le texte décrit le bouton (`aria-describedby`) : elle n'est dite qu'une fois (revue de #59). Non adoptés, par choix : les boutons des lignes de tableau (comptes, postes de confiance : une raison par ligne noierait le tableau), les boutons de l'en-tête de page (Ajouter un compte, Exporter) et les actions des bandeaux de sécurité (même raison écrite sur la page Sécurité). `// FIX:01M4ECZJBH94ABZXSTNNFFGZ5P`.
 
 ## Règles
 - Aucune règle métier modifiée.

@@ -94,7 +94,6 @@ const text = computed(() => {
         :disabled="block !== null"
         :busy="busy"
         :hint="reason"
-        reason-below
         data-attack-mode-toggle
         @click="$emit('change')"
       >

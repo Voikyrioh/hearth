@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useId } from "vue";
 import { ceilingOf, type Point } from "@/dashboard/series";
+import { t } from "@/i18n";
 
 // Courbe pleine (SVG pur) : trait 2 px, remplissage dégradé, point d'extrémité plein, pas de
 // grille. Les pas sans mesure (`v` nul) sont des TROUS (le trait s'interrompt), jamais un zéro.
@@ -128,7 +129,7 @@ function onKey(event: KeyboardEvent) {
 // FIX:01M4ECZJ34NZE9Z9P4YATK707H
 // Sans repère posé : aucun texte de valeur (la dernière valeur change chaque seconde, un lecteur d'écran la réciterait
 // à chaque mesure). Avec un repère : le texte figé au moment où l'utilisateur l'a déplacé (revue de la PR #58).
-const valueText = computed(() => hover.value?.text);
+const valueText = computed(() => hover.value?.text ?? t("dash.chartKeys"));
 interface Drawn {
   tone: ChartSeries["tone"];
   line: string;
@@ -189,7 +190,7 @@ const drawn = computed<Drawn[]>(() =>
     :aria-label="label"
     :aria-valuemin="0"
     :aria-valuemax="Math.max(0, count - 1)"
-    :aria-valuenow="shown ?? Math.max(0, count - 1)"
+    :aria-valuenow="shown ?? undefined"
     :aria-valuetext="valueText"
     @pointermove="onMove"
     @pointerleave="clear"

@@ -10,4 +10,4 @@ Carte « Mode attaque » de la page Sécurité (HRT-26, BR-TRUST-010, 018, 029) 
 
 HRT-39 (C34, FIX-01M4DJZAFYE77R5MKKA2NV6CE3) : éteint, le texte dit ce que le mode FERA ; actif, une phrase (depuis quand) et les règles repliées dans « Comment ça marche ».
 - HRT-38 (C46) : hors « Connecté », l'état illisible dit « Pas encore chargé… » sans « Réessayer » (celui du bandeau suffit).
-- HRT-40 (C42) : la raison du bouton grisé est écrite sous le bouton (`reason-below`). Deux phrases en langage courant (FIX:01M4ECZJVHHJA1MNQ2E4FSFJ0K).
+- HRT-40 : la raison est déjà écrite sous le bouton par le panneau (`data-attack-mode-reason`), `reason-below` non adopté ici. Deux phrases en langage courant (FIX:01M4ECZJVHHJA1MNQ2E4FSFJ0K).

@@ -233,9 +233,11 @@ describe("molecules", () => {
       },
     });
     const stop = wrapper.get(".chart-box");
-    expect(stop.attributes("aria-valuetext")).toBeUndefined();
+    // Sans repère : une consigne fixe (jamais un nombre brut, jamais une valeur qui change chaque seconde).
+    expect(stop.attributes("aria-valuetext")).toBe("Flèches pour parcourir les valeurs");
+    expect(stop.attributes("aria-valuenow")).toBeUndefined();
     await wrapper.setProps({ series: [{ points: make(55), tone: "ac" as const }] });
-    expect(stop.attributes("aria-valuetext")).toBeUndefined();
+    expect(stop.attributes("aria-valuetext")).toBe("Flèches pour parcourir les valeurs");
     await stop.trigger("keydown", { key: "ArrowLeft" });
     const posed = stop.attributes("aria-valuetext");
     expect(posed).toMatch(/^10 %, /);

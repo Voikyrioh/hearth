@@ -507,6 +507,7 @@ export const fr = {
     span1h: "Dernière heure",
     scaleTo: "0 à {max}",
     chartSummary: "Dernière valeur {last}, minimum {min}, maximum {max}, sur {span}",
+    chartKeys: "Flèches pour parcourir les valeurs",
     chartSummaryNamed: "{name} : dernière valeur {last}, minimum {min}, maximum {max}",
     onSpan: "sur {span}",
     legendDisk: "Courbe : disque le plus plein (%)",
