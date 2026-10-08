@@ -29,5 +29,6 @@ Le processeur n'est « attention » ou « critique » que si tous les points de 
 - `dashboard.rs::DashBook::on_metrics` tient la série du processeur par serveur sur l'instant de RÉCEPTION (jamais l'horloge de l'agent) et appelle `cpu_level` ; un instantané de reconnexion la reprend. Le niveau du processeur affiché est celui-là, jamais calculé sur la fenêtre d'une heure. Tests : `src-tauri/tests/dashboard.rs` (29 s, 30 s, creux, trou, séries indépendantes).
 
 ## Historique
+- 2026-10-08 — HRT-18 : la série du processeur de la coquille date ses points sur une horloge qui ne recule jamais (lecture murale unique puis monotone), pas sur l'horloge murale (FIX-01M4CRD60RKGZC2HTT52GK6P2T).
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
 - 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

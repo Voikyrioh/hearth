@@ -22,7 +22,7 @@ use tokio::process::Command;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use super::round1;
+use super::trunc1;
 use crate::application::ports::GpuProbe;
 use crate::domain::machine::GpuIdentity;
 use crate::domain::metrics::GpuReading;
@@ -108,13 +108,13 @@ pub fn parse_line(line: &str) -> Option<SmiLine> {
     Some(SmiLine {
         index,
         name,
-        load_percent: number(fields[tail]).map(|value| round1(value.clamp(0.0, 100.0) as f32)),
+        load_percent: number(fields[tail]).map(|value| trunc1(value.clamp(0.0, 100.0) as f32)),
         memory_used_mib: mib(fields[tail + 1]),
         memory_total_mib: mib(fields[tail + 2]),
         // Hors de -50 à 150 °C, c'est un capteur défaillant, pas une température.
         temp_c: number(fields[tail + 3])
             .filter(|value| (-50.0..=150.0).contains(value))
-            .map(|value| round1(value as f32)),
+            .map(|value| trunc1(value as f32)),
     })
 }
 

@@ -1281,7 +1281,6 @@ impl SessionService {
         &self,
         session: &CurrentSession,
         addr: &str,
-        required: bool,
     ) -> Result<Option<AdminReauthInfo>, StoreError> {
         if self.trust.is_none() {
             return Ok(None);
@@ -1298,7 +1297,8 @@ impl SessionService {
             _ => 0,
         };
         Ok(Some(AdminReauthInfo {
-            required,
+            // L'agent exige la confirmation dès sa construction : aucun réglage (BR-TRUST-045).
+            required: true,
             factors: vec!["password".to_owned(), "device_key".to_owned()],
             password: mode,
             elevated_for_s,

@@ -20,7 +20,7 @@ Côté agent : valeurs brutes et stables, sans mise en forme : charges en pource
 - `hearth_proto::api::metrics::tests`
 
 ## Cas limites
-- Aucun arrondi côté agent : le client arrondit à l'affichage seulement.
+- Aucun arrondi côté agent : le client arrondit à l'affichage seulement. Seule exception : une décimale sur les pourcentages et températures, par TRONCATURE (`trunc1`), la même règle que l'affichage (« 99 % » pour 99,96) : arrondir faisait classer et afficher « 100 % » une mesure à 99,96 (FIX-01M4CRD4NX3A34B7Z31A7RWE1B).
 
 ## Règles liées
 - BR-DASH-002

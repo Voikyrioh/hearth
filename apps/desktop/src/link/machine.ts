@@ -1,4 +1,5 @@
 import type {
+  HistoryEvent as HistoryDto,
   LevelsDto,
   MachineDto,
   MetricsEvent as MetricsDto,
@@ -96,7 +97,9 @@ export interface MachineMetrics {
 /** Ce que reçoit un abonné au tableau de bord d'un serveur. */
 export type MachineEvent =
   | { kind: "view"; view: MachineView }
-  | { kind: "metrics"; metrics: MachineMetrics };
+  | { kind: "metrics"; metrics: MachineMetrics }
+  /** L'heure écoulée avant l'instantané (du plus ancien au plus récent), lue à la connexion. */
+  | { kind: "history"; history: MachineSample[] };
 
 function num(value: number | null): number | null {
   return value !== null && Number.isFinite(value) ? value : null;
@@ -212,6 +215,10 @@ export function toView(dto: SnapshotDto): MachineView | null {
     history: dto.history.flatMap((sample) => toSample(sample) ?? []),
     levels: dto.levels ? toLevels(dto.levels) : null,
   };
+}
+
+export function toHistory(dto: HistoryDto): MachineSample[] {
+  return dto.history.flatMap((sample) => toSample(sample) ?? []);
 }
 
 export function toMetrics(dto: MetricsDto): MachineMetrics | null {

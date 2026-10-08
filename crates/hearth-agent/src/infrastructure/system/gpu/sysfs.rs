@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::round1;
+use super::trunc1;
 use crate::application::ports::GpuProbe;
 use crate::domain::machine::GpuIdentity;
 use crate::domain::metrics::GpuReading;
@@ -103,7 +103,7 @@ fn read_temperature(device: &Path) -> Option<f32> {
     hwmons.iter().find_map(|hwmon| {
         let millidegrees = read(&hwmon.join("temp1_input"))?.parse::<i64>().ok()?;
         let celsius = millidegrees as f32 / 1000.0;
-        (-50.0..=150.0).contains(&celsius).then(|| round1(celsius))
+        (-50.0..=150.0).contains(&celsius).then(|| trunc1(celsius))
     })
 }
 

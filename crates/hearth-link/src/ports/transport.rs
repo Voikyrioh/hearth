@@ -3,6 +3,7 @@
 
 use async_trait::async_trait;
 use hearth_proto::api::hello::HelloResponse;
+use hearth_proto::api::metrics::HistoryResponse;
 use hearth_proto::api::operations::OperationResponse;
 use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::sessions::{
@@ -248,6 +249,19 @@ pub trait Transport: Send + Sync {
         token: &Secret,
         request: &ApiRequest,
     ) -> Result<ApiResponse, TransportError>;
+
+    /// `GET /metrics/history?window=1h` : l'heure écoulée, à 1 échantillon par 10 secondes, du plus ancien
+    /// au plus récent (BR-DASH-010). Lecture seule, sans suivi d'opération. Par défaut non pris en charge
+    /// (transports simulés) : le tableau de bord se contente alors de l'instantané du flux.
+    async fn hour_history(
+        &self,
+        _target: &Target,
+        _token: &Secret,
+    ) -> Result<HistoryResponse, TransportError> {
+        Err(TransportError::Protocol(
+            "historique non pris en charge".into(),
+        ))
+    }
 
     /// `GET /audit/export…` : le corps brut (CSV), `path` construit par la bibliothèque. Un refus
     /// est une `TransportError::Api`. Par défaut non pris en charge (transports simulés).

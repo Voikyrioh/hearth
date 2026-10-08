@@ -143,6 +143,23 @@ describe("curves window (BR-DASH-010)", () => {
     ctx.wrapper.unmount();
   });
 
+  it("opens with the hour already read: the 1 h curve is full, nothing says « Depuis »", async () => {
+    const ctx = await mountContext();
+    ctx.bridge.machine.prefillHour("forge");
+    ctx.bridge.machine.prefill("forge", 300);
+    useServersStore().setCurrent("forge");
+    const wrapper = mount(Dashboard, { global: ctx.global });
+    await flushPromises();
+    const radios = wrapper.findAll('[role="radio"]');
+    await radios[2]?.trigger("click");
+    expect(useDashboardStore().windowKey).toBe("1h");
+    expect(wrapper.text()).not.toContain("Depuis");
+    const ring = useDashboardStore().of("forge")?.ring;
+    // 330 échantillons d'avant (10 s) + 300 de l'instantané (1 s).
+    expect(ring?.length).toBe(630);
+    wrapper.unmount();
+  });
+
   it("keeps the last click when switching quickly, and keeps the choice across servers", async () => {
     const ctx = await open();
     const radios = () => ctx.wrapper.findAll('[role="radio"]');

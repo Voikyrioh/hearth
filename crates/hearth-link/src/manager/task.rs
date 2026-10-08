@@ -71,6 +71,11 @@ pub(crate) enum Command {
 const CLOSE_GOING_AWAY: u16 = 1001;
 
 enum Internal {
+    /// L'heure écoulée lue à part (`attempt::read_hour`) pour la session de cette `epoch`.
+    Hour {
+        epoch: u64,
+        older: Vec<Sample>,
+    },
     OpResponse {
         id: OperationId,
         result: Result<ApiResponse, TransportError>,
@@ -184,6 +189,9 @@ struct Runner {
     internal_tx: mpsc::Sender<Internal>,
     internal_rx: mpsc::Receiver<Internal>,
     history: VecDeque<Sample>,
+    /// La lecture de l'heure en cours (hors tentative de connexion) et la session qu'elle sert.
+    hour: Option<JoinHandle<()>>,
+    hour_epoch: u64,
     machine_info: Option<Arc<MachineResponse>>,
     last_contact: Option<WallTime>,
     published: Option<Status>,
@@ -231,6 +239,8 @@ impl Runner {
             internal_tx,
             internal_rx,
             history,
+            hour: None,
+            hour_epoch: 0,
             machine_info,
             last_contact,
             published: None,
@@ -542,6 +552,8 @@ impl Runner {
                 if effects.contains(&Effect::ResolvePending) {
                     self.last_contact = Some(self.deps.clock.wall());
                     self.install_snapshot(*machine, history);
+                    // L'heure d'avant l'instantané : lue à part, annoncée quand elle arrive (donc après lui).
+                    self.start_hour();
                     // Comme un message du flux : un client qui se connecte PENDANT l'étape `restart`
                     // ouvre la fenêtre de coupure attendue (BR-UPDATE-014).
                     for progress in updates {
@@ -587,6 +599,15 @@ impl Runner {
 
     async fn on_internal(&mut self, message: Internal) {
         match message {
+            Internal::Hour { epoch, older } => {
+                // Une lecture d'une session finie (le lien est retombé entre-temps) n'annonce rien.
+                if epoch == self.hour_epoch && self.stream.is_some() {
+                    self.deps.sink.emit(Event::History {
+                        server: self.id.clone(),
+                        samples: Arc::new(older),
+                    });
+                }
+            }
             Internal::OpResponse { id, result } => self.on_op_response(id, result).await,
             Internal::Lookup { id, lookup } => self.on_lookup(id, lookup),
             Internal::NotSent { id, slow } => self.on_not_sent(&id, slow),
@@ -720,6 +741,7 @@ impl Runner {
                     }
                 }
                 Effect::CloseStream => {
+                    self.cancel_hour();
                     if self.stream.take().is_some() {
                         self.persist(true);
                     }
@@ -746,6 +768,31 @@ impl Runner {
                 AttemptKind::Reauth => attempt::reauthenticate(&deps, &shared).await,
             }
         }));
+    }
+
+    /// Lance la lecture de l'heure écoulée, à côté du direct : jamais dans la tentative, jamais attendue.
+    fn start_hour(&mut self) {
+        self.cancel_hour();
+        let epoch = self.hour_epoch;
+        let deps = self.deps.clone();
+        let shared = self.shared.clone();
+        let snapshot: Vec<Sample> = self.history.iter().cloned().collect();
+        let tx = self.internal_tx.clone();
+        self.hour = Some(tokio::spawn(async move {
+            let older = attempt::read_hour(&deps, &shared, &snapshot).await;
+            if !older.is_empty() {
+                let _ = tx.send(Internal::Hour { epoch, older }).await;
+            }
+        }));
+    }
+
+    /// Abandonne la lecture de l'heure (le lien est tombé, ou une nouvelle session commence) : rien ne sera
+    /// annoncé pour l'ancienne.
+    fn cancel_hour(&mut self) {
+        self.hour_epoch = self.hour_epoch.wrapping_add(1);
+        if let Some(handle) = self.hour.take() {
+            handle.abort();
+        }
     }
 
     fn abort_attempt(&mut self) {

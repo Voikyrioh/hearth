@@ -91,6 +91,13 @@ pub enum Event {
         machine: Arc<MachineResponse>,
         history: Arc<Vec<Sample>>,
     },
+    /// L'heure écoulée AVANT l'instantané (à la connexion, `GET /metrics/history?window=1h`, 1 échantillon
+    /// par 10 s) : le tableau de bord amorce sa courbe d'une heure dès l'ouverture (BR-DASH-010).
+    /// Strictement plus ancienne que l'instantané ; jamais émise si la lecture échoue ou si rien n'est plus ancien.
+    History {
+        server: ServerId,
+        samples: Arc<Vec<Sample>>,
+    },
     /// Issue d'une action restée incertaine pendant une coupure (BR-RESIL-010).
     Operation {
         server: ServerId,
@@ -133,6 +140,7 @@ impl Event {
             Self::State { server, .. }
             | Self::Metrics { server, .. }
             | Self::Snapshot { server, .. }
+            | Self::History { server, .. }
             | Self::Operation { server, .. }
             | Self::SessionEnded { server, .. }
             | Self::FingerprintChanged { server, .. }

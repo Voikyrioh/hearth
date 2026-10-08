@@ -117,6 +117,24 @@ test("perte du lien : dernières valeurs grisées et datées, puis retour en dir
     .not.toBe(frozen);
 });
 
+test("l'heure écoulée est déjà là à l'ouverture : courbe d'une heure remplie (captures 1920 et 2560)", async ({
+  page,
+}) => {
+  await page.goto("/?nodev#/servers/forge/dashboard");
+  const radios = page.getByRole("radiogroup", { name: "Durée des courbes" }).getByRole("radio");
+  await radios.nth(2).click();
+  await expect(radios.nth(2)).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByText(/^Depuis/)).toHaveCount(0);
+  // Les six courbes ont des points sur presque toute la largeur : le tracé du processeur est long.
+  const path = await cpuCurve(page).getAttribute("d");
+  expect((path ?? "").split(/[ML]/).filter(Boolean).length).toBeGreaterThan(300);
+  for (const width of [1920, 2560] as const) {
+    await page.setViewportSize({ width, height: HEIGHT });
+    await page.screenshot({ path: `e2e/screenshots/dashboard-heure-ouverture-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1366, height: 800 });
+});
+
 test("les courbes basculent entre 1 min, 5 min et 1 h sans attente", async ({ page }) => {
   await page.goto("/?nodev#/servers/forge/dashboard");
   const radios = page.getByRole("radiogroup", { name: "Durée des courbes" }).getByRole("radio");
@@ -124,8 +142,8 @@ test("les courbes basculent entre 1 min, 5 min et 1 h sans attente", async ({ pa
   await expect(radios.nth(1)).toHaveAttribute("aria-checked", "true");
   await radios.nth(2).click();
   await expect(radios.nth(2)).toHaveAttribute("aria-checked", "true");
-  // L'application vient de s'ouvrir : l'heure n'est pas encore remplie, et la courbe le dit.
-  await expect(page.getByText(/^Depuis \d+ min$/).first()).toBeVisible();
+  // L'heure est lue à la connexion (BR-DASH-010) : la courbe est déjà remplie dès l'ouverture.
+  await expect(page.getByText(/^Depuis/)).toHaveCount(0);
   await radios.nth(0).click();
   await expect(radios.nth(0)).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText(/^Depuis/)).toHaveCount(0);

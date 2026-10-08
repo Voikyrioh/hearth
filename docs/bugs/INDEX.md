@@ -5,6 +5,11 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | Fiche | Titre | Date |
 |---|---|---|
 | [FIX-01M4CJEQS88NZWCQ129XDP91MT](./FIX-01M4CJEQS88NZWCQ129XDP91MT.md) | Une coupure rétablie entre 1,5 s et 3 s faisait clignoter « Reconnexion en cours » | 2026-10-08 |
+| [FIX-01M4CRD60RKGZC2HTT52GK6P2T](./FIX-01M4CRD60RKGZC2HTT52GK6P2T.md) | La série du processeur de la coquille et le repli des dates suivaient l'horloge murale du poste | 2026-10-08 |
+| [FIX-01M4CRD4NX3A34B7Z31A7RWE1B](./FIX-01M4CRD4NX3A34B7Z31A7RWE1B.md) | Les mesures de l'agent étaient arrondies à la décimale alors que l'affichage tronque (99,96 devenait 100 %) | 2026-10-08 |
+| [FIX-01M4CRD381DKREY9RARJ81E6WH](./FIX-01M4CRD381DKREY9RARJ81E6WH.md) | Une vue sans échantillon (ou plus ancienne) remplaçait l'identité de la machine reçue à la connexion | 2026-10-08 |
+| [FIX-01M4CRD1VMNQP4W619XVF1AWRE](./FIX-01M4CRD1VMNQP4W619XVF1AWRE.md) | Un pic rangé avec d'autres échantillons dans un même pas était tracé à la moyenne du pas (100 % tracé à 55 %) | 2026-10-08 |
+| [FIX-01M4CRD0HH1YX2RQHBK72GM0VQ](./FIX-01M4CRD0HH1YX2RQHBK72GM0VQ.md) | Un échantillon réellement perdu était comblé par interpolation sur la courbe, contre la règle « un vrai trou reste un trou » | 2026-10-08 |
 | [FIX-01M4C9YKCVPDFSSJ2EYMZSRSPM](./FIX-01M4C9YKCVPDFSSJ2EYMZSRSPM.md) | Le point de contrôle occupé de l'effacement des anciennes empreintes n'était pas lu avant de poser la marque | 2026-10-08 |
 | [FIX-01M4C9YK78KHZCEH723M9NE8BQ](./FIX-01M4C9YK78KHZCEH723M9NE8BQ.md) | La copie de la base de la mise à jour gardait les anciennes empreintes jusqu'à sa suppression simple | 2026-10-08 |
 | [FIX-01M4BZN31A8Z8WN0WKNTCRTFFN](./FIX-01M4BZN31A8Z8WN0WKNTCRTFFN.md) | L'empreinte des requêtes suivies était un SHA-256 sans clé du corps, devinable hors ligne depuis la base (mots de passe) | 2026-10-07 |
