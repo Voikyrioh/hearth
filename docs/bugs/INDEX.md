@@ -4,6 +4,12 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4DJZBAQBTJ55NAA62BNQASH](./FIX-01M4DJZBAQBTJ55NAA62BNQASH.md) | Le menu disait « Sécurité », la page « Sécurité et mode attaque » (C39) | 2026-10-08 |
+| [FIX-01M4DNFDC9KF9FXYJ0H2TC2JKX](./FIX-01M4DNFDC9KF9FXYJ0H2TC2JKX.md) | L'effacement en attente se lisait sous une autre session ou chez un non-administrateur | 2026-10-08 |
+| [FIX-01M4DJZB43SA08NE46DGEZK213](./FIX-01M4DJZB43SA08NE46DGEZK213.md) | « Plus d'infos » ne donnait aucune information sur l'alerte (C36) | 2026-10-08 |
+| [FIX-01M4DJZAXMGAXW5PPQBMQVC96Y](./FIX-01M4DJZAXMGAXW5PPQBMQVC96Y.md) | La marque de sécurité recouvrait les initiales du serveur (C38) | 2026-10-08 |
+| [FIX-01M4DJZAPV5ECT10JJ5JWNM8A6](./FIX-01M4DJZAPV5ECT10JJ5JWNM8A6.md) | Les bandeaux de sécurité étaient plus larges que la page, actions à l'autre bout (C35) | 2026-10-08 |
+| [FIX-01M4DJZAFYE77R5MKKA2NV6CE3](./FIX-01M4DJZAFYE77R5MKKA2NV6CE3.md) | Le mode attaque éteint parlait au présent et en jargon (C34) | 2026-10-08 |
 | [FIX-01M4DKQWTWVNDXFPWJ5SE88SN7](./FIX-01M4DKQWTWVNDXFPWJ5SE88SN7.md) | Les actions d'un compte passaient sur deux lignes à 1280 et 1366 (C21) | 2026-10-08 |
 | [FIX-01M4DKQV9ZT6XQF6P7ER02HFYZ](./FIX-01M4DKQV9ZT6XQF6P7ER02HFYZ.md) | Les boutons d'une fenêtre de dialogue sortaient de l'écran à 1100×680 (C20) | 2026-10-08 |
 | [FIX-01M4D4Y22QGBWNKKJTK8K3X12A](./FIX-01M4D4Y22QGBWNKKJTK8K3X12A.md) | Le nom accessible du chargement ne suivait pas le texte affiché (retour de revue HRT-34) | 2026-10-08 |

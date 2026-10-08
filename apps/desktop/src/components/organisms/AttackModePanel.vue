@@ -3,6 +3,7 @@ import { computed } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HTag from "@/components/atoms/HTag.vue";
+import { formatDateTime } from "@/composables/format";
 import { t } from "@/i18n";
 import type { AttackMode } from "@/link";
 import { type AttackModeBlock, blockMessageKey } from "@/security/gate";
@@ -44,7 +45,12 @@ const stateLabel = computed(() =>
 );
 const tagTone = computed(() => (on.value && !suspended.value ? "accent" : "neutral"));
 const text = computed(() => {
-  if (!suspended.value) return t("security.modeText");
+  if (!suspended.value) {
+    if (!on.value) return t("security.modeTextOff");
+    return props.mode.since
+      ? t("security.modeTextOnSince", { time: formatDateTime(props.mode.since) })
+      : t("security.modeTextOn");
+  }
   return props.minutes === null || props.minutes === 0
     ? t("security.suspendedSoon")
     : t("security.suspendedText", { n: props.minutes });
@@ -66,11 +72,14 @@ const text = computed(() => {
       </HTag>
     </header>
     <p class="panel__text">{{ text }}</p>
-    <p v-if="on" class="panel__note">{{ t("security.autoEndNote") }}</p>
-    <ul v-if="on" class="panel__notes">
-      <li>{{ t("security.attackNoteAddress") }}</li>
-      <li>{{ t("security.attackNoteChallenge") }}</li>
-    </ul>
+    <details v-if="on" class="panel__more" data-attack-mode-details>
+      <summary>{{ t("security.howItWorks") }}</summary>
+      <p class="panel__note">{{ t("security.autoEndNote") }}</p>
+      <ul class="panel__notes">
+        <li>{{ t("security.attackNoteAddress") }}</li>
+        <li>{{ t("security.attackNoteChallenge") }}</li>
+      </ul>
+    </details>
     <div class="panel__actions">
       <HButton
         :variant="on ? 'secondary' : 'primary'"
@@ -124,6 +133,11 @@ const text = computed(() => {
   border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--card-edge);
+}
+
+.panel__more summary {
+  cursor: pointer;
+  color: var(--ac);
 }
 
 .panel__head {
