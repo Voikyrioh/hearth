@@ -23,7 +23,7 @@ L'interface du client (revue UX du 2026-10-08), jamais publiée.
 Aucun.
 
 ## Correction
-La page déclare « rien reçu » (`composables/pageSeen.ts`) tant qu'elle n'a pas de machine ; `StaleSurface` ne pose alors pas l'estampille. `// FIX:01M4E9T7ECW7H6R9V4V6YNVRE1`.
+Le tableau de bord déclare « rien reçu » par `usePageData` (le mécanisme commun de HRT-38) tant qu'il n'a pas de machine ; le gabarit ne pose alors pas l'estampille. `// FIX:01M4E9T7ECW7H6R9V4V6YNVRE1`.
 
 ## Règles
 - BR-DASH-010, BR-DASH-014 (formateurs d'unités uniques).
@@ -33,4 +33,4 @@ La page déclare « rien reçu » (`composables/pageSeen.ts`) tant qu'elle n'a p
 
 ## Références
 - Ticket : HRT-41 (revue UX du 2026-10-08)
-- Code : `components/molecules/StaleSurface.vue, composables/pageSeen.ts, pages/Dashboard.vue`
+- Code : `pages/Dashboard.vue`, `composables/usePageData.ts`
