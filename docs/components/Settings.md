@@ -10,4 +10,4 @@ Réglages, dans l'ordre du design (`design-ecrans-socle.md`) : à gauche « Gén
 
 - HRT-12 : réglage de notifications (rangé dans « Client » depuis HRT-13, préférence du client) : « Notifier quand un serveur devient hors ligne ou revient » (activé par défaut, BR-RESIL-015) ; commandes `get_notify_on_link_change` / `set_notify_on_link_change`.
 - HRT-26 : la section « Client » porte la ligne « Alertes de sécurité » (réglage séparé de « Notifier quand un serveur devient hors ligne ou revient », activé par défaut, BR-TRUST-033). Test : `pages/SecuritySettings.test.ts`.
-- HRT-42 : à partir de 1 700 px de fenêtre, deux colonnes égales bornées à 1 200 px (`--page-max-settings`) ; au-dessous rien ne change. FIX:01M4EDC0FVT0ZHGASFEMWX7066. Décision de Claude, à confirmer par Voiky (conception grand écran, décisions 3 à 6).
+- HRT-42 : à partir de 1 500 px de page (requête de conteneur), deux colonnes égales bornées à 1 200 px (`--page-max-settings`) ; au-dessous rien ne change. FIX:01M4EDC0FVT0ZHGASFEMWX7066. Décision de Claude, à confirmer par Voiky (conception grand écran, décisions 3 à 6).

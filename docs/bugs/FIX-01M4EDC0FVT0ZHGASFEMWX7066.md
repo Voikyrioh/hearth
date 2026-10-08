@@ -23,7 +23,7 @@ L'interface du client (revue UX du 2026-10-08), jamais publiée.
 Aucun.
 
 ## Correction
-Jetons `--page-max`, `--table-max`, `--page-max-settings`, `--page-max-security`. Réglages : deux colonnes égales à partir de 1 700 px de fenêtre. Sécurité : deux colonnes à partir de 1 500 px de page (1 820 px de fenêtre). Pas d'échelle automatique 125/150 % (attend l'accord de Voiky). Décision de Claude, à confirmer par Voiky. `// FIX:01M4EDC0FVT0ZHGASFEMWX7066`.
+Jetons `--page-max`, `--table-max`, `--page-max-settings`, `--page-max-security`. Réglages et Sécurité : deux colonnes à partir de 1 500 px de PAGE (requêtes de conteneur, pas de largeur de fenêtre ; 1 612 et 1 820 px de fenêtre aujourd'hui). La note « Effacement en attente » reste après la confirmation du mot de passe, à toutes les largeurs (en deux colonnes : sous elle, colonne de droite). Pas d'échelle automatique 125/150 % (attend l'accord de Voiky). Décision de Claude, à confirmer par Voiky. `// FIX:01M4EDC0FVT0ZHGASFEMWX7066`.
 
 ## Règles
 - Aucune règle métier.

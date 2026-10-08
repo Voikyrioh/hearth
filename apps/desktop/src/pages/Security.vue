@@ -90,6 +90,7 @@ async function reconnect() {
 </script>
 
 <template>
+  <div class="security-page">
   <div class="security">
     <div class="security__col">
     <SecurityAlertCard
@@ -109,7 +110,6 @@ async function reconnect() {
       @reconnect="reconnect"
       @retry="security.load(serverId)"
     />
-    <ErasurePendingNote v-if="securityEntry?.state?.erasurePending && server?.role === 'admin'" />
     </div>
     <div class="security__col">
     <TrustedDeviceTable
@@ -120,6 +120,7 @@ async function reconnect() {
       @retry="store.load(serverId)"
     />
     <ReauthSettingCard :key="serverId" :server-id="serverId" />
+    <ErasurePendingNote v-if="securityEntry?.state?.erasurePending && server?.role === 'admin'" />
     </div>
     <RemoveDeviceDialog
       :open="removing !== null"
@@ -128,9 +129,15 @@ async function reconnect() {
       @close="removing = null"
     />
   </div>
+  </div>
 </template>
 
 <style scoped>
+/* Largeur de PAGE : la requête de conteneur ci-dessous suit la page, pas la fenêtre (HRT-42, revue de #60). */
+.security-page {
+  container: security / inline-size;
+}
+
 .security {
   display: flex;
   flex-direction: column;
@@ -145,8 +152,8 @@ async function reconnect() {
 
 /* FIX:01M4EDC0FVT0ZHGASFEMWX7066 */
 /* HRT-42 : à partir de 1 500 px de page (fenêtre de 1 820 px : barre des serveurs, navigation et marges en moins), deux colonnes :
-   l'état et le mode attaque, puis les postes et la confirmation. */
-@media (min-width: 1820px) {
+   l'état et le mode attaque, puis les postes, la confirmation et la note d'effacement en attente. */
+@container security (min-width: 1500px) {
   .security {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

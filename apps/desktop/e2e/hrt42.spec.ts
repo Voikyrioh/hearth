@@ -99,3 +99,78 @@ for (const size of [...SMALL, ...WIDE]) {
     await shoot(page, "hrtx-securite", size);
   });
 }
+
+// Seuils en LARGEUR DE PAGE (requête de conteneur à 1 500 px), pas en largeur de fenêtre.
+test("réglages : deux colonnes égales dès 1 500 px de page (fenêtre de 1 612 px), une seule colonne de 640 px avant", async ({
+  page,
+}) => {
+  const widthsAt = async (width: number) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/?nodev#/settings");
+    await expect(page.locator(".settings__column").first()).toBeVisible();
+    return page
+      .locator(".settings__column")
+      .evaluateAll((items) => items.map((item) => item.getBoundingClientRect().width));
+  };
+  const [narrowLeft = 0] = await widthsAt(1590);
+  expect(narrowLeft).toBeCloseTo(640, 0);
+  const [left = 0, right = 0] = await widthsAt(1640);
+  expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+});
+
+test("sécurité : deux colonnes dès 1 500 px de page (fenêtre de 1 820 px)", async ({ page }) => {
+  const sideBySide = async (width: number) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/?nodev#/servers/forge/security");
+    await expect(page.locator("[data-device]").first()).toBeVisible();
+    return page.evaluate(() => {
+      const a = document.querySelector("[data-attack-mode-toggle]")?.closest("section");
+      const d = document.querySelector("[data-device]")?.closest("section");
+      return (
+        Math.abs((d?.getBoundingClientRect().x ?? 0) - (a?.getBoundingClientRect().x ?? 0)) > 300
+      );
+    });
+  };
+  expect(await sideBySide(1800)).toBe(false);
+  expect(await sideBySide(1840)).toBe(true);
+});
+
+for (const size of [...SMALL, ...WIDE]) {
+  test(`sécurité à ${size.width}×${size.height} : la note « Effacement en attente » reste en dernier`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/dashboard");
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __hearthSim: { security: { setErasurePending(id: string, pending: boolean): void } };
+        }
+      ).__hearthSim.security.setErasurePending("forge", true),
+    );
+    await page.evaluate(() => {
+      window.location.hash = "#/servers/forge/security";
+    });
+    await expect(page.locator("[data-device]").first()).toBeVisible();
+    const note = page.locator("[data-erasure-pending]");
+    await expect(note).toBeVisible();
+    const geometry = await page.evaluate(() => {
+      const rect = (el: Element | null | undefined) => el?.getBoundingClientRect();
+      const reauth = rect(document.querySelector("[data-reauth-setting]")?.closest("section"));
+      const note = rect(document.querySelector("[data-erasure-pending]"));
+      const attack = rect(document.querySelector("[data-attack-mode-toggle]")?.closest("section"));
+      return {
+        noteTop: note?.top ?? 0,
+        reauthBottom: reauth?.bottom ?? 0,
+        noteX: note?.x ?? 0,
+        reauthX: reauth?.x ?? 0,
+        attackBottom: attack?.bottom ?? 0,
+      };
+    });
+    // Comme avant le lot : après la confirmation du mot de passe, à toutes les largeurs (en deux colonnes, sous elle).
+    expect(geometry.noteTop, "note sous la confirmation").toBeGreaterThanOrEqual(
+      geometry.reauthBottom - 1,
+    );
+    expect(Math.abs(geometry.noteX - geometry.reauthX), "même colonne").toBeLessThanOrEqual(1);
+  });
+}
