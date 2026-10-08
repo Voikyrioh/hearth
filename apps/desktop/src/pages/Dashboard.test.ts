@@ -371,7 +371,7 @@ describe("live changes (BR-DASH-012)", () => {
       totalBytes: 500 * 1024 ** 3,
       removable: true,
     };
-    const names = () => ctx.wrapper.findAll(".disk__name").map((n) => n.text());
+    const names = () => ctx.wrapper.findAll(".disk__name .sr-only").map((n) => n.text());
     expect(names()).toEqual(["/dev/nvme0n1p2", "/dev/sda1"]);
     ctx.bridge.machine.setMachine("forge", { ...base, disks: [...base.disks, extra] });
     await second(ctx);
