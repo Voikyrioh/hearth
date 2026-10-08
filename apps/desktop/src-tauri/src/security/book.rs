@@ -122,6 +122,16 @@ impl SecurityBook {
         names
     }
 
+    /// Une session s'ouvre ou se ferme sur ce serveur (connexion, déconnexion) : l'effacement en attente est
+    /// remis à zéro. L'agent ne le dit qu'aux administrateurs : ce que disait la session d'avant (peut-être
+    /// celle d'un administrateur) ne doit jamais se lire sous celle d'un autre compte. La première lecture de
+    /// la nouvelle session le rétablit, ou non. FIX:01M4DNFDC9KF9FXYJ0H2TC2JKX
+    pub fn reset_erasure(&mut self, server: &str) {
+        if let Some(entry) = self.servers.get_mut(server) {
+            entry.erasure_pending = false;
+        }
+    }
+
     /// Le serveur est retiré du carnet : on l'oublie (mémoire bornée par le carnet).
     pub fn forget(&mut self, server: &str) {
         self.servers.remove(server);
@@ -172,5 +182,11 @@ mod tests {
             !book.on_stream("neuf", &view, true).erasure_pending,
             "jamais lu : rien en attente"
         );
+        // Une session s'ouvre ou se ferme : ce que disait la précédente ne se lit pas sous la suivante.
+        assert!(book.on_read("forge", &response(true), true).erasure_pending);
+        book.reset_erasure("forge");
+        assert!(!book.current("forge", true).unwrap().erasure_pending);
+        assert!(!book.on_stream("forge", &view, true).erasure_pending);
+        book.reset_erasure("inconnu");
     }
 }

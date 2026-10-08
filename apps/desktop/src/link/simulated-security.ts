@@ -24,6 +24,8 @@ interface Book {
   device: SecurityDevice;
   keyAtHand: boolean;
   erasurePending: boolean;
+  /** Ce que la DERNIÈRE LECTURE a dit : le message du flux ne porte pas l'effacement, il garde cette valeur (comme la coquille). */
+  erasureRead: boolean;
 }
 
 function freshBook(): Book {
@@ -35,6 +37,7 @@ function freshBook(): Book {
     device: "proven",
     keyAtHand: true,
     erasurePending: false,
+    erasureRead: false,
   };
 }
 
@@ -71,7 +74,11 @@ export class SimulatedSecurity {
     if (!book.supported) return;
     book.seq += 1;
     // Le message du flux ne dit rien du poste : `unknown` tant qu'une lecture ne l'a pas donné.
-    const state = { ...this.view(serverId, book), device: "unknown" as const };
+    const state = {
+      ...this.view(serverId, book),
+      device: "unknown" as const,
+      erasurePending: book.erasureRead,
+    };
     for (const listener of this.listeners) listener({ ...state });
   }
 
@@ -135,7 +142,11 @@ export class SimulatedSecurity {
     this.listeners.add(listener);
     for (const [serverId, book] of this.books) {
       if (book.supported && book.seq > 0) {
-        listener({ ...this.view(serverId, book), device: "unknown" });
+        listener({
+          ...this.view(serverId, book),
+          device: "unknown",
+          erasurePending: book.erasureRead,
+        });
       }
     }
     return () => void this.listeners.delete(listener);
@@ -146,6 +157,7 @@ export class SimulatedSecurity {
     const book = this.book(serverId);
     if (!book.supported) return { kind: "unsupported" };
     book.seq += 1;
+    book.erasureRead = book.erasurePending;
     return { kind: "known", state: this.view(serverId, book) };
   }
 

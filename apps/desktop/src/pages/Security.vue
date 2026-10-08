@@ -113,7 +113,7 @@ async function reconnect() {
       @retry="store.load(serverId)"
     />
     <ReauthSettingCard :key="serverId" :server-id="serverId" />
-    <ErasurePendingNote v-if="securityEntry?.state?.erasurePending" />
+    <ErasurePendingNote v-if="securityEntry?.state?.erasurePending && server?.role === 'admin'" />
     <RemoveDeviceDialog
       :open="removing !== null"
       :server-id="serverId"

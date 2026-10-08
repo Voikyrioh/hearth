@@ -439,4 +439,14 @@ describe("Lecture de l'état ratée", () => {
     expect(wrapper.find("[data-erasure-pending]").exists()).toBe(false);
     wrapper.unmount();
   });
+  // FIX:01M4DNFDC9KF9FXYJ0H2TC2JKX : l'agent ne le dit qu'aux administrateurs ; un compte en lecture ne le lit jamais.
+  it("never tells a read-only account that an erasure is pending", async () => {
+    const { wrapper, bridge } = await boot("/servers/salon/security");
+    bridge.security.setErasurePending("salon", true);
+    await useSecurityStore().load("salon");
+    await flushPromises();
+    expect(useSecurityStore().of("salon")?.state?.erasurePending).toBe(true);
+    expect(wrapper.find("[data-erasure-pending]").exists()).toBe(false);
+    wrapper.unmount();
+  });
 });

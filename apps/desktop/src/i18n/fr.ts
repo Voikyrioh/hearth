@@ -153,6 +153,8 @@ export const fr = {
     erasureText:
       "L'effacement des anciennes empreintes de requêtes n'a pas pu se terminer au dernier démarrage de l'agent. Rien à faire : il est repris tout seul au prochain démarrage de l'agent.",
     cardTitle: "Ce qui se passe",
+    // « adresses inconnues » : définition de l'alerte côté agent (BR-CONN-018, docs/open-api/security.md :
+    // plus de 10 échecs venus d'adresses inconnues). L'agent ne donne ni adresse ni nombre d'essais.
     cardOwn: "Ton identifiant est visé par des essais de connexion venus d'adresses inconnues.",
     cardOwnSince:
       "Ton identifiant est visé par des essais de connexion venus d'adresses inconnues, depuis le {time}.",
