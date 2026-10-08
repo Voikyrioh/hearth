@@ -154,6 +154,9 @@ async function submit() {
   void reauth.load();
   if (report.kind !== "refused" || !report.refusal) return;
   const refusal = report.refusal;
+  // Le curseur revient dans la confirmation vidée (le champ était figé pendant l'envoi) : le prochain
+  // geste est de la retaper, sans clic.
+  void nextTick().then(() => field.value?.focus());
   switch (refusal.kind) {
     case "wrong_password":
       passwordError.value = t("reauth.wrongPassword");

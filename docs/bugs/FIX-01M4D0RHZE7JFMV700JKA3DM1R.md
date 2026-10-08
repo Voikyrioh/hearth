@@ -23,13 +23,13 @@ Client Windows, écrans concernés, depuis leur livraison. Source : revue UX de 
 Cliquer d'abord dans le bon champ.
 
 ## Correction
-Une fois l'état lu, le curseur va dans le premier champ de l'acte (`firstActField`, hors confirmation) ; une fenêtre sans champ d'acte met le curseur dans « Ton mot de passe » ; un curseur déjà dans un champ ne bouge pas. `FIX:` dans `AdminActDialog.vue`.
+Une fois l'état lu, le curseur va dans le premier champ de l'acte (`firstActField`, hors confirmation) ; une fenêtre sans champ d'acte met le curseur dans « Ton mot de passe » ; un curseur déjà dans un champ ne bouge pas. Après un refus, le curseur revient dans la confirmation vidée (le champ était figé pendant l'envoi). Le panneau de reconnexion (session expirée, `ReconnectPanel`) suit la même règle : curseur dans le mot de passe quand l'identifiant est connu, dans l'identifiant sinon, et de nouveau dans le mot de passe après un refus. `FIX:` dans `AdminActDialog.vue` et `ReconnectPanel.vue`.
 
 ## Règles
 - Aucune règle métier touchée (interface seulement).
 
 ## Non-régression
-- `accounts.test.ts`, `e2e/hrt33-keyboard.spec.ts` (frappe réelle au clavier, Tab).
+- `accounts.test.ts`, `connect.test.ts` (panneau de reconnexion), `e2e/hrt33-keyboard.spec.ts` (frappe réelle au clavier, Tab, retour du curseur après un refus), `e2e/offline.spec.ts` (session expirée).
 
 ## Références
 - Ticket : HRT-33 (lot 1)

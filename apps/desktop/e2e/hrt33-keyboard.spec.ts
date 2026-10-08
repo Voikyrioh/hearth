@@ -46,6 +46,11 @@ test("créer un compte : le curseur est dans l'identifiant, ce qui est tapé n'a
   await page.getByRole("button", { name: "Ajouter un compte" }).click();
   await ready(page);
   await expect(dialog(page).getByLabel("Identifiant")).toBeFocused();
+  // La confirmation des actes porte son propre exemple (C19).
+  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveAttribute(
+    "placeholder",
+    "Le tien, pour confirmer",
+  );
   await page.keyboard.type("sophie");
   await expect(dialog(page).getByLabel("Identifiant")).toHaveValue("sophie");
   await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveValue("");
@@ -74,7 +79,9 @@ test("un mot de passe de confirmation faux ne vide que la confirmation (C18)", a
   await expect(dialog(page).getByLabel("Mot de passe du nouveau compte")).toHaveValue(GOOD);
   await expect(dialog(page).getByLabel("Confirme le mot de passe du compte")).toHaveValue(GOOD);
   await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveValue("");
-  await dialog(page).getByLabel("Ton mot de passe").fill(OWN);
+  // Le curseur est revenu dans la confirmation : on la retape au clavier, sans clic.
+  await expect(dialog(page).getByLabel("Ton mot de passe")).toBeFocused();
+  await page.keyboard.type(OWN);
   await dialog(page).getByRole("button", { name: "Créer", exact: true }).click();
   await expect(page.locator(".toast").filter({ hasText: "Compte sophie créé" })).toBeVisible();
 });

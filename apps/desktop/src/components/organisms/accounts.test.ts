@@ -318,6 +318,9 @@ describe("CreateAccountDialog", () => {
     expect(text()).toContain("Mot de passe incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
     expect(reauthField()?.value).toBe("");
+    // Le curseur revient dans la confirmation vidée : le prochain geste est de la retaper.
+    await flushPromises();
+    expect(document.activeElement).toBe(reauthField());
     expect(field("ex. camille")?.value).toBe("sophie");
     expect(field("Celui que ce compte utilisera")?.value).toBe(GOOD);
     expect(field("Confirme le mot de passe")?.value).toBe(GOOD);

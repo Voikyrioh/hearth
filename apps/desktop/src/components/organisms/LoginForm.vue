@@ -66,7 +66,19 @@ function submit() {
   emit("submit", { username: user.value.trim(), password: password.value, remember: keep.value });
 }
 
+const root = ref<HTMLFormElement | null>(null);
+
 defineExpose({
+  /** Le curseur va dans le premier champ à remplir (identifiant s'il est vide, sinon mot de passe). */
+  focusFirstEmpty: () => {
+    const fields = root.value?.querySelectorAll<HTMLInputElement>("input:not([type=checkbox])");
+    for (const input of fields ?? []) {
+      if (input.value === "") {
+        input.focus();
+        return;
+      }
+    }
+  },
   /** Vide le mot de passe (après un refus, il n'est jamais gardé à l'écran). */
   clearPassword: () => {
     password.value = "";
@@ -76,7 +88,7 @@ defineExpose({
 </script>
 
 <template>
-  <form class="login" novalidate @submit.prevent="submit">
+  <form ref="root" class="login" novalidate @submit.prevent="submit">
     <HInput
       v-model="user"
       :label="t('connect.username')"

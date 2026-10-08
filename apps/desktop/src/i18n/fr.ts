@@ -117,7 +117,7 @@ export const fr = {
     removeAdvice:
       "Change aussi ton mot de passe si ce poste n'est plus à toi : un poste retiré depuis un autre PC peut se reconnaître à sa prochaine connexion par mot de passe.",
     password: "Ton mot de passe",
-    passwordPlaceholder: "Le tien, pour confirmer",
+    passwordPlaceholder: "Mot de passe",
     removed: "Ce poste a été retiré de ta liste de postes de confiance.",
     wrongPassword: "Mot de passe incorrect.",
     proofRefused: "Le serveur n'a pas reconnu ce poste. Réessaie dans un instant.",
@@ -195,7 +195,7 @@ export const fr = {
   },
   reauth: {
     password: "Ton mot de passe",
-    passwordPlaceholder: "Mot de passe",
+    passwordPlaceholder: "Le tien, pour confirmer",
     currentPassword: "Ton mot de passe actuel",
     help: "Pour cette action, confirme ton mot de passe. La clé de ce poste est vérifiée en même temps.",
     elevated:

@@ -266,6 +266,19 @@ describe("ReconnectPanel", () => {
     expect((wrapper.get("input").element as HTMLInputElement).value).toBe("marie");
   });
 
+  // FIX:01M4D0RHZE7JFMV700JKA3DM1R (C56) : l'identifiant est connu, le curseur est dans le mot de passe.
+  it("puts the cursor in the password field when the identifier is already known", async () => {
+    const ctx = await context([SAMPLE_AGENT], "none");
+    const wrapper = mount(ReconnectPanel, {
+      props: { server, reason: "expired" },
+      global: ctx.global,
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(document.activeElement).toBe(wrapper.findAll("input")[1]?.element);
+    wrapper.unmount();
+  });
+
   it("shows no blocking message when the remembered password was refused (BR-CONN-017)", async () => {
     const ctx = await context();
     const wrapper = mount(ReconnectPanel, {
