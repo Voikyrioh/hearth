@@ -4,6 +4,10 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4D0RJJNZK7NGDMSFBE18Q29](./FIX-01M4D0RJJNZK7NGDMSFBE18Q29.md) | Deux champs « Mot de passe » identiques à la création d'un compte | 2026-10-08 |
+| [FIX-01M4D0RJB17YE0F26QFXGJ2WEV](./FIX-01M4D0RJB17YE0F26QFXGJ2WEV.md) | Un mot de passe de confirmation faux effaçait la saisie du nouveau compte | 2026-10-08 |
+| [FIX-01M4D0RJ5EMX3TG1TJB0EJ5EYP](./FIX-01M4D0RJ5EMX3TG1TJB0EJ5EYP.md) | Assistant d'ajout : « Suivant » grisé sans raison et curseur nulle part | 2026-10-08 |
+| [FIX-01M4D0RHZE7JFMV700JKA3DM1R](./FIX-01M4D0RHZE7JFMV700JKA3DM1R.md) | Les fenêtres d'actes d'administration s'ouvraient avec le curseur dans la confirmation | 2026-10-08 |
 | [FIX-01M4CJEQS88NZWCQ129XDP91MT](./FIX-01M4CJEQS88NZWCQ129XDP91MT.md) | Une coupure rétablie entre 1,5 s et 3 s faisait clignoter « Reconnexion en cours » | 2026-10-08 |
 | [FIX-01M4CRD60RKGZC2HTT52GK6P2T](./FIX-01M4CRD60RKGZC2HTT52GK6P2T.md) | La série du processeur de la coquille et le repli des dates suivaient l'horloge murale du poste | 2026-10-08 |
 | [FIX-01M4CRD4NX3A34B7Z31A7RWE1B](./FIX-01M4CRD4NX3A34B7Z31A7RWE1B.md) | Les mesures de l'agent étaient arrondies à la décimale alors que l'affichage tronque (99,96 devenait 100 %) | 2026-10-08 |
