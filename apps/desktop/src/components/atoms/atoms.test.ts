@@ -11,6 +11,28 @@ import HSpinner from "./HSpinner.vue";
 import HTag from "./HTag.vue";
 import HTooltip from "./HTooltip.vue";
 
+describe("HButton : la raison du blocage écrite sous le bouton (HRT-40, C42)", () => {
+  it("écrit la raison en texte permanent quand `reason-below` et désactivé, rien sinon", () => {
+    const blocked = mount(HButton, {
+      props: {
+        disabled: true,
+        hint: "Seul un administrateur peut mettre à jour l'agent",
+        reasonBelow: true,
+      },
+      slots: { default: "Mettre à jour l'agent" },
+    });
+    expect(blocked.get("[data-button-reason]").text()).toBe(
+      "Seul un administrateur peut mettre à jour l'agent",
+    );
+    const open = mount(HButton, {
+      props: { hint: "Seul un administrateur peut mettre à jour l'agent", reasonBelow: true },
+    });
+    expect(open.find("[data-button-reason]").exists()).toBe(false);
+    const plain = mount(HButton, { props: { disabled: true, hint: "x" } });
+    expect(plain.find("[data-button-reason]").exists()).toBe(false);
+  });
+});
+
 describe("HButton variants and busy state", () => {
   it("renders the danger variant, and a solid one only for danger", () => {
     const danger = mount(HButton, { props: { variant: "danger" } }).get("button");

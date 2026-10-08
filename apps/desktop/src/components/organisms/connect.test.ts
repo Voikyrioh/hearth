@@ -87,8 +87,15 @@ describe("AddServerWizard", () => {
     // Rien n'est enregistré avant « Confirmer » ; les deux boutons sont là.
     expect(servers.servers).toHaveLength(0);
     const buttons = wrapper.findAll("button").map((b) => b.text());
-    expect(buttons).toEqual(["Refuser", "Confirmer"]);
-    await wrapper.findAll("button")[1]?.trigger("click");
+    expect(buttons).toEqual(["Précédent", "Refuser", "Confirmer"]);
+    // HRT-40 (C3) : le serveur vérifié est rappelé, et où relire l'empreinte et ce que « Refuser » fait.
+    expect(wrapper.get("[data-fingerprint-server]").text()).toContain("Atelier");
+    expect(wrapper.get("[data-fingerprint-server]").text()).toContain("192.168.1.50");
+    expect(wrapper.get("[data-fingerprint-where]").text()).toContain(
+      "sudo hearth-agent fingerprint",
+    );
+    expect(wrapper.get("[data-fingerprint-refuse]").text()).toContain("rien n'est enregistré");
+    await wrapper.findAll("button")[2]?.trigger("click");
     await flushPromises();
     // « Confirmer » n'enregistre rien : le serveur n'existe qu'à la connexion réussie.
     expect(servers.servers).toHaveLength(0);
@@ -114,8 +121,18 @@ describe("AddServerWizard", () => {
   it("registers nothing and returns to the list when the fingerprint is refused", async () => {
     const { wrapper, servers } = await wizard();
     await reachFingerprint(wrapper);
-    await wrapper.findAll("button")[0]?.trigger("click");
+    await wrapper.findAll("button")[1]?.trigger("click");
     expect(wrapper.emitted("cancel")).toHaveLength(1);
+    expect(servers.servers).toHaveLength(0);
+  });
+
+  it("goes back to the address with « Précédent » on the fingerprint step, nothing registered (C3)", async () => {
+    const { wrapper, servers } = await wizard();
+    await reachFingerprint(wrapper);
+    await wrapper.get("[data-fingerprint-back]").trigger("click");
+    expect(wrapper.find("[data-fingerprint]").exists()).toBe(false);
+    expect(wrapper.get("h1").text()).toBe("Ajouter un serveur");
+    expect(wrapper.emitted("cancel")).toBeUndefined();
     expect(servers.servers).toHaveLength(0);
   });
 
@@ -312,8 +329,13 @@ describe("ReconnectPanel", () => {
       props: { server, reason: "revoked", revoked: true },
       global: ctx.global,
     });
-    expect(wrapper.text()).toContain("Ton compte n'est plus accessible.");
-    expect(wrapper.text()).toContain("Connecte-toi avec un compte valide.");
+    // HRT-38 (C47) : un titre clair, une explication du statut, une sortie.
+    expect(wrapper.get("h2").text()).toBe("Accès révoqué sur forge");
+    expect(wrapper.text()).toContain("supprimé ou désactivé, ou son mot de passe a changé");
+    expect(wrapper.text()).toContain(
+      "Demande à l'administrateur du serveur de rétablir ton compte",
+    );
+    expect(wrapper.text()).not.toContain("Connecte-toi à");
     expect(wrapper.find("form").exists()).toBe(false);
     await wrapper.get("button").trigger("click");
     expect(wrapper.text()).toContain("Se connecter");

@@ -7,3 +7,4 @@ Fenêtre de formulaire : `<dialog>` natif ouvert par `showModal()` (piège à fo
 - Props : `open`, `title`, `submitLabel`, `canSubmit`, `busy`, `error`, `destructive`, `cancelLabel`
 - Événements et slots : Événements `submit`, `cancel` ; slot par défaut (les champs)
 - Notes : Le parent vide ses mots de passe après chaque envoi. Utilisée par `CreateAccountDialog`, `PasswordDialog`, `OwnAccountCard`. Test : `accounts.test.ts`.
+- HRT-40 : prop `hideSubmit` (aucun bouton d'action : l'action est impossible).

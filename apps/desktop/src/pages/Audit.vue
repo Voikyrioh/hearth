@@ -6,13 +6,14 @@ import { cloneDraft, emptyDraft, type FilterDraft, hasAnyFilter, sameDraft } fro
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
-import HTag from "@/components/atoms/HTag.vue";
 import AuditDetailDialog from "@/components/molecules/AuditDetailDialog.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import AuditFilters from "@/components/organisms/AuditFilters.vue";
 import AuditTable from "@/components/organisms/AuditTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
+import { useNotLoadedText } from "@/composables/useNotLoadedText";
 import { useNow } from "@/composables/useNow";
+import { usePageData } from "@/composables/usePageData";
 import { t } from "@/i18n";
 import { type AuditEntry, failureMessage } from "@/link";
 import { AUDIT_WINDOW_MAX, useAuditStore } from "@/stores/audit";
@@ -39,6 +40,10 @@ const unfiltered = computed(() => !hasAnyFilter(appliedDraft.value));
 const loading = computed(() => audit.status === "loading");
 const empty = computed(() => audit.status !== "loading" && audit.entries.length === 0);
 const failed = computed(() => audit.status === "error");
+// FIX:01M4E82YHBNR94DXKJATXCQ5TM (C46) : un journal jamais lu, lien absent : « pas encore chargé », une seule fois, et
+// aucune estampille « Vu il y a… » puisque rien n'a été vu.
+const notLoaded = useNotLoadedText();
+usePageData(() => audit.status === "ready" || audit.entries.length > 0);
 const forbidden = computed(() => audit.failure?.kind === "forbidden");
 
 const count = computed(() => {
@@ -156,18 +161,20 @@ const reasonText = computed(() =>
       @clear="clear"
     />
 
-    <div v-if="!isConnected" class="audit__stale" role="status">
-      <HTag tone="warn">{{ t("audit.staleBadge") }}</HTag>
-      <span>{{ t("audit.stale") }}</span>
-      <HButton variant="ghost" size="sm" :busy="audit.reloading" @click="audit.reloadManually()">
-        {{ audit.reloading ? t("audit.reloadingNow") : t("audit.reload") }}
-      </HButton>
-    </div>
-
-    <div v-if="failed && !forbidden" class="audit__error" role="alert">
+    <!-- FIX:01M4E5D447SRCNGAQY4PP006HC (C30) : hors ligne, le bandeau du gabarit dit « Serveur hors ligne » et porte « Réessayer
+         maintenant », l'estampille du gabarit dit que la liste n'est pas à jour : rien d'autre ici. -->
+    <div v-if="failed && !forbidden && isConnected" class="audit__error" role="alert">
       <span>{{ reasonText }}</span>
       <HButton variant="ghost" size="sm" @click="audit.retry()">{{ t("common.retry") }}</HButton>
     </div>
+
+    <p
+      v-if="failed && !forbidden && audit.entries.length === 0 && notLoaded"
+      class="audit__pending"
+      data-not-loaded-yet
+    >
+      {{ notLoaded }}
+    </p>
 
     <div class="audit__meta">
       <span v-if="!empty" class="audit__count" role="status">{{ count }}</span>
@@ -230,7 +237,6 @@ const reasonText = computed(() =>
   gap: var(--space-3);
 }
 
-.audit__stale,
 .audit__error {
   display: flex;
   align-items: center;
@@ -244,6 +250,13 @@ const reasonText = computed(() =>
 .audit__error {
   border-color: var(--crit);
   background: var(--crit-tint);
+}
+
+.audit__pending {
+  padding: var(--space-4);
+  border-radius: var(--radius-control);
+  background: var(--card);
+  color: var(--tx2);
 }
 
 .audit__meta {

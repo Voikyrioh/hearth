@@ -6,6 +6,8 @@ import HSpinner from "@/components/atoms/HSpinner.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import { formatAgo } from "@/composables/formatAgo";
+import { useCurrentServer } from "@/composables/useCurrentServer";
+import { useNotLoadedText } from "@/composables/useNotLoadedText";
 import { useNow } from "@/composables/useNow";
 import { t } from "@/i18n";
 import type { TrustedDevice } from "@/link";
@@ -20,6 +22,9 @@ import type { DevicesStatus } from "@/stores/devices";
 // c'est `StaleSurface` qui la désature, et `needs-link` qui désactive « Retirer » (BR-RESIL-007, 008).
 // Aucune clé, aucune empreinte de clé, aucun défi n'existe côté interface : seulement des noms, des
 // dates, une adresse et des booléens.
+const { isConnected } = useCurrentServer();
+const notLoaded = useNotLoadedText();
+
 const props = defineProps<{
   status: DevicesStatus;
   devices: readonly TrustedDevice[];
@@ -86,6 +91,14 @@ const named = (device: TrustedDevice) => `${t("devices.remove")} ${device.name}`
       <span>{{ t("devices.unsupported") }}</span>
     </p>
 
+    <p
+      v-else-if="status === 'error' && devices.length === 0 && notLoaded"
+      class="card__note"
+      data-not-loaded-yet
+    >
+      <HIcon name="info" size="sm" />
+      <span>{{ notLoaded }}</span>
+    </p>
     <div v-else-if="status === 'error' && devices.length === 0" class="card__error" role="alert">
       <p class="card__alert">
         <HIcon name="alert" size="sm" />
@@ -111,7 +124,7 @@ const named = (device: TrustedDevice) => `${t("devices.remove")} ${device.name}`
         <span>{{ t("devices.limit", { max }) }}</span>
       </p>
       <p v-if="showLimitHelp" class="card__help">{{ t("devices.limitHelp") }}</p>
-      <p v-if="status === 'error'" class="card__alert" role="alert">
+      <p v-if="status === 'error' && isConnected" class="card__alert" role="alert">
         <HIcon name="alert" size="sm" />
         <span>{{ t("devices.loadFailed") }}</span>
         <HButton size="sm" variant="secondary" @click="emit('retry')">{{ t("common.retry") }}</HButton>

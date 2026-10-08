@@ -20,6 +20,8 @@ const props = withDefaults(
     solid?: boolean;
     needsLink?: NeedsLink;
     hint?: string;
+    /** FIX:01M4E5D6DYHHX9CBBVDYAFEWMZ (C42) : la raison du blocage est AUSSI écrite sous le bouton, en texte permanent (pas seulement au survol). */
+    reasonBelow?: boolean;
     tipPlacement?: "start" | "center" | "end";
     type?: "button" | "submit";
   }>(),
@@ -31,6 +33,7 @@ const props = withDefaults(
     solid: false,
     needsLink: undefined,
     hint: undefined,
+    reasonBelow: false,
     tipPlacement: "center",
     type: "button",
   },
@@ -42,6 +45,10 @@ const linkReason = useNeedsLink(() => props.needsLink);
 const inert = computed(() => props.disabled || props.busy || linkReason.value !== null);
 const tip = computed(() => linkReason.value ?? (props.disabled ? props.hint : undefined));
 
+const reason = computed(() =>
+  props.reasonBelow && inert.value && !props.busy ? tip.value : undefined,
+);
+
 function onClick(event: MouseEvent) {
   if (inert.value) {
     event.preventDefault();
@@ -52,27 +59,30 @@ function onClick(event: MouseEvent) {
 </script>
 
 <template>
-  <HTooltip :text="tip" :placement="tipPlacement">
-    <template #default="{ describedby }">
-      <button
-        v-bind="$attrs"
-        :type="type"
-        :class="[
-          'btn',
-          `btn--${variant}`,
-          `btn--${size}`,
-          { 'btn--busy': busy, 'btn--solid': solid && variant === 'danger' },
-        ]"
-        :aria-disabled="inert ? 'true' : undefined"
-        :aria-busy="busy ? 'true' : undefined"
-        :aria-describedby="describedby"
-        @click="onClick"
-      >
-        <HSpinner v-if="busy" />
-        <slot />
-      </button>
-    </template>
-  </HTooltip>
+  <span :class="reasonBelow ? 'btn-with-reason' : 'btn-bare'">
+    <HTooltip :text="tip" :placement="tipPlacement">
+      <template #default="{ describedby }">
+        <button
+          v-bind="$attrs"
+          :type="type"
+          :class="[
+            'btn',
+            `btn--${variant}`,
+            `btn--${size}`,
+            { 'btn--busy': busy, 'btn--solid': solid && variant === 'danger' },
+          ]"
+          :aria-disabled="inert ? 'true' : undefined"
+          :aria-busy="busy ? 'true' : undefined"
+          :aria-describedby="describedby"
+          @click="onClick"
+        >
+          <HSpinner v-if="busy" />
+          <slot />
+        </button>
+      </template>
+    </HTooltip>
+    <span v-if="reason" class="btn__reason" data-button-reason>{{ reason }}</span>
+  </span>
 </template>
 
 <style scoped>
@@ -91,6 +101,23 @@ function onClick(event: MouseEvent) {
   transition:
     background var(--motion-fast) var(--ease),
     border-color var(--motion-fast) var(--ease);
+}
+
+/* Sans raison écrite, l'enveloppe ne change aucune mise en page. */
+.btn-bare {
+  display: contents;
+}
+
+.btn-with-reason {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.btn__reason {
+  color: var(--tx2);
+  font-size: var(--fs-small);
 }
 
 .btn--sm {

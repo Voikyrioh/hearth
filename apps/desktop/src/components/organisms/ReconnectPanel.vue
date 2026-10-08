@@ -21,6 +21,12 @@ const reconnect = useReconnect(() => props.server);
 const form = ref<InstanceType<typeof LoginForm> | null>(null);
 const otherAccount = ref(false);
 
+// FIX:01M4E5D51P81MQQYR9PBB3TF22 (C47) : accès révoqué, le titre le dit (plus « Connecte-toi à… » alors qu'on ne peut pas).
+const title = computed(() =>
+  props.revoked
+    ? t("link.revokedTitle", { name: props.server.name })
+    : t("connect.reconnectTitle", { name: props.server.name }),
+);
 const expired = computed(() => !props.revoked && props.reason === "expired");
 const notice = computed(() => {
   if (props.revoked) return t("link.revokedNotice");
@@ -68,8 +74,8 @@ async function submit(entry: { username: string; password: string; remember: boo
 </script>
 
 <template>
-  <section class="reconnect" :aria-label="t('connect.reconnectTitle', { name: server.name })">
-    <h2 class="reconnect__title">{{ t("connect.reconnectTitle", { name: server.name }) }}</h2>
+  <section class="reconnect" :aria-label="title">
+    <h2 class="reconnect__title">{{ title }}</h2>
     <p v-if="notice" class="reconnect__notice" role="status">{{ notice }}</p>
     <p v-if="hint" class="reconnect__hint">{{ hint }}</p>
     <HButton v-if="revoked && !otherAccount" variant="secondary" @click="otherAccount = true">

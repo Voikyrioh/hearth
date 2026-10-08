@@ -40,3 +40,4 @@ Tant que le lien n'est pas « Connecté » (reconnexion, hors ligne, session exp
 - 2026-10-05 — fiches HRT-07 et HRT-09 réunies (fusion de main dans feat/HRT-07-link).
 - 2026-10-05 : vérifications de bout en bout (HRT-12).
 - 2026-10-05 : garantie structurelle : `StaleSurface` dans le gabarit du serveur, plus par convention de page (revue HRT-12).
+- 2026-10-08 : pas d'estampille pour une page qui n'a rien lu (`usePageData`, HRT-38). Grisé et date pendant « Reconnexion… » : maintenus, question ouverte pour Voiky (le constat C48 de la revue UX demandait de ne rien changer pendant 30 s).

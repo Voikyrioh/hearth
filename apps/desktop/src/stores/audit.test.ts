@@ -294,20 +294,6 @@ describe("coupure et retour du lien (BR-AUDIT-011, 020)", () => {
     expect(audit.failure).toEqual({ kind: "not_connected" });
     expect(audit.entries.length).toBeGreaterThan(0);
   });
-
-  it("« Rechargement manuel » : une tentative de reconnexion, puis « Serveur toujours injoignable » si le lien ne revient pas", async () => {
-    const { audit, bridge } = await opened(20);
-    bridge.setState("forge", "offline");
-    const pending = audit.reloadManually();
-    expect(audit.reloading).toBe(true);
-    await vi.advanceTimersByTimeAsync(6000);
-    await pending;
-    expect(audit.reloading).toBe(false);
-    expect(bridge.retries).toContain("forge");
-    expect(useToastsStore().items.map((toast) => toast.message)).toContain(
-      "Serveur toujours injoignable",
-    );
-  });
 });
 
 describe("export (BR-AUDIT-017)", () => {

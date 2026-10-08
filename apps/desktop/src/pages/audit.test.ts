@@ -169,39 +169,29 @@ describe("page Journal d'activité", () => {
     wrapper.unmount();
   });
 
-  it("hors « Connecté » : étiquette « Périmé », message, « Rechargement manuel » ; au retour, « Lien rétabli » et rattrapage", async () => {
+  it("hors ligne : le bandeau du gabarit dit tout, la page n'ajoute aucun message ni second « Réessayer » ; au retour, « Lien rétabli » et rattrapage (HRT-38, C30)", async () => {
     const { wrapper, bridge } = await boot(40);
-    expect(wrapper.text()).not.toContain("Données périmées, serveur injoignable");
     bridge.setState("forge", "offline");
     const missed = bridge.audit.add("forge", { account: "léa", actionLabel: "Manquée" });
     await flushPromises();
-    expect(wrapper.text()).toContain("Périmé");
-    expect(wrapper.text()).toContain("Données périmées, serveur injoignable");
-    expect(wrapper.text()).toContain("Rechargement manuel");
+    // Un seul « Réessayer » : celui du bandeau.
+    expect(wrapper.get(".banner").text()).toContain("Réessayer maintenant");
+    expect(wrapper.text()).not.toContain("Périmé");
+    expect(wrapper.text()).not.toContain("Données périmées, serveur injoignable");
+    expect(wrapper.text()).not.toContain("Rechargement manuel");
+    expect(wrapper.text()).not.toContain(
+      "Indisponible tant que le lien avec le serveur n'est pas établi.",
+    );
+    expect(wrapper.findAll("button").filter((b) => /^Réessayer/.test(b.text()))).toHaveLength(1);
     // Le gabarit marque la page périmée UNE fois (la page ne s'enveloppe pas elle-même).
     expect(wrapper.findAll('[data-stale="true"]')).toHaveLength(1);
     expect(wrapper.text()).not.toContain("Manquée");
     bridge.setState("forge", "connected");
     await flushPromises();
     expect(wrapper.text()).toContain("Manquée");
-    expect(wrapper.text()).not.toContain("Données périmées, serveur injoignable");
     expect(wrapper.text()).toContain("Lien rétabli, données à jour");
     expect(bridge.audit.reads.at(-1)?.before).toBeNull();
     expect(missed.id).toBeGreaterThan(0);
-    wrapper.unmount();
-  });
-
-  it("« Rechargement manuel » sans retour du lien : « Serveur toujours injoignable », le bouton reste", async () => {
-    const { wrapper, bridge } = await boot(10);
-    bridge.setState("forge", "offline");
-    await flushPromises();
-    const reload = wrapper.findAll("button").find((b) => b.text() === "Rechargement manuel");
-    await reload?.trigger("click");
-    await vi.advanceTimersByTimeAsync(6000);
-    await flushPromises();
-    expect(bridge.retries).toContain("forge");
-    expect(wrapper.text()).toContain("Serveur toujours injoignable");
-    expect(wrapper.findAll("button").some((b) => b.text() === "Rechargement manuel")).toBe(true);
     wrapper.unmount();
   });
 
