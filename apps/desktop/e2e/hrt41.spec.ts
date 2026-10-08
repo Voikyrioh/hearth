@@ -89,3 +89,41 @@ for (const size of SIZES) {
     await expect.poll(strokeOf, { timeout: 4000 }).toBe("rgb(255, 90, 90)");
   });
 }
+
+test("le survol d'une courbe se fait au clavier : flèches, valeur et heure, Échap", async ({
+  page,
+}) => {
+  await open(page, SIZES[2]);
+  const chart = page.locator(".chart-box").first();
+  await chart.focus();
+  await expect(chart).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  const tip = page.locator(".chart__tip").first();
+  await expect(tip).toBeVisible();
+  await expect(tip).toContainText(/\d{2}:\d{2}:\d{2}/);
+  const before = await tip.innerText();
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  expect(await tip.innerText()).not.toBe(before);
+  expect(await chart.getAttribute("aria-valuetext")).toContain(":");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".chart__tip")).toHaveCount(0);
+});
+
+test("aucun chiffre en chasse fixe ne contient l'espace fine insécable absente de la police", async ({
+  page,
+}) => {
+  await open(page, SIZES[3]);
+  const bad = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("body *"))
+      .filter(
+        (element) =>
+          getComputedStyle(element).fontFamily.includes("DM Mono") &&
+          Array.from(element.childNodes).some(
+            (node) => node.nodeType === 3 && (node.textContent ?? "").includes(" "),
+          ),
+      )
+      .map((element) => element.textContent),
+  );
+  expect(bad).toEqual([]);
+});

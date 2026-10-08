@@ -495,6 +495,8 @@ export const fr = {
     span1h: "Dernière heure",
     scaleTo: "0 à {max}",
     chartSummary: "Dernière valeur {last}, minimum {min}, maximum {max}, sur {span}",
+    chartSummaryNamed: "{name} : dernière valeur {last}, minimum {min}, maximum {max}",
+    onSpan: "sur {span}",
     legendDisk: "Courbe : disque le plus plein (%)",
     legendTemp: "Courbe : sonde la plus chaude (°C)",
     levelAttention: "Attention",

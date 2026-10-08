@@ -37,15 +37,25 @@ const scale = computed(() =>
 // FIX:01M4E9T718D37EXTXMWA7YXWJE (C10)
 // Texte équivalent de la courbe : sa dernière valeur, son minimum et son maximum sur la fenêtre.
 const described = computed(() => {
-  const first = props.series[0];
-  const summary = first ? summaryOf(first.points) : null;
-  if (!summary) return props.label;
-  return `${props.label}. ${t("dash.chartSummary", {
+  const summaries = props.series.flatMap((serie) => {
+    const summary = summaryOf(serie.points);
+    return summary ? [{ name: serie.name, summary }] : [];
+  });
+  const [only] = summaries;
+  if (!only) return props.label;
+  const fields = (summary: NonNullable<typeof only>["summary"]) => ({
     last: props.format(summary.last),
     min: props.format(summary.min),
     max: props.format(summary.max),
-    span: span.value,
-  })}`;
+  });
+  if (summaries.length === 1 && !only.name) {
+    return `${props.label}. ${t("dash.chartSummary", { ...fields(only.summary), span: span.value })}`;
+  }
+  // Plusieurs séries : le résumé de chacune, nommée (le montant ET le descendant du réseau).
+  const parts = summaries.map(({ name, summary }) =>
+    t("dash.chartSummaryNamed", { name: name ?? "", ...fields(summary) }),
+  );
+  return `${props.label}. ${parts.join(" ; ")}, ${t("dash.onSpan", { span: span.value })}`;
 });
 
 const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 5000);

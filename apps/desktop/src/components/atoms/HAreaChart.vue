@@ -8,6 +8,8 @@ import { ceilingOf, type Point } from "@/dashboard/series";
 export interface ChartSeries {
   points: readonly Point[];
   tone: "ac" | "cool";
+  /** Nom de la série, dit par le texte équivalent quand la courbe en porte plusieurs (« Montant », « Descendant »). */
+  name?: string;
 }
 
 const props = defineProps<{
@@ -60,31 +62,70 @@ const ceiling = computed(() => ceilingOf(props.series, props.max, props.atLeast)
 // courbe est son `aria-label` (dernière valeur, minimum, maximum) : l'info-bulle est un plus pour la souris.
 const TIME = new Intl.DateTimeFormat("fr-FR", { timeStyle: "medium" });
 const hover = ref<{ ratio: number; text: string } | null>(null);
-function onMove(event: PointerEvent) {
-  const element = box.value;
-  const first = props.series[0];
-  if (!element || !first || first.points.length === 0) return;
-  const rect = element.getBoundingClientRect();
-  if (rect.width === 0) return;
-  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-  const count = first.points.length;
-  const stepX = count > 1 ? (WIDTH - PAD * 2) / (count - 1) : 0;
-  const index =
-    stepX === 0 ? 0 : Math.min(count - 1, Math.max(0, Math.round((ratio * WIDTH - PAD) / stepX)));
-  const at = first.points[index];
-  if (!at) return;
+const shown = ref<number | null>(null);
+const count = computed(() => props.series[0]?.points.length ?? 0);
+const stepX = computed(() => (count.value > 1 ? (WIDTH - PAD * 2) / (count.value - 1) : 0));
+
+/** Texte « valeur, heure » du point `index` (toutes les séries) ; null si le point n'existe pas. */
+function textAt(index: number): string | null {
+  const at = props.series[0]?.points[index];
+  if (!at) return null;
   const values = props.series
     .map((serie) => serie.points[index]?.v ?? null)
     .filter((value): value is number => value !== null)
     .map((value) => (props.format ? props.format(value) : String(Math.round(value))));
-  const ratioAt = (PAD + index * stepX) / WIDTH;
-  element.style.setProperty("--hover-x", `${(ratioAt * 100).toFixed(2)}%`);
-  hover.value = {
-    ratio: ratioAt,
-    text: `${values.length > 0 ? values.join(" · ") : "-"}, ${TIME.format(new Date(at.t))}`,
-  };
+  return `${values.length > 0 ? values.join(" · ") : "-"}, ${TIME.format(new Date(at.t))}`;
 }
 
+function show(index: number) {
+  const element = box.value;
+  const text = textAt(index);
+  if (!element || text === null) return;
+  const ratio = (PAD + index * stepX.value) / WIDTH;
+  element.style.setProperty("--hover-x", `${(ratio * 100).toFixed(2)}%`);
+  shown.value = index;
+  hover.value = { ratio, text };
+}
+
+function clear() {
+  hover.value = null;
+  shown.value = null;
+}
+
+function onMove(event: PointerEvent) {
+  const element = box.value;
+  if (!element || count.value === 0) return;
+  const rect = element.getBoundingClientRect();
+  if (rect.width === 0) return;
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  const index =
+    stepX.value === 0
+      ? 0
+      : Math.min(count.value - 1, Math.max(0, Math.round((ratio * WIDTH - PAD) / stepX.value)));
+  show(index);
+}
+
+// Clavier (une courbe = un seul arrêt de tabulation) : flèches (Maj : par 10), Début, Fin ; Échap retire le repère.
+// La valeur et l'heure sont portées par `aria-valuetext` : le lecteur d'écran les annonce à chaque déplacement.
+function onKey(event: KeyboardEvent) {
+  if (count.value === 0) return;
+  const last = count.value - 1;
+  const at = shown.value ?? last;
+  const jump = event.shiftKey ? 10 : 1;
+  let next: number | null = null;
+  if (event.key === "ArrowLeft") next = shown.value === null ? last - jump : at - jump;
+  else if (event.key === "ArrowRight") next = shown.value === null ? last : at + jump;
+  else if (event.key === "Home") next = 0;
+  else if (event.key === "End") next = last;
+  else if (event.key === "Escape") {
+    clear();
+    return;
+  } else return;
+  event.preventDefault();
+  show(Math.min(last, Math.max(0, next)));
+}
+
+const valueText = computed(() => hover.value?.text ?? textAt(count.value - 1) ?? "");
 interface Drawn {
   tone: ChartSeries["tone"];
   line: string;
@@ -136,7 +177,22 @@ const drawn = computed<Drawn[]>(() =>
 </script>
 
 <template>
-  <div ref="box" class="chart-box" @pointermove="onMove" @pointerleave="hover = null">
+  <div
+    ref="box"
+    class="chart-box"
+    role="slider"
+    tabindex="0"
+    aria-orientation="horizontal"
+    :aria-label="label"
+    :aria-valuemin="0"
+    :aria-valuemax="Math.max(0, count - 1)"
+    :aria-valuenow="shown ?? Math.max(0, count - 1)"
+    :aria-valuetext="valueText"
+    @pointermove="onMove"
+    @pointerleave="clear"
+    @keydown="onKey"
+    @blur="clear"
+  >
   <svg class="chart" :viewBox="`0 0 ${WIDTH} ${height}`" role="img" :aria-label="label">
     <defs>
       <linearGradient
