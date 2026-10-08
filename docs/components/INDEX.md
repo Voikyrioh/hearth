@@ -12,6 +12,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`HIcon`](./HIcon.md) — Jeu d'icônes SVG.
 - [`HLogo`](./HLogo.md) — Logo Hearth.
 - [`HTooltip`](./HTooltip.md) — Bulle d'explication (survol, focus).
+- [`HMiddleText`](./HMiddleText.md) — Texte long tronqué au milieu, complet au survol et au clavier.
 - [`HSpinner`](./HSpinner.md) — Indicateur d'attente.
 - [`HToggle`](./HToggle.md) — Interrupteur booléen.
 - [`HSelect`](./HSelect.md) — Liste déroulante native (un choix).

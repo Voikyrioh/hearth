@@ -6,6 +6,7 @@ import { fullestDiskPercent, percentOf } from "@/dashboard/series";
 import { t } from "@/i18n";
 import { type ServerMachine, useDashboardStore } from "@/stores/dashboard";
 import HMeter from "../atoms/HMeter.vue";
+import HMiddleText from "../atoms/HMiddleText.vue";
 import DashCard from "../molecules/DashCard.vue";
 import LevelBadge from "../molecules/LevelBadge.vue";
 import StatRow from "../molecules/StatRow.vue";
@@ -43,8 +44,8 @@ const covered = useCoverage(props.entry);
     <ul v-else class="disks__list">
       <li v-for="disk in disks" :key="disk.key" class="disk" :data-level="disk.level">
         <div class="disk__head">
-          <span class="disk__name">{{ disk.name }}</span>
-          <span v-if="disk.mount !== disk.name" class="disk__mount">{{ disk.mount }}</span>
+          <HMiddleText class="disk__name" :text="disk.name" />
+          <HMiddleText v-if="disk.mount !== disk.name" class="disk__mount" :text="disk.mount" />
           <span class="disk__gap" />
           <span class="disk__percent">{{ formatPercent(disk.percent) }}</span>
           <LevelBadge :level="disk.level" />
@@ -99,22 +100,28 @@ const covered = useCoverage(props.entry);
   min-width: 0;
 }
 
+/* FIX:01M4EPX88BTXFX1PX7E57WGK38 (HRT-47, S1b) : nom et point de montage tronqués au milieu, jamais en colonne ni hors de la carte. */
 .disk__name {
+  flex: 0 1 auto;
+  min-width: min-content;
   font-weight: var(--fw-semibold);
-  overflow-wrap: anywhere;
 }
 
 .disk__gap {
-  flex: 1;
+  flex: 1 0 0;
 }
 
 .disk__percent {
+  flex: none;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .disk__mount {
   /* FIX:01M4D1K6V5DS7DQVR6ZV7A3HGY : le point de montage se lit (taille du texte, pas de la note) */
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--tx);
   font-family: var(--font-mono);
 }

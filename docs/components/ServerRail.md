@@ -7,3 +7,4 @@ Barre des serveurs (64 px) : logo (retour à l'accueil), un `ServerAvatar` par s
 - Props : aucune (lit les stores `servers` et `link`)
 - Événements et slots : aucun
 - Notes : Utilise `vue-router`. Tests : `organisms.test.ts`, `e2e/shell.spec.ts`.
+- HRT-47 (S2) : 8 px de marge verticale dans la liste, l'anneau du serveur sélectionné n'est plus rogné. FIX:01M4EPX8PWN1RRX8A4HZGTKF0E.

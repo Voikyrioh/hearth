@@ -7,3 +7,4 @@ Sections « Machine » (Nom, Système, Processeur, Mémoire, Disques) et « Dur�
 - Props : `entry` (`ServerMachine` du store `dashboard`)
 - Événements et slots : aucun
 - Notes : Tests : `pages/Dashboard.test.ts`.
+- HRT-47 (S1b) : chaque disque (point de montage tronqué au milieu, taille) tient dans la carte. FIX:01M4EPX88BTXFX1PX7E57WGK38.
