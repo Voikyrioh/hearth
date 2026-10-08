@@ -37,7 +37,7 @@ function state(index: number): "done" | "now" | "later" {
         <i v-else-if="state(index) === 'now'" class="steps__dot" />
       </span>
       <span class="steps__label">
-        {{ stepLabel(step, step === props.step ? percent : null) }}
+        {{ stepLabel(step, step === props.step ? percent : null, state(index) === "done") }}
         <span class="steps__sr">, {{ t(`agentUpdate.${state(index) === "done" ? "stepDone" : state(index) === "now" ? "stepNow" : "stepLater"}`) }}</span>
       </span>
       <HMeter

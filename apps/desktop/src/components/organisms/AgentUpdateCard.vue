@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { historyMessage, progressSentence, refusalMessage } from "@/agentUpdate/messages";
+import {
+  historyMessage,
+  progressSentence,
+  refusalMessage,
+  stepAnnouncement,
+} from "@/agentUpdate/messages";
 import HButton from "@/components/atoms/HButton.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import AgentUpdateSteps from "@/components/molecules/AgentUpdateSteps.vue";
@@ -75,7 +80,10 @@ const versions = computed(() => {
 const silent = computed(() => state.value === "offline");
 
 /** Le bouton existe quand une version plus récente est disponible ; il est inerte sans droit ou pendant l'opération. */
-const showButton = computed(() => available.value !== null && view.value?.managed === false);
+// Pendant la mise à jour, le bouton disparaît (HRT-46, C43, FIX:01M4E48N732694TTFSRQF1C4KG) : les étapes disent où elle en est.
+const showButton = computed(
+  () => available.value !== null && view.value?.managed === false && !running.value,
+);
 const hint = computed(() => (isAdmin.value ? undefined : t("agentUpdate.readOnlyHint")));
 
 const history = computed(() => {
@@ -133,9 +141,6 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
       <LinkStatePill :state="state" />
     </header>
     <p class="agent__versions" data-agent-versions>{{ versions }}</p>
-    <p v-if="available && !running && !compat" class="agent__available" data-agent-available>
-      {{ t("agentUpdate.availableText") }}
-    </p>
 
     <p v-if="compat" class="agent__incompat" role="alert" data-agent-incompat>{{ compatMessage }}</p>
     <p v-else-if="view?.managed" class="agent__note" data-agent-managed>
@@ -160,8 +165,10 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
         {{ t("agentUpdate.runningLost") }}
       </p>
       <template v-else>
-        <p class="agent__sentence" role="status" data-agent-progress>
-          {{ progressSentence(step, progress?.percent ?? null) }}
+        <p class="agent__sentence" data-agent-progress>{{ progressSentence() }}</p>
+        <!-- Annonce polie de l'étape courante (lecteurs d'écran), invisible : l'œil lit la liste des étapes. -->
+        <p class="sr-only" role="status" aria-live="polite" data-agent-announce>
+          {{ stepAnnouncement(step) }}
         </p>
         <AgentUpdateSteps :step="step" :percent="progress?.percent ?? null" />
         <p class="agent__cut">{{ t("agentUpdate.cutAnnounce") }}</p>
@@ -225,8 +232,9 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
   gap: var(--space-3);
 }
 
+/* HRT-46, FIX:01M4E48N732694TTFSRQF1C4KG : `flex: 1 1 auto` (pas `1`) : le titre garde sa largeur et c'est la pastille qui passe à la ligne, elle ne le chevauche plus. */
 .agent__title {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   font-size: var(--fs-h3);
   font-weight: var(--fw-semibold);
@@ -238,7 +246,6 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
   font-variant-numeric: tabular-nums;
 }
 
-.agent__available,
 .agent__note,
 .agent__history {
   margin-top: var(--space-2);

@@ -64,7 +64,7 @@ describe("add-server wizard, step 1", () => {
     wizard.port.value = "70000";
     wizard.touched.value.port = true;
     expect(wizard.canNext.value).toBe(false);
-    expect(wizard.errors.value.port).toBe("L'emplacement saisi n'est pas valide");
+    expect(wizard.errors.value.port).toBe("Port invalide. Plage admise : 1–⁠65535");
     wizard.port.value = "";
     expect(wizard.canNext.value).toBe(true);
   });
