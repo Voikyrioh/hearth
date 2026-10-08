@@ -17,7 +17,8 @@ export interface ActReport {
  * Ce qu'une fenêtre d'acte d'administration doit savoir de la confirmation (HRT-30, BR-TRUST-042, 043) :
  * lu de l'AGENT à chaque ouverture (l'interface ne devine ni sa capacité ni l'élévation de 5 minutes).
  *
- * - `supported` : l'agent annonce la confirmation des actes ; sinon, aucune demande en plus ;
+ * - `supported` : l'agent annonce la confirmation des actes ; sinon `agentTooOld` : la liaison n'envoie
+ *   aucun acte à cet agent, la fenêtre le dit et ne propose rien ;
  * - `keyMissing` : ce PC n'a pas de clé au coffre, rien ne peut partir d'ici : la fenêtre l'explique ;
  * - `elevated` : pour CET acte (la règle de couverture est celle de l'agent, `reauthCovers`) le mot de
  *   passe n'est pas demandé, il reste `remaining` secondes ;
@@ -71,6 +72,8 @@ export function useReauth(
   );
 
   const supported = computed(() => state.value?.supported === true);
+  /** L'état est lu et l'agent n'annonce pas la confirmation : rien ne peut partir. */
+  const agentTooOld = computed(() => state.value !== null && !supported.value);
   const keyMissing = computed(() => supported.value && state.value?.hasDeviceKey === false);
   const elevated = computed(
     () => supported.value && !keyMissing.value && covered.value && countdown.remaining.value > 0,
@@ -97,6 +100,7 @@ export function useReauth(
     failed,
     ready,
     supported,
+    agentTooOld,
     keyMissing,
     elevated,
     needsPassword,

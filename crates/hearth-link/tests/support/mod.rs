@@ -266,9 +266,11 @@ pub struct Options {
     /// Le client parle la clé d'appareil (défi signé, inscription). Faux par défaut : les scénarios
     /// d'avant HRT-23 voient un agent sans défi, comme avant (`Spy::old_agent`).
     pub device_key: bool,
-    /// L'agent EXIGE la confirmation des actes d'administration (HRT-30). Faux par défaut : les scénarios
-    /// de résilience envoient des routes d'acte brutes.
-    pub reauth_required: bool,
+    /// L'agent ACCEPTE un acte sans confirmation (porte de test `accept_unconfirmed_acts_for_tests`). Faux
+    /// par défaut : le banc exige, comme l'agent en production. Seuls les scénarios de résilience qui
+    /// envoient volontairement des routes d'acte brutes (`execute_raw`) le demandent, par
+    /// `Options::accepting_bare_acts()` ; `tests/bench_guard.rs` compte ces usagers.
+    pub bare_acts: bool,
 }
 
 impl Default for Options {
@@ -279,7 +281,7 @@ impl Default for Options {
             config: fast_config(),
             updating: None,
             device_key: false,
-            reauth_required: false,
+            bare_acts: false,
         }
     }
 }
@@ -687,7 +689,7 @@ impl World {
     /// Agent installé, compte « marie », mandataire, `LinkManager` connecté.
     pub async fn connected(options: Options) -> Self {
         let mut agent = TestAgent::install_with(options.updating).await;
-        agent.require_confirmation(options.reauth_required);
+        agent.accept_bare_acts(options.bare_acts);
         agent.create_account("marie", options.role).await;
         let proxy = FaultProxy::start(agent.addr).await;
         let dir = agent::tmp::tempdir().unwrap();
@@ -785,6 +787,15 @@ pub fn thresholds(silence: Option<Duration>, reconnecting: bool, offline: bool) 
 }
 
 impl Options {
+    /// Le banc ACCEPTE un acte sans confirmation : réservé aux scénarios de résilience qui passent par
+    /// la porte brute (`execute_raw`). Voir `tests/bench_guard.rs`.
+    pub fn accepting_bare_acts(self) -> Self {
+        Self {
+            bare_acts: true,
+            ..self
+        }
+    }
+
     /// Scénario qui éprouve la détection d'un flux muet : silence et battement à l'échelle.
     pub fn silent_link() -> Self {
         Self {

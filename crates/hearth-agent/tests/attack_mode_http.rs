@@ -1,6 +1,6 @@
 //! Le mode attaque sur l'API HTTPS et le flux (HRT-25, ADR-0025, BR-TRUST-013, 018, 028, 030 à
-//! 032) : `PUT /security/attack-mode` et sa garde (administrateur, mot de passe, clé inscrite ET
-//! prouvée), `GET /security`, une session présentée seule refusée sur chaque route et sur le flux, sans
+//! 032) : `PUT /security/attack-mode` et sa garde (administrateur, acte confirmé : mot de passe ET
+//! preuve d'une clé inscrite, usage `0x05` ; plus de forme à plat, HRT-18 tranche 5), `GET /security`, une session présentée seule refusée sur chaque route et sur le flux, sans
 //! rien révéler. Vraie base SQLite, vraies signatures Ed25519, vrai agent TLS pour le flux.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -10,7 +10,7 @@ mod support;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode};
 use hearth_agent::application::ports::IdentityStore;
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::session_token::SessionToken;
@@ -18,23 +18,18 @@ use hearth_agent::domain::trust::attack_mode::EndHow;
 use hearth_agent::entrypoint::http::{Access, ENDPOINTS};
 use hearth_agent::infrastructure::tls::FileIdentityStore;
 use hearth_proto::device_proof::Binding;
-use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::stream::{SecurityMessage, ServerMessage, SessionNotice, Topic};
 use serde_json::{Value, json};
 use support::api::{Api, Reply};
-use support::device::{DeviceKey, attack_mode_body, device_json, login_token};
+use support::device::{Actor, DeviceKey, device_json, login_token};
 use support::https::{self, Agent};
 use support::probe::metering;
 use support::ws::{self, End, WsClient};
-use support::{CLIENT_ADDR, Env, PASSWORD, SERVER_FINGERPRINT, by, client_at, env, secret};
+use support::{CLIENT_ADDR, Env, PASSWORD, by, client_at, env, secret};
 use time::Duration;
 
 const WRONG: &str = "Wrong-Horse-9999";
 const ELSEWHERE: &str = "10.0.0.99";
-
-fn fingerprint() -> Fingerprint {
-    Fingerprint::from_bytes(SERVER_FINGERPRINT)
-}
 
 /// Un administrateur dont la clé est inscrite : sa session est ouverte AVEC la preuve de la clé.
 async fn admin_with_key(env: &Env, api: &Api, name: &str) -> (DeviceKey, String) {
@@ -52,13 +47,29 @@ async fn put(api: &Api, token: &str, body: &Value) -> Reply {
         .await
 }
 
-async fn challenge(api: &Api, username: &str, purpose: &str) -> String {
-    let reply = api
-        .post("/sessions/challenge")
-        .json(&json!({ "username": username, "purpose": purpose }))
-        .send()
+/// Le geste, CONFIRMÉ : mot de passe du compte et preuve de sa clé (usage `0x05`).
+async fn act(api: &Api, who: &Actor, active: bool) -> Reply {
+    api.act(
+        who,
+        Method::PUT,
+        "/security/attack-mode",
+        json!({ "active": active }),
+    )
+    .await
+}
+
+/// Comme `act`, avec un autre mot de passe de confirmation.
+async fn act_with(api: &Api, who: &Actor, active: bool, password: &str) -> Reply {
+    let body = who
+        .confirm_with(
+            api,
+            &Method::PUT,
+            "/security/attack-mode",
+            json!({ "active": active }),
+            password,
+        )
         .await;
-    reply.body["challenge"].as_str().unwrap().to_owned()
+    put(api, &who.token, &body).await
 }
 
 fn hash_of(token: &str) -> [u8; 32] {
@@ -93,10 +104,10 @@ async fn journal_of(env: &Env, action: &str) -> Vec<(String, Option<String>, Opt
 async fn an_administrator_with_a_proved_key_and_the_password_enables_then_disables_the_mode() {
     let env = env().await;
     let api = Api::new(&env);
-    let (key, token) = admin_with_key(&env, &api, "marie").await;
+    let marie = env.actor(&api, "marie", Role::Admin).await;
+    let token = marie.token.clone();
 
-    let body = attack_mode_body(&api, &key, "marie", &token, true, PASSWORD).await;
-    let reply = put(&api, &token, &body).await;
+    let reply = act(&api, &marie, true).await;
     assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
     assert_eq!(reply.body["state"], "active");
     assert!(reply.body["since"].is_string());
@@ -107,8 +118,7 @@ async fn an_administrator_with_a_proved_key_and_the_password_enables_then_disabl
     assert_eq!(state.body["attack_mode"]["state"], "active");
 
     // Marie, administratrice, reste reconnue une fois le mode actif : session + adresse retenue.
-    let body = attack_mode_body(&api, &key, "marie", &token, false, PASSWORD).await;
-    let reply = put(&api, &token, &body).await;
+    let reply = act(&api, &marie, false).await;
     assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
     assert_eq!(reply.body["state"], "off");
     assert_eq!(reply.body["last_end"], "manual");
@@ -127,11 +137,8 @@ async fn an_administrator_with_a_proved_key_and_the_password_enables_then_disabl
 async fn a_read_only_account_is_refused_with_403_and_the_refusal_is_journaled() {
     let env = env().await;
     let api = Api::new(&env);
-    env.create("lucas", Role::ReadOnly).await;
-    let key = DeviceKey::new();
-    let token = login_token(&api, &key, "lucas", PASSWORD).await;
-    let body = attack_mode_body(&api, &key, "lucas", &token, true, PASSWORD).await;
-    let reply = put(&api, &token, &body).await;
+    let lucas = env.actor(&api, "lucas", Role::ReadOnly).await;
+    let reply = act(&api, &lucas, true).await;
     assert_eq!(reply.status, StatusCode::FORBIDDEN, "{:?}", reply.body);
     assert_eq!(reply.code(), "FORBIDDEN_ROLE");
     assert_eq!(
@@ -146,19 +153,19 @@ async fn a_read_only_account_is_refused_with_403_and_the_refusal_is_journaled() 
     assert_eq!(refused[0].1.as_deref(), Some("lucas"));
     // Le corps n'est pas lu pour un refus de rôle : le geste n'est pas connu, la désactivation refusée
     // est consignée sous le code par défaut, l'activation.
-    let body = attack_mode_body(&api, &key, "lucas", &token, false, PASSWORD).await;
-    assert_eq!(put(&api, &token, &body).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(act(&api, &lucas, false).await.status, StatusCode::FORBIDDEN);
     assert!(journal_of(&env, "attack_mode.disable").await.is_empty());
     let all = journal_of(&env, "attack_mode.enable").await;
     assert!(!all.is_empty() && all.iter().all(|entry| entry.0 == "denied"));
 }
 
+/// Sans le membre `reauth` (client trop ancien, ou session volée), la couche répond `426` : rien n'est
+/// écrit et aucun mot de passe n'est essayé. Les refus de preuve (clé inconnue, autre acte, autre geste,
+/// autre session, périmée, rejouée) sont éprouvés sur les dix actes par `admin_reauth.rs`.
 #[tokio::test]
-async fn an_administrator_without_a_proved_key_is_refused_with_409_a_typed_reason_and_nothing_is_written()
- {
+async fn a_bare_request_is_refused_with_426_for_both_gestures_and_nothing_is_written() {
     let env = env().await;
     let api = Api::new(&env);
-    // Une session sans clé (client ancien, poste non inscrit) : ni preuve, ni poste.
     env.create("marie", Role::Admin).await;
     let token = api.token_of("marie").await;
     let state_before: (i64, Option<String>, Option<String>) =
@@ -166,41 +173,28 @@ async fn an_administrator_without_a_proved_key_is_refused_with_409_a_typed_reaso
             .fetch_one(env.db.pool())
             .await
             .unwrap();
-    let reply = put(
-        &api,
-        &token,
-        &json!({ "active": true, "password": PASSWORD }),
-    )
-    .await;
-    assert_eq!(reply.status, StatusCode::CONFLICT, "{:?}", reply.body);
-    assert_eq!(reply.code(), "POST_NOT_RECOGNIZED");
-    assert_eq!(reply.body["error"]["details"]["field"], "device");
-    assert_eq!(reply.body["error"]["details"]["reason"], "proof_missing");
-    // Désactiver exige la même preuve.
-    let reply = put(
-        &api,
-        &token,
-        &json!({ "active": false, "password": PASSWORD }),
-    )
-    .await;
-    assert_eq!(reply.code(), "POST_NOT_RECOGNIZED");
+    for active in [true, false] {
+        let reply = put(
+            &api,
+            &token,
+            &json!({ "active": active, "password": PASSWORD }),
+        )
+        .await;
+        assert_eq!(
+            reply.status,
+            StatusCode::UPGRADE_REQUIRED,
+            "{:?}",
+            reply.body
+        );
+        assert_eq!(reply.code(), "INCOMPATIBLE_VERSION");
+        assert_eq!(reply.body["error"]["details"]["reason"], "reauth_required");
+    }
     let state_after: (i64, Option<String>, Option<String>) =
         sqlx::query_as("SELECT active, activation_id, ended_how FROM attack_mode")
             .fetch_one(env.db.pool())
             .await
             .unwrap();
     assert_eq!(state_after, state_before, "aucune écriture");
-    // Les refus sont consignés « refusé », sous le code du geste demandé.
-    for action in ["attack_mode.enable", "attack_mode.disable"] {
-        let refused = journal_of(&env, action).await;
-        assert_eq!(refused.len(), 1, "{action}");
-        assert_eq!(refused[0].0, "denied", "{action}");
-        assert_eq!(
-            refused[0].2.as_deref(),
-            Some("mode attaque : poste non reconnu"),
-            "{action}"
-        );
-    }
     // Aucune tentative de mot de passe n'a été faite : sans preuve, la session volée ne devine rien.
     assert_eq!(
         scalar(
@@ -213,197 +207,10 @@ async fn an_administrator_without_a_proved_key_is_refused_with_409_a_typed_reaso
 }
 
 #[tokio::test]
-async fn every_kind_of_wrong_proof_is_refused_with_409_and_leaves_the_mode_off() {
-    let env = env().await;
-    let api = Api::new(&env);
-    let (key, token) = admin_with_key(&env, &api, "marie").await;
-    let (paul_key, _paul_token) = admin_with_key(&env, &api, "paul").await;
-    let hash = hash_of(&token);
-    let fp = fingerprint();
-    async fn attempt(api: &Api, token: &str, proof: Value, active: bool) -> Reply {
-        put(
-            api,
-            token,
-            &json!({ "active": active, "password": PASSWORD, "device": proof }),
-        )
-        .await
-    }
-
-    // (a) une clé qui n'est pas inscrite du tout.
-    let stranger = DeviceKey::new();
-    let issued = challenge(&api, "marie", "attack_mode").await;
-    let proof = stranger.sign(
-        &fp,
-        Binding::AttackMode {
-            token_hash: &hash,
-            activate: true,
-        },
-        "marie",
-        &issued,
-    );
-    let reply = attempt(&api, &token, device_json(&proof), true).await;
-    assert_eq!(
-        (reply.status, reply.code()),
-        (StatusCode::CONFLICT, "POST_NOT_RECOGNIZED")
-    );
-    assert_eq!(reply.body["error"]["details"]["reason"], "proof_invalid");
-
-    // (b) la clé INSCRITE d'un autre compte, signée correctement.
-    let issued = challenge(&api, "marie", "attack_mode").await;
-    let proof = paul_key.sign(
-        &fp,
-        Binding::AttackMode {
-            token_hash: &hash,
-            activate: true,
-        },
-        "marie",
-        &issued,
-    );
-    let reply = attempt(&api, &token, device_json(&proof), true).await;
-    assert_eq!(reply.code(), "POST_NOT_RECOGNIZED");
-
-    // (c) la preuve d'un autre usage (connexion, flux, retrait).
-    for (purpose, binding) in [
-        ("login", Binding::Login),
-        ("session", Binding::Session { token_hash: &hash }),
-    ] {
-        let issued = challenge(&api, "marie", purpose).await;
-        let proof = key.sign(&fp, binding, "marie", &issued);
-        let reply = attempt(&api, &token, device_json(&proof), true).await;
-        assert_eq!(reply.code(), "POST_NOT_RECOGNIZED", "usage {purpose}");
-    }
-    // Un défi demandé pour le mode attaque mais signé avec l'octet d'usage d'une connexion.
-    let issued = challenge(&api, "marie", "attack_mode").await;
-    let proof = key.sign(&fp, Binding::Login, "marie", &issued);
-    assert_eq!(
-        attempt(&api, &token, device_json(&proof), true)
-            .await
-            .code(),
-        "POST_NOT_RECOGNIZED"
-    );
-
-    // (d) la preuve de l'autre geste : une preuve d'activation ne désactive pas, et inversement.
-    let issued = challenge(&api, "marie", "attack_mode").await;
-    let activate_proof = key.sign(
-        &fp,
-        Binding::AttackMode {
-            token_hash: &hash,
-            activate: true,
-        },
-        "marie",
-        &issued,
-    );
-    assert_eq!(
-        attempt(&api, &token, device_json(&activate_proof), false)
-            .await
-            .code(),
-        "POST_NOT_RECOGNIZED",
-        "preuve d'activation pour désactiver"
-    );
-    let issued = challenge(&api, "marie", "attack_mode").await;
-    let deactivate_proof = key.sign(
-        &fp,
-        Binding::AttackMode {
-            token_hash: &hash,
-            activate: false,
-        },
-        "marie",
-        &issued,
-    );
-    assert_eq!(
-        attempt(&api, &token, device_json(&deactivate_proof), true)
-            .await
-            .code(),
-        "POST_NOT_RECOGNIZED",
-        "preuve de désactivation pour activer"
-    );
-
-    // (e) la preuve liée au jeton d'une AUTRE session.
-    let other = api.token_of("marie").await;
-    let other_hash = hash_of(&other);
-    let issued = challenge(&api, "marie", "attack_mode").await;
-    let proof = key.sign(
-        &fp,
-        Binding::AttackMode {
-            token_hash: &other_hash,
-            activate: true,
-        },
-        "marie",
-        &issued,
-    );
-    assert_eq!(
-        attempt(&api, &token, device_json(&proof), true)
-            .await
-            .code(),
-        "POST_NOT_RECOGNIZED"
-    );
-
-    // (f) une preuve périmée (60 secondes sur l'horloge monotone).
-    let issued = challenge(&api, "marie", "attack_mode").await;
-    let proof = key.sign(
-        &fp,
-        Binding::AttackMode {
-            token_hash: &hash,
-            activate: true,
-        },
-        "marie",
-        &issued,
-    );
-    env.monotonic.advance(Duration::seconds(61));
-    assert_eq!(
-        attempt(&api, &token, device_json(&proof), true)
-            .await
-            .code(),
-        "POST_NOT_RECOGNIZED"
-    );
-
-    assert_eq!(active(&env).await, 0);
-    assert!(
-        journal_of(&env, "attack_mode.enable")
-            .await
-            .iter()
-            .all(|entry| entry.0 == "denied"),
-        "aucune activation réussie"
-    );
-}
-
-#[tokio::test]
-async fn a_replayed_proof_is_refused_and_a_proof_that_did_not_serve_is_not_burned() {
-    let env = env().await;
-    let api = Api::new(&env);
-    let (key, token) = admin_with_key(&env, &api, "marie").await;
-    // Un mot de passe faux ne brûle pas la preuve : le même corps, une fois le mot de passe corrigé, sert.
-    let mut body = attack_mode_body(&api, &key, "marie", &token, true, WRONG).await;
-    let reply = put(&api, &token, &body).await;
-    assert_eq!(
-        reply.status,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "{:?}",
-        reply.body
-    );
-    assert_eq!(reply.code(), "WRONG_PASSWORD");
-    assert_eq!(active(&env).await, 0);
-    body["password"] = json!(PASSWORD);
-    let served = put(&api, &token, &body).await;
-    assert_eq!(served.status, StatusCode::OK, "{:?}", served.body);
-    // Rejouée : le défi a servi.
-    let _ = put(
-        &api,
-        &token,
-        &attack_mode_body(&api, &key, "marie", &token, false, PASSWORD).await,
-    )
-    .await;
-    assert_eq!(active(&env).await, 0);
-    let replay = put(&api, &token, &body).await;
-    assert_eq!(replay.code(), "POST_NOT_RECOGNIZED", "{:?}", replay.body);
-    assert_eq!(active(&env).await, 0, "la preuve rejouée n'active rien");
-}
-
-#[tokio::test]
 async fn a_wrong_password_counts_as_a_login_failure_with_the_same_counters_and_slowdown() {
     let env = env().await;
     let api = Api::new(&env);
-    let (key, token) = admin_with_key(&env, &api, "marie").await;
+    let marie = env.actor(&api, "marie", Role::Admin).await;
     let pair = |env: &Env| {
         let pool = env.db.pool().clone();
         async move {
@@ -415,8 +222,7 @@ async fn a_wrong_password_counts_as_a_login_failure_with_the_same_counters_and_s
     };
     let before = pair(&env).await;
     for attempt in 1..=4 {
-        let body = attack_mode_body(&api, &key, "marie", &token, true, WRONG).await;
-        let reply = put(&api, &token, &body).await;
+        let reply = act_with(&api, &marie, true, WRONG).await;
         assert_eq!(
             reply.code(),
             "WRONG_PASSWORD",
@@ -430,15 +236,13 @@ async fn a_wrong_password_counts_as_a_login_failure_with_the_same_counters_and_s
         );
     }
     // Le cinquième échec ouvre l'attente du couple, exactement comme à la connexion.
-    let body = attack_mode_body(&api, &key, "marie", &token, true, WRONG).await;
-    let reply = put(&api, &token, &body).await;
+    let reply = act_with(&api, &marie, true, WRONG).await;
     assert!(
         matches!(reply.status.as_u16(), 422 | 429),
         "{:?}",
         reply.body
     );
-    let body = attack_mode_body(&api, &key, "marie", &token, true, PASSWORD).await;
-    let reply = put(&api, &token, &body).await;
+    let reply = act(&api, &marie, true).await;
     assert_eq!(
         reply.status,
         StatusCode::TOO_MANY_REQUESTS,

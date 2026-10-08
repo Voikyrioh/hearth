@@ -1,7 +1,7 @@
 //! La confirmation des actes d'administration côté liaison, contre un VRAI agent qui EXIGE la
 //! confirmation (TLS 1.3, SQLite) : mot de passe ET preuve de la clé de ce poste (usage `0x05`) sur les
 //! dix actes, défi neuf et clé d'opération neuve à chaque essai, rien d'envoyé sans clé, élévation de
-//! 5 minutes, agent ancien, client ancien. HRT-30 (ADR-0031, ADR-0033, BR-TRUST-036 à 046).
+//! 5 minutes, agent qui n'annonce pas la capacité, client ancien. HRT-30 (ADR-0031, ADR-0033, BR-TRUST-036 à 046).
 //! Aucune attente de durée.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -21,7 +21,6 @@ const NEW_PASSWORD: &str = "Sunny-Walk-Home-42";
 fn requiring() -> Options {
     Options {
         device_key: true,
-        reauth_required: true,
         ..Options::default()
     }
 }
@@ -274,7 +273,6 @@ async fn a_wrong_password_counts_like_a_failed_login_until_the_agent_makes_you_w
 async fn without_a_key_no_call_leaves_not_even_a_challenge() {
     let world = World::connected(Options {
         device_key: false,
-        reauth_required: true,
         ..Options::default()
     })
     .await;
@@ -536,47 +534,40 @@ async fn an_old_client_is_told_to_update_and_keeps_its_link_and_its_reads() {
     assert_eq!(account_count(&world).await, 1);
 }
 
+/// Un agent qui n'annonce pas `admin_reauth` n'est pas de cette famille (aucune version d'avant n'a été
+/// publiée) : aucun acte ne lui part, ni défi, ni écriture, ni mot de passe.
 #[tokio::test]
-async fn an_agent_from_before_sends_the_act_as_it_always_did_with_no_extra_demand() {
-    let world = World::connected(Options {
-        device_key: false,
-        ..Options::default()
-    })
-    .await;
-    world.spy.hide_reauth(true);
-    let challenges = world.spy.calls();
-    let state = world.manager.admin_reauth(&world.id).await.unwrap();
-    assert!(state.agent.is_none(), "aucune capacité annoncée");
-    let (status, _) = act(
-        &world,
-        Method::Post,
-        "/accounts",
-        Some(create_body("paul")),
-        None,
-    )
-    .await;
-    assert_eq!(status, 201);
-    assert_eq!(
-        world.spy.calls(),
-        challenges,
-        "aucun défi : tout comme avant"
-    );
-}
-
-#[tokio::test]
-async fn an_agent_from_before_gets_the_attack_mode_in_its_delivered_flat_form() {
+async fn an_agent_that_does_not_announce_the_confirmation_gets_no_act_and_no_password() {
     let world = World::connected(Options {
         device_key: true,
         ..Options::default()
     })
     .await;
     world.spy.hide_reauth(true);
-    let outcome = world
+    let challenges = world.spy.calls();
+    let writes = world.spy.write_count();
+    let state = world.manager.admin_reauth(&world.id).await.unwrap();
+    assert!(state.agent.is_none(), "aucune capacité annoncée");
+    let error = world
+        .manager
+        .execute_act(
+            &world.id,
+            ActionRequest {
+                method: Method::Post,
+                path: "/accounts".into(),
+                body: Some(create_body("paul")),
+            },
+            Some(&Secret::from(PASSWORD)),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, LinkError::Incompatible(_)), "{error:?}");
+    let error = world
         .manager
         .set_attack_mode(&world.id, true, &Secret::from(PASSWORD))
         .await
-        .unwrap();
-    assert_eq!(completed(&outcome).0, 200);
-    assert_eq!(world.spy.calls_for(ChallengePurpose::AttackMode), 1);
-    assert_eq!(world.spy.calls_for(ChallengePurpose::AdminAct), 0);
+        .unwrap_err();
+    assert!(matches!(error, LinkError::Incompatible(_)), "{error:?}");
+    assert_eq!(world.spy.calls(), challenges, "aucun défi");
+    assert_eq!(world.spy.write_count(), writes, "aucune écriture");
 }

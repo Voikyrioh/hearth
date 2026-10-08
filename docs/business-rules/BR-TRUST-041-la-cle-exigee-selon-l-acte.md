@@ -14,7 +14,7 @@ maj: 2026-10-07
 | Acte | Clé exigée | Contrat |
 |---|---|---|
 | Retrait d'un poste | clé du **poste courant** (relié à la session, BR-TRUST-048) | livré, usage `0x04`, inchangé |
-| Mode attaque | une clé inscrite du compte appelant | `0x05` (la forme à plat `0x03` reste acceptée) |
+| Mode attaque | une clé inscrite du compte appelant | `0x05` (la forme à plat `0x03` est retirée) |
 | Autres actes (création, rôle, mot de passe d'un compte, suppression, fermeture des sessions, mise à jour de l'agent, son propre mot de passe, réglage) | une clé inscrite du compte appelant | `0x05` |
 
 La clé d'un autre poste inscrit du même compte est acceptée pour le mode attaque et les actes nouveaux ; la clé d'un autre compte est refusée (`proof_invalid`).

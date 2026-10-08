@@ -6,8 +6,8 @@
 //! contrôlent rien : ils traduisent. Les lectures sont ouvertes à tout compte authentifié.
 
 use axum::Json;
-use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
+use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use hearth_proto::api::update::{
     AgentUpdateAccepted, AgentUpdateRequest, AgentUpdateStatus, LastUpdateResponse,
@@ -35,6 +35,7 @@ pub async fn last(State(state): State<AppState>) -> Json<LastUpdateResponse> {
 /// `POST /api/v1/agent/update` : lance la mise à jour côté serveur et rend `202` tout de suite.
 pub async fn start(
     State(state): State<AppState>,
+    _confirmed: Extension<crate::application::sessions::Reauthenticated>,
     Requester(by): Requester,
     body: Result<Json<AgentUpdateRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<AgentUpdateAccepted>), ApiError> {

@@ -33,6 +33,8 @@ fn options(rig: &Arc<Rig>, role: Role, config: LinkConfig) -> Options {
         role,
         config,
         updating: Some(update_rig::factory(rig)),
+        // Le banc exige la confirmation : la mise à jour part comme un acte confirmé (clé + mot de passe).
+        device_key: true,
         ..Options::default()
     }
 }
@@ -40,13 +42,14 @@ fn options(rig: &Arc<Rig>, role: Role, config: LinkConfig) -> Options {
 async fn start_update(world: &World, rig: &Rig) -> ActionOutcome {
     world
         .manager
-        .execute_raw(
+        .execute_act(
             &world.id,
             ActionRequest {
                 method: Method::Post,
                 path: "/agent/update".into(),
                 body: Some(rig.request("0.2.0", BINARY)),
             },
+            Some(&Secret::from(PASSWORD)),
         )
         .await
         .unwrap()
@@ -57,12 +60,7 @@ async fn start_update(world: &World, rig: &Rig) -> ActionOutcome {
 #[tokio::test]
 async fn the_update_is_a_confirmed_act_signed_with_its_version_and_sum() {
     let rig = Arc::new(rig(true, false));
-    let world = World::connected(Options {
-        device_key: true,
-        reauth_required: true,
-        ..options(&rig, Role::Admin, support::fast_config())
-    })
-    .await;
+    let world = World::connected(options(&rig, Role::Admin, support::fast_config())).await;
     let action = |rig: &Rig| ActionRequest {
         method: Method::Post,
         path: "/agent/update".into(),
@@ -349,7 +347,11 @@ async fn an_ordinary_cut_with_the_same_thresholds_is_offline_at_once() {
 async fn a_read_only_account_sees_an_update_started_by_someone_else_and_every_connection_gets_the_current_step()
  {
     let rig = Arc::new(rig(true, true));
-    let world = World::connected(options(&rig, Role::ReadOnly, support::fast_config())).await;
+    // Un autre administrateur lance la mise à jour par une session brute (sans confirmation) : le banc l'accepte.
+    let world = World::connected(
+        options(&rig, Role::ReadOnly, support::fast_config()).accepting_bare_acts(),
+    )
+    .await;
     // Un autre administrateur lance la mise à jour, par sa propre session.
     world.agent.create_account("paul", Role::Admin).await;
     let transport = support::transport();

@@ -290,9 +290,8 @@ fn done(outcome: Result<AccountOutcome, LinkFailure>) -> (Option<AccountDto>, u3
 
 /// Un agent avec `marie` (Administrateur) et son client connecté.
 async fn rig() -> (TestAgent, Client) {
-    let mut agent = TestAgent::install().await;
+    let agent = TestAgent::install().await;
     // Un agent qui EXIGE la confirmation des actes, comme le service (HRT-30).
-    agent.require_confirmation(true);
     agent.create_account("marie", Role::Admin).await;
     let admin = client(agent.addr.port(), "marie", PASSWORD, config(false, false)).await;
     (agent, admin)

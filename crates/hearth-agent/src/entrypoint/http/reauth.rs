@@ -242,6 +242,8 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
         Err(_) => return ApiError::invalid("body", "Corps de requête illisible").into_response(),
     };
     let sessions = state.app.sessions.clone();
+    // Lu seulement sous la porte des bancs d'essai : en production l'exigence est le défaut du service.
+    #[cfg(feature = "test-support")]
     let required = sessions.reauth_required() || kind == ActKind::ReauthSetting;
     let client = ClientInfo {
         name: client_name(&parts.headers),
@@ -262,7 +264,11 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
         return ApiError::invalid("body", "Corps de requête illisible").into_response();
     };
     match reauth {
+        #[cfg(feature = "test-support")]
         None if kind == ActKind::AccountPasswordOwn && !required => {
+            parts
+                .extensions
+                .insert(crate::application::sessions::Reauthenticated::unconfirmed());
             // Client actuel : l'ancien mot de passe passe tout de même par les compteurs de la connexion
             // (constat C3), puis le handler fait comme avant.
             let Parsed::Own(request) = parsed else {
@@ -294,13 +300,11 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
         }
-        // Le mode attaque garde sa forme à plat (usage `0x03`) : le handler vérifie preuve et mot de
-        // passe lui-même, aussi strictement.
-        None if matches!(kind, ActKind::AttackModeEnable | ActKind::AttackModeDisable) => {
-            next.run(Request::from_parts(parts, Body::from(bytes)))
-                .await
-        }
+        #[cfg(feature = "test-support")]
         None if !required => {
+            parts
+                .extensions
+                .insert(crate::application::sessions::Reauthenticated::unconfirmed());
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
         }

@@ -9,13 +9,12 @@
 //!
 //! ```text
 //! "hearth-device-proof/1" || 0x00
-//! || usage (1 octet : 0x01 connexion, 0x02 session, 0x03 mode attaque, 0x04 retrait d'un poste,
+//! || usage (1 octet : 0x01 connexion, 0x02 session, 0x03 réservé (ancien mode attaque à plat, retiré), 0x04 retrait d'un poste,
 //!    0x05 acte d'administration)
 //! || empreinte SHA-256 du certificat du serveur épinglé (32 octets)
 //! || longueur de l'identifiant normalisé (2 octets, grand-boutiste) || identifiant normalisé (UTF-8)
 //! || défi (56 octets)
-//! || usages 0x02, 0x03, 0x04 et 0x05 : SHA-256 du jeton de session (32 octets)
-//! || usage 0x03 : 0x01 pour activer, 0x00 pour désactiver
+//! || usages 0x02, 0x04 et 0x05 : SHA-256 du jeton de session (32 octets)
 //! || usage 0x04 : longueur (2) et octets de l'identifiant du poste à retirer
 //! || usage 0x05 : code de l'acte (1 octet, voir `admin_act`)
 //!                || longueur (2) || cible (identifiant technique du compte visé, vide sinon)
@@ -67,12 +66,6 @@ pub enum Binding<'a> {
     Session {
         token_hash: &'a [u8; TOKEN_HASH_LEN],
     },
-    /// Activation ou désactivation du mode attaque (usage `0x03`), liée au jeton et au geste.
-    /// **Réservé** : défini ici, utilisé par le mode attaque (HRT-25).
-    AttackMode {
-        token_hash: &'a [u8; TOKEN_HASH_LEN],
-        activate: bool,
-    },
     /// Retrait d'un poste de confiance (usage `0x04`), lié au jeton et à l'**identifiant du poste visé** :
     /// une preuve capturée ne retire pas un autre poste.
     DeviceRemoval {
@@ -93,7 +86,6 @@ impl Binding<'_> {
         match self {
             Self::Login => 0x01,
             Self::Session { .. } => 0x02,
-            Self::AttackMode { .. } => 0x03,
             Self::DeviceRemoval { .. } => 0x04,
             Self::AdminAct { .. } => 0x05,
         }
@@ -145,13 +137,6 @@ pub fn signing_bytes(
     match binding {
         Binding::Login => {}
         Binding::Session { token_hash } => bytes.extend_from_slice(token_hash),
-        Binding::AttackMode {
-            token_hash,
-            activate,
-        } => {
-            bytes.extend_from_slice(token_hash);
-            bytes.push(u8::from(activate));
-        }
         Binding::DeviceRemoval { token_hash, target } => {
             bytes.extend_from_slice(token_hash);
             let target = target.as_bytes();
@@ -217,33 +202,6 @@ mod tests {
     }
 
     #[test]
-    fn the_attack_mode_layout_adds_the_token_hash_and_the_gesture() {
-        let hash = [0x22; 32];
-        let on = signing_bytes(
-            Binding::AttackMode {
-                token_hash: &hash,
-                activate: true,
-            },
-            &fingerprint(),
-            "marie",
-            &challenge(),
-        );
-        let off = signing_bytes(
-            Binding::AttackMode {
-                token_hash: &hash,
-                activate: false,
-            },
-            &fingerprint(),
-            "marie",
-            &challenge(),
-        );
-        assert_eq!(on[21 + 1], 0x03);
-        assert_eq!(on.last(), Some(&0x01));
-        assert_eq!(off.last(), Some(&0x00));
-        assert_ne!(on, off, "une preuve ne sert pas à l'autre geste");
-    }
-
-    #[test]
     fn the_device_removal_layout_binds_the_token_and_the_target_device() {
         let hash = [0x44; 32];
         let a = signing_bytes(
@@ -284,15 +242,6 @@ mod tests {
         assert_ne!(session, a);
         assert_eq!(Binding::Login.usage(), 1);
         assert_eq!(Binding::Session { token_hash: &hash }.usage(), 2);
-        assert_eq!(
-            Binding::AttackMode {
-                token_hash: &hash,
-                activate: true
-            }
-            .usage(),
-            3,
-            "0x03 reste réservé au mode attaque"
-        );
     }
 
     /// Vecteur de référence de l'usage `0x05`, assemblé à la main : si la disposition change, ce test

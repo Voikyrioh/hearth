@@ -17,7 +17,7 @@ use serde_json::json;
 use support::{Options, WAIT, World};
 
 async fn world() -> (World, String) {
-    let world = World::connected(Options::default()).await;
+    let world = World::connected(Options::default().accepting_bare_acts()).await;
     world.agent.create_account("paul", Role::Admin).await;
     let me = world.manager.accounts_list(&world.id).await.unwrap().me;
     (world, me)

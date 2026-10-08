@@ -35,9 +35,9 @@ L'agent est un binaire statique qui tourne en root sur un serveur du réseau loc
 - **Message signé** (source unique : `hearth_proto::device_proof::signing_bytes`, partagée par l'agent et la liaison) :
 
   ```
-  "hearth-device-proof/1" || 0x00 || usage (0x01 connexion, 0x02 session, 0x03 mode attaque, 0x04 retrait d'un poste)
+  "hearth-device-proof/1" || 0x00 || usage (0x01 connexion, 0x02 session, 0x03 réservé (ancien mode attaque, retiré), 0x04 retrait d'un poste)
   || SHA-256 du certificat du serveur (32) || longueur (2) + identifiant normalisé || défi (56)
-  || usages 0x02, 0x03 et 0x04 : SHA-256 du jeton (32) || usage 0x03 : 0x01 activer / 0x00 désactiver
+  || usages 0x02, 0x04 et 0x05 : SHA-256 du jeton (32)
   || usage 0x04 : longueur (2) + identifiant du poste visé
   ```
 
@@ -47,7 +47,7 @@ L'agent est un binaire statique qui tourne en root sur un serveur du réseau loc
   |---|---|---|---|---|
   | `0x01` | `login` | connexion par mot de passe | (rien) | livré (HRT-22) |
   | `0x02` | `session` | ouverture du flux d'une session | jeton | livré (HRT-22) |
-  | `0x03` | `attack_mode` | activer ou désactiver le mode attaque | jeton, geste | **réservé**, défini, non utilisé (HRT-25) |
+  | `0x03` | (aucun) | ancien mode attaque à plat | jeton, geste | **retiré** (HRT-18 tranche 5) : octet inutilisé, jamais réutilisé |
   | `0x04` | `device_removal` | retirer un poste de confiance | jeton, identifiant du poste visé | livré (HRT-22, Q16) |
 
   Elle lie la preuve à l'**empreinte du certificat épinglé** (une preuve obtenue par un faux serveur ne vaut rien sur le vrai ; dit honnêtement : c'est un lien avec l'identité du serveur, pas avec la session TLS elle-même), à l'**identifiant**, à l'**usage** (une preuve de connexion ne sert pas à authentifier un flux), et pour les usages 0x02 et 0x03 au **jeton**. L'usage 0x03 est défini dès cette version (HRT-25) ; l'agent le sait déjà vérifier.

@@ -13,7 +13,8 @@ import type { AdminActKind, Role } from "@/link";
 // compte, fermer des sessions, mettre à jour l'agent, mode attaque, réglage de fréquence. Le slot reçoit
 // les champs propres à l'acte ; la fenêtre ajoute « Ton mot de passe » SELON CE QUE L'AGENT ANNONCE, lu à
 // chaque ouverture (jamais deviné) :
-// - agent d'avant la confirmation : aucun champ en plus, tout part comme avant ;
+// - agent qui n'annonce pas la confirmation : la liaison n'envoie aucun acte, la fenêtre dit de mettre
+//   l'agent à jour et ne propose rien ;
 // - ce PC sans clé au coffre : rien ne peut partir, la fenêtre l'explique et propose de se reconnecter
 //   pour enregistrer ce poste (le mot de passe ne sert alors à rien) ;
 // - délai de 5 minutes ouvert ET acte couvert : pas de champ, le temps restant est écrit ;
@@ -40,7 +41,7 @@ const props = withDefaults(
     destructive?: boolean;
     /** Le libellé du champ quand le mot de passe de confirmation a un nom propre (« Ancien mot de passe »). */
     passwordLabel?: string;
-    /** Lance l'acte avec le mot de passe saisi (`null` : délai ouvert, ou agent d'avant). */
+    /** Lance l'acte avec le mot de passe saisi (`null` : délai ouvert). */
     perform: (adminPassword: string | null) => Promise<ActReport>;
     /** Le texte d'un refus qui n'est pas celui de la confirmation ; `undefined` : la fenêtre n'en montre pas. */
     refusalText?: (refusal: { kind: string; retry_after_s?: number }) => string | undefined;
@@ -104,6 +105,7 @@ const canSend = computed(
     props.canSubmit &&
     reauth.ready.value &&
     !reauth.keyMissing.value &&
+    !reauth.agentTooOld.value &&
     (!reauth.needsPassword.value || password.value !== ""),
 );
 
@@ -159,7 +161,7 @@ async function submit() {
     :busy="sending"
     :error="error"
     :destructive="destructive"
-    :cancel-label="reauth.keyMissing.value ? t('common.close') : undefined"
+    :cancel-label="reauth.keyMissing.value || reauth.agentTooOld.value ? t('common.close') : undefined"
     @submit="submit"
     @cancel="emit('close')"
   >
@@ -169,6 +171,9 @@ async function submit() {
     <div v-else-if="reauth.failed.value" class="admin__state" data-reauth-failed>
       <p role="alert" class="admin__alert">{{ t("reauth.stateFailed") }}</p>
       <HButton variant="secondary" @click="reauth.load()">{{ t("common.retry") }}</HButton>
+    </div>
+    <div v-else-if="reauth.agentTooOld.value" class="admin__state" data-reauth-agent-old>
+      <p role="alert" class="admin__alert">{{ t("reauth.agentTooOld") }}</p>
     </div>
     <div v-else-if="reauth.keyMissing.value" class="admin__state" data-reauth-no-key>
       <p class="admin__title">{{ t("reauth.noKeyTitle") }}</p>

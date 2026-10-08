@@ -203,10 +203,10 @@ pub struct TestAgent {
     pub services: Services,
     running: Option<RunningAgent>,
     updating: Option<UpdatingFactory>,
-    /// L'agent EXIGE la confirmation des actes (`accept_unconfirmed_acts_for_tests`). Faux par défaut : les scénarios de
-    /// résilience envoient des routes d'acte brutes (`execute_raw`) ; les scénarios de confirmation le
-    /// règlent à vrai (`require_confirmation`), comme le service en production (HRT-30).
-    reauth_required: bool,
+    /// L'agent ACCEPTE un acte sans confirmation (`accept_unconfirmed_acts_for_tests`). Faux par défaut : le
+    /// banc exige, comme le service en production ; seuls les scénarios de résilience qui envoient des
+    /// routes d'acte brutes (`execute_raw`) le règlent à vrai (`accept_bare_acts`).
+    bare_acts: bool,
     pub addr: SocketAddr,
 }
 
@@ -246,7 +246,7 @@ impl TestAgent {
             services,
             running: None,
             updating,
-            reauth_required: false,
+            bare_acts: false,
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         };
         agent.start().await;
@@ -270,17 +270,15 @@ impl TestAgent {
         self.addr = running.server.local_addr();
         running
             .sessions
-            .accept_unconfirmed_acts_for_tests(!self.reauth_required);
+            .accept_unconfirmed_acts_for_tests(self.bare_acts);
         self.running = Some(running);
     }
 
-    /// Règle si l'agent exige la confirmation des actes d'administration (conservé au redémarrage).
-    pub fn require_confirmation(&mut self, required: bool) {
-        self.reauth_required = required;
+    /// Règle si l'agent accepte un acte sans confirmation (conservé au redémarrage).
+    pub fn accept_bare_acts(&mut self, accepted: bool) {
+        self.bare_acts = accepted;
         if let Some(running) = &self.running {
-            running
-                .sessions
-                .accept_unconfirmed_acts_for_tests(!required);
+            running.sessions.accept_unconfirmed_acts_for_tests(accepted);
         }
     }
 

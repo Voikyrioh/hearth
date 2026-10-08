@@ -317,8 +317,7 @@ async fn the_relay_keeps_the_last_state_and_replays_it_to_a_late_window() {
 
 /// Un agent qui EXIGE la confirmation des actes, avec `marie` Administrateur et son PC connecté.
 async fn requiring_pc() -> (TestAgent, Client) {
-    let mut agent = TestAgent::install().await;
-    agent.require_confirmation(true);
+    let agent = TestAgent::install().await;
     agent.create_account("marie", Role::Admin).await;
     let pc = client(agent.addr.port()).await;
     (agent, pc)

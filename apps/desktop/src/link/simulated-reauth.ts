@@ -9,7 +9,7 @@ import { LinkCommandError, type Role } from "./types";
  * simulé (c'est `keyAtHand` de la sécurité simulée). Le mot de passe n'est ni gardé ni noté.
  */
 
-/** Faux : agent d'avant la confirmation des actes (aucune demande en plus). */
+/** Faux : l'agent n'annonce pas la confirmation des actes (aucun acte ne lui part). */
 interface Book {
   supported: boolean;
   required: boolean;
@@ -75,7 +75,7 @@ export class SimulatedReauth {
 
   // --- Pilotage par le test ---
 
-  /** Faux : agent d'avant la confirmation des actes. */
+  /** Faux : l'agent n'annonce pas la confirmation des actes. */
   setSupported(serverId: string, supported: boolean): void {
     this.book(serverId).supported = supported;
   }
@@ -126,7 +126,8 @@ export class SimulatedReauth {
     own: string,
   ): SimConfirmation {
     const book = this.book(serverId);
-    if (!book.supported) return { kind: "ok" };
+    // Comme la liaison : un agent qui n'annonce pas la confirmation ne reçoit aucun acte.
+    if (!book.supported) throw new LinkCommandError({ kind: "incompatible_agent" });
     if (!this.hasKey(serverId)) throw new LinkCommandError({ kind: "not_recognized" });
     const elevated = book.elevatedUntil > this.now();
     if (elevated && simulatedCovers(kind, role) && !password) return { kind: "ok" };
