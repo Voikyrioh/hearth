@@ -506,6 +506,52 @@ async fn a_session_revoked_during_the_stream_shows_access_revoked_and_stops() {
     assert!(!world.manager.servers()[0].remember);
 }
 
+/// Ligne 13 du tableau : « Accès révoqué » puis « Utiliser un autre compte » (la connexion d'un compte
+/// valide) ramène « Connecté ». Contre un vrai agent.
+#[tokio::test]
+async fn after_access_revoked_another_login_gives_connected_again() {
+    let world = World::connected(Options::default()).await;
+    let mark = world.recorder.mark();
+    world.agent.revoke_sessions("marie").await;
+    world
+        .recorder
+        .wait_state(mark, LinkState::AccessRevoked, WAIT)
+        .await;
+    let again = world.recorder.mark();
+    world
+        .manager
+        .login(&world.id, "marie", Secret::from(PASSWORD), false)
+        .await
+        .unwrap();
+    world
+        .recorder
+        .wait_state(again, LinkState::Connected, WAIT)
+        .await;
+    assert_eq!(world.agent.sessions_open("marie").await, 1);
+}
+
+/// Parcours « première connexion » en un seul test (HRT-18) : sonde → empreinte épinglée → session →
+/// flux (instantané puis mesures). `World::connected` fait ces quatre pas ; ici on vérifie ce qu'ils
+/// laissent : un serveur enregistré, une session chez l'agent, un jeton au coffre, l'état « Connecté ».
+#[tokio::test]
+async fn the_first_connection_goes_probe_fingerprint_session_stream() {
+    let world = World::connected(Options::default()).await;
+    assert_eq!(world.state().state, LinkState::Connected);
+    assert_eq!(world.manager.servers().len(), 1);
+    assert_eq!(world.agent.sessions_open("marie").await, 1);
+    assert!(
+        world
+            .vault
+            .get(&world.id, SecretKind::Token)
+            .unwrap()
+            .is_some(),
+        "le jeton est au coffre"
+    );
+    // Des mesures arrivent bien par le flux ouvert (pas seulement l'instantané).
+    let seen = world.recorder.mark();
+    world.recorder.wait_metrics(seen, WAIT).await;
+}
+
 #[tokio::test]
 async fn an_expired_session_with_a_saved_password_reconnects_silently() {
     let world = World::connected(Options {

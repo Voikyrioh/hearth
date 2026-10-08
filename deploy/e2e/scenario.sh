@@ -332,6 +332,20 @@ ok "/api/v1/hello répond (service durci : capacités, filtre d'appels système)
 [ "$(login)" = 201 ] || die "la connexion avec le compte créé échoue : $(cat "$OUT.login")"
 grep -q '"token"' "$OUT.login" || die "pas de jeton"
 ok "la connexion avec le compte créé (haché fourni) réussit"
+# HRT-18 : les mesures fonctionnent sur le vrai systemd (identité de la machine, puis échantillons).
+TOKEN="$(sed -n 's/.*"token": *"\([0-9a-f]*\)".*/\1/p' "$OUT.login")"
+[ -n "$TOKEN" ] || die "jeton illisible dans la réponse de connexion"
+authed() { curl -sk --max-time 10 -H "authorization: Bearer $TOKEN" -H 'x-hearth-api: 1' -H 'x-hearth-client: e2e/1' "$@"; }
+authed "$BASE/machine" | grep -q '"capabilities"' || die "/machine ne rend pas l'identité de la machine"
+SAMPLES=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    authed "$BASE/metrics/history?window=1m" >"$OUT.metrics"
+    # Au moins un échantillon (la liste vide `"samples":[]` ne compte pas), avec processeur et mémoire.
+    if grep -Eq '"samples": *\[ *\{' "$OUT.metrics" && grep -q '"cpu"' "$OUT.metrics" && grep -q '"mem"' "$OUT.metrics"; then SAMPLES=1; break; fi
+    sleep 1
+done
+[ "$SAMPLES" = 1 ] || die "aucun échantillon de mesures après 10 s : $(cat "$OUT.metrics")"
+ok "mesures : identité de la machine et échantillons (processeur, mémoire) servis par l'agent sous systemd"
 [ "$(served_fingerprint)" = "$FIRST_FP" ] || die "l'empreinte affichée ($FIRST_FP) n'est pas celle du certificat servi ($(served_fingerprint))"
 ok "l'empreinte affichée est celle du certificat servi"
 

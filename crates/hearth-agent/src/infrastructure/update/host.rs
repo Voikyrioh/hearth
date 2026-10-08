@@ -552,11 +552,16 @@ pub fn systemd_run_arguments(supervisor: &Path, job: &Path) -> Vec<OsString> {
 /// et la supprime. Un lien symbolique n'est jamais suivi : le lien est retiré, sa cible n'est pas
 /// touchée. Les échecs sont journalisés, jamais fatals.
 fn erase_copy(path: &Path) {
+    erase_copy_with(path, &overwrite_with_zeros);
+}
+
+/// `erase_copy` avec l'écrasement injecté : les tests y observent l'ORDRE (renommer, écraser, supprimer).
+fn erase_copy_with(path: &Path, overwrite: &dyn Fn(&Path) -> std::io::Result<()>) {
     let mut erasing = path.as_os_str().to_owned();
     erasing.push(ERASING_SUFFIX);
     let erasing = PathBuf::from(erasing);
     if erasing.symlink_metadata().is_ok() {
-        finish_erasing(&erasing);
+        finish_erasing(&erasing, overwrite);
     }
     match path.symlink_metadata() {
         Ok(meta) if meta.file_type().is_symlink() => {
@@ -564,18 +569,20 @@ fn erase_copy(path: &Path) {
             let _ = fs::remove_file(path);
         }
         Ok(_) => match fs::rename(path, &erasing) {
-            Ok(()) => finish_erasing(&erasing),
+            Ok(()) => finish_erasing(&erasing, overwrite),
             Err(error) => {
-                tracing::warn!(%error, path = %path.display(), "copie de la base non renommée avant écrasement");
-                finish_erasing(path);
+                // Sans renommage, jamais d'écrasement sous le nom que la remise de la base lit :
+                // la copie est seulement supprimée.
+                tracing::warn!(%error, path = %path.display(), "copie de la base non renommée : supprimée sans écrasement");
+                let _ = fs::remove_file(path);
             }
         },
         Err(_) => {}
     }
 }
 
-fn finish_erasing(path: &Path) {
-    if let Err(error) = overwrite_with_zeros(path) {
+fn finish_erasing(path: &Path, overwrite: &dyn Fn(&Path) -> std::io::Result<()>) {
+    if let Err(error) = overwrite(path) {
         tracing::warn!(%error, path = %path.display(), "copie de la base non écrasée avant suppression");
     }
     if let Err(error) = fs::remove_file(path)
@@ -864,6 +871,8 @@ mod tests {
         assert!(fs::read(&link).unwrap().iter().all(|b| *b == 0));
     }
 
+    /// L'ORDRE : au moment où l'écrasement s'exécute, la copie ne porte plus son nom d'origine (celui que
+    /// la remise de la base lit) ; elle porte `.erasing`. Puis elle est supprimée.
     #[test]
     fn the_copy_is_renamed_before_it_is_overwritten() {
         let (dir, _host) = host();
@@ -871,18 +880,25 @@ mod tests {
         fs::create_dir_all(&update).unwrap();
         let path = update.join(UPDATE_DB_BACKUP_FILE);
         fs::write(&path, b"x".repeat(1000)).unwrap();
-        let link = update.join("watch.link");
-        fs::hard_link(&path, &link).unwrap();
-        // Après le renommage seul, plus rien ne porte le nom lu par la remise de la base.
-        let mut erasing = path.as_os_str().to_owned();
-        erasing.push(ERASING_SUFFIX);
-        fs::rename(&path, &erasing).unwrap();
+        let calls = std::cell::RefCell::new(Vec::new());
+        erase_copy_with(&path, &|seen: &Path| {
+            calls.borrow_mut().push((
+                seen.file_name().unwrap().to_string_lossy().into_owned(),
+                path.exists(),
+                seen.exists(),
+            ));
+            overwrite_with_zeros(seen)
+        });
+        assert_eq!(
+            calls.into_inner(),
+            [("hearth.db.before.erasing".to_owned(), false, true)],
+            "écrasement une fois, sous `.erasing`, le nom d'origine absent"
+        );
         assert!(!path.exists());
-        assert_eq!(fs::read(&link).unwrap(), b"x".repeat(1000));
-        erase_copy(&path);
-        // Le nom d'origine n'existe pas, le `.erasing` repris est fini.
-        assert!(!path.exists());
-        assert!(fs::read(&link).unwrap().iter().all(|b| *b == 0));
+        assert!(
+            !update.join("hearth.db.before.erasing").exists(),
+            "puis supprimée"
+        );
     }
 
     #[cfg(unix)]
