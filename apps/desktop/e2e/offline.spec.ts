@@ -162,10 +162,13 @@ test("session expirée : un panneau non bloquant, mot de passe refusé puis acce
     "aria-disabled",
     "true",
   );
+  // C56 : l'identifiant est connu, le curseur est dans le mot de passe (et y revient après un refus).
+  await expect(page.getByLabel("Mot de passe", { exact: true })).toBeFocused();
   await page.getByLabel("Mot de passe", { exact: true }).fill("Mauvais-1");
   await page.getByRole("button", { name: "Me reconnecter" }).click();
   await expect(page.getByText("Identifiant ou mot de passe incorrect.")).toBeVisible();
   await expect(page.getByText("Ta session a expiré.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Mot de passe", { exact: true })).toBeFocused();
   await page.getByLabel("Mot de passe", { exact: true }).fill("Correct-Horse-9");
   await page.getByRole("button", { name: "Me reconnecter" }).click();
   await expect(pillOf(page)).toHaveText("Connecté");

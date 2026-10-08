@@ -37,7 +37,7 @@ describe("AddServerWizard", () => {
     await flushPromises();
   }
 
-  it("starts at step 1 with « Suivant » inactive and the exact spec labels", async () => {
+  it("starts at step 1 with the exact spec labels and « Suivant » never greyed without a reason", async () => {
     const { wrapper } = await wizard();
     expect(wrapper.get("h1").text()).toBe("Ajouter un serveur");
     const labels = wrapper.findAll("label").map((label) => label.text());
@@ -46,10 +46,33 @@ describe("AddServerWizard", () => {
     expect(wrapper.find("input[placeholder^='Forge']").exists()).toBe(true);
     expect(wrapper.find("input[placeholder='192.168.1.20 ou forge.maison']").exists()).toBe(true);
     const next = wrapper.findAll("button").find((b) => b.text() === "Suivant");
-    expect(next?.attributes("aria-disabled")).toBe("true");
+    // C1 : jamais grisé sans raison ; un champ manquant se dit au clic.
+    expect(next?.attributes("aria-disabled")).not.toBe("true");
     expect(wrapper.findAll("[role=radio]")).toHaveLength(8);
     // Le fil des étapes : l'étape courante est annoncée.
     expect(wrapper.get("[aria-current=step]").text()).toContain("Adresse");
+  });
+
+  // FIX:01M4D0RJ5EMX3TG1TJB0EJ5EYP (C1, C2) : curseur dans le premier champ ; « Suivant » (clic ou Entrée)
+  // dit ce qui manque et y place le curseur au lieu de rester muet.
+  it("puts the cursor in the first field, and says what is missing instead of staying mute", async () => {
+    const ctx = await context();
+    await ctx.router.push("/welcome");
+    const wrapper = mount(AddServerWizard, { global: ctx.global, attachTo: document.body });
+    await flushPromises();
+    const inputs = wrapper.findAll("input");
+    expect(document.activeElement).toBe(inputs[0]?.element);
+    // L'adresse est remplie, le nom manque : Entrée dit « Le nom du serveur est requis », curseur dans le nom.
+    await inputs[1]?.setValue("192.168.1.99");
+    (document.activeElement as HTMLElement).blur();
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    expect(wrapper.text()).toContain("Le nom du serveur est requis");
+    expect(document.activeElement).toBe(inputs[0]?.element);
+    // Le même texte au clic sur « Suivant ».
+    const next = wrapper.findAll("button").find((b) => b.text() === "Suivant");
+    expect(next?.attributes("aria-disabled")).not.toBe("true");
+    wrapper.unmount();
   });
 
   it("goes through the three steps, comparing the fingerprint and connecting", async () => {
@@ -241,6 +264,36 @@ describe("ReconnectPanel", () => {
     expect(wrapper.text()).toContain("Rentre ton mot de passe pour reprendre.");
     expect(wrapper.get("button[type=submit]").text()).toBe("Me reconnecter");
     expect((wrapper.get("input").element as HTMLInputElement).value).toBe("marie");
+  });
+
+  // FIX:01M4D0RHZE7JFMV700JKA3DM1R (C56) : l'identifiant est connu, le curseur est dans le mot de passe.
+  it("puts the cursor in the password field when the identifier is already known", async () => {
+    const ctx = await context([SAMPLE_AGENT], "none");
+    const wrapper = mount(ReconnectPanel, {
+      props: { server, reason: "expired" },
+      global: ctx.global,
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(document.activeElement).toBe(wrapper.findAll("input")[1]?.element);
+    wrapper.unmount();
+  });
+
+  // Garde du curseur : un panneau qui apparaît ne vole pas le champ où l'utilisateur est déjà en train de taper.
+  it("does not steal the cursor from a field the user is already typing in", async () => {
+    const ctx = await context([SAMPLE_AGENT], "none");
+    const elsewhere = document.createElement("input");
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    const wrapper = mount(ReconnectPanel, {
+      props: { server, reason: "expired" },
+      global: ctx.global,
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(document.activeElement).toBe(elsewhere);
+    wrapper.unmount();
+    elsewhere.remove();
   });
 
   it("shows no blocking message when the remembered password was refused (BR-CONN-017)", async () => {

@@ -38,6 +38,7 @@ export default defineConfig({
         "attack-mode.spec.ts",
         "reauth.spec.ts",
         "identity.spec.ts",
+        "hrt33-keyboard.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },

@@ -79,6 +79,11 @@ test("retrait : confirmation avec le mot de passe, refus d'un mauvais, puis succ
     "true",
   );
   await shoot(page, "securite-retrait");
+  // Le retrait d'un poste garde son texte d'exemple (celui des sept autres fenêtres est « Le tien, pour confirmer »).
+  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveAttribute(
+    "placeholder",
+    "Mot de passe",
+  );
 
   await dialog(page).getByLabel("Ton mot de passe").fill("Faux-Mot-De-Passe-1");
   await dialog(page).getByRole("button", { name: "Retirer" }).click();
