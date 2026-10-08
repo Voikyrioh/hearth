@@ -18,6 +18,8 @@ const props = defineProps<{
   label: string;
   /** Met en forme une valeur pour l'info-bulle du survol (unité comprise). */
   format?: (value: number) => string;
+  /** Hauteur (px) laissée libre en haut du tracé pour une légende posée par-dessus (durée, échelle). */
+  reserveTop?: number;
 }>();
 
 const WIDTH = 300;
@@ -30,11 +32,14 @@ const prefix = useId();
 const box = ref<HTMLElement | null>(null);
 const HEIGHT_BOUNDS = { min: 40, max: 900 };
 const height = ref(DEFAULT_HEIGHT);
+const topUnits = ref(0);
 let observer: ResizeObserver | undefined;
 function measure() {
   const element = box.value;
   if (!element || element.clientWidth === 0 || element.clientHeight === 0) return;
   const ratio = element.clientHeight / element.clientWidth;
+  // Les pixels de la légende convertis en unités du viewBox (même échelle sur les deux axes).
+  topUnits.value = Math.round(((props.reserveTop ?? 0) * WIDTH) / element.clientWidth);
   height.value = Math.min(
     HEIGHT_BOUNDS.max,
     Math.max(HEIGHT_BOUNDS.min, Math.round(WIDTH * ratio)),
@@ -94,7 +99,9 @@ const drawn = computed<Drawn[]>(() =>
     const top = ceiling.value;
     const x = (index: number) => PAD + index * stepX;
     const y = (value: number) =>
-      height.value - PAD - (Math.min(Math.max(value, 0), top) / top) * (height.value - PAD * 2);
+      height.value -
+      PAD -
+      (Math.min(Math.max(value, 0), top) / top) * (height.value - PAD * 2 - topUnits.value);
     let line = "";
     let area = "";
     let run: { from: number; to: number } | null = null;

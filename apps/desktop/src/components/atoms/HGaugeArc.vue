@@ -3,7 +3,7 @@ import { computed } from "vue";
 import type { Level } from "@/link";
 
 // Arc de jauge de 270° (SVG pur) : piste, puis arc de valeur qui glisse vers sa nouvelle valeur.
-// Normal = trait turquoise neutre ; attention et critique changent de couleur (le pictogramme et le
+// Normal = trait braise uni ; attention et critique changent de couleur (le pictogramme et le
 // libellé sont portés par `Gauge`, jamais la couleur seule). `ratio` nul : piste seule.
 const props = withDefaults(defineProps<{ ratio: number | null; level?: Level }>(), {
   level: "normal",
@@ -53,12 +53,11 @@ const ARC = "M 21.72 78.28 A 40 40 0 1 1 78.28 78.28";
   transition: stroke-dasharray var(--motion-base) var(--ease);
 }
 
-/* FIX:01M4E9T77SYNC7MK8Q1JP5PQ4J */
-/* HRT-41 (C13) : à l'état normal la jauge est neutre (turquoise) ; le rose et l'ambre sont réservés à l'attention et à l'alerte.
-   Décision de Claude du 2026-10-08, à confirmer par Voiky. */
+/* FIX:01M4E9T77SYNC7MK8Q1JP5PQ4J (C13) : à l'état normal la jauge est en braise unie, comme les courbes. Le dégradé
+   qui finissait en rose (`--ac2`) donnait à une mesure normale (22 %) la couleur d'une alerte. */
 .arc__value--normal {
-  stroke: var(--cool);
-  filter: drop-shadow(0 0 var(--glow-radius) color-mix(in srgb, var(--cool) 70%, transparent));
+  stroke: var(--ac);
+  filter: drop-shadow(0 0 var(--glow-radius) color-mix(in srgb, var(--ac) 70%, transparent));
 }
 
 .arc__value--attention {

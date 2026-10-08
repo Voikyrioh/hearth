@@ -22,6 +22,9 @@ const props = defineProps<{
   legend?: string;
 }>();
 
+// Hauteur de la ligne « durée / échelle », posée PAR-DESSUS le haut de la courbe (elle n'ajoute aucune hauteur à la carte).
+const HEAD_PX = 18;
+
 const SPAN_KEYS: Record<WindowKey, MessageKey> = {
   "1m": "dash.span1m",
   "5m": "dash.span5m",
@@ -50,10 +53,12 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
 
 <template>
   <div class="series">
-    <p v-if="legend" class="series__legend">{{ legend }}</p>
     <div class="series__head">
-      <span class="series__span">{{ span }}</span>
-      <span class="series__scale">{{ scale }}</span>
+      <p v-if="legend" class="series__legend">{{ legend }}</p>
+      <div class="series__line">
+        <span class="series__span">{{ span }}</span>
+        <span class="series__scale">{{ scale }}</span>
+      </div>
     </div>
     <HAreaChart
       :series="series"
@@ -61,6 +66,7 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
       :at-least="atLeast"
       :label="described"
       :format="format"
+      :reserve-top="legend ? HEAD_PX * 2 : HEAD_PX"
     />
     <p v-if="partial" class="series__covered">
       {{ t("dash.coveredSince", { duration: formatCovered(coveredMs) }) }}
@@ -70,6 +76,7 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
 
 <style scoped>
 .series {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -83,11 +90,20 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
 }
 
 .series__head {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+  color: var(--tx3);
+  font-size: var(--fs-small);
+}
+
+.series__line {
   display: flex;
   justify-content: space-between;
   gap: var(--space-3);
-  color: var(--tx3);
-  font-size: var(--fs-small);
 }
 
 .series__scale {

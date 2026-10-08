@@ -150,8 +150,11 @@ test("un pic d'il y a 40 minutes se voit encore sur la fenêtre 1 h (maximum par
   const ys = [...path.matchAll(/[ML]\s*(-?[\d.]+)[ ,](-?[\d.]+)/g)].map((match) =>
     Number(match[2]),
   );
-  // La courbe touche le haut du graphique : le pic à 100 % n'a pas été moyenné.
-  expect(Math.min(...ys)).toBeLessThan(height * 0.1);
+  // La courbe touche le haut de sa zone de tracé : le pic à 100 % n'a pas été moyenné. La zone de tracé commence
+  // sous la ligne « durée / échelle » (HRT-41, 18 px posés par-dessus la courbe) : on mesure depuis ce haut-là.
+  const width = await chart.evaluate((svg) => svg.getBoundingClientRect().width);
+  const plotTop = Math.round((18 * 300) / width);
+  expect(Math.min(...ys) - plotTop).toBeLessThan((height - plotTop) * 0.1);
   await page.setViewportSize({ width: 1920, height: HEIGHT });
   await page.screenshot({ path: "e2e/screenshots/dashboard-1h-pic-ancien-1920.png" });
   await page.setViewportSize({ width: 1366, height: 800 });
@@ -271,7 +274,7 @@ for (const size of LAYOUT_SIZES) {
       expect(gap.empty, `${gap.title} : vide sous son contenu`).toBeLessThanOrEqual(32);
     }
     // VIDES INTERNES (retour de revue HRT-34) : une jauge n'est jamais perdue au milieu d'un grand vide : l'espace
-    // au-dessus et au-dessous d'elle, dans sa rangée, reste sous 100 px (80 px de la moitié d'une jauge, plus la ligne « durée / échelle » que HRT-41 pose au-dessus des courbes).
+    // au-dessus et au-dessous d'elle, dans sa rangée, reste sous 80 px (la moitié d'une jauge).
     const voids = await page.locator("figure.gauge").evaluateAll((gauges) =>
       gauges.map((gauge) => {
         const row = (gauge.parentElement as HTMLElement).getBoundingClientRect();
@@ -289,8 +292,8 @@ for (const size of LAYOUT_SIZES) {
       }),
     );
     for (const gap of voids) {
-      expect(gap.above, `${gap.name} : vide au-dessus`).toBeLessThanOrEqual(100);
-      expect(gap.below, `${gap.name} : vide au-dessous`).toBeLessThanOrEqual(100);
+      expect(gap.above, `${gap.name} : vide au-dessus`).toBeLessThanOrEqual(80);
+      expect(gap.below, `${gap.name} : vide au-dessous`).toBeLessThanOrEqual(80);
     }
     // Pas de trou entre le contenu d'une carte et sa courbe (hors rangées jauge + courbe).
     const chartGaps = await page.locator(".series").evaluateAll((series) =>

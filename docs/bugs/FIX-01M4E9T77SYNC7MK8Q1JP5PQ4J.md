@@ -1,20 +1,20 @@
 ---
 id: FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J
-titre: Les jauges à l'état normal étaient dessinées en dégradé rose-braise, la couleur d'une alerte (C13)
+titre: Une jauge normale (22 %) portait la couleur d'une alerte : le rose du dégradé (C13)
 date_découverte: 2026-10-08
 date_correction: 2026-10-08
 ---
 
-# FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J : Les jauges à l'état normal étaient dessinées en dégradé rose-braise, la couleur d'une alerte (C13)
+# FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J : Une jauge normale (22 %) portait la couleur d'une alerte : le rose du dégradé (C13)
 
 ## Symptôme
 La mémoire à 22 % était tracée dans un dégradé qui finit en rose, associé à une alerte.
 
 ## Reproduction
-`e2e/hrt41.spec.ts` « jauges neutres » : le trait d'une jauge normale n'est ni un dégradé ni le rose. Vitest `components/dashboard.test.ts` (pas de `linearGradient` au niveau normal). Rouge avant : dégradé `ac2` vers `ac`.
+`e2e/hrt41.spec.ts` « légende ... jauges » : la jauge de la mémoire à 22 % porte le jeton braise `--ac` (rgb 255, 123, 61) ; épinglée à l'attention puis au critique (valeurs de BR-DASH-003), elle porte `--warn` puis `--crit`. Rouge avant : le trait était un dégradé (`url(...)`) qui finissait en `--ac2`, le rose.
 
 ## Cause root
-Le niveau normal utilisait le dégradé de marque de la maquette.
+Le niveau normal dessinait l'arc en dégradé de `--ac2` (rose, proche de `--crit`) vers `--ac` : un jeton d'alerte-like utilisé à tort sur une mesure normale.
 
 ## Impacté
 L'interface du client (revue UX du 2026-10-08), jamais publiée.
@@ -23,7 +23,7 @@ L'interface du client (revue UX du 2026-10-08), jamais publiée.
 Aucun.
 
 ## Correction
-Niveau normal : trait turquoise neutre (`--cool`), barres `HMeter` de même ; l'attention et le critique gardent l'ambre et le rouge. Décision de Claude du 2026-10-08, à confirmer par Voiky (le design system disait « braise = état normal »). `// FIX:01M4E9T77SYNC7MK8Q1JP5PQ4J`.
+Niveau normal : trait braise uni `--ac`, la couleur des courbes (identité braise du design system, inchangée) ; `--warn` et `--crit` n'apparaissent qu'aux seuils de BR-DASH-003. Les barres `HMeter` étaient déjà en `--ac`. `// FIX:01M4E9T77SYNC7MK8Q1JP5PQ4J`.
 
 ## Règles
 - BR-DASH-010, BR-DASH-014 (formateurs d'unités uniques).

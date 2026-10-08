@@ -63,13 +63,29 @@ for (const size of SIZES) {
     await expect(
       page.locator(".series__legend", { hasText: "sonde la plus chaude" }),
     ).toBeVisible();
-    // Une jauge à l'état normal n'a ni dégradé ni rose d'alerte.
-    const strokes = await page
-      .locator(".arc__value--normal")
-      .evaluateAll((arcs) => arcs.map((arc) => getComputedStyle(arc).stroke));
-    expect(strokes.length).toBeGreaterThan(0);
-    for (const stroke of strokes) {
-      expect(stroke, "trait d'une jauge normale").not.toMatch(/url|255, 79, 122/);
-    }
+    // Jauge de la mémoire à 22 % (normal) : braise unie ; jamais un dégradé qui finit en rose d'alerte.
+    const arc = page.locator("figure.gauge", { hasText: "Mémoire" }).locator(".arc__value").first();
+    const strokeOf = () => arc.evaluate((element) => getComputedStyle(element).stroke);
+    expect(await strokeOf(), "normal").toBe("rgb(255, 123, 61)");
+    // Aux niveaux d'alerte de BR-DASH-003 (valeurs épinglées du pont simulé), les couleurs d'alerte.
+    const pin = (level: string | null) =>
+      page.evaluate(
+        (l) =>
+          (
+            window as unknown as {
+              __hearthSim: {
+                machine: {
+                  pin(id: string, key: string, level: string | null): void;
+                  tick(id: string): void;
+                };
+              };
+            }
+          ).__hearthSim.machine.pin("forge", "mem", l),
+        level,
+      );
+    await pin("attention");
+    await expect.poll(strokeOf, { timeout: 4000 }).toBe("rgb(255, 192, 77)");
+    await pin("critical");
+    await expect.poll(strokeOf, { timeout: 4000 }).toBe("rgb(255, 90, 90)");
   });
 }
