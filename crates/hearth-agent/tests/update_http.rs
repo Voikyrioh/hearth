@@ -22,7 +22,7 @@ struct Bench {
     env: Env,
     api: Api,
     rig: Rig,
-    admin: String,
+    admin: support::device::Actor,
     readonly: String,
 }
 
@@ -30,7 +30,7 @@ async fn bench(allowed: bool, gated: bool) -> Bench {
     let env = env().await;
     let rig = Rig::new(&env, allowed, gated);
     let api = Api::from_state(state_with(&env, rig.service.clone()));
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let admin = env.actor(&api, "marie", Role::Admin).await;
     let readonly = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
     Bench {
         env,
@@ -42,7 +42,16 @@ async fn bench(allowed: bool, gated: bool) -> Bench {
 }
 
 impl Bench {
-    async fn post(&self, token: &str, body: &Value) -> support::api::Reply {
+    /// La mise à jour de l'agent, CONFIRMÉE (mot de passe et preuve de la clé du poste de `who`) : jamais
+    /// couverte par le délai, un défi neuf à chaque appel.
+    async fn post(&self, who: &support::device::Actor, body: &Value) -> support::api::Reply {
+        self.api
+            .act(who, Method::POST, "/agent/update", body.clone())
+            .await
+    }
+
+    /// La même demande avec la session seule (un compte qui n'a pas le droit : refusé avant toute confirmation).
+    async fn post_unconfirmed(&self, token: &str, body: &Value) -> support::api::Reply {
         self.api
             .call(Method::POST, "/agent/update")
             .token(token)
@@ -100,7 +109,7 @@ async fn an_administrator_starts_an_update_and_gets_202_with_the_first_step() {
 async fn a_read_only_account_is_refused_and_the_refusal_is_journaled() {
     let bench = bench(true, false).await;
     let body = bench.rig.request("0.2.0", BINARY);
-    let reply = bench.post(&bench.readonly, &body).await;
+    let reply = bench.post_unconfirmed(&bench.readonly, &body).await;
     assert_eq!(
         (reply.status, reply.code()),
         (StatusCode::FORBIDDEN, "FORBIDDEN_ROLE")
@@ -160,10 +169,15 @@ async fn replaying_the_same_operation_key_after_a_cut_does_not_start_a_second_up
     // réponse ; la mise à jour, elle, n'est partie qu'une fois (BR-UPDATE-017).
     let bench = bench(true, true).await;
     let body = bench.rig.request("0.2.0", BINARY);
+    // Le corps CONFIRMÉ est rejoué tel quel : même clé, même requête.
+    let body = bench
+        .admin
+        .confirm(&bench.api, &Method::POST, "/agent/update", body)
+        .await;
     let first = bench
         .api
         .call(Method::POST, "/agent/update")
-        .token(&bench.admin)
+        .token(&bench.admin.token)
         .key(KEY)
         .json(&body)
         .send()
@@ -172,7 +186,7 @@ async fn replaying_the_same_operation_key_after_a_cut_does_not_start_a_second_up
     let again = bench
         .api
         .call(Method::POST, "/agent/update")
-        .token(&bench.admin)
+        .token(&bench.admin.token)
         .key(KEY)
         .json(&body)
         .send()
@@ -258,7 +272,7 @@ async fn invalid_bodies_are_validation_errors_naming_the_field() {
     let reply = bench
         .api
         .call(Method::POST, "/agent/update")
-        .token(&bench.admin)
+        .token(&bench.admin.token)
         .raw_body("pas du json")
         .send()
         .await;

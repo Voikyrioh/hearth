@@ -40,9 +40,17 @@ async fn events(agent: &Agent, token: &str, query: &str) -> Vec<Value> {
     reply.body["events"].as_array().unwrap().clone()
 }
 
+/// Les actions du journal, sans les deux entrées que la CONFIRMATION d'un acte ajoute (l'inscription du poste
+/// à la connexion avec clé, l'ouverture du délai du mot de passe) : elles ont leurs propres tests.
 fn actions(events: &[Value]) -> Vec<(&str, &str)> {
     events
         .iter()
+        .filter(|event| {
+            !matches!(
+                event["action"].as_str(),
+                Some("device.enroll" | "reauth.elevation")
+            )
+        })
         .map(|event| {
             (
                 event["action"].as_str().unwrap(),
@@ -57,19 +65,23 @@ async fn an_account_creation_produces_its_entry_with_who_where_and_what() {
     let env = env().await;
     env.create("marie", Role::Admin).await;
     let agent = https::start(&env).await;
-    let admin = token(&agent, "marie").await;
+    let admin = agent.login_actor("marie").await;
 
     let created = agent
-        .request("POST", "/accounts")
-        .token(&admin)
+        .confirmed(
+            &admin,
+            "POST",
+            "/accounts",
+            json!({ "username": "paul", "password": OTHER_PASSWORD, "role": "readonly" }),
+        )
+        .await
         .header("x-hearth-client", "poste-de-marie/2.0")
         .header("idempotency-key", "KEY-CREATE-1")
-        .json(&json!({ "username": "paul", "password": OTHER_PASSWORD, "role": "readonly" }))
         .send()
         .await;
     assert_eq!(created.status, 201, "{:?}", created.body);
 
-    let listed = events(&agent, &admin, "").await;
+    let listed = events(&agent, &admin.token, "").await;
     let creation = &listed[0];
     assert_eq!(creation["action"], "account.create");
     assert_eq!(creation["action_label"], "Création de compte");
@@ -93,7 +105,7 @@ async fn an_account_creation_produces_its_entry_with_who_where_and_what() {
         ],
         "la création de marie par la ligne de commande de test, sa connexion, celle de paul"
     );
-    let again = events(&agent, &admin, "").await;
+    let again = events(&agent, &admin.token, "").await;
     assert_eq!(
         again.len(),
         listed.len(),
@@ -210,34 +222,42 @@ async fn a_failed_modifying_request_is_journaled_once_even_when_replayed() {
     env.create("marie", Role::Admin).await;
     env.create("paul", Role::ReadOnly).await;
     let agent = https::start(&env).await;
-    let admin = token(&agent, "marie").await;
+    let admin = agent.login_actor("marie").await;
 
-    let request = |key: &str, username: &str, password: &str| {
+    // Chaque requête est confirmée une fois ; un rejeu renvoie le MÊME corps (même clé, même requête).
+    let weak = agent
+        .confirm(
+            &admin,
+            "POST",
+            "/accounts",
+            json!({ "username": "nouveau", "password": "faible", "role": "readonly" }),
+        )
+        .await;
+    let taken = agent
+        .confirm(
+            &admin,
+            "POST",
+            "/accounts",
+            json!({ "username": "PAUL", "password": OTHER_PASSWORD, "role": "readonly" }),
+        )
+        .await;
+    let request = |key: &str, body: &Value| {
         agent
             .request("POST", "/accounts")
-            .token(&admin)
+            .token(&admin.token)
             .header("idempotency-key", key)
-            .json(&json!({ "username": username, "password": password, "role": "readonly" }))
+            .json(body)
     };
-    assert_eq!(
-        request("K-WEAK", "nouveau", "faible").send().await.status,
-        422
-    );
+    assert_eq!(request("K-WEAK", &weak).send().await.status, 422);
     // Deux échecs identiques à moins d'une minute se regroupent : on espace les requêtes.
     env.clock.advance(time::Duration::seconds(61));
-    assert_eq!(
-        request("K-TAKEN", "PAUL", OTHER_PASSWORD)
-            .send()
-            .await
-            .status,
-        409
-    );
+    assert_eq!(request("K-TAKEN", &taken).send().await.status, 409);
     // La même clé rejouée rend le premier résultat sans rien exécuter : pas de seconde entrée.
-    let replay = request("K-TAKEN", "PAUL", OTHER_PASSWORD).send().await;
+    let replay = request("K-TAKEN", &taken).send().await;
     assert_eq!(replay.status, 409);
     assert_eq!(replay.header("idempotent-replayed"), Some("true"));
 
-    let failed = events(&agent, &admin, "?outcome=failed").await;
+    let failed = events(&agent, &admin.token, "?outcome=failed").await;
     assert_eq!(
         actions(&failed),
         [("account.create", "failed"), ("account.create", "failed")]
@@ -255,12 +275,16 @@ async fn the_journal_is_filtered_searched_and_paged_over_the_wire() {
     let env = env().await;
     env.create("marie", Role::Admin).await;
     let agent = https::start(&env).await;
-    let admin = token(&agent, "marie").await;
+    let admin = agent.login_actor("marie").await;
     for name in ["alice", "bruno", "carla", "denis"] {
         let created = agent
-            .request("POST", "/accounts")
-            .token(&admin)
-            .json(&json!({ "username": name, "password": OTHER_PASSWORD, "role": "readonly" }))
+            .confirmed(
+                &admin,
+                "POST",
+                "/accounts",
+                json!({ "username": name, "password": OTHER_PASSWORD, "role": "readonly" }),
+            )
+            .await
             .send()
             .await;
         assert_eq!(created.status, 201);
@@ -269,24 +293,24 @@ async fn the_journal_is_filtered_searched_and_paged_over_the_wire() {
     assert_eq!(one_wrong.status, 401);
 
     // Filtres multi-valeurs et combinés.
-    let both = events(&agent, &admin, "?action=account.create&q=alice+bruno").await;
+    let both = events(&agent, &admin.token, "?action=account.create&q=alice+bruno").await;
     assert_eq!(
         both.len(),
         0,
         "ET entre les mots : aucune entrée ne porte les deux"
     );
-    let alice = events(&agent, &admin, "?action=account.create&q=alice").await;
+    let alice = events(&agent, &admin.token, "?action=account.create&q=alice").await;
     assert_eq!(alice.len(), 1);
     assert_eq!(alice[0]["target"], "alice");
-    let some = events(&agent, &admin, "?q=carla").await;
+    let some = events(&agent, &admin.token, "?q=carla").await;
     assert_eq!(some.len(), 1);
-    let logins = events(&agent, &admin, "?action=login&outcome=ok,denied").await;
+    let logins = events(&agent, &admin.token, "?action=login&outcome=ok,denied").await;
     assert_eq!(logins.len(), 2);
     // Un mot de recherche qui ressemble à une requête du moteur n'est que du texte.
     for hostile in ["%22", "*", "NEAR%28a%29", "a+OR+b", "-x", "%28"] {
         let reply = agent
             .request("GET", &format!("/audit?q={hostile}"))
-            .token(&admin)
+            .token(&admin.token)
             .send()
             .await;
         assert_eq!(reply.status, 200, "{hostile}");
@@ -302,7 +326,7 @@ async fn the_journal_is_filtered_searched_and_paged_over_the_wire() {
         };
         let reply = agent
             .request("GET", &format!("/audit{query}"))
-            .token(&admin)
+            .token(&admin.token)
             .send()
             .await;
         assert_eq!(reply.status, 200);
@@ -314,7 +338,7 @@ async fn the_journal_is_filtered_searched_and_paged_over_the_wire() {
             break;
         }
     }
-    let all = events(&agent, &admin, "").await;
+    let all = events(&agent, &admin.token, "").await;
     let all_ids: Vec<i64> = all
         .iter()
         .map(|event| event["id"].as_i64().unwrap())
@@ -332,7 +356,7 @@ async fn the_journal_is_filtered_searched_and_paged_over_the_wire() {
     ] {
         let reply = agent
             .request("GET", &format!("/audit{query}"))
-            .token(&admin)
+            .token(&admin.token)
             .send()
             .await;
         assert_eq!(
@@ -351,12 +375,16 @@ async fn the_export_is_a_spreadsheet_file_of_the_filtered_result() {
     let env = env().await;
     env.create("marie", Role::Admin).await;
     let agent = https::start(&env).await;
-    let admin = token(&agent, "marie").await;
+    let admin = agent.login_actor("marie").await;
     // Un identifiant qui commencerait une formule dans un tableur.
     let created = agent
-        .request("POST", "/accounts")
-        .token(&admin)
-        .json(&json!({ "username": "-cmd", "password": OTHER_PASSWORD, "role": "readonly" }))
+        .confirmed(
+            &admin,
+            "POST",
+            "/accounts",
+            json!({ "username": "-cmd", "password": OTHER_PASSWORD, "role": "readonly" }),
+        )
+        .await
         .send()
         .await;
     assert_eq!(created.status, 201);
@@ -365,7 +393,7 @@ async fn the_export_is_a_spreadsheet_file_of_the_filtered_result() {
 
     let export = agent
         .request("GET", "/audit/export?outcome=ok&action=account.create")
-        .token(&admin)
+        .token(&admin.token)
         .send()
         .await;
     assert_eq!(export.status, 200);
@@ -405,7 +433,7 @@ async fn the_export_is_a_spreadsheet_file_of_the_filtered_result() {
     // Sans filtre, tout (UTF-8, accents compris).
     let everything = agent
         .request("GET", "/audit/export")
-        .token(&admin)
+        .token(&admin.token)
         .send()
         .await;
     assert!(everything.text.contains(";Refusé;identifiants incorrects"));
@@ -419,15 +447,19 @@ async fn no_password_nor_token_is_anywhere_in_the_journal_after_a_full_scenario(
     env.create("marie", Role::Admin).await;
     env.create("lucas", Role::ReadOnly).await;
     let agent = https::start(&env).await;
-    let admin = token(&agent, "marie").await;
+    let admin = agent.login_actor("marie").await;
     let readonly = token(&agent, "lucas").await;
 
     login(&agent, "marie", WRONG).await;
     login(&agent, PASSWORD, PASSWORD).await;
     agent
-        .request("POST", "/accounts")
-        .token(&admin)
-        .json(&json!({ "username": "paul", "password": OTHER_PASSWORD, "role": "readonly" }))
+        .confirmed(
+            &admin,
+            "POST",
+            "/accounts",
+            json!({ "username": "paul", "password": OTHER_PASSWORD, "role": "readonly" }),
+        )
+        .await
         .send()
         .await;
     agent
@@ -436,16 +468,29 @@ async fn no_password_nor_token_is_anywhere_in_the_journal_after_a_full_scenario(
         .json(&json!({ "username": "intrus", "password": OTHER_PASSWORD, "role": "admin" }))
         .send()
         .await;
+    let wrong_own = agent
+        .confirm_with(
+            &admin,
+            "PUT",
+            "/me/password",
+            json!({ "current": WRONG, "password": "Brand-New-Pass-7" }),
+            WRONG,
+        )
+        .await;
     agent
         .request("PUT", "/me/password")
-        .token(&admin)
-        .json(&json!({ "current": WRONG, "password": "Brand-New-Pass-7" }))
+        .token(&admin.token)
+        .json(&wrong_own)
         .send()
         .await;
     agent
-        .request("PUT", "/accounts/UNKNOWN/password")
-        .token(&admin)
-        .json(&json!({ "password": "Brand-New-Pass-7" }))
+        .confirmed(
+            &admin,
+            "PUT",
+            "/accounts/UNKNOWN/password",
+            json!({ "password": "Brand-New-Pass-7" }),
+        )
+        .await
         .send()
         .await;
     agent
@@ -464,10 +509,10 @@ async fn no_password_nor_token_is_anywhere_in_the_journal_after_a_full_scenario(
     .await
     .unwrap();
     assert!(rows.len() >= 8, "{}", rows.len());
-    let wire = serde_json::to_string(&events(&agent, &admin, "").await).unwrap();
+    let wire = serde_json::to_string(&events(&agent, &admin.token, "").await).unwrap();
     let export = agent
         .request("GET", "/audit/export")
-        .token(&admin)
+        .token(&admin.token)
         .send()
         .await
         .text;
@@ -484,7 +529,7 @@ async fn no_password_nor_token_is_anywhere_in_the_journal_after_a_full_scenario(
         ] {
             assert!(!haystack.contains(secret), "{secret} dans {haystack}");
         }
-        for bearer in [&admin, &readonly] {
+        for bearer in [&admin.token, &readonly] {
             assert!(!haystack.contains(bearer.as_str()), "jeton dans {haystack}");
         }
     }
@@ -504,14 +549,18 @@ async fn a_failure_or_a_refusal_on_an_account_route_names_the_account() {
     let marie = env.create("marie", Role::Admin).await;
     let lucas = env.create("lucas", Role::ReadOnly).await;
     let agent = https::start(&env).await;
-    let admin = token(&agent, "marie").await;
+    let admin = agent.login_actor("marie").await;
     let readonly = token(&agent, "lucas").await;
 
     // Échec : supprimer le dernier administrateur.
     let refused = agent
-        .request("DELETE", &format!("/accounts/{}", marie.id))
-        .token(&admin)
-        .json(&json!({ "confirmation": "marie" }))
+        .confirmed(
+            &admin,
+            "DELETE",
+            &format!("/accounts/{}", marie.id),
+            json!({ "confirmation": "marie" }),
+        )
+        .await
         .send()
         .await;
     assert_eq!(refused.status, 409);
@@ -527,14 +576,18 @@ async fn a_failure_or_a_refusal_on_an_account_route_names_the_account() {
     // Compte inconnu : le motif de la route.
     env.clock.advance(time::Duration::seconds(61));
     let unknown = agent
-        .request("PATCH", "/accounts/INCONNU")
-        .token(&admin)
-        .json(&json!({ "role": "readonly" }))
+        .confirmed(
+            &admin,
+            "PATCH",
+            "/accounts/INCONNU",
+            json!({ "role": "readonly" }),
+        )
+        .await
         .send()
         .await;
     assert_eq!(unknown.status, 404);
 
-    let listed = events(&agent, &admin, "?outcome=denied,failed").await;
+    let listed = events(&agent, &admin.token, "?outcome=denied,failed").await;
     let targets: Vec<(&str, &str)> = listed
         .iter()
         .map(|e| (e["action"].as_str().unwrap(), e["target"].as_str().unwrap()))

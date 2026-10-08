@@ -147,13 +147,17 @@ async fn a_session_is_revoked_when_its_password_changes() {
     env.create("marie", Role::Admin).await;
     let lucas = env.create("lucas", Role::ReadOnly).await;
     let agent = https::start(&env).await;
-    let admin = token(&agent, "marie").await;
+    let admin = agent.login_actor("marie").await;
     let victim = token(&agent, "lucas").await;
 
     let changed = agent
-        .request("PUT", &format!("/accounts/{}/password", lucas.id))
-        .token(&admin)
-        .json(&json!({ "password": OTHER_PASSWORD }))
+        .confirmed(
+            &admin,
+            "PUT",
+            &format!("/accounts/{}/password", lucas.id),
+            json!({ "password": OTHER_PASSWORD }),
+        )
+        .await
         .send()
         .await;
     assert_eq!(changed.status, 200, "{:?}", changed.body);
@@ -164,7 +168,7 @@ async fn a_session_is_revoked_when_its_password_changes() {
     assert_eq!(
         agent
             .request("GET", "/me")
-            .token(&admin)
+            .token(&admin.token)
             .send()
             .await
             .status,
@@ -217,8 +221,17 @@ async fn replaying_an_operation_key_returns_the_first_result_without_running_aga
     let env = env().await;
     env.create("lucas", Role::ReadOnly).await;
     let agent = https::start(&env).await;
-    let token = token(&agent, "lucas").await;
-    let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
+    let lucas = agent.login_actor("lucas").await;
+    let token = lucas.token.clone();
+    // Le corps CONFIRMÉ est envoyé tel quel les deux fois (même clé, même requête).
+    let body = agent
+        .confirm(
+            &lucas,
+            "PUT",
+            "/me/password",
+            json!({ "current": PASSWORD, "password": OTHER_PASSWORD }),
+        )
+        .await;
 
     let first = agent
         .request("PUT", "/me/password")
@@ -250,10 +263,19 @@ async fn replaying_an_operation_key_returns_the_first_result_without_running_aga
     assert_eq!(state.body["status"], "succeeded");
 
     // Sans la clé, la même requête est ré-exécutée et échoue.
+    // Un défi neuf et l'ancien mot de passe, devenu faux : la requête est ré-exécutée et refusée.
+    let fresh = agent
+        .confirm(
+            &lucas,
+            "PUT",
+            "/me/password",
+            json!({ "current": PASSWORD, "password": OTHER_PASSWORD }),
+        )
+        .await;
     let again = agent
         .request("PUT", "/me/password")
         .token(&token)
-        .json(&body)
+        .json(&fresh)
         .send()
         .await;
     assert_eq!((again.status, again.code()), (422, "WRONG_PASSWORD"));
@@ -285,8 +307,16 @@ async fn a_client_that_cuts_before_the_answer_still_gets_its_result_recorded() {
     let env = env().await;
     env.create("lucas", Role::ReadOnly).await;
     let agent = https::start(&env).await;
-    let token = token(&agent, "lucas").await;
-    let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
+    let lucas = agent.login_actor("lucas").await;
+    let token = lucas.token.clone();
+    let body = agent
+        .confirm(
+            &lucas,
+            "PUT",
+            "/me/password",
+            json!({ "current": PASSWORD, "password": OTHER_PASSWORD }),
+        )
+        .await;
 
     // Le calcul du mot de passe dure 300 ms : le client coupe pendant l'exécution.
     env.hasher

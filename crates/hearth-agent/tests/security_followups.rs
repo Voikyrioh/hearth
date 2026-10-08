@@ -6,6 +6,7 @@
 
 mod support;
 
+use axum::http::Method;
 use hearth_agent::application::sessions::AuthError;
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::sessions::SessionEnd;
@@ -106,24 +107,32 @@ async fn on_the_wire_the_field_is_additive_and_keeps_the_address_the_request_com
         (json!({ "keep_address": true }), true),
     ] {
         let env = env().await;
-        let api = Api::new(&env);
+        let mut api = Api::new(&env);
+        // L'agent EXIGE la confirmation : l'acte part d'un poste dont la clé est inscrite (adresse A, liée à
+        // sa clé). Une connexion SANS clé depuis une autre adresse B (un autre client) fait de B une adresse
+        // apprise sans clé ; la session à clé agit ensuite depuis B. C'est cette adresse-là que le choix
+        // « garder ce poste reconnu » protège, les adresses liées à une clé survivent toujours.
         env.create("marie", Role::Admin).await;
-        let token = api.token_of("marie").await;
+        let marie = env.login_actor(&api, "marie").await;
+        api.addr = std::net::SocketAddr::from(([10, 7, 7, 9], 40_000));
+        api.token_of("marie").await;
         let before = addresses(&env).await;
-        assert_eq!(before.len(), 1, "la connexion a retenu l'adresse du client");
+        assert_eq!(before, ["10.0.0.7", "10.7.7.9"], "A (clé) et B (sans clé)");
         let mut body = json!({ "current": PASSWORD, "password": NEW_PASSWORD });
         for (name, value) in extra.as_object().unwrap() {
             body[name] = value.clone();
         }
         let reply = api
-            .put("/me/password")
-            .token(&token)
-            .json(&body)
-            .send()
+            .act(&marie, Method::PUT, "/me/password", body.clone())
             .await;
         assert_eq!(reply.status, 200, "{:?}", reply.body);
         let after = addresses(&env).await;
-        assert_eq!(after, if kept { before } else { vec![] }, "{body}");
+        let expected: Vec<&str> = if kept {
+            vec!["10.0.0.7", "10.7.7.9"]
+        } else {
+            vec!["10.0.0.7"]
+        };
+        assert_eq!(after, expected, "{body}");
     }
 }
 

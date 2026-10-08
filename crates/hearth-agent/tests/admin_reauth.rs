@@ -2,9 +2,8 @@
 //! membre `reauth`, la preuve d'usage `0x05` liée à l'acte, le mot de passe par le chemin de la
 //! connexion, l'élévation de 5 minutes. Vraie base SQLite, vraies signatures Ed25519, routeur en processus.
 //!
-//! L'agent **exige** la confirmation dès la construction du service : le banc de ce fichier rétablit
-//! l'exigence (`accept_unconfirmed_acts_for_tests(false)`) sur un banc d'essai qui accepte les actes bruts
-//! par défaut ; un acte sans `reauth` y reçoit `426`.
+//! L'agent **exige** la confirmation dès la construction du service, et tous les bancs d'essai de l'agent
+//! le font aussi : un acte sans `reauth` reçoit `426`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -217,8 +216,6 @@ async fn actor(env: &Env, api: &Api, name: &'static str, role: Role) -> Actor {
 
 async fn bench() -> Bench {
     let env = env().await;
-    // Ces scénarios éprouvent l'agent qui EXIGE (le service qui sert) : l'exigence est rétablie.
-    env.sessions.accept_unconfirmed_acts_for_tests(false);
     let rig = Rig::new(&env, true, true);
     let api = Api::from_state(state_with(&env, rig.service.clone()));
     let marie = actor(&env, &api, "marie", Role::Admin).await;

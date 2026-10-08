@@ -345,18 +345,16 @@ async fn an_expired_session_answers_session_expired_and_a_closed_one_session_rev
     use hearth_agent::domain::sessions::LIFETIME;
     let env = env().await;
     let api = Api::new(&env);
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let admin = env.actor(&api, "marie", Role::Admin).await;
     let lucas = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
 
     let reply = api
-        .put(
-            "/accounts/{id}/password"
-                .replace("{id}", &lucas_id(&env).await)
-                .as_str(),
+        .act(
+            &admin,
+            Method::PUT,
+            &format!("/accounts/{}/password", lucas_id(&env).await),
+            json!({ "password": OTHER_PASSWORD }),
         )
-        .token(&admin)
-        .json(&json!({ "password": OTHER_PASSWORD }))
-        .send()
         .await;
     assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
     assert_eq!(reply.body["sessions_closed"], 1);
@@ -367,7 +365,7 @@ async fn an_expired_session_answers_session_expired_and_a_closed_one_session_rev
     );
 
     env.clock.advance(LIFETIME + time::Duration::seconds(1));
-    let reply = api.get("/me").token(&admin).send().await;
+    let reply = api.get("/me").token(&admin.token).send().await;
     assert_eq!(
         (reply.status, reply.code()),
         (StatusCode::UNAUTHORIZED, "SESSION_EXPIRED")
@@ -438,13 +436,15 @@ async fn the_version_is_checked_on_the_login_too() {
 async fn an_administrator_manages_accounts() {
     let env = env().await;
     let api = Api::new(&env);
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let admin = env.actor(&api, "marie", Role::Admin).await;
 
     let created = api
-        .post("/accounts")
-        .token(&admin)
-        .json(&json!({ "username": "lucas", "password": PASSWORD, "role": "readonly" }))
-        .send()
+        .act(
+            &admin,
+            Method::POST,
+            "/accounts",
+            json!({ "username": "lucas", "password": PASSWORD, "role": "readonly" }),
+        )
         .await;
     assert_eq!(created.status, StatusCode::CREATED, "{:?}", created.body);
     assert_eq!(created.body["username"], "lucas");
@@ -452,10 +452,12 @@ async fn an_administrator_manages_accounts() {
     let lucas = created.body["id"].as_str().unwrap().to_owned();
 
     let taken = api
-        .post("/accounts")
-        .token(&admin)
-        .json(&json!({ "username": "LUCAS", "password": PASSWORD, "role": "admin" }))
-        .send()
+        .act(
+            &admin,
+            Method::POST,
+            "/accounts",
+            json!({ "username": "LUCAS", "password": PASSWORD, "role": "admin" }),
+        )
         .await;
     assert_eq!(
         (taken.status, taken.code()),
@@ -463,10 +465,12 @@ async fn an_administrator_manages_accounts() {
     );
 
     let weak = api
-        .post("/accounts")
-        .token(&admin)
-        .json(&json!({ "username": "paul", "password": "abc", "role": "admin" }))
-        .send()
+        .act(
+            &admin,
+            Method::POST,
+            "/accounts",
+            json!({ "username": "paul", "password": "abc", "role": "admin" }),
+        )
         .await;
     assert_eq!(
         (weak.status, weak.code()),
@@ -475,7 +479,7 @@ async fn an_administrator_manages_accounts() {
     let rules = weak.body["error"]["details"]["rules"].as_array().unwrap();
     assert!(rules.contains(&json!("min_length")) && rules.contains(&json!("digit")));
 
-    let list = api.get("/accounts").token(&admin).send().await;
+    let list = api.get("/accounts").token(&admin.token).send().await;
     let accounts = list.body["accounts"].as_array().unwrap();
     assert_eq!(accounts.len(), 2);
     assert_eq!(accounts[0]["username"], "marie");
@@ -484,10 +488,12 @@ async fn an_administrator_manages_accounts() {
     assert!(accounts[1]["last_login_at"].is_null());
 
     let promoted = api
-        .patch(&format!("/accounts/{lucas}"))
-        .token(&admin)
-        .json(&json!({ "role": "admin" }))
-        .send()
+        .act(
+            &admin,
+            Method::PATCH,
+            &format!("/accounts/{lucas}"),
+            json!({ "role": "admin" }),
+        )
         .await;
     assert_eq!(promoted.status, StatusCode::NO_CONTENT);
     assert_eq!(env.service.find("lucas").await.unwrap().role, Role::Admin);
@@ -497,14 +503,16 @@ async fn an_administrator_manages_accounts() {
 async fn the_last_administrator_cannot_be_demoted_or_deleted() {
     let env = env().await;
     let api = Api::new(&env);
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let admin = env.actor(&api, "marie", Role::Admin).await;
     let marie = env.service.find("marie").await.unwrap().id.to_string();
 
     let demote = api
-        .patch(&format!("/accounts/{marie}"))
-        .token(&admin)
-        .json(&json!({ "role": "readonly" }))
-        .send()
+        .act(
+            &admin,
+            Method::PATCH,
+            &format!("/accounts/{marie}"),
+            json!({ "role": "readonly" }),
+        )
         .await;
     assert_eq!(
         (demote.status, demote.code()),
@@ -512,10 +520,12 @@ async fn the_last_administrator_cannot_be_demoted_or_deleted() {
     );
 
     let delete = api
-        .delete(&format!("/accounts/{marie}"))
-        .token(&admin)
-        .json(&json!({ "confirmation": "marie" }))
-        .send()
+        .act(
+            &admin,
+            Method::DELETE,
+            &format!("/accounts/{marie}"),
+            json!({ "confirmation": "marie" }),
+        )
         .await;
     assert_eq!(
         (delete.status, delete.code()),
@@ -527,14 +537,17 @@ async fn the_last_administrator_cannot_be_demoted_or_deleted() {
 async fn deleting_your_own_account_needs_your_username_retyped() {
     let env = env().await;
     let api = Api::new(&env);
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let admin = env.actor(&api, "marie", Role::Admin).await;
     env.create("paul", Role::Admin).await;
     let marie = env.service.find("marie").await.unwrap().id.to_string();
 
     let refused = api
-        .delete(&format!("/accounts/{marie}"))
-        .token(&admin)
-        .send()
+        .act(
+            &admin,
+            Method::DELETE,
+            &format!("/accounts/{marie}"),
+            json!({}),
+        )
         .await;
     assert_eq!(
         (refused.status, refused.code()),
@@ -543,14 +556,16 @@ async fn deleting_your_own_account_needs_your_username_retyped() {
     assert_eq!(refused.body["error"]["details"]["field"], "confirmation");
 
     let done = api
-        .delete(&format!("/accounts/{marie}"))
-        .token(&admin)
-        .json(&json!({ "confirmation": "Marie" }))
-        .send()
+        .act(
+            &admin,
+            Method::DELETE,
+            &format!("/accounts/{marie}"),
+            json!({ "confirmation": "Marie" }),
+        )
         .await;
     assert_eq!(done.status, StatusCode::OK, "{:?}", done.body);
     assert_eq!(done.body["sessions_closed"], 1);
-    let reply = api.get("/me").token(&admin).send().await;
+    let reply = api.get("/me").token(&admin.token).send().await;
     assert_eq!(
         (reply.status, reply.code()),
         (StatusCode::UNAUTHORIZED, "SESSION_REVOKED")
@@ -561,32 +576,48 @@ async fn deleting_your_own_account_needs_your_username_retyped() {
 async fn revoking_sessions_and_changing_your_own_password_follow_the_rules() {
     let env = env().await;
     let api = Api::new(&env);
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
-    let lucas_current = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
+    let admin = env.actor(&api, "marie", Role::Admin).await;
+    let lucas_current = env.actor(&api, "lucas", Role::ReadOnly).await;
     let lucas_other = api.token_of("lucas").await;
     let lucas = lucas_id(&env).await;
 
     // Un compte lecture seule change son propre mot de passe : l'autre session est fermée.
-    let wrong = api
-        .put("/me/password")
-        .token(&lucas_current)
-        .json(&json!({ "current": "Wrong-Horse-9999", "password": OTHER_PASSWORD }))
-        .send()
-        .await;
+    let wrong = {
+        let body = lucas_current
+            .confirm_with(
+                &api,
+                &Method::PUT,
+                "/me/password",
+                json!({ "current": "Wrong-Horse-9999", "password": OTHER_PASSWORD }),
+                "Wrong-Horse-9999",
+            )
+            .await;
+        api.put("/me/password")
+            .token(&lucas_current.token)
+            .json(&body)
+            .send()
+            .await
+    };
     assert_eq!(
         (wrong.status, wrong.code()),
         (StatusCode::UNPROCESSABLE_ENTITY, "WRONG_PASSWORD")
     );
     let changed = api
-        .put("/me/password")
-        .token(&lucas_current)
-        .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
-        .send()
+        .act(
+            &lucas_current,
+            Method::PUT,
+            "/me/password",
+            json!({ "current": PASSWORD, "password": OTHER_PASSWORD }),
+        )
         .await;
     assert_eq!(changed.status, StatusCode::OK, "{:?}", changed.body);
     assert_eq!(changed.body["sessions_closed"], 1);
     assert_eq!(
-        api.get("/me").token(&lucas_current).send().await.status,
+        api.get("/me")
+            .token(&lucas_current.token)
+            .send()
+            .await
+            .status,
         StatusCode::OK
     );
     assert_eq!(
@@ -596,21 +627,31 @@ async fn revoking_sessions_and_changing_your_own_password_follow_the_rules() {
 
     // Un administrateur révoque les sessions de lucas.
     let revoked = api
-        .delete(&format!("/accounts/{lucas}/sessions"))
-        .token(&admin)
-        .send()
+        .act(
+            &admin,
+            Method::DELETE,
+            &format!("/accounts/{lucas}/sessions"),
+            json!({}),
+        )
         .await;
     assert_eq!(revoked.status, StatusCode::OK);
     assert_eq!(revoked.body["sessions_closed"], 1);
     assert_eq!(
-        api.get("/me").token(&lucas_current).send().await.code(),
+        api.get("/me")
+            .token(&lucas_current.token)
+            .send()
+            .await
+            .code(),
         "SESSION_REVOKED"
     );
 
     let unknown = api
-        .delete("/accounts/01JNOSUCHACCOUNT0000000000/sessions")
-        .token(&admin)
-        .send()
+        .act(
+            &admin,
+            Method::DELETE,
+            "/accounts/01JNOSUCHACCOUNT0000000000/sessions",
+            json!({}),
+        )
         .await;
     assert_eq!(
         (unknown.status, unknown.code()),
@@ -626,8 +667,17 @@ async fn revoking_sessions_and_changing_your_own_password_follow_the_rules() {
 async fn replaying_a_key_returns_the_first_result_without_running_again() {
     let env = env().await;
     let api = Api::new(&env);
-    let token = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
-    let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
+    let lucas = env.actor(&api, "lucas", Role::ReadOnly).await;
+    let token = lucas.token.clone();
+    // Le corps CONFIRMÉ est envoyé tel quel les deux fois : même clé, même requête (un rejeu à l'identique).
+    let body = lucas
+        .confirm(
+            &api,
+            &Method::PUT,
+            "/me/password",
+            json!({ "current": PASSWORD, "password": OTHER_PASSWORD }),
+        )
+        .await;
 
     let first = api
         .put("/me/password")
@@ -666,8 +716,17 @@ async fn replaying_a_key_returns_the_first_result_without_running_again() {
 async fn a_failed_result_is_replayed_too() {
     let env = env().await;
     let api = Api::new(&env);
-    let token = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
-    let body = json!({ "current": "Wrong-Horse-9999", "password": OTHER_PASSWORD });
+    let lucas = env.actor(&api, "lucas", Role::ReadOnly).await;
+    let token = lucas.token.clone();
+    let body = lucas
+        .confirm_with(
+            &api,
+            &Method::PUT,
+            "/me/password",
+            json!({ "current": "Wrong-Horse-9999", "password": OTHER_PASSWORD }),
+            "Wrong-Horse-9999",
+        )
+        .await;
     let first = api
         .put("/me/password")
         .token(&token)
@@ -758,7 +817,7 @@ async fn a_key_still_running_answers_409_and_each_account_has_its_own_keys() {
     let env = env().await;
     let api = Api::new(&env);
     let lucas = env.account_with_token(&api, "lucas", Role::ReadOnly).await;
-    let paul = env.account_with_token(&api, "paul", Role::ReadOnly).await;
+    let paul = env.actor(&api, "paul", Role::ReadOnly).await;
     let lucas_account = env.service.find("lucas").await.unwrap().id;
     let key = hearth_agent::domain::operations::OperationKey::parse(KEY).unwrap();
     let body = json!({ "current": PASSWORD, "password": OTHER_PASSWORD });
@@ -790,17 +849,21 @@ async fn a_key_still_running_answers_409_and_each_account_has_its_own_keys() {
     assert!(state.body["result"].is_null());
 
     // La même clé chez un autre compte est la sienne : elle s'exécute, sans voir celle de lucas.
+    // Chez paul la même clé est la sienne : l'acte, confirmé, s'exécute.
+    let confirmed = paul
+        .confirm(&api, &Method::PUT, "/me/password", body.clone())
+        .await;
     let own = api
         .put("/me/password")
-        .token(&paul)
+        .token(&paul.token)
         .key(KEY)
-        .json(&body)
+        .json(&confirmed)
         .send()
         .await;
     assert_eq!(own.status, StatusCode::OK, "{:?}", own.body);
     let paul_state = api
         .get(&format!("/operations/{KEY}"))
-        .token(&paul)
+        .token(&paul.token)
         .send()
         .await;
     assert_eq!(paul_state.body["status"], "succeeded");
@@ -810,13 +873,22 @@ async fn a_key_still_running_answers_409_and_each_account_has_its_own_keys() {
 async fn a_key_reused_for_another_request_is_refused_without_running() {
     let env = env().await;
     let api = Api::new(&env);
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
+    let admin = env.actor(&api, "marie", Role::Admin).await;
     let lucas = env.create("lucas", Role::ReadOnly).await;
+    let path = format!("/accounts/{}/password", lucas.id);
+    let original = admin
+        .confirm(
+            &api,
+            &Method::PUT,
+            &path,
+            json!({ "password": OTHER_PASSWORD }),
+        )
+        .await;
     let first = api
-        .put(&format!("/accounts/{}/password", lucas.id))
-        .token(&admin)
+        .put(&path)
+        .token(&admin.token)
         .key(KEY)
-        .json(&json!({ "password": OTHER_PASSWORD }))
+        .json(&original)
         .send()
         .await;
     assert_eq!(first.status, StatusCode::OK, "{:?}", first.body);
@@ -824,7 +896,7 @@ async fn a_key_reused_for_another_request_is_refused_without_running() {
     // Même clé, autre méthode et autre chemin : jamais le résultat du PUT, jamais exécutée.
     let other = api
         .delete(&format!("/accounts/{}", lucas.id))
-        .token(&admin)
+        .token(&admin.token)
         .key(KEY)
         .send()
         .await;
@@ -840,7 +912,7 @@ async fn a_key_reused_for_another_request_is_refused_without_running() {
     // Même clé, même requête mais un autre corps : refusée aussi.
     let changed_body = api
         .put(&format!("/accounts/{}/password", lucas.id))
-        .token(&admin)
+        .token(&admin.token)
         .key(KEY)
         .json(&json!({ "password": "Third-Pass-9999" }))
         .send()
@@ -850,9 +922,9 @@ async fn a_key_reused_for_another_request_is_refused_without_running() {
     // La requête d'origine, rejouée à l'identique, rend son résultat.
     let replay = api
         .put(&format!("/accounts/{}/password", lucas.id))
-        .token(&admin)
+        .token(&admin.token)
         .key(KEY)
-        .json(&json!({ "password": OTHER_PASSWORD }))
+        .json(&original)
         .send()
         .await;
     assert_eq!(replay.headers.get("idempotent-replayed").unwrap(), "true");
@@ -909,18 +981,25 @@ async fn the_login_ignores_the_key_so_no_token_is_ever_stored_in_an_operation() 
 async fn a_replayed_creation_creates_the_account_once() {
     let env = env().await;
     let api = Api::new(&env);
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
-    let body = json!({ "username": "lucas", "password": PASSWORD, "role": "readonly" });
+    let admin = env.actor(&api, "marie", Role::Admin).await;
+    let body = admin
+        .confirm(
+            &api,
+            &Method::POST,
+            "/accounts",
+            json!({ "username": "lucas", "password": PASSWORD, "role": "readonly" }),
+        )
+        .await;
     let first = api
         .post("/accounts")
-        .token(&admin)
+        .token(&admin.token)
         .key(KEY)
         .json(&body)
         .send()
         .await;
     let second = api
         .post("/accounts")
-        .token(&admin)
+        .token(&admin.token)
         .key(KEY)
         .json(&body)
         .send()
@@ -969,8 +1048,7 @@ async fn a_tracked_body_over_one_mebibyte_is_413_not_422() {
 async fn every_modifying_route_leaves_exactly_one_success_entry() {
     let env = env().await;
     let api = Api::new(&env);
-    let admin = env.account_with_token(&api, "marie", Role::Admin).await;
-    let own = env.account_with_token(&api, "carl", Role::ReadOnly).await;
+    let _ = env.account_with_token(&api, "carl", Role::ReadOnly).await;
     let role_victim = env.create("v-role", Role::ReadOnly).await;
     let password_victim = env.create("v-pass", Role::ReadOnly).await;
     let sessions_victim = env.create("v-sess", Role::ReadOnly).await;
@@ -991,8 +1069,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     let carl_session = support::device::login_token(&api, &carl_key, "carl", PASSWORD).await;
     // `marie` ouvre une session AVEC la clé d'un poste inscrit : activer le mode attaque exige la preuve
     // d'une clé inscrite et le mot de passe (Q14 point 3, Q16).
-    let marie_key = support::device::DeviceKey::new();
-    let marie_session = support::device::login_token(&api, &marie_key, "marie", PASSWORD).await;
+    let marie = env.actor(&api, "marie", Role::Admin).await;
 
     let successes = |env: &support::Env| {
         let pool = env.db.pool().clone();
@@ -1025,8 +1102,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         // Le retrait d'un poste (route précédente) ferme les sessions SANS lien du compte (HRT-24,
         // suivi de la revue de la PR #25) : `carl` ouvre une session fraîche pour le changement de
         // son mot de passe (sa connexion s'écrit avant la mesure).
-        let own_token = if endpoint.path == "/me/password" {
-            Some(api.token_of("carl").await)
+        let own_actor = if endpoint.path == "/me/password" {
+            Some(env.login_actor(&api, "carl").await)
         } else {
             None
         };
@@ -1057,60 +1134,67 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     .await
             }
             ("PUT", "/me/password") => {
-                api.put("/me/password")
-                    .token(own_token.as_deref().unwrap_or(&own))
-                    .json(&json!({ "current": PASSWORD, "password": OTHER_PASSWORD }))
-                    .send()
-                    .await
+                api.act(
+                    own_actor.as_ref().unwrap(),
+                    Method::PUT,
+                    "/me/password",
+                    json!({ "current": PASSWORD, "password": OTHER_PASSWORD }),
+                )
+                .await
             }
             ("POST", "/accounts") => {
-                api.post("/accounts")
-                    .token(&admin)
-                    .json(&json!({ "username": "nouveau", "password": OTHER_PASSWORD, "role": "readonly" }))
-                    .send()
-                    .await
+                api.act(
+                    &marie,
+                    Method::POST,
+                    "/accounts",
+                    json!({ "username": "nouveau", "password": OTHER_PASSWORD, "role": "readonly" }),
+                )
+                .await
             }
             ("PATCH", "/accounts/{id}") => {
-                api.patch(&format!("/accounts/{}", role_victim.id))
-                    .token(&admin)
-                    .json(&json!({ "role": "admin" }))
-                    .send()
-                    .await
+                api.act(
+                    &marie,
+                    Method::PATCH,
+                    &format!("/accounts/{}", role_victim.id),
+                    json!({ "role": "admin" }),
+                )
+                .await
             }
             ("DELETE", "/accounts/{id}") => {
-                api.delete(&format!("/accounts/{}", delete_victim.id))
-                    .token(&admin)
-                    .send()
-                    .await
+                api.act(
+                    &marie,
+                    Method::DELETE,
+                    &format!("/accounts/{}", delete_victim.id),
+                    json!({}),
+                )
+                .await
             }
             ("PUT", "/accounts/{id}/password") => {
-                api.put(&format!("/accounts/{}/password", password_victim.id))
-                    .token(&admin)
-                    .json(&json!({ "password": OTHER_PASSWORD }))
-                    .send()
-                    .await
+                api.act(
+                    &marie,
+                    Method::PUT,
+                    &format!("/accounts/{}/password", password_victim.id),
+                    json!({ "password": OTHER_PASSWORD }),
+                )
+                .await
             }
             ("DELETE", "/accounts/{id}/sessions") => {
-                api.delete(&format!("/accounts/{}/sessions", sessions_victim.id))
-                    .token(&admin)
-                    .send()
-                    .await
+                api.act(
+                    &marie,
+                    Method::DELETE,
+                    &format!("/accounts/{}/sessions", sessions_victim.id),
+                    json!({}),
+                )
+                .await
             }
             ("PUT", "/security/attack-mode") => {
-                let body = support::device::attack_mode_body(
-                    &api,
-                    &marie_key,
-                    "marie",
-                    &marie_session,
-                    true,
-                    PASSWORD,
-                )
-                .await;
                 let reply = api
-                    .put("/security/attack-mode")
-                    .token(&marie_session)
-                    .json(&body)
-                    .send()
+                    .act(
+                        &marie,
+                        Method::PUT,
+                        "/security/attack-mode",
+                        json!({ "active": true }),
+                    )
                     .await;
                 // Le mode est éteint pour les routes suivantes du balayage.
                 sqlx::query("UPDATE attack_mode SET active = 0 WHERE id = 1")
@@ -1121,23 +1205,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             }
             ("PUT", "/me/reauth") => {
                 // Le réglage de fréquence du mot de passe (HRT-28) : toujours confirmé.
-                let act = hearth_proto::admin_act::AdminAct::ReauthSetting {
-                    mode: hearth_proto::api::reauth::ReauthMode::Each,
-                };
-                let body = support::device::with_reauth(
-                    &api,
-                    &marie_key,
-                    "marie",
-                    &marie_session,
-                    &act,
-                    PASSWORD,
-                    json!({ "password": "each" }),
-                )
-                .await;
-                api.put("/me/reauth")
-                    .token(&marie_session)
-                    .json(&body)
-                    .send()
+                api.act(&marie, Method::PUT, "/me/reauth", json!({ "password": "each" }))
                     .await
             }
             (method, path) => panic!("route modifiante sans scénario de réussite : {method} {path}"),
@@ -1182,7 +1250,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             "/sessions/challenge" => continue,
             other => panic!("route de lecture sans scénario : {other}"),
         };
-        let reply = api.get(&path).token(&admin).send().await;
+        let reply = api.get(&path).token(&marie.token).send().await;
         assert!(
             reply.status.is_success() || reply.status == StatusCode::NOT_FOUND,
             "{path} : {:?}",

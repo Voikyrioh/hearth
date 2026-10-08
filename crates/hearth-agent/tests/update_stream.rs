@@ -29,11 +29,10 @@ async fn login(agent: &Agent, name: &str) -> String {
 #[tokio::test]
 async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_too() {
     let env = env().await;
-    env.create("marie", Role::Admin).await;
     env.create("lucas", Role::ReadOnly).await;
     let rig = Rig::new(&env, true, true);
     let agent = support::https::start_updating(&env, metering(), Some(rig.updating())).await;
-    let admin = login(&agent, "marie").await;
+    let admin = agent.actor(&env, "marie", Role::Admin).await;
     let readonly = login(&agent, "lucas").await;
 
     let mut watcher = support::ws::open(&agent).await;
@@ -41,9 +40,13 @@ async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_t
     watcher.subscribe(&[Topic::Update]).await;
 
     let reply = agent
-        .request("POST", "/agent/update")
-        .token(&admin)
-        .json(&rig.request("0.2.0", BINARY))
+        .confirmed(
+            &admin,
+            "POST",
+            "/agent/update",
+            rig.request("0.2.0", BINARY),
+        )
+        .await
         .send()
         .await;
     assert_eq!(reply.status, 202, "{:?}", reply.body);
@@ -81,17 +84,16 @@ async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_t
 #[tokio::test]
 async fn a_client_that_subscribes_in_the_middle_gets_the_current_step_then_the_result() {
     let env = env().await;
-    env.create("marie", Role::Admin).await;
     let rig = Rig::new(&env, true, true);
     let agent = support::https::start_updating(&env, metering(), Some(rig.updating())).await;
-    let token = login(&agent, "marie").await;
+    let marie = agent.actor(&env, "marie", Role::Admin).await;
+    let token = marie.token.clone();
     // Une somme fausse : la mise à jour échoue après le téléchargement.
     let mut body = rig.request("0.2.0", BINARY);
     body["sha256"] = json!("11".repeat(32));
     let accepted = agent
-        .request("POST", "/agent/update")
-        .token(&token)
-        .json(&body)
+        .confirmed(&marie, "POST", "/agent/update", body)
+        .await
         .send()
         .await;
     assert_eq!(accepted.status, 202);

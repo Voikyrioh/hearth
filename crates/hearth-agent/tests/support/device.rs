@@ -254,3 +254,124 @@ pub async fn with_reauth(
     body["reauth"] = reauth_member(api, key, username, token, act, password).await;
     body
 }
+
+/// Un poste de test : un compte, la clé de ce poste (inscrite par la connexion) et le jeton de la session
+/// ouverte AVEC la preuve de cette clé. C'est ce que l'agent qui EXIGE demande à tout acte d'administration
+/// (HRT-30) : un acte part par [`Api::act`] ou [`Actor::confirm`], jamais avec la session seule.
+pub struct Actor {
+    pub name: String,
+    pub key: DeviceKey,
+    pub token: String,
+}
+
+impl Env {
+    /// Crée le compte et ouvre sa session depuis un poste dont la clé est inscrite.
+    pub async fn actor(
+        &self,
+        api: &super::api::Api,
+        name: &str,
+        role: hearth_agent::domain::accounts::Role,
+    ) -> Actor {
+        self.create(name, role).await;
+        self.login_actor(api, name).await
+    }
+
+    /// Ouvre une session de plus pour un compte existant, depuis un nouveau poste.
+    pub async fn login_actor(&self, api: &super::api::Api, name: &str) -> Actor {
+        let key = DeviceKey::new();
+        let token = login_token(api, &key, name, super::PASSWORD).await;
+        Actor {
+            name: name.to_owned(),
+            key,
+            token,
+        }
+    }
+}
+
+/// L'acte que dit une requête (méthode, chemin, corps), comme l'agent le reconstruit : les 10 actes du
+/// contrat commun. Le retrait d'un poste a son propre contrat (`removal_body`).
+pub fn act_of<'a>(
+    method: &str,
+    path: &'a str,
+    body: &'a serde_json::Value,
+) -> hearth_proto::admin_act::AdminAct<'a> {
+    use hearth_proto::admin_act::AdminAct;
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    let text = |field: &str| body[field].as_str().unwrap_or_default();
+    let role = || serde_json::from_value(body["role"].clone()).expect("rôle de l'acte");
+    match (method, parts.as_slice()) {
+        ("POST", ["accounts"]) => AdminAct::AccountCreate {
+            username: text("username"),
+            role: role(),
+        },
+        ("PATCH", ["accounts", id]) => AdminAct::AccountRole {
+            target: id,
+            role: role(),
+        },
+        ("PUT", ["accounts", id, "password"]) => AdminAct::AccountPassword { target: id },
+        ("DELETE", ["accounts", id]) => AdminAct::AccountDelete { target: id },
+        ("DELETE", ["accounts", id, "sessions"]) => AdminAct::SessionsRevoke { target: id },
+        ("POST", ["agent", "update"]) => AdminAct::AgentUpdate {
+            version: text("version"),
+            sha256: text("sha256"),
+        },
+        ("PUT", ["security", "attack-mode"]) => AdminAct::AttackMode {
+            enable: body["active"].as_bool().unwrap_or_default(),
+        },
+        ("PUT", ["me", "password"]) => AdminAct::AccountPasswordOwn,
+        ("PUT", ["me", "reauth"]) => AdminAct::ReauthSetting {
+            mode: serde_json::from_value(body["password"].clone()).expect("réglage"),
+        },
+        _ => panic!("{method} {path} n'est pas un acte du contrat commun"),
+    }
+}
+
+impl Actor {
+    /// Le corps de cet acte, augmenté de son membre `reauth` : le mot de passe de ce compte et une preuve
+    /// d'un défi NEUF. À envoyer tel quel pour un rejeu à l'identique (même clé d'opération).
+    pub async fn confirm(
+        &self,
+        api: &super::api::Api,
+        method: &axum::http::Method,
+        path: &str,
+        body: serde_json::Value,
+    ) -> serde_json::Value {
+        self.confirm_with(api, method, path, body, super::PASSWORD)
+            .await
+    }
+
+    /// Comme [`Actor::confirm`], avec un autre mot de passe de confirmation (un faux, par exemple).
+    pub async fn confirm_with(
+        &self,
+        api: &super::api::Api,
+        method: &axum::http::Method,
+        path: &str,
+        mut body: serde_json::Value,
+        password: &str,
+    ) -> serde_json::Value {
+        let member = {
+            let act = act_of(method.as_str(), path, &body);
+            reauth_member(api, &self.key, &self.name, &self.token, &act, password).await
+        };
+        body["reauth"] = member;
+        body
+    }
+}
+
+impl super::api::Api {
+    /// Un acte d'administration CONFIRMÉ, envoyé par ce poste, avec le mot de passe du compte.
+    pub async fn act(
+        &self,
+        who: &Actor,
+        method: axum::http::Method,
+        path: &str,
+        body: serde_json::Value,
+    ) -> super::api::Reply {
+        let body = who.confirm(self, &method, path, body).await;
+        self.call(method, path)
+            .token(&who.token)
+            .json(&body)
+            .send()
+            .await
+    }
+}

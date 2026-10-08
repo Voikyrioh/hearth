@@ -56,12 +56,12 @@ zeroize.workspace = true
 
 [features]
 # Expose `SessionService::accept_unconfirmed_acts_for_tests` aux bancs d'essai qui envoient des actes bruts.
-# Jamais activée par un binaire de production : seul le dev-dependency ci-dessous la demande, et un test de
-# garde (`tests/test_support_guard.rs`) interdit son nom dans `src/` hors de la porte.
+# Jamais activée par un binaire de production : seuls les dev-dependencies de `hearth-link` et de la coquille la
+# demandent (leurs bancs d'essai de résilience envoient des actes bruts) ; `tests/test_support_guard.rs` lit tous
+# les manifestes du workspace et interdit le nom de la porte et toute écriture du drapeau hors de sa définition.
 test-support = []
 
 [dev-dependencies]
-hearth-agent = { path = ".", features = ["test-support"] }
 minisign.workspace = true
 futures-util.workspace = true
 tempfile.workspace = true
