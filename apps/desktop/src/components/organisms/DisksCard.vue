@@ -93,7 +93,7 @@ const covered = useCoverage(props.entry);
 .disk__head {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
 }
 
@@ -112,7 +112,8 @@ const covered = useCoverage(props.entry);
 }
 
 .disk__mount {
-  color: var(--tx3);
+  /* FIX:01M4D1K6V5DS7DQVR6ZV7A3HGY */
+  color: var(--tx2);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
 }

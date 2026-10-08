@@ -32,8 +32,10 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
 <style scoped>
 .series {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--space-1);
+  min-height: 0;
 }
 
 .series__covered {

@@ -53,7 +53,8 @@ const covered = useCoverage(props.entry);
 <style scoped>
 .mem {
   display: flex;
-  align-items: center;
+  flex: 1 1 auto;
+  align-items: stretch;
   gap: var(--space-4);
 }
 

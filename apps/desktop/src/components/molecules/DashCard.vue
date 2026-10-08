@@ -38,6 +38,11 @@ const titleId = useId();
 }
 
 .card__title {
+  /* FIX:01M4D1K6V5DS7DQVR6ZV7A3HGY */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--tx2);
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
@@ -47,6 +52,7 @@ const titleId = useId();
 
 .card__body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;

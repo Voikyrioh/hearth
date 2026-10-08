@@ -4,6 +4,10 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4D1K9GV5X6MJTHDB8RYPMS6](./FIX-01M4D1K9GV5X6MJTHDB8RYPMS6.md) | Un chargement des mesures qui ne finit pas se lisait comme une panne (C5) | 2026-10-08 |
+| [FIX-01M4D1K8675QMBAFTM76XF4XJC](./FIX-01M4D1K8675QMBAFTM76XF4XJC.md) | La carte Carte graphique absente restait sans explication (C15) | 2026-10-08 |
+| [FIX-01M4D1K6V5DS7DQVR6ZV7A3HGY](./FIX-01M4D1K6V5DS7DQVR6ZV7A3HGY.md) | Le titre « Durée de fonctionnement » se cassait en deux lignes et le point de montage des disques était presque invisible (C14) | 2026-10-08 |
+| [FIX-01M4D1K5GKA4XPJH8391E1HWKZ](./FIX-01M4D1K5GKA4XPJH8391E1HWKZ.md) | Le tableau de bord ne tenait pas à 1280 px : courbes écrasées, cartes de hauteurs inégales, trous (C6, C7) | 2026-10-08 |
 | [FIX-01M4CY8BVM3MV9769QWNDNW7VT](./FIX-01M4CY8BVM3MV9769QWNDNW7VT.md) | Un pic d'une seconde disparaissait de l'historique d'une heure en vieillissant (moyenne par pas de 10 s) | 2026-10-08 |
 | [FIX-01M4CJEQS88NZWCQ129XDP91MT](./FIX-01M4CJEQS88NZWCQ129XDP91MT.md) | Une coupure rétablie entre 1,5 s et 3 s faisait clignoter « Reconnexion en cours » | 2026-10-08 |
 | [FIX-01M4CRD60RKGZC2HTT52GK6P2T](./FIX-01M4CRD60RKGZC2HTT52GK6P2T.md) | La série du processeur de la coquille et le repli des dates suivaient l'horloge murale du poste | 2026-10-08 |
