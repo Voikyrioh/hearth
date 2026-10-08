@@ -100,6 +100,8 @@ const SERVICE_FILESYSTEMS: &[&str] = &[
     "hugetlbfs",
     "mqueue",
     "nsfs",
+    "overlay",
+    "overlayfs",
     "proc",
     "pstore",
     "ramfs",
@@ -118,12 +120,31 @@ pub fn is_real_filesystem(fs: &str) -> bool {
     !SERVICE_FILESYSTEMS.contains(&fs.as_str())
 }
 
-/// Les disques à montrer parmi les volumes listés : systèmes de fichiers de service, volumes de
-/// taille nulle et doublons (un même volume monté à plusieurs endroits, ou lié par `bind`) sont
-/// retirés ; on garde le point de montage le plus court. Résultat trié par point de montage.
+/// Ce volume est-il porté par un périphérique bloc réel (BR-DASH-016) ? Sous Linux et macOS le système donne le
+/// périphérique (`/dev/sda2`, `/dev/mapper/…`) : un volume sans périphérique de ce genre (overlay de Docker,
+/// partage réseau, FUSE) n'est pas un disque ; un jeu de données ZFS n'a pas de chemin `/dev` et en est un. Sous
+/// Windows (lettre de lecteur) l'étiquette du volume ne se juge pas : il l'est.
+/// FIX:01M4EPVM3MK6PDHQDYKQGQB09R (HRT-47, S1a).
+fn carried_by_block_device(volume: &Volume) -> bool {
+    if !volume.mount.starts_with('/') {
+        return true;
+    }
+    volume.name.starts_with("/dev/")
+        || volume
+            .fs
+            .as_deref()
+            .is_some_and(|fs| fs.trim().eq_ignore_ascii_case("zfs"))
+}
+
+/// Les disques à montrer parmi les volumes listés (BR-DASH-012, BR-DASH-016) : systèmes de fichiers de service,
+/// volumes qui ne sont pas portés par un périphérique bloc réel, volumes de taille nulle et doublons (un même
+/// périphérique monté à plusieurs endroits, ou lié par `bind`, dont `/nix/store` en lecture seule) sont retirés ;
+/// on garde le point de montage le plus court. Résultat trié par point de montage.
 pub fn visible_volumes(mut volumes: Vec<Volume>) -> Vec<Volume> {
     volumes.retain(|volume| {
-        volume.total_bytes > 0 && volume.fs.as_deref().is_none_or(is_real_filesystem)
+        volume.total_bytes > 0
+            && volume.fs.as_deref().is_none_or(is_real_filesystem)
+            && carried_by_block_device(volume)
     });
     volumes.sort_by(|a, b| {
         a.mount
@@ -138,7 +159,14 @@ pub fn visible_volumes(mut volumes: Vec<Volume>) -> Vec<Volume> {
         } else {
             &volume.name
         };
-        seen.insert((device.clone(), volume.total_bytes, volume.available_bytes))
+        // Un périphérique `/dev/…` est UN disque, quelle que soit la place libre lue à chaque montage ; les autres
+        // (étiquettes Windows, jeux ZFS) se distinguent aussi par leur taille.
+        let key = if device.starts_with("/dev/") {
+            (device.clone(), 0, 0)
+        } else {
+            (device.clone(), volume.total_bytes, volume.available_bytes)
+        };
+        seen.insert(key)
     });
     volumes.sort_by(|a, b| a.mount.cmp(&b.mount));
     volumes
@@ -231,12 +259,12 @@ mod tests {
             "cgroup2",
             "squashfs",
             " devtmpfs ",
+            "overlay",
+            "overlayfs",
         ] {
             assert!(!is_real_filesystem(fs), "{fs}");
         }
-        for fs in [
-            "ext4", "btrfs", "xfs", "NTFS", "exfat", "overlay", "zfs", "",
-        ] {
+        for fs in ["ext4", "btrfs", "xfs", "NTFS", "exfat", "zfs", ""] {
             assert!(is_real_filesystem(fs), "{fs}");
         }
     }
@@ -253,6 +281,74 @@ mod tests {
         let kept = visible_volumes(volumes);
         let mounts: Vec<_> = kept.iter().map(|v| v.mount.as_str()).collect();
         assert_eq!(mounts, ["/", "/mnt/data"]);
+    }
+
+    const OVERLAY_MOUNT: &str = "/var/lib/docker/rootfs/overlayfs/516ea538a4b3c6d7e8f90123456789abcdef0123456789abcdef0123456789ab";
+
+    fn mounts(kept: Vec<Volume>) -> Vec<String> {
+        kept.into_iter().map(|v| v.mount).collect()
+    }
+
+    // BR-DASH-016 : la table de montage de la forge au premier smoke (2026-10-08, NixOS avec Docker).
+    #[test]
+    fn the_docker_overlay_of_the_forge_is_not_a_disk() {
+        let volumes = vec![
+            volume("/dev/sda2", "/", "ext4", 1000, 400),
+            volume("/dev/sda1", "/boot", "vfat", 500, 450),
+            volume("overlay", OVERLAY_MOUNT, "overlay", 1000, 400),
+        ];
+        assert_eq!(mounts(visible_volumes(volumes)), ["/", "/boot"]);
+    }
+
+    #[test]
+    fn only_filesystems_carried_by_a_block_device_are_disks() {
+        let volumes = vec![
+            volume("/dev/sda2", "/", "ext4", 1000, 400),
+            volume("/dev/mapper/vg-data", "/mnt/data", "xfs", 2000, 500),
+            volume("tank/home", "/home", "zfs", 3000, 900),
+            volume(
+                "overlay",
+                "/var/lib/docker/overlay2/x/merged",
+                "overlay",
+                1000,
+                400,
+            ),
+            volume(
+                "overlay",
+                "/run/containerd/io.containerd/x",
+                "overlayfs",
+                1000,
+                400,
+            ),
+            volume(
+                "shm",
+                "/var/lib/docker/containers/x/mounts/shm",
+                "tmpfs",
+                64,
+                64,
+            ),
+            volume("devtmpfs", "/dev", "devtmpfs", 8000, 8000),
+            volume("/dev/loop3", "/run/snap/core", "squashfs", 100, 0),
+            volume("nas:/export", "/mnt/nas", "nfs4", 9000, 100),
+            volume("gvfsd-fuse", "/run/user/1000/gvfs", "fuse.gvfsd-fuse", 1, 1),
+        ];
+        assert_eq!(
+            mounts(visible_volumes(volumes)),
+            ["/", "/home", "/mnt/data"]
+        );
+    }
+
+    #[test]
+    fn nixos_read_only_store_and_bind_mounts_do_not_double_the_root() {
+        // `/nix/store` est monté en lecture seule sur le même périphérique que `/` ; la place libre peut
+        // différer d'une lecture à l'autre : le périphérique seul décide.
+        let volumes = vec![
+            volume("/dev/sda2", "/nix/store", "ext4", 1000, 399),
+            volume("/dev/sda2", "/", "ext4", 1000, 400),
+            volume("/dev/sda2", "/etc/hosts", "ext4", 1000, 401),
+            volume("/dev/sda1", "/boot", "vfat", 500, 450),
+        ];
+        assert_eq!(mounts(visible_volumes(volumes)), ["/", "/boot"]);
     }
 
     #[test]

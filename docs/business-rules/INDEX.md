@@ -109,6 +109,7 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-DASH-013](./BR-DASH-013-deux-roles-une-vue.md) — Les deux rôles voient le tableau de bord à l'identique — `entrypoint/http/mod.rs::ENDPOINTS, entrypoint/ws/connection.rs` — invariant ✓
 - [BR-DASH-014](./BR-DASH-014-formats-d-unites.md) — Les nombres suivent les unités : pourcentages entiers, Go à une décimale, débit adaptatif, durée longue — `hearth-proto/src/api/metrics.rs` — —
 - [BR-DASH-015](./BR-DASH-015-interfaces-reseau-comptees.md) — Seules les interfaces réseau physiques comptent dans le débit — `domain/machine.rs::throughput_interfaces` — invariant ✓
+- [BR-DASH-016](./BR-DASH-016-disques-portes-par-un-peripherique-bloc.md) — Seuls les systèmes de fichiers portés par un périphérique bloc réel sont des disques — `domain/machine.rs::{carried_by_block_device, visible_volumes}` — invariant ✓
 
 ### UPDATE (client, HRT-16)
 
