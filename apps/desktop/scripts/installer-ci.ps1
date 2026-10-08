@@ -393,6 +393,24 @@ Expect (-not (Test-Path $defaultDir)) '(f4) rien dans le dossier par defaut'
 Uninstall-At $chosen
 Uninstall-At $remembered
 
+# (f5) Le dossier memorise INVALIDE ne fait jamais perdre un /D= : (a) /D= different du memorise ; (b) /D= EGAL au
+# memorise (cas vu en CI : cle laissee par une installation dont le dossier a disparu, puis installation silencieuse
+# dans ce meme dossier). Dans les deux cas l'installation est faite dans le dossier demande.
+$stale = Join-Path $env:RUNNER_TEMP 'stale hearth'
+$other = Join-Path $env:RUNNER_TEMP 'other hearth'
+Remember $stale
+$o = Start-Process $installer -ArgumentList '/S', ('/D=' + $other) -PassThru
+[void]$o.WaitForExit(240000)
+Expect (& $hasHearth $other) '(f5a) dossier memorise invalide + /D=autre : installation dans le dossier demande'
+Expect (-not (Test-Path $stale)) '(f5a) le dossier memorise invalide n''est pas cree'
+Uninstall-At $other
+Remember $stale
+$s = Start-Process $installer -ArgumentList '/S', ('/D=' + $stale) -PassThru
+[void]$s.WaitForExit(240000)
+Expect (& $hasHearth $stale) '(f5b) dossier memorise invalide + /D= le meme dossier : /D= gagne, installation faite la'
+Expect (-not (Test-Path $defaultDir)) '(f5b) rien dans le dossier par defaut'
+Uninstall-At $stale
+
 Clear-Entry
 if ($script:stuck.Count -gt 0) { Fail "l'installateur ne se ferme pas : $($script:stuck -join ' ; ')" }
 Save-Results

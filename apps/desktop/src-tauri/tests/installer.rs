@@ -275,6 +275,17 @@ fn a_remembered_install_folder_is_only_kept_when_it_still_holds_hearth() {
     assert!(check.contains(r#"ReadRegStr $R6 HKCU "${HEARTH_PRODUCT_KEY}" """#));
     assert!(check.contains(r#"${IfNot} ${FileExists} "$R6\${HEARTH_MAIN_EXE}""#));
     assert!(check.contains(r#"StrCpy $INSTDIR "${HEARTH_DEFAULT_DIR}""#));
+    // Un /D= explicite gagne toujours (la CI de la PR #62 l'a vu perdre) : la vraie ligne de commande du processus est lue,
+    // et le dossier n'est touché que si /D= y est absent ET que l'exécutable manque.
+    assert!(check.contains("GetCommandLineW"));
+    let command_line = check
+        .find(r#""/D=""#)
+        .expect("la ligne de commande est cherchée pour /D=");
+    let reset = check.find("StrCpy $INSTDIR").unwrap();
+    assert!(
+        command_line < reset,
+        "/D= est cherché AVANT de toucher $INSTDIR"
+    );
     assert_eq!(
         define(&script, "HEARTH_PRODUCT_KEY"),
         r"Software\Voikyrioh\Hearth"
