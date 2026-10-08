@@ -25,6 +25,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 ## Molécules
 
 - [`LinkStatePill`](./LinkStatePill.md) — Pastille d'état du lien (5 états).
+- [`ErasurePendingNote`](./ErasurePendingNote.md) — Note « Effacement en attente » de la page Sécurité (administrateur, rien à faire).
 - [`SecurityAlertCard`](./SecurityAlertCard.md) — Carte « Ce qui se passe » de la page Sécurité (alerte : depuis quand, combien de comptes, quoi faire).
 - [`SecurityBanner`](./SecurityBanner.md) — Base des bandeaux de sécurité (alerte, mode attaque, suspendu).
 - [`ServerAvatar`](./ServerAvatar.md) — Avatar de serveur (initiales, anneau, pastille d'état).
