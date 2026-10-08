@@ -10,6 +10,7 @@ import {
   formatUptime,
   formatUsage,
 } from "./format";
+import source from "./format.ts?raw";
 
 describe("formats (BR-DASH-014)", () => {
   it("rounds percentages to an integer", () => {
@@ -83,5 +84,13 @@ describe("formats (BR-DASH-014)", () => {
     expect(formatCovered(30_000)).toBe("30 s");
     expect(formatCovered(59.6 * 60_000)).toBe("59 min");
     expect(formatCovered(90 * 60_000)).toBe("1 h 30 min");
+  });
+});
+
+describe("source du formateur", () => {
+  it("n'écrit jamais d'espace invisible en clair : les séparateurs de milliers sont en échappement", () => {
+    expect(source).not.toContain(String.fromCharCode(0x202f));
+    expect(source).not.toContain(String.fromCharCode(0xa0));
+    expect(source).toContain("\\u202F");
   });
 });

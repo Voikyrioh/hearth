@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useId } from "vue";
 import { type NeedsLink, useNeedsLink } from "@/composables/useNeedsLink";
 import HSpinner from "./HSpinner.vue";
 import HTooltip from "./HTooltip.vue";
@@ -48,6 +48,8 @@ const tip = computed(() => linkReason.value ?? (props.disabled ? props.hint : un
 const reason = computed(() =>
   props.reasonBelow && inert.value && !props.busy ? tip.value : undefined,
 );
+// La raison écrite sous le bouton n'est dite qu'une fois : pas d'infobulle redondante, et le texte visible décrit le bouton.
+const reasonId = useId();
 
 function onClick(event: MouseEvent) {
   if (inert.value) {
@@ -60,7 +62,7 @@ function onClick(event: MouseEvent) {
 
 <template>
   <span :class="reasonBelow ? 'btn-with-reason' : 'btn-bare'">
-    <HTooltip :text="tip" :placement="tipPlacement">
+    <HTooltip :text="reason ? undefined : tip" :placement="tipPlacement">
       <template #default="{ describedby }">
         <button
           v-bind="$attrs"
@@ -73,7 +75,7 @@ function onClick(event: MouseEvent) {
           ]"
           :aria-disabled="inert ? 'true' : undefined"
           :aria-busy="busy ? 'true' : undefined"
-          :aria-describedby="describedby"
+          :aria-describedby="reason ? reasonId : describedby"
           @click="onClick"
         >
           <HSpinner v-if="busy" />
@@ -81,7 +83,7 @@ function onClick(event: MouseEvent) {
         </button>
       </template>
     </HTooltip>
-    <span v-if="reason" class="btn__reason" data-button-reason>{{ reason }}</span>
+    <span v-if="reason" :id="reasonId" class="btn__reason" data-button-reason>{{ reason }}</span>
   </span>
 </template>
 

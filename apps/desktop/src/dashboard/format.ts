@@ -32,7 +32,7 @@ const FRENCH_NUMBER = new Intl.NumberFormat("fr-FR", {
 export function decimal(value: number): string {
   // DM Mono n'a pas l'espace fine insécable (U+202F, celle d'Intl en français) : les chiffres suivants tombaient dans une police de repli.
   // L'espace insécable ordinaire (U+00A0) existe dans la police ; un seul endroit : ce formateur (BR-DASH-014).
-  return FRENCH_NUMBER.format(Number(value.toFixed(1))).replaceAll(" ", " ");
+  return FRENCH_NUMBER.format(Number(value.toFixed(1))).replaceAll("\u202F", "\u00A0");
 }
 
 /**

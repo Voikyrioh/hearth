@@ -5,6 +5,11 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | Fiche | Titre | Date |
 |---|---|---|
 | [FIX-01M4EDC0FVT0ZHGASFEMWX7066](./FIX-01M4EDC0FVT0ZHGASFEMWX7066.md) | Réglages et Sécurité : une colonne étroite, une colonne étirée, et du contenu sans borne à 1920 et 2560 (C44, C55 en partie) | 2026-10-08 |
+| [FIX-01M4ECZJ34NZE9Z9P4YATK707H](./FIX-01M4ECZJ34NZE9Z9P4YATK707H.md) | Une courbe qui a le focus récitait une valeur par seconde (suivi de la revue de #58) | 2026-10-08 |
+| [FIX-01M4ECZJBH94ABZXSTNNFFGZ5P](./FIX-01M4ECZJBH94ABZXSTNNFFGZ5P.md) | Un bouton grisé n'expliquait sa raison qu'au survol (C42) | 2026-10-08 |
+| [FIX-01M4ECZJKG6MQ2C65TZP25WSPD](./FIX-01M4ECZJKG6MQ2C65TZP25WSPD.md) | La fenêtre de retrait d'un poste alignait quatre paragraphes avant le champ (C39) | 2026-10-08 |
+| [FIX-01M4ECZJVHHJA1MNQ2E4FSFJ0K](./FIX-01M4ECZJVHHJA1MNQ2E4FSFJ0K.md) | « Un poste à moitié reconnu » : jargon sur la page Sécurité (C34, reste) | 2026-10-08 |
+| [FIX-01M4ECZK55R0HTKS7SQH4WZ1ZZ](./FIX-01M4ECZK55R0HTKS7SQH4WZ1ZZ.md) | Après un échec de lecture, « Réessayer » relançait l'ancien filtre, et rien ne disait que la recherche tapée n'était pas appliquée (HRT-43) | 2026-10-08 |
 | [FIX-01M4E9T718D37EXTXMWA7YXWJE](./FIX-01M4E9T718D37EXTXMWA7YXWJE.md) | Une courbe du tableau de bord ne disait ni sa durée, ni son échelle, ni sa valeur (C10) | 2026-10-08 |
 | [FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J](./FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J.md) | Les jauges à l'état normal étaient dessinées en dégradé rose-braise, la couleur d'une alerte (C13) | 2026-10-08 |
 | [FIX-01M4E9T7ECW7H6R9V4V6YNVRE1](./FIX-01M4E9T7ECW7H6R9V4V6YNVRE1.md) | Tableau de bord sans mesure : « Vu il y a… » posé sur une page qui n'a rien vu | 2026-10-08 |

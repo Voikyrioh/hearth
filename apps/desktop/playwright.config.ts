@@ -39,6 +39,7 @@ export default defineConfig({
         "layout.spec.ts",
         "hrt43-44.spec.ts",
       "hrt42.spec.ts",
+      "hrtx.spec.ts",
       "hrt41.spec.ts",
         "reauth.spec.ts",
         "identity.spec.ts",

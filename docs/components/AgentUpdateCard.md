@@ -11,3 +11,4 @@ L'interface ne fournit NI adresse, NI signature, NI somme : elle ne transmet que
 - Notes : place choisie : colonne de droite des réglages, au-dessus de « Mon compte » (le design y met une carte « État du serveur » par serveur). Store : `agentUpdates`. Tests : `agentUpdate.test.ts`, `stores/agentUpdates.test.ts`, `e2e/agent-update.spec.ts`.
 
 HRT-30 : la confirmation de la mise à jour passe par `AdminActDialog` (kind `agent_update`, jamais couvert par le délai : mot de passe toujours demandé).
+- HRT-40 (C42) : la raison du bouton grisé est écrite sous le bouton (`reason-below`). FIX:01M4ECZJBH94ABZXSTNNFFGZ5P.

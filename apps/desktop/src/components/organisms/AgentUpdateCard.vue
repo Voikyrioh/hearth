@@ -192,11 +192,13 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
     </div>
     <p v-else-if="history" class="agent__history" data-agent-history>{{ history }}</p>
 
+    <!-- FIX:01M4ECZJBH94ABZXSTNNFFGZ5P : la raison du bouton grisé est écrite dessous. -->
     <div v-if="showButton" class="agent__actions">
       <HButton
         :needs-link="{ server: server.id }"
         :disabled="!isAdmin || running"
         :hint="hint"
+        reason-below
         :busy="action.busy.value"
         data-agent-update-button
         @click="confirming = true"

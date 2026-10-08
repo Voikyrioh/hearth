@@ -68,13 +68,19 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
       {{ t(connected ? "settings.connectedAs" : "settings.lastAccount", { username: server.username }) }}
     </p>
     <div class="mine__actions">
-      <HButton variant="secondary" :needs-link="{ server: server.id }" @click="changing = true">
+      <HButton
+        variant="secondary"
+        :needs-link="{ server: server.id }"
+        reason-below
+        @click="changing = true"
+      >
         {{ t("accounts.changeOwnPassword") }}
       </HButton>
       <HButton
         v-if="server.role === 'admin'"
         variant="danger"
         :needs-link="{ server: server.id, role: 'admin' }"
+        reason-below
         @click="removing = true"
       >
         {{ t("accounts.removeOwn") }}

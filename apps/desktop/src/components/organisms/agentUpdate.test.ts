@@ -87,8 +87,13 @@ describe("le bouton « Mettre à jour l'agent »", () => {
     const button = update(wrapper);
     expect(button.exists()).toBe(true);
     expect(button.attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get('[role="tooltip"]').text()).toBe(
+    // La raison est écrite sous le bouton (une seule fois, sans infobulle) et décrit le bouton.
+    expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
+    expect(wrapper.get("[data-button-reason]").text()).toBe(
       "Seul un administrateur peut mettre à jour l'agent",
+    );
+    expect(button.attributes("aria-describedby")).toBe(
+      wrapper.get("[data-button-reason]").attributes("id"),
     );
     await button.trigger("click");
     await flushPromises();
@@ -387,7 +392,7 @@ describe("les refus", () => {
     bridge.setState("forge", "offline");
     await flushPromises();
     expect(update(wrapper).attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get('[role="tooltip"]').text()).toBe(
+    expect(wrapper.get("[data-button-reason]").text()).toBe(
       "Indisponible tant que le serveur est hors ligne.",
     );
   });

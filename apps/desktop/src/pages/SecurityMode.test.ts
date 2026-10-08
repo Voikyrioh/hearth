@@ -354,6 +354,20 @@ describe("Retrait d'un poste", () => {
     expect(document.querySelector("[data-remove-advice]")?.textContent).toContain(
       "Change aussi ton mot de passe si ce poste n'est plus à toi",
     );
+    // HRT-39 : l'essentiel d'abord. Un seul paragraphe (les deux phrases de la spec) avant le champ ; le conseil est replié.
+    const dialog = document.querySelector("dialog[open]") as HTMLElement;
+    const before = Array.from(dialog.querySelectorAll("p")).filter(
+      (paragraph) =>
+        !paragraph.closest("details") &&
+        paragraph.compareDocumentPosition(dialog.querySelector("input") as Node) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(before.map((paragraph) => paragraph.textContent)).toEqual([
+      "Es-tu sûr de vouloir retirer ce poste ? Tu ne pourras plus te connecter depuis ce poste sans avoir un mot de passe valide.",
+    ]);
+    expect(
+      document.querySelector("[data-remove-advice]")?.closest("details")?.hasAttribute("open"),
+    ).toBe(false);
     wrapper.unmount();
   });
 });
