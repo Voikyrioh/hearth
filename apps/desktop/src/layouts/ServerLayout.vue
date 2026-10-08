@@ -68,7 +68,7 @@ function openSecurityPage() {
 <template>
   <div v-if="server" class="layout">
     <ServerNav :server="server" />
-    <div class="layout__main">
+    <div :class="['layout__main', { 'layout__main--table': route.name === 'accounts' }]">
       <AppHeader :title="title" :server-id="server.id">
         <template #actions><div id="header-actions" class="layout__actions" /></template>
       </AppHeader>
@@ -142,6 +142,11 @@ function openSecurityPage() {
   gap: var(--space-4);
   min-width: 0;
   padding: var(--page-pad);
+}
+
+/* FIX:01M4EHYNXY72JB4KW0994J85AB : l'en-tête de Comptes est borné comme son contenu (le tableau de 1 400 px), pas à la borne des autres pages. */
+.layout__main--table {
+  max-width: calc(var(--table-max) + var(--page-pad) * 2);
 }
 
 .layout__actions {

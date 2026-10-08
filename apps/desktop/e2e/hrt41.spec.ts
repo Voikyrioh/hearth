@@ -22,7 +22,7 @@ for (const size of SIZES) {
     page,
   }) => {
     await open(page, size);
-    const spans = await page.locator(".series .series__span").allInnerTexts();
+    const spans = await page.locator(".series .series__span-full").allTextContents();
     const scales = await page.locator(".series .series__scale").allInnerTexts();
     const charts = await page.locator(".series").count();
     expect(charts).toBeGreaterThanOrEqual(5);
@@ -68,6 +68,9 @@ for (const size of SIZES) {
     const strokeOf = () => arc.evaluate((element) => getComputedStyle(element).stroke);
     expect(await strokeOf(), "normal").toBe("rgb(255, 123, 61)");
     // Aux niveaux d'alerte de BR-DASH-003 (valeurs épinglées du pont simulé), les couleurs d'alerte.
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __hearthSim?: object }).__hearthSim),
+    );
     const pin = (level: string | null) =>
       page.evaluate(
         (l) =>

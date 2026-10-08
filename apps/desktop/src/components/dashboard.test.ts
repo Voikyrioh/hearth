@@ -147,7 +147,7 @@ describe("molecules", () => {
         format: (value: number) => `${value} %`,
       },
     });
-    expect(wrapper.get(".series__span").text()).toBe("5 dernières minutes");
+    expect(wrapper.get(".series__span-full").text()).toBe("5 dernières minutes");
     expect(wrapper.get(".series__scale").text()).toBe("0 à 100 %");
     expect(wrapper.get("svg").attributes("aria-label")).toBe(
       "Charge. Dernière valeur 20 %, minimum 10 %, maximum 40 %, sur 5 dernières minutes",

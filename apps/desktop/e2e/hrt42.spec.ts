@@ -37,7 +37,7 @@ for (const size of [...SMALL, ...WIDE]) {
       await expect(page.locator(".layout__content")).toBeVisible();
       const main = await box(page, ".layout__main");
       expect(main.w, `${name} : largeur du contenu`).toBeLessThanOrEqual(1760 + 48 + 1);
-      if (size.width <= 1920) {
+      if (size.width <= 1920 && name !== "accounts") {
         // Jusqu'à 1920 la page est plus étroite que la borne : rien ne change (toute la place disponible).
         expect(main.w, `${name} : toute la place`).toBeGreaterThan(size.width - 272 - 2);
       }
@@ -141,6 +141,10 @@ for (const size of [...SMALL, ...WIDE]) {
   }) => {
     await page.setViewportSize(size);
     await page.goto("/?nodev#/servers/forge/dashboard");
+    // Le crochet du pont simulé est posé après le chargement de la page : on l'attend (course vue à 1100×680 sur la CI).
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __hearthSim?: object }).__hearthSim),
+    );
     await page.evaluate(() =>
       (
         window as unknown as {

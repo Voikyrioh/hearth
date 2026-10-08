@@ -331,6 +331,9 @@ defineExpose({ rows });
 }
 
 .table__head {
+  /* FIX:01M4EHYNER6SJ3ZZVH286TD3FB : même gouttière que la zone de lignes (barre de défilement classique), sinon les en-têtes se décalent. */
+  overflow: hidden;
+  scrollbar-gutter: stable;
   height: var(--audit-row-height);
   border-bottom: var(--border-width) solid var(--bd);
   color: var(--tx2);
@@ -344,7 +347,9 @@ defineExpose({ rows });
   position: relative;
   flex: 1 1 0;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .table__scroll--busy {

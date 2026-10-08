@@ -47,10 +47,11 @@ const updateAvailable = computed(() => agents.withUpdate.includes(props.server.i
       </RouterLink>
       <span class="row__address">{{ server.address }}</span>
     </div>
+    <!-- FIX:01M4EHYPMVHR2TY39G3BQ7ZJZA : l'état du lien suit le nom ; ce sont les étiquettes qui passent à la ligne, jamais la pastille seule. -->
+    <LinkStatePill :state="state" />
     <HTag v-if="mark" :tone="mark === 'alert' ? 'warn' : 'accent'" :data-security-tag="mark">{{ t(MARK_TAGS[mark]) }}</HTag>
     <HTag v-if="server.remember" tone="neutral">{{ t("connect.rememberedBadge") }}</HTag>
     <HTag v-if="updateAvailable" tone="accent" data-update-available>{{ t("agentUpdate.tag") }}</HTag>
-    <LinkStatePill :state="state" />
     <div class="row__actions">
       <HButton v-if="state === 'connected'" variant="secondary" size="sm" @click="$emit('disconnect')">
         {{ t("connect.disconnect") }}
