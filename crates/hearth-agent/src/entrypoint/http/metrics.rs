@@ -45,7 +45,7 @@ pub async fn history(
     let Query(query) = query
         .map_err(|_| ApiError::invalid("window", "Les paramètres de la requête sont illisibles"))?;
     let window = window_of(&query)?;
-    let samples = state.metrics.history(window);
+    let (samples, peaks) = state.metrics.history_with_peaks(window);
     Ok(Json(HistoryResponse {
         window: metrics_wire::window_to_wire(window),
         step_s: window.step_s(),
@@ -53,6 +53,7 @@ pub async fn history(
             .iter()
             .map(|sample| metrics_wire::sample(sample))
             .collect(),
+        peaks: peaks.iter().map(metrics_wire::peak).collect(),
     }))
 }
 

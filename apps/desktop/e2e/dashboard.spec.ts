@@ -135,6 +135,28 @@ test("l'heure écoulée est déjà là à l'ouverture : courbe d'une heure rempl
   await page.setViewportSize({ width: 1366, height: 800 });
 });
 
+test("un pic d'il y a 40 minutes se voit encore sur la fenêtre 1 h (maximum par pas, capture 1920)", async ({
+  page,
+}) => {
+  await page.goto("/?nodev#/servers/forge/dashboard");
+  const radios = page.getByRole("radiogroup", { name: "Durée des courbes" }).getByRole("radio");
+  await radios.nth(2).click();
+  await expect(radios.nth(2)).toHaveAttribute("aria-checked", "true");
+  const chart = section(page, "Processeur").locator("svg.chart").first();
+  const height = await chart.evaluate(
+    (svg) => (svg as unknown as SVGSVGElement).viewBox.baseVal.height,
+  );
+  const path = (await cpuCurve(page).getAttribute("d")) ?? "";
+  const ys = [...path.matchAll(/[ML]\s*(-?[\d.]+)[ ,](-?[\d.]+)/g)].map((match) =>
+    Number(match[2]),
+  );
+  // La courbe touche le haut du graphique : le pic à 100 % n'a pas été moyenné.
+  expect(Math.min(...ys)).toBeLessThan(height * 0.1);
+  await page.setViewportSize({ width: 1920, height: HEIGHT });
+  await page.screenshot({ path: "e2e/screenshots/dashboard-1h-pic-ancien-1920.png" });
+  await page.setViewportSize({ width: 1366, height: 800 });
+});
+
 test("les courbes basculent entre 1 min, 5 min et 1 h sans attente", async ({ page }) => {
   await page.goto("/?nodev#/servers/forge/dashboard");
   const radios = page.getByRole("radiogroup", { name: "Durée des courbes" }).getByRole("radio");

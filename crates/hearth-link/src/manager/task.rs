@@ -70,6 +70,24 @@ pub(crate) enum Command {
 /// de session délibérée du point de vue d'une action.
 const CLOSE_GOING_AWAY: u16 = 1001;
 
+/// Une heure lue n'est annoncée que si elle sert la session COURANTE : même époque que l'abandon le plus récent
+/// (`cancel_hour`) ET flux ouvert. Un message déjà posté dans la file avant l'abandon est ainsi écarté.
+fn hour_is_current(message_epoch: u64, current_epoch: u64, stream_open: bool) -> bool {
+    message_epoch == current_epoch && stream_open
+}
+
+#[cfg(test)]
+mod hour_tests {
+    use super::hour_is_current;
+
+    #[test]
+    fn an_hour_read_for_an_earlier_session_or_without_a_stream_is_never_announced() {
+        assert!(hour_is_current(3, 3, true));
+        assert!(!hour_is_current(2, 3, true), "époque d'une session finie");
+        assert!(!hour_is_current(3, 3, false), "lien retombé");
+    }
+}
+
 enum Internal {
     /// L'heure écoulée lue à part (`attempt::read_hour`) pour la session de cette `epoch`.
     Hour {
@@ -601,7 +619,7 @@ impl Runner {
         match message {
             Internal::Hour { epoch, older } => {
                 // Une lecture d'une session finie (le lien est retombé entre-temps) n'annonce rien.
-                if epoch == self.hour_epoch && self.stream.is_some() {
+                if hour_is_current(epoch, self.hour_epoch, self.stream.is_some()) {
                     self.deps.sink.emit(Event::History {
                         server: self.id.clone(),
                         samples: Arc::new(older),

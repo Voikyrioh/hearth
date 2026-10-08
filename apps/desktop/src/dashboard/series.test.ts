@@ -209,6 +209,59 @@ describe("an hour seeded at 10 s then the 5 minutes of the snapshot at 1 s", () 
   });
 });
 
+describe("SampleRing.fill (the hour read beside the connection)", () => {
+  const live = (from: number, count: number, cpu = 10) =>
+    Array.from({ length: count }, (_, i) => makeSample(at(from + i), { cpu }));
+  const hour = (from: number, count: number, cpu = 19) =>
+    Array.from({ length: count }, (_, i) => makeSample(at(from + i * 10) + 3, { cpu }));
+
+  it("fills what is older than the first sample and keeps every live sample as it was", () => {
+    const ring = new SampleRing();
+    ring.merge(live(600, 100, 100));
+    ring.fill(hour(0, 60));
+    expect(ring.samples().filter((sample) => sample.cpu === 100)).toHaveLength(100);
+    expect(ring.first?.at).toBe(at(0) + 3);
+    expect(ring.length).toBe(100 + 60);
+  });
+
+  it("does not fill a lost sample (neighbours 2 s apart): a real hole stays a hole", () => {
+    const ring = new SampleRing();
+    ring.merge([...live(0, 50), ...live(52, 50)]);
+    // Un point de l'heure tombe pile dans le trou de 2 s : ses voisins sont à 1 s, il n'entre pas.
+    ring.fill([makeSample(at(51))]);
+    expect(ring.length).toBe(100);
+  });
+
+  it("fills a long link outage (more than 3 s with no sample at all) with the hour averages", () => {
+    const ring = new SampleRing();
+    ring.merge([...live(0, 50), ...live(350, 50)]);
+    ring.fill(hour(52, 29));
+    // Entre 52 s et 340 s : un point par 10 s, chacun à plus de 1,5 s de tout échantillon.
+    expect(ring.length).toBe(100 + 29);
+    expect(
+      ring.samples().every((sample, i, all) => i === 0 || sample.at > (all[i - 1]?.at ?? 0)),
+    ).toBe(true);
+  });
+
+  it("applying the same hour twice changes nothing", () => {
+    const ring = new SampleRing();
+    ring.merge(live(600, 100));
+    ring.fill(hour(0, 50));
+    const once = ring.length;
+    ring.fill(hour(0, 50));
+    expect(ring.length).toBe(once);
+  });
+
+  it("a peak carried by an old hour sample is drawn at its height on the 1 h window", () => {
+    const ring = new SampleRing();
+    ring.merge(live(3000, 600));
+    // L'agent rend le maximum de chaque pas : le pic d'une seconde y est, à 100.
+    ring.fill([...hour(0, 270), makeSample(at(1005), { cpu: 100 })].sort((a, b) => a.at - b.at));
+    const points = resample(ring.samples(), "1h", cpuLoad);
+    expect(Math.max(...points.map((point) => point.v ?? 0))).toBe(100);
+  });
+});
+
 describe("coverage and measures", () => {
   it("measures the time covered inside the window, on contiguous samples", () => {
     expect(coverageMs([], "5m")).toBe(0);

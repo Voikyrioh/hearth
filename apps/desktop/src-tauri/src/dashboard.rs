@@ -369,6 +369,27 @@ impl MonoMs {
     }
 }
 
+/// « Maintenant » du module : voir [`MonoMs`] (horloge murale lue UNE fois au premier appel, puis monotone).
+pub fn now_ms() -> i64 {
+    use std::sync::OnceLock;
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    static CLOCK: OnceLock<MonoMs> = OnceLock::new();
+    CLOCK
+        .get_or_init(|| {
+            MonoMs::new(
+                || {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .ok()
+                        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
+                        .unwrap_or(0)
+                },
+                Instant::now(),
+            )
+        })
+        .at(Instant::now())
+}
+
 /// L'heure écoulée avant l'instantané (`link://history`), à 1 échantillon par 10 secondes : le tableau de bord
 /// amorce sa courbe d'une heure dès l'ouverture (BR-DASH-010). Plus ancienne que l'instantané.
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]

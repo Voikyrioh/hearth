@@ -65,6 +65,25 @@ pub struct Sample {
     pub temps: Vec<TempSample>,
 }
 
+/// Le MAXIMUM de chaque mesure tracée sur un pas d'une fenêtre rééchantillonnée (`1h`, pas de 10 s), rendu à
+/// côté de la moyenne : un pic d'une seconde ne disparaît pas quand il vieillit (BR-DASH-010).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StepPeak {
+    /// Charge globale maximale du pas.
+    pub cpu: f32,
+    pub mem_used_bytes: u64,
+    /// Débits maximaux (chacun son maximum) ; absent si aucune mesure de débit dans le pas.
+    pub net: Option<NetSample>,
+    /// Une entrée par carte graphique du dernier échantillon du pas, dans le même ordre.
+    pub gpus: Vec<GpuPeak>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GpuPeak {
+    pub load_percent: Option<f32>,
+    pub memory_used_bytes: Option<u64>,
+}
+
 /// Fenêtre d'historique demandée (`window=1m|5m|1h`, BR-DASH-010).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HistoryWindow {
@@ -84,6 +103,12 @@ pub struct HistoryResponse {
     pub step_s: u32,
     /// Du plus ancien au plus récent.
     pub samples: Vec<Sample>,
+    /// Les maxima de chaque pas, un par échantillon de `samples`, dans le même ordre : seulement pour la
+    /// fenêtre `1h` (les autres sont à 1 échantillon par seconde, déjà au maximum de détail). Champ AJOUTÉ :
+    /// un client plus ancien l'ignore et lit les moyennes de `samples` ; un agent plus ancien ne l'envoie
+    /// pas (liste vide).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peaks: Vec<StepPeak>,
 }
 
 #[cfg(test)]
@@ -114,6 +139,43 @@ mod tests {
             }],
             temps: vec![],
         }
+    }
+
+    #[test]
+    fn the_peaks_are_an_added_field_an_older_reader_ignores_and_an_older_agent_omits() {
+        let mut response = HistoryResponse {
+            window: HistoryWindow::OneHour,
+            step_s: 10,
+            samples: vec![sample()],
+            peaks: vec![],
+        };
+        // Sans maxima (fenêtres à 1 s, agent plus ancien) : le champ n'est pas écrit.
+        assert!(!serde_json::to_string(&response).unwrap().contains("peaks"));
+        // Un agent plus ancien n'envoie pas le champ : il se lit comme une liste vide.
+        let old = r#"{"window":"1h","step_s":10,"samples":[]}"#;
+        assert!(
+            serde_json::from_str::<HistoryResponse>(old)
+                .unwrap()
+                .peaks
+                .is_empty()
+        );
+        response.peaks = vec![StepPeak {
+            cpu: 100.0,
+            mem_used_bytes: 1,
+            net: None,
+            gpus: vec![GpuPeak {
+                load_percent: Some(90.0),
+                memory_used_bytes: None,
+            }],
+        }];
+        let text = serde_json::to_string(&response).unwrap();
+        assert_eq!(
+            serde_json::from_str::<HistoryResponse>(&text).unwrap(),
+            response
+        );
+        // Un lecteur plus ancien (sans le champ) ignore `peaks` : il lit les moyennes de `samples`.
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(value["samples"].is_array() && value["peaks"].is_array());
     }
 
     #[test]
