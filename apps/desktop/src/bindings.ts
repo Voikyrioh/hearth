@@ -607,6 +607,15 @@ export type GpuSampleDto = {
 	tempC: number | null,
 };
 
+/**
+ *  L'heure écoulée avant l'instantané (`link://history`), à 1 échantillon par 10 secondes : le tableau de bord
+ *  amorce sa courbe d'une heure dès l'ouverture (BR-DASH-010). Plus ancienne que l'instantané.
+ */
+export type HistoryEvent = {
+	serverId: string,
+	history: SampleDto[],
+};
+
 export type InvalidField = "name" | "address" | "port" | "credentials" | "fingerprint" | "other";
 
 export type LevelDto = "normal" | "attention" | "critical";

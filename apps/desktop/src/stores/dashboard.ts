@@ -87,13 +87,27 @@ export const useDashboardStore = defineStore("dashboard", () => {
 
   function apply(serverId: string, event: MachineEvent) {
     const target = entry(serverId);
+    if (event.kind === "history") {
+      // L'heure écoulée avant l'instantané : elle ne comble que ce que l'anneau n'a pas (plus ancien, trous),
+      // ne remplace jamais un échantillon reçu en direct et ne touche ni l'identité ni le dernier échantillon
+      // (BR-DASH-010).
+      target.ring.fill(event.history);
+      target.tick += 1;
+      return;
+    }
     if (event.kind === "view") {
       const { view } = event;
+      // Le plus récent déjà connu, AVANT de recoller la vue (FIX:01M4CRD381DKREY9RARJ81E6WH).
+      const knownAt = target.ring.last?.at;
       target.ring.merge(view.history);
       const viewLast = view.history.at(-1);
-      // Une lecture du disque qui arrive après l'instantané de connexion ne remet pas l'identité d'hier.
-      const stale = viewLast && target.latest && viewLast.at < target.latest.sample.at;
-      if (!stale || !target.machine) target.machine = view.machine;
+      // Une vue plus ancienne que ce qu'on sait déjà (lecture du disque tardive, ou sans aucun échantillon)
+      // ne remet pas l'identité d'hier : celle d'une connexion plus récente prime.
+      const stale =
+        target.machine !== null &&
+        knownAt !== undefined &&
+        (viewLast === undefined || viewLast.at < knownAt);
+      if (!stale) target.machine = view.machine;
       // Les niveaux de la vue sont ceux de SON dernier échantillon : ils ne remplacent pas ceux d'un
       // échantillon du flux plus récent.
       if (viewLast && view.levels && (!target.latest || viewLast.at >= target.latest.sample.at)) {

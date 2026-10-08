@@ -7,6 +7,7 @@ pub mod backoff;
 pub mod book;
 pub mod compat;
 pub mod event;
+pub mod history;
 pub mod pending_ops;
 pub mod pinning;
 pub mod secret;

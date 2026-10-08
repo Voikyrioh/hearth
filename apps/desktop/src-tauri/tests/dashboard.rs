@@ -310,3 +310,73 @@ fn quantities_and_percentages_cross_the_bridge_readably() {
     assert_eq!(json["levels"]["cpu"], "normal");
     assert_eq!(json["serverId"], "srv");
 }
+
+/// L'heure écoulée avant l'instantané : retenue, rejouée avec la vue, strictement plus ancienne que son
+/// premier échantillon, et jamais mêlée à la série du processeur (HRT-18, BR-DASH-010).
+#[test]
+fn the_hour_before_the_snapshot_is_kept_replayed_with_the_view_and_kept_out_of_the_cpu_series() {
+    let mut book = DashBook::default();
+    let machine = machine(false, false);
+    let view_samples: Vec<Sample> = (600..=605).map(|s| sample(s, 10.0)).collect();
+    // L'heure d'avant : un échantillon par 10 s, dont un chevauche l'instantané (à écarter à la relecture).
+    let hour: Vec<Sample> = [0, 10, 20, 600, 610]
+        .iter()
+        .map(|s| sample(*s, 99.0))
+        .collect();
+    let event = book.on_history("srv", &hour, 0);
+    assert_eq!(event.server_id, "srv");
+    assert_eq!(event.history.len(), 5);
+
+    let (view, _) = snapshot("srv", &machine, &view_samples, 0);
+    let first = view.history[0].at;
+    let joined = book.with_older(view);
+    // 3 plus anciens (0, 10, 20 s), les échantillons à 600 s et après appartiennent à l'instantané.
+    assert_eq!(joined.history.len(), 3 + 6);
+    assert!(joined.history[..3].iter().all(|sample| sample.at < first));
+    assert!(
+        joined
+            .history
+            .windows(2)
+            .all(|pair| pair[0].at < pair[1].at)
+    );
+
+    // La série du processeur (30 s à 1 Hz) ne voit pas l'heure : un snapshot de connexion la repart de lui seul.
+    let snapshot_event = book.on_snapshot("srv", &machine, &view_samples, 605_000);
+    assert_eq!(snapshot_event.history.len(), 6);
+    let level = book
+        .on_metrics("srv", &sample(606, 10.0), 606_000)
+        .levels
+        .cpu;
+    assert_eq!(
+        level,
+        LevelDto::Normal,
+        "99 % de l'heure d'avant ne tient pas 30 s"
+    );
+
+    // Un serveur oublié oublie aussi son heure.
+    book.forget("srv");
+    let (view, _) = snapshot("srv", &machine, &view_samples, 0);
+    assert_eq!(book.with_older(view).history.len(), 6);
+}
+
+/// FIX:01M4CRD60RKGZC2HTT52GK6P2T : « maintenant » lit l'horloge murale UNE fois, puis avance sur l'horloge
+/// monotone. Rougit si on revient à une lecture murale à chaque appel (la source serait appelée plusieurs fois et
+/// le temps suivrait ses sauts).
+#[test]
+fn now_reads_the_wall_clock_once_then_only_follows_the_monotonic_clock() {
+    use hearth_desktop_lib::dashboard::MonoMs;
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+    let reads = Cell::new(0);
+    let start = Instant::now();
+    let clock = MonoMs::new(
+        || {
+            reads.set(reads.get() + 1);
+            1_790_000_000_000
+        },
+        start,
+    );
+    assert_eq!(clock.at(start), 1_790_000_000_000);
+    assert_eq!(clock.at(start + Duration::from_secs(5)), 1_790_000_005_000);
+    assert_eq!(reads.get(), 1, "l'horloge murale n'est lue qu'une fois");
+}

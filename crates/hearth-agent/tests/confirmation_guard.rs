@@ -4,6 +4,7 @@
 //! - **le moyen n'existe plus** : ni la porte des bancs (`accept_unconfirmed_acts_for_tests`), ni le marqueur
 //!   `Reauthenticated::unconfirmed`, ni le drapeau `reauth_required`, ni la fonction cargo `test-support` de
 //!   l'agent ne figurent dans `src/` ni dans un manifeste du workspace (le test lit tous les membres) ;
+//! - **une seule fabrication** de `Reauthenticated` dans `src/` (après une confirmation réussie) ;
 //! - **le handler de chaque route d'acte prend `Extension<Reauthenticated>`** (jamais optionnelle), dans sa
 //!   signature : sans la confirmation posée par la couche, il ne s'exécute pas ;
 //! - **comportement** : le scénario `e2e-update` prouve que le binaire de publication exige (un acte sans
@@ -55,6 +56,34 @@ fn nothing_in_src_can_act_without_the_confirmation() {
         }
     }
     assert!(hits.is_empty(), "moyen d'agir sans confirmation : {hits:?}");
+}
+
+/// Ce qui tient : `Reauthenticated` n'a qu'UN lieu de fabrication dans `src/`, après une confirmation
+/// réussie (`SessionService::reauthenticate`). Une porte rouverte sous un autre nom devrait le fabriquer
+/// ailleurs et ferait tomber ce compte, quel que soit son nom.
+#[test]
+fn reauthenticated_is_built_in_exactly_one_place() {
+    let mut files = Vec::new();
+    rust_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut files,
+    );
+    let mut builds = Vec::new();
+    for path in files {
+        let text = std::fs::read_to_string(&path).unwrap();
+        for (index, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or("");
+            // Une fabrication : le constructeur de tuple, jamais le type dans une signature.
+            if code.contains("Reauthenticated(") && !code.contains("struct Reauthenticated") {
+                builds.push(format!("{}:{}", path.display(), index + 1));
+            }
+        }
+    }
+    assert_eq!(
+        builds.len(),
+        1,
+        "fabrications de `Reauthenticated` : {builds:?}"
+    );
 }
 
 /// Les membres du workspace, lus de la racine.

@@ -266,6 +266,12 @@ pub struct Options {
     /// Le client parle la clé d'appareil (défi signé, inscription). Faux par défaut : les scénarios
     /// d'avant HRT-23 voient un agent sans défi, comme avant (`Spy::old_agent`).
     pub device_key: bool,
+    /// Réponse scriptée de `GET /metrics/history?window=1h` (l'agent vient de démarrer : son anneau est vide).
+    pub hours: Vec<hearth_proto::api::metrics::HistoryResponse>,
+    /// La PREMIÈRE lecture de l'heure ne répond pas tant que le test ne la libère pas (`hour_release`).
+    pub hour_hold_first: bool,
+    /// La lecture de l'heure échoue (agent sans la route, délai) : la connexion s'ouvre quand même.
+    pub hour_fails: bool,
 }
 
 impl Default for Options {
@@ -276,6 +282,9 @@ impl Default for Options {
             config: fast_config(),
             updating: None,
             device_key: false,
+            hours: Vec::new(),
+            hour_hold_first: false,
+            hour_fails: false,
         }
     }
 }
@@ -364,6 +373,13 @@ pub struct SpyState {
     pub writes: std::sync::Mutex<Vec<(String, String)>>,
     /// L'agent est vu « d'avant la confirmation des actes » : `GET /security` perd `admin_reauth`.
     pub hide_reauth: std::sync::atomic::AtomicBool,
+    /// Réponse scriptée de `GET /metrics/history?window=1h` (le vrai agent vient de démarrer : son anneau est vide).
+    pub scripted_hour: std::sync::Mutex<Vec<hearth_proto::api::metrics::HistoryResponse>>,
+    pub hour_hold_first: std::sync::atomic::AtomicBool,
+    pub hour_release: tokio::sync::Notify,
+    pub hour_calls: std::sync::atomic::AtomicUsize,
+    /// La lecture de l'heure rend une erreur de transport.
+    pub hour_fails: std::sync::atomic::AtomicBool,
 }
 
 impl SpyState {
@@ -406,6 +422,11 @@ impl Spy {
                 first: std::sync::Mutex::new(None),
                 writes: std::sync::Mutex::new(Vec::new()),
                 hide_reauth: std::sync::atomic::AtomicBool::new(false),
+                scripted_hour: std::sync::Mutex::new(Vec::new()),
+                hour_hold_first: std::sync::atomic::AtomicBool::new(false),
+                hour_release: tokio::sync::Notify::new(),
+                hour_calls: std::sync::atomic::AtomicUsize::new(0),
+                hour_fails: std::sync::atomic::AtomicBool::new(false),
             }),
         }
     }
@@ -479,6 +500,17 @@ impl hearth_link::ports::Transport for SharedSpy {
         hearth_link::ports::transport::TransportError,
     > {
         self.0.request(target, token, request).await
+    }
+
+    async fn hour_history(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+    ) -> Result<
+        hearth_proto::api::metrics::HistoryResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.hour_history(target, token).await
     }
 
     async fn export_audit(
@@ -624,6 +656,45 @@ impl hearth_link::ports::Transport for Spy {
         Ok(response)
     }
 
+    async fn hour_history(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+    ) -> Result<
+        hearth_proto::api::metrics::HistoryResponse,
+        hearth_link::ports::transport::TransportError,
+    > {
+        if self
+            .state
+            .hour_fails
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(hearth_link::ports::transport::TransportError::Io(
+                "lecture coupée".into(),
+            ));
+        }
+        // Un historique scripté (le banc ne peut pas vieillir l'anneau de l'agent), sinon le vrai.
+        let call = self
+            .state
+            .hour_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call == 0
+            && self
+                .state
+                .hour_hold_first
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            self.state.hour_release.notified().await;
+        }
+        {
+            let scripted = self.state.scripted_hour.lock().unwrap();
+            if let Some(response) = scripted.get(call).or_else(|| scripted.last()) {
+                return Ok(response.clone());
+            }
+        }
+        self.inner.hour_history(target, token).await
+    }
+
     async fn export_audit(
         &self,
         target: &hearth_link::ports::transport::Target,
@@ -697,6 +768,13 @@ impl World {
                 ChallengeMode::OldAgent
             },
         ));
+        *spy.state.scripted_hour.lock().unwrap() = options.hours.clone();
+        spy.state
+            .hour_hold_first
+            .store(options.hour_hold_first, std::sync::atomic::Ordering::SeqCst);
+        spy.state
+            .hour_fails
+            .store(options.hour_fails, std::sync::atomic::Ordering::SeqCst);
         let transport: Arc<dyn hearth_link::ports::Transport> = Arc::new(SharedSpy(spy.clone()));
         let manager = start_manager_shared(
             dir.path(),

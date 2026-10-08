@@ -30,5 +30,6 @@ Côté agent : à chaque abonnement, le `snapshot` rend l'historique jusqu'au de
 - `SampleRing::merge` : l'instantané qui suit une reconnexion remplace ce qu'il recouvre et garde le plus ancien et le plus récent ; les courbes se terminent au dernier échantillon (elles ne glissent pas pendant la coupure). Tests : `dashboard/series.test.ts`, `pages/Dashboard.test.ts`, `e2e/dashboard.spec.ts`.
 
 ## Historique
+- 2026-10-08 — HRT-18 : une vue sans échantillon, ou plus ancienne que le plus récent déjà connu (y compris l'heure lue à l'ouverture), ne remplace plus l'identité de la machine (FIX-01M4CRD381DKREY9RARJ81E6WH).
 - 2026-10-04 — création (HRT-06, session 2026-10-04-hearth-creation).
 - 2026-10-05 — interface du tableau de bord (HRT-11, session 2026-10-04-hearth-creation).

@@ -41,9 +41,11 @@ pub fn platform_probe() -> Arc<dyn GpuProbe> {
     }
 }
 
-/// Arrondit une mesure à une décimale : pas de bruit inutile sur le fil.
-pub(crate) fn round1(value: f32) -> f32 {
-    (value * 10.0).round() / 10.0
+/// Tronque une mesure à une décimale (vers le bas) : pas de bruit inutile sur le fil, et la même règle que
+/// l'affichage, qui tronque (« 99 % » pour 99,96). Arrondir ferait afficher ou classer « 100 % » une mesure à
+/// 99,96 (FIX:01M4CRD4NX3A34B7Z31A7RWE1B). La tolérance absorbe le bruit des flottants (0,7 lu « 0,69999999 »).
+pub(crate) fn trunc1(value: f32) -> f32 {
+    (((f64::from(value) * 10.0) + 1e-4).floor() / 10.0) as f32
 }
 
 #[cfg(test)]
@@ -84,9 +86,19 @@ mod tests {
     }
 
     #[test]
-    fn rounding_keeps_one_decimal() {
-        assert_eq!(round1(12.345), 12.3);
-        assert_eq!(round1(99.96), 100.0);
-        assert_eq!(round1(0.04), 0.0);
+    fn truncation_keeps_one_decimal_like_the_display() {
+        assert_eq!(trunc1(12.345), 12.3);
+        assert_eq!(trunc1(99.96), 99.9, "99,96 ne devient jamais 100");
+        assert_eq!(trunc1(0.04), 0.0);
+        assert_eq!(
+            trunc1(0.7),
+            0.7,
+            "le bruit des flottants ne retire pas un dixième"
+        );
+        assert_eq!(
+            trunc1(-3.25),
+            -3.3,
+            "vers le bas, comme Math.floor de l'affichage"
+        );
     }
 }

@@ -107,7 +107,9 @@ describe("TauriLinkBridge.onMachine", () => {
       got.push(
         event.kind === "view"
           ? `view:${event.view.history.length}`
-          : `metrics:${event.metrics.sample.at}`,
+          : event.kind === "history"
+            ? `history:${event.history.length}`
+            : `metrics:${event.metrics.sample.at}`,
       ),
     );
     expect(got).toEqual(["view:1"]);
@@ -116,10 +118,12 @@ describe("TauriLinkBridge.onMachine", () => {
     await emit(LINK_EVENTS.metrics, { serverId: "b", sample: sample(3000), levels });
     await emit(LINK_EVENTS.snapshot, view("a", [sample(1000), sample(2000)]));
     await emit(LINK_EVENTS.snapshot, view("b", []));
-    expect(got).toEqual(["view:1", "metrics:2000", "view:2"]);
+    await emit(LINK_EVENTS.history, { serverId: "a", history: [sample(500)] });
+    await emit(LINK_EVENTS.history, { serverId: "b", history: [sample(600)] });
+    expect(got).toEqual(["view:1", "metrics:2000", "view:2", "history:1"]);
     off();
     await emit(LINK_EVENTS.metrics, { serverId: "a", sample: sample(4000), levels });
-    expect(got).toHaveLength(3);
+    expect(got).toHaveLength(4);
   });
 
   it("replays nothing when the shell has no view yet", async () => {

@@ -7,6 +7,7 @@ import {
   type AccountOutcome as BoundOutcome,
   commands,
   type FingerprintEvent,
+  type HistoryEvent,
   type LinkStateDto,
   type MetricsEvent,
   type NoticeEvent,
@@ -31,7 +32,7 @@ import {
   toDeviceRemovalOutcome,
   toTrustedDevices,
 } from "./devices";
-import { type MachineEvent, toMetrics, toView } from "./machine";
+import { type MachineEvent, toHistory, toMetrics, toView } from "./machine";
 import {
   type AdminActKind,
   type ReauthMode,
@@ -75,6 +76,7 @@ export const LINK_EVENTS = {
   notice: "link://notice",
   snapshot: "link://snapshot",
   metrics: "link://metrics",
+  history: "link://history",
   audit: "link://audit",
   auditGap: "link://audit-gap",
   agentUpdate: "agent-update://progress",
@@ -200,6 +202,13 @@ export class TauriLinkBridge implements LinkBridge {
           if (event.payload.serverId !== serverId) return;
           const metrics = toMetrics(event.payload);
           if (metrics) listener({ kind: "metrics", metrics });
+        }),
+      );
+      unlisteners.push(
+        await listen<HistoryEvent>(LINK_EVENTS.history, (event) => {
+          if (event.payload.serverId !== serverId) return;
+          const history = toHistory(event.payload);
+          if (history.length > 0) listener({ kind: "history", history });
         }),
       );
       // Écoute posée d'abord, lecture ensuite. Rien n'est jeté : la vue lue complète ce que le flux

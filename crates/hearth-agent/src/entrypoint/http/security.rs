@@ -80,7 +80,7 @@ pub async fn state(
     let view = view(&snapshot)?;
     let admin_reauth = state
         .sessions
-        .admin_reauth_info(&caller, &addr, true)
+        .admin_reauth_info(&caller, &addr)
         .await
         .map_err(|error| ApiError::internal(&error))?;
     Ok(Json(SecurityResponse {
@@ -147,7 +147,7 @@ pub async fn set_reauth(
         .map_err(|error| ApiError::internal(&error))?;
     let info = state
         .sessions
-        .admin_reauth_info(&caller, &addr, true)
+        .admin_reauth_info(&caller, &addr)
         .await
         .map_err(|error| ApiError::internal(&error))?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "Route inconnue"))?;
