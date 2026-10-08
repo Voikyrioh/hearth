@@ -64,8 +64,8 @@ describe("HAreaChart", () => {
         label: "Débit réseau",
       },
     });
-    expect(wrapper.attributes("role")).toBe("img");
-    expect(wrapper.attributes("aria-label")).toBe("Débit réseau");
+    expect(wrapper.find("svg").attributes("role")).toBe("img");
+    expect(wrapper.find("svg").attributes("aria-label")).toBe("Débit réseau");
     expect(wrapper.findAll(".chart__line")).toHaveLength(2);
   });
 });

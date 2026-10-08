@@ -23,7 +23,7 @@ Le tableau de bord (HRT-11), jamais publié.
 Aucun.
 
 ## Correction
-Grille par conteneur (`container: dash`) : 12 colonnes au-dessus de 1300 px de page, 6 en dessous (Machine + Processeur, Mémoire + Réseau, Carte graphique pleine largeur, Disques pleine largeur), 1 colonne sous 700 px ; cartes étirées (`align-items: stretch`, cases en colonne dont les cartes grandissent) ; Températures empilée sous Mémoire (choix : Disques + Températures ne tenaient pas sous le pli à 1920). `// FIX:01M4D1K5GKA4XPJH8391E1HWKZ`.
+Grille par conteneur (`container: dash`) : 12 colonnes au-dessus de 1300 px de page, 6 en dessous (Machine + Processeur, Mémoire + Réseau, Carte graphique pleine largeur, Disques pleine largeur), 1 colonne sous 700 px ; cartes étirées (`align-items: stretch`, cases en colonne dont les cartes grandissent) ; Carte graphique 4, Réseau 3, Disques 3, Températures 2 en 12 colonnes (choix : Disques + Températures empilés ne tenaient pas sous le pli à 1920) ; le contenu REMPLIT chaque carte : la courbe (`HAreaChart`, hauteur du viewBox suivie par `ResizeObserver`) prend la hauteur restante, les barres des cœurs et la courbe de charge se partagent la carte Processeur ; assertion de remplissage (vide sous le contenu au plus 32 px), rouge sur la tête 3608f64. `// FIX:01M4D1K5GKA4XPJH8391E1HWKZ`.
 
 ## Règles
 - Design : grille 12 puis 6 colonnes (`contexts/hearth/conceptions/2026-10-04-design-ecrans-socle.md`).

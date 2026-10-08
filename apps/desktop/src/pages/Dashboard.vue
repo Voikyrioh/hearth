@@ -101,13 +101,11 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
       <div class="dash__grid">
         <div class="dash__machine"><MachineCard :entry="entry" /></div>
         <div class="dash__cpu"><CpuCard :entry="entry" /></div>
-        <div class="dash__memory">
-          <MemoryCard :entry="entry" />
-          <TemperaturesCard :entry="entry" />
-        </div>
+        <div class="dash__memory"><MemoryCard :entry="entry" /></div>
         <div class="dash__gpu"><GpuCard :entry="entry" /></div>
         <div class="dash__network"><NetworkCard :entry="entry" /></div>
         <div class="dash__disks"><DisksCard :entry="entry" /></div>
+        <div class="dash__temps"><TemperaturesCard :entry="entry" /></div>
       </div>
     </div>
   </template>
@@ -129,7 +127,9 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
   min-height: var(--control-sm);
 }
 
-/* Grille de 12 colonnes : Machine 3, Processeur 5, Mémoire 4 ; Carte graphique 5, Réseau 4,
+/* Grille de 12 colonnes : Machine 3, Processeur 5, Mémoire 4 ; Carte graphique 4, Réseau 3, Disques 3,
+   Températures 2 (HRT-34 : sinon Disques + Températures empilés dépassaient la moitié basse à 1920 px).
+   Ancienne répartition : Carte graphique 5, Réseau 4,
    Disques 3 ; Températures sous Mémoire (HRT-34 : Disques et Températures empilés dépassaient la moitié basse de
    l'écran à 1920 px, l'essentiel ne tenait pas sans défiler). Une rangée = une hauteur : les cartes d'une rangée s'étirent. Sous 1300 px de
    page : 6 colonnes, puis 1 sous 700 px (voir plus bas). */
@@ -146,7 +146,8 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
 .dash__memory,
 .dash__gpu,
 .dash__network,
-.dash__disks {
+.dash__disks,
+.dash__temps {
   display: flex;
   flex-direction: column;
   gap: var(--card-gap);
@@ -158,7 +159,8 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
 .dash__memory > *,
 .dash__gpu > *,
 .dash__network > *,
-.dash__disks > * {
+.dash__disks > *,
+.dash__temps > * {
   flex: 1 1 auto;
 }
 
@@ -175,15 +177,19 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
 }
 
 .dash__gpu {
-  grid-column: span 5;
+  grid-column: span 4;
 }
 
 .dash__network {
-  grid-column: span 4;
+  grid-column: span 3;
 }
 
 .dash__disks {
   grid-column: span 3;
+}
+
+.dash__temps {
+  grid-column: span 2;
 }
 
 /* Page de moins de 1300 px (fenêtre ouverte à 1280, 1366) : 6 colonnes, deux cartes par rangée, la carte
@@ -220,7 +226,12 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
 
   .dash__disks {
     order: 6;
-    grid-column: span 6;
+    grid-column: span 3;
+  }
+
+  .dash__temps {
+    order: 7;
+    grid-column: span 3;
   }
 }
 
@@ -235,7 +246,8 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
   .dash__memory,
   .dash__gpu,
   .dash__network,
-  .dash__disks {
+  .dash__disks,
+  .dash__temps {
     grid-column: auto;
   }
 }

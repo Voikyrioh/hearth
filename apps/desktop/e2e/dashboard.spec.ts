@@ -250,6 +250,26 @@ for (const size of LAYOUT_SIZES) {
         }
       }
     }
+    // REMPLISSAGE (revue UX C7) : dans chaque carte, l'espace vide sous le dernier élément de contenu ne dépasse
+    // pas le remplissage normal de la carte (32 px de tolérance) : les trous ne passent pas DANS les cartes.
+    const gaps = await page.locator("section.card").evaluateAll((cards) =>
+      cards.map((card) => {
+        const box = card.getBoundingClientRect();
+        const padding = Number.parseFloat(getComputedStyle(card).paddingBottom);
+        let bottom = 0;
+        for (const element of card.querySelectorAll("*")) {
+          const rect = element.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) bottom = Math.max(bottom, rect.bottom);
+        }
+        return {
+          title: card.querySelector("h2")?.textContent ?? "",
+          empty: Math.round(box.bottom - bottom - padding),
+        };
+      }),
+    );
+    for (const gap of gaps) {
+      expect(gap.empty, `${gap.title} : vide sous son contenu`).toBeLessThanOrEqual(32);
+    }
     // Pas de titre cassé sur plusieurs lignes, courbes d'au moins 150 px de large.
     for (const box of boxes) expect(box.titleLines, box.title).toBeLessThanOrEqual(1);
     const charts = await page

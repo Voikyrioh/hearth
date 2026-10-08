@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, useId } from "vue";
 import type { Point } from "@/dashboard/series";
 
 // Courbe pleine (SVG pur) : trait 2 px, remplissage dégradé, point d'extrémité plein, pas de
@@ -19,9 +19,32 @@ const props = defineProps<{
 }>();
 
 const WIDTH = 300;
-const HEIGHT = 80;
+const DEFAULT_HEIGHT = 80;
 const PAD = 4;
 const prefix = useId();
+
+// La courbe remplit la hauteur que sa carte lui laisse (HRT-34) : la hauteur du viewBox suit celle de la boîte
+// (même échelle sur les deux axes : le trait et le point d'extrémité restent ronds et fins).
+const box = ref<HTMLElement | null>(null);
+const HEIGHT_BOUNDS = { min: 40, max: 900 };
+const height = ref(DEFAULT_HEIGHT);
+let observer: ResizeObserver | undefined;
+function measure() {
+  const element = box.value;
+  if (!element || element.clientWidth === 0 || element.clientHeight === 0) return;
+  const ratio = element.clientHeight / element.clientWidth;
+  height.value = Math.min(
+    HEIGHT_BOUNDS.max,
+    Math.max(HEIGHT_BOUNDS.min, Math.round(WIDTH * ratio)),
+  );
+}
+onMounted(() => {
+  measure();
+  if (typeof ResizeObserver === "undefined" || !box.value) return;
+  observer = new ResizeObserver(measure);
+  observer.observe(box.value);
+});
+onBeforeUnmount(() => observer?.disconnect());
 
 const ceiling = computed(() => {
   if (props.max !== null) return props.max;
@@ -46,14 +69,14 @@ const drawn = computed<Drawn[]>(() =>
     const top = ceiling.value;
     const x = (index: number) => PAD + index * stepX;
     const y = (value: number) =>
-      HEIGHT - PAD - (Math.min(Math.max(value, 0), top) / top) * (HEIGHT - PAD * 2);
+      height.value - PAD - (Math.min(Math.max(value, 0), top) / top) * (height.value - PAD * 2);
     let line = "";
     let area = "";
     let run: { from: number; to: number } | null = null;
     let dot: Drawn["dot"] = null;
     const close = () => {
       if (run) {
-        area += `L ${x(run.to).toFixed(1)} ${HEIGHT - PAD} L ${x(run.from).toFixed(1)} ${HEIGHT - PAD} Z `;
+        area += `L ${x(run.to).toFixed(1)} ${height.value - PAD} L ${x(run.from).toFixed(1)} ${height.value - PAD} Z `;
       }
       run = null;
     };
@@ -81,7 +104,8 @@ const drawn = computed<Drawn[]>(() =>
 </script>
 
 <template>
-  <svg class="chart" :viewBox="`0 0 ${WIDTH} ${HEIGHT}`" role="img" :aria-label="label">
+  <div ref="box" class="chart-box">
+  <svg class="chart" :viewBox="`0 0 ${WIDTH} ${height}`" role="img" :aria-label="label">
     <defs>
       <linearGradient
         v-for="(serie, index) in drawn"
@@ -112,14 +136,24 @@ const drawn = computed<Drawn[]>(() =>
       />
     </template>
   </svg>
+  </div>
 </template>
 
 <style scoped>
+.chart-box {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: var(--chart-min-height);
+  aspect-ratio: 300 / 80;
+}
+
 .chart {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
-  height: auto;
-  min-height: var(--chart-min-height);
+  height: 100%;
 }
 
 .chart__fill {

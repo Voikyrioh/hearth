@@ -52,6 +52,7 @@ const titleId = useId();
 
 .card__body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;

@@ -68,6 +68,7 @@ const covered = useCoverage(props.entry);
 <style scoped>
 .gpu {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--space-3);
 }
@@ -78,7 +79,8 @@ const covered = useCoverage(props.entry);
 
 .gpu__gauges {
   display: flex;
-  align-items: center;
+  flex: 1 1 auto;
+  align-items: stretch;
   gap: var(--space-4);
 }
 

@@ -27,6 +27,7 @@ const summary = computed(() => titles.value.join(", "));
 <style scoped>
 .cores {
   display: flex;
+  flex: 2 1 auto;
   flex-direction: column;
   gap: var(--space-1);
 }
