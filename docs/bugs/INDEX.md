@@ -9,6 +9,11 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M4D1K6V5DS7DQVR6ZV7A3HGY](./FIX-01M4D1K6V5DS7DQVR6ZV7A3HGY.md) | Le titre « Durée de fonctionnement » se cassait en deux lignes et le point de montage des disques était presque invisible (C14) | 2026-10-08 |
 | [FIX-01M4D1K5GKA4XPJH8391E1HWKZ](./FIX-01M4D1K5GKA4XPJH8391E1HWKZ.md) | Le tableau de bord ne tenait pas à 1280 px : courbes écrasées, cartes de hauteurs inégales, trous (C6, C7) | 2026-10-08 |
 | [FIX-01M4CY8BVM3MV9769QWNDNW7VT](./FIX-01M4CY8BVM3MV9769QWNDNW7VT.md) | Un pic d'une seconde disparaissait de l'historique d'une heure en vieillissant (moyenne par pas de 10 s) | 2026-10-08 |
+| [FIX-01M4D6KNXEFG8DH4K9JXBJ98MA](./FIX-01M4D6KNXEFG8DH4K9JXBJ98MA.md) | Un `.erasing` orphelin n'était fini qu'à la mise à jour suivante | 2026-10-08 |
+| [FIX-01M4D6KNQRS959ZRJ38TJBQE6N](./FIX-01M4D6KNQRS959ZRJ38TJBQE6N.md) | L'effacement différé des anciennes empreintes n'était visible qu'au journal du service | 2026-10-08 |
+| [FIX-01M4D6KNHSZ39EY28XEFAV722X](./FIX-01M4D6KNHSZ39EY28XEFAV722X.md) | L'effacement de reprise des anciennes empreintes était retenté à chaque ouverture de la base | 2026-10-08 |
+| [FIX-01M4D6KNC8G4T68J25J7DXMMNM](./FIX-01M4D6KNC8G4T68J25J7DXMMNM.md) | Le client retombait en silence sur les moyennes quand les maxima manquaient | 2026-10-08 |
+| [FIX-01M4D6KN655K009FC3JR9H70VN](./FIX-01M4D6KN655K009FC3JR9H70VN.md) | La température tracée sur l'heure restait une moyenne | 2026-10-08 |
 | [FIX-01M4CJEQS88NZWCQ129XDP91MT](./FIX-01M4CJEQS88NZWCQ129XDP91MT.md) | Une coupure rétablie entre 1,5 s et 3 s faisait clignoter « Reconnexion en cours » | 2026-10-08 |
 | [FIX-01M4CRD60RKGZC2HTT52GK6P2T](./FIX-01M4CRD60RKGZC2HTT52GK6P2T.md) | La série du processeur de la coquille et le repli des dates suivaient l'horloge murale du poste | 2026-10-08 |
 | [FIX-01M4CRD4NX3A34B7Z31A7RWE1B](./FIX-01M4CRD4NX3A34B7Z31A7RWE1B.md) | Les mesures de l'agent étaient arrondies à la décimale alors que l'affichage tronque (99,96 devenait 100 %) | 2026-10-08 |
