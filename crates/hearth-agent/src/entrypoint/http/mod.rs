@@ -70,6 +70,9 @@ pub struct AppState {
     /// Mise à jour de l'agent à distance (HRT-17).
     pub update: Arc<UpdateService>,
     pub stream: StreamContext,
+    /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
+    /// administrateurs par `GET /security`, sans rien de sensible.
+    pub erasure_pending: bool,
 }
 
 /// Qui peut appeler une route.

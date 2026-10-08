@@ -100,6 +100,11 @@ pub struct SecurityResponse {
     /// La confirmation des actes d'administration (HRT-28). Absent : agent d'avant ce ticket.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admin_reauth: Option<AdminReauthInfo>,
+    /// L'effacement physique des anciennes empreintes de requêtes (HRT-32, ADR-0034) a échoué au démarrage
+    /// du service et sera retenté au suivant. **Administrateur seulement**, absent sinon (et absent quand
+    /// rien n'est en attente, ou chez un agent d'avant). Rien de sensible : un fait, pas un contenu.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub erasure_pending: bool,
 }
 
 #[cfg(test)]
@@ -135,14 +140,36 @@ mod tests {
             attack_mode: AttackModeInfo::off(),
             device: SessionDevice::Proven,
             admin_reauth: None,
+            erasure_pending: true,
         };
         let value = serde_json::to_value(&response).expect("json");
+        assert_eq!(value["erasure_pending"], true);
         assert_eq!(value["alert"]["others"], 2);
         assert_eq!(value["alert"]["since"], "2026-10-07T01:00:00Z");
         assert_eq!(value["device"], "proven");
         assert_eq!(
             serde_json::from_value::<SecurityResponse>(value).expect("round trip"),
             response
+        );
+    }
+
+    #[test]
+    fn nothing_pending_means_no_field_and_an_older_agent_reads_as_nothing_pending() {
+        let mut response: SecurityResponse = serde_json::from_value(json!({
+            "alert": { "own": false }, "attack_mode": { "state": "off" }, "device": "none"
+        }))
+        .expect("agent d'avant : pas de champ");
+        assert!(!response.erasure_pending);
+        assert!(
+            serde_json::to_value(&response)
+                .unwrap()
+                .get("erasure_pending")
+                .is_none()
+        );
+        response.erasure_pending = true;
+        assert_eq!(
+            serde_json::to_value(&response).unwrap()["erasure_pending"],
+            true
         );
     }
 

@@ -195,7 +195,7 @@ async fn no_old_fingerprint_is_left_in_the_database_file_or_its_journal() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     }
-    let db = Database::open(dir.path()).await.unwrap();
+    let db = Database::open_for_service(dir.path()).await.unwrap();
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operations")
         .fetch_one(db.pool())
         .await
@@ -219,7 +219,7 @@ async fn a_deleted_operation_leaves_no_bytes_behind() {
     use hearth_agent::infrastructure::sqlite::Database;
 
     let dir = tmp::tempdir().unwrap();
-    let db = Database::open(dir.path()).await.unwrap();
+    let db = Database::open_for_service(dir.path()).await.unwrap();
     let hashes: Vec<String> = (0..40)
         .map(|i| legacy_hash("POST", "/accounts", format!("secret-{i}").as_bytes()))
         .collect();
@@ -300,7 +300,7 @@ async fn rows_deleted_by_an_old_binary_do_not_survive_the_open() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     }
-    let db = Database::open(dir.path()).await.unwrap();
+    let db = Database::open_for_service(dir.path()).await.unwrap();
     db.pool().close().await;
     let after = file_bytes(dir.path());
     assert!(hashes.iter().all(|h| count_in(&after, h) == 0));

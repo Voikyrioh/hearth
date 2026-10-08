@@ -52,9 +52,9 @@ use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::security_feed::BroadcastSecurityFeed;
 use crate::infrastructure::sqlite::{
-    Database, DatabaseError, SqliteAccountRepo, SqliteAttackModeRepo, SqliteAuditRepo,
-    SqliteDeviceRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteOperationRepo,
-    SqliteSessionRepo, SqliteStore,
+    Database, DatabaseError, ServiceDatabase, SqliteAccountRepo, SqliteAttackModeRepo,
+    SqliteAuditRepo, SqliteDeviceRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo,
+    SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
 };
 use crate::infrastructure::system::gpu;
 use crate::infrastructure::system::{ProcBootInfo, SysinfoProbe, SystemMachineInfo};
@@ -416,7 +416,7 @@ pub fn account_service(database: &Database) -> Result<Arc<AccountService>, AppEr
 
 /// Ouvre le port et démarre le serveur HTTPS, avec les adaptateurs de production.
 pub async fn start(config: &AgentConfig) -> Result<RunningAgent, AppError> {
-    let database = Database::open(&config.data_dir).await?;
+    let database = Database::open_for_service(&config.data_dir).await?;
     start_with(config, &database, &Adapters::production()?).await
 }
 
@@ -424,7 +424,7 @@ pub async fn start(config: &AgentConfig) -> Result<RunningAgent, AppError> {
 /// les sondes de la machine réelle.
 pub async fn start_with(
     config: &AgentConfig,
-    database: &Database,
+    database: &ServiceDatabase,
     adapters: &Adapters,
 ) -> Result<RunningAgent, AppError> {
     start_with_metering(config, database, adapters, Metering::production()).await
@@ -433,7 +433,7 @@ pub async fn start_with(
 /// Comme `start_with`, avec ces sondes et ces délais.
 pub async fn start_with_metering(
     config: &AgentConfig,
-    database: &Database,
+    database: &ServiceDatabase,
     adapters: &Adapters,
     metering: Metering,
 ) -> Result<RunningAgent, AppError> {
@@ -451,7 +451,7 @@ pub async fn start_with_metering(
 /// faux).
 pub async fn start_with_all(
     config: &AgentConfig,
-    database: &Database,
+    database: &ServiceDatabase,
     adapters: &Adapters,
     metering: Metering,
     updating: Updating,
@@ -471,12 +471,15 @@ pub async fn start_with_all(
 /// du mode attaque et de sa fenêtre de redémarrage en injectent un faux, jamais le vrai `/proc`.
 pub async fn start_full(
     config: &AgentConfig,
-    database: &Database,
+    database: &ServiceDatabase,
     adapters: &Adapters,
     metering: Metering,
     updating: Updating,
     boot: Arc<dyn BootInfo>,
 ) -> Result<RunningAgent, AppError> {
+    // FIX:01M4D6KNXEFG8DH4K9JXBJ98MA : une copie de la base à moitié effacée par un arrêt brutal est finie au
+    // démarrage du service, pas seulement à la mise à jour suivante.
+    crate::infrastructure::update::finish_interrupted_erasures(&config.data_dir);
     let store = FileIdentityStore::new(&config.data_dir);
     let identity = load_identity(&store)?;
     let tls = tls::server_config(&store)?;
@@ -490,7 +493,7 @@ pub async fn start_full(
     let listener = TcpListener::bind(addr).map_err(|source| AppError::Bind { addr, source })?;
 
     let services = services_with_trust(
-        database,
+        database.database(),
         adapters,
         TrustParts {
             fingerprint: identity.fingerprint,
@@ -544,6 +547,7 @@ pub async fn start_full(
         metrics: metrics.clone(),
         update: update.clone(),
         stream,
+        erasure_pending: database.erasure_pending(),
     });
     // À l'arrêt, les flux ouverts se ferment d'eux-mêmes avant que le serveur n'attende les connexions.
     let server = http::spawn(listener, tls, router)?.on_shutdown(move || closing.begin_shutdown());

@@ -29,7 +29,7 @@ use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
 use hearth_agent::infrastructure::config::AgentConfig;
 use hearth_agent::infrastructure::ids::UlidGen;
 use hearth_agent::infrastructure::random::OsTokenGen;
-use hearth_agent::infrastructure::sqlite::Database;
+use hearth_agent::infrastructure::sqlite::{Database, ServiceDatabase};
 use time::{Duration as TimeDuration, OffsetDateTime};
 
 pub const PASSWORD: &str = "Correct-Horse-9";
@@ -259,9 +259,15 @@ impl TestAgent {
             Some(make) => make(),
             None => app::Updating::production(&config).unwrap(),
         };
-        let running = app::start_with_all(&config, &self.db, &self.adapters, metering(), updating)
-            .await
-            .unwrap();
+        let running = app::start_with_all(
+            &config,
+            &ServiceDatabase::adopt(self.db.clone()),
+            &self.adapters,
+            metering(),
+            updating,
+        )
+        .await
+        .unwrap();
         self.addr = running.server.local_addr();
         self.running = Some(running);
     }
