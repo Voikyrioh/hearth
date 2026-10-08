@@ -7,6 +7,13 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M4E9T718D37EXTXMWA7YXWJE](./FIX-01M4E9T718D37EXTXMWA7YXWJE.md) | Une courbe du tableau de bord ne disait ni sa durée, ni son échelle, ni sa valeur (C10) | 2026-10-08 |
 | [FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J](./FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J.md) | Les jauges à l'état normal étaient dessinées en dégradé rose-braise, la couleur d'une alerte (C13) | 2026-10-08 |
 | [FIX-01M4E9T7ECW7H6R9V4V6YNVRE1](./FIX-01M4E9T7ECW7H6R9V4V6YNVRE1.md) | Tableau de bord sans mesure : « Vu il y a… » posé sur une page qui n'a rien vu | 2026-10-08 |
+| [FIX-01M4E82YHBNR94DXKJATXCQ5TM](./FIX-01M4E82YHBNR94DXKJATXCQ5TM.md) | Journal jamais chargé hors ligne : un cadre vide sous une estampille (C46) | 2026-10-08 |
+| [FIX-01M4E5D3N2QCVCD494WC6S8WRD](./FIX-01M4E5D3N2QCVCD494WC6S8WRD.md) | Action impossible : la fenêtre garde sa question et un bouton grisé, sans chemin (C40, C41) | 2026-10-08 |
+| [FIX-01M4E5D447SRCNGAQY4PP006HC](./FIX-01M4E5D447SRCNGAQY4PP006HC.md) | Hors ligne : trois messages et trois gestes pour la même information (C30) | 2026-10-08 |
+| [FIX-01M4E5D4JY66T0ETEMRY1DZQZK](./FIX-01M4E5D4JY66T0ETEMRY1DZQZK.md) | Page jamais chargée hors ligne : erreur, deuxième « Réessayer » et « Vu il y a… » sans rien vu (C46) | 2026-10-08 |
+| [FIX-01M4E5D51P81MQQYR9PBB3TF22](./FIX-01M4E5D51P81MQQYR9PBB3TF22.md) | Accès révoqué : « Connecte-toi à forge » alors qu'on ne peut pas (C47) | 2026-10-08 |
+| [FIX-01M4E5D5Z5MBSD639B5NPX81GC](./FIX-01M4E5D5Z5MBSD639B5NPX81GC.md) | Étape « Empreinte » : quel serveur, où relire l'empreinte, que fait « Refuser » (C3) | 2026-10-08 |
+| [FIX-01M4E5D6DYHHX9CBBVDYAFEWMZ](./FIX-01M4E5D6DYHHX9CBBVDYAFEWMZ.md) | Bouton grisé : la raison seulement au survol (C42) | 2026-10-08 |
 | [FIX-01M4E48N732694TTFSRQF1C4KG](./FIX-01M4E48N732694TTFSRQF1C4KG.md) | Mise à jour de l'agent : le bouton, l'étape et la mention se répètent (C43) | 2026-10-08 |
 | [FIX-01M4E48MY42041VB11FJFSG0XW](./FIX-01M4E48MY42041VB11FJFSG0XW.md) | Port faux : « L'emplacement saisi n'est pas valide » (C4) | 2026-10-08 |
 | [FIX-01M4DPR4FFVCMZN0KPEA4JVCC8](./FIX-01M4DPR4FFVCMZN0KPEA4JVCC8.md) | Nombres à l'anglaise et unités brutes (C12) | 2026-10-08 |

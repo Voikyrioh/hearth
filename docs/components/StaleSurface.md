@@ -10,3 +10,4 @@ Enveloppe commune des données périmées : quand `stale`, le contenu est désat
 
 - HRT-12 : monté UNE fois par `ServerLayout` autour de la page (désaturation, opacité 0,62, âge en direct) quand le lien n'est pas « Connecté » : une page ne l'enveloppe pas elle-même (BR-RESIL-007). Vérifié par `shell.test.ts` (toutes les routes) et `e2e/offline.spec.ts`.
 - HRT-41 : pas d'estampille quand la page n'a rien reçu (`composables/pageSeen.ts`, posé par le tableau de bord sans machine). FIX:01M4E9T7ECW7H6R9V4V6YNVRE1.
+- HRT-38 : prop `stamped` (faux : page sans donnée lue, aucune estampille) ; le gabarit estompe et date toujours dès « Reconnexion… » (BR-RESIL-007, question ouverte pour Voiky). Composable `usePageData` (`providePageData` dans `ServerLayout`, `usePageData` dans les pages Comptes et Sécurité).

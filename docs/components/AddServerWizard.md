@@ -9,3 +9,4 @@ Assistant d'ajout d'un serveur en 3 temps (adresse, empreinte, connexion) dans u
 - Notes : Tests : `connect.test.ts`, `useAddServer.test.ts`, `e2e/connect.spec.ts`.
 
 HRT-33 (revue UX du 2026-10-08) : le curseur est dans le premier champ de chaque étape qui en a un (nom, puis identifiant) ; « Suivant » n'est jamais grisé : un champ manquant ou faux est dit sous le champ et le curseur y va, au clic comme à Entrée (FIX-01M4D0RJ5EMX3TG1TJB0EJ5EYP). Tests : `connect.test.ts`, `e2e/hrt33-keyboard.spec.ts`.
+- HRT-40 (C3) : l'étape « Empreinte » rappelle le nom et l'adresse du serveur, offre « Précédent », dit où relire l'empreinte (`sudo hearth-agent fingerprint`) et que « Refuser » annule l'ajout.

@@ -9,3 +9,4 @@ Carte « Mode attaque » de la page Sécurité (HRT-26, BR-TRUST-010, 018, 029) 
 - Notes : la confirmation (avec mot de passe) est portée par `AttackModeDialog`, ouverte par `security.ask` dans le gabarit. Tests : `pages/SecurityMode.test.ts`, `e2e/attack-mode.spec.ts`.
 
 HRT-39 (C34, FIX-01M4DJZAFYE77R5MKKA2NV6CE3) : éteint, le texte dit ce que le mode FERA ; actif, une phrase (depuis quand) et les règles repliées dans « Comment ça marche ».
+- HRT-38 (C46) : hors « Connecté », l'état illisible dit « Pas encore chargé… » sans « Réessayer » (celui du bandeau suffit).

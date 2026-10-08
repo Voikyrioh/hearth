@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, ref, shallowRef } from "vue";
 import { cloneDraft, type FilterDraft, isUnfiltered, resolveFilter } from "@/audit/filters";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
@@ -27,8 +27,6 @@ export const AUDIT_LIVE_DEBOUNCE_MS = 300;
 export const AUDIT_LIVE_MAX_WAIT_MS = 2000;
 /** Vérification périodique de la tête (lien établi) : répare ce que le flux a perdu sans le dire. */
 export const AUDIT_VERIFY_EVERY_MS = 30_000;
-/** Attente d'un « Rechargement manuel » avant de dire que le serveur est toujours injoignable. */
-export const AUDIT_RELOAD_WAIT_MS = 5000;
 /** Intervalle minimal entre deux annonces de nouvelles entrées aux lecteurs d'écran. */
 export const AUDIT_ANNOUNCE_MS = 2000;
 const KNOWN_ACCOUNTS_MAX = 200;
@@ -96,7 +94,6 @@ export const useAuditStore = defineStore("audit", () => {
   const windowFull = ref(false);
   const knownAccounts = ref<string[]>([]);
   const exporting = ref(false);
-  const reloading = ref(false);
   /** Compteur : la page remonte en haut de la liste quand il change. */
   const topSignal = ref(0);
   /** Dernière annonce pour les lecteurs d'écran (« 3 nouvelles entrées »). */
@@ -464,7 +461,6 @@ export const useAuditStore = defineStore("audit", () => {
     catchAgain = false;
     resumed = false;
     verifiedTop = 0;
-    reloading.value = false;
     exporting.value = false;
   }
 
@@ -546,49 +542,6 @@ export const useAuditStore = defineStore("audit", () => {
     if (value && (pending.value.length > 0 || pendingOverflow.value)) void showPending();
   }
 
-  /** Attend « Connecté » sans interroger en boucle : l'état du lien est réactif. */
-  function untilConnected(id: string, ms: number): Promise<boolean> {
-    const link = useLinkStore();
-    if (link.stateOf(id) === "connected") return Promise.resolve(true);
-    return new Promise((resolve) => {
-      const stop = watch(
-        () => link.stateOf(id),
-        (state) => {
-          if (state !== "connected") return;
-          stop();
-          clearTimeout(timer);
-          resolve(true);
-        },
-      );
-      const timer = setTimeout(() => {
-        stop();
-        resolve(false);
-      }, ms);
-    });
-  }
-
-  /** « Rechargement manuel » (BR-AUDIT-020) : une tentative de reconnexion, puis la relecture. */
-  async function reloadManually(): Promise<void> {
-    const id = serverId.value;
-    if (id === null || reloading.value) return;
-    reloading.value = true;
-    const link = useLinkStore();
-    try {
-      await link.retryNow(id);
-      const connected = await untilConnected(id, AUDIT_RELOAD_WAIT_MS);
-      if (serverId.value !== id) return;
-      if (!connected) {
-        useToastsStore().push({ kind: "info", message: t("audit.stillUnreachable") });
-      }
-      // Connecté : `resume` (appelé par la page au changement d'état) fait la relecture.
-    } catch (error) {
-      logUiError(error, "audit");
-      useToastsStore().push({ kind: "info", message: t("audit.stillUnreachable") });
-    } finally {
-      reloading.value = false;
-    }
-  }
-
   /** « Exporter » : le résultat filtré APPLIQUÉ, dans un fichier choisi par l'utilisateur. */
   async function exportCsv(): Promise<void> {
     const id = serverId.value;
@@ -627,7 +580,6 @@ export const useAuditStore = defineStore("audit", () => {
     unverified,
     knownAccounts,
     exporting,
-    reloading,
     topSignal,
     announcement,
     open,
@@ -639,7 +591,6 @@ export const useAuditStore = defineStore("audit", () => {
     resume,
     showPending,
     setAtTop,
-    reloadManually,
     exportCsv,
   };
 });

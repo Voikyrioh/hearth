@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { pageNothingSeen } from "@/composables/pageSeen";
 import StaleStamp from "./StaleStamp.vue";
 
 // Enveloppe commune des données périmées (BR-RESIL-007) : quand le lien n'est pas
 // « Connecté », le contenu est désaturé et daté ; il reste lisible et jamais retiré.
-defineProps<{ stale: boolean; lastContactAt: number | null }>();
+withDefaults(
+  defineProps<{
+    stale: boolean;
+    lastContactAt: number | null;
+    /** Faux : la page n'a encore rien chargé, il n'y a donc rien à dater (HRT-38, C46). */
+    stamped?: boolean;
+  }>(),
+  { stamped: true },
+);
 </script>
 
 <template>
   <div :class="['surface', { 'surface--stale': stale }]" :data-stale="stale ? 'true' : undefined">
     <div class="surface__body"><slot /></div>
-        <!-- FIX:01M4E9T7ECW7H6R9V4V6YNVRE1 : rien reçu, rien à dater. -->
-    <StaleStamp v-if="stale && !pageNothingSeen" class="surface__stamp" :last-contact-at="lastContactAt" />
+    <StaleStamp v-if="stale && stamped" class="surface__stamp" :last-contact-at="lastContactAt" />
   </div>
 </template>
 

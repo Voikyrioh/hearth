@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, inject, nextTick, ref, watch } from "vue";
+import { routerKey } from "vue-router";
 import HButton from "@/components/atoms/HButton.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import FormDialog from "@/components/molecules/FormDialog.vue";
@@ -61,6 +62,7 @@ const reauth = useReauth(
   () => props.kind,
   () => props.role,
 );
+const router = inject(routerKey, null);
 const password = ref("");
 const passwordError = ref<string | undefined>();
 const error = ref<string | undefined>();
@@ -115,6 +117,21 @@ function firstActField(): HTMLElement | null {
     return element;
   }
   return null;
+}
+
+// FIX:01M4E5D3N2QCVCD494WC6S8WRD (C40, C41) : quand l'action est IMPOSSIBLE, la fenêtre dit l'état vrai en titre (plus la
+// question de l'acte), ne propose aucun bouton d'action, et mène là où ça se règle.
+const blocked = computed(() => reauth.agentTooOld.value || reauth.keyMissing.value);
+const shownTitle = computed(() => {
+  if (reauth.agentTooOld.value) return t("reauth.agentOldTitle");
+  if (reauth.keyMissing.value) return t("reauth.noKeyTitle");
+  return props.title;
+});
+
+/** Mène à la page de mise à jour de l'agent (Réglages) et ferme la fenêtre. */
+async function goToSettings() {
+  emit("close");
+  await router?.push({ name: "settings" });
 }
 
 const awaiting = computed(() => !reauth.ready.value && !reauth.failed.value);
@@ -179,8 +196,9 @@ async function submit() {
 <template>
   <FormDialog
     :open="open"
-    :title="title"
+    :title="shownTitle"
     :submit-label="submitLabel"
+    :hide-submit="blocked"
     :can-submit="canSend"
     :busy="sending"
     :error="error"
@@ -198,9 +216,11 @@ async function submit() {
     </div>
     <div v-else-if="reauth.agentTooOld.value" class="admin__state" data-reauth-agent-old>
       <p role="alert" class="admin__alert">{{ t("failure.agentTooOld") }}</p>
+      <HButton variant="secondary" data-reauth-settings @click="goToSettings">
+        {{ t("reauth.goSettings") }}
+      </HButton>
     </div>
     <div v-else-if="reauth.keyMissing.value" class="admin__state" data-reauth-no-key>
-      <p class="admin__title">{{ t("reauth.noKeyTitle") }}</p>
       <p class="admin__help">{{ t("reauth.noKey") }}</p>
       <HButton variant="secondary" data-reauth-reconnect @click="reauth.reconnect()">
         {{ t("reauth.reconnect") }}

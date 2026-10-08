@@ -38,4 +38,5 @@ Quand les sessions d'un compte sont fermées par un changement de mot de passe (
 - 2026-10-04 — création (HRT-04, session 2026-10-04-hearth-creation).
 - 2026-10-05 — côté client ajouté (HRT-07, session 2026-10-04-hearth-creation).
 - 2026-10-05 — précisé (HRT-07, review Stephen round 1).
+- 2026-10-08 : titre « Accès révoqué sur {nom} », explication et invitation à demander à l'administrateur de rétablir le compte (HRT-38, FIX-01M4E5D51P81MQQYR9PBB3TF22).
 - 2026-10-05 : panneau d'accès révoqué et « Utiliser un autre compte » (HRT-12).
