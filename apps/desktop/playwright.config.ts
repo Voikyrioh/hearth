@@ -36,6 +36,7 @@ export default defineConfig({
         "agent-update.spec.ts",
         "security.spec.ts",
         "attack-mode.spec.ts",
+        "layout.spec.ts",
         "reauth.spec.ts",
         "identity.spec.ts",
       ],
