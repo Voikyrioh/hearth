@@ -13,7 +13,7 @@ liens: [ADR-0013, ADR-0016, ADR-0023, ADR-0024, ADR-0025, BR-TRUST-009, BR-TRUST
 
 ## Contexte
 
-L'agent livre l'alerte (HRT-24) et le mode attaque (HRT-25) : message `security` du flux, `GET /security`, `PUT /security/attack-mode` (mot de passe ET preuve de clé d'usage `0x03`). Le client doit les montrer partout (bandeaux, marque du serveur), laisser un administrateur activer et désactiver, notifier Windows, et dire clairement quand ce PC ne peut pas agir. Contraintes : la WebView ne voit jamais la clé (ADR-0023), un événement n'est qu'un signal (ADR-0013 point 3), une commande = une action typée (ADR-0016).
+L'agent livre l'alerte (HRT-24) et le mode attaque (HRT-25) : message `security` du flux, `GET /security`, `PUT /security/attack-mode` (mot de passe ET preuve de clé, contrat commun des actes d'usage `0x05` depuis ADR-0033). Le client doit les montrer partout (bandeaux, marque du serveur), laisser un administrateur activer et désactiver, notifier Windows, et dire clairement quand ce PC ne peut pas agir. Contraintes : la WebView ne voit jamais la clé (ADR-0023), un événement n'est qu'un signal (ADR-0013 point 3), une commande = une action typée (ADR-0016).
 
 ## Décision
 
