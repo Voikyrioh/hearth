@@ -810,29 +810,7 @@ impl LinkRuntime {
     }
 }
 
-/// Maintenant, en millisecondes : l'horloge MURALE lue UNE fois au premier appel, puis l'horloge MONOTONE.
-/// La série du processeur et le repli d'un échantillon à la date illisible ne doivent pas suivre un saut de
-/// l'horloge murale (changement d'heure, synchronisation, réglage à la main) : ce « maintenant » ne recule
-/// jamais et avance d'une seconde par seconde (FIX:01M4CRD60RKGZC2HTT52GK6P2T).
-fn now_ms() -> i64 {
-    use std::sync::OnceLock;
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
-    static CLOCK: OnceLock<crate::dashboard::MonoMs> = OnceLock::new();
-    CLOCK
-        .get_or_init(|| {
-            crate::dashboard::MonoMs::new(
-                || {
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .ok()
-                        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
-                        .unwrap_or(0)
-                },
-                Instant::now(),
-            )
-        })
-        .at(Instant::now())
-}
+use crate::dashboard::now_ms;
 
 /// Nom du poste annoncé à l'agent (`X-Hearth-Client`) : `{ordinateur}/{version}`.
 pub fn client_name(version: &str) -> String {

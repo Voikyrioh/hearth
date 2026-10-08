@@ -35,6 +35,7 @@ fn hour(samples: Vec<Sample>) -> HistoryResponse {
         window: HistoryWindow::OneHour,
         step_s: 10,
         samples,
+        peaks: Vec::new(),
     }
 }
 
@@ -143,7 +144,7 @@ async fn a_mute_history_route_never_delays_the_connection_and_the_hour_is_pasted
         "aucune tentative échouée : {states:?}"
     );
     // La route répond enfin : l'heure arrive après coup, le lien n'a pas bougé.
-    world.spy.hour_release.notify_waiters();
+    world.spy.hour_release.notify_one();
     world
         .recorder
         .wait_for(0, "l'heure écoulée", WAIT, |event| {
@@ -185,11 +186,49 @@ async fn a_read_in_flight_when_the_link_drops_is_abandoned_and_announces_nothing
             matches!(event, Event::History { .. })
         })
         .await;
-    // On libère l'ancienne lecture : elle a été abandonnée, personne n'écoute plus.
-    world.spy.hour_release.notify_waiters();
+    // FAIT : l'ancienne lecture a été ABANDONNÉE (son futur a été jeté pendant qu'elle attendait) ; sans
+    // l'abandon ce compteur resterait à 0.
+    assert_eq!(world.spy.hour_aborted.load(Ordering::SeqCst), 1);
+    // On la libère : plus personne n'attend, elle ne finit jamais. On attend ensuite un fait POSTÉRIEUR (la
+    // mesure suivante du direct) avant de compter les événements d'historique.
+    world.spy.hour_release.notify_one();
+    let after = world.recorder.mark();
+    world.recorder.wait_metrics(after, WAIT).await;
+    assert_eq!(world.spy.hour_completed.load(Ordering::SeqCst), 0);
     assert_eq!(
         history_events(&world),
         vec![vec!["2021-01-01T00:00:00Z".to_owned()]]
     );
     assert!(world.spy.hour_calls.load(Ordering::SeqCst) >= 2);
+}
+
+/// Le maximum de chaque pas remplace la moyenne : un pic d'une seconde d'il y a une heure est tracé à sa hauteur.
+#[tokio::test]
+async fn the_peaks_of_the_agent_replace_the_means_in_the_hour_announced() {
+    use hearth_proto::api::metrics::StepPeak;
+    let mut response = hour(vec![sample("2020-01-01T00:00:00Z")]);
+    response.peaks = vec![StepPeak {
+        cpu: 100.0,
+        mem_used_bytes: 2,
+        net: None,
+        gpus: vec![],
+    }];
+    let world = World::connected(Options {
+        hours: vec![response],
+        ..Options::default()
+    })
+    .await;
+    let (_, event) = world
+        .recorder
+        .wait_for(0, "l'heure écoulée", WAIT, |event| {
+            matches!(event, Event::History { .. })
+        })
+        .await;
+    let Event::History { samples, .. } = event else {
+        unreachable!()
+    };
+    assert_eq!(
+        samples[0].cpu, 100.0,
+        "le maximum du pas, pas la moyenne (42)"
+    );
 }
