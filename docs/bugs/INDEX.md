@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4EDC0FVT0ZHGASFEMWX7066](./FIX-01M4EDC0FVT0ZHGASFEMWX7066.md) | Réglages et Sécurité : une colonne étroite, une colonne étirée, et du contenu sans borne à 1920 et 2560 (C44, C55 en partie) | 2026-10-08 |
 | [FIX-01M4ECZJ34NZE9Z9P4YATK707H](./FIX-01M4ECZJ34NZE9Z9P4YATK707H.md) | Une courbe qui a le focus récitait une valeur par seconde (suivi de la revue de #58) | 2026-10-08 |
 | [FIX-01M4ECZJBH94ABZXSTNNFFGZ5P](./FIX-01M4ECZJBH94ABZXSTNNFFGZ5P.md) | Un bouton grisé n'expliquait sa raison qu'au survol (C42) | 2026-10-08 |
 | [FIX-01M4ECZJKG6MQ2C65TZP25WSPD](./FIX-01M4ECZJKG6MQ2C65TZP25WSPD.md) | La fenêtre de retrait d'un poste alignait quatre paragraphes avant le champ (C39) | 2026-10-08 |

@@ -103,6 +103,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
 
 <style scoped>
 .settings {
+  container: settings / inline-size;
   height: 100%;
   padding: var(--space-5);
   overflow-y: auto;
@@ -122,6 +123,15 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
 
 .settings__column {
   min-width: 0;
+}
+
+/* FIX:01M4EDC0FVT0ZHGASFEMWX7066 */
+/* HRT-42 : à partir de 1 500 px de page, deux colonnes égales, bornées (au-dessous, rien ne change). */
+@container settings (min-width: 1500px) {
+  .settings__columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: var(--page-max-settings);
+  }
 }
 
 .settings__panel {
