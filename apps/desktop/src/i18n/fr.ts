@@ -560,8 +560,6 @@ export const fr = {
     uptimeMinutes: "{m} min",
     coveredSeconds: "{n} s",
     systemLine: "{name} {version}",
-    processorLine: "{model} · {threads}",
-    processorFreq: "{line} · {freq}",
     coreFirst: "Cœur 1",
     coreLast: "Cœur {n}",
     coresSummary: "{label} : {values}",
