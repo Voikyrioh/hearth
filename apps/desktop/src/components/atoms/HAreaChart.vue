@@ -145,7 +145,6 @@ const drawn = computed<Drawn[]>(() =>
   flex: 1 1 auto;
   width: 100%;
   min-height: var(--chart-min-height);
-  aspect-ratio: 300 / 80;
 }
 
 .chart {

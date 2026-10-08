@@ -78,13 +78,15 @@ const covered = useCoverage(props.entry);
 }
 
 .gpu__gauges {
+  /* FIX:01M4D4Y0D7YFWCV6R1GEHXZGPB */
   display: flex;
   flex: 1 1 auto;
-  align-items: stretch;
+  align-items: center;
   gap: var(--space-4);
 }
 
 .gpu__chart {
+  align-self: stretch;
   flex: 1;
   min-width: 0;
 }

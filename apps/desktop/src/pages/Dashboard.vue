@@ -74,7 +74,8 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
 </script>
 
 <template>
-  <div v-if="loading" class="dash__loading" role="status" :aria-label="t('dash.loading')">
+  <!-- FIX:01M4D4Y22QGBWNKKJTK8K3X12A : le nom accessible suit le texte affiché -->
+  <div v-if="loading" class="dash__loading" role="status" :aria-label="slow ? t('dash.loadingSlow') : t('dash.loading')">
     <HSpinner />
     <span>{{ slow ? t("dash.loadingSlow") : t("dash.loading") }}</span>
     <HButton v-if="slow" variant="secondary" data-dash-retry @click="retryLoading">
@@ -128,11 +129,9 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
 }
 
 /* Grille de 12 colonnes : Machine 3, Processeur 5, Mémoire 4 ; Carte graphique 4, Réseau 3, Disques 3,
-   Températures 2 (HRT-34 : sinon Disques + Températures empilés dépassaient la moitié basse à 1920 px).
-   Ancienne répartition : Carte graphique 5, Réseau 4,
-   Disques 3 ; Températures sous Mémoire (HRT-34 : Disques et Températures empilés dépassaient la moitié basse de
-   l'écran à 1920 px, l'essentiel ne tenait pas sans défiler). Une rangée = une hauteur : les cartes d'une rangée s'étirent. Sous 1300 px de
-   page : 6 colonnes, puis 1 sous 700 px (voir plus bas). */
+   Températures 2 (HRT-34 : les six cartes tiennent dans la zone à 1920 px ; Disques + Températures empilés, ou
+   Températures sous la carte graphique, dépassaient le bas). Une rangée = une hauteur : les cartes d'une rangée
+   s'étirent. Sous 1300 px de page : 6 colonnes, puis 1 sous 700 px (voir plus bas). */
 .dash__grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
