@@ -4,6 +4,11 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4DJZBAQBTJ55NAA62BNQASH](./FIX-01M4DJZBAQBTJ55NAA62BNQASH.md) | Le menu disait « Sécurité », la page « Sécurité et mode attaque » (C39) | 2026-10-08 |
+| [FIX-01M4DJZB43SA08NE46DGEZK213](./FIX-01M4DJZB43SA08NE46DGEZK213.md) | « Plus d'infos » ne donnait aucune information sur l'alerte (C36) | 2026-10-08 |
+| [FIX-01M4DJZAXMGAXW5PPQBMQVC96Y](./FIX-01M4DJZAXMGAXW5PPQBMQVC96Y.md) | La marque de sécurité recouvrait les initiales du serveur (C38) | 2026-10-08 |
+| [FIX-01M4DJZAPV5ECT10JJ5JWNM8A6](./FIX-01M4DJZAPV5ECT10JJ5JWNM8A6.md) | Les bandeaux de sécurité étaient plus larges que la page, actions à l'autre bout (C35) | 2026-10-08 |
+| [FIX-01M4DJZAFYE77R5MKKA2NV6CE3](./FIX-01M4DJZAFYE77R5MKKA2NV6CE3.md) | Le mode attaque éteint parlait au présent et en jargon (C34) | 2026-10-08 |
 | [FIX-01M4D4Y22QGBWNKKJTK8K3X12A](./FIX-01M4D4Y22QGBWNKKJTK8K3X12A.md) | Le nom accessible du chargement ne suivait pas le texte affiché (retour de revue HRT-34) | 2026-10-08 |
 | [FIX-01M4D4Y0D7YFWCV6R1GEHXZGPB](./FIX-01M4D4Y0D7YFWCV6R1GEHXZGPB.md) | Tableau de bord : jauges perdues dans un grand vide à 1920 et 2560 (retour de revue HRT-34) | 2026-10-08 |
 | [FIX-01M4D4H25X7PN4SH2N7DC3REGS](./FIX-01M4D4H25X7PN4SH2N7DC3REGS.md) | Les filtres du journal prenaient le quart de l'écran à 1280 et 1366 (C29) | 2026-10-08 |

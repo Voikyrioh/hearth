@@ -8,3 +8,5 @@ Avatar rond d'un serveur : initiales, anneau de la couleur du serveur quand il e
 - Événements et slots : aucun
 - Notes : La couleur est un numéro de palette (pas de `style=` en ligne). Tests : `molecules.test.ts`.
 - HRT-26 : `mark` pose un petit rond en haut à droite (bouclier rose : mode attaque actif ; horloge turquoise : suspendu ; triangle ambre : alerte), jamais la couleur seule : le nom accessible devient « {nom}, {état}, mode attaque actif » (ou « suspendu », « alerte de sécurité »). Priorité : mode attaque, suspendu, alerte (`security/mark.ts::markOf`). Tests : `pages/SecurityMode.test.ts`.
+
+HRT-39 (C38, FIX-01M4DJZAXMGAXW5PPQBMQVC96Y) : la marque de sécurité dépasse du coin (`--mark-offset`), elle ne recouvre plus les initiales.

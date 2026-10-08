@@ -7,3 +7,5 @@ Base commune des bandeaux de sécurité (HRT-26, conception design, écran B). U
 - Props : `tone`, `title`, `stamp`
 - Événements et slots : slot par défaut (le texte), slot `actions`
 - Notes : Tests : `pages/SecurityMode.test.ts`, `e2e/attack-mode.spec.ts`.
+
+HRT-39 (C35, FIX-01M4DJZAPV5ECT10JJ5JWNM8A6) : largeur du contenu (`--column-max`), l'action suit le message ; « Plus d'infos » et « Voir la page Sécurité » sont des boutons à contour.
