@@ -52,6 +52,11 @@ defineProps<{ steps: string[]; current: number; label: string }>();
   border: var(--border-width) solid var(--bd);
   border-radius: 50%;
   font-weight: var(--fw-semibold);
+  /* FIX:01M4EPX90N9QNNPCHVNB6MCDDF (S3) : le chiffre est centré par sa HAUTEUR DE CAPITALE (`text-box`), pas par la boîte de la
+     ligne (que les polices de rendu différent déplacent d'un pixel) ; interligne 1 et chiffres tabulaires en repli. */
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-box: trim-both cap alphabetic;
 }
 
 .trail__step--now {

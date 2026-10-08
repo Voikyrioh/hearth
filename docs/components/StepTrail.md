@@ -7,3 +7,4 @@ Fil des étapes de l'assistant d'ajout : « Adresse », « Empreinte », « Conn
 - Props : `steps`, `current` (index), `label`
 - Événements et slots : aucun
 - Notes : Tests : `connect.test.ts`, `e2e/connect.spec.ts`.
+- HRT-47 (S3) : chiffre centré par sa hauteur de capitale (`text-box`), interligne 1. FIX:01M4EPX90N9QNNPCHVNB6MCDDF.
