@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use sysinfo::{Components, DiskRefreshKind, Disks, MINIMUM_CPU_UPDATE_INTERVAL, Networks, System};
 
-use super::gpu::round1;
+use super::gpu::trunc1;
 use crate::application::ports::{ProbeError, SystemProbe};
 use crate::domain::machine::{
     CpuIdentity, DiskIdentity, InterfaceKind, MachineIdentity, OsIdentity, Volume,
@@ -107,7 +107,7 @@ fn temperatures(components: &Components) -> Vec<TempReading> {
             let celsius = component.temperature()?;
             PLAUSIBLE_CELSIUS.contains(&celsius).then(|| TempReading {
                 label: component.label().to_owned(),
-                celsius: round1(celsius),
+                celsius: trunc1(celsius),
             })
         })
         .collect()
@@ -129,7 +129,7 @@ fn observe_interface(name: &str) -> InterfaceKind {
 }
 
 fn percent(value: f32) -> f32 {
-    round1(value.clamp(0.0, 100.0))
+    trunc1(value.clamp(0.0, 100.0))
 }
 
 impl SystemProbe for SysinfoProbe {

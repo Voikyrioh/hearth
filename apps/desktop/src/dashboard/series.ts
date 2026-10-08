@@ -21,7 +21,7 @@ export const WINDOWS: Record<WindowKey, { spanMs: number; stepMs: number }> = {
 export const WINDOW_KEYS: readonly WindowKey[] = ["1m", "5m", "1h"];
 export const DEFAULT_WINDOW: WindowKey = "5m";
 
-/** Un point de courbe : `v` est `null` quand la mesure manque sur tout le pas (trou, jamais zéro). */
+/** Un point de courbe : `v` est le maximum du pas, `null` quand la mesure manque sur tout le pas (trou, jamais zéro). */
 export interface Point {
   t: number;
   v: number | null;
@@ -88,13 +88,17 @@ export class SampleRing {
 /**
  * Deux échantillons voisins séparés d'au plus cette durée n'ont qu'un pas vide entre eux : un
  * échantillon à 1 Hz dont l'intervalle réel dérive (1,003 s) saute une case de temps de loin en
- * loin. Ce pas-là est comblé (moyenne de ses voisins) ; au-delà, c'est un vrai trou et il reste vide.
+ * loin, et ses voisins restent à environ 1 s l'un de l'autre. Ce pas-là est comblé (moyenne de ses
+ * voisins). Un échantillon RÉELLEMENT perdu laisse ses voisins à environ 2 s : au-delà de ce seuil
+ * c'est un vrai trou, et il reste vide (BR-DASH-010, FIX:01M4CRD0HH1YX2RQHBK72GM0VQ).
  */
-export const BRIDGE_MS = 2500;
+export const BRIDGE_MS = 1500;
 
 /**
- * Courbe d'une mesure sur une fenêtre : `spanMs / stepMs` pas, chacun la MOYENNE des valeurs lues
- * dans le pas (`null` s'il n'y en a aucune). La fenêtre se termine au dernier échantillon.
+ * Courbe d'une mesure sur une fenêtre : `spanMs / stepMs` pas, chacun le MAXIMUM des valeurs lues
+ * dans le pas (`null` s'il n'y en a aucune). La fenêtre se termine au dernier échantillon. Le
+ * maximum, pas la moyenne : un pic à 100 % rangé avec un échantillon calme ne doit pas se tracer à
+ * 55 % (FIX:01M4CRD1VMNQP4W619XVF1AWRE).
  *
  * L'agent date à la milliseconde réelle : un échantillon est rangé dans le pas le PLUS PROCHE de
  * son âge (arrondi, pas troncature), donc ±quelques ms de gigue ne changent pas de case. Un pas
@@ -111,8 +115,7 @@ export function resample(
   const { spanMs, stepMs } = WINDOWS[window];
   const count = spanMs / stepMs;
   const start = last.at - spanMs;
-  const sums = new Array<number>(count).fill(0);
-  const counts = new Array<number>(count).fill(0);
+  const peaks = new Array<number | null>(count).fill(null);
   const firstAt = new Array<number>(count).fill(Number.POSITIVE_INFINITY);
   const lastAt = new Array<number>(count).fill(Number.NEGATIVE_INFINITY);
   for (let index = samples.length - 1; index >= 0; index -= 1) {
@@ -122,20 +125,16 @@ export function resample(
     if (value === null) continue;
     const bucket = count - 1 - Math.round((last.at - sample.at) / stepMs);
     if (bucket < 0) continue;
-    sums[bucket] = (sums[bucket] ?? 0) + value;
-    counts[bucket] = (counts[bucket] ?? 0) + 1;
+    const peak = peaks[bucket];
+    peaks[bucket] = peak === null || peak === undefined ? value : Math.max(peak, value);
     firstAt[bucket] = Math.min(firstAt[bucket] ?? sample.at, sample.at);
     lastAt[bucket] = Math.max(lastAt[bucket] ?? sample.at, sample.at);
   }
-  const means = sums.map((sum, bucket) => {
-    const n = counts[bucket] ?? 0;
-    return n > 0 ? sum / n : null;
-  });
-  return means.map((mean, bucket) => {
-    let v = mean;
+  return peaks.map((peak, bucket) => {
+    let v = peak;
     if (v === null && bucket > 0 && bucket < count - 1) {
-      const before = means[bucket - 1] ?? null;
-      const after = means[bucket + 1] ?? null;
+      const before = peaks[bucket - 1] ?? null;
+      const after = peaks[bucket + 1] ?? null;
       const gap = (firstAt[bucket + 1] ?? Number.POSITIVE_INFINITY) - (lastAt[bucket - 1] ?? 0);
       if (before !== null && after !== null && gap <= BRIDGE_MS) v = (before + after) / 2;
     }

@@ -92,11 +92,26 @@ describe("resample", () => {
     expect(points[0]?.v).toBe(340);
   });
 
-  it("averages the readings of each 10 s step on the hour window", () => {
+  it("keeps the MAXIMUM of each 10 s step on the hour window, so a peak is seen", () => {
     const hour = resample(second, "1h", cpuLoad);
     // Chaque échantillon va au pas le plus proche de son âge : le dernier pas reçoit les âges de
-    // 0 à 5 s (échantillons 395 à 399), moyenne 397.
-    expect(hour.at(-1)?.v).toBeCloseTo(397, 5);
+    // 0 à 5 s (échantillons 395 à 399), le maximum est 399.
+    expect(hour.at(-1)?.v).toBe(399);
+  });
+
+  it("a 100 % peak among calm samples of the same step is drawn at 100 %, not at the mean", () => {
+    const calm = Array.from({ length: 120 }, (_, i) => makeSample(at(i), { cpu: 10 }));
+    const spike = calm.map((sample, i) => (i === 61 ? { ...sample, cpu: 100 } : sample));
+    const hour = resample(spike, "1h", cpuLoad);
+    expect(Math.max(...hour.map((point) => point.v ?? 0))).toBe(100);
+    // Deux échantillons rangés dans le même pas de 1 s : le maximum, pas la moyenne (55).
+    const crowded = [
+      makeSample(at(0), { cpu: 10 }),
+      makeSample(at(1) - 30, { cpu: 10 }),
+      makeSample(at(1) + 30, { cpu: 100 }),
+    ];
+    const points = resample(crowded, "1m", cpuLoad);
+    expect(points.at(-1)?.v).toBe(100);
   });
 
   it("leaves a hole (null) where nothing was measured, never a zero", () => {
@@ -149,6 +164,14 @@ describe("resample with a real agent clock (jitter, drift)", () => {
     expect(holes(resample(short, "1m", cpuLoad))).toBeGreaterThanOrEqual(1);
   });
 
+  it("a really lost sample (neighbours 2 s apart) stays a hole, it is not interpolated", () => {
+    const samples = makeSeries(120, T0, { jitterMs: 3 });
+    const lost = samples.filter((_, index) => index !== 60);
+    const points = resample(lost, "5m", cpuLoad);
+    expect(holes(points.slice(-120))).toBe(1);
+    // Une dérive d'horloge (voisins à ~1 s) reste comblée : voir le test de dérive.
+  });
+
   it("the hour window (10 s steps) is not hurt by jitter either", () => {
     const samples = makeSeries(3600, T0, { jitterMs: 20 });
     const points = resample(samples, "1h", cpuLoad);
@@ -160,6 +183,29 @@ describe("resample with a real agent clock (jitter, drift)", () => {
     const gappy = [...samples.slice(0, 300), ...samples.slice(306)];
     expect(coverageMs(gappy, "5m")).toBeLessThan(300_000);
     expect(coverageMs(gappy, "1h")).toBeGreaterThan(590_000);
+  });
+});
+
+describe("an hour seeded at 10 s then the 5 minutes of the snapshot at 1 s", () => {
+  const seeded = () => {
+    const ring = new SampleRing();
+    // L'heure d'avant l'instantané (un échantillon par 10 s), puis l'instantané (une par seconde).
+    ring.merge(Array.from({ length: 330 }, (_, i) => makeSample(T0 + i * 10_000)));
+    ring.merge(Array.from({ length: 300 }, (_, i) => makeSample(T0 + 3_300_000 + i * 1000)));
+    return ring;
+  };
+
+  it("covers the whole hour on contiguous samples: no « Depuis N min » at the opening", () => {
+    const ring = seeded();
+    expect(coverageMs(ring.samples(), "1h")).toBeGreaterThanOrEqual(3_590_000 - 10_000);
+    expect(coverageMs(ring.samples(), "5m")).toBeGreaterThan(298_000);
+  });
+
+  it("a 12 s outage inside the hour breaks the contiguity of the 5 min window but not the 10 s steps of the hour", () => {
+    const ring = new SampleRing();
+    ring.merge(Array.from({ length: 100 }, (_, i) => makeSample(T0 + i * 1000)));
+    ring.merge(Array.from({ length: 100 }, (_, i) => makeSample(T0 + 112_000 + i * 1000)));
+    expect(coverageMs(ring.samples(), "5m")).toBeLessThan(100_000);
   });
 });
 
