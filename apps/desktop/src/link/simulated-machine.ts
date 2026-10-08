@@ -167,6 +167,9 @@ export class SimulatedMachine {
     const end = this.now();
     for (let back = 3600; back > 300; back -= 10) {
       const sample = this.generate(track, end - back * 1000);
+      // Un pic à 100 % d'il y a 40 minutes : l'agent rend le MAXIMUM de chaque pas de l'heure à côté de la
+      // moyenne, il ne disparaît pas en vieillissant (BR-DASH-010).
+      if (back === 2400) sample.cpu = 100;
       track.history.pop();
       track.older.push(sample);
     }
