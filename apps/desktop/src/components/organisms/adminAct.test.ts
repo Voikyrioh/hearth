@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
+import { createMemoryHistory, createRouter } from "vue-router";
 import type { ActReport } from "@/composables/useReauth";
 import { fr } from "@/i18n/fr";
 import type { AdminActKind } from "@/link";
@@ -206,9 +207,47 @@ describe("AdminActDialog", () => {
     expect(document.querySelector("[data-reauth-agent-old]")?.textContent).toContain(
       "Mets à jour l'agent",
     );
+    // HRT-40 (C40) : un titre neutre (plus la question de l'acte), aucun bouton d'action, un bouton qui mène à la mise à jour.
+    expect(document.querySelector("dialog h2")?.textContent).toBe("Mise à jour requise");
+    expect(document.querySelector("dialog button[type=submit]")).toBeNull();
+    expect(dialogButton("Fermer")).not.toBeNull();
+    expect(document.querySelector("[data-reauth-settings]")?.textContent?.trim()).toBe(
+      "Aller aux réglages",
+    );
     dialogButton("Fermer")?.click();
     await flushPromises();
     expect(perform).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("« Aller aux réglages » closes the window and opens the settings, where the agent is updated (C40)", async () => {
+    const ctx = await startedApp();
+    ctx.bridge.reauth.setSupported("forge", false);
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", component: { render: () => null } },
+        { path: "/settings", name: "settings", component: { render: () => null } },
+      ],
+    });
+    await router.push("/");
+    const wrapper = mount(AdminActDialog, {
+      props: {
+        open: true,
+        serverId: "forge",
+        kind: "sessions_revoke",
+        title: "Fermer ?",
+        submitLabel: "Fermer",
+        perform: async (): Promise<ActReport> => ({ kind: "done" }),
+      },
+      global: { plugins: [ctx.pinia, router] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    (document.querySelector("[data-reauth-settings]") as HTMLElement).click();
+    await flushPromises();
+    expect(router.currentRoute.value.name).toBe("settings");
+    expect(wrapper.emitted("close")).toHaveLength(1);
     wrapper.unmount();
   });
 
@@ -219,12 +258,14 @@ describe("AdminActDialog", () => {
     await wrapper.setProps({ open: true });
     await flushPromises();
     expect(document.querySelector("[data-reauth-no-key]")).not.toBeNull();
-    expect(text()).toContain("Ce poste n'est pas encore enregistré");
+    // HRT-40 (C41) : le titre dit l'état vrai, plus de bouton d'action, un seul geste (se reconnecter).
+    expect(document.querySelector("dialog h2")?.textContent).toBe("Poste non enregistré");
     expect(text()).toContain("Me reconnecter pour enregistrer ce poste");
     expect(reauthField()).toBeNull();
+    expect(document.querySelector("dialog button[type=submit]")).toBeNull();
     expect(
-      document.querySelector("dialog button[type=submit]")?.getAttribute("aria-disabled"),
-    ).toBe("true");
+      [...document.querySelectorAll("dialog button")].map((b) => b.textContent?.trim()),
+    ).toEqual(["Me reconnecter pour enregistrer ce poste", "Fermer"]);
     expect(sent).toEqual([]);
     expect(bridge.calls.some((call) => call.startsWith("account sessions"))).toBe(false);
     const logout = vi.spyOn(bridge, "logout");

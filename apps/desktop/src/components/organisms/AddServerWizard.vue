@@ -54,6 +54,11 @@ function cancel() {
   emit("cancel");
 }
 
+const address = computed(() => {
+  const port = wizard.port.value.trim();
+  return port ? `${wizard.host.value.trim()}:${port}` : wizard.host.value.trim();
+});
+
 function refuse() {
   wizard.refuse();
   emit("cancel");
@@ -133,12 +138,22 @@ function refuse() {
     <!-- Temps 2 : l'empreinte à comparer -->
     <div v-else-if="wizard.step.value === 'fingerprint' && wizard.probe.value" class="wizard__form">
       <h1 id="wizard-title" class="wizard__title">{{ t("connect.verifyTitle") }}</h1>
+      <!-- FIX:01M4E5D5Z5MBSD639B5NPX81GC (C3) : le serveur qu'on vérifie est rappelé, avec un retour en arrière et la conséquence d'un refus. -->
+      <p class="wizard__server" data-fingerprint-server>
+        <strong>{{ wizard.name.value }}</strong>
+        <span class="wizard__address">{{ address }}</span>
+      </p>
       <FingerprintBlock
         :value="wizard.probe.value.display"
         :label="t('connect.fingerprintLabel')"
       />
       <p class="wizard__help">{{ t("connect.fingerprintHelp") }}</p>
+      <p class="wizard__help" data-fingerprint-where>{{ t("connect.fingerprintWhere") }}</p>
+      <p class="wizard__help" data-fingerprint-refuse>{{ t("connect.fingerprintRefuseHelp") }}</p>
       <div class="wizard__actions">
+        <HButton variant="ghost" data-fingerprint-back @click="wizard.back()">
+          {{ t("connect.previous") }}
+        </HButton>
         <HButton variant="secondary" @click="refuse">
           {{ t("connect.refuseFingerprint") }}
         </HButton>
@@ -229,6 +244,18 @@ function refuse() {
 
 .wizard__error {
   color: var(--crit);
+}
+
+.wizard__server {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+}
+
+.wizard__address {
+  color: var(--tx2);
+  font-family: var(--font-mono);
 }
 
 .wizard__actions {

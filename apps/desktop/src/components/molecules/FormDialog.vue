@@ -19,8 +19,17 @@ const props = withDefaults(
     error?: string;
     destructive?: boolean;
     cancelLabel?: string;
+    /** Pas de bouton d'action : l'action est impossible, la fenêtre ne propose que de la quitter (HRT-40). */
+    hideSubmit?: boolean;
   }>(),
-  { canSubmit: true, busy: false, error: undefined, destructive: false, cancelLabel: undefined },
+  {
+    canSubmit: true,
+    busy: false,
+    error: undefined,
+    destructive: false,
+    cancelLabel: undefined,
+    hideSubmit: false,
+  },
 );
 
 const emit = defineEmits<{ submit: []; cancel: [] }>();
@@ -94,6 +103,7 @@ function onNativeClose() {
             {{ cancelLabel ?? t("common.cancel") }}
           </HButton>
           <HButton
+            v-if="!hideSubmit"
             type="submit"
             :variant="destructive ? 'danger' : 'primary'"
             :solid="destructive"
