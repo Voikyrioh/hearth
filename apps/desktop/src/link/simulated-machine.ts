@@ -90,6 +90,8 @@ interface Track {
   pins: Partial<Record<Pinnable, Level>>;
   /** La carte graphique n'expose pas sa température (BR-DASH-007). */
   gpuTempMissing: boolean;
+  /** Une sonde au nom très long en plus (cas de géométrie, HRT-47). */
+  longSensor: boolean;
   step: number;
   listeners: Set<(event: MachineEvent) => void>;
 }
@@ -123,6 +125,7 @@ export class SimulatedMachine {
         levels: null,
         pins: {},
         gpuTempMissing: false,
+        longSensor: false,
         step: 0,
         listeners: new Set(),
       };
@@ -233,6 +236,16 @@ export class SimulatedMachine {
     this.track(serverId).gpuTempMissing = missing;
   }
 
+  /** Ajoute (ou retire) une sonde au nom très long : le nom ne sort jamais de sa carte (HRT-47, S1b). */
+  setLongSensor(serverId: string, on: boolean): void {
+    this.track(serverId).longSensor = on;
+  }
+
+  /** L'identité de la machine d'un serveur (pour en dériver une variante dans un test). */
+  machineOf(serverId: string): MachineInfo {
+    return this.track(serverId).machine;
+  }
+
   /** Remplace l'identité de la machine (sans carte, sans sonde, deux disques…) et l'annonce. */
   setMachine(serverId: string, machine: MachineInfo): void {
     this.track(serverId).machine = machine;
@@ -303,6 +316,14 @@ export class SimulatedMachine {
               celsius: one(this.value(track, "temp", 44 + 8 * wave(17))),
             },
             { label: "nvme Composite", celsius: one(36 + 4 * wave(29)) },
+            ...(track.longSensor
+              ? [
+                  {
+                    label: "nvme Samsung SSD 990 PRO 2TB Composite capteur du contrôleur principal",
+                    celsius: one(33 + 3 * wave(31)),
+                  },
+                ]
+              : []),
           ]
         : [],
     };

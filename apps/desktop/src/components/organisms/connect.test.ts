@@ -43,8 +43,10 @@ describe("AddServerWizard", () => {
     const labels = wrapper.findAll("label").map((label) => label.text());
     expect(labels).toEqual(["Nom du serveur", "Adresse IP ou nom", "Port (optionnel)"]);
     expect(wrapper.find("input[placeholder='7341']").exists()).toBe(true);
-    expect(wrapper.find("input[placeholder^='Forge']").exists()).toBe(true);
-    expect(wrapper.find("input[placeholder='192.168.1.20 ou forge.maison']").exists()).toBe(true);
+    expect(wrapper.find("input[placeholder='ex. salon']").exists()).toBe(true);
+    expect(wrapper.find("input[placeholder='ex. 192.168.1.10 ou serveur.local']").exists()).toBe(
+      true,
+    );
     const next = wrapper.findAll("button").find((b) => b.text() === "Suivant");
     // C1 : jamais grisé sans raison ; un champ manquant se dit au clic.
     expect(next?.attributes("aria-disabled")).not.toBe("true");

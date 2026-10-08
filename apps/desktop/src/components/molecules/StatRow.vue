@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Level } from "@/link";
+import HMiddleText from "../atoms/HMiddleText.vue";
 import LevelBadge from "./LevelBadge.vue";
 
 // Une ligne « libellé : valeur » d'une carte, avec la marque d'alerte de la valeur. Une valeur
@@ -21,10 +22,10 @@ withDefaults(
 <template>
   <div :class="['stat', { 'stat--stacked': stacked }]" :data-level="level">
     <dt class="stat__label">
-      <i v-if="swatch" :class="['stat__swatch', `stat__swatch--${swatch}`]" aria-hidden="true" />{{ label }}
+      <i v-if="swatch" :class="['stat__swatch', `stat__swatch--${swatch}`]" aria-hidden="true" /><HMiddleText class="stat__text" :text="label" />
     </dt>
     <dd :class="['stat__value', { 'stat__value--muted': muted }]">
-      {{ value }}<LevelBadge :level="level" />
+      <slot>{{ value }}</slot><LevelBadge :level="level" />
     </dd>
   </div>
 </template>
@@ -65,8 +66,16 @@ withDefaults(
   background: var(--cool);
 }
 
+.stat__text {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .stat__label {
-  flex: none;
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
   color: var(--tx2);
 }
 
@@ -82,6 +91,12 @@ withDefaults(
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
   text-align: right;
+}
+
+/* Une valeur (« 36 °C ») ne s'écrit jamais en colonne : c'est le libellé qui se tronque (HRT-47, S1b). */
+.stat:not(.stat--stacked) .stat__value {
+  flex: none;
+  white-space: nowrap;
 }
 
 .stat__value--muted {
