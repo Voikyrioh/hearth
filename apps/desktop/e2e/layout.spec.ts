@@ -195,7 +195,7 @@ for (const size of SIZES) {
 // ── HRT-36 : rien ne se chevauche ni ne se coupe ─────────────────────────────────────────────
 
 for (const size of SIZES) {
-  test(`comptes à ${size.width}×${size.height} : aucun bouton d'action coupé (entièrement dans le tableau)`, async ({
+  test(`comptes à ${size.width}×${size.height} : une ligne par compte, aucun bouton coupé (entièrement dans le tableau)`, async ({
     page,
   }) => {
     await page.setViewportSize(size);
@@ -203,6 +203,13 @@ for (const size of SIZES) {
     await expect(page.locator("tr[data-account]").first()).toBeVisible();
     const rows = await boxesOf(page, "tr[data-account]");
     expect(rows.length).toBeGreaterThan(1);
+    // C21 : une ligne par compte (au plus 76 px), actions comprises, sans bouton coupé ni hors tableau.
+    // À la fenêtre minimale (1100 px) il n'y a plus la place : les actions passent à la ligne dans le tableau.
+    if (size.width >= 1280) {
+      for (const row of rows) {
+        expect(row.h, `${row.text.slice(0, 20)} : une ligne`).toBeLessThanOrEqual(76);
+      }
+    }
     // Chaque bouton d'action est ENTIÈREMENT dans la zone visible du tableau (jamais coupé).
     const wrap = (await boxesOf(page, ".table-wrap"))[0];
     expect(wrap).toBeTruthy();
@@ -359,5 +366,82 @@ for (const size of [SIZES[0], SIZES[3]]) {
     expect(scroller, "conteneur de défilement").not.toBeNull();
     expect(Math.abs((scroller?.width ?? 0) - (scroller?.right ?? 0))).toBeLessThanOrEqual(2);
     await shoot(page, "hrt36-mes-serveurs", size.width, size.height);
+  });
+}
+
+// ── HRT-36 C20 : les boutons d'une fenêtre de dialogue restent visibles, le contenu défile ────────────
+
+for (const size of [...SIZES, { width: 1100, height: 420 }]) {
+  test(`fenêtre de création de compte à ${size.width}×${size.height} : « Annuler » et « Créer » toujours visibles`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/accounts");
+    await page.getByRole("button", { name: "Ajouter un compte" }).click();
+    const dialog = page.locator("dialog[open]");
+    await expect(dialog).toBeVisible();
+    for (const name of ["Annuler", "Créer"]) {
+      const box = await dialog.getByRole("button", { name, exact: true }).boundingBox();
+      expect(box, name).not.toBeNull();
+      expect(
+        (box?.y ?? 0) >= 0 && (box?.y ?? 0) + (box?.height ?? 0) <= size.height,
+        `${name} dans la fenêtre`,
+      ).toBe(true);
+    }
+    const frame = await dialog.boundingBox();
+    expect((frame?.y ?? 0) + (frame?.height ?? 0)).toBeLessThanOrEqual(size.height);
+    if (size.height <= 480) {
+      const scrolls = await dialog
+        .locator(".dialog__scroll")
+        .evaluate((el) => el.scrollHeight > el.clientHeight);
+      expect(scrolls, "le contenu défile").toBe(true);
+    }
+    // Les boutons ne recouvrent jamais le contenu : la zone qui défile se termine avant eux.
+    const scrollBox = await dialog.locator(".dialog__scroll").boundingBox();
+    const cancel = await dialog.getByRole("button", { name: "Annuler", exact: true }).boundingBox();
+    expect(
+      (scrollBox?.y ?? 0) + (scrollBox?.height ?? 0),
+      "contenu au-dessus des boutons",
+    ).toBeLessThanOrEqual((cancel?.y ?? 0) + 1);
+    await shoot(page, "hrt36-dialogue", size.width, size.height);
+  });
+}
+
+// ── HRT-44 : des actions qui disent ce qu'elles font (Comptes) ───────────────────────────────────────
+
+for (const size of SIZES) {
+  test(`comptes à ${size.width}×${size.height} : « Changer mon mot de passe », la case vient après les champs`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/accounts");
+    await page.getByRole("button", { name: "Changer mon mot de passe" }).click();
+    const dialog = page.locator("dialog[open]");
+    await expect(dialog).toBeVisible();
+    const y = async (locator: ReturnType<typeof dialog.getByLabel>) =>
+      (await locator.first().boundingBox())?.y ?? -1;
+    const next = await y(dialog.getByLabel("Nouveau mot de passe", { exact: true }));
+    const old = await y(dialog.getByLabel("Ancien mot de passe"));
+    const keep = await y(dialog.getByLabel("Garder ce poste reconnu"));
+    expect(next, "nouveau mot de passe").toBeGreaterThan(0);
+    expect(old, "l'ancien suit le nouveau").toBeGreaterThan(next);
+    expect(keep, "la case vient après les champs").toBeGreaterThan(old);
+    await shoot(page, "hrt44-mon-mot-de-passe", size.width, size.height);
+  });
+
+  test(`suppression de compte à ${size.width}×${size.height} : titre sans redite, délai avec unités`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/accounts");
+    await page
+      .locator("tr[data-account='lea']")
+      .getByRole("button", { name: /^Supprimer/ })
+      .click();
+    const dialog = page.locator("dialog[open]");
+    await expect(dialog.getByRole("heading", { name: "Supprimer le compte ?" })).toBeVisible();
+    await expect(dialog).not.toContainText("Supprimer le compte lea ?");
+    await expect(dialog).toContainText("Le compte lea et ses sessions seront supprimés.");
+    await shoot(page, "hrt44-suppression", size.width, size.height);
   });
 }

@@ -80,10 +80,11 @@ export function useReauth(
   );
   const needsPassword = computed(() => supported.value && !elevated.value);
   const ready = computed(() => state.value !== null);
-  /** « 4:32 » : le temps qu'il reste, à la seconde. */
+  /** « 4 min 32 s » : le temps qu'il reste, avec ses unités. */
   const clock = computed(() => {
     const seconds = countdown.remaining.value;
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    const minutes = Math.floor(seconds / 60);
+    return minutes > 0 ? `${minutes} min ${seconds % 60} s` : `${seconds} s`;
   });
 
   /** Se reconnecter pour enregistrer ce poste : la déconnexion volontaire ramène la connexion par mot de passe. */

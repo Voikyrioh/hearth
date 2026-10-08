@@ -63,7 +63,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
         <tr>
           <th scope="col">{{ t("accounts.colUsername") }}</th>
           <th scope="col">{{ t("accounts.colRole") }}</th>
-          <th scope="col">{{ t("accounts.colCreated") }}</th>
+          <th scope="col" class="table__created">{{ t("accounts.colCreated") }}</th>
           <th scope="col">{{ t("accounts.colLastLogin") }}</th>
           <th scope="col" class="table__num">{{ t("accounts.colSessions") }}</th>
           <th scope="col"><span class="sr-only">{{ t("accounts.colActions") }}</span></th>
@@ -91,7 +91,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
               {{ roleLabel(account.role) }}
             </HTag>
           </td>
-          <td>{{ formatDate(account.createdAt) }}</td>
+          <td class="table__created">{{ formatDate(account.createdAt) }}</td>
           <td>{{ account.lastLoginAt ? formatDateTime(account.lastLoginAt) : t("accounts.neverLoggedIn") }}</td>
           <td class="table__num">{{ account.sessionsOpen }}</td>
           <td>
@@ -161,6 +161,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
 
 <style scoped>
 .table-wrap {
+  container: accounts / inline-size;
   overflow-x: auto;
   border-radius: var(--radius-card);
   background: var(--card);
@@ -207,8 +208,32 @@ const named = (label: string, account: Account) => `${label} ${account.username}
 
 .table__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* FIX:01M4DKQWTWVNDXFPWJ5SE88SN7 (C21) : tableau de moins de 1100 px de large (fenêtre de 1100 à 1366 px) : la date de création, la donnée la moins
+   utile, cède sa place aux actions, qui tiennent sur une ligne et restent entièrement visibles (HRT-36, C21).
+   Plus large, elle reste affichée. */
+@container accounts (max-width: 1100px) {
+  .table__created {
+    display: none;
+  }
+
+  .table th,
+  .table td {
+    padding-inline: var(--space-3);
+  }
+}
+
+/* Fenêtre minimale (tableau de moins de 850 px) : même en retirant la date il n'y a plus la place pour une ligne ;
+   les actions passent alors à la ligne DANS leur cellule, sans jamais sortir du tableau. */
+@container accounts (max-width: 850px) {
+  .table__actions {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
 }
 </style>

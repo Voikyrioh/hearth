@@ -59,7 +59,7 @@ describe("la ligne « Demander mon mot de passe »", () => {
     await flushPromises();
     expect(document.querySelector("[data-reauth-field]")).not.toBeNull();
     await confirmDialog("Changer", "Faux-Mot-De-Passe-1");
-    expect(document.body.textContent).toContain("Mot de passe incorrect.");
+    expect(document.body.textContent).toContain("Mot de passe actuel incorrect.");
     expect(bridge.reauth.state("forge").mode).toBe("window");
     await confirmDialog("Changer", OWN);
     expect(bridge.reauth.state("forge").mode).toBe("each");

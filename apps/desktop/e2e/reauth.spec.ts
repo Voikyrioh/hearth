@@ -47,11 +47,11 @@ test("chaque acte d'une fenêtre demande « Ton mot de passe » quand l'agent l'
 }) => {
   await page.goto("/?nodev#/servers/forge/accounts");
   await row(page, "paul")
-    .getByRole("button", { name: /^Mot de passe/ })
+    .getByRole("button", { name: /^Changer le mot de passe/ })
     .click();
   const open = await ready(page);
   await expect(open.getByLabel("Ton mot de passe")).toBeVisible();
-  await expect(open.getByText("La clé de ce poste est vérifiée en même temps.")).toBeVisible();
+  await expect(open.getByText("Pour confirmer, redonne ton mot de passe.")).toBeVisible();
   await expect(open.getByRole("button", { name: "Changer le mot de passe" })).toHaveAttribute(
     "aria-disabled",
     "true",
@@ -77,13 +77,13 @@ test("pendant le délai de 5 minutes : un acte couvert n'a pas de champ et dit l
   const second = await ready(page);
   await expect(second.getByLabel("Ton mot de passe")).toHaveCount(0);
   await expect(second.locator("[data-reauth-elevated]")).toContainText(
-    /il ne t'est pas redemandé pendant encore \d:\d\d/,
+    /Il te sera redemandé dans \d+ min \d+ s/,
   );
   await shoot(page, "reauth-delai");
   await second.getByRole("button", { name: "Annuler" }).click();
   // Le mot de passe d'un autre compte n'est jamais couvert.
   await row(page, "paul")
-    .getByRole("button", { name: /^Mot de passe/ })
+    .getByRole("button", { name: /^Changer le mot de passe/ })
     .click();
   const third = await ready(page);
   await expect(third.getByLabel("Ton mot de passe")).toBeVisible();
@@ -117,7 +117,7 @@ test("le délai s'est fermé chez l'agent : la fenêtre redemande le mot de pass
   await expect(second.getByLabel("Mot de passe du nouveau compte")).toHaveValue(GOOD);
   await second.getByLabel("Ton mot de passe").fill(OWN);
   await second.getByRole("button", { name: "Créer", exact: true }).click();
-  await expect(page.locator(".toast").filter({ hasText: "Compte marc créé" })).toBeVisible();
+  await expect(page.locator(".toast").filter({ hasText: "Compte marc créé." })).toBeVisible();
 });
 
 test("un mot de passe faux reste sous le champ, la fenêtre reste ouverte, le champ est vidé", async ({
@@ -125,14 +125,14 @@ test("un mot de passe faux reste sous le champ, la fenêtre reste ouverte, le ch
 }) => {
   await page.goto("/?nodev#/servers/forge/accounts");
   await row(page, "paul")
-    .getByRole("button", { name: /^Mot de passe/ })
+    .getByRole("button", { name: /^Changer le mot de passe/ })
     .click();
   const open = await ready(page);
   await open.getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
   await open.getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await open.getByLabel("Ton mot de passe").fill("Faux-Mot-De-Passe-1");
   await open.getByRole("button", { name: "Changer le mot de passe" }).click();
-  await expect(open.getByText("Mot de passe incorrect.")).toBeVisible();
+  await expect(open.getByText("Mot de passe actuel incorrect.")).toBeVisible();
   await expect(open.getByLabel("Ton mot de passe")).toHaveValue("");
   await expect(dialog(page)).toHaveCount(1);
 });

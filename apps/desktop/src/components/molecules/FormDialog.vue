@@ -83,9 +83,11 @@ function onNativeClose() {
     >
       <h2 :id="titleId" class="dialog__title">{{ title }}</h2>
       <form class="dialog__form" novalidate @submit.prevent="submit">
-        <fieldset class="dialog__fields" :disabled="busy">
-          <slot />
-        </fieldset>
+        <div class="dialog__scroll">
+          <fieldset class="dialog__fields" :disabled="busy">
+            <slot />
+          </fieldset>
+        </div>
         <p v-if="error" class="dialog__error" role="alert">{{ error }}</p>
         <div class="dialog__actions">
           <HButton variant="secondary" :disabled="busy" @click="cancel">
@@ -110,12 +112,20 @@ function onNativeClose() {
 .dialog {
   width: var(--form-dialog-width);
   max-width: calc(100vw - var(--page-pad) * 2);
+  /* FIX:01M4DKQV9ZT6XQF6P7ER02HFYZ : la fenêtre ne dépasse jamais l'écran ; le contenu défile, les boutons restent visibles (C20) */
+  max-height: calc(100dvh - var(--page-pad) * 2);
+  overflow: hidden;
   padding: var(--space-5);
   border: 0;
   border-radius: var(--radius-card);
   background: var(--card);
   color: var(--tx);
   box-shadow: var(--card-edge);
+}
+
+.dialog[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 .dialog::backdrop {
@@ -129,9 +139,17 @@ function onNativeClose() {
 
 .dialog__form {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--space-4);
+  min-height: 0;
   margin-top: var(--space-4);
+}
+
+.dialog__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .dialog__fields {
@@ -150,6 +168,7 @@ function onNativeClose() {
 
 .dialog__actions {
   display: flex;
+  flex: none;
   justify-content: flex-end;
   gap: var(--space-3);
 }

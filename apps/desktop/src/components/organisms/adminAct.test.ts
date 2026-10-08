@@ -98,7 +98,7 @@ describe("AdminActDialog", () => {
     await flushPromises();
     dialogButton("Fermer")?.click();
     await flushPromises();
-    expect(text()).toContain("Mot de passe incorrect.");
+    expect(text()).toContain("Mot de passe actuel incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
     for (let attempt = 0; attempt < 5; attempt++) {
       typeInto(reauthField(), "Faux-Mot-De-Passe-1");
@@ -147,7 +147,7 @@ describe("AdminActDialog", () => {
     });
     await flushPromises();
     expect(reauthField()).toBeNull();
-    expect(document.querySelector("[data-reauth-elevated]")?.textContent).toMatch(/\d:\d\d/);
+    expect(document.querySelector("[data-reauth-elevated]")?.textContent).toMatch(/\d+ min \d+ s/);
     expect(dialogButton("Fermer")?.getAttribute("aria-disabled")).toBeNull();
     await wrapper.setProps({ kind: "account_password" });
     await flushPromises();
