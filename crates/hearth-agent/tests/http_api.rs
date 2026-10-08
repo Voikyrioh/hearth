@@ -1048,7 +1048,7 @@ async fn a_tracked_body_over_one_mebibyte_is_413_not_422() {
 async fn every_modifying_route_leaves_exactly_one_success_entry() {
     let env = env().await;
     let api = Api::new(&env);
-    let own = env.account_with_token(&api, "carl", Role::ReadOnly).await;
+    let _ = env.account_with_token(&api, "carl", Role::ReadOnly).await;
     let role_victim = env.create("v-role", Role::ReadOnly).await;
     let password_victim = env.create("v-pass", Role::ReadOnly).await;
     let sessions_victim = env.create("v-sess", Role::ReadOnly).await;

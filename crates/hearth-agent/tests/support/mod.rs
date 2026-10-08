@@ -413,7 +413,7 @@ pub async fn env() -> Env {
 /// fonction (sous-commandes `account`), et celui de tous les tests d'avant HRT-22.
 pub fn plain_sessions(env: &Env) -> SessionService {
     let pool = env.db.pool().clone();
-    let sessions = SessionService::new(
+    SessionService::new(
         Arc::new(SqliteAccountRepo::new(pool.clone())),
         Arc::new(SqliteSessionRepo::new(pool.clone())),
         Arc::new(SqliteLoginAttemptRepo::new(pool.clone())),
@@ -425,8 +425,7 @@ pub fn plain_sessions(env: &Env) -> SessionService {
         Arc::new(OsTokenGen),
         env.trail.clone(),
         env.audit_sink.clone(),
-    );
-    sessions
+    )
 }
 
 pub fn secret(value: &str) -> Secret {
