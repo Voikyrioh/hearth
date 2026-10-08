@@ -7,3 +7,5 @@ Serveur sans session (logique dans `composables/useReconnect.ts` ; recréé par 
 - Props : `server`, `reason`, `revoked`
 - Événements et slots : aucun
 - Notes : Monté par `ServerLayout`. Tests : `connect.test.ts`, `router/connect.test.ts`, `e2e/offline.spec.ts`.
+
+HRT-35 : panneau EN SURIMPRESSION, centré horizontalement et verticalement dans la zone de contenu, premier dans le DOM (atteint en premier au clavier), au-dessus par `z-index`, fond opaque et ombre ; il ne repousse plus la dernière vue. « Utiliser un autre compte » reste réservé à l'accès révoqué (BR-RESIL-014).

@@ -206,6 +206,7 @@ const reasonText = computed(() =>
 .audit {
   position: relative;
   display: flex;
+  flex: 1 0 auto;
   flex-direction: column;
   gap: var(--space-4);
 }
@@ -236,6 +237,9 @@ const reasonText = computed(() =>
 
 .audit__area {
   position: relative;
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
 }
 
 .audit__new {
