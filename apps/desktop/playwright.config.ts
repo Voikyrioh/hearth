@@ -39,6 +39,7 @@ export default defineConfig({
         "layout.spec.ts",
         "reauth.spec.ts",
         "identity.spec.ts",
+        "hrt33-keyboard.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },

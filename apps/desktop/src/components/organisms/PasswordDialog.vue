@@ -14,8 +14,8 @@ import { useSecurityStore } from "@/stores/security";
 // Changement de mot de passe : le sien (`account` absent : ancien puis nouveau, ferme les AUTRES
 // sessions, garde la courante, BR-ACCT-009) ou celui d'un autre compte (un administrateur le
 // définit, ferme toutes les sessions de ce compte, BR-ACCT-008). `username` est celui du compte dont
-// le mot de passe change : la règle « ne contient pas l'identifiant ». Les trois champs sont vidés
-// après CHAQUE envoi, réussi ou non. Pour SON mot de passe, la case « Garder ce poste reconnu » (Q15,
+// le mot de passe change : la règle « ne contient pas l'identifiant ». Les champs du nouveau mot de passe
+// sont vidés après un envoi non refusé (sur un refus, seule la confirmation est à refaire). Pour SON mot de passe, la case « Garder ce poste reconnu » (Q15,
 // BR-CONN-019) est décochée par défaut : l'adresse d'où part la demande est alors oubliée comme les
 // autres (le choix le plus strict). Absente de l'effet (désactivée, avec sa raison) quand l'agent est
 // trop ancien pour la connaître ; et si le mode attaque est actif sur un poste sans clé enregistrée, un
@@ -102,7 +102,9 @@ async function perform(adminPassword: string | null) {
         password.value,
         own.value && keepAddress.value,
       );
-  if (!(report.kind === "refused" && report.refusal.kind === "password_required")) {
+  // FIX:01M4D0RJB17YE0F26QFXGJ2WEV (C18) : sur un refus (ancien mot de passe faux, attente, délai fermé) le
+  // nouveau mot de passe est gardé ; seul le mot de passe de confirmation est à refaire.
+  if (report.kind !== "refused") {
     password.value = "";
     confirmation.value = "";
   }

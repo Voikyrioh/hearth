@@ -61,7 +61,7 @@ async function confirm(page: Page, label: string, password = OWN) {
 
 async function fillCreate(page: Page, username: string, password: string, confirm = password) {
   await dialog(page).getByLabel("Identifiant").fill(username);
-  await dialog(page).getByLabel("Mot de passe", { exact: true }).fill(password);
+  await dialog(page).getByLabel("Mot de passe du nouveau compte").fill(password);
   await dialog(page).getByLabel("Confirme le mot de passe").fill(confirm);
 }
 
@@ -111,16 +111,16 @@ test("création : critères du mot de passe en direct (coche et croix), bouton i
   await dialog(page).getByLabel("Identifiant").fill("sophie");
   await expect(dialog(page).getByText("L'identifiant contient")).toHaveCount(0);
   // Le mot de passe : chaque critère passe de la croix à la coche en direct.
-  await dialog(page).getByLabel("Mot de passe", { exact: true }).fill("abc");
+  await dialog(page).getByLabel("Mot de passe du nouveau compte").fill("abc");
   const rule = (name: string) => dialog(page).locator(`[data-rule="${name}"]`);
   await expect(rule("min_length")).toHaveAttribute("data-met", "false");
   await expect(rule("digit")).toHaveAttribute("data-met", "false");
   await expect(rule("uppercase")).toHaveAttribute("data-met", "false");
   await expect(rule("lowercase")).toHaveAttribute("data-met", "true");
   await expect(rule("min_length")).toContainText("Non respecté");
-  await dialog(page).getByLabel("Mot de passe", { exact: true }).fill("xxSophiexx12A");
+  await dialog(page).getByLabel("Mot de passe du nouveau compte").fill("xxSophiexx12A");
   await expect(rule("contains_username")).toHaveAttribute("data-met", "false");
-  await dialog(page).getByLabel("Mot de passe", { exact: true }).fill(GOOD);
+  await dialog(page).getByLabel("Mot de passe du nouveau compte").fill(GOOD);
   for (const name of ["min_length", "digit", "lowercase", "uppercase", "contains_username"]) {
     await expect(rule(name)).toHaveAttribute("data-met", "true");
   }
@@ -151,7 +151,7 @@ test("création réussie : compte ajouté en bas de la liste, message de succès
   expect(JSON.stringify(await sim(page).calls())).not.toContain(GOOD);
 });
 
-test("création refusée : identifiant déjà utilisé, formulaire conservé, mots de passe vidés", async ({
+test("création refusée : identifiant déjà utilisé, formulaire conservé en entier (C18)", async ({
   page,
 }) => {
   await page.goto("/?nodev#/servers/forge/accounts");
@@ -160,8 +160,8 @@ test("création refusée : identifiant déjà utilisé, formulaire conservé, mo
   await confirm(page, "Créer");
   await expect(dialog(page).getByText("Cet identifiant est déjà utilisé")).toBeVisible();
   await expect(dialog(page).getByLabel("Identifiant")).toHaveValue("PAUL");
-  await expect(dialog(page).getByLabel("Mot de passe", { exact: true })).toHaveValue("");
-  await expect(dialog(page).getByLabel("Confirme le mot de passe")).toHaveValue("");
+  await expect(dialog(page).getByLabel("Mot de passe du nouveau compte")).toHaveValue(GOOD);
+  await expect(dialog(page).getByLabel("Confirme le mot de passe")).toHaveValue(GOOD);
   // Annuler : la fenêtre se ferme, rien n'a été créé, la prochaine ouverture est vide.
   await dialog(page).getByRole("button", { name: "Annuler" }).click();
   await expect(dialog(page)).toHaveCount(0);

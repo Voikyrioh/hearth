@@ -15,6 +15,10 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M4D4FSDN82D1PNC7YQEERDNB](./FIX-01M4D4FSDN82D1PNC7YQEERDNB.md) | Page Comptes vide : « Comptes » deux fois et « Ajouter un compte » deux fois (C25) | 2026-10-08 |
 | [FIX-01M4D4FQRZ2QTRT57HMM6TAPBE](./FIX-01M4D4FQRZ2QTRT57HMM6TAPBE.md) | Le panneau de session expirée se posait en haut à gauche et repoussait la dernière vue (C45) | 2026-10-08 |
 | [FIX-01M4D4FP65X3TZW6JQAZ5YK7EX](./FIX-01M4D4FP65X3TZW6JQAZ5YK7EX.md) | Les écrans vides étaient plaqués à gauche, titre cassé, deux tiers de l'écran vides (C27) | 2026-10-08 |
+| [FIX-01M4D0RJJNZK7NGDMSFBE18Q29](./FIX-01M4D0RJJNZK7NGDMSFBE18Q29.md) | Deux champs « Mot de passe » identiques à la création d'un compte | 2026-10-08 |
+| [FIX-01M4D0RJB17YE0F26QFXGJ2WEV](./FIX-01M4D0RJB17YE0F26QFXGJ2WEV.md) | Un mot de passe de confirmation faux effaçait la saisie du nouveau compte | 2026-10-08 |
+| [FIX-01M4D0RJ5EMX3TG1TJB0EJ5EYP](./FIX-01M4D0RJ5EMX3TG1TJB0EJ5EYP.md) | Assistant d'ajout : « Suivant » grisé sans raison et curseur nulle part | 2026-10-08 |
+| [FIX-01M4D0RHZE7JFMV700JKA3DM1R](./FIX-01M4D0RHZE7JFMV700JKA3DM1R.md) | Les fenêtres d'actes d'administration s'ouvraient avec le curseur dans la confirmation | 2026-10-08 |
 | [FIX-01M4D1K9GV5X6MJTHDB8RYPMS6](./FIX-01M4D1K9GV5X6MJTHDB8RYPMS6.md) | Un chargement des mesures qui ne finit pas se lisait comme une panne (C5) | 2026-10-08 |
 | [FIX-01M4D1K8675QMBAFTM76XF4XJC](./FIX-01M4D1K8675QMBAFTM76XF4XJC.md) | La carte Carte graphique absente restait sans explication (C15) | 2026-10-08 |
 | [FIX-01M4D1K6V5DS7DQVR6ZV7A3HGY](./FIX-01M4D1K6V5DS7DQVR6ZV7A3HGY.md) | Le titre « Durée de fonctionnement » se cassait en deux lignes et le point de montage des disques était presque invisible (C14) | 2026-10-08 |

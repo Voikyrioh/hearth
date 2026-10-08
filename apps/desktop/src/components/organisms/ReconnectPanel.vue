@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import LoginForm from "@/components/organisms/LoginForm.vue";
 import { useReconnect } from "@/composables/useReconnect";
@@ -33,9 +33,37 @@ const hint = computed(() => {
 });
 const showForm = computed(() => !props.revoked || otherAccount.value);
 
+// FIX:01M4D0RHZE7JFMV700JKA3DM1R (C56) : à l'ouverture du panneau (session expirée, accès révoqué puis
+// « Utiliser un autre compte »), le curseur est dans le premier champ à remplir : le mot de passe quand
+// l'identifiant est connu, l'identifiant sinon ; après un refus il revient dans le mot de passe vidé.
+async function focusForm() {
+  await nextTick();
+  form.value?.focusFirstEmpty();
+}
+// À l'ouverture seulement si le curseur n'est dans aucun champ : ce que l'utilisateur est en train de taper
+// ailleurs (une autre page, un autre serveur) n'est jamais volé par un panneau qui apparaît.
+function cursorInAField(): boolean {
+  const active = document.activeElement;
+  return (
+    active instanceof HTMLInputElement ||
+    active instanceof HTMLTextAreaElement ||
+    active instanceof HTMLSelectElement ||
+    (active instanceof HTMLElement && active.isContentEditable)
+  );
+}
+onMounted(() => {
+  if (!cursorInAField()) void focusForm();
+});
+watch(showForm, (shown) => {
+  if (shown) void focusForm();
+});
+
 async function submit(entry: { username: string; password: string; remember: boolean }) {
   const connected = await reconnect.submit(entry);
-  if (!connected) form.value?.clearPassword();
+  if (!connected) {
+    form.value?.clearPassword();
+    void focusForm();
+  }
 }
 </script>
 
