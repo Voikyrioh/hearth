@@ -365,8 +365,9 @@ test("action lancée au moment d'une coupure : résultat inconnu, jamais rejoué
   await expect(unknown).toContainText("Elle n'a pas été rejouée automatiquement.");
   await expect(unknown).toContainText("À la reconnexion, la liste se mettra à jour.");
   await expect(pill(page)).toHaveText("Reconnexion…");
-  // Hors lien : la liste d'avant, désaturée, et plus aucune action possible.
-  await expect(page.locator('[data-stale="true"]')).toHaveCount(1);
+  // Hors lien : la liste d'avant, plus aucune action possible. En reconnexion (moins de 30 s) la page garde son
+  // apparence (HRT-38, C48) ; elle ne se désature qu'à « Hors ligne ».
+  await expect(page.locator('[data-stale="true"]')).toHaveCount(0);
   await expect(row(page, "lea")).toHaveCount(1);
   await expect(row(page, "paul").getByRole("button", { name: /^Supprimer/ })).toHaveAttribute(
     "aria-disabled",

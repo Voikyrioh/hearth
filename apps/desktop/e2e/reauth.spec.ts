@@ -152,17 +152,13 @@ test("poste sans clé : rien ne part, l'écran dit quoi faire et propose de se r
     .getByRole("button", { name: /^Supprimer/ })
     .click();
   const open = await ready(page);
-  await expect(open.locator("[data-reauth-no-key]")).toContainText(
-    "Ce poste n'est pas encore enregistré",
-  );
+  await expect(open.getByRole("heading", { name: "Poste non enregistré" })).toBeVisible();
   await expect(
     open.getByRole("button", { name: "Me reconnecter pour enregistrer ce poste" }),
   ).toBeVisible();
   await expect(open.getByLabel("Ton mot de passe")).toHaveCount(0);
-  await expect(open.getByRole("button", { name: "Supprimer", exact: true })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
+  // HRT-40 (C41) : plus de bouton d'action grisé.
+  await expect(open.getByRole("button", { name: "Supprimer", exact: true })).toHaveCount(0);
   expect((await calls(page)).filter((call) => call.startsWith("account delete"))).toHaveLength(0);
   await shoot(page, "reauth-sans-cle");
 });
@@ -179,10 +175,9 @@ test("agent qui n'annonce pas la confirmation : aucun acte, la fenêtre dit de m
   // Comme la liaison : aucun acte ne part, ni champ ni bouton d'envoi, l'écran le dit.
   await expect(open.locator("[data-reauth-agent-old]")).toContainText("Mets à jour l'agent");
   await expect(open.getByLabel("Ton mot de passe")).toHaveCount(0);
-  await expect(open.getByRole("button", { name: "Supprimer", exact: true })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
+  // HRT-40 (C40) : plus de bouton d'action grisé, un bouton qui mène aux réglages.
+  await expect(open.getByRole("button", { name: "Supprimer", exact: true })).toHaveCount(0);
+  await expect(open.getByRole("button", { name: "Aller aux réglages" })).toBeVisible();
   expect((await calls(page)).filter((call) => call.startsWith("account delete"))).toHaveLength(0);
 });
 

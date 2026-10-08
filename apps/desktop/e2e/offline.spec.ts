@@ -61,9 +61,9 @@ test("reconnexion : discrète, sans bandeau ni fenêtre, actions expliquées", a
   await expect(page.getByRole("tooltip")).toHaveText(
     "Indisponible pendant la reconnexion au serveur.",
   );
-  // Les dernières données restent là, désaturées, avec leur âge.
-  await expect(page.locator('[data-stale="true"]')).toHaveCount(1);
-  await expect(page.getByText(/^Vu il y a \d+ s$/)).toBeVisible();
+  // Les dernières données restent là, sans changer d'apparence ni être datées pendant la reconnexion (HRT-38, C48).
+  await expect(page.locator('[data-stale="true"]')).toHaveCount(0);
+  await expect(page.getByText(/^Vu il y a \d+ s$/)).toHaveCount(0);
 });
 
 test("hors ligne : bandeau, données périmées, retour du lien", async ({ page }) => {
@@ -181,8 +181,9 @@ test("accès révoqué : explication, pas de reconnexion automatique, un autre c
   await page.goto("/?nodev#/servers/forge/accounts");
   await publish(page, "forge", "access_revoked", { reason: "revoked" });
   await expect(pillOf(page)).toHaveText("Accès révoqué");
-  await expect(page.getByText("Ton compte n'est plus accessible.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Connecte-toi avec un compte valide.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Accès révoqué sur forge" })).toBeVisible();
+  await expect(page.getByText("il a pu être supprimé ou désactivé")).toBeVisible();
+  await expect(page.getByText("Demande à l'administrateur du serveur")).toBeVisible();
   await expect(page.getByLabel("Mot de passe", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ajouter un compte" })).toHaveAttribute(
     "aria-disabled",

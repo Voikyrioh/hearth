@@ -208,8 +208,10 @@ test("perte du lien : données périmées, rechargement manuel ; retour : rattra
 }) => {
   await open(page);
   await sim(page, (s) => s.setState("forge", "offline"));
-  await expect(page.getByText("Données périmées, serveur injoignable")).toBeVisible();
-  await expect(page.getByText("Périmé", { exact: true })).toBeVisible();
+  // HRT-38 (C30) : le bandeau du gabarit dit « Serveur hors ligne », la page n'ajoute ni « Périmé » ni « Rechargement manuel ».
+  await expect(page.locator(".banner")).toContainText("Serveur hors ligne");
+  await expect(page.getByText("Données périmées, serveur injoignable")).toHaveCount(0);
+  await expect(page.getByText("Rechargement manuel")).toHaveCount(0);
   await expect(page.locator('[data-stale="true"]')).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Exporter" })).toHaveAttribute(
     "aria-disabled",
