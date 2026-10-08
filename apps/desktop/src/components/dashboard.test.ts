@@ -115,11 +115,49 @@ describe("molecules", () => {
   });
 
   it("a chart says when its history does not cover the whole window", () => {
-    const props = { series: [], max: 100, label: "x", window: "1h" as const };
-    expect(mount(TimeSeriesChart, { props: { ...props, coveredMs: 12 * 60_000 } }).text()).toBe(
-      "Depuis 12 min",
+    const props = {
+      series: [],
+      max: 100,
+      label: "x",
+      window: "1h" as const,
+      format: (value: number) => `${value} %`,
+    };
+    const partial = mount(TimeSeriesChart, { props: { ...props, coveredMs: 12 * 60_000 } });
+    expect(partial.get(".series__covered").text()).toBe("Depuis 12 min");
+    expect(
+      mount(TimeSeriesChart, { props: { ...props, coveredMs: 3_600_000 } })
+        .find(".series__covered")
+        .exists(),
+    ).toBe(false);
+  });
+
+  it("a chart always says its duration and its scale, and gives a text equivalent", () => {
+    const points = [
+      { t: 1_000, v: 10 },
+      { t: 2_000, v: 40 },
+      { t: 3_000, v: 20 },
+    ];
+    const wrapper = mount(TimeSeriesChart, {
+      props: {
+        series: [{ points, tone: "ac" as const }],
+        max: 100,
+        label: "Charge",
+        window: "5m" as const,
+        coveredMs: 3_600_000,
+        format: (value: number) => `${value} %`,
+      },
+    });
+    expect(wrapper.get(".series__span").text()).toBe("5 dernières minutes");
+    expect(wrapper.get(".series__scale").text()).toBe("0 à 100 %");
+    expect(wrapper.get("svg").attributes("aria-label")).toBe(
+      "Charge. Dernière valeur 20 %, minimum 10 %, maximum 40 %, sur 5 dernières minutes",
     );
-    expect(mount(TimeSeriesChart, { props: { ...props, coveredMs: 3_600_000 } }).text()).toBe("");
+  });
+
+  it("a gauge at the normal level is not drawn with the alert gradient", () => {
+    const wrapper = mount(HGaugeArc, { props: { ratio: 0.22, level: "normal" } });
+    expect(wrapper.find("linearGradient").exists()).toBe(false);
+    expect(wrapper.get(".arc__value").attributes("stroke")).toBeUndefined();
   });
 });
 

@@ -66,6 +66,8 @@ const covered = useCoverage(props.entry);
       :label="t('dash.chartDisk')"
       :window="store.windowKey"
       :covered-ms="covered"
+      :format="formatPercent"
+      :legend="t('dash.legendDisk')"
     />
   </DashCard>
 </template>

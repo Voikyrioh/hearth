@@ -44,7 +44,7 @@ const width = computed(() =>
 }
 
 .meter__value--normal {
-  fill: var(--ac);
+  fill: var(--cool);
 }
 
 .meter__value--attention {

@@ -50,6 +50,8 @@ const covered = useCoverage(props.entry);
         :label="t('dash.chartWithValue', { label: t('dash.chartTemp'), value: formatTemperature(hottestNow) })"
         :window="store.windowKey"
         :covered-ms="covered"
+        :format="formatTemperature"
+        :legend="t('dash.legendTemp')"
       />
     </template>
   </DashCard>

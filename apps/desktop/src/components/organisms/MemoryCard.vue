@@ -39,6 +39,7 @@ const covered = useCoverage(props.entry);
         :label="t('dash.chartWithValue', { label: t('dash.chartMemory'), value: formatPercent(percent) })"
         :window="store.windowKey"
         :covered-ms="covered"
+        :format="formatPercent"
       />
     </div>
     <dl class="mem__rows">

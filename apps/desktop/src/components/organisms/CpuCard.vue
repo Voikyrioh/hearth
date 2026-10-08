@@ -38,6 +38,7 @@ const covered = useCoverage(props.entry);
         :label="t('dash.chartWithValue', { label: t('dash.chartCpu'), value: formatPercent(cpu) })"
         :window="store.windowKey"
         :covered-ms="covered"
+        :format="formatPercent"
       />
     </div>
     <CoreBars :cores="cores" :label="t('dash.coresLabel')" />

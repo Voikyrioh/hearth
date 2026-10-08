@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useId } from "vue";
-import type { Point } from "@/dashboard/series";
+import { ceilingOf, type Point } from "@/dashboard/series";
 
 // Courbe pleine (SVG pur) : trait 2 px, remplissage dégradé, point d'extrémité plein, pas de
 // grille. Les pas sans mesure (`v` nul) sont des TROUS (le trait s'interrompt), jamais un zéro.
@@ -16,6 +16,8 @@ const props = defineProps<{
   /** Échelle minimale quand `max` est nul : une courbe de température ne plafonne pas à sa valeur. */
   atLeast?: number;
   label: string;
+  /** Met en forme une valeur pour l'info-bulle du survol (unité comprise). */
+  format?: (value: number) => string;
 }>();
 
 const WIDTH = 300;
@@ -46,14 +48,37 @@ onMounted(() => {
 });
 onBeforeUnmount(() => observer?.disconnect());
 
-const ceiling = computed(() => {
-  if (props.max !== null) return props.max;
-  let top = 0;
-  for (const serie of props.series) {
-    for (const point of serie.points) if (point.v !== null && point.v > top) top = point.v;
-  }
-  return Math.max(top, props.atLeast ?? 1);
-});
+const ceiling = computed(() => ceilingOf(props.series, props.max, props.atLeast));
+
+// FIX:01M4E9T718D37EXTXMWA7YXWJE (C10)
+// Survol : un repère vertical et une info-bulle « valeur, heure » (HRT-41, C10). Le texte équivalent de la
+// courbe est son `aria-label` (dernière valeur, minimum, maximum) : l'info-bulle est un plus pour la souris.
+const TIME = new Intl.DateTimeFormat("fr-FR", { timeStyle: "medium" });
+const hover = ref<{ ratio: number; text: string } | null>(null);
+function onMove(event: PointerEvent) {
+  const element = box.value;
+  const first = props.series[0];
+  if (!element || !first || first.points.length === 0) return;
+  const rect = element.getBoundingClientRect();
+  if (rect.width === 0) return;
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  const count = first.points.length;
+  const stepX = count > 1 ? (WIDTH - PAD * 2) / (count - 1) : 0;
+  const index =
+    stepX === 0 ? 0 : Math.min(count - 1, Math.max(0, Math.round((ratio * WIDTH - PAD) / stepX)));
+  const at = first.points[index];
+  if (!at) return;
+  const values = props.series
+    .map((serie) => serie.points[index]?.v ?? null)
+    .filter((value): value is number => value !== null)
+    .map((value) => (props.format ? props.format(value) : String(Math.round(value))));
+  const ratioAt = (PAD + index * stepX) / WIDTH;
+  element.style.setProperty("--hover-x", `${(ratioAt * 100).toFixed(2)}%`);
+  hover.value = {
+    ratio: ratioAt,
+    text: `${values.length > 0 ? values.join(" · ") : "-"}, ${TIME.format(new Date(at.t))}`,
+  };
+}
 
 interface Drawn {
   tone: ChartSeries["tone"];
@@ -104,7 +129,7 @@ const drawn = computed<Drawn[]>(() =>
 </script>
 
 <template>
-  <div ref="box" class="chart-box">
+  <div ref="box" class="chart-box" @pointermove="onMove" @pointerleave="hover = null">
   <svg class="chart" :viewBox="`0 0 ${WIDTH} ${height}`" role="img" :aria-label="label">
     <defs>
       <linearGradient
@@ -136,6 +161,14 @@ const drawn = computed<Drawn[]>(() =>
       />
     </template>
   </svg>
+  <template v-if="hover">
+    <span class="chart__cursor" aria-hidden="true" />
+    <span
+      :class="['chart__tip', { 'chart__tip--end': hover.ratio > 0.6 }]"
+      aria-hidden="true"
+      >{{ hover.text }}</span
+    >
+  </template>
   </div>
 </template>
 
@@ -153,6 +186,37 @@ const drawn = computed<Drawn[]>(() =>
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.chart__cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--hover-x);
+  width: var(--border-width);
+  background: var(--tx3);
+  pointer-events: none;
+}
+
+.chart__tip {
+  position: absolute;
+  top: 0;
+  left: var(--hover-x);
+  z-index: var(--z-tooltip);
+  padding: var(--space-1) var(--space-2);
+  transform: translateX(var(--space-2));
+  border-radius: var(--radius-control);
+  background: var(--card-2);
+  box-shadow: var(--card-edge);
+  color: var(--tx);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart__tip--end {
+  transform: translateX(calc(-100% - var(--space-2)));
 }
 
 .chart__fill {

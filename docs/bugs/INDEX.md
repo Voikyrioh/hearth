@@ -4,6 +4,9 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4E9T718D37EXTXMWA7YXWJE](./FIX-01M4E9T718D37EXTXMWA7YXWJE.md) | Une courbe du tableau de bord ne disait ni sa durée, ni son échelle, ni sa valeur (C10) | 2026-10-08 |
+| [FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J](./FIX-01M4E9T77SYNC7MK8Q1JP5PQ4J.md) | Les jauges à l'état normal étaient dessinées en dégradé rose-braise, la couleur d'une alerte (C13) | 2026-10-08 |
+| [FIX-01M4E9T7ECW7H6R9V4V6YNVRE1](./FIX-01M4E9T7ECW7H6R9V4V6YNVRE1.md) | Tableau de bord sans mesure : « Vu il y a… » posé sur une page qui n'a rien vu | 2026-10-08 |
 | [FIX-01M4E48N732694TTFSRQF1C4KG](./FIX-01M4E48N732694TTFSRQF1C4KG.md) | Mise à jour de l'agent : le bouton, l'étape et la mention se répètent (C43) | 2026-10-08 |
 | [FIX-01M4E48MY42041VB11FJFSG0XW](./FIX-01M4E48MY42041VB11FJFSG0XW.md) | Port faux : « L'emplacement saisi n'est pas valide » (C4) | 2026-10-08 |
 | [FIX-01M4DPR4FFVCMZN0KPEA4JVCC8](./FIX-01M4DPR4FFVCMZN0KPEA4JVCC8.md) | Nombres à l'anglaise et unités brutes (C12) | 2026-10-08 |

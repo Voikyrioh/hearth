@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pageNothingSeen } from "@/composables/pageSeen";
 import StaleStamp from "./StaleStamp.vue";
 
 // Enveloppe commune des données périmées (BR-RESIL-007) : quand le lien n'est pas
@@ -9,7 +10,8 @@ defineProps<{ stale: boolean; lastContactAt: number | null }>();
 <template>
   <div :class="['surface', { 'surface--stale': stale }]" :data-stale="stale ? 'true' : undefined">
     <div class="surface__body"><slot /></div>
-    <StaleStamp v-if="stale" class="surface__stamp" :last-contact-at="lastContactAt" />
+        <!-- FIX:01M4E9T7ECW7H6R9V4V6YNVRE1 : rien reçu, rien à dater. -->
+    <StaleStamp v-if="stale && !pageNothingSeen" class="surface__stamp" :last-contact-at="lastContactAt" />
   </div>
 </template>
 

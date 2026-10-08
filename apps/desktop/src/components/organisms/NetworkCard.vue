@@ -45,6 +45,7 @@ const covered = useCoverage(props.entry);
       :label="t('dash.chartWithValue', { label: t('dash.chartNet'), value: `${t('dash.netUp')} ${formatRate(net?.upBytesPerS ?? null)}, ${t('dash.netDown')} ${formatRate(net?.downBytesPerS ?? null)}` })"
       :window="store.windowKey"
       :covered-ms="covered"
+      :format="formatRate"
     />
   </DashCard>
 </template>

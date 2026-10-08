@@ -297,7 +297,9 @@ describe("hors ligne (HRT-12)", () => {
       bridge.setState("forge", "offline");
       await flushPromises();
       expect(wrapper.findAll('[data-stale="true"]'), `${name} hors ligne`).toHaveLength(1);
-      expect(wrapper.text(), name).toMatch(/Vu il y a \d+ s/);
+      // Le tableau de bord de ce test n'a reçu aucune mesure : il n'y a rien à dater (HRT-41).
+      if (name === "dashboard") expect(wrapper.text(), name).not.toMatch(/Vu il y a/);
+      else expect(wrapper.text(), name).toMatch(/Vu il y a \d+ s/);
       bridge.setState("forge", "connected");
       await flushPromises();
     }
