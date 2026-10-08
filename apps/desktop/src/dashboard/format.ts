@@ -2,7 +2,7 @@ import { t } from "@/i18n";
 
 /**
  * Formats des nombres du tableau de bord (BR-DASH-014) : pourcentages entiers (`87 %`), quantités
- * en Go à une décimale (`12.5 Go`), débits à l'unité adaptée (`1.2 Mo/s`, `450 Ko/s`), durée de
+ * en Go à une décimale à virgule sans « ,0 » (`12,5 Go`, `64 Go`, `4 To` dès 1 024 Go), débits à l'unité adaptée (`1,2 Mo/s`, `450 Ko/s`), durée de
  * fonctionnement longue (`3 j 4 h 12 min`, `2 h 30 min` sous un jour). Les puissances sont celles
  * de 1024 : une mémoire de « 16 Go » est une barrette de 16 Gio. Une mesure absente se dit
  * « Non disponible » (BR-DASH-008), jamais zéro. Les unités et les gabarits sont dans `i18n/fr.ts`.
@@ -20,11 +20,26 @@ export function formatPercent(value: number | null): string {
   return value === null ? t("dash.unavailable") : t("dash.unitPercent", { n: Math.floor(value) });
 }
 
-export function formatGb(bytes: number | null): string {
-  return bytes === null ? t("dash.unavailable") : t("dash.unitGb", { n: (bytes / GIB).toFixed(1) });
+/** Une décimale, VIRGULE française, sans « ,0 » inutile : `64`, `12,5` (HRT-46, C12). FIX:01M4DPR4FFVCMZN0KPEA4JVCC8 */
+export function decimal(value: number): string {
+  const text = value.toFixed(1);
+  return (text.endsWith(".0") ? text.slice(0, -2) : text).replace(".", ",");
 }
 
-/** « 12.5 Go / 64.0 Go » : utilisé sur total. */
+/**
+ * « 12,5 Go » ; à partir de 1 024 Go, en To (`4 To`, `1,5 To`). Tout est binaire, comme l'Explorateur
+ * Windows : 1 To = 1 024 Go, libellés « Go » et « To ». Un seul formateur pour la mémoire et les disques.
+ * La bascule se décide sur la valeur ARRONDIE : jamais « 1024 Go ».
+ */
+export function formatGb(bytes: number | null): string {
+  if (bytes === null) return t("dash.unavailable");
+  const gb = bytes / GIB;
+  return Number(gb.toFixed(1)) >= 1024
+    ? t("dash.unitTb", { n: decimal(gb / 1024) })
+    : t("dash.unitGb", { n: decimal(gb) });
+}
+
+/** « 12,5 Go / 64 Go » : utilisé sur total. */
 export function formatUsage(used: number | null, total: number | null): string {
   if (used === null || total === null) return t("dash.unavailable");
   return t("dash.usage", { used: formatGb(used), total: formatGb(total) });
@@ -36,8 +51,8 @@ export function formatRate(bytesPerSecond: number | null): string {
   const kilo = Math.round(bytesPerSecond / KIB);
   const mega = (bytesPerSecond / MIB).toFixed(1);
   const giga = (bytesPerSecond / GIB).toFixed(1);
-  if (Number(mega) >= 1024) return t("dash.rateGb", { n: giga });
-  if (kilo >= 1024) return t("dash.rateMb", { n: mega });
+  if (Number(mega) >= 1024) return t("dash.rateGb", { n: decimal(Number(giga)) });
+  if (kilo >= 1024) return t("dash.rateMb", { n: decimal(Number(mega)) });
   if (bytesPerSecond >= KIB) return t("dash.rateKb", { n: kilo });
   return t("dash.rateB", { n: Math.round(bytesPerSecond) });
 }
@@ -51,7 +66,7 @@ export function formatTemperature(celsius: number | null): string {
 export function formatFrequency(megahertz: number | null): string {
   if (megahertz === null) return t("dash.unavailable");
   return megahertz >= 1000
-    ? t("dash.unitGhz", { n: (megahertz / 1000).toFixed(1) })
+    ? t("dash.unitGhz", { n: decimal(megahertz / 1000) })
     : t("dash.unitMhz", { n: Math.round(megahertz) });
 }
 

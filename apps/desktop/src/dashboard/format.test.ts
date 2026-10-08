@@ -23,19 +23,32 @@ describe("formats (BR-DASH-014)", () => {
   });
 
   it("writes memory and disks in Go with one decimal", () => {
-    expect(formatGb(12.5 * GIB)).toBe("12.5 Go");
-    expect(formatGb(0)).toBe("0.0 Go");
-    expect(formatUsage(8 * GIB, 64 * GIB)).toBe("8.0 Go / 64.0 Go");
+    expect(formatGb(12.5 * GIB)).toBe("12,5 Go");
+    expect(formatGb(0)).toBe("0 Go");
+    expect(formatUsage(8 * GIB, 64 * GIB)).toBe("8 Go / 64 Go");
+    // HRT-46 (C12) : virgule française, jamais de « ,0 », et des To à partir de 1 000 Go.
+    expect(formatGb(64 * GIB)).toBe("64 Go");
+    expect(formatGb(999.9 * GIB)).toBe("999,9 Go");
+    // Tout en binaire, comme l'Explorateur Windows : 1 To = 1 024 Go (décision de Claude du 2026-10-08).
+    expect(formatGb(1000 * GIB)).toBe("1000 Go");
+    expect(formatGb(1023 * GIB)).toBe("1023 Go");
+    expect(formatGb(1023.96 * GIB)).toBe("1 To");
+    expect(formatGb(1024 * GIB)).toBe("1 To");
+    expect(formatGb(1536 * GIB)).toBe("1,5 To");
+    expect(formatGb(4096 * GIB)).toBe("4 To");
+    // Un disque « de 4 To » du commerce (4 × 10¹² octets) vaut 3,6 To affichés, comme chez Windows.
+    expect(formatGb(4e12)).toBe("3,6 To");
+    expect(formatGb(3280 * GIB)).toBe("3,2 To");
   });
 
   it("adapts the unit of a rate: Mo/s, Ko/s, and a zero stays a zero", () => {
-    expect(formatRate(1.2 * 1024 * 1024)).toBe("1.2 Mo/s");
+    expect(formatRate(1.2 * 1024 * 1024)).toBe("1,2 Mo/s");
     expect(formatRate(450 * 1024)).toBe("450 Ko/s");
     expect(formatRate(300)).toBe("300 o/s");
     expect(formatRate(0)).toBe("0 o/s");
-    expect(formatRate(2.5 * GIB)).toBe("2.5 Go/s");
+    expect(formatRate(2.5 * GIB)).toBe("2,5 Go/s");
     // La bascule se fait après l'arrondi : jamais « 1024 Ko/s ».
-    expect(formatRate(1_048_500)).toBe("1.0 Mo/s");
+    expect(formatRate(1_048_500)).toBe("1 Mo/s");
     expect(formatRate(1023.4 * 1024)).toBe("1023 Ko/s");
   });
 
@@ -63,7 +76,7 @@ describe("formats (BR-DASH-014)", () => {
   it("writes temperatures, frequencies and covered time", () => {
     expect(formatTemperature(52.4)).toBe("52 °C");
     expect(formatTemperature(79.9)).toBe("79 °C");
-    expect(formatFrequency(4500)).toBe("4.5 GHz");
+    expect(formatFrequency(4500)).toBe("4,5 GHz");
     expect(formatFrequency(800)).toBe("800 MHz");
     expect(formatCovered(12 * 60_000 + 20_000)).toBe("12 min");
     expect(formatCovered(30_000)).toBe("30 s");
