@@ -106,7 +106,8 @@ function openSecurityPage() {
         @close="security.closeDialog()"
       />
       <div class="layout__content">
-        <!-- Sans session : le formulaire de connexion, au-dessus de la dernière vue (périmée). -->
+        <!-- Sans session : le formulaire de connexion, EN SURIMPRESSION de la dernière vue (périmée), premier dans
+             le DOM (atteint en premier au clavier), au-dessus par `z-index`. -->
         <ReconnectPanel
           v-if="state === 'session_expired' || state === 'access_revoked'"
           :key="server.id"
@@ -145,7 +146,10 @@ function openSecurityPage() {
 }
 
 .layout__content {
+  position: relative;
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
   overflow-y: auto;
 }

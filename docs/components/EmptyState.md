@@ -2,7 +2,7 @@
 
 Molécule · `apps/desktop/src/components/molecules/EmptyState.vue`
 
-Placeholder d'une vue vide : illustration, titre (Sora 30), texte, action. Largeur max 420 px, centré. L'illustration vient de la collection `src/assets/illustrations/` (images générées choisies par le détenteur, PNG à fond transparent produits par `npm run build:illustrations`, ADR-0027) : décorative (`alt` vide), 220 px (`md`) ou 280 px (`lg`) par jetons.
+Placeholder d'une vue vide : illustration, titre (Sora 30), texte, action. Largeur max 640 px, centré. L'illustration vient de la collection `src/assets/illustrations/` (images générées choisies par le détenteur, PNG à fond transparent produits par `npm run build:illustrations`, ADR-0027) : décorative (`alt` vide), 220 px (`md`) ou 280 px (`lg`) par jetons.
 
 - Props : `title`, `text`, `heading` (`h1` par défaut, `h2` quand la vue a déjà son `h1`), `illustration` (`firstLaunch`, `journal`, `offline` ; absente : rien), `size` (`md` par défaut, `lg`)
 - Événements et slots : slots `illustration` (prime sur la prop), `action` (tous deux optionnels)

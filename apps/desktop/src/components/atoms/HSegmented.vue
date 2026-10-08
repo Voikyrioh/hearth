@@ -52,6 +52,7 @@ function move(delta: number) {
 <style scoped>
 .seg {
   display: inline-flex;
+  flex: none;
   padding: var(--space-1);
   border: var(--border-width) solid var(--bd);
   border-radius: var(--radius-control);
@@ -59,6 +60,8 @@ function move(delta: number) {
 }
 
 .seg__item {
+  /* FIX:01M4D4FWJBQ360DF7FB9RWFZCM : chaque choix sur une ligne (revue UX C33) */
+  white-space: nowrap;
   min-height: var(--control-sm);
   padding: 0 var(--space-3);
   border: 0;

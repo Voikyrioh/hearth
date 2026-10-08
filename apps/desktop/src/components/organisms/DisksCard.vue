@@ -112,10 +112,9 @@ const covered = useCoverage(props.entry);
 }
 
 .disk__mount {
-  /* FIX:01M4D1K6V5DS7DQVR6ZV7A3HGY */
-  color: var(--tx2);
+  /* FIX:01M4D1K6V5DS7DQVR6ZV7A3HGY : le point de montage se lit (taille du texte, pas de la note) */
+  color: var(--tx);
   font-family: var(--font-mono);
-  font-size: var(--fs-small);
 }
 
 .disk__free {

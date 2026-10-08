@@ -52,13 +52,15 @@ const covered = useCoverage(props.entry);
 
 <style scoped>
 .mem {
+  /* FIX:01M4D4Y0D7YFWCV6R1GEHXZGPB : la jauge est centrée dans sa rangée, la courbe prend la hauteur (pas de vide sous la jauge) */
   display: flex;
   flex: 1 1 auto;
-  align-items: stretch;
+  align-items: center;
   gap: var(--space-4);
 }
 
 .mem__chart {
+  align-self: stretch;
   flex: 1;
   min-width: 0;
 }

@@ -113,16 +113,13 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
     <HButton variant="secondary" @click="store.load(serverId)">{{ t("common.retry") }}</HButton>
   </div>
   <section v-else-if="accounts.length === 0" class="accounts__empty">
-    <EmptyState :title="t('pages.accounts')" :text="t('accounts.empty')"
+    <!-- FIX:01M4D4FSDN82D1PNC7YQEERDNB : le titre de la page et son bouton d'action (en-tête) suffisent. -->
+    <EmptyState
+      :title="t('accounts.emptyTitle')"
+      :text="t('accounts.empty')"
       heading="h2"
       :illustration="SCREEN_ILLUSTRATIONS.accounts ?? undefined"
-    >
-      <template #action>
-        <HButton :needs-link="{ role: 'admin' }" @click="creating = true">
-          {{ t("pages.addAccount") }}
-        </HButton>
-      </template>
-    </EmptyState>
+    />
   </section>
   <AccountTable
     v-else

@@ -41,7 +41,10 @@ withDefaults(
   flex-direction: column;
   align-items: center;
   width: 100%;
-  max-width: var(--content-max);
+  max-width: var(--panel-max);
+  /* FIX:01M4D4FP65X3TZW6JQAZ5YK7EX : centré dans sa zone, jamais plaqué au bord gauche (revue UX C27) */
+  padding: var(--space-6) 0;
+  margin: auto;
   text-align: center;
 }
 

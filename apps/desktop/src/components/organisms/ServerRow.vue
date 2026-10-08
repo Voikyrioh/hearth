@@ -80,8 +80,9 @@ const updateAvailable = computed(() => agents.withUpdate.includes(props.server.i
 }
 
 .row__id {
+  /* FIX:01M4D4G1E0DGHFXWVPXVW04DF6 : la colonne du nom garde sa largeur de contenu, les étiquettes passent à la ligne au lieu de la recouvrir (revue UX C51) */
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
 }

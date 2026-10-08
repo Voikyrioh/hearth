@@ -270,6 +270,54 @@ for (const size of LAYOUT_SIZES) {
     for (const gap of gaps) {
       expect(gap.empty, `${gap.title} : vide sous son contenu`).toBeLessThanOrEqual(32);
     }
+    // VIDES INTERNES (retour de revue HRT-34) : une jauge n'est jamais perdue au milieu d'un grand vide : l'espace
+    // au-dessus et au-dessous d'elle, dans sa rangée, reste sous 80 px (la moitié d'une jauge).
+    const voids = await page.locator("figure.gauge").evaluateAll((gauges) =>
+      gauges.map((gauge) => {
+        const row = (gauge.parentElement as HTMLElement).getBoundingClientRect();
+        // Le contenu de la jauge (cadran puis légende), pas sa boîte (qui peut être étirée).
+        const top = (gauge.querySelector(".gauge__dial") as HTMLElement).getBoundingClientRect()
+          .top;
+        const bottom = (
+          gauge.querySelector(".gauge__caption") as HTMLElement
+        ).getBoundingClientRect().bottom;
+        return {
+          name: gauge.getAttribute("aria-label") ?? "",
+          above: Math.round(top - row.top),
+          below: Math.round(row.bottom - bottom),
+        };
+      }),
+    );
+    for (const gap of voids) {
+      expect(gap.above, `${gap.name} : vide au-dessus`).toBeLessThanOrEqual(80);
+      expect(gap.below, `${gap.name} : vide au-dessous`).toBeLessThanOrEqual(80);
+    }
+    // Pas de trou entre le contenu d'une carte et sa courbe (hors rangées jauge + courbe).
+    const chartGaps = await page.locator(".series").evaluateAll((series) =>
+      series.flatMap((element) => {
+        const parent = element.parentElement as HTMLElement;
+        if (getComputedStyle(parent).flexDirection === "row") return [];
+        const before = element.previousElementSibling;
+        if (!before) return [];
+        return [
+          Math.round(element.getBoundingClientRect().top - before.getBoundingClientRect().bottom),
+        ];
+      }),
+    );
+    for (const gap of chartGaps) expect(gap, "vide avant une courbe").toBeLessThanOrEqual(24);
+    // Le point de montage se lit : même taille que le nom du disque (pas une note en petit).
+    const sizes = await page.evaluate(() => {
+      const mount = document.querySelector(".disk__mount");
+      const name = document.querySelector(".disk__name");
+      return mount && name
+        ? [
+            Number.parseFloat(getComputedStyle(mount).fontSize),
+            Number.parseFloat(getComputedStyle(name).fontSize),
+          ]
+        : null;
+    });
+    expect(sizes).not.toBeNull();
+    expect(sizes?.[0] ?? 0).toBeGreaterThanOrEqual((sizes?.[1] ?? 99) - 0.5);
     // Pas de titre cassé sur plusieurs lignes, courbes d'au moins 150 px de large.
     for (const box of boxes) expect(box.titleLines, box.title).toBeLessThanOrEqual(1);
     const charts = await page
@@ -277,6 +325,17 @@ for (const size of LAYOUT_SIZES) {
       .evaluateAll((svgs) => svgs.map((svg) => svg.getBoundingClientRect().width));
     for (const width of charts) expect(width).toBeGreaterThanOrEqual(150);
     // À 1920 et plus, l'essentiel tient sans défiler.
+    // Les cartes sont ENTIÈRES dans la zone de contenu (pas seulement leur haut) quand tout peut tenir.
+    const zoneBottom = await page.evaluate(
+      () => document.querySelector(".layout__content")?.getBoundingClientRect().bottom ?? 0,
+    );
+    if (size.width >= 1920) {
+      for (const box of boxes) {
+        expect(box.y + box.h, `${box.title} entière dans la zone`).toBeLessThanOrEqual(
+          zoneBottom - 1,
+        );
+      }
+    }
     if (size.width >= 1920) {
       const needed = [
         "Processeur",

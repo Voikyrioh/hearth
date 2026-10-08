@@ -67,10 +67,11 @@ describe("Comptes (administrateurs)", () => {
     const wrapper = mount(App, { global: ctx.global, attachTo: document.body });
     await flushPromises();
     expect(wrapper.text()).toContain(
-      "Aucun compte n'existe pour le moment. Crée-en un pour commencer.",
+      "Crée un compte avec le bouton « Ajouter un compte », en haut de la page.",
     );
+    // Un seul bouton « Ajouter un compte » (celui de l'en-tête) et pas de titre « Comptes » en double.
     expect(wrapper.findAll("button").filter((b) => b.text() === "Ajouter un compte")).toHaveLength(
-      2,
+      1,
     );
     // Illustration : celle de la table des écrans (aucune tant que `accounts` y vaut null).
     expect(wrapper.findAll(".empty__img")).toHaveLength(SCREEN_ILLUSTRATIONS.accounts ? 1 : 0);

@@ -16,6 +16,15 @@ defineProps<{ stale: boolean; lastContactAt: number | null }>();
 <style scoped>
 .surface {
   position: relative;
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.surface__body {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
 }
 
 .surface--stale .surface__body {

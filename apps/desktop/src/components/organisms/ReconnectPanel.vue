@@ -91,12 +91,18 @@ async function submit(entry: { username: string; password: string; remember: boo
 
 <style scoped>
 .reconnect {
+  /* FIX:01M4D4FQRZ2QTRT57HMM6TAPBE : en surimpression, centré, sans repousser la dernière vue (revue UX C45) */
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-tooltip);
+  height: fit-content;
+  box-shadow: var(--card-edge);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: var(--content-max);
+  width: min(100%, var(--content-max));
   padding: var(--space-4);
-  margin-bottom: var(--space-4);
+  margin: auto;
   border: var(--border-width) solid var(--bd);
   border-radius: var(--radius-card);
   background: var(--card);

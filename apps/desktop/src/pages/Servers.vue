@@ -20,7 +20,8 @@ const book = useServerBook();
 </script>
 
 <template>
-  <main class="book">
+  <main class="book__scroll">
+    <div class="book">
     <header class="book__head">
       <h1 class="book__title">{{ t("connect.booksTitle") }}</h1>
       <HButton @click="router.push({ name: 'add-server' })">
@@ -56,19 +57,23 @@ const book = useServerBook();
       @confirm="book.confirmRemove()"
       @cancel="book.removing.value = null"
     />
+    </div>
   </main>
 </template>
 
 <style scoped>
+.book__scroll {
+  height: 100%;
+  overflow-y: auto;
+}
+
 .book {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
   max-width: var(--panel-max);
-  height: 100%;
   margin: 0 auto;
   padding: var(--page-pad);
-  overflow-y: auto;
 }
 
 .book__head {

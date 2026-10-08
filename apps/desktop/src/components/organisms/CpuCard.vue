@@ -53,6 +53,7 @@ const covered = useCoverage(props.entry);
 }
 
 .cpu__chart {
+  align-self: stretch;
   flex: 1;
   min-width: 0;
 }

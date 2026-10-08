@@ -26,6 +26,11 @@ const labelId = useId();
   padding: var(--space-3) 0;
 }
 
+.row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .row__label {
   font-weight: var(--fw-medium);
 }

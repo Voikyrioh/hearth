@@ -136,6 +136,10 @@ describe("slow loading (HRT-34, revue UX C5)", () => {
     vi.advanceTimersByTime(3100);
     await flushPromises();
     expect(wrapper.text()).toContain("Mesures en cours de chargement");
+    // Le nom accessible suit le texte affiché (retour de revue HRT-34).
+    expect(wrapper.find('[role="status"]').attributes("aria-label")).toBe(
+      "Mesures en cours de chargement…",
+    );
     expect(wrapper.find("[data-dash-retry]").exists()).toBe(true);
     wrapper.unmount();
   });
