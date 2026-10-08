@@ -27,6 +27,8 @@ Sans bouton, deux applications pouvaient se chevaucher ; la plus lente, dépass�
 
 Mesure de la rangée unique : la hauteur de la carte de filtres SANS filtre actif est aussi mesurée (une rangée tient en moins de 140 px), pour que l'état d'avant rougisse à 1100 sans passer par le bouton « Appliquer ».
 
+Restauration après échec : le filtre remis est le dernier filtre dont la lecture a RÉUSSI (celui de la liste affichée), jamais celui d'une application dépassée (test à trois temps : A lente dépassée, B en échec). Tableau : plancher de quatre rangées (en-tête et trois lignes) pour que la page ne défile pas avec la période personnalisée et un bandeau à 1100×680 ; avec la période personnalisée ET deux bandeaux la page défile encore (limite connue).
+
 ## Correction
 La recherche s'applique seule 350 ms après la frappe (`Audit.vue`) ; les listes s'appliquent au choix, une période personnalisée dès que ses deux dates sont valides, et le bouton « Appliquer les filtres » est retiré (la carte tient sur une rangée) ; l'état vide n'a plus de bouton (celui de la carte de filtres suffit). `// FIX:01M4DNJ42ETVYR5Y01YNVPW715`.
 

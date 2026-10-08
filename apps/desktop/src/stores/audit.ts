@@ -120,6 +120,10 @@ export const useAuditStore = defineStore("audit", () => {
   let verifiedTop = 0;
   /** Le brouillon appliqué : les périodes relatives se recalculent quand le jour change. */
   let appliedDraft: FilterDraft | null = null;
+  // Le dernier filtre dont la lecture a RÉUSSI (celui de la liste affichée) : c'est lui qu'on restaure
+  // après un échec, jamais un filtre posé par une application dépassée qui n'a pas abouti.
+  let confirmedFilter: AuditFilter = { ...EMPTY_AUDIT_FILTER };
+  let confirmedDraft: FilterDraft | null = null;
 
   const newCount = computed(() => pending.value.length);
   const hasMoreBelow = computed(() => nextBefore.value !== null);
@@ -246,6 +250,8 @@ export const useAuditStore = defineStore("audit", () => {
       verifiedTop = page.events[0]?.id ?? 0;
       setEntries(mergeDesc(page.events, isUnfiltered(applied.value) ? buffered : []));
       status.value = "ready";
+      confirmedFilter = applied.value;
+      confirmedDraft = appliedDraft;
       if (!options.silent) topSignal.value += 1;
       // Ce qui est arrivé pendant la lecture n'est pas confirmé : une relecture le vérifie.
       if (buffered.length > 0) scheduleCatchUp();
@@ -400,6 +406,8 @@ export const useAuditStore = defineStore("audit", () => {
     serverId.value = id;
     applied.value = { ...EMPTY_AUDIT_FILTER };
     appliedDraft = null;
+    confirmedFilter = applied.value;
+    confirmedDraft = null;
     openSeq += 1;
     const mine = openSeq;
     // Écoute posée d'abord, lecture ensuite : aucune entrée ne tombe entre les deux.
@@ -470,29 +478,25 @@ export const useAuditStore = defineStore("audit", () => {
   ): Promise<"applied" | "invalid" | "failed" | "superseded"> {
     const filter = resolveFilter(cloneDraft(draft), now);
     if (!filter) return "invalid";
-    const previous = applied.value;
-    const previousDraft = appliedDraft;
     applied.value = filter;
     appliedDraft = cloneDraft(draft);
     const outcome = await load();
     if (outcome === "ok") return "applied";
     // Dépassée par une application plus récente : son filtre est déjà posé, on n'y touche pas.
     if (outcome === "superseded") return "superseded";
-    applied.value = previous;
-    appliedDraft = previousDraft;
+    applied.value = confirmedFilter;
+    appliedDraft = confirmedDraft;
     return "failed";
   }
 
   /** « Effacer les filtres » : tout le journal ; `false` si la lecture échoue (l'état précédent reste). */
   async function clearFilters(): Promise<boolean> {
-    const previous = applied.value;
-    const previousDraft = appliedDraft;
     applied.value = { ...EMPTY_AUDIT_FILTER };
     appliedDraft = null;
     const outcome = await load();
     if (outcome === "failed") {
-      applied.value = previous;
-      appliedDraft = previousDraft;
+      applied.value = confirmedFilter;
+      appliedDraft = confirmedDraft;
     }
     return outcome !== "failed";
   }

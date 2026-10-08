@@ -307,7 +307,7 @@ defineExpose({ rows });
 .table {
   display: flex;
   flex: 1 1 0;
-  min-height: calc(var(--audit-row-height) * 5);
+  min-height: calc(var(--audit-row-height) * 4);
   overflow-x: auto;
   border-radius: var(--radius-card);
   background: var(--card);

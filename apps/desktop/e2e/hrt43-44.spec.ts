@@ -155,6 +155,65 @@ for (const size of SIZES) {
   });
 }
 
+// HRT-37 : une seule barre aussi quand la page est plus chargée (seconde rangée de filtres, bandeaux).
+for (const size of [SIZES[0], SIZES[2]]) {
+  for (const state of [
+    "période personnalisée",
+    "alerte de sécurité",
+    "mode attaque",
+    "période personnalisée et mode attaque",
+    "période personnalisée et alerte de sécurité",
+  ] as const) {
+    test(`journal à ${size.width}×${size.height} avec ${state} : le tableau défile, pas la page`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await page.goto("/?nodev#/servers/forge/audit");
+      await expect(page.locator("[role=row][data-row-key]").first()).toBeVisible();
+      if (state.startsWith("période personnalisée")) {
+        await page.getByLabel("Période").selectOption("custom");
+        await expect(page.getByLabel("Du", { exact: true })).toBeVisible();
+      }
+      if (state !== "période personnalisée") {
+        await page.evaluate((kind) => {
+          const sim = (
+            window as unknown as {
+              __hearthSim: {
+                security: {
+                  setAlert(id: string, alert: { own: boolean; others: number | null }): void;
+                  setMode(id: string, mode: string, options?: object): void;
+                };
+              };
+            }
+          ).__hearthSim;
+          if (kind.includes("alerte")) sim.security.setAlert("forge", { own: true, others: null });
+          else sim.security.setMode("forge", "active");
+        }, state);
+        await expect(
+          page.getByText(
+            state.includes("alerte") ? "Attaque probable détectée" : "Mode attaque actif",
+          ),
+        ).toBeVisible();
+      }
+      await page.waitForTimeout(300);
+      const scroll = await page.evaluate(() => {
+        const content = document.querySelector(".layout__content") as HTMLElement;
+        const root = document.scrollingElement as HTMLElement;
+        return {
+          page: content.scrollHeight - content.clientHeight,
+          layoutMain:
+            (document.querySelector(".layout__main") as HTMLElement).scrollHeight -
+            (document.querySelector(".layout__main") as HTMLElement).clientHeight,
+          document: root.scrollHeight - root.clientHeight,
+        };
+      });
+      expect(scroll.page, "la zone de contenu défile").toBeLessThanOrEqual(1);
+      expect(scroll.document, "le document défile").toBeLessThanOrEqual(1);
+      expect(scroll.layoutMain, "la mise en page déborde").toBeLessThanOrEqual(1);
+    });
+  }
+}
+
 // ── HRT-43 ───────────────────────────────────────────────────────────────────────────────────
 
 for (const size of SIZES) {
