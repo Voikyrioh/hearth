@@ -54,7 +54,7 @@ const reason = computed(() => {
     {{ text }}
     <template #actions>
       <HButton
-        v-if="!modeOn"
+        v-if="!modeOn && !onPage"
         variant="secondary"
         size="sm"
         needs-link
@@ -65,7 +65,7 @@ const reason = computed(() => {
       >
         {{ t("security.activate") }}
       </HButton>
-      <HButton v-if="!onPage" variant="ghost" size="sm" data-security-details @click="$emit('details')">
+      <HButton v-if="!onPage" variant="secondary" size="sm" data-security-details @click="$emit('details')">
         {{ t("security.moreInfo") }}
       </HButton>
     </template>

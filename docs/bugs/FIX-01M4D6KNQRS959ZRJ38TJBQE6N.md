@@ -23,7 +23,7 @@ Agent et client depuis la tranche concernée (jamais publié).
 Aucun.
 
 ## Correction
-`Database::erasure_pending()` ; `GET /security` rend `erasure_pending: true` aux ADMINISTRATEURS seulement, champ absent sinon (rien en attente, compte lecture seule, agent d'avant). Un fait, rien de sensible. **Rendu par l'agent, pas encore affiché** : aucun client ne lit `erasure_pending` aujourd'hui (suivi dans le ticket HRT-18 : l'afficher dans la page Sécurité). open-api `security.md` à jour. `FIX:` dans `entrypoint/http/security.rs`.
+`Database::erasure_pending()` ; `GET /security` rend `erasure_pending: true` aux ADMINISTRATEURS seulement, champ absent sinon (rien en attente, compte lecture seule, agent d'avant). Un fait, rien de sensible. Rendu par l'agent ; la page Sécurité du client l'affiche depuis HRT-39 (note « Effacement en attente », rien à faire). open-api `security.md` à jour. `FIX:` dans `entrypoint/http/security.rs`.
 
 ## Règles
 - BR-RESIL-021 et ADR-0034 ; BR-ACCT-013/014 (réservé aux administrateurs).

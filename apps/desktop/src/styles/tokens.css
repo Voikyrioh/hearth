@@ -99,6 +99,7 @@
   --ring-width: 2px;
   --sec-edge: 4px;
   --mark-size: 16px;
+  --mark-offset: -8px;
   --mark-icon: 10px;
   --focus-ring: 2px;
   --focus-offset: 2px;
@@ -144,8 +145,8 @@
   --audit-menu-width: 260px;
   --audit-menu-max: 300px;
   --audit-search-min: 240px;
+  --audit-search-floor: 200px;
   --audit-field-min: 160px;
-  --audit-scroll-height: max(360px, calc(100vh - 460px));
   --audit-detail-width: 560px;
 
   /* États */

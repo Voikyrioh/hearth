@@ -379,6 +379,59 @@ describe("cycle de vie", () => {
     await flushPromises();
     expect(audit.entries.every((entry) => entry.account === "marie")).toBe(true);
   });
+  it("deux applications qui se chevauchent : la première, résolue en dernier, ne restaure rien et ne notifie rien", async () => {
+    const ctx = await startedApp();
+    ctx.bridge.audit.seed("forge", 40);
+    const audit = useAuditStore();
+    await audit.open("forge");
+    await flushPromises();
+    const original = ctx.bridge.readAudit.bind(ctx.bridge);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    ctx.bridge.readAudit = async (...args) => {
+      if (args[1].accounts.includes("paul")) await gate;
+      return original(...args);
+    };
+    const slow = audit.apply({ ...emptyDraft(), accounts: ["paul"] });
+    const fast = audit.apply({ ...emptyDraft(), accounts: ["marie"] });
+    expect(await fast).toBe("applied");
+    release();
+    // Dépassée : ni « failed » (qui ferait notifier une erreur), ni restauration du filtre d'avant.
+    expect(await slow).toBe("superseded");
+    await flushPromises();
+    expect(audit.applied.accounts).toEqual(["marie"]);
+    expect(audit.status).toBe("ready");
+  });
+
+  it("A dépassée puis B en échec : le filtre restauré est le dernier réellement chargé, pas celui de A", async () => {
+    const ctx = await startedApp();
+    ctx.bridge.audit.seed("forge", 40);
+    const audit = useAuditStore();
+    await audit.open("forge");
+    await flushPromises();
+    const original = ctx.bridge.readAudit.bind(ctx.bridge);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    ctx.bridge.readAudit = async (...args) => {
+      if (args[1].accounts.includes("paul")) await gate;
+      if (args[1].accounts.includes("marie")) throw new Error("lien coupé");
+      return original(...args);
+    };
+    const before = audit.entries.map((entry) => entry.id);
+    const slow = audit.apply({ ...emptyDraft(), accounts: ["paul"] });
+    const failing = audit.apply({ ...emptyDraft(), accounts: ["marie"] });
+    expect(await failing).toBe("failed");
+    release();
+    expect(await slow).toBe("superseded");
+    await flushPromises();
+    // Le filtre de A n'a jamais été chargé : le magasin garde celui de la liste affichée.
+    expect(audit.applied.accounts).toEqual([]);
+    expect(audit.entries.map((entry) => entry.id)).toEqual(before);
+  });
 });
 
 describe("mergeDesc", () => {

@@ -9,6 +9,16 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M4DPR4FFVCMZN0KPEA4JVCC8](./FIX-01M4DPR4FFVCMZN0KPEA4JVCC8.md) | Nombres à l'anglaise et unités brutes (C12) | 2026-10-08 |
 | [FIX-01M4DPR45X80GAYPS8MJ4RPZ8E](./FIX-01M4DPR45X80GAYPS8MJ4RPZ8E.md) | Barre des serveurs : outils sans nom, couleurs seulement sur le serveur ouvert, suppression sans nom (C49, C52) | 2026-10-08 |
 | [FIX-01M4DPR3YFC0AQC1D3D20KSY04](./FIX-01M4DPR3YFC0AQC1D3D20KSY04.md) | Barres de défilement blanches, une par zone (C9) | 2026-10-08 |
+| [FIX-01M4DNJ3P75DN25714EBCH2EY2](./FIX-01M4DNJ3P75DN25714EBCH2EY2.md) | Le rôle en cours de changement ne se distinguait pas des autres cellules (C22) | 2026-10-08 |
+| [FIX-01M4DNJ3W899Y50NPSRQ8W8ZVN](./FIX-01M4DNJ3W899Y50NPSRQ8W8ZVN.md) | L'en-tête « Sessions ouvertes » était en chasse fixe, les autres non (C26) | 2026-10-08 |
+| [FIX-01M4DNJ42ETVYR5Y01YNVPW715](./FIX-01M4DNJ42ETVYR5Y01YNVPW715.md) | Dans le journal, la recherche ne filtrait qu'avec Entrée ou le bouton éloigné (C28) | 2026-10-08 |
+| [FIX-01M4DNJ97KCR694M9JT5B7R67B](./FIX-01M4DNJ97KCR694M9JT5B7R67B.md) | Journal : textes bruts, raison en minuscules, lignes vides, horodatage ISO (C32) | 2026-10-08 |
+| [FIX-01M4DJZBAQBTJ55NAA62BNQASH](./FIX-01M4DJZBAQBTJ55NAA62BNQASH.md) | Le menu disait « Sécurité », la page « Sécurité et mode attaque » (C39) | 2026-10-08 |
+| [FIX-01M4DNFDC9KF9FXYJ0H2TC2JKX](./FIX-01M4DNFDC9KF9FXYJ0H2TC2JKX.md) | L'effacement en attente se lisait sous une autre session ou chez un non-administrateur | 2026-10-08 |
+| [FIX-01M4DJZB43SA08NE46DGEZK213](./FIX-01M4DJZB43SA08NE46DGEZK213.md) | « Plus d'infos » ne donnait aucune information sur l'alerte (C36) | 2026-10-08 |
+| [FIX-01M4DJZAXMGAXW5PPQBMQVC96Y](./FIX-01M4DJZAXMGAXW5PPQBMQVC96Y.md) | La marque de sécurité recouvrait les initiales du serveur (C38) | 2026-10-08 |
+| [FIX-01M4DJZAPV5ECT10JJ5JWNM8A6](./FIX-01M4DJZAPV5ECT10JJ5JWNM8A6.md) | Les bandeaux de sécurité étaient plus larges que la page, actions à l'autre bout (C35) | 2026-10-08 |
+| [FIX-01M4DJZAFYE77R5MKKA2NV6CE3](./FIX-01M4DJZAFYE77R5MKKA2NV6CE3.md) | Le mode attaque éteint parlait au présent et en jargon (C34) | 2026-10-08 |
 | [FIX-01M4DKQWTWVNDXFPWJ5SE88SN7](./FIX-01M4DKQWTWVNDXFPWJ5SE88SN7.md) | Les actions d'un compte passaient sur deux lignes à 1280 et 1366 (C21) | 2026-10-08 |
 | [FIX-01M4DKQV9ZT6XQF6P7ER02HFYZ](./FIX-01M4DKQV9ZT6XQF6P7ER02HFYZ.md) | Les boutons d'une fenêtre de dialogue sortaient de l'écran à 1100×680 (C20) | 2026-10-08 |
 | [FIX-01M4D4Y22QGBWNKKJTK8K3X12A](./FIX-01M4D4Y22QGBWNKKJTK8K3X12A.md) | Le nom accessible du chargement ne suivait pas le texte affiché (retour de revue HRT-34) | 2026-10-08 |

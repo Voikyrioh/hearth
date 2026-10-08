@@ -8,15 +8,13 @@ import MultiSelect from "@/components/molecules/MultiSelect.vue";
 import { t } from "@/i18n";
 import { AUDIT_KINDS, AUDIT_OUTCOMES, type AuditKind, type AuditOutcome } from "@/link";
 
-// Filtres du journal (BR-AUDIT-014, 015, 016) : on les édite ici, ils ne s'appliquent qu'au clic
-// sur « Appliquer les filtres » (ou Entrée dans la recherche). Le filtrage lui-même est fait par
-// l'agent : ce composant ne filtre rien.
+// Filtres du journal (BR-AUDIT-014, 015, 016) : on les édite ici ; la page les applique au choix
+// (la recherche peu après la frappe, une période personnalisée dès que ses deux dates sont valides).
+// Le filtrage lui-même est fait par l'agent : ce composant ne filtre rien.
 const props = defineProps<{
   draft: FilterDraft;
   /** Comptes proposés (ceux que le journal a montrés). */
   accounts: readonly string[];
-  /** Le brouillon diffère de ce qui est appliqué : « Appliquer » devient actif. */
-  dirty: boolean;
   /** Au moins un filtre ou une recherche est appliqué ou édité : « Effacer » apparaît. */
   active: boolean;
   busy: boolean;
@@ -71,7 +69,6 @@ const errorText = computed(() => {
       return undefined;
   }
 });
-const canApply = computed(() => props.dirty && error.value === null && !props.busy);
 
 function patch(change: Partial<FilterDraft>) {
   emit("update:draft", { ...props.draft, ...change });
@@ -79,7 +76,7 @@ function patch(change: Partial<FilterDraft>) {
 </script>
 
 <template>
-  <form class="filters" role="search" :aria-label="t('audit.filtersTitle')" @submit.prevent="canApply && emit('apply')">
+  <form class="filters" role="search" :aria-label="t('audit.filtersTitle')" @submit.prevent="emit('apply')">
     <h2 class="filters__title">{{ t("audit.filtersTitle") }}</h2>
     <div class="filters__row">
       <div class="filters__search">
@@ -120,6 +117,17 @@ function patch(change: Partial<FilterDraft>) {
         :options="periodOptions"
         @update:model-value="(period: Period) => patch({ period })"
       />
+      <HButton
+        v-if="active"
+        class="filters__clear"
+        variant="ghost"
+        :disabled="busy"
+        :aria-label="t('audit.clear')"
+        @click="emit('clear')"
+      >
+        <span class="filters__clear-full" aria-hidden="true">{{ t("audit.clear") }}</span>
+        <span class="filters__clear-short" aria-hidden="true">{{ t("audit.clearShort") }}</span>
+      </HButton>
     </div>
     <div class="filters__row filters__row--end">
       <template v-if="draft.period === 'custom'">
@@ -141,26 +149,13 @@ function patch(change: Partial<FilterDraft>) {
           />
         </div>
       </template>
-      <span class="filters__gap" />
-      <HButton v-if="active" variant="ghost" :disabled="busy" @click="emit('clear')">
-        {{ t("audit.clear") }}
-      </HButton>
-      <HButton
-        type="submit"
-        variant="primary"
-        :disabled="!canApply"
-        :aria-describedby="dirty ? 'audit-pending-filters' : undefined"
-      >
-        {{ t("audit.apply") }}
-        <span v-if="dirty" class="filters__dot" aria-hidden="true" />
-      </HButton>
-      <span v-if="dirty" id="audit-pending-filters" class="filters__sr">{{ t("audit.pendingFilters") }}</span>
     </div>
   </form>
 </template>
 
 <style scoped>
 .filters {
+  container: filters / inline-size;
   /* FIX:01M4D4H25X7PN4SH2N7DC3REGS : filtres sur une ligne, bouton compris (revue UX C29) */
   display: flex;
   flex-wrap: wrap;
@@ -188,7 +183,26 @@ function patch(change: Partial<FilterDraft>) {
 
 .filters__search {
   flex: 2 1 calc(var(--audit-search-min) / 2);
-  min-width: 0;
+  min-width: var(--audit-search-floor);
+}
+
+.filters__clear {
+  flex: 0 0 auto;
+}
+
+.filters__clear-short {
+  display: none;
+}
+
+/* Carte étroite : « Effacer » (le nom accessible reste « Effacer les filtres ») pour que tout tienne sur une rangée. */
+@container filters (max-width: 820px) {
+  .filters__clear-full {
+    display: none;
+  }
+
+  .filters__clear-short {
+    display: inline;
+  }
 }
 
 .filters__field {
@@ -196,25 +210,14 @@ function patch(change: Partial<FilterDraft>) {
   min-width: 0;
 }
 
-.filters__gap {
-  display: none;
+/* Une liste choisie n'est jamais coupée (« Tout l'hist ») : elle prend au moins la largeur de son plus long libellé,
+   la rangée passe à la ligne si elle manque de place. */
+.filters__field:has(select) {
+  min-width: min-content;
 }
 
-.filters__dot {
-  display: inline-block;
-  width: var(--status-dot);
-  height: var(--status-dot);
-  margin-left: var(--space-2);
-  border-radius: var(--radius-pill);
-  background: var(--crit);
-}
-
-.filters__sr {
-  position: absolute;
-  width: var(--border-width);
-  height: var(--border-width);
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+.filters__field :deep(.select__input) {
+  width: auto;
+  min-width: 100%;
 }
 </style>

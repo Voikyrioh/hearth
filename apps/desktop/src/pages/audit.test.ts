@@ -10,6 +10,7 @@ import AuditFilters from "@/components/organisms/AuditFilters.vue";
 import AuditTable from "@/components/organisms/AuditTable.vue";
 import type { AuditEntry } from "@/link";
 import { AUDIT_LIVE_DEBOUNCE_MS } from "@/stores/audit";
+import { useToastsStore } from "@/stores/toasts";
 import { mountContext } from "@/test/mount";
 
 // HRT-14 : la page Journal d'activité et ses composants (BR-AUDIT-001, 010, 013 à 020).
@@ -95,25 +96,60 @@ describe("page Journal d'activité", () => {
     wrapper.unmount();
   });
 
-  it("« Appliquer » attend une modification ; la recherche filtre ; « Effacer les filtres » revient au journal complet", async () => {
+  it("pas de bouton « Appliquer » ; Entrée dans la recherche filtre ; « Effacer les filtres » revient au journal complet", async () => {
     const { wrapper } = await boot(60);
-    const apply = () =>
-      wrapper.findAll("button").find((b) => b.text().includes("Appliquer les filtres"));
-    expect(apply()?.attributes("aria-disabled")).toBe("true");
+    expect(wrapper.text()).not.toContain("Appliquer");
     expect(wrapper.text()).not.toContain("Effacer les filtres");
     await wrapper.find('input[type="search"]').setValue("zzz-introuvable");
-    expect(apply()?.attributes("aria-disabled")).toBeUndefined();
-    await apply()?.trigger("click");
     await wrapper.find("form").trigger("submit");
     await flushPromises();
     expect(wrapper.text()).toContain("Aucun événement ne correspond");
-    const clear = wrapper.findAll("button").filter((b) => b.text() === "Effacer les filtres");
+    const clear = wrapper.findAll('button[aria-label="Effacer les filtres"]');
     expect(clear.length).toBeGreaterThan(0);
     await clear[0]?.trigger("click");
     await flushPromises();
     expect(wrapper.text()).not.toContain("Aucun événement ne correspond");
     expect((wrapper.find('input[type="search"]').element as HTMLInputElement).value).toBe("");
     expect(wrapper.find('[role="grid"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("Entrée dans la recherche : une seule lecture, le délai de frappe déjà armé ne relance rien", async () => {
+    const { wrapper, bridge } = await boot(60);
+    const original = bridge.readAudit.bind(bridge);
+    let reads = 0;
+    bridge.readAudit = async (...args) => {
+      reads += 1;
+      return original(...args);
+    };
+    await wrapper.find('input[type="search"]').setValue("marie");
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(reads).toBe(1);
+    wrapper.unmount();
+  });
+
+  it("échec de lecture pendant la frappe : filtres et liste précédents gardés, une seule notification, le champ garde la saisie", async () => {
+    const { wrapper, bridge } = await boot(60);
+    const before = wrapper.findAll('[role="row"][data-row-key]').length;
+    const original = bridge.readAudit.bind(bridge);
+    bridge.readAudit = async (...args) => {
+      if (args[1].text) throw new Error("lien coupé");
+      return original(...args);
+    };
+    await wrapper.find('input[type="search"]').setValue("marie");
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(document.body.textContent).toContain("Impossible de charger le journal");
+    expect(
+      useToastsStore().items.filter(
+        (toast) => toast.message === "Impossible de charger le journal",
+      ),
+    ).toHaveLength(1);
+    expect((wrapper.find('input[type="search"]').element as HTMLInputElement).value).toBe("marie");
+    expect(wrapper.findAll('[role="row"][data-row-key]').length).toBe(before);
     wrapper.unmount();
   });
 
@@ -259,7 +295,7 @@ describe("AuditTable", () => {
     const reason = cells[6];
     expect(reason?.text().length).toBeLessThan(100);
     expect(reason?.text().endsWith(String.fromCharCode(0x2026))).toBe(true);
-    expect(reason?.attributes("title")).toBe(long);
+    expect(reason?.attributes("title")).toBe(`X${"x".repeat(299)}`);
     wrapper.unmount();
   });
 
@@ -306,20 +342,17 @@ describe("AuditTable", () => {
 });
 
 describe("AuditFilters et MultiSelect", () => {
-  it("période personnalisée : messages exacts de la spec, « Appliquer » bloqué", async () => {
+  it("période personnalisée : messages exacts de la spec", async () => {
     const wrapper = mount(AuditFilters, {
       props: {
         draft: { ...emptyDraft(), period: "custom", fromDate: "2026-10-03", toDate: "2026-10-01" },
         accounts: [],
-        dirty: true,
         active: true,
         busy: false,
         now: new Date(2026, 9, 4, 12).getTime(),
       },
     });
     expect(wrapper.text()).toContain("La fin de la période doit suivre le début");
-    const apply = wrapper.findAll("button").find((b) => b.text().includes("Appliquer les filtres"));
-    expect(apply?.attributes("aria-disabled")).toBe("true");
     await wrapper.setProps({
       draft: { ...emptyDraft(), period: "custom", fromDate: "2026-06-01" },
     });

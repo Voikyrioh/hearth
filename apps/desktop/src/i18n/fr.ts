@@ -10,6 +10,7 @@ export const fr = {
     colUsername: "Identifiant",
     colRole: "Rôle",
     colCreated: "Créé le",
+    createdOn: "Créé le {date}",
     colLastLogin: "Dernière connexion",
     colSessions: "Sessions ouvertes",
     colActions: "Actions",
@@ -143,8 +144,31 @@ export const fr = {
     deactivate: "Désactiver le mode attaque",
     modeActive: "Mode attaque actif",
     modeSuspendedTitle: "Mode attaque suspendu",
-    modeText:
-      "Seuls les postes reconnus peuvent se connecter. Un poste connu par un seul signe a droit à un essai.",
+    modeText: "Seuls les postes reconnus peuvent se connecter.",
+    // FIX:01M4DJZAFYE77R5MKKA2NV6CE3 (C34) : éteint, la carte dit ce que le mode FERA ; actif, ce qui se passe.
+    modeTextOff:
+      "Le mode attaque permet de ne laisser se connecter que les postes reconnus, le temps d'une attaque. Un poste à moitié reconnu aurait droit à un seul essai. Tu peux l'activer si une attaque est en cours.",
+    modeTextOn: "Le mode attaque est actif : seuls les postes reconnus peuvent se connecter.",
+    modeTextOnSince:
+      "Le mode attaque est actif depuis {time} : seuls les postes reconnus peuvent se connecter.",
+    howItWorks: "Comment ça marche",
+    erasureTitle: "Effacement en attente",
+    erasureText:
+      "L'effacement des anciennes empreintes de requêtes n'a pas pu se terminer au dernier démarrage de l'agent. Rien à faire : il est repris tout seul au prochain démarrage de l'agent.",
+    cardTitle: "Ce qui se passe",
+    // « adresses inconnues » : définition de l'alerte côté agent (BR-CONN-018, docs/open-api/security.md :
+    // plus de 10 échecs venus d'adresses inconnues). L'agent ne donne ni adresse ni nombre d'essais.
+    cardOwn: "Ton identifiant est visé par des essais de connexion venus d'adresses inconnues.",
+    cardOwnSince:
+      "Ton identifiant est visé par des essais de connexion venus d'adresses inconnues, depuis le {time}.",
+    cardOthersOne: "1 autre compte de ce serveur est visé (son nom n'est pas montré ici).",
+    cardOthersMany:
+      "{n} autres comptes de ce serveur sont visés (leurs noms ne sont pas montrés ici).",
+    cardSeeJournal: "Voir le journal d'activité",
+    cardTodoOff:
+      "Si l'attaque continue, active le mode attaque (carte ci-dessous) : seuls les postes reconnus pourront alors se connecter.",
+    cardTodoOn:
+      "Le mode attaque est déjà actif. Il s'arrête tout seul quand l'attaque semble terminée.",
     bannerSuspended: "Le serveur a redémarré. Le mode attaque reprend dans {n} min.",
     bannerSuspendedSoon: "Le serveur a redémarré. Le mode attaque reprend dans moins d'une minute.",
     seePage: "Voir la page Sécurité",
@@ -165,7 +189,7 @@ export const fr = {
       "Si l'adresse d'un poste change entre le moment où il demande à être reconnu et sa connexion, sa preuve est ignorée.",
     confirmOnTitle: "Activer le mode attaque ?",
     confirmOnMessage:
-      "Seuls les postes reconnus pourront se connecter, sur tous les comptes de ce serveur. Un poste connu par un seul signe aura droit à un essai. Les autres seront refusés. Le mode s'arrête tout seul quand l'attaque semble terminée.",
+      "Seuls les postes reconnus pourront se connecter, sur tous les comptes de ce serveur. Un poste à moitié reconnu aura droit à un seul essai. Les autres seront refusés. Le mode s'arrête tout seul quand l'attaque semble terminée.",
     confirmOffTitle: "Désactiver le mode attaque ?",
     confirmOffMessage:
       "Les postes non reconnus pourront de nouveau essayer de se connecter. Si l'attaque continue, tu pourras le réactiver.",
@@ -173,8 +197,7 @@ export const fr = {
       "Pour changer le mode attaque, confirme ton mot de passe. La clé de ce poste est vérifiée en même temps.",
     password: "Ton mot de passe",
     passwordPlaceholder: "Mot de passe",
-    enabled:
-      "Mode attaque activé. Seuls les postes reconnus peuvent se connecter. Un poste connu par un seul signe a droit à un essai.",
+    enabled: "Mode attaque activé. Seuls les postes reconnus peuvent se connecter.",
     disabled: "Mode attaque désactivé.",
     autoStopped: "L'attaque semble terminée. Le mode attaque s'est arrêté automatiquement.",
     resumed: "Le mode attaque reprend après 30 minutes de suspension.",
@@ -200,7 +223,7 @@ export const fr = {
     password: "Ton mot de passe",
     passwordPlaceholder: "Le tien, pour confirmer",
     currentPassword: "Ton mot de passe actuel",
-    help: "Pour confirmer, redonne ton mot de passe.",
+    help: "Pour confirmer, redonne ton mot de passe. La clé de ce poste est vérifiée en même temps.",
     elevated: "Mot de passe déjà confirmé. Il te sera redemandé dans {time}.",
     elapsed:
       "Le délai est terminé. Redonne ton mot de passe pour continuer, ce que tu as saisi est gardé.",
@@ -335,7 +358,7 @@ export const fr = {
     dashboard: "Tableau de bord",
     accounts: "Comptes",
     audit: "Journal d'activité",
-    security: "Sécurité et mode attaque",
+    security: "Sécurité",
     addAccount: "Ajouter un compte",
     export: "Exporter",
     soonTitle: "Bientôt disponible",
@@ -540,9 +563,8 @@ export const fr = {
     to: "Au",
     anySelection: "Tous",
     selectionCount: "{n} choisis",
-    apply: "Appliquer les filtres",
-    pendingFilters: "Des filtres ont été modifiés et ne sont pas encore appliqués.",
     clear: "Effacer les filtres",
+    clearShort: "Effacer",
     reload: "Rechargement manuel",
     reloadingNow: "Tentative de reconnexion",
     colWhen: "Date et heure",

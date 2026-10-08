@@ -22,6 +22,25 @@ export function whenOf(entry: AuditEntry, timeZone?: string): string {
   return formatWhen(entry.atMs, timeZone) ?? safeText(entry.at);
 }
 
+// FIX:01M4DNJ97KCR694M9JT5B7R67B (C32)
+/** Majuscule à la première lettre d'un texte libre (raison, cible) : « lecture seule » devient « Lecture seule ». */
+export function capitalize<T extends string | null>(text: T): T {
+  if (text === null) return text;
+  const first = Array.from(text)[0];
+  return (first === undefined ? text : first.toUpperCase() + text.slice(first.length)) as T;
+}
+
+/** La source UTC lisible : `08/10/2026 11:40:11 UTC` (jamais l'horodatage ISO brut), ou le texte brut si illisible. */
+export function sourceOf(entry: AuditEntry): string {
+  if (!Number.isFinite(entry.atMs)) return safeText(entry.at);
+  const text = new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "short",
+    timeStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(entry.atMs));
+  return `${text} UTC`;
+}
+
 /** L'origine : le texte de l'agent pour un poste du réseau, un libellé fixe sinon. */
 export function originOf(entry: AuditEntry): string {
   if (entry.origin.kind === "cli") return t("audit.originCli");

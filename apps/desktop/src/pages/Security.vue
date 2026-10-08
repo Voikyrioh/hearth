@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import AttackModePanel from "@/components/organisms/AttackModePanel.vue";
+import ErasurePendingNote from "@/components/organisms/ErasurePendingNote.vue";
 import ReauthSettingCard from "@/components/organisms/ReauthSettingCard.vue";
 import RemoveDeviceDialog from "@/components/organisms/RemoveDeviceDialog.vue";
+import SecurityAlertCard from "@/components/organisms/SecurityAlertCard.vue";
 import TrustedDeviceTable from "@/components/organisms/TrustedDeviceTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useResumeMinutes } from "@/composables/useResumeMinutes";
 import { reportUiError } from "@/errors/report";
-import { type AttackMode, getLinkBridge, type TrustedDevice } from "@/link";
+import { type AttackMode, alertVisible, getLinkBridge, type TrustedDevice } from "@/link";
 import { attackModeBlock } from "@/security/gate";
 import { useDevicesStore } from "@/stores/devices";
 import { useLinkStore } from "@/stores/link";
@@ -86,6 +88,13 @@ async function reconnect() {
 
 <template>
   <div class="security">
+    <SecurityAlertCard
+      v-if="securityEntry?.state && alertVisible(securityEntry.state.alert)"
+      :alert="securityEntry.state.alert"
+      :role="server?.role ?? 'readonly'"
+      :server-id="serverId"
+      :mode-on="mode.state !== 'off'"
+    />
     <AttackModePanel
       :mode="mode"
       :block="block"
@@ -104,6 +113,7 @@ async function reconnect() {
       @retry="store.load(serverId)"
     />
     <ReauthSettingCard :key="serverId" :server-id="serverId" />
+    <ErasurePendingNote v-if="securityEntry?.state?.erasurePending && server?.role === 'admin'" />
     <RemoveDeviceDialog
       :open="removing !== null"
       :server-id="serverId"

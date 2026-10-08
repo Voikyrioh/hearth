@@ -48,8 +48,12 @@ describe("Sécurité : le mode attaque", () => {
     const { wrapper } = await boot();
     expect(wrapper.get("[data-attack-mode-state]").text()).toBe("Inactif");
     expect(wrapper.get("[data-attack-mode-panel]").text()).toContain(
-      "Seuls les postes reconnus peuvent se connecter. Un poste connu par un seul signe a droit à un essai.",
+      "Le mode attaque permet de ne laisser se connecter que les postes reconnus, le temps d'une attaque.",
     );
+    // C34 : plus de « signe » ; éteint, le texte dit ce que le mode FERA (futur), jamais « est actif ».
+    expect(wrapper.get("[data-attack-mode-panel]").text()).not.toContain("un seul signe");
+    expect(wrapper.get("[data-attack-mode-panel]").text()).not.toContain("est actif");
+    expect(wrapper.find("[data-attack-mode-details]").exists()).toBe(false);
     expect(toggle(wrapper).text()).toBe("Activer le mode attaque");
     expect(toggle(wrapper).attributes("aria-disabled")).toBeUndefined();
     expect(wrapper.find("[data-attack-mode-reason]").exists()).toBe(false);
@@ -70,7 +74,7 @@ describe("Sécurité : le mode attaque", () => {
     expect(wrapper.get("[data-attack-mode-state]").text()).toBe("Actif");
     expect(toggle(wrapper).text()).toBe("Désactiver le mode attaque");
     expect(useToastsStore().items.map((toast) => toast.message)).toContain(
-      "Mode attaque activé. Seuls les postes reconnus peuvent se connecter. Un poste connu par un seul signe a droit à un essai.",
+      "Mode attaque activé. Seuls les postes reconnus peuvent se connecter.",
     );
     // Le bandeau permanent est posé par le gabarit, avec le sens écrit.
     expect(wrapper.get("[data-attack-mode-banner]").text()).toContain("Mode attaque actif");
@@ -376,6 +380,73 @@ describe("Lecture de l'état ratée", () => {
     await flushPromises();
     expect(wrapper.find("[data-attack-mode-reason]").exists()).toBe(false);
     expect(toggle(wrapper).attributes("aria-disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+  // FIX:01M4DJZAFYE77R5MKKA2NV6CE3 (C34) : actif, la carte dit ce qui se passe en une phrase, le reste est replié.
+  it("says what is happening in one sentence when active, the rest folded away", async () => {
+    const { wrapper, bridge } = await boot();
+    bridge.security.setMode("forge", "active");
+    await flushPromises();
+    const panel = wrapper.get("[data-attack-mode-panel]");
+    expect(panel.text()).toContain("Le mode attaque est actif");
+    const details = panel.get("[data-attack-mode-details]");
+    expect(details.element.tagName).toBe("DETAILS");
+    expect((details.element as HTMLDetailsElement).open).toBe(false);
+    expect(details.text()).toContain("Comment ça marche");
+    wrapper.unmount();
+  });
+
+  // FIX:01M4DJZB43SA08NE46DGEZK213 (C36) : « Plus d'infos » mène à une carte qui dit ce que l'agent sait.
+  it("tells the alert on the page: since when, how many other accounts, what to do, one activate button on the whole page", async () => {
+    const { wrapper, bridge } = await boot();
+    expect(wrapper.find("[data-alert-card]").exists()).toBe(false);
+    bridge.security.setAlert("forge", { own: true, others: 2 });
+    await flushPromises();
+    const card = wrapper.get("[data-alert-card]");
+    expect(card.text()).toContain("Ton identifiant est visé");
+    expect(card.text()).toContain("2 autres comptes de ce serveur sont visés");
+    expect(card.text()).toContain("leurs noms ne sont pas montrés");
+    expect(card.get("[data-alert-todo]").text()).toContain("active le mode attaque");
+    // Un seul « Activer le mode attaque » sur la page : celui de la carte (ni dans le bandeau, ni dans la carte « Ce qui se passe »).
+    const activates = wrapper
+      .findAll("button")
+      .filter((button) => button.text() === "Activer le mode attaque");
+    expect(activates).toHaveLength(1);
+    expect(activates[0]?.attributes("data-attack-mode-toggle")).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it("does not show the alert card to nobody: no alert, no card", async () => {
+    const { wrapper } = await boot();
+    expect(wrapper.find("[data-alert-card]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+  // HRT-18 (suite) : l'agent dit qu'un effacement est en attente ; la page le dit et dit quoi faire (rien).
+  it("tells an administrator that an erasure is pending and that nothing is to be done", async () => {
+    const { wrapper, bridge } = await boot();
+    expect(wrapper.find("[data-erasure-pending]").exists()).toBe(false);
+    bridge.security.setErasurePending("forge", true);
+    await wrapper.vm.$nextTick();
+    await useSecurityStore().load("forge");
+    await flushPromises();
+    const note = wrapper.get("[data-erasure-pending]");
+    expect(note.text()).toContain("Effacement en attente");
+    expect(note.text()).toContain("Rien à faire");
+    expect(note.text()).toContain("prochain démarrage de l'agent");
+    bridge.security.setErasurePending("forge", false);
+    await useSecurityStore().load("forge");
+    await flushPromises();
+    expect(wrapper.find("[data-erasure-pending]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+  // FIX:01M4DNFDC9KF9FXYJ0H2TC2JKX : l'agent ne le dit qu'aux administrateurs ; un compte en lecture ne le lit jamais.
+  it("never tells a read-only account that an erasure is pending", async () => {
+    const { wrapper, bridge } = await boot("/servers/salon/security");
+    bridge.security.setErasurePending("salon", true);
+    await useSecurityStore().load("salon");
+    await flushPromises();
+    expect(useSecurityStore().of("salon")?.state?.erasurePending).toBe(true);
+    expect(wrapper.find("[data-erasure-pending]").exists()).toBe(false);
     wrapper.unmount();
   });
 });

@@ -112,6 +112,11 @@ const describedBy = computed(() => {
   outline: none;
 }
 
+/* La croix d'effacement de la recherche ne touche jamais le texte saisi. */
+.field__input[type="search"]::-webkit-search-cancel-button {
+  margin-inline-start: var(--space-2);
+}
+
 .field__input--mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

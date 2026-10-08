@@ -99,7 +99,12 @@ export const useSecurityStore = defineStore("security", () => {
       if (current && read.state.seq <= current.seq) {
         put(serverId, {
           status: "ready",
-          state: { ...current, device: read.state.device, keyAtHand: read.state.keyAtHand },
+          state: {
+            ...current,
+            device: read.state.device,
+            keyAtHand: read.state.keyAtHand,
+            erasurePending: read.state.erasurePending,
+          },
           at: Date.now(),
         });
         return;

@@ -553,6 +553,8 @@ impl LinkRuntime {
             .manager
             .login(&id, username, Secret::new(password), remember)
             .await?;
+        // FIX:01M4DNFDC9KF9FXYJ0H2TC2JKX : une nouvelle session ne relit pas l'effacement en attente de la précédente.
+        self.security_book().reset_erasure(id.as_str());
         self.publish_servers(sink);
         Ok(crate::link_dto::LoginDto {
             role: crate::link_dto::RoleDto::from(info.account.role),
@@ -561,7 +563,9 @@ impl LinkRuntime {
     }
 
     pub async fn logout(&self, server_id: &str, sink: &dyn UiSink) -> Result<(), LinkFailure> {
-        self.manager.logout(&Self::id(server_id)?).await?;
+        let id = Self::id(server_id)?;
+        self.manager.logout(&id).await?;
+        self.security_book().reset_erasure(id.as_str());
         self.publish_servers(sink);
         Ok(())
     }

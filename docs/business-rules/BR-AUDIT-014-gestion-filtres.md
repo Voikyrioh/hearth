@@ -21,7 +21,7 @@ Côté interface : filtres visibles, bouton « Effacer les filtres », rien n'es
 - `apps/desktop/src/components/organisms/AuditFilters.vue`
 
 ## Interface
-Les filtres sont édités dans la carte « Filtres » et ne s'appliquent qu'au clic sur « Appliquer les filtres » (actif seulement quand le brouillon diffère de ce qui est appliqué, avec un point d'attente) ou Entrée dans la recherche ; « Effacer les filtres » (visible dès qu'un filtre existe) remet tout à zéro et relit le journal complet ; un échec de lecture garde les filtres et la liste précédents. Rien n'est mémorisé à la fermeture. Un filtre actif s'applique aussi aux entrées reçues en direct : l'agent décide (relecture de la tête), jamais une recopie locale de ses règles.
+Les filtres sont édités dans la carte « Filtres » et s'appliquent d'eux-mêmes : la recherche 350 ms après la frappe (ou Entrée), un choix de liste tout de suite, une période personnalisée dès que ses deux dates sont valides (aucun bouton « Appliquer » : DÉCISION DE CLAUDE DU 2026-10-08, À CONFIRMER PAR VOIKY, HRT-43 ; Entrée dans la recherche lance une seule lecture) ; « Effacer les filtres » (visible dès qu'un filtre existe) remet tout à zéro et relit le journal complet ; un échec de lecture garde les filtres et la liste précédents ; une lecture DÉPASSÉE par une application plus récente n'est pas un échec : elle ne restaure rien et ne notifie rien, le filtre de la dernière application reste. Rien n'est mémorisé à la fermeture. Un filtre actif s'applique aussi aux entrées reçues en direct : l'agent décide (relecture de la tête), jamais une recopie locale de ses règles.
 
 ## Vérification
 - `domain::audit::filter::tests`.

@@ -70,7 +70,7 @@ describe("Sécurité : tes postes de confiance", () => {
       { name: "bureau/0.1.0", lastProvedAt: "2020-01-01T00:00:00.000Z" },
       { name: "salon/0.1.0", current: true },
     ]);
-    expect(wrapper.get("h1").text()).toBe("Sécurité et mode attaque");
+    expect(wrapper.get("h1").text()).toBe("Sécurité");
     expect(wrapper.get(".card__title").text()).toBe("Tes postes de confiance");
     expect(rows(wrapper)).toEqual(["salon/0.1.0", "bureau/0.1.0"]);
     expect(wrapper.get('[data-device="salon/0.1.0"]').text()).toContain("Ce poste");
@@ -83,7 +83,7 @@ describe("Sécurité : tes postes de confiance", () => {
 
   it("is in the navigation for every role and open to a read-only account", async () => {
     const { wrapper } = await openWith([{ name: "salon/0.1.0", current: true }], {}, "salon");
-    expect(wrapper.get("h1").text()).toBe("Sécurité et mode attaque");
+    expect(wrapper.get("h1").text()).toBe("Sécurité");
     expect(wrapper.findAll(".nav__item").map((a) => a.text())).toContain("Sécurité");
     expect(wrapper.get(".nav__item.router-link-active").text()).toBe("Sécurité");
     wrapper.unmount();

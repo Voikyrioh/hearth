@@ -76,6 +76,9 @@ const named = (label: string, account: Account) => `${label} ${account.username}
               {{ account.username }}
               <HTag v-if="account.id === meId" tone="neutral">{{ t("accounts.you") }}</HTag>
             </div>
+            <span class="table__hint">{{
+              t("accounts.createdOn", { date: formatDate(account.createdAt) })
+            }}</span>
           </th>
           <td :data-editing="editing === account.id ? '' : undefined">
             <div v-if="editing === account.id" @focusout="editing = null" @keydown.esc="editing = null">
@@ -200,10 +203,31 @@ const named = (label: string, account: Account) => `${label} ${account.username}
   font-weight: var(--fw-semibold);
 }
 
+/* FIX:01M4DNJ3W899Y50NPSRQ8W8ZVN (C26) : l'en-tête garde la police des autres titres. */
+.table thead .table__num {
+  font-family: inherit;
+}
+
 .table__num {
   text-align: right;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* HRT-44 : la date de création, cachée tant que la colonne « Créé le » est affichée. */
+.table__hint {
+  display: none;
+}
+
+/* FIX:01M4DNJ3P75DN25714EBCH2EY2 (C22) : la cellule du rôle en cours de changement se distingue des autres lignes (fond et trait). */
+.table td[data-editing] :deep(.select__input) {
+  width: auto;
+  min-width: 100%;
+}
+
+.table td[data-editing] {
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 var(--ring-width) var(--ac);
 }
 
 .table__actions {
@@ -222,9 +246,18 @@ const named = (label: string, account: Account) => `${label} ${account.username}
     display: none;
   }
 
+  /* La date de création, absente de sa colonne : petit texte atténué sous l'identifiant (jamais dite deux fois). */
+  .table__hint {
+    display: block;
+    color: var(--tx3);
+    font-size: var(--fs-small);
+    font-weight: var(--fw-regular);
+    white-space: nowrap;
+  }
+
   .table th,
   .table td {
-    padding-inline: var(--space-3);
+    padding-inline: var(--space-2);
   }
 }
 
