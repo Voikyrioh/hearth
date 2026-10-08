@@ -227,7 +227,7 @@ const reasonText = computed(() =>
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .audit__stale,
