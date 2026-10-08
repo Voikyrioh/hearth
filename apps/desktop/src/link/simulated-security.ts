@@ -23,6 +23,7 @@ interface Book {
   attackMode: AttackMode;
   device: SecurityDevice;
   keyAtHand: boolean;
+  erasurePending: boolean;
 }
 
 function freshBook(): Book {
@@ -33,6 +34,7 @@ function freshBook(): Book {
     attackMode: { state: "off", since: null, resumesInS: null, lastEnd: null },
     device: "proven",
     keyAtHand: true,
+    erasurePending: false,
   };
 }
 
@@ -59,6 +61,7 @@ export class SimulatedSecurity {
       attackMode: { ...book.attackMode },
       device: book.device,
       keyAtHand: book.keyAtHand,
+      erasurePending: book.erasurePending,
     };
   }
 
@@ -108,6 +111,11 @@ export class SimulatedSecurity {
     const book = this.book(serverId);
     book.device = device;
     book.keyAtHand = keyAtHand;
+  }
+
+  /** L'agent dit qu'un effacement est en attente (administrateur seulement). Ne publie rien : la lecture le donne. */
+  setErasurePending(serverId: string, pending: boolean): void {
+    this.book(serverId).erasurePending = pending;
   }
 
   /** Faux : agent d'avant l'alerte et le mode attaque. */

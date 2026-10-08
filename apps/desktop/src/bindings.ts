@@ -831,6 +831,11 @@ export type SecurityEvent = {
 	device: SecurityDeviceDto,
 	/**  Ce PC garde une clé d'appareil pour ce serveur (un booléen : la clé elle-même ne sort pas). */
 	keyAtHand: boolean,
+	/**
+	 *  L'agent dit que l'effacement physique des anciennes empreintes de requêtes est en attente (HRT-32,
+	 *  ADR-0034) : il ne le dit qu'aux administrateurs, et la dernière lecture fait foi (le flux ne le porte pas).
+	 */
+	erasurePending: boolean,
 };
 
 /**

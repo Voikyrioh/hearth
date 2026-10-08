@@ -5,6 +5,7 @@ type Sim = {
   security: {
     setAlert(id: string, alert: { own: boolean; others?: number | null }): void;
     setMode(id: string, state: string): void;
+    setErasurePending(id: string, pending: boolean): void;
   };
 };
 
@@ -103,4 +104,21 @@ test("« Plus d'infos » mène à la carte qui dit ce qui se passe (C36)", async
   await expect(card).toContainText("Ton identifiant est visé");
   await expect(card).toContainText("2 autres comptes");
   await expect(card.getByRole("link", { name: "Voir le journal d'activité" })).toBeVisible();
+});
+
+test("l'effacement en attente se lit dans la page Sécurité, avec ce qu'il faut faire : rien (HRT-18)", async ({
+  page,
+}) => {
+  await page.goto("/?nodev#/servers/forge/dashboard");
+  await page.evaluate(() =>
+    (window as unknown as { __hearthSim: Sim }).__hearthSim.security.setErasurePending(
+      "forge",
+      true,
+    ),
+  );
+  await page.getByRole("link", { name: "Sécurité", exact: true }).click();
+  const note = page.locator("[data-erasure-pending]");
+  await expect(note).toContainText("Effacement en attente");
+  await expect(note).toContainText("Rien à faire");
+  await expect(note).toContainText("prochain démarrage de l'agent");
 });

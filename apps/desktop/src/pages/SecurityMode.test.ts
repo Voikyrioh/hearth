@@ -421,4 +421,22 @@ describe("Lecture de l'état ratée", () => {
     expect(wrapper.find("[data-alert-card]").exists()).toBe(false);
     wrapper.unmount();
   });
+  // HRT-18 (suite) : l'agent dit qu'un effacement est en attente ; la page le dit et dit quoi faire (rien).
+  it("tells an administrator that an erasure is pending and that nothing is to be done", async () => {
+    const { wrapper, bridge } = await boot();
+    expect(wrapper.find("[data-erasure-pending]").exists()).toBe(false);
+    bridge.security.setErasurePending("forge", true);
+    await wrapper.vm.$nextTick();
+    await useSecurityStore().load("forge");
+    await flushPromises();
+    const note = wrapper.get("[data-erasure-pending]");
+    expect(note.text()).toContain("Effacement en attente");
+    expect(note.text()).toContain("Rien à faire");
+    expect(note.text()).toContain("prochain démarrage de l'agent");
+    bridge.security.setErasurePending("forge", false);
+    await useSecurityStore().load("forge");
+    await flushPromises();
+    expect(wrapper.find("[data-erasure-pending]").exists()).toBe(false);
+    wrapper.unmount();
+  });
 });

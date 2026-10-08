@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import AttackModePanel from "@/components/organisms/AttackModePanel.vue";
+import ErasurePendingNote from "@/components/organisms/ErasurePendingNote.vue";
 import ReauthSettingCard from "@/components/organisms/ReauthSettingCard.vue";
 import RemoveDeviceDialog from "@/components/organisms/RemoveDeviceDialog.vue";
 import SecurityAlertCard from "@/components/organisms/SecurityAlertCard.vue";
@@ -112,6 +113,7 @@ async function reconnect() {
       @retry="store.load(serverId)"
     />
     <ReauthSettingCard :key="serverId" :server-id="serverId" />
+    <ErasurePendingNote v-if="securityEntry?.state?.erasurePending" />
     <RemoveDeviceDialog
       :open="removing !== null"
       :server-id="serverId"

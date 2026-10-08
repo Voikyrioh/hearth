@@ -16,6 +16,7 @@ struct Entry {
     alert: AlertDto,
     attack_mode: AttackModeDto,
     device: SecurityDeviceDto,
+    erasure_pending: bool,
 }
 
 #[derive(Default)]
@@ -33,11 +34,20 @@ impl SecurityBook {
         key_at_hand: bool,
     ) -> SecurityEvent {
         let (alert, attack_mode) = view_parts(view);
-        let device = self
+        let (device, erasure_pending) = self
             .servers
             .get(server)
-            .map_or(SecurityDeviceDto::Unknown, |entry| entry.device);
-        self.store(server, alert, attack_mode, device, key_at_hand)
+            .map_or((SecurityDeviceDto::Unknown, false), |entry| {
+                (entry.device, entry.erasure_pending)
+            });
+        self.store(
+            server,
+            alert,
+            attack_mode,
+            device,
+            erasure_pending,
+            key_at_hand,
+        )
     }
 
     /// Une lecture `GET /security` : l'état complet, poste compris.
@@ -48,7 +58,14 @@ impl SecurityBook {
         key_at_hand: bool,
     ) -> SecurityEvent {
         let (alert, attack_mode, device) = response_parts(response);
-        self.store(server, alert, attack_mode, device, key_at_hand)
+        self.store(
+            server,
+            alert,
+            attack_mode,
+            device,
+            response.erasure_pending,
+            key_at_hand,
+        )
     }
 
     fn store(
@@ -57,6 +74,7 @@ impl SecurityBook {
         alert: AlertDto,
         attack_mode: AttackModeDto,
         device: SecurityDeviceDto,
+        erasure_pending: bool,
         key_at_hand: bool,
     ) -> SecurityEvent {
         let seq = self
@@ -70,6 +88,7 @@ impl SecurityBook {
                 alert: alert.clone(),
                 attack_mode: attack_mode.clone(),
                 device,
+                erasure_pending,
             },
         );
         SecurityEvent {
@@ -79,6 +98,7 @@ impl SecurityBook {
             attack_mode,
             device,
             key_at_hand,
+            erasure_pending,
         }
     }
 
@@ -91,6 +111,7 @@ impl SecurityBook {
             attack_mode: entry.attack_mode.clone(),
             device: entry.device,
             key_at_hand,
+            erasure_pending: entry.erasure_pending,
         })
     }
 
@@ -104,5 +125,52 @@ impl SecurityBook {
     /// Le serveur est retiré du carnet : on l'oublie (mémoire bornée par le carnet).
     pub fn forget(&mut self, server: &str) {
         self.servers.remove(server);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hearth_proto::api::security::{AlertInfo, AttackModeInfo, SessionDevice};
+
+    use super::*;
+
+    fn response(erasure_pending: bool) -> SecurityResponse {
+        SecurityResponse {
+            alert: AlertInfo {
+                own: false,
+                since: None,
+                others: None,
+            },
+            attack_mode: AttackModeInfo::off(),
+            device: SessionDevice::Proven,
+            admin_reauth: None,
+            erasure_pending,
+        }
+    }
+
+    /// L'effacement en attente (HRT-32 suites) vient de la lecture `GET /security`, que le flux ne porte pas :
+    /// un message du flux garde ce que la dernière lecture en a dit, et la lecture suivante fait foi.
+    #[test]
+    fn the_pending_erasure_comes_from_the_read_and_survives_a_stream_message() {
+        let mut book = SecurityBook::default();
+        assert!(book.on_read("forge", &response(true), true).erasure_pending);
+        let view = SecurityView {
+            alert: response(false).alert,
+            attack_mode: response(false).attack_mode,
+        };
+        assert!(
+            book.on_stream("forge", &view, true).erasure_pending,
+            "le flux ne dit rien de l'effacement : la dernière lecture fait foi"
+        );
+        assert!(book.current("forge", true).unwrap().erasure_pending);
+        assert!(
+            !book
+                .on_read("forge", &response(false), true)
+                .erasure_pending
+        );
+        assert!(
+            !book.on_stream("neuf", &view, true).erasure_pending,
+            "jamais lu : rien en attente"
+        );
     }
 }

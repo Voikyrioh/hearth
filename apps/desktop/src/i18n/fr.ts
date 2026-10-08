@@ -149,6 +149,9 @@ export const fr = {
     modeTextOnSince:
       "Le mode attaque est actif depuis {time} : seuls les postes reconnus peuvent se connecter.",
     howItWorks: "Comment ça marche",
+    erasureTitle: "Effacement en attente",
+    erasureText:
+      "L'effacement des anciennes empreintes de requêtes n'a pas pu se terminer au dernier démarrage de l'agent. Rien à faire : il est repris tout seul au prochain démarrage de l'agent.",
     cardTitle: "Ce qui se passe",
     cardOwn: "Ton identifiant est visé par des essais de connexion venus d'adresses inconnues.",
     cardOwnSince:
