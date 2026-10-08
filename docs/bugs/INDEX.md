@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4CJEQS88NZWCQ129XDP91MT](./FIX-01M4CJEQS88NZWCQ129XDP91MT.md) | Une coupure rétablie entre 1,5 s et 3 s faisait clignoter « Reconnexion en cours » | 2026-10-08 |
 | [FIX-01M4C9YKCVPDFSSJ2EYMZSRSPM](./FIX-01M4C9YKCVPDFSSJ2EYMZSRSPM.md) | Le point de contrôle occupé de l'effacement des anciennes empreintes n'était pas lu avant de poser la marque | 2026-10-08 |
 | [FIX-01M4C9YK78KHZCEH723M9NE8BQ](./FIX-01M4C9YK78KHZCEH723M9NE8BQ.md) | La copie de la base de la mise à jour gardait les anciennes empreintes jusqu'à sa suppression simple | 2026-10-08 |
 | [FIX-01M4BZN31A8Z8WN0WKNTCRTFFN](./FIX-01M4BZN31A8Z8WN0WKNTCRTFFN.md) | L'empreinte des requêtes suivies était un SHA-256 sans clé du corps, devinable hors ligne depuis la base (mots de passe) | 2026-10-07 |

@@ -13,12 +13,14 @@ maj: 2026-10-05
 ## Règle
 Pendant les 3 premières secondes d'une coupure, l'état du lien reste « Connecté » : le client réessaie seul, sans notification. Le seuil est exact à la milliseconde : 2 999 ms de coupure = « Connecté », 3 000 ms = « Reconnexion en cours ». La coupure est mesurée depuis l'erreur de transport, ou depuis le dernier message reçu quand c'est un silence qui la révèle.
 
+**« Reconnexion en cours » n'est montrée qu'après 3 s de coupure CONTINUE, quelles que soient les tentatives en dessous.** Les tentatives gardent leurs délais (0,5 / 1 / 2 / 4 / 8 / 15 / 30 s), donc une coupure rétablie à 2,9 s ne serait retrouvée qu'à la tentative de 3,5 s : pour que l'écran ne clignote pas, une **vérification** part une fois, à 3 s exactement, hors de la suite des délais. Réussie : rien n'a été montré. Échouée : « Reconnexion en cours » est affichée, datée de 3 s, et la tentative planifiée garde sa place. Une tentative restée sans réponse au seuil, un silence de plus de 3 s, une réponse « attends » du serveur valent déjà preuve : « Reconnexion en cours » sans vérification.
+
 ## Application (code)
-- `crates/hearth-link/src/domain/state.rs::LinkMachine::handle` (entrées `Input::TransportFailed`, `Input::Tick`) et `LinkMachine::derive_down` : état affiché dérivé de la durée de coupure ; `LinkMachine::deadline` donne l'échéance du `Tick` qui franchit le seuil.
+- `crates/hearth-link/src/domain/state.rs::LinkMachine::handle` (entrées `Input::TransportFailed`, `Input::Tick`) et `LinkMachine::derive_down` : état affiché dérivé de la durée de coupure ; `LinkMachine::deadline` donne l'échéance du `Tick` qui franchit le seuil ; `LinkMachine::check_threshold` fait la vérification du seuil (champs `confirmed`, `probe`, `resume_at` de l'`Outage`, FIX-01M4CJEQS88NZWCQ129XDP91MT).
 - `crates/hearth-link/src/domain/state.rs::RECONNECTING_AFTER`, `Thresholds` (seuils injectables pour les tests de résilience).
 
 ## Vérification
-- Tests : `domain::state::tests::row01_connected_cut_under_3s_changes_nothing`, `::row02_connected_cut_between_3s_and_30s_shows_reconnecting` (2 999 / 3 000 ms), `::a_cut_found_by_an_error_starts_at_the_error_not_at_the_last_message`.
+- Tests : `domain::state::tests::row01_connected_cut_under_3s_changes_nothing`, `::row02_connected_cut_between_3s_and_30s_shows_reconnecting` (2 999 / 3 000 ms), `::a_cut_found_by_an_error_starts_at_the_error_not_at_the_last_message`, `::a_cut_healed_just_before_3s_shows_nothing_even_if_the_next_attempt_comes_later`, `::a_cut_still_there_at_3s_shows_reconnecting_then_connected_and_keeps_its_delays`. Gestionnaire aux seuils du produit en temps virtuel : `crates/hearth-link/tests/link_timing.rs::a_cut_healed_at_2_9_seconds_shows_nothing`, `::a_cut_healed_at_3_1_seconds_shows_reconnecting_then_connected`.
 - Intégration : `crates/hearth-link/tests/fault_proxy.rs::a_cut_healed_before_any_threshold_shows_nothing_and_the_stream_resumes` (aucun état émis, le flux repart ; le seuil de 3 s lui-même est prouvé en temps contrôlé par `domain::state::tests::row01…`/`row02…`, 2 999 / 3 000 ms), `::a_delayed_agent_keeps_its_stream_open_and_nothing_is_shown`.
 - Coquille, contre un vrai agent : `apps/desktop/src-tauri/tests/offline.rs``::a_cut_shorter_than_the_threshold_never_reaches_the_screen_nor_the_notifications` (aucun seuil du lien ne peut être franchi : ce test prouve que la reprise n'affiche rien) (aucun événement d'état à l'écran, aucune notification, icône inchangée).
 - Interface : `apps/desktop/e2e/offline.spec.ts` (« une coupure courte ne change rien à l'écran »).
@@ -32,4 +34,5 @@ Pendant les 3 premières secondes d'une coupure, l'état du lien reste « Connec
 
 ## Historique
 - 2026-10-05 — création (HRT-07, session 2026-10-04-hearth-creation).
+- 2026-10-08 : « Reconnexion » après 3 s de coupure continue seulement, vérification au seuil (HRT-18, FIX-01M4CJEQS88NZWCQ129XDP91MT).
 - 2026-10-05 : tests de résilience rendus déterministes, test de la coquille et de l'écran (HRT-12).
