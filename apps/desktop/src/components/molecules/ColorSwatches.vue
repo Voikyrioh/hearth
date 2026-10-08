@@ -29,10 +29,13 @@ defineEmits<{ "update:modelValue": [value: ServerColor] }>();
 </template>
 
 <style scoped>
+/* FIX:01M4EPX90N9QNNPCHVNB6MCDDF (S3) : l'anneau de la pastille sélectionnée (2 × `--ring-width` hors de la pastille) ne sort pas
+   de la colonne des champs : la rangée est décalée de la largeur de l'anneau. */
 .swatches {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
+  padding: calc(var(--ring-width) * 2);
 }
 
 .swatch {

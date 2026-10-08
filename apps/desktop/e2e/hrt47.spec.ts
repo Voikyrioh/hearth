@@ -158,7 +158,7 @@ for (const size of SIZES) {
 }
 
 // S3 : les chiffres des étapes sont centrés dans leurs ronds (mesure du glyphe, pas de la boîte).
-for (const size of [SIZES[0], SIZES[1], SIZES[3]]) {
+for (const size of SIZES) {
   test(`ajout d'un serveur à ${size.width}×${size.height} : chiffres des étapes centrés dans leurs ronds`, async ({
     page,
   }) => {
@@ -198,9 +198,153 @@ for (const size of [SIZES[0], SIZES[1], SIZES[3]]) {
     });
     expect(offsets.length).toBeGreaterThan(0);
     for (const offset of offsets) {
-      expect(Math.abs(offset.dy), "écart vertical du chiffre").toBeLessThanOrEqual(1);
-      expect(Math.abs(offset.dx), "écart horizontal du chiffre").toBeLessThanOrEqual(1);
+      expect(Math.abs(offset.dy), "écart vertical du chiffre").toBeLessThanOrEqual(0.5);
+      expect(Math.abs(offset.dx), "écart horizontal du chiffre").toBeLessThanOrEqual(0.5);
     }
     await page.screenshot({ path: `e2e/screenshots/smoke-ajout-${size.width}x${size.height}.png` });
+  });
+}
+
+// S3, mesuré sur la capture réelle de Voiky (WebView2) : la pastille de la couleur sélectionnée sortait de 4 px à gauche
+// de la colonne des champs (anneau de sélection) ; libellés d'étape, champs et boutons à 1 px près.
+for (const size of SIZES) {
+  test(`ajout d'un serveur à ${size.width}×${size.height} : alignements de la fenêtre (étapes, champs, couleurs, boutons)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/dashboard");
+    await page.locator("[data-rail-add]").click();
+    await expect(page.locator(".trail__puck").first()).toBeVisible();
+    const m = await page.evaluate(() => {
+      const left = (el: Element | null) => el?.getBoundingClientRect().left ?? 0;
+      const right = (el: Element | null) => el?.getBoundingClientRect().right ?? 0;
+      const inputs = Array.from(
+        document.querySelectorAll("form input[type=text], form input:not([type])"),
+      );
+      const ringWidth =
+        Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--ring-width"),
+        ) || 2;
+      const swatches = Array.from(document.querySelectorAll(".swatch"));
+      const first = swatches[0];
+      const on = document.querySelector(".swatch--on");
+      const ring = on ? ringWidth * 2 : 0;
+      const buttons = Array.from(document.querySelectorAll("form button")).filter((b) =>
+        b.textContent?.trim(),
+      );
+      const puck = document.querySelector(".trail__puck")?.getBoundingClientRect();
+      const name = document.querySelector(".trail__name");
+      const nameRange = name ? document.createRange() : null;
+      nameRange?.selectNodeContents(name as Node);
+      const text = nameRange?.getBoundingClientRect();
+      return {
+        inputLeft: left(inputs[0]?.closest(".field__box") ?? null),
+        inputRight: right(inputs[0]?.closest(".field__box") ?? null),
+        ringLeft: left(first ?? null) - (first === on ? ring : 0),
+        buttonsRight: right(buttons.at(-1) ?? null),
+        puckCenter: puck ? puck.top + puck.height / 2 : 0,
+        textCenter: text ? text.top + text.height / 2 : 0,
+      };
+    });
+    expect(
+      m.ringLeft,
+      "la pastille sélectionnée et son anneau ne sortent pas de la colonne des champs",
+    ).toBeGreaterThanOrEqual(m.inputLeft - 0.5);
+    expect(
+      Math.abs(m.buttonsRight - m.inputRight),
+      "boutons alignés sur le bord droit des champs",
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(m.textCenter - m.puckCenter),
+      "libellé d'étape centré sur son rond",
+    ).toBeLessThanOrEqual(1);
+  });
+}
+
+// S3, précision de Voiky : « les éléments ne semblaient pas tous alignés pareil à gauche ». UN seul axe gauche pour tout le
+// contenu de la fenêtre d'ajout, anneaux et halos compris : rond de l'étape 1, titre, libellés, bord VISIBLE des champs
+// (champ au focus), première pastille de couleur (sélectionnée, avec son anneau).
+for (const size of SIZES) {
+  test(`ajout d'un serveur à ${size.width}×${size.height} : un seul axe gauche (anneaux et halos compris)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await page.goto("/?nodev#/servers/forge/dashboard");
+    await page.locator("[data-rail-add]").click();
+    await expect(page.locator(".trail__puck").first()).toBeVisible();
+    await page.locator("form input").first().focus();
+    // Les transitions du halo de focus sont finies avant de mesurer.
+    await page.evaluate(() =>
+      Promise.all(document.getAnimations().map((animation) => animation.finished)),
+    );
+    const edges = await page.evaluate(() => {
+      const spread = (el: Element) => {
+        const shadow = getComputedStyle(el).boxShadow;
+        if (!shadow || shadow === "none" || shadow.includes("inset")) return 0;
+        return Math.max(
+          0,
+          ...Array.from(shadow.matchAll(/(\d+(?:\.\d+)?)px(?=\s*(?:,|$))/g)).map((m) =>
+            Number(m[1]),
+          ),
+        );
+      };
+      const visibleLeft = (el: Element | null) =>
+        el ? el.getBoundingClientRect().left - spread(el) : Number.NaN;
+      const ringWidth =
+        Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--ring-width"),
+        ) || 2;
+      const swatch = document.querySelector(".swatch--on") ?? document.querySelector(".swatch");
+      return {
+        puck: visibleLeft(document.querySelector(".trail__puck")),
+        title: visibleLeft(document.querySelector("h1")),
+        label: visibleLeft(document.querySelector("form label")),
+        field: visibleLeft(document.querySelector("form .field__box")),
+        swatch: swatch ? swatch.getBoundingClientRect().left - ringWidth * 2 : Number.NaN,
+      };
+    });
+    const values = Object.values(edges);
+    const spreadOfEdges = Math.max(...values) - Math.min(...values);
+    expect(spreadOfEdges, `bords gauches visibles : ${JSON.stringify(edges)}`).toBeLessThanOrEqual(
+      1,
+    );
+  });
+}
+
+// Même vérification sur les fenêtres de formulaire : création de compte et changement de son mot de passe.
+for (const [name, open] of [
+  [
+    "création de compte",
+    async (page: Page) => page.getByRole("button", { name: "Ajouter un compte" }).click(),
+  ],
+  [
+    "changement de mot de passe",
+    async (page: Page) =>
+      page.getByRole("button", { name: "Changer mon mot de passe" }).first().click(),
+  ],
+] as const) {
+  test(`fenêtre « ${name} » : titre, libellés et champs sur le même axe gauche`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(SIZES[2]);
+    await page.goto("/?nodev#/servers/forge/accounts");
+    await expect(page.locator(".table-wrap")).toBeVisible();
+    await open(page);
+    const dialog = page.locator("dialog[open]");
+    await expect(dialog).toBeVisible();
+    await dialog.locator("input").first().focus();
+    await page.evaluate(() =>
+      Promise.all(document.getAnimations().map((animation) => animation.finished)),
+    );
+    const edges = await dialog.evaluate((el) => {
+      const left = (node: Element | null) => node?.getBoundingClientRect().left ?? Number.NaN;
+      return {
+        title: left(el.querySelector("h1, h2")),
+        label: left(el.querySelector("label")),
+        field: left(el.querySelector(".field__box")),
+      };
+    });
+    const values = Object.values(edges);
+    expect(Math.max(...values) - Math.min(...values), JSON.stringify(edges)).toBeLessThanOrEqual(1);
   });
 }

@@ -7,3 +7,4 @@ Champ texte : libellé toujours visible, aide, erreur sous le champ (`role="aler
 - Props : `modelValue`, `label`, `type` (`text`, `password`, `search`), `help`, `error`, `placeholder`, `autocomplete` (`off` par défaut), `disabled`, `mono` (chasse fixe : adresses, empreintes)
 - Événements et slots : événement `update:modelValue` ; slot `suffix`
 - Notes : Jetons : `--bg`, `--bd`, `--ac`, `--crit`, `--focus-halo`, `--field-pad-*`. Tests : `atoms.test.ts`.
+- HRT-47 (S3) : halo de focus dessiné à l'intérieur de la bordure (même axe gauche que le reste) ; idem `HSelect` et `MultiSelect`. FIX:01M4EPX90N9QNNPCHVNB6MCDDF. Décision de Claude, à confirmer par Voiky.
