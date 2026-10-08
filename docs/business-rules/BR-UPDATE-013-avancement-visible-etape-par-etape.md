@@ -5,7 +5,7 @@ titre: Une mise à jour de l'agent est visible étape par étape
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-mises-a-jour.md (BR-UPDATE-013), HRT-17
-maj: 2026-10-06
+maj: 2026-10-08
 ---
 
 # BR-UPDATE-013 : Une mise à jour de l'agent est visible étape par étape
@@ -27,7 +27,7 @@ L'agent diffuse chaque étape sur le flux temps réel (sujet `update`, tout comp
 - `deploy/e2e/scenario-update.sh` (signature d'une autre clé : rien téléchargé, rien écrit ; somme fausse : rien déposé).
 
 ## Interface (HRT-17, lot interface)
-- Les étapes s'affichent une à la fois (Téléchargement avec son pourcentage, Vérification, Installation, Redémarrage, Contrôle : faite = coche, en cours = point braise, à venir = cercle vide) avec la phrase « Mise à jour de l'agent en cours. Étape : téléchargement (35 %)… ». Elles viennent du sujet `update` du flux (`ServerMessage::Update`, `Event::AgentUpdate`, événement `agent-update://progress`) ; l'interface ne calcule rien (le pourcentage est borné à 0 à 100 pour la barre).
+- Les étapes s'affichent une à la fois (Téléchargement avec son pourcentage, Vérification, Installation, Redémarrage, Contrôle : faite = coche, en cours = point braise, à venir = cercle vide) avec la phrase « Mise à jour de l'agent en cours. » (l'étape n'y est pas redite : la liste la montre ; une étape finie perd ses points de suspension ; le bouton « Mettre à jour l'agent » disparaît pendant l'opération ; HRT-46, FIX-01M4E48N732694TTFSRQF1C4KG). Elles viennent du sujet `update` du flux (`ServerMessage::Update`, `Event::AgentUpdate`, événement `agent-update://progress`) ; l'interface ne calcule rien (le pourcentage est borné à 0 à 100 pour la barre).
 - Code : `apps/desktop/src/components/molecules/AgentUpdateSteps.vue`, `apps/desktop/src/agentUpdate/messages.ts`, `apps/desktop/src/stores/agentUpdates.ts`, `crates/hearth-link/src/manager/task.rs::on_update`.
 - Tests : `crates/hearth-link/tests/agent_update.rs::the_steps_arrive_on_the_stream_in_order_with_the_download_percentage` ; `apps/desktop/src-tauri/tests/agent_update_runtime.rs` (progression relayée à l'interface) ; `apps/desktop/src/components/organisms/agentUpdate.test.ts`, `apps/desktop/e2e/agent-update.spec.ts`.
 

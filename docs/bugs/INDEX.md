@@ -4,6 +4,11 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4E48N732694TTFSRQF1C4KG](./FIX-01M4E48N732694TTFSRQF1C4KG.md) | Mise à jour de l'agent : le bouton, l'étape et la mention se répètent (C43) | 2026-10-08 |
+| [FIX-01M4E48MY42041VB11FJFSG0XW](./FIX-01M4E48MY42041VB11FJFSG0XW.md) | Port faux : « L'emplacement saisi n'est pas valide » (C4) | 2026-10-08 |
+| [FIX-01M4DPR4FFVCMZN0KPEA4JVCC8](./FIX-01M4DPR4FFVCMZN0KPEA4JVCC8.md) | Nombres à l'anglaise et unités brutes (C12) | 2026-10-08 |
+| [FIX-01M4DPR45X80GAYPS8MJ4RPZ8E](./FIX-01M4DPR45X80GAYPS8MJ4RPZ8E.md) | Barre des serveurs : outils sans nom, couleurs seulement sur le serveur ouvert, suppression sans nom (C49, C52) | 2026-10-08 |
+| [FIX-01M4DPR3YFC0AQC1D3D20KSY04](./FIX-01M4DPR3YFC0AQC1D3D20KSY04.md) | Barres de défilement blanches, une par zone (C9) | 2026-10-08 |
 | [FIX-01M4DNJ3P75DN25714EBCH2EY2](./FIX-01M4DNJ3P75DN25714EBCH2EY2.md) | Le rôle en cours de changement ne se distinguait pas des autres cellules (C22) | 2026-10-08 |
 | [FIX-01M4DNJ3W899Y50NPSRQ8W8ZVN](./FIX-01M4DNJ3W899Y50NPSRQ8W8ZVN.md) | L'en-tête « Sessions ouvertes » était en chasse fixe, les autres non (C26) | 2026-10-08 |
 | [FIX-01M4DNJ42ETVYR5Y01YNVPW715](./FIX-01M4DNJ42ETVYR5Y01YNVPW715.md) | Dans le journal, la recherche ne filtrait qu'avec Entrée ou le bouton éloigné (C28) | 2026-10-08 |

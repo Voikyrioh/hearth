@@ -6,7 +6,8 @@ import { type MessageKey, t } from "@/i18n";
 import type { LinkState, ServerColor } from "@/link";
 import type { SecurityMark } from "@/security/mark";
 
-// Avatar rond d'un serveur : initiales, anneau de la couleur du serveur quand il est
+// Avatar rond d'un serveur : initiales, contour et teinte de la couleur du serveur (tous les
+// serveurs, ouverts ou non : HRT-45, C52, FIX:01M4DPR45X80GAYPS8MJ4RPZ8E), double anneau quand il est
 // actif, pastille d'état en bas à droite. Le nom accessible porte l'état (pas la couleur).
 const props = withDefaults(
   defineProps<{
@@ -68,17 +69,16 @@ const label = computed(() =>
   place-items: center;
   width: var(--avatar-size);
   height: var(--avatar-size);
-  border: var(--border-width) solid var(--bd);
+  border: var(--border-width) solid var(--ring);
   border-radius: 50%;
-  background: var(--card);
-  color: var(--tx2);
+  background: color-mix(in srgb, var(--ring) 16%, var(--card));
+  color: var(--tx);
   font-family: var(--font-title);
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
 }
 
 .avatar--active {
-  color: var(--tx);
   box-shadow:
     0 0 0 var(--ring-width) var(--bg),
     0 0 0 calc(var(--ring-width) * 2) var(--ring);

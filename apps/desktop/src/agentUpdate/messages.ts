@@ -15,33 +15,39 @@ const STEP_LABELS: Record<Exclude<UpdateStep, "done">, MessageKey> = {
   check: "agentUpdate.stepCheck",
 };
 
-const STEP_NOW: Record<Exclude<UpdateStep, "done" | "download">, MessageKey> = {
-  verify: "agentUpdate.nowVerify",
-  install: "agentUpdate.nowInstall",
-  restart: "agentUpdate.nowRestart",
-  check: "agentUpdate.nowCheck",
+/** Une étape finie n'a plus de points de suspension : elle est faite, plus en train de se faire. */
+const STEP_DONE: Record<Exclude<UpdateStep, "done">, MessageKey> = {
+  download: "agentUpdate.stepDownloadDone",
+  verify: "agentUpdate.stepVerifyDone",
+  install: "agentUpdate.stepInstallDone",
+  restart: "agentUpdate.stepRestartDone",
+  check: "agentUpdate.stepCheckDone",
 };
 
 /** Le libellé d'une étape dans la liste (« Téléchargement : 35 % » pendant le téléchargement). */
-export function stepLabel(step: Exclude<UpdateStep, "done">, percent: number | null): string {
+export function stepLabel(
+  step: Exclude<UpdateStep, "done">,
+  percent: number | null,
+  done = false,
+): string {
+  if (done) return t(STEP_DONE[step]);
   if (step === "download" && percent !== null) {
     return t("agentUpdate.stepDownloadPercent", { percent });
   }
   return t(STEP_LABELS[step]);
 }
 
-/** La phrase d'avancement : « Mise à jour de l'agent en cours. Étape : téléchargement (35 %)… ». */
-export function progressSentence(
-  step: Exclude<UpdateStep, "done">,
-  percent: number | null,
-): string {
-  const now =
-    step === "download"
-      ? percent === null
-        ? t("agentUpdate.nowDownload")
-        : t("agentUpdate.nowDownloadPercent", { percent })
-      : t(STEP_NOW[step]);
-  return t("agentUpdate.progress", { step: now });
+/** La phrase d'avancement : l'étape n'y est PAS redite, la liste des étapes la montre (HRT-46, C43, FIX:01M4E48N732694TTFSRQF1C4KG). */
+export function progressSentence(): string {
+  return t("agentUpdate.progress");
+}
+
+/**
+ * Ce que le lecteur d'écran entend (région vivante polie, invisible) : l'étape COURANTE, une fois par étape (pas à chaque
+ * pourcentage). À l'œil, l'étape n'est dite que par la liste (HRT-46, C43).
+ */
+export function stepAnnouncement(step: Exclude<UpdateStep, "done">): string {
+  return t("agentUpdate.announce", { step: stepLabel(step, null, true).toLowerCase() });
 }
 
 const REASONS: Record<UpdateReason, MessageKey> = {

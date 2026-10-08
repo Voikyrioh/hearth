@@ -6,6 +6,7 @@ import {
   refusalMessage,
   resultMessage,
   resultTone,
+  stepAnnouncement,
   stepLabel,
 } from "./messages";
 
@@ -25,16 +26,23 @@ describe("les étapes", () => {
     expect(stepLabel("verify", 35)).toBe("Vérification…");
   });
 
-  it("says the current step in the sentence of the specification", () => {
-    expect(progressSentence("download", 35)).toBe(
-      "Mise à jour de l'agent en cours. Étape : téléchargement (35 %)…",
+  it("says the update is running without repeating the step, which the list shows (C43)", () => {
+    expect(progressSentence()).toBe("Mise à jour de l'agent en cours.");
+  });
+
+  it("announces the current step to a screen reader, once per step", () => {
+    expect(stepAnnouncement("download")).toBe(
+      "Mise à jour de l'agent en cours. Étape : téléchargement.",
     );
-    expect(progressSentence("download", null)).toBe(
-      "Mise à jour de l'agent en cours. Étape : téléchargement…",
+    expect(stepAnnouncement("restart")).toBe(
+      "Mise à jour de l'agent en cours. Étape : redémarrage.",
     );
-    expect(progressSentence("restart", null)).toBe(
-      "Mise à jour de l'agent en cours. Étape : redémarrage…",
-    );
+  });
+
+  it("drops the ellipsis of a finished step (C43)", () => {
+    expect(stepLabel("download", null, true)).toBe("Téléchargement");
+    expect(stepLabel("check", null, true)).toBe("Contrôle");
+    expect(stepLabel("verify", null, false)).toBe("Vérification…");
   });
 });
 

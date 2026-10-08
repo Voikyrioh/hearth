@@ -57,9 +57,8 @@ describe("le bouton « Mettre à jour l'agent »", () => {
     expect(wrapper.get("h3").text()).toBe("État du serveur : forge");
     expect(wrapper.get("[data-agent-versions]").text()).toContain("Agent 0.1.0");
     expect(wrapper.get("[data-agent-tag]").text()).toBe("Mise à jour disponible");
-    expect(wrapper.get("[data-agent-available]").text()).toBe(
-      "Mise à jour disponible pour l'agent",
-    );
+    // Dite une fois : la mention, pas aussi une phrase (HRT-46, C43).
+    expect(wrapper.find("[data-agent-available]").exists()).toBe(false);
     expect(wrapper.get("[data-agent-versions]").text()).toBe(
       "Client indisponible · Agent 0.1.0 · Disponible 0.2.0",
     );
@@ -128,25 +127,32 @@ describe("l'avancement : étapes discrètes, une à la fois", () => {
   it("shows the five steps with the download percentage, then the restart as « Reconnexion… » without any error", async () => {
     const ctx = await card();
     const { wrapper, bridge, toasts } = ctx;
+    // Avant l'opération la région vivante existe déjà, VIDE : le texte y arrivera ensuite.
+    const region = wrapper.get("[data-agent-announce]");
+    expect(region.text()).toBe("");
+    expect(region.attributes("role")).toBe("status");
     await confirmUpdate(wrapper);
     // Acceptée : les étapes s'affichent tout de suite.
-    expect(wrapper.get("[data-agent-progress]").text()).toBe(
-      "Mise à jour de l'agent en cours. Étape : téléchargement…",
-    );
+    expect(wrapper.get("[data-agent-progress]").text()).toBe("Mise à jour de l'agent en cours.");
     expect(
       wrapper.findAll("[data-agent-steps] li").map((li) => li.attributes("data-step")),
     ).toEqual(["download", "verify", "install", "restart", "check"]);
     sim(bridge).advance("forge", "download", 35);
     await flushPromises();
-    expect(wrapper.get("[data-agent-progress]").text()).toBe(
-      "Mise à jour de l'agent en cours. Étape : téléchargement (35 %)…",
-    );
     const states = () =>
       wrapper.findAll("[data-agent-steps] li").map((li) => li.attributes("data-state"));
     expect(states()).toEqual(["now", "later", "later", "later", "later"]);
     expect(wrapper.get('[data-step="download"]').text()).toContain("Téléchargement : 35 %");
-    // Le bouton est inerte pendant l'opération, la mention disparaît.
-    expect(update(wrapper).attributes("aria-disabled")).toBe("true");
+    // La MÊME région vivante qu'avant l'opération (un texte posé dans une région créée avec lui n'est pas
+    // toujours annoncé : première étape).
+    expect(wrapper.get("[data-agent-announce]").element).toBe(region.element);
+    // L'étape reste annoncée aux lecteurs d'écran : une région vivante polie, qui suit l'étape courante.
+    const announce = () => wrapper.get("[data-agent-announce]");
+    expect(announce().attributes("aria-live")).toBe("polite");
+    expect(announce().attributes("role")).toBe("status");
+    expect(announce().text()).toBe("Mise à jour de l'agent en cours. Étape : téléchargement.");
+    // Le bouton disparaît pendant l'opération (C43), la mention aussi.
+    expect(update(wrapper).exists()).toBe(false);
     expect(wrapper.find("[data-agent-tag]").exists()).toBe(false);
     // Les étapes suivantes, une à la fois.
     for (const [step, expected] of [
@@ -156,11 +162,15 @@ describe("l'avancement : étapes discrètes, une à la fois", () => {
       sim(bridge).advance("forge", step);
       await flushPromises();
       expect(states()).toEqual(expected);
+      expect(announce().text()).toContain(step === "verify" ? "vérification" : "installation");
     }
     // Le redémarrage : le lien tombe, « Reconnexion… », ni message d'erreur ni notification.
     sim(bridge).advance("forge", "restart");
     await flushPromises();
     expect(states()).toEqual(["done", "done", "done", "now", "later"]);
+    // Une étape finie n'a plus de points de suspension (C43).
+    expect(wrapper.get('[data-step="download"]').text()).toMatch(/^Téléchargement(?!…)/);
+    expect(wrapper.get('[data-step="restart"]').text()).toContain("Redémarrage…");
     expect(wrapper.get("[data-state]").attributes("data-state")).toBe("reconnecting");
     expect(wrapper.get(".pill").text()).toBe("Reconnexion…");
     expect(wrapper.text()).toContain("Le lien avec le serveur sera coupé brièvement");

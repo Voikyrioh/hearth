@@ -33,6 +33,12 @@
   --cool-tint: color-mix(in srgb, var(--cool) 12%, var(--card));
   --on-crit: #1c1518;
   --scrim: color-mix(in srgb, var(--bg) 72%, transparent);
+  /* Poignée de défilement (HRT-37) : 3,6 pour 1 sur le fond de page, 3,2 sur une carte au repos (WCAG 1.4.11 : 3 pour 1) ; plus claire au survol (6,4 sur une carte). */
+  --scroll-thumb: var(--tx3);
+  --scroll-thumb-hover: var(--tx2);
+  --scroll-track: transparent;
+  --scroll-size: 12px;
+  --scroll-gap: 2px;
 
   /* Couleurs de serveur : palette de 8 (anneau de l'avatar actif) */
   --server-1: #ff7b3d;

@@ -172,7 +172,7 @@ test("carnet : oubli des identifiants, déconnexion, suppression avec confirmati
   // Suppression : Annuler ne change rien, Supprimer retire le serveur.
   await salon.getByRole("button", { name: "Supprimer" }).click();
   const dialog = page.getByRole("alertdialog");
-  await expect(dialog).toContainText("Supprimer ce serveur ?");
+  await expect(dialog).toContainText("Supprimer nas-salon ?");
   await expect(dialog).toContainText("Ses identifiants mémorisés seront aussi supprimés.");
   await dialog.getByRole("button", { name: "Annuler" }).click();
   await expect(salon).toBeVisible();
