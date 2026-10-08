@@ -4,6 +4,17 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4D4Y22QGBWNKKJTK8K3X12A](./FIX-01M4D4Y22QGBWNKKJTK8K3X12A.md) | Le nom accessible du chargement ne suivait pas le texte affiché (retour de revue HRT-34) | 2026-10-08 |
+| [FIX-01M4D4Y0D7YFWCV6R1GEHXZGPB](./FIX-01M4D4Y0D7YFWCV6R1GEHXZGPB.md) | Tableau de bord : jauges perdues dans un grand vide à 1920 et 2560 (retour de revue HRT-34) | 2026-10-08 |
+| [FIX-01M4D4H25X7PN4SH2N7DC3REGS](./FIX-01M4D4H25X7PN4SH2N7DC3REGS.md) | Les filtres du journal prenaient le quart de l'écran à 1280 et 1366 (C29) | 2026-10-08 |
+| [FIX-01M4D4G1E0DGHFXWVPXVW04DF6](./FIX-01M4D4G1E0DGHFXWVPXVW04DF6.md) | « Mes serveurs » : l'adresse recouverte par les étiquettes, barre de défilement au milieu de l'écran (C51) | 2026-10-08 |
+| [FIX-01M4D4FZQ6BWTJJK1MYCCYMFDE](./FIX-01M4D4FZQ6BWTJJK1MYCCYMFDE.md) | Beaucoup de serveurs : le bas de la barre sortait de l'écran (C50) | 2026-10-08 |
+| [FIX-01M4D4FY4G650RBNJ3W7NSP947](./FIX-01M4D4FY4G650RBNJ3W7NSP947.md) | Mode attaque + alerte : 170 px de bandeaux empilés sur toutes les pages (C37) | 2026-10-08 |
+| [FIX-01M4D4FWJBQ360DF7FB9RWFZCM](./FIX-01M4D4FWJBQ360DF7FB9RWFZCM.md) | « Demander mon mot de passe » : le sélecteur se cassait sur trois lignes (C33) | 2026-10-08 |
+| [FIX-01M4D4FTZX89X3Z6MATEQ0KCN7](./FIX-01M4D4FTZX89X3Z6MATEQ0KCN7.md) | Les actions d'un compte passaient sur deux lignes à 1280 et 1366 (C21) | 2026-10-08 |
+| [FIX-01M4D4FSDN82D1PNC7YQEERDNB](./FIX-01M4D4FSDN82D1PNC7YQEERDNB.md) | Page Comptes vide : « Comptes » deux fois et « Ajouter un compte » deux fois (C25) | 2026-10-08 |
+| [FIX-01M4D4FQRZ2QTRT57HMM6TAPBE](./FIX-01M4D4FQRZ2QTRT57HMM6TAPBE.md) | Le panneau de session expirée se posait en haut à gauche et repoussait la dernière vue (C45) | 2026-10-08 |
+| [FIX-01M4D4FP65X3TZW6JQAZ5YK7EX](./FIX-01M4D4FP65X3TZW6JQAZ5YK7EX.md) | Les écrans vides étaient plaqués à gauche, titre cassé, deux tiers de l'écran vides (C27) | 2026-10-08 |
 | [FIX-01M4D1K9GV5X6MJTHDB8RYPMS6](./FIX-01M4D1K9GV5X6MJTHDB8RYPMS6.md) | Un chargement des mesures qui ne finit pas se lisait comme une panne (C5) | 2026-10-08 |
 | [FIX-01M4D1K8675QMBAFTM76XF4XJC](./FIX-01M4D1K8675QMBAFTM76XF4XJC.md) | La carte Carte graphique absente restait sans explication (C15) | 2026-10-08 |
 | [FIX-01M4D1K6V5DS7DQVR6ZV7A3HGY](./FIX-01M4D1K6V5DS7DQVR6ZV7A3HGY.md) | Le titre « Durée de fonctionnement » se cassait en deux lignes et le point de montage des disques était presque invisible (C14) | 2026-10-08 |
