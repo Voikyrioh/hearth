@@ -251,6 +251,17 @@ struct Outage {
     /// Un réveil a déjà repoussé « Hors ligne » dans cette coupure : un seul report tant qu'aucun
     /// contact n'a réussi (un poste qui se réveille toutes les 20 s finit « Hors ligne »).
     woken: bool,
+    /// La coupure est établie : une tentative a échoué (ou était sans réponse) au-delà du seuil de
+    /// « Reconnexion en cours ». Tant qu'elle ne l'est pas, l'état affiché reste « Connecté » : une
+    /// coupure rétablie avant le seuil ne se voit pas, même si la prochaine tentative planifiée n'a
+    /// lieu qu'après (FIX:01M4CJEQS88NZWCQ129XDP91MT).
+    confirmed: bool,
+    /// La tentative en cours est la vérification faite au seuil (hors de la suite des délais).
+    probe: bool,
+    /// Fin de la borne de la vérification : sans réponse à cet instant, la coupure est établie.
+    probe_until: Option<Mono>,
+    /// Instant de la tentative planifiée que la vérification a devancée : rendu tel quel après elle.
+    resume_at: Option<Mono>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -310,6 +321,10 @@ impl LinkMachine {
                     next_attempt_at: Some(now),
                     reauthed: false,
                     woken: false,
+                    confirmed: false,
+                    probe: false,
+                    probe_until: None,
+                    resume_at: None,
                 }),
                 LinkState::Reconnecting,
             ),
@@ -328,6 +343,10 @@ impl LinkMachine {
                     next_attempt_at: Some(now),
                     reauthed: false,
                     woken: false,
+                    confirmed: false,
+                    probe: false,
+                    probe_until: None,
+                    resume_at: None,
                 }),
                 LinkState::Offline,
             ),
@@ -397,8 +416,11 @@ impl LinkMachine {
                 {
                     offer(at);
                 }
-                if self.shown == LinkState::Connected {
+                if self.shown == LinkState::Connected && !outage.confirmed && !outage.probe {
                     offer(outage.since.after(self.thresholds.reconnecting_after));
+                }
+                if let Some(at) = outage.probe_until {
+                    offer(at);
                 }
                 if self.shown != LinkState::Offline && !outage.manual {
                     offer(self.offline_at(&outage));
@@ -475,6 +497,7 @@ impl LinkMachine {
     }
 
     fn on_tick(&mut self, now: Mono, effects: &mut Vec<Effect>) {
+        self.check_threshold(now, effects);
         match self.phase {
             // Silence : la coupure a commencé au dernier message reçu.
             Phase::Up {
@@ -494,6 +517,47 @@ impl LinkMachine {
                 self.phase = Phase::Down(outage);
             }
             _ => {}
+        }
+        // Une perte trouvée à l'instant (silence dépassé) peut déjà avoir passé le seuil.
+        self.check_threshold(now, effects);
+    }
+
+    /// Borne de la vérification du seuil : le sixième du seuil (0,5 s pour 3 s).
+    fn probe_bound(&self) -> Duration {
+        self.thresholds.reconnecting_after / 6
+    }
+
+    /// Seuil de « Reconnexion en cours » (3 s de coupure) atteint alors que rien ne prouve encore la
+    /// coupure.
+    fn check_threshold(&mut self, now: Mono, effects: &mut Vec<Effect>) {
+        // La vérification est bornée : sans réponse à sa borne, la coupure est établie (comme pour
+        // une tentative déjà en vol au seuil) ; la tentative continue, devenue une tentative
+        // ordinaire, et prend la place de la planifiée.
+        if let Phase::Down(mut outage) = self.phase
+            && outage.probe
+            && outage.probe_until.is_some_and(|at| at <= now)
+        {
+            outage.confirmed = true;
+            end_probe(&mut outage);
+            self.phase = Phase::Down(outage);
+        }
+        if let Phase::Down(mut outage) = self.phase
+            && self.shown == LinkState::Connected
+            && !outage.confirmed
+            && !outage.probe
+            && now >= outage.since.after(self.thresholds.reconnecting_after)
+        {
+            if outage.in_flight || outage.step != Step::Reconnect {
+                outage.confirmed = true;
+            } else {
+                outage.probe = true;
+                outage.probe_until = Some(now.after(self.probe_bound()));
+                outage.in_flight = true;
+                outage.resume_at = outage.next_attempt_at;
+                outage.next_attempt_at = None;
+                effects.push(Effect::StartAttempt);
+            }
+            self.phase = Phase::Down(outage);
         }
     }
 
@@ -527,10 +591,21 @@ impl LinkMachine {
     fn on_transport_failed(&mut self, now: Mono, effects: &mut Vec<Effect>) {
         match self.phase {
             Phase::Up { .. } => self.lose(now, effects),
+            Phase::Down(mut outage) if outage.in_flight && outage.probe => {
+                // La vérification du seuil a échoué : la coupure est établie. La suite des délais
+                // reprend là où elle en était.
+                outage.confirmed = true;
+                outage.in_flight = false;
+                outage.next_attempt_at = outage.resume_at.take();
+                outage.probe = false;
+                outage.probe_until = None;
+                self.phase = Phase::Down(outage);
+            }
             Phase::Down(mut outage) if outage.in_flight => {
                 let delay = self.backoff.next_delay((self.jitter)());
                 outage.in_flight = false;
                 outage.manual = false;
+                outage.confirmed |= now >= outage.since.after(self.thresholds.reconnecting_after);
                 outage.next_attempt_at = Some(now.after(delay));
                 self.phase = Phase::Down(outage);
             }
@@ -580,6 +655,10 @@ impl LinkMachine {
             next_attempt_at: None,
             reauthed: false,
             woken,
+            confirmed: false,
+            probe: false,
+            probe_until: None,
+            resume_at: None,
         });
         effects.push(Effect::Reauthenticate);
     }
@@ -592,6 +671,7 @@ impl LinkMachine {
             outage.in_flight = true;
             outage.next_attempt_at = None;
             outage.reauthed = true;
+            end_probe(&mut outage);
             self.phase = Phase::Down(outage);
             effects.push(Effect::StartAttempt);
         }
@@ -628,6 +708,8 @@ impl LinkMachine {
                 }
                 outage.in_flight = true;
                 outage.next_attempt_at = None;
+                // Le déclencheur remplace la vérification du seuil par une tentative ordinaire.
+                end_probe(&mut outage);
                 effects.push(step_effect(outage.step));
                 self.phase = Phase::Down(outage);
             }
@@ -654,6 +736,9 @@ impl LinkMachine {
             let usual = self.backoff.next_delay((self.jitter)());
             outage.in_flight = false;
             outage.manual = false;
+            // Le serveur répond mais demande d'attendre : la coupure est établie.
+            outage.confirmed = true;
+            end_probe(&mut outage);
             outage.next_attempt_at = Some(now.after(usual.max(delay)));
             self.phase = Phase::Down(outage);
         }
@@ -679,6 +764,10 @@ impl LinkMachine {
             next_attempt_at: None,
             reauthed: false,
             woken: false,
+            confirmed: false,
+            probe: false,
+            probe_until: None,
+            resume_at: None,
         });
         effects.push(Effect::StartAttempt);
     }
@@ -699,6 +788,10 @@ impl LinkMachine {
             next_attempt_at: None,
             reauthed: false,
             woken: false,
+            confirmed: false,
+            probe: false,
+            probe_until: None,
+            resume_at: None,
         });
         effects.extend([
             Effect::CloseStream,
@@ -766,12 +859,21 @@ impl LinkMachine {
             (LinkState::Offline, offline_at)
         } else if outage.manual || outage.unproven || expected {
             (LinkState::Reconnecting, now)
-        } else if elapsed >= self.thresholds.reconnecting_after {
+        } else if elapsed >= self.thresholds.reconnecting_after && outage.confirmed {
             (LinkState::Reconnecting, reconnecting_at)
         } else {
             (LinkState::Connected, now)
         }
     }
+}
+
+/// Sortie de la vérification du seuil, par n'importe quelle voie (borne, réponse « attends »,
+/// tentative relancée) : ni drapeau levé ni instant de reprise ne survivent, l'échec suivant est un
+/// échec ordinaire qui calcule son délai.
+fn end_probe(outage: &mut Outage) {
+    outage.probe = false;
+    outage.probe_until = None;
+    outage.resume_at = None;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

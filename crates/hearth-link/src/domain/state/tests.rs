@@ -141,6 +141,143 @@ fn row01_connected_cut_under_3s_changes_nothing() {
     );
 }
 
+/// FIX:01M4CJEQS88NZWCQ129XDP91MT : l'état affiché ne passe à « Reconnexion » qu'après 3 s de coupure
+/// CONTINUE. À 3 s une vérification part (hors de la suite des délais) ; si elle réussit, rien n'a
+/// été montré, même si la prochaine tentative planifiée n'avait lieu qu'après le seuil.
+#[test]
+fn a_cut_healed_just_before_3s_shows_nothing_even_if_the_next_attempt_comes_later() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::TransportFailed);
+    // La tentative immédiate, puis celles de 10,5 s et 11,5 s : refusées (le serveur est coupé).
+    rig.send(Input::TransportFailed);
+    rig.advance_to(10_500);
+    rig.send(Input::TransportFailed);
+    rig.advance_to(11_500);
+    rig.send(Input::TransportFailed);
+    // Le serveur revient à 12,9 s ; la prochaine tentative planifiée serait à 13,5 s.
+    rig.advance_to(12_999);
+    assert_eq!(rig.state(), LinkState::Connected);
+    let before = rig.count(Effect::StartAttempt);
+    rig.advance_to(13_000);
+    assert_eq!(
+        rig.count(Effect::StartAttempt),
+        before + 1,
+        "la vérification du seuil part"
+    );
+    assert_eq!(rig.state(), LinkState::Connected, "rien n'est montré");
+    rig.send(Input::Connected);
+    assert_eq!(rig.state(), LinkState::Connected);
+}
+
+#[test]
+fn a_cut_still_there_at_3s_shows_reconnecting_then_connected_and_keeps_its_delays() {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::TransportFailed);
+    rig.send(Input::TransportFailed);
+    rig.advance_to(10_500);
+    rig.send(Input::TransportFailed);
+    rig.advance_to(11_500);
+    rig.send(Input::TransportFailed);
+    rig.advance_to(13_000);
+    assert_eq!(rig.state(), LinkState::Connected, "la vérification court");
+    // La vérification échoue : la coupure est établie, datée du seuil.
+    rig.send(Input::TransportFailed);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    // La tentative planifiée (13,5 s) garde sa place : la vérification ne décale rien.
+    assert_eq!(
+        rig.machine.status().next_retry_at,
+        Some(Mono::from_millis(13_500))
+    );
+    rig.advance_to(13_500);
+    rig.send(Input::Connected);
+    assert_eq!(rig.state(), LinkState::Connected);
+}
+
+/// Un lien coupé depuis 10 s, trois tentatives refusées, la vérification du seuil partie à 13 s et
+/// restée sans réponse.
+fn rig_with_a_silent_probe() -> Rig {
+    let mut rig = Rig::connected();
+    rig.send_at(10_000, Input::TransportFailed);
+    rig.send(Input::TransportFailed);
+    rig.advance_to(10_500);
+    rig.send(Input::TransportFailed);
+    rig.advance_to(11_500);
+    rig.send(Input::TransportFailed);
+    rig.advance_to(13_000);
+    assert_eq!(rig.state(), LinkState::Connected, "la vérification court");
+    rig
+}
+
+/// FIX:01M4CJEQS88NZWCQ129XDP91MT : la vérification est BORNÉE (le sixième du seuil, 0,5 s). Sans
+/// réponse à sa borne, la coupure est établie : « Reconnexion » datée de 3 s, sans attendre le délai
+/// de la tentative (8 s en production).
+#[test]
+fn a_silent_probe_cannot_hold_the_screen_on_connected_past_its_bound() {
+    let mut rig = rig_with_a_silent_probe();
+    rig.advance_to(13_499);
+    assert_eq!(rig.state(), LinkState::Connected);
+    rig.advance_to(13_500);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    assert_eq!(
+        rig.machine.status().since,
+        Mono::from_millis(13_000),
+        "datée du seuil"
+    );
+    // « Hors ligne » reste à 30 s de coupure.
+    rig.advance_to(39_999);
+    assert_eq!(rig.state(), LinkState::Reconnecting);
+    rig.advance_to(40_000);
+    assert_eq!(rig.state(), LinkState::Offline);
+}
+
+/// Une vérification qui se conclut autrement que par son échec (réponse « attends ») ne laisse rien
+/// derrière elle : l'échec de la tentative suivante calcule son délai. La réponse arrive AVANT la
+/// borne (13 500 ms) : seul `end_probe` de ce chemin peut remettre le drapeau à zéro.
+#[test]
+fn a_probe_ended_by_a_wait_answer_does_not_make_the_next_failure_skip_its_delay() {
+    let mut rig = rig_with_a_silent_probe();
+    rig.send_at(13_100, Input::RetryAfter(Duration::from_secs(60)));
+    // La borne (13 500 ms) rattraperait un drapeau resté levé : on regarde donc l'état interne tout de
+    // suite, avant elle.
+    assert!(
+        matches!(rig.machine.phase, Phase::Down(o) if !o.probe && o.probe_until.is_none() && o.resume_at.is_none()),
+        "la vérification n'a rien laissé derrière elle"
+    );
+    assert_eq!(
+        rig.machine.status().next_retry_at,
+        Some(Mono::from_millis(73_100))
+    );
+    rig.advance_to(73_100);
+    rig.send(Input::TransportFailed);
+    let next = rig.machine.status().next_retry_at.unwrap().as_millis();
+    assert!(
+        next > rig.now,
+        "un délai est calculé : {next} contre {}",
+        rig.now
+    );
+}
+
+/// Un déclencheur (réseau, réveil, « Réessayer ») pendant la vérification la remplace par une
+/// tentative ordinaire : son échec calcule son délai, il ne reprend pas l'instant planifié d'avant.
+/// Le déclencheur ET l'échec arrivent AVANT la borne (13 500 ms) : seul `end_probe` du déclencheur
+/// peut empêcher l'échec d'être pris pour celui de la vérification, qui reprendrait l'instant planifié
+/// d'avant (13 500 ms) au lieu de calculer un délai.
+#[test]
+fn a_trigger_during_the_probe_makes_it_an_ordinary_attempt() {
+    for trigger in [Input::NetworkChanged, Input::Woke, Input::RetryNow] {
+        let mut rig = rig_with_a_silent_probe();
+        rig.send_at(13_100, trigger);
+        assert!(
+            matches!(rig.machine.phase, Phase::Down(o) if !o.probe && o.probe_until.is_none() && o.resume_at.is_none()),
+            "{trigger:?} : la vérification n'a rien laissé derrière elle"
+        );
+        rig.send_at(13_300, Input::TransportFailed);
+        let next = rig.machine.status().next_retry_at.unwrap().as_millis();
+        // Échec ordinaire : un délai du backoff (au moins 0,4 s) à partir de l'échec.
+        assert!(next >= 13_300 + 400, "{trigger:?} : {next}");
+    }
+}
+
 #[test]
 fn row02_connected_cut_between_3s_and_30s_shows_reconnecting() {
     let mut rig = Rig::connected();
@@ -440,9 +577,20 @@ fn the_first_attempt_is_immediate_then_delays_follow_the_sequence() {
         at += delay;
         let before = rig.count(Effect::StartAttempt);
         rig.advance_to(at - 1);
-        assert_eq!(rig.count(Effect::StartAttempt), before, "pas avant {at}");
+        // Seule exception avant l'échéance : la vérification faite une fois, au seuil de 3 s de
+        // coupure (FIX:01M4CJEQS88NZWCQ129XDP91MT). Elle échoue ici, et la suite des délais
+        // reprend telle quelle.
+        let probes = rig.count(Effect::StartAttempt) - before;
+        assert!(probes <= 1, "pas avant {at}");
+        if probes == 1 {
+            rig.send(Input::TransportFailed);
+        }
         rig.advance_to(at);
-        assert_eq!(rig.count(Effect::StartAttempt), before + 1, "à {at}");
+        assert_eq!(
+            rig.count(Effect::StartAttempt) - before - probes,
+            1,
+            "à {at}"
+        );
     }
 }
 
@@ -989,8 +1137,10 @@ fn every_input_in_every_phase_is_handled_without_panicking_or_spinning() {
             if let Some(again) = rig.machine.deadline() {
                 assert!(
                     again.as_millis() > rig.now || rig.machine.status().next_retry_at.is_some(),
-                    "échéance non consommée : {again:?} à {}",
-                    rig.now
+                    "échéance non consommée : {again:?} à {} ; {:?} ; {:?}",
+                    rig.now,
+                    rig.machine,
+                    input
                 );
             }
         }
