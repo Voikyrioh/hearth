@@ -14,8 +14,8 @@
 //!
 //! L'agent **exige** la confirmation dès la construction du service (`SessionService::new`) : une requête
 //! sans membre `reauth` reçoit `426` « client trop ancien », jamais un repli vers « la session suffit ».
-//! Le régime « accepte sans exiger » n'existe plus que pour les bancs d'essai qui envoient des actes bruts
-//! (`accept_unconfirmed_acts_for_tests`) ; aucun code de production ne l'active.
+//! Le régime « accepte sans exiger » n'existe plus que pour les bancs de résilience de `hearth-link` (actes
+//! bruts, 20 tests) ; aucun banc de l'agent n'y recourt (`accept_unconfirmed_acts_for_tests`) ; aucun code de production ne l'active.
 
 use std::sync::Arc;
 

@@ -131,8 +131,6 @@ pub async fn start_booted(
         .await
         .expect("démarrage");
     let addr = running.server.local_addr();
-    // Ces scénarios envoient des actes bruts (session seule) : régime d'avant HRT-30, demandé par son nom.
-    running.sessions.accept_unconfirmed_acts_for_tests(true);
     Agent { running, addr }
 }
 
@@ -162,7 +160,6 @@ pub async fn start_updating(
     }
     .expect("démarrage");
     let addr = running.server.local_addr();
-    running.sessions.accept_unconfirmed_acts_for_tests(true);
     Agent { running, addr }
 }
 
@@ -178,6 +175,117 @@ impl Agent {
 
     pub async fn shutdown(self) {
         self.running.server.shutdown().await.expect("arrêt");
+    }
+
+    /// L'empreinte du certificat de cet agent : celle que les preuves de clé signent.
+    pub fn fingerprint(&self) -> hearth_proto::fingerprint::Fingerprint {
+        self.running.identity.fingerprint
+    }
+
+    async fn challenge(&self, username: &str, purpose: &str) -> String {
+        let reply = self
+            .request("POST", "/sessions/challenge")
+            .json(&serde_json::json!({ "username": username, "purpose": purpose }))
+            .send()
+            .await;
+        reply.body["challenge"].as_str().expect("défi").to_owned()
+    }
+
+    /// Crée le compte et ouvre sa session depuis un poste dont la clé est inscrite (preuve de la clé).
+    pub async fn actor(
+        &self,
+        env: &Env,
+        name: &str,
+        role: hearth_agent::domain::accounts::Role,
+    ) -> super::device::Actor {
+        env.create(name, role).await;
+        self.login_actor(name).await
+    }
+
+    /// Ouvre une session de plus pour un compte existant, depuis un nouveau poste.
+    pub async fn login_actor(&self, name: &str) -> super::device::Actor {
+        let key = super::device::DeviceKey::new();
+        let challenge = self.challenge(name, "login").await;
+        let proof = key.sign(
+            &self.fingerprint(),
+            hearth_proto::device_proof::Binding::Login,
+            name,
+            &challenge,
+        );
+        let reply = self
+            .request("POST", "/sessions")
+            .header("x-hearth-client", "poste-de-test/1.0")
+            .json(&serde_json::json!({
+                "username": name,
+                "password": super::PASSWORD,
+                "device": super::device::device_json(&proof),
+            }))
+            .send()
+            .await;
+        assert_eq!(reply.status, 201, "{:?}", reply.body);
+        super::device::Actor {
+            name: name.to_owned(),
+            key,
+            token: reply.body["token"].as_str().expect("jeton").to_owned(),
+        }
+    }
+
+    /// Le corps de cet acte, augmenté de son membre `reauth` (mot de passe du compte, défi NEUF).
+    pub async fn confirm(
+        &self,
+        who: &super::device::Actor,
+        method: &str,
+        path: &str,
+        body: Value,
+    ) -> Value {
+        self.confirm_with(who, method, path, body, super::PASSWORD)
+            .await
+    }
+
+    pub async fn confirm_with(
+        &self,
+        who: &super::device::Actor,
+        method: &str,
+        path: &str,
+        mut body: Value,
+        password: &str,
+    ) -> Value {
+        let challenge = self.challenge(&who.name, "admin_act").await;
+        let hash = hearth_agent::domain::session_token::SessionToken::parse(&who.token)
+            .expect("jeton")
+            .hash();
+        let member = {
+            let act = super::device::act_of(method, path, &body);
+            let proof = who.key.sign(
+                &self.fingerprint(),
+                hearth_proto::device_proof::Binding::AdminAct {
+                    token_hash: hash.as_bytes(),
+                    act: &act,
+                },
+                &who.name,
+                &challenge,
+            );
+            let mut member = serde_json::json!({ "device": super::device::device_json(&proof) });
+            if !password.is_empty() {
+                member["password"] = Value::String(password.to_owned());
+            }
+            member
+        };
+        body["reauth"] = member;
+        body
+    }
+
+    /// Un acte d'administration CONFIRMÉ, prêt à partir (jeton de ce poste, corps augmenté de `reauth`) :
+    /// on peut encore y ajouter des en-têtes avant `send`.
+    pub async fn confirmed(
+        &self,
+        who: &super::device::Actor,
+        method: &str,
+        path: &str,
+        body: Value,
+    ) -> Request<'_> {
+        let body = self.confirm(who, method, path, body).await;
+        self.request(method, path).token(&who.token).json(&body)
     }
 
     /// Requête HTTP/1.1 sur une connexion TLS 1.3 neuve. `X-Hearth-Api: 1` par défaut.

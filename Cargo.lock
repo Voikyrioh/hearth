@@ -2050,7 +2050,6 @@ dependencies = [
  "futures-util",
  "gethostname",
  "getrandom 0.4.3",
- "hearth-agent",
  "hearth-proto",
  "http-body-util",
  "mac_address",
