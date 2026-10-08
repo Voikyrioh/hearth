@@ -89,6 +89,9 @@ for (const size of SIZES) {
     await page.setViewportSize(size);
     await page.goto("/?nodev#/servers/forge/dashboard");
     await expect(page.locator(".layout__content")).toBeVisible();
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __hearthSim?: object }).__hearthSim),
+    );
     await page.evaluate(() =>
       (window as unknown as { __hearthSim: SimSecurity }).__hearthSim.security.setAlert("forge", {
         own: true,
@@ -162,6 +165,9 @@ test("barre des serveurs à 1100×680 avec 14 serveurs : pas de défilement hori
 }) => {
   await page.setViewportSize(SIZES[0]);
   await page.goto("/?nodev#/servers/forge/dashboard");
+  await page.waitForFunction(() =>
+    Boolean((window as unknown as { __hearthSim?: object }).__hearthSim),
+  );
   await page.evaluate((n) => {
     const sim = (window as unknown as { __hearthSim: Record<string, unknown> }).__hearthSim as {
       servers: Record<string, unknown>[];

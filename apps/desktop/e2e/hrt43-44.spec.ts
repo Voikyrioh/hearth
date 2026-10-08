@@ -175,6 +175,9 @@ for (const size of [SIZES[0], SIZES[2]]) {
         await expect(page.getByLabel("Du", { exact: true })).toBeVisible();
       }
       if (state !== "période personnalisée") {
+        await page.waitForFunction(() =>
+          Boolean((window as unknown as { __hearthSim?: object }).__hearthSim),
+        );
         await page.evaluate((kind) => {
           const sim = (
             window as unknown as {

@@ -68,6 +68,9 @@ for (const size of SIZES) {
     const strokeOf = () => arc.evaluate((element) => getComputedStyle(element).stroke);
     expect(await strokeOf(), "normal").toBe("rgb(255, 123, 61)");
     // Aux niveaux d'alerte de BR-DASH-003 (valeurs épinglées du pont simulé), les couleurs d'alerte.
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __hearthSim?: object }).__hearthSim),
+    );
     const pin = (level: string | null) =>
       page.evaluate(
         (l) =>

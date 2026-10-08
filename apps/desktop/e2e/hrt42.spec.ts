@@ -141,6 +141,10 @@ for (const size of [...SMALL, ...WIDE]) {
   }) => {
     await page.setViewportSize(size);
     await page.goto("/?nodev#/servers/forge/dashboard");
+    // Le crochet du pont simulé est posé après le chargement de la page : on l'attend (course vue à 1100×680 sur la CI).
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __hearthSim?: object }).__hearthSim),
+    );
     await page.evaluate(() =>
       (
         window as unknown as {
