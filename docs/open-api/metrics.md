@@ -8,7 +8,7 @@ Historique des mesures de la machine, rééchantillonné (BR-DASH-010). L'agent 
 
 ## Requête
 
-`GET /api/v1/metrics/history?window=1m|5m|1h` (`5m` si `window` est absent). Le client lit `window=1h` à chaque connexion pour amorcer sa courbe d'une heure (BR-DASH-010, ADR-0015 §5).
+`GET /api/v1/metrics/history?window=1m|5m|1h` (`5m` si `window` est absent). Pour `window=1h`, la réponse porte aussi `peaks` : le MAXIMUM de chaque pas de 10 s (`cpu`, `mem_used_bytes`, `net` avec chaque débit à son maximum, `gpus[]` avec `load_percent` et `memory_used_bytes`), un élément par échantillon de `samples`, dans le même ordre (absent pour `1m` et `5m`, à 1 échantillon par seconde). Champ ajouté : un lecteur plus ancien l'ignore et lit les moyennes. Le client lit `window=1h` à chaque connexion pour amorcer sa courbe d'une heure (BR-DASH-010, ADR-0015 §5).
 
 | `window` | Période | Pas des échantillons |
 |---|---|---|

@@ -223,6 +223,93 @@ pub fn window_samples(raw: Vec<Arc<Sample>>, window: HistoryWindow) -> Vec<Arc<S
         .collect()
 }
 
+/// Le maximum de chaque mesure tracée sur un pas (voir [`peaks`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepPeak {
+    pub cpu: f32,
+    pub mem_used_bytes: u64,
+    pub net: Option<NetRate>,
+    pub gpus: Vec<GpuPeak>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GpuPeak {
+    pub load_percent: Option<f32>,
+    pub memory_used_bytes: Option<u64>,
+}
+
+/// Découpe une série en groupes consécutifs de même pas (les pas sont alignés sur les secondes de l'horloge
+/// monotone). Partagé par la moyenne ([`resample`]) et le maximum ([`peaks`]) : même découpe, un pic par pas.
+fn step_groups<S>(samples: &[S], step_s: u32) -> Vec<&[S]>
+where
+    S: Borrow<Sample>,
+{
+    let step = i64::from(step_s);
+    let bucket_of = |sample: &S| sample.borrow().mono.whole_seconds().div_euclid(step);
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start < samples.len() {
+        let bucket = bucket_of(&samples[start]);
+        let end = samples[start..]
+            .iter()
+            .position(|sample| bucket_of(sample) != bucket)
+            .map_or(samples.len(), |offset| start + offset);
+        out.push(&samples[start..end]);
+        start = end;
+    }
+    out
+}
+
+/// Le MAXIMUM de chaque mesure tracée par pas de `step_s` secondes (processeur global, mémoire utilisée, débits,
+/// charge et mémoire de chaque carte graphique), un élément par pas de [`resample`], dans le même ordre. Un pas
+/// de 1 s ou moins n'en a pas besoin : liste vide. FIX:01M4CY8BVM3MV9769QWNDNW7VT
+pub fn peaks<S: Borrow<Sample>>(samples: &[S], step_s: u32) -> Vec<StepPeak> {
+    if step_s <= 1 {
+        return Vec::new();
+    }
+    step_groups(samples, step_s)
+        .into_iter()
+        .filter_map(|group| {
+            let last = group.last()?.borrow();
+            let max_f32 = |values: &mut dyn Iterator<Item = f32>| {
+                values.fold(None, |m: Option<f32>, v| Some(m.map_or(v, |m| m.max(v))))
+            };
+            let rates: Vec<NetRate> = group.iter().filter_map(|s| s.borrow().net).collect();
+            let net = (!rates.is_empty()).then(|| NetRate {
+                up_bytes_per_s: rates.iter().map(|r| r.up_bytes_per_s).max().unwrap_or(0),
+                down_bytes_per_s: rates.iter().map(|r| r.down_bytes_per_s).max().unwrap_or(0),
+            });
+            let gpus = last
+                .gpus
+                .iter()
+                .enumerate()
+                .map(|(i, gpu)| {
+                    let same = || {
+                        group
+                            .iter()
+                            .filter_map(move |s| s.borrow().gpus.get(i))
+                            .filter(|g| g.name == gpu.name)
+                    };
+                    GpuPeak {
+                        load_percent: max_f32(&mut same().filter_map(|g| g.load_percent)),
+                        memory_used_bytes: same().filter_map(|g| g.memory_used_bytes).max(),
+                    }
+                })
+                .collect();
+            Some(StepPeak {
+                cpu: max_f32(&mut group.iter().map(|s| s.borrow().cpu)).unwrap_or(last.cpu),
+                mem_used_bytes: group
+                    .iter()
+                    .map(|s| s.borrow().mem.used_bytes)
+                    .max()
+                    .unwrap_or(last.mem.used_bytes),
+                net,
+                gpus,
+            })
+        })
+        .collect()
+}
+
 /// Réduit une série (du plus ancien au plus récent) à un échantillon par pas de `step_s`
 /// secondes, les pas étant alignés sur les secondes de l'horloge monotone. Chaque pas devient la
 /// moyenne de ses échantillons, daté de son dernier ; les listes (cœurs, disques, cartes
@@ -235,21 +322,13 @@ pub fn resample<S: Borrow<Sample>>(samples: &[S], step_s: u32) -> Vec<Sample> {
             .map(|sample| sample.borrow().clone())
             .collect();
     }
-    let step = i64::from(step_s);
-    let bucket_of = |sample: &S| sample.borrow().mono.whole_seconds().div_euclid(step);
-    let mut out = Vec::new();
-    let mut start = 0;
-    while start < samples.len() {
-        let bucket = bucket_of(&samples[start]);
-        let end = samples[start..]
-            .iter()
-            .position(|sample| bucket_of(sample) != bucket)
-            .map_or(samples.len(), |offset| start + offset);
-        let group: Vec<&Sample> = samples[start..end].iter().map(Borrow::borrow).collect();
-        out.push(average(&group));
-        start = end;
-    }
-    out
+    step_groups(samples, step_s)
+        .into_iter()
+        .map(|group| {
+            let group: Vec<&Sample> = group.iter().map(Borrow::borrow).collect();
+            average(&group)
+        })
+        .collect()
 }
 
 fn mean_f32(values: impl Iterator<Item = f32>) -> Option<f32> {
@@ -400,6 +479,69 @@ mod tests {
             gpus: vec![],
             temps: vec![],
         }
+    }
+
+    #[test]
+    fn the_peak_of_each_ten_second_step_keeps_a_one_second_spike_the_mean_hides() {
+        let mut raw: Vec<Arc<Sample>> = (0..20).map(|i| Arc::new(sample(i, 10.0))).collect();
+        // Un pic à 100 % d'UNE seconde dans le premier pas (0 à 9 s).
+        raw[4] = Arc::new(sample(4, 100.0));
+        let steps = resample(&raw, 10);
+        let max = peaks(&raw, 10);
+        assert_eq!(steps.len(), 2);
+        assert_eq!(max.len(), 2, "un maximum par pas, comme les moyennes");
+        assert!(
+            steps[0].cpu < 25.0,
+            "la moyenne masque le pic : {}",
+            steps[0].cpu
+        );
+        assert_eq!(max[0].cpu, 100.0);
+        assert_eq!(max[1].cpu, 10.0);
+        assert_eq!(max[0].mem_used_bytes, 109, "la mémoire maximale du pas");
+        assert!(
+            peaks(&raw, 1).is_empty(),
+            "le pas d'une seconde n'a pas de maxima"
+        );
+    }
+
+    #[test]
+    fn the_peak_of_a_step_follows_the_gpu_and_the_network_of_the_step() {
+        let mut a = sample(0, 1.0);
+        a.net = Some(NetRate {
+            up_bytes_per_s: 5,
+            down_bytes_per_s: 90,
+        });
+        a.gpus = vec![GpuReading {
+            name: "g".into(),
+            load_percent: Some(30.0),
+            memory_used_bytes: Some(10),
+            memory_total_bytes: Some(100),
+            temp_c: None,
+        }];
+        let mut b = sample(1, 1.0);
+        b.net = Some(NetRate {
+            up_bytes_per_s: 50,
+            down_bytes_per_s: 9,
+        });
+        b.gpus = vec![GpuReading {
+            name: "g".into(),
+            load_percent: Some(80.0),
+            memory_used_bytes: None,
+            memory_total_bytes: Some(100),
+            temp_c: None,
+        }];
+        let max = peaks(&[a, b], 10);
+        assert_eq!(max.len(), 1);
+        assert_eq!(
+            max[0].net,
+            Some(NetRate {
+                up_bytes_per_s: 50,
+                down_bytes_per_s: 90
+            }),
+            "chaque débit a son maximum"
+        );
+        assert_eq!(max[0].gpus[0].load_percent, Some(80.0));
+        assert_eq!(max[0].gpus[0].memory_used_bytes, Some(10));
     }
 
     #[test]

@@ -22,8 +22,8 @@ use tokio::sync::broadcast;
 use super::ports::{Clock, GpuProbe, MonotonicClock, ProbeError, SystemProbe};
 use crate::domain::machine::{GpuIdentity, MachineIdentity};
 use crate::domain::metrics::{
-    HistoryWindow, IDENTITY_MAX_AGE, IDENTITY_RETRY_AFTER, Ring, SAMPLE_TIMEOUT, Sample,
-    window_samples,
+    HistoryWindow, IDENTITY_MAX_AGE, IDENTITY_RETRY_AFTER, Ring, SAMPLE_TIMEOUT, Sample, StepPeak,
+    peaks, window_samples,
 };
 
 /// Échantillons que garde un abonné avant d'en perdre : un abonné lent perd les plus anciens, il
@@ -243,6 +243,19 @@ impl MetricsService {
             .unwrap_or_else(PoisonError::into_inner)
             .since(now, window.span());
         window_samples(raw, window)
+    }
+
+    /// Les maxima de chaque pas de la fenêtre (vide pour les fenêtres à 1 échantillon par seconde), calculés sur
+    /// les MÊMES échantillons bruts que [`Self::history`] : un maximum par échantillon rendu.
+    pub fn history_with_peaks(&self, window: HistoryWindow) -> (Vec<Arc<Sample>>, Vec<StepPeak>) {
+        let now = self.mono.elapsed();
+        let raw = self
+            .ring
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .since(now, window.span());
+        let maxima = peaks(&raw, window.step_s());
+        (window_samples(raw, window), maxima)
     }
 
     /// S'abonne aux prochains échantillons. S'abonner **avant** de lire l'historique : aucun
@@ -894,5 +907,35 @@ mod tests {
         assert_eq!(hour.len(), 2);
         let minute = metrics.history(HistoryWindow::OneMinute);
         assert_eq!(minute.len(), 20);
+    }
+
+    #[tokio::test]
+    async fn the_hour_window_hands_back_one_peak_per_step_beside_the_mean_and_short_windows_none() {
+        let time = Time::new();
+        let metrics = service(FakeProbe::default(), vec![], &time);
+        let start = time.elapsed().whole_seconds();
+        time.advance(10 - start.rem_euclid(10));
+        for _ in 0..20 {
+            metrics.sample_once().await.unwrap();
+            time.advance(1);
+        }
+        let (hour, peaks) = metrics.history_with_peaks(HistoryWindow::OneHour);
+        assert_eq!(hour.len(), 2);
+        assert_eq!(peaks.len(), hour.len(), "un maximum par échantillon rendu");
+        for (mean, peak) in hour.iter().zip(&peaks) {
+            assert!(
+                peak.cpu >= mean.cpu,
+                "le maximum n'est jamais sous la moyenne"
+            );
+            assert!(peak.mem_used_bytes >= mean.mem.used_bytes);
+        }
+        for window in [HistoryWindow::OneMinute, HistoryWindow::FiveMinutes] {
+            let (samples, peaks) = metrics.history_with_peaks(window);
+            assert!(!samples.is_empty());
+            assert!(
+                peaks.is_empty(),
+                "à 1 échantillon par seconde, pas de maxima"
+            );
+        }
     }
 }
