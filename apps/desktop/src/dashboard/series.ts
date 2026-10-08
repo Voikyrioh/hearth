@@ -234,3 +234,33 @@ export function hottest(sample: MachineSample): number | null {
   }
   return max;
 }
+
+/** Plafond de l'échelle d'une courbe : `max` s'il est donné, sinon la plus grande valeur affichée (au moins `atLeast`). Un seul calcul pour le tracé et pour l'échelle écrite. */
+export function ceilingOf(
+  series: readonly { points: readonly Point[] }[],
+  max: number | null,
+  atLeast = 1,
+): number {
+  if (max !== null) return max;
+  let top = 0;
+  for (const serie of series) {
+    for (const point of serie.points) if (point.v !== null && point.v > top) top = point.v;
+  }
+  return Math.max(top, atLeast);
+}
+
+/** Dernière valeur, minimum et maximum d'une série sur la fenêtre (les trous sont ignorés). */
+export function summaryOf(
+  points: readonly Point[],
+): { last: number; min: number; max: number } | null {
+  let last: number | null = null;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const point of points) {
+    if (point.v === null) continue;
+    last = point.v;
+    min = Math.min(min, point.v);
+    max = Math.max(max, point.v);
+  }
+  return last === null ? null : { last, min, max };
+}

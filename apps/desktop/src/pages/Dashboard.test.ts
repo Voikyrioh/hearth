@@ -397,6 +397,15 @@ describe("live changes (BR-DASH-012)", () => {
 });
 
 describe("link not connected (BR-DASH-009, 011)", () => {
+  it("shows no « Vu il y a » stamp on a dashboard that never received a measure", async () => {
+    const ctx = await openInLayout("forge", 0);
+    ctx.bridge.setState("forge", "offline");
+    await flushPromises();
+    expect(ctx.wrapper.text()).toContain("Aucune mesure pour l'instant");
+    expect(ctx.wrapper.find(".surface__stamp").exists()).toBe(false);
+    ctx.wrapper.unmount();
+  });
+
   it("keeps the last values, greyed and dated, and resumes live when the link returns", async () => {
     const ctx = await openInLayout();
     await second(ctx, 3);

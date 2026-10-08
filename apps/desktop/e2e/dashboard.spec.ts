@@ -150,8 +150,11 @@ test("un pic d'il y a 40 minutes se voit encore sur la fenêtre 1 h (maximum par
   const ys = [...path.matchAll(/[ML]\s*(-?[\d.]+)[ ,](-?[\d.]+)/g)].map((match) =>
     Number(match[2]),
   );
-  // La courbe touche le haut du graphique : le pic à 100 % n'a pas été moyenné.
-  expect(Math.min(...ys)).toBeLessThan(height * 0.1);
+  // La courbe touche le haut de sa zone de tracé : le pic à 100 % n'a pas été moyenné. La zone de tracé commence
+  // sous la ligne « durée / échelle » (HRT-41, 18 px posés par-dessus la courbe) : on mesure depuis ce haut-là.
+  const width = await chart.evaluate((svg) => svg.getBoundingClientRect().width);
+  const plotTop = Math.round((18 * 300) / width);
+  expect(Math.min(...ys) - plotTop).toBeLessThan((height - plotTop) * 0.1);
   await page.setViewportSize({ width: 1920, height: HEIGHT });
   await page.screenshot({ path: "e2e/screenshots/dashboard-1h-pic-ancien-1920.png" });
   await page.setViewportSize({ width: 1366, height: 800 });

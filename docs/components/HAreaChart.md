@@ -7,3 +7,5 @@ Courbe pleine en SVG pur (pas d'uPlot, ADR-0015) : trait 2 px, remplissage dégr
 - Props : `series` (`{ points, tone: 'ac' | 'cool' }[]`), `max` (borne haute ou `null` : suit la plus grande valeur), `label`
 - Événements et slots : aucun
 - Notes : `role="img"` avec `label`. Jetons : `--ac`, `--cool`, `--chart-fill-opacity`, `--chart-min-height`. Tests : `components/dashboard.test.ts`.
+- HRT-41 : au survol, repère vertical et info-bulle « valeur, heure » (`format`), positionnés par la variable `--hover-x`.
+- HRT-41 : la courbe est un seul arrêt de tabulation (`role="slider"`) : flèches (Maj : par 10), Début, Fin déplacent le repère, `aria-valuetext` dit « valeur, heure », Échap retire le repère. `name` de série : le texte équivalent résume chaque série nommée (réseau : montant ET descendant).

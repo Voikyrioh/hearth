@@ -38,13 +38,14 @@ const covered = useCoverage(props.entry);
     </dl>
     <TimeSeriesChart
       :series="[
-        { points: down, tone: 'cool' },
-        { points: up, tone: 'ac' },
+        { points: down, tone: 'cool', name: t('dash.netDown') },
+        { points: up, tone: 'ac', name: t('dash.netUp') },
       ]"
       :max="null"
       :label="t('dash.chartWithValue', { label: t('dash.chartNet'), value: `${t('dash.netUp')} ${formatRate(net?.upBytesPerS ?? null)}, ${t('dash.netDown')} ${formatRate(net?.downBytesPerS ?? null)}` })"
       :window="store.windowKey"
       :covered-ms="covered"
+      :format="formatRate"
     />
   </DashCard>
 </template>

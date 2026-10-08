@@ -115,11 +115,114 @@ describe("molecules", () => {
   });
 
   it("a chart says when its history does not cover the whole window", () => {
-    const props = { series: [], max: 100, label: "x", window: "1h" as const };
-    expect(mount(TimeSeriesChart, { props: { ...props, coveredMs: 12 * 60_000 } }).text()).toBe(
-      "Depuis 12 min",
+    const props = {
+      series: [],
+      max: 100,
+      label: "x",
+      window: "1h" as const,
+      format: (value: number) => `${value} %`,
+    };
+    const partial = mount(TimeSeriesChart, { props: { ...props, coveredMs: 12 * 60_000 } });
+    expect(partial.get(".series__covered").text()).toBe("Depuis 12 min");
+    expect(
+      mount(TimeSeriesChart, { props: { ...props, coveredMs: 3_600_000 } })
+        .find(".series__covered")
+        .exists(),
+    ).toBe(false);
+  });
+
+  it("a chart always says its duration and its scale, and gives a text equivalent", () => {
+    const points = [
+      { t: 1_000, v: 10 },
+      { t: 2_000, v: 40 },
+      { t: 3_000, v: 20 },
+    ];
+    const wrapper = mount(TimeSeriesChart, {
+      props: {
+        series: [{ points, tone: "ac" as const }],
+        max: 100,
+        label: "Charge",
+        window: "5m" as const,
+        coveredMs: 3_600_000,
+        format: (value: number) => `${value} %`,
+      },
+    });
+    expect(wrapper.get(".series__span").text()).toBe("5 dernières minutes");
+    expect(wrapper.get(".series__scale").text()).toBe("0 à 100 %");
+    expect(wrapper.get("svg").attributes("aria-label")).toBe(
+      "Charge. Dernière valeur 20 %, minimum 10 %, maximum 40 %, sur 5 dernières minutes",
     );
-    expect(mount(TimeSeriesChart, { props: { ...props, coveredMs: 3_600_000 } }).text()).toBe("");
+  });
+
+  it("a chart of two series gives the summary of each, named", () => {
+    const wrapper = mount(TimeSeriesChart, {
+      props: {
+        series: [
+          {
+            points: [
+              { t: 1_000, v: 100 },
+              { t: 2_000, v: 300 },
+            ],
+            tone: "cool" as const,
+            name: "Descendant",
+          },
+          {
+            points: [
+              { t: 1_000, v: 10 },
+              { t: 2_000, v: 30 },
+            ],
+            tone: "ac" as const,
+            name: "Montant",
+          },
+        ],
+        max: null,
+        label: "Débit réseau",
+        window: "5m" as const,
+        coveredMs: 3_600_000,
+        format: (value: number) => `${value} o/s`,
+      },
+    });
+    const label = wrapper.get("svg").attributes("aria-label") ?? "";
+    expect(label).toContain("Montant : dernière valeur 30 o/s, minimum 10 o/s, maximum 30 o/s");
+    expect(label).toContain(
+      "Descendant : dernière valeur 300 o/s, minimum 100 o/s, maximum 300 o/s",
+    );
+  });
+
+  it("a chart is one tab stop: arrows move the marker and say value and time, Escape clears it", async () => {
+    const points = [
+      { t: Date.UTC(2026, 9, 8, 10, 0, 0), v: 10 },
+      { t: Date.UTC(2026, 9, 8, 10, 0, 1), v: 40 },
+      { t: Date.UTC(2026, 9, 8, 10, 0, 2), v: 20 },
+    ];
+    const wrapper = mount(HAreaChart, {
+      props: {
+        series: [{ points, tone: "ac" as const }],
+        max: 100,
+        label: "Charge",
+        format: (v: number) => `${v} %`,
+      },
+    });
+    const stop = wrapper.get(".chart-box");
+    expect(stop.attributes("tabindex")).toBe("0");
+    expect(wrapper.findAll("[tabindex]")).toHaveLength(1);
+    await stop.trigger("focus");
+    await stop.trigger("keydown", { key: "ArrowLeft" });
+    expect(wrapper.find(".chart__tip").exists()).toBe(true);
+    const first = stop.attributes("aria-valuetext");
+    expect(first).toMatch(/^40 %, \d{2}:\d{2}:\d{2}$/);
+    await stop.trigger("keydown", { key: "ArrowLeft" });
+    expect(stop.attributes("aria-valuetext")).toMatch(/^10 %, /);
+    await stop.trigger("keydown", { key: "ArrowRight" });
+    expect(stop.attributes("aria-valuetext")).toBe(first);
+    await stop.trigger("keydown", { key: "Escape" });
+    expect(wrapper.find(".chart__tip").exists()).toBe(false);
+  });
+
+  it("a gauge at the normal level is not drawn with the alert gradient", () => {
+    const wrapper = mount(HGaugeArc, { props: { ratio: 0.22, level: "normal" } });
+    expect(wrapper.find("linearGradient").exists()).toBe(false);
+    expect(wrapper.get(".arc__value").attributes("stroke")).toBeUndefined();
   });
 });
 

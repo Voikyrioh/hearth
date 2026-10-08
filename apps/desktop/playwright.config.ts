@@ -38,6 +38,7 @@ export default defineConfig({
         "attack-mode.spec.ts",
         "layout.spec.ts",
         "hrt43-44.spec.ts",
+      "hrt41.spec.ts",
         "reauth.spec.ts",
         "identity.spec.ts",
         "hrt39-security.spec.ts",

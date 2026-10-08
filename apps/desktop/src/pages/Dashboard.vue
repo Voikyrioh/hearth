@@ -13,6 +13,7 @@ import MemoryCard from "@/components/organisms/MemoryCard.vue";
 import NetworkCard from "@/components/organisms/NetworkCard.vue";
 import TemperaturesCard from "@/components/organisms/TemperaturesCard.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
+import { usePageData } from "@/composables/usePageData";
 import { WINDOW_KEYS, type WindowKey } from "@/dashboard/series";
 import { type MessageKey, t } from "@/i18n";
 import { useDashboardStore } from "@/stores/dashboard";
@@ -40,6 +41,8 @@ const loading = computed(
   () => !hasMachine.value && (entry.value?.settled !== true || isConnected.value),
 );
 const failed = computed(() => entry.value?.failed === true);
+// FIX:01M4E9T7ECW7H6R9V4V6YNVRE1 : aucune mesure reçue, rien à dater, le gabarit ne pose pas « Vu il y a… » (mécanisme commun, HRT-38).
+usePageData(() => hasMachine.value);
 
 /** FIX:01M4D1K9GV5X6MJTHDB8RYPMS6 — au-delà de ce délai, un chargement qui ne finit pas le dit et propose une action (revue UX C5). */
 const SLOW_LOADING_MS = 3000;

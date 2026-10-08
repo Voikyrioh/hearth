@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useId } from "vue";
-import type { Point } from "@/dashboard/series";
+import { ceilingOf, type Point } from "@/dashboard/series";
 
 // Courbe pleine (SVG pur) : trait 2 px, remplissage dégradé, point d'extrémité plein, pas de
 // grille. Les pas sans mesure (`v` nul) sont des TROUS (le trait s'interrompt), jamais un zéro.
@@ -8,6 +8,8 @@ import type { Point } from "@/dashboard/series";
 export interface ChartSeries {
   points: readonly Point[];
   tone: "ac" | "cool";
+  /** Nom de la série, dit par le texte équivalent quand la courbe en porte plusieurs (« Montant », « Descendant »). */
+  name?: string;
 }
 
 const props = defineProps<{
@@ -16,6 +18,10 @@ const props = defineProps<{
   /** Échelle minimale quand `max` est nul : une courbe de température ne plafonne pas à sa valeur. */
   atLeast?: number;
   label: string;
+  /** Met en forme une valeur pour l'info-bulle du survol (unité comprise). */
+  format?: (value: number) => string;
+  /** Hauteur (px) laissée libre en haut du tracé pour une légende posée par-dessus (durée, échelle). */
+  reserveTop?: number;
 }>();
 
 const WIDTH = 300;
@@ -28,11 +34,14 @@ const prefix = useId();
 const box = ref<HTMLElement | null>(null);
 const HEIGHT_BOUNDS = { min: 40, max: 900 };
 const height = ref(DEFAULT_HEIGHT);
+const topUnits = ref(0);
 let observer: ResizeObserver | undefined;
 function measure() {
   const element = box.value;
   if (!element || element.clientWidth === 0 || element.clientHeight === 0) return;
   const ratio = element.clientHeight / element.clientWidth;
+  // Les pixels de la légende convertis en unités du viewBox (même échelle sur les deux axes).
+  topUnits.value = Math.round(((props.reserveTop ?? 0) * WIDTH) / element.clientWidth);
   height.value = Math.min(
     HEIGHT_BOUNDS.max,
     Math.max(HEIGHT_BOUNDS.min, Math.round(WIDTH * ratio)),
@@ -46,15 +55,77 @@ onMounted(() => {
 });
 onBeforeUnmount(() => observer?.disconnect());
 
-const ceiling = computed(() => {
-  if (props.max !== null) return props.max;
-  let top = 0;
-  for (const serie of props.series) {
-    for (const point of serie.points) if (point.v !== null && point.v > top) top = point.v;
-  }
-  return Math.max(top, props.atLeast ?? 1);
-});
+const ceiling = computed(() => ceilingOf(props.series, props.max, props.atLeast));
 
+// FIX:01M4E9T718D37EXTXMWA7YXWJE (C10)
+// Survol : un repère vertical et une info-bulle « valeur, heure » (HRT-41, C10). Le texte équivalent de la
+// courbe est son `aria-label` (dernière valeur, minimum, maximum) : l'info-bulle est un plus pour la souris.
+const TIME = new Intl.DateTimeFormat("fr-FR", { timeStyle: "medium" });
+const hover = ref<{ ratio: number; text: string } | null>(null);
+const shown = ref<number | null>(null);
+const count = computed(() => props.series[0]?.points.length ?? 0);
+const stepX = computed(() => (count.value > 1 ? (WIDTH - PAD * 2) / (count.value - 1) : 0));
+
+/** Texte « valeur, heure » du point `index` (toutes les séries) ; null si le point n'existe pas. */
+function textAt(index: number): string | null {
+  const at = props.series[0]?.points[index];
+  if (!at) return null;
+  const values = props.series
+    .map((serie) => serie.points[index]?.v ?? null)
+    .filter((value): value is number => value !== null)
+    .map((value) => (props.format ? props.format(value) : String(Math.round(value))));
+  return `${values.length > 0 ? values.join(" · ") : "-"}, ${TIME.format(new Date(at.t))}`;
+}
+
+function show(index: number) {
+  const element = box.value;
+  const text = textAt(index);
+  if (!element || text === null) return;
+  const ratio = (PAD + index * stepX.value) / WIDTH;
+  element.style.setProperty("--hover-x", `${(ratio * 100).toFixed(2)}%`);
+  shown.value = index;
+  hover.value = { ratio, text };
+}
+
+function clear() {
+  hover.value = null;
+  shown.value = null;
+}
+
+function onMove(event: PointerEvent) {
+  const element = box.value;
+  if (!element || count.value === 0) return;
+  const rect = element.getBoundingClientRect();
+  if (rect.width === 0) return;
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  const index =
+    stepX.value === 0
+      ? 0
+      : Math.min(count.value - 1, Math.max(0, Math.round((ratio * WIDTH - PAD) / stepX.value)));
+  show(index);
+}
+
+// Clavier (une courbe = un seul arrêt de tabulation) : flèches (Maj : par 10), Début, Fin ; Échap retire le repère.
+// La valeur et l'heure sont portées par `aria-valuetext` : le lecteur d'écran les annonce à chaque déplacement.
+function onKey(event: KeyboardEvent) {
+  if (count.value === 0) return;
+  const last = count.value - 1;
+  const at = shown.value ?? last;
+  const jump = event.shiftKey ? 10 : 1;
+  let next: number | null = null;
+  if (event.key === "ArrowLeft") next = shown.value === null ? last - jump : at - jump;
+  else if (event.key === "ArrowRight") next = shown.value === null ? last : at + jump;
+  else if (event.key === "Home") next = 0;
+  else if (event.key === "End") next = last;
+  else if (event.key === "Escape") {
+    clear();
+    return;
+  } else return;
+  event.preventDefault();
+  show(Math.min(last, Math.max(0, next)));
+}
+
+const valueText = computed(() => hover.value?.text ?? textAt(count.value - 1) ?? "");
 interface Drawn {
   tone: ChartSeries["tone"];
   line: string;
@@ -69,7 +140,9 @@ const drawn = computed<Drawn[]>(() =>
     const top = ceiling.value;
     const x = (index: number) => PAD + index * stepX;
     const y = (value: number) =>
-      height.value - PAD - (Math.min(Math.max(value, 0), top) / top) * (height.value - PAD * 2);
+      height.value -
+      PAD -
+      (Math.min(Math.max(value, 0), top) / top) * (height.value - PAD * 2 - topUnits.value);
     let line = "";
     let area = "";
     let run: { from: number; to: number } | null = null;
@@ -104,7 +177,22 @@ const drawn = computed<Drawn[]>(() =>
 </script>
 
 <template>
-  <div ref="box" class="chart-box">
+  <div
+    ref="box"
+    class="chart-box"
+    role="slider"
+    tabindex="0"
+    aria-orientation="horizontal"
+    :aria-label="label"
+    :aria-valuemin="0"
+    :aria-valuemax="Math.max(0, count - 1)"
+    :aria-valuenow="shown ?? Math.max(0, count - 1)"
+    :aria-valuetext="valueText"
+    @pointermove="onMove"
+    @pointerleave="clear"
+    @keydown="onKey"
+    @blur="clear"
+  >
   <svg class="chart" :viewBox="`0 0 ${WIDTH} ${height}`" role="img" :aria-label="label">
     <defs>
       <linearGradient
@@ -136,6 +224,14 @@ const drawn = computed<Drawn[]>(() =>
       />
     </template>
   </svg>
+  <template v-if="hover">
+    <span class="chart__cursor" aria-hidden="true" />
+    <span
+      :class="['chart__tip', { 'chart__tip--end': hover.ratio > 0.6 }]"
+      aria-hidden="true"
+      >{{ hover.text }}</span
+    >
+  </template>
   </div>
 </template>
 
@@ -153,6 +249,37 @@ const drawn = computed<Drawn[]>(() =>
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.chart__cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--hover-x);
+  width: var(--border-width);
+  background: var(--tx3);
+  pointer-events: none;
+}
+
+.chart__tip {
+  position: absolute;
+  top: 0;
+  left: var(--hover-x);
+  z-index: var(--z-tooltip);
+  padding: var(--space-1) var(--space-2);
+  transform: translateX(var(--space-2));
+  border-radius: var(--radius-control);
+  background: var(--card-2);
+  box-shadow: var(--card-edge);
+  color: var(--tx);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart__tip--end {
+  transform: translateX(calc(-100% - var(--space-2)));
 }
 
 .chart__fill {

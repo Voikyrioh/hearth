@@ -52,6 +52,7 @@ const covered = useCoverage(props.entry);
         :label="t('dash.chartWithValue', { label: t('dash.chartGpu'), value: formatPercent(load) })"
         :window="store.windowKey"
         :covered-ms="covered"
+        :format="formatPercent"
       />
     </div>
     <dl class="gpu__rows">
