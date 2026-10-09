@@ -1,0 +1,14 @@
+# Code owners: GitHub requests their review on every pull request that touches a
+# matching path. With "Require review from Code Owners" enabled in the branch
+# protection of main, a pull request cannot be merged without it.
+#
+# One owner for the whole repository.
+*       @Voikyrioh
+
+# The paths that decide what gets signed, built and shipped. Same owner today;
+# listed apart so the rule stays visible when the project gets more maintainers.
+/.github/                                   @Voikyrioh
+/deploy/                                    @Voikyrioh
+/apps/desktop/src-tauri/update-key.pub      @Voikyrioh
+/crates/hearth-agent/update-key.pub         @Voikyrioh
+/apps/desktop/src-tauri/tauri.conf.json     @Voikyrioh
