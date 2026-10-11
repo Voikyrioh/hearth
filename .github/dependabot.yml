@@ -1,0 +1,16 @@
+# Dependabot version updates. Security fixes for Cargo and npm come from the
+# repository setting "Dependabot security updates" (no entry needed here); this
+# file only keeps the GitHub Actions used by the workflows up to date, grouped in
+# one monthly pull request to keep the noise low.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ci
