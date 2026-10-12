@@ -208,12 +208,15 @@ pub fn check_repository_version(requested: &str, cargo_toml: &str) -> Result<(),
 
 /// La signature d'un binaire de l'AGENT (faite à la main par `minisign -S`, ADR-0014) : le contenu du
 /// fichier `.minisig`, ou son encodage base64, vérifié contre la clé publique embarquée dans l'agent.
-/// Le commentaire de confiance n'est pas contrôlé : l'agent ne l'exige pas (il contrôle la version en
-/// exécutant le binaire).
+/// Le commentaire de confiance doit porter `version:X.Y.Z` égal à `version` : ce que l'agent exige
+/// avant tout échange de binaire (BR-UPDATE-035). Même forme stricte que lui : un seul champ
+/// `version:`, ni `v`, ni pré-version. La signature se fait à la main avec
+/// `minisign -S -t "version:X.Y.Z" …` (runbook `mettre-a-jour-agent.md`).
 pub fn verify_agent_signature(
     public_key_file: &str,
     signature: &str,
     data: &[u8],
+    version: &str,
 ) -> Result<(), String> {
     let public = minisign::PublicKeyBox::from_string(&decode_key_file(public_key_file))
         .and_then(minisign::PublicKeyBox::into_public_key)
@@ -223,7 +226,27 @@ pub fn verify_agent_signature(
         .map_err(|error| format!("signature illisible : {error}"))?;
     minisign::verify(&public, &signature, Cursor::new(data), true, false, true).map_err(|_| {
         "la signature ne correspond pas à crates/hearth-agent/update-key.pub : le binaire n'a pas été signé par la paire de la clé embarquée dans l'agent, ou le fichier a changé".to_owned()
-    })
+    })?;
+    let comment = signature
+        .trusted_comment()
+        .map_err(|error| error.to_string())?;
+    let mut fields = comment
+        .split('\t')
+        .filter_map(|field| field.strip_prefix("version:"));
+    let signed = fields.next();
+    if fields.next().is_some() {
+        return Err(
+            "le commentaire signé porte plusieurs champs version: (l'agent le refuserait)"
+                .to_owned(),
+        );
+    }
+    if signed != Some(version) {
+        return Err(format!(
+            "la signature porte la version {} et non {version} : l'agent la refuserait avant tout échange. Signer avec `minisign -S -t \"version:{version}\"`",
+            signed.unwrap_or("(aucune)")
+        ));
+    }
+    Ok(())
 }
 
 /// Le texte d'une signature minisign : tel quel, ou décodé s'il est en base64.

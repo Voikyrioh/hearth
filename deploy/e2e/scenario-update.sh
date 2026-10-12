@@ -4,7 +4,8 @@
 # lecture seule :
 #   /dist/hearth-agent-old    l'agent installé (0.1.0), qui n'accepte que la clé jetable du test
 #   /dist/hearth-agent-new    la version suivante (0.2.0), vrai agent statique
-#   /dist/new.minisig         sa signature (clé jetable) ; new.other.minisig : signée par une autre clé
+#   /dist/new.minisig         sa signature (clé jetable, commentaire signé version:0.2.0) ; new.other.minisig : signée
+#                             par une autre clé ; new.slow.minisig : signée version:0.9.0 (scénario « une seule à la fois »)
 #   /dist/mute                un « agent » signé qui annonce 0.3.0 mais ne répond jamais
 #   /dist/mute.minisig        sa signature
 #   /deploy/install.sh        le script d'installation
@@ -267,7 +268,7 @@ ok "agent muet : retour automatique à l'ancien binaire (identique octet pour oc
 # --------------------------------------------------------------------------------------------
 # 4. Une seule mise à jour à la fois
 # --------------------------------------------------------------------------------------------
-SLOW_BODY=$(request_body 0.9.0 "$SLOW_URL" /dist/new.minisig /dist/hearth-agent-new)
+SLOW_BODY=$(request_body 0.9.0 "$SLOW_URL" /dist/new.slow.minisig /dist/hearth-agent-new)
 code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$SLOW_BODY")")
 [ "$code" = 202 ] || die "la mise à jour lente devrait être acceptée (reçu $code : $(cat "$OUT.body"))"
 sleep 1
