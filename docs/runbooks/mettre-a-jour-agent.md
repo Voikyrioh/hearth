@@ -24,7 +24,7 @@ Changer la clé = réinstaller à la main les agents existants (ils n'acceptent 
 ## Publier une version
 
 1. Construire : `cargo xtask agent` (binaire statique `target/dist/hearth-agent`, taille et SHA-256 affichés).
-2. Signer : `minisign -S -s ~/.hearth/update.key -m hearth-agent -x hearth-agent.minisig`.
+2. Signer, AVEC la version dans le commentaire signé (BR-UPDATE-035 : sans elle, ou avec un autre numéro, l'agent refuse avant tout échange et `agent-manifest` ne publie pas) : `minisign -S -t "version:X.Y.Z" -s ~/.hearth/update.key -m hearth-agent -x hearth-agent.minisig`.
 3. Héberger le binaire en **HTTPS** (TLS 1.3, certificat reconnu par le système du serveur), à une adresse sans identifiant. Le client lit la cible dans la section `agent` du `latest.json` de la release (voir « Publier la cible pour le client » ci-dessous), et la transmet à l'agent ; à la main : `POST /api/v1/agent/update` avec `{ version, url, signature, sha256 }`.
 
 ## Publier la cible pour le client (section `agent` de `latest.json`, ADR-0021)
