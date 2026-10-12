@@ -9,7 +9,7 @@ Règles : `docs/business-rules/BR-INSTALL-*.md`. Décision de service (root, dur
 - Un accès shell avec les droits d'administration (`sudo`).
 - Linux x86_64 ; systemd (sinon, installation gérée, voir plus bas).
 - Le port 7341 libre (ou un autre, au choix) et 256 Mio libres sur le disque du dossier de données.
-- Le binaire : fichier local (`cargo xtask agent` le construit dans `target/dist/hearth-agent`, avec sa somme SHA-256 dans la CI), ou une adresse **HTTPS** avec sa somme SHA-256. **La publication des versions n'existe pas encore** : sans `--binary` ni adresse, le téléchargement par défaut échoue proprement et rien n'est installé.
+- Le binaire : fichier local (`cargo xtask agent` le construit dans `target/dist/hearth-agent`, avec sa somme SHA-256 dans la CI), ou une adresse **HTTPS** avec sa somme SHA-256. Sans `--binary` ni adresse, le script télécharge la dernière version publiée sur `https://hearth.voikyrioh.fr/api` (voir « Téléchargement par défaut »).
 - Le dossier de données (`/var/lib/hearth`) : absolu, chemin simple, appartenant à root et fermé aux autres (0700) s'il existe déjà ; sinon l'installation refuse avant d'écrire.
 
 Chemins fixes : binaire `/usr/local/bin/hearth-agent`, configuration `/etc/hearth/agent.toml`, données `/var/lib/hearth/` (base, certificat, clé), unité `/etc/systemd/system/hearth-agent.service`.
@@ -17,6 +17,8 @@ Chemins fixes : binaire `/usr/local/bin/hearth-agent`, configuration `/etc/heart
 ## Installation interactive
 
 ```sh
+curl -fsSL https://hearth.voikyrioh.fr/api/install.sh | sudo sh
+# ou, avec un fichier local vérifié à la main :
 sudo sh deploy/install.sh --binary ./hearth-agent
 # ou, avec une adresse :
 curl -fsSL <adresse-du-script> | sudo HEARTH_RELEASE_URL=<adresse-du-binaire> HEARTH_SHA256=<somme> sh
@@ -51,6 +53,7 @@ L'installateur ne passe jamais ces variables à ses sous-processus (`df`, `syste
 
 - `HEARTH_PORT` ou `--port`. `--yes` : aucune question ; une valeur manquante arrête l'installation **avant toute écriture**.
 - **Téléchargement** : `--url` (ou `HEARTH_RELEASE_URL`) en **HTTPS seulement** (redirections bornées et en HTTPS seulement). La somme SHA-256 est **obligatoire** : `--sha256` / `HEARTH_SHA256`, ou publiée à côté (`ADRESSE.sha256`, même origine). Sans somme, rien n'est téléchargé.
+- **Téléchargement par défaut** (BR-INSTALL-013) : le script lit `https://hearth.voikyrioh.fr/api/releases/latest/agent`, une ligne `VERSION SOMME CHEMIN` (version `X.Y.Z`, somme de 64 hexadécimaux, chemin en `[A-Za-z0-9._/-]` commençant par un chiffre, sans `..` ni `//`). Il la contrôle strictement, télécharge `…/api/releases/CHEMIN`, compare la somme SHA-256, et s'arrête avant toute écriture au moindre écart. Cette somme vient de la même origine que le binaire (elle écarte un téléchargement abîmé, pas une origine compromise) : pour t'en garantir, passe `--sha256` (elle doit alors être identique) ou utilise `--binary`. `HEARTH_BASE_URL` change l'origine (HTTPS seulement, pour les essais).
 - **Fichier local** : `--binary` (chemin résolu en absolu, jamais cherché dans le `PATH`). Sans `--sha256`, le script annonce clairement, avant de le lancer en root, que le binaire n'est pas vérifié. La signature minisign arrivera avec ADR-0008.
 
 Directement avec le binaire (sans le script) : `sudo --preserve-env=… ./hearth-agent install --yes` avec les mêmes variables.
@@ -103,7 +106,10 @@ Un prérequis qui manque, une erreur ou Ctrl+C : l'agent annonce ce qui s'est pa
 | « Une installation est déjà en cours… » | une autre installation tient le verrou | attendre qu'elle se termine |
 | « Une version plus récente… est déjà installée » | le binaire installé est plus récent | rien : le script n'installe jamais une version plus ancienne que le binaire installé |
 | « Le chemin du dossier de données existe mais n'est pas un dossier » | un fichier occupe l'emplacement | le retirer, ou autre dossier |
-| « Aucune version de l'agent n'est publiée… » | pas de publication de versions | `--binary` ou `HEARTH_RELEASE_URL` |
+| « Le pointeur de la dernière version… est absent » | aucune version publiée à l'origine | `--binary` ou `HEARTH_RELEASE_URL` |
+| « Le pointeur de la dernière version est mal formé » | la réponse de l'origine n'a pas la forme `VERSION SOMME CHEMIN` attendue | ne pas installer ; prévenir le mainteneur ; `--binary` |
+| « La somme SHA-256 donnée ne correspond pas… » | `--sha256` différente de celle de la dernière version publiée | vérifier la somme donnée |
+| « Aucune version de l'agent n'est publiée… » | l'adresse `--url` / `HEARTH_RELEASE_URL` n'existe pas | corriger l'adresse, ou `--binary` |
 | « Le téléchargement n'a pas abouti… » | réseau coupé, adresse injoignable | relancer (aucun cache partiel n'est utilisé) |
 | « La somme SHA-256 du binaire ne correspond pas… » | binaire altéré ou mauvaise somme | vérifier la source, ne pas installer |
 
@@ -128,4 +134,4 @@ Le refus de rétrograder ne porte que sur le **binaire installé**. Après `unin
 
 ## Vérifier l'installation de bout en bout (développement)
 
-`cargo xtask e2e-install` construit le binaire statique, démarre un conteneur Debian avec systemd et rejoue tout ce runbook (installation par le script lu depuis un tube en HTTPS, réinstallation, mise à niveau depuis une autre version, désinstallation avec conservation puis purge d'un dossier partagé, refus, erreur tardive et SIGHUP avec retour en arrière complet, installation interactive sur un terminal, installation gérée). Docker est requis. `cargo xtask shellcheck` contrôle les scripts.
+`cargo xtask e2e-install` construit le binaire statique, démarre un conteneur Debian avec systemd et rejoue tout ce runbook (installation par le script lu depuis un tube en HTTPS, téléchargement par le pointeur de la dernière version et ses refus, réinstallation, mise à niveau depuis une autre version, désinstallation avec conservation puis purge d'un dossier partagé, refus, erreur tardive et SIGHUP avec retour en arrière complet, installation interactive sur un terminal, installation gérée). Docker est requis. `cargo xtask shellcheck` contrôle les scripts.
