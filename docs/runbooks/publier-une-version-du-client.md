@@ -20,14 +20,14 @@ Les clés de publication sont en place depuis le 2026-10-12 : la clé publique d
 **Avertissement : changer la clé rend tous les clients installés incapables d'accepter la moindre mise à jour ; il faut les réinstaller un par un à la main.** À ne faire qu'en cas de perte avérée.
 
 1. Générer la paire (la clé secrète reste chez toi, jamais dans le dépôt, jamais dans le hub) :
-   ```sh
-   cd apps/desktop
-   npx tauri signer generate -w ~/.hearth/client-update.key      # demande un mot de passe ; écrit la clé secrète et client-update.key.pub
+   ```powershell
+   cd apps\desktop
+   npx tauri signer generate -w "$env:USERPROFILE\.hearth\client-update.key"      # demande un mot de passe ; écrit la clé secrète et client-update.key.pub
    ```
 2. Remplacer la clé publique du dépôt par la nouvelle (le fichier de Tauri, une ligne en base64, ou le fichier minisign : les deux formats sont acceptés), puis commit et PR comme d'habitude. Sous PowerShell : `Copy-Item $HOME\.hearth\client-update.key.pub apps\desktop\src-tauri\update-key.pub` ; en Bash : `cp ~/.hearth/client-update.key.pub apps/desktop/src-tauri/update-key.pub`.
 3. Remplacer les secrets de l'environnement `release` :
-   ```sh
-   gh secret set HEARTH_CLIENT_SIGNING_KEY --env release < ~/.hearth/client-update.key
+   ```powershell
+   Get-Content -Raw "$env:USERPROFILE\.hearth\client-update.key" | gh secret set HEARTH_CLIENT_SIGNING_KEY --env release
    gh secret set HEARTH_CLIENT_SIGNING_KEY_PASSWORD --env release
    ```
    Sous PowerShell, `<` n'existe pas : `Get-Content -Raw $HOME\.hearth\client-update.key | gh secret set HEARTH_CLIENT_SIGNING_KEY --env release`.

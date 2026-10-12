@@ -20,7 +20,7 @@ Le refus a lieu **avant tout échange de binaire** et avant toute écriture : un
 Pourquoi : sans cela, un ancien binaire authentique annoncé sous un numéro plus grand tournait en root jusqu'à 60 s avant d'être rejeté.
 
 ## Fabrication de la signature
-La signature se fait à la main, avec la clé secrète du détenteur : `minisign -S -t "version:X.Y.Z" -s ~/.hearth/update.key -m hearth-agent -x hearth-agent.minisig` (option `-t` de minisign). Pas de commande `xtask` de signature (la clé secrète ne passe jamais par le dépôt ni la CI). `cargo xtask agent-manifest` REFUSE de publier une signature dont le commentaire ne porte pas `version:` égal à `--version` (même forme stricte que l'agent).
+La signature se fait à la main, avec la clé secrète du détenteur : `minisign -S -t "version:X.Y.Z" -s "$env:USERPROFILE\.hearth\update.key" -m hearth-agent -x hearth-agent.minisig` (PowerShell ; jamais `~`, qu'un autre interpréteur a déjà pris pour un dossier littéral) (option `-t` de minisign). Pas de commande `xtask` de signature (la clé secrète ne passe jamais par le dépôt ni la CI). `cargo xtask agent-manifest` REFUSE de publier une signature dont le commentaire ne porte pas `version:` égal à `--version` (même forme stricte que l'agent).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/update/signed_version.rs::check_signed_version` (la règle, pure).
@@ -50,3 +50,4 @@ La signature se fait à la main, avec la clé secrète du détenteur : `minisign
 
 ## Historique
 - 2026-10-12 : création (HRT-48).
+- 2026-10-12 : HRT-55, chemin de la clé en PowerShell ; la publication passe par `cargo xtask release-stage`, qui revérifie la version signée (`agent-manifest` garde le même contrôle mais n'est plus dans la procédure).
