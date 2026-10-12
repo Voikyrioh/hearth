@@ -15,6 +15,9 @@
 //! releases/X.Y.Z/                   les 8 fichiers de la liste fermée de l'API, immuables
 //! ```
 //!
+//! À côté de `releases/` (donc jamais déposé) : `COMMIT`, le commit de l'arbre propre dont la
+//! version est assemblée (HRT-60). `release-upload` refuse si le commit en place a changé.
+//!
 //! La liste fermée, la forme du manifeste et le chemin du pointeur de l'agent sont ceux de
 //! `hearth-releases-api` : `src/service/release-files.ts` (noms, clés d'objet) et
 //! `src/service/manifest.ts` (lecture du manifeste, `latestInstallerPath`, `agentPointer`).
@@ -41,6 +44,12 @@ pub const SCRIPT_KEY: &str = "releases/install.sh";
 const NOTES_MAX_CHARS: usize = 8_000;
 /// L'API refuse un manifeste de plus de 256 Kio (`MAX_MANIFEST_BYTES` de `manifest.ts`).
 const MANIFEST_MAX_BYTES: usize = 256 * 1024;
+
+/// Fichier à la racine du dossier d'assemblage (hors `releases/`, donc jamais déposé) qui garde le commit
+/// de l'arbre propre assemblé (HRT-60).
+pub const COMMIT_FILE: &str = "COMMIT";
+/// Nombre de fichiers nommés dans un refus d'arbre modifié.
+const DIRTY_LIST_MAX: usize = 10;
 
 /// Les fichiers d'une version : clé d'objet (`releases/...`, barres obliques) vers contenu.
 pub type Files = BTreeMap<String, Vec<u8>>;
@@ -346,24 +355,252 @@ pub fn check_install_script(script: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Lance `git -C <root> ...` en lecture seule via l'exécuteur injecté. Un échec n'est jamais lu comme
+/// « arbre propre » : il remonte en erreur.
+fn git_text(host: &dyn Host, root: &Path, list: &[&str], why: &str) -> Result<String, String> {
+    let mut argv = vec!["-C".to_owned(), root.to_string_lossy().into_owned()];
+    argv.extend(list.iter().map(|arg| (*arg).to_owned()));
+    // GIT_OPTIONAL_LOCKS=0 : `git status` ne réécrit pas l'index, la lecture reste une lecture.
+    let env = [("GIT_OPTIONAL_LOCKS", "0")];
+    let output = host.run(&Call::new("git", &argv).env(&env))?;
+    if output.success {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(format!(
+            "git {} a échoué ({}) : {why}",
+            list.join(" "),
+            output.stderr.chars().take(200).collect::<String>()
+        ))
+    }
+}
+
+/// Ce que la construction de l'agent lit sur le disque (`cargo build -p hearth-agent` dans un conteneur
+/// qui monte le dépôt, voir `agent.rs`) : le manifeste et le verrou du workspace, la chaîne d'outils, la
+/// configuration de Cargo, les requêtes SQLx hors ligne, et les crates (sources, `build.rs`, migrations
+/// embarquées par `sqlx::migrate!`, clé publique de mise à jour). Un fichier NON SUIVI dans ces chemins
+/// entre dans le binaire (une migration, un `build.rs`) : il est refusé. `target/`, `dist`, `.env`,
+/// `*.log` (ignorés par `.gitignore`) et tout ce qui est hors de ces chemins (artefact du client,
+/// signatures sous `target/dist/`) sont tolérés. `deploy/` n'y est pas : `install.sh` part de `HEAD`.
+pub const BUILD_INPUTS: [&str; 6] = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    ".cargo",
+    ".sqlx",
+    "crates",
+];
+
+/// Les fichiers SUIVIS qui diffèrent de `HEAD` (modifiés, indexés, supprimés).
+/// `git status --porcelain --untracked-files=no`, lecture seule. Vide = rien de suivi n'a changé.
+pub fn tracked_changes(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let out = git_text(
+        host,
+        root,
+        &["status", "--porcelain", "--untracked-files=no"],
+        "état de l'arbre inconnu, jamais traité comme propre",
+    )?;
+    Ok(out
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.trim_end().to_owned())
+        .collect())
+}
+
+/// Les fichiers non suivis et non ignorés sous les entrées de la construction (`BUILD_INPUTS`).
+pub fn untracked_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let mut list = vec!["ls-files", "--others", "--exclude-standard", "--"];
+    list.extend(BUILD_INPUTS);
+    let out = git_text(
+        host,
+        root,
+        &list,
+        "fichiers non suivis inconnus, jamais traités comme absents",
+    )?;
+    Ok(out
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| format!("non suivi {}", line.trim_end()))
+        .collect())
+}
+
+/// Les fichiers IGNORÉS sous les entrées de la construction. Rien d'ignoré n'y vit légitimement, et
+/// l'ignorance peut venir du poste (`.git/info/exclude`, `core.excludesFile`), pas du commit : ranger
+/// une migration d'essai ainsi la cacherait de `git status` sans l'ôter du binaire. Refusés.
+pub fn ignored_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let mut list = vec![
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--",
+    ];
+    list.extend(BUILD_INPUTS);
+    let out = git_text(
+        host,
+        root,
+        &list,
+        "fichiers ignorés inconnus, jamais traités comme absents",
+    )?;
+    Ok(out
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| format!("ignoré {}", line.trim_end()))
+        .collect())
+}
+
+/// Les fichiers que git est prié de ne pas regarder (`skip-worktree`, lettre `S` de `git ls-files -v`,
+/// ou `assume-unchanged`, lettre minuscule) : modifiés sur le disque, absents de `git status`.
+pub fn hidden_changes(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let out = git_text(
+        host,
+        root,
+        &["ls-files", "-v"],
+        "fichiers masqués à git inconnus, jamais traités comme absents",
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|line| {
+            let tag = line.chars().next()?;
+            (tag == 'S' || tag.is_ascii_lowercase()).then(|| {
+                format!(
+                    "masqué à git ({tag}) {}",
+                    line.get(2..).unwrap_or("").trim_end()
+                )
+            })
+        })
+        .collect())
+}
+
+/// Tout ce qui sépare l'arbre de `HEAD` pour la construction : fichiers suivis modifiés, fichiers non
+/// suivis des entrées de la construction, fichiers masqués à git. Vide = l'arbre est le commit.
+pub fn tree_problems(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let mut problems = tracked_changes(host, root)?;
+    problems.extend(untracked_inputs(host, root)?);
+    problems.extend(ignored_inputs(host, root)?);
+    problems.extend(hidden_changes(host, root)?);
+    Ok(problems)
+}
+
+/// Le commit de `HEAD` (`git rev-parse HEAD`).
+pub fn head_commit(host: &dyn Host, root: &Path) -> Result<String, String> {
+    let out = git_text(
+        host,
+        root,
+        &["rev-parse", "HEAD"],
+        "commit en place inconnu",
+    )?;
+    let commit = out.trim().to_owned();
+    if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!(
+            "git rev-parse HEAD a rendu « {commit} » : pas un commit"
+        ));
+    }
+    Ok(commit)
+}
+
+/// Refuse un arbre qui n'est pas son commit (HRT-60) : fichier suivi modifié (indexé ou non), fichier non
+/// suivi dans les entrées de la construction, fichier masqué à git. Les autres fichiers non suivis sont
+/// tolérés. Contrôle fait AU MOMENT de l'assemblage ou du dépôt : il ne prouve pas que le binaire donné
+/// sort de ce commit (c'est l'enregistrement de construction, `check_agent_build`). Rend le commit en
+/// place, lu une seule fois.
+pub fn check_clean_tree(host: &dyn Host, root: &Path) -> Result<String, String> {
+    let problems = tree_problems(host, root)?;
+    if !problems.is_empty() {
+        let shown = problems
+            .iter()
+            .take(DIRTY_LIST_MAX)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ; ");
+        let more = match problems.len().saturating_sub(DIRTY_LIST_MAX) {
+            0 => String::new(),
+            n => format!(" ; et {n} autre(s)"),
+        };
+        return Err(format!(
+            "l'arbre de travail n'est pas le commit en place ({shown}{more}) : committe ou supprime ces fichiers (git stash -u pour les non suivis), retire skip-worktree et assume-unchanged, reconstruis l'agent, puis relance. Un binaire signé doit sortir du commit exact qui sera étiqueté"
+        ));
+    }
+    head_commit(host, root)
+}
+
+/// Refuse un binaire d'agent qui ne sort pas du commit assemblé (HRT-60) : `record` est le texte de
+/// `<binaire>.build`, écrit par `cargo xtask agent` après une construction réussie (voir `agent.rs`).
+/// Somme, commit et état de l'arbre doivent correspondre. Fichier en clair, falsifiable à la main :
+/// une garde contre l'erreur, pas contre la malveillance.
+pub fn check_agent_build(record: &str, agent: &[u8], head: &str) -> Result<(), String> {
+    let record = crate::agent::BuildRecord::parse(record)?;
+    let sha = sha256_hex(agent);
+    if record.sha256 != sha {
+        return Err(format!(
+            "le binaire de l'agent (sha256 {sha}) n'est pas celui que cargo xtask agent a construit (sha256 {}) : reconstruis-le et signe-le de nouveau",
+            record.sha256
+        ));
+    }
+    if record.commit != head {
+        return Err(format!(
+            "le binaire de l'agent a été construit sur le commit {} et HEAD est {head} : reviens sur {} ou reconstruis l'agent ici",
+            record.commit, record.commit
+        ));
+    }
+    if record.tree != "clean" {
+        return Err(format!(
+            "le binaire de l'agent a été construit sur un arbre « {} » (pas propre, ou état inconnu) : reconstruis-le sur un arbre propre et signe-le de nouveau",
+            record.tree
+        ));
+    }
+    Ok(())
+}
+
+/// Écrit le commit assemblé à côté de `releases/` (jamais déposé).
+pub fn write_stage_commit(dir: &Path, commit: &str) -> Result<(), String> {
+    let path = dir.join(COMMIT_FILE);
+    std::fs::write(&path, format!("{commit}\n"))
+        .map_err(|error| format!("{} : {error}", path.display()))
+}
+
+/// Relit le commit enregistré par `release-stage`. Absent ou illisible : refus (on ne devine pas).
+pub fn read_stage_commit(dir: &Path) -> Result<String, String> {
+    let path = dir.join(COMMIT_FILE);
+    let text = std::fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "{} illisible ({error}) : le commit assemblé est inconnu, relance cargo xtask release-stage",
+            path.display()
+        )
+    })?;
+    let commit = text.trim().to_owned();
+    if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!(
+            "{} ne contient pas un commit : relance cargo xtask release-stage",
+            path.display()
+        ));
+    }
+    Ok(commit)
+}
+
+/// Avant tout dépôt (essai à blanc compris) : l'arbre est propre ET son commit est celui qui a été
+/// assemblé. Seul `git` en lecture est lancé, jamais `aws` ni `curl`. Rend le commit.
+pub fn check_stage_commit(
+    host: &dyn Host,
+    root: &Path,
+    recorded: Result<String, String>,
+) -> Result<String, String> {
+    let recorded = recorded?;
+    let current = check_clean_tree(host, root)?;
+    if current != recorded {
+        return Err(format!(
+            "le commit en place ({current}) n'est pas celui qui a été assemblé ({recorded}) : reviens sur {recorded} (git checkout), ou relance cargo xtask release-stage ici"
+        ));
+    }
+    Ok(current)
+}
+
 /// Sans `--install-script`, le script déposé est `deploy/install.sh` du dépôt : il ne doit pas différer
 /// de `HEAD` (modifié, indexé ou non suivi). Commandes git en lecture seule, via l'exécuteur injecté.
 /// Rend le commit de `HEAD`, que l'appelant affiche.
 pub fn check_script_is_committed(host: &dyn Host, root: &Path) -> Result<String, String> {
-    let root_text = root.to_string_lossy().into_owned();
     let git = |list: &[&str]| -> Result<String, String> {
-        let mut argv = vec!["-C".to_owned(), root_text.clone()];
-        argv.extend(list.iter().map(|arg| (*arg).to_owned()));
-        let output = host.run(&Call::new("git", &argv))?;
-        if output.success {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        } else {
-            Err(format!(
-                "git {} a échoué ({}) : impossible de vérifier deploy/install.sh",
-                list.join(" "),
-                output.stderr.chars().take(200).collect::<String>()
-            ))
-        }
+        git_text(host, root, list, "impossible de vérifier deploy/install.sh")
+            .map(|text| text.trim().to_owned())
     };
     let status = git(&["status", "--porcelain", "--", "deploy/install.sh"])?;
     if !status.is_empty() {
@@ -376,30 +613,34 @@ pub fn check_script_is_committed(host: &dyn Host, root: &Path) -> Result<String,
 
 /// Les octets de `deploy/install.sh` tels que dans `HEAD` (`git show`, lecture seule) : le fichier du
 /// commit affiché, pas celui du disque (`skip-worktree`, lecture décalée).
-fn committed_script_bytes(host: &dyn Host, root: &Path) -> Result<Vec<u8>, String> {
+fn committed_script_bytes(host: &dyn Host, root: &Path, commit: &str) -> Result<Vec<u8>, String> {
+    let spec = format!("{commit}:deploy/install.sh");
     let argv = vec![
         "-C".to_owned(),
         root.to_string_lossy().into_owned(),
         "show".to_owned(),
-        "HEAD:deploy/install.sh".to_owned(),
+        spec.clone(),
     ];
-    let output = host.run(&Call::new("git", &argv))?;
+    let env = [("GIT_OPTIONAL_LOCKS", "0")];
+    let output = host.run(&Call::new("git", &argv).env(&env))?;
     if output.success {
         Ok(output.stdout)
     } else {
         Err(format!(
-            "git show HEAD:deploy/install.sh a échoué ({}) : impossible de lire le script du commit",
+            "git show {spec} a échoué ({}) : impossible de lire le script du commit",
             output.stderr.chars().take(200).collect::<String>()
         ))
     }
 }
 
+/// `expected_commit` est le commit déjà lu par `check_clean_tree` : le script est celui du même `HEAD`.
 /// Choisit les octets du script à déposer et la ligne qui le dit. Sans option, ou si l'option désigne
 /// `deploy/install.sh` du dépôt (comparaison après `canonicalize`), le script doit être celui de `HEAD`
 /// et ce sont les octets de `HEAD` qui partent. Tout autre fichier est lu sur le disque, non comparé.
 pub fn select_install_script(
     host: &dyn Host,
     root: &Path,
+    expected_commit: &str,
     given: Option<&str>,
     read: &dyn Fn(&Path) -> Result<Vec<u8>, String>,
     canonical: &dyn Fn(&Path) -> Option<std::path::PathBuf>,
@@ -417,7 +658,12 @@ pub fn select_install_script(
         ));
     }
     let commit = check_script_is_committed(host, root)?;
-    let bytes = committed_script_bytes(host, root)?;
+    if commit != expected_commit {
+        return Err(format!(
+            "HEAD a changé pendant l'assemblage ({expected_commit} puis {commit}) : relance cargo xtask release-stage"
+        ));
+    }
+    let bytes = committed_script_bytes(host, root, &commit)?;
     Ok((
         bytes,
         format!("script : deploy/install.sh tel que dans le commit {commit}"),
@@ -603,6 +849,10 @@ fn visit(dir: &Path, relative: &str, files: &mut Files) -> Result<(), String> {
             .file_name()
             .into_string()
             .map_err(|_| format!("{} : nom illisible", dir.display()))?;
+        if relative.is_empty() && name == COMMIT_FILE {
+            // Le commit enregistré n'est pas un objet du bucket : `read_stage_commit` le lit à part.
+            continue;
+        }
         let key = if relative.is_empty() {
             name
         } else {
@@ -634,6 +884,11 @@ pub fn write_stage_dir(dir: &Path, files: &Files) -> Result<(), String> {
     if releases.exists() {
         std::fs::remove_dir_all(&releases)
             .map_err(|error| format!("{} : {error}", releases.display()))?;
+    }
+    // Un commit enregistré par un assemblage précédent ne survit pas à celui-ci.
+    let commit = dir.join(COMMIT_FILE);
+    if commit.exists() {
+        std::fs::remove_file(&commit).map_err(|error| format!("{} : {error}", commit.display()))?;
     }
     for (key, bytes) in files {
         let path = key
@@ -673,6 +928,20 @@ pub const STAGE_DIR: &str = "target/release-stage";
 
 /// `cargo xtask release-stage --client-dir D --agent-binary F --agent-signature S [--install-script P]`.
 pub fn run_stage(args: &[String]) -> Result<(), String> {
+    stage_with(&System::new(), &root()?, args, &mut |line| {
+        println!("{line}")
+    })
+}
+
+/// Le corps de `release-stage`, avec l'exécuteur et la racine injectés (les tests y branchent un faux
+/// git et un dossier jetable). L'ordre est la promesse : drapeaux, arbre propre, lectures, vérifications,
+/// et seulement alors la première écriture.
+pub fn stage_with(
+    host: &dyn Host,
+    root: &Path,
+    args: &[String],
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
     check_flags(
         args,
         &[
@@ -683,7 +952,11 @@ pub fn run_stage(args: &[String]) -> Result<(), String> {
         ],
         &[],
     )?;
-    let root = root()?;
+    // Avant toute lecture et toute écriture : un arbre qui n'est pas son commit ne s'assemble pas (HRT-60).
+    let commit = check_clean_tree(host, root)?;
+    say(format!(
+        "arbre propre (fichiers suivis, entrées de la construction), commit en place : {commit}"
+    ));
     let read_text = |path: &Path| {
         std::fs::read_to_string(path).map_err(|error| format!("{} : {error}", path.display()))
     };
@@ -699,17 +972,27 @@ pub fn run_stage(args: &[String]) -> Result<(), String> {
     let installer_signature = read_text(&client_dir.join(format!("{installer_name}.sig")))?;
     let latest_json = read_text(&client_dir.join("latest.json"))?;
     let notes = read_text(&client_dir.join("notes.txt"))?;
-    let agent = read_bytes(Path::new(&required(args, "--agent-binary")?))?;
+    let agent_path = required(args, "--agent-binary")?;
+    let agent = read_bytes(Path::new(&agent_path))?;
+    // Le binaire doit sortir de ce commit : l'enregistrement de `cargo xtask agent`, à côté de lui.
+    let record_path = crate::agent::record_path(Path::new(&agent_path));
+    let record = read_text(&record_path).map_err(|error| {
+        format!(
+            "enregistrement de construction de l'agent absent ou illisible ({error}) : reconstruis l'agent avec cargo xtask agent sur ce commit, puis signe-le"
+        )
+    })?;
+    check_agent_build(&record, &agent, &commit)?;
     let agent_signature = read_text(Path::new(&required(args, "--agent-signature")?))?;
     let given = option(args, "--install-script");
     let (install_script, script_note) = select_install_script(
-        &System::new(),
-        &root,
+        host,
+        root,
+        &commit,
         given.as_deref(),
         &|path| read_bytes(path),
         &|path| std::fs::canonicalize(path).ok(),
     )?;
-    println!("{script_note}");
+    say(script_note);
     let client_key = read_text(&root.join("apps/desktop/src-tauri/update-key.pub"))?;
     let agent_key = read_text(&root.join("crates/hearth-agent/update-key.pub"))?;
 
@@ -728,14 +1011,20 @@ pub fn run_stage(args: &[String]) -> Result<(), String> {
     })?;
     let stage = root.join(STAGE_DIR);
     write_stage_dir(&stage, &files)?;
-    println!(
-        "version {version} assemblée et revérifiée (signatures du client et de l'agent, sommes, adresses, liste fermée) sous {STAGE_DIR}/ :"
-    );
+    write_stage_commit(&stage, &commit)?;
+    say(format!(
+        "version {version} assemblée et revérifiée (signatures du client et de l'agent, sommes, adresses, liste fermée, binaire de l'agent construit sur ce commit) sous {STAGE_DIR}/ :"
+    ));
     for (key, bytes) in &files {
-        println!("  {key}  {}  {} octets", sha256_hex(bytes), bytes.len());
+        say(format!(
+            "  {key}  {}  {} octets",
+            sha256_hex(bytes),
+            bytes.len()
+        ));
     }
-    println!(
+    say(
         "suite : cargo xtask release-upload (essai à blanc), puis cargo xtask release-upload --confirm"
+            .to_owned(),
     );
     Ok(())
 }
@@ -880,12 +1169,107 @@ pub mod fixtures {
     pub fn verify(files: &Files) -> Result<String, String> {
         verify_stage(files, &keys().client_public, &keys().agent_public, CARGO)
     }
+
+    /// Faux git pour l'état de l'arbre (HRT-60). Répond à `status`, à `ls-files --others` (`untracked`),
+    /// à `ls-files -v` (`hidden`), à `rev-parse HEAD` et à `show`, et enregistre chaque appel et chaque
+    /// programme lancé (un programme autre que git, `aws` ou `curl`, y est visible).
+    pub struct TreeFake {
+        pub status: String,
+        pub status_fails: bool,
+        pub head: String,
+        pub head_fails: bool,
+        pub untracked: String,
+        pub ignored: String,
+        pub hidden: String,
+        pub cannot_launch: bool,
+        pub show: Vec<u8>,
+        pub calls: std::cell::RefCell<Vec<Vec<String>>>,
+        pub programs: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl TreeFake {
+        pub fn new(status: &str, head: &str) -> Self {
+            Self {
+                status: status.to_owned(),
+                status_fails: false,
+                head: head.to_owned(),
+                head_fails: false,
+                untracked: String::new(),
+                ignored: String::new(),
+                hidden: String::new(),
+                cannot_launch: false,
+                show: SCRIPT.to_vec(),
+                calls: Default::default(),
+                programs: Default::default(),
+            }
+        }
+
+        pub fn only_git_ran(&self) -> bool {
+            self.programs.borrow().iter().all(|p| p == "git")
+        }
+    }
+
+    impl Host for TreeFake {
+        fn run(&self, call: &Call) -> Result<crate::host::CmdOutput, String> {
+            self.programs.borrow_mut().push(call.program.to_owned());
+            if self.cannot_launch {
+                return Err("« git » est introuvable".to_owned());
+            }
+            let ok = |stdout: Vec<u8>| crate::host::CmdOutput {
+                success: true,
+                code: Some(0),
+                stdout,
+                stderr: String::new(),
+            };
+            if call.program != "git" {
+                return Ok(ok(Vec::new()));
+            }
+            self.calls.borrow_mut().push(call.args.to_vec());
+            let has = |word: &str| call.args.iter().any(|arg| arg == word);
+            let (fails, out): (bool, Vec<u8>) = if has("status") {
+                (self.status_fails, format!("{}\n", self.status).into_bytes())
+            } else if has("ls-files") && has("--ignored") {
+                (false, format!("{}\n", self.ignored).into_bytes())
+            } else if has("ls-files") && has("--others") {
+                (false, format!("{}\n", self.untracked).into_bytes())
+            } else if has("ls-files") {
+                (false, format!("{}\n", self.hidden).into_bytes())
+            } else if has("rev-parse") {
+                (self.head_fails, format!("{}\n", self.head).into_bytes())
+            } else if has("show") {
+                (false, self.show.clone())
+            } else {
+                panic!("appel git inattendu : {:?}", call.args)
+            };
+            Ok(crate::host::CmdOutput {
+                success: !fails,
+                code: Some(if fails { 128 } else { 0 }),
+                stdout: if fails { Vec::new() } else { out },
+                stderr: if fails {
+                    "fatal: boum".to_owned()
+                } else {
+                    String::new()
+                },
+            })
+        }
+        fn elapsed(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+        fn sleep(&self, _: std::time::Duration) {}
+    }
+
+    /// Un dossier jetable sous les racines que `test-tmp-check` surveille ; à supprimer en fin de test.
+    pub fn tmp_dir(name: &str) -> std::path::PathBuf {
+        let exe = std::env::current_exe().unwrap();
+        crate::test_tmp::tmp_root::roots_for(&exe)[0].join(format!("{name}-{}", std::process::id()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::fixtures::*;
     use super::*;
+    use std::path::PathBuf;
 
     fn key(name: &str) -> String {
         version_key(VERSION, name)
@@ -1203,7 +1587,8 @@ mod tests {
             calls: Default::default(),
         };
         let (bytes, note) =
-            select_install_script(&fake, Path::new("depot"), None, &disk, &canon).unwrap();
+            select_install_script(&fake, Path::new("depot"), "abc1234def", None, &disk, &canon)
+                .unwrap();
         assert_eq!(bytes, COMMITTED_SCRIPT);
         assert!(
             note.contains("abc1234def") && note.contains("commit"),
@@ -1213,7 +1598,7 @@ mod tests {
             fake.calls
                 .borrow()
                 .iter()
-                .any(|call| call[2..] == ["show", "HEAD:deploy/install.sh"])
+                .any(|call| call[2..] == ["show", "abc1234def:deploy/install.sh"])
         );
     }
 
@@ -1226,6 +1611,7 @@ mod tests {
         let error = select_install_script(
             &dirty,
             Path::new("depot"),
+            "abc1234def",
             Some("deploy/install.sh"),
             &disk,
             &canon,
@@ -1239,6 +1625,7 @@ mod tests {
         let (bytes, _) = select_install_script(
             &clean,
             Path::new("depot"),
+            "abc1234def",
             Some("deploy/install.sh"),
             &disk,
             &canon,
@@ -1253,9 +1640,15 @@ mod tests {
             status: " M deploy/install.sh",
             calls: Default::default(),
         };
-        let (bytes, note) =
-            select_install_script(&fake, Path::new("depot"), Some("autre.sh"), &disk, &canon)
-                .unwrap();
+        let (bytes, note) = select_install_script(
+            &fake,
+            Path::new("depot"),
+            "abc1234def",
+            Some("autre.sh"),
+            &disk,
+            &canon,
+        )
+        .unwrap();
         assert!(String::from_utf8_lossy(&bytes).contains("disque"));
         assert!(note.contains("non comparé à HEAD"), "{note}");
         assert!(fake.calls.borrow().is_empty(), "aucun appel git");
@@ -1270,7 +1663,13 @@ mod tests {
                 Ok(crate::host::CmdOutput {
                     success: !shown,
                     code: Some(if shown { 128 } else { 0 }),
-                    stdout: b"\n".to_vec(),
+                    stdout: if call.args.iter().any(|arg| arg == "rev-parse") {
+                        b"abc1234def
+"
+                        .to_vec()
+                    } else {
+                        Vec::new()
+                    },
                     stderr: "fatal: path not in HEAD".to_owned(),
                 })
             }
@@ -1279,8 +1678,15 @@ mod tests {
             }
             fn sleep(&self, _: std::time::Duration) {}
         }
-        let error =
-            select_install_script(&NoShow, Path::new("depot"), None, &disk, &canon).unwrap_err();
+        let error = select_install_script(
+            &NoShow,
+            Path::new("depot"),
+            "abc1234def",
+            None,
+            &disk,
+            &canon,
+        )
+        .unwrap_err();
         assert!(error.contains("git show"), "{error}");
     }
 
@@ -1556,5 +1962,431 @@ mod tests {
         assert!(check_flags(&args(&["--confirm"]), &["--stage-dir"], &["--confirm"]).is_ok());
         assert!(check_flags(&args(&["--confirmer"]), &["--stage-dir"], &["--confirm"]).is_err());
         assert!(check_flags(&args(&["--stage-dir"]), &["--stage-dir"], &[]).is_err());
+    }
+
+    #[test]
+    fn a_clean_tree_is_accepted_and_its_commit_returned_with_read_only_calls() {
+        let fake = TreeFake::new("", "abc1234def");
+        assert_eq!(
+            check_clean_tree(&fake, Path::new("depot")).unwrap(),
+            "abc1234def"
+        );
+        let calls = fake.calls.borrow();
+        assert_eq!(calls.len(), 5, "{calls:?}");
+        assert_eq!(
+            calls[0][2..],
+            ["status", "--porcelain", "--untracked-files=no"]
+        );
+        assert_eq!(calls[1][2..4], ["ls-files", "--others"]);
+        assert_eq!(calls[2][2..5], ["ls-files", "--others", "--ignored"]);
+        assert_eq!(calls[3][2..], ["ls-files", "-v"]);
+        assert_eq!(calls[4][2..], ["rev-parse", "HEAD"]);
+        assert!(fake.only_git_ran());
+    }
+
+    #[test]
+    fn a_tracked_change_staged_or_not_is_refused_and_names_the_files() {
+        for status in [
+            "M  Cargo.toml",
+            " M Cargo.toml",
+            "MM Cargo.toml",
+            " D crates/hearth-agent/update-key.pub",
+            "A  nouveau.rs",
+        ] {
+            let fake = TreeFake::new(status, "abc1234def");
+            let error = check_clean_tree(&fake, Path::new("depot")).unwrap_err();
+            let file = status.split(' ').next_back().unwrap();
+            assert!(
+                error.contains(file) && error.contains("committe") && error.contains("stash -u"),
+                "{status} : {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_list_of_changed_files_is_bounded() {
+        let status = (0..25)
+            .map(|n| format!(" M f{n:02}.rs"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let error = check_clean_tree(&TreeFake::new(&status, "abc"), Path::new("d")).unwrap_err();
+        assert!(
+            error.contains("f09.rs") && !error.contains("f10.rs"),
+            "{error}"
+        );
+        assert!(error.contains("et 15 autre(s)"), "{error}");
+    }
+
+    #[test]
+    fn a_git_that_fails_is_never_read_as_a_clean_tree() {
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.status_fails = true;
+        let error = check_clean_tree(&fake, Path::new("depot")).unwrap_err();
+        assert!(error.contains("jamais traité comme propre"), "{error}");
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.head_fails = true;
+        assert!(check_clean_tree(&fake, Path::new("depot")).is_err());
+        let fake = TreeFake::new("", "pas un commit");
+        assert!(check_clean_tree(&fake, Path::new("depot")).is_err());
+    }
+
+    #[test]
+    fn the_commit_record_is_read_back_and_is_not_part_of_the_deposited_files() {
+        let exe = std::env::current_exe().unwrap();
+        let base = crate::test_tmp::tmp_root::roots_for(&exe)[0]
+            .join(format!("release_stage_commit-{}", std::process::id()));
+        let files = Fixture::new().staged();
+        let outcome = (|| {
+            write_stage_dir(&base, &files)?;
+            write_stage_commit(&base, "abc1234def")?;
+            let commit = read_stage_commit(&base)?;
+            let read = read_stage_dir(&base)?;
+            // Un nouvel assemblage efface l'ancien commit.
+            write_stage_dir(&base, &files)?;
+            let after = read_stage_commit(&base);
+            Ok::<_, String>((commit, read, after))
+        })();
+        let _ = std::fs::remove_dir_all(&base);
+        let (commit, read, after) = outcome.unwrap();
+        assert_eq!(commit, "abc1234def");
+        assert_eq!(read, files, "COMMIT n'est pas un fichier de la version");
+        assert!(verify(&read).is_ok());
+        assert!(after.is_err());
+    }
+
+    #[test]
+    fn an_upload_on_another_commit_or_without_record_or_on_a_dirty_tree_is_refused() {
+        let root = Path::new("depot");
+        let same = TreeFake::new("", "abc1234def");
+        assert_eq!(
+            check_stage_commit(&same, root, Ok("abc1234def".to_owned())).unwrap(),
+            "abc1234def"
+        );
+        let other = TreeFake::new("", "fff9999aaa");
+        let error = check_stage_commit(&other, root, Ok("abc1234def".to_owned())).unwrap_err();
+        assert!(
+            error.contains("fff9999aaa") && error.contains("abc1234def"),
+            "{error}"
+        );
+        let missing = Err("COMMIT illisible".to_owned());
+        let fake = TreeFake::new("", "abc1234def");
+        assert!(check_stage_commit(&fake, root, missing).is_err());
+        assert!(
+            fake.calls.borrow().is_empty(),
+            "rien n'est lancé sans enregistrement"
+        );
+        let dirty = TreeFake::new(" M Cargo.toml", "abc1234def");
+        let error = check_stage_commit(&dirty, root, Ok("abc1234def".to_owned())).unwrap_err();
+        assert!(error.contains("Cargo.toml"), "{error}");
+        let mut broken = TreeFake::new("", "abc1234def");
+        broken.status_fails = true;
+        assert!(check_stage_commit(&broken, root, Ok("abc1234def".to_owned())).is_err());
+    }
+
+    #[test]
+    fn a_missing_or_garbled_record_file_is_an_error() {
+        let exe = std::env::current_exe().unwrap();
+        let base = crate::test_tmp::tmp_root::roots_for(&exe)[0]
+            .join(format!("release_stage_commit_bad-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let missing = read_stage_commit(&base);
+        std::fs::write(base.join(COMMIT_FILE), "n'importe quoi\n").unwrap();
+        let garbled = read_stage_commit(&base);
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(missing.is_err() && garbled.is_err());
+    }
+
+    #[test]
+    fn an_untracked_file_among_the_build_inputs_is_refused_and_named() {
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.untracked = "crates/hearth-agent/migrations/0005_x.sql".to_owned();
+        let error = check_clean_tree(&fake, Path::new("depot")).unwrap_err();
+        assert!(
+            error.contains("crates/hearth-agent/migrations/0005_x.sql")
+                && error.contains("non suivi")
+                && error.contains("stash -u"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn the_untracked_check_is_limited_to_the_build_inputs_and_honours_gitignore() {
+        let fake = TreeFake::new("", "abc1234def");
+        check_clean_tree(&fake, Path::new("depot")).unwrap();
+        let calls = fake.calls.borrow();
+        let call = &calls[1];
+        assert_eq!(
+            call[2..],
+            [
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "Cargo.toml",
+                "Cargo.lock",
+                "rust-toolchain.toml",
+                ".cargo",
+                ".sqlx",
+                "crates"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_ignored_file_among_the_build_inputs_is_refused_and_named() {
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.ignored = "crates/hearth-agent/migrations/0005_essai.sql".to_owned();
+        let error = check_clean_tree(&fake, Path::new("depot")).unwrap_err();
+        assert!(
+            error.contains("ignoré crates/hearth-agent/migrations/0005_essai.sql"),
+            "{error}"
+        );
+        let calls = fake.calls.borrow();
+        let call = calls
+            .iter()
+            .find(|c| c.contains(&"--ignored".to_owned()))
+            .unwrap();
+        assert!(
+            call.contains(&"--exclude-standard".to_owned())
+                && call.ends_with(&["crates".to_owned()])
+        );
+    }
+
+    #[test]
+    fn a_file_hidden_from_git_is_refused() {
+        for hidden in ["S crates/hearth-agent/src/lib.rs", "h Cargo.lock"] {
+            let mut fake = TreeFake::new("", "abc1234def");
+            fake.hidden = format!("H Cargo.toml\n{hidden}");
+            let error = check_clean_tree(&fake, Path::new("depot")).unwrap_err();
+            let file = hidden.split(' ').next_back().unwrap();
+            assert!(
+                error.contains(file) && error.contains("masqué") && !error.contains("H Cargo"),
+                "{hidden} : {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn git_is_asked_without_optional_locks() {
+        struct Env(std::cell::RefCell<Vec<bool>>);
+        impl Host for Env {
+            fn run(&self, call: &Call) -> Result<crate::host::CmdOutput, String> {
+                self.0
+                    .borrow_mut()
+                    .push(call.env.contains(&("GIT_OPTIONAL_LOCKS", "0")));
+                Ok(crate::host::CmdOutput {
+                    success: true,
+                    code: Some(0),
+                    stdout: if call.args.iter().any(|arg| arg == "rev-parse") {
+                        b"abc
+"
+                        .to_vec()
+                    } else {
+                        Vec::new()
+                    },
+                    stderr: String::new(),
+                })
+            }
+            fn elapsed(&self) -> std::time::Duration {
+                std::time::Duration::ZERO
+            }
+            fn sleep(&self, _: std::time::Duration) {}
+        }
+        let env = Env(Default::default());
+        check_clean_tree(&env, Path::new("depot")).unwrap();
+        let seen = env.0.borrow();
+        assert_eq!(seen.len(), 5);
+        assert!(seen.iter().all(|locked| *locked));
+    }
+
+    #[test]
+    fn the_script_of_another_head_is_refused() {
+        let fake = GitFake {
+            status: "",
+            calls: Default::default(),
+        };
+        let error =
+            select_install_script(&fake, Path::new("depot"), "fff0000", None, &disk, &canon)
+                .unwrap_err();
+        assert!(error.contains("HEAD a changé"), "{error}");
+    }
+
+    fn record_for(agent: &[u8], commit: &str, tree: &str) -> String {
+        crate::agent::BuildRecord {
+            commit: commit.to_owned(),
+            tree: tree.to_owned(),
+            sha256: sha256_hex(agent),
+            version: VERSION.to_owned(),
+        }
+        .render()
+    }
+
+    #[test]
+    fn an_agent_binary_needs_a_matching_build_record() {
+        let agent = b"agent";
+        let good = record_for(agent, "abc1234def", "clean");
+        assert!(check_agent_build(&good, agent, "abc1234def").is_ok());
+        // autre fichier que celui construit
+        assert!(
+            check_agent_build(&good, b"autre", "abc1234def")
+                .unwrap_err()
+                .contains("pas celui que cargo xtask agent a construit")
+        );
+        // autre commit
+        assert!(
+            check_agent_build(&good, agent, "fff0000")
+                .unwrap_err()
+                .contains("construit sur le commit abc1234def")
+        );
+        // arbre pas propre ou inconnu
+        for tree in ["dirty", "unknown"] {
+            let record = record_for(agent, "abc1234def", tree);
+            assert!(
+                check_agent_build(&record, agent, "abc1234def")
+                    .unwrap_err()
+                    .contains(tree)
+            );
+        }
+        // illisible
+        assert!(check_agent_build("n'importe quoi", agent, "abc1234def").is_err());
+    }
+
+    fn stage_args(client: &Path, agent: &Path, signature: &Path) -> Vec<String> {
+        [
+            "--client-dir",
+            &client.to_string_lossy(),
+            "--agent-binary",
+            &agent.to_string_lossy(),
+            "--agent-signature",
+            &signature.to_string_lossy(),
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+    }
+
+    #[test]
+    fn the_stage_refuses_a_tree_that_is_not_its_commit_before_writing_anything() {
+        let root = tmp_dir("stage_guard");
+        std::fs::create_dir_all(&root).unwrap();
+        let args = stage_args(&root.join("c"), &root.join("a"), &root.join("s"));
+        let mut cases = Vec::new();
+        cases.push(("README.md", TreeFake::new(" M README.md", "abc1234def")));
+        let mut untracked = TreeFake::new("", "abc1234def");
+        untracked.untracked = "crates/hearth-agent/migrations/0005_x.sql".to_owned();
+        cases.push(("0005_x.sql", untracked));
+        let mut hidden = TreeFake::new("", "abc1234def");
+        hidden.hidden = "S Cargo.lock".to_owned();
+        cases.push(("Cargo.lock", hidden));
+        let mut broken = TreeFake::new("", "abc1234def");
+        broken.status_fails = true;
+        cases.push(("jamais traité comme propre", broken));
+        for (expected, fake) in cases {
+            let error = stage_with(&fake, &root, &args, &mut |_| {}).unwrap_err();
+            assert!(error.contains(expected), "{expected} : {error}");
+            assert!(!root.join(STAGE_DIR).exists(), "rien n'est écrit");
+            assert!(fake.only_git_ran());
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Un dépôt jetable avec les entrées d'une version correcte, le dossier du client, l'agent, sa
+    /// signature et son enregistrement de construction. Rend (racine, arguments, chemin de l'agent).
+    fn staged_repo(
+        name: &str,
+        record: impl Fn(&[u8]) -> String,
+    ) -> (PathBuf, Vec<String>, PathBuf) {
+        let root = tmp_dir(name);
+        let fixture = Fixture::new();
+        let write = |path: PathBuf, bytes: &[u8]| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        };
+        write(root.join("Cargo.toml"), CARGO.as_bytes());
+        write(
+            root.join("apps/desktop/src-tauri/update-key.pub"),
+            keys().client_public.as_bytes(),
+        );
+        write(
+            root.join("crates/hearth-agent/update-key.pub"),
+            keys().agent_public.as_bytes(),
+        );
+        let client = root.join("client");
+        let installer = installer_file_name(VERSION);
+        write(client.join(&installer), &fixture.installer);
+        write(
+            client.join(format!("{installer}.sig")),
+            fixture.installer_signature.as_bytes(),
+        );
+        write(client.join("latest.json"), fixture.latest_json.as_bytes());
+        write(client.join("notes.txt"), fixture.notes.as_bytes());
+        let agent = root.join("dist/hearth-agent");
+        write(agent.clone(), &fixture.agent);
+        write(
+            root.join("dist/hearth-agent.minisig"),
+            fixture.agent_signature.as_bytes(),
+        );
+        write(
+            crate::agent::record_path(&agent),
+            record(&fixture.agent).as_bytes(),
+        );
+        let args = stage_args(&client, &agent, &root.join("dist/hearth-agent.minisig"));
+        (root, args, agent)
+    }
+
+    #[test]
+    fn the_stage_of_a_clean_tree_with_a_matching_build_writes_the_commit_record() {
+        let (root, args, _) =
+            staged_repo("stage_ok", |agent| record_for(agent, "abc1234def", "clean"));
+        let fake = TreeFake::new("", "abc1234def");
+        let mut lines = Vec::new();
+        let outcome = stage_with(&fake, &root, &args, &mut |line| lines.push(line));
+        let commit = read_stage_commit(&root.join(STAGE_DIR));
+        let files = read_stage_dir(&root.join(STAGE_DIR));
+        let record_staged = files
+            .as_ref()
+            .map(|files| files.keys().any(|key| key.contains("build")))
+            .unwrap_or(true);
+        let _ = std::fs::remove_dir_all(&root);
+        outcome.unwrap();
+        assert_eq!(commit.unwrap(), "abc1234def");
+        assert!(verify(&files.unwrap()).is_ok());
+        assert!(
+            !record_staged,
+            "l'enregistrement de construction n'est jamais assemblé"
+        );
+        assert!(lines.iter().any(|line| line.contains("abc1234def")));
+    }
+
+    #[test]
+    fn the_stage_refuses_an_agent_without_a_matching_build_before_writing() {
+        type Case = (&'static str, fn(&[u8]) -> String);
+        let cases: [Case; 4] = [
+            ("construit sur le commit", |a| {
+                record_for(a, "fff0000", "clean")
+            }),
+            ("pas propre", |a| record_for(a, "abc1234def", "dirty")),
+            ("pas celui que cargo xtask agent a construit", |_| {
+                record_for(b"un autre binaire", "abc1234def", "clean")
+            }),
+            ("illisible", |_| "n'importe quoi".to_owned()),
+        ];
+        for (n, (expected, record)) in cases.into_iter().enumerate() {
+            let (root, args, agent) = staged_repo(&format!("stage_ko{n}"), record);
+            let fake = TreeFake::new("", "abc1234def");
+            let error = stage_with(&fake, &root, &args, &mut |_| {}).unwrap_err();
+            let written = root.join(STAGE_DIR).exists();
+            // Sans enregistrement du tout.
+            std::fs::remove_file(crate::agent::record_path(&agent)).unwrap();
+            let missing = stage_with(&fake, &root, &args, &mut |_| {}).unwrap_err();
+            let written_after = root.join(STAGE_DIR).exists();
+            let _ = std::fs::remove_dir_all(&root);
+            assert!(error.contains(expected), "{expected} : {error}");
+            assert!(
+                missing.contains("enregistrement de construction"),
+                "{missing}"
+            );
+            assert!(!written && !written_after, "rien n'est écrit");
+        }
     }
 }
