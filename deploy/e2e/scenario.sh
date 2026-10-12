@@ -306,7 +306,7 @@ point() { printf '%s\n' "$1" >"$POINTER"; }
 # $1 : le cas ; $2 (facultatif) : le message attendu au lieu de « mal formé ».
 pointer_refused() {
     : >/tmp/https.log
-    if run env HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
+    if run env HEARTH_BASE_URL="${ORIGIN:-$API}" sh /deploy/install.sh --yes; then
         die "install.sh devrait refuser le pointeur : $1"
     fi
     must_say "${2:-Le pointeur de la dernière version est mal formé}"
@@ -401,6 +401,89 @@ must_say "Installation réussie."
 "$INSTALLED" uninstall --purge --yes >/dev/null 2>&1 || die "purge après l'installation par le pointeur"
 nothing_left "après l'installation par le pointeur"
 ok "install.sh par défaut : pointeur valide, binaire téléchargé, somme vérifiée, installation réussie"
+
+# --------------------------------------------------------------------------------------------
+# Lecture du pointeur sans curl (HRT-59) : la branche `wget` de install.sh, jamais exercée sinon.
+# curl est caché le temps de la section (déplacé dans le conteneur jetable) puis rendu.
+# --------------------------------------------------------------------------------------------
+CURL_BIN="$(command -v curl)"
+valid_pointer() { point "9.9.9 $SUM 9.9.9/hearth-agent-linux-x86_64"; }
+# Installation complète puis purge, par l'origine $1.
+install_via() {
+    : >/tmp/https.log
+    run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_BASE_URL="$1" sh /deploy/install.sh --yes || die "l'installation par le pointeur ($2) a échoué"
+    must_say "Dernière version : 9.9.9"
+    must_say "Installation réussie."
+    grep -q '^/api/releases/9.9.9/hearth-agent-linux-x86_64' /tmp/https.log || die "le binaire n'a pas été téléchargé ($2)"
+    "$INSTALLED" uninstall --purge --yes >/dev/null 2>&1 || die "purge après l'installation par le pointeur ($2)"
+    nothing_left "après l'installation par le pointeur ($2)"
+}
+# Corps de plus de 512 octets, plus long que ce que la lecture bornée garde.
+long_pointer() { { printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64 ' "$SUM"; head -c 100000 /dev/zero | tr '\0' 'a'; printf '\n'; } >"$POINTER"; }
+
+# Avec curl d'abord (corps en morceaux, sans longueur annoncée : curl avant 8.4 ne peut pas borner
+# sur la taille, c'est la mesure qui refuse).
+echo "== curl : $("$CURL_BIN" --version | head -n 1)"
+long_pointer
+ORIGIN="https://127.0.0.1:8445/chunked/api"
+pointer_refused "curl, corps en morceaux de 100 Ko sans longueur annoncée"
+valid_pointer
+install_via "$ORIGIN" "curl, corps en morceaux"
+unset ORIGIN
+ok "install.sh avec curl : pointeur servi en morceaux sans longueur annoncée, trop long refusé, valide accepté"
+
+mv "$CURL_BIN" "$CURL_BIN.hidden"
+command -v curl >/dev/null 2>&1 && die "curl devrait être caché"
+command -v wget >/dev/null 2>&1 || die "wget absent de l'image"
+echo "== wget seul : $(wget --version 2>&1 | head -n 1) (curl caché)"
+
+# 1. pointeur valide : installation complète, binaire compris.
+valid_pointer
+install_via "$API" "wget, pointeur valide"
+# 2. 404.
+rm -f "$POINTER"
+pointer_refused "wget, pointeur absent" "Le pointeur de la dernière version de l'agent est absent"
+# 3. trop long (600 octets, puis 100 Ko).
+{ printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64 ' "$SUM"; head -c 600 /dev/zero | tr '\0' 'a'; printf '\n'; } >"$POINTER"
+pointer_refused "wget, plus de 512 octets"
+long_pointer
+pointer_refused "wget, 100 Ko"
+# 4. redirections : vers HTTP refusée, vers HTTPS suivie.
+valid_pointer
+: >/tmp/https.log
+if run env HEARTH_BASE_URL=https://127.0.0.1:8445/redirhttp/api sh /deploy/install.sh --yes; then
+    die "wget : une redirection vers HTTP devrait être refusée"
+fi
+must_say "Le téléchargement n'a pas abouti. Relance l'installation."
+! grep -q '^/api/releases/9.9.9/' /tmp/https.log || die "wget : un binaire a été téléchargé après une redirection vers HTTP"
+nothing_left "wget, redirection vers HTTP"
+install_via "https://127.0.0.1:8445/redir/api" "wget, redirection vers HTTPS"
+# 5. corps en morceaux sans longueur annoncée : la borne est celle de `head -c`.
+ORIGIN="https://127.0.0.1:8445/chunked/api"
+long_pointer
+pointer_refused "wget, corps en morceaux de 100 Ko sans longueur annoncée"
+valid_pointer
+install_via "$ORIGIN" "wget, corps en morceaux"
+unset ORIGIN
+ok "install.sh avec wget seul (curl caché) : pointeur valide installé, 404, trop long, redirection vers HTTP refusée puis vers HTTPS suivie, corps en morceaux borné"
+
+# 6. BusyBox wget : n'est pas GNU Wget, le script le dit et ne lit rien.
+mkdir -p /tmp/bb
+ln -sf "$(command -v busybox)" /tmp/bb/wget
+echo "== busybox wget : $(/tmp/bb/wget --version 2>&1 | head -n 2 | tr '\n' ' ')"
+valid_pointer
+: >/tmp/https.log
+if run env PATH="/tmp/bb:$PATH" HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
+    die "install.sh avec BusyBox wget devrait s'arrêter"
+fi
+must_say "Ce wget n'est pas GNU Wget"
+[ ! -s /tmp/https.log ] || die "BusyBox wget : une requête est partie malgré le refus"
+nothing_left "BusyBox wget"
+ok "install.sh avec BusyBox wget : refusé clairement, aucune requête, rien d'écrit"
+
+mv "$CURL_BIN.hidden" "$CURL_BIN"
+command -v curl >/dev/null 2>&1 || die "curl devrait être rendu"
+valid_pointer
 
 # --------------------------------------------------------------------------------------------
 # Première installation : script lu depuis un tube, binaire téléchargé en HTTPS, somme publiée à côté

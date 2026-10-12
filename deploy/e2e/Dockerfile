@@ -6,7 +6,7 @@ FROM debian:12-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e36870
 ENV container=docker
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        systemd systemd-sysv dbus curl ca-certificates openssl netcat-openbsd python3 procps util-linux \
+        systemd systemd-sysv dbus curl wget busybox ca-certificates openssl netcat-openbsd python3 procps util-linux \
     && rm -rf /var/lib/apt/lists/* \
     # Les unités inutiles dans un conteneur ralentissent ou bloquent le démarrage.
     && rm -f /lib/systemd/system/multi-user.target.wants/* \
