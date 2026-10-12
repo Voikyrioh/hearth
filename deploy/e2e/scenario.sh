@@ -619,6 +619,26 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ "$SAMPLES" = 1 ] || die "aucun échantillon de mesures après 10 s : $(cat "$OUT.metrics")"
 ok "mesures : identité de la machine et échantillons (processeur, mémoire) servis par l'agent sous systemd"
+# HRT-61 : ce conteneur Debian n'a AUCUN moteur de conteneurs. L'agent l'annonce (capacité `services`),
+# dit « absent » avec une liste vide, sans rien d'écrit dans le moteur, sans erreur bruyante dans son
+# journal et sans sonder en boucle serrée.
+hello | grep -q '"capabilities":\["services"\]' || die "/hello n'annonce pas la capacité services : $(hello)"
+ENGINE_STATE=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    authed "$BASE/services" >"$OUT.services"
+    if grep -Eq '"state": *"absent"' "$OUT.services"; then ENGINE_STATE=absent; break; fi
+    sleep 1
+done
+[ "$ENGINE_STATE" = absent ] || die "aucun moteur : l'état « absent » est attendu, reçu : $(cat "$OUT.services")"
+grep -Eq '"services": *\[ *\]' "$OUT.services" || die "aucun moteur : la liste des services devrait être vide : $(cat "$OUT.services")"
+[ ! -e /var/run/docker.sock ] || die "ce conteneur ne devrait pas avoir de socket de moteur"
+authed -X POST "$BASE/engine/recheck" | grep -Eq '"state": *"absent"' || die "POST /engine/recheck : l'état « absent » est attendu"
+sleep 6
+if journalctl -u hearth-agent --no-pager 2>/dev/null | grep -Ei 'docker|conteneur|engine|moteur' | grep -Eiq 'warn|error|erreur'; then
+    die "aucun moteur : l'agent ne doit rien dire de bruyant"
+fi
+[ "$(systemctl is-active hearth-agent)" = active ] || die "l'agent est tombé faute de moteur"
+ok "aucun moteur de conteneurs : capacité annoncée, état « absent », liste vide, relance de la détection sans erreur, journal silencieux, agent actif"
 [ "$(served_fingerprint)" = "$FIRST_FP" ] || die "l'empreinte affichée ($FIRST_FP) n'est pas celle du certificat servi ($(served_fingerprint))"
 ok "l'empreinte affichée est celle du certificat servi"
 
