@@ -171,8 +171,11 @@ pub enum TagLookup {
     Absent,
 }
 
-/// Garde contre une seconde signature du même numéro : un numéro publié est brûlé, jamais réutilisé
-/// (conception de la distribution, 8.2). Refuse si l'étiquette `v{version}` existe déjà sur le dépôt
+/// Garde contre la resignature d'un numéro déjà étiqueté : un numéro étiqueté est brûlé, jamais
+/// resigné (conception de la distribution, 8.2). L'étiquette n'est posée qu'à la fin, à la main :
+/// entre la signature et l'étiquette (ou après un essai qui signe puis échoue) rien n'empêche de
+/// relancer, cette fenêtre n'est PAS couverte (le refus de `release-upload` sur une version déjà
+/// déposée la fermera, HRT-51). Refuse si l'étiquette `v{version}` existe déjà sur le dépôt
 /// distant. `lookup` interroge le dépôt (`git ls-remote`, lecture seule) : injectée pour les tests.
 /// Une interrogation impossible (réseau coupé) refuse aussi : sans réponse on ne sait pas.
 pub fn check_tag_is_free(
@@ -188,7 +191,7 @@ pub fn check_tag_is_free(
     })? {
         TagLookup::Absent => Ok(()),
         TagLookup::Present => Err(format!(
-            "l'étiquette {tag} existe déjà sur origin : ce numéro est brûlé, jamais réutilisé. Passe à la version suivante (Cargo.toml et apps/desktop/package.json)"
+            "l'étiquette {tag} existe déjà sur origin : ce numéro est brûlé, jamais resigné (l'étiquette n'est posée qu'à la fin, à la main : ce refus ne couvre pas un numéro signé mais pas encore étiqueté). Passe à la version suivante (Cargo.toml et apps/desktop/package.json)"
         )),
     }
 }

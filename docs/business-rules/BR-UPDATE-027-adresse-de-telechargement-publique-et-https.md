@@ -5,7 +5,7 @@ titre: Le serveur ne télécharge qu'en HTTPS, depuis une adresse publique
 statut: active
 invariant: true
 source: revue Stephen de HRT-17 (round 1), ADR-0014
-maj: 2026-10-06
+maj: 2026-10-12
 ---
 
 # BR-UPDATE-027 : Le serveur ne télécharge qu'en HTTPS, depuis une adresse publique

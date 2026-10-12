@@ -5,8 +5,10 @@
 //! - `client-release-check [--version X.Y.Z]` : refuse la clé publique de DÉVELOPPEMENT du dépôt (sans
 //!   clé secrète : rien de ce qu'elle « vérifierait » ne serait jamais installable) et, si une
 //!   version est donnée, exige qu'elle soit celle du dépôt et que l'étiquette `vX.Y.Z` n'existe pas
-//!   déjà sur `origin` (`git ls-remote --exit-code --tags`, lecture seule : jamais deux signatures du
-//!   même numéro).
+//!   déjà sur `origin` (`git ls-remote --exit-code --tags`, lecture seule : un numéro déjà étiqueté
+//!   n'est jamais resigné). L'étiquette n'est posée qu'à la fin, à la main : la fenêtre entre la
+//!   signature et l'étiquette n'est pas couverte (le refus de `release-upload` sur une version déjà
+//!   déposée la fermera, HRT-51).
 //! - `client-version` : la version du dépôt (`[workspace.package]` de `Cargo.toml`), seule source du
 //!   numéro publié : le flux de publication n'en reçoit aucun à la main.
 //! - `client-sign --installer F --version X.Y.Z` : signe l'installateur (minisign, Ed25519) avec la clé

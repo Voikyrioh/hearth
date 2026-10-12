@@ -5,7 +5,7 @@ titre: Sans Internet, la vérification échoue en silence et la dernière vérif
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-mises-a-jour.md (BR-UPDATE-007), HRT-16
-maj: 2026-10-05
+maj: 2026-10-12
 ---
 
 # BR-UPDATE-007 : Sans Internet, la vérification échoue en silence et la dernière vérification reste affichée

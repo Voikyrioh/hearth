@@ -325,3 +325,41 @@ fn a_manifest_without_an_agent_section_offers_nothing_and_a_broken_one_is_an_err
         ManifestError::TooLarge
     );
 }
+
+/// Cas limites de l'analyse d'adresse (voir `update_domain.rs`) : relevés en exécutant la bibliothèque
+/// `url`, fixés ici pour que sa montée de version ne les change pas sans bruit.
+#[test]
+fn address_edge_cases_keep_their_recorded_meaning() {
+    let refused = [
+        "https://hearth.voikyrioh.fr./api/releases/0.2.0/a",
+        "https://hearth.voikyrioh.fr\u{3002}/api/releases/0.2.0/a",
+        r"https://hearth.voikyrioh.fr\@evil.test/api/releases/0.2.0/a",
+        r"https://hearth.voikyrioh.fr\.evil.test/api/releases/0.2.0/a",
+        r"https://hearth.voikyrioh.fr/api/releases\..\install.sh",
+        "https://h\u{435}arth.voikyrioh.fr/api/releases/0.2.0/a",
+        "https://hearth.voikyrioh.fr\u{ff0e}evil.test/api/releases/0.2.0/a",
+        "https://hearth.voikyrioh.fr%2eevil.test/api/releases/0.2.0/a",
+    ];
+    for bad in refused {
+        let mut c = candidate();
+        c.url = bad.into();
+        assert!(validate_target(&c, &policy()).is_err(), "{bad}");
+    }
+    // Acceptés : la même source officielle écrite autrement ; l'adresse retenue, donc envoyée à l'agent,
+    // est celle que l'analyse a normalisée.
+    for ok in [
+        "HTTPS://HEARTH.VOIKYRIOH.FR/api/releases/0.2.0/a",
+        "https://hearth.voikyrioh.fr:443/api/releases/0.2.0/a",
+        "https://hearth\u{3002}voikyrioh\u{3002}fr/api/releases/0.2.0/a",
+        r"https://hearth.voikyrioh.fr/api\releases/0.2.0/a",
+    ] {
+        let mut c = candidate();
+        c.url = ok.into();
+        let target = validate_target(&c, &policy()).unwrap_or_else(|e| panic!("{ok}: {e:?}"));
+        assert_eq!(
+            target.url().to_string(),
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/a",
+            "{ok}"
+        );
+    }
+}

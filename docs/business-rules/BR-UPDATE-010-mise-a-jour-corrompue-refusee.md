@@ -5,7 +5,7 @@ titre: Une mise à jour corrompue ou incomplète est refusée, la version en cou
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-mises-a-jour.md (BR-UPDATE-010), HRT-16
-maj: 2026-10-05
+maj: 2026-10-12
 ---
 
 # BR-UPDATE-010 : Une mise à jour corrompue ou incomplète est refusée, la version en cours reste utilisable

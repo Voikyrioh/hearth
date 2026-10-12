@@ -331,3 +331,48 @@ fn the_record_survives_a_json_round_trip_and_tolerates_missing_fields() {
         UpdateRecord::default()
     );
 }
+
+/// Cas limites de l'analyse d'adresse, relevés en exécutant la bibliothèque `url` : ce filtre est gravé
+/// dans le client, une montée de version de `url` ne doit pas en changer le sens sans bruit.
+#[test]
+fn address_edge_cases_keep_their_recorded_meaning() {
+    let refused = [
+        // Point final : nom absolu, pas l'hôte compilé.
+        "https://hearth.voikyrioh.fr./api/releases/1.1.0/x.exe",
+        "https://hearth.voikyrioh.fr\u{3002}/api/releases/1.1.0/x.exe",
+        // Barre inverse : lue comme une barre oblique, l'hôte s'arrête avant.
+        r"https://hearth.voikyrioh.fr\@evil.test/api/releases/1.1.0/x.exe",
+        r"https://hearth.voikyrioh.fr\.evil.test/api/releases/1.1.0/x.exe",
+        r"https://hearth.voikyrioh.fr/api/releases\..\install.sh",
+        // IDN et homoglyphes : le « e » cyrillique donne un autre nom (punycode).
+        "https://h\u{435}arth.voikyrioh.fr/api/releases/1.1.0/x.exe",
+        "https://hearth.voikyrioh.fr\u{ff0e}evil.test/api/releases/1.1.0/x.exe",
+        // Point encodé dans l'hôte.
+        "https://hearth.voikyrioh.fr%2eevil.test/api/releases/1.1.0/x.exe",
+    ];
+    for url in refused {
+        assert_eq!(
+            validate_candidate("1.0.0", &candidate("1.1.0", url), &policy()),
+            Err(Rejection::UntrustedSource),
+            "{url}"
+        );
+    }
+    // Acceptés : la même source officielle, écrite autrement. Plus tolérant sur la forme seulement :
+    // l'analyse ramène l'adresse à `hearth.voikyrioh.fr` sans port, et c'est elle que l'on télécharge.
+    let accepted = [
+        // Casse du schéma et de l'hôte.
+        "HTTPS://HEARTH.VOIKYRIOH.FR/api/releases/1.1.0/x.exe",
+        // Port par défaut explicite.
+        "https://hearth.voikyrioh.fr:443/api/releases/1.1.0/x.exe",
+        // Point idéographique entre les étiquettes : normalisé en point.
+        "https://hearth\u{3002}voikyrioh\u{3002}fr/api/releases/1.1.0/x.exe",
+        // Barre inverse dans le chemin : lue comme une barre oblique, reste sous le préfixe.
+        r"https://hearth.voikyrioh.fr/api\releases/1.1.0/x.exe",
+    ];
+    for url in accepted {
+        assert!(
+            validate_candidate("1.0.0", &candidate("1.1.0", url), &policy()).is_ok(),
+            "{url}"
+        );
+    }
+}

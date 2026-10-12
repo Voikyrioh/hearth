@@ -177,7 +177,7 @@ version = \"0.2.0\"
         );
     }
 
-    const CLIENT: &str = r#"{"version":"1.2.0","notes":"n","pub_date":"2026-10-06T10:00:00Z","platforms":{"windows-x86_64":{"signature":"c2ln","url":"https://github.com/Voikyrioh/hearth/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe"}}}"#;
+    const CLIENT: &str = r#"{"version":"1.2.0","notes":"n","pub_date":"2026-10-06T10:00:00Z","platforms":{"windows-x86_64":{"signature":"c2ln","url":"https://hearth.voikyrioh.fr/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe"}}}"#;
 
     #[test]
     fn the_agent_section_is_added_to_the_client_manifest_which_is_otherwise_kept() {

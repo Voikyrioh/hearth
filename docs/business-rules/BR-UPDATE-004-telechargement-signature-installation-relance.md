@@ -5,7 +5,7 @@ titre: La mise à jour est téléchargée, sa signature vérifiée, puis install
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-mises-a-jour.md (BR-UPDATE-004), HRT-16
-maj: 2026-10-05
+maj: 2026-10-12
 ---
 
 # BR-UPDATE-004 : La mise à jour est téléchargée, sa signature vérifiée, puis installée et le client se relance
@@ -24,7 +24,7 @@ maj: 2026-10-05
 - Non vérifié sans vraie publication : le lancement réel de l'installateur NSIS et la relance (voir le runbook, § « Premier essai »).
 
 ## Cas limites
-- Le téléchargement est tenu en mémoire, sans plafond de taille côté client ; la signature n'est vérifiée qu'après le téléchargement complet. Limites : source du premier saut restreinte à `hearth.voikyrioh.fr/api/releases/` en HTTPS, redirections en HTTPS à chaque saut et au plus 5 (`DownloadPolicy::allows_redirect`), sans liste d'hôtes sur les sauts suivants (compromis écrit dans ADR-0017), délai de 15 min.
+- Le téléchargement est tenu en mémoire, sans plafond de taille côté client ; la signature n'est vérifiée qu'après le téléchargement complet. Limites : source du premier saut restreinte à `hearth.voikyrioh.fr/api/releases/` en HTTPS, redirections en HTTPS à chaque saut et au plus 5 (`DownloadPolicy::allows_redirect`), sans liste d'hôtes sur les sauts suivants (compromis repris dans ADR-0035, décision 6), délai de 15 min.
 - Tant que le dépôt porte la clé de développement (sans clé secrète), AUCUNE mise à jour n'est acceptée : c'est voulu (runbook `publier-une-version-du-client`).
 
 ## Règles liées

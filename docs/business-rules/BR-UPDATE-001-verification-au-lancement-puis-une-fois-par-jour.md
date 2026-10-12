@@ -5,7 +5,7 @@ titre: Le client vérifie les mises à jour au lancement, puis une fois par jour
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-04-fonctionnelle-mises-a-jour.md (BR-UPDATE-001), HRT-16
-maj: 2026-10-05
+maj: 2026-10-12
 ---
 
 # BR-UPDATE-001 : Le client vérifie les mises à jour au lancement, puis une fois par jour au plus
