@@ -8,6 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::docker::{self, args, mount_path};
+use crate::host::{Host, System};
+use crate::release_stage::{head_commit, tracked_changes};
 
 pub const IMAGE: &str =
     "rust:1.95-alpine@sha256:606fd313a0f49743ee2a7bd49a0914bab7deedb12791f3a846a34a4711db7ed2";
@@ -77,8 +79,36 @@ pub struct Build {
     pub expect_key: Option<String>,
 }
 
+/// Dit quel commit est construit et avertit si l'arbre a des modifications suivies (HRT-60). Ne refuse
+/// jamais : la commande sert aussi au développement et aux tâches e2e. Un git muet est signalé, pas fatal.
+pub fn report_tree(host: &dyn Host, root: &Path, say: &mut dyn FnMut(&str)) {
+    match head_commit(host, root) {
+        Ok(commit) => say(&format!("commit construit : {commit}")),
+        Err(error) => say(&format!(
+            "AVERTISSEMENT : commit en place inconnu ({error})"
+        )),
+    }
+    match tracked_changes(host, root) {
+        Ok(changes) if changes.is_empty() => {}
+        Ok(changes) => say(&format!(
+            "AVERTISSEMENT : l'arbre a {} fichier(s) suivi(s) modifié(s) ({}) : ce binaire ne sort pas du commit seul, il ne doit pas être signé ni publié (release-stage le refusera)",
+            changes.len(),
+            changes
+                .iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ; ")
+        )),
+        Err(error) => say(&format!(
+            "AVERTISSEMENT : état de l'arbre inconnu ({error}) : ne signe pas ce binaire sans l'avoir vérifié"
+        )),
+    }
+}
+
 pub fn run() -> Result<PathBuf, String> {
     let root = docker::repo_root()?;
+    report_tree(&System::new(), &root, &mut |line| println!("{line}"));
     build(&Build {
         dist: root.join("target").join("dist"),
         out_name: "hearth-agent".to_owned(),
@@ -219,4 +249,42 @@ fn mounts(root: &Path, dist: &Path, test_build: bool) -> Result<Vec<String>, Str
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::release_stage::fixtures::TreeFake;
+
+    fn said(fake: &TreeFake) -> Vec<String> {
+        let mut lines = Vec::new();
+        report_tree(fake, Path::new("depot"), &mut |line| {
+            lines.push(line.to_owned())
+        });
+        lines
+    }
+
+    #[test]
+    fn a_clean_tree_prints_the_commit_and_no_warning() {
+        let lines = said(&TreeFake::new("", "abc1234def"));
+        assert_eq!(lines, ["commit construit : abc1234def"]);
+    }
+
+    #[test]
+    fn a_modified_tree_warns_but_never_fails() {
+        let lines = said(&TreeFake::new(" M Cargo.toml", "abc1234def"));
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].starts_with("AVERTISSEMENT") && lines[1].contains("Cargo.toml"));
+    }
+
+    #[test]
+    fn a_git_that_cannot_answer_warns_and_does_not_stop_the_build() {
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.status_fails = true;
+        let lines = said(&fake);
+        assert!(
+            lines.iter().any(|l| l.contains("état de l'arbre inconnu")),
+            "{lines:?}"
+        );
+    }
 }

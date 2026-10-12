@@ -469,7 +469,7 @@ pub fn publish(
     }
     if !options.confirm {
         say(format!(
-            "ESSAI À BLANC : rien n'est écrit et aucune commande n'est lancée (ni aws, ni curl). Ajoute --confirm pour déposer. Bucket s3://{BUCKET} ({ENDPOINT})"
+            "ESSAI À BLANC : rien n'est écrit et ni aws ni curl ne sont lancés (seul git, en lecture, vérifie l'arbre et le commit). Ajoute --confirm pour déposer. Bucket s3://{BUCKET} ({ENDPOINT})"
         ));
         say(
             "avant toute écriture : lecture du manifeste en place, refus si sa version est supérieure à celle déposée (--allow-rollback pour un retour arrière voulu)"
@@ -637,6 +637,9 @@ pub fn run_upload(args: &[String]) -> Result<(), String> {
         .stage_dir
         .map_or_else(|| root.join(STAGE_DIR), |dir| Path::new(&dir).to_path_buf());
     let files = read_stage_dir(&stage_dir)?;
+    // HRT-60, essai à blanc compris : arbre propre et commit identique à celui assemblé (git, lecture seule).
+    let commit = check_stage_commit(&System::new(), &root, read_stage_commit(&stage_dir))?;
+    println!("arbre propre, commit en place identique à celui assemblé : {commit}");
     let read = |path: &str| {
         std::fs::read_to_string(root.join(path)).map_err(|error| format!("{path} : {error}"))
     };

@@ -15,6 +15,9 @@
 //! releases/X.Y.Z/                   les 8 fichiers de la liste fermée de l'API, immuables
 //! ```
 //!
+//! À côté de `releases/` (donc jamais déposé) : `COMMIT`, le commit de l'arbre propre dont la
+//! version est assemblée (HRT-60). `release-upload` refuse si le commit en place a changé.
+//!
 //! La liste fermée, la forme du manifeste et le chemin du pointeur de l'agent sont ceux de
 //! `hearth-releases-api` : `src/service/release-files.ts` (noms, clés d'objet) et
 //! `src/service/manifest.ts` (lecture du manifeste, `latestInstallerPath`, `agentPointer`).
@@ -41,6 +44,12 @@ pub const SCRIPT_KEY: &str = "releases/install.sh";
 const NOTES_MAX_CHARS: usize = 8_000;
 /// L'API refuse un manifeste de plus de 256 Kio (`MAX_MANIFEST_BYTES` de `manifest.ts`).
 const MANIFEST_MAX_BYTES: usize = 256 * 1024;
+
+/// Fichier à la racine du dossier d'assemblage (hors `releases/`, donc jamais déposé) qui garde le commit
+/// de l'arbre propre assemblé (HRT-60).
+pub const COMMIT_FILE: &str = "COMMIT";
+/// Nombre de fichiers nommés dans un refus d'arbre modifié.
+const DIRTY_LIST_MAX: usize = 10;
 
 /// Les fichiers d'une version : clé d'objet (`releases/...`, barres obliques) vers contenu.
 pub type Files = BTreeMap<String, Vec<u8>>;
@@ -346,6 +355,122 @@ pub fn check_install_script(script: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Lance `git -C <root> ...` en lecture seule via l'exécuteur injecté. Un échec n'est jamais lu comme
+/// « arbre propre » : il remonte en erreur.
+fn git_text(host: &dyn Host, root: &Path, list: &[&str], why: &str) -> Result<String, String> {
+    let mut argv = vec!["-C".to_owned(), root.to_string_lossy().into_owned()];
+    argv.extend(list.iter().map(|arg| (*arg).to_owned()));
+    let output = host.run(&Call::new("git", &argv))?;
+    if output.success {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(format!(
+            "git {} a échoué ({}) : {why}",
+            list.join(" "),
+            output.stderr.chars().take(200).collect::<String>()
+        ))
+    }
+}
+
+/// Les fichiers SUIVIS qui diffèrent de `HEAD` (modifiés, indexés, supprimés ; les fichiers non suivis
+/// sont ignorés). `git status --porcelain --untracked-files=no`, lecture seule. Vide = arbre propre.
+pub fn tracked_changes(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let out = git_text(
+        host,
+        root,
+        &["status", "--porcelain", "--untracked-files=no"],
+        "état de l'arbre inconnu, jamais traité comme propre",
+    )?;
+    Ok(out
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.trim_end().to_owned())
+        .collect())
+}
+
+/// Le commit de `HEAD` (`git rev-parse HEAD`).
+pub fn head_commit(host: &dyn Host, root: &Path) -> Result<String, String> {
+    let out = git_text(
+        host,
+        root,
+        &["rev-parse", "HEAD"],
+        "commit en place inconnu",
+    )?;
+    let commit = out.trim().to_owned();
+    if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!(
+            "git rev-parse HEAD a rendu « {commit} » : pas un commit"
+        ));
+    }
+    Ok(commit)
+}
+
+/// Refuse un arbre dont un fichier suivi diffère de `HEAD` (HRT-60) : la version, les clés publiques et
+/// le binaire de l'agent viennent du disque, ils doivent être ceux du commit étiqueté. Les fichiers non
+/// suivis sont tolérés. Rend le commit en place.
+pub fn check_clean_tree(host: &dyn Host, root: &Path) -> Result<String, String> {
+    let changes = tracked_changes(host, root)?;
+    if !changes.is_empty() {
+        let shown = changes
+            .iter()
+            .take(DIRTY_LIST_MAX)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ; ");
+        let more = match changes.len().saturating_sub(DIRTY_LIST_MAX) {
+            0 => String::new(),
+            n => format!(" ; et {n} autre(s)"),
+        };
+        return Err(format!(
+            "l'arbre de travail a des modifications suivies non committées ({shown}{more}) : committe-les ou range-les (git stash), reconstruis l'agent, puis relance. Un binaire signé doit sortir du commit exact qui sera étiqueté"
+        ));
+    }
+    head_commit(host, root)
+}
+
+/// Écrit le commit assemblé à côté de `releases/` (jamais déposé).
+pub fn write_stage_commit(dir: &Path, commit: &str) -> Result<(), String> {
+    let path = dir.join(COMMIT_FILE);
+    std::fs::write(&path, format!("{commit}\n"))
+        .map_err(|error| format!("{} : {error}", path.display()))
+}
+
+/// Relit le commit enregistré par `release-stage`. Absent ou illisible : refus (on ne devine pas).
+pub fn read_stage_commit(dir: &Path) -> Result<String, String> {
+    let path = dir.join(COMMIT_FILE);
+    let text = std::fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "{} illisible ({error}) : le commit assemblé est inconnu, relance cargo xtask release-stage",
+            path.display()
+        )
+    })?;
+    let commit = text.trim().to_owned();
+    if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!(
+            "{} ne contient pas un commit : relance cargo xtask release-stage",
+            path.display()
+        ));
+    }
+    Ok(commit)
+}
+
+/// Avant tout dépôt (essai à blanc compris) : l'arbre est propre ET son commit est celui qui a été
+/// assemblé. Seul `git` en lecture est lancé, jamais `aws` ni `curl`. Rend le commit.
+pub fn check_stage_commit(
+    host: &dyn Host,
+    root: &Path,
+    recorded: Result<String, String>,
+) -> Result<String, String> {
+    let recorded = recorded?;
+    let current = check_clean_tree(host, root)?;
+    if current != recorded {
+        return Err(format!(
+            "le commit en place ({current}) n'est pas celui qui a été assemblé ({recorded}) : reviens sur {recorded} (git checkout), ou relance cargo xtask release-stage ici"
+        ));
+    }
+    Ok(current)
+}
+
 /// Sans `--install-script`, le script déposé est `deploy/install.sh` du dépôt : il ne doit pas différer
 /// de `HEAD` (modifié, indexé ou non suivi). Commandes git en lecture seule, via l'exécuteur injecté.
 /// Rend le commit de `HEAD`, que l'appelant affiche.
@@ -603,6 +728,10 @@ fn visit(dir: &Path, relative: &str, files: &mut Files) -> Result<(), String> {
             .file_name()
             .into_string()
             .map_err(|_| format!("{} : nom illisible", dir.display()))?;
+        if relative.is_empty() && name == COMMIT_FILE {
+            // Le commit enregistré n'est pas un objet du bucket : `read_stage_commit` le lit à part.
+            continue;
+        }
         let key = if relative.is_empty() {
             name
         } else {
@@ -634,6 +763,11 @@ pub fn write_stage_dir(dir: &Path, files: &Files) -> Result<(), String> {
     if releases.exists() {
         std::fs::remove_dir_all(&releases)
             .map_err(|error| format!("{} : {error}", releases.display()))?;
+    }
+    // Un commit enregistré par un assemblage précédent ne survit pas à celui-ci.
+    let commit = dir.join(COMMIT_FILE);
+    if commit.exists() {
+        std::fs::remove_file(&commit).map_err(|error| format!("{} : {error}", commit.display()))?;
     }
     for (key, bytes) in files {
         let path = key
@@ -684,6 +818,9 @@ pub fn run_stage(args: &[String]) -> Result<(), String> {
         &[],
     )?;
     let root = root()?;
+    // Avant toute lecture et toute écriture : un arbre modifié ne s'assemble pas (HRT-60).
+    let commit = check_clean_tree(&System::new(), &root)?;
+    println!("arbre propre (fichiers suivis), commit en place : {commit}");
     let read_text = |path: &Path| {
         std::fs::read_to_string(path).map_err(|error| format!("{} : {error}", path.display()))
     };
@@ -728,6 +865,7 @@ pub fn run_stage(args: &[String]) -> Result<(), String> {
     })?;
     let stage = root.join(STAGE_DIR);
     write_stage_dir(&stage, &files)?;
+    write_stage_commit(&stage, &commit)?;
     println!(
         "version {version} assemblée et revérifiée (signatures du client et de l'agent, sommes, adresses, liste fermée) sous {STAGE_DIR}/ :"
     );
@@ -879,6 +1017,63 @@ pub mod fixtures {
 
     pub fn verify(files: &Files) -> Result<String, String> {
         verify_stage(files, &keys().client_public, &keys().agent_public, CARGO)
+    }
+
+    /// Faux git pour l'état de l'arbre (HRT-60) : `status` rend `status` (ou échoue), `rev-parse HEAD`
+    /// rend `head` (ou échoue). Enregistre chaque appel.
+    pub struct TreeFake {
+        pub status: String,
+        pub status_fails: bool,
+        pub head: String,
+        pub head_fails: bool,
+        pub calls: std::cell::RefCell<Vec<Vec<String>>>,
+    }
+
+    impl TreeFake {
+        pub fn new(status: &str, head: &str) -> Self {
+            Self {
+                status: status.to_owned(),
+                status_fails: false,
+                head: head.to_owned(),
+                head_fails: false,
+                calls: Default::default(),
+            }
+        }
+    }
+
+    impl Host for TreeFake {
+        fn run(&self, call: &Call) -> Result<crate::host::CmdOutput, String> {
+            assert_eq!(call.program, "git", "aucun autre programme");
+            self.calls.borrow_mut().push(call.args.to_vec());
+            let (fails, out) = if call.args.iter().any(|arg| arg == "status") {
+                (self.status_fails, &self.status)
+            } else {
+                assert!(
+                    call.args.iter().any(|arg| arg == "rev-parse"),
+                    "{:?}",
+                    call.args
+                );
+                (self.head_fails, &self.head)
+            };
+            Ok(crate::host::CmdOutput {
+                success: !fails,
+                code: Some(if fails { 128 } else { 0 }),
+                stdout: if fails {
+                    Vec::new()
+                } else {
+                    format!("{out}\n").into_bytes()
+                },
+                stderr: if fails {
+                    "fatal: boum".to_owned()
+                } else {
+                    String::new()
+                },
+            })
+        }
+        fn elapsed(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+        fn sleep(&self, _: std::time::Duration) {}
     }
 }
 
@@ -1556,5 +1751,142 @@ mod tests {
         assert!(check_flags(&args(&["--confirm"]), &["--stage-dir"], &["--confirm"]).is_ok());
         assert!(check_flags(&args(&["--confirmer"]), &["--stage-dir"], &["--confirm"]).is_err());
         assert!(check_flags(&args(&["--stage-dir"]), &["--stage-dir"], &[]).is_err());
+    }
+
+    #[test]
+    fn a_clean_tree_is_accepted_and_its_commit_returned_with_read_only_calls() {
+        let fake = TreeFake::new("", "abc1234def");
+        assert_eq!(
+            check_clean_tree(&fake, Path::new("depot")).unwrap(),
+            "abc1234def"
+        );
+        let calls = fake.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            calls[0][2..],
+            ["status", "--porcelain", "--untracked-files=no"]
+        );
+        assert_eq!(calls[1][2..], ["rev-parse", "HEAD"]);
+    }
+
+    #[test]
+    fn a_tracked_change_staged_or_not_is_refused_and_names_the_files() {
+        for status in [
+            "M  Cargo.toml",
+            " M Cargo.toml",
+            "MM Cargo.toml",
+            " D crates/hearth-agent/update-key.pub",
+            "A  nouveau.rs",
+        ] {
+            let fake = TreeFake::new(status, "abc1234def");
+            let error = check_clean_tree(&fake, Path::new("depot")).unwrap_err();
+            let file = status.split(' ').next_back().unwrap();
+            assert!(
+                error.contains(file) && error.contains("committe") && error.contains("stash"),
+                "{status} : {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_list_of_changed_files_is_bounded() {
+        let status = (0..25)
+            .map(|n| format!(" M f{n:02}.rs"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let error = check_clean_tree(&TreeFake::new(&status, "abc"), Path::new("d")).unwrap_err();
+        assert!(
+            error.contains("f09.rs") && !error.contains("f10.rs"),
+            "{error}"
+        );
+        assert!(error.contains("et 15 autre(s)"), "{error}");
+    }
+
+    #[test]
+    fn an_untracked_file_alone_is_tolerated_because_git_is_asked_to_ignore_it() {
+        // Avec `--untracked-files=no`, git ne rend rien pour un fichier non suivi : ce faux rend donc
+        // une sortie vide. On fige l'option, c'est elle qui porte la tolérance.
+        let fake = TreeFake::new("", "abc1234def");
+        assert!(check_clean_tree(&fake, Path::new("depot")).is_ok());
+        assert!(fake.calls.borrow()[0].contains(&"--untracked-files=no".to_owned()));
+    }
+
+    #[test]
+    fn a_git_that_fails_is_never_read_as_a_clean_tree() {
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.status_fails = true;
+        let error = check_clean_tree(&fake, Path::new("depot")).unwrap_err();
+        assert!(error.contains("jamais traité comme propre"), "{error}");
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.head_fails = true;
+        assert!(check_clean_tree(&fake, Path::new("depot")).is_err());
+        let fake = TreeFake::new("", "pas un commit");
+        assert!(check_clean_tree(&fake, Path::new("depot")).is_err());
+    }
+
+    #[test]
+    fn the_commit_record_is_read_back_and_is_not_part_of_the_deposited_files() {
+        let exe = std::env::current_exe().unwrap();
+        let base = crate::test_tmp::tmp_root::roots_for(&exe)[0]
+            .join(format!("release_stage_commit-{}", std::process::id()));
+        let files = Fixture::new().staged();
+        let outcome = (|| {
+            write_stage_dir(&base, &files)?;
+            write_stage_commit(&base, "abc1234def")?;
+            let commit = read_stage_commit(&base)?;
+            let read = read_stage_dir(&base)?;
+            // Un nouvel assemblage efface l'ancien commit.
+            write_stage_dir(&base, &files)?;
+            let after = read_stage_commit(&base);
+            Ok::<_, String>((commit, read, after))
+        })();
+        let _ = std::fs::remove_dir_all(&base);
+        let (commit, read, after) = outcome.unwrap();
+        assert_eq!(commit, "abc1234def");
+        assert_eq!(read, files, "COMMIT n'est pas un fichier de la version");
+        assert!(verify(&read).is_ok());
+        assert!(after.is_err());
+    }
+
+    #[test]
+    fn an_upload_on_another_commit_or_without_record_or_on_a_dirty_tree_is_refused() {
+        let root = Path::new("depot");
+        let same = TreeFake::new("", "abc1234def");
+        assert_eq!(
+            check_stage_commit(&same, root, Ok("abc1234def".to_owned())).unwrap(),
+            "abc1234def"
+        );
+        let other = TreeFake::new("", "fff9999aaa");
+        let error = check_stage_commit(&other, root, Ok("abc1234def".to_owned())).unwrap_err();
+        assert!(
+            error.contains("fff9999aaa") && error.contains("abc1234def"),
+            "{error}"
+        );
+        let missing = Err("COMMIT illisible".to_owned());
+        let fake = TreeFake::new("", "abc1234def");
+        assert!(check_stage_commit(&fake, root, missing).is_err());
+        assert!(
+            fake.calls.borrow().is_empty(),
+            "rien n'est lancé sans enregistrement"
+        );
+        let dirty = TreeFake::new(" M Cargo.toml", "abc1234def");
+        let error = check_stage_commit(&dirty, root, Ok("abc1234def".to_owned())).unwrap_err();
+        assert!(error.contains("Cargo.toml"), "{error}");
+        let mut broken = TreeFake::new("", "abc1234def");
+        broken.status_fails = true;
+        assert!(check_stage_commit(&broken, root, Ok("abc1234def".to_owned())).is_err());
+    }
+
+    #[test]
+    fn a_missing_or_garbled_record_file_is_an_error() {
+        let exe = std::env::current_exe().unwrap();
+        let base = crate::test_tmp::tmp_root::roots_for(&exe)[0]
+            .join(format!("release_stage_commit_bad-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let missing = read_stage_commit(&base);
+        std::fs::write(base.join(COMMIT_FILE), "n'importe quoi\n").unwrap();
+        let garbled = read_stage_commit(&base);
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(missing.is_err() && garbled.is_err());
     }
 }
