@@ -10,39 +10,38 @@ Un administrateur demande la mise à jour depuis le client (écran livré avec H
 
 Pas de mise à jour à distance si l'installation est gérée par le système (`--managed`, NixOS) ou sans systemd : mettre à jour par la configuration du système, ou par `install.sh --binary` (BR-INSTALL-007).
 
-## Prérequis, une fois : la clé de signature
+## Prérequis : la clé de signature (déjà en place)
 
-La clé publique est **embarquée** dans l'agent (`crates/hearth-agent/update-key.pub`). La clé du dépôt n'a **aucune clé secrète** : tant que tu n'as pas généré la tienne et reconstruit l'agent, aucune mise à jour n'est acceptée.
+La clé publique est **embarquée** dans l'agent (`crates/hearth-agent/update-key.pub`, identifiant de clé minisign `29944AFE28EABECE`) et elle est dans le dépôt depuis le 2026-10-12. La clé secrète correspondante reste chez Voiky, jamais dans le dépôt ni dans la CI.
 
-```sh
-minisign -G -p update-key.pub -s ~/.hearth/update.key     # une fois ; la clé secrète reste chez toi, jamais dans le dépôt
-cp update-key.pub crates/hearth-agent/update-key.pub      # puis reconstruire et réinstaller l'agent (cargo xtask agent)
-```
-
-Changer la clé = réinstaller à la main les agents existants (ils n'acceptent que l'ancienne).
+**Ne génère pas de nouvelle paire pour publier.** Une paire neuve n'est justifiée que par la perte de la clé secrète ou par une rotation voulue. Dans les deux cas, les agents déjà installés ne font confiance qu'à la clé embarquée à leur construction : ils refusent toute signature de la nouvelle clé et ne peuvent plus se mettre à jour à distance. Il faut alors remplacer `crates/hearth-agent/update-key.pub`, reconstruire l'agent et le réinstaller à la main sur chaque serveur (`install.sh --binary`). Le client (clé `70250B2A465F79C3`, `apps/desktop/src-tauri/update-key.pub`) se comporte de la même façon.
 
 ## Publier une version
 
+La version publiée est celle du dépôt (`[workspace.package]` de `Cargo.toml`). Les mises à jour sont servies par `https://hearth.voikyrioh.fr/api/releases/` depuis un bucket privé (ADR-0035), plus par les GitHub Releases. Personne n'édite un manifeste à la main : `release-stage` est le seul à l'écrire, section `agent` comprise.
+
 1. Construire : `cargo xtask agent` (binaire statique `target/dist/hearth-agent`, taille et SHA-256 affichés).
-2. Signer, AVEC la version dans le commentaire signé (BR-UPDATE-035 : sans elle, ou avec un autre numéro, l'agent refuse avant tout échange et `agent-manifest` ne publie pas) : `minisign -S -t "version:X.Y.Z" -s ~/.hearth/update.key -m hearth-agent -x hearth-agent.minisig`. Cette clé ne signe QUE des binaires d'agent : le champ `file:` de la signature n'est pas contrôlé, tout fichier signé avec `version:X` serait recevable comme « agent X » (BR-UPDATE-035, risques résiduels).
-3. Héberger le binaire en **HTTPS** (TLS 1.3, certificat reconnu par le système du serveur), à une adresse sans identifiant. Le client lit la cible dans la section `agent` du `latest.json` de la release (voir « Publier la cible pour le client » ci-dessous), et la transmet à l'agent ; à la main : `POST /api/v1/agent/update` avec `{ version, url, signature, sha256 }`.
-
-## Publier la cible pour le client (section `agent` de `latest.json`, ADR-0021)
-
-Le client (HRT-17, lot interface) propose « Mettre à jour l'agent » quand la section `agent` du `latest.json` de la dernière release publiée annonce une version STRICTEMENT plus récente que celle de l'agent. Il la lit dans la même requête que son propre flux (une par 24 h au plus et par client, ou « Vérifier maintenant »). Rien n'est publié automatiquement : tout se fait à la main, avec TA clé secrète, qui ne quitte jamais ta machine.
-
-1. Construire et signer le binaire (étapes 1 et 2 ci-dessus). Le nom du binaire publié est `hearth-agent-linux-x86_64` (copie de `target/dist/hearth-agent`), la signature `hearth-agent-linux-x86_64.minisig`.
-2. Le flux `publish-client` crée le brouillon `vX.Y.Z` avec `latest.json` (runbook `publier-une-version-du-client.md`). Récupérer ce `latest.json` : `gh release download vX.Y.Z --pattern latest.json`.
-3. Y AJOUTER la section de l'agent (aucun secret ; la signature est vérifiée contre `crates/hearth-agent/update-key.pub`, la clé embarquée dans l'agent : une signature que l'agent refuserait n'est pas publiée ; le fichier doit déjà être un manifeste du client valable) :
-   ```sh
-   # --version DOIT être la version du dépôt ([workspace.package] de Cargo.toml) : celle du binaire construit
-   cargo xtask agent-manifest --manifest latest.json --version X.Y.Z \
-     --binary-file hearth-agent-linux-x86_64 --signature-file hearth-agent-linux-x86_64.minisig \
-     --url https://github.com/Voikyrioh/hearth/releases/download/vX.Y.Z/hearth-agent-linux-x86_64
+2. Signer avec `minisign` (aucune commande `xtask` ne signe l'agent), AVEC la version dans le commentaire signé (BR-UPDATE-035 : sans elle, ou avec un autre numéro, l'agent refuse avant tout échange et `release-stage` n'assemble pas). Sous PowerShell, sur ta machine (chemins en `$env:USERPROFILE`, jamais `~`) :
+   ```powershell
+   minisign -S -t "version:X.Y.Z" -s "$env:USERPROFILE\.hearth\update.key" -m target\dist\hearth-agent -x target\dist\hearth-agent.minisig
    ```
-4. Joindre au brouillon, AVANT de le publier : `gh release upload vX.Y.Z hearth-agent-linux-x86_64 hearth-agent-linux-x86_64.minisig latest.json --clobber`, puis vérifier : `gh release view vX.Y.Z --json assets --jq '.assets[].name'` doit lister le binaire, son `.minisig` et `latest.json` (sans la section, le client ne propose rien pour l'agent ; un `latest.json` écrasé par un `client-manifest` refait la perd). Le numéro de l'adresse du binaire est celui de l'AGENT, le nom de la release (`vX.Y.Z`) celui qui porte le client : ils peuvent différer, l'adresse doit commencer par `…/releases/download/v{version}/` avec `--version` donné.
-5. Toute release qui doit rester « dernière » porte un `latest.json` AVEC la section `agent` : l'adresse `releases/latest/download/latest.json` suit la dernière release publiée. Une release du client seul (agent inchangé) reprend la section de la précédente (`gh release download vANCIENNE --pattern latest.json`, copier son bloc `agent` dans le nouveau fichier avec `agent-manifest` et le même binaire, ou à la main) ; sans section, le client ne propose plus rien pour l'agent et reste utilisable.
-6. Contrôler après publication : « Vérifier maintenant » dans les réglages d'un client dont l'agent est plus ancien fait apparaître « Mise à jour disponible » sur la carte du serveur ; un agent déjà à jour ne montre rien. Le client ne propose jamais une version plus ancienne ou égale, ni une adresse qui n'est pas HTTPS, publique et dans les releases du dépôt. **Premier essai** : le client n'a jamais lu le vrai GitHub (redirections réelles, TLS de la plateforme) : regarde le journal du client (`logs/`) pour une ligne « cible de l'agent non lue ».
+   Cette clé ne signe QUE des binaires d'agent : le champ `file:` de la signature n'est pas contrôlé, tout fichier signé avec `version:X` serait recevable comme « agent X » (BR-UPDATE-035, risques résiduels). La signature doit venir de la clé d'identifiant `29944AFE28EABECE`, sinon `release-stage` la refuse (vérifiée contre la clé embarquée).
+3. Récupérer l'artefact du flux `publish-client` (installateur du client signé, son `.sig`, `latest.json`, `notes.txt` ; runbook `publier-une-version-du-client.md`), puis assembler la version en local, sans réseau ni secret :
+   ```powershell
+   cargo xtask release-stage --client-dir <dossier de l'artefact> --agent-binary target\dist\hearth-agent --agent-signature target\dist\hearth-agent.minisig
+   ```
+   `release-stage` revérifie les deux signatures (version signée comprise), les sommes, les adresses et la liste fermée de l'API, écrit sous `target/release-stage/` et range l'agent dans le dossier de SA version (`releases/X.Y.Z/hearth-agent-linux-x86_64`, ce que `install.sh` exige, BR-INSTALL-013). La section `agent` du manifeste est produite ici, avec l'adresse `https://hearth.voikyrioh.fr/api/releases/X.Y.Z/hearth-agent-linux-x86_64`. Il n'y a qu'une version par dépôt : une version d'agent différente de celle du dépôt est refusée.
+4. Déposer au bucket : d'abord l'essai à blanc, qui affiche chaque écriture sans rien écrire (`cargo xtask release-upload`), puis `cargo xtask release-upload --confirm`. Il faut l'outil `aws` et les variables `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` de la clé de publication dans l'environnement. Les fichiers de la version partent d'abord, le manifeste EN DERNIER (BR-RELEASE-001 à 003) : tant qu'il n'est pas déposé, ni les clients ni `install.sh` ne voient la nouvelle version. Un manifeste en place de version supérieure n'est pas remplacé sans `--allow-rollback`.
+5. Pour tester sans client : `POST /api/v1/agent/update` avec `{ version, url, signature, sha256 }` (contrat `docs/open-api/agent-update.md`).
+
+`cargo xtask agent-manifest` existe encore mais ne fait plus partie de la procédure : il ajoutait la section `agent` à un `latest.json` hébergé sur GitHub, ce que `release-stage` fait désormais lui-même.
+
+### Ce que voient le client et l'agent
+
+- Le client (HRT-17) propose « Mettre à jour l'agent » quand la section `agent` du manifeste annonce une version STRICTEMENT plus récente que celle de l'agent. Il la lit dans la même requête que son propre flux (une par 24 h au plus et par client, ou « Vérifier maintenant ») et ne propose jamais une version plus ancienne ou égale, ni une adresse qui n'est pas HTTPS, publique et sous `hearth.voikyrioh.fr/api/releases/` (ADR-0035). Rien n'est installé sans clic.
+- L'agent télécharge, vérifie la somme puis la signature contre sa clé embarquée (avec `version:X.Y.Z`), et seulement alors échange les binaires (voir « En bref »).
+- `install.sh` sans adresse lit le pointeur `https://hearth.voikyrioh.fr/api/releases/latest/agent` et installe cette version (BR-INSTALL-013).
+- Contrôle après publication : « Vérifier maintenant » dans les réglages d'un client dont l'agent est plus ancien fait apparaître « Mise à jour disponible » sur la carte du serveur ; un agent déjà à jour ne montre rien. **Premier essai** : regarde le journal du client (`logs/`) pour une ligne « cible de l'agent non lue ».
 
 ## Suivre une mise à jour
 

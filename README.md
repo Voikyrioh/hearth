@@ -19,6 +19,12 @@ sudo sh deploy/install.sh --binary ./hearth-agent   # questions : port, premier 
 
 Sans question : fabrique un haché (`hearth-agent hash-password --user marie`, saisie sans écho), puis passe-le par l'environnement préservé de `sudo` : `HEARTH_ADMIN_USER=marie HEARTH_ADMIN_PASSWORD_HASH='$argon2id$…' sudo --preserve-env=HEARTH_ADMIN_USER,HEARTH_ADMIN_PASSWORD_HASH sh deploy/install.sh --binary ./hearth-agent --yes`. Un mot de passe ne se met jamais sur une ligne de commande. À la fin, l'agent tourne, démarre avec le serveur, et affiche son **empreinte** : à comparer avec celle du client à la première connexion. Désinstaller : `sudo hearth-agent uninstall [--keep-data|--purge]`. Détails, réinstallation, installation gérée (NixOS), dépannage : [`docs/runbooks/installer-agent.md`](./docs/runbooks/installer-agent.md).
 
+## Vie privée : ce que Hearth contacte
+
+- Le client vérifie les mises à jour auprès de `hearth.voikyrioh.fr` (`/api/releases/`), au lancement puis au plus une fois par jour en automatique (plus « Vérifier maintenant » quand tu le demandes). Sans Internet, la vérification échoue en silence.
+- Rien n'est téléchargé ni installé sans ton clic ; les fichiers sont vérifiés (somme et signature) avant d'être écrits.
+- L'agent ne contacte `hearth.voikyrioh.fr` que lorsqu'un administrateur demande sa mise à jour, ou à l'installation si tu n'as pas donné de binaire (`install.sh`).
+
 ## Dépôt
 
 | Dossier | Rôle |

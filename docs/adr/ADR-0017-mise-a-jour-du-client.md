@@ -65,6 +65,10 @@ Ce qui protège quoi : la **signature** (clé embarquée, version signée, `requ
 - `bindings.ts` gagne `UpdateStateDto` et ses types (régénération : `HEARTH_REGEN_BINDINGS=1 cargo test -p hearth-desktop`).
 - Le flux `publish-client` ne se déclenche qu'à la main et ne crée qu'un brouillon.
 
+## Amendement du 2026-10-12 : la clé de publication est en place
+
+La décision 3 décrit la clé du dépôt comme une clé de développement sans clé secrète. Ce n'est plus vrai : `apps/desktop/src-tauri/update-key.pub` est la vraie clé de publication du client (identifiant minisign `70250B2A465F79C3`) ; sa clé secrète reste chez Voiky et dans les secrets du flux `publish-client`, jamais dans le dépôt. Ne pas la régénérer : une nouvelle paire n'est justifiée que par une perte ou une rotation, qui laisse sans mise à jour tous les clients installés (ils ne font confiance qu'à la clé embarquée). Reste vrai : la garde `cargo xtask client-release-check` refuse toujours une clé qui porte la marque de développement (`DEV public key`).
+
 ## Références
 
 - ADR-0008, ADR-0014, ADR-0010, ADR-0011 ; BR-UPDATE-001 à 010, 025, 026.
