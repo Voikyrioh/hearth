@@ -83,12 +83,20 @@ pub fn run() -> Result<(), String> {
     let new =
         fs::read(dist.join("hearth-agent-new")).map_err(|error| format!("lecture : {error}"))?;
     fs::write(dist.join("mute"), MUTE).map_err(|error| format!("écriture : {error}"))?;
-    sign(&ours.sk, &new, &dist.join("new.minisig"))?;
-    sign(&theirs.sk, &new, &dist.join("new.other.minisig"))?;
-    sign(&ours.sk, MUTE.as_bytes(), &dist.join("mute.minisig"))?;
+    sign(&ours.sk, &new, "0.2.0", &dist.join("new.minisig"))?;
+    // Le scénario « une seule mise à jour à la fois » demande 0.9.0 avec le binaire 0.2.0 : signé 0.9.0
+    // pour que le refus reste celui du binaire qui n'annonce pas la version visée.
+    sign(&ours.sk, &new, "0.9.0", &dist.join("new.slow.minisig"))?;
+    sign(&theirs.sk, &new, "0.2.0", &dist.join("new.other.minisig"))?;
+    sign(
+        &ours.sk,
+        MUTE.as_bytes(),
+        "0.3.0",
+        &dist.join("mute.minisig"),
+    )?;
     let next =
         fs::read(dist.join("hearth-agent-next")).map_err(|error| format!("lecture : {error}"))?;
-    sign(&ours.sk, &next, &dist.join("next.minisig"))?;
+    sign(&ours.sk, &next, "0.2.1", &dist.join("next.minisig"))?;
 
     crate::e2e::machine(
         &dist,
@@ -100,8 +108,15 @@ pub fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn sign(secret: &minisign::SecretKey, data: &[u8], path: &std::path::Path) -> Result<(), String> {
-    let signature = minisign::sign(None, secret, Cursor::new(data), None, None)
+/// Signe comme le fait la publication (BR-UPDATE-035) : `version:X.Y.Z` dans le commentaire signé.
+fn sign(
+    secret: &minisign::SecretKey,
+    data: &[u8],
+    version: &str,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let comment = format!("file:hearth-agent\tversion:{version}");
+    let signature = minisign::sign(None, secret, Cursor::new(data), Some(&comment), None)
         .map_err(|error| format!("signature impossible : {error}"))?;
     fs::write(path, signature.to_string())
         .map_err(|error| format!("écriture de {} : {error}", path.display()))

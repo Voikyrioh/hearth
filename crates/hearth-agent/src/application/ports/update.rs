@@ -13,7 +13,7 @@ use thiserror::Error;
 use tokio::sync::broadcast;
 
 use crate::domain::install::Version;
-use crate::domain::update::{Job, Marker, SupervisorState, UpdateRecord};
+use crate::domain::update::{Job, Marker, SignedVersionRefusal, SupervisorState, UpdateRecord};
 
 #[derive(Debug, Error)]
 pub enum FetchError {
@@ -49,16 +49,23 @@ pub enum SignatureError {
     /// La signature est lisible mais ne correspond pas au contenu.
     #[error("signature fausse")]
     Wrong,
+    /// La version du commentaire signé n'est pas la version demandée (BR-UPDATE-035).
+    #[error("version signée refusée : {0}")]
+    Version(SignedVersionRefusal),
 }
 
 /// Vérifie une signature minisign avec la clé publique **embarquée** dans l'agent.
 pub trait SignatureVerifier: Send + Sync {
     /// Lisible, et faite par la clé embarquée (identifiant de clé) : sans le contenu, donc avant
-    /// tout téléchargement.
-    fn check_format(&self, signature: &str) -> Result<(), SignatureError>;
+    /// tout téléchargement. Le commentaire signé doit porter `version:` égal à `version`, la version
+    /// demandée (lu ici sans le contenu : refus précoce, `verify` le rejuge sous la signature
+    /// globale).
+    fn check_format(&self, signature: &str, version: &Version) -> Result<(), SignatureError>;
 
-    /// La signature est celle de ces octets.
-    fn verify(&self, data: &[u8], signature: &str) -> Result<(), SignatureError>;
+    /// La signature est celle de ces octets (commentaire signé compris, signature globale), et la
+    /// version qu'elle porte est `version`.
+    fn verify(&self, data: &[u8], signature: &str, version: &Version)
+    -> Result<(), SignatureError>;
 }
 
 #[derive(Debug, Error)]

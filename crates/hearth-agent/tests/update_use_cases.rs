@@ -227,6 +227,72 @@ async fn a_signature_of_another_key_is_refused_before_any_download() {
 }
 
 #[tokio::test]
+async fn a_signed_version_that_is_not_the_requested_one_is_refused_before_any_download() {
+    // BR-UPDATE-035 : sans version signée, ou avec une version signée plus petite ou plus grande
+    // que la demande, rien n'est téléchargé, rien n'est écrit, rien ne tourne.
+    let env = env().await;
+    let sum = sha256_hex(BINARY);
+    let cases = [
+        (None, "sans version"),
+        (Some("0.1.0"), "plus petite"),
+        (Some("0.1.9"), "plus petite"),
+        (Some("0.2.1"), "plus grande"),
+        (Some("0.9.0"), "plus grande"),
+    ];
+    for (signed, label) in cases {
+        let rig = Rig::new(&env, true, false);
+        let signature = match signed {
+            Some(version) => rig.keys.sign_version(BINARY, version),
+            None => rig.keys.sign_comment(BINARY, None),
+        };
+        let error = rig
+            .service
+            .start(by().clone(), input(&rig, "0.2.0", BINARY, &signature, &sum))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, UpdateError::BadSignature), "{label}");
+        assert!(
+            rig.downloader.fetched.lock().unwrap().is_empty(),
+            "{label} : rien téléchargé"
+        );
+        rig.host.with(|s| {
+            assert!(
+                s.staged.is_none() && s.job.is_none() && s.launched.is_empty(),
+                "{label}"
+            );
+        });
+        assert!(!rig.service.status().in_progress, "{label}");
+    }
+}
+
+#[tokio::test]
+async fn a_forged_signed_version_is_refused_after_the_download_and_before_any_write() {
+    // Le commentaire d'un ancien binaire réécrit en `version:0.2.0` passe la lecture seule d'avant
+    // le téléchargement, pas la signature globale : refusé avant tout dépôt.
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    let forged = rig
+        .keys
+        .sign_version(BINARY, "0.1.0")
+        .replace("version:0.1.0", "version:0.2.0");
+    let mut events = rig.feed_receiver();
+    rig.service
+        .start(
+            by().clone(),
+            input(&rig, "0.2.0", BINARY, &forged, &sha256_hex(BINARY)),
+        )
+        .await
+        .unwrap();
+    let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+    assert_eq!(done.outcome, Some(UpdateOutcome::Failed));
+    assert_eq!(done.reason, Some(UpdateReason::BadSignature));
+    rig.host.with(|s| {
+        assert!(s.staged.is_none(), "rien d'écrit");
+        assert!(!s.supervisor_prepared && s.job.is_none() && s.launched.is_empty());
+    });
+}
+
+#[tokio::test]
 async fn only_one_update_at_a_time_and_the_refusal_is_journaled() {
     let env = env().await;
     let rig = Rig::new(&env, true, true);

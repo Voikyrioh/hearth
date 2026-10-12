@@ -42,8 +42,19 @@ impl Keys {
         }
     }
 
+    /// Signé pour la version `0.2.0`, celle que visent presque tous les tests (BR-UPDATE-035).
     pub fn sign(&self, data: &[u8]) -> String {
-        minisign::sign(None, &self.secret, Cursor::new(data), None, None)
+        self.sign_version(data, "0.2.0")
+    }
+
+    /// Signé comme `xtask` : `version:X.Y.Z` dans le commentaire de confiance.
+    pub fn sign_version(&self, data: &[u8], version: &str) -> String {
+        self.sign_comment(data, Some(&format!("file:hearth-agent\tversion:{version}")))
+    }
+
+    /// Signé avec ce commentaire de confiance (`None` : l'horodatage que minisign met seul).
+    pub fn sign_comment(&self, data: &[u8], comment: Option<&str>) -> String {
+        minisign::sign(None, &self.secret, Cursor::new(data), comment, None)
             .expect("signature")
             .to_string()
     }

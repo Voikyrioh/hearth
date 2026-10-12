@@ -157,6 +157,7 @@ Côté agent :
 - [BR-UPDATE-032](./BR-UPDATE-032-le-superviseur-rejoue-ne-refait-aucune-etape.md) — Un superviseur rejoué ne refait aucune étape (marqueur durable, issues sûres) — `domain/update/resume.rs`, `application/update_supervisor.rs::Supervisor::drive` — invariant ✓
 - [BR-UPDATE-033](./BR-UPDATE-033-les-reprises-sont-bornees.md) — Les reprises sont bornées (3), puis abandon journalisé une fois, copies gardées — `domain/update/resume.rs::{MAX_RESUMES, enter}`, `application/update_supervisor.rs::Supervisor::abandon` — invariant ✓
 - [BR-UPDATE-034](./BR-UPDATE-034-machine-redemarree-pendant-une-mise-a-jour.md) — Une machine redémarrée pendant une mise à jour : l'agent qui démarre reprend le marqueur — `domain/update/resume.rs::resume_phase`, `application/update.rs::UpdateService::{resume, recover}` — invariant ✓
+- [BR-UPDATE-035](./BR-UPDATE-035-la-version-signee-fait-foi-pour-l-agent.md) — L'agent refuse, avant tout échange de binaire, une signature dont le commentaire signé n'a pas `version:X.Y.Z` égal à la version demandée — `domain/update/signed_version.rs::check_signed_version` — invariant ✓
 
 Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent côté client (HRT-17, lot interface). Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée) ; 030 à 034 de HRT-27 (superviseur relancé et rejouable, arrêt voulu, reprises bornées, machine redémarrée).
 

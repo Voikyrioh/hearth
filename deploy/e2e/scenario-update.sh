@@ -4,7 +4,8 @@
 # lecture seule :
 #   /dist/hearth-agent-old    l'agent installé (0.1.0), qui n'accepte que la clé jetable du test
 #   /dist/hearth-agent-new    la version suivante (0.2.0), vrai agent statique
-#   /dist/new.minisig         sa signature (clé jetable) ; new.other.minisig : signée par une autre clé
+#   /dist/new.minisig         sa signature (clé jetable, commentaire signé version:0.2.0) ; new.other.minisig : signée
+#                             par une autre clé ; new.slow.minisig : signée version:0.9.0 (scénario « une seule à la fois »)
 #   /dist/mute                un « agent » signé qui annonce 0.3.0 mais ne répond jamais
 #   /dist/mute.minisig        sa signature
 #   /deploy/install.sh        le script d'installation
@@ -187,6 +188,19 @@ code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$BAD")")
 [ "$(hello_version)" = "0.1.0" ] || die "l'agent a changé de version"
 ok "signature d'une autre clé : 422 BAD_SIGNATURE, rien téléchargé, rien écrit, binaire et version inchangés"
 
+# Rejeu (BR-UPDATE-035) : signature AUTHENTIQUE (bonne clé, bon fichier) mais d'une autre version (commentaire signé
+# version:0.9.0), présentée comme la 0.2.0. Arrêtée par le contrôle précoce, avant tout téléchargement.
+: >/tmp/https.log
+REPLAY=$(request_body 0.2.0 "$NEW_URL" /dist/new.slow.minisig /dist/hearth-agent-new)
+code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$REPLAY")")
+[ "$code" = 422 ] && [ "$(body_field error.code)" = BAD_SIGNATURE ] || die "une signature authentique d'une autre version devrait recevoir 422 BAD_SIGNATURE (reçu $code : $(cat "$OUT.body"))"
+[ ! -e "$DATA/update" ] || die "$DATA/update existe : quelque chose a été écrit pour une signature rejouée"
+[ ! -s /tmp/https.log ] || die "le fichier a été téléchargé malgré la version signée différente : $(cat /tmp/https.log)"
+[ "$(sha_of "$INSTALLED")" = "$BIN_BEFORE" ] || die "le binaire installé a changé (rejeu)"
+[ ! -e "$BACKUP" ] || die "une sauvegarde existe (rejeu)"
+[ "$(hello_version)" = "0.1.0" ] || die "l'agent a changé de version (rejeu)"
+ok "signature authentique d'une autre version (0.9.0 présentée en 0.2.0) : 422 BAD_SIGNATURE, rien téléchargé, rien écrit, agent inchangé"
+
 # Somme fausse (signature de la bonne clé, bon fichier) : refusée après téléchargement, avant toute écriture.
 WRONG_SUM=$(python3 -c 'import json,sys; b=json.loads(sys.argv[1]); b["sha256"]="0"*64; print(json.dumps(b))' "$(request_body 0.2.0 "$NEW_URL" /dist/new.minisig /dist/hearth-agent-new)")
 code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$WRONG_SUM")")
@@ -267,7 +281,7 @@ ok "agent muet : retour automatique à l'ancien binaire (identique octet pour oc
 # --------------------------------------------------------------------------------------------
 # 4. Une seule mise à jour à la fois
 # --------------------------------------------------------------------------------------------
-SLOW_BODY=$(request_body 0.9.0 "$SLOW_URL" /dist/new.minisig /dist/hearth-agent-new)
+SLOW_BODY=$(request_body 0.9.0 "$SLOW_URL" /dist/new.slow.minisig /dist/hearth-agent-new)
 code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$SLOW_BODY")")
 [ "$code" = 202 ] || die "la mise à jour lente devrait être acceptée (reçu $code : $(cat "$OUT.body"))"
 sleep 1

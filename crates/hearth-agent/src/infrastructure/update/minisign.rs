@@ -8,6 +8,8 @@ use base64::engine::general_purpose::STANDARD;
 use minisign_verify::{PublicKey, Signature};
 
 use crate::application::ports::{SignatureError, SignatureVerifier};
+use crate::domain::install::Version;
+use crate::domain::update::check_signed_version;
 
 /// La clé publique de cette construction.
 pub const EMBEDDED_PUBLIC_KEY: &str = include_str!(concat!(env!("OUT_DIR"), "/update-key.pub"));
@@ -62,21 +64,31 @@ fn signature_text(input: &str) -> Option<String> {
 }
 
 impl SignatureVerifier for MinisignVerifier {
-    fn check_format(&self, signature: &str) -> Result<(), SignatureError> {
+    fn check_format(&self, signature: &str, version: &Version) -> Result<(), SignatureError> {
         let text = signature_text(signature).ok_or(SignatureError::Malformed)?;
-        Signature::decode(&text).map_err(|_| SignatureError::Malformed)?;
+        let decoded = Signature::decode(&text).map_err(|_| SignatureError::Malformed)?;
         match key_id_of(&text) {
-            Some(id) if id == self.key_id => Ok(()),
-            _ => Err(SignatureError::Malformed),
+            Some(id) if id == self.key_id => {}
+            _ => return Err(SignatureError::Malformed),
         }
+        // Lu sans le contenu, donc pas encore garanti : refus précoce seulement. `verify` fait foi.
+        check_signed_version(decoded.trusted_comment(), version).map_err(SignatureError::Version)
     }
 
-    fn verify(&self, data: &[u8], signature: &str) -> Result<(), SignatureError> {
+    fn verify(
+        &self,
+        data: &[u8],
+        signature: &str,
+        version: &Version,
+    ) -> Result<(), SignatureError> {
         let text = signature_text(signature).ok_or(SignatureError::Malformed)?;
         let signature = Signature::decode(&text).map_err(|_| SignatureError::Malformed)?;
+        // minisign-verify contrôle la signature des octets ET la signature globale (octets de la
+        // signature + commentaire signé) : le commentaire lu ensuite est donc authentique.
         self.key
             .verify(data, &signature, false)
-            .map_err(|_| SignatureError::Wrong)
+            .map_err(|_| SignatureError::Wrong)?;
+        check_signed_version(signature.trusted_comment(), version).map_err(SignatureError::Version)
     }
 }
 
@@ -85,6 +97,7 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
+    use crate::domain::update::SignedVersionRefusal;
 
     struct Pair {
         public: String,
@@ -99,14 +112,28 @@ mod tests {
         }
     }
 
-    fn sign(pair: &Pair, data: &[u8]) -> String {
+    const V: Version = Version::new(0, 2, 0);
+
+    /// Signé avec ce commentaire de confiance (ou aucun : minisign met alors un horodatage).
+    fn sign_with(pair: &Pair, data: &[u8], comment: Option<&str>) -> String {
         let public = minisign::PublicKey::from_box(
             minisign::PublicKeyBox::from_string(&pair.public).expect("clé"),
         )
         .ok();
-        minisign::sign(public.as_ref(), &pair.secret, Cursor::new(data), None, None)
-            .expect("signature")
-            .to_string()
+        minisign::sign(
+            public.as_ref(),
+            &pair.secret,
+            Cursor::new(data),
+            comment,
+            None,
+        )
+        .expect("signature")
+        .to_string()
+    }
+
+    /// Signé comme le fait `xtask` : `version:0.2.0` dans le commentaire de confiance.
+    fn sign(pair: &Pair, data: &[u8]) -> String {
+        sign_with(pair, data, Some("timestamp:1\tfile:agent\tversion:0.2.0"))
     }
 
     #[test]
@@ -115,11 +142,11 @@ mod tests {
         let verifier = MinisignVerifier::new(&pair.public).unwrap();
         let data = b"binaire de l'agent";
         let text = sign(&pair, data);
-        assert!(verifier.check_format(&text).is_ok());
-        assert!(verifier.verify(data, &text).is_ok());
+        assert!(verifier.check_format(&text, &V).is_ok());
+        assert!(verifier.verify(data, &text, &V).is_ok());
         let encoded = STANDARD.encode(&text);
-        assert!(verifier.check_format(&encoded).is_ok());
-        assert!(verifier.verify(data, &encoded).is_ok());
+        assert!(verifier.check_format(&encoded, &V).is_ok());
+        assert!(verifier.verify(data, &encoded, &V).is_ok());
     }
 
     #[test]
@@ -128,11 +155,11 @@ mod tests {
         let verifier = MinisignVerifier::new(&pair.public).unwrap();
         let text = sign(&pair, b"autre contenu");
         assert!(
-            verifier.check_format(&text).is_ok(),
+            verifier.check_format(&text, &V).is_ok(),
             "bien formée, de la bonne clé"
         );
         assert_eq!(
-            verifier.verify(b"binaire", &text),
+            verifier.verify(b"binaire", &text, &V),
             Err(SignatureError::Wrong)
         );
     }
@@ -143,8 +170,11 @@ mod tests {
         let theirs = pair();
         let verifier = MinisignVerifier::new(&ours.public).unwrap();
         let text = sign(&theirs, b"binaire");
-        assert_eq!(verifier.check_format(&text), Err(SignatureError::Malformed));
-        assert!(verifier.verify(b"binaire", &text).is_err());
+        assert_eq!(
+            verifier.check_format(&text, &V),
+            Err(SignatureError::Malformed)
+        );
+        assert!(verifier.verify(b"binaire", &text, &V).is_err());
     }
 
     #[test]
@@ -157,12 +187,72 @@ mod tests {
             "!!!!",
         ] {
             assert_eq!(
-                verifier.check_format(text),
+                verifier.check_format(text, &V),
                 Err(SignatureError::Malformed),
                 "{text:?}"
             );
-            assert!(verifier.verify(b"x", text).is_err(), "{text:?}");
+            assert!(verifier.verify(b"x", text, &V).is_err(), "{text:?}");
         }
+    }
+
+    #[test]
+    fn a_signature_without_a_signed_version_is_refused_before_and_after_the_download() {
+        let pair = pair();
+        let verifier = MinisignVerifier::new(&pair.public).unwrap();
+        let data = b"binaire";
+        // Sans commentaire choisi (horodatage seul), ou avec un commentaire sans version.
+        for text in [
+            sign_with(&pair, data, None),
+            sign_with(&pair, data, Some("timestamp:1\tfile:agent")),
+        ] {
+            let refusal = Err(SignatureError::Version(SignedVersionRefusal::Missing));
+            assert_eq!(verifier.check_format(&text, &V), refusal);
+            assert_eq!(verifier.verify(data, &text, &V), refusal);
+        }
+    }
+
+    #[test]
+    fn a_signed_version_other_than_the_requested_one_is_refused_smaller_and_greater() {
+        let pair = pair();
+        let verifier = MinisignVerifier::new(&pair.public).unwrap();
+        let data = b"binaire";
+        for signed in ["0.1.0", "0.1.9", "0.2.1", "1.0.0"] {
+            let text = sign_with(&pair, data, Some(&format!("file:agent\tversion:{signed}")));
+            assert!(matches!(
+                verifier.check_format(&text, &V),
+                Err(SignatureError::Version(
+                    SignedVersionRefusal::Mismatch { .. }
+                ))
+            ));
+            assert!(matches!(
+                verifier.verify(data, &text, &V),
+                Err(SignatureError::Version(
+                    SignedVersionRefusal::Mismatch { .. }
+                ))
+            ));
+        }
+    }
+
+    #[test]
+    fn the_signed_comment_is_covered_by_the_global_signature() {
+        // Un ancien binaire authentique (signé 0.1.0) dont on remplace le commentaire par
+        // `version:0.2.0` : la lecture seule du commentaire l'accepterait, la signature globale
+        // (octets de la signature + commentaire) le refuse.
+        let pair = pair();
+        let verifier = MinisignVerifier::new(&pair.public).unwrap();
+        let data = b"ancien agent";
+        let honest = sign_with(&pair, data, Some("file:agent\tversion:0.1.0"));
+        let forged = honest.replace("version:0.1.0", "version:0.2.0");
+        assert_ne!(honest, forged);
+        assert!(
+            verifier.check_format(&forged, &V).is_ok(),
+            "le refus précoce ne voit que le texte"
+        );
+        assert_eq!(
+            verifier.verify(data, &forged, &V),
+            Err(SignatureError::Wrong),
+            "la signature globale fait foi"
+        );
     }
 
     #[test]
