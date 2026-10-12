@@ -347,13 +347,10 @@ pointer_refused "deux lignes"
 printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64\r\n' "$SUM" >"$POINTER"
 pointer_refused "fin de ligne CRLF"
 # Ligne valide suivie d'une ligne vide : seul le compte de lignes la refuse.
-printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64
-
-' "$SUM" >"$POINTER"
+printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64\n\n' "$SUM" >"$POINTER"
 pointer_refused "ligne vide en plus"
 # Octet nul dans la version : seul le contrôle d'octets du fichier le voit (le shell le retirerait).
-printf '9.9.9  %s 9.9.9/hearth-agent-linux-x86_64
-' "$SUM" >"$POINTER"
+printf '9.9.9\000 %s 9.9.9/hearth-agent-linux-x86_64\n' "$SUM" >"$POINTER"
 pointer_refused "octet nul"
 # Plus de 512 octets : coupé à la lecture ou refusé par la mesure, même message, rien de téléchargé ni d'écrit.
 { printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64 ' "$SUM"; head -c 600 /dev/zero | tr '\0' 'a'; printf '\n'; } >"$POINTER"
