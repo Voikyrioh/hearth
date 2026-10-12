@@ -27,6 +27,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::client_release::{option, required, root};
+use crate::host::{Call, Host, System};
 use crate::release_core::*;
 
 pub const MANIFEST_NAME: &str = "manifest.json";
@@ -293,6 +294,7 @@ pub fn verify_stage(
         );
     }
 
+    check_install_script(&files[SCRIPT_KEY])?;
     check_sums(files, &version)?;
 
     let installer_name = installer_file_name(&version);
@@ -319,6 +321,57 @@ pub fn verify_stage(
 
     check_manifest(files, &version)?;
     Ok(version)
+}
+
+/// Garde sur le script déposé : il sera lancé en root sur les serveurs. Non vide, texte, première ligne
+/// `#!/bin/sh` (sans retour chariot), il lit le pointeur `releases/latest/agent` de l'API et nomme le
+/// binaire `hearth-agent-linux-x86_64`. Un script qui ne remplit pas ces conditions est l'ancien script
+/// (celui d'avant la lecture du pointeur), un fichier vide ou un mauvais fichier.
+pub fn check_install_script(script: &[u8]) -> Result<(), String> {
+    if script.is_empty() {
+        return Err("le script d'installation est vide".to_owned());
+    }
+    let text = std::str::from_utf8(script)
+        .map_err(|_| "le script d'installation n'est pas du texte".to_owned())?;
+    if text.split('\n').next() != Some("#!/bin/sh") {
+        return Err("le script d'installation doit commencer par la ligne #!/bin/sh (sans retour chariot Windows)".to_owned());
+    }
+    for needle in ["releases/latest/agent", AGENT_BINARY] {
+        if !text.contains(needle) {
+            return Err(format!(
+                "le script d'installation ne contient pas « {needle} » : c'est un ancien script ou un mauvais fichier (la lecture du pointeur releases/latest/agent arrive avec la PR de install.sh, à fusionner AVANT ce dépôt). Donne le bon par --install-script"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Sans `--install-script`, le script déposé est `deploy/install.sh` du dépôt : il ne doit pas différer
+/// de `HEAD` (modifié, indexé ou non suivi). Commandes git en lecture seule, via l'exécuteur injecté.
+/// Rend le commit de `HEAD`, que l'appelant affiche.
+pub fn check_script_is_committed(host: &dyn Host, root: &Path) -> Result<String, String> {
+    let root_text = root.to_string_lossy().into_owned();
+    let git = |list: &[&str]| -> Result<String, String> {
+        let mut argv = vec!["-C".to_owned(), root_text.clone()];
+        argv.extend(list.iter().map(|arg| (*arg).to_owned()));
+        let output = host.run(&Call::new("git", &argv))?;
+        if output.success {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        } else {
+            Err(format!(
+                "git {} a échoué ({}) : impossible de vérifier deploy/install.sh",
+                list.join(" "),
+                output.stderr.chars().take(200).collect::<String>()
+            ))
+        }
+    };
+    let status = git(&["status", "--porcelain", "--", "deploy/install.sh"])?;
+    if !status.is_empty() {
+        return Err(format!(
+            "deploy/install.sh diffère de HEAD ({status}) : committe-le, ou donne le fichier voulu par --install-script. Un script lancé en root ne part pas d'un fichier non committé"
+        ));
+    }
+    git(&["rev-parse", "HEAD"])
 }
 
 /// Un seul dossier de version sous `releases/`, et seulement les deux objets mutables à côté.
@@ -598,10 +651,17 @@ pub fn run_stage(args: &[String]) -> Result<(), String> {
     let notes = read_text(&client_dir.join("notes.txt"))?;
     let agent = read_bytes(Path::new(&required(args, "--agent-binary")?))?;
     let agent_signature = read_text(Path::new(&required(args, "--agent-signature")?))?;
-    let script_path = option(args, "--install-script").map_or_else(
-        || root.join("deploy/install.sh"),
-        |path| Path::new(&path).to_path_buf(),
-    );
+    let script_path = match option(args, "--install-script") {
+        Some(path) => {
+            println!("script : {path} (donné par --install-script, non comparé à HEAD)");
+            Path::new(&path).to_path_buf()
+        }
+        None => {
+            let commit = check_script_is_committed(&System::new(), &root)?;
+            println!("script : deploy/install.sh tel que dans le commit {commit}");
+            root.join("deploy/install.sh")
+        }
+    };
     let install_script = read_bytes(&script_path)?;
     let client_key = read_text(&root.join("apps/desktop/src-tauri/update-key.pub"))?;
     let agent_key = read_text(&root.join("crates/hearth-agent/update-key.pub"))?;
@@ -645,6 +705,10 @@ pub mod fixtures {
 
     pub const CARGO: &str = "[workspace.package]\nversion = \"0.1.0\"\n";
     pub const VERSION: &str = "0.1.0";
+    /// Un script qui passe la garde (lecture du pointeur, nom du binaire) : le dépôt de cette branche a
+    /// encore l'ANCIEN script, les tests fournissent le leur.
+    pub const SCRIPT: &[u8] =
+        b"#!/bin/sh\n# lit /api/releases/latest/agent, installe hearth-agent-linux-x86_64\necho installe\n";
 
     pub struct Keys {
         pub client_secret: String,
@@ -741,7 +805,7 @@ pub mod fixtures {
                 latest_json,
                 notes: "Corrections.\n".to_owned(),
                 agent,
-                install_script: b"#!/bin/sh\necho installe\n".to_vec(),
+                install_script: SCRIPT.to_vec(),
             }
         }
 
@@ -945,11 +1009,140 @@ mod tests {
     }
 
     #[test]
-    fn the_api_mirror_refuses_a_pointer_that_install_sh_would_refuse() {
-        let files = Fixture::new().staged();
-        let mut value: Value = serde_json::from_slice(&files[MANIFEST_KEY]).unwrap();
-        value["agent"]["version"] = "0.0.9".into();
-        assert!(api_accepts(&value).unwrap_err().contains("chemin"));
+    fn a_script_that_would_not_read_the_pointer_or_is_empty_is_refused() {
+        for (script, expected) in [
+            (&b""[..], "vide"),
+            // L'ancien script : télécharge depuis GitHub, ne lit pas le pointeur de l'API.
+            (
+                &b"#!/bin/sh\nURL=\"https://github.com/x/releases/latest/download/hearth-agent-linux-x86_64\"\n"[..],
+                "releases/latest/agent",
+            ),
+            (&b"#!/bin/sh\n# releases/latest/agent\n"[..], "hearth-agent-linux-x86_64"),
+            (
+                &b"#!/bin/bash\n# releases/latest/agent hearth-agent-linux-x86_64\n"[..],
+                "#!/bin/sh",
+            ),
+            (
+                &b"# releases/latest/agent hearth-agent-linux-x86_64\n#!/bin/sh\n"[..],
+                "#!/bin/sh",
+            ),
+            (
+                &b"#!/bin/sh\r\n# releases/latest/agent hearth-agent-linux-x86_64\r\n"[..],
+                "#!/bin/sh",
+            ),
+            (&b"\xff\xfe"[..], "pas du texte"),
+        ] {
+            let mut fixture = Fixture::new();
+            fixture.install_script = script.to_vec();
+            let error = build_stage(&fixture.input()).unwrap_err();
+            assert!(error.contains(expected), "{expected} : {error}");
+        }
+        // Le même contrôle rejoue à l'envoi : un dossier assemblé dont le script a été remplacé après coup.
+        let mut files = Fixture::new().staged();
+        files.insert(SCRIPT_KEY.to_owned(), b"#!/bin/sh\necho vide\n".to_vec());
+        files.insert(key(SCRIPT_NAME), b"#!/bin/sh\necho vide\n".to_vec());
+        let sums = sums_text(&files, VERSION).unwrap();
+        files.insert(key(SUMS_NAME), sums.into_bytes());
+        assert!(
+            verify(&files)
+                .unwrap_err()
+                .contains("releases/latest/agent")
+        );
+        // Le bon passe.
+        assert!(check_install_script(SCRIPT).is_ok());
+    }
+
+    /// Faux git : répond à `status --porcelain` et `rev-parse HEAD`, enregistre les arguments.
+    struct GitFake {
+        status: &'static str,
+        calls: std::cell::RefCell<Vec<Vec<String>>>,
+    }
+
+    impl Host for GitFake {
+        fn run(&self, call: &Call) -> Result<crate::host::CmdOutput, String> {
+            assert_eq!(call.program, "git");
+            self.calls.borrow_mut().push(call.args.to_vec());
+            let out = if call.args.iter().any(|arg| arg == "status") {
+                self.status
+            } else {
+                "abc1234def"
+            };
+            Ok(crate::host::CmdOutput {
+                success: true,
+                code: Some(0),
+                stdout: format!("{out}\n").into_bytes(),
+                stderr: String::new(),
+            })
+        }
+        fn elapsed(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+        fn sleep(&self, _: std::time::Duration) {}
+    }
+
+    #[test]
+    fn the_repository_script_must_be_the_committed_one_and_its_commit_is_shown() {
+        let clean = GitFake {
+            status: "",
+            calls: Default::default(),
+        };
+        let commit = check_script_is_committed(&clean, Path::new("depot")).unwrap();
+        assert_eq!(commit, "abc1234def");
+        // Lecture seule, restreint au fichier.
+        let calls = clean.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].ends_with(&[
+            "status".to_owned(),
+            "--porcelain".to_owned(),
+            "--".to_owned(),
+            "deploy/install.sh".to_owned()
+        ]));
+        assert_eq!(calls[1][2..], ["rev-parse", "HEAD"]);
+        for call in calls.iter() {
+            assert!(
+                !call
+                    .iter()
+                    .any(|arg| ["commit", "add", "checkout", "reset", "stash"]
+                        .contains(&arg.as_str())),
+                "{call:?}"
+            );
+        }
+        for status in [
+            " M deploy/install.sh",
+            "M  deploy/install.sh",
+            "?? deploy/install.sh",
+        ] {
+            let dirty = GitFake {
+                status,
+                calls: Default::default(),
+            };
+            let error = check_script_is_committed(&dirty, Path::new("depot")).unwrap_err();
+            assert!(
+                error.contains("diffère de HEAD") && error.contains("--install-script"),
+                "{status} : {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_git_that_cannot_answer_stops_the_script_check() {
+        struct Broken;
+        impl Host for Broken {
+            fn run(&self, _: &Call) -> Result<crate::host::CmdOutput, String> {
+                Ok(crate::host::CmdOutput {
+                    success: false,
+                    code: Some(128),
+                    stdout: Vec::new(),
+                    stderr: "fatal: not a git repository".to_owned(),
+                })
+            }
+            fn elapsed(&self) -> std::time::Duration {
+                std::time::Duration::ZERO
+            }
+            fn sleep(&self, _: std::time::Duration) {}
+        }
+        let error = check_script_is_committed(&Broken, Path::new("depot")).unwrap_err();
+        assert!(error.contains("impossible de vérifier"), "{error}");
     }
 
     #[test]

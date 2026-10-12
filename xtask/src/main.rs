@@ -35,6 +35,7 @@ mod docker;
 mod e2e;
 mod e2e_double_failure;
 mod e2e_update;
+mod host;
 mod release_core;
 mod release_publish;
 mod release_stage;
@@ -54,7 +55,7 @@ fn main() -> ExitCode {
   client-release-check  refuse la clé de développement, une version qui n'est pas celle du dépôt et une étiquette vX.Y.Z déjà présente sur origin
   client-version        la version du dépôt (seule source du numéro publié)\n  client-sign           signe l'installateur avec la clé des variables d'environnement (version dans la signature)\n  client-manifest       vérifie la signature puis écrit latest.json (manifeste du greffon de mise à jour du client ; --url = https://hearth.voikyrioh.fr/api/releases/X.Y.Z/Hearth_X.Y.Z_x64-setup.exe)
   release-stage         assemble une version sous target/release-stage/ (--client-dir D --agent-binary F --agent-signature S [--install-script P]) après avoir revérifié signatures, sommes, adresses et liste fermée
-  release-upload        dépose la version assemblée au bucket : ESSAI À BLANC par défaut, --confirm pour écrire (fichiers, relecture publique, script, manifeste en dernier ; nécessite l'outil aws et ses variables AWS_* dans l'environnement)
+  release-upload        dépose la version assemblée au bucket : ESSAI À BLANC par défaut, --confirm pour écrire (fichiers, relecture publique, script, manifeste en dernier, chacun relu dans le bucket ; refuse un manifeste en place de version supérieure sauf --allow-rollback ; nécessite l'outil aws et ses variables AWS_* dans l'environnement)
   agent-manifest        vérifie la signature de l'agent contre sa clé embarquée puis ajoute la section `agent` à latest.json (cible de la mise à jour de l'agent)"
             );
             return ExitCode::SUCCESS;

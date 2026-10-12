@@ -20,7 +20,7 @@ pub const DEV_KEY_MARK: &str = "DEV public key";
 /// `{DOWNLOAD_PREFIX}{X.Y.Z}/{fichier}`, SANS `v` devant la version (format de l'API).
 pub const DOWNLOAD_PREFIX: &str = "https://hearth.voikyrioh.fr/api/releases/";
 /// Binaire de l'agent dans la liste fermée de l'API (`hearth-releases-api`,
-/// `release-files.ts::AGENT_BINARY`) : aussi la contrainte de `deploy/install.sh` (fiche BR-INSTALL à écrire avec le ticket de install.sh).
+/// `release-files.ts::AGENT_BINARY`) : aussi la contrainte de `deploy/install.sh` (BR-INSTALL-013, fiche de la PR de install.sh).
 pub const AGENT_BINARY: &str = "hearth-agent-linux-x86_64";
 
 /// Nom de l'installateur du client dans la liste fermée de l'API (`release-files.ts`).
@@ -174,8 +174,9 @@ pub enum TagLookup {
 /// Garde contre la resignature d'un numéro déjà étiqueté : un numéro étiqueté est brûlé, jamais
 /// resigné (conception de la distribution, 8.2). L'étiquette n'est posée qu'à la fin, à la main :
 /// entre la signature et l'étiquette (ou après un essai qui signe puis échoue) rien n'empêche de
-/// relancer, cette fenêtre n'est PAS couverte (le refus de `release-upload` sur une version déjà
-/// déposée la fermera, HRT-51). Refuse si l'étiquette `v{version}` existe déjà sur le dépôt
+/// relancer : cette garde ne couvre PAS cette fenêtre. `release-upload` la ferme à partir du premier
+/// objet déposé (il refuse d'écrire une clé de version déjà présente avec un autre contenu,
+/// BR-RELEASE-001) ; un numéro signé puis jamais déposé reste resignable. Refuse si l'étiquette `v{version}` existe déjà sur le dépôt
 /// distant. `lookup` interroge le dépôt (`git ls-remote`, lecture seule) : injectée pour les tests.
 /// Une interrogation impossible (réseau coupé) refuse aussi : sans réponse on ne sait pas.
 pub fn check_tag_is_free(
@@ -345,7 +346,7 @@ pub fn agent_section(
         return Err("somme SHA-256 : 64 caractères hexadécimaux attendus".to_owned());
     }
     // Dossier = version de l'AGENT, fichier = `hearth-agent-linux-x86_64` : `install.sh` n'accepte que
-    // ce chemin (fiche BR-INSTALL à écrire avec le ticket de install.sh).
+    // ce chemin (BR-INSTALL-013, fiche de la PR de install.sh).
     check_release_url(prefix, version, AGENT_BINARY, url)?;
     Ok(json!({
         "version": version,
