@@ -48,6 +48,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             data = source.read()
         # Réponse écrite à la main : ni Content-Length, ni keep-alive ; la fin du corps est le
         # morceau de taille 0. Un client qui borne sur la taille annoncée n'a rien à borner.
+        self.log_request(200)  # réponse écrite à la main : sans cela la requête n'est pas journalisée
         self.wfile.write(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
         size = 100 if len(data) <= 200000 else 65536  # petits morceaux pour un pointeur
         for start in range(0, len(data), size):
