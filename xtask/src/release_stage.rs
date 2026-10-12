@@ -374,6 +374,56 @@ pub fn check_script_is_committed(host: &dyn Host, root: &Path) -> Result<String,
     git(&["rev-parse", "HEAD"])
 }
 
+/// Les octets de `deploy/install.sh` tels que dans `HEAD` (`git show`, lecture seule) : le fichier du
+/// commit affiché, pas celui du disque (`skip-worktree`, lecture décalée).
+fn committed_script_bytes(host: &dyn Host, root: &Path) -> Result<Vec<u8>, String> {
+    let argv = vec![
+        "-C".to_owned(),
+        root.to_string_lossy().into_owned(),
+        "show".to_owned(),
+        "HEAD:deploy/install.sh".to_owned(),
+    ];
+    let output = host.run(&Call::new("git", &argv))?;
+    if output.success {
+        Ok(output.stdout)
+    } else {
+        Err(format!(
+            "git show HEAD:deploy/install.sh a échoué ({}) : impossible de lire le script du commit",
+            output.stderr.chars().take(200).collect::<String>()
+        ))
+    }
+}
+
+/// Choisit les octets du script à déposer et la ligne qui le dit. Sans option, ou si l'option désigne
+/// `deploy/install.sh` du dépôt (comparaison après `canonicalize`), le script doit être celui de `HEAD`
+/// et ce sont les octets de `HEAD` qui partent. Tout autre fichier est lu sur le disque, non comparé.
+pub fn select_install_script(
+    host: &dyn Host,
+    root: &Path,
+    given: Option<&str>,
+    read: &dyn Fn(&Path) -> Result<Vec<u8>, String>,
+    canonical: &dyn Fn(&Path) -> Option<std::path::PathBuf>,
+) -> Result<(Vec<u8>, String), String> {
+    let is_repo_script = given.is_none_or(|path| {
+        let repo = canonical(&root.join("deploy/install.sh"));
+        repo.is_some() && canonical(Path::new(path)) == repo
+    });
+    if !is_repo_script {
+        let path = given.unwrap_or_default();
+        let bytes = read(Path::new(path))?;
+        return Ok((
+            bytes,
+            format!("script : {path} (donné par --install-script, non comparé à HEAD)"),
+        ));
+    }
+    let commit = check_script_is_committed(host, root)?;
+    let bytes = committed_script_bytes(host, root)?;
+    Ok((
+        bytes,
+        format!("script : deploy/install.sh tel que dans le commit {commit}"),
+    ))
+}
+
 /// Un seul dossier de version sous `releases/`, et seulement les deux objets mutables à côté.
 fn single_version_dir(files: &Files) -> Result<String, String> {
     let mut dirs = BTreeSet::new();
@@ -651,18 +701,15 @@ pub fn run_stage(args: &[String]) -> Result<(), String> {
     let notes = read_text(&client_dir.join("notes.txt"))?;
     let agent = read_bytes(Path::new(&required(args, "--agent-binary")?))?;
     let agent_signature = read_text(Path::new(&required(args, "--agent-signature")?))?;
-    let script_path = match option(args, "--install-script") {
-        Some(path) => {
-            println!("script : {path} (donné par --install-script, non comparé à HEAD)");
-            Path::new(&path).to_path_buf()
-        }
-        None => {
-            let commit = check_script_is_committed(&System::new(), &root)?;
-            println!("script : deploy/install.sh tel que dans le commit {commit}");
-            root.join("deploy/install.sh")
-        }
-    };
-    let install_script = read_bytes(&script_path)?;
+    let given = option(args, "--install-script");
+    let (install_script, script_note) = select_install_script(
+        &System::new(),
+        &root,
+        given.as_deref(),
+        &|path| read_bytes(path),
+        &|path| std::fs::canonicalize(path).ok(),
+    )?;
+    println!("{script_note}");
     let client_key = read_text(&root.join("apps/desktop/src-tauri/update-key.pub"))?;
     let agent_key = read_text(&root.join("crates/hearth-agent/update-key.pub"))?;
 
@@ -1062,6 +1109,14 @@ mod tests {
         fn run(&self, call: &Call) -> Result<crate::host::CmdOutput, String> {
             assert_eq!(call.program, "git");
             self.calls.borrow_mut().push(call.args.to_vec());
+            if call.args.iter().any(|arg| arg == "show") {
+                return Ok(crate::host::CmdOutput {
+                    success: true,
+                    code: Some(0),
+                    stdout: COMMITTED_SCRIPT.to_vec(),
+                    stderr: String::new(),
+                });
+            }
             let out = if call.args.iter().any(|arg| arg == "status") {
                 self.status
             } else {
@@ -1122,6 +1177,111 @@ mod tests {
                 "{status} : {error}"
             );
         }
+    }
+
+    const COMMITTED_SCRIPT: &[u8] = b"#!/bin/sh\n# script du commit\n";
+
+    fn disk(path: &Path) -> Result<Vec<u8>, String> {
+        assert_eq!(path, Path::new("autre.sh"), "seul l'autre fichier est lu");
+        Ok(b"#!/bin/sh\n# script du disque\n".to_vec())
+    }
+
+    /// `depot/deploy/install.sh` et `deploy/install.sh` désignent le même fichier.
+    fn canon(path: &Path) -> Option<std::path::PathBuf> {
+        let text = path.to_string_lossy().replace('\\', "/");
+        match text.as_str() {
+            "depot/deploy/install.sh" | "deploy/install.sh" => Some("/R/deploy/install.sh".into()),
+            "autre.sh" => Some("/R/autre.sh".into()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn without_the_option_the_bytes_of_head_are_staged_not_the_disk() {
+        let fake = GitFake {
+            status: "",
+            calls: Default::default(),
+        };
+        let (bytes, note) =
+            select_install_script(&fake, Path::new("depot"), None, &disk, &canon).unwrap();
+        assert_eq!(bytes, COMMITTED_SCRIPT);
+        assert!(
+            note.contains("abc1234def") && note.contains("commit"),
+            "{note}"
+        );
+        assert!(
+            fake.calls
+                .borrow()
+                .iter()
+                .any(|call| call[2..] == ["show", "HEAD:deploy/install.sh"])
+        );
+    }
+
+    #[test]
+    fn the_option_naming_the_repository_script_keeps_the_committed_check() {
+        let dirty = GitFake {
+            status: " M deploy/install.sh",
+            calls: Default::default(),
+        };
+        let error = select_install_script(
+            &dirty,
+            Path::new("depot"),
+            Some("deploy/install.sh"),
+            &disk,
+            &canon,
+        )
+        .unwrap_err();
+        assert!(error.contains("diffère de HEAD"), "{error}");
+        let clean = GitFake {
+            status: "",
+            calls: Default::default(),
+        };
+        let (bytes, _) = select_install_script(
+            &clean,
+            Path::new("depot"),
+            Some("deploy/install.sh"),
+            &disk,
+            &canon,
+        )
+        .unwrap();
+        assert_eq!(bytes, COMMITTED_SCRIPT);
+    }
+
+    #[test]
+    fn another_file_is_read_from_disk_and_not_compared_to_head() {
+        let fake = GitFake {
+            status: " M deploy/install.sh",
+            calls: Default::default(),
+        };
+        let (bytes, note) =
+            select_install_script(&fake, Path::new("depot"), Some("autre.sh"), &disk, &canon)
+                .unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("disque"));
+        assert!(note.contains("non comparé à HEAD"), "{note}");
+        assert!(fake.calls.borrow().is_empty(), "aucun appel git");
+    }
+
+    #[test]
+    fn a_failing_git_show_stops_the_staging() {
+        struct NoShow;
+        impl Host for NoShow {
+            fn run(&self, call: &Call) -> Result<crate::host::CmdOutput, String> {
+                let shown = call.args.iter().any(|arg| arg == "show");
+                Ok(crate::host::CmdOutput {
+                    success: !shown,
+                    code: Some(if shown { 128 } else { 0 }),
+                    stdout: b"\n".to_vec(),
+                    stderr: "fatal: path not in HEAD".to_owned(),
+                })
+            }
+            fn elapsed(&self) -> std::time::Duration {
+                std::time::Duration::ZERO
+            }
+            fn sleep(&self, _: std::time::Duration) {}
+        }
+        let error =
+            select_install_script(&NoShow, Path::new("depot"), None, &disk, &canon).unwrap_err();
+        assert!(error.contains("git show"), "{error}");
     }
 
     #[test]

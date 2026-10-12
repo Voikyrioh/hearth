@@ -85,11 +85,13 @@ pub struct PlannedWrite {
 
 /// Options de `release-upload`.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Options {
+pub struct Options<'a> {
     /// Sans elle : essai à blanc.
     pub confirm: bool,
     /// Autorise à remplacer un manifeste annonçant une version SUPÉRIEURE (retour arrière voulu).
     pub allow_rollback: bool,
+    /// Dossier assemblé réellement lu (cité dans la commande manuelle de secours).
+    pub stage_dir: &'a str,
 }
 
 /// Le type de contenu posé au dépôt, d'après le nom du fichier (même table que `contentTypeFor` de
@@ -259,10 +261,18 @@ fn put(host: &dyn Host, write: &PlannedWrite, bytes: &[u8]) -> Result<(), String
     }
 }
 
-/// Ce qu'il faut remettre à la main quand un objet mutable relu n'est pas celui qu'on vient de déposer.
-fn restore_hint(write: &PlannedWrite) -> String {
+/// Ce qu'il faut faire quand un objet mutable relu n'est pas celui qu'on vient de déposer : relancer la
+/// même commande (elle redépose script et manifeste depuis les octets vérifiés, puis les relit), sinon
+/// la commande manuelle complète, depuis le dossier assemblé réellement lu.
+fn restore_hint(write: &PlannedWrite, stage_dir: &str) -> String {
+    let env = AWS_ENV
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let stage_dir = stage_dir.trim_end_matches(['/', '\\']);
     format!(
-        "Remets exactement le fichier {key} du dossier assemblé (target/release-stage/{key}, sha256 {sum}, {size} octets, type {ct}) à la clé {key} du bucket {BUCKET} (par exemple : aws s3 cp target/release-stage/{key} s3://{BUCKET}/{key} --endpoint-url {ENDPOINT} --content-type \"{ct}\")",
+        "Premier remède : relance la même commande (elle redépose {key} depuis les octets vérifiés du dossier assemblé et le relit). Sinon, à la main, avec ces deux variables d'environnement posées ({env}) : aws s3 cp {stage_dir}/{key} s3://{BUCKET}/{key} --endpoint-url {ENDPOINT} --region {REGION} --content-type \"{ct}\" (fichier de sha256 {sum}, {size} octets)",
         key = write.key,
         sum = write.sum,
         size = write.size,
@@ -272,7 +282,7 @@ fn restore_hint(write: &PlannedWrite) -> String {
 
 /// Relit par le BUCKET (donc sans cache) un objet mutable qu'on vient d'écrire : seule preuve que
 /// l'annonce est bonne. Sinon, une erreur qui dit exactement quoi remettre.
-fn verify_written(host: &dyn Host, write: &PlannedWrite) -> Result<(), String> {
+fn verify_written(host: &dyn Host, write: &PlannedWrite, stage_dir: &str) -> Result<(), String> {
     let consequence = match write.kind {
         Kind::Script => {
             "Le script servi par /api/install.sh peut être FAUX tant que ce n'est pas remis ; le manifeste n'est PAS écrit"
@@ -283,7 +293,7 @@ fn verify_written(host: &dyn Host, write: &PlannedWrite) -> Result<(), String> {
         format!(
             "après l'écriture de {} : {error}. {consequence}. {}",
             write.key,
-            restore_hint(write)
+            restore_hint(write, stage_dir)
         )
     })?;
     match state {
@@ -291,13 +301,13 @@ fn verify_written(host: &dyn Host, write: &PlannedWrite) -> Result<(), String> {
         Remote::Absent => Err(format!(
             "{} est introuvable dans le bucket juste après son écriture. {consequence}. {}",
             write.key,
-            restore_hint(write)
+            restore_hint(write, stage_dir)
         )),
         Remote::Different(found) => Err(format!(
             "{} relu dans le bucket (sha256 {found}) n'est pas celui déposé (sha256 {}). {consequence}. {}",
             write.key,
             write.sum,
-            restore_hint(write)
+            restore_hint(write, stage_dir)
         )),
     }
 }
@@ -396,9 +406,15 @@ fn triple(version: &str) -> Result<(u64, u64, u64), String> {
 
 /// Lit le manifeste EN PLACE dans le bucket (avant toute écriture) : refus si sa version, client ou
 /// agent, est supérieure à celle déposée, sauf retour arrière explicite. Absent = premier dépôt.
-fn check_not_older(host: &dyn Host, version: &str, allow_rollback: bool) -> Result<(), String> {
+/// Rend les versions annoncées plus récentes que celle déposée (vide hors retour arrière accepté) : le
+/// retour arrière accepté doit laisser une ligne, que l'appelant affiche avant la première écriture.
+fn check_not_older(
+    host: &dyn Host,
+    version: &str,
+    allow_rollback: bool,
+) -> Result<Vec<String>, String> {
     let Some(bytes) = fetch(host, MANIFEST_KEY)? else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let unreadable = |detail: &str| {
         format!(
@@ -426,7 +442,7 @@ fn check_not_older(host: &dyn Host, version: &str, allow_rollback: bool) -> Resu
         }
     }
     if newer.is_empty() || allow_rollback {
-        return Ok(());
+        return Ok(newer);
     }
     Err(format!(
         "REFUS : le manifeste en place annonce {} alors que la version déposée est {version}. Un dépôt ne ramène pas la version annoncée en arrière par accident (dossier assemblé resté sous target/ après un retour sur un ancien commit ?). Rien n'a été écrit. Si le retour arrière est voulu, relance avec --allow-rollback",
@@ -459,6 +475,12 @@ pub fn publish(
             "avant toute écriture : lecture du manifeste en place, refus si sa version est supérieure à celle déposée (--allow-rollback pour un retour arrière voulu)"
                 .to_owned(),
         );
+        if options.allow_rollback {
+            say(
+                "--allow-rollback est ARMÉ : si le manifeste en place annonce une version supérieure à celle déposée, il sera remplacé sans refus (le dépôt réel affichera alors une ligne « RETOUR ARRIÈRE » avant sa première écriture)"
+                    .to_owned(),
+            );
+        }
         for (at, write) in writes.iter().enumerate() {
             let note = match write.kind {
                 Kind::Version => {
@@ -512,13 +534,19 @@ pub fn publish(
         ));
     }
     // 1a bis. Le manifeste en place n'annonce pas une version plus récente.
-    check_not_older(host, version, options.allow_rollback).map_err(|error| {
+    let newer = check_not_older(host, version, options.allow_rollback).map_err(|error| {
         if error.contains("Rien n'a été écrit") {
             error
         } else {
             nothing_written(error)
         }
     })?;
+    if !newer.is_empty() {
+        say(format!(
+            "RETOUR ARRIÈRE : le manifeste en place annonce {}, il sera remplacé par {version}",
+            newer.join(" et ")
+        ));
+    }
     // 1b. Écriture de ce qui manque, depuis les octets vérifiés.
     for (write, remote) in &state {
         if *remote == Remote::Same {
@@ -536,7 +564,7 @@ pub fn publish(
         for write in writes.iter().filter(|write| write.kind == kind) {
             put(host, write, &files[&write.key])?;
             say(format!("écrit : {}", write.key));
-            verify_written(host, write)?;
+            verify_written(host, write, options.stage_dir)?;
             say(format!("relu dans le bucket, identique : {}", write.key));
         }
     }
@@ -631,6 +659,7 @@ pub fn run_upload(args: &[String]) -> Result<(), String> {
         Options {
             confirm: parsed.confirm,
             allow_rollback: parsed.allow_rollback,
+            stage_dir: &stage_dir.to_string_lossy(),
         },
         &mut |line| println!("{line}"),
     )
@@ -647,6 +676,13 @@ mod tests {
     const CONFIRM: Options = Options {
         confirm: true,
         allow_rollback: false,
+        stage_dir: "target/release-stage",
+    };
+
+    const ROLLBACK: Options = Options {
+        confirm: true,
+        allow_rollback: true,
+        stage_dir: "target/release-stage",
     };
 
     /// Ce que le faux a reçu pour un appel.
@@ -886,6 +922,7 @@ mod tests {
             Options {
                 confirm,
                 allow_rollback: false,
+                stage_dir: "target/release-stage",
             },
         )
     }
@@ -1235,9 +1272,12 @@ mod tests {
         assert!(
             error.contains(MANIFEST_KEY)
                 && error.contains("n'est pas celui déposé")
-                && error.contains("Remets exactement")
+                && error.contains("Premier remède : relance la même commande")
                 && error.contains(&sha256_hex(&files[MANIFEST_KEY]))
-                && error.contains("target/release-stage/releases/manifest.json"),
+                && error.contains("aws s3 cp target/release-stage/releases/manifest.json")
+                && error.contains("--region fr-par")
+                && error.contains("AWS_REQUEST_CHECKSUM_CALCULATION=when_required")
+                && error.contains("AWS_RESPONSE_CHECKSUM_VALIDATION=when_required"),
             "{error}"
         );
         assert!(!lines.iter().any(|line| line.contains("annoncée")));
@@ -1251,7 +1291,7 @@ mod tests {
         assert!(
             error.contains(SCRIPT_KEY)
                 && error.contains("FAUX")
-                && error.contains("Remets exactement")
+                && error.contains("Premier remède")
                 && error.contains("le manifeste n'est PAS écrit"),
             "{error}"
         );
@@ -1401,17 +1441,59 @@ mod tests {
     fn the_explicit_rollback_option_lets_an_older_version_replace_the_manifest() {
         let (files, fake) = setup();
         fake.insert(MANIFEST_KEY, &manifest_of("0.2.0", Some("0.2.0")));
-        let (result, _) = run_with(
-            &fake,
-            &files,
-            Options {
-                confirm: true,
-                allow_rollback: true,
-            },
-        );
+        let (result, lines) = run_with(&fake, &files, ROLLBACK);
         result.unwrap();
         assert_eq!(fake.writes().last(), Some(&MANIFEST_KEY.to_owned()));
         assert_eq!(fake.bucket.borrow()[MANIFEST_KEY], files[MANIFEST_KEY]);
+        // Le retour arrière accepté laisse une ligne, avant la première écriture.
+        let at = lines
+            .iter()
+            .position(|line| line.starts_with("RETOUR ARRIÈRE"))
+            .expect("ligne RETOUR ARRIÈRE");
+        assert!(
+            lines[at].contains("version (client) 0.2.0 et agent.version 0.2.0")
+                && lines[at].contains(&format!("remplacé par {VERSION}")),
+            "{}",
+            lines[at]
+        );
+        assert!(lines[..at].iter().all(|line| !line.starts_with("écrit")));
+        // Un dépôt normal n'en laisse pas.
+        let (files, fake) = setup();
+        let (_, lines) = run(&fake, &files, true);
+        assert!(!lines.iter().any(|line| line.contains("RETOUR ARRIÈRE")));
+    }
+
+    #[test]
+    fn the_dry_run_says_when_the_rollback_option_is_armed() {
+        let (files, fake) = setup();
+        let (result, lines) = run_with(
+            &fake,
+            &files,
+            Options {
+                confirm: false,
+                ..ROLLBACK
+            },
+        );
+        result.unwrap();
+        assert!(fake.calls.borrow().is_empty());
+        assert!(lines.iter().any(|line| line.contains("ARMÉ")));
+        let (_, plain) = run(&fake, &files, false);
+        assert!(!plain.iter().any(|line| line.contains("ARMÉ")));
+    }
+
+    #[test]
+    fn the_rollback_option_does_not_excuse_an_unreadable_manifest_in_place() {
+        for placed in [
+            b"pas du json".to_vec(),
+            b"{}".to_vec(),
+            manifest_of("bientot", None),
+        ] {
+            let (files, fake) = setup();
+            fake.insert(MANIFEST_KEY, &placed);
+            let error = run_with(&fake, &files, ROLLBACK).0.unwrap_err();
+            assert!(error.contains("illisible"), "{error}");
+            assert!(fake.writes().is_empty());
+        }
     }
 
     #[test]
