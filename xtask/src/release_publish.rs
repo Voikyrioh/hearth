@@ -1625,7 +1625,7 @@ mod tests {
         let mut untracked = TreeFake::new("", "abc1234def");
         untracked.untracked = "crates/hearth-agent/migrations/0005_x.sql".to_owned();
         let cases = [
-            ("Cargo.toml", TreeFake::new(" M Cargo.toml", "abc1234def")),
+            ("README.md", TreeFake::new(" M README.md", "abc1234def")),
             ("0005_x.sql", untracked),
             (
                 "n'est pas celui qui a été assemblé",

@@ -423,6 +423,31 @@ pub fn untracked_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, Str
         .collect())
 }
 
+/// Les fichiers IGNORÉS sous les entrées de la construction. Rien d'ignoré n'y vit légitimement, et
+/// l'ignorance peut venir du poste (`.git/info/exclude`, `core.excludesFile`), pas du commit : ranger
+/// une migration d'essai ainsi la cacherait de `git status` sans l'ôter du binaire. Refusés.
+pub fn ignored_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let mut list = vec![
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--",
+    ];
+    list.extend(BUILD_INPUTS);
+    let out = git_text(
+        host,
+        root,
+        &list,
+        "fichiers ignorés inconnus, jamais traités comme absents",
+    )?;
+    Ok(out
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| format!("ignoré {}", line.trim_end()))
+        .collect())
+}
+
 /// Les fichiers que git est prié de ne pas regarder (`skip-worktree`, lettre `S` de `git ls-files -v`,
 /// ou `assume-unchanged`, lettre minuscule) : modifiés sur le disque, absents de `git status`.
 pub fn hidden_changes(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
@@ -451,6 +476,7 @@ pub fn hidden_changes(host: &dyn Host, root: &Path) -> Result<Vec<String>, Strin
 pub fn tree_problems(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
     let mut problems = tracked_changes(host, root)?;
     problems.extend(untracked_inputs(host, root)?);
+    problems.extend(ignored_inputs(host, root)?);
     problems.extend(hidden_changes(host, root)?);
     Ok(problems)
 }
@@ -572,20 +598,9 @@ pub fn check_stage_commit(
 /// de `HEAD` (modifié, indexé ou non suivi). Commandes git en lecture seule, via l'exécuteur injecté.
 /// Rend le commit de `HEAD`, que l'appelant affiche.
 pub fn check_script_is_committed(host: &dyn Host, root: &Path) -> Result<String, String> {
-    let root_text = root.to_string_lossy().into_owned();
     let git = |list: &[&str]| -> Result<String, String> {
-        let mut argv = vec!["-C".to_owned(), root_text.clone()];
-        argv.extend(list.iter().map(|arg| (*arg).to_owned()));
-        let output = host.run(&Call::new("git", &argv))?;
-        if output.success {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        } else {
-            Err(format!(
-                "git {} a échoué ({}) : impossible de vérifier deploy/install.sh",
-                list.join(" "),
-                output.stderr.chars().take(200).collect::<String>()
-            ))
-        }
+        git_text(host, root, list, "impossible de vérifier deploy/install.sh")
+            .map(|text| text.trim().to_owned())
     };
     let status = git(&["status", "--porcelain", "--", "deploy/install.sh"])?;
     if !status.is_empty() {
@@ -598,19 +613,21 @@ pub fn check_script_is_committed(host: &dyn Host, root: &Path) -> Result<String,
 
 /// Les octets de `deploy/install.sh` tels que dans `HEAD` (`git show`, lecture seule) : le fichier du
 /// commit affiché, pas celui du disque (`skip-worktree`, lecture décalée).
-fn committed_script_bytes(host: &dyn Host, root: &Path) -> Result<Vec<u8>, String> {
+fn committed_script_bytes(host: &dyn Host, root: &Path, commit: &str) -> Result<Vec<u8>, String> {
+    let spec = format!("{commit}:deploy/install.sh");
     let argv = vec![
         "-C".to_owned(),
         root.to_string_lossy().into_owned(),
         "show".to_owned(),
-        "HEAD:deploy/install.sh".to_owned(),
+        spec.clone(),
     ];
-    let output = host.run(&Call::new("git", &argv))?;
+    let env = [("GIT_OPTIONAL_LOCKS", "0")];
+    let output = host.run(&Call::new("git", &argv).env(&env))?;
     if output.success {
         Ok(output.stdout)
     } else {
         Err(format!(
-            "git show HEAD:deploy/install.sh a échoué ({}) : impossible de lire le script du commit",
+            "git show {spec} a échoué ({}) : impossible de lire le script du commit",
             output.stderr.chars().take(200).collect::<String>()
         ))
     }
@@ -646,7 +663,7 @@ pub fn select_install_script(
             "HEAD a changé pendant l'assemblage ({expected_commit} puis {commit}) : relance cargo xtask release-stage"
         ));
     }
-    let bytes = committed_script_bytes(host, root)?;
+    let bytes = committed_script_bytes(host, root, &commit)?;
     Ok((
         bytes,
         format!("script : deploy/install.sh tel que dans le commit {commit}"),
@@ -1162,6 +1179,7 @@ pub mod fixtures {
         pub head: String,
         pub head_fails: bool,
         pub untracked: String,
+        pub ignored: String,
         pub hidden: String,
         pub cannot_launch: bool,
         pub show: Vec<u8>,
@@ -1177,6 +1195,7 @@ pub mod fixtures {
                 head: head.to_owned(),
                 head_fails: false,
                 untracked: String::new(),
+                ignored: String::new(),
                 hidden: String::new(),
                 cannot_launch: false,
                 show: SCRIPT.to_vec(),
@@ -1209,6 +1228,8 @@ pub mod fixtures {
             let has = |word: &str| call.args.iter().any(|arg| arg == word);
             let (fails, out): (bool, Vec<u8>) = if has("status") {
                 (self.status_fails, format!("{}\n", self.status).into_bytes())
+            } else if has("ls-files") && has("--ignored") {
+                (false, format!("{}\n", self.ignored).into_bytes())
             } else if has("ls-files") && has("--others") {
                 (false, format!("{}\n", self.untracked).into_bytes())
             } else if has("ls-files") {
@@ -1577,7 +1598,7 @@ mod tests {
             fake.calls
                 .borrow()
                 .iter()
-                .any(|call| call[2..] == ["show", "HEAD:deploy/install.sh"])
+                .any(|call| call[2..] == ["show", "abc1234def:deploy/install.sh"])
         );
     }
 
@@ -1951,14 +1972,15 @@ mod tests {
             "abc1234def"
         );
         let calls = fake.calls.borrow();
-        assert_eq!(calls.len(), 4, "{calls:?}");
+        assert_eq!(calls.len(), 5, "{calls:?}");
         assert_eq!(
             calls[0][2..],
             ["status", "--porcelain", "--untracked-files=no"]
         );
         assert_eq!(calls[1][2..4], ["ls-files", "--others"]);
-        assert_eq!(calls[2][2..], ["ls-files", "-v"]);
-        assert_eq!(calls[3][2..], ["rev-parse", "HEAD"]);
+        assert_eq!(calls[2][2..5], ["ls-files", "--others", "--ignored"]);
+        assert_eq!(calls[3][2..], ["ls-files", "-v"]);
+        assert_eq!(calls[4][2..], ["rev-parse", "HEAD"]);
         assert!(fake.only_git_ran());
     }
 
@@ -2111,6 +2133,26 @@ mod tests {
     }
 
     #[test]
+    fn an_ignored_file_among_the_build_inputs_is_refused_and_named() {
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.ignored = "crates/hearth-agent/migrations/0005_essai.sql".to_owned();
+        let error = check_clean_tree(&fake, Path::new("depot")).unwrap_err();
+        assert!(
+            error.contains("ignoré crates/hearth-agent/migrations/0005_essai.sql"),
+            "{error}"
+        );
+        let calls = fake.calls.borrow();
+        let call = calls
+            .iter()
+            .find(|c| c.contains(&"--ignored".to_owned()))
+            .unwrap();
+        assert!(
+            call.contains(&"--exclude-standard".to_owned())
+                && call.ends_with(&["crates".to_owned()])
+        );
+    }
+
+    #[test]
     fn a_file_hidden_from_git_is_refused() {
         for hidden in ["S crates/hearth-agent/src/lib.rs", "h Cargo.lock"] {
             let mut fake = TreeFake::new("", "abc1234def");
@@ -2153,7 +2195,7 @@ mod tests {
         let env = Env(Default::default());
         check_clean_tree(&env, Path::new("depot")).unwrap();
         let seen = env.0.borrow();
-        assert_eq!(seen.len(), 4);
+        assert_eq!(seen.len(), 5);
         assert!(seen.iter().all(|locked| *locked));
     }
 
@@ -2229,7 +2271,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let args = stage_args(&root.join("c"), &root.join("a"), &root.join("s"));
         let mut cases = Vec::new();
-        cases.push(("Cargo.toml", TreeFake::new(" M Cargo.toml", "abc1234def")));
+        cases.push(("README.md", TreeFake::new(" M README.md", "abc1234def")));
         let mut untracked = TreeFake::new("", "abc1234def");
         untracked.untracked = "crates/hearth-agent/migrations/0005_x.sql".to_owned();
         cases.push(("0005_x.sql", untracked));

@@ -90,6 +90,8 @@ pub struct BuildRecord {
     /// `clean`, `dirty` ou `unknown` (git muet, ou `HEAD` / arbre changés pendant la construction).
     pub tree: String,
     pub sha256: String,
+    /// Informatif : `release-stage` ne le compare pas (commit égal et arbre propre impliquent le même
+    /// `Cargo.toml`, et le script du conteneur contrôle `--version`).
     pub version: String,
 }
 
