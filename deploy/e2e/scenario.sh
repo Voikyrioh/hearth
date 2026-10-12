@@ -90,7 +90,15 @@ mkdir -p /tmp/www/api/releases/latest /tmp/www/api/releases/9.9.9
 cp "$BIN" /tmp/www/api/releases/9.9.9/hearth-agent-linux-x86_64
 python3 /deploy/e2e/https_server.py 8445 /tmp/www &
 API=https://127.0.0.1:8445/api
+# Serveur en CLAIR (mêmes fichiers) : cible des redirections vers HTTP, qui ne doivent jamais y
+# arriver. Si une redirection était suivie, la requête aboutirait et l'installation réussirait.
+python3 -u -m http.server 8446 --bind 127.0.0.1 --directory /tmp/www >>/tmp/http-clear.log 2>&1 &
 sleep 2
+# Témoin : ce serveur répond et journalise bien (« GET »), sinon un journal vide ne prouverait rien.
+curl -s -o /dev/null http://127.0.0.1:8446/release/hearth-agent || die "le serveur en clair ne répond pas"
+grep -q 'GET /release/hearth-agent' /tmp/http-clear.log || die "le serveur en clair ne journalise pas ses requêtes"
+: >/tmp/http-clear.log
+clear_log_empty() { ! grep -q 'GET' /tmp/http-clear.log || die "une requête est partie en clair : $1"; }
 REL=https://127.0.0.1:8443/hearth-agent
 
 # --------------------------------------------------------------------------------------------
@@ -241,10 +249,14 @@ if run sh /deploy/install.sh --url http://127.0.0.1:8443/hearth-agent --sha256 "
 fi
 must_say "n'est pas en HTTPS"
 nothing_left "http"
-if run env HEARTH_RELEASE_URL=https://127.0.0.1:8443/redirect sh /deploy/install.sh --sha256 "$SUM" --yes; then
+# La cible de la redirection est le serveur en clair, qui sert le vrai binaire : suivie, la
+# redirection ferait RÉUSSIR l'installation (somme et identifiants fournis).
+: >/tmp/http-clear.log
+if run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_RELEASE_URL=https://127.0.0.1:8443/redirect sh /deploy/install.sh --sha256 "$SUM" --yes; then
     die "install.sh devrait refuser une redirection vers HTTP"
 fi
 must_say "Le téléchargement n'a pas abouti. Relance l'installation."
+clear_log_empty "curl, redirection vers HTTP"
 nothing_left "redirection"
 ok "install.sh : adresse en clair refusée, redirection vers HTTP refusée"
 
@@ -407,6 +419,9 @@ ok "install.sh par défaut : pointeur valide, binaire téléchargé, somme véri
 # curl est caché le temps de la section (déplacé dans le conteneur jetable) puis rendu.
 # --------------------------------------------------------------------------------------------
 CURL_BIN="$(command -v curl)"
+# curl est rendu à la sortie du scénario quoi qu'il arrive (die compris) : la suite en a besoin.
+restore_curl() { if [ -e "$CURL_BIN.hidden" ]; then mv "$CURL_BIN.hidden" "$CURL_BIN"; fi; }
+trap restore_curl EXIT
 valid_pointer() { point "9.9.9 $SUM 9.9.9/hearth-agent-linux-x86_64"; }
 # Installation complète puis purge, par l'origine $1.
 install_via() {
@@ -421,6 +436,21 @@ install_via() {
 # Corps de plus de 512 octets, plus long que ce que la lecture bornée garde.
 long_pointer() { { printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64 ' "$SUM"; head -c 100000 /dev/zero | tr '\0' 'a'; printf '\n'; } >"$POINTER"; }
 
+# Redirection vers HTTP refusée : le pointeur ET le binaire existent sur le serveur en clair, donc
+# une redirection suivie ferait réussir l'installation. Le journal du serveur en clair reste vide.
+redirect_to_http_refused() {
+    : >/tmp/http-clear.log
+    : >/tmp/https.log
+    if run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_BASE_URL=https://127.0.0.1:8445/redirhttp/api sh /deploy/install.sh --yes; then
+        die "$1 : une redirection vers HTTP devrait être refusée"
+    fi
+    must_say "Le téléchargement n'a pas abouti. Relance l'installation."
+    must_not_say "Dernière version"
+    clear_log_empty "$1"
+    ! grep -q '/api/releases/9.9.9/' /tmp/https.log || die "$1 : un binaire a été téléchargé après une redirection vers HTTP"
+    nothing_left "$1"
+}
+
 # Avec curl d'abord (corps en morceaux, sans longueur annoncée : curl avant 8.4 ne peut pas borner
 # sur la taille, c'est la mesure qui refuse).
 echo "== curl : $("$CURL_BIN" --version | head -n 1)"
@@ -430,11 +460,14 @@ pointer_refused "curl, corps en morceaux de 100 Ko sans longueur annoncée"
 valid_pointer
 install_via "$ORIGIN" "curl, corps en morceaux"
 unset ORIGIN
-ok "install.sh avec curl : pointeur servi en morceaux sans longueur annoncée, trop long refusé, valide accepté"
+valid_pointer
+redirect_to_http_refused "curl, redirection du pointeur vers HTTP"
+ok "install.sh avec curl : pointeur servi en morceaux sans longueur annoncée, trop long refusé, valide accepté, redirection du pointeur vers HTTP refusée (le serveur en clair aurait fait réussir l'installation)"
 
 mv "$CURL_BIN" "$CURL_BIN.hidden"
 command -v curl >/dev/null 2>&1 && die "curl devrait être caché"
 command -v wget >/dev/null 2>&1 || die "wget absent de l'image"
+wget --version 2>&1 | grep -q '^GNU Wget [0-9]' || die "le wget de l'image n'est pas GNU Wget 1"
 echo "== wget seul : $(wget --version 2>&1 | head -n 1) (curl caché)"
 
 # 1. pointeur valide : installation complète, binaire compris.
@@ -448,29 +481,48 @@ pointer_refused "wget, pointeur absent" "Le pointeur de la dernière version de 
 pointer_refused "wget, plus de 512 octets"
 long_pointer
 pointer_refused "wget, 100 Ko"
-# 4. redirections : vers HTTP refusée, vers HTTPS suivie.
+# 4. redirections : vers HTTP refusée (le serveur en clair réussirait si elle était suivie), vers
+# HTTPS suivie.
 valid_pointer
-: >/tmp/https.log
-if run env HEARTH_BASE_URL=https://127.0.0.1:8445/redirhttp/api sh /deploy/install.sh --yes; then
-    die "wget : une redirection vers HTTP devrait être refusée"
-fi
-must_say "Le téléchargement n'a pas abouti. Relance l'installation."
-! grep -q '/api/releases/9.9.9/' /tmp/https.log || die "wget : un binaire a été téléchargé après une redirection vers HTTP"
-nothing_left "wget, redirection vers HTTP"
+redirect_to_http_refused "wget, redirection du pointeur vers HTTP"
 install_via "https://127.0.0.1:8445/redir/api" "wget, redirection vers HTTPS"
-# 5. corps en morceaux sans longueur annoncée : la borne est celle de `head -c`.
+# 5. corps en morceaux sans longueur annoncée.
 ORIGIN="https://127.0.0.1:8445/chunked/api"
 long_pointer
 pointer_refused "wget, corps en morceaux de 100 Ko sans longueur annoncée"
 valid_pointer
 install_via "$ORIGIN" "wget, corps en morceaux"
 unset ORIGIN
-ok "install.sh avec wget seul (curl caché) : pointeur valide installé, 404, trop long, redirection vers HTTP refusée puis vers HTTPS suivie, corps en morceaux borné"
+# 6. corps SANS FIN : la lecture doit s'arrêter d'elle-même (head -c ferme le tube, wget meurt à
+# l'écriture suivante). Sans borne, `timeout` couperait à 20 s sans le message attendu et le
+# serveur enverrait son plafond de 64 Mio.
+rm -f /tmp/endless.bytes
+: >/tmp/https.log
+START=$(date +%s)
+if run timeout 20 env HEARTH_BASE_URL=https://127.0.0.1:8445/endless/api sh /deploy/install.sh --yes; then
+    die "wget : un corps sans fin devrait être refusé"
+fi
+ELAPSED=$(( $(date +%s) - START ))
+must_say "Le pointeur de la dernière version est mal formé"
+[ "$ELAPSED" -lt 15 ] || die "wget : la lecture du corps sans fin a duré ${ELAPSED} s (non bornée ?)"
+n=0
+while [ ! -s /tmp/endless.bytes ]; do
+    n=$((n + 1))
+    [ "$n" -lt 20 ] || die "wget : le serveur n'a pas fini d'écrire le corps sans fin"
+    sleep 1
+done
+SENT=$(cat /tmp/endless.bytes)
+[ "$SENT" -lt 8388608 ] || die "wget : $SENT octets envoyés avant que la lecture ne s'arrête (non bornée ?)"
+nothing_left "wget, corps sans fin"
+ok "install.sh avec wget seul (curl caché) : pointeur valide installé, 404, trop long, redirection vers HTTP refusée (serveur en clair resté muet) puis vers HTTPS suivie, corps en morceaux refusé, corps sans fin coupé en ${ELAPSED} s après $SENT octets sur 67108864 possibles"
 
-# 6. BusyBox wget : n'est pas GNU Wget, le script le dit et ne lit rien.
+# 7. BusyBox wget : n'est pas GNU Wget, le script le dit et ne lit rien.
 mkdir -p /tmp/bb
 ln -sf "$(command -v busybox)" /tmp/bb/wget
 echo "== busybox wget : $(/tmp/bb/wget --version 2>&1 | head -n 2 | tr '\n' ' ')"
+# C'est bien l'applet BusyBox qui répond (sinon le refus ne prouverait rien).
+/tmp/bb/wget --version 2>&1 | grep -q 'BusyBox' || die "/tmp/bb/wget n'est pas le wget de BusyBox"
+[ "$(PATH="/tmp/bb:$PATH" command -v wget)" = "/tmp/bb/wget" ] || die "le wget du PATH n'est pas celui de BusyBox"
 valid_pointer
 : >/tmp/https.log
 if run env PATH="/tmp/bb:$PATH" HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
@@ -480,6 +532,20 @@ must_say "Ce wget n'est pas GNU Wget"
 [ ! -s /tmp/https.log ] || die "BusyBox wget : une requête est partie malgré le refus"
 nothing_left "BusyBox wget"
 ok "install.sh avec BusyBox wget : refusé clairement, aucune requête, rien d'écrit"
+
+# 8. Wget2 : bannière SIMULÉE (aucun wget2 réel dans l'image, rien n'est affirmé de son
+# comportement) ; elle prouve seulement que le test distingue « GNU Wget2 » de « GNU Wget 1 ».
+mkdir -p /tmp/w2
+printf '#!/bin/sh\necho "GNU Wget2 2.0.1 - multithreaded metalink/file/website downloader"\n' >/tmp/w2/wget
+chmod 0755 /tmp/w2/wget
+: >/tmp/https.log
+if run env PATH="/tmp/w2:$PATH" HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
+    die "install.sh avec un wget qui se présente comme Wget2 devrait s'arrêter"
+fi
+must_say "Ce wget n'est pas GNU Wget 1"
+[ ! -s /tmp/https.log ] || die "Wget2 simulé : une requête est partie malgré le refus"
+nothing_left "Wget2 simulé"
+ok "install.sh avec une bannière « GNU Wget2 » (simulée) : refusé clairement, aucune requête"
 
 mv "$CURL_BIN.hidden" "$CURL_BIN"
 command -v curl >/dev/null 2>&1 || die "curl devrait être rendu"

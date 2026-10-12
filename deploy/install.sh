@@ -181,14 +181,16 @@ download() {
             *) return 1 ;;
         esac
     elif command -v wget >/dev/null 2>&1; then
-        # HRT-59 : seul GNU Wget est pris en charge (options -S, --max-redirect, -t). BusyBox wget
-        # les ignore ou les refuse selon la version, ce qui laisserait une lecture non bornée ou un
-        # échec muet : on le dit au lieu de deviner.
-        wget --version 2>&1 | grep -q 'GNU Wget'             || fail "Ce wget n'est pas GNU Wget (BusyBox ?) : il n'est pas pris en charge. Installe curl ou GNU Wget, ou fournis un binaire avec --binary. Aucune modification n'a été apportée à ta machine."
+        # HRT-59 : seul GNU Wget 1.x est pris en charge (options -S, --max-redirect, -t, format des
+        # en-têtes de -S). BusyBox wget les ignore ou les refuse selon la version, Wget2 change le
+        # format de -S et la ligne d'état : un échec muet ou une lecture non bornée est pire qu'un
+        # refus net. « GNU Wget2 » ne passe pas (le motif exige un chiffre après « GNU Wget »).
+        wget --version 2>&1 | grep -q '^GNU Wget [0-9]' \
+            || fail "Ce wget n'est pas GNU Wget 1 (BusyBox, Wget2 ?) : il n'est pas pris en charge. Installe curl ou GNU Wget 1, ou fournis un binaire avec --binary. Aucune modification n'a été apportée à ta machine."
         wget_https_only "$1" "$2" "${3:-}"
         return $?
     fi
-    fail "Ni curl ni wget : téléchargement impossible. Fournis un binaire avec --binary."
+    fail "Ni curl ni wget : téléchargement impossible. Fournis un binaire avec --binary. Aucune modification n'a été apportée à ta machine."
 }
 
 # Entier décimal de 1 à 9 chiffres.
