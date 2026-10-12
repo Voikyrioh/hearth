@@ -1,7 +1,7 @@
 //! Adaptateur du port `Feed` sur le greffon officiel `tauri-plugin-updater` (ADR-0017).
 //!
-//! Le greffon fait le réseau (HTTPS, rustls + ring), lit le manifeste statique `latest.json` des
-//! GitHub Releases, télécharge l'installateur EN MÉMOIRE, vérifie la signature minisign contre la
+//! Le greffon fait le réseau (HTTPS, rustls + ring), lit le manifeste statique servi par
+//! `hearth.voikyrioh.fr/api/releases/latest`, télécharge l'installateur EN MÉMOIRE, vérifie la signature minisign contre la
 //! clé publique embarquée (`update-key.pub`), et lance l'installateur NSIS (`/UPDATE`, relance).
 //! Rien ici n'est exposé à l'interface : le greffon est branché sans aucune permission côté web
 //! (`capabilities/default.json` n'en accorde aucune), l'adresse du flux et la clé sont des
@@ -97,7 +97,7 @@ pub struct TauriFeed<R: Runtime> {
 }
 
 impl<R: Runtime> TauriFeed<R> {
-    /// Production : le flux des GitHub Releases du dépôt public, fixé à la compilation.
+    /// Production : le flux de versions du serveur Hearth, fixé à la compilation.
     pub fn production(app: AppHandle<R>, policy: DownloadPolicy) -> Result<Self, url::ParseError> {
         Ok(Self::with_endpoint(app, Url::parse(FEED_URL)?, policy))
     }

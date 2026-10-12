@@ -32,6 +32,8 @@ use url::Url;
 #[derive(Clone)]
 enum Reply {
     Ok(Vec<u8>),
+    /// Comme `Ok`, en `Content-Type: application/json` (une route d'API, comme le serveur Hearth).
+    Json(Vec<u8>),
     /// Annonce `declared` octets, en envoie `sent`, puis coupe la connexion.
     Cut {
         declared: usize,
@@ -104,6 +106,20 @@ impl Server {
                         Some(Reply::Ok(body)) => {
                             let mut out = format!(
                                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            )
+                            .into_bytes();
+                            out.extend(body);
+                            out
+                        }
+                        Some(Reply::Json(body)) => {
+                            let mut out = format!(
+                                "HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+",
                                 body.len()
                             )
                             .into_bytes();
@@ -305,6 +321,48 @@ async fn the_manifest_is_read_and_announces_the_newer_version() {
     // La vérification ne télécharge pas l'installateur.
     assert_eq!(server.hits("/setup.exe"), 0);
     assert_eq!(server.hits("/latest.json"), 1);
+}
+
+#[tokio::test]
+async fn a_feed_without_a_json_extension_served_as_application_json_is_read() {
+    // `GET /api/releases/latest` : route d'API, aucune extension, `application/json` (HRT-49).
+    let key = TestKey::new();
+    let server = Server::start().await;
+    let file = installer(2_000);
+    server.serve(
+        "/api/releases/1.1.0/Hearth_1.1.0_x64-setup.exe",
+        Reply::Ok(file.clone()),
+    );
+    server.serve(
+        "/api/releases/latest",
+        Reply::Json(manifest(
+            "1.1.0",
+            &server.url("/api/releases/1.1.0/Hearth_1.1.0_x64-setup.exe"),
+            &key.sign(&file, "1.1.0"),
+        )),
+    );
+    let app = app(&key);
+    let feed = TauriFeed::with_endpoint(
+        app.handle().clone(),
+        Url::parse(&server.url("/api/releases/latest")).unwrap(),
+        DownloadPolicy::local_for_tests(server.port),
+    );
+
+    let candidate = feed.check().await.unwrap().unwrap();
+
+    assert_eq!(candidate.version, "1.1.0");
+    assert_eq!(server.hits("/api/releases/latest"), 1);
+    // Le même flux sans `Content-Type` (le serveur de test historique) est lu de la même façon :
+    // le greffon ne contrôle ni le nom ni le type.
+    server.serve(
+        "/api/releases/latest",
+        Reply::Ok(manifest(
+            "1.1.0",
+            &server.url("/api/releases/1.1.0/Hearth_1.1.0_x64-setup.exe"),
+            &key.sign(&file, "1.1.0"),
+        )),
+    );
+    assert!(feed.check().await.unwrap().is_some());
 }
 
 #[tokio::test]
@@ -896,7 +954,7 @@ async fn the_installer_follows_exactly_the_maximum_number_of_redirects() {
 }
 
 #[tokio::test]
-async fn the_manifest_follows_the_same_bound_and_works_behind_githubs_two_redirects() {
+async fn the_manifest_follows_the_same_bound_and_works_behind_two_redirects() {
     let key = TestKey::new();
     let file = installer(500);
     let signature = key.sign(&file, "1.1.0");
@@ -1033,9 +1091,9 @@ fn publish_like_the_workflow(
         1_800_000_000,
     )
     .unwrap();
-    let prefix = server.url("/releases/download/");
+    let prefix = server.url("/api/releases/");
     let url = server.url(&format!(
-        "/releases/download/v{announced_version}/Hearth_{announced_version}_x64-setup.exe"
+        "/api/releases/{announced_version}/Hearth_{announced_version}_x64-setup.exe"
     ));
     let text = release_core::manifest_for(
         &prefix,
@@ -1048,9 +1106,7 @@ fn publish_like_the_workflow(
     .unwrap();
     server.serve("/latest.json", Reply::Ok(text.into_bytes()));
     server.serve(
-        &format!(
-            "/releases/download/v{announced_version}/Hearth_{announced_version}_x64-setup.exe"
-        ),
+        &format!("/api/releases/{announced_version}/Hearth_{announced_version}_x64-setup.exe"),
         Reply::Ok(file.to_vec()),
     );
 }

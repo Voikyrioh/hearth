@@ -14,8 +14,7 @@ use hearth_desktop_lib::update::domain::DownloadPolicy;
 use serde_json::json;
 use url::Url;
 
-const URL: &str =
-    "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64";
+const URL: &str = "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64";
 const SIGNATURE: &str =
     "untrusted comment: signature from minisign secret key\nRUQabc\ntrusted comment: x\nabc\n";
 
@@ -33,7 +32,7 @@ fn candidate() -> AgentCandidate {
 }
 
 fn policy() -> DownloadPolicy {
-    DownloadPolicy::github_releases()
+    DownloadPolicy::official_releases()
 }
 
 fn target(version: &str) -> AgentTarget {
@@ -120,8 +119,8 @@ fn a_bad_checksum_or_signature_is_never_retained() {
 #[test]
 fn an_address_that_is_not_https_is_never_sent() {
     for bad in [
-        "http://github.com/Voikyrioh/hearth/releases/download/v0.2.0/a",
-        "ftp://github.com/Voikyrioh/hearth/releases/download/v0.2.0/a",
+        "http://hearth.voikyrioh.fr/api/releases/0.2.0/a",
+        "ftp://hearth.voikyrioh.fr/api/releases/0.2.0/a",
         "file:///etc/passwd",
     ] {
         let mut c = candidate();
@@ -159,7 +158,7 @@ fn a_local_or_private_address_is_never_sent() {
         "0x7f.1",
     ] {
         let mut c = candidate();
-        c.url = format!("https://{host}/Voikyrioh/hearth/releases/download/v0.2.0/a");
+        c.url = format!("https://{host}/api/releases/0.2.0/a");
         let error = validate_target(&c, &policy()).unwrap_err();
         assert!(
             matches!(
@@ -195,19 +194,28 @@ fn the_local_table_says_what_it_means() {
         assert!(!is_local_ip(ip.parse().unwrap()), "{ip}");
     }
     assert!(host_is_local(&Url::parse("https://localhost./x").unwrap()));
-    assert!(!host_is_local(&Url::parse("https://github.com/x").unwrap()));
+    assert!(!host_is_local(
+        &Url::parse("https://hearth.voikyrioh.fr/x").unwrap()
+    ));
 }
 
 #[test]
-fn an_address_outside_the_releases_of_the_repository_is_never_sent() {
+fn an_address_outside_the_release_server_is_never_sent() {
     for bad in [
-        "https://exemple.org/Voikyrioh/hearth/releases/download/v0.2.0/a",
-        "https://github.com/autre/hearth/releases/download/v0.2.0/a",
-        "https://github.com/Voikyrioh/hearth/archive/main.zip",
-        "https://github.com.evil.example/Voikyrioh/hearth/releases/download/v0.2.0/a",
-        "https://user:pass@github.com/Voikyrioh/hearth/releases/download/v0.2.0/a",
-        "https://github.com:8443/Voikyrioh/hearth/releases/download/v0.2.0/a",
-        "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/a#fragment",
+        // Autre hôte, hôte en suffixe, sous-domaine, ancienne source (GitHub).
+        "https://exemple.org/api/releases/0.2.0/a",
+        "https://hearth.voikyrioh.fr.evil.example/api/releases/0.2.0/a",
+        "https://evil.hearth.voikyrioh.fr/api/releases/0.2.0/a",
+        "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/a",
+        // Chemin hors de `/api/releases/`.
+        "https://hearth.voikyrioh.fr/",
+        "https://hearth.voikyrioh.fr/api/install.sh",
+        "https://hearth.voikyrioh.fr/api/releases-evil/0.2.0/a",
+        "https://hearth.voikyrioh.fr/api/releases/../install.sh",
+        // Identifiant, port, fragment.
+        "https://user:pass@hearth.voikyrioh.fr/api/releases/0.2.0/a",
+        "https://hearth.voikyrioh.fr:8443/api/releases/0.2.0/a",
+        "https://hearth.voikyrioh.fr/api/releases/0.2.0/a#fragment",
     ] {
         let mut c = candidate();
         c.url = bad.into();
@@ -244,7 +252,7 @@ fn a_retained_target_is_validated_again_when_read_back() {
     for tamper in [
         |r: &mut AgentTargetRecord| r.url = "https://exemple.org/hearth-agent".into(),
         |r: &mut AgentTargetRecord| {
-            r.url = "http://github.com/Voikyrioh/hearth/releases/download/v0.2.0/a".into()
+            r.url = "http://hearth.voikyrioh.fr/api/releases/0.2.0/a".into()
         },
         |r: &mut AgentTargetRecord| r.sha256 = "00".into(),
         |r: &mut AgentTargetRecord| r.version = "0.2.0-evil".into(),

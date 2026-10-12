@@ -23,10 +23,11 @@ Un fichier dont la signature ne correspond pas (modifié, tronqué, signé par u
 - `apps/desktop/e2e/updates.spec.ts` : « mise à jour corrompue : refusée avec le message exact ».
 
 ## Cas limites
-- La signature protège le fichier ET sa version : le client exige (`requireSignedVersion`) que la version annoncée par le manifeste soit celle du commentaire signé. Un ancien installateur, validement signé, servi sous un numéro plus grand est refusé comme corrompu ; une signature sans version aussi. Le manifeste n'est pas signé (HTTPS vers GitHub) : la source de l'installateur est restreinte au dépôt (BR-UPDATE-003).
+- La signature protège le fichier ET sa version : le client exige (`requireSignedVersion`) que la version annoncée par le manifeste soit celle du commentaire signé. Un ancien installateur, validement signé, servi sous un numéro plus grand est refusé comme corrompu ; une signature sans version aussi. Le manifeste n'est pas signé (HTTPS vers `hearth.voikyrioh.fr`) : la source de l'installateur est restreinte à `/api/releases/` de ce nom (BR-UPDATE-003).
 
 ## Règles liées
 - BR-UPDATE-004, BR-UPDATE-009, ADR-0017
 
 ## Historique
 - 2026-10-05 : création (HRT-16, session 2026-10-04-hearth-creation).
+- 2026-10-12 : flux et installateur servis par `hearth.voikyrioh.fr/api/releases/` au lieu des GitHub Releases (HRT-49, ADR-0035).

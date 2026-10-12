@@ -23,10 +23,11 @@ Si le client n'a pas accès à Internet, la vérification est abandonnée sans f
 - `apps/desktop/src/components/organisms/updates.test.ts` : `without Internet shows only the last check date, no error and no 'à jour' claim` ; `apps/desktop/e2e/updates.spec.ts` : « « Vérifier maintenant » sans Internet… ».
 
 ## Cas limites
-- Une release qui n'existe pas encore (404 de `latest.json`) est traitée comme « sans réponse » : même silence.
+- Aucune version publiée (404 de `/api/releases/latest`) est traitée comme « sans réponse » : même silence.
 
 ## Règles liées
 - BR-UPDATE-001, BR-UPDATE-008, BR-UPDATE-026
 
 ## Historique
 - 2026-10-05 : création (HRT-16, session 2026-10-04-hearth-creation).
+- 2026-10-12 : flux et installateur servis par `hearth.voikyrioh.fr/api/releases/` au lieu des GitHub Releases (HRT-49, ADR-0035).
