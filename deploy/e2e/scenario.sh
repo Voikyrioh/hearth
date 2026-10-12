@@ -99,6 +99,15 @@ curl -s -o /dev/null http://127.0.0.1:8446/release/hearth-agent || die "le serve
 grep -q 'GET /release/hearth-agent' /tmp/http-clear.log || die "le serveur en clair ne journalise pas ses requêtes"
 : >/tmp/http-clear.log
 clear_log_empty() { ! grep -q 'GET' /tmp/http-clear.log || die "une requête est partie en clair : $1"; }
+# Témoin APRÈS un refus, sans curl (il peut être caché) : le serveur en clair répond et journalise
+# encore. Sinon une redirection suivie serait tombée sur un port fermé, et le journal vide ne
+# prouverait rien.
+clear_server_alive() {
+    python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8446/release/hearth-agent", timeout=5).read()' \
+        || die "le serveur en clair ne répond plus : $1"
+    grep -q 'GET /release/hearth-agent' /tmp/http-clear.log || die "le serveur en clair ne journalise plus : $1"
+    : >/tmp/http-clear.log
+}
 REL=https://127.0.0.1:8443/hearth-agent
 
 # --------------------------------------------------------------------------------------------
@@ -257,6 +266,7 @@ if run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_RELEASE
 fi
 must_say "Le téléchargement n'a pas abouti. Relance l'installation."
 clear_log_empty "curl, redirection vers HTTP"
+clear_server_alive "curl, redirection vers HTTP"
 nothing_left "redirection"
 ok "install.sh : adresse en clair refusée, redirection vers HTTP refusée"
 
@@ -447,6 +457,7 @@ redirect_to_http_refused() {
     must_say "Le téléchargement n'a pas abouti. Relance l'installation."
     must_not_say "Dernière version"
     clear_log_empty "$1"
+    clear_server_alive "$1"
     ! grep -q '/api/releases/9.9.9/' /tmp/https.log || die "$1 : un binaire a été téléchargé après une redirection vers HTTP"
     nothing_left "$1"
 }
@@ -469,7 +480,7 @@ mv "$CURL_BIN" "$CURL_BIN.hidden"
 hash -r
 command -v curl >/dev/null 2>&1 && die "curl devrait être caché"
 command -v wget >/dev/null 2>&1 || die "wget absent de l'image"
-wget --version 2>&1 | grep -q '^GNU Wget [0-9]' || die "le wget de l'image n'est pas GNU Wget 1"
+LC_ALL=C wget --version 2>&1 </dev/null | grep -q '^GNU Wget [0-9]' || die "le wget de l'image n'est pas GNU Wget 1"
 echo "== wget seul : $(wget --version 2>&1 | head -n 1) (curl caché)"
 
 # 1. pointeur valide : installation complète, binaire compris.

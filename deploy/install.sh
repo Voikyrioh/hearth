@@ -185,7 +185,9 @@ download() {
         # en-têtes de -S). BusyBox wget les ignore ou les refuse selon la version, Wget2 change le
         # format de -S et la ligne d'état : un échec muet ou une lecture non bornée est pire qu'un
         # refus net. « GNU Wget2 » ne passe pas (le motif exige un chiffre après « GNU Wget »).
-        wget --version 2>&1 | grep -q '^GNU Wget [0-9]' \
+        # LC_ALL=C : la bannière est traduisible. </dev/null : le script est souvent lu par un tube
+        # (`... | sh`), aucun outil sondé ne doit pouvoir lire l'entrée du shell.
+        LC_ALL=C wget --version 2>&1 </dev/null | grep -q '^GNU Wget [0-9]' \
             || fail "Ce wget n'est pas GNU Wget 1 (BusyBox, Wget2 ?) : il n'est pas pris en charge. Installe curl ou GNU Wget 1, ou fournis un binaire avec --binary. Aucune modification n'a été apportée à ta machine."
         wget_https_only "$1" "$2" "${3:-}"
         return $?
