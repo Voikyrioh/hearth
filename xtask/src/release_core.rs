@@ -15,8 +15,30 @@ pub const TARGET: &str = "windows-x86_64";
 pub const AGENT_TARGET: &str = "linux-x86_64";
 /// Marque du commentaire de la clé de développement (`update/feed.rs::DEV_KEY_MARK`).
 pub const DEV_KEY_MARK: &str = "DEV public key";
-/// Les installateurs ne sont téléchargés que de ce dépôt (`update/domain.rs`).
-pub const DOWNLOAD_PREFIX: &str = "https://github.com/Voikyrioh/hearth/releases/download/";
+/// Les installateurs et l'agent ne sont téléchargés que de ce préfixe : `DOWNLOAD_HOST` +
+/// `DOWNLOAD_PATH_PREFIX` de `update/domain.rs` (ADR-0035). Adresse d'un fichier :
+/// `{DOWNLOAD_PREFIX}{X.Y.Z}/{fichier}`, SANS `v` devant la version (format de l'API).
+pub const DOWNLOAD_PREFIX: &str = "https://hearth.voikyrioh.fr/api/releases/";
+/// Binaire de l'agent dans la liste fermée de l'API (`hearth-releases-api`,
+/// `release-files.ts::AGENT_BINARY`) : aussi la contrainte de `deploy/install.sh` (fiche BR-INSTALL à écrire avec le ticket de install.sh).
+pub const AGENT_BINARY: &str = "hearth-agent-linux-x86_64";
+
+/// Nom de l'installateur du client dans la liste fermée de l'API (`release-files.ts`).
+pub fn installer_file_name(version: &str) -> String {
+    format!("Hearth_{version}_x64-setup.exe")
+}
+
+/// L'adresse exacte d'un fichier de version : `{prefix}{version}/{file}`, `version` strictement
+/// `X.Y.Z`. Le dossier est la version ANNONCÉE, le fichier un nom de la liste fermée : toute autre
+/// adresse (autre dossier, autre fichier, `v` devant la version, requête, fragment) est refusée.
+fn check_release_url(prefix: &str, version: &str, file: &str, url: &str) -> Result<(), String> {
+    let expected = format!("{prefix}{version}/{file}");
+    if url == expected {
+        Ok(())
+    } else {
+        Err(format!("l'adresse doit être exactement {expected}"))
+    }
+}
 
 /// La clé publique du dépôt est-elle utilisable pour une publication ?
 pub fn check_key(public_key_file: &str) -> Result<(), String> {
@@ -103,6 +125,11 @@ pub fn verify_signature(
     let text = String::from_utf8(bytes).map_err(|_| "signature : pas du texte".to_owned())?;
     let signature = minisign::SignatureBox::from_string(&text)
         .map_err(|error| format!("signature illisible : {error}"))?;
+    // `allow_legacy = true` : aligné sur le client. Le greffon vérifie par `PublicKey::verify(data,
+    // &signature, true)` (tauri-plugin-updater 2.13.1, `updater.rs:1648`) et `minisign-verify` 0.2.5
+    // accepte alors une signature NON pré-hachée (`lib.rs:365-369` ; refus seulement avec `false`).
+    // Cette fonction n'est donc pas plus lâche que le client. `sign_installer` signe toujours en
+    // pré-haché.
     minisign::verify(&public, &signature, Cursor::new(data), true, false, true).map_err(|_| {
         "la signature ne correspond pas à update-key.pub : la clé secrète des secrets n'est pas la paire de la clé publique du dépôt, ou le fichier a changé".to_owned()
     })?;
@@ -121,14 +148,48 @@ pub fn verify_signature(
     Ok(())
 }
 
-/// `X.Y.Z` strict (pas de préversion : le flux publié n'en propose jamais).
+/// `X.Y.Z` strict (pas de préversion : le flux publié n'en propose jamais), sans zéro en tête : la
+/// même forme que l'API (`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`).
 pub fn check_version(version: &str) -> Result<(), String> {
     let parts: Vec<&str> = version.split('.').collect();
-    let numeric = |part: &&str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    let numeric = |part: &&str| {
+        !part.is_empty()
+            && part.bytes().all(|b| b.is_ascii_digit())
+            && (*part == "0" || !part.starts_with('0'))
+    };
     if parts.len() == 3 && parts.iter().all(numeric) {
         Ok(())
     } else {
         Err(format!("version « {version} » : attendu X.Y.Z"))
+    }
+}
+
+/// Réponse de la recherche de l'étiquette `vX.Y.Z` sur le dépôt distant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagLookup {
+    Present,
+    Absent,
+}
+
+/// Garde contre une seconde signature du même numéro : un numéro publié est brûlé, jamais réutilisé
+/// (conception de la distribution, 8.2). Refuse si l'étiquette `v{version}` existe déjà sur le dépôt
+/// distant. `lookup` interroge le dépôt (`git ls-remote`, lecture seule) : injectée pour les tests.
+/// Une interrogation impossible (réseau coupé) refuse aussi : sans réponse on ne sait pas.
+pub fn check_tag_is_free(
+    version: &str,
+    lookup: &dyn Fn(&str) -> Result<TagLookup, String>,
+) -> Result<(), String> {
+    check_version(version)?;
+    let tag = format!("v{version}");
+    match lookup(&tag).map_err(|error| {
+        format!(
+            "impossible de vérifier que l'étiquette {tag} n'existe pas sur origin ({error}) : rien n'est signé"
+        )
+    })? {
+        TagLookup::Absent => Ok(()),
+        TagLookup::Present => Err(format!(
+            "l'étiquette {tag} existe déjà sur origin : ce numéro est brûlé, jamais réutilisé. Passe à la version suivante (Cargo.toml et apps/desktop/package.json)"
+        )),
     }
 }
 
@@ -173,10 +234,7 @@ pub fn manifest_for(
     if signature.is_empty() {
         return Err("signature vide".to_owned());
     }
-    let expected = format!("{prefix}v{version}/");
-    if !url.starts_with(&expected) {
-        return Err(format!("l'adresse doit commencer par {expected}"));
-    }
+    check_release_url(prefix, version, &installer_file_name(version), url)?;
     if time::OffsetDateTime::parse(pub_date, &time::format_description::well_known::Rfc3339)
         .is_err()
     {
@@ -283,10 +341,9 @@ pub fn agent_section(
     if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("somme SHA-256 : 64 caractères hexadécimaux attendus".to_owned());
     }
-    let expected = format!("{prefix}v{version}/");
-    if !url.starts_with(&expected) {
-        return Err(format!("l'adresse doit commencer par {expected}"));
-    }
+    // Dossier = version de l'AGENT, fichier = `hearth-agent-linux-x86_64` : `install.sh` n'accepte que
+    // ce chemin (fiche BR-INSTALL à écrire avec le ticket de install.sh).
+    check_release_url(prefix, version, AGENT_BINARY, url)?;
     Ok(json!({
         "version": version,
         "platforms": {

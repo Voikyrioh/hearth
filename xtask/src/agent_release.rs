@@ -6,7 +6,9 @@
 //!   faite à la main avec la clé secrète de l'agent) contre `crates/hearth-agent/update-key.pub` (la clé
 //!   embarquée dans l'agent : une signature qu'il refuserait n'est jamais publiée), exige que `--version`
 //!   soit celle du dépôt et que le fichier soit déjà un manifeste valable du client, puis y ajoute (ou y
-//!   remplace) la section `agent`, le reste du fichier étant conservé (par défaut sur place).
+//!   remplace) la section `agent`, le reste du fichier étant conservé (par défaut sur place). `U` est
+//!   exactement `https://hearth.voikyrioh.fr/api/releases/{X.Y.Z}/hearth-agent-linux-x86_64`, `X.Y.Z`
+//!   étant la version de l'AGENT, sans `v` (contrainte de `deploy/install.sh` ; fiche BR-INSTALL à écrire avec le ticket de install.sh).
 //!
 //! Aucun secret ici : la signature est faite par le détenteur du dépôt, hors du dépôt et hors de la CI
 //! (runbook `docs/runbooks/mettre-a-jour-agent.md`).
@@ -88,8 +90,7 @@ pub fn run_manifest(args: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const URL: &str =
-        "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64";
+    const URL: &str = "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64";
 
     fn pair() -> (minisign::KeyPair, String) {
         let keys = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
@@ -176,7 +177,7 @@ version = \"0.2.0\"
         );
     }
 
-    const CLIENT: &str = r#"{"version":"1.2.0","notes":"n","pub_date":"2026-10-06T10:00:00Z","platforms":{"windows-x86_64":{"signature":"c2ln","url":"https://github.com/Voikyrioh/hearth/releases/download/v1.2.0/Hearth_1.2.0_x64-setup.exe"}}}"#;
+    const CLIENT: &str = r#"{"version":"1.2.0","notes":"n","pub_date":"2026-10-06T10:00:00Z","platforms":{"windows-x86_64":{"signature":"c2ln","url":"https://github.com/Voikyrioh/hearth/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe"}}}"#;
 
     #[test]
     fn the_agent_section_is_added_to_the_client_manifest_which_is_otherwise_kept() {
@@ -218,15 +219,26 @@ version = \"0.2.0\"
         assert!(ok("0.2.0", &sha, URL).is_ok());
         assert!(ok("0.2", &sha, URL).is_err());
         assert!(ok("0.2.0", "ab", URL).is_err());
-        assert!(
-            ok(
-                "0.2.0",
-                &sha,
-                "http://github.com/Voikyrioh/hearth/releases/download/v0.2.0/a"
-            )
-            .is_err()
-        );
-        assert!(ok("0.2.0", &sha, "https://exemple.org/hearth-agent").is_err());
+        for bad in [
+            // Pas HTTPS, autre hôte, hôte en suffixe, ancienne source (GitHub).
+            "http://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64",
+            "https://exemple.org/hearth-agent",
+            "https://hearth.voikyrioh.fr.evil.test/api/releases/0.2.0/hearth-agent-linux-x86_64",
+            "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64",
+            // `v` devant la version, mauvais fichier (install.sh n'accepte que le binaire), autre dossier.
+            "https://hearth.voikyrioh.fr/api/releases/v0.2.0/hearth-agent-linux-x86_64",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64.minisig",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/Hearth_0.2.0_x64-setup.exe",
+            "https://hearth.voikyrioh.fr/api/releases/0.1.0/hearth-agent-linux-x86_64",
+            // Port, identifiant, requête, fragment.
+            "https://hearth.voikyrioh.fr:8443/api/releases/0.2.0/hearth-agent-linux-x86_64",
+            "https://u:p@hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64?x=1",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64#a",
+        ] {
+            assert!(ok("0.2.0", &sha, bad).is_err(), "{bad}");
+        }
         assert!(
             ok("0.3.0", &sha, URL).is_err(),
             "l'adresse doit être celle de la version annoncée"

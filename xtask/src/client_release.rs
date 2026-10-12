@@ -4,7 +4,9 @@
 //!
 //! - `client-release-check [--version X.Y.Z]` : refuse la clé publique de DÉVELOPPEMENT du dépôt (sans
 //!   clé secrète : rien de ce qu'elle « vérifierait » ne serait jamais installable) et, si une
-//!   version est donnée, exige qu'elle soit celle du dépôt.
+//!   version est donnée, exige qu'elle soit celle du dépôt et que l'étiquette `vX.Y.Z` n'existe pas
+//!   déjà sur `origin` (`git ls-remote --exit-code --tags`, lecture seule : jamais deux signatures du
+//!   même numéro).
 //! - `client-version` : la version du dépôt (`[workspace.package]` de `Cargo.toml`), seule source du
 //!   numéro publié : le flux de publication n'en reçoit aucun à la main.
 //! - `client-sign --installer F --version X.Y.Z` : signe l'installateur (minisign, Ed25519) avec la clé
@@ -15,7 +17,8 @@
 //!   publication. Écrit `F.sig` (le contenu du `.sig` en base64, comme Tauri).
 //! - `client-manifest --version X.Y.Z --installer-file I --signature-file F --url U --notes-file N
 //!   --date D --out O` : vérifie la signature (clé du dépôt, version signée), puis écrit le manifeste
-//!   au format statique du greffon de mise à jour de Tauri.
+//!   au format statique du greffon de mise à jour de Tauri. `U` est exactement
+//!   `https://hearth.voikyrioh.fr/api/releases/{X.Y.Z}/Hearth_{X.Y.Z}_x64-setup.exe` (sans `v`).
 //!
 //! Aucun secret ici : la signature de l'installateur se fait dans le flux de publication, avec la
 //! clé secrète des secrets du dépôt (runbook `docs/runbooks/publier-une-version-du-client.md`).
@@ -73,8 +76,29 @@ pub fn run_check(args: &[String]) -> Result<(), String> {
             package["version"]
         ));
     }
+    check_tag_is_free(&repository, &remote_tag_lookup)?;
     println!("publication possible : version {repository}, clé publique de production");
     Ok(())
+}
+
+/// `git ls-remote --exit-code --tags origin refs/tags/{tag}` : 0 = l'étiquette existe, 2 = elle n'existe
+/// pas, autre = interrogation impossible. Lecture seule. Le nom vient de `check_tag_is_free`, déjà
+/// validé `vX.Y.Z` ; arguments en liste, aucun interpréteur.
+fn remote_tag_lookup(tag: &str) -> Result<TagLookup, String> {
+    let output = std::process::Command::new("git")
+        .current_dir(root()?)
+        .args(["ls-remote", "--exit-code", "--tags", "origin"])
+        .arg(format!("refs/tags/{tag}"))
+        .output()
+        .map_err(|error| format!("git : {error}"))?;
+    match output.status.code() {
+        Some(0) => Ok(TagLookup::Present),
+        Some(2) => Ok(TagLookup::Absent),
+        other => Err(format!(
+            "git ls-remote : code {other:?} {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
 }
 
 /// `cargo xtask client-version` : affiche la version du dépôt, rien d'autre.
@@ -157,8 +181,7 @@ mod tests {
 
     use super::*;
 
-    const URL: &str =
-        "https://github.com/Voikyrioh/hearth/releases/download/v1.2.0/Hearth_1.2.0_x64-setup.exe";
+    const URL: &str = "https://hearth.voikyrioh.fr/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe";
 
     #[test]
     fn the_development_key_is_refused() {
@@ -253,9 +276,51 @@ mod tests {
     #[test]
     fn versions_are_strict() {
         assert!(check_version("1.2.0").is_ok());
-        for bad in ["1.2", "1.2.0-beta.1", "v1.2.0", "1..0", "a.b.c", ""] {
+        for bad in [
+            "1.2",
+            "1.2.0-beta.1",
+            "v1.2.0",
+            "1..0",
+            "a.b.c",
+            "",
+            "01.2.0",
+            "1.02.0",
+        ] {
             assert!(check_version(bad).is_err(), "{bad}");
         }
+        assert!(check_version("0.0.0").is_ok());
+        assert!(check_version("10.20.30").is_ok());
+    }
+
+    #[test]
+    fn a_tag_that_already_exists_on_origin_refuses_the_publication() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let lookup = |answer: Result<TagLookup, String>| {
+            let seen = &seen;
+            move |tag: &str| {
+                seen.borrow_mut().push(tag.to_owned());
+                answer.clone()
+            }
+        };
+        assert!(check_tag_is_free("1.2.0", &lookup(Ok(TagLookup::Absent))).is_ok());
+        assert_eq!(
+            seen.borrow().as_slice(),
+            ["v1.2.0"],
+            "l'étiquette demandée est vX.Y.Z"
+        );
+        let error = check_tag_is_free("1.2.0", &lookup(Ok(TagLookup::Present))).unwrap_err();
+        assert!(
+            error.contains("v1.2.0") && error.contains("brûlé"),
+            "{error}"
+        );
+        // Sans réponse (réseau coupé, origin absent) : refusé, jamais « libre par défaut ».
+        let error =
+            check_tag_is_free("1.2.0", &lookup(Err("délai dépassé".to_owned()))).unwrap_err();
+        assert!(error.contains("délai dépassé") && error.contains("rien n'est signé"));
+        // Une version mal formée n'interroge rien.
+        seen.borrow_mut().clear();
+        assert!(check_tag_is_free("v1.2.0", &lookup(Ok(TagLookup::Absent))).is_err());
+        assert!(seen.borrow().is_empty());
     }
 
     #[test]
@@ -289,24 +354,27 @@ mod tests {
             manifest(version, "n", signature, url, date)
         };
         assert!(ok(URL, "2026-10-05T20:00:00Z", "1.2.0", "s").is_ok());
-        assert!(
-            ok(
-                "http://github.com/Voikyrioh/hearth/releases/download/v1.2.0/x.exe",
-                "2026-10-05T20:00:00Z",
-                "1.2.0",
-                "s"
-            )
-            .is_err()
-        );
-        assert!(
-            ok(
-                "https://example.com/Voikyrioh/hearth/releases/download/v1.2.0/x.exe",
-                "2026-10-05T20:00:00Z",
-                "1.2.0",
-                "s"
-            )
-            .is_err()
-        );
+        let date = "2026-10-05T20:00:00Z";
+        for bad in [
+            // Pas HTTPS, autre hôte, hôte en suffixe, ancienne source (GitHub).
+            "http://hearth.voikyrioh.fr/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe",
+            "https://example.com/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe",
+            "https://hearth.voikyrioh.fr.evil.test/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe",
+            "https://github.com/Voikyrioh/hearth/releases/download/v1.2.0/Hearth_1.2.0_x64-setup.exe",
+            // `v` devant la version (ancien format), autre dossier, autre fichier, hors liste fermée.
+            "https://hearth.voikyrioh.fr/api/releases/v1.2.0/Hearth_1.2.0_x64-setup.exe",
+            "https://hearth.voikyrioh.fr/api/releases/1.1.0/Hearth_1.2.0_x64-setup.exe",
+            "https://hearth.voikyrioh.fr/api/releases/1.2.0/x.exe",
+            "https://hearth.voikyrioh.fr/api/releases/1.2.0/hearth-agent-linux-x86_64",
+            "https://hearth.voikyrioh.fr/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe.sig",
+            // Port, identifiant, requête, fragment.
+            "https://hearth.voikyrioh.fr:8443/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe",
+            "https://u:p@hearth.voikyrioh.fr/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe",
+            "https://hearth.voikyrioh.fr/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe?x=1",
+            "https://hearth.voikyrioh.fr/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe#a",
+        ] {
+            assert!(ok(bad, date, "1.2.0", "s").is_err(), "{bad}");
+        }
         assert!(ok(URL, "hier", "1.2.0", "s").is_err());
         assert!(ok(URL, "2026-10-05T20:00:00Z", "1.2.0", "  ").is_err());
         // L'adresse doit être celle de la version annoncée.
