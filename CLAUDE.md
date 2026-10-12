@@ -78,6 +78,16 @@ Greffon `tauri-plugin-updater` en API Rust seule (aucune permission côté web),
 
 Le CLIENT lit la cible de l'agent dans la section `agent` du manifeste de versions (ADR-0021, ADR-0035), dans la MÊME requête que son propre flux (`version_comparator` du greffon) : toujours UNE requête par vérification (BR-UPDATE-001). La WebView ne fournit NI adresse, NI signature, NI somme : `update_agent(server_id, version)` ne reçoit que le numéro vu ; la coquille valide la cible (HTTPS public, `hearth.voikyrioh.fr/api/releases/`, jamais de rétrogradation) et construit la requête. L'agent reste l'arbitre (rôle, signature, somme). Le redémarrage annoncé par l'agent est une coupure ATTENDUE dans `hearth-link` (2 minutes, « Reconnexion… », sans alarme). Publication : `cargo xtask agent-manifest` (`--url` exactement `https://hearth.voikyrioh.fr/api/releases/{version de l'agent}/hearth-agent-linux-x86_64`) puis ajout à la main au manifeste (runbook `docs/runbooks/mettre-a-jour-agent.md`). Règles `BR-UPDATE-020` à `023`.
 
+### Dépôt d'une version (HRT-51)
+
+```sh
+cargo xtask release-stage --client-dir <artefact publish-client> --agent-binary <hearth-agent> --agent-signature <hearth-agent.minisig> [--install-script deploy/install.sh]
+cargo xtask release-upload             # ESSAI À BLANC (défaut) : affiche chaque écriture, ne lance aucune commande
+cargo xtask release-upload --confirm   # dépose : fichiers de la version, relecture publique, script, manifeste EN DERNIER
+```
+
+`release-stage` écrit sous `target/release-stage/` seulement, après avoir revérifié signatures (client et agent avec version signée), sommes, adresses, liste fermée de l'API et forme du manifeste ; la version est celle du dépôt, l'agent est rangé dans le dossier de SA version. `release-upload --confirm` exige l'outil `aws` (AWS CLI v2) et `curl`, et les variables `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` de la clé de publication dans l'environnement (lues par `aws`, jamais par `xtask`, jamais en argument) ; il refuse d'écrire une clé de version déjà présente avec un autre contenu. Règles `BR-RELEASE-001` à `003`, code `xtask/src/release_stage.rs` et `release_publish.rs`.
+
 ## Règles
 
 - Architecture hexagonale dans `hearth-agent` et `hearth-link` : `domain/` sans E/S ni dépendance vers axum, SQLx, système. Ports dans `application/ports/`.
