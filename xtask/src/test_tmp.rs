@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 
 #[path = "../../crates/hearth-agent/tests/support/tmp_root.rs"]
-mod tmp_root;
+pub(crate) mod tmp_root;
 
 /// Les racines surveillées, vues depuis l'exécutable `exe`.
 fn roots(exe: &Path) -> Vec<PathBuf> {
