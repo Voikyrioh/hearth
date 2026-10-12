@@ -1,6 +1,6 @@
 # Mettre l'agent à jour à distance
 
-Procédure d'exploitation de la mise à jour de l'agent (HRT-17). Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024`, `BR-UPDATE-027` à `BR-UPDATE-034`. Décisions : ADR-0008, ADR-0014. Contrat : `docs/open-api/agent-update.md`.
+Procédure d'exploitation de la mise à jour de l'agent (HRT-17). Règles : `BR-UPDATE-011` à `BR-UPDATE-019`, `BR-UPDATE-024`, `BR-UPDATE-027` à `BR-UPDATE-035`, `BR-RELEASE-001` à `003`, `BR-INSTALL-013`. Décisions : ADR-0008, ADR-0014, ADR-0021, ADR-0035. Contrat : `docs/open-api/agent-update.md`.
 
 ## En bref
 
@@ -20,8 +20,8 @@ La clé publique est **embarquée** dans l'agent (`crates/hearth-agent/update-ke
 
 La version publiée est celle du dépôt (`[workspace.package]` de `Cargo.toml`). Les mises à jour sont servies par `https://hearth.voikyrioh.fr/api/releases/` depuis un bucket privé (ADR-0035), plus par les GitHub Releases. Personne n'édite un manifeste à la main : `release-stage` est le seul à l'écrire, section `agent` comprise.
 
-1. Construire : `cargo xtask agent` (binaire statique `target/dist/hearth-agent`, taille et SHA-256 affichés).
-2. Signer avec `minisign` (aucune commande `xtask` ne signe l'agent), AVEC la version dans le commentaire signé (BR-UPDATE-035 : sans elle, ou avec un autre numéro, l'agent refuse avant tout échange et `release-stage` n'assemble pas). Sous PowerShell, sur ta machine (chemins en `$env:USERPROFILE`, jamais `~`) :
+1. Construire, sur le commit EXACT où le flux `publish-client` a tourné (`gh run view <id-du-run> --repo Voikyrioh/hearth --json headSha --jq .headSha`, puis `git checkout <SHA>`), donc APRÈS la fusion de la PR de version : `cargo xtask agent` (binaire statique `target/dist/hearth-agent`, taille et SHA-256 affichés). La sortie doit montrer `hearth-agent X.Y.Z` : `release-stage` ne contrôle que la version du commentaire signé, pas celle du binaire. Ne signe jamais un `target\dist\hearth-agent` qui n'est pas celui de cette construction (compare `Get-FileHash target\dist\hearth-agent` à la somme affichée).
+2. Signer avec `minisign` (aucune commande `xtask` ne signe l'agent), AVEC la version dans le commentaire signé (BR-UPDATE-035 : sans elle, ou avec un autre numéro, l'agent refuse avant tout échange et `release-stage` n'assemble pas). Sous PowerShell, sur ta machine, depuis la racine du dépôt, avec minisign 0.12 (chemins en `$env:USERPROFILE`, jamais `~`) :
    ```powershell
    minisign -S -t "version:X.Y.Z" -s "$env:USERPROFILE\.hearth\update.key" -m target\dist\hearth-agent -x target\dist\hearth-agent.minisig
    ```
@@ -30,9 +30,10 @@ La version publiée est celle du dépôt (`[workspace.package]` de `Cargo.toml`)
    ```powershell
    cargo xtask release-stage --client-dir <dossier de l'artefact> --agent-binary target\dist\hearth-agent --agent-signature target\dist\hearth-agent.minisig
    ```
-   `release-stage` revérifie les deux signatures (version signée comprise), les sommes, les adresses et la liste fermée de l'API, écrit sous `target/release-stage/` et range l'agent dans le dossier de SA version (`releases/X.Y.Z/hearth-agent-linux-x86_64`, ce que `install.sh` exige, BR-INSTALL-013). La section `agent` du manifeste est produite ici, avec l'adresse `https://hearth.voikyrioh.fr/api/releases/X.Y.Z/hearth-agent-linux-x86_64`. Il n'y a qu'une version par dépôt : une version d'agent différente de celle du dépôt est refusée.
-4. Déposer au bucket : d'abord l'essai à blanc, qui affiche chaque écriture sans rien écrire (`cargo xtask release-upload`), puis `cargo xtask release-upload --confirm`. Il faut l'outil `aws` et les variables `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` de la clé de publication dans l'environnement. Les fichiers de la version partent d'abord, le manifeste EN DERNIER (BR-RELEASE-001 à 003) : tant qu'il n'est pas déposé, ni les clients ni `install.sh` ne voient la nouvelle version. Un manifeste en place de version supérieure n'est pas remplacé sans `--allow-rollback`.
-5. Pour tester sans client : `POST /api/v1/agent/update` avec `{ version, url, signature, sha256 }` (contrat `docs/open-api/agent-update.md`).
+   `release-stage` revérifie les deux signatures (version signée comprise), les sommes, les adresses et la liste fermée de l'API, exige que `deploy/install.sh` soit identique à `HEAD` (committé, sinon il refuse), écrit sous `target/release-stage/` et range l'agent dans le dossier de SA version (`releases/X.Y.Z/hearth-agent-linux-x86_64`, ce que `install.sh` exige, BR-INSTALL-013). La section `agent` du manifeste est produite ici, avec l'adresse `https://hearth.voikyrioh.fr/api/releases/X.Y.Z/hearth-agent-linux-x86_64`. Il n'y a qu'une version par dépôt : une version d'agent différente de celle du dépôt est refusée.
+4. Déposer au bucket : d'abord l'essai à blanc, qui affiche chaque écriture sans rien écrire (`cargo xtask release-upload`), puis `cargo xtask release-upload --confirm`. Il faut les outils `aws` (AWS CLI v2) et `curl` (livré avec Windows), et les variables `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` de la clé de publication dans l'environnement. Les fichiers de la version partent d'abord, le manifeste EN DERNIER (BR-RELEASE-001 à 003) : tant qu'il n'est pas déposé, ni les clients ni `install.sh` ne voient la nouvelle version. Un manifeste en place de version supérieure n'est pas remplacé sans `--allow-rollback`.
+5. Finir par le runbook du client, qui est la procédure maîtresse d'une version : suppression de l'artefact `hearth-client-signed` (son étape 4) et release GitHub sans binaire, qui pose l'étiquette `vX.Y.Z` (son étape 5). Ce runbook-ci ne détaille que la part de l'agent (étapes 1 et 2).
+6. Pour tester sans client : `POST /api/v1/agent/update` avec `{ version, url, signature, sha256 }` (contrat `docs/open-api/agent-update.md`).
 
 `cargo xtask agent-manifest` existe encore mais ne fait plus partie de la procédure : il ajoutait la section `agent` à un `latest.json` hébergé sur GitHub, ce que `release-stage` fait désormais lui-même.
 
@@ -40,7 +41,7 @@ La version publiée est celle du dépôt (`[workspace.package]` de `Cargo.toml`)
 
 - Le client (HRT-17) propose « Mettre à jour l'agent » quand la section `agent` du manifeste annonce une version STRICTEMENT plus récente que celle de l'agent. Il la lit dans la même requête que son propre flux (une par 24 h au plus et par client, ou « Vérifier maintenant ») et ne propose jamais une version plus ancienne ou égale, ni une adresse qui n'est pas HTTPS, publique et sous `hearth.voikyrioh.fr/api/releases/` (ADR-0035). Rien n'est installé sans clic.
 - L'agent télécharge, vérifie la somme puis la signature contre sa clé embarquée (avec `version:X.Y.Z`), et seulement alors échange les binaires (voir « En bref »).
-- `install.sh` sans adresse lit le pointeur `https://hearth.voikyrioh.fr/api/releases/latest/agent` et installe cette version (BR-INSTALL-013).
+- `install.sh` sans `--binary`, sans `--url` et sans `HEARTH_RELEASE_URL` lit le pointeur `https://hearth.voikyrioh.fr/api/releases/latest/agent` et installe cette version (BR-INSTALL-013).
 - Contrôle après publication : « Vérifier maintenant » dans les réglages d'un client dont l'agent est plus ancien fait apparaître « Mise à jour disponible » sur la carte du serveur ; un agent déjà à jour ne montre rien. **Premier essai** : regarde le journal du client (`logs/`) pour une ligne « cible de l'agent non lue ».
 
 ## Suivre une mise à jour
@@ -139,7 +140,7 @@ Note : après un retour à la main vers un agent plus ancien, `update/last.json`
 - **Agent trop ancien pour le client** (versions d'interface incompatibles, BR-CONN-014) : l'agent répond `426` à toute route sauf `/hello`, donc le client ne peut pas le mettre à jour ; passer par `install.sh --binary` ou la configuration du système. Le client dit quoi faire (BR-UPDATE-020, 021).
 - **Redémarrage long** : le client attend le nouvel agent 2 minutes au plus (« Reconnexion… », sans alarme) ; au-delà, le lien passe « Hors ligne » comme une panne ordinaire (ADR-0021).
 - Un serveur de versions qui ne parle que TLS 1.2 est refusé (ADR-0014).
-- **Double panne** : si le superviseur est tué après l'échange **et** que le nouveau binaire ne démarre pas du tout, personne ne tourne pour conclure et le service reste à terre : reprise à la main ci-dessus (copier `.hearth-agent.previous`, puis la copie de la base si la base a été migrée). Une reprise automatique est à l'étude (ADR-0014, section du 2026-10-06).
+- **Double panne** : si le superviseur est tué après l'échange **et** que le nouveau binaire ne démarre pas du tout, personne ne tourne pour conclure et le service reste à terre : reprise à la main ci-dessus (copier `.hearth-agent.previous`, puis la copie de la base si la base a été migrée).
 - À vérifier sur la vraie machine (NixOS avec carte NVIDIA) : voir `contexts/hearth/sessions/2026-10-04-hearth-creation/tasks/T20-hrt-17-maj-agent.md`. En installation gérée, la mise à jour passe par la configuration NixOS, pas par cette procédure.
 
 ## Vérifier de bout en bout (développement)

@@ -17,6 +17,8 @@ ADR-0008 fixe le principe (flux de versions signé, superviseur, retour arrière
 
 ## Décision
 
+> **2026-10-12 : la décision 7 (clé du dépôt sans clé secrète) est amendée en bas de ce document.**
+
 1. **Le superviseur est une copie de l'ancien binaire**, déposée dans `<données>/update/supervisor` et lancée par `hearth-agent update-supervise --job <job.json>` (sous-commande cachée). Pas un second binaire à publier : le superviseur est exactement le code de l'agent qui l'a lancé, et il n'est pas touché par l'échange du binaire installé.
 2. **Il est lancé par `systemd-run`** (unité transitoire `hearth-agent-update`, `--collect`), donc **hors du groupe de contrôle du service** : `systemctl stop hearth-agent` ne le tue pas (ADR-0012 le rappelait). Un lancement « détaché » par un double `fork` ne survivrait pas à l'arrêt du service. Sans systemd, ou en installation gérée (`--managed`), l'agent **refuse** la mise à jour à distance (`409 MANAGED_INSTALL`). Un lanceur « processus détaché » existe pour le développement et les tests (`Launcher::Detached`), jamais en production.
 3. **Les fichiers de la mise à jour vivent dans `<données>/update/`** (binaire déposé, copie du superviseur, travail, étape, dernier résultat, verrou), pas dans `/tmp` : l'unité a `PrivateTmp=yes`, le superviseur ne verrait pas un fichier de `/tmp`, et seul le dossier de données est écrivable par l'agent. Dossier 0700, fichiers 0600 (0700 pour les binaires), écritures par fichier voisin puis renommage. Tous les noms sont dans `domain/install/files.rs`, **source unique** de la désinstallation (BR-INSTALL-011) : un nom écrit est un nom purgé.

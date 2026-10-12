@@ -21,10 +21,12 @@ Sans question : fabrique un haché (`hearth-agent hash-password --user marie`, s
 
 ## Vie privée : ce que Hearth contacte
 
+Le service de versions (`hearth.voikyrioh.fr`) n'est pas encore en ligne : ce qui suit décrit son fonctionnement à la première publication.
+
 - Le client vérifie les mises à jour auprès de `hearth.voikyrioh.fr` (`/api/releases/`), au lancement puis au plus une fois par jour en automatique (plus « Vérifier maintenant » quand tu le demandes). Sans Internet, la vérification échoue en silence.
-- Rien n'est téléchargé ni installé sans ton clic ; les fichiers sont vérifiés (somme et signature) avant d'être écrits.
-- Le service de versions ne demande ni compte ni identifiant, et n'écrit dans ses journaux ni adresse, ni agent utilisateur, ni identifiant de trace venu de l'appelant. Les premières installations sont comptées par une ligne qui ne porte que le type (client ou agent) et la version. Il est servi derrière Cloudflare, qui voit ton adresse comme pour tout site.
-- L'agent ne contacte `hearth.voikyrioh.fr` que lorsqu'un administrateur demande sa mise à jour, ou à l'installation si tu n'as pas donné de binaire (`install.sh`).
+- Aucun fichier n'est téléchargé ni installé sans ton clic. L'installateur du client n'est lancé qu'une fois sa signature vérifiée ; le binaire de l'agent n'est écrit qu'une fois sa somme et sa signature vérifiées.
+- Le service de versions ne demande ni compte ni identifiant. Il écrit une ligne de journal par requête (méthode, chemin, statut, durée), sans adresse ni agent utilisateur. Les premières installations sont comptées par une ligne qui ne porte que le type (client ou agent) et la version servie. Il est servi derrière Cloudflare, qui voit ton adresse comme pour tout site.
+- L'agent ne contacte `hearth.voikyrioh.fr` que lorsqu'un administrateur demande sa mise à jour ; `install.sh` le contacte à l'installation si tu n'as donné ni binaire ni adresse.
 
 ## Dépôt
 
