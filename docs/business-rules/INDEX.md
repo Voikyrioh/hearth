@@ -162,6 +162,12 @@ Côté agent :
 
 Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent côté client (HRT-17, lot interface). Les règles 027 à 029 sont nées de la revue de HRT-17 (adresse de téléchargement, travail orphelin, base migrée) ; 030 à 034 de HRT-27 (superviseur relancé et rejouable, arrêt voulu, reprises bornées, machine redémarrée).
 
+### RELEASE (dépôt d'une version au bucket, HRT-51)
+
+- [BR-RELEASE-001](./BR-RELEASE-001-une-version-deposee-ne-se-reecrit-jamais.md) — Une version déposée au bucket ne se réécrit jamais : clé existante au même contenu passée, à un autre contenu refus avant toute écriture — `xtask/src/release_publish.rs::publish` — invariant ✓
+- [BR-RELEASE-002](./BR-RELEASE-002-le-manifeste-est-ecrit-en-dernier.md) — Le manifeste est écrit en dernier, après la relecture publique de tous les fichiers (5 min de patience) ; essai à blanc par défaut — `xtask/src/release_publish.rs::{publish, read_back}` — invariant ✓
+- [BR-RELEASE-003](./BR-RELEASE-003-la-version-assemblee-est-reverifiee-avant-toute-ecriture.md) — La version assemblée est revérifiée en entier (signatures, sommes, adresses, liste fermée, forme du manifeste) avant écriture et avant dépôt ; l'agent est rangé dans le dossier de sa version — `xtask/src/release_stage.rs::{build_stage, verify_stage}` — invariant ✓
+
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
 | **INSTALL** | Installation agent : déploiement, service système, génération certificat | 13 | us-installer-agent |

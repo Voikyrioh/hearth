@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// Dossiers et fichiers où chercher des références.
-const SCANNED: [&str; 6] = [
+const SCANNED: [&str; 7] = [
     "crates",
+    "xtask/src",
     "apps/desktop/src",
     "apps/desktop/src-tauri/src",
     "docs/adr",

@@ -17,6 +17,9 @@
 //!   `publier-une-version-du-client`). Les adresses publiées sont celles de
 //!   `hearth.voikyrioh.fr/api/releases/` (HRT-49, ADR-0035) ; `client-release-check` refuse un numéro
 //!   dont l'étiquette `vX.Y.Z` existe déjà sur `origin`.
+//! - `release-stage`, `release-upload` : assemble une version en local (`target/release-stage/`, tout
+//!   revérifié) puis la dépose au bucket (essai à blanc par défaut, `--confirm`, manifeste EN DERNIER ;
+//!   HRT-51, BR-RELEASE-001 à 003).
 //! - `agent-manifest` : section `agent` du `latest.json`, signature vérifiée contre la clé
 //!   embarquée dans l'agent (HRT-17, ADR-0021, runbook `mettre-a-jour-agent`).
 //!
@@ -32,7 +35,10 @@ mod docker;
 mod e2e;
 mod e2e_double_failure;
 mod e2e_update;
+mod host;
 mod release_core;
+mod release_publish;
+mod release_stage;
 mod shellcheck;
 mod test_tmp;
 
@@ -48,6 +54,8 @@ fn main() -> ExitCode {
   shellcheck    contrôle les scripts de deploy/ avec shellcheck (en conteneur)\n  test-tmp-check  échoue si la suite de tests a laissé des dossiers temporaires (--clean les supprime)\n  br-check      toute référence BR-… du code et des docs a sa fiche
   client-release-check  refuse la clé de développement, une version qui n'est pas celle du dépôt et une étiquette vX.Y.Z déjà présente sur origin
   client-version        la version du dépôt (seule source du numéro publié)\n  client-sign           signe l'installateur avec la clé des variables d'environnement (version dans la signature)\n  client-manifest       vérifie la signature puis écrit latest.json (manifeste du greffon de mise à jour du client ; --url = https://hearth.voikyrioh.fr/api/releases/X.Y.Z/Hearth_X.Y.Z_x64-setup.exe)
+  release-stage         assemble une version sous target/release-stage/ (--client-dir D --agent-binary F --agent-signature S [--install-script P]) après avoir revérifié signatures, sommes, adresses et liste fermée
+  release-upload        dépose la version assemblée au bucket : ESSAI À BLANC par défaut, --confirm pour écrire (fichiers, relecture publique, script, manifeste en dernier, chacun relu dans le bucket ; refuse un manifeste en place de version supérieure sauf --allow-rollback ; nécessite l'outil aws et ses variables AWS_* dans l'environnement)
   agent-manifest        vérifie la signature de l'agent contre sa clé embarquée puis ajoute la section `agent` à latest.json (cible de la mise à jour de l'agent)"
             );
             return ExitCode::SUCCESS;
@@ -71,6 +79,12 @@ fn main() -> ExitCode {
         }
         Some("agent-manifest") => {
             agent_release::run_manifest(&std::env::args().skip(2).collect::<Vec<_>>())
+        }
+        Some("release-stage") => {
+            release_stage::run_stage(&std::env::args().skip(2).collect::<Vec<_>>())
+        }
+        Some("release-upload") => {
+            release_publish::run_upload(&std::env::args().skip(2).collect::<Vec<_>>())
         }
         Some(other) => Err(format!("tâche inconnue : {other}")),
     };

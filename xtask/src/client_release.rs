@@ -29,21 +29,21 @@ use std::path::{Path, PathBuf};
 
 use crate::release_core::*;
 
-fn root() -> Result<PathBuf, String> {
+pub(crate) fn root() -> Result<PathBuf, String> {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| "racine du dépôt introuvable".to_owned())
 }
 
-fn option(args: &[String], name: &str) -> Option<String> {
+pub(crate) fn option(args: &[String], name: &str) -> Option<String> {
     args.iter()
         .position(|arg| arg == name)
         .and_then(|at| args.get(at + 1))
         .cloned()
 }
 
-fn required(args: &[String], name: &str) -> Result<String, String> {
+pub(crate) fn required(args: &[String], name: &str) -> Result<String, String> {
     option(args, name).ok_or_else(|| format!("{name} manquant"))
 }
 
