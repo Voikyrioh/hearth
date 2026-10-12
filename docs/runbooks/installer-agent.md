@@ -122,6 +122,7 @@ Le refus de rétrograder ne porte que sur le **binaire installé**. Après `unin
 - **`install.sh` hérite de l'environnement de `sudo`** : les variables `HEARTH_ADMIN_USER`, `HEARTH_ADMIN_PASSWORD` et `HEARTH_ADMIN_PASSWORD_HASH` qui traînent dans le terminal sont lues par l'installation. Un mot de passe oublié dans l'environnement crée donc un premier compte sans qu'il soit demandé. Vérifier avec `env | grep HEARTH_` avant de lancer. Les sous-processus de l'installation (`systemctl`, `df`, l'ancien binaire) ne reçoivent jamais ces variables.
 - **Somme SHA-256** : `install.sh` dit d'où elle vient. Donnée par `--sha256`, elle protège contre un binaire abîmé **et** contre une origine compromise. Publiée à côté du binaire (`ADRESSE.sha256`, même origine), elle ne protège que d'un téléchargement abîmé : le script le dit.
 - **Redirections** : le script ne suit une redirection que si elle reste en HTTPS (avec `curl` comme avec `wget`).
+- **Sans curl** : `install.sh` se rabat sur `wget`, mais seulement GNU Wget 1.x (`wget --version` commence par « GNU Wget » et un chiffre). Avec BusyBox wget (Alpine, routeurs) ou Wget2 (`wget` par défaut de Fedora récentes), il s'arrête avec « Ce wget n'est pas GNU Wget 1 » avant toute requête, pour tous les téléchargements (pointeur, binaire, somme) : installer `curl` ou GNU Wget 1, ou donner `--binary`. Wget2 est refusé par précaution, il n'a pas été essayé.
 
 ## Dépannage
 

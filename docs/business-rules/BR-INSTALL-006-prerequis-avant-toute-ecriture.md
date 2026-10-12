@@ -17,7 +17,7 @@ Les prérequis sont contrôlés dans l'ordre : droits, système (Linux), archite
 - `crates/hearth-agent/src/domain/install/prerequisites.rs::check_prerequisites`.
 - `crates/hearth-agent/src/domain/install/port.rs::parse_port` : 1 à 65535, vide = 7341.
 - `crates/hearth-agent/src/application/install.rs::Installer::check_prerequisites` : observe (port, espace) puis décide.
-- `deploy/install.sh` : le téléchargement échoue proprement (message, rien d'installé) quand le réseau ou la version manquent ; pointeur de la dernière version : BR-INSTALL-013.
+- `deploy/install.sh` : le téléchargement échoue proprement (message, rien d'installé) quand le réseau ou la version manquent ; pointeur de la dernière version : BR-INSTALL-013. Sans `curl`, tout téléchargement (pointeur, binaire, somme, `--url` compris) exige GNU Wget 1.x et s'arrête sinon avant toute requête.
 
 ## Vérification
 - `domain::install::prerequisites::tests`, `domain::install::port::tests`.
