@@ -11,6 +11,8 @@ liens: [ADR-0002, ADR-0008, ADR-0009, ADR-0010, ADR-0011, ADR-0014, conception t
 
 # ADR-0017 : Mise à jour du client
 
+> **2026-10-12 : la partie « flux GitHub Releases » (décision 2 : adresse du flux, source de l'installateur, redirections de GitHub) est remplacée par ADR-0035.** Le texte ci-dessous reste l'historique de la décision du 2026-10-05.
+
 ## Contexte
 
 ADR-0008 fixe le principe (minisign, flux de versions) et ADR-0014 l'a réalisé pour l'agent. HRT-16 le réalise pour le client Windows : sans lui, chaque correction demanderait de réinstaller à la main. C'est aussi un canal d'exécution de code sur le PC de l'utilisateur : une mise à jour non vérifiée serait la pire faille du produit. Le « point ouvert » de la conception technique (où publier les versions) est tranché : **les GitHub Releases du dépôt public** `Voikyrioh/hearth`.

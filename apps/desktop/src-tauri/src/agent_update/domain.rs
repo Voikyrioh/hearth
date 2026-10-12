@@ -6,7 +6,7 @@
 //! SHA-256 et la signature minisign contre SA clé embarquée avant d'écrire quoi que ce soit, et il
 //! refuse une adresse non HTTPS ou locale, une version qui n'est pas plus récente. Ce module garantit
 //! autre chose : que le client n'envoie JAMAIS une cible qu'il sait mauvaise (rétrogradation,
-//! adresse non HTTPS, locale ou hors du dépôt prévu, version illisible), même si le flux, ou le
+//! adresse non HTTPS, locale ou hors du serveur de versions prévu, version illisible), même si le flux, ou le
 //! fichier de l'état, étaient altérés. La WebView, elle, ne fournit aucun de ces champs.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -108,7 +108,7 @@ pub enum TargetRejection {
     /// Adresse de bouclage, privée, de lien local ou sans nom public (BR-UPDATE-027, côté agent).
     #[error("adresse locale ou privée")]
     LocalAddress,
-    /// L'adresse n'est pas celle des releases du dépôt prévu.
+    /// L'adresse n'est pas celle du serveur de versions prévu (`DownloadPolicy::official_releases`).
     #[error("source de téléchargement refusée")]
     UntrustedSource,
 }
@@ -154,7 +154,7 @@ pub fn validate_target(
 }
 
 /// L'adresse du binaire : HTTPS, sans identifiant ni fragment, hôte public, et source permise par la
-/// politique (les releases du dépôt public). Les deux dernières vérifications sont celles que le
+/// politique (le serveur de versions Hearth, `/api/releases/`). Les deux dernières vérifications sont celles que le
 /// client applique déjà à son propre installateur ; la première est celle de l'agent
 /// (BR-UPDATE-027), refaite ici pour ne jamais lui envoyer ce qu'il refuserait.
 fn check_address(url: &Url, policy: &DownloadPolicy) -> Result<(), TargetRejection> {

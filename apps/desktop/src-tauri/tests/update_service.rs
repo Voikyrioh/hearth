@@ -19,8 +19,7 @@ use hearth_desktop_lib::update::service::{InstallRefusal, UpdateService};
 
 const HOUR: i64 = 60 * 60 * 1000;
 const START: i64 = 1_800_000_000_000;
-const URL: &str =
-    "https://github.com/Voikyrioh/hearth/releases/download/v1.1.0/Hearth_1.1.0_x64-setup.exe";
+const URL: &str = "https://hearth.voikyrioh.fr/api/releases/1.1.0/Hearth_1.1.0_x64-setup.exe";
 
 struct FakeClock(AtomicI64);
 
@@ -152,7 +151,7 @@ fn rig_with(record: UpdateRecord) -> Rig {
         store.clone(),
         feed.clone(),
         sink.clone(),
-        DownloadPolicy::github_releases(),
+        DownloadPolicy::official_releases(),
         "1.0.0",
     );
     Rig {
@@ -384,7 +383,7 @@ async fn the_attempt_is_written_before_the_network_call() {
         store.clone(),
         probe.clone(),
         Arc::new(Sink::default()),
-        DownloadPolicy::github_releases(),
+        DownloadPolicy::official_releases(),
         "1.0.0",
     );
     service.check_if_due().await;

@@ -30,8 +30,7 @@ use url::Url;
 
 const HOUR: i64 = 60 * 60 * 1000;
 const START: i64 = 1_800_000_000_000;
-const URL: &str =
-    "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64";
+const URL: &str = "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64";
 const SIGNATURE: &str =
     "untrusted comment: signature from minisign secret key\nRUQabc\ntrusted comment: x\nabc\n";
 
@@ -122,7 +121,7 @@ fn rig() -> Rig {
         store.clone(),
         feed.clone(),
         Arc::new(Quiet),
-        DownloadPolicy::github_releases(),
+        DownloadPolicy::official_releases(),
         "0.1.0",
     );
     Rig {
@@ -232,7 +231,7 @@ async fn a_failed_read_keeps_the_previous_target_and_a_missing_entry_clears_it()
 async fn a_target_the_client_refuses_is_never_retained_and_replaces_nothing_dangerous() {
     for bad in [
         AgentCandidate {
-            url: "http://github.com/Voikyrioh/hearth/releases/download/v0.2.0/a".into(),
+            url: "http://hearth.voikyrioh.fr/api/releases/0.2.0/a".into(),
             ..candidate()
         },
         AgentCandidate {
@@ -240,7 +239,7 @@ async fn a_target_the_client_refuses_is_never_retained_and_replaces_nothing_dang
             ..candidate()
         },
         AgentCandidate {
-            url: "https://127.0.0.1/Voikyrioh/hearth/releases/download/v0.2.0/a".into(),
+            url: "https://127.0.0.1/api/releases/0.2.0/a".into(),
             ..candidate()
         },
         AgentCandidate {
@@ -287,7 +286,7 @@ async fn a_state_file_edited_by_hand_cannot_make_the_client_send_another_address
         store,
         Arc::new(FakeFeed::default()),
         Arc::new(Quiet),
-        DownloadPolicy::github_releases(),
+        DownloadPolicy::official_releases(),
         "0.1.0",
     );
     assert!(service.agent_target().is_none());
@@ -312,7 +311,7 @@ async fn without_a_registered_server_the_agent_file_is_not_read() {
         Arc::new(MemStore::default()),
         feed.clone(),
         Arc::new(Quiet),
-        DownloadPolicy::github_releases(),
+        DownloadPolicy::official_releases(),
         "0.1.0",
     )
     .with_agent_wanted(|| false);
@@ -327,7 +326,7 @@ fn service_on(store: &Arc<MemStore>) -> UpdateService {
         store.clone(),
         Arc::new(FakeFeed::default()),
         Arc::new(Quiet),
-        DownloadPolicy::github_releases(),
+        DownloadPolicy::official_releases(),
         "0.1.0",
     )
 }
@@ -728,7 +727,7 @@ async fn the_section_made_by_the_publication_code_is_read_and_retained_by_the_cl
     release_core::verify_agent_signature(&public, &signature, binary, "0.2.0").unwrap();
     let sha = "ab".repeat(32);
     let section = release_core::agent_section(
-        "https://github.com/Voikyrioh/hearth/releases/download/",
+        "https://hearth.voikyrioh.fr/api/releases/",
         "0.2.0",
         &signature,
         &sha,
@@ -748,7 +747,7 @@ async fn the_section_made_by_the_publication_code_is_read_and_retained_by_the_cl
         .await
         .unwrap()
         .expect("section de l'agent");
-    let target = validate_target(&found, &DownloadPolicy::github_releases()).unwrap();
+    let target = validate_target(&found, &DownloadPolicy::official_releases()).unwrap();
     assert_eq!(target.version().to_string(), "0.2.0");
     assert_eq!(target.url().as_str(), URL);
     assert_eq!(target.sha256(), sha);
