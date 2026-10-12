@@ -310,7 +310,7 @@ pointer_refused() {
         die "install.sh devrait refuser le pointeur : $1"
     fi
     must_say "${2:-Le pointeur de la dernière version est mal formé}"
-    ! grep -q '^/api/releases/9.9.9/' /tmp/https.log || die "un binaire a été téléchargé malgré le pointeur : $1"
+    ! grep -q '/api/releases/9.9.9/' /tmp/https.log || die "un binaire a été téléchargé malgré le pointeur : $1"
     nothing_left "pointeur refusé : $1"
 }
 
@@ -414,7 +414,7 @@ install_via() {
     run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_BASE_URL="$1" sh /deploy/install.sh --yes || die "l'installation par le pointeur ($2) a échoué"
     must_say "Dernière version : 9.9.9"
     must_say "Installation réussie."
-    grep -q '^/api/releases/9.9.9/hearth-agent-linux-x86_64' /tmp/https.log || die "le binaire n'a pas été téléchargé ($2)"
+    grep -q '/api/releases/9.9.9/hearth-agent-linux-x86_64$' /tmp/https.log || die "le binaire n'a pas été téléchargé ($2)"
     "$INSTALLED" uninstall --purge --yes >/dev/null 2>&1 || die "purge après l'installation par le pointeur ($2)"
     nothing_left "après l'installation par le pointeur ($2)"
 }
@@ -455,7 +455,7 @@ if run env HEARTH_BASE_URL=https://127.0.0.1:8445/redirhttp/api sh /deploy/insta
     die "wget : une redirection vers HTTP devrait être refusée"
 fi
 must_say "Le téléchargement n'a pas abouti. Relance l'installation."
-! grep -q '^/api/releases/9.9.9/' /tmp/https.log || die "wget : un binaire a été téléchargé après une redirection vers HTTP"
+! grep -q '/api/releases/9.9.9/' /tmp/https.log || die "wget : un binaire a été téléchargé après une redirection vers HTTP"
 nothing_left "wget, redirection vers HTTP"
 install_via "https://127.0.0.1:8445/redir/api" "wget, redirection vers HTTPS"
 # 5. corps en morceaux sans longueur annoncée : la borne est celle de `head -c`.
