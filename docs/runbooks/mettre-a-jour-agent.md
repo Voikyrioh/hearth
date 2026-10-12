@@ -20,7 +20,15 @@ La clé publique est **embarquée** dans l'agent (`crates/hearth-agent/update-ke
 
 La version publiée est celle du dépôt (`[workspace.package]` de `Cargo.toml`). Les mises à jour sont servies par `https://hearth.voikyrioh.fr/api/releases/` depuis un bucket privé (ADR-0035), plus par les GitHub Releases. Personne n'édite un manifeste à la main : `release-stage` est le seul à l'écrire, section `agent` comprise.
 
-1. Construire, sur le commit EXACT où le flux `publish-client` a tourné (`gh run view <id-du-run> --repo Voikyrioh/hearth --json headSha --jq .headSha`, puis `git checkout <SHA>`), donc APRÈS la fusion de la PR de version : `cargo xtask agent` (binaire statique `target/dist/hearth-agent`, taille et SHA-256 affichés). La sortie doit montrer `hearth-agent X.Y.Z` : `release-stage` ne contrôle que la version du commentaire signé, pas celle du binaire. Ne signe jamais un `target\dist\hearth-agent` qui n'est pas celui de cette construction (compare `Get-FileHash target\dist\hearth-agent` à la somme affichée).
+1. Construire, sur le commit EXACT où le flux `publish-client` a tourné, donc APRÈS la fusion de la PR de version, et depuis un arbre SANS modification locale :
+   ```powershell
+   gh run view <id-du-run> --repo Voikyrioh/hearth --json headSha --jq .headSha
+   git fetch origin
+   git status --porcelain      # doit ne rien afficher : sinon ranger les modifications avant de continuer
+   git checkout <SHA>
+   cargo xtask agent
+   ```
+   `git checkout <SHA>` garde les modifications locales, et `cargo xtask agent` construit l'arbre de travail tel qu'il est sur le disque : seul `deploy/install.sh` est comparé à `HEAD` par `release-stage`. Reste sur ce commit jusqu'à la fin de `release-upload --confirm` (`release-stage` et `release-upload` lisent la version et les clés sur le disque). Le binaire statique est `target/dist/hearth-agent`, taille et SHA-256 affichés. La sortie doit montrer `hearth-agent X.Y.Z` : `release-stage` ne contrôle que la version du commentaire signé, pas celle du binaire. Ne signe jamais un `target\dist\hearth-agent` qui n'est pas celui de cette construction (compare `Get-FileHash target\dist\hearth-agent` à la somme affichée).
 2. Signer avec `minisign` (aucune commande `xtask` ne signe l'agent), AVEC la version dans le commentaire signé (BR-UPDATE-035 : sans elle, ou avec un autre numéro, l'agent refuse avant tout échange et `release-stage` n'assemble pas). Sous PowerShell, sur ta machine, depuis la racine du dépôt, avec minisign 0.12 (chemins en `$env:USERPROFILE`, jamais `~`) :
    ```powershell
    minisign -S -t "version:X.Y.Z" -s "$env:USERPROFILE\.hearth\update.key" -m target\dist\hearth-agent -x target\dist\hearth-agent.minisig
@@ -32,7 +40,7 @@ La version publiée est celle du dépôt (`[workspace.package]` de `Cargo.toml`)
    ```
    `release-stage` revérifie les deux signatures (version signée comprise), les sommes, les adresses et la liste fermée de l'API, exige que `deploy/install.sh` soit identique à `HEAD` (committé, sinon il refuse), écrit sous `target/release-stage/` et range l'agent dans le dossier de SA version (`releases/X.Y.Z/hearth-agent-linux-x86_64`, ce que `install.sh` exige, BR-INSTALL-013). La section `agent` du manifeste est produite ici, avec l'adresse `https://hearth.voikyrioh.fr/api/releases/X.Y.Z/hearth-agent-linux-x86_64`. Il n'y a qu'une version par dépôt : une version d'agent différente de celle du dépôt est refusée.
 4. Déposer au bucket : d'abord l'essai à blanc, qui affiche chaque écriture sans rien écrire (`cargo xtask release-upload`), puis `cargo xtask release-upload --confirm`. Il faut les outils `aws` (AWS CLI v2) et `curl` (livré avec Windows), et les variables `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` de la clé de publication dans l'environnement. Les fichiers de la version partent d'abord, le manifeste EN DERNIER (BR-RELEASE-001 à 003) : tant qu'il n'est pas déposé, ni les clients ni `install.sh` ne voient la nouvelle version. Un manifeste en place de version supérieure n'est pas remplacé sans `--allow-rollback`.
-5. Finir par le runbook du client, qui est la procédure maîtresse d'une version : suppression de l'artefact `hearth-client-signed` (son étape 4) et release GitHub sans binaire, qui pose l'étiquette `vX.Y.Z` (son étape 5). Ce runbook-ci ne détaille que la part de l'agent (étapes 1 et 2).
+5. Finir par le runbook du client, qui est la procédure maîtresse d'une version : release GitHub sans binaire, qui pose l'étiquette `vX.Y.Z` (son étape 5). L'artefact `hearth-client-signed` doit déjà être supprimé de GitHub (son étape 4, dès les sommes comparées). Ce runbook-ci ne détaille que la part de l'agent (étapes 1 et 2).
 6. Pour tester sans client : `POST /api/v1/agent/update` avec `{ version, url, signature, sha256 }` (contrat `docs/open-api/agent-update.md`).
 
 `cargo xtask agent-manifest` existe encore mais ne fait plus partie de la procédure : il ajoutait la section `agent` à un `latest.json` hébergé sur GitHub, ce que `release-stage` fait désormais lui-même.
