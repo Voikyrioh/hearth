@@ -85,9 +85,9 @@ cp "$BIN" /tmp/www/nosum/hearth-agent
 python3 /deploy/e2e/https_server.py 8443 /tmp/www/release &
 python3 /deploy/e2e/https_server.py 8444 /tmp/www/nosum &
 # Origine des versions publiées (BR-INSTALL-013) : /api/releases/latest/agent (pointeur) et
-# /api/releases/9.9.9/hearth-agent.
+# /api/releases/9.9.9/hearth-agent-linux-x86_64.
 mkdir -p /tmp/www/api/releases/latest /tmp/www/api/releases/9.9.9
-cp "$BIN" /tmp/www/api/releases/9.9.9/hearth-agent
+cp "$BIN" /tmp/www/api/releases/9.9.9/hearth-agent-linux-x86_64
 python3 /deploy/e2e/https_server.py 8445 /tmp/www &
 API=https://127.0.0.1:8445/api
 sleep 2
@@ -303,12 +303,13 @@ ok "install.sh --binary relatif : résolu en chemin absolu, aucun homonyme du PA
 # --------------------------------------------------------------------------------------------
 POINTER=/tmp/www/api/releases/latest/agent
 point() { printf '%s\n' "$1" >"$POINTER"; }
+# $1 : le cas ; $2 (facultatif) : le message attendu au lieu de « mal formé ».
 pointer_refused() {
     : >/tmp/https.log
     if run env HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
         die "install.sh devrait refuser le pointeur : $1"
     fi
-    must_say "Le pointeur de la dernière version est mal formé"
+    must_say "${2:-Le pointeur de la dernière version est mal formé}"
     ! grep -q '^/api/releases/9.9.9/' /tmp/https.log || die "un binaire a été téléchargé malgré le pointeur : $1"
     nothing_left "pointeur refusé : $1"
 }
@@ -319,27 +320,45 @@ if run env HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
 fi
 must_say "Le pointeur de la dernière version de l'agent est absent"
 nothing_left "pointeur absent"
-point "9.9.9 $SUM 9.9.9/hearth-agent extra"
+point "9.9.9 $SUM 9.9.9/hearth-agent-linux-x86_64 extra"
 pointer_refused "quatre éléments"
 point "9.9.9 $SUM"
 pointer_refused "chemin manquant"
-point "9.9 $SUM 9.9.9/hearth-agent"
+point "9.9 $SUM 9.9.9/hearth-agent-linux-x86_64"
 pointer_refused "version X.Y"
-point "9.9.9 $(printf '%s' "$SUM" | cut -c 1-63) 9.9.9/hearth-agent"
+point "9.9.9 $(printf '%s' "$SUM" | cut -c 1-63) 9.9.9/hearth-agent-linux-x86_64"
 pointer_refused "somme de 63 caractères"
-point "9.9.9 $SUM ../9.9.9/hearth-agent"
+point "9.9.9 $SUM ../9.9.9/hearth-agent-linux-x86_64"
 pointer_refused "chemin avec .."
-point "9.9.9 $SUM 9.9.9/../9.9.9/hearth-agent"
+point "9.9.9 $SUM 9.9.9/../9.9.9/hearth-agent-linux-x86_64"
 pointer_refused "chemin avec .. au milieu"
-point "9.9.9 $SUM 9.9.9//hearth-agent"
+point "9.9.9 $SUM 9.9.9//hearth-agent-linux-x86_64"
 pointer_refused "chemin avec //"
-point "9.9.9 $SUM /9.9.9/hearth-agent"
+point "9.9.9 $SUM /9.9.9/hearth-agent-linux-x86_64"
 pointer_refused "chemin absolu"
-point "9.9.9 $SUM 9.9.9/hearth-agent;id"
+point "9.9.9 $SUM 9.9.9/hearth-agent-linux-x86_64;id"
 pointer_refused "chemin avec ;"
+point "9.9.9 $SUM 9.9.9/hearth-agent"
+pointer_refused "chemin d'un autre nom que hearth-agent-linux-x86_64"
+point "9.9.9 $SUM 8.8.8/hearth-agent-linux-x86_64"
+pointer_refused "chemin d'une autre version"
+printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64\n9.9.9 %s 9.9.9/hearth-agent-linux-x86_64\n' "$SUM" "$SUM" >"$POINTER"
+pointer_refused "deux lignes"
+printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64\r\n' "$SUM" >"$POINTER"
+pointer_refused "fin de ligne CRLF"
+# Plus de 512 octets : avec curl, --max-filesize coupe à la lecture (« n'a pas abouti ») ; sinon la mesure
+# derrière refuse (« mal formé »). Dans les deux cas, rien n'est téléchargé ni écrit.
+{ printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64 ' "$SUM"; head -c 600 /dev/zero | tr '\0' 'a'; printf '\n'; } >"$POINTER"
+pointer_refused "plus de 512 octets" "Le téléchargement n'a pas abouti. Relance l'installation."
+# Origine injoignable pour le pointeur (passe par resolve_pointer, contrairement à HEARTH_RELEASE_URL).
+if run env HEARTH_BASE_URL=https://127.0.0.1:9/api sh /deploy/install.sh --yes; then
+    die "install.sh avec une origine injoignable devrait échouer"
+fi
+must_say "Le téléchargement n'a pas abouti. Relance l'installation."
+nothing_left "origine injoignable"
 ok "install.sh : pointeur absent, mal formé, avec .. : refus avant de télécharger, rien d'écrit"
 
-point "9.9.9 $(printf '0%.0s' $(seq 1 64)) 9.9.9/hearth-agent"
+point "9.9.9 $(printf '0%.0s' $(seq 1 64)) 9.9.9/hearth-agent-linux-x86_64"
 if run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
     die "install.sh avec un pointeur à la somme fausse devrait échouer"
 fi
@@ -352,9 +371,27 @@ must_say "n'est pas en HTTPS"
 nothing_left "origine en clair"
 ok "install.sh : pointeur à la somme fausse refusé, origine en clair refusée, rien d'écrit"
 
-point "9.9.9 $SUM 9.9.9/hearth-agent"
+# --sha256 différente de celle du pointeur : refus avant de télécharger le binaire.
+point "9.9.9 $SUM 9.9.9/hearth-agent-linux-x86_64"
+: >/tmp/https.log
+if run env HEARTH_BASE_URL="$API" sh /deploy/install.sh --sha256 "$(printf '1%.0s' $(seq 1 64))" --yes; then
+    die "install.sh avec une --sha256 différente de celle du pointeur devrait échouer"
+fi
+must_say "La somme SHA-256 donnée ne correspond pas à celle de la dernière version publiée"
+! grep -q '^/api/releases/9.9.9/' /tmp/https.log || die "un binaire a été téléchargé malgré une --sha256 différente"
+nothing_left "--sha256 différente du pointeur"
+# --sha256 identique : acceptée, et le message ne prétend pas que la somme vient de la même adresse.
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_BASE_URL="$API" sh /deploy/install.sh --sha256 "$SUM" --yes || die "l'installation par le pointeur avec --sha256 identique a échoué"
+must_say "Somme SHA-256 vérifiée (celle que tu as donnée)"
+must_not_say "vient de la même adresse"
+must_say "Origine des versions : $API (HEARTH_BASE_URL)"
+must_say "Dernière version : 9.9.9"
+"$INSTALLED" uninstall --purge --yes >/dev/null 2>&1 || die "purge après l'installation par le pointeur avec --sha256"
+nothing_left "après l'installation par le pointeur avec --sha256"
+ok "install.sh : --sha256 différente refusée avant de télécharger, --sha256 identique acceptée sans fausse promesse"
+
 run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes || die "l'installation par le pointeur a échoué"
-must_say "Somme SHA-256 vérifiée"
+must_say "Somme SHA-256 vérifiée, mais elle vient de la même adresse"
 must_say "Installation réussie."
 "$INSTALLED" uninstall --purge --yes >/dev/null 2>&1 || die "purge après l'installation par le pointeur"
 nothing_left "après l'installation par le pointeur"
