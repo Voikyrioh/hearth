@@ -1,12 +1,23 @@
 name: publish-client
 
-# Publication du client Windows (HRT-16, ADR-0017, runbook docs/runbooks/publier-une-version-du-client.md).
+# Publication du client Windows (HRT-16, HRT-52, ADR-0017, runbook docs/runbooks/publier-une-version-du-client.md).
 #
 # DÉCLENCHÉ À LA MAIN SEULEMENT (Actions, « Run workflow »), et seulement depuis `main` : aucun push, aucune
 # PR, aucune étiquette ne le lance. Il construit l'installateur NSIS (job `build`, SANS aucun secret), puis
-# le signe avec la clé SECRÈTE des secrets du dépôt et crée une release BROUILLON (job `sign`, SANS
-# installation de dépendances npm). Le client ne voit la release qu'une fois que tu l'as publiée à la main
-# (le flux `releases/latest` ne propose jamais un brouillon).
+# le signe avec la clé SECRÈTE de l'environnement `release` (job `sign`, SANS installation de dépendances
+# npm) et rend l'artefact `hearth-client-signed` (1 jour). Il ne dépose RIEN et ne crée AUCUNE release
+# GitHub : les binaires vivent sur le bucket derrière https://hearth.voikyrioh.fr (conception distribution
+# Scaleway, sections 4.6 et 8.2). La suite se fait sur la machine du propriétaire : `gh run download`, puis
+# `cargo xtask release-stage` et `release-upload` (HRT-51). La release GitHub SANS binaire (étiquette,
+# notes, `SHA256SUMS`) est créée à la main APRÈS le dépôt : voir le runbook.
+#
+# Contenu de l'artefact `hearth-client-signed` : Hearth_X.Y.Z_x64-setup.exe, son `.sig`, `latest.json` (adresse
+# de l'installateur sur hearth.voikyrioh.fr ; intermédiaire, jamais déposé tel quel : le manifeste du bucket est
+# écrit par `release-stage`, HRT-51) et `notes.txt` (notes saisies au lancement).
+#
+# ATTENTION : le dépôt est public, donc cet artefact (installateur SIGNÉ) se télécharge avec n'importe quel
+# compte GitHub connecté dès la fin du job `sign`, jusqu'à sa suppression. Conservation : 1 jour. Le propriétaire
+# le supprime sitôt téléchargé (runbook). Le numéro est brûlé dès que `sign` a réussi.
 #
 # La version publiée est celle de `Cargo.toml` (`cargo xtask client-version`) : rien n'est saisi à la main
 # dans le formulaire, donc le numéro signé est celui du binaire construit.
@@ -36,6 +47,11 @@ on:
 
 permissions:
   contents: read
+
+# Deux lancements rapprochés signeraient deux fois le même numéro : un seul à la fois, sans annulation.
+concurrency:
+  group: publish-client
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -92,14 +108,16 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     environment: release
+    permissions:
+      contents: read
     runs-on: windows-latest
     timeout-minutes: 30
-    permissions:
-      contents: write
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.95"
@@ -135,19 +153,25 @@ jobs:
             --installer-file "installer/Hearth_${VERSION}_x64-setup.exe" \
             --notes-file installer/notes.txt \
             --signature-file "installer/Hearth_${VERSION}_x64-setup.exe.sig" \
-            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/Hearth_${VERSION}_x64-setup.exe" \
+            --url "https://hearth.voikyrioh.fr/api/releases/${VERSION}/Hearth_${VERSION}_x64-setup.exe" \
             --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --out installer/latest.json
 
-      # BROUILLON, étiqueté sur le commit construit : à relire et à publier à la main depuis la page des
-      # releases. L'étiquette pointe la source du binaire (dépôt AGPL).
-      - name: Release brouillon
+      # Aucune release GitHub, aucun droit d'écriture : le dossier `signed/` ne reçoit que ce que l'étape de
+      # publication (xtask release-stage, sur la machine du propriétaire) doit lire. L'installateur non
+      # signé de l'artefact de `build` n'est pas repris.
+      - name: Rassembler l'artefact signé
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${VERSION}" --draft --target "$GITHUB_SHA" \
-            --title "Hearth ${VERSION}" --notes-file installer/notes.txt \
-            "installer/Hearth_${VERSION}_x64-setup.exe" \
-            "installer/Hearth_${VERSION}_x64-setup.exe.sig" \
-            installer/latest.json
+          mkdir signed
+          cp "installer/Hearth_${VERSION}_x64-setup.exe" \
+             "installer/Hearth_${VERSION}_x64-setup.exe.sig" \
+             installer/latest.json installer/notes.txt signed/
+          sha256sum signed/*
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hearth-client-signed
+          path: signed/
+          if-no-files-found: error
+          retention-days: 1
