@@ -465,6 +465,8 @@ redirect_to_http_refused "curl, redirection du pointeur vers HTTP"
 ok "install.sh avec curl : pointeur servi en morceaux sans longueur annoncée, trop long refusé, valide accepté, redirection du pointeur vers HTTP refusée (le serveur en clair aurait fait réussir l'installation)"
 
 mv "$CURL_BIN" "$CURL_BIN.hidden"
+# Le shell garde en mémoire le chemin d'une commande déjà lancée : sans cela il trouverait encore curl.
+hash -r
 command -v curl >/dev/null 2>&1 && die "curl devrait être caché"
 command -v wget >/dev/null 2>&1 || die "wget absent de l'image"
 wget --version 2>&1 | grep -q '^GNU Wget [0-9]' || die "le wget de l'image n'est pas GNU Wget 1"
@@ -548,6 +550,7 @@ nothing_left "Wget2 simulé"
 ok "install.sh avec une bannière « GNU Wget2 » (simulée) : refusé clairement, aucune requête"
 
 mv "$CURL_BIN.hidden" "$CURL_BIN"
+hash -r
 command -v curl >/dev/null 2>&1 || die "curl devrait être rendu"
 valid_pointer
 
