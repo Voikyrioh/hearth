@@ -89,7 +89,7 @@ Un client qui ne connaît pas ce type de trame l'ignore. Le client actuel la lit
 
 Ce que le client fait de ce contrat, pour qui écrit un autre client ou diagnostique :
 
-- **La cible vient du client, jamais de l'interface** : le client lit la section `agent` du `latest.json` de la dernière release publiée de `Voikyrioh/hearth`, dans la MÊME requête que son propre flux de versions (une vérification = une requête, au plus une par 24 h, ADR-0017 et ADR-0021), et ne transmet à `POST /agent/update` que ce qu'il y a lu après l'avoir validé (version `X.Y.Z` plus récente que `current`, adresse HTTPS publique des releases du dépôt, signature, somme). Section du manifeste :
+- **La cible vient du client, jamais de l'interface** : le client lit la section `agent` du manifeste servi par `https://hearth.voikyrioh.fr/api/releases/latest` (ADR-0035), dans la MÊME requête que son propre flux de versions (une vérification = une requête, au plus une par 24 h, ADR-0017 et ADR-0021), et ne transmet à `POST /agent/update` que ce qu'il y a lu après l'avoir validé (version `X.Y.Z` plus récente que `current`, adresse HTTPS publique sous `https://hearth.voikyrioh.fr/api/releases/`, signature, somme). Section du manifeste :
 
 ```json
 {
@@ -99,7 +99,7 @@ Ce que le client fait de ce contrat, pour qui écrit un autre client ou diagnost
     "version": "0.2.0",
     "platforms": {
       "linux-x86_64": {
-        "url": "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64",
+        "url": "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64",
         "signature": "untrusted comment: …\nRUQ…\ntrusted comment: …\n…",
         "sha256": "ab12…(64 caractères hexadécimaux)"
       }

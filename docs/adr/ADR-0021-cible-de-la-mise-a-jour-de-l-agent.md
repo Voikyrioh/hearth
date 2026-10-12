@@ -11,6 +11,8 @@ liens: [ADR-0003, ADR-0008, ADR-0013, ADR-0014, ADR-0016, ADR-0017, conception t
 
 # ADR-0021 : Cible de la mise à jour de l'agent
 
+> **2026-10-12 : la source permise de la cible de l'agent (décision 4 : `github.com`, `/Voikyrioh/hearth/releases/download/`) est remplacée par ADR-0035 : `hearth.voikyrioh.fr`, `/api/releases/`.** Le texte ci-dessous reste l'historique de la décision du 2026-10-06.
+
 ## Contexte
 
 L'agent sait se mettre à jour (ADR-0014) mais n'interroge jamais Internet de lui-même : c'est le CLIENT qui lui transmet la cible (`version`, `url`, `signature`, `sha256`), et l'agent vérifie tout contre SA clé embarquée avant d'écrire quoi que ce soit. Ce que le lot interface de HRT-17 devait trancher, et que l'ADR-0017 (décision 8) et l'amendement de l'ADR-0008 avaient laissé ouvert : **où et sous quelle forme la cible de l'agent est publiée, comment le client la lit sans dépasser sa règle de fréquence, et qui fait confiance à quoi.** Le flux du client (ADR-0017) est au format du greffon de Tauri, qui ne rend le manifeste que lorsqu'une version plus récente du CLIENT existe : une section `agent` du même fichier serait illisible quand le client est à jour.
