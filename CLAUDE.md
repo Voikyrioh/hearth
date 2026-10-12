@@ -48,6 +48,10 @@ git add .sqlx
 
 Si `cargo sqlx` manque ou n'a pas le pilote SQLite : `cargo install sqlx-cli --no-default-features --features sqlite,rustls`. Voie sans le CLI : créer la base en exécutant le SQL des migrations (par exemple avec le module `sqlite3` de Python), puis `DATABASE_URL=… SQLX_OFFLINE_DIR=$PWD/.sqlx cargo build -p hearth-agent --all-targets` après avoir touché `crates/hearth-agent/src/lib.rs` pour forcer la recompilation. Les migrations déjà publiées ne se modifient jamais : on en ajoute une.
 
+## Moteur de conteneurs (HRT-61)
+
+L'agent lit le moteur de conteneurs (Docker) par son socket Unix et diffuse la liste des services, en LECTURE SEULE (ADR-0036 à ADR-0038). Réglages : `[engine] enabled` et `[engine] socket` de `agent.toml`, `HEARTH_ENGINE=off` (désactive : le socket n'est jamais ouvert), `HEARTH_ENGINE_SOCKET`. Aucun moteur sur le poste de développement : tout se teste contre le faux moteur (`FakeEngine`) et un faux démon HTTP local ; le vrai moteur n'existe qu'en CI (job `engine`, `HEARTH_TEST_ENGINE=1 cargo test -p hearth-agent --test engine_real -- --ignored`). Tests bridés : `cargo test -p hearth-agent -j 2 --test services_https -- --test-threads=2`. Aucune valeur de variable, aucun nom de variable, aucune commande dans les types du fil ni les traces.
+
 ## Comptes en ligne de commande
 
 `hearth-agent account add|list|passwd|role|remove|revoke` (voir `docs/runbooks/recuperer-acces-administrateur.md`). Le mot de passe n'est jamais un argument : saisie sans écho, ou `HEARTH_ACCOUNT_PASSWORD`.

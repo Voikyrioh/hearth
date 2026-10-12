@@ -20,7 +20,8 @@ Corps JSON direct (pas d'enveloppe `data`).
   "machine_name": "forge",
   "install_id": "0123456789abcdef0123456789abcdef",
   "managed": false,
-  "mac_addresses": ["AA:BB:CC:DD:EE:FF"]
+  "mac_addresses": ["AA:BB:CC:DD:EE:FF"],
+  "capabilities": ["services"]
 }
 ```
 
@@ -33,6 +34,7 @@ Corps JSON direct (pas d'enveloppe `data`).
 | `install_id` | texte | 32 caractères hexadécimaux minuscules ; généré à la première exécution, jamais modifié. |
 | `managed` | booléen | Installation gérée de l'extérieur : pas de mise à jour automatique. |
 | `mac_addresses` | tableau de texte | Adresses MAC des interfaces (`AA:BB:CC:DD:EE:FF`), triées, sans doublon, sans adresse nulle. |
+| `capabilities` | tableau de texte | Ce que cet agent sait faire de plus que le socle (HRT-61, ADR-0038) : `"services"` (sujet `services` du flux, `GET /services`, `POST /engine/recheck`). Absent chez un agent ancien : lu comme une liste vide. Un client n'utilise un sujet ou une route nouvelle que si la capacité est annoncée ; un client ancien ignore le champ. `api` ne change pas. |
 
 L'empreinte du certificat n'est pas dans le corps : le client la calcule sur le certificat présenté pendant la poignée de main TLS (SHA-256 du DER).
 

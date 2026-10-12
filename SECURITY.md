@@ -49,4 +49,6 @@ Aucune version n'est encore publiée à ce jour ; la première sera la 0.1.0.
 
 Pour savoir où chercher, les décisions de sécurité sont écrites dans `docs/adr/` et les règles dans `docs/business-rules/` (connexion, postes de confiance, mode attaque, mises à jour signées, installation). `ARCHITECTURE.md` donne la carte du code.
 
+Le moteur de conteneurs (note provisoire, HRT-61, finalisée avec HRT-70) : l'agent lit le moteur de conteneurs du serveur par le socket Unix du moteur (ADR-0036). **Le socket d'un moteur de conteneurs équivaut à `root`** : qui le pilote monte `/` dans un conteneur. La tranche actuelle ne fait que lire (détection, liste des conteneurs, événements) et ne transporte ni valeur ni nom de variable d'environnement, ni commande de lancement ; les tranches suivantes ajouteront démarrer, arrêter et déployer, et un administrateur Hearth deviendra alors, en pratique, `root` du serveur. L'administrateur du serveur peut couper tout cela : `[engine] enabled = false` dans `agent.toml` (ou `HEARTH_ENGINE=off`) : l'agent n'ouvre alors jamais le socket du moteur.
+
 La confiance repose sur trois choses, aucune n'est dans ce dépôt : la clé de signature des mises à jour, l'empreinte de chaque serveur, et les mots de passe. Le serveur qui distribue les versions n'est pas de confiance : c'est la signature qui fait foi.
