@@ -8,7 +8,7 @@
 //!   soit celle du dépôt et que le fichier soit déjà un manifeste valable du client, puis y ajoute (ou y
 //!   remplace) la section `agent`, le reste du fichier étant conservé (par défaut sur place). `U` est
 //!   exactement `https://hearth.voikyrioh.fr/api/releases/{X.Y.Z}/hearth-agent-linux-x86_64`, `X.Y.Z`
-//!   étant la version de l'AGENT, sans `v` (contrainte de `deploy/install.sh` ; fiche BR-INSTALL à écrire avec le ticket de install.sh).
+//!   étant la version de l'AGENT, sans `v` (contrainte de `deploy/install.sh` ; BR-INSTALL-013).
 //!
 //! Aucun secret ici : la signature est faite par le détenteur du dépôt, hors du dépôt et hors de la CI
 //! (runbook `docs/runbooks/mettre-a-jour-agent.md`).

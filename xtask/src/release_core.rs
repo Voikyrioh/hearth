@@ -20,7 +20,7 @@ pub const DEV_KEY_MARK: &str = "DEV public key";
 /// `{DOWNLOAD_PREFIX}{X.Y.Z}/{fichier}`, SANS `v` devant la version (format de l'API).
 pub const DOWNLOAD_PREFIX: &str = "https://hearth.voikyrioh.fr/api/releases/";
 /// Binaire de l'agent dans la liste fermée de l'API (`hearth-releases-api`,
-/// `release-files.ts::AGENT_BINARY`) : aussi la contrainte de `deploy/install.sh` (BR-INSTALL-013, fiche de la PR de install.sh).
+/// `release-files.ts::AGENT_BINARY`) : aussi la contrainte de `deploy/install.sh` (BR-INSTALL-013).
 pub const AGENT_BINARY: &str = "hearth-agent-linux-x86_64";
 
 /// Nom de l'installateur du client dans la liste fermée de l'API (`release-files.ts`).
@@ -346,7 +346,7 @@ pub fn agent_section(
         return Err("somme SHA-256 : 64 caractères hexadécimaux attendus".to_owned());
     }
     // Dossier = version de l'AGENT, fichier = `hearth-agent-linux-x86_64` : `install.sh` n'accepte que
-    // ce chemin (BR-INSTALL-013, fiche de la PR de install.sh).
+    // ce chemin (BR-INSTALL-013).
     check_release_url(prefix, version, AGENT_BINARY, url)?;
     Ok(json!({
         "version": version,
