@@ -230,7 +230,9 @@ resolve_pointer() {
     v_rest="${version#*.}"
     v_minor="${v_rest%%.*}"
     v_patch="${v_rest#*.}"
-    is_number "$v_major" && is_number "$v_minor" && is_number "$v_patch" || fail "$bad_pointer"
+    if ! is_number "$v_major" || ! is_number "$v_minor" || ! is_number "$v_patch"; then
+        fail "$bad_pointer"
+    fi
     # SOMME : 64 hexadécimaux.
     case "$sum" in
         "" | *[!0-9A-Fa-f]*) fail "$bad_pointer" ;;
