@@ -15,27 +15,27 @@ pub const CHECK_INTERVAL_MS: i64 = DAY_MS;
 /// Durée du report « Plus tard » (BR-UPDATE-006).
 pub const POSTPONE_MS: i64 = DAY_MS;
 
-/// Adresse du flux de versions : fixée à la compilation, jamais saisie (ADR-0017). GitHub
-/// redirige `latest` vers la dernière release publiée du dépôt public (hors préversions).
-pub const FEED_URL: &str =
-    "https://github.com/Voikyrioh/hearth/releases/latest/download/latest.json";
-/// Les installateurs ne se téléchargent que de ce dépôt (défense en profondeur : la signature reste
-/// la barrière).
-pub const DOWNLOAD_HOST: &str = "github.com";
-pub const DOWNLOAD_PATH_PREFIX: &str = "/Voikyrioh/hearth/releases/download/";
+/// Adresse du flux de versions : fixée à la compilation, jamais saisie (ADR-0017, ADR-0035). Route
+/// d'API sans extension : le greffon lit le corps comme du JSON, quel que soit le nom ou le
+/// `Content-Type`. Le serveur ne répond jamais 204 (le greffon le lirait comme « rien de neuf »).
+pub const FEED_URL: &str = "https://hearth.voikyrioh.fr/api/releases/latest";
+/// Les installateurs (et le binaire de l'agent) ne se téléchargent que de ce nom, sous ce chemin
+/// (défense en profondeur : la signature reste la barrière). Adresse versionnée du serveur Hearth :
+/// `/api/releases/{X.Y.Z}/{fichier}`, sans `v` devant la version.
+pub const DOWNLOAD_HOST: &str = "hearth.voikyrioh.fr";
+pub const DOWNLOAD_PATH_PREFIX: &str = "/api/releases/";
 
-/// Nombre de redirections suivies au plus, pour le manifeste comme pour l'installateur. GitHub en
-/// fait déjà DEUX aujourd'hui (`releases/latest/download/…` vers `releases/download/vN/…`, puis vers
-/// le stockage des releases, relevé sur les en-têtes d'une release publique d'un autre dépôt). La
-/// borne est large exprès : un saut de plus chez GitHub ne doit pas rendre muets tous les clients
-/// installés, sans correctif possible puisque le correctif passerait par ce même canal. C'est le
-/// rang de la redirection (la 1re, la 2e…) qui est borné, l'adresse de départ n'est pas comptée.
+/// Nombre de redirections suivies au plus, pour le manifeste comme pour l'installateur. Le serveur
+/// n'en fait aucune aujourd'hui : les cinq permises sont l'issue de secours pour déplacer le service
+/// sans toucher aux clients installés, sans correctif possible puisque le correctif passerait par ce
+/// même canal. C'est le rang de la redirection (la 1re, la 2e…) qui est borné, l'adresse de départ
+/// n'est pas comptée.
 pub const MAX_REDIRECTS: usize = 5;
 /// Tentatives réseau AUTOMATIQUES au plus par 24 h glissantes, quoi qu'il arrive (réussies, échouées,
 /// sans réseau) : plafond dur, compté et persisté, indépendant du classement des erreurs.
 pub const MAX_AUTOMATIC_ATTEMPTS_PER_DAY: usize = 3;
 /// Une vérification manuelle ne repart pas moins de 30 s après la précédente tentative (une page
-/// compromise ne peut pas boucler sur la requête vers GitHub).
+/// compromise ne peut pas boucler sur la requête vers le serveur de versions).
 pub const MANUAL_CHECK_MIN_INTERVAL_MS: i64 = 30_000;
 
 /// Les notes de version sont du texte affiché tel quel, jamais du HTML ; bornées.
@@ -63,7 +63,7 @@ pub struct UpdateRecord {
     pub postponed_until: Option<i64>,
     /// Version plus récente connue à la dernière vérification réussie.
     pub available: Option<Release>,
-    /// La cible de l'AGENT lue dans la section `agent` du `latest.json`, par la même requête (ADR-0021). Relue et
+    /// La cible de l'AGENT lue dans la section `agent` du manifeste de versions, par la même requête (ADR-0021). Relue et
     /// validée de nouveau à chaque usage : ce fichier se modifie à la main.
     pub agent: Option<AgentTargetRecord>,
     /// Pour chaque serveur, la date (`at`) du dernier résultat de mise à jour de l'agent déjà ANNONCÉ à
@@ -101,8 +101,8 @@ pub struct DownloadPolicy {
 }
 
 impl DownloadPolicy {
-    /// Production : HTTPS, `github.com`, releases du dépôt public.
-    pub fn github_releases() -> Self {
+    /// Production : HTTPS, `hearth.voikyrioh.fr`, chemin `/api/releases/` (ADR-0035).
+    pub fn official_releases() -> Self {
         Self {
             scheme: "https",
             host: DOWNLOAD_HOST.to_owned(),
@@ -154,7 +154,7 @@ impl DownloadPolicy {
     /// redirection (1 pour la première) : au plus `MAX_REDIRECTS`. HTTPS à chaque saut. AUCUNE liste
     /// d'hôtes sur les sauts suivants : la signature (clé embarquée + version signée) protège le
     /// contenu, HTTPS protège le transport, et une liste ferait taire tous les clients au premier
-    /// changement de domaine de stockage chez GitHub (ADR-0017).
+    /// changement de stockage derrière le service (ADR-0017).
     pub fn allows_redirect(&self, target: &Url, rank: usize) -> bool {
         rank <= MAX_REDIRECTS
             && (!self.redirects_https_only || target.scheme() == "https")
@@ -188,7 +188,7 @@ pub enum Rejection {
     /// Numéro de version, adresse ou signature inutilisables.
     #[error("annonce mal formée : {0}")]
     Malformed(&'static str),
-    /// L'installateur ne vient pas du dépôt prévu, ou pas en HTTPS.
+    /// L'installateur ne vient pas du serveur de versions prévu, ou pas en HTTPS.
     #[error("source de téléchargement refusée")]
     UntrustedSource,
 }

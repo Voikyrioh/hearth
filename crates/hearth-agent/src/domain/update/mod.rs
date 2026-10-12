@@ -10,6 +10,7 @@ mod orphan;
 mod progress;
 mod record;
 mod resume;
+mod signed_version;
 mod space;
 mod supervise;
 mod target;
@@ -21,6 +22,7 @@ pub use resume::{
     BinaryBackup, DatabaseCopy, Entry, MAX_RESUMES, Marker, Phase, RollbackAct, RollbackFacts,
     Stored, binary_backup, binary_restored, database_copy, enter, rollback_step, swap_done,
 };
+pub use signed_version::{SignedVersionRefusal, check_signed_version};
 pub use space::{SpaceRefusal, check_space, required_space};
 pub use supervise::{Answer, CHECK_POLL, CHECK_WINDOW, STOP_GRACE, Verdict, check_verdict};
 pub use target::{

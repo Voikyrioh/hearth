@@ -6,7 +6,9 @@
 //!   faite à la main avec la clé secrète de l'agent) contre `crates/hearth-agent/update-key.pub` (la clé
 //!   embarquée dans l'agent : une signature qu'il refuserait n'est jamais publiée), exige que `--version`
 //!   soit celle du dépôt et que le fichier soit déjà un manifeste valable du client, puis y ajoute (ou y
-//!   remplace) la section `agent`, le reste du fichier étant conservé (par défaut sur place).
+//!   remplace) la section `agent`, le reste du fichier étant conservé (par défaut sur place). `U` est
+//!   exactement `https://hearth.voikyrioh.fr/api/releases/{X.Y.Z}/hearth-agent-linux-x86_64`, `X.Y.Z`
+//!   étant la version de l'AGENT, sans `v` (contrainte de `deploy/install.sh` ; fiche BR-INSTALL à écrire avec le ticket de install.sh).
 //!
 //! Aucun secret ici : la signature est faite par le détenteur du dépôt, hors du dépôt et hors de la CI
 //! (runbook `docs/runbooks/mettre-a-jour-agent.md`).
@@ -56,7 +58,7 @@ pub fn run_manifest(args: &[String]) -> Result<(), String> {
         .map_err(|error| format!("Cargo.toml : {error}"))?;
     check_repository_version(&version, &cargo)?;
     // Ce que l'agent refuserait n'est jamais publié : signature vérifiée contre SA clé embarquée.
-    verify_agent_signature(&key, &signature, &binary)?;
+    verify_agent_signature(&key, &signature, &binary, &version)?;
     let section = agent_section(
         DOWNLOAD_PREFIX,
         &version,
@@ -88,8 +90,7 @@ pub fn run_manifest(args: &[String]) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const URL: &str =
-        "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64";
+    const URL: &str = "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64";
 
     fn pair() -> (minisign::KeyPair, String) {
         let keys = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
@@ -97,16 +98,21 @@ mod tests {
         (keys, public)
     }
 
-    fn sign(keys: &minisign::KeyPair, data: &[u8]) -> String {
+    fn sign_with(keys: &minisign::KeyPair, data: &[u8], comment: Option<&str>) -> String {
         minisign::sign(
             None,
             &keys.sk,
             std::io::Cursor::new(data),
-            Some("trusted"),
+            comment,
             Some("signature de test"),
         )
         .unwrap()
         .to_string()
+    }
+
+    /// Comme `minisign -S -t "version:0.2.0"`.
+    fn sign(keys: &minisign::KeyPair, data: &[u8]) -> String {
+        sign_with(keys, data, Some("version:0.2.0"))
     }
 
     #[test]
@@ -115,17 +121,39 @@ mod tests {
         let (other, _) = pair();
         let data = b"agent";
         let signature = sign(&keys, data);
-        assert!(verify_agent_signature(&public, &signature, data).is_ok());
+        assert!(verify_agent_signature(&public, &signature, data, "0.2.0").is_ok());
         let encoded =
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &signature);
-        assert!(verify_agent_signature(&public, &encoded, data).is_ok());
+        assert!(verify_agent_signature(&public, &encoded, data, "0.2.0").is_ok());
         assert!(
-            verify_agent_signature(&public, &sign(&other, data), data)
+            verify_agent_signature(&public, &sign(&other, data), data, "0.2.0")
                 .unwrap_err()
                 .contains("update-key.pub")
         );
-        assert!(verify_agent_signature(&public, &signature, b"autre").is_err());
-        assert!(verify_agent_signature(&public, "pas une signature", data).is_err());
+        assert!(verify_agent_signature(&public, &signature, b"autre", "0.2.0").is_err());
+        assert!(verify_agent_signature(&public, "pas une signature", data, "0.2.0").is_err());
+    }
+
+    #[test]
+    fn a_signature_without_the_version_or_with_another_one_is_never_published() {
+        // BR-UPDATE-035 : ce que l'agent refuserait avant l'échange ne sort pas.
+        let (keys, public) = pair();
+        let data = b"agent";
+        let check = |comment: Option<&str>| {
+            verify_agent_signature(&public, &sign_with(&keys, data, comment), data, "0.2.0")
+        };
+        assert!(check(Some("file:agent\tversion:0.2.0")).is_ok());
+        for refused in [
+            None,
+            Some("file:agent"),
+            Some("version:0.1.0"),
+            Some("version:0.2.1"),
+            Some("version:v0.2.0"),
+            Some("version:0.2.0\tversion:0.2.0"),
+        ] {
+            let error = check(refused).unwrap_err();
+            assert!(error.contains("version"), "{refused:?} : {error}");
+        }
     }
 
     #[test]
@@ -149,7 +177,7 @@ version = \"0.2.0\"
         );
     }
 
-    const CLIENT: &str = r#"{"version":"1.2.0","notes":"n","pub_date":"2026-10-06T10:00:00Z","platforms":{"windows-x86_64":{"signature":"c2ln","url":"https://github.com/Voikyrioh/hearth/releases/download/v1.2.0/Hearth_1.2.0_x64-setup.exe"}}}"#;
+    const CLIENT: &str = r#"{"version":"1.2.0","notes":"n","pub_date":"2026-10-06T10:00:00Z","platforms":{"windows-x86_64":{"signature":"c2ln","url":"https://hearth.voikyrioh.fr/api/releases/1.2.0/Hearth_1.2.0_x64-setup.exe"}}}"#;
 
     #[test]
     fn the_agent_section_is_added_to_the_client_manifest_which_is_otherwise_kept() {
@@ -191,15 +219,26 @@ version = \"0.2.0\"
         assert!(ok("0.2.0", &sha, URL).is_ok());
         assert!(ok("0.2", &sha, URL).is_err());
         assert!(ok("0.2.0", "ab", URL).is_err());
-        assert!(
-            ok(
-                "0.2.0",
-                &sha,
-                "http://github.com/Voikyrioh/hearth/releases/download/v0.2.0/a"
-            )
-            .is_err()
-        );
-        assert!(ok("0.2.0", &sha, "https://exemple.org/hearth-agent").is_err());
+        for bad in [
+            // Pas HTTPS, autre hôte, hôte en suffixe, ancienne source (GitHub).
+            "http://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64",
+            "https://exemple.org/hearth-agent",
+            "https://hearth.voikyrioh.fr.evil.test/api/releases/0.2.0/hearth-agent-linux-x86_64",
+            "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64",
+            // `v` devant la version, mauvais fichier (install.sh n'accepte que le binaire), autre dossier.
+            "https://hearth.voikyrioh.fr/api/releases/v0.2.0/hearth-agent-linux-x86_64",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64.minisig",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/Hearth_0.2.0_x64-setup.exe",
+            "https://hearth.voikyrioh.fr/api/releases/0.1.0/hearth-agent-linux-x86_64",
+            // Port, identifiant, requête, fragment.
+            "https://hearth.voikyrioh.fr:8443/api/releases/0.2.0/hearth-agent-linux-x86_64",
+            "https://u:p@hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64?x=1",
+            "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64#a",
+        ] {
+            assert!(ok("0.2.0", &sha, bad).is_err(), "{bad}");
+        }
         assert!(
             ok("0.3.0", &sha, URL).is_err(),
             "l'adresse doit être celle de la version annoncée"

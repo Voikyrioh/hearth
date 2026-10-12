@@ -249,6 +249,40 @@ async fn a_signature_by_another_key_is_refused_with_bad_signature_and_nothing_ru
 }
 
 #[tokio::test]
+async fn a_signature_without_the_requested_version_is_refused_and_journaled_like_any_bad_signature()
+{
+    // BR-UPDATE-035 + BR-UPDATE-024.
+    let bench = bench(true, false).await;
+    for signed in [None, Some("0.1.0"), Some("0.3.0")] {
+        let mut body = bench.rig.request("0.2.0", BINARY);
+        body["signature"] = json!(match signed {
+            Some(version) => bench.rig.keys.sign_version(BINARY, version),
+            None => bench.rig.keys.sign_comment(BINARY, None),
+        });
+        let reply = bench.post(&bench.admin, &body).await;
+        assert_eq!(
+            (reply.status, reply.code()),
+            (StatusCode::UNPROCESSABLE_ENTITY, "BAD_SIGNATURE"),
+            "{signed:?}"
+        );
+    }
+    assert!(bench.rig.downloader.fetched.lock().unwrap().is_empty());
+    bench.rig.host.with(|s| {
+        assert!(s.staged.is_none() && s.job.is_none() && s.launched.is_empty());
+    });
+    let entries = bench.journal().await;
+    // Les refus identiques consécutifs se regroupent au journal : au moins une entrée, toutes
+    // « signature invalide ».
+    assert!(!entries.is_empty());
+    assert!(entries.iter().all(|entry| {
+        entry
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("signature invalide"))
+    }));
+}
+
+#[tokio::test]
 async fn invalid_bodies_are_validation_errors_naming_the_field() {
     let bench = bench(true, false).await;
     let good = bench.rig.request("0.2.0", BINARY);

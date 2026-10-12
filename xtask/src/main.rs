@@ -14,7 +14,9 @@
 //!   T43).
 //! - `br-check` : toute référence `BR-…` du code et des docs a sa fiche.
 //! - `client-release-check`, `client-manifest` : publication du client (HRT-16, runbook
-//!   `publier-une-version-du-client`).
+//!   `publier-une-version-du-client`). Les adresses publiées sont celles de
+//!   `hearth.voikyrioh.fr/api/releases/` (HRT-49, ADR-0035) ; `client-release-check` refuse un numéro
+//!   dont l'étiquette `vX.Y.Z` existe déjà sur `origin`.
 //! - `agent-manifest` : section `agent` du `latest.json`, signature vérifiée contre la clé
 //!   embarquée dans l'agent (HRT-17, ADR-0021, runbook `mettre-a-jour-agent`).
 //!
@@ -44,8 +46,8 @@ fn main() -> ExitCode {
                 "tâches :\n  agent         construit le binaire statique de l'agent en conteneur (target/dist/hearth-agent)\n  e2e-install   installation de bout en bout dans un conteneur jetable\n  e2e-update    mise à jour de l'agent à distance de bout en bout (retour automatique compris)
   e2e-double-failure  la double panne de la mise à jour de l'agent (superviseur tué, retour arrière sans geste) sur un vrai systemd
   shellcheck    contrôle les scripts de deploy/ avec shellcheck (en conteneur)\n  test-tmp-check  échoue si la suite de tests a laissé des dossiers temporaires (--clean les supprime)\n  br-check      toute référence BR-… du code et des docs a sa fiche
-  client-release-check  refuse la clé de développement et une version qui n'est pas celle du dépôt
-  client-version        la version du dépôt (seule source du numéro publié)\n  client-sign           signe l'installateur avec la clé des variables d'environnement (version dans la signature)\n  client-manifest       vérifie la signature puis écrit latest.json (manifeste du greffon de mise à jour du client)
+  client-release-check  refuse la clé de développement, une version qui n'est pas celle du dépôt et une étiquette vX.Y.Z déjà présente sur origin
+  client-version        la version du dépôt (seule source du numéro publié)\n  client-sign           signe l'installateur avec la clé des variables d'environnement (version dans la signature)\n  client-manifest       vérifie la signature puis écrit latest.json (manifeste du greffon de mise à jour du client ; --url = https://hearth.voikyrioh.fr/api/releases/X.Y.Z/Hearth_X.Y.Z_x64-setup.exe)
   agent-manifest        vérifie la signature de l'agent contre sa clé embarquée puis ajoute la section `agent` à latest.json (cible de la mise à jour de l'agent)"
             );
             return ExitCode::SUCCESS;

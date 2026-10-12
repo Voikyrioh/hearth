@@ -45,7 +45,7 @@ Accepte le membre `reauth` des actes d'administration (HRT-28) : la preuve lie l
 
   - `version` : `X.Y.Z`, **strictement plus récente** que `current`.
   - `url` : HTTPS seulement, sans identifiant dans l'adresse, 2048 caractères au plus. **Adresse publique** : bouclage, privées, lien-local et partagées refusées (`422 VALIDATION_ERROR`, `details.field = "url"`, « adresse locale ou privée refusée »), aussi après résolution du nom et à chaque redirection (BR-UPDATE-027). Les redirections sont suivies une à une et doivent rester en HTTPS. Le serveur télécharge **directement** : aucun proxy d'environnement (`HTTPS_PROXY`...) n'est utilisé, sinon le filtre des adresses serait contourné ; un serveur qui ne sort que par un proxy ne peut pas se mettre à jour à distance (`unreachable`).
-  - `signature` : le contenu du fichier `.minisig` de minisign, ou son encodage base64 (le format de Tauri). Elle doit être faite par la clé publique **embarquée** dans l'agent.
+  - `signature` : le contenu du fichier `.minisig` de minisign, ou son encodage base64 (le format de Tauri). Elle doit être faite par la clé publique **embarquée** dans l'agent, et son commentaire signé doit porter `version:X.Y.Z` égal à `version` (`minisign -S -t "version:X.Y.Z"`, BR-UPDATE-035).
   - `sha256` : somme du binaire, hexadécimale.
 - `202` : `{ "version": "0.2.0", "step": "download" }`. L'avancement suit sur le flux.
 - Le fichier est téléchargé **en mémoire** (128 Mio au plus). **Rien n'est écrit ni exécuté avant que la somme ET la signature soient vérifiées.**
@@ -58,7 +58,7 @@ Accepte le membre `reauth` des actes d'administration (HRT-28) : la preuve lie l
 | 403 | `FORBIDDEN_ROLE` | compte en lecture seule (consigné au journal) | « Seul un administrateur peut mettre à jour l'agent » |
 | 409 | `MANAGED_INSTALL` | installation gérée par le système, ou agent sans systemd | « Cette installation est gérée par le système : l'agent ne se met pas à jour à distance. Mets-le à jour par la configuration du système. » |
 | 409 | `OPERATION_IN_PROGRESS` | une mise à jour est déjà en cours (BR-UPDATE-012) | « Une mise à jour de l'agent est déjà en cours. Réessaye plus tard. » |
-| 422 | `BAD_SIGNATURE` | signature illisible ou d'une autre clé : refusée **avant tout téléchargement** | « La signature de la mise à jour est refusée. Rien n'a été téléchargé ni modifié. » |
+| 422 | `BAD_SIGNATURE` | signature illisible, d'une autre clé, ou dont la version signée n'est pas `version` (BR-UPDATE-035) : refusée **avant tout téléchargement** | « La signature de la mise à jour est refusée. Rien n'a été téléchargé ni modifié. » |
 | 422 | `VALIDATION_ERROR` | `details.field` : `version` (illisible, ou pas plus récente), `url`, `sha256`, `signature` | |
 
 Toutes ces erreurs sont consignées au journal d'activité (action `agent.update`, BR-UPDATE-024).
@@ -89,7 +89,7 @@ Un client qui ne connaît pas ce type de trame l'ignore. Le client actuel la lit
 
 Ce que le client fait de ce contrat, pour qui écrit un autre client ou diagnostique :
 
-- **La cible vient du client, jamais de l'interface** : le client lit la section `agent` du `latest.json` de la dernière release publiée de `Voikyrioh/hearth`, dans la MÊME requête que son propre flux de versions (une vérification = une requête, au plus une par 24 h, ADR-0017 et ADR-0021), et ne transmet à `POST /agent/update` que ce qu'il y a lu après l'avoir validé (version `X.Y.Z` plus récente que `current`, adresse HTTPS publique des releases du dépôt, signature, somme). Section du manifeste :
+- **La cible vient du client, jamais de l'interface** : le client lit la section `agent` du manifeste servi par `https://hearth.voikyrioh.fr/api/releases/latest` (ADR-0035), dans la MÊME requête que son propre flux de versions (une vérification = une requête, au plus une par 24 h, ADR-0017 et ADR-0021), et ne transmet à `POST /agent/update` que ce qu'il y a lu après l'avoir validé (version `X.Y.Z` plus récente que `current`, adresse HTTPS publique sous `https://hearth.voikyrioh.fr/api/releases/`, signature, somme). Section du manifeste :
 
 ```json
 {
@@ -99,7 +99,7 @@ Ce que le client fait de ce contrat, pour qui écrit un autre client ou diagnost
     "version": "0.2.0",
     "platforms": {
       "linux-x86_64": {
-        "url": "https://github.com/Voikyrioh/hearth/releases/download/v0.2.0/hearth-agent-linux-x86_64",
+        "url": "https://hearth.voikyrioh.fr/api/releases/0.2.0/hearth-agent-linux-x86_64",
         "signature": "untrusted comment: …\nRUQ…\ntrusted comment: …\n…",
         "sha256": "ab12…(64 caractères hexadécimaux)"
       }

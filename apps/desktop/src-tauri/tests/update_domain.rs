@@ -3,11 +3,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)] // tests : les helpers peuvent paniquer
 
 use hearth_desktop_lib::update::domain::{
-    CHECK_INTERVAL_MS, Candidate, DownloadPolicy, FEED_URL, MAX_AUTOMATIC_ATTEMPTS_PER_DAY,
-    MAX_REDIRECTS, NOTES_MAX_CHARS, POSTPONE_MS, Rejection, Release, UpdateRecord,
-    attempts_in_window, automatic_check_allowed, banner_visible, check_is_due, clean_notes,
-    forget_installed, is_postponed, manual_check_allowed, postponed_until, validate_candidate,
-    with_attempt,
+    CHECK_INTERVAL_MS, Candidate, DOWNLOAD_HOST, DOWNLOAD_PATH_PREFIX, DownloadPolicy, FEED_URL,
+    MAX_AUTOMATIC_ATTEMPTS_PER_DAY, MAX_REDIRECTS, NOTES_MAX_CHARS, POSTPONE_MS, Rejection,
+    Release, UpdateRecord, attempts_in_window, automatic_check_allowed, banner_visible,
+    check_is_due, clean_notes, forget_installed, is_postponed, manual_check_allowed,
+    postponed_until, validate_candidate, with_attempt,
 };
 
 const HOUR: i64 = 60 * 60 * 1000;
@@ -42,25 +42,31 @@ fn a_manual_check_waits_thirty_seconds_after_the_previous_attempt() {
 
 #[test]
 fn redirects_are_https_at_every_rank_bounded_exactly_and_not_limited_to_hosts() {
-    let policy = DownloadPolicy::github_releases();
+    let policy = DownloadPolicy::official_releases();
     let ok = |url: &str, rank: usize| policy.allows_redirect(&url::Url::parse(url).unwrap(), rank);
     // Le rang 1 est la première redirection : l'adresse de départ n'est pas comptée.
     for rank in 1..=MAX_REDIRECTS {
-        assert!(ok("https://github.com/x", rank), "rang {rank}");
+        assert!(ok("https://hearth.voikyrioh.fr/x", rank), "rang {rank}");
     }
-    assert!(!ok("https://github.com/x", MAX_REDIRECTS + 1));
-    assert_eq!(MAX_REDIRECTS, 5, "marge réelle : GitHub en fait déjà 2");
+    assert!(!ok("https://hearth.voikyrioh.fr/x", MAX_REDIRECTS + 1));
+    assert_eq!(
+        MAX_REDIRECTS, 5,
+        "marge gardée : issue de secours pour déplacer le service"
+    );
     // HTTPS à n'importe quel rang.
     for rank in 1..=MAX_REDIRECTS {
-        assert!(!ok("http://github.com/x", rank), "http au rang {rank}");
-        assert!(!ok("http://objects.githubusercontent.com/x", rank));
+        assert!(
+            !ok("http://hearth.voikyrioh.fr/x", rank),
+            "http au rang {rank}"
+        );
+        assert!(!ok("http://stockage.example/x", rank));
     }
     // Aucune liste d'hôtes sur les sauts : un autre hôte en HTTPS est suivi (la signature et HTTPS
-    // protègent, une liste ferait taire le parc au premier changement de stockage chez GitHub).
-    assert!(ok("https://release-assets.githubusercontent.com/x", 2));
+    // protègent, une liste ferait taire le parc au premier déplacement du service).
+    assert!(ok("https://nouveau-nom.example/x", 2));
     assert!(ok("https://un-autre-stockage.example/x", 2));
     // Pas d'identifiants dans l'adresse.
-    assert!(!ok("https://user:pw@github.com/x", 1));
+    assert!(!ok("https://user:pw@hearth.voikyrioh.fr/x", 1));
     assert!(policy.https_only());
 }
 
@@ -148,7 +154,7 @@ fn a_release_already_installed_is_forgotten() {
 }
 
 fn policy() -> DownloadPolicy {
-    DownloadPolicy::github_releases()
+    DownloadPolicy::official_releases()
 }
 
 fn candidate(version: &str, url: &str) -> Candidate {
@@ -160,8 +166,7 @@ fn candidate(version: &str, url: &str) -> Candidate {
     }
 }
 
-const GOOD_URL: &str =
-    "https://github.com/Voikyrioh/hearth/releases/download/v1.1.0/Hearth_1.1.0_x64-setup.exe";
+const GOOD_URL: &str = "https://hearth.voikyrioh.fr/api/releases/1.1.0/Hearth_1.1.0_x64-setup.exe";
 
 #[test]
 fn a_newer_release_from_the_repository_is_accepted() {
@@ -197,15 +202,31 @@ fn a_prerelease_is_never_offered() {
 }
 
 #[test]
-fn an_installer_must_come_from_the_repository_over_https() {
+fn an_installer_must_come_from_the_release_server_over_https() {
     for url in [
-        "http://github.com/Voikyrioh/hearth/releases/download/v1.1.0/x.exe",
-        "https://example.com/Voikyrioh/hearth/releases/download/v1.1.0/x.exe",
-        "https://github.com/Autre/hearth/releases/download/v1.1.0/x.exe",
-        "https://github.com/Voikyrioh/hearth/archive/main.zip",
-        "https://user:pass@github.com/Voikyrioh/hearth/releases/download/v1.1.0/x.exe",
-        "https://github.com:8443/Voikyrioh/hearth/releases/download/v1.1.0/x.exe",
-        "https://github.com.evil.test/Voikyrioh/hearth/releases/download/v1.1.0/x.exe",
+        // Pas HTTPS.
+        "http://hearth.voikyrioh.fr/api/releases/1.1.0/x.exe",
+        // Autre hôte, hôte en suffixe, sous-domaine, ancienne source (GitHub).
+        "https://example.com/api/releases/1.1.0/x.exe",
+        "https://hearth.voikyrioh.fr.evil.test/api/releases/1.1.0/x.exe",
+        "https://evil.hearth.voikyrioh.fr/api/releases/1.1.0/x.exe",
+        "https://github.com/Voikyrioh/hearth/releases/download/v1.1.0/x.exe",
+        // Chemin hors de `/api/releases/` : racine du frontend, autres routes de l'API, voisin du préfixe.
+        "https://hearth.voikyrioh.fr/",
+        "https://hearth.voikyrioh.fr/index.html",
+        "https://hearth.voikyrioh.fr/api/install.sh",
+        "https://hearth.voikyrioh.fr/api/health",
+        "https://hearth.voikyrioh.fr/api/releases",
+        "https://hearth.voikyrioh.fr/api/releases-evil/1.1.0/x.exe",
+        "https://hearth.voikyrioh.fr/releases/1.1.0/x.exe",
+        // Remontée hors du préfixe (normalisée par l'analyse de l'adresse).
+        "https://hearth.voikyrioh.fr/api/releases/../install.sh",
+        "https://hearth.voikyrioh.fr/api/releases/%2e%2e/install.sh",
+        // Identifiant dans l'adresse.
+        "https://user:pass@hearth.voikyrioh.fr/api/releases/1.1.0/x.exe",
+        "https://user@hearth.voikyrioh.fr/api/releases/1.1.0/x.exe",
+        // Port.
+        "https://hearth.voikyrioh.fr:8443/api/releases/1.1.0/x.exe",
         "file:///C:/Windows/System32/cmd.exe",
     ] {
         assert_eq!(
@@ -259,11 +280,33 @@ fn notes_are_plain_bounded_text() {
 }
 
 #[test]
-fn the_feed_address_is_a_fixed_https_address_of_the_public_repository() {
+fn the_feed_address_is_a_fixed_https_address_of_the_release_server() {
+    assert_eq!(
+        FEED_URL, "https://hearth.voikyrioh.fr/api/releases/latest",
+        "route gravée à vie (conception de la distribution, 4.4)"
+    );
+    assert_eq!(DOWNLOAD_HOST, "hearth.voikyrioh.fr");
+    assert_eq!(DOWNLOAD_PATH_PREFIX, "/api/releases/");
     let url = url::Url::parse(FEED_URL).unwrap();
     assert_eq!(url.scheme(), "https");
-    assert_eq!(url.host_str(), Some("github.com"));
-    assert!(url.path().starts_with("/Voikyrioh/hearth/releases/"));
+    assert_eq!(url.host_str(), Some(DOWNLOAD_HOST));
+    assert_eq!(url.port(), None);
+    assert!(url.path().starts_with(DOWNLOAD_PATH_PREFIX));
+    // Le flux est une route d'API : aucune extension de fichier.
+    assert!(!url.path().ends_with(".json"));
+    // Le flux lui-même est une source permise (le serveur peut le rediriger sans changer de nom).
+    assert!(policy().allows(&url));
+}
+
+#[test]
+fn the_production_policy_is_the_release_server_over_https_only() {
+    let policy = DownloadPolicy::official_releases();
+    assert!(policy.https_only());
+    let good = url::Url::parse(
+        "https://hearth.voikyrioh.fr/api/releases/1.1.0/Hearth_1.1.0_x64-setup.exe",
+    )
+    .unwrap();
+    assert!(policy.allows(&good));
 }
 
 #[test]
@@ -287,4 +330,49 @@ fn the_record_survives_a_json_round_trip_and_tolerates_missing_fields() {
         serde_json::from_str::<UpdateRecord>("{}").unwrap(),
         UpdateRecord::default()
     );
+}
+
+/// Cas limites de l'analyse d'adresse, relevés en exécutant la bibliothèque `url` : ce filtre est gravé
+/// dans le client, une montée de version de `url` ne doit pas en changer le sens sans bruit.
+#[test]
+fn address_edge_cases_keep_their_recorded_meaning() {
+    let refused = [
+        // Point final : nom absolu, pas l'hôte compilé.
+        "https://hearth.voikyrioh.fr./api/releases/1.1.0/x.exe",
+        "https://hearth.voikyrioh.fr\u{3002}/api/releases/1.1.0/x.exe",
+        // Barre inverse : lue comme une barre oblique, l'hôte s'arrête avant.
+        r"https://hearth.voikyrioh.fr\@evil.test/api/releases/1.1.0/x.exe",
+        r"https://hearth.voikyrioh.fr\.evil.test/api/releases/1.1.0/x.exe",
+        r"https://hearth.voikyrioh.fr/api/releases\..\install.sh",
+        // IDN et homoglyphes : le « e » cyrillique donne un autre nom (punycode).
+        "https://h\u{435}arth.voikyrioh.fr/api/releases/1.1.0/x.exe",
+        "https://hearth.voikyrioh.fr\u{ff0e}evil.test/api/releases/1.1.0/x.exe",
+        // Point encodé dans l'hôte.
+        "https://hearth.voikyrioh.fr%2eevil.test/api/releases/1.1.0/x.exe",
+    ];
+    for url in refused {
+        assert_eq!(
+            validate_candidate("1.0.0", &candidate("1.1.0", url), &policy()),
+            Err(Rejection::UntrustedSource),
+            "{url}"
+        );
+    }
+    // Acceptés : la même source officielle, écrite autrement. Plus tolérant sur la forme seulement :
+    // l'analyse ramène l'adresse à `hearth.voikyrioh.fr` sans port, et c'est elle que l'on télécharge.
+    let accepted = [
+        // Casse du schéma et de l'hôte.
+        "HTTPS://HEARTH.VOIKYRIOH.FR/api/releases/1.1.0/x.exe",
+        // Port par défaut explicite.
+        "https://hearth.voikyrioh.fr:443/api/releases/1.1.0/x.exe",
+        // Point idéographique entre les étiquettes : normalisé en point.
+        "https://hearth\u{3002}voikyrioh\u{3002}fr/api/releases/1.1.0/x.exe",
+        // Barre inverse dans le chemin : lue comme une barre oblique, reste sous le préfixe.
+        r"https://hearth.voikyrioh.fr/api\releases/1.1.0/x.exe",
+    ];
+    for url in accepted {
+        assert!(
+            validate_candidate("1.0.0", &candidate("1.1.0", url), &policy()).is_ok(),
+            "{url}"
+        );
+    }
 }

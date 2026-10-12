@@ -50,7 +50,7 @@ pub fn install<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
     let handle = app.handle().clone();
     // Une seule politique de source, partagée : le service refuse une annonce qui ne la respecte pas,
     // l'adaptateur ne retient ni ne télécharge rien d'autre et durcit les redirections avec elle.
-    let policy = domain::DownloadPolicy::github_releases();
+    let policy = domain::DownloadPolicy::official_releases();
     let feed = TauriFeed::production(handle.clone(), policy.clone())
         .map_err(|error| format!("adresse du flux de versions : {error}"))?;
     // La cible de l'agent n'est lue que si un serveur est enregistré (la liaison est ouverte avant).
