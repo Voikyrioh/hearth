@@ -719,13 +719,13 @@ async fn the_section_made_by_the_publication_code_is_read_and_retained_by_the_cl
         None,
         &keys.sk,
         std::io::Cursor::new(binary),
-        Some("trusted"),
+        Some("version:0.2.0"),
         Some("signature de test"),
     )
     .unwrap()
     .to_string();
     // Ce que l'agent exigera : la signature se vérifie contre SA clé.
-    release_core::verify_agent_signature(&public, &signature, binary).unwrap();
+    release_core::verify_agent_signature(&public, &signature, binary, "0.2.0").unwrap();
     let sha = "ab".repeat(32);
     let section = release_core::agent_section(
         "https://github.com/Voikyrioh/hearth/releases/download/",

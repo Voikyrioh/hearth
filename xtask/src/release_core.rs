@@ -210,7 +210,8 @@ pub fn check_repository_version(requested: &str, cargo_toml: &str) -> Result<(),
 /// fichier `.minisig`, ou son encodage base64, vérifié contre la clé publique embarquée dans l'agent.
 /// Le commentaire de confiance doit porter `version:X.Y.Z` égal à `version` : ce que l'agent exige
 /// avant tout échange de binaire (BR-UPDATE-035). Même forme stricte que lui : un seul champ
-/// `version:`, ni `v`, ni pré-version. La signature se fait à la main avec
+/// `version:`, ni `v`, ni pré-version (`check_version` contrôle la forme de `version`, et la comparaison
+/// de chaînes refuse tout écart, zéros en tête compris). La signature se fait à la main avec
 /// `minisign -S -t "version:X.Y.Z" …` (runbook `mettre-a-jour-agent.md`).
 pub fn verify_agent_signature(
     public_key_file: &str,
@@ -218,13 +219,14 @@ pub fn verify_agent_signature(
     data: &[u8],
     version: &str,
 ) -> Result<(), String> {
+    check_version(version)?;
     let public = minisign::PublicKeyBox::from_string(&decode_key_file(public_key_file))
         .and_then(minisign::PublicKeyBox::into_public_key)
         .map_err(|error| format!("clé publique de l'agent illisible : {error}"))?;
     let text = signature_text(signature)?;
     let signature = minisign::SignatureBox::from_string(&text)
         .map_err(|error| format!("signature illisible : {error}"))?;
-    minisign::verify(&public, &signature, Cursor::new(data), true, false, true).map_err(|_| {
+    minisign::verify(&public, &signature, Cursor::new(data), true, false, false).map_err(|_| {
         "la signature ne correspond pas à crates/hearth-agent/update-key.pub : le binaire n'a pas été signé par la paire de la clé embarquée dans l'agent, ou le fichier a changé".to_owned()
     })?;
     let comment = signature

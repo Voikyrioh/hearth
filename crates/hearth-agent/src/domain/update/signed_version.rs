@@ -44,6 +44,8 @@ pub fn check_signed_version(
     let signed = strict
         .then(|| Version::parse(text).ok())
         .flatten()
+        // Forme canonique : pas de zéros en tête (`00.2.0`), comme la comparaison de chaînes de `xtask`.
+        .filter(|version| version.to_string() == text)
         .ok_or(SignedVersionRefusal::Malformed)?;
     if signed == *requested {
         Ok(())
@@ -114,6 +116,9 @@ mod tests {
             "version:0.2",
             "version:0.2.0.0",
             "version:0.2.x",
+            "version:00.2.0",
+            "version:0.02.0",
+            "version:0.2.00",
             "version:",
             "version: 0.2.0",
             "version:0.2.0\tversion:0.2.0",
@@ -122,6 +127,17 @@ mod tests {
             assert_eq!(
                 check_signed_version(comment, &REQUESTED),
                 Err(SignedVersionRefusal::Malformed),
+                "{comment:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_field_name_is_case_sensitive_and_tab_separated() {
+        for comment in ["Version:0.2.0", "VERSION:0.2.0", "file:x version:0.2.0"] {
+            assert_eq!(
+                check_signed_version(comment, &REQUESTED),
+                Err(SignedVersionRefusal::Missing),
                 "{comment:?}"
             );
         }

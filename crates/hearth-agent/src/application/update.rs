@@ -284,7 +284,10 @@ impl UpdateService {
                     .verifier
                     .check_format(&target.signature, &target.version)
                 {
-                    Err(_) => Err(UpdateError::BadSignature),
+                    Err(error) => {
+                        tracing::warn!(%error, "signature de la mise à jour refusée à la demande");
+                        Err(UpdateError::BadSignature)
+                    }
                     Ok(()) => {
                         let first = UpdateProgress {
                             version: target.version.to_string(),
