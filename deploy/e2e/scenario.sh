@@ -84,6 +84,12 @@ printf '%s  hearth-agent\n' "$SUM" >/tmp/www/release/hearth-agent.sha256
 cp "$BIN" /tmp/www/nosum/hearth-agent
 python3 /deploy/e2e/https_server.py 8443 /tmp/www/release &
 python3 /deploy/e2e/https_server.py 8444 /tmp/www/nosum &
+# Origine des versions publiées (BR-INSTALL-013) : /api/releases/latest/agent (pointeur) et
+# /api/releases/9.9.9/hearth-agent.
+mkdir -p /tmp/www/api/releases/latest /tmp/www/api/releases/9.9.9
+cp "$BIN" /tmp/www/api/releases/9.9.9/hearth-agent
+python3 /deploy/e2e/https_server.py 8445 /tmp/www &
+API=https://127.0.0.1:8445/api
 sleep 2
 REL=https://127.0.0.1:8443/hearth-agent
 
@@ -291,6 +297,68 @@ must_say "n'a pas de somme SHA-256 à comparer"
 "$INSTALLED" uninstall --purge --yes >/dev/null 2>&1 || die "purge après --binary relatif"
 nothing_left "après --binary relatif"
 ok "install.sh --binary relatif : résolu en chemin absolu, aucun homonyme du PATH lancé ; binaire sans somme annoncé avant lancement"
+
+# --------------------------------------------------------------------------------------------
+# install.sh par défaut : la dernière version, par son pointeur validé (BR-INSTALL-013)
+# --------------------------------------------------------------------------------------------
+POINTER=/tmp/www/api/releases/latest/agent
+point() { printf '%s\n' "$1" >"$POINTER"; }
+pointer_refused() {
+    : >/tmp/https.log
+    if run env HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
+        die "install.sh devrait refuser le pointeur : $1"
+    fi
+    must_say "Le pointeur de la dernière version est mal formé"
+    ! grep -q '^/api/releases/9.9.9/' /tmp/https.log || die "un binaire a été téléchargé malgré le pointeur : $1"
+    nothing_left "pointeur refusé : $1"
+}
+
+rm -f "$POINTER"
+if run env HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
+    die "install.sh sans pointeur devrait échouer"
+fi
+must_say "Le pointeur de la dernière version de l'agent est absent"
+nothing_left "pointeur absent"
+point "9.9.9 $SUM 9.9.9/hearth-agent extra"
+pointer_refused "quatre éléments"
+point "9.9.9 $SUM"
+pointer_refused "chemin manquant"
+point "9.9 $SUM 9.9.9/hearth-agent"
+pointer_refused "version X.Y"
+point "9.9.9 $(printf '%s' "$SUM" | cut -c 1-63) 9.9.9/hearth-agent"
+pointer_refused "somme de 63 caractères"
+point "9.9.9 $SUM ../9.9.9/hearth-agent"
+pointer_refused "chemin avec .."
+point "9.9.9 $SUM 9.9.9/../9.9.9/hearth-agent"
+pointer_refused "chemin avec .. au milieu"
+point "9.9.9 $SUM 9.9.9//hearth-agent"
+pointer_refused "chemin avec //"
+point "9.9.9 $SUM /9.9.9/hearth-agent"
+pointer_refused "chemin absolu"
+point "9.9.9 $SUM 9.9.9/hearth-agent;id"
+pointer_refused "chemin avec ;"
+ok "install.sh : pointeur absent, mal formé, avec .. : refus avant de télécharger, rien d'écrit"
+
+point "9.9.9 $(printf '0%.0s' $(seq 1 64)) 9.9.9/hearth-agent"
+if run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes; then
+    die "install.sh avec un pointeur à la somme fausse devrait échouer"
+fi
+must_say "La somme SHA-256 du binaire ne correspond pas"
+nothing_left "pointeur, somme fausse"
+if run env HEARTH_BASE_URL=http://127.0.0.1:8445/api sh /deploy/install.sh --yes; then
+    die "install.sh devrait refuser une origine en clair"
+fi
+must_say "n'est pas en HTTPS"
+nothing_left "origine en clair"
+ok "install.sh : pointeur à la somme fausse refusé, origine en clair refusée, rien d'écrit"
+
+point "9.9.9 $SUM 9.9.9/hearth-agent"
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW HEARTH_BASE_URL="$API" sh /deploy/install.sh --yes || die "l'installation par le pointeur a échoué"
+must_say "Somme SHA-256 vérifiée"
+must_say "Installation réussie."
+"$INSTALLED" uninstall --purge --yes >/dev/null 2>&1 || die "purge après l'installation par le pointeur"
+nothing_left "après l'installation par le pointeur"
+ok "install.sh par défaut : pointeur valide, binaire téléchargé, somme vérifiée, installation réussie"
 
 # --------------------------------------------------------------------------------------------
 # Première installation : script lu depuis un tube, binaire téléchargé en HTTPS, somme publiée à côté

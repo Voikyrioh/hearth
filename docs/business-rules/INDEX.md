@@ -57,6 +57,7 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-INSTALL-010](./BR-INSTALL-010-format-mot-de-passe-premier-compte.md) — Mot de passe du premier compte : 12 caractères, majuscule, minuscule, chiffre — `domain/install/credentials.rs::check_admin_password` — invariant ✓
 - [BR-INSTALL-011](./BR-INSTALL-011-desinstallation-conserver-ou-supprimer.md) — Désinstallation : conserver ou supprimer comptes, journal et configuration — `domain/install/uninstall.rs::uninstall_plan` — invariant ✓
 - [BR-INSTALL-012](./BR-INSTALL-012-architecture-prise-en-charge.md) — Architectures prises en charge : x86_64 et arm64 — `domain/install/platform.rs::parse_arch` — invariant ✓
+- [BR-INSTALL-013](./BR-INSTALL-013-telechargement-par-pointeur-valide.md) — Téléchargement par défaut : pointeur de la dernière version validé strictement — `deploy/install.sh::resolve_pointer` — invariant ✓
 - [BR-ACCT-001](./BR-ACCT-001-creation-compte.md) — Un compte est créé avec un identifiant unique, un mot de passe et un rôle — `application/accounts.rs::AccountService::create` — —
 - [BR-ACCT-002](./BR-ACCT-002-format-identifiant.md) — Identifiant : 3 à 32 caractères, minuscules, chiffres, tiret, underscore — `hearth-proto/account_rules.rs::check_username` (via `domain/accounts/username.rs::Username::parse`) — ✓
 - [BR-ACCT-003](./BR-ACCT-003-unicite-insensible-casse.md) — Identifiant unique, insensible à la casse — `hearth-proto/account_rules.rs::check_username` (via `domain/accounts/username.rs::Username::parse`) — ✓
@@ -162,7 +163,7 @@ Les règles BR-UPDATE-020 à 023 concernent l'écran de mise à jour de l'agent 
 
 | Domaine | Rôle | Nombre fiches | Référence conception |
 |---|---|---|---|
-| **INSTALL** | Installation agent : déploiement, service système, génération certificat | 12 | us-installer-agent |
+| **INSTALL** | Installation agent : déploiement, service système, génération certificat | 13 | us-installer-agent |
 | **CLIENT** | Installation et configuration client desktop : NSIS, Tauri, démarrage, zone notification | 14 | us-installer-client |
 | **CONN** | Connexion au serveur : découverte, épinglage TLS, authentification, session, coffre | 17 | us-connecter-serveur |
 | **DASH** | Tableau de bord machine : mesures système, GPU, historique, seuils | 15 | us-tableau-de-bord-machine |

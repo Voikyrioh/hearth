@@ -17,7 +17,7 @@ Les prérequis sont contrôlés dans l'ordre : droits, système (Linux), archite
 - `crates/hearth-agent/src/domain/install/prerequisites.rs::check_prerequisites`.
 - `crates/hearth-agent/src/domain/install/port.rs::parse_port` : 1 à 65535, vide = 7341.
 - `crates/hearth-agent/src/application/install.rs::Installer::check_prerequisites` : observe (port, espace) puis décide.
-- `deploy/install.sh` : le téléchargement échoue proprement (message, rien d'installé) quand le réseau ou la version manquent.
+- `deploy/install.sh` : le téléchargement échoue proprement (message, rien d'installé) quand le réseau ou la version manquent ; pointeur de la dernière version : BR-INSTALL-013.
 
 ## Vérification
 - `domain::install::prerequisites::tests`, `domain::install::port::tests`.
@@ -28,7 +28,7 @@ Les prérequis sont contrôlés dans l'ordre : droits, système (Linux), archite
 - Espace disque illisible (pas de `df`) : le contrôle est ignoré plutôt que de bloquer l'installation.
 
 ## Règles liées
-- BR-INSTALL-001, BR-INSTALL-012
+- BR-INSTALL-001, BR-INSTALL-012, BR-INSTALL-013
 
 ## Historique
 - 2026-10-05 : création (HRT-15, session 2026-10-04-hearth-creation).
