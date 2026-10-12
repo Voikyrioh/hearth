@@ -19,6 +19,15 @@ sudo sh deploy/install.sh --binary ./hearth-agent   # questions : port, premier 
 
 Sans question : fabrique un haché (`hearth-agent hash-password --user marie`, saisie sans écho), puis passe-le par l'environnement préservé de `sudo` : `HEARTH_ADMIN_USER=marie HEARTH_ADMIN_PASSWORD_HASH='$argon2id$…' sudo --preserve-env=HEARTH_ADMIN_USER,HEARTH_ADMIN_PASSWORD_HASH sh deploy/install.sh --binary ./hearth-agent --yes`. Un mot de passe ne se met jamais sur une ligne de commande. À la fin, l'agent tourne, démarre avec le serveur, et affiche son **empreinte** : à comparer avec celle du client à la première connexion. Désinstaller : `sudo hearth-agent uninstall [--keep-data|--purge]`. Détails, réinstallation, installation gérée (NixOS), dépannage : [`docs/runbooks/installer-agent.md`](./docs/runbooks/installer-agent.md).
 
+## Vie privée : ce que Hearth contacte
+
+Le service de versions (`hearth.voikyrioh.fr`) n'est pas encore en ligne : ce qui suit décrit son fonctionnement à la première publication.
+
+- Le client vérifie les mises à jour auprès de `hearth.voikyrioh.fr` (`/api/releases/`), au lancement puis au plus une fois par jour en automatique (plus « Vérifier maintenant » quand tu le demandes). Sans Internet, la vérification échoue en silence.
+- Aucun fichier n'est téléchargé ni installé sans ton clic. L'installateur du client n'est lancé qu'une fois sa signature vérifiée ; le binaire de l'agent n'est écrit qu'une fois sa somme et sa signature vérifiées.
+- Le service de versions ne demande ni compte ni identifiant. Il écrit une ligne de journal par requête (méthode, chemin, statut, durée), sans adresse ni agent utilisateur. Les premières installations sont comptées par une ligne qui ne porte que le type (client ou agent) et la version servie. Il est servi derrière Cloudflare, qui voit ton adresse comme pour tout site.
+- L'agent ne contacte `hearth.voikyrioh.fr` que lorsqu'un administrateur demande sa mise à jour ; `install.sh` le contacte à l'installation si tu n'as donné ni binaire ni adresse.
+
 ## Dépôt
 
 | Dossier | Rôle |

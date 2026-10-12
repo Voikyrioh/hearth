@@ -28,8 +28,10 @@ use crate::agent_update::domain::{AgentCandidate, parse_agent_section};
 /// faire accepter son installateur.
 pub const EMBEDDED_PUBLIC_KEY: &str = include_str!("../../update-key.pub");
 
-/// Clé de développement du dépôt : sans clé secrète, aucune signature ne la satisfait, donc aucune
-/// mise à jour n'est possible tant que Voiky n'a pas mis la sienne (runbook
+/// Le fichier de clé embarqué est-il une clé de développement (sans clé secrète : aucune signature ne
+/// la satisfait) ? Depuis le 2026-10-12 le dépôt porte la vraie clé de publication, donc non ; la
+/// garde reste pour signaler au journal un client construit avec une clé de développement remise par
+/// erreur (la publication, elle, est refusée par `cargo xtask client-release-check` ; runbook
 /// `publier-une-version-du-client`).
 pub fn embedded_key_is_development() -> bool {
     is_development_key(EMBEDDED_PUBLIC_KEY)

@@ -6,7 +6,7 @@ Procédure d'exploitation de la mise à jour du client Windows (HRT-16). Règles
 
 Le client vérifie au lancement puis une fois par jour au plus le manifeste servi par `https://hearth.voikyrioh.fr` (ADR-0035). Si une version plus récente existe, un bandeau le dit ; au clic sur « Mettre à jour maintenant », le client télécharge l'installateur en mémoire, vérifie sa signature minisign contre la clé publique **embarquée**, et seulement alors lance l'installateur (mode passif, relance). Pas de signature valide : rien n'est installé.
 
-Publier = construire l'installateur, le signer avec TA clé secrète, puis le déposer dans le bucket derrière `https://hearth.voikyrioh.fr`. Le flux `publish-client` (déclenché à la main) construit et signe, et rend l'artefact `hearth-client-signed` : il ne dépose rien et ne crée AUCUNE release GitHub. Le dépôt dans le bucket se fait sur ta machine (`cargo xtask release-stage` puis `release-upload`, livrées par HRT-51, pas encore dans le dépôt), et c'est le manifeste du bucket, écrit en dernier, qui annonce la version aux clients. GitHub ne garde qu'un second canal : une release SANS binaire par version, créée à la main (voir plus bas).
+Publier = construire l'installateur, le signer avec TA clé secrète, puis le déposer dans le bucket derrière `https://hearth.voikyrioh.fr`. Le flux `publish-client` (déclenché à la main) construit et signe, et rend l'artefact `hearth-client-signed` : il ne dépose rien et ne crée AUCUNE release GitHub. Le dépôt dans le bucket se fait sur ta machine (`cargo xtask release-stage` puis `release-upload`, HRT-51), et c'est le manifeste du bucket, écrit en dernier, qui annonce la version aux clients. GitHub ne garde qu'un second canal : une release SANS binaire par version, créée à la main (voir plus bas).
 
 ## Prérequis (déjà en place)
 
@@ -20,30 +20,30 @@ Les clés de publication sont en place depuis le 2026-10-12 : la clé publique d
 **Avertissement : changer la clé rend tous les clients installés incapables d'accepter la moindre mise à jour ; il faut les réinstaller un par un à la main.** À ne faire qu'en cas de perte avérée.
 
 1. Générer la paire (la clé secrète reste chez toi, jamais dans le dépôt, jamais dans le hub) :
-   ```sh
-   cd apps/desktop
-   npx tauri signer generate -w ~/.hearth/client-update.key      # demande un mot de passe ; écrit la clé secrète et client-update.key.pub
+   ```powershell
+   cd apps\desktop
+   npx tauri signer generate -w "$env:USERPROFILE\.hearth\client-update.key"      # demande un mot de passe ; écrit la clé secrète et client-update.key.pub
    ```
-2. Remplacer la clé publique du dépôt par la nouvelle (le fichier de Tauri, une ligne en base64, ou le fichier minisign : les deux formats sont acceptés), puis commit et PR comme d'habitude. Sous PowerShell : `Copy-Item $HOME\.hearth\client-update.key.pub apps\desktop\src-tauri\update-key.pub` ; en Bash : `cp ~/.hearth/client-update.key.pub apps/desktop/src-tauri/update-key.pub`.
+2. Remplacer la clé publique du dépôt par la nouvelle (le fichier de Tauri, une ligne en base64, ou le fichier minisign : les deux formats sont acceptés), puis commit et PR comme d'habitude. Sous PowerShell : `Copy-Item $env:USERPROFILE\.hearth\client-update.key.pub apps\desktop\src-tauri\update-key.pub` ; en Bash : `cp ~/.hearth/client-update.key.pub apps/desktop/src-tauri/update-key.pub`.
 3. Remplacer les secrets de l'environnement `release` :
-   ```sh
-   gh secret set HEARTH_CLIENT_SIGNING_KEY --env release < ~/.hearth/client-update.key
-   gh secret set HEARTH_CLIENT_SIGNING_KEY_PASSWORD --env release
+   ```powershell
+   Get-Content -Raw "$env:USERPROFILE\.hearth\client-update.key" | gh secret set HEARTH_CLIENT_SIGNING_KEY --env release --repo Voikyrioh/hearth
+   gh secret set HEARTH_CLIENT_SIGNING_KEY_PASSWORD --env release --repo Voikyrioh/hearth
    ```
-   Sous PowerShell, `<` n'existe pas : `Get-Content -Raw $HOME\.hearth\client-update.key | gh secret set HEARTH_CLIENT_SIGNING_KEY --env release`.
 
 ## Publier une version
 
 1. Choisir la version `X.Y.Z` (pas de préversion). La changer à **deux** endroits, dans une PR : `version` de `[workspace.package]` du `Cargo.toml` racine et `version` de `apps/desktop/package.json`. C'est la SEULE source du numéro : le flux ne demande aucune version dans son formulaire, il lit celle du dépôt (`cargo xtask client-version`), donc le numéro signé est celui du binaire construit.
 2. Fusionner la PR, puis : Actions > **publish-client** > Run workflow, **depuis `main`** (le flux refuse toute autre branche : le binaire signé doit venir de ce qui est fusionné), avec les notes de version (texte brut : elles s'affichent telles quelles dans le client, en une liste de lignes par exemple).
 3. Le flux, en deux jobs : **`build`** (aucun secret) : garde de publication, construction de l'installateur NSIS (`Hearth_X.Y.Z_x64-setup.exe`), installateur passé en artefact. **Avant d'approuver `sign`, relis le journal de `build`** (voir plus bas : c'est la seule relecture qui retient encore quelque chose). **`sign`** (installe aucune dépendance npm, droit `contents: read` seulement) : compile `xtask`, puis une seule étape voit la clé secrète : `cargo xtask client-sign` signe avec la version dans le commentaire signé (`version:X.Y.Z`) et RELIT la signature contre `update-key.pub` (une clé secrète qui n'est pas la paire du fichier du dépôt est refusée ici) ; `client-manifest` revérifie, puis écrit `latest.json` avec l'adresse `https://hearth.voikyrioh.fr/api/releases/X.Y.Z/Hearth_X.Y.Z_x64-setup.exe` ; enfin l'artefact **`hearth-client-signed`** (conservé 1 jour) : `Hearth_X.Y.Z_x64-setup.exe`, `Hearth_X.Y.Z_x64-setup.exe.sig`, `latest.json`, `notes.txt`. Le journal affiche les sommes SHA-256 de ces fichiers. Aucune release n'est créée.
-4. Sur ta machine (Windows PowerShell), télécharger l'artefact, puis le SUPPRIMER de GitHub (il est public tant qu'il existe) :
-   ```sh
+4. Sur ta machine (Windows PowerShell), télécharger l'artefact, comparer les sommes, puis le SUPPRIMER de GitHub (il est public tant qu'il existe) :
+   ```powershell
    gh run download <id-du-run> --repo Voikyrioh/hearth -n hearth-client-signed -D <dossier>
+   Get-FileHash <dossier>\*          # à comparer aux sommes SHA-256 du journal du job sign, AVANT de supprimer
    gh api repos/Voikyrioh/hearth/actions/runs/<id-du-run>/artifacts
    gh api -X DELETE repos/Voikyrioh/hearth/actions/artifacts/<id-de-l-artefact>
    ```
-   La deuxième commande liste les artefacts du run : prendre l'`id` de celui qui s'appelle `hearth-client-signed`. Compare les sommes SHA-256 du journal à celles des fichiers téléchargés (`Get-FileHash <fichier>`). Ensuite : construire et signer l'agent (`mettre-a-jour-agent.md`), puis assembler et déposer, depuis la racine du dépôt à jour sur `main` (commandes livrées par HRT-51 ; si `cargo xtask` ne les connaît pas, ce ticket n'est pas encore fusionné : s'arrêter là) :
+   La troisième commande liste les artefacts du run : prendre l'`id` de celui qui s'appelle `hearth-client-signed`. Ne supprime que si les sommes sont celles du journal. Ensuite : construire et signer l'agent (`mettre-a-jour-agent.md`), puis assembler et déposer, depuis la racine du dépôt, sur le commit EXACT où le flux a tourné (le `headSha` du run, celui de l'étape 5 ; c'est un commit de `main`, mais `main` a pu avancer depuis : `release-stage` lit la version et les clés sur le disque, et `install.sh` dans le commit en place : arbre sans modification locale, voir `mettre-a-jour-agent.md`, étape 1) :
    ```powershell
    cargo xtask release-stage --client-dir <dossier> --agent-binary <hearth-agent> --agent-signature <hearth-agent.minisig>
    cargo xtask release-upload
@@ -74,10 +74,10 @@ Retirer une version publiée par erreur : remettre le manifeste de la version pr
 
 L'essai bout en bout (deux versions consécutives, dépôt dans le bucket) est porté par le ticket HRT-56 : ce runbook n'en décrit que les contrôles. Rien de ce qui suit n'a été vérifié sur une vraie version ; le faire avec deux versions consécutives :
 
-1. La première publication est `0.1.0` PAR LE FLUX puis le dépôt dans le bucket (le client `0.1.0` des tests locaux n'a pas ta clé et ne peut pas être mis à jour). Installe cet installateur `0.1.0` sur un poste, puis publie `0.1.1` de la même façon.
+1. La première publication est `0.1.0` PAR LE FLUX puis le dépôt dans le bucket (un client construit avant le 2026-10-12 porte l'ancienne clé de développement et ne peut pas être mis à jour : le réinstaller). Installe cet installateur `0.1.0` sur un poste, puis publie `0.1.1` de la même façon.
 2. Sur ce poste : « Vérifier maintenant » dans Réglages doit annoncer `0.1.1` et ses notes ; « Plus tard » masque le bandeau ; « Mettre à jour maintenant » télécharge, installe et relance le client en `0.1.1`.
 3. Contrôler après la relance : les serveurs enregistrés et leurs mots de passe sont là, les réglages aussi, et **l'entrée de démarrage avec Windows** (clé `Run` de l'utilisateur) existe toujours si elle était activée (BR-UPDATE-005).
-4. Contrôler `%APPDATA%\fr.voikyrioh.hearth\update.json` : la dernière vérification et la version qui tourne y sont ; le journal du client (`logs/`) contient « clé de mise à jour de développement » seulement pour un client construit avec la clé du dépôt.
+4. Contrôler `%APPDATA%\fr.voikyrioh.hearth\update.json` : la dernière vérification et la version qui tourne y sont ; le journal du client (`logs/`) ne contient PAS « clé de mise à jour de développement » (la ligne ne sort que d'un client construit avant le 2026-10-12).
 5. Refus : signer une copie de l'installateur avec une AUTRE clé et la servir à la place (adresse de test, HRT-56), ou modifier un octet : le client doit répondre « Mise à jour corrompue. Refusée. » et rien ne doit s'installer.
 6. Contrôler le `.sig` publié : décodé (base64), son commentaire de confiance porte `version:X.Y.Z` (`client-sign` l'impose, c'est vérifiable à l'œil).
 7. **Sortie du client** (le greffon fait `exit(0)` juste après avoir lancé l'installateur, sans crochet de notre côté) : (a) la relance reprend les arguments du processus : un client lancé par Windows avec `--minimized` doit revenir caché dans la zone de notification après un clic sur « Mettre à jour maintenant » ; (b) `installer/hooks.nsh` : si le contrôle « disque insuffisant » refuse en mode passif, le client est fermé et non relancé (l'ancienne version reste installée) : noter ce que tu vois.
@@ -93,7 +93,7 @@ L'essai bout en bout (deux versions consécutives, dépôt dans le bucket) est p
 | `client-sign` ou `client-manifest` : « la signature ne correspond pas à update-key.pub » | la clé secrète des secrets n'est pas la paire de la clé publique du dépôt | remettre la bonne clé secrète dans l'environnement `release` (sauvegarde, prérequis 2) ; ne PAS remplacer `update-key.pub` |
 | Le flux ne démarre pas / ne fait rien | lancé depuis une autre branche que `main` | Run workflow depuis `main` |
 | Le client ne voit jamais la mise à jour | manifeste du bucket pas encore écrit (dépôt interrompu avant l'étape 4 de `release-upload`) ; ou sans l'entrée `windows-x86_64` ; ou dernière vérification il y a moins de 24 h | relancer `release-upload` ; « Vérifier maintenant » |
-| « Mise à jour corrompue. Refusée. » alors que le fichier est bon | le client a été construit avec une autre clé publique que celle qui a signé (clé de développement du dépôt, ou ancienne clé) | réinstaller à la main un client construit avec la bonne clé |
+| « Mise à jour corrompue. Refusée. » alors que le fichier est bon | le client a été construit avec une autre clé publique que celle qui a signé (client construit avant le 2026-10-12, ou ancienne clé) | réinstaller à la main un client construit avec la bonne clé |
 | « Téléchargement interrompu. » | coupure, ou hearth.voikyrioh.fr répond en erreur ; ou l'adresse du manifeste pointe un fichier absent du bucket | « Réessayer » ; vérifier que les fichiers de la version sont dans le bucket (`GET /api/releases/X.Y.Z/...`) |
 | Aucun message d'erreur et pas de bandeau | normal sans Internet ou si hearth.voikyrioh.fr ne répond pas (BR-UPDATE-007, 008) : la date de la dernière vérification reste dans Réglages | « Vérifier maintenant » plus tard |
 

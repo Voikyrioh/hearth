@@ -25,7 +25,7 @@ maj: 2026-10-12
 
 ## Cas limites
 - Le téléchargement est tenu en mémoire, sans plafond de taille côté client ; la signature n'est vérifiée qu'après le téléchargement complet. Limites : source du premier saut restreinte à `hearth.voikyrioh.fr/api/releases/` en HTTPS, redirections en HTTPS à chaque saut et au plus 5 (`DownloadPolicy::allows_redirect`), sans liste d'hôtes sur les sauts suivants (compromis repris dans ADR-0035, décision 6), délai de 15 min.
-- Tant que le dépôt porte la clé de développement (sans clé secrète), AUCUNE mise à jour n'est acceptée : c'est voulu (runbook `publier-une-version-du-client`).
+- Si le dépôt portait une clé de développement (sans clé secrète), AUCUNE mise à jour ne serait acceptée : c'est voulu, et `client-release-check` refuse de publier avec une telle clé. Depuis le 2026-10-12 le dépôt porte la vraie clé de publication (`70250B2A465F79C3`).
 
 ## Règles liées
 - BR-UPDATE-002, BR-UPDATE-003, BR-UPDATE-010, ADR-0008, ADR-0017
@@ -33,3 +33,4 @@ maj: 2026-10-12
 ## Historique
 - 2026-10-05 : création (HRT-16, session 2026-10-04-hearth-creation).
 - 2026-10-12 : flux et installateur servis par `hearth.voikyrioh.fr/api/releases/` au lieu des GitHub Releases (HRT-49, ADR-0035).
+- 2026-10-12 : la clé publique du dépôt est la vraie clé de publication (`70250B2A465F79C3`), plus une clé de développement (HRT-55).
