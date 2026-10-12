@@ -631,15 +631,30 @@ pub fn parse_upload_args(args: &[String]) -> Result<UploadArgs, String> {
 
 /// `cargo xtask release-upload [--confirm] [--allow-rollback] [--stage-dir D]`.
 pub fn run_upload(args: &[String]) -> Result<(), String> {
+    upload_with(&System::new(), &root()?, args, &mut |line| {
+        println!("{line}")
+    })
+}
+
+/// Le corps de `release-upload`, avec l'exécuteur et la racine injectés. La garde de l'arbre et du
+/// commit (HRT-60) passe avant la vérification et avant tout appel de `publish` (donc de `aws` et
+/// `curl`), essai à blanc compris.
+pub fn upload_with(
+    host: &dyn Host,
+    root: &Path,
+    args: &[String],
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
     let parsed = parse_upload_args(args)?;
-    let root = root()?;
     let stage_dir = parsed
         .stage_dir
         .map_or_else(|| root.join(STAGE_DIR), |dir| Path::new(&dir).to_path_buf());
     let files = read_stage_dir(&stage_dir)?;
     // HRT-60, essai à blanc compris : arbre propre et commit identique à celui assemblé (git, lecture seule).
-    let commit = check_stage_commit(&System::new(), &root, read_stage_commit(&stage_dir))?;
-    println!("arbre propre, commit en place identique à celui assemblé : {commit}");
+    let commit = check_stage_commit(host, root, read_stage_commit(&stage_dir))?;
+    say(format!(
+        "arbre propre, commit en place identique à celui assemblé : {commit}"
+    ));
     let read = |path: &str| {
         std::fs::read_to_string(root.join(path)).map_err(|error| format!("{path} : {error}"))
     };
@@ -656,7 +671,7 @@ pub fn run_upload(args: &[String]) -> Result<(), String> {
         return Err("version du dossier assemblé différente de celle du dépôt".to_owned());
     }
     publish(
-        &System::new(),
+        host,
         &version,
         &files,
         Options {
@@ -664,7 +679,7 @@ pub fn run_upload(args: &[String]) -> Result<(), String> {
             allow_rollback: parsed.allow_rollback,
             stage_dir: &stage_dir.to_string_lossy(),
         },
-        &mut |line| println!("{line}"),
+        say,
     )
 }
 
@@ -1589,5 +1604,58 @@ mod tests {
             content_type("releases/0.1.0/hearth-agent-linux-x86_64"),
             "application/octet-stream"
         );
+    }
+
+    #[test]
+    fn the_upload_guard_refuses_before_any_aws_or_curl_with_and_without_confirm() {
+        use crate::release_stage::fixtures::{TreeFake, tmp_dir};
+        let root = tmp_dir("upload_guard");
+        let stage = root.join("stage");
+        let files = Fixture::new().staged();
+        write_stage_dir(&stage, &files).unwrap();
+        write_stage_commit(&stage, "abc1234def").unwrap();
+        let stage_text = stage.to_string_lossy().into_owned();
+        let flags = |confirm: bool| {
+            let mut args = vec!["--stage-dir".to_owned(), stage_text.clone()];
+            if confirm {
+                args.push("--confirm".to_owned());
+            }
+            args
+        };
+        let mut untracked = TreeFake::new("", "abc1234def");
+        untracked.untracked = "crates/hearth-agent/migrations/0005_x.sql".to_owned();
+        let cases = [
+            ("Cargo.toml", TreeFake::new(" M Cargo.toml", "abc1234def")),
+            ("0005_x.sql", untracked),
+            (
+                "n'est pas celui qui a été assemblé",
+                TreeFake::new("", "fff0000"),
+            ),
+        ];
+        for confirm in [false, true] {
+            for (expected, fake) in &cases {
+                let error = upload_with(fake, &root, &flags(confirm), &mut |_| {}).unwrap_err();
+                assert!(error.contains(expected), "{expected} : {error}");
+                assert!(fake.only_git_ran(), "ni aws ni curl : {:?}", fake.programs);
+            }
+        }
+        // Enregistrement absent : refus, sans même lancer git.
+        std::fs::remove_file(stage.join(COMMIT_FILE)).unwrap();
+        for confirm in [false, true] {
+            let fake = TreeFake::new("", "abc1234def");
+            let error = upload_with(&fake, &root, &flags(confirm), &mut |_| {}).unwrap_err();
+            assert!(error.contains("COMMIT"), "{error}");
+            assert!(fake.programs.borrow().is_empty());
+        }
+        // Tout concorde : la garde laisse passer, l'échec vient plus loin (pas de Cargo.toml ici).
+        write_stage_commit(&stage, "abc1234def").unwrap();
+        let fake = TreeFake::new("", "abc1234def");
+        let error = upload_with(&fake, &root, &flags(false), &mut |_| {}).unwrap_err();
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            error.contains("Cargo.toml") && !error.contains("assemblé ("),
+            "{error}"
+        );
+        assert!(fake.only_git_ran());
     }
 }
