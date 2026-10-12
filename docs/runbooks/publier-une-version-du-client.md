@@ -6,7 +6,7 @@ Procédure d'exploitation de la mise à jour du client Windows (HRT-16). Règles
 
 Le client vérifie au lancement puis une fois par jour au plus le fichier `latest.json` de la **dernière release publiée** de `Voikyrioh/hearth`. Si une version plus récente existe, un bandeau le dit ; au clic sur « Mettre à jour maintenant », le client télécharge l'installateur en mémoire, vérifie sa signature minisign contre la clé publique **embarquée**, et seulement alors lance l'installateur (mode passif, relance). Pas de signature valide : rien n'est installé.
 
-Publier = construire l'installateur, le signer avec TA clé secrète, joindre `latest.json`, et publier la release. Tout est fait par le flux `publish-client` (déclenché à la main), qui crée un **brouillon** : tant que tu ne l'as pas publié, aucun client ne le voit.
+Publier = construire l'installateur, le signer avec TA clé secrète, puis le déposer dans le bucket derrière `https://hearth.voikyrioh.fr`. Le flux `publish-client` (déclenché à la main) construit et signe, et rend l'artefact `hearth-client-signed` : il ne dépose rien et ne crée AUCUNE release GitHub. Le dépôt dans le bucket se fait sur ta machine (`cargo xtask release-stage` puis `release-upload`, HRT-51), et c'est le manifeste du bucket, écrit en dernier, qui annonce la version aux clients. GitHub ne garde qu'un second canal : une release SANS binaire par version, créée à la main (voir plus bas).
 
 ## Prérequis, une fois : la paire de clés
 
@@ -33,17 +33,23 @@ La clé publique du dépôt (`apps/desktop/src-tauri/update-key.pub`) est une cl
 
 1. Choisir la version `X.Y.Z` (pas de préversion). La changer à **deux** endroits, dans une PR : `version` de `[workspace.package]` du `Cargo.toml` racine et `version` de `apps/desktop/package.json`. C'est la SEULE source du numéro : le flux ne demande aucune version dans son formulaire, il lit celle du dépôt (`cargo xtask client-version`), donc le numéro signé est celui du binaire construit.
 2. Fusionner la PR, puis : Actions > **publish-client** > Run workflow, **depuis `main`** (le flux refuse toute autre branche : le binaire signé doit venir de ce qui est fusionné), avec les notes de version (texte brut : elles s'affichent telles quelles dans le client, en une liste de lignes par exemple).
-3. Le flux, en deux jobs : **`build`** (aucun secret) : garde de publication, construction de l'installateur NSIS (`Hearth_X.Y.Z_x64-setup.exe`), installateur passé en artefact. **`sign`** (installe aucune dépendance npm) : compile `xtask`, puis une seule étape voit la clé secrète : `cargo xtask client-sign` signe avec la version dans le commentaire signé (`version:X.Y.Z`) et RELIT la signature contre `update-key.pub` (une clé secrète qui n'est pas la paire du fichier du dépôt est refusée ici, avant toute publication) ; `client-manifest` revérifie, puis écrit `latest.json` ; enfin le **brouillon** de release `vX.Y.Z`, étiqueté sur le commit construit (`--target`), avec les trois fichiers (installateur, `.sig`, `latest.json`).
-4. Ouvrir le brouillon, vérifier les trois fichiers et les notes, puis **Publish release**. À partir de là, `releases/latest/download/latest.json` annonce la version aux clients (au plus une vérification par jour et par client, ou leur « Vérifier maintenant »).
+3. Le flux, en deux jobs : **`build`** (aucun secret) : garde de publication, construction de l'installateur NSIS (`Hearth_X.Y.Z_x64-setup.exe`), installateur passé en artefact. **`sign`** (installe aucune dépendance npm, droit `contents: read` seulement) : compile `xtask`, puis une seule étape voit la clé secrète : `cargo xtask client-sign` signe avec la version dans le commentaire signé (`version:X.Y.Z`) et RELIT la signature contre `update-key.pub` (une clé secrète qui n'est pas la paire du fichier du dépôt est refusée ici, avant toute publication) ; `client-manifest` revérifie, puis écrit `latest.json` avec l'adresse `https://hearth.voikyrioh.fr/api/releases/X.Y.Z/Hearth_X.Y.Z_x64-setup.exe` ; enfin l'artefact **`hearth-client-signed`** (conservé 7 jours) : `Hearth_X.Y.Z_x64-setup.exe`, `Hearth_X.Y.Z_x64-setup.exe.sig`, `latest.json`, `notes.txt`. Aucune release n'est créée.
+4. Sur ta machine : `gh run download <id-du-run> -n hearth-client-signed -D <dossier>`, construire et signer l'agent, puis `cargo xtask release-stage` et `release-upload` (déposent dans le bucket ; le manifeste est écrit en dernier et annonce la version aux clients, au plus une vérification par jour et par client, ou leur « Vérifier maintenant »).
+5. **Release GitHub sans binaire**, à la main, APRÈS le dépôt réussi (décision du propriétaire du 2026-10-12 ; second canal pour les sommes, aucun flux ne la crée). Depuis le dossier du dépôt, sur `main` à jour, avec `SHA256SUMS` tiré du dossier préparé par `release-stage` (le même fichier que celui du bucket) et les notes de la version dans `notes.txt` (celui de l'artefact) :
+   ```sh
+   gh release create "vX.Y.Z" --repo Voikyrioh/hearth --target <SHA-du-commit-construit>      --title "Hearth X.Y.Z" --notes-file notes.txt SHA256SUMS
+   ```
+   `<SHA-du-commit-construit>` = le commit de `main` sur lequel le flux a tourné (page du run). Aucun binaire n'est joint : ni installateur, ni `.sig`, ni `latest.json`. L'étiquette pointe la source du binaire (dépôt AGPL). Pas de `--draft` : la release ne pilote plus aucune mise à jour. Commande à lancer hors des heures employeur (gel Git du propriétaire).
 
-Retirer une version publiée par erreur : repasser la release en brouillon ou la supprimer ; les clients qui l'ont déjà installée ne reviennent pas en arrière (jamais de rétrogradation, ADR-0017) : publier une version suivante qui corrige.
+Retirer une version publiée par erreur : remettre le manifeste de la version précédente dans le bucket (`releases/PREC/manifest.json` vers `releases/manifest.json`, conception distribution Scaleway, section 8.2), le numéro est brûlé ; les clients qui l'ont déjà installée ne reviennent pas en arrière (jamais de rétrogradation, ADR-0017) : publier une version suivante qui corrige.
 
 ## Ce que la séparation en deux jobs protège, et ce qu'elle ne protège pas
 
 - La clé secrète n'est vue que par l'étape `client-sign` du job `sign` (et elle exige l'approbation de l'environnement `release`). Les scripts de construction (`npm ci`, `build.rs` de tout l'arbre Cargo du client) tournent dans `build`, SANS secret.
 - Les scripts de construction des dépendances de `xtask` (`cargo build -p xtask --locked`, arbre Cargo verrouillé et réduit) tournent dans `sign` juste AVANT l'étape qui reçoit la clé, mais sans la clé.
-- **`sign` signe ce que `build` a produit.** Une dépendance compromise pendant `build` obtient donc UNE release signée (en brouillon). Avant d'approuver l'environnement, **relis le journal du job `build`** (dépendances installées, étapes, durée) ; avant de publier le brouillon, relis ses fichiers.
+- **`sign` signe ce que `build` a produit.** Une dépendance compromise pendant `build` obtient donc UN installateur signé (dans l'artefact). Avant d'approuver l'environnement, **relis le journal du job `build`** (dépendances installées, étapes, durée) ; avant le dépôt dans le bucket, relis les fichiers de l'artefact.
 - L'artefact de `build` ne peut pas venir d'une autre exécution (portée de l'exécution).
+- Le flux n'a aucun droit d'écriture sur le dépôt (`contents: read`) et ne crée ni brouillon, ni release, ni étiquette.
 
 ## Premier essai (à faire une fois, avant de compter dessus)
 
@@ -67,9 +73,9 @@ Rien de ce qui suit n'a pu être vérifié sans vraie release ; le faire avec de
 | Le job `sign` attend | l'approbation de l'environnement `release` | l'approuver, après relecture du journal de `build` |
 | `client-sign` ou `client-manifest` : « la signature ne correspond pas à update-key.pub » | la clé secrète des secrets n'est pas la paire de la clé publique du dépôt | remettre la bonne clé publique (prérequis 2) ou la bonne clé secrète |
 | Le flux ne démarre pas / ne fait rien | lancé depuis une autre branche que `main` | Run workflow depuis `main` |
-| Le client ne voit jamais la mise à jour | release encore en brouillon ; ou publiée comme préversion ; ou `latest.json` sans l'entrée `windows-x86_64` ; ou dernière vérification il y a moins de 24 h | publier la release (hors préversion) ; « Vérifier maintenant » |
+| Le client ne voit jamais la mise à jour | manifeste du bucket pas encore écrit (dépôt interrompu avant l'étape 4 de `release-upload`) ; ou sans l'entrée `windows-x86_64` ; ou dernière vérification il y a moins de 24 h | relancer `release-upload` ; « Vérifier maintenant » |
 | « Mise à jour corrompue. Refusée. » alors que le fichier est bon | le client a été construit avec une autre clé publique que celle qui a signé (clé de développement du dépôt, ou ancienne clé) | réinstaller à la main un client construit avec la bonne clé |
-| « Téléchargement interrompu. » | coupure, ou GitHub répond en erreur ; ou l'adresse de `latest.json` pointe un fichier absent de la release | « Réessayer » ; vérifier que les trois fichiers sont joints au brouillon publié |
+| « Téléchargement interrompu. » | coupure, ou GitHub répond en erreur ; ou l'adresse de `latest.json` pointe un fichier absent de la release | « Réessayer » ; vérifier que les fichiers de la version sont dans le bucket (`GET /api/releases/X.Y.Z/...`) |
 | Aucun message d'erreur et pas de bandeau | normal sans Internet ou si GitHub ne répond pas (BR-UPDATE-007, 008) : la date de la dernière vérification reste dans Réglages | « Vérifier maintenant » plus tard |
 
 ## Limites connues
