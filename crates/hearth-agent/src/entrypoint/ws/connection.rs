@@ -12,7 +12,8 @@ use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, ErrorDetail};
 use hearth_proto::stream::{
-    ClientMessage, SecurityMessage, ServerMessage, SessionNotice, SignedAuth, Topic, UpdateMessage,
+    ClientMessage, SecurityMessage, ServerMessage, ServicesMessage, SessionNotice, SignedAuth,
+    Topic, UpdateMessage,
 };
 use serde_json::Value;
 use tokio::sync::broadcast::{self, error::RecvError};
@@ -20,6 +21,7 @@ use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, timeout};
 
 use super::{Permit, StreamSettings};
 use crate::application::audit::AuditService;
+use crate::application::services::ServicesChange;
 use crate::application::sessions::{AuthError, CurrentSession};
 use crate::domain::audit::AuditRecord;
 use crate::domain::metrics::Sample;
@@ -27,7 +29,7 @@ use crate::domain::secret::Secret;
 use crate::domain::sessions::SessionEnd;
 use crate::domain::stream::{SNAPSHOT_WINDOW, is_new, may_subscribe};
 use crate::entrypoint::http::{self, ApiError, AppState};
-use crate::entrypoint::metrics_wire;
+use crate::entrypoint::{metrics_wire, services_wire};
 
 /// Comment la connexion se termine : un code de fermeture et une raison courte, ou rien si le
 /// client est déjà parti.
@@ -119,6 +121,11 @@ struct Subscriptions {
     audit: Option<broadcast::Receiver<AuditRecord>>,
     /// Progression de la mise à jour de l'agent (tout compte authentifié).
     update: Option<broadcast::Receiver<UpdateProgress>>,
+    /// L'état du moteur et la liste des services (tout compte authentifié, les deux rôles reçoivent la
+    /// même chose).
+    services: Option<broadcast::Receiver<Arc<ServicesChange>>>,
+    /// Dernier `rev` envoyé : un lot déjà couvert par l'instantané est écarté.
+    services_rev: u64,
     /// Instant monotone du dernier échantillon envoyé (snapshot compris) : pas de doublon
     /// (BR-DASH-011), même si l'horloge murale recule.
     last_sent: Option<time::Duration>,
@@ -288,6 +295,32 @@ async fn serve(
                 }
                 Err(RecvError::Lagged(missed)) => tracing::debug!(missed, "abonné lent : étapes de mise à jour perdues"),
                 Err(RecvError::Closed) => subscriptions.update = None,
+            },
+            change = next(&mut subscriptions.services) => match change {
+                Ok(change) => {
+                    if change.rev > subscriptions.services_rev {
+                        subscriptions.services_rev = change.rev;
+                        let message = ServicesMessage::ServicesDelta(services_wire::delta(
+                            &change,
+                            state.services.host(),
+                        ));
+                        if !send(socket, &settings, &message).await {
+                            return None;
+                        }
+                    }
+                }
+                // Un abonné lent a perdu des lots : il reçoit un instantané complet, sans logique de
+                // trou à écrire côté client. Les lots anciens encore en file sont écartés par `rev`.
+                Err(RecvError::Lagged(missed)) => {
+                    tracing::debug!(missed, "abonné lent : instantané des services renvoyé");
+                    let snapshot = state.services.snapshot();
+                    subscriptions.services_rev = snapshot.rev;
+                    let message = ServicesMessage::ServicesSnapshot(services_wire::snapshot(&snapshot));
+                    if !send(socket, &settings, &message).await {
+                        return None;
+                    }
+                }
+                Err(RecvError::Closed) => subscriptions.services = None,
             },
             _ = check.tick() => {
                 match state.sessions.authenticate_at(token.expose(), addr).await {
@@ -537,6 +570,18 @@ async fn handle_text(
                 if let Some(progress) = current
                     && !send(socket, &settings, &UpdateMessage::Update(progress)).await
                 {
+                    return Handled::Stop;
+                }
+            }
+            // Le moteur et les services : ouverts aux deux rôles, rien à contrôler. S'abonner AVANT de
+            // lire l'état (`subscribe` les prend sous le même verrou) : aucun lot ne se perd.
+            subscriptions.services = None;
+            if topics.contains(&Topic::Services) {
+                let (receiver, snapshot) = state.services.subscribe();
+                subscriptions.services = Some(receiver);
+                subscriptions.services_rev = snapshot.rev;
+                let message = ServicesMessage::ServicesSnapshot(services_wire::snapshot(&snapshot));
+                if !send(socket, &settings, &message).await {
                     return Handled::Stop;
                 }
             }

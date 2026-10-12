@@ -56,6 +56,8 @@ rustls-native-certs = "0.8"
 base64 = "0.22"
 # Déjà dans l'arbre (rustls, rcgen) : en dépendance directe pour la clé d'appareil (ADR-0023).
 ring = "0.17"
+# Accès au moteur de conteneurs par le socket Unix (ADR-0036) : sans TLS, donc ni OpenSSL ni aws-lc (ADR-0009).
+bollard = { version = "0.21", default-features = false, features = ["http", "pipe"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

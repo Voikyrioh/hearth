@@ -12,11 +12,13 @@ use axum::http::{HeaderMap, Method, Request, StatusCode};
 use hearth_agent::application::hello::HelloService;
 use hearth_agent::application::metrics::MetricsService;
 use hearth_agent::application::ports::MachineInfo;
+use hearth_agent::application::services::{EngineTimings, ServicesRegistry};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::install_id::InstallId;
 use hearth_agent::entrypoint::http::{AppState, router};
 use hearth_agent::entrypoint::ws::{StreamContext, StreamSettings};
 use hearth_agent::infrastructure::clock::SystemMonotonic;
+use hearth_agent::infrastructure::engine::FakeEngine;
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -63,6 +65,15 @@ pub fn state_with(
             Arc::new(SystemMonotonic::new()),
         )),
         update,
+        // Le pilotage des services désactivé : ces tests n'ouvrent jamais le socket d'un moteur.
+        services: ServicesRegistry::new(
+            Arc::new(FakeEngine::new()),
+            &super::engine::TestHost,
+            env.clock.clone(),
+            Arc::new(SystemMonotonic::new()),
+            false,
+            EngineTimings::production(),
+        ),
         stream: StreamContext::new(StreamSettings::default()),
         erasure_pending: false,
     }

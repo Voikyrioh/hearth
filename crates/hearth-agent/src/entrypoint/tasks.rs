@@ -13,6 +13,7 @@ use crate::application::audit::AuditRecorder;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::{MetricsError, MetricsService};
 use crate::application::security::SecurityService;
+use crate::application::services::ServicesRegistry;
 
 /// Période de la purge (sessions expirées, traces anciennes, opérations de plus de 24 h).
 pub const PURGE_PERIOD: Duration = Duration::from_secs(60 * 60);
@@ -51,6 +52,21 @@ where
             ticker.tick().await;
             if let Err(error) = tokio::spawn(job()).await {
                 tracing::error!(task = name, %error, "passage interrompu, reprise au prochain");
+            }
+        }
+    }))
+}
+
+/// Détection du moteur de conteneurs et suivi des services (HRT-61) : une tâche de longue durée,
+/// supervisée comme les autres (abandonner la valeur l'arrête). Une panique de la tâche est tracée
+/// et la tâche repart : l'agent ne tombe jamais pour un moteur.
+pub fn spawn_services(registry: Arc<ServicesRegistry>) -> BackgroundTask {
+    BackgroundTask(tokio::spawn(async move {
+        loop {
+            let run = tokio::spawn(registry.clone().run());
+            if let Err(error) = run.await {
+                tracing::error!(%error, "détection du moteur interrompue, reprise dans 5 s");
+                tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }
     }))

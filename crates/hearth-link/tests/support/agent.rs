@@ -254,6 +254,7 @@ impl TestAgent {
             port: 0,
             data_dir: self.dir.path().to_owned(),
             managed: false,
+            engine: hearth_agent::infrastructure::config::EngineConfig::disabled(),
         };
         let updating = match &self.updating {
             Some(make) => make(),

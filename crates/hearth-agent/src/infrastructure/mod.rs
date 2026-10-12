@@ -7,6 +7,7 @@ pub mod clock;
 pub mod config;
 pub mod crypto;
 pub mod data_dir;
+pub mod engine;
 pub mod file_lock;
 pub mod fingerprint;
 pub mod fingerprint_secret;
