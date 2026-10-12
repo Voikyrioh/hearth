@@ -8,7 +8,11 @@
 
 set -eu
 
-REPO="Voikyrioh/hearth"
+# Origine des versions publiées (API de distribution). Surchargeable pour les essais.
+DEFAULT_BASE_URL="https://hearth.voikyrioh.fr/api"
+BASE_URL="${HEARTH_BASE_URL:-$DEFAULT_BASE_URL}"
+# Nom du binaire dans une version publiée : le chemin du pointeur est « VERSION/ce nom » (BR-INSTALL-013).
+AGENT_FILE="hearth-agent-linux-x86_64"
 
 BINARY=""
 URL="${HEARTH_RELEASE_URL:-}"
@@ -33,16 +37,20 @@ Installe l'agent Hearth sur ce serveur Linux (x86_64 seulement pour l'instant).
 
 Utilisation :
   sudo sh install.sh --binary ./hearth-agent
+  curl -fsSL https://hearth.voikyrioh.fr/api/install.sh | sudo sh
   sudo sh install.sh --url https://exemple.org/hearth-agent --sha256 SOMME
-  curl -fsSL https://exemple.org/install.sh | sudo sh -s -- --url https://exemple.org/hearth-agent
 
 Options du script (les autres, par exemple --port 7342, --managed, --yes, sont transmises
 telles quelles à `hearth-agent install`) :
   --binary CHEMIN   utilise ce fichier local (sa somme n'est vérifiée que si --sha256 est donnée)
-  --url ADRESSE     télécharge le binaire à cette adresse HTTPS (ou HEARTH_RELEASE_URL)
+  --url ADRESSE     télécharge le binaire à cette adresse HTTPS (ou HEARTH_RELEASE_URL) au lieu
+                    de la dernière version publiée
   --sha256 SOMME    somme SHA-256 attendue (ou HEARTH_SHA256). Pour un téléchargement, elle est
                     OBLIGATOIRE : donnée ici, ou publiée à côté du binaire (ADRESSE.sha256, en
                     HTTPS depuis la même origine). Sans somme, rien n'est téléchargé.
+                    Sans --url ni --binary : la dernière version publiée est lue sur
+                    hearth.voikyrioh.fr, sa ligne est contrôlée, et --sha256 doit lui
+                    correspondre si tu la donnes.
   --help            affiche cette aide
 
 Mot de passe du premier compte : jamais sur une ligne de commande. Trois voies :
@@ -51,7 +59,8 @@ Mot de passe du premier compte : jamais sur une ligne de commande. Trois voies :
      avec HEARTH_ADMIN_USER, transmis par l'environnement préservé de sudo
      (`sudo --preserve-env=HEARTH_ADMIN_USER,HEARTH_ADMIN_PASSWORD_HASH sh install.sh ...`) ;
   3. HEARTH_ADMIN_PASSWORD lu au clavier (`read -rs`), exporté, puis transmis de la même façon.
-Autres variables : HEARTH_PORT, HEARTH_MANAGED.
+Autres variables : HEARTH_PORT, HEARTH_MANAGED, HEARTH_BASE_URL (autre origine des versions,
+HTTPS seulement).
 EOF
 }
 
@@ -99,9 +108,13 @@ make_workdir() {
 # FIX:01M460G91CSXXRV2Q34FXQBYMT
 # `wget --https-only` ne vaut qu'en mode récursif : une redirection de https vers http serait
 # suivie. wget ne suit donc aucune redirection (`--max-redirect=0`) ; elles sont suivies ici, une
-# à une, et chacune doit être en HTTPS. Rend 0 si abouti, 2 si l'adresse n'existe pas (404), 1 sinon.
+# à une, et chacune doit être en HTTPS. Rend 0 si abouti, 2 si l'adresse n'existe pas (404), 3 si
+# la réponse dépasse la taille maximale, 1 sinon.
+# $3 (facultatif) : taille maximale en octets ; la lecture s'arrête à cette taille + 1 (`head -c`)
+# et une seule tentative est faite (`-t 1`).
 wget_https_only() {
     url="$1"
+    max="${3:-}"
     hops=0
     while [ "$hops" -le 5 ]; do
         case "$url" in
@@ -109,7 +122,19 @@ wget_https_only() {
             *) return 1 ;;
         esac
         headers="$WORKDIR/wget.headers"
-        if wget -nv -S --max-redirect=0 -T 15 -O "$2" "$url" 2>"$headers"; then
+        if [ -n "$max" ]; then
+            wget_rc=0
+            {
+                wget -nv -S --max-redirect=0 -T 15 -t 1 -O - "$url" 2>"$headers" || wget_rc=$?
+                printf '%s' "$wget_rc" >"$WORKDIR/wget.rc"
+            } | head -c "$((max + 1))" >"$2"
+            if [ "$(wc -c <"$2" | tr -d ' ')" -gt "$max" ]; then
+                return 3
+            fi
+            if [ "$(cat "$WORKDIR/wget.rc")" = "0" ]; then
+                return 0
+            fi
+        elif wget -nv -S --max-redirect=0 -T 15 -O "$2" "$url" 2>"$headers"; then
             return 0
         fi
         location="$(grep -i '^ *Location:' "$headers" | tail -n 1 | sed 's/^ *[Ll]ocation: *//' | tr -d '\r')"
@@ -126,25 +151,124 @@ wget_https_only() {
 }
 
 # Téléchargement en HTTPS seulement, redirections comprises et bornées. Rend 0 si abouti, 2 si
-# l'adresse n'existe pas (404), 1 sinon.
+# l'adresse n'existe pas (404), 3 si la réponse dépasse la taille maximale, 1 sinon.
+# $3 et $4 (facultatifs) : taille maximale en octets et délai total en secondes (curl seulement
+# pour le délai), pour une petite réponse attendue (le pointeur). Sans eux : aucune borne de
+# taille, 600 s. Avec curl avant 8.4, la taille n'est bornée à la lecture que si le serveur
+# l'annonce ; sinon c'est le délai qui borne, et l'appelant mesure ensuite.
 download() {
     case "$1" in
         https://*) ;;
         *) fail "L'adresse $1 n'est pas en HTTPS : un binaire lancé en root ne se télécharge pas en clair. Aucune modification n'a été apportée à ta machine." ;;
     esac
     if command -v curl >/dev/null 2>&1; then
-        code="$(curl -sSL --proto '=https' --proto-redir '=https' --max-redirs 5 --tlsv1.2 \
-            --connect-timeout 15 --max-time 600 -o "$2" -w '%{http_code}' "$1" 2>/dev/null)" || return 1
+        if [ -n "${3:-}" ]; then
+            code="$(curl -sSL --proto '=https' --proto-redir '=https' --max-redirs 5 --tlsv1.2 \
+                --connect-timeout 15 --max-time "${4:-30}" --max-filesize "$3" -o "$2" -w '%{http_code}' "$1" 2>/dev/null)" || {
+                # 63 : taille maximale dépassée (CURLE_FILESIZE_EXCEEDED).
+                if [ "$?" -eq 63 ]; then
+                    return 3
+                fi
+                return 1
+            }
+        else
+            code="$(curl -sSL --proto '=https' --proto-redir '=https' --max-redirs 5 --tlsv1.2 \
+                --connect-timeout 15 --max-time 600 -o "$2" -w '%{http_code}' "$1" 2>/dev/null)" || return 1
+        fi
         case "$code" in
             200) return 0 ;;
             404) return 2 ;;
             *) return 1 ;;
         esac
     elif command -v wget >/dev/null 2>&1; then
-        wget_https_only "$1" "$2"
+        wget_https_only "$1" "$2" "${3:-}"
         return $?
     fi
     fail "Ni curl ni wget : téléchargement impossible. Fournis un binaire avec --binary."
+}
+
+# Entier décimal de 1 à 9 chiffres.
+is_number() {
+    case "$1" in
+        "" | *[!0-9]*) return 1 ;;
+    esac
+    [ "${#1}" -le 9 ]
+}
+
+# Lit le pointeur de la dernière version (BR-INSTALL-013) : une ligne « VERSION SOMME CHEMIN », où
+# CHEMIN vaut toujours « VERSION/hearth-agent-linux-x86_64 ». Tout est contrôlé strictement AVANT
+# d'être utilisé ; rien venu du réseau n'est évalué (ni eval, ni expansion non protégée). Pose URL,
+# SHA256 et SHA256_SOURCE, ou arrête l'installation.
+resolve_pointer() {
+    if [ "$BASE_URL" != "$DEFAULT_BASE_URL" ]; then
+        say "Origine des versions : $BASE_URL (HEARTH_BASE_URL)"
+    fi
+    say "Recherche de la dernière version de l'agent..."
+    pointer="$WORKDIR/pointer"
+    bad_pointer="Le pointeur de la dernière version est mal formé. Installation abandonnée, aucune modification n'a été apportée à ta machine."
+    status=0
+    # Lecture bornée à 512 octets et 30 s (voir `download` pour ce que chaque outil tient), puis
+    # mesurée. HTTPS : contrôlé par `download`.
+    download "$BASE_URL/releases/latest/agent" "$pointer" 512 30 || status=$?
+    case "$status" in
+        0) ;;
+        2) fail "Le pointeur de la dernière version de l'agent est absent ($BASE_URL/releases/latest/agent). Aucune modification n'a été apportée à ta machine." ;;
+        3) fail "$bad_pointer" ;;
+        *) fail "Le téléchargement n'a pas abouti. Relance l'installation." ;;
+    esac
+    # Une seule ligne, courte (la borne de lecture est doublée ici par une mesure).
+    [ "$(wc -c <"$pointer" | tr -d ' ')" -le 512 ] || fail "$bad_pointer"
+    [ "$(grep -c '' "$pointer")" -eq 1 ] || fail "$bad_pointer"
+    # Octets du FICHIER (pas de la variable, qui perdrait les octets nuls) : liste fermée, ni retour
+    # chariot, ni octet nul, ni octet de contrôle.
+    [ "$(LC_ALL=C tr -d 'A-Za-z0-9 ._/\n-' <"$pointer" | wc -c | tr -d ' ')" -eq 0 ] || fail "$bad_pointer"
+    line="$(cat "$pointer")"
+    # Trois éléments séparés par une espace, ni plus ni moins.
+    case "$line" in
+        *" "*" "*) ;;
+        *) fail "$bad_pointer" ;;
+    esac
+    version="${line%% *}"
+    rest="${line#* }"
+    sum="${rest%% *}"
+    path="${rest#* }"
+    case "$path" in
+        *" "*) fail "$bad_pointer" ;;
+    esac
+    # VERSION : X.Y.Z, trois nombres de 1 à 9 chiffres.
+    case "$version" in
+        *.*.*) ;;
+        *) fail "$bad_pointer" ;;
+    esac
+    v_major="${version%%.*}"
+    v_rest="${version#*.}"
+    v_minor="${v_rest%%.*}"
+    v_patch="${v_rest#*.}"
+    if ! is_number "$v_major" || ! is_number "$v_minor" || ! is_number "$v_patch"; then
+        fail "$bad_pointer"
+    fi
+    # SOMME : 64 hexadécimaux.
+    case "$sum" in
+        "" | *[!0-9A-Fa-f]*) fail "$bad_pointer" ;;
+    esac
+    [ "${#sum}" -eq 64 ] || fail "$bad_pointer"
+    # CHEMIN : une constante dérivée de la version. Les contrôles de forme suivent en ceinture.
+    [ "$path" = "$version/$AGENT_FILE" ] || fail "$bad_pointer"
+    case "$path" in
+        "" | *[!A-Za-z0-9._/-]* | [!0-9]* | *..* | *//* | */) fail "$bad_pointer" ;;
+    esac
+    [ "${#path}" -le 200 ] || fail "$bad_pointer"
+    say "Dernière version : $version"
+    sum="$(printf '%s' "$sum" | tr 'A-F' 'a-f')"
+    if [ -n "$SHA256" ]; then
+        given="$(printf '%s' "$SHA256" | tr 'A-F' 'a-f')"
+        [ "$given" = "$sum" ] || fail "La somme SHA-256 donnée ne correspond pas à celle de la dernière version publiée. Installation abandonnée, aucune modification n'a été apportée à ta machine."
+        # Somme donnée par l'utilisateur et identique : SHA256_SOURCE reste « given ».
+    else
+        SHA256="$sum"
+        SHA256_SOURCE="origin"
+    fi
+    URL="$BASE_URL/releases/$path"
 }
 
 main() {
@@ -216,10 +340,8 @@ $1"
     else
         make_workdir
         if [ -z "$URL" ]; then
-            # Dernière version publiée du dépôt. La publication des versions n'existe pas
-            # encore : tant qu'aucune n'est publiée, ce téléchargement échoue avec un message
-            # clair.
-            URL="https://github.com/$REPO/releases/latest/download/hearth-agent-linux-x86_64"
+            # Par défaut : la dernière version publiée, par son pointeur validé (BR-INSTALL-013).
+            resolve_pointer
         fi
         case "$URL" in
             https://*) ;;
@@ -235,7 +357,7 @@ $1"
                 SHA256="$(cut -d ' ' -f 1 "$WORKDIR/expected.sha256" | head -n 1)"
                 SHA256_SOURCE="origin"
             elif [ "$status" -eq 2 ]; then
-                fail "Aucune somme SHA-256 n'est fournie ni publiée à côté du binaire ($URL.sha256), et aucune version de l'agent n'est peut-être publiée à cette adresse (la publication des versions n'est pas encore disponible). Rien n'est téléchargé : un binaire lancé en root ne s'installe pas sans vérification. Donne la somme avec --sha256, ou fournis un binaire avec --binary. Aucune modification n'a été apportée à ta machine."
+                fail "Aucune somme SHA-256 n'est fournie ni publiée à côté du binaire ($URL.sha256), et aucune version de l'agent n'est peut-être publiée à cette adresse. Rien n'est téléchargé : un binaire lancé en root ne s'installe pas sans vérification. Donne la somme avec --sha256, ou fournis un binaire avec --binary. Aucune modification n'a été apportée à ta machine."
             else
                 fail "Le téléchargement n'a pas abouti. Relance l'installation."
             fi
@@ -247,7 +369,7 @@ $1"
         case "$status" in
             0) ;;
             2)
-                fail "Aucune version de l'agent n'est publiée à l'adresse $URL. La publication des versions n'est pas encore disponible : fournis un binaire avec --binary, ou une adresse avec --url (ou HEARTH_RELEASE_URL). Aucune modification n'a été apportée à ta machine."
+                fail "Aucune version de l'agent n'est publiée à l'adresse $URL. Fournis un binaire avec --binary, ou une adresse avec --url (ou HEARTH_RELEASE_URL). Aucune modification n'a été apportée à ta machine."
                 ;;
             *)
                 fail "Le téléchargement n'a pas abouti. Relance l'installation."
