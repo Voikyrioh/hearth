@@ -346,10 +346,18 @@ printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64\n9.9.9 %s 9.9.9/hearth-agent-li
 pointer_refused "deux lignes"
 printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64\r\n' "$SUM" >"$POINTER"
 pointer_refused "fin de ligne CRLF"
-# Plus de 512 octets : avec curl, --max-filesize coupe à la lecture (« n'a pas abouti ») ; sinon la mesure
-# derrière refuse (« mal formé »). Dans les deux cas, rien n'est téléchargé ni écrit.
+# Ligne valide suivie d'une ligne vide : seul le compte de lignes la refuse.
+printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64
+
+' "$SUM" >"$POINTER"
+pointer_refused "ligne vide en plus"
+# Octet nul dans la version : seul le contrôle d'octets du fichier le voit (le shell le retirerait).
+printf '9.9.9  %s 9.9.9/hearth-agent-linux-x86_64
+' "$SUM" >"$POINTER"
+pointer_refused "octet nul"
+# Plus de 512 octets : coupé à la lecture ou refusé par la mesure, même message, rien de téléchargé ni d'écrit.
 { printf '9.9.9 %s 9.9.9/hearth-agent-linux-x86_64 ' "$SUM"; head -c 600 /dev/zero | tr '\0' 'a'; printf '\n'; } >"$POINTER"
-pointer_refused "plus de 512 octets" "Le téléchargement n'a pas abouti. Relance l'installation."
+pointer_refused "plus de 512 octets"
 # Origine injoignable pour le pointeur (passe par resolve_pointer, contrairement à HEARTH_RELEASE_URL).
 if run env HEARTH_BASE_URL=https://127.0.0.1:9/api sh /deploy/install.sh --yes; then
     die "install.sh avec une origine injoignable devrait échouer"

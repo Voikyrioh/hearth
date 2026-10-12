@@ -108,9 +108,10 @@ make_workdir() {
 # FIX:01M460G91CSXXRV2Q34FXQBYMT
 # `wget --https-only` ne vaut qu'en mode récursif : une redirection de https vers http serait
 # suivie. wget ne suit donc aucune redirection (`--max-redirect=0`) ; elles sont suivies ici, une
-# à une, et chacune doit être en HTTPS. Rend 0 si abouti, 2 si l'adresse n'existe pas (404), 1 sinon.
-# $3 (facultatif) : taille maximale en octets ; la lecture s'arrête à cette taille + 1 (`head -c`),
-# l'appelant mesure ensuite et refuse ce qui dépasse.
+# à une, et chacune doit être en HTTPS. Rend 0 si abouti, 2 si l'adresse n'existe pas (404), 3 si
+# la réponse dépasse la taille maximale, 1 sinon.
+# $3 (facultatif) : taille maximale en octets ; la lecture s'arrête à cette taille + 1 (`head -c`)
+# et une seule tentative est faite (`-t 1`).
 wget_https_only() {
     url="$1"
     max="${3:-}"
@@ -124,9 +125,12 @@ wget_https_only() {
         if [ -n "$max" ]; then
             wget_rc=0
             {
-                wget -nv -S --max-redirect=0 -T 15 -O - "$url" 2>"$headers" || wget_rc=$?
+                wget -nv -S --max-redirect=0 -T 15 -t 1 -O - "$url" 2>"$headers" || wget_rc=$?
                 printf '%s' "$wget_rc" >"$WORKDIR/wget.rc"
             } | head -c "$((max + 1))" >"$2"
+            if [ "$(wc -c <"$2" | tr -d ' ')" -gt "$max" ]; then
+                return 3
+            fi
             if [ "$(cat "$WORKDIR/wget.rc")" = "0" ]; then
                 return 0
             fi
@@ -147,9 +151,11 @@ wget_https_only() {
 }
 
 # Téléchargement en HTTPS seulement, redirections comprises et bornées. Rend 0 si abouti, 2 si
-# l'adresse n'existe pas (404), 1 sinon.
-# $3 et $4 (facultatifs) : taille maximale en octets et délai total en secondes, pour une petite
-# réponse attendue (le pointeur). Sans eux : aucune borne de taille, 600 s.
+# l'adresse n'existe pas (404), 3 si la réponse dépasse la taille maximale, 1 sinon.
+# $3 et $4 (facultatifs) : taille maximale en octets et délai total en secondes (curl seulement
+# pour le délai), pour une petite réponse attendue (le pointeur). Sans eux : aucune borne de
+# taille, 600 s. Avec curl avant 8.4, la taille n'est bornée à la lecture que si le serveur
+# l'annonce ; sinon c'est le délai qui borne, et l'appelant mesure ensuite.
 download() {
     case "$1" in
         https://*) ;;
@@ -158,7 +164,13 @@ download() {
     if command -v curl >/dev/null 2>&1; then
         if [ -n "${3:-}" ]; then
             code="$(curl -sSL --proto '=https' --proto-redir '=https' --max-redirs 5 --tlsv1.2 \
-                --connect-timeout 15 --max-time "${4:-30}" --max-filesize "$3" -o "$2" -w '%{http_code}' "$1" 2>/dev/null)" || return 1
+                --connect-timeout 15 --max-time "${4:-30}" --max-filesize "$3" -o "$2" -w '%{http_code}' "$1" 2>/dev/null)" || {
+                # 63 : taille maximale dépassée (CURLE_FILESIZE_EXCEEDED).
+                if [ "$?" -eq 63 ]; then
+                    return 3
+                fi
+                return 1
+            }
         else
             code="$(curl -sSL --proto '=https' --proto-redir '=https' --max-redirs 5 --tlsv1.2 \
                 --connect-timeout 15 --max-time 600 -o "$2" -w '%{http_code}' "$1" 2>/dev/null)" || return 1
@@ -193,15 +205,17 @@ resolve_pointer() {
     fi
     say "Recherche de la dernière version de l'agent..."
     pointer="$WORKDIR/pointer"
+    bad_pointer="Le pointeur de la dernière version est mal formé. Installation abandonnée, aucune modification n'a été apportée à ta machine."
     status=0
-    # Lecture bornée à 512 octets et 30 s : l'origine ne peut pas remplir le disque. HTTPS : contrôlé par `download`.
+    # Lecture bornée à 512 octets et 30 s (voir `download` pour ce que chaque outil tient), puis
+    # mesurée. HTTPS : contrôlé par `download`.
     download "$BASE_URL/releases/latest/agent" "$pointer" 512 30 || status=$?
     case "$status" in
         0) ;;
         2) fail "Le pointeur de la dernière version de l'agent est absent ($BASE_URL/releases/latest/agent). Aucune modification n'a été apportée à ta machine." ;;
+        3) fail "$bad_pointer" ;;
         *) fail "Le téléchargement n'a pas abouti. Relance l'installation." ;;
     esac
-    bad_pointer="Le pointeur de la dernière version est mal formé. Installation abandonnée, aucune modification n'a été apportée à ta machine."
     # Une seule ligne, courte (la borne de lecture est doublée ici par une mesure).
     [ "$(wc -c <"$pointer" | tr -d ' ')" -le 512 ] || fail "$bad_pointer"
     [ "$(grep -c '' "$pointer")" -eq 1 ] || fail "$bad_pointer"
