@@ -280,7 +280,10 @@ impl UpdateService {
                 input,
             ) {
                 Err(refusal) => Err(UpdateError::Refused(refusal)),
-                Ok(target) => match self.verifier.check_format(&target.signature) {
+                Ok(target) => match self
+                    .verifier
+                    .check_format(&target.signature, &target.version)
+                {
                     Err(_) => Err(UpdateError::BadSignature),
                     Ok(()) => {
                         let first = UpdateProgress {
@@ -371,14 +374,19 @@ impl UpdateService {
             return Err(UpdateReason::BadChecksum);
         }
         {
-            let (bytes, verifier, signature) = (
+            let (bytes, verifier, signature, version) = (
                 Arc::clone(&bytes),
                 Arc::clone(&self.verifier),
                 target.signature.clone(),
+                target.version,
             );
-            blocking(move || verifier.verify(&bytes[..], &signature))
+            blocking(move || verifier.verify(&bytes[..], &signature, &version))
                 .await?
-                .map_err(|_| UpdateReason::BadSignature)?;
+                .map_err(|error| {
+                    // Le détail (jamais l'adresse ni la signature) va au journal de l'agent.
+                    tracing::warn!(%error, "signature de la mise à jour refusée");
+                    UpdateReason::BadSignature
+                })?;
         }
 
         // 3. Dépôt, contrôle de la version annoncée, copie du superviseur, travail.
