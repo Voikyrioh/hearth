@@ -43,14 +43,20 @@ Les clés de publication sont en place depuis le 2026-10-12 : la clé publique d
    gh api repos/Voikyrioh/hearth/actions/runs/<id-du-run>/artifacts
    gh api -X DELETE repos/Voikyrioh/hearth/actions/artifacts/<id-de-l-artefact>
    ```
-   La deuxième commande liste les artefacts du run : prendre l'`id` de celui qui s'appelle `hearth-client-signed`. Compare les sommes SHA-256 du journal à celles des fichiers téléchargés (`Get-FileHash <fichier>`). Ensuite : construire et signer l'agent (`mettre-a-jour-agent.md`), puis `cargo xtask release-stage` et `cargo xtask release-upload` : **commandes livrées par HRT-51, pas encore dans le dépôt** (arguments définis par ce ticket). Elles déposent dans le bucket ; le manifeste est écrit en dernier et annonce la version aux clients, au plus une vérification par jour et par client, ou leur « Vérifier maintenant ».
-5. **Release GitHub sans binaire**, à la main, APRÈS le dépôt réussi (décision du propriétaire du 2026-10-12 ; second canal pour les sommes, aucun flux ne la crée). Les notes sont `notes.txt` du dossier de `gh run download` ; `SHA256SUMS` est le fichier préparé par `release-stage` (le même que celui du bucket ; son chemin est donné par `release-stage`, HRT-51). Le SHA de l'étiquette est celui du commit sur lequel le flux a tourné :
+   La deuxième commande liste les artefacts du run : prendre l'`id` de celui qui s'appelle `hearth-client-signed`. Compare les sommes SHA-256 du journal à celles des fichiers téléchargés (`Get-FileHash <fichier>`). Ensuite : construire et signer l'agent (`mettre-a-jour-agent.md`), puis assembler et déposer, depuis la racine du dépôt à jour sur `main` (commandes livrées par HRT-51 ; si `cargo xtask` ne les connaît pas, ce ticket n'est pas encore fusionné : s'arrêter là) :
+   ```powershell
+   cargo xtask release-stage --client-dir <dossier> --agent-binary <hearth-agent> --agent-signature <hearth-agent.minisig>
+   cargo xtask release-upload
+   cargo xtask release-upload --confirm
+   ```
+   `release-stage` revérifie tout (signatures, sommes, adresses, script) et écrit sous `target/release-stage/` seulement. `release-upload` sans option est un ESSAI À BLANC : il affiche chaque écriture et n'en fait aucune ; le relire avant `--confirm`. `--confirm` demande l'outil `aws`, `curl`, et la clé de publication du bucket dans `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` de la session (jamais en argument, jamais dans un fichier du dépôt). Il refuse de réécrire une version déjà déposée avec un autre contenu, et de remplacer un manifeste d'une version supérieure (`--allow-rollback` seulement pour retirer une version, voir plus bas). Le manifeste est écrit en dernier et annonce la version aux clients, au plus une vérification par jour et par client, ou leur « Vérifier maintenant ».
+5. **Release GitHub sans binaire**, à la main, APRÈS le dépôt réussi (décision du propriétaire du 2026-10-12 ; second canal pour les sommes, aucun flux ne la crée). Les notes sont `notes.txt` du dossier de `gh run download` ; `SHA256SUMS` est le fichier préparé par `release-stage` (le même que celui du bucket : `target\release-stage\releases\X.Y.Z\SHA256SUMS`). Tant que cette étiquette n'est pas posée, rien ne refuse de relancer le flux sur le même numéro (`client-release-check` ne regarde que l'étiquette `vX.Y.Z` de `origin`) : ne pas relancer `publish-client` entre la signature et cette étape ; après le premier objet déposé, c'est `release-upload` qui refuse un contenu différent. Le SHA de l'étiquette est celui du commit sur lequel le flux a tourné :
    ```powershell
    gh run view <id-du-run> --repo Voikyrioh/hearth --json headSha --jq .headSha
    gh release create "vX.Y.Z" --repo Voikyrioh/hearth `
      --target <SHA-donné-par-la-commande-précédente> `
      --title "Hearth X.Y.Z" --notes-file <dossier>\notes.txt `
-     <chemin-donné-par-release-stage>\SHA256SUMS
+     target\release-stage\releases\X.Y.Z\SHA256SUMS
    ```
    En Bash, la continuation de ligne est `\` au lieu de la backtick. Aucun binaire n'est joint : ni installateur, ni `.sig`, ni `latest.json`. L'étiquette pointe la source du binaire (dépôt AGPL) ; une étiquette posée sur le mauvais commit ne se corrige pas proprement. Pas de `--draft` : la release ne pilote plus aucune mise à jour. Commande à lancer hors des heures employeur (gel Git du propriétaire).
 
@@ -81,7 +87,7 @@ L'essai bout en bout (deux versions consécutives, dépôt dans le bucket) est p
 
 | Constat | Cause probable | Que faire |
 |---|---|---|
-| Le flux s'arrête à « Garde de publication » | `update-key.pub` est la clé de développement, ou la version demandée n'est pas celle de `Cargo.toml`/`package.json` | suivre le message |
+| Le flux s'arrête à « Garde de publication » | la version demandée n'est pas celle de `Cargo.toml`/`package.json`, ou l'étiquette `vX.Y.Z` existe déjà sur `origin` (numéro déjà publié : en prendre un autre), ou `update-key.pub` est redevenue la clé de développement (ne doit plus arriver depuis la pose de la clé de publication) | suivre le message |
 | `client-sign` : « HEARTH_CLIENT_SIGNING_KEY est absent ou vide », « mot de passe obligatoire », « clé secrète illisible » | secret absent (ou posé dans le dépôt et non dans l'environnement `release`), mot de passe vide ou faux | créer ou corriger les secrets de l'environnement (prérequis 1) |
 | Le job `sign` attend | l'approbation de l'environnement `release` | l'approuver, après relecture du journal de `build` |
 | `client-sign` ou `client-manifest` : « la signature ne correspond pas à update-key.pub » | la clé secrète des secrets n'est pas la paire de la clé publique du dépôt | remettre la bonne clé secrète dans l'environnement `release` (sauvegarde, prérequis 2) ; ne PAS remplacer `update-key.pub` |
