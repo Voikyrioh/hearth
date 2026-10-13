@@ -23,13 +23,22 @@ const fields = computed(() => {
   // HRT-43 (C32) : pas de ligne vide (cible ou raison absentes) ; source lisible, raison avec majuscule.
   const rows: Array<readonly [string, string]> = [
     [t("audit.colWhen"), whenOf(entry)],
-    [t("audit.detailSource"), sourceOf(entry)],
     [t("audit.colAccount"), safeText(entry.account)],
     [t("audit.colOrigin"), originOf(entry)],
     [t("audit.colAction"), safeText(entry.actionLabel)],
     [t("audit.colTarget"), safeText(entry.target)],
     [t("audit.colOutcome"), outcomeLabel(entry.outcome)],
     [t("audit.colReason"), capitalize(safeText(entry.reason))],
+  ];
+  return rows.filter(([, value]) => value.trim() !== "");
+});
+
+// HRT-142 : la date UTC et le numéro n'aident pas à lire l'événement : ils sont rangés sous « Détails techniques ».
+const technical = computed(() => {
+  const entry = props.entry;
+  if (!entry) return [];
+  const rows: Array<readonly [string, string]> = [
+    [t("audit.detailSource"), sourceOf(entry)],
     [t("audit.detailId"), String(entry.id)],
   ];
   return rows.filter(([, value]) => value.trim() !== "");
@@ -87,6 +96,15 @@ function onNativeClose() {
           <dd class="detail__value">{{ value }}</dd>
         </template>
       </dl>
+      <h3 v-if="technical.length > 0" class="detail__technical" data-audit-technical>
+        {{ t("audit.detailTechnical") }}
+      </h3>
+      <dl v-if="technical.length > 0" class="detail__list detail__list--technical">
+        <template v-for="[label, value] in technical" :key="label">
+          <dt class="detail__label">{{ label }}</dt>
+          <dd class="detail__value">{{ value }}</dd>
+        </template>
+      </dl>
       <div class="detail__actions">
         <HButton ref="closeButton" variant="secondary" @click="emit('close')">
           {{ t("common.close") }}
@@ -126,8 +144,21 @@ function onNativeClose() {
   margin-top: var(--space-4);
 }
 
+.detail__technical {
+  margin-top: var(--space-4);
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-medium);
+}
+
+.detail__list--technical {
+  margin-top: var(--space-2);
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
+}
+
 .detail__label {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .detail__value {

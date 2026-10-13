@@ -4,6 +4,7 @@ import { defineComponent, h } from "vue";
 import App from "@/App.vue";
 import { reportUiError } from "@/errors/report";
 import { mountContext } from "@/test/mount";
+import { tooltip } from "@/test/tooltip";
 
 beforeEach(() =>
   vi.useFakeTimers({
@@ -147,9 +148,7 @@ describe("shell of a server", () => {
     bridge.setState("forge", "offline");
     await flushPromises();
     expect(action().attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get("#header-actions [role=tooltip]").text()).toBe(
-      "Indisponible tant que le serveur est hors ligne.",
-    );
+    expect(tooltip().text()).toBe("Indisponible tant que le serveur est hors ligne.");
     await action().trigger("click");
     expect(wrapper.find(".toast").exists()).toBe(false);
     bridge.setState("forge", "connected");
@@ -278,7 +277,7 @@ describe("hors ligne (HRT-12)", () => {
     expect(wrapper.text()).toMatch(/Vu il y a \d+ s/);
     const action = wrapper.findAll("button").find((b) => b.text() === "Ajouter un compte");
     expect(action?.attributes("aria-disabled")).toBe("true");
-    expect(wrapper.text()).toContain("Indisponible tant que le serveur est hors ligne.");
+    expect(tooltip().text()).toBe("Indisponible tant que le serveur est hors ligne.");
     expect(wrapper.find('[role="dialog"], [role="alertdialog"], dialog').exists()).toBe(false);
     // Le lien revient : tout se remet en place.
     bridge.setState("forge", "connected");

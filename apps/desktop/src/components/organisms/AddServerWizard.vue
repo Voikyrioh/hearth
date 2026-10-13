@@ -224,17 +224,17 @@ function refuse() {
 }
 
 .wizard__colors-label {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
 .wizard__help,
 .wizard__status {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .wizard__info {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .wizard__link {
@@ -254,7 +254,7 @@ function refuse() {
 }
 
 .wizard__address {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
 }
 

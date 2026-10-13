@@ -31,7 +31,7 @@ import { t } from "@/i18n";
 .note__icon {
   flex: none;
   margin-top: var(--space-1);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .note__title {
@@ -39,6 +39,6 @@ import { t } from "@/i18n";
 }
 
 .note__text {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 </style>

@@ -272,15 +272,18 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
 
 /// Décode un segment de chemin encodé en pourcentage (`%5C` donne `\`). `None` : encodage illisible ou
 /// octets qui ne sont pas de l'UTF-8. Source unique de l'agent (qui lit la clé de `/services/{key}/release`)
-/// et de la liaison cliente (qui signe la même clé).
+/// et de la liaison cliente (qui signe la même clé). Un `%` est suivi de DEUX chiffres hexadécimaux, rien
+/// d'autre : ni signe (`%+f`), ni espace, ni lettre hors `a-f`.
+// FIX:01M4W5A9CK7Q2R8T3X6V0DNYHE
 pub fn decode_segment(raw: &str) -> Option<String> {
     let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] == b'%' {
-            let pair = raw.get(index + 1..index + 3)?;
-            out.push(u8::from_str_radix(pair, 16).ok()?);
+            let high = hex_digit(*bytes.get(index + 1)?)?;
+            let low = hex_digit(*bytes.get(index + 2)?)?;
+            out.push(high << 4 | low);
             index += 3;
         } else {
             out.push(bytes[index]);
@@ -288,6 +291,16 @@ pub fn decode_segment(raw: &str) -> Option<String> {
         }
     }
     String::from_utf8(out).ok()
+}
+
+/// La valeur d'un chiffre hexadécimal ASCII (`0-9`, `a-f`, `A-F`) ; rien d'autre.
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// Un texte a-t-il la forme d'une clé de service (`h_`, `u_` ou `c_`, puis des caractères d'identifiant
@@ -580,6 +593,13 @@ mod tests {
         assert_eq!(decode_segment("%zz"), None);
         assert_eq!(decode_segment("%4"), None);
         assert_eq!(decode_segment("%ff"), None);
+        // Deux chiffres hexadécimaux, pas un de plus ni de moins, jamais un signe ni un espace.
+        assert_eq!(decode_segment("a%2Bb").as_deref(), Some("a+b"));
+        for malformed in [
+            "%+f", "%-1", "% 5", "%5 ", "%+", "%", "a%", "%é", "%0x", "%%41",
+        ] {
+            assert_eq!(decode_segment(malformed), None, "{malformed:?}");
+        }
         assert!(is_service_key("u_docker-terraria.service"));
         assert!(is_service_key("c_0123abcd"));
         assert!(!is_service_key("x_abc"));

@@ -47,7 +47,7 @@ const id = useId();
 }
 
 .select__label {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
@@ -80,7 +80,7 @@ const id = useId();
 .select__chevron {
   position: absolute;
   right: var(--space-3);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   pointer-events: none;
 }
 </style>

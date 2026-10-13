@@ -508,6 +508,13 @@ impl From<LinkError> for LinkFailure {
             LinkError::Rejected(Some(hearth_proto::error::ErrorCode::ForbiddenRole)) => {
                 Self::Forbidden
             }
+            // Refus qui porte une raison (adopter, relâcher) : aucun écran ne s'en sert encore, la raison
+            // sera rendue à l'interface avec l'écran d'adoption. D'ici là, même sort que le refus nu.
+            LinkError::RejectedBecause {
+                code: hearth_proto::error::ErrorCode::ForbiddenRole,
+                ..
+            } => Self::Forbidden,
+            LinkError::RejectedBecause { .. } => Self::Internal,
             LinkError::MissingRight(right) => Self::missing(&right),
             // Sans clé au coffre : le retrait d'un poste la traite avant (`devices::service::removed`),
             // le mode attaque la rend telle quelle (`NotRecognized`, rien n'est parti).

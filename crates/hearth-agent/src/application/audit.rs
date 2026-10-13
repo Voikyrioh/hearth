@@ -202,6 +202,50 @@ impl AuditSink for AuditRecorder {
         }
     }
 
+    async fn record_grouped_required(
+        &self,
+        actor: Actor,
+        action: AuditAction,
+        target: Target,
+        outcome: Outcome,
+    ) -> Result<(), AuditWriteError> {
+        let event = AuditEvent::new(self.clock.now(), actor, action, target, outcome);
+        let own = event.clone();
+        let to_write = self
+            .repeats
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .admit(event);
+        let mut written = true;
+        for event in to_write {
+            match self.write(&event).await {
+                Ok(record) => self.trail.publish(vec![record]),
+                Err(error) => {
+                    tracing::error!(%error, action = event.action.code(), "entrée du journal non écrite");
+                    // Une lecture servie exige son entrée : si c'est la sienne qui n'a pas pu être
+                    // écrite, le groupe qu'elle venait d'ouvrir est refermé. Sinon le réessai serait
+                    // compté dans ce groupe et servi sans trace (revue de la PR 89).
+                    if event == own {
+                        let orphaned = self
+                            .repeats
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .withdraw(&own);
+                        for summary in orphaned {
+                            self.write_and_publish(summary).await;
+                        }
+                    }
+                    written = false;
+                }
+            }
+        }
+        if written {
+            Ok(())
+        } else {
+            Err(AuditWriteError)
+        }
+    }
+
     async fn record_required(
         &self,
         actor: Actor,

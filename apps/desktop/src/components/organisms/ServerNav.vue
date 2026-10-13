@@ -85,7 +85,7 @@ const nav = ref<HTMLElement | null>(null);
 
 .side__address {
   overflow: hidden;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
   text-overflow: ellipsis;
@@ -103,7 +103,7 @@ const nav = ref<HTMLElement | null>(null);
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-control);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .nav__item::before {

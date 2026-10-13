@@ -64,6 +64,15 @@ function headings(wrapper: ReturnType<typeof mount>) {
   return wrapper.findAll("h2").map((heading) => heading.text());
 }
 
+describe("disk names (HRT-142)", () => {
+  it("names the root disk the same in the Machine card and the Disks card", async () => {
+    const ctx = await open("forge", 300);
+    const machine = ctx.wrapper.findAll("[data-machine-disk]").map((row) => row.text());
+    expect(machine.some((text) => text.includes("Disque système"))).toBe(true);
+    expect(machine.some((text) => text.startsWith("/ ") || text === "/")).toBe(false);
+  });
+});
+
 describe("initial display (BR-DASH-001)", () => {
   it("shows a loader until the first measures arrive, then every section", async () => {
     const ctx = await open("forge", 0);
@@ -371,7 +380,7 @@ describe("live changes (BR-DASH-012)", () => {
       totalBytes: 500 * 1024 ** 3,
       removable: true,
     };
-    const names = () => ctx.wrapper.findAll(".disk__name .sr-only").map((n) => n.text());
+    const names = () => ctx.wrapper.findAll(".disk__mount .sr-only").map((n) => n.text());
     expect(names()).toEqual(["/dev/nvme0n1p2", "/dev/sda1"]);
     ctx.bridge.machine.setMachine("forge", { ...base, disks: [...base.disks, extra] });
     await second(ctx);

@@ -4,6 +4,9 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4VNGP6RMTHA7XNDDGV2FH1R](./FIX-01M4VNGP6RMTHA7XNDDGV2FH1R.md) | L'état « à confirmer » d'une adoption ne survivait pas au redémarrage, et le passage de relecture jugeait « non relue » une adoption faite pendant ses lectures (HRT-80, PR 89) | 2026-10-14 |
+| [FIX-01M4VNGP6R446RGM9FB3JEJG7P](./FIX-01M4VNGP6R446RGM9FB3JEJG7P.md) | Après un échec d'écriture, la lecture des candidats du même compte était servie sans entrée au journal (HRT-80, PR 89) | 2026-10-14 |
+| [FIX-01M4W5A9CK7Q2R8T3X6V0DNYHE](./FIX-01M4W5A9CK7Q2R8T3X6V0DNYHE.md) | `decode_segment` acceptait `%+f` (la couche et le routeur ne lisaient pas la même clé) (HRT-80) | 2026-10-14 |
 | [FIX-01M4VR6Y4Q4AVQVT9FCME7Z2SB](./FIX-01M4VR6Y4Q4AVQVT9FCME7Z2SB.md) | Une étape, une issue ou un code inconnu d'un agent plus récent faisait rejeter ou perdre le message entier (BR-COMPAT-001) | 2026-10-14 |
 | [FIX-01M4V4G0ZPWMKE6WCYKPF2Q3SM](./FIX-01M4V4G0ZPWMKE6WCYKPF2Q3SM.md) | La liste des dossiers refusés au montage laissait passer /usr, /nix, /run, /var/spool et le .ssh d'un compte (HRT-75) | 2026-10-13 |
 | [FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ](./FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ.md) | Textes de conteneur : séparateurs de ligne Unicode non retirés, ports et montages omis non comptés (HRT-72) | 2026-10-13 |

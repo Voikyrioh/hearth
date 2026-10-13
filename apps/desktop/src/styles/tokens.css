@@ -12,7 +12,15 @@
   --bd: #3a2c31;
   --tx: #f6ece6;
   --tx2: #b3a19c;
-  --tx3: #7d6c68;
+  /* HRT-141 : le texte secondaire de l'interface (92 usages) est plus clair que le gris de la charte (--tx2, couleur de
+     l'identité visuelle : icônes de zone de notification, bible DA) : 9,3 pour 1 sur le fond de page, à 1,6 pour 1 du
+     texte discret (--tx3, 5,9) et du texte principal (--tx, 15,4). Les trois niveaux restent visibles. */
+  --tx-secondary: #c8b7b1;
+  /* HRT-141 : le texte atténué qui porte une information (date, espace libre, échelle) tient 4,5 pour 1 sur le fond
+     de page (5,9), la barre latérale (5,6), une carte (5,1) et une carte relevée (4,7). */
+  --tx3: #a09089;
+  /* Le gris le plus sombre (3,6 pour 1 sur le fond de page) : seulement ce qui n'écrit rien (poignée de défilement, trait). */
+  --tx-faint: #7d6c68;
   --ac: #ff7b3d;
   --ac2: #ff4f7a;
   --cool: #5fd0c0;
@@ -32,9 +40,12 @@
   --sec-tint: color-mix(in srgb, var(--ac2) 12%, var(--card));
   --cool-tint: color-mix(in srgb, var(--cool) 12%, var(--card));
   --on-crit: #1c1518;
+  /* Bouton inactif : surface neutre + texte discret (4,7 pour 1). */
+  --disabled-bg: var(--card-2);
+  --disabled-tx: var(--tx3);
   --scrim: color-mix(in srgb, var(--bg) 72%, transparent);
   /* Poignée de défilement (HRT-37) : 3,6 pour 1 sur le fond de page, 3,2 sur une carte au repos (WCAG 1.4.11 : 3 pour 1) ; plus claire au survol (6,4 sur une carte). */
-  --scroll-thumb: var(--tx3);
+  --scroll-thumb: var(--tx-faint);
   --scroll-thumb-hover: var(--tx2);
   --scroll-track: transparent;
   --scroll-size: 12px;
@@ -54,6 +65,8 @@
   --font-title: "Sora", system-ui, sans-serif;
   --font-body: "Instrument Sans", system-ui, sans-serif;
   --font-mono: "DM Mono", ui-monospace, monospace;
+  /* Phrase de version de l'agent (réglages) : en chasse fixe aujourd'hui ; à trancher par le propriétaire, un seul endroit (`var(--font-body)` pour la police du texte). */
+  --font-versions: var(--font-mono);
   --fs-small: 12px;
   --fs-body: 13.5px;
   --fs-lead: 15px;
@@ -172,7 +185,7 @@
   --command-max-height: 160px;
 
   /* États */
-  --opacity-disabled: 0.45;
+  --opacity-disabled: 0.7;
   --opacity-stale: 0.62;
   --grayscale-stale: 0.85;
   --opacity-pulse-low: 0.35;
@@ -189,4 +202,5 @@
   --z-tooltip: 30;
   --z-toast: 40;
   --z-dev: 60;
+  --z-skip: 70;
 }

@@ -93,7 +93,7 @@ const updateAvailable = computed(() => agents.withUpdate.includes(props.server.i
 }
 
 .row__address {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
 }

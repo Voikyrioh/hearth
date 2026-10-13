@@ -67,7 +67,7 @@ const more = computed(() => Math.max(0, props.ports.length - shown.value.length)
 }
 
 .chips--host {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
@@ -88,7 +88,7 @@ const more = computed(() => Math.max(0, props.ports.length - shown.value.length)
 .chip--more {
   border: var(--border-width) solid var(--bd);
   background: transparent;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   cursor: pointer;
 }
 </style>

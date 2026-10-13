@@ -274,7 +274,7 @@ async function submit() {
 }
 
 .admin__help {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .admin__alert {

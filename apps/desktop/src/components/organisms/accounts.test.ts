@@ -111,8 +111,10 @@ describe("AccountTable", () => {
   it("offers only « Changer mon mot de passe » on one's own line", async () => {
     const wrapper = await table();
     const own = wrapper.get('[data-account="marie"]');
-    expect(own.findAll("td button").map((b) => b.text())).toEqual(["Changer mon mot de passe"]);
-    await own.get("td button").trigger("click");
+    expect(own.findAll("td button:not([data-services-right])").map((b) => b.text())).toEqual([
+      "Changer mon mot de passe",
+    ]);
+    await own.get("td button:not([data-services-right])").trigger("click");
     expect(wrapper.emitted("changeOwnPassword")).toHaveLength(1);
     wrapper.unmount();
   });
@@ -120,7 +122,7 @@ describe("AccountTable", () => {
   it("offers the four actions on another line, with the number of sessions on the button", async () => {
     const wrapper = await table();
     const paul = wrapper.get('[data-account="paul"]');
-    expect(paul.findAll("td button").map((b) => b.text())).toEqual([
+    expect(paul.findAll("td button:not([data-services-right])").map((b) => b.text())).toEqual([
       "Changer le rôle",
       "Changer le mot de passe",
       "Fermer les 2 sessions",
@@ -128,12 +130,12 @@ describe("AccountTable", () => {
     ]);
     // Aucune session : « Fermer les sessions » est grisé.
     const lea = wrapper.get('[data-account="lea"]');
-    const close = lea.findAll("td button")[2];
+    const close = lea.findAll("td button:not([data-services-right])")[2];
     expect(close?.text()).toBe("Fermer les sessions");
     expect(close?.attributes("aria-disabled")).toBe("true");
-    await paul.findAll("td button")[2]?.trigger("click");
-    await paul.findAll("td button")[3]?.trigger("click");
-    await paul.findAll("td button")[1]?.trigger("click");
+    await paul.findAll("td button:not([data-services-right])")[2]?.trigger("click");
+    await paul.findAll("td button:not([data-services-right])")[3]?.trigger("click");
+    await paul.findAll("td button:not([data-services-right])")[1]?.trigger("click");
     expect(wrapper.emitted("closeSessions")?.[0]?.[0]).toMatchObject({ username: "paul" });
     expect(wrapper.emitted("remove")?.[0]?.[0]).toMatchObject({ username: "paul" });
     expect(wrapper.emitted("changePassword")?.[0]?.[0]).toMatchObject({ username: "paul" });
@@ -143,7 +145,7 @@ describe("AccountTable", () => {
   it("changes the role through a dropdown opened by « Changer le rôle »", async () => {
     const wrapper = await table();
     const paul = wrapper.get('[data-account="paul"]');
-    await paul.findAll("td button")[0]?.trigger("click");
+    await paul.findAll("td button:not([data-services-right])")[0]?.trigger("click");
     await flushPromises();
     const select = paul.get("select");
     expect(select.findAll("option").map((o) => o.text())).toEqual([
@@ -164,7 +166,9 @@ describe("AccountTable", () => {
       account({ username: "marie", role: "admin" }),
       account({ username: "jean", role: "admin" }),
     ]);
-    const [role, , , remove] = wrapper.get('[data-account="jean"]').findAll("td button");
+    const [role, , , remove] = wrapper
+      .get('[data-account="jean"]')
+      .findAll("td button:not([data-services-right])");
     expect(role?.attributes("aria-disabled")).toBeUndefined();
     expect(remove?.attributes("aria-disabled")).toBeUndefined();
     wrapper.unmount();
@@ -174,7 +178,7 @@ describe("AccountTable", () => {
     const HINT =
       "Ce compte peut gérer les services. Seul un compte qui le peut aussi, ou la commande sur le serveur, peut le supprimer.";
     const removeOf = (wrapper: Awaited<ReturnType<typeof table>>, name: string) =>
-      wrapper.get(`[data-account="${name}"]`).findAll("td button")[3];
+      wrapper.get(`[data-account="${name}"]`).findAll("td button:not([data-services-right])")[3];
 
     it("greys out the removal of a holder when you are not one, and says why; the role stays possible", async () => {
       const wrapper = await table(
@@ -186,8 +190,10 @@ describe("AccountTable", () => {
       );
       const paul = wrapper.get('[data-account="paul"]');
       expect(removeOf(wrapper, "paul")?.attributes("aria-disabled")).toBe("true");
-      expect(paul.text()).toContain(HINT);
-      expect(paul.findAll("td button")[0]?.attributes("aria-disabled")).toBeUndefined();
+      expect(document.body.textContent).toContain(HINT);
+      expect(
+        paul.findAll("td button:not([data-services-right])")[0]?.attributes("aria-disabled"),
+      ).toBeUndefined();
       wrapper.unmount();
     });
 
@@ -230,10 +236,12 @@ describe("AccountTable", () => {
     // Cas d'une liste périmée : le seul administrateur est un autre compte que « moi ».
     const wrapper = await table([account({ username: "jean", role: "admin" })]);
     const jean = wrapper.get('[data-account="jean"]');
-    const [role, , , remove] = jean.findAll("td button");
+    const [role, , , remove] = jean.findAll("td button:not([data-services-right])");
     expect(role?.attributes("aria-disabled")).toBe("true");
     expect(remove?.attributes("aria-disabled")).toBe("true");
-    expect(jean.text()).toContain("Il doit toujours rester au moins un administrateur");
+    expect(document.body.textContent).toContain(
+      "Il doit toujours rester au moins un administrateur",
+    );
     wrapper.unmount();
   });
 });

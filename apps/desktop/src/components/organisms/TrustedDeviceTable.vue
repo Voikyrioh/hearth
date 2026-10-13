@@ -200,7 +200,7 @@ const named = (device: TrustedDevice) => `${t("devices.remove")} ${device.name}`
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
   font-size: var(--fs-body);
 }
@@ -232,7 +232,7 @@ const named = (device: TrustedDevice) => `${t("devices.remove")} ${device.name}`
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-body);
 }
 
@@ -257,7 +257,7 @@ const named = (device: TrustedDevice) => `${t("devices.remove")} ${device.name}`
 }
 
 .card__help {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-body);
 }
 
@@ -283,7 +283,7 @@ const named = (device: TrustedDevice) => `${t("devices.remove")} ${device.name}`
 }
 
 .table thead th {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   font-weight: var(--fw-medium);
   letter-spacing: var(--ls-label);
@@ -302,7 +302,7 @@ const named = (device: TrustedDevice) => `${t("devices.remove")} ${device.name}`
 }
 
 .table__last {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .table__actions {

@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useCoverage, useMachineSeries } from "@/composables/useMachineSeries";
 import { formatGb, formatPercent, formatUsage } from "@/dashboard/format";
+import { diskTitle } from "@/dashboard/labels";
 import { fullestDiskPercent, percentOf } from "@/dashboard/series";
 import { t } from "@/i18n";
 import { type ServerMachine, useDashboardStore } from "@/stores/dashboard";
@@ -26,7 +27,7 @@ const disks = computed(() => {
     return {
       key: `${disk.name}|${disk.mount}`,
       name: disk.name,
-      mount: disk.mount,
+      ...diskTitle(disk.name, disk.mount),
       percent,
       level: latest.levels.disks[index] ?? "normal",
       usage: formatUsage(disk.usedBytes, disk.totalBytes),
@@ -44,8 +45,8 @@ const covered = useCoverage(props.entry);
     <ul v-else class="disks__list">
       <li v-for="disk in disks" :key="disk.key" class="disk" :data-level="disk.level">
         <div class="disk__head">
-          <HMiddleText class="disk__name" :text="disk.name" />
-          <HMiddleText v-if="disk.mount !== disk.name" class="disk__mount" :text="disk.mount" />
+          <HMiddleText class="disk__name" :text="disk.title" />
+          <HMiddleText v-if="disk.technical" class="disk__mount" :text="disk.technical" />
           <span class="disk__gap" />
           <span class="disk__percent">{{ formatPercent(disk.percent) }}</span>
           <LevelBadge :level="disk.level" />
@@ -75,7 +76,7 @@ const covered = useCoverage(props.entry);
 
 <style scoped>
 .disks__none {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .disks__list {
@@ -102,13 +103,13 @@ const covered = useCoverage(props.entry);
 
 /* FIX:01M4EPX88BTXFX1PX7E57WGK38 (HRT-47, S1b) : nom et point de montage tronqués au milieu, jamais en colonne ni hors de la carte. */
 .disk__name {
-  flex: 0 1 auto;
-  min-width: min-content;
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: var(--fw-semibold);
 }
 
 .disk__gap {
-  flex: 1 0 0;
+  flex: 0 0 0;
 }
 
 .disk__percent {
@@ -119,10 +120,11 @@ const covered = useCoverage(props.entry);
 }
 
 .disk__mount {
-  /* FIX:01M4D1K6V5DS7DQVR6ZV7A3HGY : le point de montage se lit (taille du texte, pas de la note) */
-  flex: 1 1 auto;
+  /* FIX:01M4D1K6V5DS7DQVR6ZV7A3HGY : le nom du périphérique se lit (taille du texte, pas de la note) ; HRT-142 : en second plan. */
+  flex: 0 1 auto;
   min-width: 0;
-  color: var(--tx);
+  max-width: 45%;
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
 }
 

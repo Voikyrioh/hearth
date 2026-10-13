@@ -127,7 +127,7 @@ defineExpose({
 }
 
 .login__status {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .login__locked {

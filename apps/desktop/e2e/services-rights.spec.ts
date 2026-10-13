@@ -82,7 +82,7 @@ test("B, administrateur sans le droit : la raison et la commande à copier, copi
     "Le droit se donne depuis le serveur. Lance cette commande sur le serveur :",
   );
   const shown = (await block.locator("pre").textContent()) ?? "";
-  expect(shown).toBe("hearth-agent account services marie --grant");
+  expect(shown).toBe("sudo hearth-agent account services marie --grant");
   await block.getByRole("button", { name: "Copier la commande" }).click();
   await expect(block.getByRole("button", { name: "Copiée" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shown);
@@ -174,7 +174,9 @@ test("le détail d'un compte : avec le droit (--revoke) et sans (--grant), au cl
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator("[data-rights-value]")).toHaveText("Autorisée");
-  await expect(dialog.locator("pre")).toHaveText("hearth-agent account services marie --revoke");
+  await expect(dialog.locator("pre")).toHaveText(
+    "sudo hearth-agent account services marie --revoke",
+  );
   await shoot(dialog, page, "droit-detail-avec-droit");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
@@ -186,7 +188,7 @@ test("le détail d'un compte : avec le droit (--revoke) et sans (--grant), au cl
     "Ce droit se donne et se retire depuis le serveur, pas depuis cet écran.",
   );
   const shown = (await dialog.locator("pre").textContent()) ?? "";
-  expect(shown).toBe("hearth-agent account services paul --grant");
+  expect(shown).toBe("sudo hearth-agent account services paul --grant");
   await dialog.getByRole("button", { name: "Copier la commande" }).click();
   await expect(dialog.getByRole("button", { name: "Copiée" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shown);

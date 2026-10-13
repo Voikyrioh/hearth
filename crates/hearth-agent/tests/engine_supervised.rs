@@ -152,12 +152,21 @@ impl ServiceRepo for NoRepo {
                 key,
                 by: "test".to_owned(),
                 at: time::OffsetDateTime::UNIX_EPOCH,
+                unconfirmed_since: None,
             })
             .collect())
     }
 
     async fn forget_adopted(&self, _key: &ServiceKey) -> Result<(), StoreError> {
         Ok(())
+    }
+
+    async fn mark_unconfirmed(
+        &self,
+        marks: &[(ServiceKey, time::OffsetDateTime)],
+        since: time::OffsetDateTime,
+    ) -> Result<Vec<(ServiceKey, time::OffsetDateTime)>, StoreError> {
+        Ok(marks.iter().map(|(key, _)| (key.clone(), since)).collect())
     }
 }
 

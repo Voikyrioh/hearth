@@ -140,7 +140,7 @@ function isActive(id: string): boolean {
 }
 
 .rail__link--tool {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .rail__link--tool:hover,

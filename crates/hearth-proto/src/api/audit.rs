@@ -70,9 +70,15 @@ pub mod action {
     /// Un compte est freiné quand il ouvre des lectures de journaux en rafale (HRT-107, BR-SLOG-027) :
     /// UNE entrée quand il est refusé plus de 30 fois en 10 minutes, jamais une par refus.
     pub const SERVICE_LOGS_THROTTLED: &str = "service.logs.throttled";
+    /// Une adoption par unité dont l'unité n'est plus relue devient « à confirmer » (HRT-80, BR-ADOPT-027) :
+    /// auteur le système, cible le service par sa clé. Type d'action « Gestion des services ».
+    pub const SERVICE_ADOPTION_TO_CONFIRM: &str = "service.adoption.to_confirm";
+    /// Une adoption tombe sans qu'aucun compte agisse : délai de confirmation écoulé, unité ou conteneur
+    /// disparu (HRT-80, BR-ADOPT-017, BR-ADOPT-027). Auteur le système, cible le service par sa clé.
+    pub const SERVICE_ADOPTION_LAPSED: &str = "service.adoption.lapsed";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 32] = [
+    pub const ALL: [&str; 34] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -105,6 +111,8 @@ pub mod action {
         SERVICE_EXTERNAL_READ,
         SERVICE_LOGS_READ,
         SERVICE_LOGS_THROTTLED,
+        SERVICE_ADOPTION_TO_CONFIRM,
+        SERVICE_ADOPTION_LAPSED,
     ];
 }
 

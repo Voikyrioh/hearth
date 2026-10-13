@@ -107,7 +107,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", onDocumentPoin
 }
 
 .multi__label {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 

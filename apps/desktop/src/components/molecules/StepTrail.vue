@@ -70,7 +70,7 @@ defineProps<{ steps: string[]; current: number; label: string }>();
 }
 
 .trail__step--done {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .trail__step--done .trail__puck {

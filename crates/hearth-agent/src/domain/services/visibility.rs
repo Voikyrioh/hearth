@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 
 use super::key::{KeyKind, ServiceKey};
-use super::unit::UnitLookup;
+use super::unit::{UnitLookup, UnitName};
 
 /// Qui a adopté un service, et quand.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,14 +90,22 @@ pub fn lapsed(
 }
 
 /// `BR-ADOPT-017` : l'adoption d'un service lancé par une unité tient tant que l'unité existe pour le
-/// système. L'unité a disparu quand le système ne la connaît plus (`NotLoaded` : supprimée, masquée, ou
-/// transitoire arrêtée, que systemd décharge) ET qu'aucun conteneur ne la porte. Un simple arrêt d'une
+/// système. L'unité a disparu quand le système ne la connaît plus (`NotLoaded` : supprimée, ou
+/// transitoire arrêtée, que systemd décharge ; une unité masquée est `Unavailable`) ET qu'aucun conteneur ne la porte. Un simple arrêt d'une
 /// unité écrite dans un fichier la laisse `loaded/inactive` : elle existe, l'adoption reste. Une réponse
 /// que le système ne donne pas ou une unité qui ne se charge pas (`Unavailable` : erreur, masquée,
 /// invalide, délai) ne dit rien : jamais une adoption ne tombe dessus. Une lecture ne suffit pas :
 /// voir [`UNIT_GONE_READS`].
 pub fn unit_is_gone(lookup: UnitLookup, container_present: bool) -> bool {
     lookup == UnitLookup::NotLoaded && !container_present
+}
+
+/// `BR-ADOPT-027` : la lecture d'une unité montre-t-elle qu'elle existe ? Seulement si le système la
+/// connaît (`Loaded`), ou s'il ne la connaît pas mais qu'un conteneur la porte : une réponse muette
+/// (`Unavailable`) ou « introuvable » sans conteneur n'ouvre pas une adoption chargée au démarrage.
+pub fn unit_answered(lookup: UnitLookup, container_present: bool) -> bool {
+    matches!(lookup, UnitLookup::Loaded(_))
+        || (lookup == UnitLookup::NotLoaded && container_present)
 }
 
 /// `BR-ADOPT-017` : nombre de lectures « introuvable, sans conteneur » CONSÉCUTIVES (espacées de deux
@@ -108,6 +116,31 @@ pub const UNIT_GONE_READS: u32 = 3;
 /// `BR-ADOPT-017` : `consecutive` lectures « disparue » de suite suffisent-elles à faire tomber ?
 pub fn gone_long_enough(consecutive: u32) -> bool {
     consecutive >= UNIT_GONE_READS
+}
+
+/// `BR-ADOPT-027` : combien de temps une adoption par unité qu'on ne relit plus attend sa confirmation
+/// avant de tomber.
+pub const CONFIRMATION_TTL: time::Duration = time::Duration::hours(24);
+
+/// `BR-ADOPT-027` : les adoptions par unité dont l'unité n'a PAS été relue à ce passage. Le système ne
+/// donne aucun repère qui distingue l'unité d'origine d'une homonyme créée plus tard (voir la fiche) :
+/// tant qu'on ne la relit pas, on ne peut pas savoir si elle existe encore, ni si c'est la même. Ces
+/// adoptions n'ouvrent plus aucun droit tant qu'un compte qui a le droit ne les a pas confirmées.
+pub fn unread_unit_adoptions<'a>(
+    adopted: impl IntoIterator<Item = &'a ServiceKey>,
+    read: &HashSet<UnitName>,
+) -> Vec<ServiceKey> {
+    adopted
+        .into_iter()
+        .filter(|key| key.kind() == KeyKind::Unit)
+        .filter(|key| key.unit().is_none_or(|unit| !read.contains(&unit)))
+        .cloned()
+        .collect()
+}
+
+/// `BR-ADOPT-027` : une adoption « à confirmer » depuis `since` tombe-t-elle à `now` ?
+pub fn confirmation_expired(since: OffsetDateTime, now: OffsetDateTime) -> bool {
+    now - since >= CONFIRMATION_TTL
 }
 
 #[cfg(test)]
@@ -184,7 +217,7 @@ mod tests {
         // Un simple arrêt : l'unité est chargée et inactive, elle existe.
         assert!(!unit_is_gone(stopped_file_unit, false));
         assert!(!unit_is_gone(stopped_file_unit, true));
-        // Supprimée, masquée ou transitoire arrêtée : le système ne la connaît plus.
+        // Supprimée ou transitoire arrêtée : le système ne la connaît plus (une masquée est `Unavailable`).
         assert!(unit_is_gone(UnitLookup::NotLoaded, false));
         // Un conteneur la porte encore : elle existe pour lui.
         assert!(!unit_is_gone(UnitLookup::NotLoaded, true));
@@ -216,5 +249,44 @@ mod tests {
         let mut none = lapsed(&adopted, &HashSet::new());
         none.sort();
         assert_eq!(none, vec![key("c_aaaa"), key("c_bbbb")]);
+    }
+
+    #[test]
+    fn an_adoption_by_unit_whose_unit_was_not_read_is_listed_and_one_without_a_unit_never_is() {
+        let read_unit = key("u_docker-a.service");
+        let unread_unit = key("u_docker-b.service");
+        let container = key("c_aaaa");
+        let keys = [read_unit.clone(), unread_unit.clone(), container];
+        let read: HashSet<UnitName> = read_unit.unit().into_iter().collect();
+        assert_eq!(unread_unit_adoptions(&keys, &read), vec![unread_unit]);
+        assert!(unread_unit_adoptions(&keys, &HashSet::new()).len() == 2);
+    }
+
+    #[test]
+    fn a_confirmation_that_never_comes_expires_after_the_bounded_delay_and_not_before() {
+        let since = OffsetDateTime::UNIX_EPOCH;
+        assert!(!confirmation_expired(since, since));
+        assert!(!confirmation_expired(
+            since,
+            since + CONFIRMATION_TTL - time::Duration::seconds(1)
+        ));
+        assert!(confirmation_expired(since, since + CONFIRMATION_TTL));
+        const { assert!(CONFIRMATION_TTL.whole_hours() <= 24 * 7) };
+    }
+
+    #[test]
+    fn only_a_loaded_unit_or_a_unit_a_container_carries_answers_for_a_loaded_adoption() {
+        use crate::domain::services::unit::{UnitActivity, UnitStatus};
+        let loaded = UnitLookup::Loaded(UnitStatus {
+            activity: UnitActivity::Inactive,
+            auto_restart: false,
+            restarts: false,
+            timeout_stop_s: None,
+        });
+        assert!(unit_answered(loaded, false));
+        assert!(unit_answered(UnitLookup::NotLoaded, true));
+        assert!(!unit_answered(UnitLookup::NotLoaded, false));
+        assert!(!unit_answered(UnitLookup::Unavailable, false));
+        assert!(!unit_answered(UnitLookup::Unavailable, true));
     }
 }

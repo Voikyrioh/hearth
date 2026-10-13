@@ -336,7 +336,7 @@ defineExpose({ rows });
   scrollbar-gutter: stable;
   height: var(--audit-row-height);
   border-bottom: var(--border-width) solid var(--bd);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
   letter-spacing: var(--ls-label);
@@ -417,7 +417,7 @@ defineExpose({ rows });
 }
 
 .table__muted {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .table__sr {

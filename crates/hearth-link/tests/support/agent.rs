@@ -15,8 +15,8 @@ use async_trait::async_trait;
 use fake_engine::FakeEngine;
 use hearth_agent::app::{self, Adapters, EngineParts, Metering, RunningAgent, Services};
 use hearth_agent::application::ports::{
-    Clock as AgentClock, GpuProbe, HashError, HostDescription, HostEnvironment, NewAdoption,
-    PasswordHasher, ProbeError, SystemProbe,
+    Clock as AgentClock, ContainerRef, GpuProbe, HashError, HostDescription, HostEnvironment,
+    NewAdoption, PasswordHasher, ProbeError, ServiceSupervisor, SystemProbe,
 };
 use hearth_agent::application::services::{AdoptionLookup, EngineTimings};
 use hearth_agent::domain::accounts::{PlainPassword, Role, ServicesRight, Username};
@@ -27,6 +27,7 @@ use hearth_agent::domain::machine::{
 use hearth_agent::domain::metrics::{DiskUsage, GpuReading, MemoryUsage, SystemSample};
 use hearth_agent::domain::secret::Secret as AgentSecret;
 use hearth_agent::domain::services::ServiceKey;
+use hearth_agent::domain::services::{UnitLookup, UnitName};
 use hearth_agent::entrypoint::ws::StreamSettings;
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
 use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
@@ -230,6 +231,50 @@ fn engine_timings() -> EngineTimings {
     }
 }
 
+/// Un superviseur de services fixe : chaque conteneur désigné appartient à l'unité donnée, que le système
+/// dit toujours « inconnue de nous » (`Unavailable` : l'adoption par unité ne tombe jamais dessus). Sert à
+/// adopter par une clé `u_` dont le nom d'unité demande un encodage dans le chemin.
+pub struct StaticSupervisor {
+    owners: std::collections::HashMap<String, UnitName>,
+}
+
+impl StaticSupervisor {
+    pub fn new(owners: &[(&str, &str)]) -> Arc<Self> {
+        Arc::new(Self {
+            owners: owners
+                .iter()
+                .map(|(container, unit)| {
+                    (
+                        (*container).to_owned(),
+                        UnitName::parse(unit).expect("nom d'unité valide"),
+                    )
+                })
+                .collect(),
+        })
+    }
+}
+
+#[async_trait]
+impl ServiceSupervisor for StaticSupervisor {
+    async fn owners(
+        &self,
+        containers: &[ContainerRef],
+    ) -> std::collections::HashMap<String, UnitName> {
+        containers
+            .iter()
+            .filter_map(|container| {
+                self.owners
+                    .get(&container.id)
+                    .map(|unit| (container.id.clone(), unit.clone()))
+            })
+            .collect()
+    }
+
+    async fn unit(&self, _unit: &UnitName) -> UnitLookup {
+        UnitLookup::Unavailable
+    }
+}
+
 pub struct TestAgent {
     dir: tmp::TestDir,
     db: Database,
@@ -242,6 +287,7 @@ pub struct TestAgent {
     /// Le faux moteur de conteneurs de l'agent (HRT-62), s'il y en a un : sans lui, le pilotage des
     /// services est désactivé comme avant.
     engine: Option<Arc<FakeEngine>>,
+    supervisor: Option<Arc<dyn ServiceSupervisor>>,
     pub addr: SocketAddr,
 }
 
@@ -266,6 +312,15 @@ impl TestAgent {
     pub async fn install_full(
         updating: Option<UpdatingFactory>,
         engine: Option<Arc<FakeEngine>>,
+    ) -> Self {
+        Self::install_supervised(updating, engine, None).await
+    }
+
+    /// Comme `install_full`, avec ce superviseur de services (sans lui : `NoSupervisor`).
+    pub async fn install_supervised(
+        updating: Option<UpdatingFactory>,
+        engine: Option<Arc<FakeEngine>>,
+        supervisor: Option<Arc<dyn ServiceSupervisor>>,
     ) -> Self {
         let dir = tmp::tempdir().unwrap();
         let db = Database::open(dir.path()).await.unwrap();
@@ -295,6 +350,7 @@ impl TestAgent {
             running: None,
             updating,
             engine,
+            supervisor,
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         };
         agent.start().await;
@@ -331,7 +387,9 @@ impl TestAgent {
                 Arc::new(hearth_agent::infrastructure::system::ProcBootInfo::new()),
                 EngineParts {
                     engine: engine.clone(),
-                    supervisor: Arc::new(hearth_agent::infrastructure::supervisor::NoSupervisor),
+                    supervisor: self.supervisor.clone().unwrap_or_else(|| {
+                        Arc::new(hearth_agent::infrastructure::supervisor::NoSupervisor)
+                    }),
                     host: Arc::new(DebianHost),
                     timings: engine_timings(),
                     log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),

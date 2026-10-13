@@ -36,9 +36,13 @@ describe("« moi » vient de l'agent", () => {
     const { wrapper } = await bootAsCapitals();
     const own = wrapper.get('[data-account="marie"]');
     expect(own.text()).toContain("toi");
-    expect(own.findAll("td button").map((b) => b.text())).toEqual(["Changer mon mot de passe"]);
+    expect(own.findAll("td button:not([data-services-right])").map((b) => b.text())).toEqual([
+      "Changer mon mot de passe",
+    ]);
     // Les autres lignes gardent leurs quatre actions.
-    expect(wrapper.get('[data-account="paul"]').findAll("td button")).toHaveLength(4);
+    expect(
+      wrapper.get('[data-account="paul"]').findAll("td button:not([data-services-right])"),
+    ).toHaveLength(4);
     wrapper.unmount();
   });
 
