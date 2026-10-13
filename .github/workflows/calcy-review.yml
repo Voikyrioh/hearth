@@ -1,0 +1,41 @@
+name: calcy-review
+
+# Trigger of the automatic review of the owner's own branches (ADR-0056, runbook
+# docs/runbooks/mettre-en-service-calcy.md). This file does NOTHING sensitive and protects NOTHING.
+#
+# Read this before changing anything:
+# - On a `push`, GitHub runs THIS file as it is in the pushed commit: whoever can push a branch writes
+#   their own version of it, filters included. The `if:` below only saves CI minutes (it keeps the job
+#   from starting for pushes that are not the owner's); it is not a barrier.
+# - The barrier is the federation rule on the Anthropic side. It only accepts a token whose claim
+#   `job_workflow_ref` is `Voikyrioh/hearth/.github/workflows/calcy-reusable.yml@refs/heads/main`, and
+#   that value exists only when `calcy-reusable.yml` is called BY REFERENCE TO `main`, as the job
+#   below does. A local reference (`./.github/...`) would follow the pushed branch: never use one.
+# - The trigger is `push` on purpose (the rule also requires `event_name=push`). NEVER switch it to
+#   `pull_request` or `pull_request_target`.
+# - No `concurrency` here: it is in the called workflow (the same group in both would deadlock).
+# To turn it off: `gh workflow disable calcy-review.yml` (see the runbook).
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - "dependabot/**"
+
+permissions: {}
+
+jobs:
+  review:
+    # Minutes saver only (see above). The called workflow repeats the checks that matter, from main.
+    if: >-
+      github.repository == 'Voikyrioh/hearth'
+      && github.actor == 'Voikyrioh'
+      && github.event.repository.fork == false
+      && vars.CALCY_MODEL != ''
+    # A called workflow keeps or reduces these, never raises them. `id-token: write` must be granted here
+    # for the called job to be able to request a token.
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    uses: Voikyrioh/hearth/.github/workflows/calcy-reusable.yml@main
