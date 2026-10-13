@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
@@ -8,6 +8,7 @@ import Callout from "@/components/molecules/Callout.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import ServiceRightReason from "@/components/molecules/ServiceRightReason.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
+import ServiceDetail from "@/components/organisms/ServiceDetail.vue";
 import ServiceTable from "@/components/organisms/ServiceTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useNow } from "@/composables/useNow";
@@ -15,8 +16,9 @@ import { usePageData } from "@/composables/usePageData";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
-import { getLinkBridge } from "@/link";
+import { getLinkBridge, type ServiceInfo } from "@/link";
 import { countServices } from "@/services/counts";
+import { openedService } from "@/services/detail";
 import { shortAge } from "@/services/format";
 import { show } from "@/services/view";
 import { useServicesStore } from "@/stores/services";
@@ -26,6 +28,9 @@ import { useServicesStore } from "@/stores/services";
 // à l'administrateur (BR-ENGINE-016). Aucun bouton d'action sur un service. Quand le lien n'est pas
 // « Connecté », le gabarit du serveur grise et date la page (`StaleSurface`) : un seul mécanisme à la fois,
 // donc la mention « Liste du moteur d'il y a… » n'apparaît que lien bon (BR-SVC-017, 018).
+// Le détail d'un service (HRT-63) s'ouvre à côté de la liste : le service ouvert est dans l'adresse
+// (`?service={clé}`, la clé STABLE, jamais le nom), donc un retour arrière ou un rechargement le retrouve. Il
+// partage le grisé et la datation de la liste (même conteneur) : le détail ouvert ne ment jamais sur son âge.
 const { server, isConnected, isAdmin } = useCurrentServer();
 const store = useServicesStore();
 const now = useNow();
@@ -34,8 +39,41 @@ const now = useNow();
 // consommeront `rights.gate`, `rights.reasonId` et `ServiceRightReason` ; en attendant la raison est dite une fois,
 // sous la carte du moteur, pour un compte qui ne peut pas agir (BR-GRANT-012, 014, 016).
 const rights = useServiceRights();
-const rightsNotice = computed(() =>
-  ["denied", "old-agent", "failed"].includes(rights.gate.value.kind),
+const route = useRoute();
+const router = useRouter();
+
+/** Le service dont le détail est ouvert : sa clé stable, dans l'adresse. Une valeur illisible vaut « aucun ». */
+const selectedKey = computed(() => {
+  const raw = route.query.service;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === "string" && value !== "" && value.length <= 300 ? value : null;
+});
+/** Le détail a été ouvert par un geste dans cette fenêtre (pas par l'adresse) : le focus va à son titre. */
+const openedByGesture = ref(false);
+const table = ref<InstanceType<typeof ServiceTable> | null>(null);
+
+function openDetail(key: string) {
+  openedByGesture.value = true;
+  void router.push({ query: { ...route.query, service: key } });
+}
+
+async function closeDetail() {
+  const key = selectedKey.value;
+  const { service: _closed, ...rest } = route.query;
+  await router.push({ query: rest });
+  openedByGesture.value = false;
+  await nextTick();
+  if (key) void table.value?.focusKey(key);
+}
+
+// La raison d'un droit manquant est dite une fois : sous la carte du moteur, ou dans la section des variables quand
+// un détail est ouvert (même identifiant, jamais deux fois). Lien coupé : le bandeau du gabarit dit déjà tout, pas de
+// seconde carte (HRT-137).
+const rightsNotice = computed(
+  () =>
+    isConnected.value &&
+    selectedKey.value === null &&
+    ["denied", "old-agent", "failed"].includes(rights.gate.value.kind),
 );
 
 watch(
@@ -97,6 +135,34 @@ const degradedList = computed(() => degraded.value !== null && isConnected.value
 const degradedAge = computed(() =>
   degraded.value?.currentAt != null ? shortAge(now.value - degraded.value.currentAt) : null,
 );
+
+/** Les services de la liste montrée (vivante ou grisée), vide si aucune n'est connue. */
+const listServices = computed<readonly ServiceInfo[]>(() =>
+  list.value.kind === "live" || list.value.kind === "stale" ? list.value.services : [],
+);
+/** La liste est connue (même vide) : sinon on ne peut pas dire qu'un service a disparu. */
+const listKnown = computed(() => list.value.kind !== "none");
+/** La dernière version vue du service ouvert : le détail reste lisible s'il disparaît (BR-SVC-016). */
+const lastSeen = ref<ServiceInfo | null>(null);
+watch(
+  [selectedKey, listServices],
+  ([key, services]) => {
+    if (key === null) {
+      lastSeen.value = null;
+      return;
+    }
+    const found = services.find((service) => service.key === key);
+    if (found) lastSeen.value = found;
+    else if (lastSeen.value && lastSeen.value.key !== key) lastSeen.value = null;
+  },
+  { immediate: true },
+);
+const opened = computed(() =>
+  selectedKey.value === null
+    ? null
+    : openedService(listServices.value, selectedKey.value, listKnown.value, lastSeen.value),
+);
+const engineReady = computed(() => engine.value?.state === "ready");
 
 function recheck() {
   if (server.value) void store.recheck(server.value.id);
@@ -199,33 +265,78 @@ async function openDocs() {
           </template>
         </Callout>
 
-        <template v-if="list.kind === 'live'">
-          <p v-if="degradedList && degradedAge !== null" class="svc__stamp" data-services-stale>
+        <!-- La liste (vivante ou grisée) et, à côté, le détail du service ouvert -->
+        <template
+          v-if="list.kind === 'live' || list.kind === 'stale' || (list.kind === 'empty' && opened)"
+        >
+          <p
+            v-if="list.kind === 'live' && degradedList && degradedAge !== null"
+            class="svc__stamp"
+            data-services-stale
+          >
             <HIcon name="clock" size="sm" />
             {{ t("services.staleList", { age: degradedAge }) }}
           </p>
-          <div :class="['svc__stale', { 'svc__stale--grey': degradedList }]">
-            <ServiceTable :services="list.services" />
+          <p
+            v-else-if="list.kind === 'stale' && staleList && staleAge !== null"
+            class="svc__stamp"
+            data-services-stale
+          >
+            <HIcon name="clock" size="sm" />
+            {{ t("services.staleList", { age: staleAge }) }}
+          </p>
+          <div
+            :class="[
+              'svc__work',
+              {
+                'svc__work--open': opened,
+                'svc__work--grey':
+                  (list.kind === 'live' && degradedList) || (list.kind === 'stale' && staleList),
+              },
+            ]"
+            data-services-work
+          >
+            <div class="svc__list">
+              <ServiceTable
+                v-if="list.kind !== 'empty'"
+                ref="table"
+                :services="listServices"
+                :selected-key="selectedKey"
+                @open="openDetail"
+              />
+              <EmptyState
+                v-else
+                :title="t('services.empty')"
+                :text="t('services.emptyText')"
+                heading="h2"
+                data-services-empty
+              />
+            </div>
+            <div v-if="opened && server" class="svc__detail">
+              <ServiceDetail
+                :key="selectedKey ?? ''"
+                :server-id="server.id"
+                :opened="opened"
+                :gate="rights.gate.value"
+                :reason-id="rights.reasonId"
+                :connected="isConnected"
+                :engine-ready="engineReady"
+                :focus-title="openedByGesture"
+                @back="closeDetail"
+                @open-other="openDetail"
+                @retry-rights="rights.retry()"
+              />
+            </div>
           </div>
         </template>
 
         <EmptyState
           v-else-if="list.kind === 'empty' && !degraded"
           :title="t('services.empty')"
-          text=""
+          :text="t('services.emptyText')"
           heading="h2"
           data-services-empty
         />
-
-        <template v-else-if="list.kind === 'stale'">
-          <p v-if="staleList && staleAge !== null" class="svc__stamp" data-services-stale>
-            <HIcon name="clock" size="sm" />
-            {{ t("services.staleList", { age: staleAge }) }}
-          </p>
-          <div :class="['svc__stale', { 'svc__stale--grey': staleList }]">
-            <ServiceTable :services="list.services" />
-          </div>
-        </template>
       </template>
     </template>
   </div>
@@ -278,15 +389,51 @@ async function openDocs() {
   color: var(--tx2);
 }
 
-.svc__stale {
+/* La liste et le détail à côté (HRT-63) : sous 960 px de zone le détail REMPLACE la liste ; au-dessus, la liste passe
+   en volet compact et le détail, borné par `--detail-max`, prend le reste. Une seule barre de défilement par volet. */
+.svc__work {
+  display: flex;
+  flex: 1 1 0;
+  gap: var(--space-4);
+  min-height: 0;
+  min-width: 0;
+  container: svcwork / inline-size;
+}
+
+.svc__list {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
 
-.svc__stale--grey {
+.svc__work--open .svc__list {
+  flex: 0 1 var(--list-compact-width);
+  min-width: 0;
+}
+
+.svc__detail {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  max-width: var(--detail-max);
+}
+
+.svc__work--grey {
   filter: grayscale(var(--grayscale-stale));
   opacity: var(--opacity-stale);
+}
+
+@container svcwork (max-width: 959px) {
+  .svc__work--open .svc__list {
+    display: none;
+  }
+
+  .svc__work--open .svc__detail {
+    max-width: none;
+  }
 }
 </style>

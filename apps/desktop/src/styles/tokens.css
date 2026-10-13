@@ -169,6 +169,10 @@
   --svc-columns: minmax(260px, 1.5fr) minmax(180px, 1fr) 200px 270px;
   --svc-columns-compact: minmax(180px, 1fr) 190px 220px;
   --svc-puck: 3px;
+  /* Détail d'un service (HRT-63) : liste compacte à côté du détail, détail borné. */
+  --list-compact-width: 418px;
+  --detail-max: 960px;
+  --env-value-max-height: 112px;
   --command-max-height: 160px;
 
   /* États */

@@ -46,7 +46,18 @@
             { "hostPort": 5353, "containerPort": 53, "protocol": "udp", "scope": "local" }
           ],
           "portsOmitted": 3,
-          "hostNetwork": false
+          "hostNetwork": false,
+          "mounts": [
+            { "kind": "folder", "source": "/srv/data", "target": "/data", "readOnly": true }
+          ],
+          "mountsOmitted": 5,
+          "restart": "unless_stopped",
+          "envNames": ["SENTINEL_ENV_NAME"],
+          "envNamesOmitted": 2,
+          "command": ["SENTINEL_COMMAND"],
+          "graceS": 30,
+          "adopted": { "by": "claire", "at": "2026-10-13T08:00:00Z" },
+          "detailsReserved": true
         },
         {
           "key": "c_77e1",
@@ -65,7 +76,16 @@
           "image": { "ref": null, "tag": null, "shortId": "abcdef012345" },
           "ports": [],
           "portsOmitted": 0,
-          "hostNetwork": true
+          "hostNetwork": true,
+          "mounts": [],
+          "mountsOmitted": 0,
+          "restart": "none",
+          "envNames": [],
+          "envNamesOmitted": 0,
+          "command": null,
+          "graceS": null,
+          "adopted": null,
+          "detailsReserved": false
         }
       ]
     }
@@ -111,7 +131,16 @@
             { "hostPort": 4433, "containerPort": 443, "protocol": "unknown", "scope": "unknown" }
           ],
           "portsOmitted": 0,
-          "hostNetwork": false
+          "hostNetwork": false,
+          "mounts": [{ "kind": "unknown", "source": "s", "target": "t", "readOnly": true }],
+          "mountsOmitted": 0,
+          "restart": "unknown",
+          "envNames": [],
+          "envNamesOmitted": 0,
+          "command": null,
+          "graceS": null,
+          "adopted": null,
+          "detailsReserved": false
         }
       ]
     }

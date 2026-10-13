@@ -141,6 +141,9 @@ export class NullLinkBridge implements LinkBridge {
   async readServiceRights(): Promise<never> {
     return this.unavailable();
   }
+  async revealServiceEnv(): Promise<never> {
+    return this.unavailable();
+  }
   async openEngineDocs(): Promise<never> {
     return this.unavailable();
   }

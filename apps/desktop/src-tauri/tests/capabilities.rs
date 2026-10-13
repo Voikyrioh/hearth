@@ -205,6 +205,9 @@ const EXPECTED: &[(&str, &str)] = &[
     ("engineRecheck", "serverId: string"),
     // HRT-78 : le droit « gérer les services » du compte connecté, en lecture seule (aucune commande ne le donne).
     ("readServiceRights", "serverId: string"),
+    // HRT-63 : les valeurs des variables d'UN service (`GET /services/{key}/env`, consignée par l'agent, réservée au
+    // droit) ; la clé du service est le seul paramètre, la route est construite par la liaison.
+    ("revealServiceEnv", "serverId: string, key: string"),
     ("openEngineDocs", ""),
 ];
 
@@ -272,6 +275,7 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "listServicesStates",
     "engineRecheck",
     "readServiceRights",
+    "revealServiceEnv",
     "openEngineDocs",
 ];
 

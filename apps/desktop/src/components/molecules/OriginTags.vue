@@ -9,11 +9,14 @@ import type { ServiceInfo } from "@/link";
 // décrivent le service sans dire qui l'a créé. `inline` : le premier repère, sur la ligne du nom ; sinon, les
 // deux autres, sur la seconde ligne de la cellule.
 const props = defineProps<{
-  service: Pick<ServiceInfo, "origin" | "driver" | "unit" | "composeProject">;
+  service: Pick<ServiceInfo, "origin" | "driver" | "unit" | "composeProject"> &
+    Partial<Pick<ServiceInfo, "adopted">>;
   part: "origin" | "details";
 }>();
 
 const external = computed(() => props.part === "origin" && props.service.origin === "external");
+/** « Adopté » (BR-SVC-003) : le service créé hors de Hearth a été confié à Hearth. */
+const adopted = computed(() => props.part === "origin" && !!props.service.adopted);
 const managed = computed(() =>
   props.part === "details" && props.service.driver === "supervisor" && props.service.unit
     ? t("services.managed", { unit: props.service.unit })
@@ -27,8 +30,11 @@ const compose = computed(() =>
 </script>
 
 <template>
-  <HTag v-if="external">{{ t("services.external") }}</HTag>
-  <template v-else-if="part === 'details'">
+  <template v-if="part === 'origin'">
+    <HTag v-if="external" :title="t('services.externalHelp')">{{ t("services.external") }}</HTag>
+    <HTag v-if="adopted">{{ t("services.adopted") }}</HTag>
+  </template>
+  <template v-else>
     <HTag v-if="managed">{{ managed }}</HTag>
     <HTag v-if="compose">{{ compose }}</HTag>
   </template>

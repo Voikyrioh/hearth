@@ -1,6 +1,7 @@
 import type {
   ServicesEvent as BoundServicesEvent,
   EngineDto,
+  EnvRevealDto,
   ServiceDto,
   ServiceRightsDto,
   ServiceStateDto,
@@ -10,8 +11,8 @@ import type {
  * Le moteur de conteneurs et les services d'un serveur (HRT-62, ADR-0038) : types de l'interface et
  * conversions depuis les types générés (`bindings.ts`). Aucune règle ici : la capacité de l'agent, la
  * fusion des lots et le tri par nom sont faits par la liaison (`hearth-link`), l'interface reçoit toujours
- * un état COMPLET. Ni valeur ni nom de variable d'environnement, ni commande de lancement : le protocole de
- * cette tranche n'en porte pas (lecture seule).
+ * un état COMPLET. Le détail d'un service (HRT-63) porte les NOMS des variables et la commande, jamais une valeur :
+ * les valeurs ne viennent que de `revealServiceEnv`, à la demande.
  */
 
 export type EngineState = EngineDto["state"];
@@ -48,6 +49,24 @@ export interface EngineInfo {
   listCurrentAt: number | null;
 }
 
+/** Un dossier de données monté dans un service. `unknown` : un genre que ce client ne connaît pas. */
+export interface ServiceMount {
+  kind: "folder" | "volume" | "unknown";
+  /** Dossier du serveur, ou nom du volume géré par le moteur. */
+  source: string;
+  target: string;
+  readOnly: boolean;
+}
+
+/** Comment le service redémarre. `unknown` : une façon que ce client ne connaît pas (aucune phrase inventée). */
+export type RestartMode =
+  | "unless_stopped"
+  | "always"
+  | "on_failure"
+  | "none"
+  | "supervisor"
+  | "unknown";
+
 export interface ServicePort {
   hostPort: number;
   containerPort: number;
@@ -81,6 +100,30 @@ export interface ServiceInfo {
   /** Ports publiés coupés par l'agent au-delà de sa borne : comptés, jamais listés (BR-SVC-021). */
   portsOmitted: number;
   hostNetwork: boolean;
+  /** Détail (HRT-63) : dossiers montés, coupés par l'agent au-delà de sa borne (comptés, jamais listés). */
+  mounts: ServiceMount[];
+  mountsOmitted: number;
+  restart: RestartMode;
+  /**
+   * NOMS des variables, jamais une valeur (BR-SVC-008). Texte sensible : jamais dans une trace, un titre ou une
+   * infobulle. Vide aussi quand `detailsReserved`.
+   */
+  envNames: string[];
+  envNamesOmitted: number;
+  /** La commande lancée ; `null` : « Commande de l'image ». Texte sensible. */
+  command: string[] | null;
+  /** Délai d'arrêt en secondes. */
+  graceS: number | null;
+  /** Qui a adopté ce service et quand (ms) ; `null` : service créé par Hearth. */
+  adopted: { by: string; at: number | null } | null;
+  /** Service adopté dont la commande et les noms de variables sont réservés au compte connecté (BR-ADOPT-015). */
+  detailsReserved: boolean;
+}
+
+/** Une variable révélée par un compte qui a le droit (BR-SVC-009). Gardée en mémoire le temps de l'affichage, jamais écrite. */
+export interface EnvVariable {
+  name: string;
+  value: string;
 }
 
 /**
@@ -148,7 +191,20 @@ export function toService(dto: ServiceDto): ServiceInfo {
     ports: dto.ports.map((port) => ({ ...port })),
     portsOmitted: dto.portsOmitted,
     hostNetwork: dto.hostNetwork,
+    mounts: dto.mounts.map((mount) => ({ ...mount })),
+    mountsOmitted: dto.mountsOmitted,
+    restart: dto.restart,
+    envNames: [...dto.envNames],
+    envNamesOmitted: dto.envNamesOmitted,
+    command: dto.command ? [...dto.command] : null,
+    graceS: dto.graceS,
+    adopted: dto.adopted ? { by: dto.adopted.by, at: parseDate(dto.adopted.at) } : null,
+    detailsReserved: dto.detailsReserved,
   };
+}
+
+export function toEnvVariables(dto: EnvRevealDto): EnvVariable[] {
+  return dto.variables.map((variable) => ({ name: variable.name, value: variable.value }));
 }
 
 export function toServicesEvent(dto: BoundServicesEvent): ServicesEvent {

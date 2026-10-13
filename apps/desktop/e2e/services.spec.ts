@@ -402,7 +402,7 @@ test("ports coupés par l'agent : le « +N » les compte sans les lister, le sur
   await expectNoHorizontalScroll(page);
 });
 
-test("clavier : Tab atteint la liste après un défilement à la souris, Entrée lit tous les ports", async ({
+test("clavier : Tab atteint la liste après un défilement à la souris, Entrée ouvre le détail et ses ports", async ({
   page,
 }) => {
   await open(page);
@@ -442,7 +442,7 @@ test("clavier : Tab atteint la liste après un défilement à la souris, Entrée
   const key = await page.evaluate(() => document.activeElement?.getAttribute("data-key"));
   await page.mouse.wheel(0, 52 * 60);
   await expect(page.locator(`[data-row][data-key='${key}']`)).toHaveCount(1);
-  // Fin, puis Entrée : la liste complète des ports est lisible au clavier, Échap rend le focus à la ligne.
+  // Fin, puis Entrée : le détail s'ouvre (HRT-63) et y donne tous les ports au clavier, Échap rend le focus à la ligne.
   await page.keyboard.press("End");
   await expect(page.locator("[data-row][data-key='c_many']")).toBeFocused();
   await expect(page.locator("[data-row][data-key='c_many']")).toHaveAttribute(
@@ -450,13 +450,13 @@ test("clavier : Tab atteint la liste après un défilement à la souris, Entrée
     /30005 vers 5 \(TCP\)/,
   );
   await page.keyboard.press("Enter");
-  const dialog = page.locator("[data-ports-dialog]");
-  await expect(dialog).toBeVisible();
+  const detail = page.locator("[data-detail-ports]");
+  await expect(detail).toBeVisible();
   for (const port of ["30001", "30002", "30003", "30004", "30005"]) {
-    await expect(dialog).toContainText(`${port} vers`);
+    await expect(detail).toContainText(`${port} vers`);
   }
   await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
+  await expect(page.locator("[data-service-detail]")).toHaveCount(0);
   await expect(page.locator("[data-row][data-key='c_many']")).toBeFocused();
 });
 

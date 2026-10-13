@@ -930,6 +930,94 @@ export const fr = {
     // Textes écrits pour ce ticket, absents des specs : à valider avec Voiky.
     waitingTitle: "Aucune information pour l'instant",
     waitingText: "La liste des services s'affichera dès que le serveur sera joignable.",
+    // Textes écrits pour HRT-63 / HRT-137, absents des specs : à valider avec Voiky.
+    adopted: "Adopté",
+    externalHelp: "Lancé en dehors de Hearth. Hearth le suit mais ne l'a pas créé.",
+    otherHelp: "Services en pause, ou dans un état que Hearth ne sait pas nommer.",
+    emptyText:
+      "Hearth affiche ici les services qu'il a créés ou que tu lui as confiés. Installer un service depuis Hearth arrive bientôt.",
+    openRow: "Ouvrir le détail de {name}",
+  },
+  // Le détail d'un service (HRT-63, BR-SVC-007 à 009, 016, 023, 027, 028). Textes de la spec `voir-les-services` et du
+  // design du lot 1, mot pour mot ; les autres sont marqués « hors spec ».
+  serviceDetail: {
+    back: "Retour à la liste",
+    region: "Détail du service {name}",
+    sections: "Sections du service",
+    tabDetail: "Détail",
+    tabLogs: "Journaux",
+    // Hors spec : les journaux d'un service ne sont pas encore branchés dans le client.
+    logsSoon: "Les journaux d'un service arrivent dans une prochaine version de Hearth.",
+    // Hors spec : démarrer, arrêter et redémarrer ne sont pas encore branchés.
+    actionsSoon:
+      "Démarrer, arrêter et redémarrer un service arrivent dans une prochaine version de Hearth.",
+    loading: "Lecture du service…",
+    gone: "Ce service n'existe plus.",
+    goneBack: "Retour à la liste",
+    recreated: "Un service nommé « {name} » existe de nouveau.",
+    openRecreated: "Ouvrir le service {name}",
+    // Hors spec : le service ouvert par une adresse n'a jamais été vu par cet écran, son nom est inconnu.
+    unnamed: "Service inconnu",
+    general: "Général",
+    state: "État",
+    lastStop: "Dernier arrêt",
+    recentRestarts: "Redémarrages récents",
+    created: "Créé le",
+    grace: "{n} secondes",
+    graceOne: "{n} seconde",
+    graceLabel: "Délai d'arrêt",
+    resources: "Ressources : non limitées",
+    exitCode: "Code {code} : {explanation}",
+    exitCodeBare: "Code {code}",
+    exit0: "terminé normalement",
+    exit137: "coupé de force (arrêt forcé ou manque de mémoire)",
+    exit143: "arrêt demandé",
+    imageSection: "Image et commande",
+    image: "Image",
+    command: "Commande",
+    commandOfImage: "Commande de l'image",
+    adoptedNote:
+      "Ce service a été créé hors de Hearth : sa configuration reste celle de son créateur.",
+    adoptedBy: "Adopté par {by} le {date}",
+    // Hors spec : le compte de l'agent n'a pas un nom valide, ou la date manque.
+    adoptedOn: "Adopté le {date}",
+    adoptedByOnly: "Adopté par {by}",
+    reserved: "Réservé aux comptes qui peuvent gérer les services.",
+    ports: "Ports",
+    noPorts: "Aucun port",
+    reachAll: "Joignable depuis : Tout le réseau du serveur",
+    reachLocal: "Joignable depuis : Ce serveur seulement",
+    mounts: "Dossiers de données",
+    noMounts: "Aucun dossier de données",
+    serverFolder: "Dossier du serveur",
+    inService: "Chemin dans le service",
+    volume: "Volume géré par le moteur",
+    readWrite: "Lecture et écriture",
+    readOnly: "Lecture seule",
+    restart: "Redémarrage",
+    restartUnlessStopped: "Redémarre tout seul sauf si tu l'arrêtes",
+    restartAlways: "Redémarre toujours",
+    restartNone: "Ne redémarre pas tout seul",
+    restartSupervisor: "Relancé par le système du serveur",
+    // Hors spec : la spec ne nomme pas ce mode de redémarrage, ni le cas d'un mode inconnu de ce client.
+    restartOnFailure: "Redémarre tout seul seulement s'il s'arrête en erreur",
+    restartUnknown: "Hearth ne reconnaît pas la façon dont ce service redémarre.",
+    env: {
+      title: "Variables d'environnement",
+      reveal: "Révéler les valeurs",
+      hide: "Masquer les valeurs",
+      reading: "Lecture des valeurs…",
+      masked: "Valeurs masquées",
+      visible: "Valeurs visibles",
+      none: "Aucune variable",
+      empty: "(valeur vide)",
+      maskedValue: "valeur masquée",
+      failed: "Impossible de lire les valeurs. Réessaie.",
+      // Hors spec : la section est indisponible tant que le moteur n'est pas prêt.
+      engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
+      // Hors spec : l'agent a coupé la liste au-delà de sa borne.
+      omitted: "et {n} autres non listées",
+    },
   },
   // Le droit de gérer les services (HRT-78, ADR-0041, BR-GRANT-*). Textes de la spécification
   // `2026-10-13-fonctionnelle-droit-de-gerer-les-services`, reprise mot pour mot. Lecture seule : aucun texte ne

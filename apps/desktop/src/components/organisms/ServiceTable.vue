@@ -5,14 +5,7 @@ import HMiddleText from "@/components/atoms/HMiddleText.vue";
 import { useNow } from "@/composables/useNow";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
-import {
-  hasHiddenPorts,
-  imageLabel,
-  loopBand,
-  PORTS_WIDTH,
-  rowLabel,
-  stateLine,
-} from "@/services/format";
+import { imageLabel, loopBand, PORTS_WIDTH, rowLabel, stateLine } from "@/services/format";
 import { anchoredScroll, indexAt, offsetsOf, type RowHeights, windowOf } from "@/services/layout";
 import OriginTags from "../molecules/OriginTags.vue";
 import PortChips from "../molecules/PortChips.vue";
@@ -27,11 +20,16 @@ import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 // visible laisse la ligne repère où elle était. Une ligne est reconnue par sa clé stable, jamais par son
 // index : le focus clavier la suit. Un seul arrêt de tabulation (la ligne active, ou la première ligne visible
 // quand la ligne active est sortie de la fenêtre dessinée : jamais aucun) ; flèches, Début, Fin et pages
-// déplacent la ligne active ; Entrée sur une ligne dont des ports sont cachés derrière « +N » ouvre la fenêtre
-// de tous ses ports. La ligne qui a le focus reste dessinée même hors de la zone visible (un défilement ne rend
+// déplacent la ligne active ; un clic ou Entrée sur une ligne ouvre le détail du service (HRT-63, il emporte
+// tous les ports) ; « +N » ouvre à la souris la fenêtre de tous ses ports. La ligne qui a le focus reste dessinée même hors de la zone visible (un défilement ne rend
 // pas le focus au document). Tout texte est interpolé (jamais du HTML) ; un nom, une image de 255 caractères
 // sont coupés au milieu et complets au survol. Le nom accessible d'une ligne donne tous ses ports.
-const props = defineProps<{ services: readonly ServiceInfo[] }>();
+const props = defineProps<{
+  services: readonly ServiceInfo[];
+  /** La clé du service dont le détail est ouvert (`aria-selected`), `null` : aucun. */
+  selectedKey?: string | null;
+}>();
+const emit = defineEmits<{ open: [key: string] }>();
 
 /** Lignes dessinées au-delà de la zone visible, de chaque côté. */
 const OVERSCAN = 8;
@@ -40,6 +38,8 @@ const FALLBACK_VIEWPORT = 600;
 const FALLBACK_HEIGHTS: RowHeights = { row: 52, alert: 80 };
 /** Largeur de la zone sous laquelle la liste passe en mode compact (même seuil que le `@container` plus bas). */
 const COMPACT_BELOW = 960;
+/** Largeur sous laquelle la liste est un volet à côté du détail : seulement Nom et État (la colonne Ports disparaît). */
+const NARROW_BELOW = 600;
 
 const now = useNow();
 const root = ref<HTMLElement | null>(null);
@@ -54,6 +54,8 @@ const hasFocus = ref(false);
 const firstVisible = ref(0);
 /** Mode compact : la colonne « Image » disparaît, la colonne « Ports » est plus étroite. */
 const compact = ref(false);
+/** Mode volet (détail ouvert à côté) : deux colonnes. */
+const narrow = ref(false);
 const portsOf = ref<ServiceInfo | null>(null);
 let observer: ResizeObserver | null = null;
 let last: { keys: string[]; offsets: number[] } = { keys: [], offsets: [0] };
@@ -76,7 +78,9 @@ const tabStop = computed(() => {
   return Math.max(start, Math.min(end - 1, firstVisible.value));
 });
 const portsWidth = computed(() => (compact.value ? PORTS_WIDTH.compact : PORTS_WIDTH.wide));
-const columnCount = computed(() => (compact.value ? COLUMNS.length - 1 : COLUMNS.length));
+const columnCount = computed(() =>
+  narrow.value ? COLUMNS.length - 2 : compact.value ? COLUMNS.length - 1 : COLUMNS.length,
+);
 
 function readHeights() {
   if (!frame.value) return;
@@ -93,6 +97,7 @@ function layout() {
   const viewport = el.clientHeight > 0 ? el.clientHeight : FALLBACK_VIEWPORT;
   const width = root.value?.clientWidth ?? 0;
   compact.value = width > 0 && width <= COMPACT_BELOW;
+  narrow.value = width > 0 && width <= NARROW_BELOW;
   let window = windowOf(offsets.value, el.scrollTop, viewport, OVERSCAN);
   firstVisible.value = indexAt(offsets.value, el.scrollTop);
   if (hasFocus.value) {
@@ -170,14 +175,16 @@ function onFocusOut(event: FocusEvent) {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  // Entrée sur la LIGNE (pas sur un contrôle dedans) : tous ses ports, quand « +N » en cache.
+  // Entrée (ou Espace) sur la LIGNE, pas sur un contrôle dedans : le détail du service s'ouvre.
   const target = event.target;
-  if (event.key === "Enter" && target instanceof HTMLElement && target.dataset.row !== undefined) {
-    const service = props.services.find((item) => item.key === target.dataset.key);
-    if (service && hasHiddenPorts(service.ports, service.portsOmitted, portsWidth.value)) {
-      portsOf.value = service;
-      event.preventDefault();
-    }
+  if (
+    (event.key === "Enter" || event.key === " ") &&
+    target instanceof HTMLElement &&
+    target.dataset.row !== undefined
+  ) {
+    const key = target.dataset.key;
+    if (key) emit("open", key);
+    event.preventDefault();
     return;
   }
   const index = activeIndex.value;
@@ -217,7 +224,13 @@ const COLUMNS = [
   "services.colPorts",
 ] as const;
 
-defineExpose({ visible });
+/** Rend le focus à la ligne d'un service (retour du détail), même si elle n'est pas dessinée. */
+async function focusKey(key: string) {
+  const index = keys.value.indexOf(key);
+  if (index >= 0) await focusRow(index);
+}
+
+defineExpose({ visible, focusKey });
 </script>
 
 <template>
@@ -236,7 +249,7 @@ defineExpose({ visible });
         <div
           v-for="(key, column) in COLUMNS"
           :key="key"
-          :class="['table__th', { 'table__th--image': column === 1 }]"
+          :class="['table__th', { 'table__th--image': column === 1, 'table__th--ports': column === 3 }]"
           role="columnheader"
         >
           {{ t(key) }}
@@ -255,8 +268,10 @@ defineExpose({ visible });
               role="row"
               :aria-rowindex="index + 2"
               :aria-label="rowLabel(service)"
+              :aria-selected="selectedKey === service.key"
               :tabindex="index === tabStop ? 0 : -1"
               @focus="activeKey = service.key"
+              @click="emit('open', service.key)"
             >
               <div class="cell cell--name" role="gridcell">
                 <span class="name-line">
@@ -390,6 +405,11 @@ defineExpose({ visible });
   height: var(--row-service-alert);
 }
 
+.row {
+  cursor: pointer;
+}
+
+.row[aria-selected="true"],
 .row:hover,
 .row:focus-visible {
   background: var(--card-2);
@@ -498,6 +518,24 @@ defineExpose({ visible });
 
   .image--inline {
     display: inline-flex;
+  }
+}
+
+@container svctable (max-width: 600px) {
+  .table__head,
+  .row {
+    grid-template-columns: minmax(0, 1fr) minmax(120px, 170px);
+  }
+
+  .table__th--ports,
+  .cell--ports {
+    display: none;
+  }
+
+  /* Le repère d'origine ne tient pas sur la ligne : il est dans le nom accessible de la ligne et dans le détail. */
+  .name-line :deep(.tag),
+  .detail-line :deep(.tag) {
+    display: none;
   }
 }
 </style>

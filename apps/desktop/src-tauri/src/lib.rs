@@ -102,6 +102,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             services::commands::list_services_states,
             services::commands::engine_recheck,
             services::commands::read_service_rights,
+            services::commands::reveal_service_env,
             services::commands::open_engine_docs,
         ])
         .typ::<link_dto::ServersEvent>()

@@ -5,7 +5,7 @@ import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
-import type { EngineInfo, ServiceRights, ServicesEvent } from "./services";
+import type { EngineInfo, EnvVariable, ServiceRights, ServicesEvent } from "./services";
 import {
   type SimAccountResult,
   SimulatedAccounts,
@@ -288,6 +288,29 @@ export class SimulatedLinkBridge implements LinkBridge {
   /** Vrai par défaut ; faux : l'agent simulé est d'avant la capacité `service-rights` (BR-GRANT-016). */
   setServiceRightsKnown(serverId: string, known: boolean): void {
     this.accounts.setRightsKnown(serverId, known);
+  }
+
+  /** Les refus de lecture des valeurs faute du droit (l'agent les consigne aussi), par serveur. */
+  readonly refusedReveals: string[] = [];
+
+  async revealServiceEnv(serverId: string, key: string): Promise<EnvVariable[]> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("service env reveal");
+    // Le serveur est l'arbitre (BR-SVC-009) : sans le droit, rien n'est envoyé, quel que soit le client.
+    if (!this.accounts.ownRights(server).granted) {
+      this.refusedReveals.push(serverId);
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    try {
+      return this.services.revealEnv(serverId, key);
+    } catch (error) {
+      if (error instanceof LinkCommandError) throw error;
+      throw this.fail({ kind: "internal" });
+    }
   }
 
   async openEngineDocs(): Promise<void> {
@@ -965,6 +988,17 @@ export class SimulatedLinkBridge implements LinkBridge {
           { hostPort: 8080, containerPort: 80, protocol: "tcp", scope: "all" },
           { hostPort: 8443, containerPort: 443, protocol: "tcp", scope: "all" },
         ],
+        command: ["nginx", "-g", "daemon off;"],
+        mounts: [
+          {
+            kind: "folder",
+            source: "/srv/web/contenu",
+            target: "/usr/share/nginx/html",
+            readOnly: true,
+          },
+          { kind: "volume", source: "web-cache", target: "/var/cache/nginx", readOnly: false },
+        ],
+        graceS: 30,
       },
       {
         key: "c_db",
@@ -972,6 +1006,15 @@ export class SimulatedLinkBridge implements LinkBridge {
         image: { ref: "postgres", tag: "16" },
         since: ago(2 * day),
         ports: [{ hostPort: 5432, containerPort: 5432, protocol: "tcp", scope: "local" }],
+        mounts: [
+          {
+            kind: "folder",
+            source: "/srv/base/donnees",
+            target: "/var/lib/postgresql/data",
+            readOnly: false,
+          },
+        ],
+        restart: "always",
       },
       {
         key: "c_cache",
@@ -1041,6 +1084,17 @@ export class SimulatedLinkBridge implements LinkBridge {
         state: "paused",
         since: ago(30 * 60_000),
       },
+    ]);
+    // Les variables : les noms vont à la liste, les valeurs ne sortent que par la lecture réservée au droit.
+    this.services.setEnv("forge", "c_web", [
+      { name: "SERVER_NAME", value: "forge.exemple" },
+      { name: "WORKERS", value: "4" },
+      { name: "MOT_DE_PASSE_ADMIN", value: "sentinelle-valeur-secrete" },
+      { name: "VIDE", value: "" },
+    ]);
+    this.services.setEnv("forge", "c_db", [
+      { name: "POSTGRES_DB", value: "boutique" },
+      { name: "POSTGRES_PASSWORD", value: "sentinelle-mot-de-passe-base" },
     ]);
     this.services.seed("salon", [], {
       state: "absent",

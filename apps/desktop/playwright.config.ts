@@ -51,6 +51,7 @@ export default defineConfig({
         "hrt38-40.spec.ts",
         "services.spec.ts",
         "services-rights.spec.ts",
+        "hrt63-detail.spec.ts",
         "hrt133-sessions.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
