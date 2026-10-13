@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use hearth_agent::application::ports::{ContainerEngine, EngineError, LogQuery};
 use hearth_agent::domain::services::logs::{
-    LogLine, LogSource, RankTracker, ResumeFilter, Verdict,
+    LogLine, LogSource, RESUME_WINDOW_LINES, RankTracker, ResumeFilter, Verdict,
 };
 use hearth_agent::domain::services::{
     EngineState, Observation, PortProtocol, ProbeOutcome, RunState, classify_probe,
@@ -417,7 +417,9 @@ async fn logs(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefix: 
         let again = read_logs(
             engine,
             &id,
+            // Même forme que `resume_query` de la production : `since` toujours borné par `tail`.
             LogQuery {
+                tail: Some(RESUME_WINDOW_LINES),
                 since_ms: Some(resume_from),
                 ..ALL_LINES
             },
