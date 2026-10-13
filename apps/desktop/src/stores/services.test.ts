@@ -46,6 +46,7 @@ describe("services store", () => {
       kind: "state",
       serverId: "forge",
       seq: first?.seq ?? 0,
+      engineReceivedAt: null,
       engine:
         first?.engine ??
         (() => {
@@ -85,6 +86,69 @@ describe("services store", () => {
     bridge.services.seed("forge", [], { state: "unsupported_engine", name: "Podman Engine" });
     expect(show(store.of("forge"))).toMatchObject({ list: { kind: "none" } });
     store.reset();
+  });
+
+  describe("le repère de réception vient de la liaison, jamais de l'heure du traitement (I4)", () => {
+    it("un état REJOUÉ à l'abonnement garde sa date de réception d'origine", async () => {
+      const { bridge } = freshBridge();
+      const received = Date.now() - 2 * 3_600_000;
+      bridge.services.seed("forge", [{ key: "c_1", name: "a" }], {
+        state: "stopped",
+        listCurrentAt: new Date(received - 30_000).toISOString(),
+        at: new Date(received).toISOString(),
+      });
+      bridge.services.setEngineReceivedAt("forge", received);
+      // La fenêtre arrive après coup : l'état lui est rejoué (même chemin que `list_services_states`).
+      const store = useServicesStore();
+      await store.start();
+      expect(store.of("forge")?.engineReceivedAt).toBe(received);
+      // Moteur non prêt : la liste date de list_current_at (30 s avant la réception), pas du rejeu.
+      expect(show(store.of("forge"))).toMatchObject({
+        list: { kind: "stale", since: received - 30_000 },
+      });
+      store.reset();
+    });
+
+    it("un instantané relu du disque au démarrage garde sa date, ou n'en a aucune (jamais l'heure du chargement)", async () => {
+      const { bridge } = freshBridge();
+      bridge.services.seed("forge", [{ key: "c_1", name: "a" }], { state: "stopped" });
+      bridge.services.setEngineReceivedAt("forge", null);
+      const store = useServicesStore();
+      await store.start();
+      expect(store.of("forge")?.engineReceivedAt).toBeNull();
+      expect(show(store.of("forge"))).toMatchObject({ list: { kind: "stale", since: null } });
+      store.reset();
+    });
+
+    it("un lot qui ne republie pas la vue garde le repère de réception de la liaison", async () => {
+      const { bridge, store } = await started();
+      bridge.services.seed("forge", [{ key: "c_1", name: "a" }]);
+      const first = store.of("forge")?.engineReceivedAt;
+      vi.advanceTimersByTime(20_000);
+      bridge.services.upsert("forge", { key: "c_2", name: "b" });
+      expect(store.of("forge")?.engineReceivedAt).toBe(first);
+      store.reset();
+    });
+
+    it("moteur arrêté depuis peu sur un serveur calme : l'âge part de list_current_at, pas du dernier événement", async () => {
+      const { bridge, store } = await started();
+      // Liste prête, puis trois heures sans aucun lot.
+      bridge.services.seed("forge", [{ key: "c_1", name: "a" }]);
+      vi.advanceTimersByTime(3 * 3_600_000);
+      // Le moteur s'arrête : la vue est dite il y a un instant, la liste était à jour 10 s avant.
+      bridge.services.setEngine("forge", {
+        state: "stopped",
+        listCurrentAt: new Date(Date.now() - 10_000).toISOString(),
+      });
+      const shown = show(store.of("forge"));
+      expect(shown).toMatchObject({ list: { kind: "stale" } });
+      if (shown.kind === "engine" && shown.list.kind === "stale" && shown.list.since !== null) {
+        expect(Date.now() - shown.list.since).toBe(10_000);
+      } else {
+        throw new Error("liste périmée datée attendue");
+      }
+      store.reset();
+    });
   });
 
   it("un lot qui passe le drapeau « liste non relisible » à vrai puis à faux arrive jusqu'à l'affichage", async () => {

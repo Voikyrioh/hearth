@@ -2,6 +2,7 @@
   "supported": {
     "serverId": "forge",
     "seq": 1,
+    "engineReceivedAt": 1790000000000.0,
     "view": {
       "kind": "supported",
       "engine": {
@@ -72,6 +73,7 @@
   "unknown": {
     "serverId": "futur",
     "seq": 1,
+    "engineReceivedAt": null,
     "view": {
       "kind": "supported",
       "engine": {
@@ -117,6 +119,7 @@
   "unsupported": {
     "serverId": "salon",
     "seq": 1,
+    "engineReceivedAt": null,
     "view": { "kind": "unsupported", "agentVersion": "0.1.0" }
   }
 }

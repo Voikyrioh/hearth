@@ -854,6 +854,10 @@ export const fr = {
       access: "sudo usermod -aG docker {account}",
       nixosConfig: "virtualisation.docker.enable = true;",
       nixosAccess: 'users.users.{account}.extraGroups = [ "docker" ];',
+      // Hors spec : le nom reçu n'est pas un nom de compte valide, la commande porte cet emplacement.
+      accountPlaceholder: "<compte-de-l-agent>",
+      accountPlaceholderNote:
+        "Le nom du compte annoncé par le serveur n'est pas valide : remplace {placeholder} par le nom du compte de l'agent.",
     },
   },
   // La liste des services (HRT-62). Textes de la spec `voir-les-services`, mot pour mot.
@@ -868,6 +872,8 @@ export const fr = {
     managed: "Géré par le système ({unit})",
     compose: "Pile Compose {project}",
     noPort: "Aucun port",
+    // Texte de la spec « voir-les-services » (détail), repris tel quel pour la cellule d'un service sur le réseau du serveur.
+    hostNetwork: "Utilise directement le réseau du serveur : aucun port individuel.",
     portMore: "+{n}",
     portLabel: "{host} vers {container} ({protocol})",
     portLabelBare: "{host} vers {container}",
@@ -901,6 +907,9 @@ export const fr = {
     staleList: "Liste du moteur d'il y a {age}",
     portsAlsoOmitted: "et {n} autres non listés",
     portsOnlyOmitted: "{n} non listés",
+    // Hors spec : la fenêtre qui liste tous les ports d'un service (le détail du service n'existe pas encore).
+    portsDialogTitle: "Ports de {name}",
+    portsOpen: "+{n}, voir tous les ports",
     rowOnePort: "1 port",
     rowPorts: "{n} ports",
     // Textes écrits pour ce ticket, absents des specs : à valider avec Voiky.

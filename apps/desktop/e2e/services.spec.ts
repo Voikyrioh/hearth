@@ -391,12 +391,73 @@ test("ports coupés par l'agent : le « +N » les compte sans les lister, le sur
   );
   const big = page.locator("[data-key='c_big'] .cell--ports");
   await expect(big).toContainText("+40");
-  await expect(big).toHaveAttribute("title", /et 40 autres non listés$/);
+  await expect(big.locator("[data-more-ports]")).toHaveAttribute(
+    "title",
+    /et 40 autres non listés$/,
+  );
   const none = page.locator("[data-key='c_none'] .cell--ports");
   await expect(none).toContainText("+7");
   await expect(none).not.toContainText("Aucun port");
-  await expect(none).toHaveAttribute("title", "7 non listés");
+  await expect(none.locator("[data-more-ports]")).toHaveAttribute("title", "7 non listés");
   await expectNoHorizontalScroll(page);
+});
+
+test("clavier : Tab atteint la liste après un défilement à la souris, Entrée lit tous les ports", async ({
+  page,
+}) => {
+  await open(page);
+  await sim(page, (s) => {
+    s.services.generate("forge", 200);
+    s.services.upsert("forge", {
+      key: "c_many",
+      name: "zz-beaucoup-de-ports",
+      ports: [
+        { hostPort: 30001, containerPort: 1, protocol: "tcp", scope: "all" },
+        { hostPort: 30002, containerPort: 2, protocol: "tcp", scope: "all" },
+        { hostPort: 30003, containerPort: 3, protocol: "tcp", scope: "all" },
+        { hostPort: 30004, containerPort: 4, protocol: "tcp", scope: "all" },
+        { hostPort: 30005, containerPort: 5, protocol: "tcp", scope: "all" },
+      ],
+    });
+  });
+  const rows = page.locator("[data-row]");
+  await expect(rows.first()).toBeVisible();
+  // Défilement à la souris : la ligne active d'origine sort de la zone dessinée.
+  await page.locator(".table__scroll").hover();
+  await page.mouse.wheel(0, 52 * 120);
+  await expect(page.locator("[data-row][data-key='c_0000']")).toHaveCount(0);
+  // Une ligne reste un arrêt de tabulation : Tab depuis le bouton « Vérifier » ou le début de la page l'atteint.
+  await page.locator(".layout__content").evaluate((el) => (el as HTMLElement).focus?.());
+  await page.keyboard.press("Tab");
+  let guard = 0;
+  while (
+    guard < 40 &&
+    !(await page.evaluate(() => document.activeElement?.hasAttribute("data-row")))
+  ) {
+    await page.keyboard.press("Tab");
+    guard += 1;
+  }
+  expect(await page.evaluate(() => document.activeElement?.hasAttribute("data-row"))).toBe(true);
+  // La ligne qui a le focus reste dans le document même si la molette l'éloigne encore.
+  const key = await page.evaluate(() => document.activeElement?.getAttribute("data-key"));
+  await page.mouse.wheel(0, 52 * 60);
+  await expect(page.locator(`[data-row][data-key='${key}']`)).toHaveCount(1);
+  // Fin, puis Entrée : la liste complète des ports est lisible au clavier, Échap rend le focus à la ligne.
+  await page.keyboard.press("End");
+  await expect(page.locator("[data-row][data-key='c_many']")).toBeFocused();
+  await expect(page.locator("[data-row][data-key='c_many']")).toHaveAttribute(
+    "aria-label",
+    /30005 vers 5 \(TCP\)/,
+  );
+  await page.keyboard.press("Enter");
+  const dialog = page.locator("[data-ports-dialog]");
+  await expect(dialog).toBeVisible();
+  for (const port of ["30001", "30002", "30003", "30004", "30005"]) {
+    await expect(dialog).toContainText(`${port} vers`);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator("[data-row][data-key='c_many']")).toBeFocused();
 });
 
 test("« Vérifier à nouveau » relance la détection ; le retour du moteur est automatique", async ({

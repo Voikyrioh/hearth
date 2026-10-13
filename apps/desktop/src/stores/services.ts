@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref, shallowReactive, watch } from "vue";
 import { logUiError } from "@/errors/report";
 import { getLinkBridge, type ServicesEvent, type Unsubscribe } from "@/link";
-import { type ServerServices, sameEngineView } from "@/services/view";
+import type { ServerServices } from "@/services/view";
 import { useServersStore } from "./servers";
 
 /** Nouvelle tentative d'abonnement aux services : espacement fixe, tant que l'écran est suivi. */
@@ -55,7 +55,7 @@ export const useServicesStore = defineStore("services", () => {
         previous: null,
         lastReady: null,
         receivedAt: now,
-        engineReceivedAt: now,
+        engineReceivedAt: null,
       });
       return;
     }
@@ -67,7 +67,7 @@ export const useServicesStore = defineStore("services", () => {
         : (known?.previous ?? null);
     const lastReady =
       event.engine.state === "ready"
-        ? { engineName: event.engine.name, services: event.services, at: now }
+        ? { engineName: event.engine.name, services: event.services, at: event.engineReceivedAt }
         : (known?.lastReady ?? null);
     entries.set(event.serverId, {
       serverId: event.serverId,
@@ -79,9 +79,9 @@ export const useServicesStore = defineStore("services", () => {
       previous,
       lastReady,
       receivedAt: now,
-      // Un lot qui ne republie pas la vue du moteur la rend identique : son repère de réception reste.
-      engineReceivedAt:
-        known && sameEngineView(known.engine, event.engine) ? known.engineReceivedAt : now,
+      // Le repère de réception est celui de la LIAISON (elle seule sait quand le message est arrivé, y
+      // compris pour un état rejoué ou relu du disque) : jamais l'heure à laquelle ce magasin le traite.
+      engineReceivedAt: event.engineReceivedAt,
     });
   }
 

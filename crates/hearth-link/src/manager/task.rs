@@ -214,6 +214,9 @@ struct Runner {
     machine_info: Option<Arc<MachineResponse>>,
     /// Le moteur et les services tels que le sujet `services` les a dits en dernier, déjà fusionnés (HRT-62).
     services: Option<ServicesState>,
+    /// Quand cette liaison a reçu la vue du moteur de `services` (heure de ce poste, HRT-62) : le repère de
+    /// l'âge de la liste, porté dans l'événement et sur le disque.
+    services_at: Option<WallTime>,
     last_contact: Option<WallTime>,
     published: Option<Status>,
     ping_n: u64,
@@ -239,13 +242,14 @@ impl Runner {
         let (internal_tx, internal_rx) = mpsc::channel(64);
         let last_contact = shared.record().last_contact_at;
         let previous = shared.last_known();
-        let (history, machine_info, services) = match previous {
+        let (history, machine_info, services, services_at) = match previous {
             Some(view) => (
                 view.history.into_iter().collect(),
                 view.machine.map(Arc::new),
                 view.services,
+                view.services_at,
             ),
-            None => (VecDeque::new(), None, None),
+            None => (VecDeque::new(), None, None, None),
         };
         Self {
             persister: Persister::spawn(deps.clone(), shared.id()),
@@ -265,6 +269,7 @@ impl Runner {
             hour_epoch: 0,
             machine_info,
             services,
+            services_at,
             last_contact,
             published: None,
             ping_n: 0,
@@ -448,7 +453,9 @@ impl Runner {
             }
             Ok(Frame::Services(message)) => {
                 self.traffic();
+                let before = self.services.as_ref().map(|state| state.engine.clone());
                 if crate::domain::services::apply(&mut self.services, *message) {
+                    self.stamp_engine(before.as_ref());
                     self.announce_services();
                     self.persist(false);
                 }
@@ -534,8 +541,22 @@ impl Runner {
             self.deps.sink.emit(Event::Services {
                 server: self.id.clone(),
                 state: Arc::new(state.clone()),
+                engine_received_at: self.services_at,
             });
         }
+    }
+
+    /// Date la vue du moteur qui vient d'arriver, ICI où le message est reçu (BR-SVC-018 : l'âge d'une liste
+    /// se mesure depuis sa réception, jamais depuis son rejeu).
+    fn stamp_engine(&mut self, before: Option<&hearth_proto::api::services::EngineView>) {
+        self.services_at = self.services.as_ref().map(|state| {
+            crate::domain::services::engine_received_at(
+                before,
+                &state.engine,
+                self.services_at,
+                self.deps.clock.wall(),
+            )
+        });
     }
 
     /// Ce que l'agent a dit des services à la connexion (HRT-62). Sans la capacité : ce qu'on tenait est
@@ -544,6 +565,7 @@ impl Runner {
         match services {
             ServicesAtConnect::Unsupported { agent_version } => {
                 self.services = None;
+                self.services_at = None;
                 self.refresh_last_known();
                 self.deps.sink.emit(Event::ServicesUnsupported {
                     server: self.id.clone(),
@@ -551,7 +573,9 @@ impl Runner {
                 });
             }
             ServicesAtConnect::Supported(Some(state)) => {
+                let before = self.services.as_ref().map(|known| known.engine.clone());
                 self.services = Some(*state);
+                self.stamp_engine(before.as_ref());
                 self.announce_services();
             }
             // Le sujet est demandé, rien n'est encore arrivé : ce qu'on tient reste, périmé, jusqu'au
@@ -1139,6 +1163,7 @@ impl Runner {
             machine: self.machine_info.as_deref().cloned(),
             history: self.history.iter().cloned().collect(),
             services: self.services.clone(),
+            services_at: self.services_at,
         };
         self.shared.set_last_known(view);
     }

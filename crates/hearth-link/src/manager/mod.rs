@@ -38,6 +38,7 @@ pub use audit::AuditExportFile;
 pub use events::EventStream;
 use events::Fanout;
 pub use reauth::ReauthState;
+pub use services::KnownServices;
 use task::Command;
 
 use crate::adapters::DeviceKey;

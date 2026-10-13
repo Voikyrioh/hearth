@@ -301,6 +301,7 @@ mod tests {
                 machine: None,
                 history: vec![],
                 services: None,
+                services_at: None,
             });
         }
         persister.save_operations(operations(3));
@@ -351,6 +352,7 @@ mod tests {
             machine: None,
             history: vec![],
             services: None,
+            services_at: None,
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let acked = persister.save_operations_acked(operations(1));

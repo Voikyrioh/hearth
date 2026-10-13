@@ -16,15 +16,17 @@ export interface ServerServices {
   services: ServiceInfo[];
   /** L'état du moteur avant l'actuel et la dernière fois qu'il a été vu (message « Ne répond pas »). */
   previous: { state: EngineState; at: number } | null;
-  /** La dernière liste vue quand le moteur était prêt (BR-SVC-018). */
-  lastReady: { engineName: string | null; services: ServiceInfo[]; at: number } | null;
-  /** Quand (horloge de ce poste) le dernier événement est arrivé. */
+  /** La dernière liste vue quand le moteur était prêt (BR-SVC-018) ; `at` : sa réception par la liaison. */
+  lastReady: { engineName: string | null; services: ServiceInfo[]; at: number | null } | null;
+  /** Quand (horloge de ce poste) le dernier événement est arrivé à l'interface (seulement pour « Dernier état connu »). */
   receivedAt: number;
   /**
-   * Quand (horloge de ce poste) la vue du moteur actuelle est arrivée : un lot qui ne la republie pas ne
-   * remet pas ce repère à zéro (l'âge de la liste se mesure depuis la réception de la VUE, pas du lot).
+   * Quand (horloge de ce poste) la LIAISON a reçu la vue du moteur actuelle. Ce repère vient de l'étage qui
+   * reçoit le message : un lot qui ne republie pas la vue ne le remet pas à zéro, un état rejoué ou relu du
+   * disque garde sa vraie date. `null` : inconnue. L'interface ne le pose jamais elle-même à l'arrivée d'un
+   * événement (ce serait l'heure du rejeu, pas celle de la réception).
    */
-  engineReceivedAt: number;
+  engineReceivedAt: number | null;
 }
 
 /**
@@ -43,22 +45,10 @@ export interface Degraded {
  * `max(0, at - listCurrentAt)`, deux dates de l'agent ; le temps écoulé depuis la réception s'y ajoute par
  * l'horloge de ce poste. Agent sans `at` (plus ancien) : comportement d'avant, sa dernière lecture complète.
  */
-export function listCurrentAt(engine: EngineInfo, engineReceivedAt: number): number | null {
+export function listCurrentAt(engine: EngineInfo, engineReceivedAt: number | null): number | null {
   if (engine.at === null) return engine.listReadAt;
-  if (engine.listCurrentAt === null) return null;
+  if (engine.listCurrentAt === null || engineReceivedAt === null) return null;
   return engineReceivedAt - Math.max(0, engine.at - engine.listCurrentAt);
-}
-
-/** Deux vues du moteur identiques (même heure d'agent, même état, même dernière mise à jour de la liste) ? */
-export function sameEngineView(before: EngineInfo | null, now: EngineInfo): boolean {
-  return (
-    before !== null &&
-    before.at !== null &&
-    before.at === now.at &&
-    before.state === now.state &&
-    before.listCurrentAt === now.listCurrentAt &&
-    before.listDegraded === now.listDegraded
-  );
 }
 
 export type ListShown =
@@ -68,7 +58,7 @@ export type ListShown =
   /** Moteur prêt, aucun service (BR-SVC-013). Dégradé : on ne dit pas « aucun service », la liste est inconnue. */
   | { kind: "empty"; degraded: Degraded | null }
   /** Moteur non prêt : la liste précédente, grisée et datée (BR-SVC-018). */
-  | { kind: "stale"; services: ServiceInfo[]; since: number };
+  | { kind: "stale"; services: ServiceInfo[]; since: number | null };
 
 export type Shown =
   /** Première détection : aucune donnée, ou moteur en « Vérification du moteur… » (BR-ENGINE-019). */
@@ -80,6 +70,18 @@ export type Shown =
 /** Le moteur est-il le même qu'à la dernière liste vue ? Sans nom connu (absent, désactivé), non (BR-SVC-018). */
 function sameEngine(known: string | null, current: string | null): boolean {
   return known !== null && current !== null && known === current;
+}
+
+/**
+ * Depuis quand la liste gardée d'un moteur non prêt n'est plus à jour. Agent avec ses dates (HRT-72) : le
+ * dernier moment où il l'a dite à jour (`list_current_at`, qui couvre explicitement « moteur plus joignable »),
+ * ramené à l'horloge de ce poste par la réception de la vue ; JAMAIS la date du dernier événement reçu (sur
+ * un serveur calme, ce serait des heures de trop). Agent sans `at` : la dernière fois que la liaison a vu
+ * le moteur prêt, faute de mieux. Rien de datable : `null`, aucune date n'est inventée.
+ */
+function staleSince(entry: ServerServices, engine: EngineInfo): number | null {
+  if (engine.at !== null) return listCurrentAt(engine, entry.engineReceivedAt);
+  return entry.lastReady?.at ?? entry.engineReceivedAt;
 }
 
 export function show(entry: ServerServices | undefined): Shown {
@@ -108,11 +110,7 @@ export function show(entry: ServerServices | undefined): Shown {
     return {
       kind: "engine",
       engine,
-      list: {
-        kind: "stale",
-        services: entry.services,
-        since: entry.lastReady?.at ?? engine.lastReadyAt ?? entry.receivedAt,
-      },
+      list: { kind: "stale", services: entry.services, since: staleSince(entry, engine) },
     };
   }
   const last = entry.lastReady;

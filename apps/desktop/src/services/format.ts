@@ -38,11 +38,18 @@ export function portLabel(port: ServicePort): string {
   });
 }
 
-/** Largeur estimée d'une puce de port (DM Mono 12 px : 7,4 px par signe, 16 px de marge intérieure, 4 px d'écart). */
-const CHIP_CHAR = 7.4;
-const CHIP_PAD = 20;
-/** Largeur utile de la colonne « Ports » (320 px moins la marge de la cellule) et nombre de lignes de la ligne de service. */
-const PORTS_WIDTH = 296;
+/**
+ * Largeur estimée d'une puce de port (DM Mono 12 px : 7,2 px par signe, 16 px de marge intérieure) et écart entre
+ * deux puces (4 px, seulement ENTRE puces). C'est une estimation de police, pas une mesure.
+ */
+const CHIP_CHAR = 7.2;
+const CHIP_PAD = 16;
+const CHIP_GAP = 4;
+/**
+ * Largeur de la colonne « Ports » selon le mode de la liste (celle des jetons `--svc-columns` : 270 en
+ * large, 220 en compact), et nombre de lignes de la ligne de service. La cellule n'a pas de marge propre.
+ */
+export const PORTS_WIDTH = { wide: 270, compact: 220 } as const;
 const PORTS_LINES = 2;
 const MORE_WIDTH = 40;
 
@@ -51,19 +58,23 @@ const MORE_WIDTH = 40;
  * lignes de la ligne de service avec la puce « +N » quand il en reste ; jamais une puce coupée ni qui déborde.
  * Au moins un port est toujours montré.
  */
-export function visiblePortCount(ports: readonly ServicePort[]): number {
+export function visiblePortCount(
+  ports: readonly ServicePort[],
+  columnWidth: number = PORTS_WIDTH.wide,
+  omitted = 0,
+): number {
   const widths = ports.slice(0, 3).map((port) => portLabel(port).length * CHIP_CHAR + CHIP_PAD);
   for (let shown = widths.length; shown > 1; shown -= 1) {
     const items = widths.slice(0, shown);
-    if (ports.length > shown) items.push(MORE_WIDTH);
+    if (ports.length > shown || omitted > 0) items.push(MORE_WIDTH);
     let lines = 1;
     let used = 0;
     for (const width of items) {
-      if (used > 0 && used + width > PORTS_WIDTH) {
+      if (used > 0 && used + CHIP_GAP + width > columnWidth) {
         lines += 1;
         used = 0;
       }
-      used += width;
+      used += (used > 0 ? CHIP_GAP : 0) + width;
     }
     if (lines <= PORTS_LINES) return shown;
   }
@@ -114,14 +125,44 @@ export const STATE_KEYS = {
   unknown: "services.state.unknown",
 } as const;
 
-/** Le nom accessible d'une ligne : « {nom}, {image}, {état}{, Créé hors de Hearth}{, {n} ports} ». */
+/**
+ * Tous les ports d'un service, dans un texte (nom accessible, fenêtre des ports, infobulle de souris) : la ligne
+ * n'en montre que trois. Ceux que l'agent a coupés au-delà de sa borne sont comptés à la suite, sans être
+ * listés (BR-SVC-021).
+ */
+export function allPortsText(ports: readonly ServicePort[], omitted: number): string {
+  const labels = ports.map(portLabel);
+  if (omitted > 0) {
+    labels.push(
+      t(labels.length > 0 ? "services.portsAlsoOmitted" : "services.portsOnlyOmitted", {
+        n: omitted,
+      }),
+    );
+  }
+  return labels.join(", ");
+}
+
+/** Des ports sont-ils cachés derrière « +N » (tous ne tiennent pas, ou l'agent en a coupé) ? */
+export function hasHiddenPorts(
+  ports: readonly ServicePort[],
+  omitted: number,
+  columnWidth: number = PORTS_WIDTH.wide,
+): boolean {
+  return omitted > 0 || ports.length > visiblePortCount(ports, columnWidth, omitted);
+}
+
+/** Le nom accessible d'une ligne : « {nom}, {image}, {état}{, Créé hors de Hearth}{, réseau du serveur | {n} ports : liste} ». */
 export function rowLabel(service: ServiceInfo): string {
   const parts = [service.name, imageLabel(service), t(STATE_KEYS[service.state])];
   if (service.origin === "external") parts.push(t("services.external"));
   // Les ports coupés par l'agent comptent aussi : le total est un minimum, jamais une liste (BR-SVC-021).
   const ports = service.ports.length + service.portsOmitted;
   if (ports > 0) {
-    parts.push(ports === 1 ? t("services.rowOnePort") : t("services.rowPorts", { n: ports }));
+    // La liste COMPLÈTE : ce que la ligne n'a pas la place de montrer reste lisible au lecteur d'écran.
+    const count = ports === 1 ? t("services.rowOnePort") : t("services.rowPorts", { n: ports });
+    parts.push(`${count} : ${allPortsText(service.ports, service.portsOmitted)}`);
+  } else if (service.hostNetwork) {
+    parts.push(t("services.hostNetwork"));
   }
   return parts.join(", ");
 }

@@ -400,12 +400,18 @@ impl ServicesViewDto {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
 pub struct ServicesEvent {
     #[serde(rename = "serverId")]
     pub server_id: String,
     /// Croît strictement par serveur : l'interface écarte tout événement dont `seq` n'est pas supérieur
     /// au dernier connu (rejeu à l'abonnement compris).
     pub seq: u32,
+    /// Quand (millisecondes depuis l'époque, heure de ce poste) LA LIAISON a reçu la vue du moteur de cet
+    /// état : le repère de l'âge de la liste. Il vient de l'étage qui reçoit le message, donc un état rejoué
+    /// ou relu du disque garde sa vraie date. `None` : inconnue (fichier d'avant ce repère, agent sans la
+    /// capacité) ; l'interface ne la remplace jamais par l'heure à laquelle elle traite l'événement.
+    #[serde(rename = "engineReceivedAt")]
+    pub engine_received_at: Option<f64>,
     pub view: ServicesViewDto,
 }

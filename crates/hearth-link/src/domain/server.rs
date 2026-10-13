@@ -121,6 +121,11 @@ pub struct LastKnown {
     /// d'environnement, ni commande : rien de tel n'arrive sur le disque. Absent d'un fichier d'avant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub services: Option<ServicesState>,
+    /// Quand la liaison a reçu la vue du moteur que porte `services` (heure de CE poste). C'est le repère
+    /// de l'âge de la liste : il vient de l'étage qui reçoit le message, jamais de l'interface (un état
+    /// rejoué ou relu du disque garde sa vraie date de réception). Absent d'un fichier d'avant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub services_at: Option<WallTime>,
 }
 
 impl LastKnown {

@@ -70,7 +70,9 @@ const list = computed(() => engineShown.value?.list ?? { kind: "none" as const }
 /** Moteur non prêt, lien bon : la liste précédente est grisée et datée par CETTE mention ; lien coupé, c'est le gabarit. */
 const staleList = computed(() => list.value.kind === "stale" && isConnected.value);
 const staleAge = computed(() =>
-  list.value.kind === "stale" ? shortAge(now.value - list.value.since) : "",
+  list.value.kind === "stale" && list.value.since !== null
+    ? shortAge(now.value - list.value.since)
+    : null,
 );
 
 /** Moteur prêt, liste non relisible, lien bon : « Impossible de lire les services », liste grisée et datée. */
@@ -201,7 +203,7 @@ async function openDocs() {
         />
 
         <template v-else-if="list.kind === 'stale'">
-          <p v-if="staleList" class="svc__stamp" data-services-stale>
+          <p v-if="staleList && staleAge !== null" class="svc__stamp" data-services-stale>
             <HIcon name="clock" size="sm" />
             {{ t("services.staleList", { age: staleAge }) }}
           </p>

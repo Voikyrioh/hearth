@@ -11,8 +11,10 @@
 //! Rien ici ne porte une valeur ou un nom de variable d'environnement ni une commande : les types du
 //! protocole n'en ont pas dans cette tranche.
 
-use hearth_proto::api::services::{CAPABILITY_SERVICES, ServiceItem, ServicesState};
+use hearth_proto::api::services::{CAPABILITY_SERVICES, EngineView, ServiceItem, ServicesState};
 use hearth_proto::stream::{ServicesMessage, Topic};
+
+use super::time::WallTime;
 
 /// L'agent sert-il le sujet `services` ? Un `/hello` sans `capabilities` (agent ancien) est une liste
 /// vide : non.
@@ -33,6 +35,22 @@ pub fn subscription_topics(capabilities: &[String], audit: bool) -> Vec<Topic> {
         topics.push(Topic::Services);
     }
     topics
+}
+
+/// Quand (heure de CE poste) la vue du moteur actuelle a été reçue. La liaison est l'étage qui reçoit le
+/// message : c'est elle qui date, pas l'interface (un état rejoué ou relu du disque garde sa vraie date de
+/// réception). Une vue identique à la précédente (un lot qui ne la republie pas) garde son repère ; une vue
+/// nouvelle, ou aucun repère connu, prend `now`.
+pub fn engine_received_at(
+    before: Option<&EngineView>,
+    after: &EngineView,
+    stamp: Option<WallTime>,
+    now: WallTime,
+) -> WallTime {
+    match (before, stamp) {
+        (Some(before), Some(stamp)) if before == after => stamp,
+        _ => now,
+    }
 }
 
 /// Clé de tri d'un service : le nom sans tenir compte de la casse, la clé stable départage.
@@ -390,6 +408,28 @@ mod tests {
             ));
             assert_eq!(state, before, "rev {rev}");
         }
+    }
+
+    #[test]
+    fn the_engine_view_is_dated_by_its_reception_and_a_repeated_view_keeps_its_date() {
+        let first = WallTime::from_millis(1_000);
+        let later = WallTime::from_millis(9_000);
+        let view = engine(EngineState::Ready);
+        // Première vue, ou aucun repère connu : l'instant de réception.
+        assert_eq!(engine_received_at(None, &view, None, first), first);
+        assert_eq!(engine_received_at(Some(&view), &view, None, later), later);
+        // Un lot qui republie la même vue ne la rajeunit pas.
+        assert_eq!(
+            engine_received_at(Some(&view), &view, Some(first), later),
+            first
+        );
+        // Une vue différente est datée de sa réception.
+        let mut changed = view.clone();
+        changed.state = EngineState::Stopped;
+        assert_eq!(
+            engine_received_at(Some(&view), &changed, Some(first), later),
+            later
+        );
     }
 
     #[test]

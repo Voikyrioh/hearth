@@ -213,7 +213,9 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
 
         <!-- L'aide : du texte à recopier (administrateur), ou le renvoi à la documentation, sans commande. -->
         <template v-if="help && help.kind === 'docs'">
-          <p v-if="engine.state !== 'absent'">{{ t("engine.unknownDistribution") }}</p>
+          <p v-if="engine.state !== 'absent' && family === null">
+            {{ t("engine.unknownDistribution") }}
+          </p>
           <button type="button" class="engine__link" data-engine-docs @click="emit('docs')">
             {{ t("engine.docsLink") }}
           </button>
@@ -221,6 +223,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
         <div v-else-if="help && isAdmin" class="engine__help">
           <p class="engine__help-title">{{ help.title }}</p>
           <CommandBlock :text="help.text" :config="help.config" />
+          <p v-if="help.note" class="engine__muted" data-help-note>{{ help.note }}</p>
         </div>
 
         <Callout v-if="!isAdmin && needsAdminNote" tone="info" inline data-readonly-note>{{
@@ -242,9 +245,10 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
           t("engine.rechecking")
         }}</span>
       </div>
-      <Callout v-if="recheck === 'failed'" tone="warn" inline>{{
-        t("services.readFailed")
-      }}</Callout>
+      <!-- Spec « Vérifier à nouveau » : en cas d'échec, l'état devient « Ne répond pas » (BR-ENGINE-009). -->
+      <Callout v-if="recheck === 'failed'" tone="warn" inline data-recheck-failed>
+        <strong>{{ t("engine.state.unresponsive") }}</strong> {{ t("engine.unresponsiveText") }}
+      </Callout>
     </template>
   </DashCard>
 </template>

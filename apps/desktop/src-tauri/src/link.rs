@@ -341,8 +341,12 @@ impl LinkRuntime {
                 events.push(event);
                 continue;
             }
-            if let Ok(Some(state)) = self.manager.services_state(&record.id).await {
-                events.push(self.services_book().on_state(&name, &state));
+            if let Ok(Some(known)) = self.manager.services_state(&record.id).await {
+                events.push(self.services_book().on_state(
+                    &name,
+                    &known.state,
+                    known.engine_received_at,
+                ));
             }
         }
         events
@@ -353,8 +357,10 @@ impl LinkRuntime {
     pub async fn resync_services(&self, sink: &dyn UiSink) {
         for record in self.manager.servers() {
             let name = record.id.to_string();
-            if let Ok(Some(state)) = self.manager.services_state(&record.id).await {
-                let event = self.services_book().on_state(&name, &state);
+            if let Ok(Some(known)) = self.manager.services_state(&record.id).await {
+                let event =
+                    self.services_book()
+                        .on_state(&name, &known.state, known.engine_received_at);
                 send(sink, crate::services::dto::EVENT, &event);
             }
         }
@@ -855,8 +861,14 @@ impl LinkRuntime {
             }
             // Le moteur et les services (HRT-62) : l'état complet, déjà fusionné par la liaison, rangé
             // (rejoué à l'abonnement) et annoncé.
-            Event::Services { server, state } => {
-                let event = self.services_book().on_state(server.as_str(), &state);
+            Event::Services {
+                server,
+                state,
+                engine_received_at,
+            } => {
+                let event =
+                    self.services_book()
+                        .on_state(server.as_str(), &state, engine_received_at);
                 send(sink, crate::services::dto::EVENT, &event);
             }
             // Agent sans la capacité : l'interface le dit, `metrics` continue.

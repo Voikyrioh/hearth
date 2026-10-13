@@ -159,6 +159,126 @@ describe("ServiceTable : liste virtualisée et accessible (BR-SVC-019, 021)", ()
   });
 });
 
+describe("ServiceTable : clavier et lecteurs d'écran (I5)", () => {
+  const port = (hostPort: number) => ({
+    hostPort,
+    containerPort: 80,
+    protocol: "tcp" as const,
+    scope: "all" as const,
+  });
+  const tabStops = (wrapper: ReturnType<typeof mount>) =>
+    wrapper.findAll("[data-row]").filter((row) => row.attributes("tabindex") === "0");
+
+  it("après un défilement à la souris qui éloigne la ligne active, une ligne reste l'arrêt de tabulation", async () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: many(200) },
+      attachTo: document.body,
+    });
+    await nextTick();
+    expect(tabStops(wrapper).map((row) => row.attributes("data-key"))).toEqual(["c_0000"]);
+    const scroller = wrapper.get(".table__scroll").element;
+    scroller.scrollTop = 52 * 120;
+    await wrapper.get(".table__scroll").trigger("scroll");
+    await flushPromises();
+    // La ligne 0 n'est plus dessinée : sans repli, aucune ligne ne serait atteignable par Tab.
+    expect(wrapper.find("[data-key='c_0000']").exists()).toBe(false);
+    const stops = tabStops(wrapper);
+    expect(stops).toHaveLength(1);
+    expect(stops[0]?.attributes("data-key")).toBe("c_0120");
+    wrapper.unmount();
+  });
+
+  it("la ligne qui a le focus reste dans le document quand la molette l'éloigne", async () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: many(200) },
+      attachTo: document.body,
+    });
+    await nextTick();
+    await wrapper.get("[role='grid']").trigger("keydown", { key: "ArrowDown" });
+    await flushPromises();
+    expect(document.activeElement?.getAttribute("data-key")).toBe("c_0001");
+    const scroller = wrapper.get(".table__scroll").element;
+    scroller.scrollTop = 52 * 150;
+    await wrapper.get(".table__scroll").trigger("scroll");
+    await flushPromises();
+    const focused = wrapper.find("[data-key='c_0001']");
+    expect(focused.exists()).toBe(true);
+    expect(document.activeElement).toBe(focused.element);
+    // Elle reste l'arrêt de tabulation unique.
+    expect(tabStops(wrapper).map((row) => row.attributes("data-key"))).toEqual(["c_0001"]);
+    wrapper.unmount();
+  });
+
+  it("le nom accessible de la ligne donne TOUS les ports, y compris ceux cachés derrière « +N »", () => {
+    const ports = Array.from({ length: 8 }, (_, index) => port(30000 + index));
+    const wrapper = mount(ServiceTable, { props: { services: [service({ key: "a", ports })] } });
+    const label = wrapper.get("[data-row]").attributes("aria-label") ?? "";
+    for (const shown of ports) expect(label).toContain(`${shown.hostPort} vers 80 (TCP)`);
+    expect(label).toContain("8 ports");
+    wrapper.unmount();
+  });
+
+  it("Entrée sur une ligne dont des ports sont cachés ouvre la liste complète, Fermer rend le focus à la ligne", async () => {
+    const ports = Array.from({ length: 8 }, (_, index) => port(30000 + index));
+    const wrapper = mount(ServiceTable, {
+      props: { services: [service({ key: "a", name: "web", ports })] },
+      attachTo: document.body,
+    });
+    await nextTick();
+    const row = wrapper.get("[data-row]");
+    (row.element as HTMLElement).focus();
+    await row.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    const dialog = document.body.querySelector("[data-ports-dialog]");
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).toContain("Ports de web");
+    for (const shown of ports) expect(dialog?.textContent).toContain(`${shown.hostPort} vers 80`);
+    const close = dialog?.querySelector("button");
+    close?.click();
+    await flushPromises();
+    expect(document.body.querySelector("[data-ports-dialog]")).toBeNull();
+    expect(document.activeElement).toBe(row.element);
+    wrapper.unmount();
+  });
+
+  it("Entrée sur une ligne dont tous les ports tiennent n'ouvre rien", async () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: [service({ key: "a", ports: [port(1)] })] },
+      attachTo: document.body,
+    });
+    await wrapper.get("[data-row]").trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(document.body.querySelector("[data-ports-dialog]")).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("« +N » est un bouton qui ouvre la même liste, et n'est pas un arrêt de tabulation de plus", async () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: [service({ key: "a", ports: [port(1)], portsOmitted: 4 })] },
+      attachTo: document.body,
+    });
+    const more = wrapper.get("[data-more-ports]");
+    expect(more.element.tagName).toBe("BUTTON");
+    expect(more.attributes("tabindex")).toBe("-1");
+    await more.trigger("click");
+    await flushPromises();
+    expect(document.body.querySelector("[data-ports-dialog]")?.textContent).toContain(
+      "4 non listés",
+    );
+    wrapper.unmount();
+  });
+
+  it("service sur le réseau du serveur : la cellule le dit", () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: [service({ key: "a", hostNetwork: true })] },
+    });
+    expect(wrapper.get(".cell--ports").text()).toBe(
+      "Utilise directement le réseau du serveur : aucun port individuel.",
+    );
+    wrapper.unmount();
+  });
+});
+
 describe("ServiceTable : ports coupés par l'agent (BR-SVC-021)", () => {
   const port = (hostPort: number) => ({
     hostPort,
@@ -175,7 +295,7 @@ describe("ServiceTable : ports coupés par l'agent (BR-SVC-021)", () => {
       },
     });
     expect(cell(wrapper).text()).toContain("+2872");
-    expect(cell(wrapper).attributes("title")).toBe(
+    expect(cell(wrapper).get("[data-more-ports]").attributes("title")).toBe(
       "1 vers 80 (TCP), 2 vers 80 (TCP), et 2872 autres non listés",
     );
     wrapper.unmount();
@@ -195,7 +315,7 @@ describe("ServiceTable : ports coupés par l'agent (BR-SVC-021)", () => {
     });
     expect(cell(wrapper).text()).toContain("+7");
     expect(cell(wrapper).text()).not.toContain("Aucun port");
-    expect(cell(wrapper).attributes("title")).toBe("7 non listés");
+    expect(cell(wrapper).get("[data-more-ports]").attributes("title")).toBe("7 non listés");
     wrapper.unmount();
   });
 
@@ -203,7 +323,7 @@ describe("ServiceTable : ports coupés par l'agent (BR-SVC-021)", () => {
     const wrapper = mount(ServiceTable, {
       props: { services: [service({ key: "a", ports: [port(1)] })] },
     });
-    expect(cell(wrapper).attributes("title")).toBeUndefined();
+    expect(cell(wrapper).find("[data-more-ports]").exists()).toBe(false);
     expect(cell(wrapper).text()).not.toContain("+");
     wrapper.unmount();
   });

@@ -6,16 +6,17 @@ import { useNow } from "@/composables/useNow";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
 import {
+  hasHiddenPorts,
   imageLabel,
   loopBand,
-  portLabel,
+  PORTS_WIDTH,
   rowLabel,
   stateLine,
-  visiblePortCount,
 } from "@/services/format";
-import { anchoredScroll, offsetsOf, type RowHeights, windowOf } from "@/services/layout";
+import { anchoredScroll, indexAt, offsetsOf, type RowHeights, windowOf } from "@/services/layout";
 import OriginTags from "../molecules/OriginTags.vue";
 import PortChips from "../molecules/PortChips.vue";
+import PortsDialog from "../molecules/PortsDialog.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 
 // La liste des services (BR-SVC-001, 002, 012, 015, 019, 021) : une grille ARIA (en-têtes de colonnes,
@@ -24,9 +25,12 @@ import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 // la donnée (standard, ou plus haute pour « Redémarre en boucle »), elle n'est jamais mesurée : le défilement
 // ne saute donc pas quand une ligne change d'état, et une ligne qui apparaît ou change au-dessus de la zone
 // visible laisse la ligne repère où elle était. Une ligne est reconnue par sa clé stable, jamais par son
-// index : le focus clavier la suit. Un seul arrêt de tabulation (la ligne active) ; flèches, Début, Fin et
-// pages déplacent la ligne active. Tout texte est interpolé (jamais du HTML) ; un nom, une image de 255
-// caractères sont coupés au milieu et complets au survol.
+// index : le focus clavier la suit. Un seul arrêt de tabulation (la ligne active, ou la première ligne visible
+// quand la ligne active est sortie de la fenêtre dessinée : jamais aucun) ; flèches, Début, Fin et pages
+// déplacent la ligne active ; Entrée sur une ligne dont des ports sont cachés derrière « +N » ouvre la fenêtre
+// de tous ses ports. La ligne qui a le focus reste dessinée même hors de la zone visible (un défilement ne rend
+// pas le focus au document). Tout texte est interpolé (jamais du HTML) ; un nom, une image de 255 caractères
+// sont coupés au milieu et complets au survol. Le nom accessible d'une ligne donne tous ses ports.
 const props = defineProps<{ services: readonly ServiceInfo[] }>();
 
 /** Lignes dessinées au-delà de la zone visible, de chaque côté. */
@@ -34,13 +38,23 @@ const OVERSCAN = 8;
 /** Repli (tests sans mise en page) quand la zone n'a pas de hauteur mesurable. */
 const FALLBACK_VIEWPORT = 600;
 const FALLBACK_HEIGHTS: RowHeights = { row: 52, alert: 80 };
+/** Largeur de la zone sous laquelle la liste passe en mode compact (même seuil que le `@container` plus bas). */
+const COMPACT_BELOW = 960;
 
 const now = useNow();
+const root = ref<HTMLElement | null>(null);
 const scroller = ref<HTMLElement | null>(null);
 const frame = ref<HTMLElement | null>(null);
 const heights = ref<RowHeights>({ ...FALLBACK_HEIGHTS });
 const range = ref({ start: 0, end: 30 });
 const activeKey = ref<string | null>(null);
+/** Le focus clavier est dans la liste : la ligne qui l'a reste dessinée. */
+const hasFocus = ref(false);
+/** La première ligne visible (l'arrêt de tabulation quand la ligne active n'est pas dessinée). */
+const firstVisible = ref(0);
+/** Mode compact : la colonne « Image » disparaît, la colonne « Ports » est plus étroite. */
+const compact = ref(false);
+const portsOf = ref<ServiceInfo | null>(null);
 let observer: ResizeObserver | null = null;
 let last: { keys: string[]; offsets: number[] } = { keys: [], offsets: [0] };
 
@@ -55,6 +69,14 @@ const activeIndex = computed(() => {
   const found = keys.value.indexOf(activeKey.value ?? "");
   return found < 0 ? 0 : found;
 });
+/** Une seule ligne est un arrêt de tabulation : la ligne active si elle est dessinée, sinon la première visible. */
+const tabStop = computed(() => {
+  const { start, end } = range.value;
+  if (activeIndex.value >= start && activeIndex.value < end) return activeIndex.value;
+  return Math.max(start, Math.min(end - 1, firstVisible.value));
+});
+const portsWidth = computed(() => (compact.value ? PORTS_WIDTH.compact : PORTS_WIDTH.wide));
+const columnCount = computed(() => (compact.value ? COLUMNS.length - 1 : COLUMNS.length));
 
 function readHeights() {
   if (!frame.value) return;
@@ -69,7 +91,16 @@ function layout() {
   const el = scroller.value;
   if (!el) return;
   const viewport = el.clientHeight > 0 ? el.clientHeight : FALLBACK_VIEWPORT;
-  const window = windowOf(offsets.value, el.scrollTop, viewport, OVERSCAN);
+  const width = root.value?.clientWidth ?? 0;
+  compact.value = width > 0 && width <= COMPACT_BELOW;
+  let window = windowOf(offsets.value, el.scrollTop, viewport, OVERSCAN);
+  firstVisible.value = indexAt(offsets.value, el.scrollTop);
+  if (hasFocus.value) {
+    const focused = keys.value.indexOf(activeKey.value ?? "");
+    if (focused >= 0) {
+      window = { start: Math.min(window.start, focused), end: Math.max(window.end, focused + 1) };
+    }
+  }
   range.value = window;
   frame.value?.style.setProperty("--svc-total", `${offsets.value.at(-1) ?? 0}px`);
   frame.value?.style.setProperty("--svc-offset", `${offsets.value[window.start] ?? 0}px`);
@@ -82,6 +113,7 @@ onMounted(() => {
   if (scroller.value && typeof ResizeObserver !== "undefined") {
     observer = new ResizeObserver(() => layout());
     observer.observe(scroller.value);
+    if (root.value) observer.observe(root.value);
   }
 });
 onBeforeUnmount(() => observer?.disconnect());
@@ -124,7 +156,30 @@ async function focusRow(index: number) {
   row?.focus();
 }
 
+function onFocusOut(event: FocusEvent) {
+  const grid = event.currentTarget;
+  if (
+    grid instanceof HTMLElement &&
+    event.relatedTarget instanceof Node &&
+    grid.contains(event.relatedTarget)
+  ) {
+    return;
+  }
+  hasFocus.value = false;
+  layout();
+}
+
 function onKeydown(event: KeyboardEvent) {
+  // Entrée sur la LIGNE (pas sur un contrôle dedans) : tous ses ports, quand « +N » en cache.
+  const target = event.target;
+  if (event.key === "Enter" && target instanceof HTMLElement && target.dataset.row !== undefined) {
+    const service = props.services.find((item) => item.key === target.dataset.key);
+    if (service && hasHiddenPorts(service.ports, service.portsOmitted, portsWidth.value)) {
+      portsOf.value = service;
+      event.preventDefault();
+    }
+    return;
+  }
   const index = activeIndex.value;
   const page = Math.max(
     1,
@@ -155,24 +210,6 @@ function onKeydown(event: KeyboardEvent) {
   event.preventDefault();
 }
 
-/**
- * Tous les ports au survol : la ligne n'en montre que trois, sur deux lignes au plus. Ceux que l'agent a coupés
- * au-delà de sa borne sont comptés à la suite, sans être listés (BR-SVC-021).
- */
-function portsTitle(service: ServiceInfo): string | undefined {
-  const omitted = service.portsOmitted;
-  if (service.ports.length <= visiblePortCount(service.ports) && omitted === 0) return undefined;
-  const labels = service.ports.map(portLabel);
-  if (omitted > 0) {
-    labels.push(
-      t(labels.length > 0 ? "services.portsAlsoOmitted" : "services.portsOnlyOmitted", {
-        n: omitted,
-      }),
-    );
-  }
-  return labels.join(", ");
-}
-
 const COLUMNS = [
   "services.colName",
   "services.colImage",
@@ -184,14 +221,16 @@ defineExpose({ visible });
 </script>
 
 <template>
-  <div class="table">
+  <div ref="root" class="table">
     <div
       class="table__grid"
       role="grid"
       :aria-label="t('services.listLabel')"
       :aria-rowcount="services.length + 1"
-      :aria-colcount="COLUMNS.length"
+      :aria-colcount="columnCount"
       @keydown="onKeydown"
+      @focusin="hasFocus = true"
+      @focusout="onFocusOut"
     >
       <div class="table__head" role="row" aria-rowindex="1">
         <div
@@ -216,12 +255,17 @@ defineExpose({ visible });
               role="row"
               :aria-rowindex="index + 2"
               :aria-label="rowLabel(service)"
-              :tabindex="index === activeIndex ? 0 : -1"
+              :tabindex="index === tabStop ? 0 : -1"
               @focus="activeKey = service.key"
             >
               <div class="cell cell--name" role="gridcell">
                 <span class="name-line">
-                  <HMiddleText class="name" :text="service.name" :focusable="false" />
+                  <HMiddleText
+                    class="name"
+                    :text="service.name"
+                    :focusable="false"
+                    preserve-spaces
+                  />
                   <OriginTags :service="service" part="origin" />
                 </span>
                 <span class="detail-line">
@@ -230,20 +274,37 @@ defineExpose({ visible });
                     class="image image--inline"
                     :text="imageLabel(service)"
                     :focusable="false"
+                    preserve-spaces
                   />
                 </span>
               </div>
               <div class="cell cell--image" role="gridcell">
-                <HMiddleText class="image" :text="imageLabel(service)" :focusable="false" />
+                <HMiddleText
+                  class="image"
+                  :text="imageLabel(service)"
+                  :focusable="false"
+                  preserve-spaces
+                />
               </div>
               <div class="cell cell--state" role="gridcell">
                 <ServiceStateBadge :state="service.state" />
                 <span class="state-line">{{ stateLine(service, now) }}</span>
               </div>
-              <div class="cell cell--ports" role="gridcell" :title="portsTitle(service)">
-                <PortChips :ports="service.ports" :omitted="service.portsOmitted" />
+              <div class="cell cell--ports" role="gridcell">
+                <PortChips
+                  :ports="service.ports"
+                  :omitted="service.portsOmitted"
+                  :host-network="service.hostNetwork"
+                  :width="portsWidth"
+                  @more="portsOf = service"
+                />
               </div>
-              <div v-if="service.state === 'restart_loop'" class="band" role="gridcell" aria-colspan="4">
+              <div
+                v-if="service.state === 'restart_loop'"
+                class="band"
+                role="gridcell"
+                :aria-colspan="columnCount"
+              >
                 <HIcon name="alert" size="sm" />
                 <span>{{ loopBand(service) }}</span>
               </div>
@@ -252,6 +313,7 @@ defineExpose({ visible });
         </div>
       </div>
     </div>
+    <PortsDialog :service="portsOf" @close="portsOf = null" />
   </div>
 </template>
 

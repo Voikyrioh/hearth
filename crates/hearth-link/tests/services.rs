@@ -121,7 +121,26 @@ async fn the_last_services_are_the_last_known_view_without_variable_names_nor_co
         .await
         .unwrap()
         .expect("la dernière liste est connue");
-    assert_eq!(names(&known), ["db", "web"]);
+    assert_eq!(names(&known.state), ["db", "web"]);
+    // La liaison date la vue du moteur à sa réception (heure de ce poste) : ce repère accompagne l'état
+    // et part avec lui au disque (un état relu au démarrage garde sa vraie date, pas celle du rejeu).
+    let received = known
+        .engine_received_at
+        .expect("la date de réception de la vue du moteur est connue");
+    let (_, announced) = world
+        .recorder
+        .wait_for(0, "l'état annoncé", WAIT, |event| {
+            services_of(event).is_some()
+        })
+        .await;
+    let Event::Services {
+        engine_received_at, ..
+    } = announced
+    else {
+        unreachable!();
+    };
+    assert!(engine_received_at.is_some());
+    assert!(engine_received_at.unwrap() <= received);
 
     // Ce qui part au fichier `snapshots/{id}.json` : la vue entière, sérialisée comme elle l'est sur le
     // disque. Aucun nom de variable, aucune valeur, aucune commande (ils n'existent pas dans le protocole
@@ -129,6 +148,7 @@ async fn the_last_services_are_the_last_known_view_without_variable_names_nor_co
     let view = world.manager.last_known(&world.id).await.unwrap().unwrap();
     let json = serde_json::to_string(&view).unwrap();
     assert!(json.contains("\"services\""));
+    assert!(json.contains("\"services_at\""), "{json}");
     for forbidden in [
         "\"env\"",
         "\"env_names\"",

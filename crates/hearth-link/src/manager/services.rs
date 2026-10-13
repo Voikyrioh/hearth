@@ -12,16 +12,31 @@ use hearth_proto::api::services::{EngineView, ServicesState};
 
 use super::LinkManager;
 use crate::domain::server::ServerId;
+use crate::domain::time::WallTime;
 use crate::error::LinkError;
 use crate::ports::transport::{ApiRequest, Method};
 
 const RECHECK_PATH: &str = "/engine/recheck";
 
+/// La dernière liste de services connue d'un serveur, avec la date à laquelle la liaison en a reçu la vue du
+/// moteur (heure de ce poste ; `None` pour un fichier écrit avant que ce repère existe : jamais inventée).
+#[derive(Debug, Clone, PartialEq)]
+pub struct KnownServices {
+    pub state: ServicesState,
+    pub engine_received_at: Option<WallTime>,
+}
+
 impl LinkManager {
     /// La dernière liste de services connue de ce serveur, même hors ligne (en mémoire, sinon relue du
     /// disque) ; `None` tant qu'aucune n'a été reçue.
-    pub async fn services_state(&self, id: &ServerId) -> Result<Option<ServicesState>, LinkError> {
-        Ok(self.last_known(id).await?.and_then(|view| view.services))
+    pub async fn services_state(&self, id: &ServerId) -> Result<Option<KnownServices>, LinkError> {
+        Ok(self.last_known(id).await?.and_then(|view| {
+            let engine_received_at = view.services_at;
+            view.services.map(|state| KnownServices {
+                state,
+                engine_received_at,
+            })
+        }))
     }
 
     /// « Vérifier à nouveau » : relance la détection du moteur tout de suite (`POST /engine/recheck`) et

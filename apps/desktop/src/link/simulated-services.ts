@@ -22,6 +22,8 @@ import { LinkCommandError, type Unsubscribe } from "./types";
 interface Book {
   seq: number;
   view: ServicesViewDto;
+  /** Quand la « liaison » a reçu la vue du moteur (comme `hearth-link`), `null` : inconnue. */
+  engineReceivedAt: number | null;
 }
 
 export type PartialEngine = Partial<Omit<EngineDto, "host">> & {
@@ -188,10 +190,21 @@ export class SimulatedServices {
     this.books.delete(serverId);
   }
 
+  /**
+   * Fixe le repère de réception de la vue du moteur (un état relu du disque ou rejoué bien après sa réception) ;
+   * `null` : inconnu, comme pour un fichier écrit avant que ce repère existe.
+   */
+  setEngineReceivedAt(serverId: string, at: number | null): void {
+    const book = this.books.get(serverId);
+    if (book) this.books.set(serverId, { ...book, engineReceivedAt: at });
+  }
+
   /** Le dernier événement d'un serveur, tel que la coquille le rejouerait. */
   current(serverId: string): BoundServicesEvent | undefined {
     const book = this.books.get(serverId);
-    return book ? { serverId, seq: book.seq, view: book.view } : undefined;
+    return book
+      ? { serverId, seq: book.seq, engineReceivedAt: book.engineReceivedAt, view: book.view }
+      : undefined;
   }
 
   // ── Ce que voit le pont ───────────────────────────────────────────────────────────────────────
@@ -237,6 +250,7 @@ export class SimulatedServices {
       : this.service(patch);
     this.books.set(serverId, {
       seq: book?.seq ?? 0,
+      engineReceivedAt: book ? book.engineReceivedAt : this.now(),
       view: {
         kind: "supported",
         engine: view.engine,
@@ -247,14 +261,29 @@ export class SimulatedServices {
 
   private store(serverId: string, view: ServicesViewDto): void {
     const seq = (this.books.get(serverId)?.seq ?? 0) + 1;
-    this.books.set(serverId, { seq, view });
+    this.books.set(serverId, { seq, view, engineReceivedAt: this.received(serverId, view) });
     this.emit(serverId);
+  }
+
+  /** Comme la liaison : une vue du moteur identique à la précédente garde sa date de réception, une autre prend maintenant. */
+  private received(serverId: string, view: ServicesViewDto): number | null {
+    if (view.kind !== "supported") return null;
+    const book = this.books.get(serverId);
+    if (
+      book &&
+      book.view.kind === "supported" &&
+      book.engineReceivedAt !== null &&
+      JSON.stringify(book.view.engine) === JSON.stringify(view.engine)
+    ) {
+      return book.engineReceivedAt;
+    }
+    return this.now();
   }
 
   private announce(serverId: string): void {
     const book = this.books.get(serverId);
     if (!book) return;
-    this.books.set(serverId, { seq: book.seq + 1, view: book.view });
+    this.books.set(serverId, { ...book, seq: book.seq + 1 });
     this.emit(serverId);
   }
 

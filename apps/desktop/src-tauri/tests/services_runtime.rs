@@ -160,9 +160,19 @@ fn full_state() -> ServicesState {
 #[test]
 fn the_event_the_window_receives_is_the_reference_file_field_by_field() {
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
-    let event = book.on_state("forge", &full_state());
+    let received = hearth_link::domain::time::WallTime::from_millis(1_790_000_000_000);
+    let event = book.on_state("forge", &full_state(), Some(received));
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
+        fixture()["supported"]
+    );
+
+    // Rejoué plus tard (fenêtre rechargée, état relu du disque), l'événement garde la date de RÉCEPTION
+    // que la liaison a donnée : la coquille n'en pose jamais une autre à l'heure du rejeu.
+    let replayed = book.current("forge").expect("l'état est rangé");
+    assert_eq!(replayed.engine_received_at, Some(1_790_000_000_000.0));
+    assert_eq!(
+        serde_json::to_value(&replayed).unwrap(),
         fixture()["supported"]
     );
 
@@ -197,7 +207,7 @@ fn a_value_from_a_newer_agent_reaches_the_window_as_unknown() {
     });
     let state: ServicesState = serde_json::from_value(wire).expect("l'instantané est lu");
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
-    let event = book.on_state("futur", &state);
+    let event = book.on_state("futur", &state, None);
     assert_eq!(serde_json::to_value(&event).unwrap(), fixture()["unknown"]);
 }
 
@@ -217,7 +227,7 @@ fn the_event_carries_no_variable_name_value_nor_command() {
         }
     }
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
-    let event = serde_json::to_value(book.on_state("forge", &full_state())).unwrap();
+    let event = serde_json::to_value(book.on_state("forge", &full_state(), None)).unwrap();
     let mut found = Vec::new();
     keys(&event, &mut found);
     for forbidden in [
@@ -400,6 +410,7 @@ async fn a_real_agent_reaches_the_window_through_the_link_and_the_shell_relay() 
     let ServicesEvent {
         server_id,
         seq: replayed,
+        engine_received_at,
         view: ServicesViewDto::Supported { services, .. },
     } = &replay[0]
     else {
@@ -407,6 +418,9 @@ async fn a_real_agent_reaches_the_window_through_the_link_and_the_shell_relay() 
     };
     assert_eq!(server_id, id.as_str());
     assert_eq!(services.len(), 3);
+    // La date de réception vient de la liaison : présente, et jamais postérieure à maintenant.
+    let received = engine_received_at.expect("la liaison date la vue du moteur");
+    assert!(received > 1_700_000_000_000.0);
     assert!(*replayed >= u32::try_from(second["seq"].as_u64().unwrap()).unwrap());
 
     // 4. « Vérifier à nouveau » : l'agent sonde, l'état du moteur revient.

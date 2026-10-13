@@ -88,7 +88,19 @@ export interface ServiceInfo {
  * strictement par serveur : le récepteur écarte tout événement dont `seq` n'est pas supérieur au dernier connu.
  */
 export type ServicesEvent =
-  | { kind: "state"; serverId: string; seq: number; engine: EngineInfo; services: ServiceInfo[] }
+  | {
+      kind: "state";
+      serverId: string;
+      seq: number;
+      /**
+       * Quand (ms, heure de CE poste) la LIAISON a reçu la vue du moteur de cet état : le repère de l'âge de la
+       * liste. Vient de l'étage qui reçoit le message (un état rejoué ou relu du disque garde sa vraie date) ;
+       * `null` : inconnue. L'interface ne la remplace jamais par l'heure à laquelle elle traite l'événement.
+       */
+      engineReceivedAt: number | null;
+      engine: EngineInfo;
+      services: ServiceInfo[];
+    }
   | { kind: "unsupported"; serverId: string; seq: number; agentVersion: string };
 
 /** Une date RFC 3339 en millisecondes ; `null` si absente ou illisible (jamais une date inventée). */
@@ -151,6 +163,7 @@ export function toServicesEvent(dto: BoundServicesEvent): ServicesEvent {
     kind: "state",
     serverId: dto.serverId,
     seq: dto.seq,
+    engineReceivedAt: dto.engineReceivedAt,
     engine: toEngine(dto.view.engine),
     services: dto.view.services.map(toService),
   };
