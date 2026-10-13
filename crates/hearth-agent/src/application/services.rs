@@ -42,6 +42,7 @@ use crate::application::ports::{
     HostEnvironment, MonotonicClock, ServiceRepo, ServiceSupervisor, StoreError, SupervisedRecord,
 };
 use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Target};
+use crate::domain::services::logs::{LogContainer, LogOrigin, LogTarget};
 use crate::domain::services::{
     Announced, Debounce, Derived, EngineProbe, EngineState, Observation, ProbeOutcome, RunState,
     ServiceKey, StartWindow, UnitLookup, UnitName, UnitStatus, classify_probe, compare_names,
@@ -1275,6 +1276,27 @@ impl ServicesRegistry {
         .await
         .map_err(|_| RevealError::JournalUnavailable)?;
         Ok(entries)
+    }
+
+    /// Ce que cette clé désigne en ce moment pour la lecture des journaux (HRT-66) : le conteneur
+    /// COURANT du service, jamais celui qu'on a lu avant (un service géré par le système change de
+    /// conteneur à chaque démarrage, BR-SVC-016). Aucune décision de droit ici : elle est prise par
+    /// `service_logs::LogAccess`.
+    pub fn log_target(&self, key: &ServiceKey) -> LogTarget {
+        let inner = self.lock();
+        let Some(view) = inner.published.get(key) else {
+            return LogTarget::Missing;
+        };
+        if view
+            .supervision
+            .as_ref()
+            .is_some_and(|supervision| !supervision.container_present)
+        {
+            return LogTarget::NoContainer {
+                origin: LogOrigin::External,
+            };
+        }
+        LogTarget::Container(LogContainer::from_observation(&view.observation))
     }
 
     /// Combien attendre avant de retenter une relecture après `failures` échecs de suite : une

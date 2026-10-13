@@ -242,6 +242,8 @@ mod tests {
             env_omitted: 0,
             command: Some(vec![Hidden::new("run"), Hidden::new("--flag=SENTINEL")]),
             stop_timeout_s: None,
+            tty: false,
+            log_driver: None,
         };
         let key = ServiceKey::for_container(&observation.id).expect("key");
         let derived = derive_state(&observation, 0, false);

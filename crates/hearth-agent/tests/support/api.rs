@@ -46,6 +46,16 @@ pub fn state_with(
     env: &Env,
     update: Arc<hearth_agent::application::update::UpdateService>,
 ) -> AppState {
+    let engine = Arc::new(FakeEngine::new());
+    // Le pilotage des services désactivé : ces tests n'ouvrent jamais le socket d'un moteur.
+    let services = ServicesRegistry::new(
+        engine.clone(),
+        &super::engine::TestHost,
+        env.clock.clone(),
+        Arc::new(SystemMonotonic::new()),
+        false,
+        EngineTimings::production(),
+    );
     AppState {
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),
@@ -65,15 +75,13 @@ pub fn state_with(
             Arc::new(SystemMonotonic::new()),
         )),
         update,
-        // Le pilotage des services désactivé : ces tests n'ouvrent jamais le socket d'un moteur.
-        services: ServicesRegistry::new(
-            Arc::new(FakeEngine::new()),
-            &super::engine::TestHost,
+        service_logs: Arc::new(hearth_agent::application::service_logs::ServiceLogs::new(
+            services.clone(),
+            engine,
             env.clock.clone(),
-            Arc::new(SystemMonotonic::new()),
-            false,
-            EngineTimings::production(),
-        ),
+            hearth_agent::application::service_logs::LogSettings::default(),
+        )),
+        services,
         stream: StreamContext::new(StreamSettings::default()),
         erasure_pending: false,
     }

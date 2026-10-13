@@ -12,6 +12,7 @@ pub mod hidden;
 pub mod image;
 pub mod key;
 pub mod limits;
+pub mod logs;
 pub mod state;
 pub mod unit;
 

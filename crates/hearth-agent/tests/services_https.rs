@@ -138,7 +138,7 @@ async fn hello_announces_the_services_capability() {
     assert_eq!(reply.status, 200);
     assert_eq!(
         reply.body["capabilities"],
-        json!(["services", "service-rights"])
+        json!(["services", "service-rights", "service-logs"])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).
     assert_eq!(reply.body["api"], json!({ "min": 1, "max": 1 }));

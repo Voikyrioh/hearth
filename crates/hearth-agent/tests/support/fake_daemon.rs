@@ -1,6 +1,6 @@
 //! Faux démon de conteneurs : un serveur HTTP/1.1 local qui rejoue des réponses de la forme
 //! documentée de l'API du moteur Docker (`/_ping`, `/version`, `/containers/json`,
-//! `/containers/{id}/json`, `/events`), pour éprouver l'adaptateur `bollard` sans moteur.
+//! `/containers/{id}/json`, `/containers/{id}/logs`, `/events`), pour éprouver l'adaptateur `bollard` sans moteur.
 //!
 //! IMPORTANT : ces réponses sont FABRIQUÉES d'après la documentation de l'API du moteur et la forme
 //! connue des réponses de Docker 24 ; elles ne viennent pas d'un vrai moteur. Leur fidélité n'est
@@ -37,6 +37,37 @@ pub struct DaemonContainer {
     pub restart: String,
     pub started_at: String,
     pub finished_at: String,
+    /// `Config.Tty` : les journaux sont un flux brut, sans trames.
+    pub tty: bool,
+    /// `HostConfig.LogConfig.Type` : `none` ne se relit pas (501).
+    pub log_driver: String,
+    /// Ce que le conteneur a écrit (HRT-66).
+    pub logs: Vec<DaemonLog>,
+}
+
+/// Un message de journal du conteneur, comme le moteur le garde : une sortie, une heure, des octets.
+#[derive(Debug, Clone)]
+pub struct DaemonLog {
+    /// 1 : sortie normale, 2 : sortie d'erreur.
+    pub stream: u8,
+    pub at_ms: i64,
+    pub text: Vec<u8>,
+}
+
+/// L'horodatage que le moteur écrit devant chaque message : neuf chiffres fixes, UTC.
+pub fn stamp(at_ms: i64) -> String {
+    let at = time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(at_ms) * 1_000_000)
+        .expect("heure valide");
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}Z",
+        at.year(),
+        u8::from(at.month()),
+        at.day(),
+        at.hour(),
+        at.minute(),
+        at.second(),
+        at.nanosecond()
+    )
 }
 
 impl DaemonContainer {
@@ -70,6 +101,9 @@ impl DaemonContainer {
             } else {
                 "0001-01-01T00:00:00Z".to_owned()
             },
+            tty: false,
+            log_driver: "json-file".to_owned(),
+            logs: Vec::new(),
         }
     }
 }
@@ -119,6 +153,9 @@ struct State {
     vanished: std::collections::BTreeSet<String>,
     /// Les chemins demandés, dans l'ordre (pour vérifier qu'aucune écriture n'est jamais émise).
     requests: Vec<String>,
+    /// Combien de messages de journal le démon a écrits sur le socket, par conteneur (HRT-66) : un
+    /// lecteur qui ne vide pas son socket arrête ce compte.
+    served_logs: BTreeMap<String, usize>,
 }
 
 pub struct FakeDaemon {
@@ -154,6 +191,7 @@ impl FakeDaemon {
             broken_inspection: Default::default(),
             vanished: Default::default(),
             requests: Vec::new(),
+            served_logs: BTreeMap::new(),
         }));
         let (events, _) = broadcast::channel(256);
         let connections: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::default();
@@ -226,6 +264,24 @@ impl FakeDaemon {
         self.lock().containers.remove(id);
     }
 
+    /// Le conteneur écrit une ligne sur cette sortie (1 : normale, 2 : erreur), à cette heure.
+    pub fn push_log(&self, id: &str, stream: u8, at_ms: i64, text: &str) {
+        let mut bytes = text.as_bytes().to_vec();
+        bytes.push(b'\n');
+        self.push_log_raw(id, stream, at_ms, &bytes);
+    }
+
+    /// Le conteneur écrit ces octets tels quels.
+    pub fn push_log_raw(&self, id: &str, stream: u8, at_ms: i64, bytes: &[u8]) {
+        if let Some(container) = self.lock().containers.get_mut(id) {
+            container.logs.push(DaemonLog {
+                stream,
+                at_ms,
+                text: bytes.to_vec(),
+            });
+        }
+    }
+
     pub fn emit(&self, id: &str, action: &str) {
         let line = json!({
             "Type": "container", "Action": action, "status": action, "id": id,
@@ -234,6 +290,11 @@ impl FakeDaemon {
         });
         // Sans abonné, `send` rend une erreur : personne n'écoute, ce n'est pas un échec.
         let _ = self.events.send(format!("{line}\n"));
+    }
+
+    /// Combien de messages de journal de ce conteneur le démon a pu écrire sur le socket de ses lecteurs.
+    pub fn served_logs(&self, id: &str) -> usize {
+        self.lock().served_logs.get(id).copied().unwrap_or(0)
     }
 
     /// Tout ce que les clients ont demandé, `MÉTHODE chemin`.
@@ -265,6 +326,7 @@ fn reason(status: u16) -> &'static str {
         400 => "Bad Request",
         403 => "Forbidden",
         404 => "Not Found",
+        501 => "Not Implemented",
         _ => "Status",
     }
 }
@@ -292,8 +354,9 @@ async fn handle(
         parts.next().unwrap_or_default().to_owned(),
         parts.next().unwrap_or_default().to_owned(),
     );
-    let (path, _query) = target.split_once('?').unwrap_or((target.as_str(), ""));
+    let (path, query) = target.split_once('?').unwrap_or((target.as_str(), ""));
     let path = path.to_owned();
+    let query = query.to_owned();
     let (config, silent) = {
         let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
         guard.requests.push(format!("{method} {path}"));
@@ -326,6 +389,13 @@ async fn handle(
     }
     if route == "/events" {
         stream_events(stream, events).await;
+        return;
+    }
+    if let Some(id) = route
+        .strip_prefix("/containers/")
+        .and_then(|rest| rest.strip_suffix("/logs"))
+    {
+        stream_logs(stream, state.clone(), id.to_owned(), query).await;
         return;
     }
     if route == "/_ping" && !config.ping_delay.is_zero() {
@@ -478,12 +548,13 @@ fn inspect(c: &DaemonContainer) -> Value {
             "NetworkMode": "default",
             "RestartPolicy": { "Name": c.restart, "MaximumRetryCount": 0 },
             "AutoRemove": false,
-            "PortBindings": bindings
+            "PortBindings": bindings,
+            "LogConfig": { "Type": c.log_driver, "Config": {} }
         },
         "Mounts": [],
         "Config": {
             "Hostname": &c.id[..12], "Image": c.image, "Env": c.env,
-            "Cmd": c.cmd, "Labels": {}
+            "Cmd": c.cmd, "Labels": {}, "Tty": c.tty
         },
         "NetworkSettings": { "Ports": live }
     })
@@ -525,4 +596,134 @@ async fn stream_events(mut stream: TcpStream, events: broadcast::Sender<String>)
             Err(broadcast::error::RecvError::Closed) => return,
         }
     }
+}
+
+/// `GET /containers/{id}/logs` : les messages du conteneur en transfert par morceaux, en trames de huit
+/// octets (conteneur sans terminal) ou bruts (avec terminal), chacun précédé de son horodatage. Avec
+/// `follow=1`, la réponse reste ouverte, envoie les nouveaux messages, et se ferme quand le conteneur
+/// s'arrête ou disparaît.
+async fn stream_logs(mut stream: TcpStream, state: Arc<Mutex<State>>, id: String, query: String) {
+    let param = |name: &str| {
+        query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+            .map(str::to_owned)
+    };
+    let follow = param("follow").is_some_and(|value| value == "1" || value == "true");
+    let since_s: Option<i64> = param("since").and_then(|value| value.parse().ok());
+    let tail: Option<usize> = param("tail").and_then(|value| value.parse().ok());
+    // 0 : introuvable, 1 : journaux non relisibles, 2 : lisible. Le verrou ne traverse aucun `await`.
+    let (probe, tty) = {
+        let guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+        match guard.containers.get(&id) {
+            None => (0, false),
+            Some(container) if container.log_driver == "none" => (1, false),
+            Some(container) => (2, container.tty),
+        }
+    };
+    if probe == 0 {
+        write_reply(
+            &mut stream,
+            json_reply(
+                404,
+                json!({ "message": format!("No such container: {id}") }),
+            ),
+        )
+        .await;
+        return;
+    }
+    if probe == 1 {
+        write_reply(
+            &mut stream,
+            json_reply(
+                501,
+                json!({ "message": "configured logging driver does not support reading" }),
+            ),
+        )
+        .await;
+        return;
+    }
+    let mut sent = 0usize;
+    let kind = if tty {
+        "application/vnd.docker.raw-stream"
+    } else {
+        "application/vnd.docker.multiplexed-stream"
+    };
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(head.as_bytes()).await.is_err() {
+        return;
+    }
+    let mut first = true;
+    loop {
+        let (batch, alive, total) = {
+            let guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(container) = guard.containers.get(&id) else {
+                break;
+            };
+            let all = &container.logs;
+            let alive = container.status == "running";
+            let mut batch: Vec<DaemonLog> = if first {
+                all.iter()
+                    .filter(|log| since_s.is_none_or(|since| log.at_ms >= since * 1000))
+                    .cloned()
+                    .collect()
+            } else {
+                all.iter().skip(sent).cloned().collect()
+            };
+            if first && let Some(tail) = tail {
+                let skip = batch.len().saturating_sub(tail);
+                batch.drain(..skip);
+            }
+            (batch, alive, all.len())
+        };
+        first = false;
+        sent = total;
+        let mut written = 0usize;
+        for log in batch {
+            let mut payload = stamp(log.at_ms).into_bytes();
+            payload.push(b' ');
+            payload.extend_from_slice(&log.text);
+            let mut message = Vec::new();
+            if !tty {
+                message.extend_from_slice(&[log.stream, 0, 0, 0]);
+                message.extend_from_slice(&u32::try_from(payload.len()).unwrap().to_be_bytes());
+            }
+            message.extend_from_slice(&payload);
+            let chunk = [
+                format!("{:x}\r\n", message.len()).into_bytes(),
+                message,
+                b"\r\n".to_vec(),
+            ]
+            .concat();
+            if stream.write_all(&chunk).await.is_err() {
+                return;
+            }
+            written += 1;
+            if written.is_multiple_of(256) {
+                *state
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .served_logs
+                    .entry(id.clone())
+                    .or_default() += 256;
+                written = 0;
+            }
+        }
+        if written > 0 {
+            *state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .served_logs
+                .entry(id.clone())
+                .or_default() += written;
+        }
+        if !follow || !alive {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+    }
+    let _ = stream.write_all(b"0\r\n\r\n").await;
+    let _ = stream.shutdown().await;
 }

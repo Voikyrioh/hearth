@@ -7,6 +7,9 @@
 //!   qui évite de demander à un moteur ancien une version d'API qu'il ne connaît pas.
 //! - **Le reste** (`/version`, liste, inspection, événements) passe par `bollard`, avec une version
 //!   d'API ramenée à celle du moteur (au plus celle de `bollard`).
+//! - **Les journaux** (HRT-66) passent par `logs.rs`, écrit à la main sur le même socket : le décodeur de
+//!   `bollard::Docker::logs` accumule sans borne une ligne de terminal sans fin de ligne et écrit les octets
+//!   restants dans une trace `debug` (voir l'en-tête de `logs.rs`).
 //! - **Lecture seule** : rien de ce fichier n'écrit dans le moteur.
 
 use std::collections::HashMap;
@@ -27,7 +30,8 @@ use super::errors::translate;
 use super::installed::InstallMarkers;
 use super::translate::{env_entries_of, observation_from};
 use crate::application::ports::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, LogQuery,
+    LogStream, Unreadable,
 };
 use crate::domain::services::{
     Announced, ApiVersion, EngineProbe, MAX_ENGINE_TEXT_CHARS, MAX_NAME_CHARS, MIN_API_VERSION,
@@ -493,6 +497,10 @@ impl ContainerEngine for BollardEngine {
                 other => Err(other),
             },
         }
+    }
+
+    fn logs(&self, id: &str, query: LogQuery) -> LogStream {
+        super::logs::open(self.inner.target.clone(), id.to_owned(), query)
     }
 
     fn events(&self) -> EngineEvents {

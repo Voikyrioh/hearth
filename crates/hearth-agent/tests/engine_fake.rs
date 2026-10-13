@@ -6,14 +6,19 @@
 mod support;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use hearth_agent::application::ports::ContainerEngine;
+use hearth_agent::domain::services::logs::LogSource;
 use hearth_agent::domain::services::{Hidden, PortBinding, PortProtocol, PortScope, RunState};
 use support::engine_contract::{self, Harness, Run, Spec};
 use support::fake_engine::{FakeEngine, at, container};
+
+/// L'heure des lignes écrites par le décor : une milliseconde de plus à chaque ligne.
+static NEXT_LOG_MS: AtomicI64 = AtomicI64::new(1_791_885_600_000);
 
 struct FakeHarness {
     engine: Arc<FakeEngine>,
@@ -38,6 +43,10 @@ impl Harness for FakeHarness {
             })
             .into_iter()
             .collect();
+        observation.tty = spec.tty;
+        if spec.log_driver_none {
+            observation.log_driver = Some("none".into());
+        }
         let id = observation.id.clone();
         // Les variables du décor : leurs noms dans l'observation, leurs valeurs pour `env` seulement.
         let pairs: Vec<(&str, &str)> = spec
@@ -87,6 +96,11 @@ impl Harness for FakeHarness {
 
     async fn remove(&self, id: &str) {
         self.engine.remove(id);
+    }
+
+    async fn print(&self, id: &str, source: LogSource, text: &str) {
+        let at_ms = NEXT_LOG_MS.fetch_add(1, Ordering::SeqCst);
+        self.engine.push_log(id, source, at_ms, text);
     }
 }
 

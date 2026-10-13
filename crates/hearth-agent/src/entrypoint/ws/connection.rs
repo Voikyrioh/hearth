@@ -33,12 +33,12 @@ use crate::entrypoint::{metrics_wire, services_wire};
 
 /// Comment la connexion se termine : un code de fermeture et une raison courte, ou rien si le
 /// client est déjà parti.
-struct Closing {
-    code: u16,
-    reason: &'static str,
+pub(super) struct Closing {
+    pub(super) code: u16,
+    pub(super) reason: &'static str,
 }
 
-fn policy(reason: &'static str) -> Option<Closing> {
+pub(super) fn policy(reason: &'static str) -> Option<Closing> {
     Some(Closing {
         code: close_code::POLICY,
         reason,
@@ -49,6 +49,12 @@ fn policy(reason: &'static str) -> Option<Closing> {
 pub async fn run(mut socket: WebSocket, state: AppState, permit: Permit, addr: String) {
     // La place de flux est rendue à la fin de la connexion, quelle qu'en soit l'issue.
     let closing = serve(&mut socket, &state, permit, &addr).await;
+    close(&mut socket, &state, closing).await;
+}
+
+/// Envoie la trame de fermeture puis attend la réponse du client (fermeture élégante), sauf si le client
+/// est déjà parti (`None`). Partagée avec le socket des journaux.
+pub(super) async fn close(socket: &mut WebSocket, state: &AppState, closing: Option<Closing>) {
     if let Some(closing) = closing {
         let frame = CloseFrame {
             code: closing.code,
@@ -83,7 +89,7 @@ pub async fn run(mut socket: WebSocket, state: AppState, permit: Permit, addr: S
 }
 
 /// Envoie un message ; `false` si le client ne le reçoit plus (coupé ou trop lent).
-async fn send(
+pub(super) async fn send(
     socket: &mut WebSocket,
     settings: &StreamSettings,
     message: &impl serde::Serialize,
@@ -465,11 +471,11 @@ async fn push_security(
 
 /// Se termine quand l'arrêt de l'agent est demandé, y compris s'il l'était déjà à la création du
 /// récepteur.
-async fn stopped(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
+pub(super) async fn stopped(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
     let _ = shutdown.wait_for(|stopped| *stopped).await;
 }
 
-fn going_away() -> Option<Closing> {
+pub(super) fn going_away() -> Option<Closing> {
     Some(Closing {
         code: close_code::AWAY,
         reason: "arrêt de l'agent",

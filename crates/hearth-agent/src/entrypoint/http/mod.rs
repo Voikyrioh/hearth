@@ -45,6 +45,7 @@ use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::AuditSink;
 use crate::application::security::SecurityService;
+use crate::application::service_logs::ServiceLogs;
 use crate::application::services::ServicesRegistry;
 use crate::application::sessions::SessionService;
 use crate::application::update::UpdateService;
@@ -73,6 +74,8 @@ pub struct AppState {
     pub update: Arc<UpdateService>,
     /// Moteur de conteneurs et liste des services, en lecture seule (HRT-61).
     pub services: Arc<ServicesRegistry>,
+    /// Lectures de journaux d'un service en direct, dix au plus (HRT-66).
+    pub service_logs: Arc<ServiceLogs>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -285,6 +288,20 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: false,
         audit: None,
         route: || post(services::recheck),
+    },
+    // Les journaux d'un service en direct (HRT-66) : un WebSocket par lecture, authentifié par son premier
+    // message comme `/stream`. Ouvert aux deux rôles ; lire n'est pas journalisé (BR-SLOG-018, BR-SLOG-022).
+    // Classée `ServiceStream` dans `CLASSES` (tests). TODO HRT-79 : la restriction au droit « gérer les
+    // services » et aux seuls services adoptés arrive avec HRT-79 ; cette route passera alors au niveau
+    // `Services` (ou son premier message jugera le droit), pas avant.
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/logs",
+        access: Access::FirstMessage,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(ws::logs),
     },
     // Révéler les valeurs des variables d'un service : réservé aux comptes qui ont le droit de gérer les
     // services, quel que soit leur rôle (BR-SVC-009, BR-GRANT-003). Le refus faute du droit est
@@ -646,9 +663,14 @@ mod tests {
         Admin(&'static str),
         /// Tout acte (ou lecture réservée) de service : niveau `Services`.
         Service,
+        /// Une lecture de service en direct, authentifiée par son premier message comme le flux : ouverte
+        /// aux deux rôles, jamais consignée (BR-SLOG-018, BR-SLOG-022). Équivalent de `OpenRead` pour un
+        /// socket. Restriction au droit et à l'adoption : arrive avec HRT-79, la ligne passera alors à
+        /// `Service`.
+        ServiceStream,
     }
 
-    use Class::{Admin, OpenRead, Own, Public, Service, Stream};
+    use Class::{Admin, OpenRead, Own, Public, Service, ServiceStream, Stream};
 
     const CLASSES: &[(&str, &str, Class)] = &[
         ("GET", "/hello", Public),
@@ -674,6 +696,9 @@ mod tests {
         ("GET", "/stream", Stream),
         ("GET", "/services", OpenRead),
         ("POST", "/engine/recheck", OpenRead),
+        // Journaux en direct (HRT-66) : ouverts aux deux rôles aujourd'hui ; la restriction par le droit
+        // et par l'adoption arrive avec HRT-79 (la ligne deviendra `Service`).
+        ("GET", "/services/{key}/logs", ServiceStream),
         ("GET", "/services/{key}/env", Service),
         (
             "GET",
@@ -762,7 +787,7 @@ mod tests {
             let class = rows[0].2;
             let expected = match class {
                 Public => Access::Public,
-                Stream => Access::FirstMessage,
+                Stream | ServiceStream => Access::FirstMessage,
                 Own | OpenRead => Access::Authenticated,
                 Admin(_) => Access::Admin,
                 Service => Access::Services,
@@ -773,11 +798,19 @@ mod tests {
                 .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")));
             if under_service_prefix {
                 assert!(
-                    matches!(class, OpenRead | Service),
+                    matches!(class, OpenRead | Service | ServiceStream),
                     "{method} {path} : une route de service est ouverte à tous (liste fermée) ou de niveau `services`"
                 );
             }
             match class {
+                ServiceStream => {
+                    // Un socket de lecture : premier message, jamais consigné, ne modifie rien.
+                    assert!(
+                        under_service_prefix && !endpoint.modifies() && !endpoint.tracked,
+                        "{method} {path} : une lecture en direct ne modifie rien"
+                    );
+                    assert_eq!(endpoint.audit, None, "{method} {path}");
+                }
                 OpenRead => {
                     assert!(
                         under_service_prefix && !endpoint.modifies() && !endpoint.tracked,
@@ -830,16 +863,25 @@ mod tests {
     }
 
     #[test]
-    fn only_the_stream_authenticates_by_its_first_message_and_it_is_version_checked() {
-        let first_message: Vec<_> = ENDPOINTS
+    fn only_the_two_sockets_authenticate_by_their_first_message_and_both_are_version_checked() {
+        // Le flux commun et le socket d'une lecture de journaux (HRT-66) : deux WebSocket, deux lectures.
+        let mut first_message: Vec<_> = ENDPOINTS
             .iter()
             .filter(|endpoint| endpoint.access == Access::FirstMessage)
+            .map(|endpoint| endpoint.path)
             .collect();
-        assert_eq!(first_message.len(), 1);
-        assert_eq!(first_message[0].path, "/stream");
-        assert_eq!(first_message[0].method, Method::GET);
-        assert!(first_message[0].version_checked);
-        assert!(!first_message[0].tracked);
+        first_message.sort_unstable();
+        assert_eq!(first_message, ["/services/{key}/logs", "/stream"]);
+        for endpoint in ENDPOINTS
+            .iter()
+            .filter(|endpoint| endpoint.access == Access::FirstMessage)
+        {
+            assert_eq!(endpoint.method, Method::GET);
+            assert!(endpoint.version_checked);
+            assert!(!endpoint.tracked);
+            // Une consultation : jamais d'entrée au journal d'activité (BR-SLOG-022).
+            assert!(endpoint.audit.is_none() && !endpoint.modifies());
+        }
     }
 
     /// Le test de garde de la liste des actes d'administration (HRT-28, BR-TRUST-037) : toute route
