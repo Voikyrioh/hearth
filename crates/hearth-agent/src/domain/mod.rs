@@ -2,6 +2,7 @@
 //! (L'empreinte, partagée avec `hearth-link`, vit dans `hearth_proto::fingerprint`.)
 
 pub mod accounts;
+pub mod archive;
 pub mod audit;
 pub mod catalog;
 pub mod compat;

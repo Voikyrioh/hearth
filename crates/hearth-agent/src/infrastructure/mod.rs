@@ -1,6 +1,7 @@
 //! Adaptateurs vers le monde extérieur : TLS et fichiers, SQLite, configuration, système.
 //! Aucune règle métier.
 
+pub mod archive_fs;
 pub mod argon2;
 pub mod audit_feed;
 pub mod clock;
