@@ -953,6 +953,12 @@ async fn a_key_kept_from_before_a_database_rollback_is_adopted_when_nothing_is_s
     // Retour arrière de la base (BR-UPDATE-029) : la clé créée après sa copie reste sur le disque, la base
     // revient sans secret ni vérification. Rien ne dépend de la clé : on la garde.
     let dir = tmp::tempdir().unwrap();
+    // Un dossier de données déjà peuplé doit être privé avant l'ouverture (droits 700 sous Unix).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let planted = [0x17_u8; KEY_LEN];
     std::fs::write(dir.path().join(SERVICES_KEY_FILE), planted).unwrap();
     set_private(&dir.path().join(SERVICES_KEY_FILE));
