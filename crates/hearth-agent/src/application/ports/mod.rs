@@ -24,12 +24,15 @@ mod known_address_repo;
 mod login_attempt_repo;
 mod machine_info;
 mod monotonic_clock;
+mod op_journal;
 mod operation_repo;
 mod password_hasher;
 mod proof;
+mod secret_sealer;
 mod security_feed;
 mod service_manager;
 mod service_repo;
+mod service_spec_repo;
 mod service_supervisor;
 mod services_right_repo;
 mod session_repo;
@@ -66,12 +69,22 @@ pub use known_address_repo::{KnownAddressRepo, KnownAddressTx};
 pub use login_attempt_repo::{LoginAttemptRepo, LoginAttemptTx};
 pub use machine_info::MachineInfo;
 pub use monotonic_clock::MonotonicClock;
+pub use op_journal::{
+    CreatedObjects, DecisionOffer, JournalError, NewOp, OpJournal, OpRecord, Progress,
+    RemoveOutcome, ServiceObserver,
+};
 pub use operation_repo::{OperationRepo, OperationTx};
 pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
+pub use secret_sealer::{
+    KeyCheckRepo, KeyRead, KeyStoreError, SealError, SealerFactory, SecretSealer, ServicesKeyStore,
+};
 pub use security_feed::SecurityFeed;
 pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState};
 pub use service_repo::{AdoptedRecord, ServiceRepo, SupervisedRecord};
+pub use service_spec_repo::{
+    NewRevision, SealedField, ServiceSpecRepo, SpecStoreError, StoredRevision,
+};
 pub use service_supervisor::{ContainerRef, ServiceSupervisor};
 pub use services_right_repo::ServicesRightTx;
 pub use session_repo::{SessionRepo, SessionTx};

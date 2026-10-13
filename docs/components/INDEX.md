@@ -73,6 +73,9 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
 - [`DevActionPanel`](./DevActionPanel.md) — Bouton d'action de développement (`useServerAction`, `needs-link`).
 - [`AccountTable`](./AccountTable.md) — Tableau des comptes et actions de ligne.
+- [`AccountDetailDialog`](./AccountDetailDialog.md) — Détail d'un compte en lecture seule (droit de gérer les services).
+- [`ServiceRightReason`](./ServiceRightReason.md) — Raison et commande sous un bouton de service désactivé faute du droit.
+- [`ServicesRightRow`](./ServicesRightRow.md) — Ligne « Gestion des services » du détail d'un compte.
 - [`SecurityAlertBanner`](./SecurityAlertBanner.md) — Bandeau « Attaque probable détectée ».
 - [`AttackModeBanner`](./AttackModeBanner.md) — Bandeau « Mode attaque actif » (et suspendu).
 - [`AttackModePanel`](./AttackModePanel.md) — Carte « Mode attaque » : état, bouton, raison d'indisponibilité.

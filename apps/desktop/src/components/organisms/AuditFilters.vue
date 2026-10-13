@@ -33,6 +33,8 @@ const KIND_KEYS = {
   accounts: "audit.kindAccounts",
   update: "audit.kindUpdate",
   denied: "audit.kindDenied",
+  services: "audit.kindServices",
+  services_rights: "audit.kindServicesRights",
 } as const;
 const OUTCOME_KEYS = {
   ok: "audit.outcomeOk",

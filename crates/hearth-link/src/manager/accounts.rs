@@ -11,6 +11,7 @@ use hearth_proto::api::sessions::MeResponse;
 
 use super::LinkManager;
 use crate::domain::server::ServerId;
+use crate::domain::services::agent_knows_service_rights;
 use crate::error::LinkError;
 
 const LIST_PATH: &str = "/accounts";
@@ -23,6 +24,9 @@ pub struct AccountsRead {
     /// Identifiant de l'AGENT du compte de la session : « qui est moi » ne se décide jamais par une
     /// comparaison de texte avec la saisie de connexion.
     pub me: String,
+    /// L'agent annonce `service-rights` (BR-GRANT-016) : sans cela, `rights` est absent de chaque compte et
+    /// « Non autorisée » ne dirait rien de vrai.
+    pub rights_known: bool,
 }
 
 impl LinkManager {
@@ -37,11 +41,13 @@ impl LinkManager {
         let list: AccountsResponse = serde_json::from_value(list)
             .map_err(|e| LinkError::Protocol(format!("liste des comptes illisible : {e}")))?;
         let me = self.typed_get(&target, &token, ME_PATH.to_owned()).await?;
+        let capabilities = self.agent_capabilities(&target).await?;
         let me: MeResponse = serde_json::from_value(me)
             .map_err(|e| LinkError::Protocol(format!("compte courant illisible : {e}")))?;
         Ok(AccountsRead {
             accounts: list.accounts,
             me: me.account.id,
+            rights_known: agent_knows_service_rights(&capabilities),
         })
     }
 }

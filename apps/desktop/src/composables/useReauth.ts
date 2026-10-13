@@ -9,7 +9,7 @@ import { useCountdown } from "./useCountdown";
  * réponse : jamais rejoué), ou échec déjà notifié.
  */
 export interface ActReport {
-  kind: "done" | "refused" | "unknown" | "failed";
+  kind: "done" | "refused" | "unknown" | "failed" | "right_lost";
   refusal?: { kind: string; retry_after_s?: number };
 }
 

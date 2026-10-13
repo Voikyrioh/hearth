@@ -13,6 +13,10 @@ pub const INSTALL_ID_FILE: &str = "install_id";
 /// Secret d'installation de l'empreinte des requêtes suivies (HRT-32, ADR-0034) : 32 octets, droits
 /// 0600, créé par l'agent au premier démarrage. Hors de la base, donc hors de sa sauvegarde.
 pub const FINGERPRINT_SECRET_FILE: &str = "request_fingerprint.key";
+/// Clé de scellement des secrets des services (HRT-83, ADR-0044) : 32 octets, droits 0600, créée par
+/// l'agent à la première nécessité, jamais dans la base, jamais régénérée par-dessus un fichier qui existe.
+/// À sauvegarder AVEC la base : sans elle, les secrets scellés d'une base restaurée sont illisibles.
+pub const SERVICES_KEY_FILE: &str = "services.key";
 /// Verrou de création de l'identité.
 pub const IDENTITY_LOCK_FILE: &str = "identity.lock";
 /// La base SQLite.
@@ -33,10 +37,10 @@ pub const DATABASE_FILES: [&str; 4] = [
 
 /// **La liste exacte** de ce que Hearth écrit dans le dossier de données (le journal d'activité
 /// vit dans la base).
-pub const DATA_FILES: [&str; 9] = {
-    // L'identité, la base, puis le secret d'empreinte, sans les retaper : un nom ajouté à l'une est
-    // purgé.
-    let mut all = [""; 9];
+pub const DATA_FILES: [&str; 10] = {
+    // L'identité, la base, puis le secret d'empreinte et la clé des services, sans les retaper : un nom
+    // ajouté à l'une est purgé.
+    let mut all = [""; 10];
     let mut i = 0;
     while i < 4 {
         all[i] = IDENTITY_FILES[i];
@@ -44,6 +48,7 @@ pub const DATA_FILES: [&str; 9] = {
         i += 1;
     }
     all[8] = FINGERPRINT_SECRET_FILE;
+    all[9] = SERVICES_KEY_FILE;
     all
 };
 
@@ -135,6 +140,14 @@ pub fn is_fingerprint_secret_temporary(name: &str) -> bool {
         .is_some_and(|middle| !middle.is_empty())
 }
 
+/// Temporaire d'écriture de la clé des services (`services.key.<pid>.<n>.tmp`) : contient la clé en clair.
+pub fn is_services_key_temporary(name: &str) -> bool {
+    name.strip_prefix(SERVICES_KEY_FILE)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .and_then(|rest| rest.strip_suffix(".tmp"))
+        .is_some_and(|middle| !middle.is_empty())
+}
+
 /// Temporaire d'écriture de la base remise par un retour arrière (`hearth.db.<pid>.tmp`).
 pub fn is_database_temporary(name: &str) -> bool {
     name.strip_suffix(".tmp")
@@ -154,10 +167,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_data_list_is_the_identity_the_database_and_the_fingerprint_secret() {
+    fn the_data_list_is_the_identity_the_database_the_fingerprint_secret_and_the_services_key() {
         let mut expected: Vec<&str> = IDENTITY_FILES.to_vec();
         expected.extend(DATABASE_FILES);
         expected.push(FINGERPRINT_SECRET_FILE);
+        expected.push(SERVICES_KEY_FILE);
         assert_eq!(DATA_FILES.to_vec(), expected);
     }
 
@@ -208,6 +222,22 @@ mod tests {
             assert!(!is_fingerprint_secret_temporary(name), "{name}");
         }
         assert!(!is_identity_temporary("request_fingerprint.key.1.0.tmp"));
+    }
+
+    #[test]
+    fn the_services_key_temporaries_are_recognised_and_nothing_else() {
+        assert!(is_services_key_temporary("services.key.12.0.tmp"));
+        for name in [
+            "services.key",
+            "services.key.tmp",
+            "services.key.1",
+            "request_fingerprint.key.1.0.tmp",
+            "notes.tmp",
+        ] {
+            assert!(!is_services_key_temporary(name), "{name}");
+        }
+        assert!(!is_identity_temporary("services.key.1.0.tmp"));
+        assert!(!is_fingerprint_secret_temporary("services.key.1.0.tmp"));
     }
 
     #[test]

@@ -407,6 +407,11 @@ pub enum LinkFailure {
     /// Le rôle du compte ne suffit pas (le serveur a répondu `FORBIDDEN_ROLE`, BR-AUDIT-001).
     #[error("rôle insuffisant")]
     Forbidden,
+    /// Le rôle suffit, mais le compte n'a pas le droit de gérer les services (`FORBIDDEN_ROLE` avec
+    /// `details.missing: "services"`, BR-GRANT-004) : ce n'est PAS un refus de rôle, l'interface ne dit
+    /// jamais « administrateur » (BR-GRANT-014) et relit son droit (BR-GRANT-011).
+    #[error("droit de gérer les services manquant")]
+    MissingServicesRight,
     /// Le suivi de l'action n'a pas pu être écrit sur le disque : l'action n'a PAS été lancée.
     #[error("suivi de l'action impossible")]
     TrackingUnavailable,
@@ -435,6 +440,25 @@ pub enum InvalidField {
     Credentials,
     Fingerprint,
     Other,
+}
+
+impl LinkFailure {
+    /// Le refus `FORBIDDEN_ROLE` d'un acte : un droit qui manque (`details.missing`), ou un rôle qui ne
+    /// suffit pas. Seul le droit que ce client connaît (`"services"`) est reconnu ; toute autre valeur
+    /// reste un refus de rôle ordinaire (la valeur reçue n'est jamais conservée ni affichée).
+    pub fn forbidden(detail: &hearth_proto::error::ErrorDetail) -> Self {
+        detail
+            .missing_right()
+            .map_or(Self::Forbidden, Self::missing)
+    }
+
+    fn missing(right: &str) -> Self {
+        if right == hearth_proto::api::accounts::RIGHT_SERVICES {
+            Self::MissingServicesRight
+        } else {
+            Self::Forbidden
+        }
+    }
 }
 
 impl From<LinkError> for LinkFailure {
@@ -472,6 +496,7 @@ impl From<LinkError> for LinkFailure {
             LinkError::Rejected(Some(hearth_proto::error::ErrorCode::ForbiddenRole)) => {
                 Self::Forbidden
             }
+            LinkError::MissingRight(right) => Self::missing(&right),
             // Sans clé au coffre : le retrait d'un poste la traite avant (`devices::service::removed`),
             // le mode attaque la rend telle quelle (`NotRecognized`, rien n'est parti).
             LinkError::NoDeviceKey => Self::NotRecognized,

@@ -31,6 +31,11 @@ const KINDS: Record<AuditKind, { codes: string[]; outcomes: string[] }> = {
     outcomes: ["ok", "denied", "failed"],
   },
   update: { codes: ["agent.update"], outcomes: ["ok", "denied", "failed"] },
+  services: { codes: ["service.env.reveal"], outcomes: ["ok", "denied", "failed"] },
+  services_rights: {
+    codes: ["account.services.grant", "account.services.revoke"],
+    outcomes: ["ok", "denied", "failed"],
+  },
   denied: {
     codes: [
       "logout",
@@ -49,6 +54,9 @@ const KINDS: Record<AuditKind, { codes: string[]; outcomes: string[] }> = {
 };
 
 const LABELS: Record<string, string> = {
+  "service.env.reveal": "Valeurs des variables révélées",
+  "account.services.grant": "Droit de gérer les services accordé",
+  "account.services.revoke": "Droit de gérer les services retiré",
   login: "Connexion",
   "login.locked": "Blocage temporaire",
   logout: "Déconnexion",

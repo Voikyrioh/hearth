@@ -2096,6 +2096,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hearth-proto",
  "http-body-util",
+ "libc",
  "log",
  "mac_address",
  "minisign",
@@ -7049,9 +7050,11 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "minisign",
+ "serde",
  "serde_json",
  "sha2 0.11.0",
  "time",
+ "toml 1.1.6+spec-1.1.0",
 ]
 
 [[package]]

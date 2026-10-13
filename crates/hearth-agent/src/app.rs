@@ -30,9 +30,12 @@ use crate::application::ports::{
     RequestFingerprinter, SecurityFeed, ServiceSupervisor, Store, StoreError, SystemProbe,
     TokenGen,
 };
+use crate::application::secret_vault::{KeyStatus, SecretVault};
 use crate::application::security::SecurityService;
 use crate::application::service_adoption::ServiceAdoption;
 use crate::application::service_logs::{LogSettings, ServiceLogs};
+use crate::application::service_ops::{OpLocks, RecoverySummary, ServiceOps};
+use crate::application::service_specs::ServiceSpecs;
 use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::services_right::ServicesRightService;
 use crate::application::sessions::SessionService;
@@ -51,6 +54,7 @@ use crate::infrastructure::argon2::Argon2Hasher;
 use crate::infrastructure::audit_feed::BroadcastAuditFeed;
 use crate::infrastructure::clock::{SystemClock, SystemMonotonic};
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
+use crate::infrastructure::created_objects::FsCreatedObjects;
 use crate::infrastructure::crypto::{HmacChallengeCrypto, RingProofVerifier};
 use crate::infrastructure::data_dir;
 use crate::infrastructure::engine::BollardEngine;
@@ -58,12 +62,16 @@ use crate::infrastructure::fingerprint::{HmacFingerprinter, NoFingerprint};
 use crate::infrastructure::fingerprint_secret::FileFingerprintSecretStore;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::install::SystemHost;
+use crate::infrastructure::ops_observer::UnobservedState;
 use crate::infrastructure::random::OsTokenGen;
+use crate::infrastructure::sealer::RingSealerFactory;
 use crate::infrastructure::security_feed::BroadcastSecurityFeed;
+use crate::infrastructure::services_key::FileServicesKeyStore;
 use crate::infrastructure::sqlite::{
     Database, DatabaseError, ServiceDatabase, SqliteAccountRepo, SqliteAttackModeRepo,
     SqliteAuditRepo, SqliteDeviceRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo,
-    SqliteOperationRepo, SqliteServiceRepo, SqliteSessionRepo, SqliteStore,
+    SqliteOpJournal, SqliteOperationRepo, SqliteServiceRepo, SqliteSessionRepo, SqliteSpecRepo,
+    SqliteStore,
 };
 use crate::infrastructure::supervisor::{NoSupervisor, ProcSystemd};
 use crate::infrastructure::system::gpu;
@@ -106,6 +114,8 @@ pub enum AppError {
     Crypto(#[from] CryptoError),
     #[error(transparent)]
     AttackMode(#[from] attack_mode_cli::AttackModeCliError),
+    #[error("opérations de service : {0}")]
+    ServiceOps(#[from] crate::application::service_ops::OpError),
     #[error("ouverture du port {addr} impossible : {source}")]
     Bind {
         addr: SocketAddr,
@@ -250,6 +260,11 @@ pub struct RunningAgent {
     pub services_task: BackgroundTask,
     /// Le registre des services (les tests y lisent l'état sans passer par HTTP).
     pub services: Arc<ServicesRegistry>,
+    /// Le socle des services créés par Hearth (HRT-83) : description durable, secrets scellés, journal des
+    /// opérations. Aucune route ne s'en sert encore.
+    pub foundations: ServiceFoundations,
+    /// Décisions expirées et opérations de service purgées : arrêtée avec l'agent.
+    pub service_ops_sweep: BackgroundTask,
     /// Les sessions : l'agent EXIGE la confirmation des actes
     /// dès la construction du service : aucun réglage, aucune porte, même en test.
     pub sessions: Arc<SessionService>,
@@ -270,6 +285,7 @@ impl RunningAgent {
             alert_sweep: _alert_sweep,
             attack_sweep: _attack_sweep,
             services_task: _services_task,
+            service_ops_sweep: _service_ops_sweep,
             audit_recorder,
             security,
             ..
@@ -282,6 +298,84 @@ impl RunningAgent {
         audit_recorder.flush_all().await;
         result
     }
+}
+
+/// Le socle des services créés par Hearth (HRT-83, ADR-0044 et ADR-0045) : la description durable (secrets
+/// scellés), le coffre de la clé, le journal des opérations et ses verrous. Construit au démarrage ; les
+/// tickets qui écrivent les actes (HRT-64, HRT-68…) s'y branchent.
+#[derive(Clone)]
+pub struct ServiceFoundations {
+    pub specs: Arc<ServiceSpecs>,
+    pub vault: Arc<SecretVault>,
+    pub ops: Arc<ServiceOps>,
+}
+
+/// Assemble le socle, DIT l'état de la clé des secrets, et classe les opérations restées en plein geste
+/// (reprendre le verrou de celles à vérifier, retirer ce que les autres avaient créé pour elles-mêmes).
+///
+/// - Aucune clé n'est créée ici : elle naît à la première nécessité.
+/// - Une clé absente, fausse ou inutilisable n'arrête PAS l'agent : les services qui tournent continuent,
+///   les secrets des services sont dits illisibles, rien n'est supprimé ni régénéré.
+/// - Rien d'une opération interrompue n'est repris, rejoué ni défait.
+pub async fn service_foundations(
+    data_dir: &std::path::Path,
+    database: &Database,
+    clock: Arc<dyn Clock>,
+    ids: Arc<dyn IdGen>,
+) -> Result<ServiceFoundations, AppError> {
+    let spec_repo = Arc::new(SqliteSpecRepo::new(database.pool().clone()));
+    let vault = Arc::new(SecretVault::new(
+        Arc::new(FileServicesKeyStore::new(data_dir)),
+        spec_repo.clone(),
+        Arc::new(RingSealerFactory),
+    ));
+    match vault.status().await {
+        Ok(KeyStatus::Ready | KeyStatus::NotNeededYet) => {}
+        Ok(KeyStatus::Unavailable(problem)) => tracing::error!(
+            %problem,
+            advice = problem.advice(),
+            "les secrets des services sont illisibles : l'agent démarre, les services en cours ne sont pas touchés, aucune clé n'est régénérée"
+        ),
+        Err(error) => tracing::error!(
+            %error,
+            "l'état de la clé des secrets des services n'a pas pu être établi : l'agent démarre"
+        ),
+    }
+    let specs = Arc::new(ServiceSpecs::new(spec_repo, vault.clone(), clock.clone()));
+    let ops = Arc::new(ServiceOps::new(
+        Arc::new(SqliteOpJournal::new(database.pool().clone())),
+        Arc::new(OpLocks::new()),
+        clock,
+        ids,
+        // Aucune racine d'objets créés tant qu'aucune opération n'en crée (HRT-85 et suivants les déclarent).
+        Arc::new(FsCreatedObjects::new([])),
+    ));
+    // Aucun observateur du moteur pour l'instant : l'état d'une opération interrompue est « illisible », donc
+    // « à vérifier » plutôt que supposé bon.
+    // La reprise ne doit JAMAIS empêcher l'agent de démarrer : c'est lui qui sert à réparer le serveur.
+    // Si même la liste des opérations non terminées est illisible, les fonctions de service restent
+    // refusées par l'index unique de la base, tout le reste fonctionne.
+    let summary = match ops.recover_at_startup(&UnobservedState).await {
+        Ok(summary) => summary,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "journal des opérations de service illisible : l'agent démarre, aucune opération n'est reprise"
+            );
+            RecoverySummary::default()
+        }
+    };
+    if summary.interrupted + summary.needs_attention + summary.locks_restored > 0 {
+        tracing::warn!(
+            interrupted = summary.interrupted,
+            needs_attention = summary.needs_attention,
+            locks_restored = summary.locks_restored,
+            objects_removed = summary.objects_removed,
+            objects_left = summary.objects_left,
+            "opérations de service restées en plein geste : classées, rien n'est rejoué"
+        );
+    }
+    Ok(ServiceFoundations { specs, vault, ops })
 }
 
 /// Fusionne fichier, variables d'environnement et options de la ligne de commande.
@@ -608,6 +702,17 @@ pub async fn start_engined(
     if let Some(attack) = &services.attack {
         attack.on_start().await?;
     }
+    // Le socle des services créés par Hearth : la clé des secrets est dite (jamais créée ici), les opérations
+    // restées en plein geste sont classées avant d'accepter la moindre requête.
+    let foundations = service_foundations(
+        &config.data_dir,
+        database.database(),
+        adapters.clock.clone(),
+        adapters.ids.clone(),
+    )
+    .await?;
+    let service_ops_sweep =
+        tasks::spawn_service_ops_sweep(foundations.ops.clone(), tasks::SERVICE_OPS_SWEEP_PERIOD);
     let hello = HelloService::new(
         identity.install_id.clone(),
         config.managed,
@@ -702,6 +807,8 @@ pub async fn start_engined(
         attack_sweep,
         services_task,
         services: registry,
+        foundations,
+        service_ops_sweep,
         sessions,
         audit_recorder: services.audit_recorder,
         security: services.security,

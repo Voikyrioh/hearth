@@ -104,7 +104,7 @@ pub fn interpret(status: u16, body: &Value) -> Result<DeviceRemovalOutcome, Link
     };
     let error = error.error;
     Ok(refused(match error.code {
-        ErrorCode::ForbiddenRole => return Err(LinkFailure::Forbidden),
+        ErrorCode::ForbiddenRole => return Err(LinkFailure::forbidden(&error)),
         ErrorCode::WrongPassword => DeviceRemovalRefusal::WrongPassword,
         ErrorCode::NotFound => DeviceRemovalRefusal::NotFound,
         ErrorCode::Busy => DeviceRemovalRefusal::Busy,

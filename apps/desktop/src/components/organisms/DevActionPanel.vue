@@ -15,7 +15,7 @@ const bridge = getLinkBridge();
 const sim = bridge instanceof SimulatedLinkBridge ? bridge : null;
 const hidden = new URLSearchParams(window.location.search).has("nodev");
 const servers = useServersStore();
-const action = useServerAction();
+const action = useServerAction(() => servers.current?.id ?? null);
 
 async function launch() {
   const id = servers.current?.id;

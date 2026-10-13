@@ -37,6 +37,7 @@ function account(partial: Partial<Account> & { username: string }): Account {
     createdAt: "2026-10-04T10:30:15.250Z",
     lastLoginAt: null,
     sessionsOpen: 0,
+    managesServices: false,
     ...partial,
   };
 }
@@ -110,8 +111,8 @@ describe("AccountTable", () => {
   it("offers only « Changer mon mot de passe » on one's own line", async () => {
     const wrapper = await table();
     const own = wrapper.get('[data-account="marie"]');
-    expect(own.findAll("button").map((b) => b.text())).toEqual(["Changer mon mot de passe"]);
-    await own.get("button").trigger("click");
+    expect(own.findAll("td button").map((b) => b.text())).toEqual(["Changer mon mot de passe"]);
+    await own.get("td button").trigger("click");
     expect(wrapper.emitted("changeOwnPassword")).toHaveLength(1);
     wrapper.unmount();
   });
@@ -119,7 +120,7 @@ describe("AccountTable", () => {
   it("offers the four actions on another line, with the number of sessions on the button", async () => {
     const wrapper = await table();
     const paul = wrapper.get('[data-account="paul"]');
-    expect(paul.findAll("button").map((b) => b.text())).toEqual([
+    expect(paul.findAll("td button").map((b) => b.text())).toEqual([
       "Changer le rôle",
       "Changer le mot de passe",
       "Fermer les 2 sessions",
@@ -127,12 +128,12 @@ describe("AccountTable", () => {
     ]);
     // Aucune session : « Fermer les sessions » est grisé.
     const lea = wrapper.get('[data-account="lea"]');
-    const close = lea.findAll("button")[2];
+    const close = lea.findAll("td button")[2];
     expect(close?.text()).toBe("Fermer les sessions");
     expect(close?.attributes("aria-disabled")).toBe("true");
-    await paul.findAll("button")[2]?.trigger("click");
-    await paul.findAll("button")[3]?.trigger("click");
-    await paul.findAll("button")[1]?.trigger("click");
+    await paul.findAll("td button")[2]?.trigger("click");
+    await paul.findAll("td button")[3]?.trigger("click");
+    await paul.findAll("td button")[1]?.trigger("click");
     expect(wrapper.emitted("closeSessions")?.[0]?.[0]).toMatchObject({ username: "paul" });
     expect(wrapper.emitted("remove")?.[0]?.[0]).toMatchObject({ username: "paul" });
     expect(wrapper.emitted("changePassword")?.[0]?.[0]).toMatchObject({ username: "paul" });
@@ -142,7 +143,7 @@ describe("AccountTable", () => {
   it("changes the role through a dropdown opened by « Changer le rôle »", async () => {
     const wrapper = await table();
     const paul = wrapper.get('[data-account="paul"]');
-    await paul.findAll("button")[0]?.trigger("click");
+    await paul.findAll("td button")[0]?.trigger("click");
     await flushPromises();
     const select = paul.get("select");
     expect(select.findAll("option").map((o) => o.text())).toEqual([
@@ -163,7 +164,7 @@ describe("AccountTable", () => {
       account({ username: "marie", role: "admin" }),
       account({ username: "jean", role: "admin" }),
     ]);
-    const [role, , , remove] = wrapper.get('[data-account="jean"]').findAll("button");
+    const [role, , , remove] = wrapper.get('[data-account="jean"]').findAll("td button");
     expect(role?.attributes("aria-disabled")).toBeUndefined();
     expect(remove?.attributes("aria-disabled")).toBeUndefined();
     wrapper.unmount();
@@ -173,7 +174,7 @@ describe("AccountTable", () => {
     // Cas d'une liste périmée : le seul administrateur est un autre compte que « moi ».
     const wrapper = await table([account({ username: "jean", role: "admin" })]);
     const jean = wrapper.get('[data-account="jean"]');
-    const [role, , , remove] = jean.findAll("button");
+    const [role, , , remove] = jean.findAll("td button");
     expect(role?.attributes("aria-disabled")).toBe("true");
     expect(remove?.attributes("aria-disabled")).toBe("true");
     expect(jean.text()).toContain("Il doit toujours rester au moins un administrateur");

@@ -1,0 +1,218 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, op_key, service_key, service_name, kind, account, plan_json, status, step,\n                    decision_json, decision_at, progress_json, cause, forced, started_at, updated_at,\n                    finished_at\n             FROM service_ops WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "op_key",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "op_key"
+          }
+        }
+      },
+      {
+        "name": "service_key",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "service_key"
+          }
+        }
+      },
+      {
+        "name": "service_name",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "service_name"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "account",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "account"
+          }
+        }
+      },
+      {
+        "name": "plan_json",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "plan_json"
+          }
+        }
+      },
+      {
+        "name": "status",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "name": "step",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "step"
+          }
+        }
+      },
+      {
+        "name": "decision_json",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "decision_json"
+          }
+        }
+      },
+      {
+        "name": "decision_at",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "decision_at"
+          }
+        }
+      },
+      {
+        "name": "progress_json",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "progress_json"
+          }
+        }
+      },
+      {
+        "name": "cause",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "cause"
+          }
+        }
+      },
+      {
+        "name": "forced",
+        "ordinal": 13,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "forced"
+          }
+        }
+      },
+      {
+        "name": "started_at",
+        "ordinal": 14,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 15,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "name": "finished_at",
+        "ordinal": 16,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_ops",
+            "name": "finished_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "9903a813b28e9ea8859d1264cb11207490a1b9938d1bac2bc43ccfc306287dad"
+}

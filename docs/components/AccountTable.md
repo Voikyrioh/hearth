@@ -11,3 +11,4 @@ Tableau des comptes (administrateurs) : Identifiant (étiquette « toi » sur sa
 - Date de création (revue du 2026-10-08) : colonne « Créé le » masquée (tableau sous 1100 px) : « Créé le jj/mm/aaaa » en petit texte atténué sous l'identifiant, ni arrêt de tabulation ni `aria-describedby` ; colonne visible : rien sous l'identifiant (jamais dite deux fois).
 - HRT-42 : le tableau est borné à `--table-max` (1 400 px). FIX:01M4EDC0FVT0ZHGASFEMWX7066. Décision de Claude, à confirmer par Voiky (conception grand écran, décisions 3 à 6).
 - Seconde passe (D6) : Échap sur la liste du rôle rend le curseur au bouton « Changer le rôle ». FIX:01M4EHYPD658X22RH4SFV0TDVE.
+- HRT-78 : repère `HTag` neutre « Peut gérer les services » (icône `box`) à côté du rôle pour le compte qui a le droit (lecture seule, aucun geste) ; le nom est un bouton qui émet `detail(account)` (détail : `AccountDetailDialog`). Les actions de ligne sont dans les `td` (les tests les cherchent par `td button`).

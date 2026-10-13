@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM service_spec_secrets WHERE service_key = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "bd387e80d71253d55b7210155c3a19166981602ce284eae7fc7d4a157432f58b"
+}

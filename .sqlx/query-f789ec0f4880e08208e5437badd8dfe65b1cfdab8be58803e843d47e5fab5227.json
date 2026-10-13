@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE service_specs SET current = 0 WHERE service_key = ? AND current = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "f789ec0f4880e08208e5437badd8dfe65b1cfdab8be58803e843d47e5fab5227"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT rev FROM service_specs WHERE service_key = ? ORDER BY rev",
+  "describe": {
+    "columns": [
+      {
+        "name": "rev",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "rev"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b75c24c150c529a8938b5d9df92a95b53aa0e64008f7a79b966c065fb23e898c"
+}

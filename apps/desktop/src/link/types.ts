@@ -158,6 +158,8 @@ export type LinkFailure =
   | { kind: "vault" }
   | { kind: "not_connected" }
   | { kind: "forbidden" }
+  /** Le rôle suffit, mais le compte n'a pas le droit de gérer les services (BR-GRANT-004) : jamais « administrateur ». */
+  | { kind: "missing_services_right" }
   | { kind: "tracking_unavailable" }
   | { kind: "tracking_slow" }
   /** Ce PC n'a pas de clé inscrite ou prouvée : le mode attaque ne se change pas d'ici (Q14 point 3). */
@@ -201,6 +203,12 @@ export interface Account {
   /** `null` : jamais connecté. */
   lastLoginAt: string | null;
   sessionsOpen: number;
+  /**
+   * Le compte peut gérer les services (ADR-0041, BR-GRANT-013). LECTURE SEULE : le droit se donne depuis le
+   * serveur, aucune action du client ne le change (BR-GRANT-005). Faux pour tous si l'agent ne sait pas le dire
+   * (`AccountList.rightsKnown`).
+   */
+  managesServices: boolean;
 }
 
 export type UsernameProblem = "empty" | "too_short" | "too_long" | "invalid_chars";
@@ -255,4 +263,6 @@ export type AccountOutcome =
 export interface AccountList {
   accounts: Account[];
   me: string;
+  /** L'agent annonce `service-rights` : sinon `managesServices` est faux pour tous parce qu'il ne sait pas le dire (BR-GRANT-016). */
+  rightsKnown: boolean;
 }

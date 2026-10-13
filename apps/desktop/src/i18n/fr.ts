@@ -602,6 +602,8 @@ export const fr = {
     kindAccounts: "Gestion des comptes",
     kindUpdate: "Mise à jour de l'agent",
     kindDenied: "Action refusée",
+    kindServices: "Gestion des services",
+    kindServicesRights: "Droits sur les services",
     outcomeOk: "Réussi",
     outcomeDenied: "Refusé",
     outcomeFailed: "Échoué",
@@ -804,6 +806,11 @@ export const fr = {
       "Le moteur de conteneurs est installé mais arrêté. S'il vient de démarrer, attends quelques secondes.",
     deniedText:
       "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous le compte « {account} » : ce compte doit être autorisé à se servir du moteur.",
+    // Hors spec (HRT-74 S7) : le nom annoncé par l'agent n'est pas un nom de compte valide, il n'est jamais affiché.
+    deniedTextUnnamed:
+      "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous un compte que Hearth ne peut pas nommer : ce compte doit être autorisé à se servir du moteur.",
+    deniedAdminTextUnnamed:
+      "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous un compte qui a déjà tous les droits du serveur : ce refus vient d'un réglage de sécurité du serveur ou du moteur, que Hearth ne peut pas corriger. Vérifie la configuration de sécurité du moteur sur le serveur.",
     deniedWarning:
       "Autoriser ce compte à se servir du moteur lui donne, en pratique, les mêmes pouvoirs que l'administrateur du serveur.",
     deniedAdminText:
@@ -915,6 +922,29 @@ export const fr = {
     // Textes écrits pour ce ticket, absents des specs : à valider avec Voiky.
     waitingTitle: "Aucune information pour l'instant",
     waitingText: "La liste des services s'affichera dès que le serveur sera joignable.",
+  },
+  // Le droit de gérer les services (HRT-78, ADR-0041, BR-GRANT-*). Textes de la spécification
+  // `2026-10-13-fonctionnelle-droit-de-gerer-les-services`, reprise mot pour mot. Lecture seule : aucun texte ne
+  // laisse entendre que le droit se donne depuis l'application (BR-GRANT-005).
+  rights: {
+    tag: "Peut gérer les services",
+    rowLabel: "Gestion des services",
+    allowed: "Autorisée",
+    notAllowed: "Non autorisée",
+    help: "Ce droit se donne et se retire depuis le serveur, pas depuis cet écran.",
+    commandLabel: "Commande à lancer sur le serveur",
+    copyCommand: "Copier la commande",
+    copied: "Copiée",
+    copyFailed: "La copie a échoué. Sélectionne le texte et copie-le toi-même.",
+    reason: "Ton compte ne peut pas gérer les services de ce serveur.",
+    adminIntro: "Le droit se donne depuis le serveur. Lance cette commande sur le serveur :",
+    readonlyAsk: "Demande à la personne qui administre ce serveur.",
+    oldAgent: "Ce serveur doit être mis à jour pour gérer les droits sur les services.",
+    refused: "Tu n'as pas le droit de gérer les services de ce serveur.",
+    lost: "Tu n'as plus le droit de gérer les services de ce serveur.",
+    readFailed: "Impossible de lire ton droit sur les services. Réessaie.",
+    // Hors spec : le nom du bouton qui ouvre le détail d'un compte, et le titre de ce détail.
+    detailOf: "Détail du compte {username}",
   },
   errors: {
     store: "Impossible de lire ou d'enregistrer tes réglages.",

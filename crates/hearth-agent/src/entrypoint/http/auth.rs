@@ -178,6 +178,37 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::IncompatibleVersion
         | ErrorCode::TooManyAttempts
         | ErrorCode::MethodNotAllowed => None,
+        // Codes du lot « déploiements, lots suivants » (HRT-83) : aucune route ne les rend encore, mais chacun
+        // est CLASSÉ ici (un journal d'activité retient un refus ou un échec d'un geste de service). Raison
+        // existante la plus proche ; la route qui les rendra peut en préciser une plus fine.
+        // Conflit d'état ou d'écriture : la demande n'a plus lieu d'être telle quelle.
+        ErrorCode::SpecConflict // la description a changé depuis sa lecture
+        | ErrorCode::ServiceAdopted // service non créé par Hearth : geste impossible
+        | ErrorCode::NameBeingDeleted // nom réservé par une suppression en cours
+        | ErrorCode::LimitRefusedLive // limite refusée à chaud par le moteur
+        | ErrorCode::LimitsChanged // limites modifiées depuis la lecture
+        | ErrorCode::OvercommitChanged // sur-allocation modifiée depuis la lecture
+        | ErrorCode::ResourceNotLimitable // ressource sans limite possible sur ce moteur
+        | ErrorCode::FileConflict // fichier modifié depuis sa lecture
+        | ErrorCode::FileNotEditable // fichier non éditable (binaire, trop gros)
+        | ErrorCode::Hardlinked // plusieurs liens durs : pas modifié sur place
+        | ErrorCode::WriteDenied // écriture refusée (droits système, montage en lecture seule, confinement)
+        | ErrorCode::BackupCorrupt // sauvegarde corrompue : restauration impossible
+        | ErrorCode::BackupInUse // sauvegarde en cours d'usage
+        | ErrorCode::RestorePlanChanged // plan de restauration changé depuis son aperçu
+        | ErrorCode::HostTooSmall // serveur trop petit pour la demande
+        | ErrorCode::WorldGone // monde disparu depuis la lecture
+        | ErrorCode::TooLateToCancel // point de non-retour passé
+        | ErrorCode::TransferExpired // transfert expiré : à refaire
+        | ErrorCode::NoSpace => Some(Outcome::Failed(Reason::Conflict)), // espace disque insuffisant
+        // Données refusées par une règle de validation.
+        ErrorCode::PlanSettingRefused // réglage de fiche hors plan
+        | ErrorCode::PathRefused => Some(Outcome::Failed(Reason::Validation)), // chemin hors règle
+        // Ressource inexistante.
+        ErrorCode::FicheUnknown => Some(Outcome::Failed(Reason::NotFound)), // fiche de jeu inconnue
+        // Place occupée : réessayer plus tard.
+        ErrorCode::HeavyIoBusy // une opération lourde tient déjà la place
+        | ErrorCode::TransferLimit => Some(Outcome::Failed(Reason::Busy)), // trop de transferts à la fois
     }
 }
 

@@ -49,7 +49,7 @@ pub fn refusal_from_error(status: u16, body: &Value) -> Result<AgentUpdateRefusa
         });
     }
     Ok(match error.error.code {
-        ErrorCode::ForbiddenRole => return Err(LinkFailure::Forbidden),
+        ErrorCode::ForbiddenRole => return Err(LinkFailure::forbidden(&error.error)),
         ErrorCode::ManagedInstall => AgentUpdateRefusal::ManagedInstall,
         ErrorCode::OperationInProgress => AgentUpdateRefusal::InProgress,
         ErrorCode::BadSignature => AgentUpdateRefusal::BadSignature,

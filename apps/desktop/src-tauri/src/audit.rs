@@ -42,6 +42,10 @@ pub enum AuditKindDto {
     Accounts,
     Update,
     Denied,
+    /// Gestion des services (HRT-63, HRT-78).
+    Services,
+    /// Droits sur les services : accordé ou retiré depuis le serveur (HRT-77, HRT-78).
+    ServicesRights,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -101,6 +105,8 @@ impl TryFrom<AuditFilterDto> for AuditFilter {
                     AuditKindDto::Accounts => ActionKind::Accounts,
                     AuditKindDto::Update => ActionKind::Update,
                     AuditKindDto::Denied => ActionKind::Denied,
+                    AuditKindDto::Services => ActionKind::Services,
+                    AuditKindDto::ServicesRights => ActionKind::ServicesRights,
                 })
                 .collect(),
             outcomes: dto

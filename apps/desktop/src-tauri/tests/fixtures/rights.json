@@ -1,0 +1,34 @@
+{
+  "serviceRights": {
+    "adminGranted": { "known": true, "granted": true, "account": "marie" },
+    "adminNone": { "known": true, "granted": false, "account": "marie" },
+    "readonlyGranted": { "known": true, "granted": true, "account": "paul" },
+    "readonlyNone": { "known": true, "granted": false, "account": "paul" },
+    "oldAgent": { "known": false, "granted": false, "account": "marie" }
+  },
+  "accountList": {
+    "accounts": [
+      {
+        "id": "01J9ZD6Q8E5W3N2K7M4T1V0XAB",
+        "username": "marie",
+        "role": "admin",
+        "createdAt": "2026-10-01T08:00:00Z",
+        "lastLoginAt": "2026-10-13T09:00:00Z",
+        "sessionsOpen": 1,
+        "managesServices": true
+      },
+      {
+        "id": "01J9ZD6Q8E5W3N2K7M4T1V0XAC",
+        "username": "paul",
+        "role": "readonly",
+        "createdAt": "2026-10-02T08:00:00Z",
+        "lastLoginAt": null,
+        "sessionsOpen": 0,
+        "managesServices": false
+      }
+    ],
+    "me": "01J9ZD6Q8E5W3N2K7M4T1V0XAB",
+    "rightsKnown": true
+  },
+  "failure": { "kind": "missing_services_right" }
+}

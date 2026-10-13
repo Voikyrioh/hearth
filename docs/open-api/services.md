@@ -225,6 +225,15 @@ Limites et garanties :
 - Un abonné trop lent (file de 64 lots dépassée) reçoit un nouveau `services_snapshot` : le client n'a aucune logique de trou à écrire. Les lots plus anciens encore en file sont écartés par `rev`.
 - Ouvert aux deux rôles. Un client qui ne connaît pas ces messages les ignore (ils ne sont pas des `ServerMessage`).
 
+## Types déclarés pour les opérations de service (HRT-83, aucune route)
+
+Le socle des services créés par Hearth déclare des types du fil **sans servir aucune route** : `API_VERSION` reste à `1`, `GET /hello` n'annonce encore aucune des nouvelles capacités (`service-ops`, `service-resources`, `service-files`, `service-transfers`, `service-backups`, `catalog`, `game-services`, constantes de `hearth_proto::api::service_ops`), le sujet `services` ne porte pas encore le message `operation`.
+
+- `OperationView` (`api/service_ops.rs`) : `id`, `key`, `kind` (`start`, `stop`, `restart`, `deploy`, `update`, `delete`, `resources`, `backup`, `restore`, `world_import`), `status` (`accepted`, `running`, `awaiting_decision`, `cancelling`, `cancelled`, `rolling_back`, `rolled_back`, `succeeded`, `failed`, `interrupted`, `needs_attention`), `step`, `steps`, `percent`, `items_done`, `bytes_done`, `bytes_total`, `eta_s`, `cancellable`, `decision` (`choices`, `expires_at`), `cause`. Toute énumération a une variante `Unknown` (valeur inconnue tolérée) ; les champs facultatifs sont `serde(default)`. **Aucune valeur, aucun nom de variable, aucune commande.**
+- `DriftView` (`api/service_spec.rs`) : `none`, `modified_outside`, `container_missing`.
+- `ErrorCode` : les 24 codes du lot (`SPEC_CONFLICT`, `SERVICE_ADOPTED`, `PLAN_SETTING_REFUSED`, `NAME_BEING_DELETED`, `LIMIT_REFUSED_LIVE`, `LIMITS_CHANGED`, `OVERCOMMIT_CHANGED`, `RESOURCE_NOT_LIMITABLE`, `PATH_REFUSED`, `FILE_CONFLICT`, `FILE_NOT_EDITABLE`, `HARDLINKED`, `NO_SPACE` (507), `WRITE_DENIED` (403), `HEAVY_IO_BUSY`, `BACKUP_CORRUPT`, `BACKUP_IN_USE`, `RESTORE_PLAN_CHANGED`, `TRANSFER_EXPIRED` (410), `TRANSFER_LIMIT` (429), `FICHE_UNKNOWN` (404), `HOST_TOO_SMALL`, `WORLD_GONE`, `TOO_LATE_TO_CANCEL`), déclarés d'un coup ; les autres sont 409 ou 422 (voir `ErrorCode::http_status`). Un client ancien lit un code inconnu comme une erreur générique.
+- Les actes `OperationCancel` et `OperationDecide` (codes `0x10` et `0x1D`) ne sont pas déclarés : ils arrivent avec la première route qui les sert.
+
 ## Comportement du moteur et de l'agent
 
 - Sonde : `GET /_ping` du socket (connexion, droits, 5 secondes), toutes les 2 secondes quand le moteur est prêt, toutes les 5 secondes sinon ; `/version` pour le nom, la version et l'API. Changement d'état publié au plus une fois par fenêtre de 5 secondes (BR-ENGINE-012, BR-ENGINE-013).

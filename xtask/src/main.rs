@@ -13,6 +13,8 @@
 //! - `test-tmp-check` : la suite de tests n'a laissé aucun dossier temporaire derrière elle (HRT-18,
 //!   T43).
 //! - `br-check` : toute référence `BR-…` du code et des docs a sa fiche.
+//! - `catalog-check` : les fiches de serveur de jeu embarquées passent le chargeur réel et `ids.lock` (HRT-113) ;
+//!   `--release` (option, aucune publication ne l'appelle) refuse toute fiche `preview`. Lancé par la CI (job `rust`).
 //! - `client-release-check`, `client-manifest` : publication du client (HRT-16, runbook
 //!   `publier-une-version-du-client`). Les adresses publiées sont celles de
 //!   `hearth.voikyrioh.fr/api/releases/` (HRT-49, ADR-0035) ; `client-release-check` refuse un numéro
@@ -30,6 +32,7 @@
 mod agent;
 mod agent_release;
 mod br_check;
+mod catalog_check;
 mod client_release;
 mod docker;
 mod e2e;
@@ -52,6 +55,7 @@ fn main() -> ExitCode {
                 "tâches :\n  agent         construit le binaire statique de l'agent en conteneur (target/dist/hearth-agent)\n  e2e-install   installation de bout en bout dans un conteneur jetable\n  e2e-update    mise à jour de l'agent à distance de bout en bout (retour automatique compris)
   e2e-double-failure  la double panne de la mise à jour de l'agent (superviseur tué, retour arrière sans geste) sur un vrai systemd
   shellcheck    contrôle les scripts de deploy/ avec shellcheck (en conteneur)\n  test-tmp-check  échoue si la suite de tests a laissé des dossiers temporaires (--clean les supprime)\n  br-check      toute référence BR-… du code et des docs a sa fiche
+  catalog-check contrôle les fiches de serveur de jeu (chargeur réel, ids.lock) ; --release refuse une fiche preview
   client-release-check  refuse la clé de développement, une version qui n'est pas celle du dépôt et une étiquette vX.Y.Z déjà présente sur origin
   client-version        la version du dépôt (seule source du numéro publié)\n  client-sign           signe l'installateur avec la clé des variables d'environnement (version dans la signature)\n  client-manifest       vérifie la signature puis écrit latest.json (manifeste du greffon de mise à jour du client ; --url = https://hearth.voikyrioh.fr/api/releases/X.Y.Z/Hearth_X.Y.Z_x64-setup.exe)
   release-stage         assemble une version sous target/release-stage/, refuse un arbre qui n'est pas son commit (suivi modifié, non suivi ou ignoré sous les entrées de la construction, fichier masqué) et un agent sans enregistrement de construction (cargo xtask agent) de ce commit, puis enregistre le commit (--client-dir D --agent-binary F --agent-signature S [--install-script P]) après avoir revérifié signatures, sommes, adresses et liste fermée
@@ -67,6 +71,9 @@ fn main() -> ExitCode {
         Some("shellcheck") => shellcheck::run(),
         Some("test-tmp-check") => test_tmp::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("br-check") => return br_check::run(),
+        Some("catalog-check") => {
+            return catalog_check::run(&std::env::args().skip(2).collect::<Vec<_>>());
+        }
         Some("client-release-check") => {
             client_release::run_check(&std::env::args().skip(2).collect::<Vec<_>>())
         }

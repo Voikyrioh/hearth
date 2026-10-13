@@ -10,7 +10,25 @@ import Callout from "./Callout.vue";
 // l'exécute jamais. Le bloc défile dans son cadre (jamais la page), reçoit le focus clavier pour défiler et
 // reste sélectionnable. « Copier » reste actif même lien coupé (le texte est déjà là) ; « Copié » dure 2
 // secondes et est annoncé ; un échec dit de copier à la main, sans bloquer (aucun secret n'est concerné).
-const props = withDefaults(defineProps<{ text: string; config?: boolean }>(), { config: false });
+// `label`, `copyLabel`, `copiedLabel`, `failedLabel` remplacent les textes du moteur de conteneurs (le droit de
+// gérer les services a les siens : « Commande à lancer sur le serveur », « Copiée »).
+const props = withDefaults(
+  defineProps<{
+    text: string;
+    config?: boolean;
+    label?: string;
+    copyLabel?: string;
+    copiedLabel?: string;
+    failedLabel?: string;
+  }>(),
+  {
+    config: false,
+    label: undefined,
+    copyLabel: undefined,
+    copiedLabel: undefined,
+    failedLabel: undefined,
+  },
+);
 
 const COPIED_MS = 2000;
 const state = ref<"idle" | "copied" | "failed">("idle");
@@ -36,12 +54,14 @@ onBeforeUnmount(() => clearTimeout(timer));
 <template>
   <div class="block">
     <div class="block__head">
-      <HTag>{{ config ? t("engine.addHere") : t("engine.runHere") }}</HTag>
+      <HTag>{{ label ?? (config ? t("engine.addHere") : t("engine.runHere")) }}</HTag>
       <HButton variant="secondary" size="sm" data-copy @click="copy">
         <HIcon v-if="state === 'copied'" name="check" size="sm" />
         <HIcon v-else name="copy" size="sm" />
         {{
-          state === "copied" ? t("engine.copied") : config ? t("engine.copyText") : t("engine.copyCommand")
+          state === "copied"
+            ? (copiedLabel ?? t("engine.copied"))
+            : (copyLabel ?? (config ? t("engine.copyText") : t("engine.copyCommand")))
         }}
       </HButton>
     </div>
@@ -50,9 +70,13 @@ onBeforeUnmount(() => clearTimeout(timer));
       tabindex="0"
       :aria-label="config ? t('engine.textLabel') : t('engine.commandLabel')"
     >{{ text }}</pre>
-    <span class="block__live" role="status">{{ state === "copied" ? t("engine.copied") : "" }}</span>
+    <span class="block__live" role="status">{{
+      state === "copied" ? (copiedLabel ?? t("engine.copied")) : ""
+    }}</span>
     <Callout v-if="state === 'failed'" tone="warn" inline>
-      {{ config ? t("engine.copyFailedText") : t("engine.copyFailedCommand") }}
+      {{
+        failedLabel ?? (config ? t("engine.copyFailedText") : t("engine.copyFailedCommand"))
+      }}
     </Callout>
   </div>
 </template>
