@@ -311,16 +311,12 @@ impl SessionTx for SqliteUnitOfWork {
         .fetch_optional(&mut *self.tx)
         .await
         .map_err(storage(NOTICES))?;
-        row.map(|row| {
-            Ok(ClosureNotice {
-                by: Username::parse(&row.closed_by).map_err(|_| StoreError::Unavailable {
-                    resource: NOTICES,
-                    message: "identifiant illisible".to_owned(),
-                })?,
-                at: parse_date(NOTICES, &row.closed_at)?,
-            })
-        })
-        .transpose()
+        // Un avis illisible ne bloque jamais une connexion : la ligne est déjà retirée, l'avis est perdu.
+        Ok(row.and_then(|row| {
+            let by = Username::parse(&row.closed_by).ok()?;
+            let at = parse_date(NOTICES, &row.closed_at).ok()?;
+            Some(ClosureNotice { by, at })
+        }))
     }
 
     async fn purge_expired(&mut self, now: OffsetDateTime) -> Result<u64, StoreError> {
