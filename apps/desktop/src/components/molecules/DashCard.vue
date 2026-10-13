@@ -43,7 +43,7 @@ const titleId = useId();
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
   letter-spacing: var(--ls-label);

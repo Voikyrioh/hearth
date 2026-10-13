@@ -83,6 +83,7 @@ test("la page Comptes : tableau, colonnes, étiquette « toi », actions de la l
   ]);
   await expect(row(page, "marie")).toContainText("toi");
   await expect(row(page, "marie").locator("td").getByRole("button")).toHaveText([
+    "Peut gérer les services",
     "Changer mon mot de passe",
   ]);
   await expect(row(page, "paul").locator("td").getByRole("button")).toHaveText([

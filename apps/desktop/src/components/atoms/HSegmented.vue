@@ -67,7 +67,7 @@ function move(delta: number) {
   border: 0;
   border-radius: var(--space-2);
   background: transparent;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   cursor: pointer;
   transition: background var(--motion-fast) var(--ease);
 }

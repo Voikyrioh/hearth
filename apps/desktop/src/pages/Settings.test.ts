@@ -2,6 +2,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { tooltip } from "@/test/tooltip";
 import Settings from "./Settings.vue";
 
 describe("Settings page", () => {
@@ -69,9 +70,7 @@ describe("Settings page", () => {
     );
     const toggle = wrapper.get('[role="switch"]');
     expect(toggle.attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get('[role="tooltip"]').text()).toBe(
-      "Disponible dès que tes réglages sont lus.",
-    );
+    expect(tooltip().text()).toBe("Disponible dès que tes réglages sont lus.");
     expect(wrapper.text()).toContain("0.1.0");
   });
 

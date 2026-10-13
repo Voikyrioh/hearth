@@ -68,7 +68,9 @@ test("disponible, confirmation, étapes, reconnexion sans erreur, résultat", as
   await open(page);
   const forge = card(page, "forge");
   await expect(forge.getByRole("heading", { level: 3 })).toHaveText("État du serveur : forge");
-  await expect(forge.locator("[data-agent-versions]")).toContainText("Agent 0.1.0");
+  await expect(forge.locator("[data-agent-versions]")).toContainText(
+    "installée sur ce serveur : 0.1.0",
+  );
   await expect(forge.locator("[data-agent-tag]")).toHaveText("Mise à jour disponible");
   await expect(forge.locator("[data-agent-update-button]")).toBeEnabled();
   await shoot(page, "agent-disponible");
@@ -109,7 +111,9 @@ test("disponible, confirmation, étapes, reconnexion sans erreur, résultat", as
   await expect(forge.locator("[data-agent-result]")).toContainText(
     "Mise à jour de l'agent réussie. L'agent est en version 0.2.0.",
   );
-  await expect(forge.locator("[data-agent-versions]")).toContainText("Agent 0.2.0");
+  await expect(forge.locator("[data-agent-versions]")).toContainText(
+    "installée sur ce serveur : 0.2.0",
+  );
   await expect(forge.locator("[data-agent-update-button]")).toHaveCount(0);
   await expect(forge.locator("[data-agent-tag]")).toHaveCount(0);
   await shoot(page, "agent-reussie");
@@ -130,7 +134,9 @@ test("retour arrière : le nouvel agent n'a pas répondu, l'ancienne version res
     /Mise à jour de l'agent annulée\. Le nouvel agent n'a pas répondu\. Retour à la version précédente\./,
   );
   await expect(forge.locator("[data-agent-result]")).toHaveAttribute("data-tone", "warn");
-  await expect(forge.locator("[data-agent-versions]")).toContainText("Agent 0.1.0");
+  await expect(forge.locator("[data-agent-versions]")).toContainText(
+    "installée sur ce serveur : 0.1.0",
+  );
   // La version reste proposée : on peut réessayer.
   await expect(forge.locator("[data-agent-update-button]")).toBeVisible();
   await shoot(page, "agent-retour-arriere");
@@ -180,7 +186,9 @@ test("coupure du lien pendant la mise à jour : coupure normale, puis le résult
   });
   await expect(pill(page, "forge")).toHaveText("Connecté");
   await expect(forge.locator("[data-agent-result]")).toContainText("réussie");
-  await expect(forge.locator("[data-agent-versions]")).toContainText("Agent 0.2.0");
+  await expect(forge.locator("[data-agent-versions]")).toContainText(
+    "installée sur ce serveur : 0.2.0",
+  );
   await expect(forge.locator("[data-agent-running]")).toHaveCount(0);
 });
 

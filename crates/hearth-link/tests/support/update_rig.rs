@@ -40,6 +40,16 @@ impl AuditSink for NoSink {
     ) -> Result<(), hearth_agent::application::ports::AuditWriteError> {
         Ok(())
     }
+
+    async fn record_grouped_required(
+        &self,
+        _: Actor,
+        _: AuditAction,
+        _: Target,
+        _: Outcome,
+    ) -> Result<(), hearth_agent::application::ports::AuditWriteError> {
+        Ok(())
+    }
 }
 
 /// La fabrique d'adaptateurs de mise à jour d'un agent de test (`TestAgent::install_with`). Le PREMIER

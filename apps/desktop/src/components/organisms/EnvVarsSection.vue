@@ -192,7 +192,7 @@ const long = (value: string) => value.length > 160 || value.includes("\n");
   align-items: center;
   gap: var(--space-2);
   margin: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   overflow-wrap: anywhere;
 }
 
@@ -225,7 +225,7 @@ const long = (value: string) => value.length > 160 || value.includes("\n");
 }
 
 .env__mask {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .env__empty {

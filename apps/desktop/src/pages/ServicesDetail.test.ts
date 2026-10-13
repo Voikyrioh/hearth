@@ -485,7 +485,7 @@ describe("les variables d'environnement (BR-SVC-008, BR-SVC-009)", () => {
       "Ton compte ne peut pas gérer les services de ce serveur.",
     );
     expect(wrapper.get("[data-env-reason] pre").text()).toBe(
-      "hearth-agent account services marie --grant",
+      "sudo hearth-agent account services marie --grant",
     );
     expect(toggle.attributes("aria-describedby")).toBeTruthy();
     await toggle.trigger("click");

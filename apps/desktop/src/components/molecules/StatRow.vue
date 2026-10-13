@@ -8,6 +8,8 @@ import LevelBadge from "./LevelBadge.vue";
 withDefaults(
   defineProps<{
     label: string;
+    /** Le nom du système, en second plan, après le libellé (HRT-142). */
+    detail?: string;
     value: string;
     level?: Level;
     muted?: boolean;
@@ -15,14 +17,14 @@ withDefaults(
     /** Pastille de la couleur de la courbe correspondante (la couleur ne porte jamais seule le sens). */
     swatch?: "ac" | "cool";
   }>(),
-  { level: "normal", muted: false, stacked: false, swatch: undefined },
+  { detail: undefined, level: "normal", muted: false, stacked: false, swatch: undefined },
 );
 </script>
 
 <template>
   <div :class="['stat', { 'stat--stacked': stacked }]" :data-level="level">
     <dt class="stat__label">
-      <i v-if="swatch" :class="['stat__swatch', `stat__swatch--${swatch}`]" aria-hidden="true" /><HMiddleText class="stat__text" :text="label" />
+      <i v-if="swatch" :class="['stat__swatch', `stat__swatch--${swatch}`]" aria-hidden="true" /><HMiddleText class="stat__text" :text="label" /><span v-if="detail" class="stat__detail">{{ detail }}</span>
     </dt>
     <dd :class="['stat__value', { 'stat__value--muted': muted }]">
       <slot>{{ value }}</slot><LevelBadge :level="level" />
@@ -66,6 +68,12 @@ withDefaults(
   background: var(--cool);
 }
 
+.stat__detail {
+  flex: 1 0 100%;
+  color: var(--tx3);
+  font-size: var(--fs-small);
+}
+
 .stat__text {
   flex: 0 1 auto;
   min-width: 0;
@@ -73,10 +81,11 @@ withDefaults(
 
 .stat__label {
   display: flex;
+  flex-wrap: wrap;
   flex: 0 1 auto;
   align-items: center;
   min-width: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .stat__value {

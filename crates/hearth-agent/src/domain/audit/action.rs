@@ -75,11 +75,18 @@ pub enum AuditAction {
     /// Un compte est freiné quand il ouvre des lectures de journaux en rafale (HRT-107, BR-SLOG-027) :
     /// une seule entrée par fenêtre de 10 minutes, avec le nombre de refus ; jamais une par refus.
     ServiceLogsThrottled,
+    /// Une adoption par unité dont l'unité n'est plus relue devient « à confirmer » : elle n'ouvre plus aucun
+    /// droit jusqu'à la confirmation d'un compte qui a le droit (HRT-80, BR-ADOPT-027). Auteur : le
+    /// système ; cible : le service par sa clé.
+    ServiceAdoptionToConfirm,
+    /// Une adoption tombe sans qu'aucun compte agisse : délai de confirmation écoulé, unité ou conteneur
+    /// disparu (HRT-80, BR-ADOPT-017, BR-ADOPT-027). Auteur : le système ; cible : le service par sa clé.
+    ServiceAdoptionLapsed,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 32] = [
+    pub const ALL: [AuditAction; 34] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -112,6 +119,8 @@ impl AuditAction {
         Self::ServiceExternalRead,
         Self::ServiceLogsRead,
         Self::ServiceLogsThrottled,
+        Self::ServiceAdoptionToConfirm,
+        Self::ServiceAdoptionLapsed,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -149,6 +158,8 @@ impl AuditAction {
             Self::ServiceExternalRead => action::SERVICE_EXTERNAL_READ,
             Self::ServiceLogsRead => action::SERVICE_LOGS_READ,
             Self::ServiceLogsThrottled => action::SERVICE_LOGS_THROTTLED,
+            Self::ServiceAdoptionToConfirm => action::SERVICE_ADOPTION_TO_CONFIRM,
+            Self::ServiceAdoptionLapsed => action::SERVICE_ADOPTION_LAPSED,
         }
     }
 
@@ -187,6 +198,8 @@ impl AuditAction {
             Self::ServiceExternalRead => "Liste des conteneurs existants",
             Self::ServiceLogsRead => "Journaux lus",
             Self::ServiceLogsThrottled => "Ouvertures de journaux freinées",
+            Self::ServiceAdoptionToConfirm => "Adoption à confirmer",
+            Self::ServiceAdoptionLapsed => "Adoption tombée",
         }
     }
 

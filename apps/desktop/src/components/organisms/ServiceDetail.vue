@@ -350,7 +350,7 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
 
 .detail__since,
 .detail__adopted {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
@@ -363,7 +363,7 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
   align-items: flex-start;
   gap: var(--space-2);
   margin: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
@@ -400,7 +400,7 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
 }
 
 .defs dt {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .defs dd {
@@ -427,7 +427,7 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
   align-items: center;
   gap: var(--space-2);
   margin: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .defs__command {
@@ -469,7 +469,7 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
 }
 
 .rows__access {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 </style>

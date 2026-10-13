@@ -15,6 +15,10 @@ const props = defineProps<{
   account: Account | null;
   /** L'agent annonce `service-rights` (BR-GRANT-016). */
   rightsKnown: boolean;
+  /** L'identifiant de l'agent du compte de la session : sur sa propre ligne, retirer le droit est signalé. */
+  meId?: string;
+  /** Pourquoi ce compte ne peut pas être supprimé par toi, dit en clair (jamais seulement au survol). */
+  removalReason?: string;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
@@ -58,10 +62,12 @@ const title = computed(() =>
           <dd>{{ account.sessionsOpen }}</dd>
         </div>
       </dl>
+      <p v-if="removalReason" class="detail__note" data-removal-reason>{{ removalReason }}</p>
       <ServicesRightRow
         :username="account.username"
         :manages="account.managesServices"
         :known="rightsKnown"
+        :own="account.id === meId"
       />
     </template>
   </FormDialog>
@@ -82,8 +88,14 @@ const title = computed(() =>
   gap: var(--space-4);
 }
 
+.detail__note {
+  margin: 0;
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
+}
+
 .detail__line dt {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .detail__line dd {

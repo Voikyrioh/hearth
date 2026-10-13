@@ -120,7 +120,7 @@ const downloadText = computed(() =>
 
 .update__version {
   margin-left: var(--space-2);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
 }
 </style>

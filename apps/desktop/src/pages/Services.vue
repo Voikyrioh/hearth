@@ -386,7 +386,7 @@ async function openDocs() {
   align-items: center;
   gap: var(--space-2);
   margin: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 /* La liste et le détail à côté (HRT-63) : sous 960 px de zone le détail REMPLACE la liste ; au-dessus, la liste passe

@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import { h } from "vue";
+import { tooltip } from "@/test/tooltip";
 import HButton from "./HButton.vue";
 import HCheckbox from "./HCheckbox.vue";
 import HIcon from "./HIcon.vue";
@@ -171,7 +172,7 @@ describe("HTooltip", () => {
       props: { text: "Explication" },
       slots: { default: '<button type="button">x</button>' },
     });
-    const bubble = wrapper.get('[role="tooltip"]');
+    const bubble = tooltip();
     expect((bubble.element as HTMLElement).style.display).toBe("none");
     await wrapper.trigger("mouseenter");
     expect((bubble.element as HTMLElement).style.display).not.toBe("none");
@@ -190,7 +191,7 @@ describe("HTooltip", () => {
           h("button", { type: "button", "aria-describedby": describedby }, "x"),
       },
     });
-    const id = wrapper.get('[role="tooltip"]').attributes("id");
+    const id = tooltip().attributes("id");
     expect(id).toBeTruthy();
     expect(wrapper.get("button").attributes("aria-describedby")).toBe(id);
   });

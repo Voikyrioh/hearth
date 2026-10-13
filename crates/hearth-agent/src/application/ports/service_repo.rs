@@ -23,6 +23,10 @@ pub struct AdoptedRecord {
     pub key: ServiceKey,
     pub by: String,
     pub at: OffsetDateTime,
+    /// `Some(depuis)` : l'adoption par unité est « à confirmer » depuis ce moment (`BR-ADOPT-027`, migration
+    /// `0014`) ; elle n'ouvre aucun droit et son délai de 24 heures court depuis cette date, quel que soit
+    /// le nombre de redémarrages. `None` : pas à confirmer.
+    pub unconfirmed_since: Option<OffsetDateTime>,
 }
 
 /// Les services que l'agent retient d'un démarrage à l'autre.
@@ -44,4 +48,14 @@ pub trait ServiceRepo: Send + Sync {
     /// Oublie l'adoption d'un service : le conteneur d'un service adopté sans unité n'existe plus
     /// (`BR-ADOPT-017`). La base oublie aussi ce qu'elle retenait du service.
     async fn forget_adopted(&self, key: &ServiceKey) -> Result<(), StoreError>;
+
+    /// Écrit « à confirmer depuis `since` » sur ces adoptions (`BR-ADOPT-027`), TOUTES ou aucune. Chaque
+    /// entrée est une clé et la date de son adoption : une ligne relâchée puis adoptée de nouveau entre-temps
+    /// (autre date) n'est pas touchée. Une ligne déjà « à confirmer » garde sa date d'origine : le délai ne
+    /// repart jamais. Rend, pour chaque ligne qui existe encore, la date « depuis » qui fait foi.
+    async fn mark_unconfirmed(
+        &self,
+        marks: &[(ServiceKey, OffsetDateTime)],
+        since: OffsetDateTime,
+    ) -> Result<Vec<(ServiceKey, OffsetDateTime)>, StoreError>;
 }

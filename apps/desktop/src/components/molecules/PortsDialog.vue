@@ -122,7 +122,7 @@ function onNativeClose() {
 }
 
 .ports__item--omitted {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: inherit;
 }
 

@@ -10,9 +10,9 @@ import { UPDATE_STEPS, type UpdateStep } from "@/link";
 // point braise, à venir = cercle vide ; une barre de progression pendant le téléchargement. L'état est
 // aussi dit en texte pour les lecteurs d'écran (« Vérification…, en cours »). Le pourcentage vient de
 // l'agent : borné ici à 0 à 100 pour la barre, jamais calculé.
-const props = defineProps<{ step: Exclude<UpdateStep, "done">; percent: number | null }>();
+const props = defineProps<{ step: Exclude<UpdateStep, "done"> | null; percent: number | null }>();
 
-const current = computed(() => UPDATE_STEPS.indexOf(props.step));
+const current = computed(() => (props.step ? UPDATE_STEPS.indexOf(props.step) : -1));
 const ratio = computed(() =>
   props.percent === null ? null : Math.min(100, Math.max(0, props.percent)) / 100,
 );
@@ -78,7 +78,7 @@ function state(index: number): "done" | "now" | "later" {
 }
 
 .steps__item--done {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .steps__item--done .steps__mark {

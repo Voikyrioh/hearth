@@ -160,12 +160,26 @@ impl ServiceAdoption {
             adopted: 0,
             results: Vec::with_capacity(keys.len()),
         };
+        // Les issues qui ne nomment aucun service (clé inconnue, divergence mémoire et base) sont
+        // comptées par motif et consignées UNE fois chacune pour l'acte, avec leur nombre : un acte de
+        // cinquante clés inventées ne peut pas écrire cinquante entrées (`BR-ADOPT-019`).
+        let mut unnamed: Vec<(Reason, u32)> = Vec::new();
         for raw in keys {
-            let outcome = self.adopt_one(raw, by).await;
+            let (outcome, unnamed_refusal) = self.adopt_one(raw, by).await;
+            if let Some(reason) = unnamed_refusal {
+                match unnamed.iter_mut().find(|(known, _)| *known == reason) {
+                    Some((_, count)) => *count += 1,
+                    None => unnamed.push((reason, 1)),
+                }
+            }
             if outcome == KeyOutcome::Adopted {
                 report.adopted += 1;
             }
             report.results.push((raw.clone(), outcome));
+        }
+        for (reason, count) in unnamed {
+            self.refuse(by, Target::Route(ADOPT_ROUTE), reason, count)
+                .await;
         }
         let diverged = report
             .results
@@ -179,7 +193,9 @@ impl ServiceAdoption {
         Ok(report)
     }
 
-    async fn adopt_one(&self, raw: &str, by: &Actor) -> KeyOutcome {
+    /// L'issue d'une clé. Le second élément est le motif d'une issue qui ne nomme aucun service : sa
+    /// consignation est groupée par l'appelant, jamais écrite ici.
+    async fn adopt_one(&self, raw: &str, by: &Actor) -> (KeyOutcome, Option<Reason>) {
         // Une clé mal formée ou `h_` (déjà publiée, créée par Hearth) a l'issue d'une clé inconnue.
         let key = ServiceKey::parse(raw).filter(|key| key.kind() != KeyKind::Hearth);
         let lookup = key.as_ref().map_or(AdoptionLookup::Unknown, |key| {
@@ -195,14 +211,14 @@ impl ServiceAdoption {
                     .map_or(Target::Route(ADOPT_ROUTE), |(name, unit)| {
                         service_target(&name, unit.as_ref().map(|unit| unit.as_str()))
                     });
-                self.refuse(by, target, Reason::AlreadyAdopted).await;
-                return KeyOutcome::AlreadyAdopted { by: adopter };
+                // Un service publié, donc nommé dans la liste de tous : une entrée par service, bornée
+                // par le nombre de services réellement adoptés.
+                self.refuse(by, target, Reason::AlreadyAdopted, 1).await;
+                return (KeyOutcome::AlreadyAdopted { by: adopter }, None);
             }
             _ => {
-                // Aucun nom, aucune clé : la même entrée pour une clé cachée, disparue ou inventée.
-                self.refuse(by, Target::Route(ADOPT_ROUTE), Reason::ServiceNotFound)
-                    .await;
-                return KeyOutcome::NotFound;
+                // Aucun nom, aucune clé : la même issue pour une clé cachée, disparue ou inventée.
+                return (KeyOutcome::NotFound, Some(Reason::ServiceNotFound));
             }
         };
         let account = by
@@ -217,18 +233,19 @@ impl ServiceAdoption {
             at: self.clock.now(),
         };
         match self.write(&adoption, by).await {
-            Ok(AdoptionWrite::Adopted) => KeyOutcome::Adopted,
+            Ok(AdoptionWrite::Adopted) => (KeyOutcome::Adopted, None),
             Ok(AdoptionWrite::AlreadyAdopted { by: adopter }) => {
                 // La mémoire disait « candidat », la base dit « déjà adopté » : le conteneur n'est pas
                 // publié (la mémoire diverge), son nom n'entre donc pas au journal. `adopt` relit la base
                 // après l'acte pour que la mémoire rejoigne la base.
-                self.refuse(by, Target::Route(ADOPT_ROUTE), Reason::AlreadyAdopted)
-                    .await;
-                KeyOutcome::AlreadyAdopted { by: adopter }
+                (
+                    KeyOutcome::AlreadyAdopted { by: adopter },
+                    Some(Reason::AlreadyAdopted),
+                )
             }
             Err(error) => {
                 tracing::warn!(%error, "adoption non écrite");
-                KeyOutcome::Failed
+                (KeyOutcome::Failed, None)
             }
         }
     }
@@ -236,6 +253,13 @@ impl ServiceAdoption {
     /// La ligne et l'entrée du journal, dans la même transaction.
     async fn write(&self, adoption: &NewAdoption, by: &Actor) -> Result<AdoptionWrite, StoreError> {
         let mut tx = self.store.begin().await?;
+        // `BR-ADOPT-027` : une adoption « à confirmer » garde sa ligne mais n'ouvre aucun droit. La
+        // confirmer, c'est la réécrire au nom du compte qui agit, avec toutes les gardes de l'acte
+        // (droit, preuve de clé, mot de passe) : l'ancienne ligne est remplacée dans la même transaction.
+        let stale = self.registry.awaits_confirmation(&adoption.key);
+        if stale {
+            tx.adoptions().release(&adoption.key).await?;
+        }
         let written = tx.adoptions().adopt(adoption).await?;
         if written != AdoptionWrite::Adopted {
             return Ok(written);
@@ -251,11 +275,15 @@ impl ServiceAdoption {
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;
         journal.publish(&self.trail);
+        if stale {
+            self.registry.confirm_adoption(&adoption.key);
+        }
         Ok(written)
     }
 
-    /// Une issue qui n'a rien adopté, consignée « Échoué » avec sa cause. Un échec d'écriture est tracé.
-    async fn refuse(&self, by: &Actor, target: Target, reason: Reason) {
+    /// Une issue qui n'a rien adopté, consignée « Échoué » avec sa cause. `times` : combien de clés de
+    /// l'acte ont cette issue (une entrée, `times - 1` autres fois). Un échec d'écriture est tracé.
+    async fn refuse(&self, by: &Actor, target: Target, reason: Reason, times: u32) {
         let result = async {
             let mut tx = self.store.begin().await?;
             let mut journal = Pending::default();
@@ -265,7 +293,8 @@ impl ServiceAdoption {
                 AuditAction::ServiceAdopt,
                 target,
                 Outcome::Failed(reason),
-            );
+            )
+            .with_repeats(times.saturating_sub(1));
             journal.record(&mut *tx, event).await?;
             tx.commit().await?;
             journal.publish(&self.trail);

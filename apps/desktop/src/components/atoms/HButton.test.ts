@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startedApp } from "@/test/app";
+import { hasTooltip, tooltip } from "@/test/tooltip";
 import HButton from "./HButton.vue";
 import HToggle from "./HToggle.vue";
 
@@ -23,15 +24,13 @@ describe("HButton", () => {
     expect(button.attributes("aria-disabled")).toBe("true");
     expect(button.attributes("disabled")).toBeUndefined();
     expect(button.attributes("title")).toBeUndefined();
-    expect(wrapper.get('[role="tooltip"]').text()).toBe("Bientôt disponible");
-    expect(button.attributes("aria-describedby")).toBe(
-      wrapper.get('[role="tooltip"]').attributes("id"),
-    );
+    expect(tooltip().text()).toBe("Bientôt disponible");
+    expect(button.attributes("aria-describedby")).toBe(tooltip().attributes("id"));
   });
 
   it("shows the explanation on keyboard focus, not only on hover", async () => {
     const wrapper = mount(HButton, { props: { disabled: true, hint: "Pourquoi" } });
-    const bubble = () => wrapper.get('[role="tooltip"]').element as HTMLElement;
+    const bubble = () => tooltip().element as HTMLElement;
     expect(bubble().style.display).toBe("none");
     await wrapper.get("button").trigger("focusin");
     expect(bubble().style.display).not.toBe("none");
@@ -75,15 +74,13 @@ describe("needs-link on HButton and HToggle (single source of truth)", () => {
     bridge.setState("forge", "offline");
     await flushPromises();
     expect(button.attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get('[role="tooltip"]').text()).toBe(
-      "Indisponible tant que le serveur est hors ligne.",
-    );
+    expect(tooltip().text()).toBe("Indisponible tant que le serveur est hors ligne.");
     await button.trigger("click");
     expect(wrapper.emitted("click")).toHaveLength(1);
     bridge.setState("forge", "connected");
     await flushPromises();
     expect(button.attributes("aria-disabled")).toBeUndefined();
-    expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
+    expect(hasTooltip()).toBe(false);
     await button.trigger("click");
     expect(wrapper.emitted("click")).toHaveLength(2);
   });
@@ -121,9 +118,7 @@ describe("needs-link on HButton and HToggle (single source of truth)", () => {
     await flushPromises();
     await wrapper.setProps({ disabled: false });
     expect(button.attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get('[role="tooltip"]').text()).toBe(
-      "Indisponible pendant la reconnexion au serveur.",
-    );
+    expect(tooltip().text()).toBe("Indisponible pendant la reconnexion au serveur.");
     bridge.setState("forge", "connected");
     await flushPromises();
     expect(button.attributes("aria-disabled")).toBeUndefined();
@@ -142,7 +137,7 @@ describe("needs-link on HButton and HToggle (single source of truth)", () => {
     (button.element as HTMLElement).focus();
     expect(document.activeElement).toBe(button.element);
     await button.trigger("focusin");
-    const bubble = wrapper.get('[role="tooltip"]');
+    const bubble = tooltip();
     expect((bubble.element as HTMLElement).style.display).not.toBe("none");
     expect(bubble.text()).toBe("Indisponible : ta session a expiré.");
     // Entrée / Espace natifs déclenchent un clic : bloqué comme à la souris.
@@ -159,7 +154,7 @@ describe("needs-link on HButton and HToggle (single source of truth)", () => {
       global: { plugins: [ctx.pinia] },
     });
     expect(wrapper.get("button").attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get('[role="tooltip"]').text()).toBe("Réservé aux administrateurs.");
+    expect(tooltip().text()).toBe("Réservé aux administrateurs.");
     ctx.servers.setCurrent("forge");
     await flushPromises();
     expect(wrapper.get("button").attributes("aria-disabled")).toBeUndefined();
@@ -176,9 +171,7 @@ describe("needs-link on HButton and HToggle (single source of truth)", () => {
     expect(wrapper.get("button").attributes("aria-disabled")).toBeUndefined();
     ctx.servers.setCurrent(null);
     await flushPromises();
-    expect(wrapper.get('[role="tooltip"]').text()).toBe(
-      "Indisponible : aucun serveur sélectionné.",
-    );
+    expect(tooltip().text()).toBe("Indisponible : aucun serveur sélectionné.");
   });
 
   it("applies to HToggle with the same rules (disabled, busy, link combined)", async () => {
@@ -194,7 +187,7 @@ describe("needs-link on HButton and HToggle (single source of truth)", () => {
     expect(toggle.attributes("aria-disabled")).toBe("true");
     await toggle.trigger("click");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
-    expect(wrapper.get('[role="tooltip"]').text()).toContain("hors ligne");
+    expect(tooltip().text()).toContain("hors ligne");
     bridge.setState("forge", "connected");
     await flushPromises();
     await toggle.trigger("click");

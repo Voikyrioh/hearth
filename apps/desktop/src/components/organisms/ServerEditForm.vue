@@ -117,7 +117,7 @@ async function confirm() {
 }
 
 .edit__info {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .edit__error {

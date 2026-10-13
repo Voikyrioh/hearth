@@ -93,9 +93,12 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
         <UpdatePanel />
       </div>
       <div v-if="servers.servers.length > 0" class="settings__column">
+        <p class="settings__note" data-agent-explain>{{ t("settings.agentExplain") }}</p>
         <AgentUpdateCard v-for="server in servers.servers" :key="server.id" :server="server" />
-        <h2 class="settings__section settings__section--column">{{ t("settings.sectionAccount") }}</h2>
-        <OwnAccountCard v-for="server in servers.servers" :key="server.id" :server="server" />
+        <section class="settings__panel" data-own-accounts>
+          <h2 class="settings__section">{{ t("settings.sectionAccount") }}</h2>
+          <OwnAccountCard v-for="server in servers.servers" :key="server.id" :server="server" />
+        </section>
       </div>
     </div>
   </main>
@@ -147,8 +150,9 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
   font-weight: var(--fw-semibold);
 }
 
-.settings__section--column {
+.settings__note {
   margin-top: var(--space-5);
+  color: var(--tx-secondary);
 }
 
 .settings__error {
@@ -160,7 +164,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
   margin-top: var(--space-4);
   padding-top: var(--space-4);
   border-top: var(--border-width) solid var(--bd);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .settings__mono {

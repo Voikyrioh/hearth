@@ -747,6 +747,8 @@ pub async fn start_engined(
         config.engine.enabled,
         engine.timings,
     );
+    // Le passage « à confirmer » et la chute d'une adoption sont consignés (auteur : le système).
+    registry.set_audit(services.audit_sink.clone());
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),
         container_engine,

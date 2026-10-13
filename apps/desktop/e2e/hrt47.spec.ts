@@ -106,7 +106,7 @@ test("le chemin long est tronqué au milieu, complet au clavier", async ({ page 
   await page.setViewportSize(SIZES[2]);
   await page.goto("/?nodev#/servers/forge/dashboard");
   await longNames(page);
-  const mid = page.locator(".disk").nth(2).locator(".disk__mount [data-middle]");
+  const mid = page.locator(".disk").nth(2).locator(".disk__name [data-middle]");
   await expect(mid).toBeVisible();
   const full =
     "/var/lib/docker/rootfs/overlayfs/516ea538beeb5e0443f9fa80d43d3f8c4c7b5fb99d71715882d9cb491826482b";

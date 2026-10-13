@@ -36,6 +36,23 @@ pub const CAPABILITY_SERVICE_RIGHTS: &str = "service-rights";
 /// réponse des candidats le dit alors par un refus `adoption_disabled`.
 pub const CAPABILITY_SERVICE_ADOPTION: &str = "service-adoption";
 
+/// `details.reason` des refus d'adoption (HRT-80, revue de la PR 89) : `409 CONFLICT` pour les deux premiers,
+/// `422 VALIDATION_ERROR` (avec `details.field = "keys"`) pour les trois autres. Additif : un agent plus
+/// ancien ne donne pas de raison pour la validation, un client qui lit une raison qu'il ne connaît pas la
+/// traite comme inconnue.
+pub mod adoption_refusal {
+    /// `[services] adoption = false` (BR-ADOPT-020).
+    pub const ADOPTION_DISABLED: &str = "adoption_disabled";
+    /// Le moteur n'est pas prêt (BR-ADOPT-026) ; `details.engine` dit son état.
+    pub const ENGINE_NOT_READY: &str = "engine_not_ready";
+    /// Aucune clé dans la demande.
+    pub const KEYS_EMPTY: &str = "keys_empty";
+    /// Plus de `MAX_ADOPTIONS` clés dans la demande.
+    pub const KEYS_TOO_MANY: &str = "keys_too_many";
+    /// Une clé deux fois dans la demande.
+    pub const KEYS_DUPLICATE: &str = "keys_duplicate";
+}
+
 /// Version minimale du moteur de conteneurs prise en charge (Docker Engine 20.10, API 1.41).
 pub const MIN_ENGINE_VERSION: &str = "20.10";
 

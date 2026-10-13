@@ -4,5 +4,5 @@ Organisme · `apps/desktop/src/components/organisms/AccountDetailDialog.vue`
 
 Détail d'un compte en lecture seule (HRT-78), ouvert par le nom dans `AccountTable` : rôle, dates, sessions et `ServicesRightRow`. Ne propose que « Fermer » ; le focus revient au nom. Ajout du ticket : le client n'avait pas de détail de compte.
 
-- Props : `account` (`null` : fermé), `rightsKnown` ; événement `close`
+- Props : `account` (`null` : fermé), `rightsKnown`, `meId` (HRT-135 : avertissement sur son propre compte), `removalReason` (HRT-134 : pourquoi tu ne peux pas supprimer ce compte, écrit sans survol) ; événement `close`
 - Tests : `pages/AccountsRights.test.ts`, `e2e/services-rights.spec.ts`.

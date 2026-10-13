@@ -37,6 +37,6 @@ const labelId = useId();
 
 .row__help {
   margin-top: var(--space-1);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 </style>

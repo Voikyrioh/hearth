@@ -63,7 +63,7 @@ function onKeydown(event: KeyboardEvent) {
   border: 0;
   border-bottom: var(--space-half) solid transparent;
   background: transparent;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   cursor: pointer;
   white-space: nowrap;
 }

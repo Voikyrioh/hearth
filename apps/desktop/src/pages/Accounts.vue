@@ -76,6 +76,14 @@ const keepsTrustedDevices = computed(() => {
 });
 // Le détail d'un compte (HRT-78) : lecture seule, le droit de gérer les services s'y lit.
 const detail = ref<Account | null>(null);
+// BR-GRANT-005 : le compte d'un titulaire du droit n'est supprimé que par un titulaire. La raison est écrite dans
+// le détail (en plus de l'infobulle du bouton « Supprimer »), pour se lire sans survol.
+const detailRemovalReason = computed(() => {
+  const target = detail.value;
+  if (!target || !entry.value?.rightsKnown || !target.managesServices) return undefined;
+  const me = accounts.value.find((account) => account.id === meId.value);
+  return me?.managesServices ? undefined : t("rights.removalBlocked");
+});
 
 // Changer un rôle, fermer des sessions et supprimer un compte sont des actes d'administration : chacun
 // passe par la fenêtre commune de confirmation (mot de passe selon ce que l'agent annonce, clé de ce PC
@@ -162,6 +170,8 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
   <AccountDetailDialog
     :account="detail"
     :rights-known="entry?.rightsKnown ?? false"
+    :me-id="meId"
+    :removal-reason="detailRemovalReason"
     @close="detail = null"
   />
 
@@ -255,6 +265,6 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
 }
 
 .accounts__notice--pending {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 </style>

@@ -265,7 +265,7 @@ const reasonText = computed(() =>
   padding: var(--space-4);
   border-radius: var(--radius-control);
   background: var(--card);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .audit__meta {
@@ -273,7 +273,7 @@ const reasonText = computed(() =>
   align-items: center;
   gap: var(--space-3);
   min-height: var(--control-sm);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .audit__area {
