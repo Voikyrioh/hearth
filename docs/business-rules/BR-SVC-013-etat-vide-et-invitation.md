@@ -18,8 +18,7 @@ Quand le moteur est prêt et qu'il n'y a aucun service, la liste est vide ; le t
 - `crates/hearth-proto/src/api/services.rs::ServicesState`
 
 ## Vérification
-- `crates/hearth-agent/src/application/services.rs::tests::the_first_state_is_checking_and_the_first_probe_publishes_at_once`
-- `crates/hearth-agent/tests/services_https.rs::reading_the_engine_and_the_services_writes_nothing_to_the_journal`
+- `crates/hearth-agent/src/application/services.rs::tests::a_ready_engine_without_a_container_gives_an_empty_list`
 
 ## Historique
 - 2026-10-13 — création (HRT-61, tranche 1 des déploiements : moteur détecté et liste en lecture seule).

@@ -26,13 +26,20 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use super::errors::translate;
 use super::installed::InstallMarkers;
 use super::translate::observation_from;
-use crate::application::ports::{ContainerEngine, EngineError, EngineEvent, EngineEvents};
+use crate::application::ports::{
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, Listing, Unreadable,
+};
 use crate::domain::services::{
-    Announced, ApiVersion, EngineProbe, MIN_API_VERSION, Observation, ProbeOutcome,
+    Announced, ApiVersion, EngineProbe, MAX_ENGINE_TEXT_CHARS, MAX_NAME_CHARS, MIN_API_VERSION,
+    Observation, ProbeOutcome, bounded,
 };
 
-/// Délai de la sonde (`BR-ENGINE-009`) : sans réponse en 5 secondes, le moteur « ne répond pas ».
+/// Délai de la sonde ENTIÈRE (`/_ping` puis `/version`, `BR-ENGINE-009`) : sans réponse complète en
+/// 5 secondes, le moteur « ne répond pas ».
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Délai de la relecture complète (liste et toutes les inspections) : au-delà, le moteur est
+/// considéré comme bloqué et la tâche du registre reprend la main (sonde, anti-clignotement).
+const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Délai d'une lecture (liste, inspection).
 const REQUEST_TIMEOUT_S: u64 = 10;
 /// Inspections simultanées au plus pendant une relecture complète.
@@ -53,7 +60,9 @@ pub enum Target {
     /// Le socket Unix du moteur (`/var/run/docker.sock`).
     Unix(PathBuf),
     /// Une adresse `hôte:port` en HTTP clair : un faux démon local en test (jamais en production,
-    /// où un moteur distant n'est pas pris en charge, ADR-0036).
+    /// où un moteur distant n'est pas pris en charge, ADR-0036). Aucune configuration ne le produit : seul
+    /// `BollardEngine::unix` est câblé (`app.rs`). Il reste compilé faute de fonctionnalité de test permise
+    /// (garde `confirmation_guard`) ; le faux démon HTTP des tests en a besoin sous Windows.
     Http(String),
 }
 
@@ -120,6 +129,68 @@ impl BollardEngine {
     pub fn unix(socket: impl Into<PathBuf>) -> Self {
         Self::new(Target::Unix(socket.into()), InstallMarkers::linux())
     }
+
+    /// La version d'API que le client négocié parle, `None` avant la première sonde réussie. Les
+    /// tests la comparent à ce que le moteur annonce.
+    pub fn spoken_api_version(&self) -> Option<ApiVersion> {
+        let client = self
+            .inner
+            .client
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()?;
+        let version = client.client_version();
+        Some(ApiVersion {
+            major: u32::try_from(version.major_version).ok()?,
+            minor: u32::try_from(version.minor_version).ok()?,
+        })
+    }
+
+    /// Liste puis inspecte chaque conteneur. Un conteneur disparu entre les deux est omis ; un
+    /// conteneur dont l'inspection échoue (délai, réponse illisible) est rendu à part ; seule la
+    /// perte du moteur (injoignable, accès refusé) interrompt la relecture.
+    async fn list_all(&self) -> Result<Listing, EngineError> {
+        let docker = self.inner.docker().await?;
+        let options = ListContainersOptionsBuilder::default().all(true).build();
+        let summaries = docker
+            .list_containers(Some(options))
+            .await
+            .map_err(|error| translate(&error))?;
+        let named: Vec<(String, String)> = summaries
+            .into_iter()
+            .filter_map(|summary| {
+                let name = summary
+                    .names
+                    .iter()
+                    .flatten()
+                    .next()
+                    .map(|name| bounded(name.trim_start_matches('/'), MAX_NAME_CHARS))
+                    .unwrap_or_default();
+                Some((summary.id?, name))
+            })
+            .collect();
+        let mut inspections = stream::iter(named)
+            .map(|(id, name)| {
+                let docker = docker.clone();
+                async move {
+                    let result = inspect_with(&docker, &id).await;
+                    (id, name, result)
+                }
+            })
+            .buffer_unordered(INSPECT_CONCURRENCY);
+        let mut listing = Listing::default();
+        while let Some((id, name, result)) = inspections.next().await {
+            match result {
+                Ok(Some(observation)) => listing.observations.push(observation),
+                // Supprimé entre la liste et son inspection : il n'existe plus.
+                Ok(None) => {}
+                // Le moteur est perdu : abandonner (les inspections en cours sont annulées).
+                Err(error) if error.engine_gone() => return Err(error),
+                Err(_) => listing.unreadable.push(Unreadable { id, name }),
+            }
+        }
+        Ok(listing)
+    }
 }
 
 impl Inner {
@@ -146,7 +217,7 @@ impl Inner {
             .map_err(|_| EngineError::Timeout)?
             .map_err(|failure| match failure {
                 PingFailure::NoAnswer => EngineError::Timeout,
-                PingFailure::Denied => EngineError::Refused,
+                PingFailure::Denied => EngineError::Denied,
                 PingFailure::Missing | PingFailure::Refused => EngineError::Unreachable,
             })?;
         let docker = self.build(reply.api_version)?;
@@ -162,8 +233,11 @@ impl Inner {
             Target::Unix(path) => {
                 Docker::connect_with_unix(&path.to_string_lossy(), REQUEST_TIMEOUT_S, &version)
             }
+            // Pas de socket Unix hors Unix : « injoignable ».
             #[cfg(not(unix))]
-            Target::Unix(_) => return Err(EngineError::Unreachable),
+            Target::Unix(path) => Err(bollard::errors::Error::SocketNotFoundError(
+                path.to_string_lossy().into_owned(),
+            )),
             Target::Http(address) => {
                 Docker::connect_with_http(address, REQUEST_TIMEOUT_S, &version)
             }
@@ -283,134 +357,123 @@ fn announced_name(version: &SystemVersion) -> String {
         .flatten()
         .find(|component| component.name.to_lowercase().contains("podman"))
     {
-        return component.name.clone();
+        return bounded(&component.name, MAX_ENGINE_TEXT_CHARS);
     }
     match version
         .platform
         .as_ref()
         .map(|platform| platform.name.trim())
     {
-        Some(name) if !name.is_empty() => name.to_owned(),
+        Some(name) if !bounded(name, MAX_ENGINE_TEXT_CHARS).is_empty() => {
+            bounded(name, MAX_ENGINE_TEXT_CHARS)
+        }
         _ => "Docker Engine".to_owned(),
+    }
+}
+
+/// Les échanges de la sonde, sans délai : l'appelant les borne ensemble.
+async fn probe_steps(inner: &Inner) -> EngineProbe {
+    let installed = |present: bool| EngineProbe {
+        outcome: ProbeOutcome::SocketMissing,
+        installed: present,
+    };
+    let reply = match ping(&inner.target).await {
+        Err(failure) => {
+            inner.forget();
+            return match failure {
+                PingFailure::Missing => installed(inner.markers.any_present()),
+                PingFailure::Refused => EngineProbe {
+                    outcome: ProbeOutcome::Refused,
+                    installed: inner.markers.any_present(),
+                },
+                PingFailure::Denied => EngineProbe {
+                    outcome: ProbeOutcome::PermissionDenied,
+                    installed: true,
+                },
+                PingFailure::NoAnswer => EngineProbe {
+                    outcome: ProbeOutcome::NoAnswer,
+                    installed: true,
+                },
+            };
+        }
+        Ok(reply) => reply,
+    };
+    // Le moteur répond : `/version` une fois, puis seulement si son API change ou après une panne.
+    let cached = inner
+        .announced
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    if let Some((api, announced)) = cached
+        && api == reply.api_version
+    {
+        return EngineProbe {
+            outcome: ProbeOutcome::Answered(announced),
+            installed: true,
+        };
+    }
+    let no_answer = EngineProbe {
+        outcome: ProbeOutcome::NoAnswer,
+        installed: true,
+    };
+    let Ok(docker) = inner.build(reply.api_version) else {
+        return no_answer;
+    };
+    let version = match docker.version().await {
+        Ok(version) => version,
+        Err(_) => {
+            inner.forget();
+            return no_answer;
+        }
+    };
+    let api_version = version
+        .api_version
+        .as_deref()
+        .and_then(ApiVersion::parse)
+        .or(reply.api_version);
+    let Some(api_version) = api_version else {
+        inner.forget();
+        return no_answer;
+    };
+    let announced = Announced {
+        name: announced_name(&version),
+        version: bounded(
+            version.version.as_deref().unwrap_or_default(),
+            MAX_ENGINE_TEXT_CHARS,
+        ),
+        api_version,
+    };
+    *inner.client.lock().unwrap_or_else(PoisonError::into_inner) = Some(docker);
+    *inner
+        .announced
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some((reply.api_version, announced.clone()));
+    EngineProbe {
+        outcome: ProbeOutcome::Answered(announced),
+        installed: true,
     }
 }
 
 #[async_trait]
 impl ContainerEngine for BollardEngine {
     async fn probe(&self) -> EngineProbe {
-        let inner = &self.inner;
-        let installed = |present: bool| EngineProbe {
-            outcome: ProbeOutcome::SocketMissing,
-            installed: present,
-        };
-        let reply = match tokio::time::timeout(inner.probe_timeout, ping(&inner.target)).await {
+        // Un seul délai pour toute la sonde (`/_ping` puis `/version`) : `BR-ENGINE-009`.
+        match tokio::time::timeout(self.inner.probe_timeout, probe_steps(&self.inner)).await {
+            Ok(probe) => probe,
             Err(_) => {
-                inner.forget();
-                return EngineProbe {
+                self.inner.forget();
+                EngineProbe {
                     outcome: ProbeOutcome::NoAnswer,
                     installed: true,
-                };
+                }
             }
-            Ok(Err(failure)) => {
-                inner.forget();
-                return match failure {
-                    PingFailure::Missing => installed(inner.markers.any_present()),
-                    PingFailure::Refused => EngineProbe {
-                        outcome: ProbeOutcome::Refused,
-                        installed: inner.markers.any_present(),
-                    },
-                    PingFailure::Denied => EngineProbe {
-                        outcome: ProbeOutcome::PermissionDenied,
-                        installed: true,
-                    },
-                    PingFailure::NoAnswer => EngineProbe {
-                        outcome: ProbeOutcome::NoAnswer,
-                        installed: true,
-                    },
-                };
-            }
-            Ok(Ok(reply)) => reply,
-        };
-        // Le moteur répond : `/version` une fois, puis seulement si son API change ou après une panne.
-        let cached = inner
-            .announced
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        if let Some((api, announced)) = cached
-            && api == reply.api_version
-        {
-            return EngineProbe {
-                outcome: ProbeOutcome::Answered(announced),
-                installed: true,
-            };
-        }
-        let no_answer = EngineProbe {
-            outcome: ProbeOutcome::NoAnswer,
-            installed: true,
-        };
-        let Ok(docker) = inner.build(reply.api_version) else {
-            return no_answer;
-        };
-        let version = match tokio::time::timeout(inner.probe_timeout, docker.version()).await {
-            Ok(Ok(version)) => version,
-            _ => {
-                inner.forget();
-                return no_answer;
-            }
-        };
-        let api_version = version
-            .api_version
-            .as_deref()
-            .and_then(ApiVersion::parse)
-            .or(reply.api_version);
-        let Some(api_version) = api_version else {
-            inner.forget();
-            return no_answer;
-        };
-        let announced = Announced {
-            name: announced_name(&version),
-            version: version.version.clone().unwrap_or_default(),
-            api_version,
-        };
-        *inner.client.lock().unwrap_or_else(PoisonError::into_inner) = Some(docker);
-        *inner
-            .announced
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some((reply.api_version, announced.clone()));
-        EngineProbe {
-            outcome: ProbeOutcome::Answered(announced),
-            installed: true,
         }
     }
 
-    async fn list(&self) -> Result<Vec<Observation>, EngineError> {
-        let docker = self.inner.docker().await?;
-        let options = ListContainersOptionsBuilder::default().all(true).build();
-        let summaries = docker
-            .list_containers(Some(options))
+    async fn list(&self) -> Result<Listing, EngineError> {
+        tokio::time::timeout(LIST_TIMEOUT, self.list_all())
             .await
-            .map_err(|error| translate(&error))?;
-        let ids: Vec<String> = summaries
-            .into_iter()
-            .filter_map(|summary| summary.id)
-            .collect();
-        // Un conteneur supprimé entre la liste et son inspection disparaît de la liste sans erreur.
-        let results: Vec<Result<Option<Observation>, EngineError>> = stream::iter(ids)
-            .map(|id| {
-                let docker = docker.clone();
-                async move { inspect_with(&docker, &id).await }
-            })
-            .buffer_unordered(INSPECT_CONCURRENCY)
-            .collect()
-            .await;
-        let mut observations = Vec::with_capacity(results.len());
-        for result in results {
-            if let Some(observation) = result? {
-                observations.push(observation);
-            }
-        }
-        Ok(observations)
+            .map_err(|_| EngineError::Timeout)?
     }
 
     async fn inspect(&self, id: &str) -> Result<Option<Observation>, EngineError> {

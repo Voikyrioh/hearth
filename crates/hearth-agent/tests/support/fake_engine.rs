@@ -1,3 +1,4 @@
+#![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 //! Faux moteur de conteneurs : un script de conteneurs, des événements injectables, une sonde réglable.
 //!
 //! Sert à tous les tests de l'agent : le poste de développement n'a pas de moteur (le vrai n'existe
@@ -14,9 +15,11 @@ use futures_util::stream;
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
-use crate::application::ports::{ContainerEngine, EngineError, EngineEvent, EngineEvents};
-use crate::domain::services::image::image_name;
-use crate::domain::services::{
+use hearth_agent::application::ports::{
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, Listing, Unreadable,
+};
+use hearth_agent::domain::services::image::image_name;
+use hearth_agent::domain::services::{
     Announced, ApiVersion, EngineProbe, Observation, ProbeOutcome, RestartPolicy, RunState,
 };
 
@@ -31,6 +34,10 @@ struct State {
     probe: EngineProbe,
     containers: BTreeMap<String, Observation>,
     list_error: Option<EngineError>,
+    /// Conteneurs dont l'inspection échoue (la liste les nomme, l'inspection répond par l'erreur).
+    inspect_errors: BTreeMap<String, EngineError>,
+    /// Le flux d'événements se ferme aussitôt ouvert (un moteur dont le flux ne tient pas).
+    events_broken: bool,
 }
 
 pub struct FakeEngine {
@@ -99,6 +106,8 @@ impl FakeEngine {
                 probe: ready_probe(),
                 containers: BTreeMap::new(),
                 list_error: None,
+                inspect_errors: BTreeMap::new(),
+                events_broken: false,
             }),
             feed,
             probes: AtomicU64::new(0),
@@ -170,6 +179,20 @@ impl FakeEngine {
         self.lock().list_error = error;
     }
 
+    /// Fait échouer l'inspection d'un conteneur (None : rétablit). La liste le rend « illisible ».
+    pub fn fail_inspect(&self, id: &str, error: Option<EngineError>) {
+        let mut state = self.lock();
+        match error {
+            Some(error) => state.inspect_errors.insert(id.to_owned(), error),
+            None => state.inspect_errors.remove(id),
+        };
+    }
+
+    /// Les flux d'événements ouverts à partir de maintenant se ferment aussitôt (true) ou tiennent.
+    pub fn set_events_broken(&self, broken: bool) {
+        self.lock().events_broken = broken;
+    }
+
     pub fn probe_count(&self) -> u64 {
         self.probes.load(Ordering::SeqCst)
     }
@@ -201,25 +224,42 @@ impl ContainerEngine for FakeEngine {
         self.lock().probe.clone()
     }
 
-    async fn list(&self) -> Result<Vec<Observation>, EngineError> {
+    async fn list(&self) -> Result<Listing, EngineError> {
         self.lists.fetch_add(1, Ordering::SeqCst);
         let state = self.lock();
         if let Some(error) = state.list_error {
             return Err(error);
         }
-        Ok(state.containers.values().cloned().collect())
+        let mut listing = Listing::default();
+        for (id, observation) in &state.containers {
+            match state.inspect_errors.get(id) {
+                Some(error) if error.engine_gone() => return Err(*error),
+                Some(_) => listing.unreadable.push(Unreadable {
+                    id: id.clone(),
+                    name: observation.name.clone(),
+                }),
+                None => listing.observations.push(observation.clone()),
+            }
+        }
+        Ok(listing)
     }
 
     async fn inspect(&self, id: &str) -> Result<Option<Observation>, EngineError> {
         self.inspections.fetch_add(1, Ordering::SeqCst);
         let state = self.lock();
-        if let Some(error) = state.list_error {
+        if let Some(error) = state
+            .list_error
+            .or_else(|| state.inspect_errors.get(id).copied())
+        {
             return Err(error);
         }
         Ok(state.containers.get(id).cloned())
     }
 
     fn events(&self) -> EngineEvents {
+        if self.lock().events_broken {
+            return stream::empty().boxed();
+        }
         let receiver = self.feed.subscribe();
         stream::unfold(receiver, |mut receiver| async move {
             loop {
@@ -233,45 +273,5 @@ impl ContainerEngine for FakeEngine {
             }
         })
         .boxed()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn the_fake_lists_inspects_and_streams_events() {
-        let engine = FakeEngine::new();
-        let web = container("web", RunState::Running);
-        let id = web.id.clone();
-        engine.put_silently(web);
-        assert_eq!(engine.list().await.expect("list").len(), 1);
-        assert!(engine.inspect(&id).await.expect("inspect").is_some());
-        assert!(engine.inspect("absent").await.expect("inspect").is_none());
-
-        let mut events = engine.events();
-        engine.emit(&id, "die");
-        let event = tokio::time::timeout(Duration::from_secs(1), events.next())
-            .await
-            .expect("événement")
-            .expect("flux ouvert")
-            .expect("pas d'erreur");
-        assert_eq!(event.container_id, id);
-        engine.break_events();
-        let end = tokio::time::timeout(Duration::from_secs(1), events.next())
-            .await
-            .expect("fin");
-        assert!(end.is_none());
-    }
-
-    #[test]
-    fn the_sample_container_is_stable_and_carries_no_environment() {
-        let a = container("web", RunState::Running);
-        assert_eq!(a.id, container("web", RunState::Exited).id);
-        assert_eq!(a.id.len(), 64);
-        assert_ne!(a.id, container("db", RunState::Running).id);
     }
 }

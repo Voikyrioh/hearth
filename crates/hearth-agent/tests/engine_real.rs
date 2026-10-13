@@ -137,3 +137,184 @@ async fn the_real_engine_is_detected_as_ready_and_a_missing_socket_as_absent_or_
     let state = classify_probe(true, Some(&missing.probe().await));
     assert!(matches!(state, EngineState::Absent | EngineState::Stopped));
 }
+
+#[tokio::test]
+#[ignore = "vrai moteur : HEARTH_TEST_ENGINE=1 cargo test -p hearth-agent --test engine_real -- --ignored"]
+async fn the_negotiated_api_version_is_the_one_the_real_engine_announces() {
+    if !enabled() {
+        eprintln!("HEARTH_TEST_ENGINE=1 n'est pas posé : test non exécuté");
+        return;
+    }
+    use hearth_agent::domain::services::{ApiVersion, MIN_API_VERSION, ProbeOutcome};
+    let engine = BollardEngine::unix(socket());
+    let ProbeOutcome::Answered(announced) = engine.probe().await.outcome else {
+        panic!("le moteur du runner doit répondre");
+    };
+    // La source indépendante : la ligne de commande du moteur.
+    let cli_api = docker(&["version", "--format", "{{.Server.APIVersion}}"]);
+    let cli_version = docker(&["version", "--format", "{{.Server.Version}}"]);
+    assert_eq!(
+        Some(announced.api_version),
+        ApiVersion::parse(&cli_api),
+        "version d'API annoncée par la sonde et par `docker version`"
+    );
+    assert_eq!(announced.version, cli_version);
+    assert!(announced.api_version >= MIN_API_VERSION);
+    // Le client parle cette version d'API, plafonnée à celle de `bollard` (jamais plus récente que
+    // le moteur : un Docker 20.10 refuse une version trop neuve).
+    let ceiling = ApiVersion {
+        major: bollard::API_DEFAULT_VERSION.major_version as u32,
+        minor: bollard::API_DEFAULT_VERSION.minor_version as u32,
+    };
+    assert_eq!(
+        engine.spoken_api_version(),
+        Some(announced.api_version.min(ceiling))
+    );
+}
+
+#[tokio::test]
+#[ignore = "vrai moteur : HEARTH_TEST_ENGINE=1 cargo test -p hearth-agent --test engine_real -- --ignored"]
+async fn the_real_engine_describes_pause_mounts_labels_policy_and_random_ports() {
+    if !enabled() {
+        eprintln!("HEARTH_TEST_ENGINE=1 n'est pas posé : test non exécuté");
+        return;
+    }
+    use hearth_agent::domain::services::{MountType, RestartPolicy, RunState};
+    docker(&["pull", "--quiet", IMAGE]);
+    remove_leftovers();
+    let name = format!("{PREFIX}-describe");
+    let volume = format!("{PREFIX}-volume");
+    docker(&["volume", "create", &volume]);
+    let folder = std::env::temp_dir().to_string_lossy().into_owned();
+    let volume_mount = format!("{volume}:/data");
+    let folder_mount = format!("{folder}:/host:ro");
+    let id = docker(&[
+        "run",
+        "-d",
+        "--name",
+        &name,
+        "--restart",
+        "unless-stopped",
+        "--label",
+        "com.docker.compose.project=hearth-shop",
+        "-v",
+        &volume_mount,
+        "-v",
+        &folder_mount,
+        // Un port du conteneur sans port du serveur demandé : le moteur en attribue un au hasard.
+        "-p",
+        "80",
+        IMAGE,
+        "sleep",
+        "300",
+    ]);
+    let engine = BollardEngine::unix(socket());
+    let running = engine
+        .inspect(&id)
+        .await
+        .expect("inspection")
+        .expect("le conteneur existe");
+    assert_eq!(running.run_state, RunState::Running);
+    assert_eq!(running.restart, RestartPolicy::UnlessStopped);
+    assert_eq!(running.compose_project.as_deref(), Some("hearth-shop"));
+    let data = running
+        .mounts
+        .iter()
+        .find(|mount| mount.target == "/data")
+        .expect("volume");
+    assert_eq!(
+        (data.kind, data.source.as_str()),
+        (MountType::Volume, volume.as_str())
+    );
+    assert!(!data.read_only);
+    let host = running
+        .mounts
+        .iter()
+        .find(|mount| mount.target == "/host")
+        .expect("dossier");
+    assert_eq!(host.kind, MountType::Folder);
+    assert!(host.read_only);
+    let random = running
+        .ports
+        .iter()
+        .find(|port| port.container_port == 80)
+        .expect("port attribué au hasard");
+    assert!(random.host_port > 0, "le vrai port, pas 0 : {random:?}");
+
+    // En pause, puis relancé.
+    docker(&["pause", &id]);
+    let paused = engine.inspect(&id).await.unwrap().unwrap();
+    assert_eq!(paused.run_state, RunState::Paused);
+    docker(&["unpause", &id]);
+    assert_eq!(
+        engine.inspect(&id).await.unwrap().unwrap().run_state,
+        RunState::Running
+    );
+    docker(&["rm", "-f", &id]);
+    docker(&["volume", "rm", &volume]);
+    remove_leftovers();
+}
+
+/// Le compte de test n'est pas root : seul un compte ordinaire se voit refuser un socket sans droit.
+#[cfg(unix)]
+fn running_as_root() -> bool {
+    Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim() == "0")
+        .unwrap_or(true)
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "vrai moteur : HEARTH_TEST_ENGINE=1 cargo test -p hearth-agent --test engine_real -- --ignored"]
+async fn a_socket_without_rights_is_access_denied_and_a_mute_socket_is_unresponsive() {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !enabled() {
+        eprintln!("HEARTH_TEST_ENGINE=1 n'est pas posé : test non exécuté");
+        return;
+    }
+    use hearth_agent::domain::services::{EngineState, classify_probe};
+    use hearth_agent::infrastructure::engine::{InstallMarkers, Target};
+    let dir = tempfile::tempdir().expect("dossier");
+
+    // Un socket Unix réel dont le fichier n'a plus aucun droit : `EACCES` à la connexion.
+    if running_as_root() {
+        eprintln!("compte root : un socket sans droit reste ouvert, cas non vérifiable ici");
+    } else {
+        let path = dir.path().join("denied.sock");
+        let _listener = tokio::net::UnixListener::bind(&path).expect("socket");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        let engine = BollardEngine::new(
+            Target::Unix(path),
+            InstallMarkers::at(Vec::<PathBuf>::new()),
+        );
+        assert_eq!(
+            classify_probe(true, Some(&engine.probe().await)),
+            EngineState::AccessDenied
+        );
+    }
+
+    // Un socket qui accepte la connexion mais ne répond jamais : « ne répond pas » au bout du délai.
+    let path = dir.path().join("mute.sock");
+    let listener = tokio::net::UnixListener::bind(&path).expect("socket");
+    let _holder = tokio::spawn(async move {
+        let mut open = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            open.push(stream);
+        }
+    });
+    let engine = BollardEngine::new(
+        Target::Unix(path),
+        InstallMarkers::at(Vec::<PathBuf>::new()),
+    )
+    .with_probe_timeout(std::time::Duration::from_secs(1));
+    let started = std::time::Instant::now();
+    let probe = engine.probe().await;
+    assert_eq!(
+        classify_probe(true, Some(&probe)),
+        EngineState::Unresponsive
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(4));
+}

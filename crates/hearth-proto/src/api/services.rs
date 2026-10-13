@@ -8,6 +8,10 @@
 //! tranche ne les remplit : un client récent lit un agent ancien, un client ancien ignore ce qu'il
 //! ne connaît pas.
 //!
+//! Les énumérations que le client lit tolèrent une valeur inconnue (variante `Unknown`, ou `Other` pour
+//! le système d'init) : un agent plus récent peut ajouter une valeur sans que le client déjà installé
+//! ne perde tout l'instantané (la capacité annoncée et `API_VERSION` ne bougent pas pour si peu).
+//!
 //! Les dates sont des textes RFC 3339 en UTC. Les textes affichés viennent de l'interface,
 //! indexés par ces codes.
 
@@ -43,6 +47,9 @@ pub enum EngineState {
     UnsupportedVersion,
     /// Pilotage des services désactivé dans la configuration de l'agent (`engine.enabled = false`).
     Disabled,
+    /// Un état que ce client ne connaît pas (ajouté par un agent plus récent).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Le système d'init du serveur.
@@ -50,6 +57,8 @@ pub enum EngineState {
 #[serde(rename_all = "snake_case")]
 pub enum InitSystem {
     Systemd,
+    /// Tout autre système d'init, y compris un que ce client ne connaît pas.
+    #[serde(other)]
     Other,
 }
 
@@ -100,6 +109,8 @@ pub enum ServiceState {
     RestartLoop,
     Paused,
     Deploying,
+    /// État du moteur que l'agent ne sait pas nommer, ou état que ce client ne connaît pas.
+    #[serde(other)]
     Unknown,
 }
 
@@ -109,6 +120,9 @@ pub enum ServiceState {
 pub enum ServiceOrigin {
     Hearth,
     External,
+    /// Une origine que ce client ne connaît pas.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Qui pilote le service. Absent dans cette tranche (jamais rempli).
@@ -117,6 +131,9 @@ pub enum ServiceOrigin {
 pub enum ServiceDriver {
     Engine,
     Supervisor,
+    /// Un pilote que ce client ne connaît pas.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -125,6 +142,9 @@ pub enum PortProtocol {
     Tcp,
     Udp,
     Sctp,
+    /// Un protocole que ce client ne connaît pas.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Qui peut joindre un port publié.
@@ -135,6 +155,9 @@ pub enum PortScope {
     All,
     /// Ce serveur seulement (adresse locale).
     Local,
+    /// Une portée que ce client ne connaît pas.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +175,9 @@ pub enum MountKind {
     Folder,
     /// Un volume géré par le moteur.
     Volume,
+    /// Un genre de montage que ce client ne connaît pas.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +210,13 @@ pub enum RestartMode {
     Always,
     OnFailure,
     None,
+    /// Le système du serveur (systemd) relance le service, pas le moteur (conception technique,
+    /// section 7). Jamais produit par la tranche 1 ; déclaré pour qu'un client de cette tranche
+    /// lise un agent de la tranche 2.
+    Supervisor,
+    /// Une politique que ce client ne connaît pas.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Verrou d'une action en cours. Jamais rempli dans cette tranche (lecture seule).
@@ -376,5 +409,56 @@ mod tests {
             "restart":"none"}"#;
         let item: ServiceItem = serde_json::from_str(text).expect("item");
         assert!(item.busy.is_none() && item.last_action.is_none());
+    }
+
+    #[test]
+    fn every_enum_the_client_reads_tolerates_a_value_it_does_not_know() {
+        fn read<T: serde::de::DeserializeOwned>(code: &str) -> T {
+            serde_json::from_value(serde_json::json!(code)).expect("une valeur inconnue est lue")
+        }
+        assert_eq!(read::<EngineState>("quantum"), EngineState::Unknown);
+        assert_eq!(read::<InitSystem>("quantum"), InitSystem::Other);
+        assert_eq!(read::<ServiceState>("quantum"), ServiceState::Unknown);
+        assert_eq!(read::<ServiceOrigin>("quantum"), ServiceOrigin::Unknown);
+        assert_eq!(read::<ServiceDriver>("quantum"), ServiceDriver::Unknown);
+        assert_eq!(read::<PortProtocol>("quantum"), PortProtocol::Unknown);
+        assert_eq!(read::<PortScope>("quantum"), PortScope::Unknown);
+        assert_eq!(read::<MountKind>("quantum"), MountKind::Unknown);
+        assert_eq!(read::<RestartMode>("quantum"), RestartMode::Unknown);
+        // La valeur que la tranche 2 produit pour un service relancé par le système du serveur.
+        assert_eq!(read::<RestartMode>("supervisor"), RestartMode::Supervisor);
+        assert_eq!(
+            serde_json::to_value(RestartMode::Supervisor).expect("json"),
+            serde_json::json!("supervisor")
+        );
+    }
+
+    #[test]
+    fn a_whole_state_from_a_newer_agent_still_reads() {
+        // Un agent de la tranche suivante : un état de moteur, un état de service, une origine, un
+        // pilote, un protocole, une portée, un genre de montage et une politique que ce client ne
+        // connaît pas. Rien de cela ne fait perdre l'instantané.
+        let text = r#"{"rev":7,
+            "engine":{"state":"hibernating","min_version":"20.10","agent_account":"root",
+              "agent_is_admin":true,"checked_at":"2026-10-13T10:00:00Z",
+              "host":{"os_id":"debian","os_like":[],"init":"runit","declarative":false}},
+            "services":[{"key":"c_1","name":"a","origin":"imported","driver":"swarm",
+              "removed_on_stop":false,"state":"migrating","never_started":false,"restarts_10m":0,
+              "image":{"short_id":"abc"},
+              "ports":[{"host_port":1,"container_port":2,"protocol":"quic","scope":"vpn"}],
+              "host_network":false,
+              "mounts":[{"kind":"nfs","source":"s","target":"t","read_only":true}],
+              "restart":"supervisor"}]}"#;
+        let state: ServicesState = serde_json::from_str(text).expect("instantané");
+        assert_eq!(state.engine.state, EngineState::Unknown);
+        assert_eq!(state.engine.host.init, InitSystem::Other);
+        let item = &state.services[0];
+        assert_eq!(item.state, ServiceState::Unknown);
+        assert_eq!(item.origin, ServiceOrigin::Unknown);
+        assert_eq!(item.driver, Some(ServiceDriver::Unknown));
+        assert_eq!(item.ports[0].protocol, PortProtocol::Unknown);
+        assert_eq!(item.ports[0].scope, PortScope::Unknown);
+        assert_eq!(item.mounts[0].kind, MountKind::Unknown);
+        assert_eq!(item.restart, RestartMode::Supervisor);
     }
 }

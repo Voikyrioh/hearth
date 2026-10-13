@@ -5,6 +5,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use super::fake_engine::FakeEngine;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -18,7 +19,6 @@ use hearth_agent::domain::install_id::InstallId;
 use hearth_agent::entrypoint::http::{AppState, router};
 use hearth_agent::entrypoint::ws::{StreamContext, StreamSettings};
 use hearth_agent::infrastructure::clock::SystemMonotonic;
-use hearth_agent::infrastructure::engine::FakeEngine;
 use serde_json::Value;
 use tower::ServiceExt;
 

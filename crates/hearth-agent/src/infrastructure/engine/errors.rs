@@ -13,6 +13,7 @@ pub fn translate(error: &Error) -> EngineError {
     match error {
         Error::DockerResponseServerError { status_code, .. } => match *status_code {
             404 => EngineError::NotFound,
+            401 | 403 => EngineError::Denied,
             // Ni un refus du moteur, ni un conteneur absent : le moteur ne tient pas la route.
             502..=504 => EngineError::Unreachable,
             _ => EngineError::Refused,
@@ -48,7 +49,7 @@ mod tests {
 
     #[test]
     fn an_unknown_server_text_is_a_refusal() {
-        for status in [400, 403, 409, 500] {
+        for status in [400, 409, 500] {
             assert_eq!(
                 translate(&server(status, "un texte jamais vu")),
                 EngineError::Refused,
@@ -56,6 +57,10 @@ mod tests {
             );
         }
         assert_eq!(translate(&server(503, "x")), EngineError::Unreachable);
+        // Un refus d'autorisation (proxy de socket, plugin) est un accès refusé, pas un texte inconnu.
+        for status in [401, 403] {
+            assert_eq!(translate(&server(status, "x")), EngineError::Denied);
+        }
     }
 
     #[test]

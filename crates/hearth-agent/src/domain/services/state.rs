@@ -102,6 +102,39 @@ pub struct Observation {
     pub compose_project: Option<String>,
 }
 
+impl Observation {
+    /// Un conteneur que la liste du moteur montre mais dont l'inspection a échoué : sa ligne reste
+    /// dans la liste dans l'état « non reconnu » (`BR-SVC-004`) plutôt que de disparaître ou de
+    /// geler toute la liste (`BR-SVC-001`). Le nom vient de la liste ; à défaut, l'identifiant court.
+    pub fn unreadable(id: &str, name: &str) -> Self {
+        let name = if name.is_empty() {
+            id.chars().take(12).collect()
+        } else {
+            name.to_owned()
+        };
+        Self {
+            id: id.to_owned(),
+            name,
+            created_at: None,
+            run_state: RunState::Unknown,
+            exit_code: None,
+            started_at: None,
+            finished_at: None,
+            image: ImageName {
+                reference: None,
+                tag: None,
+                short_id: String::new(),
+            },
+            ports: Vec::new(),
+            host_network: false,
+            mounts: Vec::new(),
+            restart: RestartPolicy::None,
+            auto_remove: false,
+            compose_project: None,
+        }
+    }
+}
+
 /// L'état d'un service et ce qui s'y rattache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceStateKind {

@@ -8,6 +8,11 @@
 //!    événements d'un lot de 250 ms sont regroupés, chaque conteneur touché est relu (un seul) ;
 //! 3. si le flux d'événements se rompt, sonde tout de suite puis relit tout.
 //!
+//! Un conteneur dont l'inspection échoue (disparu, réponse illisible, délai) ne gèle pas la liste :
+//! il garde sa dernière observation, ou apparaît « non reconnu » s'il est nouveau, et la relecture
+//! est retentée en reculant (2 s, 4 s, 8 s… jusqu'à 60 s). Une liste refusée (401, 403) alors que la
+//! sonde répond donne « accès refusé », pas « prêt » avec une liste vide.
+//!
 //! L'état du moteur passe par `Debounce` : au plus un changement affiché toutes les 5 secondes.
 //! Chaque changement est un lot (`ServicesChange`) diffusé aux abonnés ; un abonné trop lent
 //! (`RecvError::Lagged`) relit un instantané complet. `rev` croît à chaque changement et repart de
@@ -17,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use futures_util::StreamExt;
+use futures_util::{StreamExt, stream};
 use time::OffsetDateTime;
 use tokio::sync::{Notify, broadcast};
 use tokio::time::{Instant, MissedTickBehavior, interval, sleep, sleep_until};
@@ -32,6 +37,13 @@ use crate::domain::services::{
 
 /// Capacité de la diffusion : un abonné qui prend plus de 64 lots de retard relit un instantané.
 const CHANNEL_CAPACITY: usize = 64;
+/// Inspections simultanées au plus lors de la relecture des conteneurs touchés par un lot d'événements.
+const REFRESH_CONCURRENCY: usize = 8;
+/// Délai de la relecture des conteneurs touchés : au-delà, le moteur est à revérifier.
+const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
+/// La relecture qui échoue ou laisse des conteneurs illisibles est retentée au plus toutes les
+/// `ready_period` x 30 (60 s en production).
+const MAX_BACKOFF_FACTOR: u32 = 30;
 
 /// Les cadences du registre. Celles de production sont celles de la conception ; les tests les
 /// raccourcissent.
@@ -121,6 +133,12 @@ struct Inner {
     windows: HashMap<ServiceKey, StartWindow>,
     published_engine: EngineKey,
     published: HashMap<ServiceKey, ServiceView>,
+    /// Conteneurs vus dans la liste mais illisibles à la dernière relecture complète.
+    degraded: usize,
+    /// La liste a été refusée (401, 403) alors que la sonde répond : l'accès est refusé.
+    list_denied: bool,
+    /// Une sonde est en cours : une relance demandée pendant ce temps n'en lance pas une autre.
+    probing: bool,
 }
 
 pub struct ServicesRegistry {
@@ -177,6 +195,9 @@ impl ServicesRegistry {
                 windows: HashMap::new(),
                 published_engine: (published, None, None),
                 published: HashMap::new(),
+                degraded: 0,
+                list_denied: false,
+                probing: false,
             }),
             clock,
             monotonic,
@@ -245,28 +266,52 @@ impl ServicesRegistry {
     }
 
     /// « Vérifier à nouveau » : relance la détection tout de suite et rend l'état. Sans effet sur le
-    /// moteur ; trop rapproché de la sonde précédente, l'état courant est rendu sans sonder.
+    /// moteur ; trop rapproché de la sonde précédente, ou pendant qu'une sonde est déjà en cours,
+    /// l'état courant est rendu sans sonder. La demande est ouverte aux deux rôles (spec : « tous ») ;
+    /// le résultat est publié tout de suite, hors anti-clignotement : l'état affiché ne change que si
+    /// l'état réel du moteur a changé, et au plus une fois par `min_recheck`.
     pub async fn recheck(&self) -> EngineStatus {
-        if self.enabled {
-            let recent = {
-                let inner = self.lock();
-                inner
-                    .last_probe
-                    .is_some_and(|at| self.mono().saturating_sub(at) < self.timings.min_recheck)
-            };
-            if !recent {
-                self.probe_and_apply(true).await;
-                self.wake.notify_one();
-            }
+        if self.enabled && self.claim_probe() {
+            self.probe_and_apply(true).await;
+            self.wake.notify_one();
         }
         self.engine_status()
+    }
+
+    /// Réserve la sonde d'une relance, d'un seul geste : deux demandes simultanées n'en lancent pas
+    /// deux.
+    fn claim_probe(&self) -> bool {
+        let mut inner = self.lock();
+        let now = self.mono();
+        let too_soon = inner
+            .last_probe
+            .is_some_and(|at| now.saturating_sub(at) < self.timings.min_recheck);
+        if inner.probing || too_soon {
+            return false;
+        }
+        inner.last_probe = Some(now);
+        inner.probing = true;
+        true
+    }
+
+    /// Une sonde a-t-elle eu lieu depuis moins de `within` ?
+    fn probed_within(&self, within: Duration) -> bool {
+        self.lock()
+            .last_probe
+            .is_some_and(|at| self.mono().saturating_sub(at) < within)
     }
 
     /// Sonde (sauf désactivé) puis applique le résultat. Rend l'état observé.
     async fn probe_and_apply(&self, force: bool) -> EngineState {
         let probe = if self.enabled {
-            self.lock().last_probe = Some(self.mono());
-            Some(self.engine.probe().await)
+            {
+                let mut inner = self.lock();
+                inner.last_probe = Some(self.mono());
+                inner.probing = true;
+            }
+            let probe = self.engine.probe().await;
+            self.lock().probing = false;
+            Some(probe)
         } else {
             None
         };
@@ -274,6 +319,17 @@ impl ServicesRegistry {
     }
 
     fn apply_probe(&self, probe: Option<EngineProbe>, force: bool) -> EngineState {
+        // La sonde répond mais la liste est refusée : pour l'utilisateur, l'accès est refusé.
+        let probe = match probe {
+            Some(EngineProbe {
+                outcome: ProbeOutcome::Answered(_),
+                installed,
+            }) if self.lock().list_denied => Some(EngineProbe {
+                outcome: ProbeOutcome::PermissionDenied,
+                installed,
+            }),
+            other => other,
+        };
         let observed = classify_probe(self.enabled, probe.as_ref());
         let announced = match probe.map(|probe| probe.outcome) {
             Some(ProbeOutcome::Answered(announced)) => Some(announced),
@@ -326,39 +382,93 @@ impl ServicesRegistry {
         Some(deadline.saturating_sub(self.mono()))
     }
 
-    /// Relit tous les conteneurs. Une erreur laisse le registre inchangé.
-    pub async fn resync(&self) -> Result<(), EngineError> {
-        let list = self.engine.list().await?;
-        let mut inner = self.lock();
-        inner.containers.clear();
-        for observation in list {
-            note_start(&mut inner.windows, &observation);
-            inner.containers.insert(observation.id.clone(), observation);
+    /// Relit tous les conteneurs. Une erreur laisse le registre inchangé. Rend le nombre de
+    /// conteneurs illisibles : ils gardent leur dernière observation, ou apparaissent « non
+    /// reconnus » s'ils sont nouveaux (`Observation::unreadable`).
+    pub async fn resync(&self) -> Result<usize, EngineError> {
+        let listing = match self.engine.list().await {
+            Ok(listing) => listing,
+            Err(error) => {
+                if error == EngineError::Denied {
+                    self.lock().list_denied = true;
+                    self.apply_probe(
+                        Some(EngineProbe {
+                            outcome: ProbeOutcome::PermissionDenied,
+                            installed: true,
+                        }),
+                        false,
+                    );
+                }
+                return Err(error);
+            }
+        };
+        let unreadable = listing.unreadable.len();
+        let recovered = {
+            let mut inner = self.lock();
+            let previous = std::mem::take(&mut inner.containers);
+            for observation in listing.observations {
+                note_start(&mut inner.windows, &observation);
+                inner.containers.insert(observation.id.clone(), observation);
+            }
+            for missing in listing.unreadable {
+                let kept = previous
+                    .get(&missing.id)
+                    .cloned()
+                    .unwrap_or_else(|| Observation::unreadable(&missing.id, &missing.name));
+                inner.containers.insert(missing.id, kept);
+            }
+            if unreadable > 0 && inner.degraded == 0 {
+                // Une fois par épisode : la relecture suivante ne répète pas.
+                tracing::warn!(
+                    unreadable,
+                    "conteneurs illisibles : leur dernière description est gardée"
+                );
+            } else if unreadable == 0 && inner.degraded > 0 {
+                tracing::info!("tous les conteneurs sont de nouveau lisibles");
+            }
+            inner.degraded = unreadable;
+            let recovered = std::mem::take(&mut inner.list_denied);
+            self.commit(&mut inner);
+            recovered
+        };
+        if recovered {
+            // La liste est lisible de nouveau : l'état « prêt » revient avec la prochaine sonde.
+            self.probe_and_apply(false).await;
         }
-        self.commit(&mut inner);
-        Ok(())
+        Ok(unreadable)
     }
 
-    /// Relit les conteneurs touchés par un lot d'événements (un seul échange par conteneur).
-    async fn refresh(&self, ids: Vec<String>) -> Result<(), EngineError> {
-        let mut read = Vec::with_capacity(ids.len());
-        for id in ids {
-            read.push((id.clone(), self.engine.inspect(&id).await?));
-        }
+    /// Relit les conteneurs touchés par un lot d'événements (un seul échange par conteneur, quelques
+    /// uns à la fois). Rend le nombre de conteneurs dont l'inspection a échoué : ils gardent leur
+    /// dernière observation. Seule la perte du moteur (ou le dépassement du délai) est une erreur.
+    async fn refresh(&self, ids: Vec<String>) -> Result<usize, EngineError> {
+        let inspections = stream::iter(ids)
+            .map(|id| async move {
+                let result = self.engine.inspect(&id).await;
+                (id, result)
+            })
+            .buffer_unordered(REFRESH_CONCURRENCY)
+            .collect::<Vec<_>>();
+        let read = tokio::time::timeout(REFRESH_TIMEOUT, inspections)
+            .await
+            .map_err(|_| EngineError::Timeout)?;
+        let mut unreadable = 0;
         let mut inner = self.lock();
-        for (id, observation) in read {
-            match observation {
-                Some(observation) => {
+        for (id, result) in read {
+            match result {
+                Ok(Some(observation)) => {
                     note_start(&mut inner.windows, &observation);
                     inner.containers.insert(observation.id.clone(), observation);
                 }
-                None => {
+                Ok(None) => {
                     inner.containers.remove(&id);
                 }
+                Err(error) if error.engine_gone() => return Err(error),
+                Err(_) => unreadable += 1,
             }
         }
         self.commit(&mut inner);
-        Ok(())
+        Ok(unreadable)
     }
 
     /// Recalcule la vue de chaque service et diffuse ce qui a changé, moteur compris. Aucun lot si
@@ -424,6 +534,19 @@ impl ServicesRegistry {
         let _ = self.changes.send(Arc::new(change));
     }
 
+    /// Combien attendre avant de retenter une relecture après `failures` échecs de suite : la
+    /// période de sonde, doublée à chaque échec, plafonnée à 30 périodes.
+    fn backoff(&self, failures: u32) -> Duration {
+        let factor = 1u32.checked_shl(failures).unwrap_or(u32::MAX);
+        self.timings
+            .ready_period
+            .saturating_mul(factor.min(MAX_BACKOFF_FACTOR))
+    }
+
+    fn list_denied(&self) -> bool {
+        self.lock().list_denied
+    }
+
     /// La tâche de fond : détection du moteur, relecture, suivi des événements. Ne rend jamais la
     /// main (on l'arrête en abandonnant la tâche qui la porte). Sans moteur, elle sonde toutes les
     /// 5 secondes et ne dit rien de plus que le changement d'état : aucune erreur bruyante.
@@ -432,29 +555,66 @@ impl ServicesRegistry {
             // Pilotage désactivé : le socket n'est jamais ouvert.
             std::future::pending::<()>().await;
         }
+        // Relectures complètes échouées de suite, et quand retenter.
+        let mut failures: u32 = 0;
+        let mut next_read = Instant::now();
+        // Phases « prêt » finies en moins d'une période de suite (flux qui casse aussitôt).
+        let mut quick_breaks: u32 = 0;
         loop {
             let started = Instant::now();
-            let observed = self.probe_and_apply(false).await;
-            if observed == EngineState::Ready {
-                match self.resync().await {
-                    Ok(()) => self.ready_phase().await,
-                    Err(error) => tracing::debug!(%error, "relecture des services impossible"),
-                }
-                // Aucune relance serrée : un moteur dont le flux casse aussitôt est sondé au rythme
-                // normal, pas en boucle.
-                let ran = started.elapsed();
-                if ran < self.timings.ready_period {
-                    sleep(self.timings.ready_period - ran).await;
-                }
+            // Une relance de l'utilisateur vient de sonder : on réutilise son résultat.
+            let observed = if self.probed_within(self.timings.min_recheck) {
+                self.lock().observed
             } else {
-                self.wait_while_not_ready().await;
+                self.probe_and_apply(false).await
+            };
+            let readable = observed == EngineState::Ready
+                || (observed == EngineState::AccessDenied && self.list_denied());
+            if !readable {
+                failures = 0;
+                self.wait_for(self.timings.other_period).await;
+            } else if Instant::now() < next_read {
+                // Relecture en recul : la sonde garde sa cadence, la liste attend.
+                self.wait_for(self.timings.ready_period).await;
+            } else {
+                match self.resync().await {
+                    Ok(unreadable) => {
+                        if failures > 0 {
+                            tracing::info!("relecture des services rétablie");
+                        }
+                        failures = 0;
+                        self.ready_phase(unreadable).await;
+                        // Une rupture du flux est reprise tout de suite (sonde puis relecture complète) ;
+                        // si elle se répète sans que la phase dure une période, on recule : jamais de
+                        // boucle serrée sur un moteur dont le flux ne tient pas.
+                        if started.elapsed() < self.timings.ready_period {
+                            quick_breaks = quick_breaks.saturating_add(1);
+                        } else {
+                            quick_breaks = 0;
+                        }
+                        if quick_breaks >= 2 {
+                            next_read = Instant::now() + self.backoff(quick_breaks - 1);
+                        }
+                    }
+                    Err(error) => {
+                        if failures == 0 {
+                            // Une fois par série d'échecs ; les suivants restent au niveau debug.
+                            tracing::warn!(%error, "relecture des services impossible");
+                        } else {
+                            tracing::debug!(%error, "relecture des services impossible");
+                        }
+                        failures = failures.saturating_add(1);
+                        next_read = Instant::now() + self.backoff(failures);
+                    }
+                }
             }
         }
     }
 
-    /// Attend la prochaine sonde ; publie au passage les changements retenus par l'anti-clignotement.
-    async fn wait_while_not_ready(&self) {
-        let deadline = Instant::now() + self.timings.other_period;
+    /// Attend la prochaine sonde (`period`) ; publie au passage les changements retenus par
+    /// l'anti-clignotement.
+    async fn wait_for(&self, period: Duration) {
+        let deadline = Instant::now() + period;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -471,14 +631,17 @@ impl ServicesRegistry {
         }
     }
 
-    /// Le moteur est prêt et la liste lue : suit les événements jusqu'à une rupture.
-    async fn ready_phase(&self) {
+    /// Le moteur est prêt et la liste lue : suit les événements jusqu'à une rupture. `unreadable` :
+    /// conteneurs que la relecture qui vient d'avoir lieu n'a pas pu lire.
+    async fn ready_phase(&self, unreadable: usize) {
         let mut events = self.engine.events();
         let mut touched: HashSet<String> = HashSet::new();
         let mut batch_at: Option<Instant> = None;
         // Le flux d'événements ne se connecte qu'à sa première lecture : une dernière relecture
         // juste après ferme l'intervalle entre la liste et cette connexion.
         let mut settle_at = Some(Instant::now() + self.timings.batch_window * 4);
+        // Relectures de suite qui ont laissé des conteneurs illisibles (pour reculer).
+        let mut retries: u32 = u32::from(unreadable > 0);
         let mut ping = interval(self.timings.ready_period);
         ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
         ping.tick().await;
@@ -497,14 +660,24 @@ impl ServicesRegistry {
                 () = sleep_until(batch_at.unwrap_or_else(Instant::now)), if batch_at.is_some() => {
                     batch_at = None;
                     let ids: Vec<String> = touched.drain().collect();
-                    if self.refresh(ids).await.is_err() {
-                        return;
+                    match self.refresh(ids).await {
+                        Ok(0) => {}
+                        // Des conteneurs illisibles : une relecture complète les reprendra, en reculant.
+                        Ok(_) => {
+                            settle_at.get_or_insert_with(|| Instant::now() + self.backoff(retries));
+                        }
+                        Err(_) => return,
                     }
                 }
                 () = sleep_until(settle_at.unwrap_or_else(Instant::now)), if settle_at.is_some() => {
                     settle_at = None;
-                    if self.resync().await.is_err() {
-                        return;
+                    match self.resync().await {
+                        Ok(0) => retries = 0,
+                        Ok(_) => {
+                            retries = retries.saturating_add(1);
+                            settle_at = Some(Instant::now() + self.backoff(retries));
+                        }
+                        Err(_) => return,
                     }
                 }
                 _ = ping.tick() => {
@@ -768,5 +941,165 @@ mod tests {
         let view = late.snapshot().services.remove(0);
         assert_eq!(view.restarts_10m, 0);
         assert_eq!(view.derived.state, ServiceStateKind::Running);
+    }
+
+    fn fast(ready_ms: u64) -> EngineTimings {
+        EngineTimings {
+            ready_period: Duration::from_millis(ready_ms),
+            other_period: Duration::from_millis(ready_ms),
+            debounce_window: Duration::from_millis(10),
+            batch_window: Duration::from_millis(5),
+            min_recheck: Duration::ZERO,
+        }
+    }
+
+    fn registry_timed(timings: EngineTimings) -> (Arc<ServicesRegistry>, Arc<FakeEngine>) {
+        let engine = Arc::new(FakeEngine::new());
+        let registry = ServicesRegistry::new(
+            engine.clone(),
+            &Linux,
+            Arc::new(Wall(Mutex::new(crate::infrastructure::engine::fake::at(
+                12,
+            )))),
+            Arc::new(Mono::default()),
+            true,
+            timings,
+        );
+        (registry, engine)
+    }
+
+    #[tokio::test]
+    async fn a_ready_engine_without_a_container_gives_an_empty_list() {
+        let (registry, _engine, _mono) = registry(true);
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.engine.state, EngineState::Ready);
+        assert!(snapshot.services.is_empty());
+    }
+
+    #[tokio::test]
+    async fn one_unreadable_container_does_not_freeze_the_list() {
+        let (registry, engine, _mono) = registry(true);
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        engine.put_silently(container("db", RunState::Running));
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.resync().await.expect("resync"), 0);
+        // `db` devient illisible (délai, réponse illisible) : sa ligne garde sa dernière description,
+        // le reste de la liste continue de suivre le moteur.
+        let db_id = container("db", RunState::Running).id;
+        engine.fail_inspect(&db_id, Some(EngineError::Timeout));
+        engine.update(&web.id, |observation| {
+            observation.run_state = RunState::Exited
+        });
+        assert_eq!(registry.resync().await.expect("resync"), 1);
+        let snapshot = registry.snapshot();
+        let state_of = |name: &str| {
+            snapshot
+                .services
+                .iter()
+                .find(|view| view.observation.name == name)
+                .map(|view| view.derived.state)
+        };
+        assert_eq!(state_of("db"), Some(ServiceStateKind::Running), "gardée");
+        assert_eq!(state_of("web"), Some(ServiceStateKind::Stopped), "suivie");
+        // Un conteneur NOUVEAU et illisible apparaît « non reconnu », sous son nom.
+        engine.put_silently(container("new", RunState::Running));
+        engine.fail_inspect(
+            &container("new", RunState::Running).id,
+            Some(EngineError::Refused),
+        );
+        assert_eq!(registry.resync().await.expect("resync"), 2);
+        let view = registry
+            .snapshot()
+            .services
+            .into_iter()
+            .find(|view| view.observation.name == "new")
+            .expect("la ligne existe");
+        assert_eq!(view.derived.state, ServiceStateKind::Unknown);
+        // Rétabli : tout est relu.
+        engine.fail_inspect(&db_id, None);
+        engine.fail_inspect(&container("new", RunState::Running).id, None);
+        assert_eq!(registry.resync().await.expect("resync"), 0);
+        assert!(
+            registry
+                .snapshot()
+                .services
+                .iter()
+                .all(|view| view.derived.state != ServiceStateKind::Unknown)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_event_for_an_unreadable_container_keeps_it_and_says_so() {
+        let (registry, engine, _mono) = registry(true);
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        engine.update(&web.id, |observation| {
+            observation.run_state = RunState::Exited
+        });
+        engine.fail_inspect(&web.id, Some(EngineError::Timeout));
+        assert_eq!(registry.refresh(vec![web.id.clone()]).await, Ok(1));
+        assert_eq!(
+            registry.snapshot().services[0].derived.state,
+            ServiceStateKind::Running
+        );
+        // Le moteur lui-même est perdu : c'est une erreur, pas un conteneur illisible.
+        engine.fail_inspect(&web.id, Some(EngineError::Unreachable));
+        assert_eq!(
+            registry.refresh(vec![web.id.clone()]).await,
+            Err(EngineError::Unreachable)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_list_while_the_probe_answers_is_access_denied_not_ready() {
+        let (registry, engine, mono) = registry(true);
+        engine.put_silently(container("web", RunState::Running));
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::Ready);
+        engine.fail_list(Some(EngineError::Denied));
+        assert_eq!(registry.resync().await, Err(EngineError::Denied));
+        // La fenêtre de l'anti-clignotement passée, l'état publié est « accès refusé » et le reste
+        // tant que la liste est refusée, même si la sonde répond.
+        mono.advance(Duration::from_secs(6));
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::AccessDenied);
+        mono.advance(Duration::from_secs(6));
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::AccessDenied);
+        // La liste est de nouveau permise : l'état « prêt » revient.
+        engine.fail_list(None);
+        mono.advance(Duration::from_secs(6));
+        registry.resync().await.expect("resync");
+        assert_eq!(registry.engine_status().state, EngineState::Ready);
+    }
+
+    #[tokio::test]
+    async fn a_listing_that_keeps_failing_backs_off_instead_of_looping() {
+        let (registry, engine) = registry_timed(fast(50));
+        engine.fail_list(Some(EngineError::Refused));
+        let task = tokio::spawn(registry.clone().run());
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        task.abort();
+        let reads = engine.list_count();
+        assert!((2..=7).contains(&reads), "{reads} relectures en 1 s");
+        // Et la sonde, elle, garde sa cadence : l'état reste suivi.
+        assert!(engine.probe_count() >= 8, "{} sondes", engine.probe_count());
+    }
+
+    #[tokio::test]
+    async fn an_event_stream_that_breaks_at_once_is_not_retried_in_a_tight_loop() {
+        let (registry, engine) = registry_timed(fast(50));
+        engine.set_events_broken(true);
+        let task = tokio::spawn(registry.clone().run());
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        task.abort();
+        let reads = engine.list_count();
+        // La première rupture est reprise tout de suite ; les suivantes reculent.
+        assert!((3..=12).contains(&reads), "{reads} relectures en 1 s");
     }
 }

@@ -13,6 +13,7 @@ pub mod device;
 pub mod engine;
 pub mod engine_contract;
 pub mod fake_daemon;
+pub mod fake_engine;
 pub mod https;
 pub mod probe;
 pub mod tmp;

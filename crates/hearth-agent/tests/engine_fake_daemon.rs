@@ -144,7 +144,7 @@ async fn an_old_docker_that_refuses_newer_api_versions_is_still_read() {
     // Debian laisse le nom de plateforme vide.
     assert_eq!(announced.name, "Docker Engine");
     assert_eq!(classify_probe(true, Some(&probe)), EngineState::Ready);
-    assert_eq!(engine.list().await.expect("liste").len(), 1);
+    assert_eq!(engine.list().await.expect("liste").observations.len(), 1);
 }
 
 #[tokio::test]
@@ -191,6 +191,59 @@ async fn a_daemon_that_never_answers_is_unresponsive_after_the_probe_delay() {
     daemon.configure(|config| config.silent = true);
     let engine = engine_of(&daemon).with_probe_timeout(Duration::from_millis(200));
     assert_eq!(state_of(&engine).await, EngineState::Unresponsive);
+}
+
+#[tokio::test]
+async fn the_whole_probe_is_bounded_by_one_delay_not_one_per_exchange() {
+    // `/_ping` met 250 ms à répondre, `/version` ne répond jamais, le délai est de 400 ms. Un délai par
+    // échange ferait 250 + 400 = 650 ms ; un seul délai pour toute la sonde coupe à 400 ms (BR-ENGINE-009).
+    let daemon = FakeDaemon::start().await;
+    daemon.configure(|config| {
+        config.ping_delay = Duration::from_millis(250);
+        config.version_silent = true;
+    });
+    let engine = engine_of(&daemon).with_probe_timeout(Duration::from_millis(400));
+    let started = std::time::Instant::now();
+    assert_eq!(state_of(&engine).await, EngineState::Unresponsive);
+    let took = started.elapsed();
+    assert!(took >= Duration::from_millis(350), "{took:?}");
+    assert!(took < Duration::from_millis(560), "{took:?}");
+}
+
+#[tokio::test]
+async fn a_container_the_daemon_cannot_describe_is_unreadable_not_a_failed_list() {
+    // Une inspection qui échoue pour un conteneur (ici, une réponse qui n'est pas du JSON attendu :
+    // le démon répond 404 pour l'un des deux après la liste) ne fait pas échouer la liste.
+    let daemon = FakeDaemon::start().await;
+    daemon.put(DaemonContainer::new("good", "running"));
+    let broken = DaemonContainer::new("broken", "running");
+    let broken_id = broken.id.clone();
+    daemon.put(broken);
+    daemon.break_inspection(&broken_id);
+    let engine = engine_of(&daemon);
+    let listing = engine.list().await.expect("la liste aboutit");
+    assert_eq!(listing.observations.len(), 1);
+    assert_eq!(listing.observations[0].name, "good");
+    assert_eq!(listing.unreadable.len(), 1);
+    assert_eq!(listing.unreadable[0].id, broken_id);
+    assert_eq!(listing.unreadable[0].name, "broken");
+    // Un conteneur supprimé entre la liste et l'inspection n'est ni dans l'un ni dans l'autre.
+    daemon.vanish_after_listing(&broken_id);
+    let listing = engine.list().await.expect("la liste aboutit");
+    assert_eq!(listing.observations.len(), 1);
+    assert!(listing.unreadable.is_empty());
+}
+
+#[tokio::test]
+async fn a_refusing_daemon_makes_the_list_denied() {
+    let daemon = FakeDaemon::start().await;
+    daemon.put(DaemonContainer::new("good", "running"));
+    daemon.configure(|config| config.list_status = 403);
+    let engine = engine_of(&daemon);
+    assert_eq!(
+        engine.list().await.expect_err("refusée"),
+        hearth_agent::application::ports::EngineError::Denied
+    );
 }
 
 #[tokio::test]

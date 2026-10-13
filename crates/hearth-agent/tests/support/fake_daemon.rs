@@ -31,6 +31,8 @@ pub struct DaemonContainer {
     pub publish: Option<(u16, u16)>,
     /// `NOM=valeur`, exactement comme le moteur les rend.
     pub env: Vec<String>,
+    /// `Config.Cmd`, exactement comme le moteur le rend.
+    pub cmd: Vec<String>,
     pub image: String,
     pub restart: String,
     pub started_at: String,
@@ -55,6 +57,7 @@ impl DaemonContainer {
             exit_code: 0,
             publish: None,
             env: vec![],
+            cmd: vec!["sleep".to_owned(), "300".to_owned()],
             image: "busybox:1.36".to_owned(),
             restart: "no".to_owned(),
             started_at: if ran {
@@ -83,6 +86,12 @@ pub struct DaemonConfig {
     pub ping_status: u16,
     /// Ne répond jamais (le moteur « ne répond pas »).
     pub silent: bool,
+    /// Attend ce temps avant de répondre à `/_ping` (un moteur lent à décider).
+    pub ping_delay: std::time::Duration,
+    /// Répond à `/_ping` mais jamais à `/version`.
+    pub version_silent: bool,
+    /// Statut de `GET /containers/json` (200, ou 403 comme un proxy qui refuse la liste).
+    pub list_status: u16,
 }
 
 impl Default for DaemonConfig {
@@ -94,6 +103,9 @@ impl Default for DaemonConfig {
             engine_version: "24.0.7".into(),
             ping_status: 200,
             silent: false,
+            ping_delay: std::time::Duration::ZERO,
+            version_silent: false,
+            list_status: 200,
         }
     }
 }
@@ -101,6 +113,10 @@ impl Default for DaemonConfig {
 struct State {
     config: DaemonConfig,
     containers: BTreeMap<String, DaemonContainer>,
+    /// Conteneurs dont l'inspection répond n'importe quoi (une réponse illisible).
+    broken_inspection: std::collections::BTreeSet<String>,
+    /// Conteneurs encore dans la liste mais déjà supprimés quand on les inspecte (404).
+    vanished: std::collections::BTreeSet<String>,
     /// Les chemins demandés, dans l'ordre (pour vérifier qu'aucune écriture n'est jamais émise).
     requests: Vec<String>,
 }
@@ -135,6 +151,8 @@ impl FakeDaemon {
         let state = Arc::new(Mutex::new(State {
             config: DaemonConfig::default(),
             containers: BTreeMap::new(),
+            broken_inspection: Default::default(),
+            vanished: Default::default(),
             requests: Vec::new(),
         }));
         let (events, _) = broadcast::channel(256);
@@ -188,6 +206,20 @@ impl FakeDaemon {
         if let Some(container) = self.lock().containers.get_mut(id) {
             change(container);
         }
+    }
+
+    /// L'inspection de ce conteneur répond une réponse illisible.
+    pub fn break_inspection(&self, id: &str) {
+        let mut state = self.lock();
+        state.broken_inspection.insert(id.to_owned());
+    }
+
+    /// Ce conteneur reste dans la liste mais n'existe plus à l'inspection (404), et son inspection
+    /// n'est plus illisible.
+    pub fn vanish_after_listing(&self, id: &str) {
+        let mut state = self.lock();
+        state.broken_inspection.remove(id);
+        state.vanished.insert(id.to_owned());
     }
 
     pub fn remove(&self, id: &str) {
@@ -296,6 +328,13 @@ async fn handle(
         stream_events(stream, events).await;
         return;
     }
+    if route == "/_ping" && !config.ping_delay.is_zero() {
+        tokio::time::sleep(config.ping_delay).await;
+    }
+    if route == "/version" && config.version_silent {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        return;
+    }
     let reply = {
         let guard = state.lock().unwrap_or_else(PoisonError::into_inner);
         route_reply(&guard, &config, route)
@@ -356,6 +395,10 @@ fn route_reply(state: &State, config: &DaemonConfig, route: &str) -> Reply {
                 "KernelVersion": "6.1.0-13-amd64", "BuildTime": "2023-10-26T09:08:01.000000000+00:00"
             }),
         ),
+        "/containers/json" if config.list_status != 200 => json_reply(
+            config.list_status,
+            json!({ "message": "access denied by authorization plugin" }),
+        ),
         "/containers/json" => json_reply(
             200,
             Value::Array(state.containers.values().map(summary).collect()),
@@ -364,6 +407,16 @@ fn route_reply(state: &State, config: &DaemonConfig, route: &str) -> Reply {
             .strip_prefix("/containers/")
             .and_then(|rest| rest.strip_suffix("/json"))
         {
+            Some(id) if state.vanished.contains(id) => json_reply(
+                404,
+                json!({ "message": format!("No such container: {id}") }),
+            ),
+            Some(id) if state.broken_inspection.contains(id) => Reply {
+                status: 200,
+                content_type: "application/json",
+                body: "{ ceci n'est pas du JSON".to_owned(),
+                extra: vec![],
+            },
             Some(id) => match state.containers.get(id) {
                 Some(container) => json_reply(200, inspect(container)),
                 None => json_reply(
@@ -410,7 +463,7 @@ fn inspect(c: &DaemonContainer) -> Value {
     json!({
         "Id": c.id,
         "Created": "2026-10-13T09:00:00.987654321Z",
-        "Path": "sleep", "Args": ["300"],
+        "Path": c.cmd.first(), "Args": c.cmd.iter().skip(1).collect::<Vec<_>>(),
         "State": {
             "Status": c.status, "Running": running, "Paused": c.status == "paused",
             "Restarting": c.status == "restarting", "OOMKilled": false,
@@ -430,7 +483,7 @@ fn inspect(c: &DaemonContainer) -> Value {
         "Mounts": [],
         "Config": {
             "Hostname": &c.id[..12], "Image": c.image, "Env": c.env,
-            "Cmd": ["sleep", "300"], "Labels": {}
+            "Cmd": c.cmd, "Labels": {}
         },
         "NetworkSettings": { "Ports": live }
     })

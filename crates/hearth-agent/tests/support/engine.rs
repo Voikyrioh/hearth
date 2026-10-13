@@ -5,10 +5,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::fake_engine::FakeEngine;
 use hearth_agent::app::EngineParts;
 use hearth_agent::application::ports::{HostDescription, HostEnvironment};
 use hearth_agent::application::services::EngineTimings;
-use hearth_agent::infrastructure::engine::FakeEngine;
 
 pub struct TestHost;
 

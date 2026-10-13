@@ -26,7 +26,7 @@ L'état affiché ne change pas plus d'une fois toutes les 5 secondes, même si l
 - `crates/hearth-agent/src/application/services.rs::tests::the_engine_state_changes_at_most_once_per_window_and_never_flashes`
 
 ## Cas limites
-- « Vérifier à nouveau » (`POST /engine/recheck`) publie le résultat tout de suite (`Debounce::force`) : c'est une demande de l'utilisateur, pas une oscillation.
+- « Vérifier à nouveau » (`POST /engine/recheck`) publie le résultat tout de suite (`Debounce::force`) : la spec l'ouvre aux deux rôles (« lien Connecté », sans réserve d'administrateur) et veut que l'état affiché reflète le résultat. Cela ne fait changer l'état affiché que si l'état RÉEL du moteur a changé ; un compte en lecture seule ne peut donc pas fabriquer un changement. Durci (revue de la PR 77) : au plus une relance par seconde, réservée d'un seul geste (deux demandes simultanées n'en lancent pas deux), et aucune relance pendant qu'une sonde est déjà en cours (un socket muet ne voit plus s'empiler des sondes). La relance réveille la tâche de fond, qui réutilise le résultat au lieu de sonder une seconde fois.
 - Le nom et la version publiés suivent l'état publié, jamais celui d'une sonde retenue : deux changements d'état ne sortent jamais pour un seul.
 
 ## Règles liées
