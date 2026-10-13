@@ -163,14 +163,14 @@ fn terraria_answers_arguments_secrets_and_a_taken_over_world_are_translated() {
     let draft = translate(
         &fiche,
         &Inputs::new()
-            .answer("world_name", "Forge")
+            .answer("world_name", "Monde")
             .request(None, true),
     )
     .expect("valide");
     assert_eq!(draft.env.len(), 1);
     assert_eq!(
         (draft.env[0].name.as_str(), draft.env[0].value.expose()),
-        ("WORLD_FILENAME", "Forge.wld")
+        ("WORLD_FILENAME", "Monde.wld")
     );
     let file = text_of(&draft, "config");
     for absent in ["autocreate", "difficulty", "seed"] {
@@ -179,7 +179,7 @@ fn terraria_answers_arguments_secrets_and_a_taken_over_world_are_translated() {
             "{absent} est porté par le monde repris"
         );
     }
-    assert!(file.contains("worldname=Forge\n"));
+    assert!(file.contains("worldname=Monde\n"));
     // Une valeur d'argument hostile est refusée avec le caractère, jamais la valeur.
     let hostile = Inputs::new().answer("announcement_box_range", "100;rm");
     let refusal = translate(&fiche, &hostile.request(None, false)).expect_err("refusée");

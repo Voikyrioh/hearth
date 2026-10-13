@@ -436,6 +436,12 @@ async fn heavy_io_has_one_seat_for_the_whole_server() {
 
 fn copy_database(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
+    // Un dossier de données porte les droits 0700 (l'agent refuse un dossier ouvert qui a du contenu).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(to, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     for entry in std::fs::read_dir(from).unwrap().flatten() {
         let file = entry.file_name().to_string_lossy().into_owned();
         if entry.path().is_file() && file.starts_with("hearth.db") {

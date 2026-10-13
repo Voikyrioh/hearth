@@ -6,7 +6,7 @@ statut: proposée (non validée par Voiky ; posée avec HRT-113)
 date: 2026-10-13
 portee: repo
 remplace: la version 1 de ce brouillon ; écarte toujours, pour ce lot, le catalogue distant signé de la feuille de route section 4
-liens: [ADR-0008, ADR-0014, ADR-0036, ADR-0041, ADR-0044 (brouillon), ADR-0045 (brouillon), ADR-0046 (brouillon), ADR-0051, ADR-0052, ADR-0053 (brouillon), ADR-0054 (brouillon), conception technique 2026-10-13 (fiches de jeu) sections 5 et 6, 2026-10-13-reglages-des-jeux, 2026-10-13-inventaire-des-jeux, BR-FICHE-005 à BR-FICHE-011, BR-FICHE-037 à FICHE-051, BR-JEU-002, BR-JEU-038, BR-JEU-039, MONDE-003, GRANT-018]
+liens: [ADR-0008, ADR-0014, ADR-0036, ADR-0041, ADR-0044 (brouillon), ADR-0045 (brouillon), ADR-0046 (brouillon), ADR-0051, ADR-0052, ADR-0053 (brouillon), ADR-0054 (brouillon), conception technique 2026-10-13 (fiches de jeu) sections 5 et 6, BR-FICHE-005 à BR-FICHE-011, BR-FICHE-037 à FICHE-051, BR-JEU-002, BR-JEU-038, BR-JEU-039, MONDE-003, GRANT-018]
 ---
 
 > Posée par HRT-113 (format version 2, domaine pur, agent). Réalisé ici : le schéma des deux fichiers, le chargeur, les neuf invariants, la traduction vers un `ServiceSpecDraft` local, `build.rs` (une fiche refusée fait échouer la compilation), `cargo xtask catalog-check` et la fiche Terraria en `preview`. La voie unique vers `ContainerPlan` (point 7) et le test « le plan est celui que le validateur du déploiement ordinaire construit » sont à HRT-101 : ce validateur n'existe pas encore dans `main`, le test est écrit et ignoré (interface `translate::DeploymentValidator`). Numéros : ADR-0053 et ADR-0054 sont des brouillons pas encore posés. Les identifiants de règles écrits sans préfixe `BR` (par exemple `FICHE-041`) sont des règles de la spec du hub (`contexts/hearth/`), sans fiche dans ce dépôt tant que leur ticket n'est pas livré.
@@ -66,7 +66,7 @@ La version 1 décrivait une fiche à quelques questions, dont les fichiers de co
 
 ## Références
 - `2026-10-13-technique-fiches-de-jeu.md`, sections 5 et 6.
-- `forge-nixos/jeux/terraria.nix`, `forge-nixos/jeux/7dtd.nix` (lecture seule).
+- Configurations d'installations de référence de Terraria et de 7 Days to Die (lecture seule).
 - Sources des deux inventaires du 2026-10-13, avec leurs réserves.
 
 ## Historique

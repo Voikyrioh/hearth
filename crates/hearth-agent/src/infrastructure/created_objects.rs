@@ -258,7 +258,7 @@ mod tests {
         fs::write(precious.join("data"), b"keep").unwrap();
         // Un lien à la place de l'objet, même avec l'inode de sa cible.
         let link = dir.path().join("import-01J");
-        std::os::unix::fs::symlink(&precious, &link).unwrap();
+        std::os::unix::fs::symlink(&precious, link).unwrap();
         let target = object(
             "import-01J",
             ObjectKind::ImportDir,

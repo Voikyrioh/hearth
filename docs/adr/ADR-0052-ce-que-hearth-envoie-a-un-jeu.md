@@ -6,7 +6,7 @@ statut: proposée (non validée par Voiky ; posée avec HRT-113)
 date: 2026-10-13
 portee: repo
 remplace: le point 6 de la version 1 de l'ADR-0050 (un ordre d'enregistrement et un ordre de sortie)
-liens: [ADR-0036, ADR-0041, ADR-0044 (brouillon), ADR-0045 (brouillon), ADR-0050, conception technique 2026-10-13 (fiches de jeu) sections 6.2, 6.3 et 11.3, 2026-10-13-reglages-des-jeux (T32 à T36), 2026-10-13-inventaire-des-jeux (section 5, points 6 et 7), BR-JEU-002 à JEU-016, JEU-034, BR-JEU-038, BR-JEU-039, GRANT-018]
+liens: [ADR-0036, ADR-0041, ADR-0044 (brouillon), ADR-0045 (brouillon), ADR-0050, conception technique 2026-10-13 (fiches de jeu) sections 6.2, 6.3 et 11.3, inventaires des réglages (T32 à T36) et des jeux (points 6 et 7), BR-JEU-002 à JEU-016, JEU-034, BR-JEU-038, BR-JEU-039, GRANT-018]
 ---
 
 > Posée par HRT-113 pour ses parties « arguments » (points 1 à 3) et « console déclarée » (points 7 à 9, la déclaration seulement). Les points 4 à 6 (ordres par l'entrée standard, séquence bornée, arrêt toujours conclu par le moteur) sont posés pour leur PLAN (`stop_plan.rs`, qui ne déroule rien) ; leur déroulé est à HRT-103. Les identifiants de règles écrits sans préfixe `BR` (par exemple `FICHE-041`) sont des règles de la spec du hub (`contexts/hearth/`), sans fiche dans ce dépôt tant que leur ticket n'est pas livré.
@@ -56,7 +56,7 @@ Trois choses atteignent le programme d'un jeu depuis Hearth : sa ligne de comman
 ## Conséquences
 - `BR-JEU-002` : une suite d'étapes au lieu d'un ordre et d'un signe. `JEU-034` : l'arrêt du moteur suit aussitôt l'ordre de sortie.
 - `BR-JEU-039` devient le cas particulier d'un mécanisme général (secret généré, console déclarée).
-- L'essai des ordres de Terraria se fait au banc d'essai en CI (ADR-0053), plus seulement sur forge.
+- L'essai des ordres de Terraria se fait au banc d'essai en CI (ADR-0053), plus seulement sur une installation réelle.
 
 ## Références
 - `2026-10-13-technique-fiches-de-jeu.md`, sections 6.2, 6.3 et 11.3.

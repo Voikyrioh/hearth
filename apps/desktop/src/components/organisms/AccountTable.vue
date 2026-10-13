@@ -117,9 +117,15 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                 {{ roleLabel(account.role) }}
               </HTag>
               <!-- BR-GRANT-013 : en lecture seule, aucun geste ne donne ni ne retire ce droit depuis cet écran. -->
-              <HTag v-if="account.managesServices" tone="neutral" class="table__right" data-services-right>
+              <HTag
+                v-if="account.managesServices"
+                tone="neutral"
+                class="table__right"
+                :title="t('rights.tag')"
+                data-services-right
+              >
                 <HIcon name="box" size="sm" />
-                {{ t("rights.tag") }}
+                <span class="table__right-text">{{ t("rights.tag") }}</span>
               </HTag>
             </div>
           </td>
@@ -319,6 +325,20 @@ const named = (label: string, account: Account) => `${label} ${account.username}
   .table th,
   .table td {
     padding-inline: var(--space-2);
+  }
+}
+
+/* Tableau de moins de 1000 px (fenêtre de 1280 px) : le repère « Peut gérer les services » (texte long) élargirait la colonne du rôle
+   de 30 px de trop, et « Changer mon mot de passe » sortirait du tableau. Le repère garde son icône ; son texte reste lu
+   par les lecteurs d'écran et en infobulle, et il se dit en entier dès que la place existe (et dans le détail du compte). */
+@container accounts (max-width: 1000px) {
+  .table__right-text {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 

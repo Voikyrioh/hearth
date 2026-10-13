@@ -1,7 +1,7 @@
 # Terraria, serveur officiel sans mod. Fiche en `preview` (HRT-113, ADR-0050 version 2).
 #
-# Construite depuis l'inventaire `2026-10-13-reglages-des-jeux.md` (T01 à T41) et `forge-nixos/jeux/terraria.nix`.
-# Tout ce qui est marqué « non vérifié » l'est dans l'inventaire : rien n'a été ajouté de mémoire. Elle n'est
+# Construite depuis un inventaire des réglages (repères T01 à T41) et la configuration d'une installation de référence.
+# Tout ce qui est marqué « non vérifié » l'est dans cet inventaire : rien n'a été ajouté de mémoire. Elle n'est
 # publiable qu'avec l'empreinte de l'image, la mesure à vide et le passage du banc d'essai (ADR-0053, HRT-114).
 
 format = 2
@@ -15,7 +15,7 @@ platform = "linux"
 
 [image]
 repository = "ryshe/terraria"
-tag = "vanilla-1.4.5.8"                   # celle de forge
+tag = "vanilla-1.4.5.8"                   # celle d'une installation de référence
 # digest : NON VÉRIFIÉ, à relever par le job fiche-golden ; obligatoire pour « published »
 game_updates = "never"                    # la version du jeu est celle de l'étiquette (T41)
 
@@ -34,13 +34,13 @@ backup = true
 id = "config"
 role = "config"
 target = "/config"
-read_only = true                          # NON VÉRIFIÉ : forge monte le seul fichier en lecture seule ; que l'image n'écrive rien d'autre dans /config est à prouver par le banc d'essai, sinon false
+read_only = true                          # NON VÉRIFIÉ : l'installation de référence monte le seul fichier en lecture seule ; que l'image n'écrive rien d'autre dans /config est à prouver par le banc d'essai, sinon false
 backup = true
 
 [[port]]
 id = "game"
 container = 7777
-protocol = "tcp"                          # forge publie 7777 en TCP ; protocole non vérifié dans la documentation du jeu
+protocol = "tcp"                          # l'installation de référence publie 7777 en TCP ; protocole non vérifié dans la documentation du jeu
 role = "game"
 publish = "always"
 default_host = 7777
@@ -53,7 +53,7 @@ format = "kv_lines"
 folder = "config"
 path = "serverconfig.txt"
 mode = "0600"                             # image en root : le fichier reste lisible par son seul propriétaire
-written_by_game = "unverified"            # les ordres « password » et « motd » de la console écrivent-ils le fichier : non vérifié (inventaire 1.5)
+written_by_game = "unverified"            # les ordres « password » et « motd » de la console écrivent-ils le fichier : non vérifié (inventaire, point 1.5)
 raw_edit = true
 
 [channel.kv]
@@ -115,7 +115,7 @@ seconds = 15
 [resources]
 cpu = { evidence = "unmeasured" }
 memory = { evidence = "unmeasured" }
-disk = { evidence = "unmeasured" }        # image d'environ 50 Mo d'après le commentaire de forge, monde non mesuré
+disk = { evidence = "unmeasured" }        # image d'environ 50 Mo d'après une installation de référence, monde non mesuré
 
 [worlds]
 folder = "world"
@@ -126,7 +126,7 @@ names_setting = "world_name"
 carried_by_world = ["world_size", "difficulty", "seed"]
 
 [worlds.backups]
-dated_copies = true                       # « Forge.wld.<date> », forme écrite par la procédure de terraria.nix
+dated_copies = true                       # « <monde>.wld.<date> », forme de copie datée observée sur une installation de référence
 
 [[not_exposed]]
 key = "-ip"

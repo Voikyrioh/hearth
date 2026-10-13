@@ -482,7 +482,7 @@ mod tests {
         let dir = private_tempdir();
         let path = dir.path().join(SERVICES_KEY_FILE);
         let made = std::process::Command::new("mkfifo")
-            .arg(&path)
+            .arg(path)
             .status()
             .unwrap();
         assert!(made.success());

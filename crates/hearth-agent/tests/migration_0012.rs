@@ -24,6 +24,14 @@ fn migrator_up_to(version: i64) -> sqlx::migrate::Migrator {
     migrator
 }
 
+/// La plus haute migration appliquée à la base.
+async fn applied_version(pool: &SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 async fn open(path: &Path) -> SqlitePool {
     SqlitePoolOptions::new()
         .max_connections(1)
@@ -189,23 +197,22 @@ async fn a_non_empty_old_table_stops_the_migration_and_leaves_the_database_at_00
         let dir = tmp::tempdir().unwrap();
         let pool = open(&dir.path().join("hearth.db")).await;
         populated_0010(&pool).await;
+        // L'état juste avant `0012`, quelles que soient les migrations intercalées depuis `0010`.
+        migrator_up_to(11).run(&pool).await.unwrap();
+        let before = applied_version(&pool).await;
         sqlx::query(insert).execute(&pool).await.unwrap();
 
         let result = migrator_up_to(12).run(&pool).await;
         assert!(result.is_err(), "{table} non vide : la migration doit refuser");
 
-        // Rien n'a bougé : les anciennes tables, leur ligne, aucune nouvelle table, version 10.
+        // Rien n'a bougé : les anciennes tables, leur ligne, aucune nouvelle table, version appliquée inchangée.
         let names = tables(&pool).await;
         assert!(names.contains(&"service_actions".to_owned()), "{table}");
         assert!(names.contains(&"deployments".to_owned()), "{table}");
         assert!(!names.contains(&"service_specs".to_owned()), "{table}");
         assert!(!names.contains(&"migration_0012_guard".to_owned()), "{table}");
         assert_eq!(count(&pool, table).await, 1, "{table}");
-        let applied: i64 = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(applied, 10);
+        assert_eq!(applied_version(&pool).await, before, "{table}");
     }
 }
 

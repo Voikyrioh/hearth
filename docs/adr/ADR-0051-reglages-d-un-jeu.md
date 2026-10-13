@@ -45,7 +45,7 @@ Une fiche connaît tous les réglages utiles d'un jeu, mais pas tout ce qu'un fi
 - **Rendu complet depuis la description** : perd commentaires, ordre et lignes inconnues ; écrase ce que le jeu a écrit.
 - **Bibliothèque XML ou INI avec arbre** : réécrit le fichier à sa façon ; surface d'analyse inutile.
 - **Le fichier seul comme vérité, sans description** : impossible de recréer le service ou de garder un secret scellé.
-- **Réécrire à chaque démarrage** (forge le fait pour 7 Days to Die) : annule toute modification du jeu ou d'une main.
+- **Réécrire à chaque démarrage** (une installation de référence le fait pour 7 Days to Die) : annule toute modification du jeu ou d'une main.
 - **Deux actes, enregistrer et importer** : même effet ; l'origine est un paramètre signé.
 
 ## Conséquences
@@ -54,4 +54,4 @@ Une fiche connaît tous les réglages utiles d'un jeu, mais pas tout ce qu'un fi
 
 ## Références
 - `2026-10-13-technique-fiches-de-jeu.md`, sections 11.1 et 11.2.
-- `forge-nixos/jeux/7dtd.nix` (recopie du fichier avant chaque démarrage : le comportement que Hearth ne reprend pas).
+- Configuration d'une installation de référence de 7 Days to Die (recopie du fichier avant chaque démarrage : le comportement que Hearth ne reprend pas).
