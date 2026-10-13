@@ -52,11 +52,15 @@ pub enum AuditAction {
     /// Le délai de 5 minutes du mot de passe s'ouvre (HRT-30, BR-TRUST-053) : le compte, le poste de la clé
     /// prouvée, l'origine ; jamais le mot de passe.
     ReauthElevation,
+    /// Un administrateur révèle les valeurs des variables d'un service (HRT-63, BR-SVC-009) : la cible
+    /// est le service, jamais un nom ni une valeur de variable. Un refus faute de droits est consigné
+    /// sous le même code par la couche d'accès.
+    ServiceEnvReveal,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 24] = [
+    pub const ALL: [AuditAction; 25] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -81,6 +85,7 @@ impl AuditAction {
         Self::SessionRefused,
         Self::ReauthSetting,
         Self::ReauthElevation,
+        Self::ServiceEnvReveal,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -110,6 +115,7 @@ impl AuditAction {
             Self::SessionRefused => action::SESSION_REFUSED,
             Self::ReauthSetting => action::REAUTH_SETTING,
             Self::ReauthElevation => action::REAUTH_ELEVATION,
+            Self::ServiceEnvReveal => action::SERVICE_ENV_REVEAL,
         }
     }
 
@@ -140,6 +146,7 @@ impl AuditAction {
             Self::SessionRefused => "Session refusée (mode attaque)",
             Self::ReauthSetting => "Réglage de la fréquence du mot de passe",
             Self::ReauthElevation => "Délai du mot de passe ouvert (5 minutes)",
+            Self::ServiceEnvReveal => "Valeurs des variables révélées",
         }
     }
 

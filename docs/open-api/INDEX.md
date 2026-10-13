@@ -4,7 +4,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 
 **Actes d'administration** (HRT-28) : les routes qui modifient (hors déconnexion et hors retrait d'un poste, qui garde son contrat) acceptent un membre `reauth` (mot de passe + preuve de clé d'usage `0x05`) ; l'agent l'EXIGE depuis HRT-30 (`GET /security` : `admin_reauth.required: true`) ; sans `reauth`, `426 INCOMPATIBLE_VERSION` « client trop ancien ». Voir [sécurité](./security.md).
 
-32 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
+33 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
@@ -22,7 +22,8 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Mesures** | GET | [`/machine`](./machine.md) | user+ | Identité machine, specs hardware |
 | **Mesures** | GET | [`/stream`](./stream.md) | user+ (jeton dans le premier message) | WebSocket flux temps réel (snapshot + metrics chaque seconde) |
 | **Mesures** | GET | [`/metrics/history?window=1m\|5m\|1h`](./metrics.md) | user+ | Historique rééchantillonné |
-| **Services** | GET | [`/services`](./services.md) | user+ | Moteur de conteneurs (état en huit valeurs, nom, version, compte de l'agent, hôte) et tous les services, arrêtés compris, triés par nom ; lecture seule, ni valeur ni nom de variable ni commande |
+| **Services** | GET | [`/services`](./services.md) | user+ | Moteur de conteneurs (état en huit valeurs, nom, version, compte de l'agent, hôte) et tous les services, arrêtés compris, triés par nom ; lecture seule, détail (noms de variables, commande, délai d'arrêt, unité systemd), aucune valeur de variable |
+| **Services** | GET | [`/services/{key}/env`](./services.md) | admin | Valeurs des variables d'un service (HRT-63, BR-SVC-009) : refus d'un compte en lecture seule et réussite consignés (`service.env.reveal`) sans nom ni valeur, `Cache-Control: no-store` |
 | **Services** | POST | [`/engine/recheck`](./services.md) | user+ | Relance la détection du moteur et rend son état : un `POST` qui ne modifie rien (`READ_ONLY_POSTS`) |
 | **Comptes** | GET | [`/accounts`](./accounts.md) | admin | Liste comptes, sessions ouvertes, dernier login |
 | **Comptes** | POST | [`/accounts`](./accounts.md) | admin | Créer compte (username, password, role) |

@@ -13,6 +13,13 @@
 //! est retentée en reculant (2 s, 4 s, 8 s… jusqu'à 60 s). Une liste refusée (401, 403) alors que la
 //! sonde répond donne « accès refusé », pas « prêt » avec une liste vide.
 //!
+//! Services supervisés (HRT-63, ADR-0037) : le propriétaire de chaque NOUVEAU conteneur est cherché
+//! une fois (`ServiceSupervisor::owners`, mis en cache pour la vie du conteneur). Un conteneur lancé
+//! sous une unité systemd porte la clé `u_<unité>` : le même service quel que soit le conteneur que le
+//! système recrée. Son dernier état connu est retenu (`ServiceRepo`, table `supervised_services`) et,
+//! quand le conteneur disparaît, le service reste listé d'après l'état de son unité (relue toutes les
+//! deux périodes de sonde). Détection seule : aucune action sur une unité.
+//!
 //! L'état du moteur passe par `Debounce` : au plus un changement affiché toutes les 5 secondes.
 //! Chaque changement est un lot (`ServicesChange`) diffusé aux abonnés ; un abonné trop lent
 //! (`RecvError::Lagged`) relit un instantané complet. `rev` croît à chaque changement et repart de
@@ -28,12 +35,17 @@ use time::OffsetDateTime;
 use tokio::sync::{Notify, broadcast};
 use tokio::time::{Instant, MissedTickBehavior, interval, sleep, sleep_until};
 
+use async_trait::async_trait;
+
 use crate::application::ports::{
-    Clock, ContainerEngine, EngineError, HostDescription, HostEnvironment, MonotonicClock,
+    AuditSink, Clock, ContainerEngine, ContainerRef, EngineError, EnvEntry, HostDescription,
+    HostEnvironment, MonotonicClock, ServiceRepo, ServiceSupervisor, StoreError, SupervisedRecord,
 };
+use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Target};
 use crate::domain::services::{
     Announced, Debounce, Derived, EngineProbe, EngineState, Observation, ProbeOutcome, RunState,
-    ServiceKey, StartWindow, classify_probe, compare_names, derive_state,
+    ServiceKey, StartWindow, UnitLookup, UnitName, UnitStatus, classify_probe, compare_names,
+    derive_state, derive_supervised,
 };
 
 /// Capacité de la diffusion : un abonné qui prend plus de 64 lots de retard relit un instantané.
@@ -105,6 +117,20 @@ pub struct ServiceView {
     pub derived: Derived,
     /// Démarrages non demandés des 10 dernières minutes.
     pub restarts_10m: u32,
+    /// Le service est lancé par une unité systemd (clé `u_`) : l'unité, son état, et si son conteneur
+    /// existe. `None` pour tout autre service.
+    pub supervision: Option<Supervision>,
+}
+
+/// Ce qui rattache un service à son unité (HRT-63).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Supervision {
+    pub unit: UnitName,
+    /// L'état de l'unité, `None` tant que le superviseur n'a rien dit (muet ou pas encore relue).
+    pub status: Option<UnitStatus>,
+    /// Le conteneur du service existe. `false` : le service est listé d'après son unité, avec ses
+    /// derniers réglages connus.
+    pub container_present: bool,
 }
 
 /// L'état complet : moteur et services (triés par nom sans tenir compte de la casse).
@@ -176,6 +202,110 @@ struct Inner {
     /// Le suivi en direct est dégradé : flux d'événements qui casse en boucle, ou conteneur touché
     /// par un événement et illisible. Une relecture complète propre le rétablit.
     tracking_lost: bool,
+    /// Propriétaire de chaque conteneur connu (`None` : lancé par personne qu'on sache voir). Cherché
+    /// une fois par conteneur ; oublié avec lui.
+    owners: HashMap<String, Option<UnitName>>,
+    /// Ce que le superviseur dit de chaque unité connue.
+    units: HashMap<UnitName, UnitLookup>,
+    /// Les services supervisés retenus, par unité.
+    remembered: HashMap<UnitName, Remembered>,
+    /// Unités dont la mémoire reste à écrire en base, et unités à oublier.
+    dirty: HashSet<UnitName>,
+    forgotten: HashSet<UnitName>,
+    /// Unités dont le conteneur existait au dernier calcul (pour écrire le moment de la disparition).
+    present_units: HashSet<UnitName>,
+    /// Dernier code de sortie vu pour une unité, par cet agent : jamais relu du système, absent après
+    /// un redémarrage de l'agent (`BR-SVC-005`).
+    last_exit: HashMap<UnitName, i64>,
+    /// Instant monotone de la dernière relecture de l'état des unités.
+    last_unit_poll: Option<Duration>,
+}
+
+/// Un service supervisé retenu : ses derniers réglages connus (sans variable ni commande) et le
+/// dernier instant où il a été vu.
+#[derive(Debug, Clone)]
+struct Remembered {
+    observation: Observation,
+    last_seen: OffsetDateTime,
+}
+
+/// Unités relues au plus par passage : un serveur n'en a que quelques-unes ; la borne protège l'agent
+/// d'un système qui en lancerait des centaines.
+const MAX_UNITS_PER_POLL: usize = 32;
+/// Les unités sont relues toutes les `UNIT_POLL_PERIODS` périodes de sonde (4 s en production).
+const UNIT_POLL_PERIODS: u32 = 2;
+
+/// L'observation qu'on retient d'un service supervisé : ses réglages, arrêtée, sans nom de variable ni
+/// commande.
+fn settings_of(observation: &Observation) -> Observation {
+    Observation {
+        run_state: RunState::Exited,
+        exit_code: None,
+        started_at: None,
+        finished_at: None,
+        env_names: Vec::new(),
+        env_omitted: 0,
+        command: None,
+        ..observation.clone()
+    }
+}
+
+/// Quand le système recrée le conteneur d'un service supervisé, l'ancien peut encore exister un instant :
+/// le conteneur qui court l'emporte sur celui qui est arrêté ; à égalité, le plus récent.
+fn better(candidate: &Observation, current: &Observation) -> bool {
+    let rank = |observation: &Observation| match observation.run_state {
+        RunState::Running => 2,
+        RunState::Restarting | RunState::Paused | RunState::Removing | RunState::Unknown => 1,
+        RunState::Created | RunState::Exited | RunState::Dead => 0,
+    };
+    rank(candidate)
+        .cmp(&rank(current))
+        .then_with(|| candidate.created_at.cmp(&current.created_at))
+        .then_with(|| candidate.id.cmp(&current.id))
+        .is_gt()
+}
+
+/// La clé du service d'un conteneur : `u_<unité>` s'il est lancé sous une unité, sinon `c_<id>`.
+fn key_of(
+    owners: &HashMap<String, Option<UnitName>>,
+    observation: &Observation,
+) -> Option<ServiceKey> {
+    match owners.get(&observation.id) {
+        Some(Some(unit)) => Some(ServiceKey::for_unit(unit)),
+        _ => ServiceKey::for_container(&observation.id),
+    }
+}
+
+/// Le dépôt qui ne retient rien : pour un registre sans base (tests de l'application).
+struct NoServiceRepo;
+
+#[async_trait]
+impl ServiceRepo for NoServiceRepo {
+    async fn load_supervised(&self) -> Result<Vec<SupervisedRecord>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn save_supervised(&self, _record: &SupervisedRecord) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn forget_supervised(&self, _unit: &UnitName) -> Result<(), StoreError> {
+        Ok(())
+    }
+}
+
+/// Aucun superviseur : aucun conteneur n'a de propriétaire.
+struct NoSupervision;
+
+#[async_trait]
+impl ServiceSupervisor for NoSupervision {
+    async fn owners(&self, _containers: &[ContainerRef]) -> HashMap<String, UnitName> {
+        HashMap::new()
+    }
+
+    async fn unit(&self, _unit: &UnitName) -> UnitLookup {
+        UnitLookup::Unavailable
+    }
 }
 
 /// Une sonde en cours : retirée du compte quand elle finit OU qu'elle est abandonnée en route.
@@ -188,8 +318,23 @@ impl Drop for ProbingFlag<'_> {
     }
 }
 
+/// Pourquoi les variables d'un service ne sont pas rendues. Aucun texte du moteur n'en fait partie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevealError {
+    /// Aucun service de cette clé (disparu, ou jamais vu).
+    NotFound,
+    /// Le service est listé d'après son unité mais son conteneur n'existe pas : rien à lire.
+    NoContainer,
+    /// Le moteur ne répond pas ou refuse la lecture.
+    EngineUnavailable,
+    /// La consignation a échoué : aucune valeur n'est rendue (BR-SVC-009).
+    JournalUnavailable,
+}
+
 pub struct ServicesRegistry {
     engine: Arc<dyn ContainerEngine>,
+    supervisor: Arc<dyn ServiceSupervisor>,
+    repo: Arc<dyn ServiceRepo>,
     clock: Arc<dyn Clock>,
     monotonic: Arc<dyn MonotonicClock>,
     host: HostDescription,
@@ -203,8 +348,34 @@ pub struct ServicesRegistry {
 }
 
 impl ServicesRegistry {
+    /// Un registre sans superviseur ni base : aucun service n'est supervisé, rien n'est retenu.
     pub fn new(
         engine: Arc<dyn ContainerEngine>,
+        host: &dyn HostEnvironment,
+        clock: Arc<dyn Clock>,
+        monotonic: Arc<dyn MonotonicClock>,
+        enabled: bool,
+        timings: EngineTimings,
+    ) -> Arc<Self> {
+        Self::with_supervision(
+            engine,
+            Arc::new(NoSupervision),
+            Arc::new(NoServiceRepo),
+            host,
+            clock,
+            monotonic,
+            enabled,
+            timings,
+        )
+    }
+
+    /// Le registre complet (HRT-63) : avec le superviseur qui dit à quelle unité appartient un
+    /// conteneur, et le dépôt qui retient les services supervisés d'un démarrage à l'autre.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_supervision(
+        engine: Arc<dyn ContainerEngine>,
+        supervisor: Arc<dyn ServiceSupervisor>,
+        repo: Arc<dyn ServiceRepo>,
         host: &dyn HostEnvironment,
         clock: Arc<dyn Clock>,
         monotonic: Arc<dyn MonotonicClock>,
@@ -226,6 +397,8 @@ impl ServicesRegistry {
         let (changes, _) = broadcast::channel(CHANNEL_CAPACITY);
         Arc::new(Self {
             engine,
+            supervisor,
+            repo,
             host: host.describe(),
             enabled,
             timings,
@@ -252,6 +425,14 @@ impl ServicesRegistry {
                 stale_since: None,
                 read_failing: false,
                 tracking_lost: false,
+                owners: HashMap::new(),
+                units: HashMap::new(),
+                remembered: HashMap::new(),
+                dirty: HashSet::new(),
+                forgotten: HashSet::new(),
+                present_units: HashSet::new(),
+                last_exit: HashMap::new(),
+                last_unit_poll: None,
             }),
             clock,
             monotonic,
@@ -577,6 +758,8 @@ impl ServicesRegistry {
             }
         };
         let unreadable = listing.unreadable.len();
+        self.resolve_owners(listing.observations.iter().map(refer).collect())
+            .await;
         let recovered = {
             let mut inner = self.lock();
             let previous = std::mem::take(&mut inner.containers);
@@ -597,7 +780,8 @@ impl ServicesRegistry {
                 }
             }
             for observation in listing.observations {
-                note_start(&mut inner.windows, &observation);
+                let key = key_of(&inner.owners, &observation);
+                note_start(&mut inner.windows, key, &observation);
                 inner.containers.insert(observation.id.clone(), observation);
             }
             for missing in listing.unreadable {
@@ -626,6 +810,7 @@ impl ServicesRegistry {
             self.commit(&mut inner);
             recovered
         };
+        self.persist_supervised().await;
         if recovered {
             // La liste est lisible de nouveau : l'état « prêt » revient avec la prochaine sonde.
             self.probe_and_apply(false).await;
@@ -647,25 +832,37 @@ impl ServicesRegistry {
         let read = tokio::time::timeout(REFRESH_TIMEOUT, inspections)
             .await
             .map_err(|_| EngineError::Timeout)?;
-        let mut unreadable = 0;
-        let mut inner = self.lock();
-        for (id, result) in read {
-            match result {
-                Ok(Some(observation)) => {
-                    note_start(&mut inner.windows, &observation);
-                    inner.containers.insert(observation.id.clone(), observation);
+        self.resolve_owners(
+            read.iter()
+                .filter_map(|(_, result)| result.as_ref().ok().and_then(Option::as_ref))
+                .map(refer)
+                .collect(),
+        )
+        .await;
+        let unreadable = {
+            let mut unreadable = 0;
+            let mut inner = self.lock();
+            for (id, result) in read {
+                match result {
+                    Ok(Some(observation)) => {
+                        let key = key_of(&inner.owners, &observation);
+                        note_start(&mut inner.windows, key, &observation);
+                        inner.containers.insert(observation.id.clone(), observation);
+                    }
+                    Ok(None) => {
+                        inner.containers.remove(&id);
+                    }
+                    Err(error) if error.engine_gone() => return Err(error),
+                    Err(_) => unreadable += 1,
                 }
-                Ok(None) => {
-                    inner.containers.remove(&id);
-                }
-                Err(error) if error.engine_gone() => return Err(error),
-                Err(_) => unreadable += 1,
             }
-        }
-        if unreadable > 0 {
-            inner.tracking_lost = true;
-        }
-        self.commit(&mut inner);
+            if unreadable > 0 {
+                inner.tracking_lost = true;
+            }
+            self.commit(&mut inner);
+            unreadable
+        };
+        self.persist_supervised().await;
         Ok(unreadable)
     }
 
@@ -678,29 +875,7 @@ impl ServicesRegistry {
         // Dans ces états (moteur absent, non pris en charge, désactivé), aucune liste ancienne n'est
         // gardée (`BR-SVC-018`) ; dans les états inaccessibles la dernière liste reste.
         if !inner.debounce.published().keeps_no_list() {
-            let present: HashSet<ServiceKey> = inner
-                .containers
-                .values()
-                .filter_map(|observation| ServiceKey::for_container(&observation.id))
-                .collect();
-            inner.windows.retain(|key, _| present.contains(key));
-            for observation in inner.containers.values() {
-                let Some(key) = ServiceKey::for_container(&observation.id) else {
-                    continue;
-                };
-                let restarts_10m = inner.windows.entry(key.clone()).or_default().count(now);
-                // Aucune action de Hearth dans cette tranche : l'arrêt n'est jamais « demandé ».
-                let derived = derive_state(observation, restarts_10m, false);
-                target.insert(
-                    key.clone(),
-                    ServiceView {
-                        key,
-                        observation: observation.clone(),
-                        derived,
-                        restarts_10m,
-                    },
-                );
-            }
+            Self::build_views(inner, now, &mut target);
         }
         let engine_key = Self::engine_key(inner);
         let engine_changed = engine_key != inner.published_engine;
@@ -733,6 +908,370 @@ impl ServicesRegistry {
         let _ = self.changes.send(Arc::new(change));
     }
 
+    /// Les vues de tous les services : un conteneur par service (celui qui tourne, à défaut le plus
+    /// récent), la clé `u_<unité>` pour un conteneur lancé sous une unité (HRT-63), puis les services
+    /// supervisés retenus dont le conteneur n'existe pas, d'après l'état de leur unité.
+    fn build_views(
+        inner: &mut Inner,
+        now: OffsetDateTime,
+        target: &mut HashMap<ServiceKey, ServiceView>,
+    ) {
+        Self::release_shared_units(inner);
+        let mut chosen: HashMap<ServiceKey, Observation> = HashMap::new();
+        for observation in inner.containers.values() {
+            let Some(key) = key_of(&inner.owners, observation) else {
+                continue;
+            };
+            if chosen
+                .get(&key)
+                .is_none_or(|current| better(observation, current))
+            {
+                chosen.insert(key, observation.clone());
+            }
+        }
+        // Un conteneur disparu ne laisse pas son propriétaire en mémoire.
+        let containers = &inner.containers;
+        inner.owners.retain(|id, _| containers.contains_key(id));
+        let remembered_keys: HashSet<ServiceKey> =
+            inner.remembered.keys().map(ServiceKey::for_unit).collect();
+        inner
+            .windows
+            .retain(|key, _| chosen.contains_key(key) || remembered_keys.contains(key));
+        let mut present_units: HashSet<UnitName> = HashSet::new();
+        for (key, observation) in chosen {
+            let restarts_10m = inner.windows.entry(key.clone()).or_default().count(now);
+            let unit = match inner.owners.get(&observation.id) {
+                Some(Some(unit)) => Some(unit.clone()),
+                _ => None,
+            };
+            let (derived, supervision) = match unit {
+                // Aucune action de Hearth dans cette tranche : l'arrêt n'est jamais « demandé ».
+                None => (derive_state(&observation, restarts_10m, false), None),
+                Some(unit) => {
+                    present_units.insert(unit.clone());
+                    let status = Self::status_of_unit(inner, &unit);
+                    if matches!(observation.run_state, RunState::Exited | RunState::Dead)
+                        && let Some(code) = observation.exit_code
+                    {
+                        inner.last_exit.insert(unit.clone(), code);
+                    }
+                    let settings = settings_of(&observation);
+                    let changed = inner
+                        .remembered
+                        .get(&unit)
+                        .is_none_or(|known| known.observation != settings);
+                    inner.remembered.insert(
+                        unit.clone(),
+                        Remembered {
+                            observation: settings,
+                            last_seen: now,
+                        },
+                    );
+                    if changed {
+                        inner.dirty.insert(unit.clone());
+                    }
+                    let derived = derive_supervised(
+                        &observation,
+                        true,
+                        status.as_ref(),
+                        restarts_10m,
+                        None,
+                        None,
+                        now,
+                    );
+                    (
+                        derived,
+                        Some(Supervision {
+                            unit,
+                            status,
+                            container_present: true,
+                        }),
+                    )
+                }
+            };
+            target.insert(
+                key.clone(),
+                ServiceView {
+                    key,
+                    observation,
+                    derived,
+                    restarts_10m,
+                    supervision,
+                },
+            );
+        }
+        // Un service supervisé dont le conteneur vient de disparaître : on retient le moment.
+        for unit in inner.present_units.difference(&present_units) {
+            inner.dirty.insert(unit.clone());
+        }
+        inner.present_units = present_units;
+        if !inner.has_list {
+            return;
+        }
+        let vanished: Vec<(UnitName, Remembered)> = inner
+            .remembered
+            .iter()
+            .filter(|(unit, _)| !inner.present_units.contains(*unit))
+            .map(|(unit, memory)| (unit.clone(), memory.clone()))
+            .collect();
+        for (unit, memory) in vanished {
+            // Le système ne connaît plus cette unité : le service n'existe plus (oublié à la
+            // prochaine relecture des unités).
+            if inner.units.get(&unit) == Some(&UnitLookup::NotLoaded) {
+                continue;
+            }
+            let key = ServiceKey::for_unit(&unit);
+            let restarts_10m = inner.windows.entry(key.clone()).or_default().count(now);
+            let status = Self::status_of_unit(inner, &unit);
+            let derived = derive_supervised(
+                &memory.observation,
+                false,
+                status.as_ref(),
+                restarts_10m,
+                inner.last_exit.get(&unit).copied(),
+                Some(memory.last_seen),
+                now,
+            );
+            target.insert(
+                key.clone(),
+                ServiceView {
+                    key,
+                    observation: memory.observation,
+                    derived,
+                    restarts_10m,
+                    supervision: Some(Supervision {
+                        unit,
+                        status,
+                        container_present: false,
+                    }),
+                },
+            );
+        }
+    }
+
+    /// Une unité ne supervise qu'UN conteneur vivant. Quand deux conteneurs vivants ou plus lui sont
+    /// attribués (ils auraient la même clé `u_` et l'un disparaîtrait de la liste, `BR-SVC-001`), aucun
+    /// n'est supervisé : chacun reste listé sous sa clé `c_`, et le service retenu de l'unité est oublié
+    /// (HRT-63). Un conteneur arrêté, reste d'une recréation, ne compte pas.
+    fn release_shared_units(inner: &mut Inner) {
+        let mut live_by_unit: HashMap<UnitName, Vec<String>> = HashMap::new();
+        for observation in inner.containers.values() {
+            let alive = matches!(
+                observation.run_state,
+                RunState::Running | RunState::Restarting | RunState::Paused
+            );
+            if alive && let Some(Some(unit)) = inner.owners.get(&observation.id) {
+                live_by_unit
+                    .entry(unit.clone())
+                    .or_default()
+                    .push(observation.id.clone());
+            }
+        }
+        for (unit, ids) in live_by_unit {
+            if ids.len() < 2 {
+                continue;
+            }
+            for id in ids {
+                inner.owners.insert(id, None);
+            }
+            if inner.remembered.remove(&unit).is_some() {
+                inner.forgotten.insert(unit.clone());
+            }
+            inner.dirty.remove(&unit);
+            inner.present_units.remove(&unit);
+            inner.last_exit.remove(&unit);
+        }
+    }
+
+    /// L'état connu d'une unité : `None` tant que le superviseur n'a rien répondu ou ne répond pas.
+    fn status_of_unit(inner: &Inner, unit: &UnitName) -> Option<UnitStatus> {
+        match inner.units.get(unit) {
+            Some(UnitLookup::Loaded(status)) => Some(*status),
+            _ => None,
+        }
+    }
+
+    /// Cherche le propriétaire des conteneurs dont on ne l'a pas encore cherché, une fois pour la vie du
+    /// conteneur, puis l'état des unités nouvellement vues. Le superviseur ne rend jamais d'erreur : un
+    /// système muet laisse tout conteneur sans propriétaire.
+    async fn resolve_owners(&self, candidates: Vec<ContainerRef>) {
+        let unknown: Vec<ContainerRef> = {
+            let inner = self.lock();
+            candidates
+                .into_iter()
+                .filter(|container| !inner.owners.contains_key(&container.id))
+                .collect()
+        };
+        if unknown.is_empty() {
+            return;
+        }
+        let found = self.supervisor.owners(&unknown).await;
+        let new_units: Vec<UnitName> = {
+            let mut inner = self.lock();
+            for container in &unknown {
+                inner
+                    .owners
+                    .insert(container.id.clone(), found.get(&container.id).cloned());
+            }
+            let mut fresh: Vec<UnitName> = found
+                .values()
+                .filter(|unit| !inner.units.contains_key(*unit))
+                .cloned()
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
+            fresh.sort();
+            fresh.truncate(MAX_UNITS_PER_POLL);
+            fresh
+        };
+        for unit in new_units {
+            let lookup = self.supervisor.unit(&unit).await;
+            self.lock().units.insert(unit, lookup);
+        }
+    }
+
+    /// Relit l'état de chaque unité connue (supervisant un conteneur, ou retenue) et recalcule les
+    /// vues. Une unité que le système ne connaît plus, dont le conteneur n'existe plus, est oubliée avec
+    /// son service retenu.
+    async fn poll_units(&self) {
+        let units: Vec<UnitName> = {
+            let mut inner = self.lock();
+            inner.last_unit_poll = Some(self.mono());
+            let mut known: HashSet<UnitName> = inner.owners.values().flatten().cloned().collect();
+            known.extend(inner.remembered.keys().cloned());
+            let mut units: Vec<UnitName> = known.into_iter().collect();
+            units.sort();
+            units.truncate(MAX_UNITS_PER_POLL);
+            units
+        };
+        if units.is_empty() {
+            return;
+        }
+        let mut looked = Vec::with_capacity(units.len());
+        for unit in units {
+            let lookup = self.supervisor.unit(&unit).await;
+            looked.push((unit, lookup));
+        }
+        {
+            let mut inner = self.lock();
+            for (unit, lookup) in looked {
+                let container_present = inner.present_units.contains(&unit);
+                if lookup == UnitLookup::NotLoaded && !container_present {
+                    if inner.remembered.remove(&unit).is_some() {
+                        inner.forgotten.insert(unit.clone());
+                    }
+                    inner.dirty.remove(&unit);
+                    inner.last_exit.remove(&unit);
+                    inner.units.remove(&unit);
+                } else {
+                    inner.units.insert(unit, lookup);
+                }
+            }
+            self.commit(&mut inner);
+        }
+        self.persist_supervised().await;
+    }
+
+    /// Les unités sont-elles à relire (toutes les deux périodes de sonde) ?
+    fn units_due(&self) -> bool {
+        let inner = self.lock();
+        inner.last_unit_poll.is_none_or(|at| {
+            self.mono().saturating_sub(at) >= self.timings.ready_period * UNIT_POLL_PERIODS
+        })
+    }
+
+    /// Écrit en base les services supervisés dont les réglages ont changé et oublie ceux dont l'unité
+    /// a disparu. Un échec est tracé et ne gêne rien : la prochaine modification réécrit.
+    async fn persist_supervised(&self) {
+        let (saves, forgets) = {
+            let mut inner = self.lock();
+            let dirty: Vec<UnitName> = inner.dirty.drain().collect();
+            let saves: Vec<SupervisedRecord> = dirty
+                .into_iter()
+                .filter_map(|unit| {
+                    inner.remembered.get(&unit).map(|memory| SupervisedRecord {
+                        unit,
+                        observation: memory.observation.clone(),
+                        last_seen_at: memory.last_seen,
+                    })
+                })
+                .collect();
+            let forgets: Vec<UnitName> = inner.forgotten.drain().collect();
+            (saves, forgets)
+        };
+        for record in saves {
+            if let Err(error) = self.repo.save_supervised(&record).await {
+                tracing::warn!(%error, "service supervisé non retenu");
+            }
+        }
+        for unit in forgets {
+            if let Err(error) = self.repo.forget_supervised(&unit).await {
+                tracing::warn!(%error, "service supervisé non oublié");
+            }
+        }
+    }
+
+    /// Reprend les services supervisés retenus par un démarrage précédent.
+    async fn load_remembered(&self) {
+        match self.repo.load_supervised().await {
+            Ok(records) => {
+                let mut inner = self.lock();
+                for record in records {
+                    inner
+                        .remembered
+                        .entry(record.unit)
+                        .or_insert_with(|| Remembered {
+                            observation: record.observation,
+                            last_seen: record.last_seen_at,
+                        });
+                }
+                self.commit(&mut inner);
+            }
+            Err(error) => tracing::warn!(%error, "services supervisés retenus illisibles"),
+        }
+    }
+
+    /// Les variables d'un service avec leurs VALEURS, pour un administrateur (BR-SVC-009). Le
+    /// service est celui que la liste montre ; sa lecture passe par le moteur, jamais par la liste.
+    /// La réussite est consignée au journal AVANT de rendre les valeurs : sans nom ni valeur, la cible
+    /// est le service. Rien n'est lu en arrière-plan : une valeur ne quitte le moteur que par cet appel.
+    pub async fn reveal_env(
+        &self,
+        key: &ServiceKey,
+        actor: Actor,
+        sink: &dyn AuditSink,
+    ) -> Result<Vec<EnvEntry>, RevealError> {
+        let (container_id, name) = {
+            let inner = self.lock();
+            let view = inner.published.get(key).ok_or(RevealError::NotFound)?;
+            if view
+                .supervision
+                .as_ref()
+                .is_some_and(|supervision| !supervision.container_present)
+            {
+                return Err(RevealError::NoContainer);
+            }
+            (view.observation.id.clone(), view.observation.name.clone())
+        };
+        let entries = match self.engine.env(&container_id).await {
+            Ok(Some(entries)) => entries,
+            Ok(None) => return Err(RevealError::NotFound),
+            Err(_) => return Err(RevealError::EngineUnavailable),
+        };
+        let target = ClientName::parse(&name).map_or(Target::None, Target::Service);
+        // La consignation précède les valeurs ET les conditionne : si elle échoue, `entries` est jeté
+        // et rien n'est rendu.
+        sink.record_required(
+            actor,
+            AuditAction::ServiceEnvReveal,
+            target,
+            Outcome::Succeeded,
+        )
+        .await
+        .map_err(|_| RevealError::JournalUnavailable)?;
+        Ok(entries)
+    }
+
     /// Combien attendre avant de retenter une relecture après `failures` échecs de suite : une
     /// période de sonde au premier, doublée à chaque échec suivant, plafonnée à 30 périodes.
     fn backoff(&self, failures: u32) -> Duration {
@@ -756,6 +1295,9 @@ impl ServicesRegistry {
             // Pilotage désactivé : le socket n'est jamais ouvert.
             std::future::pending::<()>().await;
         }
+        // Les services supervisés d'un démarrage précédent, avec l'état actuel de leur unité.
+        self.load_remembered().await;
+        self.poll_units().await;
         // Relectures complètes échouées de suite, et quand retenter.
         let mut failures: u32 = 0;
         let mut next_read = Instant::now();
@@ -938,8 +1480,24 @@ impl ServicesRegistry {
                         return;
                     }
                     // Les démarrages de plus de 10 minutes sortent de la fenêtre sans événement.
-                    let mut inner = self.lock();
-                    self.commit(&mut inner);
+                    {
+                        let mut inner = self.lock();
+                        self.commit(&mut inner);
+                    }
+                    // L'état des unités change sans événement du moteur (échec, relance) : relu à
+                    // intervalles, la sonde gardant sa cadence pendant ce temps.
+                    if self.units_due() {
+                        let polled = tokio::time::timeout(
+                            REFRESH_TIMEOUT,
+                            self.while_probing(self.poll_units()),
+                        )
+                        .await;
+                        // Le moteur n'est plus prêt : retour à la sonde. Un délai dépassé ne dit
+                        // rien du moteur, la relecture suivante reprend.
+                        if matches!(polled, Ok(None)) {
+                            return;
+                        }
+                    }
                 }
                 () = sleep(debounce_wait.unwrap_or_default()), if debounce_wait.is_some() => {
                     self.flush_debounce();
@@ -951,17 +1509,26 @@ impl ServicesRegistry {
 }
 
 /// Note le début d'exécution d'un conteneur qui tourne dans la fenêtre des démarrages.
-fn note_start(windows: &mut HashMap<ServiceKey, StartWindow>, observation: &Observation) {
+fn note_start(
+    windows: &mut HashMap<ServiceKey, StartWindow>,
+    key: Option<ServiceKey>,
+    observation: &Observation,
+) {
     if observation.run_state != RunState::Running {
         return;
     }
-    let (Some(key), Some(started_at)) = (
-        ServiceKey::for_container(&observation.id),
-        observation.started_at,
-    ) else {
+    let (Some(key), Some(started_at)) = (key, observation.started_at) else {
         return;
     };
     windows.entry(key).or_default().observe(started_at);
+}
+
+/// Le conteneur d'une observation, pour chercher son propriétaire.
+fn refer(observation: &Observation) -> ContainerRef {
+    ContainerRef {
+        id: observation.id.clone(),
+        name: observation.name.clone(),
+    }
 }
 
 fn sort_views(views: &mut [ServiceView]) {
@@ -1819,5 +2386,633 @@ mod tests {
         let reads = engine.list_count();
         // La première rupture est reprise tout de suite ; les suivantes reculent.
         assert!((2..=14).contains(&reads), "{reads} relectures en 1 s");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Services supervisés (HRT-63) : clé `u_`, service gardé d'après son unité, mémoire, révélation
+    // -----------------------------------------------------------------------------------------
+
+    use crate::domain::services::{Hidden, UnitActivity};
+    use crate::infrastructure::supervisor::fake::{FakeSupervisor, running_unit, unit_named};
+
+    /// Un dépôt en mémoire : ce qu'il a reçu, pour vérifier ce que l'agent retient.
+    #[derive(Default)]
+    struct MemoryRepo {
+        saved: Mutex<HashMap<UnitName, SupervisedRecord>>,
+        forgotten: Mutex<Vec<UnitName>>,
+        saves: AtomicU64,
+    }
+
+    #[async_trait]
+    impl ServiceRepo for MemoryRepo {
+        async fn load_supervised(&self) -> Result<Vec<SupervisedRecord>, StoreError> {
+            let saved = self.saved.lock().unwrap_or_else(PoisonError::into_inner);
+            Ok(saved.values().cloned().collect())
+        }
+
+        async fn save_supervised(&self, record: &SupervisedRecord) -> Result<(), StoreError> {
+            self.saves.fetch_add(1, Ordering::SeqCst);
+            self.saved
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(record.unit.clone(), record.clone());
+            Ok(())
+        }
+
+        async fn forget_supervised(&self, unit: &UnitName) -> Result<(), StoreError> {
+            self.saved
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(unit);
+            self.forgotten
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(unit.clone());
+            Ok(())
+        }
+    }
+
+    type Supervised = (
+        Arc<ServicesRegistry>,
+        Arc<FakeEngine>,
+        Arc<FakeSupervisor>,
+        Arc<MemoryRepo>,
+    );
+
+    fn supervised_registry() -> Supervised {
+        let engine = Arc::new(FakeEngine::new());
+        let supervisor = Arc::new(FakeSupervisor::new());
+        let repo = Arc::new(MemoryRepo::default());
+        let registry = supervised_over(&engine, &supervisor, &repo);
+        (registry, engine, supervisor, repo)
+    }
+
+    fn supervised_over(
+        engine: &Arc<FakeEngine>,
+        supervisor: &Arc<FakeSupervisor>,
+        repo: &Arc<MemoryRepo>,
+    ) -> Arc<ServicesRegistry> {
+        let wall = Arc::new(Wall(Mutex::new(crate::infrastructure::engine::fake::at(
+            12,
+        ))));
+        supervised_with_clock(engine, supervisor, repo, wall)
+    }
+
+    fn supervised_with_clock(
+        engine: &Arc<FakeEngine>,
+        supervisor: &Arc<FakeSupervisor>,
+        repo: &Arc<MemoryRepo>,
+        wall: Arc<Wall>,
+    ) -> Arc<ServicesRegistry> {
+        ServicesRegistry::with_supervision(
+            engine.clone(),
+            supervisor.clone(),
+            repo.clone(),
+            &Linux,
+            wall,
+            Arc::new(Mono::default()),
+            true,
+            EngineTimings::production(),
+        )
+    }
+
+    /// Le conteneur qu'un système recrée à chaque démarrage : même nom, autre identifiant.
+    fn recreated(name: &str, state: RunState, id_char: char) -> Observation {
+        let mut observation = container(name, state);
+        observation.id = id_char.to_string().repeat(64);
+        observation
+    }
+
+    fn only_service(registry: &ServicesRegistry) -> ServiceView {
+        let mut services = registry.snapshot().services;
+        assert_eq!(services.len(), 1, "{services:?}");
+        services.remove(0)
+    }
+
+    #[tokio::test]
+    async fn a_container_under_a_unit_is_the_service_u_unit_whatever_container_the_system_creates()
+    {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let unit = unit_named("docker-terraria.service");
+        let first = recreated("terraria", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let view = only_service(&registry);
+        assert_eq!(view.key.as_str(), "u_docker-terraria.service");
+        assert_eq!(view.derived.state, ServiceStateKind::Running);
+        let supervision = view.supervision.expect("supervisé");
+        assert!(supervision.container_present);
+        assert_eq!(supervision.unit, unit);
+        assert_eq!(
+            supervision.status.map(|s| s.timeout_stop_s),
+            Some(Some(120))
+        );
+
+        // Le système arrête puis relance : un autre conteneur, le même service.
+        engine.remove(&first.id);
+        let second = recreated("terraria", RunState::Running, 'b');
+        supervisor.set_owner(&second.id, &unit);
+        engine.put_silently(second.clone());
+        registry.resync().await.expect("resync");
+        let view = only_service(&registry);
+        assert_eq!(view.key.as_str(), "u_docker-terraria.service");
+        assert_eq!(view.observation.id, second.id);
+    }
+
+    #[tokio::test]
+    async fn a_container_without_an_owner_keeps_its_container_key() {
+        let (registry, engine, _supervisor, _repo) = supervised_registry();
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let view = only_service(&registry);
+        assert_eq!(view.key.as_str(), format!("c_{}", web.id));
+        assert!(view.supervision.is_none());
+    }
+
+    #[tokio::test]
+    async fn the_owner_of_a_container_is_searched_once_for_its_whole_life() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        engine.put_silently(container("web", RunState::Running));
+        engine.put_silently(container("db", RunState::Running));
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        assert_eq!(supervisor.owner_containers_asked(), 2);
+        // Relire n'y change rien : ni /proc relu, ni conteneur redemandé.
+        registry.resync().await.expect("resync");
+        registry
+            .refresh(vec![container("web", RunState::Running).id])
+            .await
+            .expect("refresh");
+        assert_eq!(supervisor.owner_containers_asked(), 2);
+        // Un conteneur neuf est cherché, lui seul.
+        engine.put_silently(container("cache", RunState::Running));
+        registry.resync().await.expect("resync");
+        assert_eq!(supervisor.owner_containers_asked(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_supervised_service_whose_container_vanished_stays_listed_from_its_unit() {
+        let (registry, engine, supervisor, repo) = supervised_registry();
+        let unit = unit_named("docker-terraria.service");
+        let mut first = recreated("terraria", RunState::Running, 'a');
+        first.auto_remove = true;
+        first.stop_timeout_s = Some(120);
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+
+        // Le conteneur est supprimé à l'arrêt (`--rm`) : le service reste listé.
+        engine.remove(&first.id);
+        let set = |activity, auto_restart| {
+            supervisor.set_status(
+                &unit,
+                UnitStatus {
+                    activity,
+                    auto_restart,
+                    restarts: true,
+                    timeout_stop_s: Some(120),
+                },
+            );
+        };
+        for (activity, auto_restart, expected) in [
+            (UnitActivity::Inactive, false, ServiceStateKind::Stopped),
+            (UnitActivity::Failed, false, ServiceStateKind::Error),
+            // UNE attente de relance est un démarrage, pas une boucle (`BR-SVC-006`).
+            (UnitActivity::Activating, true, ServiceStateKind::Starting),
+            (UnitActivity::Activating, false, ServiceStateKind::Starting),
+        ] {
+            set(activity, auto_restart);
+            registry
+                .refresh(vec![first.id.clone()])
+                .await
+                .expect("refresh");
+            registry.poll_units().await;
+            let view = only_service(&registry);
+            assert_eq!(view.key.as_str(), "u_docker-terraria.service");
+            assert_eq!(view.derived.state, expected, "{activity:?}");
+            let supervision = view.supervision.as_ref().expect("supervisé");
+            assert!(!supervision.container_present);
+            // Les derniers réglages connus : nom, image, suppression à l'arrêt.
+            assert_eq!(view.observation.name, "terraria");
+            assert!(view.observation.auto_remove);
+        }
+        // L'unité est connue de la base : elle l'a retenue dès le premier passage.
+        let saved = repo.saved.lock().unwrap_or_else(PoisonError::into_inner);
+        assert!(saved.contains_key(&unit));
+    }
+
+    fn waiting_for_relaunch() -> UnitStatus {
+        UnitStatus {
+            activity: UnitActivity::Activating,
+            auto_restart: true,
+            restarts: true,
+            timeout_stop_s: Some(120),
+        }
+    }
+
+    #[tokio::test]
+    async fn three_relaunches_by_the_system_are_a_loop_one_is_not() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let base = crate::infrastructure::engine::fake::at(12);
+        supervisor.set_status(&unit, running_unit());
+        let mut last = recreated("x", RunState::Running, 'a');
+        for (index, id_char) in ['a', 'b', 'c'].into_iter().enumerate() {
+            engine.remove(&last.id);
+            last = recreated("x", RunState::Running, id_char);
+            last.started_at = Some(base - time::Duration::minutes(4 - 2 * index as i64));
+            supervisor.set_owner(&last.id, &unit);
+            engine.put_silently(last.clone());
+            registry.probe_and_apply(false).await;
+            registry.resync().await.expect("resync");
+            if index == 0 {
+                // Un seul démarrage, puis l'unité attend de relancer le conteneur disparu.
+                engine.remove(&last.id);
+                supervisor.set_status(&unit, waiting_for_relaunch());
+                registry.resync().await.expect("resync");
+                registry.poll_units().await;
+                let view = only_service(&registry);
+                assert_eq!(view.restarts_10m, 1);
+                assert_eq!(
+                    view.derived.state,
+                    ServiceStateKind::Starting,
+                    "une seule relance n'est pas une boucle"
+                );
+                supervisor.set_status(&unit, running_unit());
+            }
+        }
+        engine.remove(&last.id);
+        supervisor.set_status(&unit, waiting_for_relaunch());
+        registry.resync().await.expect("resync");
+        registry.poll_units().await;
+        let view = only_service(&registry);
+        assert_eq!(view.restarts_10m, 3);
+        assert_eq!(view.derived.state, ServiceStateKind::RestartLoop);
+    }
+
+    #[tokio::test]
+    async fn a_unit_active_without_a_container_stops_being_starting_after_ten_minutes() {
+        let engine = Arc::new(FakeEngine::new());
+        let supervisor = Arc::new(FakeSupervisor::new());
+        let repo = Arc::new(MemoryRepo::default());
+        let wall = Arc::new(Wall(Mutex::new(crate::infrastructure::engine::fake::at(
+            12,
+        ))));
+        let registry = supervised_with_clock(&engine, &supervisor, &repo, wall.clone());
+        let unit = unit_named("docker-x.service");
+        let first = recreated("x", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        // Le conteneur finit, l'unité reste « active » : le moteur n'a rien.
+        engine.remove(&first.id);
+        registry.resync().await.expect("resync");
+        registry.poll_units().await;
+        assert_eq!(
+            only_service(&registry).derived.state,
+            ServiceStateKind::Starting
+        );
+        wall.advance(time::Duration::minutes(11));
+        registry.poll_units().await;
+        let view = only_service(&registry);
+        assert_eq!(view.derived.state, ServiceStateKind::Unknown);
+        assert!(!view.supervision.expect("supervisé").container_present);
+    }
+
+    #[tokio::test]
+    async fn two_live_containers_under_one_unit_are_both_listed_and_neither_is_supervised() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let first = recreated("x", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        assert_eq!(
+            only_service(&registry).key.as_str(),
+            "u_docker-x.service",
+            "seul sous son unité, il est supervisé"
+        );
+        // Un second conteneur vivant revendique la même unité : plus aucun n'est supervisé, aucun ne
+        // disparaît de la liste (`BR-SVC-001`).
+        let second = recreated("y", RunState::Running, 'b');
+        supervisor.set_owner(&second.id, &unit);
+        engine.put_silently(second.clone());
+        registry.resync().await.expect("resync");
+        let services = registry.snapshot().services;
+        let mut keys: Vec<String> = services
+            .iter()
+            .map(|view| view.key.as_str().to_owned())
+            .collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![format!("c_{}", first.id), format!("c_{}", second.id)]
+        );
+        assert!(services.iter().all(|view| view.supervision.is_none()));
+    }
+
+    #[tokio::test]
+    async fn a_stopped_leftover_of_a_recreation_does_not_unsupervise_the_live_container() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let live = recreated("x", RunState::Running, 'a');
+        let stale = recreated("x-old", RunState::Exited, 'b');
+        supervisor.set_owner(&live.id, &unit);
+        supervisor.set_owner(&stale.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(live.clone());
+        engine.put_silently(stale);
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let view = only_service(&registry);
+        assert_eq!(view.key.as_str(), "u_docker-x.service");
+        assert_eq!(view.observation.id, live.id);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_unit_state_is_not_a_stopped_service() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let first = recreated("x", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        engine.remove(&first.id);
+        // Le superviseur se tait (pas de systemctl) : « état non reconnu », jamais « arrêté ».
+        supervisor.set_unit(&unit, UnitLookup::Unavailable);
+        registry.poll_units().await;
+        registry
+            .refresh(vec![first.id.clone()])
+            .await
+            .expect("refresh");
+        assert_eq!(
+            only_service(&registry).derived.state,
+            ServiceStateKind::Unknown
+        );
+    }
+
+    #[tokio::test]
+    async fn a_unit_the_system_forgets_is_dropped_with_its_memory() {
+        let (registry, engine, supervisor, repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let first = recreated("x", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        engine.remove(&first.id);
+        registry
+            .refresh(vec![first.id.clone()])
+            .await
+            .expect("refresh");
+        assert_eq!(
+            registry.snapshot().services.len(),
+            1,
+            "gardé tant que l'unité existe"
+        );
+        supervisor.set_unit(&unit, UnitLookup::NotLoaded);
+        registry.poll_units().await;
+        assert!(registry.snapshot().services.is_empty());
+        let forgotten = repo
+            .forgotten
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(*forgotten, vec![unit]);
+    }
+
+    #[tokio::test]
+    async fn only_the_settings_are_retained_never_a_variable_name_or_the_command() {
+        let (registry, engine, supervisor, repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let mut first = recreated("x", RunState::Running, 'a');
+        first.env_names = vec![Hidden::new("SENTINEL_NAME")];
+        first.command = Some(vec![Hidden::new("--token=SENTINEL-CMD")]);
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        // Le détail complet est servi tant que le conteneur existe...
+        let view = only_service(&registry);
+        assert_eq!(view.observation.env_names.len(), 1);
+        // ... mais rien de cela n'est retenu.
+        let saved = repo.saved.lock().unwrap_or_else(PoisonError::into_inner);
+        let record = saved.get(&unit).expect("retenu");
+        assert!(record.observation.env_names.is_empty());
+        assert!(record.observation.command.is_none());
+        assert_eq!(record.observation.run_state, RunState::Exited);
+        assert!(!format!("{record:?}").contains("SENTINEL"));
+    }
+
+    #[tokio::test]
+    async fn a_remembered_service_is_listed_after_a_restart_of_the_agent_without_its_container() {
+        let engine = Arc::new(FakeEngine::new());
+        let supervisor = Arc::new(FakeSupervisor::new());
+        let repo = Arc::new(MemoryRepo::default());
+        let unit = unit_named("docker-terraria.service");
+        {
+            let registry = supervised_over(&engine, &supervisor, &repo);
+            let first = recreated("terraria", RunState::Running, 'a');
+            supervisor.set_owner(&first.id, &unit);
+            supervisor.set_status(&unit, running_unit());
+            engine.put_silently(first.clone());
+            registry.probe_and_apply(false).await;
+            registry.resync().await.expect("resync");
+            engine.remove(&first.id);
+        }
+        // L'agent redémarre : le conteneur n'existe plus, l'unité est arrêtée.
+        supervisor.set_status(
+            &unit,
+            UnitStatus {
+                activity: UnitActivity::Inactive,
+                auto_restart: false,
+                restarts: true,
+                timeout_stop_s: Some(120),
+            },
+        );
+        let registry = supervised_over(&engine, &supervisor, &repo);
+        registry.load_remembered().await;
+        registry.poll_units().await;
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let view = only_service(&registry);
+        assert_eq!(view.key.as_str(), "u_docker-terraria.service");
+        assert_eq!(view.derived.state, ServiceStateKind::Stopped);
+        assert_eq!(
+            view.derived.exit_code, None,
+            "pas de code après un redémarrage de l'agent"
+        );
+    }
+
+    /// Un journal qui se souvient de ce qu'on lui écrit.
+    #[derive(Default)]
+    struct RecordingSink {
+        entries: Mutex<Vec<(AuditAction, Target, Outcome)>>,
+        /// Le journal refuse les écritures obligatoires (base pleine ou verrouillée).
+        failing: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait]
+    impl AuditSink for RecordingSink {
+        async fn record(
+            &self,
+            _actor: Actor,
+            action: AuditAction,
+            target: Target,
+            outcome: Outcome,
+        ) {
+            self.entries
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((action, target, outcome));
+        }
+
+        async fn record_required(
+            &self,
+            actor: Actor,
+            action: AuditAction,
+            target: Target,
+            outcome: Outcome,
+        ) -> Result<(), crate::application::ports::AuditWriteError> {
+            if self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(crate::application::ports::AuditWriteError);
+            }
+            self.record(actor, action, target, outcome).await;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn no_value_is_returned_when_the_journal_write_fails() {
+        let (registry, engine, _supervisor, _repo) = supervised_registry();
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        engine.set_env(&web.id, &[("DB_PASSWORD", "SENTINEL-VALUE")]);
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let key = only_service(&registry).key;
+        let sink = RecordingSink::default();
+        sink.failing
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let outcome = registry.reveal_env(&key, Actor::system(), &sink).await;
+        assert_eq!(outcome.err(), Some(RevealError::JournalUnavailable));
+        assert!(
+            sink.entries
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "rien n'est consigné, rien n'est rendu"
+        );
+        sink.failing
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            registry
+                .reveal_env(&key, Actor::system(), &sink)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_values_are_read_only_on_request_and_the_success_is_journaled_without_them() {
+        let (registry, engine, _supervisor, _repo) = supervised_registry();
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        engine.set_env(&web.id, &[("DB_PASSWORD", "SENTINEL-VALUE")]);
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        registry
+            .refresh(vec![web.id.clone()])
+            .await
+            .expect("refresh");
+        assert_eq!(
+            engine.env_read_count(),
+            0,
+            "aucune valeur n'est lue en arrière-plan"
+        );
+        let key = only_service(&registry).key;
+        let sink = RecordingSink::default();
+        let entries = registry
+            .reveal_env(&key, Actor::system(), &sink)
+            .await
+            .expect("révélées");
+        assert_eq!(engine.env_read_count(), 1);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name.expose(), "DB_PASSWORD");
+        assert_eq!(entries[0].value.expose(), "SENTINEL-VALUE");
+        let journaled = sink.entries.lock().unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(journaled.len(), 1);
+        assert_eq!(journaled[0].0, AuditAction::ServiceEnvReveal);
+        assert_eq!(journaled[0].2, Outcome::Succeeded);
+        let written = format!("{:?} {:?}", journaled[0].1, journaled[0].1.text());
+        assert!(written.contains("web"));
+        assert!(!written.contains("SENTINEL") && !written.contains("DB_PASSWORD"));
+    }
+
+    #[tokio::test]
+    async fn a_reveal_that_fails_reads_nothing_and_journals_no_success() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let sink = RecordingSink::default();
+        let unknown = ServiceKey::parse("c_0123abcd").expect("clé");
+        assert_eq!(
+            registry
+                .reveal_env(&unknown, Actor::system(), &sink)
+                .await
+                .err(),
+            Some(RevealError::NotFound)
+        );
+        // Un service supervisé dont le conteneur n'existe plus : rien à lire.
+        let unit = unit_named("docker-x.service");
+        let first = recreated("x", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let key = only_service(&registry).key;
+        // Le moteur refuse la lecture.
+        engine.fail_inspect(&first.id, Some(EngineError::Timeout));
+        assert_eq!(
+            registry
+                .reveal_env(&key, Actor::system(), &sink)
+                .await
+                .err(),
+            Some(RevealError::EngineUnavailable)
+        );
+        engine.fail_inspect(&first.id, None);
+        engine.remove(&first.id);
+        registry
+            .refresh(vec![first.id.clone()])
+            .await
+            .expect("refresh");
+        supervisor.set_unit(&unit, UnitLookup::Unavailable);
+        assert_eq!(
+            registry
+                .reveal_env(&key, Actor::system(), &sink)
+                .await
+                .err(),
+            Some(RevealError::NoContainer)
+        );
+        assert!(
+            sink.entries
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "aucune réussite consignée"
+        );
     }
 }

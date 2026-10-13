@@ -307,6 +307,9 @@ async fn a_database_opened_by_the_agent_is_at_0006_and_a_fresh_one_matches_the_m
     let dir = tmp::tempdir().unwrap();
     let migrated = database_at_0005(&dir.path().join("old.db")).await;
     migrator_up_to(6).run(&migrated).await.unwrap();
+    // Les migrations ultérieures (0007 à 0009 : `audit_events.details`) s'appliquent aux deux : on
+    // compare deux bases au même numéro, la base migrée depuis la 0005 et la base neuve.
+    sqlx::migrate!("./migrations").run(&migrated).await.unwrap();
     let fresh_dir = tmp::tempdir().unwrap();
     let fresh = Database::open(fresh_dir.path()).await.unwrap();
     for table in ["audit_events", "attack_mode", "attack_trials", "sessions"] {

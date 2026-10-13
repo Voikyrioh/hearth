@@ -20,6 +20,7 @@ const KEY: &str = "01J9ZY0G3Q8M2K6W4T7V5N1B9D";
 /// le handler ne s'en serve.
 fn concrete(path: &str) -> String {
     path.replace("{id}", "01JNOSUCHACCOUNT0000000000")
+        .replace("{key}", "c_nosuchservice")
 }
 
 const METHODS: [Method; 5] = [

@@ -16,11 +16,12 @@ use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
 use hearth_agent::application::ports::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, Listing, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, Unreadable,
 };
+use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::services::image::image_name;
 use hearth_agent::domain::services::{
-    Announced, ApiVersion, EngineProbe, Observation, ProbeOutcome, RestartPolicy, RunState,
+    Announced, ApiVersion, EngineProbe, Hidden, Observation, ProbeOutcome, RestartPolicy, RunState,
 };
 
 #[derive(Debug, Clone)]
@@ -36,6 +37,10 @@ struct State {
     list_error: Option<EngineError>,
     /// Conteneurs dont l'inspection échoue (la liste les nomme, l'inspection répond par l'erreur).
     inspect_errors: BTreeMap<String, EngineError>,
+    /// Variables d'environnement (nom, valeur) par conteneur, pour `env`.
+    envs: BTreeMap<String, Vec<(String, String)>>,
+    /// Combien de fois `env` a été appelée.
+    env_reads: u64,
     /// Le flux d'événements se ferme aussitôt ouvert (un moteur dont le flux ne tient pas).
     events_broken: bool,
     /// Temps que `list` met à répondre (un moteur lent).
@@ -98,6 +103,10 @@ pub fn container(name: &str, run_state: RunState) -> Observation {
         restart: RestartPolicy::None,
         auto_remove: false,
         compose_project: None,
+        env_names: vec![],
+        env_omitted: 0,
+        command: None,
+        stop_timeout_s: None,
     }
 }
 
@@ -111,6 +120,8 @@ impl FakeEngine {
                 containers: BTreeMap::new(),
                 list_error: None,
                 inspect_errors: BTreeMap::new(),
+                envs: BTreeMap::new(),
+                env_reads: 0,
                 events_broken: false,
                 list_delay: std::time::Duration::ZERO,
             }),
@@ -193,6 +204,21 @@ impl FakeEngine {
         };
     }
 
+    /// Règle les variables d'un conteneur : la LISTE n'en montre que les noms (dans l'observation, à
+    /// poser avec `Observation::env_names`), `env` rend noms et valeurs.
+    pub fn set_env(&self, id: &str, variables: &[(&str, &str)]) {
+        let pairs = variables
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect();
+        self.lock().envs.insert(id.to_owned(), pairs);
+    }
+
+    /// Combien de fois les valeurs ont été lues (jamais par la liste ni par les événements).
+    pub fn env_read_count(&self) -> u64 {
+        self.lock().env_reads
+    }
+
     /// Les flux d'événements ouverts à partir de maintenant se ferment aussitôt (true) ou tiennent.
     pub fn set_events_broken(&self, broken: bool) {
         self.lock().events_broken = broken;
@@ -268,6 +294,32 @@ impl ContainerEngine for FakeEngine {
             return Err(error);
         }
         Ok(state.containers.get(id).cloned())
+    }
+
+    async fn env(&self, id: &str) -> Result<Option<Vec<EnvEntry>>, EngineError> {
+        let mut state = self.lock();
+        state.env_reads += 1;
+        if let Some(error) = state
+            .list_error
+            .or_else(|| state.inspect_errors.get(id).copied())
+        {
+            return Err(error);
+        }
+        if !state.containers.contains_key(id) {
+            return Ok(None);
+        }
+        Ok(Some(
+            state
+                .envs
+                .get(id)
+                .into_iter()
+                .flatten()
+                .map(|(name, value)| EnvEntry {
+                    name: Hidden::new(name.clone()),
+                    value: Secret::from(value.as_str()),
+                })
+                .collect(),
+        ))
     }
 
     fn events(&self) -> EngineEvents {

@@ -110,6 +110,7 @@ fn forbidden_message(action: Option<AuditAction>) -> &'static str {
     match action {
         Some(AuditAction::AuditRead) => "Tu n'as pas la permission de lire le journal d'activité",
         Some(AuditAction::AgentUpdate) => "Seul un administrateur peut mettre à jour l'agent",
+        Some(AuditAction::ServiceEnvReveal) => "Réservé aux administrateurs.",
         Some(AuditAction::AttackModeEnable | AuditAction::AttackModeDisable) => {
             "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs."
         }

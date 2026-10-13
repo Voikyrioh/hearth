@@ -34,9 +34,9 @@ use hearth_link::domain::event::Event;
 use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::{LinkState, Thresholds};
 use hearth_proto::api::services::{
-    EngineState, EngineView, HostInfo, ImageInfo, InitSystem, MIN_ENGINE_VERSION, MountKind,
-    PortProtocol, PortScope, RestartMode, ServiceDriver, ServiceItem, ServiceMount, ServiceOrigin,
-    ServicePort, ServiceState, ServicesState,
+    Concealed, EngineState, EngineView, HostInfo, ImageInfo, InitSystem, MIN_ENGINE_VERSION,
+    MountKind, PortProtocol, PortScope, RestartMode, ServiceDriver, ServiceItem, ServiceMount,
+    ServiceOrigin, ServicePort, ServiceState, ServicesState,
 };
 use serde_json::Value;
 
@@ -122,6 +122,11 @@ fn full_state() -> ServicesState {
                 }],
                 mounts_omitted: 5,
                 restart: RestartMode::UnlessStopped,
+                // Ignorés aussi (HRT-63 côté client) : la sentinelle ne doit JAMAIS sortir de la coquille.
+                env_names: vec![Concealed::new("SENTINEL_ENV_NAME")],
+                env_names_omitted: 2,
+                command: Some(vec![Concealed::new("SENTINEL_COMMAND")]),
+                grace_s: Some(30),
                 busy: None,
                 last_action: None,
             },
@@ -150,6 +155,10 @@ fn full_state() -> ServicesState {
                 mounts: vec![],
                 mounts_omitted: 0,
                 restart: RestartMode::None,
+                env_names: vec![],
+                env_names_omitted: 0,
+                command: None,
+                grace_s: None,
                 busy: None,
                 last_action: None,
             },
@@ -228,6 +237,7 @@ fn the_event_carries_no_variable_name_value_nor_command() {
     }
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
     let event = serde_json::to_value(book.on_state("forge", &full_state(), None)).unwrap();
+    assert!(!event.to_string().contains("SENTINEL"), "{event}");
     let mut found = Vec::new();
     keys(&event, &mut found);
     for forbidden in [

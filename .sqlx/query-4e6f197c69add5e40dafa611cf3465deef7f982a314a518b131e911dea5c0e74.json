@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO supervised_services (service_key, unit, name, last_view_json, last_seen_at)\n             VALUES (?, ?, ?, ?, ?)\n             ON CONFLICT (service_key) DO UPDATE SET\n                 name = excluded.name,\n                 last_view_json = excluded.last_view_json,\n                 last_seen_at = excluded.last_seen_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "4e6f197c69add5e40dafa611cf3465deef7f982a314a518b131e911dea5c0e74"
+}

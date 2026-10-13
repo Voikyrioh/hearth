@@ -30,6 +30,16 @@ struct NoSink;
 #[async_trait]
 impl AuditSink for NoSink {
     async fn record(&self, _: Actor, _: AuditAction, _: Target, _: Outcome) {}
+
+    async fn record_required(
+        &self,
+        _: Actor,
+        _: AuditAction,
+        _: Target,
+        _: Outcome,
+    ) -> Result<(), hearth_agent::application::ports::AuditWriteError> {
+        Ok(())
+    }
 }
 
 /// La fabrique d'adaptateurs de mise à jour d'un agent de test (`TestAgent::install_with`). Le PREMIER

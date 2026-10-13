@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT unit, last_view_json, last_seen_at FROM supervised_services ORDER BY unit",
+  "describe": {
+    "columns": [
+      {
+        "name": "unit",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "supervised_services",
+            "name": "unit"
+          }
+        }
+      },
+      {
+        "name": "last_view_json",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "supervised_services",
+            "name": "last_view_json"
+          }
+        }
+      },
+      {
+        "name": "last_seen_at",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "supervised_services",
+            "name": "last_seen_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8546cfa1a0fe81580db7878833601bb37ccfc6a91b9890c5952166ded8993cb7"
+}

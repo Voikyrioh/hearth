@@ -186,6 +186,9 @@ pub enum Target {
     Alert(AlertPhase),
     /// L'essai unique d'un critère, en mode attaque (HRT-25) : l'adresse ou la clé, jamais leur valeur.
     Trial(TrialKind),
+    /// Un service de conteneurs, par son nom (nettoyé et borné comme un nom de poste) : jamais le nom
+    /// ni la valeur d'une de ses variables (HRT-63).
+    Service(ClientName),
 }
 
 /// Le moment de l'épisode d'alerte que l'entrée consigne.
@@ -210,6 +213,7 @@ impl Target {
             }
             Self::Trial(TrialKind::Address) => Some("essai sur l'adresse retenue".to_owned()),
             Self::Trial(TrialKind::Key) => Some("essai sur la clé du poste".to_owned()),
+            Self::Service(name) => Some(format!("service {}", name.as_str())),
         }
     }
 }

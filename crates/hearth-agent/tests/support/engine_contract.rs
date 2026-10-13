@@ -51,7 +51,8 @@ pub trait Harness: Send + Sync {
     async fn remove(&self, id: &str);
 }
 
-/// La variable sentinelle : ni son nom ni sa valeur ne doivent ressortir d'une observation.
+/// La variable sentinelle : ni son nom ni sa valeur ne doivent ressortir d'un `Debug`. Le nom est lu
+/// (détail d'un service), la valeur seulement par `env`.
 pub const SENTINEL_NAME: &str = "HEARTH_CONTRACT_SECRET";
 pub const SENTINEL_VALUE: &str = "sentinel-7f3a91-do-not-leak";
 
@@ -179,7 +180,7 @@ pub async fn run(harness: &dyn Harness, prefix: &str) {
         "un conteneur inconnu rend None, pas une erreur"
     );
 
-    // 5. Ni la valeur ni le nom de la variable sentinelle ne sortent de la lecture.
+    // 5. Ni la valeur ni le nom de la variable sentinelle ne sortent de la lecture par `Debug`.
     let everything = format!(
         "{:?} {:?}",
         engine.list().await.expect("liste"),
@@ -192,6 +193,43 @@ pub async fn run(harness: &dyn Harness, prefix: &str) {
     assert!(
         !everything.contains(SENTINEL_NAME),
         "nom de variable divulgué"
+    );
+
+    // 5 bis. Les NOMS des variables sont lus avec la liste (BR-SVC-008), les VALEURS seulement par
+    //    `env` (BR-SVC-009), et un conteneur inconnu rend None.
+    assert!(
+        listed_running
+            .env_names
+            .iter()
+            .any(|name| name.expose() == SENTINEL_NAME),
+        "nom de variable lu : {:?}",
+        listed_running.env_names
+    );
+    let entries = engine
+        .env(&running)
+        .await
+        .expect("variables")
+        .expect("le conteneur existe");
+    assert_eq!(
+        entries
+            .iter()
+            .find(|entry| entry.name.expose() == SENTINEL_NAME)
+            .map(|entry| entry.value.expose()),
+        Some(SENTINEL_VALUE),
+        "valeur révélée"
+    );
+    assert!(
+        engine
+            .env(&"0".repeat(64))
+            .await
+            .expect("variables")
+            .is_none(),
+        "un conteneur inconnu rend None, pas une erreur"
+    );
+    let shown = format!("{entries:?}");
+    assert!(
+        !shown.contains(SENTINEL_VALUE) && !shown.contains(SENTINEL_NAME),
+        "Debug ne montre rien"
     );
 
     // 6. Les événements : l'arrêt du service en marche est annoncé. Le flux se connecte à sa

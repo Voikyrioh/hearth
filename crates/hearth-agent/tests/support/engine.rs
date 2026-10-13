@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::fake_engine::FakeEngine;
+use super::fake_supervisor::FakeSupervisor;
 use hearth_agent::app::EngineParts;
 use hearth_agent::application::ports::{HostDescription, HostEnvironment};
 use hearth_agent::application::services::EngineTimings;
@@ -42,8 +43,18 @@ pub fn parts(engine: Arc<FakeEngine>) -> EngineParts {
 }
 
 pub fn parts_with(engine: Arc<FakeEngine>, timings: EngineTimings) -> EngineParts {
+    parts_supervised(engine, Arc::new(FakeSupervisor::new()), timings)
+}
+
+/// Comme `parts_with`, avec ce faux superviseur : le test règle propriétaires et états des unités.
+pub fn parts_supervised(
+    engine: Arc<FakeEngine>,
+    supervisor: Arc<FakeSupervisor>,
+    timings: EngineTimings,
+) -> EngineParts {
     EngineParts {
         engine,
+        supervisor,
         host: Arc::new(TestHost),
         timings,
     }

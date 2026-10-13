@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use futures_util::Stream;
 use thiserror::Error;
 
-use crate::domain::services::{EngineProbe, Observation};
+use crate::domain::secret::Secret;
+use crate::domain::services::{EngineProbe, Hidden, Observation};
 
 /// Erreur d'un échange avec le moteur. Le texte du moteur n'en fait JAMAIS partie : il est traduit
 /// dans l'adaptateur (`infrastructure/engine/errors.rs`) et un texte inconnu devient `Refused`.
@@ -60,13 +61,22 @@ pub struct EngineEvent {
     pub action: String,
 }
 
+/// Une variable d'environnement d'un conteneur, lue pour la révéler à un administrateur
+/// (`GET /services/{key}/env`, BR-SVC-009). Le nom est [`Hidden`], la valeur un [`Secret`] : ni l'un ni
+/// l'autre ne s'affiche (`Debug` masqué), et la valeur est effacée de la mémoire à la libération.
+#[derive(Debug)]
+pub struct EnvEntry {
+    pub name: Hidden,
+    pub value: Secret,
+}
+
 /// Le flux des événements. Sa FIN (ou une erreur) veut dire que le moteur est à revérifier : sonde
 /// immédiate puis relecture complète.
 pub type EngineEvents = Pin<Box<dyn Stream<Item = Result<EngineEvent, EngineError>> + Send>>;
 
 /// Le moteur de conteneurs vu par l'agent, EN LECTURE SEULE (HRT-61, ADR-0036).
 ///
-/// Quatre méthodes, aucune n'écrit : ni démarrer, ni arrêter, ni créer, ni supprimer, ni télécharger.
+/// Cinq méthodes (HRT-63 ajoute `env`), aucune n'écrit : ni démarrer, ni arrêter, ni créer, ni supprimer, ni télécharger.
 /// Une méthode d'écriture « pour plus tard » n'a pas sa place ici : chaque tranche ajoute les siennes
 /// avec son faux et son cas dans la suite de contrat (`tests/support/engine_contract.rs`).
 ///
@@ -90,4 +100,9 @@ pub trait ContainerEngine: Send + Sync {
 
     /// Les événements qui touchent les conteneurs, à partir de maintenant.
     fn events(&self) -> EngineEvents;
+
+    /// Les variables d'environnement d'un conteneur, avec leurs VALEURS (HRT-63). Appelée à la seule
+    /// demande d'un administrateur, jamais en arrière-plan ; au plus `MAX_ENV_NAMES` variables, comme
+    /// la liste des noms. `None` si le conteneur n'existe plus.
+    async fn env(&self, id: &str) -> Result<Option<Vec<EnvEntry>>, EngineError>;
 }

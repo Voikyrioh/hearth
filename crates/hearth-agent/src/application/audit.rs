@@ -17,7 +17,9 @@ use thiserror::Error;
 use tokio::sync::broadcast;
 
 use super::maintenance::MaintenanceService;
-use super::ports::{AuditFeed, AuditRepo, AuditSink, Clock, Store, StoreError, UnitOfWork};
+use super::ports::{
+    AuditFeed, AuditRepo, AuditSink, AuditWriteError, Clock, Store, StoreError, UnitOfWork,
+};
 use crate::domain::accounts::Role;
 use crate::domain::audit::{
     Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, CAP_CHECK_EVERY, Outcome,
@@ -197,6 +199,26 @@ impl AuditSink for AuditRecorder {
             .admit(event);
         for event in to_write {
             self.write_and_publish(event).await;
+        }
+    }
+
+    async fn record_required(
+        &self,
+        actor: Actor,
+        action: AuditAction,
+        target: Target,
+        outcome: Outcome,
+    ) -> Result<(), AuditWriteError> {
+        let event = AuditEvent::new(self.clock.now(), actor, action, target, outcome);
+        match self.write(&event).await {
+            Ok(record) => {
+                self.trail.publish(vec![record]);
+                Ok(())
+            }
+            Err(error) => {
+                tracing::error!(%error, action = event.action.code(), "entrée du journal non écrite");
+                Err(AuditWriteError)
+            }
         }
     }
 }

@@ -333,6 +333,13 @@ impl From<&ServiceItem> for ServiceDto {
             // Idem pour le nombre de montages coupés par l'agent (le détail les montrera).
             mounts_omitted: _,
             restart: _,
+            // HRT-63 côté client (écran de détail, pas encore là) : noms de variables, commande et délai
+            // d'arrêt ne vont ni au DTO ni à l'interface avant ce ticket. Surtout, ces noms et cette
+            // commande ne sont jamais lus en clair ici (BR-SVC-020).
+            env_names: _,
+            env_names_omitted: _,
+            command: _,
+            grace_s: _,
             // Les actes (tranche suivante) : jamais remplis par l'agent de cette tranche.
             busy: _,
             last_action: _,

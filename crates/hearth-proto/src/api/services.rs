@@ -272,7 +272,33 @@ pub struct LastAction {
     pub finished_at: Option<String>,
 }
 
-/// Un service de la liste. AUCUNE valeur de variable, aucun nom de variable, aucune commande.
+/// Un texte qui ne s'affiche jamais : nom ou valeur d'une variable d'environnement, argument de la
+/// commande de lancement. Sur le fil c'est un simple texte JSON ; dans le code, `Debug` ne montre
+/// rien (`Concealed(***)`), il n'y a pas de `Display`, et la lecture passe par [`Concealed::expose`],
+/// facile à repérer en revue. Un nom, une valeur ou une commande ne doivent jamais entrer dans une
+/// trace, un message d'erreur, un journal ni la base (ADR-0037).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Concealed(String);
+
+impl Concealed {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+
+    /// Le texte en clair. À n'utiliser que pour le rendre à l'écran ou le comparer.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Concealed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Concealed(***)")
+    }
+}
+
+/// Un service de la liste, avec son détail. AUCUNE valeur de variable d'environnement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceItem {
     /// Identité stable, opaque pour le client (`c_…`, plus tard `h_…` et `u_…`).
@@ -311,10 +337,41 @@ pub struct ServiceItem {
     #[serde(default, skip_serializing_if = "is_zero")]
     pub mounts_omitted: u32,
     pub restart: RestartMode,
+    /// Noms des variables d'environnement du service, y compris celles de l'image (BR-SVC-008). Jamais
+    /// de valeur : elles ne se lisent que par `GET /services/{key}/env` (administrateur). Plafonné
+    /// (`env_names_omitted` compte le reste). Absent d'un agent de la tranche 1 : liste vide.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_names: Vec<Concealed>,
+    /// Variables au-delà de la borne, non listées. Absent vaut 0.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub env_names_omitted: u32,
+    /// La commande lancée (entrée puis arguments) ; absente quand le moteur n'en annonce aucune
+    /// (BR-SVC-007 : « Commande de l'image »).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<Concealed>>,
+    /// Délai d'arrêt du service en secondes (BR-SVC-007) : celui du service (pilote `engine`) ou de son
+    /// unité (pilote `supervisor`), 10 par défaut pour un conteneur qui n'en déclare pas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grace_s: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub busy: Option<BusyInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_action: Option<LastAction>,
+}
+
+/// Une variable d'environnement révélée.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvVariable {
+    pub name: Concealed,
+    pub value: Concealed,
+}
+
+/// La réponse de `GET /services/{key}/env` (administrateur seulement, BR-SVC-009) : les variables
+/// du service avec leur valeur, dans l'ordre du moteur. Réponse jamais stockable
+/// (`Cache-Control: no-store`) ; son contenu n'entre dans aucune trace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvReveal {
+    pub variables: Vec<EnvVariable>,
 }
 
 /// Le contenu de `GET /services` et de `services_snapshot` : l'état du moteur et tous les services,
@@ -362,6 +419,41 @@ mod tests {
             list_degraded: false,
             at: None,
             list_current_at: None,
+        }
+    }
+
+    fn sample_item() -> ServiceItem {
+        ServiceItem {
+            key: "c_0123".into(),
+            name: "web".into(),
+            origin: ServiceOrigin::External,
+            driver: None,
+            unit: None,
+            removed_on_stop: false,
+            compose_project: None,
+            state: ServiceState::Running,
+            since: None,
+            created_at: None,
+            never_started: false,
+            exit_code: None,
+            restarts_10m: 0,
+            image: ImageInfo {
+                reference: Some("nginx".into()),
+                tag: Some("1.27".into()),
+                short_id: "abcdef012345".into(),
+            },
+            ports: vec![],
+            ports_omitted: 0,
+            host_network: false,
+            mounts: vec![],
+            mounts_omitted: 0,
+            restart: RestartMode::None,
+            env_names: vec![],
+            env_names_omitted: 0,
+            command: None,
+            grace_s: None,
+            busy: None,
+            last_action: None,
         }
     }
 
@@ -438,86 +530,78 @@ mod tests {
 
     #[test]
     fn the_omitted_counters_are_optional_both_ways() {
-        let mut item = serde_json::to_value(ServiceItem {
-            key: "c_1".into(),
-            name: "web".into(),
-            origin: ServiceOrigin::External,
-            driver: None,
-            unit: None,
-            removed_on_stop: false,
-            compose_project: None,
-            state: ServiceState::Running,
-            since: None,
-            created_at: None,
-            never_started: false,
-            exit_code: None,
-            restarts_10m: 0,
-            image: ImageInfo {
-                reference: None,
-                tag: None,
-                short_id: "abc".into(),
-            },
-            ports: vec![],
-            ports_omitted: 0,
-            host_network: false,
-            mounts: vec![],
-            mounts_omitted: 0,
-            restart: RestartMode::None,
-            busy: None,
-            last_action: None,
-        })
-        .expect("json");
+        let mut item = serde_json::to_value(sample_item()).expect("json");
         assert!(item.get("ports_omitted").is_none() && item.get("mounts_omitted").is_none());
+        assert!(item.get("env_names_omitted").is_none());
         let old: ServiceItem = serde_json::from_value(item.clone()).expect("old agent");
         assert_eq!((old.ports_omitted, old.mounts_omitted), (0, 0));
+        assert_eq!(old.env_names_omitted, 0);
         item["ports_omitted"] = 2872.into();
         item["mounts_omitted"] = 436.into();
+        item["env_names_omitted"] = 9.into();
         let new: ServiceItem = serde_json::from_value(item).expect("new agent");
         assert_eq!((new.ports_omitted, new.mounts_omitted), (2872, 436));
+        assert_eq!(new.env_names_omitted, 9);
     }
 
     #[test]
-    fn a_service_item_declares_no_variable_nor_command_field() {
-        let item = ServiceItem {
-            key: "c_0123".into(),
-            name: "web".into(),
-            origin: ServiceOrigin::External,
-            driver: None,
-            unit: None,
-            removed_on_stop: false,
-            compose_project: None,
-            state: ServiceState::Running,
-            since: None,
-            created_at: None,
-            never_started: false,
-            exit_code: None,
-            restarts_10m: 0,
-            image: ImageInfo {
-                reference: Some("nginx".into()),
-                tag: Some("1.27".into()),
-                short_id: "abcdef012345".into(),
-            },
-            ports: vec![],
-            ports_omitted: 0,
-            host_network: false,
-            mounts: vec![],
-            mounts_omitted: 0,
-            restart: RestartMode::None,
-            busy: None,
-            last_action: None,
-        };
-        let json = serde_json::to_value(&item).expect("json");
-        for forbidden in ["env", "env_names", "command", "cmd"] {
-            assert!(
-                json.get(forbidden).is_none(),
-                "{forbidden} ne voyage pas dans cette tranche"
-            );
-        }
-        // Les champs des tranches suivantes sont absents tant qu'ils ne sont pas remplis.
-        for later in ["driver", "unit", "busy", "last_action"] {
+    fn the_detail_fields_are_absent_until_filled_and_never_show_in_debug() {
+        // Un service sans détail ne porte aucun des champs de la tranche 2 : un client de la
+        // tranche 1 lit le même JSON qu'avant.
+        let json = serde_json::to_value(sample_item()).expect("json");
+        for later in [
+            "env_names",
+            "env_names_omitted",
+            "command",
+            "grace_s",
+            "driver",
+            "unit",
+            "busy",
+            "last_action",
+        ] {
             assert!(json.get(later).is_none(), "{later}");
         }
         assert_eq!(json["image"]["ref"], "nginx");
+        // Avec détail : les noms et la commande voyagent (jamais une valeur), `Debug` ne les montre pas.
+        let mut item = sample_item();
+        item.env_names = vec![Concealed::new("SENTINEL_NAME")];
+        item.command = Some(vec![
+            Concealed::new("run"),
+            Concealed::new("--token=SENTINEL"),
+        ]);
+        item.grace_s = Some(120);
+        let json = serde_json::to_value(&item).expect("json");
+        assert_eq!(json["env_names"], serde_json::json!(["SENTINEL_NAME"]));
+        assert_eq!(
+            json["command"],
+            serde_json::json!(["run", "--token=SENTINEL"])
+        );
+        assert_eq!(json["grace_s"], 120);
+        let back: ServiceItem = serde_json::from_value(json).expect("back");
+        assert_eq!(back, item);
+        let shown = format!("{item:?} {item:#?}");
+        assert!(!shown.contains("SENTINEL"), "{shown}");
+        assert!(shown.contains("Concealed(***)"));
+    }
+
+    #[test]
+    fn a_revealed_value_never_shows_in_debug_but_travels_as_plain_json() {
+        let reveal = EnvReveal {
+            variables: vec![EnvVariable {
+                name: Concealed::new("DB_PASSWORD"),
+                value: Concealed::new("SENTINEL-VALUE"),
+            }],
+        };
+        let shown = format!("{reveal:?}");
+        assert!(
+            !shown.contains("SENTINEL") && !shown.contains("DB_PASSWORD"),
+            "{shown}"
+        );
+        let json = serde_json::to_value(&reveal).expect("json");
+        assert_eq!(json["variables"][0]["value"], "SENTINEL-VALUE");
+        let back: EnvReveal = serde_json::from_value(json).expect("back");
+        assert_eq!(back, reveal);
+        assert_eq!(back.variables[0].value.expose(), "SENTINEL-VALUE");
     }
 
     #[test]

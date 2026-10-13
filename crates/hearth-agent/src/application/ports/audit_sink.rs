@@ -11,7 +11,24 @@ use crate::domain::audit::{Actor, AuditAction, AuditRecord, Outcome, Target};
 #[async_trait]
 pub trait AuditSink: Send + Sync {
     async fn record(&self, actor: Actor, action: AuditAction, target: Target, outcome: Outcome);
+
+    /// Écrit une entrée dont l'acte NE DOIT PAS avoir lieu sans elle (révélation de secrets,
+    /// BR-SVC-009) : l'entrée est écrite tout de suite, sans regroupement des répétitions, et l'échec
+    /// est RENDU à l'appelant, qui doit alors refuser l'acte. Pas d'implémentation par défaut : un
+    /// journal qui ne sait pas rendre son échec ne doit pas compiler.
+    async fn record_required(
+        &self,
+        actor: Actor,
+        action: AuditAction,
+        target: Target,
+        outcome: Outcome,
+    ) -> Result<(), AuditWriteError>;
 }
+
+/// L'entrée n'a pas pu être écrite. Aucun détail : le texte de la base n'a pas à remonter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("entrée du journal non écrite")]
+pub struct AuditWriteError;
 
 /// Diffusion interne des entrées écrites, à destination du flux temps réel (sujet `audit`,
 /// administrateurs seulement : le filtrage par rôle est à la charge de l'abonné). Une entrée est

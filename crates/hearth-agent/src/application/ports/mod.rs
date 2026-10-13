@@ -27,6 +27,8 @@ mod password_hasher;
 mod proof;
 mod security_feed;
 mod service_manager;
+mod service_repo;
+mod service_supervisor;
 mod session_repo;
 mod store_error;
 mod system_probe;
@@ -38,11 +40,11 @@ pub use account_repo::{AccountRepo, AccountTx};
 pub use admin_accounts::{AdminAccounts, AdminAccountsError, AdminCredential};
 pub use attack_mode_repo::{AttackModeRepo, AttackModeTx};
 pub use audit_repo::{AuditRepo, AuditTx};
-pub use audit_sink::{AuditFeed, AuditSink};
+pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, Listing, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, Unreadable,
 };
 pub use device_repo::{DeviceRepo, DeviceTx};
 pub use fingerprint::{FingerprintSecretError, FingerprintSecretStore, RequestFingerprinter};
@@ -63,6 +65,8 @@ pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
 pub use security_feed::SecurityFeed;
 pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState};
+pub use service_repo::{ServiceRepo, SupervisedRecord};
+pub use service_supervisor::{ContainerRef, ServiceSupervisor};
 pub use session_repo::{SessionRepo, SessionTx};
 pub use store_error::StoreError;
 pub use system_probe::{ProbeError, SystemProbe};

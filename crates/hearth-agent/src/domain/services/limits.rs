@@ -23,6 +23,15 @@ pub const MAX_ENGINE_TEXT_CHARS: usize = 64;
 pub const MAX_PORTS: usize = 128;
 /// Nombre maximal de montages gardés par service.
 pub const MAX_MOUNTS: usize = 64;
+/// Nombre maximal de noms de variables d'environnement gardés par service (HRT-63) ; le reste est
+/// compté (`env_omitted`).
+pub const MAX_ENV_NAMES: usize = 256;
+/// Longueur maximale du nom d'une variable d'environnement.
+pub const MAX_ENV_NAME_CHARS: usize = 255;
+/// Nombre maximal d'éléments gardés de la commande (entrée et arguments).
+pub const MAX_COMMAND_ARGS: usize = 64;
+/// Longueur maximale d'un élément de la commande.
+pub const MAX_COMMAND_ARG_CHARS: usize = 1024;
 
 /// Marque d'un texte coupé.
 const ELLIPSIS: char = '…';

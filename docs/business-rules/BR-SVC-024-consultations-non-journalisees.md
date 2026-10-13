@@ -11,10 +11,10 @@ maj: 2026-10-13
 # BR-SVC-024 — Lire la liste des services n'est pas journalisé
 
 ## Règle
-Lire la liste, le détail et le récapitulatif des ports sont des consultations, non journalisées. Dans cette tranche : `GET /services`, `POST /engine/recheck` et le sujet `services`, sans action de journal. La révélation des valeurs (journalisée) arrive avec la tranche 2.
+Lire la liste, le détail et le récapitulatif des ports sont des consultations, non journalisées. `GET /services`, `POST /engine/recheck` et le sujet `services` n'ont aucune action de journal. Exception (HRT-63) : la révélation des valeurs des variables, `GET /services/{key}/env`, est consignée (BR-SVC-009), réussite et refus ; ce n'est pas une consultation ordinaire.
 
 ## Application (code)
-- `crates/hearth-agent/src/entrypoint/http/mod.rs::ENDPOINTS (`audit: None`)`
+- `crates/hearth-agent/src/entrypoint/http/mod.rs::ENDPOINTS (`audit: None`, sauf `/services/{key}/env`)`
 
 ## Vérification
 - `crates/hearth-agent/tests/services_https.rs::reading_the_engine_and_the_services_writes_nothing_to_the_journal`

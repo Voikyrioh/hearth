@@ -25,9 +25,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::errors::translate;
 use super::installed::InstallMarkers;
-use super::translate::observation_from;
+use super::translate::{env_entries_of, observation_from};
 use crate::application::ports::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, Listing, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, Unreadable,
 };
 use crate::domain::services::{
     Announced, ApiVersion, EngineProbe, MAX_ENGINE_TEXT_CHARS, MAX_NAME_CHARS, MIN_API_VERSION,
@@ -479,6 +479,20 @@ impl ContainerEngine for BollardEngine {
     async fn inspect(&self, id: &str) -> Result<Option<Observation>, EngineError> {
         let docker = self.inner.docker().await?;
         inspect_with(&docker, id).await
+    }
+
+    async fn env(&self, id: &str) -> Result<Option<Vec<EnvEntry>>, EngineError> {
+        let docker = self.inner.docker().await?;
+        let options = InspectContainerOptionsBuilder::default()
+            .size(false)
+            .build();
+        match docker.inspect_container(id, Some(options)).await {
+            Ok(response) => Ok(Some(env_entries_of(&response))),
+            Err(error) => match translate(&error) {
+                EngineError::NotFound => Ok(None),
+                other => Err(other),
+            },
+        }
     }
 
     fn events(&self) -> EngineEvents {

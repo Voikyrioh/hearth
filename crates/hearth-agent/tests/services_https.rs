@@ -14,15 +14,18 @@ use std::time::{Duration, Instant};
 
 use hearth_agent::app::EngineParts;
 use hearth_agent::domain::accounts::Role;
-use hearth_agent::domain::services::{ProbeOutcome, RunState};
+use hearth_agent::domain::services::{Hidden, ProbeOutcome, RunState, UnitActivity, UnitStatus};
 use hearth_agent::infrastructure::engine::{BollardEngine, InstallMarkers, Target};
 use hearth_agent::infrastructure::logging::{self, LogFormat};
-use hearth_proto::api::services::{EngineState, ServiceItem, ServiceState, ServicesState};
+use hearth_proto::api::services::{
+    Concealed, EngineState, RestartMode, ServiceDriver, ServiceItem, ServiceState, ServicesState,
+};
 use hearth_proto::stream::{ServicesMessage, Topic};
 use serde_json::json;
-use support::engine::{fast_timings, parts, parts_with};
+use support::engine::{fast_timings, parts, parts_supervised, parts_with};
 use support::fake_daemon::{DaemonContainer, FakeDaemon};
 use support::fake_engine::{FakeEngine, container, ready_probe};
+use support::fake_supervisor::{FakeSupervisor, running_unit, unit_named};
 use support::https::{self, Agent};
 use support::probe::{fast_stream, metering_with};
 use support::ws::{self, WsClient};
@@ -678,7 +681,8 @@ fn captured_traces() -> Arc<Mutex<Vec<u8>>> {
 }
 
 #[tokio::test]
-async fn no_variable_value_name_or_command_reaches_a_message_a_response_or_a_trace() {
+async fn no_variable_value_reaches_a_message_a_response_or_a_trace_and_no_name_or_command_reaches_a_trace()
+ {
     let traces = captured_traces();
     // Témoins : sans eux, un tampon vide ou un pont `log` absent rendraient le test aveugle. Une
     // ligne `log` ordinaire doit arriver ; une ligne `log` de `bollard` sous `warn` ne doit pas ;
@@ -709,6 +713,7 @@ async fn no_variable_value_name_or_command_reaches_a_message_a_response_or_a_tra
         &env,
         EngineParts {
             engine: Arc::new(engine),
+            supervisor: Arc::new(FakeSupervisor::new()),
             host: Arc::new(support::engine::TestHost),
             timings: fast_timings(),
         },
@@ -746,17 +751,18 @@ async fn no_variable_value_name_or_command_reaches_a_message_a_response_or_a_tra
         let message = client.next_services().await;
         texts.push(serde_json::to_string(&message).unwrap());
     }
+    // Les VALEURS ne voyagent jamais dans la liste, ni dans un delta, ni dans une relance (elles ne se
+    // lisent que par `GET /services/{key}/env`). Les NOMS et la commande, eux, sont dans le détail
+    // d'un service pour les deux rôles (BR-SVC-007, BR-SVC-008, BR-SVC-020) : on le prouve, pour que
+    // l'absence de la valeur ne soit pas un test aveugle.
     for text in &texts {
-        for forbidden in [
-            "SENTINEL-VALUE-91c2",
-            "DB_PASSWORD",
-            "SENTINEL_NAME_77",
-            "SENTINEL-CMD-5d1e",
-            "run-server",
-        ] {
-            assert!(!text.contains(forbidden), "{forbidden} dans {text}");
-        }
+        assert!(
+            !text.contains("SENTINEL-VALUE-91c2"),
+            "une valeur dans {text}"
+        );
     }
+    assert!(texts[0].contains("DB_PASSWORD") && texts[0].contains("SENTINEL_NAME_77"));
+    assert!(texts[0].contains("run-server"));
     agent.shutdown().await;
     let captured = String::from_utf8_lossy(&traces.lock().unwrap()).into_owned();
     assert!(
@@ -777,4 +783,468 @@ async fn no_variable_value_name_or_command_reaches_a_message_a_response_or_a_tra
         !captured.contains("witness-bollard-debug"),
         "`bollard` ne sort pas sous `warn`"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Détail d'un service, services supervisés, révélation des variables (HRT-63)
+// ---------------------------------------------------------------------------------------------
+
+/// Un conteneur avec son détail : noms de variables, commande, délai d'arrêt déclaré.
+fn detailed(name: &str, state: RunState) -> hearth_agent::domain::services::Observation {
+    let mut observation = container(name, state);
+    observation.env_names = vec![Hidden::new("APP_MODE"), Hidden::new("DB_PASSWORD")];
+    observation.command = Some(vec![Hidden::new("/entrypoint.sh"), Hidden::new("--serve")]);
+    observation.stop_timeout_s = Some(30);
+    observation
+}
+
+/// Le conteneur d'un autre identifiant que le système recrée à chaque démarrage.
+fn recreated(
+    name: &str,
+    state: RunState,
+    id_char: char,
+) -> hearth_agent::domain::services::Observation {
+    let mut observation = detailed(name, state);
+    observation.id = id_char.to_string().repeat(64);
+    observation
+}
+
+async fn listed(agent: &Agent, count: usize) {
+    let registry = agent.services();
+    eventually("la liste est lue", || {
+        let registry = registry.clone();
+        async move { registry.snapshot().services.len() == count }
+    })
+    .await;
+}
+
+/// Compte, résultat, cible, raison, libellé d'une entrée du journal.
+type JournalRow = (String, String, Option<String>, Option<String>, String);
+
+fn all_bytes(dir: &std::path::Path) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            bytes.extend(all_bytes(&path));
+        } else if let Ok(content) = std::fs::read(&path) {
+            bytes.extend(content);
+        }
+    }
+    bytes
+}
+
+fn contains(haystack: &[u8], needle: &str) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle.as_bytes())
+}
+
+#[tokio::test]
+async fn the_detail_of_a_service_has_names_command_and_grace_for_both_roles_and_never_a_value() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let web = detailed("web", RunState::Running);
+    engine.put_silently(web.clone());
+    engine.set_env(
+        &web.id,
+        &[("APP_MODE", "prod"), ("DB_PASSWORD", "SENTINEL-VALUE-A")],
+    );
+    let agent = ready_agent(&env, &engine).await;
+    listed(&agent, 1).await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    let mut seen = Vec::new();
+    for token in [&admin, &readonly] {
+        let (state, text) = services_of(&agent, token).await;
+        let item = &state.services[0];
+        let names: Vec<&str> = item.env_names.iter().map(Concealed::expose).collect();
+        assert_eq!(names, ["APP_MODE", "DB_PASSWORD"]);
+        let command: Vec<&str> = item
+            .command
+            .iter()
+            .flatten()
+            .map(Concealed::expose)
+            .collect();
+        assert_eq!(command, ["/entrypoint.sh", "--serve"]);
+        assert_eq!(item.grace_s, Some(30));
+        assert!(!text.contains("SENTINEL-VALUE-A"), "une valeur dans {text}");
+        seen.push(item.clone());
+    }
+    assert_eq!(seen[0], seen[1], "les deux rôles voient le même détail");
+    assert_eq!(
+        engine.env_read_count(),
+        0,
+        "aucune valeur n'est lue sans demande de révélation"
+    );
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_service_run_by_a_unit_is_served_under_its_unit_and_stays_listed_when_its_container_goes()
+{
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let supervisor = Arc::new(FakeSupervisor::new());
+    let unit = unit_named("docker-terraria.service");
+    let first = recreated("terraria", RunState::Running, 'a');
+    supervisor.set_owner(&first.id, &unit);
+    supervisor.set_status(&unit, running_unit());
+    engine.put_silently(first.clone());
+    let agent = https::start_engined(
+        &env,
+        parts_supervised(engine.clone(), supervisor.clone(), fast_timings()),
+    )
+    .await;
+    listed(&agent, 1).await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let (mut client, snapshot) = subscribed(&agent, &admin).await;
+    let item = &snapshot.services[0];
+    assert_eq!(item.key, "u_docker-terraria.service");
+    assert_eq!(item.driver, Some(ServiceDriver::Supervisor));
+    assert_eq!(item.unit.as_deref(), Some("docker-terraria.service"));
+    assert_eq!(item.restart, RestartMode::Supervisor);
+    assert_eq!(item.grace_s, Some(120), "le délai de l'unité, pas 10 s");
+    assert_eq!(item.state, ServiceState::Running);
+
+    // Le système arrête le service (`--rm` : le conteneur disparaît) et constate l'échec.
+    supervisor.set_status(
+        &unit,
+        UnitStatus {
+            activity: UnitActivity::Failed,
+            auto_restart: false,
+            restarts: true,
+            timeout_stop_s: Some(120),
+        },
+    );
+    engine.remove(&first.id);
+    eventually("le service reste listé, en erreur", || {
+        let agent = &agent;
+        let admin = &admin;
+        async move {
+            let (state, _) = services_of(agent, admin).await;
+            state.services.len() == 1
+                && state.services[0].key == "u_docker-terraria.service"
+                && state.services[0].state == ServiceState::Error
+        }
+    })
+    .await;
+    // Le delta qui l'annonce garde la même clé, jamais une disparition suivie d'une apparition.
+    let mut removed_seen = false;
+    let mut error_seen = false;
+    while !error_seen {
+        let ServicesMessage::ServicesDelta(delta) = client.next_services().await else {
+            continue;
+        };
+        removed_seen |= delta.removed.iter().any(|key| key.contains("terraria"));
+        error_seen = delta.upserts.iter().any(|item| {
+            item.key == "u_docker-terraria.service" && item.state == ServiceState::Error
+        });
+    }
+    assert!(!removed_seen, "le service n'a jamais disparu de la liste");
+    let (state, text) = services_of(&agent, &admin).await;
+    let gone = &state.services[0];
+    assert!(gone.env_names.is_empty() && gone.command.is_none());
+    assert_eq!(gone.name, "terraria");
+    assert!(!text.contains("DB_PASSWORD"), "rien du détail n'est retenu");
+
+    // Un homonyme créé ensuite n'est pas confondu avec lui (BR-SVC-016).
+    engine.put(recreated("terraria", RunState::Running, 'c'), "start");
+    listed(&agent, 2).await;
+    let (state, _) = services_of(&agent, &admin).await;
+    let mut keys: Vec<&str> = state.services.iter().map(|s| s.key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(keys.len(), 2);
+    assert!(keys[0].starts_with("c_") && keys[1] == "u_docker-terraria.service");
+
+    // Le système relance le service : un autre conteneur, la même clé, de nouveau en marche.
+    let second = recreated("terraria", RunState::Running, 'b');
+    supervisor.set_owner(&second.id, &unit);
+    supervisor.set_status(&unit, running_unit());
+    engine.put(second.clone(), "start");
+    eventually("le service relancé est de nouveau en marche", || {
+        let agent = &agent;
+        let admin = &admin;
+        async move {
+            let (state, _) = services_of(agent, admin).await;
+            state
+                .services
+                .iter()
+                .any(|s| s.key == "u_docker-terraria.service" && s.state == ServiceState::Running)
+        }
+    })
+    .await;
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn only_an_administrator_reveals_the_values_and_every_attempt_is_journaled_without_them() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let web = detailed("web", RunState::Running);
+    engine.put_silently(web.clone());
+    engine.set_env(
+        &web.id,
+        &[("APP_MODE", "prod"), ("DB_PASSWORD", "SENTINEL-VALUE-A")],
+    );
+    let agent = ready_agent(&env, &engine).await;
+    listed(&agent, 1).await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    let path = format!("/services/c_{}/env", web.id);
+
+    // Un compte en lecture seule est refusé, même client modifié : rien n'est lu dans le moteur.
+    let denied = agent.request("GET", &path).token(&readonly).send().await;
+    assert_eq!(denied.status, 403, "{:?}", denied.body);
+    assert_eq!(denied.code(), "FORBIDDEN_ROLE");
+    assert_eq!(
+        denied.body["error"]["message"],
+        "Réservé aux administrateurs."
+    );
+    assert!(!denied.text.contains("SENTINEL") && !denied.text.contains("DB_PASSWORD"));
+    assert_eq!(engine.env_read_count(), 0);
+    // Sans session : refusé avant tout.
+    let anonymous = agent.request("GET", &path).send().await;
+    assert_eq!(anonymous.status, 401);
+
+    // L'administrateur reçoit les valeurs, dans une réponse que rien ne stocke.
+    let revealed = agent.request("GET", &path).token(&admin).send().await;
+    assert_eq!(revealed.status, 200, "{:?}", revealed.body);
+    assert_eq!(revealed.header("cache-control"), Some("no-store"));
+    assert_eq!(revealed.header("pragma"), Some("no-cache"));
+    assert_eq!(
+        revealed.body,
+        json!({ "variables": [
+            { "name": "APP_MODE", "value": "prod" },
+            { "name": "DB_PASSWORD", "value": "SENTINEL-VALUE-A" }
+        ]})
+    );
+    assert_eq!(engine.env_read_count(), 1);
+
+    // Un service inconnu, une clé mal formée : 404, sans répéter la clé.
+    for bad in ["c_00ff", "x_not-a-key", "u_docker-ghost.service"] {
+        let reply = agent
+            .request("GET", &format!("/services/{bad}/env"))
+            .token(&admin)
+            .send()
+            .await;
+        assert_eq!(reply.status, 404, "{bad} : {:?}", reply.body);
+        assert!(
+            !reply.text.contains(bad),
+            "la clé est répétée : {}",
+            reply.text
+        );
+    }
+    assert_eq!(engine.env_read_count(), 1, "rien de plus n'est lu");
+
+    // Le journal : le refus (cible : la route) et la réussite (cible : le service), sans nom ni valeur.
+    let rows: Vec<JournalRow> = sqlx::query_as(
+        "SELECT account, outcome, target, reason, action_label FROM audit_events
+         WHERE action = 'service.env.reveal' ORDER BY id",
+    )
+    .fetch_all(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "lucas".to_owned(),
+                "denied".to_owned(),
+                Some("/services/{key}/env".to_owned()),
+                Some("lecture seule".to_owned()),
+                "Valeurs des variables révélées".to_owned()
+            ),
+            (
+                "marie".to_owned(),
+                "ok".to_owned(),
+                Some("service web".to_owned()),
+                None,
+                "Valeurs des variables révélées".to_owned()
+            ),
+        ]
+    );
+    // Rien de secret nulle part dans les fichiers de la base.
+    agent.shutdown().await;
+    let bytes = all_bytes(env.dir.path());
+    for secret in ["SENTINEL-VALUE-A", "DB_PASSWORD", "APP_MODE"] {
+        assert!(!contains(&bytes, secret), "{secret} dans la base");
+    }
+}
+
+#[tokio::test]
+async fn no_value_leaves_when_the_journal_cannot_be_written_and_each_reveal_is_its_own_entry() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let web = detailed("web", RunState::Running);
+    engine.put_silently(web.clone());
+    engine.set_env(&web.id, &[("DB_PASSWORD", "SENTINEL-VALUE-J")]);
+    let agent = ready_agent(&env, &engine).await;
+    listed(&agent, 1).await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let path = format!("/services/c_{}/env", web.id);
+
+    // Le journal refuse toute écriture de révélation (base pleine ou verrouillée, simulée).
+    sqlx::query(
+        "CREATE TRIGGER refuse_reveal BEFORE INSERT ON audit_events
+         WHEN NEW.action = 'service.env.reveal'
+         BEGIN SELECT RAISE(ABORT, 'journal indisponible'); END",
+    )
+    .execute(env.db.pool())
+    .await
+    .unwrap();
+    let refused = agent.request("GET", &path).token(&admin).send().await;
+    assert_eq!(refused.status, 503, "{:?}", refused.body);
+    assert_eq!(refused.code(), "BUSY");
+    assert!(
+        !refused.text.contains("SENTINEL") && !refused.text.contains("DB_PASSWORD"),
+        "une valeur ou un nom est sorti : {}",
+        refused.text
+    );
+    assert!(
+        !refused.text.contains("journal indisponible"),
+        "le texte de la base remonte : {}",
+        refused.text
+    );
+
+    // Le journal revient : deux révélations de suite sont deux entrées (pas de regroupement).
+    sqlx::query("DROP TRIGGER refuse_reveal")
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        let revealed = agent.request("GET", &path).token(&admin).send().await;
+        assert_eq!(revealed.status, 200, "{:?}", revealed.body);
+        assert_eq!(revealed.body["variables"][0]["value"], "SENTINEL-VALUE-J");
+    }
+    let ok: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'service.env.reveal' AND outcome = 'ok'",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(ok, 2, "une entrée par révélation réussie");
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_journal_or_the_database()
+ {
+    let traces = captured_traces();
+    let env = env().await;
+    // Le VRAI adaptateur `bollard` sur un faux démon dont l'inspection porte une valeur sentinelle.
+    let daemon = FakeDaemon::start().await;
+    let mut container = DaemonContainer::new("vault", "running");
+    container.env = vec![
+        "DB_PASSWORD=SENTINEL-REVEAL-VALUE-44ab".to_owned(),
+        "SENTINEL_REVEAL_NAME_12=plain".to_owned(),
+    ];
+    container.cmd = vec![
+        "serve".to_owned(),
+        "--token=SENTINEL-REVEAL-CMD-9f".to_owned(),
+    ];
+    let key = format!("c_{}", container.id);
+    daemon.put(container);
+    let engine = BollardEngine::new(
+        Target::Http(daemon.address()),
+        InstallMarkers::at(Vec::<std::path::PathBuf>::new()),
+    );
+    let agent = https::start_engined(
+        &env,
+        EngineParts {
+            engine: Arc::new(engine),
+            supervisor: Arc::new(FakeSupervisor::new()),
+            host: Arc::new(support::engine::TestHost),
+            timings: fast_timings(),
+        },
+    )
+    .await;
+    listed(&agent, 1).await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    let path = format!("/services/{key}/env");
+
+    // Réussite, refus, service inconnu, requête sans session.
+    let revealed = agent.request("GET", &path).token(&admin).send().await;
+    assert_eq!(revealed.status, 200, "{:?}", revealed.body);
+    assert!(
+        revealed.text.contains("SENTINEL-REVEAL-VALUE-44ab"),
+        "le témoin : l'administrateur reçoit bien la valeur"
+    );
+    let mut elsewhere = Vec::new();
+    for reply in [
+        agent.request("GET", &path).token(&readonly).send().await,
+        agent
+            .request("GET", "/services/c_00ff/env")
+            .token(&admin)
+            .send()
+            .await,
+        agent.request("GET", &path).send().await,
+        agent
+            .request("GET", "/services")
+            .token(&readonly)
+            .send()
+            .await,
+    ] {
+        elsewhere.push(reply.text);
+    }
+    let (mut client, snapshot) = subscribed(&agent, &readonly).await;
+    elsewhere.push(serde_json::to_string(&snapshot).unwrap());
+    daemon.update(key.trim_start_matches("c_"), |c| c.status = "exited".into());
+    daemon.emit(key.trim_start_matches("c_"), "die");
+    elsewhere.push(serde_json::to_string(&client.next_services().await).unwrap());
+    for text in &elsewhere {
+        assert!(
+            !text.contains("SENTINEL-REVEAL-VALUE-44ab"),
+            "une valeur hors de la révélation : {text}"
+        );
+    }
+    agent.shutdown().await;
+
+    // Ni le journal d'activité ni les fichiers de la base ne contiennent valeur, nom ni commande.
+    let journal: Vec<String> = sqlx::query_scalar(
+        "SELECT COALESCE(account, '') || '|' || COALESCE(origin_name, '') || '|' || action_label || '|'
+                || COALESCE(target, '') || '|' || COALESCE(reason, '') || '|' || COALESCE(details, '')
+         FROM audit_events",
+    )
+    .fetch_all(env.db.pool())
+    .await
+    .unwrap();
+    assert!(journal.iter().any(|line| line.contains("service vault")));
+    let bytes = all_bytes(env.dir.path());
+    for forbidden in [
+        "SENTINEL-REVEAL-VALUE-44ab",
+        "DB_PASSWORD",
+        "SENTINEL_REVEAL_NAME_12",
+        "SENTINEL-REVEAL-CMD-9f",
+    ] {
+        assert!(
+            journal.iter().all(|line| !line.contains(forbidden)),
+            "{forbidden} dans le journal"
+        );
+        assert!(!contains(&bytes, forbidden), "{forbidden} dans la base");
+    }
+    // Les traces, au niveau le plus bavard, pont `log` de `bollard` compris : ni la valeur, ni le
+    // nom, ni la commande.
+    let captured = String::from_utf8_lossy(&traces.lock().unwrap()).into_owned();
+    assert!(!captured.is_empty(), "le tampon des traces n'est pas vide");
+    for forbidden in [
+        "SENTINEL-REVEAL-VALUE-44ab",
+        "DB_PASSWORD",
+        "SENTINEL_REVEAL_NAME_12",
+        "SENTINEL-REVEAL-CMD-9f",
+        "--token=",
+    ] {
+        if let Some(at) = captured.find(forbidden) {
+            let from = captured[..at]
+                .char_indices()
+                .rev()
+                .nth(300)
+                .map_or(0, |(i, _)| i);
+            panic!(
+                "{forbidden} dans les traces : ...{}",
+                &captured[from..(at + 200).min(captured.len())]
+            );
+        }
+    }
 }
