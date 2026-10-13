@@ -1,0 +1,125 @@
+{
+  "supported": {
+    "serverId": "forge",
+    "seq": 1,
+    "engineReceivedAt": 1790000000000.0,
+    "view": {
+      "kind": "supported",
+      "engine": {
+        "state": "ready",
+        "name": "Docker Engine - Community",
+        "version": "24.0.7",
+        "minVersion": "20.10",
+        "agentAccount": "root",
+        "agentIsAdmin": true,
+        "host": {
+          "osId": "debian",
+          "osLike": ["ubuntu"],
+          "init": "systemd",
+          "declarative": false
+        },
+        "lastReadyAt": "2026-10-13T10:00:00Z",
+        "checkedAt": "2026-10-13T10:00:02Z",
+        "listReadAt": "2026-10-13T09:59:30Z",
+        "listDegraded": true,
+        "at": "2026-10-13T10:00:02Z",
+        "listCurrentAt": "2026-10-13T09:59:30Z"
+      },
+      "services": [
+        {
+          "key": "c_9f0a",
+          "name": "web",
+          "origin": "external",
+          "driver": "supervisor",
+          "unit": "docker-web.service",
+          "removedOnStop": true,
+          "composeProject": "shop",
+          "state": "restart_loop",
+          "since": "2026-10-13T09:00:00Z",
+          "createdAt": "2026-10-12T09:00:00Z",
+          "neverStarted": false,
+          "exitCode": 137,
+          "restarts10m": 4,
+          "image": { "ref": "nginx", "tag": "1.27", "shortId": "0123456789ab" },
+          "ports": [
+            { "hostPort": 8080, "containerPort": 80, "protocol": "tcp", "scope": "all" },
+            { "hostPort": 5353, "containerPort": 53, "protocol": "udp", "scope": "local" }
+          ],
+          "portsOmitted": 3,
+          "hostNetwork": false
+        },
+        {
+          "key": "c_77e1",
+          "name": "sans-nom",
+          "origin": "hearth",
+          "driver": null,
+          "unit": null,
+          "removedOnStop": false,
+          "composeProject": null,
+          "state": "stopped",
+          "since": null,
+          "createdAt": null,
+          "neverStarted": true,
+          "exitCode": null,
+          "restarts10m": 0,
+          "image": { "ref": null, "tag": null, "shortId": "abcdef012345" },
+          "ports": [],
+          "portsOmitted": 0,
+          "hostNetwork": true
+        }
+      ]
+    }
+  },
+  "unknown": {
+    "serverId": "futur",
+    "seq": 1,
+    "engineReceivedAt": null,
+    "view": {
+      "kind": "supported",
+      "engine": {
+        "state": "unknown",
+        "name": null,
+        "version": null,
+        "minVersion": "20.10",
+        "agentAccount": "root",
+        "agentIsAdmin": true,
+        "host": { "osId": "debian", "osLike": [], "init": "other", "declarative": false },
+        "lastReadyAt": null,
+        "checkedAt": "2026-10-13T10:00:02Z",
+        "listReadAt": null,
+        "listDegraded": false,
+        "at": null,
+        "listCurrentAt": null
+      },
+      "services": [
+        {
+          "key": "c_aa01",
+          "name": "futur",
+          "origin": "unknown",
+          "driver": "unknown",
+          "unit": null,
+          "removedOnStop": false,
+          "composeProject": null,
+          "state": "unknown",
+          "since": null,
+          "createdAt": null,
+          "neverStarted": false,
+          "exitCode": null,
+          "restarts10m": 0,
+          "image": { "ref": "nginx", "tag": "1.27", "shortId": "0123456789ab" },
+          "ports": [
+            { "hostPort": 4433, "containerPort": 443, "protocol": "unknown", "scope": "unknown" }
+          ],
+          "portsOmitted": 0,
+          "hostNetwork": false
+        }
+      ]
+    }
+  },
+  "unsupported": {
+    "serverId": "salon",
+    "seq": 1,
+    "engineReceivedAt": null,
+    "view": { "kind": "unsupported", "agentVersion": "0.1.0" }
+  }
+}

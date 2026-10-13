@@ -18,6 +18,7 @@ pub mod logging;
 pub mod presence;
 pub mod reauth;
 pub mod security;
+pub mod services;
 pub mod settings;
 pub mod startup;
 pub mod texts;
@@ -98,6 +99,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             reauth::commands::get_reauth_state,
             reauth::commands::reauth_covers,
             reauth::commands::set_reauth_setting,
+            services::commands::list_services_states,
+            services::commands::engine_recheck,
+            services::commands::open_engine_docs,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()
@@ -113,6 +117,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<security::dto::SecurityEvent>()
         .typ::<agent_update::dto::AgentUpdateEvent>()
         .typ::<reauth::dto::ReauthSettingOutcome>()
+        .typ::<services::dto::ServicesEvent>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.

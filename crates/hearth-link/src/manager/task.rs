@@ -16,6 +16,7 @@ use futures_util::FutureExt as _;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
 use hearth_proto::api::security::SecurityView;
+use hearth_proto::api::services::ServicesState;
 use hearth_proto::api::update::{UpdateProgress, UpdateStep};
 use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice};
@@ -23,7 +24,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, JoinError, JoinHandle};
 use tokio::time::timeout;
 
-use super::attempt::{self, AttemptResult};
+use super::attempt::{self, AttemptResult, ServicesAtConnect};
 use super::persist::Persister;
 use super::{ActionOutcome, ActionRequest, Deps, Shared};
 use crate::domain::event::{Event, SessionEnd, StateInfo};
@@ -211,6 +212,11 @@ struct Runner {
     hour: Option<JoinHandle<()>>,
     hour_epoch: u64,
     machine_info: Option<Arc<MachineResponse>>,
+    /// Le moteur et les services tels que le sujet `services` les a dits en dernier, déjà fusionnés (HRT-62).
+    services: Option<ServicesState>,
+    /// Quand cette liaison a reçu la vue du moteur de `services` (heure de ce poste, HRT-62) : le repère de
+    /// l'âge de la liste, porté dans l'événement et sur le disque.
+    services_at: Option<WallTime>,
     last_contact: Option<WallTime>,
     published: Option<Status>,
     ping_n: u64,
@@ -236,12 +242,14 @@ impl Runner {
         let (internal_tx, internal_rx) = mpsc::channel(64);
         let last_contact = shared.record().last_contact_at;
         let previous = shared.last_known();
-        let (history, machine_info) = match previous {
+        let (history, machine_info, services, services_at) = match previous {
             Some(view) => (
                 view.history.into_iter().collect(),
                 view.machine.map(Arc::new),
+                view.services,
+                view.services_at,
             ),
-            None => (VecDeque::new(), None),
+            None => (VecDeque::new(), None, None, None),
         };
         Self {
             persister: Persister::spawn(deps.clone(), shared.id()),
@@ -260,6 +268,8 @@ impl Runner {
             hour: None,
             hour_epoch: 0,
             machine_info,
+            services,
+            services_at,
             last_contact,
             published: None,
             ping_n: 0,
@@ -441,6 +451,15 @@ impl Runner {
                 self.traffic();
                 self.on_security(*view);
             }
+            Ok(Frame::Services(message)) => {
+                self.traffic();
+                let before = self.services.as_ref().map(|state| state.engine.clone());
+                if crate::domain::services::apply(&mut self.services, *message) {
+                    self.stamp_engine(before.as_ref());
+                    self.announce_services();
+                    self.persist(false);
+                }
+            }
             Ok(Frame::Other) => self.traffic(),
             // Le flux reste en place jusqu'à l'effet `CloseStream` de la machine.
             // FIX:01M47PCYX3BY3YV84R9WW3KAQ3 — une trame de fermeture AVEC code, autre que « l'agent
@@ -515,6 +534,56 @@ impl Runner {
         });
     }
 
+    /// Annonce l'état complet des services (déjà fusionné) et le range dans la dernière vue connue.
+    fn announce_services(&mut self) {
+        self.refresh_last_known();
+        if let Some(state) = &self.services {
+            self.deps.sink.emit(Event::Services {
+                server: self.id.clone(),
+                state: Arc::new(state.clone()),
+                engine_received_at: self.services_at,
+            });
+        }
+    }
+
+    /// Date la vue du moteur qui vient d'arriver, ICI où le message est reçu (BR-SVC-018 : l'âge d'une liste
+    /// se mesure depuis sa réception, jamais depuis son rejeu).
+    fn stamp_engine(&mut self, before: Option<&hearth_proto::api::services::EngineView>) {
+        self.services_at = self.services.as_ref().map(|state| {
+            crate::domain::services::engine_received_at(
+                before,
+                &state.engine,
+                self.services_at,
+                self.deps.clock.wall(),
+            )
+        });
+    }
+
+    /// Ce que l'agent a dit des services à la connexion (HRT-62). Sans la capacité : ce qu'on tenait est
+    /// effacé (l'agent a pu être remplacé par une version plus ancienne) et l'interface le sait.
+    fn on_services_connect(&mut self, services: ServicesAtConnect) {
+        match services {
+            ServicesAtConnect::Unsupported { agent_version } => {
+                self.services = None;
+                self.services_at = None;
+                self.refresh_last_known();
+                self.deps.sink.emit(Event::ServicesUnsupported {
+                    server: self.id.clone(),
+                    agent_version,
+                });
+            }
+            ServicesAtConnect::Supported(Some(state)) => {
+                let before = self.services.as_ref().map(|known| known.engine.clone());
+                self.services = Some(*state);
+                self.stamp_engine(before.as_ref());
+                self.announce_services();
+            }
+            // Le sujet est demandé, rien n'est encore arrivé : ce qu'on tient reste, périmé, jusqu'au
+            // premier instantané de l'agent.
+            ServicesAtConnect::Supported(None) => {}
+        }
+    }
+
     /// Progression de la mise à jour de l'agent : annoncée à l'interface ; `restart` rend la
     /// coupure qui suit attendue (« Reconnexion… » sans alarme), `done` lève l'attente
     /// (BR-UPDATE-014).
@@ -562,6 +631,7 @@ impl Runner {
                 history,
                 updates,
                 security,
+                services,
             } => {
                 self.stream = Some(stream);
                 self.shared.clear_presented();
@@ -580,6 +650,7 @@ impl Runner {
                     if let Some(view) = security {
                         self.on_security(*view);
                     }
+                    self.on_services_connect(services);
                 } else {
                     // Résultat périmé (déconnexion entre-temps) : on ne le garde pas.
                     self.stream = None;
@@ -1091,6 +1162,8 @@ impl Runner {
             at: self.last_contact.unwrap_or_else(|| self.deps.clock.wall()),
             machine: self.machine_info.as_deref().cloned(),
             history: self.history.iter().cloned().collect(),
+            services: self.services.clone(),
+            services_at: self.services_at,
         };
         self.shared.set_last_known(view);
     }

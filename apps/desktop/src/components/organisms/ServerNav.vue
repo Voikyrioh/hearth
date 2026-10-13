@@ -5,19 +5,20 @@ import { arrowNav } from "@/composables/arrowNav";
 import { type MessageKey, t } from "@/i18n";
 import type { ServerInfo } from "@/link";
 
-// Navigation du serveur : nom, adresse en chasse fixe, entrées de vue. « Comptes » et
+// Navigation du serveur : nom, adresse en chasse fixe, entrées de vue. « Services » est ouvert aux deux rôles (HRT-62). « Comptes » et
 // « Journal d'activité » n'existent pas pour le rôle Lecture seule (BR-ACCT-013) ; « Sécurité » est
 // ouverte à tous (chacun gère ses propres postes de confiance, HRT-23).
 const props = defineProps<{ server: ServerInfo }>();
 
 interface Entry {
-  route: "dashboard" | "accounts" | "audit" | "security";
+  route: "dashboard" | "services" | "accounts" | "audit" | "security";
   label: MessageKey;
   adminOnly: boolean;
 }
 
 const ENTRIES: Entry[] = [
   { route: "dashboard", label: "nav.dashboard", adminOnly: false },
+  { route: "services", label: "nav.services", adminOnly: false },
   { route: "accounts", label: "nav.accounts", adminOnly: true },
   { route: "audit", label: "nav.audit", adminOnly: true },
   { route: "security", label: "nav.security", adminOnly: false },

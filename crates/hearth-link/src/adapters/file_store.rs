@@ -402,6 +402,9 @@ mod tests {
             at: WallTime::from_millis(1_790_000_000_000),
             machine: None,
             history: vec![],
+            services: None,
+            // Le repère de réception de la vue du moteur survit au disque (un état relu garde sa date).
+            services_at: Some(WallTime::from_millis(1_790_000_000_500)),
         };
         store.save(&id, &view).await.unwrap();
         assert_eq!(store.load(&id).await.unwrap(), Some(view));

@@ -154,6 +154,22 @@
   --audit-search-floor: 200px;
   --audit-field-min: 160px;
   --audit-detail-width: 560px;
+  --ports-dialog-width: 480px;
+
+  /* Services (HRT-62, conception design 2026-10-13) : hauteurs de ligne déduites de la donnée, jamais mesurées. */
+  --row-service: 52px;
+  --row-service-alert: 80px;
+  --engine-edge: 4px;
+  --engine-card-min: 56px;
+  --skeleton-height: 12px;
+  --skeleton-sm: 80px;
+  --skeleton-md: 160px;
+  /* Largeurs du design (Image, État 200, Ports 270) SAUF la colonne Nom, élargie : à 1366 la capture montre
+     les noms coupés à « a..cien-service » quand le repère « Créé hors de Hearth » occupe la ligne (design : 200 px). */
+  --svc-columns: minmax(260px, 1.5fr) minmax(180px, 1fr) 200px 270px;
+  --svc-columns-compact: minmax(180px, 1fr) 190px 220px;
+  --svc-puck: 3px;
+  --command-max-height: 160px;
 
   /* États */
   --opacity-disabled: 0.45;
@@ -169,6 +185,7 @@
   --ease: cubic-bezier(0.2, 0, 0, 1);
 
   /* Couches */
+  --z-raised: 1;
   --z-tooltip: 30;
   --z-toast: 40;
   --z-dev: 60;
