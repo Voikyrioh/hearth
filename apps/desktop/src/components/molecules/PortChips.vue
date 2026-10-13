@@ -6,15 +6,18 @@ import { portLabel, visiblePortCount } from "@/services/format";
 
 // Les ports exposés d'un service : au plus 3 puces, et seulement celles qui tiennent sur deux lignes « {port du serveur} vers {port du service} ({protocole}) »,
 // puis « +N » (BR-SVC-002). Aucun port : « Aucun port ». Un service sur le réseau du serveur n'a pas de port
-// individuel (BR-SVC-014) : rien n'est inventé.
-const props = defineProps<{ ports: readonly ServicePort[] }>();
+// individuel (BR-SVC-014) : rien n'est inventé. Les ports que l'agent a coupés au-delà de sa borne (`omitted`,
+// BR-SVC-021) comptent dans le « +N » sans être listés.
+const props = withDefaults(defineProps<{ ports: readonly ServicePort[]; omitted?: number }>(), {
+  omitted: 0,
+});
 
 const shown = computed(() => props.ports.slice(0, visiblePortCount(props.ports)));
-const more = computed(() => Math.max(0, props.ports.length - shown.value.length));
+const more = computed(() => Math.max(0, props.ports.length - shown.value.length) + props.omitted);
 </script>
 
 <template>
-  <span v-if="ports.length === 0" class="chips chips--none">{{ t("services.noPort") }}</span>
+  <span v-if="ports.length === 0 && omitted === 0" class="chips chips--none">{{ t("services.noPort") }}</span>
   <span v-else class="chips">
     <span v-for="(port, index) in shown" :key="index" class="chip">{{ portLabel(port) }}</span>
     <span v-if="more > 0" class="chip chip--more">{{ t("services.portMore", { n: more }) }}</span>

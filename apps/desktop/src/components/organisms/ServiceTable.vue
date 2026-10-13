@@ -155,11 +155,22 @@ function onKeydown(event: KeyboardEvent) {
   event.preventDefault();
 }
 
-/** Tous les ports au survol : la ligne n'en montre que trois, sur deux lignes au plus. */
+/**
+ * Tous les ports au survol : la ligne n'en montre que trois, sur deux lignes au plus. Ceux que l'agent a coupés
+ * au-delà de sa borne sont comptés à la suite, sans être listés (BR-SVC-021).
+ */
 function portsTitle(service: ServiceInfo): string | undefined {
-  return service.ports.length > visiblePortCount(service.ports)
-    ? service.ports.map(portLabel).join(", ")
-    : undefined;
+  const omitted = service.portsOmitted;
+  if (service.ports.length <= visiblePortCount(service.ports) && omitted === 0) return undefined;
+  const labels = service.ports.map(portLabel);
+  if (omitted > 0) {
+    labels.push(
+      t(labels.length > 0 ? "services.portsAlsoOmitted" : "services.portsOnlyOmitted", {
+        n: omitted,
+      }),
+    );
+  }
+  return labels.join(", ");
 }
 
 const COLUMNS = [
@@ -230,7 +241,7 @@ defineExpose({ visible });
                 <span class="state-line">{{ stateLine(service, now) }}</span>
               </div>
               <div class="cell cell--ports" role="gridcell" :title="portsTitle(service)">
-                <PortChips :ports="service.ports" />
+                <PortChips :ports="service.ports" :omitted="service.portsOmitted" />
               </div>
               <div v-if="service.state === 'restart_loop'" class="band" role="gridcell" aria-colspan="4">
                 <HIcon name="alert" size="sm" />

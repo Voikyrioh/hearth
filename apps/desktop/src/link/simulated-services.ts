@@ -75,6 +75,8 @@ export class SimulatedServices {
       checkedAt: at,
       listReadAt: at,
       listDegraded: false,
+      at,
+      listCurrentAt: at,
       ...patch,
       host: { osId: "debian", osLike: [], init: "systemd", declarative: false, ...patch.host },
     };
@@ -94,6 +96,7 @@ export class SimulatedServices {
       exitCode: null,
       restarts10m: 0,
       ports: [],
+      portsOmitted: 0,
       hostNetwork: false,
       ...patch,
       image: { ref: "nginx", tag: "1.27", shortId: "0123456789ab", ...patch.image },
@@ -142,7 +145,13 @@ export class SimulatedServices {
     if (current.kind !== "supported") return;
     this.store(serverId, {
       kind: "supported",
-      engine: { ...current.engine, ...patch, host: { ...current.engine.host, ...patch.host } },
+      engine: {
+        ...current.engine,
+        // Une vue refabriquée porte l'heure de l'agent à cet instant (HRT-72).
+        at: new Date(this.now()).toISOString(),
+        ...patch,
+        host: { ...current.engine.host, ...patch.host },
+      },
       services: current.services,
     });
   }

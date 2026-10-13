@@ -12,7 +12,7 @@ import {
 } from "./format";
 import { familyOf, helpFor } from "./help";
 import { anchoredScroll, indexAt, offsetsOf, windowOf } from "./layout";
-import { type ServerServices, show } from "./view";
+import { type ServerServices, sameEngineView, show } from "./view";
 
 const NOW = Date.parse("2026-10-13T12:00:00Z");
 
@@ -31,6 +31,8 @@ function engine(
     checkedAt: NOW,
     listReadAt: null,
     listDegraded: false,
+    at: null,
+    listCurrentAt: null,
     ...patch,
     host: { osId: "debian", osLike: [], init: "systemd", declarative: false, ...host },
   };
@@ -52,6 +54,7 @@ function service(patch: Partial<ServiceInfo> & { key: string }): ServiceInfo {
     restarts10m: 0,
     image: { ref: "nginx", tag: "1.27", shortId: "0123456789ab" },
     ports: [],
+    portsOmitted: 0,
     hostNetwork: false,
     ...patch,
   };
@@ -361,27 +364,89 @@ describe("ce qui s'affiche (BR-ENGINE-001, 019, BR-SVC-013, 018)", () => {
       previous: null,
       lastReady: null,
       receivedAt: NOW,
+      engineReceivedAt: NOW,
       ...patch,
     };
   }
   const list = [service({ key: "a" }), service({ key: "b" })];
 
-  it("moteur prêt et liste non relisible : la liste reste, avec la date de la dernière lecture ; sans date, aucune inventée", () => {
+  it("agent sans heure (plus ancien) : la liste reste, datée par sa dernière lecture ; sans date, aucune inventée", () => {
     const readAt = NOW - 120_000;
     expect(
       show(entry({ engine: engine({ listDegraded: true, listReadAt: readAt }), services: list })),
-    ).toMatchObject({ list: { kind: "live", degraded: { readAt } } });
+    ).toMatchObject({ list: { kind: "live", degraded: { currentAt: readAt } } });
     expect(
       show(entry({ engine: engine({ listDegraded: true, listReadAt: null }), services: list })),
-    ).toMatchObject({ list: { kind: "live", degraded: { readAt: null } } });
+    ).toMatchObject({ list: { kind: "live", degraded: { currentAt: null } } });
     // Liste vide et dégradée : on ne dit pas « aucun service », la liste est inconnue.
     expect(show(entry({ engine: engine({ listDegraded: true }) }))).toMatchObject({
-      list: { kind: "empty", degraded: { readAt: null } },
+      list: { kind: "empty", degraded: { currentAt: null } },
     });
     // À jour : pas de marque.
     expect(show(entry({ services: list }))).toMatchObject({
       list: { kind: "live", degraded: null },
     });
+  });
+
+  describe("âge de la liste (HRT-72) : deux dates de l'agent, plus le temps écoulé chez ce poste", () => {
+    const AT = Date.parse("2026-10-13T10:00:00Z");
+    const view = (patch: Partial<EngineInfo>, receivedAt = NOW) =>
+      show(
+        entry({
+          engine: engine({ listDegraded: true, at: AT, ...patch }),
+          engineReceivedAt: receivedAt,
+          services: list,
+        }),
+      );
+
+    it("l'âge est at - listCurrentAt à la réception, sans comparer les horloges (l'agent est 3 h en avance)", () => {
+      // L'horloge de l'agent (AT) n'a aucun rapport avec celle du poste (NOW) : seul l'écart entre ses deux dates compte.
+      expect(view({ listCurrentAt: AT - 90_000 })).toMatchObject({
+        list: { degraded: { currentAt: NOW - 90_000 } },
+      });
+    });
+
+    it("un écart négatif est ramené à zéro", () => {
+      expect(view({ listCurrentAt: AT + 5_000 })).toMatchObject({
+        list: { degraded: { currentAt: NOW } },
+      });
+    });
+
+    it("la date de réception décale l'âge : une vue reçue il y a 10 s a 10 s de plus", () => {
+      expect(view({ listCurrentAt: AT - 90_000 }, NOW - 10_000)).toMatchObject({
+        list: { degraded: { currentAt: NOW - 100_000 } },
+      });
+    });
+
+    it("heure de l'agent présente, liste jamais lue : rien à dater", () => {
+      expect(view({ listCurrentAt: null, listReadAt: NOW - 60_000 })).toMatchObject({
+        list: { degraded: { currentAt: null } },
+      });
+    });
+
+    it("moteur prêt, liste à jour : aucune marque, même avec les dates", () => {
+      expect(
+        show(
+          entry({
+            engine: engine({ at: AT, listCurrentAt: AT, listDegraded: false }),
+            services: list,
+          }),
+        ),
+      ).toMatchObject({ list: { degraded: null } });
+    });
+  });
+
+  it("deux vues identiques du moteur se reconnaissent par l'heure de l'agent, l'état et la liste", () => {
+    const base = engine({ at: NOW, listCurrentAt: NOW - 1000, listDegraded: true });
+    expect(sameEngineView(base, { ...base })).toBe(true);
+    expect(sameEngineView(base, { ...base, at: NOW + 1000 })).toBe(false);
+    expect(sameEngineView(base, { ...base, listDegraded: false })).toBe(false);
+    expect(sameEngineView(base, { ...base, listCurrentAt: NOW })).toBe(false);
+    expect(sameEngineView(base, { ...base, state: "stopped" })).toBe(false);
+    expect(sameEngineView(null, base)).toBe(false);
+    // Agent sans heure : jamais « identique », on ne devine rien.
+    const old = engine();
+    expect(sameEngineView(old, { ...old })).toBe(false);
   });
 
   it("rien reçu, ou moteur en première détection : le chargement, aucune liste", () => {

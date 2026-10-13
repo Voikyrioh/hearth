@@ -91,13 +91,80 @@ describe("services store", () => {
     const { bridge, store } = await started();
     bridge.services.seed("forge", [{ key: "c_1", name: "a" }]);
     expect(show(store.of("forge"))).toMatchObject({ list: { kind: "live", degraded: null } });
-    const readAt = new Date(Date.now() - 60_000).toISOString();
-    bridge.services.setEngine("forge", { listDegraded: true, listReadAt: readAt });
+    const currentAt = new Date(Date.now() - 60_000).toISOString();
+    bridge.services.setEngine("forge", { listDegraded: true, listCurrentAt: currentAt });
     expect(show(store.of("forge"))).toMatchObject({
-      list: { kind: "live", degraded: { readAt: Date.parse(readAt) } },
+      list: { kind: "live", degraded: { currentAt: Date.parse(currentAt) } },
     });
     bridge.services.setEngine("forge", { listDegraded: false });
     expect(show(store.of("forge"))).toMatchObject({ list: { kind: "live", degraded: null } });
+    store.reset();
+  });
+
+  it("l'âge de la liste grandit avec le temps écoulé chez ce poste, et un lot qui ne republie pas la vue ne le remet pas à zéro", async () => {
+    const { bridge, store } = await started();
+    const sixtySecondsAgo = new Date(Date.now() - 60_000).toISOString();
+    bridge.services.seed("forge", [{ key: "c_1", name: "a" }], {
+      listDegraded: true,
+      listCurrentAt: sixtySecondsAgo,
+    });
+    const age = () => {
+      const shown = show(store.of("forge"));
+      if (shown.kind !== "engine" || shown.list.kind !== "live" || !shown.list.degraded)
+        return null;
+      const { currentAt } = shown.list.degraded;
+      return currentAt === null ? null : Date.now() - currentAt;
+    };
+    expect(age()).toBe(60_000);
+    vi.advanceTimersByTime(10_000);
+    expect(age()).toBe(70_000);
+    // Un lot qui ne touche qu'un service : la vue du moteur est celle d'avant, le repère de réception reste.
+    bridge.services.upsert("forge", { key: "c_2", name: "b" });
+    expect(age()).toBe(70_000);
+    vi.advanceTimersByTime(5_000);
+    bridge.services.upsert("forge", { key: "c_3", name: "c" });
+    expect(age()).toBe(75_000);
+    // Une vue refabriquée (même dernier moment à jour, heure de l'agent plus tardive) : l'âge reste continu.
+    bridge.services.setEngine("forge", {});
+    expect(age()).toBe(75_000);
+    store.reset();
+  });
+
+  it("à la reconnexion, un nouvel instantané du moteur donne son propre âge", async () => {
+    const { bridge, store } = await started();
+    bridge.services.seed("forge", [{ key: "c_1", name: "a" }], {
+      listDegraded: true,
+      listCurrentAt: new Date(Date.now() - 30_000).toISOString(),
+    });
+    vi.advanceTimersByTime(120_000);
+    bridge.services.seed("forge", [{ key: "c_1", name: "a" }], {
+      listDegraded: true,
+      listCurrentAt: new Date(Date.now() - 4_000).toISOString(),
+    });
+    const shown = show(store.of("forge"));
+    expect(shown).toMatchObject({ list: { degraded: { currentAt: Date.now() - 4_000 } } });
+    store.reset();
+  });
+
+  it("un agent plus ancien (sans heure) : la date de sa dernière lecture, comme avant ; jamais inventée", async () => {
+    const { bridge, store } = await started();
+    const readAt = new Date(Date.now() - 90_000).toISOString();
+    bridge.services.seed("forge", [{ key: "c_1", name: "a" }], {
+      listDegraded: true,
+      listReadAt: readAt,
+      at: null,
+      listCurrentAt: null,
+    });
+    expect(show(store.of("forge"))).toMatchObject({
+      list: { degraded: { currentAt: Date.parse(readAt) } },
+    });
+    bridge.services.seed("forge", [{ key: "c_1", name: "a" }], {
+      listDegraded: true,
+      listReadAt: null,
+      at: null,
+      listCurrentAt: null,
+    });
+    expect(show(store.of("forge"))).toMatchObject({ list: { degraded: { currentAt: null } } });
     store.reset();
   });
 

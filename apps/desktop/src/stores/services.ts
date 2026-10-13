@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref, shallowReactive, watch } from "vue";
 import { logUiError } from "@/errors/report";
 import { getLinkBridge, type ServicesEvent, type Unsubscribe } from "@/link";
-import type { ServerServices } from "@/services/view";
+import { type ServerServices, sameEngineView } from "@/services/view";
 import { useServersStore } from "./servers";
 
 /** Nouvelle tentative d'abonnement aux services : espacement fixe, tant que l'écran est suivi. */
@@ -55,6 +55,7 @@ export const useServicesStore = defineStore("services", () => {
         previous: null,
         lastReady: null,
         receivedAt: now,
+        engineReceivedAt: now,
       });
       return;
     }
@@ -78,6 +79,9 @@ export const useServicesStore = defineStore("services", () => {
       previous,
       lastReady,
       receivedAt: now,
+      // Un lot qui ne republie pas la vue du moteur la rend identique : son repère de réception reste.
+      engineReceivedAt:
+        known && sameEngineView(known.engine, event.engine) ? known.engineReceivedAt : now,
     });
   }
 

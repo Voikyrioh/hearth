@@ -74,6 +74,8 @@ fn full_state() -> ServicesState {
             checked_at: "2026-10-13T10:00:02Z".into(),
             list_read_at: Some("2026-10-13T09:59:30Z".into()),
             list_degraded: true,
+            at: Some("2026-10-13T10:00:02Z".into()),
+            list_current_at: Some("2026-10-13T09:59:30Z".into()),
         },
         services: vec![
             ServiceItem {
@@ -109,6 +111,7 @@ fn full_state() -> ServicesState {
                         scope: PortScope::Local,
                     },
                 ],
+                ports_omitted: 3,
                 host_network: false,
                 // Ignorés par la copie de la coquille (détail d'un service, tranche suivante).
                 mounts: vec![ServiceMount {
@@ -117,6 +120,7 @@ fn full_state() -> ServicesState {
                     target: "/data".into(),
                     read_only: true,
                 }],
+                mounts_omitted: 5,
                 restart: RestartMode::UnlessStopped,
                 busy: None,
                 last_action: None,
@@ -141,8 +145,10 @@ fn full_state() -> ServicesState {
                     short_id: "abcdef012345".into(),
                 },
                 ports: vec![],
+                ports_omitted: 0,
                 host_network: true,
                 mounts: vec![],
+                mounts_omitted: 0,
                 restart: RestartMode::None,
                 busy: None,
                 last_action: None,

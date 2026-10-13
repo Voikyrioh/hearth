@@ -41,6 +41,10 @@ export interface EngineInfo {
   listReadAt: number | null;
   /** La liste affichée n'est peut-être plus à jour (relecture en échec, conteneurs illisibles, suivi suspendu). */
   listDegraded: boolean;
+  /** Heure de l'AGENT à la fabrication de la vue (HRT-72) ; `null` pour un agent plus ancien (date jamais inventée). */
+  at: number | null;
+  /** Dernier moment où la liste était à jour, heure de l'AGENT ; `null` : aucune liste lue (si `at` est là) ou agent ancien. */
+  listCurrentAt: number | null;
 }
 
 export interface ServicePort {
@@ -73,6 +77,8 @@ export interface ServiceInfo {
   restarts10m: number;
   image: { ref: string | null; tag: string | null; shortId: string };
   ports: ServicePort[];
+  /** Ports publiés coupés par l'agent au-delà de sa borne : comptés, jamais listés (BR-SVC-021). */
+  portsOmitted: number;
   hostNetwork: boolean;
 }
 
@@ -105,6 +111,8 @@ export function toEngine(dto: EngineDto): EngineInfo {
     checkedAt: parseDate(dto.checkedAt) ?? 0,
     listReadAt: parseDate(dto.listReadAt),
     listDegraded: dto.listDegraded,
+    at: parseDate(dto.at),
+    listCurrentAt: parseDate(dto.listCurrentAt),
   };
 }
 
@@ -125,6 +133,7 @@ export function toService(dto: ServiceDto): ServiceInfo {
     restarts10m: dto.restarts10m,
     image: { ref: dto.image.ref, tag: dto.image.tag, shortId: dto.image.shortId },
     ports: dto.ports.map((port) => ({ ...port })),
+    portsOmitted: dto.portsOmitted,
     hostNetwork: dto.hostNetwork,
   };
 }

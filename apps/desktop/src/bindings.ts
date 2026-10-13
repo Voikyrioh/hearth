@@ -608,6 +608,10 @@ export type EngineDto = {
 	listReadAt: string | null,
 	/**  La liste affichée n'est peut-être plus à jour (relecture en échec, conteneurs illisibles, suivi suspendu). */
 	listDegraded: boolean,
+	/**  Heure de l'agent à la fabrication de la vue (HRT-72) ; absente pour un agent plus ancien. */
+	at: string | null,
+	/**  Dernier moment où la liste était à jour (HRT-72) ; absent si aucune liste n'a été lue. */
+	listCurrentAt: string | null,
 };
 
 export type EngineStateDto = "checking" | "ready" | "stopped" | "access_denied" | "unresponsive" | "absent" | "unsupported_engine" | "unsupported_version" | "disabled" | 
@@ -947,6 +951,8 @@ export type ServiceDto = {
 	restarts10m: number,
 	image: ImageDto,
 	ports: PortDto[],
+	/**  Ports publiés au-delà de la borne de l'agent, non listés (`BR-SVC-021`). */
+	portsOmitted: number,
 	hostNetwork: boolean,
 };
 

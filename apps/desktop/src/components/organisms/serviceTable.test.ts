@@ -20,6 +20,7 @@ function service(patch: Partial<ServiceInfo> & { key: string }): ServiceInfo {
     restarts10m: 0,
     image: { ref: "nginx", tag: "1.27", shortId: "0123456789ab" },
     ports: [],
+    portsOmitted: 0,
     hostNetwork: false,
     ...patch,
   };
@@ -154,6 +155,56 @@ describe("ServiceTable : liste virtualisée et accessible (BR-SVC-019, 021)", ()
     await flushPromises();
     // La ligne 20 était à 10 px du haut : elle y reste malgré les 28 px gagnés au-dessus.
     expect(scroller.scrollTop).toBe(52 * 20 + 28 + 10);
+    wrapper.unmount();
+  });
+});
+
+describe("ServiceTable : ports coupés par l'agent (BR-SVC-021)", () => {
+  const port = (hostPort: number) => ({
+    hostPort,
+    containerPort: 80,
+    protocol: "tcp" as const,
+    scope: "all" as const,
+  });
+  const cell = (wrapper: ReturnType<typeof mount>) => wrapper.get(".cell--ports");
+
+  it("le « +N » compte les ports coupés sans les lister ; le survol le dit", () => {
+    const wrapper = mount(ServiceTable, {
+      props: {
+        services: [service({ key: "a", ports: [port(1), port(2)], portsOmitted: 2872 })],
+      },
+    });
+    expect(cell(wrapper).text()).toContain("+2872");
+    expect(cell(wrapper).attributes("title")).toBe(
+      "1 vers 80 (TCP), 2 vers 80 (TCP), et 2872 autres non listés",
+    );
+    wrapper.unmount();
+  });
+
+  it("des ports listés qui tiennent et des ports coupés : « +N » des seuls ports coupés", () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: [service({ key: "a", ports: [port(1)], portsOmitted: 5 })] },
+    });
+    expect(cell(wrapper).text()).toContain("+5");
+    wrapper.unmount();
+  });
+
+  it("aucun port listé mais des ports coupés : jamais « Aucun port »", () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: [service({ key: "a", ports: [], portsOmitted: 7 })] },
+    });
+    expect(cell(wrapper).text()).toContain("+7");
+    expect(cell(wrapper).text()).not.toContain("Aucun port");
+    expect(cell(wrapper).attributes("title")).toBe("7 non listés");
+    wrapper.unmount();
+  });
+
+  it("rien de coupé : comportement d'avant (pas de survol quand tout tient)", () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: [service({ key: "a", ports: [port(1)] })] },
+    });
+    expect(cell(wrapper).attributes("title")).toBeUndefined();
+    expect(cell(wrapper).text()).not.toContain("+");
     wrapper.unmount();
   });
 });

@@ -83,7 +83,7 @@ const degraded = computed(() => {
 /** Lien coupé : le gabarit grise et date déjà tout (un seul mécanisme), la liste n'est pas filtrée une seconde fois. */
 const degradedList = computed(() => degraded.value !== null && isConnected.value);
 const degradedAge = computed(() =>
-  degraded.value?.readAt != null ? shortAge(now.value - degraded.value.readAt) : null,
+  degraded.value?.currentAt != null ? shortAge(now.value - degraded.value.currentAt) : null,
 );
 
 function recheck() {

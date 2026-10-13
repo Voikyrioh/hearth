@@ -416,7 +416,7 @@ describe("liste non relisible, moteur prêt (HRT-61 list_degraded)", () => {
 
   it("lien bon : « Impossible de lire les services », la liste reste, grisée et datée de la dernière lecture", async () => {
     const { wrapper } = await open((sim) =>
-      sim.services.seed("forge", WEB, { listDegraded: true, listReadAt: readAgo(180_000) }),
+      sim.services.seed("forge", WEB, { listDegraded: true, listCurrentAt: readAgo(180_000) }),
     );
     expect(wrapper.get("[data-services-degraded]").text()).toContain(
       "Impossible de lire les services pour le moment.",
@@ -430,11 +430,46 @@ describe("liste non relisible, moteur prêt (HRT-61 list_degraded)", () => {
 
   it("sans date de l'agent : la liste est annoncée non relisible, aucune date n'est inventée", async () => {
     const { wrapper } = await open((sim) =>
-      sim.services.seed("forge", WEB, { listDegraded: true, listReadAt: null }),
+      sim.services.seed("forge", WEB, { listDegraded: true, listCurrentAt: null }),
     );
     expect(wrapper.find("[data-services-degraded]").exists()).toBe(true);
     expect(wrapper.find("[data-services-stale]").exists()).toBe(false);
     expect(wrapper.findAll("[data-row]")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("l'agent a une autre horloge que le poste : l'âge est l'écart entre ses deux dates, jamais la différence des horloges", async () => {
+    const { wrapper } = await open((sim) =>
+      sim.services.seed("forge", WEB, {
+        listDegraded: true,
+        // L'agent est 3 h en avance : at et listCurrentAt sont à lui, 2 min d'écart.
+        at: new Date(Date.now() + 3 * 3_600_000).toISOString(),
+        listCurrentAt: new Date(Date.now() + 3 * 3_600_000 - 120_000).toISOString(),
+      }),
+    );
+    expect(wrapper.get("[data-services-stale]").text()).toBe("Liste du moteur d'il y a 2 min");
+    wrapper.unmount();
+  });
+
+  it("agent plus ancien (sans heure) : la date de sa dernière lecture, comme avant", async () => {
+    const { wrapper } = await open((sim) =>
+      sim.services.seed("forge", WEB, {
+        listDegraded: true,
+        at: null,
+        listCurrentAt: null,
+        listReadAt: readAgo(240_000),
+      }),
+    );
+    expect(wrapper.get("[data-services-stale]").text()).toBe("Liste du moteur d'il y a 4 min");
+    wrapper.unmount();
+  });
+
+  it("heure de l'agent présente et liste jamais lue : non relisible, sans âge", async () => {
+    const { wrapper } = await open((sim) =>
+      sim.services.seed("forge", WEB, { listDegraded: true, listCurrentAt: null }),
+    );
+    expect(wrapper.find("[data-services-degraded]").exists()).toBe(true);
+    expect(wrapper.find("[data-services-stale]").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -447,7 +482,7 @@ describe("liste non relisible, moteur prêt (HRT-61 list_degraded)", () => {
 
   it("lien coupé : un seul mécanisme (le gabarit), le message reste mais ni seconde date ni second filtre", async () => {
     const { wrapper, bridge } = await open((sim) =>
-      sim.services.seed("forge", WEB, { listDegraded: true, listReadAt: readAgo(60_000) }),
+      sim.services.seed("forge", WEB, { listDegraded: true, listCurrentAt: readAgo(60_000) }),
     );
     bridge.setState("forge", "offline");
     await flushPromises();
@@ -465,7 +500,7 @@ describe("liste non relisible, moteur prêt (HRT-61 list_degraded)", () => {
       sim.services.seed("forge", WEB, {
         state: "unresponsive",
         listDegraded: true,
-        listReadAt: readAgo(60_000),
+        listCurrentAt: readAgo(60_000),
       }),
     );
     expect(wrapper.find("[data-services-degraded]").exists()).toBe(false);
@@ -475,7 +510,7 @@ describe("liste non relisible, moteur prêt (HRT-61 list_degraded)", () => {
 
   it("le retour à la normale retire le message et le filtre", async () => {
     const { wrapper, bridge } = await open((sim) =>
-      sim.services.seed("forge", WEB, { listDegraded: true, listReadAt: readAgo(60_000) }),
+      sim.services.seed("forge", WEB, { listDegraded: true, listCurrentAt: readAgo(60_000) }),
     );
     bridge.services.setEngine("forge", { listDegraded: false });
     await flushPromises();

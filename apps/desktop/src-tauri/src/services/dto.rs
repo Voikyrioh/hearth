@@ -112,6 +112,11 @@ pub struct EngineDto {
     /// La liste affichée n'est peut-être plus à jour (relecture en échec, conteneurs illisibles, suivi suspendu).
     #[serde(rename = "listDegraded")]
     pub list_degraded: bool,
+    /// Heure de l'agent à la fabrication de la vue (HRT-72) ; absente pour un agent plus ancien.
+    pub at: Option<String>,
+    /// Dernier moment où la liste était à jour (HRT-72) ; absent si aucune liste n'a été lue.
+    #[serde(rename = "listCurrentAt")]
+    pub list_current_at: Option<String>,
 }
 
 impl From<&EngineView> for EngineDto {
@@ -128,6 +133,8 @@ impl From<&EngineView> for EngineDto {
             checked_at,
             list_read_at,
             list_degraded,
+            at,
+            list_current_at,
         } = engine;
         Self {
             state: (*state).into(),
@@ -141,6 +148,8 @@ impl From<&EngineView> for EngineDto {
             checked_at: checked_at.clone(),
             list_read_at: list_read_at.clone(),
             list_degraded: *list_degraded,
+            at: at.clone(),
+            list_current_at: list_current_at.clone(),
         }
     }
 }
@@ -292,6 +301,9 @@ pub struct ServiceDto {
     pub restarts_10m: u32,
     pub image: ImageDto,
     pub ports: Vec<PortDto>,
+    /// Ports publiés au-delà de la borne de l'agent, non listés (`BR-SVC-021`).
+    #[serde(rename = "portsOmitted")]
+    pub ports_omitted: u32,
     #[serde(rename = "hostNetwork")]
     pub host_network: bool,
 }
@@ -314,9 +326,12 @@ impl From<&ServiceItem> for ServiceDto {
             restarts_10m,
             image,
             ports,
+            ports_omitted,
             host_network,
             // Le détail d'un service (tranche suivante) : pas montré par la liste.
             mounts: _,
+            // Idem pour le nombre de montages coupés par l'agent (le détail les montrera).
+            mounts_omitted: _,
             restart: _,
             // Les actes (tranche suivante) : jamais remplis par l'agent de cette tranche.
             busy: _,
@@ -348,6 +363,7 @@ impl From<&ServiceItem> for ServiceDto {
             restarts_10m: *restarts_10m,
             image: image.into(),
             ports: ports.iter().map(PortDto::from).collect(),
+            ports_omitted: *ports_omitted,
             host_network: *host_network,
         }
     }

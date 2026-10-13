@@ -20,15 +20,45 @@ export interface ServerServices {
   lastReady: { engineName: string | null; services: ServiceInfo[]; at: number } | null;
   /** Quand (horloge de ce poste) le dernier événement est arrivé. */
   receivedAt: number;
+  /**
+   * Quand (horloge de ce poste) la vue du moteur actuelle est arrivée : un lot qui ne la republie pas ne
+   * remet pas ce repère à zéro (l'âge de la liste se mesure depuis la réception de la VUE, pas du lot).
+   */
+  engineReceivedAt: number;
 }
 
 /**
  * Moteur prêt mais liste peut-être plus à jour (`list_degraded` de l'agent) : « Impossible de lire les
- * services » et la liste datée par `readAt`. `readAt` est `null` quand l'agent ne donne pas la date : on ne
- * l'invente pas, la liste est alors seulement annoncée comme non relisible.
+ * services » et la liste datée par `currentAt`, le dernier moment où elle était à jour, EXPRIMÉ À L'HORLOGE
+ * DE CE POSTE (réception de la vue moins l'âge que l'agent a mesuré avec sa seule horloge) : l'âge affiché
+ * est `maintenant - currentAt`, sans jamais comparer deux horloges. `null` quand il n'y a rien à dater
+ * (aucune liste lue, ou agent sans date) : on ne l'invente pas, la liste est seulement annoncée non relisible.
  */
 export interface Degraded {
-  readAt: number | null;
+  currentAt: number | null;
+}
+
+/**
+ * Le dernier moment où la liste était à jour, à l'horloge de ce poste (HRT-72). Âge à la réception =
+ * `max(0, at - listCurrentAt)`, deux dates de l'agent ; le temps écoulé depuis la réception s'y ajoute par
+ * l'horloge de ce poste. Agent sans `at` (plus ancien) : comportement d'avant, sa dernière lecture complète.
+ */
+export function listCurrentAt(engine: EngineInfo, engineReceivedAt: number): number | null {
+  if (engine.at === null) return engine.listReadAt;
+  if (engine.listCurrentAt === null) return null;
+  return engineReceivedAt - Math.max(0, engine.at - engine.listCurrentAt);
+}
+
+/** Deux vues du moteur identiques (même heure d'agent, même état, même dernière mise à jour de la liste) ? */
+export function sameEngineView(before: EngineInfo | null, now: EngineInfo): boolean {
+  return (
+    before !== null &&
+    before.at !== null &&
+    before.at === now.at &&
+    before.state === now.state &&
+    before.listCurrentAt === now.listCurrentAt &&
+    before.listDegraded === now.listDegraded
+  );
 }
 
 export type ListShown =
@@ -60,7 +90,9 @@ export function show(entry: ServerServices | undefined): Shown {
   const engine = entry.engine;
   if (!engine || engine.state === "checking") return { kind: "loading" };
   if (engine.state === "ready") {
-    const degraded = engine.listDegraded ? { readAt: engine.listReadAt } : null;
+    const degraded = engine.listDegraded
+      ? { currentAt: listCurrentAt(engine, entry.engineReceivedAt) }
+      : null;
     return {
       kind: "engine",
       engine,

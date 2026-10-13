@@ -899,6 +899,8 @@ export const fr = {
     loading: "Lecture des services…",
     readFailed: "Impossible de lire les services pour le moment.",
     staleList: "Liste du moteur d'il y a {age}",
+    portsAlsoOmitted: "et {n} autres non listés",
+    portsOnlyOmitted: "{n} non listés",
     rowOnePort: "1 port",
     rowPorts: "{n} ports",
     // Textes écrits pour ce ticket, absents des specs : à valider avec Voiky.

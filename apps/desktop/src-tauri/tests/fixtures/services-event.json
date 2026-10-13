@@ -20,7 +20,9 @@
         "lastReadyAt": "2026-10-13T10:00:00Z",
         "checkedAt": "2026-10-13T10:00:02Z",
         "listReadAt": "2026-10-13T09:59:30Z",
-        "listDegraded": true
+        "listDegraded": true,
+        "at": "2026-10-13T10:00:02Z",
+        "listCurrentAt": "2026-10-13T09:59:30Z"
       },
       "services": [
         {
@@ -42,6 +44,7 @@
             { "hostPort": 8080, "containerPort": 80, "protocol": "tcp", "scope": "all" },
             { "hostPort": 5353, "containerPort": 53, "protocol": "udp", "scope": "local" }
           ],
+          "portsOmitted": 3,
           "hostNetwork": false
         },
         {
@@ -60,6 +63,7 @@
           "restarts10m": 0,
           "image": { "ref": null, "tag": null, "shortId": "abcdef012345" },
           "ports": [],
+          "portsOmitted": 0,
           "hostNetwork": true
         }
       ]
@@ -81,7 +85,9 @@
         "lastReadyAt": null,
         "checkedAt": "2026-10-13T10:00:02Z",
         "listReadAt": null,
-        "listDegraded": false
+        "listDegraded": false,
+        "at": null,
+        "listCurrentAt": null
       },
       "services": [
         {
@@ -102,6 +108,7 @@
           "ports": [
             { "hostPort": 4433, "containerPort": 443, "protocol": "unknown", "scope": "unknown" }
           ],
+          "portsOmitted": 0,
           "hostNetwork": false
         }
       ]

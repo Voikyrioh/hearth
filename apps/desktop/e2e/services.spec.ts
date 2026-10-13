@@ -320,7 +320,7 @@ test("moteur prêt, liste non relisible : la liste reste grisée et datée, 1366
   await sim(page, (s) =>
     s.services.seed("forge", [{ key: "c_1", name: "web" }], {
       listDegraded: true,
-      listReadAt: new Date(Date.now() - 180_000).toISOString(),
+      listCurrentAt: new Date(Date.now() - 180_000).toISOString(),
     }),
   );
   await expect(page.locator("[data-services-degraded]")).toContainText(
@@ -334,6 +334,69 @@ test("moteur prêt, liste non relisible : la liste reste grisée et datée, 1366
   });
   await sim(page, (s) => s.services.setEngine("forge", { listDegraded: false }));
   await expect(page.locator("[data-services-degraded]")).toHaveCount(0);
+});
+
+test("âge de la liste : l'écart entre les deux dates de l'agent, quelle que soit son horloge ; un lot qui ne republie pas la vue ne le remet pas à zéro", async ({
+  page,
+}) => {
+  await open(page);
+  // L'agent a 3 h d'avance sur ce poste : seules ses deux dates comptent, 3 min d'écart.
+  await sim(page, (s) => {
+    const ahead = Date.now() + 3 * 3_600_000;
+    s.services.seed("forge", [{ key: "c_1", name: "web" }], {
+      listDegraded: true,
+      at: new Date(ahead).toISOString(),
+      listCurrentAt: new Date(ahead - 180_000).toISOString(),
+    });
+  });
+  await expect(page.locator("[data-services-stale]")).toHaveText("Liste du moteur d'il y a 3 min");
+  // Un lot qui ne touche qu'un service : l'âge continue, il ne repart pas de zéro.
+  await sim(page, (s) => s.services.upsert("forge", { key: "c_2", name: "api" }));
+  await expect(page.locator("[data-row]")).toHaveCount(2);
+  await expect(page.locator("[data-services-stale]")).toHaveText("Liste du moteur d'il y a 3 min");
+  // Heure de l'agent présente, liste jamais lue : non relisible, sans âge.
+  await sim(page, (s) =>
+    s.services.setEngine("forge", { listCurrentAt: null, listReadAt: new Date().toISOString() }),
+  );
+  await expect(page.locator("[data-services-degraded]")).toBeVisible();
+  await expect(page.locator("[data-services-stale]")).toHaveCount(0);
+  // Agent plus ancien, sans heure : la date de sa dernière lecture, comme avant.
+  await sim(page, (s) =>
+    s.services.setEngine("forge", {
+      at: null,
+      listCurrentAt: null,
+      listReadAt: new Date(Date.now() - 240_000).toISOString(),
+    }),
+  );
+  await expect(page.locator("[data-services-stale]")).toHaveText("Liste du moteur d'il y a 4 min");
+});
+
+test("ports coupés par l'agent : le « +N » les compte sans les lister, le survol le dit", async ({
+  page,
+}) => {
+  await open(page);
+  await sim(page, (s) =>
+    s.services.seed("forge", [
+      {
+        key: "c_big",
+        name: "beaucoup",
+        ports: [
+          { hostPort: 8080, containerPort: 80, protocol: "tcp", scope: "all" },
+          { hostPort: 8081, containerPort: 80, protocol: "tcp", scope: "all" },
+        ],
+        portsOmitted: 40,
+      },
+      { key: "c_none", name: "coupes", ports: [], portsOmitted: 7 },
+    ]),
+  );
+  const big = page.locator("[data-key='c_big'] .cell--ports");
+  await expect(big).toContainText("+40");
+  await expect(big).toHaveAttribute("title", /et 40 autres non listés$/);
+  const none = page.locator("[data-key='c_none'] .cell--ports");
+  await expect(none).toContainText("+7");
+  await expect(none).not.toContainText("Aucun port");
+  await expect(none).toHaveAttribute("title", "7 non listés");
+  await expectNoHorizontalScroll(page);
 });
 
 test("« Vérifier à nouveau » relance la détection ; le retour du moteur est automatique", async ({

@@ -118,7 +118,8 @@ export const STATE_KEYS = {
 export function rowLabel(service: ServiceInfo): string {
   const parts = [service.name, imageLabel(service), t(STATE_KEYS[service.state])];
   if (service.origin === "external") parts.push(t("services.external"));
-  const ports = service.ports.length;
+  // Les ports coupés par l'agent comptent aussi : le total est un minimum, jamais une liste (BR-SVC-021).
+  const ports = service.ports.length + service.portsOmitted;
   if (ports > 0) {
     parts.push(ports === 1 ? t("services.rowOnePort") : t("services.rowPorts", { n: ports }));
   }

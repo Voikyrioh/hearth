@@ -113,6 +113,8 @@ mod tests {
             checked_at: "2026-10-13T10:00:00Z".into(),
             list_read_at: None,
             list_degraded: false,
+            at: None,
+            list_current_at: None,
         }
     }
 
@@ -137,8 +139,10 @@ mod tests {
                 short_id: "abcdef012345".into(),
             },
             ports: vec![],
+            ports_omitted: 0,
             host_network: false,
             mounts: vec![],
+            mounts_omitted: 0,
             restart: RestartMode::None,
             busy: None,
             last_action: None,
@@ -320,6 +324,48 @@ mod tests {
         assert_eq!(flag(&state), (false, Some("2026-10-13T10:01:00Z".into())));
         // Les services n'ont pas bougé pendant ce temps.
         assert_eq!(names(&state), ["a"]);
+    }
+
+    #[test]
+    fn the_freshness_dates_and_omitted_counts_travel_untouched_and_a_bare_delta_keeps_the_view() {
+        let mut state = None;
+        let mut view = engine(EngineState::Ready);
+        view.at = Some("2026-10-13T10:05:00Z".into());
+        view.list_current_at = Some("2026-10-13T10:02:00Z".into());
+        view.list_degraded = true;
+        let mut cut = item("c_1", "a", ServiceState::Running);
+        cut.ports_omitted = 40;
+        cut.mounts_omitted = 3;
+        apply(
+            &mut state,
+            ServicesMessage::ServicesSnapshot(ServicesState {
+                rev: 1,
+                engine: view.clone(),
+                services: vec![cut],
+            }),
+        );
+        // Un lot sans vue du moteur : la vue (donc ses deux dates) est celle d'avant, rien n'est recalculé ici.
+        assert!(apply(
+            &mut state,
+            delta(2, vec![item("c_2", "b", ServiceState::Running)], vec![])
+        ));
+        let kept = state.as_ref().expect("état");
+        assert_eq!(kept.engine, view);
+        assert_eq!(
+            (
+                kept.services[0].ports_omitted,
+                kept.services[0].mounts_omitted
+            ),
+            (40, 3)
+        );
+        // Un agent plus ancien : les dates restent absentes, jamais inventées.
+        let mut old = None;
+        apply(&mut old, snapshot(1, vec![]));
+        let old_engine = &old.as_ref().expect("état").engine;
+        assert_eq!(
+            (&old_engine.at, &old_engine.list_current_at),
+            (&None, &None)
+        );
     }
 
     #[test]
