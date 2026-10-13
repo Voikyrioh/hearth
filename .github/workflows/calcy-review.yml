@@ -1,0 +1,96 @@
+name: calcy-review
+
+# Automatic review of the owner's own pull requests, posted as one comment (ADR-0056, runbook
+# docs/runbooks/mettre-en-service-calcy.md).
+#
+# Read this before changing anything:
+# - The trigger is `push` on purpose. The identity federation rule on the Anthropic side only accepts
+#   `event_name=push` for this repository, and a push only exists for someone who can write to the
+#   repository: a pull request from a fork never starts this workflow. NEVER switch it to
+#   `pull_request` or `pull_request_target`.
+# - The script and the instructions come from `main` (first checkout). The pushed branch (second
+#   checkout) is only read as data by `git diff`; nothing from it is ever executed.
+# - No value written by the author of a branch (branch name, commit message, title, description, file
+#   names, diff) is ever placed inside a `run:` line or an expression of this file.
+# To turn it off: `gh workflow disable calcy-review.yml` (see the runbook).
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - "dependabot/**"
+
+# No right by default; the job asks for exactly what it uses.
+permissions: {}
+
+# One run per branch; a newer push cancels the previous one before it spends anything more.
+concurrency:
+  group: calcy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Owner's pushes only, on the real repository only, and only once the model variable is set
+    # (the repository variable CALCY_MODEL is the on/off switch together with the workflow state).
+    if: >-
+      github.repository == 'Voikyrioh/hearth'
+      && github.actor == 'Voikyrioh'
+      && github.event.repository.fork == false
+      && vars.CALCY_MODEL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # read the code
+      pull-requests: write # the single comment
+      id-token: write # identity federation: GitHub OIDC token exchanged for an Anthropic access token
+    env:
+      # Identifiers of the federation setup: not secrets (the rule only accepts this repository's pushes).
+      ANTHROPIC_FEDERATION_RULE_ID: fdrl_01AsnGjCeaCTjwCHw8RyQzGK
+      ANTHROPIC_ORGANIZATION_ID: d970229f-a844-40c9-80bf-eedcfc2d9ded
+      ANTHROPIC_SERVICE_ACCOUNT_ID: svac_01NuXPZUAvyw1uzrcpMVcB5F
+      ANTHROPIC_WORKSPACE_ID: wrkspc_017gUxiWv2q7JPVtVhXgfP8o
+    steps:
+      # Trusted side: the default branch, only the script and the instructions.
+      - name: Checkout the script (main)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trusted
+          sparse-checkout: |
+            .github/scripts
+            .github/calcy
+          persist-credentials: false
+
+      # Untrusted side: the pushed commit, read as data. Full history so the diff against the base works.
+      - name: Checkout the pushed commit (data only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: untrusted
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check that the script exists on main
+        id: present
+        run: |
+          if [ -f trusted/.github/scripts/calcy-review.mjs ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::calcy-review.mjs is not on main yet: nothing to run (expected on the pull request that introduces Calcy)."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Review the pull request
+        if: steps.present.outputs.found == 'true'
+        working-directory: untrusted
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PUSHED_BRANCH: ${{ github.ref_name }}
+          PUSHED_SHA: ${{ github.sha }}
+          # Repository variables (Settings > Variables). The model is never written in this file.
+          CALCY_MODEL: ${{ vars.CALCY_MODEL }}
+          CALCY_MAX_DIFF_CHARS: ${{ vars.CALCY_MAX_DIFF_CHARS }}
+          CALCY_PRICE_INPUT_PER_MTOK: ${{ vars.CALCY_PRICE_INPUT_PER_MTOK }}
+          CALCY_PRICE_OUTPUT_PER_MTOK: ${{ vars.CALCY_PRICE_OUTPUT_PER_MTOK }}
+        run: node ../trusted/.github/scripts/calcy-review.mjs
