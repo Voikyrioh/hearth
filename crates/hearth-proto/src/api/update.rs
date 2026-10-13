@@ -23,6 +23,10 @@ pub enum UpdateStep {
     Check,
     /// Terminée : voir `outcome`.
     Done,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Comment une mise à jour s'est terminée.
@@ -35,6 +39,10 @@ pub enum UpdateOutcome {
     RolledBack,
     /// Échec avant tout échange de binaire : l'agent n'a pas changé (téléchargement, signature…).
     Failed,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Pourquoi une mise à jour n'a pas abouti.

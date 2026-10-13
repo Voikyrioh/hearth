@@ -99,6 +99,10 @@ pub enum ErrorCode {
     WorldGone,
     /// L'opération a passé son point de non-retour : elle ne s'annule plus (ADR-0045).
     TooLateToCancel,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 impl ErrorCode {
@@ -148,7 +152,8 @@ impl ErrorCode {
             Self::TooManyAttempts | Self::TransferLimit => 429,
             Self::TransferExpired => 410,
             Self::NoSpace => 507,
-            Self::InternalError => 500,
+            // `Unknown` n'existe qu'à la lecture : l'agent ne l'émet jamais, un statut 500 si on le demande.
+            Self::InternalError | Self::Unknown => 500,
         }
     }
 }
@@ -205,6 +210,10 @@ impl ErrorBody {
 pub enum UpgradeTarget {
     Client,
     Agent,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 impl ErrorBody {

@@ -30,6 +30,10 @@ pub enum AttackModeState {
     Off,
     Active,
     Suspended,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Comment le dernier mode attaque s'est terminé.
@@ -39,6 +43,10 @@ pub enum AttackModeEnd {
     Manual,
     Auto,
     Cli,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Le mode attaque du serveur, tel que le client le voit.
@@ -89,6 +97,10 @@ pub struct SecurityView {
 pub enum SessionDevice {
     Proven,
     None,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Réponse de `GET /security`.

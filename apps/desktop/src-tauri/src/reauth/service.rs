@@ -36,7 +36,8 @@ pub async fn state(manager: &LinkManager, id: &ServerId) -> Result<ReauthStateDt
 pub fn covers(kind: AdminActKindDto, role: Option<RoleDto>) -> bool {
     let role = match role {
         Some(RoleDto::Readonly) => RoleName::Readonly,
-        Some(RoleDto::Admin) | None => RoleName::Admin,
+        // Un rôle inconnu (agent plus récent) vaut « Administrateur » : le plus strict.
+        Some(RoleDto::Admin | RoleDto::Unknown) | None => RoleName::Admin,
     };
     let act = match kind {
         AdminActKindDto::AccountCreate => AdminAct::AccountCreate { username: "", role },

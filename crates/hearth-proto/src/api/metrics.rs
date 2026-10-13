@@ -110,6 +110,10 @@ pub enum HistoryWindow {
     FiveMinutes,
     #[serde(rename = "1h")]
     OneHour,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Réponse de `GET /metrics/history`.

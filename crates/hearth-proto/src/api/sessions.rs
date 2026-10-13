@@ -69,6 +69,10 @@ pub enum ChallengePurpose {
     DeviceRemoval,
     /// Un acte d'administration (HRT-28) : usage `0x05`, lié à l'acte, sa cible et ses paramètres.
     AdminAct,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Corps de `POST /sessions/challenge` (route publique, sans effet, sans lecture en base).
@@ -124,6 +128,10 @@ pub enum DeviceStatus {
     Limit,
     /// Preuve valide, inscription gelée (mode attaque).
     Deferred,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// `POST /sessions` avec, en option, la preuve de la clé d'appareil. Même corps que
@@ -335,7 +343,8 @@ mod tests {
         }
         let unknown: Result<ChallengeRequest, _> =
             serde_json::from_str(r#"{"username":"a","purpose":"autre"}"#);
-        assert!(unknown.is_err());
+        // Lu `Unknown` (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB) : c'est le handler de l'agent qui refuse, jamais un défi.
+        assert_eq!(unknown.unwrap().purpose, ChallengePurpose::Unknown);
     }
 
     #[test]

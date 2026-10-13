@@ -18,6 +18,7 @@ export const fr = {
     neverLoggedIn: "Jamais",
     roleAdmin: "Administrateur",
     roleReadonly: "Lecture seule",
+    roleUnknown: "Rôle inconnu de ce client",
     emptyTitle: "Aucun compte à afficher",
     empty: "Crée un compte avec le bouton « Ajouter un compte », en haut de la page.",
     loadFailed: "Impossible de lire la liste des comptes.",
@@ -615,6 +616,7 @@ export const fr = {
     outcomeOk: "Réussi",
     outcomeDenied: "Refusé",
     outcomeFailed: "Échoué",
+    outcomeUnknown: "Inconnu",
     originCli: "ligne de commande du serveur",
     originAssistant: "assistant",
     countOne: "1 événement",
@@ -738,8 +740,11 @@ export const fr = {
     resultRollbackFailed:
       "La mise à jour de l'agent n'a pas pu être menée à bout, et le retour à la version précédente n'est pas confirmé. Vérifie l'agent sur le serveur (guide « Mettre à jour l'agent »).",
     resultFailed: "La mise à jour de l'agent n'a pas abouti.",
+    resultUnknown:
+      "La mise à jour de l'agent s'est terminée, mais ce client ne sait pas dire comment. Vérifie la version de l'agent.",
     dismiss: "Compris",
     historySucceeded: "Dernière mise à jour de l'agent : réussie ({when}).",
+    historyUnknown: "Dernière mise à jour de l'agent : issue inconnue de ce client ({when}).",
     historyRolledBack:
       "Dernière mise à jour de l'agent : annulée, retour à la version précédente ({when}).",
     historyFailed: "Dernière mise à jour de l'agent : échouée ({when}).",

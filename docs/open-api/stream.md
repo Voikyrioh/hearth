@@ -15,6 +15,10 @@ Flux temps réel : l'identité et l'historique de la machine, puis un échantill
 4. La session est revérifiée toutes les 5 s. Si le rôle a changé (un administrateur rétrogradé), l'abonnement `audit` est retiré avec un message `error` `FORBIDDEN_ROLE`. Si la session est révoquée ou expire, l'agent envoie `{"type":"session","kind":"revoked"}` ou `{"type":"session","kind":"expired"}`, puis ferme (`1008`).
 5. À l'arrêt de l'agent : fermeture propre, code `1001`.
 
+## Valeurs inconnues (FIX-01M4VR6Y4Q4AVQVT9FCME7Z2SB, BR-COMPAT-001)
+
+Un client lit un agent plus récent : un `type` de message inconnu est ignoré (`ServerMessage::Unknown`), une valeur d'énumération inconnue (étape, issue, raison, motif de fin de session `kind`, code d'erreur, état du mode attaque…) se lit `Unknown` sans faire rejeter le message, un champ en trop est ignoré. Les messages `security` et `services` se lisent avant `ServerMessage`. Un agent, lui, refuse une commande qu'il ne comprend pas (`subscribe` avec un sujet inconnu, `422`). `API_VERSION` ne change pas pour une valeur ajoutée.
+
 ## Sujet `services` (HRT-61)
 
 Ouvert à tout compte authentifié, les deux rôles reçoivent la même chose, à une différence près : la commande et les noms de variables d'un service ADOPTÉ ne vont qu'aux comptes qui ont le droit « gérer les services » (HRT-79, `details_reserved`). Seuls les services créés par Hearth et les adoptés sont publiés ; les autres conteneurs sont comptés (`engine.external_count`). À l'abonnement : `services_snapshot` (état du moteur et services publiés), puis `services_delta` à chaque lot de changements. Un abonné trop lent reçoit un nouveau `services_snapshot`. **Ne l'envoyer qu'à un agent dont `GET /hello` annonce la capacité `services`** : un sujet inconnu d'un agent ancien fait refuser tout le message `subscribe`. Contenu des messages, `rev` et comportement : [services.md](./services.md).

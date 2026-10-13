@@ -60,6 +60,8 @@ fn role_name(role: RoleDto) -> RoleName {
     match role {
         RoleDto::Admin => RoleName::Admin,
         RoleDto::Readonly => RoleName::Readonly,
+        // Jamais offert par l'interface ; l'agent refuse un rôle qu'il ne connaît pas (`422`).
+        RoleDto::Unknown => RoleName::Unknown,
     }
 }
 

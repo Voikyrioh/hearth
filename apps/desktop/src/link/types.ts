@@ -14,7 +14,7 @@ export const LINK_STATES: readonly LinkState[] = [
   "access_revoked",
 ];
 
-export type Role = "admin" | "readonly";
+export type Role = "admin" | "readonly" | "unknown";
 
 /** Numéro de couleur dans la palette de 8 jetons `--server-1` à `--server-8`. */
 export type ServerColor = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;

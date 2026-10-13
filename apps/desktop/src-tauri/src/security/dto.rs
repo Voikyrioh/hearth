@@ -41,6 +41,9 @@ pub enum AttackModeStateDto {
     Off,
     Active,
     Suspended,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle à l'interface,
+    // jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    Unknown,
 }
 
 impl From<AttackModeState> for AttackModeStateDto {
@@ -49,6 +52,7 @@ impl From<AttackModeState> for AttackModeStateDto {
             AttackModeState::Off => Self::Off,
             AttackModeState::Active => Self::Active,
             AttackModeState::Suspended => Self::Suspended,
+            AttackModeState::Unknown => Self::Unknown,
         }
     }
 }
@@ -60,6 +64,9 @@ pub enum AttackModeEndDto {
     Manual,
     Auto,
     Cli,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle à l'interface,
+    // jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    Unknown,
 }
 
 impl From<AttackModeEnd> for AttackModeEndDto {
@@ -68,6 +75,7 @@ impl From<AttackModeEnd> for AttackModeEndDto {
             AttackModeEnd::Manual => Self::Manual,
             AttackModeEnd::Auto => Self::Auto,
             AttackModeEnd::Cli => Self::Cli,
+            AttackModeEnd::Unknown => Self::Unknown,
         }
     }
 }
@@ -111,6 +119,8 @@ impl From<SessionDevice> for SecurityDeviceDto {
         match device {
             SessionDevice::Proven => Self::Proven,
             SessionDevice::None => Self::None,
+            // Le serveur a dit une valeur inconnue de cette version : « on ne sait pas », comme avant la lecture.
+            SessionDevice::Unknown => Self::Unknown,
         }
     }
 }

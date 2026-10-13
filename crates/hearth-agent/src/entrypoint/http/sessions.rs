@@ -18,6 +18,7 @@ use tracing::Instrument;
 use super::auth::{Caller, Requester};
 use super::{ApiError, AppState, wire};
 use crate::application::sessions::ClientInfo;
+use crate::application::trust::TrustError;
 use crate::domain::audit::ClientName;
 use crate::domain::secret::Secret;
 
@@ -114,7 +115,10 @@ pub async fn challenge(
     let Json(request) = body?;
     let response = trust
         .issue_challenge(&request.username, request.purpose, &addr)
-        .map_err(|error| ApiError::internal(&error))?;
+        .map_err(|error| match error {
+            TrustError::UnknownPurpose => ApiError::invalid("purpose", "Usage de défi inconnu"),
+            other => ApiError::internal(&other),
+        })?;
     Ok(Json(response))
 }
 

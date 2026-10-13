@@ -52,6 +52,7 @@ const OUTCOME_KEYS = {
   ok: "audit.outcomeOk",
   denied: "audit.outcomeDenied",
   failed: "audit.outcomeFailed",
+  unknown: "audit.outcomeUnknown",
 } as const;
 
 export function outcomeLabel(outcome: AuditEntry["outcome"]): string {

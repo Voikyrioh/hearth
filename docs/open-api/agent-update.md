@@ -4,6 +4,8 @@ Mettre l'agent à jour à distance, avec retour arrière automatique (HRT-17). T
 
 La mise à jour s'exécute **côté serveur** : `POST` répond `202` tout de suite, le client suit l'avancement par le flux (sujet `update`) ou par `GET /agent/update`, et lit le résultat par `GET /agent/update/last` quand il revient après une coupure ou un redémarrage de l'agent.
 
+**Valeurs inconnues** (BR-COMPAT-001) : `step`, `outcome` et `reason` sont lus par le client avec un repli. Un agent plus récent peut ajouter une étape, une issue ou une raison : le client la lit `unknown` (`UpdateStep::Unknown`, `UpdateOutcome::Unknown`, `UpdateReason::Unknown`) sans perdre la progression ; une issue `unknown` n'est ni une réussite ni un échec. Ajouter une valeur ne change pas `API_VERSION`.
+
 ## `GET /api/v1/agent/update`
 
 - **Rôle** : tous (lecture). Pas de clé d'opération.

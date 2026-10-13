@@ -97,11 +97,18 @@ fn classify(error: &TransportError) -> AttemptResult {
     }
 }
 
+/// Qui doit se mettre à jour. Une cible absente, illisible ou que cette version ne connaît pas
+/// (`UpgradeTarget::Unknown`) se lit « le client » : un agent qui nomme une cible inconnue de ce client
+/// est plus récent que lui, et le client est le seul côté que l'utilisateur met à jour d'ici
+/// (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB). L'état de la liaison ne porte donc jamais `Unknown`.
 fn upgrade_target(details: &serde_json::Value) -> UpgradeTarget {
-    details
+    match details
         .get("upgrade")
         .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .unwrap_or(UpgradeTarget::Client)
+    {
+        Some(UpgradeTarget::Agent) => UpgradeTarget::Agent,
+        Some(UpgradeTarget::Client | UpgradeTarget::Unknown) | None => UpgradeTarget::Client,
+    }
 }
 
 const NOTE_ABSENT: u8 = 1;
@@ -254,12 +261,19 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                     ErrorCode::SessionRevoked => return AttemptResult::Revoked,
                     // Le sujet `audit` refusé à un compte lecture seule : le reste est pris.
                     ErrorCode::ForbiddenRole => {}
+                    // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un code d'un agent plus récent : comme avant qu'il soit
+                    // lu (la trame était ignorée), le flux dit le reste ou se ferme (alors `recv` échoue).
+                    ErrorCode::Unknown => {}
                     _ => return AttemptResult::Failed,
                 },
                 ServerMessage::Session { kind } => {
                     return match kind {
                         SessionNotice::Expired => AttemptResult::SessionExpired,
                         SessionNotice::Revoked => AttemptResult::Revoked,
+                        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une fin de session d'un motif inconnu n'est ni
+                        // « expirée » ni « révoquée » : on ne tranche pas, l'agent ferme le flux et la
+                        // tentative suivante apprend le vrai motif par le chemin ordinaire.
+                        SessionNotice::Unknown => AttemptResult::Failed,
                     };
                 }
                 // Au plus quelques-uns : un agent bavard ne remplit pas la mémoire d'une tentative.

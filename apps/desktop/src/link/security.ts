@@ -24,7 +24,7 @@ export interface SecurityAlert {
   others: number | null;
 }
 
-export type AttackModeState = "off" | "active" | "suspended";
+export type AttackModeState = "off" | "active" | "suspended" | "unknown";
 
 /** Le mode attaque du serveur. */
 export interface AttackMode {
@@ -33,7 +33,7 @@ export interface AttackMode {
   /** Seulement « suspendu » : secondes avant la reprise. */
   resumesInS: number | null;
   /** Comment le dernier mode s'est terminé : à la main, tout seul, ou par la commande du serveur. */
-  lastEnd: "manual" | "auto" | "cli" | null;
+  lastEnd: "manual" | "auto" | "cli" | "unknown" | null;
 }
 
 /**

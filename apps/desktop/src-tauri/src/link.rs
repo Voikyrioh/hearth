@@ -454,6 +454,7 @@ impl LinkRuntime {
                 AttackModeState::Off => ModeKind::Off,
                 AttackModeState::Active => ModeKind::Active,
                 AttackModeState::Suspended => ModeKind::Suspended,
+                AttackModeState::Unknown => ModeKind::Unknown,
             },
             ended_automatically: view.attack_mode.last_end == Some(AttackModeEnd::Auto),
         };

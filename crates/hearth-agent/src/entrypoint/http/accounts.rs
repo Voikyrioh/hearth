@@ -50,7 +50,7 @@ pub async fn create(
         .create(
             &request.username,
             Secret::from(request.password),
-            wire::role_from_wire(request.role),
+            wire::role_from_wire(request.role)?,
             &by,
         )
         .await?;
@@ -68,7 +68,11 @@ pub async fn change_role(
     let Json(request) = body?;
     state
         .accounts
-        .change_role(&AccountId::new(id), wire::role_from_wire(request.role), &by)
+        .change_role(
+            &AccountId::new(id),
+            wire::role_from_wire(request.role)?,
+            &by,
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

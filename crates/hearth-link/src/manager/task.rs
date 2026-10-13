@@ -511,6 +511,9 @@ impl Runner {
             ServerMessage::Session { kind } => match kind {
                 SessionNotice::Expired => self.session_expired().await,
                 SessionNotice::Revoked => self.access_revoked().await,
+                // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : motif inconnu (agent plus récent) : ni expirée ni révoquée
+                // affirmée ; l'agent ferme le flux, la reconnexion apprend le vrai motif (401 ou 403).
+                SessionNotice::Unknown => {}
             },
             ServerMessage::Error(detail) => match detail.code {
                 ErrorCode::SessionExpired | ErrorCode::Unauthenticated => {
@@ -521,6 +524,8 @@ impl Runner {
                 _ => {}
             },
             ServerMessage::Pong { .. } => {}
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un type de message d'un agent plus récent : ignoré, le flux continue.
+            ServerMessage::Unknown => {}
             ServerMessage::Update(progress) => self.on_update(progress).await,
         }
     }
@@ -593,6 +598,9 @@ impl Runner {
             UpdateStep::Done => self.input(Input::RestartEnded).await,
             UpdateStep::Download | UpdateStep::Verify | UpdateStep::Install | UpdateStep::Check => {
             }
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une étape d'un agent plus récent : l'attente de la coupure ne
+            // change pas (ni annoncée ni levée), l'événement est transmis tel quel avec l'étape inconnue.
+            UpdateStep::Unknown => {}
         }
         self.deps.sink.emit(Event::AgentUpdate {
             server: self.id.clone(),

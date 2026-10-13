@@ -328,6 +328,8 @@ fn outcome_code(outcome: OutcomeName) -> &'static str {
         OutcomeName::Ok => "ok",
         OutcomeName::Denied => "denied",
         OutcomeName::Failed => "failed",
+        // Jamais construit par le client ; si une valeur inconnue revenait ici, l'agent la refuse.
+        OutcomeName::Unknown => "unknown",
     }
 }
 

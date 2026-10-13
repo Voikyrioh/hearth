@@ -153,7 +153,7 @@ export const commands = {
 	 *  L'élévation de 5 minutes couvre-t-elle cet acte ? La règle est celle de l'agent, lue de
 	 *  `hearth-proto` : la fenêtre ne la recopie pas. Ne parle pas à l'agent.
 	 */
-	reauthCovers: (kind: AdminActKindDto, role: "admin" | "readonly" | null) => __TAURI_INVOKE<boolean>("reauth_covers", { kind, role }),
+	reauthCovers: (kind: AdminActKindDto, role: "admin" | "readonly" | "unknown" | null) => __TAURI_INVOKE<boolean>("reauth_covers", { kind, role }),
 	/**
 	 *  Change le réglage « Demander mon mot de passe » (à chaque action, ou 5 minutes). `password` est le
 	 *  mot de passe actuel de confirmation, la preuve de la clé de ce PC est faite par la coquille.
@@ -314,7 +314,7 @@ export type AgentUpdateOutcome =
  */
 { kind: "unknown"; op_id: string };
 
-export type AgentUpdateOutcomeDto = "succeeded" | "rolled_back" | "failed";
+export type AgentUpdateOutcomeDto = "succeeded" | "rolled_back" | "failed" | "unknown";
 
 /**  Où en est la mise à jour en cours. */
 export type AgentUpdateProgressDto = {
@@ -391,7 +391,7 @@ export type AgentUpdateResultDto = {
 	announced: boolean,
 };
 
-export type AgentUpdateStepDto = "download" | "verify" | "install" | "restart" | "check" | "done";
+export type AgentUpdateStepDto = "download" | "verify" | "install" | "restart" | "check" | "done" | "unknown";
 
 /**  L'état de la mise à jour de l'agent d'un serveur, relu à la demande (affichage, retour du lien). */
 export type AgentUpdateView = {
@@ -441,7 +441,7 @@ export type AttackModeDto = {
 };
 
 /**  Comment le dernier mode attaque s'est terminé. */
-export type AttackModeEndDto = "manual" | "auto" | "cli";
+export type AttackModeEndDto = "manual" | "auto" | "cli" | "unknown";
 
 /**  Issue d'une activation ou d'une désactivation. */
 export type AttackModeOutcome = 
@@ -473,7 +473,7 @@ export type AttackModeRefusal =
 /**  L'agent ne connaît pas cette fonction (agent d'avant le mode attaque). */
 { kind: "unsupported" } | { kind: "session_ended" } | { kind: "session_revoked" } | { kind: "other" };
 
-export type AttackModeStateDto = "off" | "active" | "suspended";
+export type AttackModeStateDto = "off" | "active" | "suspended" | "unknown";
 
 /**
  *  Une entrée du journal. `at` : RFC 3339 en UTC, la source (l'interface l'affiche dans le fuseau du
@@ -532,9 +532,9 @@ export type AuditOriginDto = {
 	text: string,
 };
 
-export type AuditOriginKindDto = "client" | "cli" | "assistant" | "system";
+export type AuditOriginKindDto = "client" | "cli" | "assistant" | "system" | "unknown";
 
-export type AuditOutcomeDto = "ok" | "denied" | "failed";
+export type AuditOutcomeDto = "ok" | "denied" | "failed" | "unknown";
 
 /**  Une page du journal filtré, de la plus récente à la plus ancienne. */
 export type AuditPageDto = {
@@ -868,7 +868,7 @@ export type ReauthModeDto =
 /**  Une saisie vaut 5 minutes (défaut). */
 "window" | 
 /**  À chaque action. */
-"each";
+"each" | "unknown";
 
 /**  Issue du changement de réglage. */
 export type ReauthSettingOutcome = { kind: "done"; mode: ReauthModeDto } | { kind: "refused"; refusal: ReauthSettingRefusal } | 
@@ -899,7 +899,7 @@ export type ReauthStateDto = {
 	hasDeviceKey: boolean,
 };
 
-export type RoleDto = "admin" | "readonly";
+export type RoleDto = "admin" | "readonly" | "unknown";
 
 /**  Une seconde de la vie de la machine. */
 export type SampleDto = {

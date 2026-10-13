@@ -25,9 +25,11 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use hearth_proto::admin_act::{ActKind, AdminAct, RouteAct, decode_segment};
 use hearth_proto::api::accounts::{
-    ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest,
+    ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest, RoleName,
 };
-use hearth_proto::api::reauth::{Reauth, SetReauthRequest, lenient_reauth, reauth_refusal};
+use hearth_proto::api::reauth::{
+    Reauth, ReauthMode, SetReauthRequest, lenient_reauth, reauth_refusal,
+};
 use hearth_proto::api::security::SetAttackModeRequest;
 use hearth_proto::api::services::AdoptRequest;
 use hearth_proto::api::update::AgentUpdateRequest;
@@ -78,15 +80,26 @@ enum Parsed {
 impl Parsed {
     /// `None` : corps illisible pour ce que la route attend.
     fn read(kind: ActKind, bytes: &[u8]) -> Option<Self> {
+        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une valeur d'énumération que cette version ne connaît pas (client
+        // plus récent) rend le corps illisible pour la route : refus de validation avant toute confirmation.
         match kind {
-            ActKind::AccountCreate => serde_json::from_slice(bytes).ok().map(Self::Create),
-            ActKind::AccountRole => serde_json::from_slice(bytes).ok().map(Self::Role),
+            ActKind::AccountCreate => serde_json::from_slice(bytes)
+                .ok()
+                .filter(|request: &CreateAccountRequest| request.role != RoleName::Unknown)
+                .map(Self::Create),
+            ActKind::AccountRole => serde_json::from_slice(bytes)
+                .ok()
+                .filter(|request: &ChangeRoleRequest| request.role != RoleName::Unknown)
+                .map(Self::Role),
             ActKind::AgentUpdate => serde_json::from_slice(bytes).ok().map(Self::Update),
             ActKind::AttackModeEnable | ActKind::AttackModeDisable => {
                 serde_json::from_slice(bytes).ok().map(Self::Attack)
             }
             ActKind::AccountPasswordOwn => serde_json::from_slice(bytes).ok().map(Self::Own),
-            ActKind::ReauthSetting => serde_json::from_slice(bytes).ok().map(Self::Setting),
+            ActKind::ReauthSetting => serde_json::from_slice(bytes)
+                .ok()
+                .filter(|request: &SetReauthRequest| request.password != ReauthMode::Unknown)
+                .map(Self::Setting),
             ActKind::ServicesAdopt => serde_json::from_slice(bytes).ok().map(Self::Adopt),
             ActKind::AccountPassword
             | ActKind::AccountDelete
@@ -327,5 +340,36 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn body(value: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&value).expect("json")
+    }
+
+    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un client plus récent envoie une valeur que cette version ne
+    /// connaît pas dans une commande. Le corps est illisible pour la route (refus de validation typé,
+    /// avant toute confirmation), jamais un acte reconstruit avec une valeur par défaut.
+    #[test]
+    fn a_command_carrying_a_value_this_version_does_not_know_is_unreadable_for_its_route() {
+        let create = body(json!({ "username": "marie", "password": "x", "role": "futur" }));
+        assert!(Parsed::read(ActKind::AccountCreate, &create).is_none());
+        let role = body(json!({ "role": "futur" }));
+        assert!(Parsed::read(ActKind::AccountRole, &role).is_none());
+        let setting = body(json!({ "password": "futur" }));
+        assert!(Parsed::read(ActKind::ReauthSetting, &setting).is_none());
+        // Les valeurs connues et un champ en trop restent lus.
+        let known =
+            body(json!({ "username": "marie", "password": "x", "role": "admin", "futur": 1 }));
+        assert!(Parsed::read(ActKind::AccountCreate, &known).is_some());
+        assert!(
+            Parsed::read(ActKind::ReauthSetting, &body(json!({ "password": "each" }))).is_some()
+        );
     }
 }

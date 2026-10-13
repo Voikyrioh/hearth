@@ -54,7 +54,8 @@ const available = computed(() => view.value?.available ?? null);
 /** L'étape à montrer : celle du flux ; « contrôle » quand l'agent dit seulement « en cours ». */
 const step = computed(() => {
   const current = progress.value?.step;
-  return current && current !== "done" ? current : "check";
+  // Une étape que ce client ne connaît pas (`unknown`) se dit comme « contrôle » : la carte reste debout.
+  return current && current !== "done" && current !== "unknown" ? current : "check";
 });
 
 const compat = computed(() =>

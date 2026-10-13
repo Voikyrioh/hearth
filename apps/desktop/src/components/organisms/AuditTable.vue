@@ -283,7 +283,7 @@ defineExpose({ rows });
                   {{ clip(row.entry.target).text }}
                 </div>
                 <div class="table__td" role="gridcell">
-                  <HTag :tone="row.entry.outcome === 'ok' ? 'ok' : 'crit'">
+                  <HTag :tone="row.entry.outcome === 'ok' ? 'ok' : row.entry.outcome === 'unknown' ? 'warn' : 'crit'">
                     {{ outcomeLabel(row.entry.outcome) }}
                   </HTag>
                 </div>
