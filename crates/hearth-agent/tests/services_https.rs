@@ -87,8 +87,34 @@ fn names(state: &ServicesState) -> Vec<&str> {
         .collect()
 }
 
+/// Adopte en base (HRT-79) tous les conteneurs que le faux moteur connaît maintenant : le registre ne
+/// publie que les services créés par Hearth et les adoptés, et la plupart de ces tests parlent de ce
+/// que les services montrent, pas de ce qui les rend publiables (voir les tests de publication).
+async fn adopt_all(env: &Env, engine: &FakeEngine) {
+    for id in engine.container_ids() {
+        env.adopt_container(&id, "adopté").await;
+    }
+}
+
+/// Démarre l'agent après avoir adopté ce que le moteur contient déjà.
+async fn started(env: &Env, engine: &Arc<FakeEngine>, engine_parts: EngineParts) -> Agent {
+    adopt_all(env, engine).await;
+    https::start_engined(env, engine_parts).await
+}
+
+/// Adopte maintenant un conteneur apparu après le démarrage et le fait prendre en compte.
+async fn adopt_now(
+    env: &Env,
+    agent: &Agent,
+    observation: &hearth_agent::domain::services::Observation,
+) {
+    env.adopt_container(&observation.id, &observation.name)
+        .await;
+    agent.services().reload_adopted().await;
+}
+
 async fn ready_agent(env: &Env, engine: &Arc<FakeEngine>) -> Agent {
-    let agent = https::start_engined(env, parts(engine.clone())).await;
+    let agent = started(env, engine, parts(engine.clone())).await;
     let registry = agent.services();
     eventually("le moteur est détecté prêt", || {
         let registry = registry.clone();
@@ -138,7 +164,7 @@ async fn hello_announces_the_services_capability() {
     assert_eq!(reply.status, 200);
     assert_eq!(
         reply.body["capabilities"],
-        json!(["services", "service-rights"])
+        json!(["services", "service-rights", "service-adoption"])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).
     assert_eq!(reply.body["api"], json!({ "min": 1, "max": 1 }));
@@ -259,10 +285,17 @@ async fn subscribing_sends_a_snapshot_with_the_engine_and_every_service_then_del
     assert_eq!(snapshot.engine.state, EngineState::Ready);
     assert_eq!(names(&snapshot), vec!["a-stopped", "b-running"]);
 
-    // Un nouveau service : le delta arrive moins de 500 ms après l'événement (BR-SVC-015).
+    // Un nouveau conteneur n'est pas publié tant qu'il n'est pas adopté : il n'est que compté.
     let fresh = container("c-fresh", RunState::Running);
-    let started = Instant::now();
     engine.put(fresh.clone(), "start");
+    let ServicesMessage::ServicesDelta(counted) = client.next_services().await else {
+        panic!("un services_delta était attendu");
+    };
+    assert!(counted.upserts.is_empty() && counted.removed.is_empty());
+    assert_eq!(counted.engine.as_ref().map(|e| e.external_count), Some(1));
+    // Une fois adopté, le service apparaît : le delta arrive moins de 500 ms après (BR-SVC-015).
+    let started = Instant::now();
+    adopt_now(&env, &agent, &fresh).await;
     let ServicesMessage::ServicesDelta(delta) = client.next_services().await else {
         panic!("un services_delta était attendu");
     };
@@ -274,7 +307,8 @@ async fn subscribing_sends_a_snapshot_with_the_engine_and_every_service_then_del
     assert!(delta.rev > snapshot.rev);
     assert_eq!(delta.upserts.len(), 1);
     assert_eq!(delta.upserts[0].name, "c-fresh");
-    assert!(delta.removed.is_empty() && delta.engine.is_none());
+    assert!(delta.removed.is_empty());
+    assert_eq!(delta.engine.as_ref().map(|e| e.external_count), Some(0));
 
     // Il disparaît : `removed`.
     engine.remove(&fresh.id);
@@ -379,7 +413,7 @@ async fn a_missing_engine_is_absent_quietly_and_a_returning_engine_is_picked_up_
     let env = env().await;
     let engine = Arc::new(FakeEngine::new());
     engine.set_outcome(ProbeOutcome::SocketMissing, false);
-    let agent = https::start_engined(&env, parts(engine.clone())).await;
+    let agent = started(&env, &engine, parts(engine.clone())).await;
     let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
     let registry = agent.services();
     eventually("l'état « absent »", || {
@@ -400,7 +434,10 @@ async fn a_missing_engine_is_absent_quietly_and_a_returning_engine_is_picked_up_
     assert_eq!(engine.list_count(), 0, "pas de relecture sans moteur");
 
     // Le moteur est installé après coup : l'état repasse à prêt tout seul, services lus.
-    engine.put_silently(container("late", RunState::Running));
+    let late = container("late", RunState::Running);
+    engine.put_silently(late.clone());
+    // Le moteur est absent : aucune liste n'est tenue, l'adoption ne tombe pas (BR-ADOPT-017).
+    adopt_now(&env, &agent, &late).await;
     engine.set_ready();
     eventually("le moteur est détecté sans rechargement", || {
         let agent = &agent;
@@ -425,7 +462,7 @@ async fn a_broken_event_stream_triggers_a_probe_and_a_full_reread() {
     let mut timings = fast_timings();
     timings.ready_period = Duration::from_secs(3);
     timings.other_period = Duration::from_secs(3);
-    let agent = https::start_engined(&env, parts_with(engine.clone(), timings)).await;
+    let agent = started(&env, &engine, parts_with(engine.clone(), timings)).await;
     let registry = agent.services();
     // Démarrage fini : sonde, relecture, relecture de calage (4 x 20 ms), flux ouvert.
     eventually("la relecture de calage est passée", || {
@@ -436,14 +473,16 @@ async fn a_broken_event_stream_triggers_a_probe_and_a_full_reread() {
     let probes = engine.probe_count();
     let lists = engine.list_count();
     // Pendant la rupture, le monde change sans événement.
-    engine.put_silently(container("two", RunState::Running));
+    let two = container("two", RunState::Running);
+    engine.put_silently(two.clone());
     let broken_at = Instant::now();
     engine.break_events();
+    // Le conteneur n'est pas adopté : la relecture complète le voit, et ne fait que le compter.
     eventually(
-        "le deuxième service est vu par la relecture complète",
+        "le deuxième conteneur est vu par la relecture complète",
         || {
             let registry = registry.clone();
-            async move { registry.snapshot().services.len() == 2 }
+            async move { registry.engine_status().external_count == 1 }
         },
     )
     .await;
@@ -454,6 +493,8 @@ async fn a_broken_event_stream_triggers_a_probe_and_a_full_reread() {
     );
     assert!(engine.probe_count() > probes, "sonde immédiate");
     assert!(engine.list_count() > lists, "relecture complète");
+    adopt_now(&env, &agent, &two).await;
+    listed(&agent, 2).await;
     agent.shutdown().await;
 }
 
@@ -498,6 +539,9 @@ async fn a_slow_subscriber_is_resynchronised_with_a_new_snapshot() {
             id
         })
         .collect();
+    for id in &ids {
+        env.adopt_container(id, "long").await;
+    }
     // Aucune limite d'envoi courte : le client bloqué reste connecté pendant tout le test.
     let mut stream = fast_stream();
     stream.send_timeout = Duration::from_secs(60);
@@ -579,7 +623,13 @@ async fn a_slow_subscriber_is_resynchronised_with_a_new_snapshot() {
         .map(|view| {
             (
                 view.key.as_str().to_owned(),
-                hearth_agent::entrypoint::services_wire::service_item(view).state,
+                hearth_agent::entrypoint::services_wire::service_item(
+                    view,
+                    hearth_agent::entrypoint::services_wire::Reader {
+                        may_manage_services: true,
+                    },
+                )
+                .state,
             )
         })
         .collect();
@@ -707,6 +757,9 @@ async fn no_variable_value_reaches_a_message_a_response_or_a_trace_and_no_name_o
         "--token=SENTINEL-CMD-5d1e".to_owned(),
     ];
     container.publish = Some((8080, 80));
+    // Adopté, pour qu'il soit publié (HRT-79) ; l'administrateur a le droit, il en lit donc le détail.
+    env.adopt(&format!("c_{}", container.id), "secretive", "marie")
+        .await;
     daemon.put(container);
     let engine = BollardEngine::new(
         Target::Http(daemon.address()),
@@ -730,6 +783,7 @@ async fn no_variable_value_reaches_a_message_a_response_or_a_trace_and_no_name_o
     .await;
     let admin = token(&env, &agent, "marie", Role::Admin).await;
     let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    env.grant_services("marie").await;
 
     let mut texts = Vec::new();
     for (round, token) in [&admin, &readonly].into_iter().enumerate() {
@@ -755,9 +809,9 @@ async fn no_variable_value_reaches_a_message_a_response_or_a_trace_and_no_name_o
         texts.push(serde_json::to_string(&message).unwrap());
     }
     // Les VALEURS ne voyagent jamais dans la liste, ni dans un delta, ni dans une relance (elles ne se
-    // lisent que par `GET /services/{key}/env`). Les NOMS et la commande, eux, sont dans le détail
-    // d'un service pour les deux rôles (BR-SVC-007, BR-SVC-008, BR-SVC-020) : on le prouve, pour que
-    // l'absence de la valeur ne soit pas un test aveugle.
+    // lisent que par `GET /services/{key}/env`). Les NOMS et la commande d'un service adopté sont dans
+    // le détail pour qui a le droit seulement (BR-ADOPT-015) : on le prouve pour le compte qui l'a,
+    // pour que l'absence de la valeur ne soit pas un test aveugle.
     for text in &texts {
         assert!(
             !text.contains("SENTINEL-VALUE-91c2"),
@@ -844,7 +898,8 @@ fn contains(haystack: &[u8], needle: &str) -> bool {
 }
 
 #[tokio::test]
-async fn the_detail_of_a_service_has_names_command_and_grace_for_both_roles_and_never_a_value() {
+async fn the_command_and_variable_names_of_an_adopted_service_are_for_the_right_only_the_rest_is_for_all_and_no_value_is_sent()
+ {
     let env = env().await;
     let engine = Arc::new(FakeEngine::new());
     let web = detailed("web", RunState::Running);
@@ -855,26 +910,56 @@ async fn the_detail_of_a_service_has_names_command_and_grace_for_both_roles_and_
     );
     let agent = ready_agent(&env, &engine).await;
     listed(&agent, 1).await;
-    let admin = token(&env, &agent, "marie", Role::Admin).await;
-    let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    // A : administrateur avec le droit ; B : administrateur sans ; C : lecture seule sans ; D : lecture
+    // seule avec (BR-GRANT-001). Le rôle ne décide de rien (BR-ADOPT-015).
+    let a = token(&env, &agent, "ada", Role::Admin).await;
+    let b = token(&env, &agent, "bob", Role::Admin).await;
+    let c = token(&env, &agent, "cleo", Role::ReadOnly).await;
+    let d = token(&env, &agent, "dan", Role::ReadOnly).await;
+    env.grant_services("ada").await;
+    env.grant_services("dan").await;
     let mut seen = Vec::new();
-    for token in [&admin, &readonly] {
+    for (who, token, right) in [
+        ("ada", &a, true),
+        ("bob", &b, false),
+        ("cleo", &c, false),
+        ("dan", &d, true),
+    ] {
         let (state, text) = services_of(&agent, token).await;
         let item = &state.services[0];
         let names: Vec<&str> = item.env_names.iter().map(Concealed::expose).collect();
-        assert_eq!(names, ["APP_MODE", "DB_PASSWORD"]);
         let command: Vec<&str> = item
             .command
             .iter()
             .flatten()
             .map(Concealed::expose)
             .collect();
-        assert_eq!(command, ["/entrypoint.sh", "--serve"]);
+        if right {
+            assert_eq!(names, ["APP_MODE", "DB_PASSWORD"], "{who}");
+            assert_eq!(command, ["/entrypoint.sh", "--serve"], "{who}");
+            assert!(!item.details_reserved, "{who}");
+        } else {
+            assert!(names.is_empty() && command.is_empty(), "{who} : {text}");
+            assert!(item.details_reserved, "{who}");
+            assert!(
+                !text.contains("APP_MODE") && !text.contains("entrypoint"),
+                "{who} : {text}"
+            );
+        }
+        // Tout le reste du détail et le repère d'adoption sont ouverts à tous.
         assert_eq!(item.grace_s, Some(30));
+        assert_eq!(item.adopted.as_ref().map(|a| a.by.as_str()), Some("marie"));
         assert!(!text.contains("SENTINEL-VALUE-A"), "une valeur dans {text}");
-        seen.push(item.clone());
+        let mut open = item.clone();
+        open.env_names.clear();
+        open.command = None;
+        open.details_reserved = false;
+        seen.push(open);
     }
-    assert_eq!(seen[0], seen[1], "les deux rôles voient le même détail");
+    assert!(
+        seen.windows(2).all(|pair| pair[0] == pair[1]),
+        "les quatre profils voient le même service, détail réservé mis à part"
+    );
     assert_eq!(
         engine.env_read_count(),
         0,
@@ -894,6 +979,8 @@ async fn a_service_run_by_a_unit_is_served_under_its_unit_and_stays_listed_when_
     supervisor.set_owner(&first.id, &unit);
     supervisor.set_status(&unit, running_unit());
     engine.put_silently(first.clone());
+    env.adopt("u_docker-terraria.service", "terraria", "marie")
+        .await;
     let agent = https::start_engined(
         &env,
         parts_supervised(engine.clone(), supervisor.clone(), fast_timings()),
@@ -951,14 +1038,18 @@ async fn a_service_run_by_a_unit_is_served_under_its_unit_and_stays_listed_when_
     assert_eq!(gone.name, "terraria");
     assert!(!text.contains("DB_PASSWORD"), "rien du détail n'est retenu");
 
-    // Un homonyme créé ensuite n'est pas confondu avec lui (BR-SVC-016).
+    // Un homonyme créé ensuite n'est pas confondu avec lui (BR-SVC-016) : il n'hérite pas de
+    // l'adoption (BR-ADOPT-017), il est compté comme non géré.
     engine.put(recreated("terraria", RunState::Running, 'c'), "start");
-    listed(&agent, 2).await;
+    eventually("l'homonyme est compté", || {
+        let registry = agent.services();
+        async move { registry.engine_status().external_count == 1 }
+    })
+    .await;
     let (state, _) = services_of(&agent, &admin).await;
-    let mut keys: Vec<&str> = state.services.iter().map(|s| s.key.as_str()).collect();
-    keys.sort_unstable();
-    assert_eq!(keys.len(), 2);
-    assert!(keys[0].starts_with("c_") && keys[1] == "u_docker-terraria.service");
+    let keys: Vec<&str> = state.services.iter().map(|s| s.key.as_str()).collect();
+    assert_eq!(keys, ["u_docker-terraria.service"]);
+    assert_eq!(state.engine.external_count, 1);
 
     // Le système relance le service : un autre conteneur, la même clé, de nouveau en marche.
     let second = recreated("terraria", RunState::Running, 'b');
@@ -1283,6 +1374,7 @@ async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_jour
         "--token=SENTINEL-REVEAL-CMD-9f".to_owned(),
     ];
     let key = format!("c_{}", container.id);
+    env.adopt(&key, "vault", "marie").await;
     daemon.put(container);
     let engine = BollardEngine::new(
         Target::Http(daemon.address()),
@@ -1388,4 +1480,422 @@ async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_jour
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Publication (HRT-79, ADR-0043) : seuls les services créés par Hearth et les adoptés sortent
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn on_a_server_whose_containers_are_all_outside_hearth_the_list_is_empty_and_they_are_counted()
+ {
+    // BR-ADOPT-001, BR-ADOPT-002 : trois conteneurs, un arrêté, un jamais démarré, aucun adopté.
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    engine.put_silently(container("web", RunState::Running));
+    engine.put_silently(container("db", RunState::Exited));
+    engine.put_silently(container("cache", RunState::Created));
+    let agent = https::start_engined(&env, parts(engine.clone())).await;
+    let registry = agent.services();
+    eventually("les trois conteneurs sont comptés", || {
+        let registry = registry.clone();
+        async move { registry.engine_status().external_count == 3 }
+    })
+    .await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    env.grant_services("marie").await;
+    for token in [&admin, &readonly] {
+        let (state, text) = services_of(&agent, token).await;
+        assert_eq!(state.engine.state, EngineState::Ready);
+        assert!(state.services.is_empty(), "{text}");
+        assert_eq!(state.engine.external_count, 3);
+        for hidden in ["web", "db", "cache", "busybox"] {
+            assert!(!text.contains(hidden), "{hidden} dans {text}");
+        }
+        let (mut client, snapshot) = subscribed(&agent, token).await;
+        assert!(snapshot.services.is_empty());
+        assert_eq!(snapshot.engine.external_count, 3);
+        let recheck = agent
+            .request("POST", "/engine/recheck")
+            .token(token)
+            .send()
+            .await;
+        assert_eq!(recheck.body["external_count"], 3);
+        // Rien d'autre ne part : le monde caché reste muet.
+        assert!(
+            client
+                .try_next_services(Duration::from_millis(300))
+                .await
+                .is_none()
+        );
+    }
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_request_by_the_key_of_a_container_that_is_not_adopted_gets_the_answer_of_an_unknown_service()
+ {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let hidden = container("hidden", RunState::Running);
+    let shown = container("shown", RunState::Running);
+    engine.put_silently(hidden.clone());
+    engine.put_silently(shown.clone());
+    engine.set_env(&hidden.id, &[("DB_PASSWORD", "SENTINEL-VALUE-H")]);
+    engine.set_env(&shown.id, &[("DB_PASSWORD", "SENTINEL-VALUE-S")]);
+    env.adopt_container(&shown.id, "shown").await;
+    // Seul `shown` est adopté : `ready_agent` adopterait aussi l'autre.
+    let agent = https::start_engined(&env, parts(engine.clone())).await;
+    listed(&agent, 1).await;
+    let admin = token(&env, &agent, "ada", Role::Admin).await;
+    let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    env.grant_services("ada").await;
+    // Avec le droit : un conteneur non adopté, une clé jamais vue, une clé d'unité jamais vue et une
+    // clé mal formée reçoivent la MÊME réponse (code, code d'erreur, message, corps).
+    let hidden_path = format!("/services/c_{}/env", hidden.id);
+    let answers = [
+        hidden_path.clone(),
+        format!("/services/c_{}/env", "f".repeat(64)),
+        "/services/u_docker-ghost.service/env".to_owned(),
+        "/services/c_not-hex-!/env".to_owned(),
+    ];
+    let mut replies = Vec::new();
+    for path in &answers {
+        let reply = agent.request("GET", path).token(&admin).send().await;
+        replies.push((reply.status, reply.code().to_owned(), reply.body.clone()));
+        assert!(
+            !reply.text.contains("hidden") && !reply.text.contains("SENTINEL"),
+            "{path} : {}",
+            reply.text
+        );
+    }
+    assert_eq!(replies[0].0, 404);
+    assert!(
+        replies.windows(2).all(|pair| pair[0] == pair[1]),
+        "non adopté, inconnu et mal formé se confondent : {replies:?}"
+    );
+    // Sans le droit : le droit est jugé avant la clé, même réponse pour tout.
+    let denied: Vec<_> = {
+        let mut out = Vec::new();
+        for path in &answers {
+            let reply = agent.request("GET", path).token(&readonly).send().await;
+            out.push((reply.status, reply.body.clone()));
+        }
+        out
+    };
+    assert_eq!(denied[0].0, 403);
+    assert!(denied.windows(2).all(|pair| pair[0] == pair[1]));
+    assert_eq!(
+        engine.env_read_count(),
+        0,
+        "rien n'est lu dans le moteur pour un conteneur non adopté"
+    );
+    // Le service adopté, lui, se révèle toujours.
+    let revealed = agent
+        .request("GET", &format!("/services/c_{}/env", shown.id))
+        .token(&admin)
+        .send()
+        .await;
+    assert_eq!(revealed.status, 200, "{:?}", revealed.body);
+    agent.shutdown().await;
+}
+
+const HIDDEN_NAME: &str = "sentinel-hidden-name-7f3a";
+const HIDDEN_IMAGE: &str = "sentinel-hidden-image-3b9d";
+const HIDDEN_VARIABLE: &str = "sentinel_hidden_var_52";
+const HIDDEN_VALUE: &str = "sentinel-hidden-value-c41e";
+const HIDDEN_COMMAND: &str = "sentinel-hidden-cmd-a90b";
+const HIDDEN_UNIT: &str = "sentinel-hidden-unit-2e1f";
+const HIDDEN_PORT: &str = "47813";
+const HIDDEN_CONTAINER_PORT: &str = "31847";
+
+/// Tout ce qui, d'un conteneur non adopté, ne doit sortir nulle part (comparé en minuscules). Les
+/// noms des autres conteneurs cachés commencent tous par le même préfixe sentinelle.
+const HIDDEN_FORBIDDEN: [&str; 8] = [
+    HIDDEN_NAME,
+    HIDDEN_IMAGE,
+    HIDDEN_VARIABLE,
+    HIDDEN_VALUE,
+    HIDDEN_COMMAND,
+    HIDDEN_UNIT,
+    "sentinel-hidden",
+    "sentinel_hidden",
+];
+
+/// Les ports sentinelles, cherchés comme nombres entiers : une date des traces peut contenir ces
+/// chiffres sans que ce soit un port.
+fn contains_number(text: &str, number: &str) -> bool {
+    text.match_indices(number).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + number.len()..].chars().next();
+        !before.is_some_and(|c| c.is_ascii_digit()) && !after.is_some_and(|c| c.is_ascii_digit())
+    })
+}
+
+fn assert_no_hidden(what: &str, text: &str) {
+    let lower = text.to_lowercase();
+    for forbidden in HIDDEN_FORBIDDEN {
+        assert!(
+            !lower.contains(forbidden),
+            "{forbidden} dans {what} : {text}"
+        );
+    }
+    for port in [HIDDEN_PORT, HIDDEN_CONTAINER_PORT] {
+        assert!(
+            !contains_number(&lower, port),
+            "le port {port} dans {what} : {text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn nothing_of_a_container_that_is_not_adopted_leaves_the_agent_by_any_route_message_or_trace()
+{
+    let traces = captured_traces();
+    log::debug!(target: "hearth_witness", "witness-hidden-line");
+    let env = env().await;
+    // Le VRAI adaptateur `bollard` sur un faux démon. Un conteneur non adopté porte la valeur
+    // sentinelle dans son nom, son image, un port, une variable (nom et valeur) et sa commande ; un
+    // second est lancé par une unité dont le nom est sentinelle ; un troisième est arrêté.
+    let daemon = FakeDaemon::start().await;
+    let mut hidden = DaemonContainer::new(HIDDEN_NAME, "running");
+    hidden.image = format!("registry.example/{HIDDEN_IMAGE}:9.9.9");
+    hidden.publish = Some((47813, 31847));
+    hidden.env = vec![format!("{HIDDEN_VARIABLE}={HIDDEN_VALUE}")];
+    hidden.cmd = vec!["serve".to_owned(), format!("--key={HIDDEN_COMMAND}")];
+    let hidden_id = hidden.id.clone();
+    let mut supervised = DaemonContainer::new("sentinel-hidden-supervised-8d", "running");
+    supervised.image = format!("registry.example/{HIDDEN_IMAGE}:1.0");
+    let supervised_id = supervised.id.clone();
+    let stopped = DaemonContainer::new("sentinel-hidden-stopped-19", "exited");
+    // Le témoin : un service adopté, qui DOIT sortir (sinon le test serait aveugle).
+    let shown = DaemonContainer::new("visible-control", "running");
+    env.adopt(&format!("c_{}", shown.id), "visible-control", "marie")
+        .await;
+    for container in [hidden, supervised, stopped, shown] {
+        daemon.put(container);
+    }
+    let supervisor = Arc::new(FakeSupervisor::new());
+    let unit = unit_named(&format!("docker-{HIDDEN_UNIT}.service"));
+    supervisor.set_owner(&supervised_id, &unit);
+    supervisor.set_status(&unit, running_unit());
+    let engine = BollardEngine::new(
+        Target::Http(daemon.address()),
+        InstallMarkers::at(Vec::<std::path::PathBuf>::new()),
+    );
+    let agent = https::start_engined(
+        &env,
+        EngineParts {
+            engine: Arc::new(engine),
+            supervisor,
+            host: Arc::new(support::engine::TestHost),
+            timings: fast_timings(),
+        },
+    )
+    .await;
+    let registry = agent.services();
+    eventually(
+        "le témoin est publié et les trois autres comptés",
+        || {
+            let registry = registry.clone();
+            async move {
+                registry.snapshot().services.len() == 1
+                    && registry.engine_status().external_count == 3
+            }
+        },
+    )
+    .await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    env.grant_services("marie").await;
+
+    let mut seen: Vec<(String, String)> = Vec::new();
+    let mut clients = Vec::new();
+    for (who, token) in [("marie", &admin), ("lucas", &readonly)] {
+        let (state, text) = services_of(&agent, token).await;
+        assert_eq!(names(&state), vec!["visible-control"], "{who}");
+        assert_eq!(state.engine.external_count, 3, "{who}");
+        seen.push((format!("GET /services ({who})"), text));
+        let recheck = agent
+            .request("POST", "/engine/recheck")
+            .token(token)
+            .send()
+            .await;
+        seen.push((format!("POST /engine/recheck ({who})"), recheck.text));
+        let (client, snapshot) = subscribed(&agent, token).await;
+        seen.push((
+            format!("services_snapshot ({who})"),
+            serde_json::to_string(&snapshot).unwrap(),
+        ));
+        clients.push((who, client));
+    }
+    let rev = registry.snapshot().rev;
+
+    // Le conteneur caché s'arrête, repart, change de port d'état : aucun lot, `rev` ne bouge pas.
+    daemon.update(&hidden_id, |c| c.status = "exited".into());
+    daemon.emit(&hidden_id, "die");
+    daemon.update(&hidden_id, |c| c.status = "running".into());
+    daemon.emit(&hidden_id, "start");
+    daemon.emit(&supervised_id, "die");
+    for (who, client) in &mut clients {
+        assert!(
+            client
+                .try_next_services(Duration::from_millis(400))
+                .await
+                .is_none(),
+            "{who} : un conteneur caché a fait partir un message"
+        );
+    }
+    assert_eq!(
+        registry.snapshot().rev,
+        rev,
+        "rev ne suit pas un conteneur caché"
+    );
+
+    // Un quatrième conteneur caché apparaît : un seul lot, qui ne porte que le nombre.
+    let mut fourth = DaemonContainer::new("sentinel-hidden-fourth-aa", "running");
+    fourth.env = vec![format!("{HIDDEN_VARIABLE}={HIDDEN_VALUE}")];
+    let fourth_id = fourth.id.clone();
+    daemon.put(fourth);
+    daemon.emit(&fourth_id, "start");
+    for (who, client) in &mut clients {
+        let ServicesMessage::ServicesDelta(delta) = client.next_services().await else {
+            panic!("{who} : un services_delta était attendu");
+        };
+        assert!(
+            delta.upserts.is_empty() && delta.removed.is_empty(),
+            "{who}"
+        );
+        assert_eq!(delta.engine.as_ref().map(|e| e.external_count), Some(4));
+        seen.push((
+            format!("services_delta ({who})"),
+            serde_json::to_string(&delta).unwrap(),
+        ));
+    }
+
+    // Une inspection illisible d'un conteneur caché : la liste est marquée « à vérifier », rien d'autre.
+    daemon.break_inspection(&hidden_id);
+    daemon.emit(&hidden_id, "die");
+    for (who, client) in &mut clients {
+        if let Some(message) = client.try_next_services(Duration::from_millis(600)).await {
+            let ServicesMessage::ServicesDelta(delta) = message else {
+                panic!("{who} : un services_delta était attendu");
+            };
+            assert!(
+                delta.upserts.is_empty() && delta.removed.is_empty(),
+                "{who}"
+            );
+            seen.push((
+                format!("services_delta illisible ({who})"),
+                serde_json::to_string(&delta).unwrap(),
+            ));
+        }
+    }
+
+    // Détail, valeurs, erreurs : par la clé du conteneur caché, avec et sans le droit.
+    let path = format!("/services/c_{hidden_id}/env");
+    for (who, token) in [("marie", &admin), ("lucas", &readonly)] {
+        let reply = agent.request("GET", &path).token(token).send().await;
+        assert!(
+            matches!(reply.status, 403 | 404),
+            "{who} : {}",
+            reply.status
+        );
+        seen.push((format!("GET env ({who})"), reply.text));
+    }
+    let revealed = agent
+        .request("GET", "/services/c_unknown/env")
+        .token(&admin)
+        .send()
+        .await;
+    seen.push(("GET env inconnu".to_owned(), revealed.text));
+
+    for (what, text) in &seen {
+        assert_no_hidden(what, text);
+    }
+    // Témoin : le service adopté, lui, est bien dans ce qui sort.
+    assert!(
+        seen.iter()
+            .any(|(_, text)| text.contains("visible-control")),
+        "le témoin doit sortir : sinon ce test est aveugle"
+    );
+    drop(clients);
+    agent.shutdown().await;
+    let captured = String::from_utf8_lossy(&traces.lock().unwrap()).into_owned();
+    assert!(
+        captured.contains("witness-hidden-line"),
+        "le pont `log` vers `tracing` doit être actif dans ce test"
+    );
+    assert!(
+        captured.len() > 2_000,
+        "les traces de l'agent, au niveau le plus bavard, doivent être capturées ({} octets)",
+        captured.len()
+    );
+    assert_no_hidden("les traces", &captured);
+}
+
+#[tokio::test]
+async fn an_adoption_by_unit_outlives_the_container_and_the_agent_and_one_without_a_unit_falls_with_its_container()
+ {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let supervisor = Arc::new(FakeSupervisor::new());
+    let unit = unit_named("docker-terraria.service");
+    let first = recreated("terraria", RunState::Running, 'a');
+    supervisor.set_owner(&first.id, &unit);
+    supervisor.set_status(&unit, running_unit());
+    engine.put_silently(first.clone());
+    let plain = container("plain", RunState::Running);
+    engine.put_silently(plain.clone());
+    env.adopt("u_docker-terraria.service", "terraria", "marie")
+        .await;
+    env.adopt_container(&plain.id, "plain").await;
+    let agent = https::start_engined(
+        &env,
+        parts_supervised(engine.clone(), supervisor.clone(), fast_timings()),
+    )
+    .await;
+    listed(&agent, 2).await;
+    // Le système recrée le conteneur de l'unité, un tiers recrée « plain » sous un autre identifiant.
+    engine.remove(&first.id);
+    let second = recreated("terraria", RunState::Running, 'b');
+    supervisor.set_owner(&second.id, &unit);
+    engine.put(second.clone(), "start");
+    engine.remove(&plain.id);
+    let mut namesake = container("plain", RunState::Running);
+    namesake.id = "9".repeat(64);
+    engine.put(namesake, "start");
+    eventually("l'homonyme est compté, l'unité reste publiée", || {
+        let registry = agent.services();
+        async move {
+            let snapshot = registry.snapshot();
+            snapshot.engine.external_count == 1
+                && snapshot.services.len() == 1
+                && snapshot.services[0].key.as_str() == "u_docker-terraria.service"
+        }
+    })
+    .await;
+    // La base suit : l'adoption sans unité est oubliée, celle de l'unité reste.
+    eventually("l'adoption de l'ancien conteneur est effacée", || {
+        let env = &env;
+        async move { env.adopted_keys().await == vec!["u_docker-terraria.service".to_owned()] }
+    })
+    .await;
+    agent.shutdown().await;
+
+    // Le serveur redémarre : l'agent repart sur la même base, le conteneur de l'unité n'est pas encore
+    // revenu. Le service reste listé d'après son unité ; l'homonyme reste non géré.
+    engine.remove(&second.id);
+    let restarted = https::start_engined(
+        &env,
+        parts_supervised(engine.clone(), supervisor.clone(), fast_timings()),
+    )
+    .await;
+    listed(&restarted, 1).await;
+    let service = restarted.services().snapshot().services.remove(0);
+    assert_eq!(service.key.as_str(), "u_docker-terraria.service");
+    assert!(service.adoption.is_some());
+    assert_eq!(restarted.services().snapshot().engine.external_count, 1);
+    restarted.shutdown().await;
 }

@@ -2,6 +2,11 @@
 //! `hearth-proto`. Partagé par `http/` (`GET /services`, `POST /engine/recheck`) et `ws/` (sujet
 //! `services`) : le contrat JSON des services n'est connu qu'ici.
 //!
+//! Ce qui sort ici a déjà passé le filtre de publication du registre (HRT-79, `BR-ADOPT-001`) : ni nom,
+//! ni image, ni port d'un conteneur non adopté n'arrive jusqu'à ces fonctions. Reste une décision par
+//! destinataire (`Reader`) : pour un service adopté, la commande et les noms de variables ne sont
+//! donnés qu'aux comptes qui ont le droit « gérer les services » (`BR-ADOPT-015`).
+//!
 //! Aucune VALEUR de variable d'environnement ne passe par ici : le registre n'en contient pas (elles ne
 //! se lisent que par `GET /services/{key}/env`, `env_reveal`). Les noms de variables et la commande
 //! (détail d'un service, BR-SVC-007 et BR-SVC-008) passent dans le type `Concealed` du fil.
@@ -11,14 +16,22 @@ use crate::application::ports::EnvEntry;
 use crate::application::ports::HostDescription;
 use crate::application::services::{EngineStatus, ServiceView, ServicesChange, ServicesSnapshot};
 use crate::domain::services::{
-    EngineState, MountType, PortProtocol, PortScope, RestartPolicy, ServiceStateKind, stop_grace_s,
+    EngineState, KeyKind, MountType, PortProtocol, PortScope, RestartPolicy, ServiceStateKind,
+    may_read_details, stop_grace_s,
 };
 use hearth_proto::api::services::{
-    Concealed, EngineState as WireEngineState, EngineView, EnvReveal, EnvVariable, HostInfo,
-    ImageInfo, InitSystem, MIN_ENGINE_VERSION, MountKind, PortProtocol as WireProtocol,
+    AdoptionInfo, Concealed, EngineState as WireEngineState, EngineView, EnvReveal, EnvVariable,
+    HostInfo, ImageInfo, InitSystem, MIN_ENGINE_VERSION, MountKind, PortProtocol as WireProtocol,
     PortScope as WireScope, RestartMode, ServiceDriver, ServiceItem, ServiceMount, ServiceOrigin,
     ServicePort, ServiceState as WireState, ServicesDelta, ServicesState,
 };
+
+/// Qui lit : le seul fait qui change le contenu d'un service publié.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reader {
+    /// Le compte a le droit « gérer les services » (ADR-0041), quel que soit son rôle.
+    pub may_manage_services: bool,
+}
 
 pub fn engine_state(state: EngineState) -> WireEngineState {
     match state {
@@ -75,16 +88,23 @@ pub fn engine_view(status: &EngineStatus, description: &HostDescription) -> Engi
         list_degraded: status.list_degraded,
         at: Some(date(status.at)),
         list_current_at: status.list_current_at.map(date),
+        external_count: status.external_count,
     }
 }
 
-pub fn service_item(view: &ServiceView) -> ServiceItem {
+pub fn service_item(view: &ServiceView, reader: Reader) -> ServiceItem {
     let observation = &view.observation;
+    // BR-ADOPT-015 : la commande et les noms de variables d'un service adopté sont retirés pour un
+    // compte sans le droit. BR-ADOPT-016 : un service créé par Hearth reste lisible de tous.
+    let details = may_read_details(view.adoption.as_ref(), reader.may_manage_services);
     ServiceItem {
         key: view.key.as_str().to_owned(),
         name: observation.name.clone(),
-        // Dans cette tranche aucun service n'est créé par Hearth.
-        origin: ServiceOrigin::External,
+        origin: if view.key.kind() == KeyKind::Hearth {
+            ServiceOrigin::Hearth
+        } else {
+            ServiceOrigin::External
+        },
         // Un service lancé sous une unité est piloté par son superviseur, tout autre par le moteur.
         driver: Some(if view.supervision.is_some() {
             ServiceDriver::Supervisor
@@ -152,18 +172,26 @@ pub fn service_item(view: &ServiceView) -> ServiceItem {
                 RestartPolicy::OnFailure => RestartMode::OnFailure,
             }
         },
-        env_names: observation
-            .env_names
-            .iter()
-            .map(|name| Concealed::new(name.expose()))
-            .collect(),
-        env_names_omitted: observation.env_omitted,
-        command: observation.command.as_ref().map(|parts| {
-            parts
+        env_names: if details {
+            observation
+                .env_names
                 .iter()
-                .map(|part| Concealed::new(part.expose()))
+                .map(|name| Concealed::new(name.expose()))
                 .collect()
-        }),
+        } else {
+            Vec::new()
+        },
+        env_names_omitted: if details { observation.env_omitted } else { 0 },
+        command: observation
+            .command
+            .as_ref()
+            .filter(|_| details)
+            .map(|parts| {
+                parts
+                    .iter()
+                    .map(|part| Concealed::new(part.expose()))
+                    .collect()
+            }),
         grace_s: Some(stop_grace_s(
             observation,
             view.supervision
@@ -172,6 +200,11 @@ pub fn service_item(view: &ServiceView) -> ServiceItem {
         )),
         busy: None,
         last_action: None,
+        adopted: view.adoption.as_ref().map(|adoption| AdoptionInfo {
+            by: adoption.by.clone(),
+            at: date(adoption.at),
+        }),
+        details_reserved: !details,
     }
 }
 
@@ -189,23 +222,31 @@ pub fn env_reveal(entries: &[EnvEntry]) -> EnvReveal {
     }
 }
 
-pub fn snapshot(snapshot: &ServicesSnapshot) -> ServicesState {
+pub fn snapshot(snapshot: &ServicesSnapshot, reader: Reader) -> ServicesState {
     ServicesState {
         rev: snapshot.rev,
         engine: engine_view(&snapshot.engine, &snapshot.host),
-        services: snapshot.services.iter().map(service_item).collect(),
+        services: snapshot
+            .services
+            .iter()
+            .map(|view| service_item(view, reader))
+            .collect(),
     }
 }
 
 /// Un lot de changements ; `host` sert à l'état du moteur quand il change.
-pub fn delta(change: &ServicesChange, host: &HostDescription) -> ServicesDelta {
+pub fn delta(change: &ServicesChange, host: &HostDescription, reader: Reader) -> ServicesDelta {
     ServicesDelta {
         rev: change.rev,
         engine: change
             .engine
             .as_ref()
             .map(|status| engine_view(status, host)),
-        upserts: change.upserts.iter().map(service_item).collect(),
+        upserts: change
+            .upserts
+            .iter()
+            .map(|view| service_item(view, reader))
+            .collect(),
         removed: change
             .removed
             .iter()
@@ -251,12 +292,19 @@ mod tests {
             derived,
             restarts_10m: 0,
             supervision: None,
+            adoption: None,
+        }
+    }
+
+    fn everyone() -> Reader {
+        Reader {
+            may_manage_services: false,
         }
     }
 
     #[test]
     fn a_service_item_is_external_engine_driven_and_carries_no_future_field() {
-        let item = service_item(&view("web", RunState::Running));
+        let item = service_item(&view("web", RunState::Running), everyone());
         assert_eq!(item.origin, ServiceOrigin::External);
         assert_eq!(item.state, WireState::Running);
         assert!(item.key.starts_with("c_"));
@@ -288,12 +336,55 @@ mod tests {
             }),
             container_present: true,
         });
-        let item = service_item(&supervised);
+        let item = service_item(&supervised, everyone());
         assert_eq!(item.key, "u_docker-terraria.service");
         assert_eq!(item.driver, Some(ServiceDriver::Supervisor));
         assert_eq!(item.unit.as_deref(), Some("docker-terraria.service"));
         assert_eq!(item.restart, RestartMode::Supervisor);
         assert_eq!(item.grace_s, Some(150));
+    }
+
+    fn adopted(mut view: ServiceView) -> ServiceView {
+        view.adoption = Some(crate::domain::services::Adoption {
+            by: "marie".to_owned(),
+            at: time::OffsetDateTime::UNIX_EPOCH,
+        });
+        view
+    }
+
+    #[test]
+    fn an_adopted_service_gives_its_command_and_variable_names_to_the_right_only() {
+        let service = adopted(view("terraria", RunState::Running));
+        let right = Reader {
+            may_manage_services: true,
+        };
+        let with = service_item(&service, right);
+        assert_eq!(with.env_names.len(), 1);
+        assert_eq!(with.command.as_ref().map(Vec::len), Some(2));
+        assert!(!with.details_reserved);
+        assert_eq!(with.adopted.as_ref().map(|a| a.by.as_str()), Some("marie"));
+        // Sans le droit : ni commande, ni noms, ni compte de noms coupés, et la réserve est dite.
+        let without = service_item(&service, everyone());
+        assert!(without.env_names.is_empty() && without.command.is_none());
+        assert_eq!(without.env_names_omitted, 0);
+        assert!(without.details_reserved);
+        // Le reste du détail est ouvert à tous (BR-ADOPT-015).
+        assert_eq!(without.image, with.image);
+        assert_eq!(without.grace_s, with.grace_s);
+        assert!(without.adopted.is_some());
+        let text = serde_json::to_string(&without).expect("json");
+        assert!(!text.contains("TOKEN_NAME") && !text.contains("SENTINEL"));
+    }
+
+    #[test]
+    fn a_service_made_by_hearth_keeps_its_details_for_every_account() {
+        let mut service = view("web", RunState::Running);
+        service.key = ServiceKey::parse("h_01ARZ3NDEKTSV4RRFFQ69G5FAV").expect("key");
+        let item = service_item(&service, everyone());
+        assert_eq!(item.origin, ServiceOrigin::Hearth);
+        assert_eq!(item.env_names.len(), 1);
+        assert_eq!(item.command.as_ref().map(Vec::len), Some(2));
+        assert!(item.adopted.is_none() && !item.details_reserved);
     }
 
     #[test]

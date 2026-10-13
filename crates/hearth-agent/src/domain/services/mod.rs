@@ -14,6 +14,7 @@ pub mod key;
 pub mod limits;
 pub mod state;
 pub mod unit;
+pub mod visibility;
 
 pub use engine::{
     Announced, ApiVersion, Debounce, EngineProbe, EngineState, MIN_API_VERSION, ProbeOutcome,
@@ -37,3 +38,4 @@ pub use unit::{
     ClientClaim, UnitActivity, UnitLookup, UnitName, UnitStatus, attribute, client_refs,
     is_engine_client, parse_main_pid, parse_show, unit_of_cgroup,
 };
+pub use visibility::{Adoption, Holder, Visibility, lapsed, may_read_details, visibility_of};

@@ -133,6 +133,7 @@ mod tests {
             list_degraded: false,
             at: None,
             list_current_at: None,
+            external_count: 0,
         }
     }
 
@@ -168,6 +169,8 @@ mod tests {
             grace_s: None,
             busy: None,
             last_action: None,
+            adopted: None,
+            details_reserved: false,
         }
     }
 

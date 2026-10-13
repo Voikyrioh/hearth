@@ -28,6 +28,13 @@ pub const CAPABILITY_SERVICES: &str = "services";
 /// traite comme non accordé pour tous et n'offre aucune action de service.
 pub const CAPABILITY_SERVICE_RIGHTS: &str = "service-rights";
 
+/// Capacité annoncée par `GET /hello` quand l'agent ne publie que les services créés par Hearth et les
+/// services adoptés (HRT-79, ADR-0043, BR-ADOPT-001) : les autres conteneurs sont comptés
+/// (`EngineView::external_count`), jamais détaillés. Un agent qui ne l'annonce pas publie tous les
+/// conteneurs du serveur (versions d'avant l'adoption). L'annonce ne dit pas que l'adoption est
+/// possible : l'acte arrive avec son propre ticket.
+pub const CAPABILITY_SERVICE_ADOPTION: &str = "service-adoption";
+
 /// Version minimale du moteur de conteneurs prise en charge (Docker Engine 20.10, API 1.41).
 pub const MIN_ENGINE_VERSION: &str = "20.10";
 
@@ -126,6 +133,11 @@ pub struct EngineView {
     /// client depuis la réception du message, mesuré par SON horloge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub list_current_at: Option<String>,
+    /// Nombre de conteneurs que le moteur connaît, arrêtés compris, qui ne sont ni créés par Hearth ni
+    /// adoptés (HRT-79, BR-ADOPT-002) : un nombre, jamais un détail. Absent vaut 0 (agent d'avant
+    /// l'adoption, qui publie tous les conteneurs, ou serveur sans conteneur non géré).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub external_count: u32,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -304,6 +316,15 @@ impl std::fmt::Debug for Concealed {
     }
 }
 
+/// Qui a adopté un service, et quand (HRT-79, ADR-0043). Absent d'un service créé par Hearth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptionInfo {
+    /// Le compte qui a adopté le service, tel que l'agent l'a figé.
+    pub by: String,
+    /// Date de l'adoption (RFC 3339, UTC).
+    pub at: String,
+}
+
 /// Un service de la liste, avec son détail. AUCUNE valeur de variable d'environnement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceItem {
@@ -363,6 +384,16 @@ pub struct ServiceItem {
     pub busy: Option<BusyInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_action: Option<LastAction>,
+    /// Présent pour un service adopté (HRT-79) : qui l'a adopté et quand. Absent pour un service créé
+    /// par Hearth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted: Option<AdoptionInfo>,
+    /// `true` : ce service est adopté et le compte qui lit n'a pas le droit « gérer les services » ;
+    /// sa commande de lancement et les noms de ses variables sont retirés de ce message
+    /// (`env_names`, `command` sont vides ou absents) et ne signifient donc pas « aucune » (HRT-79,
+    /// BR-ADOPT-015). Absent vaut `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub details_reserved: bool,
 }
 
 /// Une variable d'environnement révélée.
@@ -426,6 +457,7 @@ mod tests {
             list_degraded: false,
             at: None,
             list_current_at: None,
+            external_count: 0,
         }
     }
 
@@ -461,6 +493,8 @@ mod tests {
             grace_s: None,
             busy: None,
             last_action: None,
+            adopted: None,
+            details_reserved: false,
         }
     }
 
@@ -533,6 +567,36 @@ mod tests {
         let back: EngineView =
             serde_json::from_value(serde_json::to_value(&never).expect("json")).expect("dated");
         assert_eq!(back, never);
+    }
+
+    #[test]
+    fn the_adoption_fields_are_absent_until_filled_and_old_clients_ignore_them() {
+        // Un agent d'avant l'adoption (ou un service créé par Hearth) : ni compte de non gérés, ni
+        // repère d'adoption, ni réserve ; le client lit le même JSON qu'avant (HRT-79).
+        let engine_json = serde_json::to_value(engine()).expect("json");
+        assert!(engine_json.get("external_count").is_none());
+        let old: EngineView = serde_json::from_value(engine_json).expect("old agent");
+        assert_eq!(old.external_count, 0);
+        let item_json = serde_json::to_value(sample_item()).expect("json");
+        assert!(item_json.get("adopted").is_none() && item_json.get("details_reserved").is_none());
+        let old: ServiceItem = serde_json::from_value(item_json).expect("old agent");
+        assert!(old.adopted.is_none() && !old.details_reserved);
+        // Un agent récent les envoie ; elles font l'aller-retour.
+        let mut view = engine();
+        view.external_count = 3;
+        let back: EngineView =
+            serde_json::from_value(serde_json::to_value(&view).expect("json")).expect("new");
+        assert_eq!(back.external_count, 3);
+        let mut item = sample_item();
+        item.adopted = Some(AdoptionInfo {
+            by: "marie".into(),
+            at: "2026-10-13T10:00:00Z".into(),
+        });
+        item.details_reserved = true;
+        let back: ServiceItem =
+            serde_json::from_value(serde_json::to_value(&item).expect("json")).expect("new");
+        assert_eq!(back, item);
+        assert_eq!(CAPABILITY_SERVICE_ADOPTION, "service-adoption");
     }
 
     #[test]

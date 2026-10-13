@@ -11,7 +11,7 @@ maj: 2026-10-13
 # BR-SVC-013 — État vide : liste vide quand le moteur est prêt sans service
 
 ## Règle
-Quand le moteur est prêt et qu'il n'y a aucun service, la liste est vide ; le texte « Aucun service pour l'instant » et l'invitation à déployer (administrateurs) sont portés par l'interface. L'agent rend `services: []` avec l'état prêt.
+Quand le moteur est prêt et qu'il n'y a aucun service PUBLIÉ (créé par Hearth ou adopté), la liste est vide, des conteneurs non gérés pouvant exister (`engine.external_count`, BR-ADOPT-002 ; l'état de forge après la mise à jour, avant la première adoption) ; le texte « Aucun service pour l'instant » et l'invitation à déployer (administrateurs) sont portés par l'interface. L'agent rend `services: []` avec l'état prêt.
 
 ## Application (code)
 - `crates/hearth-agent/src/application/services.rs::ServicesRegistry::snapshot`
@@ -22,3 +22,4 @@ Quand le moteur est prêt et qu'il n'y a aucun service, la liste est vide ; le t
 
 ## Historique
 - 2026-10-13 — création (HRT-61, tranche 1 des déploiements : moteur détecté et liste en lecture seule).
+- 2026-10-13 — HRT-79 (ADR-0043) : liste vide ne veut plus dire serveur sans conteneur ; le compte des non gérés l'accompagne.

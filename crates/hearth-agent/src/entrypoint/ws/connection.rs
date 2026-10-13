@@ -29,7 +29,8 @@ use crate::domain::secret::Secret;
 use crate::domain::sessions::SessionEnd;
 use crate::domain::stream::{SNAPSHOT_WINDOW, is_new, may_subscribe};
 use crate::entrypoint::http::{self, ApiError, AppState};
-use crate::entrypoint::{metrics_wire, services_wire};
+use crate::entrypoint::metrics_wire;
+use crate::entrypoint::services_wire::{self, Reader};
 
 /// Comment la connexion se termine : un code de fermeture et une raison courte, ou rien si le
 /// client est déjà parti.
@@ -134,6 +135,14 @@ struct Subscriptions {
     /// Cartes graphiques de l'identité envoyée dans le dernier `snapshot` : un nouveau `snapshot`
     /// part quand la liste des cartes change.
     snapshot_gpus: Vec<crate::domain::machine::GpuIdentity>,
+}
+
+/// Pour qui les messages des services sont fabriqués : le droit du compte au dernier contrôle de la
+/// session.
+fn reader_of(session: &CurrentSession) -> Reader {
+    Reader {
+        may_manage_services: session.account.may_manage_services(),
+    }
 }
 
 /// Reçoit le prochain élément d'un abonnement, ou attend sans fin s'il n'y en a pas.
@@ -303,6 +312,7 @@ async fn serve(
                         let message = ServicesMessage::ServicesDelta(services_wire::delta(
                             &change,
                             state.services.host(),
+                            reader_of(&session),
                         ));
                         if !send(socket, &settings, &message).await {
                             return None;
@@ -315,7 +325,10 @@ async fn serve(
                     tracing::debug!(missed, "abonné lent : instantané des services renvoyé");
                     let snapshot = state.services.snapshot();
                     subscriptions.services_rev = snapshot.rev;
-                    let message = ServicesMessage::ServicesSnapshot(services_wire::snapshot(&snapshot));
+                    let message = ServicesMessage::ServicesSnapshot(services_wire::snapshot(
+                        &snapshot,
+                        reader_of(&session),
+                    ));
                     if !send(socket, &settings, &message).await {
                         return None;
                     }
@@ -338,7 +351,21 @@ async fn serve(
                         // Le rôle a pu changer pendant le flux (`change_role` ne ferme pas les
                         // sessions) : le sujet `audit` se perd avec le droit de le lire.
                         let role_changed = session.account.role != current.account.role;
+                        // Le droit « gérer les services » décide de ce qu'un service adopté montre
+                        // (BR-ADOPT-015) : s'il a changé, la liste repart entière avec le nouveau
+                        // contenu, sans attendre un changement.
+                        let right_changed = reader_of(&session) != reader_of(&current);
                         session = current;
+                        if right_changed && subscriptions.services.is_some() {
+                            let snapshot = state.services.snapshot();
+                            subscriptions.services_rev = snapshot.rev;
+                            let message = ServicesMessage::ServicesSnapshot(
+                                services_wire::snapshot(&snapshot, reader_of(&session)),
+                            );
+                            if !send(socket, &settings, &message).await {
+                                return None;
+                            }
+                        }
                         // Le rôle décide de ce que l'alerte montre (le nombre des autres comptes) :
                         // un rôle changé pendant le flux se relit tout de suite. Le mode attaque peut
                         // avoir changé ailleurs (la sous-commande `attack-mode off`, un autre
@@ -580,7 +607,10 @@ async fn handle_text(
                 let (receiver, snapshot) = state.services.subscribe();
                 subscriptions.services = Some(receiver);
                 subscriptions.services_rev = snapshot.rev;
-                let message = ServicesMessage::ServicesSnapshot(services_wire::snapshot(&snapshot));
+                let message = ServicesMessage::ServicesSnapshot(services_wire::snapshot(
+                    &snapshot,
+                    reader_of(session),
+                ));
                 if !send(socket, &settings, &message).await {
                     return Handled::Stop;
                 }

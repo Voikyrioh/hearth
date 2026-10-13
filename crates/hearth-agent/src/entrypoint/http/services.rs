@@ -6,6 +6,12 @@
 //! détection, sans effet sur le moteur) : il est dans `READ_ONLY_POSTS`, ni acte d'administration ni
 //! exception nommée. Aucune route n'écrit dans le moteur ni dans les services.
 //!
+//! Ce que ces routes publient est filtré en amont, par le registre (HRT-79, ADR-0043) : seuls les
+//! services créés par Hearth et les services adoptés en sortent, les autres conteneurs ne sont qu'un
+//! nombre. Une clé qui n'est pas publiée reçoit EXACTEMENT la réponse d'une clé inconnue. Pour un service
+//! adopté, la commande et les noms de variables ne sont donnés qu'aux comptes qui ont le droit
+//! (`BR-ADOPT-015`) : `list` le décide d'après le compte de la requête.
+//!
 //! `GET /services/{key}/env` révèle les VALEURS des variables d'un service : réservée aux comptes qui
 //! ont le droit « gérer les services », quel que soit leur rôle (niveau `Services`, ADR-0041 : un
 //! administrateur sans le droit est refusé, un compte en lecture seule qui l'a est servi ; la couche
@@ -20,15 +26,18 @@ use axum::response::{IntoResponse, Response};
 use hearth_proto::api::services::{EngineView, ServicesState};
 use hearth_proto::error::ErrorCode;
 
-use super::auth::Requester;
+use super::auth::{Caller, Requester};
 use super::{ApiError, AppState};
 use crate::application::services::RevealError;
 use crate::domain::services::ServiceKey;
-use crate::entrypoint::services_wire;
+use crate::entrypoint::services_wire::{self, Reader};
 
 /// `GET /api/v1/services` : le même contenu que `services_snapshot` du flux (repli, tests).
-pub async fn list(State(state): State<AppState>) -> Json<ServicesState> {
-    Json(services_wire::snapshot(&state.services.snapshot()))
+pub async fn list(State(state): State<AppState>, Caller(session): Caller) -> Json<ServicesState> {
+    let reader = Reader {
+        may_manage_services: session.account.may_manage_services(),
+    };
+    Json(services_wire::snapshot(&state.services.snapshot(), reader))
 }
 
 /// `POST /api/v1/engine/recheck` : relance la détection du moteur tout de suite et rend son état.

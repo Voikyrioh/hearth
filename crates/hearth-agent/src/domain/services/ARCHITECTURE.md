@@ -10,7 +10,8 @@ services/
 ├── key.rs     → `ServiceKey` : `c_` et `u_` produites, `h_` analysée seulement — ADR-0037, BR-SVC-016
 ├── unit.rs    → `UnitName` (nom d'unité validé : jeu de caractères de `systemd.unit(5)`), `UnitStatus`, `UnitLookup`, `parse_show` (sortie de `systemctl show`), `parse_timespan`, `unit_of_cgroup` (groupe de contrôle vers unité), `client_refs` (ligne de commande d'un client du moteur vers les conteneurs qu'elle nomme), `is_engine_client` — BR-SVC-016
 ├── hidden.rs  → `Hidden` : nom de variable ou argument de commande, `Debug` masqué, pas de `Display` — BR-SVC-008
-└── limits.rs  → bornes de tout ce qui vient d'un conteneur : `bounded` (sans caractères de contrôle, coupé à une longueur), `MAX_PORTS`, `MAX_MOUNTS`, `MAX_ENV_NAMES`, `MAX_COMMAND_ARGS`… — BR-SVC-021
+├── limits.rs  → bornes de tout ce qui vient d'un conteneur : `bounded` (sans caractères de contrôle, coupé à une longueur), `MAX_PORTS`, `MAX_MOUNTS`, `MAX_ENV_NAMES`, `MAX_COMMAND_ARGS`… — BR-SVC-021
+└── visibility.rs → ce que Hearth publie (HRT-79, ADR-0043) : `visibility_of` (créé par Hearth, adopté ou caché ; le seul endroit qui le décide), `Adoption`, `may_read_details` (commande et noms de variables d'un adopté : le droit seulement), `lapsed` (l'adoption d'un conteneur sans unité tombe avec lui), `Holder` (qui tient un port ou un nom : un conteneur caché n'a aucune charge utile) — BR-ADOPT-001, 015, 016, 017, 022
 ```
 
 Les tranches suivantes ajoutent `lock.rs`, `intent.rs`, `spec.rs`, `folders.rs`, `ports.rs`, `command.rs`, `deploy.rs`, `logs.rs` (conception technique des déploiements, section 9).

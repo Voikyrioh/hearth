@@ -66,7 +66,7 @@ pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
 pub use security_feed::SecurityFeed;
 pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState};
-pub use service_repo::{ServiceRepo, SupervisedRecord};
+pub use service_repo::{AdoptedRecord, ServiceRepo, SupervisedRecord};
 pub use service_supervisor::{ContainerRef, ServiceSupervisor};
 pub use services_right_repo::ServicesRightTx;
 pub use session_repo::{SessionRepo, SessionTx};

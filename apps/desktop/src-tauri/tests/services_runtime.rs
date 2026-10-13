@@ -76,6 +76,7 @@ fn full_state() -> ServicesState {
             list_degraded: true,
             at: Some("2026-10-13T10:00:02Z".into()),
             list_current_at: Some("2026-10-13T09:59:30Z".into()),
+            external_count: 0,
         },
         services: vec![
             ServiceItem {
@@ -129,6 +130,8 @@ fn full_state() -> ServicesState {
                 grace_s: Some(30),
                 busy: None,
                 last_action: None,
+                adopted: None,
+                details_reserved: false,
             },
             ServiceItem {
                 key: "c_77e1".into(),
@@ -161,6 +164,8 @@ fn full_state() -> ServicesState {
                 grace_s: None,
                 busy: None,
                 last_action: None,
+                adopted: None,
+                details_reserved: false,
             },
         ],
     }

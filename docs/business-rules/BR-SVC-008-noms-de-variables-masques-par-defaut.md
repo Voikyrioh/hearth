@@ -11,7 +11,7 @@ maj: 2026-10-13
 # BR-SVC-008 — Noms de variables visibles, valeurs masquées par défaut
 
 ## Règle
-Le détail d'un service montre les NOMS de toutes ses variables d'environnement, celles que l'image fournit comprises, pour les DEUX rôles (la spec ne les réserve à personne : BR-SVC-008, BR-SVC-020). Leurs VALEURS ne sont jamais dans la liste, le détail ni le flux : elles ne quittent le moteur que par `GET /services/{key}/env`, à la demande d'un administrateur (BR-SVC-009). L'interface les masque par un masque de longueur fixe (huit puces) qui ne révèle pas la longueur de la valeur.
+Le détail d'un service montre les NOMS de toutes ses variables d'environnement, celles que l'image fournit comprises, pour les DEUX rôles (BR-SVC-020). Amendé par HRT-79 (ADR-0043, BR-ADOPT-015) : pour un service ADOPTÉ, les noms sont réservés aux comptes qui ont le droit « gérer les services » (retirés du message, `details_reserved`) ; pour un service créé par Hearth rien ne change (BR-ADOPT-016). Leurs VALEURS ne sont jamais dans la liste, le détail ni le flux : elles ne quittent le moteur que par `GET /services/{key}/env`, à la demande d'un administrateur (BR-SVC-009). L'interface les masque par un masque de longueur fixe (huit puces) qui ne révèle pas la longueur de la valeur.
 
 - Côté agent, un nom est un `Hidden` (domaine) puis un `Concealed` (fil) : `Debug` ne montre rien, il n'y a pas de `Display`. Le nom n'entre dans aucune trace, aucune entrée du journal d'activité, aucune table de la base, aucun message d'erreur (test sentinelle).
 - Nettoyés des caractères de contrôle et plafonnés : 255 caractères par nom, 256 noms au plus par service ; le surplus est compté dans `env_names_omitted` (« et N autres »).
@@ -36,3 +36,4 @@ Le détail d'un service montre les NOMS de toutes ses variables d'environnement,
 
 ## Historique
 - 2026-10-13 — création (HRT-63, tranche 2 des déploiements : détail, superviseur, révélation des variables).
+- 2026-10-13 — HRT-79 (ADR-0043) : noms de variables réservés au droit pour un service adopté.

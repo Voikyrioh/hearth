@@ -20,6 +20,14 @@
 //! quand le conteneur disparaît, le service reste listé d'après l'état de son unité (relue toutes les
 //! deux périodes de sonde). Détection seule : aucune action sur une unité.
 //!
+//! Publication (HRT-79, ADR-0043, `BR-ADOPT-001`) : le registre LIT tous les conteneurs, mais n'en
+//! publie que deux sortes : les services créés par Hearth (clé `h_`) et les services adoptés. Les
+//! autres sont comptés (`EngineStatus::external_count`), jamais détaillés. Le filtre est appelé à UN
+//! seul endroit, `publish`, à la fin de chaque recalcul : l'instantané, les lots de changements et
+//! toute route qui cherche un service par sa clé ne voient que ce qui a passé ce filtre. Un
+//! changement qui ne touche qu'un conteneur caché n'avance donc pas `rev` et ne fait partir aucun
+//! lot ; seul le compte des non gérés, voulu, bouge.
+//!
 //! L'état du moteur passe par `Debounce` : au plus un changement affiché toutes les 5 secondes.
 //! Chaque changement est un lot (`ServicesChange`) diffusé aux abonnés ; un abonné trop lent
 //! (`RecvError::Lagged`) relit un instantané complet. `rev` croît à chaque changement et repart de
@@ -38,14 +46,16 @@ use tokio::time::{Instant, MissedTickBehavior, interval, sleep, sleep_until};
 use async_trait::async_trait;
 
 use crate::application::ports::{
-    AuditSink, Clock, ContainerEngine, ContainerRef, EngineError, EnvEntry, HostDescription,
-    HostEnvironment, MonotonicClock, ServiceRepo, ServiceSupervisor, StoreError, SupervisedRecord,
+    AdoptedRecord, AuditSink, Clock, ContainerEngine, ContainerRef, EngineError, EnvEntry,
+    HostDescription, HostEnvironment, MonotonicClock, ServiceRepo, ServiceSupervisor, StoreError,
+    SupervisedRecord,
 };
 use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Target};
 use crate::domain::services::{
-    Announced, Debounce, Derived, EngineProbe, EngineState, Observation, ProbeOutcome, RunState,
-    ServiceKey, StartWindow, UnitLookup, UnitName, UnitStatus, classify_probe, compare_names,
-    derive_state, derive_supervised,
+    Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, Observation,
+    PortProtocol, ProbeOutcome, RunState, ServiceKey, StartWindow, UnitLookup, UnitName,
+    UnitStatus, Visibility, classify_probe, compare_names, derive_state, derive_supervised, lapsed,
+    visibility_of,
 };
 
 /// Capacité de la diffusion : un abonné qui prend plus de 64 lots de retard relit un instantané.
@@ -107,6 +117,9 @@ pub struct EngineStatus {
     /// Dernier moment où la liste était à jour (HRT-72) : `at` si elle l'est maintenant, sinon
     /// l'instant où l'agent a vu qu'elle cessait de l'être. `None` : aucune liste n'a été lue.
     pub list_current_at: Option<OffsetDateTime>,
+    /// Conteneurs que le moteur connaît, arrêtés compris, qui ne sont ni créés par Hearth ni adoptés
+    /// (HRT-79, `BR-ADOPT-002`). Un nombre : rien d'autre n'en sort.
+    pub external_count: u32,
 }
 
 /// Un service tel que la liste le montre : le conteneur observé et ce qu'on en dérive.
@@ -120,6 +133,8 @@ pub struct ServiceView {
     /// Le service est lancé par une unité systemd (clé `u_`) : l'unité, son état, et si son conteneur
     /// existe. `None` pour tout autre service.
     pub supervision: Option<Supervision>,
+    /// Présent pour un service adopté (HRT-79) ; absent pour un service créé par Hearth.
+    pub adoption: Option<Adoption>,
 }
 
 /// Ce qui rattache un service à son unité (HRT-63).
@@ -153,7 +168,7 @@ pub struct ServicesChange {
 }
 
 /// Ce qui change l'état publié du moteur (hors dates de contrôle, qui changent à chaque sonde).
-type EngineKey = (EngineState, Option<String>, Option<String>, bool);
+type EngineKey = (EngineState, Option<String>, Option<String>, bool, usize);
 
 struct Inner {
     rev: u64,
@@ -171,7 +186,16 @@ struct Inner {
     containers: HashMap<String, Observation>,
     windows: HashMap<ServiceKey, StartWindow>,
     published_engine: EngineKey,
+    /// Ce qui a passé le filtre de publication (`publish`) : la SEULE vue des services qui sorte du
+    /// registre. Les conteneurs cachés ne sont que dans `containers`.
     published: HashMap<ServiceKey, ServiceView>,
+    /// Services adoptés (HRT-79), lus en base (`reload_adopted`). Vide tant qu'ils ne sont pas lus :
+    /// rien n'est publié par défaut.
+    adopted: HashMap<ServiceKey, Adoption>,
+    /// Adoptions tombées avec leur conteneur (`BR-ADOPT-017`), à effacer de la base.
+    lapsed: HashSet<ServiceKey>,
+    /// Combien de conteneurs ne sont ni créés par Hearth ni adoptés.
+    external: usize,
     /// Conteneurs vus dans la liste mais illisibles à la dernière relecture complète.
     degraded: usize,
     /// La liste a été refusée (401, 403) alors que la sonde répond : l'accès est refusé.
@@ -290,6 +314,14 @@ impl ServiceRepo for NoServiceRepo {
     }
 
     async fn forget_supervised(&self, _unit: &UnitName) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn load_adopted(&self) -> Result<Vec<AdoptedRecord>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn forget_adopted(&self, _key: &ServiceKey) -> Result<(), StoreError> {
         Ok(())
     }
 }
@@ -413,8 +445,11 @@ impl ServicesRegistry {
                 last_probe: None,
                 containers: HashMap::new(),
                 windows: HashMap::new(),
-                published_engine: (published, None, None, false),
+                published_engine: (published, None, None, false, 0),
                 published: HashMap::new(),
+                adopted: HashMap::new(),
+                lapsed: HashSet::new(),
+                external: 0,
                 degraded: 0,
                 list_denied: false,
                 probing: 0,
@@ -494,6 +529,7 @@ impl ServicesRegistry {
             list_degraded: Self::list_degraded(inner),
             at: now,
             list_current_at: Self::list_current_at(inner, now),
+            external_count: u32::try_from(inner.external).unwrap_or(u32::MAX),
         }
     }
 
@@ -590,6 +626,7 @@ impl ServicesRegistry {
             inner.shown.as_ref().map(|shown| shown.name.clone()),
             inner.shown.as_ref().map(|shown| shown.version.clone()),
             Self::list_degraded(inner),
+            inner.external,
         )
     }
 
@@ -871,12 +908,15 @@ impl ServicesRegistry {
     fn commit(&self, inner: &mut Inner) {
         let now = self.clock.now();
         Self::track_staleness(inner, now);
-        let mut target: HashMap<ServiceKey, ServiceView> = HashMap::new();
+        let mut every: HashMap<ServiceKey, ServiceView> = HashMap::new();
         // Dans ces états (moteur absent, non pris en charge, désactivé), aucune liste ancienne n'est
         // gardée (`BR-SVC-018`) ; dans les états inaccessibles la dernière liste reste.
         if !inner.debounce.published().keeps_no_list() {
-            Self::build_views(inner, now, &mut target);
+            Self::build_views(inner, now, &mut every);
         }
+        // Le seul passage du filtre de publication : tout ce qui suit (comparaison, `rev`, lots,
+        // instantané) ne voit que `target`.
+        let target = Self::publish(inner, every);
         let engine_key = Self::engine_key(inner);
         let engine_changed = engine_key != inner.published_engine;
         let mut upserts: Vec<ServiceView> = target
@@ -906,6 +946,48 @@ impl ServicesRegistry {
         };
         // Sans abonné, `send` rend une erreur : personne n'écoute, ce n'est pas un échec.
         let _ = self.changes.send(Arc::new(change));
+    }
+
+    /// LE filtre de publication (HRT-79, `BR-ADOPT-001`). Rend les seuls services qui sortent de
+    /// l'agent (créés par Hearth, adoptés) et pose le nombre des autres. Les adoptions dont le
+    /// conteneur n'existe plus tombent d'abord (`BR-ADOPT-017`), seulement quand la liste des
+    /// conteneurs est celle du moteur : jamais parce qu'un moteur absent l'a vidée.
+    fn publish(
+        inner: &mut Inner,
+        every: HashMap<ServiceKey, ServiceView>,
+    ) -> HashMap<ServiceKey, ServiceView> {
+        if inner.has_list && !inner.debounce.published().keeps_no_list() {
+            let live: HashSet<ServiceKey> = inner
+                .containers
+                .values()
+                .filter_map(|observation| key_of(&inner.owners, observation))
+                .collect();
+            for key in lapsed(&inner.adopted, &live) {
+                inner.adopted.remove(&key);
+                inner.lapsed.insert(key);
+            }
+        }
+        let mut published = HashMap::with_capacity(every.len());
+        for (key, mut view) in every {
+            match visibility_of(&key, &inner.adopted) {
+                Visibility::Hearth => {}
+                Visibility::Adopted(adoption) => view.adoption = Some(adoption.clone()),
+                Visibility::Hidden => continue,
+            }
+            published.insert(key, view);
+        }
+        // Les conteneurs, pas les services : un conteneur arrêté, reste d'une recréation, compte comme
+        // les autres tant qu'aucun service publié ne le porte.
+        inner.external = inner
+            .containers
+            .values()
+            .filter(|observation| {
+                key_of(&inner.owners, observation).is_none_or(|key| {
+                    matches!(visibility_of(&key, &inner.adopted), Visibility::Hidden)
+                })
+            })
+            .count();
+        published
     }
 
     /// Les vues de tous les services : un conteneur par service (celui qui tourne, à défaut le plus
@@ -950,25 +1032,29 @@ impl ServicesRegistry {
                 Some(unit) => {
                     present_units.insert(unit.clone());
                     let status = Self::status_of_unit(inner, &unit);
-                    if matches!(observation.run_state, RunState::Exited | RunState::Dead)
-                        && let Some(code) = observation.exit_code
-                    {
-                        inner.last_exit.insert(unit.clone(), code);
-                    }
-                    let settings = settings_of(&observation);
-                    let changed = inner
-                        .remembered
-                        .get(&unit)
-                        .is_none_or(|known| known.observation != settings);
-                    inner.remembered.insert(
-                        unit.clone(),
-                        Remembered {
-                            observation: settings,
-                            last_seen: now,
-                        },
-                    );
-                    if changed {
-                        inner.dirty.insert(unit.clone());
+                    // HRT-79 : Hearth ne retient, en mémoire comme en base, que les services adoptés.
+                    // Les réglages d'un conteneur caché ne sont gardés nulle part.
+                    if inner.adopted.contains_key(&key) {
+                        if matches!(observation.run_state, RunState::Exited | RunState::Dead)
+                            && let Some(code) = observation.exit_code
+                        {
+                            inner.last_exit.insert(unit.clone(), code);
+                        }
+                        let settings = settings_of(&observation);
+                        let changed = inner
+                            .remembered
+                            .get(&unit)
+                            .is_none_or(|known| known.observation != settings);
+                        inner.remembered.insert(
+                            unit.clone(),
+                            Remembered {
+                                observation: settings,
+                                last_seen: now,
+                            },
+                        );
+                        if changed {
+                            inner.dirty.insert(unit.clone());
+                        }
                     }
                     let derived = derive_supervised(
                         &observation,
@@ -997,6 +1083,7 @@ impl ServicesRegistry {
                     derived,
                     restarts_10m,
                     supervision,
+                    adoption: None,
                 },
             );
         }
@@ -1044,6 +1131,7 @@ impl ServicesRegistry {
                         status,
                         container_present: false,
                     }),
+                    adoption: None,
                 },
             );
         }
@@ -1199,6 +1287,12 @@ impl ServicesRegistry {
             let forgets: Vec<UnitName> = inner.forgotten.drain().collect();
             (saves, forgets)
         };
+        let lapsed: Vec<ServiceKey> = self.lock().lapsed.drain().collect();
+        for key in lapsed {
+            if let Err(error) = self.repo.forget_adopted(&key).await {
+                tracing::warn!(%error, "adoption tombée non oubliée");
+            }
+        }
         for record in saves {
             if let Err(error) = self.repo.save_supervised(&record).await {
                 tracing::warn!(%error, "service supervisé non retenu");
@@ -1211,12 +1305,93 @@ impl ServicesRegistry {
         }
     }
 
-    /// Reprend les services supervisés retenus par un démarrage précédent.
+    /// Qui tient ce port du serveur, parmi TOUS les conteneurs que le moteur connaît, arrêtés compris
+    /// (conflits de ports, `BR-ADOPT-022`). Un service publié est nommé ; un conteneur non adopté
+    /// est `Holder::Unmanaged`, sans son nom ni son image. Les ports d'un service en réseau hôte ne
+    /// sont pas listés et ne sont donc pas vus ici (limite de `Observation`).
+    pub fn port_holder(&self, host_port: u16, protocol: PortProtocol) -> Option<Holder> {
+        let inner = self.lock();
+        inner
+            .containers
+            .values()
+            .find(|observation| {
+                observation
+                    .ports
+                    .iter()
+                    .any(|port| port.host_port == host_port && port.protocol == protocol)
+            })
+            .map(|observation| Self::holder_of(&inner, observation))
+    }
+
+    /// Qui porte ce nom de service, sans tenir compte de la casse (`BR-ADOPT-022` : « Ce nom est déjà
+    /// pris », sans autre indication quand c'est un conteneur non adopté).
+    pub fn name_holder(&self, name: &str) -> Option<Holder> {
+        let inner = self.lock();
+        inner
+            .containers
+            .values()
+            .find(|observation| observation.name.to_lowercase() == name.to_lowercase())
+            .map(|observation| Self::holder_of(&inner, observation))
+    }
+
+    fn holder_of(inner: &Inner, observation: &Observation) -> Holder {
+        match key_of(&inner.owners, observation).map(|key| visibility_of(&key, &inner.adopted)) {
+            Some(Visibility::Hearth | Visibility::Adopted(_)) => {
+                Holder::Service(observation.name.clone())
+            }
+            Some(Visibility::Hidden) | None => Holder::Unmanaged,
+        }
+    }
+
+    /// Lit les services adoptés (HRT-79) et recalcule ce qui est publié. À appeler après toute écriture
+    /// de l'adoption (HRT-80) ; le registre l'appelle une fois au démarrage. Une lecture en échec laisse
+    /// l'ensemble connu : jamais plus de services publiés qu'avant. Un service qui n'est plus adopté
+    /// sort de la liste et son souvenir est oublié ; il est de nouveau compté.
+    pub async fn reload_adopted(&self) {
+        match self.repo.load_adopted().await {
+            Ok(records) => {
+                {
+                    let mut inner = self.lock();
+                    inner.adopted = records
+                        .into_iter()
+                        .map(|AdoptedRecord { key, by, at }| (key, Adoption { by, at }))
+                        .collect();
+                    // Ce qu'on retenait d'un service qui n'est plus adopté n'a plus de raison d'être.
+                    let stale: Vec<UnitName> = inner
+                        .remembered
+                        .keys()
+                        .filter(|unit| !inner.adopted.contains_key(&ServiceKey::for_unit(unit)))
+                        .cloned()
+                        .collect();
+                    for unit in stale {
+                        inner.remembered.remove(&unit);
+                        inner.dirty.remove(&unit);
+                        inner.last_exit.remove(&unit);
+                        inner.forgotten.insert(unit);
+                    }
+                    self.commit(&mut inner);
+                }
+                self.persist_supervised().await;
+            }
+            Err(error) => tracing::warn!(%error, "services adoptés illisibles"),
+        }
+    }
+
+    /// Reprend les services supervisés retenus par un démarrage précédent, s'ils sont adoptés.
     async fn load_remembered(&self) {
         match self.repo.load_supervised().await {
             Ok(records) => {
                 let mut inner = self.lock();
                 for record in records {
+                    if !inner
+                        .adopted
+                        .contains_key(&ServiceKey::for_unit(&record.unit))
+                    {
+                        // Défense : la base ne le permet plus (migration 0011), mais ce qui n'est pas
+                        // adopté ne se publie jamais depuis la mémoire.
+                        inner.forgotten.insert(record.unit);
+                        continue;
+                    }
                     inner
                         .remembered
                         .entry(record.unit)
@@ -1300,7 +1475,9 @@ impl ServicesRegistry {
             // Pilotage désactivé : le socket n'est jamais ouvert.
             std::future::pending::<()>().await;
         }
-        // Les services supervisés d'un démarrage précédent, avec l'état actuel de leur unité.
+        // Les services adoptés d'abord (rien n'est publié sans eux), puis les services supervisés d'un
+        // démarrage précédent, avec l'état actuel de leur unité.
+        self.reload_adopted().await;
         self.load_remembered().await;
         self.poll_units().await;
         // Relectures complètes échouées de suite, et quand retenter.
@@ -1611,7 +1788,43 @@ mod tests {
             enabled,
             EngineTimings::production(),
         );
+        adopt_vocabulary(&registry);
         (registry, engine, mono)
+    }
+
+    /// Les services que les tests de ce module traitent comme adoptés d'avance : le registre ne publie
+    /// rien d'autre que les services créés par Hearth et les adoptés (HRT-79), et ces tests parlent de
+    /// l'état du moteur, de la fraîcheur, des clés et de la supervision, pas de la publication (voir
+    /// plus bas les tests de publication, qui partent d'un registre sans adoption).
+    fn vocabulary() -> Vec<AdoptedRecord> {
+        let at = crate::infrastructure::engine::fake::at(12);
+        let mut keys: Vec<ServiceKey> = ["web", "db", "cache", "Api", "new"]
+            .iter()
+            .filter_map(|name| ServiceKey::for_container(&container(name, RunState::Running).id))
+            .collect();
+        keys.extend(
+            ('a'..='f').filter_map(|id| ServiceKey::for_container(&id.to_string().repeat(64))),
+        );
+        keys.extend(
+            ["docker-terraria.service", "docker-x.service"]
+                .iter()
+                .filter_map(|unit| UnitName::parse(unit))
+                .map(|unit| ServiceKey::for_unit(&unit)),
+        );
+        keys.into_iter()
+            .map(|key| AdoptedRecord {
+                key,
+                by: "marie".to_owned(),
+                at,
+            })
+            .collect()
+    }
+
+    fn adopt_vocabulary(registry: &ServicesRegistry) {
+        registry.lock().adopted = vocabulary()
+            .into_iter()
+            .map(|AdoptedRecord { key, by, at }| (key, Adoption { by, at }))
+            .collect();
     }
 
     #[tokio::test]
@@ -1667,6 +1880,9 @@ mod tests {
         // Rien n'a changé : relire ne diffuse rien.
         registry.resync().await.expect("resync");
         assert!(receiver.try_recv().is_err());
+        // Une adoption sans unité tombe avec son conteneur (BR-ADOPT-017) : la première lecture, vide,
+        // a défait celle du vocabulaire.
+        adopt_vocabulary(&registry);
         engine.put_silently(container("web", RunState::Running));
         registry
             .refresh(vec![container("web", RunState::Running).id])
@@ -1811,7 +2027,9 @@ mod tests {
             back.engine.list_current_at, None,
             "aucune liste, aucune date"
         );
-        // La relecture rétablit la liste actuelle.
+        // La relecture rétablit la liste actuelle (les adoptions tombées avec leurs conteneurs sont
+        // reposées : ce test parle de fraîcheur, pas d'adoption).
+        adopt_vocabulary(&registry);
         registry.resync().await.expect("resync");
         let read = registry.snapshot();
         assert_eq!(read.services.len(), 1);
@@ -2003,6 +2221,7 @@ mod tests {
             true,
             EngineTimings::production(),
         );
+        adopt_vocabulary(&registry);
         (registry, engine, mono, wall)
     }
 
@@ -2150,6 +2369,7 @@ mod tests {
             true,
             timings,
         );
+        adopt_vocabulary(&registry);
         (registry, engine)
     }
 
@@ -2190,6 +2410,7 @@ mod tests {
         assert_eq!(state_of("db"), Some(ServiceStateKind::Running), "gardée");
         assert_eq!(state_of("web"), Some(ServiceStateKind::Stopped), "suivie");
         // Un conteneur NOUVEAU et illisible apparaît « non reconnu », sous son nom.
+        adopt_vocabulary(&registry);
         engine.put_silently(container("new", RunState::Running));
         engine.fail_inspect(
             &container("new", RunState::Running).id,
@@ -2401,11 +2622,12 @@ mod tests {
     use crate::infrastructure::supervisor::fake::{FakeSupervisor, running_unit, unit_named};
 
     /// Un dépôt en mémoire : ce qu'il a reçu, pour vérifier ce que l'agent retient.
-    #[derive(Default)]
     struct MemoryRepo {
         saved: Mutex<HashMap<UnitName, SupervisedRecord>>,
         forgotten: Mutex<Vec<UnitName>>,
         saves: AtomicU64,
+        /// Les services adoptés que la base « contient » (HRT-79).
+        adopted: Mutex<Vec<AdoptedRecord>>,
     }
 
     #[async_trait]
@@ -2434,6 +2656,33 @@ mod tests {
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(unit.clone());
             Ok(())
+        }
+
+        async fn load_adopted(&self) -> Result<Vec<AdoptedRecord>, StoreError> {
+            Ok(self
+                .adopted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone())
+        }
+
+        async fn forget_adopted(&self, key: &ServiceKey) -> Result<(), StoreError> {
+            self.adopted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retain(|record| &record.key != key);
+            Ok(())
+        }
+    }
+
+    impl Default for MemoryRepo {
+        fn default() -> Self {
+            Self {
+                saved: Mutex::default(),
+                forgotten: Mutex::default(),
+                saves: AtomicU64::new(0),
+                adopted: Mutex::new(vocabulary()),
+            }
         }
     }
 
@@ -2469,7 +2718,7 @@ mod tests {
         repo: &Arc<MemoryRepo>,
         wall: Arc<Wall>,
     ) -> Arc<ServicesRegistry> {
-        ServicesRegistry::with_supervision(
+        let registry = ServicesRegistry::with_supervision(
             engine.clone(),
             supervisor.clone(),
             repo.clone(),
@@ -2478,7 +2727,9 @@ mod tests {
             Arc::new(Mono::default()),
             true,
             EngineTimings::production(),
-        )
+        );
+        adopt_vocabulary(&registry);
+        registry
     }
 
     /// Le conteneur qu'un système recrée à chaque démarrage : même nom, autre identifiant.
@@ -2713,6 +2964,7 @@ mod tests {
         let second = recreated("y", RunState::Running, 'b');
         supervisor.set_owner(&second.id, &unit);
         engine.put_silently(second.clone());
+        adopt_vocabulary(&registry);
         registry.resync().await.expect("resync");
         let services = registry.snapshot().services;
         let mut keys: Vec<String> = services
@@ -3019,5 +3271,335 @@ mod tests {
                 .is_empty(),
             "aucune réussite consignée"
         );
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Publication (HRT-79, ADR-0043) : seuls les services créés par Hearth et les services adoptés
+    // sortent ; les autres conteneurs sont comptés. Ces tests partent d'un registre SANS adoption.
+    // -----------------------------------------------------------------------------------------
+
+    /// Un registre sans aucune adoption, sur un dépôt en mémoire vide.
+    fn unadopted() -> Supervised {
+        let engine = Arc::new(FakeEngine::new());
+        let supervisor = Arc::new(FakeSupervisor::new());
+        let repo = Arc::new(MemoryRepo::default());
+        repo.adopted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+        let registry = registry_over(&engine, &supervisor, &repo);
+        (registry, engine, supervisor, repo)
+    }
+
+    fn registry_over(
+        engine: &Arc<FakeEngine>,
+        supervisor: &Arc<FakeSupervisor>,
+        repo: &Arc<MemoryRepo>,
+    ) -> Arc<ServicesRegistry> {
+        ServicesRegistry::with_supervision(
+            engine.clone(),
+            supervisor.clone(),
+            repo.clone(),
+            &Linux,
+            Arc::new(Wall(Mutex::new(crate::infrastructure::engine::fake::at(
+                12,
+            )))),
+            Arc::new(Mono::default()),
+            true,
+            EngineTimings::production(),
+        )
+    }
+
+    fn adopt_in_base(repo: &MemoryRepo, key: &str) {
+        repo.adopted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(AdoptedRecord {
+                key: ServiceKey::parse(key).expect("clé"),
+                by: "marie".to_owned(),
+                at: crate::infrastructure::engine::fake::at(12),
+            });
+    }
+
+    fn key_of_name(name: &str) -> String {
+        format!("c_{}", container(name, RunState::Running).id)
+    }
+
+    #[tokio::test]
+    async fn without_adoption_nothing_is_published_and_every_container_is_counted_stopped_ones_included()
+     {
+        let (registry, engine, _supervisor, _repo) = unadopted();
+        engine.put_silently(container("web", RunState::Running));
+        engine.put_silently(container("db", RunState::Exited));
+        engine.put_silently(container("cache", RunState::Created));
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let snapshot = registry.snapshot();
+        assert!(snapshot.services.is_empty(), "{:?}", snapshot.services);
+        assert_eq!(snapshot.engine.external_count, 3);
+        // Le registre complet reste en mémoire, mais rien n'en sort : ni par la clé.
+        assert_eq!(registry.lock().containers.len(), 3);
+        let sink = RecordingSink::default();
+        let hidden = ServiceKey::parse(&key_of_name("web")).expect("clé");
+        assert_eq!(
+            registry
+                .reveal_env(&hidden, Actor::system(), &sink)
+                .await
+                .err(),
+            Some(RevealError::NotFound),
+            "un conteneur non adopté est un service inconnu"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_change_to_a_hidden_container_moves_neither_the_revision_nor_the_deltas() {
+        let (registry, engine, _supervisor, _repo) = unadopted();
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let (mut receiver, before) = registry.subscribe();
+        // Il s'arrête, redémarre : rien ne part, `rev` ne bouge pas.
+        engine.put_silently(container("web", RunState::Exited));
+        registry
+            .refresh(vec![web.id.clone()])
+            .await
+            .expect("refresh");
+        engine.put_silently(web.clone());
+        registry
+            .refresh(vec![web.id.clone()])
+            .await
+            .expect("refresh");
+        assert!(receiver.try_recv().is_err(), "aucun lot");
+        assert_eq!(registry.snapshot().rev, before.rev);
+        // Un conteneur de plus : un seul lot, qui ne porte que le nombre.
+        let db = container("db", RunState::Running);
+        engine.put_silently(db.clone());
+        registry
+            .refresh(vec![db.id.clone()])
+            .await
+            .expect("refresh");
+        let change = receiver.try_recv().expect("le compte a changé");
+        assert!(change.upserts.is_empty() && change.removed.is_empty());
+        assert_eq!(change.engine.as_ref().map(|e| e.external_count), Some(2));
+        assert_eq!(change.rev, before.rev + 1);
+    }
+
+    #[tokio::test]
+    async fn an_adopted_container_is_published_by_its_key_and_the_others_stay_counted() {
+        let (registry, engine, _supervisor, repo) = unadopted();
+        engine.put_silently(container("web", RunState::Running));
+        engine.put_silently(container("db", RunState::Running));
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let (mut receiver, _) = registry.subscribe();
+        adopt_in_base(&repo, &key_of_name("web"));
+        registry.reload_adopted().await;
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.services.len(), 1);
+        let view = &snapshot.services[0];
+        assert_eq!(view.observation.name, "web");
+        assert_eq!(view.adoption.as_ref().map(|a| a.by.as_str()), Some("marie"));
+        assert_eq!(snapshot.engine.external_count, 1);
+        // Un lot : le service apparaît et le compte baisse, en un seul message.
+        let change = receiver.try_recv().expect("un lot");
+        assert_eq!(change.upserts.len(), 1);
+        assert_eq!(change.engine.as_ref().map(|e| e.external_count), Some(1));
+        // La révélation ne trouve que le service adopté.
+        let sink = RecordingSink::default();
+        let other = ServiceKey::parse(&key_of_name("db")).expect("clé");
+        assert_eq!(
+            registry
+                .reveal_env(&other, Actor::system(), &sink)
+                .await
+                .err(),
+            Some(RevealError::NotFound)
+        );
+    }
+
+    #[tokio::test]
+    async fn releasing_an_adoption_hides_the_service_again_and_forgets_what_was_kept() {
+        let (registry, engine, supervisor, repo) = unadopted();
+        let unit = unit_named("docker-terraria.service");
+        let first = recreated("terraria", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first);
+        adopt_in_base(&repo, "u_docker-terraria.service");
+        registry.probe_and_apply(false).await;
+        registry.reload_adopted().await;
+        registry.resync().await.expect("resync");
+        assert_eq!(registry.snapshot().services.len(), 1);
+        assert!(
+            repo.saved
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(&unit),
+            "un service adopté est retenu"
+        );
+        // L'adoption est retirée de la base : le service sort et son souvenir est oublié.
+        repo.adopted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+        registry.reload_adopted().await;
+        let snapshot = registry.snapshot();
+        assert!(snapshot.services.is_empty());
+        assert_eq!(snapshot.engine.external_count, 1);
+        assert!(registry.lock().remembered.is_empty());
+        assert_eq!(
+            *repo
+                .forgotten
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+            vec![unit]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hidden_container_run_by_a_unit_is_never_remembered_in_memory_or_in_the_base() {
+        let (registry, engine, supervisor, repo) = unadopted();
+        let unit = unit_named("docker-terraria.service");
+        let first = recreated("terraria", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        assert!(registry.snapshot().services.is_empty());
+        assert_eq!(repo.saves.load(Ordering::SeqCst), 0);
+        assert!(registry.lock().remembered.is_empty());
+        // Son conteneur disparaît : rien ne reste listé « d'après son unité ».
+        engine.remove(&first.id);
+        registry.refresh(vec![first.id]).await.expect("refresh");
+        registry.poll_units().await;
+        assert!(registry.snapshot().services.is_empty());
+        assert_eq!(registry.snapshot().engine.external_count, 0);
+    }
+
+    #[tokio::test]
+    async fn an_adoption_by_unit_survives_the_recreation_of_the_container_and_a_restart_of_the_agent()
+     {
+        let (registry, engine, supervisor, repo) = unadopted();
+        let unit = unit_named("docker-terraria.service");
+        let first = recreated("terraria", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        adopt_in_base(&repo, "u_docker-terraria.service");
+        registry.probe_and_apply(false).await;
+        registry.reload_adopted().await;
+        registry.resync().await.expect("resync");
+        assert_eq!(
+            only_service(&registry).key.as_str(),
+            "u_docker-terraria.service"
+        );
+        // Le système recrée le conteneur sous l'unité : même service, toujours adopté.
+        engine.remove(&first.id);
+        let second = recreated("terraria", RunState::Running, 'b');
+        supervisor.set_owner(&second.id, &unit);
+        engine.put_silently(second.clone());
+        registry.resync().await.expect("resync");
+        let view = only_service(&registry);
+        assert_eq!(view.key.as_str(), "u_docker-terraria.service");
+        assert!(view.adoption.is_some());
+        assert_eq!(registry.snapshot().engine.external_count, 0);
+        // Le redémarrage de l'agent : un nouveau registre, la même base, le conteneur absent.
+        engine.remove(&second.id);
+        let restarted = registry_over(&engine, &supervisor, &repo);
+        restarted.reload_adopted().await;
+        restarted.load_remembered().await;
+        restarted.probe_and_apply(false).await;
+        restarted.resync().await.expect("resync");
+        let kept = only_service(&restarted);
+        assert_eq!(kept.key.as_str(), "u_docker-terraria.service");
+        assert!(!kept.supervision.expect("supervisé").container_present);
+    }
+
+    #[tokio::test]
+    async fn an_adoption_without_a_unit_falls_with_its_container_and_a_namesake_does_not_inherit_it()
+     {
+        let (registry, engine, _supervisor, repo) = unadopted();
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        adopt_in_base(&repo, &format!("c_{}", web.id));
+        registry.probe_and_apply(false).await;
+        registry.reload_adopted().await;
+        registry.resync().await.expect("resync");
+        assert_eq!(only_service(&registry).observation.name, "web");
+        // Un tiers supprime puis recrée « web » : autre identifiant, même nom.
+        engine.remove(&web.id);
+        let mut namesake = container("web", RunState::Running);
+        namesake.id = "9".repeat(64);
+        engine.put_silently(namesake);
+        registry.resync().await.expect("resync");
+        let snapshot = registry.snapshot();
+        assert!(snapshot.services.is_empty(), "{:?}", snapshot.services);
+        assert_eq!(snapshot.engine.external_count, 1, "compté comme non géré");
+        assert!(
+            repo.adopted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "l'ancienne adoption est oubliée en base"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_vanished_engine_does_not_end_the_adoption_of_a_container_it_still_holds() {
+        let (registry, engine, _supervisor, repo) = unadopted();
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        adopt_in_base(&repo, &format!("c_{}", web.id));
+        registry.probe_and_apply(false).await;
+        registry.reload_adopted().await;
+        registry.resync().await.expect("resync");
+        // Le moteur disparaît (liste vidée), puis revient avec le même conteneur.
+        engine.set_outcome(ProbeOutcome::SocketMissing, false);
+        registry.probe_and_apply(true).await;
+        assert!(registry.snapshot().services.is_empty());
+        engine.set_ready();
+        registry.probe_and_apply(true).await;
+        registry.resync().await.expect("resync");
+        assert_eq!(only_service(&registry).observation.name, "web");
+    }
+
+    #[tokio::test]
+    async fn a_port_or_a_name_held_by_a_container_that_is_not_adopted_is_told_without_naming_it() {
+        use crate::domain::services::{PortBinding, PortScope};
+        let (registry, engine, _supervisor, repo) = unadopted();
+        let port = |host_port| PortBinding {
+            host_port,
+            container_port: 80,
+            protocol: PortProtocol::Tcp,
+            scope: PortScope::All,
+        };
+        let mut hidden = container("sentinel-hidden", RunState::Exited);
+        hidden.ports = vec![port(8080)];
+        let mut web = container("web", RunState::Running);
+        web.ports = vec![port(9090)];
+        engine.put_silently(hidden);
+        engine.put_silently(web.clone());
+        adopt_in_base(&repo, &format!("c_{}", web.id));
+        registry.probe_and_apply(false).await;
+        registry.reload_adopted().await;
+        registry.resync().await.expect("resync");
+        // Le conteneur non adopté tient le port, même arrêté : dit sans son nom ni son image.
+        let held = registry.port_holder(8080, PortProtocol::Tcp);
+        assert_eq!(held, Some(Holder::Unmanaged));
+        assert!(!format!("{held:?}").contains("sentinel"));
+        assert_eq!(
+            registry.name_holder("SENTINEL-hidden"),
+            Some(Holder::Unmanaged),
+            "le nom est pris, sans la casse"
+        );
+        // Le service adopté, lui, est nommé : il est dans la liste.
+        assert_eq!(
+            registry.port_holder(9090, PortProtocol::Tcp),
+            Some(Holder::Service("web".to_owned()))
+        );
+        assert_eq!(registry.port_holder(9090, PortProtocol::Udp), None);
+        assert_eq!(registry.port_holder(7070, PortProtocol::Tcp), None);
+        assert_eq!(registry.name_holder("libre"), None);
     }
 }

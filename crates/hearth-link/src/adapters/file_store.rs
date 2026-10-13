@@ -460,6 +460,7 @@ mod tests {
                 list_degraded: false,
                 at: None,
                 list_current_at: None,
+                external_count: 0,
             },
             services: vec![item],
         };
