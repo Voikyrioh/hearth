@@ -102,6 +102,15 @@ impl Authority {
             }
         }
     }
+
+    /// Cette autorité peut-elle SUPPRIMER le compte `target`, qui a le droit `target_right` ? Même
+    /// décision que pour ses moyens de connexion (BR-GRANT-005) : le droit se donne par NOM depuis le
+    /// serveur, et la suppression efface aussi les postes de confiance, que la règle du droit interdit
+    /// de toucher. Le serveur, le titulaire lui-même ou un autre titulaire le peuvent ; un compte sans
+    /// le droit se supprime comme avant.
+    pub fn may_delete_account(&self, target: &AccountId, target_right: ServicesRight) -> bool {
+        self.may_change_login_means_of(target, target_right)
+    }
 }
 
 impl Default for ServicesRight {
@@ -195,6 +204,28 @@ mod tests {
             right: ServicesRight::None,
         };
         assert!(!administrator_without_the_right.may_change_login_means_of(&target, right));
+    }
+
+    #[test]
+    fn a_holder_is_deleted_only_by_the_server_the_holder_or_another_holder() {
+        let target = AccountId::new("A");
+        let right = ServicesRight::Manage;
+        let other = |right| Authority::Network {
+            account: AccountId::new("B"),
+            right,
+        };
+        assert!(Authority::Server.may_delete_account(&target, right));
+        assert!(other(ServicesRight::Manage).may_delete_account(&target, right));
+        assert!(
+            Authority::Network {
+                account: target.clone(),
+                right,
+            }
+            .may_delete_account(&target, right)
+        );
+        assert!(!other(ServicesRight::None).may_delete_account(&target, right));
+        // Un compte sans le droit se supprime comme avant, par n'importe qui.
+        assert!(other(ServicesRight::None).may_delete_account(&target, ServicesRight::None));
     }
 
     #[test]

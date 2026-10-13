@@ -89,11 +89,16 @@ pub async fn delete(
         serde_json::from_slice::<DeleteAccountRequest>(&body)
             .map_err(|error| ApiError::invalid("body", error.to_string()))?
     };
+    // BR-GRANT-005 : une demande reçue du réseau n'a que l'autorité de son compte, relu à cette requête.
+    let authority = Authority::Network {
+        account: caller.account.id.clone(),
+        right: caller.account.services_right,
+    };
     let count = state
         .accounts
         .delete(
             &AccountId::new(id),
-            Some(&caller.account.id),
+            &authority,
             request.confirmation.as_deref(),
             &by,
         )

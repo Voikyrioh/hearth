@@ -109,3 +109,31 @@ test("à ta connexion suivante : qui a fermé tes sessions et quand, une fois, f
   await goTo(page, "accounts");
   await expect(page.locator("[data-sessions-closed]")).toHaveCount(0);
 });
+
+test("supprimer un compte qui peut gérer les services : indisponible sans le droit, avec l'explication", async ({
+  page,
+}) => {
+  await openDashboard(page);
+  await setRights(page, { marie: false, paul: true });
+  await goTo(page, "accounts");
+  const remove = row(page, "paul").getByRole("button", { name: /^Supprimer paul/ });
+  await expect(remove).toHaveAttribute("aria-disabled", "true");
+  await remove.hover();
+  await expect(page.getByRole("tooltip")).toHaveText(
+    "Ce compte peut gérer les services. Seul un compte qui le peut aussi, ou la commande sur le serveur, peut le supprimer.",
+  );
+  // Un compte sans le droit se supprime comme avant ; le rôle d'un titulaire reste modifiable.
+  await expect(
+    row(page, "lea").getByRole("button", { name: /^Supprimer lea/ }),
+  ).not.toHaveAttribute("aria-disabled", "true");
+  await expect(
+    row(page, "paul").getByRole("button", { name: /^Changer le rôle paul/ }),
+  ).not.toHaveAttribute("aria-disabled", "true");
+  // Avec le droit, le geste revient.
+  await goTo(page, "dashboard");
+  await setRights(page, { marie: true, paul: true });
+  await goTo(page, "accounts");
+  await expect(
+    row(page, "paul").getByRole("button", { name: /^Supprimer paul/ }),
+  ).not.toHaveAttribute("aria-disabled", "true");
+});

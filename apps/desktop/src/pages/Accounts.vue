@@ -150,6 +150,7 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
     v-else
     :accounts="accounts"
     :me-id="meId"
+    :rights-known="entry?.rightsKnown ?? false"
     :busy="actions.busy.value"
     @change-role="(account, role) => (roleChange = { account, role })"
     @change-password="passwordFor = $event"

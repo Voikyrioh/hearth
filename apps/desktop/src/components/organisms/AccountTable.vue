@@ -15,7 +15,13 @@ import type { Account, Role } from "@/link";
 // ne peut être ni rétrogradé ni supprimé : les deux boutons sont grisés avec l'explication.
 // `meId` : l'identifiant de l'AGENT du compte de la session (jamais une comparaison de texte avec
 // ce qui a été tapé à la connexion). `busy` : une action est en cours, aucune autre ne part.
-const props = defineProps<{ accounts: readonly Account[]; meId: string; busy?: boolean }>();
+// `rightsKnown` : l'agent annonce le droit « gérer les services » (sans lui, personne n'est protégé à l'écran).
+const props = defineProps<{
+  accounts: readonly Account[];
+  meId: string;
+  busy?: boolean;
+  rightsKnown?: boolean;
+}>();
 
 const emit = defineEmits<{
   changeRole: [account: Account, role: Role];
@@ -35,6 +41,18 @@ const OPTIONS: Array<{ value: Role; label: string }> = [
 
 const admins = computed(() => props.accounts.filter((account) => account.role === "admin").length);
 const isLastAdmin = (account: Account) => account.role === "admin" && admins.value <= 1;
+
+// BR-GRANT-005 : le compte d'un titulaire du droit n'est supprimé que par un titulaire (ou la commande sur le
+// serveur). L'agent reste l'arbitre : ce geste n'est qu'indisponible ici, avec son explication.
+const iHoldTheRight = computed(
+  () => props.accounts.find((account) => account.id === props.meId)?.managesServices === true,
+);
+const protectedFromMe = (account: Account) =>
+  props.rightsKnown === true && account.managesServices && !iHoldTheRight.value;
+function removeHint(account: Account): string | undefined {
+  if (isLastAdmin(account)) return t("accounts.lastAdmin");
+  return protectedFromMe(account) ? t("accounts.holderNoDelete") : undefined;
+}
 
 const root = ref<HTMLElement | null>(null);
 const editing = ref<string | null>(null);
@@ -181,8 +199,8 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                   size="sm"
                   variant="danger"
                   :needs-link="ADMIN"
-                  :disabled="busy || isLastAdmin(account)"
-                  :hint="isLastAdmin(account) ? t('accounts.lastAdmin') : undefined"
+                  :disabled="busy || isLastAdmin(account) || protectedFromMe(account)"
+                  :hint="removeHint(account)"
                   :aria-label="named(t('accounts.remove'), account)"
                   @click="emit('remove', account)"
                 >

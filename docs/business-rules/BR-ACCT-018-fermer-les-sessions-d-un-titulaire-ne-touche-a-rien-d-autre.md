@@ -15,7 +15,7 @@ Quand l'administrateur qui agit **n'a pas** le droit de gérer les services et q
 
 La fenêtre de confirmation du client le dit dans le premier cas seulement : « Ce compte peut gérer les services. Il devra se reconnecter ; ses postes de confiance sont gardés. ».
 
-Ce que cette règle ne change pas (défaut posé avec BR-GRANT-005, toujours à confirmer) : changer le mot de passe d'un titulaire reste réservé à lui-même, à un autre titulaire ou à la ligne de commande. Constat de HRT-133 : le changement de rôle et la suppression d'un titulaire par un administrateur sans le droit sont AUJOURD'HUI acceptés (classés « sans danger », `entrypoint/http/mod.rs::CLASSES`, test `the_acts_declared_harmless_do_not_hand_a_holder_to_an_administrator_without_the_right`) ; le retrait d'un poste n'existe que pour son titulaire.
+Ce que cette règle ne change pas (défaut posé avec BR-GRANT-005, toujours à confirmer) : changer le mot de passe d'un titulaire reste réservé à lui-même, à un autre titulaire ou à la ligne de commande. Constat de HRT-133, mis à jour par la décision du propriétaire du 2026-10-13 : le changement de rôle d'un titulaire par un administrateur sans le droit reste accepté (classé « sans danger », `entrypoint/http/mod.rs::CLASSES`, test `the_acts_declared_harmless_do_not_hand_a_holder_to_an_administrator_without_the_right`) ; sa suppression est désormais refusée (BR-GRANT-005) ; le retrait d'un poste n'existe que pour son titulaire.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/sessions.rs::plan_revocation` (rend `Revocation { closure, trust }`, `TrustAfterRevocation::{ForgetAll, ForgetWithoutDevice, Keep}`).

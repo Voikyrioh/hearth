@@ -46,6 +46,11 @@ pub enum AccountError {
         "Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut modifier ses moyens de connexion."
     )]
     ServicesHolderProtected,
+    /// BR-GRANT-005 : même refus, pour la suppression du compte.
+    #[error(
+        "Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut le supprimer."
+    )]
+    ServicesHolderDeletionProtected,
     #[error("L'ancien mot de passe est incorrect")]
     OldPasswordIncorrect,
     #[error("Le mot de passe a été modifié entre-temps, réessaye")]
@@ -440,13 +445,15 @@ impl AccountService {
     }
 
     /// BR-ACCT-007, BR-ACCT-010, BR-ACCT-012 : supprime un compte et ferme ses sessions.
-    /// `acting` est le compte qui demande la suppression (absent en ligne de commande) ; s'il
-    /// supprime son propre compte, `confirmation` doit être son identifiant retapé.
+    /// `authority` dit qui demande la suppression (le serveur en ligne de commande) ; s'il supprime son
+    /// propre compte, `confirmation` doit être son identifiant retapé. BR-GRANT-005 : le compte d'un
+    /// titulaire du droit n'est supprimé que par le serveur, lui-même ou un autre titulaire, jugé sur le
+    /// droit lu dans cette transaction, avant toute écriture.
     /// Rend le nombre de sessions fermées.
     pub async fn delete(
         &self,
         id: &AccountId,
-        acting: Option<&AccountId>,
+        authority: &Authority,
         confirmation: Option<&str>,
         by: &Actor,
     ) -> Result<u64, AccountError> {
@@ -456,6 +463,13 @@ impl AccountService {
             .find(id)
             .await?
             .ok_or(AccountError::NotFound)?;
+        if !authority.may_delete_account(&account.id, account.services_right) {
+            return Err(AccountError::ServicesHolderDeletionProtected);
+        }
+        let acting = match authority {
+            Authority::Server => None,
+            Authority::Network { account, .. } => Some(account),
+        };
         if acting == Some(id) {
             confirm_self_deletion(&account.username, confirmation.unwrap_or(""))?;
         }

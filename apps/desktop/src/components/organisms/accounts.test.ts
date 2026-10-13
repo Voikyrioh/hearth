@@ -82,12 +82,12 @@ describe("AccountTable", () => {
     account({ username: "lea" }),
   ];
 
-  async function table(list: Account[] = accounts) {
+  async function table(list: Account[] = accounts, rightsKnown = false) {
     const { pinia } = await startedApp();
     const { useServersStore } = await import("@/stores/servers");
     useServersStore().setCurrent("forge");
     return mount(AccountTable, {
-      props: { accounts: list, meId: "MARIE" },
+      props: { accounts: list, meId: "MARIE", rightsKnown },
       global: { plugins: [pinia] },
       attachTo: document.body,
     });
@@ -168,6 +168,62 @@ describe("AccountTable", () => {
     expect(role?.attributes("aria-disabled")).toBeUndefined();
     expect(remove?.attributes("aria-disabled")).toBeUndefined();
     wrapper.unmount();
+  });
+
+  describe("removal of an account that can manage the services (BR-GRANT-005)", () => {
+    const HINT =
+      "Ce compte peut gérer les services. Seul un compte qui le peut aussi, ou la commande sur le serveur, peut le supprimer.";
+    const removeOf = (wrapper: Awaited<ReturnType<typeof table>>, name: string) =>
+      wrapper.get(`[data-account="${name}"]`).findAll("td button")[3];
+
+    it("greys out the removal of a holder when you are not one, and says why; the role stays possible", async () => {
+      const wrapper = await table(
+        [
+          account({ username: "marie", role: "admin" }),
+          account({ username: "paul", managesServices: true }),
+        ],
+        true,
+      );
+      const paul = wrapper.get('[data-account="paul"]');
+      expect(removeOf(wrapper, "paul")?.attributes("aria-disabled")).toBe("true");
+      expect(paul.text()).toContain(HINT);
+      expect(paul.findAll("td button")[0]?.attributes("aria-disabled")).toBeUndefined();
+      wrapper.unmount();
+    });
+
+    it("keeps the removal of an account without the right, and of a holder when you are one", async () => {
+      const mixed = await table(
+        [
+          account({ username: "marie", role: "admin" }),
+          account({ username: "paul", managesServices: true }),
+          account({ username: "lea" }),
+        ],
+        true,
+      );
+      expect(removeOf(mixed, "lea")?.attributes("aria-disabled")).toBeUndefined();
+      mixed.unmount();
+      const holder = await table(
+        [
+          account({ username: "marie", role: "admin", managesServices: true }),
+          account({ username: "paul", managesServices: true }),
+        ],
+        true,
+      );
+      expect(removeOf(holder, "paul")?.attributes("aria-disabled")).toBeUndefined();
+      holder.unmount();
+    });
+
+    it("does not protect anyone when the agent does not announce the right", async () => {
+      const wrapper = await table(
+        [
+          account({ username: "marie", role: "admin" }),
+          account({ username: "paul", managesServices: true }),
+        ],
+        false,
+      );
+      expect(removeOf(wrapper, "paul")?.attributes("aria-disabled")).toBeUndefined();
+      wrapper.unmount();
+    });
   });
 
   it("greys out the change of role and the removal of the last administrator, and says why", async () => {

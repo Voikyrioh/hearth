@@ -6,7 +6,7 @@ mod support;
 
 use hearth_agent::application::accounts::AccountError;
 use hearth_agent::application::ports::AccountRepo;
-use hearth_agent::domain::accounts::Authority;
+use hearth_agent::domain::accounts::{Authority, ServicesRight};
 use hearth_agent::domain::accounts::{PasswordRule, Role, Username};
 use hearth_agent::domain::sessions::SessionId;
 use hearth_agent::infrastructure::sqlite::SqliteAccountRepo;
@@ -173,7 +173,7 @@ async fn the_last_administrator_cannot_be_removed_nor_demoted() {
 
     let removal = env
         .service
-        .delete(&marie.id, None, None, by())
+        .delete(&marie.id, &Authority::Server, None, by())
         .await
         .unwrap_err();
     assert!(matches!(removal, AccountError::LastAdmin(_)));
@@ -202,11 +202,13 @@ async fn the_last_administrator_cannot_be_removed_nor_demoted() {
         .await
         .unwrap();
     assert!(matches!(
-        env.service.delete(&paul.id, None, None, by()).await,
+        env.service
+            .delete(&paul.id, &Authority::Server, None, by())
+            .await,
         Err(AccountError::LastAdmin(_))
     ));
     env.service
-        .delete(&marie.id, None, None, by())
+        .delete(&marie.id, &Authority::Server, None, by())
         .await
         .unwrap();
 }
@@ -217,8 +219,10 @@ async fn two_simultaneous_removals_of_the_last_two_administrators_leave_one() {
     let marie = env.create("marie", Role::Admin).await;
     let paul = env.create("paul", Role::Admin).await;
 
-    let first = env.service.delete(&marie.id, None, None, by());
-    let second = env.service.delete(&paul.id, None, None, by());
+    let first = env
+        .service
+        .delete(&marie.id, &Authority::Server, None, by());
+    let second = env.service.delete(&paul.id, &Authority::Server, None, by());
     let (first, second) = tokio::join!(first, second);
 
     let refused = [&first, &second]
@@ -391,7 +395,7 @@ async fn removing_an_account_closes_its_sessions() {
 
     let closed = env
         .service
-        .delete(&paul.id, None, None, by())
+        .delete(&paul.id, &Authority::Server, None, by())
         .await
         .unwrap();
     assert_eq!(closed, 2);
@@ -408,7 +412,9 @@ async fn removing_an_unknown_account_is_not_found() {
     env.create("marie", Role::Admin).await;
     let ghost = hearth_agent::domain::accounts::AccountId::new("INCONNU");
     assert!(matches!(
-        env.service.delete(&ghost, None, None, by()).await,
+        env.service
+            .delete(&ghost, &Authority::Server, None, by())
+            .await,
         Err(AccountError::NotFound)
     ));
     assert!(matches!(
@@ -461,7 +467,15 @@ async fn deleting_your_own_account_requires_your_username() {
     for wrong in [None, Some(""), Some("paul"), Some("mari")] {
         let error = env
             .service
-            .delete(&marie.id, Some(&marie.id), wrong, by())
+            .delete(
+                &marie.id,
+                &Authority::Network {
+                    account: marie.id.clone(),
+                    right: ServicesRight::None,
+                },
+                wrong,
+                by(),
+            )
             .await
             .unwrap_err();
         assert!(matches!(error, AccountError::SelfDeletion(_)), "{wrong:?}");
@@ -473,7 +487,15 @@ async fn deleting_your_own_account_requires_your_username() {
     assert_eq!(env.service.list().await.unwrap().len(), 2);
 
     env.service
-        .delete(&marie.id, Some(&marie.id), Some("MARIE"), by())
+        .delete(
+            &marie.id,
+            &Authority::Network {
+                account: marie.id.clone(),
+                right: ServicesRight::None,
+            },
+            Some("MARIE"),
+            by(),
+        )
         .await
         .unwrap();
     assert_eq!(env.service.list().await.unwrap().len(), 1);
@@ -485,7 +507,15 @@ async fn deleting_someone_else_needs_no_confirmation() {
     let marie = env.create("marie", Role::Admin).await;
     let paul = env.create("paul", Role::ReadOnly).await;
     env.service
-        .delete(&paul.id, Some(&marie.id), None, by())
+        .delete(
+            &paul.id,
+            &Authority::Network {
+                account: marie.id.clone(),
+                right: ServicesRight::None,
+            },
+            None,
+            by(),
+        )
         .await
         .unwrap();
 }
@@ -718,7 +748,7 @@ async fn the_closure_notice_keeps_the_latest_author_only_and_goes_with_the_accou
     assert_eq!(notices().await.len(), 1);
     // L'avis part avec le compte.
     env.service
-        .delete(&marie.id, None, None, by())
+        .delete(&marie.id, &Authority::Server, None, by())
         .await
         .unwrap();
     assert!(notices().await.is_empty());

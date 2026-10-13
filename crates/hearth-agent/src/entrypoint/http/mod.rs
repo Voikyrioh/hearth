@@ -767,7 +767,7 @@ mod tests {
             "DELETE",
             "/accounts/{id}",
             Admin(
-                "sans danger : le droit est une colonne de la ligne du compte, supprimée avec lui ; un compte recréé sous le même nom a un autre identifiant et naît sans le droit",
+                "PROTÉGÉE : refusée sur un compte qui a le droit sauf par lui-même, par un compte qui l'a aussi ou par la ligne de commande (le droit se donne par nom : supprimer puis recréer un homonyme le ferait redonner à un inconnu ; la suppression efface aussi les postes de confiance)",
             ),
         ),
         (
@@ -912,13 +912,13 @@ mod tests {
                 ("POST", "/services/{key}/release"),
             ]
         );
-        // Et la seule route protégée de l'inventaire.
+        // Et les deux seules routes protégées de l'inventaire : le mot de passe d'autrui et la suppression.
         assert_eq!(
             CLASSES
                 .iter()
                 .filter(|row| matches!(row.2, Admin(verdict) if verdict.starts_with("PROTÉGÉE")))
                 .count(),
-            1
+            2
         );
     }
 

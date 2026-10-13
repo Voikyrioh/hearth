@@ -162,7 +162,8 @@ impl From<AccountError> for ApiError {
                 Self(ErrorBody::weak_password(&rules, message))
             }
             // Même forme que le refus faute du droit : le droit nommé en détail (BR-GRANT-005).
-            AccountError::ServicesHolderProtected => {
+            AccountError::ServicesHolderProtected
+            | AccountError::ServicesHolderDeletionProtected => {
                 Self(ErrorBody::missing_right(RIGHT_SERVICES, message))
             }
             AccountError::UsernameTaken => Self::new(ErrorCode::UsernameTaken, message),

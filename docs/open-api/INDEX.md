@@ -34,7 +34,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Comptes** | PATCH | [`/accounts/{id}`](./accounts.md) | admin | Modifier rôle |
 | **Comptes** | PUT | [`/accounts/{id}/password`](./accounts.md) | admin | Changer mot de passe (ferme sessions compte) |
 | **Comptes** | PUT | [`/me/password`](./accounts.md) | user+ | Changer son mot de passe (ferme autres sessions) |
-| **Comptes** | DELETE | [`/accounts/{id}`](./accounts.md) | admin | Supprimer compte |
+| **Comptes** | DELETE | [`/accounts/{id}`](./accounts.md) | admin | Supprimer compte (refusé sur un titulaire du droit sauf par un titulaire) |
 | **Comptes** | DELETE | [`/accounts/{id}/sessions`](./accounts.md) | admin | Fermer toutes les sessions du compte |
 | **Audit** | GET | [`/audit?filters…`](./audit.md) | admin | Journal d'activité (filtres, recherche plein texte, pagination curseur) |
 | **Audit** | GET | [`/audit/export?filters…`](./audit.md) | admin | Journal CSV (UTF-8 BOM, `;` séparateur) |

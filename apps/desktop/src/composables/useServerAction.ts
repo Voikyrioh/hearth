@@ -19,6 +19,12 @@ export interface RunOptions {
   unknownMessage?: MessageKey;
   /** Le texte du refus de rôle de l'agent (`forbidden`) propre à l'écran ; sinon celui de `failureMessage`. */
   forbiddenMessage?: MessageKey;
+  /**
+   * Le texte quand l'agent refuse l'acte faute du droit de gérer les services ET que ce refus est celui d'un
+   * compte protégé (BR-GRANT-005), pas un droit perdu par l'appelant : la fenêtre reste telle quelle, le droit
+   * de l'appelant n'est pas relu comme perdu.
+   */
+  protectedHolderMessage?: MessageKey;
 }
 
 /**
@@ -66,6 +72,10 @@ export function useServerAction(serverId: () => string | null) {
       return result;
     } catch (error) {
       const failure = failureOf(error);
+      if (failure?.kind === "missing_services_right" && options.protectedHolderMessage) {
+        toasts.push({ kind: "error", message: t(options.protectedHolderMessage) });
+        return null;
+      }
       if (failure?.kind === "missing_services_right") {
         // Le droit affiché était périmé : on le relit tout de suite, les boutons se désactivent (BR-GRANT-011).
         rightLost.value = true;

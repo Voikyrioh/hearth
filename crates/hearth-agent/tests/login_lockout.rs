@@ -408,7 +408,7 @@ async fn password_change_revocation_and_deletion_forget_the_known_addresses() {
     right(&env, "marie", CLIENT_ADDR).await.expect("connexion");
     assert_eq!(known().await, 1);
     env.service
-        .delete(&marie.id, None, None, by())
+        .delete(&marie.id, &Authority::Server, None, by())
         .await
         .unwrap();
     assert_eq!(known().await, 0, "compte supprimé");
