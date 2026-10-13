@@ -6,6 +6,7 @@
 //! `CLAUDE.md` pour régénérer.
 
 mod account_repo;
+mod adoption_repo;
 mod attack_mode_repo;
 mod audit_repo;
 mod convert;

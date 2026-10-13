@@ -54,6 +54,38 @@ pub async fn connect_with(
     api_version: Option<&str>,
     recv_buffer: Option<u32>,
 ) -> Result<WsClient, Refused> {
+    connect_path(agent, "/api/v1/stream", api_version, recv_buffer).await
+}
+
+/// Ouvre le socket des journaux d'un service (HRT-66) avec la version d'interface courante.
+pub async fn open_logs(agent: &Agent, key: &str) -> Result<WsClient, Refused> {
+    connect_path(
+        agent,
+        &format!("/api/v1/services/{key}/logs"),
+        Some("1"),
+        None,
+    )
+    .await
+}
+
+/// Comme `open_logs`, avec un tampon de réception minuscule : un client qui ne lit pas bloque vite
+/// l'envoi de l'agent.
+pub async fn open_logs_small_buffer(agent: &Agent, key: &str) -> Result<WsClient, Refused> {
+    connect_path(
+        agent,
+        &format!("/api/v1/services/{key}/logs"),
+        Some("1"),
+        Some(4096),
+    )
+    .await
+}
+
+pub async fn connect_path(
+    agent: &Agent,
+    path: &str,
+    api_version: Option<&str>,
+    recv_buffer: Option<u32>,
+) -> Result<WsClient, Refused> {
     let tcp = match recv_buffer {
         None => TcpStream::connect(agent.addr).await.expect("connexion"),
         Some(size) => {
@@ -69,7 +101,7 @@ pub async fn connect_with(
         .connect(name, tcp)
         .await
         .expect("poignée de main TLS 1.3");
-    let mut request = format!("wss://localhost:{}/api/v1/stream", agent.addr.port())
+    let mut request = format!("wss://localhost:{}{path}", agent.addr.port())
         .into_client_request()
         .expect("requête");
     if let Some(version) = api_version {
@@ -108,6 +140,21 @@ impl WsClient {
             .expect("envoi");
     }
 
+    /// Ferme proprement : trame de fermeture envoyée par le client.
+    pub async fn close(&mut self) {
+        use futures_util::SinkExt as _;
+        self.socket.send(Message::Close(None)).await.expect("envoi");
+    }
+
+    /// Envoie une trame binaire (que les sockets de ce protocole refusent).
+    pub async fn send_binary(&mut self, bytes: &[u8]) {
+        use futures_util::SinkExt as _;
+        self.socket
+            .send(Message::Binary(bytes.to_vec().into()))
+            .await
+            .expect("envoi");
+    }
+
     pub async fn auth(&mut self, token: &str) {
         self.send(&ClientMessage::Auth {
             token: token.to_owned(),
@@ -120,6 +167,52 @@ impl WsClient {
             topics: topics.to_vec(),
         })
         .await;
+    }
+
+    /// Envoie un message JSON quelconque.
+    pub async fn send_value(&mut self, value: &impl serde::Serialize) {
+        let text = serde_json::to_string(value).expect("json");
+        self.send_text(&text).await;
+    }
+
+    /// Prochain message du socket des journaux, ou la fin de la connexion.
+    pub async fn next_logs(
+        &mut self,
+    ) -> Result<hearth_proto::api::service_logs::LogsServerMessage, End> {
+        self.try_next_logs(WAIT)
+            .await
+            .expect("aucun message des journaux dans le délai")
+    }
+
+    /// Comme `next_logs`, mais `None` si rien ne vient dans ce délai.
+    pub async fn try_next_logs(
+        &mut self,
+        wait: Duration,
+    ) -> Option<Result<hearth_proto::api::service_logs::LogsServerMessage, End>> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            let frame = match tokio::time::timeout_at(deadline, self.socket.next()).await {
+                Err(_) => return None,
+                Ok(frame) => frame.transpose().unwrap_or(None),
+            };
+            match frame {
+                Some(Message::Text(text)) => {
+                    return Some(Ok(serde_json::from_str(text.as_str()).unwrap_or_else(
+                        |error| panic!("message des journaux illisible ({error}) : {text}"),
+                    )));
+                }
+                Some(Message::Close(frame)) => {
+                    return Some(Err(End::Closed(frame.map_or(1005, |f| u16::from(f.code)))));
+                }
+                Some(_) => {}
+                None => return Some(Err(End::Dropped)),
+            }
+        }
+    }
+
+    /// Coupe sans trame de fermeture (le client disparaît).
+    pub fn drop_connection(self) {
+        drop(self);
     }
 
     /// Prochain message du serveur, ou la fin de la connexion.

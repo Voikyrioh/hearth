@@ -71,6 +71,16 @@ const ACCOUNT_CODES: [&str; 18] = [
     action::REAUTH_ELEVATION,
 ];
 
+/// Gestion des services : valeurs révélées, services adoptés ou rendus, refus de lire les conteneurs
+/// existants ou les journaux d'un service adopté (HRT-80).
+const SERVICES_CODES: [&str; 5] = [
+    action::SERVICE_ENV_REVEAL,
+    action::SERVICE_ADOPT,
+    action::SERVICE_RELEASE,
+    action::SERVICE_EXTERNAL_READ,
+    action::SERVICE_LOGS_READ,
+];
+
 /// Droits sur les services : accordé ou retiré depuis le serveur.
 const SERVICES_RIGHTS_CODES: [&str; 2] = [
     action::ACCOUNT_SERVICES_GRANT,
@@ -102,7 +112,7 @@ impl ActionKind {
             Self::Accounts => &ACCOUNT_CODES,
             Self::Update => &[action::AGENT_UPDATE],
             Self::Denied => &DENIED_CODES,
-            Self::Services => &[action::SERVICE_ENV_REVEAL],
+            Self::Services => &SERVICES_CODES,
             Self::ServicesRights => &SERVICES_RIGHTS_CODES,
         }
     }

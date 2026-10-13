@@ -8,6 +8,7 @@
 //! - `connection` : une connexion, de l'authentification à la fermeture.
 
 mod connection;
+mod service_logs;
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -15,13 +16,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use axum::extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::response::Response;
 use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::{AUTH_TIMEOUT_S, MAX_CLIENT_MESSAGE_BYTES};
 use tokio::sync::watch;
 
 use super::http::{ApiError, AppState};
+use crate::domain::services::ServiceKey;
 use crate::domain::stream::{
     IDLE_TIMEOUT, MAX_PENDING_PER_ADDRESS, MAX_PENDING_TOTAL, MAX_STREAMS_PER_ACCOUNT,
     MAX_STREAMS_TOTAL, MIN_SUBSCRIBE_INTERVAL, PendingRefusal, SEND_TIMEOUT, SESSION_CHECK_PERIOD,
@@ -261,6 +263,49 @@ pub async fn stream(
         .max_message_size(MAX_CLIENT_MESSAGE_BYTES)
         .max_frame_size(MAX_CLIENT_MESSAGE_BYTES)
         .on_upgrade(move |socket| connection::run(socket, state, permit, ip.to_string())))
+}
+
+/// `GET /api/v1/services/{key}/logs` : le socket d'une lecture de journaux (HRT-66). Mise à niveau
+/// comme `/stream` : même quota des connexions en attente d'authentification, jeton dans le premier
+/// message. Une clé qui n'a aucune des trois formes d'une clé de service est refusée avant la mise à niveau.
+pub async fn logs(
+    upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(key): Path<String>,
+) -> Result<Response, ApiError> {
+    let key = ServiceKey::parse(&key)
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "Ce service n'existe pas."))?;
+    let upgrade = upgrade.map_err(|_| {
+        ApiError::invalid(
+            "upgrade",
+            "Cette route est un flux WebSocket : ouvre-la par une mise à niveau",
+        )
+    })?;
+    let ip = peer.ip().to_canonical();
+    let sessions = state.sessions.clone();
+    let permit = state
+        .stream
+        .wait_for_place(ip, || async move {
+            sessions
+                .address_is_known(&ip.to_string())
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "lecture des adresses connues impossible : place refusée");
+                    false
+                })
+        })
+        .await
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::Busy,
+                "Trop de connexions en attente d'authentification : envoie auth plus vite ou réessaie dans un instant",
+            )
+        })?;
+    Ok(upgrade
+        .max_message_size(MAX_CLIENT_MESSAGE_BYTES)
+        .max_frame_size(MAX_CLIENT_MESSAGE_BYTES)
+        .on_upgrade(move |socket| service_logs::run(socket, state, permit, ip.to_string(), key)))
 }
 
 #[cfg(test)]

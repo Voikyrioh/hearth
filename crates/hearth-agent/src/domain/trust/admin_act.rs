@@ -31,7 +31,8 @@ pub fn elevation_remaining_s(opened_ms: u64, now_ms: u64) -> u64 {
 /// l'agent, changer le réglage, donner le rôle Administrateur (changement de rôle ou création). Elle
 /// couvre ce qui retire ou limite un accès : créer un compte en lecture seule, passer un compte en
 /// lecture seule, supprimer un compte, fermer les sessions d'un compte (le dernier administrateur reste
-/// protégé par BR-ACCT-007). Le retrait d'un poste (contrat `0x04`) n'est pas un `AdminAct` : il exige
+/// protégé par BR-ACCT-007), rendre un service adopté à l'état non géré (BR-ADOPT-013). **Jamais**
+/// non plus pour adopter des conteneurs (BR-ADOPT-008). Le retrait d'un poste (contrat `0x04`) n'est pas un `AdminAct` : il exige
 /// toujours le mot de passe.
 ///
 /// La correspondance est exhaustive : un acte de plus oblige à choisir.
@@ -127,6 +128,15 @@ mod tests {
                     mode: ReauthMode::Each,
                 },
                 false,
+            ),
+            // Adopter ouvre la frontière de confidentialité : le mot de passe à chaque fois. Relâcher
+            // retire un accès : couvert.
+            (AdminAct::services_adopt(["c_a", "u_b.service"]), false),
+            (
+                AdminAct::ServiceRelease {
+                    target: "c_a".into(),
+                },
+                true,
             ),
         ]
     }

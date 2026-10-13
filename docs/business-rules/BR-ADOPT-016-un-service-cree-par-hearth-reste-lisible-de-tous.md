@@ -11,17 +11,19 @@ maj: 2026-10-13
 # BR-ADOPT-016 — Pour un service créé par Hearth rien ne change : commande et noms de variables restent lisibles de tous les comptes, les valeurs sont réservées au droit
 
 ## Règle
-Pour un service créé par Hearth (clé `h_`), le créateur du service en a choisi le contenu : la commande et les noms de variables restent lisibles de tous les comptes. Seules les valeurs restent réservées au droit. Un service `h_` est publié de droit, sans adoption (la base refuse d'ailleurs qu'on en adopte un).
+Pour un service créé par Hearth (clé `h_`), le créateur du service en a choisi le contenu : la commande, les noms de variables et les journaux restent lisibles de tous les comptes. Seules les valeurs restent réservées au droit. Un service `h_` est publié de droit, sans adoption (la base refuse d'ailleurs qu'on en adopte un).
 
 Aujourd'hui l'agent ne produit pas encore de clé `h_` (le déploiement est un autre ticket) : la règle est tenue et prouvée au niveau du filtre (`visibility_of`) et de l'écriture du message (`service_item`), pas par un service créé de bout en bout.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/visibility.rs::{visibility_of, may_read_details}`
 - `crates/hearth-agent/src/entrypoint/services_wire.rs::service_item`
+- `crates/hearth-agent/src/domain/services/logs.rs::may_read` (origine `Hearth` : tous les comptes)
 
 ## Vérification
 - `crates/hearth-agent/src/entrypoint/services_wire.rs::tests::a_service_made_by_hearth_keeps_its_details_for_every_account`
 - `crates/hearth-agent/src/domain/services/visibility.rs::tests::a_service_made_by_hearth_is_published_without_being_adopted`
+- `crates/hearth-agent/src/domain/services/logs.rs::tests::the_verdict_depends_on_who_created_the_service_and_on_the_right_of_the_account`
 - `crates/hearth-agent/tests/migration_0011.rs::an_adoption_is_by_unit_or_by_container_never_by_name_and_never_for_a_service_made_by_hearth`
 
 ## Cas limites
@@ -32,3 +34,4 @@ Aujourd'hui l'agent ne produit pas encore de clé `h_` (le déploiement est un a
 
 ## Historique
 - 2026-10-13 — création (HRT-79, ADR-0043 : ce que l'agent publie, moitié agent, première partie).
+- 2026-10-13 — HRT-79 : les journaux d'un service créé par Hearth restent ouverts à tous (`may_read`).

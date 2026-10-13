@@ -662,6 +662,97 @@ ok "aucun moteur de conteneurs : capacité annoncée, état « absent », liste 
 [ "$(served_fingerprint)" = "$FIRST_FP" ] || die "l'empreinte affichée ($FIRST_FP) n'est pas celle du certificat servi ($(served_fingerprint))"
 ok "l'empreinte affichée est celle du certificat servi"
 
+# --------------------------------------------------------------------------------------------
+# HRT-80 : adopter et relâcher un service, de bout en bout (confirmation complète : mot de passe ET preuve
+# de la clé d'un poste inscrit). Ce conteneur n'a AUCUN moteur de conteneurs : on ne peut donc PAS adopter
+# un vrai conteneur ici. Ce que cette étape prouve sur un vrai agent sous systemd : le droit « gérer les
+# services » est exigé pour lire les candidats (la lecture réussie comme le refus sont au journal), la
+# confirmation est exigée pour adopter et relâcher, `admin_act.py` signe exactement ce que l'agent
+# reconstruit (nombre et empreinte des clés pour adopter, clé décodée du chemin pour relâcher, y compris
+# une unité au nom échappé par une barre oblique inverse), une preuve qui ne colle pas à la demande est
+# refusée, et l'adoption répond « moteur non prêt ». Ce qu'elle ne prouve PAS : l'adoption d'un conteneur
+# réel, sa persistance à travers un redémarrage et la chute d'une adoption par unité sur un vrai systemd
+# (l'étape `supervised` n'est pas étendue à l'adoption : suivi de HRT-80).
+# --------------------------------------------------------------------------------------------
+ADOPT_KEYFILE=/tmp/e2e-adopt-device.pem
+adopt_call() {
+    # $1 méthode, $2 chemin (déjà encodé), $3 jeton, $4 corps JSON (facultatif)
+    if [ "$#" -ge 4 ]; then
+        curl -sk --max-time 20 -o "$OUT.body" -w '%{http_code}' -X "$1" "$BASE$2" \
+            -H "authorization: Bearer $3" -H 'x-hearth-api: 1' -H 'x-hearth-client: e2e/1' \
+            -H 'content-type: application/json' -d "$4"
+    else
+        curl -sk --max-time 20 -o "$OUT.body" -w '%{http_code}' -X "$1" "$BASE$2" \
+            -H "authorization: Bearer $3" -H 'x-hearth-api: 1' -H 'x-hearth-client: e2e/1'
+    fi
+}
+body_matches() { grep -Eq "$1" "$OUT.body"; }
+audit_count() {
+    python3 -c 'import sqlite3, sys
+db = sqlite3.connect("file:/var/lib/hearth/hearth.db?mode=ro", uri=True)
+print(db.execute("SELECT COUNT(*) FROM audit_events WHERE action = ? AND outcome = ?", (sys.argv[1], sys.argv[2])).fetchone()[0])' "$1" "$2"
+}
+UNKNOWN_KEY=c_0123456789abcdef
+OTHER_KEY=c_fedcba9876543210
+ESCAPED_KEY='u_docker-my\x2dapp.service'
+ESCAPED_PATH='u_docker-my%5Cx2dapp.service'
+
+# Sans le droit, la liste des candidats est refusée et le refus est au journal.
+[ "$(adopt_call GET /services/external "$TOKEN")" = 403 ] || die "adoption : sans le droit, la liste des candidats devrait être refusée : $(cat "$OUT.body")"
+[ "$(audit_count service.external.read denied)" = 1 ] || die "adoption : le refus de lire les candidats devrait être au journal"
+run "$INSTALLED" account services "$USER_NAME" --grant || die "adoption : octroi du droit"
+[ "$(login)" = 201 ] || die "adoption : connexion impossible après l'octroi"
+ADOPT_TOKEN="$(sed -n 's/.*"token": *"\([0-9a-f]*\)".*/\1/p' "$OUT.login")"
+[ -n "$ADOPT_TOKEN" ] || die "adoption : jeton illisible"
+[ "$(python3 /deploy/e2e/admin_act.py enroll 127.0.0.1 "$PORT" "$USER_NAME" "$PW" "$ADOPT_KEYFILE")" = enrolled ] || die "adoption : la clé de ce poste n'a pas été inscrite"
+
+# Avec le droit : aucun moteur, donc aucun candidat, et l'état du moteur le dit. La lecture réussie est consignée.
+[ "$(adopt_call GET /services/external "$ADOPT_TOKEN")" = 200 ] || die "adoption : la liste des candidats devrait être servie : $(cat "$OUT.body")"
+{ body_matches '"engine": *"absent"' && body_matches '"containers": *\[ *\]'; } || die "adoption : liste vide et moteur absent attendus : $(cat "$OUT.body")"
+[ "$(audit_count service.external.read ok)" = 1 ] || die "adoption : la lecture des candidats devrait être au journal (une entrée)"
+
+# Sans confirmation : l'agent EXIGE, rien n'est fait.
+CODE=$(adopt_call POST /services/adopt "$ADOPT_TOKEN" "{\"keys\":[\"$UNKNOWN_KEY\"]}")
+{ [ "$CODE" = 426 ] && body_matches '"reason": *"reauth_required"'; } || die "adoption sans confirmation : 426 reauth_required attendu (reçu $CODE) : $(cat "$OUT.body")"
+CODE=$(adopt_call POST "/services/$UNKNOWN_KEY/release" "$ADOPT_TOKEN" '{}')
+{ [ "$CODE" = 426 ] && body_matches '"reason": *"reauth_required"'; } || die "relâche sans confirmation : 426 reauth_required attendu (reçu $CODE) : $(cat "$OUT.body")"
+
+# Adoption confirmée : la preuve est reconnue (sinon le refus serait `proof_invalid`), puis le moteur n'est pas prêt.
+CONFIRMED=$(printf '{"keys":["%s"]}' "$UNKNOWN_KEY" \
+    | python3 /deploy/e2e/admin_act.py confirm-adopt 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "$PW" "$ADOPT_KEYFILE") \
+    || die "adoption : confirmation non signée"
+CODE=$(adopt_call POST /services/adopt "$ADOPT_TOKEN" "$CONFIRMED")
+{ [ "$CODE" = 409 ] && body_matches '"reason": *"engine_not_ready"'; } || die "adoption confirmée sans moteur : 409 engine_not_ready attendu (reçu $CODE) : $(cat "$OUT.body")"
+# Une preuve NEUVE (un défi ne sert qu'une fois) signée pour une clé, dont le corps porte une autre clé :
+# refusée, parce que la cible ne colle pas, non parce que le défi a déjà servi.
+CONFIRMED=$(printf '{"keys":["%s"]}' "$UNKNOWN_KEY"     | python3 /deploy/e2e/admin_act.py confirm-adopt 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "$PW" "$ADOPT_KEYFILE")     || die "adoption : confirmation non signée (corps modifié)"
+TAMPERED=$(printf '%s' "$CONFIRMED" | python3 -c 'import json, sys
+body = json.load(sys.stdin)
+body["keys"] = [sys.argv[1]]
+print(json.dumps(body))' "$OTHER_KEY") || die "adoption : corps modifié illisible"
+CODE=$(adopt_call POST /services/adopt "$ADOPT_TOKEN" "$TAMPERED")
+{ [ "$CODE" = 409 ] && body_matches '"reason": *"proof_invalid"'; } || die "adoption : une preuve pour une autre clé devrait être refusée, proof_invalid (reçu $CODE) : $(cat "$OUT.body")"
+
+# Relâche confirmée d'une clé inconnue : la preuve est reconnue, rien n'est relâché, aucune erreur.
+CONFIRMED=$(printf '{}' \
+    | python3 /deploy/e2e/admin_act.py confirm-release 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "$PW" "$ADOPT_KEYFILE" "$UNKNOWN_KEY") \
+    || die "relâche : confirmation non signée"
+CODE=$(adopt_call POST "/services/$UNKNOWN_KEY/release" "$ADOPT_TOKEN" "$CONFIRMED")
+{ [ "$CODE" = 200 ] && body_matches '"released": *false'; } || die "relâche confirmée d'une clé inconnue : 200 released=false attendu (reçu $CODE) : $(cat "$OUT.body")"
+# Une unité au nom échappé (`\x2d`) voyage encodée dans le chemin (`%5C`) ; la preuve signe la clé décodée.
+CONFIRMED=$(printf '{}' \
+    | python3 /deploy/e2e/admin_act.py confirm-release 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "$PW" "$ADOPT_KEYFILE" "$ESCAPED_KEY") \
+    || die "relâche : confirmation non signée (nom échappé)"
+CODE=$(adopt_call POST "/services/$ESCAPED_PATH/release" "$ADOPT_TOKEN" "$CONFIRMED")
+{ [ "$CODE" = 200 ] && body_matches '"released": *false'; } || die "relâche d'une clé au nom échappé : l'agent et le client devraient s'accorder (reçu $CODE) : $(cat "$OUT.body")"
+# Une preuve NEUVE signée pour une clé, envoyée à la relâche d'une autre : refusée (la cible ne colle pas).
+CONFIRMED=$(printf '{}'     | python3 /deploy/e2e/admin_act.py confirm-release 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "$PW" "$ADOPT_KEYFILE" "$ESCAPED_KEY")     || die "relâche : confirmation non signée (autre clé)"
+CODE=$(adopt_call POST "/services/$OTHER_KEY/release" "$ADOPT_TOKEN" "$CONFIRMED")
+{ [ "$CODE" = 409 ] && body_matches '"reason": *"proof_invalid"'; } || die "relâche : une preuve pour une autre clé devrait être refusée, proof_invalid (reçu $CODE) : $(cat "$OUT.body")"
+run "$INSTALLED" account services "$USER_NAME" --revoke || die "adoption : retrait du droit"
+[ "$(adopt_call GET /services/external "$ADOPT_TOKEN")" = 403 ] || die "adoption : droit retiré, la liste des candidats devrait être refusée : $(cat "$OUT.body")"
+ok "adoption et relâche de bout en bout (sans moteur) : droit exigé, lecture des candidats au journal, confirmation exigée, preuve reconnue, preuve pour une autre clé refusée, clé au nom échappé, moteur non prêt"
+
 [ "$(stat -c %a /var/lib/hearth)" = 700 ] || die "dossier de données : droits $(stat -c %a /var/lib/hearth)"
 [ "$(stat -c %a /var/lib/hearth/key.pem)" = 600 ] || die "key.pem : droits $(stat -c %a /var/lib/hearth/key.pem)"
 [ "$(stat -c %a /var/lib/hearth/hearth.db)" = 600 ] || die "hearth.db : droits $(stat -c %a /var/lib/hearth/hearth.db)"

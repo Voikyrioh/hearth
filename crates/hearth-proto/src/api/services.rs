@@ -32,7 +32,8 @@ pub const CAPABILITY_SERVICE_RIGHTS: &str = "service-rights";
 /// services adoptés (HRT-79, ADR-0043, BR-ADOPT-001) : les autres conteneurs sont comptés
 /// (`EngineView::external_count`), jamais détaillés. Un agent qui ne l'annonce pas publie tous les
 /// conteneurs du serveur (versions d'avant l'adoption). L'annonce ne dit pas que l'adoption est
-/// possible : l'acte arrive avec son propre ticket.
+/// possible : l'adoption se désactive dans la configuration de l'agent (`[services] adoption`), la
+/// réponse des candidats le dit alors par un refus `adoption_disabled`.
 pub const CAPABILITY_SERVICE_ADOPTION: &str = "service-adoption";
 
 /// Version minimale du moteur de conteneurs prise en charge (Docker Engine 20.10, API 1.41).
@@ -412,6 +413,88 @@ pub struct EnvReveal {
     pub variables: Vec<EnvVariable>,
 }
 
+/// Au plus ce nombre de services par acte d'adoption (BR-ADOPT-007).
+pub const MAX_ADOPTIONS: usize = 50;
+
+/// Un conteneur non géré proposé à l'adoption (BR-ADOPT-006). C'est TOUT ce que la lecture des candidats
+/// expose d'un conteneur : de quoi choisir, rien de plus. Ni variable, ni commande, ni port, ni dossier
+/// monté, ni journal : avant l'adoption, aucun autre détail n'existe pour le client. La clé `c_` porte
+/// l'identifiant COMPLET du conteneur (elle en est la preuve d'identité, nécessaire à l'acte) ; la clé
+/// `u_` porte le nom de l'unité.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalContainer {
+    /// La clé que l'acte d'adoption enverra (`u_<unité>` ou `c_<identifiant>`), opaque pour le client.
+    pub key: String,
+    pub name: String,
+    pub image: ImageInfo,
+    /// L'unité du système qui le lance, absente sans unité : l'adoption ne tient alors que pour la vie de
+    /// ce conteneur (BR-ADOPT-017).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    pub state: ServiceState,
+}
+
+/// La réponse de `GET /services/external` (comptes qui ont le droit « gérer les services » seulement) :
+/// les candidats triés par nom sans tenir compte de la casse, et l'état du moteur qui explique une liste
+/// vide (`BR-ADOPT-026`). Jamais diffusée par le flux, jamais gardée par l'agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalContainers {
+    pub engine: EngineState,
+    pub containers: Vec<ExternalContainer>,
+}
+
+/// Corps de `POST /services/adopt` : les clés cochées, 50 au plus (`MAX_ADOPTIONS`), sans doublon. Le
+/// membre `reauth` de la confirmation voyage à côté (voir `api::reauth`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptRequest {
+    pub keys: Vec<String>,
+}
+
+/// Le résultat d'une clé d'adoption (`BR-ADOPT-010`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdoptionResult {
+    /// Adopté.
+    Adopted,
+    /// Déjà adopté (par `AdoptionItem::by`), pas touché.
+    AlreadyAdopted,
+    /// Aucun conteneur de cette clé : disparu depuis la liste, ou jamais existé. L'agent ne distingue
+    /// jamais l'un de l'autre (BR-ADOPT-004).
+    NotFound,
+    /// L'agent n'a pas pu écrire (base ou journal indisponibles) : rien n'a été adopté pour cette clé.
+    Failed,
+    /// Un résultat que ce client ne connaît pas (agent plus récent) : traité comme non adopté.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Le résultat d'une clé de `POST /services/adopt`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptionItem {
+    pub key: String,
+    pub result: AdoptionResult,
+    /// Le compte qui avait déjà adopté ce service (`already_adopted` seulement) : déjà publié à tous les
+    /// comptes par `ServiceItem::adopted`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+}
+
+/// La réponse de `POST /services/adopt` : un résultat par clé, dans l'ordre de la demande.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptResponse {
+    /// Combien de services ont été adoptés par cet acte.
+    pub adopted: u32,
+    pub results: Vec<AdoptionItem>,
+}
+
+/// La réponse de `POST /services/{key}/release`. `released: false` : le service n'était déjà plus adopté
+/// (aucun effet, aucune entrée de journal, `BR-ADOPT-013`) ; l'agent ne dit jamais pourquoi (inconnu,
+/// jamais adopté ou déjà relâché se répondent pareil).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseResponse {
+    pub released: bool,
+}
+
 /// Le contenu de `GET /services` et de `services_snapshot` : l'état du moteur et tous les services,
 /// arrêtés compris, triés par nom sans tenir compte de la casse (`BR-SVC-012`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -735,5 +818,41 @@ mod tests {
         assert_eq!(item.ports[0].scope, PortScope::Unknown);
         assert_eq!(item.mounts[0].kind, MountKind::Unknown);
         assert_eq!(item.restart, RestartMode::Supervisor);
+    }
+
+    #[test]
+    fn the_adoption_messages_tolerate_what_a_newer_agent_adds() {
+        // Un résultat inconnu est lu comme tel, jamais comme une erreur de tout le message.
+        let response: AdoptResponse = serde_json::from_value(serde_json::json!({
+            "adopted": 1,
+            "results": [
+                { "key": "c_a", "result": "adopted", "extra": true },
+                { "key": "c_b", "result": "already_adopted", "by": "marie" },
+                { "key": "c_c", "result": "something_new" },
+            ],
+        }))
+        .expect("réponse");
+        assert_eq!(response.results[0].result, AdoptionResult::Adopted);
+        assert_eq!(response.results[1].by.as_deref(), Some("marie"));
+        assert_eq!(response.results[2].result, AdoptionResult::Unknown);
+        let candidates: ExternalContainers = serde_json::from_value(serde_json::json!({
+            "engine": "ready",
+            "containers": [{
+                "key": "u_x.service", "name": "x", "image": { "short_id": "ab" },
+                "state": "running", "later": 1
+            }],
+        }))
+        .expect("candidats");
+        assert_eq!(candidates.containers[0].unit, None);
+        // Ce que la lecture des candidats expose d'un conteneur, et rien d'autre.
+        let value = serde_json::to_value(&candidates.containers[0]).unwrap();
+        let mut fields: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        fields.sort_unstable();
+        assert_eq!(fields, ["image", "key", "name", "state"]);
     }
 }

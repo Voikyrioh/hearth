@@ -12,6 +12,7 @@ pub mod hidden;
 pub mod image;
 pub mod key;
 pub mod limits;
+pub mod logs;
 pub mod state;
 pub mod unit;
 pub mod visibility;
@@ -38,4 +39,7 @@ pub use unit::{
     ClientClaim, UnitActivity, UnitLookup, UnitName, UnitStatus, attribute, client_refs,
     is_engine_client, parse_main_pid, parse_show, unit_of_cgroup,
 };
-pub use visibility::{Adoption, Holder, Visibility, lapsed, may_read_details, visibility_of};
+pub use visibility::{
+    Adoption, Holder, UNIT_GONE_READS, Visibility, gone_long_enough, lapsed, may_read_details,
+    unit_is_gone, visibility_of,
+};

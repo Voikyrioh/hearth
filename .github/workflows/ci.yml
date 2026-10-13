@@ -4,6 +4,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  # La version longue du débit des journaux (HRT-66) : job `engine-logs-long`, 10 minutes par défaut.
+  workflow_dispatch:
+    inputs:
+      log_rate_seconds:
+        description: "Durée du débit soutenu des journaux, en secondes (version longue)"
+        default: "600"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -142,7 +148,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Moteur du runner (version)
         run: docker version
+      # La suite de contrat (liste, inspection, événements, journaux : fin, dernières lignes, reprise, suivi,
+      # terminal, ligne géante, pilote `none`) et le débit soutenu des journaux : 60 s à environ 1 000 lignes
+      # par seconde, sans perte ni doublon, mémoire du lecteur stable (HRT-66).
       - name: Suite de contrat de l'adaptateur contre un vrai moteur
+        env:
+          HEARTH_LOG_RATE_SECONDS: "60"
         run: cargo test -p hearth-agent --test engine_real -- --ignored --test-threads=1 --nocapture
       # Rien ne doit rester : les conteneurs de test sont supprimés avant et après la suite.
       - name: Conteneurs laissés par la suite
@@ -178,6 +189,30 @@ jobs:
             [ -z "$left" ] || docker rm -f $left
             exit 1
           fi
+
+  # La version longue du débit des journaux (HRT-66) : lancée à la main (`workflow_dispatch`), pas à chaque
+  # PR. Un service qui écrit environ 1 000 lignes par seconde est lu sans perte pendant 10 minutes
+  # (durée réglable à la main) ; la mémoire du lecteur est mesurée avant et après.
+  engine-logs-long:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HEARTH_TEST_ENGINE: "1"
+      HEARTH_LOG_RATE_SECONDS: ${{ inputs.log_rate_seconds }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Débit soutenu des journaux (version longue)
+        run: cargo test -p hearth-agent --test engine_real a_service_writing_a_thousand_lines_a_second -- --ignored --test-threads=1 --nocapture
+      - name: Conteneurs laissés par le test
+        if: always()
+        run: |
+          left="$(docker ps -aq --filter name=hearth-contract-)"
+          if [ -n "$left" ]; then docker rm -f $left; exit 1; fi
 
   # Le binaire de l'agent (statique, musl), l'installation de bout en bout dans un conteneur avec
   # systemd, et les scripts de deploy/. Les conteneurs sont ceux de `cargo xtask` ; leur cache

@@ -8,9 +8,17 @@ ce que fait la liaison cliente, avec `openssl` pour Ed25519 :
     admin_act.py enroll  HOST PORT USER PASSWORD KEYFILE      inscrit la clé de ce « poste » (connexion avec preuve)
     admin_act.py confirm HOST PORT TOKEN USER PASSWORD KEYFILE   lit un corps JSON de mise à jour sur l'entrée
                                                                standard et rend le même corps + `reauth`
+    admin_act.py confirm-adopt HOST PORT TOKEN USER PASSWORD KEYFILE
+                                                               lit `{"keys": [...]}` (adopter des conteneurs,
+                                                               code d'acte 0x11, HRT-80) et rend le corps + `reauth`
+    admin_act.py confirm-release HOST PORT TOKEN USER PASSWORD KEYFILE KEY
+                                                               lit un corps JSON (`{}`) et le rend + `reauth` pour
+                                                               `POST /services/KEY/release` (code d'acte 0x12)
 
-Seule la mise à jour de l'agent (code d'acte 0x06) est prise en charge : c'est le seul acte que les scénarios
-envoient. La disposition du message signé est celle de `hearth_proto::device_proof::signing_bytes`.
+Les actes pris en charge sont la mise à jour de l'agent (code 0x06) et les deux actes d'adoption de services
+(0x11, 0x12) : ce sont les seuls que les scénarios envoient. La disposition du message signé est celle de
+`hearth_proto::device_proof::signing_bytes` ; la cible signée d'une adoption est le nombre et l'empreinte
+des clés triées (`hearth_proto::admin_act::AdminAct::services_adopt`).
 Aucun secret n'est écrit sur la sortie d'erreur.
 """
 
@@ -28,6 +36,8 @@ DOMAIN = b"hearth-device-proof/1"
 USAGE_LOGIN = 0x01
 USAGE_ADMIN_ACT = 0x05
 ACT_AGENT_UPDATE = 0x06
+ACT_SERVICES_ADOPT = 0x11
+ACT_SERVICE_RELEASE = 0x12
 
 
 def connect(host, port):
@@ -131,12 +141,55 @@ def confirm(host, port, token, user, password, keyfile):
     print(json.dumps(request))
 
 
+def act_tail(code, target, params):
+    """Fin du message signé d'un acte : code, cible, paramètres (chacun précédé de sa longueur sur 2 octets)."""
+    tail = bytes([code]) + len(target).to_bytes(2, "big") + target + bytes([len(params)])
+    for param in params:
+        tail += len(param).to_bytes(2, "big") + param
+    return tail
+
+
+def adoption_params(keys):
+    """Le nombre de clés et l'empreinte SHA-256 de leurs clés triées, chacune précédée de sa longueur."""
+    digest = hashlib.sha256()
+    for key in sorted(keys, key=lambda k: k.encode()):
+        raw = key.encode()
+        digest.update(len(raw).to_bytes(2, "big") + raw)
+    return [str(len(keys)).encode(), digest.hexdigest().encode()]
+
+
+def signed_member(host, port, token, user, password, keyfile, tail):
+    connection = connect(host, port)
+    text, raw = challenge_for(connection, user, "admin_act")
+    token_hash = hashlib.sha256(bytes.fromhex(token)).digest()
+    message = head(USAGE_ADMIN_ACT, fingerprint(connection), user, raw) + token_hash + tail
+    return ({"password": password, "device": device_member(keyfile, message, text)},)
+
+
+def confirm_adopt(host, port, token, user, password, keyfile):
+    request = json.load(sys.stdin)
+    tail = act_tail(ACT_SERVICES_ADOPT, b"", adoption_params(request["keys"]))
+    (request["reauth"],) = signed_member(host, port, token, user, password, keyfile, tail)
+    print(json.dumps(request))
+
+
+def confirm_release(host, port, token, user, password, keyfile, key):
+    request = json.load(sys.stdin)
+    tail = act_tail(ACT_SERVICE_RELEASE, key.encode(), [])
+    (request["reauth"],) = signed_member(host, port, token, user, password, keyfile, tail)
+    print(json.dumps(request))
+
+
 def main():
     command, args = sys.argv[1], sys.argv[2:]
     if command == "enroll":
         enroll(*args)
     elif command == "confirm":
         confirm(*args)
+    elif command == "confirm-adopt":
+        confirm_adopt(*args)
+    elif command == "confirm-release":
+        confirm_release(*args)
     else:
         sys.exit("commande inconnue")
 

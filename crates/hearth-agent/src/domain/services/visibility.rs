@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 
 use super::key::{KeyKind, ServiceKey};
+use super::unit::UnitLookup;
 
 /// Qui a adopté un service, et quand.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +89,27 @@ pub fn lapsed(
         .collect()
 }
 
+/// `BR-ADOPT-017` : l'adoption d'un service lancé par une unité tient tant que l'unité existe pour le
+/// système. L'unité a disparu quand le système ne la connaît plus (`NotLoaded` : supprimée, masquée, ou
+/// transitoire arrêtée, que systemd décharge) ET qu'aucun conteneur ne la porte. Un simple arrêt d'une
+/// unité écrite dans un fichier la laisse `loaded/inactive` : elle existe, l'adoption reste. Une réponse
+/// que le système ne donne pas ou une unité qui ne se charge pas (`Unavailable` : erreur, masquée,
+/// invalide, délai) ne dit rien : jamais une adoption ne tombe dessus. Une lecture ne suffit pas :
+/// voir [`UNIT_GONE_READS`].
+pub fn unit_is_gone(lookup: UnitLookup, container_present: bool) -> bool {
+    lookup == UnitLookup::NotLoaded && !container_present
+}
+
+/// `BR-ADOPT-017` : nombre de lectures « introuvable, sans conteneur » CONSÉCUTIVES (espacées de deux
+/// périodes de sonde, 8 s en production) avant qu'une adoption par unité tombe. Une lecture qui dit
+/// autre chose remet le compte à zéro.
+pub const UNIT_GONE_READS: u32 = 3;
+
+/// `BR-ADOPT-017` : `consecutive` lectures « disparue » de suite suffisent-elles à faire tomber ?
+pub fn gone_long_enough(consecutive: u32) -> bool {
+    consecutive >= UNIT_GONE_READS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +170,35 @@ mod tests {
         assert!(!may_read_details(Some(&adopted), false));
         assert!(may_read_details(None, false));
         assert!(may_read_details(None, true));
+    }
+
+    #[test]
+    fn an_adoption_by_unit_falls_only_when_the_system_no_longer_knows_the_unit() {
+        use crate::domain::services::unit::{UnitActivity, UnitStatus};
+        let stopped_file_unit = UnitLookup::Loaded(UnitStatus {
+            activity: UnitActivity::Inactive,
+            auto_restart: false,
+            restarts: false,
+            timeout_stop_s: None,
+        });
+        // Un simple arrêt : l'unité est chargée et inactive, elle existe.
+        assert!(!unit_is_gone(stopped_file_unit, false));
+        assert!(!unit_is_gone(stopped_file_unit, true));
+        // Supprimée, masquée ou transitoire arrêtée : le système ne la connaît plus.
+        assert!(unit_is_gone(UnitLookup::NotLoaded, false));
+        // Un conteneur la porte encore : elle existe pour lui.
+        assert!(!unit_is_gone(UnitLookup::NotLoaded, true));
+        // Le système ne répond pas, ou l'unité ne se charge pas : on ne sait rien, rien ne tombe.
+        assert!(!unit_is_gone(UnitLookup::Unavailable, false));
+    }
+
+    #[test]
+    fn a_single_read_never_ends_an_adoption() {
+        assert!(!gone_long_enough(0));
+        assert!(!gone_long_enough(1));
+        assert!(!gone_long_enough(UNIT_GONE_READS - 1));
+        assert!(gone_long_enough(UNIT_GONE_READS));
+        const { assert!(UNIT_GONE_READS >= 3) };
     }
 
     #[test]

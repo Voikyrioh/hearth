@@ -43,18 +43,9 @@ const ELLIPSIS: char = '…';
 /// U+2028 et U+2029 (hors catégorie « contrôle » : un nom pouvait casser une ligne d'affichage).
 /// FIX:01M4SFCSXW2P3QXP6FY8CS6ZMQ (docs/bugs/FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ.md). Sans eux, un chemin de montage ou une étiquette pourrait se lire à l'envers.
 fn is_unsafe_char(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{00AD}'
-                | '\u{061C}'
-                | '\u{200B}'..='\u{200F}'
-                | '\u{2028}'..='\u{2029}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{2064}'
-                | '\u{2066}'..='\u{2069}'
-                | '\u{FEFF}'
-        )
+    // La liste des caractères de formatage invisibles est celle des lignes de journal : une seule
+    // (`hearth_proto::log_text`, HRT-66).
+    c.is_control() || hearth_proto::log_text::is_invisible_format(c)
 }
 
 /// Le texte sans caractère de contrôle ni de formatage invisible, coupé à `max` caractères (la marque « … » compte dans la

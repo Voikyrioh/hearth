@@ -12,12 +12,14 @@ mod support;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use hearth_agent::application::ports::ContainerEngine;
+use hearth_agent::domain::services::logs::LogSource;
 use hearth_agent::domain::services::{EngineState, ProbeOutcome, classify_probe};
 use hearth_agent::infrastructure::engine::{BollardEngine, InstallMarkers, Target};
 use support::engine_contract::{self, Harness, Run, Spec};
@@ -29,6 +31,9 @@ fn engine_of(daemon: &FakeDaemon) -> BollardEngine {
         InstallMarkers::at(Vec::<PathBuf>::new()),
     )
 }
+
+/// L'heure des lignes écrites par le décor : une milliseconde de plus à chaque ligne.
+static NEXT_LOG_MS: AtomicI64 = AtomicI64::new(1_791_885_600_000);
 
 struct DaemonHarness {
     daemon: Arc<FakeDaemon>,
@@ -46,6 +51,10 @@ impl Harness for DaemonHarness {
         let mut container = DaemonContainer::new(&spec.name, "created");
         container.publish = spec.publish;
         container.env = spec.env.clone();
+        container.tty = spec.tty;
+        if spec.log_driver_none {
+            container.log_driver = "none".into();
+        }
         let id = container.id.clone();
         self.runs.lock().unwrap().insert(id.clone(), spec.run);
         self.daemon.put(container);
@@ -89,6 +98,12 @@ impl Harness for DaemonHarness {
     async fn remove(&self, id: &str) {
         self.daemon.remove(id);
         self.daemon.emit(id, "destroy");
+    }
+
+    async fn print(&self, id: &str, source: LogSource, text: &str) {
+        let at_ms = NEXT_LOG_MS.fetch_add(1, Ordering::SeqCst);
+        let stream = if source == LogSource::Err { 2 } else { 1 };
+        self.daemon.push_log(id, stream, at_ms, text);
     }
 }
 

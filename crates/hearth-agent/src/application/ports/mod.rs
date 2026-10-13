@@ -5,6 +5,7 @@
 
 mod account_repo;
 mod admin_accounts;
+mod adoption_tx;
 mod attack_mode_repo;
 mod audit_repo;
 mod audit_sink;
@@ -39,13 +40,15 @@ mod update;
 
 pub use account_repo::{AccountRepo, AccountTx};
 pub use admin_accounts::{AdminAccounts, AdminAccountsError, AdminCredential};
+pub use adoption_tx::{AdoptionTx, AdoptionWrite, NewAdoption, ReleasedAdoption};
 pub use attack_mode_repo::{AttackModeRepo, AttackModeTx};
 pub use audit_repo::{AuditRepo, AuditTx};
 pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, LogQuery,
+    LogStream, Unreadable,
 };
 pub use device_repo::{DeviceRepo, DeviceTx};
 pub use fingerprint::{FingerprintSecretError, FingerprintSecretStore, RequestFingerprinter};

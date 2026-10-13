@@ -164,7 +164,12 @@ async fn hello_announces_the_services_capability() {
     assert_eq!(reply.status, 200);
     assert_eq!(
         reply.body["capabilities"],
-        json!(["services", "service-rights", "service-adoption"])
+        json!([
+            "services",
+            "service-rights",
+            "service-logs",
+            "service-adoption"
+        ])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).
     assert_eq!(reply.body["api"], json!({ "min": 1, "max": 1 }));
@@ -891,6 +896,50 @@ fn all_bytes(dir: &std::path::Path) -> Vec<u8> {
     bytes
 }
 
+/// Toutes les cellules de toutes les tables de la base, en texte (`quote()` de SQLite) : de quoi chercher une
+/// valeur où qu'elle soit écrite, pas seulement dans les tables qu'on pense à regarder.
+async fn dump_tables(env: &Env) -> String {
+    dump_pool(env.db.pool()).await
+}
+
+async fn dump_pool(pool: &sqlx::SqlitePool) -> String {
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let mut out = String::new();
+    for table in tables {
+        let columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info(?)")
+            .bind(&table)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        if columns.is_empty() {
+            continue;
+        }
+        let cells = columns
+            .iter()
+            .map(|column| format!("quote(\"{column}\")"))
+            .collect::<Vec<_>>()
+            .join(" || ',' || ");
+        // Les noms de tables et de colonnes viennent de `sqlite_master` : aucune saisie.
+        let rows: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT {cells} FROM \"{table}\""
+        )))
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        out.push_str(&format!("[{table}] {} lignes\n", rows.len()));
+        for row in rows {
+            out.push_str(&row);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 fn contains(haystack: &[u8], needle: &str) -> bool {
     haystack
         .windows(needle.len())
@@ -965,6 +1014,124 @@ async fn the_command_and_variable_names_of_an_adopted_service_are_for_the_right_
         0,
         "aucune valeur n'est lue sans demande de révélation"
     );
+    agent.shutdown().await;
+}
+
+/// Ce que le message d'un abonné porte du détail réservé d'un service adopté : les noms, la commande.
+const DETAIL_TEXTS: [&str; 4] = ["APP_MODE", "DB_PASSWORD", "/entrypoint.sh", "--serve"];
+
+fn assert_detail(who: &str, what: &str, text: &str, present: bool) {
+    for needle in DETAIL_TEXTS {
+        assert_eq!(
+            text.contains(needle),
+            present,
+            "{who} / {what} : {needle} {} dans {text}",
+            if present { "manque" } else { "présent" }
+        );
+    }
+}
+
+/// Le prochain `services_snapshot` d'un abonné (les lots qui le précèdent sont lus et rendus).
+async fn next_snapshot(client: &mut WsClient) -> (ServicesState, Vec<ServicesMessage>) {
+    let mut before = Vec::new();
+    loop {
+        match client.try_next_services(Duration::from_secs(3)).await {
+            Some(ServicesMessage::ServicesSnapshot(snapshot)) => return (snapshot, before),
+            Some(other) => before.push(other),
+            None => panic!("aucun instantané dans le délai (lots reçus : {before:?})"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_stream_is_composed_for_each_reader_so_the_detail_of_an_adopted_service_reaches_only_the_right()
+ {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let web = detailed("web", RunState::Running);
+    engine.put_silently(web.clone());
+    let agent = ready_agent(&env, &engine).await;
+    listed(&agent, 1).await;
+    // Deux comptes abonnés EN MÊME TEMPS : ada a le droit, bob (administrateur) ne l'a pas.
+    let ada = token(&env, &agent, "ada", Role::Admin).await;
+    let bob = token(&env, &agent, "bob", Role::Admin).await;
+    env.grant_services("ada").await;
+    let (mut ws_ada, snapshot_ada) = subscribed(&agent, &ada).await;
+    let (mut ws_bob, snapshot_bob) = subscribed(&agent, &bob).await;
+
+    // 1. L'instantané : le détail pour ada, rien pour bob, qui voit pourtant le service.
+    let (text_ada, text_bob) = (
+        serde_json::to_string(&snapshot_ada).unwrap(),
+        serde_json::to_string(&snapshot_bob).unwrap(),
+    );
+    assert_detail("ada", "instantané", &text_ada, true);
+    assert_detail("bob", "instantané", &text_bob, false);
+    assert_eq!(names(&snapshot_bob), ["web"], "bob voit le service");
+    assert!(
+        snapshot_bob.services[0].details_reserved && !snapshot_ada.services[0].details_reserved
+    );
+
+    // 2. Un lot : le service change d'état, les deux abonnés reçoivent leur propre composition.
+    engine.update(&web.id, |o| {
+        o.run_state = RunState::Exited;
+        o.exit_code = Some(0);
+    });
+    engine.emit(&web.id, "die");
+    for (who, client, present) in [("ada", &mut ws_ada, true), ("bob", &mut ws_bob, false)] {
+        let ServicesMessage::ServicesDelta(delta) = client.next_services().await else {
+            panic!("{who} : un services_delta était attendu");
+        };
+        assert_eq!(delta.upserts.len(), 1, "{who}");
+        assert_detail(who, "lot", &serde_json::to_string(&delta).unwrap(), present);
+        assert_eq!(delta.upserts[0].details_reserved, !present, "{who}");
+    }
+
+    // 3. Le droit d'ada est retiré PENDANT l'abonnement : un instantané entier, sans le détail, puis les
+    // lots suivants ne portent plus rien non plus.
+    env.revoke_services("ada").await;
+    let (snapshot, _) = next_snapshot(&mut ws_ada).await;
+    assert_detail(
+        "ada",
+        "instantané après retrait",
+        &serde_json::to_string(&snapshot).unwrap(),
+        false,
+    );
+    assert!(snapshot.services[0].details_reserved);
+    engine.update(&web.id, |o| o.run_state = RunState::Running);
+    engine.emit(&web.id, "start");
+    let ServicesMessage::ServicesDelta(delta) = ws_ada.next_services().await else {
+        panic!("un services_delta était attendu après le retrait");
+    };
+    assert_detail(
+        "ada",
+        "lot après retrait",
+        &serde_json::to_string(&delta).unwrap(),
+        false,
+    );
+    assert!(delta.upserts[0].details_reserved);
+
+    // 4. Le droit donné à bob pendant l'abonnement : le détail arrive d'un coup, puis dans les lots.
+    env.grant_services("bob").await;
+    let (snapshot, _) = next_snapshot(&mut ws_bob).await;
+    assert_detail(
+        "bob",
+        "instantané après octroi",
+        &serde_json::to_string(&snapshot).unwrap(),
+        true,
+    );
+    assert!(!snapshot.services[0].details_reserved);
+    engine.update(&web.id, |o| o.run_state = RunState::Exited);
+    engine.emit(&web.id, "die");
+    let ServicesMessage::ServicesDelta(delta) = ws_bob.next_services().await else {
+        panic!("un services_delta était attendu après l'octroi");
+    };
+    assert_detail(
+        "bob",
+        "lot après octroi",
+        &serde_json::to_string(&delta).unwrap(),
+        true,
+    );
+    drop((ws_ada, ws_bob));
     agent.shutdown().await;
 }
 
@@ -1609,6 +1776,50 @@ const HIDDEN_COMMAND: &str = "sentinel-hidden-cmd-a90b";
 const HIDDEN_UNIT: &str = "sentinel-hidden-unit-2e1f";
 const HIDDEN_PORT: &str = "47813";
 const HIDDEN_CONTAINER_PORT: &str = "31847";
+/// Une ligne de journal écrite par un conteneur caché (préfixe sentinelle : `HIDDEN_FORBIDDEN` la couvre).
+const HIDDEN_LOG_LINE: &str = "sentinel-hidden-log-line-6b21 jeton=abc";
+/// Une ligne du journal du témoin adopté : elle DOIT sortir, pour qui a le droit.
+const SHOWN_LOG_LINE: &str = "visible-log-line-91d2";
+
+/// Ouvre une lecture de journaux, rend tout ce qui est reçu jusqu'à la fermeture (texte brut des messages).
+async fn logs_text(agent: &Agent, token: &str, key: &str) -> String {
+    let mut client = ws::open_logs(agent, key)
+        .await
+        .expect("socket des journaux");
+    client
+        .send_value(&json!({ "type": "auth", "token": token }))
+        .await;
+    client
+        .send_value(&hearth_proto::api::service_logs::LogsClientMessage::Open {
+            tail: 1000,
+            since: None,
+        })
+        .await;
+    let mut text = String::new();
+    // Une lecture qui s'ouvre ne finit pas d'elle-même : on s'arrête à la première ligne reçue, à la
+    // fermeture ou à un silence.
+    while let Some(next) = client.try_next_logs(Duration::from_millis(800)).await {
+        match next {
+            Ok(message) => {
+                text.push_str(&format!("{message:?}\n"));
+                // Le `Debug` d'une ligne cache son texte : on le lit ici, pour que la recherche des
+                // sentinelles voie ce que le client recevrait.
+                if let hearth_proto::api::service_logs::LogsServerMessage::Lines(lines) = message {
+                    for item in &lines.items {
+                        text.push_str(&item.x);
+                        text.push('\n');
+                    }
+                    break;
+                }
+            }
+            Err(end) => {
+                text.push_str(&format!("{end:?}\n"));
+                break;
+            }
+        }
+    }
+    text
+}
 
 /// Tout ce qui, d'un conteneur non adopté, ne doit sortir nulle part (comparé en minuscules). Les
 /// noms des autres conteneurs cachés commencent tous par le même préfixe sentinelle.
@@ -1669,13 +1880,21 @@ async fn nothing_of_a_container_that_is_not_adopted_leaves_the_agent_by_any_rout
     supervised.image = format!("registry.example/{HIDDEN_IMAGE}:1.0");
     let supervised_id = supervised.id.clone();
     let stopped = DaemonContainer::new("sentinel-hidden-stopped-19", "exited");
+    let stopped_id = stopped.id.clone();
     // Le témoin : un service adopté, qui DOIT sortir (sinon le test serait aveugle).
     let shown = DaemonContainer::new("visible-control", "running");
     env.adopt(&format!("c_{}", shown.id), "visible-control", "marie")
         .await;
+    let shown_id = shown.id.clone();
     for container in [hidden, supervised, stopped, shown] {
         daemon.put(container);
     }
+    // Les journaux : chaque conteneur caché écrit une ligne sentinelle, le témoin une ligne qui doit sortir.
+    for id in [&hidden_id, &supervised_id, &stopped_id] {
+        daemon.push_log(id, 1, 1_791_885_600_000, HIDDEN_LOG_LINE);
+        daemon.push_log(id, 2, 1_791_885_600_001, HIDDEN_LOG_LINE);
+    }
+    daemon.push_log(&shown_id, 1, 1_791_885_600_000, SHOWN_LOG_LINE);
     let supervisor = Arc::new(FakeSupervisor::new());
     let unit = unit_named(&format!("docker-{HIDDEN_UNIT}.service"));
     supervisor.set_owner(&supervised_id, &unit);
@@ -1811,6 +2030,242 @@ async fn nothing_of_a_container_that_is_not_adopted_leaves_the_agent_by_any_rout
         .await;
     seen.push(("GET env inconnu".to_owned(), revealed.text));
 
+    // Journaux : la clé d'un conteneur caché (avec le droit ou sans, arrêté, lancé par une unité, apparu
+    // plus tard) ne donne pas une ligne, par aucun des deux comptes.
+    let hidden_keys = [
+        format!("c_{hidden_id}"),
+        // La clé d'une unité cachée n'est pas demandée : son nom est la sentinelle, et le chemin que le
+        // client écrit lui-même est tracé par la couche HTTP (BR-ADOPT-004, cas limites).
+        format!("c_{supervised_id}"),
+        format!("c_{stopped_id}"),
+        format!("c_{fourth_id}"),
+    ];
+    for (who, token) in [("marie", &admin), ("lucas", &readonly)] {
+        for key in &hidden_keys {
+            let text = logs_text(&agent, token, key).await;
+            assert!(text.contains("ServiceNotFound"), "{who} {key} : {text}");
+            seen.push((format!("logs {key} ({who})"), text));
+        }
+    }
+    // Témoin : le service adopté se lit avec le droit (les lignes sortent, le test n'est pas aveugle), pas
+    // sans (même réponse qu'une clé inconnue).
+    let shown_key = format!("c_{shown_id}");
+    let with_right = logs_text(&agent, &admin, &shown_key).await;
+    assert!(with_right.contains(SHOWN_LOG_LINE), "{with_right}");
+    let without_right = logs_text(&agent, &readonly, &shown_key).await;
+    // Un service adopté est dans la liste de ce compte : le refus est explicite (BR-SLOG-024), à la
+    // différence de la clé cachée ou inconnue, qui reçoit « introuvable ».
+    assert!(
+        without_right.contains("MissingRight") && !without_right.contains(SHOWN_LOG_LINE),
+        "{without_right}"
+    );
+    seen.push(("logs témoin (lucas)".to_owned(), without_right));
+
+    // Un compte sans le droit n'apprend RIEN de la liste des non gérés, ni des actes d'adoption : ses
+    // demandes (lecture, adoption de clés cachées, relâche) sont refusées avant qu'une clé soit lue.
+    let bob = token(&env, &agent, "bob", Role::Admin).await;
+    for (who, token) in [("lucas", &readonly), ("bob", &bob)] {
+        let candidates = agent
+            .request("GET", "/services/external")
+            .token(token)
+            .send()
+            .await;
+        assert_eq!(candidates.status, 403, "{who} : {}", candidates.text);
+        seen.push((format!("GET /services/external ({who})"), candidates.text));
+        for key in &hidden_keys {
+            let adopt = agent
+                .request("POST", "/services/adopt")
+                .token(token)
+                .json(&json!({ "keys": [key] }))
+                .send()
+                .await;
+            assert_eq!(adopt.status, 403, "{who} : {}", adopt.text);
+            seen.push((format!("POST adopt {key} ({who})"), adopt.text));
+            let release = agent
+                .request("POST", &format!("/services/{key}/release"))
+                .token(token)
+                .json(&json!({}))
+                .send()
+                .await;
+            assert_eq!(release.status, 403, "{who} : {}", release.text);
+            seen.push((format!("POST release {key} ({who})"), release.text));
+        }
+    }
+    // Un AUTRE conteneur est adopté par l'acte (avec le droit, la preuve de la clé et le mot de passe) :
+    // il apparaît, et les cachés restent invisibles, par aucune route ni aucun message.
+    let marie = agent.login_actor("marie").await;
+    let fifth = DaemonContainer::new("adoptable-extra", "running");
+    let second = format!("c_{}", fifth.id);
+    daemon.put(fifth);
+    daemon.emit(second.trim_start_matches("c_"), "start");
+    for (who, client) in &mut clients {
+        // Un cinquième conteneur non géré apparaît : le nombre seul bouge.
+        let ServicesMessage::ServicesDelta(delta) = client.next_services().await else {
+            panic!("{who} : un services_delta était attendu");
+        };
+        assert!(delta.upserts.is_empty(), "{who}");
+        assert_eq!(delta.engine.as_ref().map(|e| e.external_count), Some(5));
+    }
+    // Le compte qui a le droit LIT les candidats : c'est le seul code qui tient en main le nom, l'image et
+    // l'unité d'un conteneur caché (`ServicesRegistry::candidates`). Sa réponse est le TÉMOIN : elle doit
+    // nommer les cachés, donc elle n'entre pas dans `seen` (ce que les comptes sans le droit reçoivent) ;
+    // tout ce qui est balayé ensuite (traces, journal, tables, octets, messages des autres abonnés) ne doit
+    // pas en avoir gardé un seul mot. Aucune variable, valeur, commande ni port n'y figure jamais.
+    let candidates = agent
+        .request("GET", "/services/external")
+        .token(&admin)
+        .send()
+        .await;
+    assert_eq!(candidates.status, 200, "{}", candidates.text);
+    let witness = candidates.text.to_lowercase();
+    for named in [
+        HIDDEN_NAME,
+        HIDDEN_IMAGE,
+        HIDDEN_UNIT,
+        "sentinel-hidden-supervised-8d",
+        "sentinel-hidden-stopped-19",
+        "sentinel-hidden-fourth-aa",
+        "adoptable-extra",
+    ] {
+        assert!(
+            witness.contains(named),
+            "la lecture des candidats doit nommer {named} (témoin) : {witness}"
+        );
+    }
+    for never in [HIDDEN_VARIABLE, HIDDEN_VALUE, HIDDEN_COMMAND] {
+        assert!(!witness.contains(never), "{never} dans les candidats");
+    }
+    for port in [HIDDEN_PORT, HIDDEN_CONTAINER_PORT] {
+        assert!(!contains_number(&witness, port), "port {port}");
+    }
+    // Elle en adopte UN, choisi dans cette liste ; les autres restent cachés.
+    let chosen = candidates.body["containers"]
+        .as_array()
+        .expect("containers")
+        .iter()
+        .find(|c| c["name"] == "adoptable-extra")
+        .expect("le candidat à adopter");
+    assert_eq!(chosen["key"], second.as_str());
+    let adopted = agent
+        .confirmed(
+            &marie,
+            "POST",
+            "/services/adopt",
+            json!({ "keys": [second.clone()] }),
+        )
+        .await
+        .send()
+        .await;
+    assert_eq!(adopted.status, 200, "{}", adopted.text);
+    for (who, client) in &mut clients {
+        // Le lot de l'adoption : un seul service de plus, et le compte des non gérés baisse d'un.
+        let ServicesMessage::ServicesDelta(delta) = client.next_services().await else {
+            panic!("{who} : un services_delta était attendu");
+        };
+        assert_eq!(delta.upserts.len(), 1, "{who}");
+        assert_eq!(delta.upserts[0].key, second, "{who}");
+        seen.push((
+            format!("services_delta après adoption ({who})"),
+            serde_json::to_string(&delta).unwrap(),
+        ));
+    }
+    for (who, token) in [("marie", &admin), ("lucas", &readonly)] {
+        let (state, text) = services_of(&agent, token).await;
+        assert_eq!(state.services.len(), 2, "{who}");
+        assert_eq!(state.engine.external_count, 4, "{who}");
+        seen.push((format!("GET /services après adoption ({who})"), text));
+    }
+    // Avec le droit, la preuve et le mot de passe : demander une clé cachée (celle du conteneur d'une unité,
+    // qui n'est pas une identité de ce service) ou inventée a la même issue, sans un nom ; relâcher une clé
+    // cachée ou inventée ne fait rien.
+    for key in [format!("c_{supervised_id}"), "c_inventee0123".to_owned()] {
+        let reply = agent
+            .confirmed(
+                &marie,
+                "POST",
+                "/services/adopt",
+                json!({ "keys": [key.clone()] }),
+            )
+            .await
+            .send()
+            .await;
+        assert_eq!(reply.status, 200, "{}", reply.text);
+        assert_eq!(reply.body["adopted"], 0);
+        assert_eq!(reply.body["results"][0]["result"], "not_found");
+        seen.push((format!("POST adopt {key} (marie)"), reply.text));
+        let reply = agent
+            .confirmed(
+                &marie,
+                "POST",
+                &format!("/services/{key}/release"),
+                json!({}),
+            )
+            .await
+            .send()
+            .await;
+        assert_eq!(reply.status, 200, "{}", reply.text);
+        assert_eq!(reply.body["released"], false);
+        seen.push((format!("POST release {key} (marie)"), reply.text));
+    }
+    // Les trois autres restent cachés : leurs clés répondent comme des clés inconnues.
+    for key in &hidden_keys[..3] {
+        let text = logs_text(&agent, &admin, key).await;
+        assert!(text.contains("ServiceNotFound"), "{key} : {text}");
+        seen.push((format!("logs {key} après adoption (marie)"), text));
+    }
+    // Le journal d'activité (lu par l'administrateur) et la base : aucune entrée, aucune table ne contient
+    // un nom, une image, une variable, une valeur, une commande, une unité ou un port cachés. Le nom du
+    // conteneur adopté est le seul nom d'un conteneur qui y entre (BR-ADOPT-019), et seulement lui.
+    agent.flush_journal().await;
+    let journal: Vec<(String, String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT action, outcome, target, reason FROM audit_events ORDER BY id")
+            .fetch_all(env.db.pool())
+            .await
+            .unwrap();
+    assert!(
+        journal
+            .iter()
+            .any(|(action, outcome, target, _)| action == "service.adopt"
+                && outcome == "ok"
+                && target.as_deref() == Some("service adoptable-extra")),
+        "l'adoption est consignée avec le nom qui vient d'être publié : {journal:?}"
+    );
+    // La lecture réussie des candidats y est (action au catalogue), sans un seul nom de conteneur. Rien n'est
+    // effacé ni remplacé avant la recherche : le texte est balayé tel que la base le porte.
+    assert!(
+        journal.iter().any(
+            |(action, outcome, target, _)| action == "service.external.read"
+                && outcome == "ok"
+                && target.as_deref() == Some("/services/external")
+        ),
+        "la lecture des candidats est consignée : {journal:?}"
+    );
+    let journal_text = journal
+        .iter()
+        .map(|row| format!("{row:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    seen.push(("journal d'activité".to_owned(), journal_text));
+    seen.push(("tables de la base".to_owned(), dump_tables(&env).await));
+    // Témoin : la recherche voit une sentinelle écrite dans une table, quelle qu'elle soit. Sans lui, un
+    // balayage qui ne lirait aucune table passerait pour un balayage propre. Il se fait sur une base en
+    // mémoire à part : une ligne écrite puis effacée reste lisible dans les pages d'un fichier SQLite.
+    let scratch = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+    sqlx::query("CREATE TABLE sentinel_control (x TEXT)")
+        .execute(&scratch)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO sentinel_control (x) VALUES (?)")
+        .bind(HIDDEN_NAME)
+        .execute(&scratch)
+        .await
+        .unwrap();
+    let controlled = dump_pool(&scratch).await;
+    assert!(
+        std::panic::catch_unwind(|| assert_no_hidden("témoin", &controlled)).is_err(),
+        "le balayage des tables doit voir une sentinelle"
+    );
+
     for (what, text) in &seen {
         assert_no_hidden(what, text);
     }
@@ -1822,6 +2277,18 @@ async fn nothing_of_a_container_that_is_not_adopted_leaves_the_agent_by_any_rout
     );
     drop(clients);
     agent.shutdown().await;
+    // Les octets du dossier de données (la base et son journal d'écriture, les fichiers de l'agent) : les
+    // sentinelles des conteneurs restés cachés n'y sont pas. Le nom du conteneur adopté y est, lui.
+    let bytes = all_bytes(env.dir.path());
+    let stored = String::from_utf8_lossy(&bytes).to_lowercase();
+    // Les deux préfixes génériques couvrent tous les conteneurs restés cachés (noms, images, unités,
+    // variables, valeurs, commandes, lignes de journal) sans rien oublier.
+    for forbidden in ["sentinel-hidden", "sentinel_hidden"] {
+        assert!(
+            !stored.contains(forbidden),
+            "{forbidden} dans le dossier de données"
+        );
+    }
     let captured = String::from_utf8_lossy(&traces.lock().unwrap()).into_owned();
     assert!(
         captured.contains("witness-hidden-line"),

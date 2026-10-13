@@ -194,6 +194,8 @@ fn from_stored(stored: StoredView) -> Result<Observation, StoreError> {
         env_omitted: 0,
         command: None,
         stop_timeout_s: stored.stop_timeout_s,
+        tty: false,
+        log_driver: None,
     })
 }
 

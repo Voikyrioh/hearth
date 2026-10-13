@@ -4,7 +4,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 
 **Actes d'administration** (HRT-28) : les routes qui modifient (hors déconnexion et hors retrait d'un poste, qui garde son contrat) acceptent un membre `reauth` (mot de passe + preuve de clé d'usage `0x05`) ; l'agent l'EXIGE depuis HRT-30 (`GET /security` : `admin_reauth.required: true`) ; sans `reauth`, `426 INCOMPATIBLE_VERSION` « client trop ancien ». Voir [sécurité](./security.md).
 
-33 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
+37 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
@@ -24,6 +24,10 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Mesures** | GET | [`/metrics/history?window=1m\|5m\|1h`](./metrics.md) | user+ | Historique rééchantillonné |
 | **Services** | GET | [`/services`](./services.md) | user+ | Moteur de conteneurs (état en huit valeurs, nom, version, compte de l'agent, hôte) et les services publiés (créés par Hearth ou adoptés, HRT-79), arrêtés compris, triés par nom, les autres conteneurs comptés (`external_count`) ; lecture seule, détail (noms de variables, commande, délai d'arrêt, unité systemd), aucune valeur de variable |
 | **Services** | GET | [`/services/{key}/env`](./services.md) | admin | Valeurs des variables d'un service (HRT-63, BR-SVC-009) : refus d'un compte en lecture seule et réussite consignés (`service.env.reveal`) sans nom ni valeur, `Cache-Control: no-store` |
+| **Services** | GET | [`/services/{key}/logs`](./services.md) | user+ (jeton dans le premier message) ; service adopté : droit de gérer les services ; conteneur non adopté : réponse d'une clé inconnue | WebSocket d'une lecture de journaux (HRT-66, HRT-79) : 1 000 dernières lignes puis le direct, lots de 100 ms, anneau borné, perte comptée, reprise par curseur, dix lectures au plus ; lire n'est pas journalisé |
+| **Services** | GET | [`/services/external`](./services.md) | droit « gérer les services » | Les conteneurs non gérés que ce compte peut choisir d'adopter (HRT-80, BR-ADOPT-005, 006) : clé, nom, image, unité, état, rien d'autre ; jamais sur le flux, jamais gardée ; lecture réussie et refus consignés (`service.external.read`, sans nom, regroupés) |
+| **Services** | POST | [`/services/adopt`](./services.md) | droit « gérer les services » + acte d'administration `0x11` (mot de passe à chaque fois, jamais l'élévation) | Adopte 1 à 50 conteneurs, un résultat par clé (HRT-80, BR-ADOPT-008 à 010) ; une ligne dans la base de l'agent, rien d'écrit sur le service ; une entrée de journal par service (`service.adopt`) |
+| **Services** | POST | [`/services/{key}/release`](./services.md) | droit « gérer les services » + acte d'administration `0x12` (couvert par l'élévation) | « Ne plus gérer » (HRT-80, BR-ADOPT-013) : le service sort de la liste de tous, sans effet ni entrée si déjà relâché ; journal `service.release` |
 | **Services** | POST | [`/engine/recheck`](./services.md) | user+ | Relance la détection du moteur et rend son état : un `POST` qui ne modifie rien (`READ_ONLY_POSTS`) |
 | **Comptes** | GET | [`/accounts`](./accounts.md) | admin | Liste comptes, sessions ouvertes, dernier login |
 | **Comptes** | POST | [`/accounts`](./accounts.md) | admin | Créer compte (username, password, role) |

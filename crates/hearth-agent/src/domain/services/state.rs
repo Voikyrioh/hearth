@@ -115,6 +115,10 @@ pub struct Observation {
     pub command: Option<Vec<Hidden>>,
     /// `Config.StopTimeout` du conteneur, en secondes, s'il en déclare un.
     pub stop_timeout_s: Option<u32>,
+    /// Lancé avec un terminal (`Config.Tty`) : une seule sortie, flux brut (journaux, BR-SLOG-012).
+    pub tty: bool,
+    /// Le pilote de journaux (`HostConfig.LogConfig.Type`) : `none` ne se relit pas (BR-SLOG-017).
+    pub log_driver: Option<String>,
 }
 
 impl Observation {
@@ -152,6 +156,8 @@ impl Observation {
             env_omitted: 0,
             command: None,
             stop_timeout_s: None,
+            tty: false,
+            log_driver: None,
         }
     }
 }
@@ -420,6 +426,8 @@ mod tests {
             env_omitted: 0,
             command: None,
             stop_timeout_s: None,
+            tty: false,
+            log_driver: None,
         }
     }
 

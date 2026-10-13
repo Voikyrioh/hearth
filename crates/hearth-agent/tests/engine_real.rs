@@ -19,9 +19,12 @@ mod support;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use hearth_agent::application::ports::ContainerEngine;
+use futures_util::StreamExt;
+use hearth_agent::application::ports::{ContainerEngine, LogQuery};
+use hearth_agent::domain::services::logs::LogSource;
 use hearth_agent::infrastructure::engine::BollardEngine;
 use support::engine_contract::{self, Harness, Run, Spec};
 
@@ -80,6 +83,13 @@ impl Harness for RealHarness {
             args.push("-e".into());
             args.push(variable.clone());
         }
+        if spec.tty {
+            args.push("-t".into());
+        }
+        if spec.log_driver_none {
+            args.push("--log-driver".into());
+            args.push("none".into());
+        }
         args.push(IMAGE.into());
         args.extend(["sh".into(), "-c".into()]);
         args.push(match spec.run {
@@ -100,6 +110,17 @@ impl Harness for RealHarness {
 
     async fn remove(&self, id: &str) {
         docker(&["rm", "-f", id]);
+    }
+
+    /// Écrit sur la sortie du processus principal du conteneur (`/proc/1/fd/1` ou `/proc/1/fd/2`) : ce que
+    /// le moteur capte, comme si le service l'avait écrit lui-même. Le texte passe en argument (`$0`), jamais
+    /// dans le script.
+    async fn print(&self, id: &str, source: LogSource, text: &str) {
+        let script = match source {
+            LogSource::Out | LogSource::Unknown => "printf '%s\n' \"$0\" > /proc/1/fd/1",
+            LogSource::Err => "printf '%s\n' \"$0\" > /proc/1/fd/2",
+        };
+        docker(&["exec", id, "sh", "-c", script, text]);
     }
 }
 
@@ -338,4 +359,97 @@ async fn denied_and_mute_unix_sockets() {
             "SAUTÉ (compte root : un socket sans droit reste ouvert, cas non vérifiable ici)"
         }
     );
+}
+
+/// La mémoire résidente de ce processus, en Kio (Linux).
+fn rss_kb() -> Option<u64> {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("VmRSS:"))
+        .and_then(|value| value.trim().trim_end_matches("kB").trim().parse().ok())
+}
+
+/// Le débit soutenu des journaux (HRT-66, BR-SLOG-007) : un service qui écrit environ 1 000 lignes par
+/// seconde est lu sans perte ni doublon pendant toute la durée, et la mémoire du lecteur ne grandit pas.
+/// `HEARTH_LOG_RATE_SECONDS` : 60 par défaut (job `engine`), 600 pour la version longue (`workflow_dispatch`).
+/// Le lecteur est celui de l'agent (`BollardEngine::logs`) ; l'anneau borné et le socket sont éprouvés
+/// par `tests/service_logs_ws.rs` (faux moteur, sans Docker).
+#[tokio::test]
+#[ignore = "vrai moteur : HEARTH_TEST_ENGINE=1 cargo test -p hearth-agent --test engine_real -- --ignored"]
+async fn a_service_writing_a_thousand_lines_a_second_is_read_without_loss_for_the_whole_duration() {
+    if !enabled() {
+        eprintln!("HEARTH_TEST_ENGINE=1 n'est pas posé : test non exécuté");
+        return;
+    }
+    let seconds: u64 = std::env::var("HEARTH_LOG_RATE_SECONDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(60);
+    docker(&["pull", "--quiet", IMAGE]);
+    remove_leftovers();
+    let name = format!("{PREFIX}-rate");
+    // Cent lignes, puis cent millisecondes de pause : environ 1 000 lignes par seconde.
+    let script = "i=0; while true; do j=0; while [ $j -lt 100 ]; do i=$((i+1)); j=$((j+1)); echo \"n=$i une ligne de journal ordinaire\"; done; sleep 0.1; done";
+    let id = docker(&["run", "-d", "--name", &name, IMAGE, "sh", "-c", script]);
+    let engine = BollardEngine::unix(socket());
+    let mut stream = engine.logs(
+        &id,
+        LogQuery {
+            follow: true,
+            tail: Some(0),
+            since_ms: None,
+            tty: false,
+        },
+    );
+    let (mut received, mut expected) = (0u64, None::<u64>);
+    let mut read_one = |line: hearth_agent::domain::services::logs::LogLine| {
+        let n: u64 = line
+            .text
+            .strip_prefix("n=")
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|number| number.parse().ok())
+            .expect("une ligne du service");
+        if let Some(expected) = expected {
+            assert_eq!(n, expected, "ni perte ni doublon après {received} lignes");
+        }
+        expected = Some(n + 1);
+        received += 1;
+    };
+    // La première ligne lue fixe le départ ; la mémoire est mesurée après une seconde de rodage.
+    let first = tokio::time::timeout(Duration::from_secs(20), stream.next())
+        .await
+        .expect("le service écrit")
+        .expect("le flux ne finit pas")
+        .expect("journaux");
+    read_one(first);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let rss_before = rss_kb();
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    while Instant::now() < deadline {
+        let line = tokio::time::timeout(Duration::from_secs(10), stream.next())
+            .await
+            .expect("une ligne au moins toutes les 10 s")
+            .expect("le flux ne finit pas")
+            .expect("journaux");
+        read_one(line);
+    }
+    let rss_after = rss_kb();
+    eprintln!(
+        "journaux : {received} lignes lues en {seconds} s, mémoire {rss_before:?} -> {rss_after:?} Kio"
+    );
+    assert!(
+        received >= seconds * 500,
+        "au moins la moitié du débit visé : {received} lignes en {seconds} s"
+    );
+    if let (Some(before), Some(after)) = (rss_before, rss_after) {
+        assert!(
+            // 32 Mio : une fuite de 0,6 Kio par ligne sur 60 s (60 000 lignes) dépasse ; 64 Mio laissaient
+            // passer un kilo-octet par ligne. La version de 10 minutes attrape bien moins encore.
+            after < before + 32 * 1024,
+            "la mémoire du lecteur ne grandit pas : {before} Kio -> {after} Kio"
+        );
+    }
+    drop(stream);
+    remove_leftovers();
 }

@@ -130,6 +130,7 @@ fn config_for(dir: &Path) -> AgentConfig {
         data_dir: dir.to_owned(),
         managed: true,
         engine: hearth_agent::infrastructure::config::EngineConfig::disabled(),
+        services: hearth_agent::infrastructure::config::ServicesConfig::default(),
     }
 }
 

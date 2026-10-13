@@ -33,6 +33,9 @@ const ALLOWED_NAMERS: &[&str] = &[
     "application/ports/unit_of_work.rs",
     "application/services_right.rs",
     "domain/accounts/account.rs",
+    // Lecture seule (HRT-66) : le `Viewer` des journaux porte le droit relu avec la session.
+    "domain/services/logs.rs",
+    "entrypoint/ws/service_logs.rs",
     "entrypoint/http/accounts.rs",
     "entrypoint/http/auth.rs",
     "entrypoint/http/wire.rs",

@@ -17,6 +17,9 @@ pub const ENV_MANAGED: &str = "HEARTH_MANAGED";
 /// moteur de conteneurs (`BR-ENGINE-021`, ADR-0036).
 pub const ENV_ENGINE: &str = "HEARTH_ENGINE";
 pub const ENV_ENGINE_SOCKET: &str = "HEARTH_ENGINE_SOCKET";
+/// `off` / `false` / `0` : l'adoption de conteneurs existants est désactivée (HRT-80, `BR-ADOPT-020`,
+/// ADR-0043) : aucun candidat, l'acte est refusé ; « ne plus gérer » reste possible.
+pub const ENV_SERVICES_ADOPTION: &str = "HEARTH_SERVICES_ADOPTION";
 
 /// Socket du moteur de conteneurs par défaut.
 pub const DEFAULT_ENGINE_SOCKET: &str = "/var/run/docker.sock";
@@ -50,6 +53,21 @@ impl EngineConfig {
     }
 }
 
+/// Réglages des services (`[services]` de `agent.toml`, HRT-80).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServicesConfig {
+    /// Permis par défaut. À `false`, l'agent ne propose aucun candidat et refuse l'acte d'adoption ;
+    /// les services déjà adoptés restent gérés et peuvent être relâchés (`BR-ADOPT-020`). Hearth ne change
+    /// jamais ce réglage lui-même.
+    pub adoption: bool,
+}
+
+impl Default for ServicesConfig {
+    fn default() -> Self {
+        Self { adoption: true }
+    }
+}
+
 /// Configuration effective, prête à l'emploi.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentConfig {
@@ -59,6 +77,7 @@ pub struct AgentConfig {
     /// Installation gérée de l'extérieur (pas de mise à jour automatique).
     pub managed: bool,
     pub engine: EngineConfig,
+    pub services: ServicesConfig,
 }
 
 /// Options venues de la ligne de commande.
@@ -94,6 +113,14 @@ struct FileConfig {
     data_dir: Option<PathBuf>,
     managed: Option<bool>,
     engine: Option<FileEngine>,
+    services: Option<FileServices>,
+}
+
+/// La table `[services]` de `agent.toml`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileServices {
+    adoption: Option<bool>,
 }
 
 /// La table `[engine]` de `agent.toml`.
@@ -126,6 +153,15 @@ pub fn load(
             .unwrap_or_else(|| PathBuf::from(DEFAULT_ENGINE_SOCKET)),
     };
 
+    let mut services = ServicesConfig {
+        adoption: file
+            .services
+            .and_then(|services| services.adoption)
+            .unwrap_or(true),
+    };
+    if let Some(value) = env(ENV_SERVICES_ADOPTION) {
+        services.adoption = parse_bool(ENV_SERVICES_ADOPTION, &value)?;
+    }
     if let Some(value) = env(ENV_LISTEN_ADDR) {
         listen_addr = parse_env(ENV_LISTEN_ADDR, &value)?;
     }
@@ -158,6 +194,7 @@ pub fn load(
         data_dir,
         managed,
         engine,
+        services,
     })
 }
 
@@ -485,6 +522,46 @@ socket = \"/run/other.sock\"
             err,
             ConfigError::BadEnv {
                 name: ENV_ENGINE,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn adoption_is_permitted_by_default_and_the_file_or_the_environment_can_turn_it_off() {
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
+        let cli = cli_with_empty_file(dir.path());
+        let data = (ENV_DATA_DIR, "/d");
+        assert!(
+            load(&cli, &env_of(&[data]))
+                .expect("config")
+                .services
+                .adoption
+        );
+        std::fs::write(
+            dir.path().join("agent.toml"),
+            "[services]
+adoption = false
+",
+        )
+        .expect("write");
+        assert!(
+            !load(&cli, &env_of(&[data]))
+                .expect("config")
+                .services
+                .adoption
+        );
+        // L'environnement l'emporte sur le fichier, dans les deux sens.
+        let env = env_of(&[data, (ENV_SERVICES_ADOPTION, "on")]);
+        assert!(load(&cli, &env).expect("config").services.adoption);
+        std::fs::write(dir.path().join("agent.toml"), "").expect("write");
+        let env = env_of(&[data, (ENV_SERVICES_ADOPTION, "off")]);
+        assert!(!load(&cli, &env).expect("config").services.adoption);
+        let env = env_of(&[data, (ENV_SERVICES_ADOPTION, "peut-être")]);
+        assert!(matches!(
+            load(&cli, &env).expect_err("booléen invalide"),
+            ConfigError::BadEnv {
+                name: ENV_SERVICES_ADOPTION,
                 ..
             }
         ));
