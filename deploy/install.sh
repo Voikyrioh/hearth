@@ -40,8 +40,8 @@ Utilisation :
   curl -fsSL https://hearth.voikyrioh.fr/api/install.sh | sudo sh
   sudo sh install.sh --url https://exemple.org/hearth-agent --sha256 SOMME
 
-Options du script (les autres, par exemple --port 7342, --managed, --yes, sont transmises
-telles quelles à `hearth-agent install`) :
+Options du script (les autres, par exemple --port 7342, --managed, --yes, --services,
+--no-services, sont transmises telles quelles à `hearth-agent install`) :
   --binary CHEMIN   utilise ce fichier local (sa somme n'est vérifiée que si --sha256 est donnée)
   --url ADRESSE     télécharge le binaire à cette adresse HTTPS (ou HEARTH_RELEASE_URL) au lieu
                     de la dernière version publiée
@@ -59,6 +59,10 @@ Mot de passe du premier compte : jamais sur une ligne de commande. Trois voies :
      avec HEARTH_ADMIN_USER, transmis par l'environnement préservé de sudo
      (`sudo --preserve-env=HEARTH_ADMIN_USER,HEARTH_ADMIN_PASSWORD_HASH sh install.sh ...`) ;
   3. HEARTH_ADMIN_PASSWORD lu au clavier (`read -rs`), exporté, puis transmis de la même façon.
+Droit de gérer les services (déployer et piloter des conteneurs) : quand un moteur de conteneurs est
+détecté, l'installation demande si le premier compte l'aura (Entrée vaut oui). Sans terminal ou
+avec --yes, la réponse vaut NON ; --services (ou HEARTH_SERVICES=manage, seule valeur qui accorde) l'accorde sans question,
+--no-services le refuse. Plus tard : `hearth-agent account services COMPTE --grant`, en root.
 Autres variables : HEARTH_PORT, HEARTH_MANAGED, HEARTH_BASE_URL (autre origine des versions,
 HTTPS seulement).
 EOF

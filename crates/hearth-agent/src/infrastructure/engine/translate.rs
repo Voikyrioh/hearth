@@ -180,7 +180,7 @@ fn command_of(response: &ContainerInspectResponse) -> Option<Vec<Hidden>> {
     Some(parts)
 }
 
-/// Les variables d'un conteneur avec leurs valeurs, pour la révélation (administrateur seulement,
+/// Les variables d'un conteneur avec leurs valeurs, pour la révélation (comptes qui ont le droit « gérer les services » seulement,
 /// BR-SVC-009). Les noms sont bornés comme dans la liste, les valeurs gardées telles quelles (un
 /// certificat s'étend sur des lignes). Au plus `MAX_ENV_NAMES` variables, comme les noms. Une entrée
 /// sans `=` a une valeur vide.

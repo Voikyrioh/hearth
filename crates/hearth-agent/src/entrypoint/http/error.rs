@@ -4,6 +4,7 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::{HeaderValue, StatusCode, header::RETRY_AFTER};
 use axum::response::{IntoResponse, Response};
+use hearth_proto::api::accounts::RIGHT_SERVICES;
 use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
 use serde_json::json;
 
@@ -18,7 +19,11 @@ use crate::domain::sessions::SessionEnd;
 /// Posé sur toute réponse d'erreur de l'API : le code du protocole, que la couche d'accès lit pour
 /// consigner l'échec d'une requête qui modifie (jamais le corps).
 #[derive(Debug, Clone, Copy)]
-pub struct ErrorMark(pub ErrorCode);
+pub struct ErrorMark {
+    pub code: ErrorCode,
+    /// Le refus nomme un droit manquant (`details.missing`) : un refus de droits, pas un refus de rôle.
+    pub missing_right: bool,
+}
 
 /// Posé par la couche de confirmation des actes (`reauth.rs`) sur un refus qu'elle a consigné avec sa
 /// propre raison : la couche d'accès l'écrit tel quel au journal, à la place de la règle par code
@@ -156,6 +161,10 @@ impl From<AccountError> for ApiError {
                 let rules: Vec<&str> = rejected.rules.iter().map(|rule| rule.code()).collect();
                 Self(ErrorBody::weak_password(&rules, message))
             }
+            // Même forme que le refus faute du droit : le droit nommé en détail (BR-GRANT-005).
+            AccountError::ServicesHolderProtected => {
+                Self(ErrorBody::missing_right(RIGHT_SERVICES, message))
+            }
             AccountError::UsernameTaken => Self::new(ErrorCode::UsernameTaken, message),
             AccountError::NotFound => Self::new(ErrorCode::NotFound, message),
             AccountError::LastAdmin(_) => Self::new(ErrorCode::LastAdmin, message),
@@ -183,11 +192,15 @@ impl From<AuditError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let code = self.0.error.code;
+        let missing_right = self.0.error.details.get("missing").is_some();
         let status =
             StatusCode::from_u16(code.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let busy = code == ErrorCode::Busy;
         let mut response = (status, Json(self.0)).into_response();
-        response.extensions_mut().insert(ErrorMark(code));
+        response.extensions_mut().insert(ErrorMark {
+            code,
+            missing_right,
+        });
         if busy {
             response
                 .headers_mut()

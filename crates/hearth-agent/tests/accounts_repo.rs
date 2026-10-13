@@ -5,7 +5,7 @@
 mod support;
 
 use hearth_agent::application::ports::{AccountRepo, SessionRepo, Store, StoreError};
-use hearth_agent::domain::accounts::{Account, AccountId, Role, Username};
+use hearth_agent::domain::accounts::{Account, AccountId, Role, ServicesRight, Username};
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::sessions::{SessionClosure, SessionId};
 use hearth_agent::infrastructure::sqlite::{
@@ -19,6 +19,7 @@ fn account(id: &str, username: &str, role: Role) -> Account {
         id: AccountId::new(id),
         username: Username::parse(username).unwrap(),
         role,
+        services_right: ServicesRight::INITIAL,
         password_hash: Secret::from("$argon2id$fake"),
         created_at: start_time(),
         password_changed_at: start_time(),

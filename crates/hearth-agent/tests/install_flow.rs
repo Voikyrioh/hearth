@@ -56,6 +56,8 @@ struct World {
     config_port: Option<u16>,
     config_managed: Option<bool>,
     admins: Vec<String>,
+    /// Comptes à qui l'installation a donné le droit de gérer les services.
+    granted: Vec<String>,
     /// Étapes qui échouent (« binary », « config », « identity », « admin », « service »,
     /// « hello »).
     fail: Vec<&'static str>,
@@ -409,11 +411,15 @@ impl AdminAccounts for FakeAdmins {
         &self,
         name: &Username,
         credential: AdminCredential,
+        grant_services: bool,
     ) -> Result<(), AdminAccountsError> {
         self.0.step("admin").map_err(AdminAccountsError::Failed)?;
         let mut world = self.0.world();
         world.database = true;
         world.admins.push(name.to_string());
+        if grant_services {
+            world.granted.push(name.to_string());
+        }
         world.log.push(match credential {
             AdminCredential::Password(_) => "admin-password".to_owned(),
             AdminCredential::Hash(_) => "admin-hash".to_owned(),
@@ -471,6 +477,8 @@ fn install_args() -> InstallArgs {
         port: None,
         managed: false,
         yes: false,
+        services: false,
+        no_services: false,
     }
 }
 
@@ -505,6 +513,18 @@ async fn run_install(
     args: &InstallArgs,
     env: &[(&str, &str)],
     interactive: bool,
+    script: Script,
+) -> Run {
+    run_install_on(machine, args, env, interactive, false, script).await
+}
+
+/// Comme `run_install`, sur un serveur où un moteur de conteneurs est (ou non) détecté.
+async fn run_install_on(
+    machine: &Machine,
+    args: &InstallArgs,
+    env: &[(&str, &str)],
+    interactive: bool,
+    engine_detected: bool,
     mut script: Script,
 ) -> Run {
     let env = env_of(env);
@@ -531,6 +551,7 @@ async fn run_install(
         target: TARGET,
         command_line: "hearth-agent install".to_owned(),
         systemd_missing: false,
+        engine_detected,
     };
     let mut out = Vec::new();
     let result = install::install(args, &context, &installer, &mut script, &mut out).await;
@@ -571,6 +592,7 @@ async fn run_uninstall(
         target: TARGET,
         command_line: "hearth-agent uninstall".to_owned(),
         systemd_missing: false,
+        engine_detected: false,
     };
     let mut out = Vec::new();
     let result = install::uninstall(args, &context, &installer, &mut script, &mut out).await;
@@ -919,6 +941,7 @@ async fn systemd_missing_without_the_managed_flag_is_refused_before_any_write() 
         target: TARGET,
         command_line: "hearth-agent install".to_owned(),
         systemd_missing: true,
+        engine_detected: false,
     };
     let mut out = Vec::new();
     let result = install::install(
@@ -1371,5 +1394,330 @@ async fn data_kept_by_an_uninstall_are_found_again_by_the_next_installation() {
     assert!(
         run.out
             .contains("Réparation réussie. Tes comptes et données sont conservés.")
+    );
+}
+
+// ----------------------------------------------------------------------------------------------
+// Droit de gérer les services (HRT-77, BR-GRANT-006, BR-GRANT-007)
+// ----------------------------------------------------------------------------------------------
+
+const QUESTION: &str =
+    "Ce compte pourra-t-il déployer et piloter des services sur ce serveur ? [O/n]";
+
+/// Des options qui n'ont qu'à répondre à la question du droit : le port est donné.
+fn args_with_port() -> InstallArgs {
+    InstallArgs {
+        port: Some("7341".to_owned()),
+        ..install_args()
+    }
+}
+
+fn asked_the_question(run: &Run) -> usize {
+    run.script.asked.iter().filter(|q| *q == QUESTION).count()
+}
+
+async fn services_install(
+    args: &InstallArgs,
+    env: &[(&str, &str)],
+    interactive: bool,
+    engine: bool,
+    answers: &[&str],
+) -> (Machine, Run) {
+    let machine = Machine::new();
+    let run = run_install_on(
+        &machine,
+        args,
+        env,
+        interactive,
+        engine,
+        script(answers, &[]),
+    )
+    .await;
+    (machine, run)
+}
+
+#[tokio::test]
+async fn enter_grants_the_right_to_the_first_account_when_an_engine_is_detected() {
+    let (machine, run) = services_install(&args_with_port(), &ADMIN_ENV, true, true, &[""]).await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert_eq!(asked_the_question(&run), 1);
+    assert_eq!(machine.world().granted, ["marie"]);
+    assert!(
+        run.out.contains(
+            "Un compte qui peut gérer les services choisit des images et les fait tourner sur ton serveur."
+        ),
+        "{}",
+        run.out
+    );
+    assert!(
+        run.out
+            .contains("Le compte marie peut maintenant gérer les services de ce serveur."),
+        "{}",
+        run.out
+    );
+}
+
+#[tokio::test]
+async fn o_grants_and_n_does_not_and_says_how_to_grant_later() {
+    for yes in ["o", "O"] {
+        let (machine, run) =
+            services_install(&args_with_port(), &ADMIN_ENV, true, true, &[yes]).await;
+        assert!(run.result.is_ok(), "{}", run.error());
+        assert_eq!(machine.world().granted, ["marie"], "réponse {yes}");
+    }
+    for no in ["n", "N"] {
+        let (machine, run) =
+            services_install(&args_with_port(), &ADMIN_ENV, true, true, &[no]).await;
+        assert!(run.result.is_ok(), "{}", run.error());
+        assert!(machine.world().granted.is_empty(), "réponse {no}");
+        assert!(
+            run.out.contains(
+                "Le compte marie ne peut pas gérer les services de ce serveur. Tu pourras l'accorder plus tard avec : hearth-agent account services marie --grant"
+            ),
+            "{}",
+            run.out
+        );
+        assert!(!run.out.contains("peut maintenant"));
+    }
+}
+
+#[tokio::test]
+async fn an_invalid_answer_asks_again_and_a_second_invalid_answer_means_no() {
+    let (machine, run) = services_install(
+        &args_with_port(),
+        &ADMIN_ENV,
+        true,
+        true,
+        &["peut-être", "o"],
+    )
+    .await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert_eq!(asked_the_question(&run), 2);
+    assert!(run.out.contains("Réponds O ou N."), "{}", run.out);
+    assert_eq!(
+        machine.world().granted,
+        ["marie"],
+        "la deuxième réponse compte"
+    );
+
+    let (machine, run) = services_install(
+        &args_with_port(),
+        &ADMIN_ENV,
+        true,
+        true,
+        &["peut-être", "vas-y", "o"],
+    )
+    .await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert_eq!(asked_the_question(&run), 2, "jamais une troisième fois");
+    assert!(
+        machine.world().granted.is_empty(),
+        "deux invalides valent non"
+    );
+    assert!(run.out.contains("ne peut pas gérer les services"));
+}
+
+#[tokio::test]
+async fn an_input_that_closes_means_no_and_never_a_grant() {
+    let (machine, run) = services_install(&args_with_port(), &ADMIN_ENV, true, true, &[]).await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert!(machine.world().granted.is_empty());
+}
+
+#[tokio::test]
+async fn without_a_terminal_or_with_yes_the_answer_is_no_and_nothing_is_asked() {
+    let (machine, run) = services_install(&install_args(), &ADMIN_ENV, false, true, &[]).await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert_eq!(asked_the_question(&run), 0);
+    assert!(machine.world().granted.is_empty());
+    assert!(run.out.contains("ne peut pas gérer les services"));
+
+    let yes = InstallArgs {
+        yes: true,
+        ..args_with_port()
+    };
+    let (machine, run) = services_install(&yes, &ADMIN_ENV, true, true, &[""]).await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert_eq!(
+        asked_the_question(&run),
+        0,
+        "--yes valide toutes les questions : non"
+    );
+    assert!(machine.world().granted.is_empty());
+}
+
+#[tokio::test]
+async fn the_explicit_option_or_variable_grants_without_asking() {
+    let services = InstallArgs {
+        services: true,
+        ..args_with_port()
+    };
+    for interactive in [false, true] {
+        let (machine, run) = services_install(&services, &ADMIN_ENV, interactive, true, &[]).await;
+        assert!(run.result.is_ok(), "{}", run.error());
+        assert_eq!(asked_the_question(&run), 0);
+        assert_eq!(
+            machine.world().granted,
+            ["marie"],
+            "interactif : {interactive}"
+        );
+    }
+    let mut env = ADMIN_ENV.to_vec();
+    env.push(("HEARTH_SERVICES", "manage"));
+    let (machine, run) = services_install(&install_args(), &env, false, true, &[]).await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert_eq!(machine.world().granted, ["marie"]);
+}
+
+#[tokio::test]
+async fn no_services_forces_no_over_the_variable_and_over_the_terminal() {
+    let no = InstallArgs {
+        no_services: true,
+        ..args_with_port()
+    };
+    let mut env = ADMIN_ENV.to_vec();
+    env.push(("HEARTH_SERVICES", "manage"));
+    let (machine, run) = services_install(&no, &env, true, true, &["o"]).await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert_eq!(asked_the_question(&run), 0);
+    assert!(machine.world().granted.is_empty());
+}
+
+#[tokio::test]
+async fn an_unknown_value_of_the_variable_is_refused_before_any_write() {
+    let mut env = ADMIN_ENV.to_vec();
+    env.push(("HEARTH_SERVICES", "tout"));
+    let (machine, run) = services_install(&install_args(), &env, false, true, &[]).await;
+    assert!(matches!(run.result, Err(InstallCliError::Refused(_))));
+    assert_eq!(
+        run.error(),
+        "HEARTH_SERVICES doit valoir « manage » ou « none »."
+    );
+    let world = machine.world();
+    assert!(world.binary.is_none() && world.admins.is_empty() && world.granted.is_empty());
+}
+
+/// BR-GRANT-007 : `HEARTH_SERVICES` n'accepte QUE `manage` et `none`, exactement. Les synonymes booléens
+/// d'une variable héritée (`1`, `true`, `yes`, `on`, `0`...), une autre casse ou un espace sont refusés
+/// avant toute écriture, avec ou sans moteur détecté, et même quand une option tranche.
+#[tokio::test]
+async fn only_manage_and_none_are_accepted_whatever_the_engine_and_the_options() {
+    let no = InstallArgs {
+        no_services: true,
+        ..args_with_port()
+    };
+    let yes = InstallArgs {
+        services: true,
+        ..args_with_port()
+    };
+    for value in [
+        "1", "true", "yes", "on", "0", "false", "no", "off", "MANAGE", "None", " manage", "manage ",
+    ] {
+        for engine in [true, false] {
+            for args in [install_args(), no.clone(), yes.clone()] {
+                let mut env = ADMIN_ENV.to_vec();
+                env.push(("HEARTH_SERVICES", value));
+                let (machine, run) = services_install(&args, &env, false, engine, &[]).await;
+                assert!(
+                    matches!(run.result, Err(InstallCliError::Refused(_))),
+                    "{value:?} avec moteur {engine} doit être refusé"
+                );
+                assert_eq!(
+                    run.error(),
+                    "HEARTH_SERVICES doit valoir « manage » ou « none »."
+                );
+                let world = machine.world();
+                assert!(
+                    world.binary.is_none() && world.admins.is_empty() && world.granted.is_empty()
+                );
+            }
+        }
+    }
+    // Une variable vide est absente ; les deux valeurs documentées passent, sans moteur aussi.
+    for (value, granted) in [("", false), ("none", false), ("manage", true)] {
+        let mut env = ADMIN_ENV.to_vec();
+        env.push(("HEARTH_SERVICES", value));
+        let (machine, run) = services_install(&install_args(), &env, false, true, &[]).await;
+        assert!(run.result.is_ok(), "{value:?} : {}", run.error());
+        assert_eq!(
+            machine.world().granted.len(),
+            usize::from(granted),
+            "{value:?}"
+        );
+        let (machine, run) = services_install(&install_args(), &env, false, false, &[]).await;
+        assert!(
+            run.result.is_ok(),
+            "{value:?} sans moteur : {}",
+            run.error()
+        );
+        assert!(machine.world().granted.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn without_an_engine_nothing_is_asked_nothing_is_granted_and_the_command_is_given() {
+    let services = InstallArgs {
+        services: true,
+        ..args_with_port()
+    };
+    for (args, interactive) in [(args_with_port(), true), (services, false)] {
+        let (machine, run) = services_install(&args, &ADMIN_ENV, interactive, false, &[""]).await;
+        assert!(run.result.is_ok(), "{}", run.error());
+        assert_eq!(asked_the_question(&run), 0);
+        assert!(machine.world().granted.is_empty());
+        assert!(
+            run.out.contains(
+                "Aucun moteur de conteneurs détecté : le droit de gérer les services n'est pas accordé. Tu pourras l'accorder plus tard avec : hearth-agent account services marie --grant"
+            ),
+            "{}",
+            run.out
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_managed_installation_asks_the_same_question_the_same_way() {
+    let managed = InstallArgs {
+        managed: true,
+        ..args_with_port()
+    };
+    let (machine, run) = services_install(&managed, &ADMIN_ENV, true, true, &["o"]).await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert_eq!(asked_the_question(&run), 1);
+    assert_eq!(machine.world().granted, ["marie"]);
+    let (machine, run) = services_install(&managed, &ADMIN_ENV, false, true, &[]).await;
+    assert!(run.result.is_ok(), "{}", run.error());
+    assert!(machine.world().granted.is_empty());
+}
+
+#[tokio::test]
+async fn an_update_never_asks_nor_grants_to_the_accounts_that_already_exist() {
+    let machine = Machine::new();
+    let first = run_install(
+        &machine,
+        &install_args(),
+        &ADMIN_ENV,
+        false,
+        Script::default(),
+    )
+    .await;
+    assert!(first.result.is_ok(), "{}", first.error());
+    let services = InstallArgs {
+        services: true,
+        ..args_with_port()
+    };
+    let again = run_install_on(&machine, &services, &[], true, true, script(&[""], &[])).await;
+    assert!(again.result.is_ok(), "{}", again.error());
+    assert_eq!(asked_the_question(&again), 0);
+    assert!(
+        machine.world().granted.is_empty(),
+        "aucun octroi en silence"
+    );
+    assert!(
+        again
+            .out
+            .contains("hearth-agent account services COMPTE --grant"),
+        "{}",
+        again.out
     );
 }

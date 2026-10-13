@@ -143,6 +143,17 @@ impl ErrorBody {
         )
     }
 
+    /// `403 FORBIDDEN_ROLE` avec `details.missing` : le droit qui manque (`api::accounts::RIGHT_SERVICES`),
+    /// pour un compte à qui son rôle ne manque pas (BR-GRANT-004). Même code que le refus de rôle :
+    /// un client ancien le traite comme un refus ; un client récent lit `details.missing`.
+    pub fn missing_right(right: &str, message: impl Into<String>) -> Self {
+        Self::with_details(
+            ErrorCode::ForbiddenRole,
+            message,
+            serde_json::json!({ "missing": right }),
+        )
+    }
+
     /// `422 WEAK_PASSWORD` avec `details.rules` : les règles non respectées, par code stable.
     pub fn weak_password(rules: &[&str], message: impl Into<String>) -> Self {
         Self::with_details(
@@ -235,6 +246,9 @@ mod tests {
         let body = ErrorBody::too_many_attempts(60, "attends");
         assert_eq!(body.error.code, ErrorCode::TooManyAttempts);
         assert_eq!(body.error.details, json!({ "retry_after_s": 60 }));
+        let body = ErrorBody::missing_right("services", "pas le droit");
+        assert_eq!(body.error.code, ErrorCode::ForbiddenRole);
+        assert_eq!(body.error.details, json!({ "missing": "services" }));
         let body = ErrorBody::weak_password(&["min_length", "digit"], "faible");
         assert_eq!(
             body.error.details,

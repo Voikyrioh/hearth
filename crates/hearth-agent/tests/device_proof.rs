@@ -15,6 +15,7 @@ use base64::engine::general_purpose::STANDARD;
 use hearth_agent::application::ports::{Clock, DeviceRepo, KnownAddressRepo};
 use hearth_agent::application::sessions::{AuthError, LoginError, LoginOutcome};
 use hearth_agent::application::trust::RemoveError;
+use hearth_agent::domain::accounts::Authority;
 use hearth_agent::domain::accounts::{AccountId, Role};
 use hearth_agent::domain::sessions::{RENEWAL_INTERVAL, SessionEnd};
 use hearth_agent::domain::trust::DeviceId;
@@ -1254,7 +1255,12 @@ async fn a_password_change_by_an_administrator_forgets_every_device_and_address(
     let env = env().await;
     let (account, _) = one_device_and_one_plain_address(&env).await;
     env.service
-        .set_password(&account, secret("Nouveau-Mot-De-Passe-77"), by())
+        .set_password(
+            &account,
+            secret("Nouveau-Mot-De-Passe-77"),
+            &Authority::Server,
+            by(),
+        )
         .await
         .unwrap();
     assert_eq!(devices(&env).await, 0, "BR-TRUST-024");

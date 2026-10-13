@@ -193,6 +193,7 @@ mod tests {
                 id: "A".into(),
                 username: "marie".into(),
                 role: RoleName::Admin,
+                rights: Vec::new(),
             },
         };
         let text = format!("{request:?} {response:?}");
@@ -227,6 +228,7 @@ mod tests {
                     id: "A".into(),
                     username: "marie".into(),
                     role: super::super::accounts::RoleName::Admin,
+                    rights: Vec::new(),
                 },
             },
             device: Some(DeviceStatus::Enrolled),

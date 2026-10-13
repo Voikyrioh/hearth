@@ -411,3 +411,71 @@ async fn every_command_is_journaled_with_the_command_line_origin_and_no_secret()
     let dump = format!("{rows:?}");
     assert!(!dump.contains(PASSWORD) && !dump.contains("Another-Pass-77"));
 }
+
+/// L'utilisateur effectif est root (Linux) : le refus « hors root » ne peut alors pas se prouver ici.
+fn running_as_root() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status
+                .lines()
+                .find_map(|line| line.strip_prefix("Uid:"))
+                .and_then(|ids| ids.split_whitespace().nth(1).map(|uid| uid == "0"))
+        })
+        .unwrap_or(false)
+}
+
+#[test]
+fn the_services_command_refuses_outside_root_before_touching_anything() {
+    if running_as_root() {
+        // Le refus « hors root » ne peut pas se prouver en root (job en conteneur). On prouve alors
+        // l'autre moitié, pour ne jamais sortir sans rien avoir prouvé : en root la commande n'est PAS
+        // refusée pour ce motif, elle va jusqu'au compte (inconnu ici). Le refus se prouve lancé hors root.
+        let dir = data_dir();
+        let run = hearth(dir.path(), &["services", "marie", "--grant"], None);
+        assert!(!run.ok(), "{}", run.all());
+        assert!(
+            !run.stderr.contains("doit être lancée en root"),
+            "refusée en root : {}",
+            run.all()
+        );
+        assert!(run.stderr.contains("n'existe pas"), "{}", run.all());
+        return;
+    }
+    let dir = data_dir();
+    for args in [
+        vec!["services", "marie", "--grant"],
+        vec!["services", "marie", "--revoke"],
+        vec!["services", "marie"],
+    ] {
+        let run = hearth(dir.path(), &args, None);
+        assert!(!run.ok(), "{args:?} : {}", run.all());
+        assert!(run.stdout.is_empty(), "{}", run.stdout);
+        assert_eq!(
+            run.stderr.trim(),
+            "Cette commande doit être lancée en root sur le serveur.",
+            "{args:?}"
+        );
+    }
+    assert!(
+        !dir.path().join(DATABASE_FILE).exists(),
+        "la base n'est même pas créée"
+    );
+}
+
+#[test]
+fn the_services_command_takes_exactly_one_option_and_no_password() {
+    let dir = data_dir();
+    // Refusées par l'analyse de la ligne, avant tout (code 2, aucune sortie sur la sortie standard).
+    for args in [
+        vec!["services", "marie", "--grant", "--revoke"],
+        vec!["services"],
+        vec!["services", "marie", "--grant", "--password", "x"],
+        vec!["services", "marie", "--role", "admin"],
+    ] {
+        let run = hearth(dir.path(), &args, Some(PASSWORD));
+        assert!(!run.ok(), "{args:?} : {}", run.all());
+        assert!(run.stdout.is_empty());
+    }
+    assert!(!dir.path().join(DATABASE_FILE).exists());
+}

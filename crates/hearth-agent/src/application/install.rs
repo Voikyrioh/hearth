@@ -58,6 +58,9 @@ pub struct InstallInputs {
     pub managed: bool,
     /// Dossier de données différent du défaut : écrit dans la configuration.
     pub data_dir_override: Option<PathBuf>,
+    /// Le premier compte reçoit le droit de gérer les services (BR-GRANT-006, 007) ; sans effet s'il
+    /// n'y a pas de premier compte à créer.
+    pub grant_services: bool,
 }
 
 /// Le résultat d'une installation réussie.
@@ -335,7 +338,9 @@ impl Installer<'_> {
             if !observed.data.database {
                 done.push(Done::Created(Asset::Database));
             }
-            self.admins.create_admin(&name, credential).await?;
+            self.admins
+                .create_admin(&name, credential, inputs.grant_services)
+                .await?;
             done.push(Done::Created(Asset::FirstAccount));
             self.check_interrupted()?;
         }

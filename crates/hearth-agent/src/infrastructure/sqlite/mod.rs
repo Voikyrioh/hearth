@@ -14,6 +14,7 @@ mod known_address_repo;
 mod login_attempt_repo;
 mod operation_repo;
 mod services_repo;
+mod services_right_repo;
 mod session_repo;
 mod store;
 

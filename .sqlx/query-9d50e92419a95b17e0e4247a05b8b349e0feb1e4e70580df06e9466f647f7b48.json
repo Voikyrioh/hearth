@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, username, password_hash, role, created_at, password_changed_at, last_login_at\n         FROM accounts WHERE username = ?",
+  "query": "SELECT id, username, password_hash, role, services_right, created_at, password_changed_at, last_login_at\n         FROM accounts WHERE username = ?",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "created_at",
+        "name": "services_right",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "accounts",
+            "name": "services_right"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "password_changed_at",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "last_login_at",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -91,8 +102,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "c6a89eea3387cbc37a350079c0b07da7f162bcb562fb798c44cebc024a6d27dd"
+  "hash": "9d50e92419a95b17e0e4247a05b8b349e0feb1e4e70580df06e9466f647f7b48"
 }

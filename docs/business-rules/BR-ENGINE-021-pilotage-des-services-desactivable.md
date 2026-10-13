@@ -26,3 +26,4 @@ L'administrateur du serveur peut désactiver le pilotage des services dans la co
 
 ## Historique
 - 2026-10-13 — création (HRT-61, tranche 1 des déploiements : moteur détecté et liste en lecture seule).
+- 2026-10-13 — HRT-76 (ADR-0041) : le coupe-circuit reste prioritaire sur le droit « gérer les services » (BR-GRANT-015) ; test : `crates/hearth-agent/tests/services_https.rs::the_kill_switch_wins_over_the_right_with_two_values_of_the_setting`.

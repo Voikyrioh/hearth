@@ -16,8 +16,9 @@ use super::ports::{
     AccountRepo, Clock, HashError, IdGen, PasswordHasher, SessionRepo, Store, StoreError,
 };
 use crate::domain::accounts::{
-    Account, AccountId, ConfirmationMismatch, LastAdminError, PasswordRejected, PlainPassword,
-    Role, Username, UsernameError, check_removal, check_role_change, confirm_self_deletion,
+    Account, AccountId, Authority, ConfirmationMismatch, LastAdminError, PasswordRejected,
+    PlainPassword, Role, ServicesRight, Username, UsernameError, check_removal, check_role_change,
+    confirm_self_deletion,
 };
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Outcome, Target};
 use crate::domain::known_address::canonical;
@@ -39,6 +40,12 @@ pub enum AccountError {
     NotFound,
     #[error(transparent)]
     LastAdmin(#[from] LastAdminError),
+    /// BR-GRANT-005 : le compte porte le droit de gérer les services, et la demande vient du réseau
+    /// d'un compte qui ne l'a pas (ni le titulaire lui-même). Texte fixe de la spec.
+    #[error(
+        "Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut modifier ses moyens de connexion."
+    )]
+    ServicesHolderProtected,
     #[error("L'ancien mot de passe est incorrect")]
     OldPasswordIncorrect,
     #[error("Le mot de passe a été modifié entre-temps, réessaye")]
@@ -51,12 +58,32 @@ pub enum AccountError {
     Hash(#[from] HashError),
 }
 
+/// Qui change un mot de passe, au nom de quoi, et avec quelle autorité (`None` : le titulaire change
+/// le sien, que la règle du droit n'arrête jamais).
+struct Acting<'a> {
+    by: &'a Actor,
+    action: AuditAction,
+    authority: Option<&'a Authority>,
+}
+
+impl<'a> Acting<'a> {
+    fn own(by: &'a Actor) -> Self {
+        Self {
+            by,
+            action: AuditAction::OwnPassword,
+            authority: None,
+        }
+    }
+}
+
 /// Ce que les cas d'usage rendent d'un compte : jamais le haché du mot de passe (BR-ACCT-006).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountView {
     pub id: AccountId,
     pub username: Username,
     pub role: Role,
+    /// Le droit « gérer les services », relu en base à chaque requête authentifiée (BR-GRANT-010).
+    pub services_right: ServicesRight,
     pub created_at: OffsetDateTime,
     pub password_changed_at: OffsetDateTime,
     pub last_login_at: Option<OffsetDateTime>,
@@ -68,6 +95,7 @@ impl From<&Account> for AccountView {
             id: account.id.clone(),
             username: account.username.clone(),
             role: account.role,
+            services_right: account.services_right,
             created_at: account.created_at,
             password_changed_at: account.password_changed_at,
             last_login_at: account.last_login_at,
@@ -195,6 +223,8 @@ impl AccountService {
             id: AccountId::new(self.ids.new_id()),
             username,
             role,
+            // BR-GRANT-002 : un compte naît sans le droit, quel que soit son rôle.
+            services_right: ServicesRight::INITIAL,
             password_hash: hash,
             created_at: now,
             password_changed_at: now,
@@ -299,10 +329,16 @@ impl AccountService {
 
     /// BR-ACCT-008 : définit le mot de passe d'un compte (administrateur ou ligne de commande)
     /// et ferme toutes ses sessions. Rend le nombre de sessions fermées.
+    ///
+    /// BR-GRANT-005 : si le compte porte le droit de gérer les services, `authority` doit être le
+    /// serveur, le titulaire lui-même ou un compte qui a aussi le droit, sinon
+    /// `ServicesHolderProtected` et rien n'est écrit. Jugé dans la transaction de l'écriture, sur le
+    /// droit lu à cet instant.
     pub async fn set_password(
         &self,
         id: &AccountId,
         password: Secret,
+        authority: &Authority,
         by: &Actor,
     ) -> Result<u64, AccountError> {
         let account = self.require(id).await?;
@@ -313,7 +349,11 @@ impl AccountService {
             PasswordChange::ByAdmin,
             None,
             None,
-            (by, AuditAction::AccountPassword),
+            Acting {
+                by,
+                action: AuditAction::AccountPassword,
+                authority: Some(authority),
+            },
         )
         .await
     }
@@ -360,7 +400,7 @@ impl AccountService {
             PasswordChange::Own { current_session },
             Some(&account.password_hash),
             keep_address,
-            (by, AuditAction::OwnPassword),
+            Acting::own(by),
         )
         .await
     }
@@ -386,7 +426,7 @@ impl AccountService {
             PasswordChange::Own { current_session },
             Some(verified),
             keep_address,
-            (by, AuditAction::OwnPassword),
+            Acting::own(by),
         )
         .await
     }
@@ -483,7 +523,11 @@ impl AccountService {
         change: PasswordChange,
         verified_hash: Option<&Secret>,
         keep_address: Option<&str>,
-        (by, action): (&Actor, AuditAction),
+        Acting {
+            by,
+            action,
+            authority,
+        }: Acting<'_>,
     ) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
         let current = tx
@@ -491,6 +535,12 @@ impl AccountService {
             .find(id)
             .await?
             .ok_or(AccountError::NotFound)?;
+        // BR-GRANT-005 : avant toute écriture, sur le droit lu dans cette transaction.
+        if let Some(authority) = authority
+            && !authority.may_change_login_means_of(&current.id, current.services_right)
+        {
+            return Err(AccountError::ServicesHolderProtected);
+        }
         // Ce qui a été vérifié doit être ce qu'on remplace : si le mot de passe a changé depuis,
         // on refuse plutôt que d'écraser un changement fait entre-temps.
         if let Some(verified) = verified_hash

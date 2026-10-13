@@ -29,6 +29,9 @@ pub const ENV_ADMIN_PASSWORD: &str = "HEARTH_ADMIN_PASSWORD";
 pub const ENV_ADMIN_PASSWORD_HASH: &str = "HEARTH_ADMIN_PASSWORD_HASH";
 pub const ENV_PORT: &str = "HEARTH_PORT";
 pub const ENV_MANAGED: &str = "HEARTH_MANAGED";
+/// `manage` accorde au premier compte le droit de gérer les services (comme `--services`), `none` ne
+/// l'accorde pas (BR-GRANT-007). Jamais lu pour autre chose.
+pub const ENV_SERVICES: &str = "HEARTH_SERVICES";
 
 // Messages de la spécification fonctionnelle (us-installer-agent, section 4).
 pub const MSG_TITLE_INSTALL: &str = "Installation de l'agent Hearth";
@@ -69,6 +72,31 @@ pub const MSG_ALREADY_RUNNING: &str =
     "Une installation est déjà en cours sur ce serveur. Attends qu'elle se termine, puis relance.";
 pub const MSG_NOT_WRITTEN: &str = "Installation gérée par le système : aucune unité n'a été écrite et le service n'a pas été lancé. Démarre l'agent avec `hearth-agent serve`, ou laisse ton système le faire.";
 
+// Droit de gérer les services : textes de la spécification fonctionnelle (BR-GRANT-006, 007, section 4).
+pub const MSG_SERVICES_HELP: &str =
+    "Un compte qui peut gérer les services choisit des images et les fait tourner sur ton serveur.";
+pub const MSG_SERVICES_QUESTION: &str =
+    "Ce compte pourra-t-il déployer et piloter des services sur ce serveur ? [O/n]";
+pub const MSG_ANSWER_YES_NO: &str = "Réponds O ou N.";
+
+pub fn msg_services_granted(account: &str) -> String {
+    format!("Le compte {account} peut maintenant gérer les services de ce serveur.")
+}
+
+pub fn msg_services_not_granted(account: &str) -> String {
+    format!(
+        "Le compte {account} ne peut pas gérer les services de ce serveur. Tu pourras l'accorder plus tard avec : hearth-agent account services {account} --grant"
+    )
+}
+
+pub fn msg_services_no_engine(account: &str) -> String {
+    format!(
+        "Aucun moteur de conteneurs détecté : le droit de gérer les services n'est pas accordé. Tu pourras l'accorder plus tard avec : hearth-agent account services {account} --grant"
+    )
+}
+
+pub const MSG_SERVICES_OPTION_UNUSED: &str = "Des comptes existent déjà : le droit de gérer les services n'est donné par l'installation qu'au premier compte. Pour l'accorder à un compte existant : hearth-agent account services COMPTE --grant";
+
 #[derive(Debug, Error)]
 pub enum InstallCliError {
     /// Un prérequis manque, ou une entrée est refusée : rien n'a été modifié.
@@ -107,6 +135,9 @@ pub struct Context<'a> {
     pub command_line: String,
     /// systemd n'est pas là et l'installation n'est pas gérée : à refuser.
     pub systemd_missing: bool,
+    /// Un moteur de conteneurs est détecté sur ce serveur : la question du droit de gérer les
+    /// services n'est posée que dans ce cas (BR-GRANT-006).
+    pub engine_detected: bool,
 }
 
 /// L'installation est-elle gérée par le système : option `--managed` ou `HEARTH_MANAGED`.
@@ -155,6 +186,9 @@ pub async fn install(
         writeln!(out, "{MSG_TITLE_INSTALL}")?;
         return Err(refusal(&blocker, context, DEFAULT_PORT));
     }
+    // La variable `HEARTH_SERVICES` est contrôlée tout de suite, quelle que soit la suite (premier compte
+    // ou non, moteur ou non) : une valeur invalide n'est jamais ignorée en silence (BR-GRANT-007).
+    services_requested(args, context.env)?;
     // Une seule installation à la fois.
     let _lock = installer
         .host
@@ -196,6 +230,17 @@ pub async fn install(
     } else {
         None
     };
+    // 5 bis. Le droit de gérer les services, pour ce premier compte seulement (BR-GRANT-006, 007) :
+    // décidé avant la première écriture, annoncé après la réussite.
+    let services = match &admin {
+        Some((name, _)) => Some(decide_services(args, context, name, prompter, out)?),
+        None => {
+            if services_requested(args, context.env)?.unwrap_or(false) && context.engine_detected {
+                writeln!(out, "{MSG_SERVICES_OPTION_UNUSED}")?;
+            }
+            None
+        }
+    };
 
     // 6. Les écritures, avec retour en arrière.
     let inputs = InstallInputs {
@@ -206,6 +251,7 @@ pub async fn install(
         source_binary: context.source_binary.clone(),
         managed,
         data_dir_override: context.data_dir_override.clone(),
+        grant_services: services.as_ref().is_some_and(|decision| decision.grant),
     };
     let mut say = |event: Event| {
         let line = match event {
@@ -240,7 +286,103 @@ pub async fn install(
         })?;
 
     report(out, &installed, installer.host.hostname().as_str())?;
+    if let Some(decision) = services {
+        writeln!(out, "{}", decision.message)?;
+    }
     Ok(())
+}
+
+/// Ce que l'installation a décidé du droit de gérer les services, et ce qu'elle en dira.
+struct ServicesDecision {
+    grant: bool,
+    message: String,
+}
+
+/// La valeur de `HEARTH_SERVICES` : EXACTEMENT `manage` (accorde) ou `none` (refuse), rien d'autre. Une
+/// variable vide est absente. Les synonymes booléens (`1`, `true`, `yes`, `on`) ne sont PAS acceptés : une
+/// variable générique héritée d'un environnement (`sudo -E`, un script d'automatisation) ne doit jamais
+/// accorder un droit qui vaut `root`. Une valeur inconnue est une erreur, jamais un octroi (BR-GRANT-007).
+fn services_from_env(
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<bool>, InstallCliError> {
+    match non_empty(env, ENV_SERVICES).as_deref() {
+        None => Ok(None),
+        Some("manage") => Ok(Some(true)),
+        Some("none") => Ok(Some(false)),
+        Some(_) => Err(InstallCliError::Refused(format!(
+            "{ENV_SERVICES} doit valoir « manage » ou « none »."
+        ))),
+    }
+}
+
+/// Le droit demandé explicitement, sans question : `--no-services` (force non), `--services`, puis
+/// `HEARTH_SERVICES` (`manage` ou `none`). `None` : rien n'est demandé (BR-GRANT-007). La variable est
+/// TOUJOURS contrôlée, même quand une option tranche et même sans moteur détecté : une valeur invalide
+/// est une erreur avant toute écriture.
+fn services_requested(
+    args: &InstallArgs,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<bool>, InstallCliError> {
+    let from_env = services_from_env(env)?;
+    if args.no_services {
+        return Ok(Some(false));
+    }
+    if args.services {
+        return Ok(Some(true));
+    }
+    Ok(from_env)
+}
+
+/// BR-GRANT-006 et BR-GRANT-007 : sans moteur détecté, la question n'est pas posée et le droit n'est
+/// pas accordé. Avec un moteur : l'option ou la variable tranche ; sinon, en interactif, la question
+/// (Entrée vaut oui) ; sans terminal ou avec `--yes`, la réponse vaut non.
+fn decide_services(
+    args: &InstallArgs,
+    context: &Context<'_>,
+    name: &Username,
+    prompter: &mut dyn Prompter,
+    out: &mut dyn Write,
+) -> Result<ServicesDecision, InstallCliError> {
+    let account = name.as_str();
+    // La variable est contrôlée AVANT de regarder s'il y a un moteur : une valeur invalide n'est pas
+    // avalée en silence sur une machine sans moteur pour être refusée sur une autre.
+    let requested = services_requested(args, context.env)?;
+    if !context.engine_detected {
+        return Ok(ServicesDecision {
+            grant: false,
+            message: msg_services_no_engine(account),
+        });
+    }
+    let grant = match requested {
+        Some(answer) => answer,
+        None if context.interactive && !args.yes => ask_services(prompter, out)?,
+        None => false,
+    };
+    let message = if grant {
+        msg_services_granted(account)
+    } else {
+        msg_services_not_granted(account)
+    };
+    Ok(ServicesDecision { grant, message })
+}
+
+/// La question, deux fois au plus : une réponse invalide la repose, la deuxième réponse invalide vaut
+/// « non ». Une entrée qui se ferme (plus rien à lire) vaut « non » aussi : jamais un octroi par défaut.
+fn ask_services(prompter: &mut dyn Prompter, out: &mut dyn Write) -> Result<bool, InstallCliError> {
+    writeln!(out, "{MSG_SERVICES_HELP}")?;
+    for _ in 0..2 {
+        let answer = match prompter.line(MSG_SERVICES_QUESTION) {
+            Ok(answer) => answer,
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        match answer.trim() {
+            "" | "o" | "O" => return Ok(true),
+            "n" | "N" => return Ok(false),
+            _ => writeln!(out, "{MSG_ANSWER_YES_NO}")?,
+        }
+    }
+    Ok(false)
 }
 
 fn failed(detail: &str) -> InstallCliError {

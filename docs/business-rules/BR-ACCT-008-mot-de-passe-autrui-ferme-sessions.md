@@ -13,6 +13,8 @@ maj: 2026-10-06
 ## Règle
 Un administrateur (ou la ligne de commande) qui définit le mot de passe d'un compte ferme immédiatement toutes les sessions ouvertes de ce compte. Le changement du mot de passe et la fermeture des sessions sont atomiques (une seule transaction).
 
+Exception (BR-GRANT-005, défaut à confirmer) : si le compte porte le droit de gérer les services, une demande reçue du réseau n'est acceptée que du titulaire lui-même ou d'un compte qui a aussi le droit ; sinon elle est refusée (`403 FORBIDDEN_ROLE`, `details.missing: "services"`) et le mot de passe comme les sessions restent intacts. La ligne de commande du serveur passe toujours.
+
 ## Application (code)
 - `crates/hearth-agent/src/domain/sessions.rs::closure_on_password_change` (`PasswordChange::ByAdmin` → `SessionClosure::All`).
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::set_password`.

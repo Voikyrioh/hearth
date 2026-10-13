@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use super::{
     AccountTx, AttackModeTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx, OperationTx,
-    SessionTx, StoreError,
+    ServicesRightTx, SessionTx, StoreError,
 };
 
 /// Point d'entrée des écritures. Le magasin est neutre : il ne porte aucun sujet (comptes,
@@ -24,6 +24,10 @@ pub trait Store: Send + Sync {
 #[async_trait]
 pub trait UnitOfWork: Send {
     fn accounts(&mut self) -> &mut dyn AccountTx;
+
+    /// L'écriture du droit « gérer les services » : réservée à la ligne de commande du serveur
+    /// (BR-GRANT-005, `ServicesRightService`).
+    fn services_right(&mut self) -> &mut dyn ServicesRightTx;
 
     fn sessions(&mut self) -> &mut dyn SessionTx;
 

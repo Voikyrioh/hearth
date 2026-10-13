@@ -237,6 +237,7 @@ impl AdminAccounts for Admins {
         &self,
         _name: &Username,
         _credential: AdminCredential,
+        _grant_services: bool,
     ) -> Result<(), AdminAccountsError> {
         std::fs::write(self.0.join("hearth.db"), "admin")
             .map_err(|error| AdminAccountsError::Failed(error.to_string()))
@@ -355,6 +356,7 @@ impl Machine {
             target: TARGET,
             command_line: "hearth-agent install".to_owned(),
             systemd_missing: false,
+            engine_detected: false,
         };
         let mut out = Vec::new();
         install::install(
@@ -362,6 +364,8 @@ impl Machine {
                 port: None,
                 managed: false,
                 yes: true,
+                services: false,
+                no_services: false,
             },
             &context,
             &installer,
@@ -397,6 +401,7 @@ impl Machine {
             target: TARGET,
             command_line: "hearth-agent uninstall".to_owned(),
             systemd_missing: false,
+            engine_detected: false,
         };
         let mut out = Vec::new();
         install::uninstall(
