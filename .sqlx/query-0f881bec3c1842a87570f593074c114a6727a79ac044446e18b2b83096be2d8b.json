@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT service_key, rev, name, spec_json, settings_json, fiche_id, fiche_version,\n                    fiche_digest, updated_by, created_at, current\n             FROM service_specs WHERE service_key = ? AND current = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "service_key",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "service_key"
+          }
+        }
+      },
+      {
+        "name": "rev",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "rev"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "spec_json",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "spec_json"
+          }
+        }
+      },
+      {
+        "name": "settings_json",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "settings_json"
+          }
+        }
+      },
+      {
+        "name": "fiche_id",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "fiche_id"
+          }
+        }
+      },
+      {
+        "name": "fiche_version",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "fiche_version"
+          }
+        }
+      },
+      {
+        "name": "fiche_digest",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "fiche_digest"
+          }
+        }
+      },
+      {
+        "name": "updated_by",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "updated_by"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "name": "current",
+        "ordinal": 10,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "current"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0f881bec3c1842a87570f593074c114a6727a79ac044446e18b2b83096be2d8b"
+}

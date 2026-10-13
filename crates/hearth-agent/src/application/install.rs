@@ -28,7 +28,7 @@ use crate::domain::install::{
 use crate::domain::install::{
     DATA_FILES, DATABASE_FILES, IDENTITY_FILES, UPDATE_DIR, UPDATE_FILES, is_binary_temporary,
     is_database_temporary, is_fingerprint_secret_temporary, is_identity_temporary,
-    is_update_temporary,
+    is_services_key_temporary, is_update_temporary,
 };
 
 /// Combien de temps on attend que l'agent réponde après son démarrage.
@@ -494,6 +494,7 @@ impl Installer<'_> {
             if is_identity_temporary(&name)
                 || is_database_temporary(&name)
                 || is_fingerprint_secret_temporary(&name)
+                || is_services_key_temporary(&name)
             {
                 self.host.remove_file(&data.join(&name))?;
             }

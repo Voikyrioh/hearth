@@ -13,6 +13,7 @@ use crate::application::audit::AuditRecorder;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::{MetricsError, MetricsService};
 use crate::application::security::SecurityService;
+use crate::application::service_ops::ServiceOps;
 use crate::application::services::ServicesRegistry;
 
 /// Période de la purge (sessions expirées, traces anciennes, opérations de plus de 24 h).
@@ -71,6 +72,32 @@ where
             }
         }
     }))
+}
+
+/// Période du balayage des opérations de service (HRT-83, ADR-0045) : décisions expirées (15 minutes) et
+/// purge des opérations terminées depuis plus de 24 h. Une décision est donc close à 30 s près.
+pub const SERVICE_OPS_SWEEP_PERIOD: Duration = Duration::from_secs(30);
+
+/// Fait expirer les décisions restées sans réponse et purge les opérations de service finies (HRT-83).
+pub fn spawn_service_ops_sweep(ops: Arc<ServiceOps>, period: Duration) -> BackgroundTask {
+    every("service_ops_sweep", period, move || {
+        let ops = ops.clone();
+        async move {
+            match ops.sweep().await {
+                Ok(summary) if summary.expired > 0 || summary.purged > 0 => {
+                    tracing::info!(
+                        expired = summary.expired,
+                        purged = summary.purged,
+                        "opérations de service : balayage"
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "balayage des opérations de service impossible")
+                }
+            }
+        }
+    })
 }
 
 /// Détection du moteur de conteneurs et suivi des services (HRT-61) : une tâche de longue durée,

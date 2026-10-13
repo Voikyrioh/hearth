@@ -75,7 +75,8 @@ Le client Windows n'écrit jamais ces routes depuis la WebView : chaque action a
 
 | Commande | Route | Clé d'opération |
 |---|---|---|
-| `list_accounts(server_id)` | `GET /accounts` puis `GET /me` (l'identifiant de l'agent du compte de la session, rendu avec la liste) | non (lectures typées, `LinkManager::accounts_list`, sans suivi) |
+| `read_service_rights(server_id)` | `GET /me` (`rights`) et `GET /hello` (capacité `service-rights`) : `{ known, granted, account }` ; lecture seule, aucune commande n'accorde ni ne retire le droit (BR-GRANT-005, BR-GRANT-011) | non (lecture typée, `LinkManager::service_rights`) |
+| `list_accounts(server_id)` | `GET /accounts` puis `GET /me` (l'identifiant de l'agent du compte de la session, rendu avec la liste ; chaque compte porte `managesServices`, la liste `rightsKnown` = capacité `service-rights`) | non (lectures typées, `LinkManager::accounts_list`, sans suivi) |
 | `create_account(server_id, username, password, role)` | `POST /accounts` | oui |
 | `change_account_role(server_id, account_id, role)` | `PATCH /accounts/{id}` | oui |
 | `set_account_password(server_id, account_id, password)` | `PUT /accounts/{id}/password` | oui |

@@ -13,9 +13,11 @@ mod device_repo;
 mod known_address_repo;
 mod login_attempt_repo;
 mod operation_repo;
+mod ops_repo;
 mod services_repo;
 mod services_right_repo;
 mod session_repo;
+mod specs_repo;
 mod store;
 
 use std::path::{Path, PathBuf};
@@ -34,8 +36,10 @@ pub use device_repo::SqliteDeviceRepo;
 pub use known_address_repo::SqliteKnownAddressRepo;
 pub use login_attempt_repo::SqliteLoginAttemptRepo;
 pub use operation_repo::SqliteOperationRepo;
+pub use ops_repo::SqliteOpJournal;
 pub use services_repo::SqliteServiceRepo;
 pub use session_repo::SqliteSessionRepo;
+pub use specs_repo::SqliteSpecRepo;
 pub use store::SqliteStore;
 
 pub const DATABASE_FILE: &str = "hearth.db";

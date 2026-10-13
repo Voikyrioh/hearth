@@ -14,6 +14,8 @@ pub mod operations;
 pub mod reauth;
 pub mod security;
 pub mod service_logs;
+pub mod service_ops;
+pub mod service_spec;
 pub mod services;
 pub mod sessions;
 pub mod update;

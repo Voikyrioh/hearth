@@ -50,6 +50,55 @@ pub enum ErrorCode {
     /// (HRT-25) ; `details.reason` dit ce qui manque. Un utilisateur déjà authentifié : ce n'est pas
     /// un oracle.
     PostNotRecognized,
+    // --- Déploiements, lots suivants (HRT-83 déclare d'un coup les codes de tout le lot) ---
+    /// La description a changé depuis que le formulaire a été ouvert ; `details.by` et `details.at` disent par qui et quand (BR-EDIT-024).
+    SpecConflict,
+    /// Le geste ne s'applique pas à un service adopté : sa configuration reste celle de son créateur.
+    ServiceAdopted,
+    /// Un réglage du plan de conteneur est refusé par la liste fermée de l'agent.
+    PlanSettingRefused,
+    /// Le nom est réservé : un service de ce nom est en cours de suppression (BR-DEL-019).
+    NameBeingDeleted,
+    /// La limite ne peut pas être posée à chaud ; `details.needs_recreate` propose de recréer le service.
+    LimitRefusedLive,
+    /// Les limites ont changé depuis la lecture ; `details.current`.
+    LimitsChanged,
+    /// Le total engagé a changé depuis la lecture ; `details.excess_bytes`.
+    OvercommitChanged,
+    /// Le moteur ne sait pas limiter cette ressource.
+    ResourceNotLimitable,
+    /// Chemin refusé ; `details.reason` : `symlink`, `outside`, `special` ou `name`.
+    PathRefused,
+    /// Le fichier a changé depuis la lecture ; `details.by` et `details.at` si connus.
+    FileConflict,
+    /// Le fichier ne s'édite pas ; `details.reason`.
+    FileNotEditable,
+    /// Le fichier a plusieurs liens durs : il n'est pas modifié sur place.
+    Hardlinked,
+    /// Pas assez d'espace ; `details.missing_bytes` et `details.free_after_bytes`.
+    NoSpace,
+    /// Écriture refusée ; `details.reason` : `permission`, `read_only_fs`, `agent_confined`, `mount_read_only` ou `root_read_only`.
+    WriteDenied,
+    /// Une sauvegarde, une restauration ou une reprise de monde est déjà en cours ; `details.service`.
+    HeavyIoBusy,
+    /// La sauvegarde est corrompue.
+    BackupCorrupt,
+    /// La sauvegarde est utilisée par une opération en cours.
+    BackupInUse,
+    /// Le plan de restauration a changé depuis sa prévisualisation.
+    RestorePlanChanged,
+    /// Le transfert a expiré.
+    TransferExpired,
+    /// Trop de transferts à la fois.
+    TransferLimit,
+    /// Fiche de serveur de jeu inconnue.
+    FicheUnknown,
+    /// La machine est trop petite pour ce service.
+    HostTooSmall,
+    /// Le monde à reprendre n'existe plus à son emplacement.
+    WorldGone,
+    /// L'opération a passé son point de non-retour : elle ne s'annule plus (ADR-0045).
+    TooLateToCancel,
 }
 
 impl ErrorCode {
@@ -60,8 +109,8 @@ impl ErrorCode {
             | Self::InvalidCredentials
             | Self::SessionExpired
             | Self::SessionRevoked => 401,
-            Self::ForbiddenRole => 403,
-            Self::NotFound => 404,
+            Self::ForbiddenRole | Self::WriteDenied => 403,
+            Self::NotFound | Self::FicheUnknown => 404,
             Self::MethodNotAllowed => 405,
             Self::PayloadTooLarge => 413,
             Self::OperationInProgress
@@ -69,15 +118,36 @@ impl ErrorCode {
             | Self::LastAdmin
             | Self::Conflict
             | Self::ManagedInstall
-            | Self::PostNotRecognized => 409,
+            | Self::PostNotRecognized
+            | Self::SpecConflict
+            | Self::ServiceAdopted
+            | Self::NameBeingDeleted
+            | Self::LimitRefusedLive
+            | Self::LimitsChanged
+            | Self::OvercommitChanged
+            | Self::ResourceNotLimitable
+            | Self::FileConflict
+            | Self::FileNotEditable
+            | Self::Hardlinked
+            | Self::HeavyIoBusy
+            | Self::BackupCorrupt
+            | Self::BackupInUse
+            | Self::RestorePlanChanged
+            | Self::HostTooSmall
+            | Self::WorldGone
+            | Self::TooLateToCancel => 409,
             Self::ValidationError
             | Self::BadSignature
             | Self::WeakPassword
             | Self::WrongPassword
-            | Self::IdempotencyKeyReused => 422,
+            | Self::IdempotencyKeyReused
+            | Self::PlanSettingRefused
+            | Self::PathRefused => 422,
             Self::Busy => 503,
             Self::IncompatibleVersion => 426,
-            Self::TooManyAttempts => 429,
+            Self::TooManyAttempts | Self::TransferLimit => 429,
+            Self::TransferExpired => 410,
+            Self::NoSpace => 507,
             Self::InternalError => 500,
         }
     }
@@ -91,6 +161,19 @@ pub struct ErrorDetail {
     /// Données complémentaires propres au code (objet vide par défaut).
     #[serde(default = "empty_details")]
     pub details: Value,
+}
+
+impl ErrorDetail {
+    /// Le droit qui manque à un compte dont le rôle suffit : `details.missing` d'un `403 FORBIDDEN_ROLE`
+    /// (BR-GRANT-004), un texte court de l'agent. Rien pour un refus de rôle ordinaire, ni pour une valeur
+    /// vide, qui n'est pas un texte ou qui dépasse 32 caractères.
+    pub fn missing_right(&self) -> Option<&str> {
+        if self.code != ErrorCode::ForbiddenRole {
+            return None;
+        }
+        let right = self.details.get("missing")?.as_str()?;
+        (!right.is_empty() && right.chars().count() <= 32).then_some(right)
+    }
 }
 
 /// Corps de toute réponse d'erreur.
@@ -173,7 +256,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const ALL: [(ErrorCode, &str, u16); 23] = [
+    const ALL: [(ErrorCode, &str, u16); 47] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -201,6 +284,34 @@ mod tests {
         (ErrorCode::ManagedInstall, "MANAGED_INSTALL", 409),
         (ErrorCode::BadSignature, "BAD_SIGNATURE", 422),
         (ErrorCode::PostNotRecognized, "POST_NOT_RECOGNIZED", 409),
+        (ErrorCode::SpecConflict, "SPEC_CONFLICT", 409),
+        (ErrorCode::ServiceAdopted, "SERVICE_ADOPTED", 409),
+        (ErrorCode::PlanSettingRefused, "PLAN_SETTING_REFUSED", 422),
+        (ErrorCode::NameBeingDeleted, "NAME_BEING_DELETED", 409),
+        (ErrorCode::LimitRefusedLive, "LIMIT_REFUSED_LIVE", 409),
+        (ErrorCode::LimitsChanged, "LIMITS_CHANGED", 409),
+        (ErrorCode::OvercommitChanged, "OVERCOMMIT_CHANGED", 409),
+        (
+            ErrorCode::ResourceNotLimitable,
+            "RESOURCE_NOT_LIMITABLE",
+            409,
+        ),
+        (ErrorCode::PathRefused, "PATH_REFUSED", 422),
+        (ErrorCode::FileConflict, "FILE_CONFLICT", 409),
+        (ErrorCode::FileNotEditable, "FILE_NOT_EDITABLE", 409),
+        (ErrorCode::Hardlinked, "HARDLINKED", 409),
+        (ErrorCode::NoSpace, "NO_SPACE", 507),
+        (ErrorCode::WriteDenied, "WRITE_DENIED", 403),
+        (ErrorCode::HeavyIoBusy, "HEAVY_IO_BUSY", 409),
+        (ErrorCode::BackupCorrupt, "BACKUP_CORRUPT", 409),
+        (ErrorCode::BackupInUse, "BACKUP_IN_USE", 409),
+        (ErrorCode::RestorePlanChanged, "RESTORE_PLAN_CHANGED", 409),
+        (ErrorCode::TransferExpired, "TRANSFER_EXPIRED", 410),
+        (ErrorCode::TransferLimit, "TRANSFER_LIMIT", 429),
+        (ErrorCode::FicheUnknown, "FICHE_UNKNOWN", 404),
+        (ErrorCode::HostTooSmall, "HOST_TOO_SMALL", 409),
+        (ErrorCode::WorldGone, "WORLD_GONE", 409),
+        (ErrorCode::TooLateToCancel, "TOO_LATE_TO_CANCEL", 409),
     ];
 
     #[test]
@@ -249,6 +360,7 @@ mod tests {
         let body = ErrorBody::missing_right("services", "pas le droit");
         assert_eq!(body.error.code, ErrorCode::ForbiddenRole);
         assert_eq!(body.error.details, json!({ "missing": "services" }));
+        assert_eq!(body.error.missing_right(), Some("services"));
         let body = ErrorBody::weak_password(&["min_length", "digit"], "faible");
         assert_eq!(
             body.error.details,

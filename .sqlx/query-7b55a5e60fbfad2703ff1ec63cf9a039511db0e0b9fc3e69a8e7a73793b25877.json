@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM service_specs WHERE service_key = ? AND rev < ? AND current = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "7b55a5e60fbfad2703ff1ec63cf9a039511db0e0b9fc3e69a8e7a73793b25877"
+}

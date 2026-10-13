@@ -79,3 +79,4 @@ Détection d'une écriture ajoutée plus tard, de deux façons indépendantes : 
 - 2026-10-13 — création (HRT-76, ADR-0041 : le droit de gérer les services, moitié agent).
 - 2026-10-13 — HRT-77 : l'unique écrivain autorisé est la requête de la commande du serveur ; second test sur les appelants.
 - 2026-10-13 — revue locale : le droit ne se prend pas par le réseau (mot de passe d'un titulaire), inventaire des actes, garde de sources sur le texte brut, les migrations et `.sqlx/`, écriture contrôlée sur une ligne.
+- 2026-10-13 — côté client (HRT-78) : une seule commande de la coquille touche au droit, `read_service_rights`, en lecture ; le pont simulé n'a que `setServiceRightOnServer` (le serveur, pour les tests). Gardé par `tests/rights_wire.rs::the_shell_has_one_command_for_the_right_and_it_only_reads`.

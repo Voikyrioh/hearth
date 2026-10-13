@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(seq) FROM service_op_steps WHERE op_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "MAX(seq)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "433cdc3a0144fdf1c90881d194175f70a8847978913a9ba4bcf5c70e43e0fe64"
+}

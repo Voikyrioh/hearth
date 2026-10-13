@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT service_key FROM service_specs WHERE name_folded = ? AND current = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "service_key",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "service_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7194bf3c7905eb39b81183d0687ffebb239845a89f3dd703ee86950dc899b3d4"
+}

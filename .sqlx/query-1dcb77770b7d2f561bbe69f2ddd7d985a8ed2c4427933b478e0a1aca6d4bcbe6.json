@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM service_ops WHERE finished_at IS NOT NULL AND finished_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1dcb77770b7d2f561bbe69f2ddd7d985a8ed2c4427933b478e0a1aca6d4bcbe6"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO service_specs\n                 (service_key, rev, name, name_folded, spec_json, settings_json, fiche_id,\n                  fiche_version, fiche_digest, updated_by, created_at, current)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "57bab7520b2ae939cf325f2a55e811ed4027fb45b7ccafaa5b757bf1e45cee3f"
+}

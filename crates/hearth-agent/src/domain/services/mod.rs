@@ -7,12 +7,14 @@
 //! commande de lancement (HRT-63, détail d'un service) n'y entrent que dans [`Hidden`], dont `Debug`
 //! ne montre rien.
 
+pub mod drift;
 pub mod engine;
 pub mod hidden;
 pub mod image;
 pub mod key;
 pub mod limits;
 pub mod logs;
+pub mod spec;
 pub mod state;
 pub mod unit;
 

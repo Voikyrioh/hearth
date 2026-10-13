@@ -34,3 +34,4 @@ Garde de sécurité (revue de la PR 79) : la seule valeur venue de l'agent qui e
 ## Historique
 - 2026-10-13 — création (HRT-62, section Services du client, lecture seule).
 - 2026-10-13 — revue de la PR 79 (I2) : validation stricte du nom de compte, emplacement littéral sinon, liste fermée pour la distribution.
+- 2026-10-13 — HRT-74 S7 : le nom du compte de l'agent qui ne passe pas `isAccountName` n'est affiché NULLE PART (phrase neutre `engine.deniedTextUnnamed` / `deniedAdminTextUnnamed`, bloc, titre, info-bulle) ; la validation est la même que celle de la commande de HRT-78 (3 à 32 caractères). Limite : un agent compromis peut annoncer un nom valide mais faux ; le client ne peut pas le vérifier, l'avertissement « mêmes pouvoirs que l'administrateur » est la seule défense.

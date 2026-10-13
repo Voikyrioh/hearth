@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM service_spec_secrets\n             WHERE service_key = ? AND rev < ?\n               AND rev NOT IN (SELECT rev FROM service_specs WHERE service_key = ? AND current = 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "5f7a48d77bef049998397a889d760dbf0ce665a3aacab2f7a17e152822467cab"
+}
