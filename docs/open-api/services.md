@@ -26,7 +26,9 @@ Le même contenu que le `services_snapshot` du flux (repli et tests). `200` :
     "host": { "os_id": "debian", "os_like": [], "init": "systemd", "declarative": false },
     "last_ready_at": "2026-10-13T10:00:00Z",
     "checked_at": "2026-10-13T10:00:02Z",
-    "list_read_at": "2026-10-13T10:00:00Z"
+    "list_read_at": "2026-10-13T10:00:00Z",
+    "at": "2026-10-13T10:00:02Z",
+    "list_current_at": "2026-10-13T10:00:02Z"
   },
   "services": [
     {
@@ -59,8 +61,10 @@ Le même contenu que le `services_snapshot` du flux (repli et tests). `200` :
 | `engine.agent_account`, `agent_is_admin` | Compte de l'agent (BR-ENGINE-008). |
 | `engine.host` | Distribution (`ID`, `ID_LIKE` de `os-release`), système d'init, serveur déclaratif (NixOS) : pour l'aide (BR-ENGINE-005). |
 | `engine.checked_at` | Date de la dernière SONDE du moteur. Elle ne date pas la liste. |
-| `engine.list_read_at` | Facultatif. Date de la dernière lecture COMPLÈTE réussie de la liste (aucun conteneur illisible). Absent tant qu'aucune n'a réussi, ou pour un agent qui ne l'envoie pas. C'est elle que le client affiche : « Liste du moteur d'il y a {âge} ». |
-| `engine.list_degraded` | Facultatif, absent vaut `false`. `true` quand la liste affichée est peut-être périmée alors que le moteur répond : la dernière relecture a échoué, des conteneurs sont illisibles (ils gardent leur dernière description, par exemple « en marche » alors qu'ils sont tombés), ou le suivi en direct est suspendu (flux d'événements qui casse en boucle, jusqu'à 60 s). Le client dit alors « Impossible de lire les services pour le moment » et date la liste avec `list_read_at`. Sans sens quand `engine.state` n'est pas `ready` ni un état inaccessible. Un agent plus ancien n'envoie ni l'un ni l'autre ; un client plus ancien les ignore (BR-SVC-001, BR-SVC-018). |
+| `engine.list_read_at` | Facultatif. Date de la dernière lecture COMPLÈTE réussie de la liste (aucun conteneur illisible). Information seulement : elle ne dit pas depuis quand la liste est périmée (une liste suivie en direct par les événements est à jour sans relecture). Absente tant qu'aucune n'a réussi depuis que la liste a été vidée. **Le client n'en tire pas l'âge** : voir `list_current_at`. |
+| `engine.list_degraded` | Facultatif, absent vaut `false`. `true` quand la liste affichée est peut-être périmée alors que le moteur répond : la dernière relecture a échoué, des conteneurs sont illisibles (ils gardent leur dernière description, par exemple « en marche » alors qu'ils sont tombés), le suivi en direct est suspendu (flux d'événements qui casse en boucle, jusqu'à 60 s), ou la liste n'a pas encore été relue depuis que le moteur a démarré ou est revenu (jusqu'à 30 s sur un moteur lent ; l'ancienne liste d'un moteur absent n'est jamais renvoyée, elle repart vide, même si le moteur a disparu et reparu dans la fenêtre d'anti-clignotement). Une coupure retenue par l'anti-clignotement ne publie pas de marque. Le client dit alors « Impossible de lire les services pour le moment » et date la liste avec `list_current_at`. Sans sens dans les états sans liste (absent, non pris en charge, désactivé) ; jamais posé pour la seule raison « pas relue » dans un état inaccessible (la liste y est déjà grisée par l'état). Un agent plus ancien n'envoie ni l'un ni l'autre ; un client plus ancien les ignore (BR-SVC-001, BR-SVC-018). |
+| `engine.at` | Facultatif (HRT-72). Heure de l'agent au moment où cette vue a été fabriquée. Sa présence dit que l'agent connaît `list_current_at`. |
+| `engine.list_current_at` | Facultatif (HRT-72). Dernier moment où la liste était à jour : `at` quand elle l'est maintenant (sonde qui répond, liste relue et suivie sans réserve) ; sinon l'instant où l'agent a vu qu'elle cessait de l'être (lecture en échec, conteneur illisible, suivi suspendu, moteur plus joignable). Une liste suivie en direct reste « à jour » sans relecture. **Âge à afficher** (« Liste du moteur d'il y a {âge} ») : `max(0, at - list_current_at)`, deux dates de l'agent donc sans écart d'horloge avec le client, PLUS le temps écoulé chez le client depuis la réception du message, mesuré par l'horloge du client (même principe que « Vu il y a » : on part de l'instant de réception, jamais d'une date de l'agent comparée à l'horloge du client). Un message vient à chaque changement d'état ou de marque : l'âge ne se recalcule pas sans nouveau message. Jamais `at` pour une liste non relue depuis que le moteur a été vu sans liste. Lecture : `at` présent et `list_current_at` absent = l'agent n'a aucune liste (« jamais lue », ou vidée dans un état sans liste : le client qui garde sa copie la date depuis sa propre réception) ; `at` absent = agent plus ancien, date inconnue. Une horloge de l'agent qui recule peut donner une date dans le futur : l'âge est borné à zéro. |
 | `services[]` | Tous les conteneurs, arrêtés compris, triés par nom sans tenir compte de la casse (BR-SVC-001, BR-SVC-012). Liste vide quand le moteur est absent, non pris en charge, de version non prise en charge ou désactivé (BR-SVC-018) ; gardée telle quelle quand le moteur est arrêté, refuse l'accès ou ne répond pas. |
 | `key` | Identité stable, opaque : `c_<identifiant complet du conteneur>` dans cette tranche (ADR-0037). |
 | `origin` | Toujours `external` dans cette tranche (BR-SVC-003). |
@@ -72,7 +76,7 @@ Le même contenu que le `services_snapshot` du flux (repli et tests). `200` :
 
 **Valeurs inconnues.** Toute énumération que le client lit (`engine.state`, `host.init`, `state`, `origin`, `driver`, `protocol`, `scope`, `mounts[].kind`, `restart`) se lit avec une variante de repli (`unknown`, ou `other` pour `host.init`) : une valeur ajoutée par un agent plus récent ne fait pas perdre l'instantané.
 
-**Bornes.** Textes nettoyés des caractères de contrôle et de formatage invisibles (renversement du sens d'écriture compris) et plafonnés, au plus 128 ports et 64 montages par service (BR-SVC-021).
+**Bornes.** Textes nettoyés des caractères de contrôle et de formatage invisibles (renversement du sens d'écriture compris) et plafonnés, au plus 128 ports et 64 montages par service ; le surplus est compté dans `ports_omitted` et `mounts_omitted` (facultatifs, absents quand 0 : « et N autres ») (BR-SVC-021).
 
 Erreurs : celles de toute route authentifiée (`401`, `426`).
 

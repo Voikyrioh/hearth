@@ -92,9 +92,13 @@ pub struct Observation {
     pub finished_at: Option<OffsetDateTime>,
     pub image: ImageName,
     pub ports: Vec<PortBinding>,
+    /// Ports publiés au-delà de `MAX_PORTS`, non gardés (`BR-SVC-021`).
+    pub ports_omitted: u32,
     /// Réseau « host » : le service n'a pas de port individuel.
     pub host_network: bool,
     pub mounts: Vec<MountInfo>,
+    /// Montages au-delà de `MAX_MOUNTS`, non gardés (`BR-SVC-021`).
+    pub mounts_omitted: u32,
     pub restart: RestartPolicy,
     /// Le moteur supprime le conteneur à son arrêt (`AutoRemove`).
     pub auto_remove: bool,
@@ -126,8 +130,10 @@ impl Observation {
                 short_id: String::new(),
             },
             ports: Vec::new(),
+            ports_omitted: 0,
             host_network: false,
             mounts: Vec::new(),
+            mounts_omitted: 0,
             restart: RestartPolicy::None,
             auto_remove: false,
             compose_project: None,
@@ -273,8 +279,10 @@ mod tests {
             finished_at: Some(datetime(11)),
             image: image_name("nginx:1.27", "sha256:0123456789abcdef"),
             ports: vec![],
+            ports_omitted: 0,
             host_network: false,
             mounts: vec![],
+            mounts_omitted: 0,
             restart: RestartPolicy::None,
             auto_remove: false,
             compose_project: None,

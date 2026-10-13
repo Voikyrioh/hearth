@@ -280,11 +280,21 @@ async fn denied_and_mute_unix_sockets() {
     // Un chemin de socket Unix tient en 107 octets : `tempdir_fast` (`/dev/shm/hearth-test-tmp/`, dossier
     // nommé d'après ce test, donc court) et des noms de fichier courts, pas `target/` du runner (trop long).
     let dir = support::tmp::tempdir_fast().expect("dossier");
+    // La garde de longueur précède le PREMIER socket (les deux noms ont la même longueur) : sur une
+    // machine sans `/dev/shm`, c'est elle qui parle, pas un `bind` en échec au message obscur.
+    for name in ["d.sock", "m.sock"] {
+        let path = dir.path().join(name);
+        assert!(
+            path.as_os_str().len() < 100,
+            "chemin de socket trop long : {path:?}"
+        );
+    }
 
-    // Un socket Unix réel dont le fichier n'a plus aucun droit : `EACCES` à la connexion.
-    if running_as_root() {
-        eprintln!("compte root : un socket sans droit reste ouvert, cas non vérifiable ici");
-    } else {
+    // Un socket Unix réel dont le fichier n'a plus aucun droit : `EACCES` à la connexion. Le journal
+    // d'un test réussi est capturé : la branche jouée ou sautée est écrite en clair, et le job
+    // `engine` lance ce test avec `--nocapture` pour la lire.
+    let denied_played = !running_as_root();
+    if denied_played {
         let path = dir.path().join("d.sock");
         let _listener = tokio::net::UnixListener::bind(&path).expect("socket");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("chmod");
@@ -300,10 +310,6 @@ async fn denied_and_mute_unix_sockets() {
 
     // Un socket qui accepte la connexion mais ne répond jamais : « ne répond pas » au bout du délai.
     let path = dir.path().join("m.sock");
-    assert!(
-        path.as_os_str().len() < 100,
-        "chemin de socket trop long : {path:?}"
-    );
     let listener = tokio::net::UnixListener::bind(&path).expect("socket");
     let _holder = tokio::spawn(async move {
         let mut open = Vec::new();
@@ -323,4 +329,13 @@ async fn denied_and_mute_unix_sockets() {
         EngineState::Unresponsive
     );
     assert!(started.elapsed() < std::time::Duration::from_secs(4));
+    eprintln!("socket muet : JOUÉ");
+    eprintln!(
+        "socket sans droit : {}",
+        if denied_played {
+            "JOUÉ (accès refusé constaté)"
+        } else {
+            "SAUTÉ (compte root : un socket sans droit reste ouvert, cas non vérifiable ici)"
+        }
+    );
 }

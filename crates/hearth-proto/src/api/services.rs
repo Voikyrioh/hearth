@@ -95,16 +95,35 @@ pub struct EngineView {
     pub last_ready_at: Option<String>,
     pub checked_at: String,
     /// Date de la dernière lecture COMPLÈTE réussie de la liste des services (RFC 3339), absente
-    /// tant qu'aucune n'a réussi. `checked_at` date la sonde du moteur, pas la liste : c'est ce champ
-    /// qui permet d'écrire « Liste du moteur d'il y a {âge} » (HRT-61, `BR-SVC-001`).
+    /// tant qu'aucune n'a réussi depuis que la liste a été vidée. Information seulement : elle ne
+    /// dit PAS depuis quand la liste est périmée (une liste suivie en direct par les événements est
+    /// à jour sans nouvelle lecture). Pour l'âge, utiliser `list_current_at` (HRT-72).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub list_read_at: Option<String>,
     /// `true` quand la liste affichée n'est peut-être pas à jour : la dernière relecture a échoué, des
-    /// conteneurs sont illisibles (leur dernière description est gardée), ou le suivi en direct est
-    /// suspendu. Le client dit alors « Impossible de lire les services » et date la liste avec
-    /// `list_read_at`. Absent (donc `false`) pour un agent qui ne le sait pas.
+    /// conteneurs sont illisibles (leur dernière description est gardée), le suivi en direct est
+    /// suspendu, ou la liste n'a pas encore été relue depuis que le moteur a (re)démarré ou est
+    /// revenu (HRT-72). Le client dit alors « Impossible de lire les services » et date la liste avec
+    /// `list_current_at`. Absent (donc `false`) pour un agent qui ne le sait pas.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub list_degraded: bool,
+    /// Heure de l'agent au moment où cette vue a été fabriquée (RFC 3339), HRT-72. Sa présence dit
+    /// que l'agent connaît `list_current_at` : avec `at` présent, `list_current_at` absent veut dire
+    /// « aucune liste n'a été lue » ; avec `at` absent (agent plus ancien), la date est inconnue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    /// Dernier moment où la liste était à jour (RFC 3339, HRT-72) : `at` quand elle l'est
+    /// maintenant, sinon l'instant où l'agent a vu qu'elle cessait de l'être (lecture en échec,
+    /// conteneur illisible, suivi suspendu, moteur plus joignable). Absent quand aucune liste n'a
+    /// été lue. L'âge est `at - list_current_at` (deux dates de l'agent : l'écart d'horloge avec le
+    /// client n'y entre pas, à ramener à zéro s'il est négatif), augmenté du temps écoulé chez le
+    /// client depuis la réception du message, mesuré par SON horloge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_current_at: Option<String>,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 /// L'état d'un service (`BR-SVC-004`). `starting`, `stopping` et `deploying` appartiennent aux
@@ -282,9 +301,15 @@ pub struct ServiceItem {
     pub restarts_10m: u32,
     pub image: ImageInfo,
     pub ports: Vec<ServicePort>,
+    /// Ports publiés au-delà de la borne de 128, non listés (`BR-SVC-021`). Absent vaut 0.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub ports_omitted: u32,
     /// Le service utilise directement le réseau du serveur : aucun port individuel.
     pub host_network: bool,
     pub mounts: Vec<ServiceMount>,
+    /// Montages au-delà de la borne de 64, non listés (`BR-SVC-021`). Absent vaut 0.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub mounts_omitted: u32,
     pub restart: RestartMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub busy: Option<BusyInfo>,
@@ -335,6 +360,8 @@ mod tests {
             checked_at: "2026-10-13T10:00:00Z".into(),
             list_read_at: None,
             list_degraded: false,
+            at: None,
+            list_current_at: None,
         }
     }
 
@@ -388,6 +415,68 @@ mod tests {
     }
 
     #[test]
+    fn the_list_age_fields_tell_a_never_read_list_from_an_old_agent() {
+        // Agent ancien : ni `at` ni `list_current_at` (date inconnue).
+        let json = serde_json::to_value(engine()).expect("json");
+        assert!(json.get("at").is_none() && json.get("list_current_at").is_none());
+        let old: EngineView = serde_json::from_value(json).expect("old agent");
+        assert!(old.at.is_none() && old.list_current_at.is_none());
+        // Agent récent, aucune liste lue : `at` présent, `list_current_at` absent.
+        let mut never = engine();
+        never.at = Some("2026-10-13T10:00:05Z".into());
+        let json = serde_json::to_value(&never).expect("json");
+        assert!(json.get("list_current_at").is_none());
+        let back: EngineView = serde_json::from_value(json).expect("never read");
+        assert_eq!(back.at.as_deref(), Some("2026-10-13T10:00:05Z"));
+        assert!(back.list_current_at.is_none());
+        // Agent récent, liste datée : les deux dates voyagent.
+        never.list_current_at = Some("2026-10-13T10:00:00Z".into());
+        let back: EngineView =
+            serde_json::from_value(serde_json::to_value(&never).expect("json")).expect("dated");
+        assert_eq!(back, never);
+    }
+
+    #[test]
+    fn the_omitted_counters_are_optional_both_ways() {
+        let mut item = serde_json::to_value(ServiceItem {
+            key: "c_1".into(),
+            name: "web".into(),
+            origin: ServiceOrigin::External,
+            driver: None,
+            unit: None,
+            removed_on_stop: false,
+            compose_project: None,
+            state: ServiceState::Running,
+            since: None,
+            created_at: None,
+            never_started: false,
+            exit_code: None,
+            restarts_10m: 0,
+            image: ImageInfo {
+                reference: None,
+                tag: None,
+                short_id: "abc".into(),
+            },
+            ports: vec![],
+            ports_omitted: 0,
+            host_network: false,
+            mounts: vec![],
+            mounts_omitted: 0,
+            restart: RestartMode::None,
+            busy: None,
+            last_action: None,
+        })
+        .expect("json");
+        assert!(item.get("ports_omitted").is_none() && item.get("mounts_omitted").is_none());
+        let old: ServiceItem = serde_json::from_value(item.clone()).expect("old agent");
+        assert_eq!((old.ports_omitted, old.mounts_omitted), (0, 0));
+        item["ports_omitted"] = 2872.into();
+        item["mounts_omitted"] = 436.into();
+        let new: ServiceItem = serde_json::from_value(item).expect("new agent");
+        assert_eq!((new.ports_omitted, new.mounts_omitted), (2872, 436));
+    }
+
+    #[test]
     fn a_service_item_declares_no_variable_nor_command_field() {
         let item = ServiceItem {
             key: "c_0123".into(),
@@ -409,8 +498,10 @@ mod tests {
                 short_id: "abcdef012345".into(),
             },
             ports: vec![],
+            ports_omitted: 0,
             host_network: false,
             mounts: vec![],
+            mounts_omitted: 0,
             restart: RestartMode::None,
             busy: None,
             last_action: None,
