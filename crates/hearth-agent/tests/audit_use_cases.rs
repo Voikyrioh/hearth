@@ -1113,3 +1113,34 @@ async fn writing_checks_the_cap_between_two_purges() {
             .unwrap();
     assert_eq!(new, 500);
 }
+
+#[tokio::test]
+async fn a_grouped_required_entry_repeats_into_one_row_and_a_failing_write_is_handed_back() {
+    let env = env().await;
+    let actor = Actor::new(
+        Some(Username::parse("marie").unwrap()),
+        Origin::client(Some("poste"), "10.0.0.7"),
+    );
+    let read = |actor: Actor| {
+        env.audit_sink.record_grouped_required(
+            actor,
+            AuditAction::ServiceExternalRead,
+            Target::Route("/services/external"),
+            Outcome::Succeeded,
+        )
+    };
+    // Cent lectures du même compte : acceptées, et une seule entrée (le regroupement du journal).
+    for _ in 0..100 {
+        read(actor.clone()).await.expect("écrite ou comptée");
+    }
+    assert_eq!(all(&env).await.len(), 1);
+
+    // Base indisponible : la première occurrence d'un autre groupe ne s'écrit pas, l'échec est RENDU
+    // (l'appelant refuse alors de répondre).
+    env.db.pool().close().await;
+    let other = Actor::new(
+        Some(Username::parse("paul").unwrap()),
+        Origin::client(Some("poste"), "10.0.0.8"),
+    );
+    assert!(read(other).await.is_err());
+}

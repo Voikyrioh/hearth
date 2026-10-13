@@ -142,15 +142,23 @@ pub async fn external(
         .service_adoption
         .candidates()
         .map_err(adoption_error)?;
+    // La trace PRÉCÈDE la liste et la conditionne, comme la révélation des variables : si l'entrée ne
+    // s'écrit pas, `found` est jeté et rien n'est rendu.
     state
         .sink
-        .record(
+        .record_grouped_required(
             actor,
             AuditAction::ServiceExternalRead,
             Target::Route("/services/external"),
             Outcome::Succeeded,
         )
-        .await;
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                ErrorCode::Busy,
+                "La lecture n'a pas pu être consignée au journal : aucun conteneur n'est rendu. Réessaie dans un instant.",
+            )
+        })?;
     let body = ExternalContainers {
         engine: services_wire::engine_state(found.engine),
         containers: found

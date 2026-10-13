@@ -49,6 +49,6 @@ pub use unit::{
     is_engine_client, parse_main_pid, parse_show, unit_of_cgroup,
 };
 pub use visibility::{
-    Adoption, Holder, UNIT_GONE_READS, Visibility, gone_long_enough, lapsed, may_read_details,
-    unit_is_gone, visibility_of,
+    Adoption, CONFIRMATION_TTL, Holder, UNIT_GONE_READS, Visibility, confirmation_expired,
+    gone_long_enough, lapsed, may_read_details, unit_is_gone, unread_unit_adoptions, visibility_of,
 };

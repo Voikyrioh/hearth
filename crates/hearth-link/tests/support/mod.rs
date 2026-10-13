@@ -277,6 +277,8 @@ pub struct Options {
     pub engine: Option<Arc<agent::fake_engine::FakeEngine>>,
     /// L'agent est vu « d'avant les services » : son `/hello` n'annonce aucune capacité (HRT-62).
     pub hide_capabilities: bool,
+    /// Le superviseur de services de l'agent (clés `u_`) ; sans lui, aucun conteneur n'a d'unité.
+    pub supervisor: Option<Arc<dyn hearth_agent::application::ports::ServiceSupervisor>>,
 }
 
 impl Default for Options {
@@ -292,6 +294,7 @@ impl Default for Options {
             hour_fails: false,
             engine: None,
             hide_capabilities: false,
+            supervisor: None,
         }
     }
 }
@@ -840,7 +843,9 @@ pub fn short_transport() -> HttpTransport {
 impl World {
     /// Agent installé, compte « marie », mandataire, `LinkManager` connecté.
     pub async fn connected(options: Options) -> Self {
-        let agent = TestAgent::install_full(options.updating, options.engine).await;
+        let agent =
+            TestAgent::install_supervised(options.updating, options.engine, options.supervisor)
+                .await;
         agent.create_account("marie", options.role).await;
         let proxy = FaultProxy::start(agent.addr).await;
         let dir = agent::tmp::tempdir().unwrap();

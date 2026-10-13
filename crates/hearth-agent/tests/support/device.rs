@@ -299,8 +299,10 @@ pub fn act_of<'a>(
         ),
         ("POST", ["services", key, "release"]) => AdminAct::ServiceRelease {
             // Décodée comme le fait l'agent (une unité au nom échappé voyage en `%5C`).
+            // Un encodage illisible n'a pas de clé à signer : le test signe le texte tel quel, la preuve
+            // ne colle alors à rien (c'est ce que l'agent doit refuser).
             target: hearth_proto::admin_act::decode_segment(key)
-                .expect("clé encodée lisible")
+                .unwrap_or_else(|| (*key).to_owned())
                 .into(),
         },
         _ => panic!("{method} {path} n'est pas un acte du contrat commun"),

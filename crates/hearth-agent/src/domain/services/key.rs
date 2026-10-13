@@ -60,6 +60,11 @@ impl ServiceKey {
         &self.0
     }
 
+    /// L'unité d'une clé `u_<unité>` ; `None` pour toute autre forme.
+    pub fn unit(&self) -> Option<UnitName> {
+        self.0.strip_prefix("u_").and_then(UnitName::parse)
+    }
+
     pub fn kind(&self) -> KeyKind {
         match self.0.as_bytes().first() {
             Some(b'h') => KeyKind::Hearth,

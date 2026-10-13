@@ -110,6 +110,13 @@ Dit sans détour, parce que « rien ne sort » est une affirmation à borner :
 - **Un bit sur la fraîcheur de la liste** : un conteneur caché dont l'inspection échoue lève `list_degraded` comme n'importe quel conteneur (« impossible de lire les services »), sans rien dire de lui. Ce n'est pas filtré.
 - Rien d'autre n'a été trouvé : ni `rev` (un changement d'état d'un conteneur caché n'en avance pas), ni la taille ou la cadence des messages, ni l'ordre de tri (les services publiés seuls sont triés), ni la réponse d'une route par clé (même code, même corps, même chemin de recherche qu'un service inconnu). La charge de l'agent et la durée d'un recalcul croissent avec le nombre de conteneurs lus : non filtré, non mesuré.
 
+## Suites de la revue finale de la PR 84 (2026-10-14)
+
+- **Adoption par unité qu'on ne relit plus** (BR-ADOPT-027). Le système ne donne aucun repère stable qui distingue une unité de son homonyme (`FragmentPath` est le même fichier et change à chaque reconstruction de NixOS ; `InvocationID` et les horodatages changent à chaque démarrage). Décision : les unités adoptées sont relues en priorité (128 par passage) ; une adoption dont l'unité n'est pas relue est « à confirmer », sans aucun droit (ni visibilité, ni journaux, ni action), confirmée par l'acte d'adoption habituel, et tombe au bout de 24 h. Alternative rejetée : lier l'adoption à `FragmentPath` + date du fichier (casse à chaque `nixos-rebuild`, ne distingue pas une homonyme au même chemin).
+- **Lecture des candidats** : pas de trace, pas de réponse (`record_grouped_required`, `503 BUSY`), tout en gardant le regroupement des répétitions.
+- **Journal d'un acte d'adoption** : une entrée par motif et par acte pour les issues sans nom, avec leur nombre (BR-ADOPT-019).
+- **Liaison cliente** : `LinkManager::{services_external, services_adopt, services_release}` (erreurs typées, `Acted<T>`), prouvées de bout en bout contre un vrai agent (`hearth-link/tests/services_acts.rs`).
+
 ## Quand NE PAS l'appliquer / limites
 
 - **Adopter donne de vrais pouvoirs** : arrêter un serveur de jeu, lire ses journaux, révéler ses variables. Et un service adopté garde ses privilèges d'origine (réseau de l'hôte, carte graphique, dossiers) : la politique de l'ADR-0041 ne s'applique qu'à ce que Hearth crée.

@@ -202,6 +202,36 @@ impl AuditSink for AuditRecorder {
         }
     }
 
+    async fn record_grouped_required(
+        &self,
+        actor: Actor,
+        action: AuditAction,
+        target: Target,
+        outcome: Outcome,
+    ) -> Result<(), AuditWriteError> {
+        let event = AuditEvent::new(self.clock.now(), actor, action, target, outcome);
+        let to_write = self
+            .repeats
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .admit(event);
+        let mut written = true;
+        for event in to_write {
+            match self.write(&event).await {
+                Ok(record) => self.trail.publish(vec![record]),
+                Err(error) => {
+                    tracing::error!(%error, action = event.action.code(), "entrée du journal non écrite");
+                    written = false;
+                }
+            }
+        }
+        if written {
+            Ok(())
+        } else {
+            Err(AuditWriteError)
+        }
+    }
+
     async fn record_required(
         &self,
         actor: Actor,

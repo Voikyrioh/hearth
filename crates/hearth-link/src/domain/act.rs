@@ -332,6 +332,10 @@ mod tests {
             "/services/u_a%zz/release",
             "/services/u_a%FF.service/release",
             "/services/u_a%00.service/release",
+            // Deux chiffres hexadécimaux exactement : ni signe, ni espace, ni `%` doublé.
+            "/services/u_a%+f.service/release",
+            "/services/u_a%-1.service/release",
+            "/services/u_a%%41.service/release",
         ] {
             assert_eq!(classify("POST", path, None), Ok(Route::Free), "{path}");
         }
