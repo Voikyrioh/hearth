@@ -155,10 +155,10 @@ struct Inner {
     probing: u32,
     /// Date de la dernière relecture complète réussie (sans conteneur illisible).
     list_read_at: Option<OffsetDateTime>,
-    /// La liste a été relue depuis la dernière fois que le moteur a été OBSERVÉ sans liste (pas
-    /// prêt), quoi que l'anti-clignotement ait publié entre-temps : tant que ce n'est pas fait, ce
-    /// que l'agent publie sous « prêt » n'est pas présenté comme frais. Seule source de vérité de
-    /// « cette liste date-t-elle d'avant la coupure ».
+    /// La liste a été relue depuis la dernière fois que le moteur a été OBSERVÉ non prêt, quoi que
+    /// l'anti-clignotement ait publié entre-temps (inaccessible compris) : tant que ce n'est pas
+    /// fait, ce que l'agent publie sous « prêt » n'est pas présenté comme frais. Source de vérité de
+    /// « cette liste date-t-elle d'avant la coupure » ; limite connue : BR-SVC-018.
     list_loaded: bool,
     /// Un état autre que « prêt » a été publié depuis la dernière relecture faite sous « prêt » publié :
     /// le client a vu la liste grisée ou absente, la marque « pas relue » est due à son retour. Ne
@@ -334,8 +334,8 @@ impl ServicesRegistry {
     }
 
     /// La liste est à jour maintenant : le moteur est vu prêt (dernière sonde), la liste a été relue
-    /// depuis qu'il a été vu sans liste, et elle est suivie sans réserve. Fondé sur l'observé, jamais
-    /// sur ce que l'anti-clignotement a publié.
+    /// depuis qu'il a été vu non prêt, et elle est suivie sans réserve. Fondé sur l'observé ; seul le
+    /// choix de montrer la marque (`gap_shown`) suit le publié (limite connue : BR-SVC-018).
     fn list_fresh(inner: &Inner) -> bool {
         inner.observed == EngineState::Ready && inner.list_loaded && !Self::list_unreliable(inner)
     }
@@ -368,10 +368,10 @@ impl ServicesRegistry {
     /// la liste n'est plus suivie : elle devra être relue au retour, même si l'anti-clignotement
     /// n'a rien publié (coupure retenue, puis retour dans la fenêtre).
     fn note_observed(inner: &mut Inner, observed: EngineState) {
-        // Sous un état inaccessible publié (liste grisée et datée, gardée), les va-et-vient du moteur
-        // ne défont pas la relecture : la marque « pas relue » au retour ferait un second changement
-        // dans la fenêtre (`the_engine_state_changes_in_time_and_never_flickers`).
-        if observed != EngineState::Ready && !inner.debounce.published().is_inaccessible() {
+        // FIX:01M4SFCQ7N5TN8VC21KBQR87PP : quel que soit l'état publié (inaccessible compris), un
+        // moteur observé non prêt défait la relecture : une liste relue avant une coupure ne repart
+        // jamais « fraîche » au retour, quelle que soit la durée de la coupure.
+        if observed != EngineState::Ready {
             inner.list_loaded = false;
         }
         Self::drop_list_if_none_kept(inner);
@@ -1276,6 +1276,144 @@ mod tests {
         registry.resync().await.expect("resync");
         let status = registry.engine_status();
         assert_eq!(status.list_current_at, Some(status.at));
+    }
+
+    /// Les trois états inaccessibles par lesquels une liste relue pendant un retour retenu peut
+    /// traverser une seconde coupure.
+    #[derive(Clone, Copy)]
+    enum Entry {
+        Stopped,
+        Unresponsive,
+        Denied,
+    }
+
+    /// FIX:01M4SFCQ7N5TN8VC21KBQR87PP : suite de N1 (HRT-73), enchaînement en cinq étapes sous un
+    /// état INACCESSIBLE publié. La liste relue pendant le retour retenu ne vaut plus rien après une
+    /// seconde coupure : au retour, elle est marquée et datée de la coupure, jamais de maintenant.
+    async fn assert_second_loss_under_inaccessible_state(entry: Entry) {
+        let (registry, engine, mono, wall) = registry_with_wall();
+        let loss = |engine: &FakeEngine| match entry {
+            Entry::Stopped | Entry::Denied => engine.set_outcome(ProbeOutcome::Refused, true),
+            Entry::Unresponsive => engine.set_outcome(ProbeOutcome::NoAnswer, true),
+        };
+        // (1) prêt, liste lue.
+        engine.put_silently(container("web", RunState::Running));
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        // (2) l'état inaccessible est publié, la liste reste (grisée, datée).
+        mono.advance(Duration::from_secs(6));
+        wall.advance(time::Duration::seconds(6));
+        let expected = match entry {
+            Entry::Stopped => EngineState::Stopped,
+            Entry::Unresponsive => EngineState::Unresponsive,
+            Entry::Denied => EngineState::AccessDenied,
+        };
+        if let Entry::Denied = entry {
+            engine.fail_list(Some(EngineError::Denied));
+            assert_eq!(registry.resync().await, Err(EngineError::Denied));
+        } else {
+            loss(&engine);
+        }
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, expected);
+        assert_eq!(registry.snapshot().services.len(), 1);
+        // (3) retour dans la fenêtre : « prêt » est retenu, mais la liste est relue.
+        mono.advance(Duration::from_secs(1));
+        wall.advance(time::Duration::seconds(1));
+        engine.fail_list(None);
+        engine.set_ready();
+        if !matches!(entry, Entry::Denied) {
+            registry.probe_and_apply(false).await;
+        }
+        registry.resync().await.expect("resync");
+        assert_eq!(registry.engine_status().state, expected);
+        // (4) seconde coupure avant l'échéance : rien n'est publié.
+        mono.advance(Duration::from_secs(1));
+        wall.advance(time::Duration::seconds(1));
+        let lost = registry.clock.now();
+        loss(&engine);
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, expected);
+        // (5) coupure de durée quelconque, puis retour une fois la fenêtre finie : « prêt » est publié.
+        mono.advance(Duration::from_secs(6));
+        wall.advance(time::Duration::hours(3));
+        engine.set_ready();
+        registry.probe_and_apply(false).await;
+        let back = registry.snapshot();
+        assert_eq!(back.engine.state, EngineState::Ready);
+        assert!(
+            back.engine.list_degraded,
+            "liste relue avant la seconde coupure : marquée"
+        );
+        assert_eq!(
+            back.engine.list_current_at,
+            Some(lost),
+            "datée de la coupure, jamais de maintenant"
+        );
+        // La relecture rétablit la liste actuelle.
+        registry.resync().await.expect("resync");
+        let read = registry.engine_status();
+        assert!(!read.list_degraded);
+        assert_eq!(read.list_current_at, Some(read.at));
+    }
+
+    #[tokio::test]
+    async fn a_list_read_under_stopped_is_not_fresh_after_a_second_loss() {
+        assert_second_loss_under_inaccessible_state(Entry::Stopped).await;
+    }
+
+    #[tokio::test]
+    async fn a_list_read_under_unresponsive_is_not_fresh_after_a_second_loss() {
+        assert_second_loss_under_inaccessible_state(Entry::Unresponsive).await;
+    }
+
+    #[tokio::test]
+    async fn a_list_read_under_access_denied_is_not_fresh_after_a_second_loss() {
+        assert_second_loss_under_inaccessible_state(Entry::Denied).await;
+    }
+
+    #[tokio::test]
+    async fn a_list_read_under_access_denied_is_not_fresh_after_moving_to_stopped() {
+        // FIX:01M4SFCQ7N5TN8VC21KBQR87PP : passage d'un état inaccessible à un autre.
+        let (registry, engine, mono, wall) = registry_with_wall();
+        engine.put_silently(container("web", RunState::Running));
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        // Accès refusé publié après un refus de liste.
+        mono.advance(Duration::from_secs(6));
+        wall.advance(time::Duration::seconds(6));
+        engine.fail_list(Some(EngineError::Denied));
+        assert_eq!(registry.resync().await, Err(EngineError::Denied));
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::AccessDenied);
+        // La liste est de nouveau permise et relue, toujours sous « accès refusé » publié.
+        mono.advance(Duration::from_secs(1));
+        wall.advance(time::Duration::seconds(1));
+        engine.fail_list(None);
+        registry.resync().await.expect("resync");
+        // Le moteur s'arrête : « arrêté » est publié à l'échéance.
+        let lost = registry.clock.now();
+        mono.advance(Duration::from_secs(6));
+        wall.advance(time::Duration::seconds(6));
+        engine.set_outcome(ProbeOutcome::Refused, true);
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::Stopped);
+        // Il revient bien plus tard.
+        mono.advance(Duration::from_secs(6));
+        wall.advance(time::Duration::hours(3));
+        engine.set_ready();
+        registry.probe_and_apply(false).await;
+        let back = registry.snapshot();
+        assert_eq!(back.engine.state, EngineState::Ready);
+        assert!(
+            back.engine.list_degraded,
+            "liste pas relue depuis : marquée"
+        );
+        assert!(
+            back.engine.list_current_at < Some(back.engine.at),
+            "jamais datée de maintenant : {:?} (coupure vers {lost})",
+            back.engine.list_current_at
+        );
     }
 
     /// Un registre dont on pilote l'horloge murale.
