@@ -36,6 +36,8 @@ use crate::link_dto::{
 use crate::presence::{ModeKind, SecurityNotice, SecurityWording};
 use crate::security::book::SecurityBook;
 use crate::security::dto::SecurityEvent;
+use crate::services::book::ServicesBook;
+use crate::services::dto::ServicesEvent;
 
 /// Ce que la coquille fait des changements d'état du lien en dehors de la fenêtre : notifications
 /// système et icône de la zone de notification (BR-RESIL-015, 016). Appelé à chaque événement
@@ -205,6 +207,8 @@ impl EventSink for PendingBook {
             | Event::SessionEnded { .. }
             | Event::AgentUpdate { .. }
             | Event::Security { .. }
+            | Event::Services { .. }
+            | Event::ServicesUnsupported { .. }
             | Event::Audit { .. } => {}
         }
     }
@@ -217,6 +221,8 @@ pub struct LinkRuntime {
     dash: Mutex<DashBook>,
     /// Dernier état de sécurité de chaque serveur, rejoué à l'abonnement (HRT-26, ADR-0013 point 3).
     security: Mutex<SecurityBook>,
+    /// Dernier état des services de chaque serveur, rejoué à l'abonnement (HRT-62).
+    services: Mutex<ServicesBook>,
     last_servers: Mutex<Option<Vec<ServerDto>>>,
     pending: Arc<PendingBook>,
     /// Dernière empreinte lue par une sonde, par adresse : seule une empreinte que cette
@@ -263,6 +269,7 @@ impl LinkRuntime {
             book: Mutex::new(StateBook::default()),
             dash: Mutex::new(DashBook::default()),
             security: Mutex::new(SecurityBook::default()),
+            services: Mutex::new(ServicesBook::default()),
             last_servers: Mutex::new(None),
             pending,
             probes: Mutex::new(HashMap::new()),
@@ -316,6 +323,47 @@ impl LinkRuntime {
 
     fn security_book(&self) -> std::sync::MutexGuard<'_, SecurityBook> {
         self.security.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn services_book(&self) -> std::sync::MutexGuard<'_, ServicesBook> {
+        self.services.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Le dernier état des services de chaque serveur du carnet (rejeu à l'abonnement). Un serveur dont
+    /// rien n'est encore arrivé en cette exécution donne la dernière liste enregistrée sur le disque
+    /// (périmée, l'interface la grise tant que le lien n'est pas « Connecté »).
+    pub async fn services_states(&self) -> Vec<ServicesEvent> {
+        let mut events = Vec::new();
+        for record in self.manager.servers() {
+            let name = record.id.to_string();
+            let known = self.services_book().current(&name);
+            if let Some(event) = known {
+                events.push(event);
+                continue;
+            }
+            if let Ok(Some(known)) = self.manager.services_state(&record.id).await {
+                events.push(self.services_book().on_state(
+                    &name,
+                    &known.state,
+                    known.engine_received_at,
+                ));
+            }
+        }
+        events
+    }
+
+    /// Après un retard d'écoute, des états ont pu être perdus : le dernier état connu de chaque serveur
+    /// (celui de la liaison, qui fusionne tous les lots) est réannoncé.
+    pub async fn resync_services(&self, sink: &dyn UiSink) {
+        for record in self.manager.servers() {
+            let name = record.id.to_string();
+            if let Ok(Some(known)) = self.manager.services_state(&record.id).await {
+                let event =
+                    self.services_book()
+                        .on_state(&name, &known.state, known.engine_received_at);
+                send(sink, crate::services::dto::EVENT, &event);
+            }
+        }
     }
 
     /// Ce PC garde-t-il une clé d'appareil pour ce serveur ? (un booléen : la clé ne sort pas).
@@ -641,6 +689,7 @@ impl LinkRuntime {
         self.book().forget(&id);
         self.dash().forget(id.as_str());
         self.security_book().forget(id.as_str());
+        self.services_book().forget(id.as_str());
         self.pending.forget(&id);
         if let Some(observer) = self.observer.get() {
             observer.on_removed(id.as_str());
@@ -672,6 +721,7 @@ impl LinkRuntime {
             self.relay(event, sink);
             if lagged {
                 self.resync_dashboards(sink).await;
+                self.resync_services(sink).await;
             }
         }
     }
@@ -808,6 +858,28 @@ impl LinkRuntime {
                 let state = self.security_book().on_stream(server.as_str(), &view, key);
                 self.observe_security(&server, &view);
                 send(sink, crate::security::dto::EVENT, &state);
+            }
+            // Le moteur et les services (HRT-62) : l'état complet, déjà fusionné par la liaison, rangé
+            // (rejoué à l'abonnement) et annoncé.
+            Event::Services {
+                server,
+                state,
+                engine_received_at,
+            } => {
+                let event =
+                    self.services_book()
+                        .on_state(server.as_str(), &state, engine_received_at);
+                send(sink, crate::services::dto::EVENT, &event);
+            }
+            // Agent sans la capacité : l'interface le dit, `metrics` continue.
+            Event::ServicesUnsupported {
+                server,
+                agent_version,
+            } => {
+                let event = self
+                    .services_book()
+                    .on_unsupported(server.as_str(), &agent_version);
+                send(sink, crate::services::dto::EVENT, &event);
             }
             Event::SessionEnded { .. } => {}
         }

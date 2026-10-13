@@ -14,6 +14,7 @@ mod events;
 mod persist;
 mod reauth;
 mod security;
+mod services;
 mod task;
 mod watchers;
 
@@ -37,6 +38,7 @@ pub use audit::AuditExportFile;
 pub use events::EventStream;
 use events::Fanout;
 pub use reauth::ReauthState;
+pub use services::KnownServices;
 use task::Command;
 
 use crate::adapters::DeviceKey;

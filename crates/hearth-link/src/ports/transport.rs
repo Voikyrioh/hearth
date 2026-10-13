@@ -12,7 +12,7 @@ use hearth_proto::api::sessions::{
 };
 use hearth_proto::error::ErrorCode;
 use hearth_proto::fingerprint::Fingerprint;
-use hearth_proto::stream::{ClientMessage, ServerMessage, SignedAuth};
+use hearth_proto::stream::{ClientMessage, ServerMessage, ServicesMessage, SignedAuth};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -161,6 +161,10 @@ pub enum Frame {
     /// après l'`auth` puis à chaque changement. Il n'est pas un `ServerMessage` : un agent d'avant la
     /// fonction n'en envoie jamais, et il se lit à part.
     Security(Box<SecurityView>),
+    /// Un message du sujet `services` (HRT-62, ADR-0038) : instantané, lot de changements ou issue
+    /// d'action. Comme `security`, ce n'est pas un `ServerMessage` : il se lit à part, et un agent sans la
+    /// capacité n'en envoie jamais (le client ne lui a pas demandé le sujet).
+    Services(Box<ServicesMessage>),
     /// Trame sans intérêt : contrôle, binaire, message mal formé ou inconnu. Compte comme signe
     /// de vie, jamais comme erreur.
     Other,

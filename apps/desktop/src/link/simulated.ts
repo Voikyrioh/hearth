@@ -5,6 +5,7 @@ import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
+import type { EngineInfo, ServicesEvent } from "./services";
 import {
   type SimAccountResult,
   SimulatedAccounts,
@@ -16,6 +17,7 @@ import { SimulatedDevices } from "./simulated-devices";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import { SimulatedReauth, simulatedCovers } from "./simulated-reauth";
 import { SimulatedSecurity } from "./simulated-security";
+import { SimulatedServices } from "./simulated-services";
 import {
   type AccountInputCheck,
   type AccountList,
@@ -184,6 +186,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly audit: SimulatedAudit;
   /** La mise à jour de l'agent simulée (HRT-17) : état par serveur, étapes pilotables par le test. */
   readonly agentUpdates: SimulatedAgentUpdates;
+  /** Le moteur de conteneurs et les services simulés (HRT-62) : pilotables par l'appelant (`services.seed`, `setEngine`, `upsert`…). */
+  readonly services: SimulatedServices;
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -201,6 +205,10 @@ export class SimulatedLinkBridge implements LinkBridge {
       // Le serveur « salon » est un boîtier sans carte graphique ni sonde : de quoi voir les états vides.
       machines: { salon: bareMachine("nas-salon") },
     });
+    this.services = new SimulatedServices(
+      this.now,
+      (id) => this.events.get(id)?.state === "connected",
+    );
     this.agentUpdates = new SimulatedAgentUpdates({
       now: this.now,
       publishLink: (id, state) => this.publish(id, state),
@@ -217,6 +225,7 @@ export class SimulatedLinkBridge implements LinkBridge {
         this.machine.prefill(server.id, 300);
       }
       this.machine.start();
+      this.seedSampleServices();
     }
     for (const server of this.servers) {
       this.events.set(server.id, this.connectedEvent(server.id));
@@ -239,6 +248,19 @@ export class SimulatedLinkBridge implements LinkBridge {
 
   async onMachine(serverId: string, listener: (event: MachineEvent) => void): Promise<Unsubscribe> {
     return this.machine.subscribe(serverId, listener);
+  }
+
+  async onServices(listener: (event: ServicesEvent) => void): Promise<Unsubscribe> {
+    return this.services.subscribe(listener);
+  }
+
+  async recheckEngine(serverId: string): Promise<EngineInfo> {
+    this.calls.push("engine recheck");
+    return this.services.recheck(serverId);
+  }
+
+  async openEngineDocs(): Promise<void> {
+    this.services.docsOpened += 1;
   }
 
   async retryNow(serverId: string): Promise<void> {
@@ -875,6 +897,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     // Le lien est revenu : l'agent renvoie son identité et son historique (BR-DASH-011).
     if (state === "connected" && previous && previous.state !== "connected") {
       this.machine.resync(serverId);
+      this.services.resync(serverId);
     }
   }
 
@@ -889,6 +912,110 @@ export class SimulatedLinkBridge implements LinkBridge {
     const full: LinkNotice = { ...notice, id: notice.id ?? ++this.noticeIds };
     if (this.noticeListeners.size === 0) this.unreadNotices.push({ ...full });
     for (const listener of [...this.noticeListeners]) listener({ ...full });
+  }
+
+  /**
+   * Services d'exemple du navigateur de développement : le serveur « forge » (administrateur) a un moteur
+   * prêt et une douzaine de services de toutes sortes ; le serveur « salon » (lecture seule) n'a pas de moteur.
+   */
+  private seedSampleServices(): void {
+    const day = 86_400_000;
+    const ago = (ms: number) => new Date(this.now() - ms).toISOString();
+    this.services.seed("forge", [
+      {
+        key: "c_web",
+        name: "web",
+        since: ago(3 * day + 4 * 3_600_000 + 12 * 60_000),
+        ports: [
+          { hostPort: 8080, containerPort: 80, protocol: "tcp", scope: "all" },
+          { hostPort: 8443, containerPort: 443, protocol: "tcp", scope: "all" },
+        ],
+      },
+      {
+        key: "c_db",
+        name: "base-de-donnees",
+        image: { ref: "postgres", tag: "16" },
+        since: ago(2 * day),
+        ports: [{ hostPort: 5432, containerPort: 5432, protocol: "tcp", scope: "local" }],
+      },
+      {
+        key: "c_cache",
+        name: "cache",
+        image: { ref: "redis", tag: "7" },
+        since: ago(day),
+      },
+      {
+        key: "c_batch",
+        name: "traitement-nocturne",
+        state: "error",
+        exitCode: 137,
+        since: ago(2 * 3_600_000),
+        image: { ref: "registre.exemple/batch", tag: "2.4" },
+      },
+      {
+        key: "c_boucle",
+        name: "synchronisation",
+        state: "restart_loop",
+        exitCode: 1,
+        restarts10m: 4,
+        since: ago(120_000),
+        image: { ref: "registre.exemple/sync", tag: "0.9" },
+      },
+      {
+        key: "c_old",
+        name: "ancien-service",
+        state: "stopped",
+        since: ago(5 * day),
+        origin: "hearth",
+      },
+      {
+        key: "c_neuf",
+        name: "nouveau",
+        state: "stopped",
+        neverStarted: true,
+        since: null,
+      },
+      {
+        key: "c_dns",
+        name: "dns",
+        image: { ref: "coredns/coredns", tag: "1.11" },
+        hostNetwork: true,
+        since: ago(day),
+      },
+      {
+        key: "c_anon",
+        name: "sans-image-nommee",
+        image: { ref: null, tag: null, shortId: "9f8e7d6c5b4a" },
+        since: ago(3_600_000),
+      },
+      {
+        key: "c_pile",
+        name: "pile-api",
+        composeProject: "boutique",
+        since: ago(day),
+        ports: [
+          { hostPort: 9000, containerPort: 9000, protocol: "tcp", scope: "all" },
+          { hostPort: 9001, containerPort: 9001, protocol: "udp", scope: "all" },
+          { hostPort: 9002, containerPort: 9002, protocol: "tcp", scope: "local" },
+          { hostPort: 9003, containerPort: 9003, protocol: "tcp", scope: "all" },
+        ],
+      },
+      {
+        key: "c_pause",
+        name: "en-pause",
+        state: "paused",
+        since: ago(30 * 60_000),
+      },
+    ]);
+    this.services.seed("salon", [], {
+      state: "absent",
+      name: null,
+      version: null,
+      lastReadyAt: null,
+      listReadAt: null,
+      listCurrentAt: null,
+      host: { osId: "debian" },
+    });
   }
 
   /** Ajoute un agent au réseau simulé. */

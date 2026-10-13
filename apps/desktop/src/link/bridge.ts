@@ -4,6 +4,7 @@ import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
+import type { EngineInfo, ServicesEvent } from "./services";
 import type {
   AccountInputCheck,
   AccountList,
@@ -231,6 +232,25 @@ export interface LinkBridge {
   ): Promise<AgentUpdateOutcome>;
   /** La progression de la mise à jour d'un agent (`agent-update://progress`) ; rien n'est rejoué : l'état se relit (`getAgentUpdate`). */
   onAgentUpdate(listener: (event: AgentUpdateEvent) => void): Promise<Unsubscribe>;
+
+  // Moteur de conteneurs et services (HRT-62) : LECTURE SEULE, UNE commande typée par geste. L'interface ne
+  // reçoit ni valeur ni nom de variable d'environnement, ni commande de lancement.
+
+  /**
+   * L'état du moteur et la liste des services de chaque serveur (`link://services`) : le dernier état connu
+   * (même hors ligne : la dernière liste enregistrée, périmée), puis chaque changement. La liaison fusionne
+   * les lots : l'interface reçoit toujours un état COMPLET, ou « cet agent ne gère pas les services » (pas
+   * de capacité `services` : ni sujet ni route envoyés à cet agent). `seq` croît strictement par serveur :
+   * le récepteur écarte tout événement dont `seq` n'est pas supérieur au dernier connu.
+   */
+  onServices(listener: (event: ServicesEvent) => void): Promise<Unsubscribe>;
+  /**
+   * « Vérifier à nouveau » : relance la détection du moteur tout de suite et rend son état. Une lecture :
+   * sans suivi, refaite par l'interface si le lien tombe. Hors « Connecté » : échec `not_connected`.
+   */
+  recheckEngine(serverId: string): Promise<EngineInfo>;
+  /** Ouvre la documentation officielle de Docker dans le navigateur du PC (l'adresse est une constante de la coquille). */
+  openEngineDocs(): Promise<void>;
 
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;

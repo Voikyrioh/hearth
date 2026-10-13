@@ -155,6 +155,6 @@ test("un compte en lecture seule voit la page et ses postes", async ({ page }) =
   await expect(page.getByRole("heading", { level: 1, name: "Sécurité" })).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Navigation du serveur" }).getByRole("link"),
-  ).toHaveText(["Tableau de bord", "Sécurité"]);
+  ).toHaveText(["Tableau de bord", "Services", "Sécurité"]);
   await expect(page.locator("tbody tr")).toHaveCount(2);
 });

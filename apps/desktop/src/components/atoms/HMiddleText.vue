@@ -7,7 +7,14 @@ import HTooltip from "./HTooltip.vue";
 // moitiés affichées sont masquées aux lecteurs d'écran, donc le lecteur lit le chemin entier et une sélection le copie
 // entier. Quand le texte est tronqué, il prend le focus clavier et le texte complet apparaît au survol et au focus
 // (infobulle). Un texte qui tient reste du texte simple, sans arrêt de tabulation (HRT-47, S1b).
-const props = withDefaults(defineProps<{ text: string; tail?: number }>(), { tail: 12 });
+// `focusable` faux : un texte tronqué ne prend pas le focus clavier (dans une grille, qui n'a qu'UN arrêt de tabulation
+// et dont la ligne porte déjà le texte complet) ; le texte complet reste dans le document et au survol.
+// `preserveSpaces` : les espaces du texte restent tous (ceux qui coupent le début de la fin, `white-space: pre`) ; sans
+// lui, comportement d'origine (`nowrap`) pour les écrans qui existaient avant la liste des services.
+const props = withDefaults(
+  defineProps<{ text: string; tail?: number; focusable?: boolean; preserveSpaces?: boolean }>(),
+  { tail: 12, focusable: true, preserveSpaces: false },
+);
 
 const head = computed(() =>
   props.text.length > props.tail ? props.text.slice(0, -props.tail) : "",
@@ -46,7 +53,11 @@ onBeforeUnmount(() => observer?.disconnect());
 
 <template>
   <HTooltip :text="truncated ? text : undefined" placement="start">
-    <span class="mid" data-middle :tabindex="truncated ? 0 : undefined">
+    <span
+      :class="['mid', { 'mid--pre': preserveSpaces }]"
+      data-middle
+      :tabindex="truncated && focusable ? 0 : undefined"
+    >
       <span class="sr-only">{{ text }}</span>
       <span v-if="head" ref="start" class="mid__start" aria-hidden="true">{{ head }}</span>
       <span class="mid__end" aria-hidden="true">{{ end }}</span>
@@ -71,5 +82,10 @@ onBeforeUnmount(() => observer?.disconnect());
 .mid__end {
   flex: none;
   white-space: nowrap;
+}
+
+.mid--pre .mid__start,
+.mid--pre .mid__end {
+  white-space: pre;
 }
 </style>

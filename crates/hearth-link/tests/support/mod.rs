@@ -272,6 +272,11 @@ pub struct Options {
     pub hour_hold_first: bool,
     /// La lecture de l'heure échoue (agent sans la route, délai) : la connexion s'ouvre quand même.
     pub hour_fails: bool,
+    /// Un faux moteur de conteneurs branché sur l'agent (HRT-62) : le sujet `services` est servi pour de
+    /// vrai. Sans lui, le pilotage des services est désactivé.
+    pub engine: Option<Arc<agent::fake_engine::FakeEngine>>,
+    /// L'agent est vu « d'avant les services » : son `/hello` n'annonce aucune capacité (HRT-62).
+    pub hide_capabilities: bool,
 }
 
 impl Default for Options {
@@ -285,6 +290,8 @@ impl Default for Options {
             hours: Vec::new(),
             hour_hold_first: false,
             hour_fails: false,
+            engine: None,
+            hide_capabilities: false,
         }
     }
 }
@@ -378,11 +385,18 @@ pub struct SpyState {
     pub hour_hold_first: std::sync::atomic::AtomicBool,
     pub hour_release: tokio::sync::Notify,
     pub hour_calls: std::sync::atomic::AtomicUsize,
+    /// Lectures de l'heure allées jusqu'à l'agent et revenues (réponse ou erreur) : la lecture à
+    /// l'ouverture ouvre sa propre connexion, un test qui compte les connexions l'attend (`settled`).
+    pub hour_returned: std::sync::atomic::AtomicUsize,
     /// La lecture de l'heure rend une erreur de transport.
     pub hour_fails: std::sync::atomic::AtomicBool,
     /// Lectures retenues abandonnees (futur jete avant liberation) et lectures retenues terminees.
     pub hour_aborted: std::sync::atomic::AtomicUsize,
     pub hour_completed: std::sync::atomic::AtomicUsize,
+    /// L'agent est vu « d'avant les services » : `/hello` perd `capabilities` (HRT-62).
+    pub hide_capabilities: std::sync::atomic::AtomicBool,
+    /// Les sujets demandés par chaque message `subscribe` envoyé à l'agent, dans l'ordre (HRT-62).
+    pub subscribed: std::sync::Mutex<Vec<Vec<hearth_proto::stream::Topic>>>,
 }
 
 impl SpyState {
@@ -429,9 +443,12 @@ impl Spy {
                 hour_hold_first: std::sync::atomic::AtomicBool::new(false),
                 hour_release: tokio::sync::Notify::new(),
                 hour_calls: std::sync::atomic::AtomicUsize::new(0),
+                hour_returned: std::sync::atomic::AtomicUsize::new(0),
                 hour_aborted: std::sync::atomic::AtomicUsize::new(0),
                 hour_completed: std::sync::atomic::AtomicUsize::new(0),
                 hour_fails: std::sync::atomic::AtomicBool::new(false),
+                hide_capabilities: std::sync::atomic::AtomicBool::new(false),
+                subscribed: std::sync::Mutex::new(Vec::new()),
             }),
         }
     }
@@ -609,7 +626,16 @@ impl hearth_link::ports::Transport for Spy {
         target: &hearth_link::ports::transport::Target,
     ) -> Result<hearth_link::ports::transport::Probed, hearth_link::ports::transport::TransportError>
     {
-        self.inner.hello(target).await
+        let mut probed = self.inner.hello(target).await?;
+        if self
+            .state
+            .hide_capabilities
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            // Un agent d'avant les services : le champ n'existe pas dans son `/hello`.
+            probed.hello.capabilities.clear();
+        }
+        Ok(probed)
     }
 
     async fn login(
@@ -711,7 +737,11 @@ impl hearth_link::ports::Transport for Spy {
                 return Ok(response.clone());
             }
         }
-        self.inner.hour_history(target, token).await
+        let read = self.inner.hour_history(target, token).await;
+        self.state
+            .hour_returned
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        read
     }
 
     async fn export_audit(
@@ -745,7 +775,45 @@ impl hearth_link::ports::Transport for Spy {
         Box<dyn hearth_link::ports::StreamConn>,
         hearth_link::ports::transport::TransportError,
     > {
-        self.inner.open_stream(target).await
+        let inner = self.inner.open_stream(target).await?;
+        Ok(Box::new(RecordingStream {
+            inner,
+            state: self.state.clone(),
+        }))
+    }
+}
+
+/// Un flux qui note les sujets de chaque `subscribe` envoyé (HRT-62 : un agent sans la capacité `services`
+/// ne doit jamais recevoir ce sujet).
+struct RecordingStream {
+    inner: Box<dyn hearth_link::ports::StreamConn>,
+    state: Arc<SpyState>,
+}
+
+#[async_trait]
+impl hearth_link::ports::StreamConn for RecordingStream {
+    async fn send(
+        &mut self,
+        message: &hearth_proto::stream::ClientMessage,
+    ) -> Result<(), hearth_link::ports::transport::TransportError> {
+        if let hearth_proto::stream::ClientMessage::Subscribe { topics } = message {
+            self.state.subscribed.lock().unwrap().push(topics.clone());
+        }
+        self.inner.send(message).await
+    }
+
+    async fn recv(
+        &mut self,
+    ) -> Result<hearth_link::ports::transport::Frame, hearth_link::ports::transport::TransportError>
+    {
+        self.inner.recv().await
+    }
+
+    async fn send_auth(
+        &mut self,
+        auth: &hearth_proto::stream::SignedAuth,
+    ) -> Result<(), hearth_link::ports::transport::TransportError> {
+        self.inner.send_auth(auth).await
     }
 }
 
@@ -772,7 +840,7 @@ pub fn short_transport() -> HttpTransport {
 impl World {
     /// Agent installé, compte « marie », mandataire, `LinkManager` connecté.
     pub async fn connected(options: Options) -> Self {
-        let agent = TestAgent::install_with(options.updating).await;
+        let agent = TestAgent::install_full(options.updating, options.engine).await;
         agent.create_account("marie", options.role).await;
         let proxy = FaultProxy::start(agent.addr).await;
         let dir = agent::tmp::tempdir().unwrap();
@@ -788,6 +856,10 @@ impl World {
             },
         ));
         *spy.state.scripted_hour.lock().unwrap() = options.hours.clone();
+        spy.state.hide_capabilities.store(
+            options.hide_capabilities,
+            std::sync::atomic::Ordering::SeqCst,
+        );
         spy.state
             .hour_hold_first
             .store(options.hour_hold_first, std::sync::atomic::Ordering::SeqCst);
@@ -902,6 +974,20 @@ impl Options {
             },
             ..Self::default()
         }
+    }
+}
+
+/// Attend que la lecture de l'heure lancée à l'ouverture ait rendu. Elle part en même temps que les
+/// premières mesures et ouvre sa propre connexion TCP ; sans cette attente, un test qui compte les
+/// connexions la prend pour une réouverture du flux, selon la vitesse de la machine.
+pub async fn settled(world: &World) {
+    let deadline = Instant::now() + WAIT;
+    while world.spy.hour_returned.load(Ordering::SeqCst) == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "la lecture de l'heure n'a pas rendu"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
     }
 }
 

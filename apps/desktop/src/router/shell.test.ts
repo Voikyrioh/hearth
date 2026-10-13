@@ -290,15 +290,16 @@ describe("hors ligne (HRT-12)", () => {
 
   it("dims and dates EVERY page of a server from the layout, none can forget it (BR-RESIL-007)", async () => {
     const { bridge, router, wrapper } = await boot("/servers/forge/dashboard");
-    for (const name of ["dashboard", "accounts", "audit", "security"]) {
+    for (const name of ["dashboard", "services", "accounts", "audit", "security"]) {
       await router.push(`/servers/forge/${name}`);
       await flushPromises();
       expect(wrapper.findAll('[data-stale="true"]'), `${name} connecté`).toHaveLength(0);
       bridge.setState("forge", "offline");
       await flushPromises();
       expect(wrapper.findAll('[data-stale="true"]'), `${name} hors ligne`).toHaveLength(1);
-      // Le tableau de bord de ce test n'a reçu aucune mesure : il n'y a rien à dater (HRT-41).
-      if (name === "dashboard") expect(wrapper.text(), name).not.toMatch(/Vu il y a/);
+      // Le tableau de bord et les services de ce test n'ont rien reçu : il n'y a rien à dater (HRT-41, HRT-62).
+      if (name === "dashboard" || name === "services")
+        expect(wrapper.text(), name).not.toMatch(/Vu il y a/);
       else expect(wrapper.text(), name).toMatch(/Vu il y a \d+ s/);
       bridge.setState("forge", "connected");
       await flushPromises();
@@ -308,7 +309,7 @@ describe("hors ligne (HRT-12)", () => {
       .getRoutes()
       .filter((route) => route.path.startsWith("/servers/:id/") && route.name)
       .map((route) => String(route.name));
-    expect(pages.sort()).toEqual(["accounts", "audit", "dashboard", "security"]);
+    expect(pages.sort()).toEqual(["accounts", "audit", "dashboard", "security", "services"]);
     wrapper.unmount();
   });
 });

@@ -199,6 +199,11 @@ const EXPECTED: &[(&str, &str)] = &[
         "setReauthSetting",
         "serverId: string, mode: ReauthModeDto, password: string",
     ),
+    // HRT-62 : le moteur et les services, en lecture seule. `engineRecheck` relance la détection (`POST
+    // /engine/recheck` ne modifie rien) ; `openEngineDocs` n'a aucun paramètre (adresse constante).
+    ("listServicesStates", ""),
+    ("engineRecheck", "serverId: string"),
+    ("openEngineDocs", ""),
 ];
 
 /// Les commandes qui portent UN ACTE D'ADMINISTRATION, avec le paramètre qui porte le mot de passe de
@@ -262,6 +267,9 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "ackAgentResult",
     "getReauthState",
     "reauthCovers",
+    "listServicesStates",
+    "engineRecheck",
+    "openEngineDocs",
 ];
 
 /// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de
