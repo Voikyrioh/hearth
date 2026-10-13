@@ -40,6 +40,7 @@ use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::services_right::ServicesRightService;
 use crate::application::sessions::SessionService;
 use crate::application::trust::TrustService;
+use crate::domain::services::BrakeSettings;
 use crate::entrypoint::account::{self, AccountCliError};
 use crate::entrypoint::attack_mode as attack_mode_cli;
 use crate::entrypoint::cli::{AccountAction, Cli, Command};
@@ -181,6 +182,9 @@ pub struct EngineParts {
     pub supervisor: Arc<dyn ServiceSupervisor>,
     pub host: Arc<dyn HostEnvironment>,
     pub timings: EngineTimings,
+    /// Plafond de lectures de journaux et frein d'ouvertures par compte (HRT-107, BR-SLOG-026 et 027).
+    /// Les tests qui ne portent pas sur eux le détendent (`BrakeSettings::relaxed`).
+    pub log_brake: BrakeSettings,
 }
 
 impl EngineParts {
@@ -198,6 +202,7 @@ impl EngineParts {
             supervisor,
             host: Arc::new(SystemHostEnvironment),
             timings: EngineTimings::production(),
+            log_brake: BrakeSettings::production(),
         }
     }
 }
@@ -746,7 +751,10 @@ pub async fn start_engined(
         registry.clone(),
         container_engine,
         adapters.clock.clone(),
-        LogSettings::default(),
+        LogSettings {
+            brake: engine.log_brake,
+            ..LogSettings::default()
+        },
     ));
     let service_adoption = Arc::new(ServiceAdoption::new(
         registry.clone(),

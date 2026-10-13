@@ -32,9 +32,16 @@
 //! [`LogSession`] est lâchée, quelle que soit la raison (socket fermé, coupure, erreur) : la lâcher
 //! abandonne aussi la tâche et ferme la lecture du moteur.
 //!
+//! Par compte (HRT-107) : trois lectures en direct au plus, tous postes confondus (BR-SLOG-026), et un
+//! frein sur les ouvertures, douze par minute, la reprise après une coupure comptant comme une ouverture
+//! (BR-SLOG-027). La règle est `domain::services::log_brake` ; ici on tient un état par compte, oublié
+//! quand le compte n'a plus rien à retenir. Un compte en lecture seule ne peut plus priver les autres
+//! des dix places ni faire relire sans fin les mille dernières lignes.
+//!
 //! Rien ici ne garde ni ne trace une ligne (BR-SLOG-019, BR-SLOG-021) : l'anneau d'une lecture est le seul
 //! endroit où des lignes attendent, et il meurt avec elle.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -51,12 +58,15 @@ use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, timeout, time
 
 use super::ports::{Clock, ContainerEngine, EngineError, LogQuery};
 use super::services::{ServicesChange, ServicesRegistry};
+use crate::domain::accounts::AccountId;
 use crate::domain::services::logs::{
     Entry, FROM_START_LINES, LogContainer, LogEvent, LogLine, LogRing, LogTarget, RESUME_MAX_LINES,
     RESUME_WINDOW_LINES, RankTracker, ReadRefusal, Relation, ResumeCheck, ResumeFilter, Step,
     Verdict, Viewer, check_resume, flush_due, may_read,
 };
-use crate::domain::services::{EngineState, RunState, ServiceKey};
+use crate::domain::services::{
+    AccountBrake, BrakeSettings, EngineState, OpenRefusal, RunState, ServiceKey,
+};
 
 /// Réglages d'une lecture. Les valeurs par défaut sont celles du protocole ; les tests les resserrent.
 #[derive(Debug, Clone, Copy)]
@@ -81,6 +91,8 @@ pub struct LogSettings {
     /// Combien de temps la lecture de la première page attend que le client vide l'anneau avant de
     /// renoncer à l'attendre (BR-SLOG-001).
     pub history_wait: Duration,
+    /// Plafond de lectures et frein d'ouvertures par compte (BR-SLOG-026, BR-SLOG-027).
+    pub brake: BrakeSettings,
 }
 
 impl Default for LogSettings {
@@ -94,6 +106,7 @@ impl Default for LogSettings {
             restart_grace: Duration::from_secs(2),
             access_recheck: Duration::from_secs(2),
             history_wait: Duration::from_secs(5),
+            brake: BrakeSettings::production(),
         }
     }
 }
@@ -147,6 +160,30 @@ impl LogAccess {
     }
 }
 
+/// Une ouverture refusée : l'erreur à envoyer au client, et, une fois par fenêtre de dix minutes pour un
+/// compte freiné, le nombre de refus à inscrire au journal d'activité (BR-SLOG-027).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenRefused {
+    pub error: LogsError,
+    pub throttle_entry: Option<u32>,
+    /// Le frein a répondu, mais ce compte n'avait de toute façon pas le droit de lire ce service : le
+    /// refus de droit reste un événement de sécurité à inscrire (BR-SLOG-024).
+    pub missing_right: bool,
+}
+
+impl From<LogsErrorCode> for OpenRefused {
+    fn from(code: LogsErrorCode) -> Self {
+        Self {
+            error: LogsError::new(code),
+            throttle_entry: None,
+            missing_right: false,
+        }
+    }
+}
+
+/// L'état du frein de chaque compte qui a quelque chose à retenir.
+type AccountBrakes = Arc<Mutex<HashMap<AccountId, AccountBrake>>>;
+
 /// Le service des lectures de journaux : le registre (qui désigne le conteneur), le moteur (qui rend
 /// les lignes), et le compte des lectures ouvertes.
 pub struct ServiceLogs {
@@ -156,6 +193,9 @@ pub struct ServiceLogs {
     settings: LogSettings,
     reads: Arc<AtomicUsize>,
     policy: ReadPolicy,
+    accounts: AccountBrakes,
+    /// Origine du temps du frein (monotone, mise en pause avec le temps de test).
+    epoch: Instant,
 }
 
 /// Une place de lecture, rendue quand elle est lâchée.
@@ -166,6 +206,21 @@ struct Permit {
 impl Drop for Permit {
     fn drop(&mut self) {
         self.reads.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Une des lectures en direct d'un compte, rendue quand elle est lâchée (BR-SLOG-026).
+struct AccountSlot {
+    accounts: AccountBrakes,
+    account: AccountId,
+}
+
+impl Drop for AccountSlot {
+    fn drop(&mut self) {
+        let mut accounts = self.accounts.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(brake) = accounts.get_mut(&self.account) {
+            brake.release();
+        }
     }
 }
 
@@ -183,6 +238,8 @@ impl ServiceLogs {
             settings,
             reads: Arc::new(AtomicUsize::new(0)),
             policy: Arc::new(may_read),
+            accounts: Arc::new(Mutex::new(HashMap::new())),
+            epoch: Instant::now(),
         }
     }
 
@@ -197,6 +254,33 @@ impl ServiceLogs {
     /// Lectures ouvertes en ce moment.
     pub fn open_reads(&self) -> usize {
         self.reads.load(Ordering::SeqCst)
+    }
+
+    /// Les limites du compte : le frein d'abord, puis le plafond de lectures (BR-SLOG-027, BR-SLOG-026).
+    /// Chaque tentative coûte une ouverture, réussie ou non plus loin.
+    fn reserve_account(&self, account: &AccountId) -> Result<AccountSlot, OpenRefused> {
+        let now_ms = u64::try_from(self.epoch.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let mut accounts = self.accounts.lock().unwrap_or_else(PoisonError::into_inner);
+        // Un compte qui n'a plus rien à retenir est oublié : la table ne grossit pas avec les comptes.
+        accounts.retain(|_, brake| !brake.is_idle(now_ms));
+        let brake = accounts
+            .entry(account.clone())
+            .or_insert_with(|| AccountBrake::new(self.settings.brake, now_ms));
+        match brake.try_open(now_ms) {
+            Ok(()) => Ok(AccountSlot {
+                accounts: self.accounts.clone(),
+                account: account.clone(),
+            }),
+            Err(OpenRefusal::AccountLimit) => Err(LogsErrorCode::LogsAccountLimit.into()),
+            Err(OpenRefusal::RateLimited {
+                retry_after_s,
+                announce,
+            }) => Err(OpenRefused {
+                error: LogsError::rate_limited(retry_after_s),
+                throttle_entry: announce,
+                missing_right: false,
+            }),
+        }
     }
 
     fn acquire(&self) -> Result<Permit, LogsErrorCode> {
@@ -228,10 +312,22 @@ impl ServiceLogs {
         viewer: Viewer,
         key: ServiceKey,
         request: OpenRequest,
-    ) -> Result<LogSession, LogsErrorCode> {
+    ) -> Result<LogSession, OpenRefused> {
+        let slot = match self.reserve_account(&viewer.account) {
+            Ok(slot) => slot,
+            Err(mut refused) => {
+                // Le frein passe d'abord, mais il ne doit pas cacher un refus de droit.
+                if refused.error.code == LogsErrorCode::LogsRateLimited {
+                    let target = self.registry.log_target(&key);
+                    refused.missing_right =
+                        (self.policy)(&viewer, &target) == Err(ReadRefusal::MissingRight);
+                }
+                return Err(refused);
+            }
+        };
         let permit = self.acquire()?;
         if self.registry.engine_status().state != EngineState::Ready {
-            return Err(LogsErrorCode::EngineUnavailable);
+            return Err(LogsErrorCode::EngineUnavailable.into());
         }
         let (viewer_tx, viewer_rx) = watch::channel(viewer);
         let access = LogAccess {
@@ -242,7 +338,7 @@ impl ServiceLogs {
         if let LogTarget::Container(container) = access.target(&key)?
             && !container.readable
         {
-            return Err(LogsErrorCode::LogsUnreadable);
+            return Err(LogsErrorCode::LogsUnreadable.into());
         }
         let shared = Arc::new(Shared {
             ring: Mutex::new(LogRing::new(
@@ -277,6 +373,7 @@ impl ServiceLogs {
             task,
             viewer: viewer_tx,
             _permit: permit,
+            _slot: slot,
             window_started: None,
             seq: 0,
         })
@@ -306,6 +403,7 @@ pub struct LogSession {
     task: JoinHandle<()>,
     viewer: watch::Sender<Viewer>,
     _permit: Permit,
+    _slot: AccountSlot,
     /// Depuis quand des lignes attendent dans l'anneau (la fenêtre de 100 ms).
     window_started: Option<Instant>,
     seq: u64,
@@ -399,7 +497,7 @@ impl LogSession {
             Step::Gap(gap) => LogsServerMessage::Gap(gap),
             Step::Event(LogEvent::Status(status)) => LogsServerMessage::Status(status),
             Step::Event(LogEvent::Marker(marker)) => LogsServerMessage::Marker(marker),
-            Step::Event(LogEvent::Error(code)) => LogsServerMessage::Error(LogsError { code }),
+            Step::Event(LogEvent::Error(code)) => LogsServerMessage::Error(LogsError::new(code)),
         }
     }
 }

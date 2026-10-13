@@ -324,6 +324,12 @@ pub enum Reason {
     /// Aucun conteneur de cette clé : disparu depuis la liste, ou jamais existé (HRT-80, BR-ADOPT-019). Le
     /// journal ne distingue pas non plus l'un de l'autre.
     ServiceNotFound,
+    /// Un compte a été refusé PLUS DE `over` fois en 10 minutes en ouvrant des lectures de journaux trop
+    /// vite (HRT-107, BR-SLOG-027). Le nombre exact n'est pas connu au moment d'écrire (l'entrée est
+    /// unique par fenêtre) : le texte dit « plus de », jamais un total qui serait faux.
+    OpensThrottled {
+        over: u32,
+    },
 }
 
 impl Reason {
@@ -333,6 +339,7 @@ impl Reason {
     pub fn group_text(self) -> String {
         match self {
             Self::TooManyAttempts { .. } => "trop de tentatives".to_owned(),
+            Self::OpensThrottled { .. } => "ouvertures de journaux freinées".to_owned(),
             other => other.text(),
         }
     }
@@ -371,6 +378,9 @@ impl Reason {
             Self::PasswordRequired => "mot de passe requis".to_owned(),
             Self::AlreadyAdopted => "déjà adopté".to_owned(),
             Self::ServiceNotFound => "service introuvable".to_owned(),
+            Self::OpensThrottled { over } => {
+                format!("plus de {over} ouvertures de journaux refusées en 10 minutes")
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M4V4G0ZPWMKE6WCYKPF2Q3SM](./FIX-01M4V4G0ZPWMKE6WCYKPF2Q3SM.md) | La liste des dossiers refusés au montage laissait passer /usr, /nix, /run, /var/spool et le .ssh d'un compte (HRT-75) | 2026-10-13 |
 | [FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ](./FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ.md) | Textes de conteneur : séparateurs de ligne Unicode non retirés, ports et montages omis non comptés (HRT-72) | 2026-10-13 |
 | [FIX-01M4SFCRJWX8KMBC1ZK9ZWETTW](./FIX-01M4SFCRJWX8KMBC1ZK9ZWETTW.md) | La date de la liste sur le fil faisait surestimer son âge, sans règle pour l'écart d'horloge (HRT-72, N2) | 2026-10-13 |
 | [FIX-01M4SFCQ7N5TN8VC21KBQR87PP](./FIX-01M4SFCQ7N5TN8VC21KBQR87PP.md) | Au retour du moteur, l'ancienne liste repartait sous « prêt » sans marque (HRT-72, N1) | 2026-10-13 |
