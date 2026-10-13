@@ -123,6 +123,34 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Le vrai moteur de conteneurs (HRT-61, ADR-0036). Les runners `ubuntu-latest` ont Docker : la suite de
+  # contrat du port `ContainerEngine` (liste, inspection, événements, lecture d'un conteneur supprimé)
+  # s'y exécute contre le VRAI moteur, par `bollard` sur le socket Unix. C'est ce qui empêche le faux
+  # moteur et le faux démon HTTP des tests de mentir. Job indépendant : aucun autre job n'en dépend,
+  # il ne peut pas casser les quatre autres. Images minuscules (`busybox`, miroir public de Docker Hub
+  # chez AWS : pas de limite anonyme serrée). Ce job n'a jamais été exécuté avant sa première PR.
+  engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HEARTH_TEST_ENGINE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Moteur du runner (version)
+        run: docker version
+      - name: Suite de contrat de l'adaptateur contre un vrai moteur
+        run: cargo test -p hearth-agent --test engine_real -- --ignored --test-threads=1
+      # Rien ne doit rester : les conteneurs de test sont supprimés avant et après la suite.
+      - name: Conteneurs laissés par la suite
+        if: always()
+        run: |
+          left="$(docker ps -aq --filter name=hearth-contract-)"
+          if [ -n "$left" ]; then docker ps -a --filter name=hearth-contract-; docker rm -f $left; exit 1; fi
+
   # Le binaire de l'agent (statique, musl), l'installation de bout en bout dans un conteneur avec
   # systemd, et les scripts de deploy/. Les conteneurs sont ceux de `cargo xtask` ; leur cache
   # (registre Cargo et dossier de cibles) est un dossier de l'hôte, mis en cache d'une exécution

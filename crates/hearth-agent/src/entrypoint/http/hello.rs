@@ -22,6 +22,11 @@ fn to_response(description: &AgentDescription) -> HelloResponse {
         install_id: description.install_id.to_string(),
         managed: description.managed,
         mac_addresses: description.mac_addresses.clone(),
+        capabilities: description
+            .capabilities
+            .iter()
+            .map(|capability| (*capability).to_owned())
+            .collect(),
     }
 }
 
@@ -41,6 +46,7 @@ mod tests {
             install_id: InstallId::from_bytes([9; 16]),
             managed: true,
             mac_addresses: vec!["AA:BB:CC:DD:EE:FF".into()],
+            capabilities: vec!["services"],
         };
         let wire = to_response(&description);
         assert_eq!(wire.product, "hearth");
@@ -49,5 +55,6 @@ mod tests {
         assert_eq!(wire.install_id, "09090909090909090909090909090909");
         assert!(wire.managed);
         assert_eq!(wire.mac_addresses, vec!["AA:BB:CC:DD:EE:FF"]);
+        assert_eq!(wire.capabilities, vec!["services"]);
     }
 }

@@ -3,6 +3,7 @@
 //! Il rend une structure applicative ; la conversion vers le type du fil
 //! (`hearth_proto::api::hello::HelloResponse`) est faite par `entrypoint/http`.
 
+use hearth_proto::api::services::CAPABILITY_SERVICES;
 use hearth_proto::product::PRODUCT_NAME;
 use hearth_proto::version::{API_MIN_SUPPORTED, API_VERSION};
 
@@ -20,6 +21,9 @@ pub struct AgentDescription {
     pub install_id: InstallId,
     pub managed: bool,
     pub mac_addresses: Vec<String>,
+    /// Ce que cet agent sait faire de plus que le socle (ADR-0038) : le client n'utilise un sujet du
+    /// flux ou une route nouvelle que si la capacité est annoncée.
+    pub capabilities: Vec<&'static str>,
 }
 
 pub struct HelloService {
@@ -39,6 +43,7 @@ impl HelloService {
                 install_id,
                 managed,
                 mac_addresses: machine.mac_addresses(),
+                capabilities: vec![CAPABILITY_SERVICES],
             },
         }
     }
@@ -83,6 +88,7 @@ mod tests {
         assert_eq!(hello.mac_addresses, vec!["AA:BB:CC:DD:EE:FF"]);
         assert_eq!(hello.api_min, API_MIN_SUPPORTED);
         assert_eq!(hello.api_max, API_VERSION);
+        assert_eq!(hello.capabilities, vec!["services"]);
     }
 
     #[test]

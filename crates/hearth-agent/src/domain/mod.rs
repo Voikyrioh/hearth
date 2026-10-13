@@ -17,6 +17,7 @@ pub mod machine;
 pub mod metrics;
 pub mod operations;
 pub mod secret;
+pub mod services;
 pub mod session_token;
 pub mod sessions;
 pub mod stream;

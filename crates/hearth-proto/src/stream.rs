@@ -20,6 +20,7 @@ use crate::api::audit::AuditEventItem;
 use crate::api::machine::MachineResponse;
 use crate::api::metrics::Sample;
 use crate::api::security::SecurityView;
+use crate::api::services::{ServicesDelta, ServicesState};
 use crate::api::sessions::DeviceProof;
 use crate::api::update::UpdateProgress;
 use crate::error::ErrorDetail;
@@ -43,6 +44,10 @@ pub enum Topic {
     /// Progression de la mise à jour de l'agent (tout compte authentifié) : l'état courant à
     /// l'abonnement, puis un message par changement d'étape ou de pourcentage entier.
     Update,
+    /// L'état du moteur de conteneurs et la liste des services (tout compte authentifié, les deux
+    /// rôles reçoivent la même chose). Un client ne l'envoie qu'à un agent qui annonce la capacité
+    /// `services` dans `/hello` : un sujet inconnu fait refuser tout le message `subscribe`.
+    Services,
 }
 
 /// Messages du client vers l'agent.
@@ -131,6 +136,36 @@ pub enum UpdateMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SecurityMessage {
     Security(SecurityView),
+}
+
+/// Messages du sujet `services` (HRT-61, ADR-0038). Comme [`SecurityMessage`], ce n'est pas un
+/// [`ServerMessage`] : un client qui ne le connaît pas lit la trame comme inconnue et l'ignore.
+/// Les messages ne partent qu'à un abonné du sujet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServicesMessage {
+    /// À l'abonnement, et chaque fois qu'un abonné trop lent a perdu des changements.
+    ServicesSnapshot(ServicesState),
+    /// Un lot de changements (au plus un par lot d'événements du moteur).
+    ServicesDelta(ServicesDelta),
+    /// Issue d'une action sur un service. Déclaré pour les tranches suivantes, jamais émis par
+    /// cette tranche (lecture seule).
+    ServiceAction(ServiceActionNotice),
+}
+
+/// Progression d'une action sur un service (tranches suivantes).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceActionNotice {
+    pub action_id: String,
+    pub key: String,
+    pub kind: String,
+    pub phase: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+    #[serde(default)]
+    pub forced: bool,
 }
 
 /// Messages de l'agent vers le client.
@@ -257,6 +292,66 @@ mod tests {
         );
         // Un client qui ne connaît que `ServerMessage` lit la trame comme inconnue : il l'ignore.
         assert!(serde_json::from_value::<ServerMessage>(value).is_err());
+    }
+
+    #[test]
+    fn the_services_messages_are_flat_and_unknown_to_the_server_messages() {
+        use crate::api::services::{
+            EngineState, EngineView, HostInfo, InitSystem, MIN_ENGINE_VERSION,
+        };
+        let engine = EngineView {
+            state: EngineState::Absent,
+            name: None,
+            version: None,
+            min_version: MIN_ENGINE_VERSION.into(),
+            agent_account: "root".into(),
+            agent_is_admin: true,
+            host: HostInfo {
+                os_id: "debian".into(),
+                os_like: vec![],
+                init: InitSystem::Systemd,
+                declarative: false,
+            },
+            last_ready_at: None,
+            checked_at: "2026-10-13T10:00:00Z".into(),
+            list_read_at: None,
+            list_degraded: false,
+        };
+        let snapshot = ServicesMessage::ServicesSnapshot(ServicesState {
+            rev: 3,
+            engine: engine.clone(),
+            services: vec![],
+        });
+        let value = serde_json::to_value(&snapshot).expect("json");
+        assert_eq!(value["type"], "services_snapshot");
+        assert_eq!(value["rev"], 3);
+        assert_eq!(value["engine"]["state"], "absent");
+        assert_eq!(
+            serde_json::from_value::<ServicesMessage>(value.clone()).expect("round trip"),
+            snapshot
+        );
+        let delta = ServicesMessage::ServicesDelta(ServicesDelta {
+            rev: 4,
+            engine: None,
+            upserts: vec![],
+            removed: vec!["c_1".into()],
+        });
+        assert_eq!(
+            serde_json::to_value(&delta).expect("json")["type"],
+            "services_delta"
+        );
+        // Un client qui ne connaît que `ServerMessage` ignore la trame.
+        assert!(serde_json::from_value::<ServerMessage>(value).is_err());
+        let subscribe: ClientMessage = serde_json::from_value(
+            json!({ "type": "subscribe", "topics": ["metrics", "services"] }),
+        )
+        .expect("subscribe");
+        assert_eq!(
+            subscribe,
+            ClientMessage::Subscribe {
+                topics: vec![Topic::Metrics, Topic::Services]
+            }
+        );
     }
 
     #[test]

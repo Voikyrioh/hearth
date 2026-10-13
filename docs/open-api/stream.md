@@ -15,6 +15,10 @@ Flux temps réel : l'identité et l'historique de la machine, puis un échantill
 4. La session est revérifiée toutes les 5 s. Si le rôle a changé (un administrateur rétrogradé), l'abonnement `audit` est retiré avec un message `error` `FORBIDDEN_ROLE`. Si la session est révoquée ou expire, l'agent envoie `{"type":"session","kind":"revoked"}` ou `{"type":"session","kind":"expired"}`, puis ferme (`1008`).
 5. À l'arrêt de l'agent : fermeture propre, code `1001`.
 
+## Sujet `services` (HRT-61)
+
+Ouvert à tout compte authentifié, les deux rôles reçoivent la même chose. À l'abonnement : `services_snapshot` (état du moteur et tous les services), puis `services_delta` à chaque lot de changements. Un abonné trop lent reçoit un nouveau `services_snapshot`. **Ne l'envoyer qu'à un agent dont `GET /hello` annonce la capacité `services`** : un sujet inconnu d'un agent ancien fait refuser tout le message `subscribe`. Contenu des messages, `rev` et comportement : [services.md](./services.md).
+
 ## Sujet `update` (HRT-17)
 
 Le message `security` (HRT-24, BR-TRUST-008) n'a pas de sujet : il est **toujours envoyé** après l'`auth`, puis à chaque changement de l'état de sécurité **de ce compte** : `{"type":"security","alert":{"own":true,"since":"…","others":1},"attack_mode":{"state":"off"}}` (`others` : administrateur seulement ; voir [security.md](./security.md)). Ce type n'est pas un `ServerMessage` : un client qui ne le connaît pas l'ignore.
@@ -26,7 +30,7 @@ Le sujet `update` (tout compte authentifié) diffuse la progression d'une mise �
 | `type` | Champs | Rôle |
 |---|---|---|
 | `auth` | `token`, `device` (optionnel) | Jeton de session, **premier message obligatoire**. Jamais journalisé. `device` : la preuve de la clé d'appareil (voir « Déroulement »). |
-| `subscribe` | `topics[]` (`metrics`, `audit`, `session`) | Remplace les abonnements. `audit` pour un compte lecture seule : message `error` `FORBIDDEN_ROLE`, le reste est pris. `session` est toujours reçu : s'y abonner est sans effet. |
+| `subscribe` | `topics[]` (`metrics`, `audit`, `session`, `update`, `services`) | Remplace les abonnements. `audit` pour un compte lecture seule : message `error` `FORBIDDEN_ROLE`, le reste est pris. `session` est toujours reçu : s'y abonner est sans effet. |
 | `ping` | `n` | Battement. |
 
 Taille maximale d'un message du client : 4 096 octets (au-delà, l'agent ferme).

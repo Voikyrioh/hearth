@@ -174,6 +174,38 @@ impl WsClient {
         }
     }
 
+    /// Prochain message du sujet `services` (les autres messages sont ignorés).
+    pub async fn next_services(&mut self) -> hearth_proto::stream::ServicesMessage {
+        self.try_next_services(WAIT)
+            .await
+            .expect("aucun message services dans le délai")
+    }
+
+    /// Comme `next_services`, mais `None` si rien ne vient dans ce délai.
+    pub async fn try_next_services(
+        &mut self,
+        wait: Duration,
+    ) -> Option<hearth_proto::stream::ServicesMessage> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            let frame = match tokio::time::timeout_at(deadline, self.socket.next()).await {
+                Err(_) => return None,
+                Ok(frame) => frame.transpose().unwrap_or(None),
+            };
+            match frame {
+                Some(Message::Text(text)) => {
+                    if let Ok(message) =
+                        serde_json::from_str::<hearth_proto::stream::ServicesMessage>(text.as_str())
+                    {
+                        return Some(message);
+                    }
+                }
+                Some(Message::Close(_)) | None => panic!("flux fermé avant le message services"),
+                Some(_) => {}
+            }
+        }
+    }
+
     /// Prochaine progression de mise à jour (les autres messages sont ignorés).
     pub async fn next_update(&mut self) -> hearth_proto::stream::UpdateMessage {
         loop {

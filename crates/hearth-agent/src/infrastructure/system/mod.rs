@@ -3,9 +3,11 @@
 
 mod boot;
 pub mod gpu;
+mod host_environment;
 mod machine_info;
 mod sysinfo_probe;
 
 pub use boot::ProcBootInfo;
+pub use host_environment::SystemHostEnvironment;
 pub use machine_info::SystemMachineInfo;
 pub use sysinfo_probe::SysinfoProbe;

@@ -619,6 +619,46 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ "$SAMPLES" = 1 ] || die "aucun échantillon de mesures après 10 s : $(cat "$OUT.metrics")"
 ok "mesures : identité de la machine et échantillons (processeur, mémoire) servis par l'agent sous systemd"
+# HRT-61 : ce conteneur Debian n'a AUCUN moteur de conteneurs. L'agent l'annonce (capacité `services`),
+# dit « absent » avec une liste vide, sans rien d'écrit dans le moteur, sans erreur bruyante dans son
+# journal et sans sonder en boucle serrée (mesuré : temps processeur de l'agent sur une fenêtre).
+hello | grep -Eq '"capabilities": *\[[^]]*"services"' || die "/hello n'annonce pas la capacité services : $(hello)"
+ENGINE_STATE=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    authed "$BASE/services" >"$OUT.services"
+    if grep -Eq '"state": *"absent"' "$OUT.services"; then ENGINE_STATE=absent; break; fi
+    sleep 1
+done
+[ "$ENGINE_STATE" = absent ] || die "aucun moteur : l'état « absent » est attendu, reçu : $(cat "$OUT.services")"
+grep -Eq '"services": *\[ *\]' "$OUT.services" || die "aucun moteur : la liste des services devrait être vide : $(cat "$OUT.services")"
+[ ! -e /var/run/docker.sock ] || die "ce conteneur ne devrait pas avoir de socket de moteur"
+# Repère du journal : seules les lignes écrites à partir d'ici comptent (un avertissement plus ancien,
+# sans rapport, ne fait pas échouer ce contrôle).
+journalctl -u hearth-agent --no-pager --show-cursor -n 0 >"$OUT.cursor" || die "journal de l'agent illisible"
+JOURNAL_CURSOR=$(sed -n 's/^-- cursor: //p' "$OUT.cursor")
+[ -n "$JOURNAL_CURSOR" ] || die "repère du journal de l'agent introuvable : $(cat "$OUT.cursor")"
+authed -X POST "$BASE/engine/recheck" | grep -Eq '"state": *"absent"' || die "POST /engine/recheck : l'état « absent » est attendu"
+# Temps processeur de l'agent (utime + stime, en ticks) sur 8 s sans moteur. Une sonde en boucle serrée
+# (connexion refusée en continu) approcherait 800 ticks ; une sonde toutes les 5 s en use moins de 25.
+agent_ticks() {
+    AGENT_PID=$(systemctl show -p MainPID --value hearth-agent)
+    [ -n "$AGENT_PID" ] && [ "$AGENT_PID" != 0 ] || die "PID de l'agent introuvable"
+    sed 's/^.*) //' "/proc/$AGENT_PID/stat" | awk '{ print $12 + $13 }'
+}
+TICKS_BEFORE=$(agent_ticks)
+sleep 8
+TICKS_AFTER=$(agent_ticks)
+case "$TICKS_BEFORE$TICKS_AFTER" in
+    "" | *[!0-9]*) die "temps processeur de l'agent illisible ($TICKS_BEFORE / $TICKS_AFTER)" ;;
+esac
+TICKS_USED=$((TICKS_AFTER - TICKS_BEFORE))
+[ "$TICKS_USED" -lt 200 ] || die "aucun moteur : l'agent a brûlé $TICKS_USED ticks de processeur en 8 s (boucle de sonde serrée ?)"
+journalctl -u hearth-agent --no-pager --after-cursor="$JOURNAL_CURSOR" >"$OUT.journal" || die "journal de l'agent illisible"
+if grep -E '"level":"(WARN|ERROR)"' "$OUT.journal" | grep -Eiq 'docker|conteneur|engine|moteur|services'; then
+    die "aucun moteur : l'agent ne doit rien dire de bruyant : $(cat "$OUT.journal")"
+fi
+[ "$(systemctl is-active hearth-agent)" = active ] || die "l'agent est tombé faute de moteur"
+ok "aucun moteur de conteneurs : capacité annoncée, état « absent », liste vide, relance de la détection sans erreur, $TICKS_USED ticks de processeur en 8 s, journal silencieux, agent actif"
 [ "$(served_fingerprint)" = "$FIRST_FP" ] || die "l'empreinte affichée ($FIRST_FP) n'est pas celle du certificat servi ($(served_fingerprint))"
 ok "l'empreinte affichée est celle du certificat servi"
 

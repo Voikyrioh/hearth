@@ -13,6 +13,7 @@ use crate::application::audit::AuditRecorder;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::{MetricsError, MetricsService};
 use crate::application::security::SecurityService;
+use crate::application::services::ServicesRegistry;
 
 /// Période de la purge (sessions expirées, traces anciennes, opérations de plus de 24 h).
 pub const PURGE_PERIOD: Duration = Duration::from_secs(60 * 60);
@@ -36,6 +37,22 @@ impl Drop for BackgroundTask {
     }
 }
 
+/// Une tâche tokio qu'on abandonne s'arrête : abandonner sa poignée, elle, ne l'arrête pas. Cette
+/// garde l'interrompt à son `Drop`, donc aussi quand la tâche qui l'attend est elle-même annulée.
+struct AbortOnDrop(JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+impl AbortOnDrop {
+    async fn finished(&mut self) -> Result<(), tokio::task::JoinError> {
+        (&mut self.0).await
+    }
+}
+
 /// Exécute `job` toutes les `period` (le premier passage a lieu tout de suite). Chaque passage
 /// tourne dans sa propre tâche : une panique est vue comme une erreur de ce passage, pas de la
 /// supervision.
@@ -49,8 +66,23 @@ where
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            if let Err(error) = tokio::spawn(job()).await {
+            if let Err(error) = AbortOnDrop(tokio::spawn(job())).finished().await {
                 tracing::error!(task = name, %error, "passage interrompu, reprise au prochain");
+            }
+        }
+    }))
+}
+
+/// Détection du moteur de conteneurs et suivi des services (HRT-61) : une tâche de longue durée,
+/// supervisée comme les autres (abandonner la valeur l'arrête, la tâche interne comprise). Une
+/// panique de la tâche est tracée et la tâche repart : l'agent ne tombe jamais pour un moteur.
+pub fn spawn_services(registry: Arc<ServicesRegistry>) -> BackgroundTask {
+    BackgroundTask(tokio::spawn(async move {
+        loop {
+            let mut run = AbortOnDrop(tokio::spawn(registry.clone().run()));
+            if let Err(error) = run.finished().await {
+                tracing::error!(%error, "détection du moteur interrompue, reprise dans 5 s");
+                tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }
     }))
@@ -244,5 +276,46 @@ mod tests {
         let after_stop = runs.load(Ordering::SeqCst);
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(runs.load(Ordering::SeqCst), after_stop);
+    }
+
+    struct LinuxHost;
+
+    impl crate::application::ports::HostEnvironment for LinuxHost {
+        fn describe(&self) -> crate::application::ports::HostDescription {
+            crate::application::ports::HostDescription::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn dropping_the_services_task_stops_the_registry_for_good() {
+        use crate::application::services::{EngineTimings, ServicesRegistry};
+        use crate::infrastructure::engine::fake::FakeEngine;
+
+        let engine = Arc::new(FakeEngine::new());
+        let registry = ServicesRegistry::new(
+            engine.clone(),
+            &LinuxHost,
+            Arc::new(RealTime),
+            Arc::new(Mono(std::time::Instant::now())),
+            true,
+            EngineTimings {
+                ready_period: Duration::from_millis(10),
+                other_period: Duration::from_millis(10),
+                debounce_window: Duration::from_millis(10),
+                batch_window: Duration::from_millis(5),
+                min_recheck: Duration::ZERO,
+            },
+        );
+        let task = spawn_services(registry);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(engine.probe_count() >= 3, "la tâche tourne");
+        drop(task);
+        // Laisse l'annulation se propager, puis vérifie que plus rien ne sonde ni ne relit.
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let probes = engine.probe_count();
+        let lists = engine.list_count();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(engine.probe_count(), probes, "plus aucune sonde");
+        assert_eq!(engine.list_count(), lists, "plus aucune relecture");
     }
 }

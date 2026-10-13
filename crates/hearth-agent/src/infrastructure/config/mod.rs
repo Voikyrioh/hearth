@@ -13,6 +13,42 @@ pub const ENV_PORT: &str = "HEARTH_PORT";
 pub const ENV_LISTEN_ADDR: &str = "HEARTH_LISTEN_ADDR";
 pub const ENV_DATA_DIR: &str = "HEARTH_DATA_DIR";
 pub const ENV_MANAGED: &str = "HEARTH_MANAGED";
+/// `off` / `false` / `0` : le pilotage des services est désactivé, l'agent n'ouvre jamais le socket du
+/// moteur de conteneurs (`BR-ENGINE-021`, ADR-0036).
+pub const ENV_ENGINE: &str = "HEARTH_ENGINE";
+pub const ENV_ENGINE_SOCKET: &str = "HEARTH_ENGINE_SOCKET";
+
+/// Socket du moteur de conteneurs par défaut.
+pub const DEFAULT_ENGINE_SOCKET: &str = "/var/run/docker.sock";
+
+/// Réglages du moteur de conteneurs (`[engine]` de `agent.toml`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineConfig {
+    /// Permis par défaut. À `false`, l'agent annonce l'état « désactivé » et n'ouvre jamais le socket.
+    pub enabled: bool,
+    /// Le socket Unix du moteur. `DOCKER_HOST` n'est pas lu ; un moteur distant n'est pas pris en
+    /// charge (ADR-0036).
+    pub socket: PathBuf,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            socket: PathBuf::from(DEFAULT_ENGINE_SOCKET),
+        }
+    }
+}
+
+impl EngineConfig {
+    /// Pilotage désactivé (les tests de l'agent n'ouvrent jamais le socket d'un vrai moteur).
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            ..Self::default()
+        }
+    }
+}
 
 /// Configuration effective, prête à l'emploi.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +58,7 @@ pub struct AgentConfig {
     pub data_dir: PathBuf,
     /// Installation gérée de l'extérieur (pas de mise à jour automatique).
     pub managed: bool,
+    pub engine: EngineConfig,
 }
 
 /// Options venues de la ligne de commande.
@@ -56,6 +93,15 @@ struct FileConfig {
     port: Option<u16>,
     data_dir: Option<PathBuf>,
     managed: Option<bool>,
+    engine: Option<FileEngine>,
+}
+
+/// La table `[engine]` de `agent.toml`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileEngine {
+    enabled: Option<bool>,
+    socket: Option<PathBuf>,
 }
 
 /// Assemble la configuration. `env` donne accès aux variables d'environnement
@@ -72,6 +118,13 @@ pub fn load(
     let mut port = file.port.unwrap_or(DEFAULT_PORT);
     let mut managed = file.managed.unwrap_or(false);
     let mut data_dir = file.data_dir;
+    let file_engine = file.engine.unwrap_or_default();
+    let mut engine = EngineConfig {
+        enabled: file_engine.enabled.unwrap_or(true),
+        socket: file_engine
+            .socket
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_ENGINE_SOCKET)),
+    };
 
     if let Some(value) = env(ENV_LISTEN_ADDR) {
         listen_addr = parse_env(ENV_LISTEN_ADDR, &value)?;
@@ -84,6 +137,12 @@ pub fn load(
     }
     if let Some(value) = env(ENV_DATA_DIR) {
         data_dir = Some(PathBuf::from(value));
+    }
+    if let Some(value) = env(ENV_ENGINE) {
+        engine.enabled = parse_bool(ENV_ENGINE, &value)?;
+    }
+    if let Some(value) = env(ENV_ENGINE_SOCKET) {
+        engine.socket = PathBuf::from(value);
     }
     if let Some(dir) = &cli.data_dir {
         data_dir = Some(dir.clone());
@@ -98,6 +157,7 @@ pub fn load(
         port,
         data_dir,
         managed,
+        engine,
     })
 }
 
@@ -376,6 +436,55 @@ mod tests {
             err,
             ConfigError::BadEnv {
                 name: ENV_MANAGED,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn the_engine_is_permitted_on_the_default_socket_without_any_source() {
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
+        let cli = cli_with_empty_file(dir.path());
+        let config = load(&cli, &env_of(&[(ENV_DATA_DIR, "/d")])).expect("config");
+        assert!(config.engine.enabled);
+        assert_eq!(config.engine.socket, PathBuf::from("/var/run/docker.sock"));
+    }
+
+    #[test]
+    fn the_engine_section_and_the_environment_can_disable_it_or_move_the_socket() {
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
+        let cli = cli_with_empty_file(dir.path());
+        std::fs::write(
+            dir.path().join("agent.toml"),
+            "[engine]
+enabled = false
+socket = \"/run/other.sock\"
+",
+        )
+        .expect("write");
+        let config = load(&cli, &env_of(&[(ENV_DATA_DIR, "/d")])).expect("config");
+        assert!(!config.engine.enabled);
+        assert_eq!(config.engine.socket, PathBuf::from("/run/other.sock"));
+        // L'environnement l'emporte sur le fichier.
+        let env = env_of(&[
+            (ENV_DATA_DIR, "/d"),
+            (ENV_ENGINE, "on"),
+            (ENV_ENGINE_SOCKET, "/env.sock"),
+        ]);
+        let config = load(&cli, &env).expect("config");
+        assert!(config.engine.enabled);
+        assert_eq!(config.engine.socket, PathBuf::from("/env.sock"));
+        let env = env_of(&[(ENV_DATA_DIR, "/d"), (ENV_ENGINE, "off")]);
+        assert!(!load(&cli, &env).expect("config").engine.enabled);
+        let err = load(
+            &cli,
+            &env_of(&[(ENV_DATA_DIR, "/d"), (ENV_ENGINE, "peut-être")]),
+        )
+        .expect_err("booléen invalide");
+        assert!(matches!(
+            err,
+            ConfigError::BadEnv {
+                name: ENV_ENGINE,
                 ..
             }
         ));

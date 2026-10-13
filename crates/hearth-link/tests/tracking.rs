@@ -175,6 +175,7 @@ impl Transport for Mock {
                 install_id: "00".into(),
                 managed: false,
                 mac_addresses: vec![],
+                capabilities: vec![],
             },
         })
     }

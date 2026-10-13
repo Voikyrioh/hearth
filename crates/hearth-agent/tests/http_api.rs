@@ -1243,8 +1243,23 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     {
         let path = match endpoint.path {
             "/hello" | "/me" | "/me/devices" | "/security" | "/machine" | "/metrics/history"
-            | "/agent/update" | "/agent/update/last" => endpoint.path.to_owned(),
+            | "/agent/update" | "/agent/update/last" | "/services" => endpoint.path.to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
+            // Un POST qui ne modifie rien : il relance la détection du moteur (HRT-61, lecture seule).
+            "/engine/recheck" => {
+                let reply = api
+                    .call(Method::POST, "/engine/recheck")
+                    .token(&marie.token)
+                    .send()
+                    .await;
+                assert!(
+                    reply.status.is_success(),
+                    "/engine/recheck : {:?}",
+                    reply.body
+                );
+                reads += 1;
+                continue;
+            }
             "/stream" => continue, // le flux se teste en WebSocket (stream_https.rs)
             // Un POST sans effet : testé à part (device_proof.rs).
             "/sessions/challenge" => continue,
@@ -1258,7 +1273,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         );
         reads += 1;
     }
-    assert!(reads >= 4, "{reads} routes de lecture balayées");
+    assert!(reads >= 6, "{reads} routes de lecture balayées");
     assert_eq!(
         entries().await,
         before,

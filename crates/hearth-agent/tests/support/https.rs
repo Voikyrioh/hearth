@@ -120,6 +120,7 @@ pub async fn start_booted(
         port: 0,
         data_dir: env.dir.path().to_owned(),
         managed: false,
+        engine: hearth_agent::infrastructure::config::EngineConfig::disabled(),
     };
     let adapters = Adapters {
         hasher: env.hasher.clone(),
@@ -142,6 +143,64 @@ pub async fn start_booted(
     Agent { running, addr }
 }
 
+/// Comme `start`, avec ce moteur de conteneurs (le pilotage des services permis) au lieu du réglage
+/// de la configuration, qui ne touche jamais le vrai socket dans les tests.
+pub async fn start_engined(env: &Env, engine: hearth_agent::app::EngineParts) -> Agent {
+    start_engine_with(env, engine, super::probe::metering(), true).await
+}
+
+/// Comme `start_engined`, avec ces sondes et ces délais de flux.
+pub async fn start_engined_metered(
+    env: &Env,
+    engine: hearth_agent::app::EngineParts,
+    metering: Metering,
+) -> Agent {
+    start_engine_with(env, engine, metering, true).await
+}
+
+/// Comme `start_engined`, avec `engine.enabled = false` dans la configuration.
+pub async fn start_engine_disabled(env: &Env, engine: hearth_agent::app::EngineParts) -> Agent {
+    start_engine_with(env, engine, super::probe::metering(), false).await
+}
+
+async fn start_engine_with(
+    env: &Env,
+    engine: hearth_agent::app::EngineParts,
+    metering: Metering,
+    enabled: bool,
+) -> Agent {
+    let config = AgentConfig {
+        listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        port: 0,
+        data_dir: env.dir.path().to_owned(),
+        managed: false,
+        engine: hearth_agent::infrastructure::config::EngineConfig {
+            enabled,
+            ..hearth_agent::infrastructure::config::EngineConfig::default()
+        },
+    };
+    let adapters = Adapters {
+        hasher: env.hasher.clone(),
+        clock: env.clock.clone(),
+        ids: Arc::new(UlidGen),
+        tokens: Arc::new(OsTokenGen),
+    };
+    let updating = hearth_agent::app::Updating::production(&config).expect("mise à jour");
+    let running = app::start_engined(
+        &config,
+        &ServiceDatabase::adopt(env.db.clone()),
+        &adapters,
+        metering,
+        updating,
+        Arc::new(hearth_agent::infrastructure::system::ProcBootInfo::new()),
+        engine,
+    )
+    .await
+    .expect("démarrage");
+    let addr = running.server.local_addr();
+    Agent { running, addr }
+}
+
 /// Comme `start_metered`, avec ces adaptateurs de mise à jour (faux) s'il y en a.
 pub async fn start_updating(
     env: &Env,
@@ -153,6 +212,7 @@ pub async fn start_updating(
         port: 0,
         data_dir: env.dir.path().to_owned(),
         managed: false,
+        engine: hearth_agent::infrastructure::config::EngineConfig::disabled(),
     };
     let adapters = Adapters {
         hasher: env.hasher.clone(),
@@ -187,6 +247,11 @@ pub async fn start_updating(
 }
 
 impl Agent {
+    /// Le registre des services de cet agent (lecture seule).
+    pub fn services(&self) -> Arc<hearth_agent::application::services::ServicesRegistry> {
+        self.running.services.clone()
+    }
+
     /// L'arrêt du service comme le fait `run_until` : les flux, puis les écritures d'alerte en vol et
     /// les synthèses du journal en attente sont écrites avant de rendre la main.
     pub async fn stop_gracefully(self) {

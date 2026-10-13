@@ -22,6 +22,7 @@ mod operations;
 mod reauth;
 mod security;
 mod server;
+mod services;
 mod sessions;
 mod update;
 mod version;
@@ -44,6 +45,7 @@ use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::AuditSink;
 use crate::application::security::SecurityService;
+use crate::application::services::ServicesRegistry;
 use crate::application::sessions::SessionService;
 use crate::application::update::UpdateService;
 use crate::domain::audit::AuditAction;
@@ -69,6 +71,8 @@ pub struct AppState {
     pub metrics: Arc<MetricsService>,
     /// Mise à jour de l'agent à distance (HRT-17).
     pub update: Arc<UpdateService>,
+    /// Moteur de conteneurs et liste des services, en lecture seule (HRT-61).
+    pub services: Arc<ServicesRegistry>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -109,8 +113,9 @@ pub struct Endpoint {
 }
 
 /// Les routes `POST` qui ne modifient rien : un calcul sans effet ni écriture (le défi de la clé
-/// d'appareil). Elles n'ont ni action de journal ni entrée de réussite.
-const READ_ONLY_POSTS: &[&str] = &["/sessions/challenge"];
+/// d'appareil) ou une lecture relancée (`/engine/recheck` relance la détection du moteur, sans rien
+/// écrire ni dans le moteur ni dans la base). Elles n'ont ni action de journal ni entrée de réussite.
+const READ_ONLY_POSTS: &[&str] = &["/sessions/challenge", "/engine/recheck"];
 
 impl Endpoint {
     /// La route modifie-t-elle quelque chose ?
@@ -258,6 +263,24 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: false,
         audit: None,
         route: || get(ws::stream),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/services",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(services::list),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/engine/recheck",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || post(services::recheck),
     },
     Endpoint {
         method: Method::GET,
@@ -499,12 +522,41 @@ mod tests {
         assert!(!challenge.modifies());
         assert!(!challenge.tracked);
         assert_eq!(challenge.audit, None);
-        // Aucune autre route POST n'est exemptée par erreur.
+        // Aucune autre route POST n'est exemptée par erreur : les seules lectures en POST sont le
+        // défi de la clé d'appareil et la relance de la détection du moteur.
         for endpoint in ENDPOINTS.iter().filter(|e| e.method == Method::POST) {
             assert_eq!(
                 endpoint.modifies(),
-                endpoint.path != "/sessions/challenge",
+                !matches!(endpoint.path, "/sessions/challenge" | "/engine/recheck"),
                 "{}",
+                endpoint.path
+            );
+        }
+    }
+
+    #[test]
+    fn the_services_routes_are_reads_open_to_both_roles_and_never_journaled() {
+        for (method, path) in [
+            (Method::GET, "/services"),
+            (Method::POST, "/engine/recheck"),
+        ] {
+            let endpoint = ENDPOINTS
+                .iter()
+                .find(|endpoint| endpoint.method == method && endpoint.path == path)
+                .unwrap();
+            assert_eq!(endpoint.access, Access::Authenticated, "{path}");
+            assert!(!endpoint.modifies() && !endpoint.tracked, "{path}");
+            assert_eq!(endpoint.audit, None, "{path}");
+            assert!(endpoint.version_checked, "{path}");
+        }
+        // Aucune route d'écriture de cette tranche : pas de route sous /services qui modifie.
+        for endpoint in ENDPOINTS.iter().filter(|endpoint| {
+            endpoint.path.starts_with("/services") || endpoint.path.starts_with("/engine")
+        }) {
+            assert!(
+                !endpoint.modifies(),
+                "{} {}",
+                endpoint.method,
                 endpoint.path
             );
         }

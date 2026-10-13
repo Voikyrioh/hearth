@@ -23,12 +23,13 @@ use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, CryptoError, FingerprintSecretError,
-    FingerprintSecretStore, GpuProbe, HashError, IdGen, IdentityError, IdentityStore,
-    MonotonicClock, PasswordHasher, PublicIdentity, RequestFingerprinter, SecurityFeed, Store,
-    StoreError, SystemProbe, TokenGen,
+    AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, ContainerEngine, CryptoError,
+    FingerprintSecretError, FingerprintSecretStore, GpuProbe, HashError, HostEnvironment, IdGen,
+    IdentityError, IdentityStore, MonotonicClock, PasswordHasher, PublicIdentity,
+    RequestFingerprinter, SecurityFeed, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::security::SecurityService;
+use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::sessions::SessionService;
 use crate::application::trust::TrustService;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -46,6 +47,7 @@ use crate::infrastructure::clock::{SystemClock, SystemMonotonic};
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::crypto::{HmacChallengeCrypto, RingProofVerifier};
 use crate::infrastructure::data_dir;
+use crate::infrastructure::engine::BollardEngine;
 use crate::infrastructure::fingerprint::{HmacFingerprinter, NoFingerprint};
 use crate::infrastructure::fingerprint_secret::FileFingerprintSecretStore;
 use crate::infrastructure::ids::UlidGen;
@@ -57,7 +59,9 @@ use crate::infrastructure::sqlite::{
     SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
 };
 use crate::infrastructure::system::gpu;
-use crate::infrastructure::system::{ProcBootInfo, SysinfoProbe, SystemMachineInfo};
+use crate::infrastructure::system::{
+    ProcBootInfo, SysinfoProbe, SystemHostEnvironment, SystemMachineInfo,
+};
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
 
 #[derive(Debug, Error)]
@@ -151,6 +155,27 @@ impl Metering {
     }
 }
 
+/// Ce qui parle au moteur de conteneurs (HRT-61) : le moteur lui-même (le port `ContainerEngine`), ce
+/// que l'agent sait du serveur et les cadences de la détection. Ceux de production par défaut (le
+/// socket de la configuration) ; les tests injectent un faux moteur et des cadences courtes.
+pub struct EngineParts {
+    pub engine: Arc<dyn ContainerEngine>,
+    pub host: Arc<dyn HostEnvironment>,
+    pub timings: EngineTimings,
+}
+
+impl EngineParts {
+    /// Le moteur du socket Unix de la configuration. Désactivé, le socket n'est jamais ouvert : la
+    /// tâche de détection ne sonde pas (l'adaptateur est construit mais jamais appelé).
+    pub fn production(config: &crate::infrastructure::config::EngineConfig) -> Self {
+        Self {
+            engine: Arc::new(BollardEngine::unix(config.socket.clone())),
+            host: Arc::new(SystemHostEnvironment),
+            timings: EngineTimings::production(),
+        }
+    }
+}
+
 /// Ce qu'il faut à l'identité d'appareil (HRT-22) et que seul le démarrage du serveur connaît :
 /// l'empreinte du certificat que le client épingle (celle que la preuve signe) et l'horloge
 /// monotone qui borne la vie d'un défi.
@@ -196,6 +221,10 @@ pub struct RunningAgent {
     /// Mode attaque : reprise après la fenêtre de redémarrage, sortie automatique : arrêtée avec
     /// l'agent.
     pub attack_sweep: Option<BackgroundTask>,
+    /// Détection du moteur de conteneurs et suivi des services (HRT-61) : arrêtée avec l'agent.
+    pub services_task: BackgroundTask,
+    /// Le registre des services (les tests y lisent l'état sans passer par HTTP).
+    pub services: Arc<ServicesRegistry>,
     /// Les sessions : l'agent EXIGE la confirmation des actes
     /// dès la construction du service : aucun réglage, aucune porte, même en test.
     pub sessions: Arc<SessionService>,
@@ -215,6 +244,7 @@ impl RunningAgent {
             audit_flush: _audit_flush,
             alert_sweep: _alert_sweep,
             attack_sweep: _attack_sweep,
+            services_task: _services_task,
             audit_recorder,
             security,
             ..
@@ -477,6 +507,21 @@ pub async fn start_full(
     updating: Updating,
     boot: Arc<dyn BootInfo>,
 ) -> Result<RunningAgent, AppError> {
+    let engine = EngineParts::production(&config.engine);
+    start_engined(config, database, adapters, metering, updating, boot, engine).await
+}
+
+/// Comme `start_full`, avec ce moteur de conteneurs (les tests injectent un faux, jamais le vrai
+/// socket).
+pub async fn start_engined(
+    config: &AgentConfig,
+    database: &ServiceDatabase,
+    adapters: &Adapters,
+    metering: Metering,
+    updating: Updating,
+    boot: Arc<dyn BootInfo>,
+    engine: EngineParts,
+) -> Result<RunningAgent, AppError> {
     // FIX:01M4D6KNXEFG8DH4K9JXBJ98MA : une copie de la base à moitié effacée par un arrêt brutal est finie au
     // démarrage du service, pas seulement à la mise à jour suivante.
     crate::infrastructure::update::finish_interrupted_erasures(&config.data_dir);
@@ -522,7 +567,7 @@ pub async fn start_full(
         metering.system,
         metering.gpu,
         metering.clock,
-        metering.monotonic,
+        metering.monotonic.clone(),
     ));
     // L'identité de la machine est lue avant de servir : les premières requêtes la trouvent prête.
     metrics.warm_up().await;
@@ -536,6 +581,14 @@ pub async fn start_full(
         adapters.clock.clone(),
     )?;
     let sessions = services.sessions.clone();
+    let registry = ServicesRegistry::new(
+        engine.engine,
+        engine.host.as_ref(),
+        adapters.clock.clone(),
+        metering.monotonic.clone(),
+        config.engine.enabled,
+        engine.timings,
+    );
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -546,6 +599,7 @@ pub async fn start_full(
         sink: services.audit_sink,
         metrics: metrics.clone(),
         update: update.clone(),
+        services: registry.clone(),
         stream,
         erasure_pending: database.erasure_pending(),
     });
@@ -559,6 +613,7 @@ pub async fn start_full(
     });
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
     let sampler = tasks::spawn_sampler(metrics, metering.period);
+    let services_task = tasks::spawn_services(registry.clone());
     let audit_flush =
         tasks::spawn_audit_flush(services.audit_recorder.clone(), tasks::AUDIT_FLUSH_PERIOD);
     let alert_sweep =
@@ -574,6 +629,8 @@ pub async fn start_full(
         audit_flush,
         alert_sweep,
         attack_sweep,
+        services_task,
+        services: registry,
         sessions,
         audit_recorder: services.audit_recorder,
         security: services.security,

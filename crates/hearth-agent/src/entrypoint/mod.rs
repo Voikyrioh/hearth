@@ -8,6 +8,7 @@ pub mod cli;
 pub mod http;
 pub mod install;
 pub mod metrics_wire;
+pub mod services_wire;
 pub mod signal;
 pub mod tasks;
 pub mod terminal;

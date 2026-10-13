@@ -129,6 +129,7 @@ fn config_for(dir: &Path) -> AgentConfig {
         port: 0,
         data_dir: dir.to_owned(),
         managed: true,
+        engine: hearth_agent::infrastructure::config::EngineConfig::disabled(),
     }
 }
 

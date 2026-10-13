@@ -280,6 +280,7 @@ impl Transport for Chaos {
                 install_id: "00".into(),
                 managed: false,
                 mac_addresses: vec![],
+                capabilities: vec![],
             },
         })
     }
