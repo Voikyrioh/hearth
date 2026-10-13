@@ -22,8 +22,8 @@ use crate::application::service_logs::OpenRequest;
 use crate::application::sessions::{AuthError, CurrentSession};
 use crate::domain::audit::{Actor, AuditAction, ClientName, Origin, Outcome, Reason, Target};
 use crate::domain::secret::Secret;
-use crate::domain::services::ServiceKey;
 use crate::domain::services::logs::Viewer;
+use crate::domain::services::{REFUSALS_BEFORE_ENTRY, ServiceKey};
 use crate::entrypoint::http::AppState;
 
 /// Sert la lecture jusqu'à sa fin, puis envoie la trame de fermeture.
@@ -55,7 +55,7 @@ fn viewer_of(session: &CurrentSession) -> Viewer {
 }
 
 fn error(code: LogsErrorCode) -> LogsServerMessage {
-    LogsServerMessage::Error(LogsError { code })
+    LogsServerMessage::Error(LogsError::new(code))
 }
 
 async fn serve(
@@ -105,11 +105,17 @@ async fn serve(
         .open(viewer_of(&session), key.clone(), request)
     {
         Ok(reading) => reading,
-        Err(code) => {
-            if code == LogsErrorCode::MissingRight {
+        Err(refused) => {
+            // Un refus de DROIT est un événement de sécurité à part : inscrit même quand le frein a
+            // répondu à sa place (le journal le regroupe lui-même).
+            if refused.error.code == LogsErrorCode::MissingRight || refused.missing_right {
                 journal_refusal(state, &session, addr, &key).await;
             }
-            send(socket, &settings, &error(code)).await;
+            // Un compte freiné plus de 30 fois en 10 minutes : UNE entrée, puis plus rien (BR-SLOG-027).
+            if refused.throttle_entry.is_some() {
+                journal_throttle(state, &session, addr).await;
+            }
+            send(socket, &settings, &LogsServerMessage::Error(refused.error)).await;
             return normal();
         }
     };
@@ -159,7 +165,7 @@ async fn serve(
                 Some(message) => {
                     let terminal = matches!(message, LogsServerMessage::Error(_));
                     // Le droit retiré pendant la lecture est un refus comme un autre (BR-SLOG-024).
-                    if matches!(&message, LogsServerMessage::Error(LogsError { code: LogsErrorCode::MissingRight })) {
+                    if matches!(&message, LogsServerMessage::Error(LogsError { code: LogsErrorCode::MissingRight, .. })) {
                         journal_refusal(state, &session, addr, &key).await;
                     }
                     // Un client qui ne reçoit plus rien pendant `send_timeout` perd SA lecture, pas le lien.
@@ -217,6 +223,27 @@ async fn journal_refusal(state: &AppState, session: &CurrentSession, addr: &str,
             AuditAction::ServiceLogsRead,
             target,
             Outcome::Denied(Reason::InsufficientRights),
+        )
+        .await;
+}
+
+/// Inscrit au journal d'activité que ce compte est freiné (BR-SLOG-027) : le compte, l'origine et le
+/// seuil franchi dans les dix dernières minutes. Jamais un service, jamais une ligne. Écrite une seule fois
+/// par fenêtre de dix minutes (le frein la demande, voir `AccountBrake`).
+async fn journal_throttle(state: &AppState, session: &CurrentSession, addr: &str) {
+    let actor = Actor::new(
+        Some(session.account.username.clone()),
+        Origin::client(None, addr),
+    );
+    state
+        .sink
+        .record(
+            actor,
+            AuditAction::ServiceLogsThrottled,
+            Target::Route("/services/{key}/logs"),
+            Outcome::Denied(Reason::OpensThrottled {
+                over: REFUSALS_BEFORE_ENTRY,
+            }),
         )
         .await;
 }

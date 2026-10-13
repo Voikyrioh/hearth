@@ -32,6 +32,13 @@ pub const CAPABILITY_SERVICE_LOGS: &str = "service-logs";
 pub const TAIL_LINES: u32 = 1_000;
 /// Lectures simultanées au plus, pour tout l'agent et tous les comptes (BR-SLOG-020).
 pub const MAX_READS: usize = 10;
+/// Lectures en direct simultanées au plus pour UN compte, tous postes confondus (BR-SLOG-026). Valeur de
+/// départ décidée par le propriétaire le 2026-10-13, à ajuster après mesure sur forge.
+pub const MAX_READS_PER_ACCOUNT: usize = 3;
+/// Réserve d'ouvertures d'un compte : 12 ouvertures en rafale (BR-SLOG-027).
+pub const OPEN_BURST: u32 = 12;
+/// Une ouverture est rendue au compte toutes les 5 secondes, soit 12 par minute (BR-SLOG-027).
+pub const OPEN_REFILL_S: u32 = 5;
 /// Un message `lines` part au plus toutes les 100 ms (BR-SLOG-007)...
 pub const BATCH_WINDOW_MS: u64 = 100;
 /// ... dès 500 lignes...
@@ -221,6 +228,12 @@ pub struct LogMarker {
 pub enum LogsErrorCode {
     /// Dix lectures sont déjà ouvertes (BR-SLOG-020).
     LogsLimit,
+    /// Ce compte lit déjà les journaux de 3 services (BR-SLOG-026) : fermer un onglet Journaux rend la
+    /// place tout de suite. Un client qui ne connaît pas ce code le lit `Unknown` (erreur terminale).
+    LogsAccountLimit,
+    /// Ce compte ouvre des lectures trop vite (BR-SLOG-027) : `retry_after_s` dit dans combien de
+    /// secondes une ouverture sera rendue. Un client qui ne connaît pas ce code le lit `Unknown`.
+    LogsRateLimited,
     /// Le moteur ne permet pas de relire les journaux de ce service (BR-SLOG-017).
     LogsUnreadable,
     /// Aucun service de cette clé, ou il a disparu pendant la lecture (BR-SLOG-015).
@@ -244,6 +257,28 @@ pub enum LogsErrorCode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogsError {
     pub code: LogsErrorCode,
+    /// Pour `LOGS_RATE_LIMITED` seulement : secondes avant qu'une ouverture soit rendue (au moins 1).
+    /// Absent pour tout autre code ; un client qui ne le connaît pas l'ignore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_s: Option<u32>,
+}
+
+impl LogsError {
+    /// Une erreur sans délai.
+    pub fn new(code: LogsErrorCode) -> Self {
+        Self {
+            code,
+            retry_after_s: None,
+        }
+    }
+
+    /// `LOGS_RATE_LIMITED` avec l'attente avant la prochaine ouverture.
+    pub fn rate_limited(retry_after_s: u32) -> Self {
+        Self {
+            code: LogsErrorCode::LogsRateLimited,
+            retry_after_s: Some(retry_after_s.max(1)),
+        }
+    }
 }
 
 /// Messages de l'agent vers le client.
@@ -364,9 +399,7 @@ mod tests {
             serde_json::to_value(&status).unwrap(),
             json!({ "type": "status", "state": "waiting", "mixed": false, "not_kept": true })
         );
-        let error = LogsServerMessage::Error(LogsError {
-            code: LogsErrorCode::LogsLimit,
-        });
+        let error = LogsServerMessage::Error(LogsError::new(LogsErrorCode::LogsLimit));
         assert_eq!(
             serde_json::to_value(&error).unwrap(),
             json!({ "type": "error", "code": "LOGS_LIMIT" })
@@ -376,9 +409,45 @@ mod tests {
             (LogsErrorCode::ServiceNotFound, "SERVICE_NOT_FOUND"),
             (LogsErrorCode::EngineUnavailable, "ENGINE_UNAVAILABLE"),
             (LogsErrorCode::MissingRight, "MISSING_RIGHT"),
+            (LogsErrorCode::LogsAccountLimit, "LOGS_ACCOUNT_LIMIT"),
+            (LogsErrorCode::LogsRateLimited, "LOGS_RATE_LIMITED"),
         ] {
             assert_eq!(serde_json::to_value(code).unwrap(), json!(text));
         }
+    }
+
+    #[test]
+    fn the_brake_error_carries_its_wait_and_the_others_carry_none() {
+        let limited = LogsServerMessage::Error(LogsError::rate_limited(4));
+        assert_eq!(
+            serde_json::to_value(&limited).unwrap(),
+            json!({ "type": "error", "code": "LOGS_RATE_LIMITED", "retry_after_s": 4 })
+        );
+        // une attente de zéro n'existe pas : au moins une seconde
+        assert_eq!(LogsError::rate_limited(0).retry_after_s, Some(1));
+        assert_eq!(
+            serde_json::to_value(LogsServerMessage::Error(LogsError::new(
+                LogsErrorCode::LogsAccountLimit
+            )))
+            .unwrap(),
+            json!({ "type": "error", "code": "LOGS_ACCOUNT_LIMIT" })
+        );
+        // un agent plus ancien n'envoie pas le champ : il se lit sans
+        let old: LogsServerMessage =
+            serde_json::from_value(json!({ "type": "error", "code": "LOGS_LIMIT" })).unwrap();
+        assert_eq!(
+            old,
+            LogsServerMessage::Error(LogsError::new(LogsErrorCode::LogsLimit))
+        );
+    }
+
+    #[test]
+    fn the_per_account_numbers_are_the_owner_s_starting_values() {
+        assert_eq!(MAX_READS_PER_ACCOUNT, 3);
+        assert_eq!(OPEN_BURST, 12);
+        assert_eq!(OPEN_REFILL_S, 5);
+        // 12 ouvertures par minute en régime établi
+        assert_eq!(60 / OPEN_REFILL_S, OPEN_BURST);
     }
 
     #[test]
@@ -445,9 +514,7 @@ mod tests {
             serde_json::from_value(json!({ "type": "error", "code": "SOMETHING_NEW" })).unwrap();
         assert_eq!(
             message,
-            LogsServerMessage::Error(LogsError {
-                code: LogsErrorCode::Unknown
-            })
+            LogsServerMessage::Error(LogsError::new(LogsErrorCode::Unknown))
         );
         let message: LogsServerMessage =
             serde_json::from_value(json!({ "type": "gap", "count": 3, "reason": "something_new" }))

@@ -1201,6 +1201,7 @@ async fn the_engine_socket_is_drained_whatever_the_client_does_with_the_real_ada
             supervisor: Arc::new(FakeSupervisor::new()),
             host: Arc::new(support::engine::TestHost),
             timings: fast_timings(),
+            log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
         },
     )
     .await;
@@ -1412,6 +1413,7 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
             supervisor: Arc::new(FakeSupervisor::new()),
             host: Arc::new(support::engine::TestHost),
             timings: fast_timings(),
+            log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
         },
     )
     .await;
@@ -1521,9 +1523,7 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
         assert_eq!(
             messages,
             [LogsServerMessage::Error(
-                hearth_proto::api::service_logs::LogsError {
-                    code: LogsErrorCode::ServiceNotFound
-                }
+                hearth_proto::api::service_logs::LogsError::new(LogsErrorCode::ServiceNotFound)
             )]
         );
         assert_eq!(end, End::Closed(1000));
@@ -1608,6 +1608,8 @@ fn quick() -> LogSettings {
         reattach_pause: Duration::from_millis(20),
         restart_grace: Duration::from_millis(1_500),
         access_recheck: Duration::from_millis(100),
+        // Ces tests ne portent pas sur le frein par compte : rien ne les arrête.
+        brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
         ..LogSettings::default()
     }
 }
@@ -2146,7 +2148,8 @@ async fn a_change_of_account_seen_by_the_session_replays_the_decision_at_once() 
     // Et un compte qui n'a jamais eu le droit n'ouvre rien.
     assert_eq!(
         logs.open(viewer(Role::ReadOnly), service_key(&key), open_request())
-            .err(),
+            .err()
+            .map(|refused| refused.error.code),
         Some(LogsErrorCode::ServiceNotFound)
     );
     agent.shutdown().await;
@@ -2382,9 +2385,7 @@ async fn hiding_agent(env: &Env) -> Hiding {
 
 fn not_found() -> Vec<LogsServerMessage> {
     vec![LogsServerMessage::Error(
-        hearth_proto::api::service_logs::LogsError {
-            code: LogsErrorCode::ServiceNotFound,
-        },
+        hearth_proto::api::service_logs::LogsError::new(LogsErrorCode::ServiceNotFound),
     )]
 }
 
@@ -2472,9 +2473,7 @@ async fn the_limit_of_ten_readings_does_not_tell_a_hidden_key_from_an_unknown_on
 
 fn missing_right() -> Vec<LogsServerMessage> {
     vec![LogsServerMessage::Error(
-        hearth_proto::api::service_logs::LogsError {
-            code: LogsErrorCode::MissingRight,
-        },
+        hearth_proto::api::service_logs::LogsError::new(LogsErrorCode::MissingRight),
     )]
 }
 
@@ -2589,4 +2588,363 @@ async fn the_registry_gives_may_read_the_origin_and_nothing_else_of_a_hidden_con
         );
     }
     h.agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// HRT-107 : trois lectures en direct par compte (BR-SLOG-026) et frein aux ouvertures en rafale
+// (BR-SLOG-027). La règle est prouvée table par table dans `domain::services::log_brake` ; ici, la
+// pose dans le service des lectures et sur le socket.
+// ---------------------------------------------------------------------------------------------
+
+use hearth_agent::application::service_logs::OpenRefused;
+use hearth_agent::domain::services::BrakeSettings;
+
+fn account_viewer(account: &str) -> Viewer {
+    Viewer {
+        account: AccountId::new(account),
+        ..viewer(Role::ReadOnly)
+    }
+}
+
+fn limited(brake: BrakeSettings) -> LogSettings {
+    LogSettings { brake, ..quick() }
+}
+
+async fn one_service_agent(env: &Env, engine: &Arc<FakeEngine>) -> (Agent, String) {
+    let web = container("web", RunState::Running);
+    let key = key_of(&web);
+    engine.put_silently(web);
+    (ready_agent(env, engine, 1).await, key)
+}
+
+fn refusal_of(result: Result<LogSession, OpenRefused>) -> OpenRefused {
+    match result {
+        Ok(_) => panic!("l'ouverture aurait dû être refusée"),
+        Err(refused) => refused,
+    }
+}
+
+#[tokio::test]
+async fn a_fourth_live_reading_of_one_account_is_refused_and_a_close_gives_the_place_back() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = one_service_agent(&env, &engine).await;
+    let logs = ServiceLogs::new(
+        agent.services(),
+        engine.clone(),
+        env.clock.clone(),
+        limited(BrakeSettings::production()),
+    );
+    let open = |who: &str| logs.open(account_viewer(who), service_key(&key), open_request());
+    let mut marie: Vec<LogSession> = (0..3).map(|_| open("marie").expect("ouverte")).collect();
+    assert_eq!(
+        refusal_of(open("marie")).error.code,
+        LogsErrorCode::LogsAccountLimit
+    );
+    // Un autre compte garde ses places : le plafond est par compte, pas pour le serveur.
+    let lucas = open("lucas").expect("un autre compte lit");
+    assert_eq!(logs.open_reads(), 4);
+    // Fermer une lecture rend la place tout de suite.
+    drop(marie.pop());
+    let again = open("marie").expect("la place est rendue");
+    assert_eq!(logs.open_reads(), 4);
+    drop((again, lucas, marie));
+    assert_eq!(logs.open_reads(), 0);
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_refusal_by_the_server_cap_does_not_keep_a_place_for_the_account() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = one_service_agent(&env, &engine).await;
+    let logs = ServiceLogs::new(
+        agent.services(),
+        engine.clone(),
+        env.clock.clone(),
+        LogSettings {
+            max_reads: 1,
+            ..limited(BrakeSettings::production())
+        },
+    );
+    let first = logs
+        .open(account_viewer("marie"), service_key(&key), open_request())
+        .expect("ouverte");
+    for _ in 0..3 {
+        assert_eq!(
+            refusal_of(logs.open(account_viewer("lucas"), service_key(&key), open_request()))
+                .error
+                .code,
+            LogsErrorCode::LogsLimit
+        );
+    }
+    drop(first);
+    // lucas a été refusé trois fois par le serveur : ses trois places sont intactes.
+    let lucas: Vec<_> = (0..1)
+        .map(|_| logs.open(account_viewer("lucas"), service_key(&key), open_request()))
+        .collect();
+    assert!(lucas.iter().all(Result::is_ok));
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_thirteenth_open_in_a_minute_is_braked_with_its_wait_and_other_accounts_are_not() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = one_service_agent(&env, &engine).await;
+    let logs = ServiceLogs::new(
+        agent.services(),
+        engine.clone(),
+        env.clock.clone(),
+        limited(BrakeSettings::production()),
+    );
+    for round in 0..12 {
+        let session = logs
+            .open(account_viewer("marie"), service_key(&key), open_request())
+            .unwrap_or_else(|_| panic!("ouverture {round}"));
+        drop(session);
+    }
+    let refused = refusal_of(logs.open(account_viewer("marie"), service_key(&key), open_request()));
+    assert_eq!(refused.error.code, LogsErrorCode::LogsRateLimited);
+    let wait = refused.error.retry_after_s.expect("l'attente est dite");
+    assert!((4..=5).contains(&wait), "{wait}");
+    assert_eq!(refused.throttle_entry, None);
+    assert!(
+        logs.open(account_viewer("lucas"), service_key(&key), open_request())
+            .is_ok()
+    );
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_open_comes_back_after_the_refill_period() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = one_service_agent(&env, &engine).await;
+    let logs = ServiceLogs::new(
+        agent.services(),
+        engine.clone(),
+        env.clock.clone(),
+        limited(BrakeSettings {
+            max_reads: 3,
+            burst: 2,
+            refill_ms: 150,
+        }),
+    );
+    for _ in 0..2 {
+        drop(
+            logs.open(account_viewer("marie"), service_key(&key), open_request())
+                .expect("ouverte"),
+        );
+    }
+    assert_eq!(
+        refusal_of(logs.open(account_viewer("marie"), service_key(&key), open_request()))
+            .error
+            .code,
+        LogsErrorCode::LogsRateLimited
+    );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert!(
+        logs.open(account_viewer("marie"), service_key(&key), open_request())
+            .is_ok()
+    );
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_reconnection_after_a_cut_counts_as_an_open() {
+    // La reprise ouvre un nouveau socket avec un curseur `since` : même route, donc même frein.
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = one_service_agent(&env, &engine).await;
+    let logs = ServiceLogs::new(
+        agent.services(),
+        engine.clone(),
+        env.clock.clone(),
+        limited(BrakeSettings {
+            max_reads: 3,
+            burst: 1,
+            refill_ms: 3_600_000,
+        }),
+    );
+    drop(
+        logs.open(account_viewer("marie"), service_key(&key), open_request())
+            .expect("ouverte"),
+    );
+    let resume = OpenRequest {
+        tail: 0,
+        since: Some(LogCursor { ts: T0, rank: 0 }),
+    };
+    assert_eq!(
+        refusal_of(logs.open(account_viewer("marie"), service_key(&key), resume))
+            .error
+            .code,
+        LogsErrorCode::LogsRateLimited
+    );
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn only_one_journal_entry_is_asked_for_after_thirty_refusals() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = one_service_agent(&env, &engine).await;
+    let logs = ServiceLogs::new(
+        agent.services(),
+        engine.clone(),
+        env.clock.clone(),
+        limited(BrakeSettings::production()),
+    );
+    for _ in 0..12 {
+        drop(
+            logs.open(account_viewer("marie"), service_key(&key), open_request())
+                .expect("ouverte"),
+        );
+    }
+    let mut entries = Vec::new();
+    for round in 0..120 {
+        let refused =
+            refusal_of(logs.open(account_viewer("marie"), service_key(&key), open_request()));
+        assert_eq!(refused.error.code, LogsErrorCode::LogsRateLimited);
+        if let Some(count) = refused.throttle_entry {
+            entries.push((round, count));
+        }
+    }
+    assert_eq!(entries, vec![(30, 31)]);
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_missing_right_stays_visible_when_the_brake_answers_in_its_place() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = one_service_agent(&env, &engine).await;
+    let logs = ServiceLogs::new(
+        agent.services(),
+        engine.clone(),
+        env.clock.clone(),
+        limited(BrakeSettings {
+            max_reads: usize::MAX,
+            burst: 1,
+            refill_ms: 3_600_000,
+        }),
+    )
+    .with_policy(Arc::new(|_, _| Err(ReadRefusal::MissingRight)));
+    let first = refusal_of(logs.open(account_viewer("marie"), service_key(&key), open_request()));
+    assert_eq!(first.error.code, LogsErrorCode::MissingRight);
+    assert!(!first.missing_right);
+    // le seau est vide : le client lit « freiné », le journal sait que le droit manquait aussi
+    let braked = refusal_of(logs.open(account_viewer("marie"), service_key(&key), open_request()));
+    assert_eq!(braked.error.code, LogsErrorCode::LogsRateLimited);
+    assert!(braked.missing_right);
+    agent.shutdown().await;
+}
+
+/// Un agent dont le frein est celui-ci : les tests du socket.
+async fn braked_agent(
+    env: &Env,
+    engine: &Arc<FakeEngine>,
+    brake: BrakeSettings,
+) -> (Agent, String) {
+    let web = container("web", RunState::Running);
+    let key = key_of(&web);
+    engine.put_silently(web);
+    align_clock(env);
+    adopt_all(env, engine).await;
+    let mut engine_parts = parts(engine.clone());
+    engine_parts.log_brake = brake;
+    let agent = https::start_engined(env, engine_parts).await;
+    wait_listed(&agent, 1).await;
+    (agent, key)
+}
+
+#[tokio::test]
+async fn the_socket_answers_the_account_limit_with_its_code_and_no_wait() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = braked_agent(&env, &engine, BrakeSettings::production()).await;
+    let marie = token(&env, &agent, "marie", Role::ReadOnly).await;
+    let lucas = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    let mut open = Vec::new();
+    for _ in 0..3 {
+        let mut client = read(&agent, &marie, &key, 10, None).await;
+        assert!(matches!(
+            client.next_logs().await.unwrap(),
+            LogsServerMessage::Status(_)
+        ));
+        open.push(client);
+    }
+    // La quatrième lecture de marie : le plafond du compte, sans attente.
+    let mut fourth = read(&agent, &marie, &key, 10, None).await;
+    match fourth.next_logs().await.unwrap() {
+        LogsServerMessage::Error(error) => {
+            assert_eq!(error.code, LogsErrorCode::LogsAccountLimit);
+            assert_eq!(error.retry_after_s, None);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(fourth.next_logs().await, Err(End::Closed(1000))));
+    // lucas lit sans souci.
+    let mut other = read(&agent, &lucas, &key, 10, None).await;
+    assert!(matches!(
+        other.next_logs().await.unwrap(),
+        LogsServerMessage::Status(_)
+    ));
+    assert_eq!(engine.open_log_reads(), 4);
+    agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_braked_account_is_told_to_wait_and_the_journal_gets_one_entry() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = braked_agent(
+        &env,
+        &engine,
+        BrakeSettings {
+            max_reads: 3,
+            burst: 1,
+            refill_ms: 3_600_000,
+        },
+    )
+    .await;
+    let marie = token(&env, &agent, "marie", Role::ReadOnly).await;
+    let mut first = read(&agent, &marie, &key, 10, None).await;
+    assert!(matches!(
+        first.next_logs().await.unwrap(),
+        LogsServerMessage::Status(_)
+    ));
+    for round in 0..36 {
+        let mut braked = read(&agent, &marie, &key, 10, None).await;
+        match braked.next_logs().await.unwrap() {
+            LogsServerMessage::Error(error) => {
+                assert_eq!(error.code, LogsErrorCode::LogsRateLimited, "{round}");
+                let wait = error.retry_after_s.expect("l'attente est dite");
+                assert!((1..=3_600).contains(&wait), "{wait}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(braked.next_logs().await, Err(End::Closed(1000))));
+    }
+    agent.flush_journal().await;
+    // (outcome, target, reason, account) de chaque entrée.
+    type Row = (String, Option<String>, Option<String>, Option<String>);
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT outcome, target, reason, account FROM audit_events
+         WHERE action = 'service.logs.throttled' ORDER BY id",
+    )
+    .fetch_all(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].0, "denied");
+    assert_eq!(rows[0].1.as_deref(), Some("/services/{key}/logs"));
+    assert_eq!(
+        rows[0].2.as_deref(),
+        Some("plus de 30 ouvertures de journaux refusées en 10 minutes")
+    );
+    assert_eq!(rows[0].3.as_deref(), Some("marie"));
+    // Aucun nom de service ni clé dans l'entrée.
+    assert!(!format!("{rows:?}").contains(&key));
+    agent.shutdown().await;
 }
