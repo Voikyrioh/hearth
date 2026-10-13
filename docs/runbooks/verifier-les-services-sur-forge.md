@@ -28,3 +28,7 @@ Squelette (HRT-61) du runbook de vérification des services sur le serveur forge
 - Partie 3 (HRT-64) : démarrer, arrêter, redémarrer un service (jamais Terraria sans sauvegarde ; 7 Days to Die : le délai d'arrêt réel de 120 s).
 - Partie 4 (HRT-66) : journaux en direct, pilote `journald`.
 - Partie 5 (HRT-68, HRT-70) : déployer une image, dossiers de données, retour des services après `nixos-rebuild switch` et après un redémarrage du serveur.
+
+## Diagnostic des journaux
+
+- `RUST_LOG` ne rend jamais bavardes les bibliothèques de transport du moteur : `bollard`, `bollard_stubs`, `hyper`, `hyper_util`, `hyperlocal`, `hyper_named_pipe` et `h2` restent au niveau `warn` pour TOUT l'agent (serveur HTTPS et client de mise à jour compris), quelle que soit la directive (`RUST_LOG=hyper_util=debug` est ignoré). C'est voulu : leurs traces de niveau `debug` contiennent les variables d'environnement des conteneurs (SECURITY.md).

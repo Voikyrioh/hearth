@@ -268,7 +268,7 @@ fn running_as_root() -> bool {
 #[cfg(unix)]
 #[tokio::test]
 #[ignore = "vrai moteur : HEARTH_TEST_ENGINE=1 cargo test -p hearth-agent --test engine_real -- --ignored"]
-async fn a_socket_without_rights_is_access_denied_and_a_mute_socket_is_unresponsive() {
+async fn denied_and_mute_unix_sockets() {
     use std::os::unix::fs::PermissionsExt;
 
     if !enabled() {
@@ -277,13 +277,15 @@ async fn a_socket_without_rights_is_access_denied_and_a_mute_socket_is_unrespons
     }
     use hearth_agent::domain::services::{EngineState, classify_probe};
     use hearth_agent::infrastructure::engine::{InstallMarkers, Target};
-    let dir = tempfile::tempdir().expect("dossier");
+    // Un chemin de socket Unix tient en 107 octets : `tempdir_fast` (`/dev/shm/hearth-test-tmp/`, dossier
+    // nommé d'après ce test, donc court) et des noms de fichier courts, pas `target/` du runner (trop long).
+    let dir = support::tmp::tempdir_fast().expect("dossier");
 
     // Un socket Unix réel dont le fichier n'a plus aucun droit : `EACCES` à la connexion.
     if running_as_root() {
         eprintln!("compte root : un socket sans droit reste ouvert, cas non vérifiable ici");
     } else {
-        let path = dir.path().join("denied.sock");
+        let path = dir.path().join("d.sock");
         let _listener = tokio::net::UnixListener::bind(&path).expect("socket");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("chmod");
         let engine = BollardEngine::new(
@@ -297,7 +299,11 @@ async fn a_socket_without_rights_is_access_denied_and_a_mute_socket_is_unrespons
     }
 
     // Un socket qui accepte la connexion mais ne répond jamais : « ne répond pas » au bout du délai.
-    let path = dir.path().join("mute.sock");
+    let path = dir.path().join("m.sock");
+    assert!(
+        path.as_os_str().len() < 100,
+        "chemin de socket trop long : {path:?}"
+    );
     let listener = tokio::net::UnixListener::bind(&path).expect("socket");
     let _holder = tokio::spawn(async move {
         let mut open = Vec::new();

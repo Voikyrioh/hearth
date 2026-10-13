@@ -94,6 +94,17 @@ pub struct EngineView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ready_at: Option<String>,
     pub checked_at: String,
+    /// Date de la dernière lecture COMPLÈTE réussie de la liste des services (RFC 3339), absente
+    /// tant qu'aucune n'a réussi. `checked_at` date la sonde du moteur, pas la liste : c'est ce champ
+    /// qui permet d'écrire « Liste du moteur d'il y a {âge} » (HRT-61, `BR-SVC-001`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_read_at: Option<String>,
+    /// `true` quand la liste affichée n'est peut-être pas à jour : la dernière relecture a échoué, des
+    /// conteneurs sont illisibles (leur dernière description est gardée), ou le suivi en direct est
+    /// suspendu. Le client dit alors « Impossible de lire les services » et date la liste avec
+    /// `list_read_at`. Absent (donc `false`) pour un agent qui ne le sait pas.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub list_degraded: bool,
 }
 
 /// L'état d'un service (`BR-SVC-004`). `starting`, `stopping` et `deploying` appartiennent aux
@@ -322,6 +333,8 @@ mod tests {
             },
             last_ready_at: None,
             checked_at: "2026-10-13T10:00:00Z".into(),
+            list_read_at: None,
+            list_degraded: false,
         }
     }
 
@@ -356,6 +369,22 @@ mod tests {
         assert!(json.get("version").is_none());
         let back: EngineView = serde_json::from_value(json).expect("back");
         assert_eq!(back, view);
+    }
+
+    #[test]
+    fn the_list_freshness_fields_are_optional_both_ways() {
+        // Un agent ancien ne les envoie pas : le client lit « à jour, date inconnue ».
+        let mut json = serde_json::to_value(engine()).expect("json");
+        assert!(json.get("list_read_at").is_none());
+        assert!(json.get("list_degraded").is_none());
+        let old: EngineView = serde_json::from_value(json.clone()).expect("old agent");
+        assert!(!old.list_degraded && old.list_read_at.is_none());
+        // Un agent récent les envoie ; un client ancien (qui ignore les champs inconnus) les ignore.
+        json["list_read_at"] = "2026-10-13T09:59:00Z".into();
+        json["list_degraded"] = true.into();
+        let new: EngineView = serde_json::from_value(json).expect("new agent");
+        assert!(new.list_degraded);
+        assert_eq!(new.list_read_at.as_deref(), Some("2026-10-13T09:59:00Z"));
     }
 
     #[test]

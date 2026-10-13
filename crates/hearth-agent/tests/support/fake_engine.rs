@@ -38,6 +38,8 @@ struct State {
     inspect_errors: BTreeMap<String, EngineError>,
     /// Le flux d'événements se ferme aussitôt ouvert (un moteur dont le flux ne tient pas).
     events_broken: bool,
+    /// Temps que `list` met à répondre (un moteur lent).
+    list_delay: std::time::Duration,
 }
 
 pub struct FakeEngine {
@@ -108,6 +110,7 @@ impl FakeEngine {
                 list_error: None,
                 inspect_errors: BTreeMap::new(),
                 events_broken: false,
+                list_delay: std::time::Duration::ZERO,
             }),
             feed,
             probes: AtomicU64::new(0),
@@ -193,6 +196,11 @@ impl FakeEngine {
         self.lock().events_broken = broken;
     }
 
+    /// `list` met ce temps à répondre (`Duration::ZERO` : rétablit).
+    pub fn set_list_delay(&self, delay: std::time::Duration) {
+        self.lock().list_delay = delay;
+    }
+
     pub fn probe_count(&self) -> u64 {
         self.probes.load(Ordering::SeqCst)
     }
@@ -226,6 +234,10 @@ impl ContainerEngine for FakeEngine {
 
     async fn list(&self) -> Result<Listing, EngineError> {
         self.lists.fetch_add(1, Ordering::SeqCst);
+        let delay = self.lock().list_delay;
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         let state = self.lock();
         if let Some(error) = state.list_error {
             return Err(error);

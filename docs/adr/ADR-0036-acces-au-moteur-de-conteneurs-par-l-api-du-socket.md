@@ -61,6 +61,8 @@ En test, le même adaptateur reçoit `Target::Http` (client `Docker::connect_wit
 ## Quand NE PAS l'appliquer / limites
 - **Le socket du moteur équivaut à root** : qui le pilote monte `/` dans un conteneur. L'agent étant root, il n'obtient aucun droit de plus ; mais tout compte Administrateur de Hearth devient, par l'agent, root du serveur. Les protections sont celles du socle (TLS épinglé, acte confirmé par clé de poste et mot de passe, journal). À dire dans `SECURITY.md`.
 - Installation gérée où l'agent n'est pas root : l'état « Accès refusé à l'agent » nomme le compte ; l'ajouter au groupe du moteur lui donne root.
+- **Docker en paquet Snap** : le socket est `/var/snap/docker/common/var-run/docker.sock`, pas `/var/run/docker.sock`, et l'agent confiné ou non peut ne pas y avoir droit. Non géré dans cette tranche : le chemin se règle à la main (`[engine] socket`), et les repères d'installation ne contiennent ni le binaire ni l'unité du paquet Snap : un moteur Snap arrêté apparaît « absent » au lieu d'« arrêté ».
+- **OpenRC (Alpine, Gentoo) et autres inits sans systemd** : la détection par l'API du socket marche, mais l'agent ne distingue que « systemd » d'« autre » (`host.init`, présence de `/run/systemd/system`) et ses repères d'installation ne regardent que des unités systemd : sur OpenRC, un moteur installé mais arrêté peut apparaître « absent » si son binaire n'est pas à un emplacement connu, et aucune commande de démarrage propre à OpenRC (`rc-service docker start`) n'est produite. À traiter avec la tranche des actions.
 - Si `bollard` ne se lie pas en statique ou tire une dépendance interdite : écrire un client minimal sur hyper derrière le même port.
 
 ## Alternatives rejetées

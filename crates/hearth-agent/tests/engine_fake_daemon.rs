@@ -195,19 +195,20 @@ async fn a_daemon_that_never_answers_is_unresponsive_after_the_probe_delay() {
 
 #[tokio::test]
 async fn the_whole_probe_is_bounded_by_one_delay_not_one_per_exchange() {
-    // `/_ping` met 250 ms à répondre, `/version` ne répond jamais, le délai est de 400 ms. Un délai par
-    // échange ferait 250 + 400 = 650 ms ; un seul délai pour toute la sonde coupe à 400 ms (BR-ENGINE-009).
+    // `/_ping` met 400 ms à répondre, `/version` ne répond jamais, le délai est de 800 ms. Un délai par
+    // échange ferait 400 + 800 = 1200 ms ; un seul délai pour toute la sonde coupe à 800 ms (BR-ENGINE-009).
+    // Marges de 100 ms en dessous et 300 ms au-dessus : un exécuteur chargé ne fait pas échouer le test.
     let daemon = FakeDaemon::start().await;
     daemon.configure(|config| {
-        config.ping_delay = Duration::from_millis(250);
+        config.ping_delay = Duration::from_millis(400);
         config.version_silent = true;
     });
-    let engine = engine_of(&daemon).with_probe_timeout(Duration::from_millis(400));
+    let engine = engine_of(&daemon).with_probe_timeout(Duration::from_millis(800));
     let started = std::time::Instant::now();
     assert_eq!(state_of(&engine).await, EngineState::Unresponsive);
     let took = started.elapsed();
-    assert!(took >= Duration::from_millis(350), "{took:?}");
-    assert!(took < Duration::from_millis(560), "{took:?}");
+    assert!(took >= Duration::from_millis(700), "{took:?}");
+    assert!(took < Duration::from_millis(1100), "{took:?}");
 }
 
 #[tokio::test]
