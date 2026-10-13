@@ -320,6 +320,38 @@ describe("autres états du moteur", () => {
     }
   });
 
+  it("valeurs d'un agent plus récent : « État non reconnu » pour le moteur, rien d'inventé pour l'origine, le pilote et le protocole", async () => {
+    const { wrapper } = await open((bridge) =>
+      bridge.services.seed(
+        "forge",
+        [
+          {
+            key: "c_1",
+            name: "futur",
+            origin: "unknown",
+            driver: "unknown",
+            state: "unknown",
+            ports: [{ hostPort: 4433, containerPort: 443, protocol: "unknown", scope: "unknown" }],
+          },
+        ],
+        { state: "unknown", name: null, version: null },
+      ),
+    );
+    expect(wrapper.get("[data-engine-state]").attributes("data-engine-state")).toBe("unknown");
+    expect(wrapper.text()).toContain("État non reconnu");
+    expect(wrapper.get("[data-engine-unknown]").text()).toContain(
+      "Hearth ne reconnaît pas l'état du moteur",
+    );
+    NO_COMMAND(wrapper);
+    expect(wrapper.find("[data-engine-recheck]").exists()).toBe(true);
+    const row = wrapper.get("[data-key='c_1']").text();
+    expect(row).toContain("4433 vers 443");
+    expect(row).not.toMatch(/UNKNOWN|unknown/);
+    expect(row).not.toContain("Créé hors de Hearth");
+    expect(row).not.toContain("Géré par le système");
+    wrapper.unmount();
+  });
+
   it("changement d'état : annoncé une fois, le bloc d'aide disparaît au retour du moteur (BR-ENGINE-012)", async () => {
     const { wrapper, bridge } = await open((sim) =>
       sim.services.seed("forge", [{ key: "c_1", name: "web" }], { state: "stopped" }),

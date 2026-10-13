@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use fake_engine::FakeEngine;
 use hearth_agent::app::{self, Adapters, EngineParts, Metering, RunningAgent, Services};
 use hearth_agent::application::ports::{
     Clock as AgentClock, GpuProbe, HashError, HostDescription, HostEnvironment, PasswordHasher,
@@ -29,11 +30,14 @@ use hearth_agent::entrypoint::ws::StreamSettings;
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
 use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
 use hearth_agent::infrastructure::config::AgentConfig;
-use hearth_agent::infrastructure::engine::FakeEngine;
 use hearth_agent::infrastructure::ids::UlidGen;
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::{Database, ServiceDatabase};
 use time::{Duration as TimeDuration, OffsetDateTime};
+
+/// Le faux moteur de l'agent (HRT-61) : il vit dans les tests de l'agent, partagé par chemin.
+#[path = "../../../hearth-agent/tests/support/fake_engine.rs"]
+pub mod fake_engine;
 
 pub const PASSWORD: &str = "Correct-Horse-9";
 

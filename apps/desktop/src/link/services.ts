@@ -42,9 +42,9 @@ export interface EngineInfo {
 export interface ServicePort {
   hostPort: number;
   containerPort: number;
-  protocol: "tcp" | "udp" | "sctp";
+  protocol: "tcp" | "udp" | "sctp" | "unknown";
   /** `all` : tout le réseau du serveur ; `local` : ce serveur seulement. */
-  scope: "all" | "local";
+  scope: "all" | "local" | "unknown";
 }
 
 /** Un service de la liste. */
@@ -52,8 +52,9 @@ export interface ServiceInfo {
   /** Identité stable, opaque : jamais le nom ni l'identifiant du conteneur. */
   key: string;
   name: string;
-  origin: "hearth" | "external";
-  driver: "engine" | "supervisor" | null;
+  /** `unknown` : une origine que ce client ne connaît pas (aucun repère n'est alors montré). */
+  origin: "hearth" | "external" | "unknown";
+  driver: "engine" | "supervisor" | "unknown" | null;
   /** Nom que le système du serveur donne au service (repère « Géré par le système »). */
   unit: string | null;
   removedOnStop: boolean;

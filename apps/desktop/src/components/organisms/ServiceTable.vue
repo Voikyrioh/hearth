@@ -5,7 +5,14 @@ import HMiddleText from "@/components/atoms/HMiddleText.vue";
 import { useNow } from "@/composables/useNow";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
-import { imageLabel, loopBand, portLabel, rowLabel, stateLine } from "@/services/format";
+import {
+  imageLabel,
+  loopBand,
+  portLabel,
+  rowLabel,
+  stateLine,
+  visiblePortCount,
+} from "@/services/format";
 import { anchoredScroll, offsetsOf, type RowHeights, windowOf } from "@/services/layout";
 import OriginTags from "../molecules/OriginTags.vue";
 import PortChips from "../molecules/PortChips.vue";
@@ -150,7 +157,9 @@ function onKeydown(event: KeyboardEvent) {
 
 /** Tous les ports au survol : la ligne n'en montre que trois, sur deux lignes au plus. */
 function portsTitle(service: ServiceInfo): string | undefined {
-  return service.ports.length > 3 ? service.ports.map(portLabel).join(", ") : undefined;
+  return service.ports.length > visiblePortCount(service.ports)
+    ? service.ports.map(portLabel).join(", ")
+    : undefined;
 }
 
 const COLUMNS = [

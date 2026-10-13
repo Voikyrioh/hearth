@@ -592,7 +592,7 @@ export type DiskSampleDto = {
 	totalBytes: number | null,
 };
 
-export type DriverDto = "engine" | "supervisor";
+export type DriverDto = "engine" | "supervisor" | "unknown";
 
 export type EngineDto = {
 	state: EngineStateDto,
@@ -606,7 +606,9 @@ export type EngineDto = {
 	checkedAt: string,
 };
 
-export type EngineStateDto = "checking" | "ready" | "stopped" | "access_denied" | "unresponsive" | "absent" | "unsupported_engine" | "unsupported_version" | "disabled";
+export type EngineStateDto = "checking" | "ready" | "stopped" | "access_denied" | "unresponsive" | "absent" | "unsupported_engine" | "unsupported_version" | "disabled" | 
+/**  Un état que ce client ne connaît pas : l'interface dit « non reconnu », sans deviner. */
+"unknown";
 
 /**
  *  Le certificat présenté n'est plus celui qui a été confirmé (BR-CONN-003). Les empreintes sont
@@ -784,7 +786,7 @@ export type OperationEventDto = {
 	outcome: OutcomeDto,
 };
 
-export type OriginDto = "hearth" | "external";
+export type OriginDto = "hearth" | "external" | "unknown";
 
 export type OsDto = {
 	name: string,
@@ -815,7 +817,7 @@ export type ProbeDto = {
 	macAddresses: string[],
 };
 
-export type ProtocolDto = "tcp" | "udp" | "sctp";
+export type ProtocolDto = "tcp" | "udp" | "sctp" | "unknown";
 
 export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked";
 
@@ -871,7 +873,7 @@ export type SampleDto = {
 	temps: TempDto[],
 };
 
-export type ScopeDto = "all" | "local";
+export type ScopeDto = "all" | "local" | "unknown";
 
 /**
  *  Ce que l'agent dit de la session de ce poste : prouvée par la clé d'un poste inscrit, ou non.

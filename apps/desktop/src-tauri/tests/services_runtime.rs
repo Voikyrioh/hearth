@@ -21,11 +21,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use agent::fake_engine::FakeEngine;
+use agent::fake_engine::container;
 use agent::{PASSWORD, TestAgent};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::services::RunState;
-use hearth_agent::infrastructure::engine::FakeEngine;
-use hearth_agent::infrastructure::engine::fake::container;
 use hearth_desktop_lib::link::{LinkRuntime, UiSink};
 use hearth_desktop_lib::services::dto::{ServicesEvent, ServicesViewDto};
 use hearth_desktop_lib::vault::{CredentialBackend, CredentialVault};
@@ -163,6 +163,34 @@ fn the_event_the_window_receives_is_the_reference_file_field_by_field() {
         serde_json::to_value(&unsupported).unwrap(),
         fixture()["unsupported"]
     );
+}
+
+/// Un agent plus récent : chaque valeur que ce client ne connaît pas traverse la liaison (lecture serde du
+/// message de l'agent) puis la copie de la coquille, et arrive à l'interface comme « inconnue », sans perdre
+/// l'instantané. La fiche `unknown` est le dernier maillon que lit le test Vitest du pont.
+#[test]
+fn a_value_from_a_newer_agent_reaches_the_window_as_unknown() {
+    let wire = serde_json::json!({
+        "rev": 9,
+        "engine": {
+            "state": "hibernating", "min_version": "20.10", "agent_account": "root",
+            "agent_is_admin": true, "checked_at": "2026-10-13T10:00:02Z",
+            "host": { "os_id": "debian", "os_like": [], "init": "runit", "declarative": false }
+        },
+        "services": [{
+            "key": "c_aa01", "name": "futur", "origin": "imported", "driver": "swarm",
+            "removed_on_stop": false, "state": "migrating", "never_started": false,
+            "restarts_10m": 0, "image": { "short_id": "0123456789ab", "ref": "nginx", "tag": "1.27" },
+            "ports": [{ "host_port": 4433, "container_port": 443, "protocol": "quic", "scope": "vpn" }],
+            "host_network": false,
+            "mounts": [{ "kind": "nfs", "source": "s", "target": "t", "read_only": true }],
+            "restart": "never-heard-of"
+        }]
+    });
+    let state: ServicesState = serde_json::from_value(wire).expect("l'instantané est lu");
+    let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
+    let event = book.on_state("futur", &state);
+    assert_eq!(serde_json::to_value(&event).unwrap(), fixture()["unknown"]);
 }
 
 /// Aucune clé de l'événement ne désigne une variable d'environnement ni une commande de lancement.

@@ -274,7 +274,7 @@ pub struct Options {
     pub hour_fails: bool,
     /// Un faux moteur de conteneurs branché sur l'agent (HRT-62) : le sujet `services` est servi pour de
     /// vrai. Sans lui, le pilotage des services est désactivé.
-    pub engine: Option<Arc<hearth_agent::infrastructure::engine::FakeEngine>>,
+    pub engine: Option<Arc<agent::fake_engine::FakeEngine>>,
     /// L'agent est vu « d'avant les services » : son `/hello` n'annonce aucune capacité (HRT-62).
     pub hide_capabilities: bool,
 }

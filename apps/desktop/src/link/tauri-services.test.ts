@@ -22,7 +22,7 @@ const fixture = JSON.parse(
     join(process.cwd(), "src-tauri", "tests", "fixtures", "services-event.json"),
     "utf8",
   ),
-) as { supported: Wire; unsupported: Wire };
+) as { supported: Wire; unsupported: Wire; unknown: Wire };
 
 type Call = { cmd: string; args: Record<string, unknown> };
 
@@ -102,6 +102,28 @@ describe("the services event of the real bridge", () => {
     off();
     await emit(LINK_EVENTS.services, { ...fixture.unsupported, seq: 3 });
     expect(seen).toHaveLength(2);
+  });
+
+  it("reads the values of a newer agent as unknown, from the wire to the store", async () => {
+    // La fiche `unknown` est ce que la coquille écrit pour un agent plus récent (test Rust jumeau).
+    ipc((cmd) => (cmd === "list_services_states" ? [] : null));
+    setLinkBridge(new TauriLinkBridge());
+    const store = useServicesStore();
+    await store.start();
+    await emit(LINK_EVENTS.services, fixture.unknown);
+    const shown = show(store.of("futur"));
+    expect(shown.kind).toBe("engine");
+    if (shown.kind !== "engine") return;
+    expect(shown.engine.state).toBe("unknown");
+    expect(shown.list.kind).toBe("stale");
+    const service = shown.list.kind === "stale" ? shown.list.services[0] : undefined;
+    expect(service).toMatchObject({
+      origin: "unknown",
+      driver: "unknown",
+      state: "unknown",
+      ports: [{ protocol: "unknown", scope: "unknown" }],
+    });
+    store.reset();
   });
 
   it("lets go of the listener when the replay fails", async () => {

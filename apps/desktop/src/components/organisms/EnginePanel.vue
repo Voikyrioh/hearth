@@ -50,6 +50,7 @@ const LOOKS: Record<Exclude<EngineState, "checking">, Look> = {
   unsupported_engine: { tone: "warn", icon: "alert", title: "engine.state.unsupportedEngine" },
   unsupported_version: { tone: "warn", icon: "alert", title: "engine.state.unsupportedVersion" },
   disabled: { tone: "plain", icon: "pause", title: "engine.state.disabled" },
+  unknown: { tone: "plain", icon: "question", title: "engine.state.unknown" },
 };
 
 const COUNT_ICONS: Record<CountKey, IconName> = {
@@ -200,6 +201,9 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
           />
         </p>
         <p v-else-if="engine.state === 'disabled'">{{ t("engine.disabledText") }}</p>
+
+        <!-- État annoncé par un agent plus récent que ce client : dit tel quel, sans deviner ni proposer d'aide. -->
+        <p v-else-if="engine.state === 'unknown'" data-engine-unknown>{{ t("engine.unknownText") }}</p>
 
         <!-- L'aide : du texte à recopier (administrateur), ou le renvoi à la documentation, sans commande. -->
         <template v-if="help && help.kind === 'docs'">

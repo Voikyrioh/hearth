@@ -114,7 +114,7 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
   top: 0;
   right: 0;
   left: 0;
-  z-index: 1;
+  z-index: var(--z-raised);
   pointer-events: none;
   color: var(--tx3);
   font-size: var(--fs-small);

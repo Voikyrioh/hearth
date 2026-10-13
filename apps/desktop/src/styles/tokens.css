@@ -182,6 +182,7 @@
   --ease: cubic-bezier(0.2, 0, 0, 1);
 
   /* Couches */
+  --z-raised: 1;
   --z-tooltip: 30;
   --z-toast: 40;
   --z-dev: 60;

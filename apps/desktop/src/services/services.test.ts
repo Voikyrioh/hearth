@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { EngineInfo, ServiceInfo, ServiceState } from "@/link";
 import { categoryOf, countServices, shownCounts } from "./counts";
-import { imageLabel, loopBand, portLabel, rowLabel, shortAge, stateLine } from "./format";
+import {
+  imageLabel,
+  loopBand,
+  portLabel,
+  rowLabel,
+  shortAge,
+  stateLine,
+  visiblePortCount,
+} from "./format";
 import { familyOf, helpFor } from "./help";
 import { anchoredScroll, indexAt, offsetsOf, windowOf } from "./layout";
 import { type ServerServices, show } from "./view";
@@ -203,6 +211,25 @@ describe("textes d'une ligne (BR-SVC-002, 006, 022)", () => {
     expect(portLabel({ hostPort: 53, containerPort: 53, protocol: "udp", scope: "local" })).toBe(
       "53 vers 53 (UDP)",
     );
+  });
+
+  it("port d'un protocole inconnu : les deux ports, sans protocole inventé", () => {
+    expect(
+      portLabel({ hostPort: 4433, containerPort: 443, protocol: "unknown", scope: "unknown" }),
+    ).toBe("4433 vers 443");
+  });
+
+  it("ports : trois au plus, et seulement ceux qui tiennent sur deux lignes avec « +N »", () => {
+    const port = (n: number, protocol: "tcp" | "udp" = "tcp") => ({
+      hostPort: n,
+      containerPort: n,
+      protocol,
+      scope: "all" as const,
+    });
+    expect(visiblePortCount([])).toBe(0);
+    expect(visiblePortCount([port(80), port(81), port(82)])).toBe(3);
+    expect(visiblePortCount(Array.from({ length: 8 }, (_, i) => port(30000 + i)))).toBe(2);
+    expect(visiblePortCount([port(65535), port(65534), port(65533), port(65532)])).toBe(2);
   });
 
   it("seconde ligne de l'état", () => {

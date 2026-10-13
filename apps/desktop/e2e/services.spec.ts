@@ -197,7 +197,8 @@ test("un nom, une image de 255 caractères ne cassent pas la mise en page", asyn
   expect(box?.height).toBeLessThanOrEqual(53);
   // Le texte complet est lu par le lecteur d'écran, la ligne n'a pas grandi et la page ne défile pas de côté.
   await expect(row).toHaveAttribute("aria-label", new RegExp(`^n${"a".repeat(253)}z, `));
-  await expect(row.getByText("+1")).toBeVisible();
+  // Quatre ports : deux puces tiennent sur les deux lignes de la cellule, « +2 » dit le reste (jamais une puce coupée).
+  await expect(row.getByText("+2")).toBeVisible();
   await expectNoHorizontalScroll(page);
   await shoot(page, "services-long");
 });

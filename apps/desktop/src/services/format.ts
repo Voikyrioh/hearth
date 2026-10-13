@@ -27,11 +27,47 @@ export function imageLabel(service: Pick<ServiceInfo, "image">): string {
 
 /** « 8080 vers 80 (TCP) ». */
 export function portLabel(port: ServicePort): string {
+  // Protocole que ce client ne connaît pas : les deux ports, sans protocole inventé.
+  if (port.protocol === "unknown") {
+    return t("services.portLabelBare", { host: port.hostPort, container: port.containerPort });
+  }
   return t("services.portLabel", {
     host: port.hostPort,
     container: port.containerPort,
     protocol: port.protocol.toUpperCase(),
   });
+}
+
+/** Largeur estimée d'une puce de port (DM Mono 12 px : 7,4 px par signe, 16 px de marge intérieure, 4 px d'écart). */
+const CHIP_CHAR = 7.4;
+const CHIP_PAD = 20;
+/** Largeur utile de la colonne « Ports » (320 px moins la marge de la cellule) et nombre de lignes de la ligne de service. */
+const PORTS_WIDTH = 296;
+const PORTS_LINES = 2;
+const MORE_WIDTH = 40;
+
+/**
+ * Combien de ports la cellule montre : au plus 3 (BR-SVC-002), et seulement ceux qui tiennent sur les deux
+ * lignes de la ligne de service avec la puce « +N » quand il en reste ; jamais une puce coupée ni qui déborde.
+ * Au moins un port est toujours montré.
+ */
+export function visiblePortCount(ports: readonly ServicePort[]): number {
+  const widths = ports.slice(0, 3).map((port) => portLabel(port).length * CHIP_CHAR + CHIP_PAD);
+  for (let shown = widths.length; shown > 1; shown -= 1) {
+    const items = widths.slice(0, shown);
+    if (ports.length > shown) items.push(MORE_WIDTH);
+    let lines = 1;
+    let used = 0;
+    for (const width of items) {
+      if (used > 0 && used + width > PORTS_WIDTH) {
+        lines += 1;
+        used = 0;
+      }
+      used += width;
+    }
+    if (lines <= PORTS_LINES) return shown;
+  }
+  return Math.min(1, ports.length);
 }
 
 /** Seconde ligne de la cellule d'état (« depuis 3 j 4 h 12 min », « Arrêté il y a 2 h », « il y a 2 h · code 137 »…). */

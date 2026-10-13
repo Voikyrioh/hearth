@@ -32,6 +32,8 @@ pub enum EngineStateDto {
     UnsupportedEngine,
     UnsupportedVersion,
     Disabled,
+    /// Un état que ce client ne connaît pas : l'interface dit « non reconnu », sans deviner.
+    Unknown,
 }
 
 impl From<EngineState> for EngineStateDto {
@@ -46,6 +48,7 @@ impl From<EngineState> for EngineStateDto {
             EngineState::UnsupportedEngine => Self::UnsupportedEngine,
             EngineState::UnsupportedVersion => Self::UnsupportedVersion,
             EngineState::Disabled => Self::Disabled,
+            EngineState::Unknown => Self::Unknown,
         }
     }
 }
@@ -167,6 +170,7 @@ impl From<ServiceState> for ServiceStateDto {
 pub enum OriginDto {
     Hearth,
     External,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
@@ -174,6 +178,7 @@ pub enum OriginDto {
 pub enum DriverDto {
     Engine,
     Supervisor,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
@@ -182,6 +187,7 @@ pub enum ProtocolDto {
     Tcp,
     Udp,
     Sctp,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
@@ -189,6 +195,7 @@ pub enum ProtocolDto {
 pub enum ScopeDto {
     All,
     Local,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -216,10 +223,12 @@ impl From<&ServicePort> for PortDto {
                 PortProtocol::Tcp => ProtocolDto::Tcp,
                 PortProtocol::Udp => ProtocolDto::Udp,
                 PortProtocol::Sctp => ProtocolDto::Sctp,
+                PortProtocol::Unknown => ProtocolDto::Unknown,
             },
             scope: match scope {
                 PortScope::All => ScopeDto::All,
                 PortScope::Local => ScopeDto::Local,
+                PortScope::Unknown => ScopeDto::Unknown,
             },
         }
     }
@@ -309,10 +318,12 @@ impl From<&ServiceItem> for ServiceDto {
             origin: match origin {
                 ServiceOrigin::Hearth => OriginDto::Hearth,
                 ServiceOrigin::External => OriginDto::External,
+                ServiceOrigin::Unknown => OriginDto::Unknown,
             },
             driver: driver.map(|driver| match driver {
                 ServiceDriver::Engine => DriverDto::Engine,
                 ServiceDriver::Supervisor => DriverDto::Supervisor,
+                ServiceDriver::Unknown => DriverDto::Unknown,
             }),
             unit: unit.clone(),
             removed_on_stop: *removed_on_stop,

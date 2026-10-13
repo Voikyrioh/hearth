@@ -10,12 +10,12 @@ mod support;
 use std::sync::Arc;
 
 use hearth_agent::domain::services::RunState;
-use hearth_agent::infrastructure::engine::FakeEngine;
-use hearth_agent::infrastructure::engine::fake::container;
 use hearth_link::domain::event::Event;
 use hearth_link::domain::state::LinkState;
 use hearth_proto::api::services::{EngineState, ServiceState, ServicesState};
 use hearth_proto::stream::Topic;
+use support::agent::fake_engine::FakeEngine;
+use support::agent::fake_engine::container;
 use support::{Options, WAIT, World};
 
 fn engined(names: &[&str]) -> (Arc<FakeEngine>, Options) {

@@ -796,6 +796,7 @@ export const fr = {
       unsupportedEngine: "Moteur non pris en charge pour l'instant",
       unsupportedVersion: "Version non prise en charge",
       disabled: "Pilotage des services désactivé sur ce serveur",
+      unknown: "État non reconnu",
     },
     stoppedText:
       "Le moteur de conteneurs est installé mais arrêté. S'il vient de démarrer, attends quelques secondes.",
@@ -805,6 +806,8 @@ export const fr = {
       "Autoriser ce compte à se servir du moteur lui donne, en pratique, les mêmes pouvoirs que l'administrateur du serveur.",
     deniedAdminText:
       "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous le compte « {account} », qui a déjà tous les droits du serveur : ce refus vient d'un réglage de sécurité du serveur ou du moteur, que Hearth ne peut pas corriger. Vérifie la configuration de sécurité du moteur sur le serveur.",
+    unknownText:
+      "Hearth ne reconnaît pas l'état du moteur annoncé par ce serveur. Vérifie à nouveau ; si cela dure, l'agent du serveur est peut-être plus récent que Hearth sur ton poste.",
     unresponsiveText: "Le moteur de conteneurs ne répond pas.",
     lastKnown: "Dernier état connu : {state}, vu il y a {age}.",
     absentText:
@@ -865,6 +868,7 @@ export const fr = {
     noPort: "Aucun port",
     portMore: "+{n}",
     portLabel: "{host} vers {container} ({protocol})",
+    portLabelBare: "{host} vers {container}",
     unnamedImage: "image sans nom {id}",
     state: {
       running: "En marche",

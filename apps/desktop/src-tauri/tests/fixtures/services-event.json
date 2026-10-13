@@ -63,6 +63,46 @@
       ]
     }
   },
+  "unknown": {
+    "serverId": "futur",
+    "seq": 1,
+    "view": {
+      "kind": "supported",
+      "engine": {
+        "state": "unknown",
+        "name": null,
+        "version": null,
+        "minVersion": "20.10",
+        "agentAccount": "root",
+        "agentIsAdmin": true,
+        "host": { "osId": "debian", "osLike": [], "init": "other", "declarative": false },
+        "lastReadyAt": null,
+        "checkedAt": "2026-10-13T10:00:02Z"
+      },
+      "services": [
+        {
+          "key": "c_aa01",
+          "name": "futur",
+          "origin": "unknown",
+          "driver": "unknown",
+          "unit": null,
+          "removedOnStop": false,
+          "composeProject": null,
+          "state": "unknown",
+          "since": null,
+          "createdAt": null,
+          "neverStarted": false,
+          "exitCode": null,
+          "restarts10m": 0,
+          "image": { "ref": "nginx", "tag": "1.27", "shortId": "0123456789ab" },
+          "ports": [
+            { "hostPort": 4433, "containerPort": 443, "protocol": "unknown", "scope": "unknown" }
+          ],
+          "hostNetwork": false
+        }
+      ]
+    }
+  },
   "unsupported": {
     "serverId": "salon",
     "seq": 1,

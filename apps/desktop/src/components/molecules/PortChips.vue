@@ -2,16 +2,15 @@
 import { computed } from "vue";
 import { t } from "@/i18n";
 import type { ServicePort } from "@/link";
-import { portLabel } from "@/services/format";
+import { portLabel, visiblePortCount } from "@/services/format";
 
-// Les ports exposés d'un service : au plus 3 puces « {port du serveur} vers {port du service} ({protocole}) »,
+// Les ports exposés d'un service : au plus 3 puces, et seulement celles qui tiennent sur deux lignes « {port du serveur} vers {port du service} ({protocole}) »,
 // puis « +N » (BR-SVC-002). Aucun port : « Aucun port ». Un service sur le réseau du serveur n'a pas de port
 // individuel (BR-SVC-014) : rien n'est inventé.
 const props = defineProps<{ ports: readonly ServicePort[] }>();
 
-const MAX = 3;
-const shown = computed(() => props.ports.slice(0, MAX));
-const more = computed(() => Math.max(0, props.ports.length - MAX));
+const shown = computed(() => props.ports.slice(0, visiblePortCount(props.ports)));
+const more = computed(() => Math.max(0, props.ports.length - shown.value.length));
 </script>
 
 <template>
@@ -44,6 +43,9 @@ const more = computed(() => Math.max(0, props.ports.length - MAX));
   font-size: var(--fs-small);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chip--more {
