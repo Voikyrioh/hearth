@@ -2111,6 +2111,9 @@ async fn the_acts_declared_harmless_do_not_hand_a_holder_to_an_administrator_wit
 /// Exclues du balayage, avec la raison : la mise à jour de l'agent (binaire signé seulement, jamais une
 /// entrée du demandeur : `update_http.rs`) et le mode attaque (réglage du serveur entier, ne vise aucun
 /// compte ; l'activer ferait refuser les connexions du balayage lui-même).
+// Portée réelle (review de la PR 83) : ce test balaie les routes d'aujourd'hui avec le corps d'un
+// changement de mot de passe. Une route nouvelle est arrêtée par le classement `CLASSES`, pas par ce
+// balayage.
 #[tokio::test]
 async fn no_chain_of_calls_from_an_administrator_without_the_right_reaches_a_services_request() {
     let env = env().await;

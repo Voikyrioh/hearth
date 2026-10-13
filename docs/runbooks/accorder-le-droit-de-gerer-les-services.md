@@ -42,6 +42,8 @@ Ajoute `--data-dir <dossier>` si le dossier de données n'est pas celui du servi
 | Pas root | `Cette commande doit être lancée en root sur le serveur.` |
 
 - Le rôle ne change pas, aucune session n'est fermée : un retrait prend effet à la requête suivante du compte (BR-GRANT-010). Un compte en lecture seule peut avoir le droit.
+- L'octroi se fait par NOM de compte. Un administrateur peut supprimer un compte et en recréer un du même nom : avant d'accorder (ou de réaccorder) le droit, vérifie dans le journal d'activité que le compte n'a pas été supprimé puis recréé, et que c'est bien celui que tu crois.
+- Un administrateur sans le droit peut fermer les sessions d'un titulaire et, avec le mode attaque, le tenir dehors. Ce n'est pas une prise de compte ; le recours est cette ligne de commande, sur le serveur.
 - Chaque octroi ou retrait **effectif** est ajouté au journal d'activité : « Droit de gérer les services accordé » ou « retiré », cible le compte, origine « ligne de commande du serveur ». Une commande sans effet ou refusée n'ajoute rien.
 - Un compte créé par `hearth-agent account add` naît **sans** le droit.
 
