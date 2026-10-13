@@ -329,6 +329,7 @@ impl TestAgent {
                 Arc::new(hearth_agent::infrastructure::system::ProcBootInfo::new()),
                 EngineParts {
                     engine: engine.clone(),
+                    supervisor: Arc::new(hearth_agent::infrastructure::supervisor::NoSupervisor),
                     host: Arc::new(DebianHost),
                     timings: engine_timings(),
                 },

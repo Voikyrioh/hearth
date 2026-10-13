@@ -162,6 +162,10 @@ mod tests {
             mounts: vec![],
             mounts_omitted: 0,
             restart: RestartMode::None,
+            env_names: vec![],
+            env_names_omitted: 0,
+            command: None,
+            grace_s: None,
             busy: None,
             last_action: None,
         }

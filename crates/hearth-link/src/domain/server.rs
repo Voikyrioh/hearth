@@ -117,8 +117,9 @@ pub struct LastKnown {
     /// Plus ancien d'abord, au plus [`HISTORY_CAP`].
     pub history: Vec<Sample>,
     /// Le moteur de conteneurs et la dernière liste des services (HRT-62) : de quoi afficher la section
-    /// Services, périmée, hors ligne. Les types du protocole ne portent ni valeur ni nom de variable
-    /// d'environnement, ni commande : rien de tel n'arrive sur le disque. Absent d'un fichier d'avant.
+    /// Services, périmée, hors ligne. En mémoire, les noms de variables et la commande (HRT-63) peuvent y
+    /// figurer ; [`LastKnown::without_secrets`] les retire avant TOUTE écriture sur le disque. Absent d'un
+    /// fichier d'avant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub services: Option<ServicesState>,
     /// Quand la liaison a reçu la vue du moteur que porte `services` (heure de CE poste). C'est le repère
@@ -129,6 +130,20 @@ pub struct LastKnown {
 }
 
 impl LastKnown {
+    /// La forme écrite sur le disque du poste : sans nom de variable d'environnement ni commande de
+    /// lancement des services (BR-SVC-020), qui ne doivent jamais être persistés.
+    pub fn without_secrets(&self) -> Self {
+        let mut view = self.clone();
+        if let Some(state) = view.services.as_mut() {
+            for item in &mut state.services {
+                item.env_names.clear();
+                item.env_names_omitted = 0;
+                item.command = None;
+            }
+        }
+        view
+    }
+
     pub fn latest(&self) -> Option<&Sample> {
         self.history.last()
     }

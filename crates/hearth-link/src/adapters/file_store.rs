@@ -188,8 +188,9 @@ impl SnapshotStore for FileSnapshotStore {
     }
 
     async fn save(&self, id: &ServerId, view: &LastKnown) -> Result<(), StoreError> {
-        let bytes =
-            serde_json::to_vec(view).map_err(|e| StoreError(format!("sérialisation : {e}")))?;
+        // Jamais de nom de variable ni de commande sur le disque (BR-SVC-020).
+        let bytes = serde_json::to_vec(&view.without_secrets())
+            .map_err(|e| StoreError(format!("sérialisation : {e}")))?;
         write_atomic(&self.path(id), &bytes).await
     }
 
@@ -414,6 +415,79 @@ mod tests {
         assert_eq!(store.load(&id).await.unwrap(), None);
         store.remove(&id).await.unwrap();
         store.remove(&id).await.unwrap();
+    }
+
+    /// HRT-63 : ni nom de variable d'environnement ni commande de lancement ne sont écrits sur le disque
+    /// du poste (BR-SVC-020) ; un fichier écrit avant ces champs se relit toujours.
+    #[tokio::test]
+    async fn the_last_view_on_disk_carries_no_env_name_and_no_command() {
+        use hearth_proto::api::services::{
+            Concealed, EngineState, EngineView, HostInfo, InitSystem, MIN_ENGINE_VERSION,
+            ServiceItem, ServicesState,
+        };
+        let dir = test_tmp::tempdir().unwrap();
+        let store = FileSnapshotStore::new(dir.path().join("snapshots"));
+        let id = ServerId::parse("a").unwrap();
+        let mut item: ServiceItem = serde_json::from_str(
+            r#"{"key":"c_1","name":"web","origin":"external","removed_on_stop":false,
+            "state":"running","never_started":false,"restarts_10m":0,
+            "image":{"short_id":"abcdef012345"},"ports":[],"host_network":false,"mounts":[],
+            "restart":"none"}"#,
+        )
+        .unwrap();
+        item.env_names = vec![Concealed::new("SENTINEL_ENV_NAME")];
+        item.env_names_omitted = 3;
+        item.command = Some(vec![Concealed::new("SENTINEL_COMMAND")]);
+        item.grace_s = Some(30);
+        let state = ServicesState {
+            rev: 1,
+            engine: EngineView {
+                state: EngineState::Ready,
+                name: None,
+                version: None,
+                min_version: MIN_ENGINE_VERSION.into(),
+                agent_account: "root".into(),
+                agent_is_admin: true,
+                host: HostInfo {
+                    os_id: "debian".into(),
+                    os_like: vec![],
+                    init: InitSystem::Systemd,
+                    declarative: false,
+                },
+                last_ready_at: None,
+                checked_at: "2026-10-13T10:00:00Z".into(),
+                list_read_at: None,
+                list_degraded: false,
+                at: None,
+                list_current_at: None,
+            },
+            services: vec![item],
+        };
+        let view = LastKnown {
+            at: WallTime::from_millis(1_790_000_000_000),
+            machine: None,
+            history: vec![],
+            services: Some(state),
+            services_at: None,
+        };
+        store.save(&id, &view).await.unwrap();
+        let file = dir.path().join("snapshots").join("a.json");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(!text.contains("SENTINEL"), "{text}");
+        assert!(
+            !text.contains("env_names") && !text.contains("command"),
+            "{text}"
+        );
+        // Le délai d'arrêt n'est pas secret : il reste.
+        assert!(text.contains("grace_s"), "{text}");
+        let back = store.load(&id).await.unwrap().unwrap();
+        let kept = &back.services.unwrap().services[0];
+        assert!(kept.env_names.is_empty() && kept.command.is_none());
+        // Un fichier d'avant HRT-63 (sans ces champs) se relit.
+        tokio::fs::write(&file, r#"{"at":1,"machine":null,"history":[]}"#)
+            .await
+            .unwrap();
+        assert!(store.load(&id).await.unwrap().is_some());
     }
 
     #[tokio::test]
