@@ -22,12 +22,21 @@ export interface ServerServices {
   receivedAt: number;
 }
 
+/**
+ * Moteur prêt mais liste peut-être plus à jour (`list_degraded` de l'agent) : « Impossible de lire les
+ * services » et la liste datée par `readAt`. `readAt` est `null` quand l'agent ne donne pas la date : on ne
+ * l'invente pas, la liste est alors seulement annoncée comme non relisible.
+ */
+export interface Degraded {
+  readAt: number | null;
+}
+
 export type ListShown =
   | { kind: "none" }
   /** Moteur prêt et au moins un service. */
-  | { kind: "live"; services: ServiceInfo[] }
-  /** Moteur prêt, aucun service (BR-SVC-013). */
-  | { kind: "empty" }
+  | { kind: "live"; services: ServiceInfo[]; degraded: Degraded | null }
+  /** Moteur prêt, aucun service (BR-SVC-013). Dégradé : on ne dit pas « aucun service », la liste est inconnue. */
+  | { kind: "empty"; degraded: Degraded | null }
   /** Moteur non prêt : la liste précédente, grisée et datée (BR-SVC-018). */
   | { kind: "stale"; services: ServiceInfo[]; since: number };
 
@@ -51,11 +60,14 @@ export function show(entry: ServerServices | undefined): Shown {
   const engine = entry.engine;
   if (!engine || engine.state === "checking") return { kind: "loading" };
   if (engine.state === "ready") {
+    const degraded = engine.listDegraded ? { readAt: engine.listReadAt } : null;
     return {
       kind: "engine",
       engine,
       list:
-        entry.services.length > 0 ? { kind: "live", services: entry.services } : { kind: "empty" },
+        entry.services.length > 0
+          ? { kind: "live", services: entry.services, degraded }
+          : { kind: "empty", degraded },
     };
   }
   // Moteur non prêt : la liste que l'agent garde (arrêté, accès refusé, muet), sinon la dernière lue prêt

@@ -111,6 +111,8 @@ mod tests {
             },
             last_ready_at: None,
             checked_at: "2026-10-13T10:00:00Z".into(),
+            list_read_at: None,
+            list_degraded: false,
         }
     }
 
@@ -274,6 +276,50 @@ mod tests {
             Some(EngineState::Stopped),
             "un lot sans moteur garde le moteur"
         );
+    }
+
+    #[test]
+    fn a_delta_flips_the_degraded_list_flag_on_then_off() {
+        let mut state = None;
+        apply(
+            &mut state,
+            snapshot(1, vec![item("c_1", "a", ServiceState::Running)]),
+        );
+        let flag = |state: &Option<ServicesState>| {
+            let engine = &state.as_ref().expect("état").engine;
+            (engine.list_degraded, engine.list_read_at.clone())
+        };
+        assert_eq!(flag(&state), (false, None));
+        let mut degraded = engine(EngineState::Ready);
+        degraded.list_degraded = true;
+        degraded.list_read_at = Some("2026-10-13T09:58:00Z".into());
+        assert!(apply(
+            &mut state,
+            ServicesMessage::ServicesDelta(ServicesDelta {
+                rev: 2,
+                engine: Some(degraded.clone()),
+                upserts: vec![],
+                removed: vec![],
+            })
+        ));
+        assert_eq!(flag(&state), (true, Some("2026-10-13T09:58:00Z".into())));
+        // Un lot sans moteur garde le drapeau : la liste reste dite non relisible.
+        assert!(apply(&mut state, delta(3, vec![], vec![])));
+        assert_eq!(flag(&state), (true, Some("2026-10-13T09:58:00Z".into())));
+        degraded.list_degraded = false;
+        degraded.list_read_at = Some("2026-10-13T10:01:00Z".into());
+        assert!(apply(
+            &mut state,
+            ServicesMessage::ServicesDelta(ServicesDelta {
+                rev: 4,
+                engine: Some(degraded),
+                upserts: vec![],
+                removed: vec![],
+            })
+        ));
+        assert_eq!(flag(&state), (false, Some("2026-10-13T10:01:00Z".into())));
+        // Les services n'ont pas bougé pendant ce temps.
+        assert_eq!(names(&state), ["a"]);
     }
 
     #[test]

@@ -61,6 +61,12 @@ const COUNT_ICONS: Record<CountKey, IconName> = {
   other: "question",
 };
 
+// Au singulier (n === 1), « arrêté » et « autre » s'accordent ; les trois autres catégories ne varient pas.
+const COUNT_KEYS_ONE: Partial<Record<CountKey, MessageKey>> = {
+  stopped: "engine.counters.stoppedOne",
+  other: "engine.counters.otherOne",
+};
+
 const COUNT_KEYS: Record<CountKey, MessageKey> = {
   running: "engine.counters.running",
   stopped: "engine.counters.stopped",
@@ -136,7 +142,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
         <ul class="engine__counters" :aria-label="t('engine.counters.label')">
           <li v-for="item in counters" :key="item.key" :class="['count', `count--${item.key}`]">
             <HIcon :name="COUNT_ICONS[item.key]" size="sm" />
-            {{ t(COUNT_KEYS[item.key], { n: item.n }) }}
+            {{ t((item.n === 1 && COUNT_KEYS_ONE[item.key]) || COUNT_KEYS[item.key], { n: item.n }) }}
           </li>
         </ul>
       </div>

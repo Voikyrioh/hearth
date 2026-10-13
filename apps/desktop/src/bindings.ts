@@ -604,6 +604,10 @@ export type EngineDto = {
 	host: HostDto,
 	lastReadyAt: string | null,
 	checkedAt: string,
+	/**  Date de la dernière lecture complète réussie de la liste ; absente si l'agent ne la donne pas. */
+	listReadAt: string | null,
+	/**  La liste affichée n'est peut-être plus à jour (relecture en échec, conteneurs illisibles, suivi suspendu). */
+	listDegraded: boolean,
 };
 
 export type EngineStateDto = "checking" | "ready" | "stopped" | "access_denied" | "unresponsive" | "absent" | "unsupported_engine" | "unsupported_version" | "disabled" | 

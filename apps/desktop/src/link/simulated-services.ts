@@ -73,6 +73,8 @@ export class SimulatedServices {
       agentIsAdmin: true,
       lastReadyAt: at,
       checkedAt: at,
+      listReadAt: at,
+      listDegraded: false,
       ...patch,
       host: { osId: "debian", osLike: [], init: "systemd", declarative: false, ...patch.host },
     };

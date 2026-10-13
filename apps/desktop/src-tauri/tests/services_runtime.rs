@@ -72,6 +72,8 @@ fn full_state() -> ServicesState {
             },
             last_ready_at: Some("2026-10-13T10:00:00Z".into()),
             checked_at: "2026-10-13T10:00:02Z".into(),
+            list_read_at: Some("2026-10-13T09:59:30Z".into()),
+            list_degraded: true,
         },
         services: vec![
             ServiceItem {

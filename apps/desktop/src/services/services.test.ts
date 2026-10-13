@@ -29,6 +29,8 @@ function engine(
     agentIsAdmin: false,
     lastReadyAt: null,
     checkedAt: NOW,
+    listReadAt: null,
+    listDegraded: false,
     ...patch,
     host: { osId: "debian", osLike: [], init: "systemd", declarative: false, ...host },
   };
@@ -363,6 +365,24 @@ describe("ce qui s'affiche (BR-ENGINE-001, 019, BR-SVC-013, 018)", () => {
     };
   }
   const list = [service({ key: "a" }), service({ key: "b" })];
+
+  it("moteur prêt et liste non relisible : la liste reste, avec la date de la dernière lecture ; sans date, aucune inventée", () => {
+    const readAt = NOW - 120_000;
+    expect(
+      show(entry({ engine: engine({ listDegraded: true, listReadAt: readAt }), services: list })),
+    ).toMatchObject({ list: { kind: "live", degraded: { readAt } } });
+    expect(
+      show(entry({ engine: engine({ listDegraded: true, listReadAt: null }), services: list })),
+    ).toMatchObject({ list: { kind: "live", degraded: { readAt: null } } });
+    // Liste vide et dégradée : on ne dit pas « aucun service », la liste est inconnue.
+    expect(show(entry({ engine: engine({ listDegraded: true }) }))).toMatchObject({
+      list: { kind: "empty", degraded: { readAt: null } },
+    });
+    // À jour : pas de marque.
+    expect(show(entry({ services: list }))).toMatchObject({
+      list: { kind: "live", degraded: null },
+    });
+  });
 
   it("rien reçu, ou moteur en première détection : le chargement, aucune liste", () => {
     expect(show(undefined)).toEqual({ kind: "loading" });

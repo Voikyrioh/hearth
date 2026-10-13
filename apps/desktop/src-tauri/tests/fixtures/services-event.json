@@ -18,7 +18,9 @@
           "declarative": false
         },
         "lastReadyAt": "2026-10-13T10:00:00Z",
-        "checkedAt": "2026-10-13T10:00:02Z"
+        "checkedAt": "2026-10-13T10:00:02Z",
+        "listReadAt": "2026-10-13T09:59:30Z",
+        "listDegraded": true
       },
       "services": [
         {
@@ -77,7 +79,9 @@
         "agentIsAdmin": true,
         "host": { "osId": "debian", "osLike": [], "init": "other", "declarative": false },
         "lastReadyAt": null,
-        "checkedAt": "2026-10-13T10:00:02Z"
+        "checkedAt": "2026-10-13T10:00:02Z",
+        "listReadAt": null,
+        "listDegraded": false
       },
       "services": [
         {

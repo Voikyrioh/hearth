@@ -312,6 +312,30 @@ test("lien coupé : la dernière liste grisée et datée, « Vérifier à nouvea
   await expect(page.locator("[data-stale='true']")).toHaveCount(0);
 });
 
+test("moteur prêt, liste non relisible : la liste reste grisée et datée, 1366 × 800", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1366, height: 800 });
+  await open(page);
+  await sim(page, (s) =>
+    s.services.seed("forge", [{ key: "c_1", name: "web" }], {
+      listDegraded: true,
+      listReadAt: new Date(Date.now() - 180_000).toISOString(),
+    }),
+  );
+  await expect(page.locator("[data-services-degraded]")).toContainText(
+    "Impossible de lire les services pour le moment.",
+  );
+  await expect(page.locator("[data-services-stale]")).toHaveText("Liste du moteur d'il y a 3 min");
+  await expect(page.locator("[data-row]")).toHaveCount(1);
+  await expect(page.locator("[data-engine-state='ready']")).toBeVisible();
+  await page.screenshot({
+    path: process.env.HRT62_SHOT ?? "e2e/screenshots/services-degrade-1366.png",
+  });
+  await sim(page, (s) => s.services.setEngine("forge", { listDegraded: false }));
+  await expect(page.locator("[data-services-degraded]")).toHaveCount(0);
+});
+
 test("« Vérifier à nouveau » relance la détection ; le retour du moteur est automatique", async ({
   page,
 }) => {

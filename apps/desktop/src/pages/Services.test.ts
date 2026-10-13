@@ -60,7 +60,7 @@ describe("ouverture de la section (BR-ENGINE-001, 019)", () => {
     expect(wrapper.text()).toContain("Prêt");
     expect(wrapper.text()).toContain("Docker Engine - Community 24.0.7");
     const counters = wrapper.findAll("ul[aria-label] li").map((item) => item.text());
-    expect(counters).toEqual(["1 en marche", "1 arrêtés", "1 en erreur", "1 en transition"]);
+    expect(counters).toEqual(["1 en marche", "1 arrêté", "1 en erreur", "1 en transition"]);
     const rows = wrapper.findAll("[data-row]");
     expect(rows.map((row) => row.attributes("data-key"))).toEqual(["c_2", "c_4", "c_3", "c_1"]);
     // La ligne « Redémarre en boucle » porte sa bande et sa hauteur.
@@ -406,6 +406,81 @@ describe("liste grisée et datée quand le moteur n'est pas prêt (BR-SVC-018)",
     await flushPromises();
     expect(wrapper.find("[data-row]").exists()).toBe(false);
     expect(wrapper.find("[data-services-stale]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe("liste non relisible, moteur prêt (HRT-61 list_degraded)", () => {
+  const WEB = [{ key: "c_1", name: "web" }];
+  const readAgo = (ms: number) => new Date(Date.now() - ms).toISOString();
+
+  it("lien bon : « Impossible de lire les services », la liste reste, grisée et datée de la dernière lecture", async () => {
+    const { wrapper } = await open((sim) =>
+      sim.services.seed("forge", WEB, { listDegraded: true, listReadAt: readAgo(180_000) }),
+    );
+    expect(wrapper.get("[data-services-degraded]").text()).toContain(
+      "Impossible de lire les services pour le moment.",
+    );
+    expect(wrapper.get("[data-services-stale]").text()).toBe("Liste du moteur d'il y a 3 min");
+    expect(wrapper.find(".svc__stale--grey").exists()).toBe(true);
+    expect(wrapper.findAll("[data-row]")).toHaveLength(1);
+    expect(wrapper.text()).toContain("Prêt");
+    wrapper.unmount();
+  });
+
+  it("sans date de l'agent : la liste est annoncée non relisible, aucune date n'est inventée", async () => {
+    const { wrapper } = await open((sim) =>
+      sim.services.seed("forge", WEB, { listDegraded: true, listReadAt: null }),
+    );
+    expect(wrapper.find("[data-services-degraded]").exists()).toBe(true);
+    expect(wrapper.find("[data-services-stale]").exists()).toBe(false);
+    expect(wrapper.findAll("[data-row]")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("liste vide et non relisible : jamais « Aucun service »", async () => {
+    const { wrapper } = await open((sim) => sim.services.seed("forge", [], { listDegraded: true }));
+    expect(wrapper.find("[data-services-degraded]").exists()).toBe(true);
+    expect(wrapper.find("[data-services-empty]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("lien coupé : un seul mécanisme (le gabarit), le message reste mais ni seconde date ni second filtre", async () => {
+    const { wrapper, bridge } = await open((sim) =>
+      sim.services.seed("forge", WEB, { listDegraded: true, listReadAt: readAgo(60_000) }),
+    );
+    bridge.setState("forge", "offline");
+    await flushPromises();
+    expect(wrapper.find("[data-services-stale]").exists()).toBe(false);
+    expect(wrapper.find(".svc__stale--grey").exists()).toBe(false);
+    expect(wrapper.find("[data-services-degraded]").exists()).toBe(true);
+    expect(wrapper.get("[data-services-degraded-recheck]").attributes("aria-disabled")).toBe(
+      "true",
+    );
+    wrapper.unmount();
+  });
+
+  it("moteur non prêt : la mention du moteur non prêt seule, pas de second message", async () => {
+    const { wrapper } = await open((sim) =>
+      sim.services.seed("forge", WEB, {
+        state: "unresponsive",
+        listDegraded: true,
+        listReadAt: readAgo(60_000),
+      }),
+    );
+    expect(wrapper.find("[data-services-degraded]").exists()).toBe(false);
+    expect(wrapper.findAll("[data-services-stale]")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("le retour à la normale retire le message et le filtre", async () => {
+    const { wrapper, bridge } = await open((sim) =>
+      sim.services.seed("forge", WEB, { listDegraded: true, listReadAt: readAgo(60_000) }),
+    );
+    bridge.services.setEngine("forge", { listDegraded: false });
+    await flushPromises();
+    expect(wrapper.find("[data-services-degraded]").exists()).toBe(false);
+    expect(wrapper.find(".svc__stale--grey").exists()).toBe(false);
     wrapper.unmount();
   });
 });

@@ -37,6 +37,10 @@ export interface EngineInfo {
   };
   lastReadyAt: number | null;
   checkedAt: number;
+  /** Dernière lecture complète réussie de la liste ; `null` si l'agent ne la donne pas (jamais inventée). */
+  listReadAt: number | null;
+  /** La liste affichée n'est peut-être plus à jour (relecture en échec, conteneurs illisibles, suivi suspendu). */
+  listDegraded: boolean;
 }
 
 export interface ServicePort {
@@ -99,6 +103,8 @@ export function toEngine(dto: EngineDto): EngineInfo {
     host: dto.host,
     lastReadyAt: parseDate(dto.lastReadyAt),
     checkedAt: parseDate(dto.checkedAt) ?? 0,
+    listReadAt: parseDate(dto.listReadAt),
+    listDegraded: dto.listDegraded,
   };
 }
 

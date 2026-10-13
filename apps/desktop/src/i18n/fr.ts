@@ -783,9 +783,11 @@ export const fr = {
       label: "Services par état",
       running: "{n} en marche",
       stopped: "{n} arrêtés",
+      stoppedOne: "{n} arrêté",
       error: "{n} en erreur",
       transition: "{n} en transition",
       other: "{n} autres",
+      otherOne: "{n} autre",
     },
     state: {
       ready: "Prêt",

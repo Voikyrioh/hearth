@@ -87,6 +87,20 @@ describe("services store", () => {
     store.reset();
   });
 
+  it("un lot qui passe le drapeau « liste non relisible » à vrai puis à faux arrive jusqu'à l'affichage", async () => {
+    const { bridge, store } = await started();
+    bridge.services.seed("forge", [{ key: "c_1", name: "a" }]);
+    expect(show(store.of("forge"))).toMatchObject({ list: { kind: "live", degraded: null } });
+    const readAt = new Date(Date.now() - 60_000).toISOString();
+    bridge.services.setEngine("forge", { listDegraded: true, listReadAt: readAt });
+    expect(show(store.of("forge"))).toMatchObject({
+      list: { kind: "live", degraded: { readAt: Date.parse(readAt) } },
+    });
+    bridge.services.setEngine("forge", { listDegraded: false });
+    expect(show(store.of("forge"))).toMatchObject({ list: { kind: "live", degraded: null } });
+    store.reset();
+  });
+
   it("un agent sans la capacité remplace tout ; mis à jour, l'état complet revient", async () => {
     const { bridge, store } = await started();
     bridge.services.seed("forge", [{ key: "c_1", name: "a" }]);

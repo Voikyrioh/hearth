@@ -1012,6 +1012,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       name: null,
       version: null,
       lastReadyAt: null,
+      listReadAt: null,
       host: { osId: "debian" },
     });
   }

@@ -73,6 +73,19 @@ const staleAge = computed(() =>
   list.value.kind === "stale" ? shortAge(now.value - list.value.since) : "",
 );
 
+/** Moteur prêt, liste non relisible, lien bon : « Impossible de lire les services », liste grisée et datée. */
+const degraded = computed(() => {
+  const shownList = list.value;
+  return (shownList.kind === "live" || shownList.kind === "empty") && shownList.degraded
+    ? shownList.degraded
+    : null;
+});
+/** Lien coupé : le gabarit grise et date déjà tout (un seul mécanisme), la liste n'est pas filtrée une seconde fois. */
+const degradedList = computed(() => degraded.value !== null && isConnected.value);
+const degradedAge = computed(() =>
+  degraded.value?.readAt != null ? shortAge(now.value - degraded.value.readAt) : null,
+);
+
 function recheck() {
   if (server.value) void store.recheck(server.value.id);
 }
@@ -153,26 +166,49 @@ async function openDocs() {
         </div>
       </div>
 
-      <template v-else-if="list.kind === 'live'">
-        <ServiceTable :services="list.services" />
-      </template>
+      <template v-else>
+        <!-- Moteur prêt mais liste non relisible : même présentation que la liste périmée du moteur non prêt -->
+        <Callout v-if="degraded" tone="error" role="alert" data-services-degraded>
+          {{ t("services.readFailed") }}
+          <template #actions>
+            <HButton
+              variant="secondary"
+              :disabled="!isConnected"
+              data-services-degraded-recheck
+              @click="recheck"
+            >
+              {{ t("engine.recheck") }}
+            </HButton>
+          </template>
+        </Callout>
 
-      <EmptyState
-        v-else-if="list.kind === 'empty'"
-        :title="t('services.empty')"
-        text=""
-        heading="h2"
-        data-services-empty
-      />
+        <template v-if="list.kind === 'live'">
+          <p v-if="degradedList && degradedAge !== null" class="svc__stamp" data-services-stale>
+            <HIcon name="clock" size="sm" />
+            {{ t("services.staleList", { age: degradedAge }) }}
+          </p>
+          <div :class="['svc__stale', { 'svc__stale--grey': degradedList }]">
+            <ServiceTable :services="list.services" />
+          </div>
+        </template>
 
-      <template v-else-if="list.kind === 'stale'">
-        <p v-if="staleList" class="svc__stamp" data-services-stale>
-          <HIcon name="clock" size="sm" />
-          {{ t("services.staleList", { age: staleAge }) }}
-        </p>
-        <div :class="['svc__stale', { 'svc__stale--grey': staleList }]">
-          <ServiceTable :services="list.services" />
-        </div>
+        <EmptyState
+          v-else-if="list.kind === 'empty' && !degraded"
+          :title="t('services.empty')"
+          text=""
+          heading="h2"
+          data-services-empty
+        />
+
+        <template v-else-if="list.kind === 'stale'">
+          <p v-if="staleList" class="svc__stamp" data-services-stale>
+            <HIcon name="clock" size="sm" />
+            {{ t("services.staleList", { age: staleAge }) }}
+          </p>
+          <div :class="['svc__stale', { 'svc__stale--grey': staleList }]">
+            <ServiceTable :services="list.services" />
+          </div>
+        </template>
       </template>
     </template>
   </div>

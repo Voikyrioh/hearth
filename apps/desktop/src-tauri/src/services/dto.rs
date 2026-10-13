@@ -106,6 +106,12 @@ pub struct EngineDto {
     pub last_ready_at: Option<String>,
     #[serde(rename = "checkedAt")]
     pub checked_at: String,
+    /// Date de la dernière lecture complète réussie de la liste ; absente si l'agent ne la donne pas.
+    #[serde(rename = "listReadAt")]
+    pub list_read_at: Option<String>,
+    /// La liste affichée n'est peut-être plus à jour (relecture en échec, conteneurs illisibles, suivi suspendu).
+    #[serde(rename = "listDegraded")]
+    pub list_degraded: bool,
 }
 
 impl From<&EngineView> for EngineDto {
@@ -120,6 +126,8 @@ impl From<&EngineView> for EngineDto {
             host,
             last_ready_at,
             checked_at,
+            list_read_at,
+            list_degraded,
         } = engine;
         Self {
             state: (*state).into(),
@@ -131,6 +139,8 @@ impl From<&EngineView> for EngineDto {
             host: host.into(),
             last_ready_at: last_ready_at.clone(),
             checked_at: checked_at.clone(),
+            list_read_at: list_read_at.clone(),
+            list_degraded: *list_degraded,
         }
     }
 }
