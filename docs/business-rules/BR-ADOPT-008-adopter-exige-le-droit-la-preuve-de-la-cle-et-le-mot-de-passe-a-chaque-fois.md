@@ -21,6 +21,7 @@ maj: 2026-10-13
 - `deploy/e2e/admin_act.py`
 
 ## Vérification
+- `crates/hearth-link/tests/services_acts.rs::the_refusals_of_the_agent_come_back_typed_and_nothing_is_adopted` et `an_adoption_and_a_release_sent_by_the_link_show_and_hide_the_service_in_its_stream` (acte signé par la liaison contre un vrai agent)
 - `crates/hearth-proto/src/admin_act.rs::tests::the_adoption_signs_the_count_and_the_fingerprint_of_the_sorted_keys`
 - `crates/hearth-agent/tests/admin_reauth.rs::the_acts_the_elevation_never_covers_ask_for_the_password_during_the_elevation`
 - `crates/hearth-agent/tests/admin_reauth.rs::a_proof_for_another_act_target_account_session_or_replayed_is_refused_and_changes_nothing`

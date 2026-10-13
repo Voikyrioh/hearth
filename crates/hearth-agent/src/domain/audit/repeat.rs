@@ -212,6 +212,28 @@ impl RepeatFilter {
         out
     }
 
+    /// Un événement que `admit` a rendu À ÉCRIRE n'a pas pu l'être : le groupe qu'il venait d'ouvrir est
+    /// refermé, comme si `admit` n'avait pas eu lieu pour lui. Sans cela, le réessai serait « compté dans
+    /// un groupe déjà ouvert » et servi sans aucune entrée au journal (revue de la PR 89). Ce qui avait
+    /// été compté dans ce groupe pendant l'écriture est rendu comme synthèse à écrire, jamais perdu.
+    pub fn withdraw(&mut self, event: &AuditEvent) -> Vec<AuditEvent> {
+        // FIX:01M4VNGP6R446RGM9FB3JEJG7P un échec d'écriture ne laisse aucun groupe ouvert.
+        let key = Key::of(event);
+        let mut out = Vec::new();
+        if let Some(window) = self.windows.remove(&key)
+            && window.suppressed > 0
+        {
+            out.push(window.last.with_repeats(window.suppressed));
+        }
+        if let Some(family) = self.families.get_mut(&key.family) {
+            family.admitted = family.admitted.saturating_sub(1);
+            if family.admitted == 0 && family.window.suppressed == 0 {
+                self.families.remove(&key.family);
+            }
+        }
+        out
+    }
+
     /// Les synthèses des fenêtres finies à `now` (les groupes sans répétition s'oublient en
     /// silence).
     pub fn due(&mut self, now: OffsetDateTime) -> Vec<AuditEvent> {
@@ -741,5 +763,36 @@ mod tests {
             }
         }
         assert!(firsts < 8 * 20, "{firsts}");
+    }
+
+    #[test]
+    fn a_withdrawn_event_leaves_no_open_group_and_its_retry_is_written_again() {
+        let mut filter = RepeatFilter::new();
+        let first = event_from(0, Some("marie"), "poste", "10.0.0.7");
+        assert_eq!(filter.admit(first.clone()), vec![first.clone()]);
+        // L'écriture a échoué : le groupe est refermé.
+        assert!(filter.withdraw(&first).is_empty());
+        assert_eq!(filter.tracked(), 0);
+        assert_eq!(filter.families(), 0);
+        // Le réessai n'est pas compté dans un groupe fantôme : il est à écrire.
+        let retry = event_from(5, Some("marie"), "poste", "10.0.0.7");
+        assert_eq!(filter.admit(retry.clone()), vec![retry]);
+    }
+
+    #[test]
+    fn what_was_counted_in_a_withdrawn_group_is_handed_back_as_a_summary() {
+        let mut filter = RepeatFilter::new();
+        let first = event_from(0, Some("marie"), "poste", "10.0.0.7");
+        filter.admit(first.clone());
+        // Une lecture concurrente arrive pendant l'écriture qui va échouer.
+        assert!(
+            filter
+                .admit(event_from(1, Some("marie"), "poste", "10.0.0.7"))
+                .is_empty()
+        );
+        let summaries = filter.withdraw(&first);
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].repeat_count, 1);
+        assert_eq!(filter.tracked(), 0);
     }
 }

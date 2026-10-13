@@ -17,7 +17,7 @@ use super::LinkManager;
 use crate::domain::audit_query::{self, AuditFilter, EXPORT_CAP, FilterError, PAGE_SIZE};
 use crate::domain::server::ServerId;
 use crate::domain::state::LinkState;
-use crate::error::{InputField, LinkError};
+use crate::error::{InputField, LinkError, RefusalReason};
 use crate::ports::transport::{ApiRequest, Method, Pin, Target};
 use crate::ports::vault::SecretKind;
 
@@ -46,6 +46,25 @@ pub(super) fn rejection(body: &Value) -> LinkError {
         return LinkError::MissingRight(right.to_owned());
     }
     LinkError::Rejected(Some(body.error.code))
+}
+
+/// Comme [`rejection`], mais un refus qui porte `details.reason` le dit (`RejectedBecause`) : adopter et
+/// relâcher, dont l'interface doit distinguer les refus que le seul code ne sépare pas. Un refus sans raison
+/// reste `Rejected`.
+pub(super) fn rejection_with_reason(body: &Value) -> LinkError {
+    let Some(parsed) = serde_json::from_value::<ErrorBody>(body.clone()).ok() else {
+        return LinkError::Rejected(None);
+    };
+    if parsed.error.missing_right().is_some() {
+        return rejection(body);
+    }
+    match parsed.error.details.get("reason").and_then(Value::as_str) {
+        Some(reason) => LinkError::RejectedBecause {
+            code: parsed.error.code,
+            reason: RefusalReason::from_wire(reason),
+        },
+        None => LinkError::Rejected(Some(parsed.error.code)),
+    }
 }
 
 impl LinkManager {
@@ -244,6 +263,76 @@ mod tests {
         assert_eq!(
             rejection(&json!("n'importe quoi")),
             LinkError::Rejected(None)
+        );
+    }
+
+    #[test]
+    fn a_refusal_of_an_adoption_or_a_release_gives_its_reason_and_tolerates_an_unknown_one() {
+        use crate::error::RefusalReason as R;
+        let cases = [
+            (
+                ErrorCode::Conflict,
+                "adoption_disabled",
+                R::AdoptionDisabled,
+            ),
+            (ErrorCode::Conflict, "engine_not_ready", R::EngineNotReady),
+            (ErrorCode::ValidationError, "keys_empty", R::KeysEmpty),
+            (ErrorCode::ValidationError, "keys_too_many", R::KeysTooMany),
+            (
+                ErrorCode::ValidationError,
+                "keys_duplicate",
+                R::KeysDuplicate,
+            ),
+            (
+                ErrorCode::PostNotRecognized,
+                "proof_missing",
+                R::ProofMissing,
+            ),
+            (
+                ErrorCode::PostNotRecognized,
+                "proof_invalid",
+                R::ProofInvalid,
+            ),
+            (
+                ErrorCode::PostNotRecognized,
+                "password_required",
+                R::PasswordRequired,
+            ),
+            (
+                ErrorCode::IncompatibleVersion,
+                "reauth_required",
+                R::ReauthRequired,
+            ),
+            // Une raison d'une version plus récente de l'agent : inconnue, jamais recopiée.
+            (ErrorCode::Conflict, "une_raison_future", R::Unknown),
+        ];
+        for (code, reason, expected) in cases {
+            let body = ErrorBody::with_details(code, "texte", json!({ "reason": reason }));
+            assert_eq!(
+                rejection_with_reason(&serde_json::to_value(body).unwrap()),
+                LinkError::RejectedBecause {
+                    code,
+                    reason: expected
+                },
+                "{reason}"
+            );
+        }
+        // Une raison qui n'est pas un texte, ou aucune raison : le refus ordinaire.
+        let odd = ErrorBody::with_details(ErrorCode::Conflict, "x", json!({ "reason": 3 }));
+        assert_eq!(
+            rejection_with_reason(&serde_json::to_value(odd).unwrap()),
+            LinkError::Rejected(Some(ErrorCode::Conflict))
+        );
+        assert_eq!(
+            rejection_with_reason(&json!("n'importe quoi")),
+            LinkError::Rejected(None)
+        );
+        // Le droit qui manque garde la priorité.
+        let right =
+            serde_json::to_value(ErrorBody::missing_right("services", "pas le droit")).unwrap();
+        assert_eq!(
+            rejection_with_reason(&right),
+            LinkError::MissingRight("services".to_owned())
         );
     }
 

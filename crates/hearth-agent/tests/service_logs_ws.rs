@@ -2948,3 +2948,48 @@ async fn a_braked_account_is_told_to_wait_and_the_journal_gets_one_entry() {
     assert!(!format!("{rows:?}").contains(&key));
     agent.shutdown().await;
 }
+
+/// Revue de la PR 89 (point 8) : une lecture de journaux DÉJÀ OUVERTE sur un service dont l'adoption passe
+/// « à confirmer » est coupée, comme pour une clé inconnue, et la clé ne se rouvre plus.
+#[tokio::test]
+async fn a_reading_open_on_a_service_whose_adoption_turns_to_confirm_is_closed_like_an_unknown_key()
+{
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let supervisor = Arc::new(FakeSupervisor::new());
+    let unit = unit_named("docker-zzz.service");
+    let mut service = container("zzz", RunState::Running);
+    service.id = "a".repeat(64);
+    supervisor.set_owner(&service.id, &unit);
+    supervisor.set_status(&unit, running_unit());
+    engine.push_log(&service.id, LogSource::Out, T0 + 1, "ligne du service");
+    engine.put_silently(service.clone());
+    let key = "u_docker-zzz.service";
+    env.adopt(key, "zzz", "marie").await;
+    let agent = https::start_engined(
+        &env,
+        parts_supervised(engine.clone(), supervisor.clone(), fast_timings()),
+    )
+    .await;
+    wait_listed(&agent, 1).await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let mut client = read(&agent, &admin, key, 1000, None).await;
+    client.next_logs().await.unwrap();
+    let (items, _, _) = collect(&mut client, 1).await;
+    assert_eq!(texts(&items), ["ligne du service"]);
+    // Plus d'adoptions par unité que l'agent n'en relit : celle-ci (dernière par ordre alphabétique) n'est
+    // plus relue au passage suivant, donc « à confirmer ».
+    for index in 0..128 {
+        env.adopt(&format!("u_docker-a{index:03}.service"), "autre", "marie")
+            .await;
+    }
+    agent.services().reload_adopted().await;
+    let (messages, end) = until_closed(&mut client).await;
+    assert_eq!(messages, not_found());
+    assert_eq!(end, End::Closed(1000));
+    assert!(agent.services().is_unconfirmed(&service_key(key)));
+    // Et la clé reçoit la réponse d'une clé inconnue.
+    let mut again = read(&agent, &admin, key, 1000, None).await;
+    expect_error(&mut again, LogsErrorCode::ServiceNotFound).await;
+    agent.shutdown().await;
+}

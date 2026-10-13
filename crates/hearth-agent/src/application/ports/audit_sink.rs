@@ -23,6 +23,19 @@ pub trait AuditSink: Send + Sync {
         target: Target,
         outcome: Outcome,
     ) -> Result<(), AuditWriteError>;
+
+    /// Comme `record_required`, mais PASSE par le regroupement des répétitions : la lecture d'une liste
+    /// sensible qui se répète (candidats à l'adoption) ne doit pas remplir le journal plafonné, et ne doit
+    /// pas non plus être servie sans trace. Un événement admis est écrit tout de suite et son échec est
+    /// RENDU ; un événement compté dans un groupe déjà ouvert ne s'écrit pas ici, il figure dans la
+    /// synthèse de la fenêtre (`BR-AUDIT-007`). Pas d'implémentation par défaut, pour la même raison.
+    async fn record_grouped_required(
+        &self,
+        actor: Actor,
+        action: AuditAction,
+        target: Target,
+        outcome: Outcome,
+    ) -> Result<(), AuditWriteError>;
 }
 
 /// L'entrée n'a pas pu être écrite. Aucun détail : le texte de la base n'a pas à remonter.
