@@ -2,6 +2,7 @@
 
 use std::io::IsTerminal;
 
+use tracing::level_filters::LevelFilter;
 use tracing::{Event, Metadata};
 use tracing_log::NormalizeEvent;
 use tracing_subscriber::EnvFilter;
@@ -142,6 +143,13 @@ impl<S> Filter<S> for TransportGuard {
         let normalized = event.normalized_metadata();
         let metadata = normalized.as_ref().unwrap_or_else(|| event.metadata());
         is_allowed(*metadata.level(), metadata.target())
+    }
+
+    /// Ce filtre ne plafonne rien lui-même. Sans cette réponse, `And` rend `None` (« inconnu ») et le
+    /// niveau global passe à `trace` : tout `debug!` des dépendances traverserait le pont `log` pour
+    /// rien. Avec elle, le plafond reste celui de `RUST_LOG`.
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        Some(LevelFilter::TRACE)
     }
 }
 

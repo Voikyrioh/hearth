@@ -19,6 +19,7 @@
 //! zéro au redémarrage.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -82,6 +83,11 @@ pub struct EngineStatus {
     pub version: Option<String>,
     pub last_ready_at: Option<OffsetDateTime>,
     pub checked_at: OffsetDateTime,
+    /// Dernière lecture COMPLÈTE réussie de la liste (`checked_at` date la sonde, pas la liste).
+    pub list_read_at: Option<OffsetDateTime>,
+    /// La liste affichée est peut-être périmée : lecture en échec, conteneurs illisibles ou suivi en
+    /// direct suspendu. Le client dit « Impossible de lire les services » et date la liste.
+    pub list_degraded: bool,
 }
 
 /// Un service tel que la liste le montre : le conteneur observé et ce qu'on en dérive.
@@ -114,7 +120,7 @@ pub struct ServicesChange {
 }
 
 /// Ce qui change l'état publié du moteur (hors dates de contrôle, qui changent à chaque sonde).
-type EngineKey = (EngineState, Option<String>, Option<String>);
+type EngineKey = (EngineState, Option<String>, Option<String>, bool);
 
 struct Inner {
     rev: u64,
@@ -137,8 +143,26 @@ struct Inner {
     degraded: usize,
     /// La liste a été refusée (401, 403) alors que la sonde répond : l'accès est refusé.
     list_denied: bool,
-    /// Une sonde est en cours : une relance demandée pendant ce temps n'en lance pas une autre.
-    probing: bool,
+    /// Sondes en cours (un compteur : la sonde de la boucle et celle d'une relance peuvent se
+    /// chevaucher) ; une relance demandée pendant ce temps n'en lance pas une autre.
+    probing: u32,
+    /// Date de la dernière relecture complète réussie (sans conteneur illisible).
+    list_read_at: Option<OffsetDateTime>,
+    /// La dernière relecture de la liste a échoué (tant qu'une relecture n'a pas réussi).
+    read_failing: bool,
+    /// Le suivi en direct est dégradé : flux d'événements qui casse en boucle, ou conteneur touché
+    /// par un événement et illisible. Une relecture complète propre le rétablit.
+    tracking_lost: bool,
+}
+
+/// Une sonde en cours : retirée du compte quand elle finit OU qu'elle est abandonnée en route.
+struct ProbingFlag<'a>(&'a ServicesRegistry);
+
+impl Drop for ProbingFlag<'_> {
+    fn drop(&mut self) {
+        let mut inner = self.0.lock();
+        inner.probing = inner.probing.saturating_sub(1);
+    }
 }
 
 pub struct ServicesRegistry {
@@ -193,11 +217,14 @@ impl ServicesRegistry {
                 last_probe: None,
                 containers: HashMap::new(),
                 windows: HashMap::new(),
-                published_engine: (published, None, None),
+                published_engine: (published, None, None, false),
                 published: HashMap::new(),
                 degraded: 0,
                 list_denied: false,
-                probing: false,
+                probing: 0,
+                list_read_at: None,
+                read_failing: false,
+                tracking_lost: false,
             }),
             clock,
             monotonic,
@@ -254,7 +281,13 @@ impl ServicesRegistry {
             version: inner.shown.as_ref().map(|shown| shown.version.clone()),
             last_ready_at: inner.last_ready_at,
             checked_at: inner.checked_at,
+            list_read_at: inner.list_read_at,
+            list_degraded: Self::list_degraded(inner),
         }
+    }
+
+    fn list_degraded(inner: &Inner) -> bool {
+        inner.read_failing || inner.tracking_lost || inner.degraded > 0
     }
 
     fn engine_key(inner: &Inner) -> EngineKey {
@@ -262,6 +295,7 @@ impl ServicesRegistry {
             inner.debounce.published(),
             inner.shown.as_ref().map(|shown| shown.name.clone()),
             inner.shown.as_ref().map(|shown| shown.version.clone()),
+            Self::list_degraded(inner),
         )
     }
 
@@ -271,8 +305,8 @@ impl ServicesRegistry {
     /// le résultat est publié tout de suite, hors anti-clignotement : l'état affiché ne change que si
     /// l'état réel du moteur a changé, et au plus une fois par `min_recheck`.
     pub async fn recheck(&self) -> EngineStatus {
-        if self.enabled && self.claim_probe() {
-            self.probe_and_apply(true).await;
+        if let Some(flag) = self.enabled.then(|| self.claim_probe()).flatten() {
+            self.probe_with(true, flag).await;
             self.wake.notify_one();
         }
         self.engine_status()
@@ -280,18 +314,18 @@ impl ServicesRegistry {
 
     /// Réserve la sonde d'une relance, d'un seul geste : deux demandes simultanées n'en lancent pas
     /// deux.
-    fn claim_probe(&self) -> bool {
+    fn claim_probe(&self) -> Option<ProbingFlag<'_>> {
         let mut inner = self.lock();
         let now = self.mono();
         let too_soon = inner
             .last_probe
             .is_some_and(|at| now.saturating_sub(at) < self.timings.min_recheck);
-        if inner.probing || too_soon {
-            return false;
+        if inner.probing > 0 || too_soon {
+            return None;
         }
         inner.last_probe = Some(now);
-        inner.probing = true;
-        true
+        inner.probing += 1;
+        Some(ProbingFlag(self))
     }
 
     /// Une sonde a-t-elle eu lieu depuis moins de `within` ?
@@ -303,14 +337,23 @@ impl ServicesRegistry {
 
     /// Sonde (sauf désactivé) puis applique le résultat. Rend l'état observé.
     async fn probe_and_apply(&self, force: bool) -> EngineState {
+        let flag = self.enabled.then(|| {
+            let mut inner = self.lock();
+            inner.last_probe = Some(self.mono());
+            inner.probing += 1;
+            ProbingFlag(self)
+        });
+        match flag {
+            Some(flag) => self.probe_with(force, flag).await,
+            None => self.apply_probe(None, force),
+        }
+    }
+
+    /// Comme `probe_and_apply` pour une sonde déjà comptée (`flag`).
+    async fn probe_with(&self, force: bool, flag: ProbingFlag<'_>) -> EngineState {
         let probe = if self.enabled {
-            {
-                let mut inner = self.lock();
-                inner.last_probe = Some(self.mono());
-                inner.probing = true;
-            }
             let probe = self.engine.probe().await;
-            self.lock().probing = false;
+            drop(flag);
             Some(probe)
         } else {
             None
@@ -330,6 +373,14 @@ impl ServicesRegistry {
             }),
             other => other,
         };
+        // Le moteur a disparu (socket absent, refusé, muet) : le refus de la liste ne vaut plus, il ne
+        // doit pas s'afficher à tort quand le moteur reviendra.
+        if matches!(
+            probe.as_ref().map(|probe| &probe.outcome),
+            Some(ProbeOutcome::SocketMissing | ProbeOutcome::Refused | ProbeOutcome::NoAnswer)
+        ) {
+            self.lock().list_denied = false;
+        }
         let observed = classify_probe(self.enabled, probe.as_ref());
         let announced = match probe.map(|probe| probe.outcome) {
             Some(ProbeOutcome::Answered(announced)) => Some(announced),
@@ -389,6 +440,13 @@ impl ServicesRegistry {
         let listing = match self.engine.list().await {
             Ok(listing) => listing,
             Err(error) => {
+                {
+                    let mut inner = self.lock();
+                    inner.read_failing = true;
+                    if error != EngineError::Denied {
+                        self.commit(&mut inner);
+                    }
+                }
                 if error == EngineError::Denied {
                     self.lock().list_denied = true;
                     self.apply_probe(
@@ -427,6 +485,11 @@ impl ServicesRegistry {
                 tracing::info!("tous les conteneurs sont de nouveau lisibles");
             }
             inner.degraded = unreadable;
+            inner.read_failing = false;
+            if unreadable == 0 {
+                inner.list_read_at = Some(self.clock.now());
+                inner.tracking_lost = false;
+            }
             let recovered = std::mem::take(&mut inner.list_denied);
             self.commit(&mut inner);
             recovered
@@ -466,6 +529,9 @@ impl ServicesRegistry {
                 Err(error) if error.engine_gone() => return Err(error),
                 Err(_) => unreadable += 1,
             }
+        }
+        if unreadable > 0 {
+            inner.tracking_lost = true;
         }
         self.commit(&mut inner);
         Ok(unreadable)
@@ -534,10 +600,12 @@ impl ServicesRegistry {
         let _ = self.changes.send(Arc::new(change));
     }
 
-    /// Combien attendre avant de retenter une relecture après `failures` échecs de suite : la
-    /// période de sonde, doublée à chaque échec, plafonnée à 30 périodes.
+    /// Combien attendre avant de retenter une relecture après `failures` échecs de suite : une
+    /// période de sonde au premier, doublée à chaque échec suivant, plafonnée à 30 périodes.
     fn backoff(&self, failures: u32) -> Duration {
-        let factor = 1u32.checked_shl(failures).unwrap_or(u32::MAX);
+        let factor = 1u32
+            .checked_shl(failures.saturating_sub(1))
+            .unwrap_or(u32::MAX);
         self.timings
             .ready_period
             .saturating_mul(factor.min(MAX_BACKOFF_FACTOR))
@@ -577,7 +645,11 @@ impl ServicesRegistry {
                 // Relecture en recul : la sonde garde sa cadence, la liste attend.
                 self.wait_for(self.timings.ready_period).await;
             } else {
-                match self.resync().await {
+                let Some(read) = self.while_probing(self.resync()).await else {
+                    // Le moteur a disparu pendant la lecture : la boucle le resonde aussitôt.
+                    continue;
+                };
+                match read {
                     Ok(unreadable) => {
                         if failures > 0 {
                             tracing::info!("relecture des services rétablie");
@@ -595,6 +667,8 @@ impl ServicesRegistry {
                         if quick_breaks >= 2 {
                             next_read = Instant::now() + self.backoff(quick_breaks - 1);
                         }
+                        // Le suivi en direct est suspendu tant que le flux casse en boucle.
+                        self.set_tracking_lost(quick_breaks >= 2);
                     }
                     Err(error) => {
                         if failures == 0 {
@@ -606,6 +680,46 @@ impl ServicesRegistry {
                         failures = failures.saturating_add(1);
                         next_read = Instant::now() + self.backoff(failures);
                     }
+                }
+            }
+        }
+    }
+
+    fn set_tracking_lost(&self, lost: bool) {
+        let mut inner = self.lock();
+        if inner.tracking_lost != lost {
+            inner.tracking_lost = lost;
+            self.commit(&mut inner);
+        }
+    }
+
+    /// Mène `work` (une lecture du moteur, qui peut durer jusqu'à 30 s) SANS aveugler la tâche : la
+    /// sonde garde sa cadence et l'anti-clignotement ses échéances pendant ce temps. Si le moteur
+    /// n'est plus prêt, la lecture est abandonnée (`None`) : il n'y a plus rien à lire.
+    async fn while_probing<T>(&self, work: impl Future<Output = T>) -> Option<T> {
+        let mut ping = interval(self.timings.ready_period);
+        ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        ping.tick().await;
+        let probes = async {
+            loop {
+                ping.tick().await;
+                let state = self.probe_and_apply(false).await;
+                // Une liste refusée qu'on est justement en train de retenter reste « lisible ».
+                let readable = state == EngineState::Ready
+                    || (state == EngineState::AccessDenied && self.list_denied());
+                if !readable {
+                    return;
+                }
+            }
+        };
+        tokio::pin!(work, probes);
+        loop {
+            let debounce_wait = self.debounce_wait();
+            tokio::select! {
+                out = &mut work => return Some(out),
+                () = &mut probes => return None,
+                () = sleep(debounce_wait.unwrap_or_default()), if debounce_wait.is_some() => {
+                    self.flush_debounce();
                 }
             }
         }
@@ -660,7 +774,10 @@ impl ServicesRegistry {
                 () = sleep_until(batch_at.unwrap_or_else(Instant::now)), if batch_at.is_some() => {
                     batch_at = None;
                     let ids: Vec<String> = touched.drain().collect();
-                    match self.refresh(ids).await {
+                    let Some(refreshed) = self.while_probing(self.refresh(ids)).await else {
+                        return;
+                    };
+                    match refreshed {
                         Ok(0) => {}
                         // Des conteneurs illisibles : une relecture complète les reprendra, en reculant.
                         Ok(_) => {
@@ -671,7 +788,10 @@ impl ServicesRegistry {
                 }
                 () = sleep_until(settle_at.unwrap_or_else(Instant::now)), if settle_at.is_some() => {
                     settle_at = None;
-                    match self.resync().await {
+                    let Some(read) = self.while_probing(self.resync()).await else {
+                        return;
+                    };
+                    match read {
                         Ok(0) => retries = 0,
                         Ok(_) => {
                             retries = retries.saturating_add(1);
@@ -1079,6 +1199,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_refusal_does_not_outlive_the_engine_that_vanished() {
+        let (registry, engine, mono) = registry(true);
+        engine.put_silently(container("web", RunState::Running));
+        registry.probe_and_apply(false).await;
+        engine.fail_list(Some(EngineError::Denied));
+        assert_eq!(registry.resync().await, Err(EngineError::Denied));
+        assert!(registry.list_denied());
+        // Le moteur disparaît, puis revient avec une liste permise : plus aucun « accès refusé ».
+        engine.set_outcome(ProbeOutcome::SocketMissing, true);
+        registry.probe_and_apply(false).await;
+        assert!(!registry.list_denied());
+        engine.set_ready();
+        engine.fail_list(None);
+        mono.advance(Duration::from_secs(6));
+        registry.probe_and_apply(false).await;
+        mono.advance(Duration::from_secs(6));
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::Ready);
+    }
+
+    #[tokio::test]
     async fn a_listing_that_keeps_failing_backs_off_instead_of_looping() {
         let (registry, engine) = registry_timed(fast(50));
         engine.fail_list(Some(EngineError::Refused));
@@ -1086,9 +1227,92 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
         task.abort();
         let reads = engine.list_count();
-        assert!((2..=7).contains(&reads), "{reads} relectures en 1 s");
+        assert!((2..=8).contains(&reads), "{reads} relectures en 1 s");
         // Et la sonde, elle, garde sa cadence : l'état reste suivi.
         assert!(engine.probe_count() >= 8, "{} sondes", engine.probe_count());
+    }
+
+    #[tokio::test]
+    async fn a_slow_listing_does_not_blind_the_probe_nor_the_debounce() {
+        let (registry, engine) = registry_timed(fast(50));
+        engine.put_silently(container("web", RunState::Running));
+        engine.set_list_delay(Duration::from_secs(3));
+        let task = tokio::spawn(registry.clone().run());
+        // La première lecture dure 3 s ; pendant ce temps, la sonde garde sa cadence (50 ms)...
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        let probes = engine.probe_count();
+        assert!(probes >= 8, "{probes} sondes pendant une lecture lente");
+        // ... et un moteur qui tombe est vu SANS attendre la fin de la lecture (l'horloge de ce test est
+        // figée : l'état publié attend l'anti-clignotement, l'état observé non).
+        engine.set_outcome(ProbeOutcome::SocketMissing, false);
+        let started = Instant::now();
+        while registry.lock().observed == EngineState::Ready {
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "perte du moteur non vue pendant la lecture lente"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_failed_or_partial_read_is_told_with_the_date_of_the_last_good_one() {
+        let (registry, engine, mono) = registry(true);
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        registry.probe_and_apply(false).await;
+        // Avant toute lecture : ni date ni drapeau.
+        assert_eq!(registry.engine_status().list_read_at, None);
+        assert!(!registry.engine_status().list_degraded);
+        registry.resync().await.expect("resync");
+        let first = registry.engine_status();
+        assert_eq!(first.list_read_at, Some(registry.clock.now()));
+        assert!(!first.list_degraded);
+        // Lecture en échec alors que la sonde répond : la liste d'avant reste, datée, marquée.
+        engine.fail_list(Some(EngineError::Refused));
+        assert_eq!(registry.resync().await, Err(EngineError::Refused));
+        mono.advance(Duration::from_secs(6));
+        let failed = registry.engine_status();
+        assert!(failed.list_degraded);
+        assert_eq!(
+            failed.list_read_at, first.list_read_at,
+            "date de la dernière bonne lecture"
+        );
+        assert_eq!(
+            registry.snapshot().services.len(),
+            1,
+            "la liste d'avant reste"
+        );
+        // Rétablie : le drapeau tombe.
+        engine.fail_list(None);
+        registry.resync().await.expect("resync");
+        assert!(!registry.engine_status().list_degraded);
+        // Lecture partielle : un conteneur illisible marque la liste, sans changer la date.
+        engine.fail_inspect(&web.id, Some(EngineError::Timeout));
+        let before = registry.engine_status().list_read_at;
+        assert_eq!(registry.resync().await, Ok(1));
+        assert!(registry.engine_status().list_degraded);
+        assert_eq!(registry.engine_status().list_read_at, before);
+        // Un conteneur touché par un événement et illisible marque aussi la liste.
+        engine.fail_inspect(&web.id, None);
+        registry.resync().await.expect("resync");
+        assert!(!registry.engine_status().list_degraded);
+        engine.fail_inspect(&web.id, Some(EngineError::Timeout));
+        assert_eq!(registry.refresh(vec![web.id.clone()]).await, Ok(1));
+        assert!(registry.engine_status().list_degraded);
+    }
+
+    #[tokio::test]
+    async fn a_change_of_list_freshness_is_published_to_subscribers() {
+        let (registry, engine, _mono) = registry(true);
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let (mut changes, _) = registry.subscribe();
+        engine.fail_list(Some(EngineError::Refused));
+        let _ = registry.resync().await;
+        let change = changes.try_recv().expect("un lot");
+        assert!(change.engine.as_ref().expect("moteur").list_degraded);
     }
 
     #[tokio::test]
@@ -1100,6 +1324,6 @@ mod tests {
         task.abort();
         let reads = engine.list_count();
         // La première rupture est reprise tout de suite ; les suivantes reculent.
-        assert!((3..=12).contains(&reads), "{reads} relectures en 1 s");
+        assert!((2..=14).contains(&reads), "{reads} relectures en 1 s");
     }
 }

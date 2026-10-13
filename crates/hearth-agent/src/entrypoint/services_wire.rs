@@ -68,6 +68,8 @@ pub fn engine_view(status: &EngineStatus, description: &HostDescription) -> Engi
         host: host(description),
         last_ready_at: status.last_ready_at.map(date),
         checked_at: date(status.checked_at),
+        list_read_at: status.list_read_at.map(date),
+        list_degraded: status.list_degraded,
     }
 }
 

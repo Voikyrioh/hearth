@@ -27,10 +27,27 @@ pub const MAX_MOUNTS: usize = 64;
 /// Marque d'un texte coupé.
 const ELLIPSIS: char = '…';
 
-/// Le texte sans caractère de contrôle, coupé à `max` caractères (la marque « … » compte dans la
+/// Un caractère qui n'a rien à faire dans un nom affiché : contrôle (retour à la ligne, échappement)
+/// ou formatage Unicode invisible qui trompe l'œil (renversement du sens d'écriture U+202A à U+202E
+/// et U+2066 à U+2069, espaces et joints de largeur nulle U+200B à U+200F, U+2060 à U+2064, U+061C,
+/// U+FEFF). Sans eux, un chemin de montage ou une étiquette pourrait se lire à l'envers.
+fn is_unsafe_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
+}
+
+/// Le texte sans caractère de contrôle ni de formatage invisible, coupé à `max` caractères (la marque « … » compte dans la
 /// limite). Un texte que la coupe ne touche pas est rendu tel quel.
 pub fn bounded(text: &str, max: usize) -> String {
-    let mut cleaned: String = text.chars().filter(|c| !c.is_control()).collect();
+    let mut cleaned: String = text.chars().filter(|c| !is_unsafe_char(*c)).collect();
     if cleaned.chars().count() > max {
         cleaned = cleaned
             .chars()
@@ -55,6 +72,15 @@ mod tests {
     fn control_characters_are_removed() {
         assert_eq!(bounded("web\n\r\t\u{1b}[31mx\u{0}", 64), "web[31mx");
         assert_eq!(bounded("tout va bien", 64), "tout va bien");
+    }
+
+    #[test]
+    fn bidirectional_and_invisible_formatting_characters_are_removed() {
+        // U+202E renverse l'affichage : ce chemin se lirait « /data/exe.jpg ».
+        assert_eq!(bounded("/data/\u{202E}gpj.exe", 64), "/data/gpj.exe");
+        assert_eq!(bounded("a\u{200B}b\u{2066}c\u{FEFF}d\u{061C}", 64), "abcd");
+        // Les lettres accentuées et l'arabe ordinaire restent.
+        assert_eq!(bounded("é مرحبا", 64), "é مرحبا");
     }
 
     #[test]

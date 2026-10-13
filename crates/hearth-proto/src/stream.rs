@@ -314,6 +314,8 @@ mod tests {
             },
             last_ready_at: None,
             checked_at: "2026-10-13T10:00:00Z".into(),
+            list_read_at: None,
+            list_degraded: false,
         };
         let snapshot = ServicesMessage::ServicesSnapshot(ServicesState {
             rev: 3,
