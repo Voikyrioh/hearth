@@ -70,6 +70,8 @@ pub fn engine_view(status: &EngineStatus, description: &HostDescription) -> Engi
         checked_at: date(status.checked_at),
         list_read_at: status.list_read_at.map(date),
         list_degraded: status.list_degraded,
+        at: Some(date(status.at)),
+        list_current_at: status.list_current_at.map(date),
     }
 }
 
@@ -112,6 +114,7 @@ pub fn service_item(view: &ServiceView) -> ServiceItem {
                 },
             })
             .collect(),
+        ports_omitted: observation.ports_omitted,
         host_network: observation.host_network,
         mounts: observation
             .mounts
@@ -126,6 +129,7 @@ pub fn service_item(view: &ServiceView) -> ServiceItem {
                 read_only: mount.read_only,
             })
             .collect(),
+        mounts_omitted: observation.mounts_omitted,
         restart: match observation.restart {
             RestartPolicy::None => RestartMode::None,
             RestartPolicy::Always => RestartMode::Always,
@@ -179,8 +183,10 @@ mod tests {
             finished_at: None,
             image: image_name("busybox:1.36", "sha256:0123456789abcdef"),
             ports: vec![],
+            ports_omitted: 0,
             host_network: false,
             mounts: vec![],
+            mounts_omitted: 0,
             restart: RestartPolicy::None,
             auto_remove: false,
             compose_project: None,

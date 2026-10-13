@@ -64,15 +64,15 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
         .and_then(|settings| settings.ports.as_ref())
         .filter(|ports| ports.values().any(|bindings| bindings.is_some()));
     let reserved = host_config.and_then(|host| host.port_bindings.as_ref());
-    let ports = match (run_state, live, reserved) {
+    let (ports, ports_omitted) = match (run_state, live, reserved) {
         (RunState::Running | RunState::Paused | RunState::Restarting, Some(live), _) => {
             ports_of(live)
         }
         (_, _, Some(reserved)) => ports_of(reserved),
-        _ => Vec::new(),
+        _ => (Vec::new(), 0),
     };
 
-    let mounts = response
+    let mut mounts: Vec<MountInfo> = response
         .mounts
         .iter()
         .flatten()
@@ -94,8 +94,10 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
                 read_only: mount.rw == Some(false),
             })
         })
-        .take(MAX_MOUNTS)
         .collect();
+    // FIX:01M4SFCRJWX8KMBC1ZK9ZWETTW : les montages au-delà de la borne sont comptés, pas oubliés en silence.
+    let mounts_omitted = u32::try_from(mounts.len().saturating_sub(MAX_MOUNTS)).unwrap_or(u32::MAX);
+    mounts.truncate(MAX_MOUNTS);
 
     Some(Observation {
         id,
@@ -111,10 +113,12 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
             .and_then(parse_date),
         image,
         ports,
+        ports_omitted,
         host_network: host_config
             .and_then(|host| host.network_mode.as_deref())
             .is_some_and(|mode| mode == "host"),
         mounts,
+        mounts_omitted,
         restart: restart_of(host_config.and_then(|host| host.restart_policy.as_ref())),
         auto_remove: host_config
             .and_then(|host| host.auto_remove)
@@ -171,7 +175,8 @@ fn restart_of(policy: Option<&bollard::models::RestartPolicy>) -> RestartPolicy 
 
 /// Les ports publiés d'une table `« 80/tcp » -> liaisons`. Les ports seulement exposés (sans
 /// liaison) ne sont pas des ports du serveur. Un même port publié sur IPv4 et IPv6 n'est qu'un port.
-fn ports_of(map: &PortMap) -> Vec<PortBinding> {
+/// Rend les `MAX_PORTS` premiers et le nombre de ceux qui sont omis au-delà.
+fn ports_of(map: &PortMap) -> (Vec<PortBinding>, u32) {
     let mut merged: BTreeMap<(u16, u16, u8), PortBinding> = BTreeMap::new();
     for (container_side, bindings) in map {
         let Some((container_port, protocol)) = container_side.split_once('/') else {
@@ -212,7 +217,9 @@ fn ports_of(map: &PortMap) -> Vec<PortBinding> {
         }
     }
     // Les ports sont triés (port du serveur, du conteneur, protocole) : le plafond garde les premiers.
-    merged.into_values().take(MAX_PORTS).collect()
+    // FIX:01M4SFCRJWX8KMBC1ZK9ZWETTW : les ports au-delà de la borne sont comptés, pas oubliés en silence.
+    let omitted = u32::try_from(merged.len().saturating_sub(MAX_PORTS)).unwrap_or(u32::MAX);
+    (merged.into_values().take(MAX_PORTS).collect(), omitted)
 }
 
 /// Une liaison sur l'adresse locale n'est joignable que depuis ce serveur ; toute autre (aucune
@@ -415,6 +422,9 @@ mod tests {
         assert!(!observation.name.contains(['\n', '\u{1b}']));
         assert_eq!(observation.ports.len(), MAX_PORTS);
         assert_eq!(observation.mounts.len(), MAX_MOUNTS);
+        // 3000 ports et 500 montages lus : le surplus est compté (BR-SVC-021).
+        assert_eq!(observation.ports_omitted as usize, 3000 - MAX_PORTS);
+        assert_eq!(observation.mounts_omitted as usize, 500 - MAX_MOUNTS);
         assert!(
             observation
                 .mounts

@@ -143,7 +143,7 @@ jobs:
       - name: Moteur du runner (version)
         run: docker version
       - name: Suite de contrat de l'adaptateur contre un vrai moteur
-        run: cargo test -p hearth-agent --test engine_real -- --ignored --test-threads=1
+        run: cargo test -p hearth-agent --test engine_real -- --ignored --test-threads=1 --nocapture
       # Rien ne doit rester : les conteneurs de test sont supprimés avant et après la suite.
       - name: Conteneurs laissés par la suite
         if: always()
