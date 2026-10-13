@@ -58,6 +58,7 @@
     "allow-set-reauth-setting",
     "allow-list-services-states",
     "allow-engine-recheck",
+    "allow-read-service-rights",
     "allow-open-engine-docs",
     "core:event:allow-listen",
     "core:event:allow-unlisten"

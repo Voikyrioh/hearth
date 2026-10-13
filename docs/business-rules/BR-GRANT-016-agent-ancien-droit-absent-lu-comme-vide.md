@@ -11,7 +11,7 @@ maj: 2026-10-13
 # BR-GRANT-016 — `rights` absent d'un agent ancien se lit comme vide ; une valeur inconnue est tolérée ; la capacité `service-rights` est annoncée par `/hello`
 
 ## Règle
-Ajout de protocole, sans changement de `API_VERSION` : (1) `AccountInfo.rights` (compte courant : `GET /me`, réponse de la connexion) et `AccountItem.rights` (chaque ligne de `GET /accounts`) valent `["services"]` pour un compte qui a le droit, `[]` sinon ; (2) `GET /hello` ajoute la capacité `service-rights` à `capabilities` ; (3) le refus faute du droit est `403 FORBIDDEN_ROLE` avec `details.missing: "services"`. Le champ est `#[serde(default)]` : absent d'un agent ancien, il se lit comme une liste vide ; une valeur inconnue dans la liste est ignorée (un agent plus récent peut ajouter un droit) ; un client ancien ignore le champ en plus. Un client qui ne voit pas la capacité `service-rights` traite le droit comme non accordé pour tous et n'offre aucune action de service (comportement du client, ticket HRT-78).
+Ajout de protocole, sans changement de `API_VERSION` : (1) `AccountInfo.rights` (compte courant : `GET /me`, réponse de la connexion) et `AccountItem.rights` (chaque ligne de `GET /accounts`) valent `["services"]` pour un compte qui a le droit, `[]` sinon ; (2) `GET /hello` ajoute la capacité `service-rights` à `capabilities` ; (3) le refus faute du droit est `403 FORBIDDEN_ROLE` avec `details.missing: "services"`. Le champ est `#[serde(default)]` : absent d'un agent ancien, il se lit comme une liste vide ; une valeur inconnue dans la liste est ignorée (un agent plus récent peut ajouter un droit) ; un client ancien ignore le champ en plus. Un client qui ne voit pas la capacité `service-rights` traite le droit comme non accordé pour tous et n'offre aucune action de service (comportement du client, HRT-78 : `rightsGate` rend `old-agent`, texte « Ce serveur doit être mis à jour pour gérer les droits sur les services. »).
 
 ## Application (code)
 - `crates/hearth-proto/src/api/accounts.rs::{AccountInfo, AccountItem, RIGHT_SERVICES, has_right}`
@@ -34,3 +34,4 @@ Ajout de protocole, sans changement de `API_VERSION` : (1) `AccountInfo.rights` 
 
 ## Historique
 - 2026-10-13 — création (HRT-76, ADR-0041 : le droit de gérer les services, moitié agent).
+- 2026-10-13 — côté client (HRT-78) : `rightsKnown` dans la liste des comptes, `known` dans la lecture du droit.

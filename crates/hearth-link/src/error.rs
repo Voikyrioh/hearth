@@ -74,6 +74,11 @@ pub enum LinkError {
     TooManyAttempts { retry_after_s: u64 },
     #[error("le serveur a refusé : {0:?}")]
     Rejected(Option<ErrorCode>),
+    /// Le compte a le bon rôle mais pas le droit que l'acte exige : `403 FORBIDDEN_ROLE` avec
+    /// `details.missing` (BR-GRANT-004). Le texte du droit est celui de l'agent, jamais affiché tel quel :
+    /// l'interface ne reconnaît que ceux qu'elle connaît (`"services"`).
+    #[error("il manque un droit : {0}")]
+    MissingRight(String),
     #[error("serveur injoignable : {0}")]
     Unreachable(String),
     #[error("réponse inattendue du serveur : {0}")]

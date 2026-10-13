@@ -50,6 +50,7 @@ export default defineConfig({
         "hrt33-keyboard.spec.ts",
         "hrt38-40.spec.ts",
         "services.spec.ts",
+        "services-rights.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },

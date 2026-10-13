@@ -13,7 +13,8 @@ export type RemovalReport =
   | { kind: "done" }
   | { kind: "refused"; refusal: DeviceRemovalRefusal }
   | { kind: "unknown" }
-  | { kind: "failed" };
+  | { kind: "failed" }
+  | { kind: "right_lost" };
 
 /**
  * Les actions de postes de confiance d'un serveur. Elles passent par `useServerAction` (une seule à la
@@ -22,7 +23,7 @@ export type RemovalReport =
  * l'envoi, réussi ou non).
  */
 export function useDeviceActions(serverId: () => string) {
-  const action = useServerAction();
+  const action = useServerAction(serverId);
   const toasts = useToastsStore();
   const devices = useDevicesStore();
 
@@ -33,7 +34,7 @@ export function useDeviceActions(serverId: () => string) {
       const result = await action.run(() =>
         getLinkBridge().removeTrustedDevice(serverId(), device.id, password),
       );
-      if (!result) return { kind: "failed" };
+      if (!result) return action.failedReport();
       if (result.kind === "done") {
         toasts.push({ kind: "success", message: t("devices.removed") });
         void devices.load(serverId());

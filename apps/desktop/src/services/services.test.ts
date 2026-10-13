@@ -219,7 +219,15 @@ describe("aide par distribution (BR-ENGINE-005, 007, 008, 017)", () => {
     });
 
     it("un nom POSIX valide est repris tel quel, sans note", () => {
-      for (const account of ["hearth", "_hearth", "hearth-agent", "svc_1", "a", "a".repeat(32)]) {
+      for (const account of [
+        "hearth",
+        "_hearth",
+        "hearth-agent",
+        "svc_1",
+        "pi",
+        "a",
+        "a".repeat(32),
+      ]) {
         const [command, config] = blocks(account);
         expect(command).toMatchObject({
           kind: "command",

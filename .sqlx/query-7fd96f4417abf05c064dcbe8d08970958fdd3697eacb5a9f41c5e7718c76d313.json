@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM service_op_steps WHERE op_id IN\n                 (SELECT id FROM service_ops WHERE finished_at IS NOT NULL AND finished_at < ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7fd96f4417abf05c064dcbe8d08970958fdd3697eacb5a9f41c5e7718c76d313"
+}

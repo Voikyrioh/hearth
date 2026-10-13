@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE service_ops\n             SET status = ?, cause = ?, decision_json = ?, decision_at = ?, updated_at = ?,\n                 finished_at = ?\n             WHERE id = ? AND status = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "482a01a2d247deb5a50bae1fdd7c2c186e0d19139eb9c906e068780428c64b45"
+}

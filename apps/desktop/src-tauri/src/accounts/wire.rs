@@ -250,7 +250,7 @@ pub fn refusal_from_error(status: u16, body: &Value) -> Result<AccountRefusal, L
     }
     let error = error.error;
     Ok(match error.code {
-        ErrorCode::ForbiddenRole => return Err(LinkFailure::Forbidden),
+        ErrorCode::ForbiddenRole => return Err(LinkFailure::forbidden(&error)),
         ErrorCode::UsernameTaken => AccountRefusal::UsernameTaken,
         ErrorCode::LastAdmin => AccountRefusal::LastAdmin,
         ErrorCode::NotFound => AccountRefusal::NotFound,

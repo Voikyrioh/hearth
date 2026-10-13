@@ -37,10 +37,15 @@ impl From<FilterError> for LinkError {
 
 /// Un refus de l'agent, lu dans son enveloppe d'erreur.
 pub(super) fn rejection(body: &Value) -> LinkError {
-    let code = serde_json::from_value::<ErrorBody>(body.clone())
-        .ok()
-        .map(|body| body.error.code);
-    LinkError::Rejected(code)
+    let Some(body) = serde_json::from_value::<ErrorBody>(body.clone()).ok() else {
+        return LinkError::Rejected(None);
+    };
+    // Le refus d'un droit (`403 FORBIDDEN_ROLE` + `details.missing`, BR-GRANT-004) n'est pas un refus de
+    // rôle : il suit jusqu'au client, qui ne dit pas « administrateur » (BR-GRANT-014).
+    if let Some(right) = body.error.missing_right() {
+        return LinkError::MissingRight(right.to_owned());
+    }
+    LinkError::Rejected(Some(body.error.code))
 }
 
 impl LinkManager {
@@ -216,6 +221,49 @@ mod tests {
     use hearth_proto::api::audit::{AuditOrigin, OriginKindName, OutcomeName};
 
     use super::*;
+    use hearth_proto::error::ErrorCode;
+    use serde_json::json;
+
+    #[test]
+    fn a_refusal_for_a_missing_right_keeps_the_right_that_is_missing() {
+        let body =
+            serde_json::to_value(ErrorBody::missing_right("services", "pas le droit")).unwrap();
+        assert_eq!(
+            rejection(&body),
+            LinkError::MissingRight("services".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_plain_role_refusal_and_an_unreadable_body_stay_what_they_were() {
+        let role = serde_json::to_value(ErrorBody::new(ErrorCode::ForbiddenRole, "rôle")).unwrap();
+        assert_eq!(
+            rejection(&role),
+            LinkError::Rejected(Some(ErrorCode::ForbiddenRole))
+        );
+        assert_eq!(
+            rejection(&json!("n'importe quoi")),
+            LinkError::Rejected(None)
+        );
+    }
+
+    #[test]
+    fn a_missing_right_is_only_read_on_a_role_refusal_and_stays_short() {
+        let other =
+            ErrorBody::with_details(ErrorCode::NotFound, "x", json!({ "missing": "services" }));
+        assert_eq!(
+            rejection(&serde_json::to_value(other).unwrap()),
+            LinkError::Rejected(Some(ErrorCode::NotFound))
+        );
+        for odd in [json!(""), json!(3), json!("x".repeat(33))] {
+            let body =
+                ErrorBody::with_details(ErrorCode::ForbiddenRole, "x", json!({ "missing": odd }));
+            assert_eq!(
+                rejection(&serde_json::to_value(body).unwrap()),
+                LinkError::Rejected(Some(ErrorCode::ForbiddenRole))
+            );
+        }
+    }
 
     fn item(id: i64) -> AuditEventItem {
         AuditEventItem {

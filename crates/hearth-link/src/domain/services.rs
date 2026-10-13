@@ -11,7 +11,9 @@
 //! Rien ici ne porte une valeur ou un nom de variable d'environnement ni une commande : les types du
 //! protocole n'en ont pas dans cette tranche.
 
-use hearth_proto::api::services::{CAPABILITY_SERVICES, EngineView, ServiceItem, ServicesState};
+use hearth_proto::api::services::{
+    CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES, EngineView, ServiceItem, ServicesState,
+};
 use hearth_proto::stream::{ServicesMessage, Topic};
 
 use super::time::WallTime;
@@ -22,6 +24,14 @@ pub fn agent_serves_services(capabilities: &[String]) -> bool {
     capabilities
         .iter()
         .any(|capability| capability == CAPABILITY_SERVICES)
+}
+
+/// L'agent connaît-il le droit « gérer les services » (capacité `service-rights`, BR-GRANT-016) ? Sinon le
+/// client le traite comme non accordé pour tous et n'offre aucune action de service.
+pub fn agent_knows_service_rights(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability == CAPABILITY_SERVICE_RIGHTS)
 }
 
 /// Les sujets à demander à un agent : les mesures, la fin de session et la mise à jour de l'agent

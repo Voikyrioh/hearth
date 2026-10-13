@@ -14,7 +14,8 @@ export type AttackModeReport =
   | { kind: "done" }
   | { kind: "refused"; refusal: AttackModeRefusal }
   | { kind: "unknown" }
-  | { kind: "failed" };
+  | { kind: "failed" }
+  | { kind: "right_lost" };
 
 /**
  * L'activation et la désactivation du mode attaque d'un serveur. Elles passent par `useServerAction`
@@ -23,7 +24,7 @@ export type AttackModeReport =
  * champ après l'envoi, réussi ou non).
  */
 export function useAttackModeActions(serverId: () => string) {
-  const action = useServerAction();
+  const action = useServerAction(serverId);
   const toasts = useToastsStore();
   const security = useSecurityStore();
 
@@ -37,7 +38,7 @@ export function useAttackModeActions(serverId: () => string) {
           forbiddenMessage: "security.noPermission",
         },
       );
-      if (!result) return { kind: "failed" };
+      if (!result) return action.failedReport();
       if (result.kind === "done") {
         toasts.push({
           kind: "success",

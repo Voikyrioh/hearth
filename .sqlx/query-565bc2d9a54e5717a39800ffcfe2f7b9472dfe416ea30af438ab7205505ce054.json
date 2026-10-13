@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO service_op_steps (op_id, seq, step, state, undo_json, at)\n                 VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "565bc2d9a54e5717a39800ffcfe2f7b9472dfe416ea30af438ab7205505ce054"
+}

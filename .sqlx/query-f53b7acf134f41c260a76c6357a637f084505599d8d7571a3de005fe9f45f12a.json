@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT field, nonce, sealed FROM service_spec_secrets\n         WHERE service_key = ? AND rev = ? ORDER BY field",
+  "describe": {
+    "columns": [
+      {
+        "name": "field",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_spec_secrets",
+            "name": "field"
+          }
+        }
+      },
+      {
+        "name": "nonce",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "service_spec_secrets",
+            "name": "nonce"
+          }
+        }
+      },
+      {
+        "name": "sealed",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "service_spec_secrets",
+            "name": "sealed"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f53b7acf134f41c260a76c6357a637f084505599d8d7571a3de005fe9f45f12a"
+}

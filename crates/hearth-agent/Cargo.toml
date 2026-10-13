@@ -57,6 +57,17 @@ tracing-log.workspace = true
 ulid.workspace = true
 zeroize.workspace = true
 
+# Les seules constantes d'ouverture de fichier (`O_NOFOLLOW`, `O_NONBLOCK`, `ELOOP`) de `services.key` ;
+# déjà dans l'arbre (tokio, mio), aucun `unsafe` (lint `forbid`).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# `build.rs` applique le chargeur de fiches (HRT-113) : même code que l'agent, déjà dans l'arbre de dépendances.
+[build-dependencies]
+serde.workspace = true
+sha2.workspace = true
+toml.workspace = true
+
 [dev-dependencies]
 log.workspace = true
 minisign.workspace = true

@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT seq, step, state, undo_json, at FROM service_op_steps WHERE op_id = ? ORDER BY seq",
+  "describe": {
+    "columns": [
+      {
+        "name": "seq",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "service_op_steps",
+            "name": "seq"
+          }
+        }
+      },
+      {
+        "name": "step",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_op_steps",
+            "name": "step"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_op_steps",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "undo_json",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_op_steps",
+            "name": "undo_json"
+          }
+        }
+      },
+      {
+        "name": "at",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "service_op_steps",
+            "name": "at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6ff4e756f44a8cde34d182f7bcfccaa2de7156d2c80ed96f0f5996012765211f"
+}

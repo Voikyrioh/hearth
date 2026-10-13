@@ -17,7 +17,7 @@ import { useToastsStore } from "@/stores/toasts";
 const props = defineProps<{ serverId: string }>();
 
 const toasts = useToastsStore();
-const action = useServerAction();
+const action = useServerAction(() => props.serverId);
 const state = ref<ReauthState | null>(null);
 const asked = ref<ReauthMode | null>(null);
 
@@ -42,7 +42,7 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
     () => getLinkBridge().setReauthSetting(props.serverId, mode, adminPassword ?? ""),
     { forbiddenMessage: "security.noPermission" },
   );
-  if (!result) return { kind: "failed" };
+  if (!result) return action.failedReport();
   if (result.kind === "done") {
     toasts.push({
       kind: "success",

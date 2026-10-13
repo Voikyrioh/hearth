@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT rev FROM service_specs WHERE service_key = ? AND current = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "rev",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "service_specs",
+            "name": "rev"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fc18334065509282de8e622e6cb3b242ec457928e67c4f86a27a4a2fe7dc2f61"
+}

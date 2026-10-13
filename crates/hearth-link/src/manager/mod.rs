@@ -13,6 +13,7 @@ mod device;
 mod events;
 mod persist;
 mod reauth;
+mod rights;
 mod security;
 mod services;
 mod task;
@@ -38,6 +39,7 @@ pub use audit::AuditExportFile;
 pub use events::EventStream;
 use events::Fanout;
 pub use reauth::ReauthState;
+pub use rights::ServiceRightsRead;
 pub use services::KnownServices;
 use task::Command;
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO service_ops\n                 (id, op_key, service_key, service_name, kind, account, plan_json, status, forced,\n                  started_at, updated_at)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "ac5bdd45474f8a2943b159369c5a07d558acfde2b5a1999d8356bf1d64c91e8f"
+}

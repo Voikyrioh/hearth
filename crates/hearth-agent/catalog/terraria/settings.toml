@@ -1,0 +1,430 @@
+# Réglages de Terraria : thèmes et catalogue (HRT-113). Les 36 réglages de l'inventaire sont tous classés :
+# réglable (25 du fichier et 2 d'arguments), imposé avec sa raison (4 du fichier : world_file, world_path,
+# port, upnp), ou écarté avec sa raison (2 du fichier et 3 d'arguments, dans fiche.toml, [[not_exposed]]).
+# Une valeur par défaut « non vérifiée » n'est PAS écrite ici : le réglage ne propose rien et Hearth n'écrit pas
+# la ligne (« non écrit » est une valeur).
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "world"
+label = "Monde"
+order = 3
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 4
+
+[[theme]]
+id = "anticheat"
+label = "Triche et sécurité"
+order = 5
+
+[[theme]]
+id = "journey"
+label = "Mode Voyage"
+order = 6
+
+[[theme]]
+id = "performance"
+label = "Performances"
+order = 7
+
+[choice_set.journey_permission]
+choices = [
+  { value = "0", label = "Personne (verrouillé)" },
+  { value = "1", label = "L'hôte seulement" },
+  { value = "2", label = "Tout le monde" },
+]
+
+[[preset]]
+id = "journey"
+channel = "config"
+theme = "journey"
+level = "advanced"
+type = "choice"
+choice_set = "journey_permission"
+change = "anytime"
+source = "partial"                        # défaut non vérifié ; « hôte » sur un serveur dédié : non vérifié
+
+# ---- Ma partie ----
+
+[[setting]]
+id = "world_name"
+key = "worldname"
+channel = "config"
+theme = "game"
+level = "essential"
+label = "Nom du monde"
+help = "Le nom du monde que le jeu crée. Il nomme aussi son fichier."
+type = "text"
+charset = "file_stem"                     # lettres, chiffres, tiret, souligné ; pas d'espace (nom de fichier)
+max_len = 100
+proposed = "Monde"
+change = "world_creation"
+source = "partial"                        # T03 : défaut non vérifié
+
+[[setting]]
+id = "password"
+key = "password"
+channel = "config"
+theme = "game"
+level = "essential"
+label = "Mot de passe du serveur"
+help = "Ce que tes joueurs tapent pour entrer. Vide : tout le monde peut entrer."
+type = "secret"
+secret_kind = "game_password"
+max_len = 100
+game_default = ""
+change = "anytime"
+source = "verified"                       # T09
+
+[[setting]]
+id = "motd"
+key = "motd"
+channel = "config"
+theme = "game"
+level = "essential"
+label = "Message d'accueil"
+help = "Le message montré à chaque joueur qui arrive."
+type = "text"
+charset = "line"
+max_len = 100
+game_default = ""
+change = "anytime"
+source = "verified"                       # T10
+
+[[setting]]
+id = "language"
+key = "language"
+channel = "config"
+theme = "game"
+level = "common"
+label = "Langue du serveur"
+help = "La langue des messages du serveur."
+type = "choice"
+choices = [
+  { value = "en-US", label = "Anglais" },
+  { value = "fr-FR", label = "Français" },
+  { value = "de-DE", label = "Allemand" },
+  { value = "it-IT", label = "Italien" },
+  { value = "es-ES", label = "Espagnol" },
+  { value = "ru-RU", label = "Russe" },
+  { value = "zh-Hans", label = "Chinois simplifié" },
+  { value = "pt-BR", label = "Portugais du Brésil" },
+  { value = "pl-PL", label = "Polonais" },
+]
+game_default = "en-US"
+change = "anytime"
+source = "verified"                       # T13 ; l'installation de référence pose « en/US », hors liste : signalé à l'import
+
+# ---- Joueurs ----
+
+[[setting]]
+id = "max_players"
+key = "maxplayers"
+channel = "config"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Combien de joueurs peuvent être connectés en même temps."
+type = "int"
+min = 1
+max = 255
+proposed = "8"                            # valeur observée sur une installation réelle ; défaut du jeu contradictoire (8 ou 16) : non écrit comme défaut
+change = "anytime"
+source = "partial"                        # T07
+
+# ---- Monde ----
+
+[[setting]]
+id = "world_size"
+key = "autocreate"
+channel = "config"
+theme = "world"
+level = "essential"
+label = "Taille du monde"
+help = "La taille du monde que le jeu crée s'il n'existe pas encore."
+type = "choice"
+choices = [
+  { value = "1", label = "Petit" },
+  { value = "2", label = "Moyen" },
+  { value = "3", label = "Grand" },
+]
+proposed = "3"                            # valeur observée sur une installation réelle, non vérifiée dans la documentation du jeu
+change = "world_creation"
+source = "verified"                       # T04 ; sans cette ligne le jeu ne crée aucun monde
+
+[[setting]]
+id = "difficulty"
+key = "difficulty"
+channel = "config"
+theme = "world"
+level = "essential"
+label = "Difficulté"
+help = "La difficulté du monde créé. Elle est gravée dans le monde."
+type = "choice"
+choices = [
+  { value = "0", label = "Classique" },
+  { value = "1", label = "Expert" },
+  { value = "2", label = "Maître" },
+  { value = "3", label = "Voyage" },
+]
+proposed = "2"                            # valeur observée sur une installation réelle, non vérifiée dans la documentation du jeu
+change = "world_creation"
+source = "partial"                        # T06 : défaut non vérifié
+
+[[setting]]
+id = "seed"
+key = "seed"
+channel = "config"
+theme = "world"
+level = "common"
+label = "Graine du monde"
+help = "Un texte qui décide de la forme du monde créé."
+type = "text"
+charset = "line"
+max_len = 100
+change = "world_creation"
+source = "partial"                        # T05 : défaut non vérifié
+
+[[setting]]
+id = "world_file"
+key = "world"
+channel = "config"
+theme = "world"
+level = "advanced"
+label = "Fichier du monde"
+help = "Le fichier que le jeu charge. Hearth le déduit du nom du monde."
+type = "text"
+charset = "line"
+max_len = 200
+change = "world_creation"
+imposed = { derive = { prefix = "/root/.local/share/Terraria/Worlds/", from = "world_name", suffix = ".wld" }, why = "Le jeu doit charger le monde rangé dans le dossier du service." }
+source = "verified"                       # T01
+
+[[setting]]
+id = "world_path"
+key = "worldpath"
+channel = "config"
+theme = "world"
+level = "advanced"
+label = "Dossier des mondes"
+help = "Le dossier où le jeu range ses mondes."
+type = "text"
+charset = "line"
+max_len = 200
+change = "anytime"
+imposed = { value = "/root/.local/share/Terraria/Worlds/", why = "C'est le dossier que Hearth garde et sauvegarde." }
+source = "partial"                        # T02
+
+# ---- Réseau ----
+
+[[setting]]
+id = "port"
+key = "port"
+channel = "config"
+theme = "network"
+level = "advanced"
+label = "Port d'écoute dans le service"
+help = "Le port sur lequel le jeu écoute à l'intérieur du service. Le port de tes joueurs se règle dans « Modifier »."
+type = "int"
+min = 1024
+max = 65535
+game_default = "7777"
+change = "anytime"
+imposed = { port = "game", why = "Il doit rester celui que Hearth relie au port du serveur." }
+source = "verified"                       # T08
+
+[[setting]]
+id = "upnp"
+key = "upnp"
+channel = "config"
+theme = "network"
+level = "advanced"
+label = "Ouverture automatique des ports (UPnP)"
+help = "Demande à la box d'ouvrir les ports toute seule."
+type = "bool"
+on = "1"
+off = "0"
+change = "anytime"
+imposed = { value = "0", why = "Hearth n'ouvre jamais de port sur ta box, et un service ne le fait pas non plus." }
+source = "partial"                        # T14
+
+# ---- Triche et sécurité ----
+
+[[setting]]
+id = "secure"
+key = "secure"
+channel = "config"
+theme = "anticheat"
+level = "common"
+label = "Protection contre la triche"
+help = "Le jeu exclut un joueur dont il juge le comportement anormal. Peut exclure à tort un joueur honnête."
+type = "bool"
+on = "1"
+off = "0"
+proposed = "1"                            # défaut proposé par la conception ; défaut du jeu non vérifié ; l'installation de référence pose 0
+change = "anytime"
+source = "partial"                        # T12
+
+[[setting]]
+id = "announcement_box_off"
+key = "-disableannouncementbox"
+channel = "args"
+arg = { flag = "-disableannouncementbox", form = "flag_if_true" }
+theme = "anticheat"
+level = "advanced"
+label = "Couper les boîtes d'annonce"
+help = "Empêche les boîtes d'annonce posées par les joueurs d'envoyer des messages."
+type = "bool"
+on = "1"
+off = "0"
+change = "anytime"
+source = "partial"                        # T35
+
+[[setting]]
+id = "announcement_box_range"
+key = "-announcementboxrange"
+channel = "args"
+arg = { flag = "-announcementboxrange", form = "flag_value" }
+theme = "anticheat"
+level = "advanced"
+label = "Portée des boîtes d'annonce"
+help = "Jusqu'où une boîte d'annonce est lue, en pixels. -1 : tout le serveur."
+type = "int"
+min = -1                                  # maximum non vérifié : aucun n'est posé
+change = "anytime"
+source = "partial"                        # T36
+
+# ---- Performances ----
+
+[[setting]]
+id = "npc_stream"
+key = "npcstream"
+channel = "config"
+theme = "performance"
+level = "advanced"
+label = "Fluidité des ennemis"
+help = "Réduit les saccades des ennemis, au prix de plus de bande passante."
+type = "int"
+min = 0                                   # « 0 à 60 et plus » : maximum non vérifié
+game_default = "60"
+change = "anytime"
+source = "verified"                       # T15
+
+# ---- Mode Voyage (15 réglages, T17 à T31) ----
+
+[[setting]]
+id = "journey_time_freeze"
+key = "journeypermission_time_setfrozen"
+label = "Figer le temps"
+help = "Qui peut arrêter l'écoulement du temps."
+preset = "journey"
+
+[[setting]]
+id = "journey_time_dawn"
+key = "journeypermission_time_setdawn"
+label = "Passer à l'aube"
+help = "Qui peut mettre l'heure à l'aube."
+preset = "journey"
+
+[[setting]]
+id = "journey_time_noon"
+key = "journeypermission_time_setnoon"
+label = "Passer à midi"
+help = "Qui peut mettre l'heure à midi."
+preset = "journey"
+
+[[setting]]
+id = "journey_time_dusk"
+key = "journeypermission_time_setdusk"
+label = "Passer au crépuscule"
+help = "Qui peut mettre l'heure au crépuscule."
+preset = "journey"
+
+[[setting]]
+id = "journey_time_midnight"
+key = "journeypermission_time_setmidnight"
+label = "Passer à minuit"
+help = "Qui peut mettre l'heure à minuit."
+preset = "journey"
+
+[[setting]]
+id = "journey_time_speed"
+key = "journeypermission_time_setspeed"
+label = "Vitesse du temps"
+help = "Qui peut accélérer ou ralentir le temps."
+preset = "journey"
+
+[[setting]]
+id = "journey_godmode"
+key = "journeypermission_godmode"
+label = "Invincibilité"
+help = "Qui peut se rendre invincible."
+preset = "journey"
+
+[[setting]]
+id = "journey_wind_strength"
+key = "journeypermission_wind_setstrength"
+label = "Force du vent"
+help = "Qui peut régler la force du vent."
+preset = "journey"
+
+[[setting]]
+id = "journey_wind_freeze"
+key = "journeypermission_wind_setfrozen"
+label = "Figer le vent"
+help = "Qui peut figer le vent."
+preset = "journey"
+
+[[setting]]
+id = "journey_rain_strength"
+key = "journeypermission_rain_setstrength"
+label = "Force de la pluie"
+help = "Qui peut régler la force de la pluie."
+preset = "journey"
+
+[[setting]]
+id = "journey_rain_freeze"
+key = "journeypermission_rain_setfrozen"
+label = "Figer la pluie"
+help = "Qui peut figer la pluie."
+preset = "journey"
+
+[[setting]]
+id = "journey_placement_range"
+key = "journeypermission_increaseplacementrange"
+label = "Portée de pose allongée"
+help = "Qui peut poser des blocs de plus loin."
+preset = "journey"
+
+[[setting]]
+id = "journey_difficulty"
+key = "journeypermission_setdifficulty"
+label = "Changer la difficulté"
+help = "Qui peut changer la difficulté en cours de partie."
+preset = "journey"
+
+[[setting]]
+id = "journey_biome_spread"
+key = "journeypermission_biomespread_setfrozen"
+label = "Figer l'extension des biomes"
+help = "Qui peut empêcher les biomes de s'étendre."
+preset = "journey"
+
+[[setting]]
+id = "journey_spawn_rate"
+key = "journeypermission_setspawnrate"
+label = "Fréquence des ennemis"
+help = "Qui peut régler la fréquence d'apparition des ennemis."
+preset = "journey"

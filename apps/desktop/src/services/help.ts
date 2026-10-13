@@ -1,3 +1,4 @@
+import { isSystemAccountName } from "@/accounts/name";
 import { t } from "@/i18n";
 import type { EngineInfo } from "@/link";
 
@@ -44,17 +45,6 @@ export function familyOf(host: EngineInfo["host"]): Family | null {
 export type HelpKind = "install" | "start" | "access";
 
 /**
- * Un nom de compte POSIX strict (BR-ENGINE-017) : minuscules ASCII, chiffres, `_` et `-`, commence par une
- * lettre ou `_`, 32 caractères au plus. Le `$` final des comptes de machine n'est PAS toléré : un compte
- * d'agent n'en porte jamais et l'accepter n'ajouterait qu'un caractère que le shell interprète.
- */
-const POSIX_ACCOUNT = /^[a-z_][a-z0-9_-]{0,31}$/;
-
-export function isPosixAccount(name: string): boolean {
-  return POSIX_ACCOUNT.test(name);
-}
-
-/**
  * Ce que l'interface montre en aide. `docs` : renvoi à la documentation, aucune commande. `note` : le nom du
  * compte reçu n'est pas un nom valide, la commande porte un emplacement littéral à remplir.
  */
@@ -64,14 +54,36 @@ export type Help =
   | { kind: "docs" };
 
 /**
- * Le nom du compte de l'agent venu du fil n'entre dans un bloc à recopier que s'il passe `isPosixAccount`
- * (un agent compromis ou un nom tordu ferait recopier une commande piégée, souvent en `sudo`). Sinon :
+ * Le nom du compte de l'agent venu du fil n'entre dans un bloc à recopier que s'il passe `isSystemAccountName` (règle POSIX, pas celle des
+ * identifiants Hearth) (un agent compromis ou un nom tordu ferait recopier une commande piégée, souvent en `sudo`). Sinon :
  * l'emplacement littéral, jamais la valeur reçue.
  */
 function accountFor(received: string): { account: string; note?: string } {
-  if (isPosixAccount(received)) return { account: received };
+  if (isSystemAccountName(received)) return { account: received };
   const account = t("engine.help.accountPlaceholder");
   return { account, note: t("engine.help.accountPlaceholderNote", { placeholder: account }) };
+}
+
+/**
+ * La phrase de l'état « Accès refusé à l'agent » (HRT-74 S7). Le compte annoncé par l'agent n'y est cité que
+ * s'il passe `isSystemAccountName` ; sinon la phrase est neutre et le nom reçu n'est NULLE PART (ni tronqué ni
+ * nettoyé : un nom nettoyé reste un nom faux présenté comme vrai). `values` : ce qui se rend en chasse fixe.
+ */
+export function deniedSentence(engine: EngineInfo): {
+  text: string;
+  values: Record<string, string>;
+} {
+  const admin = engine.agentIsAdmin;
+  if (!isSystemAccountName(engine.agentAccount)) {
+    return {
+      text: t(admin ? "engine.deniedAdminTextUnnamed" : "engine.deniedTextUnnamed"),
+      values: {},
+    };
+  }
+  return {
+    text: t(admin ? "engine.deniedAdminText" : "engine.deniedText"),
+    values: { account: engine.agentAccount },
+  };
 }
 
 /**

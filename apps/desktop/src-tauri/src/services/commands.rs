@@ -9,7 +9,7 @@ use std::sync::Arc;
 use hearth_link::domain::server::ServerId;
 use tauri::State;
 
-use super::dto::{EngineDto, ServicesEvent};
+use super::dto::{EngineDto, ServiceRightsDto, ServicesEvent};
 use crate::link::LinkRuntime;
 use crate::link_dto::LinkFailure;
 
@@ -39,6 +39,20 @@ pub async fn engine_recheck(
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     let engine = link.manager().engine_recheck(&id).await?;
     Ok(EngineDto::from(&engine))
+}
+
+/// Le droit « gérer les services » du compte connecté (BR-GRANT-011) : une lecture (`GET /me` et `GET /hello`),
+/// relue à l'ouverture de la section, à chaque reconnexion et après tout refus pour absence du droit. Aucune
+/// commande de cette coquille n'accorde ni ne retire le droit : il ne se donne que depuis le serveur
+/// (BR-GRANT-005). Hors « Connecté » : `NotConnected` sans rien envoyer.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_service_rights(
+    link: Runtime_<'_>,
+    server_id: String,
+) -> Result<ServiceRightsDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    Ok(link.manager().service_rights(&id).await?.into())
 }
 
 /// Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est

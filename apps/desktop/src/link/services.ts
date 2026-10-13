@@ -2,6 +2,7 @@ import type {
   ServicesEvent as BoundServicesEvent,
   EngineDto,
   ServiceDto,
+  ServiceRightsDto,
   ServiceStateDto,
 } from "@/bindings";
 
@@ -167,4 +168,19 @@ export function toServicesEvent(dto: BoundServicesEvent): ServicesEvent {
     engine: toEngine(dto.view.engine),
     services: dto.view.services.map(toService),
   };
+}
+
+/**
+ * Le droit « gérer les services » du compte connecté (HRT-78, ADR-0041, BR-GRANT-011). `known` faux : l'agent
+ * n'annonce pas `service-rights`, `granted` est alors toujours faux (BR-GRANT-016). `account` : l'identifiant du
+ * compte connecté, texte de l'agent, à valider (`isHearthUsername`) avant tout affichage.
+ */
+export interface ServiceRights {
+  known: boolean;
+  granted: boolean;
+  account: string;
+}
+
+export function toServiceRights(dto: ServiceRightsDto): ServiceRights {
+  return { known: dto.known, granted: dto.granted, account: dto.account };
 }

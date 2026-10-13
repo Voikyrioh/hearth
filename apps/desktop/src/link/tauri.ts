@@ -49,7 +49,14 @@ import {
   toSecurityRead,
   toSecurityState,
 } from "./security";
-import { type EngineInfo, type ServicesEvent, toEngine, toServicesEvent } from "./services";
+import {
+  type EngineInfo,
+  type ServiceRights,
+  type ServicesEvent,
+  toEngine,
+  toServiceRights,
+  toServicesEvent,
+} from "./services";
 import {
   type AccountInputCheck,
   type AccountList,
@@ -473,6 +480,10 @@ export class TauriLinkBridge implements LinkBridge {
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {
     return toEngine(unwrap(await commands.engineRecheck(serverId)));
+  }
+
+  async readServiceRights(serverId: string): Promise<ServiceRights> {
+    return toServiceRights(unwrap(await commands.readServiceRights(serverId)));
   }
 
   async openEngineDocs(): Promise<void> {

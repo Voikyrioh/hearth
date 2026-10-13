@@ -171,6 +171,13 @@ export const commands = {
 	 */
 	engineRecheck: (serverId: string) => typedError<EngineDto, LinkFailure>(__TAURI_INVOKE("engine_recheck", { serverId })),
 	/**
+	 *  Le droit « gérer les services » du compte connecté (BR-GRANT-011) : une lecture (`GET /me` et `GET /hello`),
+	 *  relue à l'ouverture de la section, à chaque reconnexion et après tout refus pour absence du droit. Aucune
+	 *  commande de cette coquille n'accorde ni ne retire le droit : il ne se donne que depuis le serveur
+	 *  (BR-GRANT-005). Hors « Connecté » : `NotConnected` sans rien envoyer.
+	 */
+	readServiceRights: (serverId: string) => typedError<ServiceRightsDto, LinkFailure>(__TAURI_INVOKE("read_service_rights", { serverId })),
+	/**
 	 *  Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est
 	 *  la constante [`ENGINE_DOCS_URL`].
 	 */
@@ -189,6 +196,12 @@ export type AccountDto = {
 	createdAt: string,
 	lastLoginAt: string | null,
 	sessionsOpen: number,
+	/**
+	 *  Le compte peut gérer les services (`rights` contient `"services"`, ADR-0041). Le client ne retient que
+	 *  le droit qu'il connaît. En LECTURE SEULE : rien dans cette coquille n'accorde ni ne retire ce droit
+	 *  (BR-GRANT-005).
+	 */
+	managesServices: boolean,
 };
 
 /**
@@ -208,6 +221,11 @@ export type AccountInputCheck = {
 export type AccountListDto = {
 	accounts: AccountDto[],
 	me: string,
+	/**
+	 *  L'agent annonce la capacité `service-rights` : sans elle, `manages_services` est faux pour tous parce
+	 *  que l'agent ne sait pas le dire, pas parce que personne ne l'a (BR-GRANT-016).
+	 */
+	rightsKnown: boolean,
 };
 
 /**  Issue d'une action de compte. */
@@ -493,7 +511,11 @@ export type AuditFilterDto = {
 };
 
 /**  Type d'action du filtre (liste fermée de la spec). */
-export type AuditKindDto = "login_ok" | "login_denied" | "accounts" | "update" | "denied";
+export type AuditKindDto = "login_ok" | "login_denied" | "accounts" | "update" | "denied" | 
+/**  Gestion des services (HRT-63, HRT-78). */
+"services" | 
+/**  Droits sur les services : accordé ou retiré depuis le serveur (HRT-77, HRT-78). */
+"services_rights";
 
 /**  Une entrée reçue en direct (`link://audit`). */
 export type AuditLiveEvent = {
@@ -708,6 +730,12 @@ export type LinkFailure =
 { kind: "not_connected" } | 
 /**  Le rôle du compte ne suffit pas (le serveur a répondu `FORBIDDEN_ROLE`, BR-AUDIT-001). */
 { kind: "forbidden" } | 
+/**
+ *  Le rôle suffit, mais le compte n'a pas le droit de gérer les services (`FORBIDDEN_ROLE` avec
+ *  `details.missing: "services"`, BR-GRANT-004) : ce n'est PAS un refus de rôle, l'interface ne dit
+ *  jamais « administrateur » (BR-GRANT-014) et relit son droit (BR-GRANT-011).
+ */
+{ kind: "missing_services_right" } | 
 /**  Le suivi de l'action n'a pas pu être écrit sur le disque : l'action n'a PAS été lancée. */
 { kind: "tracking_unavailable" } | 
 /**  Le disque est trop lent pour écrire le suivi à temps : l'action n'a PAS été lancée. */
@@ -954,6 +982,17 @@ export type ServiceDto = {
 	/**  Ports publiés au-delà de la borne de l'agent, non listés (`BR-SVC-021`). */
 	portsOmitted: number,
 	hostNetwork: boolean,
+};
+
+/**
+ *  Le droit « gérer les services » du compte connecté (HRT-78, ADR-0041, BR-GRANT-011), en lecture seule.
+ *  `known` faux : l'agent n'annonce pas `service-rights` (BR-GRANT-016), `granted` est alors toujours faux.
+ *  `account` : l'identifiant du compte connecté, texte de l'agent (l'interface le valide avant tout affichage).
+ */
+export type ServiceRightsDto = {
+	known: boolean,
+	granted: boolean,
+	account: string,
 };
 
 export type ServiceStateDto = "running" | "stopped" | "starting" | "stopping" | "error" | "restart_loop" | "paused" | "deploying" | "unknown";

@@ -1,0 +1,31 @@
+---
+id: BR-FICHE-008
+domaine: FICHE
+titre: Une ressource sans preuve n'a pas de nombre : « non mesurée » refuse un chiffre écrit à côté
+statut: active
+invariant: true
+source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-installer-serveur-de-jeu.md (BR-FICHE-008), contexts/hearth/conceptions/2026-10-13-technique-fiches-de-jeu.md, HRT-113
+maj: 2026-10-13
+---
+
+# BR-FICHE-008 — Une ressource sans preuve n'a pas de nombre : « non mesurée » refuse un chiffre écrit à côté
+
+## Règle
+Une fiche déclare le processeur, la mémoire et l'espace disque qu'elle demande, chacun avec sa preuve (`measured`, `measured_idle`, `publisher` avec son adresse en `https`, ou `unmeasured`). Une ressource `unmeasured` ne porte AUCUN nombre : le format refuse un chiffre écrit à côté (`RessourceNonMesureeAvecNombre`). La fiche Terraria déclare ses trois ressources `unmeasured`, sans nombre.
+
+## Application (code)
+- `crates/hearth-agent/src/domain/catalog/loading/invariants.rs::check_resources`
+- `crates/hearth-agent/src/domain/catalog/loading/schema/fiche.rs::{Resources, Evidence}`
+
+## Vérification
+- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::coherence_the_settings_of_a_fiche_agree_with_each_other (ressources non mesurées avec un nombre)`
+- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest`
+
+## Cas limites
+- La règle « le Catalogue ne montre une fiche que si sa mémoire minimale et son disque ont une preuve » est la règle de PUBLICATION (ADR-0053, HRT-114) : une fiche `unmeasured` reste `preview`. Toute fiche est embarquée dans le binaire, `preview` comprise (la publication n'est pas bloquée par une fiche en cours de preuve) ; une fiche `preview` n'est jamais PROPOSÉE : `domain::catalog::embedded::offered()`, la seule porte du catalogue vers l'application, ne rend que les fiches `published` (test `the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest`). `cargo xtask catalog-check` tourne dans la CI à chaque PR ; son option `--release` (refuser toute fiche `preview`) n'est branchée sur aucune publication aujourd'hui.
+
+## Règles liées
+- BR-FICHE-007, BR-FICHE-010
+
+## Historique
+- 2026-10-13 — création (HRT-113, format de fiche version 2, domaine pur).

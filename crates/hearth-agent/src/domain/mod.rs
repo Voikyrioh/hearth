@@ -3,6 +3,7 @@
 
 pub mod accounts;
 pub mod audit;
+pub mod catalog;
 pub mod compat;
 pub mod eviction;
 pub mod fingerprint_secret;
@@ -16,6 +17,8 @@ pub mod login_policy;
 pub mod machine;
 pub mod metrics;
 pub mod operations;
+pub mod ops;
+pub mod sealed;
 pub mod secret;
 pub mod services;
 pub mod session_token;

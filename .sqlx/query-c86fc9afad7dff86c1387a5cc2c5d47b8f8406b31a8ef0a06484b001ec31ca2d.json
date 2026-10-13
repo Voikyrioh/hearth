@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO service_spec_secrets (service_key, rev, field, nonce, sealed)\n                 VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "c86fc9afad7dff86c1387a5cc2c5d47b8f8406b31a8ef0a06484b001ec31ca2d"
+}

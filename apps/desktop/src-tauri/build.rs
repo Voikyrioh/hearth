@@ -57,6 +57,7 @@ const COMMANDS: &[&str] = &[
     "set_reauth_setting",
     "list_services_states",
     "engine_recheck",
+    "read_service_rights",
     "open_engine_docs",
 ];
 
