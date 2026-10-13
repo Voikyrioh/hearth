@@ -98,6 +98,26 @@ fn key_of(observation: &hearth_agent::domain::services::Observation) -> String {
     format!("c_{}", observation.id)
 }
 
+/// Ouvre le socket d'une lecture. Une adresse n'a que deux places d'attente d'authentification
+/// (`MAX_PENDING_PER_ADDRESS`), gardées jusqu'au `open` lu par l'agent : un test qui ouvre ses lectures
+/// à la file depuis `127.0.0.1` peut voir la place de la précédente rendue après sa propre demande
+/// (course d'ordonnancement, vue sous Linux). Le refus `503` est alors normal et l'on réessaie ; une
+/// place qui fuirait ferait échouer au délai.
+async fn open_socket(agent: &Agent, key: &str) -> WsClient {
+    let started = Instant::now();
+    loop {
+        match ws::open_logs(agent, key).await {
+            Ok(client) => return client,
+            Err(refused)
+                if refused.status == 503 && started.elapsed() < Duration::from_secs(10) =>
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(refused) => panic!("socket ouvert : {refused:?}"),
+        }
+    }
+}
+
 /// Ouvre une lecture : socket, `auth`, `open`.
 async fn read(
     agent: &Agent,
@@ -106,7 +126,7 @@ async fn read(
     tail: u32,
     since: Option<LogCursor>,
 ) -> WsClient {
-    let mut client = ws::open_logs(agent, key).await.expect("socket ouvert");
+    let mut client = open_socket(agent, key).await;
     client
         .send_value(&json!({ "type": "auth", "token": token }))
         .await;
