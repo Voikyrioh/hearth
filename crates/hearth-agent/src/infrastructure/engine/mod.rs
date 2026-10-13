@@ -16,4 +16,4 @@ pub mod installed;
 pub mod translate;
 
 pub use self::bollard::{BollardEngine, Target};
-pub use self::installed::InstallMarkers;
+pub use self::installed::{InstallMarkers, engine_detected};

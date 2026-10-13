@@ -12,7 +12,7 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use super::convert::storage;
 use crate::application::ports::{
     AccountTx, AttackModeTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx, OperationTx,
-    SessionTx, Store, StoreError, UnitOfWork,
+    ServicesRightTx, SessionTx, Store, StoreError, UnitOfWork,
 };
 
 /// Ressource nommée par les erreurs d'ouverture et de validation d'une unité de travail : le
@@ -49,6 +49,10 @@ pub struct SqliteUnitOfWork {
 #[async_trait]
 impl UnitOfWork for SqliteUnitOfWork {
     fn accounts(&mut self) -> &mut dyn AccountTx {
+        self
+    }
+
+    fn services_right(&mut self) -> &mut dyn ServicesRightTx {
         self
     }
 

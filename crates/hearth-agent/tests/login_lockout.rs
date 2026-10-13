@@ -12,6 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hearth_agent::application::ports::{Clock, HashError, KnownAddressRepo, PasswordHasher, Store};
 use hearth_agent::application::sessions::{LoginError, LoginOutcome, SessionService};
+use hearth_agent::domain::accounts::Authority;
 use hearth_agent::domain::accounts::{PlainPassword, Role};
 use hearth_agent::domain::identifier_slowdown::{self, FREE_FAILURES, MAX_DELAY};
 use hearth_agent::domain::known_address::MAX_PER_ACCOUNT;
@@ -363,7 +364,12 @@ async fn password_change_revocation_and_deletion_forget_the_known_addresses() {
     right(&env, "marie", CLIENT_ADDR).await.expect("connexion");
     assert_eq!(known().await, 1);
     env.service
-        .set_password(&marie.id, secret("Nouveau-Mot-De-Passe-77"), by())
+        .set_password(
+            &marie.id,
+            secret("Nouveau-Mot-De-Passe-77"),
+            &Authority::Server,
+            by(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -373,7 +379,7 @@ async fn password_change_revocation_and_deletion_forget_the_known_addresses() {
     );
 
     env.service
-        .set_password(&marie.id, secret(PASSWORD), by())
+        .set_password(&marie.id, secret(PASSWORD), &Authority::Server, by())
         .await
         .unwrap();
     let outcome = right(&env, "marie", CLIENT_ADDR).await.expect("connexion");
@@ -391,7 +397,7 @@ async fn password_change_revocation_and_deletion_forget_the_known_addresses() {
     assert_eq!(known().await, 0, "mot de passe changé par son titulaire");
 
     env.service
-        .set_password(&marie.id, secret(PASSWORD), by())
+        .set_password(&marie.id, secret(PASSWORD), &Authority::Server, by())
         .await
         .unwrap();
     right(&env, "marie", CLIENT_ADDR).await.expect("connexion");

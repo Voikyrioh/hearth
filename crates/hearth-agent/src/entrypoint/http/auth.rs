@@ -2,8 +2,11 @@
 //!
 //! Le routeur pose cette couche (`guard`) sur chaque route non publique, d'après le niveau
 //! d'accès déclaré dans `ENDPOINTS` : session valable, puis rôle pour une route réservée aux
-//! administrateurs (BR-ACCT-013 et BR-ACCT-014), avant toute lecture du corps. Un handler ne
-//! redéclare rien : il reçoit le contexte authentifié par l'extracteur `Caller`. La couche pose
+//! administrateurs (BR-ACCT-013 et BR-ACCT-014), ou droit « gérer les services » pour une route de
+//! service (BR-GRANT-003, BR-GRANT-004), avant toute lecture du corps. Le droit est celui que la
+//! session vient de relire en base : un retrait prend effet à la requête suivante (BR-GRANT-010).
+//! Un handler ne redéclare
+//! rien : il reçoit le contexte authentifié par l'extracteur `Caller`. La couche pose
 //! aussi le suivi des opérations quand la table le demande, et consigne au journal d'activité les
 //! refus faute de droits et les échecs des requêtes qui modifient (BR-AUDIT-003), d'après la
 //! colonne « action de journal » de la table : un handler n'y pense pas.
@@ -16,7 +19,8 @@ use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use hearth_proto::error::ErrorCode;
+use hearth_proto::api::accounts::RIGHT_SERVICES;
+use hearth_proto::error::{ErrorBody, ErrorCode};
 use hearth_proto::headers;
 
 use tracing::Instrument;
@@ -118,13 +122,38 @@ fn forbidden_message(action: Option<AuditAction>) -> &'static str {
     }
 }
 
+/// Le refus faute du droit « gérer les services » (BR-GRANT-004) : texte de la spec, jamais le mot
+/// « administrateur », et le droit manquant en détail pour le client. Même réponse que la route
+/// existe ou non, que le service existe ou non : le droit est jugé AVANT que la clé du chemin soit lue.
+fn missing_services_right() -> ApiError {
+    ApiError(ErrorBody::missing_right(
+        RIGHT_SERVICES,
+        "Tu n'as pas le droit de gérer les services de ce serveur.",
+    ))
+}
+
+/// Le refus d'un niveau d'accès : la réponse, et la raison que le journal retient.
+fn refusal(access: Access, audit: Option<AuditAction>) -> (ApiError, Reason) {
+    match access {
+        Access::Services => (missing_services_right(), Reason::InsufficientRights),
+        _ => (
+            ApiError::new(ErrorCode::ForbiddenRole, forbidden_message(audit)),
+            Reason::ReadOnly,
+        ),
+    }
+}
+
 /// Ce que le journal retient d'une réponse d'erreur : un refus faute de droits, ou un échec.
 /// `None` pour ce qui n'est pas une action ratée : pas d'appelant reconnu, connexion (qui se
 /// consigne elle-même), requête qui ne s'est pas exécutée (clé d'opération rejouée ou déjà en
 /// cours), version incompatible, route ou méthode inconnue. Exhaustif : un nouveau code oblige à
 /// choisir.
-fn failure_of(code: ErrorCode) -> Option<Outcome> {
-    match code {
+fn failure_of(mark: ErrorMark) -> Option<Outcome> {
+    match mark.code {
+        // Un refus qui nomme le droit manquant est un refus de droits, pas de lecture seule.
+        ErrorCode::ForbiddenRole if mark.missing_right => {
+            Some(Outcome::Denied(Reason::InsufficientRights))
+        }
         ErrorCode::ForbiddenRole => Some(Outcome::Denied(Reason::ReadOnly)),
         ErrorCode::ValidationError | ErrorCode::WeakPassword | ErrorCode::PayloadTooLarge => {
             Some(Outcome::Failed(Reason::Validation))
@@ -193,12 +222,15 @@ async fn authenticate(state: &AppState, parts: &Parts) -> Result<CurrentSession,
     })
 }
 
-/// Un niveau d'accès autorise-t-il ce compte ?
+/// Un niveau d'accès autorise-t-il ce compte ? L'UNIQUE point où le rôle et le droit sont jugés :
+/// aucun handler ne les relit (BR-GRANT-004). Les deux axes sont indépendants (BR-GRANT-001) : le rôle
+/// administrateur n'ouvre aucun acte de service, le droit n'ouvre aucune route d'administration.
 fn allows(access: Access, session: &CurrentSession) -> bool {
     match access {
         // `FirstMessage` n'a pas de couche d'accès : le flux s'authentifie lui-même.
         Access::Public | Access::FirstMessage | Access::Authenticated => true,
         Access::Admin => session.account.role.can_manage_accounts(),
+        Access::Services => session.account.services_right.can_manage_services(),
     }
 }
 
@@ -257,11 +289,9 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
         let target = guard.target_of(&parts).await;
         // BR-AUDIT-003, BR-AUDIT-021 : toute action refusée faute de droits est consignée,
         // consultation du journal comprise.
-        guard
-            .journal(&actor, target, Outcome::Denied(Reason::ReadOnly))
-            .await;
-        return ApiError::new(ErrorCode::ForbiddenRole, forbidden_message(guard.audit))
-            .into_response();
+        let (error, reason) = refusal(guard.access, guard.audit);
+        guard.journal(&actor, target, Outcome::Denied(reason)).await;
+        return error.into_response();
     }
     // Le corps n'est lu qu'ici, une fois la session reconnue ET le rôle admis : une requête sans jeton,
     // ou sans le rôle, ne fait lire aucun corps. Un refus `401` n'a donc pas de geste (il n'est pas
@@ -296,7 +326,7 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
                 .extensions()
                 .get::<ErrorMark>()
                 .copied()
-                .and_then(|ErrorMark(code)| failure_of(code)),
+                .and_then(failure_of),
         };
         if let Some(outcome) = outcome {
             guard.journal(&actor, target, outcome).await;
@@ -345,7 +375,7 @@ mod tests {
 
     use super::*;
     use crate::application::accounts::AccountView;
-    use crate::domain::accounts::{AccountId, Role, Username};
+    use crate::domain::accounts::{AccountId, Role, ServicesRight, Username};
     use crate::domain::sessions::SessionId;
     use time::OffsetDateTime;
 
@@ -358,11 +388,16 @@ mod tests {
     }
 
     fn session(role: Role) -> CurrentSession {
+        session_with(role, ServicesRight::None)
+    }
+
+    fn session_with(role: Role, services_right: ServicesRight) -> CurrentSession {
         CurrentSession {
             account: AccountView {
                 id: AccountId::new("A"),
                 username: Username::parse("marie").unwrap(),
                 role,
+                services_right,
                 created_at: OffsetDateTime::UNIX_EPOCH,
                 password_changed_at: OffsetDateTime::UNIX_EPOCH,
                 last_login_at: None,
@@ -389,6 +424,57 @@ mod tests {
         for access in [Access::Public, Access::FirstMessage, Access::Authenticated] {
             assert!(allows(access, &session(Role::ReadOnly)));
         }
+    }
+
+    #[test]
+    fn only_the_right_passes_the_services_level_whatever_the_role() {
+        // BR-GRANT-001 : deux axes, quatre combinaisons.
+        for role in [Role::Admin, Role::ReadOnly] {
+            assert!(!allows(
+                Access::Services,
+                &session_with(role, ServicesRight::None)
+            ));
+            assert!(allows(
+                Access::Services,
+                &session_with(role, ServicesRight::Manage)
+            ));
+        }
+        // Le droit n'ouvre aucune route d'administration, le rôle aucun acte de service.
+        assert!(!allows(
+            Access::Admin,
+            &session_with(Role::ReadOnly, ServicesRight::Manage)
+        ));
+        assert!(allows(
+            Access::Admin,
+            &session_with(Role::Admin, ServicesRight::None)
+        ));
+    }
+
+    #[test]
+    fn the_services_refusal_names_the_missing_right_and_never_an_administrator() {
+        let (error, reason) = refusal(Access::Services, Some(AuditAction::ServiceEnvReveal));
+        assert_eq!(reason, Reason::InsufficientRights);
+        assert_eq!(error.0.error.code, ErrorCode::ForbiddenRole);
+        assert_eq!(
+            error.0.error.message,
+            "Tu n'as pas le droit de gérer les services de ce serveur."
+        );
+        assert_eq!(
+            error.0.error.details,
+            serde_json::json!({ "missing": "services" })
+        );
+        assert!(
+            !error
+                .0
+                .error
+                .message
+                .to_lowercase()
+                .contains("administrateur")
+        );
+        // Un refus de rôle garde sa raison et son texte.
+        let (error, reason) = refusal(Access::Admin, Some(AuditAction::AuditRead));
+        assert_eq!(reason, Reason::ReadOnly);
+        assert_eq!(error.0.error.details, serde_json::json!({}));
     }
 
     #[test]
@@ -422,8 +508,20 @@ mod tests {
     #[test]
     fn an_error_is_journaled_as_a_denial_or_a_failure_and_never_as_noise() {
         use ErrorCode::*;
-        let outcome = |code| failure_of(code).map(|outcome| outcome.kind().code());
+        let outcome = |code| {
+            failure_of(ErrorMark {
+                code,
+                missing_right: false,
+            })
+            .map(|outcome| outcome.kind().code())
+        };
         assert_eq!(outcome(ForbiddenRole), Some("denied"));
+        // Un refus qui nomme le droit manquant : refusé pour « droits insuffisants », pas « lecture seule ».
+        let missing = failure_of(ErrorMark {
+            code: ForbiddenRole,
+            missing_right: true,
+        });
+        assert_eq!(missing, Some(Outcome::Denied(Reason::InsufficientRights)));
         for code in [
             ValidationError,
             WeakPassword,

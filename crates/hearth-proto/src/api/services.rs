@@ -22,6 +22,12 @@ use serde::{Deserialize, Serialize};
 /// un sujet inconnu fait refuser TOUT le message `subscribe`, `metrics` compris.
 pub const CAPABILITY_SERVICES: &str = "services";
 
+/// Capacité annoncée par `GET /hello` quand l'agent connaît le droit « gérer les services » : `rights`
+/// est porté par la description des comptes et le serveur refuse les actes de service sans lui
+/// (HRT-76, ADR-0041, BR-GRANT-016). Un agent qui ne l'annonce pas n'a pas ce droit : le client le
+/// traite comme non accordé pour tous et n'offre aucune action de service.
+pub const CAPABILITY_SERVICE_RIGHTS: &str = "service-rights";
+
 /// Version minimale du moteur de conteneurs prise en charge (Docker Engine 20.10, API 1.41).
 pub const MIN_ENGINE_VERSION: &str = "20.10";
 
@@ -338,7 +344,7 @@ pub struct ServiceItem {
     pub mounts_omitted: u32,
     pub restart: RestartMode,
     /// Noms des variables d'environnement du service, y compris celles de l'image (BR-SVC-008). Jamais
-    /// de valeur : elles ne se lisent que par `GET /services/{key}/env` (administrateur). Plafonné
+    /// de valeur : elles ne se lisent que par `GET /services/{key}/env` (comptes qui ont le droit « gérer les services »). Plafonné
     /// (`env_names_omitted` compte le reste). Absent d'un agent de la tranche 1 : liste vide.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env_names: Vec<Concealed>,
@@ -366,7 +372,8 @@ pub struct EnvVariable {
     pub value: Concealed,
 }
 
-/// La réponse de `GET /services/{key}/env` (administrateur seulement, BR-SVC-009) : les variables
+/// La réponse de `GET /services/{key}/env` (comptes qui ont le droit « gérer les services » seulement, quel que
+/// soit leur rôle, BR-SVC-009, BR-GRANT-003) : les variables
 /// du service avec leur valeur, dans l'ordre du moteur. Réponse jamais stockable
 /// (`Cache-Control: no-store`) ; son contenu n'entre dans aucune trace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

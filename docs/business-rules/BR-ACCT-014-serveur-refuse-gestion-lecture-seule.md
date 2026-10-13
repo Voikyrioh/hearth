@@ -34,3 +34,6 @@ L'interface masque, elle ne protège pas : un compte Lecture seule qui force l'a
 - 2026-10-04 — appliquée aux routes (HRT-04).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
 - 2026-10-07 : HRT-28 : le rôle est vérifié avant la confirmation (`403` avant tout `reauth`).
+
+## Précision HRT-76
+HRT-76 (ADR-0041) : le rôle gouverne les comptes, le journal et les mises à jour ; le droit « gérer les services » est un autre axe, indépendant (BR-GRANT-001). Un refus faute du droit n'est pas un refus de rôle : `details.missing: "services"`, cause « droits insuffisants » (BR-GRANT-004).

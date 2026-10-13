@@ -195,6 +195,7 @@ impl Transport for Mock {
                 id: "A".into(),
                 username: "marie".into(),
                 role: *self.0.next_role.lock().unwrap(),
+                rights: Vec::new(),
             },
         })
     }

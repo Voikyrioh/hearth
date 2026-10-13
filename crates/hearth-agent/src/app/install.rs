@@ -15,7 +15,7 @@ use crate::application::ports::{
     AdminAccounts, AdminAccountsError, AdminCredential, InstallPaths, PasswordHasher,
     ServiceManager, Store,
 };
-use crate::domain::accounts::{Role, Username};
+use crate::domain::accounts::{Role, ServicesRight, Username};
 use crate::domain::audit::Actor;
 use crate::domain::install::Version;
 use crate::domain::secret::Secret;
@@ -24,6 +24,7 @@ use crate::entrypoint::install::{self, Context};
 use crate::entrypoint::signal::interruption_signal;
 use crate::entrypoint::terminal::TerminalPrompter;
 use crate::infrastructure::argon2::Argon2Hasher;
+use crate::infrastructure::engine::{InstallMarkers, engine_detected};
 use crate::infrastructure::install::SystemHost;
 use crate::infrastructure::service::{Systemd, Unmanaged};
 use crate::infrastructure::sqlite::{Database, SqliteStore};
@@ -36,6 +37,16 @@ const DEFAULT_DATA_DIR: &str = "/var/lib/hearth";
 struct LocalAdmins {
     data_dir: PathBuf,
     hasher: Argon2Hasher,
+}
+
+/// Les comptes de l'installation tels que `install` les assemble, sur ce dossier de données : le vrai
+/// chemin de création du premier compte et de l'octroi du droit de gérer les services, sans service
+/// système ni installation de fichiers. Pour les tests d'intégration (`tests/install_real_accounts.rs`).
+pub fn local_admins(data_dir: PathBuf) -> Result<impl AdminAccounts, AppError> {
+    Ok(LocalAdmins {
+        data_dir,
+        hasher: Argon2Hasher::new()?,
+    })
 }
 
 fn failed(error: impl std::fmt::Display) -> AdminAccountsError {
@@ -61,6 +72,7 @@ impl AdminAccounts for LocalAdmins {
         &self,
         name: &Username,
         credential: AdminCredential,
+        grant_services: bool,
     ) -> Result<(), AdminAccountsError> {
         let database = Database::open(&self.data_dir).await.map_err(failed)?;
         let accounts = super::account_service(&database).map_err(failed)?;
@@ -77,25 +89,48 @@ impl AdminAccounts for LocalAdmins {
                     .await
             }
         };
+        // Le droit de gérer les services (BR-GRANT-006, 007), consigné au journal avec l'origine
+        // « ligne de commande du serveur » comme la commande `account services` (BR-GRANT-009). Si
+        // l'octroi échoue, le compte qui vient d'être créé n'est pas laissé derrière.
+        let result = match result {
+            Ok(_) if grant_services => {
+                let granted = async {
+                    let adapters = super::Adapters::production().map_err(failed)?;
+                    super::services_right_service(&database, &adapters)
+                        .set(name.as_str(), ServicesRight::Manage, &by)
+                        .await
+                        .map(|_| ())
+                        .map_err(failed)
+                }
+                .await;
+                if granted.is_err() {
+                    let _ = delete_account(&database, name).await;
+                }
+                granted
+            }
+            other => other.map(|_| ()).map_err(failed),
+        };
         // La base est fermée avant que le service ne l'ouvre : le journal WAL est reporté.
         database.pool().close().await;
-        result.map(|_| ()).map_err(failed)
+        result
     }
 
     async fn remove_created(&self, name: &Username) -> Result<(), AdminAccountsError> {
         let database = Database::open(&self.data_dir).await.map_err(failed)?;
-        let accounts = super::account_service(&database).map_err(failed)?;
-        let result = async {
-            let account = accounts.find(name.as_str()).await.map_err(failed)?;
-            let store = SqliteStore::new(database.pool().clone());
-            let mut tx = store.begin().await.map_err(failed)?;
-            tx.accounts().delete(&account.id).await.map_err(failed)?;
-            tx.commit().await.map_err(failed)
-        }
-        .await;
+        let result = delete_account(&database, name).await;
         database.pool().close().await;
         result
     }
+}
+
+/// Supprime un compte sans la garde du dernier administrateur : retour en arrière de l'installation.
+async fn delete_account(database: &Database, name: &Username) -> Result<(), AdminAccountsError> {
+    let accounts = super::account_service(database).map_err(failed)?;
+    let account = accounts.find(name.as_str()).await.map_err(failed)?;
+    let store = SqliteStore::new(database.pool().clone());
+    let mut tx = store.begin().await.map_err(failed)?;
+    tx.accounts().delete(&account.id).await.map_err(failed)?;
+    tx.commit().await.map_err(failed)
 }
 
 /// L'installation est-elle gérée par le système (option ou `HEARTH_MANAGED`) ?
@@ -129,6 +164,8 @@ struct ContextData {
     data_dir_override: Option<PathBuf>,
     command_line: String,
     systemd_missing: bool,
+    /// Un moteur de conteneurs est détecté (repère d'installation ou socket) et le pilotage permis.
+    engine_detected: bool,
 }
 
 fn assemble(cli: &Cli, managed: bool) -> Result<Assembled, AppError> {
@@ -159,6 +196,11 @@ fn assemble(cli: &Cli, managed: bool) -> Result<Assembled, AppError> {
             data_dir_override,
             command_line: std::env::args().collect::<Vec<_>>().join(" "),
             systemd_missing: !managed && !Systemd::is_running_here(),
+            engine_detected: engine_detected(
+                config.engine.enabled,
+                &InstallMarkers::linux(),
+                &config.engine.socket,
+            ),
         },
     })
 }
@@ -176,6 +218,7 @@ fn context<'a>(
         target: Version::parse(crate::build_info::VERSION).map_err(AppError::Version)?,
         command_line: data.command_line.clone(),
         systemd_missing: data.systemd_missing,
+        engine_detected: data.engine_detected,
     })
 }
 

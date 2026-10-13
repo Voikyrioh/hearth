@@ -58,6 +58,10 @@ L'installateur ne passe jamais ces variables à ses sous-processus (`df`, `syste
 
 Directement avec le binaire (sans le script) : `sudo --preserve-env=… ./hearth-agent install --yes` avec les mêmes variables.
 
+## Le droit de gérer les services
+
+Quand un moteur de conteneurs est détecté, l'installation demande si le **premier compte** pourra déployer et piloter des services (Entrée vaut oui en interactif ; sans terminal ou avec `--yes`, la réponse vaut non ; `--services` / `HEARTH_SERVICES=manage` l'accorde, `--no-services` le refuse). Sans moteur, la question n'est pas posée. Une réinstallation ou une mise à niveau n'accorde rien aux comptes existants. Procédure complète : `accorder-le-droit-de-gerer-les-services.md`.
+
 ## Réinstaller, mettre à niveau
 
 Relancer la même commande avec le nouveau binaire. L'agent détecte l'installation :

@@ -6,6 +6,7 @@ mod support;
 
 use hearth_agent::application::accounts::AccountError;
 use hearth_agent::application::ports::AccountRepo;
+use hearth_agent::domain::accounts::Authority;
 use hearth_agent::domain::accounts::{PasswordRule, Role, Username};
 use hearth_agent::domain::sessions::SessionId;
 use hearth_agent::infrastructure::sqlite::SqliteAccountRepo;
@@ -245,7 +246,12 @@ async fn an_administrator_password_change_closes_every_session() {
 
     let closed = env
         .service
-        .set_password(&marie.id, secret("Brand-New-Pass-7"), by())
+        .set_password(
+            &marie.id,
+            secret("Brand-New-Pass-7"),
+            &Authority::Server,
+            by(),
+        )
         .await
         .unwrap();
     assert_eq!(closed, 2);
@@ -270,7 +276,7 @@ async fn set_password_applies_the_rules_and_changes_nothing_when_refused() {
     let before = env.hash_of(&marie.id).await;
     let error = env
         .service
-        .set_password(&marie.id, secret("short"), by())
+        .set_password(&marie.id, secret("short"), &Authority::Server, by())
         .await
         .unwrap_err();
     assert!(matches!(error, AccountError::WeakPassword(_)));
@@ -407,7 +413,7 @@ async fn removing_an_unknown_account_is_not_found() {
     ));
     assert!(matches!(
         env.service
-            .set_password(&ghost, secret(PASSWORD), by())
+            .set_password(&ghost, secret(PASSWORD), &Authority::Server, by())
             .await,
         Err(AccountError::NotFound)
     ));
@@ -494,7 +500,7 @@ async fn errors_never_contain_the_password() {
     for attempt in attempts {
         let error = env
             .service
-            .set_password(&marie.id, secret(attempt), by())
+            .set_password(&marie.id, secret(attempt), &Authority::Server, by())
             .await
             .unwrap_err();
         messages.push(format!("{error} {error:?}"));

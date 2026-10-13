@@ -799,6 +799,186 @@ nothing_left "après désinstallation interactive"
 ok "désinstallation interactive : question reposée jusqu'à une réponse valide, purge complète"
 
 # --------------------------------------------------------------------------------------------
+# Droit de gérer les services (HRT-77, BR-GRANT-006 à 009) : question à l'installation, options,
+# commande `account services`, journal d'activité
+# --------------------------------------------------------------------------------------------
+# Lecture seule de la base de l'agent (python3 est dans l'image ; l'agent peut tourner).
+cat >/tmp/dbq.py <<'EOF'
+import sqlite3
+import sys
+
+db = sqlite3.connect("file:/var/lib/hearth/hearth.db?mode=ro", uri=True)
+if sys.argv[1] == "right":
+    print(db.execute("SELECT services_right FROM accounts WHERE username = ?", (sys.argv[2],)).fetchone()[0])
+else:
+    for row in db.execute(
+        "SELECT action, origin_kind, IFNULL(account, '-'), IFNULL(target, '-'), outcome "
+        "FROM audit_events WHERE action LIKE 'account.services.%' ORDER BY id"
+    ):
+        print("|".join(row))
+EOF
+right_of() { python3 /tmp/dbq.py right "$1"; }
+journal() { python3 /tmp/dbq.py journal; }
+journal_count() { journal | wc -l | tr -d ' '; }
+login_rights() { grep -o '"rights":\[[^]]*\]' "$OUT.login"; }
+purge() { "$INSTALLED" uninstall --purge --yes >/dev/null 2>&1 || die "purge ($1)"; nothing_left "$1"; }
+QUESTION='Ce compte pourra-t-il déployer et piloter des services sur ce serveur ? [O/n]'
+LATER="Tu pourras l'accorder plus tard avec : hearth-agent account services $USER_NAME --grant"
+
+# Aucun moteur (rien n'est installé dans le conteneur) : la question n'est pas posée, même avec
+# l'option d'octroi, et la commande pour accorder plus tard est donnée.
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --yes --services || die "installation sans moteur"
+must_say "Aucun moteur de conteneurs détecté : le droit de gérer les services n'est pas accordé. $LATER"
+must_not_say "$QUESTION"
+[ "$(right_of "$USER_NAME")" = none ] || die "le droit a été accordé sans moteur"
+[ "$(journal_count)" -eq 0 ] || die "une entrée de journal sans octroi"
+purge "après installation sans moteur"
+ok "sans moteur : question non posée, droit non accordé même avec --services, commande pour plus tard donnée"
+
+# Un faux moteur : le repère d'installation que l'agent cherche (aucun moteur n'est lancé).
+touch /usr/local/bin/dockerd && chmod 0755 /usr/local/bin/dockerd
+
+# Mode muet (--yes) : la réponse vaut non ; les comptes ne reçoivent pas le droit.
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --yes || die "installation muette avec moteur"
+must_say "Le compte $USER_NAME ne peut pas gérer les services de ce serveur. $LATER"
+must_not_say "$QUESTION"
+[ "$(right_of "$USER_NAME")" = none ] || die "mode muet : le droit a été accordé"
+[ "$(journal_count)" -eq 0 ] || die "mode muet : une entrée de journal"
+[ "$(login)" = 201 ] || die "connexion impossible (mode muet)"
+[ "$(login_rights)" = '"rights":[]' ] || die "mode muet : le client verrait un droit : $(login_rights)"
+ok "mode muet : réponse non, aucun droit, aucune entrée de journal, aucun droit annoncé au client"
+
+# La commande, en root sur le serveur : octroi, état déjà atteint, retrait, erreurs.
+run "$INSTALLED" account services "$USER_NAME" --grant || die "account services --grant"
+must_say "Le compte $USER_NAME peut maintenant gérer les services de ce serveur."
+[ "$(right_of "$USER_NAME")" = manage ] || die "l'octroi n'est pas en base"
+[ "$(journal)" = "account.services.grant|cli|-|$USER_NAME|ok" ] || die "journal après octroi : $(journal)"
+[ "$(login)" = 201 ] && [ "$(login_rights)" = '"rights":["services"]' ] || die "le client ne voit pas le droit : $(login_rights)"
+run "$INSTALLED" account services "$USER_NAME" --grant || die "account services --grant (déjà accordé)"
+must_say "Le compte $USER_NAME peut déjà gérer les services de ce serveur."
+[ "$(journal_count)" -eq 1 ] || die "un octroi sans effet a écrit une entrée"
+run "$INSTALLED" account services "$USER_NAME" --revoke || die "account services --revoke"
+must_say "Le compte $USER_NAME ne peut plus gérer les services de ce serveur."
+[ "$(right_of "$USER_NAME")" = none ] || die "le retrait n'est pas en base"
+[ "$(journal | tail -n 1)" = "account.services.revoke|cli|-|$USER_NAME|ok" ] || die "journal après retrait : $(journal)"
+run "$INSTALLED" account services "$USER_NAME" --revoke || die "account services --revoke (déjà retiré)"
+must_say "Le compte $USER_NAME ne pouvait pas gérer les services de ce serveur."
+[ "$(journal_count)" -eq 2 ] || die "un retrait sans effet a écrit une entrée"
+ok "commande : octroi, retrait, état déjà atteint dit comme tel sans entrée de journal, origine « cli », droit visible du client"
+
+if run "$INSTALLED" account services "$USER_NAME"; then die "sans option, la commande devrait échouer"; fi
+must_say "Précise --grant ou --revoke."
+if run "$INSTALLED" account services "$USER_NAME" --grant --revoke; then die "les deux options devraient être refusées"; fi
+if run "$INSTALLED" account services personne --grant; then die "un compte inconnu devrait être refusé"; fi
+must_say "Aucun compte « personne » sur ce serveur."
+# shellcheck disable=SC2016 # le nom piégé doit rester littéral
+if run "$INSTALLED" account services '$(touch /tmp/interprete)' --grant; then die "un nom piégé devrait être refusé"; fi
+[ ! -e /tmp/interprete ] || die "le nom du compte a été interprété"
+[ "$(right_of "$USER_NAME")" = none ] && [ "$(journal_count)" -eq 2 ] || die "un refus a modifié le droit ou le journal"
+cp "$INSTALLED" /tmp/agent-nobody && chmod 0755 /tmp/agent-nobody
+if run su -s /bin/sh nobody -c "/tmp/agent-nobody --data-dir /var/lib/hearth account services $USER_NAME --grant"; then
+    die "la commande hors root devrait échouer"
+fi
+must_say "Cette commande doit être lancée en root sur le serveur."
+[ "$(right_of "$USER_NAME")" = none ] && [ "$(journal_count)" -eq 2 ] || die "le refus hors root a modifié le droit ou le journal"
+ok "commande : sans option, deux options, compte inconnu, nom piégé non interprété, hors root : refus, ni droit ni journal modifiés"
+purge "après la commande"
+
+# Option explicite, sans terminal : octroi sans question, entrée de journal d'origine « cli ».
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --yes --services || die "installation --services"
+must_say "Le compte $USER_NAME peut maintenant gérer les services de ce serveur."
+[ "$(right_of "$USER_NAME")" = manage ] || die "--services : droit absent"
+[ "$(journal)" = "account.services.grant|cli|-|$USER_NAME|ok" ] || die "--services : journal $(journal)"
+purge "après --services"
+ok "--services : droit accordé au premier compte sans question, consigné (origine « cli »)"
+
+# --no-services l'emporte sur la variable d'environnement.
+run env HEARTH_SERVICES=manage HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --yes --no-services || die "installation --no-services"
+[ "$(right_of "$USER_NAME")" = none ] || die "--no-services n'a pas forcé non"
+purge "après --no-services"
+# La variable seule accorde ; une valeur inconnue est refusée avant toute écriture.
+run env HEARTH_SERVICES=manage HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --yes || die "installation HEARTH_SERVICES=manage"
+[ "$(right_of "$USER_NAME")" = manage ] || die "HEARTH_SERVICES=manage n'a pas accordé"
+purge "après HEARTH_SERVICES"
+if run env HEARTH_SERVICES=peut-etre HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --yes; then
+    die "une valeur inconnue de HEARTH_SERVICES devrait être refusée"
+fi
+must_say "HEARTH_SERVICES doit valoir « manage » ou « none »."
+nothing_left "HEARTH_SERVICES inconnue"
+# Seules les valeurs documentées (manage, none) sont lues : un synonyme booléen hérité d'un environnement
+# n'accorde jamais le droit.
+for value in true 1 yes on; do
+    if run env HEARTH_SERVICES=$value HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --yes; then
+        die "HEARTH_SERVICES=$value devrait être refusée"
+    fi
+    must_say "HEARTH_SERVICES doit valoir « manage » ou « none »."
+    nothing_left "HEARTH_SERVICES=$value"
+done
+ok "--no-services force non ; HEARTH_SERVICES=manage accorde ; une valeur inconnue ou un synonyme booléen est refusé avant toute écriture"
+
+# install.sh transmet l'option telle quelle (sans l'interpréter), sous le sh du conteneur (dash).
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW sh /deploy/install.sh --binary "$BIN" --yes --services || die "install.sh --services"
+must_say "Le compte $USER_NAME peut maintenant gérer les services de ce serveur."
+[ "$(right_of "$USER_NAME")" = manage ] || die "install.sh n'a pas transmis --services"
+purge "après install.sh --services"
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW sh /deploy/install.sh --binary "$BIN" --yes || die "install.sh sans option"
+[ "$(right_of "$USER_NAME")" = none ] || die "install.sh a accordé le droit sans option"
+purge "après install.sh sans option"
+ok "install.sh : --services transmis, sans option le droit n'est pas accordé"
+
+# Installation interactive (pty) : Entrée accorde le droit.
+feed "" "$USER_NAME" "$PW" "$PW" "" | script -qec "$BIN install" /dev/null >"$OUT" 2>&1 || die "installation interactive (Entrée)"
+must_say "Un compte qui peut gérer les services choisit des images et les fait tourner sur ton serveur."
+must_say "$QUESTION"
+must_say "Le compte $USER_NAME peut maintenant gérer les services de ce serveur."
+[ "$(right_of "$USER_NAME")" = manage ] || die "Entrée n'a pas accordé le droit"
+[ "$(journal)" = "account.services.grant|cli|-|$USER_NAME|ok" ] || die "interactif : journal $(journal)"
+purge "après installation interactive (Entrée)"
+# « n » ne l'accorde pas.
+feed "" "$USER_NAME" "$PW" "$PW" n | script -qec "$BIN install" /dev/null >"$OUT" 2>&1 || die "installation interactive (n)"
+must_say "Le compte $USER_NAME ne peut pas gérer les services de ce serveur. $LATER"
+[ "$(right_of "$USER_NAME")" = none ] || die "« n » a accordé le droit"
+purge "après installation interactive (n)"
+# Une réponse invalide repose la question ; la deuxième réponse compte.
+feed "" "$USER_NAME" "$PW" "$PW" peut-etre o | script -qec "$BIN install" /dev/null >"$OUT" 2>&1 || die "installation interactive (invalide puis o)"
+must_say "Réponds O ou N."
+[ "$(tr -d '\r' <"$OUT" | grep -cF "$QUESTION")" -eq 2 ] || die "la question devait être posée deux fois"
+[ "$(right_of "$USER_NAME")" = manage ] || die "invalide puis « o » n'a pas accordé le droit"
+purge "après installation interactive (invalide puis o)"
+# Deux réponses invalides de suite valent non, et la question n'est pas posée une troisième fois.
+feed "" "$USER_NAME" "$PW" "$PW" peut-etre vas-y o | script -qec "$BIN install" /dev/null >"$OUT" 2>&1 || die "installation interactive (deux invalides)"
+[ "$(tr -d '\r' <"$OUT" | grep -cF "$QUESTION")" -eq 2 ] || die "la question devait être posée deux fois seulement"
+[ "$(right_of "$USER_NAME")" = none ] || die "deux réponses invalides ont accordé le droit"
+purge "après installation interactive (deux invalides)"
+ok "installation interactive (pty) : Entrée accorde, « n » refuse, invalide puis « o » accorde, deux invalides valent non"
+
+# Installation gérée (NixOS) : même question, même façon (ici avec l'option, sans unité).
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --managed --yes --services || die "installation gérée --services"
+must_say "Le compte $USER_NAME peut maintenant gérer les services de ce serveur."
+[ "$(right_of "$USER_NAME")" = manage ] || die "installation gérée : droit absent"
+run "$BIN" uninstall --managed --purge --yes || die "purge de l'installation gérée (droit)"
+feed "" "$USER_NAME" "$PW" "$PW" o | script -qec "$BIN install --managed" /dev/null >"$OUT" 2>&1 || die "installation gérée interactive"
+must_say "$QUESTION"
+[ "$(right_of "$USER_NAME")" = manage ] || die "installation gérée interactive : droit absent"
+run "$BIN" uninstall --managed --purge --yes || die "purge de l'installation gérée interactive"
+nothing_left "après installations gérées avec le droit"
+ok "installation gérée : même question, même octroi, rien de laissé"
+
+# Une RÉINSTALLATION (même version du binaire, base déjà au schéma 0010) n'accorde aucun droit aux comptes
+# existants, option comprise. Ce que ce cas ne prouve PAS : le passage d'une base 0009 à 0010 par une vraie
+# mise à jour ; celui-là n'est couvert qu'au niveau SQL (`tests/migration_0010.rs`), pas de bout en bout.
+run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --yes || die "installation avant mise à jour"
+run "$BIN" install --yes --services || die "réinstallation avec --services"
+[ "$(right_of "$USER_NAME")" = none ] || die "une réinstallation a accordé le droit en silence"
+must_not_say "peut maintenant gérer les services"
+must_say "hearth-agent account services COMPTE --grant"
+purge "après réinstallation"
+ok "réinstallation (même version) : aucun droit accordé en silence, l'option inutilisée est signalée avec la commande"
+
+rm -f /usr/local/bin/dockerd /tmp/agent-nobody /tmp/dbq.py
+nothing_left "fin de la section droit de gérer les services"
+
+# --------------------------------------------------------------------------------------------
 # Installation gérée par le système : aucune unité, aucun binaire copié
 # --------------------------------------------------------------------------------------------
 run env HEARTH_ADMIN_USER=$USER_NAME HEARTH_ADMIN_PASSWORD=$PW "$BIN" install --managed --yes || die "l'installation gérée a échoué"

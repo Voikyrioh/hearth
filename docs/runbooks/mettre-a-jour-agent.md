@@ -10,6 +10,16 @@ Un administrateur demande la mise à jour depuis le client (écran livré avec H
 
 Pas de mise à jour à distance si l'installation est gérée par le système (`--managed`, NixOS) ou sans systemd : mettre à jour par la configuration du système, ou par `install.sh --binary` (BR-INSTALL-007).
 
+## Après la mise à jour : le droit de gérer les services
+
+À partir de la version qui apporte le droit « gérer les services » (ADR-0041, migration `0010`), **aucun compte existant ne l'a** : la mise à jour n'accorde rien en silence, pas même au premier administrateur (BR-GRANT-002). Sans le droit, un compte voit la liste des services mais ne peut ni les démarrer, ni les arrêter, ni les déployer, ni révéler les valeurs de leurs variables. Pour le donner, sur le serveur, en root :
+
+```sh
+sudo hearth-agent account services <compte> --grant
+```
+
+(`--revoke` le retire ; détail et messages : `accorder-le-droit-de-gerer-les-services.md`.) À faire une fois par compte concerné, y compris sur une installation gérée par le système (NixOS) : la commande ne dépend pas du mode d'installation.
+
 ## Prérequis : la clé de signature (déjà en place)
 
 La clé publique est **embarquée** dans l'agent (`crates/hearth-agent/update-key.pub`, identifiant de clé minisign `29944AFE28EABECE`) et elle est dans le dépôt depuis le 2026-10-12. La clé secrète correspondante reste chez Voiky, jamais dans le dépôt ni dans la CI.

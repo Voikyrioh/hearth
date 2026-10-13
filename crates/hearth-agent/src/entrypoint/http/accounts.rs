@@ -16,7 +16,7 @@ use super::auth::{Caller, Requester};
 use super::reauth::PasswordConfirmed;
 use super::{ApiError, AppState, wire};
 use crate::application::sessions::Reauthenticated;
-use crate::domain::accounts::AccountId;
+use crate::domain::accounts::{AccountId, Authority};
 use crate::domain::secret::Secret;
 
 fn closed(count: u64) -> Json<SessionsClosedResponse> {
@@ -106,14 +106,25 @@ pub async fn delete(
 pub async fn set_password(
     State(state): State<AppState>,
     _confirmed: Extension<Reauthenticated>,
+    Caller(caller): Caller,
     Requester(by): Requester,
     Path(id): Path<String>,
     body: Result<Json<SetPasswordRequest>, JsonRejection>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
     let Json(request) = body?;
+    // BR-GRANT-005 : une demande reçue du réseau n'a que l'autorité de son compte, relu à cette requête.
+    let authority = Authority::Network {
+        account: caller.account.id.clone(),
+        right: caller.account.services_right,
+    };
     let count = state
         .accounts
-        .set_password(&AccountId::new(id), Secret::from(request.password), &by)
+        .set_password(
+            &AccountId::new(id),
+            Secret::from(request.password),
+            &authority,
+            &by,
+        )
         .await?;
     Ok(closed(count))
 }

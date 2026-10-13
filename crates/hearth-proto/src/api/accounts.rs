@@ -13,12 +13,33 @@ pub enum RoleName {
     Readonly,
 }
 
+/// Le droit « gérer les services » (HRT-76, ADR-0041, BR-GRANT-001) dans `rights`. Indépendant du rôle,
+/// donné depuis le serveur seulement : aucune route ne l'accorde ni ne le retire (BR-GRANT-005).
+pub const RIGHT_SERVICES: &str = "services";
+
 /// Le compte tel que le client le connaît : sans date ni haché.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountInfo {
     pub id: String,
     pub username: String,
     pub role: RoleName,
+    /// Les droits du compte en plus de son rôle (`RIGHT_SERVICES`). Absent chez un agent ancien : lu
+    /// comme une liste vide (BR-GRANT-016). Une valeur inconnue est tolérée : un agent plus récent peut
+    /// ajouter un droit, un client ne retient que ceux qu'il connaît.
+    #[serde(default)]
+    pub rights: Vec<String>,
+}
+
+impl AccountInfo {
+    /// Le compte peut-il gérer les services ? (`false` chez un agent qui n'annonce pas `rights`.)
+    pub fn can_manage_services(&self) -> bool {
+        has_right(&self.rights, RIGHT_SERVICES)
+    }
+}
+
+/// `rights` contient-il ce droit ? Les valeurs inconnues sont ignorées.
+pub fn has_right(rights: &[String], right: &str) -> bool {
+    rights.iter().any(|candidate| candidate == right)
 }
 
 /// Un compte dans la liste d'administration.
@@ -32,6 +53,10 @@ pub struct AccountItem {
     pub last_login_at: Option<String>,
     /// Sessions dont l'expiration est dans le futur.
     pub sessions_open: u64,
+    /// Les droits du compte en plus de son rôle (voir `AccountInfo::rights`). Absent chez un agent
+    /// ancien : lu comme une liste vide.
+    #[serde(default)]
+    pub rights: Vec<String>,
 }
 
 /// Réponse de `GET /accounts`.
@@ -189,10 +214,47 @@ mod tests {
             created_at: "2026-10-04T10:30:15.250Z".into(),
             last_login_at: None,
             sessions_open: 0,
+            rights: Vec::new(),
         };
         assert_eq!(
             serde_json::to_value(item).unwrap()["last_login_at"],
             json!(null)
         );
+    }
+
+    #[test]
+    fn rights_are_an_additive_field_absent_means_none_and_an_unknown_right_is_tolerated() {
+        // Un agent ancien n'écrit pas `rights` : le client lit une liste vide.
+        let old: AccountInfo =
+            serde_json::from_value(json!({ "id": "A", "username": "marie", "role": "admin" }))
+                .unwrap();
+        assert!(old.rights.is_empty() && !old.can_manage_services());
+        let old_item: AccountItem = serde_json::from_value(json!({
+            "id": "A", "username": "marie", "role": "readonly",
+            "created_at": "2026-10-04T10:30:15.250Z", "last_login_at": null, "sessions_open": 0
+        }))
+        .unwrap();
+        assert!(old_item.rights.is_empty());
+        // Un agent plus récent peut ajouter un droit : il est ignoré, `services` reste lu.
+        let newer: AccountInfo = serde_json::from_value(json!({
+            "id": "A", "username": "marie", "role": "readonly", "rights": ["console", "services"]
+        }))
+        .unwrap();
+        assert!(newer.can_manage_services());
+        let unknown_only: AccountInfo = serde_json::from_value(json!({
+            "id": "A", "username": "marie", "role": "readonly", "rights": ["console"]
+        }))
+        .unwrap();
+        assert!(!unknown_only.can_manage_services());
+        // Un client ancien, qui ne connaît pas le champ, lit toujours le compte.
+        #[derive(Deserialize)]
+        struct OldInfo {
+            #[allow(dead_code)]
+            username: String,
+        }
+        let text = serde_json::to_string(&newer).unwrap();
+        assert!(serde_json::from_str::<OldInfo>(&text).is_ok());
+        // Le nom du droit sur le fil est celui de la spec.
+        assert_eq!(RIGHT_SERVICES, "services");
     }
 }

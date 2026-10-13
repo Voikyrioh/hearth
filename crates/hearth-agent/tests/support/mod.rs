@@ -487,6 +487,38 @@ impl Env {
         tx.commit().await.expect("validation");
     }
 
+    /// Pose le droit « gérer les services » directement en base (HRT-76). Aucune route ni aucun cas
+    /// d'usage ne le fait (BR-GRANT-005) : la commande du serveur est le ticket HRT-77, et c'est la
+    /// seule aide qui écrit cette colonne.
+    pub async fn grant_services(&self, username: &str) {
+        self.set_services_right(username, "manage").await;
+    }
+
+    /// Retire le droit directement en base : la requête suivante du compte est refusée (BR-GRANT-010).
+    pub async fn revoke_services(&self, username: &str) {
+        self.set_services_right(username, "none").await;
+    }
+
+    async fn set_services_right(&self, username: &str, value: &str) {
+        let changed = sqlx::query("UPDATE accounts SET services_right = ? WHERE username = ?")
+            .bind(value)
+            .bind(username)
+            .execute(self.db.pool())
+            .await
+            .expect("droit sur les services")
+            .rows_affected();
+        assert_eq!(changed, 1, "compte {username} inconnu");
+    }
+
+    /// Le droit stocké d'un compte (`none` ou `manage`).
+    pub async fn services_right_of(&self, username: &str) -> String {
+        sqlx::query_scalar("SELECT services_right FROM accounts WHERE username = ?")
+            .bind(username)
+            .fetch_one(self.db.pool())
+            .await
+            .expect("droit sur les services")
+    }
+
     pub async fn hash_of(&self, account: &AccountId) -> String {
         sqlx::query_scalar("SELECT password_hash FROM accounts WHERE id = ?")
             .bind(account.as_str())

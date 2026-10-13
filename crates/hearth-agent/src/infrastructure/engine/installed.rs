@@ -53,9 +53,37 @@ impl InstallMarkers {
     }
 }
 
+/// « Un moteur de conteneurs est-il détecté sur ce serveur ? » pour la question de l'installation
+/// (BR-GRANT-006) : un repère d'installation (`dockerd`, unité `docker.service`) ou le socket du
+/// moteur présent. Métadonnées seulement : rien n'est exécuté, rien n'est ouvert, aucune attente.
+/// Un pilotage désactivé dans la configuration (`engine.enabled = false`) vaut « aucun moteur » :
+/// le droit n'ouvrirait rien.
+pub fn engine_detected(enabled: bool, markers: &InstallMarkers, socket: &Path) -> bool {
+    enabled && (markers.any_present() || std::fs::symlink_metadata(socket).is_ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_engine_is_detected_by_its_markers_or_its_socket_unless_the_piloting_is_off() {
+        let here = std::env::current_exe().expect("exe");
+        let none = InstallMarkers::at(Vec::<PathBuf>::new());
+        let nowhere = Path::new("/nonexistent/docker.sock");
+        assert!(!engine_detected(true, &none, nowhere));
+        assert!(engine_detected(true, &none, &here), "le socket seul suffit");
+        assert!(engine_detected(
+            true,
+            &InstallMarkers::at([here.clone()]),
+            nowhere
+        ));
+        assert!(!engine_detected(
+            false,
+            &InstallMarkers::at([here.clone()]),
+            &here
+        ));
+    }
 
     #[test]
     fn nothing_listed_means_no_engine() {

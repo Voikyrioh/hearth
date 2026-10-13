@@ -48,12 +48,17 @@ pub mod action {
     pub const REAUTH_SETTING: &str = "reauth.setting";
     /// Le délai de 5 minutes du mot de passe s'ouvre : qui, quel poste, quand (HRT-30, BR-TRUST-053).
     pub const REAUTH_ELEVATION: &str = "reauth.elevation";
-    /// Un administrateur révèle les valeurs des variables d'un service : qui, quel service, jamais un
+    /// Un compte qui a le droit de gérer les services révèle les valeurs des variables d'un service : qui, quel service, jamais un
     /// nom ni une valeur (HRT-63, BR-SVC-009). Type d'action « Gestion des services » du filtre.
     pub const SERVICE_ENV_REVEAL: &str = "service.env.reveal";
+    /// Le droit « gérer les services » est accordé à un compte, depuis le serveur (ligne de commande ou
+    /// installation, HRT-77, BR-GRANT-009). Type d'action « Droits sur les services » du filtre.
+    pub const ACCOUNT_SERVICES_GRANT: &str = "account.services.grant";
+    /// Le droit « gérer les services » est retiré à un compte, depuis le serveur (HRT-77, BR-GRANT-009).
+    pub const ACCOUNT_SERVICES_REVOKE: &str = "account.services.revoke";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 25] = [
+    pub const ALL: [&str; 27] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -79,6 +84,8 @@ pub mod action {
         REAUTH_SETTING,
         REAUTH_ELEVATION,
         SERVICE_ENV_REVEAL,
+        ACCOUNT_SERVICES_GRANT,
+        ACCOUNT_SERVICES_REVOKE,
     ];
 }
 

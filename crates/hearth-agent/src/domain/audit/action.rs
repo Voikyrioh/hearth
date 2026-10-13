@@ -52,15 +52,20 @@ pub enum AuditAction {
     /// Le délai de 5 minutes du mot de passe s'ouvre (HRT-30, BR-TRUST-053) : le compte, le poste de la clé
     /// prouvée, l'origine ; jamais le mot de passe.
     ReauthElevation,
-    /// Un administrateur révèle les valeurs des variables d'un service (HRT-63, BR-SVC-009) : la cible
+    /// Un compte qui a le droit de gérer les services révèle les valeurs des variables d'un service (HRT-63, BR-SVC-009) : la cible
     /// est le service, jamais un nom ni une valeur de variable. Un refus faute de droits est consigné
     /// sous le même code par la couche d'accès.
     ServiceEnvReveal,
+    /// Le droit « gérer les services » est accordé à un compte, depuis le serveur (ligne de commande ou
+    /// installation, HRT-77, BR-GRANT-009). Jamais depuis une route (BR-GRANT-005).
+    AccountServicesGrant,
+    /// Le droit « gérer les services » est retiré à un compte, depuis le serveur (HRT-77, BR-GRANT-009).
+    AccountServicesRevoke,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 25] = [
+    pub const ALL: [AuditAction; 27] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -86,6 +91,8 @@ impl AuditAction {
         Self::ReauthSetting,
         Self::ReauthElevation,
         Self::ServiceEnvReveal,
+        Self::AccountServicesGrant,
+        Self::AccountServicesRevoke,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -116,6 +123,8 @@ impl AuditAction {
             Self::ReauthSetting => action::REAUTH_SETTING,
             Self::ReauthElevation => action::REAUTH_ELEVATION,
             Self::ServiceEnvReveal => action::SERVICE_ENV_REVEAL,
+            Self::AccountServicesGrant => action::ACCOUNT_SERVICES_GRANT,
+            Self::AccountServicesRevoke => action::ACCOUNT_SERVICES_REVOKE,
         }
     }
 
@@ -147,6 +156,8 @@ impl AuditAction {
             Self::ReauthSetting => "Réglage de la fréquence du mot de passe",
             Self::ReauthElevation => "Délai du mot de passe ouvert (5 minutes)",
             Self::ServiceEnvReveal => "Valeurs des variables révélées",
+            Self::AccountServicesGrant => "Droit de gérer les services accordé",
+            Self::AccountServicesRevoke => "Droit de gérer les services retiré",
         }
     }
 
