@@ -1,9 +1,10 @@
 //! Traduction d'une réponse d'inspection du moteur en [`Observation`] du domaine.
 //!
-//! Fonctions pures, testées sans moteur. Ce qu'on NE copie pas : `Config.Env` (variables
-//! d'environnement), `Config.Cmd`, `Config.Entrypoint`, `Path`, `Args` : ils restent dans la réponse
-//! du moteur et meurent avec elle. Cette tranche ne transporte ni valeur ni nom de variable, ni
-//! commande (ADR-0038).
+//! Fonctions pures, testées sans moteur. Ce qu'on NE copie JAMAIS : les VALEURS des variables
+//! d'environnement (`Config.Env` après le premier `=`), qui restent dans la réponse du moteur et
+//! meurent avec elle. Ce qu'on copie pour le détail d'un service (HRT-63, BR-SVC-007, BR-SVC-008) :
+//! les NOMS des variables et la commande lancée (`Path` et `Args`), bornés et rangés dans `Hidden`
+//! (`Debug` masqué).
 
 use std::collections::BTreeMap;
 
@@ -13,8 +14,11 @@ use bollard::models::{
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use crate::application::ports::EnvEntry;
+use crate::domain::secret::Secret;
 use crate::domain::services::image::image_name;
 use crate::domain::services::{
+    Hidden, MAX_COMMAND_ARG_CHARS, MAX_COMMAND_ARGS, MAX_ENV_NAME_CHARS, MAX_ENV_NAMES,
     MAX_IMAGE_REF_CHARS, MAX_IMAGE_TAG_CHARS, MAX_LABEL_CHARS, MAX_MOUNTS, MAX_NAME_CHARS,
     MAX_PATH_CHARS, MAX_PORTS, MountInfo, MountType, Observation, PortBinding, PortProtocol,
     PortScope, RestartPolicy, RunState, bounded, bounded_opt,
@@ -98,6 +102,7 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
     // FIX:01M4SFCSXW2P3QXP6FY8CS6ZMQ : les montages au-delà de la borne sont comptés, pas oubliés en silence.
     let mounts_omitted = u32::try_from(mounts.len().saturating_sub(MAX_MOUNTS)).unwrap_or(u32::MAX);
     mounts.truncate(MAX_MOUNTS);
+    let (env_names, env_omitted) = env_names_of(config.and_then(|config| config.env.as_deref()));
 
     Some(Observation {
         id,
@@ -130,7 +135,72 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
                 .map(String::as_str),
             MAX_LABEL_CHARS,
         ),
+        env_names,
+        env_omitted,
+        command: command_of(response),
+        stop_timeout_s: config
+            .and_then(|config| config.stop_timeout)
+            .and_then(|seconds| u32::try_from(seconds).ok()),
     })
+}
+
+/// Les noms des variables d'une liste `NOM=valeur` (la valeur est jetée sur place), nettoyés et bornés ;
+/// au-delà de `MAX_ENV_NAMES`, le surplus est compté. Une entrée sans nom est ignorée.
+fn env_names_of(env: Option<&[String]>) -> (Vec<Hidden>, u32) {
+    let names: Vec<Hidden> = env
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| {
+            let name = bounded(
+                entry
+                    .split_once('=')
+                    .map_or(entry.as_str(), |(name, _)| name),
+                MAX_ENV_NAME_CHARS,
+            );
+            (!name.is_empty()).then(|| Hidden::new(name))
+        })
+        .collect();
+    let omitted = u32::try_from(names.len().saturating_sub(MAX_ENV_NAMES)).unwrap_or(u32::MAX);
+    (names.into_iter().take(MAX_ENV_NAMES).collect(), omitted)
+}
+
+/// La commande lancée : le programme (`Path`) puis ses arguments (`Args`), chacun borné ; au-delà de
+/// `MAX_COMMAND_ARGS` éléments la liste finit par « … » (jamais présentée comme complète). `None` si le
+/// moteur n'en annonce aucune.
+fn command_of(response: &ContainerInspectResponse) -> Option<Vec<Hidden>> {
+    let program = response.path.as_deref().filter(|path| !path.is_empty())?;
+    let mut parts: Vec<Hidden> = std::iter::once(program)
+        .chain(response.args.iter().flatten().map(String::as_str))
+        .map(|part| Hidden::new(bounded(part, MAX_COMMAND_ARG_CHARS)))
+        .collect();
+    if parts.len() > MAX_COMMAND_ARGS {
+        parts.truncate(MAX_COMMAND_ARGS - 1);
+        parts.push(Hidden::new("…"));
+    }
+    Some(parts)
+}
+
+/// Les variables d'un conteneur avec leurs valeurs, pour la révélation (administrateur seulement,
+/// BR-SVC-009). Les noms sont bornés comme dans la liste, les valeurs gardées telles quelles (un
+/// certificat s'étend sur des lignes). Au plus `MAX_ENV_NAMES` variables, comme les noms. Une entrée
+/// sans `=` a une valeur vide.
+pub fn env_entries_of(response: &ContainerInspectResponse) -> Vec<EnvEntry> {
+    response
+        .config
+        .as_ref()
+        .and_then(|config| config.env.as_deref())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| {
+            let (name, value) = entry.split_once('=').unwrap_or((entry.as_str(), ""));
+            let name = bounded(name, MAX_ENV_NAME_CHARS);
+            (!name.is_empty()).then(|| EnvEntry {
+                name: Hidden::new(name),
+                value: Secret::from(value),
+            })
+        })
+        .take(MAX_ENV_NAMES)
+        .collect()
 }
 
 fn run_state_of(response: &ContainerInspectResponse) -> RunState {
@@ -320,8 +390,9 @@ mod tests {
     }
 
     #[test]
-    fn nothing_from_the_environment_or_the_command_survives_the_translation() {
+    fn names_and_command_are_kept_hidden_and_no_value_survives_the_translation() {
         let observation = observation_from(&response(json!({}))).expect("observation");
+        // `Debug` ne montre ni les noms, ni la commande, ni (a fortiori) les valeurs.
         let rendered = format!("{observation:?}");
         for sentinel in [
             "SENTINEL-ENV-VALUE",
@@ -329,9 +400,82 @@ mod tests {
             "SENTINEL-ARG",
             "PASSWORD",
             "API_TOKEN",
+            "entrypoint",
         ] {
             assert!(!rendered.contains(sentinel), "{sentinel} dans {rendered}");
         }
+        // Les noms sont gardés (BR-SVC-008), jamais une valeur.
+        let names: Vec<&str> = observation.env_names.iter().map(Hidden::expose).collect();
+        assert_eq!(names, vec!["PASSWORD", "API_TOKEN"]);
+        assert_eq!(observation.env_omitted, 0);
+        // La commande lancée : le programme puis ses arguments (BR-SVC-007).
+        let command: Vec<&str> = observation
+            .command
+            .iter()
+            .flatten()
+            .map(Hidden::expose)
+            .collect();
+        assert_eq!(
+            command,
+            vec!["/entrypoint.sh", "--secret-flag=SENTINEL-ARG"]
+        );
+        assert_eq!(observation.stop_timeout_s, None);
+    }
+
+    #[test]
+    fn the_stop_timeout_the_names_and_the_command_are_bounded() {
+        let env: Vec<String> = (0..300)
+            .map(|index| format!("VAR_{index}=v{index}"))
+            .collect();
+        let args: Vec<String> = (0..100).map(|index| format!("arg{index}")).collect();
+        let observation = observation_from(&response(json!({
+            "Path": "run",
+            "Args": args,
+            "Config": { "Image": "nginx:1.27", "Env": env, "StopTimeout": 120 }
+        })))
+        .expect("observation");
+        assert_eq!(observation.stop_timeout_s, Some(120));
+        assert_eq!(observation.env_names.len(), MAX_ENV_NAMES);
+        assert_eq!(observation.env_omitted as usize, 300 - MAX_ENV_NAMES);
+        let command = observation.command.expect("commande");
+        assert_eq!(command.len(), MAX_COMMAND_ARGS);
+        assert_eq!(command.last().map(Hidden::expose), Some("…"));
+        // Pas de délai négatif, pas de commande si le moteur n'annonce rien.
+        let observation = observation_from(&response(json!({
+            "Path": "", "Config": { "Image": "x", "StopTimeout": -1 }
+        })))
+        .expect("observation");
+        assert_eq!(
+            (observation.command, observation.stop_timeout_s),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn the_values_are_read_only_for_the_reveal_and_never_cleaned() {
+        let entries = env_entries_of(&response(json!({
+            "Config": { "Image": "x",
+                        "Env": ["PASSWORD=a=b\nc", "EMPTY=", "BARE", "=orphan", "API=SENTINEL-ENV-VALUE"] }
+        })));
+        let pairs: Vec<(&str, &str)> = entries
+            .iter()
+            .map(|entry| (entry.name.expose(), entry.value.expose()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("PASSWORD", "a=b\nc"),
+                ("EMPTY", ""),
+                ("BARE", ""),
+                ("API", "SENTINEL-ENV-VALUE")
+            ]
+        );
+        let shown = format!("{entries:?}");
+        assert!(
+            !shown.contains("SENTINEL") && !shown.contains("PASSWORD"),
+            "{shown}"
+        );
+        assert!(env_entries_of(&ContainerInspectResponse::default()).is_empty());
     }
 
     #[test]

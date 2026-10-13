@@ -99,10 +99,13 @@ pub fn try_init_with(
         .try_init()
 }
 
-/// Les bibliothèques de transport vers le moteur de conteneurs. `bollard` écrit le corps de chaque
-/// réponse décodée au niveau `debug` (`Decoded into string`), donc, pour une inspection, les
-/// variables d'environnement et la commande de chaque conteneur ; `hyper` et ses voisines écrivent
-/// des échanges bruts. Rien de ce qu'elles disent ne sort sous le niveau `warn` (HRT-61, ADR-0038).
+/// Les bibliothèques de transport vers le moteur de conteneurs, et de WebSocket. `bollard` écrit le
+/// corps de chaque réponse décodée au niveau `debug` (`Decoded into string`), donc, pour une
+/// inspection, les variables d'environnement et la commande de chaque conteneur ; `hyper` et ses
+/// voisines écrivent des échanges bruts ; `tungstenite` écrit chaque message WebSocket au niveau
+/// `trace` (`Received message`, `Sending frame`), donc, depuis HRT-63, les noms de variables et la
+/// commande de chaque service que le flux porte. Rien de ce qu'elles disent ne sort sous le niveau
+/// `warn` (HRT-61, HRT-63, ADR-0038).
 /// Les autres dépendances de l'agent n'ont pas été auditées ici une à une : celles qui parlent à
 /// `tracing` le font au niveau de leurs propres cibles (voir `SECURITY.md`).
 const GUARDED_TARGETS: &[&str] = &[
@@ -113,6 +116,8 @@ const GUARDED_TARGETS: &[&str] = &[
     "hyperlocal",
     "hyper_named_pipe",
     "h2",
+    "tungstenite",
+    "tokio_tungstenite",
 ];
 
 /// Cette trace peut-elle sortir ? Oui sauf si elle vient d'une cible gardée à un niveau plus
@@ -187,6 +192,8 @@ mod tests {
             "hyper_util::client::legacy::connect::http",
             "hyperlocal",
             "h2::codec",
+            "tungstenite::protocol",
+            "tokio_tungstenite",
         ] {
             assert!(!is_allowed(Level::DEBUG, target), "{target}");
             assert!(!is_allowed(Level::TRACE, target), "{target}");

@@ -19,7 +19,7 @@ Chaque ligne montre : le nom, l'image avec sa version, l'état, depuis quand, le
 - `crates/hearth-agent/src/domain/services/state.rs::derive_state (`since`, `never_started`)`
 
 ## Vérification
-- `crates/hearth-agent/src/entrypoint/services_wire.rs::tests::a_service_item_is_external_and_carries_no_future_field`
+- `crates/hearth-agent/src/entrypoint/services_wire.rs::tests::a_service_item_is_external_engine_driven_and_carries_no_future_field`
 - `crates/hearth-agent/src/infrastructure/engine/translate.rs::tests::a_running_container_is_translated`
 
 ## Historique

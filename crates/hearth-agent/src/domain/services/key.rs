@@ -3,13 +3,15 @@
 //! Opaque pour le client, calculée par l'agent, indépendante de l'identifiant du conteneur quand
 //! un service est recréé. Trois formes :
 //! - `h_<ULID>` : service créé par Hearth (tranche 5) ;
-//! - `u_<unité>` : service supervisé par une unité systemd (tranche 2) ;
+//! - `u_<unité>` : service supervisé par une unité systemd (tranche 2, HRT-63) ; le nom de l'unité
+//!   est celui de systemd, suffixe `.service` compris (`u_docker-terraria.service`) ;
 //! - `c_<identifiant du conteneur>` : tout autre conteneur.
 //!
-//! Cette tranche ne PRODUIT que `c_` ; `h_` et `u_` sont seulement analysés (une route future les
-//! recevra de l'extérieur).
+//! Les tranches 1 et 2 PRODUISENT `c_` et `u_` ; `h_` est seulement analysé (tranche 5).
 
 use std::fmt;
+
+use super::unit::UnitName;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyKind {
@@ -28,6 +30,12 @@ impl ServiceKey {
     /// La clé d'un conteneur que personne d'autre ne désigne : `c_<identifiant complet>`.
     pub fn for_container(container_id: &str) -> Option<Self> {
         Self::parse(&format!("c_{container_id}"))
+    }
+
+    /// La clé d'un service supervisé : `u_<unité>`. Le nom d'unité est déjà validé ; la clé ne dépend
+    /// pas du conteneur, que le système recrée à chaque démarrage (BR-SVC-016).
+    pub fn for_unit(unit: &UnitName) -> Self {
+        Self(format!("u_{unit}"))
     }
 
     /// Lit une clé reçue de l'extérieur ; `None` si elle n'a aucune des trois formes.
@@ -88,6 +96,15 @@ mod tests {
         let key = ServiceKey::for_container(&id).expect("key");
         assert_eq!(key.as_str(), format!("c_{id}"));
         assert_eq!(key.kind(), KeyKind::Container);
+    }
+
+    #[test]
+    fn a_supervised_service_key_is_u_then_the_unit_and_does_not_depend_on_the_container() {
+        let unit = UnitName::parse("docker-x.service").expect("unit");
+        let key = ServiceKey::for_unit(&unit);
+        assert_eq!(key.as_str(), "u_docker-x.service");
+        assert_eq!(key.kind(), KeyKind::Unit);
+        assert_eq!(ServiceKey::parse(key.as_str()), Some(key));
     }
 
     #[test]

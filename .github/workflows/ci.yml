@@ -150,6 +150,29 @@ jobs:
         run: |
           left="$(docker ps -aq --filter name=hearth-contract-)"
           if [ -n "$left" ]; then docker ps -a --filter name=hearth-contract-; docker rm -f $left; exit 1; fi
+      # HRT-63 (ADR-0037) : un conteneur lancé par une unité systemd (`systemd-run --unit=hearth-e2e
+      # --property=Restart=always docker run --rm --name hearth-e2e ...`, root). Le test détecte le
+      # propriétaire par /proc, lit l'unité, vérifie la clé `u_` du service, et CONSIGNE ce que fait un
+      # arrêt par l'API du moteur sur ce conteneur (question ouverte de la section 0 de la conception) :
+      # la réponse est dans le journal de l'étape et dans le résumé du job. Il ne la juge pas.
+      - name: Service supervisé par une unité systemd (propriétaire détecté, arrêt par l'API consigné)
+        run: |
+          bin="$(cargo test -p hearth-agent --test engine_supervised --no-run --message-format=json \
+            | jq -r 'select(.reason == "compiler-artifact" and .target.name == "engine_supervised" and .executable != null) | .executable' \
+            | tail -n 1)"
+          test -x "$bin"
+          sudo -E env "PATH=$PATH" HEARTH_TEST_SUPERVISED=1 "$bin" --ignored --test-threads=1 --nocapture
+      - name: Unités et conteneurs laissés par l'étape supervisée
+        if: always()
+        run: |
+          left="$(docker ps -aq --filter name=hearth-e2e)"
+          units="$(systemctl list-units --all --plain --no-legend 'hearth-e2e*' || true)"
+          if [ -n "$left" ] || [ -n "$units" ]; then
+            docker ps -a --filter name=hearth-e2e; echo "$units"
+            sudo systemctl stop 'hearth-e2e*' || true; sudo rm -f /run/systemd/system/hearth-e2e-file.service
+            [ -z "$left" ] || docker rm -f $left
+            exit 1
+          fi
 
   # Le binaire de l'agent (statique, musl), l'installation de bout en bout dans un conteneur avec
   # systemd, et les scripts de deploy/. Les conteneurs sont ceux de `cargo xtask` ; leur cache

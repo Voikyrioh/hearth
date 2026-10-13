@@ -2,7 +2,7 @@
 id: ADR-0037
 titre: Un service a une clé stable et un pilote (moteur ou superviseur systemd détecté) ; le moteur est la vérité, la base de l'agent ne retient que ce que lui seul sait
 type: architecture
-statut: proposée (non validée par Voiky ; posée avec HRT-61)
+statut: proposée (non validée par Voiky ; posée avec HRT-61, détection implémentée avec HRT-63)
 date: 2026-10-13
 portee: repo
 remplace: aucune
@@ -36,7 +36,12 @@ Sur forge, chaque conteneur est déclaré par `virtualisation.oci-containers` : 
 
 ## Mise en oeuvre (HRT-61, HRT-63)
 - **HRT-61 (lecture seule)** : `domain/services/key.rs` (`ServiceKey`) et `state.rs` (`derive_state`). Seule la clé `c_<identifiant complet>` est PRODUITE ; `h_<ULID>` et `u_<unité>` sont seulement analysées. Aucun superviseur, aucun port `ServiceSupervisor`, aucune table : tout service a le pilote du moteur (le champ `driver` du fil reste absent). Les démarrages non demandés sont comptés par l'agent (fenêtre glissante de 10 minutes en mémoire, un démarrage = un `StartedAt` distinct vu dans une inspection), jamais par `RestartCount` du moteur.
-- **HRT-63** : superviseur `proc_systemd`, clé `u_`, table `supervised_services` (migration `0009`).
+- **HRT-63 (détection, sans action)** : port `ServiceSupervisor` (`owners`, `unit` : ni démarrer, ni arrêter, ni redémarrer, qui arrivent avec HRT-64), adaptateur `infrastructure/supervisor/proc_systemd.rs`, clé `u_<unité>` (le suffixe `.service` fait partie de la clé : `u_docker-terraria.service`), champs `driver`, `unit`, `grace_s` du fil, table `supervised_services` (migration `0009`, qui crée aussi `service_intents`, `service_actions`, `deployments`, `audit_events.details`, non utilisées ici), service supervisé gardé dans la liste d'après l'état de son unité.
+  - **Détection** : pour chaque NOUVEAU conteneur (une fois pour sa vie, mise en cache), l'agent parcourt `/proc`, cherche un processus dont le programme est `docker` ou `podman` (cible du lien `exe`, à défaut `argv[0]` ; une enveloppe `.docker-wrapped` compte), dont la ligne de commande est un `run` (son `--name`, le premier fait foi) ou un `start` (ses arguments) qui désigne le conteneur par nom, identifiant complet ou préfixe d'au moins 12 caractères, et lit le `cgroup` de ce processus : le premier composant `.service` du chemin, sauf `user@*.service` (gestionnaire d'utilisateur) et tout chemin qui passe par un `.scope` (session). Deux unités qui revendiquent le même conteneur : aucun propriétaire. Un `docker run -d` dont le client a quitté n'est pas détecté (limite).
+  - **Sécurité** : le nom d'unité est lu sur le système, donc VALIDÉ (`UnitName`) avant d'aller dans une clé, un argument ou la base. `systemctl show --property=... -- <unité>` est lancé sans interpréteur, un argument à la fois, avec un délai de 5 s ; son absence est un cas normal et silencieux. Lecture seule de `/proc` : 100 000 processus et 2 s au plus par recherche.
+  - **Mémoire** : `supervised_services.last_view_json` ne contient que les réglages (nom, image, ports, montages, suppression à l'arrêt, délai) : ni nom de variable, ni commande, ni valeur. L'état de chaque unité connue est relu toutes les deux périodes de sonde (4 s). Une unité que le système ne connaît plus, dont le conteneur n'existe plus, est oubliée avec sa ligne (pas de purge horaire séparée).
+  - **Écarts avec la conception** : (1) la clé garde le suffixe `.service` ; (2) le code de sortie d'un service supervisé sans conteneur est celui du dernier arrêt VU par l'agent, jamais relu de `ExecMainStatus` ; (3) la commande affichée est `Path` + `Args` (ce que le conteneur lance), le moteur ne disant pas si elle vient de l'image.
+  - **Question ouverte de la section 0, à lire après l'étape CI `supervised`** : `tests/engine_supervised.rs` lance `systemd-run --unit=hearth-e2e --property=Restart=always docker run --rm --name hearth-e2e ...` (plus `RestartSec=3`), détecte le propriétaire, puis CONSIGNE ce que fait `docker stop` (même appel d'API que le moteur recevrait de Hearth) sur ce conteneur : suppression par `--rm`, relance par l'unité, nouvel identifiant, durée, états de l'unité et du service. Le résultat est dans le journal et le résumé de l'étape ; ce paragraphe sera complété avec ce résultat réel (non obtenu : l'étape n'a pas encore tourné). La décision (piloter par le superviseur) n'en dépend pas.
 
 ## Alternatives rejetées
 - **Piloter par l'API du moteur et annoncer « reparti tout seul »** : aucun arrêt ne tiendrait sur forge, aucun démarrage possible, sauvegarde d'un serveur de jeu coupée.
@@ -47,7 +52,7 @@ Sur forge, chaque conteneur est déclaré par `virtualisation.oci-containers` : 
 ## Conséquences
 - Plusieurs règles des specs « voir les services » et « cycle de vie » sont à amender : la liste, règle par règle, est dans la section « Écarts avec les specs fonctionnelles » de la conception technique.
 - Migration `0009_services.sql`.
-- Un test CI avec un vrai systemd et un vrai moteur (`systemd-run` d'un `docker run --rm`).
+- Un test CI avec un vrai systemd et un vrai moteur (`systemd-run` d'un `docker run --rm`) : `tests/engine_supervised.rs`, étape `supervised` du job `engine`.
 
 ## Références
 - nixpkgs, `nixos/modules/virtualisation/oci-containers.nix`.

@@ -1,19 +1,22 @@
 //! Ce que l'agent observe d'un conteneur et l'état de service qui en découle (`BR-SVC-004` à
 //! `BR-SVC-006`, `BR-SVC-012`).
 //!
-//! `derive_state` est une fonction pure. Dans cette tranche (lecture seule) elle ne connaît ni action
-//! de Hearth en cours, ni déploiement, ni superviseur : ces branches arrivent aux tranches 3 et 5
-//! (`starting`, `stopping`, `deploying`).
+//! `derive_state` est une fonction pure. Elle ne connaît ni action de Hearth en cours, ni déploiement
+//! (tranches 3 et 5 : `deploying`) ; `derive_unit_state` donne l'état d'un service supervisé dont le
+//! conteneur a disparu, d'après son unité (HRT-63).
 //!
-//! Une [`Observation`] ne porte AUCUNE valeur de variable d'environnement, aucun nom de variable et
-//! aucune commande : l'adaptateur du moteur les laisse dans la réponse du moteur et ne les copie pas.
+//! Une [`Observation`] ne porte AUCUNE valeur de variable d'environnement. Les NOMS des variables et la
+//! commande (détail d'un service, BR-SVC-008) y sont dans [`Hidden`], dont `Debug` ne montre rien ;
+//! l'adaptateur du moteur les copie bornés et laisse les valeurs dans la réponse du moteur.
 
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
 use time::{Duration, OffsetDateTime};
 
+use super::hidden::Hidden;
 use super::image::ImageName;
+use super::unit::{UnitActivity, UnitStatus};
 
 /// Fenêtre de comptage des démarrages non demandés (`BR-SVC-006`).
 pub const RESTART_LOOP_WINDOW: Duration = Duration::minutes(10);
@@ -104,6 +107,14 @@ pub struct Observation {
     pub auto_remove: bool,
     /// Projet Compose (information seulement).
     pub compose_project: Option<String>,
+    /// Noms des variables d'environnement (jamais une valeur), bornés (`MAX_ENV_NAMES`, `bounded`).
+    pub env_names: Vec<Hidden>,
+    /// Variables au-delà de `MAX_ENV_NAMES`, non gardées.
+    pub env_omitted: u32,
+    /// La commande lancée (entrée puis arguments, bornés) ; `None` si le moteur n'en annonce aucune.
+    pub command: Option<Vec<Hidden>>,
+    /// `Config.StopTimeout` du conteneur, en secondes, s'il en déclare un.
+    pub stop_timeout_s: Option<u32>,
 }
 
 impl Observation {
@@ -137,6 +148,10 @@ impl Observation {
             restart: RestartPolicy::None,
             auto_remove: false,
             compose_project: None,
+            env_names: Vec::new(),
+            env_omitted: 0,
+            command: None,
+            stop_timeout_s: None,
         }
     }
 }
@@ -145,6 +160,8 @@ impl Observation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceStateKind {
     Running,
+    /// Démarrage en cours : seulement pour un service supervisé dont l'unité démarre (HRT-63).
+    Starting,
     Stopped,
     Error,
     RestartLoop,
@@ -218,6 +235,99 @@ pub fn derive_state(
     }
 }
 
+/// L'état d'un service supervisé dont le conteneur n'existe pas (HRT-63, `BR-SVC-001`, `BR-SVC-005`,
+/// `BR-SVC-016`) : le système recrée le conteneur à chaque démarrage, l'état vient donc de l'unité.
+///
+/// - unité qui démarre : « démarrage » ; qui attend de se relancer après un arrêt (`auto-restart`) :
+///   « redémarre en boucle » ;
+/// - unité en échec : « en erreur » (le système a constaté l'échec) ; arrêtée : « arrêté » ;
+/// - `last_exit` : code du dernier arrêt vu par cet agent (jamais relu du système : il n'est pas
+///   affiché après un redémarrage de l'agent) ; `since` : le dernier instant connu du service.
+pub fn derive_unit_state(
+    status: &UnitStatus,
+    last_exit: Option<i64>,
+    since: Option<OffsetDateTime>,
+) -> Derived {
+    let state = match status.activity {
+        UnitActivity::Activating if status.auto_restart => ServiceStateKind::RestartLoop,
+        UnitActivity::Activating | UnitActivity::Active => ServiceStateKind::Starting,
+        UnitActivity::Deactivating => ServiceStateKind::Stopping,
+        UnitActivity::Inactive => ServiceStateKind::Stopped,
+        UnitActivity::Failed => ServiceStateKind::Error,
+        UnitActivity::Other => ServiceStateKind::Unknown,
+    };
+    let exit_code = match state {
+        ServiceStateKind::Stopped | ServiceStateKind::Error | ServiceStateKind::RestartLoop => {
+            last_exit
+        }
+        _ => None,
+    };
+    Derived {
+        state,
+        since,
+        never_started: false,
+        exit_code,
+    }
+}
+
+/// Délai d'arrêt d'un service qui n'en déclare aucun (celui du moteur : 10 secondes).
+pub const DEFAULT_STOP_TIMEOUT_S: u32 = 10;
+
+/// Le délai d'arrêt du service, en secondes (`BR-SVC-007`) : celui de son unité pour un service
+/// supervisé (c'est le système qui l'arrête), sinon celui que le conteneur déclare, sinon 10.
+pub fn stop_grace_s(observation: &Observation, unit: Option<&UnitStatus>) -> u32 {
+    unit.and_then(|status| status.timeout_stop_s)
+        .or(observation.stop_timeout_s)
+        .unwrap_or(DEFAULT_STOP_TIMEOUT_S)
+}
+
+/// L'état d'un service supervisé (HRT-63), conteneur présent ou non :
+///
+/// - conteneur présent et qui n'est pas arrêté (en marche, en pause, en relance, en suppression) :
+///   l'état du conteneur, comme tout autre service (`derive_state`) ;
+/// - conteneur arrêté, jamais démarré ou absent, et unité connue : l'état de l'UNITÉ
+///   (`derive_unit_state`). C'est le système du serveur qui relance ou non, donc lui qui sait si
+///   l'arrêt est voulu ou si l'unité est en échec (`BR-SVC-005`) ;
+/// - unité inconnue (superviseur muet) : l'état du conteneur s'il existe, sinon « non reconnu ».
+///
+/// `last_exit` : dernier code de sortie vu par CET agent pour l'unité (conteneur absent) ;
+/// `last_seen` : dernier instant où le service a été vu (conteneur absent).
+pub fn derive_supervised(
+    observation: &Observation,
+    container_present: bool,
+    status: Option<&UnitStatus>,
+    recent_starts: u32,
+    last_exit: Option<i64>,
+    last_seen: Option<OffsetDateTime>,
+) -> Derived {
+    let stopped_shape = matches!(
+        observation.run_state,
+        RunState::Exited | RunState::Dead | RunState::Created
+    );
+    if container_present && !stopped_shape {
+        return derive_state(observation, recent_starts, false);
+    }
+    match (status, container_present) {
+        (Some(status), true) => {
+            let mut derived = derive_unit_state(
+                status,
+                observation.exit_code,
+                observation.finished_at.or(observation.created_at),
+            );
+            derived.never_started = observation.run_state == RunState::Created;
+            derived
+        }
+        (Some(status), false) => derive_unit_state(status, last_exit, last_seen),
+        (None, true) => derive_state(observation, recent_starts, false),
+        (None, false) => Derived {
+            state: ServiceStateKind::Unknown,
+            since: last_seen,
+            never_started: false,
+            exit_code: None,
+        },
+    }
+}
+
 /// Les démarrages des 10 dernières minutes d'un service, comptés par l'agent (fenêtre glissante, en
 /// mémoire). Un démarrage est un instant de début d'exécution (`StartedAt`) distinct du précédent.
 #[derive(Debug, Clone, Default)]
@@ -286,7 +396,121 @@ mod tests {
             restart: RestartPolicy::None,
             auto_remove: false,
             compose_project: None,
+            env_names: vec![],
+            env_omitted: 0,
+            command: None,
+            stop_timeout_s: None,
         }
+    }
+
+    fn unit(activity: UnitActivity, auto_restart: bool) -> UnitStatus {
+        UnitStatus {
+            activity,
+            auto_restart,
+            restarts: true,
+            timeout_stop_s: Some(120),
+        }
+    }
+
+    #[test]
+    fn a_supervised_service_without_container_takes_its_state_from_the_unit() {
+        let state = |activity, auto_restart| {
+            derive_unit_state(&unit(activity, auto_restart), Some(1), Some(datetime(12)))
+        };
+        // Arrêtée : « arrêté », avec le code du dernier arrêt vu.
+        let stopped = state(UnitActivity::Inactive, false);
+        assert_eq!(stopped.state, ServiceStateKind::Stopped);
+        assert_eq!(
+            (stopped.exit_code, stopped.since),
+            (Some(1), Some(datetime(12)))
+        );
+        // En échec constaté par le système : « en erreur ».
+        assert_eq!(
+            state(UnitActivity::Failed, false).state,
+            ServiceStateKind::Error
+        );
+        // Qui attend de se relancer : « redémarre en boucle » ; qui démarre : « démarrage ».
+        assert_eq!(
+            state(UnitActivity::Activating, true).state,
+            ServiceStateKind::RestartLoop
+        );
+        let starting = state(UnitActivity::Activating, false);
+        assert_eq!(starting.state, ServiceStateKind::Starting);
+        assert_eq!(starting.exit_code, None, "pas de code pour un démarrage");
+        assert_eq!(
+            state(UnitActivity::Deactivating, false).state,
+            ServiceStateKind::Stopping
+        );
+        assert_eq!(
+            state(UnitActivity::Other, false).state,
+            ServiceStateKind::Unknown
+        );
+        // Un agent qui n'a rien vu s'arrêter n'affiche aucun code.
+        let unseen = derive_unit_state(&unit(UnitActivity::Failed, false), None, None);
+        assert_eq!((unseen.exit_code, unseen.since), (None, None));
+        assert!(!unseen.never_started);
+    }
+
+    #[test]
+    fn the_stop_grace_is_the_unit_s_then_the_container_s_then_ten_seconds() {
+        let mut web = observation(RunState::Running, None);
+        assert_eq!(stop_grace_s(&web, None), 10);
+        web.stop_timeout_s = Some(30);
+        assert_eq!(stop_grace_s(&web, None), 30);
+        assert_eq!(
+            stop_grace_s(&web, Some(&unit(UnitActivity::Active, false))),
+            120,
+            "le délai de l'unité l'emporte pour un service supervisé"
+        );
+        let unlimited = UnitStatus {
+            timeout_stop_s: None,
+            ..unit(UnitActivity::Active, false)
+        };
+        assert_eq!(stop_grace_s(&web, Some(&unlimited)), 30);
+    }
+
+    #[test]
+    fn a_supervised_service_follows_its_container_when_it_runs_and_its_unit_when_it_does_not() {
+        let failed = unit(UnitActivity::Failed, false);
+        let inactive = unit(UnitActivity::Inactive, false);
+        // Un conteneur qui tourne : son état, quoi que dise l'unité.
+        let running = observation(RunState::Running, None);
+        let derived = derive_supervised(&running, true, Some(&failed), 0, None, None);
+        assert_eq!(derived.state, ServiceStateKind::Running);
+        let derived = derive_supervised(&running, true, Some(&failed), 3, None, None);
+        assert_eq!(derived.state, ServiceStateKind::RestartLoop);
+        // Un conteneur arrêté avec un code non nul : « arrêté » si le système l'a arrêté, « en
+        // erreur » s'il constate l'échec.
+        let exited = observation(RunState::Exited, Some(143));
+        let derived = derive_supervised(&exited, true, Some(&inactive), 0, None, None);
+        assert_eq!(derived.state, ServiceStateKind::Stopped);
+        assert_eq!(derived.exit_code, Some(143));
+        let derived = derive_supervised(&exited, true, Some(&failed), 0, None, None);
+        assert_eq!(derived.state, ServiceStateKind::Error);
+        // Un conteneur jamais démarré garde sa marque.
+        let created = observation(RunState::Created, Some(0));
+        let derived = derive_supervised(&created, true, Some(&inactive), 0, None, None);
+        assert!(derived.never_started);
+        // Conteneur absent : l'unité décide, avec le dernier code vu et le dernier instant vu.
+        let derived = derive_supervised(
+            &exited,
+            false,
+            Some(&failed),
+            0,
+            Some(137),
+            Some(datetime(12)),
+        );
+        assert_eq!(derived.state, ServiceStateKind::Error);
+        assert_eq!(
+            (derived.exit_code, derived.since),
+            (Some(137), Some(datetime(12)))
+        );
+        // Superviseur muet : le conteneur s'il existe, sinon « non reconnu » (jamais « arrêté » à tort).
+        let derived = derive_supervised(&exited, true, None, 0, None, None);
+        assert_eq!(derived.state, ServiceStateKind::Error);
+        let derived = derive_supervised(&exited, false, None, 0, Some(1), Some(datetime(12)));
+        assert_eq!(derived.state, ServiceStateKind::Unknown);
+        assert_eq!(derived.exit_code, None);
     }
 
     #[test]

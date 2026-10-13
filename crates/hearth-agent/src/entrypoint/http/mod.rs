@@ -282,6 +282,18 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || post(services::recheck),
     },
+    // Révéler les valeurs des variables d'un service : administrateur seulement (BR-SVC-009). Le refus
+    // d'un compte en lecture seule est consigné par la couche d'accès, la réussite par le cas
+    // d'usage ; une consultation, pas un acte d'administration du socle (aucun mot de passe).
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/env",
+        access: Access::Admin,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceEnvReveal),
+        route: || get(services::env),
+    },
     Endpoint {
         method: Method::GET,
         path: "/accounts",
@@ -549,6 +561,15 @@ mod tests {
             assert_eq!(endpoint.audit, None, "{path}");
             assert!(endpoint.version_checked, "{path}");
         }
+        // La révélation des variables : réservée aux administrateurs, journalisée, jamais suivie.
+        let reveal = ENDPOINTS
+            .iter()
+            .find(|endpoint| endpoint.path == "/services/{key}/env")
+            .unwrap();
+        assert_eq!(reveal.method, Method::GET);
+        assert_eq!(reveal.access, Access::Admin);
+        assert!(!reveal.modifies() && !reveal.tracked && reveal.version_checked);
+        assert_eq!(reveal.audit, Some(AuditAction::ServiceEnvReveal));
         // Aucune route d'écriture de cette tranche : pas de route sous /services qui modifie.
         for endpoint in ENDPOINTS.iter().filter(|endpoint| {
             endpoint.path.starts_with("/services") || endpoint.path.starts_with("/engine")

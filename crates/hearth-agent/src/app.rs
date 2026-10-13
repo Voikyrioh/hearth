@@ -26,7 +26,8 @@ use crate::application::ports::{
     AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, ContainerEngine, CryptoError,
     FingerprintSecretError, FingerprintSecretStore, GpuProbe, HashError, HostEnvironment, IdGen,
     IdentityError, IdentityStore, MonotonicClock, PasswordHasher, PublicIdentity,
-    RequestFingerprinter, SecurityFeed, Store, StoreError, SystemProbe, TokenGen,
+    RequestFingerprinter, SecurityFeed, ServiceSupervisor, Store, StoreError, SystemProbe,
+    TokenGen,
 };
 use crate::application::security::SecurityService;
 use crate::application::services::{EngineTimings, ServicesRegistry};
@@ -56,8 +57,9 @@ use crate::infrastructure::security_feed::BroadcastSecurityFeed;
 use crate::infrastructure::sqlite::{
     Database, DatabaseError, ServiceDatabase, SqliteAccountRepo, SqliteAttackModeRepo,
     SqliteAuditRepo, SqliteDeviceRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo,
-    SqliteOperationRepo, SqliteSessionRepo, SqliteStore,
+    SqliteOperationRepo, SqliteServiceRepo, SqliteSessionRepo, SqliteStore,
 };
+use crate::infrastructure::supervisor::{NoSupervisor, ProcSystemd};
 use crate::infrastructure::system::gpu;
 use crate::infrastructure::system::{
     ProcBootInfo, SysinfoProbe, SystemHostEnvironment, SystemMachineInfo,
@@ -155,11 +157,13 @@ impl Metering {
     }
 }
 
-/// Ce qui parle au moteur de conteneurs (HRT-61) : le moteur lui-même (le port `ContainerEngine`), ce
-/// que l'agent sait du serveur et les cadences de la détection. Ceux de production par défaut (le
-/// socket de la configuration) ; les tests injectent un faux moteur et des cadences courtes.
+/// Ce qui parle au moteur de conteneurs (HRT-61) : le moteur lui-même (le port `ContainerEngine`), le
+/// superviseur qui dit quelle unité systemd lance un conteneur (HRT-63, détection seule), ce que l'agent
+/// sait du serveur et les cadences de la détection. Ceux de production par défaut (le socket de la
+/// configuration) ; les tests injectent un faux moteur, un faux superviseur et des cadences courtes.
 pub struct EngineParts {
     pub engine: Arc<dyn ContainerEngine>,
+    pub supervisor: Arc<dyn ServiceSupervisor>,
     pub host: Arc<dyn HostEnvironment>,
     pub timings: EngineTimings,
 }
@@ -168,8 +172,15 @@ impl EngineParts {
     /// Le moteur du socket Unix de la configuration. Désactivé, le socket n'est jamais ouvert : la
     /// tâche de détection ne sonde pas (l'adaptateur est construit mais jamais appelé).
     pub fn production(config: &crate::infrastructure::config::EngineConfig) -> Self {
+        // Sans systemd (ou hors Linux), il n'y a aucun superviseur à interroger.
+        let supervisor: Arc<dyn ServiceSupervisor> = if SystemHostEnvironment.describe().systemd {
+            Arc::new(ProcSystemd::system())
+        } else {
+            Arc::new(NoSupervisor)
+        };
         Self {
             engine: Arc::new(BollardEngine::unix(config.socket.clone())),
+            supervisor,
             host: Arc::new(SystemHostEnvironment),
             timings: EngineTimings::production(),
         }
@@ -581,8 +592,10 @@ pub async fn start_engined(
         adapters.clock.clone(),
     )?;
     let sessions = services.sessions.clone();
-    let registry = ServicesRegistry::new(
+    let registry = ServicesRegistry::with_supervision(
         engine.engine,
+        engine.supervisor,
+        Arc::new(SqliteServiceRepo::new(database.database().pool().clone())),
         engine.host.as_ref(),
         adapters.clock.clone(),
         metering.monotonic.clone(),

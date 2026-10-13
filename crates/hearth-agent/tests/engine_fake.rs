@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use hearth_agent::application::ports::ContainerEngine;
-use hearth_agent::domain::services::{PortBinding, PortProtocol, PortScope, RunState};
+use hearth_agent::domain::services::{Hidden, PortBinding, PortProtocol, PortScope, RunState};
 use support::engine_contract::{self, Harness, Run, Spec};
 use support::fake_engine::{FakeEngine, at, container};
 
@@ -39,6 +39,14 @@ impl Harness for FakeHarness {
             .into_iter()
             .collect();
         let id = observation.id.clone();
+        // Les variables du décor : leurs noms dans l'observation, leurs valeurs pour `env` seulement.
+        let pairs: Vec<(&str, &str)> = spec
+            .env
+            .iter()
+            .filter_map(|entry| entry.split_once('='))
+            .collect();
+        observation.env_names = pairs.iter().map(|(name, _)| Hidden::new(*name)).collect();
+        self.engine.set_env(&id, &pairs);
         self.runs.lock().unwrap().insert(id.clone(), spec.run);
         self.engine.put_silently(observation);
         self.engine.emit(&id, "create");

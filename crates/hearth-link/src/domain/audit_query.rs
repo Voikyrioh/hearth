@@ -36,6 +36,9 @@ pub enum ActionKind {
     Update,
     /// Action refusée faute de droits (hors connexion).
     Denied,
+    /// Gestion des services (HRT-63) : pour l'instant la seule révélation des valeurs de variables.
+    /// L'entrée du filtre à l'écran vient avec le détail d'un service, côté client.
+    Services,
 }
 
 /// Gestion des comptes : création, suppression, rôle, mots de passe, sessions, et les postes de
@@ -90,6 +93,7 @@ impl ActionKind {
             Self::Accounts => &ACCOUNT_CODES,
             Self::Update => &[action::AGENT_UPDATE],
             Self::Denied => &DENIED_CODES,
+            Self::Services => &[action::SERVICE_ENV_REVEAL],
         }
     }
 
@@ -98,7 +102,7 @@ impl ActionKind {
         match self {
             Self::LoginOk => &[OutcomeName::Ok],
             Self::LoginDenied | Self::Denied => &[OutcomeName::Denied],
-            Self::Accounts | Self::Update => &ALL_OUTCOMES,
+            Self::Accounts | Self::Update | Self::Services => &ALL_OUTCOMES,
         }
     }
 }
@@ -445,6 +449,7 @@ mod tests {
             ActionKind::Accounts,
             ActionKind::Update,
             ActionKind::Denied,
+            ActionKind::Services,
         ];
         for code in action::ALL {
             assert!(

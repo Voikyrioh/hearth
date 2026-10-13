@@ -18,6 +18,7 @@ pub mod random;
 pub mod security_feed;
 pub mod service;
 pub mod sqlite;
+pub mod supervisor;
 pub mod system;
 pub mod tls;
 pub mod update;

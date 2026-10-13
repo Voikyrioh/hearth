@@ -13,6 +13,7 @@ mod device_repo;
 mod known_address_repo;
 mod login_attempt_repo;
 mod operation_repo;
+mod services_repo;
 mod session_repo;
 mod store;
 
@@ -32,6 +33,7 @@ pub use device_repo::SqliteDeviceRepo;
 pub use known_address_repo::SqliteKnownAddressRepo;
 pub use login_attempt_repo::SqliteLoginAttemptRepo;
 pub use operation_repo::SqliteOperationRepo;
+pub use services_repo::SqliteServiceRepo;
 pub use session_repo::SqliteSessionRepo;
 pub use store::SqliteStore;
 

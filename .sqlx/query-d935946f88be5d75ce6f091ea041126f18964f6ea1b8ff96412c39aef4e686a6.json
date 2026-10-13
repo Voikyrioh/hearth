@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM supervised_services WHERE service_key = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "d935946f88be5d75ce6f091ea041126f18964f6ea1b8ff96412c39aef4e686a6"
+}
