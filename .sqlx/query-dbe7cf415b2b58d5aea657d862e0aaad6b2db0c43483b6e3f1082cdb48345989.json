@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT service_key, adopted_by, adopted_at FROM adopted_services ORDER BY service_key",
+  "describe": {
+    "columns": [
+      {
+        "name": "service_key",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "adopted_services",
+            "name": "service_key"
+          }
+        }
+      },
+      {
+        "name": "adopted_by",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "adopted_services",
+            "name": "adopted_by"
+          }
+        }
+      },
+      {
+        "name": "adopted_at",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "adopted_services",
+            "name": "adopted_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dbe7cf415b2b58d5aea657d862e0aaad6b2db0c43483b6e3f1082cdb48345989"
+}

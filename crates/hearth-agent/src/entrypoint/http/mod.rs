@@ -45,6 +45,7 @@ use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::AuditSink;
 use crate::application::security::SecurityService;
+use crate::application::service_adoption::ServiceAdoption;
 use crate::application::service_logs::ServiceLogs;
 use crate::application::services::ServicesRegistry;
 use crate::application::sessions::SessionService;
@@ -76,6 +77,8 @@ pub struct AppState {
     pub services: Arc<ServicesRegistry>,
     /// Lectures de journaux d'un service en direct, dix au plus (HRT-66).
     pub service_logs: Arc<ServiceLogs>,
+    /// Adopter un conteneur existant et le relâcher (HRT-80, ADR-0043).
+    pub service_adoption: Arc<ServiceAdoption>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -290,10 +293,11 @@ pub static ENDPOINTS: &[Endpoint] = &[
         route: || post(services::recheck),
     },
     // Les journaux d'un service en direct (HRT-66) : un WebSocket par lecture, authentifié par son premier
-    // message comme `/stream`. Ouvert aux deux rôles ; lire n'est pas journalisé (BR-SLOG-018, BR-SLOG-022).
-    // Classée `ServiceStream` dans `CLASSES` (tests). TODO HRT-79 : la restriction au droit « gérer les
-    // services » et aux seuls services adoptés arrive avec HRT-79 ; cette route passera alors au niveau
-    // `Services` (ou son premier message jugera le droit), pas avant.
+    // message comme `/stream`. Le niveau `Access::Services` ne s'applique pas à un socket : le droit est
+    // jugé par `domain::services::logs::may_read` (HRT-79), à l'ouverture puis toutes les 2 s et à chaque
+    // changement du compte. Service créé par Hearth : tous les comptes ; service adopté : le droit de
+    // gérer les services ; conteneur non adopté : réponse d'un service inconnu (BR-ADOPT-004,
+    // BR-ADOPT-015, BR-ADOPT-016). Lire n'est pas journalisé (BR-SLOG-022). Classée `ServiceStream`.
     Endpoint {
         method: Method::GET,
         path: "/services/{key}/logs",
@@ -315,6 +319,39 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: false,
         audit: Some(AuditAction::ServiceEnvReveal),
         route: || get(services::env),
+    },
+    // Adopter des conteneurs existants (HRT-80, ADR-0043, BR-ADOPT-005 à BR-ADOPT-013). Les trois exigent le
+    // droit « gérer les services » (niveau `Services`, refus consigné par la couche d'accès). La liste des
+    // candidats est consignée quand elle réussit (sans nom) comme quand elle est refusée, jamais sur le flux. Adopter est
+    // un acte d'administration du socle (preuve de clé du poste, mot de passe À CHAQUE FOIS : jamais
+    // couvert par l'élévation de 5 minutes) ; relâcher en est un aussi, couvert par l'élévation (il retire
+    // un accès, il n'en donne pas). Classées `Service`.
+    Endpoint {
+        method: Method::GET,
+        path: "/services/external",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceExternalRead),
+        route: || get(services::external),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/services/adopt",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceAdopt),
+        route: || post(services::adopt),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/release",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceRelease),
+        route: || post(services::release),
     },
     Endpoint {
         method: Method::GET,
@@ -663,10 +700,12 @@ mod tests {
         Admin(&'static str),
         /// Tout acte (ou lecture réservée) de service : niveau `Services`.
         Service,
-        /// Une lecture de service en direct, authentifiée par son premier message comme le flux : ouverte
-        /// aux deux rôles, jamais consignée (BR-SLOG-018, BR-SLOG-022). Équivalent de `OpenRead` pour un
-        /// socket. Restriction au droit et à l'adoption : arrive avec HRT-79, la ligne passera alors à
-        /// `Service`.
+        /// Une lecture de service en direct, authentifiée par son premier message comme le flux, jamais
+        /// consignée (BR-SLOG-022). Le rôle n'y entre pas ; le droit de gérer les services et l'adoption
+        /// sont jugés par `may_read` (HRT-79), seul point de contrôle, rejoué pendant la lecture : un
+        /// service créé par Hearth est lisible de tous, un adopté du seul droit, un conteneur non adopté
+        /// de personne (réponse d'un service inconnu). `Access::Services` ne peut pas l'exprimer : il est
+        /// jugé à l'ouverture d'une requête, pas rejoué pendant un socket.
         ServiceStream,
     }
 
@@ -696,10 +735,15 @@ mod tests {
         ("GET", "/stream", Stream),
         ("GET", "/services", OpenRead),
         ("POST", "/engine/recheck", OpenRead),
-        // Journaux en direct (HRT-66) : ouverts aux deux rôles aujourd'hui ; la restriction par le droit
-        // et par l'adoption arrive avec HRT-79 (la ligne deviendra `Service`).
+        // Journaux en direct (HRT-66, HRT-79) : le droit et l'adoption sont jugés par `may_read`, pas par
+        // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
         ("GET", "/services/{key}/env", Service),
+        // Adopter et relâcher (HRT-80) : le droit est exigé par le niveau, la confirmation par la table
+        // des actes de `hearth-proto`. Aucune route n'adopte « tout » (BR-ADOPT-021).
+        ("GET", "/services/external", Service),
+        ("POST", "/services/adopt", Service),
+        ("POST", "/services/{key}/release", Service),
         (
             "GET",
             "/accounts",
@@ -851,8 +895,24 @@ mod tests {
                 "{method} {path} : ligne de CLASSES sans route"
             );
         }
-        // Le seul acte de service d'aujourd'hui, et la seule route protégée de l'inventaire.
-        assert_eq!(CLASSES.iter().filter(|row| row.2 == Service).count(), 1);
+        // Les routes de niveau `Services` : la révélation des valeurs, la liste des candidats et les deux
+        // actes d'adoption. Une route nouvelle de ce niveau change cette liste, donc se relit ici.
+        let mut service_routes: Vec<_> = CLASSES
+            .iter()
+            .filter(|row| row.2 == Service)
+            .map(|row| (row.0, row.1))
+            .collect();
+        service_routes.sort_unstable();
+        assert_eq!(
+            service_routes,
+            [
+                ("GET", "/services/external"),
+                ("GET", "/services/{key}/env"),
+                ("POST", "/services/adopt"),
+                ("POST", "/services/{key}/release"),
+            ]
+        );
+        // Et la seule route protégée de l'inventaire.
         assert_eq!(
             CLASSES
                 .iter()

@@ -17,6 +17,8 @@ Le détail d'un service suit sa CLÉ (`ServiceKey`), jamais son nom ni l'identif
 - `c_<identifiant complet>` pour tout autre conteneur : supprimé puis recréé par un tiers sous le même nom, c'est un AUTRE service (le détail ouvert n'est jamais basculé).
 - `h_<ULID>` est seulement analysée (tranche 5).
 
+Amendé par HRT-79 (ADR-0043, BR-ADOPT-017, BR-ADOPT-018) : l'adoption suit cette clé. Un service adopté sans unité (`c_`) n'est adopté que pour la vie de son conteneur ; `supervised_services` ne retient que des services adoptés.
+
 Tant que l'unité existe pour le système, un service supervisé dont le conteneur disparaît RESTE listé (BR-SVC-001), d'après l'état de l'unité (BR-SVC-005), avec ses derniers réglages connus (`supervised_services`, migration `0009`). Quand le système ne connaît plus l'unité (non chargée, introuvable, masquée) et que son conteneur n'existe plus, le service sort de la liste et de la base. Le nom d'unité lu sur le système est VALIDÉ (`UnitName` : jeu de caractères de `systemd.unit(5)`, 255 caractères, suffixe `.service`, ni tiret ni point au début) avant d'entrer dans une clé, un argument de `systemctl` ou la base. Un conteneur sans propriétaire connu (`docker run -d` dont le client a déjà quitté, unité d'une autre nature) garde la clé `c_` : limite assumée (ADR-0037).
 
 ## Application (code)
@@ -53,3 +55,4 @@ Tant que l'unité existe pour le système, un service supervisé dont le contene
 
 ## Historique
 - 2026-10-13 — création (HRT-63, tranche 2 des déploiements : détail, superviseur, révélation des variables).
+- 2026-10-13 — HRT-79 (ADR-0043) : l'adoption suit la clé ; `supervised_services` ne retient que les services adoptés (migration `0011`).

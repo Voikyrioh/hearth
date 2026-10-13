@@ -9,7 +9,11 @@
 //!
 //! Pur : aucune E/S.
 
-use hearth_proto::admin_act::{ActKind, AdminAct, Contract, ROUTES, RouteAct};
+use std::borrow::Cow;
+
+use hearth_proto::admin_act::{
+    ActKind, AdminAct, Contract, ROUTES, RouteAct, decode_segment, is_service_key,
+};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
 use serde_json::Value;
@@ -18,7 +22,7 @@ use serde_json::Value;
 const ID_MAX_LEN: usize = 64;
 
 /// Ce que dit une requête sur l'administration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route<'a> {
     /// Hors de la liste fermée : une lecture, ou une route que l'agent ne garde pas par `reauth`.
     Free,
@@ -37,11 +41,32 @@ fn is_id(text: &str) -> bool {
     !text.is_empty() && text.len() <= ID_MAX_LEN && text.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+/// La clé d'un service lue dans un segment du chemin (`{key}`, HRT-80), décodée comme le fait l'agent
+/// (`decode_segment`, source unique). Le segment ne contient, tel qu'il part, que des caractères qui
+/// s'écrivent sans encodage ou l'encodage en pourcentage : une barre oblique inverse nue n'est pas permise
+/// (les URL la lisent comme une `/`) ; elle voyage en `%5C`. Le segment est découpé AVANT le décodage :
+/// un `%2F` décodé donne une clé invalide (rejetée ici), jamais un autre segment. `None` : pas une clé,
+/// la requête part comme une route inconnue de l'agent, sans pouvoir se faire passer pour un acte.
+fn key_of(segment: &str) -> Option<Cow<'_, str>> {
+    if !segment
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b':' | b'@' | b'%'))
+    {
+        return None;
+    }
+    let key = if segment.contains('%') {
+        Cow::Owned(decode_segment(segment)?)
+    } else {
+        Cow::Borrowed(segment)
+    };
+    is_service_key(&key).then_some(key)
+}
+
 /// La ligne de la liste fermée que vise cette requête, avec l'identifiant du chemin quand le motif en a
-/// un. Un chemin dont l'identifiant n'a pas la forme d'un identifiant n'est PAS reconnu : il part, s'il
+/// un (`{id}` d'un compte, ou `{key}` d'un service). Un chemin dont l'identifiant n'a pas la forme d'un identifiant n'est PAS reconnu : il part, s'il
 /// part, comme une route inconnue de l'agent (qui répondra `404`), sans pouvoir se faire passer pour
 /// un autre acte.
-pub fn route_of<'a>(method: &str, path: &'a str) -> Option<(&'static RouteAct, &'a str)> {
+pub fn route_of<'a>(method: &str, path: &'a str) -> Option<(&'static RouteAct, Cow<'a, str>)> {
     let wanted: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     ROUTES.iter().find_map(|route| {
         if route.method != method {
@@ -51,13 +76,15 @@ pub fn route_of<'a>(method: &str, path: &'a str) -> Option<(&'static RouteAct, &
         if pattern.len() != wanted.len() {
             return None;
         }
-        let mut id = "";
+        let mut id = Cow::Borrowed("");
         for (expected, got) in pattern.iter().zip(&wanted) {
             if *expected == "{id}" {
                 if !is_id(got) {
                     return None;
                 }
-                id = got;
+                id = Cow::Borrowed(*got);
+            } else if *expected == "{key}" {
+                id = key_of(got)?;
             } else if expected != got {
                 return None;
             }
@@ -88,13 +115,29 @@ fn mode(body: Option<&Value>) -> Result<ReauthMode, Unreadable> {
     }
 }
 
+/// Les clés d'une adoption (`keys`, un tableau de textes) : un corps dont une entrée n'est pas un texte
+/// n'est pas un acte.
+fn keys(body: Option<&Value>) -> Result<Vec<&str>, Unreadable> {
+    body.and_then(|body| body.get("keys"))
+        .and_then(Value::as_array)
+        .ok_or(Unreadable)?
+        .iter()
+        .map(|key| key.as_str().ok_or(Unreadable))
+        .collect()
+}
+
 /// L'acte d'un genre donné, lu dans le chemin (`id`) et le corps. Correspondance EXHAUSTIVE : un genre
 /// d'acte de plus ne compile pas tant qu'on ne dit pas comment le reconstruire.
 fn build<'a>(
     kind: ActKind,
-    id: &'a str,
+    id: Cow<'a, str>,
     body: Option<&'a Value>,
 ) -> Result<AdminAct<'a>, Unreadable> {
+    // Seule la clé d'un service peut être décodée (texte possédé) ; l'identifiant d'un compte est emprunté.
+    let id_ref = || match &id {
+        Cow::Borrowed(text) => Ok(*text),
+        Cow::Owned(_) => Err(Unreadable),
+    };
     let active = body
         .and_then(|body| body.get("active"))
         .and_then(Value::as_bool);
@@ -104,12 +147,12 @@ fn build<'a>(
             role: role(body)?,
         },
         ActKind::AccountRole => AdminAct::AccountRole {
-            target: id,
+            target: id_ref()?,
             role: role(body)?,
         },
-        ActKind::AccountPassword => AdminAct::AccountPassword { target: id },
-        ActKind::AccountDelete => AdminAct::AccountDelete { target: id },
-        ActKind::SessionsRevoke => AdminAct::SessionsRevoke { target: id },
+        ActKind::AccountPassword => AdminAct::AccountPassword { target: id_ref()? },
+        ActKind::AccountDelete => AdminAct::AccountDelete { target: id_ref()? },
+        ActKind::SessionsRevoke => AdminAct::SessionsRevoke { target: id_ref()? },
         ActKind::AgentUpdate => AdminAct::AgentUpdate {
             version: text(body, "version")?,
             sha256: text(body, "sha256")?,
@@ -121,6 +164,8 @@ fn build<'a>(
         ActKind::AttackModeEnable | ActKind::AttackModeDisable => return Err(Unreadable),
         ActKind::AccountPasswordOwn => AdminAct::AccountPasswordOwn,
         ActKind::ReauthSetting => AdminAct::ReauthSetting { mode: mode(body)? },
+        ActKind::ServicesAdopt => AdminAct::services_adopt(keys(body)?),
+        ActKind::ServiceRelease => AdminAct::ServiceRelease { target: id },
     })
 }
 
@@ -139,7 +184,7 @@ pub fn classify<'a>(
     route
         .kinds
         .iter()
-        .find_map(|kind| build(*kind, id, body).ok())
+        .find_map(|kind| build(*kind, id.clone(), body).ok())
         .map(Route::Act)
         .ok_or(Unreadable)
 }
@@ -152,13 +197,17 @@ mod tests {
 
     /// Un chemin et un corps d'exemple pour chaque route de la liste.
     fn sample(route: &RouteAct) -> (String, Value) {
-        let path = route.pattern.replace("{id}", "01ABC");
+        let path = route
+            .pattern
+            .replace("{id}", "01ABC")
+            .replace("{key}", "u_docker-terraria.service");
         let body = match route.pattern {
             "/accounts" => json!({ "username": "paul", "role": "readonly" }),
             "/accounts/{id}" if route.method == "PATCH" => json!({ "role": "admin" }),
             "/agent/update" => json!({ "version": "0.2.0", "sha256": "ab" }),
             "/security/attack-mode" => json!({ "active": true }),
             "/me/reauth" => json!({ "password": "each" }),
+            "/services/adopt" => json!({ "keys": ["c_0123abcd", "u_docker-x.service"] }),
             _ => json!({}),
         };
         (path, body)
@@ -214,6 +263,78 @@ mod tests {
             panic!("acte attendu");
         };
         assert_eq!(act.params(), vec![b"0.3.0".to_vec(), b"ab".to_vec()]);
+    }
+
+    #[test]
+    fn the_adoption_signs_the_keys_of_the_body_and_the_release_signs_the_key_of_the_path() {
+        let body = json!({ "keys": ["u_b.service", "c_aa"], "reauth": { "password": "x" } });
+        let Ok(Route::Act(act)) = classify("POST", "/services/adopt", Some(&body)) else {
+            panic!("acte attendu");
+        };
+        assert_eq!(act, AdminAct::services_adopt(["c_aa", "u_b.service"]));
+        // Une entrée qui n'est pas un texte, ou pas de clés : pas un acte.
+        for bad in [json!({ "keys": [1] }), json!({}), json!({ "keys": "c_aa" })] {
+            assert_eq!(
+                classify("POST", "/services/adopt", Some(&bad)),
+                Err(Unreadable)
+            );
+        }
+        let empty = json!({});
+        let Ok(Route::Act(act)) = classify(
+            "POST",
+            "/services/u_docker-7dtd.service/release",
+            Some(&empty),
+        ) else {
+            panic!("acte attendu");
+        };
+        assert_eq!(
+            act,
+            AdminAct::ServiceRelease {
+                target: "u_docker-7dtd.service".into()
+            }
+        );
+        // Une unité au nom échappé par le système (`-` pour un tiret) voyage encodée (`%5C`) : la
+        // liaison la décode comme l'agent et signe la clé en clair, pour toute clé que l'agent peut émettre.
+        for (wire, key) in [
+            (
+                "/services/u_docker-my%5Cx2dapp.service/release",
+                "u_docker-my\\x2dapp.service",
+            ),
+            (
+                "/services/u_docker-my%5cx2dapp.service/release",
+                "u_docker-my\\x2dapp.service",
+            ),
+            ("/services/u_a%40b.service/release", "u_a@b.service"),
+            ("/services/u_a@b:c.service/release", "u_a@b:c.service"),
+        ] {
+            let Ok(Route::Act(act)) = classify("POST", wire, Some(&empty)) else {
+                panic!("acte attendu pour {wire}");
+            };
+            assert_eq!(act.target(), key, "{wire}");
+            assert!(is_service_key(act.target()));
+            assert!(act.params().is_empty());
+        }
+        // Un segment qui n'a pas la forme d'une clé n'est jamais pris pour un acte.
+        for path in [
+            "/services/abc/release",
+            "/services/c_a%2Fb/release",
+            "/services/../release",
+            "/services//release",
+            "/services/c_/release",
+            // La clé ne sort jamais de son segment : `/`, `..` et `%2f` encodés, ou une barre oblique
+            // inverse nue (que les URL lisent comme `/`), ne donnent pas une clé.
+            "/services/u_a%2fb.service/release",
+            "/services/u_a%2Fb.service/release",
+            "/services/%2e%2e/release",
+            "/services/u_..%2f..%2faccounts/release",
+            "/services/u_a\\b.service/release",
+            "/services/u_a%5/release",
+            "/services/u_a%zz/release",
+            "/services/u_a%FF.service/release",
+            "/services/u_a%00.service/release",
+        ] {
+            assert_eq!(classify("POST", path, None), Ok(Route::Free), "{path}");
+        }
     }
 
     #[test]

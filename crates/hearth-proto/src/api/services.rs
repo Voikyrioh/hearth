@@ -28,6 +28,14 @@ pub const CAPABILITY_SERVICES: &str = "services";
 /// traite comme non accordé pour tous et n'offre aucune action de service.
 pub const CAPABILITY_SERVICE_RIGHTS: &str = "service-rights";
 
+/// Capacité annoncée par `GET /hello` quand l'agent ne publie que les services créés par Hearth et les
+/// services adoptés (HRT-79, ADR-0043, BR-ADOPT-001) : les autres conteneurs sont comptés
+/// (`EngineView::external_count`), jamais détaillés. Un agent qui ne l'annonce pas publie tous les
+/// conteneurs du serveur (versions d'avant l'adoption). L'annonce ne dit pas que l'adoption est
+/// possible : l'adoption se désactive dans la configuration de l'agent (`[services] adoption`), la
+/// réponse des candidats le dit alors par un refus `adoption_disabled`.
+pub const CAPABILITY_SERVICE_ADOPTION: &str = "service-adoption";
+
 /// Version minimale du moteur de conteneurs prise en charge (Docker Engine 20.10, API 1.41).
 pub const MIN_ENGINE_VERSION: &str = "20.10";
 
@@ -126,6 +134,11 @@ pub struct EngineView {
     /// client depuis la réception du message, mesuré par SON horloge.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub list_current_at: Option<String>,
+    /// Nombre de conteneurs que le moteur connaît, arrêtés compris, qui ne sont ni créés par Hearth ni
+    /// adoptés (HRT-79, BR-ADOPT-002) : un nombre, jamais un détail. Absent vaut 0 (agent d'avant
+    /// l'adoption, qui publie tous les conteneurs, ou serveur sans conteneur non géré).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub external_count: u32,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -304,6 +317,15 @@ impl std::fmt::Debug for Concealed {
     }
 }
 
+/// Qui a adopté un service, et quand (HRT-79, ADR-0043). Absent d'un service créé par Hearth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptionInfo {
+    /// Le compte qui a adopté le service, tel que l'agent l'a figé.
+    pub by: String,
+    /// Date de l'adoption (RFC 3339, UTC).
+    pub at: String,
+}
+
 /// Un service de la liste, avec son détail. AUCUNE valeur de variable d'environnement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceItem {
@@ -363,6 +385,16 @@ pub struct ServiceItem {
     pub busy: Option<BusyInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_action: Option<LastAction>,
+    /// Présent pour un service adopté (HRT-79) : qui l'a adopté et quand. Absent pour un service créé
+    /// par Hearth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted: Option<AdoptionInfo>,
+    /// `true` : ce service est adopté et le compte qui lit n'a pas le droit « gérer les services » ;
+    /// sa commande de lancement et les noms de ses variables sont retirés de ce message
+    /// (`env_names`, `command` sont vides ou absents) et ne signifient donc pas « aucune » (HRT-79,
+    /// BR-ADOPT-015). Absent vaut `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub details_reserved: bool,
 }
 
 /// Une variable d'environnement révélée.
@@ -379,6 +411,88 @@ pub struct EnvVariable {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnvReveal {
     pub variables: Vec<EnvVariable>,
+}
+
+/// Au plus ce nombre de services par acte d'adoption (BR-ADOPT-007).
+pub const MAX_ADOPTIONS: usize = 50;
+
+/// Un conteneur non géré proposé à l'adoption (BR-ADOPT-006). C'est TOUT ce que la lecture des candidats
+/// expose d'un conteneur : de quoi choisir, rien de plus. Ni variable, ni commande, ni port, ni dossier
+/// monté, ni journal : avant l'adoption, aucun autre détail n'existe pour le client. La clé `c_` porte
+/// l'identifiant COMPLET du conteneur (elle en est la preuve d'identité, nécessaire à l'acte) ; la clé
+/// `u_` porte le nom de l'unité.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalContainer {
+    /// La clé que l'acte d'adoption enverra (`u_<unité>` ou `c_<identifiant>`), opaque pour le client.
+    pub key: String,
+    pub name: String,
+    pub image: ImageInfo,
+    /// L'unité du système qui le lance, absente sans unité : l'adoption ne tient alors que pour la vie de
+    /// ce conteneur (BR-ADOPT-017).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    pub state: ServiceState,
+}
+
+/// La réponse de `GET /services/external` (comptes qui ont le droit « gérer les services » seulement) :
+/// les candidats triés par nom sans tenir compte de la casse, et l'état du moteur qui explique une liste
+/// vide (`BR-ADOPT-026`). Jamais diffusée par le flux, jamais gardée par l'agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalContainers {
+    pub engine: EngineState,
+    pub containers: Vec<ExternalContainer>,
+}
+
+/// Corps de `POST /services/adopt` : les clés cochées, 50 au plus (`MAX_ADOPTIONS`), sans doublon. Le
+/// membre `reauth` de la confirmation voyage à côté (voir `api::reauth`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptRequest {
+    pub keys: Vec<String>,
+}
+
+/// Le résultat d'une clé d'adoption (`BR-ADOPT-010`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdoptionResult {
+    /// Adopté.
+    Adopted,
+    /// Déjà adopté (par `AdoptionItem::by`), pas touché.
+    AlreadyAdopted,
+    /// Aucun conteneur de cette clé : disparu depuis la liste, ou jamais existé. L'agent ne distingue
+    /// jamais l'un de l'autre (BR-ADOPT-004).
+    NotFound,
+    /// L'agent n'a pas pu écrire (base ou journal indisponibles) : rien n'a été adopté pour cette clé.
+    Failed,
+    /// Un résultat que ce client ne connaît pas (agent plus récent) : traité comme non adopté.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Le résultat d'une clé de `POST /services/adopt`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptionItem {
+    pub key: String,
+    pub result: AdoptionResult,
+    /// Le compte qui avait déjà adopté ce service (`already_adopted` seulement) : déjà publié à tous les
+    /// comptes par `ServiceItem::adopted`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+}
+
+/// La réponse de `POST /services/adopt` : un résultat par clé, dans l'ordre de la demande.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptResponse {
+    /// Combien de services ont été adoptés par cet acte.
+    pub adopted: u32,
+    pub results: Vec<AdoptionItem>,
+}
+
+/// La réponse de `POST /services/{key}/release`. `released: false` : le service n'était déjà plus adopté
+/// (aucun effet, aucune entrée de journal, `BR-ADOPT-013`) ; l'agent ne dit jamais pourquoi (inconnu,
+/// jamais adopté ou déjà relâché se répondent pareil).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseResponse {
+    pub released: bool,
 }
 
 /// Le contenu de `GET /services` et de `services_snapshot` : l'état du moteur et tous les services,
@@ -426,6 +540,7 @@ mod tests {
             list_degraded: false,
             at: None,
             list_current_at: None,
+            external_count: 0,
         }
     }
 
@@ -461,6 +576,8 @@ mod tests {
             grace_s: None,
             busy: None,
             last_action: None,
+            adopted: None,
+            details_reserved: false,
         }
     }
 
@@ -533,6 +650,36 @@ mod tests {
         let back: EngineView =
             serde_json::from_value(serde_json::to_value(&never).expect("json")).expect("dated");
         assert_eq!(back, never);
+    }
+
+    #[test]
+    fn the_adoption_fields_are_absent_until_filled_and_old_clients_ignore_them() {
+        // Un agent d'avant l'adoption (ou un service créé par Hearth) : ni compte de non gérés, ni
+        // repère d'adoption, ni réserve ; le client lit le même JSON qu'avant (HRT-79).
+        let engine_json = serde_json::to_value(engine()).expect("json");
+        assert!(engine_json.get("external_count").is_none());
+        let old: EngineView = serde_json::from_value(engine_json).expect("old agent");
+        assert_eq!(old.external_count, 0);
+        let item_json = serde_json::to_value(sample_item()).expect("json");
+        assert!(item_json.get("adopted").is_none() && item_json.get("details_reserved").is_none());
+        let old: ServiceItem = serde_json::from_value(item_json).expect("old agent");
+        assert!(old.adopted.is_none() && !old.details_reserved);
+        // Un agent récent les envoie ; elles font l'aller-retour.
+        let mut view = engine();
+        view.external_count = 3;
+        let back: EngineView =
+            serde_json::from_value(serde_json::to_value(&view).expect("json")).expect("new");
+        assert_eq!(back.external_count, 3);
+        let mut item = sample_item();
+        item.adopted = Some(AdoptionInfo {
+            by: "marie".into(),
+            at: "2026-10-13T10:00:00Z".into(),
+        });
+        item.details_reserved = true;
+        let back: ServiceItem =
+            serde_json::from_value(serde_json::to_value(&item).expect("json")).expect("new");
+        assert_eq!(back, item);
+        assert_eq!(CAPABILITY_SERVICE_ADOPTION, "service-adoption");
     }
 
     #[test]
@@ -671,5 +818,41 @@ mod tests {
         assert_eq!(item.ports[0].scope, PortScope::Unknown);
         assert_eq!(item.mounts[0].kind, MountKind::Unknown);
         assert_eq!(item.restart, RestartMode::Supervisor);
+    }
+
+    #[test]
+    fn the_adoption_messages_tolerate_what_a_newer_agent_adds() {
+        // Un résultat inconnu est lu comme tel, jamais comme une erreur de tout le message.
+        let response: AdoptResponse = serde_json::from_value(serde_json::json!({
+            "adopted": 1,
+            "results": [
+                { "key": "c_a", "result": "adopted", "extra": true },
+                { "key": "c_b", "result": "already_adopted", "by": "marie" },
+                { "key": "c_c", "result": "something_new" },
+            ],
+        }))
+        .expect("réponse");
+        assert_eq!(response.results[0].result, AdoptionResult::Adopted);
+        assert_eq!(response.results[1].by.as_deref(), Some("marie"));
+        assert_eq!(response.results[2].result, AdoptionResult::Unknown);
+        let candidates: ExternalContainers = serde_json::from_value(serde_json::json!({
+            "engine": "ready",
+            "containers": [{
+                "key": "u_x.service", "name": "x", "image": { "short_id": "ab" },
+                "state": "running", "later": 1
+            }],
+        }))
+        .expect("candidats");
+        assert_eq!(candidates.containers[0].unit, None);
+        // Ce que la lecture des candidats expose d'un conteneur, et rien d'autre.
+        let value = serde_json::to_value(&candidates.containers[0]).unwrap();
+        let mut fields: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        fields.sort_unstable();
+        assert_eq!(fields, ["image", "key", "name", "state"]);
     }
 }

@@ -32,6 +32,18 @@ fn engined(names: &[&str]) -> (Arc<FakeEngine>, Options) {
     )
 }
 
+/// Un agent connecté dont ces conteneurs sont ADOPTÉS par « marie » : l'agent ne publie que les services
+/// créés par Hearth ou adoptés (HRT-79), un conteneur seulement présent dans le moteur n'arrive jamais à
+/// la liaison. L'adoption est posée par le port d'écriture de l'agent, comme l'acte (HRT-80).
+async fn connected_adopting(adopted: &[&str], options: Options) -> World {
+    let world = World::connected(options).await;
+    for name in adopted {
+        let id = container(name, RunState::Running).id;
+        world.agent.adopt_container(&id, name, "marie").await;
+    }
+    world
+}
+
 fn services_of(event: &Event) -> Option<&ServicesState> {
     match event {
         Event::Services { state, .. } => Some(state),
@@ -67,7 +79,7 @@ async fn wait_state(
 async fn a_real_agent_sends_the_engine_and_the_services_and_the_link_keeps_them_merged_and_sorted()
 {
     let (engine, options) = engined(&["zeta", "Alpha", "mid"]);
-    let world = World::connected(options).await;
+    let world = connected_adopting(&["zeta", "Alpha", "mid"], options).await;
 
     // L'instantané : le moteur prêt et les trois services, triés sans tenir compte de la casse.
     let first = wait_state(&world, 0, "l'instantané des services", |state| {
@@ -84,9 +96,12 @@ async fn a_real_agent_sends_the_engine_and_the_services_and_the_link_keeps_them_
             .all(|s| s.state == ServiceState::Running)
     );
 
-    // Un lot : un service créé en ligne de commande apparaît à sa place, l'état reste COMPLET.
+    // Un lot : un service créé en ligne de commande, et adopté, apparaît à sa place, l'état reste COMPLET.
     let mark = world.recorder.mark();
-    engine.put(container("beta", RunState::Running), "create");
+    let beta = container("beta", RunState::Running);
+    engine.put(beta.clone(), "create");
+    // Créé hors de Hearth : seulement compté tant qu'il n'est pas adopté.
+    world.agent.adopt_container(&beta.id, "beta", "marie").await;
     let second = wait_state(&world, mark, "un service créé", |state| {
         state.services.len() == 4
     })
@@ -111,7 +126,7 @@ async fn a_real_agent_sends_the_engine_and_the_services_and_the_link_keeps_them_
 #[tokio::test]
 async fn the_last_services_are_the_last_known_view_without_variable_names_nor_command() {
     let (_engine, options) = engined(&["web", "db"]);
-    let world = World::connected(options).await;
+    let world = connected_adopting(&["web", "db"], options).await;
     wait_state(&world, 0, "les services", |state| state.services.len() == 2).await;
 
     // La liaison les range dans la dernière vue connue (en mémoire, écrite sur le disque à la période).
@@ -224,7 +239,7 @@ async fn an_agent_with_the_capability_is_asked_for_the_services_topic() {
 #[tokio::test]
 async fn check_again_asks_the_agent_to_probe_the_engine_and_writes_nothing() {
     let (engine, options) = engined(&["web"]);
-    let world = World::connected(options).await;
+    let world = connected_adopting(&["web"], options).await;
     wait_state(&world, 0, "les services", |state| state.services.len() == 1).await;
     let before = engine.probe_count();
     let view = world.manager.engine_recheck(&world.id).await.unwrap();
@@ -243,11 +258,14 @@ async fn check_again_asks_the_agent_to_probe_the_engine_and_writes_nothing() {
 async fn the_capabilities_are_read_again_at_every_connection() {
     let engine = Arc::new(FakeEngine::new());
     engine.put_silently(container("web", RunState::Running));
-    let world = World::connected(Options {
-        engine: Some(engine),
-        hide_capabilities: true,
-        ..Options::default()
-    })
+    let world = connected_adopting(
+        &["web"],
+        Options {
+            engine: Some(engine),
+            hide_capabilities: true,
+            ..Options::default()
+        },
+    )
     .await;
     world
         .recorder
@@ -268,4 +286,43 @@ async fn the_capabilities_are_read_again_at_every_connection() {
     })
     .await;
     assert_eq!(names(&state), ["web"]);
+}
+
+/// La règle de publication vue de la liaison (HRT-79) : un conteneur que personne n'a adopté n'arrive pas
+/// jusqu'à elle, il est seulement compté ; une fois adopté, il apparaît.
+#[tokio::test]
+async fn a_container_nobody_adopted_never_reaches_the_link_until_it_is_adopted() {
+    let (_engine, options) = engined(&["hidden", "shown"]);
+    let world = connected_adopting(&["shown"], options).await;
+
+    let first = wait_state(&world, 0, "le service adopté", |state| {
+        state.services.len() == 1
+    })
+    .await;
+    assert_eq!(names(&first), ["shown"]);
+    assert_eq!(first.engine.external_count, 1);
+    // Le conteneur caché n'est dans aucun état reçu, ni dans la dernière vue connue.
+    for (_, event) in world.recorder.since(0) {
+        if let Some(state) = services_of(&event) {
+            assert!(!names(state).contains(&"hidden".to_owned()), "{state:?}");
+        }
+    }
+    let known = world
+        .manager
+        .services_state(&world.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(names(&known.state), ["shown"]);
+
+    // Adopté par un compte qui en a le droit, il apparaît.
+    let mark = world.recorder.mark();
+    let id = container("hidden", RunState::Running).id;
+    world.agent.adopt_container(&id, "hidden", "marie").await;
+    let second = wait_state(&world, mark, "le service désormais adopté", |state| {
+        state.services.len() == 2
+    })
+    .await;
+    assert_eq!(names(&second), ["hidden", "shown"]);
+    assert_eq!(second.engine.external_count, 0);
 }

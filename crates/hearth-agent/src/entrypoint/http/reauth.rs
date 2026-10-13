@@ -23,12 +23,13 @@ use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use hearth_proto::admin_act::{ActKind, AdminAct, RouteAct};
+use hearth_proto::admin_act::{ActKind, AdminAct, RouteAct, decode_segment};
 use hearth_proto::api::accounts::{
     ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest,
 };
 use hearth_proto::api::reauth::{Reauth, SetReauthRequest, lenient_reauth, reauth_refusal};
 use hearth_proto::api::security::SetAttackModeRequest;
+use hearth_proto::api::services::AdoptRequest;
 use hearth_proto::api::update::AgentUpdateRequest;
 use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
 use serde::Deserialize;
@@ -68,6 +69,8 @@ enum Parsed {
     Attack(SetAttackModeRequest),
     Own(ChangeOwnPasswordRequest),
     Setting(SetReauthRequest),
+    /// Adopter : le corps porte les clés (HRT-80), dont le nombre et l'empreinte sont signés.
+    Adopt(AdoptRequest),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
 }
@@ -84,9 +87,11 @@ impl Parsed {
             }
             ActKind::AccountPasswordOwn => serde_json::from_slice(bytes).ok().map(Self::Own),
             ActKind::ReauthSetting => serde_json::from_slice(bytes).ok().map(Self::Setting),
-            ActKind::AccountPassword | ActKind::AccountDelete | ActKind::SessionsRevoke => {
-                Some(Self::TargetOnly)
-            }
+            ActKind::ServicesAdopt => serde_json::from_slice(bytes).ok().map(Self::Adopt),
+            ActKind::AccountPassword
+            | ActKind::AccountDelete
+            | ActKind::SessionsRevoke
+            | ActKind::ServiceRelease => Some(Self::TargetOnly),
         }
     }
 
@@ -112,6 +117,12 @@ impl Parsed {
             (Self::Setting(request), _) => AdminAct::ReauthSetting {
                 mode: request.password,
             },
+            (Self::Adopt(request), _) => {
+                AdminAct::services_adopt(request.keys.iter().map(String::as_str))
+            }
+            (Self::TargetOnly, ActKind::ServiceRelease) => {
+                AdminAct::ServiceRelease { target: id.into() }
+            }
             (Self::TargetOnly, ActKind::AccountPassword) => {
                 AdminAct::AccountPassword { target: id }
             }
@@ -246,7 +257,14 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
         name: client_name(&parts.headers),
         addr: origin_of(&parts).addr().unwrap_or_default().to_owned(),
     };
-    let id = path_param(state.route.pattern, parts.uri.path(), "id").unwrap_or_default();
+    // La cible vient du chemin : l'identifiant d'un compte (`{id}`) ou la clé d'un service (`{key}`, décodée
+    // comme la lit le routeur ; un encodage illisible laisse la cible vide, donc une preuve qui ne colle pas).
+    let id = path_param(state.route.pattern, parts.uri.path(), "id")
+        .or_else(|| {
+            path_param(state.route.pattern, parts.uri.path(), "key")
+                .and_then(|raw| decode_segment(&raw))
+        })
+        .unwrap_or_default();
     // Le corps est lu avec le type du handler : illisible, il n'y a pas d'acte à confirmer.
     let Some(parsed) = Parsed::read(kind, &bytes) else {
         return ApiError::invalid("body", "Corps de requête illisible").into_response();

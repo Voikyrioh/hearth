@@ -1,4 +1,5 @@
-//! Services supervisés retenus, en SQLite (`supervised_services`, HRT-63, ADR-0037).
+//! Services supervisés retenus et services adoptés, en SQLite (`supervised_services`, HRT-63,
+//! ADR-0037 ; `adopted_services`, HRT-79, ADR-0043).
 //!
 //! `last_view_json` est un objet à nous, fabriqué ici depuis une `Observation` : il ne contient NI
 //! valeur de variable, NI nom de variable, NI commande (l'observation retenue en est déjà dépourvue
@@ -10,14 +11,15 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use super::convert::{format_date, parse_date, storage};
-use crate::application::ports::{ServiceRepo, StoreError, SupervisedRecord};
+use crate::application::ports::{AdoptedRecord, ServiceRepo, StoreError, SupervisedRecord};
 use crate::domain::services::image::ImageName;
 use crate::domain::services::{
     MAX_MOUNTS, MAX_PORTS, MountInfo, MountType, Observation, PortBinding, PortProtocol, PortScope,
-    RestartPolicy, RunState, UnitName,
+    RestartPolicy, RunState, ServiceKey, UnitName,
 };
 
 const RESOURCE: &str = "supervised_services";
+const ADOPTED: &str = "adopted_services";
 
 pub struct SqliteServiceRepo {
     pool: SqlitePool,
@@ -272,6 +274,45 @@ impl ServiceRepo for SqliteServiceRepo {
             .execute(&self.pool)
             .await
             .map_err(storage(RESOURCE))?;
+        Ok(())
+    }
+
+    async fn load_adopted(&self) -> Result<Vec<AdoptedRecord>, StoreError> {
+        let rows = sqlx::query!(
+            "SELECT service_key, adopted_by, adopted_at FROM adopted_services ORDER BY service_key"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(storage(ADOPTED))?;
+        let mut records = Vec::with_capacity(rows.len());
+        for row in rows {
+            // Une ligne illisible est omise et tracée : son service reste non publié.
+            let record = ServiceKey::parse(&row.service_key)
+                .ok_or_else(|| StoreError::Unavailable {
+                    resource: ADOPTED,
+                    message: "clé illisible".to_owned(),
+                })
+                .and_then(|key| {
+                    Ok(AdoptedRecord {
+                        key,
+                        by: row.adopted_by.clone(),
+                        at: parse_date(ADOPTED, &row.adopted_at)?,
+                    })
+                });
+            match record {
+                Ok(record) => records.push(record),
+                Err(error) => tracing::warn!(%error, "adoption illisible, omise"),
+            }
+        }
+        Ok(records)
+    }
+
+    async fn forget_adopted(&self, key: &ServiceKey) -> Result<(), StoreError> {
+        let key = key.as_str();
+        sqlx::query!("DELETE FROM adopted_services WHERE service_key = ?", key)
+            .execute(&self.pool)
+            .await
+            .map_err(storage(ADOPTED))?;
         Ok(())
     }
 }

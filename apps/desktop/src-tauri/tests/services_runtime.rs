@@ -76,6 +76,7 @@ fn full_state() -> ServicesState {
             list_degraded: true,
             at: Some("2026-10-13T10:00:02Z".into()),
             list_current_at: Some("2026-10-13T09:59:30Z".into()),
+            external_count: 0,
         },
         services: vec![
             ServiceItem {
@@ -129,6 +130,8 @@ fn full_state() -> ServicesState {
                 grace_s: Some(30),
                 busy: None,
                 last_action: None,
+                adopted: None,
+                details_reserved: false,
             },
             ServiceItem {
                 key: "c_77e1".into(),
@@ -161,6 +164,8 @@ fn full_state() -> ServicesState {
                 grace_s: None,
                 busy: None,
                 last_action: None,
+                adopted: None,
+                details_reserved: false,
             },
         ],
     }
@@ -357,6 +362,11 @@ async fn a_real_agent_reaches_the_window_through_the_link_and_the_shell_relay() 
     engine.put_silently(container("Alpha", RunState::Exited));
     let agent = TestAgent::install_engined(engine.clone()).await;
     agent.create_account("marie", Role::Admin).await;
+    // L'agent ne publie que les services créés par Hearth ou adoptés (HRT-79) : ces deux-là sont adoptés.
+    for name in ["zeta", "Alpha"] {
+        let id = container(name, RunState::Running).id;
+        agent.adopt_container(&id, name, "marie").await;
+    }
 
     let dir = agent::tmp::tempdir().unwrap();
     let vault = Arc::new(CredentialVault::new(Shared(Arc::new(Memory::default()))));
@@ -409,7 +419,9 @@ async fn a_real_agent_reaches_the_window_through_the_link_and_the_shell_relay() 
     let seq = first["seq"].as_u64().unwrap();
 
     // 2. Un changement du moteur arrive à la fenêtre, avec un numéro plus grand.
-    engine.put(container("beta", RunState::Running), "create");
+    let beta = container("beta", RunState::Running);
+    engine.put(beta.clone(), "create");
+    agent.adopt_container(&beta.id, "beta", "marie").await;
     let second = wait_for(&sink, "un service créé", |event| names(event).len() == 3).await;
     assert_eq!(names(&second), ["Alpha", "beta", "zeta"]);
     assert!(second["seq"].as_u64().unwrap() > seq);

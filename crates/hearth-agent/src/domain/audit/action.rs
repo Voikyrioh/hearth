@@ -61,11 +61,22 @@ pub enum AuditAction {
     AccountServicesGrant,
     /// Le droit « gérer les services » est retiré à un compte, depuis le serveur (HRT-77, BR-GRANT-009).
     AccountServicesRevoke,
+    /// Un conteneur existant est adopté (HRT-80, BR-ADOPT-019) : une entrée par service, cible = son nom
+    /// (avec son unité s'il en a une). La route consigne aussi ici un refus ou un échec de l'acte.
+    ServiceAdopt,
+    /// Un service adopté est rendu à l'état non géré (HRT-80, BR-ADOPT-019).
+    ServiceRelease,
+    /// Lecture de la liste des conteneurs non gérés : consignée quand elle réussit (sans aucun nom) comme
+    /// quand elle est refusée faute du droit (HRT-80, BR-ADOPT-005).
+    ServiceExternalRead,
+    /// Lecture des journaux d'un service adopté : consignée seulement quand elle est refusée faute du
+    /// droit (HRT-80, BR-SLOG-024). Lire n'est jamais consigné (BR-SLOG-022).
+    ServiceLogsRead,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 27] = [
+    pub const ALL: [AuditAction; 31] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -93,6 +104,10 @@ impl AuditAction {
         Self::ServiceEnvReveal,
         Self::AccountServicesGrant,
         Self::AccountServicesRevoke,
+        Self::ServiceAdopt,
+        Self::ServiceRelease,
+        Self::ServiceExternalRead,
+        Self::ServiceLogsRead,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -125,6 +140,10 @@ impl AuditAction {
             Self::ServiceEnvReveal => action::SERVICE_ENV_REVEAL,
             Self::AccountServicesGrant => action::ACCOUNT_SERVICES_GRANT,
             Self::AccountServicesRevoke => action::ACCOUNT_SERVICES_REVOKE,
+            Self::ServiceAdopt => action::SERVICE_ADOPT,
+            Self::ServiceRelease => action::SERVICE_RELEASE,
+            Self::ServiceExternalRead => action::SERVICE_EXTERNAL_READ,
+            Self::ServiceLogsRead => action::SERVICE_LOGS_READ,
         }
     }
 
@@ -158,6 +177,10 @@ impl AuditAction {
             Self::ServiceEnvReveal => "Valeurs des variables révélées",
             Self::AccountServicesGrant => "Droit de gérer les services accordé",
             Self::AccountServicesRevoke => "Droit de gérer les services retiré",
+            Self::ServiceAdopt => "Service adopté",
+            Self::ServiceRelease => "Adoption retirée",
+            Self::ServiceExternalRead => "Liste des conteneurs existants",
+            Self::ServiceLogsRead => "Journaux lus",
         }
     }
 

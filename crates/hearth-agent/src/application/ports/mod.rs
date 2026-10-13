@@ -5,6 +5,7 @@
 
 mod account_repo;
 mod admin_accounts;
+mod adoption_tx;
 mod attack_mode_repo;
 mod audit_repo;
 mod audit_sink;
@@ -39,6 +40,7 @@ mod update;
 
 pub use account_repo::{AccountRepo, AccountTx};
 pub use admin_accounts::{AdminAccounts, AdminAccountsError, AdminCredential};
+pub use adoption_tx::{AdoptionTx, AdoptionWrite, NewAdoption, ReleasedAdoption};
 pub use attack_mode_repo::{AttackModeRepo, AttackModeTx};
 pub use audit_repo::{AuditRepo, AuditTx};
 pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
@@ -67,7 +69,7 @@ pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
 pub use security_feed::SecurityFeed;
 pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState};
-pub use service_repo::{ServiceRepo, SupervisedRecord};
+pub use service_repo::{AdoptedRecord, ServiceRepo, SupervisedRecord};
 pub use service_supervisor::{ContainerRef, ServiceSupervisor};
 pub use services_right_repo::ServicesRightTx;
 pub use session_repo::{SessionRepo, SessionTx};

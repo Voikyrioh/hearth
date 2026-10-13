@@ -89,6 +89,14 @@ pub struct AccountView {
     pub last_login_at: Option<OffsetDateTime>,
 }
 
+impl AccountView {
+    /// Le compte a le droit « gérer les services » (indépendant du rôle) : décide de ce qu'un service
+    /// adopté montre à ce compte (HRT-79, BR-ADOPT-015).
+    pub fn may_manage_services(&self) -> bool {
+        self.services_right.can_manage_services()
+    }
+}
+
 impl From<&Account> for AccountView {
     fn from(account: &Account) -> Self {
         Self {

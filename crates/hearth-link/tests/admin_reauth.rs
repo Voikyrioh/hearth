@@ -337,7 +337,9 @@ fn sample(method: &str, pattern: &str) -> (Method, String, Option<Value>) {
         "DELETE" => Method::Delete,
         other => panic!("méthode {other}"),
     };
-    let path = pattern.replace("{id}", "01ABC");
+    let path = pattern
+        .replace("{id}", "01ABC")
+        .replace("{key}", "u_docker-x.service");
     let body = match pattern {
         "/accounts" => Some(create_body("paul")),
         "/accounts/{id}" if method == Method::Patch => Some(json!({ "role": "readonly" })),
@@ -345,6 +347,7 @@ fn sample(method: &str, pattern: &str) -> (Method, String, Option<Value>) {
         "/security/attack-mode" => Some(json!({ "active": true })),
         "/me/password" => Some(json!({ "current": "x", "password": "y" })),
         "/me/reauth" => Some(json!({ "password": "each" })),
+        "/services/adopt" => Some(json!({ "keys": ["c_0123abcd", "u_docker-x.service"] })),
         _ => None,
     };
     (method, path, body)

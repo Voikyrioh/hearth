@@ -121,6 +121,7 @@ pub async fn start_booted(
         data_dir: env.dir.path().to_owned(),
         managed: false,
         engine: hearth_agent::infrastructure::config::EngineConfig::disabled(),
+        services: hearth_agent::infrastructure::config::ServicesConfig::default(),
     };
     let adapters = Adapters {
         hasher: env.hasher.clone(),
@@ -146,7 +147,7 @@ pub async fn start_booted(
 /// Comme `start`, avec ce moteur de conteneurs (le pilotage des services permis) au lieu du réglage
 /// de la configuration, qui ne touche jamais le vrai socket dans les tests.
 pub async fn start_engined(env: &Env, engine: hearth_agent::app::EngineParts) -> Agent {
-    start_engine_with(env, engine, super::probe::metering(), true).await
+    start_engine_with(env, engine, super::probe::metering(), true, true).await
 }
 
 /// Comme `start_engined`, avec ces sondes et ces délais de flux.
@@ -155,12 +156,17 @@ pub async fn start_engined_metered(
     engine: hearth_agent::app::EngineParts,
     metering: Metering,
 ) -> Agent {
-    start_engine_with(env, engine, metering, true).await
+    start_engine_with(env, engine, metering, true, true).await
 }
 
 /// Comme `start_engined`, avec `engine.enabled = false` dans la configuration.
 pub async fn start_engine_disabled(env: &Env, engine: hearth_agent::app::EngineParts) -> Agent {
-    start_engine_with(env, engine, super::probe::metering(), false).await
+    start_engine_with(env, engine, super::probe::metering(), false, true).await
+}
+
+/// Comme `start_engined`, avec `services.adoption = false` dans la configuration (`BR-ADOPT-020`).
+pub async fn start_without_adoption(env: &Env, engine: hearth_agent::app::EngineParts) -> Agent {
+    start_engine_with(env, engine, super::probe::metering(), true, false).await
 }
 
 async fn start_engine_with(
@@ -168,6 +174,7 @@ async fn start_engine_with(
     engine: hearth_agent::app::EngineParts,
     metering: Metering,
     enabled: bool,
+    adoption: bool,
 ) -> Agent {
     let config = AgentConfig {
         listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -178,6 +185,7 @@ async fn start_engine_with(
             enabled,
             ..hearth_agent::infrastructure::config::EngineConfig::default()
         },
+        services: hearth_agent::infrastructure::config::ServicesConfig { adoption },
     };
     let adapters = Adapters {
         hasher: env.hasher.clone(),
@@ -213,6 +221,7 @@ pub async fn start_updating(
         data_dir: env.dir.path().to_owned(),
         managed: false,
         engine: hearth_agent::infrastructure::config::EngineConfig::disabled(),
+        services: hearth_agent::infrastructure::config::ServicesConfig::default(),
     };
     let adapters = Adapters {
         hasher: env.hasher.clone(),
@@ -259,6 +268,11 @@ impl Agent {
             .run_until(std::future::ready(()))
             .await
             .expect("arrêt");
+    }
+
+    /// Écrit les entrées du journal d'activité encore regroupées (refus répétés), pour les lire en base.
+    pub async fn flush_journal(&self) {
+        self.running.audit_recorder.flush_all().await;
     }
 
     pub async fn shutdown(self) {

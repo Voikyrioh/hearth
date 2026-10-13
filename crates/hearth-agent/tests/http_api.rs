@@ -10,7 +10,8 @@ use axum::http::{Method, StatusCode};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::entrypoint::http::{Access, ENDPOINTS};
 use serde_json::json;
-use support::api::Api;
+use support::api::{Api, state_with_engine};
+use support::fake_engine::{FakeEngine, container};
 use support::{PASSWORD, env};
 
 const OTHER_PASSWORD: &str = "Another-Pass-77";
@@ -1367,7 +1368,29 @@ async fn a_tracked_body_over_one_mebibyte_is_413_not_422() {
 #[tokio::test]
 async fn every_modifying_route_leaves_exactly_one_success_entry() {
     let env = env().await;
-    let api = Api::new(&env);
+    // Un moteur prêt qui porte deux conteneurs non gérés : l'un sera adopté par le balayage, l'autre
+    // l'est d'avance et sera relâché (HRT-80).
+    let engine = std::sync::Arc::new(FakeEngine::new());
+    let to_adopt = container(
+        "a-adopter",
+        hearth_agent::domain::services::RunState::Running,
+    );
+    let to_release = container(
+        "a-relacher",
+        hearth_agent::domain::services::RunState::Running,
+    );
+    let adopt_key = format!("c_{}", to_adopt.id);
+    let release_key = format!("c_{}", to_release.id);
+    engine.put_silently(to_adopt);
+    engine.put_silently(to_release);
+    env.adopt(&release_key, "a-relacher", "marie").await;
+    let state = state_with_engine(
+        &env,
+        support::update::Rig::new(&env, false, false).service,
+        engine,
+    )
+    .await;
+    let api = Api::from_state(state);
     let _ = env.account_with_token(&api, "carl", Role::ReadOnly).await;
     let role_victim = env.create("v-role", Role::ReadOnly).await;
     let password_victim = env.create("v-pass", Role::ReadOnly).await;
@@ -1538,6 +1561,25 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     Method::PUT,
                     "/me/reauth",
                     json!({ "password": "each" }),
+                )
+                .await
+            }
+            ("POST", "/services/adopt") => {
+                // Adopter exige le droit, la preuve de la clé et le mot de passe (HRT-80).
+                api.act(
+                    &marie,
+                    Method::POST,
+                    "/services/adopt",
+                    json!({ "keys": [adopt_key] }),
+                )
+                .await
+            }
+            ("POST", "/services/{key}/release") => {
+                api.act(
+                    &marie,
+                    Method::POST,
+                    &format!("/services/{release_key}/release"),
+                    json!({}),
                 )
                 .await
             }

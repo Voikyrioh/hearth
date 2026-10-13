@@ -22,6 +22,21 @@ Squelette (HRT-61) du runbook de vérification des services sur le serveur forge
 
 À consigner dans la session : version de l'agent, date, résultat de chaque étape, écarts.
 
+## Partie 1 bis : accorder le droit, puis adopter (HRT-79, HRT-80)
+
+Depuis HRT-79 la liste ne montre plus que les services créés par Hearth et les services ADOPTÉS : sur forge, où tous les services sont hors Hearth, l'étape 3 ci-dessus donne d'abord une liste VIDE et « n conteneurs créés hors de Hearth ne sont pas gérés ». **Premier geste : accorder le droit, puis adopter.**
+
+1. **Accorder le droit** à son compte, sur le serveur, en root : `docs/runbooks/accorder-le-droit-de-gerer-les-services.md` (`hearth-agent account services {compte} --grant`). Le droit ne se donne jamais depuis le réseau.
+2. **Constater.** `GET /api/v1/services` : `services` vide, `engine.external_count` = le nombre de conteneurs de `docker ps -a`. `GET /api/v1/hello` : `capabilities` contient `service-adoption`.
+3. **Lire les candidats** (`GET /api/v1/services/external`, avec le droit) : `terraria`, `7dtd`, `forge-studio`, chacun avec son unité (`docker-terraria.service`…), son image, son état ; la clé d'un service lancé par une unité est `u_<unité>`. Sans le droit : `403`. À consigner : les candidats manquants ou en trop.
+4. **Adopter** (jamais Terraria sans autosave ni sauvegarde préalables, règle du hub : adopter n'y touche pas, mais le geste suivant, arrêter, si). Depuis le client quand HRT-81 est livré ; sinon `deploy/e2e/admin_act.py confirm-adopt HOST PORT TOKEN USER PASSWORD KEYFILE` (corps `{"keys": ["u_docker-terraria.service"]}`), qui fournit la preuve de clé et le mot de passe. Attendu : `adopted: 1`, le service apparaît dans la liste de tous les comptes avec « adopté par {compte} », `external_count` baisse d'un.
+5. **Vérifier que rien n'a changé.** `docker inspect` du conteneur et `systemctl show docker-terraria.service` avant et après : identiques (étiquettes, état, `MainPID`, `ActiveEnterTimestamp`). L'adoption n'écrit rien sur le service.
+6. **Le journal d'activité** (administrateur) : une entrée « Service adopté » par service, cible « service terraria (docker-terraria.service) », jamais un autre détail du conteneur.
+7. **Lecture seule.** Un compte sans le droit voit le service adopté dans la liste mais sans commande ni noms de variables (`details_reserved`), et reçoit `MISSING_RIGHT` (consigné) s'il ouvre ses journaux.
+8. **Relâcher puis adopter de nouveau** un conteneur de test sans importance (`docker run -d --name hearth-verif busybox:1.36 sleep 600`) : « Ne plus gérer » (`POST /services/{key}/release`) le retire de la liste de tous sans toucher au conteneur ; `docker rm -f hearth-verif` ensuite. Un conteneur SANS unité recréé par un tiers redevient non géré.
+
+À consigner dans la session : version de l'agent, date, résultat de chaque étape, écarts. Ce que la CI seule prouve : le comportement d'un vrai Docker et d'un vrai systemd (`engine_supervised.rs`, étape `supervised`).
+
 ## Parties suivantes (squelette)
 
 - Partie 2 (HRT-63) : détail d'un service, variables masquées puis révélées, service géré par une unité systemd (`u_docker-*.service`), ce que fait un arrêt par l'API du moteur sur un conteneur `--rm`.

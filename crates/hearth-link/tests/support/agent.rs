@@ -15,10 +15,10 @@ use async_trait::async_trait;
 use fake_engine::FakeEngine;
 use hearth_agent::app::{self, Adapters, EngineParts, Metering, RunningAgent, Services};
 use hearth_agent::application::ports::{
-    Clock as AgentClock, GpuProbe, HashError, HostDescription, HostEnvironment, PasswordHasher,
-    ProbeError, SystemProbe,
+    Clock as AgentClock, GpuProbe, HashError, HostDescription, HostEnvironment, NewAdoption,
+    PasswordHasher, ProbeError, SystemProbe,
 };
-use hearth_agent::application::services::EngineTimings;
+use hearth_agent::application::services::{AdoptionLookup, EngineTimings};
 use hearth_agent::domain::accounts::{PlainPassword, Role, Username};
 use hearth_agent::domain::audit::{Actor, Origin};
 use hearth_agent::domain::machine::{
@@ -26,6 +26,7 @@ use hearth_agent::domain::machine::{
 };
 use hearth_agent::domain::metrics::{DiskUsage, GpuReading, MemoryUsage, SystemSample};
 use hearth_agent::domain::secret::Secret as AgentSecret;
+use hearth_agent::domain::services::ServiceKey;
 use hearth_agent::entrypoint::ws::StreamSettings;
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
 use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
@@ -310,6 +311,7 @@ impl TestAgent {
                 Some(_) => hearth_agent::infrastructure::config::EngineConfig::default(),
                 None => hearth_agent::infrastructure::config::EngineConfig::disabled(),
             },
+            services: hearth_agent::infrastructure::config::ServicesConfig::default(),
         };
         let updating = match &self.updating {
             Some(make) => make(),
@@ -339,6 +341,39 @@ impl TestAgent {
         };
         self.addr = running.server.local_addr();
         self.running = Some(running);
+    }
+
+    /// Adopte ce conteneur comme le fait l'acte d'adoption (HRT-80) : la ligne `adopted_services` est écrite
+    /// par le port d'écriture de l'agent, puis le registre relit les adoptions. Sans adoption, l'agent ne
+    /// publie pas un conteneur qu'il n'a pas créé (HRT-79, `BR-ADOPT-*`) : ses tests le font donc comme un
+    /// compte qui a le droit. L'acte lui-même (droit, confirmation, journal) est testé dans `hearth-agent`.
+    pub async fn adopt_container(&self, container_id: &str, name: &str, adopted_by: &str) {
+        let key = ServiceKey::for_container(container_id).expect("identifiant de conteneur");
+        let adoption = NewAdoption {
+            key: key.clone(),
+            name: name.to_owned(),
+            unit: None,
+            by: adopted_by.to_owned(),
+            at: self.clock.now(),
+        };
+        // Comme l'acte : on n'adopte que ce que l'agent connaît (une adoption dont le conteneur n'existe pas
+        // tombe, `BR-ADOPT-017`). Fait observable, borne de garde large.
+        let registry = &self.running.as_ref().expect("agent démarré").services;
+        let mut tries = 0;
+        while matches!(registry.adoption_lookup(&key), AdoptionLookup::Unknown) {
+            tries += 1;
+            assert!(tries < 1000, "l'agent ne connaît pas le conteneur {name}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let mut tx = self.services.store.begin().await.unwrap();
+        tx.adoptions().adopt(&adoption).await.unwrap();
+        tx.commit().await.unwrap();
+        self.running
+            .as_ref()
+            .expect("agent démarré")
+            .services
+            .reload_adopted()
+            .await;
     }
 
     /// Arrêt de l'agent (le dossier de données, donc l'identité, est conservé).

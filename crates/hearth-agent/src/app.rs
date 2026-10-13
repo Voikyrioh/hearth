@@ -31,6 +31,7 @@ use crate::application::ports::{
     TokenGen,
 };
 use crate::application::security::SecurityService;
+use crate::application::service_adoption::ServiceAdoption;
 use crate::application::service_logs::{LogSettings, ServiceLogs};
 use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::services_right::ServicesRightService;
@@ -219,6 +220,10 @@ pub struct Services {
     pub audit_sink: Arc<dyn AuditSink>,
     /// Le même, pour écrire les synthèses des événements répétés (`flush`).
     pub audit_recorder: Arc<AuditRecorder>,
+    /// Le magasin et la diffusion du journal : l'adoption de services écrit sa ligne et son entrée de
+    /// journal dans la même transaction (HRT-80).
+    pub store: Arc<dyn Store>,
+    pub trail: Arc<AuditTrail>,
 }
 
 /// Agent démarré : le serveur, la partie publique de son identité et ses tâches de fond.
@@ -243,8 +248,8 @@ pub struct RunningAgent {
     /// Les sessions : l'agent EXIGE la confirmation des actes
     /// dès la construction du service : aucun réglage, aucune porte, même en test.
     pub sessions: Arc<SessionService>,
-    /// Écrit les synthèses du journal en attente à l'arrêt.
-    audit_recorder: Arc<AuditRecorder>,
+    /// Écrit les synthèses du journal en attente à l'arrêt (les tests le vident pour lire le journal).
+    pub audit_recorder: Arc<AuditRecorder>,
     /// Les écritures d'alerte en vol, attendues à l'arrêt.
     security: Arc<SecurityService>,
 }
@@ -451,6 +456,8 @@ fn assemble(
         )),
         audit_sink: recorder.clone(),
         audit_recorder: recorder,
+        store,
+        trail,
     }
 }
 
@@ -636,6 +643,13 @@ pub async fn start_engined(
         adapters.clock.clone(),
         LogSettings::default(),
     ));
+    let service_adoption = Arc::new(ServiceAdoption::new(
+        registry.clone(),
+        services.store.clone(),
+        adapters.clock.clone(),
+        services.trail.clone(),
+        config.services.adoption,
+    ));
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -648,6 +662,7 @@ pub async fn start_engined(
         update: update.clone(),
         services: registry.clone(),
         service_logs,
+        service_adoption,
         stream,
         erasure_pending: database.erasure_pending(),
     });

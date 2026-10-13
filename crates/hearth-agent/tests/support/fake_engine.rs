@@ -193,6 +193,11 @@ impl FakeEngine {
         self.wake_logs();
     }
 
+    /// Les identifiants des conteneurs que le moteur connaît maintenant (pour adopter en base, HRT-79).
+    pub fn container_ids(&self) -> Vec<String> {
+        self.lock().containers.keys().cloned().collect()
+    }
+
     /// Ajoute ou remplace un conteneur et émet l'événement correspondant.
     pub fn put(&self, observation: Observation, action: &str) {
         let id = observation.id.clone();

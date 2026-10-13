@@ -56,9 +56,20 @@ pub mod action {
     pub const ACCOUNT_SERVICES_GRANT: &str = "account.services.grant";
     /// Le droit « gérer les services » est retiré à un compte, depuis le serveur (HRT-77, BR-GRANT-009).
     pub const ACCOUNT_SERVICES_REVOKE: &str = "account.services.revoke";
+    /// Un conteneur existant est adopté (HRT-80, BR-ADOPT-019) : une entrée par service, le nom du service
+    /// et son unité sont les seuls détails du conteneur écrits. Type d'action « Gestion des services ».
+    pub const SERVICE_ADOPT: &str = "service.adopt";
+    /// Un service adopté est rendu à l'état non géré (HRT-80, BR-ADOPT-019).
+    pub const SERVICE_RELEASE: &str = "service.release";
+    /// La lecture de la liste des conteneurs non gérés (HRT-80, BR-ADOPT-005), réussie (sans aucun nom de
+    /// conteneur) ou refusée faute du droit.
+    pub const SERVICE_EXTERNAL_READ: &str = "service.external.read";
+    /// Un refus de lecture des journaux d'un service adopté faute du droit (HRT-80, BR-SLOG-024) ; la
+    /// lecture réussie n'est jamais consignée (BR-SLOG-022).
+    pub const SERVICE_LOGS_READ: &str = "service.logs.read";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 27] = [
+    pub const ALL: [&str; 31] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -86,6 +97,10 @@ pub mod action {
         SERVICE_ENV_REVEAL,
         ACCOUNT_SERVICES_GRANT,
         ACCOUNT_SERVICES_REVOKE,
+        SERVICE_ADOPT,
+        SERVICE_RELEASE,
+        SERVICE_EXTERNAL_READ,
+        SERVICE_LOGS_READ,
     ];
 }
 
