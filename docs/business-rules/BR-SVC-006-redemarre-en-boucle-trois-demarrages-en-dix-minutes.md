@@ -11,7 +11,7 @@ maj: 2026-10-13
 # BR-SVC-006 — « Redémarre en boucle » : 3 démarrages non demandés en 10 minutes
 
 ## Règle
-Un service est « redémarre en boucle » après au moins 3 démarrages non demandés dans les 10 dernières minutes, que ce soit par le moteur ou par autre chose, ou quand le moteur dit qu'il est en cours de relance (`restarting`), code de sortie zéro compris. Les démarrages sont comptés par l'agent (fenêtre glissante en mémoire, un démarrage = un `StartedAt` distinct), jamais par `RestartCount` du moteur. `restarts_10m` donne le compte.
+Un service est « redémarre en boucle » après au moins 3 démarrages non demandés dans les 10 dernières minutes, que ce soit par le moteur ou par autre chose, ou quand le moteur dit qu'il est en cours de relance (`restarting`), code de sortie zéro compris. La spec le dit ainsi (BR-SVC-006 : « ou quand il vient de s'arrêter et qu'il est en attente de relance, quel que soit son code de sortie ») : un service en cours de relance est donc « en boucle » dès la première relance, ce n'est pas un élargissement de la fiche pour suivre le code. Les démarrages sont comptés par l'agent (fenêtre glissante en mémoire, un démarrage = un `StartedAt` distinct), jamais par `RestartCount` du moteur. `restarts_10m` donne le compte.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/state.rs::derive_state`

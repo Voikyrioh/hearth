@@ -15,17 +15,20 @@ use std::time::{Duration, Instant};
 use hearth_agent::app::EngineParts;
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::services::{ProbeOutcome, RunState};
-use hearth_agent::infrastructure::engine::fake::{container, ready_probe};
-use hearth_agent::infrastructure::engine::{BollardEngine, FakeEngine, InstallMarkers, Target};
+use hearth_agent::infrastructure::engine::{BollardEngine, InstallMarkers, Target};
+use hearth_agent::infrastructure::logging::{self, LogFormat};
 use hearth_proto::api::services::{EngineState, ServiceItem, ServiceState, ServicesState};
 use hearth_proto::stream::{ServicesMessage, Topic};
 use serde_json::json;
 use support::engine::{fast_timings, parts, parts_with};
 use support::fake_daemon::{DaemonContainer, FakeDaemon};
+use support::fake_engine::{FakeEngine, container, ready_probe};
 use support::https::{self, Agent};
 use support::probe::{fast_stream, metering_with};
 use support::ws::{self, WsClient};
 use support::{Env, PASSWORD, env};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
 async fn token(env: &Env, agent: &Agent, username: &str, role: Role) -> String {
     env.create(username, role).await;
@@ -92,6 +95,36 @@ async fn ready_agent(env: &Env, engine: &Arc<FakeEngine>) -> Agent {
     })
     .await;
     agent
+}
+
+#[tokio::test]
+async fn the_engine_task_stops_with_the_agent() {
+    // Après l'arrêt de l'agent, plus rien ne sonde le moteur ni ne relit la liste (une tâche
+    // abandonnée sans être arrêtée tournerait tant que le runtime vit).
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    engine.put_silently(container("web", RunState::Running));
+    let agent = ready_agent(&env, &engine).await;
+    let before = engine.probe_count();
+    eventually("la sonde tourne", || {
+        let engine = engine.clone();
+        async move { engine.probe_count() > before + 2 }
+    })
+    .await;
+    agent.shutdown().await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let (probes, lists) = (engine.probe_count(), engine.list_count());
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(
+        engine.probe_count(),
+        probes,
+        "plus aucune sonde après l'arrêt"
+    );
+    assert_eq!(
+        engine.list_count(),
+        lists,
+        "plus aucune relecture après l'arrêt"
+    );
 }
 
 #[tokio::test]
@@ -372,20 +405,28 @@ async fn a_missing_engine_is_absent_quietly_and_a_returning_engine_is_picked_up_
 
 #[tokio::test]
 async fn a_broken_event_stream_triggers_a_probe_and_a_full_reread() {
+    // Cadences LONGUES (3 s) : ni la sonde périodique ni aucune relecture de calage ne peut tomber
+    // dans la fenêtre du test. Seule la réaction à la rupture du flux peut expliquer une sonde et une
+    // relecture complète en moins d'une seconde.
     let env = env().await;
     let engine = Arc::new(FakeEngine::new());
     engine.put_silently(container("one", RunState::Running));
-    let agent = ready_agent(&env, &engine).await;
+    let mut timings = fast_timings();
+    timings.ready_period = Duration::from_secs(3);
+    timings.other_period = Duration::from_secs(3);
+    let agent = https::start_engined(&env, parts_with(engine.clone(), timings)).await;
     let registry = agent.services();
-    eventually("un abonné aux événements", || {
+    // Démarrage fini : sonde, relecture, relecture de calage (4 x 20 ms), flux ouvert.
+    eventually("la relecture de calage est passée", || {
         let engine = engine.clone();
-        async move { engine.event_subscribers() > 0 }
+        async move { engine.list_count() >= 2 && engine.event_subscribers() > 0 }
     })
     .await;
     let probes = engine.probe_count();
     let lists = engine.list_count();
     // Pendant la rupture, le monde change sans événement.
     engine.put_silently(container("two", RunState::Running));
+    let broken_at = Instant::now();
     engine.break_events();
     eventually(
         "le deuxième service est vu par la relecture complète",
@@ -395,6 +436,11 @@ async fn a_broken_event_stream_triggers_a_probe_and_a_full_reread() {
         },
     )
     .await;
+    assert!(
+        broken_at.elapsed() < Duration::from_millis(1500),
+        "la réaction doit précéder la période de 3 s : {:?}",
+        broken_at.elapsed()
+    );
     assert!(engine.probe_count() > probes, "sonde immédiate");
     assert!(engine.list_count() > lists, "relecture complète");
     agent.shutdown().await;
@@ -589,7 +635,9 @@ async fn a_client_that_does_not_subscribe_to_services_never_receives_them() {
 // Aucune valeur de variable ne voyage : ni dans les messages, ni dans les traces
 // ---------------------------------------------------------------------------------------------
 
-/// Les traces de tout le binaire de test, capturées en mémoire (une seule installation globale).
+/// Les traces de tout le binaire de test, capturées en mémoire. Elles passent par le MÊME chemin
+/// d'initialisation que la production (`logging::try_init_with` : filtre de sécurité et pont `log`
+/// vers `tracing` compris), au niveau le plus bavard, avec une directive qui vise `bollard` lui-même.
 fn captured_traces() -> Arc<Mutex<Vec<u8>>> {
     #[derive(Clone)]
     struct Sink(Arc<Mutex<Vec<u8>>>);
@@ -612,13 +660,13 @@ fn captured_traces() -> Arc<Mutex<Vec<u8>>> {
     TRACES
         .get_or_init(|| {
             let buffer = Arc::new(Mutex::new(Vec::new()));
-            // Tous les niveaux, y compris `trace` : si une valeur devait fuir, elle fuirait là.
-            let _ = tracing::subscriber::set_global_default(
-                tracing_subscriber::fmt()
-                    .with_max_level(tracing::Level::TRACE)
-                    .with_writer(Sink(buffer.clone()))
-                    .finish(),
-            );
+            logging::try_init_with(
+                BoxMakeWriter::new(Sink(buffer.clone())),
+                LogFormat::Json,
+                false,
+                EnvFilter::new("trace,bollard=trace,bollard::docker=trace,hyper_util=trace"),
+            )
+            .expect("première installation du journal de ce binaire de test");
             buffer
         })
         .clone()
@@ -627,14 +675,24 @@ fn captured_traces() -> Arc<Mutex<Vec<u8>>> {
 #[tokio::test]
 async fn no_variable_value_name_or_command_reaches_a_message_a_response_or_a_trace() {
     let traces = captured_traces();
+    // Témoins : sans eux, un tampon vide ou un pont `log` absent rendraient le test aveugle. Une
+    // ligne `log` ordinaire doit arriver ; une ligne `log` de `bollard` sous `warn` ne doit pas ;
+    // au niveau `warn` elle arrive.
+    log::debug!(target: "hearth_witness", "witness-log-line");
+    log::debug!(target: "bollard::docker", "witness-bollard-debug");
+    log::warn!(target: "bollard::docker", "witness-bollard-warn");
     let env = env().await;
     // Le VRAI adaptateur `bollard` sur un faux démon dont les réponses d'inspection portent une
-    // variable d'environnement sentinelle ET une commande.
+    // variable d'environnement sentinelle ET une commande sentinelle.
     let daemon = FakeDaemon::start().await;
     let mut container = DaemonContainer::new("secretive", "running");
     container.env = vec![
         "DB_PASSWORD=SENTINEL-VALUE-91c2".to_owned(),
         "SENTINEL_NAME_77=plain".to_owned(),
+    ];
+    container.cmd = vec![
+        "run-server".to_owned(),
+        "--token=SENTINEL-CMD-5d1e".to_owned(),
     ];
     container.publish = Some((8080, 80));
     daemon.put(container);
@@ -688,7 +746,8 @@ async fn no_variable_value_name_or_command_reaches_a_message_a_response_or_a_tra
             "SENTINEL-VALUE-91c2",
             "DB_PASSWORD",
             "SENTINEL_NAME_77",
-            "sleep",
+            "SENTINEL-CMD-5d1e",
+            "run-server",
         ] {
             assert!(!text.contains(forbidden), "{forbidden} dans {text}");
         }
@@ -696,10 +755,21 @@ async fn no_variable_value_name_or_command_reaches_a_message_a_response_or_a_tra
     agent.shutdown().await;
     let captured = String::from_utf8_lossy(&traces.lock().unwrap()).into_owned();
     assert!(
-        !captured.is_empty(),
-        "les traces doivent avoir été capturées"
+        captured.contains("witness-log-line"),
+        "le pont `log` vers `tracing` doit être actif dans ce test : {captured}"
     );
-    for forbidden in ["SENTINEL-VALUE-91c2", "DB_PASSWORD", "SENTINEL_NAME_77"] {
+    for forbidden in [
+        "SENTINEL-VALUE-91c2",
+        "DB_PASSWORD",
+        "SENTINEL_NAME_77",
+        "SENTINEL-CMD-5d1e",
+        "run-server",
+    ] {
         assert!(!captured.contains(forbidden), "{forbidden} dans les traces");
     }
+    assert!(captured.contains("witness-bollard-warn"));
+    assert!(
+        !captured.contains("witness-bollard-debug"),
+        "`bollard` ne sort pas sous `warn`"
+    );
 }

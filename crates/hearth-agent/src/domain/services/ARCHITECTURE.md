@@ -8,7 +8,7 @@ services/
 ├── state.rs   → `Observation` (un conteneur réduit à ce que la liste montre), `derive_state` (état d'un service, fonction pure : code de sortie, `restarting`, pause, jamais démarré), `StartWindow` (démarrages des 10 dernières minutes, 3 = boucle), `compare_names` (tri sans la casse) — BR-SVC-004 à 006, 012
 ├── image.rs   → `image_name` : nom, version, identifiant court ; image sans nom — BR-SVC-022
 ├── key.rs     → `ServiceKey` : `c_` produite, `h_` et `u_` analysées seulement — ADR-0037
-└── cause.rs   → `Cause` : la liste fermée des causes (déclarée complète, aucune produite par la lecture seule)
+└── limits.rs  → bornes de tout ce qui vient d'un conteneur : `bounded` (sans caractères de contrôle, coupé à une longueur), `MAX_PORTS`, `MAX_MOUNTS`… — BR-SVC-021
 ```
 
 Les tranches suivantes ajoutent `lock.rs`, `intent.rs`, `spec.rs`, `folders.rs`, `ports.rs`, `command.rs`, `deploy.rs`, `logs.rs` (conception technique des déploiements, section 9).

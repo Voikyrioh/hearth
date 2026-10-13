@@ -41,7 +41,9 @@ pub use audit_repo::{AuditRepo, AuditTx};
 pub use audit_sink::{AuditFeed, AuditSink};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
-pub use container_engine::{ContainerEngine, EngineError, EngineEvent, EngineEvents};
+pub use container_engine::{
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, Listing, Unreadable,
+};
 pub use device_repo::{DeviceRepo, DeviceTx};
 pub use fingerprint::{FingerprintSecretError, FingerprintSecretStore, RequestFingerprinter};
 pub use gpu_probe::GpuProbe;

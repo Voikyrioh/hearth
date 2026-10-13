@@ -63,13 +63,18 @@ Le même contenu que le `services_snapshot` du flux (repli et tests). `200` :
 | `state` | `running`, `stopped`, `error`, `restart_loop`, `paused`, `stopping`, `unknown` produits ici ; `starting`, `deploying` réservés aux tranches suivantes (BR-SVC-004 à 006). |
 | `restarts_10m` | Démarrages non demandés des 10 dernières minutes, comptés par l'agent (BR-SVC-006). |
 | `image.ref` | Absent pour une image sans nom (BR-SVC-022). |
-| `driver`, `unit`, `busy`, `last_action` | Déclarés facultatifs pour les tranches suivantes, absents ici. |
+| `driver`, `unit`, `busy`, `last_action` | Déclarés facultatifs pour les tranches suivantes, absents ici. `driver` absent vaut `engine` (le moteur pilote le service). |
+| `restart` | `unless_stopped`, `always`, `on_failure`, `none` produits ici ; `supervisor` (relancé par le système du serveur) est déclaré pour la tranche 2. |
+
+**Valeurs inconnues.** Toute énumération que le client lit (`engine.state`, `host.init`, `state`, `origin`, `driver`, `protocol`, `scope`, `mounts[].kind`, `restart`) se lit avec une variante de repli (`unknown`, ou `other` pour `host.init`) : une valeur ajoutée par un agent plus récent ne fait pas perdre l'instantané.
+
+**Bornes.** Textes nettoyés des caractères de contrôle et plafonnés, au plus 128 ports et 64 montages par service (BR-SVC-021).
 
 Erreurs : celles de toute route authentifiée (`401`, `426`).
 
 ## `POST /api/v1/engine/recheck`
 
-Relance la détection du moteur tout de suite (« Vérifier à nouveau ») et rend `engine` (la forme de `EngineView` ci-dessus). C'est un `POST` qui **ne modifie rien** : il est dans `READ_ONLY_POSTS`, ni acte d'administration ni exception nommée, sans clé d'opération ni confirmation. Une demande trop rapprochée de la sonde précédente (moins d'1 seconde) rend l'état courant sans sonder. Le résultat est publié tout de suite (hors de l'anti-clignotement).
+Relance la détection du moteur tout de suite (« Vérifier à nouveau ») et rend `engine` (la forme de `EngineView` ci-dessus). C'est un `POST` qui **ne modifie rien** : il est dans `READ_ONLY_POSTS`, ni acte d'administration ni exception nommée, sans clé d'opération ni confirmation. Une demande trop rapprochée de la sonde précédente (moins d'1 seconde), ou pendant qu'une sonde est déjà en cours, rend l'état courant sans sonder. Ouvert aux deux rôles. Le résultat est publié tout de suite (hors de l'anti-clignotement).
 
 ## Sujet `services` du flux `/stream`
 

@@ -7,13 +7,13 @@ mod support;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use hearth_agent::application::ports::ContainerEngine;
 use hearth_agent::domain::services::{PortBinding, PortProtocol, PortScope, RunState};
-use hearth_agent::infrastructure::engine::FakeEngine;
-use hearth_agent::infrastructure::engine::fake::{at, container};
 use support::engine_contract::{self, Harness, Run, Spec};
+use support::fake_engine::{FakeEngine, at, container};
 
 struct FakeHarness {
     engine: Arc<FakeEngine>,
@@ -89,4 +89,39 @@ async fn the_fake_engine_honours_the_engine_contract() {
         runs: Mutex::default(),
     };
     engine_contract::run(&harness, "contract").await;
+}
+
+#[tokio::test]
+async fn the_fake_lists_inspects_and_streams_events() {
+    use futures_util::StreamExt;
+    use hearth_agent::application::ports::ContainerEngine;
+    let engine = FakeEngine::new();
+    let web = container("web", RunState::Running);
+    let id = web.id.clone();
+    engine.put_silently(web);
+    assert_eq!(engine.list().await.expect("list").observations.len(), 1);
+    assert!(engine.inspect(&id).await.expect("inspect").is_some());
+    assert!(engine.inspect("absent").await.expect("inspect").is_none());
+
+    let mut events = engine.events();
+    engine.emit(&id, "die");
+    let event = tokio::time::timeout(Duration::from_secs(1), events.next())
+        .await
+        .expect("événement")
+        .expect("flux ouvert")
+        .expect("pas d'erreur");
+    assert_eq!(event.container_id, id);
+    engine.break_events();
+    let end = tokio::time::timeout(Duration::from_secs(1), events.next())
+        .await
+        .expect("fin");
+    assert!(end.is_none());
+}
+
+#[test]
+fn the_sample_container_is_stable_and_carries_no_environment() {
+    let a = container("web", RunState::Running);
+    assert_eq!(a.id, container("web", RunState::Exited).id);
+    assert_eq!(a.id.len(), 64);
+    assert_ne!(a.id, container("db", RunState::Running).id);
 }

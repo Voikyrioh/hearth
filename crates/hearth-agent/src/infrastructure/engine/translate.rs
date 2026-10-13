@@ -15,8 +15,9 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::domain::services::image::image_name;
 use crate::domain::services::{
-    MountInfo, MountType, Observation, PortBinding, PortProtocol, PortScope, RestartPolicy,
-    RunState,
+    MAX_IMAGE_REF_CHARS, MAX_IMAGE_TAG_CHARS, MAX_LABEL_CHARS, MAX_MOUNTS, MAX_NAME_CHARS,
+    MAX_PATH_CHARS, MAX_PORTS, MountInfo, MountType, Observation, PortBinding, PortProtocol,
+    PortScope, RestartPolicy, RunState, bounded, bounded_opt,
 };
 
 /// Étiquette posée par Compose sur les conteneurs d'une pile (information seulement).
@@ -32,23 +33,28 @@ pub fn parse_date(text: &str) -> Option<OffsetDateTime> {
 /// `Some` seulement pour une réponse qui désigne un conteneur (identifiant non vide).
 pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observation> {
     let id = response.id.clone().filter(|id| !id.is_empty())?;
-    let name = response
-        .name
-        .as_deref()
-        .unwrap_or_default()
-        .trim_start_matches('/')
-        .to_owned();
+    // Tout texte venu du conteneur est nettoyé et plafonné ici (`domain::services::limits`).
+    let name = bounded(
+        response
+            .name
+            .as_deref()
+            .unwrap_or_default()
+            .trim_start_matches('/'),
+        MAX_NAME_CHARS,
+    );
     let state = response.state.as_ref();
     let run_state = run_state_of(response);
     let host_config = response.host_config.as_ref();
     let config = response.config.as_ref();
 
-    let image = image_name(
+    let mut image = image_name(
         config
             .and_then(|config| config.image.as_deref())
             .unwrap_or_default(),
         response.image.as_deref().unwrap_or_default(),
     );
+    image.reference = bounded_opt(image.reference.as_deref(), MAX_IMAGE_REF_CHARS);
+    image.tag = bounded_opt(image.tag.as_deref(), MAX_IMAGE_TAG_CHARS);
 
     // Les ports réels d'un conteneur qui tourne (le moteur attribue les ports demandés « au
     // hasard » au démarrage) ; sinon ceux qu'il a réservés.
@@ -83,11 +89,12 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
             }?;
             Some(MountInfo {
                 kind,
-                source,
-                target: mount.destination.clone()?,
+                source: bounded(&source, MAX_PATH_CHARS),
+                target: bounded(mount.destination.as_deref()?, MAX_PATH_CHARS),
                 read_only: mount.rw == Some(false),
             })
         })
+        .take(MAX_MOUNTS)
         .collect();
 
     Some(Observation {
@@ -112,11 +119,13 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
         auto_remove: host_config
             .and_then(|host| host.auto_remove)
             .unwrap_or(false),
-        compose_project: config
-            .and_then(|config| config.labels.as_ref())
-            .and_then(|labels| labels.get(COMPOSE_PROJECT_LABEL))
-            .filter(|project| !project.is_empty())
-            .cloned(),
+        compose_project: bounded_opt(
+            config
+                .and_then(|config| config.labels.as_ref())
+                .and_then(|labels| labels.get(COMPOSE_PROJECT_LABEL))
+                .map(String::as_str),
+            MAX_LABEL_CHARS,
+        ),
     })
 }
 
@@ -202,7 +211,8 @@ fn ports_of(map: &PortMap) -> Vec<PortBinding> {
                 });
         }
     }
-    merged.into_values().collect()
+    // Les ports sont triés (port du serveur, du conteneur, protocole) : le plafond garde les premiers.
+    merged.into_values().take(MAX_PORTS).collect()
 }
 
 /// Une liaison sur l'adresse locale n'est joignable que depuis ce serveur ; toute autre (aucune
@@ -372,6 +382,55 @@ mod tests {
         })))
         .expect("observation");
         assert_eq!(observation.image.reference, None);
+    }
+
+    #[test]
+    fn everything_a_container_says_is_cleaned_and_bounded() {
+        use crate::domain::services::{MAX_MOUNTS, MAX_NAME_CHARS, MAX_PATH_CHARS, MAX_PORTS};
+        let ports: serde_json::Map<String, serde_json::Value> = (1..=3000u32)
+            .map(|port| {
+                (
+                    format!("{port}/tcp"),
+                    json!([{ "HostIp": "0.0.0.0", "HostPort": (10_000 + port).to_string() }]),
+                )
+            })
+            .collect();
+        let mounts: Vec<_> = (0..500)
+            .map(|index| {
+                json!({ "Type": "bind", "Source": format!("/srv/{index}"),
+                        "Destination": format!("/data{index}"), "RW": true })
+            })
+            .collect();
+        let observation = observation_from(&response(json!({
+            "Name": format!("/web\n\u{1b}[31m{}", "x".repeat(1000)),
+            "Mounts": mounts,
+            "NetworkSettings": { "Ports": ports },
+            "Config": {
+                "Image": format!("reg/{}:tag\nfake", "i".repeat(1000)),
+                "Labels": { "com.docker.compose.project": "shop\r\nforged: line" }
+            }
+        })))
+        .expect("observation");
+        assert_eq!(observation.name.chars().count(), MAX_NAME_CHARS);
+        assert!(!observation.name.contains(['\n', '\u{1b}']));
+        assert_eq!(observation.ports.len(), MAX_PORTS);
+        assert_eq!(observation.mounts.len(), MAX_MOUNTS);
+        assert!(
+            observation
+                .mounts
+                .iter()
+                .all(|m| m.target.chars().count() <= MAX_PATH_CHARS)
+        );
+        assert_eq!(
+            observation.compose_project.as_deref(),
+            Some("shopforged: line")
+        );
+        let tag = observation.image.tag.expect("version");
+        assert!(!tag.contains('\n'));
+        assert!(
+            observation.image.reference.expect("nom").chars().count()
+                <= crate::domain::services::MAX_IMAGE_REF_CHARS
+        );
     }
 
     #[test]

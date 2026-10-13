@@ -74,6 +74,7 @@ async fn find(engine: &Arc<dyn ContainerEngine>, name: &str) -> Option<Observati
         .list()
         .await
         .expect("liste")
+        .observations
         .into_iter()
         .find(|observation| observation.name == name)
 }

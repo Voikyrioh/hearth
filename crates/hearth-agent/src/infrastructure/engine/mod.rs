@@ -4,14 +4,16 @@
 //! - `translate` : réponse d'inspection du moteur vers `Observation` (pur, sans variables ni commande) ;
 //! - `errors` : erreur du moteur vers `EngineError` (le texte du moteur n'en sort jamais) ;
 //! - `installed` : un moteur est-il installé sur ce serveur ? (séparer « arrêté » d'« absent ») ;
-//! - `fake` : le faux moteur de tous les tests.
+//! - `fake` : le faux moteur des tests, qui vit dans `tests/support/fake_engine.rs` (partagé avec les
+//!   tests d'intégration) et n'est compilé que sous `cfg(test)` : il n'est pas dans le binaire livré.
 
 pub mod bollard;
 pub mod errors;
+#[cfg(test)]
+#[path = "../../../tests/support/fake_engine.rs"]
 pub mod fake;
 pub mod installed;
 pub mod translate;
 
 pub use self::bollard::{BollardEngine, Target};
-pub use self::fake::FakeEngine;
 pub use self::installed::InstallMarkers;
