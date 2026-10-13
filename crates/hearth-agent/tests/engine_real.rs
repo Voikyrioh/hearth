@@ -14,6 +14,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/image_pull.rs"]
+mod image_pull;
 mod support;
 
 use std::path::PathBuf;
@@ -131,7 +133,7 @@ async fn the_bollard_adapter_honours_the_engine_contract_against_a_real_engine()
         eprintln!("HEARTH_TEST_ENGINE=1 n'est pas posé : test non exécuté");
         return;
     }
-    docker(&["pull", "--quiet", IMAGE]);
+    image_pull::ensure(IMAGE);
     remove_leftovers();
     let harness = RealHarness {
         engine: Arc::new(BollardEngine::unix(socket())),
@@ -201,7 +203,7 @@ async fn the_real_engine_describes_pause_mounts_labels_policy_and_random_ports()
         return;
     }
     use hearth_agent::domain::services::{MountType, RestartPolicy, RunState};
-    docker(&["pull", "--quiet", IMAGE]);
+    image_pull::ensure(IMAGE);
     remove_leftovers();
     let name = format!("{PREFIX}-describe");
     let volume = format!("{PREFIX}-volume");
@@ -386,7 +388,7 @@ async fn a_service_writing_a_thousand_lines_a_second_is_read_without_loss_for_th
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(60);
-    docker(&["pull", "--quiet", IMAGE]);
+    image_pull::ensure(IMAGE);
     remove_leftovers();
     let name = format!("{PREFIX}-rate");
     // Cent lignes, puis cent millisecondes de pause : environ 1 000 lignes par seconde.

@@ -36,6 +36,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/image_pull.rs"]
+mod image_pull;
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
@@ -266,7 +269,7 @@ async fn a_container_run_by_a_unit_is_detected_and_the_engine_stop_is_recorded()
     // Les restes d'une exécution interrompue, puis le décor défait quoi qu'il arrive.
     drop(Cleanup);
     let _cleanup = Cleanup;
-    must("docker", &["pull", "--quiet", IMAGE]);
+    image_pull::ensure(IMAGE);
 
     // Le décor : un conteneur `--rm` lancé par une unité qui se relance toujours, comme les unités
     // `docker-<nom>.service` de `virtualisation.oci-containers` sur NixOS.
