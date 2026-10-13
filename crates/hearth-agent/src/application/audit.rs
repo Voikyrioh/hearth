@@ -210,6 +210,7 @@ impl AuditSink for AuditRecorder {
         outcome: Outcome,
     ) -> Result<(), AuditWriteError> {
         let event = AuditEvent::new(self.clock.now(), actor, action, target, outcome);
+        let own = event.clone();
         let to_write = self
             .repeats
             .lock()
@@ -221,6 +222,19 @@ impl AuditSink for AuditRecorder {
                 Ok(record) => self.trail.publish(vec![record]),
                 Err(error) => {
                     tracing::error!(%error, action = event.action.code(), "entrée du journal non écrite");
+                    // Une lecture servie exige son entrée : si c'est la sienne qui n'a pas pu être
+                    // écrite, le groupe qu'elle venait d'ouvrir est refermé. Sinon le réessai serait
+                    // compté dans ce groupe et servi sans trace (revue de la PR 89).
+                    if event == own {
+                        let orphaned = self
+                            .repeats
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .withdraw(&own);
+                        for summary in orphaned {
+                            self.write_and_publish(summary).await;
+                        }
+                    }
                     written = false;
                 }
             }

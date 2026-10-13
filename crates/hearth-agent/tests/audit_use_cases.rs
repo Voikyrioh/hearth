@@ -1144,3 +1144,47 @@ async fn a_grouped_required_entry_repeats_into_one_row_and_a_failing_write_is_ha
     );
     assert!(read(other).await.is_err());
 }
+
+/// Revue de la PR 89 : un échec d'écriture ne laisse AUCUN groupe ouvert. Le réessai du même compte n'est
+/// jamais « compté dans un groupe déjà ouvert » et servi sans trace : il est refusé tant que le journal
+/// refuse d'écrire, et écrit dès qu'il le peut.
+#[tokio::test]
+async fn a_failed_grouped_write_leaves_no_open_group_and_the_retry_is_refused_or_written() {
+    let env = env().await;
+    let actor = Actor::new(
+        Some(Username::parse("marie").unwrap()),
+        Origin::client(Some("poste"), "10.0.0.7"),
+    );
+    let read = || {
+        env.audit_sink.record_grouped_required(
+            actor.clone(),
+            AuditAction::ServiceExternalRead,
+            Target::Route("/services/external"),
+            Outcome::Succeeded,
+        )
+    };
+    sqlx::query(
+        "CREATE TRIGGER refuse_audit BEFORE INSERT ON audit_events
+         BEGIN SELECT RAISE(ABORT, 'journal indisponible'); END",
+    )
+    .execute(env.db.pool())
+    .await
+    .unwrap();
+    // Le premier essai et tous les suivants sont refusés : aucun n'est servi sans entrée.
+    for _ in 0..5 {
+        assert!(read().await.is_err());
+    }
+    assert!(all(&env).await.is_empty());
+    sqlx::query("DROP TRIGGER refuse_audit")
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+    // Le journal revient : le réessai écrit SON entrée (le groupe n'était pas resté ouvert).
+    read().await.expect("écrite");
+    let entries = all(&env).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, "service.external.read");
+    // Et le suivant est bien compté dans le groupe que cette entrée vient d'ouvrir.
+    read().await.expect("comptée");
+    assert_eq!(all(&env).await.len(), 1);
+}

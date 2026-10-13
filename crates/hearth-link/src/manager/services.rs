@@ -45,16 +45,20 @@ fn key_segment(key: &str) -> String {
     key.replace('\\', "%5C")
 }
 
+/// Lit une réponse typée. L'erreur de lecture ne recopie JAMAIS celle de `serde` : une erreur de type cite la
+/// valeur fautive, qui peut être le nom ou l'image d'un conteneur que le compte n'a pas adopté.
+fn parse<T: DeserializeOwned>(body: serde_json::Value, what: &str) -> Result<T, LinkError> {
+    serde_json::from_value(body).map_err(|_| LinkError::Protocol(format!("{what} illisible")))
+}
+
 fn acted<T: DeserializeOwned>(outcome: ActionOutcome, what: &str) -> Result<Acted<T>, LinkError> {
     match outcome {
         ActionOutcome::ResultUnknown { id } => Ok(Acted::ResultUnknown { id }),
         ActionOutcome::Completed { status, body, .. } => {
             if !(200..300).contains(&status) {
-                return Err(super::audit::rejection(&body));
+                return Err(super::audit::rejection_with_reason(&body));
             }
-            serde_json::from_value(body)
-                .map(Acted::Done)
-                .map_err(|e| LinkError::Protocol(format!("{what} illisible : {e}")))
+            parse(body, what).map(Acted::Done)
         }
     }
 }
@@ -88,8 +92,7 @@ impl LinkManager {
         let body = self
             .typed_get(&target, &token, EXTERNAL_PATH.to_owned())
             .await?;
-        serde_json::from_value(body)
-            .map_err(|e| LinkError::Protocol(format!("conteneurs candidats illisibles : {e}")))
+        parse(body, "conteneurs candidats")
     }
 
     /// Adopte ces clés (`POST /services/adopt`) : un acte d'administration, le mot de passe ET la preuve
@@ -106,7 +109,7 @@ impl LinkManager {
         let body = serde_json::to_value(AdoptRequest {
             keys: keys.to_vec(),
         })
-        .map_err(|e| LinkError::Protocol(format!("demande d'adoption : {e}")))?;
+        .map_err(|_| LinkError::Protocol("demande d'adoption illisible".into()))?;
         let outcome = self
             .execute_act(
                 id,
@@ -171,7 +174,39 @@ impl LinkManager {
         if !(200..300).contains(&response.status) {
             return Err(super::audit::rejection(&response.body));
         }
-        serde_json::from_value(response.body)
-            .map_err(|e| LinkError::Protocol(format!("état du moteur illisible : {e}")))
+        parse(response.body, "état du moteur")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hearth_proto::api::services::{AdoptResponse, ExternalContainers};
+    use serde_json::json;
+
+    use super::*;
+
+    /// Une réponse illisible ne recopie jamais le texte de `serde`, qui cite la valeur fautive : ici le nom
+    /// d'un conteneur que le compte n'a pas adopté.
+    #[test]
+    fn an_unreadable_answer_never_repeats_the_value_serde_complains_about() {
+        const HIDDEN: &str = "SENTINEL-NOM-CACHE-3c9e";
+        let wrong = json!({ "engine": HIDDEN, "containers": HIDDEN, "adopted": HIDDEN });
+        for result in [
+            parse::<ExternalContainers>(wrong.clone(), "conteneurs candidats").map(|_| ()),
+            parse::<AdoptResponse>(wrong.clone(), "réponse d'adoption").map(|_| ()),
+            acted::<AdoptResponse>(
+                ActionOutcome::Completed {
+                    status: 200,
+                    body: wrong.clone(),
+                    replayed: false,
+                },
+                "réponse d'adoption",
+            )
+            .map(|_| ()),
+        ] {
+            let error = result.unwrap_err();
+            assert!(matches!(error, LinkError::Protocol(_)), "{error:?}");
+            assert!(!format!("{error} {error:?}").contains(HIDDEN), "{error:?}");
+        }
     }
 }

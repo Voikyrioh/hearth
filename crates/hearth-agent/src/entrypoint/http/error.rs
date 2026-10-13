@@ -49,6 +49,15 @@ impl ApiError {
         ))
     }
 
+    /// Erreur de validation sur un champ, avec la raison (`details.reason`, un texte fixe du protocole).
+    pub fn invalid_because(field: &str, reason: &str, message: impl Into<String>) -> Self {
+        Self(ErrorBody::with_details(
+            ErrorCode::ValidationError,
+            message,
+            json!({ "field": field, "reason": reason }),
+        ))
+    }
+
     /// Erreur interne : le détail va au journal (une fois), jamais au client.
     pub fn internal(error: &dyn Display) -> Self {
         tracing::error!(%error, "erreur interne");

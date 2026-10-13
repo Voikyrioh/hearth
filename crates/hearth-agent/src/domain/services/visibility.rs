@@ -100,6 +100,14 @@ pub fn unit_is_gone(lookup: UnitLookup, container_present: bool) -> bool {
     lookup == UnitLookup::NotLoaded && !container_present
 }
 
+/// `BR-ADOPT-027` : la lecture d'une unité montre-t-elle qu'elle existe ? Seulement si le système la
+/// connaît (`Loaded`), ou s'il ne la connaît pas mais qu'un conteneur la porte : une réponse muette
+/// (`Unavailable`) ou « introuvable » sans conteneur n'ouvre pas une adoption chargée au démarrage.
+pub fn unit_answered(lookup: UnitLookup, container_present: bool) -> bool {
+    matches!(lookup, UnitLookup::Loaded(_))
+        || (lookup == UnitLookup::NotLoaded && container_present)
+}
+
 /// `BR-ADOPT-017` : nombre de lectures « introuvable, sans conteneur » CONSÉCUTIVES (espacées de deux
 /// périodes de sonde, 8 s en production) avant qu'une adoption par unité tombe. Une lecture qui dit
 /// autre chose remet le compte à zéro.
@@ -264,5 +272,21 @@ mod tests {
         ));
         assert!(confirmation_expired(since, since + CONFIRMATION_TTL));
         const { assert!(CONFIRMATION_TTL.whole_hours() <= 24 * 7) };
+    }
+
+    #[test]
+    fn only_a_loaded_unit_or_a_unit_a_container_carries_answers_for_a_loaded_adoption() {
+        use crate::domain::services::unit::{UnitActivity, UnitStatus};
+        let loaded = UnitLookup::Loaded(UnitStatus {
+            activity: UnitActivity::Inactive,
+            auto_restart: false,
+            restarts: false,
+            timeout_stop_s: None,
+        });
+        assert!(unit_answered(loaded, false));
+        assert!(unit_answered(UnitLookup::NotLoaded, true));
+        assert!(!unit_answered(UnitLookup::NotLoaded, false));
+        assert!(!unit_answered(UnitLookup::Unavailable, false));
+        assert!(!unit_answered(UnitLookup::Unavailable, true));
     }
 }

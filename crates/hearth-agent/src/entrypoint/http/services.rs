@@ -32,7 +32,7 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use hearth_proto::api::services::{
     AdoptRequest, AdoptResponse, AdoptionItem, AdoptionResult, EngineView, ExternalContainer,
-    ExternalContainers, ImageInfo, ReleaseResponse, ServicesState,
+    ExternalContainers, ImageInfo, ReleaseResponse, ServicesState, adoption_refusal,
 };
 use hearth_proto::error::{ErrorBody, ErrorCode};
 
@@ -100,7 +100,7 @@ fn adoption_disabled() -> ApiError {
     ApiError(ErrorBody::with_details(
         ErrorCode::Conflict,
         "L'adoption de services est désactivée sur ce serveur. Un administrateur du serveur peut la réactiver dans la configuration de l'agent Hearth.",
-        serde_json::json!({ "reason": "adoption_disabled" }),
+        serde_json::json!({ "reason": adoption_refusal::ADOPTION_DISABLED }),
     ))
 }
 
@@ -111,19 +111,25 @@ fn adoption_error(error: AdoptionError) -> ApiError {
             ErrorCode::Conflict,
             "Le moteur de conteneurs n'est pas prêt : rien ne peut être adopté pour l'instant.",
             serde_json::json!({
-                "reason": "engine_not_ready",
+                "reason": adoption_refusal::ENGINE_NOT_READY,
                 "engine": services_wire::engine_state(state),
             }),
         )),
-        AdoptionError::Invalid(Invalid::TooMany) => {
-            ApiError::invalid("keys", "Tu peux adopter 50 services à la fois.")
-        }
-        AdoptionError::Invalid(Invalid::Empty) => {
-            ApiError::invalid("keys", "Choisis au moins un service à adopter.")
-        }
-        AdoptionError::Invalid(Invalid::Duplicate) => {
-            ApiError::invalid("keys", "Un service ne se choisit qu'une fois.")
-        }
+        AdoptionError::Invalid(Invalid::TooMany) => ApiError::invalid_because(
+            "keys",
+            adoption_refusal::KEYS_TOO_MANY,
+            "Tu peux adopter 50 services à la fois.",
+        ),
+        AdoptionError::Invalid(Invalid::Empty) => ApiError::invalid_because(
+            "keys",
+            adoption_refusal::KEYS_EMPTY,
+            "Choisis au moins un service à adopter.",
+        ),
+        AdoptionError::Invalid(Invalid::Duplicate) => ApiError::invalid_because(
+            "keys",
+            adoption_refusal::KEYS_DUPLICATE,
+            "Un service ne se choisit qu'une fois.",
+        ),
         AdoptionError::Store(error) => ApiError::internal(&error),
     }
 }

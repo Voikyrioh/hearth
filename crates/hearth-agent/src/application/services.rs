@@ -35,7 +35,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use futures_util::{StreamExt, stream};
@@ -50,15 +50,15 @@ use crate::application::ports::{
     HostDescription, HostEnvironment, MonotonicClock, ServiceRepo, ServiceSupervisor, StoreError,
     SupervisedRecord,
 };
-use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Target};
+use crate::domain::audit::{Actor, AdoptionCause, AuditAction, ClientName, Outcome, Target};
 use crate::domain::services::image::ImageName;
 use crate::domain::services::logs::{LogContainer, LogOrigin, LogTarget};
 use crate::domain::services::{
-    Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, Observation,
+    Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, KeyKind, Observation,
     PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow, UnitLookup,
     UnitName, UnitStatus, Visibility, classify_probe, compare_names, confirmation_expired,
-    derive_state, derive_supervised, gone_long_enough, lapsed, unit_is_gone, unread_unit_adoptions,
-    visibility_of,
+    derive_state, derive_supervised, gone_long_enough, lapsed, unit_answered, unit_is_gone,
+    unread_unit_adoptions, visibility_of,
 };
 
 /// Capacité de la diffusion : un abonné qui prend plus de 64 lots de retard relit un instantané.
@@ -228,13 +228,26 @@ struct Inner {
     /// Services adoptés (HRT-79), lus en base (`reload_adopted`). Vide tant qu'ils ne sont pas lus :
     /// rien n'est publié par défaut.
     adopted: HashMap<ServiceKey, Adoption>,
-    /// Adoptions tombées avec leur conteneur (`BR-ADOPT-017`), à effacer de la base.
+    /// Adoptions tombées (conteneur ou unité disparus, échéance de la confirmation), à effacer de la base.
+    /// Tant qu'une clé est dans cette file, `reload_adopted` ne la relit pas (`BR-ADOPT-027`).
     lapsed: HashSet<ServiceKey>,
     /// Adoptions par unité « à confirmer » (`BR-ADOPT-027`), avec le moment où elles le sont devenues :
     /// l'unité n'est plus relue, rien ne dit que c'est encore la même. Elles ne sont PLUS dans
     /// `adopted` (donc invisibles et sans droit) ; leur ligne reste en base jusqu'à la confirmation ou
-    /// l'échéance. En mémoire seulement : un redémarrage de l'agent relit l'unité.
+    /// l'échéance. DURABLE : la date « depuis » est dans la colonne `unconfirmed_since` (migration
+    /// `0014`), écrite avant que l'adoption cesse d'ouvrir des droits et relue au démarrage.
     unconfirmed: HashMap<ServiceKey, OffsetDateTime>,
+    /// Adoptions par unité chargées de la base au démarrage de l'agent et pas encore relues depuis : elles
+    /// n'ouvrent AUCUN droit (une unité remplacée pendant l'arrêt de l'agent n'en hérite pas) mais ne sont
+    /// PAS « à confirmer » : aucun délai ne court. La première lecture qui trouve l'unité chargée les
+    /// rend actives (`BR-ADOPT-027`). Jamais écrit en base : c'est un état de ce démarrage.
+    pending: HashMap<ServiceKey, Adoption>,
+    /// Le démarrage n'a pas encore lu les adoptions avec succès : les adoptions par unité qu'une lecture
+    /// trouvera arrivent alors dans `pending` (`BR-ADOPT-027`), même si cette lecture a lieu plus tard.
+    awaiting_boot_load: bool,
+    /// Ce que le registre doit encore consigner au journal d'activité (auteur : le système) : passage « à
+    /// confirmer » et chute d'une adoption. Vidé par `persist_supervised`.
+    journal: Vec<(AuditAction, ServiceKey, AdoptionCause)>,
     /// Combien de conteneurs ne sont ni créés par Hearth ni adoptés.
     external: usize,
     /// Conteneurs vus dans la liste mais illisibles à la dernière relecture complète.
@@ -287,6 +300,30 @@ struct Inner {
     last_exit: HashMap<UnitName, i64>,
     /// Instant monotone de la dernière relecture de l'état des unités.
     last_unit_poll: Option<Duration>,
+}
+
+impl Inner {
+    /// L'adoption tombe : sa ligne est mise en file d'effacement et la chute sera consignée (auteur : le
+    /// système). Rien d'autre ne retient la clé : ni droits, ni état « à confirmer », ni attente.
+    fn lapse(&mut self, key: ServiceKey, cause: AdoptionCause) {
+        self.adopted.remove(&key);
+        self.unconfirmed.remove(&key);
+        self.pending.remove(&key);
+        if self.lapsed.insert(key.clone()) {
+            self.journal
+                .push((AuditAction::ServiceAdoptionLapsed, key, cause));
+        }
+    }
+
+    /// Ce que le registre retenait d'une unité dont l'adoption n'ouvre plus de droits.
+    fn forget_unit_memory(&mut self, unit: &UnitName) {
+        self.gone_reads.remove(unit);
+        if self.remembered.remove(unit).is_some() {
+            self.forgotten.insert(unit.clone());
+        }
+        self.dirty.remove(unit);
+        self.last_exit.remove(unit);
+    }
 }
 
 /// Un service supervisé retenu : ses derniers réglages connus (sans variable ni commande) et le
@@ -372,6 +409,14 @@ impl ServiceRepo for NoServiceRepo {
     async fn forget_adopted(&self, _key: &ServiceKey) -> Result<(), StoreError> {
         Ok(())
     }
+
+    async fn mark_unconfirmed(
+        &self,
+        marks: &[(ServiceKey, OffsetDateTime)],
+        since: OffsetDateTime,
+    ) -> Result<Vec<(ServiceKey, OffsetDateTime)>, StoreError> {
+        Ok(marks.iter().map(|(key, _)| (key.clone(), since)).collect())
+    }
 }
 
 /// Aucun superviseur : aucun conteneur n'a de propriétaire.
@@ -422,6 +467,9 @@ pub struct ServicesRegistry {
     enabled: bool,
     timings: EngineTimings,
     state: Mutex<Inner>,
+    /// Le journal d'activité, pour consigner ce que le registre décide seul (passage « à confirmer » et chute
+    /// d'une adoption). Posé une fois par la racine de composition ; absent, rien n'est consigné.
+    audit: OnceLock<Arc<dyn AuditSink>>,
     changes: broadcast::Sender<Arc<ServicesChange>>,
     /// Réveille la tâche (« Vérifier à nouveau »).
     wake: Notify,
@@ -499,6 +547,9 @@ impl ServicesRegistry {
                 adopted: HashMap::new(),
                 lapsed: HashSet::new(),
                 unconfirmed: HashMap::new(),
+                pending: HashMap::new(),
+                awaiting_boot_load: false,
+                journal: Vec::new(),
                 external: 0,
                 degraded: 0,
                 list_denied: false,
@@ -522,9 +573,15 @@ impl ServicesRegistry {
             }),
             clock,
             monotonic,
+            audit: OnceLock::new(),
             changes,
             wake: Notify::new(),
         })
+    }
+
+    /// Branche le journal d'activité (une seule fois ; un second appel est sans effet).
+    pub fn set_audit(&self, sink: Arc<dyn AuditSink>) {
+        let _ = self.audit.set(sink);
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -1014,8 +1071,7 @@ impl ServicesRegistry {
                 .filter_map(|observation| key_of(&inner.owners, observation))
                 .collect();
             for key in lapsed(&inner.adopted, &live) {
-                inner.adopted.remove(&key);
-                inner.lapsed.insert(key);
+                inner.lapse(key, AdoptionCause::ContainerGone);
             }
         }
         let mut published = HashMap::with_capacity(every.len());
@@ -1277,11 +1333,18 @@ impl ServicesRegistry {
     /// Relit l'état de chaque unité connue (supervisant un conteneur, ou retenue) et recalcule les
     /// vues. Une unité que le système ne connaît plus, dont le conteneur n'existe plus, est oubliée avec
     /// son service retenu.
+    ///
+    /// `BR-ADOPT-027` : le jugement « cette adoption n'a pas été relue » se fait sur l'INSTANTANÉ des
+    /// adoptions pris au début du passage (`judged`), jamais sur l'ensemble au moment où les lectures
+    /// finissent : une adoption faite pendant les lectures n'est pas jugée par ce passage. Le passage
+    /// « à confirmer » est ÉCRIT en base avant que l'adoption cesse d'ouvrir des droits.
     async fn poll_units(&self) {
-        let units: Vec<UnitName> = {
+        // FIX:01M4VNGP6RMTHA7XNDDGV2FH1R jugement sur l'instantané du début du passage, état « à confirmer » durable.
+        let (units, judged) = {
             let mut inner = self.lock();
             inner.last_unit_poll = Some(self.mono());
-            // `BR-ADOPT-027` : une confirmation qu'aucun compte n'a donnée dans le délai tombe.
+            // `BR-ADOPT-027` : une confirmation qu'aucun compte n'a donnée dans le délai tombe. Le délai
+            // court depuis la date écrite en base : un redémarrage ne le fait jamais repartir.
             let now = self.clock.now();
             let expired: Vec<ServiceKey> = inner
                 .unconfirmed
@@ -1290,21 +1353,26 @@ impl ServicesRegistry {
                 .map(|(key, _)| key.clone())
                 .collect();
             for key in expired {
-                inner.unconfirmed.remove(&key);
                 if let Some(unit) = key.unit() {
-                    inner.gone_reads.remove(&unit);
+                    inner.forget_unit_memory(&unit);
                 }
-                inner.lapsed.insert(key);
+                inner.lapse(key, AdoptionCause::Expired);
             }
+            // L'instantané : les adoptions par unité (actives, pas encore relues depuis le démarrage, ou
+            // « à confirmer »).
+            let judged: HashSet<ServiceKey> = inner
+                .adopted
+                .keys()
+                .chain(inner.pending.keys())
+                .chain(inner.unconfirmed.keys())
+                .filter(|key| key.kind() == KeyKind::Unit)
+                .cloned()
+                .collect();
             // Les adoptions (confirmées ou non) d'abord : ce sont elles dont l'unité doit être relue,
             // avant celle d'un conteneur quelconque. Au-delà de la borne, l'adoption qui n'est pas
             // relue devient « à confirmer » plus bas.
-            let mut adopted_units: Vec<UnitName> = inner
-                .adopted
-                .keys()
-                .chain(inner.unconfirmed.keys())
-                .filter_map(ServiceKey::unit)
-                .collect();
+            let mut adopted_units: Vec<UnitName> =
+                judged.iter().filter_map(ServiceKey::unit).collect();
             adopted_units.sort();
             adopted_units.dedup();
             let mut known: HashSet<UnitName> = inner.owners.values().flatten().cloned().collect();
@@ -1315,9 +1383,10 @@ impl ServicesRegistry {
             adopted_units.truncate(MAX_ADOPTED_UNITS_PER_POLL);
             let room = MAX_UNITS_PER_POLL.saturating_sub(adopted_units.len());
             adopted_units.extend(others.into_iter().take(room));
-            adopted_units
+            (adopted_units, judged)
         };
         if units.is_empty() {
+            self.persist_supervised().await;
             return;
         }
         let read: HashSet<UnitName> = units.iter().cloned().collect();
@@ -1326,17 +1395,20 @@ impl ServicesRegistry {
             let lookup = self.supervisor.unit(&unit).await;
             looked.push((unit, lookup));
         }
-        {
+        let unread = {
             let mut inner = self.lock();
             // Le compte des lectures « introuvable » ne survit pas à une unité qu'on ne relit plus.
             inner.gone_reads.retain(|unit, _| read.contains(unit));
             for (unit, lookup) in looked {
                 let container_present = inner.present_units.contains(&unit);
                 let key = ServiceKey::for_unit(&unit);
-                // Seule une adoption fait tomber : le compte d'une unité qui n'est pas adoptée ne
-                // servirait qu'à frapper une adoption future.
-                let counts =
-                    inner.adopted.contains_key(&key) || inner.unconfirmed.contains_key(&key);
+                // Seule une adoption jugée par ce passage (présente à son début, encore là) fait tomber
+                // ou se réveille : le compte d'une unité qui n'est pas adoptée ne servirait qu'à frapper
+                // une adoption future, et une adoption faite pendant les lectures n'a rien lu.
+                let counts = judged.contains(&key)
+                    && (inner.adopted.contains_key(&key)
+                        || inner.pending.contains_key(&key)
+                        || inner.unconfirmed.contains_key(&key));
                 let gone_reads = if counts && unit_is_gone(lookup, container_present) {
                     let reads = inner.gone_reads.entry(unit.clone()).or_insert(0);
                     *reads = reads.saturating_add(1);
@@ -1348,44 +1420,88 @@ impl ServicesRegistry {
                 if gone_long_enough(gone_reads) {
                     // `BR-ADOPT-017` : l'adoption tient tant que l'unité existe. Le système répond
                     // clairement « introuvable » (supprimée, ou transitoire arrêtée), aucun conteneur ne
-                    // la porte, et c'est vrai depuis plusieurs lectures de suite : l'adoption tombe, sans
-                    // entrée au journal (aucun compte n'agit). Une unité écrite dans un fichier reste
-                    // connue une fois arrêtée (`loaded/inactive`) ; une unité masquée, en erreur, ou une
-                    // réponse que le système ne donne pas (`Unavailable`) ne fait rien tomber.
-                    inner.gone_reads.remove(&unit);
-                    let was_unconfirmed = inner.unconfirmed.remove(&key).is_some();
-                    if inner.adopted.remove(&key).is_some() || was_unconfirmed {
-                        inner.lapsed.insert(key);
-                    }
-                    if inner.remembered.remove(&unit).is_some() {
-                        inner.forgotten.insert(unit.clone());
-                    }
-                    inner.dirty.remove(&unit);
-                    inner.last_exit.remove(&unit);
+                    // la porte, et c'est vrai depuis plusieurs lectures de suite : l'adoption tombe. Une
+                    // unité écrite dans un fichier reste connue une fois arrêtée (`loaded/inactive`) ;
+                    // une unité masquée, en erreur, ou une réponse que le système ne donne pas
+                    // (`Unavailable`) ne fait rien tomber. La chute est consignée (auteur : le système).
+                    inner.forget_unit_memory(&unit);
+                    inner.lapse(key, AdoptionCause::UnitGone);
                     inner.units.remove(&unit);
                 } else {
+                    // `BR-ADOPT-027` : une adoption chargée au démarrage devient active à la première
+                    // lecture qui montre l'unité chargée. Une réponse muette ou « introuvable » ne
+                    // l'ouvre pas.
+                    if counts
+                        && unit_answered(lookup, container_present)
+                        && let Some(adoption) = inner.pending.remove(&key)
+                    {
+                        inner.adopted.insert(key, adoption);
+                    }
                     inner.units.insert(unit, lookup);
                 }
             }
             // `BR-ADOPT-027` : une adoption par unité dont l'unité n'a pas été relue ne dit plus rien
-            // d'une unité qui pourrait être une homonyme : elle devient « à confirmer ».
-            let now = self.clock.now();
-            let unread = unread_unit_adoptions(inner.adopted.keys(), &read);
-            for key in unread {
-                inner.adopted.remove(&key);
-                inner.unconfirmed.insert(key.clone(), now);
-                if let Some(unit) = key.unit() {
-                    inner.gone_reads.remove(&unit);
-                    if inner.remembered.remove(&unit).is_some() {
-                        inner.forgotten.insert(unit.clone());
-                    }
-                    inner.dirty.remove(&unit);
-                    inner.last_exit.remove(&unit);
-                }
-            }
+            // d'une unité qui pourrait être une homonyme : elle devient « à confirmer ». Seules les
+            // adoptions jugées par ce passage, et encore là, comptent.
+            let unread: Vec<(ServiceKey, OffsetDateTime)> = unread_unit_adoptions(&judged, &read)
+                .into_iter()
+                .filter_map(|key| {
+                    let at = inner
+                        .adopted
+                        .get(&key)
+                        .or_else(|| inner.pending.get(&key))?
+                        .at;
+                    Some((key, at))
+                })
+                .collect();
             self.commit(&mut inner);
+            unread
+        };
+        if !unread.is_empty() {
+            self.mark_unconfirmed(&unread).await;
         }
         self.persist_supervised().await;
+    }
+
+    /// Passe ces adoptions à « à confirmer ». La date est ÉCRITE en base d'abord (toutes ou aucune) ; la
+    /// mémoire ne retire les droits qu'ensuite, avec la date que la base fait foi (celle d'origine si la
+    /// ligne l'était déjà). Un échec d'écriture ne change rien : le passage suivant recommence.
+    async fn mark_unconfirmed(&self, unread: &[(ServiceKey, OffsetDateTime)]) {
+        let now = self.clock.now();
+        let written = match self.repo.mark_unconfirmed(unread, now).await {
+            Ok(written) => written,
+            Err(error) => {
+                tracing::warn!(%error, "adoptions à confirmer non écrites, reprise au prochain passage");
+                return;
+            }
+        };
+        let mut inner = self.lock();
+        for (key, since) in written {
+            let Some((_, at)) = unread.iter().find(|(known, _)| *known == key) else {
+                continue;
+            };
+            // Relâchée, confirmée ou adoptée de nouveau pendant l'écriture : ce n'est plus la même.
+            let same = inner
+                .adopted
+                .get(&key)
+                .or_else(|| inner.pending.get(&key))
+                .is_some_and(|adoption| adoption.at == *at);
+            if !same {
+                continue;
+            }
+            inner.adopted.remove(&key);
+            inner.pending.remove(&key);
+            inner.unconfirmed.insert(key.clone(), since);
+            if let Some(unit) = key.unit() {
+                inner.forget_unit_memory(&unit);
+            }
+            inner.journal.push((
+                AuditAction::ServiceAdoptionToConfirm,
+                key,
+                AdoptionCause::UnitNotRead,
+            ));
+        }
+        self.commit(&mut inner);
     }
 
     /// Les unités sont-elles à relire (toutes les deux périodes de sonde) ?
@@ -1397,7 +1513,9 @@ impl ServicesRegistry {
     }
 
     /// Écrit en base les services supervisés dont les réglages ont changé et oublie ceux dont l'unité
-    /// a disparu. Un échec est tracé et ne gêne rien : la prochaine modification réécrit.
+    /// a disparu, efface les adoptions tombées et consigne au journal ce que le registre a décidé seul
+    /// (passage « à confirmer », chute). Un échec est tracé et ne gêne rien : la prochaine modification
+    /// réécrit, et une entrée de journal non écrite reste en file.
     async fn persist_supervised(&self) {
         let (saves, forgets) = {
             let mut inner = self.lock();
@@ -1415,13 +1533,16 @@ impl ServicesRegistry {
             let forgets: Vec<UnitName> = inner.forgotten.drain().collect();
             (saves, forgets)
         };
-        let lapsed: Vec<ServiceKey> = self.lock().lapsed.drain().collect();
+        let lapsed: Vec<ServiceKey> = self.lock().lapsed.iter().cloned().collect();
         for key in lapsed {
-            if let Err(error) = self.repo.forget_adopted(&key).await {
-                tracing::warn!(%error, "adoption tombée non oubliée");
-                // Remise dans la file : la ligne reste en base tant qu'elle n'est pas effacée, un oubli
-                // perdu la ferait revenir à la prochaine relecture (HRT-80, suivi 8 de la revue).
-                self.lock().lapsed.insert(key);
+            match self.repo.forget_adopted(&key).await {
+                Ok(()) => {
+                    self.lock().lapsed.remove(&key);
+                }
+                // La clé reste dans la file : la ligne est en base tant qu'elle n'est pas effacée, un oubli
+                // perdu la ferait revenir à la prochaine relecture (HRT-80, suivi 8 de la revue), et
+                // `reload_adopted` ignore les clés de la file (PR 89).
+                Err(error) => tracing::warn!(%error, "adoption tombée non oubliée"),
             }
         }
         for record in saves {
@@ -1432,6 +1553,29 @@ impl ServicesRegistry {
         for unit in forgets {
             if let Err(error) = self.repo.forget_supervised(&unit).await {
                 tracing::warn!(%error, "service supervisé non oublié");
+            }
+        }
+        self.flush_journal().await;
+    }
+
+    /// Consigne au journal d'activité (auteur : le système) les passages « à confirmer » et les chutes
+    /// d'adoption décidés par le registre. Le service est désigné par sa clé, jamais par le nom ni l'image
+    /// du conteneur (`Target::ServiceAdoption`). Sans journal branché ou en cas d'échec, l'entrée reste en
+    /// file.
+    async fn flush_journal(&self) {
+        let Some(sink) = self.audit.get() else {
+            return;
+        };
+        let entries: Vec<_> = self.lock().journal.drain(..).collect();
+        for (action, key, cause) in entries {
+            let target = ClientName::parse(key.as_str())
+                .map_or(Target::None, |name| Target::ServiceAdoption(name, cause));
+            if sink
+                .record_required(Actor::system(), action, target, Outcome::Succeeded)
+                .await
+                .is_err()
+            {
+                self.lock().journal.push((action, key, cause));
             }
         }
     }
@@ -1580,9 +1724,17 @@ impl ServicesRegistry {
         found
     }
 
-    /// Cette adoption par unité est-elle « à confirmer » (`BR-ADOPT-027`) ?
+    /// Cette adoption par unité est-elle « à confirmer » (`BR-ADOPT-027`), date écrite en base ?
     pub fn is_unconfirmed(&self, key: &ServiceKey) -> bool {
         self.lock().unconfirmed.contains_key(key)
+    }
+
+    /// Cette adoption attend-elle une confirmation (`BR-ADOPT-027`) ? Vrai pour une adoption « à
+    /// confirmer » comme pour une adoption par unité chargée au démarrage et pas encore relue : dans les
+    /// deux cas un compte qui a le droit peut la confirmer par l'acte d'adoption habituel.
+    pub fn awaits_confirmation(&self, key: &ServiceKey) -> bool {
+        let inner = self.lock();
+        inner.unconfirmed.contains_key(key) || inner.pending.contains_key(key)
     }
 
     /// Un compte qui a le droit vient de confirmer cette adoption (la ligne est réécrite à son nom) :
@@ -1590,46 +1742,90 @@ impl ServicesRegistry {
     pub fn confirm_adoption(&self, key: &ServiceKey) {
         let mut inner = self.lock();
         inner.unconfirmed.remove(key);
+        inner.pending.remove(key);
         if let Some(unit) = key.unit() {
             inner.gone_reads.remove(&unit);
         }
     }
 
+    /// Démarrage de l'agent (`BR-ADOPT-027`) : lit les adoptions, reprend les services supervisés retenus,
+    /// puis relit les unités une première fois. Tant que cette première lecture n'a pas montré l'unité
+    /// d'une adoption par unité, celle-ci n'ouvre aucun droit (`pending`) : une unité remplacée pendant
+    /// l'arrêt de l'agent n'en hérite pas. Une adoption déjà « à confirmer » le reste, avec sa date
+    /// d'origine. Rien n'est publié avant la première lecture de la liste des conteneurs : en pratique la
+    /// première lecture des unités est faite avant, et les services ne clignotent pas.
+    pub async fn start_up(&self) {
+        self.lock().awaiting_boot_load = true;
+        self.reload_adopted().await;
+        self.load_remembered().await;
+        self.poll_units().await;
+    }
+
     /// Lit les services adoptés (HRT-79) et recalcule ce qui est publié. À appeler après toute écriture
-    /// de l'adoption (HRT-80) ; le registre l'appelle une fois au démarrage. Une lecture en échec laisse
-    /// l'ensemble connu : jamais plus de services publiés qu'avant. Un service qui n'est plus adopté
-    /// sort de la liste et son souvenir est oublié ; il est de nouveau compté.
+    /// de l'adoption (HRT-80) ; le registre l'appelle une fois au démarrage (`start_up`). Une lecture en
+    /// échec laisse l'ensemble connu : jamais plus de services publiés qu'avant. Un service qui n'est plus
+    /// adopté sort de la liste et son souvenir est oublié ; il est de nouveau compté. Une clé dans la
+    /// file d'effacement (adoption tombée, pas encore effacée) n'est jamais relue (`BR-ADOPT-027`).
     pub async fn reload_adopted(&self) {
         match self.repo.load_adopted().await {
             Ok(records) => {
                 {
                     let mut inner = self.lock();
-                    // Une adoption « à confirmer » garde sa ligne mais pas ses droits (`BR-ADOPT-027`) ;
-                    // si la ligne a disparu (relâchée, tombée), elle n'est plus à confirmer.
-                    let in_base: HashSet<ServiceKey> =
-                        records.iter().map(|record| record.key.clone()).collect();
-                    inner.unconfirmed.retain(|key, _| in_base.contains(key));
-                    let unconfirmed: HashSet<ServiceKey> =
-                        inner.unconfirmed.keys().cloned().collect();
-                    inner.adopted = records
-                        .into_iter()
-                        .filter(|record| !unconfirmed.contains(&record.key))
-                        .map(|AdoptedRecord { key, by, at }| (key, Adoption { by, at }))
-                        .collect();
+                    // Une adoption par unité chargée au démarrage n'ouvre ses droits qu'après une
+                    // lecture de son unité (`pending`) ; une adoption « à confirmer » (date écrite en
+                    // base) n'en ouvre aucun. Les autres sont actives.
+                    let booting = inner.awaiting_boot_load;
+                    let mut adopted = HashMap::new();
+                    let mut pending = HashMap::new();
+                    let mut unconfirmed = HashMap::new();
+                    for AdoptedRecord {
+                        key,
+                        by,
+                        at,
+                        unconfirmed_since,
+                    } in records
+                    {
+                        if inner.lapsed.contains(&key) {
+                            continue;
+                        }
+                        let adoption = Adoption { by, at };
+                        // Une date écrite par ce démarrage l'emporte sur une lecture plus ancienne que
+                        // l'écriture (la confirmation, elle, retire la clé de la mémoire avant de relire).
+                        let unconfirmed_since =
+                            unconfirmed_since.or_else(|| inner.unconfirmed.get(&key).copied());
+                        if let Some(since) = unconfirmed_since {
+                            unconfirmed.insert(key, since);
+                        } else if key.kind() != KeyKind::Unit {
+                            adopted.insert(key, adoption);
+                        } else if booting || inner.pending.contains_key(&key) {
+                            pending.insert(key, adoption);
+                        } else {
+                            adopted.insert(key, adoption);
+                        }
+                    }
+                    inner.awaiting_boot_load = false;
+                    inner.adopted = adopted;
+                    inner.pending = pending;
+                    inner.unconfirmed = unconfirmed;
                     let tracked: HashSet<ServiceKey> = inner
                         .adopted
                         .keys()
+                        .chain(inner.pending.keys())
                         .chain(inner.unconfirmed.keys())
                         .cloned()
                         .collect();
                     inner
                         .gone_reads
                         .retain(|unit, _| tracked.contains(&ServiceKey::for_unit(unit)));
-                    // Ce qu'on retenait d'un service qui n'est plus adopté n'a plus de raison d'être.
+                    // Ce qu'on retenait d'un service qui n'est plus adopté (ou « à confirmer ») n'a plus
+                    // de raison d'être ; celui d'une adoption pas encore relue est gardé.
                     let stale: Vec<UnitName> = inner
                         .remembered
                         .keys()
-                        .filter(|unit| !inner.adopted.contains_key(&ServiceKey::for_unit(unit)))
+                        .filter(|unit| {
+                            let key = ServiceKey::for_unit(unit);
+                            !inner.adopted.contains_key(&key) && !inner.pending.contains_key(&key)
+                        })
                         .cloned()
                         .collect();
                     for unit in stale {
@@ -1652,10 +1848,8 @@ impl ServicesRegistry {
             Ok(records) => {
                 let mut inner = self.lock();
                 for record in records {
-                    if !inner
-                        .adopted
-                        .contains_key(&ServiceKey::for_unit(&record.unit))
-                    {
+                    let key = ServiceKey::for_unit(&record.unit);
+                    if !inner.adopted.contains_key(&key) && !inner.pending.contains_key(&key) {
                         // Défense : la base ne le permet plus (migration 0011), mais ce qui n'est pas
                         // adopté ne se publie jamais depuis la mémoire.
                         inner.forgotten.insert(record.unit);
@@ -1779,9 +1973,7 @@ impl ServicesRegistry {
         }
         // Les services adoptés d'abord (rien n'est publié sans eux), puis les services supervisés d'un
         // démarrage précédent, avec l'état actuel de leur unité.
-        self.reload_adopted().await;
-        self.load_remembered().await;
-        self.poll_units().await;
+        self.start_up().await;
         // Relectures complètes échouées de suite, et quand retenter.
         let mut failures: u32 = 0;
         let mut next_read = Instant::now();
@@ -2118,6 +2310,7 @@ mod tests {
                 key,
                 by: "marie".to_owned(),
                 at,
+                unconfirmed_since: None,
             })
             .collect()
     }
@@ -2125,7 +2318,7 @@ mod tests {
     fn adopt_vocabulary(registry: &ServicesRegistry) {
         registry.lock().adopted = vocabulary()
             .into_iter()
-            .map(|AdoptedRecord { key, by, at }| (key, Adoption { by, at }))
+            .map(|AdoptedRecord { key, by, at, .. }| (key, Adoption { by, at }))
             .collect();
     }
 
@@ -2932,6 +3125,8 @@ mod tests {
         adopted: Mutex<Vec<AdoptedRecord>>,
         /// La base refuse d'effacer une adoption (indisponible).
         forget_fails: std::sync::atomic::AtomicBool,
+        /// La base refuse d'écrire « à confirmer » (indisponible).
+        mark_fails: std::sync::atomic::AtomicBool,
     }
 
     #[async_trait]
@@ -2983,6 +3178,31 @@ mod tests {
                 .retain(|record| &record.key != key);
             Ok(())
         }
+
+        async fn mark_unconfirmed(
+            &self,
+            marks: &[(ServiceKey, OffsetDateTime)],
+            since: OffsetDateTime,
+        ) -> Result<Vec<(ServiceKey, OffsetDateTime)>, StoreError> {
+            if self.mark_fails.load(Ordering::SeqCst) {
+                return Err(StoreError::Unavailable {
+                    resource: "adopted_services",
+                    message: "test".to_owned(),
+                });
+            }
+            let mut records = self.adopted.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut effective = Vec::new();
+            for (key, at) in marks {
+                if let Some(record) = records
+                    .iter_mut()
+                    .find(|record| &record.key == key && record.at == *at)
+                {
+                    let kept = *record.unconfirmed_since.get_or_insert(since);
+                    effective.push((key.clone(), kept));
+                }
+            }
+            Ok(effective)
+        }
     }
 
     impl Default for MemoryRepo {
@@ -2993,6 +3213,7 @@ mod tests {
                 saves: AtomicU64::new(0),
                 adopted: Mutex::new(vocabulary()),
                 forget_fails: std::sync::atomic::AtomicBool::new(false),
+                mark_fails: std::sync::atomic::AtomicBool::new(false),
             }
         }
     }
@@ -3641,6 +3862,7 @@ mod tests {
                 key: ServiceKey::parse(key).expect("clé"),
                 by: "marie".to_owned(),
                 at: crate::infrastructure::engine::fake::at(12),
+                unconfirmed_since: None,
             });
     }
 
@@ -4264,6 +4486,7 @@ mod tests {
                     key,
                     by: "marie".to_owned(),
                     at,
+                    unconfirmed_since: None,
                 });
         }
     }
@@ -4350,6 +4573,7 @@ mod tests {
         registry.poll_units().await;
         let late_key = ServiceKey::for_unit(units.last().expect("des unités"));
         assert!(registry.is_unconfirmed(&late_key));
+        confirm_in_base(&repo, &late_key);
         registry.confirm_adoption(&late_key);
         registry.reload_adopted().await;
         assert!(!registry.is_unconfirmed(&late_key));
@@ -4423,5 +4647,416 @@ mod tests {
         registry.poll_units().await;
         registry.persist_supervised().await;
         assert!(!adopted_in_base(&repo).contains(&"u_docker-x.service".to_owned()));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Revue de la PR 89 : l'état « à confirmer » est durable, une adoption chargée au démarrage est
+    // relue avant d'ouvrir un droit, le jugement « non relue » se fait sur l'instantané du passage
+    // -----------------------------------------------------------------------------------------
+
+    /// Un registre « redémarré » : mémoire neuve sur la MÊME base, sans aucune adoption injectée.
+    fn restarted(
+        engine: &Arc<FakeEngine>,
+        supervisor: &Arc<FakeSupervisor>,
+        repo: &Arc<MemoryRepo>,
+        wall: &Arc<Wall>,
+    ) -> Arc<ServicesRegistry> {
+        ServicesRegistry::with_supervision(
+            engine.clone(),
+            supervisor.clone(),
+            repo.clone(),
+            &Linux,
+            wall.clone(),
+            Arc::new(Mono::default()),
+            true,
+            EngineTimings::production(),
+        )
+    }
+
+    /// Une base sans adoption ni service retenu, sur laquelle on seme ce qu'un test veut.
+    fn empty_base() -> (
+        Arc<FakeEngine>,
+        Arc<FakeSupervisor>,
+        Arc<MemoryRepo>,
+        Arc<Wall>,
+    ) {
+        let repo = Arc::new(MemoryRepo::default());
+        repo.adopted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
+        let wall = Arc::new(Wall(Mutex::new(crate::infrastructure::engine::fake::at(
+            12,
+        ))));
+        (
+            Arc::new(FakeEngine::new()),
+            Arc::new(FakeSupervisor::new()),
+            repo,
+            wall,
+        )
+    }
+
+    fn seed_in_base(repo: &MemoryRepo, units: &[UnitName]) {
+        let at = crate::infrastructure::engine::fake::at(12);
+        for unit in units {
+            repo.adopted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(AdoptedRecord {
+                    key: ServiceKey::for_unit(unit),
+                    by: "marie".to_owned(),
+                    at,
+                    unconfirmed_since: None,
+                });
+        }
+    }
+
+    fn since_in_base(repo: &MemoryRepo, key: &ServiceKey) -> Option<OffsetDateTime> {
+        repo.adopted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|record| &record.key == key)
+            .and_then(|record| record.unconfirmed_since)
+    }
+
+    fn all_loaded(supervisor: &FakeSupervisor, units: &[UnitName]) {
+        for unit in units {
+            supervisor.set_status(unit, running_unit());
+        }
+    }
+
+    fn journal_texts(sink: &RecordingSink) -> Vec<(AuditAction, String)> {
+        sink.entries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(action, target, _)| (*action, target.text().unwrap_or_default()))
+            .collect()
+    }
+
+    /// `BR-ADOPT-027` : l'état « à confirmer » et son échéance survivent à un redémarrage de l'agent. Le
+    /// délai court depuis la date écrite en base, jamais depuis le démarrage ; les adoptions relues, elles,
+    /// retrouvent leurs droits.
+    #[tokio::test]
+    async fn a_restart_keeps_an_adoption_to_confirm_and_its_deadline_never_restarts() {
+        let (engine, supervisor, repo, wall) = empty_base();
+        let units = many_units(MAX_ADOPTED_UNITS_PER_POLL + 1);
+        seed_in_base(&repo, &units);
+        all_loaded(&supervisor, &units);
+        let late_key = ServiceKey::for_unit(units.last().expect("des unités"));
+        let sink = Arc::new(RecordingSink::default());
+
+        let first = restarted(&engine, &supervisor, &repo, &wall);
+        first.set_audit(sink.clone());
+        first.start_up().await;
+        let marked_at = wall.now();
+        assert!(first.is_unconfirmed(&late_key), "au-delà de la borne");
+        assert_eq!(
+            since_in_base(&repo, &late_key),
+            Some(marked_at),
+            "écrit en base"
+        );
+        assert_eq!(
+            journal_texts(&sink),
+            vec![(
+                AuditAction::ServiceAdoptionToConfirm,
+                format!(
+                    "service {} (unité plus relue, à confirmer sous 24 h)",
+                    late_key.as_str()
+                )
+            )]
+        );
+
+        // L'agent s'arrête vingt heures, puis redémarre : mémoire neuve, même base.
+        wall.advance(time::Duration::hours(20));
+        let second = restarted(&engine, &supervisor, &repo, &wall);
+        second.set_audit(sink.clone());
+        second.start_up().await;
+        assert!(second.is_unconfirmed(&late_key), "toujours à confirmer");
+        assert_eq!(
+            second.lock().unconfirmed.get(&late_key),
+            Some(&marked_at),
+            "la date d'origine, pas celle du démarrage"
+        );
+        assert!(!second.lock().adopted.contains_key(&late_key));
+        assert_eq!(second.lock().adopted.len(), MAX_ADOPTED_UNITS_PER_POLL);
+        assert!(second.lock().pending.is_empty(), "les autres sont relues");
+        // Quatre heures de plus : 24 h après la date d'origine, 4 h après le redémarrage.
+        wall.advance(time::Duration::hours(3) + time::Duration::minutes(59));
+        second.poll_units().await;
+        assert!(second.is_unconfirmed(&late_key), "23 h 59 : pas encore");
+        wall.advance(time::Duration::minutes(2));
+        second.poll_units().await;
+        assert!(!second.is_unconfirmed(&late_key));
+        assert!(!adopted_in_base(&repo).contains(&late_key.as_str().to_owned()));
+        let journal = journal_texts(&sink);
+        assert_eq!(
+            journal.last(),
+            Some(&(
+                AuditAction::ServiceAdoptionLapsed,
+                format!("service {} (non confirmée sous 24 h)", late_key.as_str())
+            ))
+        );
+    }
+
+    /// `BR-ADOPT-027` : une adoption par unité chargée au démarrage n'ouvre aucun droit tant que son
+    /// unité n'a pas été relue ; une unité que le système ne connaît plus ne la fait jamais publier, et
+    /// elle tombe, consignée.
+    #[tokio::test]
+    async fn a_restart_gives_no_right_to_an_adoption_whose_unit_was_replaced_while_the_agent_was_stopped()
+     {
+        let (engine, supervisor, repo, wall) = empty_base();
+        let unit = unit_named("docker-x.service");
+        let key = ServiceKey::for_unit(&unit);
+        seed_in_base(&repo, std::slice::from_ref(&unit));
+        // L'unité d'origine n'existe plus au redémarrage.
+        supervisor.set_unit(&unit, UnitLookup::NotLoaded);
+        let sink = Arc::new(RecordingSink::default());
+        let registry = restarted(&engine, &supervisor, &repo, &wall);
+        registry.set_audit(sink.clone());
+        registry.start_up().await;
+        let rights_closed = |registry: &ServicesRegistry| {
+            let inner = registry.lock();
+            !inner.adopted.contains_key(&key) && !inner.unconfirmed.contains_key(&key)
+        };
+        assert!(rights_closed(&registry), "aucun droit, pas « à confirmer »");
+        assert!(registry.lock().pending.contains_key(&key));
+        for _ in 1..UNIT_GONE_READS {
+            assert!(rights_closed(&registry));
+            registry.poll_units().await;
+        }
+        assert!(!adopted_in_base(&repo).contains(&key.as_str().to_owned()));
+        assert!(registry.lock().pending.is_empty());
+        assert_eq!(
+            journal_texts(&sink),
+            vec![(
+                AuditAction::ServiceAdoptionLapsed,
+                format!("service {} (unité disparue)", key.as_str())
+            )]
+        );
+    }
+
+    /// `BR-ADOPT-027` : « pas encore relue depuis le démarrage » n'est PAS « à confirmer » : aucun délai ne
+    /// court, aucune écriture en base, aucun droit ; la première lecture qui montre l'unité l'ouvre.
+    #[tokio::test]
+    async fn an_adoption_not_yet_read_since_the_start_has_no_right_and_no_deadline_until_the_unit_answers()
+     {
+        let (engine, supervisor, repo, wall) = empty_base();
+        let unit = unit_named("docker-x.service");
+        let key = ServiceKey::for_unit(&unit);
+        seed_in_base(&repo, std::slice::from_ref(&unit));
+        // Le superviseur est lent ou muet : « Unavailable ».
+        supervisor.set_unit(&unit, UnitLookup::Unavailable);
+        let sink = Arc::new(RecordingSink::default());
+        let registry = restarted(&engine, &supervisor, &repo, &wall);
+        registry.set_audit(sink.clone());
+        registry.start_up().await;
+        for _ in 0..5 {
+            wall.advance(time::Duration::hours(12));
+            registry.poll_units().await;
+            let inner = registry.lock();
+            assert!(inner.pending.contains_key(&key), "en attente de lecture");
+            assert!(!inner.adopted.contains_key(&key));
+            assert!(!inner.unconfirmed.contains_key(&key), "pas à confirmer");
+        }
+        assert_eq!(since_in_base(&repo, &key), None, "rien d'écrit en base");
+        assert!(adopted_in_base(&repo).contains(&key.as_str().to_owned()));
+        assert!(journal_texts(&sink).is_empty(), "rien de consigné");
+        // Un compte qui a le droit peut la confirmer sans attendre la lecture.
+        assert!(registry.awaits_confirmation(&key));
+        // Le système répond enfin : droits ouverts, rien d'autre ne change.
+        supervisor.set_status(&unit, running_unit());
+        registry.poll_units().await;
+        assert!(registry.lock().adopted.contains_key(&key));
+        assert!(registry.lock().pending.is_empty());
+        assert_eq!(since_in_base(&repo, &key), None);
+    }
+
+    /// Redémarrage ordinaire : toutes les unités répondent, toutes les adoptions retrouvent leurs droits à
+    /// la première lecture, et rien n'est écrit en base ni consigné.
+    #[tokio::test]
+    async fn an_ordinary_restart_reopens_every_adoption_at_the_first_read_and_writes_nothing() {
+        let (engine, supervisor, repo, wall) = empty_base();
+        let units = many_units(5);
+        seed_in_base(&repo, &units);
+        all_loaded(&supervisor, &units);
+        let before = repo
+            .adopted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let sink = Arc::new(RecordingSink::default());
+        let registry = restarted(&engine, &supervisor, &repo, &wall);
+        registry.set_audit(sink.clone());
+        // Avant la première lecture des unités : aucun droit.
+        registry.lock().awaiting_boot_load = true;
+        registry.reload_adopted().await;
+        assert!(registry.lock().adopted.is_empty());
+        assert_eq!(registry.lock().pending.len(), 5);
+        registry.poll_units().await;
+        assert_eq!(registry.lock().adopted.len(), 5);
+        assert!(registry.lock().pending.is_empty());
+        assert!(registry.lock().unconfirmed.is_empty());
+        assert_eq!(
+            *repo.adopted.lock().unwrap_or_else(PoisonError::into_inner),
+            before
+        );
+        assert!(journal_texts(&sink).is_empty());
+    }
+
+    /// Un échec d'écriture de l'état « à confirmer » ne change rien : l'adoption garde ses droits tant que
+    /// la date n'est pas écrite, et le passage suivant recommence (écrit AVANT que les droits partent).
+    #[tokio::test]
+    async fn the_rights_are_kept_until_the_to_confirm_state_is_written() {
+        let (engine, supervisor, repo, wall) = empty_base();
+        let units = many_units(MAX_ADOPTED_UNITS_PER_POLL + 1);
+        seed_in_base(&repo, &units);
+        all_loaded(&supervisor, &units);
+        let late_key = ServiceKey::for_unit(units.last().expect("des unités"));
+        let registry = restarted(&engine, &supervisor, &repo, &wall);
+        // Un état actif sans passer par le démarrage : la base est en panne d'écriture.
+        registry.reload_adopted().await;
+        repo.mark_fails
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        registry.poll_units().await;
+        assert!(registry.lock().adopted.contains_key(&late_key));
+        assert!(!registry.is_unconfirmed(&late_key));
+        assert_eq!(since_in_base(&repo, &late_key), None);
+        repo.mark_fails
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        registry.poll_units().await;
+        assert!(registry.is_unconfirmed(&late_key));
+        assert!(!registry.lock().adopted.contains_key(&late_key));
+        assert_eq!(since_in_base(&repo, &late_key), Some(wall.now()));
+    }
+
+    /// Revue de la PR 89 : une adoption faite pendant que le passage lit les unités n'est pas jugée « non
+    /// relue » par ce passage, même si son unité n'est pas dans ce qu'il a lu.
+    #[tokio::test]
+    async fn an_adoption_made_while_the_units_are_being_read_is_not_judged_by_that_pass() {
+        let (engine, supervisor, repo, wall) = empty_base();
+        let old = unit_named("docker-a.service");
+        let fresh = unit_named("docker-b.service");
+        seed_in_base(&repo, std::slice::from_ref(&old));
+        all_loaded(&supervisor, &[old.clone(), fresh.clone()]);
+        let registry = restarted(&engine, &supervisor, &repo, &wall);
+        registry.reload_adopted().await;
+        // Le passage lit les unités ; il est suspendu dans sa première lecture.
+        supervisor.hold_unit_reads();
+        let pass = tokio::spawn({
+            let registry = registry.clone();
+            async move { registry.poll_units().await }
+        });
+        supervisor.wait_until_a_unit_read_is_held().await;
+        // Pendant ce temps, un compte adopte `fresh` (la ligne, puis la relecture de la base).
+        seed_in_base(&repo, std::slice::from_ref(&fresh));
+        registry.reload_adopted().await;
+        let fresh_key = ServiceKey::for_unit(&fresh);
+        assert!(registry.lock().adopted.contains_key(&fresh_key));
+        supervisor.release_unit_reads();
+        pass.await.expect("passage");
+        assert!(
+            registry.lock().adopted.contains_key(&fresh_key),
+            "l'adoption toute neuve reste active"
+        );
+        assert!(!registry.is_unconfirmed(&fresh_key));
+        assert_eq!(since_in_base(&repo, &fresh_key), None);
+        assert!(
+            registry
+                .lock()
+                .adopted
+                .contains_key(&ServiceKey::for_unit(&old))
+        );
+    }
+
+    /// Revue de la PR 89 : une clé dans la file d'effacement n'est pas ressuscitée par une relecture de la
+    /// base (la ligne n'est effacée qu'à la fin du passage, ou pas du tout si l'effacement échoue).
+    #[tokio::test]
+    async fn a_reload_does_not_resurrect_an_adoption_waiting_to_be_erased() {
+        let (registry, engine, supervisor, repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let first = recreated("x", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        engine.remove(&first.id);
+        registry
+            .refresh(vec![first.id.clone()])
+            .await
+            .expect("refresh");
+        supervisor.set_unit(&unit, UnitLookup::NotLoaded);
+        repo.forget_fails
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..UNIT_GONE_READS {
+            registry.poll_units().await;
+        }
+        let key = ServiceKey::for_unit(&unit);
+        assert!(
+            adopted_in_base(&repo).contains(&key.as_str().to_owned()),
+            "la ligne est encore là"
+        );
+        registry.reload_adopted().await;
+        assert!(
+            !registry.lock().adopted.contains_key(&key),
+            "pas ressuscitée"
+        );
+        assert!(
+            registry
+                .snapshot()
+                .services
+                .iter()
+                .all(|view| view.key != key),
+            "et pas publiée"
+        );
+        repo.forget_fails
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        registry.persist_supervised().await;
+        registry.reload_adopted().await;
+        assert!(!adopted_in_base(&repo).contains(&key.as_str().to_owned()));
+        assert!(!registry.lock().adopted.contains_key(&key));
+    }
+
+    /// Une confirmation d'un compte qui a le droit réécrit la ligne (sans date) : elle rend les droits,
+    /// et un redémarrage ensuite ne la retrouve pas « à confirmer ».
+    #[tokio::test]
+    async fn a_confirmation_survives_a_restart() {
+        let (engine, supervisor, repo, wall) = empty_base();
+        let units = many_units(MAX_ADOPTED_UNITS_PER_POLL + 1);
+        seed_in_base(&repo, &units);
+        all_loaded(&supervisor, &units);
+        let late_key = ServiceKey::for_unit(units.last().expect("des unités"));
+        let first = restarted(&engine, &supervisor, &repo, &wall);
+        first.start_up().await;
+        assert!(first.is_unconfirmed(&late_key));
+        // L'acte de confirmation : la base réécrit la ligne sans date, la mémoire le sait.
+        confirm_in_base(&repo, &late_key);
+        first.confirm_adoption(&late_key);
+        first.reload_adopted().await;
+        assert!(first.lock().adopted.contains_key(&late_key));
+        // Redémarrage : plus de borne atteinte ici (une unité en moins).
+        repo.adopted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|record| record.key != ServiceKey::for_unit(&units[0]));
+        let second = restarted(&engine, &supervisor, &repo, &wall);
+        second.start_up().await;
+        assert!(!second.is_unconfirmed(&late_key));
+        assert!(second.lock().adopted.contains_key(&late_key));
+    }
+
+    /// L'effet en base de l'acte de confirmation : la ligne est réécrite, sans date « à confirmer ».
+    fn confirm_in_base(repo: &MemoryRepo, key: &ServiceKey) {
+        for record in repo
+            .adopted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter_mut()
+            .filter(|record| &record.key == key)
+        {
+            record.unconfirmed_since = None;
+        }
     }
 }

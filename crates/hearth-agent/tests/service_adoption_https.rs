@@ -970,13 +970,36 @@ async fn a_container_without_a_unit_is_adopted_for_its_life_and_a_unit_for_good(
         candidates.body["containers"][0]["key"].as_str().unwrap(),
         key_of(&plain)
     );
-    // La fin de l'adoption de l'ancien conteneur n'écrit aucune entrée au journal : aucun compte n'agit.
+    // La chute de l'adoption de l'ancien conteneur est consignée par le système (aucun compte n'agit),
+    // le service désigné par sa clé et jamais par le nom du conteneur.
+    let probe = b.env.db.pool().clone();
+    eventually("la chute est consignée", || {
+        let pool = probe.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM audit_events WHERE action = 'service.adoption.lapsed'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+                == 1
+        }
+    })
+    .await;
+    let falls = system_entries(&b).await;
+    assert_eq!(falls.len(), 1, "{falls:?}");
+    assert_eq!(
+        falls[0].1.as_deref(),
+        Some(format!("service {} (conteneur disparu)", key_of(&plain)).as_str())
+    );
+    assert_eq!(falls[0].2, None);
+    assert_eq!(falls[0].3, "system");
     let journal = b.journal().await;
     assert!(
-        journal
-            .iter()
-            .all(|row| row.0 == "service.adopt" || row.0 == "service.external.read"),
-        "seulement l'acte d'adopter et la lecture des candidats : {journal:?}"
+        journal.iter().all(|row| row.0 == "service.adopt"
+            || row.0 == "service.external.read"
+            || row.0 == "service.adoption.lapsed"),
+        "l'acte d'adopter, la lecture des candidats et la chute : {journal:?}"
     );
     b.agent.shutdown().await;
 }
@@ -1354,5 +1377,108 @@ async fn an_adoption_to_confirm_opens_no_right_until_an_account_with_the_right_c
         2,
         "{journal:?}"
     );
+    b.agent.shutdown().await;
+}
+
+/// Une adoption « à confirmer » (unité jamais relue au-delà de la borne) et le banc qui la porte.
+async fn bench_with_adoption_to_confirm() -> (Bench, String) {
+    let b = bench(Mode::Normal, |engine, supervisor| {
+        let (service, _) = under_unit(supervisor, "ghost-late", "docker-zzz.service", 'a');
+        engine.put_silently(service);
+    })
+    .await;
+    b.read(1).await;
+    let key = "u_docker-zzz.service".to_owned();
+    assert_eq!(b.adopt(&b.dan, &[key.clone()]).await.body["adopted"], 1);
+    for index in 0..128 {
+        b.env
+            .adopt(&format!("u_docker-a{index:03}.service"), "autre", "marie")
+            .await;
+    }
+    let registry = b.agent.services();
+    registry.reload_adopted().await;
+    let probe = registry.clone();
+    let probed = key.clone();
+    eventually("l'adoption devient à confirmer", || {
+        let registry = probe.clone();
+        let key = probed.clone();
+        async move { ServiceKey::parse(&key).is_some_and(|key| registry.is_unconfirmed(&key)) }
+    })
+    .await;
+    (b, key)
+}
+
+/// Les entrées « système » du journal : action, cible, compte, origine.
+async fn system_entries(b: &Bench) -> Vec<(String, Option<String>, Option<String>, String)> {
+    b.agent.flush_journal().await;
+    sqlx::query_as(
+        "SELECT action, target, account, origin_kind FROM audit_events
+         WHERE action IN ('service.adoption.to_confirm', 'service.adoption.lapsed') ORDER BY id",
+    )
+    .fetch_all(b.env.db.pool())
+    .await
+    .unwrap()
+}
+
+/// Revue de la PR 89 (points 4 et 5) : le passage « à confirmer » est consigné par le système, le service
+/// désigné par sa clé et jamais par le nom du conteneur ; relâcher une adoption « à confirmer » est
+/// toujours possible pour un compte qui a le droit, répond comme toute relâche, et est consigné.
+#[tokio::test]
+async fn the_passage_to_confirm_is_journaled_by_the_system_without_a_container_name_and_releasing_still_works()
+ {
+    let (b, key) = bench_with_adoption_to_confirm().await;
+    let probe = b.env.db.pool().clone();
+    eventually("l'entrée du passage à confirmer", || {
+        let pool = probe.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM audit_events WHERE action = 'service.adoption.to_confirm'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+                > 0
+        }
+    })
+    .await;
+    let entries = system_entries(&b).await;
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].0, "service.adoption.to_confirm");
+    assert_eq!(
+        entries[0].1.as_deref(),
+        Some("service u_docker-zzz.service (unité plus relue, à confirmer sous 24 h)")
+    );
+    assert_eq!(entries[0].2, None, "aucun compte n'agit");
+    assert_eq!(entries[0].3, "system");
+    for (_, target, _, _) in &entries {
+        assert!(
+            !target.as_deref().unwrap_or_default().contains("ghost"),
+            "jamais le nom du conteneur"
+        );
+    }
+
+    // Un compte qui a le droit relâche l'adoption « à confirmer » : c'est le geste qui retire des droits.
+    let reply = b.release(&b.ada, &key).await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    assert_eq!(reply.body, json!({ "released": true }));
+    let rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM adopted_services WHERE service_key = ?")
+            .bind(&key)
+            .fetch_one(b.env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(rows, 0);
+    let registry = b.agent.services();
+    assert!(!ServiceKey::parse(&key).is_some_and(|key| registry.is_unconfirmed(&key)));
+    let journal = b.journal().await;
+    assert!(
+        journal.iter().any(|row| row.0 == "service.release"
+            && row.1 == "ok"
+            && row.4.as_deref() == Some("ada")),
+        "{journal:?}"
+    );
+    // Un compte sans le droit ne peut pas relâcher, quoi que soit l'état de l'adoption.
+    let refused = b.release(&b.bob, &key).await;
+    assert_eq!(refused.status, 403, "{}", refused.text);
     b.agent.shutdown().await;
 }

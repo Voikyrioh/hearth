@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT service_key, adopted_by, adopted_at FROM adopted_services ORDER BY service_key",
+  "query": "SELECT service_key, adopted_by, adopted_at, unconfirmed_since FROM adopted_services ORDER BY service_key",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,17 @@
             "name": "adopted_at"
           }
         }
+      },
+      {
+        "name": "unconfirmed_since",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "adopted_services",
+            "name": "unconfirmed_since"
+          }
+        }
       }
     ],
     "parameters": {
@@ -43,8 +54,9 @@
     "nullable": [
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "dbe7cf415b2b58d5aea657d862e0aaad6b2db0c43483b6e3f1082cdb48345989"
+  "hash": "1ee2722394ab08df58de66ae04db41b3e55e88aee4400fb35cee7b312d977b2c"
 }

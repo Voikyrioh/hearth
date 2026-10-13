@@ -256,7 +256,7 @@ impl ServiceAdoption {
         // `BR-ADOPT-027` : une adoption « à confirmer » garde sa ligne mais n'ouvre aucun droit. La
         // confirmer, c'est la réécrire au nom du compte qui agit, avec toutes les gardes de l'acte
         // (droit, preuve de clé, mot de passe) : l'ancienne ligne est remplacée dans la même transaction.
-        let stale = self.registry.is_unconfirmed(&adoption.key);
+        let stale = self.registry.awaits_confirmation(&adoption.key);
         if stale {
             tx.adoptions().release(&adoption.key).await?;
         }
