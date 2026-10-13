@@ -21,7 +21,7 @@ Corps JSON direct (pas d'enveloppe `data`).
   "install_id": "0123456789abcdef0123456789abcdef",
   "managed": false,
   "mac_addresses": ["AA:BB:CC:DD:EE:FF"],
-  "capabilities": ["services", "service-logs"]
+  "capabilities": ["services", "service-rights", "service-logs"]
 }
 ```
 
@@ -34,7 +34,7 @@ Corps JSON direct (pas d'enveloppe `data`).
 | `install_id` | texte | 32 caractères hexadécimaux minuscules ; généré à la première exécution, jamais modifié. |
 | `managed` | booléen | Installation gérée de l'extérieur : pas de mise à jour automatique. |
 | `mac_addresses` | tableau de texte | Adresses MAC des interfaces (`AA:BB:CC:DD:EE:FF`), triées, sans doublon, sans adresse nulle. |
-| `capabilities` | tableau de texte | Ce que cet agent sait faire de plus que le socle (HRT-61, ADR-0038) : `"services"` (sujet `services` du flux, `GET /services`, `POST /engine/recheck`) ; `"service-logs"` (HRT-66, socket `GET /services/{key}/logs`). Absent chez un agent ancien : lu comme une liste vide. Un client n'utilise un sujet ou une route nouvelle que si la capacité est annoncée ; un client ancien ignore le champ. `api` ne change pas. |
+| `capabilities` | tableau de texte | Ce que cet agent sait faire de plus que le socle (HRT-61, ADR-0038) : `"services"` (sujet `services` du flux, `GET /services`, `POST /engine/recheck`) ; `"service-rights"` (HRT-76, ADR-0041 : `rights` sur la description des comptes, et le serveur refuse les actes de service sans le droit « gérer les services » ; un client qui ne voit pas cette capacité traite le droit comme non accordé pour tous, BR-GRANT-016) ; `"service-logs"` (HRT-66, socket `GET /services/{key}/logs`). Absent chez un agent ancien : lu comme une liste vide. Un client n'utilise un sujet ou une route nouvelle que si la capacité est annoncée ; un client ancien ignore le champ. `api` ne change pas. |
 
 L'empreinte du certificat n'est pas dans le corps : le client la calcule sur le certificat présenté pendant la poignée de main TLS (SHA-256 du DER).
 

@@ -1521,7 +1521,7 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
 use hearth_agent::application::service_logs::{
     LogSession, LogSettings, OpenRequest, ReadPolicy, ServiceLogs,
 };
-use hearth_agent::domain::accounts::AccountId;
+use hearth_agent::domain::accounts::{AccountId, ServicesRight};
 use hearth_agent::domain::services::ServiceKey;
 use hearth_agent::domain::services::logs::{LogTarget, ReadRefusal, Viewer};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1530,6 +1530,7 @@ fn viewer(role: Role) -> Viewer {
     Viewer {
         account: AccountId::new("compte-de-test"),
         role,
+        services_right: ServicesRight::None,
     }
 }
 

@@ -33,11 +33,15 @@ pub trait AdminAccounts: Send + Sync {
     /// Nombre d'administrateurs ; 0 si la base n'existe pas encore (elle n'est pas créée).
     async fn admin_count(&self) -> Result<u64, AdminAccountsError>;
 
-    /// Crée le premier administrateur (la base et ses migrations sont créées si besoin).
+    /// Crée le premier administrateur (la base et ses migrations sont créées si besoin). Avec
+    /// `grant_services`, il reçoit aussi le droit de gérer les services (BR-GRANT-006, 007), consigné au
+    /// journal comme par la commande du serveur ; si ce droit ne peut pas être donné, le compte n'est pas
+    /// laissé derrière et l'erreur est rendue.
     async fn create_admin(
         &self,
         name: &Username,
         credential: AdminCredential,
+        grant_services: bool,
     ) -> Result<(), AdminAccountsError>;
 
     /// Retire un compte que cette installation vient de créer (retour en arrière : la règle du

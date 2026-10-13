@@ -10,6 +10,7 @@ mod support;
 use hearth_agent::application::audit::{AuditError, EXPORT_LIMIT};
 use hearth_agent::application::ports::AuditFeed;
 use hearth_agent::application::sessions::LoginError;
+use hearth_agent::domain::accounts::Authority;
 use hearth_agent::domain::accounts::{Role, Username};
 use hearth_agent::domain::audit::{
     Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, MAX_ENTRIES, Origin, OriginKind,
@@ -71,7 +72,12 @@ async fn account_management_writes_one_entry_per_action_with_who_where_and_what(
         .await
         .unwrap();
     env.service
-        .set_password(&paul.id, secret("Another-Pass-77"), by())
+        .set_password(
+            &paul.id,
+            secret("Another-Pass-77"),
+            &Authority::Server,
+            by(),
+        )
         .await
         .unwrap();
     env.service
@@ -587,7 +593,12 @@ async fn no_event_ever_holds_a_password_or_a_token_after_a_full_scenario() {
         .await
         .unwrap_err();
     env.service
-        .set_password(&paul.id, secret("Another-Pass-77"), by())
+        .set_password(
+            &paul.id,
+            secret("Another-Pass-77"),
+            &Authority::Server,
+            by(),
+        )
         .await
         .unwrap();
     env.service
@@ -708,7 +719,12 @@ async fn when_the_entry_cannot_be_written_the_action_is_not_committed() {
         .await
         .unwrap_err();
     env.service
-        .set_password(&paul.id, secret("Another-Pass-77"), by())
+        .set_password(
+            &paul.id,
+            secret("Another-Pass-77"),
+            &Authority::Server,
+            by(),
+        )
         .await
         .unwrap_err();
     env.service

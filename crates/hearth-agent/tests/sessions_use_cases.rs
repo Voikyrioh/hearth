@@ -7,6 +7,7 @@ mod support;
 
 use hearth_agent::application::ports::Clock;
 use hearth_agent::application::sessions::{AuthError, LoginError};
+use hearth_agent::domain::accounts::Authority;
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::operations::{OperationKey, OperationStatus, Replay};
 use hearth_agent::domain::sessions::{LIFETIME, SessionEnd};
@@ -356,7 +357,12 @@ async fn closing_sessions_leaves_a_revocation_trace_whatever_the_cause() {
 
     // Mot de passe changé par un administrateur.
     env.service
-        .set_password(&marie.id, secret("Another-Pass-77"), by())
+        .set_password(
+            &marie.id,
+            secret("Another-Pass-77"),
+            &Authority::Server,
+            by(),
+        )
         .await
         .unwrap();
     let error = env.sessions.authenticate(&marie_token).await.unwrap_err();

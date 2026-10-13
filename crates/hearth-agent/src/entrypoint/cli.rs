@@ -90,6 +90,15 @@ pub struct InstallArgs {
     /// Ne pose aucune question : tout vient des variables et des options.
     #[arg(long, short = 'y')]
     pub yes: bool,
+    /// Accorde au premier compte le droit de gérer les services, sans poser la question
+    /// (BR-GRANT-007). Prioritaire sur HEARTH_SERVICES (qui n'accepte que `manage` ou `none`). Sans effet si aucun moteur de conteneurs n'est
+    /// détecté ou si un compte existe déjà.
+    #[arg(long, conflicts_with = "no_services")]
+    pub services: bool,
+    /// N'accorde pas ce droit, sans poser la question (la réponse par défaut d'une installation sans
+    /// terminal). Prioritaire sur `--services` et sur HEARTH_SERVICES.
+    #[arg(long)]
+    pub no_services: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
@@ -134,6 +143,20 @@ pub enum AccountAction {
     Remove { username: String },
     /// Ferme toutes les sessions d'un compte sans changer son mot de passe.
     Revoke { username: String },
+    /// Accorde (`--grant`) ou retire (`--revoke`) le droit de gérer les services de ce serveur à un
+    /// compte (BR-GRANT-008). Lancée en root sur le serveur : c'est le seul moyen de donner ce droit,
+    /// aucune demande réseau ne le fait (BR-GRANT-005). Une et une seule des deux options ; l'absence
+    /// des deux est refusée par la commande elle-même, avec le message de la spécification.
+    Services {
+        /// Identifiant du compte : lu comme un identifiant, jamais interprété.
+        username: String,
+        /// Accorde le droit.
+        #[arg(long, conflicts_with = "revoke")]
+        grant: bool,
+        /// Retire le droit.
+        #[arg(long)]
+        revoke: bool,
+    },
 }
 
 fn parse_role(value: &str) -> Result<Role, String> {
@@ -210,6 +233,66 @@ mod tests {
     }
 
     #[test]
+    fn the_services_command_takes_one_account_and_at_most_one_option() {
+        let action = |args: &[&str]| match Cli::parse_from(args).command() {
+            Command::Account { action } => action,
+            other => panic!("attendu : account, reçu {other:?}"),
+        };
+        assert_eq!(
+            action(&["hearth-agent", "account", "services", "marie", "--grant"]),
+            AccountAction::Services {
+                username: "marie".into(),
+                grant: true,
+                revoke: false
+            }
+        );
+        assert_eq!(
+            action(&["hearth-agent", "account", "services", "marie", "--revoke"]),
+            AccountAction::Services {
+                username: "marie".into(),
+                grant: false,
+                revoke: true
+            }
+        );
+        // Sans option : acceptée par l'analyse, refusée par la commande avec son message.
+        assert_eq!(
+            action(&["hearth-agent", "account", "services", "marie"]),
+            AccountAction::Services {
+                username: "marie".into(),
+                grant: false,
+                revoke: false
+            }
+        );
+        let refused = |args: &[&str]| Cli::try_parse_from(args).is_err();
+        assert!(refused(&[
+            "hearth-agent",
+            "account",
+            "services",
+            "marie",
+            "--grant",
+            "--revoke"
+        ]));
+        assert!(refused(&["hearth-agent", "account", "services", "--grant"]));
+        assert!(refused(&[
+            "hearth-agent",
+            "account",
+            "services",
+            "marie",
+            "--grant",
+            "--role",
+            "admin"
+        ]));
+        assert!(refused(&[
+            "hearth-agent",
+            "account",
+            "services",
+            "marie",
+            "autre",
+            "--grant"
+        ]));
+    }
+
+    #[test]
     fn install_options_are_parsed() {
         let install = |args: &[&str]| match Cli::parse_from(args).command() {
             Command::Install(args) => args,
@@ -220,7 +303,9 @@ mod tests {
             InstallArgs {
                 port: None,
                 managed: false,
-                yes: false
+                yes: false,
+                services: false,
+                no_services: false
             }
         );
         assert_eq!(
@@ -235,8 +320,16 @@ mod tests {
             InstallArgs {
                 port: Some("9000".into()),
                 managed: true,
-                yes: true
+                yes: true,
+                services: false,
+                no_services: false
             }
+        );
+        assert!(install(&["hearth-agent", "install", "--services"]).services);
+        assert!(install(&["hearth-agent", "install", "--no-services"]).no_services);
+        assert!(
+            Cli::try_parse_from(["hearth-agent", "install", "--services", "--no-services"])
+                .is_err()
         );
     }
 

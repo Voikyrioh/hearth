@@ -4,6 +4,7 @@ use std::fmt;
 
 use time::OffsetDateTime;
 
+use super::rights::ServicesRight;
 use super::role::Role;
 use super::username::Username;
 use crate::domain::secret::Secret;
@@ -34,6 +35,9 @@ pub struct Account {
     pub id: AccountId,
     pub username: Username,
     pub role: Role,
+    /// Le droit « gérer les services » (BR-GRANT-001) : lu en base, jamais écrit par l'agent en
+    /// fonctionnement (BR-GRANT-005). Un compte qui naît l'a à `ServicesRight::INITIAL`.
+    pub services_right: ServicesRight,
     pub password_hash: Secret,
     pub created_at: OffsetDateTime,
     pub password_changed_at: OffsetDateTime,

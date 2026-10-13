@@ -37,6 +37,7 @@ pub fn account_info(account: &AccountView) -> AccountInfo {
         id: account.id.to_string(),
         username: account.username.as_str().to_owned(),
         role: role_to_wire(account.role),
+        rights: account.services_right.wire_rights(),
     }
 }
 
@@ -48,6 +49,7 @@ pub fn account_item(account: &AccountView, sessions_open: usize) -> Result<Accou
         created_at: date(account.created_at)?,
         last_login_at: account.last_login_at.map(date).transpose()?,
         sessions_open: u64::try_from(sessions_open).unwrap_or(u64::MAX),
+        rights: account.services_right.wire_rights(),
     })
 }
 

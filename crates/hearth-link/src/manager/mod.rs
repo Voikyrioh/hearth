@@ -1330,6 +1330,7 @@ mod tests {
                 id: "A".into(),
                 username: "marie".into(),
                 role: hearth_proto::api::accounts::RoleName::Admin,
+                rights: Vec::new(),
             },
         };
         let secret = Secret::new(PASSWORD);

@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use super::convert::{format_date, is_unique_violation, parse_date, storage};
 use super::store::SqliteUnitOfWork;
 use crate::application::ports::{AccountRepo, AccountTx, StoreError};
-use crate::domain::accounts::{Account, AccountId, Role, Username};
+use crate::domain::accounts::{Account, AccountId, Role, ServicesRight, Username};
 use crate::domain::secret::Secret;
 use crate::domain::trust::admin_act::{mode_from_seconds, seconds_of};
 
@@ -31,6 +31,7 @@ struct AccountRow {
     username: String,
     password_hash: String,
     role: String,
+    services_right: String,
     created_at: String,
     password_changed_at: String,
     last_login_at: Option<String>,
@@ -44,6 +45,11 @@ fn into_account(row: AccountRow) -> Result<Account, StoreError> {
     Ok(Account {
         username: Username::parse(&row.username).map_err(|_| corrupt("identifiant"))?,
         role: row.role.parse::<Role>().map_err(|_| corrupt("rôle"))?,
+        // Une valeur inconnue en base est une anomalie : jamais un droit accordé par défaut.
+        services_right: row
+            .services_right
+            .parse::<ServicesRight>()
+            .map_err(|_| corrupt("droit sur les services"))?,
         created_at: parse_date(RESOURCE, &row.created_at)?,
         password_changed_at: parse_date(RESOURCE, &row.password_changed_at)?,
         last_login_at: row
@@ -62,7 +68,7 @@ pub(super) async fn find_by_id(
 ) -> Result<Option<Account>, StoreError> {
     sqlx::query_as!(
         AccountRow,
-        "SELECT id, username, password_hash, role, created_at, password_changed_at, last_login_at
+        "SELECT id, username, password_hash, role, services_right, created_at, password_changed_at, last_login_at
          FROM accounts WHERE id = ?",
         id.as_str()
     )
@@ -79,7 +85,7 @@ pub(super) async fn find_by_username(
 ) -> Result<Option<Account>, StoreError> {
     sqlx::query_as!(
         AccountRow,
-        "SELECT id, username, password_hash, role, created_at, password_changed_at, last_login_at
+        "SELECT id, username, password_hash, role, services_right, created_at, password_changed_at, last_login_at
          FROM accounts WHERE username = ?",
         username.as_str()
     )
@@ -106,7 +112,7 @@ impl AccountRepo for SqliteAccountRepo {
         let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
         sqlx::query_as!(
             AccountRow,
-            "SELECT id, username, password_hash, role, created_at, password_changed_at, last_login_at
+            "SELECT id, username, password_hash, role, services_right, created_at, password_changed_at, last_login_at
              FROM accounts ORDER BY created_at, id"
         )
         .fetch_all(&mut *conn)
@@ -153,7 +159,14 @@ impl AccountTx for SqliteUnitOfWork {
         Ok(u64::try_from(count).unwrap_or(0))
     }
 
+    /// `services_right` n'est PAS écrit : la colonne prend son défaut `none` (BR-GRANT-002) et aucun
+    /// chemin de l'agent en fonctionnement ne l'écrit (BR-GRANT-005).
     async fn insert(&mut self, account: &Account) -> Result<(), StoreError> {
+        debug_assert_eq!(
+            account.services_right,
+            ServicesRight::INITIAL,
+            "un compte naît sans le droit (BR-GRANT-002)"
+        );
         let created_at = format_date(RESOURCE, account.created_at)?;
         let changed_at = format_date(RESOURCE, account.password_changed_at)?;
         let last_login_at = account

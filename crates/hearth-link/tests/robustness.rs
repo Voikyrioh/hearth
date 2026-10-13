@@ -302,6 +302,7 @@ impl Transport for Chaos {
                 id: "A".into(),
                 username: "marie".into(),
                 role: RoleName::Admin,
+                rights: Vec::new(),
             },
         })
     }

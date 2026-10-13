@@ -1232,7 +1232,7 @@ impl ServicesRegistry {
         }
     }
 
-    /// Les variables d'un service avec leurs VALEURS, pour un administrateur (BR-SVC-009). Le
+    /// Les variables d'un service avec leurs VALEURS, pour un compte qui a le droit « gérer les services » (BR-SVC-009, jugé par la couche d'accès). Le
     /// service est celui que la liste montre ; sa lecture passe par le moteur, jamais par la liste.
     /// La réussite est consignée au journal AVANT de rendre les valeurs : sans nom ni valeur, la cible
     /// est le service. Rien n'est lu en arrière-plan : une valeur ne quitte le moteur que par cet appel.
@@ -1242,6 +1242,11 @@ impl ServicesRegistry {
         actor: Actor,
         sink: &dyn AuditSink,
     ) -> Result<Vec<EnvEntry>, RevealError> {
+        // BR-GRANT-015 : le coupe-circuit l'emporte sur le droit. Pilotage désactivé, aucun service
+        // n'est publié et le moteur n'est jamais ouvert, même pour un compte qui a le droit.
+        if !self.enabled {
+            return Err(RevealError::NotFound);
+        }
         let (container_id, name) = {
             let inner = self.lock();
             let view = inner.published.get(key).ok_or(RevealError::NotFound)?;

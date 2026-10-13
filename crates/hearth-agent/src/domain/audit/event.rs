@@ -234,6 +234,9 @@ pub enum Reason {
     },
     /// Un compte en lecture seule demande ce qui est réservé aux administrateurs.
     ReadOnly,
+    /// Un acte de service est demandé par un compte qui n'a pas le droit de gérer les services,
+    /// quel que soit son rôle (BR-GRANT-004, cause « droits insuffisants » du cycle de vie des services).
+    InsufficientRights,
     Validation,
     UsernameTaken,
     WrongPassword,
@@ -291,6 +294,7 @@ impl Reason {
                 format!("trop de tentatives, attente de {retry_after_s} s")
             }
             Self::ReadOnly => "lecture seule".to_owned(),
+            Self::InsufficientRights => "droits insuffisants".to_owned(),
             Self::Validation => "données invalides".to_owned(),
             Self::UsernameTaken => "identifiant déjà utilisé".to_owned(),
             Self::WrongPassword => "mot de passe actuel incorrect".to_owned(),

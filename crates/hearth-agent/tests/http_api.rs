@@ -148,10 +148,329 @@ async fn every_admin_route_refuses_a_read_only_account_and_changes_nothing() {
     assert_eq!(reply.status, StatusCode::OK);
 }
 
-/// Ce que le balayage ne doit jamais modifier : comptes, rôles, hachés, sessions.
+/// Pose les déclencheurs qui voient toute écriture de la colonne du droit « gérer les services »
+/// (BR-GRANT-005). `UPDATE OF services_right` se déclenche dès que la colonne figure dans la liste
+/// `SET` d'une requête, même pour la valeur qu'elle avait déjà : une route qui réécrit le droit à
+/// l'identique est vue aussi. Un compte inséré avec une valeur autre que `none` l'est également.
+/// Les écritures vues s'accumulent dans `right_writes`.
+async fn install_right_write_detector(env: &support::Env) {
+    for statement in [
+        "CREATE TABLE right_writes (what TEXT NOT NULL)",
+        "CREATE TRIGGER right_updated AFTER UPDATE OF services_right ON accounts
+         BEGIN INSERT INTO right_writes VALUES ('update ' || NEW.id); END",
+        "CREATE TRIGGER right_born AFTER INSERT ON accounts WHEN NEW.services_right <> 'none'
+         BEGIN INSERT INTO right_writes VALUES ('insert ' || NEW.id); END",
+    ] {
+        sqlx::query(statement).execute(env.db.pool()).await.unwrap();
+    }
+}
+
+async fn right_writes(env: &support::Env) -> Vec<String> {
+    sqlx::query_scalar("SELECT what FROM right_writes ORDER BY rowid")
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap()
+}
+
+/// Le témoin du détecteur : sans lui, un détecteur mal posé ne verrait rien et tous les balayages
+/// passeraient. Une écriture directe (celle qu'une route ajoutée plus tard ferait) est vue, qu'elle
+/// accorde, retire ou réécrive à l'identique, et qu'elle passe par `UPDATE` ou par un compte inséré
+/// avec le droit.
+#[tokio::test]
+async fn the_write_detector_sees_every_kind_of_write_of_the_services_right() {
+    let env = env().await;
+    env.create("marie", Role::Admin).await;
+    install_right_write_detector(&env).await;
+    assert!(right_writes(&env).await.is_empty());
+    // Le chemin de production qui crée un compte ne l'écrit pas.
+    env.create("lucas", Role::ReadOnly).await;
+    assert!(
+        right_writes(&env).await.is_empty(),
+        "{:?}",
+        right_writes(&env).await
+    );
+    // Écritures directes, de toutes les formes.
+    sqlx::query("UPDATE accounts SET services_right = 'manage' WHERE username = 'marie'")
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE accounts SET services_right = 'manage' WHERE username = 'marie'")
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE accounts SET services_right = 'none' WHERE username = 'lucas'")
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO accounts (id, username, password_hash, role, services_right, created_at,
+                               password_changed_at)
+         VALUES ('01X', 'intrus', 'h', 'readonly', 'manage', '2026-10-01T10:00:00.000Z',
+                 '2026-10-01T10:00:00.000Z')",
+    )
+    .execute(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(right_writes(&env).await.len(), 4);
+}
+
+/// Les quatre profils de la spec (BR-GRANT-001) : A admin avec le droit, B admin sans, C lecture seule
+/// sans, D lecture seule avec. Rend les jetons dans l'ordre A, B, C, D.
+async fn four_profiles(env: &support::Env, api: &Api) -> [String; 4] {
+    let a = env.account_with_token(api, "ada", Role::Admin).await;
+    let b = env.account_with_token(api, "bob", Role::Admin).await;
+    let c = env.account_with_token(api, "cleo", Role::ReadOnly).await;
+    let d = env.account_with_token(api, "dan", Role::ReadOnly).await;
+    env.grant_services("ada").await;
+    env.grant_services("dan").await;
+    [a, b, c, d]
+}
+
+/// BR-GRANT-001, BR-GRANT-003, BR-GRANT-004 : sur CHAQUE route de niveau « services » (existante ou
+/// ajoutée plus tard : la table fait foi), un administrateur sans le droit et un compte en lecture
+/// seule sans le droit sont refusés, quel que soit le client, avec le droit manquant en détail et un
+/// refus consigné ; les comptes qui ont le droit passent la garde, administrateur ou non.
+#[tokio::test]
+async fn every_services_route_refuses_an_account_without_the_right_even_an_administrator() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let [a, b, c, d] = four_profiles(&env, &api).await;
+    install_right_write_detector(&env).await;
+    let before = snapshot(&env).await;
+
+    let mut swept = 0;
+    for endpoint in ENDPOINTS
+        .iter()
+        .filter(|endpoint| endpoint.access == Access::Services)
+    {
+        let path = concrete(endpoint.path);
+        // Les refus identiques à moins d'une minute se regroupent : on espace les appels.
+        env.clock.advance(time::Duration::seconds(61));
+        for (who, token) in [("bob", &b), ("cleo", &c)] {
+            let reply = api
+                .call(endpoint.method.clone(), &path)
+                .token(token)
+                .json(&json!({}))
+                .send()
+                .await;
+            assert_eq!(
+                (reply.status, reply.code()),
+                (StatusCode::FORBIDDEN, "FORBIDDEN_ROLE"),
+                "{} {} doit refuser {who}",
+                endpoint.method,
+                endpoint.path
+            );
+            assert_eq!(
+                reply.body["error"]["details"],
+                json!({ "missing": "services" }),
+                "{} {}",
+                endpoint.method,
+                endpoint.path
+            );
+            assert_eq!(
+                reply.body["error"]["message"],
+                "Tu n'as pas le droit de gérer les services de ce serveur."
+            );
+            env.clock.advance(time::Duration::seconds(61));
+        }
+        for (who, token) in [("ada", &a), ("dan", &d)] {
+            let reply = api
+                .call(endpoint.method.clone(), &path)
+                .token(token)
+                .json(&json!({}))
+                .send()
+                .await;
+            assert!(
+                reply.status != StatusCode::UNAUTHORIZED && reply.status != StatusCode::FORBIDDEN,
+                "{} {} doit laisser passer {who} : {}",
+                endpoint.method,
+                endpoint.path,
+                reply.status
+            );
+        }
+        // Le refus est consigné sous l'action de la route, avec la cause « droits insuffisants ».
+        let action = endpoint
+            .audit
+            .expect("une route de service est consignée")
+            .code();
+        for who in ["bob", "cleo"] {
+            let reasons: Vec<Option<String>> = sqlx::query_scalar(
+                "SELECT reason FROM audit_events WHERE outcome = 'denied' AND action = ? AND account = ?",
+            )
+            .bind(action)
+            .bind(who)
+            .fetch_all(env.db.pool())
+            .await
+            .unwrap();
+            assert!(
+                !reasons.is_empty(),
+                "{who} : refus non consigné pour {action}"
+            );
+            assert!(
+                reasons
+                    .iter()
+                    .all(|reason| reason.as_deref() == Some("droits insuffisants")),
+                "{reasons:?}"
+            );
+        }
+        swept += 1;
+    }
+    assert!(swept >= 1, "au moins la révélation des variables");
+    assert_eq!(snapshot(&env).await, before, "rien n'a changé en base");
+    assert!(right_writes(&env).await.is_empty());
+}
+
+/// BR-GRANT-001 : le droit n'ouvre RIEN d'autre que les services. Un compte en lecture seule qui a le
+/// droit (profil D) est refusé sur toutes les routes d'administration (comptes, journal d'activité,
+/// mise à jour de l'agent, mode attaque) et rien ne change ; le rôle d'administrateur sans le droit
+/// (profil B) garde ses routes.
+#[tokio::test]
+async fn a_read_only_account_with_the_right_reaches_nothing_but_the_services() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let [_a, b, _c, d] = four_profiles(&env, &api).await;
+    install_right_write_detector(&env).await;
+    let before = snapshot(&env).await;
+    let journal_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+
+    let mut admin_routes = 0;
+    for endpoint in ENDPOINTS
+        .iter()
+        .filter(|endpoint| endpoint.access == Access::Admin)
+    {
+        env.clock.advance(time::Duration::seconds(61));
+        let reply = api
+            .call(endpoint.method.clone(), &concrete(endpoint.path))
+            .token(&d)
+            .json(&json!({
+                "username": "intrus", "password": OTHER_PASSWORD, "role": "admin",
+                "confirmation": "dan", "active": true,
+                "rights": ["services"], "services_right": "manage"
+            }))
+            .send()
+            .await;
+        assert_eq!(
+            (reply.status, reply.code()),
+            (StatusCode::FORBIDDEN, "FORBIDDEN_ROLE"),
+            "{} {} doit refuser un compte en lecture seule, même avec le droit",
+            endpoint.method,
+            endpoint.path
+        );
+        // Un refus de rôle : aucun droit manquant en détail, le client ne confond pas les deux.
+        assert_eq!(reply.body["error"]["details"], json!({}));
+        admin_routes += 1;
+    }
+    assert!(
+        admin_routes >= 8,
+        "{admin_routes} routes d'administration balayées"
+    );
+    assert_eq!(snapshot(&env).await, before, "rien n'a changé en base");
+    // Les refus sont consignés au nom de `dan` (une entrée par route), pas de succès en plus.
+    let denials: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE outcome = 'denied' AND account = 'dan'",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(usize::try_from(denials).unwrap(), admin_routes);
+    let journal_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(journal_after - journal_before, denials);
+    // Il lit toujours ce que tout compte lit, et le journal d'activité lui reste fermé.
+    for path in ["/me", "/services", "/machine"] {
+        let reply = api.get(path).token(&d).send().await;
+        assert_eq!(reply.status, StatusCode::OK, "{path}");
+    }
+    // Contrôle inverse : l'administrateur sans le droit garde les comptes et le journal.
+    for path in ["/accounts", "/audit"] {
+        let reply = api.get(path).token(&b).send().await;
+        assert_eq!(reply.status, StatusCode::OK, "{path}");
+    }
+    assert!(right_writes(&env).await.is_empty());
+}
+
+/// BR-GRANT-002 et BR-GRANT-016 : un compte créé par la route naît sans le droit, quel que soit son
+/// rôle et ce que le corps de la requête essaie de lui donner ; chaque ligne de la liste des comptes et
+/// la description du compte courant portent `rights`.
+#[tokio::test]
+async fn a_created_account_is_born_without_the_right_and_rights_are_described_on_the_wire() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let marie = env.actor(&api, "marie", Role::Admin).await;
+    env.grant_services("marie").await;
+    install_right_write_detector(&env).await;
+
+    for (name, role) in [("nouvel-admin", "admin"), ("nouveau-lecteur", "readonly")] {
+        // Un client modifié glisse le droit dans le corps : rien ne le lit.
+        let reply = api
+            .act(
+                &marie,
+                Method::POST,
+                "/accounts",
+                json!({
+                    "username": name, "password": OTHER_PASSWORD, "role": role,
+                    "rights": ["services"], "services_right": "manage"
+                }),
+            )
+            .await;
+        assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+        assert_eq!(reply.body["rights"], json!([]), "{name}");
+        assert_eq!(env.services_right_of(name).await, "none", "{name}");
+    }
+    // La liste des comptes : une ligne par compte, `rights` partout, `services` pour marie seule.
+    let list = api.get("/accounts").token(&marie.token).send().await;
+    assert_eq!(list.status, StatusCode::OK);
+    let accounts = list.body["accounts"].as_array().unwrap();
+    assert_eq!(accounts.len(), 3);
+    for account in accounts {
+        let expected = if account["username"] == "marie" {
+            json!(["services"])
+        } else {
+            json!([])
+        };
+        assert_eq!(account["rights"], expected, "{account}");
+    }
+    // Le compte courant, par `GET /me` et par la connexion.
+    let me = api.get("/me").token(&marie.token).send().await;
+    assert_eq!(me.body["account"]["rights"], json!(["services"]));
+    let login = api.login("marie", PASSWORD).await;
+    assert_eq!(login.body["account"]["rights"], json!(["services"]));
+    let lecteur = api.login("nouveau-lecteur", OTHER_PASSWORD).await;
+    assert_eq!(lecteur.body["account"]["rights"], json!([]));
+    // Changer le rôle ne touche pas au droit (BR-GRANT-001 : deux axes indépendants).
+    let victim = env.service.find("nouveau-lecteur").await.unwrap().id;
+    env.grant_services("nouveau-lecteur").await;
+    sqlx::query("DELETE FROM right_writes")
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+    let promoted = api
+        .act(
+            &marie,
+            Method::PATCH,
+            &format!("/accounts/{victim}"),
+            json!({ "role": "admin", "rights": [], "services_right": "none" }),
+        )
+        .await;
+    assert_eq!(
+        promoted.status,
+        StatusCode::NO_CONTENT,
+        "{:?}",
+        promoted.body
+    );
+    assert_eq!(env.services_right_of("nouveau-lecteur").await, "manage");
+    assert!(right_writes(&env).await.is_empty());
+}
+
+/// Ce que le balayage ne doit jamais modifier : comptes, rôles, droits, hachés, sessions.
 async fn snapshot(env: &support::Env) -> Vec<String> {
     let mut lines: Vec<String> = sqlx::query_scalar(
-        "SELECT id || '|' || username || '|' || role || '|' || password_hash FROM accounts ORDER BY id",
+        "SELECT id || '|' || username || '|' || role || '|' || services_right || '|' || password_hash FROM accounts ORDER BY id",
     )
     .fetch_all(env.db.pool())
     .await
@@ -1071,6 +1390,10 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     // `marie` ouvre une session AVEC la clé d'un poste inscrit : activer le mode attaque exige la preuve
     // d'une clé inscrite et le mot de passe (Q14 point 3, Q16).
     let marie = env.actor(&api, "marie", Role::Admin).await;
+    // L'acteur a TOUS les pouvoirs (administrateur avec le droit) et le détecteur d'écriture du droit
+    // est posé : aucune des routes balayées ci-dessous ne doit écrire la colonne (BR-GRANT-005).
+    env.grant_services("marie").await;
+    install_right_write_detector(&env).await;
 
     let successes = |env: &support::Env| {
         let pool = env.db.pool().clone();
@@ -1148,7 +1471,11 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     &marie,
                     Method::POST,
                     "/accounts",
-                    json!({ "username": "nouveau", "password": OTHER_PASSWORD, "role": "readonly" }),
+                    // Des champs de droit glissés dans le corps : ignorés, jamais lus.
+                    json!({
+                        "username": "nouveau", "password": OTHER_PASSWORD, "role": "readonly",
+                        "rights": ["services"], "services_right": "manage"
+                    }),
                 )
                 .await
             }
@@ -1157,7 +1484,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     &marie,
                     Method::PATCH,
                     &format!("/accounts/{}", role_victim.id),
-                    json!({ "role": "admin" }),
+                    json!({ "role": "admin", "rights": ["services"], "services_right": "manage" }),
                 )
                 .await
             }
@@ -1206,10 +1533,17 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             }
             ("PUT", "/me/reauth") => {
                 // Le réglage de fréquence du mot de passe (HRT-28) : toujours confirmé.
-                api.act(&marie, Method::PUT, "/me/reauth", json!({ "password": "each" }))
-                    .await
+                api.act(
+                    &marie,
+                    Method::PUT,
+                    "/me/reauth",
+                    json!({ "password": "each" }),
+                )
+                .await
             }
-            (method, path) => panic!("route modifiante sans scénario de réussite : {method} {path}"),
+            (method, path) => {
+                panic!("route modifiante sans scénario de réussite : {method} {path}")
+            }
         };
         assert!(
             reply.status.is_success(),
@@ -1228,6 +1562,12 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         swept += 1;
     }
     assert!(swept >= 8, "{swept} routes balayées");
+    // BR-GRANT-005 : aucune de ces routes n'a écrit la colonne du droit. Ni le compte créé avec un droit
+    // glissé dans son corps, ni le compte promu administrateur ne l'ont reçu.
+    assert_eq!(right_writes(&env).await, Vec::<String>::new());
+    assert_eq!(env.services_right_of("nouveau").await, "none");
+    assert_eq!(env.services_right_of("v-role").await, "none");
+    assert_eq!(env.services_right_of("marie").await, "manage");
 
     // Les routes de lecture (dont celles des mesures) ne laissent aucune entrée (BR-AUDIT-004).
     let entries = || async {
@@ -1466,4 +1806,469 @@ async fn the_stream_route_without_an_upgrade_explains_itself() {
         (reply.status, reply.code()),
         (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR")
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// BR-GRANT-005 : le droit ne se donne pas par le réseau, et ne se PREND pas non plus
+// ---------------------------------------------------------------------------------------------
+
+/// Le mot de passe qu'un administrateur sans le droit voudrait imposer à un compte qui l'a.
+const TAKEOVER_PASSWORD: &str = "Taken-Over-55-Pass";
+
+/// Le refus dédié (BR-GRANT-005), au mot près.
+const HOLDER_PROTECTED: &str = "Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut modifier ses moyens de connexion.";
+
+async fn id_of(env: &support::Env, name: &str) -> String {
+    env.service.find(name).await.unwrap().id.to_string()
+}
+
+fn password_body() -> serde_json::Value {
+    json!({ "password": TAKEOVER_PASSWORD })
+}
+
+/// Les entrées du journal d'un acte : (résultat, raison), pour l'acteur et la cible donnés.
+async fn journal_of(
+    env: &support::Env,
+    action: &str,
+    actor: &str,
+    target: &str,
+) -> Vec<(String, Option<String>)> {
+    sqlx::query_as(
+        "SELECT outcome, reason FROM audit_events WHERE action = ? AND account = ? AND target = ? ORDER BY id",
+    )
+    .bind(action)
+    .bind(actor)
+    .bind(target)
+    .fetch_all(env.db.pool())
+    .await
+    .unwrap()
+}
+
+/// B1 (bloquant de la review) : un administrateur SANS le droit ne définit pas le mot de passe d'un compte
+/// qui l'a (administrateur ou lecture seule). Refus dédié, au mot près, droit manquant en détail, refus
+/// consigné « droits insuffisants », ni haché ni sessions touchés. Non-régression : la même demande est
+/// acceptée sur un compte qui n'a pas le droit, et un compte qui a le droit est accepté partout.
+#[tokio::test]
+async fn an_administrator_without_the_right_cannot_define_the_password_of_a_holder() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let ada = env.actor(&api, "ada", Role::Admin).await;
+    let bob = env.actor(&api, "bob", Role::Admin).await;
+    env.create("cleo", Role::ReadOnly).await;
+    env.create("dan", Role::ReadOnly).await;
+    env.grant_services("ada").await;
+    env.grant_services("dan").await;
+    install_right_write_detector(&env).await;
+    let (ada_id, dan_id, cleo_id, bob_id) = (
+        id_of(&env, "ada").await,
+        id_of(&env, "dan").await,
+        id_of(&env, "cleo").await,
+        id_of(&env, "bob").await,
+    );
+    let ada_hash = env
+        .hash_of(&env.service.find("ada").await.unwrap().id)
+        .await;
+    let ada_sessions = env
+        .session_ids(&env.service.find("ada").await.unwrap().id)
+        .await;
+
+    // Refusé sur un titulaire administrateur (ada) et sur un titulaire en lecture seule (dan).
+    for (name, id) in [("ada", &ada_id), ("dan", &dan_id)] {
+        env.clock.advance(time::Duration::seconds(61));
+        let reply = api
+            .act(
+                &bob,
+                Method::PUT,
+                &format!("/accounts/{id}/password"),
+                password_body(),
+            )
+            .await;
+        assert_eq!(
+            (reply.status, reply.code()),
+            (StatusCode::FORBIDDEN, "FORBIDDEN_ROLE"),
+            "{name} : {:?}",
+            reply.body
+        );
+        assert_eq!(reply.body["error"]["message"], HOLDER_PROTECTED, "{name}");
+        assert_eq!(
+            reply.body["error"]["details"],
+            json!({ "missing": "services" })
+        );
+        assert_eq!(
+            journal_of(&env, "account.password", "bob", name).await,
+            vec![("denied".to_owned(), Some("droits insuffisants".to_owned()))],
+            "le refus est consigné, sans entrée de réussite"
+        );
+        // Le titulaire n'a pas été touché, et le mot de passe imposé n'ouvre rien.
+        assert_ne!(
+            api.login(name, TAKEOVER_PASSWORD).await.status,
+            StatusCode::CREATED
+        );
+    }
+    assert_eq!(
+        env.hash_of(&env.service.find("ada").await.unwrap().id)
+            .await,
+        ada_hash
+    );
+    assert_eq!(
+        env.session_ids(&env.service.find("ada").await.unwrap().id)
+            .await,
+        ada_sessions
+    );
+    // Rien d'autre n'a changé : le droit des titulaires est intact, aucune écriture de la colonne.
+    assert_eq!(env.services_right_of("ada").await, "manage");
+    assert_eq!(env.services_right_of("dan").await, "manage");
+    assert!(right_writes(&env).await.is_empty());
+
+    // Non-régression : sur un compte sans le droit, et sur lui-même, l'administrateur sans le droit passe.
+    for (name, id) in [("cleo", &cleo_id), ("bob", &bob_id)] {
+        let reply = api
+            .act(
+                &bob,
+                Method::PUT,
+                &format!("/accounts/{id}/password"),
+                password_body(),
+            )
+            .await;
+        assert_eq!(reply.status, StatusCode::OK, "{name} : {:?}", reply.body);
+        assert_eq!(
+            api.login(name, TAKEOVER_PASSWORD).await.status,
+            StatusCode::CREATED
+        );
+    }
+
+    // Un compte qui a le droit passe : sur un autre titulaire, sur un compte sans le droit, sur lui-même.
+    for (name, id) in [("dan", &dan_id), ("cleo", &cleo_id), ("ada", &ada_id)] {
+        let reply = api
+            .act(
+                &ada,
+                Method::PUT,
+                &format!("/accounts/{id}/password"),
+                json!({ "password": OTHER_PASSWORD }),
+            )
+            .await;
+        assert_eq!(
+            reply.status,
+            StatusCode::OK,
+            "ada sur {name} : {:?}",
+            reply.body
+        );
+    }
+    assert!(right_writes(&env).await.is_empty());
+}
+
+/// La règle suit le droit LU à cet instant : retiré par le serveur, le compte redevient un compte comme les
+/// autres ; accordé à l'administrateur qui demande, il passe ; la ligne de commande du serveur passe
+/// toujours (c'est le serveur, BR-GRANT-005).
+#[tokio::test]
+async fn the_protection_follows_the_right_read_at_the_time_and_the_server_always_passes() {
+    use hearth_agent::domain::accounts::Authority;
+
+    let env = env().await;
+    let api = Api::new(&env);
+    env.create("ada", Role::Admin).await;
+    let bob = env.actor(&api, "bob", Role::Admin).await;
+    let ada = env.service.find("ada").await.unwrap().id;
+    env.grant_services("ada").await;
+    let path = format!("/accounts/{ada}/password");
+
+    let refused = api.act(&bob, Method::PUT, &path, password_body()).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN, "{:?}", refused.body);
+    // Le serveur (la ligne de commande) passe, quel que soit le droit de la cible.
+    env.service
+        .set_password(
+            &ada,
+            support::secret(OTHER_PASSWORD),
+            &Authority::Server,
+            support::by(),
+        )
+        .await
+        .unwrap();
+    // L'administrateur reçoit le droit sur le serveur : il passe, sur un titulaire.
+    env.grant_services("bob").await;
+    let accepted = api.act(&bob, Method::PUT, &path, password_body()).await;
+    assert_eq!(accepted.status, StatusCode::OK, "{:?}", accepted.body);
+    // Le droit de la cible est retiré sur le serveur : même un administrateur sans le droit passe.
+    env.revoke_services("bob").await;
+    env.revoke_services("ada").await;
+    let accepted = api.act(&bob, Method::PUT, &path, password_body()).await;
+    assert_eq!(accepted.status, StatusCode::OK, "{:?}", accepted.body);
+}
+
+/// Inventaire de BR-GRANT-005, les actes que `CLASSES` (mod.rs) déclare « sans danger » : un administrateur
+/// sans le droit les accomplit sur un titulaire SANS que cela lui donne le compte ni le droit.
+///
+/// - changement de rôle : le droit reste, ni mot de passe ni session ne change ;
+/// - fermeture des sessions : le titulaire perd ses sessions, garde son droit, et la route n'inscrit aucun
+///   poste ni mot de passe ;
+/// - suppression : le droit disparaît AVEC la ligne du compte ; un compte recréé sous le même nom a un autre
+///   identifiant, naît sans le droit, et le mot de passe choisi à la création n'ouvre aucun acte de service.
+#[tokio::test]
+async fn the_acts_declared_harmless_do_not_hand_a_holder_to_an_administrator_without_the_right() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let ada = env.actor(&api, "ada", Role::Admin).await;
+    let bob = env.actor(&api, "bob", Role::Admin).await;
+    env.create("dan", Role::ReadOnly).await;
+    env.grant_services("ada").await;
+    env.grant_services("dan").await;
+    install_right_write_detector(&env).await;
+    let (ada_id, dan_id) = (id_of(&env, "ada").await, id_of(&env, "dan").await);
+
+    // Changement de rôle d'un titulaire : accepté, le droit reste, le mot de passe aussi.
+    let reply = api
+        .act(
+            &bob,
+            Method::PATCH,
+            &format!("/accounts/{dan_id}"),
+            json!({ "role": "admin" }),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT, "{:?}", reply.body);
+    assert_eq!(env.services_right_of("dan").await, "manage");
+    assert_eq!(api.login("dan", PASSWORD).await.status, StatusCode::CREATED);
+    assert_ne!(
+        api.login("dan", TAKEOVER_PASSWORD).await.status,
+        StatusCode::CREATED
+    );
+
+    // Fermeture des sessions d'un titulaire : acceptée, le droit reste, sa session est fermée, et
+    // l'administrateur ne tient toujours aucun jeton qui passe le niveau « services ».
+    let reply = api
+        .act(
+            &bob,
+            Method::DELETE,
+            &format!("/accounts/{ada_id}/sessions"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert_eq!(env.services_right_of("ada").await, "manage");
+    assert_eq!(
+        api.get("/me").token(&ada.token).send().await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    let env_route = api.get("/services/c_x/env").token(&bob.token).send().await;
+    assert_eq!(env_route.status, StatusCode::FORBIDDEN);
+    assert_eq!(api.login("ada", PASSWORD).await.status, StatusCode::CREATED);
+
+    // Suppression puis recréation sous le même nom : le droit ne renaît JAMAIS.
+    let reply = api
+        .act(
+            &bob,
+            Method::DELETE,
+            &format!("/accounts/{ada_id}"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
+        .bind(&ada_id)
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, 0, "le droit disparaît avec la ligne du compte");
+    let reply = api
+        .act(
+            &bob,
+            Method::POST,
+            "/accounts",
+            json!({ "username": "ada", "password": TAKEOVER_PASSWORD, "role": "admin" }),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+    let new_ada = id_of(&env, "ada").await;
+    assert_ne!(new_ada, ada_id, "un autre identifiant");
+    assert_eq!(env.services_right_of("ada").await, "none");
+    let login = api.login("ada", TAKEOVER_PASSWORD).await;
+    assert_eq!(login.status, StatusCode::CREATED, "{:?}", login.body);
+    let token = login.body["token"].as_str().unwrap().to_owned();
+    for endpoint in ENDPOINTS.iter().filter(|e| e.access == Access::Services) {
+        let reply = api
+            .call(endpoint.method.clone(), &concrete(endpoint.path))
+            .token(&token)
+            .json(&json!({}))
+            .send()
+            .await;
+        assert_eq!(
+            reply.status,
+            StatusCode::FORBIDDEN,
+            "{} {}",
+            endpoint.method,
+            endpoint.path
+        );
+    }
+    // Aucun de ces actes n'a écrit la colonne du droit (la création du compte la laisse à son défaut).
+    assert!(right_writes(&env).await.is_empty());
+}
+
+/// Garde générale (B1) : AUCUN enchaînement d'appels réseau partant d'un administrateur sans le droit
+/// n'aboutit à une requête acceptée au niveau `Services`. Le balayage part de la TABLE : chaque route
+/// d'administration qui modifie, existante ou ajoutée plus tard, est appelée par `bob` sur chaque
+/// compte (titulaires administrateur et lecture seule, compte sans droit, compte inexistant) avec le
+/// mot de passe qu'il voudrait imposer ; puis il supprime et recrée les titulaires sous leur nom. Il essaie
+/// ensuite ce mot de passe sur tous les comptes : tout jeton obtenu doit être refusé sur CHAQUE route de
+/// niveau `Services`, et aucun compte qui a le droit ne doit s'ouvrir avec ce mot de passe.
+///
+/// Exclues du balayage, avec la raison : la mise à jour de l'agent (binaire signé seulement, jamais une
+/// entrée du demandeur : `update_http.rs`) et le mode attaque (réglage du serveur entier, ne vise aucun
+/// compte ; l'activer ferait refuser les connexions du balayage lui-même).
+// Portée réelle (review de la PR 83) : ce test balaie les routes d'aujourd'hui avec le corps d'un
+// changement de mot de passe. Une route nouvelle est arrêtée par le classement `CLASSES`, pas par ce
+// balayage.
+#[tokio::test]
+async fn no_chain_of_calls_from_an_administrator_without_the_right_reaches_a_services_request() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let _ada = env.actor(&api, "ada", Role::Admin).await;
+    let bob = env.actor(&api, "bob", Role::Admin).await;
+    env.create("cleo", Role::ReadOnly).await;
+    env.create("dan", Role::ReadOnly).await;
+    env.grant_services("ada").await;
+    env.grant_services("dan").await;
+    install_right_write_detector(&env).await;
+    let originals = [
+        ("ada", id_of(&env, "ada").await),
+        ("dan", id_of(&env, "dan").await),
+        ("cleo", id_of(&env, "cleo").await),
+    ];
+
+    let swept_routes: Vec<_> = ENDPOINTS
+        .iter()
+        .filter(|e| e.access == Access::Admin && e.modifies())
+        .filter(|e| !matches!(e.path, "/agent/update" | "/security/attack-mode"))
+        .collect();
+    assert!(
+        swept_routes.len() >= 4,
+        "{} routes balayées",
+        swept_routes.len()
+    );
+
+    // Phase 1 : chaque route sur chaque compte (hors suppressions), le tout en visant ce que `bob`
+    // pourrait vouloir prendre. `bob` lui-même n'est pas visé : ses propres actes ferment sa session.
+    let mut targets: Vec<String> = originals.iter().map(|(_, id)| id.clone()).collect();
+    targets.push("01JNOSUCHACCOUNT0000000000".to_owned());
+    let mut number = 0;
+    for endpoint in swept_routes
+        .iter()
+        .filter(|e| !(e.method == Method::DELETE && e.path == "/accounts/{id}"))
+    {
+        for target in &targets {
+            number += 1;
+            env.clock.advance(time::Duration::seconds(61));
+            let path = endpoint.path.replace("{id}", target);
+            let body = json!({
+                "username": format!("mallory{number}"), "password": TAKEOVER_PASSWORD,
+                "role": "admin"
+            });
+            let reply = api.act(&bob, endpoint.method.clone(), &path, body).await;
+            assert!(
+                reply.status != StatusCode::UNAUTHORIZED,
+                "{} {path} : la session de bob doit tenir : {:?}",
+                endpoint.method,
+                reply.body
+            );
+        }
+    }
+    // Les titulaires n'ont pas changé de mot de passe : celui que bob voulait imposer n'ouvre rien.
+    for name in ["ada", "dan"] {
+        assert_ne!(
+            api.login(name, TAKEOVER_PASSWORD).await.status,
+            StatusCode::CREATED,
+            "{name} ne doit pas s'ouvrir avec le mot de passe de bob"
+        );
+        assert_eq!(env.services_right_of(name).await, "manage");
+    }
+
+    // Phase 2 : suppression de chaque compte puis recréation sous le même nom, mot de passe choisi par bob.
+    for (name, id) in &originals {
+        let reply = api
+            .act(&bob, Method::DELETE, &format!("/accounts/{id}"), json!({}))
+            .await;
+        assert_eq!(reply.status, StatusCode::OK, "{name} : {:?}", reply.body);
+        let reply = api
+            .act(
+                &bob,
+                Method::POST,
+                "/accounts",
+                json!({ "username": name, "password": TAKEOVER_PASSWORD, "role": "admin" }),
+            )
+            .await;
+        assert_eq!(
+            reply.status,
+            StatusCode::CREATED,
+            "{name} : {:?}",
+            reply.body
+        );
+    }
+    // Aucun compte de départ n'existe plus sous son identifiant, et aucun compte n'a le droit.
+    for (name, id) in &originals {
+        assert_ne!(
+            &id_of(&env, name).await,
+            id,
+            "{name} : un autre identifiant"
+        );
+    }
+    let holders: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE services_right <> 'none'")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        holders, 0,
+        "le droit ne renaît jamais, ni par suppression ni par création"
+    );
+
+    // Phase 3 : le mot de passe de bob sur TOUS les comptes ; tout jeton obtenu est refusé partout au niveau
+    // « services ».
+    let names: Vec<String> = sqlx::query_scalar("SELECT username FROM accounts ORDER BY id")
+        .fetch_all(env.db.pool())
+        .await
+        .unwrap();
+    assert!(names.len() >= 5, "{names:?}");
+    let mut opened = 0;
+    for name in &names {
+        let login = api.login(name, TAKEOVER_PASSWORD).await;
+        if login.status != StatusCode::CREATED {
+            continue;
+        }
+        opened += 1;
+        let token = login.body["token"].as_str().unwrap().to_owned();
+        assert_eq!(env.services_right_of(name).await, "none", "{name}");
+        for endpoint in ENDPOINTS.iter().filter(|e| e.access == Access::Services) {
+            let reply = api
+                .call(endpoint.method.clone(), &concrete(endpoint.path))
+                .token(&token)
+                .json(&json!({}))
+                .send()
+                .await;
+            assert_eq!(
+                (reply.status, reply.code()),
+                (StatusCode::FORBIDDEN, "FORBIDDEN_ROLE"),
+                "{name} : {} {} doit rester refusé",
+                endpoint.method,
+                endpoint.path
+            );
+        }
+    }
+    assert!(
+        opened >= 3,
+        "le balayage a bien ouvert des comptes : {opened}"
+    );
+    // Et `bob`, avec sa propre session, est refusé lui aussi.
+    for endpoint in ENDPOINTS.iter().filter(|e| e.access == Access::Services) {
+        let reply = api
+            .call(endpoint.method.clone(), &concrete(endpoint.path))
+            .token(&bob.token)
+            .json(&json!({}))
+            .send()
+            .await;
+        assert_eq!(
+            reply.status,
+            StatusCode::FORBIDDEN,
+            "bob : {}",
+            endpoint.path
+        );
+    }
+    assert!(right_writes(&env).await.is_empty());
 }

@@ -48,6 +48,7 @@ fn viewer_of(session: &CurrentSession) -> Viewer {
     Viewer {
         account: session.account.id.clone(),
         role: session.account.role,
+        services_right: session.account.services_right,
     }
 }
 

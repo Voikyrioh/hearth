@@ -6,9 +6,10 @@
 //! détection, sans effet sur le moteur) : il est dans `READ_ONLY_POSTS`, ni acte d'administration ni
 //! exception nommée. Aucune route n'écrit dans le moteur ni dans les services.
 //!
-//! `GET /services/{key}/env` révèle les VALEURS des variables d'un service : réservée aux
-//! administrateurs (la couche d'accès refuse et consigne le refus d'un compte en lecture seule), la
-//! réussite est consignée au journal par le cas d'usage sans nom ni valeur, la réponse n'est jamais
+//! `GET /services/{key}/env` révèle les VALEURS des variables d'un service : réservée aux comptes qui
+//! ont le droit « gérer les services », quel que soit leur rôle (niveau `Services`, ADR-0041 : un
+//! administrateur sans le droit est refusé, un compte en lecture seule qui l'a est servi ; la couche
+//! d'accès refuse et consigne le refus), la réussite est consignée au journal par le cas d'usage sans nom ni valeur, la réponse n'est jamais
 //! stockable. Aucune valeur n'entre dans une trace ni dans un message d'erreur.
 
 use axum::Json;
@@ -36,8 +37,8 @@ pub async fn recheck(State(state): State<AppState>) -> Json<EngineView> {
     Json(services_wire::engine_view(&status, state.services.host()))
 }
 
-/// `GET /api/v1/services/{key}/env` : les variables du service avec leurs valeurs (administrateur
-/// seulement, BR-SVC-009). La clé du chemin n'est jamais répétée dans une réponse d'erreur.
+/// `GET /api/v1/services/{key}/env` : les variables du service avec leurs valeurs (comptes qui ont le
+/// droit « gérer les services » seulement, quel que soit le rôle ; BR-SVC-009, BR-GRANT-003). La clé du chemin n'est jamais répétée dans une réponse d'erreur.
 pub async fn env(
     State(state): State<AppState>,
     Requester(actor): Requester,

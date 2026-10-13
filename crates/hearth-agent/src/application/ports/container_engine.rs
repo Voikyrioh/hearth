@@ -66,7 +66,7 @@ pub struct EngineEvent {
     pub action: String,
 }
 
-/// Une variable d'environnement d'un conteneur, lue pour la révéler à un administrateur
+/// Une variable d'environnement d'un conteneur, lue pour la révéler à un compte qui a le droit de gérer les services
 /// (`GET /services/{key}/env`, BR-SVC-009). Le nom est [`Hidden`], la valeur un [`Secret`] : ni l'un ni
 /// l'autre ne s'affiche (`Debug` masqué), et la valeur est effacée de la mémoire à la libération.
 #[derive(Debug)]
@@ -127,7 +127,7 @@ pub trait ContainerEngine: Send + Sync {
     fn events(&self) -> EngineEvents;
 
     /// Les variables d'environnement d'un conteneur, avec leurs VALEURS (HRT-63). Appelée à la seule
-    /// demande d'un administrateur, jamais en arrière-plan ; au plus `MAX_ENV_NAMES` variables, comme
+    /// demande d'un compte qui a le droit, jamais en arrière-plan ; au plus `MAX_ENV_NAMES` variables, comme
     /// la liste des noms. `None` si le conteneur n'existe plus.
     async fn env(&self, id: &str) -> Result<Option<Vec<EnvEntry>>, EngineError>;
 

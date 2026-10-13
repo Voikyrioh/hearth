@@ -39,6 +39,9 @@ pub enum ActionKind {
     /// Gestion des services (HRT-63) : pour l'instant la seule révélation des valeurs de variables.
     /// L'entrée du filtre à l'écran vient avec le détail d'un service, côté client.
     Services,
+    /// Droits sur les services (HRT-77, BR-GRANT-009) : le droit « gérer les services » accordé ou retiré,
+    /// depuis le serveur. L'entrée du filtre à l'écran vient avec le lot client de l'épique.
+    ServicesRights,
 }
 
 /// Gestion des comptes : création, suppression, rôle, mots de passe, sessions, et les postes de
@@ -68,6 +71,12 @@ const ACCOUNT_CODES: [&str; 18] = [
     action::REAUTH_ELEVATION,
 ];
 
+/// Droits sur les services : accordé ou retiré depuis le serveur.
+const SERVICES_RIGHTS_CODES: [&str; 2] = [
+    action::ACCOUNT_SERVICES_GRANT,
+    action::ACCOUNT_SERVICES_REVOKE,
+];
+
 /// « Action refusée » : tout ce qui n'est pas une connexion, refusé faute de droits.
 const DENIED_CODES: [&str; 10] = [
     action::LOGOUT,
@@ -94,6 +103,7 @@ impl ActionKind {
             Self::Update => &[action::AGENT_UPDATE],
             Self::Denied => &DENIED_CODES,
             Self::Services => &[action::SERVICE_ENV_REVEAL],
+            Self::ServicesRights => &SERVICES_RIGHTS_CODES,
         }
     }
 
@@ -102,7 +112,7 @@ impl ActionKind {
         match self {
             Self::LoginOk => &[OutcomeName::Ok],
             Self::LoginDenied | Self::Denied => &[OutcomeName::Denied],
-            Self::Accounts | Self::Update | Self::Services => &ALL_OUTCOMES,
+            Self::Accounts | Self::Update | Self::Services | Self::ServicesRights => &ALL_OUTCOMES,
         }
     }
 }
@@ -450,6 +460,7 @@ mod tests {
             ActionKind::Update,
             ActionKind::Denied,
             ActionKind::Services,
+            ActionKind::ServicesRights,
         ];
         for code in action::ALL {
             assert!(

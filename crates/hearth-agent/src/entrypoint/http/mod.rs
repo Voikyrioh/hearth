@@ -94,6 +94,10 @@ pub enum Access {
     FirstMessage,
     /// Une session valable d'un compte qui gère les comptes.
     Admin,
+    /// Une session valable d'un compte qui a le droit de gérer les services (ADR-0041, BR-GRANT-003),
+    /// quel que soit son rôle. Le niveau de TOUT acte de service, existant ou à venir : le droit est
+    /// jugé par la couche d'accès (`auth::allows`), à chaque requête, et nulle part ailleurs.
+    Services,
 }
 
 /// Une route de l'API : méthode, chemin (sous `/api/v1`), accès, handler.
@@ -285,11 +289,11 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || post(services::recheck),
     },
-    // Révéler les valeurs des variables d'un service : administrateur seulement (BR-SVC-009). Le refus
-    // d'un compte en lecture seule est consigné par la couche d'accès, la réussite par le cas
-    // d'usage ; une consultation, pas un acte d'administration du socle (aucun mot de passe).
     // Les journaux d'un service en direct (HRT-66) : un WebSocket par lecture, authentifié par son premier
     // message comme `/stream`. Ouvert aux deux rôles ; lire n'est pas journalisé (BR-SLOG-018, BR-SLOG-022).
+    // Classée `ServiceStream` dans `CLASSES` (tests). TODO HRT-79 : la restriction au droit « gérer les
+    // services » et aux seuls services adoptés arrive avec HRT-79 ; cette route passera alors au niveau
+    // `Services` (ou son premier message jugera le droit), pas avant.
     Endpoint {
         method: Method::GET,
         path: "/services/{key}/logs",
@@ -299,10 +303,14 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || get(ws::logs),
     },
+    // Révéler les valeurs des variables d'un service : réservé aux comptes qui ont le droit de gérer les
+    // services, quel que soit leur rôle (BR-SVC-009, BR-GRANT-003). Le refus faute du droit est
+    // consigné par la couche d'accès, la réussite par le cas d'usage ; une consultation, pas un acte
+    // d'administration du socle (aucun mot de passe).
     Endpoint {
         method: Method::GET,
         path: "/services/{key}/env",
-        access: Access::Admin,
+        access: Access::Services,
         version_checked: true,
         tracked: false,
         audit: Some(AuditAction::ServiceEnvReveal),
@@ -575,26 +583,15 @@ mod tests {
             assert_eq!(endpoint.audit, None, "{path}");
             assert!(endpoint.version_checked, "{path}");
         }
-        // La révélation des variables : réservée aux administrateurs, journalisée, jamais suivie.
+        // La révélation des variables : réservée au droit de gérer les services, journalisée, jamais suivie.
         let reveal = ENDPOINTS
             .iter()
             .find(|endpoint| endpoint.path == "/services/{key}/env")
             .unwrap();
         assert_eq!(reveal.method, Method::GET);
-        assert_eq!(reveal.access, Access::Admin);
+        assert_eq!(reveal.access, Access::Services);
         assert!(!reveal.modifies() && !reveal.tracked && reveal.version_checked);
         assert_eq!(reveal.audit, Some(AuditAction::ServiceEnvReveal));
-        // Aucune route d'écriture de cette tranche : pas de route sous /services qui modifie.
-        for endpoint in ENDPOINTS.iter().filter(|endpoint| {
-            endpoint.path.starts_with("/services") || endpoint.path.starts_with("/engine")
-        }) {
-            assert!(
-                !endpoint.modifies(),
-                "{} {}",
-                endpoint.method,
-                endpoint.path
-            );
-        }
     }
 
     #[test]
@@ -616,7 +613,7 @@ mod tests {
     #[test]
     fn every_route_that_modifies_or_is_reserved_has_a_journal_action() {
         for endpoint in ENDPOINTS {
-            if endpoint.modifies() || endpoint.access == Access::Admin {
+            if endpoint.modifies() || matches!(endpoint.access, Access::Admin | Access::Services) {
                 assert!(
                     endpoint.audit.is_some(),
                     "{} {} sans action de journal",
@@ -643,6 +640,226 @@ mod tests {
             assert_eq!(endpoint.audit, Some(AuditAction::AuditRead));
             assert!(!endpoint.modifies() && !endpoint.tracked);
         }
+    }
+
+    /// Ce qu'une route est, au regard de BR-GRANT-001 à BR-GRANT-005. CHAQUE route de `ENDPOINTS` est
+    /// classée ici, une fois : une route nouvelle non classée fait échouer
+    /// `every_route_is_classified_and_every_service_route_is_at_the_services_level`, et c'est le point
+    /// de revue de qui l'ajoute.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Class {
+        /// Aucune session (`/hello`, connexion, défi).
+        Public,
+        /// Authentifiée par le premier message (le flux).
+        Stream,
+        /// Une session, tout rôle ; lit ou agit sur le compte de l'APPELANT seulement.
+        Own,
+        /// Une lecture ouverte à tout rôle, y compris sur les services (liste, détection du moteur) :
+        /// la liste fermée des routes de service ouvertes à tous.
+        OpenRead,
+        /// Réservée aux administrateurs. Le texte dit pourquoi elle ne livre à un administrateur SANS le
+        /// droit ni le droit ni le compte d'un titulaire (inventaire de BR-GRANT-005) : « PROTÉGÉE : … »
+        /// si le code refuse, « sans danger : … » si la preuve est que la route n'y mène pas.
+        Admin(&'static str),
+        /// Tout acte (ou lecture réservée) de service : niveau `Services`.
+        Service,
+        /// Une lecture de service en direct, authentifiée par son premier message comme le flux : ouverte
+        /// aux deux rôles, jamais consignée (BR-SLOG-018, BR-SLOG-022). Équivalent de `OpenRead` pour un
+        /// socket. Restriction au droit et à l'adoption : arrive avec HRT-79, la ligne passera alors à
+        /// `Service`.
+        ServiceStream,
+    }
+
+    use Class::{Admin, OpenRead, Own, Public, Service, ServiceStream, Stream};
+
+    const CLASSES: &[(&str, &str, Class)] = &[
+        ("GET", "/hello", Public),
+        ("POST", "/sessions", Public),
+        ("POST", "/sessions/challenge", Public),
+        ("DELETE", "/sessions/current", Own),
+        ("GET", "/me", Own),
+        ("GET", "/me/devices", Own),
+        ("DELETE", "/me/devices/{id}", Own),
+        ("GET", "/security", Own),
+        (
+            "PUT",
+            "/security/attack-mode",
+            Admin(
+                "sans danger : réglage du serveur entier, ne vise aucun compte et n'ajoute de moyen de connexion à personne ; exige la preuve de clé de l'appelant",
+            ),
+        ),
+        ("PUT", "/me/password", Own),
+        ("PUT", "/me/reauth", Own),
+        ("GET", "/operations/{id}", Own),
+        ("GET", "/machine", Own),
+        ("GET", "/metrics/history", Own),
+        ("GET", "/stream", Stream),
+        ("GET", "/services", OpenRead),
+        ("POST", "/engine/recheck", OpenRead),
+        // Journaux en direct (HRT-66) : ouverts aux deux rôles aujourd'hui ; la restriction par le droit
+        // et par l'adoption arrive avec HRT-79 (la ligne deviendra `Service`).
+        ("GET", "/services/{key}/logs", ServiceStream),
+        ("GET", "/services/{key}/env", Service),
+        (
+            "GET",
+            "/accounts",
+            Admin("sans danger : lecture, aucun haché ni moyen de connexion"),
+        ),
+        (
+            "POST",
+            "/accounts",
+            Admin(
+                "sans danger : un compte naît sans le droit quel que soit son rôle (BR-GRANT-002) ; son créateur choisit le mot de passe d'un compte NEUF, pas celui d'un titulaire",
+            ),
+        ),
+        (
+            "PATCH",
+            "/accounts/{id}",
+            Admin(
+                "sans danger : le rôle est un axe indépendant du droit, il ne donne ni mot de passe ni session ni droit",
+            ),
+        ),
+        (
+            "DELETE",
+            "/accounts/{id}",
+            Admin(
+                "sans danger : le droit est une colonne de la ligne du compte, supprimée avec lui ; un compte recréé sous le même nom a un autre identifiant et naît sans le droit",
+            ),
+        ),
+        (
+            "PUT",
+            "/accounts/{id}/password",
+            Admin(
+                "PROTÉGÉE : refusée sur un compte qui a le droit sauf par lui-même, par un compte qui l'a aussi ou par la ligne de commande",
+            ),
+        ),
+        (
+            "DELETE",
+            "/accounts/{id}/sessions",
+            Admin(
+                "sans danger : ferme des sessions et oublie des postes de confiance, n'ajoute aucun moyen de connexion ; un poste ne s'inscrit qu'à la connexion, avec le mot de passe du titulaire",
+            ),
+        ),
+        ("GET", "/agent/update", Own),
+        ("GET", "/agent/update/last", Own),
+        (
+            "POST",
+            "/agent/update",
+            Admin(
+                "sans danger : n'installe qu'un binaire signé par la clé de publication ; aucune entrée du demandeur n'est du code, la migration 0010 laisse le défaut « aucun »",
+            ),
+        ),
+        ("GET", "/audit", Admin("sans danger : lecture du journal")),
+        (
+            "GET",
+            "/audit/export",
+            Admin("sans danger : lecture du journal"),
+        ),
+    ];
+
+    /// Les préfixes des routes de service : sous l'un d'eux, une route est ouverte à tous (la liste
+    /// fermée `OpenRead`) ou de niveau `Services`, jamais autre chose.
+    const SERVICE_PREFIXES: &[&str] = &[
+        "/services",
+        "/deployments",
+        "/engine",
+        "/adoptions",
+        "/containers",
+    ];
+
+    /// BR-GRANT-003 et BR-GRANT-005 : le classement est EXHAUSTIF par construction. Toute route déclarée
+    /// y figure (une route nouvelle non classée fait échouer ce test), toute ligne a sa route, et le
+    /// niveau déclaré est celui de la classe. Sous un préfixe de service, seules les routes de la liste
+    /// fermée `OpenRead` échappent au niveau `Services`.
+    #[test]
+    fn every_route_is_classified_and_every_service_route_is_at_the_services_level() {
+        for endpoint in ENDPOINTS {
+            let (method, path) = (&endpoint.method, endpoint.path);
+            let rows: Vec<_> = CLASSES
+                .iter()
+                .filter(|(m, p, _)| *m == method.as_str() && *p == path)
+                .collect();
+            assert_eq!(
+                rows.len(),
+                1,
+                "{method} {path} n'est pas classée (ou l'est deux fois) : la classer dans CLASSES est le point de revue de toute route nouvelle"
+            );
+            let class = rows[0].2;
+            let expected = match class {
+                Public => Access::Public,
+                Stream | ServiceStream => Access::FirstMessage,
+                Own | OpenRead => Access::Authenticated,
+                Admin(_) => Access::Admin,
+                Service => Access::Services,
+            };
+            assert_eq!(endpoint.access, expected, "{method} {path} : {class:?}");
+            let under_service_prefix = SERVICE_PREFIXES
+                .iter()
+                .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")));
+            if under_service_prefix {
+                assert!(
+                    matches!(class, OpenRead | Service | ServiceStream),
+                    "{method} {path} : une route de service est ouverte à tous (liste fermée) ou de niveau `services`"
+                );
+            }
+            match class {
+                ServiceStream => {
+                    // Un socket de lecture : premier message, jamais consigné, ne modifie rien.
+                    assert!(
+                        under_service_prefix && !endpoint.modifies() && !endpoint.tracked,
+                        "{method} {path} : une lecture en direct ne modifie rien"
+                    );
+                    assert_eq!(endpoint.audit, None, "{method} {path}");
+                }
+                OpenRead => {
+                    assert!(
+                        under_service_prefix && !endpoint.modifies() && !endpoint.tracked,
+                        "{method} {path} : une route ouverte à tous ne modifie rien"
+                    );
+                    assert_eq!(endpoint.audit, None, "{method} {path}");
+                }
+                Service => {
+                    // Chaque acte de service est consigné : un refus sans droit s'écrit sous son action.
+                    assert!(endpoint.audit.is_some(), "{method} {path}");
+                    assert!(endpoint.version_checked, "{method} {path}");
+                    if endpoint.modifies() {
+                        assert!(endpoint.tracked, "{method} {path}");
+                    }
+                }
+                Own if endpoint.modifies() => {
+                    // Une route de tout rôle qui modifie n'agit que sur l'appelant : aucune autre cible
+                    // que `/me` ou la session courante.
+                    assert!(
+                        path.starts_with("/me") || path == "/sessions/current",
+                        "{method} {path} : une route de tout rôle qui modifie ne vise que l'appelant"
+                    );
+                }
+                Admin(verdict) => {
+                    assert!(
+                        verdict.starts_with("PROTÉGÉE") || verdict.starts_with("sans danger"),
+                        "{method} {path} : {verdict}"
+                    );
+                }
+                _ => {}
+            }
+        }
+        for (method, path, _) in CLASSES {
+            assert!(
+                ENDPOINTS
+                    .iter()
+                    .any(|e| e.method.as_str() == *method && e.path == *path),
+                "{method} {path} : ligne de CLASSES sans route"
+            );
+        }
+        // Le seul acte de service d'aujourd'hui, et la seule route protégée de l'inventaire.
+        assert_eq!(CLASSES.iter().filter(|row| row.2 == Service).count(), 1);
+        assert_eq!(
+            CLASSES
+                .iter()
+                .filter(|row| matches!(row.2, Admin(verdict) if verdict.starts_with("PROTÉGÉE")))
+                .count(),
+            1
+        );
     }
 
     #[test]

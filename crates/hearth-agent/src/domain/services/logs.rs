@@ -22,7 +22,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use super::state::{Observation, RunState};
-use crate::domain::accounts::{AccountId, Role};
+use crate::domain::accounts::{AccountId, Role, ServicesRight};
 
 /// Octets bruts gardés pour UNE ligne en cours d'assemblage, par sortie. Au-delà, les octets sont
 /// comptés et jetés : une ligne sans fin ne fait jamais grossir la mémoire (BR-SLOG-013). Large devant
@@ -654,12 +654,13 @@ impl LogTarget {
 
 /// Qui lit : le compte (pas seulement son rôle) tel que la session le montre À CE MOMENT. Les décisions du
 /// 2026-10-13 (droit de gérer les services, HRT-76 ; services adoptés, HRT-79) portent sur un droit du
-/// compte : le champ `rights` et le niveau `Access::Services` de la branche voisine entreront ICI (un
-/// champ de plus), sans changer la signature de [`may_read`] ni ses appelants.
+/// compte : `services_right` (BR-GRANT-001) y est porté, relu avec la session ; un retrait du droit
+/// change donc le `Viewer` et rejoue la décision. [`may_read`] ne s'en sert pas encore.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Viewer {
     pub account: AccountId,
     pub role: Role,
+    pub services_right: ServicesRight,
 }
 
 /// Pourquoi ce compte ne lit pas ces journaux.
@@ -677,6 +678,10 @@ pub enum ReadRefusal {
 /// ferme la lecture en cours. Les règles « droit de gérer les services » (HRT-76) et « un service hors
 /// Hearth se lit s'il est adopté » (HRT-79) s'ajouteront ICI, avec `viewer` et `target.origin()`, sans
 /// toucher au reste.
+///
+/// Restriction par le droit (`viewer.services_right`) et par l'adoption : PAS ICI, elle arrive avec
+/// HRT-79 (la route passera alors à `Access::Services` dans `CLASSES`). Aujourd'hui les deux rôles lisent
+/// tout service publié, avec ou sans le droit.
 pub fn may_read(viewer: &Viewer, target: &LogTarget) -> Result<(), ReadRefusal> {
     let _ = (viewer, target.origin());
     Ok(())
@@ -1035,10 +1040,14 @@ mod tests {
 
     #[test]
     fn both_roles_read_every_listed_service() {
-        for role in [Role::Admin, Role::ReadOnly] {
+        // Aujourd'hui le droit ne change rien : sa prise en compte arrive avec HRT-79.
+        for (role, services_right) in [Role::Admin, Role::ReadOnly].into_iter().flat_map(|role| {
+            [ServicesRight::None, ServicesRight::Manage].map(|right| (role, right))
+        }) {
             let viewer = Viewer {
                 account: AccountId::new("compte"),
                 role,
+                services_right,
             };
             for origin in [LogOrigin::Hearth, LogOrigin::Adopted, LogOrigin::External] {
                 assert_eq!(

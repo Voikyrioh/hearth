@@ -138,7 +138,7 @@ async fn hello_announces_the_services_capability() {
     assert_eq!(reply.status, 200);
     assert_eq!(
         reply.body["capabilities"],
-        json!(["services", "service-logs"])
+        json!(["services", "service-rights", "service-logs"])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).
     assert_eq!(reply.body["api"], json!({ "min": 1, "max": 1 }));
@@ -981,7 +981,8 @@ async fn a_service_run_by_a_unit_is_served_under_its_unit_and_stays_listed_when_
 }
 
 #[tokio::test]
-async fn only_an_administrator_reveals_the_values_and_every_attempt_is_journaled_without_them() {
+async fn only_an_account_with_the_right_reveals_the_values_whatever_its_role_and_every_attempt_is_journaled_without_them()
+ {
     let env = env().await;
     let engine = Arc::new(FakeEngine::new());
     let web = detailed("web", RunState::Running);
@@ -992,43 +993,71 @@ async fn only_an_administrator_reveals_the_values_and_every_attempt_is_journaled
     );
     let agent = ready_agent(&env, &engine).await;
     listed(&agent, 1).await;
-    let admin = token(&env, &agent, "marie", Role::Admin).await;
-    let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    // Les quatre profils de la spec (BR-GRANT-001) : A admin avec le droit, B admin sans, C lecture
+    // seule sans, D lecture seule avec.
+    let a = token(&env, &agent, "ada", Role::Admin).await;
+    let b = token(&env, &agent, "bob", Role::Admin).await;
+    let c = token(&env, &agent, "cleo", Role::ReadOnly).await;
+    let d = token(&env, &agent, "dan", Role::ReadOnly).await;
+    env.grant_services("ada").await;
+    env.grant_services("dan").await;
     let path = format!("/services/c_{}/env", web.id);
 
-    // Un compte en lecture seule est refusé, même client modifié : rien n'est lu dans le moteur.
-    let denied = agent.request("GET", &path).token(&readonly).send().await;
-    assert_eq!(denied.status, 403, "{:?}", denied.body);
-    assert_eq!(denied.code(), "FORBIDDEN_ROLE");
-    assert_eq!(
-        denied.body["error"]["message"],
-        "Réservé aux administrateurs."
-    );
-    assert!(!denied.text.contains("SENTINEL") && !denied.text.contains("DB_PASSWORD"));
+    // Sans le droit, quel que soit le rôle (même un administrateur) : refusé, même client modifié, et
+    // rien n'est lu dans le moteur. Le texte ne dit jamais « administrateur ».
+    for (who, token) in [("bob", &b), ("cleo", &c)] {
+        let denied = agent.request("GET", &path).token(token).send().await;
+        assert_eq!(denied.status, 403, "{who} : {:?}", denied.body);
+        assert_eq!(denied.code(), "FORBIDDEN_ROLE");
+        assert_eq!(
+            denied.body["error"]["message"],
+            "Tu n'as pas le droit de gérer les services de ce serveur."
+        );
+        assert_eq!(
+            denied.body["error"]["details"],
+            json!({ "missing": "services" })
+        );
+        assert!(!denied.text.contains("SENTINEL") && !denied.text.contains("DB_PASSWORD"));
+        assert!(!denied.text.to_lowercase().contains("administrateur"));
+    }
     assert_eq!(engine.env_read_count(), 0);
+    // Un service inconnu ou une clé mal formée ne se distingue pas d'un service connu pour un compte
+    // sans le droit : le droit est jugé avant la clé (BR-GRANT-004), aucun oracle d'existence.
+    let known = agent.request("GET", &path).token(&b).send().await;
+    for other in ["c_00ff", "x_not-a-key", "u_docker-ghost.service"] {
+        let unknown = agent
+            .request("GET", &format!("/services/{other}/env"))
+            .token(&b)
+            .send()
+            .await;
+        assert_eq!(unknown.status, known.status, "{other}");
+        assert_eq!(unknown.body, known.body, "{other}");
+    }
     // Sans session : refusé avant tout.
     let anonymous = agent.request("GET", &path).send().await;
     assert_eq!(anonymous.status, 401);
 
-    // L'administrateur reçoit les valeurs, dans une réponse que rien ne stocke.
-    let revealed = agent.request("GET", &path).token(&admin).send().await;
-    assert_eq!(revealed.status, 200, "{:?}", revealed.body);
-    assert_eq!(revealed.header("cache-control"), Some("no-store"));
-    assert_eq!(revealed.header("pragma"), Some("no-cache"));
-    assert_eq!(
-        revealed.body,
-        json!({ "variables": [
-            { "name": "APP_MODE", "value": "prod" },
-            { "name": "DB_PASSWORD", "value": "SENTINEL-VALUE-A" }
-        ]})
-    );
-    assert_eq!(engine.env_read_count(), 1);
+    // Avec le droit, administrateur ou lecture seule : les valeurs, dans une réponse que rien ne stocke.
+    for (who, token) in [("ada", &a), ("dan", &d)] {
+        let revealed = agent.request("GET", &path).token(token).send().await;
+        assert_eq!(revealed.status, 200, "{who} : {:?}", revealed.body);
+        assert_eq!(revealed.header("cache-control"), Some("no-store"));
+        assert_eq!(revealed.header("pragma"), Some("no-cache"));
+        assert_eq!(
+            revealed.body,
+            json!({ "variables": [
+                { "name": "APP_MODE", "value": "prod" },
+                { "name": "DB_PASSWORD", "value": "SENTINEL-VALUE-A" }
+            ]})
+        );
+    }
+    assert_eq!(engine.env_read_count(), 2);
 
-    // Un service inconnu, une clé mal formée : 404, sans répéter la clé.
+    // Un service inconnu, une clé mal formée : 404 pour qui a le droit, sans répéter la clé.
     for bad in ["c_00ff", "x_not-a-key", "u_docker-ghost.service"] {
         let reply = agent
             .request("GET", &format!("/services/{bad}/env"))
-            .token(&admin)
+            .token(&a)
             .send()
             .await;
         assert_eq!(reply.status, 404, "{bad} : {:?}", reply.body);
@@ -1038,28 +1067,51 @@ async fn only_an_administrator_reveals_the_values_and_every_attempt_is_journaled
             reply.text
         );
     }
-    assert_eq!(engine.env_read_count(), 1, "rien de plus n'est lu");
+    assert_eq!(engine.env_read_count(), 2, "rien de plus n'est lu");
 
-    // Le journal : le refus (cible : la route) et la réussite (cible : le service), sans nom ni valeur.
-    let rows: Vec<JournalRow> = sqlx::query_as(
+    // Le journal : les refus (cible : la route, jamais la clé demandée, cause « droits insuffisants »)
+    // et les réussites (cible : le service), sans nom ni valeur. Les refus identiques d'un même compte
+    // se regroupent dans la minute : on lit la première entrée de chacun.
+    for who in ["bob", "cleo"] {
+        let first: JournalRow = sqlx::query_as(
+            "SELECT account, outcome, target, reason, action_label FROM audit_events
+             WHERE action = 'service.env.reveal' AND outcome = 'denied' AND account = ?
+             ORDER BY id LIMIT 1",
+        )
+        .bind(who)
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            first,
+            (
+                who.to_owned(),
+                "denied".to_owned(),
+                Some("/services/{key}/env".to_owned()),
+                Some("droits insuffisants".to_owned()),
+                "Valeurs des variables révélées".to_owned()
+            )
+        );
+    }
+    let ok: Vec<JournalRow> = sqlx::query_as(
         "SELECT account, outcome, target, reason, action_label FROM audit_events
-         WHERE action = 'service.env.reveal' ORDER BY id",
+         WHERE action = 'service.env.reveal' AND outcome = 'ok' ORDER BY id",
     )
     .fetch_all(env.db.pool())
     .await
     .unwrap();
     assert_eq!(
-        rows,
+        ok,
         vec![
             (
-                "lucas".to_owned(),
-                "denied".to_owned(),
-                Some("/services/{key}/env".to_owned()),
-                Some("lecture seule".to_owned()),
+                "ada".to_owned(),
+                "ok".to_owned(),
+                Some("service web".to_owned()),
+                None,
                 "Valeurs des variables révélées".to_owned()
             ),
             (
-                "marie".to_owned(),
+                "dan".to_owned(),
                 "ok".to_owned(),
                 Some("service web".to_owned()),
                 None,
@@ -1075,6 +1127,89 @@ async fn only_an_administrator_reveals_the_values_and_every_attempt_is_journaled
     }
 }
 
+/// BR-GRANT-010 : un retrait prend effet à la requête suivante, sans fermer la session ; un octroi
+/// aussi. Le droit est relu en base à chaque requête (aucun cache de session).
+#[tokio::test]
+async fn a_withdrawal_takes_effect_on_the_next_request_without_closing_the_session() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let web = detailed("web", RunState::Running);
+    engine.put_silently(web.clone());
+    engine.set_env(&web.id, &[("DB_PASSWORD", "SENTINEL-VALUE-W")]);
+    let agent = ready_agent(&env, &engine).await;
+    listed(&agent, 1).await;
+    let lucas = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    let path = format!("/services/c_{}/env", web.id);
+
+    let refused = agent.request("GET", &path).token(&lucas).send().await;
+    assert_eq!(refused.status, 403);
+    env.grant_services("lucas").await;
+    let granted = agent.request("GET", &path).token(&lucas).send().await;
+    assert_eq!(granted.status, 200, "{:?}", granted.body);
+    // Le retrait : la requête suivante, avec le MÊME jeton, est refusée ; la session reste ouverte.
+    env.revoke_services("lucas").await;
+    let after = agent.request("GET", &path).token(&lucas).send().await;
+    assert_eq!(after.status, 403, "{:?}", after.body);
+    assert_eq!(
+        after.body["error"]["details"],
+        json!({ "missing": "services" })
+    );
+    let still_open = agent.request("GET", "/me").token(&lucas).send().await;
+    assert_eq!(still_open.status, 200, "la session n'est pas fermée");
+    assert_eq!(still_open.body["account"]["role"], "readonly");
+    assert_eq!(still_open.body["account"]["rights"], json!([]));
+    assert_eq!(
+        engine.env_read_count(),
+        1,
+        "rien n'a été lu après le retrait"
+    );
+    // Le droit redonné, le même jeton passe de nouveau : rien n'a été fermé ni mémorisé.
+    env.grant_services("lucas").await;
+    let again = agent.request("GET", &path).token(&lucas).send().await;
+    assert_eq!(again.status, 200);
+    let me = agent.request("GET", "/me").token(&lucas).send().await;
+    assert_eq!(me.body["account"]["rights"], json!(["services"]));
+    agent.shutdown().await;
+}
+
+/// BR-GRANT-015 : le coupe-circuit l'emporte sur le droit. Test à deux valeurs de `engine.enabled`.
+#[tokio::test]
+async fn the_kill_switch_wins_over_the_right_with_two_values_of_the_setting() {
+    // Pilotage permis : le compte qui a le droit révèle.
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let web = detailed("web", RunState::Running);
+    engine.put_silently(web.clone());
+    engine.set_env(&web.id, &[("DB_PASSWORD", "SENTINEL-VALUE-K")]);
+    let agent = ready_agent(&env, &engine).await;
+    listed(&agent, 1).await;
+    let marie = token(&env, &agent, "marie", Role::Admin).await;
+    env.grant_services("marie").await;
+    let path = format!("/services/c_{}/env", web.id);
+    let on = agent.request("GET", &path).token(&marie).send().await;
+    assert_eq!(on.status, 200, "{:?}", on.body);
+    agent.shutdown().await;
+
+    // Pilotage désactivé : le même compte, avec le droit, n'obtient rien et le moteur n'est jamais ouvert.
+    let env = self::env().await;
+    let engine = Arc::new(FakeEngine::new());
+    engine.put_silently(web.clone());
+    engine.set_env(&web.id, &[("DB_PASSWORD", "SENTINEL-VALUE-K")]);
+    let mut config_parts = parts(engine.clone());
+    config_parts.timings = fast_timings();
+    let agent = https::start_engine_disabled(&env, config_parts).await;
+    let marie = token(&env, &agent, "marie", Role::Admin).await;
+    env.grant_services("marie").await;
+    let off = agent.request("GET", &path).token(&marie).send().await;
+    assert_eq!(off.status, 404, "{:?}", off.body);
+    assert!(!off.text.contains("SENTINEL"));
+    assert_eq!(engine.env_read_count(), 0);
+    assert_eq!(engine.probe_count(), 0, "le socket n'est jamais ouvert");
+    // Le droit existe toujours : le coupe-circuit ne le retire pas.
+    assert_eq!(env.services_right_of("marie").await, "manage");
+    agent.shutdown().await;
+}
+
 #[tokio::test]
 async fn no_value_leaves_when_the_journal_cannot_be_written_and_each_reveal_is_its_own_entry() {
     let env = env().await;
@@ -1085,6 +1220,7 @@ async fn no_value_leaves_when_the_journal_cannot_be_written_and_each_reveal_is_i
     let agent = ready_agent(&env, &engine).await;
     listed(&agent, 1).await;
     let admin = token(&env, &agent, "marie", Role::Admin).await;
+    env.grant_services("marie").await;
     let path = format!("/services/c_{}/env", web.id);
 
     // Le journal refuse toute écriture de révélation (base pleine ou verrouillée, simulée).
@@ -1165,6 +1301,8 @@ async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_jour
     listed(&agent, 1).await;
     let admin = token(&env, &agent, "marie", Role::Admin).await;
     let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
+    // Seul un compte qui a le droit de gérer les services révèle une valeur (BR-GRANT-003).
+    env.grant_services("marie").await;
     let path = format!("/services/{key}/env");
 
     // Réussite, refus, service inconnu, requête sans session.
@@ -1172,7 +1310,7 @@ async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_jour
     assert_eq!(revealed.status, 200, "{:?}", revealed.body);
     assert!(
         revealed.text.contains("SENTINEL-REVEAL-VALUE-44ab"),
-        "le témoin : l'administrateur reçoit bien la valeur"
+        "le témoin : le compte qui a le droit reçoit bien la valeur"
     );
     let mut elsewhere = Vec::new();
     for reply in [

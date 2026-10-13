@@ -32,7 +32,7 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 {
   "token": "9f2c…64 caractères hexadécimaux…",
   "expires_at": "2026-11-03T10:30:15.25Z",
-  "account": { "id": "01J9ZY0G3Q8M2K6W4T7V5N1B9D", "username": "marie", "role": "admin" },
+  "account": { "id": "01J9ZY0G3Q8M2K6W4T7V5N1B9D", "username": "marie", "role": "admin", "rights": [] },
   "device": "enrolled"
 }
 ```
@@ -87,7 +87,7 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 
 ```json
 {
-  "account": { "id": "01J9…", "username": "marie", "role": "admin" },
+  "account": { "id": "01J9…", "username": "marie", "role": "admin", "rights": ["services"] },
   "session_expires_at": "2026-11-03T10:30:15.25Z"
 }
 ```

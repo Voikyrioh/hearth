@@ -12,6 +12,7 @@ use thiserror::Error;
 mod install;
 mod update;
 
+pub use install::local_admins;
 pub use update::{Updating, run_supervisor, update_service};
 
 use crate::application::accounts::AccountService;
@@ -25,18 +26,19 @@ use crate::application::operations::OperationService;
 use crate::application::ports::{
     AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, ContainerEngine, CryptoError,
     FingerprintSecretError, FingerprintSecretStore, GpuProbe, HashError, HostEnvironment, IdGen,
-    IdentityError, IdentityStore, MonotonicClock, PasswordHasher, PublicIdentity,
+    IdentityError, IdentityStore, InstallHost, MonotonicClock, PasswordHasher, PublicIdentity,
     RequestFingerprinter, SecurityFeed, ServiceSupervisor, Store, StoreError, SystemProbe,
     TokenGen,
 };
 use crate::application::security::SecurityService;
 use crate::application::service_logs::{LogSettings, ServiceLogs};
 use crate::application::services::{EngineTimings, ServicesRegistry};
+use crate::application::services_right::ServicesRightService;
 use crate::application::sessions::SessionService;
 use crate::application::trust::TrustService;
 use crate::entrypoint::account::{self, AccountCliError};
 use crate::entrypoint::attack_mode as attack_mode_cli;
-use crate::entrypoint::cli::{Cli, Command};
+use crate::entrypoint::cli::{AccountAction, Cli, Command};
 use crate::entrypoint::http::{self, AppState, ServerError, ServerHandle};
 use crate::entrypoint::install::InstallCliError;
 use crate::entrypoint::signal::shutdown_signal;
@@ -53,6 +55,7 @@ use crate::infrastructure::engine::BollardEngine;
 use crate::infrastructure::fingerprint::{HmacFingerprinter, NoFingerprint};
 use crate::infrastructure::fingerprint_secret::FileFingerprintSecretStore;
 use crate::infrastructure::ids::UlidGen;
+use crate::infrastructure::install::SystemHost;
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::security_feed::BroadcastSecurityFeed;
 use crate::infrastructure::sqlite::{
@@ -456,6 +459,29 @@ pub fn account_service(database: &Database) -> Result<Arc<AccountService>, AppEr
     Ok(services(database, &Adapters::production()?).accounts)
 }
 
+/// Assemble le cas d'usage qui donne et retire le droit de gérer les services (BR-GRANT-005,
+/// BR-GRANT-008) : pour la sous-commande `account services` et la question de l'installation, UNIQUEMENT.
+/// Il n'est dans aucun `Services` que reçoit le serveur HTTP : aucune route ne peut l'appeler.
+pub fn services_right_service(
+    database: &Database,
+    adapters: &Adapters,
+) -> Arc<ServicesRightService> {
+    let pool = database.pool();
+    let store: Arc<dyn Store> = Arc::new(SqliteStore::new(pool.clone()));
+    let maintenance = Arc::new(MaintenanceService::new(
+        store.clone(),
+        adapters.clock.clone(),
+    ));
+    let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
+    let trail = Arc::new(AuditTrail::new(feed, maintenance));
+    Arc::new(ServicesRightService::new(
+        Arc::new(SqliteAccountRepo::new(pool.clone())),
+        store,
+        adapters.clock.clone(),
+        trail,
+    ))
+}
+
 /// Ouvre le port et démarre le serveur HTTPS, avec les adaptateurs de production.
 pub async fn start(config: &AgentConfig) -> Result<RunningAgent, AppError> {
     let database = Database::open_for_service(&config.data_dir).await?;
@@ -667,6 +693,11 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
         Command::Install(args) => return install::run_install(&cli, &args).await,
         Command::Uninstall(args) => return install::run_uninstall(&cli, &args).await,
         Command::HashPassword { user } => return install::run_hash_password(&user).await,
+        // BR-GRANT-008 : le droit de gérer les services ne se change qu'en root, vérifié AVANT de
+        // créer le dossier de données ou d'ouvrir la base.
+        Command::Account {
+            action: AccountAction::Services { .. },
+        } => account::require_root(SystemHost.is_privileged())?,
         Command::UpdateSupervise { job } => return run_supervisor(&job),
         Command::BuildInfo => {
             let key = crate::infrastructure::update::EMBEDDED_PUBLIC_KEY;
@@ -694,9 +725,19 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
         }
         Command::Account { action } => {
             let database = Database::open(&config.data_dir).await?;
+            let adapters = Adapters::production()?;
             let service = account_service(&database)?;
+            let rights = services_right_service(&database, &adapters);
             let passwords = TerminalPasswords::from_env(&|name| std::env::var(name).ok());
-            account::execute(&action, &service, &passwords, &mut std::io::stdout()).await?;
+            account::execute(
+                &action,
+                &service,
+                &rights,
+                &passwords,
+                SystemHost.is_privileged(),
+                &mut std::io::stdout(),
+            )
+            .await?;
             Ok(())
         }
         Command::AttackMode { action } => {
