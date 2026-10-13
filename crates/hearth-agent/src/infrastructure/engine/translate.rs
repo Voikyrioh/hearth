@@ -95,7 +95,7 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
             })
         })
         .collect();
-    // FIX:01M4SFCRJWX8KMBC1ZK9ZWETTW : les montages au-delà de la borne sont comptés, pas oubliés en silence.
+    // FIX:01M4SFCSXW2P3QXP6FY8CS6ZMQ : les montages au-delà de la borne sont comptés, pas oubliés en silence.
     let mounts_omitted = u32::try_from(mounts.len().saturating_sub(MAX_MOUNTS)).unwrap_or(u32::MAX);
     mounts.truncate(MAX_MOUNTS);
 
@@ -217,7 +217,7 @@ fn ports_of(map: &PortMap) -> (Vec<PortBinding>, u32) {
         }
     }
     // Les ports sont triés (port du serveur, du conteneur, protocole) : le plafond garde les premiers.
-    // FIX:01M4SFCRJWX8KMBC1ZK9ZWETTW : les ports au-delà de la borne sont comptés, pas oubliés en silence.
+    // FIX:01M4SFCSXW2P3QXP6FY8CS6ZMQ : les ports au-delà de la borne sont comptés, pas oubliés en silence.
     let omitted = u32::try_from(merged.len().saturating_sub(MAX_PORTS)).unwrap_or(u32::MAX);
     (merged.into_values().take(MAX_PORTS).collect(), omitted)
 }

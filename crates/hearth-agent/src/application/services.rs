@@ -155,9 +155,16 @@ struct Inner {
     probing: u32,
     /// Date de la dernière relecture complète réussie (sans conteneur illisible).
     list_read_at: Option<OffsetDateTime>,
-    /// La liste a été relue depuis que le moteur a (re)démarré ou est revenu : tant que ce n'est
-    /// pas fait, ce que l'agent publie sous « prêt » (ou grisé) n'est pas présenté comme frais.
+    /// La liste a été relue depuis la dernière fois que le moteur a été OBSERVÉ sans liste (pas
+    /// prêt), quoi que l'anti-clignotement ait publié entre-temps : tant que ce n'est pas fait, ce
+    /// que l'agent publie sous « prêt » n'est pas présenté comme frais. Seule source de vérité de
+    /// « cette liste date-t-elle d'avant la coupure ».
     list_loaded: bool,
+    /// Un état autre que « prêt » a été publié depuis la dernière relecture faite sous « prêt » publié :
+    /// le client a vu la liste grisée ou absente, la marque « pas relue » est due à son retour. Ne
+    /// décide que de ce qui est MONTRÉ (une coupure retenue par l'anti-clignotement ne fait pas
+    /// clignoter la marque) ; la fraîcheur, elle, suit `list_loaded`.
+    gap_shown: bool,
     /// Le registre contient une liste lue (faux au départ, et quand il est vidé : moteur absent,
     /// non pris en charge). Sans liste, aucune date de fraîcheur n'existe : « jamais lue ».
     has_list: bool,
@@ -240,6 +247,7 @@ impl ServicesRegistry {
                 probing: 0,
                 list_read_at: None,
                 list_loaded: false,
+                gap_shown: true,
                 has_list: false,
                 stale_since: None,
                 read_failing: false,
@@ -312,22 +320,31 @@ impl ServicesRegistry {
     /// depuis le retour du moteur (`list_loaded`), pas seulement après un échec de lecture.
     fn list_degraded(inner: &Inner) -> bool {
         let state = inner.debounce.published();
-        // Seulement sous « prêt » : dans un état inaccessible la liste est déjà grisée par l'état, et
-        // une marque qui bascule pendant ce temps ferait un second changement dans la fenêtre.
-        let awaiting = state == EngineState::Ready && !inner.list_loaded;
-        inner.read_failing || inner.tracking_lost || inner.degraded > 0 || awaiting
+        // Seulement sous « prêt » publié, et seulement si le client a vu la coupure : dans un état
+        // inaccessible la liste est déjà grisée par l'état, et une coupure retenue par
+        // l'anti-clignotement ne doit pas faire basculer la marque (un second changement dans la
+        // fenêtre). Ce que l'on DIT de la fraîcheur (`list_fresh`) ne dépend pas de ce choix.
+        let awaiting = state == EngineState::Ready && inner.gap_shown && !inner.list_loaded;
+        Self::list_unreliable(inner) || awaiting
     }
 
-    /// La liste est à jour maintenant : le moteur répond (dernière sonde) et la liste est relue et
-    /// suivie sans réserve.
+    /// La liste n'est pas suivie sans réserve : lecture en échec, suivi perdu, conteneur illisible.
+    fn list_unreliable(inner: &Inner) -> bool {
+        inner.read_failing || inner.tracking_lost || inner.degraded > 0
+    }
+
+    /// La liste est à jour maintenant : le moteur est vu prêt (dernière sonde), la liste a été relue
+    /// depuis qu'il a été vu sans liste, et elle est suivie sans réserve. Fondé sur l'observé, jamais
+    /// sur ce que l'anti-clignotement a publié.
     fn list_fresh(inner: &Inner) -> bool {
-        inner.observed == EngineState::Ready && !Self::list_degraded(inner)
+        inner.observed == EngineState::Ready && inner.list_loaded && !Self::list_unreliable(inner)
     }
 
     /// FIX:01M4SFCRJWX8KMBC1ZK9ZWETTW : dernier moment où la liste était à jour, pas fin de la
     /// dernière relecture complète (une liste suivie par les événements est à jour sans relecture).
     fn list_current_at(inner: &Inner, now: OffsetDateTime) -> Option<OffsetDateTime> {
-        if !inner.has_list {
+        // Dans les états sans liste, le client n'en a pas : pas de date, quoi que le registre contienne.
+        if !inner.has_list || inner.debounce.published().keeps_no_list() {
             return None;
         }
         if Self::list_fresh(inner) {
@@ -347,14 +364,37 @@ impl ServicesRegistry {
         }
     }
 
-    /// Un état du moteur vient d'être publié. Tant qu'il n'est pas « prêt », la liste n'est plus
-    /// relue : elle devra l'être de nouveau au retour. Dans les états sans liste (`BR-SVC-018`), le
-    /// registre est vidé pour de bon, pas seulement masqué.
-    fn note_published(inner: &mut Inner, state: EngineState) {
-        if state != EngineState::Ready {
+    /// Une sonde vient d'observer `observed`, publié ou non. Tant que le moteur n'est pas vu « prêt »,
+    /// la liste n'est plus suivie : elle devra être relue au retour, même si l'anti-clignotement
+    /// n'a rien publié (coupure retenue, puis retour dans la fenêtre).
+    fn note_observed(inner: &mut Inner, observed: EngineState) {
+        // Sous un état inaccessible publié (liste grisée et datée, gardée), les va-et-vient du moteur
+        // ne défont pas la relecture : la marque « pas relue » au retour ferait un second changement
+        // dans la fenêtre (`the_engine_state_changes_in_time_and_never_flickers`).
+        if observed != EngineState::Ready && !inner.debounce.published().is_inaccessible() {
             inner.list_loaded = false;
         }
-        if state.keeps_no_list() {
+        Self::drop_list_if_none_kept(inner);
+    }
+
+    /// Un état du moteur vient d'être publié.
+    fn note_published(inner: &mut Inner) {
+        if inner.debounce.published() != EngineState::Ready {
+            inner.gap_shown = true;
+        } else if inner.list_loaded {
+            // « Prêt » est parti avec une liste relue : le client la voit sans marque.
+            inner.gap_shown = false;
+        }
+        Self::drop_list_if_none_kept(inner);
+    }
+
+    /// Dans les états sans liste (`BR-SVC-018`), le registre est vidé pour de bon, pas seulement
+    /// masqué : à chaque sonde et à chaque publication, pour qu'une relecture faite pendant un retour
+    /// retenu n'y survive pas à une seconde disparition sans publication.
+    fn drop_list_if_none_kept(inner: &mut Inner) {
+        if inner.debounce.published().keeps_no_list() {
+            inner.list_loaded = false;
+            inner.gap_shown = true;
             inner.containers.clear();
             inner.windows.clear();
             inner.list_read_at = None;
@@ -464,6 +504,7 @@ impl ServicesRegistry {
         let mut inner = self.lock();
         inner.checked_at = wall;
         inner.observed = observed;
+        Self::note_observed(&mut inner, observed);
         if observed == EngineState::Ready {
             inner.last_ready_at = Some(wall);
         }
@@ -477,7 +518,7 @@ impl ServicesRegistry {
         };
         if let Some(state) = published {
             tracing::info!(?state, "état du moteur de conteneurs");
-            Self::note_published(&mut inner, state);
+            Self::note_published(&mut inner);
         }
         // Le nom et la version suivent l'état publié : ils changent avec lui, ou quand le moteur
         // publié change de version.
@@ -495,7 +536,7 @@ impl ServicesRegistry {
         let mut inner = self.lock();
         if let Some(state) = inner.debounce.flush(now) {
             tracing::info!(?state, "état du moteur de conteneurs");
-            Self::note_published(&mut inner, state);
+            Self::note_published(&mut inner);
             // L'état retenu est celui de la dernière sonde : il part avec ce qu'elle a annoncé.
             inner.shown = inner.last_announced.clone();
             self.commit(&mut inner);
@@ -545,7 +586,16 @@ impl ServicesRegistry {
                 inner.has_list = true;
                 inner.stale_since = None;
             }
-            inner.list_loaded = true;
+            // Une lecture qui finit après que le moteur a été vu partir ne vaut pas relecture.
+            if matches!(
+                inner.observed,
+                EngineState::Ready | EngineState::AccessDenied
+            ) {
+                inner.list_loaded = true;
+                if inner.debounce.published() == EngineState::Ready {
+                    inner.gap_shown = false;
+                }
+            }
             for observation in listing.observations {
                 note_start(&mut inner.windows, &observation);
                 inner.containers.insert(observation.id.clone(), observation);
@@ -1144,6 +1194,88 @@ mod tests {
         let read = registry.snapshot();
         assert_eq!(read.services.len(), 1);
         assert!(!read.engine.list_degraded);
+    }
+
+    #[tokio::test]
+    async fn a_list_read_during_a_held_back_return_is_not_kept_across_a_second_loss() {
+        // FIX:01M4SFCQ7N5TN8VC21KBQR87PP : N1, enchaînement R1 de la revue de la PR 78.
+        let (registry, engine, mono) = registry(true);
+        // (1) prêt, liste lue.
+        engine.put_silently(container("web", RunState::Running));
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        // (2) le moteur disparaît : « absent » est publié, le registre est vidé.
+        mono.advance(Duration::from_secs(6));
+        engine.set_outcome(ProbeOutcome::SocketMissing, false);
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::Absent);
+        // (3) il revient dans la fenêtre : « prêt » est retenu, mais la liste est relue.
+        mono.advance(Duration::from_secs(1));
+        engine.set_ready();
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::Absent);
+        registry.resync().await.expect("resync");
+        // (4) il redisparaît avant l'échéance : rien n'est publié.
+        mono.advance(Duration::from_secs(1));
+        engine.set_outcome(ProbeOutcome::SocketMissing, false);
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::Absent);
+        // Le moteur a changé de contenu entre-temps.
+        engine.remove(&container("web", RunState::Running).id);
+        engine.put_silently(container("db", RunState::Running));
+        // (5) il revient une fois la fenêtre finie : « prêt » est publié tout de suite.
+        mono.advance(Duration::from_secs(6));
+        engine.set_ready();
+        registry.probe_and_apply(false).await;
+        let back = registry.snapshot();
+        assert_eq!(back.engine.state, EngineState::Ready);
+        assert!(
+            back.services.is_empty(),
+            "la liste lue en (3) date d'avant la seconde disparition : {:?}",
+            back.services
+        );
+        assert!(back.engine.list_degraded, "liste pas relue : marquée");
+        assert_eq!(
+            back.engine.list_current_at, None,
+            "aucune liste, aucune date"
+        );
+        // La relecture rétablit la liste actuelle.
+        registry.resync().await.expect("resync");
+        let read = registry.snapshot();
+        assert_eq!(read.services.len(), 1);
+        assert!(!read.engine.list_degraded);
+        assert_eq!(read.engine.list_current_at, Some(read.engine.at));
+    }
+
+    #[tokio::test]
+    async fn a_list_not_read_since_a_held_back_loss_is_never_dated_now() {
+        // FIX:01M4SFCQ7N5TN8VC21KBQR87PP : variante de R1 (« Vérifier à nouveau » après une coupure retenue).
+        let (registry, engine, mono, wall) = registry_with_wall();
+        engine.put_silently(container("web", RunState::Running));
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        // Coupure dans la fenêtre : rien n'est publié.
+        mono.advance(Duration::from_secs(1));
+        wall.advance(time::Duration::seconds(1));
+        let lost = registry.clock.now();
+        engine.set_outcome(ProbeOutcome::Refused, true);
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_status().state, EngineState::Ready);
+        // Retour, relance de l'utilisateur : toujours rien de publié, mais la liste n'est pas relue.
+        mono.advance(Duration::from_secs(1));
+        wall.advance(time::Duration::seconds(1));
+        engine.set_ready();
+        registry.probe_and_apply(true).await;
+        let status = registry.engine_status();
+        assert_eq!(status.state, EngineState::Ready);
+        assert_eq!(
+            status.list_current_at,
+            Some(lost),
+            "liste non relue : datée de la perte"
+        );
+        registry.resync().await.expect("resync");
+        let status = registry.engine_status();
+        assert_eq!(status.list_current_at, Some(status.at));
     }
 
     /// Un registre dont on pilote l'horloge murale.
