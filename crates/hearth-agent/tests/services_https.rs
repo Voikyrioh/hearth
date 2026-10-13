@@ -1073,6 +1073,61 @@ async fn only_an_administrator_reveals_the_values_and_every_attempt_is_journaled
 }
 
 #[tokio::test]
+async fn no_value_leaves_when_the_journal_cannot_be_written_and_each_reveal_is_its_own_entry() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let web = detailed("web", RunState::Running);
+    engine.put_silently(web.clone());
+    engine.set_env(&web.id, &[("DB_PASSWORD", "SENTINEL-VALUE-J")]);
+    let agent = ready_agent(&env, &engine).await;
+    listed(&agent, 1).await;
+    let admin = token(&env, &agent, "marie", Role::Admin).await;
+    let path = format!("/services/c_{}/env", web.id);
+
+    // Le journal refuse toute écriture de révélation (base pleine ou verrouillée, simulée).
+    sqlx::query(
+        "CREATE TRIGGER refuse_reveal BEFORE INSERT ON audit_events
+         WHEN NEW.action = 'service.env.reveal'
+         BEGIN SELECT RAISE(ABORT, 'journal indisponible'); END",
+    )
+    .execute(env.db.pool())
+    .await
+    .unwrap();
+    let refused = agent.request("GET", &path).token(&admin).send().await;
+    assert_eq!(refused.status, 503, "{:?}", refused.body);
+    assert_eq!(refused.code(), "BUSY");
+    assert!(
+        !refused.text.contains("SENTINEL") && !refused.text.contains("DB_PASSWORD"),
+        "une valeur ou un nom est sorti : {}",
+        refused.text
+    );
+    assert!(
+        !refused.text.contains("journal indisponible"),
+        "le texte de la base remonte : {}",
+        refused.text
+    );
+
+    // Le journal revient : deux révélations de suite sont deux entrées (pas de regroupement).
+    sqlx::query("DROP TRIGGER refuse_reveal")
+        .execute(env.db.pool())
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        let revealed = agent.request("GET", &path).token(&admin).send().await;
+        assert_eq!(revealed.status, 200, "{:?}", revealed.body);
+        assert_eq!(revealed.body["variables"][0]["value"], "SENTINEL-VALUE-J");
+    }
+    let ok: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'service.env.reveal' AND outcome = 'ok'",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(ok, 2, "une entrée par révélation réussie");
+    agent.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_journal_or_the_database()
  {
     let traces = captured_traces();

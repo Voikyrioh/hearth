@@ -327,6 +327,8 @@ pub enum RevealError {
     NoContainer,
     /// Le moteur ne répond pas ou refuse la lecture.
     EngineUnavailable,
+    /// La consignation a échoué : aucune valeur n'est rendue (BR-SVC-009).
+    JournalUnavailable,
 }
 
 pub struct ServicesRegistry {
@@ -914,6 +916,7 @@ impl ServicesRegistry {
         now: OffsetDateTime,
         target: &mut HashMap<ServiceKey, ServiceView>,
     ) {
+        Self::release_shared_units(inner);
         let mut chosen: HashMap<ServiceKey, Observation> = HashMap::new();
         for observation in inner.containers.values() {
             let Some(key) = key_of(&inner.owners, observation) else {
@@ -974,6 +977,7 @@ impl ServicesRegistry {
                         restarts_10m,
                         None,
                         None,
+                        now,
                     );
                     (
                         derived,
@@ -1026,6 +1030,7 @@ impl ServicesRegistry {
                 restarts_10m,
                 inner.last_exit.get(&unit).copied(),
                 Some(memory.last_seen),
+                now,
             );
             target.insert(
                 key.clone(),
@@ -1041,6 +1046,40 @@ impl ServicesRegistry {
                     }),
                 },
             );
+        }
+    }
+
+    /// Une unité ne supervise qu'UN conteneur vivant. Quand deux conteneurs vivants ou plus lui sont
+    /// attribués (ils auraient la même clé `u_` et l'un disparaîtrait de la liste, `BR-SVC-001`), aucun
+    /// n'est supervisé : chacun reste listé sous sa clé `c_`, et le service retenu de l'unité est oublié
+    /// (HRT-63). Un conteneur arrêté, reste d'une recréation, ne compte pas.
+    fn release_shared_units(inner: &mut Inner) {
+        let mut live_by_unit: HashMap<UnitName, Vec<String>> = HashMap::new();
+        for observation in inner.containers.values() {
+            let alive = matches!(
+                observation.run_state,
+                RunState::Running | RunState::Restarting | RunState::Paused
+            );
+            if alive && let Some(Some(unit)) = inner.owners.get(&observation.id) {
+                live_by_unit
+                    .entry(unit.clone())
+                    .or_default()
+                    .push(observation.id.clone());
+            }
+        }
+        for (unit, ids) in live_by_unit {
+            if ids.len() < 2 {
+                continue;
+            }
+            for id in ids {
+                inner.owners.insert(id, None);
+            }
+            if inner.remembered.remove(&unit).is_some() {
+                inner.forgotten.insert(unit.clone());
+            }
+            inner.dirty.remove(&unit);
+            inner.present_units.remove(&unit);
+            inner.last_exit.remove(&unit);
         }
     }
 
@@ -1220,13 +1259,16 @@ impl ServicesRegistry {
             Err(_) => return Err(RevealError::EngineUnavailable),
         };
         let target = ClientName::parse(&name).map_or(Target::None, Target::Service);
-        sink.record(
+        // La consignation précède les valeurs ET les conditionne : si elle échoue, `entries` est jeté
+        // et rien n'est rendu.
+        sink.record_required(
             actor,
             AuditAction::ServiceEnvReveal,
             target,
             Outcome::Succeeded,
         )
-        .await;
+        .await
+        .map_err(|_| RevealError::JournalUnavailable)?;
         Ok(entries)
     }
 
@@ -2410,14 +2452,24 @@ mod tests {
         supervisor: &Arc<FakeSupervisor>,
         repo: &Arc<MemoryRepo>,
     ) -> Arc<ServicesRegistry> {
+        let wall = Arc::new(Wall(Mutex::new(crate::infrastructure::engine::fake::at(
+            12,
+        ))));
+        supervised_with_clock(engine, supervisor, repo, wall)
+    }
+
+    fn supervised_with_clock(
+        engine: &Arc<FakeEngine>,
+        supervisor: &Arc<FakeSupervisor>,
+        repo: &Arc<MemoryRepo>,
+        wall: Arc<Wall>,
+    ) -> Arc<ServicesRegistry> {
         ServicesRegistry::with_supervision(
             engine.clone(),
             supervisor.clone(),
             repo.clone(),
             &Linux,
-            Arc::new(Wall(Mutex::new(crate::infrastructure::engine::fake::at(
-                12,
-            )))),
+            wall,
             Arc::new(Mono::default()),
             true,
             EngineTimings::production(),
@@ -2532,11 +2584,8 @@ mod tests {
         for (activity, auto_restart, expected) in [
             (UnitActivity::Inactive, false, ServiceStateKind::Stopped),
             (UnitActivity::Failed, false, ServiceStateKind::Error),
-            (
-                UnitActivity::Activating,
-                true,
-                ServiceStateKind::RestartLoop,
-            ),
+            // UNE attente de relance est un démarrage, pas une boucle (`BR-SVC-006`).
+            (UnitActivity::Activating, true, ServiceStateKind::Starting),
             (UnitActivity::Activating, false, ServiceStateKind::Starting),
         ] {
             set(activity, auto_restart);
@@ -2557,6 +2606,138 @@ mod tests {
         // L'unité est connue de la base : elle l'a retenue dès le premier passage.
         let saved = repo.saved.lock().unwrap_or_else(PoisonError::into_inner);
         assert!(saved.contains_key(&unit));
+    }
+
+    fn waiting_for_relaunch() -> UnitStatus {
+        UnitStatus {
+            activity: UnitActivity::Activating,
+            auto_restart: true,
+            restarts: true,
+            timeout_stop_s: Some(120),
+        }
+    }
+
+    #[tokio::test]
+    async fn three_relaunches_by_the_system_are_a_loop_one_is_not() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let base = crate::infrastructure::engine::fake::at(12);
+        supervisor.set_status(&unit, running_unit());
+        let mut last = recreated("x", RunState::Running, 'a');
+        for (index, id_char) in ['a', 'b', 'c'].into_iter().enumerate() {
+            engine.remove(&last.id);
+            last = recreated("x", RunState::Running, id_char);
+            last.started_at = Some(base - time::Duration::minutes(4 - 2 * index as i64));
+            supervisor.set_owner(&last.id, &unit);
+            engine.put_silently(last.clone());
+            registry.probe_and_apply(false).await;
+            registry.resync().await.expect("resync");
+            if index == 0 {
+                // Un seul démarrage, puis l'unité attend de relancer le conteneur disparu.
+                engine.remove(&last.id);
+                supervisor.set_status(&unit, waiting_for_relaunch());
+                registry.resync().await.expect("resync");
+                registry.poll_units().await;
+                let view = only_service(&registry);
+                assert_eq!(view.restarts_10m, 1);
+                assert_eq!(
+                    view.derived.state,
+                    ServiceStateKind::Starting,
+                    "une seule relance n'est pas une boucle"
+                );
+                supervisor.set_status(&unit, running_unit());
+            }
+        }
+        engine.remove(&last.id);
+        supervisor.set_status(&unit, waiting_for_relaunch());
+        registry.resync().await.expect("resync");
+        registry.poll_units().await;
+        let view = only_service(&registry);
+        assert_eq!(view.restarts_10m, 3);
+        assert_eq!(view.derived.state, ServiceStateKind::RestartLoop);
+    }
+
+    #[tokio::test]
+    async fn a_unit_active_without_a_container_stops_being_starting_after_ten_minutes() {
+        let engine = Arc::new(FakeEngine::new());
+        let supervisor = Arc::new(FakeSupervisor::new());
+        let repo = Arc::new(MemoryRepo::default());
+        let wall = Arc::new(Wall(Mutex::new(crate::infrastructure::engine::fake::at(
+            12,
+        ))));
+        let registry = supervised_with_clock(&engine, &supervisor, &repo, wall.clone());
+        let unit = unit_named("docker-x.service");
+        let first = recreated("x", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        // Le conteneur finit, l'unité reste « active » : le moteur n'a rien.
+        engine.remove(&first.id);
+        registry.resync().await.expect("resync");
+        registry.poll_units().await;
+        assert_eq!(
+            only_service(&registry).derived.state,
+            ServiceStateKind::Starting
+        );
+        wall.advance(time::Duration::minutes(11));
+        registry.poll_units().await;
+        let view = only_service(&registry);
+        assert_eq!(view.derived.state, ServiceStateKind::Unknown);
+        assert!(!view.supervision.expect("supervisé").container_present);
+    }
+
+    #[tokio::test]
+    async fn two_live_containers_under_one_unit_are_both_listed_and_neither_is_supervised() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let first = recreated("x", RunState::Running, 'a');
+        supervisor.set_owner(&first.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(first.clone());
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        assert_eq!(
+            only_service(&registry).key.as_str(),
+            "u_docker-x.service",
+            "seul sous son unité, il est supervisé"
+        );
+        // Un second conteneur vivant revendique la même unité : plus aucun n'est supervisé, aucun ne
+        // disparaît de la liste (`BR-SVC-001`).
+        let second = recreated("y", RunState::Running, 'b');
+        supervisor.set_owner(&second.id, &unit);
+        engine.put_silently(second.clone());
+        registry.resync().await.expect("resync");
+        let services = registry.snapshot().services;
+        let mut keys: Vec<String> = services
+            .iter()
+            .map(|view| view.key.as_str().to_owned())
+            .collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![format!("c_{}", first.id), format!("c_{}", second.id)]
+        );
+        assert!(services.iter().all(|view| view.supervision.is_none()));
+    }
+
+    #[tokio::test]
+    async fn a_stopped_leftover_of_a_recreation_does_not_unsupervise_the_live_container() {
+        let (registry, engine, supervisor, _repo) = supervised_registry();
+        let unit = unit_named("docker-x.service");
+        let live = recreated("x", RunState::Running, 'a');
+        let stale = recreated("x-old", RunState::Exited, 'b');
+        supervisor.set_owner(&live.id, &unit);
+        supervisor.set_owner(&stale.id, &unit);
+        supervisor.set_status(&unit, running_unit());
+        engine.put_silently(live.clone());
+        engine.put_silently(stale);
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let view = only_service(&registry);
+        assert_eq!(view.key.as_str(), "u_docker-x.service");
+        assert_eq!(view.observation.id, live.id);
     }
 
     #[tokio::test]
@@ -2681,6 +2862,8 @@ mod tests {
     #[derive(Default)]
     struct RecordingSink {
         entries: Mutex<Vec<(AuditAction, Target, Outcome)>>,
+        /// Le journal refuse les écritures obligatoires (base pleine ou verrouillée).
+        failing: std::sync::atomic::AtomicBool,
     }
 
     #[async_trait]
@@ -2697,6 +2880,51 @@ mod tests {
                 .unwrap_or_else(PoisonError::into_inner)
                 .push((action, target, outcome));
         }
+
+        async fn record_required(
+            &self,
+            actor: Actor,
+            action: AuditAction,
+            target: Target,
+            outcome: Outcome,
+        ) -> Result<(), crate::application::ports::AuditWriteError> {
+            if self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(crate::application::ports::AuditWriteError);
+            }
+            self.record(actor, action, target, outcome).await;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn no_value_is_returned_when_the_journal_write_fails() {
+        let (registry, engine, _supervisor, _repo) = supervised_registry();
+        let web = container("web", RunState::Running);
+        engine.put_silently(web.clone());
+        engine.set_env(&web.id, &[("DB_PASSWORD", "SENTINEL-VALUE")]);
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let key = only_service(&registry).key;
+        let sink = RecordingSink::default();
+        sink.failing
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let outcome = registry.reveal_env(&key, Actor::system(), &sink).await;
+        assert_eq!(outcome.err(), Some(RevealError::JournalUnavailable));
+        assert!(
+            sink.entries
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "rien n'est consigné, rien n'est rendu"
+        );
+        sink.failing
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            registry
+                .reveal_env(&key, Actor::system(), &sink)
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]

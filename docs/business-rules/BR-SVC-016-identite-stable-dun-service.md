@@ -13,7 +13,7 @@ maj: 2026-10-13
 ## Règle
 Le détail d'un service suit sa CLÉ (`ServiceKey`), jamais son nom ni l'identifiant de son conteneur :
 
-- `u_<unité>` pour un conteneur lancé sous une unité de service systemd (le suffixe `.service` fait partie de la clé) : le système recrée le conteneur à chaque démarrage, sous un autre identifiant ; c'est le même service. L'agent cherche le propriétaire d'un conteneur une fois pour sa vie (processus client `docker` ou `podman` dont la ligne de commande nomme le conteneur, groupe de contrôle de ce processus) ; deux unités qui revendiquent le même conteneur : pas de propriétaire.
+- `u_<unité>` pour un conteneur lancé sous une unité de service systemd (le suffixe `.service` fait partie de la clé) : le système recrée le conteneur à chaque démarrage, sous un autre identifiant ; c'est le même service. L'agent cherche le propriétaire d'un conteneur une fois pour sa vie (processus client `docker` ou `podman` dont la ligne de commande nomme le conteneur, groupe de contrôle de ce processus) ; ce client doit être le processus PRINCIPAL de l'unité (`MainPID` de `systemctl show`), sinon un service qui lance des conteneurs au premier plan (tâche planifiée, exécuteur de CI) passerait pour eux ; deux unités qui revendiquent le même conteneur : pas de propriétaire ; une unité à laquelle deux conteneurs vivants sont attribués n'en supervise aucun (chacun reste `c_`, aucun ne disparaît de la liste).
 - `c_<identifiant complet>` pour tout autre conteneur : supprimé puis recréé par un tiers sous le même nom, c'est un AUTRE service (le détail ouvert n'est jamais basculé).
 - `h_<ULID>` est seulement analysée (tranche 5).
 
@@ -21,7 +21,7 @@ Tant que l'unité existe pour le système, un service supervisé dont le contene
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/key.rs::ServiceKey::for_unit`
-- `crates/hearth-agent/src/domain/services/unit.rs::{UnitName, unit_of_cgroup, client_refs, is_engine_client}`
+- `crates/hearth-agent/src/domain/services/unit.rs::{UnitName, unit_of_cgroup, client_refs, is_engine_client, attribute, parse_main_pid}`
 - `crates/hearth-agent/src/infrastructure/supervisor/proc_systemd.rs::{ProcSystemd, scan}`
 - `crates/hearth-agent/src/application/services.rs::ServicesRegistry::{resolve_owners, build_views, poll_units}`
 - `crates/hearth-agent/src/application/ports/service_supervisor.rs::ServiceSupervisor`
@@ -34,6 +34,12 @@ Tant que l'unité existe pour le système, un service supervisé dont le contene
 - `crates/hearth-agent/tests/supervisor_proc.rs::a_container_run_by_a_service_unit_is_found_and_its_key_is_u_unit`
 - `crates/hearth-agent/tests/supervisor_proc.rs::only_the_containers_a_client_names_get_an_owner`
 - `crates/hearth-agent/tests/supervisor_proc.rs::two_units_claiming_the_same_container_leave_it_without_an_owner`
+- `crates/hearth-agent/tests/supervisor_proc.rs::a_client_that_is_not_the_main_process_of_its_unit_owns_nothing`
+- `crates/hearth-agent/tests/supervisor_proc.rs::a_unit_that_names_two_containers_supervises_neither`
+- `crates/hearth-agent/tests/supervisor_proc.rs::a_homonymous_program_started_by_another_service_does_not_take_the_unit`
+- `crates/hearth-agent/tests/supervisor_proc.rs::the_main_process_is_read_from_systemctl_before_a_unit_owns_a_container`
+- `crates/hearth-agent/src/application/services.rs::tests::two_live_containers_under_one_unit_are_both_listed_and_neither_is_supervised`
+- `crates/hearth-agent/src/application/services.rs::tests::a_unit_active_without_a_container_stops_being_starting_after_ten_minutes`
 - `crates/hearth-agent/tests/supervisor_proc.rs::a_unit_name_that_is_not_a_unit_name_never_leaves_the_scan`
 - `crates/hearth-agent/src/application/services.rs::tests::a_container_under_a_unit_is_the_service_u_unit_whatever_container_the_system_creates`
 - `crates/hearth-agent/src/application/services.rs::tests::a_supervised_service_whose_container_vanished_stays_listed_from_its_unit`

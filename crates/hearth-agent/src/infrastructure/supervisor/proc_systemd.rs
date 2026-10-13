@@ -4,8 +4,10 @@
 //! ...`, ou `systemd-run docker run ...`) a un processus client du moteur (`docker` ou `podman`)
 //! dans le groupe de contrôle de l'unité. On le cherche dans `/proc` : le programme (`exe`, à défaut
 //! le premier argument), sa ligne de commande (un `run` qui nomme le conteneur, ou un `start`), puis
-//! `cgroup`. Rien n'est écrit, rien n'est lancé. Le client d'un `docker run -d` qui a déjà rendu la
-//! main n'existe plus : son conteneur n'a pas de propriétaire connu (limite assumée, ADR-0037).
+//! `cgroup`. Ce n'est qu'une REVENDICATION : le client doit encore être le processus principal de
+//! l'unité (`MainPID` de `systemctl show`), sinon un service qui lance des conteneurs au premier plan
+//! (tâche planifiée, exécuteur de CI) passerait pour eux. Le client d'un `docker run -d` qui a déjà rendu
+//! la main n'existe plus : son conteneur n'a pas de propriétaire connu (limite assumée, ADR-0037).
 //!
 //! **État d'une unité.** `systemctl show --property=... -- <unité>`, lancé SANS interpréteur, chaque
 //! argument un par un, après `--`, avec un délai. Le nom d'unité est un `UnitName` : validé avant
@@ -28,7 +30,8 @@ use tokio::io::AsyncReadExt;
 use crate::application::ports::{ContainerRef, ServiceSupervisor};
 use crate::domain::services::unit::SHOW_PROPERTIES;
 use crate::domain::services::{
-    UnitLookup, UnitName, client_refs, is_engine_client, parse_show, unit_of_cgroup,
+    ClientClaim, UnitLookup, UnitName, attribute, client_refs, is_engine_client, parse_main_pid,
+    parse_show, unit_of_cgroup,
 };
 use crate::infrastructure::install::scrub::scrubbed;
 
@@ -40,6 +43,8 @@ const MAX_CMDLINE_BYTES: u64 = 64 * 1024;
 const MAX_CGROUP_BYTES: u64 = 16 * 1024;
 /// Sortie de `systemctl show` lue au plus.
 const MAX_SHOW_BYTES: u64 = 16 * 1024;
+/// Unités vérifiées au plus par recherche (une par `systemctl show`).
+const MAX_CLAIMED_UNITS: usize = 32;
 /// Délai de `systemctl show`.
 const SHOW_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -109,9 +114,26 @@ impl ServiceSupervisor for ProcSystemd {
         let root = self.proc_root.clone();
         let wanted = containers.to_vec();
         // Lectures de fichiers : hors de la tâche asynchrone.
-        tokio::task::spawn_blocking(move || scan(&root, &wanted))
+        let claims = tokio::task::spawn_blocking(move || scan(&root, &wanted))
             .await
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Un client du moteur dans le groupe de contrôle d'un service ne suffit pas : il faut qu'il soit
+        // le processus principal de l'unité (`MainPID`). Une unité qui ne répond pas n'est pas crue.
+        let mut units: Vec<UnitName> = claims.iter().map(|claim| claim.unit.clone()).collect();
+        units.sort();
+        units.dedup();
+        units.truncate(MAX_CLAIMED_UNITS);
+        let mut main_pids: HashMap<UnitName, u32> = HashMap::new();
+        for unit in units {
+            if let Some(pid) = self
+                .show(&unit)
+                .await
+                .and_then(|text| parse_main_pid(&text))
+            {
+                main_pids.insert(unit, pid);
+            }
+        }
+        attribute(&claims, &main_pids)
     }
 
     async fn unit(&self, unit: &UnitName) -> UnitLookup {
@@ -123,25 +145,27 @@ impl ServiceSupervisor for ProcSystemd {
 }
 
 /// Parcourt `proc_root` : pour chaque client du moteur dont la ligne de commande désigne l'un des
-/// conteneurs cherchés, l'unité de service de son groupe de contrôle. Un conteneur revendiqué par deux
-/// unités différentes n'a pas de propriétaire (ambigu).
-pub fn scan(proc_root: &Path, wanted: &[ContainerRef]) -> HashMap<String, UnitName> {
+/// conteneurs cherchés, la revendication de l'unité de service de son groupe de contrôle (processus,
+/// conteneur, unité). Aucune attribution ici : `domain::services::attribute` décide, après avoir lu le
+/// processus principal de chaque unité.
+pub fn scan(proc_root: &Path, wanted: &[ContainerRef]) -> Vec<ClientClaim> {
     let Ok(entries) = std::fs::read_dir(proc_root) else {
-        return HashMap::new();
+        return Vec::new();
     };
     let started = Instant::now();
-    let mut claims: HashMap<String, Option<UnitName>> = HashMap::new();
+    let mut claims: Vec<ClientClaim> = Vec::new();
     for entry in entries.flatten().take(MAX_PROCESSES) {
         if started.elapsed() > SCAN_BUDGET {
             break;
         }
         let file_name = entry.file_name();
-        let is_pid = file_name
+        let Some(pid) = file_name
             .to_str()
-            .is_some_and(|name| !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()));
-        if !is_pid {
+            .filter(|name| name.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
             continue;
-        }
+        };
         let dir = entry.path();
         let args = read_cmdline(&dir.join("cmdline"));
         let Some(program) = program_of(&dir, &args) else {
@@ -164,21 +188,15 @@ pub fn scan(proc_root: &Path, wanted: &[ContainerRef]) -> HashMap<String, UnitNa
                 .iter()
                 .any(|reference| designates(reference, container))
             {
-                claims
-                    .entry(container.id.clone())
-                    .and_modify(|owner| {
-                        if owner.as_ref() != Some(&unit) {
-                            *owner = None;
-                        }
-                    })
-                    .or_insert_with(|| Some(unit.clone()));
+                claims.push(ClientClaim {
+                    container: container.id.clone(),
+                    unit: unit.clone(),
+                    pid,
+                });
             }
         }
     }
     claims
-        .into_iter()
-        .filter_map(|(id, owner)| owner.map(|unit| (id, unit)))
-        .collect()
 }
 
 /// Le nom, l'identifiant complet ou un préfixe d'au moins 12 caractères de l'identifiant.

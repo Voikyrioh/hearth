@@ -5,6 +5,7 @@
 //! où que ce soit (clé de service, argument de `systemctl`, base). Le jeu de caractères est celui de
 //! `systemd.unit(5)` ; un nom qui n'y tient pas n'est pas une unité pour Hearth.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// Longueur maximale d'un nom d'unité, suffixe compris (limite de systemd : 255).
@@ -101,7 +102,67 @@ pub enum UnitLookup {
 }
 
 /// Les propriétés demandées à `systemctl show` (`--property=`), séparées par des virgules.
-pub const SHOW_PROPERTIES: &str = "LoadState,ActiveState,SubState,Restart,TimeoutStopUSec";
+pub const SHOW_PROPERTIES: &str = "LoadState,ActiveState,SubState,Restart,TimeoutStopUSec,MainPID";
+
+/// Le processus principal de l'unité (`MainPID`) d'une sortie de `systemctl show`. `0` (aucun processus)
+/// et tout texte illisible donnent `None`.
+pub fn parse_main_pid(text: &str) -> Option<u32> {
+    text.lines()
+        .find_map(|line| line.strip_prefix("MainPID="))
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|pid| *pid != 0)
+}
+
+/// Un client du moteur (processus `docker` ou `podman`) qui désigne un conteneur et tourne dans le groupe
+/// de contrôle d'une unité de service : une REVENDICATION, pas encore une attribution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientClaim {
+    /// Identifiant complet du conteneur désigné.
+    pub container: String,
+    pub unit: UnitName,
+    /// Le processus du client.
+    pub pid: u32,
+}
+
+/// Les propriétaires que les revendications établissent (HRT-63, ADR-0037). Un client du moteur qui
+/// tourne dans le groupe de contrôle d'un service ne dit pas que ce service EST ce conteneur (une tâche
+/// planifiée lance des conteneurs au premier plan, un exécuteur de CI aussi). Trois règles :
+///
+/// 1. seul le processus PRINCIPAL de l'unité (`main_pids`, lu par `systemctl show`) compte : c'est
+///    l'`ExecStart` de l'unité, donc le client dont le conteneur est le service ;
+/// 2. un conteneur revendiqué par deux unités n'a pas de propriétaire (ambigu) ;
+/// 3. une unité qui revendique plusieurs conteneurs n'en supervise aucun : un service n'a qu'un
+///    conteneur, rien n'est caché derrière une clé commune.
+pub fn attribute(
+    claims: &[ClientClaim],
+    main_pids: &HashMap<UnitName, u32>,
+) -> HashMap<String, UnitName> {
+    let mut by_container: HashMap<&str, HashSet<&UnitName>> = HashMap::new();
+    for claim in claims {
+        if main_pids.get(&claim.unit) == Some(&claim.pid) {
+            by_container
+                .entry(claim.container.as_str())
+                .or_default()
+                .insert(&claim.unit);
+        }
+    }
+    let mut by_unit: HashMap<&UnitName, HashSet<&str>> = HashMap::new();
+    for (container, units) in &by_container {
+        let mut distinct = units.iter().copied();
+        if let (Some(unit), None) = (distinct.next(), distinct.next()) {
+            by_unit.entry(unit).or_default().insert(*container);
+        }
+    }
+    by_unit
+        .into_iter()
+        .filter(|(_, containers)| containers.len() == 1)
+        .flat_map(|(unit, containers)| {
+            containers
+                .into_iter()
+                .map(move |container| (container.to_owned(), unit.clone()))
+        })
+        .collect()
+}
 
 /// Lit la sortie de `systemctl show --property=<SHOW_PROPERTIES> -- <unité>` (lignes `Nom=valeur`).
 /// Une sortie sans `LoadState` ou sans `ActiveState` n'est pas une réponse d'un systemd.

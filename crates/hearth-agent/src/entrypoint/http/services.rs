@@ -59,6 +59,10 @@ pub async fn env(
                 ErrorCode::Busy,
                 "Le moteur de conteneurs ne répond pas. Réessaie dans un instant.",
             ),
+            RevealError::JournalUnavailable => ApiError::new(
+                ErrorCode::Busy,
+                "La révélation n'a pas pu être consignée au journal : aucune valeur n'est rendue. Réessaie dans un instant.",
+            ),
         })?;
     let mut response = (StatusCode::OK, Json(services_wire::env_reveal(&entries))).into_response();
     // Des valeurs secrètes : aucun cache, ni du client ni d'un intermédiaire.

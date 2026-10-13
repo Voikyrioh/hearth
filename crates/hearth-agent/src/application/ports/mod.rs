@@ -40,7 +40,7 @@ pub use account_repo::{AccountRepo, AccountTx};
 pub use admin_accounts::{AdminAccounts, AdminAccountsError, AdminCredential};
 pub use attack_mode_repo::{AttackModeRepo, AttackModeTx};
 pub use audit_repo::{AuditRepo, AuditTx};
-pub use audit_sink::{AuditFeed, AuditSink};
+pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{

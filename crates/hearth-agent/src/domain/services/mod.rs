@@ -29,10 +29,11 @@ pub use limits::{
 };
 pub use state::{
     Derived, MountInfo, MountType, Observation, PortBinding, PortProtocol, PortScope,
-    RESTART_LOOP_STARTS, RESTART_LOOP_WINDOW, RestartPolicy, RunState, ServiceStateKind,
-    StartWindow, compare_names, derive_state, derive_supervised, derive_unit_state, stop_grace_s,
+    RESTART_LOOP_STARTS, RESTART_LOOP_WINDOW, RestartPolicy, RunState, STARTING_MAX,
+    ServiceStateKind, StartWindow, compare_names, derive_state, derive_supervised,
+    derive_unit_state, stop_grace_s,
 };
 pub use unit::{
-    UnitActivity, UnitLookup, UnitName, UnitStatus, client_refs, is_engine_client, parse_show,
-    unit_of_cgroup,
+    ClientClaim, UnitActivity, UnitLookup, UnitName, UnitStatus, attribute, client_refs,
+    is_engine_client, parse_main_pid, parse_show, unit_of_cgroup,
 };

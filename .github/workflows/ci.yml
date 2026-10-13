@@ -154,8 +154,13 @@ jobs:
       # --property=Restart=always docker run --rm --name hearth-e2e ...`, root). Le test détecte le
       # propriétaire par /proc, lit l'unité, vérifie la clé `u_` du service, et CONSIGNE ce que fait un
       # arrêt par l'API du moteur sur ce conteneur (question ouverte de la section 0 de la conception) :
-      # la réponse est dans le journal de l'étape et dans le résumé du job. Il ne la juge pas.
-      - name: Service supervisé par une unité systemd (propriétaire détecté, arrêt par l'API consigné)
+      # la réponse est dans le journal de l'étape et dans le résumé du job. Il ne la juge pas. Il
+      # consigne aussi l'arrêt PAR LE SUPERVISEUR (durée, état de l'unité, conteneur, registre) d'une
+      # unité transitoire et d'une unité de fichier, puis juge. Pire cas des attentes du test : environ
+      # 7 minutes (3 x 60 s de démarrage, 30 s, 2 x (60 s + 30 s), hors téléchargement) ; l'étape est
+      # coupée à 12 minutes, le job à 20.
+      - name: Service supervisé par une unité systemd (propriétaire détecté, arrêts consignés)
+        timeout-minutes: 12
         run: |
           bin="$(cargo test -p hearth-agent --test engine_supervised --no-run --message-format=json \
             | jq -r 'select(.reason == "compiler-artifact" and .target.name == "engine_supervised" and .executable != null) | .executable' \

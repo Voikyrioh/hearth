@@ -24,7 +24,12 @@
 //!    Hearth le retire de la liste. Pour l'unité d'un fichier (comme `docker-<nom>.service` sur NixOS),
 //!    qui reste chargée et arrêtée, il reste listé « arrêté », d'après l'unité, alors que son
 //!    conteneur (`--rm`) n'existe plus : c'est le cas de forge, vérifié par une seconde unité écrite
-//!    dans `/run/systemd/system`.
+//!    dans `/run/systemd/system`. Pour chaque cas le test CONSIGNE la durée de `systemctl stop`, l'état
+//!    de l'unité, la présence du conteneur et la suite d'états vus par le registre, puis juge.
+//!
+//! Le conteneur de test s'arrête au signal (gestionnaire de SIGTERM) et l'unité déclare
+//! `TimeoutStopSec=20`, comme un serveur de jeu. Toutes les attentes sont bornées (60 s, 30 s) et
+//! annoncées dans leurs messages ; l'étape CI porte son propre `timeout-minutes`.
 //!
 //! Ce test n'a JAMAIS été exécuté sur le poste de développement : il ne l'est qu'en CI. Il compile
 //! partout (aucune API propre à Linux) mais ne s'exécute que sous Linux.
@@ -49,6 +54,16 @@ use hearth_agent::infrastructure::supervisor::ProcSystemd;
 use hearth_agent::infrastructure::system::SystemHostEnvironment;
 
 const IMAGE: &str = "public.ecr.aws/docker/library/busybox:1.36";
+/// Le programme du conteneur de test : comme un serveur de jeu, il s'arrête proprement au signal
+/// d'arrêt (SIGTERM). `sleep` seul est le processus 1 du conteneur et IGNORE SIGTERM : l'arrêt de
+/// l'unité attendait alors le délai par défaut de systemd (90 s, constaté à la première course CI).
+const CONTAINER_SCRIPT: &str = "trap \"exit 0\" TERM; sleep 600 & wait";
+/// Le délai d'arrêt que déclare l'unité de test (comme celle d'un serveur de jeu). Il borne `systemctl
+/// stop` même si le conteneur n'obéit pas : 20 s, puis SIGKILL.
+const STOP_TIMEOUT_S: u32 = 20;
+/// Durée maximale annoncée d'un `systemctl stop` observé, et de l'attente du dénouement qui suit.
+const STOP_LIMIT: Duration = Duration::from_secs(60);
+const SETTLE_LIMIT: Duration = Duration::from_secs(30);
 const UNIT: &str = "hearth-e2e.service";
 const CONTAINER: &str = "hearth-e2e";
 const KEY: &str = "u_hearth-e2e.service";
@@ -137,7 +152,7 @@ fn is_root() -> bool {
 }
 
 /// L'identifiant du conteneur de ce nom, vide s'il n'existe pas (entre deux démarrages de l'unité).
-fn container_id() -> String {
+fn container_id_of(name: &str) -> String {
     run(
         "docker",
         &[
@@ -145,10 +160,14 @@ fn container_id() -> String {
             "-aq",
             "--no-trunc",
             "--filter",
-            &format!("name=^{CONTAINER}$"),
+            &format!("name=^{name}$"),
         ],
     )
     .unwrap_or_default()
+}
+
+fn container_id() -> String {
+    container_id_of(CONTAINER)
 }
 
 fn unit_line() -> String {
@@ -193,7 +212,7 @@ fn view_of(registry: &ServicesRegistry, key: &str) -> Option<(ServiceStateKind, 
 }
 
 /// Écrit la consignation dans la sortie du test et, en CI, dans le résumé de l'étape.
-fn record(lines: &[String]) {
+fn record(title: &str, lines: &[String]) {
     let text = lines.join("\n");
     println!("{text}");
     if let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY")
@@ -202,7 +221,7 @@ fn record(lines: &[String]) {
             .create(true)
             .open(path)
     {
-        let _ = writeln!(file, "### Service supervisé : arrêt par l'API du moteur\n");
+        let _ = writeln!(file, "### {title}\n");
         for line in lines {
             let _ = writeln!(file, "- {line}");
         }
@@ -237,14 +256,16 @@ async fn a_container_run_by_a_unit_is_detected_and_the_engine_stop_is_recorded()
             &format!("--unit={}", UNIT.trim_end_matches(".service")),
             "--property=Restart=always",
             "--property=RestartSec=3",
+            &format!("--property=TimeoutStopSec={STOP_TIMEOUT_S}"),
             "docker",
             "run",
             "--rm",
             "--name",
             CONTAINER,
             IMAGE,
-            "sleep",
-            "600",
+            "sh",
+            "-c",
+            CONTAINER_SCRIPT,
         ],
     );
     eventually(
@@ -351,50 +372,61 @@ async fn a_container_run_by_a_unit_is_detected_and_the_engine_stop_is_recorded()
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    record(&[
-        format!(
-            "`docker stop` (appel de l'API du moteur) sur le conteneur de l'unité : code {:?}, {}",
-            stop_output.status.code(),
-            String::from_utf8_lossy(&stop_output.stderr).trim()
-        ),
-        format!(
-            "conteneur supprimé par le moteur (`--rm`) : {}",
-            match container_vanished_after {
-                Some(after) => format!("oui, vu après {} ms", after.as_millis()),
-                None => "non vu absent (relance plus rapide que l'échantillonnage)".to_owned(),
-            }
-        ),
-        format!(
-            "l'unité relance le service : {}",
-            match &new_container {
-                Some((id, after)) => format!(
-                    "oui, nouveau conteneur {} après {} ms (identifiant différent : {})",
-                    &id[..12.min(id.len())],
-                    after.as_millis(),
-                    id != &first_id
-                ),
-                None => "non, aucun nouveau conteneur en 30 s".to_owned(),
-            }
-        ),
-        format!("états de l'unité vus : {unit_transitions:?}"),
-        format!("états du service vus par le registre : {seen_states:?}"),
-        format!("la clé {KEY} est restée listée pendant tout l'arrêt : {key_always_listed}"),
-    ]);
+    record(
+        "Service supervisé : arrêt par l'API du moteur",
+        &[
+            format!(
+                "`docker stop` (appel de l'API du moteur) sur le conteneur de l'unité : code {:?}, {}",
+                stop_output.status.code(),
+                String::from_utf8_lossy(&stop_output.stderr).trim()
+            ),
+            format!(
+                "conteneur supprimé par le moteur (`--rm`) : {}",
+                match container_vanished_after {
+                    Some(after) => format!("oui, vu après {} ms", after.as_millis()),
+                    None => "non vu absent (relance plus rapide que l'échantillonnage)".to_owned(),
+                }
+            ),
+            format!(
+                "l'unité relance le service : {}",
+                match &new_container {
+                    Some((id, after)) => format!(
+                        "oui, nouveau conteneur {} après {} ms (identifiant différent : {})",
+                        &id[..12.min(id.len())],
+                        after.as_millis(),
+                        id != &first_id
+                    ),
+                    None => "non, aucun nouveau conteneur en 30 s".to_owned(),
+                }
+            ),
+            format!("états de l'unité vus : {unit_transitions:?}"),
+            format!("états du service vus par le registre : {seen_states:?}"),
+            format!("la clé {KEY} est restée listée pendant tout l'arrêt : {key_always_listed}"),
+        ],
+    );
     assert!(
         key_always_listed,
         "le service doit rester listé sous la même clé quand son conteneur est recréé"
     );
 
     // 4a. L'arrêt par le superviseur d'une unité transitoire : systemd la décharge, le service
-    //     n'existe plus pour le système et sort de la liste.
-    must("systemctl", &["stop", UNIT]);
-    eventually(
-        "le service d'une unité transitoire arrêtée sort de la liste",
-        Duration::from_secs(60),
-        || registry_view(&registry).is_none(),
-    )
-    .await;
-    assert!(container_id().is_empty(), "`--rm` : plus de conteneur");
+    //     n'existe plus pour le système et sort de la liste. Durée, état de l'unité, conteneur et
+    //     registre sont consignés AVANT tout jugement.
+    let transient =
+        stop_by_supervisor(&registry, KEY, UNIT, CONTAINER, |view| view.is_none()).await;
+    record(
+        "Service supervisé : arrêt par le superviseur (unité transitoire)",
+        &transient.lines("`systemctl stop` d'une unité transitoire", KEY),
+    );
+    assert!(
+        transient.settled,
+        "le service d'une unité transitoire arrêtée devait sortir de la liste en {SETTLE_LIMIT:?} : {:?}",
+        transient.lines("arrêt", KEY)
+    );
+    assert!(
+        container_id().is_empty(),
+        "`--rm` : plus de conteneur après l'arrêt de l'unité"
+    );
 
     // 4b. L'unité d'un fichier, comme celles de NixOS : arrêtée, elle reste chargée, et son service reste
     //     listé « arrêté » alors que son conteneur n'existe plus.
@@ -404,38 +436,172 @@ async fn a_container_run_by_a_unit_is_detected_and_the_engine_stop_is_recorded()
             "[Service]
 Restart=always
 RestartSec=3
-ExecStart=/usr/bin/docker run --rm --name {FILE_CONTAINER} {IMAGE} sleep 600
+TimeoutStopSec={STOP_TIMEOUT_S}
+ExecStart=/usr/bin/env docker run --rm --name {FILE_CONTAINER} {IMAGE} sh -c '{CONTAINER_SCRIPT}'
 "
         ),
     )
     .expect("unité écrite dans /run/systemd/system");
     must("systemctl", &["daemon-reload"]);
-    must("systemctl", &["start", FILE_UNIT]);
+    must("systemctl", &["start", "--no-block", FILE_UNIT]);
     eventually(
         "le service de l'unité d'un fichier est listé en marche",
         Duration::from_secs(60),
         || view_of(&registry, FILE_KEY) == Some((ServiceStateKind::Running, true)),
     )
     .await;
-    must("systemctl", &["stop", FILE_UNIT]);
-    eventually(
-        "le service de l'unité d'un fichier reste listé, arrêté, sans conteneur",
-        Duration::from_secs(60),
-        || view_of(&registry, FILE_KEY) == Some((ServiceStateKind::Stopped, false)),
-    )
+    let from_file = stop_by_supervisor(&registry, FILE_KEY, FILE_UNIT, FILE_CONTAINER, |view| {
+        view == Some((ServiceStateKind::Stopped, false))
+    })
     .await;
+    record(
+        "Service supervisé : arrêt par le superviseur (unité d'un fichier)",
+        &from_file.lines("`systemctl stop` d'une unité de fichier", FILE_KEY),
+    );
+    assert!(
+        from_file.settled,
+        "le service de l'unité d'un fichier devait rester listé, arrêté, sans conteneur, en {SETTLE_LIMIT:?} : {:?}",
+        from_file.lines("arrêt", FILE_KEY)
+    );
     let file_unit = UnitName::parse(FILE_UNIT).unwrap();
     let UnitLookup::Loaded(after) = supervisor.unit(&file_unit).await else {
         panic!("l'unité d'un fichier, arrêtée, reste chargée");
     };
     assert_eq!(after.activity, UnitActivity::Inactive);
-    record(&[
-        format!(
-            "`systemctl stop` d'une unité transitoire : {KEY} sort de la liste (systemd la décharge)"
-        ),
-        format!(
-            "`systemctl stop` d'une unité de fichier : {FILE_KEY} reste listé, arrêté, sans conteneur, d'après l'unité"
-        ),
-    ]);
     task.abort();
+}
+
+/// Ce qu'a fait un `systemctl stop`, tel qu'observé : consigné, jamais deviné.
+struct StopObservation {
+    /// Durée de `systemctl stop` (la commande rend la main quand l'unité est arrêtée).
+    took: Duration,
+    /// Le code de sortie de la commande, `None` si elle a dépassé `STOP_LIMIT`.
+    code: Option<i32>,
+    timed_out: bool,
+    /// Les états du service vus par le registre, dans l'ordre.
+    states: Vec<String>,
+    still_listed_at_end: bool,
+    /// `LoadState`, `ActiveState`, `SubState`, `Result` de l'unité après l'arrêt.
+    unit_after: String,
+    container_after: String,
+    /// Le registre a atteint l'état attendu avant `SETTLE_LIMIT`.
+    settled: bool,
+}
+
+impl StopObservation {
+    fn lines(&self, what: &str, key: &str) -> Vec<String> {
+        let container = if self.container_after.is_empty() {
+            "absent".to_owned()
+        } else {
+            format!(
+                "présent ({})",
+                &self.container_after[..12.min(self.container_after.len())]
+            )
+        };
+        let abandoned = if self.timed_out {
+            format!(" (ABANDONNÉ après {STOP_LIMIT:?})")
+        } else {
+            String::new()
+        };
+        vec![
+            format!(
+                "{what} : code {:?}, durée {} ms{abandoned}",
+                self.code,
+                self.took.as_millis()
+            ),
+            format!("état de l'unité après l'arrêt : {}", self.unit_after),
+            format!("conteneur après l'arrêt : {container}"),
+            format!("états du service vus par le registre : {:?}", self.states),
+            format!(
+                "la clé {key} est encore listée en fin d'observation : {}",
+                self.still_listed_at_end
+            ),
+            format!(
+                "état attendu atteint en {SETTLE_LIMIT:?} au plus : {}",
+                self.settled
+            ),
+        ]
+    }
+}
+
+fn describe(view: Option<(ServiceStateKind, bool)>) -> String {
+    match view {
+        Some((state, true)) => format!("{state:?} (conteneur)"),
+        Some((state, false)) => format!("{state:?} (sans conteneur)"),
+        None => "absent de la liste".to_owned(),
+    }
+}
+
+/// Lance `systemctl stop <unité>` et observe, toutes les 200 ms, ce que montre le registre pour la clé,
+/// jusqu'à ce que la commande rende la main (au plus `STOP_LIMIT`), puis jusqu'à `settled` (au plus
+/// `SETTLE_LIMIT`). Aucune attente n'est sans borne : au pire `STOP_LIMIT + SETTLE_LIMIT`.
+async fn stop_by_supervisor(
+    registry: &ServicesRegistry,
+    key: &str,
+    unit: &str,
+    container: &str,
+    settled: impl Fn(Option<(ServiceStateKind, bool)>) -> bool,
+) -> StopObservation {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let target = unit.to_owned();
+    // Un fil dédié : `Command::status` attend la fin de la commande, sans processus orphelin à relire.
+    std::thread::spawn(move || {
+        let code = Command::new("systemctl")
+            .args(["stop", "--", &target])
+            .status()
+            .ok()
+            .and_then(|status| status.code());
+        let _ = sender.send(code);
+    });
+    let mut states: Vec<String> = Vec::new();
+    let sample = |states: &mut Vec<String>| {
+        let text = describe(view_of(registry, key));
+        if states.last() != Some(&text) {
+            states.push(text);
+        }
+    };
+    let started = Instant::now();
+    let mut code = None;
+    let mut took = STOP_LIMIT;
+    let mut timed_out = true;
+    while started.elapsed() < STOP_LIMIT {
+        sample(&mut states);
+        if let Ok(done) = receiver.try_recv() {
+            code = done;
+            took = started.elapsed();
+            timed_out = false;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let settle_started = Instant::now();
+    let mut reached = false;
+    while settle_started.elapsed() < SETTLE_LIMIT {
+        sample(&mut states);
+        if settled(view_of(registry, key)) {
+            reached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    StopObservation {
+        took,
+        code,
+        timed_out,
+        states,
+        still_listed_at_end: view_of(registry, key).is_some(),
+        unit_after: run(
+            "systemctl",
+            &[
+                "show",
+                "--property=LoadState,ActiveState,SubState,Result",
+                "--",
+                unit,
+            ],
+        )
+        .unwrap_or_default()
+        .replace('\n', " "),
+        container_after: container_id_of(container),
+        settled: reached,
+    }
 }

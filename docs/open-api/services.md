@@ -124,8 +124,8 @@ Révèle les variables d'environnement d'un service avec leurs VALEURS (BR-SVC-0
 
 - Variables dans l'ordre du moteur, au plus 256 (comme `env_names`), valeurs non modifiées (un certificat s'étend sur plusieurs lignes), une entrée sans `=` a une valeur vide.
 - Les valeurs ne sont lues dans le moteur (`ContainerEngine::env`) qu'à cette demande ; aucune relecture de la liste, aucun événement, aucun abonnement ne les lit.
-- **Journal** : une entrée `service.env.reveal` (« Valeurs des variables révélées », cible « service {nom} », résultat réussi) est écrite avant que les valeurs partent ; le refus d'un compte en lecture seule est consigné sous le même code (cible : la route). Jamais un nom ni une valeur de variable.
-- Erreurs : `404 NOT_FOUND` clé mal formée ou service inconnu (« Ce service n'existe pas. ») ; `404` service supervisé listé d'après son unité mais sans conteneur (« Les variables de ce service ne sont pas lisibles : son conteneur n'existe pas. ») ; `503 BUSY` moteur muet. La clé n'est jamais répétée dans une erreur.
+- **Journal** : une entrée `service.env.reveal` (« Valeurs des variables révélées », cible « service {nom} », résultat réussi) est écrite AVANT que les valeurs partent, une entrée par révélation (sans regroupement) ; si l'écriture échoue, aucune valeur n'est rendue : `503 BUSY`, texte fixe, sans détail (BR-SVC-009). Le refus d'un compte en lecture seule est consigné sous le même code (cible : la route). Jamais un nom ni une valeur de variable.
+- Erreurs : `404 NOT_FOUND` clé mal formée ou service inconnu (« Ce service n'existe pas. ») ; `404` service supervisé listé d'après son unité mais sans conteneur (« Les variables de ce service ne sont pas lisibles : son conteneur n'existe pas. ») ; `503 BUSY` moteur muet ; `503 BUSY` journal non écrit (aucune valeur rendue). La clé n'est jamais répétée dans une erreur.
 - Une réponse est un secret : jamais stockée, jamais tracée (test sentinelle au niveau de trace le plus bavard).
 
 ## `POST /api/v1/engine/recheck`

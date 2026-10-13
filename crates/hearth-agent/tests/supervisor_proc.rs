@@ -9,13 +9,15 @@
 #[path = "support/tmp.rs"]
 mod tmp;
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::Path;
 
 use hearth_agent::application::ports::{ContainerRef, ServiceSupervisor};
-use hearth_agent::domain::services::{ServiceKey, UnitLookup, UnitName};
+use hearth_agent::domain::services::{ServiceKey, UnitLookup, UnitName, attribute};
 #[cfg(unix)]
 use hearth_agent::domain::services::{UnitActivity, UnitStatus};
+use hearth_agent::infrastructure::supervisor::proc_systemd::scan;
 use hearth_agent::infrastructure::supervisor::{NoSupervisor, ProcSystemd};
 
 fn container(name: &str, id_char: char) -> ContainerRef {
@@ -40,6 +42,21 @@ fn supervisor(root: &Path) -> ProcSystemd {
     )
 }
 
+/// Les propriétaires que la détection établit quand `systemctl show` donne ces processus principaux
+/// (lecture du faux `/proc`, puis la règle d'attribution : la même chaîne que `owners`, sans lancer
+/// `systemctl`, donc sur tous les systèmes).
+fn owners_with_mains(
+    root: &Path,
+    wanted: &[ContainerRef],
+    mains: &[(&str, u32)],
+) -> HashMap<String, UnitName> {
+    let mains = mains
+        .iter()
+        .map(|(name, pid)| (unit(name), *pid))
+        .collect::<HashMap<_, _>>();
+    attribute(&scan(root, wanted), &mains)
+}
+
 #[tokio::test]
 async fn a_container_run_by_a_service_unit_is_found_and_its_key_is_u_unit() {
     let dir = tmp::tempdir().unwrap();
@@ -50,9 +67,11 @@ async fn a_container_run_by_a_service_unit_is_found_and_its_key_is_u_unit() {
         "0::/system.slice/docker-x.service\n",
     );
     let web = container("docker-x", 'a');
-    let owners = supervisor(dir.path())
-        .owners(std::slice::from_ref(&web))
-        .await;
+    let owners = owners_with_mains(
+        dir.path(),
+        std::slice::from_ref(&web),
+        &[("docker-x.service", 4242)],
+    );
     let unit = owners.get(&web.id).expect("propriétaire");
     assert_eq!(unit.as_str(), "docker-x.service");
     assert_eq!(ServiceKey::for_unit(unit).as_str(), "u_docker-x.service");
@@ -126,7 +145,19 @@ async fn only_the_containers_a_client_names_get_an_owner() {
         container("spoof", 'e'),
         container("web", 'f'),
     ];
-    let owners = supervisor(dir.path()).owners(&wanted).await;
+    // Les clients 10 et 11 sont les processus principaux de leurs unités ; ceux des autres unités aussi
+    // (c'est la lecture du groupe de contrôle et du programme qui les écarte, pas le `MainPID`).
+    let owners = owners_with_mains(
+        dir.path(),
+        &wanted,
+        &[
+            ("docker-terraria.service", 10),
+            ("podman-valheim.service", 11),
+            ("evil.service", 14),
+            ("cron.service", 16),
+            ("x.service", 13),
+        ],
+    );
     let mut found: Vec<(&str, &str)> = wanted
         .iter()
         .filter_map(|c| {
@@ -170,9 +201,11 @@ async fn a_container_is_designated_by_name_full_id_or_a_long_id_prefix() {
         &["docker", "start", "-a", &short.id[..6]],
         "0::/system.slice/three.service\n",
     );
-    let owners = supervisor(dir.path())
-        .owners(&[by_id.clone(), by_prefix.clone(), short.clone()])
-        .await;
+    let owners = owners_with_mains(
+        dir.path(),
+        &[by_id.clone(), by_prefix.clone(), short.clone()],
+        &[("one.service", 1), ("two.service", 2), ("three.service", 3)],
+    );
     assert_eq!(
         owners.get(&by_id.id).map(UnitName::as_str),
         Some("one.service")
@@ -213,14 +246,119 @@ async fn two_units_claiming_the_same_container_leave_it_without_an_owner() {
         "0::/system.slice/same.service\n",
     );
     let (web, db) = (container("web", 'a'), container("db", 'b'));
-    let owners = supervisor(dir.path())
-        .owners(&[web.clone(), db.clone()])
-        .await;
+    let owners = owners_with_mains(
+        dir.path(),
+        &[web.clone(), db.clone()],
+        &[("a.service", 1), ("b.service", 2), ("same.service", 3)],
+    );
     assert!(!owners.contains_key(&web.id));
     assert_eq!(
         owners.get(&db.id).map(UnitName::as_str),
         Some("same.service")
     );
+}
+
+#[tokio::test]
+async fn a_client_that_is_not_the_main_process_of_its_unit_owns_nothing() {
+    let dir = tmp::tempdir().unwrap();
+    // Une tâche planifiée lance un conteneur au premier plan : son client tourne dans le groupe de
+    // contrôle du service de planification, dont le processus principal est le planificateur (pid 5).
+    process(
+        dir.path(),
+        77,
+        &["docker", "run", "--rm", "--name=sauvegarde", "img"],
+        "0::/system.slice/cron.service\n",
+    );
+    // Le vrai service d'un conteneur : son client EST le processus principal.
+    process(
+        dir.path(),
+        90,
+        &["docker", "run", "--name=terraria", "img"],
+        "0::/system.slice/docker-terraria.service\n",
+    );
+    let wanted = [container("sauvegarde", 'a'), container("terraria", 'b')];
+    let owners = owners_with_mains(
+        dir.path(),
+        &wanted,
+        &[("cron.service", 5), ("docker-terraria.service", 90)],
+    );
+    assert!(!owners.contains_key(&wanted[0].id), "{owners:?}");
+    assert_eq!(
+        owners.get(&wanted[1].id).map(UnitName::as_str),
+        Some("docker-terraria.service")
+    );
+    // Une unité sans processus principal (arrêtée, ou `systemctl` muet) ne donne rien.
+    assert!(owners_with_mains(dir.path(), &wanted, &[]).is_empty());
+    assert!(owners_with_mains(dir.path(), &wanted, &[("docker-terraria.service", 0)]).is_empty());
+}
+
+#[tokio::test]
+async fn a_unit_that_names_two_containers_supervises_neither() {
+    let dir = tmp::tempdir().unwrap();
+    // `docker start -a a b` : un seul client, deux conteneurs vivants sous la même clé `u_` possible.
+    process(
+        dir.path(),
+        30,
+        &["docker", "start", "-a", "alpha", "beta"],
+        "0::/system.slice/pair.service\n",
+    );
+    process(
+        dir.path(),
+        31,
+        &["docker", "run", "--name=gamma", "img"],
+        "0::/system.slice/solo.service\n",
+    );
+    let wanted = [
+        container("alpha", 'a'),
+        container("beta", 'b'),
+        container("gamma", 'c'),
+    ];
+    let owners = owners_with_mains(
+        dir.path(),
+        &wanted,
+        &[("pair.service", 30), ("solo.service", 31)],
+    );
+    assert!(!owners.contains_key(&wanted[0].id) && !owners.contains_key(&wanted[1].id));
+    assert_eq!(
+        owners.get(&wanted[2].id).map(UnitName::as_str),
+        Some("solo.service")
+    );
+}
+
+#[tokio::test]
+async fn a_homonymous_program_started_by_another_service_does_not_take_the_unit() {
+    let dir = tmp::tempdir().unwrap();
+    // Le vrai client de l'unité, puis un programme homonyme lancé plus tard par un autre processus du
+    // même service : seul le principal (pid 40) fait foi, le second revendique le même conteneur en vain.
+    process(
+        dir.path(),
+        40,
+        &["docker", "run", "--name=web", "img"],
+        "0::/system.slice/docker-web.service\n",
+    );
+    process(
+        dir.path(),
+        41,
+        &["docker", "run", "--name=web", "img"],
+        "0::/system.slice/docker-web.service\n",
+    );
+    let web = container("web", 'a');
+    let owners = owners_with_mains(
+        dir.path(),
+        std::slice::from_ref(&web),
+        &[("docker-web.service", 40)],
+    );
+    assert_eq!(
+        owners.get(&web.id).map(UnitName::as_str),
+        Some("docker-web.service")
+    );
+    // Aucun des deux n'est le processus principal : rien.
+    let owners = owners_with_mains(
+        dir.path(),
+        std::slice::from_ref(&web),
+        &[("docker-web.service", 99)],
+    );
+    assert!(owners.is_empty());
 }
 
 #[tokio::test]
@@ -262,9 +400,11 @@ async fn a_nix_wrapped_client_and_a_missing_proc_are_both_normal() {
         "0::/system.slice/docker-web.service\n",
     );
     let web = container("web", 'a');
-    let owners = supervisor(dir.path())
-        .owners(std::slice::from_ref(&web))
-        .await;
+    let owners = owners_with_mains(
+        dir.path(),
+        std::slice::from_ref(&web),
+        &[("docker-web.service", 1)],
+    );
     assert_eq!(
         owners.get(&web.id).map(UnitName::as_str),
         Some("docker-web.service")
@@ -298,9 +438,11 @@ async fn the_program_is_read_from_the_exe_link_when_there_is_one() {
     );
     symlink("/usr/bin/docker", dir.path().join("2").join("exe")).unwrap();
     let (web, db) = (container("web", 'a'), container("db", 'b'));
-    let owners = supervisor(dir.path())
-        .owners(&[web.clone(), db.clone()])
-        .await;
+    let owners = owners_with_mains(
+        dir.path(),
+        &[web.clone(), db.clone()],
+        &[("spoof.service", 1), ("real.service", 2)],
+    );
     assert!(!owners.contains_key(&web.id));
     assert_eq!(
         owners.get(&db.id).map(UnitName::as_str),
@@ -344,6 +486,47 @@ fn fake_systemctl(dir: &Path, body: &str) -> std::path::PathBuf {
     std::fs::write(&script, format!("#!/bin/sh\n{body}\n")).unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     script
+}
+
+/// La chaîne complète : faux `/proc`, vrai appel (faux `systemctl`) pour le processus principal de
+/// chaque unité revendiquée.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_main_process_is_read_from_systemctl_before_a_unit_owns_a_container() {
+    let dir = tmp::tempdir().unwrap();
+    process(
+        dir.path(),
+        4242,
+        &["docker", "run", "--name=terraria", "img"],
+        "0::/system.slice/docker-terraria.service\n",
+    );
+    process(
+        dir.path(),
+        77,
+        &["docker", "run", "--rm", "--name=sauvegarde", "img"],
+        "0::/system.slice/cron.service\n",
+    );
+    let script = fake_systemctl(
+        dir.path(),
+        "case \"$4\" in\n\
+         docker-terraria.service) printf 'MainPID=4242\\n' ;;\n\
+         cron.service) printf 'MainPID=5\\n' ;;\n\
+         esac",
+    );
+    let supervisor = ProcSystemd::new(dir.path().to_path_buf(), script.into_os_string());
+    let (terraria, backup) = (container("terraria", 'a'), container("sauvegarde", 'b'));
+    let owners = supervisor.owners(&[terraria.clone(), backup.clone()]).await;
+    assert_eq!(
+        owners.get(&terraria.id).map(UnitName::as_str),
+        Some("docker-terraria.service")
+    );
+    assert!(!owners.contains_key(&backup.id), "{owners:?}");
+    // Sans `systemctl`, aucune unité n'est crue.
+    let mute = ProcSystemd::new(
+        dir.path().to_path_buf(),
+        dir.path().join("nowhere").into_os_string(),
+    );
+    assert!(mute.owners(&[terraria]).await.is_empty());
 }
 
 #[cfg(unix)]
