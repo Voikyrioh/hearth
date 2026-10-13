@@ -385,6 +385,9 @@ pub struct SpyState {
     pub hour_hold_first: std::sync::atomic::AtomicBool,
     pub hour_release: tokio::sync::Notify,
     pub hour_calls: std::sync::atomic::AtomicUsize,
+    /// Lectures de l'heure allées jusqu'à l'agent et revenues (réponse ou erreur) : la lecture à
+    /// l'ouverture ouvre sa propre connexion, un test qui compte les connexions l'attend (`settled`).
+    pub hour_returned: std::sync::atomic::AtomicUsize,
     /// La lecture de l'heure rend une erreur de transport.
     pub hour_fails: std::sync::atomic::AtomicBool,
     /// Lectures retenues abandonnees (futur jete avant liberation) et lectures retenues terminees.
@@ -440,6 +443,7 @@ impl Spy {
                 hour_hold_first: std::sync::atomic::AtomicBool::new(false),
                 hour_release: tokio::sync::Notify::new(),
                 hour_calls: std::sync::atomic::AtomicUsize::new(0),
+                hour_returned: std::sync::atomic::AtomicUsize::new(0),
                 hour_aborted: std::sync::atomic::AtomicUsize::new(0),
                 hour_completed: std::sync::atomic::AtomicUsize::new(0),
                 hour_fails: std::sync::atomic::AtomicBool::new(false),
@@ -733,7 +737,11 @@ impl hearth_link::ports::Transport for Spy {
                 return Ok(response.clone());
             }
         }
-        self.inner.hour_history(target, token).await
+        let read = self.inner.hour_history(target, token).await;
+        self.state
+            .hour_returned
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        read
     }
 
     async fn export_audit(
@@ -966,6 +974,20 @@ impl Options {
             },
             ..Self::default()
         }
+    }
+}
+
+/// Attend que la lecture de l'heure lancée à l'ouverture ait rendu. Elle part en même temps que les
+/// premières mesures et ouvre sa propre connexion TCP ; sans cette attente, un test qui compte les
+/// connexions la prend pour une réouverture du flux, selon la vitesse de la machine.
+pub async fn settled(world: &World) {
+    let deadline = Instant::now() + WAIT;
+    while world.spy.hour_returned.load(Ordering::SeqCst) == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "la lecture de l'heure n'a pas rendu"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
     }
 }
 

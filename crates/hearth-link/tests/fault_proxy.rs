@@ -27,7 +27,7 @@ use hearth_link::ports::vault::{SecretKind, Vault as _};
 use hearth_link::{ActionOutcome, ActionRequest, LinkError};
 use serde_json::json;
 use support::{
-    Options, PASSWORD, WAIT, World, never, thresholds, wait_attempts, wait_metrics_times,
+    Options, PASSWORD, WAIT, World, never, settled, thresholds, wait_attempts, wait_metrics_times,
 };
 use time::Duration as TimeDuration;
 
@@ -199,6 +199,9 @@ async fn a_delayed_agent_keeps_its_stream_open_and_nothing_is_shown() {
         false,
     )))
     .await;
+    // La lecture de l'heure part avec les premières mesures, sur sa propre connexion : on l'attend,
+    // sinon elle compte comme une réouverture du flux.
+    settled(&world).await;
     let mark = world.recorder.mark();
     let connections = world.proxy.accepted();
     world.proxy.delay(ms(250));
@@ -693,6 +696,7 @@ async fn an_action_that_never_reached_the_agent_is_announced_as_not_executed() {
     // Trou noir : la requête part dans le vide, l'agent ne la reçoit jamais.
     // Les deux lectures qui précèdent l'acte (état de sécurité, défi) passent ; la requête de l'acte, la
     // troisième connexion, part dans le vide.
+    settled(&world).await;
     world.proxy.freeze_from(world.proxy.accepted() + 3);
     let outcome = world
         .manager
@@ -823,6 +827,7 @@ async fn a_network_change_does_not_cut_a_healthy_stream() {
         false,
     )))
     .await;
+    settled(&world).await;
     let mark = world.recorder.mark();
     let connections = world.proxy.accepted();
     // Docker, WSL, Tailscale : la liste d'adresses change, le réseau utile non.
