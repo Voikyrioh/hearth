@@ -21,9 +21,11 @@ pub enum SinkError {
 /// Contrat de l'adaptateur :
 /// - tout chemin reçu est relatif, déjà jugé ; l'écriture reste sous le dossier de destination ;
 /// - aucun lien n'est suivi, ni dans la destination ni dans un parent déjà présent ;
-/// - les dossiers manquants sont créés par l'adaptateur (propriétaire du serveur, `0750`) ;
-/// - un fichier est créé neuf (`0640`, aucun bit d'exécution, propriétaire et dates non repris de
-///   l'archive) et ne remplace jamais un objet existant.
+/// - les dossiers manquants sont créés par l'adaptateur, avec le propriétaire et les droits que
+///   l'APPELANT a demandés (`WriteSpec` de l'adaptateur), jamais ceux de l'archive ni le masque ambiant ;
+/// - un fichier est créé neuf (même propriétaire, même mode fixe demandé par l'appelant, aucun bit
+///   d'exécution ni spécial), ne remplace jamais un objet existant, et `flush` le rend durable
+///   (`fsync`) : l'extraction appelle `flush` une fois par fichier, après ses derniers octets.
 pub trait ExtractSink {
     fn create_dir(&mut self, path: &ArchivePath) -> Result<(), SinkError>;
     fn create_file(&mut self, path: &ArchivePath) -> Result<Box<dyn Write + '_>, SinkError>;

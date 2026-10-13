@@ -34,7 +34,7 @@ flate2 = { version = "1.1", default-features = false, features = ["rust_backend"
 # Clé de comparaison des noms d'une archive (NFC), déjà dans l'arbre (url, idna).
 unicode-normalization = { version = "0.1", default-features = false, features = ["std"] }
 # Écriture sans suivre de lien (openat par composant), API sûre, déjà dans l'arbre (tempfile) ; Unix seulement.
-rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+rustix = { version = "1", default-features = false, features = ["std", "fs", "process"] }
 subtle = "2"
 getrandom = "0.4"
 clap = { version = "4", features = ["derive"] }

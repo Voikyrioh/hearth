@@ -124,12 +124,12 @@ fn find_end_record<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<EndRecord
     let disk = cur.u16()?;
     let cd_disk = cur.u16()?;
     let entries_disk = cur.u16()?;
-    let entries_total = cur.u16()?;
-    let cd_size = cur.u32()?;
-    let cd_offset = cur.u32()?;
+    let entries_total16 = cur.u16()?;
+    let cd_size32 = cur.u32()?;
+    let cd_offset32 = cur.u32()?;
     let _comment_len = cur.u16()?;
     let end_abs = base + pos as u64;
-    if disk != 0 || cd_disk != 0 || entries_disk != entries_total {
+    if disk != 0 || cd_disk != 0 || entries_disk != entries_total16 {
         return Err(ArchiveRefusal::MultiVolume);
     }
     // Une autre signature de fin à partir du début de l'index (après la dernière entrée), dans un
@@ -140,15 +140,15 @@ fn find_end_record<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<EndRecord
             .iter()
             .any(|&other| other != pos && base + other as u64 >= index_start)
     };
-    let needs_zip64 = entries_total == 0xFFFF || cd_size == u32::MAX || cd_offset == u32::MAX;
+    let needs_zip64 = entries_total16 == 0xFFFF || cd_size32 == u32::MAX || cd_offset32 == u32::MAX;
     if !needs_zip64 {
-        if ambiguous(u64::from(cd_offset)) {
+        if ambiguous(u64::from(cd_offset32)) {
             return Err(ArchiveRefusal::TwoEndRecords);
         }
         return Ok(EndRecord {
-            entries: u64::from(entries_total),
-            cd_size: u64::from(cd_size),
-            cd_offset: u64::from(cd_offset),
+            entries: u64::from(entries_total16),
+            cd_size: u64::from(cd_size32),
+            cd_offset: u64::from(cd_offset32),
             index_end: end_abs,
         });
     }
@@ -192,6 +192,15 @@ fn find_end_record<R: Read + Seek>(r: &mut R, file_len: u64) -> Result<EndRecord
     if disk != 0 || cd_disk != 0 || entries_disk != entries_total {
         return Err(ArchiveRefusal::MultiVolume);
     }
+    // ZIP64 partiel : un champ de l'enregistrement de fin qui n'est PAS saturé doit dire la même chose
+    // que l'enregistrement ZIP64 (un lecteur qui ne substitue que les champs saturés verrait une autre
+    // archive).
+    if (entries_total16 != 0xFFFF && u64::from(entries_total16) != entries_total)
+        || (cd_size32 != u32::MAX && u64::from(cd_size32) != cd_size)
+        || (cd_offset32 != u32::MAX && u64::from(cd_offset32) != cd_offset)
+    {
+        return Err(ArchiveRefusal::IndexLies);
+    }
     if ambiguous(cd_offset) {
         return Err(ArchiveRefusal::TwoEndRecords);
     }
@@ -231,6 +240,22 @@ fn zip64_fields(
     let compressed = next(want_compressed)?;
     let offset = next(want_offset)?;
     Ok((size, compressed, offset))
+}
+
+/// Taille maximale du champ « extra » d'un en-tête local (Info-ZIP en écrit une trentaine d'octets).
+const MAX_LOCAL_EXTRA: u64 = 512;
+
+/// Le champ « extra » est-il une suite exacte d'enregistrements (identifiant, longueur, corps) ?
+fn is_well_formed_extra(extra: &[u8]) -> bool {
+    let mut cur = Cur(extra);
+    while !cur.is_empty() {
+        let Ok(_id) = cur.u16() else { return false };
+        let Ok(len) = cur.u16() else { return false };
+        if cur.take(usize::from(len)).is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 fn long_enough(entries: u64, cd_size: u64) -> bool {
@@ -331,14 +356,16 @@ pub(super) fn inspect<R: Read + Seek>(
         let is_dir = judged.trailing_slash;
 
         // Type de l'entrée : jamais autre chose qu'un fichier ordinaire ou un dossier.
-        if made_by >> 8 == 3 {
-            match (external >> 16) & 0o170_000 {
-                0o120_000 => return Err(ArchiveRefusal::SymbolicLink),
-                0o100_000 if is_dir => return Err(ArchiveRefusal::IndexLies),
-                0o040_000 if !is_dir => return Err(ArchiveRefusal::IndexLies),
-                0o100_000 | 0o040_000 | 0 => {}
-                _ => return Err(ArchiveRefusal::SpecialFile),
-            }
+        // Le type codé dans les 16 bits hauts des attributs externes est lu QUEL QUE SOIT l'hôte
+        // (`made_by`) : un lien ou un fichier spécial ne passe pas pour un fichier ordinaire parce que
+        // l'archive se dit faite sous un autre système. L'accord fichier/dossier, lui, n'est exigé que
+        // d'un hôte Unix (sous un autre hôte, ces bits sont souvent à zéro ou sans sens).
+        match (external >> 16) & 0o170_000 {
+            0o120_000 => return Err(ArchiveRefusal::SymbolicLink),
+            0o100_000 if made_by >> 8 == 3 && is_dir => return Err(ArchiveRefusal::IndexLies),
+            0o040_000 if made_by >> 8 == 3 && !is_dir => return Err(ArchiveRefusal::IndexLies),
+            0o100_000 | 0o040_000 | 0 => {}
+            _ => return Err(ArchiveRefusal::SpecialFile),
         }
         if external & 0x0400 != 0 {
             // FILE_ATTRIBUTE_REPARSE_POINT : lien ou jonction Windows.
@@ -507,9 +534,25 @@ fn confront_local_headers<R: Read + Seek>(
         if name != expected.as_bytes() {
             return Err(ArchiveRefusal::LocalHeaderMismatch);
         }
+        // Le champ « extra » local est une suite d'enregistrements complète, sans octet en trop, et
+        // petite : 65 535 octets libres y cacheraient n'importe quoi.
+        if extra_len > MAX_LOCAL_EXTRA {
+            return Err(ArchiveRefusal::UncoveredBytes);
+        }
+        let mut extra = vec![0u8; extra_len as usize];
+        read_exact_at(r, name_at + name_len, &mut extra)?;
+        if !is_well_formed_extra(&extra) {
+            return Err(ArchiveRefusal::UncoveredBytes);
+        }
+        // Un dossier peut porter un flux deflate vide de deux octets (`03 00`), rien d'autre.
+        if plan.is_dir && plan.compressed != 0 {
+            let mut body = vec![0u8; plan.compressed as usize];
+            read_exact_at(r, data_offset, &mut body)?;
+            if body != [0x03, 0x00] {
+                return Err(ArchiveRefusal::UncoveredBytes);
+            }
+        }
         let (size, compressed) = if size32 == u32::MAX || compressed32 == u32::MAX {
-            let mut extra = vec![0u8; extra_len as usize];
-            read_exact_at(r, name_at + name_len, &mut extra)?;
             let (s, c, _) =
                 zip64_fields(&extra, size32 == u32::MAX, compressed32 == u32::MAX, false)?;
             (
@@ -582,13 +625,19 @@ pub(super) fn read_entry<R: Read + Seek>(
 ) -> Result<(), ArchiveRefusal> {
     r.seek(SeekFrom::Start(plan.data_offset))
         .map_err(ArchiveRefusal::from_io)?;
-    let limited = r.take(plan.compressed);
-    let mut reader: Box<dyn Read + '_> = match plan.method {
-        Method::Stored => Box::new(limited),
-        Method::Deflate => Box::new(DeflateDecoder::new(BufReader::with_capacity(
-            super::limits::BUFFER,
-            limited,
-        ))),
-    };
-    pump(&mut *reader, plan.size, Some(plan.crc), cancel, emit)
+    let mut limited = r.take(plan.compressed);
+    match plan.method {
+        Method::Stored => pump(&mut limited, plan.size, Some(plan.crc), cancel, emit),
+        Method::Deflate => {
+            let mut decoder =
+                DeflateDecoder::new(BufReader::with_capacity(super::limits::BUFFER, limited));
+            pump(&mut decoder, plan.size, Some(plan.crc), cancel, emit)?;
+            // Le flux deflate doit finir exactement où finit la zone compressée annoncée : des octets
+            // après sa fin ne sont lus par personne.
+            if decoder.total_in() != plan.compressed {
+                return Err(ArchiveRefusal::UncoveredBytes);
+            }
+            Ok(())
+        }
+    }
 }

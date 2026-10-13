@@ -13,10 +13,10 @@ archive/
 ├── zip.rs      → lecteur de zip à la main : enregistrement de fin (et ZIP64), index, confrontation de chaque en-tête local, pavage du fichier sans trou
 ├── tar.rs      → `TarWalker` : ustar, pax, noms longs GNU, tailles, fin ; gzip.rs : flux gzip à un seul membre, en-tête borné, pied vérifié, taux surveillé
 ├── flow.rs     → annulation, empreinte du fichier, `pump` (taille exacte, un octet d'excès au plus, CRC-32)
-├── sink.rs     → port `ExtractSink` : l'adaptateur écrit sans suivre de lien (`infrastructure/archive_fs.rs`)
+├── sink.rs     → port `ExtractSink` : l'adaptateur écrit sans suivre de lien, avec le propriétaire et les modes de l'appelant, `flush` = `fsync` (`infrastructure/archive_fs/`)
 └── testkit.rs  → (tests) fabrique zip, tar et gzip octet par octet, piégés ; `MemSink`
 ```
 
-Tests : `tests_paths.rs` (noms), `tests_zip.rs` (zip), `tests_tar.rs` (tar et gzip), `tests_extract.rs` (extraction, annulation, génération aléatoire à graine fixe). Le test de liens contre le vrai système de fichiers est `tests/archive_fs.rs` (module `unix` : CI Linux seulement).
+Tests : `tests_paths.rs` (noms), `tests_zip.rs` (zip), `tests_tar.rs` (tar et gzip), `tests_extract.rs` (extraction, annulation, génération aléatoire à graine fixe). Les tests d'écriture contre le vrai système de fichiers sont `tests/archive_fs.rs` (module `unix`) et `infrastructure/archive_fs/tests_unix.rs` : CI Linux seulement.
 
 Règles : BR-ARCH-001 à BR-ARCH-011. Décision : ADR-0055.

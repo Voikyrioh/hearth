@@ -33,9 +33,22 @@ pub struct ArchiveLimits {
     /// « Lire un seul fichier » (ADR-0055 point 12).
     pub max_single_read: u64,
     /// Relire chaque entrée à l'inspection (tailles et sommes de contrôle réelles) : l'archive est alors
-    /// jugée sur ce qu'elle contient et non sur ce qu'elle annonce. Désactivé seulement par les tests
-    /// qui veulent atteindre les gardes de l'extraction.
-    pub verify_data: bool,
+    /// jugée sur ce qu'elle contient et non sur ce qu'elle annonce. Visible du seul module `archive` et de
+    /// ses tests (`pub(super)`) : aucun appelant ne peut le couper, ni le lire, ni construire des bornes
+    /// par un littéral de structure hors du module ; il ajuste les champs publics d'un
+    /// `ArchiveLimits::default()`.
+    ///
+    /// ```compile_fail,E0451
+    /// use hearth_agent::domain::archive::ArchiveLimits;
+    /// let _ = ArchiveLimits { verify_data: false, ..ArchiveLimits::default() };
+    /// ```
+    ///
+    /// ```compile_fail,E0616
+    /// use hearth_agent::domain::archive::ArchiveLimits;
+    /// let mut limits = ArchiveLimits::default();
+    /// limits.verify_data = false;
+    /// ```
+    pub(super) verify_data: bool,
 }
 
 impl Default for ArchiveLimits {

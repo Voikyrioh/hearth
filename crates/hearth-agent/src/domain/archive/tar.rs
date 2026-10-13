@@ -360,6 +360,7 @@ impl<'a, R: Read> TarWalker<'a, R> {
     /// Après la fin : tout ce qui reste doit être nul jusqu'à la fin du flux.
     pub(super) fn finish(&mut self, cancel: Cancel<'_>) -> Result<(), ArchiveRefusal> {
         let mut scratch = vec![0u8; BUFFER];
+        let mut zeros = 0u64;
         loop {
             check_cancel(cancel)?;
             let got = read_some(&mut self.reader, &mut scratch).map_err(ArchiveRefusal::from_io)?;
@@ -369,9 +370,18 @@ impl<'a, R: Read> TarWalker<'a, R> {
             if !is_zero(&scratch[..got]) {
                 return Err(ArchiveRefusal::UncoveredBytes);
             }
+            // Le remplissage de fin d'un tar (facteur de blocage) est de quelques Kio : au-delà du
+            // plafond, un `.tar.gz` minuscule suivi de zéros compressés ferait lire des gigaoctets.
+            zeros += got as u64;
+            if zeros > MAX_TRAILING_ZEROS {
+                return Err(ArchiveRefusal::UncoveredBytes);
+            }
         }
     }
 }
+
+/// Remplissage nul toléré après les deux blocs de fin d'un tar.
+const MAX_TRAILING_ZEROS: u64 = 1024 * 1024;
 
 fn padding(size: u64) -> u64 {
     (BLOCK as u64 - size % BLOCK as u64) % BLOCK as u64

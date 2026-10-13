@@ -91,6 +91,67 @@ fn a_nul_byte_or_a_control_character_is_refused() {
     assert_eq!(code_for("a\u{85}b".as_bytes()), "CONTROL_CHARACTER");
 }
 
+/// Chaque caractère de catégorie `Cf` (Unicode 16.0), `Zl` et `Zp` : un nom qui en porte un est refusé,
+/// au début, au milieu et à la fin d'un composant.
+const FORMAT_AND_SEPARATOR_CHARS: &[u32] = &[
+    0x00AD, 0x0600, 0x0601, 0x0602, 0x0603, 0x0604, 0x0605, 0x061C, 0x06DD, 0x070F, 0x0890, 0x0891,
+    0x08E2, 0x180E, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x2028, 0x2029, 0x202A, 0x202B, 0x202C,
+    0x202D, 0x202E, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069, 0x206A,
+    0x206B, 0x206C, 0x206D, 0x206E, 0x206F, 0xFEFF, 0xFFF9, 0xFFFA, 0xFFFB, 0x110BD, 0x110CD,
+    0x13430, 0x13431, 0x13432, 0x13433, 0x13434, 0x13435, 0x13436, 0x13437, 0x13438, 0x13439,
+    0x1343A, 0x1343B, 0x1343C, 0x1343D, 0x1343E, 0x1343F, 0x1BCA0, 0x1BCA1, 0x1BCA2, 0x1BCA3,
+    0x1D173, 0x1D174, 0x1D175, 0x1D176, 0x1D177, 0x1D178, 0x1D179, 0x1D17A, 0xE0001, 0xE0020,
+    0xE0041, 0xE007F,
+];
+
+#[test]
+fn every_format_or_line_separator_character_is_refused_wherever_it_stands() {
+    for &code in FORMAT_AND_SEPARATOR_CHARS {
+        let c = char::from_u32(code).unwrap();
+        for name in [
+            format!("{c}name.txt"),
+            format!("na{c}me.txt"),
+            format!("name.txt{c}"),
+            format!("dir/{c}/file"),
+        ] {
+            assert_eq!(
+                code_for(name.as_bytes()),
+                "CONTROL_CHARACTER",
+                "U+{code:04X} dans {name:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_c0_and_c1_control_character_is_refused() {
+    for code in (0u32..=0x1F).chain(0x7F..=0x9F) {
+        let c = char::from_u32(code).unwrap();
+        let name = format!("a{c}b");
+        assert_eq!(
+            code_for(name.as_bytes()),
+            "CONTROL_CHARACTER",
+            "U+{code:04X}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_non_ascii_names_still_pass() {
+    // Lettres accentuées, idéogrammes, emoji simple, tiret demi-cadratin, espace insécable : ni `Cc`,
+    // ni `Cf`, ni `Zl`, ni `Zp`.
+    for name in [
+        "résumé.txt",
+        "世界/monde",
+        "pomme\u{1F34E}",
+        "a\u{2013}b",
+        "a\u{00A0}b",
+        "e\u{0301}",
+    ] {
+        judge_bytes(one(name.as_bytes())).unwrap();
+    }
+}
+
 #[test]
 fn a_name_that_is_not_utf8_is_refused_with_the_sentence_of_the_adr_and_never_guessed() {
     let refusal = refusal_of(one(&[b'a', 0xE9, b'.', b't']));

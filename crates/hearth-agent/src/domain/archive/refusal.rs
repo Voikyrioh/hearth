@@ -54,7 +54,9 @@ pub enum ArchiveRefusal {
     EmptyComponent,
     #[error("un chemin contient un nom réservé de Windows, ou finit par un point ou une espace")]
     ReservedName,
-    #[error("un chemin contient un octet nul ou un caractère de contrôle")]
+    #[error(
+        "un chemin contient un octet nul, un caractère de contrôle ou un caractère de format (sens d'écriture, largeur nulle, séparateur de ligne)"
+    )]
     ControlCharacter,
     #[error(
         "Ce fichier contient des noms que Hearth ne sait pas lire. Recrée l'archive avec un outil récent."
@@ -96,6 +98,14 @@ pub enum ArchiveRefusal {
     SourceUnreadable,
     #[error("l'écriture de l'extraction a échoué")]
     WriteFailed,
+    #[error(
+        "le dossier qui doit recevoir l'extraction n'est pas sûr (il doit appartenir à l'utilisateur de l'agent et n'être inscriptible que par lui)"
+    )]
+    UnsafeDestination,
+    #[error(
+        "ce système ne sait pas poser le dossier extrait sans remplacer un objet existant (renommage sans écrasement indisponible)"
+    )]
+    AtomicSwitchUnavailable,
     #[error("l'opération a été annulée")]
     Cancelled,
     #[error("le fichier demandé n'est pas dans l'archive")]
@@ -151,6 +161,8 @@ impl ArchiveRefusal {
             ArchiveChanged => "ARCHIVE_CHANGED",
             SourceUnreadable => "SOURCE_UNREADABLE",
             WriteFailed => "WRITE_FAILED",
+            UnsafeDestination => "UNSAFE_DESTINATION",
+            AtomicSwitchUnavailable => "ATOMIC_SWITCH_UNAVAILABLE",
             Cancelled => "CANCELLED",
             EntryNotFound => "ENTRY_NOT_FOUND",
             EntryTooLargeToRead { .. } => "ENTRY_TOO_LARGE_TO_READ",
@@ -163,6 +175,8 @@ impl ArchiveRefusal {
             self,
             ArchiveRefusal::SourceUnreadable
                 | ArchiveRefusal::WriteFailed
+                | ArchiveRefusal::UnsafeDestination
+                | ArchiveRefusal::AtomicSwitchUnavailable
                 | ArchiveRefusal::Cancelled
                 | ArchiveRefusal::EntryNotFound
                 | ArchiveRefusal::ArchiveChanged

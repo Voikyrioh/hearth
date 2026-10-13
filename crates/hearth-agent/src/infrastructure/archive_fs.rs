@@ -1,196 +1,179 @@
-//! Adaptateur fichiers de la lecture d'archive (HRT-130, ADR-0055, `BR-ARCH-007`, `BR-ARCH-009`).
+//! Adaptateur fichiers de la lecture d'archive (HRT-130, ADR-0055, `BR-ARCH-007`, `BR-ARCH-008`,
+//! `BR-ARCH-009`).
 //!
 //! Le domaine (`domain::archive`) juge et décrit ; ce module ouvre le fichier d'archive et écrit, dans
-//! un dossier d'attente NEUF, ce que le domaine lui remet, SANS JAMAIS SUIVRE UN LIEN :
+//! un dossier d'attente NEUF, ce que le domaine lui remet, SANS JAMAIS SUIVRE UN LIEN et SANS AUCUN
+//! APPEL PAR CHEMIN une fois le dossier parent ouvert (`unix.rs`).
 //!
-//! - Unix : chaque dossier traversé est ouvert par `openat(parent, composant, O_NOFOLLOW | O_DIRECTORY)`
-//!   à partir du descripteur du dossier d'attente, jamais par un chemin complet ; un fichier est créé par
-//!   `openat(..., O_CREAT | O_EXCL | O_NOFOLLOW)`, qui échoue sur tout objet déjà présent, lien compris.
-//!   Un lien trouvé en route (créé par un tiers, ou déjà présent dans une destination reprise) donne
-//!   `SinkError::Blocked` : on ne le suit pas, on ne l'ouvre pas, on n'écrit pas au travers.
-//! - Hors Unix (poste de développement Windows) : repli par `symlink_metadata` à chaque composant puis
-//!   `create_new` ; sans la garantie sans course de la voie Unix (aucun root ni service ici).
+//! # La source
 //!
-//! Fichiers créés `0640`, dossiers `0750` (moins le `umask`), aucun bit d'exécution, aucun
-//! setuid/setgid, propriétaire du processus : rien n'est repris de l'archive.
+//! L'archive est ouverte sans suivre de lien ni bloquer sur un tube nommé (aide de `services_key.rs`),
+//! puis `fstat` sur le descripteur : un fichier ordinaire, sinon `SOURCE_UNREADABLE`.
 //!
-//! Extraction : dossier d'attente voisin de la destination, puis bascule par `rename`. Un refus, une
-//! panne ou une annulation retire le dossier d'attente (`remove_dir_all` ne suit pas les liens) et ne
-//! laisse rien à la destination.
+//! # La destination (Unix, seule plate-forme prise en charge pour écrire)
+//!
+//! L'appelant donne une [`Destination`] : une racine de CONFIANCE (chemin absolu, dont elle répond) et un
+//! chemin relatif (`parents/.../nom`). Le dossier parent est ouvert UNE fois, composant par composant
+//! depuis la racine (`O_DIRECTORY | O_NOFOLLOW`), puis tout se fait relativement à ce descripteur :
+//! création du dossier d'attente (`mkdirat`, nom imprévisible, `0700`), son ouverture, les écritures,
+//! la bascule (`renameat2` avec `RENAME_NOREPLACE`, les deux noms relatifs au MÊME descripteur) et le
+//! nettoyage (`unlinkat`, jamais de lien suivi, seulement le dossier dont le périphérique et l'inode sont
+//! ceux de celui que l'opération a créé).
+//!
+//! **Précondition, vérifiée sur le descripteur du parent (`fstat`) et refusée sinon
+//! (`UNSAFE_DESTINATION`)** : le parent appartient à l'utilisateur EFFECTIF de l'agent et n'est
+//! inscriptible ni par le groupe ni par les autres (`mode & 0o022 == 0`). Un autre compte qui pourrait y
+//! écrire pourrait substituer ou renommer le dossier d'attente entre deux appels : on ne l'accepte pas.
+//!
+//! **Bascule** : si le noyau ou le système de fichiers ne prend pas en charge `RENAME_NOREPLACE`
+//! (`EINVAL`, `ENOSYS`, `ENOTSUP`), le dossier d'attente est retiré et l'extraction est refusée
+//! (`ATOMIC_SWITCH_UNAVAILABLE`) : jamais de repli par un `rename` qui remplacerait en silence.
+//!
+//! **Propriétaire et droits** : posés par descripteur à la création (`fchown`, `fchmod`) d'après la
+//! [`WriteSpec`] de l'appelant (identifiants numériques et modes fixes), jamais d'après l'archive ni le
+//! masque ambiant. **Durabilité** : `fsync` de chaque fichier, de chaque dossier puis du dossier
+//! d'attente avant la bascule, et du parent après.
+//!
+//! # Hors Unix
+//!
+//! L'agent ne tourne que sous Linux. Hors Unix, lire (`inspect_file`, `read_file_entry`) reste possible
+//! (poste de développement), mais ÉCRIRE est refusé (`ATOMIC_SWITCH_UNAVAILABLE`) : il n'existe aucun
+//! repli par chemin, donc aucun repli « non sûr face aux courses » que la production pourrait atteindre.
 
 use std::fs::File;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path};
 
 use crate::domain::archive::{
-    ArchiveLimits, ArchivePath, ArchiveRefusal, Cancel, ExtractReport, ExtractSink, Inspection,
-    SinkError, extract, inspect, read_one,
+    ArchiveLimits, ArchiveRefusal, Cancel, ExtractReport, Inspection, inspect, read_one,
 };
+use crate::infrastructure::services_key::open_read_no_follow;
 
-/// Écrit sous un dossier racine donné, sans suivre de lien.
-pub struct DirectorySink {
-    root: imp::Root,
-}
-
-impl DirectorySink {
-    /// Ouvre un dossier existant comme racine d'écriture. La racine elle-même n'est pas suivie si c'est
-    /// un lien (Unix).
-    pub fn open(root: &Path) -> std::io::Result<Self> {
-        Ok(Self {
-            root: imp::Root::open(root)?,
-        })
-    }
-}
-
-impl ExtractSink for DirectorySink {
-    fn create_dir(&mut self, path: &ArchivePath) -> Result<(), SinkError> {
-        let components: Vec<&str> = path.components().collect();
-        self.root.make_dirs(&components)
-    }
-
-    fn create_file(&mut self, path: &ArchivePath) -> Result<Box<dyn Write + '_>, SinkError> {
-        let components: Vec<&str> = path.components().collect();
-        let Some((name, parents)) = components.split_last() else {
-            return Err(SinkError::Blocked);
-        };
-        let file = self.root.create_file(parents, name)?;
-        Ok(Box::new(file))
-    }
-}
+#[cfg(test)]
+#[cfg(unix)]
+mod tests_unix;
+#[cfg(unix)]
+mod unix;
 
 #[cfg(unix)]
-mod imp {
-    use std::fs::File;
-    use std::os::fd::OwnedFd;
-    use std::path::Path;
+pub use unix::DirectorySink;
 
-    use rustix::fs::{CWD, Mode, OFlags, mkdirat, openat};
-    use rustix::io::Errno;
+/// Propriétaire demandé pour tout ce que l'extraction crée : identifiants numériques donnés par
+/// l'appelant, jamais repris de l'archive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileOwner {
+    uid: u32,
+    gid: u32,
+}
 
-    use crate::domain::archive::SinkError;
-
-    const DIR_MODE: Mode = Mode::RWXU.union(Mode::RGRP).union(Mode::XGRP);
-    const FILE_MODE: Mode = Mode::RUSR.union(Mode::WUSR).union(Mode::RGRP);
-
-    fn blocked_or_io(errno: Errno) -> SinkError {
-        match errno {
-            Errno::EXIST => SinkError::AlreadyExists,
-            // Un lien (O_NOFOLLOW), ou un fichier là où un dossier était attendu.
-            Errno::LOOP | Errno::NOTDIR => SinkError::Blocked,
-            other => SinkError::Io(std::io::Error::from(other).kind()),
-        }
+impl FileOwner {
+    /// `None` si un identifiant vaut `u32::MAX` (« ne pas changer » pour `chown`, jamais un compte).
+    pub fn new(uid: u32, gid: u32) -> Option<Self> {
+        (uid != u32::MAX && gid != u32::MAX).then_some(Self { uid, gid })
     }
 
-    pub(super) struct Root(OwnedFd);
+    pub fn uid(&self) -> u32 {
+        self.uid
+    }
 
-    impl Root {
-        pub(super) fn open(path: &Path) -> std::io::Result<Self> {
-            let fd = openat(
-                CWD,
-                path,
-                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                Mode::empty(),
-            )?;
-            Ok(Self(fd))
-        }
-
-        /// Crée (si besoin) puis ouvre chaque dossier de la chaîne, un composant à la fois, depuis le
-        /// descripteur du précédent. Rend le descripteur du dernier.
-        fn descend(&self, components: &[&str]) -> Result<OwnedFd, SinkError> {
-            let mut current = self
-                .0
-                .try_clone()
-                .map_err(|error| SinkError::Io(error.kind()))?;
-            for component in components {
-                match mkdirat(&current, *component, DIR_MODE) {
-                    Ok(()) | Err(Errno::EXIST) => {}
-                    Err(errno) => return Err(blocked_or_io(errno)),
-                }
-                current = openat(
-                    &current,
-                    *component,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(blocked_or_io)?;
-            }
-            Ok(current)
-        }
-
-        pub(super) fn make_dirs(&self, components: &[&str]) -> Result<(), SinkError> {
-            self.descend(components).map(drop)
-        }
-
-        pub(super) fn create_file(&self, parents: &[&str], name: &str) -> Result<File, SinkError> {
-            let parent = self.descend(parents)?;
-            let fd = openat(
-                &parent,
-                name,
-                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                FILE_MODE,
-            )
-            .map_err(blocked_or_io)?;
-            Ok(File::from(fd))
-        }
+    pub fn gid(&self) -> u32 {
+        self.gid
     }
 }
 
-#[cfg(not(unix))]
-mod imp {
-    use std::fs::{File, OpenOptions};
-    use std::path::{Path, PathBuf};
+/// Propriétaire et droits FIXES de ce que l'extraction crée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteSpec {
+    owner: FileOwner,
+    file_mode: u32,
+    dir_mode: u32,
+}
 
-    use crate::domain::archive::SinkError;
-
-    pub(super) struct Root(PathBuf);
-
-    fn io(error: std::io::Error) -> SinkError {
-        match error.kind() {
-            std::io::ErrorKind::AlreadyExists => SinkError::AlreadyExists,
-            kind => SinkError::Io(kind),
-        }
+impl WriteSpec {
+    /// `file_mode` : lecture/écriture seulement (aucun bit d'exécution, `setuid`, `setgid` ni
+    /// `sticky`), lecture par le propriétaire au moins. `dir_mode` : `rwx` pour le propriétaire au
+    /// moins, aucun bit spécial. Sinon `None`.
+    pub fn new(owner: FileOwner, file_mode: u32, dir_mode: u32) -> Option<Self> {
+        let file_ok = file_mode & !0o666 == 0 && file_mode & 0o400 != 0;
+        let dir_ok = dir_mode & !0o777 == 0 && dir_mode & 0o700 == 0o700;
+        (file_ok && dir_ok).then_some(Self {
+            owner,
+            file_mode,
+            dir_mode,
+        })
     }
 
-    impl Root {
-        pub(super) fn open(path: &Path) -> std::io::Result<Self> {
-            let metadata = std::fs::symlink_metadata(path)?;
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(std::io::ErrorKind::InvalidInput.into());
+    pub fn owner(&self) -> FileOwner {
+        self.owner
+    }
+
+    pub fn file_mode(&self) -> u32 {
+        self.file_mode
+    }
+
+    pub fn dir_mode(&self) -> u32 {
+        self.dir_mode
+    }
+}
+
+/// Où poser le dossier extrait : une racine de CONFIANCE absolue et un chemin relatif sous elle, dont
+/// le dernier composant est le nom (qui ne doit pas exister) et les autres des dossiers existants.
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(unix), allow(dead_code))] // hors Unix, rien n'est écrit : les champs ne sont pas lus
+pub struct Destination<'a> {
+    trusted_root: &'a Path,
+    relative: &'a Path,
+}
+
+/// Profondeur maximale du chemin relatif d'une destination.
+const MAX_DESTINATION_DEPTH: usize = 64;
+
+impl<'a> Destination<'a> {
+    /// `None` si la racine n'est pas absolue ou si le chemin relatif est vide, absolu, ou contient
+    /// autre chose que des noms simples (`.`, `..`, préfixe).
+    pub fn new(trusted_root: &'a Path, relative: &'a Path) -> Option<Self> {
+        if !trusted_root.is_absolute() {
+            return None;
+        }
+        let mut count = 0usize;
+        for component in relative.components() {
+            if !matches!(component, Component::Normal(_)) {
+                return None;
             }
-            Ok(Self(path.to_path_buf()))
+            count += 1;
         }
+        (1..=MAX_DESTINATION_DEPTH)
+            .contains(&count)
+            .then_some(Self {
+                trusted_root,
+                relative,
+            })
+    }
 
-        fn descend(&self, components: &[&str]) -> Result<PathBuf, SinkError> {
-            let mut current = self.0.clone();
-            for component in components {
-                current.push(component);
-                match std::fs::symlink_metadata(&current) {
-                    Ok(metadata) if metadata.file_type().is_symlink() => {
-                        return Err(SinkError::Blocked);
-                    }
-                    Ok(metadata) if metadata.is_dir() => {}
-                    Ok(_) => return Err(SinkError::Blocked),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                        std::fs::create_dir(&current).map_err(io)?;
-                    }
-                    Err(error) => return Err(io(error)),
-                }
-            }
-            Ok(current)
-        }
+    #[cfg(unix)]
+    fn trusted_root(&self) -> &Path {
+        self.trusted_root
+    }
 
-        pub(super) fn make_dirs(&self, components: &[&str]) -> Result<(), SinkError> {
-            self.descend(components).map(drop)
-        }
+    /// Les noms simples du chemin relatif, le dernier compris.
+    #[cfg(unix)]
+    fn names(&self) -> Vec<&std::ffi::OsStr> {
+        self.relative
+            .components()
+            .filter_map(|component| match component {
+                Component::Normal(name) => Some(name),
+                _ => None,
+            })
+            .collect()
+    }
+}
 
-        pub(super) fn create_file(&self, parents: &[&str], name: &str) -> Result<File, SinkError> {
-            let parent = self.descend(parents)?;
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(parent.join(name))
-                .map_err(io)
-        }
+/// Ouvre le fichier d'archive : sans suivre de lien, sans bloquer sur un tube nommé, et seulement un
+/// fichier ordinaire (vérifié sur le descripteur ouvert).
+fn open_archive(path: &Path) -> Result<File, ArchiveRefusal> {
+    let file = open_read_no_follow(path).map_err(|_| ArchiveRefusal::SourceUnreadable)?;
+    match file.metadata() {
+        Ok(metadata) if metadata.is_file() => Ok(file),
+        _ => Err(ArchiveRefusal::SourceUnreadable),
     }
 }
 
@@ -200,7 +183,7 @@ pub fn inspect_file(
     limits: &ArchiveLimits,
     cancel: Cancel<'_>,
 ) -> Result<Inspection, ArchiveRefusal> {
-    let mut file = File::open(path).map_err(|_| ArchiveRefusal::SourceUnreadable)?;
+    let mut file = open_archive(path)?;
     inspect(&mut file, limits, cancel)
 }
 
@@ -212,66 +195,30 @@ pub fn read_file_entry(
     limits: &ArchiveLimits,
     cancel: Cancel<'_>,
 ) -> Result<Vec<u8>, ArchiveRefusal> {
-    let mut file = File::open(path).map_err(|_| ArchiveRefusal::SourceUnreadable)?;
+    let mut file = open_archive(path)?;
     read_one(&mut file, inspection, wanted, limits, cancel)
 }
 
-fn staging_beside(destination: &Path) -> Option<PathBuf> {
-    let name = destination.file_name()?.to_str()?;
-    let parent = destination.parent().filter(|p| !p.as_os_str().is_empty())?;
-    Some(parent.join(format!(".{name}.staging-{}", ulid::Ulid::generate())))
-}
-
-fn create_private_dir(path: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        std::fs::DirBuilder::new().mode(0o750).create(path)
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::create_dir(path)
-    }
-}
-
-fn absent(path: &Path) -> bool {
-    matches!(
-        std::fs::symlink_metadata(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound
-    )
-}
-
-/// Extrait l'archive inspectée dans `destination`, qui ne doit pas exister : dossier d'attente voisin,
-/// extraction, puis bascule. L'empreinte du fichier est recalculée et doit être celle de l'inspection.
-/// Refus, panne ou annulation : le dossier d'attente est retiré, `destination` n'existe pas.
+/// Extrait l'archive inspectée sous `destination` (dont le dernier composant ne doit pas exister) :
+/// dossier d'attente voisin, extraction, `fsync`, bascule sans remplacement, `fsync` du parent.
+/// L'empreinte du fichier est recalculée et doit être celle de l'inspection. Refus, panne ou
+/// annulation : le dossier d'attente est retiré et la destination n'existe pas.
 pub fn extract_file(
     path: &Path,
     inspection: &Inspection,
-    destination: &Path,
+    destination: &Destination<'_>,
+    spec: &WriteSpec,
     limits: &ArchiveLimits,
     cancel: Cancel<'_>,
 ) -> Result<ExtractReport, ArchiveRefusal> {
-    let Some(staging) = staging_beside(destination) else {
-        return Err(ArchiveRefusal::WriteFailed);
-    };
-    if !absent(destination) {
-        return Err(ArchiveRefusal::WriteFailed);
+    #[cfg(unix)]
+    {
+        let mut file = open_archive(path)?;
+        unix::extract_into(&mut file, inspection, destination, spec, limits, cancel)
     }
-    let mut file = File::open(path).map_err(|_| ArchiveRefusal::SourceUnreadable)?;
-    create_private_dir(&staging).map_err(|_| ArchiveRefusal::WriteFailed)?;
-    let outcome = DirectorySink::open(&staging)
-        .map_err(|_| ArchiveRefusal::WriteFailed)
-        .and_then(|mut sink| extract(&mut file, inspection, &mut sink, limits, cancel));
-    let report = match outcome {
-        Ok(report) => report,
-        Err(refusal) => {
-            let _ = std::fs::remove_dir_all(&staging);
-            return Err(refusal);
-        }
-    };
-    if !absent(destination) || std::fs::rename(&staging, destination).is_err() {
-        let _ = std::fs::remove_dir_all(&staging);
-        return Err(ArchiveRefusal::WriteFailed);
+    #[cfg(not(unix))]
+    {
+        let _ = (path, inspection, destination, spec, limits, cancel);
+        Err(ArchiveRefusal::AtomicSwitchUnavailable)
     }
-    Ok(report)
 }

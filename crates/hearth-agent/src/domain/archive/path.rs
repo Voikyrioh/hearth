@@ -10,7 +10,7 @@ use super::limits::ArchiveLimits;
 use super::refusal::ArchiveRefusal;
 
 /// Chemin relatif jugé : UTF-8 valide, `/` pour seul séparateur, aucun composant vide, `.` ni `..`,
-/// aucun caractère de contrôle, aucun nom réservé de Windows, au plus `max_depth` niveaux.
+/// aucun caractère de contrôle ni de format (`is_forbidden_char`), aucun nom réservé de Windows, au plus `max_depth` niveaux.
 /// Seul `judge` en fabrique : posséder un `ArchivePath`, c'est que le nom a passé tous les refus.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArchivePath(String);
@@ -33,6 +33,43 @@ impl ArchivePath {
 pub(super) struct JudgedName {
     pub path: ArchivePath,
     pub trailing_slash: bool,
+}
+
+/// Caractères de FORMAT d'Unicode (catégorie générale `Cf`, Unicode 16.0) : ils ne s'impriment pas mais
+/// changent l'affichage (inversion bidirectionnelle, largeur nulle, marques de langue) et permettent de
+/// faire passer un nom pour un autre. Le standard de Rust n'expose pas les catégories : la table est
+/// écrite ici, testée caractère par caractère, et à relire à chaque montée d'Unicode.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0x00AD
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x202A..=0x202E
+            | 0x2060..=0x2064
+            | 0x2066..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x1_3430..=0x1_343F
+            | 0x1_BCA0..=0x1_BCA3
+            | 0x1_D173..=0x1_D17A
+            | 0xE0001
+            | 0xE0020..=0xE007F
+    )
+}
+
+/// Un nom ne contient AUCUN caractère de catégorie `Cc` (contrôles C0, DEL et C1), `Cf` (format),
+/// `Zl` (U+2028) ni `Zp` (U+2029) : voir `BR-ARCH-003`.
+pub(super) fn is_forbidden_char(c: char) -> bool {
+    c.is_control() || is_format_char(c) || matches!(c, '\u{2028}' | '\u{2029}')
 }
 
 const RESERVED_DEVICES: [&str; 6] = ["con", "prn", "aux", "nul", "conin$", "conout$"];
@@ -67,7 +104,7 @@ pub(super) fn judge(raw: &[u8], limits: &ArchiveLimits) -> Result<JudgedName, Ar
         return Err(ArchiveRefusal::ControlCharacter);
     }
     let name = std::str::from_utf8(raw).map_err(|_| ArchiveRefusal::NonUtf8Name)?;
-    if name.chars().any(char::is_control) {
+    if name.chars().any(is_forbidden_char) {
         return Err(ArchiveRefusal::ControlCharacter);
     }
     if name.contains('\\') {

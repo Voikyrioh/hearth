@@ -294,7 +294,7 @@ fn a_one_level_bomb_is_refused_by_ratio_before_any_decompression() {
 }
 
 #[test]
-fn many_moderately_compressed_entries_trip_the_archive_ratio() {
+fn with_the_entry_ratio_relaxed_one_big_entry_still_trips_the_archive_ratio() {
     let limits = ArchiveLimits {
         max_entry_ratio: 1_000_000,
         ..ArchiveLimits::default()
@@ -479,4 +479,113 @@ fn an_index_claiming_sixty_mebibytes_in_a_tiny_file_is_refused_without_reserving
     .build();
     assert!(bytes.len() < 1000);
     assert_eq!(code_of(bytes), "UNCOVERED_BYTES");
+}
+
+#[test]
+fn many_small_entries_each_under_the_entry_floor_still_trip_the_archive_ratio() {
+    // Huit entrées de 512 Kio de zéros : aucune ne dépasse le plancher du taux par entrée (1 Mio), mais
+    // leur somme (4 Mio) dépasse 100 fois le fichier.
+    let entries: Vec<ZEntry> = (0..8)
+        .map(|i| ZEntry::file(&format!("z{i}"), &vec![0u8; 512 * 1024]).deflated())
+        .collect();
+    let bytes = Zip::of(entries).build();
+    assert!(bytes.len() < 20_000);
+    assert!(matches!(
+        refusal_of(bytes),
+        ArchiveRefusal::ArchiveRatioTooHigh { ratio: 100 }
+    ));
+}
+
+#[test]
+fn a_link_or_special_file_is_refused_whatever_host_the_archive_claims() {
+    for made_by in [0x0000u16, 0x0A00, 0x0B14, 0x031E] {
+        for (mode, code) in [
+            (0o120_777u32, "SYMBOLIC_LINK"),
+            (0o010_644, "SPECIAL_FILE"),
+            (0o060_644, "SPECIAL_FILE"),
+            (0o020_644, "SPECIAL_FILE"),
+            (0o140_644, "SPECIAL_FILE"),
+        ] {
+            let mut entry = ZEntry::file("evil", b"target");
+            entry.made_by = made_by;
+            let bytes = Zip::of(vec![entry.mode(mode)]).build();
+            assert_eq!(
+                code_of(bytes),
+                code,
+                "made_by {made_by:#06x}, mode {mode:o}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_local_extra_field_is_a_short_exact_run_of_records() {
+    let record = |id: u16, body: &[u8]| {
+        let mut out = id.to_le_bytes().to_vec();
+        out.extend((body.len() as u16).to_le_bytes());
+        out.extend(body);
+        out
+    };
+    let with_extra = |extra: Vec<u8>| {
+        let mut entry = ZEntry::file("a.txt", b"hello");
+        entry.local_extra = extra;
+        Zip::of(vec![entry]).build()
+    };
+    // Un horodatage d'Info-ZIP : accepté.
+    judge_bytes(with_extra(record(0x5455, &[1, 0, 0, 0, 0]))).unwrap();
+    // Un octet de trop après le dernier enregistrement, ou un enregistrement qui déborde : refusé.
+    let mut trailing = record(0x5455, &[1, 0, 0, 0, 0]);
+    trailing.push(0xAA);
+    assert_eq!(code_of(with_extra(trailing)), "UNCOVERED_BYTES");
+    assert_eq!(
+        code_of(with_extra(vec![0x55, 0x54, 0xFF, 0x00, 1])),
+        "UNCOVERED_BYTES"
+    );
+    // Un champ énorme, même bien formé, cacherait n'importe quoi.
+    assert_eq!(
+        code_of(with_extra(record(0xCAFE, &vec![7u8; 4000]))),
+        "UNCOVERED_BYTES"
+    );
+}
+
+#[test]
+fn bytes_after_the_end_of_a_deflate_stream_are_refused() {
+    let honest = deflate(b"hello hello hello");
+    let mut padded = honest.clone();
+    padded.extend([0xAA, 0xBB, 0xCC]);
+    let mut entry = ZEntry::file("a.txt", b"hello hello hello").deflated();
+    entry.raw_payload = Some(honest);
+    judge_bytes(Zip::of(vec![entry]).build()).unwrap();
+    let mut entry = ZEntry::file("a.txt", b"hello hello hello").deflated();
+    entry.raw_payload = Some(padded);
+    assert_eq!(code_of(Zip::of(vec![entry]).build()), "UNCOVERED_BYTES");
+}
+
+#[test]
+fn a_folder_entry_carries_nothing_but_an_empty_deflate_stream() {
+    let dir = |payload: Vec<u8>| {
+        let mut entry = ZEntry::dir("d/").deflated();
+        entry.raw_payload = Some(payload);
+        Zip::of(vec![entry]).build()
+    };
+    judge_bytes(dir(vec![0x03, 0x00])).unwrap();
+    assert_eq!(code_of(dir(vec![0xAA, 0xBB])), "UNCOVERED_BYTES");
+    assert_eq!(code_of(dir(vec![0x03])), "UNCOVERED_BYTES");
+}
+
+#[test]
+fn a_partly_saturated_end_record_must_agree_with_the_zip64_record() {
+    let two = |partial: Option<u16>| {
+        Zip {
+            zip64: true,
+            zip64_partial_count: partial,
+            ..Zip::of(vec![ZEntry::file("a", b"1"), ZEntry::file("b", b"2")])
+        }
+        .build()
+    };
+    // Le nombre à 16 bits dit la même chose que l'enregistrement ZIP64 : accepté.
+    assert_eq!(judge_bytes(two(Some(2))).unwrap().entries().len(), 2);
+    // Il dit autre chose, les deux autres champs étant saturés : deux lecteurs verraient deux archives.
+    assert_eq!(code_of(two(Some(1))), "INDEX_LIES");
+    assert_eq!(code_of(two(Some(3))), "INDEX_LIES");
 }

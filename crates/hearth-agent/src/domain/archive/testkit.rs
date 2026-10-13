@@ -69,6 +69,8 @@ pub struct ZEntry {
     pub offset_override: Option<u32>,
     pub raw_payload: Option<Vec<u8>>,
     pub central_extra: Vec<u8>,
+    /// Champ « extra » de l'en-tête LOCAL, tel quel.
+    pub local_extra: Vec<u8>,
 }
 
 impl ZEntry {
@@ -95,6 +97,7 @@ impl ZEntry {
             offset_override: None,
             raw_payload: None,
             central_extra: Vec::new(),
+            local_extra: Vec::new(),
         }
     }
     pub fn dir(name: &str) -> Self {
@@ -129,6 +132,8 @@ pub struct Zip {
     pub eocd_disk: u16,
     pub second_end_record: bool,
     pub zip64: bool,
+    /// Avec `zip64` : nombre d'entrées montré par l'enregistrement de fin à 16 bits au lieu de 0xFFFF.
+    pub zip64_partial_count: Option<u16>,
 }
 
 impl Zip {
@@ -166,8 +171,9 @@ impl Zip {
             u32le(&mut out, if e.descriptor { 0 } else { csize });
             u32le(&mut out, if e.descriptor { 0 } else { usize_ });
             u16le(&mut out, name.len() as u16);
-            u16le(&mut out, 0);
+            u16le(&mut out, e.local_extra.len() as u16);
             out.extend(&name);
+            out.extend(&e.local_extra);
             out.extend(&payload);
             if e.descriptor {
                 u32le(&mut out, 0x0807_4b50);
@@ -250,7 +256,7 @@ impl Zip {
             u16le(out, self.eocd_disk);
             u16le(out, 0);
             let shown = if self.zip64 {
-                0xFFFF
+                self.zip64_partial_count.unwrap_or(0xFFFF)
             } else {
                 self.count_lie.unwrap_or(count)
             };

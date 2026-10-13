@@ -436,3 +436,17 @@ fn an_extended_header_announcing_a_huge_size_is_refused_without_reading_or_reser
         assert!(refusal_of(bytes).is_about_the_archive(), "{}", flag as char);
     }
 }
+
+#[test]
+fn the_zero_padding_after_the_end_of_a_tar_is_capped() {
+    let base = tar_of(&[TEntry::file("a.txt", b"hello")]);
+    // Le remplissage d'un facteur de blocage ordinaire (quelques Kio) passe.
+    let mut padded = base.clone();
+    padded.extend(vec![0u8; 9 * 1024]);
+    judge_bytes(padded).unwrap();
+    // Deux Mio de zéros ne passent pas, en tar comme en tar.gz.
+    let mut stuffed = base;
+    stuffed.extend(vec![0u8; 2 * MIB as usize]);
+    assert_eq!(code_of(stuffed.clone()), "UNCOVERED_BYTES");
+    assert_eq!(code_of(gzip(&stuffed)), "UNCOVERED_BYTES");
+}

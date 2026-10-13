@@ -52,10 +52,10 @@ fn storage(path: &Path, error: &io::Error) -> KeyStoreError {
     }
 }
 
-/// Ouvre la clé en lecture sans jamais suivre un lien symbolique (`O_NOFOLLOW`) et sans jamais bloquer
-/// sur un tube nommé posé à sa place (`O_NONBLOCK` : l'ouverture rend la main, le contrôle de genre
-/// vient avant toute lecture).
-fn open_key(path: &Path) -> io::Result<fs::File> {
+/// Ouvre un fichier en lecture sans jamais suivre un lien symbolique (`O_NOFOLLOW`) et sans jamais
+/// bloquer sur un tube nommé posé à sa place (`O_NONBLOCK` : l'ouverture rend la main, le contrôle de
+/// genre vient avant toute lecture). Aussi utilisée pour ouvrir une archive (`archive_fs.rs`).
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -86,12 +86,12 @@ fn effective_uid() -> Option<u32> {
 
 /// Un lien symbolique refusé par `O_NOFOLLOW` répond `ELOOP`.
 #[cfg(unix)]
-fn is_symlink_refusal(error: &io::Error) -> bool {
+pub(crate) fn is_symlink_refusal(error: &io::Error) -> bool {
     error.raw_os_error() == Some(libc::ELOOP)
 }
 
 #[cfg(not(unix))]
-fn is_symlink_refusal(_error: &io::Error) -> bool {
+pub(crate) fn is_symlink_refusal(_error: &io::Error) -> bool {
     false
 }
 
@@ -99,7 +99,7 @@ fn is_symlink_refusal(_error: &io::Error) -> bool {
 /// genre (fichier ordinaire, avant toute lecture), propriétaire (l'utilisateur effectif de l'agent),
 /// droits (aucun accès pour les autres), taille.
 fn read_file(path: &Path) -> KeyRead {
-    let file = match open_key(path) {
+    let file = match open_read_no_follow(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return KeyRead::Absent,
         Err(error) if is_symlink_refusal(&error) => {
