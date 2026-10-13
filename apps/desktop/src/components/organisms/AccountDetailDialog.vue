@@ -90,12 +90,12 @@ const title = computed(() =>
 
 .detail__note {
   margin: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
 .detail__line dt {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .detail__line dd {

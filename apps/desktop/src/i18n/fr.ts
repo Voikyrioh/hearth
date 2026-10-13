@@ -745,6 +745,9 @@ export const fr = {
     resultRollbackFailed:
       "La mise à jour de l'agent n'a pas pu être menée à bout, et le retour à la version précédente n'est pas confirmé. Vérifie l'agent sur le serveur (guide « Mettre à jour l'agent »).",
     resultFailed: "La mise à jour de l'agent n'a pas abouti.",
+    // Issue que ce client ne connaît pas. À trancher par le propriétaire (neutre proposé : « Hearth ne sait pas comment
+    // la mise à jour s'est terminée. Vérifie la version affichée. ») ; aujourd'hui, même texte que l'échec.
+    resultUnknown: "La mise à jour de l'agent n'a pas abouti.",
     dismiss: "Compris",
     historySucceeded: "Dernière mise à jour de l'agent : réussie ({when}).",
     historyRolledBack:

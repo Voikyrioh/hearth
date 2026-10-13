@@ -67,7 +67,7 @@ test("filtres : appliquer, recherche, plusieurs valeurs, effacer d'un clic", asy
   // Plus de bouton « Appliquer » : la recherche s'applique à la frappe.
   await expect(page.getByRole("button", { name: /Appliquer/ })).toHaveCount(0);
   await page.getByRole("searchbox", { name: "Rechercher" }).fill("léa");
-  await expect(page.getByText(/événements( ou plus)?$/).first()).toBeVisible();
+  await expect(page.getByText(/événements( affichés, d'autres plus bas)?$/).first()).toBeVisible();
   await expect(page.getByText("100 événements affichés, d'autres plus bas")).toHaveCount(0, {
     timeout: 3000,
   });

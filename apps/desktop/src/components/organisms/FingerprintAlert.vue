@@ -95,7 +95,7 @@ function accept() {
 
 .alert__text {
   margin-top: var(--space-3);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .alert__prints {

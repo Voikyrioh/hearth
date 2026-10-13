@@ -91,7 +91,7 @@ const ICONS: Record<ToastKind, IconName> = {
   padding: var(--space-half) var(--space-2);
   border-radius: var(--radius-pill);
   background: var(--bd);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
   white-space: nowrap;

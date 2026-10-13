@@ -12,3 +12,4 @@ L'interface ne fournit NI adresse, NI signature, NI somme : elle ne transmet que
 
 HRT-30 : la confirmation de la mise à jour passe par `AdminActDialog` (kind `agent_update`, jamais couvert par le délai : mot de passe toujours demandé).
 - HRT-40 (C42) : la raison du bouton grisé est écrite sous le bouton (`reason-below`). FIX:01M4ECZJBH94ABZXSTNNFFGZ5P.
+- Revue PR 91, à trancher par le propriétaire : la police de la phrase de version est le jeton `--font-versions` (chasse fixe aujourd'hui) ; le texte d'une issue de mise à jour inconnue est `agentUpdate.resultUnknown` dans `i18n/fr.ts` (même texte que l'échec aujourd'hui ; proposé : « Hearth ne sait pas comment la mise à jour s'est terminée. Vérifie la version affichée. »).

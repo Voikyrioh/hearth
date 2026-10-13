@@ -76,7 +76,7 @@ const covered = useCoverage(props.entry);
 
 <style scoped>
 .disks__none {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .disks__list {
@@ -124,7 +124,7 @@ const covered = useCoverage(props.entry);
   flex: 0 1 auto;
   min-width: 0;
   max-width: 45%;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
 }
 

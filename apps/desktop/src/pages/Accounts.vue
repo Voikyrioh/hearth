@@ -265,6 +265,6 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
 }
 
 .accounts__notice--pending {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 </style>

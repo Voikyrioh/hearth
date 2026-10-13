@@ -261,6 +261,6 @@ const windowOptions = WINDOW_KEYS.map((key) => ({ value: key, label: t(WINDOW_LA
   justify-content: center;
   gap: var(--space-3);
   min-height: var(--soon-min-height);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 </style>

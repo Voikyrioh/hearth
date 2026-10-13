@@ -141,7 +141,7 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
 
 .mine__as {
   margin-top: var(--space-2);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .mine__actions {

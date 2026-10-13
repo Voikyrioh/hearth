@@ -146,19 +146,19 @@ function onNativeClose() {
 
 .detail__technical {
   margin-top: var(--space-4);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   font-weight: var(--fw-medium);
 }
 
 .detail__list--technical {
   margin-top: var(--space-2);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
 .detail__label {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .detail__value {

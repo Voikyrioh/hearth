@@ -86,6 +86,6 @@ const since = computed(() => (props.alert.since ? formatDateTime(props.alert.sin
 }
 
 .card__todo {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 </style>

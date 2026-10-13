@@ -336,13 +336,18 @@ test("journal : textes lisibles (raison avec majuscule, détail sans valeur vide
     expect(reason.charAt(0), reason).toBe(reason.charAt(0).toUpperCase());
   }
   await row.click();
-  const detail = page.locator("dialog[open] .detail__list:not(.detail__list--technical)");
-  await expect(detail).toBeVisible();
+  // Le détail d'origine = la liste lisible ET les détails techniques (source, numéro) : tout est contrôlé.
+  const detail = page.locator("dialog[open] .detail__list");
+  await expect(detail).toHaveCount(2);
+  await expect(detail.first()).toBeVisible();
+  await expect(page.locator("dialog[open] .detail__list--technical")).toBeVisible();
   const labels = await detail.locator("dt").allInnerTexts();
   const values = await detail.locator("dd").allInnerTexts();
   expect(
     values.every((value) => value.trim() !== ""),
     `valeurs vides : ${labels.join(", ")}`,
   ).toBe(true);
-  expect(await detail.innerText()).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z/);
+  expect(await page.locator("dialog[open]").innerText()).not.toMatch(
+    /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z/,
+  );
 });

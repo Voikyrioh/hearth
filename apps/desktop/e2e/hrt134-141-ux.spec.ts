@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { decodePng } from "../src/assets/png-decode";
 
 // Revue UX du 2026-10-13, sur le pont SIMULÉ, mesures de GÉOMÉTRIE aux largeurs 1100, 1280, 1366, 1920 et 2560 :
 // - HRT-134 : toute bulle du tableau des comptes est entière dans la fenêtre, hors du tableau, sans barre de
@@ -224,18 +225,7 @@ function ratio(a: string, b: string): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05);
 }
-function mix(fg: string, bg: string, alpha: number): string {
-  const part = (i: number) =>
-    Math.round(
-      Number.parseInt(fg.slice(1 + i * 2, 3 + i * 2), 16) * alpha +
-        Number.parseInt(bg.slice(1 + i * 2, 3 + i * 2), 16) * (1 - alpha),
-    )
-      .toString(16)
-      .padStart(2, "0");
-  return `#${part(0)}${part(1)}${part(2)}`;
-}
-
-test("HRT-141 : le texte atténué atteint 4,5 pour 1 sur chaque fond, un bouton inactif 3 pour 1", async ({
+test("HRT-141 : trois niveaux de texte lisibles (4,5 pour 1) et distincts sur chaque fond", async ({
   page,
 }) => {
   await page.goto("/?nodev#/servers/forge/dashboard");
@@ -249,33 +239,114 @@ test("HRT-141 : le texte atténué atteint 4,5 pour 1 sur chaque fond, un bouton
       card: read("card"),
       "card-2": read("card-2"),
       tx: read("tx"),
-      tx2: read("tx2"),
+      "tx-secondary": read("tx-secondary"),
       tx3: read("tx3"),
-      ac: read("ac"),
-      "on-ac": read("on-ac"),
-      crit: read("crit"),
-      opacity: Number.parseFloat(read("opacity-disabled")),
     };
   });
   for (const surface of ["bg", "side", "card", "card-2"] as const) {
-    for (const text of ["tx", "tx2", "tx3"] as const) {
+    for (const text of ["tx", "tx-secondary", "tx3"] as const) {
       expect(ratio(tokens[text], tokens[surface]), `${text} sur ${surface}`).toBeGreaterThanOrEqual(
         4.5,
       );
     }
   }
-  // Inactif : tout (texte ET fond) passe par l'opacité sur la carte.
-  const under = tokens.card;
-  const variants = [
-    { name: "secondaire", fg: tokens.tx, bg: under },
-    { name: "danger", fg: tokens.crit, bg: under },
-    { name: "principal", fg: tokens["on-ac"], bg: tokens.ac },
-  ];
-  for (const { name, fg, bg } of variants) {
-    const shownText = mix(fg, under, tokens.opacity);
-    const shownBg = bg === under ? under : mix(bg, under, tokens.opacity);
-    expect(ratio(shownText, shownBg), `bouton ${name} inactif`).toBeGreaterThanOrEqual(3);
+  // La hiérarchie reste visible : au moins 1,5 pour 1 entre deux niveaux voisins.
+  expect(ratio(tokens.tx, tokens["tx-secondary"]), "principal / secondaire").toBeGreaterThanOrEqual(
+    1.5,
+  );
+  expect(ratio(tokens["tx-secondary"], tokens.tx3), "secondaire / discret").toBeGreaterThanOrEqual(
+    1.5,
+  );
+});
+
+/** Couleur calculée `rgb(r, g, b)` en `#rrggbb`. */
+function hexOf(rgb: string): string {
+  const parts = (rgb.match(/[\d.]+/g) ?? []).slice(0, 3).map((n) => Math.round(Number(n)));
+  return `#${parts.map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}
+
+type Look = {
+  color: string;
+  background: string;
+  opacity: string;
+  shadow: string;
+  cursor: string;
+  border: string;
+};
+
+test("HRT-141 : un bouton inactif se reconnaît d'un coup d'œil et reste lisible, pour les quatre variantes", async ({
+  page,
+}) => {
+  await openAccounts(page, { width: 1366, height: 800 });
+  const tokens = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement);
+    const read = (name: string) => style.getPropertyValue(`--${name}`).trim();
+    return { "card-2": read("card-2"), ac: read("ac") };
+  });
+  // Un vrai bouton inactif du tableau (« Fermer les sessions » d'un compte sans session) sert de modèle : on en
+  // pose une copie par variante, avec la vraie feuille de style du composant, active puis inactive.
+  const model = page
+    .locator("tr[data-account='lea']")
+    .getByRole("button", { name: /^Fermer les sessions/ });
+  await expect(model).toHaveAttribute("aria-disabled", "true");
+  const measures = await model.evaluate((button) => {
+    const host = button.parentElement;
+    if (!host) throw new Error("pas d'hôte");
+    const read = (element: Element): Look => {
+      const style = getComputedStyle(element);
+      return {
+        color: style.color,
+        background: style.backgroundColor,
+        opacity: style.opacity,
+        shadow: style.boxShadow,
+        cursor: style.cursor,
+        border: style.borderTopStyle,
+      };
+    };
+    const out: Record<string, { active: Look; inactive: Look }> = {};
+    for (const variant of ["primary", "danger", "secondary", "ghost"]) {
+      const looks: Look[] = [];
+      for (const inactive of [false, true]) {
+        const copy = button.cloneNode(true) as HTMLElement;
+        copy.className = copy.className.replace(
+          /btn--(primary|danger|secondary|ghost)/,
+          `btn--${variant}`,
+        );
+        if (inactive) copy.setAttribute("aria-disabled", "true");
+        else copy.removeAttribute("aria-disabled");
+        copy.setAttribute("data-probe", `${variant}-${inactive ? "inactif" : "actif"}`);
+        host.appendChild(copy);
+        looks.push(read(copy));
+      }
+      out[variant] = { active: looks[0] as Look, inactive: looks[1] as Look };
+    }
+    return out;
+  });
+  for (const [variant, { active, inactive }] of Object.entries(measures)) {
+    const label = `variante ${variant}`;
+    // Lisible : texte contre son fond, sans passer par l'opacité.
+    expect(inactive.opacity, `${label} : aucune opacité`).toBe("1");
+    expect(inactive.shadow, `${label} : pas d'ombre`).toBe("none");
+    expect(inactive.cursor, `${label} : curseur`).toBe("not-allowed");
+    expect(inactive.border, `${label} : contour en tirets`).toBe("dashed");
+    expect(hexOf(inactive.background), `${label} : fond de surface neutre`).toBe(tokens["card-2"]);
+    expect(
+      ratio(hexOf(inactive.color), hexOf(inactive.background)),
+      `${label} : texte inactif contre son fond`,
+    ).toBeGreaterThanOrEqual(4.5);
+    // Reconnaissable : ni la couleur d'accent, ni le texte de l'actif.
+    expect(hexOf(inactive.background), `${label} : pas d'accent`).not.toBe(tokens.ac);
+    expect(hexOf(inactive.color), `${label} : texte différent de l'actif`).not.toBe(
+      hexOf(active.color),
+    );
   }
+  // Le bouton principal inactif contre l'actif : bien plus que les 1,65 pour 1 d'une simple opacité.
+  const primary = measures.primary;
+  if (!primary) throw new Error("pas de variante principale");
+  expect(
+    ratio(hexOf(primary.active.background), hexOf(primary.inactive.background)),
+    "principal actif contre inactif",
+  ).toBeGreaterThanOrEqual(3);
 });
 
 // Captures de contrôle (Réglages, tableau de bord, comptes) aux quatre largeurs de la revue ; aucune assertion
@@ -296,3 +367,151 @@ for (const size of SIZES.filter((entry) => entry.width >= 1280)) {
     await page.screenshot({ path: `${SHOTS}/hrt141-comptes-contrastes-${size.width}.png` });
   });
 }
+
+// Revue de la PR 91 : la bulle est un `popover` (couche supérieure), donc au-dessus d'une fenêtre modale ouverte
+// par `showModal()`. Aucune fenêtre de l'application n'a de bulle aujourd'hui : on ouvre la VRAIE fenêtre du détail
+// d'un compte, puis on ouvre une VRAIE bulle de la page (celle du repère, par l'événement que le survol lèverait),
+// que l'on recouvre avec la fenêtre : si la bulle passait dessous, le point d'essai renverrait la fenêtre.
+test("la bulle ouverte pendant qu'une fenêtre modale est ouverte reste au-dessus de la fenêtre", async ({
+  page,
+}) => {
+  await openAccounts(page, { width: 1366, height: 800 });
+  const tag = page.locator("tr[data-account='paul'] [data-services-right]");
+  await tag.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  const facts = await page.evaluate(() => {
+    const modal = document.querySelector("dialog[open]") as HTMLElement;
+    const trigger = document
+      .querySelector("tr[data-account='paul'] [data-services-right]")
+      ?.closest(".tip") as HTMLElement;
+    trigger.dispatchEvent(new MouseEvent("mouseenter"));
+    return new Promise<{
+      popover: boolean;
+      modalIsModal: boolean;
+      box: { x: number; y: number };
+    }>((resolve) =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const bubble = Array.from(document.querySelectorAll<HTMLElement>("[role=tooltip]")).find(
+            (element) => getComputedStyle(element).display !== "none",
+          );
+          if (!bubble) throw new Error("aucune bulle ouverte");
+          const box = bubble.getBoundingClientRect();
+          // La fenêtre est ramenée pile sur la bulle.
+          modal.style.margin = "0";
+          modal.style.position = "fixed";
+          modal.style.left = `${box.left - 20}px`;
+          modal.style.top = `${box.top - 20}px`;
+          resolve({
+            popover: bubble.matches(":popover-open"),
+            modalIsModal: modal.matches(":modal"),
+            box: { x: box.left, y: box.top },
+          });
+        }),
+      ),
+    );
+  });
+  await page.screenshot({ path: `${SHOTS}/bulle-dans-fenetre-modale-1366.png` });
+  expect(facts.modalIsModal, "la fenêtre est modale (couche supérieure)").toBe(true);
+  expect(facts.popover, "la bulle est dans la couche supérieure").toBe(true);
+  // Ce qui est PEINT au coin de la bulle (dans son remplissage) : la couleur de la bulle, pas celle de la fenêtre.
+  // (`elementFromPoint` ne sert pas : le reste de la page est inerte pendant une fenêtre modale.)
+  const colors = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement);
+    return {
+      bubble: style.getPropertyValue("--card-2").trim(),
+      dialog: style.getPropertyValue("--card").trim(),
+    };
+  });
+  const shot = await page.screenshot({
+    clip: { x: facts.box.x + 3, y: facts.box.y + 3, width: 2, height: 2 },
+  });
+  const { rgba } = decodePng(shot);
+  const painted = `#${[0, 1, 2].map((i) => (rgba[i] ?? 0).toString(16).padStart(2, "0")).join("")}`;
+  // Lissage de la capture : on compare des distances, pas l'égalité exacte.
+  const distance = (x: string, y: string) =>
+    [1, 3, 5].reduce(
+      (sum, i) =>
+        sum +
+        Math.abs(Number.parseInt(x.slice(i, i + 2), 16) - Number.parseInt(y.slice(i, i + 2), 16)),
+      0,
+    );
+  expect(
+    distance(painted, colors.bubble),
+    "la couleur peinte est celle de la bulle, pas celle de la fenêtre",
+  ).toBeLessThan(distance(painted, colors.dialog));
+  expect(distance(painted, colors.bubble)).toBeLessThanOrEqual(12);
+});
+
+// Revue de la PR 91 : la bulle suit son déclencheur quand il bouge sans défilement, et se ferme quand il disparaît
+// ou sort du cadre de son conteneur.
+test("la bulle suit son déclencheur quand il bouge, et se ferme quand il disparaît ou sort du cadre", async ({
+  page,
+}) => {
+  await openAccounts(page, { width: 1366, height: 345 });
+  const remove = page
+    .locator("tr[data-account='paul']")
+    .getByRole("button", { name: /^Supprimer paul/ });
+  // Au focus : la souris ne quitte pas le contrôle quand la page défile.
+  await remove.focus();
+  const bubble = page.locator("[role=tooltip]:visible");
+  await expect(bubble).toBeVisible();
+  const gap = async () => {
+    const [b, r] = await Promise.all([bubble.boundingBox(), remove.boundingBox()]);
+    if (!b || !r) throw new Error("pas de boîte");
+    return Math.round(
+      Math.abs(b.y + b.height - r.y) < Math.abs(b.y - (r.y + r.height))
+        ? r.y - (b.y + b.height)
+        : b.y - (r.y + r.height),
+    );
+  };
+  const before = await gap();
+  // 1. Le déclencheur bouge sans défilement ni redimensionnement (une ligne s'ajoute au-dessus).
+  await page.evaluate(() => {
+    const spacer = document.createElement("div");
+    spacer.id = "sonde-espace";
+    spacer.style.height = "24px";
+    document.querySelector("tr[data-account='paul']")?.closest("table")?.before(spacer);
+  });
+  await expect.poll(gap).toBe(before);
+  // 2. Le déclencheur défile avec la page : la bulle l'accompagne.
+  await page.evaluate(() => {
+    const row = document.querySelector("tr[data-account='paul']");
+    let node: HTMLElement | null = row as HTMLElement | null;
+    while (node && node.scrollHeight <= node.clientHeight + 1) node = node.parentElement;
+    node?.scrollBy(0, 12);
+  });
+  await expect.poll(gap).toBe(before);
+  // 3. Le déclencheur sort du cadre du conteneur qui défile (même en restant dans la fenêtre) : la bulle ne flotte pas sans lui.
+  const outside = await page.evaluate(() => {
+    const row = document.querySelector("tr[data-account='paul']") as HTMLElement;
+    // Du contenu de plus sous le tableau : de quoi défiler loin, jusqu'à faire sortir la ligne par le haut.
+    const tall = document.createElement("div");
+    tall.style.height = "3000px";
+    row.closest("table")?.after(tall);
+    const button = row.querySelector("button[aria-label^='Supprimer'], button") as HTMLElement;
+    let node: HTMLElement | null = row;
+    while (node && node.scrollHeight <= node.clientHeight + 1) node = node.parentElement;
+    if (!node) return "pas de conteneur qui défile";
+    node.scrollTo(0, node.scrollHeight);
+    return new Promise<string>((resolve) =>
+      requestAnimationFrame(() => {
+        const frame = node.getBoundingClientRect();
+        const box = button.getBoundingClientRect();
+        resolve(box.top >= frame.bottom || box.bottom <= frame.top ? "dehors" : "dedans");
+      }),
+    );
+  });
+  expect(outside, "le bouton est sorti du cadre au défilement").toBe("dehors");
+  await expect(page.locator("[role=tooltip]:visible")).toHaveCount(0);
+  // 4. Le déclencheur disparaît (masqué) pendant que la bulle est ouverte : elle se ferme.
+  await remove.blur();
+  await remove.focus();
+  await expect(bubble).toBeVisible();
+  await page.evaluate(() => {
+    const row = document.querySelector("tr[data-account='paul']") as HTMLElement;
+    row.style.display = "none";
+  });
+  await expect(page.locator("[role=tooltip]:visible")).toHaveCount(0);
+});

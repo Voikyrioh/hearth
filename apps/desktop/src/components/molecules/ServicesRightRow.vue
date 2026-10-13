@@ -67,7 +67,7 @@ const command = computed(() => (props.known ? grantCommand(props.username, props
 }
 
 .row__line dt {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .row__line dd {
@@ -78,7 +78,7 @@ const command = computed(() => (props.known ? grantCommand(props.username, props
 
 .row__help {
   margin: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 

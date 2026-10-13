@@ -51,22 +51,62 @@ function onViewportChange() {
   place();
 }
 
+/** Position du contrôle au dernier passage : le déclencheur peut bouger sans que rien défile ni se redimensionne. */
+let last = "";
+let frame = 0;
+let watcher: IntersectionObserver | undefined;
+
+function follow() {
+  const anchor = trigger.value;
+  if (anchor) {
+    const r = anchor.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) {
+      // Plus affiché (retiré de la page, masqué) : rien à expliquer.
+      open.value = false;
+      return;
+    }
+    const now = `${r.left}|${r.top}|${r.width}|${r.height}`;
+    if (now !== last) {
+      last = now;
+      place();
+    }
+  }
+  frame = requestAnimationFrame(follow);
+}
+
+function stop() {
+  window.removeEventListener("resize", onViewportChange);
+  window.removeEventListener("scroll", onViewportChange, true);
+  cancelAnimationFrame(frame);
+  watcher?.disconnect();
+  watcher = undefined;
+}
+
 watch(open, async (isOpen) => {
   if (!isOpen) {
-    window.removeEventListener("resize", onViewportChange);
-    window.removeEventListener("scroll", onViewportChange, true);
+    stop();
+    // `?.` : sans `popover` (anciens moteurs, jsdom), `v-show` suffit à cacher la bulle.
+    bubble.value?.hidePopover?.();
     return;
   }
   await nextTick();
+  if (!open.value) return;
+  bubble.value?.showPopover?.();
   place();
   window.addEventListener("resize", onViewportChange);
   window.addEventListener("scroll", onViewportChange, true);
+  last = "";
+  if (typeof requestAnimationFrame === "function") frame = requestAnimationFrame(follow);
+  // Le contrôle défile hors du cadre de son conteneur (en-tête qui le cache) : la bulle ne flotte pas sans lui.
+  if (typeof IntersectionObserver === "function" && trigger.value) {
+    watcher = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => !entry.isIntersecting)) open.value = false;
+    });
+    watcher.observe(trigger.value);
+  }
 });
 
-onBeforeUnmount(() => {
-  window.removeEventListener("resize", onViewportChange);
-  window.removeEventListener("scroll", onViewportChange, true);
-});
+onBeforeUnmount(stop);
 </script>
 
 <template>
@@ -87,6 +127,7 @@ onBeforeUnmount(() => {
         :id="id"
         ref="bubble"
         class="tip__bubble"
+        popover="manual"
         role="tooltip"
         >{{ text }}</span
       >
@@ -102,6 +143,10 @@ onBeforeUnmount(() => {
 /* Hors du conteneur du contrôle : position fixe dans la fenêtre, coordonnées posées par `place()`. */
 .tip__bubble {
   position: fixed;
+  /* `popover` pose des marges et `inset: 0` par défaut : on repart de zéro pour que le placement soit le nôtre. */
+  inset: auto;
+  margin: 0;
+  overflow: visible;
   top: var(--tip-y, 0);
   left: var(--tip-x, 0);
   z-index: var(--z-tooltip);

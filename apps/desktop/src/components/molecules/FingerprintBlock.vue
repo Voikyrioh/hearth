@@ -31,7 +31,7 @@ const groups = computed(() => props.value.split(/\s+/).filter(Boolean));
 
 .fp__label {
   margin-bottom: var(--space-2);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 

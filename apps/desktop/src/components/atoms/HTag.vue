@@ -25,7 +25,7 @@ withDefaults(
   padding: var(--space-half) var(--space-2);
   border: var(--border-width) solid var(--bd);
   border-radius: var(--radius-pill);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   white-space: nowrap;
 }

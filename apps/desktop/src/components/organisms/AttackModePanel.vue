@@ -166,16 +166,16 @@ const text = computed(() => {
 }
 
 .panel__text {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .panel__note {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .panel__notes {
   padding-left: var(--space-4);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   list-style: disc;
 }
 
@@ -193,7 +193,7 @@ const text = computed(() => {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .panel__reason--warn .panel__reason-icon {

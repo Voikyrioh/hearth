@@ -139,7 +139,7 @@ function onClick(event: MouseEvent) {
 }
 
 .btn__reason {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
@@ -194,7 +194,7 @@ function onClick(event: MouseEvent) {
   min-width: var(--target-size);
   padding: 0;
   background: transparent;
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .btn--ghost:hover:not([aria-disabled="true"]) {
@@ -202,10 +202,17 @@ function onClick(event: MouseEvent) {
   color: var(--tx);
 }
 
-/* HRT-141 : inactif, le libellé reste lisible (3 pour 1 au moins, opacité 0,7) ; le contour en tirets dit l'état sans la couleur. */
+/* HRT-141 : inactif = fond de surface neutre, texte au jeton discret (4,7 pour 1 sur ce fond), contour en tirets
+   discret, ni ombre ni couleur d'accent, curseur « interdit ». Rien ne repose sur l'opacité : le bouton reste lisible
+   et se distingue d'un coup d'œil de l'actif (orange plein, ou contour et texte pleins), pour les quatre variantes. */
 .btn[aria-disabled="true"]:not(.btn--busy) {
   border-style: dashed;
-  border-color: currentColor;
+  border-color: var(--tx-faint);
+  background: var(--disabled-bg);
+  color: var(--disabled-tx);
+  opacity: 1;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .btn--busy {

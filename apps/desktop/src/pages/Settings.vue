@@ -152,7 +152,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
 
 .settings__note {
   margin-top: var(--space-5);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .settings__error {
@@ -164,7 +164,7 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
   margin-top: var(--space-4);
   padding-top: var(--space-4);
   border-top: var(--border-width) solid var(--bd);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .settings__mono {

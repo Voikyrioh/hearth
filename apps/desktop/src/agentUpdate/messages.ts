@@ -99,6 +99,9 @@ export function resultMessage(result: ResultLike): string {
         ? t("agentUpdate.resultIdentityChanged")
         : t("agentUpdate.resultRolledBack");
   }
+  // HRT-143 : une issue inconnue (agent plus récent) a son propre texte, séparé de l'échec connu : le propriétaire
+  // peut le rendre neutre en changeant `agentUpdate.resultUnknown` (et le ton ci-dessous) sans toucher aux vrais échecs.
+  if (result.outcome !== "failed") return t("agentUpdate.resultUnknown");
   // HRT-143 : une raison inconnue (agent plus récent) dit le message générique, jamais une page cassée.
   return t(REASONS[result.reason ?? "unknown"] ?? REASONS.unknown);
 }

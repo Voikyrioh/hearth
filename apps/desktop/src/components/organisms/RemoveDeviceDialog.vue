@@ -86,7 +86,7 @@ async function submit() {
 }
 
 .remove__help {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .remove__more summary {

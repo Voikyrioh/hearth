@@ -79,7 +79,7 @@ const lastCheck = computed(() => {
 
 .updates__last {
   margin-top: var(--space-1);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .updates__help {

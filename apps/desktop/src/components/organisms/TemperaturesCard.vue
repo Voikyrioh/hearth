@@ -61,7 +61,7 @@ const covered = useCoverage(props.entry);
 
 <style scoped>
 .temps__none {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .temps__rows {

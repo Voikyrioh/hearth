@@ -85,7 +85,7 @@ withDefaults(
   flex: 0 1 auto;
   align-items: center;
   min-width: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .stat__value {

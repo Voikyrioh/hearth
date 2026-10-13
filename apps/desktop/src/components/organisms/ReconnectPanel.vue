@@ -124,6 +124,6 @@ async function submit(entry: { username: string; password: string; remember: boo
 }
 
 .reconnect__hint {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 </style>

@@ -108,6 +108,36 @@ describe("HTooltip hors de son conteneur (HRT-134)", () => {
     wrapper.unmount();
   });
 
+  it("enters the top layer (popover) when the engine has it, so a modal window cannot hide it", async () => {
+    const show = vi.fn();
+    const hide = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "showPopover", {
+      value: show,
+      configurable: true,
+    });
+    Object.defineProperty(HTMLElement.prototype, "hidePopover", {
+      value: hide,
+      configurable: true,
+    });
+    try {
+      const { wrapper, bubble } = placed(
+        { left: 100, right: 140, top: 100, bottom: 130 },
+        { width: 200, height: 60 },
+      );
+      expect(bubble.getAttribute("popover")).toBe("manual");
+      await wrapper.trigger("mouseenter");
+      await flushPromises();
+      expect(show).toHaveBeenCalledTimes(1);
+      await wrapper.trigger("mouseleave");
+      await flushPromises();
+      expect(hide).toHaveBeenCalled();
+      wrapper.unmount();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "showPopover");
+      Reflect.deleteProperty(HTMLElement.prototype, "hidePopover");
+    }
+  });
+
   it("moves above the control when there is no room below, and closes on Escape", async () => {
     const { wrapper, bubble } = placed(
       { left: 100, right: 140, top: 650, bottom: 680 },

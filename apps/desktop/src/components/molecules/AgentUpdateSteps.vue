@@ -78,7 +78,7 @@ function state(index: number): "done" | "now" | "later" {
 }
 
 .steps__item--done {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .steps__item--done .steps__mark {

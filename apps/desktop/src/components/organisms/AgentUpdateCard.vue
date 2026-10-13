@@ -252,14 +252,14 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
 
 .agent__versions {
   margin-top: var(--space-3);
-  font-family: var(--font-mono);
+  font-family: var(--font-versions);
   font-variant-numeric: tabular-nums;
 }
 
 .agent__note,
 .agent__history {
   margin-top: var(--space-2);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .agent__incompat {

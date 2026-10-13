@@ -247,7 +247,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
 }
 
 .table thead th {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   font-weight: var(--fw-medium);
   letter-spacing: var(--ls-label);
@@ -275,7 +275,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
   font: inherit;
   text-align: left;
   text-decoration: underline;
-  text-decoration-color: var(--tx2);
+  text-decoration-color: var(--tx-secondary);
   text-underline-offset: var(--space-half);
 }
 
