@@ -11,7 +11,7 @@ Procédures opérationnelles : installation, diagnostics, recovery.
 - [Le secret d'empreinte des requêtes suivies](./secret-d-empreinte.md) — où il est, perdu ou remplacé, démarrage refusé (ADR-0034)
 - [La clé des secrets des services](./cle-des-secrets-des-services.md) — `services.key` : où elle est, à sauvegarder AVEC la base, clé manquante ou fausse (secrets illisibles, rien de détruit, jamais régénérée), rotation non prévue (ADR-0044, BR-EDIT-034)
 - [Vérifier les services sur la forge](./verifier-les-services-sur-forge.md) — squelette (HRT-61) : moteur détecté et liste en lecture seule, règles de sécurité (jamais Terraria sans sauvegarde), parties à venir
-- [Mettre en service Calcy](./mettre-en-service-calcy.md) — review automatique des branches du propriétaire : plafond de dépense, règle de fédération (condition d'acteur), variables du dépôt (`CALCY_MODEL`), première PR, couper en une commande, coût par poussée (ADR-0056)
+- [Mettre en service Calcy](./mettre-en-service-calcy.md) — review automatique des branches du propriétaire : désactiver d'abord la règle large, ordre de mise en service, règle de fédération exacte (`job_workflow_ref`, `actor_id`), variables du dépôt, essais négatif et positif, couper en une commande, coût par poussée (ADR-0056)
 
 Structure : `{titre-court}.md` avec sections (prérequis, étapes, diagnostic, rollback).
 

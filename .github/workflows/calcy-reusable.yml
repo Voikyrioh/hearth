@@ -1,0 +1,92 @@
+name: calcy-reusable
+
+# The sensitive half of Calcy (ADR-0056, runbook docs/runbooks/mettre-en-service-calcy.md): identity
+# exchange, call to the Anthropic API, comment. It is only ever started by `calcy-review.yml`, which
+# calls it BY REFERENCE TO `main` (`uses: Voikyrioh/hearth/.github/workflows/calcy-reusable.yml@main`).
+#
+# Why this file exists: on a `push`, GitHub runs the workflow files of the PUSHED commit, so anything
+# written in `calcy-review.yml` (including its `if:` filters) can be rewritten by whoever pushes a
+# branch. This file cannot: the caller names `main`, so the OIDC claim `job_workflow_ref` is always
+# `Voikyrioh/hearth/.github/workflows/calcy-reusable.yml@refs/heads/main`, and the Anthropic federation
+# rule only accepts that value. A branch that does not call this file as written gets no token.
+#
+# Read this before changing anything:
+# - Nothing here may trust an input, a secret or an environment variable coming from the caller: the
+#   caller is the file of the pushed branch. This workflow declares no input and reads only the
+#   repository variables (`vars`), which a branch cannot change.
+# - The script and the instructions come from `main` (first checkout). The pushed commit (second
+#   checkout) is only read as data by `git diff`; nothing from it is ever executed.
+# - No value written by the author of a branch (commit message, title, description, file names, diff) is
+#   ever placed inside a `run:` line or an expression. The branch NAME does appear in an expression (the
+#   concurrency group) and in `env:`: never in a shell line.
+# - The `if:` below is trusted (this file comes from `main`), unlike the one in the caller.
+# To turn Calcy off: `gh workflow disable calcy-review.yml` (see the runbook).
+
+on:
+  workflow_call:
+
+# No right by default; the job asks for exactly what it uses. A called workflow can keep or reduce the
+# permissions of its caller, never raise them.
+permissions: {}
+
+jobs:
+  review:
+    if: >-
+      github.repository == 'Voikyrioh/hearth'
+      && github.actor_id == '22913150'
+      && github.event_name == 'push'
+      && github.event.repository.fork == false
+      && vars.CALCY_MODEL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # One run per branch; a newer push cancels the previous one before it spends anything more (a call
+    # already sent stays billed). The caller has NO concurrency of its own: the same group name in the
+    # caller and in the called job would deadlock.
+    concurrency:
+      group: calcy-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read # read the code
+      pull-requests: write # the single comment
+      id-token: write # identity federation: GitHub OIDC token exchanged for an Anthropic access token
+    steps:
+      # Trusted side: the default branch, only the script and the instructions.
+      - name: Checkout the script (main)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: trusted
+          sparse-checkout: |
+            .github/scripts
+            .github/calcy
+          persist-credentials: false
+
+      # Untrusted side: the pushed commit, read as data. Full history so the diff against the base works.
+      - name: Checkout the pushed commit (data only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: untrusted
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Review the pull request
+        working-directory: untrusted
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PUSHED_BRANCH: ${{ github.ref_name }}
+          PUSHED_SHA: ${{ github.sha }}
+          # Repository variables (Settings > Secrets and variables > Actions > Variables). They are
+          # identifiers and settings, not secrets: the narrow federation rule is the barrier, not their
+          # secrecy. The model is never written in a file of the repository.
+          ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.CALCY_FEDERATION_RULE_ID }}
+          ANTHROPIC_ORGANIZATION_ID: ${{ vars.CALCY_ORGANIZATION_ID }}
+          ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.CALCY_SERVICE_ACCOUNT_ID }}
+          ANTHROPIC_WORKSPACE_ID: ${{ vars.CALCY_WORKSPACE_ID }}
+          CALCY_MODEL: ${{ vars.CALCY_MODEL }}
+          CALCY_MAX_DIFF_CHARS: ${{ vars.CALCY_MAX_DIFF_CHARS }}
+          CALCY_MAX_INPUT_TOKENS: ${{ vars.CALCY_MAX_INPUT_TOKENS }}
+          CALCY_PRICE_INPUT_PER_MTOK: ${{ vars.CALCY_PRICE_INPUT_PER_MTOK }}
+          CALCY_PRICE_OUTPUT_PER_MTOK: ${{ vars.CALCY_PRICE_OUTPUT_PER_MTOK }}
+        run: node ../trusted/.github/scripts/calcy-review.mjs
