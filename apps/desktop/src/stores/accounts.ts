@@ -16,6 +16,8 @@ export interface ServerAccounts {
   accounts: Account[];
   /** Identifiant de l'agent du compte de la session ; vide tant que la liste n'a pas été lue. */
   me: string;
+  /** L'agent annonce `service-rights` (BR-GRANT-016) ; faux tant que la liste n'a pas été lue. */
+  rightsKnown: boolean;
 }
 
 export const useAccountsStore = defineStore("accounts", () => {
@@ -40,22 +42,33 @@ export const useAccountsStore = defineStore("accounts", () => {
         status: "loading",
         accounts: known?.accounts ?? [],
         me: known?.me ?? "",
+        rightsKnown: known?.rightsKnown ?? false,
       });
     }
     try {
       const list = await getLinkBridge().listAccounts(serverId);
       if (reads.get(serverId) !== ticket) return;
-      put(serverId, { status: "ready", accounts: list.accounts, me: list.me });
+      put(serverId, {
+        status: "ready",
+        accounts: list.accounts,
+        me: list.me,
+        rightsKnown: list.rightsKnown,
+      });
     } catch (error) {
       if (reads.get(serverId) !== ticket) return;
       // L'agent refuse le rôle (`forbidden`, la seule façon de dire « accès refusé ») : rien à montrer.
       if (failureOf(error)?.kind === "forbidden") {
-        put(serverId, { status: "refused", accounts: [], me: "" });
+        put(serverId, { status: "refused", accounts: [], me: "", rightsKnown: false });
         return;
       }
       // Lien coupé ou serveur parti : la dernière liste connue reste (le gabarit la désature).
       const current = byServer.value[serverId];
-      put(serverId, { status: "error", accounts: current?.accounts ?? [], me: current?.me ?? "" });
+      put(serverId, {
+        status: "error",
+        accounts: current?.accounts ?? [],
+        me: current?.me ?? "",
+        rightsKnown: current?.rightsKnown ?? false,
+      });
       if (!failureOf(error)) reportUiError(error, "accounts:load");
     }
   }

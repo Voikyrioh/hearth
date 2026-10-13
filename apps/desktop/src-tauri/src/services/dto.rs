@@ -17,6 +17,27 @@ use hearth_proto::api::services::{
 use serde::Serialize;
 use specta::Type;
 
+/// Le droit « gérer les services » du compte connecté (HRT-78, ADR-0041, BR-GRANT-011), en lecture seule.
+/// `known` faux : l'agent n'annonce pas `service-rights` (BR-GRANT-016), `granted` est alors toujours faux.
+/// `account` : l'identifiant du compte connecté, texte de l'agent (l'interface le valide avant tout affichage).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceRightsDto {
+    pub known: bool,
+    pub granted: bool,
+    pub account: String,
+}
+
+impl From<hearth_link::ServiceRightsRead> for ServiceRightsDto {
+    fn from(read: hearth_link::ServiceRightsRead) -> Self {
+        Self {
+            known: read.agent_knows,
+            granted: read.granted,
+            account: read.account,
+        }
+    }
+}
+
 /// Événement de l'état des services d'un serveur (nom côté fenêtre).
 pub const EVENT: &str = "link://services";
 

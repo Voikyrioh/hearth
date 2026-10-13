@@ -12,7 +12,15 @@ export type AuditOutcome = "ok" | "denied" | "failed";
 export type AuditOriginKind = "client" | "cli" | "assistant" | "system";
 
 /** Types d'action du filtre (la liste fermée de la spec). */
-export const AUDIT_KINDS = ["login_ok", "login_denied", "accounts", "update", "denied"] as const;
+export const AUDIT_KINDS = [
+  "login_ok",
+  "login_denied",
+  "accounts",
+  "update",
+  "denied",
+  "services",
+  "services_rights",
+] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
 export const AUDIT_OUTCOMES: readonly AuditOutcome[] = ["ok", "denied", "failed"];

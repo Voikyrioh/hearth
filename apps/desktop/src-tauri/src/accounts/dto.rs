@@ -3,7 +3,7 @@
 //! ne traversent que les paramètres des commandes, jamais un type qui dérive `Debug`.
 
 use hearth_proto::account_rules::{InputCheck, PasswordRule, UsernameProblem};
-use hearth_proto::api::accounts::AccountItem;
+use hearth_proto::api::accounts::{AccountItem, RIGHT_SERVICES, has_right};
 use serde::Serialize;
 use specta::Type;
 
@@ -20,6 +20,10 @@ pub struct AccountDto {
     pub created_at: String,
     pub last_login_at: Option<String>,
     pub sessions_open: u32,
+    /// Le compte peut gérer les services (`rights` contient `"services"`, ADR-0041). Le client ne retient que
+    /// le droit qu'il connaît. En LECTURE SEULE : rien dans cette coquille n'accorde ni ne retire ce droit
+    /// (BR-GRANT-005).
+    pub manages_services: bool,
 }
 
 impl From<AccountItem> for AccountDto {
@@ -31,6 +35,7 @@ impl From<AccountItem> for AccountDto {
             created_at: item.created_at,
             last_login_at: item.last_login_at,
             sessions_open: u32::try_from(item.sessions_open).unwrap_or(u32::MAX),
+            manages_services: has_right(&item.rights, RIGHT_SERVICES),
         }
     }
 }
@@ -161,7 +166,11 @@ pub enum AccountOutcome {
 /// une comparaison de texte côté interface). Un refus de rôle de l'agent est `LinkFailure::Forbidden`
 /// (une seule façon de dire « accès refusé »).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountListDto {
     pub accounts: Vec<AccountDto>,
     pub me: String,
+    /// L'agent annonce la capacité `service-rights` : sans elle, `manages_services` est faux pour tous parce
+    /// que l'agent ne sait pas le dire, pas parce que personne ne l'a (BR-GRANT-016).
+    pub rights_known: bool,
 }

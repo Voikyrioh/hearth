@@ -66,6 +66,7 @@ pub async fn list(manager: &LinkManager, id: &ServerId) -> Result<AccountListDto
     Ok(AccountListDto {
         accounts: read.accounts.into_iter().map(Into::into).collect(),
         me: read.me,
+        rights_known: read.rights_known,
     })
 }
 
@@ -198,6 +199,7 @@ pub fn old_password_stands(result: &Result<AccountOutcome, LinkFailure>) -> bool
             | LinkFailure::TrackingUnavailable
             | LinkFailure::TrackingSlow
             | LinkFailure::Forbidden
+            | LinkFailure::MissingServicesRight
             | LinkFailure::NotRecognized
             | LinkFailure::DeviceChallengeUnavailable
             | LinkFailure::IncompatibleClient => true,

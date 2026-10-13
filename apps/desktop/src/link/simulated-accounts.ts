@@ -1,3 +1,4 @@
+import type { ServiceRights } from "./services";
 import {
   type Account,
   type AccountInputCheck,
@@ -58,6 +59,8 @@ interface SimAccount {
   createdAt: string;
   lastLoginAt: string | null;
   sessions: number;
+  /** Le droit « gérer les services » (ADR-0041) : il ne se donne que par `setRight`, comme la commande du serveur. */
+  managesServices: boolean;
 }
 
 /** Le résultat d'une action simulée ; `ended` : la session de l'utilisateur lui-même a été fermée. */
@@ -100,6 +103,8 @@ export class SimulatedAccounts {
           createdAt: at(30 * day),
           lastLoginAt: at(0),
           sessions: 1,
+          // Par défaut le compte connecté peut gérer les services : les écrans qui n'en parlent pas ne changent pas.
+          managesServices: true,
         },
       ];
       if (server.role === "admin") {
@@ -111,6 +116,7 @@ export class SimulatedAccounts {
             createdAt: at(12 * day),
             lastLoginAt: at(2 * day),
             sessions: 2,
+            managesServices: false,
           },
           {
             id: this.newId(),
@@ -119,6 +125,7 @@ export class SimulatedAccounts {
             createdAt: at(3 * day),
             lastLoginAt: null,
             sessions: 0,
+            managesServices: false,
           },
         );
       }
@@ -139,6 +146,7 @@ export class SimulatedAccounts {
       createdAt: account.createdAt,
       lastLoginAt: account.lastLoginAt,
       sessionsOpen: account.sessions,
+      managesServices: account.managesServices,
     };
   }
 
@@ -161,7 +169,45 @@ export class SimulatedAccounts {
   /** Lecture seule : l'agent refuse (`forbidden`, la seule façon de dire « accès refusé »). */
   list(server: ServerInfo): Account[] {
     if (this.forbidden(server)) throw new LinkCommandError({ kind: "forbidden" });
-    return this.book(server).map((account) => this.view(account));
+    const known = this.rightsKnown(server);
+    return this.book(server).map((account) => ({
+      ...this.view(account),
+      // Un agent qui ne connaît pas le droit n'envoie pas `rights` : lu comme vide (BR-GRANT-016).
+      managesServices: known && account.managesServices,
+    }));
+  }
+
+  /** La capacité `service-rights` de l'agent simulé (vraie par défaut ; `setRightsKnown(…, false)` : agent ancien). */
+  private readonly oldAgents = new Set<string>();
+
+  rightsKnown(server: ServerInfo): boolean {
+    return !this.oldAgents.has(server.id);
+  }
+
+  setRightsKnown(serverId: string, known: boolean): void {
+    if (known) this.oldAgents.delete(serverId);
+    else this.oldAgents.add(serverId);
+  }
+
+  /**
+   * Ce que le serveur fait quand on lui lance `hearth-agent account services {compte} --grant|--revoke` : le
+   * SEUL chemin qui change le droit (BR-GRANT-005). Aucune action du pont ne l'appelle ; les tests le jouent pour
+   * dire « le serveur a accordé / retiré le droit ».
+   */
+  setRight(server: ServerInfo, username: string, granted: boolean): void {
+    const account = this.book(server).find((a) => a.username === username.toLowerCase());
+    if (account) account.managesServices = granted;
+  }
+
+  /** Le droit du compte connecté tel que `GET /me` + `GET /hello` le donnent (tout rôle peut le lire). */
+  ownRights(server: ServerInfo): ServiceRights {
+    const me = this.me(server);
+    const known = this.rightsKnown(server);
+    return {
+      known,
+      granted: known && (me?.managesServices ?? false),
+      account: me?.username ?? server.username.toLowerCase(),
+    };
   }
 
   create(server: ServerInfo, username: string, password: string, role: Role): SimAccountResult {
@@ -180,6 +226,8 @@ export class SimulatedAccounts {
       createdAt: new Date(this.now()).toISOString(),
       lastLoginAt: null,
       sessions: 0,
+      // Un compte naît sans le droit, quel que soit son rôle (BR-GRANT-002).
+      managesServices: false,
     };
     book.push(account);
     return done(this.view(account), 0);
@@ -262,6 +310,7 @@ export class SimulatedAccounts {
         createdAt: account.createdAt ?? new Date(this.now()).toISOString(),
         lastLoginAt: account.lastLoginAt ?? null,
         sessions: account.sessions ?? 0,
+        managesServices: account.managesServices ?? false,
       })),
     );
   }

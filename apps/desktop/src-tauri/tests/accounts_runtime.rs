@@ -733,7 +733,7 @@ async fn a_login_typed_in_capitals_keeps_the_identifier_of_the_agent_and_me_is_i
         .find(|r| r.id == admin.id)
         .unwrap();
     assert_eq!(record.username, "marie");
-    let AccountListDto { accounts, me } = admin.list().await.unwrap();
+    let AccountListDto { accounts, me, .. } = admin.list().await.unwrap();
     let marie = accounts.iter().find(|a| a.username == "marie").unwrap();
     assert_eq!(me, marie.id);
     let paul = accounts.iter().find(|a| a.username == "paul").unwrap();
@@ -1008,4 +1008,94 @@ async fn a_wrong_confirmation_password_is_a_typed_refusal_then_a_typed_wait() {
     );
     // Le mot de passe de paul n'a pas changé : ses sessions ne sont pas fermées, il se connecte encore.
     assert_eq!(admin.accounts().await.len(), 2);
+}
+
+// ── HRT-78 : le droit « gérer les services », lu de bout en bout ──────────────────────────────────────
+// Un vrai agent (TLS 1.3, SQLite) donne `rights` et la capacité `service-rights` ; la bibliothèque les lit
+// (`LinkManager::service_rights`, `accounts_list`), la coquille les relaie en `ServiceRightsDto` et en
+// `AccountListDto`. Le droit se donne ICI comme sur le serveur (`grant_services`), jamais par le client.
+
+impl Client {
+    async fn own_right(
+        &self,
+    ) -> Result<hearth_desktop_lib::services::dto::ServiceRightsDto, LinkFailure> {
+        Ok(self
+            .runtime
+            .manager()
+            .service_rights(&self.id)
+            .await?
+            .into())
+    }
+}
+
+#[tokio::test]
+async fn the_right_of_each_profile_is_read_from_the_agent_and_relayed_in_the_wire_shape() {
+    let agent = TestAgent::install().await;
+    agent.create_account("marie", Role::Admin).await;
+    agent.create_account("paul", Role::ReadOnly).await;
+    let admin = client(agent.addr.port(), "marie", PASSWORD, config(false, false)).await;
+    let readonly = client(agent.addr.port(), "paul", PASSWORD, config(false, false)).await;
+    let sheet: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/rights.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Profil B : administrateur sans le droit. Profil C : lecture seule sans le droit.
+    let b = admin.own_right().await.unwrap();
+    let c = readonly.own_right().await.unwrap();
+    assert!(b.known && !b.granted && b.account == "marie");
+    assert!(c.known && !c.granted && c.account == "paul");
+    assert_eq!(
+        serde_json::to_value(&b).unwrap(),
+        sheet["serviceRights"]["adminNone"]
+    );
+    assert_eq!(
+        serde_json::to_value(&c).unwrap(),
+        sheet["serviceRights"]["readonlyNone"]
+    );
+
+    // Le serveur accorde le droit (la commande locale) : la lecture suivante le voit, sans reconnexion.
+    agent.grant_services("marie").await;
+    agent.grant_services("paul").await;
+    let a = admin.own_right().await.unwrap();
+    let d = readonly.own_right().await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&a).unwrap(),
+        sheet["serviceRights"]["adminGranted"]
+    );
+    assert!(d.known && d.granted && d.account == "paul");
+
+    // L'administrateur voit le droit de chaque compte ; la lecture seule n'a pas la liste (BR-ACCT-013).
+    let list = admin.list().await.unwrap();
+    assert!(list.rights_known);
+    assert!(list.accounts.iter().all(|account| account.manages_services));
+    assert_eq!(readonly.list().await.unwrap_err(), LinkFailure::Forbidden);
+
+    // Le serveur le retire : relu au prochain appel, le rôle n'a pas bougé.
+    agent.revoke_services("marie").await;
+    assert!(!admin.own_right().await.unwrap().granted);
+    assert!(!admin.account("marie").await.manages_services);
+    assert!(admin.account("paul").await.manages_services);
+    assert_eq!(admin.account("marie").await.role, RoleDto::Admin);
+}
+
+#[tokio::test]
+async fn the_right_cannot_be_given_from_the_client_through_any_account_action() {
+    let (_agent, admin) = rig().await;
+    // Créer un compte (avec ou sans demande de droit côté client : le client n'a aucun champ pour cela), puis
+    // changer son rôle : le droit reste tel que le serveur l'a.
+    let (created, _) = done(admin.create("paul", NEW_PASSWORD, RoleDto::Admin).await);
+    let paul = created.expect("le compte créé");
+    assert!(
+        !paul.manages_services,
+        "un compte naît sans le droit (BR-GRANT-002)"
+    );
+    done(admin.set_role(&paul.id, RoleDto::Readonly).await);
+    done(admin.set_role(&paul.id, RoleDto::Admin).await);
+    assert!(!admin.account("paul").await.manages_services);
+    assert!(!admin.own_right().await.unwrap().granted);
 }

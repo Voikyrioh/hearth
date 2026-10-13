@@ -5,6 +5,7 @@ import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import HButton from "@/components/atoms/HButton.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
+import AccountDetailDialog from "@/components/organisms/AccountDetailDialog.vue";
 import AccountTable from "@/components/organisms/AccountTable.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import CreateAccountDialog from "@/components/organisms/CreateAccountDialog.vue";
@@ -64,6 +65,8 @@ const ownPassword = ref(false);
 const removing = ref<Account | null>(null);
 const roleChange = ref<{ account: Account; role: Role } | null>(null);
 const closing = ref<Account | null>(null);
+// Le détail d'un compte (HRT-78) : lecture seule, le droit de gérer les services s'y lit.
+const detail = ref<Account | null>(null);
 
 // Changer un rôle, fermer des sessions et supprimer un compte sont des actes d'administration : chacun
 // passe par la fenêtre commune de confirmation (mot de passe selon ce que l'agent annonce, clé de ce PC
@@ -144,6 +147,12 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
     @change-own-password="ownPassword = true"
     @close-sessions="closing = $event"
     @remove="removing = $event"
+    @detail="detail = $event"
+  />
+  <AccountDetailDialog
+    :account="detail"
+    :rights-known="entry?.rightsKnown ?? false"
+    @close="detail = null"
   />
 
   <CreateAccountDialog :open="creating" :server-id="serverId" @close="creating = false" />

@@ -22,6 +22,14 @@ const props = withDefaults(
     hint?: string;
     /** FIX:01M4E5D6DYHHX9CBBVDYAFEWMZ (C42) : la raison du blocage est AUSSI écrite sous le bouton, en texte permanent (pas seulement au survol). */
     reasonBelow?: boolean;
+    /**
+     * L'`id` d'un texte écrit ailleurs qui dit pourquoi le bouton est inactif (par exemple `ServiceRightReason`) :
+     * le bouton lui est lié par `aria-describedby` et il est lu avec lui. Pas d'infobulle en plus (une seule fois).
+     * Une liste d'identifiants séparés par une espace est acceptée. Il s'AJOUTE aux autres raisons du bouton (lien
+     * coupé, raison écrite dessous, infobulle) au lieu de les remplacer : un bouton bloqué pour deux raisons les
+     * garde toutes les deux.
+     */
+    describedBy?: string;
     tipPlacement?: "start" | "center" | "end";
     type?: "button" | "submit";
   }>(),
@@ -34,6 +42,7 @@ const props = withDefaults(
     needsLink: undefined,
     hint: undefined,
     reasonBelow: false,
+    describedBy: undefined,
     tipPlacement: "center",
     type: "button",
   },
@@ -43,13 +52,25 @@ const emit = defineEmits<{ click: [event: MouseEvent] }>();
 
 const linkReason = useNeedsLink(() => props.needsLink);
 const inert = computed(() => props.disabled || props.busy || linkReason.value !== null);
-const tip = computed(() => linkReason.value ?? (props.disabled ? props.hint : undefined));
+const tip = computed(() =>
+  props.describedBy && props.disabled && linkReason.value === null
+    ? undefined
+    : (linkReason.value ?? (props.disabled ? props.hint : undefined)),
+);
 
 const reason = computed(() =>
   props.reasonBelow && inert.value && !props.busy ? tip.value : undefined,
 );
 // La raison écrite sous le bouton n'est dite qu'une fois : pas d'infobulle redondante, et le texte visible décrit le bouton.
 const reasonId = useId();
+
+/** Les raisons qui décrivent le bouton, ensemble : l'existante (écrite dessous ou infobulle), puis celle de l'appelant. */
+function describedByIds(tooltip: string | undefined): string | undefined {
+  const ids = [reason.value ? reasonId : tooltip];
+  if (props.disabled && props.describedBy) ids.push(props.describedBy);
+  const joined = ids.filter(Boolean).join(" ");
+  return joined === "" ? undefined : joined;
+}
 
 function onClick(event: MouseEvent) {
   if (inert.value) {
@@ -75,7 +96,7 @@ function onClick(event: MouseEvent) {
           ]"
           :aria-disabled="inert ? 'true' : undefined"
           :aria-busy="busy ? 'true' : undefined"
-          :aria-describedby="reason ? reasonId : describedby"
+          :aria-describedby="describedByIds(describedby)"
           @click="onClick"
         >
           <HSpinner v-if="busy" />

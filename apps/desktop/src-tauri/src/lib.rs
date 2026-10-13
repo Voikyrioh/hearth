@@ -101,6 +101,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             reauth::commands::set_reauth_setting,
             services::commands::list_services_states,
             services::commands::engine_recheck,
+            services::commands::read_service_rights,
             services::commands::open_engine_docs,
         ])
         .typ::<link_dto::ServersEvent>()

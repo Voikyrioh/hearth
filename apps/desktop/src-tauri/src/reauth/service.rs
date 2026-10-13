@@ -108,7 +108,7 @@ pub fn interpret(status: u16, body: &Value) -> Result<ReauthSettingOutcome, Link
     }
     use hearth_proto::error::ErrorCode;
     match error.error.code {
-        ErrorCode::ForbiddenRole => Err(LinkFailure::Forbidden),
+        ErrorCode::ForbiddenRole => Err(LinkFailure::forbidden(&error.error)),
         ErrorCode::NotFound => refused(ReauthSettingRefusal::Unsupported),
         ErrorCode::Unauthenticated | ErrorCode::SessionExpired => {
             refused(ReauthSettingRefusal::SessionEnded)

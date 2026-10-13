@@ -112,7 +112,7 @@ describe("action lancée au moment d'une coupure (BR-RESIL-009, 010)", () => {
   it("dit que le résultat n'est pas connu, ne rejoue jamais, puis annonce l'issue au retour du lien", async () => {
     const { bridge, link } = await startedApp();
     const toasts = useToastsStore();
-    const action = useServerAction();
+    const action = useServerAction(() => "forge");
     bridge.actionMode = "cut";
     const result = await action.run(() => bridge.runDevAction("forge"));
     expect(result).toMatchObject({ kind: "unknown" });
@@ -148,7 +148,7 @@ describe("action lancée au moment d'une coupure (BR-RESIL-009, 010)", () => {
   it("refuse sans rien envoyer hors « Connecté », par une notification discrète (BR-RESIL-008, 011)", async () => {
     const { bridge } = await startedApp();
     const toasts = useToastsStore();
-    const action = useServerAction();
+    const action = useServerAction(() => "forge");
     bridge.setState("forge", "offline");
     const result = await action.run(() => bridge.runDevAction("forge"));
     expect(result).toBeNull();
@@ -160,7 +160,7 @@ describe("action lancée au moment d'une coupure (BR-RESIL-009, 010)", () => {
 
   it("répond normalement quand le lien tient", async () => {
     await startedApp();
-    const action = useServerAction();
+    const action = useServerAction(() => "forge");
     const bridge = getLinkBridge() as SimulatedLinkBridge;
     expect(await action.run(() => bridge.runDevAction("forge"))).toEqual({
       kind: "completed",

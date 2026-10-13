@@ -36,7 +36,7 @@ const agents = useAgentUpdatesStore();
 const link = useLinkStore();
 const settings = useSettingsStore();
 const toasts = useToastsStore();
-const action = useServerAction();
+const action = useServerAction(() => props.server.id);
 const now = useNow();
 
 const confirming = ref(false);
@@ -113,6 +113,8 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
     },
   );
   if (!result) {
+    // Refusé faute du droit de gérer les services : la fenêtre se ferme, le texte est déjà dit.
+    if (action.rightLost.value) return { kind: "right_lost" };
     // Échec (lien coupé, refus de rôle de l'agent) : déjà notifié ; l'état se relit.
     void agents.refresh(props.server.id);
     return { kind: "done" };

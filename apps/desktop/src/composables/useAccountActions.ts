@@ -21,7 +21,8 @@ export type AccountReport =
   | { kind: "done"; sessionsClosed: number }
   | { kind: "refused"; refusal: AccountRefusal }
   | { kind: "unknown" }
-  | { kind: "failed" };
+  | { kind: "failed" }
+  | { kind: "right_lost" };
 
 /**
  * Les actions de comptes d'un serveur. Chacune passe par `useServerAction` (une seule à la fois,
@@ -31,7 +32,7 @@ export type AccountReport =
  * rendu proprement.
  */
 export function useAccountActions(serverId: () => string) {
-  const action = useServerAction();
+  const action = useServerAction(serverId);
   const toasts = useToastsStore();
   const accounts = useAccountsStore();
 
@@ -56,7 +57,7 @@ export function useAccountActions(serverId: () => string) {
       unknownMessage: "accounts.unknownResult",
       forbiddenMessage: "accounts.forbidden",
     });
-    if (!result) return { kind: "failed" };
+    if (!result) return action.failedReport();
     if (result.kind === "done") {
       onDone(result);
       if (rereads) reloadIfRead();

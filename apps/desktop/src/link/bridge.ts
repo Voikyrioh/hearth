@@ -4,7 +4,7 @@ import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
-import type { EngineInfo, ServicesEvent } from "./services";
+import type { EngineInfo, ServiceRights, ServicesEvent } from "./services";
 import type {
   AccountInputCheck,
   AccountList,
@@ -249,6 +249,13 @@ export interface LinkBridge {
    * sans suivi, refaite par l'interface si le lien tombe. Hors « Connecté » : échec `not_connected`.
    */
   recheckEngine(serverId: string): Promise<EngineInfo>;
+  /**
+   * Le droit « gérer les services » du compte connecté (HRT-78, BR-GRANT-011) : une lecture, relue à l'ouverture de
+   * la section Services, à chaque reconnexion et après tout refus pour absence du droit. Aucune méthode de ce pont
+   * ne l'accorde ni ne le retire : il se donne depuis le serveur seulement (BR-GRANT-005). Hors « Connecté » :
+   * échec `not_connected`.
+   */
+  readServiceRights(serverId: string): Promise<ServiceRights>;
   /** Ouvre la documentation officielle de Docker dans le navigateur du PC (l'adresse est une constante de la coquille). */
   openEngineDocs(): Promise<void>;
 

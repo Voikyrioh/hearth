@@ -9,7 +9,7 @@ import { type MessageKey, t } from "@/i18n";
 import type { EngineInfo, EngineState } from "@/link";
 import { type CountKey, type Counts, shownCounts } from "@/services/counts";
 import { shortAge } from "@/services/format";
-import { familyOf, helpFor } from "@/services/help";
+import { deniedSentence, familyOf, helpFor } from "@/services/help";
 import Callout from "../molecules/Callout.vue";
 import CommandBlock from "../molecules/CommandBlock.vue";
 import DashCard from "../molecules/DashCard.vue";
@@ -108,6 +108,11 @@ const help = computed(() => {
   }
 });
 
+/** La phrase du refus d'accès : le nom du compte de l'agent n'y est cité que s'il est un nom de compte valide. */
+const denied = computed(() =>
+  props.engine ? deniedSentence(props.engine) : { text: "", values: {} },
+);
+
 const previousText = computed(() => {
   const before = props.previous;
   if (!before || before.state === "checking") return "";
@@ -164,10 +169,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
         <!-- Accès refusé à l'agent -->
         <template v-else-if="engine.state === 'access_denied'">
           <p>
-            <MonoText
-              :text="engine.agentIsAdmin ? t('engine.deniedAdminText') : t('engine.deniedText')"
-              :values="{ account: engine.agentAccount }"
-            />
+            <MonoText :text="denied.text" :values="denied.values" />
           </p>
           <Callout v-if="!engine.agentIsAdmin" tone="warn" inline>{{
             t("engine.deniedWarning")

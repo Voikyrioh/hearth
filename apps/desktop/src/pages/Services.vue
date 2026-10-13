@@ -6,11 +6,13 @@ import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
+import ServiceRightReason from "@/components/molecules/ServiceRightReason.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
 import ServiceTable from "@/components/organisms/ServiceTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useNow } from "@/composables/useNow";
 import { usePageData } from "@/composables/usePageData";
+import { useServiceRights } from "@/composables/useServiceRights";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
 import { getLinkBridge } from "@/link";
@@ -27,6 +29,14 @@ import { useServicesStore } from "@/stores/services";
 const { server, isConnected, isAdmin } = useCurrentServer();
 const store = useServicesStore();
 const now = useNow();
+// Le droit « gérer les services » du compte connecté, lu à l'ouverture et à chaque reconnexion (HRT-78,
+// BR-GRANT-011). Aucun bouton d'action de service n'existe encore dans cette section : ceux des tickets suivants
+// consommeront `rights.gate`, `rights.reasonId` et `ServiceRightReason` ; en attendant la raison est dite une fois,
+// sous la carte du moteur, pour un compte qui ne peut pas agir (BR-GRANT-012, 014, 016).
+const rights = useServiceRights();
+const rightsNotice = computed(() =>
+  ["denied", "old-agent", "failed"].includes(rights.gate.value.kind),
+);
 
 watch(
   () => server.value?.id,
@@ -151,6 +161,11 @@ async function openDocs() {
         @docs="openDocs"
       />
 
+      <!-- Le droit de gérer les services : la raison pour laquelle aucune action n'est proposée (BR-GRANT-014, 016) -->
+      <Callout v-if="rightsNotice" class="svc__rights" tone="info" data-services-rights>
+        <ServiceRightReason :gate="rights.gate.value" :id="rights.reasonId" @retry="rights.retry()" />
+      </Callout>
+
       <!-- Première détection : des lignes esquissées, jamais une fausse liste -->
       <div
         v-if="shown.kind === 'loading'"
@@ -223,6 +238,13 @@ async function openDocs() {
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+}
+
+/* C5 : le bandeau de raison est une colonne de lecture bornée (`--panel-max`), aligné à gauche, pas toute la page à 2 560. */
+.svc__rights {
+  align-self: flex-start;
+  width: 100%;
+  max-width: var(--panel-max);
 }
 
 .svc__link {

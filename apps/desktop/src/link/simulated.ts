@@ -5,7 +5,7 @@ import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
-import type { EngineInfo, ServicesEvent } from "./services";
+import type { EngineInfo, ServiceRights, ServicesEvent } from "./services";
 import {
   type SimAccountResult,
   SimulatedAccounts,
@@ -259,6 +259,37 @@ export class SimulatedLinkBridge implements LinkBridge {
     return this.services.recheck(serverId);
   }
 
+  /** Les prochaines lectures du droit échouent (lien muet, agent qui ne répond pas) tant que c'est vrai. */
+  failRightsReads = false;
+  /** Lectures du droit faites, par serveur (observable dans les tests : à l'ouverture, à la reconnexion, après un refus). */
+  readonly rightsReads: string[] = [];
+
+  async readServiceRights(serverId: string): Promise<ServiceRights> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.rightsReads.push(serverId);
+    if (this.failRightsReads) throw this.fail({ kind: "unreachable" });
+    this.calls.push("rights read");
+    return this.accounts.ownRights(server);
+  }
+
+  /**
+   * Ce que fait le serveur quand on lui lance `hearth-agent account services {compte} --grant|--revoke` : le seul
+   * chemin qui change le droit (BR-GRANT-005). Un test l'appelle pour dire « le serveur a accordé / retiré le droit » ;
+   * aucune méthode du pont (donc aucun écran) ne le fait.
+   */
+  setServiceRightOnServer(serverId: string, username: string, granted: boolean): void {
+    this.accounts.setRight(this.requireServer(serverId), username, granted);
+  }
+
+  /** Vrai par défaut ; faux : l'agent simulé est d'avant la capacité `service-rights` (BR-GRANT-016). */
+  setServiceRightsKnown(serverId: string, known: boolean): void {
+    this.accounts.setRightsKnown(serverId, known);
+  }
+
   async openEngineDocs(): Promise<void> {
     this.services.docsOpened += 1;
   }
@@ -495,7 +526,11 @@ export class SimulatedLinkBridge implements LinkBridge {
       throw this.fail({ kind: "not_connected" });
     }
     this.calls.push("account list");
-    return { accounts: this.accounts.list(server), me: this.accounts.meId(server) };
+    return {
+      accounts: this.accounts.list(server),
+      me: this.accounts.meId(server),
+      rightsKnown: this.accounts.rightsKnown(server),
+    };
   }
 
   createAccount(

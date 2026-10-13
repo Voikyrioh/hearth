@@ -51,6 +51,8 @@ export function failureMessage(failure: LinkFailure, seconds?: number): string {
       return t("failure.notConnected");
     case "forbidden":
       return t("failure.forbidden");
+    case "missing_services_right":
+      return t("rights.refused");
     case "not_recognized":
       return t("reauth.notEnrolled");
     case "device_challenge_unavailable":

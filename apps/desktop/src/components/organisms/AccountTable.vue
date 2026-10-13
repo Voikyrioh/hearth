@@ -2,6 +2,7 @@
 import { computed, nextTick, ref } from "vue";
 import { roleLabel } from "@/accounts/messages";
 import HButton from "@/components/atoms/HButton.vue";
+import HIcon from "@/components/atoms/HIcon.vue";
 import HSelect from "@/components/atoms/HSelect.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import { formatDate, formatDateTime } from "@/composables/format";
@@ -22,6 +23,8 @@ const emit = defineEmits<{
   changeOwnPassword: [];
   closeSessions: [account: Account];
   remove: [account: Account];
+  /** Ouvre le détail du compte (lecture seule : le droit de gérer les services y est dit, HRT-78). */
+  detail: [account: Account];
 }>();
 
 const ADMIN = { role: "admin" } as const;
@@ -84,7 +87,15 @@ const named = (label: string, account: Account) => `${label} ${account.username}
         <tr v-for="account in accounts" :key="account.id" :data-account="account.username">
           <th scope="row">
             <div class="table__name">
-              {{ account.username }}
+              <button
+                type="button"
+                class="table__open"
+                :aria-label="t('rights.detailOf', { username: account.username })"
+                aria-haspopup="dialog"
+                @click="emit('detail', account)"
+              >
+                {{ account.username }}
+              </button>
               <HTag v-if="account.id === meId" tone="neutral">{{ t("accounts.you") }}</HTag>
             </div>
             <span class="table__hint">{{
@@ -101,9 +112,16 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                 @update:model-value="chooseRole(account, $event)"
               />
             </div>
-            <HTag v-else :tone="account.role === 'admin' ? 'accent' : 'neutral'">
-              {{ roleLabel(account.role) }}
-            </HTag>
+            <div v-else class="table__tags">
+              <HTag :tone="account.role === 'admin' ? 'accent' : 'neutral'">
+                {{ roleLabel(account.role) }}
+              </HTag>
+              <!-- BR-GRANT-013 : en lecture seule, aucun geste ne donne ni ne retire ce droit depuis cet écran. -->
+              <HTag v-if="account.managesServices" tone="neutral" class="table__right" data-services-right>
+                <HIcon name="box" size="sm" />
+                {{ t("rights.tag") }}
+              </HTag>
+            </div>
           </td>
           <td class="table__created">{{ formatDate(account.createdAt) }}</td>
           <td>{{ account.lastLoginAt ? formatDateTime(account.lastLoginAt) : t("accounts.neverLoggedIn") }}</td>
@@ -213,6 +231,37 @@ const named = (label: string, account: Account) => `${label} ${account.username}
   align-items: center;
   gap: var(--space-2);
   font-weight: var(--fw-semibold);
+}
+
+/* Le nom ouvre le détail du compte : un bouton, reconnaissable comme un lien. */
+.table__open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--bd);
+  text-underline-offset: var(--space-half);
+}
+
+.table__open:hover {
+  text-decoration-color: currentColor;
+}
+
+.table__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.table__right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 /* FIX:01M4DNJ3W899Y50NPSRQ8W8ZVN (C26) : l'en-tête garde la police des autres titres. */

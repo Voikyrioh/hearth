@@ -46,7 +46,7 @@ describe("accounts store", () => {
     });
     vi.spyOn(bridge, "listAccounts").mockImplementationOnce(async () => {
       await gate;
-      return { kind: "listed" as const, accounts: [], me: "" };
+      return { kind: "listed" as const, accounts: [], me: "", rightsKnown: true };
     });
     const first = store.load("forge");
     const second = store.load("forge");
@@ -61,7 +61,7 @@ describe("useServerAction with an account outcome", () => {
   it("says the result is unknown once, with the text of the specification, and never replays", async () => {
     await startedApp();
     const toasts = useToastsStore();
-    const { run } = useServerAction();
+    const { run } = useServerAction(() => "forge");
     const perform = vi.fn(async () => ({ kind: "unknown" as const, opId: "OP" }));
     const result = await run(perform, { unknownMessage: "accounts.unknownResult" });
     expect(result).toEqual({ kind: "unknown", opId: "OP" });
@@ -104,6 +104,7 @@ describe("account actions", () => {
         createdAt: "",
         lastLoginAt: null,
         sessionsOpen: 1,
+        managesServices: false,
       },
       "readonly",
       OWN,

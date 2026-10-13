@@ -163,7 +163,9 @@ async function submit() {
     // Vidé après CHAQUE envoi, réussi ou non.
     password.value = "";
   }
-  if (report.kind === "done" || report.kind === "unknown") {
+  // `right_lost` : le serveur a refusé faute du droit de gérer les services (retiré entre-temps, BR-GRANT-010) : la
+  // fenêtre se ferme, le texte et la relecture du droit sont déjà faits (`useServerAction`).
+  if (report.kind === "done" || report.kind === "unknown" || report.kind === "right_lost") {
     emit("close");
     return;
   }
