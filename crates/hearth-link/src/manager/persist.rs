@@ -300,6 +300,7 @@ mod tests {
                 at: WallTime::from_millis(n as i64),
                 machine: None,
                 history: vec![],
+                services: None,
             });
         }
         persister.save_operations(operations(3));
@@ -349,6 +350,7 @@ mod tests {
             at: WallTime::from_millis(1),
             machine: None,
             history: vec![],
+            services: None,
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let acked = persister.save_operations_acked(operations(1));

@@ -155,6 +155,19 @@
   --audit-field-min: 160px;
   --audit-detail-width: 560px;
 
+  /* Services (HRT-62, conception design 2026-10-13) : hauteurs de ligne déduites de la donnée, jamais mesurées. */
+  --row-service: 52px;
+  --row-service-alert: 80px;
+  --engine-edge: 4px;
+  --engine-card-min: 56px;
+  --skeleton-height: 12px;
+  --skeleton-sm: 80px;
+  --skeleton-md: 160px;
+  --svc-columns: minmax(220px, 1.4fr) minmax(180px, 1fr) 190px 320px;
+  --svc-columns-compact: minmax(180px, 1fr) 190px 220px;
+  --svc-puck: 3px;
+  --command-max-height: 160px;
+
   /* États */
   --opacity-disabled: 0.45;
   --opacity-stale: 0.62;

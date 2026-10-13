@@ -22,9 +22,16 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`HBars`](./HBars.md) — Barres verticales (SVG), une par cœur.
 - [`HMeter`](./HMeter.md) — Jauge linéaire (SVG), occupation d'un disque.
 - [`HSelect`](./HSelect.md) — Liste déroulante native (libellé, masquable).
+- [`HSkeleton`](./HSkeleton.md) — Barre esquissée fixe (lecture en cours).
 
 ## Molécules
 
+- [`Callout`](./Callout.md) — Encart d'information, d'avertissement, d'erreur (HRT-62).
+- [`ServiceStateBadge`](./ServiceStateBadge.md) — État d'un service : icône et mot.
+- [`PortChips`](./PortChips.md) — Ports d'un service (trois puces puis « +N »).
+- [`OriginTags`](./OriginTags.md) — Repères d'origine d'un service.
+- [`CommandBlock`](./CommandBlock.md) — Commande ou texte de configuration à recopier.
+- [`MonoText`](./MonoText.md) — Phrase avec valeurs en chasse fixe.
 - [`LinkStatePill`](./LinkStatePill.md) — Pastille d'état du lien (5 états).
 - [`ErasurePendingNote`](./ErasurePendingNote.md) — Note « Effacement en attente » de la page Sécurité (administrateur, rien à faire).
 - [`SecurityAlertCard`](./SecurityAlertCard.md) — Carte « Ce qui se passe » de la page Sécurité (alerte : depuis quand, combien de comptes, quoi faire).
@@ -128,3 +135,9 @@ Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,orga
 - Désactivé = `aria-disabled` (jamais `disabled` natif : le focus clavier est conservé), explication par `HTooltip`. Pour le lien et le rôle : la prop `needsLink`, nulle part ailleurs.
 - Aucune valeur visuelle littérale : `npm run lint` échoue sur une couleur ou un `px` hors de `tokens.css`.
 - Responsive : captures 1366, 1920 et 2560 px (`npm run e2e`, `apps/desktop/e2e/screenshots/`, non commitées).
+
+## Moteur de conteneurs et services (HRT-62)
+
+- [`EnginePanel`](./EnginePanel.md) — Carte « Moteur de conteneurs » : états, compteurs, aide à recopier.
+- [`ServiceTable`](./ServiceTable.md) — Liste des services virtualisée.
+- [`Services`](./Services.md) — Page de la section « Services » (lecture seule).

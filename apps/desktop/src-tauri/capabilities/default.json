@@ -56,6 +56,9 @@
     "allow-get-reauth-state",
     "allow-reauth-covers",
     "allow-set-reauth-setting",
+    "allow-list-services-states",
+    "allow-engine-recheck",
+    "allow-open-engine-docs",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

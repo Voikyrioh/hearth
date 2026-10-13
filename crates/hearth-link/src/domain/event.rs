@@ -6,6 +6,7 @@ use hearth_proto::api::audit::AuditEventItem;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
 use hearth_proto::api::security::SecurityView;
+use hearth_proto::api::services::ServicesState;
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::fingerprint::Fingerprint;
 
@@ -129,6 +130,19 @@ pub enum Event {
         server: ServerId,
         view: Arc<SecurityView>,
     },
+    /// L'état du moteur de conteneurs et la liste des services (sujet `services`, HRT-62) : TOUJOURS
+    /// l'état complet, déjà fusionné par la liaison (instantané ou lot), trié par nom sans tenir compte de la
+    /// casse. Annoncé à la connexion, puis à chaque changement. Jamais émis pour un agent sans la capacité.
+    Services {
+        server: ServerId,
+        state: Arc<ServicesState>,
+    },
+    /// L'agent ne sert pas les services (pas de capacité `services` dans `/hello`) : le client ne lui a
+    /// envoyé ni le sujet ni aucune route. Annoncé à chaque connexion à cet agent, avec sa version.
+    ServicesUnsupported {
+        server: ServerId,
+        agent_version: String,
+    },
 }
 
 impl Event {
@@ -146,7 +160,9 @@ impl Event {
             | Self::FingerprintChanged { server, .. }
             | Self::Audit { server, .. }
             | Self::AgentUpdate { server, .. }
-            | Self::Security { server, .. } => Some(server),
+            | Self::Security { server, .. }
+            | Self::Services { server, .. }
+            | Self::ServicesUnsupported { server, .. } => Some(server),
         }
     }
 }

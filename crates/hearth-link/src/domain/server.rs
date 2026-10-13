@@ -5,6 +5,7 @@ use std::fmt;
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
+use hearth_proto::api::services::ServicesState;
 use hearth_proto::fingerprint::Fingerprint;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -115,6 +116,11 @@ pub struct LastKnown {
     pub machine: Option<MachineResponse>,
     /// Plus ancien d'abord, au plus [`HISTORY_CAP`].
     pub history: Vec<Sample>,
+    /// Le moteur de conteneurs et la dernière liste des services (HRT-62) : de quoi afficher la section
+    /// Services, périmée, hors ligne. Les types du protocole ne portent ni valeur ni nom de variable
+    /// d'environnement, ni commande : rien de tel n'arrive sur le disque. Absent d'un fichier d'avant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub services: Option<ServicesState>,
 }
 
 impl LastKnown {

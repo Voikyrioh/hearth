@@ -159,6 +159,22 @@ export const commands = {
 	 *  mot de passe actuel de confirmation, la preuve de la clé de ce PC est faite par la coquille.
 	 */
 	setReauthSetting: (serverId: string, mode: ReauthModeDto, password: string) => typedError<ReauthSettingOutcome, LinkFailure>(__TAURI_INVOKE("set_reauth_setting", { serverId, mode, password })),
+	/**
+	 *  Le dernier état des services de chaque serveur du carnet, sans lecture réseau : l'interface le rejoue à
+	 *  son abonnement (ADR-0013 point 3). Un serveur dont la coquille n'a encore rien reçu en cette exécution
+	 *  donne la dernière liste enregistrée sur le disque, périmée.
+	 */
+	listServicesStates: () => typedError<ServicesEvent[], LinkFailure>(__TAURI_INVOKE("list_services_states")),
+	/**
+	 *  « Vérifier à nouveau » : relance la détection du moteur tout de suite et rend son état. Une lecture :
+	 *  sans suivi, refaite par l'interface si le lien tombe. Hors « Connecté », `NotConnected` sans rien envoyer.
+	 */
+	engineRecheck: (serverId: string) => typedError<EngineDto, LinkFailure>(__TAURI_INVOKE("engine_recheck", { serverId })),
+	/**
+	 *  Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est
+	 *  la constante [`ENGINE_DOCS_URL`].
+	 */
+	openEngineDocs: () => typedError<null, LinkFailure>(__TAURI_INVOKE("open_engine_docs")),
 };
 
 /* Types */
@@ -576,6 +592,22 @@ export type DiskSampleDto = {
 	totalBytes: number | null,
 };
 
+export type DriverDto = "engine" | "supervisor";
+
+export type EngineDto = {
+	state: EngineStateDto,
+	name: string | null,
+	version: string | null,
+	minVersion: string,
+	agentAccount: string,
+	agentIsAdmin: boolean,
+	host: HostDto,
+	lastReadyAt: string | null,
+	checkedAt: string,
+};
+
+export type EngineStateDto = "checking" | "ready" | "stopped" | "access_denied" | "unresponsive" | "absent" | "unsupported_engine" | "unsupported_version" | "disabled";
+
 /**
  *  Le certificat présenté n'est plus celui qui a été confirmé (BR-CONN-003). Les empreintes sont
  *  en 8 groupes de 4 pour l'affichage ; `presented_hex` est la forme complète à renvoyer pour
@@ -615,6 +647,22 @@ export type HistoryEvent = {
 	serverId: string,
 	history: SampleDto[],
 };
+
+export type HostDto = {
+	osId: string,
+	osLike: string[],
+	init: InitDto,
+	declarative: boolean,
+};
+
+export type ImageDto = {
+	/**  Absent : une image sans nom (« image sans nom {identifiant} », `BR-SVC-022`). */
+	ref: string | null,
+	tag: string | null,
+	shortId: string,
+};
+
+export type InitDto = "systemd" | "other";
 
 export type InvalidField = "name" | "address" | "port" | "credentials" | "fingerprint" | "other";
 
@@ -736,6 +784,8 @@ export type OperationEventDto = {
 	outcome: OutcomeDto,
 };
 
+export type OriginDto = "hearth" | "external";
+
 export type OsDto = {
 	name: string,
 	version: string | null,
@@ -747,6 +797,13 @@ export type OutcomeDto = "done" | "not_executed" | "unknown";
 
 export type PasswordRuleDto = "required" | "min_length" | "digit" | "lowercase" | "uppercase" | "contains_username";
 
+export type PortDto = {
+	hostPort: number,
+	containerPort: number,
+	protocol: ProtocolDto,
+	scope: ScopeDto,
+};
+
 /**  Première prise de contact : l'empreinte à faire confirmer. */
 export type ProbeDto = {
 	/**  Forme complète (64 caractères hexadécimaux), à renvoyer à `add_server`. */
@@ -757,6 +814,8 @@ export type ProbeDto = {
 	agentVersion: string,
 	macAddresses: string[],
 };
+
+export type ProtocolDto = "tcp" | "udp" | "sctp";
 
 export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked";
 
@@ -812,6 +871,8 @@ export type SampleDto = {
 	temps: TempDto[],
 };
 
+export type ScopeDto = "all" | "local";
+
 /**
  *  Ce que l'agent dit de la session de ce poste : prouvée par la clé d'un poste inscrit, ou non.
  *  `Unknown` : pas encore lu (le message du flux ne le porte pas, seule la lecture le dit).
@@ -863,6 +924,42 @@ export type ServerDto = {
 export type ServersEvent = {
 	servers: ServerDto[],
 };
+
+export type ServiceDto = {
+	key: string,
+	name: string,
+	origin: OriginDto,
+	driver: DriverDto | null,
+	unit: string | null,
+	removedOnStop: boolean,
+	composeProject: string | null,
+	state: ServiceStateDto,
+	since: string | null,
+	createdAt: string | null,
+	neverStarted: boolean,
+	exitCode: number | null,
+	restarts10m: number,
+	image: ImageDto,
+	ports: PortDto[],
+	hostNetwork: boolean,
+};
+
+export type ServiceStateDto = "running" | "stopped" | "starting" | "stopping" | "error" | "restart_loop" | "paused" | "deploying" | "unknown";
+
+export type ServicesEvent = {
+	serverId: string,
+	/**
+	 *  Croît strictement par serveur : l'interface écarte tout événement dont `seq` n'est pas supérieur
+	 *  au dernier connu (rejeu à l'abonnement compris).
+	 */
+	seq: number,
+	view: ServicesViewDto,
+};
+
+/**  Ce que l'agent dit des services d'un serveur : l'état complet, ou « cet agent ne les gère pas ». */
+export type ServicesViewDto = { kind: "supported"; engine: EngineDto; services: ServiceDto[] } | 
+/**  Pas de capacité `services` dans `/hello` : ni sujet ni route envoyés à cet agent. */
+{ kind: "unsupported"; agentVersion: string };
 
 /**
  *  Réglages locaux, tels que l'interface les voit. Le fait que l'explication de

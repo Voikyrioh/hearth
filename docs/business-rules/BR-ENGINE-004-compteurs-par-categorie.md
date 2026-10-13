@@ -11,14 +11,16 @@ maj: 2026-10-13
 # BR-ENGINE-004 — Compteurs de services par catégorie, calculés par l'interface
 
 ## Règle
-Les compteurs « en marche », « arrêtés », « en erreur » (et « en transition », « autres » s'ils ne sont pas vides) sont calculés par l'interface à partir de l'état de chaque service : l'agent ne compte rien et n'envoie aucun compteur. Il garantit seulement que l'état de chaque service est un des neuf états fermés de BR-SVC-004, ce qui rend le total égal au nombre de lignes. Côté client (affichage, textes, boutons) : porté par HRT-62, hors de cette tranche.
+Les compteurs « en marche », « arrêtés », « en erreur » (et « en transition », « autres » s'ils ne sont pas vides) sont calculés par l'interface à partir de l'état de chaque service : l'agent ne compte rien et n'envoie aucun compteur. Il garantit seulement que l'état de chaque service est un des neuf états fermés de BR-SVC-004, ce qui rend le total égal au nombre de lignes. Côté client (HRT-62) : `categoryOf` et `countServices` calculent les compteurs, `shownCounts` n'affiche « en transition » et « autres » que s'ils ne sont pas vides.
 
 ## Application (code)
 - `crates/hearth-proto/src/api/services.rs::ServiceState`
 - `crates/hearth-agent/src/domain/services/state.rs::derive_state`
+- `apps/desktop/src/services/counts.ts::{categoryOf, countServices, shownCounts}`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/services/state.rs::tests::every_other_run_state_has_its_service_state`
+- `apps/desktop/src/services/services.test.ts` (compteurs de la carte du moteur)
 
 ## Règles liées
 - BR-SVC-004

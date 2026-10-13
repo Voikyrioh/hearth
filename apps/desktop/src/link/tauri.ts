@@ -5,6 +5,7 @@ import {
   type AgentUpdateEvent as BoundAgentUpdateEvent,
   type LinkFailure as BoundFailure,
   type AccountOutcome as BoundOutcome,
+  type ServicesEvent as BoundServicesEvent,
   commands,
   type FingerprintEvent,
   type HistoryEvent,
@@ -48,6 +49,7 @@ import {
   toSecurityRead,
   toSecurityState,
 } from "./security";
+import { type EngineInfo, type ServicesEvent, toEngine, toServicesEvent } from "./services";
 import {
   type AccountInputCheck,
   type AccountList,
@@ -81,6 +83,7 @@ export const LINK_EVENTS = {
   auditGap: "link://audit-gap",
   agentUpdate: "agent-update://progress",
   security: "link://security",
+  services: "link://services",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -449,6 +452,31 @@ export class TauriLinkBridge implements LinkBridge {
       throw error;
     }
     return unlisten;
+  }
+
+  async onServices(listener: (event: ServicesEvent) => void): Promise<Unsubscribe> {
+    // Écoute posée D'ABORD, dernier état connu lu ensuite : aucune fenêtre où un état est perdu. L'état
+    // rejoué et le signal peuvent se croiser : le récepteur écarte tout `seq` qui n'est pas plus grand.
+    const unlisten = await listen<BoundServicesEvent>(LINK_EVENTS.services, (event) =>
+      listener(toServicesEvent(event.payload)),
+    );
+    try {
+      for (const state of unwrap(await commands.listServicesStates())) {
+        listener(toServicesEvent(state));
+      }
+    } catch (error) {
+      unlisten();
+      throw error;
+    }
+    return unlisten;
+  }
+
+  async recheckEngine(serverId: string): Promise<EngineInfo> {
+    return toEngine(unwrap(await commands.engineRecheck(serverId)));
+  }
+
+  async openEngineDocs(): Promise<void> {
+    unwrap(await commands.openEngineDocs());
   }
 
   async getSecurity(serverId: string): Promise<SecurityRead> {

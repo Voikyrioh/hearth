@@ -7,11 +7,12 @@ use std::time::Duration;
 use hearth_proto::api::machine::MachineResponse;
 use hearth_proto::api::metrics::Sample;
 use hearth_proto::api::security::SecurityView;
+use hearth_proto::api::services::ServicesState;
 use hearth_proto::api::sessions::LoginRequest;
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, UpgradeTarget};
 use hearth_proto::fingerprint::Fingerprint;
-use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, SignedAuth, Topic};
+use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice, SignedAuth};
 use tokio::time::timeout;
 use zeroize::Zeroize;
 
@@ -19,11 +20,21 @@ use super::{Deps, Shared, device};
 use crate::domain::history::PeaksFit;
 use crate::domain::pending_ops::{Lookup, OperationId};
 use crate::domain::secret::Secret;
+use crate::domain::services;
 use crate::ports::transport::{Frame, StreamConn, TransportError};
 use crate::ports::vault::SecretKind;
 
 /// Messages de mise à jour retenus au plus pendant l'attente de l'instantané.
 const MAX_EARLY_UPDATES: usize = 8;
+
+/// Ce que l'agent a dit des services à la connexion (HRT-62).
+pub(crate) enum ServicesAtConnect {
+    /// Pas de capacité `services` dans `/hello` : le sujet n'a pas été demandé, `metrics` fonctionne.
+    Unsupported { agent_version: String },
+    /// Le sujet a été demandé ; l'état reçu AVANT l'instantané des mesures, s'il y en a un (l'agent envoie
+    /// le sien en premier).
+    Supported(Option<Box<ServicesState>>),
+}
 
 pub(crate) enum AttemptResult {
     /// Flux ouvert, authentifié, instantané reçu.
@@ -36,6 +47,7 @@ pub(crate) enum AttemptResult {
         updates: Vec<UpdateProgress>,
         /// Dernier état de sécurité reçu AVANT l'instantané (le message suit l'`auth`).
         security: Option<Box<SecurityView>>,
+        services: ServicesAtConnect,
     },
     /// Échec passager (réseau, délai, serveur occupé…) : on réessaiera.
     Failed,
@@ -184,6 +196,13 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
         Err(device::LoginError::Transport(error)) => return classify(&error),
         Err(device::LoginError::ChallengeUnavailable) => return AttemptResult::Failed,
     };
+    // Ce que l'agent sait faire, relu à CHAQUE connexion : une mise à jour de l'agent change ses capacités
+    // (HRT-62). Le sujet `services` n'est demandé qu'à un agent qui l'annonce.
+    let hello = match deps.transport.hello(&shared.target()).await {
+        Ok(probed) => probed.hello,
+        Err(error) => return classify(&error),
+    };
+    let serves_services = services::agent_serves_services(&hello.capabilities);
     let mut stream = match deps.transport.open_stream(&shared.target()).await {
         Ok(stream) => stream,
         Err(error) => return classify(&error),
@@ -202,13 +221,11 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
     sent.zeroize();
     // Le sujet `update` est ouvert à tout compte : le serveur annonce ainsi son redémarrage de mise
     // à jour (coupure attendue, BR-UPDATE-014) et son avancement.
-    let mut topics = vec![Topic::Metrics, Topic::Session, Topic::Update];
-    if deps.config.subscribe_audit {
-        topics.push(Topic::Audit);
-    }
+    let topics = services::subscription_topics(&hello.capabilities, deps.config.subscribe_audit);
     let _ = stream.send(&ClientMessage::Subscribe { topics }).await;
     let mut updates = Vec::new();
     let mut security = None;
+    let mut early_services: Option<ServicesState> = None;
     loop {
         match stream.recv().await {
             Ok(Frame::Message(message)) => match *message {
@@ -219,6 +236,13 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                         history,
                         updates,
                         security,
+                        services: if serves_services {
+                            ServicesAtConnect::Supported(early_services.map(Box::new))
+                        } else {
+                            ServicesAtConnect::Unsupported {
+                                agent_version: hello.agent_version,
+                            }
+                        },
                     };
                 }
                 ServerMessage::Error(detail) => match detail.code {
@@ -248,6 +272,10 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
             },
             // Seul le dernier dit l'état.
             Ok(Frame::Security(view)) => security = Some(view),
+            // L'état des services part avant l'instantané des mesures : on le fusionne, il n'est pas perdu.
+            Ok(Frame::Services(message)) => {
+                services::apply(&mut early_services, *message);
+            }
             Ok(Frame::Other) => {}
             Err(_) => return AttemptResult::Failed,
         }

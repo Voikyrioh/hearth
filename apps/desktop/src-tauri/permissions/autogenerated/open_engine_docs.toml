@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-engine-docs"
+description = "Enables the open_engine_docs command without any pre-configured scope."
+commands.allow = ["open_engine_docs"]
+
+[[permission]]
+identifier = "deny-open-engine-docs"
+description = "Denies the open_engine_docs command without any pre-configured scope."
+commands.deny = ["open_engine_docs"]

@@ -17,6 +17,7 @@ La liste se tient à jour sans rechargement, dans les 5 secondes après le chang
 - `crates/hearth-agent/src/application/services.rs::ServicesRegistry::{ready_phase, refresh, resync, commit}`
 - `crates/hearth-agent/src/entrypoint/ws/connection.rs (sujet `services`, `Lagged` renvoie un instantané)`
 - `crates/hearth-agent/src/entrypoint/services_wire.rs::delta`
+- `crates/hearth-link/src/domain/services.rs::apply` (fusion des lots), `apps/desktop/src/services/layout.ts::anchoredScroll`, `apps/desktop/src/components/organisms/ServiceTable.vue`
 
 ## Vérification
 - `crates/hearth-agent/tests/services_https.rs::subscribing_sends_a_snapshot_with_the_engine_and_every_service_then_deltas_in_time`

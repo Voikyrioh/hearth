@@ -55,6 +55,9 @@ const COMMANDS: &[&str] = &[
     "get_reauth_state",
     "reauth_covers",
     "set_reauth_setting",
+    "list_services_states",
+    "engine_recheck",
+    "open_engine_docs",
 ];
 
 fn main() {

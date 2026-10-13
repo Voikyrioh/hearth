@@ -12,10 +12,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hearth_agent::app::{self, Adapters, Metering, RunningAgent, Services};
+use hearth_agent::app::{self, Adapters, EngineParts, Metering, RunningAgent, Services};
 use hearth_agent::application::ports::{
-    Clock as AgentClock, GpuProbe, HashError, PasswordHasher, ProbeError, SystemProbe,
+    Clock as AgentClock, GpuProbe, HashError, HostDescription, HostEnvironment, PasswordHasher,
+    ProbeError, SystemProbe,
 };
+use hearth_agent::application::services::EngineTimings;
 use hearth_agent::domain::accounts::{PlainPassword, Role, Username};
 use hearth_agent::domain::audit::{Actor, Origin};
 use hearth_agent::domain::machine::{
@@ -27,6 +29,7 @@ use hearth_agent::entrypoint::ws::StreamSettings;
 use hearth_agent::infrastructure::argon2::Argon2Hasher;
 use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
 use hearth_agent::infrastructure::config::AgentConfig;
+use hearth_agent::infrastructure::engine::FakeEngine;
 use hearth_agent::infrastructure::ids::UlidGen;
 use hearth_agent::infrastructure::random::OsTokenGen;
 use hearth_agent::infrastructure::sqlite::{Database, ServiceDatabase};
@@ -194,6 +197,34 @@ fn metering() -> Metering {
     }
 }
 
+/// L'hôte d'un agent de test avec un faux moteur : un Debian avec systemd, qui tourne sous root.
+struct DebianHost;
+
+impl HostEnvironment for DebianHost {
+    fn describe(&self) -> HostDescription {
+        HostDescription {
+            os_id: "debian".into(),
+            os_like: vec![],
+            systemd: true,
+            declarative: false,
+            agent_account: "root".into(),
+            agent_is_admin: true,
+        }
+    }
+}
+
+/// Des cadences courtes : l'état du moteur change au plus une fois par 250 ms, les événements du moteur
+/// sont regroupés sur 20 ms.
+fn engine_timings() -> EngineTimings {
+    EngineTimings {
+        ready_period: Duration::from_millis(40),
+        other_period: Duration::from_millis(40),
+        debounce_window: Duration::from_millis(250),
+        batch_window: Duration::from_millis(20),
+        min_recheck: Duration::ZERO,
+    }
+}
+
 pub struct TestAgent {
     dir: tmp::TestDir,
     db: Database,
@@ -203,6 +234,9 @@ pub struct TestAgent {
     pub services: Services,
     running: Option<RunningAgent>,
     updating: Option<UpdatingFactory>,
+    /// Le faux moteur de conteneurs de l'agent (HRT-62), s'il y en a un : sans lui, le pilotage des
+    /// services est désactivé comme avant.
+    engine: Option<Arc<FakeEngine>>,
     pub addr: SocketAddr,
 }
 
@@ -215,6 +249,19 @@ impl TestAgent {
     /// Comme `install`, avec des adaptateurs de mise à jour fabriqués par `updating` (sans eux :
     /// ceux de la production, qui refusent la mise à jour hors systemd).
     pub async fn install_with(updating: Option<UpdatingFactory>) -> Self {
+        Self::install_full(updating, None).await
+    }
+
+    /// Comme `install`, avec ce faux moteur de conteneurs branché sur l'agent : le sujet `services` du flux
+    /// est servi pour de vrai (vrai TLS, vrai WebSocket), le moteur est piloté par le test.
+    pub async fn install_engined(engine: Arc<FakeEngine>) -> Self {
+        Self::install_full(None, Some(engine)).await
+    }
+
+    pub async fn install_full(
+        updating: Option<UpdatingFactory>,
+        engine: Option<Arc<FakeEngine>>,
+    ) -> Self {
         let dir = tmp::tempdir().unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let clock = Arc::new(TestClock(Mutex::new(
@@ -242,6 +289,7 @@ impl TestAgent {
             services,
             running: None,
             updating,
+            engine,
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         };
         agent.start().await;
@@ -254,21 +302,36 @@ impl TestAgent {
             port: 0,
             data_dir: self.dir.path().to_owned(),
             managed: false,
-            engine: hearth_agent::infrastructure::config::EngineConfig::disabled(),
+            engine: match &self.engine {
+                Some(_) => hearth_agent::infrastructure::config::EngineConfig::default(),
+                None => hearth_agent::infrastructure::config::EngineConfig::disabled(),
+            },
         };
         let updating = match &self.updating {
             Some(make) => make(),
             None => app::Updating::production(&config).unwrap(),
         };
-        let running = app::start_with_all(
-            &config,
-            &ServiceDatabase::adopt(self.db.clone()),
-            &self.adapters,
-            metering(),
-            updating,
-        )
-        .await
-        .unwrap();
+        let database = ServiceDatabase::adopt(self.db.clone());
+        let running = match &self.engine {
+            None => app::start_with_all(&config, &database, &self.adapters, metering(), updating)
+                .await
+                .unwrap(),
+            Some(engine) => app::start_engined(
+                &config,
+                &database,
+                &self.adapters,
+                metering(),
+                updating,
+                Arc::new(hearth_agent::infrastructure::system::ProcBootInfo::new()),
+                EngineParts {
+                    engine: engine.clone(),
+                    host: Arc::new(DebianHost),
+                    timings: engine_timings(),
+                },
+            )
+            .await
+            .unwrap(),
+        };
         self.addr = running.server.local_addr();
         self.running = Some(running);
     }

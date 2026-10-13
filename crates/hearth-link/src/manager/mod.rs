@@ -14,6 +14,7 @@ mod events;
 mod persist;
 mod reauth;
 mod security;
+mod services;
 mod task;
 mod watchers;
 

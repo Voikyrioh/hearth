@@ -402,6 +402,7 @@ mod tests {
             at: WallTime::from_millis(1_790_000_000_000),
             machine: None,
             history: vec![],
+            services: None,
         };
         store.save(&id, &view).await.unwrap();
         assert_eq!(store.load(&id).await.unwrap(), Some(view));

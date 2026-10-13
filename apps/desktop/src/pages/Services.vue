@@ -1,0 +1,232 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { RouterLink } from "vue-router";
+import HButton from "@/components/atoms/HButton.vue";
+import HIcon from "@/components/atoms/HIcon.vue";
+import HSkeleton from "@/components/atoms/HSkeleton.vue";
+import Callout from "@/components/molecules/Callout.vue";
+import EmptyState from "@/components/molecules/EmptyState.vue";
+import EnginePanel from "@/components/organisms/EnginePanel.vue";
+import ServiceTable from "@/components/organisms/ServiceTable.vue";
+import { useCurrentServer } from "@/composables/useCurrentServer";
+import { useNow } from "@/composables/useNow";
+import { usePageData } from "@/composables/usePageData";
+import { logUiError } from "@/errors/report";
+import { t } from "@/i18n";
+import { getLinkBridge } from "@/link";
+import { countServices } from "@/services/counts";
+import { shortAge } from "@/services/format";
+import { show } from "@/services/view";
+import { useServicesStore } from "@/stores/services";
+
+// La section « Services » d'un serveur, en LECTURE SEULE (HRT-62) : l'état du moteur d'abord (BR-ENGINE-001),
+// puis la liste, à jour en direct. Les deux rôles voient la même chose ; seule l'aide à recopier est réservée
+// à l'administrateur (BR-ENGINE-016). Aucun bouton d'action sur un service. Quand le lien n'est pas
+// « Connecté », le gabarit du serveur grise et date la page (`StaleSurface`) : un seul mécanisme à la fois,
+// donc la mention « Liste du moteur d'il y a… » n'apparaît que lien bon (BR-SVC-017, 018).
+const { server, isConnected, isAdmin } = useCurrentServer();
+const store = useServicesStore();
+const now = useNow();
+
+watch(
+  () => server.value?.id,
+  (id) => {
+    if (id) void store.start();
+  },
+  { immediate: true },
+);
+
+const entry = computed(() => (server.value ? store.of(server.value.id) : undefined));
+const shown = computed(() => show(entry.value));
+const loading = computed(() => shown.value.kind === "loading");
+// Rien n'est arrivé : rien à dater, le gabarit ne pose pas « Vu il y a… » (mécanisme commun, HRT-38).
+usePageData(() => entry.value !== undefined);
+
+/** Au-delà de ce délai connecté, une première détection qui ne finit pas (elle dure 5 s au plus) est dite en échec. */
+const SLOW_LOADING_MS = 10_000;
+const slow = ref(false);
+let slowTimer: ReturnType<typeof setTimeout> | undefined;
+watch(
+  () => loading.value && isConnected.value,
+  (waiting) => {
+    clearTimeout(slowTimer);
+    slow.value = false;
+    if (waiting) slowTimer = setTimeout(() => (slow.value = true), SLOW_LOADING_MS);
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => clearTimeout(slowTimer));
+
+/** La lecture est en échec : l'abonnement a échoué, ou la première détection ne finit pas. */
+const readFailed = computed(() => (store.failed && entry.value === undefined) || slow.value);
+const waiting = computed(() => loading.value && !isConnected.value && !store.failed);
+
+const engineShown = computed(() => (shown.value.kind === "engine" ? shown.value : null));
+const engine = computed(() => engineShown.value?.engine ?? null);
+const counts = computed(() =>
+  engine.value?.state === "ready" ? countServices(entry.value?.services ?? []) : null,
+);
+const list = computed(() => engineShown.value?.list ?? { kind: "none" as const });
+/** Moteur non prêt, lien bon : la liste précédente est grisée et datée par CETTE mention ; lien coupé, c'est le gabarit. */
+const staleList = computed(() => list.value.kind === "stale" && isConnected.value);
+const staleAge = computed(() =>
+  list.value.kind === "stale" ? shortAge(now.value - list.value.since) : "",
+);
+
+function recheck() {
+  if (server.value) void store.recheck(server.value.id);
+}
+
+function retry() {
+  slow.value = false;
+  void store.retry();
+}
+
+async function openDocs() {
+  try {
+    await getLinkBridge().openEngineDocs();
+  } catch (error) {
+    logUiError(error, "services:docs");
+  }
+}
+</script>
+
+<template>
+  <div class="svc">
+    <!-- La lecture est en échec -->
+    <Callout v-if="readFailed" tone="error" role="alert" data-services-failed>
+      {{ t("services.readFailed") }}
+      <template #actions>
+        <HButton variant="secondary" data-services-retry @click="retry">
+          {{ t("engine.recheck") }}
+        </HButton>
+      </template>
+    </Callout>
+
+    <!-- Rien à montrer tant que le serveur n'est pas joignable -->
+    <EmptyState
+      v-else-if="waiting"
+      :title="t('services.waitingTitle')"
+      :text="t('services.waitingText')"
+      heading="h2"
+    />
+
+    <!-- Agent trop ancien : ni sujet ni route envoyés, `metrics` continue -->
+    <Callout
+      v-else-if="shown.kind === 'old-agent'"
+      tone="warn"
+      data-services-old-agent
+    >
+      {{ t("engine.oldAgent", { version: shown.agentVersion }) }}
+      <template #actions>
+        <RouterLink class="svc__link" :to="{ name: 'settings' }">
+          {{ t("engine.oldAgentLink") }}
+        </RouterLink>
+      </template>
+    </Callout>
+
+    <template v-else>
+      <EnginePanel
+        :engine="engine"
+        :counts="counts"
+        :is-admin="isAdmin"
+        :previous="entry?.previous ?? null"
+        :recheck="server ? store.recheckOf(server.id) : 'idle'"
+        @recheck="recheck"
+        @docs="openDocs"
+      />
+
+      <!-- Première détection : des lignes esquissées, jamais une fausse liste -->
+      <div
+        v-if="shown.kind === 'loading'"
+        class="svc__skeleton"
+        role="status"
+        aria-busy="true"
+        :aria-label="t('services.loading')"
+        data-services-loading
+      >
+        <div v-for="row in 8" :key="row" class="svc__skeleton-row">
+          <HSkeleton size="md" />
+          <HSkeleton size="md" />
+          <HSkeleton size="sm" />
+          <HSkeleton size="sm" />
+        </div>
+      </div>
+
+      <template v-else-if="list.kind === 'live'">
+        <ServiceTable :services="list.services" />
+      </template>
+
+      <EmptyState
+        v-else-if="list.kind === 'empty'"
+        :title="t('services.empty')"
+        text=""
+        heading="h2"
+        data-services-empty
+      />
+
+      <template v-else-if="list.kind === 'stale'">
+        <p v-if="staleList" class="svc__stamp" data-services-stale>
+          <HIcon name="clock" size="sm" />
+          {{ t("services.staleList", { age: staleAge }) }}
+        </p>
+        <div :class="['svc__stale', { 'svc__stale--grey': staleList }]">
+          <ServiceTable :services="list.services" />
+        </div>
+      </template>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.svc {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.svc__link {
+  color: var(--ac);
+  text-decoration: underline;
+}
+
+.svc__skeleton {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+.svc__skeleton-row {
+  display: grid;
+  grid-template-columns: var(--svc-columns);
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--row-service);
+  padding: 0 var(--space-4);
+  border-bottom: var(--border-width) solid var(--bd);
+}
+
+.svc__stamp {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--tx2);
+}
+
+.svc__stale {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.svc__stale--grey {
+  filter: grayscale(var(--grayscale-stale));
+  opacity: var(--opacity-stale);
+}
+</style>

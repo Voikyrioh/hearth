@@ -16,6 +16,7 @@ Quand le moteur n'est pas prêt, la dernière liste connue reste dans le registr
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/engine.rs::EngineState::{is_inaccessible, keeps_no_list}`
 - `crates/hearth-agent/src/application/services.rs::ServicesRegistry::commit`
+- `apps/desktop/src/services/view.ts::show` (liste précédente grisée, jamais celle d'un autre moteur)
 
 ## Vérification
 - `crates/hearth-agent/src/application/services.rs::tests::an_inaccessible_engine_keeps_the_last_list_and_a_missing_one_drops_it`

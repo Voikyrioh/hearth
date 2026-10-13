@@ -11,6 +11,7 @@ export * from "./machine";
 export * from "./messages";
 export * from "./reauth";
 export * from "./security";
+export * from "./services";
 export {
   groupFingerprint,
   OTHER_FINGERPRINT,
@@ -28,6 +29,7 @@ export { SimulatedDevices } from "./simulated-devices";
 export { bareMachine, type Pinnable, SimulatedMachine, sampleMachine } from "./simulated-machine";
 export { SimulatedReauth } from "./simulated-reauth";
 export { SimulatedSecurity } from "./simulated-security";
+export { SimulatedServices } from "./simulated-services";
 export { TauriLinkBridge } from "./tauri";
 export * from "./types";
 

@@ -7,3 +7,5 @@ Texte long tronqué AU MILIEU : le début et les 12 derniers caractères (`tail`
 - Props : `text`, `tail` (12 par défaut)
 - Notes : se réduit dans son parent flexible (`min-width: 0`). FIX:01M4EPX88BTXFX1PX7E57WGK38. Tests : `e2e/hrt47.spec.ts`.
 - Accessibilité (revue de #63) : la troncature est visuelle seulement ; le texte COMPLET est dans le document (`sr-only`), les deux moitiés affichées sont `aria-hidden` : un lecteur d'écran lit le chemin entier, aucun rôle inventé. La mesure suit le texte quand il change (observateur rattaché à la moitié « début » à chaque changement).
+
+- HRT-62 : prop `focusable` (vraie par défaut) ; fausse dans une grille (un seul arrêt de tabulation). Les deux moitiés gardent leurs espaces (`white-space: pre`).

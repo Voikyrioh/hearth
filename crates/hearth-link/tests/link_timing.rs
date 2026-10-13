@@ -99,7 +99,12 @@ fn machine() -> MachineResponse {
 #[async_trait]
 impl Transport for Scripted {
     async fn hello(&self, target: &Target) -> Result<Probed, TransportError> {
-        if !self.0.host(&target.host).up.load(Ordering::SeqCst) {
+        // Les tentatives de connexion relisent `/hello` (capacités, HRT-62) avant d'ouvrir le flux : ce banc compte
+        // les tentatives à l'OUVERTURE du flux, c'est elle qui constate l'hôte coupé. Seule la première prise de
+        // contact (sonde) échoue ici.
+        if matches!(target.pin, hearth_link::ports::transport::Pin::Probe)
+            && !self.0.host(&target.host).up.load(Ordering::SeqCst)
+        {
             return Err(TransportError::Connect("injoignable".into()));
         }
         Ok(Probed {

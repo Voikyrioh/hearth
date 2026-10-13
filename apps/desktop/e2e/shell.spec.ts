@@ -50,6 +50,7 @@ test("coquille avec deux serveurs", async ({ page }) => {
   const nav = page.getByRole("navigation", { name: "Navigation du serveur" });
   await expect(nav.getByRole("link")).toHaveText([
     "Tableau de bord",
+    "Services",
     "Comptes",
     "Journal d'activité",
     "Sécurité",
@@ -58,7 +59,7 @@ test("coquille avec deux serveurs", async ({ page }) => {
   // Le serveur en lecture seule n'a ni « Comptes » ni « Journal d'activité » (mais « Sécurité »).
   await rail.locator('a[data-server="salon"]').click();
   await expect(page).toHaveURL(/#\/servers\/salon\/dashboard$/);
-  await expect(nav.getByRole("link")).toHaveText(["Tableau de bord", "Sécurité"]);
+  await expect(nav.getByRole("link")).toHaveText(["Tableau de bord", "Services", "Sécurité"]);
   await page.goto("/?nodev#/servers/salon/accounts");
   await expect(page).toHaveURL(/#\/servers\/salon\/dashboard$/);
 
@@ -137,7 +138,7 @@ test("clavier : focus visible et flèches dans la barre et la navigation", async
   const nav = page.getByRole("navigation", { name: "Navigation du serveur" });
   await nav.getByRole("link", { name: "Tableau de bord" }).focus();
   await page.keyboard.press("ArrowDown");
-  await expect(nav.getByRole("link", { name: "Comptes" })).toBeFocused();
+  await expect(nav.getByRole("link", { name: "Services" })).toBeFocused();
   await page.keyboard.press("End");
   await expect(nav.getByRole("link", { name: "Sécurité" })).toBeFocused();
 });
