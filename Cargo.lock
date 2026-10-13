@@ -2091,6 +2091,7 @@ dependencies = [
  "base64 0.22.1",
  "bollard",
  "clap",
+ "flate2",
  "futures-util",
  "gethostname",
  "getrandom 0.4.3",
@@ -2105,6 +2106,7 @@ dependencies = [
  "reqwest",
  "ring",
  "rpassword",
+ "rustix",
  "rustls",
  "rustls-native-certs",
  "serde",
@@ -2127,6 +2129,7 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "ulid",
+ "unicode-normalization",
  "url",
  "zeroize",
 ]
