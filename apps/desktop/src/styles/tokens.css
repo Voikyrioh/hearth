@@ -12,7 +12,11 @@
   --bd: #3a2c31;
   --tx: #f6ece6;
   --tx2: #b3a19c;
-  --tx3: #7d6c68;
+  /* HRT-141 : le texte atténué qui porte une information (date, espace libre, échelle) tient 4,5 pour 1 sur le fond
+     de page (5,9), la barre latérale (5,6), une carte (5,1) et une carte relevée (4,7). */
+  --tx3: #a09089;
+  /* Le gris le plus sombre (3,6 pour 1 sur le fond de page) : seulement ce qui n'écrit rien (poignée de défilement, trait). */
+  --tx-faint: #7d6c68;
   --ac: #ff7b3d;
   --ac2: #ff4f7a;
   --cool: #5fd0c0;
@@ -34,7 +38,7 @@
   --on-crit: #1c1518;
   --scrim: color-mix(in srgb, var(--bg) 72%, transparent);
   /* Poignée de défilement (HRT-37) : 3,6 pour 1 sur le fond de page, 3,2 sur une carte au repos (WCAG 1.4.11 : 3 pour 1) ; plus claire au survol (6,4 sur une carte). */
-  --scroll-thumb: var(--tx3);
+  --scroll-thumb: var(--tx-faint);
   --scroll-thumb-hover: var(--tx2);
   --scroll-track: transparent;
   --scroll-size: 12px;
@@ -172,7 +176,7 @@
   --command-max-height: 160px;
 
   /* États */
-  --opacity-disabled: 0.45;
+  --opacity-disabled: 0.7;
   --opacity-stale: 0.62;
   --grayscale-stale: 0.85;
   --opacity-pulse-low: 0.35;
@@ -189,4 +193,5 @@
   --z-tooltip: 30;
   --z-toast: 40;
   --z-dev: 60;
+  --z-skip: 70;
 }

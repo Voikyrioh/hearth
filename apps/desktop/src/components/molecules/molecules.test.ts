@@ -338,4 +338,28 @@ describe("ErrorBoundary", () => {
     // La page replante : la frontière la remplace de nouveau, sans planter l'application.
     expect(wrapper.find('[role="alert"]').exists()).toBe(true);
   });
+
+  // HRT-143 : « Réessayer » relève la page quand la cause du plantage a disparu.
+  it("shows the page again on « Réessayer » once the cause is gone", async () => {
+    let broken = true;
+    const Flaky = defineComponent({
+      setup() {
+        if (broken) throw new Error("valeur inconnue");
+        return () => h("p", "page revenue");
+      },
+    });
+    const wrapper = mount(
+      defineComponent({
+        components: { ErrorBoundary, Flaky },
+        template: "<ErrorBoundary><Flaky /></ErrorBoundary>",
+      }),
+    );
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true);
+    broken = false;
+    await wrapper.get('[role="alert"] button').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("page revenue");
+  });
 });

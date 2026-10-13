@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
+import { tooltip } from "@/test/tooltip";
 import HToggle from "./HToggle.vue";
 
 describe("HToggle", () => {
@@ -23,7 +24,7 @@ describe("HToggle", () => {
     await button.trigger("click");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
     expect(button.attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get('[role="tooltip"]').text()).toBe("Pas encore");
+    expect(tooltip().text()).toBe("Pas encore");
     expect(button.attributes("disabled")).toBeUndefined();
   });
 

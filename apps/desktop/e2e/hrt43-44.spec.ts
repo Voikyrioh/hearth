@@ -263,7 +263,7 @@ for (const size of SIZES) {
     await page.setViewportSize(size);
     await page.goto("/?nodev#/servers/forge/audit");
     await expect(page.locator("[role=row][data-row-key]").first()).toBeVisible();
-    await expect(page.getByText("100 événements ou plus")).toBeVisible();
+    await expect(page.getByText("100 événements affichés, d'autres plus bas")).toBeVisible();
     // Période personnalisée : s'applique dès que les deux dates sont valides (ici, avant les premières entrées).
     await page.getByLabel("Période").selectOption("custom");
     const day = (offset: number) => {
@@ -273,7 +273,9 @@ for (const size of SIZES) {
     };
     await page.getByLabel("Du", { exact: true }).fill(day(-5));
     await page.getByLabel("Au", { exact: true }).fill(day(-4));
-    await expect(page.getByText("100 événements ou plus")).toHaveCount(0, { timeout: 3000 });
+    await expect(page.getByText("100 événements affichés, d'autres plus bas")).toHaveCount(0, {
+      timeout: 3000,
+    });
   });
 
   // HRT-37 : une seule barre de défilement dans le journal : celle du tableau ; la page ne défile pas.
@@ -334,7 +336,7 @@ test("journal : textes lisibles (raison avec majuscule, détail sans valeur vide
     expect(reason.charAt(0), reason).toBe(reason.charAt(0).toUpperCase());
   }
   await row.click();
-  const detail = page.locator("dialog[open] .detail__list");
+  const detail = page.locator("dialog[open] .detail__list:not(.detail__list--technical)");
   await expect(detail).toBeVisible();
   const labels = await detail.locator("dt").allInnerTexts();
   const values = await detail.locator("dd").allInnerTexts();

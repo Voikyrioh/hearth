@@ -117,12 +117,14 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
 </template>
 
 <style scoped>
+/* Le compte sur un serveur n'est plus une carte : la carte « Mon compte » (page Réglages) les réunit. */
 .mine {
-  margin-top: var(--space-5);
-  padding: var(--space-5);
-  border-radius: var(--radius-card);
-  background: var(--card);
-  box-shadow: var(--card-edge);
+  margin-top: var(--space-4);
+}
+
+.mine + .mine {
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--bd);
 }
 
 .mine__head {

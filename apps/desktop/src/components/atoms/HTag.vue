@@ -1,12 +1,22 @@
 <script setup lang="ts">
 // Étiquette courte (rôle, état). Le sens ne repose jamais sur la couleur seule : le texte le porte.
-withDefaults(defineProps<{ tone?: "neutral" | "accent" | "ok" | "warn" | "crit" }>(), {
-  tone: "neutral",
-});
+// `interactive` : l'étiquette est un bouton (clavier, focus visible) qui ouvre une explication ; le clic est
+// reçu par l'appelant (`@click` passe à la racine).
+withDefaults(
+  defineProps<{ tone?: "neutral" | "accent" | "ok" | "warn" | "crit"; interactive?: boolean }>(),
+  { tone: "neutral", interactive: false },
+);
 </script>
 
 <template>
-  <span :class="['tag', `tag--${tone}`]"><slot /></span>
+  <button
+    v-if="interactive"
+    type="button"
+    :class="['tag', `tag--${tone}`, 'tag--interactive']"
+  >
+    <slot />
+  </button>
+  <span v-else :class="['tag', `tag--${tone}`]"><slot /></span>
 </template>
 
 <style scoped>
@@ -18,6 +28,17 @@ withDefaults(defineProps<{ tone?: "neutral" | "accent" | "ok" | "warn" | "crit" 
   color: var(--tx2);
   font-size: var(--fs-small);
   white-space: nowrap;
+}
+
+.tag--interactive {
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tag--interactive:hover {
+  background: var(--card-2);
+  color: var(--tx);
 }
 
 .tag--accent {

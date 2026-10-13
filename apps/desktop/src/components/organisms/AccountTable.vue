@@ -5,6 +5,7 @@ import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSelect from "@/components/atoms/HSelect.vue";
 import HTag from "@/components/atoms/HTag.vue";
+import HTooltip from "@/components/atoms/HTooltip.vue";
 import { formatDate, formatDateTime } from "@/composables/format";
 import { t } from "@/i18n";
 import type { Account, Role } from "@/link";
@@ -135,16 +136,22 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                 {{ roleLabel(account.role) }}
               </HTag>
               <!-- BR-GRANT-013 : en lecture seule, aucun geste ne donne ni ne retire ce droit depuis cet écran. -->
-              <HTag
-                v-if="account.managesServices"
-                tone="neutral"
-                class="table__right"
-                :title="t('rights.tag')"
-                data-services-right
-              >
-                <HIcon name="box" size="sm" />
-                <span class="table__right-text">{{ t("rights.tag") }}</span>
-              </HTag>
+              <HTooltip v-if="account.managesServices" :text="t('rights.tagTip')" placement="start">
+                <template #default="{ describedby }">
+                  <HTag
+                    tone="neutral"
+                    interactive
+                    class="table__right"
+                    aria-haspopup="dialog"
+                    :aria-describedby="describedby"
+                    data-services-right
+                    @click="emit('detail', account)"
+                  >
+                    <HIcon name="box" size="sm" />
+                    <span class="table__right-text">{{ t("rights.tag") }}</span>
+                  </HTag>
+                </template>
+              </HTooltip>
             </div>
           </td>
           <td class="table__created">{{ formatDate(account.createdAt) }}</td>
@@ -190,6 +197,7 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                   variant="secondary"
                   :needs-link="ADMIN"
                   :disabled="busy || account.sessionsOpen === 0"
+                  :hint="account.sessionsOpen === 0 ? t('accounts.noSessionToClose') : undefined"
                   :aria-label="named(sessionsLabel(account), account)"
                   @click="emit('closeSessions', account)"
                 >
@@ -267,11 +275,12 @@ const named = (label: string, account: Account) => `${label} ${account.username}
   font: inherit;
   text-align: left;
   text-decoration: underline;
-  text-decoration-color: var(--bd);
+  text-decoration-color: var(--tx2);
   text-underline-offset: var(--space-half);
 }
 
 .table__open:hover {
+  color: var(--ac);
   text-decoration-color: currentColor;
 }
 

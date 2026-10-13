@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import { startedApp } from "@/test/app";
+import { hasTooltip, tooltip } from "@/test/tooltip";
 import HButton from "./HButton.vue";
 
 // HRT-40 (C42) : quand la raison est écrite sous le bouton, elle n'est dite qu'une fois (revue de la PR #59) :
@@ -13,7 +14,7 @@ describe("HButton reason-below", () => {
       props: { ...props, reasonBelow: true },
       slots: { default: "Agir" },
     });
-    expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
+    expect(hasTooltip()).toBe(false);
     const reason = wrapper.get("[data-button-reason]");
     expect(reason.attributes("id")).toBeTruthy();
     expect(wrapper.get("button").attributes("aria-describedby")).toBe(reason.attributes("id"));
@@ -22,7 +23,7 @@ describe("HButton reason-below", () => {
 
   it("sans reason-below, la raison reste une infobulle décrivant le bouton", () => {
     const wrapper = mount(HButton, { props, slots: { default: "Agir" } });
-    const bubble = wrapper.get('[role="tooltip"]');
+    const bubble = tooltip();
     expect(wrapper.get("button").attributes("aria-describedby")).toBe(bubble.attributes("id"));
     expect(wrapper.find("[data-button-reason]").exists()).toBe(false);
   });
@@ -37,7 +38,7 @@ describe("HButton describedBy", () => {
       slots: { default: "Démarrer" },
     });
     expect(wrapper.get("button").attributes("aria-describedby")).toBe("why");
-    expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
+    expect(hasTooltip()).toBe(false);
   });
 
   it("sans blocage du droit (non désactivé), le texte ne décrit pas le bouton", () => {
@@ -73,7 +74,7 @@ describe("HButton describedBy", () => {
       global: { plugins: [ctx.pinia] },
     });
     await flushPromises();
-    const bubble = wrapper.get('[role="tooltip"]');
+    const bubble = tooltip();
     expect(bubble.text()).toContain("Indisponible");
     expect(wrapper.get("button").attributes("aria-describedby")).toBe(
       `${bubble.attributes("id")} why`,
@@ -90,7 +91,7 @@ describe("HButton describedBy", () => {
       global: { plugins: [ctx.pinia] },
     });
     await flushPromises();
-    const bubble = wrapper.get('[role="tooltip"]');
+    const bubble = tooltip();
     expect(wrapper.get("button").attributes("aria-describedby")).toBe(bubble.attributes("id"));
   });
 });

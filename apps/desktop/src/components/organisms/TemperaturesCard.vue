@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useCoverage, useMachineSeries } from "@/composables/useMachineSeries";
 import { formatTemperature } from "@/dashboard/format";
+import { probeTitle } from "@/dashboard/labels";
 import { hottest } from "@/dashboard/series";
 import { t } from "@/i18n";
 import { type ServerMachine, useDashboardStore } from "@/stores/dashboard";
@@ -19,7 +20,7 @@ const probes = computed(() => {
   const latest = props.entry.latest;
   if (!latest) return [];
   return latest.sample.temps.map((temp, index) => ({
-    label: temp.label,
+    ...probeTitle(temp.label),
     celsius: temp.celsius,
     level: latest.levels.temps[index] ?? "normal",
   }));
@@ -38,7 +39,8 @@ const covered = useCoverage(props.entry);
         <StatRow
           v-for="(probe, index) in probes"
           :key="index"
-          :label="probe.label"
+          :label="probe.title"
+          :detail="probe.technical ?? undefined"
           :value="formatTemperature(probe.celsius)"
           :level="probe.level"
         />

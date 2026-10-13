@@ -57,7 +57,7 @@ describe("les quatre profils", () => {
     const block = notice(wrapper);
     expect(block.get("[data-rights-sentence]").text()).toBe(REASON);
     expect(block.get("[data-rights-follow]").text()).toBe(ADMIN_INTRO);
-    expect(block.get("pre").text()).toBe("hearth-agent account services marie --grant");
+    expect(block.get("pre").text()).toBe("sudo hearth-agent account services marie --grant");
     wrapper.unmount();
   });
 

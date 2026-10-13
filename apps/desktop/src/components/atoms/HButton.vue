@@ -202,6 +202,12 @@ function onClick(event: MouseEvent) {
   color: var(--tx);
 }
 
+/* HRT-141 : inactif, le libellé reste lisible (3 pour 1 au moins, opacité 0,7) ; le contour en tirets dit l'état sans la couleur. */
+.btn[aria-disabled="true"]:not(.btn--busy) {
+  border-style: dashed;
+  border-color: currentColor;
+}
+
 .btn--busy {
   cursor: progress;
 }

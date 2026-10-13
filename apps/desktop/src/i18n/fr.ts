@@ -26,6 +26,7 @@ export const fr = {
     password: "Changer le mot de passe",
     closeSessions: "Fermer les sessions",
     closeSessionsMany: "Fermer les {n} sessions",
+    noSessionToClose: "Ce compte n'a aucune session ouverte.",
     remove: "Supprimer",
     changeOwnPassword: "Changer mon mot de passe",
     removeOwn: "Supprimer mon compte",
@@ -279,6 +280,7 @@ export const fr = {
     loading: "Chargement",
   },
   rail: {
+    skipToContent: "Aller au contenu",
     label: "Serveurs",
     home: "Accueil",
     addServer: "Ajouter un serveur",
@@ -538,6 +540,9 @@ export const fr = {
     memoryUsage: "Utilisée / Totale",
     diskUsage: "Utilisé / Total",
     diskFree: "Libre : {size}",
+    diskSystem: "Disque système",
+    probeProcessor: "Processeur",
+    probeSsd: "Disque SSD",
     gpu: "Carte graphique",
     gpuLoad: "Charge",
     gpuMemory: "Mémoire vidéo",
@@ -619,7 +624,7 @@ export const fr = {
     originAssistant: "assistant",
     countOne: "1 événement",
     count: "{n} événements",
-    countMore: "{n} événements ou plus",
+    countMore: "{n} événements affichés, d'autres plus bas",
     loadFailed: "Impossible de charger le journal",
     moreFailed: "Impossible de charger les entrées plus anciennes",
     notApplied: "Ta recherche n'est pas appliquée. {reason}",
@@ -641,6 +646,7 @@ export const fr = {
     burstCollapse: "Replier : {summary}",
     burstFrom: "depuis {addr}",
     details: "Détail de l'entrée",
+    detailTechnical: "Détails techniques",
     detailSource: "Date source (UTC)",
     detailId: "Numéro",
     windowFull:
@@ -666,7 +672,7 @@ export const fr = {
     corrupted: "Mise à jour corrompue. Refusée. La version en cours reste utilisable.",
     failed: "La mise à jour n'a pas abouti. La version en cours reste utilisable.",
     sectionTitle: "Mises à jour",
-    upToDate: "Tu es à jour",
+    upToDate: "Hearth est à jour sur ce PC.",
     lastCheck: "Dernière vérification : {when}",
     neverChecked: "Aucune vérification réussie pour l'instant.",
     checkNow: "Vérifier maintenant",
@@ -682,11 +688,12 @@ export const fr = {
   },
   agentUpdate: {
     cardTitle: "État du serveur : {name}",
-    versions: "Client {client} · Agent {agent}",
-    versionsAvailable: "Client {client} · Agent {agent} · Disponible {available}",
+    versions: "Version installée sur ce serveur : {agent}.",
+    versionsAvailable:
+      "Version installée sur ce serveur : {agent}. La version {available} est disponible.",
     tag: "Mise à jour disponible",
     runningLost: "Le serveur ne répond plus. L'état de la mise à jour sera relu à son retour.",
-    upToDate: "L'agent est à jour.",
+    upToDate: "Hearth est à jour sur ce serveur.",
     unavailable: "Indisponible tant que le serveur n'est pas connecté.",
     readFailed: "Impossible de lire l'état de la mise à jour de l'agent.",
     button: "Mettre à jour l'agent",
@@ -765,6 +772,7 @@ export const fr = {
     toggleUnavailable: "Disponible dès que tes réglages sont lus.",
     sectionClient: "Client",
     sectionAccount: "Mon compte",
+    agentExplain: "L'agent est le programme Hearth installé sur ton serveur.",
     connectedAs: "Connecté en tant que {username}",
     lastAccount: "Dernier compte utilisé : {username}",
     notifyOnLinkChange: "Notifier quand un serveur devient hors ligne ou revient",
@@ -936,6 +944,15 @@ export const fr = {
   // laisse entendre que le droit se donne depuis l'application (BR-GRANT-005).
   rights: {
     tag: "Peut gérer les services",
+    // Bulle du repère : ce que le droit permet (BR-GRANT-003) et comment il se donne (BR-GRANT-005).
+    tagTip:
+      "Ce compte peut démarrer, arrêter, redémarrer et déployer des services sur ce serveur. Clique pour voir comment ce droit se donne.",
+    permits:
+      "Ce droit permet de démarrer, arrêter, redémarrer et déployer des services sur ce serveur.",
+    revokeOwnWarning:
+      "C'est ton propre compte. Si tu lances cette commande, tu ne pourras plus démarrer, arrêter, redémarrer ni déployer de services sur ce serveur.",
+    removalBlocked:
+      "Ce compte peut gérer les services : seul un compte qui le peut aussi, ou la commande sur le serveur, peut le supprimer.",
     rowLabel: "Gestion des services",
     allowed: "Autorisée",
     notAllowed: "Non autorisée",

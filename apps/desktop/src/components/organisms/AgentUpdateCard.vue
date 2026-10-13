@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import {
   historyMessage,
+  knownStep,
   progressSentence,
   refusalMessage,
   stepAnnouncement,
@@ -19,7 +20,6 @@ import { t } from "@/i18n";
 import { getLinkBridge, type ServerInfo } from "@/link";
 import { useAgentUpdatesStore } from "@/stores/agentUpdates";
 import { useLinkStore } from "@/stores/link";
-import { useSettingsStore } from "@/stores/settings";
 import { useToastsStore } from "@/stores/toasts";
 
 // « État du serveur : {nom} » (réglages) : versions du client et de l'agent (BR-UPDATE-022, 025), la
@@ -34,7 +34,6 @@ const props = defineProps<{ server: ServerInfo }>();
 
 const agents = useAgentUpdatesStore();
 const link = useLinkStore();
-const settings = useSettingsStore();
 const toasts = useToastsStore();
 const action = useServerAction(() => props.server.id);
 const now = useNow();
@@ -51,10 +50,13 @@ const running = computed(() => agents.runningOf(props.server.id));
 const notice = computed(() => agents.noticeOf(props.server.id));
 const available = computed(() => view.value?.available ?? null);
 
-/** L'étape à montrer : celle du flux ; « contrôle » quand l'agent dit seulement « en cours ». */
+/**
+ * L'étape à montrer : celle du flux ; « contrôle » quand l'agent dit seulement « en cours » ; aucune (`null`) quand
+ * l'agent annonce une étape que ce client ne connaît pas (HRT-143) : la carte dit « en cours » sans en marquer une.
+ */
 const step = computed(() => {
   const current = progress.value?.step;
-  return current && current !== "done" ? current : "check";
+  return current && current !== "done" ? knownStep(current) : "check";
 });
 
 const compat = computed(() =>
@@ -68,10 +70,7 @@ const compatMessage = computed(() => {
 });
 
 const versions = computed(() => {
-  const params = {
-    client: settings.version ?? t("settings.versionUnavailable"),
-    agent: view.value?.current ?? t("settings.versionUnavailable"),
-  };
+  const params = { agent: view.value?.current ?? t("settings.versionUnavailable") };
   return available.value
     ? t("agentUpdate.versionsAvailable", { ...params, available: available.value.version })
     : t("agentUpdate.versions", params);
@@ -80,7 +79,11 @@ const versions = computed(() => {
 const silent = computed(() => state.value === "offline");
 /** Vide hors mise à jour (et quand le serveur ne répond plus) : le texte arrive dans une région déjà présente. */
 const announcement = computed(() =>
-  running.value && !silent.value ? stepAnnouncement(step.value) : "",
+  running.value && !silent.value
+    ? step.value
+      ? stepAnnouncement(step.value)
+      : progressSentence()
+    : "",
 );
 
 /** Le bouton existe quand une version plus récente est disponible ; il est inerte sans droit ou pendant l'opération. */

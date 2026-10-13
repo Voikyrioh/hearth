@@ -16,6 +16,8 @@ const props = defineProps<{
   manages: boolean;
   /** L'agent annonce `service-rights`. */
   known: boolean;
+  /** C'est le compte de la personne qui regarde : la commande qui retire le droit est précédée d'un avertissement. */
+  own?: boolean;
 }>();
 
 const command = computed(() => (props.known ? grantCommand(props.username, props.manages) : null));
@@ -30,7 +32,11 @@ const command = computed(() => (props.known ? grantCommand(props.username, props
       </dd>
     </dl>
     <template v-if="known">
+      <p class="row__help" data-rights-permits>{{ t("rights.permits") }}</p>
       <p class="row__help" data-rights-help>{{ t("rights.help") }}</p>
+      <p v-if="own && manages && command" class="row__warn" data-rights-own-warning>
+        {{ t("rights.revokeOwnWarning") }}
+      </p>
       <CommandBlock
         v-if="command"
         :text="command"
@@ -73,6 +79,12 @@ const command = computed(() => (props.known ? grantCommand(props.username, props
 .row__help {
   margin: 0;
   color: var(--tx2);
+  font-size: var(--fs-small);
+}
+
+.row__warn {
+  margin: 0;
+  color: var(--warn);
   font-size: var(--fs-small);
 }
 </style>
