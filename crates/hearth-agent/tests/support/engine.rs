@@ -57,5 +57,7 @@ pub fn parts_supervised(
         supervisor,
         host: Arc::new(TestHost),
         timings,
+        // Les tests qui ne portent pas sur le plafond par compte ni sur le frein les détendent.
+        log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
     }
 }

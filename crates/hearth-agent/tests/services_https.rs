@@ -777,6 +777,7 @@ async fn no_variable_value_reaches_a_message_a_response_or_a_trace_and_no_name_o
             supervisor: Arc::new(FakeSupervisor::new()),
             host: Arc::new(support::engine::TestHost),
             timings: fast_timings(),
+            log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
         },
     )
     .await;
@@ -1554,6 +1555,7 @@ async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_jour
             supervisor: Arc::new(FakeSupervisor::new()),
             host: Arc::new(support::engine::TestHost),
             timings: fast_timings(),
+            log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
         },
     )
     .await;
@@ -1910,6 +1912,7 @@ async fn nothing_of_a_container_that_is_not_adopted_leaves_the_agent_by_any_rout
             supervisor,
             host: Arc::new(support::engine::TestHost),
             timings: fast_timings(),
+            log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
         },
     )
     .await;

@@ -8,10 +8,12 @@
 //! ne montre rien.
 
 pub mod engine;
+pub mod folders;
 pub mod hidden;
 pub mod image;
 pub mod key;
 pub mod limits;
+pub mod log_brake;
 pub mod logs;
 pub mod state;
 pub mod unit;
@@ -21,6 +23,10 @@ pub use engine::{
     Announced, ApiVersion, Debounce, EngineProbe, EngineState, MIN_API_VERSION, ProbeOutcome,
     classify_probe, is_supported_engine,
 };
+pub use folders::{
+    ACCOUNT_SECRET_FOLDERS, FolderPath, FolderPolicy, FolderRefusal, MAX_LINK_HOPS, Probe,
+    SYSTEM_FOLDERS, home_folders, resolve,
+};
 pub use hidden::Hidden;
 pub use image::{ImageName, image_name};
 pub use key::{KeyKind, ServiceKey};
@@ -29,6 +35,7 @@ pub use limits::{
     MAX_ENV_NAMES, MAX_IMAGE_REF_CHARS, MAX_IMAGE_TAG_CHARS, MAX_LABEL_CHARS, MAX_MOUNTS,
     MAX_NAME_CHARS, MAX_PATH_CHARS, MAX_PORTS, bounded, bounded_opt,
 };
+pub use log_brake::{AccountBrake, BrakeSettings, OpenRefusal};
 pub use state::{
     Derived, MountInfo, MountType, Observation, PortBinding, PortProtocol, PortScope,
     RESTART_LOOP_STARTS, RESTART_LOOP_WINDOW, RestartPolicy, RunState, STARTING_MAX,

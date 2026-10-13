@@ -16,6 +16,7 @@ mod device_repo;
 mod fingerprint;
 mod gpu_probe;
 mod host_environment;
+mod host_folders;
 mod id_gen;
 mod identity_store;
 mod install_host;
@@ -54,6 +55,7 @@ pub use device_repo::{DeviceRepo, DeviceTx};
 pub use fingerprint::{FingerprintSecretError, FingerprintSecretStore, RequestFingerprinter};
 pub use gpu_probe::GpuProbe;
 pub use host_environment::{HostDescription, HostEnvironment};
+pub use host_folders::HostFolders;
 pub use id_gen::IdGen;
 pub use identity_store::{IdentityError, IdentityStore, PublicIdentity};
 pub use install_host::{

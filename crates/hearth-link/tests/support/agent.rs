@@ -334,6 +334,7 @@ impl TestAgent {
                     supervisor: Arc::new(hearth_agent::infrastructure::supervisor::NoSupervisor),
                     host: Arc::new(DebianHost),
                     timings: engine_timings(),
+                    log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
                 },
             )
             .await

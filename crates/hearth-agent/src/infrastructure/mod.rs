@@ -11,6 +11,7 @@ pub mod engine;
 pub mod file_lock;
 pub mod fingerprint;
 pub mod fingerprint_secret;
+pub mod host;
 pub mod ids;
 pub mod install;
 pub mod logging;

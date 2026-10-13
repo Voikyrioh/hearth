@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod attack_mode;
 pub mod audit;
 pub mod elevation;
+pub mod folders;
 pub mod hello;
 pub mod install;
 pub mod maintenance;

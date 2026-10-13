@@ -67,9 +67,12 @@ pub mod action {
     /// Un refus de lecture des journaux d'un service adopté faute du droit (HRT-80, BR-SLOG-024) ; la
     /// lecture réussie n'est jamais consignée (BR-SLOG-022).
     pub const SERVICE_LOGS_READ: &str = "service.logs.read";
+    /// Un compte est freiné quand il ouvre des lectures de journaux en rafale (HRT-107, BR-SLOG-027) :
+    /// UNE entrée quand il est refusé plus de 30 fois en 10 minutes, jamais une par refus.
+    pub const SERVICE_LOGS_THROTTLED: &str = "service.logs.throttled";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 31] = [
+    pub const ALL: [&str; 32] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -101,6 +104,7 @@ pub mod action {
         SERVICE_RELEASE,
         SERVICE_EXTERNAL_READ,
         SERVICE_LOGS_READ,
+        SERVICE_LOGS_THROTTLED,
     ];
 }
 

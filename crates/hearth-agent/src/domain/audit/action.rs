@@ -72,11 +72,14 @@ pub enum AuditAction {
     /// Lecture des journaux d'un service adopté : consignée seulement quand elle est refusée faute du
     /// droit (HRT-80, BR-SLOG-024). Lire n'est jamais consigné (BR-SLOG-022).
     ServiceLogsRead,
+    /// Un compte est freiné quand il ouvre des lectures de journaux en rafale (HRT-107, BR-SLOG-027) :
+    /// une seule entrée par fenêtre de 10 minutes, avec le nombre de refus ; jamais une par refus.
+    ServiceLogsThrottled,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 31] = [
+    pub const ALL: [AuditAction; 32] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -108,6 +111,7 @@ impl AuditAction {
         Self::ServiceRelease,
         Self::ServiceExternalRead,
         Self::ServiceLogsRead,
+        Self::ServiceLogsThrottled,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -144,6 +148,7 @@ impl AuditAction {
             Self::ServiceRelease => action::SERVICE_RELEASE,
             Self::ServiceExternalRead => action::SERVICE_EXTERNAL_READ,
             Self::ServiceLogsRead => action::SERVICE_LOGS_READ,
+            Self::ServiceLogsThrottled => action::SERVICE_LOGS_THROTTLED,
         }
     }
 
@@ -181,6 +186,7 @@ impl AuditAction {
             Self::ServiceRelease => "Adoption retirée",
             Self::ServiceExternalRead => "Liste des conteneurs existants",
             Self::ServiceLogsRead => "Journaux lus",
+            Self::ServiceLogsThrottled => "Ouvertures de journaux freinées",
         }
     }
 

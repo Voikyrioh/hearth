@@ -11,7 +11,7 @@ maj: 2026-10-13
 # BR-SLOG-020 — Dix lectures simultanées au plus pour tout l'agent ; fermer le socket arrête la lecture côté serveur et rend la place
 
 ## Règle
-Les dix places sont communes à tous les comptes (`ServiceLogs::acquire`, `Permit`). Une onzième ouverture répond `error { code: "LOGS_LIMIT" }`. Fermer le socket, proprement ou non (coupure du lien, client disparu), lâche la `LogSession` : la tâche qui lit le moteur est abandonnée, la connexion au moteur se ferme et la place revient. Une lecture suspendue par une coupure libère donc sa place ; à la reprise elle en retrouve une s'il en reste, sinon `LOGS_LIMIT`. La place d'attente d'authentification (quotas de `/stream`) est gardée jusqu'à l'`open`, puis rendue : une lecture est comptée par ses propres dix places. Un compte en lecture seule peut tenir les dix places et en priver les administrateurs : la spec fixe dix pour tous, un plafond par compte serait une décision du propriétaire. Le texte « Trop de journaux sont ouverts… » est porté par le client.
+Les dix places sont communes à tous les comptes (`ServiceLogs::acquire`, `Permit`). Une onzième ouverture répond `error { code: "LOGS_LIMIT" }`. Fermer le socket, proprement ou non (coupure du lien, client disparu), lâche la `LogSession` : la tâche qui lit le moteur est abandonnée, la connexion au moteur se ferme et la place revient. Une lecture suspendue par une coupure libère donc sa place ; à la reprise elle en retrouve une s'il en reste, sinon `LOGS_LIMIT`. La place d'attente d'authentification (quotas de `/stream`) est gardée jusqu'à l'`open`, puis rendue : une lecture est comptée par ses propres dix places. Un compte en lecture seule pouvait tenir les dix places et en priver les administrateurs : le propriétaire a décidé, le 2026-10-13, d'un plafond par compte (3 lectures, BR-SLOG-026) et d'un frein aux ouvertures (BR-SLOG-027), qui se vérifient avant celui-ci. Le texte « Trop de journaux sont ouverts… » est porté par le client.
 
 ## Application (code)
 - `crates/hearth-agent/src/application/service_logs.rs::{ServiceLogs::acquire, LogSession (Drop)}`
@@ -25,6 +25,8 @@ Les dix places sont communes à tous les comptes (`ServiceLogs::acquire`, `Permi
 
 ## Règles liées
 - BR-SLOG-007
+- BR-SLOG-026
+- BR-SLOG-027
 
 ## Historique
 - 2026-10-13 — création (HRT-66, tranche 4 des déploiements : journaux en direct, côté agent et protocole).
