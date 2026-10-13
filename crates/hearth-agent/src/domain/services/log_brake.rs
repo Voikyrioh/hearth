@@ -108,6 +108,9 @@ impl AccountBrake {
     /// seau plein, aucun refus récent).
     pub fn is_idle(&mut self, now_ms: u64) -> bool {
         self.refill(now_ms);
+        // la fenêtre des refus avance avec le temps, pas seulement à un nouveau refus : sinon un compte
+        // freiné une fois resterait en mémoire jusqu'au redémarrage
+        self.forget_old_refusals(now_ms);
         self.reads == 0
             && self.tokens >= self.settings.burst
             && self.refusals.is_empty()
@@ -153,13 +156,8 @@ impl AccountBrake {
         }
     }
 
-    fn refuse_rate(&mut self, now_ms: u64) -> OpenRefusal {
-        let next = self.refilled_at + self.settings.refill_ms;
-        let wait_ms = next.saturating_sub(now_ms);
-        let retry_after_s = u32::try_from(wait_ms.div_ceil(1000))
-            .unwrap_or(u32::MAX)
-            .max(1);
-        // Les refus de la fenêtre de 10 minutes.
+    /// Garde les refus de la fenêtre de 10 minutes.
+    fn forget_old_refusals(&mut self, now_ms: u64) {
         while self
             .refusals
             .front()
@@ -167,6 +165,15 @@ impl AccountBrake {
         {
             self.refusals.pop_front();
         }
+    }
+
+    fn refuse_rate(&mut self, now_ms: u64) -> OpenRefusal {
+        let next = self.refilled_at + self.settings.refill_ms;
+        let wait_ms = next.saturating_sub(now_ms);
+        let retry_after_s = u32::try_from(wait_ms.div_ceil(1000))
+            .unwrap_or(u32::MAX)
+            .max(1);
+        self.forget_old_refusals(now_ms);
         if self.refusals.len() >= MAX_REMEMBERED_REFUSALS {
             self.refusals.pop_front();
         }
@@ -425,6 +432,28 @@ mod tests {
         brake.release();
         assert!(!brake.is_idle(1), "le seau n'est pas plein");
         assert!(brake.is_idle(STEP + 1), "le jeton est revenu");
+    }
+
+    #[test]
+    fn a_braked_account_is_forgotten_once_the_refusal_window_has_passed() {
+        let mut brake = brake();
+        for _ in 0..12 {
+            brake.try_open(0).unwrap();
+            brake.release();
+        }
+        assert!(matches!(
+            brake.try_open(1),
+            Err(OpenRefusal::RateLimited { .. })
+        ));
+        assert!(!brake.refusals.is_empty());
+        // seau revenu plein, mais le refus est récent : le compte reste marqué
+        assert!(!brake.is_idle(REFUSAL_WINDOW_MS - 1));
+        // fenêtre écoulée : plus rien à retenir
+        assert!(brake.is_idle(REFUSAL_WINDOW_MS + 1));
+        assert!(
+            brake.refusals.is_empty(),
+            "la file est vidée, pas seulement ignorée"
+        );
     }
 
     #[test]

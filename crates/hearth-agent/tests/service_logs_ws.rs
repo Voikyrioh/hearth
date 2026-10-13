@@ -2814,6 +2814,32 @@ async fn only_one_journal_entry_is_asked_for_after_thirty_refusals() {
     agent.shutdown().await;
 }
 
+#[tokio::test]
+async fn a_missing_right_stays_visible_when_the_brake_answers_in_its_place() {
+    let env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    let (agent, key) = one_service_agent(&env, &engine).await;
+    let logs = ServiceLogs::new(
+        agent.services(),
+        engine.clone(),
+        env.clock.clone(),
+        limited(BrakeSettings {
+            max_reads: usize::MAX,
+            burst: 1,
+            refill_ms: 3_600_000,
+        }),
+    )
+    .with_policy(Arc::new(|_, _| Err(ReadRefusal::MissingRight)));
+    let first = refusal_of(logs.open(account_viewer("marie"), service_key(&key), open_request()));
+    assert_eq!(first.error.code, LogsErrorCode::MissingRight);
+    assert!(!first.missing_right);
+    // le seau est vide : le client lit « freiné », le journal sait que le droit manquait aussi
+    let braked = refusal_of(logs.open(account_viewer("marie"), service_key(&key), open_request()));
+    assert_eq!(braked.error.code, LogsErrorCode::LogsRateLimited);
+    assert!(braked.missing_right);
+    agent.shutdown().await;
+}
+
 /// Un agent dont le frein est celui-ci : les tests du socket.
 async fn braked_agent(
     env: &Env,
@@ -2915,7 +2941,7 @@ async fn a_braked_account_is_told_to_wait_and_the_journal_gets_one_entry() {
     assert_eq!(rows[0].1.as_deref(), Some("/services/{key}/logs"));
     assert_eq!(
         rows[0].2.as_deref(),
-        Some("31 ouvertures de journaux refusées en 10 minutes")
+        Some("plus de 30 ouvertures de journaux refusées en 10 minutes")
     );
     assert_eq!(rows[0].3.as_deref(), Some("marie"));
     // Aucun nom de service ni clé dans l'entrée.

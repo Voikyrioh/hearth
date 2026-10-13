@@ -5,7 +5,9 @@
 //! La liste des comptes est relue à chaque vérification (BR-DEPLOY-012 : un compte ajouté après le
 //! démarrage est couvert) ; si elle est illisible, le dossier est refusé.
 //!
-//! Cette liste de refus est une CEINTURE ; la barrière est la liste d'autorisation des dossiers
+//! Cette liste de refus n'est PAS une barrière : un filtre sur un nom, que le moteur résout lui-même plus tard
+//! (BR-DEPLOY-012, SECURITY.md). Aucun appelant en production pour l'instant. La barrière sera la liste
+//! d'autorisation des dossiers
 //! ouverts aux services (HRT-70).
 
 use super::ports::HostFolders;
@@ -14,16 +16,67 @@ use crate::domain::services::{
 };
 
 /// Ce que l'agent sait de lui-même et de son moteur, en chemins absolus (BR-DEPLOY-012).
-#[derive(Debug, Clone, Default)]
+///
+/// Il n'existe aucun fait par défaut : les champs sont privés, le seul moyen d'en fabriquer un est
+/// [`FolderFacts::new`], qui refuse un fait vide, relatif ou illisible. Un fait manquant ne peut donc pas
+/// désarmer la liste de refus en silence : l'appelant reçoit une erreur, jamais un accord.
+#[derive(Debug, Clone)]
 pub struct FolderFacts {
-    /// Le socket de communication du moteur.
-    pub engine_socket: String,
-    /// Le dossier de données du moteur.
-    pub engine_data_dir: String,
-    /// La racine de données Hearth.
-    pub hearth_data_root: String,
-    /// Données, programme et configuration de l'agent.
-    pub agent_paths: Vec<String>,
+    engine_socket: String,
+    engine_data_dir: String,
+    hearth_data_root: String,
+    agent_paths: Vec<String>,
+}
+
+/// Le fait obligatoire qui manque ou n'est pas un chemin absolu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum FolderFactsError {
+    #[error("le socket du moteur est absent ou n'est pas un chemin absolu")]
+    EngineSocket,
+    #[error("le dossier de données du moteur est absent ou n'est pas un chemin absolu")]
+    EngineDataDir,
+    #[error("la racine de données Hearth est absente ou n'est pas un chemin absolu")]
+    HearthDataRoot,
+    #[error("aucun dossier de l'agent, ou l'un n'est pas un chemin absolu")]
+    AgentPaths,
+}
+
+/// Un fait utilisable : un chemin absolu que [`resolve`] accepte.
+fn is_fact(path: &str) -> bool {
+    !path.trim().is_empty() && resolve(path, &mut |_| Probe::Plain).is_ok()
+}
+
+impl FolderFacts {
+    /// Les faits obligatoires : le socket et le dossier de données du moteur, la racine de données Hearth,
+    /// et au moins un dossier de l'agent. Chacun doit être un chemin absolu non vide.
+    pub fn new(
+        engine_socket: impl Into<String>,
+        engine_data_dir: impl Into<String>,
+        hearth_data_root: impl Into<String>,
+        agent_paths: Vec<String>,
+    ) -> Result<Self, FolderFactsError> {
+        let engine_socket = engine_socket.into();
+        let engine_data_dir = engine_data_dir.into();
+        let hearth_data_root = hearth_data_root.into();
+        if !is_fact(&engine_socket) {
+            return Err(FolderFactsError::EngineSocket);
+        }
+        if !is_fact(&engine_data_dir) {
+            return Err(FolderFactsError::EngineDataDir);
+        }
+        if !is_fact(&hearth_data_root) {
+            return Err(FolderFactsError::HearthDataRoot);
+        }
+        if agent_paths.is_empty() || !agent_paths.iter().all(|path| is_fact(path)) {
+            return Err(FolderFactsError::AgentPaths);
+        }
+        Ok(Self {
+            engine_socket,
+            engine_data_dir,
+            hearth_data_root,
+            agent_paths,
+        })
+    }
 }
 
 /// Construit la liste des dossiers refusés telle qu'elle est maintenant : la liste fermée du système, les
@@ -143,16 +196,17 @@ mod tests {
     }
 
     fn facts() -> FolderFacts {
-        FolderFacts {
-            engine_socket: "/var/run/docker.sock".into(),
-            engine_data_dir: "/var/lib/docker".into(),
-            hearth_data_root: "/var/lib/hearth-data".into(),
-            agent_paths: vec![
+        FolderFacts::new(
+            "/var/run/docker.sock",
+            "/var/lib/docker",
+            "/var/lib/hearth-data",
+            vec![
                 "/var/lib/hearth".into(),
                 "/usr/local/bin/hearth-agent".into(),
                 "/etc/hearth".into(),
             ],
-        }
+        )
+        .expect("faits complets")
     }
 
     fn verdict(host: &FakeHost, raw: &str) -> Result<String, FolderRefusal> {
@@ -326,5 +380,41 @@ mod tests {
             );
             assert!(!refusal.message().contains("secretaccount"));
         }
+    }
+
+    #[test]
+    fn a_missing_or_empty_fact_is_an_error_never_an_acceptance() {
+        let agent = || vec!["/etc/hearth".to_owned()];
+        let build = |socket: &str, data: &str, root: &str, paths: Vec<String>| {
+            FolderFacts::new(socket, data, root, paths).map(|_| ())
+        };
+        assert_eq!(build("/s", "/d", "/r", agent()), Ok(()));
+        for empty in ["", "   ", "relative/path", "./x", "/nul\0byte"] {
+            assert_eq!(
+                build(empty, "/d", "/r", agent()),
+                Err(FolderFactsError::EngineSocket),
+                "{empty:?}"
+            );
+            assert_eq!(
+                build("/s", empty, "/r", agent()),
+                Err(FolderFactsError::EngineDataDir),
+                "{empty:?}"
+            );
+            assert_eq!(
+                build("/s", "/d", empty, agent()),
+                Err(FolderFactsError::HearthDataRoot),
+                "{empty:?}"
+            );
+            assert_eq!(
+                build("/s", "/d", "/r", vec!["/a".into(), empty.into()]),
+                Err(FolderFactsError::AgentPaths),
+                "{empty:?}"
+            );
+        }
+        assert_eq!(
+            build("/s", "/d", "/r", Vec::new()),
+            Err(FolderFactsError::AgentPaths),
+            "aucun dossier de l'agent"
+        );
     }
 }

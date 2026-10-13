@@ -285,10 +285,11 @@ pub enum Reason {
     /// Aucun conteneur de cette clé : disparu depuis la liste, ou jamais existé (HRT-80, BR-ADOPT-019). Le
     /// journal ne distingue pas non plus l'un de l'autre.
     ServiceNotFound,
-    /// Un compte a été refusé `refusals` fois en 10 minutes en ouvrant des lectures de journaux trop
-    /// vite (HRT-107, BR-SLOG-027).
+    /// Un compte a été refusé PLUS DE `over` fois en 10 minutes en ouvrant des lectures de journaux trop
+    /// vite (HRT-107, BR-SLOG-027). Le nombre exact n'est pas connu au moment d'écrire (l'entrée est
+    /// unique par fenêtre) : le texte dit « plus de », jamais un total qui serait faux.
     OpensThrottled {
-        refusals: u32,
+        over: u32,
     },
 }
 
@@ -338,8 +339,8 @@ impl Reason {
             Self::PasswordRequired => "mot de passe requis".to_owned(),
             Self::AlreadyAdopted => "déjà adopté".to_owned(),
             Self::ServiceNotFound => "service introuvable".to_owned(),
-            Self::OpensThrottled { refusals } => {
-                format!("{refusals} ouvertures de journaux refusées en 10 minutes")
+            Self::OpensThrottled { over } => {
+                format!("plus de {over} ouvertures de journaux refusées en 10 minutes")
             }
         }
     }

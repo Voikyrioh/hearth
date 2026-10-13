@@ -22,8 +22,8 @@ use crate::application::service_logs::OpenRequest;
 use crate::application::sessions::{AuthError, CurrentSession};
 use crate::domain::audit::{Actor, AuditAction, ClientName, Origin, Outcome, Reason, Target};
 use crate::domain::secret::Secret;
-use crate::domain::services::ServiceKey;
 use crate::domain::services::logs::Viewer;
+use crate::domain::services::{REFUSALS_BEFORE_ENTRY, ServiceKey};
 use crate::entrypoint::http::AppState;
 
 /// Sert la lecture jusqu'à sa fin, puis envoie la trame de fermeture.
@@ -106,12 +106,14 @@ async fn serve(
     {
         Ok(reading) => reading,
         Err(refused) => {
-            if refused.error.code == LogsErrorCode::MissingRight {
+            // Un refus de DROIT est un événement de sécurité à part : inscrit même quand le frein a
+            // répondu à sa place (le journal le regroupe lui-même).
+            if refused.error.code == LogsErrorCode::MissingRight || refused.missing_right {
                 journal_refusal(state, &session, addr, &key).await;
             }
             // Un compte freiné plus de 30 fois en 10 minutes : UNE entrée, puis plus rien (BR-SLOG-027).
-            if let Some(refusals) = refused.throttle_entry {
-                journal_throttle(state, &session, addr, refusals).await;
+            if refused.throttle_entry.is_some() {
+                journal_throttle(state, &session, addr).await;
             }
             send(socket, &settings, &LogsServerMessage::Error(refused.error)).await;
             return normal();
@@ -226,9 +228,9 @@ async fn journal_refusal(state: &AppState, session: &CurrentSession, addr: &str,
 }
 
 /// Inscrit au journal d'activité que ce compte est freiné (BR-SLOG-027) : le compte, l'origine et le
-/// nombre de refus des dix dernières minutes. Jamais un service, jamais une ligne. Écrite une seule fois
+/// seuil franchi dans les dix dernières minutes. Jamais un service, jamais une ligne. Écrite une seule fois
 /// par fenêtre de dix minutes (le frein la demande, voir `AccountBrake`).
-async fn journal_throttle(state: &AppState, session: &CurrentSession, addr: &str, refusals: u32) {
+async fn journal_throttle(state: &AppState, session: &CurrentSession, addr: &str) {
     let actor = Actor::new(
         Some(session.account.username.clone()),
         Origin::client(None, addr),
@@ -239,7 +241,9 @@ async fn journal_throttle(state: &AppState, session: &CurrentSession, addr: &str
             actor,
             AuditAction::ServiceLogsThrottled,
             Target::Route("/services/{key}/logs"),
-            Outcome::Denied(Reason::OpensThrottled { refusals }),
+            Outcome::Denied(Reason::OpensThrottled {
+                over: REFUSALS_BEFORE_ENTRY,
+            }),
         )
         .await;
 }

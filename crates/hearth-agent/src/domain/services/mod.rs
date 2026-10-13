@@ -35,7 +35,7 @@ pub use limits::{
     MAX_ENV_NAMES, MAX_IMAGE_REF_CHARS, MAX_IMAGE_TAG_CHARS, MAX_LABEL_CHARS, MAX_MOUNTS,
     MAX_NAME_CHARS, MAX_PATH_CHARS, MAX_PORTS, bounded, bounded_opt,
 };
-pub use log_brake::{AccountBrake, BrakeSettings, OpenRefusal};
+pub use log_brake::{AccountBrake, BrakeSettings, OpenRefusal, REFUSALS_BEFORE_ENTRY};
 pub use state::{
     Derived, MountInfo, MountType, Observation, PortBinding, PortProtocol, PortScope,
     RESTART_LOOP_STARTS, RESTART_LOOP_WINDOW, RestartPolicy, RunState, STARTING_MAX,

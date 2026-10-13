@@ -166,6 +166,9 @@ impl LogAccess {
 pub struct OpenRefused {
     pub error: LogsError,
     pub throttle_entry: Option<u32>,
+    /// Le frein a répondu, mais ce compte n'avait de toute façon pas le droit de lire ce service : le
+    /// refus de droit reste un événement de sécurité à inscrire (BR-SLOG-024).
+    pub missing_right: bool,
 }
 
 impl From<LogsErrorCode> for OpenRefused {
@@ -173,6 +176,7 @@ impl From<LogsErrorCode> for OpenRefused {
         Self {
             error: LogsError::new(code),
             throttle_entry: None,
+            missing_right: false,
         }
     }
 }
@@ -274,6 +278,7 @@ impl ServiceLogs {
             }) => Err(OpenRefused {
                 error: LogsError::rate_limited(retry_after_s),
                 throttle_entry: announce,
+                missing_right: false,
             }),
         }
     }
@@ -308,7 +313,18 @@ impl ServiceLogs {
         key: ServiceKey,
         request: OpenRequest,
     ) -> Result<LogSession, OpenRefused> {
-        let slot = self.reserve_account(&viewer.account)?;
+        let slot = match self.reserve_account(&viewer.account) {
+            Ok(slot) => slot,
+            Err(mut refused) => {
+                // Le frein passe d'abord, mais il ne doit pas cacher un refus de droit.
+                if refused.error.code == LogsErrorCode::LogsRateLimited {
+                    let target = self.registry.log_target(&key);
+                    refused.missing_right =
+                        (self.policy)(&viewer, &target) == Err(ReadRefusal::MissingRight);
+                }
+                return Err(refused);
+            }
+        };
         let permit = self.acquire()?;
         if self.registry.engine_status().state != EngineState::Ready {
             return Err(LogsErrorCode::EngineUnavailable.into());

@@ -15,12 +15,13 @@ use hearth_agent::infrastructure::host::folders::SystemFolders;
 use support::tmp;
 
 fn facts(root: &Path) -> FolderFacts {
-    FolderFacts {
-        engine_socket: "/var/run/docker.sock".into(),
-        engine_data_dir: "/var/lib/docker".into(),
-        hearth_data_root: root.join("hearth-data").to_string_lossy().into_owned(),
-        agent_paths: vec![root.join("agent").to_string_lossy().into_owned()],
-    }
+    FolderFacts::new(
+        "/var/run/docker.sock",
+        "/var/lib/docker",
+        root.join("hearth-data").to_string_lossy().into_owned(),
+        vec![root.join("agent").to_string_lossy().into_owned()],
+    )
+    .expect("faits complets")
 }
 
 fn judge(host: &SystemFolders, root: &Path, raw: &Path) -> Result<String, FolderRefusal> {
@@ -46,6 +47,14 @@ fn real_links_detours_and_accounts_are_judged_on_the_real_file_system() {
     )
     .unwrap();
     let host = SystemFolders::with_passwd(passwd.to_string_lossy().into_owned());
+
+    // Le dossier de compilation ne doit pas être lui-même sous un dossier refusé par la liste fermée du
+    // système (`/tmp`, `/root`, `/usr`...) : sinon rien de ce qu'on crée ici ne peut passer. Le test
+    // s'arrête alors proprement, il ne dépend pas de l'emplacement des sources.
+    if judge(&host, &root, &root.join("srv/data")).is_err() {
+        eprintln!("test ignoré : le dossier temporaire est sous un dossier refusé par le système");
+        return;
+    }
 
     // un dossier sans rapport passe
     assert!(judge(&host, &root, &root.join("srv/data")).is_ok());
