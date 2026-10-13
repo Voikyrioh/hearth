@@ -32,4 +32,4 @@ Un nom, une image ou un chemin allant jusqu'à 255 caractères ne casse jamais l
 
 ## Historique
 - 2026-10-13 — création (revue de la PR 77, HRT-61).
-- 2026-10-13 — HRT-72 : compteurs des ports et montages omis (FIX-01M4SFCRJWX8KMBC1ZK9ZWETTW) ; U+2028, U+2029, U+00AD retirés (FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ).
+- 2026-10-13 — HRT-72 : compteurs des ports et montages omis (FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ) ; U+2028, U+2029, U+00AD retirés (FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ).
