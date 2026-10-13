@@ -3,6 +3,7 @@
 //! Il rend une structure applicative ; la conversion vers le type du fil
 //! (`hearth_proto::api::hello::HelloResponse`) est faite par `entrypoint/http`.
 
+use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
 use hearth_proto::api::services::CAPABILITY_SERVICES;
 use hearth_proto::product::PRODUCT_NAME;
 use hearth_proto::version::{API_MIN_SUPPORTED, API_VERSION};
@@ -43,7 +44,7 @@ impl HelloService {
                 install_id,
                 managed,
                 mac_addresses: machine.mac_addresses(),
-                capabilities: vec![CAPABILITY_SERVICES],
+                capabilities: vec![CAPABILITY_SERVICES, CAPABILITY_SERVICE_LOGS],
             },
         }
     }
@@ -88,7 +89,7 @@ mod tests {
         assert_eq!(hello.mac_addresses, vec!["AA:BB:CC:DD:EE:FF"]);
         assert_eq!(hello.api_min, API_MIN_SUPPORTED);
         assert_eq!(hello.api_max, API_VERSION);
-        assert_eq!(hello.capabilities, vec!["services"]);
+        assert_eq!(hello.capabilities, vec!["services", "service-logs"]);
     }
 
     #[test]

@@ -5,6 +5,7 @@ use futures_util::Stream;
 use thiserror::Error;
 
 use crate::domain::secret::Secret;
+use crate::domain::services::logs::LogLine;
 use crate::domain::services::{EngineProbe, Hidden, Observation};
 
 /// Erreur d'un échange avec le moteur. Le texte du moteur n'en fait JAMAIS partie : il est traduit
@@ -26,6 +27,10 @@ pub enum EngineError {
     /// Le moteur (ou un proxy de socket) refuse l'accès à l'agent (401, 403).
     #[error("le moteur refuse l'accès")]
     Denied,
+    /// Le moteur ne sait pas faire cela pour ce conteneur : ses journaux ne se relisent pas (pilote
+    /// de journaux `none`, 501), BR-SLOG-017.
+    #[error("le moteur ne permet pas de relire les journaux de ce conteneur")]
+    Unsupported,
 }
 
 impl EngineError {
@@ -74,9 +79,29 @@ pub struct EnvEntry {
 /// immédiate puis relecture complète.
 pub type EngineEvents = Pin<Box<dyn Stream<Item = Result<EngineEvent, EngineError>> + Send>>;
 
+/// Ce que la lecture des journaux d'un conteneur demande au moteur (HRT-66).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogQuery {
+    /// Garder la connexion ouverte et envoyer les lignes à mesure qu'elles s'écrivent. Le flux finit
+    /// quand le conteneur s'arrête.
+    pub follow: bool,
+    /// Les N dernières lignes ; `None` : toutes celles que le moteur a gardées (à partir de `since_ms`).
+    pub tail: Option<u32>,
+    /// Les lignes écrites à partir de la seconde qui contient cette heure (millisecondes depuis
+    /// l'époque) : le moteur ne filtre qu'à la seconde, l'appelant écarte le surplus (curseur de reprise).
+    pub since_ms: Option<i64>,
+    /// Le conteneur a un terminal : le moteur envoie un flux brut, pas des trames.
+    pub tty: bool,
+}
+
+/// Le flux des lignes d'un conteneur, déjà assemblées, nettoyées et bornées (jamais plus de
+/// `MAX_LINE_CHARS` caractères par ligne). Une erreur termine le flux ; sa FIN veut dire que le
+/// conteneur s'est arrêté (ou que le moteur a coupé). L'abandonner ferme la connexion au moteur.
+pub type LogStream = Pin<Box<dyn Stream<Item = Result<LogLine, EngineError>> + Send>>;
+
 /// Le moteur de conteneurs vu par l'agent, EN LECTURE SEULE (HRT-61, ADR-0036).
 ///
-/// Cinq méthodes (HRT-63 ajoute `env`), aucune n'écrit : ni démarrer, ni arrêter, ni créer, ni supprimer, ni télécharger.
+/// Cinq méthodes (HRT-63 ajoute `env`, HRT-66 ajoute `logs`), aucune n'écrit : ni démarrer, ni arrêter, ni créer, ni supprimer, ni télécharger.
 /// Une méthode d'écriture « pour plus tard » n'a pas sa place ici : chaque tranche ajoute les siennes
 /// avec son faux et son cas dans la suite de contrat (`tests/support/engine_contract.rs`).
 ///
@@ -105,4 +130,10 @@ pub trait ContainerEngine: Send + Sync {
     /// demande d'un administrateur, jamais en arrière-plan ; au plus `MAX_ENV_NAMES` variables, comme
     /// la liste des noms. `None` si le conteneur n'existe plus.
     async fn env(&self, id: &str) -> Result<Option<Vec<EnvEntry>>, EngineError>;
+
+    /// Les journaux d'un conteneur (HRT-66, BR-SLOG-*). Lecture seule, comme le reste. Le texte d'une
+    /// ligne est du contenu sensible : ni l'implémentation ni l'appelant ne le tracent. Les erreurs
+    /// arrivent dans le flux : `NotFound` (conteneur disparu), `Unsupported` (journaux non relisibles),
+    /// `Unreachable` / `Timeout` / `Denied` / `Refused`.
+    fn logs(&self, id: &str, query: LogQuery) -> LogStream;
 }

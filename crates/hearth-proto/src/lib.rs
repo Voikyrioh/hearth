@@ -7,6 +7,7 @@ pub mod device_proof;
 pub mod error;
 pub mod fingerprint;
 pub mod headers;
+pub mod log_text;
 pub mod product;
 pub mod stream;
 pub mod thresholds;

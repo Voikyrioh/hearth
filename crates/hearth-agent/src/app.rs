@@ -30,6 +30,7 @@ use crate::application::ports::{
     TokenGen,
 };
 use crate::application::security::SecurityService;
+use crate::application::service_logs::{LogSettings, ServiceLogs};
 use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::sessions::SessionService;
 use crate::application::trust::TrustService;
@@ -592,6 +593,7 @@ pub async fn start_engined(
         adapters.clock.clone(),
     )?;
     let sessions = services.sessions.clone();
+    let container_engine = engine.engine.clone();
     let registry = ServicesRegistry::with_supervision(
         engine.engine,
         engine.supervisor,
@@ -602,6 +604,12 @@ pub async fn start_engined(
         config.engine.enabled,
         engine.timings,
     );
+    let service_logs = Arc::new(ServiceLogs::new(
+        registry.clone(),
+        container_engine,
+        adapters.clock.clone(),
+        LogSettings::default(),
+    ));
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -613,6 +621,7 @@ pub async fn start_engined(
         metrics: metrics.clone(),
         update: update.clone(),
         services: registry.clone(),
+        service_logs,
         stream,
         erasure_pending: database.erasure_pending(),
     });

@@ -44,7 +44,8 @@ pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, LogQuery,
+    LogStream, Unreadable,
 };
 pub use device_repo::{DeviceRepo, DeviceTx};
 pub use fingerprint::{FingerprintSecretError, FingerprintSecretStore, RequestFingerprinter};

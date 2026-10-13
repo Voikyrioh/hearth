@@ -1262,6 +1262,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 continue;
             }
             "/stream" => continue, // le flux se teste en WebSocket (stream_https.rs)
+            // Le socket d'une lecture de journaux (HRT-66) : WebSocket aussi (service_logs_ws.rs).
+            "/services/{key}/logs" => continue,
             // Un POST sans effet : testé à part (device_proof.rs).
             "/sessions/challenge" => continue,
             other => panic!("route de lecture sans scénario : {other}"),

@@ -8,7 +8,8 @@
 //! C'est ce qui empêche le faux de mentir : ce que le faux promet, le vrai le tient, sinon le job
 //! `engine` de la CI échoue. La suite ne touche qu'à la LECTURE (liste, inspection, événements) ; les
 //! écritures dont elle a besoin pour préparer son décor (créer, démarrer, arrêter, supprimer) sont
-//! faites par l'exécutant, jamais par le port.
+//! faites par l'exécutant, jamais par le port. Les journaux (HRT-66) y sont lus aussi : fin, dernières
+//! lignes, reprise par curseur, suivi, terminal, ligne géante, pilote `none`, conteneur inconnu.
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
@@ -16,7 +17,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use hearth_agent::application::ports::ContainerEngine;
+use hearth_agent::application::ports::{ContainerEngine, EngineError, LogQuery};
+use hearth_agent::domain::services::logs::{
+    LogLine, LogSource, RankTracker, ResumeFilter, Verdict,
+};
 use hearth_agent::domain::services::{
     EngineState, Observation, PortProtocol, ProbeOutcome, RunState, classify_probe,
 };
@@ -30,6 +34,10 @@ pub struct Spec {
     /// `NOM=valeur` : une variable d'environnement SENTINELLE, qui ne doit jamais ressortir.
     pub env: Vec<String>,
     pub run: Run,
+    /// Lancé avec un terminal : flux brut, une seule sortie.
+    pub tty: bool,
+    /// Pilote de journaux `none` : ils ne se relisent pas.
+    pub log_driver_none: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +57,8 @@ pub trait Harness: Send + Sync {
     /// Arrête un conteneur qui tourne.
     async fn stop(&self, id: &str);
     async fn remove(&self, id: &str);
+    /// Le conteneur (qui tourne) écrit cette ligne sur cette sortie.
+    async fn print(&self, id: &str, source: LogSource, text: &str);
 }
 
 /// La variable sentinelle : ni son nom ni sa valeur ne doivent ressortir d'un `Debug`. Le nom est lu
@@ -104,6 +114,8 @@ pub async fn run(harness: &dyn Harness, prefix: &str) {
             publish: Some((18_080, 80)),
             env: vec![format!("{SENTINEL_NAME}={SENTINEL_VALUE}")],
             run: Run::Forever,
+            tty: false,
+            log_driver_none: false,
         })
         .await;
     harness.start(&running).await;
@@ -113,6 +125,8 @@ pub async fn run(harness: &dyn Harness, prefix: &str) {
             publish: None,
             env: vec![],
             run: Run::Forever,
+            tty: false,
+            log_driver_none: false,
         })
         .await;
     let exited = harness
@@ -121,6 +135,8 @@ pub async fn run(harness: &dyn Harness, prefix: &str) {
             publish: None,
             env: vec![],
             run: Run::ExitsWith(3),
+            tty: false,
+            log_driver_none: false,
         })
         .await;
     harness.start(&exited).await;
@@ -258,7 +274,259 @@ pub async fn run(harness: &dyn Harness, prefix: &str) {
     assert_eq!(engine.inspect(&created).await.expect("inspection"), None);
     assert!(find(&engine, &created_name).await.is_none());
 
+    // 8. Les journaux (HRT-66).
+    logs(harness, &engine, prefix).await;
+
     // Nettoyage.
     harness.remove(&running).await;
     harness.remove(&exited).await;
+}
+
+const ALL_LINES: LogQuery = LogQuery {
+    follow: false,
+    tail: None,
+    since_ms: None,
+    tty: false,
+};
+
+/// Lit un flux de journaux jusqu'à sa fin.
+async fn read_logs(
+    engine: &Arc<dyn ContainerEngine>,
+    id: &str,
+    query: LogQuery,
+) -> Result<Vec<LogLine>, EngineError> {
+    let mut stream = engine.logs(id, query);
+    let mut lines = Vec::new();
+    while let Some(item) = tokio::time::timeout(Duration::from_secs(20), stream.next())
+        .await
+        .expect("le flux de journaux ne finit pas")
+    {
+        lines.push(item?);
+    }
+    Ok(lines)
+}
+
+/// Relit jusqu'à ce que ces textes soient tous là (un vrai moteur écrit ses journaux de façon asynchrone).
+async fn read_until(
+    engine: &Arc<dyn ContainerEngine>,
+    id: &str,
+    query: LogQuery,
+    wanted: &[&str],
+) -> Vec<LogLine> {
+    for _ in 0..100 {
+        let lines = read_logs(engine, id, query).await.expect("journaux");
+        if wanted
+            .iter()
+            .all(|text| lines.iter().any(|line| line.text == *text))
+        {
+            return lines;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("journaux : {wanted:?} jamais lus en 10 s");
+}
+
+fn texts_of<'a>(lines: &'a [LogLine], wanted: &[&str]) -> Vec<&'a str> {
+    lines
+        .iter()
+        .map(|line| line.text.as_str())
+        .filter(|text| wanted.contains(text))
+        .collect()
+}
+
+/// Le contrat des journaux. Les textes portent le préfixe `contract-` : un vrai moteur n'a pas que nos lignes.
+async fn logs(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefix: &str) {
+    let spec = |name: &str, tty: bool, none: bool| Spec {
+        name: format!("{prefix}-{name}"),
+        publish: None,
+        env: vec![],
+        run: Run::Forever,
+        tty,
+        log_driver_none: none,
+    };
+    let id = harness.create(&spec("logs", false, false)).await;
+    harness.start(&id).await;
+    harness.print(&id, LogSource::Out, "contract-out-1").await;
+    harness.print(&id, LogSource::Err, "contract-err-1").await;
+    harness
+        .print(&id, LogSource::Out, "\u{1b}[31mcontract-color\u{1b}[0m")
+        .await;
+
+    // La fin : les deux sorties, le texte nettoyé, l'ordre du moteur, des heures qui ne reculent pas.
+    let lines = read_until(
+        engine,
+        &id,
+        ALL_LINES,
+        &["contract-out-1", "contract-err-1", "contract-color"],
+    )
+    .await;
+    let source_of = |text: &str| {
+        lines
+            .iter()
+            .find(|line| line.text == text)
+            .map(|l| l.source)
+    };
+    assert_eq!(source_of("contract-out-1"), Some(LogSource::Out));
+    assert_eq!(source_of("contract-err-1"), Some(LogSource::Err));
+    assert_eq!(source_of("contract-color"), Some(LogSource::Out));
+    assert_eq!(
+        texts_of(
+            &lines,
+            &["contract-out-1", "contract-err-1", "contract-color"]
+        ),
+        ["contract-out-1", "contract-err-1", "contract-color"]
+    );
+    // Le moteur horodate chaque sortie à part : l'heure ne recule pas SORTIE PAR SORTIE (deux sorties
+    // mêlées peuvent s'inverser de quelques microsecondes, ce que l'agent tolère, BR-SLOG-014).
+    for source in [LogSource::Out, LogSource::Err] {
+        let times: Vec<i64> = lines
+            .iter()
+            .filter(|line| line.source == source)
+            .map(|line| line.at_ms)
+            .collect();
+        assert!(
+            times.windows(2).all(|pair| pair[0] <= pair[1]),
+            "l'heure du moteur ne recule pas ({source:?})"
+        );
+    }
+    assert!(lines.iter().all(|line| line.at_ms > 1_700_000_000_000));
+
+    // Les N dernières lignes.
+    let last = read_logs(
+        engine,
+        &id,
+        LogQuery {
+            tail: Some(1),
+            ..ALL_LINES
+        },
+    )
+    .await
+    .expect("journaux");
+    assert_eq!(last.len(), 1);
+    assert_eq!(last[0].text, "contract-color");
+
+    // La reprise : le curseur de la dernière ligne lue, puis seulement ce qui suit, sans doublon.
+    let mut tracker = RankTracker::new();
+    let cursors: Vec<_> = lines.iter().map(|line| tracker.next(line.at_ms)).collect();
+    let cursor = *cursors.last().expect("au moins une ligne");
+    let resume_from = lines.last().expect("au moins une ligne").at_ms;
+    harness.print(&id, LogSource::Out, "contract-new-1").await;
+    harness.print(&id, LogSource::Out, "contract-new-2").await;
+    let mut resumed = Vec::new();
+    for _ in 0..100 {
+        let again = read_logs(
+            engine,
+            &id,
+            LogQuery {
+                since_ms: Some(resume_from),
+                ..ALL_LINES
+            },
+        )
+        .await
+        .expect("journaux");
+        let (mut filter, mut ranks) = (ResumeFilter::new(cursor), RankTracker::new());
+        resumed = again
+            .into_iter()
+            .filter(|line| filter.judge(ranks.next(line.at_ms)) == Verdict::Take)
+            .map(|line| line.text)
+            .collect();
+        if resumed.len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        resumed,
+        ["contract-new-1", "contract-new-2"],
+        "ni doublon ni perte"
+    );
+
+    // Le suivi : une ligne écrite après l'ouverture arrive ; une ligne géante est coupée et comptée.
+    let mut stream = engine.logs(
+        &id,
+        LogQuery {
+            follow: true,
+            tail: Some(0),
+            ..ALL_LINES
+        },
+    );
+    // Le flux se connecte à sa première lecture : on l'amorce avant que le service n'écrive.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), stream.next())
+            .await
+            .is_err(),
+        "tail=0 : aucune ancienne ligne"
+    );
+    harness.print(&id, LogSource::Out, "contract-live-1").await;
+    harness
+        .print(
+            &id,
+            LogSource::Out,
+            &format!("contract-giant-{}", "g".repeat(30_000)),
+        )
+        .await;
+    let mut seen_live = false;
+    let mut giant = None;
+    while !(seen_live && giant.is_some()) {
+        let line = tokio::time::timeout(Duration::from_secs(15), stream.next())
+            .await
+            .expect("le suivi reçoit les lignes écrites après l'ouverture")
+            .expect("le flux ne finit pas tant que le conteneur tourne")
+            .expect("journaux");
+        seen_live |= line.text == "contract-live-1";
+        if line.text.starts_with("contract-giant-") {
+            giant = Some(line);
+        }
+    }
+    let giant = giant.expect("ligne géante");
+    assert_eq!(
+        giant.text.chars().count(),
+        10_000,
+        "coupée à 10 000 caractères"
+    );
+    assert_eq!(giant.cut, Some(30_015), "le total est compté");
+
+    // Le conteneur s'arrête : le suivi se termine, et ses dernières lignes restent lisibles (service arrêté).
+    harness.stop(&id).await;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while stream.next().await.is_some() {}
+    })
+    .await
+    .expect("le suivi finit quand le conteneur s'arrête");
+    let after = read_until(engine, &id, ALL_LINES, &["contract-live-1"]).await;
+    assert!(after.iter().any(|line| line.text == "contract-new-2"));
+
+    // Un terminal : un flux brut, les lignes sont lues sans trame.
+    let tty = harness.create(&spec("logs-tty", true, false)).await;
+    harness.start(&tty).await;
+    harness.print(&tty, LogSource::Out, "contract-tty-1").await;
+    let lines = read_until(
+        engine,
+        &tty,
+        LogQuery {
+            tty: true,
+            ..ALL_LINES
+        },
+        &["contract-tty-1"],
+    )
+    .await;
+    assert!(lines.iter().all(|line| line.source == LogSource::Out));
+
+    // Un pilote `none` : les journaux ne se relisent pas.
+    let silent = harness.create(&spec("logs-none", false, true)).await;
+    harness.start(&silent).await;
+    assert_eq!(
+        read_logs(engine, &silent, ALL_LINES).await.err(),
+        Some(EngineError::Unsupported)
+    );
+
+    // Un conteneur inconnu n'est pas une panne du moteur.
+    assert_eq!(
+        read_logs(engine, &"0".repeat(64), ALL_LINES).await.err(),
+        Some(EngineError::NotFound)
+    );
+
+    harness.remove(&id).await;
+    harness.remove(&tty).await;
+    harness.remove(&silent).await;
 }

@@ -11,6 +11,7 @@ pub mod metrics;
 pub mod operations;
 pub mod ports;
 pub mod security;
+pub mod service_logs;
 pub mod services;
 pub mod sessions;
 pub mod trust;

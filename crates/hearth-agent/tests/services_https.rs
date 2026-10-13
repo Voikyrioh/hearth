@@ -136,7 +136,10 @@ async fn hello_announces_the_services_capability() {
     let agent = https::start_engined(&env, parts(Arc::new(FakeEngine::new()))).await;
     let reply = agent.request("GET", "/hello").send().await;
     assert_eq!(reply.status, 200);
-    assert_eq!(reply.body["capabilities"], json!(["services"]));
+    assert_eq!(
+        reply.body["capabilities"],
+        json!(["services", "service-logs"])
+    );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).
     assert_eq!(reply.body["api"], json!({ "min": 1, "max": 1 }));
     agent.shutdown().await;

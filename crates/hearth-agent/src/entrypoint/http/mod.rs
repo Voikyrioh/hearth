@@ -45,6 +45,7 @@ use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::AuditSink;
 use crate::application::security::SecurityService;
+use crate::application::service_logs::ServiceLogs;
 use crate::application::services::ServicesRegistry;
 use crate::application::sessions::SessionService;
 use crate::application::update::UpdateService;
@@ -73,6 +74,8 @@ pub struct AppState {
     pub update: Arc<UpdateService>,
     /// Moteur de conteneurs et liste des services, en lecture seule (HRT-61).
     pub services: Arc<ServicesRegistry>,
+    /// Lectures de journaux d'un service en direct, dix au plus (HRT-66).
+    pub service_logs: Arc<ServiceLogs>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -285,6 +288,17 @@ pub static ENDPOINTS: &[Endpoint] = &[
     // Révéler les valeurs des variables d'un service : administrateur seulement (BR-SVC-009). Le refus
     // d'un compte en lecture seule est consigné par la couche d'accès, la réussite par le cas
     // d'usage ; une consultation, pas un acte d'administration du socle (aucun mot de passe).
+    // Les journaux d'un service en direct (HRT-66) : un WebSocket par lecture, authentifié par son premier
+    // message comme `/stream`. Ouvert aux deux rôles ; lire n'est pas journalisé (BR-SLOG-018, BR-SLOG-022).
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/logs",
+        access: Access::FirstMessage,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(ws::logs),
+    },
     Endpoint {
         method: Method::GET,
         path: "/services/{key}/env",
@@ -632,16 +646,25 @@ mod tests {
     }
 
     #[test]
-    fn only_the_stream_authenticates_by_its_first_message_and_it_is_version_checked() {
-        let first_message: Vec<_> = ENDPOINTS
+    fn only_the_two_sockets_authenticate_by_their_first_message_and_both_are_version_checked() {
+        // Le flux commun et le socket d'une lecture de journaux (HRT-66) : deux WebSocket, deux lectures.
+        let mut first_message: Vec<_> = ENDPOINTS
             .iter()
             .filter(|endpoint| endpoint.access == Access::FirstMessage)
+            .map(|endpoint| endpoint.path)
             .collect();
-        assert_eq!(first_message.len(), 1);
-        assert_eq!(first_message[0].path, "/stream");
-        assert_eq!(first_message[0].method, Method::GET);
-        assert!(first_message[0].version_checked);
-        assert!(!first_message[0].tracked);
+        first_message.sort_unstable();
+        assert_eq!(first_message, ["/services/{key}/logs", "/stream"]);
+        for endpoint in ENDPOINTS
+            .iter()
+            .filter(|endpoint| endpoint.access == Access::FirstMessage)
+        {
+            assert_eq!(endpoint.method, Method::GET);
+            assert!(endpoint.version_checked);
+            assert!(!endpoint.tracked);
+            // Une consultation : jamais d'entrée au journal d'activité (BR-SLOG-022).
+            assert!(endpoint.audit.is_none() && !endpoint.modifies());
+        }
     }
 
     /// Le test de garde de la liste des actes d'administration (HRT-28, BR-TRUST-037) : toute route

@@ -18,10 +18,10 @@ use crate::application::ports::EnvEntry;
 use crate::domain::secret::Secret;
 use crate::domain::services::image::image_name;
 use crate::domain::services::{
-    Hidden, MAX_COMMAND_ARG_CHARS, MAX_COMMAND_ARGS, MAX_ENV_NAME_CHARS, MAX_ENV_NAMES,
-    MAX_IMAGE_REF_CHARS, MAX_IMAGE_TAG_CHARS, MAX_LABEL_CHARS, MAX_MOUNTS, MAX_NAME_CHARS,
-    MAX_PATH_CHARS, MAX_PORTS, MountInfo, MountType, Observation, PortBinding, PortProtocol,
-    PortScope, RestartPolicy, RunState, bounded, bounded_opt,
+    Hidden, MAX_COMMAND_ARG_CHARS, MAX_COMMAND_ARGS, MAX_ENGINE_TEXT_CHARS, MAX_ENV_NAME_CHARS,
+    MAX_ENV_NAMES, MAX_IMAGE_REF_CHARS, MAX_IMAGE_TAG_CHARS, MAX_LABEL_CHARS, MAX_MOUNTS,
+    MAX_NAME_CHARS, MAX_PATH_CHARS, MAX_PORTS, MountInfo, MountType, Observation, PortBinding,
+    PortProtocol, PortScope, RestartPolicy, RunState, bounded, bounded_opt,
 };
 
 /// Étiquette posée par Compose sur les conteneurs d'une pile (information seulement).
@@ -141,6 +141,13 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
         stop_timeout_s: config
             .and_then(|config| config.stop_timeout)
             .and_then(|seconds| u32::try_from(seconds).ok()),
+        tty: config.and_then(|config| config.tty).unwrap_or(false),
+        log_driver: bounded_opt(
+            host_config
+                .and_then(|host| host.log_config.as_ref())
+                .and_then(|log| log.typ.as_deref()),
+            MAX_ENGINE_TEXT_CHARS,
+        ),
     })
 }
 
