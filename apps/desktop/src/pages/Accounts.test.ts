@@ -95,7 +95,9 @@ describe("Comptes (administrateurs)", () => {
 
   it("closes the sessions of an account after a confirmation that names it, and says so", async () => {
     const { wrapper } = await boot();
-    const close = wrapper.get('[data-account="paul"]').findAll("td button")[2];
+    const close = wrapper
+      .get('[data-account="paul"]')
+      .findAll("td button:not([data-services-right])")[2];
     expect(close?.text()).toBe("Fermer les 2 sessions");
     await close?.trigger("click");
     await flushPromises();
@@ -104,7 +106,10 @@ describe("Comptes (administrateurs)", () => {
     expect(useToastsStore().items.map((t) => t.message)).toContain("Sessions de paul fermées.");
     expect(wrapper.get('[data-account="paul"] td:nth-child(5)').text()).toBe("0");
     expect(
-      wrapper.get('[data-account="paul"]').findAll("td button")[2]?.attributes("aria-disabled"),
+      wrapper
+        .get('[data-account="paul"]')
+        .findAll("td button:not([data-services-right])")[2]
+        ?.attributes("aria-disabled"),
     ).toBe("true");
     wrapper.unmount();
   });
@@ -112,7 +117,7 @@ describe("Comptes (administrateurs)", () => {
   it("changes a role from the dropdown and announces it", async () => {
     const { wrapper } = await boot();
     const paul = wrapper.get('[data-account="paul"]');
-    await paul.findAll("td button")[0]?.trigger("click");
+    await paul.findAll("td button:not([data-services-right])")[0]?.trigger("click");
     await flushPromises();
     await paul.get("select").setValue("admin");
     await flushPromises();
@@ -127,7 +132,10 @@ describe("Comptes (administrateurs)", () => {
 
   it("asks for a confirmation that names the account before deleting it", async () => {
     const { wrapper, bridge } = await boot();
-    await wrapper.get('[data-account="lea"]').findAll("td button")[3]?.trigger("click");
+    await wrapper
+      .get('[data-account="lea"]')
+      .findAll("td button:not([data-services-right])")[3]
+      ?.trigger("click");
     await flushPromises();
     expect(document.body.textContent).toContain("Supprimer le compte ?");
     expect(document.body.textContent).toContain(
@@ -137,7 +145,10 @@ describe("Comptes (administrateurs)", () => {
     dialogButton("Annuler")?.click();
     await flushPromises();
     expect(bridge.calls.some((c) => c.startsWith("account delete"))).toBe(false);
-    await wrapper.get('[data-account="lea"]').findAll("td button")[3]?.trigger("click");
+    await wrapper
+      .get('[data-account="lea"]')
+      .findAll("td button:not([data-services-right])")[3]
+      ?.trigger("click");
     await confirmDialog("Supprimer");
     expect(rows(wrapper)).toEqual(["marie", "paul"]);
     expect(useToastsStore().items.map((t) => t.message)).toContain("Compte lea supprimé.");
@@ -159,7 +170,10 @@ describe("Comptes (administrateurs)", () => {
       { id: "A", username: "marie", role: "readonly" },
       { id: "J", username: "jean", role: "admin" },
     ]);
-    await wrapper.get('[data-account="jean"]').findAll("td button")[3]?.trigger("click");
+    await wrapper
+      .get('[data-account="jean"]')
+      .findAll("td button:not([data-services-right])")[3]
+      ?.trigger("click");
     await confirmDialog("Supprimer");
     expect(useToastsStore().items.map((t) => t.message)).toContain(
       "Il doit toujours rester au moins un administrateur",
@@ -168,7 +182,10 @@ describe("Comptes (administrateurs)", () => {
     expect(rows(wrapper)).toEqual(["marie", "jean"]);
     // La liste a été relue : jean est maintenant le seul administrateur, ses boutons sont grisés.
     expect(
-      wrapper.get('[data-account="jean"]').findAll("td button")[3]?.attributes("aria-disabled"),
+      wrapper
+        .get('[data-account="jean"]')
+        .findAll("td button:not([data-services-right])")[3]
+        ?.attributes("aria-disabled"),
     ).toBe("true");
     wrapper.unmount();
   });
@@ -176,7 +193,10 @@ describe("Comptes (administrateurs)", () => {
   it("an action cut before its answer is unknown, said once, not replayed, and the list is re-read when the link is back", async () => {
     const { wrapper, bridge } = await boot();
     bridge.actionMode = "cut";
-    await wrapper.get('[data-account="lea"]').findAll("td button")[3]?.trigger("click");
+    await wrapper
+      .get('[data-account="lea"]')
+      .findAll("td button:not([data-services-right])")[3]
+      ?.trigger("click");
     await confirmDialog("Supprimer");
     const messages = useToastsStore().items.map((t) => t.message);
     expect(messages).toContain(
@@ -197,7 +217,7 @@ describe("Comptes (administrateurs)", () => {
     const { wrapper, bridge } = await boot();
     bridge.setState("forge", "offline");
     await flushPromises();
-    const buttons = wrapper.findAll("tbody td button");
+    const buttons = wrapper.findAll("tbody td button:not([data-services-right])");
     expect(buttons.length).toBeGreaterThan(0);
     for (const b of buttons) expect(b.attributes("aria-disabled")).toBe("true");
     expect(wrapper.get("#header-actions button").attributes("aria-disabled")).toBe("true");

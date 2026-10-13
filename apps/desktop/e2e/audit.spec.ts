@@ -46,7 +46,7 @@ test("le tableau, ses colonnes, le compteur et l'indicateur de conservation", as
     "Résultat",
     "Raison",
   ]);
-  await expect(page.getByText("100 événements ou plus")).toBeVisible();
+  await expect(page.getByText("100 événements affichés, d'autres plus bas")).toBeVisible();
   await expect(page.getByText("Journal conservé pendant 90 jours ou 50 000 entrées")).toBeVisible();
   // Une liste virtualisée : des centaines d'entrées, des dizaines de lignes dans le DOM.
   expect(await rows(page).count()).toBeLessThan(60);
@@ -55,7 +55,9 @@ test("le tableau, ses colonnes, le compteur et l'indicateur de conservation", as
     el.scrollTop = el.scrollHeight;
   });
   await expect(
-    page.getByText("200 événements ou plus").or(page.getByText("250 événements")),
+    page
+      .getByText("200 événements affichés, d'autres plus bas")
+      .or(page.getByText("250 événements")),
   ).toBeVisible();
   await page.screenshot({ path: "e2e/screenshots/audit-1366.png" });
 });
@@ -65,8 +67,10 @@ test("filtres : appliquer, recherche, plusieurs valeurs, effacer d'un clic", asy
   // Plus de bouton « Appliquer » : la recherche s'applique à la frappe.
   await expect(page.getByRole("button", { name: /Appliquer/ })).toHaveCount(0);
   await page.getByRole("searchbox", { name: "Rechercher" }).fill("léa");
-  await expect(page.getByText(/événements( ou plus)?$/).first()).toBeVisible();
-  await expect(page.getByText("100 événements ou plus")).toHaveCount(0, { timeout: 3000 });
+  await expect(page.getByText(/événements( affichés, d'autres plus bas)?$/).first()).toBeVisible();
+  await expect(page.getByText("100 événements affichés, d'autres plus bas")).toHaveCount(0, {
+    timeout: 3000,
+  });
   const accounts = await page
     .locator('[role="row"][data-row-key] [role="gridcell"]:nth-child(2)')
     .allTextContents();
@@ -86,7 +90,7 @@ test("filtres : appliquer, recherche, plusieurs valeurs, effacer d'un clic", asy
   await page.getByRole("button", { name: "Effacer les filtres" }).first().click();
   await expect(page.getByText("Aucun événement ne correspond")).toHaveCount(0);
   await expect(page.getByRole("searchbox", { name: "Rechercher" })).toHaveValue("");
-  await expect(page.getByText("100 événements ou plus")).toBeVisible();
+  await expect(page.getByText("100 événements affichés, d'autres plus bas")).toBeVisible();
   await expect(page.getByRole("button", { name: "Effacer les filtres" })).toHaveCount(0);
 });
 

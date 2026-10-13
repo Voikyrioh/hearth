@@ -81,7 +81,7 @@ withDefaults(
   flex-direction: column;
   align-items: center;
   gap: var(--space-1);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 </style>

@@ -70,7 +70,7 @@ const describedBy = computed(() => {
 }
 
 .field__label {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
@@ -133,7 +133,7 @@ const describedBy = computed(() => {
 }
 
 .field__help {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 </style>

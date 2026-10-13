@@ -261,7 +261,7 @@ const drawn = computed<Drawn[]>(() =>
   bottom: 0;
   left: var(--hover-x);
   width: var(--border-width);
-  background: var(--tx3);
+  background: var(--tx-faint);
   pointer-events: none;
 }
 

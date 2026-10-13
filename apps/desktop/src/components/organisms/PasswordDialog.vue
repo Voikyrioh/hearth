@@ -158,7 +158,7 @@ async function perform(adminPassword: string | null) {
 
 <style scoped>
 .password__help {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .password__warn {

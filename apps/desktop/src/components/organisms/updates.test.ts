@@ -161,7 +161,7 @@ describe("UpdatePanel", () => {
   it("says the client is up to date with the age of the last check", async () => {
     const { wrapper } = await mountWith(UpdatePanel);
     expect(wrapper.get("h2").text()).toBe("Mises à jour");
-    expect(wrapper.get("[data-updates-status]").text()).toBe("Tu es à jour");
+    expect(wrapper.get("[data-updates-status]").text()).toBe("Hearth est à jour sur ce PC.");
     expect(wrapper.get("[data-updates-last]").text()).toBe(
       "Dernière vérification : il y a 2 heures",
     );

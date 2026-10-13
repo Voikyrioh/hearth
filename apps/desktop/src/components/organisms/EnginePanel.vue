@@ -291,7 +291,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
 }
 
 .engine__checking {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .engine__ready {
@@ -318,7 +318,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
   display: inline-flex;
   align-items: center;
   gap: var(--space-1p5);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -345,7 +345,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
 }
 
 .engine--plain .engine__icon {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .engine__state {
@@ -368,7 +368,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
 }
 
 .engine__muted {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .engine__help {

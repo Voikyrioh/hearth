@@ -76,6 +76,12 @@ describe("les résultats", () => {
     );
   });
 
+  it("gives an outcome this client does not know its own text, apart from a known failure (HRT-143)", () => {
+    const unknown = { outcome: "paused" as never, reason: null, version: null };
+    expect(resultMessage(unknown).length).toBeGreaterThan(10);
+    expect(resultMessage(unknown)).not.toContain("—");
+  });
+
   it("uses the texts of the specification to the letter", () => {
     expect(resultMessage({ outcome: "rolled_back", reason: "no_answer", version: "0.2.0" })).toBe(
       "Mise à jour de l'agent annulée. Le nouvel agent n'a pas répondu. Retour à la version précédente.",

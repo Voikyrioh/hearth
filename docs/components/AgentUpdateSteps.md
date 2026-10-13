@@ -7,3 +7,4 @@ Les cinq étapes d'une mise à jour de l'agent, une à la fois (BR-UPDATE-013) :
 - Props : `step` (l'étape en cours), `percent` (téléchargement, ou `null`)
 - Événements et slots : aucun
 - Notes : `data-step` et `data-state` sur chaque ligne (tests). Tests : `agentUpdate.test.ts`.
+- HRT-143 : `step` peut être `null` (étape que ce client ne connaît pas, `knownStep` dans `agentUpdate/messages.ts`) : aucune étape n'est marquée « en cours ». Une raison inconnue dit le message générique d'échec.

@@ -28,6 +28,6 @@ const indexes = computed(() => {
 
 <style scoped>
 .gpu-card__none {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 </style>

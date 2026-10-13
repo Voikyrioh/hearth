@@ -171,7 +171,7 @@ function patch(change: Partial<FilterDraft>) {
 
 .filters__title {
   flex: 0 0 100%;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
   letter-spacing: var(--ls-label);

@@ -74,7 +74,7 @@ describe("page Journal d'activité", () => {
       "Résultat",
       "Raison",
     ]);
-    expect(wrapper.text()).toContain("100 événements ou plus");
+    expect(wrapper.text()).toContain("100 événements affichés, d'autres plus bas");
     expect(wrapper.text()).toContain("Journal conservé pendant 90 jours ou 50 000 entrées");
     expect(wrapper.text()).toContain("Filtres");
     wrapper.unmount();
