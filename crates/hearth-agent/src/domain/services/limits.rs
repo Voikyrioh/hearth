@@ -30,13 +30,17 @@ const ELLIPSIS: char = '…';
 /// Un caractère qui n'a rien à faire dans un nom affiché : contrôle (retour à la ligne, échappement)
 /// ou formatage Unicode invisible qui trompe l'œil (renversement du sens d'écriture U+202A à U+202E
 /// et U+2066 à U+2069, espaces et joints de largeur nulle U+200B à U+200F, U+2060 à U+2064, U+061C,
-/// U+FEFF). Sans eux, un chemin de montage ou une étiquette pourrait se lire à l'envers.
+/// U+FEFF), plus le trait d'union conditionnel U+00AD et les séparateurs de ligne et de paragraphe
+/// U+2028 et U+2029 (hors catégorie « contrôle » : un nom pouvait casser une ligne d'affichage).
+/// FIX:01M4SFCSXW2P3QXP6FY8CS6ZMQ (docs/bugs/FIX-01M4SFCSXW2P3QXP6FY8CS6ZMQ.md). Sans eux, un chemin de montage ou une étiquette pourrait se lire à l'envers.
 fn is_unsafe_char(c: char) -> bool {
     c.is_control()
         || matches!(
             c,
-            '\u{061C}'
+            '\u{00AD}'
+                | '\u{061C}'
                 | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'..='\u{2029}'
                 | '\u{202A}'..='\u{202E}'
                 | '\u{2060}'..='\u{2064}'
                 | '\u{2066}'..='\u{2069}'
@@ -79,6 +83,8 @@ mod tests {
         // U+202E renverse l'affichage : ce chemin se lirait « /data/exe.jpg ».
         assert_eq!(bounded("/data/\u{202E}gpj.exe", 64), "/data/gpj.exe");
         assert_eq!(bounded("a\u{200B}b\u{2066}c\u{FEFF}d\u{061C}", 64), "abcd");
+        // Séparateurs de ligne et de paragraphe, trait d'union conditionnel (hors « contrôle »).
+        assert_eq!(bounded("web\u{2028}x\u{2029}y\u{00AD}z", 64), "webxyz");
         // Les lettres accentuées et l'arabe ordinaire restent.
         assert_eq!(bounded("é مرحبا", 64), "é مرحبا");
     }

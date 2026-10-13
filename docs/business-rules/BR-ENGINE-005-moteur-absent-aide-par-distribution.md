@@ -18,8 +18,6 @@ maj: 2026-10-13
 - `crates/hearth-agent/src/infrastructure/system/host_environment.rs::SystemHostEnvironment`
 - `crates/hearth-agent/src/infrastructure/engine/installed.rs::InstallMarkers::any_present`
 - `crates/hearth-proto/src/api/services.rs::HostInfo`
-- `apps/desktop/src/services/help.ts::{familyOf, helpFor}` (aide par famille, textes dans `i18n/fr.ts`, `engine.help.*`)
-- `apps/desktop/src/components/organisms/EnginePanel.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/infrastructure/system/host_environment.rs::tests::debian_and_nixos_are_recognised`

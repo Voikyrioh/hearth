@@ -7,5 +7,3 @@ Jeu d'icônes SVG en trait (grille 24, `currentColor`) : un nom = quelques trac�
 - Props : `name` (`plus`, `settings`, `alert`, `info`, `check`, `close`, `refresh`, `server`, `eye`, `eye-off`, `chevron-down`, `chevron-right`, `arrow-up`, `download`, `shield`, `clock`), `label` (optionnel), `size` (`md` 20 px, `sm` 16 px)
 - Événements et slots : aucun
 - Notes : Ajouter une icône = une entrée de plus dans `ICONS`. Tests : `atoms.test.ts`.
-
-- HRT-62 : glyphes `play`, `stop`, `pause`, `lock`, `box`, `loop`, `question`, `copy` (états d'un service et du moteur).
