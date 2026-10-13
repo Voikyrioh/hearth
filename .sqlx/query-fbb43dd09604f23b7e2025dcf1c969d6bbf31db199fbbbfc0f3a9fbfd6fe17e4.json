@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO session_closure_notices (account_id, closed_by, closed_at)\n             VALUES (?, ?, ?)\n             ON CONFLICT (account_id) DO UPDATE\n             SET closed_by = excluded.closed_by, closed_at = excluded.closed_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "fbb43dd09604f23b7e2025dcf1c969d6bbf31db199fbbbfc0f3a9fbfd6fe17e4"
+}

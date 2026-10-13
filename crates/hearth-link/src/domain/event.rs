@@ -141,6 +141,14 @@ pub enum Event {
         state: Arc<ServicesState>,
         engine_received_at: Option<WallTime>,
     },
+    /// Un autre compte a fermé les sessions de ce compte : dit UNE fois par l'agent, à la première connexion qui
+    /// suit (connexion saisie ou reconnexion silencieuse), avec l'identifiant de l'administrateur et la date
+    /// (HRT-133, BR-ACCT-019). Jamais d'adresse.
+    SessionsClosed {
+        server: ServerId,
+        by: String,
+        at: String,
+    },
     /// L'agent ne sert pas les services (pas de capacité `services` dans `/hello`) : le client ne lui a
     /// envoyé ni le sujet ni aucune route. Annoncé à chaque connexion à cet agent, avec sa version.
     ServicesUnsupported {
@@ -166,6 +174,7 @@ impl Event {
             | Self::AgentUpdate { server, .. }
             | Self::Security { server, .. }
             | Self::Services { server, .. }
+            | Self::SessionsClosed { server, .. }
             | Self::ServicesUnsupported { server, .. } => Some(server),
         }
     }

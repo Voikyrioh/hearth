@@ -196,3 +196,37 @@ describe("notices of the library", () => {
     expect(useToastsStore().items).toHaveLength(1);
   });
 });
+
+describe("notice of the sessions closed by another account (HRT-133)", () => {
+  const AT = "2026-10-13T18:30:00.000Z";
+
+  it("keeps who closed the sessions until the person closes the information, never as a toast", async () => {
+    const { bridge } = freshBridge();
+    const link = useLinkStore();
+    await link.start();
+    bridge.emitNotice({ kind: "sessions_closed", serverId: "forge", by: "marie", at: AT });
+    expect(link.closedNoticeOf("forge")).toEqual({ by: "marie", at: AT });
+    expect(link.closedNoticeOf("salon")).toBeUndefined();
+    expect(useToastsStore().items).toHaveLength(0);
+    link.dismissClosedNotice("forge");
+    expect(link.closedNoticeOf("forge")).toBeUndefined();
+  });
+
+  it("shows it once even when the live signal and the replay carry the same notice", async () => {
+    const { bridge } = freshBridge();
+    const link = useLinkStore();
+    await link.start();
+    bridge.emitNotice({ id: 9, kind: "sessions_closed", serverId: "forge", by: "marie", at: AT });
+    link.dismissClosedNotice("forge");
+    bridge.emitNotice({ id: 9, kind: "sessions_closed", serverId: "forge", by: "marie", at: AT });
+    expect(link.closedNoticeOf("forge")).toBeUndefined();
+  });
+
+  it("shows a notice announced before the interface listened", async () => {
+    const { bridge } = freshBridge();
+    bridge.emitNotice({ kind: "sessions_closed", serverId: "forge", by: "paul", at: AT });
+    const link = useLinkStore();
+    await link.start();
+    expect(link.closedNoticeOf("forge")?.by).toBe("paul");
+  });
+});

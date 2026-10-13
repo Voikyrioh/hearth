@@ -373,7 +373,7 @@ async fn closing_sessions_leaves_a_revocation_trace_whatever_the_cause() {
 
     // Suppression du compte : le jeton est révoqué, pas « expiré ».
     env.service
-        .delete(&paul.id, None, None, by())
+        .delete(&paul.id, &Authority::Server, None, by())
         .await
         .unwrap();
     let error = env.sessions.authenticate(&paul_token).await.unwrap_err();

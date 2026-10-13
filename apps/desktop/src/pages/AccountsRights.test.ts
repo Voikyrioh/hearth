@@ -1,6 +1,8 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App.vue";
+import { useToastsStore } from "@/stores/toasts";
+import { confirmDialog } from "@/test/confirm";
 import { mountContext } from "@/test/mount";
 
 // HRT-78 : le droit « gérer les services » dans la page Comptes (BR-GRANT-013, écran I du design) : le repère
@@ -77,6 +79,46 @@ describe("le repère dans la liste", () => {
     ).toBe(false);
     const buttons = wrapper.findAll("tbody td button").map((b) => b.text());
     expect(buttons.join(" ")).not.toMatch(/droit|services|accorder|retirer/i);
+    wrapper.unmount();
+  });
+});
+
+describe("supprimer un compte qui peut gérer les services (BR-GRANT-005)", () => {
+  const HINT =
+    "Ce compte peut gérer les services. Seul un compte qui le peut aussi, ou la commande sur le serveur, peut le supprimer.";
+  const remove = (wrapper: VueWrapper, name: string) => row(wrapper, name).findAll("td button")[3];
+
+  it("sans le droit, « Supprimer » est indisponible sur un titulaire avec l'explication ; un compte sans droit se supprime", async () => {
+    const { wrapper } = await boot((bridge) => {
+      bridge.setServiceRightOnServer("forge", "marie", false);
+      bridge.setServiceRightOnServer("forge", "paul", true);
+    });
+    expect(remove(wrapper, "paul")?.attributes("aria-disabled")).toBe("true");
+    expect(row(wrapper, "paul").text()).toContain(HINT);
+    expect(remove(wrapper, "lea")?.attributes("aria-disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("avec le droit, « Supprimer » reste disponible sur un autre titulaire", async () => {
+    const { wrapper } = await boot((bridge) => {
+      bridge.setServiceRightOnServer("forge", "paul", true);
+    });
+    expect(remove(wrapper, "paul")?.attributes("aria-disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("si le droit a changé depuis la lecture, le refus de l'agent est dit comme tel, sans « tu n'as plus le droit »", async () => {
+    const { wrapper, bridge } = await boot((b) => {
+      b.setServiceRightOnServer("forge", "paul", true);
+    });
+    // Le serveur retire le droit de marie ; l'écran, lui, la croit encore titulaire.
+    bridge.setServiceRightOnServer("forge", "marie", false);
+    await remove(wrapper, "paul")?.trigger("click");
+    await confirmDialog("Supprimer");
+    const messages = useToastsStore().items.map((t) => t.message);
+    expect(messages).toContain(HINT);
+    expect(messages).not.toContain("Tu n'as plus le droit de gérer les services de ce serveur.");
+    expect(wrapper.find(`[data-account="paul"]`).exists()).toBe(true);
     wrapper.unmount();
   });
 });

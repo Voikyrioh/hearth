@@ -139,6 +139,7 @@ impl Transport for Scripted {
                 role: RoleName::Admin,
                 rights: Vec::new(),
             },
+            sessions_closed: None,
         })
     }
 

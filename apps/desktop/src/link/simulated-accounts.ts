@@ -286,6 +286,15 @@ export class SimulatedAccounts {
     const account = book.find((a) => a.id === accountId);
     if (!account) return refuse({ kind: "not_found" });
     const self = account.id === this.me(server)?.id;
+    // BR-GRANT-005 : le compte d'un titulaire n'est supprimé que par lui-même, un autre titulaire ou le serveur.
+    if (
+      this.rightsKnown(server) &&
+      account.managesServices &&
+      !self &&
+      this.me(server)?.managesServices !== true
+    ) {
+      throw new LinkCommandError({ kind: "missing_services_right" });
+    }
     if (self && (confirmation ?? "").trim().toLowerCase() !== account.username) {
       return refuse({ kind: "confirmation_mismatch" });
     }

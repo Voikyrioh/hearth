@@ -304,6 +304,7 @@ impl Transport for Chaos {
                 role: RoleName::Admin,
                 rights: Vec::new(),
             },
+            sessions_closed: None,
         })
     }
 

@@ -125,7 +125,9 @@ pub async fn execute(
         }
         AccountAction::Remove { username } => {
             let account = service.find(username).await?;
-            service.delete(&account.id, None, None, &by).await?;
+            service
+                .delete(&account.id, &Authority::Server, None, &by)
+                .await?;
             writeln!(out, "Compte {} supprimé", account.username)?;
         }
         AccountAction::Revoke { username } => {

@@ -10,7 +10,7 @@ mod support;
 use hearth_agent::application::audit::{AuditError, EXPORT_LIMIT};
 use hearth_agent::application::ports::AuditFeed;
 use hearth_agent::application::sessions::LoginError;
-use hearth_agent::domain::accounts::Authority;
+use hearth_agent::domain::accounts::{Authority, ServicesRight};
 use hearth_agent::domain::accounts::{Role, Username};
 use hearth_agent::domain::audit::{
     Actor, AuditAction, AuditEvent, AuditFilter, AuditRecord, MAX_ENTRIES, Origin, OriginKind,
@@ -92,7 +92,15 @@ async fn account_management_writes_one_entry_per_action_with_who_where_and_what(
         .unwrap();
     env.service.revoke_sessions(&paul.id, by()).await.unwrap();
     env.service
-        .delete(&paul.id, Some(&marie.id), None, by())
+        .delete(
+            &paul.id,
+            &Authority::Network {
+                account: marie.id.clone(),
+                right: ServicesRight::None,
+            },
+            None,
+            by(),
+        )
         .await
         .unwrap();
 
@@ -136,7 +144,10 @@ async fn account_management_writes_one_entry_per_action_with_who_where_and_what(
                 "sessions.revoke".into(),
                 "ok".into(),
                 root.clone(),
-                Some("paul".into())
+                Some(
+                    "paul : 0 sessions fermées (compte visé : ne peut pas gérer les services)"
+                        .into()
+                )
             ),
             (
                 "account.delete".into(),
@@ -172,7 +183,7 @@ async fn an_action_that_fails_leaves_no_success_entry() {
         .await
         .unwrap_err();
     env.service
-        .delete(&marie.id, None, None, by())
+        .delete(&marie.id, &Authority::Server, None, by())
         .await
         .unwrap_err();
     env.service
@@ -732,7 +743,7 @@ async fn when_the_entry_cannot_be_written_the_action_is_not_committed() {
         .await
         .unwrap_err();
     env.service
-        .delete(&paul.id, None, None, by())
+        .delete(&paul.id, &Authority::Server, None, by())
         .await
         .unwrap_err();
     assert_eq!(env.service.find("paul").await.unwrap().role, Role::ReadOnly);

@@ -1296,7 +1296,7 @@ async fn deleting_the_account_erases_its_devices_and_addresses_and_only_its_own(
     )
     .await;
     env.service
-        .delete(&account, None, None, by())
+        .delete(&account, &Authority::Server, None, by())
         .await
         .unwrap();
     assert_eq!(devices(&env).await, 1, "celui de paul reste");

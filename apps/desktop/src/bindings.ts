@@ -808,11 +808,17 @@ export type NoticeEvent = {
 	id: number,
 	kind: NoticeKind,
 	serverId: string | null,
+	/**  `SessionsClosed` : l'identifiant de l'administrateur qui a fermé les sessions. */
+	by: string | null,
+	/**  `SessionsClosed` : quand (RFC 3339, UTC). */
+	at: string | null,
 };
 
 export type NoticeKind = 
 /**  Les suivis d'actions d'un serveur étaient illisibles : vérifie l'état avant de relancer. */
 "operations_lost" | 
+/**  Un autre compte a fermé les sessions de ce compte (HRT-133, BR-ACCT-019) : `by` et `at`. */
+"sessions_closed" | 
 /**  L'écoute a pris du retard : des changements ont pu être manqués (états relus). */
 "lagged";
 

@@ -4,7 +4,7 @@ domaine: GRANT
 titre: Le droit se donne et se retire depuis le serveur seulement : aucune route ne l'écrit, et aucune route ne le fait prendre
 statut: active
 invariant: true
-source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-droit-de-gerer-les-services.md (BR-GRANT-005), contexts/hearth/conceptions/2026-10-13-adr-droit-de-gerer-les-services-brouillon.md, HRT-76, revue locale du 2026-10-13 (B1)
+source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-droit-de-gerer-les-services.md (BR-GRANT-005), contexts/hearth/conceptions/2026-10-13-adr-droit-de-gerer-les-services-brouillon.md, HRT-76, revue locale du 2026-10-13 (B1), décision du propriétaire du 2026-10-13 21:55 (suppression)
 maj: 2026-10-13
 ---
 
@@ -13,7 +13,7 @@ maj: 2026-10-13
 ## Règle
 Aucun écran du client, aucune action d'un administrateur, aucune demande réseau n'accorde ni ne retire le droit, y compris pour un compte qui se l'accorderait à lui-même. Les corps des routes (`POST /accounts`, `PATCH /accounts/{id}`) ne lisent aucun champ de droit : un `rights` ou `services_right` glissé par un client modifié est ignoré. La colonne n'est écrite par AUCUN code de l'agent en fonctionnement. Les deux seuls chemins qui la donnent ou la retirent sont locaux au serveur : la commande `hearth-agent account services` et la question de l'installation (HRT-77, BR-GRANT-008). Ils passent par UNE requête, dans UN fichier (`infrastructure/sqlite/services_right_repo.rs`), seule entrée de la liste des écrivains autorisés du test de sources ; un second test borne les fichiers qui nomment l'écriture et le cas d'usage `ServicesRightService` (jamais le serveur HTTP). L'écriture légitime contrôle qu'une seule ligne est écrite : un compte disparu entre la lecture et l'écriture est une erreur et rien n'est consigné comme réussi.
 
-**Le droit ne se prend pas non plus par le réseau** (défaut à confirmer par le propriétaire, posé avec la revue locale du 2026-10-13). Un compte qui porte le droit ne voit ses moyens de connexion modifiés par le réseau que par lui-même ou par un compte qui porte lui aussi le droit. Sinon l'acte est refusé (`403`, droit manquant `services` en détail, entrée « refusé : droits insuffisants » au journal) avec le texte : « Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut modifier ses moyens de connexion. » La ligne de commande locale reste permise (c'est le serveur). La règle suit le droit lu au moment de l'acte, dans la transaction de l'écriture. Sans cette règle, un administrateur sans le droit définirait le mot de passe d'un titulaire, ouvrirait une session à son nom et obtiendrait l'effet du droit sans que le serveur l'ait donné.
+**Le droit ne se prend pas non plus par le réseau** (défaut à confirmer par le propriétaire, posé avec la revue locale du 2026-10-13). Un compte qui porte le droit ne voit ses moyens de connexion modifiés, ni son compte supprimé, par le réseau que par lui-même ou par un compte qui porte lui aussi le droit. Sinon l'acte est refusé (`403`, droit manquant `services` en détail, entrée « refusé : droits insuffisants » au journal) avec le texte : « Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut modifier ses moyens de connexion. » La ligne de commande locale reste permise (c'est le serveur). La règle suit le droit lu au moment de l'acte, dans la transaction de l'écriture. Pour la suppression (`DELETE /accounts/{id}`) le refus est le même (`403`, `FORBIDDEN_ROLE`, `details.missing: "services"`, « refusé : droits insuffisants » au journal) avec le texte : « Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut le supprimer. » Il est jugé dans la transaction de la suppression, avant toute écriture (rien ne bouge : compte, postes de confiance, sessions, droit). Les protections existantes sont inchangées (confirmation de son propre compte, dernier administrateur). Sans cette règle, un administrateur sans le droit définirait le mot de passe d'un titulaire, ouvrirait une session à son nom et obtiendrait l'effet du droit sans que le serveur l'ait donné.
 
 ### Inventaire des actes qui peuvent mener d'un compte à un autre
 
@@ -21,8 +21,8 @@ Aucun écran du client, aucune action d'un administrateur, aucune demande résea
 |---|---|---|
 | Définir le mot de passe d'autrui (`PUT /accounts/{id}/password`) | **protégé** | refusé sur un titulaire sauf lui-même, un autre titulaire, ou la ligne de commande ; jugé dans la transaction |
 | Changer son propre mot de passe (`PUT /me/password`) | sans danger | exige l'ancien mot de passe, ne vise que l'appelant |
-| Changer le rôle (`PATCH /accounts/{id}`) | sans danger | le rôle est un axe indépendant du droit ; ne donne ni mot de passe, ni session, ni droit |
-| Supprimer un compte (`DELETE /accounts/{id}`) | sans danger | le droit est une colonne de la ligne du compte et disparaît avec elle ; un compte recréé sous le même nom a un autre identifiant et naît sans le droit (BR-GRANT-002). Limite : l'octroi sur le serveur se fait PAR NOM. Un administrateur sans le droit peut supprimer le compte d'un titulaire et recréer un compte du même nom ; si le propriétaire relance ensuite l'octroi sur ce nom sans vérifier, il le donne au nouveau compte. Avant d'accorder, vérifier que le compte est bien celui qu'on croit (date de création, journal d'activité) |
+| Changer le rôle (`PATCH /accounts/{id}`) | sans danger | le rôle est un axe indépendant du droit ; ne donne ni mot de passe, ni session, ni droit (laissé tel quel par décision du propriétaire, 2026-10-13) |
+| Supprimer un compte (`DELETE /accounts/{id}`) | **protégé** | refusé sur un titulaire sauf par lui-même, un autre titulaire, ou la ligne de commande ; jugé dans la transaction. Pourquoi (décision du propriétaire, 2026-10-13) : (1) le droit se donne PAR NOM depuis le serveur : un administrateur sans le droit pouvait supprimer le compte, recréer un homonyme dont il connaît le mot de passe, et attendre que le propriétaire redonne le droit à ce nom ; (2) la suppression efface aussi les postes de confiance, que la règle du droit interdit de toucher à un administrateur sans le droit (BR-ACCT-018) ; (3) supprimer le seul titulaire laisserait le serveur sans personne pour gérer les services |
 | Créer un compte (`POST /accounts`) | sans danger | naît sans le droit quel que soit le rôle ; le créateur choisit le mot de passe d'un compte NEUF |
 | Fermer les sessions d'autrui (`DELETE /accounts/{id}/sessions`) | sans danger | ferme des sessions et oublie des postes de confiance et des adresses retenues, n'en ajoute aucun ; refuse plus de monde, n'en laisse entrer aucun. Limite : c'est un moyen de gêner un titulaire (déni de service), et combiné au mode attaque il peut le tenir dehors tant qu'il n'a pas un poste reconnu ; le recours est la ligne de commande du serveur |
 | Inscrire un poste de confiance ou une clé pour autrui | n'existe pas | un poste ne s'inscrit qu'à la connexion, avec le mot de passe du titulaire (BR-TRUST) |
@@ -45,6 +45,9 @@ Détection d'une écriture ajoutée plus tard, de deux façons indépendantes : 
 - `crates/hearth-agent/src/entrypoint/http/accounts.rs::{create, change_role} (aucun champ de droit lu)`
 - `crates/hearth-agent/src/infrastructure/sqlite/services_right_repo.rs` (l'unique écrivain, appelé par la seule ligne de commande : BR-GRANT-008)
 - `crates/hearth-agent/src/domain/accounts/rights.rs::Authority::may_change_login_means_of` (qui peut modifier les moyens de connexion d'un titulaire)
+- `crates/hearth-agent/src/domain/accounts/rights.rs::Authority::may_delete_account` (qui peut supprimer le compte d'un titulaire)
+- `crates/hearth-agent/src/application/accounts.rs::AccountService::delete` (la règle, dans la transaction ; refus `ServicesHolderDeletionProtected`)
+- `apps/desktop/src/components/organisms/AccountTable.vue` (« Supprimer » indisponible avec l'explication ; l'agent reste l'arbitre)
 - `crates/hearth-agent/src/application/accounts.rs::AccountService::set_password` (la règle, dans la transaction ; refus `ServicesHolderProtected`)
 
 ## Vérification
@@ -59,23 +62,31 @@ Détection d'une écriture ajoutée plus tard, de deux façons indépendantes : 
 - `crates/hearth-agent/tests/http_api.rs::a_read_only_account_with_the_right_reaches_nothing_but_the_services`
 - `crates/hearth-agent/tests/http_api.rs::an_administrator_without_the_right_cannot_define_the_password_of_a_holder`
 - `crates/hearth-agent/tests/http_api.rs::the_protection_follows_the_right_read_at_the_time_and_the_server_always_passes`
+- `crates/hearth-agent/tests/http_api.rs::an_administrator_without_the_right_cannot_delete_a_holder`
+- `crates/hearth-agent/tests/http_api.rs::the_server_deletes_a_holder`
 - `crates/hearth-agent/tests/http_api.rs::the_acts_declared_harmless_do_not_hand_a_holder_to_an_administrator_without_the_right`
 - `crates/hearth-agent/tests/http_api.rs::no_chain_of_calls_from_an_administrator_without_the_right_reaches_a_services_request`
 - `crates/hearth-agent/tests/services_grant_cli.rs::a_right_written_for_a_vanished_account_is_an_error_and_journals_nothing`
 - `crates/hearth-agent/src/entrypoint/http/mod.rs::tests::every_route_is_classified_and_every_service_route_is_at_the_services_level`
 - `crates/hearth-agent/src/domain/accounts/rights.rs::tests::the_means_of_a_holder_change_only_from_the_server_the_holder_or_another_holder`
+- `crates/hearth-agent/src/domain/accounts/rights.rs::tests::a_holder_is_deleted_only_by_the_server_the_holder_or_another_holder`
+- `apps/desktop/src/components/organisms/accounts.test.ts` (« removal of an account that can manage the services »)
+- `apps/desktop/src/pages/AccountsRights.test.ts` (« supprimer un compte qui peut gérer les services »)
+- `apps/desktop/e2e/hrt133-sessions.spec.ts` (« supprimer un compte qui peut gérer les services »)
 
 ## Cas limites
 - Le détecteur d'exécution ne voit que les routes que le balayage appelle avec un scénario de réussite : une route modifiante sans scénario fait déjà échouer `every_modifying_route_leaves_exactly_one_success_entry` (« route modifiante sans scénario de réussite »).
 - Le test de sources lit le texte brut : une requête dont le NOM de la colonne serait lui-même recomposé (`format!("services_{}", …)`) échapperait à (1), pas à (2).
 - La règle des moyens de connexion suit le droit au moment de l'acte : si le serveur accorde le droit à un compte pendant qu'un administrateur sans le droit définit son mot de passe, l'ordre de la transaction décide (l'acte passe s'il précède l'octroi). Fenêtre de quelques millisecondes, sans élargissement du droit.
-- Un administrateur sans le droit peut toujours fermer les sessions d'un titulaire et supprimer son compte (déni de service possible, jamais prise du compte) ; le titulaire se reconnecte avec son mot de passe, que personne d'autre n'a pu changer.
+- Un administrateur sans le droit peut toujours fermer les sessions d'un titulaire et changer son rôle (déni de service possible, jamais prise du compte) ; le titulaire se reconnecte avec son mot de passe, que personne d'autre n'a pu changer. Il ne peut plus supprimer son compte.
+- Un titulaire peut supprimer un autre titulaire, y compris le dernier autre : la protection arrête les administrateurs SANS le droit, pas ceux qui l'ont. Le serveur sans titulaire reste possible par la ligne de commande (`account remove`) ; la règle empêche seulement qu'un compte sans le droit y mène.
 - Le client affichera pour ce refus « rôle insuffisant » tant que la liaison ne transporte pas `details.missing` (HRT-78, hors de ce ticket).
 
 ## Règles liées
 - BR-GRANT-002, BR-GRANT-004, BR-GRANT-008, BR-ACCT-008
 
 ## Historique
+- 2026-10-13 — décision du propriétaire (21:55, « on suit ta recommandation ») : la suppression d'un titulaire devient refusée à un administrateur sans le droit ; le changement de rôle reste permis.
 - 2026-10-13 — création (HRT-76, ADR-0041 : le droit de gérer les services, moitié agent).
 - 2026-10-13 — HRT-77 : l'unique écrivain autorisé est la requête de la commande du serveur ; second test sur les appelants.
 - 2026-10-13 — revue locale : le droit ne se prend pas par le réseau (mot de passe d'un titulaire), inventaire des actes, garde de sources sur le texte brut, les migrations et `.sqlx/`, écriture contrôlée sur une ligne.

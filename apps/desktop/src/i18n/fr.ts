@@ -71,6 +71,8 @@ export const fr = {
     unknownResult:
       "Le résultat de cette opération n'est pas connu. Elle n'a pas été rejouée automatiquement. À la reconnexion, la liste se mettra à jour.",
     lastAdmin: "Il doit toujours rester au moins un administrateur",
+    holderNoDelete:
+      "Ce compte peut gérer les services. Seul un compte qui le peut aussi, ou la commande sur le serveur, peut le supprimer.",
     lastAdminSelf: "Tu es le dernier administrateur, ce compte ne peut pas être supprimé",
     usernameTaken: "Cet identifiant est déjà utilisé",
     wrongPassword: "L'ancien mot de passe est incorrect",
@@ -261,6 +263,12 @@ export const fr = {
     sessionsTitle: "Fermer les sessions de {username} ?",
     sessionsMessage: "{username} devra se reconnecter sur chacun de ses postes.",
     sessionsApply: "Fermer les sessions",
+    sessionsHolderNote:
+      "Ce compte peut gérer les services. Il devra se reconnecter ; ses postes de confiance sont gardés.",
+  },
+  sessionsClosed: {
+    banner: "Tes sessions ont été fermées par {username} le {date}.",
+    dismiss: "Fermer l'information",
   },
   common: {
     comingSoon: "Bientôt disponible",

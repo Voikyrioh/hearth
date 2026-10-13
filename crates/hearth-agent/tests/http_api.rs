@@ -2043,8 +2043,9 @@ async fn the_protection_follows_the_right_read_at_the_time_and_the_server_always
 /// - changement de rôle : le droit reste, ni mot de passe ni session ne change ;
 /// - fermeture des sessions : le titulaire perd ses sessions, garde son droit, et la route n'inscrit aucun
 ///   poste ni mot de passe ;
-/// - suppression : le droit disparaît AVEC la ligne du compte ; un compte recréé sous le même nom a un autre
-///   identifiant, naît sans le droit, et le mot de passe choisi à la création n'ouvre aucun acte de service.
+///
+/// La suppression n'en fait plus partie : elle est refusée à un administrateur sans le droit sur un titulaire
+/// (le droit se donne par NOM, un homonyme recréé le recevrait).
 #[tokio::test]
 async fn the_acts_declared_harmless_do_not_hand_a_holder_to_an_administrator_without_the_right() {
     let env = env().await;
@@ -2094,54 +2095,129 @@ async fn the_acts_declared_harmless_do_not_hand_a_holder_to_an_administrator_wit
     assert_eq!(env_route.status, StatusCode::FORBIDDEN);
     assert_eq!(api.login("ada", PASSWORD).await.status, StatusCode::CREATED);
 
-    // Suppression puis recréation sous le même nom : le droit ne renaît JAMAIS.
+    // La suppression n'est plus dans cette liste : elle est refusée sur un titulaire (voir
+    // `an_administrator_without_the_right_cannot_delete_a_holder`).
+    // Aucun de ces actes n'a écrit la colonne du droit (la création du compte la laisse à son défaut).
+    assert!(right_writes(&env).await.is_empty());
+}
+
+/// Le refus dédié de la suppression (BR-GRANT-005), au mot près.
+const HOLDER_DELETION_PROTECTED: &str = "Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut le supprimer.";
+
+/// BR-GRANT-005 (décision du propriétaire du 2026-10-13) : un administrateur SANS le droit ne supprime pas
+/// le compte d'un titulaire. Refus dédié, droit manquant en détail, refus consigné « droits insuffisants » ;
+/// ni le compte, ni ses postes de confiance, ni ses sessions, ni son droit n'ont bougé. Un titulaire
+/// supprime un autre titulaire ; un compte sans le droit se supprime comme avant.
+#[tokio::test]
+async fn an_administrator_without_the_right_cannot_delete_a_holder() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let ada = env.actor(&api, "ada", Role::Admin).await;
+    let bob = env.actor(&api, "bob", Role::Admin).await;
+    env.create("cleo", Role::ReadOnly).await;
+    env.create("dan", Role::ReadOnly).await;
+    env.create("eve", Role::ReadOnly).await;
+    env.grant_services("ada").await;
+    env.grant_services("dan").await;
+    env.grant_services("eve").await;
+    install_right_write_detector(&env).await;
+    let (ada_id, dan_id, cleo_id, eve_id) = (
+        id_of(&env, "ada").await,
+        id_of(&env, "dan").await,
+        id_of(&env, "cleo").await,
+        id_of(&env, "eve").await,
+    );
+    let ada_sessions = env
+        .session_ids(&env.service.find("ada").await.unwrap().id)
+        .await;
+    let ada_trust = trust_of(&env, &ada_id).await;
+    assert!(
+        ada_trust.0 >= 1,
+        "ada a un poste de confiance : {ada_trust:?}"
+    );
+
+    // Refusé sur un titulaire administrateur et sur un titulaire en lecture seule.
+    for (name, id) in [("ada", &ada_id), ("dan", &dan_id)] {
+        let reply = api
+            .act(&bob, Method::DELETE, &format!("/accounts/{id}"), json!({}))
+            .await;
+        assert_eq!(
+            (reply.status, reply.code()),
+            (StatusCode::FORBIDDEN, "FORBIDDEN_ROLE"),
+            "{name} : {:?}",
+            reply.body
+        );
+        assert_eq!(
+            reply.body["error"]["message"], HOLDER_DELETION_PROTECTED,
+            "{name}"
+        );
+        assert_eq!(
+            reply.body["error"]["details"],
+            json!({ "missing": "services" })
+        );
+        assert_eq!(
+            journal_of(&env, "account.delete", "bob", name).await,
+            vec![("denied".to_owned(), Some("droits insuffisants".to_owned()))],
+            "le refus est consigné, sans entrée de réussite"
+        );
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
+            .bind(id)
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap();
+        assert_eq!(rows, 1, "{name} existe encore");
+        assert_eq!(env.services_right_of(name).await, "manage");
+    }
+    assert_eq!(
+        env.session_ids(&env.service.find("ada").await.unwrap().id)
+            .await,
+        ada_sessions
+    );
+    assert_eq!(trust_of(&env, &ada_id).await, ada_trust);
+    assert_eq!(
+        api.get("/me").token(&ada.token).send().await.status,
+        StatusCode::OK
+    );
+    assert!(right_writes(&env).await.is_empty());
+
+    // Un titulaire supprime un autre titulaire.
     let reply = api
         .act(
-            &bob,
+            &ada,
             Method::DELETE,
-            &format!("/accounts/{ada_id}"),
+            &format!("/accounts/{eve_id}"),
             json!({}),
         )
         .await;
     assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
-    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE id = ?")
-        .bind(&ada_id)
-        .fetch_one(env.db.pool())
-        .await
-        .unwrap();
-    assert_eq!(rows, 0, "le droit disparaît avec la ligne du compte");
+    // L'administrateur sans le droit supprime un compte sans le droit, comme avant.
     let reply = api
         .act(
             &bob,
-            Method::POST,
-            "/accounts",
-            json!({ "username": "ada", "password": TAKEOVER_PASSWORD, "role": "admin" }),
+            Method::DELETE,
+            &format!("/accounts/{cleo_id}"),
+            json!({}),
         )
         .await;
-    assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
-    let new_ada = id_of(&env, "ada").await;
-    assert_ne!(new_ada, ada_id, "un autre identifiant");
-    assert_eq!(env.services_right_of("ada").await, "none");
-    let login = api.login("ada", TAKEOVER_PASSWORD).await;
-    assert_eq!(login.status, StatusCode::CREATED, "{:?}", login.body);
-    let token = login.body["token"].as_str().unwrap().to_owned();
-    for endpoint in ENDPOINTS.iter().filter(|e| e.access == Access::Services) {
-        let reply = api
-            .call(endpoint.method.clone(), &concrete(endpoint.path))
-            .token(&token)
-            .json(&json!({}))
-            .send()
-            .await;
-        assert_eq!(
-            reply.status,
-            StatusCode::FORBIDDEN,
-            "{} {}",
-            endpoint.method,
-            endpoint.path
-        );
-    }
-    // Aucun de ces actes n'a écrit la colonne du droit (la création du compte la laisse à son défaut).
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
     assert!(right_writes(&env).await.is_empty());
+}
+
+/// La ligne de commande du serveur supprime un titulaire (c'est le serveur, BR-GRANT-005).
+#[tokio::test]
+async fn the_server_deletes_a_holder() {
+    use hearth_agent::domain::accounts::Authority;
+
+    let env = env().await;
+    env.create("ada", Role::Admin).await;
+    env.create("bob", Role::Admin).await;
+    env.grant_services("ada").await;
+    let ada = env.service.find("ada").await.unwrap().id;
+    env.service
+        .delete(&ada, &Authority::Server, None, support::by())
+        .await
+        .unwrap();
+    assert!(env.service.find("ada").await.is_err());
 }
 
 /// Garde générale (B1) : AUCUN enchaînement d'appels réseau partant d'un administrateur sans le droit
@@ -2222,44 +2298,52 @@ async fn no_chain_of_calls_from_an_administrator_without_the_right_reaches_a_ser
         assert_eq!(env.services_right_of(name).await, "manage");
     }
 
-    // Phase 2 : suppression de chaque compte puis recréation sous le même nom, mot de passe choisi par bob.
+    // Phase 2 : suppression de chaque compte. Les titulaires sont refusés (le droit se donne par nom : un
+    // homonyme recréé le recevrait) ; le compte sans le droit est supprimé puis recréé sous le même nom,
+    // mot de passe choisi par bob.
     for (name, id) in &originals {
         let reply = api
             .act(&bob, Method::DELETE, &format!("/accounts/{id}"), json!({}))
             .await;
-        assert_eq!(reply.status, StatusCode::OK, "{name} : {:?}", reply.body);
-        let reply = api
-            .act(
-                &bob,
-                Method::POST,
-                "/accounts",
-                json!({ "username": name, "password": TAKEOVER_PASSWORD, "role": "admin" }),
-            )
-            .await;
-        assert_eq!(
-            reply.status,
-            StatusCode::CREATED,
-            "{name} : {:?}",
-            reply.body
-        );
+        if *name == "cleo" {
+            assert_eq!(reply.status, StatusCode::OK, "{name} : {:?}", reply.body);
+            let reply = api
+                .act(
+                    &bob,
+                    Method::POST,
+                    "/accounts",
+                    json!({ "username": name, "password": TAKEOVER_PASSWORD, "role": "admin" }),
+                )
+                .await;
+            assert_eq!(
+                reply.status,
+                StatusCode::CREATED,
+                "{name} : {:?}",
+                reply.body
+            );
+            assert_ne!(
+                &id_of(&env, name).await,
+                id,
+                "{name} : un autre identifiant"
+            );
+        } else {
+            assert_eq!(
+                (reply.status, reply.code()),
+                (StatusCode::FORBIDDEN, "FORBIDDEN_ROLE"),
+                "{name} : {:?}",
+                reply.body
+            );
+            assert_eq!(&id_of(&env, name).await, id, "{name} : le même compte");
+            assert_eq!(env.services_right_of(name).await, "manage");
+        }
     }
-    // Aucun compte de départ n'existe plus sous son identifiant, et aucun compte n'a le droit.
-    for (name, id) in &originals {
-        assert_ne!(
-            &id_of(&env, name).await,
-            id,
-            "{name} : un autre identifiant"
-        );
-    }
+    // Aucun titulaire n'a été remplacé ; le seul compte recréé n'a pas le droit.
     let holders: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE services_right <> 'none'")
             .fetch_one(env.db.pool())
             .await
             .unwrap();
-    assert_eq!(
-        holders, 0,
-        "le droit ne renaît jamais, ni par suppression ni par création"
-    );
+    assert_eq!(holders, 2, "ada et dan gardent leur droit, rien de plus");
 
     // Phase 3 : le mot de passe de bob sur TOUS les comptes ; tout jeton obtenu est refusé partout au niveau
     // « services ».
@@ -2267,7 +2351,7 @@ async fn no_chain_of_calls_from_an_administrator_without_the_right_reaches_a_ser
         .fetch_all(env.db.pool())
         .await
         .unwrap();
-    assert!(names.len() >= 5, "{names:?}");
+    assert!(names.len() >= 4, "{names:?}");
     let mut opened = 0;
     for name in &names {
         let login = api.login(name, TAKEOVER_PASSWORD).await;
@@ -2294,7 +2378,7 @@ async fn no_chain_of_calls_from_an_administrator_without_the_right_reaches_a_ser
         }
     }
     assert!(
-        opened >= 3,
+        opened >= 1,
         "le balayage a bien ouvert des comptes : {opened}"
     );
     // Et `bob`, avec sa propre session, est refusé lui aussi.
@@ -2313,4 +2397,227 @@ async fn no_chain_of_calls_from_an_administrator_without_the_right_reaches_a_ser
         );
     }
     assert!(right_writes(&env).await.is_empty());
+}
+
+// ---------------------------------------------------------------------------------------------
+// Fermer les sessions d'un compte qui a le droit de gérer les services (HRT-133, BR-ACCT-017 à 019)
+// ---------------------------------------------------------------------------------------------
+
+async fn count_of(env: &support::Env, sql: &'static str, account_id: &str) -> i64 {
+    sqlx::query_scalar(sql)
+        .bind(account_id)
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap()
+}
+
+/// (postes de confiance, adresses retenues) d'un compte.
+async fn trust_of(env: &support::Env, account_id: &str) -> (i64, i64) {
+    (
+        count_of(
+            env,
+            "SELECT COUNT(*) FROM trusted_devices WHERE account_id = ?",
+            account_id,
+        )
+        .await,
+        count_of(
+            env,
+            "SELECT COUNT(*) FROM known_addresses WHERE account_id = ?",
+            account_id,
+        )
+        .await,
+    )
+}
+
+/// Connexion depuis le poste habituel du compte (sa clé déjà inscrite) : la réponse entière.
+async fn login_from_usual_device(api: &Api, who: &support::device::Actor) -> support::api::Reply {
+    let body = support::device::device_login_body(api, &who.key, &who.name, PASSWORD).await;
+    api.post("/sessions").json(&body).send().await
+}
+
+/// BR-ACCT-017, 018 : un administrateur SANS le droit ferme les sessions d'un titulaire, tout de suite, et
+/// rien d'autre ne change (mot de passe, postes de confiance, adresses retenues, droit). Le titulaire se
+/// reconnaît depuis son poste habituel, voit une fois qui a fermé ses sessions (BR-ACCT-019), et le journal
+/// dit tout sans adresse.
+#[tokio::test]
+async fn an_administrator_without_the_right_closes_the_sessions_of_a_holder_and_nothing_else() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let ada = env.actor(&api, "ada", Role::Admin).await;
+    let bob = env.actor(&api, "bob", Role::Admin).await;
+    env.grant_services("ada").await;
+    install_right_write_detector(&env).await;
+    let ada_id = id_of(&env, "ada").await;
+    let second_ada = env.login_actor(&api, "ada").await;
+    let hash_before = env
+        .hash_of(&env.service.find("ada").await.unwrap().id)
+        .await;
+    let trust_before = trust_of(&env, &ada_id).await;
+    assert_eq!(trust_before.0, 2, "deux postes inscrits");
+    assert!(trust_before.1 >= 1);
+
+    let reply = api
+        .act(
+            &bob,
+            Method::DELETE,
+            &format!("/accounts/{ada_id}/sessions"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert_eq!(reply.body["sessions_closed"], 2);
+    for token in [&ada.token, &second_ada.token] {
+        assert_eq!(
+            api.get("/me").token(token).send().await.code(),
+            "SESSION_REVOKED"
+        );
+    }
+    // Rien d'autre : mot de passe, postes, adresses, droit.
+    assert_eq!(
+        env.hash_of(&env.service.find("ada").await.unwrap().id)
+            .await,
+        hash_before
+    );
+    assert_eq!(trust_of(&env, &ada_id).await, trust_before);
+    assert_eq!(env.services_right_of("ada").await, "manage");
+    assert!(right_writes(&env).await.is_empty());
+    // L'administrateur, lui, n'a rien gagné et garde sa session.
+    assert_eq!(
+        api.get("/me").token(&bob.token).send().await.status,
+        StatusCode::OK
+    );
+
+    // Journal : l'auteur, le compte visé, le nombre, le droit de chacun, l'origine ; jamais d'adresse.
+    let row: (String, String, String) = sqlx::query_as(
+        "SELECT account, target, origin_kind FROM audit_events WHERE action = 'sessions.revoke'",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(row.0, "bob");
+    assert_eq!(
+        row.1,
+        "ada : 2 sessions fermées (compte visé : peut gérer les services ; auteur : ne peut pas gérer les services)"
+    );
+    assert_eq!(row.2, "client");
+    let notice_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session_closure_notices")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(notice_rows, 1);
+
+    // Le titulaire revient depuis son poste habituel : reconnu, et prévenu UNE fois, sans adresse.
+    let back = login_from_usual_device(&api, &ada).await;
+    assert_eq!(back.status, StatusCode::CREATED, "{:?}", back.body);
+    assert_eq!(back.body["device"], "proven");
+    let notice = &back.body["sessions_closed"];
+    assert_eq!(notice["by"], "bob");
+    assert!(notice["at"].as_str().unwrap().ends_with('Z'), "{notice}");
+    assert_eq!(notice.as_object().unwrap().len(), 2, "{notice}");
+    let again = login_from_usual_device(&api, &ada).await;
+    assert_eq!(again.status, StatusCode::CREATED);
+    assert!(
+        again.body.get("sessions_closed").is_none(),
+        "{:?}",
+        again.body
+    );
+}
+
+/// Les autres cas gardent l'effet d'avant : un titulaire qui ferme les sessions d'un autre titulaire, ou
+/// d'un compte sans le droit, fait oublier ses postes et ses adresses. Le journal dit le droit de chacun.
+#[tokio::test]
+async fn the_other_cases_still_forget_the_trusted_devices() {
+    let env = env().await;
+    let api = Api::new(&env);
+    env.actor(&api, "dan", Role::Admin).await;
+    env.actor(&api, "cleo", Role::ReadOnly).await;
+    env.actor(&api, "eve", Role::ReadOnly).await;
+    env.grant_services("dan").await;
+    env.grant_services("cleo").await;
+    let (cleo_id, eve_id) = (id_of(&env, "cleo").await, id_of(&env, "eve").await);
+    assert_eq!(trust_of(&env, &cleo_id).await.0, 1);
+    let dan = env.login_actor(&api, "dan").await;
+    let reply = api
+        .act(
+            &dan,
+            Method::DELETE,
+            &format!("/accounts/{cleo_id}/sessions"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert_eq!(trust_of(&env, &cleo_id).await, (0, 0));
+    let reply = api
+        .act(
+            &dan,
+            Method::DELETE,
+            &format!("/accounts/{eve_id}/sessions"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert_eq!(trust_of(&env, &eve_id).await, (0, 0));
+    let targets: Vec<String> = sqlx::query_scalar(
+        "SELECT target FROM audit_events WHERE action = 'sessions.revoke' ORDER BY id",
+    )
+    .fetch_all(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        targets,
+        [
+            "cleo : 1 session fermée (compte visé : peut gérer les services ; auteur : peut gérer les services)",
+            "eve : 1 session fermée (compte visé : ne peut pas gérer les services ; auteur : peut gérer les services)",
+        ]
+    );
+}
+
+/// BR-ACCT-019 : un administrateur qui ferme ses propres sessions garde celle d'où il agit ; aucun avis
+/// pour soi-même. Un compte en lecture seule ne ferme les sessions de personne (BR-ACCT-017).
+#[tokio::test]
+async fn closing_your_own_sessions_keeps_the_current_one_and_read_only_cannot_close_any() {
+    let env = env().await;
+    let api = Api::new(&env);
+    let bob = env.actor(&api, "bob", Role::Admin).await;
+    let bob_other = env.login_actor(&api, "bob").await;
+    let cleo = env.actor(&api, "cleo", Role::ReadOnly).await;
+    let (bob_id, cleo_id) = (id_of(&env, "bob").await, id_of(&env, "cleo").await);
+
+    let reply = api
+        .act(
+            &bob,
+            Method::DELETE,
+            &format!("/accounts/{bob_id}/sessions"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert_eq!(reply.body["sessions_closed"], 1);
+    assert_eq!(
+        api.get("/me").token(&bob.token).send().await.status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        api.get("/me").token(&bob_other.token).send().await.code(),
+        "SESSION_REVOKED"
+    );
+    let notices: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session_closure_notices")
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(notices, 0, "pas d'avis pour soi-même");
+
+    for target in [&bob_id, &cleo_id] {
+        let refused = api
+            .delete(&format!("/accounts/{target}/sessions"))
+            .token(&cleo.token)
+            .json(&json!({}))
+            .send()
+            .await;
+        assert_eq!(refused.status, StatusCode::FORBIDDEN, "{:?}", refused.body);
+    }
+    assert_eq!(
+        api.get("/me").token(&bob.token).send().await.status,
+        StatusCode::OK
+    );
 }

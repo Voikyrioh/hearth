@@ -9,12 +9,13 @@ use time::OffsetDateTime;
 use super::convert::{format_date, is_unique_violation, parse_date, storage};
 use super::store::SqliteUnitOfWork;
 use crate::application::ports::{SessionRepo, SessionTx, StoreError};
-use crate::domain::accounts::AccountId;
+use crate::domain::accounts::{AccountId, Username};
 use crate::domain::session_token::TokenHash;
-use crate::domain::sessions::{Session, SessionClosure, SessionId};
+use crate::domain::sessions::{ClosureNotice, Session, SessionClosure, SessionId};
 use crate::domain::trust::DeviceId;
 
 const RESOURCE: &str = "sessions";
+const NOTICES: &str = "session_closure_notices";
 
 pub struct SqliteSessionRepo {
     pool: SqlitePool,
@@ -274,6 +275,48 @@ impl SessionTx for SqliteUnitOfWork {
         .await
         .map_err(storage(RESOURCE))?;
         Ok(result.rows_affected())
+    }
+
+    async fn leave_closure_notice(
+        &mut self,
+        account: &AccountId,
+        notice: &ClosureNotice,
+    ) -> Result<(), StoreError> {
+        let closed_at = format_date(NOTICES, notice.at)?;
+        let closed_by = notice.by.as_str();
+        sqlx::query!(
+            "INSERT INTO session_closure_notices (account_id, closed_by, closed_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT (account_id) DO UPDATE
+             SET closed_by = excluded.closed_by, closed_at = excluded.closed_at",
+            account.as_str(),
+            closed_by,
+            closed_at
+        )
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(NOTICES))?;
+        Ok(())
+    }
+
+    async fn take_closure_notice(
+        &mut self,
+        account: &AccountId,
+    ) -> Result<Option<ClosureNotice>, StoreError> {
+        let row = sqlx::query!(
+            "DELETE FROM session_closure_notices WHERE account_id = ?
+             RETURNING closed_by AS \"closed_by!: String\", closed_at AS \"closed_at!: String\"",
+            account.as_str()
+        )
+        .fetch_optional(&mut *self.tx)
+        .await
+        .map_err(storage(NOTICES))?;
+        // Un avis illisible ne bloque jamais une connexion : la ligne est déjà retirée, l'avis est perdu.
+        Ok(row.and_then(|row| {
+            let by = Username::parse(&row.closed_by).ok()?;
+            let at = parse_date(NOTICES, &row.closed_at).ok()?;
+            Some(ClosureNotice { by, at })
+        }))
     }
 
     async fn purge_expired(&mut self, now: OffsetDateTime) -> Result<u64, StoreError> {

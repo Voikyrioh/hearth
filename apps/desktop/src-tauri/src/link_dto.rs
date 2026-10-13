@@ -311,6 +311,8 @@ impl FingerprintEvent {
 pub enum NoticeKind {
     /// Les suivis d'actions d'un serveur étaient illisibles : vérifie l'état avant de relancer.
     OperationsLost,
+    /// Un autre compte a fermé les sessions de ce compte (HRT-133, BR-ACCT-019) : `by` et `at`.
+    SessionsClosed,
     /// L'écoute a pris du retard : des changements ont pu être manqués (états relus).
     Lagged,
 }
@@ -322,6 +324,10 @@ pub struct NoticeEvent {
     pub id: u32,
     pub kind: NoticeKind,
     pub server_id: Option<String>,
+    /// `SessionsClosed` : l'identifiant de l'administrateur qui a fermé les sessions.
+    pub by: Option<String>,
+    /// `SessionsClosed` : quand (RFC 3339, UTC).
+    pub at: Option<String>,
 }
 
 // ── Retours de commandes ───────────────────────────────────────────────────────────────────

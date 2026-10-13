@@ -193,6 +193,15 @@ pub enum Target {
     /// BR-ADOPT-019) : ce sont les SEULS détails d'un conteneur que le journal écrit, et seulement au
     /// moment où l'acte réussit (le nom devient visible de tous à l'adoption, pas avant).
     ServiceUnit(ClientName, Option<ClientName>),
+    /// Les sessions d'un compte ont été fermées par l'administration (HRT-133, BR-ACCT-019) : le compte
+    /// visé, le nombre de sessions, si le compte visé avait le droit de gérer les services et si l'auteur
+    /// l'avait (`None` : la ligne de commande du serveur, qui n'a pas de compte). Jamais d'adresse.
+    SessionsClosed {
+        account: Username,
+        closed: u64,
+        target_holder: bool,
+        author_holder: Option<bool>,
+    },
 }
 
 /// Le moment de l'épisode d'alerte que l'entrée consigne.
@@ -221,6 +230,36 @@ impl Target {
             Self::ServiceUnit(name, None) => Some(format!("service {}", name.as_str())),
             Self::ServiceUnit(name, Some(unit)) => {
                 Some(format!("service {} ({})", name.as_str(), unit.as_str()))
+            }
+            Self::SessionsClosed {
+                account,
+                closed,
+                target_holder,
+                author_holder,
+            } => {
+                let count = if *closed == 1 {
+                    "1 session fermée".to_owned()
+                } else {
+                    format!("{closed} sessions fermées")
+                };
+                let right = |holder: bool| {
+                    if holder {
+                        "peut gérer les services"
+                    } else {
+                        "ne peut pas gérer les services"
+                    }
+                };
+                Some(match author_holder {
+                    Some(author) => format!(
+                        "{account} : {count} (compte visé : {} ; auteur : {})",
+                        right(*target_holder),
+                        right(*author)
+                    ),
+                    None => format!(
+                        "{account} : {count} (compte visé : {})",
+                        right(*target_holder)
+                    ),
+                })
             }
         }
     }
@@ -551,6 +590,32 @@ mod tests {
 
     fn marie() -> Username {
         Username::parse("marie").unwrap()
+    }
+
+    #[test]
+    fn the_closure_of_sessions_says_who_could_manage_services_and_never_an_address() {
+        let closed = |closed, author_holder| {
+            Target::SessionsClosed {
+                account: marie(),
+                closed,
+                target_holder: true,
+                author_holder,
+            }
+            .text()
+            .unwrap()
+        };
+        assert_eq!(
+            closed(1, Some(false)),
+            "marie : 1 session fermée (compte visé : peut gérer les services ; auteur : ne peut pas gérer les services)"
+        );
+        assert_eq!(
+            closed(3, Some(true)),
+            "marie : 3 sessions fermées (compte visé : peut gérer les services ; auteur : peut gérer les services)"
+        );
+        assert_eq!(
+            closed(0, None),
+            "marie : 0 sessions fermées (compte visé : peut gérer les services)"
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 use super::StoreError;
 use crate::domain::accounts::AccountId;
 use crate::domain::session_token::TokenHash;
-use crate::domain::sessions::{Session, SessionClosure, SessionId};
+use crate::domain::sessions::{ClosureNotice, Session, SessionClosure, SessionId};
 use crate::domain::trust::DeviceId;
 
 /// Lecture des sessions. Toute écriture passe par `UnitOfWork::sessions`.
@@ -76,6 +76,21 @@ pub trait SessionTx: Send {
         except: &SessionId,
         at: OffsetDateTime,
     ) -> Result<u64, StoreError>;
+
+    /// Laisse à ce compte l'avis « tes sessions ont été fermées par … » (HRT-133, BR-ACCT-019) ; un avis
+    /// plus récent remplace l'ancien.
+    async fn leave_closure_notice(
+        &mut self,
+        account: &AccountId,
+        notice: &ClosureNotice,
+    ) -> Result<(), StoreError>;
+
+    /// Lit puis supprime l'avis de ce compte : il n'est livré qu'une fois, dans la transaction de la
+    /// connexion qui le montre. `None` : rien à dire.
+    async fn take_closure_notice(
+        &mut self,
+        account: &AccountId,
+    ) -> Result<Option<ClosureNotice>, StoreError>;
 
     /// Supprime les sessions expirées avant `now` ; rend leur nombre.
     async fn purge_expired(&mut self, now: OffsetDateTime) -> Result<u64, StoreError>;

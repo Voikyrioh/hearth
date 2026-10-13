@@ -30,6 +30,19 @@ pub struct LoginResponse {
     pub token: String,
     pub expires_at: String,
     pub account: AccountInfo,
+    /// Présent une seule fois, à la première connexion qui suit la fermeture des sessions du compte par un
+    /// autre compte (HRT-133, BR-ACCT-019). Absent sinon ; un client qui ne connaît pas le champ l'ignore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions_closed: Option<SessionsClosedNotice>,
+}
+
+/// Qui a fermé les sessions du compte, et quand (HRT-133, BR-ACCT-019). Jamais d'adresse ni de nom de poste.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionsClosedNotice {
+    /// L'identifiant de l'administrateur.
+    pub by: String,
+    /// Quand, au format des dates du fil (RFC 3339, UTC).
+    pub at: String,
 }
 
 impl fmt::Debug for LoginResponse {
@@ -38,6 +51,7 @@ impl fmt::Debug for LoginResponse {
             .field("token", &"***")
             .field("expires_at", &self.expires_at)
             .field("account", &self.account)
+            .field("sessions_closed", &self.sessions_closed)
             .finish()
     }
 }
@@ -195,10 +209,50 @@ mod tests {
                 role: RoleName::Admin,
                 rights: Vec::new(),
             },
+            sessions_closed: None,
         };
         let text = format!("{request:?} {response:?}");
         assert!(!text.contains("Secret-Pass"), "{text}");
         assert!(!text.contains(&"ab".repeat(32)), "{text}");
+    }
+
+    #[test]
+    fn the_closure_notice_is_optional_on_the_wire_and_an_old_client_ignores_it() {
+        let login = |notice| LoginResponse {
+            token: "ab".repeat(32),
+            expires_at: "2026-11-03T10:30:15.250Z".into(),
+            account: AccountInfo {
+                id: "A".into(),
+                username: "marie".into(),
+                role: RoleName::Admin,
+                rights: Vec::new(),
+            },
+            sessions_closed: notice,
+        };
+        // Sans avis, le champ n'est pas écrit : le corps est celui d'avant.
+        let plain = serde_json::to_string(&login(None)).unwrap();
+        assert!(!plain.contains("sessions_closed"), "{plain}");
+        let parsed: LoginResponse = serde_json::from_str(&plain).unwrap();
+        assert_eq!(parsed.sessions_closed, None);
+        // Avec un avis : l'identifiant et la date, rien d'autre.
+        let notice = SessionsClosedNotice {
+            by: "paul".into(),
+            at: "2026-11-03T09:00:00.000Z".into(),
+        };
+        let text = serde_json::to_string(&login(Some(notice.clone()))).unwrap();
+        assert!(
+            text.contains(r#""sessions_closed":{"by":"paul","at":"2026-11-03T09:00:00.000Z"}"#),
+            "{text}"
+        );
+        let back: LoginResponse = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.sessions_closed, Some(notice));
+        // Un corps qui porte l'avis reste lisible par un type qui ne le connaît pas (champ ignoré).
+        #[derive(Deserialize)]
+        struct Old {
+            expires_at: String,
+        }
+        let old: Old = serde_json::from_str(&text).unwrap();
+        assert_eq!(old.expires_at, "2026-11-03T10:30:15.250Z");
     }
 
     #[test]
@@ -230,6 +284,7 @@ mod tests {
                     role: super::super::accounts::RoleName::Admin,
                     rights: Vec::new(),
                 },
+                sessions_closed: None,
             },
             device: Some(DeviceStatus::Enrolled),
         };

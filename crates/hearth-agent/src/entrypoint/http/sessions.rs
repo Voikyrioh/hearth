@@ -86,6 +86,11 @@ pub async fn login(
             token: outcome.token.encode(),
             expires_at: wire::date(outcome.expires_at)?,
             account: wire::account_info(&outcome.account),
+            sessions_closed: outcome
+                .closure_notice
+                .as_ref()
+                .map(wire::sessions_closed_notice)
+                .transpose()?,
         },
         device: outcome.device,
     };

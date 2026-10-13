@@ -3,6 +3,7 @@
 
 use hearth_proto::api::accounts::{AccountInfo, AccountItem, RoleName};
 use hearth_proto::api::audit::{AuditEventItem, AuditOrigin, OriginKindName, OutcomeName};
+use hearth_proto::api::sessions::SessionsClosedNotice;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
@@ -10,6 +11,7 @@ use super::error::ApiError;
 use crate::application::accounts::{AccountSummary, AccountView};
 use crate::domain::accounts::Role;
 use crate::domain::audit::{AuditRecord, OriginKind, OutcomeKind};
+use crate::domain::sessions::ClosureNotice;
 
 pub fn role_to_wire(role: Role) -> RoleName {
     match role {
@@ -30,6 +32,14 @@ pub fn date(date: OffsetDateTime) -> Result<String, ApiError> {
     date.to_offset(time::UtcOffset::UTC)
         .format(&Rfc3339)
         .map_err(|error| ApiError::internal(&error))
+}
+
+/// L'avis de fermeture des sessions (BR-ACCT-019) : l'identifiant de l'administrateur et la date.
+pub fn sessions_closed_notice(notice: &ClosureNotice) -> Result<SessionsClosedNotice, ApiError> {
+    Ok(SessionsClosedNotice {
+        by: notice.by.as_str().to_owned(),
+        at: date(notice.at)?,
+    })
 }
 
 pub fn account_info(account: &AccountView) -> AccountInfo {

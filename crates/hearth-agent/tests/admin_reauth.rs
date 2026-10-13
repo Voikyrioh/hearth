@@ -10,7 +10,7 @@
 mod support;
 
 use axum::http::{Method, StatusCode};
-use hearth_agent::domain::accounts::Role;
+use hearth_agent::domain::accounts::{Authority, Role};
 use hearth_proto::admin_act::{ActKind, AdminAct};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
@@ -1618,7 +1618,11 @@ async fn deleting_the_account_or_closing_its_sessions_closes_its_elevations() {
     assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
     assert_eq!(b.env.elevations.len(), 1);
     let paul = b.env.service.find("paul").await.unwrap().id;
-    b.env.service.delete(&paul, None, None, by()).await.unwrap();
+    b.env
+        .service
+        .delete(&paul, &Authority::Server, None, by())
+        .await
+        .unwrap();
     assert!(b.env.elevations.is_empty(), "suppression du compte");
 }
 

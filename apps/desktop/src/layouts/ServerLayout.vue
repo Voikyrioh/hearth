@@ -10,6 +10,7 @@ import OfflineBanner from "@/components/organisms/OfflineBanner.vue";
 import ReconnectPanel from "@/components/organisms/ReconnectPanel.vue";
 import SecurityAlertBanner from "@/components/organisms/SecurityAlertBanner.vue";
 import ServerNav from "@/components/organisms/ServerNav.vue";
+import SessionsClosedNotice from "@/components/organisms/SessionsClosedNotice.vue";
 import { formatClock } from "@/composables/format";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { providePageData } from "@/composables/usePageData";
@@ -37,6 +38,10 @@ const { server, state, lastContactAt } = useCurrentServer();
 const pageHasData = providePageData();
 const stale = computed(() => state.value !== "connected");
 const event = computed(() => (server.value ? link.eventOf(server.value.id) : undefined));
+// HRT-133 : qui a fermé les sessions de ce compte, dit une seule fois (BR-ACCT-019).
+const closedNotice = computed(() =>
+  server.value ? link.closedNoticeOf(server.value.id) : undefined,
+);
 
 watch(
   () => route.params.id,
@@ -101,6 +106,12 @@ function openSecurityPage() {
         :mode-on="modeOn(securityState.attackMode)"
         @activate="security.ask(server.id, true)"
         @details="openSecurityPage"
+      />
+      <SessionsClosedNotice
+        v-if="closedNotice"
+        :by="closedNotice.by"
+        :at="closedNotice.at"
+        @dismiss="link.dismissClosedNotice(server.id)"
       />
       <AttackModeDialog
         :open="askedHere"

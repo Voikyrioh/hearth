@@ -29,9 +29,10 @@ Bouton « Fermer les sessions » (« Fermer les <n> sessions » à partir de deu
 - Aucune session ouverte → succès, 0 session fermée.
 
 ## Règles liées
-- BR-ACCT-008.
+- BR-ACCT-008, BR-ACCT-017, BR-ACCT-018, BR-ACCT-019.
 
 ## Historique
 - 2026-10-04 — création (HRT-03, session 2026-10-04-hearth-creation).
 - 2026-10-06 — section « Interface » (HRT-13, session 2026-10-04-hearth-creation).
+- 2026-10-13 : HRT-133 : l'effet sur les postes de confiance et les adresses dépend de qui agit et du droit du compte visé (BR-ACCT-018) ; `AccountService::revoke_sessions_as`.
 - 2026-10-07 : HRT-28 : la fermeture des sessions accepte un membre `reauth` (BR-TRUST-036) ; couverte par l'élévation (BR-TRUST-043).

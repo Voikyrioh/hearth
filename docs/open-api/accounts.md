@@ -2,7 +2,7 @@
 
 Gestion des comptes. Code : `crates/hearth-agent/src/entrypoint/http/accounts.rs` (handlers), `application/accounts.rs` (cas d'usage), `domain/accounts/` (règles). Types du fil : `hearth-proto::api::accounts`.
 
-Toutes ces routes exigent `X-Hearth-Api` et un jeton (`Authorization: Bearer …`). Sauf `PUT /me/password`, elles sont **réservées aux administrateurs** (et `PUT /accounts/{id}/password` refuse en plus, sur un compte qui a le droit « gérer les services », tout administrateur qui ne l'a pas : voir plus bas) : un compte lecture seule reçoit `403 FORBIDDEN_ROLE` (BR-ACCT-013, BR-ACCT-014), avant même la lecture du corps. Le contrôle est fait par l'agent, par une couche unique (`auth::guard`, posée par le routeur d'après la table `ENDPOINTS`), jamais par le client.
+Toutes ces routes exigent `X-Hearth-Api` et un jeton (`Authorization: Bearer …`). Sauf `PUT /me/password`, elles sont **réservées aux administrateurs** (et `PUT /accounts/{id}/password` et `DELETE /accounts/{id}` refusent en plus, sur un compte qui a le droit « gérer les services », tout administrateur qui ne l'a pas : voir plus bas) : un compte lecture seule reçoit `403 FORBIDDEN_ROLE` (BR-ACCT-013, BR-ACCT-014), avant même la lecture du corps. Le contrôle est fait par l'agent, par une couche unique (`auth::guard`, posée par le routeur d'après la table `ENDPOINTS`), jamais par le client.
 
 **Confirmation (HRT-28, ADR-0031).** Chaque route qui modifie (création, rôle, mot de passe d'un compte, suppression, fermeture des sessions, `PUT /me/password`) accepte un membre `reauth` (mot de passe + preuve de clé d'usage `0x05` liée à l'acte) : voir [sécurité](./security.md), « Confirmation des actes d'administration ». L'agent l'exige (`426` sans `reauth`). **`PUT /me/password`** : avec `reauth`, `reauth.password` est l'ancien mot de passe (il doit être égal à `current`, sinon `422 VALIDATION_ERROR`, `details.field = "current"`) ; **sans `reauth` aussi, l'ancien mot de passe passe par les compteurs de la connexion** (`422 WRONG_PASSWORD` compté comme un échec de connexion, `429 TOO_MANY_ATTEMPTS` à partir du cinquième : BR-TRUST-040).
 
@@ -43,6 +43,7 @@ Corps facultatif : `{ "confirmation": "marie" }`. Qui supprime **son propre** co
 |---|---|---|
 | 422 | `VALIDATION_ERROR` | `details.field = "confirmation"` : identifiant retapé absent ou différent. |
 | 409 | `LAST_ADMIN` | Supprimer le dernier administrateur. |
+| 403 | `FORBIDDEN_ROLE` | `details.missing: "services"` : le compte porte le droit « gérer les services » et l'appelant n'est ni ce compte ni un compte qui a aussi le droit (« Ce compte peut gérer les services de ce serveur : seul un compte qui a ce droit, ou la ligne de commande du serveur, peut le supprimer. » ; consigné « refusé : droits insuffisants » ; BR-GRANT-005). Rien n'est supprimé. La ligne de commande du serveur (`account remove`) passe toujours. |
 | 404 | `NOT_FOUND` | Compte inconnu. |
 
 ## `PUT /api/v1/accounts/{id}/password` (admin)
@@ -51,7 +52,11 @@ Corps : `{ "password": "…" }`. `200` : `{ "sessions_closed": n }`. Toutes les 
 
 ## `DELETE /api/v1/accounts/{id}/sessions` (admin)
 
-Ferme toutes les sessions du compte sans toucher à son mot de passe (BR-ACCT-011). `200` : `{ "sessions_closed": n }`. Erreur : `NOT_FOUND`.
+Ferme toutes les sessions du compte sans toucher à son mot de passe (BR-ACCT-011), y compris celles d'un compte qui peut gérer les services, que l'appelant ait ce droit ou non (BR-ACCT-017). `200` : `{ "sessions_closed": n }`. Erreur : `NOT_FOUND`. Acte d'administration confirmé (signé par l'identifiant de la cible, inchangé).
+
+- Appelant **sans** le droit, cible **avec** : ferme les sessions et rien d'autre (mot de passe, postes de confiance, adresses retenues et droit gardés, BR-ACCT-018). Autres cas : toutes les sessions, postes et adresses oubliés, comme avant.
+- Cible = l'appelant : sa session courante est gardée, ses postes à clé aussi (BR-ACCT-018, BR-ACCT-009).
+- Journal : cible « ada : 2 sessions fermées (compte visé : peut gérer les services ; auteur : ne peut pas gérer les services) » (BR-ACCT-019). Le compte visé reçoit une fois, dans la réponse de sa connexion suivante, `sessions_closed` (voir [sessions](./sessions.md)).
 
 ## `PUT /api/v1/me/password` (tout rôle)
 

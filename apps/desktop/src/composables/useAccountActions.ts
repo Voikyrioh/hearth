@@ -1,6 +1,6 @@
 import { refusalMessage, roleLabel } from "@/accounts/messages";
 import { useServerAction } from "@/composables/useServerAction";
-import { t } from "@/i18n";
+import { type MessageKey, t } from "@/i18n";
 import {
   type Account,
   type AccountOutcome,
@@ -52,10 +52,12 @@ export function useAccountActions(serverId: () => string) {
     call: () => Promise<AccountOutcome>,
     onDone: (outcome: Extract<AccountOutcome, { kind: "done" }>) => void,
     rereads = true,
+    protectedHolderMessage?: MessageKey,
   ): Promise<AccountReport> {
     const result = await action.run(call, {
       unknownMessage: "accounts.unknownResult",
       forbiddenMessage: "accounts.forbidden",
+      protectedHolderMessage,
     });
     if (!result) return action.failedReport();
     if (result.kind === "done") {
@@ -127,6 +129,9 @@ export function useAccountActions(serverId: () => string) {
               username: account.username,
             }),
           ),
+        true,
+        // BR-GRANT-005 : le compte d'un titulaire n'est supprimé que par un titulaire ou le serveur.
+        "accounts.holderNoDelete",
       );
     },
 

@@ -65,6 +65,8 @@ pub(crate) enum AttemptResult {
     /// maintenant au compte (un administrateur rétrogradé le perd sans nouvelle saisie).
     Reauthenticated {
         role: hearth_proto::api::accounts::RoleName,
+        /// Qui a fermé les sessions du compte, dit une seule fois par l'agent à cette connexion (HRT-133).
+        sessions_closed: Option<hearth_proto::api::sessions::SessionsClosedNotice>,
     },
 }
 
@@ -345,6 +347,7 @@ pub(crate) async fn reauthenticate_with_key(deps: &Deps, shared: &Shared) -> Att
             match deps.vault.put(&id, SecretKind::Token, &token) {
                 Ok(()) => AttemptResult::Reauthenticated {
                     role: response.account.role,
+                    sessions_closed: response.sessions_closed.take(),
                 },
                 Err(error) => {
                     tracing::warn!(server = %id, %error, "jeton non mémorisé");
