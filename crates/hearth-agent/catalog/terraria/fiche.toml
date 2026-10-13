@@ -1,0 +1,154 @@
+# Terraria, serveur officiel sans mod. Fiche en `preview` (HRT-113, ADR-0050 version 2).
+#
+# Construite depuis l'inventaire `2026-10-13-reglages-des-jeux.md` (T01 à T41) et `forge-nixos/jeux/terraria.nix`.
+# Tout ce qui est marqué « non vérifié » l'est dans l'inventaire : rien n'a été ajouté de mémoire. Elle n'est
+# publiable qu'avec l'empreinte de l'image, la mesure à vide et le passage du banc d'essai (ADR-0053, HRT-114).
+
+format = 2
+id = "terraria"
+version = 1
+family = "terraria"
+name = "Terraria"
+summary = "Le serveur officiel de Terraria, sans mod."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "ryshe/terraria"
+tag = "vanilla-1.4.5.8"                   # celle de forge
+# digest : NON VÉRIFIÉ, à relever par le job fiche-golden ; obligatoire pour « published »
+game_updates = "never"                    # la version du jeu est celle de l'étiquette (T41)
+
+[owner]
+uid = 0                                   # l'image tourne en root (lu sur la branche master, non vérifié sur l'étiquette épinglée)
+gid = 0
+
+[[folder]]
+id = "world"
+role = "world"
+target = "/root/.local/share/Terraria/Worlds"
+read_only = false
+backup = true
+
+[[folder]]
+id = "config"
+role = "config"
+target = "/config"
+read_only = true                          # NON VÉRIFIÉ : forge monte le seul fichier en lecture seule ; que l'image n'écrive rien d'autre dans /config est à prouver par le banc d'essai, sinon false
+backup = true
+
+[[port]]
+id = "game"
+container = 7777
+protocol = "tcp"                          # forge publie 7777 en TCP ; protocole non vérifié dans la documentation du jeu
+role = "game"
+publish = "always"
+default_host = 7777
+mapping = "nat"
+
+[[channel]]
+id = "config"
+kind = "file"
+format = "kv_lines"
+folder = "config"
+path = "serverconfig.txt"
+mode = "0600"                             # image en root : le fichier reste lisible par son seul propriétaire
+written_by_game = "unverified"            # les ordres « password » et « motd » de la console écrivent-ils le fichier : non vérifié (inventaire 1.5)
+raw_edit = true
+
+[channel.kv]
+separator = "="
+comment = "#"
+quote = "none"
+
+[[channel]]
+id = "args"
+kind = "args"
+
+[[env]]
+name = "WORLD_FILENAME"                   # définie : l'image charge ce monde et s'arrête s'il manque (T37)
+derive = { from = "world_name", suffix = ".wld" }
+when = "world_imported"                   # monde nouveau : non définie, l'image crée le monde d'après le fichier
+
+[first_start]
+ready_timeout_s = 1800                    # durée de génération d'un grand monde : non vérifiée
+world_generation = true
+
+[ready]
+log_contains = "Server started"           # lu dans le commentaire de terraria.nix, jamais observé ici
+status = "untested"
+
+[stop]
+grace_s = 10                              # l'image ignore le signal (T2) : attendre plus longtemps n'enregistre rien
+signal = "image_default"
+world_saved = "by_sequence"
+
+[stop.sequence]
+status = "untested"                       # point B6 : le serveur lit-il son entrée sans terminal ? Non vérifié
+
+[[stop.sequence.step]]
+kind = "stdin_line"
+line = "save"
+quits = false
+
+[[stop.sequence.step]]
+kind = "wait"
+seconds = 15                              # la ligne de journal qui confirme l'enregistrement n'est pas connue : pas de wait_log
+
+[[stop.sequence.step]]
+kind = "stdin_line"
+line = "exit"                             # « arrête le serveur et enregistre » (T1)
+quits = true
+
+[save]
+status = "untested"
+
+[[save.step]]
+kind = "stdin_line"
+line = "save"
+quits = false
+
+[[save.step]]
+kind = "wait"
+seconds = 15
+
+[resources]
+cpu = { evidence = "unmeasured" }
+memory = { evidence = "unmeasured" }
+disk = { evidence = "unmeasured" }        # image d'environ 50 Mo d'après le commentaire de forge, monde non mesuré
+
+[worlds]
+folder = "world"
+unit = "file"
+suffix = ".wld"
+companions = []                           # fichiers voisins d'un monde : non vérifié
+names_setting = "world_name"
+carried_by_world = ["world_size", "difficulty", "seed"]
+
+[worlds.backups]
+dated_copies = true                       # « Forge.wld.<date> », forme écrite par la procédure de terraria.nix
+
+[[not_exposed]]
+key = "-ip"
+channel = "args"
+why = "Adresse d'écoute à l'intérieur du conteneur : la changer coupe le port publié."
+
+[[not_exposed]]
+key = "-steam"
+channel = "args"
+why = "Prise en charge de Steam : effet dans un conteneur sans client Steam non vérifié."
+
+[[not_exposed]]
+key = "-lobby"
+channel = "args"
+why = "Sans effet sans -steam."
+
+[[not_exposed]]
+key = "banlist"
+channel = "config"
+why = "Chemin du fichier des bannis : où le jeu l'écrit dans le conteneur n'est pas vérifié. Laissé au défaut du jeu."
+
+[[not_exposed]]
+key = "priority"
+channel = "config"
+why = "Priorité du processus : effet sous Linux non vérifié ; les ressources se règlent dans l'onglet Ressources."
