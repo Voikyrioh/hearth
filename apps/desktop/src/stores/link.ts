@@ -193,15 +193,37 @@ export const useLinkStore = defineStore("link", () => {
     }
   }
 
+  /** Qui a fermé les sessions du compte sur ce serveur, et quand : un seul par serveur, à fermer (HRT-133). */
+  const closedNotices = ref<Record<string, { by: string; at: string }>>({});
+
+  function closedNoticeOf(serverId: string): { by: string; at: string } | undefined {
+    return closedNotices.value[serverId];
+  }
+
+  function dismissClosedNotice(serverId: string) {
+    const { [serverId]: _gone, ...rest } = closedNotices.value;
+    closedNotices.value = rest;
+  }
+
   // Avis déjà montrés (signal en direct et lecture d'état peuvent porter le même) : bornés.
   const seenNotices = new Set<number>();
 
   function onNotice(notice: LinkNotice) {
-    if (notice.kind !== "operations_lost") return;
+    if (notice.kind !== "operations_lost" && notice.kind !== "sessions_closed") return;
     if (notice.id > 0) {
       if (seenNotices.has(notice.id)) return;
       seenNotices.add(notice.id);
       if (seenNotices.size > 200) seenNotices.delete(seenNotices.values().next().value as number);
+    }
+    if (notice.kind === "sessions_closed") {
+      // Dit une seule fois par l'agent (HRT-133, BR-ACCT-019) : gardé jusqu'à ce que la personne le ferme.
+      if (notice.serverId && notice.by && notice.at) {
+        closedNotices.value = {
+          ...closedNotices.value,
+          [notice.serverId]: { by: notice.by, at: notice.at },
+        };
+      }
+      return;
     }
     const name = notice.serverId ? (servers.byId(notice.serverId)?.name ?? notice.serverId) : "";
     toasts.push({ kind: "warn", message: t("bridge.operationsLost", { server: name }) });
@@ -304,6 +326,7 @@ export const useLinkStore = defineStore("link", () => {
     operations.value = {};
     alerts.value = {};
     dismissed.value = {};
+    closedNotices.value = {};
     failureSteps.clear();
   }
 
@@ -313,6 +336,8 @@ export const useLinkStore = defineStore("link", () => {
     subscriptionFailed,
     listening,
     alerts,
+    closedNoticeOf,
+    dismissClosedNotice,
     pendingAlert,
     dismissAlert,
     reopenAlert,

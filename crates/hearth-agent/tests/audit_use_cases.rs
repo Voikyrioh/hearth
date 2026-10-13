@@ -136,7 +136,10 @@ async fn account_management_writes_one_entry_per_action_with_who_where_and_what(
                 "sessions.revoke".into(),
                 "ok".into(),
                 root.clone(),
-                Some("paul".into())
+                Some(
+                    "paul : 0 sessions fermées (compte visé : ne peut pas gérer les services)"
+                        .into()
+                )
             ),
             (
                 "account.delete".into(),

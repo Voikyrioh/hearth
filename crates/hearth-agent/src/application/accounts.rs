@@ -24,8 +24,8 @@ use crate::domain::audit::{Actor, AuditAction, AuditEvent, Outcome, Target};
 use crate::domain::known_address::canonical;
 use crate::domain::secret::Secret;
 use crate::domain::sessions::{
-    PasswordChange, SessionId, closure_on_account_deletion, closure_on_password_change,
-    closure_on_revocation, is_open,
+    PasswordChange, SessionId, TrustAfterRevocation, closure_on_account_deletion,
+    closure_on_password_change, is_open, notice_for, plan_revocation,
 };
 
 #[derive(Debug, Error)]
@@ -479,29 +479,63 @@ impl AccountService {
         Ok(closed)
     }
 
-    /// BR-ACCT-011 : ferme toutes les sessions du compte sans toucher au mot de passe.
+    /// BR-ACCT-011 : ferme toutes les sessions du compte sans toucher au mot de passe, avec l'autorité du
+    /// serveur (ligne de commande) : postes de confiance et adresses retenues oubliés.
     /// Rend le nombre de sessions fermées.
     pub async fn revoke_sessions(&self, id: &AccountId, by: &Actor) -> Result<u64, AccountError> {
+        self.revoke_sessions_as(id, by, &Authority::Server, None)
+            .await
+    }
+
+    /// BR-ACCT-011, BR-ACCT-017 à BR-ACCT-019 : ferme les sessions du compte pour le compte de `authority`.
+    /// Permis pour n'importe quel compte cible, titulaire du droit de gérer les services ou non ; ce que le
+    /// geste garde ou oublie est décidé par `plan_revocation` sur le droit lu dans cette transaction. Le
+    /// mot de passe n'est jamais touché. `current_session` : la session d'où agit le demandeur.
+    /// Rend le nombre de sessions fermées.
+    pub async fn revoke_sessions_as(
+        &self,
+        id: &AccountId,
+        by: &Actor,
+        authority: &Authority,
+        current_session: Option<&SessionId>,
+    ) -> Result<u64, AccountError> {
         let mut tx = self.store.begin().await?;
         let account = tx
             .accounts()
             .find(id)
             .await?
             .ok_or(AccountError::NotFound)?;
-        let closed = tx
-            .sessions()
-            .close(id, &closure_on_revocation(), self.clock.now())
-            .await?;
-        // Sessions fermées par l'administration : les postes de confiance et les adresses connues
-        // du compte sont oubliés (ADR-0022, ADR-0023) : « fermer les sessions » est le geste pour un
-        // poste volé.
-        tx.devices().forget_all(id).await?;
-        tx.known_addresses().forget(id).await?;
+        let now = self.clock.now();
+        let plan = plan_revocation(authority, id, account.services_right, current_session);
+        let closed = tx.sessions().close(id, &plan.closure, now).await?;
+        match plan.trust {
+            // Sessions fermées par l'administration : les postes de confiance et les adresses connues
+            // du compte sont oubliés (ADR-0022, ADR-0023) : « fermer les sessions » est le geste pour un
+            // poste volé.
+            TrustAfterRevocation::ForgetAll => {
+                tx.devices().forget_all(id).await?;
+                tx.known_addresses().forget(id).await?;
+            }
+            TrustAfterRevocation::ForgetWithoutDevice => {
+                tx.known_addresses().forget_without_device(id).await?;
+            }
+            // BR-ACCT-018 : un administrateur sans le droit ferme les sessions d'un titulaire et rien
+            // d'autre.
+            TrustAfterRevocation::Keep => {}
+        }
+        if let Some(notice) = notice_for(authority, by.account.as_ref(), id, closed, now) {
+            tx.sessions().leave_closure_notice(id, &notice).await?;
+        }
         let mut journal = Pending::default();
         let event = self.succeeded(
             by,
             AuditAction::SessionsRevoke,
-            Target::Account(account.username.clone()),
+            Target::SessionsClosed {
+                account: account.username.clone(),
+                closed,
+                target_holder: account.services_right.can_manage_services(),
+                author_holder: authority.holds_services_right(),
+            },
         );
         journal.record(&mut *tx, event).await?;
         tx.commit().await?;

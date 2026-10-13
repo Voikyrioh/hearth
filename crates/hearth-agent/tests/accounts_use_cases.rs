@@ -652,3 +652,74 @@ async fn the_date_returned_by_create_is_the_one_read_back_by_find() {
     assert_eq!(created.created_at, found.created_at);
     assert_eq!(created.password_changed_at, found.password_changed_at);
 }
+
+/// BR-ACCT-019 : l'avis de fermeture n'existe qu'en un exemplaire par compte (le plus récent), jamais pour
+/// zéro session, jamais pour soi-même ni pour la ligne de commande, et disparaît avec le compte.
+#[tokio::test]
+async fn the_closure_notice_keeps_the_latest_author_only_and_goes_with_the_account() {
+    use hearth_agent::domain::accounts::ServicesRight;
+    use hearth_agent::domain::audit::{Actor, Origin};
+
+    let env = env().await;
+    let marie = env.create("marie", Role::Admin).await;
+    let paul = env.create("paul", Role::Admin).await;
+    let lea = env.create("lea", Role::Admin).await;
+    let as_net = |who: &hearth_agent::application::accounts::AccountView| {
+        (
+            Actor::new(
+                Some(who.username.clone()),
+                Origin::client(Some("poste"), "10.0.0.9"),
+            ),
+            Authority::Network {
+                account: who.id.clone(),
+                right: ServicesRight::None,
+            },
+        )
+    };
+    let notices = || async {
+        sqlx::query_as::<_, (String,)>("SELECT closed_by FROM session_closure_notices")
+            .fetch_all(env.db.pool())
+            .await
+            .unwrap()
+    };
+    // Zéro session fermée : aucun avis.
+    let (actor, authority) = as_net(&paul);
+    env.service
+        .revoke_sessions_as(&marie.id, &actor, &authority, None)
+        .await
+        .unwrap();
+    assert!(notices().await.is_empty());
+    // La ligne de commande n'a pas d'identifiant : aucun avis.
+    env.insert_session(&marie.id, "S1", Duration::hours(1))
+        .await;
+    env.service.revoke_sessions(&marie.id, by()).await.unwrap();
+    assert!(notices().await.is_empty());
+    // Deux fermetures : seul le dernier auteur reste.
+    env.insert_session(&marie.id, "S2", Duration::hours(1))
+        .await;
+    env.service
+        .revoke_sessions_as(&marie.id, &actor, &authority, None)
+        .await
+        .unwrap();
+    env.insert_session(&marie.id, "S3", Duration::hours(1))
+        .await;
+    let (actor, authority) = as_net(&lea);
+    env.service
+        .revoke_sessions_as(&marie.id, &actor, &authority, None)
+        .await
+        .unwrap();
+    assert_eq!(notices().await, [("lea".to_owned(),)]);
+    // Soi-même : pas d'avis.
+    env.insert_session(&lea.id, "S4", Duration::hours(1)).await;
+    env.service
+        .revoke_sessions_as(&lea.id, &actor, &authority, Some(&SessionId::new("S4")))
+        .await
+        .unwrap();
+    assert_eq!(notices().await.len(), 1);
+    // L'avis part avec le compte.
+    env.service
+        .delete(&marie.id, None, None, by())
+        .await
+        .unwrap();
+    assert!(notices().await.is_empty());
+}

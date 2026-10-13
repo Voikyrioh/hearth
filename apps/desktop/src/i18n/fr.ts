@@ -261,6 +261,12 @@ export const fr = {
     sessionsTitle: "Fermer les sessions de {username} ?",
     sessionsMessage: "{username} devra se reconnecter sur chacun de ses postes.",
     sessionsApply: "Fermer les sessions",
+    sessionsHolderNote:
+      "Ce compte peut gérer les services. Il devra se reconnecter ; ses postes de confiance sont gardés.",
+  },
+  sessionsClosed: {
+    banner: "Tes sessions ont été fermées par {username} le {date}.",
+    dismiss: "Fermer l'information",
   },
   common: {
     comingSoon: "Bientôt disponible",

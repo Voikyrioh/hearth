@@ -51,7 +51,11 @@ Corps : `{ "password": "…" }`. `200` : `{ "sessions_closed": n }`. Toutes les 
 
 ## `DELETE /api/v1/accounts/{id}/sessions` (admin)
 
-Ferme toutes les sessions du compte sans toucher à son mot de passe (BR-ACCT-011). `200` : `{ "sessions_closed": n }`. Erreur : `NOT_FOUND`.
+Ferme toutes les sessions du compte sans toucher à son mot de passe (BR-ACCT-011), y compris celles d'un compte qui peut gérer les services, que l'appelant ait ce droit ou non (BR-ACCT-017). `200` : `{ "sessions_closed": n }`. Erreur : `NOT_FOUND`. Acte d'administration confirmé (signé par l'identifiant de la cible, inchangé).
+
+- Appelant **sans** le droit, cible **avec** : ferme les sessions et rien d'autre (mot de passe, postes de confiance, adresses retenues et droit gardés, BR-ACCT-018). Autres cas : toutes les sessions, postes et adresses oubliés, comme avant.
+- Cible = l'appelant : sa session courante est gardée, ses postes à clé aussi (BR-ACCT-018, BR-ACCT-009).
+- Journal : cible « ada : 2 sessions fermées (compte visé : peut gérer les services ; auteur : ne peut pas gérer les services) » (BR-ACCT-019). Le compte visé reçoit une fois, dans la réponse de sa connexion suivante, `sessions_closed` (voir [sessions](./sessions.md)).
 
 ## `PUT /api/v1/me/password` (tout rôle)
 

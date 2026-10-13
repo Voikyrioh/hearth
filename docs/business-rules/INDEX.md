@@ -74,6 +74,9 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 - [BR-ACCT-014](./BR-ACCT-014-serveur-refuse-gestion-lecture-seule.md) — Le serveur refuse la gestion de comptes à un compte lecture seule  — `domain/accounts/role.rs::Role::can_manage_accounts` — ✓
 - [BR-ACCT-015](./BR-ACCT-015-gestion-en-ligne-de-commande.md) — Gestion de comptes en ligne de commande sur le serveur — `entrypoint/account.rs::execute` — —
 - [BR-ACCT-016](./BR-ACCT-016-changements-consignes-au-journal.md) — Changements de compte consignés au journal — `application/accounts.rs::AccountService`, `domain/audit/policy.rs::is_journaled` — ✓
+- [BR-ACCT-017](./BR-ACCT-017-fermer-les-sessions-de-tout-compte.md) — Un administrateur ferme les sessions de n'importe quel compte, titulaire du droit ou non — `domain/sessions.rs::plan_revocation` — —
+- [BR-ACCT-018](./BR-ACCT-018-fermer-les-sessions-d-un-titulaire-ne-touche-a-rien-d-autre.md) — Fermer les sessions d'un titulaire sans le droit : sessions seulement — `domain/sessions.rs::plan_revocation` — invariant ✓
+- [BR-ACCT-019](./BR-ACCT-019-journal-et-avis-de-fermeture-des-sessions.md) — Journal (droit de chacun, nombre) et avis une fois au compte visé — `domain/sessions.rs::notice_for` — —
 - [BR-AUDIT-001](./BR-AUDIT-001-controle-acces-journal.md) — Seul un administrateur lit le journal — `domain/audit/policy.rs::can_read_journal` — invariant ✓
 - [BR-AUDIT-002](./BR-AUDIT-002-structure-entree.md) — Chaque entrée dit quand, qui, d'où, quoi, sur quoi et avec quel résultat — `domain/audit/event.rs::{AuditEvent, Actor, Origin, Target, Outcome, Reason, AuditRecord}` — —
 - [BR-AUDIT-003](./BR-AUDIT-003-evenements-journalises.md) — Connexions, refus, déconnexions, modifications et refus faute de droits sont journalisés — `domain/audit/policy.rs::is_journaled` — —

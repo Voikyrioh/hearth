@@ -96,6 +96,8 @@ struct Script {
     login_in_flight: AtomicBool,
     /// Rôle que le serveur donne au compte à la prochaine connexion.
     next_role: Mutex<RoleName>,
+    /// Avis de fermeture des sessions que l'agent joint à la prochaine connexion, une seule fois (HRT-133).
+    next_notice: Mutex<Option<hearth_proto::api::sessions::SessionsClosedNotice>>,
     /// Si posé : `logout` attend d'être relâché (déconnexion en vol).
     logout_hold: AtomicBool,
     logout_in_flight: AtomicBool,
@@ -128,6 +130,7 @@ impl Script {
             login_hold: AtomicBool::new(false),
             login_in_flight: AtomicBool::new(false),
             next_role: Mutex::new(RoleName::Admin),
+            next_notice: Mutex::new(None),
             logout_hold: AtomicBool::new(false),
             logout_in_flight: AtomicBool::new(false),
             logouts: AtomicUsize::new(0),
@@ -197,6 +200,7 @@ impl Transport for Mock {
                 role: *self.0.next_role.lock().unwrap(),
                 rights: Vec::new(),
             },
+            sessions_closed: self.0.next_notice.lock().unwrap().take(),
         })
     }
 
@@ -1652,4 +1656,64 @@ async fn an_action_that_keeps_its_session_completes_and_the_link_stays_connected
         .unwrap();
     assert!(is_done(&outcome));
     assert_eq!(rig.manager.state(&id).unwrap().state, LinkState::Connected);
+}
+
+// ── Avis de fermeture des sessions (HRT-133, BR-ACCT-019) ────────────────────────────────────
+
+fn closure_notice() -> hearth_proto::api::sessions::SessionsClosedNotice {
+    hearth_proto::api::sessions::SessionsClosedNotice {
+        by: "paul".into(),
+        at: "2026-10-13T20:00:00.000Z".into(),
+    }
+}
+
+async fn closed_notice_in(events: &mut hearth_link::EventStream) -> (String, String) {
+    tokio::time::timeout(GUARD, async {
+        loop {
+            match events.recv().await {
+                Some(Event::SessionsClosed { by, at, .. }) => return (by, at),
+                Some(_) => {}
+                None => panic!("flux d'événements fermé"),
+            }
+        }
+    })
+    .await
+    .expect("l'avis de fermeture est annoncé")
+}
+
+#[tokio::test]
+async fn a_silent_reconnection_announces_who_closed_the_sessions_once() {
+    let (rig, id) = connected(Disk::Normal, true).await;
+    let mut events = rig.manager.subscribe();
+    *rig.script.next_notice.lock().unwrap() = Some(closure_notice());
+    rig.script.expire_next.store(true, Ordering::SeqCst);
+    let notice = closed_notice_in(&mut events).await;
+    assert_eq!(
+        notice,
+        ("paul".to_owned(), "2026-10-13T20:00:00.000Z".to_owned())
+    );
+    wait_state(&rig.manager, &id, LinkState::Connected).await;
+    // Une seule fois : la reconnexion suivante n'en porte plus.
+    rig.script.expire_next.store(true, Ordering::SeqCst);
+    let logins = rig.script.logins.load(Ordering::SeqCst);
+    wait_until("deuxième reconnexion", || {
+        rig.script.logins.load(Ordering::SeqCst) > logins
+    })
+    .await;
+    wait_state(&rig.manager, &id, LinkState::Connected).await;
+    while let Some(event) = events.try_recv() {
+        assert!(!matches!(event, Event::SessionsClosed { .. }), "{event:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_explicit_login_announces_who_closed_the_sessions() {
+    let (rig, id) = connected(Disk::Normal, true).await;
+    let mut events = rig.manager.subscribe();
+    *rig.script.next_notice.lock().unwrap() = Some(closure_notice());
+    rig.manager
+        .login(&id, "marie", Secret::from("Correct-Horse-9"), true)
+        .await
+        .unwrap();
+    assert_eq!(closed_notice_in(&mut events).await.0, "paul");
 }

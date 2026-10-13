@@ -65,6 +65,15 @@ const ownPassword = ref(false);
 const removing = ref<Account | null>(null);
 const roleChange = ref<{ account: Account; role: Role } | null>(null);
 const closing = ref<Account | null>(null);
+// HRT-133 (BR-ACCT-018) : quand le compte visé peut gérer les services et que toi non, fermer ses sessions ne
+// fait rien oublier (postes de confiance gardés) ; la fenêtre le dit dans ce cas seulement. Le droit de
+// chacun est celui que l'agent annonce (`rightsKnown`).
+const keepsTrustedDevices = computed(() => {
+  const target = closing.value;
+  if (!target || !entry.value?.rightsKnown || !target.managesServices) return false;
+  const me = accounts.value.find((account) => account.id === meId.value);
+  return me !== undefined && !me.managesServices && me.id !== target.id;
+});
 // Le détail d'un compte (HRT-78) : lecture seule, le droit de gérer les services s'y lit.
 const detail = ref<Account | null>(null);
 
@@ -202,6 +211,7 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
     @close="closing = null"
   >
     <p data-sessions-message>{{ t("reauth.sessionsMessage", { username: closing?.username ?? "" }) }}</p>
+    <p v-if="keepsTrustedDevices" data-sessions-holder-note>{{ t("reauth.sessionsHolderNote") }}</p>
   </AdminActDialog>
   <AdminActDialog
     :open="removing !== null"

@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use hearth_proto::api::accounts::AccountInfo;
 use hearth_proto::api::hello::HelloResponse;
-use hearth_proto::api::sessions::LoginResponse;
+use hearth_proto::api::sessions::{LoginResponse, SessionsClosedNotice};
 use hearth_proto::fingerprint::Fingerprint;
 use serde_json::Value;
 use tokio::sync::{OwnedMutexGuard, mpsc, oneshot, watch};
@@ -656,6 +656,21 @@ impl LinkManager {
         }
     }
 
+    /// Dit à l'interface, une fois, qui a fermé les sessions du compte (HRT-133, BR-ACCT-019) : l'agent ne
+    /// l'a écrit que dans la réponse de cette connexion, il ne le répétera pas.
+    fn announce_sessions_closed(&self, id: &ServerId, notice: Option<SessionsClosedNotice>) {
+        if let Some(notice) = notice {
+            self.inner
+                .deps
+                .sink
+                .emit(crate::domain::event::Event::SessionsClosed {
+                    server: id.clone(),
+                    by: notice.by,
+                    at: notice.at,
+                });
+        }
+    }
+
     /// Ferme au mieux une session qu'on vient d'obtenir et qu'on n'utilisera pas.
     async fn close_session(&self, target: &Target, token: &str) {
         let deps = &self.inner.deps;
@@ -758,6 +773,7 @@ impl LinkManager {
             })
             .await
             .map_err(|_| LinkError::Stopped)?;
+        self.announce_sessions_closed(&id, response.sessions_closed.take());
         Ok((
             id,
             LoginInfo {
@@ -894,6 +910,7 @@ impl LinkManager {
             .send(Command::LoggedIn { account_changed })
             .await
             .map_err(|_| LinkError::Stopped)?;
+        self.announce_sessions_closed(id, response.sessions_closed.take());
         Ok(LoginInfo {
             account: response.account.clone(),
             expires_at: response.expires_at.clone(),
@@ -1334,6 +1351,7 @@ mod tests {
                 role: hearth_proto::api::accounts::RoleName::Admin,
                 rights: Vec::new(),
             },
+            sessions_closed: None,
         };
         let secret = Secret::new(PASSWORD);
         let text = format!(

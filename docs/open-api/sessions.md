@@ -39,6 +39,7 @@ Toutes ces routes exigent l'en-tête `X-Hearth-Api: <n>` (BR-CONN-014) ; voir «
 
 - `device` (absent quand aucune clé n'a été prise en compte : pas de clé, preuve invalide, clé inscrite pour un autre compte) : `enrolled` (clé inscrite par cette connexion), `proven` (clé déjà inscrite, preuve valide), `limit` (le compte a déjà 8 postes : rien n'est inscrit, aucune éviction), `deferred` (preuve valide, inscription gelée pendant le mode attaque). Un client qui ne connaît pas le champ l'ignore.
 
+- `sessions_closed` (absent sauf une fois) : `{ "by": "paul", "at": "2026-10-13T18:30:00.000Z" }`, présent dans la réponse de la **première connexion qui suit** la fermeture des sessions du compte par un autre compte, puis jamais plus (BR-ACCT-019). Identifiant et date seulement, jamais d'adresse. Un client qui ne connaît pas le champ l'ignore.
 - `token` : 32 octets aléatoires du système, en hexadécimal minuscule. Rendu une seule fois. L'agent n'en garde que le SHA-256 (BR-RESIL-012). À envoyer en `Authorization: Bearer <token>`.
 - `expires_at` : fin de la session si elle reste inactive ; l'activité la repousse (30 jours glissants).
 - `account.role` : `admin` ou `readonly`.

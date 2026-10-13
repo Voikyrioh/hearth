@@ -674,7 +674,17 @@ impl Runner {
                 self.input(Input::FingerprintChanged).await;
             }
             AttemptResult::Incompatible(target) => self.input(Input::Incompatible(target)).await,
-            AttemptResult::Reauthenticated { role } => {
+            AttemptResult::Reauthenticated {
+                role,
+                sessions_closed,
+            } => {
+                if let Some(notice) = sessions_closed {
+                    self.deps.sink.emit(Event::SessionsClosed {
+                        server: self.id.clone(),
+                        by: notice.by,
+                        at: notice.at,
+                    });
+                }
                 let mut record = self.shared.record();
                 if record.role != Some(role) {
                     record.role = Some(role);

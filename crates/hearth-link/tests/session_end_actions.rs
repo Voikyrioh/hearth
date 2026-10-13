@@ -1,5 +1,5 @@
 //! Les actions qui terminent ou modifient leur propre session, contre un VRAI agent : fermer ses
-//! propres sessions, supprimer son compte, définir son mot de passe par la route d'administration,
+//! propres sessions (celle d'où l'on agit reste ouverte, HRT-133), supprimer son compte, définir son mot de passe par la route d'administration,
 //! changer son propre mot de passe (la session courante est gardée), se rétrograder. Dans chaque cas
 //! l'appelant reçoit le résultat de la RÉPONSE (jamais « résultat inconnu ») que l'avis de fin de
 //! session du flux arrive avant ou après elle ; l'ordre exact est prouvé de façon déterministe par
@@ -51,8 +51,11 @@ async fn session_ended(world: &World) {
 }
 
 #[tokio::test]
-async fn closing_your_own_sessions_returns_its_result_and_ends_the_session() {
+async fn closing_your_own_sessions_returns_its_result_and_keeps_the_session_you_act_from() {
+    // HRT-133 (BR-ACCT-019) : l'administrateur qui ferme ses propres sessions garde celle d'où il agit, comme
+    // quand il change son propre mot de passe : le lien reste connecté, rien ne dit « session terminée ».
     let (world, me) = world().await;
+    let mark = world.recorder.since(0).len();
     let outcome = run(
         &world,
         ActionRequest {
@@ -63,7 +66,16 @@ async fn closing_your_own_sessions_returns_its_result_and_ends_the_session() {
     )
     .await;
     assert_completed(&outcome);
-    session_ended(&world).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let states = world.recorder.states_since(mark);
+    assert!(
+        !states.contains(&LinkState::AccessRevoked) && !states.contains(&LinkState::SessionExpired),
+        "la session d'où part l'action reste ouverte : {states:?}"
+    );
+    assert!(
+        states.iter().all(|state| *state == LinkState::Connected),
+        "{states:?}"
+    );
 }
 
 #[tokio::test]

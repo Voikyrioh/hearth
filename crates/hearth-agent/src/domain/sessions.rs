@@ -6,7 +6,7 @@ use std::fmt;
 
 use time::{Duration, OffsetDateTime};
 
-use super::accounts::AccountId;
+use super::accounts::{AccountId, Authority, ServicesRight, Username};
 use super::session_token::TokenHash;
 
 /// Durée de vie d'une session sans activité (BR-RESIL-012).
@@ -135,6 +135,89 @@ pub fn closure_on_revocation() -> SessionClosure {
     SessionClosure::All
 }
 
+/// Ce que la fermeture des sessions d'un compte fait des postes de confiance et des adresses retenues.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustAfterRevocation {
+    /// Tout est oublié, postes et adresses : le geste pour un poste volé (ADR-0022, ADR-0023).
+    ForgetAll,
+    /// Les postes à clé restent, avec leur adresse ; les adresses apprises sans clé sont oubliées
+    /// (comme le changement de son propre mot de passe, BR-ACCT-009).
+    ForgetWithoutDevice,
+    /// Rien n'est oublié : le geste ne ferme que des sessions (BR-ACCT-018).
+    Keep,
+}
+
+/// Le plan d'une fermeture de sessions demandée : quelles sessions, et ce que deviennent postes et adresses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Revocation {
+    pub closure: SessionClosure,
+    pub trust: TrustAfterRevocation,
+}
+
+/// BR-ACCT-017 à BR-ACCT-019 : ce que fait la fermeture des sessions de `target` (qui a le droit
+/// `target_right`) demandée par `authority`.
+/// - Un administrateur SANS le droit ferme un compte qui l'a : les sessions, et rien d'autre (le mot de
+///   passe n'est de toute façon jamais touché ; ni les postes de confiance, ni les adresses retenues).
+/// - Un compte ferme ses propres sessions : celle d'où il agit reste ouverte, comme à BR-ACCT-009.
+/// - Tous les autres cas (ligne de commande du serveur, administrateur qui a le droit, cible sans le
+///   droit) gardent l'effet d'avant : toutes les sessions, postes et adresses oubliés.
+pub fn plan_revocation(
+    authority: &Authority,
+    target: &AccountId,
+    target_right: ServicesRight,
+    current_session: Option<&SessionId>,
+) -> Revocation {
+    let everything = Revocation {
+        closure: closure_on_revocation(),
+        trust: TrustAfterRevocation::ForgetAll,
+    };
+    let Authority::Network { account, right } = authority else {
+        return everything;
+    };
+    if account == target {
+        return match current_session {
+            Some(current) => Revocation {
+                closure: SessionClosure::AllExcept(current.clone()),
+                trust: TrustAfterRevocation::ForgetWithoutDevice,
+            },
+            None => everything,
+        };
+    }
+    if target_right.can_manage_services() && !right.can_manage_services() {
+        return Revocation {
+            closure: closure_on_revocation(),
+            trust: TrustAfterRevocation::Keep,
+        };
+    }
+    everything
+}
+
+/// BR-ACCT-019 : ce que le compte dont les sessions ont été fermées lit, une fois, à sa connexion suivante.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClosureNotice {
+    /// L'identifiant de l'administrateur qui a fermé les sessions.
+    pub by: Username,
+    pub at: OffsetDateTime,
+}
+
+/// BR-ACCT-019 : un avis n'est laissé que si un AUTRE compte a fermé au moins une session par le réseau
+/// (jamais pour soi-même, jamais pour la ligne de commande qui n'a pas d'identifiant, jamais pour zéro session).
+pub fn notice_for(
+    authority: &Authority,
+    by: Option<&Username>,
+    target: &AccountId,
+    closed: u64,
+    at: OffsetDateTime,
+) -> Option<ClosureNotice> {
+    let Authority::Network { account, .. } = authority else {
+        return None;
+    };
+    if account == target || closed == 0 {
+        return None;
+    }
+    by.map(|by| ClosureNotice { by: by.clone(), at })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +260,99 @@ mod tests {
                 current_session: None
             }),
             SessionClosure::All
+        );
+    }
+
+    fn network(account: &str, right: ServicesRight) -> Authority {
+        Authority::Network {
+            account: AccountId::new(account),
+            right,
+        }
+    }
+
+    #[test]
+    fn an_administrator_without_the_right_closes_a_holder_and_nothing_else() {
+        let plan = plan_revocation(
+            &network("ADMIN", ServicesRight::None),
+            &AccountId::new("HOLDER"),
+            ServicesRight::Manage,
+            Some(&SessionId::new("S1")),
+        );
+        assert_eq!(plan.closure, SessionClosure::All);
+        assert_eq!(plan.trust, TrustAfterRevocation::Keep);
+    }
+
+    #[test]
+    fn every_other_case_keeps_the_effect_it_had_before() {
+        let target = AccountId::new("T");
+        let everything = Revocation {
+            closure: SessionClosure::All,
+            trust: TrustAfterRevocation::ForgetAll,
+        };
+        // La ligne de commande, même sur un titulaire.
+        assert_eq!(
+            plan_revocation(&Authority::Server, &target, ServicesRight::Manage, None),
+            everything
+        );
+        // Un administrateur qui a le droit, sur un titulaire.
+        assert_eq!(
+            plan_revocation(
+                &network("ADMIN", ServicesRight::Manage),
+                &target,
+                ServicesRight::Manage,
+                None
+            ),
+            everything
+        );
+        // Un administrateur sans le droit, sur un compte sans le droit.
+        assert_eq!(
+            plan_revocation(
+                &network("ADMIN", ServicesRight::None),
+                &target,
+                ServicesRight::None,
+                None
+            ),
+            everything
+        );
+    }
+
+    #[test]
+    fn closing_ones_own_sessions_keeps_the_current_one() {
+        let me = AccountId::new("ME");
+        let plan = plan_revocation(
+            &network("ME", ServicesRight::None),
+            &me,
+            ServicesRight::None,
+            Some(&SessionId::new("S1")),
+        );
+        assert_eq!(
+            plan.closure,
+            SessionClosure::AllExcept(SessionId::new("S1"))
+        );
+        assert_eq!(plan.trust, TrustAfterRevocation::ForgetWithoutDevice);
+    }
+
+    #[test]
+    fn a_notice_is_left_only_when_another_account_closed_a_session_over_the_network() {
+        let at = now();
+        let by = Username::parse("admin").unwrap();
+        let target = AccountId::new("T");
+        let net = network("ADMIN", ServicesRight::None);
+        assert_eq!(
+            notice_for(&net, Some(&by), &target, 2, at),
+            Some(ClosureNotice { by: by.clone(), at })
+        );
+        assert_eq!(notice_for(&net, Some(&by), &target, 0, at), None);
+        assert_eq!(notice_for(&Authority::Server, None, &target, 2, at), None);
+        assert_eq!(
+            notice_for(
+                &network("T", ServicesRight::None),
+                Some(&by),
+                &target,
+                2,
+                at
+            ),
+            None
         );
     }
 

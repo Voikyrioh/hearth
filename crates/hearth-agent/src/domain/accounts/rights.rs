@@ -75,6 +75,15 @@ pub enum Authority {
 }
 
 impl Authority {
+    /// Cette autorité a-t-elle le droit de gérer les services ? `None` pour le serveur, qui n'est pas un
+    /// compte (le journal ne l'écrit pas, HRT-133, BR-ACCT-019).
+    pub fn holds_services_right(&self) -> Option<bool> {
+        match self {
+            Authority::Server => None,
+            Authority::Network { right, .. } => Some(right.can_manage_services()),
+        }
+    }
+
     /// Cette autorité peut-elle modifier les moyens de connexion du compte `target`, qui a le droit
     /// `target_right` ? Toujours oui si la cible n'a pas le droit (aucun changement par rapport à
     /// avant le droit) ; sinon le serveur, la cible elle-même, ou un compte qui a le droit.

@@ -781,7 +781,7 @@ mod tests {
             "DELETE",
             "/accounts/{id}/sessions",
             Admin(
-                "sans danger : ferme des sessions et oublie des postes de confiance, n'ajoute aucun moyen de connexion ; un poste ne s'inscrit qu'à la connexion, avec le mot de passe du titulaire",
+                "sans danger : ferme des sessions, n'ajoute aucun moyen de connexion et, sur un titulaire par un administrateur sans le droit, ne touche ni à ses postes de confiance ni à ses adresses retenues (BR-ACCT-017, 018) ; un poste ne s'inscrit qu'à la connexion, avec le mot de passe du titulaire",
             ),
         ),
         ("GET", "/agent/update", Own),

@@ -129,16 +129,30 @@ pub async fn set_password(
     Ok(closed(count))
 }
 
-/// `DELETE /api/v1/accounts/{id}/sessions` : ferme toutes les sessions du compte (BR-ACCT-011).
+/// `DELETE /api/v1/accounts/{id}/sessions` : ferme toutes les sessions du compte (BR-ACCT-011), y compris
+/// celles d'un compte qui a le droit de gérer les services, que l'appelant l'ait ou non (BR-ACCT-017) : dans
+/// ce cas le geste ne ferme que des sessions (BR-ACCT-018). Un administrateur qui ferme ses propres
+/// sessions garde celle d'où il agit (BR-ACCT-019).
 pub async fn revoke_sessions(
     State(state): State<AppState>,
     _confirmed: Extension<Reauthenticated>,
+    Caller(caller): Caller,
     Requester(by): Requester,
     Path(id): Path<String>,
 ) -> Result<Json<SessionsClosedResponse>, ApiError> {
+    // Une demande reçue du réseau n'a que l'autorité de son compte, relu à cette requête.
+    let authority = Authority::Network {
+        account: caller.account.id.clone(),
+        right: caller.account.services_right,
+    };
     let count = state
         .accounts
-        .revoke_sessions(&AccountId::new(id), &by)
+        .revoke_sessions_as(
+            &AccountId::new(id),
+            &by,
+            &authority,
+            Some(&caller.session_id),
+        )
         .await?;
     Ok(closed(count))
 }

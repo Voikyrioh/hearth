@@ -40,7 +40,9 @@ use crate::domain::login_policy::{
 };
 use crate::domain::secret::Secret;
 use crate::domain::session_token::SessionToken;
-use crate::domain::sessions::{Session, SessionEnd, SessionId, check, expiry_from, renewed_expiry};
+use crate::domain::sessions::{
+    ClosureNotice, Session, SessionEnd, SessionId, check, expiry_from, renewed_expiry,
+};
 use crate::domain::trust::DeviceId;
 use crate::domain::trust::admin_act::covered_by_elevation;
 use crate::domain::trust::attack_mode::{Effective, EndHow};
@@ -66,6 +68,9 @@ pub struct LoginOutcome {
     /// Ce que la connexion a fait de la clé d'appareil présentée (HRT-22) ; `None` : aucune clé
     /// prise en compte (pas de clé, preuve invalide, clé d'un autre compte).
     pub device: Option<DeviceStatus>,
+    /// L'avis laissé par la fermeture des sessions de ce compte par un autre compte, livré UNE fois, dans la
+    /// transaction de cette connexion (HRT-133, BR-ACCT-019).
+    pub closure_notice: Option<ClosureNotice>,
 }
 
 /// Pourquoi on passe par le chemin de la connexion : ouvrir une session, ou seulement confirmer le
@@ -950,6 +955,7 @@ impl SessionService {
             expires_at: expiry_from(now),
         };
         tx.sessions().insert(&session).await?;
+        let closure_notice = tx.sessions().take_closure_notice(&account.id).await?;
         tx.accounts().record_login(&account.id, now).await?;
         let succeeded = AuditEvent::new(
             now,
@@ -993,6 +999,7 @@ impl SessionService {
             expires_at: session.expires_at,
             account: view,
             device: device_status,
+            closure_notice,
         })
     }
 

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM session_closure_notices WHERE account_id = ?\n             RETURNING closed_by AS \"closed_by!: String\", closed_at AS \"closed_at!: String\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "closed_by!: String",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_closure_notices",
+            "name": "closed_by"
+          }
+        }
+      },
+      {
+        "name": "closed_at!: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "session_closure_notices",
+            "name": "closed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "be00651a3a3b7f33b8677f0215804f6b952f64f0cf8e1cc13b3210d00a9b9eac"
+}

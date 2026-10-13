@@ -110,13 +110,18 @@ impl PendingBook {
         self.lock().notices.clone()
     }
 
-    /// Numéro de l'avis retenu pour ce serveur (0 si aucun) : le signal en direct porte le même.
-    pub fn notice_id(&self, server: &str) -> u32 {
+    /// Numéro de l'avis de ce genre retenu pour ce serveur (0 si aucun) : le signal en direct porte le même.
+    pub fn notice_id(&self, server: &str, kind: NoticeKind) -> u32 {
+        self.notice_of(server, kind).map_or(0, |notice| notice.id)
+    }
+
+    /// L'avis de ce genre retenu pour ce serveur, le plus récent.
+    pub fn notice_of(&self, server: &str, kind: NoticeKind) -> Option<NoticeEvent> {
         self.lock()
             .notices
             .iter()
-            .rfind(|notice| notice.server_id.as_deref() == Some(server))
-            .map_or(0, |notice| notice.id)
+            .rfind(|notice| notice.kind == kind && notice.server_id.as_deref() == Some(server))
+            .cloned()
     }
 
     pub fn ack_notices(&self, ids: &[u32]) {
@@ -168,11 +173,10 @@ impl EventSink for PendingBook {
             Event::OperationsLost { server } => {
                 let mut pending = self.lock();
                 let name = server.to_string();
-                if !pending
-                    .notices
-                    .iter()
-                    .any(|notice| notice.server_id.as_deref() == Some(name.as_str()))
-                {
+                if !pending.notices.iter().any(|notice| {
+                    notice.kind == NoticeKind::OperationsLost
+                        && notice.server_id.as_deref() == Some(name.as_str())
+                }) {
                     pending.next_notice = pending.next_notice.wrapping_add(1).max(1);
                     let id = pending.next_notice;
                     if pending.notices.len() >= MAX_RETAINED {
@@ -182,8 +186,32 @@ impl EventSink for PendingBook {
                         id,
                         kind: NoticeKind::OperationsLost,
                         server_id: Some(name),
+                        by: None,
+                        at: None,
                     });
                 }
+            }
+            // HRT-133 : retenu jusqu'à son acquittement (la fenêtre a pu ne pas écouter à ce moment), un seul
+            // par serveur, le plus récent.
+            Event::SessionsClosed { server, by, at } => {
+                let mut pending = self.lock();
+                let name = server.to_string();
+                pending.notices.retain(|notice| {
+                    !(notice.kind == NoticeKind::SessionsClosed
+                        && notice.server_id.as_deref() == Some(name.as_str()))
+                });
+                pending.next_notice = pending.next_notice.wrapping_add(1).max(1);
+                let id = pending.next_notice;
+                if pending.notices.len() >= MAX_RETAINED {
+                    pending.notices.remove(0);
+                }
+                pending.notices.push(NoticeEvent {
+                    id,
+                    kind: NoticeKind::SessionsClosed,
+                    server_id: Some(name),
+                    by: Some(by),
+                    at: Some(at),
+                });
             }
             Event::Operation {
                 server,
@@ -785,11 +813,29 @@ impl LinkRuntime {
                 sink,
                 events::NOTICE,
                 &NoticeEvent {
-                    id: self.pending.notice_id(server.as_str()),
+                    id: self
+                        .pending
+                        .notice_id(server.as_str(), NoticeKind::OperationsLost),
                     kind: NoticeKind::OperationsLost,
                     server_id: Some(server.to_string()),
+                    by: None,
+                    at: None,
                 },
             ),
+            // L'avis retenu par `PendingBook` (même numéro, rejoué à l'abonnement s'il n'est pas acquitté).
+            Event::SessionsClosed { server, by, at } => {
+                let notice = self
+                    .pending
+                    .notice_of(server.as_str(), NoticeKind::SessionsClosed)
+                    .unwrap_or(NoticeEvent {
+                        id: 0,
+                        kind: NoticeKind::SessionsClosed,
+                        server_id: Some(server.to_string()),
+                        by: Some(by),
+                        at: Some(at),
+                    });
+                send(sink, events::NOTICE, &notice);
+            }
             Event::Lagged { .. } => {
                 // Des entrées du journal ont pu être perdues : la page relit la tête (HRT-14).
                 send(sink, crate::audit::GAP_EVENT, &serde_json::json!({}));
@@ -800,6 +846,8 @@ impl LinkRuntime {
                         id: 0,
                         kind: NoticeKind::Lagged,
                         server_id: None,
+                        by: None,
+                        at: None,
                     },
                 );
                 // Des signaux ont pu être perdus : on réannonce tout l'état courant, états des

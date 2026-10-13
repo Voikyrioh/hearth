@@ -397,7 +397,10 @@ async fn every_command_is_journaled_with_the_command_line_origin_and_no_secret()
             ("account.create", Some("paul")),
             ("account.role", Some("paul (Administrateur)")),
             ("account.password", Some("paul")),
-            ("sessions.revoke", Some("paul")),
+            (
+                "sessions.revoke",
+                Some("paul : 0 sessions fermées (compte visé : ne peut pas gérer les services)")
+            ),
             ("account.delete", Some("paul")),
         ]
     );

@@ -95,9 +95,13 @@ export interface FingerprintChange {
 export interface LinkNotice {
   /** Numéro de l'avis retenu par la coquille (acquittement, dédoublonnage) ; 0 : non retenu. */
   id: number;
-  /** Les suivis d'actions étaient illisibles / l'écoute a pris du retard. */
-  kind: "operations_lost" | "lagged";
+  /** Les suivis d'actions étaient illisibles / l'écoute a pris du retard / un autre compte a fermé tes sessions. */
+  kind: "operations_lost" | "lagged" | "sessions_closed";
   serverId: string | null;
+  /** `sessions_closed` : l'identifiant de l'administrateur qui a fermé les sessions. */
+  by?: string | null;
+  /** `sessions_closed` : quand (RFC 3339, UTC). */
+  at?: string | null;
 }
 
 /** Première prise de contact : l'empreinte à faire confirmer. */
