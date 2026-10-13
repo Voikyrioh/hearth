@@ -333,13 +333,18 @@ async fn the_engine_state_changes_in_time_and_never_flickers() {
             engine.set_probe(ready_probe());
         }
     });
+    // BR-ENGINE-013 vise les changements d'ÉTAT : un message qui porte le moteur sans que l'état
+    // change (la marque de fraîcheur de la liste, par exemple) n'est pas un changement.
+    let mut shown = snapshot.engine.state;
     let mut changes = Vec::new();
     let started = Instant::now();
     while started.elapsed() < Duration::from_millis(1_200) {
         if let Some(ServicesMessage::ServicesDelta(delta)) =
             client.try_next_services(Duration::from_millis(100)).await
             && let Some(engine) = delta.engine
+            && engine.state != shown
         {
+            shown = engine.state;
             changes.push((started.elapsed(), engine.state));
         }
     }
