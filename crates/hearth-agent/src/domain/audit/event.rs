@@ -189,6 +189,10 @@ pub enum Target {
     /// Un service de conteneurs, par son nom (nettoyé et borné comme un nom de poste) : jamais le nom
     /// ni la valeur d'une de ses variables (HRT-63).
     Service(ClientName),
+    /// Un service adopté ou rendu, par son nom et l'unité du système qui le lance s'il en a une (HRT-80,
+    /// BR-ADOPT-019) : ce sont les SEULS détails d'un conteneur que le journal écrit, et seulement au
+    /// moment où l'acte réussit (le nom devient visible de tous à l'adoption, pas avant).
+    ServiceUnit(ClientName, Option<ClientName>),
 }
 
 /// Le moment de l'épisode d'alerte que l'entrée consigne.
@@ -214,6 +218,10 @@ impl Target {
             Self::Trial(TrialKind::Address) => Some("essai sur l'adresse retenue".to_owned()),
             Self::Trial(TrialKind::Key) => Some("essai sur la clé du poste".to_owned()),
             Self::Service(name) => Some(format!("service {}", name.as_str())),
+            Self::ServiceUnit(name, None) => Some(format!("service {}", name.as_str())),
+            Self::ServiceUnit(name, Some(unit)) => {
+                Some(format!("service {} ({})", name.as_str(), unit.as_str()))
+            }
         }
     }
 }
@@ -272,6 +280,11 @@ pub enum Reason {
     ProofInvalid,
     /// Le mot de passe manque et l'élévation ne couvre pas l'acte (HRT-28).
     PasswordRequired,
+    /// Le service est déjà adopté (HRT-80, BR-ADOPT-019).
+    AlreadyAdopted,
+    /// Aucun conteneur de cette clé : disparu depuis la liste, ou jamais existé (HRT-80, BR-ADOPT-019). Le
+    /// journal ne distingue pas non plus l'un de l'autre.
+    ServiceNotFound,
 }
 
 impl Reason {
@@ -317,6 +330,8 @@ impl Reason {
             Self::ProofMissing => "preuve de clé absente".to_owned(),
             Self::ProofInvalid => "preuve de clé invalide".to_owned(),
             Self::PasswordRequired => "mot de passe requis".to_owned(),
+            Self::AlreadyAdopted => "déjà adopté".to_owned(),
+            Self::ServiceNotFound => "service introuvable".to_owned(),
         }
     }
 }

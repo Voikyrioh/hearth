@@ -227,6 +227,10 @@ pub enum LogsErrorCode {
     ServiceNotFound,
     /// Le moteur ne répond pas ou n'est pas prêt (BR-SLOG-016).
     EngineUnavailable,
+    /// Le service est adopté et ce compte n'a pas le droit de gérer les services : refus explicite
+    /// (BR-SLOG-018, BR-SLOG-024, BR-GRANT-004). Jamais rendu pour un conteneur non adopté ni pour une clé
+    /// inconnue, qui reçoivent `SERVICE_NOT_FOUND` : le service refusé est déjà dans la liste de ce compte.
+    MissingRight,
     /// Jeton refusé, ou premier message qui n'est pas `auth`.
     Unauthenticated,
     /// Message illisible, ou `open` attendu et absent.
@@ -371,6 +375,7 @@ mod tests {
             (LogsErrorCode::LogsUnreadable, "LOGS_UNREADABLE"),
             (LogsErrorCode::ServiceNotFound, "SERVICE_NOT_FOUND"),
             (LogsErrorCode::EngineUnavailable, "ENGINE_UNAVAILABLE"),
+            (LogsErrorCode::MissingRight, "MISSING_RIGHT"),
         ] {
             assert_eq!(serde_json::to_value(code).unwrap(), json!(text));
         }

@@ -15,8 +15,9 @@ use hearth_proto::admin_act::{ActKind, AdminAct};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
 use serde_json::{Value, json};
-use support::api::{Api, Reply, state_with};
+use support::api::{Api, Reply, state_with_engine};
 use support::device::{DeviceKey, device_login_body, login_token, reauth_member};
+use support::fake_engine::{FakeEngine, container};
 use support::update::Rig;
 use support::{Env, PASSWORD, by, env};
 use time::Duration;
@@ -32,15 +33,42 @@ const BINARY: &[u8] = b"nouvel agent";
 /// Un acte d'administration complet, possédé : de quoi bâtir la requête et l'acte que le client signe.
 #[derive(Clone, Debug)]
 enum Spec {
-    Create { username: String, role: RoleName },
-    Role { target: String, role: RoleName },
-    Password { target: String },
-    Delete { target: String },
-    Revoke { target: String },
-    Update { version: String, body: Value },
-    Attack { enable: bool },
+    Create {
+        username: String,
+        role: RoleName,
+    },
+    Role {
+        target: String,
+        role: RoleName,
+    },
+    Password {
+        target: String,
+    },
+    Delete {
+        target: String,
+    },
+    Revoke {
+        target: String,
+    },
+    Update {
+        version: String,
+        body: Value,
+    },
+    Attack {
+        enable: bool,
+    },
     Own,
-    Setting { mode: ReauthMode },
+    Setting {
+        mode: ReauthMode,
+    },
+    /// Adopter ces conteneurs, par leur clé (HRT-80).
+    Adopt {
+        keys: Vec<String>,
+    },
+    /// Rendre ce service adopté à l'état non géré (HRT-80).
+    Release {
+        key: String,
+    },
 }
 
 fn role_wire(role: RoleName) -> &'static str {
@@ -71,6 +99,10 @@ impl Spec {
             Self::Attack { enable } => AdminAct::AttackMode { enable: *enable },
             Self::Own => AdminAct::AccountPasswordOwn,
             Self::Setting { mode } => AdminAct::ReauthSetting { mode: *mode },
+            Self::Adopt { keys } => AdminAct::services_adopt(keys.iter().map(String::as_str)),
+            Self::Release { key } => AdminAct::ServiceRelease {
+                target: key.as_str().into(),
+            },
         }
     }
 
@@ -115,6 +147,12 @@ impl Spec {
                 "/me/reauth".into(),
                 json!({ "password": mode.as_str() }),
             ),
+            Self::Adopt { keys } => (
+                Method::POST,
+                "/services/adopt".into(),
+                json!({ "keys": keys }),
+            ),
+            Self::Release { key } => (Method::POST, format!("/services/{key}/release"), json!({})),
         }
     }
 
@@ -177,6 +215,20 @@ impl Spec {
                 },
             }],
             Self::Own => Vec::new(),
+            // Une clé de plus, une autre clé : le nombre ou l'empreinte signés ne collent plus.
+            Self::Adopt { keys } => {
+                let mut more = keys.clone();
+                more.push("c_autre".into());
+                vec![
+                    Self::Adopt { keys: more },
+                    Self::Adopt {
+                        keys: vec!["c_autre".into()],
+                    },
+                ]
+            }
+            Self::Release { .. } => vec![Self::Release {
+                key: "c_autre".into(),
+            }],
         }
     }
 }
@@ -201,6 +253,9 @@ impl Actor {
 struct Bench {
     env: Env,
     api: Api,
+    /// Le faux moteur du registre des services (prêt, sans conteneur au départ).
+    engine: std::sync::Arc<FakeEngine>,
+    state: hearth_agent::entrypoint::http::AppState,
     rig: Rig,
     marie: Actor,
     carl: Actor,
@@ -217,13 +272,17 @@ async fn actor(env: &Env, api: &Api, name: &'static str, role: Role) -> Actor {
 async fn bench() -> Bench {
     let env = env().await;
     let rig = Rig::new(&env, true, true);
-    let api = Api::from_state(state_with(&env, rig.service.clone()));
+    let engine = std::sync::Arc::new(FakeEngine::new());
+    let state = state_with_engine(&env, rig.service.clone(), engine.clone()).await;
+    let api = Api::from_state(state.clone());
     let marie = actor(&env, &api, "marie", Role::Admin).await;
     let carl = actor(&env, &api, "carl", Role::ReadOnly).await;
     let paul = actor(&env, &api, "paul", Role::ReadOnly).await;
     Bench {
         env,
         api,
+        engine,
+        state,
         rig,
         marie,
         carl,
@@ -283,7 +342,30 @@ impl Bench {
             ActKind::ReauthSetting => Spec::Setting {
                 mode: ReauthMode::Each,
             },
+            ActKind::ServicesAdopt => {
+                // L'acte exige le droit : marie l'a, et un conteneur non géré existe.
+                self.env.grant_services("marie").await;
+                Spec::Adopt {
+                    keys: vec![self.unmanaged("a-adopter").await],
+                }
+            }
+            ActKind::ServiceRelease => {
+                self.env.grant_services("marie").await;
+                let key = self.unmanaged("a-relacher").await;
+                self.env.adopt(&key, "a-relacher", "marie").await;
+                self.state.services.reload_adopted().await;
+                Spec::Release { key }
+            }
         }
+    }
+
+    /// Un conteneur non géré que le moteur connaît, et sa clé.
+    async fn unmanaged(&self, name: &str) -> String {
+        let observation = container(name, hearth_agent::domain::services::RunState::Running);
+        let key = format!("c_{}", observation.id);
+        self.engine.put_silently(observation);
+        self.state.services.resync().await.expect("liste");
+        key
     }
 
     async fn victim(&self, name: &str) -> String {
@@ -358,8 +440,8 @@ impl Bench {
         .fetch_all(self.env.db.pool())
         .await
         .unwrap();
-        let counts: (i64, i64, i64) = sqlx::query_as(
-            "SELECT (SELECT COUNT(*) FROM sessions), (SELECT COUNT(*) FROM trusted_devices), (SELECT active FROM attack_mode WHERE id = 1)",
+        let counts: (i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM sessions), (SELECT COUNT(*) FROM trusted_devices), (SELECT active FROM attack_mode WHERE id = 1), (SELECT COUNT(*) FROM adopted_services)",
         )
         .fetch_one(self.env.db.pool())
         .await
@@ -922,6 +1004,8 @@ async fn the_acts_the_elevation_never_covers_ask_for_the_password_during_the_ele
         ActKind::AgentUpdate,
         ActKind::AttackModeEnable,
         ActKind::ReauthSetting,
+        // Adopter ouvre la frontière de confidentialité : le mot de passe à chaque fois (BR-ADOPT-008).
+        ActKind::ServicesAdopt,
         ActKind::AttackModeDisable,
     ]
     .into_iter()
@@ -1000,7 +1084,12 @@ async fn the_acts_the_elevation_never_covers_ask_for_the_password_during_the_ele
     // Les quatre actes couverts passent sous l'élévation.
     b.act(&b.marie, &readonly_account("rouvre2"), PASSWORD)
         .await;
-    for kind in [ActKind::AccountDelete, ActKind::SessionsRevoke] {
+    // Rendre un service adopté retire un accès : couvert aussi (BR-ADOPT-013).
+    for kind in [
+        ActKind::AccountDelete,
+        ActKind::SessionsRevoke,
+        ActKind::ServiceRelease,
+    ] {
         let spec = b.spec(kind).await;
         let reply = b.act(&b.marie, &spec, "").await;
         assert!(reply.status.is_success(), "{kind:?} : {:?}", reply.body);

@@ -44,10 +44,13 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use hearth_agent::application::ports::{
-    ContainerEngine, ContainerRef, ServiceRepo, ServiceSupervisor, StoreError, SupervisedRecord,
+    AdoptedRecord, ContainerEngine, ContainerRef, ServiceRepo, ServiceSupervisor, StoreError,
+    SupervisedRecord,
 };
 use hearth_agent::application::services::{EngineTimings, ServicesRegistry};
-use hearth_agent::domain::services::{ServiceStateKind, UnitActivity, UnitLookup, UnitName};
+use hearth_agent::domain::services::{
+    ServiceKey, ServiceStateKind, UnitActivity, UnitLookup, UnitName,
+};
 use hearth_agent::infrastructure::clock::{SystemClock, SystemMonotonic};
 use hearth_agent::infrastructure::engine::BollardEngine;
 use hearth_agent::infrastructure::supervisor::ProcSystemd;
@@ -120,7 +123,8 @@ impl Drop for Cleanup {
     }
 }
 
-/// Le dépôt qui ne retient rien : ce test ne touche à aucune base.
+/// Le dépôt qui ne retient rien : ce test ne touche à aucune base. Les deux services du test sont
+/// adoptés d'avance (HRT-79 : le registre ne publie que les services créés par Hearth et les adoptés).
 struct NoRepo;
 
 #[async_trait]
@@ -134,6 +138,22 @@ impl ServiceRepo for NoRepo {
     }
 
     async fn forget_supervised(&self, _unit: &UnitName) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn load_adopted(&self) -> Result<Vec<AdoptedRecord>, StoreError> {
+        Ok([KEY, FILE_KEY]
+            .into_iter()
+            .filter_map(ServiceKey::parse)
+            .map(|key| AdoptedRecord {
+                key,
+                by: "test".to_owned(),
+                at: time::OffsetDateTime::UNIX_EPOCH,
+            })
+            .collect())
+    }
+
+    async fn forget_adopted(&self, _key: &ServiceKey) -> Result<(), StoreError> {
         Ok(())
     }
 }

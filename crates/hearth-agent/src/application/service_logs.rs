@@ -11,10 +11,12 @@
 //! géré par le système change de conteneur à chaque démarrage (BR-SVC-016). À chaque changement de
 //! conteneur la tâche pose un repère « redémarré » puis lit le nouveau depuis son début (BR-SLOG-009) ;
 //! elle relit ce que le service désigne maintenant à chaque tour, par [`LogAccess`], l'UNIQUE point de
-//! décision « ce service est-il lisible par ce compte » (aujourd'hui : les deux rôles lisent tout). La
+//! décision « ce service est-il lisible par ce compte » (`may_read` : créé par Hearth, tous les comptes ; adopté, le
+//! droit de gérer les services ; non adopté, personne, comme une clé inconnue, HRT-79). La
 //! décision est rejouée à chaque tour ET pendant une lecture longue (période [`LogSettings::access_recheck`],
 //! et tout de suite quand la session change le compte vu, [`LogSession::set_viewer`]) : un droit retiré
-//! ferme la lecture avec `SERVICE_NOT_FOUND`, comme un service qui disparaît.
+//! ferme la lecture avec `MISSING_RIGHT` (service adopté, droit retiré) ou `SERVICE_NOT_FOUND` (service qui
+//! disparaît, adoption relâchée, ou jamais publié).
 //!
 //! Reprise (BR-SLOG-014) : le curseur vient du client et n'est jamais cru sur parole
 //! ([`check_resume`] : fenêtre de temps, rang plausible, pas dans le futur) ; la relecture qui vise un
@@ -123,14 +125,19 @@ impl LogAccess {
     /// pas et un service que ce compte ne peut pas lire donnent la même réponse (aucun oracle).
     pub fn target(&self, key: &ServiceKey) -> Result<LogTarget, LogsErrorCode> {
         let target = self.registry.log_target(key);
-        let allowed = {
+        let verdict = {
             let viewer = self.viewer.borrow();
-            (self.policy)(&viewer, &target).is_ok()
+            (self.policy)(&viewer, &target)
         };
-        if !allowed || target == LogTarget::Missing {
-            return Err(LogsErrorCode::ServiceNotFound);
+        match verdict {
+            // Un conteneur non adopté : la réponse d'une clé inconnue, avant tout appel au moteur.
+            Err(ReadRefusal::NotEnabled) => Err(LogsErrorCode::ServiceNotFound),
+            // Un service adopté, donc dans la liste de ce compte : refus explicite (BR-SLOG-018). Le
+            // domaine ne le rend que pour une origine adoptée, jamais pour un caché ni un inconnu.
+            Err(ReadRefusal::MissingRight) => Err(LogsErrorCode::MissingRight),
+            Ok(()) if target == LogTarget::Missing => Err(LogsErrorCode::ServiceNotFound),
+            Ok(()) => Ok(target),
         }
-        Ok(target)
     }
 
     /// Ce que le registre publie pour cette clé, SANS décision de droit : sert seulement à voir si
@@ -350,7 +357,7 @@ impl LogSession {
     }
 
     /// Le compte tel que la session le montre maintenant : la lecture rejoue sa décision de lecture
-    /// tout de suite si quelque chose a changé (rôle, et demain droits, HRT-76).
+    /// tout de suite si quelque chose a changé (rôle, droit de gérer les services).
     pub fn set_viewer(&self, viewer: Viewer) {
         self.viewer.send_if_modified(|current| {
             if *current == viewer {

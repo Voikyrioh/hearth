@@ -4,7 +4,9 @@
 //! (`hearth_proto::api::hello::HelloResponse`) est faite par `entrypoint/http`.
 
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
-use hearth_proto::api::services::{CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES};
+use hearth_proto::api::services::{
+    CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
+};
 use hearth_proto::product::PRODUCT_NAME;
 use hearth_proto::version::{API_MIN_SUPPORTED, API_VERSION};
 
@@ -48,6 +50,7 @@ impl HelloService {
                     CAPABILITY_SERVICES,
                     CAPABILITY_SERVICE_RIGHTS,
                     CAPABILITY_SERVICE_LOGS,
+                    CAPABILITY_SERVICE_ADOPTION,
                 ],
             },
         }
@@ -95,7 +98,12 @@ mod tests {
         assert_eq!(hello.api_max, API_VERSION);
         assert_eq!(
             hello.capabilities,
-            vec!["services", "service-rights", "service-logs"]
+            vec![
+                "services",
+                "service-rights",
+                "service-logs",
+                "service-adoption"
+            ]
         );
     }
 

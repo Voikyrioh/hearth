@@ -510,6 +510,48 @@ impl Env {
         assert_eq!(changed, 1, "compte {username} inconnu");
     }
 
+    /// Pose l'adoption d'un service directement en base (HRT-79) : l'acte qui adopte, avec son
+    /// contrôle du droit, son mot de passe et son journal, est le ticket HRT-80, et c'est cette aide
+    /// qui en tient lieu pour les tests de publication. `key` est `c_<identifiant>` ou `u_<unité>`.
+    /// Un agent déjà démarré la prend en compte à `ServicesRegistry::reload_adopted`.
+    pub async fn adopt(&self, key: &str, name: &str, adopted_by: &str) {
+        let unit = key.strip_prefix("u_");
+        sqlx::query(
+            "INSERT OR REPLACE INTO adopted_services (service_key, name, unit, adopted_by, adopted_at)
+             VALUES (?, ?, ?, ?, '2026-10-13T10:00:00.000Z')",
+        )
+        .bind(key)
+        .bind(name)
+        .bind(unit)
+        .bind(adopted_by)
+        .execute(self.db.pool())
+        .await
+        .expect("adoption en base");
+    }
+
+    /// Adopte un conteneur sans unité, par son identifiant complet (`c_<identifiant>`).
+    pub async fn adopt_container(&self, container_id: &str, name: &str) {
+        self.adopt(&format!("c_{container_id}"), name, "marie")
+            .await;
+    }
+
+    /// Retire l'adoption d'un service directement en base.
+    pub async fn unadopt(&self, key: &str) {
+        sqlx::query("DELETE FROM adopted_services WHERE service_key = ?")
+            .bind(key)
+            .execute(self.db.pool())
+            .await
+            .expect("adoption retirée");
+    }
+
+    /// Les clés des services adoptés en base.
+    pub async fn adopted_keys(&self) -> Vec<String> {
+        sqlx::query_scalar("SELECT service_key FROM adopted_services ORDER BY service_key")
+            .fetch_all(self.db.pool())
+            .await
+            .expect("adoptions")
+    }
+
     /// Le droit stocké d'un compte (`none` ou `manage`).
     pub async fn services_right_of(&self, username: &str) -> String {
         sqlx::query_scalar("SELECT services_right FROM accounts WHERE username = ?")

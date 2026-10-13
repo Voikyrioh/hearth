@@ -37,11 +37,15 @@ pub enum ActKind {
     AttackModeDisable,
     AccountPasswordOwn,
     ReauthSetting,
+    /// Adopter des conteneurs existants (HRT-80, ADR-0043) : jamais couvert par l'élévation.
+    ServicesAdopt,
+    /// Rendre un service adopté à l'état non géré (HRT-80, ADR-0043).
+    ServiceRelease,
 }
 
 impl ActKind {
     /// Tous les actes `0x05`, dans l'ordre des codes.
-    pub const ALL: [ActKind; 10] = [
+    pub const ALL: [ActKind; 12] = [
         Self::AccountCreate,
         Self::AccountRole,
         Self::AccountPassword,
@@ -52,6 +56,8 @@ impl ActKind {
         Self::AttackModeDisable,
         Self::AccountPasswordOwn,
         Self::ReauthSetting,
+        Self::ServicesAdopt,
+        Self::ServiceRelease,
     ];
 
     /// L'octet du code de l'acte dans le message signé. `0x09` est réservé (jamais utilisé : le retrait
@@ -68,6 +74,8 @@ impl ActKind {
             Self::AttackModeDisable => 0x08,
             Self::AccountPasswordOwn => 0x0A,
             Self::ReauthSetting => 0x0B,
+            Self::ServicesAdopt => 0x11,
+            Self::ServiceRelease => 0x12,
         }
     }
 
@@ -84,15 +92,20 @@ impl ActKind {
             Self::AttackModeDisable => action::ATTACK_MODE_DISABLE,
             Self::AccountPasswordOwn => action::ACCOUNT_PASSWORD_OWN,
             Self::ReauthSetting => action::REAUTH_SETTING,
+            Self::ServicesAdopt => action::SERVICE_ADOPT,
+            Self::ServiceRelease => action::SERVICE_RELEASE,
         }
     }
 }
+
+/// Taille de l'empreinte des clés d'une adoption (SHA-256).
+pub const FINGERPRINT_LEN: usize = 32;
 
 /// Un acte tel que l'agent le **reconstruit depuis la requête** (jamais lu dans la preuve) et tel que
 /// le client le signe : l'acte, sa cible et les paramètres non secrets qui changent son sens. Les
 /// secrets (mot de passe de confirmation, nouveau mot de passe d'un compte) n'y entrent jamais : une
 /// signature observée ne doit pas servir à tester des mots de passe hors ligne.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminAct<'a> {
     /// Créer un compte : l'identifiant (normalisé à la signature) et le rôle demandés.
     AccountCreate { username: &'a str, role: RoleName },
@@ -112,12 +125,43 @@ pub enum AdminAct<'a> {
     AccountPasswordOwn,
     /// Changer le réglage de fréquence du mot de passe.
     ReauthSetting { mode: ReauthMode },
+    /// Adopter des conteneurs (HRT-80) : la cible signée est le NOMBRE de clés et l'EMPREINTE de leurs
+    /// clés triées (voir [`AdminAct::services_adopt`]) : on ne peut adopter que ce que la confirmation a
+    /// montré, sans signer une liste de 50 clés.
+    ServicesAdopt {
+        count: u32,
+        fingerprint: [u8; FINGERPRINT_LEN],
+    },
+    /// Rendre le service `target` (sa clé) à l'état non géré (HRT-80). Texte possédé quand la clé a été
+    /// décodée d'un segment de chemin encodé en pourcentage (un `\` de nom d'unité s'écrit `%5C`).
+    ServiceRelease { target: std::borrow::Cow<'a, str> },
 }
 
 fn role_text(role: RoleName) -> &'static str {
     match role {
         RoleName::Admin => "admin",
         RoleName::Readonly => "readonly",
+    }
+}
+
+impl AdminAct<'_> {
+    /// L'acte d'adoption de ces clés (dans n'importe quel ordre) : leur nombre et l'empreinte SHA-256 de
+    /// leurs clés triées (ordre des octets), chacune précédée de sa longueur sur deux octets. Source unique
+    /// pour l'agent (qui reconstruit l'acte depuis le corps) et la liaison cliente (qui le signe).
+    pub fn services_adopt<'k>(keys: impl IntoIterator<Item = &'k str>) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut sorted: Vec<&str> = keys.into_iter().collect();
+        sorted.sort_unstable();
+        let mut hasher = Sha256::new();
+        for key in &sorted {
+            let length = u16::try_from(key.len()).unwrap_or(u16::MAX);
+            hasher.update(length.to_be_bytes());
+            hasher.update(&key.as_bytes()[..usize::from(length)]);
+        }
+        Self::ServicesAdopt {
+            count: u32::try_from(sorted.len()).unwrap_or(u32::MAX),
+            fingerprint: hasher.finalize().into(),
+        }
     }
 }
 
@@ -135,6 +179,8 @@ impl AdminAct<'_> {
             Self::AttackMode { enable: false } => ActKind::AttackModeDisable,
             Self::AccountPasswordOwn => ActKind::AccountPasswordOwn,
             Self::ReauthSetting { .. } => ActKind::ReauthSetting,
+            Self::ServicesAdopt { .. } => ActKind::ServicesAdopt,
+            Self::ServiceRelease { .. } => ActKind::ServiceRelease,
         }
     }
 
@@ -150,6 +196,7 @@ impl AdminAct<'_> {
             | Self::AccountPassword { target }
             | Self::AccountDelete { target }
             | Self::SessionsRevoke { target } => target,
+            Self::ServiceRelease { target } => target,
             _ => "",
         }
     }
@@ -168,6 +215,10 @@ impl AdminAct<'_> {
                 sha256.to_ascii_lowercase().into_bytes(),
             ],
             Self::ReauthSetting { mode } => vec![mode.as_str().as_bytes().to_vec()],
+            Self::ServicesAdopt { count, fingerprint } => {
+                let hex: String = fingerprint.iter().map(|b| format!("{b:02x}")).collect();
+                vec![count.to_string().into_bytes(), hex.into_bytes()]
+            }
             _ => Vec::new(),
         }
     }
@@ -208,8 +259,47 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         | AdminAct::AgentUpdate { .. }
         | AdminAct::AttackMode { .. }
         | AdminAct::AccountPasswordOwn
-        | AdminAct::ReauthSetting { .. } => false,
+        | AdminAct::ReauthSetting { .. }
+        // Adopter ouvre la frontière de confidentialité d'un serveur : le mot de passe à chaque fois
+        // (BR-ADOPT-008). Rendre un service retire un accès, il n'en donne pas (BR-ADOPT-013).
+        | AdminAct::ServicesAdopt { .. } => false,
+        AdminAct::ServiceRelease { .. } => true,
     }
+}
+
+/// Décode un segment de chemin encodé en pourcentage (`%5C` donne `\`). `None` : encodage illisible ou
+/// octets qui ne sont pas de l'UTF-8. Source unique de l'agent (qui lit la clé de `/services/{key}/release`)
+/// et de la liaison cliente (qui signe la même clé).
+pub fn decode_segment(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let pair = raw.get(index + 1..index + 3)?;
+            out.push(u8::from_str_radix(pair, 16).ok()?);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// Un texte a-t-il la forme d'une clé de service (`h_`, `u_` ou `c_`, puis des caractères d'identifiant
+/// ou de nom d'unité) ? La validité complète est celle de l'agent ; ceci écarte ce qui ne peut pas en
+/// être une, pour que la liaison cliente ne prenne jamais un chemin quelconque pour un acte.
+pub fn is_service_key(text: &str) -> bool {
+    let Some((prefix, body)) = text.split_once('_') else {
+        return false;
+    };
+    matches!(prefix, "h" | "u" | "c")
+        && !body.is_empty()
+        && body.len() <= 256
+        && body
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_' | '.' | '\\' | '@'))
 }
 
 /// Une ligne de la table des actes : méthode, motif de la route (celui de `ENDPOINTS`), les actes que la
@@ -279,6 +369,18 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::ReauthSetting],
         contract: Contract::Reauth,
     },
+    RouteAct {
+        method: "POST",
+        pattern: "/services/adopt",
+        kinds: &[ActKind::ServicesAdopt],
+        contract: Contract::Reauth,
+    },
+    RouteAct {
+        method: "POST",
+        pattern: "/services/{key}/release",
+        kinds: &[ActKind::ServiceRelease],
+        contract: Contract::Reauth,
+    },
     // Le retrait d'un poste : contrat livré, clé du poste courant (Q18).
     RouteAct {
         method: "DELETE",
@@ -329,7 +431,9 @@ mod tests {
         let codes: Vec<u8> = ActKind::ALL.iter().map(|kind| kind.code()).collect();
         assert_eq!(
             codes,
-            vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B]
+            vec![
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x11, 0x12
+            ]
         );
         assert_eq!(codes.iter().collect::<HashSet<_>>().len(), codes.len());
         assert!(!codes.contains(&0x09), "0x09 est réservé");
@@ -348,12 +452,12 @@ mod tests {
                 "{kind:?}"
             );
         }
-        // Dix actes en 0x05 ; neuf routes d'acte (dont le retrait d'un poste, sous son contrat) en plus du
-        // réglage de fréquence.
-        assert_eq!(in_routes.len(), 10);
+        // Douze actes en 0x05 ; onze routes d'acte (dont le retrait d'un poste, sous son contrat) en plus
+        // du réglage de fréquence.
+        assert_eq!(in_routes.len(), 12);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            9
+            11
         );
     }
 
@@ -424,6 +528,62 @@ mod tests {
             .params(),
             vec![b"each".to_vec()]
         );
+    }
+
+    #[test]
+    fn the_adoption_signs_the_count_and_the_fingerprint_of_the_sorted_keys() {
+        let one = AdminAct::services_adopt(["u_b.service", "c_aa"]);
+        let other_order = AdminAct::services_adopt(["c_aa", "u_b.service"]);
+        assert_eq!(one, other_order);
+        assert_eq!(one.kind(), ActKind::ServicesAdopt);
+        assert_eq!(one.target(), "");
+        let params = one.params();
+        assert_eq!(params[0], b"2".to_vec());
+        assert_eq!(params[1].len(), 64);
+        // Une clé de plus, une clé de moins ou une clé différente change ce qui est signé.
+        assert_ne!(one, AdminAct::services_adopt(["c_aa"]));
+        assert_ne!(one, AdminAct::services_adopt(["c_aa", "u_c.service"]));
+        assert_ne!(
+            AdminAct::services_adopt(["c_a", "c_b"]),
+            AdminAct::services_adopt(["c_ab"]),
+            "la longueur de chaque clé est signée : deux clés ne valent pas leur concaténation"
+        );
+        // Un vecteur fixe, le même que celui de `deploy/e2e/admin_act.py` (`adoption_params`) : le script des
+        // scénarios et l'agent signent et vérifient la même empreinte.
+        assert_eq!(
+            params[1],
+            b"48809d984241a859f5e5b17afdf24da1b442d5b5bbf6509b345b66752c22a5de".to_vec()
+        );
+        assert!(!covered_by_elevation(&one));
+        assert!(covered_by_elevation(&AdminAct::ServiceRelease {
+            target: "u_x.service".into()
+        }));
+        assert_eq!(
+            AdminAct::ServiceRelease {
+                target: "c_ab".into()
+            }
+            .target(),
+            "c_ab"
+        );
+    }
+
+    #[test]
+    fn a_path_segment_is_decoded_and_a_key_has_its_shape() {
+        assert_eq!(
+            decode_segment("u_a%5Cb%40c.service").as_deref(),
+            Some("u_a\\b@c.service")
+        );
+        assert_eq!(decode_segment("c_abc").as_deref(), Some("c_abc"));
+        assert_eq!(decode_segment("%zz"), None);
+        assert_eq!(decode_segment("%4"), None);
+        assert_eq!(decode_segment("%ff"), None);
+        assert!(is_service_key("u_docker-terraria.service"));
+        assert!(is_service_key("c_0123abcd"));
+        assert!(!is_service_key("x_abc"));
+        assert!(!is_service_key("c_"));
+        assert!(!is_service_key("c_a/b"));
+        assert!(!is_service_key("../c_a"));
+        assert!(!is_service_key("abc"));
     }
 
     #[test]

@@ -156,6 +156,8 @@ impl From<&EngineView> for EngineDto {
             list_degraded,
             at,
             list_current_at,
+            // HRT-79 : le nombre de conteneurs non gérés n'est pas encore montré par le client.
+            external_count: _,
         } = engine;
         Self {
             state: (*state).into(),
@@ -364,6 +366,9 @@ impl From<&ServiceItem> for ServiceDto {
             // Les actes (tranche suivante) : jamais remplis par l'agent de cette tranche.
             busy: _,
             last_action: _,
+            // HRT-79 : repère d'adoption et détail réservé, pas encore montrés par le client.
+            adopted: _,
+            details_reserved: _,
         } = item;
         Self {
             key: key.clone(),

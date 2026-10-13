@@ -6,7 +6,8 @@
 //!
 //! Déroulement : `auth` (même forme que `/stream`), `open`, puis les messages de `hearth_proto::api::service_logs`.
 //! Le texte d'une ligne ne passe par aucune trace d'ici : seuls des nombres sont tracés.
-//! Lire n'est pas journalisé (BR-SLOG-022) : la route n'a pas d'action d'audit.
+//! Lire n'est pas journalisé (BR-SLOG-022) : la route n'a pas d'action d'audit. Seul un REFUS faute du droit
+//! sur un service adopté est inscrit (BR-SLOG-024, `journal_refusal`), une fois par lecture refusée.
 
 use axum::extract::ws::{Message, WebSocket, close_code};
 use hearth_proto::api::service_logs::{
@@ -19,6 +20,7 @@ use super::connection::{Closing, close, going_away, policy, send, stopped};
 use super::{Permit, StreamSettings};
 use crate::application::service_logs::OpenRequest;
 use crate::application::sessions::{AuthError, CurrentSession};
+use crate::domain::audit::{Actor, AuditAction, ClientName, Origin, Outcome, Reason, Target};
 use crate::domain::secret::Secret;
 use crate::domain::services::ServiceKey;
 use crate::domain::services::logs::Viewer;
@@ -98,9 +100,15 @@ async fn serve(
     drop(permit);
 
     // 3. La lecture. Les refus connus d'avance sont des erreurs du socket, pas de la mise à niveau.
-    let mut reading = match state.service_logs.open(viewer_of(&session), key, request) {
+    let mut reading = match state
+        .service_logs
+        .open(viewer_of(&session), key.clone(), request)
+    {
         Ok(reading) => reading,
         Err(code) => {
+            if code == LogsErrorCode::MissingRight {
+                journal_refusal(state, &session, addr, &key).await;
+            }
             send(socket, &settings, &error(code)).await;
             return normal();
         }
@@ -150,6 +158,10 @@ async fn serve(
             message = reading.next_message() => match message {
                 Some(message) => {
                     let terminal = matches!(message, LogsServerMessage::Error(_));
+                    // Le droit retiré pendant la lecture est un refus comme un autre (BR-SLOG-024).
+                    if matches!(&message, LogsServerMessage::Error(LogsError { code: LogsErrorCode::MissingRight })) {
+                        journal_refusal(state, &session, addr, &key).await;
+                    }
                     // Un client qui ne reçoit plus rien pendant `send_timeout` perd SA lecture, pas le lien.
                     if !send(socket, &settings, &message).await {
                         break None;
@@ -179,6 +191,34 @@ async fn serve(
     };
     tracing::info!(lost = reading.lost(), "lecture de journaux fermée");
     closing
+}
+
+/// Inscrit au journal d'activité le refus de lire les journaux d'un service adopté faute du droit
+/// (BR-SLOG-024, BR-GRANT-004) : qui, quel service (nom et unité, déjà dans sa liste), d'où, résultat
+/// « Refusé : droits insuffisants ». Jamais pour un conteneur non adopté ni une clé inconnue, qui n'ont
+/// pas de refus explicite. Un échec d'écriture est tracé par le puits, jamais subi par l'appelant.
+async fn journal_refusal(state: &AppState, session: &CurrentSession, addr: &str, key: &ServiceKey) {
+    let target = match state.services.published_label(key) {
+        Some((name, unit)) => {
+            ClientName::parse(&name).map_or(Target::Route("/services/{key}/logs"), |name| {
+                Target::ServiceUnit(name, unit.and_then(|unit| ClientName::parse(unit.as_str())))
+            })
+        }
+        None => Target::Route("/services/{key}/logs"),
+    };
+    let actor = Actor::new(
+        Some(session.account.username.clone()),
+        Origin::client(None, addr),
+    );
+    state
+        .sink
+        .record(
+            actor,
+            AuditAction::ServiceLogsRead,
+            target,
+            Outcome::Denied(Reason::InsufficientRights),
+        )
+        .await;
 }
 
 /// Lit le premier message : `auth` avec un jeton valable. Sinon une erreur du socket, puis la fermeture.

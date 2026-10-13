@@ -11,7 +11,7 @@ maj: 2026-10-07
 # BR-TRUST-037 : La liste des actes d'administration est fermée : toute route qui modifie est un acte ou une exception nommée, tenue par un test de garde
 
 ## Règle
-- Est un acte toute route non publique qui **modifie** (`Endpoint::modifies`), sauf exception nommée. Source unique : `hearth_proto::admin_act::{ROUTES, NOT_AN_ACT}` (dix actes en `0x05`, neuf routes d'acte dont le retrait d'un poste, plus le réglage de fréquence ; une exception : la déconnexion).
+- Est un acte toute route non publique qui **modifie** (`Endpoint::modifies`), sauf exception nommée. Source unique : `hearth_proto::admin_act::{ROUTES, NOT_AN_ACT}` (douze actes en `0x05` dont, depuis HRT-80, adopter des conteneurs `0x11` et relâcher un service `0x12`, onze routes d'acte dont le retrait d'un poste, plus le réglage de fréquence ; une exception : la déconnexion).
 - Lire et exporter le journal, lister les comptes et suivre le journal en direct sont des consultations réservées, pas des actes (BR-TRUST-038, choix à remontrer à Voiky).
 - Le test `every_modifying_route_is_an_admin_act_or_a_named_exception` échoue si une route qui modifie est ajoutée à `ENDPOINTS` sans être classée ; la couche de confirmation est posée d'après la même table.
 

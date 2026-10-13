@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 use super::{
-    AccountTx, AttackModeTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx, OperationTx,
-    ServicesRightTx, SessionTx, StoreError,
+    AccountTx, AdoptionTx, AttackModeTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx,
+    OperationTx, ServicesRightTx, SessionTx, StoreError,
 };
 
 /// Point d'entrée des écritures. Le magasin est neutre : il ne porte aucun sujet (comptes,
@@ -28,6 +28,9 @@ pub trait UnitOfWork: Send {
     /// L'écriture du droit « gérer les services » : réservée à la ligne de commande du serveur
     /// (BR-GRANT-005, `ServicesRightService`).
     fn services_right(&mut self) -> &mut dyn ServicesRightTx;
+
+    /// L'écriture de l'adoption d'un service (HRT-80) : un seul cas d'usage, `ServiceAdoption`.
+    fn adoptions(&mut self) -> &mut dyn AdoptionTx;
 
     fn sessions(&mut self) -> &mut dyn SessionTx;
 

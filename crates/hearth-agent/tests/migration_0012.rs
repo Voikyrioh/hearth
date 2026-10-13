@@ -123,6 +123,26 @@ async fn a_populated_0010_database_keeps_everything_and_swaps_the_two_empty_tabl
     assert!(before.contains(&"service_actions".to_owned()));
     assert!(before.contains(&"deployments".to_owned()));
 
+    // `0011` oublie les services supervisés non adoptés (BR-ADOPT) : on en adopte un avant `0012`, qui
+    // doit le garder tel quel.
+    migrator_up_to(11).run(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO adopted_services (service_key, name, unit, adopted_by, adopted_at)
+         VALUES ('u_docker-terraria.service', 'terraria', 'docker-terraria.service', '01A',
+                 '2026-10-02T10:00:00.000Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO supervised_services (service_key, unit, name, last_view_json, last_seen_at)
+         VALUES ('u_docker-terraria.service', 'docker-terraria.service', 'terraria', '{}',
+                 '2026-10-02T10:00:00.000Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
     migrator_up_to(12).run(&pool).await.unwrap();
 
     let after = tables(&pool).await;
@@ -164,8 +184,13 @@ async fn a_populated_0010_database_keeps_everything_and_swaps_the_two_empty_tabl
     assert_eq!((accounts, sessions, intents), (2, 1, 1));
     assert_eq!(supervised, "terraria");
     assert_eq!(meta, "kept");
-    // Les tables de `0011` (services adoptés) ne sont ni créées ni requises.
-    assert!(!after.iter().any(|name| name.contains("adopt")));
+    // La table de `0011` (services adoptés) n'est ni touchée ni requise par `0012`.
+    assert!(after.contains(&"adopted_services".to_owned()));
+    let adopted: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM adopted_services")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(adopted, 1);
     // Les nouvelles tables sont vides : aucun service n'a de description.
     for table in [
         "service_specs",
@@ -234,11 +259,7 @@ async fn running_the_migrations_twice_changes_nothing() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(
-        applied,
-        12 - 1,
-        "0011 n'existe pas sur cette branche : onze migrations"
-    );
+    assert_eq!(applied, 12, "douze migrations, de `0001` à `0012`");
     let specs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM service_specs")
         .fetch_one(&pool)
         .await

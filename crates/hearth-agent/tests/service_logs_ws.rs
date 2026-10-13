@@ -2,7 +2,12 @@
 //! faux moteur (ou `bollard` sur un faux démon), vraie base. Un socket par lecture, 1 000 dernières lignes
 //! puis le direct, lots, anneau borné, perte comptée, nettoyage, reprise, redémarrage, dix lectures.
 //!
-//! Règles : BR-SLOG-001, 003, 006 à 010, 012, 013, 015 à 023.
+//! Règles : BR-SLOG-001, 003, 006 à 010, 011, 012, 013, 015 à 023 ; BR-ADOPT-004, 015, 016.
+//!
+//! Le registre ne publie que les services créés par Hearth et les adoptés (HRT-79) : ces tests adoptent
+//! ce que le faux moteur contient (`adopt_all`) et donnent le droit de gérer les services aux comptes de
+//! `token` (un service adopté se lit avec le droit seulement). `token_without_right` et les tests de la fin
+//! du fichier prouvent le reste.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -36,9 +41,24 @@ use tracing_subscriber::fmt::writer::BoxMakeWriter;
 /// 2026-10-13 10:00:00 UTC en millisecondes : le démarrage des conteneurs de test.
 const T0: i64 = 1_791_885_600_000;
 
+/// Un compte qui a le droit de gérer les services (donc lit les journaux d'un service adopté).
 async fn token(env: &Env, agent: &Agent, username: &str, role: Role) -> String {
     env.create(username, role).await;
+    env.grant_services(username).await;
     login(agent, username).await
+}
+
+/// Un compte SANS le droit : il lit les journaux d'un service créé par Hearth, jamais ceux d'un adopté.
+async fn token_without_right(env: &Env, agent: &Agent, username: &str, role: Role) -> String {
+    env.create(username, role).await;
+    login(agent, username).await
+}
+
+/// Adopte en base tous les conteneurs que le faux moteur connaît maintenant.
+async fn adopt_all(env: &Env, engine: &FakeEngine) {
+    for id in engine.container_ids() {
+        env.adopt_container(&id, "adopté").await;
+    }
 }
 
 /// Ouvre une session de ce compte déjà créé.
@@ -77,6 +97,7 @@ fn align_clock(env: &Env) {
 
 async fn ready_agent(env: &Env, engine: &Arc<FakeEngine>, services: usize) -> Agent {
     align_clock(env);
+    adopt_all(env, engine).await;
     let agent = https::start_engined(env, parts(engine.clone())).await;
     wait_listed(&agent, services).await;
     agent
@@ -664,6 +685,8 @@ async fn a_service_run_by_a_unit_is_followed_across_its_containers_by_its_key() 
     supervisor.set_status(&unit, running_unit());
     engine.push_log(&first.id, LogSource::Out, T0 + 1, "monde chargé");
     engine.put_silently(first.clone());
+    env.adopt("u_docker-terraria.service", "terraria", "marie")
+        .await;
     let agent = https::start_engined(
         &env,
         parts_supervised(engine.clone(), supervisor.clone(), fast_timings()),
@@ -1166,6 +1189,7 @@ async fn the_engine_socket_is_drained_whatever_the_client_does_with_the_real_ada
     let container = DaemonContainer::new("bavard", "running");
     let (id, key) = (container.id.clone(), format!("c_{}", container.id));
     daemon.put(container);
+    env.adopt_container(&id, "bavard").await;
     let engine = BollardEngine::new(
         Target::Http(daemon.address()),
         InstallMarkers::at(Vec::<std::path::PathBuf>::new()),
@@ -1351,6 +1375,22 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
     let slow = DaemonContainer::new("lent", "running");
     let (slow_id, slow_key) = (slow.id.clone(), format!("c_{}", slow.id));
     daemon.put(slow);
+    // Un conteneur que personne n'a adopté (HRT-79) : ses journaux portent des sentinelles. Elles ne
+    // doivent sortir par aucune route ni aucune trace (BR-ADOPT-001, BR-ADOPT-004).
+    let hidden = DaemonContainer::new("cache", "running");
+    let (hidden_id, hidden_key) = (hidden.id.clone(), format!("c_{}", hidden.id));
+    daemon.put(hidden);
+    daemon.push_log(&hidden_id, 1, T0, "SENTINEL-LINE-HIDDEN-d2f9 jeton=cache");
+    daemon.push_log(&hidden_id, 2, T0 + 1, "SENTINEL-LINE-HIDDEN-ERR-81ca");
+    for adopted in [
+        id.as_str(),
+        muted_key.trim_start_matches("c_"),
+        terminal_id.as_str(),
+        liar_id.as_str(),
+        slow_id.as_str(),
+    ] {
+        env.adopt_container(adopted, "adopté").await;
+    }
     daemon.push_log(&id, 1, T0, "SENTINEL-LINE-OUT-5e21 mot de passe=hunter2");
     daemon.push_log(&id, 2, T0 + 1, "\u{1b}[31mSENTINEL-LINE-ERR-9a07\u{1b}[0m");
     daemon.push_log_raw(&id, 1, T0 + 2, b"SENTINEL-LINE-SPLIT-");
@@ -1474,6 +1514,21 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
     refused.next_logs().await.unwrap();
     let mut unknown = read(&agent, &admin, &format!("c_{}", "d".repeat(64)), 1000, None).await;
     expect_error(&mut unknown, LogsErrorCode::ServiceNotFound).await;
+    // Le conteneur caché : même réponse que le service inconnu, pour les deux comptes, et pas une ligne.
+    for who in [&admin, &readonly] {
+        let mut refused_hidden = read(&agent, who, &hidden_key, 1000, None).await;
+        let (messages, end) = until_closed(&mut refused_hidden).await;
+        assert_eq!(
+            messages,
+            [LogsServerMessage::Error(
+                hearth_proto::api::service_logs::LogsError {
+                    code: LogsErrorCode::ServiceNotFound
+                }
+            )]
+        );
+        assert_eq!(end, End::Closed(1000));
+        shown.push_str(&format!("{messages:?}"));
+    }
     // Le démon tombe en pleine lecture : l'erreur de transport ne cite aucune ligne.
     let mut cut = read(&agent, &admin, &key, 1000, None).await;
     cut.next_logs().await.unwrap();
@@ -1484,6 +1539,10 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
 
     // Les messages d'état et de repère (hors lignes) ne contiennent pas non plus le texte.
     assert!(!shown.is_empty());
+    assert!(
+        !shown.contains("SENTINEL-LINE-HIDDEN"),
+        "une ligne d'un conteneur caché est sortie"
+    );
     let data_dir = env.dir.path().to_owned();
     agent.shutdown().await;
     let captured = String::from_utf8_lossy(&traces.lock().unwrap()).into_owned();
@@ -1530,7 +1589,15 @@ fn viewer(role: Role) -> Viewer {
     Viewer {
         account: AccountId::new("compte-de-test"),
         role,
+        services_right: ServicesRight::Manage,
+    }
+}
+
+/// Un compte sans le droit de gérer les services.
+fn viewer_without_right(role: Role) -> Viewer {
+    Viewer {
         services_right: ServicesRight::None,
+        ..viewer(role)
     }
 }
 
@@ -2128,6 +2195,7 @@ async fn a_revoked_session_closes_its_reading_and_gives_the_place_back() {
     let (engine, key, _) = chatty_engine(1);
     let agent = ready_agent(&env, &engine, 1).await;
     let marie = env.create("marie", Role::Admin).await;
+    env.grant_services("marie").await;
     let admin = login(&agent, "marie").await;
     let readonly = token(&env, &agent, "lucas", Role::ReadOnly).await;
     // Neuf lectures d'un autre compte tiennent neuf places.
@@ -2162,6 +2230,7 @@ async fn a_silent_client_loses_its_reading_and_the_agent_shutting_down_closes_it
     let env = env().await;
     let (engine, key, _) = chatty_engine(1);
     align_clock(&env);
+    adopt_all(&env, &engine).await;
     let mut stream = support::probe::fast_stream();
     stream.idle_timeout = Duration::from_millis(400);
     let agent = https::start_engined_metered(
@@ -2270,4 +2339,254 @@ async fn the_place_of_a_reading_comes_back_whatever_ends_it() {
     )));
     drop(background);
     agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Journaux et publication (HRT-79) : un conteneur non adopté n'a aucun journal (BR-ADOPT-004), un service
+// adopté se lit avec le droit de gérer les services (BR-ADOPT-015, BR-SLOG-018)
+// ---------------------------------------------------------------------------------------------
+
+const HIDDEN_LINE: &str = "SENTINEL-LINE-HIDDEN-0d71";
+
+/// Un agent dont le moteur porte un conteneur adopté (`visible`) et un conteneur que personne n'a adopté
+/// (`cache`), dont le journal contient une ligne sentinelle.
+struct Hiding {
+    engine: Arc<FakeEngine>,
+    agent: Agent,
+    hidden_key: String,
+    shown_key: String,
+}
+
+async fn hiding_agent(env: &Env) -> Hiding {
+    let engine = Arc::new(FakeEngine::new());
+    let hidden = container("cache", RunState::Running);
+    let shown = container("visible", RunState::Running);
+    engine.push_log(&hidden.id, LogSource::Out, T0, HIDDEN_LINE);
+    engine.push_log(&shown.id, LogSource::Out, T0, "ligne visible");
+    let (hidden_key, shown_key) = (key_of(&hidden), key_of(&shown));
+    let shown_id = shown.id.clone();
+    engine.put_silently(hidden);
+    engine.put_silently(shown);
+    align_clock(env);
+    // Seul `visible` est adopté : `ready_agent` adopterait aussi l'autre.
+    env.adopt_container(&shown_id, "visible").await;
+    let agent = https::start_engined(env, parts(engine.clone())).await;
+    wait_listed(&agent, 1).await;
+    Hiding {
+        engine,
+        agent,
+        hidden_key,
+        shown_key,
+    }
+}
+
+fn not_found() -> Vec<LogsServerMessage> {
+    vec![LogsServerMessage::Error(
+        hearth_proto::api::service_logs::LogsError {
+            code: LogsErrorCode::ServiceNotFound,
+        },
+    )]
+}
+
+#[tokio::test]
+async fn a_hidden_container_gets_on_the_logs_route_exactly_the_answer_of_an_unknown_key() {
+    let env = env().await;
+    let h = hiding_agent(&env).await;
+    let granted = token(&env, &h.agent, "marie", Role::Admin).await;
+    let plain = token_without_right(&env, &h.agent, "lucas", Role::ReadOnly).await;
+    let unknown_container = format!("c_{}", "f".repeat(64));
+    let unknown_unit = "u_docker-fantome.service".to_owned();
+    for (who, who_token) in [("avec le droit", &granted), ("sans le droit", &plain)] {
+        let mut answers = Vec::new();
+        for key in [&h.hidden_key, &unknown_container, &unknown_unit] {
+            let started = Instant::now();
+            let mut client = read(&h.agent, who_token, key, 1000, None).await;
+            let (messages, end) = until_closed(&mut client).await;
+            answers.push((messages, end, started.elapsed()));
+        }
+        // Même contenu, même code de fermeture, même ordre : l'erreur est le premier et seul message.
+        assert_eq!(answers[0].0, not_found(), "{who}");
+        assert_eq!(answers[0].1, End::Closed(1000), "{who}");
+        for pair in answers.windows(2) {
+            assert_eq!(pair[0].0, pair[1].0, "{who} : message");
+            assert_eq!(pair[0].1, pair[1].1, "{who} : fermeture");
+        }
+        // Même moment : aucune attente propre à la clé cachée.
+        for (_, _, elapsed) in &answers {
+            assert!(*elapsed < Duration::from_secs(2), "{who} : {elapsed:?}");
+        }
+        let text = format!("{answers:?}");
+        assert!(
+            !text.contains("SENTINEL") && !text.contains("cache"),
+            "{text}"
+        );
+    }
+    // Le moteur n'a jamais été interrogé pour la clé cachée : aucune lecture de journaux du tout.
+    assert_eq!(h.engine.log_read_count(), 0);
+    // Témoin : le service adopté, lui, se lit avec le droit (sinon ce test serait aveugle).
+    let mut client = read(&h.agent, &granted, &h.shown_key, 1000, None).await;
+    client.next_logs().await.unwrap();
+    let (items, _, _) = collect(&mut client, 1).await;
+    assert_eq!(texts(&items), ["ligne visible"]);
+    assert_eq!(h.engine.log_read_count(), 1);
+    h.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_limit_of_ten_readings_does_not_tell_a_hidden_key_from_an_unknown_one() {
+    let env = env().await;
+    let h = hiding_agent(&env).await;
+    let granted = token(&env, &h.agent, "marie", Role::Admin).await;
+    let unknown = format!("c_{}", "e".repeat(64));
+    // Avant la limite : cachée et inconnue se ressemblent.
+    for key in [&h.hidden_key, &unknown] {
+        let mut client = read(&h.agent, &granted, key, 10, None).await;
+        expect_error(&mut client, LogsErrorCode::ServiceNotFound).await;
+    }
+    let mut open = Vec::new();
+    for _ in 0..10 {
+        let mut client = read(&h.agent, &granted, &h.shown_key, 10, None).await;
+        client.next_logs().await.unwrap();
+        open.push(client);
+    }
+    // À la limite : la même réponse pour les deux, qui ne dit rien de l'existence de l'une ni de l'autre.
+    for key in [&h.hidden_key, &unknown] {
+        let mut client = read(&h.agent, &granted, key, 10, None).await;
+        expect_error(&mut client, LogsErrorCode::LogsLimit).await;
+    }
+    // Une place rendue : de nouveau la même réponse « inconnu » pour les deux.
+    open.pop().unwrap().drop_connection();
+    let engine = h.engine.clone();
+    eventually("la place est rendue", || {
+        let engine = engine.clone();
+        async move { engine.open_log_reads() == 9 }
+    })
+    .await;
+    for key in [&h.hidden_key, &unknown] {
+        let mut client = read(&h.agent, &granted, key, 10, None).await;
+        expect_error(&mut client, LogsErrorCode::ServiceNotFound).await;
+    }
+    drop(open);
+    h.agent.shutdown().await;
+}
+
+fn missing_right() -> Vec<LogsServerMessage> {
+    vec![LogsServerMessage::Error(
+        hearth_proto::api::service_logs::LogsError {
+            code: LogsErrorCode::MissingRight,
+        },
+    )]
+}
+
+#[tokio::test]
+async fn an_adopted_service_is_read_with_the_right_to_manage_services_whatever_the_role() {
+    let env = env().await;
+    let h = hiding_agent(&env).await;
+    let accounts = [
+        ("marie", Role::Admin, true),
+        ("lucas", Role::ReadOnly, true),
+        ("ada", Role::Admin, false),
+        ("zoe", Role::ReadOnly, false),
+    ];
+    for (name, role, has_right) in accounts {
+        let who = if has_right {
+            token(&env, &h.agent, name, role).await
+        } else {
+            token_without_right(&env, &h.agent, name, role).await
+        };
+        let mut client = read(&h.agent, &who, &h.shown_key, 1000, None).await;
+        if has_right {
+            client.next_logs().await.unwrap();
+            let (items, _, _) = collect(&mut client, 1).await;
+            assert_eq!(texts(&items), ["ligne visible"], "{name}");
+        } else {
+            // Refusé même par un client modifié, sans ligne, et dit en clair : le service est dans la liste
+            // de ce compte, le refus est explicite (BR-SLOG-018, BR-SLOG-024) et non « introuvable ».
+            let (messages, end) = until_closed(&mut client).await;
+            assert_eq!(messages, missing_right(), "{name}");
+            assert_eq!(end, End::Closed(1000), "{name}");
+        }
+    }
+    h.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_right_withdrawn_during_a_reading_closes_it_with_the_explicit_refusal() {
+    let env = env().await;
+    let h = hiding_agent(&env).await;
+    let marie = token(&env, &h.agent, "marie", Role::Admin).await;
+    let mut client = read(&h.agent, &marie, &h.shown_key, 1000, None).await;
+    client.next_logs().await.unwrap();
+    let (items, _, _) = collect(&mut client, 1).await;
+    assert_eq!(texts(&items), ["ligne visible"]);
+    env.revoke_services("marie").await;
+    let started = Instant::now();
+    let (messages, end) = until_closed(&mut client).await;
+    assert_eq!(messages, missing_right());
+    assert_eq!(end, End::Closed(1000));
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    h.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_adoption_given_up_during_a_reading_closes_it_and_the_key_turns_into_an_unknown_one() {
+    let env = env().await;
+    let h = hiding_agent(&env).await;
+    let marie = token(&env, &h.agent, "marie", Role::Admin).await;
+    let mut client = read(&h.agent, &marie, &h.shown_key, 1000, None).await;
+    client.next_logs().await.unwrap();
+    let (items, _, _) = collect(&mut client, 1).await;
+    assert_eq!(texts(&items), ["ligne visible"]);
+    // L'adoption est relâchée : le conteneur cesse d'être publié.
+    env.unadopt(&h.shown_key).await;
+    h.agent.services().reload_adopted().await;
+    let started = Instant::now();
+    let (messages, end) = until_closed(&mut client).await;
+    assert_eq!(messages, not_found());
+    assert_eq!(end, End::Closed(1000));
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    // Et la clé, maintenant cachée, reçoit la réponse d'une clé inconnue.
+    let mut again = read(&h.agent, &marie, &h.shown_key, 1000, None).await;
+    expect_error(&mut again, LogsErrorCode::ServiceNotFound).await;
+    h.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_registry_gives_may_read_the_origin_and_nothing_else_of_a_hidden_container() {
+    use hearth_agent::domain::services::logs::{LogOrigin, may_read};
+    let env = env().await;
+    let h = hiding_agent(&env).await;
+    let registry = h.agent.services();
+    let hidden = registry.log_target(&service_key(&h.hidden_key));
+    let shown = registry.log_target(&service_key(&h.shown_key));
+    let gone = registry.log_target(&service_key(&format!("c_{}", "d".repeat(64))));
+    assert_eq!(hidden.origin(), Some(LogOrigin::External));
+    assert_eq!(shown.origin(), Some(LogOrigin::Adopted));
+    assert_eq!(gone, LogTarget::Missing);
+    // Une cible cachée ne porte aucune donnée du conteneur.
+    assert!(
+        matches!(hidden, LogTarget::NoContainer { .. }),
+        "{hidden:?}"
+    );
+    for role in [Role::Admin, Role::ReadOnly] {
+        assert_eq!(
+            may_read(&viewer(role), &hidden),
+            Err(ReadRefusal::NotEnabled)
+        );
+        assert_eq!(may_read(&viewer(role), &shown), Ok(()));
+        // Un service adopté lu sans le droit : refus explicite, distinct de la clé cachée ou inconnue.
+        assert_eq!(
+            may_read(&viewer_without_right(role), &shown),
+            Err(ReadRefusal::MissingRight)
+        );
+    }
+    h.agent.shutdown().await;
 }

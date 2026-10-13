@@ -46,14 +46,38 @@ pub fn state_with(
     env: &Env,
     update: Arc<hearth_agent::application::update::UpdateService>,
 ) -> AppState {
-    let engine = Arc::new(FakeEngine::new());
     // Le pilotage des services désactivé : ces tests n'ouvrent jamais le socket d'un moteur.
+    state_over(env, update, Arc::new(FakeEngine::new()), false)
+}
+
+/// Comme `state_with`, avec ce faux moteur ET le pilotage des services permis : le registre sonde ce moteur
+/// et lit ses conteneurs avant de rendre la main (le moteur est « prêt »), de quoi tester les routes
+/// d'adoption sans démarrer l'agent.
+pub async fn state_with_engine(
+    env: &Env,
+    update: Arc<hearth_agent::application::update::UpdateService>,
+    engine: Arc<FakeEngine>,
+) -> AppState {
+    let state = state_over(env, update, engine, true);
+    state.services.recheck().await;
+    // Les adoptions déjà écrites en base sont publiées comme au démarrage de l'agent.
+    state.services.reload_adopted().await;
+    state.services.resync().await.expect("liste des conteneurs");
+    state
+}
+
+fn state_over(
+    env: &Env,
+    update: Arc<hearth_agent::application::update::UpdateService>,
+    engine: Arc<FakeEngine>,
+    engine_enabled: bool,
+) -> AppState {
     let services = ServicesRegistry::new(
         engine.clone(),
         &super::engine::TestHost,
         env.clock.clone(),
         Arc::new(SystemMonotonic::new()),
-        false,
+        engine_enabled,
         EngineTimings::production(),
     );
     AppState {
@@ -75,6 +99,17 @@ pub fn state_with(
             Arc::new(SystemMonotonic::new()),
         )),
         update,
+        service_adoption: Arc::new(
+            hearth_agent::application::service_adoption::ServiceAdoption::new(
+                services.clone(),
+                Arc::new(hearth_agent::infrastructure::sqlite::SqliteStore::new(
+                    env.db.pool().clone(),
+                )),
+                env.clock.clone(),
+                env.trail.clone(),
+                true,
+            ),
+        ),
         service_logs: Arc::new(hearth_agent::application::service_logs::ServiceLogs::new(
             services.clone(),
             engine,

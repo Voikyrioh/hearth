@@ -1,10 +1,9 @@
 -- Description durable des services créés par Hearth et journal des opérations (HRT-83, ADR-0044,
 -- ADR-0045). Même convention de dates que 0001 (texte UTC à largeur fixe).
 --
--- NUMÉRO : `0011` est pris par la branche des services adoptés, pas encore fusionnée. Cette migration
--- ne dépend d'AUCUNE table de `0011` (ni ne la crée). SQLx applique toute migration absente de
--- `_sqlx_migrations`, quel que soit l'ordre des numéros : `0011` pourra arriver après `0012` sans rien
--- casser, et inversement.
+-- NUMÉRO : `0011` est celle des services adoptés (HRT-79/80), appliquée avant celle-ci. Cette migration
+-- ne dépend d'AUCUNE table de `0011` (ni ne la crée) : SQLx applique toute migration absente de
+-- `_sqlx_migrations`, quel que soit l'ordre des numéros.
 --
 -- Elle REMPLACE `service_actions` et `deployments` (créées par 0009, jamais écrites par aucun code :
 -- aucune requête de l'agent ne les nomme) par un seul modèle d'opération. Elle ne détruit jamais de

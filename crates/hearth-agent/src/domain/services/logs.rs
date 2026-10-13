@@ -563,12 +563,10 @@ fn millis(at: OffsetDateTime) -> i64 {
 
 impl LogContainer {
     /// Ce que la lecture des journaux retient d'un conteneur observé.
-    pub fn from_observation(observation: &Observation) -> Self {
+    pub fn from_observation(observation: &Observation, origin: LogOrigin) -> Self {
         Self {
             id: observation.id.clone(),
-            // Dans cette tranche, tout service est créé hors de Hearth (BR-SVC-003). HRT-79 (adoption)
-            // et la tranche « déployer » (créé par Hearth) remplaceront cette ligne par l'origine publiée.
-            origin: LogOrigin::External,
+            origin,
             run_state: observation.run_state,
             tty: observation.tty,
             readable: observation.log_driver.as_deref() != Some("none"),
@@ -615,16 +613,17 @@ pub enum Relation {
     NewContainer,
 }
 
-/// Qui a créé un service. Aujourd'hui l'agent ne publie que `External` (BR-SVC-003) ; les deux autres
-/// existent pour que la décision de lecture ([`may_read`]) n'ait pas à changer de forme quand HRT-79
-/// (services adoptés) et la tranche « déployer » (créé par Hearth) arrivent.
+/// Qui a créé un service, d'après le filtre de publication (`visibility_of`, HRT-79, ADR-0043) : c'est
+/// l'entrée de la décision de lecture ([`may_read`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogOrigin {
-    /// Créé par Hearth (clé `h_`).
+    /// Créé par Hearth (clé `h_`) : lisible de tous les comptes (BR-ADOPT-016).
     Hearth,
-    /// Créé hors de Hearth puis adopté par un acte (ADR-0043, brouillon).
+    /// Créé hors de Hearth puis adopté : lisible des seuls comptes qui ont le droit de gérer les
+    /// services (BR-ADOPT-015).
     Adopted,
-    /// Créé hors de Hearth, pas adopté.
+    /// Créé hors de Hearth, pas adopté : jamais lisible, la clé reçoit la réponse d'un service inconnu
+    /// (BR-ADOPT-004).
     External,
 }
 
@@ -653,9 +652,9 @@ impl LogTarget {
 }
 
 /// Qui lit : le compte (pas seulement son rôle) tel que la session le montre À CE MOMENT. Les décisions du
-/// 2026-10-13 (droit de gérer les services, HRT-76 ; services adoptés, HRT-79) portent sur un droit du
-/// compte : `services_right` (BR-GRANT-001) y est porté, relu avec la session ; un retrait du droit
-/// change donc le `Viewer` et rejoue la décision. [`may_read`] ne s'en sert pas encore.
+/// 2026-10-13 (droit de gérer les services, services adoptés) portent sur un droit du compte :
+/// `services_right` (BR-GRANT-001) y est porté, relu avec la session ; un retrait du droit change donc
+/// le `Viewer` et rejoue la décision. [`may_read`] s'en sert pour un service adopté.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Viewer {
     pub account: AccountId,
@@ -666,25 +665,34 @@ pub struct Viewer {
 /// Pourquoi ce compte ne lit pas ces journaux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadRefusal {
-    /// Le service n'est pas ouvert à ce compte (journaux d'un service hors Hearth non adopté, ou compte
-    /// sans le droit de gérer les services, à venir : HRT-76, HRT-79).
+    /// Le service n'est pas ouvert à ce compte : service hors Hearth non adopté. Pour l'agent, c'est
+    /// `SERVICE_NOT_FOUND`, la réponse d'une clé inconnue (BR-ADOPT-004).
     NotEnabled,
+    /// Le service est adopté, donc dans la liste de ce compte, et il n'a pas le droit de gérer les
+    /// services : refus explicite (`MISSING_RIGHT`, BR-SLOG-018, BR-GRANT-004) et consigné
+    /// (BR-SLOG-024). Il n'existe que pour un service PUBLIÉ : un conteneur caché ne peut jamais le
+    /// produire, il reste indiscernable d'une clé inconnue.
+    MissingRight,
 }
 
-/// LE point de décision « ce service est-il lisible par ce compte ». Aujourd'hui, les deux rôles lisent
-/// tout service que la liste montre (BR-SLOG-011, BR-SLOG-018). Il est rejoué à l'ouverture, à chaque
-/// nouvelle résolution du conteneur, à chaque changement du compte vu par la session, et
-/// périodiquement pendant une lecture longue (`application::service_logs::LogAccess`) : un droit retiré
-/// ferme la lecture en cours. Les règles « droit de gérer les services » (HRT-76) et « un service hors
-/// Hearth se lit s'il est adopté » (HRT-79) s'ajouteront ICI, avec `viewer` et `target.origin()`, sans
-/// toucher au reste.
+/// LE point de décision « ce service est-il lisible par ce compte » (BR-SLOG-011, BR-SLOG-018,
+/// BR-ADOPT-004, BR-ADOPT-015, BR-ADOPT-016) :
+/// - créé par Hearth : tous les comptes, quel que soit le droit ;
+/// - adopté : les seuls comptes qui ont le droit de gérer les services ;
+/// - hors Hearth et non adopté : personne (la clé reçoit la réponse d'un service inconnu) ;
+/// - aucun service : rien à protéger, l'appelant répond « introuvable ».
 ///
-/// Restriction par le droit (`viewer.services_right`) et par l'adoption : PAS ICI, elle arrive avec
-/// HRT-79 (la route passera alors à `Access::Services` dans `CLASSES`). Aujourd'hui les deux rôles lisent
-/// tout service publié, avec ou sans le droit.
+/// Il est rejoué à l'ouverture, à chaque nouvelle résolution du conteneur, à chaque changement du
+/// compte vu par la session, et périodiquement pendant une lecture longue
+/// (`application::service_logs::LogAccess`) : un droit retiré, une adoption relâchée ou un conteneur
+/// qui cesse d'être publié ferment la lecture en cours.
 pub fn may_read(viewer: &Viewer, target: &LogTarget) -> Result<(), ReadRefusal> {
-    let _ = (viewer, target.origin());
-    Ok(())
+    match target.origin() {
+        None | Some(LogOrigin::Hearth) => Ok(()),
+        Some(LogOrigin::Adopted) if viewer.services_right.can_manage_services() => Ok(()),
+        Some(LogOrigin::Adopted) => Err(ReadRefusal::MissingRight),
+        Some(LogOrigin::External) => Err(ReadRefusal::NotEnabled),
+    }
 }
 
 #[cfg(test)]
@@ -1039,21 +1047,37 @@ mod tests {
     }
 
     #[test]
-    fn both_roles_read_every_listed_service() {
-        // Aujourd'hui le droit ne change rien : sa prise en compte arrive avec HRT-79.
-        for (role, services_right) in [Role::Admin, Role::ReadOnly].into_iter().flat_map(|role| {
-            [ServicesRight::None, ServicesRight::Manage].map(|right| (role, right))
-        }) {
-            let viewer = Viewer {
-                account: AccountId::new("compte"),
-                role,
-                services_right,
-            };
-            for origin in [LogOrigin::Hearth, LogOrigin::Adopted, LogOrigin::External] {
+    fn the_verdict_depends_on_who_created_the_service_and_on_the_right_of_the_account() {
+        // BR-ADOPT-015, BR-ADOPT-016, BR-ADOPT-004 : le rôle n'y entre pour rien, le droit seul décide
+        // pour un service adopté, et un service non adopté n'est lisible de personne.
+        for role in [Role::Admin, Role::ReadOnly] {
+            for services_right in [ServicesRight::None, ServicesRight::Manage] {
+                let viewer = Viewer {
+                    account: AccountId::new("compte"),
+                    role,
+                    services_right,
+                };
+                let verdict = |origin| may_read(&viewer, &LogTarget::NoContainer { origin });
                 assert_eq!(
-                    may_read(&viewer, &LogTarget::NoContainer { origin }),
-                    Ok(())
+                    verdict(LogOrigin::Hearth),
+                    Ok(()),
+                    "{role:?} {services_right:?}"
                 );
+                assert_eq!(
+                    verdict(LogOrigin::Adopted),
+                    if services_right == ServicesRight::Manage {
+                        Ok(())
+                    } else {
+                        Err(ReadRefusal::MissingRight)
+                    },
+                    "{role:?} {services_right:?}"
+                );
+                assert_eq!(
+                    verdict(LogOrigin::External),
+                    Err(ReadRefusal::NotEnabled),
+                    "{role:?} {services_right:?}"
+                );
+                assert_eq!(may_read(&viewer, &LogTarget::Missing), Ok(()));
             }
         }
     }

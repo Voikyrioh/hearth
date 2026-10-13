@@ -256,7 +256,7 @@ impl Env {
     }
 }
 
-/// L'acte que dit une requête (méthode, chemin, corps), comme l'agent le reconstruit : les 10 actes du
+/// L'acte que dit une requête (méthode, chemin, corps), comme l'agent le reconstruit : les actes du
 /// contrat commun. Le retrait d'un poste a son propre contrat (`removal_body`).
 pub fn act_of<'a>(
     method: &str,
@@ -289,6 +289,19 @@ pub fn act_of<'a>(
         ("PUT", ["me", "password"]) => AdminAct::AccountPasswordOwn,
         ("PUT", ["me", "reauth"]) => AdminAct::ReauthSetting {
             mode: serde_json::from_value(body["password"].clone()).expect("réglage"),
+        },
+        ("POST", ["services", "adopt"]) => AdminAct::services_adopt(
+            body["keys"]
+                .as_array()
+                .expect("clés de l'adoption")
+                .iter()
+                .filter_map(serde_json::Value::as_str),
+        ),
+        ("POST", ["services", key, "release"]) => AdminAct::ServiceRelease {
+            // Décodée comme le fait l'agent (une unité au nom échappé voyage en `%5C`).
+            target: hearth_proto::admin_act::decode_segment(key)
+                .expect("clé encodée lisible")
+                .into(),
         },
         _ => panic!("{method} {path} n'est pas un acte du contrat commun"),
     }

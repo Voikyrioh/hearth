@@ -94,10 +94,12 @@ pub struct UnitStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitLookup {
     Loaded(UnitStatus),
-    /// Le système ne connaît plus cette unité (non chargée, introuvable, masquée) : le service n'existe
-    /// plus pour lui.
+    /// Le système répond clairement qu'il n'y a pas de telle unité (`LoadState=not-found`) : supprimée,
+    /// ou transitoire déchargée à l'arrêt. Le SEUL état dont une adoption peut tomber (BR-ADOPT-017).
     NotLoaded,
-    /// Le superviseur ne répond pas (pas de `systemctl`, système sans systemd, délai) : on ne sait rien.
+    /// On ne sait rien de l'unité : pas de `systemctl`, système sans systemd, délai, sortie illisible,
+    /// ou unité qui existe mais ne se charge pas (`error`, `bad-setting`, `masked`, `merged`...). Une
+    /// adoption ne tombe jamais sur cet état.
     Unavailable,
 }
 
@@ -189,8 +191,14 @@ pub fn parse_show(text: &str) -> UnitLookup {
     let (Some(load), Some(active)) = (load, active) else {
         return UnitLookup::Unavailable;
     };
-    if load != "loaded" {
+    // `not-found` est la seule réponse qui dit « cette unité n'existe pas ». Un fichier d'unité en cours
+    // d'édition (`error`, `bad-setting`), une unité masquée ou fusionnée existent : on ne sait rien de
+    // plus, et rien ne doit tomber là-dessus.
+    if load == "not-found" {
         return UnitLookup::NotLoaded;
+    }
+    if load != "loaded" {
+        return UnitLookup::Unavailable;
     }
     UnitLookup::Loaded(UnitStatus {
         activity: UnitActivity::parse(active),
@@ -560,10 +568,14 @@ mod tests {
             parse_show(&text("not-found", "inactive", "dead", "no", "1min 30s")),
             UnitLookup::NotLoaded
         );
-        assert_eq!(
-            parse_show(&text("masked", "inactive", "dead", "no", "1min 30s")),
-            UnitLookup::NotLoaded
-        );
+        // Existe mais ne se charge pas : on ne sait rien, jamais « introuvable ».
+        for load in ["masked", "error", "bad-setting", "merged", "stub"] {
+            assert_eq!(
+                parse_show(&text(load, "inactive", "dead", "no", "1min 30s")),
+                UnitLookup::Unavailable,
+                "{load}"
+            );
+        }
         // Une sortie qui n'est pas celle d'un systemd.
         assert_eq!(parse_show(""), UnitLookup::Unavailable);
         assert_eq!(

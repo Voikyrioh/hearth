@@ -5,6 +5,7 @@
 
 mod account_repo;
 mod admin_accounts;
+mod adoption_tx;
 mod attack_mode_repo;
 mod audit_repo;
 mod audit_sink;
@@ -42,6 +43,7 @@ mod update;
 
 pub use account_repo::{AccountRepo, AccountTx};
 pub use admin_accounts::{AdminAccounts, AdminAccountsError, AdminCredential};
+pub use adoption_tx::{AdoptionTx, AdoptionWrite, NewAdoption, ReleasedAdoption};
 pub use attack_mode_repo::{AttackModeRepo, AttackModeTx};
 pub use audit_repo::{AuditRepo, AuditTx};
 pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
@@ -77,7 +79,7 @@ pub use secret_sealer::{
 };
 pub use security_feed::SecurityFeed;
 pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState};
-pub use service_repo::{ServiceRepo, SupervisedRecord};
+pub use service_repo::{AdoptedRecord, ServiceRepo, SupervisedRecord};
 pub use service_spec_repo::{
     NewRevision, SealedField, ServiceSpecRepo, SpecStoreError, StoredRevision,
 };

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM adopted_services WHERE service_key = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b6ed5c97d428bbd5207262a1cff3a4d1bbfdf1613a366b14319d6af3c6318063"
+}

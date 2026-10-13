@@ -10,7 +10,7 @@ liens: [ADR-0006, ADR-0009, ADR-0031, ADR-0034, ADR-0037, ADR-0039 (brouillon), 
 ---
 
 > Posée par HRT-83. Le propriétaire a accepté le principe le 2026-10-13 : « la configuration des services est gardée chiffrée sur le serveur, la clé dans un fichier à côté ». Les choix de détail ci-dessous (algorithme, données associées, comportement sans clé) sont ceux de Claude et attendent sa relecture.
-> Numérotation de la migration : `0012` (la `0011` est prise par la branche des services adoptés, pas encore fusionnée ; cette migration ne dépend d'aucune table de `0011`).
+> Numérotation de la migration : `0012` (la `0011` est celle des services adoptés, ADR-0043 ; cette migration ne dépend d'aucune table de `0011`).
 
 # ADR-0044 : La description durable d'un service
 
