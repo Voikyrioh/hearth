@@ -36,6 +36,7 @@ impl From<FilterError> for LinkError {
 }
 
 /// Un refus de l'agent, lu dans son enveloppe d'erreur.
+#[cfg(test)]
 pub(super) fn rejection(body: &Value) -> LinkError {
     rejection_at(body, 0)
 }
@@ -57,20 +58,22 @@ pub(super) fn rejection_at(body: &Value, status: u16) -> LinkError {
 
 /// Comme [`rejection`], mais un refus qui porte `details.reason` le dit (`RejectedBecause`) : adopter et
 /// relâcher, dont l'interface doit distinguer les refus que le seul code ne sépare pas. Un refus sans raison
-/// reste `Rejected`.
-pub(super) fn rejection_with_reason(body: &Value) -> LinkError {
+/// reste `Rejected`. Comme [`rejection_at`], un code inconnu de cette version retombe sur le sens du statut HTTP
+/// (BR-COMPAT-001 point 8) : FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB.
+pub(super) fn rejection_with_reason(body: &Value, status: u16) -> LinkError {
     let Some(parsed) = serde_json::from_value::<ErrorBody>(body.clone()).ok() else {
         return LinkError::Rejected(None);
     };
     if parsed.error.missing_right().is_some() {
-        return rejection(body);
+        return rejection_at(body, status);
     }
+    let code = parsed.error.code.or_from_status(status);
     match parsed.error.details.get("reason").and_then(Value::as_str) {
         Some(reason) => LinkError::RejectedBecause {
-            code: parsed.error.code,
+            code,
             reason: RefusalReason::from_wire(reason),
         },
-        None => LinkError::Rejected(Some(parsed.error.code)),
+        None => LinkError::Rejected(Some(code)),
     }
 }
 
@@ -333,7 +336,7 @@ mod tests {
         for (code, reason, expected) in cases {
             let body = ErrorBody::with_details(code, "texte", json!({ "reason": reason }));
             assert_eq!(
-                rejection_with_reason(&serde_json::to_value(body).unwrap()),
+                rejection_with_reason(&serde_json::to_value(body).unwrap(), 0),
                 LinkError::RejectedBecause {
                     code,
                     reason: expected
@@ -344,20 +347,52 @@ mod tests {
         // Une raison qui n'est pas un texte, ou aucune raison : le refus ordinaire.
         let odd = ErrorBody::with_details(ErrorCode::Conflict, "x", json!({ "reason": 3 }));
         assert_eq!(
-            rejection_with_reason(&serde_json::to_value(odd).unwrap()),
+            rejection_with_reason(&serde_json::to_value(odd).unwrap(), 0),
             LinkError::Rejected(Some(ErrorCode::Conflict))
         );
         assert_eq!(
-            rejection_with_reason(&json!("n'importe quoi")),
+            rejection_with_reason(&json!("n'importe quoi"), 409),
             LinkError::Rejected(None)
         );
         // Le droit qui manque garde la priorité.
         let right =
             serde_json::to_value(ErrorBody::missing_right("services", "pas le droit")).unwrap();
         assert_eq!(
-            rejection_with_reason(&right),
+            rejection_with_reason(&right, 403),
             LinkError::MissingRight("services".to_owned())
         );
+    }
+
+    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un code inconnu retombe sur le sens du statut HTTP aussi pour les refus
+    /// d'adoption et de relâche, avec ou sans raison ; un `2xx` ou un statut hors table reste `Unknown`.
+    #[test]
+    fn a_reasoned_refusal_with_an_unknown_code_falls_back_on_the_http_status() {
+        let unknown = |details| ErrorBody::with_details(ErrorCode::Unknown, "texte", details);
+        let without = serde_json::to_value(unknown(json!({}))).unwrap();
+        let with = serde_json::to_value(unknown(json!({ "reason": "reauth_required" }))).unwrap();
+        assert_eq!(
+            rejection_with_reason(&without, 409),
+            LinkError::Rejected(Some(ErrorCode::Conflict))
+        );
+        assert_eq!(
+            rejection_with_reason(&without, 403),
+            LinkError::Rejected(Some(ErrorCode::ForbiddenRole))
+        );
+        assert_eq!(
+            rejection_with_reason(&with, 409),
+            LinkError::RejectedBecause {
+                code: ErrorCode::Conflict,
+                reason: RefusalReason::ReauthRequired
+            }
+        );
+        // Aucun repli à inventer : un statut hors table (ou un `2xx`) reste inconnu.
+        for status in [0, 200, 418] {
+            assert_eq!(
+                rejection_with_reason(&without, status),
+                LinkError::Rejected(Some(ErrorCode::Unknown)),
+                "{status}"
+            );
+        }
     }
 
     #[test]

@@ -183,12 +183,13 @@ fn write_unreadable_result(host: &FsUpdateHost, job: Option<&Job>) -> Result<(),
         version: job.map(|job| job.version.clone()),
         previous: job.map(|job| job.previous.clone()).unwrap_or_default(),
         outcome: UpdateOutcome::Failed.into(),
-        reason: Some(UpdateReason::Interrupted),
+        reason: Some(UpdateReason::Interrupted.into()),
         at: format_time(SystemClock.now()),
         requested_by: job.and_then(|job| job.requested_by.clone()),
         client_name: job.and_then(|job| job.client_name.clone()),
         client_addr: job.and_then(|job| job.client_addr.clone()),
         reported: false,
+        extra: Default::default(),
     };
     host.write_last(&record)
         .map_err(|error| AppError::Supervise {

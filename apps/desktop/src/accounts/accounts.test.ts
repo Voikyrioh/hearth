@@ -46,7 +46,7 @@ describe("accounts store", () => {
     });
     vi.spyOn(bridge, "listAccounts").mockImplementationOnce(async () => {
       await gate;
-      return { kind: "listed" as const, accounts: [], me: "", rightsKnown: true };
+      return { kind: "listed" as const, accounts: [], me: "", rightsKnown: true, unreadable: 0 };
     });
     const first = store.load("forge");
     const second = store.load("forge");

@@ -53,6 +53,7 @@ describe("services store", () => {
           throw new Error("moteur attendu");
         })(),
       services: [],
+      unreadable: 0,
     });
     expect(store.of("forge")?.services).toHaveLength(1);
     store.reset();

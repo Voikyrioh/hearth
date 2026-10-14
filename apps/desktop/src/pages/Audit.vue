@@ -8,6 +8,7 @@ import HIcon from "@/components/atoms/HIcon.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import AuditDetailDialog from "@/components/molecules/AuditDetailDialog.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
+import UnreadableNote from "@/components/molecules/UnreadableNote.vue";
 import AuditFilters from "@/components/organisms/AuditFilters.vue";
 import AuditTable from "@/components/organisms/AuditTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
@@ -221,6 +222,8 @@ const reasonText = computed(() =>
         :text="''"
       />
     </div>
+
+    <UnreadableNote :count="audit.unreadable" />
 
     <div v-if="audit.loadMoreFailed" class="audit__error" role="alert">
       <span>{{ t("audit.moreFailed") }}</span>

@@ -56,6 +56,7 @@ export const useServicesStore = defineStore("services", () => {
         lastReady: null,
         receivedAt: now,
         engineReceivedAt: null,
+        unreadable: 0,
       });
       return;
     }
@@ -82,6 +83,7 @@ export const useServicesStore = defineStore("services", () => {
       // Le repère de réception est celui de la LIAISON (elle seule sait quand le message est arrivé, y
       // compris pour un état rejoué ou relu du disque) : jamais l'heure à laquelle ce magasin le traite.
       engineReceivedAt: event.engineReceivedAt,
+      unreadable: event.unreadable,
     });
   }
 

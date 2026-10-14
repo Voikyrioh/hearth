@@ -51,7 +51,7 @@ fn acted<T: DeserializeOwned>(outcome: ActionOutcome, what: &str) -> Result<Acte
         ActionOutcome::ResultUnknown { id } => Ok(Acted::ResultUnknown { id }),
         ActionOutcome::Completed { status, body, .. } => {
             if !(200..300).contains(&status) {
-                return Err(super::audit::rejection_with_reason(&body));
+                return Err(super::audit::rejection_with_reason(&body, status));
             }
             parse(body, what).map(Acted::Done)
         }

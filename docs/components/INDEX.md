@@ -41,6 +41,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`ReleaseNotesDialog`](./ReleaseNotesDialog.md) — Notes de version en texte brut (boîte modale).
 - [`ErrorBoundary`](./ErrorBoundary.md) — Frontière d'erreur d'une page.
 - [`EmptyState`](./EmptyState.md) — Placeholder de vue vide.
+- [`UnreadableNote`](./UnreadableNote.md) — Ligne « n éléments ne sont pas lisibles par cette version » sous une liste partielle.
 - [`SettingRow`](./SettingRow.md) — Ligne de réglage.
 - [`ComingSoonPanel`](./ComingSoonPanel.md) — Carte « Bientôt disponible ».
 - [`ColorSwatches`](./ColorSwatches.md) — Palette des 8 couleurs de serveur.

@@ -56,6 +56,7 @@ export default defineConfig({
         "hrt67-shell.spec.ts",
         "hrt133-sessions.spec.ts",
         "hrt134-141-ux.spec.ts",
+        "unreadable.spec.ts",
       ],
       use: { baseURL: `http://localhost:${DEV_PORT}` },
     },

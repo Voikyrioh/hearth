@@ -588,6 +588,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       accounts: this.accounts.list(server),
       me: this.accounts.meId(server),
       rightsKnown: this.accounts.rightsKnown(server),
+      unreadable: this.accounts.unreadable.get(serverId) ?? 0,
     };
   }
 

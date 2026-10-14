@@ -7,6 +7,7 @@ import HSkeleton from "@/components/atoms/HSkeleton.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import ServiceRightReason from "@/components/molecules/ServiceRightReason.vue";
+import UnreadableNote from "@/components/molecules/UnreadableNote.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
 import ServiceDetail from "@/components/organisms/ServiceDetail.vue";
 import ServiceTable from "@/components/organisms/ServiceTable.vue";
@@ -354,6 +355,8 @@ async function openDocs() {
           heading="h2"
           data-services-empty
         />
+
+        <UnreadableNote :count="entry?.unreadable ?? 0" />
       </template>
     </template>
   </div>

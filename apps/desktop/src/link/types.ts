@@ -275,4 +275,6 @@ export interface AccountList {
   me: string;
   /** L'agent annonce `service-rights` : sinon `managesServices` est faux pour tous parce qu'il ne sait pas le dire (BR-GRANT-016). */
   rightsKnown: boolean;
+  /** Combien de comptes l'agent a envoyés sans que cette version sache les lire (écartés, BR-COMPAT-001 point 10). */
+  unreadable: number;
 }

@@ -5,6 +5,7 @@ import { SCREEN_ILLUSTRATIONS } from "@/assets/illustrations/screens";
 import HButton from "@/components/atoms/HButton.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
+import UnreadableNote from "@/components/molecules/UnreadableNote.vue";
 import AccountDetailDialog from "@/components/organisms/AccountDetailDialog.vue";
 import AccountTable from "@/components/organisms/AccountTable.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
@@ -167,6 +168,7 @@ const refusalText = (refusal: { kind: string }) => refusalMessage(refusal as nev
     @remove="removing = $event"
     @detail="detail = $event"
   />
+  <UnreadableNote :count="entry?.status === 'ready' ? entry.unreadable : 0" />
   <AccountDetailDialog
     :account="detail"
     :rights-known="entry?.rightsKnown ?? false"

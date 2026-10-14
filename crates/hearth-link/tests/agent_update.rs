@@ -256,6 +256,7 @@ fn succeeded_record() -> UpdateRecord {
         client_name: None,
         client_addr: None,
         reported: false,
+        extra: Default::default(),
     }
 }
 

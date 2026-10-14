@@ -54,6 +54,8 @@ export const fr = {
     keepAddressOldAgent: "Disponible quand l'agent de ce serveur est à jour.",
     keepAddressAttackNoKey:
       "Le mode attaque est actif et ce poste n'a pas de clé enregistrée : si tu ne le gardes pas reconnu, ta session sera refusée tout de suite après le changement.",
+    keepAddressAttackUnknownNoKey:
+      "Ce client ne sait pas lire l'état du mode attaque de ce serveur, et ce poste n'a pas de clé enregistrée : si le mode attaque est actif et que tu ne gardes pas ce poste reconnu, ta session sera refusée tout de suite après le changement.",
     nextPassword: "Nouveau mot de passe",
     nextPasswordPlaceholder: "Nouveau mot de passe",
     confirmNextPassword: "Confirme le nouveau mot de passe",
@@ -152,6 +154,7 @@ export const fr = {
     activate: "Activer le mode attaque",
     deactivate: "Désactiver le mode attaque",
     modeActive: "Mode attaque actif",
+    modeUnknownTitle: "État de protection illisible",
     modeSuspendedTitle: "Mode attaque suspendu",
     modeText: "Seuls les postes reconnus peuvent se connecter.",
     // FIX:01M4DJZAFYE77R5MKKA2NV6CE3 (C34) : éteint, la carte dit ce que le mode FERA ; actif, ce qui se passe.
@@ -292,6 +295,10 @@ export const fr = {
     confirm: "Confirmer",
     retry: "Réessayer",
     loading: "Chargement",
+    unreadableOne:
+      "1 élément n'est pas lisible par cette version de Hearth. Mets Hearth à jour sur ce PC.",
+    unreadableMany:
+      "{n} éléments ne sont pas lisibles par cette version de Hearth. Mets Hearth à jour sur ce PC.",
   },
   rail: {
     skipToContent: "Aller au contenu",

@@ -25,7 +25,7 @@ export interface TrustedDevice {
 
 /** La liste, ou « l'agent ne connaît pas cette fonction » (agent d'avant la clé d'appareil). */
 export type TrustedDevices =
-  | { kind: "listed"; devices: TrustedDevice[]; max: number }
+  | { kind: "listed"; devices: TrustedDevice[]; max: number; unreadable: number }
   | { kind: "unsupported" };
 
 /** Pourquoi un retrait est refusé : le message est choisi par l'interface d'après `kind`. */
@@ -42,7 +42,12 @@ export type DeviceRemovalOutcome =
 
 export function toTrustedDevices(dto: TrustedDevicesDto): TrustedDevices {
   if (dto.kind === "unsupported") return dto;
-  return { kind: "listed", devices: dto.devices.map(toTrustedDevice), max: dto.max };
+  return {
+    kind: "listed",
+    devices: dto.devices.map(toTrustedDevice),
+    max: dto.max,
+    unreadable: dto.unreadable,
+  };
 }
 
 function toTrustedDevice(dto: TrustedDeviceDto): TrustedDevice {
