@@ -216,6 +216,20 @@ async fn a_proof_for_one_usage_identifier_server_or_address_is_worth_nothing_for
     );
 }
 
+/// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un usage de défi que cette version ne connaît pas (client plus récent) ne
+/// reçoit JAMAIS de défi : refus typé, pas un défi d'un autre usage.
+#[tokio::test]
+async fn a_challenge_for_a_purpose_this_version_does_not_know_is_refused() {
+    let env = env().await;
+    let refused = env
+        .trust
+        .issue_challenge("marie", ChallengePurpose::Unknown, CLIENT_ADDR);
+    assert!(matches!(
+        refused,
+        Err(hearth_agent::application::trust::TrustError::UnknownPurpose)
+    ));
+}
+
 #[tokio::test]
 async fn an_expired_challenge_is_refused_and_one_at_the_limit_is_not() {
     let env = env().await;

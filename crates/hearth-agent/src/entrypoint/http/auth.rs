@@ -166,7 +166,8 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         ErrorCode::PostNotRecognized => Some(Outcome::Denied(Reason::NotRecognized)),
         ErrorCode::NotFound => Some(Outcome::Failed(Reason::NotFound)),
         ErrorCode::Busy => Some(Outcome::Failed(Reason::Busy)),
-        ErrorCode::InternalError => Some(Outcome::Failed(Reason::Internal)),
+        // `Unknown` n'existe qu'à la lecture : l'agent ne l'émet jamais.
+        ErrorCode::InternalError | ErrorCode::Unknown => Some(Outcome::Failed(Reason::Internal)),
         ErrorCode::ManagedInstall => Some(Outcome::Failed(Reason::ManagedInstall)),
         ErrorCode::BadSignature => Some(Outcome::Failed(Reason::BadSignature)),
         ErrorCode::Unauthenticated

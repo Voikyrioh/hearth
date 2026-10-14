@@ -22,6 +22,8 @@ const props = defineProps<{
   onPage?: boolean;
   /** Le mode attaque est déjà actif ou suspendu : activer de nouveau n'a pas de sens (on désactive depuis la page). */
   modeOn?: boolean;
+  /** Ce client ne sait pas lire le mode attaque : pas de bouton « Activer » fondé sur un état inconnu. */
+  modeUnknown?: boolean;
 }>();
 
 defineEmits<{ activate: []; details: [] }>();
@@ -29,6 +31,7 @@ defineEmits<{ activate: []; details: [] }>();
 const others = computed(() => props.alert.others ?? 0);
 
 const text = computed(() => {
+  if (props.role === "unknown") return t("security.alertRoleUnknown");
   if (props.role !== "admin") return t("security.alertReadonly");
   if (props.alert.own) {
     if (others.value === 0) return t("security.alertOwn");
@@ -54,7 +57,7 @@ const reason = computed(() => {
     {{ text }}
     <template #actions>
       <HButton
-        v-if="!modeOn && !onPage"
+        v-if="!modeOn && !modeUnknown && !onPage"
         variant="secondary"
         size="sm"
         needs-link

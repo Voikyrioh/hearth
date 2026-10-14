@@ -115,6 +115,10 @@ impl fmt::Debug for SignedAuth {
 pub enum SessionNotice {
     Revoked,
     Expired,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 /// Message du sujet `update` tel que l'AGENT l'envoie. Sur le fil, il est identique à
@@ -198,6 +202,11 @@ pub enum ServerMessage {
     /// Erreur du protocole (mêmes codes que l'API HTTP) ; l'agent ferme ensuite le flux quand
     /// l'erreur est fatale (authentification), pas quand il s'agit d'un message mal formé.
     Error(ErrorDetail),
+    /// Un message dont le `type` est inconnu de cette version (ajouté par un agent plus récent) :
+    /// toléré à la lecture, ignoré par la liaison, jamais pris pour un message connu
+    /// (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 #[cfg(test)]
@@ -250,11 +259,12 @@ mod tests {
             serde_json::to_value(ServerMessage::Update(progress)).expect("json"),
             value
         );
-        // Un type que ni l'un ni l'autre ne connaît (un sujet futur) reste une erreur de lecture,
-        // que la bibliothèque de liaison traite comme une trame sans intérêt.
-        assert!(
+        // Un type que ni l'un ni l'autre ne connaît (un sujet futur) se lit `Unknown` (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB) :
+        // la bibliothèque de liaison l'ignore.
+        assert_eq!(
             serde_json::from_value::<ServerMessage>(json!({ "type": "something_new", "x": 1 }))
-                .is_err()
+                .expect("lue"),
+            ServerMessage::Unknown
         );
         assert_eq!(
             serde_json::from_value::<UpdateMessage>(value).expect("update"),
@@ -291,7 +301,10 @@ mod tests {
             message
         );
         // Un client qui ne connaît que `ServerMessage` lit la trame comme inconnue : il l'ignore.
-        assert!(serde_json::from_value::<ServerMessage>(value).is_err());
+        assert_eq!(
+            serde_json::from_value::<ServerMessage>(value).expect("lue"),
+            ServerMessage::Unknown
+        );
     }
 
     #[test]
@@ -323,7 +336,7 @@ mod tests {
         let snapshot = ServicesMessage::ServicesSnapshot(ServicesState {
             rev: 3,
             engine: engine.clone(),
-            services: vec![],
+            services: vec![].into(),
         });
         let value = serde_json::to_value(&snapshot).expect("json");
         assert_eq!(value["type"], "services_snapshot");
@@ -336,7 +349,7 @@ mod tests {
         let delta = ServicesMessage::ServicesDelta(ServicesDelta {
             rev: 4,
             engine: None,
-            upserts: vec![],
+            upserts: vec![].into(),
             removed: vec!["c_1".into()],
         });
         assert_eq!(
@@ -344,7 +357,10 @@ mod tests {
             "services_delta"
         );
         // Un client qui ne connaît que `ServerMessage` ignore la trame.
-        assert!(serde_json::from_value::<ServerMessage>(value).is_err());
+        assert_eq!(
+            serde_json::from_value::<ServerMessage>(value).expect("lue"),
+            ServerMessage::Unknown
+        );
         let subscribe: ClientMessage = serde_json::from_value(
             json!({ "type": "subscribe", "topics": ["metrics", "services"] }),
         )

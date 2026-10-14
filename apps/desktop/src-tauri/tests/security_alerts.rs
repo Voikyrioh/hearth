@@ -102,6 +102,30 @@ fn the_automatic_end_is_announced_only_after_having_seen_the_mode_on() {
     );
 }
 
+/// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un état du mode attaque que ce client ne connaît pas (agent plus récent) ne
+/// change rien à ce qu'on savait : il n'annonce ni une fin, ni un début, et n'efface pas un mode vu actif.
+#[test]
+fn an_unknown_attack_mode_changes_nothing_of_what_was_known() {
+    let mut watch = SecurityWatch::default();
+    watch.observe("a", &notice(false, ModeKind::Active, false));
+    // Inconnu pendant que le mode était vu actif, puis éteint tout seul : la fin est bien annoncée.
+    let unknown = watch.observe("a", &notice(false, ModeKind::Unknown, true));
+    assert!(!unknown.mode_stopped_by_agent);
+    assert!(
+        watch
+            .observe("a", &notice(false, ModeKind::Off, true))
+            .mode_stopped_by_agent
+    );
+    // Inconnu sans avoir jamais vu le mode actif : aucune fin n'est inventée.
+    let mut fresh = SecurityWatch::default();
+    fresh.observe("b", &notice(false, ModeKind::Unknown, true));
+    assert!(
+        !fresh
+            .observe("b", &notice(false, ModeKind::Off, true))
+            .mode_stopped_by_agent
+    );
+}
+
 #[test]
 fn a_security_notification_shares_the_one_per_minute_window_with_the_link() {
     let mut gate = NotificationGate::default();

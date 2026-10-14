@@ -282,6 +282,9 @@ fn decide(op: &mut PendingOp, lookup: Lookup, now: WallTime) -> Resolution {
             // Une réponse 4xx a été rendue : l'action a été refusée, donc pas exécutée.
             OperationStatus::Failed => Resolution::Final(Outcome::NotExecuted),
             OperationStatus::Interrupted => Resolution::Final(Outcome::StillUnknown),
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un état que cette version ne connaît pas n'est ni une réussite
+            // ni un échec : on ne sait pas, et l'action n'est jamais rejouée.
+            OperationStatus::Unknown => Resolution::Final(Outcome::StillUnknown),
             OperationStatus::Running => {
                 op.checks = op.checks.saturating_add(1);
                 if op.checks >= MAX_RUNNING_CHECKS {

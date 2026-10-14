@@ -8,6 +8,7 @@
 
 use hearth_proto::api::accounts::{AccountItem, AccountsResponse};
 use hearth_proto::api::sessions::MeResponse;
+use hearth_proto::lenient::Items;
 
 use super::LinkManager;
 use crate::domain::server::ServerId;
@@ -20,7 +21,8 @@ const ME_PATH: &str = "/me";
 /// La liste des comptes et le compte de la session courante.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountsRead {
-    pub accounts: Vec<AccountItem>,
+    /// Un compte illisible par cette version est écarté et compté (`Items::unreadable`).
+    pub accounts: Items<AccountItem>,
     /// Identifiant de l'AGENT du compte de la session : « qui est moi » ne se décide jamais par une
     /// comparaison de texte avec la saisie de connexion.
     pub me: String,
@@ -44,6 +46,12 @@ impl LinkManager {
         let capabilities = self.agent_capabilities(&target).await?;
         let me: MeResponse = serde_json::from_value(me)
             .map_err(|e| LinkError::Protocol(format!("compte courant illisible : {e}")))?;
+        if list.accounts.unreadable() > 0 {
+            tracing::warn!(
+                unreadable = list.accounts.unreadable(),
+                "comptes illisibles par cette version, écartés"
+            );
+        }
         Ok(AccountsRead {
             accounts: list.accounts,
             me: me.account.id,

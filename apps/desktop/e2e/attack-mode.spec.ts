@@ -220,3 +220,42 @@ test("changer son mot de passe : la case « Garder ce poste reconnu » est déco
   await expect(box).toBeChecked();
   await shoot(page, "attaque-garder-poste");
 });
+
+// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB (BR-COMPAT-001 point 4) : un état du mode attaque que ce client ne sait pas lire
+// (agent plus récent) n'est ni « Actif » ni « Inactif » : libellé neutre, aucun bouton qui agit sur le mode, pas de
+// bandeau permanent qui affirme une attaque, mais l'alerte, elle, reste visible.
+test("mode attaque d'un état inconnu : dit qu'il ne sait pas lire, aucun bouton, aucun bandeau d'attaque", async ({
+  page,
+}) => {
+  await page.goto("/?nodev#/servers/forge/security");
+  await expect(page.locator("[data-attack-mode-state]")).toHaveText("Inactif");
+  await sim(page).mode("forge", "unknown");
+  await expect(page.locator("[data-attack-mode-state]")).toHaveText("Inconnu");
+  const panel = page.locator("[data-attack-mode-panel]");
+  await expect(panel).toContainText(
+    "Ce client ne sait pas lire l'état de protection de ce serveur. Mets Hearth à jour sur ce PC.",
+  );
+  await expect(panel.getByRole("button")).toHaveCount(0);
+  await expect(panel).not.toContainText("Actif");
+  await expect(panel).not.toContainText("Inactif");
+  await expect(modeBanner(page)).toHaveCount(0);
+  // La marque du serveur ne dit pas « mode attaque actif ».
+  await expect(page.locator('[data-server="forge"] [role="img"]')).not.toHaveAttribute(
+    "aria-label",
+    /mode attaque actif/,
+  );
+  // Une alerte reste visible (elle ne dépend pas du mode) et ne propose pas d'activer le mode à l'aveugle.
+  await sim(page).alert("forge", true);
+  await expect(alertBanner(page)).toBeVisible();
+  await expect(page.locator("[data-alert-card]")).toContainText(
+    "Ce client ne sait pas lire l'état de protection de ce serveur.",
+  );
+  await page.goto("/?nodev#/servers/forge/dashboard");
+  await expect(alertBanner(page)).toBeVisible();
+  await expect(
+    alertBanner(page).getByRole("button", { name: "Activer le mode attaque" }),
+  ).toHaveCount(0);
+  expect(await sim(page).calls()).not.toContain("attack-mode on");
+  expect(await sim(page).calls()).not.toContain("attack-mode off");
+  await shoot(page, "attaque-inconnu");
+});

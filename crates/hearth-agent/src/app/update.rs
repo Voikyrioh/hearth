@@ -182,7 +182,7 @@ fn write_unreadable_result(host: &FsUpdateHost, job: Option<&Job>) -> Result<(),
     let record = UpdateRecord {
         version: job.map(|job| job.version.clone()),
         previous: job.map(|job| job.previous.clone()).unwrap_or_default(),
-        outcome: UpdateOutcome::Failed,
+        outcome: UpdateOutcome::Failed.into(),
         reason: Some(UpdateReason::Interrupted),
         at: format_time(SystemClock.now()),
         requested_by: job.and_then(|job| job.requested_by.clone()),

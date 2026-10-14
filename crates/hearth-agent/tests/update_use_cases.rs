@@ -337,7 +337,7 @@ async fn a_supervisor_that_still_works_counts_as_an_update_in_progress_after_a_r
     rig.host.with(|s| {
         s.state = Some(hearth_agent::domain::update::SupervisorState {
             version: "0.2.0".into(),
-            step: UpdateStep::Check,
+            step: UpdateStep::Check.into(),
             previous: "0.1.0".into(),
             requester: Default::default(),
         });
@@ -440,7 +440,7 @@ async fn the_result_written_by_the_supervisor_is_announced_once_and_journaled_on
         s.last = Some(UpdateRecord {
             version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
-            outcome: UpdateOutcome::Succeeded,
+            outcome: UpdateOutcome::Succeeded.into(),
             reason: None,
             at: "2026-10-05T10:00:00Z".into(),
             requested_by: Some("marie".into()),
@@ -464,6 +464,41 @@ async fn the_result_written_by_the_supervisor_is_announced_once_and_journaled_on
     assert!(!rig.service.status().in_progress);
 }
 
+/// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB (B2) : une issue écrite par un agent plus récent n'est ni un succès ni un
+/// échec : l'entrée du journal le dit, les clients reçoivent `unknown`, le fichier garde la valeur d'origine.
+#[tokio::test]
+async fn an_outcome_from_a_newer_agent_is_neither_success_nor_failure_and_is_kept_as_written() {
+    let env = env().await;
+    let rig = Rig::new(&env, true, false);
+    let foreign = UpdateRecord {
+        outcome: serde_json::from_str("\"partly_applied\"").unwrap(),
+        ..record(UpdateOutcome::Succeeded, None)
+    };
+    rig.host.with(|s| s.last = Some(foreign));
+    let mut events = rig.feed_receiver();
+    rig.service.resume().await;
+    let done = next_matching(&mut events, |p| p.step == UpdateStep::Done).await;
+    assert_eq!(done.outcome, Some(UpdateOutcome::Unknown));
+    let entries = journal(&env).await;
+    assert_eq!(entries.len(), 1);
+    let reason = entries[0].reason.as_deref().unwrap_or_default();
+    assert!(reason.contains("inconnu de cette version"), "{reason}");
+    assert!(!reason.contains("mise à jour échouée"), "{reason}");
+    assert!(!reason.contains("retour à la version"), "{reason}");
+    assert_ne!(entries[0].outcome.code(), "ok");
+    // Le fichier : annoncée une fois, valeur d'origine intacte, et la seconde lecture n'écrit rien de plus.
+    let last = rig.host.with(|s| s.last.clone()).unwrap();
+    assert!(last.reported);
+    assert_eq!(
+        serde_json::to_string(&last.outcome).unwrap(),
+        "\"partly_applied\""
+    );
+    rig.service.resume().await;
+    assert_eq!(journal(&env).await.len(), 1);
+    let status = rig.service.status().last.unwrap();
+    assert_eq!(status.outcome, UpdateOutcome::Unknown);
+}
+
 #[tokio::test]
 async fn a_rolled_back_update_is_announced_with_its_reason_and_journaled_as_failed() {
     let env = env().await;
@@ -472,7 +507,7 @@ async fn a_rolled_back_update_is_announced_with_its_reason_and_journaled_as_fail
         s.last = Some(UpdateRecord {
             version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
-            outcome: UpdateOutcome::RolledBack,
+            outcome: UpdateOutcome::RolledBack.into(),
             reason: Some(UpdateReason::NoAnswer),
             at: "2026-10-05T10:00:00Z".into(),
             requested_by: Some("marie".into()),
@@ -524,7 +559,7 @@ async fn the_result_survives_the_loss_of_the_service_itself() {
         s.last = Some(UpdateRecord {
             version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
-            outcome: UpdateOutcome::Succeeded,
+            outcome: UpdateOutcome::Succeeded.into(),
             reason: None,
             at: "2026-10-05T10:00:00Z".into(),
             requested_by: None,
@@ -599,7 +634,7 @@ async fn a_version_that_is_not_newer_or_a_bad_field_is_refused_without_a_trace()
 fn intent(step: UpdateStep) -> hearth_agent::domain::update::SupervisorState {
     hearth_agent::domain::update::SupervisorState {
         version: "0.2.0".into(),
-        step,
+        step: step.into(),
         previous: "0.1.0".into(),
         requester: hearth_agent::domain::update::Requester {
             by: Some("marie".into()),
@@ -641,7 +676,7 @@ fn record(outcome: UpdateOutcome, reason: Option<UpdateReason>) -> UpdateRecord 
     UpdateRecord {
         version: Some("0.2.0".into()),
         previous: "0.1.0".into(),
-        outcome,
+        outcome: outcome.into(),
         reason,
         at: "2026-10-05T10:00:00Z".into(),
         requested_by: Some("marie".into()),
@@ -903,7 +938,7 @@ async fn a_recovery_whose_launch_keeps_failing_is_bounded_across_agent_restarts_
         .with(|s| s.last.clone())
         .expect("un résultat écrit");
     assert_eq!(
-        (last.outcome, last.reason),
+        (last.outcome.wire(), last.reason),
         (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed))
     );
     // Les démarrages d'après ne retentent rien et ne journalisent plus.

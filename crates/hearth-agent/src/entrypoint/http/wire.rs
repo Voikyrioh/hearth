@@ -20,10 +20,14 @@ pub fn role_to_wire(role: Role) -> RoleName {
     }
 }
 
-pub fn role_from_wire(role: RoleName) -> Role {
+/// Le rôle demandé par un client. Un rôle que cette version ne connaît pas (client plus récent) est un
+/// refus de validation typé, jamais un rôle par défaut (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+pub fn role_from_wire(role: RoleName) -> Result<Role, ApiError> {
     match role {
-        RoleName::Admin => Role::Admin,
-        RoleName::Readonly => Role::ReadOnly,
+        RoleName::Admin => Ok(Role::Admin),
+        RoleName::Readonly => Ok(Role::ReadOnly),
+        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB
+        RoleName::Unknown => Err(ApiError::invalid("role", "Rôle inconnu de cet agent")),
     }
 }
 
@@ -102,9 +106,21 @@ mod tests {
     use time::Duration;
 
     #[test]
+    fn a_role_this_version_does_not_know_is_a_typed_validation_refusal_never_a_default() {
+        let Err(ApiError(body)) = role_from_wire(RoleName::Unknown) else {
+            panic!("un rôle inconnu doit être refusé");
+        };
+        assert_eq!(
+            body.error.code,
+            hearth_proto::error::ErrorCode::ValidationError
+        );
+        assert_eq!(body.error.details["field"], "role");
+    }
+
+    #[test]
     fn roles_convert_both_ways() {
         for role in [Role::Admin, Role::ReadOnly] {
-            assert_eq!(role_from_wire(role_to_wire(role)), role);
+            assert_eq!(role_from_wire(role_to_wire(role)).ok(), Some(role));
         }
     }
 

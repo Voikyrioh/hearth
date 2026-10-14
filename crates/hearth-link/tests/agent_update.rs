@@ -249,7 +249,7 @@ fn succeeded_record() -> UpdateRecord {
     UpdateRecord {
         version: Some("0.2.0".to_owned()),
         previous: "0.1.0".to_owned(),
-        outcome: UpdateOutcome::Succeeded,
+        outcome: UpdateOutcome::Succeeded.into(),
         reason: None,
         at: "2026-10-06T10:00:00Z".to_owned(),
         requested_by: Some("marie".to_owned()),

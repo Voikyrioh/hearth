@@ -16,7 +16,7 @@ import { useCurrentServer } from "@/composables/useCurrentServer";
 import { providePageData } from "@/composables/usePageData";
 import { useResumeMinutes } from "@/composables/useResumeMinutes";
 import { t } from "@/i18n";
-import { alertVisible, modeOn } from "@/link";
+import { alertVisible, modeOn, modeUnknown } from "@/link";
 import { attackModeBlock } from "@/security/gate";
 import { useLinkStore } from "@/stores/link";
 import { useSecurityStore } from "@/stores/security";
@@ -104,6 +104,7 @@ function openSecurityPage() {
         :stamp="stamp"
         :on-page="onSecurityPage"
         :mode-on="modeOn(securityState.attackMode)"
+        :mode-unknown="modeUnknown(securityState.attackMode)"
         @activate="security.ask(server.id, true)"
         @details="openSecurityPage"
       />

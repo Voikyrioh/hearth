@@ -14,7 +14,7 @@ export const LINK_STATES: readonly LinkState[] = [
   "access_revoked",
 ];
 
-export type Role = "admin" | "readonly";
+export type Role = "admin" | "readonly" | "unknown";
 
 /** Numéro de couleur dans la palette de 8 jetons `--server-1` à `--server-8`. */
 export type ServerColor = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
@@ -50,7 +50,9 @@ export type Reason =
   | "expired"
   | "stored_password_refused"
   | "user_disconnected"
-  | "revoked";
+  | "revoked"
+  /** Fin de session pour un motif que ce client ne connaît pas (agent plus récent) : ni expirée ni révoquée affirmée. */
+  | "ended";
 
 /**
  * Événement `link://state`. `seq` est un numéro de séquence strictement croissant PAR SERVEUR,

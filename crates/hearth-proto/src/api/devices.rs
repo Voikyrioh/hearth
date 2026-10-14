@@ -9,6 +9,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::sessions::{DeviceProof, lenient_proof};
+use crate::lenient::Items;
 
 /// Postes reconnus au plus par compte (BR-TRUST-022) : le 9e n'est pas inscrit, sans éviction.
 pub const MAX_DEVICES_PER_ACCOUNT: usize = 8;
@@ -32,7 +33,8 @@ pub struct DeviceItem {
 /// Réponse de `GET /me/devices`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DevicesResponse {
-    pub devices: Vec<DeviceItem>,
+    /// Un poste illisible par cette version est écarté et compté (BR-COMPAT-001 point 10).
+    pub devices: Items<DeviceItem>,
     pub max: usize,
 }
 

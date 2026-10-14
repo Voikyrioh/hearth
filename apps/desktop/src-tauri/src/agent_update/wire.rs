@@ -48,7 +48,8 @@ pub fn refusal_from_error(status: u16, body: &Value) -> Result<AgentUpdateRefusa
             Confirmation::Busy => AgentUpdateRefusal::Busy,
         });
     }
-    Ok(match error.error.code {
+    // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8).
+    Ok(match error.error.code.or_from_status(status) {
         ErrorCode::ForbiddenRole => return Err(LinkFailure::forbidden(&error.error)),
         ErrorCode::ManagedInstall => AgentUpdateRefusal::ManagedInstall,
         ErrorCode::OperationInProgress => AgentUpdateRefusal::InProgress,

@@ -93,6 +93,13 @@ const created = computed(() =>
 );
 const state = computed(() => (service.value ? stateLine(service.value, now.value) : ""));
 const loop = computed(() => (service.value ? loopBand(service.value) : ""));
+/** Le genre d'un montage ; un genre inconnu de ce client n'est ni un dossier ni un volume (BR-COMPAT-001). */
+function mountKindLabel(kind: "folder" | "volume" | "other"): string {
+  if (kind === "volume") return t("serviceDetail.volume");
+  if (kind === "folder") return t("serviceDetail.serverFolder");
+  return t("serviceDetail.mountUnknown");
+}
+
 const mounts = computed(() => (service.value ? service.value.mounts.map(mountView) : []));
 /** Texte du serveur rendu inoffensif (caractères bidirectionnels, invisibles, de contrôle), en un seul endroit. */
 const shownName = computed(() => (service.value ? safeText(service.value.name) : ""));
@@ -270,9 +277,7 @@ const commandNote = computed(() => {
         </p>
         <ul v-else class="rows">
           <li v-for="(mount, index) in mounts" :key="index" class="rows__item rows__item--mount">
-            <span class="defs__soft">{{
-              mount.kind === "volume" ? t("serviceDetail.volume") : t("serviceDetail.serverFolder")
-            }}</span>
+            <span class="defs__soft">{{ mountKindLabel(mount.kind) }}</span>
             <span class="defs__mono"
               ><BoundedText :text="mount.source" :label="t('serviceDetail.serverFolder')"
             /></span>

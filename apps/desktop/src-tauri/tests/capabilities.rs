@@ -193,7 +193,7 @@ const EXPECTED: &[(&str, &str)] = &[
     ("getReauthState", "serverId: string"),
     (
         "reauthCovers",
-        "kind: AdminActKindDto, role: \"admin\" | \"readonly\" | null",
+        "kind: AdminActKindDto, role: \"admin\" | \"readonly\" | \"unknown\" | null",
     ),
     (
         "setReauthSetting",

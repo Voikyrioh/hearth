@@ -522,6 +522,9 @@ impl Runner {
             ServerMessage::Session { kind } => match kind {
                 SessionNotice::Expired => self.session_expired().await,
                 SessionNotice::Revoked => self.access_revoked().await,
+                // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : motif inconnu (agent plus récent) : ni expirée ni révoquée
+                // affirmée, mais une fin de session reste une fin de session : déconnecté, message neutre.
+                SessionNotice::Unknown => self.session_ended_unknown().await,
             },
             ServerMessage::Error(detail) => match detail.code {
                 ErrorCode::SessionExpired | ErrorCode::Unauthenticated => {
@@ -532,6 +535,8 @@ impl Runner {
                 _ => {}
             },
             ServerMessage::Pong { .. } => {}
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un type de message d'un agent plus récent : ignoré, le flux continue.
+            ServerMessage::Unknown => {}
             ServerMessage::Update(progress) => self.on_update(progress).await,
         }
     }
@@ -607,6 +612,9 @@ impl Runner {
             UpdateStep::Done => self.input(Input::RestartEnded).await,
             UpdateStep::Download | UpdateStep::Verify | UpdateStep::Install | UpdateStep::Check => {
             }
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une étape d'un agent plus récent : l'attente de la coupure ne
+            // change pas (ni annoncée ni levée), l'événement est transmis tel quel avec l'étape inconnue.
+            UpdateStep::Unknown => {}
         }
         self.deps.sink.emit(Event::AgentUpdate {
             server: self.id.clone(),
@@ -675,6 +683,7 @@ impl Runner {
             AttemptResult::Failed => self.input(Input::TransportFailed).await,
             AttemptResult::SessionExpired => self.session_expired().await,
             AttemptResult::Revoked => self.access_revoked().await,
+            AttemptResult::SessionEndedUnknown => self.session_ended_unknown().await,
             AttemptResult::StoredPasswordRefused => self.stored_password_refused().await,
             AttemptResult::RetryAfter(delay) => self.input(Input::RetryAfter(delay)).await,
             AttemptResult::Fingerprint { presented } => {
@@ -810,6 +819,25 @@ impl Runner {
             self.deps.sink.emit(Event::SessionEnded {
                 server: self.id.clone(),
                 kind: SessionEnd::Revoked,
+            });
+        }
+    }
+
+    /// L'agent a mis fin à la session pour un motif que cette version ne connaît pas (BR-COMPAT-001 point 9) :
+    /// déconnecté, le jeton est retiré du coffre, aucune reconnexion silencieuse (le motif réel n'est pas su,
+    /// ce pourrait être une révocation) ; le mot de passe mémorisé n'est pas effacé (rien ne dit qu'il est faux).
+    async fn session_ended_unknown(&mut self) {
+        if self.machine.status().reason == Some(Reason::UserDisconnected)
+            || self.shared.record().signed_out
+        {
+            return;
+        }
+        self.input(Input::SessionEndedUnknown).await;
+        if self.machine.state() == LinkState::SessionExpired {
+            let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
+            self.deps.sink.emit(Event::SessionEnded {
+                server: self.id.clone(),
+                kind: SessionEnd::Unknown,
             });
         }
     }

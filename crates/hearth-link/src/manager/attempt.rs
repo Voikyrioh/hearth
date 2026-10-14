@@ -52,6 +52,8 @@ pub(crate) enum AttemptResult {
     /// Échec passager (réseau, délai, serveur occupé…) : on réessaiera.
     Failed,
     SessionExpired,
+    /// Fin de session au motif inconnu de cette version (BR-COMPAT-001 point 9).
+    SessionEndedUnknown,
     Revoked,
     /// Le mot de passe mémorisé est refusé (reconnexion silencieuse).
     StoredPasswordRefused,
@@ -76,7 +78,9 @@ fn classify(error: &TransportError) -> AttemptResult {
         TransportError::FingerprintMismatch { presented } => AttemptResult::Fingerprint {
             presented: *presented,
         },
-        TransportError::Api(api) => match api.code {
+        // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8). Un `429` ou `503` qui demande
+        // d'attendre est attendu, un `401` est une session finie, jamais une nouvelle tentative au rythme du client.
+        TransportError::Api(api) => match api.code.map(|code| code.or_from_status(api.status)) {
             Some(ErrorCode::IncompatibleVersion) => {
                 AttemptResult::Incompatible(upgrade_target(&api.details))
             }
@@ -97,11 +101,18 @@ fn classify(error: &TransportError) -> AttemptResult {
     }
 }
 
+/// Qui doit se mettre à jour. Une cible absente, illisible ou que cette version ne connaît pas
+/// (`UpgradeTarget::Unknown`) se lit « le client » : un agent qui nomme une cible inconnue de ce client
+/// est plus récent que lui, et le client est le seul côté que l'utilisateur met à jour d'ici
+/// (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB). L'état de la liaison ne porte donc jamais `Unknown`.
 fn upgrade_target(details: &serde_json::Value) -> UpgradeTarget {
-    details
+    match details
         .get("upgrade")
         .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .unwrap_or(UpgradeTarget::Client)
+    {
+        Some(UpgradeTarget::Agent) => UpgradeTarget::Agent,
+        Some(UpgradeTarget::Client | UpgradeTarget::Unknown) | None => UpgradeTarget::Client,
+    }
 }
 
 const NOTE_ABSENT: u8 = 1;
@@ -254,12 +265,18 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                     ErrorCode::SessionRevoked => return AttemptResult::Revoked,
                     // Le sujet `audit` refusé à un compte lecture seule : le reste est pris.
                     ErrorCode::ForbiddenRole => {}
+                    // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un code d'un agent plus récent : comme avant qu'il soit
+                    // lu (la trame était ignorée), le flux dit le reste ou se ferme (alors `recv` échoue).
+                    ErrorCode::Unknown => {}
                     _ => return AttemptResult::Failed,
                 },
                 ServerMessage::Session { kind } => {
                     return match kind {
                         SessionNotice::Expired => AttemptResult::SessionExpired,
                         SessionNotice::Revoked => AttemptResult::Revoked,
+                        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une fin de session d'un motif inconnu n'est ni
+                        // « expirée » ni « révoquée » affirmée, mais reste une fin de session.
+                        SessionNotice::Unknown => AttemptResult::SessionEndedUnknown,
                     };
                 }
                 // Au plus quelques-uns : un agent bavard ne remplit pas la mémoire d'une tentative.
@@ -429,6 +446,31 @@ mod tests {
             classify(&api(Some(ErrorCode::Busy), 503, None)),
             AttemptResult::Failed
         ));
+    }
+
+    /// BR-COMPAT-001 point 8 : un code d'erreur inconnu (agent plus récent) retombe sur le sens du statut.
+    #[test]
+    fn an_unknown_code_keeps_the_meaning_of_its_http_status() {
+        let unknown = Some(ErrorCode::Unknown);
+        let result = classify(&api(unknown, 429, Some(90)));
+        assert!(matches!(result, AttemptResult::RetryAfter(d) if d == Duration::from_secs(90)));
+        let result = classify(&api(unknown, 503, Some(5)));
+        assert!(matches!(result, AttemptResult::RetryAfter(d) if d == Duration::from_secs(5)));
+        assert!(matches!(
+            classify(&api(unknown, 401, None)),
+            AttemptResult::SessionExpired
+        ));
+        assert!(matches!(
+            classify(&api(unknown, 426, None)),
+            AttemptResult::Incompatible(UpgradeTarget::Agent)
+        ));
+        // Ni succès ni attente inventée : un `403` ou un `500` inconnu est un échec ordinaire.
+        for status in [403, 404, 500] {
+            assert!(matches!(
+                classify(&api(unknown, status, None)),
+                AttemptResult::Failed
+            ));
+        }
     }
 
     #[test]

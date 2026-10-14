@@ -170,7 +170,8 @@ fn full_state() -> ServicesState {
                 adopted: None,
                 details_reserved: false,
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -206,7 +207,7 @@ fn the_event_the_window_receives_is_the_reference_file_field_by_field() {
 fn a_list_read_back_from_the_disk_says_its_details_were_not_read() {
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
     let mut from_disk = full_state();
-    for item in &mut from_disk.services {
+    for item in from_disk.services.iter_mut() {
         item.env_names.clear();
         item.command = None;
     }

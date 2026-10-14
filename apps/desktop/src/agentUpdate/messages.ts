@@ -7,7 +7,7 @@ import { type AgentUpdateRefusal, UPDATE_STEPS, type UpdateReason, type UpdateSt
  * Les clés sont des correspondances EXHAUSTIVES : un code de plus ne compile pas sans son texte.
  */
 
-const STEP_LABELS: Record<Exclude<UpdateStep, "done">, MessageKey> = {
+const STEP_LABELS: Record<Exclude<UpdateStep, "done" | "unknown">, MessageKey> = {
   download: "agentUpdate.stepDownload",
   verify: "agentUpdate.stepVerify",
   install: "agentUpdate.stepInstall",
@@ -16,7 +16,7 @@ const STEP_LABELS: Record<Exclude<UpdateStep, "done">, MessageKey> = {
 };
 
 /** Une étape finie n'a plus de points de suspension : elle est faite, plus en train de se faire. */
-const STEP_DONE: Record<Exclude<UpdateStep, "done">, MessageKey> = {
+const STEP_DONE: Record<Exclude<UpdateStep, "done" | "unknown">, MessageKey> = {
   download: "agentUpdate.stepDownloadDone",
   verify: "agentUpdate.stepVerifyDone",
   install: "agentUpdate.stepInstallDone",
@@ -28,13 +28,15 @@ const STEP_DONE: Record<Exclude<UpdateStep, "done">, MessageKey> = {
  * HRT-143 : une étape que ce client ne connaît pas (ajoutée par un agent plus récent) n'est pas une étape de la
  * liste. `null` : l'écran dit seulement « en cours », sans marquer d'étape à tort.
  */
-export function knownStep(step: string | null | undefined): Exclude<UpdateStep, "done"> | null {
+export function knownStep(
+  step: string | null | undefined,
+): Exclude<UpdateStep, "done" | "unknown"> | null {
   return UPDATE_STEPS.find((known) => known === step) ?? null;
 }
 
 /** Le libellé d'une étape dans la liste (« Téléchargement : 35 % » pendant le téléchargement). */
 export function stepLabel(
-  step: Exclude<UpdateStep, "done">,
+  step: Exclude<UpdateStep, "done" | "unknown">,
   percent: number | null,
   done = false,
 ): string {
@@ -54,11 +56,11 @@ export function progressSentence(): string {
  * Ce que le lecteur d'écran entend (région vivante polie, invisible) : l'étape COURANTE, une fois par étape (pas à chaque
  * pourcentage). À l'œil, l'étape n'est dite que par la liste (HRT-46, C43).
  */
-export function stepAnnouncement(step: Exclude<UpdateStep, "done">): string {
+export function stepAnnouncement(step: Exclude<UpdateStep, "done" | "unknown">): string {
   return t("agentUpdate.announce", { step: stepLabel(step, null, true).toLowerCase() });
 }
 
-const REASONS: Record<UpdateReason, MessageKey> = {
+export const REASONS: Record<UpdateReason, MessageKey> = {
   unreachable: "agentUpdate.resultUnreachable",
   download_failed: "agentUpdate.resultDownloadFailed",
   bad_checksum: "agentUpdate.resultBadChecksum",
@@ -78,7 +80,7 @@ const REASONS: Record<UpdateReason, MessageKey> = {
 export type ResultTone = "ok" | "warn" | "crit";
 
 export interface ResultLike {
-  outcome: "succeeded" | "rolled_back" | "failed";
+  outcome: "succeeded" | "rolled_back" | "failed" | "unknown";
   reason: UpdateReason | null;
   /** `null` ou vide : la version visée ne se sait pas, le texte n'a pas de numéro. */
   version: string | null;
@@ -91,6 +93,8 @@ export function resultMessage(result: ResultLike): string {
       ? t("agentUpdate.resultSucceeded", { version: result.version })
       : t("agentUpdate.resultSucceededNoVersion");
   }
+  // Une issue que ce client ne connaît pas (agent plus récent) : ni réussite ni échec affirmés.
+  if (result.outcome === "unknown") return t("agentUpdate.resultUnknown");
   if (result.outcome === "rolled_back") {
     // Seules deux raisons existent pour un retour arrière ; toute autre se dit sans la raison.
     return result.reason === "no_answer"
@@ -99,8 +103,7 @@ export function resultMessage(result: ResultLike): string {
         ? t("agentUpdate.resultIdentityChanged")
         : t("agentUpdate.resultRolledBack");
   }
-  // HRT-143 : une issue inconnue (agent plus récent) a son propre texte, séparé de l'échec connu : le propriétaire
-  // peut le rendre neutre en changeant `agentUpdate.resultUnknown` (et le ton ci-dessous) sans toucher aux vrais échecs.
+  // Une valeur hors de la liste (jamais vue par ce client) se dit comme l'issue inconnue, jamais comme un échec.
   if (result.outcome !== "failed") return t("agentUpdate.resultUnknown");
   // HRT-143 : une raison inconnue (agent plus récent) dit le message générique, jamais une page cassée.
   return t(REASONS[result.reason ?? "unknown"] ?? REASONS.unknown);
@@ -108,7 +111,7 @@ export function resultMessage(result: ResultLike): string {
 
 export function resultTone(result: ResultLike): ResultTone {
   if (result.outcome === "succeeded") return "ok";
-  return result.outcome === "rolled_back" ? "warn" : "crit";
+  return result.outcome === "failed" ? "crit" : "warn";
 }
 
 /** La ligne d'historique d'un résultat qui n'est plus récent (plus de 24 h). */
@@ -118,7 +121,9 @@ export function historyMessage(result: ResultLike, when: string): string {
       ? "agentUpdate.historySucceeded"
       : result.outcome === "rolled_back"
         ? "agentUpdate.historyRolledBack"
-        : "agentUpdate.historyFailed";
+        : result.outcome === "unknown"
+          ? "agentUpdate.historyUnknown"
+          : "agentUpdate.historyFailed";
   return t(key, { when });
 }
 
