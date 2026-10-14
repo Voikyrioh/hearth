@@ -287,8 +287,10 @@ impl WsClient {
             };
             match frame {
                 Some(Message::Text(text)) => {
+                    // `Unknown` est la variante de repli : toute trame d'un autre sujet (mesures, sécurité…) s'y lit.
                     if let Ok(message) =
                         serde_json::from_str::<hearth_proto::stream::ServicesMessage>(text.as_str())
+                        && message != hearth_proto::stream::ServicesMessage::Unknown
                     {
                         return Some(message);
                     }

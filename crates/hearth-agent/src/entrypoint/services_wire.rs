@@ -12,9 +12,11 @@
 //! (détail d'un service, BR-SVC-007 et BR-SVC-008) passent dans le type `Concealed` du fil.
 
 use super::metrics_wire::date;
+use super::service_ops_wire;
 use crate::application::ports::EnvEntry;
 use crate::application::ports::HostDescription;
 use crate::application::services::{EngineStatus, ServiceView, ServicesChange, ServicesSnapshot};
+use crate::domain::ops::OpsIndex;
 use crate::domain::services::{
     EngineState, KeyKind, MountType, PortProtocol, PortScope, RestartPolicy, ServiceStateKind,
     may_read_details, stop_grace_s,
@@ -222,20 +224,35 @@ pub fn env_reveal(entries: &[EnvEntry]) -> EnvReveal {
     }
 }
 
-pub fn snapshot(snapshot: &ServicesSnapshot, reader: Reader) -> ServicesState {
+/// `busy` et `last_action` d'un service : des PROJECTIONS du journal des opérations (HRT-144, BR-LIFE-013),
+/// jamais un état à part. Absents tant que le service n'a aucune opération.
+fn with_operations(mut item: ServiceItem, view: &ServiceView, ops: &OpsIndex) -> ServiceItem {
+    item.busy = ops.busy(&view.key).map(service_ops_wire::busy);
+    item.last_action = ops
+        .last_action(&view.key)
+        .map(service_ops_wire::last_action);
+    item
+}
+
+pub fn snapshot(snapshot: &ServicesSnapshot, reader: Reader, ops: &OpsIndex) -> ServicesState {
     ServicesState {
         rev: snapshot.rev,
         engine: engine_view(&snapshot.engine, &snapshot.host),
         services: snapshot
             .services
             .iter()
-            .map(|view| service_item(view, reader))
+            .map(|view| with_operations(service_item(view, reader), view, ops))
             .collect(),
     }
 }
 
 /// Un lot de changements ; `host` sert à l'état du moteur quand il change.
-pub fn delta(change: &ServicesChange, host: &HostDescription, reader: Reader) -> ServicesDelta {
+pub fn delta(
+    change: &ServicesChange,
+    host: &HostDescription,
+    reader: Reader,
+    ops: &OpsIndex,
+) -> ServicesDelta {
     ServicesDelta {
         rev: change.rev,
         engine: change
@@ -245,7 +262,7 @@ pub fn delta(change: &ServicesChange, host: &HostDescription, reader: Reader) ->
         upserts: change
             .upserts
             .iter()
-            .map(|view| service_item(view, reader))
+            .map(|view| with_operations(service_item(view, reader), view, ops))
             .collect(),
         removed: change
             .removed
@@ -285,6 +302,7 @@ mod tests {
             stop_timeout_s: None,
             tty: false,
             log_driver: None,
+            hearth_key: None,
         };
         let key = ServiceKey::for_container(&observation.id).expect("key");
         let derived = derive_state(&observation, 0, false);

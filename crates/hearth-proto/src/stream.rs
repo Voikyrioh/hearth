@@ -20,6 +20,7 @@ use crate::api::audit::AuditEventItem;
 use crate::api::machine::MachineResponse;
 use crate::api::metrics::Sample;
 use crate::api::security::SecurityView;
+use crate::api::service_ops::OperationView;
 use crate::api::services::{ServicesDelta, ServicesState};
 use crate::api::sessions::DeviceProof;
 use crate::api::update::UpdateProgress;
@@ -149,8 +150,18 @@ pub enum ServicesMessage {
     /// Un lot de changements (au plus un par lot d'événements du moteur).
     ServicesDelta(ServicesDelta),
     /// Issue d'une action sur un service. Déclaré pour les tranches suivantes, jamais émis par
-    /// cette tranche (lecture seule).
+    /// cette tranche (lecture seule). REMPLACÉ par [`ServicesMessage::Operation`] (ADR-0045), qui porte
+    /// l'opération entière ; ce message ne sera pas émis.
     ServiceAction(ServiceActionNotice),
+    /// L'état d'une opération de service (HRT-144, ADR-0045) : à l'abonnement pour chaque opération en
+    /// cours que ce compte peut voir, puis à chaque changement, au plus un message par 500 ms et par
+    /// opération (le dernier état d'une opération n'est jamais perdu : il part à l'échéance). Les champs de
+    /// [`OperationView`] sont à plat à côté de `type`. Annoncé par la capacité `service-ops`.
+    Operation(OperationView),
+    /// Un message de ce sujet que ce client ne connaît pas (un agent plus récent) : ignoré, jamais une
+    /// erreur de lecture.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Progression d'une action sur un service (tranches suivantes).
@@ -506,5 +517,40 @@ mod tests {
         .expect("json");
         assert_eq!(json["type"], "error");
         assert_eq!(json["code"], "SESSION_REVOKED");
+    }
+
+    #[test]
+    fn an_operation_message_is_flat_next_to_its_type_and_an_unknown_one_is_tolerated() {
+        use crate::api::service_ops::{OperationKind, OperationStatus, OperationView};
+        let view = OperationView {
+            id: "01OP".into(),
+            key: "h_01J9ZY0G3Q8M2K6W4T7V5N1B9D".into(),
+            kind: OperationKind::Deploy,
+            status: OperationStatus::Running,
+            step: Some("pull".into()),
+            steps: Vec::new(),
+            percent: Some(40),
+            items_done: None,
+            bytes_done: None,
+            bytes_total: None,
+            eta_s: None,
+            cancellable: true,
+            decision: None,
+            cause: None,
+        };
+        let value = serde_json::to_value(ServicesMessage::Operation(view.clone())).expect("json");
+        assert_eq!(value["type"], "operation");
+        assert_eq!(value["id"], "01OP");
+        assert_eq!(value["kind"], "deploy");
+        assert_eq!(
+            serde_json::from_value::<ServicesMessage>(value).expect("lu"),
+            ServicesMessage::Operation(view)
+        );
+        // Un message d'un sujet plus récent : lu comme inconnu, jamais une erreur.
+        assert_eq!(
+            serde_json::from_value::<ServicesMessage>(json!({ "type": "something_new", "x": 1 }))
+                .expect("tolérant"),
+            ServicesMessage::Unknown
+        );
     }
 }

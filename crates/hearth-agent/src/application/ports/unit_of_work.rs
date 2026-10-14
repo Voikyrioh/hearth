@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use super::{
     AccountTx, AdoptionTx, AttackModeTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx,
-    OperationTx, ServicesRightTx, SessionTx, StoreError,
+    OperationTx, ServiceOpTx, ServicesRightTx, SessionTx, StoreError,
 };
 
 /// Point d'entrée des écritures. Le magasin est neutre : il ne porte aucun sujet (comptes,
@@ -31,6 +31,10 @@ pub trait UnitOfWork: Send {
 
     /// L'écriture de l'adoption d'un service (HRT-80) : un seul cas d'usage, `ServiceAdoption`.
     fn adoptions(&mut self) -> &mut dyn AdoptionTx;
+
+    /// Le journal des opérations de service, pour annuler et décider avec leur entrée du journal d'activité
+    /// (HRT-144) : un seul cas d'usage, `ServiceOpAccess`.
+    fn service_ops(&mut self) -> &mut dyn ServiceOpTx;
 
     fn sessions(&mut self) -> &mut dyn SessionTx;
 

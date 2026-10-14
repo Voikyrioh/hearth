@@ -75,11 +75,39 @@ pub enum AuditAction {
     /// Un compte est freiné quand il ouvre des lectures de journaux en rafale (HRT-107, BR-SLOG-027) :
     /// une seule entrée par fenêtre de 10 minutes, avec le nombre de refus ; jamais une par refus.
     ServiceLogsThrottled,
+    /// Un service est démarré (HRT-64).
+    ServiceStart,
+    /// Un service est arrêté (HRT-64).
+    ServiceStop,
+    /// Un service est redémarré (HRT-64).
+    ServiceRestart,
+    /// Un service est déployé (HRT-68, HRT-101).
+    ServiceDeploy,
+    /// Un service est modifié (genre d'opération `update`).
+    ServiceUpdate,
+    /// Un service est supprimé (HRT-85).
+    ServiceDelete,
+    /// Les limites d'un service changent (genre `resources`).
+    ServiceResources,
+    /// Un service est sauvegardé (genre `backup`).
+    ServiceBackupCreate,
+    /// Un service est restauré (genre `restore`).
+    ServiceBackupRestore,
+    /// Une sauvegarde est supprimée (HRT-97).
+    ServiceBackupDelete,
+    /// Un monde est repris d'ailleurs (genre `world_import`).
+    ServiceWorldImport,
+    /// Les réglages d'un serveur de jeu sont enregistrés (HRT-108).
+    ServiceGameSettings,
+    /// Une annulation refusée ou en échec avant d'avoir lu l'opération (HRT-144) ; la réussite s'écrit sous l'action du genre.
+    OperationCancel,
+    /// Une décision refusée ou en échec avant d'avoir lu l'opération (HRT-144) ; la réussite s'écrit sous l'action du genre.
+    OperationDecide,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 32] = [
+    pub const ALL: [AuditAction; 46] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -112,6 +140,20 @@ impl AuditAction {
         Self::ServiceExternalRead,
         Self::ServiceLogsRead,
         Self::ServiceLogsThrottled,
+        Self::ServiceStart,
+        Self::ServiceStop,
+        Self::ServiceRestart,
+        Self::ServiceDeploy,
+        Self::ServiceUpdate,
+        Self::ServiceDelete,
+        Self::ServiceResources,
+        Self::ServiceBackupCreate,
+        Self::ServiceBackupRestore,
+        Self::ServiceBackupDelete,
+        Self::ServiceWorldImport,
+        Self::ServiceGameSettings,
+        Self::OperationCancel,
+        Self::OperationDecide,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -149,6 +191,20 @@ impl AuditAction {
             Self::ServiceExternalRead => action::SERVICE_EXTERNAL_READ,
             Self::ServiceLogsRead => action::SERVICE_LOGS_READ,
             Self::ServiceLogsThrottled => action::SERVICE_LOGS_THROTTLED,
+            Self::ServiceStart => action::SERVICE_START,
+            Self::ServiceStop => action::SERVICE_STOP,
+            Self::ServiceRestart => action::SERVICE_RESTART,
+            Self::ServiceDeploy => action::SERVICE_DEPLOY,
+            Self::ServiceUpdate => action::SERVICE_UPDATE,
+            Self::ServiceDelete => action::SERVICE_DELETE,
+            Self::ServiceResources => action::SERVICE_RESOURCES,
+            Self::ServiceBackupCreate => action::SERVICE_BACKUP_CREATE,
+            Self::ServiceBackupRestore => action::SERVICE_BACKUP_RESTORE,
+            Self::ServiceBackupDelete => action::SERVICE_BACKUP_DELETE,
+            Self::ServiceWorldImport => action::SERVICE_WORLD_IMPORT,
+            Self::ServiceGameSettings => action::SERVICE_GAME_SETTINGS,
+            Self::OperationCancel => action::OPERATION_CANCEL,
+            Self::OperationDecide => action::OPERATION_DECIDE,
         }
     }
 
@@ -187,6 +243,20 @@ impl AuditAction {
             Self::ServiceExternalRead => "Liste des conteneurs existants",
             Self::ServiceLogsRead => "Journaux lus",
             Self::ServiceLogsThrottled => "Ouvertures de journaux freinées",
+            Self::ServiceStart => "Démarrage d'un service",
+            Self::ServiceStop => "Arrêt d'un service",
+            Self::ServiceRestart => "Redémarrage d'un service",
+            Self::ServiceDeploy => "Déploiement d'un service",
+            Self::ServiceUpdate => "Modification d'un service",
+            Self::ServiceDelete => "Suppression d'un service",
+            Self::ServiceResources => "Limites d'un service",
+            Self::ServiceBackupCreate => "Sauvegarde d'un service",
+            Self::ServiceBackupRestore => "Restauration d'un service",
+            Self::ServiceBackupDelete => "Suppression d'une sauvegarde",
+            Self::ServiceWorldImport => "Reprise d'un monde",
+            Self::ServiceGameSettings => "Réglages d'un jeu",
+            Self::OperationCancel => "Annulation d'une opération",
+            Self::OperationDecide => "Décision sur une opération",
         }
     }
 

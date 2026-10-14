@@ -19,6 +19,8 @@ Flux temps réel : l'identité et l'historique de la machine, puis un échantill
 
 Ouvert à tout compte authentifié, les deux rôles reçoivent la même chose, à une différence près : la commande et les noms de variables d'un service ADOPTÉ ne vont qu'aux comptes qui ont le droit « gérer les services » (HRT-79, `details_reserved`). Seuls les services créés par Hearth et les adoptés sont publiés ; les autres conteneurs sont comptés (`engine.external_count`). À l'abonnement : `services_snapshot` (état du moteur et services publiés), puis `services_delta` à chaque lot de changements. Un abonné trop lent reçoit un nouveau `services_snapshot`. **Ne l'envoyer qu'à un agent dont `GET /hello` annonce la capacité `services`** : un sujet inconnu d'un agent ancien fait refuser tout le message `subscribe`. Contenu des messages, `rev` et comportement : [services.md](./services.md).
 
+Le sujet porte aussi le message `operation` (HRT-144, capacité `service-ops`) : l'état d'une opération de service, à l'abonnement pour chaque opération en cours que le compte voit, puis à chaque changement, **au plus un message par 500 ms et par opération**, le dernier état jamais perdu. Voir [service-ops](./service-ops.md). `ServiceItem.busy` et `last_action` sont des projections du journal des opérations.
+
 ## Sujet `update` (HRT-17)
 
 Le message `security` (HRT-24, BR-TRUST-008) n'a pas de sujet : il est **toujours envoyé** après l'`auth`, puis à chaque changement de l'état de sécurité **de ce compte** : `{"type":"security","alert":{"own":true,"since":"…","others":1},"attack_mode":{"state":"off"}}` (`others` : administrateur seulement ; voir [security.md](./security.md)). Ce type n'est pas un `ServerMessage` : un client qui ne le connaît pas l'ignore.

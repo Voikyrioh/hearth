@@ -1390,6 +1390,46 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         engine,
     )
     .await;
+    // Deux opérations de service dans le journal (HRT-144) : une qu'on annulera, une qui attend une décision.
+    let (cancel_op, decide_op) = {
+        use hearth_agent::application::service_ops::AcceptRequest;
+        use hearth_agent::domain::ops::{Choice, OpKind, OpPlan, PlannedStep, StepName};
+        let ops = state.service_ops.ops().clone();
+        let plan = || {
+            OpPlan::new(
+                vec![PlannedStep {
+                    name: StepName::parse("check").unwrap(),
+                    destructive: false,
+                }],
+                None,
+            )
+            .unwrap()
+        };
+        let accept = |key: &str| AcceptRequest {
+            op_key: format!("k-{key}"),
+            service: hearth_agent::domain::services::ServiceKey::parse(key).unwrap(),
+            service_name: "jeu".to_owned(),
+            kind: OpKind::Deploy,
+            account: "marie".to_owned(),
+            plan: plan(),
+            forced: false,
+            reserve_name: None,
+            heavy_io: false,
+        };
+        let cancel_op = ops
+            .accept(accept("h_01J9ZY0G3Q8M2K6W4T7V5N1B9D"))
+            .await
+            .unwrap();
+        let decide_op = ops
+            .accept(accept("h_01J9ZY0G3Q8M2K6W4T7V5N1B9E"))
+            .await
+            .unwrap();
+        ops.start(&decide_op).await.unwrap();
+        ops.ask_decision(&decide_op, &[Choice::Continue, Choice::Cancel])
+            .await
+            .unwrap();
+        (cancel_op, decide_op)
+    };
     let api = Api::from_state(state);
     let _ = env.account_with_token(&api, "carl", Role::ReadOnly).await;
     let role_victim = env.create("v-role", Role::ReadOnly).await;
@@ -1583,6 +1623,26 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 )
                 .await
             }
+            // Annuler et décider une opération de service (HRT-144) : la réussite s'écrit sous l'action du
+            // GENRE de l'opération, une seule entrée.
+            ("DELETE", "/operations/services/{id}") => {
+                api.act(
+                    &marie,
+                    Method::DELETE,
+                    &format!("/operations/services/{cancel_op}"),
+                    json!({}),
+                )
+                .await
+            }
+            ("POST", "/operations/services/{id}/decision") => {
+                api.act(
+                    &marie,
+                    Method::POST,
+                    &format!("/operations/services/{decide_op}/decision"),
+                    json!({ "choice": "continue" }),
+                )
+                .await
+            }
             (method, path) => {
                 panic!("route modifiante sans scénario de réussite : {method} {path}")
             }
@@ -1628,6 +1688,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             "/hello" | "/me" | "/me/devices" | "/security" | "/machine" | "/metrics/history"
             | "/agent/update" | "/agent/update/last" | "/services" => endpoint.path.to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
+            // Lire une opération de service (HRT-144) : une lecture, aucune entrée de journal.
+            "/operations/services/{id}" => "/operations/services/INCONNUE".to_owned(),
             // Un POST qui ne modifie rien : il relance la détection du moteur (HRT-61, lecture seule).
             "/engine/recheck" => {
                 let reply = api

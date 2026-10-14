@@ -28,9 +28,11 @@ Toute opération (démarrer, arrêter, redémarrer, déployer, modifier, supprim
 
 ## Cas limites
 - Le message « Une action est déjà en cours sur ce service. » et le nom du compte viennent avec les routes (HRT-64).
+- Le verrou est VISIBLE de tous : `ServiceItem.busy` (type, compte, depuis quand) est la projection de l'opération non terminée du service (BR-OPS-005, HRT-144).
 
 ## Règles liées
 - BR-FILES-024, BR-DEL-019, BR-EDIT-031
 
 ## Historique
+- 2026-10-14 — `busy` et `last_action` projetés du journal (HRT-144).
 - 2026-10-13 — création (HRT-83, ADR-0044 et ADR-0045 : socle des services créés par Hearth, côté agent).

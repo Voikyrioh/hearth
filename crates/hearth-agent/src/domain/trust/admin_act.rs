@@ -138,6 +138,73 @@ mod tests {
                 },
                 true,
             ),
+            // Déclarés par HRT-144. Piloter un service existant, annuler ou trancher une opération déjà
+            // confirmée, sauvegarder, régler un jeu : couverts. Déployer, supprimer un service ou une
+            // sauvegarde : le mot de passe à chaque fois.
+            (
+                AdminAct::ServiceStart {
+                    target: "c_a".into(),
+                },
+                true,
+            ),
+            (
+                AdminAct::ServiceStop {
+                    target: "c_a".into(),
+                },
+                true,
+            ),
+            (
+                AdminAct::ServiceRestart {
+                    target: "c_a".into(),
+                },
+                true,
+            ),
+            (
+                AdminAct::ServiceDeploy {
+                    name: "jeu",
+                    image: "x:1",
+                    digest: [0; 32],
+                    env_count: 0,
+                    command: false,
+                },
+                false,
+            ),
+            (AdminAct::OperationCancel { target: "01OP" }, true),
+            (
+                AdminAct::ServiceDelete {
+                    target: "c_a".into(),
+                    data: false,
+                    backups: false,
+                },
+                false,
+            ),
+            (
+                AdminAct::BackupCreate {
+                    target: "c_a".into(),
+                    mode: "stopped",
+                    ignored: 0,
+                },
+                true,
+            ),
+            (AdminAct::BackupDelete { target: "01BK" }, false),
+            (
+                AdminAct::OperationDecide {
+                    target: "01OP",
+                    choice: hearth_proto::api::service_ops::OperationChoice::Keep,
+                },
+                true,
+            ),
+            (
+                AdminAct::GameSettingsSave {
+                    target: "c_a".into(),
+                    base_rev: 1,
+                    changes: 1,
+                    ids_digest: [0; 32],
+                    origin: "form",
+                    effect: "none",
+                },
+                true,
+            ),
         ]
     }
 

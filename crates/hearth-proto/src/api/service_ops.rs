@@ -1,19 +1,22 @@
 //! Les opérations de service (HRT-83, ADR-0045) : démarrer, déployer, modifier, supprimer, sauvegarder,
 //! restaurer, reprendre un monde. Un seul modèle pour tous : un genre fermé, un statut fermé, des étapes.
 //!
-//! Cette tranche ne déclare que les TYPES et les constantes du lot : aucune route ne les sert encore, le
-//! message `operation` du sujet `services` (au plus un par 500 ms et par opération) rejoint
-//! `stream::ServicesMessage` avec le suivi côté client (HRT-84), qui lit ce corps tel quel. Rien d'ici ne
-//! porte une valeur, un nom de variable ou une commande : le plan d'une opération n'a jamais de secret.
+//! Les types et les constantes des opérations. Trois routes les servent (HRT-144) : `GET
+//! /operations/services/{id}` (une [`OperationView`]), `POST /operations/services/{id}/decision`
+//! ([`OperationDecision`]) et `DELETE /operations/services/{id}` (annuler), et le message `operation` du
+//! sujet `services` (`stream::ServicesMessage::Operation`, au plus un par 500 ms et par opération) porte
+//! la même [`OperationView`]. Rien d'ici ne porte une valeur, un nom de variable, une commande ni un
+//! chemin du serveur : le plan d'une opération n'a jamais de secret.
 //!
 //! Évolution : toute énumération que le client lit tolère une valeur inconnue (`Unknown`), tout champ
 //! ajouté plus tard est facultatif (`serde(default)`).
 
 use serde::{Deserialize, Serialize};
 
-/// Capacité annoncée par `GET /hello` quand l'agent sert la description des services et leurs
-/// opérations (modifier, supprimer, opérations génériques). Déclarée par HRT-83, annoncée quand une
-/// première route existe (HRT-64, HRT-68) : un client n'affiche rien sans elle.
+/// Capacité annoncée par `GET /hello` quand l'agent sert le suivi des opérations de service : lire une
+/// opération, la décider, l'annuler, et le message `operation` du flux (HRT-144). Annoncée parce que ces
+/// routes existent ; un client n'affiche rien sans elle. Elle ne dit PAS que l'agent sait démarrer,
+/// déployer ou supprimer : chaque geste aura sa propre capacité ou sa propre route.
 pub const CAPABILITY_SERVICE_OPS: &str = "service-ops";
 /// Capacité : processeur et mémoire d'un service, consommation (lot suivant).
 pub const CAPABILITY_SERVICE_RESOURCES: &str = "service-resources";
@@ -95,6 +98,22 @@ pub enum OperationChoice {
     Unknown,
 }
 
+impl OperationChoice {
+    /// Le code du choix, tel qu'il s'écrit sur le fil ; c'est aussi ce que la preuve de clé d'une
+    /// décision signe (`admin_act::AdminAct::OperationDecide`). Un choix inconnu se dit `unknown` : il
+    /// n'est jamais offert, donc jamais accepté.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Continue => "continue",
+            Self::Cancel => "cancel",
+            Self::Revert => "revert",
+            Self::Keep => "keep",
+            Self::Verified => "verified",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Pourquoi l'opération est dans son statut (liste fermée de codes ; l'interface les met en phrases).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -147,8 +166,10 @@ pub struct StepView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecisionView {
     pub choices: Vec<OperationChoice>,
-    /// Quand la décision expire (RFC 3339, UTC).
-    pub expires_at: String,
+    /// Quand la décision expire (RFC 3339, UTC). Absent pour une opération à vérifier (`needs_attention`) :
+    /// elle attend sans limite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
 }
 
 /// Une opération telle que le client la suit (corps du message `operation`). Aucun secret, aucune valeur.
@@ -183,11 +204,18 @@ pub struct OperationView {
     pub cause: Option<OperationCause>,
 }
 
-/// Corps d'une décision (acte `OperationDecide`, déclaré avec sa route par le ticket qui la sert).
+/// Corps d'une décision (acte `OperationDecide`, `POST /operations/services/{id}/decision`). Le membre
+/// `reauth` de la confirmation s'y ajoute à côté, lu par la couche de confirmation ; ici seul le choix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationDecision {
     pub choice: OperationChoice,
 }
+
+/// Combien d'opérations l'agent garde au plus, terminées comprises (les plus récentes). Une opération qui
+/// n'est pas terminée n'est jamais comptée ni purgée.
+pub const MAX_RETAINED_OPERATIONS: u32 = 500;
+/// Combien d'étapes une [`OperationView`] porte au plus (celles du plan : `MAX_STEPS` côté agent).
+pub const MAX_VIEW_STEPS: usize = 32;
 
 #[cfg(test)]
 mod tests {

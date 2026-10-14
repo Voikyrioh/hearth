@@ -106,6 +106,18 @@ pub fn recover(
     }
 }
 
+/// Les objets qu'une opération ANNULÉE (par le compte, ou par l'expiration d'une décision sans réponse) avait
+/// créés pour elle-même et qui doivent partir : les mêmes que pour une reprise, et rien d'autre (HRT-144,
+/// ADR-0045). L'annulation n'existe qu'avant le point de non-retour, mais un geste destructif a pu précéder
+/// ce point : tant qu'un geste destructif a une ligne, un dossier d'import ou d'attente reste en place (il
+/// pourrait être celui d'un retour arrière). Aucun geste sur le service ou ses données.
+pub fn cleanup_on_cancel(plan: &OpPlan, records: &[StepRecord]) -> Vec<CreatedObject> {
+    let any_destructive_row = plan
+        .destructive_steps()
+        .any(|step| latest_state(records, &step.name).is_some());
+    removable_objects(plan, records, any_destructive_row)
+}
+
 /// Une opération dont le journal des étapes ne se relit pas (ligne illisible, état inconnu, version plus
 /// récente du binaire) : on ne sait pas ce qui a eu lieu, donc `needs_attention`, verrou repris, et RIEN
 /// n'est retiré (le journal qui nommerait les objets créés est précisément ce qui ne se lit pas).

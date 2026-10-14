@@ -29,6 +29,21 @@ pub struct Progress {
     pub bytes_total: Option<u64>,
 }
 
+/// Dans quels statuts une ligne du journal d'étapes peut être écrite. La condition est vérifiée PAR
+/// L'INSTRUCTION qui écrit, pas avant : une annulation qui passe l'opération en `cancelling` entre la
+/// lecture du statut et l'écriture d'un `intent` destructif ne laisse pas cet `intent` s'écrire (HRT-144,
+/// ADR-0045 point « atomique »).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepGuard {
+    /// L'opération n'est pas terminée : toute ligne ordinaire (`done`, `failed`, `undone`, `intent` d'une
+    /// étape qui ne détruit rien), y compris pendant une annulation ou un retour arrière qui rangent.
+    Unfinished,
+    /// L'opération s'exécute (`running`) ou revient en arrière (`rolling_back`) : l'`intent` d'une étape
+    /// destructive. Une opération en annulation, en attente d'une décision ou à vérifier n'écrit plus de
+    /// geste destructif.
+    Executing,
+}
+
 /// Les choix offerts au compte, et depuis quand ils attendent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionOffer {
@@ -103,7 +118,10 @@ pub trait OpJournal: Send + Sync {
     async fn steps(&self, id: &str) -> Result<Vec<StepRecord>, StoreError>;
 
     /// Ajoute une ligne au journal et met l'étape courante de l'opération. Avec `durable`, la ligne est
-    /// validée SUR LE DISQUE (`synchronous=FULL`) avant le retour : c'est le cas de tout `intent`.
+    /// validée SUR LE DISQUE (`synchronous=FULL`) avant le retour : c'est le cas de tout `intent`. La ligne
+    /// n'est écrite que si le statut de l'opération satisfait `guard`, vérifié dans la même instruction
+    /// (`Stale` sinon, `Unknown` si l'opération n'existe pas).
+    #[allow(clippy::too_many_arguments)]
     async fn append_step(
         &self,
         id: &str,
@@ -112,6 +130,7 @@ pub trait OpJournal: Send + Sync {
         undo: &UndoInfo,
         at: OffsetDateTime,
         durable: bool,
+        guard: StepGuard,
     ) -> Result<u32, JournalError>;
 
     /// Change le statut si et seulement s'il vaut `from` (compare-and-set). `decision` remplace les choix
@@ -142,13 +161,25 @@ pub trait OpJournal: Send + Sync {
     /// Efface les opérations terminées avant `before` et leur journal. Une opération `needs_attention`
     /// n'est jamais effacée (elle n'est pas terminée). Rend leur nombre.
     async fn purge_finished(&self, before: OffsetDateTime) -> Result<u64, StoreError>;
+
+    /// Borne le nombre d'opérations GARDÉES : ne laisse que les `keep` opérations terminées les plus
+    /// récemment (avec leur journal), efface les autres. Une opération qui n'est pas terminée n'est jamais
+    /// comptée ni effacée. Rend le nombre d'opérations effacées.
+    async fn prune_finished_beyond(&self, keep: u32) -> Result<u64, StoreError>;
+
+    /// Les `limit` opérations terminées le plus récemment, de la plus récente à la plus ancienne : de quoi
+    /// rebâtir « la dernière action » de chaque service au démarrage. Une ligne illisible est ignorée
+    /// (tracée), jamais fatale.
+    async fn recent_finished(&self, limit: u32) -> Result<Vec<OpRecord>, StoreError>;
 }
 
 /// Ce que le moteur dit du service d'une opération non terminée, jugé par l'adaptateur du moteur. Le
 /// domaine ne sait que classer le résultat (`domain::ops::recover`).
 #[async_trait]
 pub trait ServiceObserver: Send + Sync {
-    async fn observe(&self, op: &OpRecord) -> Observed;
+    /// `steps` est le journal de l'opération, déjà relu par l'appelant : l'observateur n'a pas besoin du
+    /// journal pour juger si le plan est allé au bout de ses gestes destructifs.
+    async fn observe(&self, op: &OpRecord, steps: &[StepRecord]) -> Observed;
 }
 
 /// Ce que devient un objet que l'opération avait créé.

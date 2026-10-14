@@ -277,6 +277,8 @@ pub struct Options {
     pub engine: Option<Arc<agent::fake_engine::FakeEngine>>,
     /// L'agent est vu « d'avant les services » : son `/hello` n'annonce aucune capacité (HRT-62).
     pub hide_capabilities: bool,
+    /// Une destination supplémentaire des événements (HRT-144 : les messages `operation` du flux).
+    pub extra_sink: Option<Arc<dyn hearth_link::ports::EventSink>>,
 }
 
 impl Default for Options {
@@ -292,6 +294,7 @@ impl Default for Options {
             hour_fails: false,
             engine: None,
             hide_capabilities: false,
+            extra_sink: None,
         }
     }
 }
@@ -327,6 +330,19 @@ pub async fn start_manager_shared(
     config: LinkConfig,
     transport: Arc<dyn hearth_link::ports::Transport>,
 ) -> LinkManager {
+    start_manager_sunk(dir, vault, net, clock, config, transport, None).await
+}
+
+/// Comme `start_manager_shared`, avec une destination supplémentaire des événements.
+pub async fn start_manager_sunk(
+    dir: &std::path::Path,
+    vault: Arc<dyn hearth_link::ports::Vault>,
+    net: Arc<ScriptedNet>,
+    clock: Arc<JumpClock>,
+    config: LinkConfig,
+    transport: Arc<dyn hearth_link::ports::Transport>,
+    extra_sink: Option<Arc<dyn hearth_link::ports::EventSink>>,
+) -> LinkManager {
     LinkManager::start(
         Ports {
             transport,
@@ -337,7 +353,7 @@ pub async fn start_manager_shared(
             clock,
             rng: Arc::new(OsRng::default()),
             net,
-            extra_sink: None,
+            extra_sink,
         },
         config,
     )
@@ -867,13 +883,14 @@ impl World {
             .hour_fails
             .store(options.hour_fails, std::sync::atomic::Ordering::SeqCst);
         let transport: Arc<dyn hearth_link::ports::Transport> = Arc::new(SharedSpy(spy.clone()));
-        let manager = start_manager_shared(
+        let manager = start_manager_sunk(
             dir.path(),
             vault.clone(),
             net.clone(),
             clock.clone(),
             options.config,
             transport,
+            options.extra_sink,
         )
         .await;
         let recorder = Recorder::spawn(manager.subscribe());

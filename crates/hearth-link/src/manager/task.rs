@@ -453,6 +453,11 @@ impl Runner {
             }
             Ok(Frame::Services(message)) => {
                 self.traffic();
+                // Le suivi d'une opération (HRT-144) : annoncé tel quel, il ne change pas l'état des services.
+                if let hearth_proto::stream::ServicesMessage::Operation(view) = *message {
+                    self.deps.sink.service_operation(&self.id, Arc::new(view));
+                    return;
+                }
                 let before = self.services.as_ref().map(|state| state.engine.clone());
                 if crate::domain::services::apply(&mut self.services, *message) {
                     self.stamp_engine(before.as_ref());

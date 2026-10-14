@@ -16,6 +16,7 @@ use hearth_proto::admin_act::{
 };
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
+use hearth_proto::api::service_ops::OperationChoice;
 use serde_json::Value;
 
 /// Un identifiant de compte de l'agent : lettres et chiffres, rien d'autre (jamais `/`, `..`, `?`).
@@ -115,6 +116,19 @@ fn mode(body: Option<&Value>) -> Result<ReauthMode, Unreadable> {
     }
 }
 
+/// Le choix d'une décision d'opération (`choice`). Un choix que ce client ne connaît pas n'est pas un acte :
+/// il ne se signe pas (l'agent ne l'a jamais offert).
+fn choice(body: Option<&Value>) -> Result<OperationChoice, Unreadable> {
+    match text(body, "choice")? {
+        "continue" => Ok(OperationChoice::Continue),
+        "cancel" => Ok(OperationChoice::Cancel),
+        "revert" => Ok(OperationChoice::Revert),
+        "keep" => Ok(OperationChoice::Keep),
+        "verified" => Ok(OperationChoice::Verified),
+        _ => Err(Unreadable),
+    }
+}
+
 /// Les clés d'une adoption (`keys`, un tableau de textes) : un corps dont une entrée n'est pas un texte
 /// n'est pas un acte.
 fn keys(body: Option<&Value>) -> Result<Vec<&str>, Unreadable> {
@@ -166,6 +180,23 @@ fn build<'a>(
         ActKind::ReauthSetting => AdminAct::ReauthSetting { mode: mode(body)? },
         ActKind::ServicesAdopt => AdminAct::services_adopt(keys(body)?),
         ActKind::ServiceRelease => AdminAct::ServiceRelease { target: id },
+        // Annuler et décider une opération de service (HRT-144, ADR-0045) : l'identifiant vient du chemin,
+        // le choix du corps.
+        ActKind::OperationCancel => AdminAct::OperationCancel { target: id_ref()? },
+        ActKind::OperationDecide => AdminAct::OperationDecide {
+            target: id_ref()?,
+            choice: choice(body)?,
+        },
+        // Déclarés pour les tranches suivantes, sans route dans `ROUTES` : aucune requête ne peut les viser
+        // (`route_of` ne lit que `ROUTES`). Le lot qui ajoute leur route écrit ici comment les reconstruire.
+        ActKind::ServiceStart
+        | ActKind::ServiceStop
+        | ActKind::ServiceRestart
+        | ActKind::ServiceDeploy
+        | ActKind::ServiceDelete
+        | ActKind::BackupCreate
+        | ActKind::BackupDelete
+        | ActKind::GameSettingsSave => return Err(Unreadable),
     })
 }
 
@@ -208,6 +239,7 @@ mod tests {
             "/security/attack-mode" => json!({ "active": true }),
             "/me/reauth" => json!({ "password": "each" }),
             "/services/adopt" => json!({ "keys": ["c_0123abcd", "u_docker-x.service"] }),
+            "/operations/services/{id}/decision" => json!({ "choice": "keep" }),
             _ => json!({}),
         };
         (path, body)
@@ -389,5 +421,63 @@ mod tests {
             classify("DELETE", "/me/devices/01ABC", None),
             Ok(Route::LegacyRemoval)
         );
+    }
+
+    #[test]
+    fn cancelling_and_deciding_an_operation_are_rebuilt_from_the_path_and_the_body() {
+        let empty = json!({});
+        let Ok(Route::Act(act)) = classify("DELETE", "/operations/services/01OP", Some(&empty))
+        else {
+            panic!("acte attendu");
+        };
+        assert_eq!(act, AdminAct::OperationCancel { target: "01OP" });
+        let body = json!({ "choice": "revert", "reauth": { "password": "x" } });
+        let Ok(Route::Act(act)) =
+            classify("POST", "/operations/services/01OP/decision", Some(&body))
+        else {
+            panic!("acte attendu");
+        };
+        assert_eq!(
+            act,
+            AdminAct::OperationDecide {
+                target: "01OP",
+                choice: OperationChoice::Revert
+            }
+        );
+        // Un choix inconnu, absent, ou qui n'est pas un texte : pas un acte ; il ne se signe jamais.
+        for bad in [
+            json!({ "choice": "dance" }),
+            json!({ "choice": "unknown" }),
+            json!({ "choice": 1 }),
+            json!({}),
+        ] {
+            assert_eq!(
+                classify("POST", "/operations/services/01OP/decision", Some(&bad)),
+                Err(Unreadable),
+                "{bad}"
+            );
+        }
+        // L'identifiant d'une opération n'est jamais un chemin.
+        for path in [
+            "/operations/services/../decision",
+            "/operations/services/a%2Fb",
+            "/operations/services/a b",
+        ] {
+            assert_eq!(classify("DELETE", path, None), Ok(Route::Free), "{path}");
+        }
+    }
+
+    #[test]
+    fn an_act_declared_without_a_route_cannot_be_produced_by_any_request() {
+        for kind in ActKind::DECLARED_WITHOUT_ROUTE {
+            assert!(
+                ROUTES.iter().all(|route| !route.kinds.contains(&kind)),
+                "{kind:?}"
+            );
+            assert!(
+                build(kind, Cow::Borrowed("x"), None).is_err(),
+                "{kind:?} sait se reconstruire sans route"
+            );
+        }
     }
 }

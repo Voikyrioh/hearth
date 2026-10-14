@@ -29,6 +29,7 @@ use hearth_proto::api::accounts::{
 };
 use hearth_proto::api::reauth::{Reauth, SetReauthRequest, lenient_reauth, reauth_refusal};
 use hearth_proto::api::security::SetAttackModeRequest;
+use hearth_proto::api::service_ops::OperationDecision;
 use hearth_proto::api::services::AdoptRequest;
 use hearth_proto::api::update::AgentUpdateRequest;
 use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
@@ -71,6 +72,8 @@ enum Parsed {
     Setting(SetReauthRequest),
     /// Adopter : le corps porte les clés (HRT-80), dont le nombre et l'empreinte sont signés.
     Adopt(AdoptRequest),
+    /// Décider d'une opération (HRT-144) : le choix du corps est signé avec l'identifiant du chemin.
+    Decide(OperationDecision),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
 }
@@ -88,10 +91,21 @@ impl Parsed {
             ActKind::AccountPasswordOwn => serde_json::from_slice(bytes).ok().map(Self::Own),
             ActKind::ReauthSetting => serde_json::from_slice(bytes).ok().map(Self::Setting),
             ActKind::ServicesAdopt => serde_json::from_slice(bytes).ok().map(Self::Adopt),
+            ActKind::OperationDecide => serde_json::from_slice(bytes).ok().map(Self::Decide),
             ActKind::AccountPassword
             | ActKind::AccountDelete
             | ActKind::SessionsRevoke
-            | ActKind::ServiceRelease => Some(Self::TargetOnly),
+            | ActKind::ServiceRelease
+            | ActKind::OperationCancel => Some(Self::TargetOnly),
+            // Déclarés pour les tranches suivantes : aucune route ne les porte, donc aucun corps à lire.
+            ActKind::ServiceStart
+            | ActKind::ServiceStop
+            | ActKind::ServiceRestart
+            | ActKind::ServiceDeploy
+            | ActKind::ServiceDelete
+            | ActKind::BackupCreate
+            | ActKind::BackupDelete
+            | ActKind::GameSettingsSave => None,
         }
     }
 
@@ -123,6 +137,14 @@ impl Parsed {
             (Self::TargetOnly, ActKind::ServiceRelease) => {
                 AdminAct::ServiceRelease { target: id.into() }
             }
+            (Self::TargetOnly, ActKind::OperationCancel) => {
+                AdminAct::OperationCancel { target: id }
+            }
+            (Self::Decide(request), _) => AdminAct::OperationDecide {
+                target: id,
+                choice: request.choice,
+            },
+
             (Self::TargetOnly, ActKind::AccountPassword) => {
                 AdminAct::AccountPassword { target: id }
             }

@@ -15,12 +15,13 @@ Au démarrage de l'agent, chaque opération non terminée est CLASSÉE, jamais c
 
 La reprise n'empêche jamais l'agent de démarrer : un journal d'étapes qui ne se relit pas classe l'opération « à vérifier » (cause « état inconnu »), verrou repris, rien retiré ni rejoué ; une ligne d'opération illisible est isolée et son service reste refusé par l'index de la base. Choisir « revenir » sur une opération à vérifier démarre un retour arrière (`rolling_back`), jamais un « revenu en arrière » sans geste.
 
-Cette tranche ne branche pas encore d'opération réelle (modifier, supprimer, sauvegarder) : elle fournit le classement, le journal et ses tests ; l'observateur du moteur de ce ticket répond « illisible », donc « à vérifier » plutôt que « tout va bien ».
+Aucun geste réel (modifier, supprimer, sauvegarder) n'est encore écrit : le classement, le journal et ses tests sont prêts. L'observateur du moteur (HRT-144, BR-OPS-008) compte les conteneurs du service dans le vrai moteur, en lecture seule ; il ne dit « cohérent » que si le plan est allé au bout de ses gestes destructifs et que le moteur montre exactement ce que sa fin laisse. L'observateur « illisible » (`UnobservedState`) ne sert plus qu'aux tests.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/ops/recover.rs::{recover, recover_unreadable_journal}`
 - `crates/hearth-agent/src/application/service_ops.rs::ServiceOps::recover_at_startup`
-- `crates/hearth-agent/src/infrastructure/ops_observer.rs::UnobservedState`
+- `crates/hearth-agent/src/infrastructure/ops_observer.rs::{EngineObserver, UnobservedState}`
+- `crates/hearth-agent/src/domain/ops/observe.rs::observed_from_presence`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/ops/recover.rs::tests::the_table_of_the_design`
@@ -42,4 +43,5 @@ Cette tranche ne branche pas encore d'opération réelle (modifier, supprimer, s
 - BR-LIFE-013, BR-DEL-025, BR-BACKUP-025, BR-JEU-011, BR-MONDE-026, BR-RESIL-009
 
 ## Historique
+- 2026-10-14 — l'observateur du vrai moteur remplace l'observateur « illisible » en production (HRT-144).
 - 2026-10-13 — création (HRT-83, ADR-0044 et ADR-0045 : socle des services créés par Hearth, côté agent).

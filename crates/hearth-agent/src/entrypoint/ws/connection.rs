@@ -6,9 +6,11 @@
 //! `send_timeout`.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use hearth_proto::api::security::SecurityView;
+use hearth_proto::api::service_ops::OperationView;
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, ErrorDetail};
 use hearth_proto::stream::{
@@ -17,19 +19,23 @@ use hearth_proto::stream::{
 };
 use serde_json::Value;
 use tokio::sync::broadcast::{self, error::RecvError};
-use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, timeout};
+use tokio::time::{Instant, MissedTickBehavior, interval_at, sleep, sleep_until, timeout};
 
 use super::{Permit, StreamSettings};
 use crate::application::audit::AuditService;
+use crate::application::service_op_access::Viewer;
+use crate::application::service_ops::OpSnapshot;
 use crate::application::services::ServicesChange;
 use crate::application::sessions::{AuthError, CurrentSession};
 use crate::domain::audit::AuditRecord;
 use crate::domain::metrics::Sample;
+use crate::domain::ops::OpFlush;
 use crate::domain::secret::Secret;
 use crate::domain::sessions::SessionEnd;
 use crate::domain::stream::{SNAPSHOT_WINDOW, is_new, may_subscribe};
 use crate::entrypoint::http::{self, ApiError, AppState};
 use crate::entrypoint::metrics_wire;
+use crate::entrypoint::service_ops_wire;
 use crate::entrypoint::services_wire::{self, Reader};
 
 /// Comment la connexion se termine : un code de fermeture et une raison courte, ou rien si le
@@ -133,6 +139,15 @@ struct Subscriptions {
     services: Option<broadcast::Receiver<Arc<ServicesChange>>>,
     /// Dernier `rev` envoyé : un lot déjà couvert par l'instantané est écarté.
     services_rev: u64,
+    /// Les changements d'opération de service (sujet `services`, HRT-144) : TOUS ceux de l'agent, filtrés ici
+    /// pour ce compte (`ServiceOpAccess::can_see`). Un abonné lent perd les plus anciens et reçoit alors
+    /// l'état des opérations en cours : il ne ralentit jamais l'agent.
+    operations: Option<broadcast::Receiver<Arc<OpSnapshot>>>,
+    /// La cadence des messages `operation` de cette connexion : un par 500 ms et par opération, le dernier
+    /// état retenu part à l'échéance (jamais perdu).
+    op_flush: OpFlush<OperationView>,
+    /// L'instant d'où se comptent les millisecondes de `op_flush`.
+    op_epoch: Option<Instant>,
     /// Instant monotone du dernier échantillon envoyé (snapshot compris) : pas de doublon
     /// (BR-DASH-011), même si l'horloge murale recule.
     last_sent: Option<time::Duration>,
@@ -149,6 +164,71 @@ fn reader_of(session: &CurrentSession) -> Reader {
     Reader {
         may_manage_services: session.account.may_manage_services(),
     }
+}
+
+fn viewer_of(session: &CurrentSession) -> Viewer {
+    Viewer {
+        may_manage_services: session.account.may_manage_services(),
+    }
+}
+
+/// Millisecondes écoulées depuis l'abonnement aux services (l'horloge monotone de la cadence).
+fn ops_now_ms(subscriptions: &Subscriptions) -> u64 {
+    subscriptions.op_epoch.map_or(0, |epoch| {
+        u64::try_from(epoch.elapsed().as_millis()).unwrap_or(u64::MAX)
+    })
+}
+
+/// Attend l'échéance du prochain message `operation` retenu, ou sans fin s'il n'y en a pas.
+async fn operation_due(epoch: Option<Instant>, deadline_ms: Option<u64>) {
+    match (epoch, deadline_ms) {
+        (Some(epoch), Some(ms)) => sleep_until(epoch + Duration::from_millis(ms)).await,
+        _ => std::future::pending().await,
+    }
+}
+
+/// Offre l'état d'une opération à la cadence de la connexion : `Some` s'il part tout de suite.
+fn offer_operation(
+    subscriptions: &mut Subscriptions,
+    view: OperationView,
+) -> Option<OperationView> {
+    let now = ops_now_ms(subscriptions);
+    let id = view.id.clone();
+    subscriptions.op_flush.offer(now, &id, view)
+}
+
+/// Envoie le message `operation` ; `false` si le client ne le reçoit plus.
+async fn send_operation(
+    socket: &mut WebSocket,
+    settings: &StreamSettings,
+    view: OperationView,
+) -> bool {
+    send(socket, settings, &ServicesMessage::Operation(view)).await
+}
+
+/// Envoie l'état des opérations EN COURS que ce compte voit : à l'abonnement, après des changements perdus
+/// par un abonné lent, après un changement de droit. Chaque état passe par la cadence. `false` si le client
+/// ne reçoit plus.
+async fn push_open_operations(
+    socket: &mut WebSocket,
+    state: &AppState,
+    session: &CurrentSession,
+    subscriptions: &mut Subscriptions,
+) -> bool {
+    match state.service_ops.open_for(viewer_of(session)).await {
+        Ok(snapshots) => {
+            for snapshot in snapshots {
+                let view = service_ops_wire::view(&snapshot);
+                if let Some(view) = offer_operation(subscriptions, view)
+                    && !send_operation(socket, &state.stream.settings, view).await
+                {
+                    return false;
+                }
+            }
+        }
+        Err(error) => tracing::warn!(%error, "opérations en cours illisibles : non envoyées"),
+    }
+    true
 }
 
 /// Reçoit le prochain élément d'un abonnement, ou attend sans fin s'il n'y en a pas.
@@ -315,11 +395,14 @@ async fn serve(
                 Ok(change) => {
                     if change.rev > subscriptions.services_rev {
                         subscriptions.services_rev = change.rev;
-                        let message = ServicesMessage::ServicesDelta(services_wire::delta(
-                            &change,
-                            state.services.host(),
-                            reader_of(&session),
-                        ));
+                        let message = state.service_ops.ops().with_index(|ops| {
+                            ServicesMessage::ServicesDelta(services_wire::delta(
+                                &change,
+                                state.services.host(),
+                                reader_of(&session),
+                                ops,
+                            ))
+                        });
                         if !send(socket, &settings, &message).await {
                             return None;
                         }
@@ -331,15 +414,52 @@ async fn serve(
                     tracing::debug!(missed, "abonné lent : instantané des services renvoyé");
                     let snapshot = state.services.snapshot();
                     subscriptions.services_rev = snapshot.rev;
-                    let message = ServicesMessage::ServicesSnapshot(services_wire::snapshot(
-                        &snapshot,
-                        reader_of(&session),
-                    ));
+                    let message = state.service_ops.ops().with_index(|ops| {
+                        ServicesMessage::ServicesSnapshot(services_wire::snapshot(
+                            &snapshot,
+                            reader_of(&session),
+                            ops,
+                        ))
+                    });
                     if !send(socket, &settings, &message).await {
                         return None;
                     }
                 }
                 Err(RecvError::Closed) => subscriptions.services = None,
+            },
+            // Le suivi des opérations de service (HRT-144) : un message par changement visible de ce compte,
+            // à la cadence de 500 ms par opération.
+            change = next(&mut subscriptions.operations) => match change {
+                Ok(snapshot) => {
+                    if state.service_ops.can_see(&snapshot.record.service, viewer_of(&session)) {
+                        let view = service_ops_wire::view(&snapshot);
+                        if let Some(view) = offer_operation(&mut subscriptions, view)
+                            && !send_operation(socket, &settings, view).await
+                        {
+                            return None;
+                        }
+                    }
+                }
+                // Un abonné lent a perdu des changements : l'état des opérations en cours repart entier, sans
+                // logique de trou à écrire côté client.
+                Err(RecvError::Lagged(missed)) => {
+                    tracing::debug!(missed, "abonné lent : état des opérations renvoyé");
+                    subscriptions.op_flush = OpFlush::new();
+                    if !push_open_operations(socket, state, &session, &mut subscriptions).await {
+                        return None;
+                    }
+                }
+                Err(RecvError::Closed) => subscriptions.operations = None,
+            },
+            // Les états retenus par la cadence partent à leur échéance : le dernier état d'une opération n'est
+            // jamais perdu.
+            () = operation_due(subscriptions.op_epoch, subscriptions.op_flush.next_deadline()) => {
+                let now = ops_now_ms(&subscriptions);
+                for view in subscriptions.op_flush.due(now) {
+                    if !send_operation(socket, &settings, view).await {
+                        return None;
+                    }
+                }
             },
             _ = check.tick() => {
                 match state.sessions.authenticate_at(token.expose(), addr).await {
@@ -365,10 +485,22 @@ async fn serve(
                         if right_changed && subscriptions.services.is_some() {
                             let snapshot = state.services.snapshot();
                             subscriptions.services_rev = snapshot.rev;
-                            let message = ServicesMessage::ServicesSnapshot(
-                                services_wire::snapshot(&snapshot, reader_of(&session)),
-                            );
+                            let message = state.service_ops.ops().with_index(|ops| {
+                                ServicesMessage::ServicesSnapshot(services_wire::snapshot(
+                                    &snapshot,
+                                    reader_of(&session),
+                                    ops,
+                                ))
+                            });
                             if !send(socket, &settings, &message).await {
+                                return None;
+                            }
+                            // Le droit décide aussi des opérations d'un service adopté : elles repartent
+                            // avec ce que le compte voit maintenant.
+                            subscriptions.op_flush = OpFlush::new();
+                            if subscriptions.operations.is_some()
+                                && !push_open_operations(socket, state, &session, &mut subscriptions).await
+                            {
                                 return None;
                             }
                         }
@@ -609,15 +741,27 @@ async fn handle_text(
             // Le moteur et les services : ouverts aux deux rôles, rien à contrôler. S'abonner AVANT de
             // lire l'état (`subscribe` les prend sous le même verrou) : aucun lot ne se perd.
             subscriptions.services = None;
+            subscriptions.operations = None;
+            subscriptions.op_flush = OpFlush::new();
             if topics.contains(&Topic::Services) {
                 let (receiver, snapshot) = state.services.subscribe();
                 subscriptions.services = Some(receiver);
                 subscriptions.services_rev = snapshot.rev;
-                let message = ServicesMessage::ServicesSnapshot(services_wire::snapshot(
-                    &snapshot,
-                    reader_of(session),
-                ));
+                let message = state.service_ops.ops().with_index(|ops| {
+                    ServicesMessage::ServicesSnapshot(services_wire::snapshot(
+                        &snapshot,
+                        reader_of(session),
+                        ops,
+                    ))
+                });
                 if !send(socket, &settings, &message).await {
+                    return Handled::Stop;
+                }
+                // Les opérations en cours que ce compte voit, puis chaque changement. S'abonner AVANT de
+                // lire l'état : aucun changement ne se perd entre les deux.
+                subscriptions.operations = Some(state.service_ops.subscribe());
+                subscriptions.op_epoch = Some(Instant::now());
+                if !push_open_operations(socket, state, session, subscriptions).await {
                     return Handled::Stop;
                 }
             }

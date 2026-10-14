@@ -10,12 +10,14 @@
 //! des objets créés par l'opération, relus avec les mêmes règles qu'à l'écriture.
 
 use async_trait::async_trait;
-use sqlx::{Acquire, SqlitePool};
+use sqlx::{Acquire, Row, Sqlite, SqlitePool};
 use time::OffsetDateTime;
 
 use super::convert::{format_date, is_unique_violation, parse_date, storage};
+use super::store::SqliteUnitOfWork;
 use crate::application::ports::{
-    DecisionOffer, JournalError, NewOp, OpJournal, OpRecord, Progress, StoreError,
+    DecisionOffer, JournalError, NewOp, OpJournal, OpRecord, Progress, ServiceOpTx, StepGuard,
+    StoreError,
 };
 use crate::domain::ops::{
     Cause, Choice, OpKind, OpPlan, OpStatus, StepName, StepRecord, StepState, UndoInfo,
@@ -172,19 +174,7 @@ impl OpJournal for SqliteOpJournal {
     }
 
     async fn get(&self, id: &str) -> Result<Option<OpRecord>, StoreError> {
-        sqlx::query_as!(
-            OpRow,
-            "SELECT id, op_key, service_key, service_name, kind, account, plan_json, status, step,
-                    decision_json, decision_at, progress_json, cause, forced, started_at, updated_at,
-                    finished_at
-             FROM service_ops WHERE id = ?",
-            id
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(storage(RESOURCE))?
-        .map(into_record)
-        .transpose()
+        get_op(&self.pool, id).await
     }
 
     async fn unfinished(&self) -> Result<Vec<OpRecord>, StoreError> {
@@ -219,25 +209,7 @@ impl OpJournal for SqliteOpJournal {
     }
 
     async fn steps(&self, id: &str) -> Result<Vec<StepRecord>, StoreError> {
-        let rows = sqlx::query!(
-            "SELECT seq, step, state, undo_json, at FROM service_op_steps WHERE op_id = ? ORDER BY seq",
-            id
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(storage(RESOURCE))?;
-        rows.into_iter()
-            .map(|row| {
-                Ok(StepRecord {
-                    seq: u32::try_from(row.seq).map_err(|_| unreadable("seq", id))?,
-                    step: StepName::parse(&row.step).ok_or_else(|| unreadable("step", id))?,
-                    state: StepState::parse(&row.state).ok_or_else(|| unreadable("state", id))?,
-                    undo: UndoInfo::from_json(&row.undo_json)
-                        .ok_or_else(|| unreadable("undo_json", id))?,
-                    at: parse_date(RESOURCE, &row.at)?,
-                })
-            })
-            .collect()
+        get_steps(&self.pool, id).await
     }
 
     async fn append_step(
@@ -248,11 +220,16 @@ impl OpJournal for SqliteOpJournal {
         undo: &UndoInfo,
         at: OffsetDateTime,
         durable: bool,
+        guard: StepGuard,
     ) -> Result<u32, JournalError> {
         let at = format_date(RESOURCE, at)?;
         let undo_json = undo.to_json();
         let step_name = step.as_str();
         let state_name = state.as_str();
+        let allowed = match guard {
+            StepGuard::Unfinished => UNFINISHED_STATUSES,
+            StepGuard::Executing => EXECUTING_STATUSES,
+        };
         let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
         if durable {
             sqlx::query("PRAGMA synchronous = FULL")
@@ -260,49 +237,58 @@ impl OpJournal for SqliteOpJournal {
                 .await
                 .map_err(storage(RESOURCE))?;
         }
+        // UNE instruction écrit la ligne SI le statut de l'opération est permis : la condition et l'écriture ne
+        // se séparent pas (un `cancelling` posé entre une lecture et l'écriture n'a pas de fenêtre). La
+        // première instruction de la transaction est celle-ci : la transaction prend le verrou d'écriture
+        // tout de suite, sans lecture préalable qu'un autre écrivain pourrait périmer.
+        let insert = format!(
+            "INSERT INTO service_op_steps (op_id, seq, step, state, undo_json, at)
+             SELECT ?1, COALESCE((SELECT MAX(seq) FROM service_op_steps WHERE op_id = ?1), 0) + 1,
+                    ?2, ?3, ?4, ?5
+             WHERE EXISTS (SELECT 1 FROM service_ops WHERE id = ?1 AND status IN ({allowed}))"
+        );
         let written = async {
             let mut tx = conn.begin().await?;
-            let last: Option<i64> =
-                sqlx::query_scalar!("SELECT MAX(seq) FROM service_op_steps WHERE op_id = ?", id)
+            let inserted = sqlx::query(sqlx::AssertSqlSafe(insert.as_str()))
+                .bind(id)
+                .bind(step_name)
+                .bind(state_name)
+                .bind(&undo_json)
+                .bind(&at)
+                .execute(&mut *tx)
+                .await?;
+            if inserted.rows_affected() == 0 {
+                tx.rollback().await?;
+                return Ok::<Option<i64>, sqlx::Error>(None);
+            }
+            let seq: i64 =
+                sqlx::query_scalar("SELECT MAX(seq) FROM service_op_steps WHERE op_id = ?")
+                    .bind(id)
                     .fetch_one(&mut *tx)
                     .await?;
-            let seq = last.unwrap_or(0) + 1;
-            sqlx::query!(
-                "INSERT INTO service_op_steps (op_id, seq, step, state, undo_json, at)
-                 VALUES (?, ?, ?, ?, ?, ?)",
-                id,
-                seq,
-                step_name,
-                state_name,
-                undo_json,
-                at
-            )
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query!(
-                "UPDATE service_ops SET step = ?, updated_at = ? WHERE id = ?",
-                step_name,
-                at,
-                id
-            )
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("UPDATE service_ops SET step = ?, updated_at = ? WHERE id = ?")
+                .bind(step_name)
+                .bind(&at)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
             tx.commit().await?;
-            Ok::<i64, sqlx::Error>(seq)
+            Ok(Some(seq))
         }
         .await;
         if durable {
             restore_normal(&mut conn).await;
         }
         match written {
-            Ok(seq) => u32::try_from(seq).map_err(|_| unreadable("seq", id).into()),
-            // Clé étrangère : l'opération n'existe pas.
-            Err(error)
-                if error
-                    .as_database_error()
-                    .is_some_and(|database| database.is_foreign_key_violation()) =>
-            {
-                Err(JournalError::Unknown)
+            Ok(Some(seq)) => u32::try_from(seq).map_err(|_| unreadable("seq", id).into()),
+            // Rien n'a été écrit : l'opération n'existe pas, ou son statut n'a pas permis la ligne.
+            Ok(None) => {
+                let exists = get_op(&self.pool, id).await?.is_some();
+                Err(if exists {
+                    JournalError::Stale
+                } else {
+                    JournalError::Unknown
+                })
             }
             Err(error) => Err(storage(RESOURCE)(error).into()),
         }
@@ -317,42 +303,8 @@ impl OpJournal for SqliteOpJournal {
         decision: Option<&DecisionOffer>,
         at: OffsetDateTime,
     ) -> Result<(), JournalError> {
-        let at = format_date(RESOURCE, at)?;
-        let (decision_json, decision_at) = decision_columns(decision)?;
-        let finished_at = to.is_terminal().then(|| at.clone());
-        let cause = cause.map_or("", Cause::as_str);
-        let from = from.as_str();
-        let to = to.as_str();
-        let done = sqlx::query!(
-            "UPDATE service_ops
-             SET status = ?, cause = ?, decision_json = ?, decision_at = ?, updated_at = ?,
-                 finished_at = ?
-             WHERE id = ? AND status = ?",
-            to,
-            cause,
-            decision_json,
-            decision_at,
-            at,
-            finished_at,
-            id,
-            from
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(storage(RESOURCE))?;
-        if done.rows_affected() == 1 {
-            return Ok(());
-        }
-        // Rien n'a bougé : l'opération n'existe pas, ou elle n'était plus dans le statut attendu.
-        let exists = sqlx::query_scalar!("SELECT id FROM service_ops WHERE id = ?", id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(storage(RESOURCE))?;
-        Err(if exists.is_some() {
-            JournalError::Stale
-        } else {
-            JournalError::Unknown
-        })
+        let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
+        do_transition(&mut conn, id, from, to, cause, decision, at).await
     }
 
     async fn set_progress(
@@ -422,5 +374,207 @@ impl OpJournal for SqliteOpJournal {
         .map_err(storage(RESOURCE))?;
         tx.commit().await.map_err(storage(RESOURCE))?;
         Ok(done.rows_affected())
+    }
+
+    async fn prune_finished_beyond(&self, keep: u32) -> Result<u64, StoreError> {
+        let keep = i64::from(keep);
+        let mut tx = self.pool.begin().await.map_err(storage(RESOURCE))?;
+        // Les plus récemment terminées restent ; une opération non terminée n'a pas de `finished_at` et n'est
+        // donc jamais candidate. Le journal d'étapes part d'abord (clé étrangère).
+        const KEPT: &str = "SELECT id FROM service_ops WHERE finished_at IS NOT NULL
+                            ORDER BY finished_at DESC, id DESC LIMIT ?";
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM service_op_steps WHERE op_id IN
+                 (SELECT id FROM service_ops WHERE finished_at IS NOT NULL AND id NOT IN ({KEPT}))"
+        )))
+        .bind(keep)
+        .execute(&mut *tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        let done = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM service_ops WHERE finished_at IS NOT NULL AND id NOT IN ({KEPT})"
+        )))
+        .bind(keep)
+        .execute(&mut *tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        tx.commit().await.map_err(storage(RESOURCE))?;
+        Ok(done.rows_affected())
+    }
+
+    async fn recent_finished(&self, limit: u32) -> Result<Vec<OpRecord>, StoreError> {
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {OP_COLUMNS} FROM service_ops WHERE finished_at IS NOT NULL
+             ORDER BY finished_at DESC, id DESC LIMIT ?"
+        )))
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| {
+                let record = row_of(row).map_err(storage(RESOURCE)).and_then(into_record);
+                match record {
+                    Ok(record) => Some(record),
+                    Err(error) => {
+                        tracing::error!(%error, "opération terminée illisible : ignorée");
+                        None
+                    }
+                }
+            })
+            .collect())
+    }
+}
+
+/// Les statuts où une ligne ordinaire du journal peut s'écrire : tous sauf les statuts terminaux.
+const UNFINISHED_STATUSES: &str =
+    "'accepted', 'running', 'awaiting_decision', 'cancelling', 'rolling_back', 'needs_attention'";
+/// Les statuts où l'`intent` d'une étape destructive peut s'écrire.
+const EXECUTING_STATUSES: &str = "'running', 'rolling_back'";
+
+const OP_COLUMNS: &str = "id, op_key, service_key, service_name, kind, account, plan_json, status, step,
+                    decision_json, decision_at, progress_json, cause, forced, started_at, updated_at,
+                    finished_at";
+
+fn row_of(row: &sqlx::sqlite::SqliteRow) -> Result<OpRow, sqlx::Error> {
+    Ok(OpRow {
+        id: row.try_get("id")?,
+        op_key: row.try_get("op_key")?,
+        service_key: row.try_get("service_key")?,
+        service_name: row.try_get("service_name")?,
+        kind: row.try_get("kind")?,
+        account: row.try_get("account")?,
+        plan_json: row.try_get("plan_json")?,
+        status: row.try_get("status")?,
+        step: row.try_get("step")?,
+        decision_json: row.try_get("decision_json")?,
+        decision_at: row.try_get("decision_at")?,
+        progress_json: row.try_get("progress_json")?,
+        cause: row.try_get("cause")?,
+        forced: row.try_get("forced")?,
+        started_at: row.try_get("started_at")?,
+        updated_at: row.try_get("updated_at")?,
+        finished_at: row.try_get("finished_at")?,
+    })
+}
+
+/// Une opération, sur le bassin OU dans une transaction.
+async fn get_op<'e, E>(db: E, id: &str) -> Result<Option<OpRecord>, StoreError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_as!(
+        OpRow,
+        "SELECT id, op_key, service_key, service_name, kind, account, plan_json, status, step,
+                    decision_json, decision_at, progress_json, cause, forced, started_at, updated_at,
+                    finished_at
+             FROM service_ops WHERE id = ?",
+        id
+    )
+    .fetch_optional(db)
+    .await
+    .map_err(storage(RESOURCE))?
+    .map(into_record)
+    .transpose()
+}
+
+/// Le journal d'étapes d'une opération, sur le bassin OU dans une transaction.
+async fn get_steps<'e, E>(db: E, id: &str) -> Result<Vec<StepRecord>, StoreError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    let rows = sqlx::query!(
+        "SELECT seq, step, state, undo_json, at FROM service_op_steps WHERE op_id = ? ORDER BY seq",
+        id
+    )
+    .fetch_all(db)
+    .await
+    .map_err(storage(RESOURCE))?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(StepRecord {
+                seq: u32::try_from(row.seq).map_err(|_| unreadable("seq", id))?,
+                step: StepName::parse(&row.step).ok_or_else(|| unreadable("step", id))?,
+                state: StepState::parse(&row.state).ok_or_else(|| unreadable("state", id))?,
+                undo: UndoInfo::from_json(&row.undo_json)
+                    .ok_or_else(|| unreadable("undo_json", id))?,
+                at: parse_date(RESOURCE, &row.at)?,
+            })
+        })
+        .collect()
+}
+
+/// Le changement de statut par comparaison-et-échange, sur le bassin OU dans une transaction.
+async fn do_transition(
+    db: &mut sqlx::SqliteConnection,
+    id: &str,
+    from: OpStatus,
+    to: OpStatus,
+    cause: Option<Cause>,
+    decision: Option<&DecisionOffer>,
+    at: OffsetDateTime,
+) -> Result<(), JournalError> {
+    let at = format_date(RESOURCE, at)?;
+    let (decision_json, decision_at) = decision_columns(decision)?;
+    let finished_at = to.is_terminal().then(|| at.clone());
+    let cause = cause.map_or("", Cause::as_str);
+    let from = from.as_str();
+    let to = to.as_str();
+    let done = sqlx::query!(
+        "UPDATE service_ops
+             SET status = ?, cause = ?, decision_json = ?, decision_at = ?, updated_at = ?,
+                 finished_at = ?
+             WHERE id = ? AND status = ?",
+        to,
+        cause,
+        decision_json,
+        decision_at,
+        at,
+        finished_at,
+        id,
+        from
+    )
+    .execute(&mut *db)
+    .await
+    .map_err(storage(RESOURCE))?;
+    if done.rows_affected() == 1 {
+        return Ok(());
+    }
+    // Rien n'a bougé : l'opération n'existe pas, ou elle n'était plus dans le statut attendu.
+    let exists = sqlx::query_scalar!("SELECT id FROM service_ops WHERE id = ?", id)
+        .fetch_optional(&mut *db)
+        .await
+        .map_err(storage(RESOURCE))?;
+    Err(if exists.is_some() {
+        JournalError::Stale
+    } else {
+        JournalError::Unknown
+    })
+}
+
+/// Le journal des opérations DANS une unité de travail : l'annulation et la décision lisent l'opération,
+/// jugent, changent son statut et écrivent l'entrée du journal d'activité dans la même transaction
+/// (`BEGIN IMMEDIATE`, un seul écrivain) : pas de changement sans trace, pas de trace sans changement.
+#[async_trait]
+impl ServiceOpTx for SqliteUnitOfWork {
+    async fn get(&mut self, id: &str) -> Result<Option<OpRecord>, StoreError> {
+        get_op(&mut *self.tx, id).await
+    }
+
+    async fn steps(&mut self, id: &str) -> Result<Vec<StepRecord>, StoreError> {
+        get_steps(&mut *self.tx, id).await
+    }
+
+    async fn transition(
+        &mut self,
+        id: &str,
+        from: OpStatus,
+        to: OpStatus,
+        cause: Option<Cause>,
+        decision: Option<&DecisionOffer>,
+        at: OffsetDateTime,
+    ) -> Result<(), JournalError> {
+        do_transition(&mut self.tx, id, from, to, cause, decision, at).await
     }
 }

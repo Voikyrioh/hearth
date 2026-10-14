@@ -233,6 +233,18 @@ impl Spec {
     }
 }
 
+/// Les actes de la matrice générique de ce fichier : ceux dont la route existe ET dont la réussite s'écrit
+/// sous leur propre action. Restent à part : les actes déclarés sans route (HRT-144, pas de requête possible)
+/// et l'annulation et la décision d'une opération, dont la réussite s'écrit sous l'action du GENRE de
+/// l'opération (`tests/service_ops_https.rs` les éprouve : preuve liée à l'identifiant et au choix, mot de
+/// passe, élévation, droit).
+fn generic_kinds() -> impl Iterator<Item = ActKind> {
+    ActKind::ALL.into_iter().filter(|kind| {
+        !ActKind::DECLARED_WITHOUT_ROUTE.contains(kind)
+            && !matches!(kind, ActKind::OperationCancel | ActKind::OperationDecide)
+    })
+}
+
 struct Actor {
     name: &'static str,
     key: std::sync::Arc<DeviceKey>,
@@ -356,6 +368,9 @@ impl Bench {
                 self.state.services.reload_adopted().await;
                 Spec::Release { key }
             }
+            other => {
+                panic!("{other:?} : pas de scénario dans la matrice générique (voir generic_kinds)")
+            }
         }
     }
 
@@ -475,7 +490,7 @@ fn assert_refused_with(reply: &Reply, status: StatusCode, code: &str, why: &str,
 
 #[tokio::test]
 async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_success_entry() {
-    for kind in ActKind::ALL {
+    for kind in generic_kinds() {
         let b = bench().await;
         let spec = b.spec(kind).await;
         let who = b.actor_for(kind);
@@ -498,7 +513,7 @@ async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_succe
 #[tokio::test]
 async fn a_proof_for_another_act_target_account_session_or_replayed_is_refused_and_changes_nothing()
 {
-    for kind in ActKind::ALL {
+    for kind in generic_kinds() {
         let b = bench().await;
         let spec = b.spec(kind).await;
         let who = b.actor_for(kind);
@@ -599,7 +614,7 @@ async fn a_proof_for_another_act_target_account_session_or_replayed_is_refused_a
 #[tokio::test]
 async fn a_confirmation_without_a_proof_or_without_a_password_is_refused_with_its_own_reason_and_tries_no_password()
  {
-    for kind in ActKind::ALL {
+    for kind in generic_kinds() {
         let b = bench().await;
         let spec = b.spec(kind).await;
         let who = b.actor_for(kind);
@@ -649,7 +664,7 @@ async fn a_confirmation_without_a_proof_or_without_a_password_is_refused_with_it
 #[tokio::test]
 async fn a_wrong_password_at_the_confirmation_counts_as_a_login_failure_and_the_wait_comes_at_the_fifth()
  {
-    for kind in ActKind::ALL {
+    for kind in generic_kinds() {
         let b = bench().await;
         let spec = b.spec(kind).await;
         let who = b.actor_for(kind);
@@ -834,7 +849,7 @@ async fn when_the_agent_requires_the_confirmation_an_act_without_reauth_is_told_
     let b = bench().await;
     let reply = b.api.get("/security").token(&b.marie.token).send().await;
     assert_eq!(reply.body["admin_reauth"]["required"], true);
-    for kind in ActKind::ALL {
+    for kind in generic_kinds() {
         let spec = b.spec(kind).await;
         let who = b.actor_for(kind);
         let before = b.snapshot().await;
@@ -1773,7 +1788,7 @@ async fn rescue_with_the_attack_mode_on_and_no_key_the_real_attack_mode_off_comm
 #[tokio::test]
 async fn an_old_client_is_refused_on_every_act_with_the_typed_error_and_keeps_its_reads() {
     let b = bench().await;
-    for kind in ActKind::ALL {
+    for kind in generic_kinds() {
         let spec = b.spec(kind).await;
         let who = b.actor_for(kind);
         let (method, path, body) = spec.request(PASSWORD);

@@ -22,8 +22,8 @@ use hearth_agent::application::service_ops::{
 };
 use hearth_agent::domain::ops::{
     Cause, Choice, ChoiceRefused, ConfigSide, CreatedObject, Holder, ObjectKind, ObjectRoot,
-    Observed, OpKind, OpPlan, OpStatus, PlannedStep, ReadKind, Refusal, StepName, StepState,
-    UndoInfo,
+    Observed, OpKind, OpPlan, OpStatus, PlannedStep, ReadKind, Refusal, StepName, StepRecord,
+    StepState, UndoInfo,
 };
 use hearth_agent::domain::services::key::ServiceKey;
 use hearth_agent::infrastructure::created_objects::FsCreatedObjects;
@@ -77,7 +77,7 @@ impl Observer {
 
 #[async_trait]
 impl ServiceObserver for Observer {
-    async fn observe(&self, _op: &OpRecord) -> Observed {
+    async fn observe(&self, _op: &OpRecord, _steps: &[StepRecord]) -> Observed {
         self.asked.fetch_add(1, Ordering::SeqCst);
         *self.answer.lock().unwrap()
     }

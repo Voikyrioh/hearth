@@ -16,6 +16,7 @@ use time::{Duration, OffsetDateTime};
 
 use super::hidden::Hidden;
 use super::image::ImageName;
+use super::key::ServiceKey;
 use super::unit::{UnitActivity, UnitStatus};
 
 /// Fenêtre de comptage des démarrages non demandés (`BR-SVC-006`).
@@ -119,6 +120,11 @@ pub struct Observation {
     pub tty: bool,
     /// Le pilote de journaux (`HostConfig.LogConfig.Type`) : `none` ne se relit pas (BR-SLOG-017).
     pub log_driver: Option<String>,
+    /// La clé `h_<ULID>` portée par l'étiquette `io.hearth.service-id` : le conteneur a été créé par Hearth
+    /// pour ce service (ADR-0037). Sert à compter les conteneurs d'un service à la reprise des opérations
+    /// (HRT-144) ; le registre ne s'en sert pas encore pour publier. Une étiquette qui n'a pas la forme d'une
+    /// clé est ignorée.
+    pub hearth_key: Option<ServiceKey>,
 }
 
 impl Observation {
@@ -158,6 +164,7 @@ impl Observation {
             stop_timeout_s: None,
             tty: false,
             log_driver: None,
+            hearth_key: None,
         }
     }
 }
@@ -428,6 +435,7 @@ mod tests {
             stop_timeout_s: None,
             tty: false,
             log_driver: None,
+            hearth_key: None,
         }
     }
 
