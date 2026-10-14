@@ -118,6 +118,12 @@ export interface ServiceInfo {
   adopted: { by: string; at: number | null } | null;
   /** Service adopté dont la commande et les noms de variables sont réservés au compte connecté (BR-ADOPT-015). */
   detailsReserved: boolean;
+  /**
+   * La commande et les noms de variables ont été LUS sur le serveur depuis le démarrage du client. Faux pour une
+   * liste relue du disque : elle y est écrite sans eux (ils peuvent porter des secrets), donc `envNames` vide et
+   * `command` à `null` y veulent dire « pas lus », JAMAIS « aucune variable » ni « commande de l'image ».
+   */
+  detailsKnown: boolean;
 }
 
 /** Une variable révélée par un compte qui a le droit (BR-SVC-009). Gardée en mémoire le temps de l'affichage, jamais écrite. */
@@ -172,7 +178,7 @@ export function toEngine(dto: EngineDto): EngineInfo {
   };
 }
 
-export function toService(dto: ServiceDto): ServiceInfo {
+export function toService(dto: ServiceDto, detailsKnown: boolean): ServiceInfo {
   return {
     key: dto.key,
     name: dto.name,
@@ -200,6 +206,7 @@ export function toService(dto: ServiceDto): ServiceInfo {
     graceS: dto.graceS,
     adopted: dto.adopted ? { by: dto.adopted.by, at: parseDate(dto.adopted.at) } : null,
     detailsReserved: dto.detailsReserved,
+    detailsKnown,
   };
 }
 
@@ -222,7 +229,7 @@ export function toServicesEvent(dto: BoundServicesEvent): ServicesEvent {
     seq: dto.seq,
     engineReceivedAt: dto.engineReceivedAt,
     engine: toEngine(dto.view.engine),
-    services: dto.view.services.map(toService),
+    services: dto.view.services.map((service) => toService(service, dto.detailsKnown)),
   };
 }
 

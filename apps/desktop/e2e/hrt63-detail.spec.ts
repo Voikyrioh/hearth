@@ -15,6 +15,7 @@ type Sim = {
     remove(id: string, key: string): void;
     setEngine(id: string, engine: Record<string, unknown>): void;
     setEnv(id: string, key: string, variables: { name: string; value: string }[]): void;
+    setDetailsKnown(id: string, known: boolean): void;
     reveals: { serverId: string; key: string }[];
   };
 };
@@ -48,10 +49,10 @@ test("parcours : ouvrir un service, lire son détail, révéler puis masquer les
   await expect(detail.getByRole("heading", { name: "web", level: 2 })).toBeVisible();
   for (const title of [
     "Général",
-    "Image et commande",
+    "Programme et commande",
     "Ports",
     "Dossiers de données",
-    "Variables d'environnement",
+    "Réglages (variables d'environnement)",
     "Redémarrage",
   ]) {
     await expect(detail.getByRole("heading", { name: title })).toBeVisible();
@@ -260,4 +261,179 @@ test("valeurs très longues et noms de 255 signes : coupés ou passés à la lig
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflowX).toBe(0);
+});
+
+// ── Corrections de la revue de la PR 93 ──────────────────────────────────────────────────────
+// Captures « après » : seulement si `HRT63_SHOTS` désigne un dossier (jamais dans la CI).
+const shot = async (page: Page, name: string) => {
+  const dir = process.env.HRT63_SHOTS;
+  if (dir) await page.screenshot({ path: `${dir}/${name}.png` });
+};
+
+test("redémarrage hors ligne : la liste relue du disque n'affirme ni « aucune variable » ni « commande par défaut »", async ({
+  page,
+}) => {
+  await open(page);
+  await sim(page, (s) => s.services.setDetailsKnown("forge", false));
+  await page.locator("[data-row][data-key='c_web']").click();
+  const detail = page.locator("[data-service-detail]");
+  await expect(detail).toContainText(
+    "Pas encore lue : elle se lira quand le lien avec le serveur sera revenu.",
+  );
+  await expect(detail).toContainText(
+    "Pas encore lus : ils se liront quand le lien avec le serveur sera revenu.",
+  );
+  await expect(detail).not.toContainText("Aucune variable");
+  await expect(detail).not.toContainText("Commande par défaut du programme");
+  await expect(page.locator("[data-env-mask]")).toHaveCount(0);
+  await shot(page, "1-hors-ligne-detail-non-lu");
+  // Le serveur répond de nouveau : la vraie liste revient, la phrase part.
+  // (un instantané complet : seul lui porte des détails lus, un lot ne change pas ce que dit l'écran)
+  await sim(page, (s) =>
+    s.services.seed("forge", [
+      { key: "c_web", name: "web", command: ["nginx", "-g", "daemon off;"] },
+    ]),
+  );
+  await expect(detail).not.toContainText("Pas encore lue");
+  await expect(page.locator("[data-detail-command]")).toHaveText("nginx -g daemon off;");
+});
+
+test("texte de 64 Ko : la commande, l'image, les chemins et les noms défilent dans leur zone, le reste de la page reste atteignable", async ({
+  page,
+}) => {
+  await open(page, 1366, 800);
+  await sim(page, (s) => {
+    const big = "x".repeat(65_536);
+    const lines = Array.from({ length: 2000 }, (_, i) => `ligne-${i}`).join("\n");
+    s.services.upsert("forge", {
+      key: "c_big",
+      name: "gros",
+      origin: "hearth",
+      image: { ref: `registre/${big}`, tag: "1" },
+      command: [big, lines],
+      mounts: [{ kind: "folder", source: `/${big}`, target: `/${big}`, readOnly: false }],
+    });
+    s.services.setEnv("forge", "c_big", [{ name: big, value: lines }]);
+  });
+  await page.locator("[data-row][data-key='c_big']").click();
+  await expect(page.locator("[data-detail-command] [data-bounded]")).toBeVisible();
+  await page.getByRole("button", { name: "Révéler les valeurs" }).click();
+  await expect(page.locator("[data-env-value]")).toBeVisible();
+  const heights = await page.evaluate(() => {
+    const zones = [
+      ...document.querySelectorAll<HTMLElement>("[data-service-detail] [data-bounded]"),
+    ];
+    const root = document.querySelector<HTMLElement>("[data-service-detail]");
+    return {
+      tallest: Math.max(...zones.map((zone) => zone.getBoundingClientRect().height)),
+      scrolling: zones.filter((zone) => zone.scrollHeight > zone.clientHeight + 1).length,
+      detail: root ? root.scrollHeight : -1,
+    };
+  });
+  // Chaque zone tient dans sa borne (160 px au plus) ; le détail entier reste de l'ordre de quelques écrans.
+  expect(heights.tallest).toBeLessThanOrEqual(170);
+  expect(heights.scrolling).toBeGreaterThanOrEqual(5);
+  expect(heights.detail).toBeLessThan(3500);
+  // Les sections qui suivent sont atteignables.
+  await page.getByRole("heading", { name: "Redémarrage" }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("heading", { name: "Redémarrage" })).toBeInViewport();
+  // Au clavier : la zone de la commande prend le focus et défile (Page suivante).
+  const command = page.locator("[data-detail-command] [data-bounded]");
+  await command.focus();
+  await expect(command).toBeFocused();
+  await page.keyboard.press("PageDown");
+  await expect.poll(() => command.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await command.scrollIntoViewIfNeeded();
+  await shot(page, "2-texte-64ko-commande");
+  await page.locator("[data-env-section]").scrollIntoViewIfNeeded();
+  await shot(page, "2-texte-64ko-variables");
+  const overflowX = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflowX).toBe(0);
+});
+
+test("sans le droit de gérer les services : ni commande ni noms de variables, une phrase dit pourquoi", async ({
+  page,
+}) => {
+  await open(page);
+  await sim(page, (s) => {
+    s.setServiceRightOnServer("forge", "marie", false);
+    s.setState("forge", "offline");
+  });
+  await page.waitForTimeout(200);
+  await sim(page, (s) => s.setState("forge", "connected"));
+  await page.locator("[data-row][data-key='c_web']").click();
+  const detail = page.locator("[data-service-detail]");
+  await expect(detail.locator("[data-detail-command-reserved]")).toContainText(
+    "Réservé aux comptes qui peuvent gérer les services.",
+  );
+  await expect(detail.locator("[data-env-note]")).toContainText(
+    "Réservé aux comptes qui peuvent gérer les services.",
+  );
+  await expect(detail).not.toContainText("daemon off");
+  await expect(page.locator("[data-env-mask]")).toHaveCount(0);
+  await shot(page, "3-sans-le-droit-commande-reservee");
+});
+
+test("l'en-tête du détail reste visible au défilement, et « Ce service n'existe plus. » ne sort pas de l'écran", async ({
+  page,
+}) => {
+  await open(page, 1366, 700);
+  await page.locator("[data-row][data-key='c_web']").click();
+  await page.getByRole("button", { name: "Révéler les valeurs" }).click();
+  const detail = page.locator("[data-service-detail]");
+  await detail.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+  const before = await box(page, "[data-detail-title]");
+  const frame = await box(page, "[data-service-detail]");
+  // Le titre reste dans le haut du volet alors qu'on est tout en bas.
+  expect(before.y).toBeGreaterThanOrEqual(frame.y - 1);
+  expect(before.y).toBeLessThan(frame.y + 120);
+  await shot(page, "7-en-tete-colle");
+  await sim(page, (s) => s.services.remove("forge", "c_web"));
+  await expect(page.locator("[data-detail-gone]")).toBeInViewport();
+  await shot(page, "7-en-tete-colle-service-disparu");
+});
+
+test("lien coupé : la raison est écrite près du bouton « Révéler les valeurs » désactivé", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator("[data-row][data-key='c_web']").click();
+  await sim(page, (s) => s.setState("forge", "offline"));
+  const toggle = page.getByRole("button", { name: "Révéler les valeurs" });
+  await expect(toggle).toHaveAttribute("aria-disabled", "true");
+  const reason = page.locator("[data-env-engine]");
+  await expect(reason).toHaveText("Indisponible tant que le serveur est hors ligne.");
+  await expect(toggle).toHaveAttribute("aria-describedby", /.+/);
+  await page.locator("[data-env-section]").scrollIntoViewIfNeeded();
+  await shot(page, "7-lien-coupe-raison");
+});
+
+test("caractères bidirectionnels et invisibles : remplacés par un repère visible, nulle part dans le document", async ({
+  page,
+}) => {
+  await open(page);
+  await sim(page, (s) => {
+    const bidi = String.fromCharCode(0x202e);
+    const zero = String.fromCharCode(0x200b);
+    s.services.upsert("forge", {
+      key: "c_h",
+      name: `hostile${bidi}etoN`,
+      origin: "hearth",
+      image: { ref: `reg${zero}istre`, tag: bidi },
+      command: [`run${bidi}`],
+      mounts: [{ kind: "folder", source: `/a${bidi}b`, target: `/c${zero}d`, readOnly: false }],
+    });
+    s.services.setEnv("forge", "c_h", [{ name: `N${bidi}`, value: `v${bidi}${zero}` }]);
+  });
+  await page.locator("[data-row][data-key='c_h']").click();
+  await page.getByRole("button", { name: "Révéler les valeurs" }).click();
+  await expect(page.locator("[data-env-value]")).toBeVisible();
+  const found = await page.evaluate(() => {
+    const text = document.body.innerText + document.body.innerHTML;
+    return [0x202e, 0x200b].filter((code) => text.includes(String.fromCharCode(code)));
+  });
+  expect(found).toEqual([]);
+  await expect(page.locator("[data-detail-title]")).toHaveText("hostile·etoN");
 });

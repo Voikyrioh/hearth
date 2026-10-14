@@ -3,6 +3,7 @@ import { service } from "@/test/service";
 import {
   adoptedLine,
   commandText,
+  detailsView,
   exitCodeText,
   graceText,
   mountView,
@@ -107,5 +108,29 @@ describe("textes du détail", () => {
     expect(adoptedLine(adopted("claire", null), date)).toBe("Adopté par claire");
     expect(adoptedLine(adopted("<b>x</b>", null), date)).toBeNull();
     expect(adoptedLine(service({ key: "c" }), date)).toBeNull();
+  });
+});
+
+describe("detailsView : la commande et les noms ne sont montrés qu'au droit, et seulement s'ils ont été lus", () => {
+  const web = service({ key: "c_1", name: "web" });
+  const allowed = { kind: "allowed" } as const;
+
+  it("visible : le droit est accordé et le serveur les a lus", () => {
+    expect(detailsView(web, allowed)).toBe("visible");
+  });
+
+  it("réservé : un compte sans le droit, ou un service dont l'agent a retiré les détails", () => {
+    expect(detailsView(web, { kind: "denied", isAdmin: false, command: null })).toBe("reserved");
+    expect(detailsView(service({ key: "c_2", detailsReserved: true }), allowed)).toBe("reserved");
+  });
+
+  it("droit pas connu (lecture, échec, ancien agent, pilotage désactivé) : rien n'est montré", () => {
+    for (const kind of ["reading", "failed", "old-agent", "engine-disabled"] as const) {
+      expect(detailsView(web, { kind })).toBe("right-unknown");
+    }
+  });
+
+  it("pas lus : une liste relue du disque, même avec le droit", () => {
+    expect(detailsView(service({ key: "c_3", detailsKnown: false }), allowed)).toBe("not-read");
   });
 });

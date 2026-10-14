@@ -211,6 +211,16 @@ describe("reveal_service_env of the real bridge (HRT-63)", () => {
     expect(event.services[1]).toMatchObject({ command: null, adopted: null, graceS: null });
   });
 
+  it("a list read back from the disk says its details were not read, on every service", () => {
+    expect(fixture.supported.detailsKnown).toBe(true);
+    const fresh = toServicesEvent(fixture.supported);
+    if (fresh.kind !== "state") throw new Error("état attendu");
+    expect(fresh.services.every((service) => service.detailsKnown)).toBe(true);
+    const fromDisk = toServicesEvent({ ...fixture.supported, detailsKnown: false });
+    if (fromDisk.kind !== "state") throw new Error("état attendu");
+    expect(fromDisk.services.every((service) => !service.detailsKnown)).toBe(true);
+  });
+
   it("an unknown value from a newer agent arrives neutral, never an exception", () => {
     const event = toServicesEvent(fixture.unknown);
     if (event.kind !== "state") throw new Error("état attendu");

@@ -178,7 +178,7 @@ fn full_state() -> ServicesState {
 fn the_event_the_window_receives_is_the_reference_file_field_by_field() {
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
     let received = hearth_link::domain::time::WallTime::from_millis(1_790_000_000_000);
-    let event = book.on_state("forge", &full_state(), Some(received));
+    let event = book.on_state("forge", &full_state(), Some(received), true);
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
         fixture()["supported"]
@@ -197,6 +197,25 @@ fn the_event_the_window_receives_is_the_reference_file_field_by_field() {
     assert_eq!(
         serde_json::to_value(&unsupported).unwrap(),
         fixture()["unsupported"]
+    );
+}
+
+/// Une liste relue du disque est écrite sans les noms de variables ni la commande : l'événement le DIT, et le
+/// rejeu à l'abonnement le garde. Leur absence n'y est jamais « aucune variable ».
+#[test]
+fn a_list_read_back_from_the_disk_says_its_details_were_not_read() {
+    let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
+    let mut from_disk = full_state();
+    for item in &mut from_disk.services {
+        item.env_names.clear();
+        item.command = None;
+    }
+    let event = book.on_state("forge", &from_disk, None, false);
+    assert!(!event.details_known);
+    assert!(!book.current("forge").unwrap().details_known);
+    assert_eq!(
+        serde_json::to_value(&event).unwrap()["detailsKnown"],
+        serde_json::json!(false)
     );
 }
 
@@ -224,7 +243,7 @@ fn a_value_from_a_newer_agent_reaches_the_window_as_unknown() {
     });
     let state: ServicesState = serde_json::from_value(wire).expect("l'instantané est lu");
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
-    let event = book.on_state("futur", &state, None);
+    let event = book.on_state("futur", &state, None, true);
     assert_eq!(serde_json::to_value(&event).unwrap(), fixture()["unknown"]);
 }
 
@@ -245,7 +264,7 @@ fn the_event_carries_names_and_command_but_never_a_value_and_debug_hides_them() 
         }
     }
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
-    let event_dto = book.on_state("forge", &full_state(), None);
+    let event_dto = book.on_state("forge", &full_state(), None, true);
     let debug = format!("{event_dto:?}");
     assert!(!debug.contains("SENTINEL"), "{debug}");
     let event = serde_json::to_value(&event_dto).unwrap();
@@ -432,6 +451,7 @@ async fn a_real_agent_reaches_the_window_through_the_link_and_the_shell_relay() 
         server_id,
         seq: replayed,
         engine_received_at,
+        details_known,
         view: ServicesViewDto::Supported { services, .. },
     } = &replay[0]
     else {
@@ -442,6 +462,8 @@ async fn a_real_agent_reaches_the_window_through_the_link_and_the_shell_relay() 
     // La date de réception vient de la liaison : présente, et jamais postérieure à maintenant.
     let received = engine_received_at.expect("la liaison date la vue du moteur");
     assert!(received > 1_700_000_000_000.0);
+    // Reçu du serveur pendant cette exécution : ses détails sont les vrais.
+    assert!(details_known);
     assert!(*replayed >= u32::try_from(second["seq"].as_u64().unwrap()).unwrap());
 
     // 4. « Vérifier à nouveau » : l'agent sonde, l'état du moteur revient.

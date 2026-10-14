@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId } from "vue";
+import { clip, safeText } from "@/audit/text";
+import BoundedText from "@/components/atoms/BoundedText.vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
@@ -11,6 +13,7 @@ import type { ServiceInfo } from "@/link";
 import {
   adoptedLine,
   commandText,
+  detailsView,
   exitCodeText,
   graceText,
   mountView,
@@ -91,18 +94,29 @@ const created = computed(() =>
 const state = computed(() => (service.value ? stateLine(service.value, now.value) : ""));
 const loop = computed(() => (service.value ? loopBand(service.value) : ""));
 const mounts = computed(() => (service.value ? service.value.mounts.map(mountView) : []));
+/** Texte du serveur rendu inoffensif (caractères bidirectionnels, invisibles, de contrôle), en un seul endroit. */
+const shownName = computed(() => (service.value ? safeText(service.value.name) : ""));
+/** La commande n'est montrée qu'à qui a le droit de gérer les services, et seulement si elle a été lue. */
+const view = computed(() => (service.value ? detailsView(service.value, props.gate) : "reserved"));
+const commandNote = computed(() => {
+  if (view.value === "reserved") return t("serviceDetail.reserved");
+  if (view.value === "right-unknown") return t("serviceDetail.rightUnknown");
+  if (view.value === "not-read") return t("serviceDetail.commandNotRead");
+  return null;
+});
 </script>
 
 <template>
   <section
     class="detail"
-    :aria-label="service ? t('serviceDetail.region', { name: service.name }) : t('serviceDetail.unnamed')"
+    :aria-label="service ? t('serviceDetail.region', { name: clip(service.name, 80).text }) : t('serviceDetail.unnamed')"
     :aria-busy="opened.kind === 'waiting' ? 'true' : undefined"
     :data-gone="gone ? '' : undefined"
     data-service-detail
     @keydown.esc="emit('back')"
   >
-    <header class="detail__head">
+    <!-- Reste en haut du volet au défilement : le nom, l'état et « Ce service n'existe plus. » ne sortent jamais de l'écran -->
+    <div class="detail__pinned" data-detail-pinned>
       <HButton variant="ghost" size="sm" data-detail-back @click="emit('back')">
         <HIcon name="arrow-left" size="sm" />
         {{ t("serviceDetail.back") }}
@@ -114,10 +128,10 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
           {{ t("serviceDetail.gone") }}
         </Callout>
         <Callout v-if="sameName" tone="info" data-detail-recreated>
-          {{ t("serviceDetail.recreated", { name: sameName.name }) }}
+          {{ t("serviceDetail.recreated", { name: clip(sameName.name, 80).text }) }}
           <template #actions>
             <HButton variant="secondary" size="sm" data-detail-open-other @click="emit('openOther', sameName.key)">
-              {{ t("serviceDetail.openRecreated", { name: sameName.name }) }}
+              {{ t("serviceDetail.openRecreated", { name: clip(sameName.name, 80).text }) }}
             </HButton>
           </template>
         </Callout>
@@ -132,7 +146,7 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
       <template v-if="service">
         <div class="detail__titleline">
           <h2 :id="titleId" ref="title" class="detail__title" tabindex="-1" data-detail-title>
-            {{ service.name }}
+            <BoundedText :text="shownName" :label="t('serviceDetail.nameLabel')" />
           </h2>
           <span class="detail__tags">
             <OriginTags :service="service" part="origin" />
@@ -144,19 +158,21 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
           <span v-if="state" class="detail__since">{{ state }}</span>
         </p>
         <p v-if="adopted" class="detail__adopted" data-detail-adopted>{{ adopted }}</p>
-
-        <!-- Démarrer, arrêter, redémarrer : pas encore branchés (l'agent ne sait pas encore les faire) -->
-        <p v-if="!gone" class="detail__soon" data-detail-actions-soon>
-          <HIcon name="info" size="sm" />
-          {{ t("serviceDetail.actionsSoon") }}
-        </p>
-
-        <HTabs v-model="tab" :tabs="tabs" :label="t('serviceDetail.sections')" :id-base="idBase" />
-        <p :id="logsNoteId" class="detail__soon" data-detail-logs-soon>
-          <HIcon name="info" size="sm" />
-          {{ t("serviceDetail.logsSoon") }}
-        </p>
       </template>
+    </div>
+
+    <header v-if="service" class="detail__head">
+      <!-- Démarrer, arrêter, redémarrer : pas encore branchés (l'agent ne sait pas encore les faire) -->
+      <p v-if="!gone" class="detail__soon" data-detail-actions-soon>
+        <HIcon name="info" size="sm" />
+        {{ t("serviceDetail.actionsSoon") }}
+      </p>
+
+      <HTabs v-model="tab" :tabs="tabs" :label="t('serviceDetail.sections')" :id-base="idBase" />
+      <p :id="logsNoteId" class="detail__soon" data-detail-logs-soon>
+        <HIcon name="info" size="sm" />
+        {{ t("serviceDetail.logsSoon") }}
+      </p>
     </header>
 
     <div
@@ -212,18 +228,22 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
         <dl class="defs">
           <div class="defs__row defs__row--stack">
             <dt>{{ t("serviceDetail.image") }}</dt>
-            <dd class="defs__mono">{{ imageLabel(service) }}</dd>
+            <dd class="defs__mono">
+              <BoundedText :text="imageLabel(service)" :label="t('serviceDetail.image')" />
+            </dd>
           </div>
           <div class="defs__row defs__row--stack">
             <dt>{{ t("serviceDetail.command") }}</dt>
-            <dd v-if="service.detailsReserved" class="defs__soft" data-detail-command-reserved>
-              <HIcon name="lock" size="sm" />
-              {{ t("serviceDetail.reserved") }}
+            <dd v-if="commandNote" class="defs__soft" :data-detail-command-reserved="view === 'visible' ? undefined : view">
+              <HIcon :name="view === 'not-read' ? 'info' : 'lock'" size="sm" />
+              {{ commandNote }}
             </dd>
             <dd v-else-if="service.command === null || service.command.length === 0" class="defs__soft">
               {{ t("serviceDetail.commandOfImage") }}
             </dd>
-            <dd v-else class="defs__command" data-detail-command>{{ commandText(service.command) }}</dd>
+            <dd v-else class="defs__command" data-detail-command>
+              <BoundedText :text="commandText(service.command)" :label="t('serviceDetail.command')" />
+            </dd>
           </div>
         </dl>
       </DashCard>
@@ -253,9 +273,13 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
             <span class="defs__soft">{{
               mount.kind === "volume" ? t("serviceDetail.volume") : t("serviceDetail.serverFolder")
             }}</span>
-            <span class="defs__mono">{{ mount.source }}</span>
+            <span class="defs__mono"
+              ><BoundedText :text="mount.source" :label="t('serviceDetail.serverFolder')"
+            /></span>
             <span class="defs__soft">{{ t("serviceDetail.inService") }}</span>
-            <span class="defs__mono">{{ mount.target }}</span>
+            <span class="defs__mono"
+              ><BoundedText :text="mount.target" :label="t('serviceDetail.inService')"
+            /></span>
             <span class="rows__access">{{ mount.access }}</span>
           </li>
           <li v-if="service.mountsOmitted > 0" class="rows__item defs__soft">
@@ -298,6 +322,20 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
   opacity: var(--opacity-stale);
 }
 
+.detail__pinned {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  align-self: stretch;
+  min-width: 0;
+  padding-bottom: var(--space-2);
+  background: var(--bg);
+}
+
 .detail__head {
   display: flex;
   flex-direction: column;
@@ -326,6 +364,7 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
 }
 
 .detail__title {
+  --bounded-max-height: var(--title-max-height);
   margin: 0;
   min-width: 0;
   font-family: var(--font-title);
@@ -436,8 +475,6 @@ const mounts = computed(() => (service.value ? service.value.mounts.map(mountVie
   background: var(--bg);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .rows {

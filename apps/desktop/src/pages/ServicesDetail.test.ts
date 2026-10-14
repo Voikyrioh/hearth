@@ -157,7 +157,7 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
     const mounts = wrapper.get("[data-detail-mounts]").text();
     expect(mounts).toContain("/srv/web");
     expect(mounts).toContain("Lecture seule");
-    expect(mounts).toContain("Volume géré par le moteur");
+    expect(mounts).toContain("Stockage géré par le moteur");
     expect(mounts).toContain("Lecture et écriture");
     expect(text).toContain("30 secondes");
     expect(text).toContain("Redémarre tout seul sauf si tu l'arrêtes");
@@ -166,7 +166,7 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
     wrapper.unmount();
   });
 
-  it("sans commande propre : « Commande de l'image » ; réseau du serveur : aucun port inventé ; aucun dossier", async () => {
+  it("sans commande propre : « Commande par défaut du programme » ; réseau du serveur : aucun port inventé ; aucun dossier", async () => {
     const { wrapper } = await open((bridge) =>
       bridge.services.seed("forge", [
         { key: "c_dns", name: "dns", hostNetwork: true },
@@ -175,7 +175,7 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
     );
     await row(wrapper, "c_dns").trigger("click");
     await flushPromises();
-    expect(detail(wrapper).text()).toContain("Commande de l'image");
+    expect(detail(wrapper).text()).toContain("Commande par défaut du programme");
     expect(wrapper.get("[data-detail-ports]").text()).toContain(
       "Utilise directement le réseau du serveur : aucun port individuel.",
     );
@@ -554,7 +554,7 @@ describe("les variables d'environnement (BR-SVC-008, BR-SVC-009)", () => {
     expect(wrapper.get("[data-env-reserved]").text()).toContain(phrase);
     expect(wrapper.find("[data-env-toggle]").exists()).toBe(false);
     expect(wrapper.find("[data-detail-ports]").exists()).toBe(true);
-    expect(detail(wrapper).text()).not.toContain("Commande de l'image");
+    expect(detail(wrapper).text()).not.toContain("Commande par défaut du programme");
     wrapper.unmount();
   });
 });
@@ -682,6 +682,145 @@ describe("la liste (HRT-137)", () => {
     bridge.setState("forge", "offline");
     await flushPromises();
     expect(wrapper.find("[data-services-rights]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+// Une liste relue du disque au redémarrage hors ligne est écrite SANS la commande ni les noms de variables (ils
+// peuvent porter des secrets) : leur absence n'y est pas « aucune variable » ni « commande par défaut » (revue de la PR 93).
+describe("liste relue du disque : une donnée absente n'est pas une donnée vide", () => {
+  const NOT_READ_COMMAND =
+    "Pas encore lue : elle se lira quand le lien avec le serveur sera revenu.";
+  const NOT_READ_ENV = "Pas encore lus : ils se liront quand le lien avec le serveur sera revenu.";
+
+  it("sans lecture fraîche, ni « Commande par défaut » ni « Aucune variable » : une phrase qui dit pourquoi", async () => {
+    const { wrapper, bridge } = await open(seedWeb);
+    // Ce que fait la coquille d'un fichier du disque : ni commande ni noms, et l'événement le dit.
+    bridge.services.setDetailsKnown("forge", false);
+    await flushPromises();
+    await openWeb(wrapper);
+    const text = detail(wrapper).text();
+    expect(text).toContain(NOT_READ_COMMAND);
+    expect(text).toContain(NOT_READ_ENV);
+    expect(text).not.toContain("Commande par défaut du programme");
+    expect(text).not.toContain("Aucune variable");
+    expect(wrapper.find("[data-env-mask]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("le lien revient et le serveur répond : la commande et les noms reviennent, la phrase part", async () => {
+    const { wrapper, bridge } = await open(seedWeb);
+    bridge.services.setDetailsKnown("forge", false);
+    await flushPromises();
+    await openWeb(wrapper);
+    expect(detail(wrapper).text()).toContain(NOT_READ_COMMAND);
+    // Un état reçu du serveur (la liste est relue en entier) porte ses détails.
+    seedWeb(bridge);
+    await flushPromises();
+    const text = detail(wrapper).text();
+    expect(text).not.toContain(NOT_READ_COMMAND);
+    expect(text).not.toContain(NOT_READ_ENV);
+    expect(wrapper.get("[data-detail-command]").text()).toBe("nginx -g daemon off;");
+    expect(wrapper.findAll("[data-env-mask]")).toHaveLength(3);
+    wrapper.unmount();
+  });
+
+  it("le magasin porte le repère de chaque service (état restauré depuis le disque)", async () => {
+    const { wrapper, bridge } = await open(seedWeb);
+    bridge.services.setDetailsKnown("forge", false);
+    await flushPromises();
+    const services = useServicesStore().of("forge")?.services ?? [];
+    expect(services.length).toBeGreaterThan(0);
+    expect(services.every((service) => !service.detailsKnown)).toBe(true);
+    expect(
+      services.every((service) => service.command === null && service.envNames.length === 0),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+});
+
+// Règle prudente en attendant la décision du propriétaire : la commande (elle peut porter un secret) et les noms de
+// variables ne sont montrés qu'aux comptes qui peuvent gérer les services, quel que soit le service.
+describe("commande et noms de variables : réservés au droit de gérer les services", () => {
+  it("un service créé par Hearth, compte sans le droit : ni commande ni noms, une phrase qui dit pourquoi", async () => {
+    const { wrapper } = await open((sim) => {
+      seedWeb(sim);
+      sim.setServiceRightOnServer("forge", "marie", false);
+    });
+    await openWeb(wrapper);
+    expect(wrapper.find("[data-detail-command]").exists()).toBe(false);
+    expect(detail(wrapper).text()).not.toContain("daemon off");
+    expect(detail(wrapper).text()).not.toContain("SERVER_NAME");
+    expect(wrapper.get("[data-detail-command-reserved]").text()).toContain(
+      "Réservé aux comptes qui peuvent gérer les services.",
+    );
+    expect(wrapper.get("[data-env-note]").text()).toContain(
+      "Réservé aux comptes qui peuvent gérer les services.",
+    );
+    wrapper.unmount();
+  });
+
+  it("avec le droit : la commande et les noms sont montrés", async () => {
+    const { wrapper } = await open(seedWeb);
+    await openWeb(wrapper);
+    expect(wrapper.get("[data-detail-command]").text()).toBe("nginx -g daemon off;");
+    expect(wrapper.get("[data-env-list]").text()).toContain("SERVER_NAME");
+    wrapper.unmount();
+  });
+});
+
+describe("texte venu du serveur : rendu inoffensif et borné", () => {
+  const BIDI = String.fromCharCode(0x202e);
+  const ZERO = String.fromCharCode(0x200b);
+  const MARK = String.fromCharCode(0xb7);
+
+  it("un caractère bidirectionnel ou invisible devient un repère visible, dans le détail ET dans la liste", async () => {
+    const { wrapper } = await open((bridge) => {
+      bridge.services.seed("forge", [
+        {
+          key: "c_h",
+          name: `hostile${BIDI}etoN`,
+          origin: "hearth",
+          image: { ref: `reg${ZERO}istre/img`, tag: `1${BIDI}` },
+          command: [`run${BIDI}`, `--x=${ZERO}y`],
+          mounts: [{ kind: "folder", source: `/a${BIDI}b`, target: `/c${ZERO}d`, readOnly: false }],
+          unit: `u${BIDI}`,
+          driver: "supervisor",
+          composeProject: `p${ZERO}q`,
+        },
+      ]);
+      bridge.services.setEnv("forge", "c_h", [
+        { name: `N${BIDI}`, value: `v${BIDI}${ZERO}\nligne` },
+      ]);
+    });
+    await row(wrapper, "c_h").trigger("click");
+    await flushPromises();
+    await reveal(wrapper);
+    const unsafe = new RegExp(`[${BIDI}${ZERO}]`);
+    expect(wrapper.element.textContent ?? "").not.toMatch(unsafe);
+    expect(wrapper.html()).not.toMatch(unsafe);
+    expect(wrapper.get("[data-detail-title]").text()).toBe(`hostile${MARK}etoN`);
+    expect(wrapper.get("[data-detail-command]").text()).toBe(`run${MARK} --x=${MARK}y`);
+    // La valeur révélée garde ses retours à la ligne, rien d'autre.
+    expect(wrapper.get("[data-env-value]").text()).toBe(`v${MARK}${MARK}\nligne`);
+    expect(wrapper.get("[data-row][data-key='c_h']").attributes("aria-label")).not.toMatch(unsafe);
+    wrapper.unmount();
+  });
+
+  it("un texte de 64 Ko : la commande, l'image, les noms et les valeurs sont dans une zone bornée", async () => {
+    const BIG = "x".repeat(65_536);
+    const { wrapper } = await open((bridge) => {
+      bridge.services.seed("forge", [
+        { key: "c_big", name: "gros", origin: "hearth", command: [BIG], image: { ref: BIG } },
+      ]);
+      bridge.services.setEnv("forge", "c_big", [{ name: BIG, value: BIG }]);
+    });
+    await row(wrapper, "c_big").trigger("click");
+    await flushPromises();
+    // La mise en page est MESURÉE par Playwright (hrt63-detail.spec.ts) ; ici : chaque texte long est dans une zone bornée.
+    expect(wrapper.find("[data-detail-command] [data-bounded]").exists()).toBe(true);
+    expect(wrapper.find("[data-detail-image] [data-bounded]").exists()).toBe(true);
+    expect(wrapper.find("[data-env-list] [data-bounded]").exists()).toBe(true);
     wrapper.unmount();
   });
 });

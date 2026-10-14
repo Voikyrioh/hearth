@@ -31,6 +31,8 @@ interface Book {
   view: ServicesViewDto;
   /** Quand la « liaison » a reçu la vue du moteur (comme `hearth-link`), `null` : inconnue. */
   engineReceivedAt: number | null;
+  /** La commande et les noms de variables ont été lus sur le serveur (faux : liste relue du disque). */
+  detailsKnown: boolean;
 }
 
 export type PartialEngine = Partial<Omit<EngineDto, "host">> & {
@@ -257,11 +259,40 @@ export class SimulatedServices {
     if (book) this.books.set(serverId, { ...book, engineReceivedAt: at });
   }
 
+  /**
+   * Fait comme une liste relue du disque au redémarrage hors ligne (`false`) : ni commande ni noms de variables
+   * (écrits nulle part), et l'événement le dit. `true` : ils ont été lus sur le serveur.
+   */
+  setDetailsKnown(serverId: string, known: boolean): void {
+    const book = this.books.get(serverId);
+    if (!book) return;
+    const view: ServicesViewDto =
+      !known && book.view.kind === "supported"
+        ? {
+            ...book.view,
+            services: book.view.services.map((item) => ({
+              ...item,
+              envNames: [],
+              envNamesOmitted: 0,
+              command: null,
+            })),
+          }
+        : book.view;
+    this.books.set(serverId, { ...book, view, detailsKnown: known });
+    this.announce(serverId);
+  }
+
   /** Le dernier événement d'un serveur, tel que la coquille le rejouerait. */
   current(serverId: string): BoundServicesEvent | undefined {
     const book = this.books.get(serverId);
     return book
-      ? { serverId, seq: book.seq, engineReceivedAt: book.engineReceivedAt, view: book.view }
+      ? {
+          serverId,
+          seq: book.seq,
+          engineReceivedAt: book.engineReceivedAt,
+          detailsKnown: book.detailsKnown,
+          view: book.view,
+        }
       : undefined;
   }
 
@@ -309,6 +340,7 @@ export class SimulatedServices {
     this.books.set(serverId, {
       seq: book?.seq ?? 0,
       engineReceivedAt: book ? book.engineReceivedAt : this.now(),
+      detailsKnown: book?.detailsKnown ?? true,
       view: {
         kind: "supported",
         engine: view.engine,
@@ -319,7 +351,13 @@ export class SimulatedServices {
 
   private store(serverId: string, view: ServicesViewDto): void {
     const seq = (this.books.get(serverId)?.seq ?? 0) + 1;
-    this.books.set(serverId, { seq, view, engineReceivedAt: this.received(serverId, view) });
+    // Un état annoncé par le serveur porte ses détails lus : seul `setDetailsKnown(false)` fait le disque.
+    this.books.set(serverId, {
+      seq,
+      view,
+      engineReceivedAt: this.received(serverId, view),
+      detailsKnown: true,
+    });
     this.emit(serverId);
   }
 

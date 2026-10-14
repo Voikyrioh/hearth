@@ -1,6 +1,8 @@
 import { isHearthUsername } from "@/accounts/name";
+import { safeText } from "@/audit/text";
 import { type MessageKey, t } from "@/i18n";
 import type { RestartMode, ServiceInfo, ServiceMount, ServicePort } from "@/link";
+import type { RightsGate } from "@/services/rights";
 
 /**
  * Le détail d'un service (HRT-63, BR-SVC-007, 008, 016, 023, 027, 028) : des fonctions PURES, sans E/S. L'agent décide
@@ -81,7 +83,8 @@ export type MountView =
 
 export function mountView(mount: ServiceMount): MountView {
   const access = mount.readOnly ? t("serviceDetail.readOnly") : t("serviceDetail.readWrite");
-  const base = { source: mount.source, target: mount.target, access };
+  // Chemins du serveur : rendus inoffensifs (caractères bidirectionnels et invisibles remplacés par un repère).
+  const base = { source: safeText(mount.source), target: safeText(mount.target), access };
   if (mount.kind === "folder") return { kind: "folder", ...base };
   if (mount.kind === "volume") return { kind: "volume", ...base };
   return { kind: "other", ...base };
@@ -94,7 +97,7 @@ export function graceText(seconds: number): string {
 
 /** La commande lancée, en un texte (arguments séparés par une espace) ; contenu sensible, jamais dans un titre ni une infobulle. */
 export function commandText(command: readonly string[]): string {
-  return command.join(" ");
+  return safeText(command.join(" "), true);
 }
 
 /**
@@ -118,4 +121,26 @@ export function adoptedLine(
 /** Le détail d'un service adopté dont la commande et les noms de variables sont réservés à ce compte (BR-SVC-028). */
 export function isReserved(service: ServiceInfo): boolean {
   return service.detailsReserved;
+}
+
+/**
+ * Ce que le détail peut dire de la COMMANDE et des NOMS de variables d'un service (BR-SVC-007, 008, 028) :
+ * - `visible` : le compte a le droit de gérer les services ET ils ont été lus sur le serveur ;
+ * - `reserved` : l'agent les a retirés (service adopté, compte sans le droit) ou le compte n'a pas le droit ;
+ * - `right-unknown` : le droit n'est pas (encore) connu : par prudence, rien n'est montré ;
+ * - `not-read` : liste relue du disque au redémarrage, écrite sans eux (ils peuvent porter des secrets) : l'absence
+ *   n'y dit PAS « aucune variable » ni « commande de l'image ».
+ *
+ * RÈGLE PRUDENTE, DÉCISION DU PROPRIÉTAIRE ATTENDUE : la commande peut porter un secret (`--token=…`) ; en attendant
+ * un filtre côté agent, le client ne montre la commande et les noms de variables qu'aux comptes qui ont le droit de
+ * gérer les services, quel que soit le service (BR-SVC-007 et 008 les disent visibles des deux rôles pour un service créé
+ * par Hearth : écart assumé, à trancher). L'agent reste l'arbitre pour un service adopté (BR-ADOPT-015).
+ */
+export type DetailsView = "visible" | "reserved" | "right-unknown" | "not-read";
+
+export function detailsView(service: ServiceInfo, gate: RightsGate): DetailsView {
+  if (service.detailsReserved || gate.kind === "denied") return "reserved";
+  if (gate.kind !== "allowed") return "right-unknown";
+  if (!service.detailsKnown) return "not-read";
+  return "visible";
 }

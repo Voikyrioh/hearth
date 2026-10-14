@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { safeText } from "@/audit/text";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HMiddleText from "@/components/atoms/HMiddleText.vue";
 import { useNow } from "@/composables/useNow";
@@ -277,7 +278,7 @@ defineExpose({ visible, focusKey });
                 <span class="name-line">
                   <HMiddleText
                     class="name"
-                    :text="service.name"
+                    :text="safeText(service.name)"
                     :focusable="false"
                     preserve-spaces
                   />
@@ -524,7 +525,7 @@ defineExpose({ visible, focusKey });
 @container svctable (max-width: 600px) {
   .table__head,
   .row {
-    grid-template-columns: minmax(0, 1fr) minmax(120px, 170px);
+    grid-template-columns: var(--svc-columns-narrow);
   }
 
   .table__th--ports,

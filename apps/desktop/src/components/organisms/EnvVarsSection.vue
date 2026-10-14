@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, useId, watch } from "vue";
+import { safeText } from "@/audit/text";
+import BoundedText from "@/components/atoms/BoundedText.vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
+import { detailsView } from "@/services/detail";
 import { canAct, type RightsGate } from "@/services/rights";
 import { useServiceEnvStore } from "@/stores/serviceEnv";
 import Callout from "../molecules/Callout.vue";
@@ -47,12 +50,15 @@ const possible = computed(
   () => allowed.value && props.connected && props.engineReady && !props.gone,
 );
 
-/** Texte permanent qui dit pourquoi le bouton est désactivé quand ce n'est pas le droit (le droit a sa propre raison). */
-const engineReason = computed(() =>
-  allowed.value && props.connected && !props.engineReady
-    ? t("serviceDetail.env.engineNotReady")
-    : null,
-);
+/**
+ * Texte permanent qui dit pourquoi le bouton est désactivé quand ce n'est pas le droit (le droit a sa propre
+ * raison) : le lien coupé (« Indisponible tant que le serveur est hors ligne. ») ou le moteur pas prêt.
+ */
+const engineReason = computed(() => {
+  if (!allowed.value || props.gone) return null;
+  if (!props.connected) return t("serviceDetail.env.offline");
+  return props.engineReady ? null : t("serviceDetail.env.engineNotReady");
+});
 const rightsReason = computed(() => ["denied", "old-agent", "failed"].includes(props.gate.kind));
 const describedBy = computed(() => {
   if (rightsReason.value) return props.reasonId;
@@ -91,21 +97,41 @@ watch(
 );
 onBeforeUnmount(maskIfMine);
 
+/**
+ * Les NOMS ne sont montrés qu'à un compte qui peut gérer les services, et seulement s'ils ont été lus sur le
+ * serveur (`detailsView`) ; sinon une phrase dit pourquoi. Une liste relue du disque est écrite sans eux : leur
+ * absence n'y veut pas dire « aucune variable ». Des valeurs révélées, elles, viennent d'une lecture fraîche.
+ */
+const view = computed(() => detailsView(props.service, props.gate));
+const note = computed(() => {
+  if (shown.value) return null;
+  if (view.value === "reserved") return t("serviceDetail.reserved");
+  if (view.value === "right-unknown") return t("serviceDetail.rightUnknown");
+  if (view.value === "not-read") return t("serviceDetail.env.notRead");
+  return null;
+});
+// Tout texte du serveur est rendu inoffensif ici (`safeText`) : la valeur garde ses retours à la ligne, rien d'autre.
 const rows = computed(() => {
   const revealed = store.variables;
   if (shown.value && revealed) {
     return revealed.map((variable) => ({
-      name: variable.name,
-      value: variable.value as string | null,
+      name: safeText(variable.name),
+      value: safeText(variable.value, true) as string | null,
     }));
   }
-  return props.service.envNames.map((name) => ({ name, value: null as string | null }));
+  if (view.value !== "visible") return [];
+  return props.service.envNames.map((name) => ({
+    name: safeText(name),
+    value: null as string | null,
+  }));
 });
 const none = computed(
-  () => !reserved.value && rows.value.length === 0 && props.service.envNamesOmitted === 0,
+  () =>
+    !reserved.value &&
+    view.value === "visible" &&
+    rows.value.length === 0 &&
+    props.service.envNamesOmitted === 0,
 );
-/** Une valeur longue ou sur plusieurs lignes défile dans sa zone : elle est alors atteignable au clavier. */
-const long = (value: string) => value.length > 160 || value.includes("\n");
 </script>
 
 <template>
@@ -156,10 +182,16 @@ const long = (value: string) => value.length > 160 || value.includes("\n");
         <span v-else>{{ t("serviceDetail.env.masked") }}</span>
       </p>
 
-      <p v-if="none" class="env__none" data-env-none>{{ t("serviceDetail.env.none") }}</p>
+      <p v-if="note" class="env__none" data-env-note>
+        <HIcon name="info" size="sm" />
+        {{ note }}
+      </p>
+      <p v-else-if="none" class="env__none" data-env-none>{{ t("serviceDetail.env.none") }}</p>
       <ul v-else-if="rows.length > 0" class="env__list" data-env-list>
         <li v-for="(row, index) in rows" :key="index" class="env__row" data-env-row>
-          <span class="env__name">{{ row.name }}</span>
+          <span class="env__name"
+            ><BoundedText :text="row.name" :label="t('serviceDetail.env.nameLabel')"
+          /></span>
           <span v-if="row.value === null" class="env__mask" data-env-mask>
             <span aria-hidden="true">••••••••</span>
             <span class="sr-only">{{ t("serviceDetail.env.maskedValue") }}</span>
@@ -167,13 +199,9 @@ const long = (value: string) => value.length > 160 || value.includes("\n");
           <span v-else-if="row.value === ''" class="env__empty">{{
             t("serviceDetail.env.empty")
           }}</span>
-          <span
-            v-else
-            class="env__value"
-            :tabindex="long(row.value) ? 0 : undefined"
-            data-env-value
-            >{{ row.value }}</span
-          >
+          <span v-else class="env__value" data-env-value
+            ><BoundedText :text="row.value" :label="t('serviceDetail.env.valueLabel')"
+          /></span>
         </li>
       </ul>
       <p v-if="service.envNamesOmitted > 0 && !shown" class="env__note" data-env-omitted>
@@ -220,8 +248,9 @@ const long = (value: string) => value.length > 160 || value.includes("\n");
 }
 
 .env__name {
+  --bounded-max-height: var(--env-value-max-height);
   font-weight: var(--fw-semibold);
-  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .env__mask {
@@ -233,10 +262,7 @@ const long = (value: string) => value.length > 160 || value.includes("\n");
 }
 
 .env__value {
-  max-height: var(--env-value-max-height);
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  user-select: text;
+  --bounded-max-height: var(--env-value-max-height);
+  min-width: 0;
 }
 </style>

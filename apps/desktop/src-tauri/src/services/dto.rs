@@ -603,5 +603,10 @@ pub struct ServicesEvent {
     /// capacité) ; l'interface ne la remplace jamais par l'heure à laquelle elle traite l'événement.
     #[serde(rename = "engineReceivedAt")]
     pub engine_received_at: Option<f64>,
+    /// Les noms de variables et la commande de cet état ont été LUS sur le serveur depuis le démarrage de la
+    /// liaison. Faux pour une liste relue du disque : elle est écrite sans eux (ils peuvent porter des secrets),
+    /// donc leur absence y veut dire « pas lus », jamais « aucune variable » ni « commande de l'image ».
+    #[serde(rename = "detailsKnown")]
+    pub details_known: bool,
     pub view: ServicesViewDto,
 }

@@ -131,4 +131,4 @@ Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,orga
 - Désactivé = `aria-disabled` (jamais `disabled` natif : le focus clavier est conservé), explication par `HTooltip`. Pour le lien et le rôle : la prop `needsLink`, nulle part ailleurs.
 - Aucune valeur visuelle littérale : `npm run lint` échoue sur une couleur ou un `px` hors de `tokens.css`.
 - Responsive : captures 1366, 1920 et 2560 px (`npm run e2e`, `apps/desktop/e2e/screenshots/`, non commitées).
-- [ServiceDetail](./ServiceDetail.md), [EnvVarsSection](./EnvVarsSection.md), [HTabs](./HTabs.md) : détail d un service (HRT-63)
+- [ServiceDetail](./ServiceDetail.md), [EnvVarsSection](./EnvVarsSection.md), [HTabs](./HTabs.md), [BoundedText](./BoundedText.md) : détail d un service (HRT-63)

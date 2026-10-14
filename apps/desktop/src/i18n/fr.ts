@@ -969,6 +969,8 @@ export const fr = {
     openRecreated: "Ouvrir le service {name}",
     // Hors spec : le service ouvert par une adresse n'a jamais été vu par cet écran, son nom est inconnu.
     unnamed: "Service inconnu",
+    // Hors spec : noms lus par un lecteur d'écran sur un texte du serveur qui défile dans sa zone.
+    nameLabel: "Nom du service",
     general: "Général",
     state: "État",
     lastStop: "Dernier arrêt",
@@ -983,10 +985,17 @@ export const fr = {
     exit0: "terminé normalement",
     exit137: "coupé de force (arrêt forcé ou manque de mémoire)",
     exit143: "arrêt demandé",
-    imageSection: "Image et commande",
-    image: "Image",
+    // Hors spec : mots courants à la place du vocabulaire de Docker (revue de la PR 93), l'ancien terme reste entre
+    // parenthèses là où il aide à chercher de l'aide.
+    imageSection: "Programme et commande",
+    image: "Programme (image)",
     command: "Commande",
-    commandOfImage: "Commande de l'image",
+    commandOfImage: "Commande par défaut du programme",
+    // Hors spec : la commande peut porter un secret ; réservée, par prudence, aux comptes qui peuvent gérer les
+    // services (décision du propriétaire attendue), et pas lue tant que la liste vient du disque.
+    rightUnknown:
+      "Visible seulement pour les comptes qui peuvent gérer les services. Ton droit n'est pas connu pour l'instant.",
+    commandNotRead: "Pas encore lue : elle se lira quand le lien avec le serveur sera revenu.",
     adoptedNote:
       "Ce service a été créé hors de Hearth : sa configuration reste celle de son créateur.",
     adoptedBy: "Adopté par {by} le {date}",
@@ -1002,7 +1011,8 @@ export const fr = {
     noMounts: "Aucun dossier de données",
     serverFolder: "Dossier du serveur",
     inService: "Chemin dans le service",
-    volume: "Volume géré par le moteur",
+    // Hors spec : « Volume » est le mot de Docker ; le mot courant est « stockage ».
+    volume: "Stockage géré par le moteur",
     readWrite: "Lecture et écriture",
     readOnly: "Lecture seule",
     restart: "Redémarrage",
@@ -1014,7 +1024,8 @@ export const fr = {
     restartOnFailure: "Redémarre tout seul seulement s'il s'arrête en erreur",
     restartUnknown: "Hearth ne reconnaît pas la façon dont ce service redémarre.",
     env: {
-      title: "Variables d'environnement",
+      // Hors spec : le nom courant d'abord, le terme technique entre parenthèses.
+      title: "Réglages (variables d'environnement)",
       reveal: "Révéler les valeurs",
       hide: "Masquer les valeurs",
       reading: "Lecture des valeurs…",
@@ -1026,6 +1037,12 @@ export const fr = {
       failed: "Impossible de lire les valeurs. Réessaie.",
       // Hors spec : la section est indisponible tant que le moteur n'est pas prêt.
       engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
+      // Texte du design du lot 1 : près du bouton quand le lien est coupé.
+      offline: "Indisponible tant que le serveur est hors ligne.",
+      // Hors spec : la liste relue du disque est écrite sans les noms de variables (ils peuvent porter des secrets).
+      notRead: "Pas encore lus : ils se liront quand le lien avec le serveur sera revenu.",
+      nameLabel: "Nom de la variable",
+      valueLabel: "Valeur de la variable",
       // Hors spec : l'agent a coupé la liste au-delà de sa borne.
       omitted: "et {n} autres non listées",
     },

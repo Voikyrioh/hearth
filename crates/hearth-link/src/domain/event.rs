@@ -140,6 +140,10 @@ pub enum Event {
         server: ServerId,
         state: Arc<ServicesState>,
         engine_received_at: Option<WallTime>,
+        /// Les noms de variables et la commande de cet état ont-ils été lus sur le serveur depuis le démarrage de
+        /// la liaison ? Faux pour une liste relue du disque, écrite sans eux : leur absence y veut dire « pas
+        /// lus », jamais « aucune variable ».
+        details_known: bool,
     },
     /// Un autre compte a fermé les sessions de ce compte : dit UNE fois par l'agent, à la première connexion qui
     /// suit (connexion saisie ou reconnexion silencieuse), avec l'identifiant de l'administrateur et la date
