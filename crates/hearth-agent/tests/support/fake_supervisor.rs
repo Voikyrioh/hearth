@@ -4,10 +4,11 @@
 //! Comme le vrai, il n'agit jamais sur une unité.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
+use tokio::sync::Semaphore;
 
 use hearth_agent::application::ports::{ContainerRef, ServiceSupervisor};
 use hearth_agent::domain::services::{UnitActivity, UnitLookup, UnitName, UnitStatus};
@@ -19,12 +20,30 @@ struct State {
     units: HashMap<UnitName, UnitLookup>,
 }
 
-#[derive(Default)]
 pub struct FakeSupervisor {
     state: Mutex<State>,
     owner_queries: AtomicU64,
     owner_containers_asked: AtomicU64,
     unit_queries: AtomicU64,
+    /// Crochet de test : tant qu'il est posé, la lecture d'une unité signale son arrivée puis attend la
+    /// reprise, sans aucun délai réel (relecture suspendue en plein passage).
+    held: AtomicBool,
+    arrived: Semaphore,
+    resume: Semaphore,
+}
+
+impl Default for FakeSupervisor {
+    fn default() -> Self {
+        Self {
+            state: Mutex::default(),
+            owner_queries: AtomicU64::new(0),
+            owner_containers_asked: AtomicU64::new(0),
+            unit_queries: AtomicU64::new(0),
+            held: AtomicBool::new(false),
+            arrived: Semaphore::new(0),
+            resume: Semaphore::new(0),
+        }
+    }
 }
 
 /// Une unité de service qui tourne, avec 120 secondes de délai d'arrêt.
@@ -75,6 +94,26 @@ impl FakeSupervisor {
         self.owner_containers_asked.load(Ordering::SeqCst)
     }
 
+    /// Suspend les lectures d'unités jusqu'à `release_unit_reads` (une lecture signale son arrivée).
+    pub fn hold_unit_reads(&self) {
+        self.held.store(true, Ordering::SeqCst);
+    }
+
+    /// Attend qu'une lecture d'unité soit arrivée et suspendue.
+    pub async fn wait_until_a_unit_read_is_held(&self) {
+        self.arrived
+            .acquire()
+            .await
+            .expect("semaphore ouvert")
+            .forget();
+    }
+
+    /// Reprend toutes les lectures suspendues et ne suspend plus rien.
+    pub fn release_unit_reads(&self) {
+        self.held.store(false, Ordering::SeqCst);
+        self.resume.add_permits(1_000_000);
+    }
+
     pub fn unit_queries(&self) -> u64 {
         self.unit_queries.load(Ordering::SeqCst)
     }
@@ -100,6 +139,14 @@ impl ServiceSupervisor for FakeSupervisor {
 
     async fn unit(&self, unit: &UnitName) -> UnitLookup {
         self.unit_queries.fetch_add(1, Ordering::SeqCst);
+        if self.held.load(Ordering::SeqCst) {
+            self.arrived.add_permits(1);
+            self.resume
+                .acquire()
+                .await
+                .expect("semaphore ouvert")
+                .forget();
+        }
         self.lock()
             .units
             .get(unit)

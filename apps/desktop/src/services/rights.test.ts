@@ -9,8 +9,8 @@ const known = (granted: boolean, account = "marie", knownByAgent = true): Rights
 
 describe("grantCommand (BR-GRANT-013)", () => {
   it("accorde (--grant) un compte qui n'a pas le droit, le retire (--revoke) à celui qui l'a", () => {
-    expect(grantCommand("marie", false)).toBe("hearth-agent account services marie --grant");
-    expect(grantCommand("marie", true)).toBe("hearth-agent account services marie --revoke");
+    expect(grantCommand("marie", false)).toBe("sudo hearth-agent account services marie --grant");
+    expect(grantCommand("marie", true)).toBe("sudo hearth-agent account services marie --revoke");
   });
 
   it("n'est construite que pour un identifiant valide", () => {
@@ -33,14 +33,23 @@ describe("grantCommand (BR-GRANT-013)", () => {
   });
 
   it("accepte un identifiant Hearth commençant par un chiffre, refuse le tiret initial", () => {
-    expect(grantCommand("3615paul", false)).toBe("hearth-agent account services 3615paul --grant");
+    expect(grantCommand("3615paul", false)).toBe(
+      "sudo hearth-agent account services 3615paul --grant",
+    );
     expect(grantCommand("-marie", false)).toBeNull();
     expect(grantCommand("--grant", true)).toBeNull();
   });
 
   it("ne contient jamais autre chose que le nom du compte entre les mots fixes", () => {
     const command = grantCommand("svc_1", false) ?? "";
-    expect(command.split(" ")).toEqual(["hearth-agent", "account", "services", "svc_1", "--grant"]);
+    expect(command.split(" ")).toEqual([
+      "sudo",
+      "hearth-agent",
+      "account",
+      "services",
+      "svc_1",
+      "--grant",
+    ]);
     expect(command).not.toMatch(/[\r\n;|&$`]/);
   });
 });
@@ -57,7 +66,7 @@ describe("rightsGate : les quatre profils (BR-GRANT-014)", () => {
     expect(gate).toEqual({
       kind: "denied",
       isAdmin: true,
-      command: "hearth-agent account services marie --grant",
+      command: "sudo hearth-agent account services marie --grant",
     });
     expect(canAct(gate)).toBe(false);
   });

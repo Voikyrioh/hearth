@@ -87,7 +87,7 @@ const command = computed(() => (props.gate.kind === "denied" ? props.gate.comman
   align-items: flex-start;
   gap: var(--space-2);
   min-width: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 

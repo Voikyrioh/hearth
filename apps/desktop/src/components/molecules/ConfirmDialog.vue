@@ -125,7 +125,7 @@ function onNativeClose() {
 
 .dialog__message {
   margin-top: var(--space-3);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .dialog__error {

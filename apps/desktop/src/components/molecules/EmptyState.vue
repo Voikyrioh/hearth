@@ -71,7 +71,7 @@ withDefaults(
 
 .empty__text {
   margin-top: var(--space-3);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-lead);
 }
 

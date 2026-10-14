@@ -4,6 +4,7 @@ import App from "@/App.vue";
 import { useToastsStore } from "@/stores/toasts";
 import { confirmDialog } from "@/test/confirm";
 import { mountContext } from "@/test/mount";
+import { tooltipFor } from "@/test/tooltip";
 
 // HRT-78 : le droit « gérer les services » dans la page Comptes (BR-GRANT-013, écran I du design) : le repère
 // « Peut gérer les services » dans la liste, la ligne « Gestion des services » dans le détail avec la commande à
@@ -77,7 +78,9 @@ describe("le repère dans la liste", () => {
     expect(
       wrapper.find("table input, table [role='switch'], table [role='checkbox']").exists(),
     ).toBe(false);
-    const buttons = wrapper.findAll("tbody td button").map((b) => b.text());
+    const buttons = wrapper
+      .findAll("tbody td button:not([data-services-right])")
+      .map((b) => b.text());
     expect(buttons.join(" ")).not.toMatch(/droit|services|accorder|retirer/i);
     wrapper.unmount();
   });
@@ -86,7 +89,8 @@ describe("le repère dans la liste", () => {
 describe("supprimer un compte qui peut gérer les services (BR-GRANT-005)", () => {
   const HINT =
     "Ce compte peut gérer les services. Seul un compte qui le peut aussi, ou la commande sur le serveur, peut le supprimer.";
-  const remove = (wrapper: VueWrapper, name: string) => row(wrapper, name).findAll("td button")[3];
+  const remove = (wrapper: VueWrapper, name: string) =>
+    row(wrapper, name).findAll("td button:not([data-services-right])")[3];
 
   it("sans le droit, « Supprimer » est indisponible sur un titulaire avec l'explication ; un compte sans droit se supprime", async () => {
     const { wrapper } = await boot((bridge) => {
@@ -94,7 +98,7 @@ describe("supprimer un compte qui peut gérer les services (BR-GRANT-005)", () =
       bridge.setServiceRightOnServer("forge", "paul", true);
     });
     expect(remove(wrapper, "paul")?.attributes("aria-disabled")).toBe("true");
-    expect(row(wrapper, "paul").text()).toContain(HINT);
+    expect(tooltipFor(remove(wrapper, "paul") as never).text()).toBe(HINT);
     expect(remove(wrapper, "lea")?.attributes("aria-disabled")).toBeUndefined();
     wrapper.unmount();
   });
@@ -132,7 +136,7 @@ describe("le détail d'un compte", () => {
       "Ce droit se donne et se retire depuis le serveur, pas depuis cet écran.",
     );
     expect(dialog.querySelector("pre")?.textContent).toBe(
-      "hearth-agent account services paul --grant",
+      "sudo hearth-agent account services paul --grant",
     );
     expect(dialog.textContent).toContain("Commande à lancer sur le serveur");
     expect(dialog.textContent).toContain("Copier la commande");
@@ -144,7 +148,7 @@ describe("le détail d'un compte", () => {
     const dialog = await openDetail(wrapper, "marie");
     expect(dialog.querySelector("[data-rights-value]")?.textContent?.trim()).toBe("Autorisée");
     expect(dialog.querySelector("pre")?.textContent).toBe(
-      "hearth-agent account services marie --revoke",
+      "sudo hearth-agent account services marie --revoke",
     );
     wrapper.unmount();
   });
@@ -207,7 +211,7 @@ describe("le détail d'un compte", () => {
     });
     const dialog = await openDetail(wrapper, "3615paul");
     expect(dialog.querySelector("pre")?.textContent?.trim()).toBe(
-      "hearth-agent account services 3615paul --grant",
+      "sudo hearth-agent account services 3615paul --grant",
     );
     wrapper.unmount();
   });

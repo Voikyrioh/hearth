@@ -42,7 +42,7 @@ use events::Fanout;
 pub use reauth::ReauthState;
 pub use rights::ServiceRightsRead;
 pub use service_ops::OperationActResult;
-pub use services::KnownServices;
+pub use services::{Acted, KnownServices};
 use task::Command;
 
 use crate::adapters::DeviceKey;

@@ -9,6 +9,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use time::OffsetDateTime;
 
 use super::convert::{format_date, parse_date, storage};
 use crate::application::ports::{AdoptedRecord, ServiceRepo, StoreError, SupervisedRecord};
@@ -280,7 +281,7 @@ impl ServiceRepo for SqliteServiceRepo {
 
     async fn load_adopted(&self) -> Result<Vec<AdoptedRecord>, StoreError> {
         let rows = sqlx::query!(
-            "SELECT service_key, adopted_by, adopted_at FROM adopted_services ORDER BY service_key"
+            "SELECT service_key, adopted_by, adopted_at, unconfirmed_since FROM adopted_services ORDER BY service_key"
         )
         .fetch_all(&self.pool)
         .await
@@ -298,6 +299,11 @@ impl ServiceRepo for SqliteServiceRepo {
                         key,
                         by: row.adopted_by.clone(),
                         at: parse_date(ADOPTED, &row.adopted_at)?,
+                        unconfirmed_since: row
+                            .unconfirmed_since
+                            .as_deref()
+                            .map(|since| parse_date(ADOPTED, since))
+                            .transpose()?,
                     })
                 });
             match record {
@@ -315,5 +321,43 @@ impl ServiceRepo for SqliteServiceRepo {
             .await
             .map_err(storage(ADOPTED))?;
         Ok(())
+    }
+
+    async fn mark_unconfirmed(
+        &self,
+        marks: &[(ServiceKey, OffsetDateTime)],
+        since: OffsetDateTime,
+    ) -> Result<Vec<(ServiceKey, OffsetDateTime)>, StoreError> {
+        let since_text = format_date(ADOPTED, since)?;
+        let mut tx = self.pool.begin().await.map_err(storage(ADOPTED))?;
+        let mut effective = Vec::with_capacity(marks.len());
+        for (key, adopted_at) in marks {
+            let adopted_at = format_date(ADOPTED, *adopted_at)?;
+            // Dynamique : la date « depuis » existante l'emporte (`COALESCE`), seule une clé `u_` est
+            // touchée (la base le garantit aussi).
+            sqlx::query(
+                "UPDATE adopted_services SET unconfirmed_since = COALESCE(unconfirmed_since, ?)
+                  WHERE service_key = ? AND adopted_at = ?",
+            )
+            .bind(&since_text)
+            .bind(key.as_str())
+            .bind(&adopted_at)
+            .execute(&mut *tx)
+            .await
+            .map_err(storage(ADOPTED))?;
+            let row: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT unconfirmed_since FROM adopted_services WHERE service_key = ? AND adopted_at = ?",
+            )
+            .bind(key.as_str())
+            .bind(&adopted_at)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(storage(ADOPTED))?;
+            if let Some(Some(text)) = row {
+                effective.push((key.clone(), parse_date(ADOPTED, &text)?));
+            }
+        }
+        tx.commit().await.map_err(storage(ADOPTED))?;
+        Ok(effective)
     }
 }

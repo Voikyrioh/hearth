@@ -275,7 +275,7 @@ async function openDocs() {
   align-items: center;
   gap: var(--space-2);
   margin: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .svc__stale {

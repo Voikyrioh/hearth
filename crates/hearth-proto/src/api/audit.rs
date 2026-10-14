@@ -102,9 +102,15 @@ pub mod action {
     pub const OPERATION_CANCEL: &str = "operation.cancel";
     /// Une décision sur une opération, refusée ou en échec (HRT-144), comme `operation.cancel`.
     pub const OPERATION_DECIDE: &str = "operation.decide";
+    /// Une adoption par unité dont l'unité n'est plus relue devient « à confirmer » (HRT-80, BR-ADOPT-027) :
+    /// auteur le système, cible le service par sa clé. Type d'action « Gestion des services ».
+    pub const SERVICE_ADOPTION_TO_CONFIRM: &str = "service.adoption.to_confirm";
+    /// Une adoption tombe sans qu'aucun compte agisse : délai de confirmation écoulé, unité ou conteneur
+    /// disparu (HRT-80, BR-ADOPT-017, BR-ADOPT-027). Auteur le système, cible le service par sa clé.
+    pub const SERVICE_ADOPTION_LAPSED: &str = "service.adoption.lapsed";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 46] = [
+    pub const ALL: [&str; 48] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -151,6 +157,8 @@ pub mod action {
         SERVICE_GAME_SETTINGS,
         OPERATION_CANCEL,
         OPERATION_DECIDE,
+        SERVICE_ADOPTION_TO_CONFIRM,
+        SERVICE_ADOPTION_LAPSED,
     ];
 }
 

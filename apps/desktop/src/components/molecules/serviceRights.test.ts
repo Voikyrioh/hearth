@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import { grantCommand, type RightsGate } from "@/services/rights";
+import { hasTooltip } from "@/test/tooltip";
 import ServiceRightReason from "./ServiceRightReason.vue";
 import ServicesRightRow from "./ServicesRightRow.vue";
 
@@ -45,7 +46,7 @@ describe("ServiceRightReason", () => {
     const wrapper = mount(ServiceRightReason, { props: { gate: denied(true), id: "why" } });
     expect(wrapper.get("[data-rights-sentence]").text()).toBe(REASON);
     expect(wrapper.get("[data-rights-follow]").text()).toBe(ADMIN_INTRO);
-    expect(wrapper.get("pre").text()).toBe("hearth-agent account services marie --grant");
+    expect(wrapper.get("pre").text()).toBe("sudo hearth-agent account services marie --grant");
     expect(wrapper.get("[data-copy]").text()).toBe("Copier la commande");
     expect(wrapper.text()).not.toContain(ASK);
   });
@@ -121,7 +122,7 @@ describe("la raison est liée au bouton désactivé", () => {
     expect(described?.textContent).toContain(REASON);
     expect(described?.textContent).toContain(ASK);
     // Une seule fois : pas d'infobulle qui répète la raison.
-    expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
+    expect(hasTooltip()).toBe(false);
     wrapper.unmount();
   });
 
@@ -175,7 +176,7 @@ describe("ServicesRightRow (détail d'un compte)", () => {
     expect(wrapper.get("[data-rights-help]").text()).toBe(
       "Ce droit se donne et se retire depuis le serveur, pas depuis cet écran.",
     );
-    expect(wrapper.get("pre").text()).toBe("hearth-agent account services paul --grant");
+    expect(wrapper.get("pre").text()).toBe("sudo hearth-agent account services paul --grant");
     expect(wrapper.get("[data-copy]").text()).toBe("Copier la commande");
     expect(wrapper.text()).toContain("Commande à lancer sur le serveur");
   });
@@ -183,7 +184,7 @@ describe("ServicesRightRow (détail d'un compte)", () => {
   it("autorisée : la commande retire le droit (--revoke)", () => {
     const wrapper = row({ username: "paul", manages: true, known: true });
     expect(wrapper.get("[data-rights-value]").text()).toBe("Autorisée");
-    expect(wrapper.get("pre").text()).toBe("hearth-agent account services paul --revoke");
+    expect(wrapper.get("pre").text()).toBe("sudo hearth-agent account services paul --revoke");
   });
 
   it("un identifiant invalide : aucune commande, et le nom n'est pas redit", () => {

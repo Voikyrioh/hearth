@@ -68,7 +68,7 @@ const LABELS: Record<LinkState, MessageKey> = {
 
 .dev__title {
   cursor: pointer;
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .dev__server {

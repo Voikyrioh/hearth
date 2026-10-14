@@ -54,7 +54,7 @@ test("aucun bandeau quand le client est à jour, et les réglages le disent", as
   await page.goto("/?nodev#/settings");
   await expect(page.getByRole("heading", { name: "Mises à jour" })).toBeVisible();
   await expect(banner(page)).toHaveCount(0);
-  await expect(page.getByText("Tu es à jour")).toBeVisible();
+  await expect(page.getByText("Hearth est à jour sur ce PC.")).toBeVisible();
   await expect(page.getByText("Dernière vérification : il y a 2 heures")).toBeVisible();
   await shoot(page, "maj-reglages-a-jour");
 });
@@ -111,17 +111,17 @@ test("« Vérifier maintenant » sans Internet : aucun message d'erreur, la date
   await expect(page.locator("[data-updates-panel] [role='alert']")).toHaveCount(0);
   await expect(banner(page)).toHaveCount(0);
   await expect(page.getByText("Dernière vérification : il y a 2 heures")).toBeVisible();
-  await expect(page.getByText("Tu es à jour")).toHaveCount(0);
+  await expect(page.getByText("Hearth est à jour sur ce PC.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Vérifier maintenant" })).toBeVisible();
   expect(await sim(page, (s) => s.calls.check)).toBe(1);
 });
 
-test("« Vérifier maintenant » sans nouvelle version : « Tu es à jour » et la date du jour", async ({
+test("« Vérifier maintenant » sans nouvelle version : « Hearth est à jour sur ce PC. » et la date du jour", async ({
   page,
 }) => {
   await page.goto("/?nodev#/settings");
   await page.getByRole("button", { name: "Vérifier maintenant" }).click();
-  await expect(page.getByText("Tu es à jour")).toBeVisible();
+  await expect(page.getByText("Hearth est à jour sur ce PC.")).toBeVisible();
   await expect(page.getByText("Dernière vérification : à l'instant")).toBeVisible();
   expect(await sim(page, (s) => s.calls.check)).toBe(1);
 });

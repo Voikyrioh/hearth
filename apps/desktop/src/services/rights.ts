@@ -42,7 +42,7 @@ export type RightsGate =
  */
 export function grantCommand(account: string, granted: boolean): string | null {
   if (!isHearthUsername(account)) return null;
-  return `hearth-agent account services ${account} ${granted ? "--revoke" : "--grant"}`;
+  return `sudo hearth-agent account services ${account} ${granted ? "--revoke" : "--grant"}`;
 }
 
 export function rightsGate(input: {

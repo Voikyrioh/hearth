@@ -19,6 +19,51 @@ pub enum InputField {
     Filter,
 }
 
+/// La raison d'un refus d'adoption ou de relâche (`details.reason`). Tolérant : toute valeur inconnue est
+/// `Unknown`, sans jamais recopier le texte reçu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusalReason {
+    /// `[services] adoption = false` sur le serveur (BR-ADOPT-020).
+    AdoptionDisabled,
+    /// Le moteur de conteneurs n'est pas prêt (BR-ADOPT-026).
+    EngineNotReady,
+    /// Aucune clé dans la demande.
+    KeysEmpty,
+    /// Plus de 50 clés dans la demande.
+    KeysTooMany,
+    /// Une clé en double dans la demande.
+    KeysDuplicate,
+    /// La confirmation n'a pas de preuve de clé lisible.
+    ProofMissing,
+    /// La preuve de clé ne vaut pas pour cet acte, ou a été rejouée ou périmée.
+    ProofInvalid,
+    /// Le mot de passe manque (élévation absente ou fermée).
+    PasswordRequired,
+    /// L'agent exige une confirmation que ce client n'envoie pas : client trop ancien.
+    ReauthRequired,
+    /// Une raison que cette version de la liaison ne connaît pas.
+    Unknown,
+}
+
+impl RefusalReason {
+    pub(crate) fn from_wire(reason: &str) -> Self {
+        use hearth_proto::api::reauth::reauth_refusal;
+        use hearth_proto::api::services::adoption_refusal;
+        match reason {
+            adoption_refusal::ADOPTION_DISABLED => Self::AdoptionDisabled,
+            adoption_refusal::ENGINE_NOT_READY => Self::EngineNotReady,
+            adoption_refusal::KEYS_EMPTY => Self::KeysEmpty,
+            adoption_refusal::KEYS_TOO_MANY => Self::KeysTooMany,
+            adoption_refusal::KEYS_DUPLICATE => Self::KeysDuplicate,
+            reauth_refusal::PROOF_MISSING => Self::ProofMissing,
+            reauth_refusal::PROOF_INVALID => Self::ProofInvalid,
+            reauth_refusal::PASSWORD_REQUIRED => Self::PasswordRequired,
+            reauth_refusal::REAUTH_REQUIRED => Self::ReauthRequired,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum LinkError {
     #[error("serveur inconnu")]
@@ -74,6 +119,16 @@ pub enum LinkError {
     TooManyAttempts { retry_after_s: u64 },
     #[error("le serveur a refusé : {0:?}")]
     Rejected(Option<ErrorCode>),
+    /// Un refus d'adopter ou de relâcher qui dit POURQUOI (`details.reason` de l'agent) : l'interface sait
+    /// distinguer un moteur pas prêt d'une adoption désactivée, une preuve invalide d'un mot de passe qui
+    /// manque, une demande vide d'une demande trop grande ou en double. La raison est une valeur fixe,
+    /// jamais le texte de l'agent ; une raison que cette version ne connaît pas est `Unknown` (le code
+    /// reste donné).
+    #[error("le serveur a refusé : {code:?} ({reason:?})")]
+    RejectedBecause {
+        code: ErrorCode,
+        reason: RefusalReason,
+    },
     /// Le compte a le bon rôle mais pas le droit que l'acte exige : `403 FORBIDDEN_ROLE` avec
     /// `details.missing` (BR-GRANT-004). Le texte du droit est celui de l'agent, jamais affiché tel quel :
     /// l'interface ne reconnaît que ceux qu'elle connaît (`"services"`).

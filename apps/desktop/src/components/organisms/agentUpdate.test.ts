@@ -5,6 +5,7 @@ import { useAgentUpdatesStore } from "@/stores/agentUpdates";
 import { useToastsStore } from "@/stores/toasts";
 import { startedApp } from "@/test/app";
 import { confirmDialog, dialogButton } from "@/test/confirm";
+import { hasTooltip } from "@/test/tooltip";
 import AgentUpdateCard from "./AgentUpdateCard.vue";
 
 // HRT-17, l'écran « État du serveur » : le bouton selon le rôle, la confirmation au texte exact, les
@@ -55,12 +56,14 @@ describe("le bouton « Mettre à jour l'agent »", () => {
   it("is visible to an administrator when a newer version is available, with both versions and the tag", async () => {
     const { wrapper } = await card();
     expect(wrapper.get("h3").text()).toBe("État du serveur : forge");
-    expect(wrapper.get("[data-agent-versions]").text()).toContain("Agent 0.1.0");
+    expect(wrapper.get("[data-agent-versions]").text()).toContain(
+      "installée sur ce serveur : 0.1.0",
+    );
     expect(wrapper.get("[data-agent-tag]").text()).toBe("Mise à jour disponible");
     // Dite une fois : la mention, pas aussi une phrase (HRT-46, C43).
     expect(wrapper.find("[data-agent-available]").exists()).toBe(false);
     expect(wrapper.get("[data-agent-versions]").text()).toBe(
-      "Client indisponible · Agent 0.1.0 · Disponible 0.2.0",
+      "Version installée sur ce serveur : 0.1.0. La version 0.2.0 est disponible.",
     );
     const button = update(wrapper);
     expect(button.text()).toBe("Mettre à jour l'agent");
@@ -74,7 +77,9 @@ describe("le bouton « Mettre à jour l'agent »", () => {
     await flushPromises();
     expect(ctx.wrapper.find("[data-agent-update-button]").exists()).toBe(false);
     expect(ctx.wrapper.find("[data-agent-tag]").exists()).toBe(false);
-    expect(ctx.wrapper.get("[data-agent-uptodate]").text()).toBe("L'agent est à jour.");
+    expect(ctx.wrapper.get("[data-agent-uptodate]").text()).toBe(
+      "Hearth est à jour sur ce serveur.",
+    );
     // Jamais de rétrogradation : une version plus ancienne n'est pas « disponible » non plus.
     sim(ctx.bridge).seed("forge", { target: "0.0.9" });
     await ctx.store.refresh("forge");
@@ -88,7 +93,7 @@ describe("le bouton « Mettre à jour l'agent »", () => {
     expect(button.exists()).toBe(true);
     expect(button.attributes("aria-disabled")).toBe("true");
     // La raison est écrite sous le bouton (une seule fois, sans infobulle) et décrit le bouton.
-    expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
+    expect(hasTooltip()).toBe(false);
     expect(wrapper.get("[data-button-reason]").text()).toBe(
       "Seul un administrateur peut mettre à jour l'agent",
     );
@@ -201,7 +206,9 @@ describe("l'avancement : étapes discrètes, une à la fois", () => {
     expect(wrapper.get("[data-agent-result]").text()).toContain(
       "Mise à jour de l'agent réussie. L'agent est en version 0.2.0.",
     );
-    expect(wrapper.get("[data-agent-versions]").text()).toContain("Agent 0.2.0");
+    expect(wrapper.get("[data-agent-versions]").text()).toContain(
+      "installée sur ce serveur : 0.2.0",
+    );
     expect(wrapper.find("[data-agent-running]").exists()).toBe(false);
     expect(wrapper.find("[data-agent-update-button]").exists()).toBe(false);
     expect(wrapper.find("[data-agent-tag]").exists()).toBe(false);
@@ -244,7 +251,9 @@ describe("l'avancement : étapes discrètes, une à la fois", () => {
     await flushPromises();
     expect(wrapper.find("[data-agent-running]").exists()).toBe(false);
     expect(wrapper.get("[data-agent-result]").text()).toContain("réussie");
-    expect(wrapper.get("[data-agent-versions]").text()).toContain("Agent 0.2.0");
+    expect(wrapper.get("[data-agent-versions]").text()).toContain(
+      "installée sur ce serveur : 0.2.0",
+    );
   });
 });
 
@@ -277,7 +286,9 @@ describe("les résultats, avec les textes de la spécification", () => {
     expect(result.attributes("data-tone")).toBe(tone);
     expect(result.text()).toContain(text);
     // L'agent n'a pas changé de version (retour arrière ou échec) : la version disponible reste proposée.
-    expect(wrapper.get("[data-agent-versions]").text()).toContain("Agent 0.1.0");
+    expect(wrapper.get("[data-agent-versions]").text()).toContain(
+      "installée sur ce serveur : 0.1.0",
+    );
     expect(wrapper.find("[data-agent-update-button]").exists()).toBe(true);
   });
 
@@ -432,5 +443,39 @@ describe("la mention de la liste des serveurs (BR-UPDATE-023)", () => {
     await store.refresh("forge");
     await store.refresh("salon");
     expect(store.withUpdate).toEqual(["forge"]);
+  });
+});
+
+// HRT-143 : un agent plus récent que le client peut envoyer une étape ou une raison que ce client ne connaît
+// pas. La carte dit alors quelque chose de générique ; elle ne tombe pas, et la page non plus.
+describe("des valeurs inconnues venues de l'agent (HRT-143)", () => {
+  it("shows a generic failure message for a reason the client does not know", async () => {
+    const { wrapper, bridge } = await card();
+    await confirmUpdate(wrapper);
+    sim(bridge).complete("forge", "failed", "brand_new_reason" as never);
+    await flushPromises();
+    expect(wrapper.get("[data-agent-result]").text()).toContain(
+      "La mise à jour de l'agent n'a pas abouti.",
+    );
+    expect(wrapper.get("[data-agent-result]").attributes("data-tone")).toBe("crit");
+  });
+
+  it("keeps the card standing for a step the client does not know, and says it is in progress", async () => {
+    const { wrapper, bridge } = await card();
+    await confirmUpdate(wrapper);
+    sim(bridge).advance("forge", "brand_new_step" as never);
+    await flushPromises();
+    expect(wrapper.find("[data-agent-running]").exists()).toBe(true);
+    expect(wrapper.get("[data-agent-progress]").text()).toBe("Mise à jour de l'agent en cours.");
+    // Aucune étape n'est présentée comme « en cours » à tort : la liste ne ment pas.
+    expect(wrapper.findAll('[data-state="now"]')).toHaveLength(0);
+  });
+
+  it("falls back to the generic message for an outcome the client does not know", async () => {
+    const { wrapper, bridge } = await card();
+    await confirmUpdate(wrapper);
+    sim(bridge).complete("forge", "brand_new_outcome" as never, null);
+    await flushPromises();
+    expect(wrapper.get("[data-agent-result]").text()).toContain("n'a pas abouti");
   });
 });

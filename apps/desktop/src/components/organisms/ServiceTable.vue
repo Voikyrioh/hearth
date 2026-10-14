@@ -351,7 +351,7 @@ defineExpose({ visible });
   scrollbar-gutter: stable;
   height: var(--control-sm);
   border-bottom: var(--border-width) solid var(--bd);
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
   letter-spacing: var(--ls-label);
@@ -436,7 +436,7 @@ defineExpose({ visible });
 
 .image {
   min-width: 0;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
 }
@@ -458,7 +458,7 @@ defineExpose({ visible });
 
 .state-line {
   overflow: hidden;
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
   text-overflow: ellipsis;
   white-space: nowrap;

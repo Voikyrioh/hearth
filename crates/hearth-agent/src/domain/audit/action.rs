@@ -103,11 +103,18 @@ pub enum AuditAction {
     OperationCancel,
     /// Une décision refusée ou en échec avant d'avoir lu l'opération (HRT-144) ; la réussite s'écrit sous l'action du genre.
     OperationDecide,
+    /// Une adoption par unité dont l'unité n'est plus relue devient « à confirmer » : elle n'ouvre plus aucun
+    /// droit jusqu'à la confirmation d'un compte qui a le droit (HRT-80, BR-ADOPT-027). Auteur : le
+    /// système ; cible : le service par sa clé.
+    ServiceAdoptionToConfirm,
+    /// Une adoption tombe sans qu'aucun compte agisse : délai de confirmation écoulé, unité ou conteneur
+    /// disparu (HRT-80, BR-ADOPT-017, BR-ADOPT-027). Auteur : le système ; cible : le service par sa clé.
+    ServiceAdoptionLapsed,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 46] = [
+    pub const ALL: [AuditAction; 48] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -154,6 +161,8 @@ impl AuditAction {
         Self::ServiceGameSettings,
         Self::OperationCancel,
         Self::OperationDecide,
+        Self::ServiceAdoptionToConfirm,
+        Self::ServiceAdoptionLapsed,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -205,6 +214,8 @@ impl AuditAction {
             Self::ServiceGameSettings => action::SERVICE_GAME_SETTINGS,
             Self::OperationCancel => action::OPERATION_CANCEL,
             Self::OperationDecide => action::OPERATION_DECIDE,
+            Self::ServiceAdoptionToConfirm => action::SERVICE_ADOPTION_TO_CONFIRM,
+            Self::ServiceAdoptionLapsed => action::SERVICE_ADOPTION_LAPSED,
         }
     }
 
@@ -257,6 +268,8 @@ impl AuditAction {
             Self::ServiceGameSettings => "Réglages d'un jeu",
             Self::OperationCancel => "Annulation d'une opération",
             Self::OperationDecide => "Décision sur une opération",
+            Self::ServiceAdoptionToConfirm => "Adoption à confirmer",
+            Self::ServiceAdoptionLapsed => "Adoption tombée",
         }
     }
 

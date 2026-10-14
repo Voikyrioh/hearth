@@ -57,7 +57,7 @@ const icon = computed(() => ICONS[props.state]);
 .badge--stopped,
 .badge--paused,
 .badge--unknown {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .badge--error,

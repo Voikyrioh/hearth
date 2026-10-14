@@ -21,6 +21,7 @@ maj: 2026-10-13
 - `crates/hearth-proto/src/admin_act.rs::{AdminAct::ServiceRelease, covered_by_elevation}`
 
 ## Vérification
+- `crates/hearth-link/tests/services_acts.rs::an_adoption_and_a_release_sent_by_the_link_show_and_hide_the_service_in_its_stream` (de bout en bout par la liaison, clé au nom échappé comprise)
 - `crates/hearth-agent/tests/service_adoption_https.rs::releasing_takes_the_service_off_the_list_of_everyone_touches_nothing_and_is_journaled_once`
 - `crates/hearth-agent/tests/service_adoption_https.rs::releasing_what_is_not_adopted_does_nothing_says_the_same_for_every_reason_and_journals_nothing`
 - `crates/hearth-agent/tests/service_adoption_https.rs::with_adoption_switched_off_nothing_is_offered_nothing_is_adopted_and_an_adopted_service_can_be_released`

@@ -100,7 +100,7 @@ const icon = computed(() =>
 }
 
 .banner__stamp {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 

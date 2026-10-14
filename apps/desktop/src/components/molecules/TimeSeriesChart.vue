@@ -105,7 +105,7 @@ const partial = computed(() => props.coveredMs < WINDOWS[props.window].spanMs - 
 }
 
 .series__legend {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 

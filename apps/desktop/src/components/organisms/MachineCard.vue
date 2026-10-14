@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { formatFrequency, formatGb, formatUptime } from "@/dashboard/format";
+import { diskTitle } from "@/dashboard/labels";
 import { t } from "@/i18n";
 import type { ServerMachine } from "@/stores/dashboard";
 import HMiddleText from "../atoms/HMiddleText.vue";
@@ -30,7 +31,8 @@ const disks = computed(() => {
   const listed = live ?? machine.value?.disks ?? [];
   return listed.map((disk) => ({
     key: `${disk.name}|${disk.mount}`,
-    mount: disk.mount,
+    // Même mot que la carte Disques (« Disque système » pour la racine).
+    mount: diskTitle(disk.name, disk.mount).title,
     size: formatGb(disk.totalBytes),
   }));
 });
@@ -93,7 +95,7 @@ const uptime = computed(() => formatUptime(props.entry.latest?.sample.uptimeS ??
 }
 
 .machine__label {
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .machine__value {
@@ -108,7 +110,7 @@ const uptime = computed(() => formatUptime(props.entry.latest?.sample.uptimeS ??
 }
 
 .machine__detail {
-  color: var(--tx2);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 
@@ -134,7 +136,7 @@ const uptime = computed(() => formatUptime(props.entry.latest?.sample.uptimeS ??
 
 .machine__size {
   flex: none;
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .machine__uptime {

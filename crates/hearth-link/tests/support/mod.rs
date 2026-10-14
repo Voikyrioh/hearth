@@ -279,6 +279,8 @@ pub struct Options {
     pub hide_capabilities: bool,
     /// Une destination supplémentaire des événements (HRT-144 : les messages `operation` du flux).
     pub extra_sink: Option<Arc<dyn hearth_link::ports::EventSink>>,
+    /// Le superviseur de services de l'agent (clés `u_`) ; sans lui, aucun conteneur n'a d'unité.
+    pub supervisor: Option<Arc<dyn hearth_agent::application::ports::ServiceSupervisor>>,
 }
 
 impl Default for Options {
@@ -295,6 +297,7 @@ impl Default for Options {
             engine: None,
             hide_capabilities: false,
             extra_sink: None,
+            supervisor: None,
         }
     }
 }
@@ -856,7 +859,9 @@ pub fn short_transport() -> HttpTransport {
 impl World {
     /// Agent installé, compte « marie », mandataire, `LinkManager` connecté.
     pub async fn connected(options: Options) -> Self {
-        let agent = TestAgent::install_full(options.updating, options.engine).await;
+        let agent =
+            TestAgent::install_supervised(options.updating, options.engine, options.supervisor)
+                .await;
         agent.create_account("marie", options.role).await;
         let proxy = FaultProxy::start(agent.addr).await;
         let dir = agent::tmp::tempdir().unwrap();

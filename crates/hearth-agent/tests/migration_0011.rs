@@ -243,7 +243,8 @@ async fn the_repository_reads_the_adopted_services_skips_an_unreadable_row_and_f
 
     let dir = tmp::tempdir().unwrap();
     let pool = open(&dir.path().join("hearth.db")).await;
-    migrator_up_to(11).run(&pool).await.unwrap();
+    // Le dépôt lit aussi la colonne de la migration 0014 : la base est à jour.
+    migrator_up_to(14).run(&pool).await.unwrap();
     let repo = SqliteServiceRepo::new(pool.clone());
     assert!(repo.load_adopted().await.unwrap().is_empty());
     insert_adopted(

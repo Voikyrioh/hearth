@@ -8,6 +8,7 @@ import FingerprintAlert from "@/components/organisms/FingerprintAlert.vue";
 import ServerRail from "@/components/organisms/ServerRail.vue";
 import UpdateBanner from "@/components/organisms/UpdateBanner.vue";
 import { reportUiError } from "@/errors/report";
+import { t } from "@/i18n";
 import { failureMessage, failureOf } from "@/link";
 import { useAgentUpdatesStore } from "@/stores/agentUpdates";
 import { useLinkStore } from "@/stores/link";
@@ -59,6 +60,15 @@ async function reload() {
   }
 }
 
+// Lien d'évitement (HRT-141) : premier arrêt du clavier, il donne le focus à la zone principale de la page
+// (le routeur est en mode « hash » : pas d'ancre, le focus est posé à la main).
+function skipToContent() {
+  const main = document.querySelector<HTMLElement>("main");
+  if (!main) return;
+  if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
+  main.focus();
+}
+
 // Alerte d'empreinte changée : celle du serveur affiché, sinon la première en attente.
 const alert = computed(() => {
   const ids = [servers.currentId, ...servers.servers.map((server) => server.id)];
@@ -83,6 +93,9 @@ async function accept(serverId: string) {
 
 <template>
   <div class="shell">
+    <button type="button" class="skip" data-skip-link @click="skipToContent">
+      {{ t("rail.skipToContent") }}
+    </button>
     <ServerRail />
     <div class="shell__content">
       <UpdateBanner />
@@ -113,6 +126,25 @@ async function accept(serverId: string) {
 .shell {
   display: flex;
   height: 100%;
+}
+
+/* Caché hors de l'écran tant qu'il n'a pas le focus ; visible, bien en vue, dès le premier appui sur Tab. */
+.skip {
+  position: fixed;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: var(--z-skip);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width) solid var(--ac);
+  border-radius: var(--radius-control);
+  background: var(--card-2);
+  color: var(--tx);
+  cursor: pointer;
+  transform: translateY(-200%);
+}
+
+.skip:focus-visible {
+  transform: none;
 }
 
 .shell__content {

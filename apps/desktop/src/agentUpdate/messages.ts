@@ -1,5 +1,5 @@
 import { type MessageKey, t } from "@/i18n";
-import type { AgentUpdateRefusal, UpdateReason, UpdateStep } from "@/link";
+import { type AgentUpdateRefusal, UPDATE_STEPS, type UpdateReason, type UpdateStep } from "@/link";
 
 /**
  * Les textes de la mise à jour de l'agent, indexés par les CODES de l'agent (étape, issue, raison,
@@ -23,6 +23,14 @@ const STEP_DONE: Record<Exclude<UpdateStep, "done">, MessageKey> = {
   restart: "agentUpdate.stepRestartDone",
   check: "agentUpdate.stepCheckDone",
 };
+
+/**
+ * HRT-143 : une étape que ce client ne connaît pas (ajoutée par un agent plus récent) n'est pas une étape de la
+ * liste. `null` : l'écran dit seulement « en cours », sans marquer d'étape à tort.
+ */
+export function knownStep(step: string | null | undefined): Exclude<UpdateStep, "done"> | null {
+  return UPDATE_STEPS.find((known) => known === step) ?? null;
+}
 
 /** Le libellé d'une étape dans la liste (« Téléchargement : 35 % » pendant le téléchargement). */
 export function stepLabel(
@@ -91,7 +99,11 @@ export function resultMessage(result: ResultLike): string {
         ? t("agentUpdate.resultIdentityChanged")
         : t("agentUpdate.resultRolledBack");
   }
-  return t(REASONS[result.reason ?? "unknown"]);
+  // HRT-143 : une issue inconnue (agent plus récent) a son propre texte, séparé de l'échec connu : le propriétaire
+  // peut le rendre neutre en changeant `agentUpdate.resultUnknown` (et le ton ci-dessous) sans toucher aux vrais échecs.
+  if (result.outcome !== "failed") return t("agentUpdate.resultUnknown");
+  // HRT-143 : une raison inconnue (agent plus récent) dit le message générique, jamais une page cassée.
+  return t(REASONS[result.reason ?? "unknown"] ?? REASONS.unknown);
 }
 
 export function resultTone(result: ResultLike): ResultTone {

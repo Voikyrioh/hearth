@@ -193,6 +193,11 @@ pub enum Target {
     /// BR-ADOPT-019) : ce sont les SEULS détails d'un conteneur que le journal écrit, et seulement au
     /// moment où l'acte réussit (le nom devient visible de tous à l'adoption, pas avant).
     ServiceUnit(ClientName, Option<ClientName>),
+    /// Une adoption qui change d'état sans qu'aucun compte agisse (HRT-80, BR-ADOPT-027, BR-ADOPT-019) :
+    /// elle devient « à confirmer » ou elle tombe. Le service est désigné par sa CLÉ (`u_...`, `c_...`),
+    /// déjà publiée à tous les comptes tant qu'il était adopté, jamais par le nom ni l'image du
+    /// conteneur : le journal se lit sans le droit de gérer les services.
+    ServiceAdoption(ClientName, AdoptionCause),
     /// Les sessions d'un compte ont été fermées par l'administration (HRT-133, BR-ACCT-019) : le compte
     /// visé, le nombre de sessions, si le compte visé avait le droit de gérer les services et si l'auteur
     /// l'avait (`None` : la ligne de commande du serveur, qui n'a pas de compte). Jamais d'adresse.
@@ -218,6 +223,30 @@ pub enum OperationGesture {
     Cancelled,
     /// Le compte a pris cette décision (le libellé du choix, en français).
     Decided(&'static str),
+}
+
+/// Pourquoi une adoption devient « à confirmer » ou tombe sans qu'aucun compte agisse (texte fixe).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdoptionCause {
+    /// L'unité n'a pas été relue à un passage (au-delà de la borne) : l'adoption est « à confirmer ».
+    UnitNotRead,
+    /// Le délai de confirmation (24 heures) est écoulé.
+    Expired,
+    /// Le système ne connaît plus l'unité et aucun conteneur ne la porte.
+    UnitGone,
+    /// Le conteneur d'un service adopté sans unité n'existe plus.
+    ContainerGone,
+}
+
+impl AdoptionCause {
+    fn text(self) -> &'static str {
+        match self {
+            Self::UnitNotRead => "unité plus relue, à confirmer sous 24 h",
+            Self::Expired => "non confirmée sous 24 h",
+            Self::UnitGone => "unité disparue",
+            Self::ContainerGone => "conteneur disparu",
+        }
+    }
 }
 
 /// Le moment de l'épisode d'alerte que l'entrée consigne.
@@ -258,6 +287,9 @@ impl Target {
                 "service {} : décision « {choice} »",
                 service.as_str()
             )),
+            Self::ServiceAdoption(key, cause) => {
+                Some(format!("service {} ({})", key.as_str(), cause.text()))
+            }
             Self::SessionsClosed {
                 account,
                 closed,

@@ -119,7 +119,7 @@ function openSecurityPage() {
         :active="security.dialog?.active ?? true"
         @close="security.closeDialog()"
       />
-      <div class="layout__content">
+      <main class="layout__content" :aria-label="title || undefined">
         <!-- Sans session : le formulaire de connexion, EN SURIMPRESSION de la dernière vue (périmée), premier dans
              le DOM (atteint en premier au clavier), au-dessus par `z-index`. -->
         <ReconnectPanel
@@ -134,7 +134,7 @@ function openSecurityPage() {
         <StaleSurface :stale="stale" :last-contact-at="lastContactAt" :stamped="pageHasData">
           <ErrorBoundary :reset-key="route.fullPath"><RouterView /></ErrorBoundary>
         </StaleSurface>
-      </div>
+      </main>
     </div>
   </div>
 </template>
