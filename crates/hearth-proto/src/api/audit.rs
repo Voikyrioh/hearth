@@ -72,6 +72,38 @@ pub mod action {
     /// Un compte est freiné quand il ouvre des lectures de journaux en rafale (HRT-107, BR-SLOG-027) :
     /// UNE entrée quand il est refusé plus de 30 fois en 10 minutes, jamais une par refus.
     pub const SERVICE_LOGS_THROTTLED: &str = "service.logs.throttled";
+    // --- Actions de service déclarées d'un coup par HRT-144 (ADR-0045) : une par genre d'opération. Type
+    // --- d'action « Gestion des services » du filtre. ---
+    /// Un service est démarré (HRT-64).
+    pub const SERVICE_START: &str = "service.start";
+    /// Un service est arrêté (HRT-64).
+    pub const SERVICE_STOP: &str = "service.stop";
+    /// Un service est redémarré (HRT-64).
+    pub const SERVICE_RESTART: &str = "service.restart";
+    /// Un service est déployé (HRT-68, HRT-101).
+    pub const SERVICE_DEPLOY: &str = "service.deploy";
+    /// Un service est modifié (lot suivant). Genre d'opération `update`.
+    pub const SERVICE_UPDATE: &str = "service.update";
+    /// Un service est supprimé (HRT-85).
+    pub const SERVICE_DELETE: &str = "service.delete";
+    /// Les limites d'un service changent (lot suivant). Genre d'opération `resources`.
+    pub const SERVICE_RESOURCES: &str = "service.resources";
+    /// Un service est sauvegardé (HRT-97). Genre d'opération `backup`.
+    pub const SERVICE_BACKUP_CREATE: &str = "service.backup.create";
+    /// Un service est restauré (lot suivant). Genre d'opération `restore`.
+    pub const SERVICE_BACKUP_RESTORE: &str = "service.backup.restore";
+    /// Une sauvegarde est supprimée (HRT-97).
+    pub const SERVICE_BACKUP_DELETE: &str = "service.backup.delete";
+    /// Un monde est repris d'ailleurs (lot suivant). Genre d'opération `world_import`.
+    pub const SERVICE_WORLD_IMPORT: &str = "service.world.import";
+    /// Les réglages d'un serveur de jeu sont enregistrés (HRT-108).
+    pub const SERVICE_GAME_SETTINGS: &str = "service.game.settings";
+    /// Une demande d'annulation d'une opération, refusée ou en échec avant d'avoir pu la lire (HRT-144) :
+    /// faute du droit, sans confirmation, opération inconnue. La réussite se consigne sous l'action du
+    /// genre de l'opération.
+    pub const OPERATION_CANCEL: &str = "operation.cancel";
+    /// Une décision sur une opération, refusée ou en échec (HRT-144), comme `operation.cancel`.
+    pub const OPERATION_DECIDE: &str = "operation.decide";
     /// Une adoption par unité dont l'unité n'est plus relue devient « à confirmer » (HRT-80, BR-ADOPT-027) :
     /// auteur le système, cible le service par sa clé. Type d'action « Gestion des services ».
     pub const SERVICE_ADOPTION_TO_CONFIRM: &str = "service.adoption.to_confirm";
@@ -80,7 +112,7 @@ pub mod action {
     pub const SERVICE_ADOPTION_LAPSED: &str = "service.adoption.lapsed";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 34] = [
+    pub const ALL: [&str; 48] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -113,6 +145,20 @@ pub mod action {
         SERVICE_EXTERNAL_READ,
         SERVICE_LOGS_READ,
         SERVICE_LOGS_THROTTLED,
+        SERVICE_START,
+        SERVICE_STOP,
+        SERVICE_RESTART,
+        SERVICE_DEPLOY,
+        SERVICE_UPDATE,
+        SERVICE_DELETE,
+        SERVICE_RESOURCES,
+        SERVICE_BACKUP_CREATE,
+        SERVICE_BACKUP_RESTORE,
+        SERVICE_BACKUP_DELETE,
+        SERVICE_WORLD_IMPORT,
+        SERVICE_GAME_SETTINGS,
+        OPERATION_CANCEL,
+        OPERATION_DECIDE,
         SERVICE_ADOPTION_TO_CONFIRM,
         SERVICE_ADOPTION_LAPSED,
     ];

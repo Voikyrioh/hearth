@@ -197,6 +197,7 @@ fn from_stored(stored: StoredView) -> Result<Observation, StoreError> {
         stop_timeout_s: stored.stop_timeout_s,
         tty: false,
         log_driver: None,
+        hearth_key: None,
     })
 }
 

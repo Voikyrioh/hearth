@@ -27,19 +27,21 @@ use crate::application::ports::{
     AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, ContainerEngine, CryptoError,
     FingerprintSecretError, FingerprintSecretStore, GpuProbe, HashError, HostEnvironment, IdGen,
     IdentityError, IdentityStore, InstallHost, MonotonicClock, PasswordHasher, PublicIdentity,
-    RequestFingerprinter, SecurityFeed, ServiceSupervisor, Store, StoreError, SystemProbe,
-    TokenGen,
+    RequestFingerprinter, SecurityFeed, ServiceObserver, ServiceSupervisor, Store, StoreError,
+    SystemProbe, TokenGen,
 };
 use crate::application::secret_vault::{KeyStatus, SecretVault};
 use crate::application::security::SecurityService;
 use crate::application::service_adoption::ServiceAdoption;
 use crate::application::service_logs::{LogSettings, ServiceLogs};
+use crate::application::service_op_access::ServiceOpAccess;
 use crate::application::service_ops::{OpLocks, RecoverySummary, ServiceOps};
 use crate::application::service_specs::ServiceSpecs;
 use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::services_right::ServicesRightService;
 use crate::application::sessions::SessionService;
 use crate::application::trust::TrustService;
+use crate::domain::ops::ObjectRoot;
 use crate::domain::services::BrakeSettings;
 use crate::entrypoint::account::{self, AccountCliError};
 use crate::entrypoint::attack_mode as attack_mode_cli;
@@ -62,7 +64,9 @@ use crate::infrastructure::fingerprint::{HmacFingerprinter, NoFingerprint};
 use crate::infrastructure::fingerprint_secret::FileFingerprintSecretStore;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::install::SystemHost;
-use crate::infrastructure::ops_observer::UnobservedState;
+use crate::infrastructure::ops_observer::{
+    EngineObserver, SpecRecordedContainers, UnobservedState,
+};
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::sealer::RingSealerFactory;
 use crate::infrastructure::security_feed::BroadcastSecurityFeed;
@@ -310,18 +314,39 @@ pub struct ServiceFoundations {
     pub ops: Arc<ServiceOps>,
 }
 
-/// Assemble le socle, DIT l'état de la clé des secrets, et classe les opérations restées en plein geste
-/// (reprendre le verrou de celles à vérifier, retirer ce que les autres avaient créé pour elles-mêmes).
-///
-/// - Aucune clé n'est créée ici : elle naît à la première nécessité.
-/// - Une clé absente, fausse ou inutilisable n'arrête PAS l'agent : les services qui tournent continuent,
-///   les secrets des services sont dits illisibles, rien n'est supprimé ni régénéré.
-/// - Rien d'une opération interrompue n'est repris, rejoué ni défait.
+/// Le socle SANS moteur : les opérations restées en plein geste sont classées avec l'observateur « illisible »
+/// (`UnobservedState`), donc « à vérifier » plutôt que supposées bonnes. **Pour les tests** et l'assemblage
+/// sans moteur ; l'agent démarre par [`service_foundations_observed`] avec l'observateur du vrai moteur.
 pub async fn service_foundations(
     data_dir: &std::path::Path,
     database: &Database,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
+) -> Result<ServiceFoundations, AppError> {
+    service_foundations_observed(data_dir, database, clock, ids, &UnobservedState).await
+}
+
+/// Où l'agent range, sous son dossier de données, ce que les opérations créent pour elles-mêmes et qu'une
+/// reprise ou une annulation retire (`FsCreatedObjects`). Valeurs par défaut du plan d'intégration des
+/// serveurs de jeu (sauvegardes et dossier d'attente) : les lots qui écrivent ces objets (HRT-97, HRT-70) les
+/// rendront configurables. Une racine qui n'existe pas encore ne retire rien (« déjà parti »).
+const BACKUPS_DIR: &str = "backups";
+const STAGING_DIR: &str = "staging";
+
+/// Assemble le socle, DIT l'état de la clé des secrets, et classe les opérations restées en plein geste
+/// (reprendre le verrou de celles à vérifier, retirer ce que les autres avaient créé pour elles-mêmes).
+/// `observer` dit ce que le moteur montre du service de chaque opération non terminée.
+///
+/// - Aucune clé n'est créée ici : elle naît à la première nécessité.
+/// - Une clé absente, fausse ou inutilisable n'arrête PAS l'agent : les services qui tournent continuent,
+///   les secrets des services sont dits illisibles, rien n'est supprimé ni régénéré.
+/// - Rien d'une opération interrompue n'est repris, rejoué ni défait.
+pub async fn service_foundations_observed(
+    data_dir: &std::path::Path,
+    database: &Database,
+    clock: Arc<dyn Clock>,
+    ids: Arc<dyn IdGen>,
+    observer: &dyn ServiceObserver,
 ) -> Result<ServiceFoundations, AppError> {
     let spec_repo = Arc::new(SqliteSpecRepo::new(database.pool().clone()));
     let vault = Arc::new(SecretVault::new(
@@ -347,15 +372,17 @@ pub async fn service_foundations(
         Arc::new(OpLocks::new()),
         clock,
         ids,
-        // Aucune racine d'objets créés tant qu'aucune opération n'en crée (HRT-85 et suivants les déclarent).
-        Arc::new(FsCreatedObjects::new([])),
+        // Les racines des objets qu'une opération crée pour elle-même, revérifiés par leur inode avant d'être
+        // retirés (jamais un chemin absolu venu de la base).
+        Arc::new(FsCreatedObjects::new([
+            (ObjectRoot::Backups, data_dir.join(BACKUPS_DIR)),
+            (ObjectRoot::Staging, data_dir.join(STAGING_DIR)),
+        ])),
     ));
-    // Aucun observateur du moteur pour l'instant : l'état d'une opération interrompue est « illisible », donc
-    // « à vérifier » plutôt que supposé bon.
     // La reprise ne doit JAMAIS empêcher l'agent de démarrer : c'est lui qui sert à réparer le serveur.
     // Si même la liste des opérations non terminées est illisible, les fonctions de service restent
     // refusées par l'index unique de la base, tout le reste fonctionne.
-    let summary = match ops.recover_at_startup(&UnobservedState).await {
+    let summary = match ops.recover_at_startup(observer).await {
         Ok(summary) => summary,
         Err(error) => {
             tracing::error!(
@@ -704,11 +731,20 @@ pub async fn start_engined(
     }
     // Le socle des services créés par Hearth : la clé des secrets est dite (jamais créée ici), les opérations
     // restées en plein geste sont classées avant d'accepter la moindre requête.
-    let foundations = service_foundations(
+    // La reprise regarde le VRAI moteur (compte les conteneurs du service de chaque opération non terminée,
+    // sans jamais lui écrire).
+    let observer = EngineObserver::new(
+        engine.engine.clone(),
+        Arc::new(SpecRecordedContainers::new(Arc::new(SqliteSpecRepo::new(
+            database.database().pool().clone(),
+        )))),
+    );
+    let foundations = service_foundations_observed(
         &config.data_dir,
         database.database(),
         adapters.clock.clone(),
         adapters.ids.clone(),
+        &observer,
     )
     .await?;
     let service_ops_sweep =
@@ -765,6 +801,13 @@ pub async fn start_engined(
         services.trail.clone(),
         config.services.adoption,
     ));
+    let service_ops = Arc::new(ServiceOpAccess::new(
+        foundations.ops.clone(),
+        registry.clone(),
+        services.store.clone(),
+        adapters.clock.clone(),
+        services.trail.clone(),
+    ));
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -778,6 +821,7 @@ pub async fn start_engined(
         services: registry.clone(),
         service_logs,
         service_adoption,
+        service_ops,
         stream,
         erasure_pending: database.erasure_pending(),
     });

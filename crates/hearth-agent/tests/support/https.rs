@@ -261,6 +261,12 @@ impl Agent {
         self.running.services.clone()
     }
 
+    /// Le journal des opérations de service de cet agent (HRT-144) : un test y ACCEPTE une opération comme le
+    /// ferait un lot de geste (HRT-64, HRT-68), puis la lit, l'annule ou la décide par les routes.
+    pub fn ops(&self) -> Arc<hearth_agent::application::service_ops::ServiceOps> {
+        self.running.foundations.ops.clone()
+    }
+
     /// L'arrêt du service comme le fait `run_until` : les flux, puis les écritures d'alerte en vol et
     /// les synthèses du journal en attente sont écrites avant de rendre la main.
     pub async fn stop_gracefully(self) {

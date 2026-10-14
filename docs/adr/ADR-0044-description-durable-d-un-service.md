@@ -74,3 +74,14 @@ Le lot 1 ne stockait rien : « le moteur est la vérité ». Modifier par recré
 - `crates/hearth-agent/src/domain/sealed.rs`, `domain/services/{spec,drift}.rs`, `infrastructure/{sealer,services_key}.rs`, `infrastructure/sqlite/specs_repo.rs`, `application/{secret_vault,service_specs}.rs`, `migrations/0012_service_specs_and_ops.sql`.
 - Modèle du fichier de clé : `infrastructure/fingerprint_secret.rs` (ADR-0034).
 - RFC 8439 (ChaCha20-Poly1305) ; documentation de `ring` (`aead`, `hmac`).
+
+## Révision du 2026-10-14 : le coffre intégré est confirmé, ce qu'il garde, et la puce de sécurité
+
+Décisions de Voiky du 2026-10-13 au soir (le coffre intégré à l'agent est accepté : « Ok pour moi sur ça », vers 23:25) :
+
+1. **Toute clé ou connexion à un autre service se saisit dans le client.** Elle part vers le serveur dans le corps d'un acte signé et n'est gardée nulle part sur le PC. Ce principe vaut pour le jeton de serveur de Steam (HRT-120) et pour tout jeton futur.
+2. **Sur le serveur, elle vit dans le coffre intégré à l'agent** : le scellement valeur par valeur du point 3, sous `services.key`. Pas de logiciel de coffre séparé.
+3. **Jamais réaffichée en clair.** Les secrets de genre « jeton d'un autre service » n'ont pas de route de révélation : remplacer ou retirer, rien d'autre. Le point 5 (« jamais vers le client hors la révélation existante ») garde son sens pour les autres secrets (variables d'un service, mot de passe d'un serveur de jeu).
+4. **Attacher la clé du coffre à la puce de sécurité du serveur (TPM) quand elle existe** est un ticket à part (HRT-148). Aujourd'hui `services.key` est un fichier `0600` à côté de la base : qui copie tout `/var/lib/hearth` a la clé et les secrets. Avec une puce, la clé du fichier serait elle-même chiffrée par une clé qui ne sort pas de la puce : une copie du disque ne suffirait plus. **Non vérifié : que forge ait une puce de sécurité active, et que l'unité de l'agent y ait accès.** Sans puce, rien ne change et l'écran le dira.
+
+Ce que cela ne change pas : le scellement ne protège pas de root sur une machine allumée, et le moteur garde les mêmes valeurs en clair dans la configuration du conteneur. La puce protégerait d'une copie du disque ou d'une sauvegarde qui fuit, pas d'un attaquant déjà root.

@@ -4,6 +4,7 @@
 //! (`hearth_proto::api::hello::HelloResponse`) est faite par `entrypoint/http`.
 
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
+use hearth_proto::api::service_ops::CAPABILITY_SERVICE_OPS;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
 };
@@ -51,6 +52,9 @@ impl HelloService {
                     CAPABILITY_SERVICE_RIGHTS,
                     CAPABILITY_SERVICE_LOGS,
                     CAPABILITY_SERVICE_ADOPTION,
+                    // Lire, décider et annuler une opération, et la suivre en direct (HRT-144) : ces routes et
+                    // ce message existent. Rien d'autre n'est annoncé (ni démarrer, ni déployer).
+                    CAPABILITY_SERVICE_OPS,
                 ],
             },
         }
@@ -102,7 +106,8 @@ mod tests {
                 "services",
                 "service-rights",
                 "service-logs",
-                "service-adoption"
+                "service-adoption",
+                "service-ops"
             ]
         );
     }

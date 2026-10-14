@@ -50,7 +50,13 @@ pub async fn list(State(state): State<AppState>, Caller(session): Caller) -> Jso
     let reader = Reader {
         may_manage_services: session.account.may_manage_services(),
     };
-    Json(services_wire::snapshot(&state.services.snapshot(), reader))
+    let snapshot = state.services.snapshot();
+    Json(
+        state
+            .service_ops
+            .ops()
+            .with_index(|ops| services_wire::snapshot(&snapshot, reader, ops)),
+    )
 }
 
 /// `POST /api/v1/engine/recheck` : relance la détection du moteur tout de suite et rend son état.

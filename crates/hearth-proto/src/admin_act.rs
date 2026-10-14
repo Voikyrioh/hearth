@@ -12,7 +12,9 @@
 use crate::api::accounts::RoleName;
 use crate::api::audit::action;
 use crate::api::reauth::ReauthMode;
+use crate::api::service_ops::OperationChoice;
 use crate::device_proof::normalize_identifier;
+use std::borrow::Cow;
 
 /// Le contrat de confirmation d'une route d'acte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,11 +43,33 @@ pub enum ActKind {
     ServicesAdopt,
     /// Rendre un service adopté à l'état non géré (HRT-80, ADR-0043).
     ServiceRelease,
+    // --- Déclarés d'un coup par HRT-144 pour les tranches L1 à L3 : les fichiers d'actes ne sont plus
+    // --- touchés par les lots suivants, qui n'y ajoutent que leur ligne de route. ---
+    /// Démarrer un service (HRT-64).
+    ServiceStart,
+    /// Arrêter un service (HRT-64).
+    ServiceStop,
+    /// Redémarrer un service (HRT-64).
+    ServiceRestart,
+    /// Déployer un service à partir d'une image (HRT-68) ou d'une fiche (HRT-101).
+    ServiceDeploy,
+    /// Annuler une opération de service avant son point de non-retour (HRT-144, ADR-0045).
+    OperationCancel,
+    /// Supprimer un service (HRT-85).
+    ServiceDelete,
+    /// Sauvegarder un service (HRT-97).
+    BackupCreate,
+    /// Supprimer une sauvegarde (HRT-97).
+    BackupDelete,
+    /// Décider d'une opération qui attend le compte (HRT-144, ADR-0045).
+    OperationDecide,
+    /// Enregistrer les réglages d'un serveur de jeu (HRT-108).
+    GameSettingsSave,
 }
 
 impl ActKind {
     /// Tous les actes `0x05`, dans l'ordre des codes.
-    pub const ALL: [ActKind; 12] = [
+    pub const ALL: [ActKind; 22] = [
         Self::AccountCreate,
         Self::AccountRole,
         Self::AccountPassword,
@@ -56,8 +80,33 @@ impl ActKind {
         Self::AttackModeDisable,
         Self::AccountPasswordOwn,
         Self::ReauthSetting,
+        Self::ServiceStart,
+        Self::ServiceStop,
+        Self::ServiceRestart,
+        Self::ServiceDeploy,
+        Self::OperationCancel,
         Self::ServicesAdopt,
         Self::ServiceRelease,
+        Self::ServiceDelete,
+        Self::BackupCreate,
+        Self::BackupDelete,
+        Self::OperationDecide,
+        Self::GameSettingsSave,
+    ];
+
+    /// Les actes DÉCLARÉS dont la route n'existe pas encore : leur lot l'ajoute à `ROUTES` et à `ENDPOINTS`
+    /// en la retirant d'ici. Tant qu'un acte est ici, aucune route ne le porte, aucune requête ne peut le
+    /// produire, et le test de `ROUTES` le sait. `0x13` (`ServiceUpdate`), `0x15` à `0x18`, `0x1A` et `0x1C`
+    /// sont réservés par la conception et ne sont pas encore déclarés.
+    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 8] = [
+        Self::ServiceStart,
+        Self::ServiceStop,
+        Self::ServiceRestart,
+        Self::ServiceDeploy,
+        Self::ServiceDelete,
+        Self::BackupCreate,
+        Self::BackupDelete,
+        Self::GameSettingsSave,
     ];
 
     /// L'octet du code de l'acte dans le message signé. `0x09` est réservé (jamais utilisé : le retrait
@@ -74,8 +123,18 @@ impl ActKind {
             Self::AttackModeDisable => 0x08,
             Self::AccountPasswordOwn => 0x0A,
             Self::ReauthSetting => 0x0B,
+            Self::ServiceStart => 0x0C,
+            Self::ServiceStop => 0x0D,
+            Self::ServiceRestart => 0x0E,
+            Self::ServiceDeploy => 0x0F,
+            Self::OperationCancel => 0x10,
             Self::ServicesAdopt => 0x11,
             Self::ServiceRelease => 0x12,
+            Self::ServiceDelete => 0x14,
+            Self::BackupCreate => 0x19,
+            Self::BackupDelete => 0x1B,
+            Self::OperationDecide => 0x1D,
+            Self::GameSettingsSave => 0x1E,
         }
     }
 
@@ -94,6 +153,19 @@ impl ActKind {
             Self::ReauthSetting => action::REAUTH_SETTING,
             Self::ServicesAdopt => action::SERVICE_ADOPT,
             Self::ServiceRelease => action::SERVICE_RELEASE,
+            Self::ServiceStart => action::SERVICE_START,
+            Self::ServiceStop => action::SERVICE_STOP,
+            Self::ServiceRestart => action::SERVICE_RESTART,
+            Self::ServiceDeploy => action::SERVICE_DEPLOY,
+            // Les refus et les échecs d'une annulation ou d'une décision se consignent sous l'action de
+            // leur route (le genre de l'opération n'est pas connu avant de l'avoir lue) ; la réussite se
+            // consigne sous l'action du GENRE de l'opération (`service.start`, `service.deploy`, …).
+            Self::OperationCancel => action::OPERATION_CANCEL,
+            Self::ServiceDelete => action::SERVICE_DELETE,
+            Self::BackupCreate => action::SERVICE_BACKUP_CREATE,
+            Self::BackupDelete => action::SERVICE_BACKUP_DELETE,
+            Self::OperationDecide => action::OPERATION_DECIDE,
+            Self::GameSettingsSave => action::SERVICE_GAME_SETTINGS,
         }
     }
 }
@@ -134,7 +206,64 @@ pub enum AdminAct<'a> {
     },
     /// Rendre le service `target` (sa clé) à l'état non géré (HRT-80). Texte possédé quand la clé a été
     /// décodée d'un segment de chemin encodé en pourcentage (un `\` de nom d'unité s'écrit `%5C`).
-    ServiceRelease { target: std::borrow::Cow<'a, str> },
+    ServiceRelease { target: Cow<'a, str> },
+    /// Démarrer le service `target` (sa clé).
+    ServiceStart { target: Cow<'a, str> },
+    /// Arrêter le service `target`.
+    ServiceStop { target: Cow<'a, str> },
+    /// Redémarrer le service `target`.
+    ServiceRestart { target: Cow<'a, str> },
+    /// Déployer un service : le NOM (cible), l'image avec sa version (`image:tag`), l'empreinte de la
+    /// partie non secrète de la description (SHA-256, calculée par le lot qui sert la route), le NOMBRE de
+    /// variables et si une commande est fixée. Jamais le nom ni la valeur d'une variable, jamais la
+    /// commande : une signature observée ne doit pas servir à tester un secret hors ligne.
+    ServiceDeploy {
+        name: &'a str,
+        image: &'a str,
+        digest: [u8; FINGERPRINT_LEN],
+        env_count: u32,
+        command: bool,
+    },
+    /// Annuler l'opération `target` (son identifiant).
+    OperationCancel { target: &'a str },
+    /// Supprimer le service `target` ; `data` et `backups` : les données et les sauvegardes partent aussi.
+    ServiceDelete {
+        target: Cow<'a, str>,
+        data: bool,
+        backups: bool,
+    },
+    /// Sauvegarder le service `target` : le mode (code de la liste fermée du lot) et le nombre d'éléments
+    /// ignorés pour cette fois.
+    BackupCreate {
+        target: Cow<'a, str>,
+        mode: &'a str,
+        ignored: u32,
+    },
+    /// Supprimer la sauvegarde `target` (son identifiant).
+    BackupDelete { target: &'a str },
+    /// Décider de l'opération `target` : le choix, qui est signé (il change le sens de l'acte).
+    OperationDecide {
+        target: &'a str,
+        choice: OperationChoice,
+    },
+    /// Enregistrer les réglages d'un serveur de jeu : la révision de base, le nombre de changements,
+    /// l'empreinte des IDENTIFIANTS changés (jamais une valeur), l'origine et l'effet (codes du lot).
+    GameSettingsSave {
+        target: Cow<'a, str>,
+        base_rev: u32,
+        changes: u32,
+        ids_digest: [u8; FINGERPRINT_LEN],
+        origin: &'a str,
+        effect: &'a str,
+    },
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn flag(value: bool) -> Vec<u8> {
+    vec![if value { b'1' } else { b'0' }]
 }
 
 fn role_text(role: RoleName) -> &'static str {
@@ -183,6 +312,16 @@ impl AdminAct<'_> {
             Self::ReauthSetting { .. } => ActKind::ReauthSetting,
             Self::ServicesAdopt { .. } => ActKind::ServicesAdopt,
             Self::ServiceRelease { .. } => ActKind::ServiceRelease,
+            Self::ServiceStart { .. } => ActKind::ServiceStart,
+            Self::ServiceStop { .. } => ActKind::ServiceStop,
+            Self::ServiceRestart { .. } => ActKind::ServiceRestart,
+            Self::ServiceDeploy { .. } => ActKind::ServiceDeploy,
+            Self::OperationCancel { .. } => ActKind::OperationCancel,
+            Self::ServiceDelete { .. } => ActKind::ServiceDelete,
+            Self::BackupCreate { .. } => ActKind::BackupCreate,
+            Self::BackupDelete { .. } => ActKind::BackupDelete,
+            Self::OperationDecide { .. } => ActKind::OperationDecide,
+            Self::GameSettingsSave { .. } => ActKind::GameSettingsSave,
         }
     }
 
@@ -198,7 +337,17 @@ impl AdminAct<'_> {
             | Self::AccountPassword { target }
             | Self::AccountDelete { target }
             | Self::SessionsRevoke { target } => target,
-            Self::ServiceRelease { target } => target,
+            Self::ServiceRelease { target }
+            | Self::ServiceStart { target }
+            | Self::ServiceStop { target }
+            | Self::ServiceRestart { target }
+            | Self::ServiceDelete { target, .. }
+            | Self::BackupCreate { target, .. }
+            | Self::GameSettingsSave { target, .. } => target,
+            Self::ServiceDeploy { name, .. } => name,
+            Self::OperationCancel { target }
+            | Self::BackupDelete { target }
+            | Self::OperationDecide { target, .. } => target,
             _ => "",
         }
     }
@@ -221,6 +370,37 @@ impl AdminAct<'_> {
                 let hex: String = fingerprint.iter().map(|b| format!("{b:02x}")).collect();
                 vec![count.to_string().into_bytes(), hex.into_bytes()]
             }
+            Self::ServiceDeploy {
+                image,
+                digest,
+                env_count,
+                command,
+                ..
+            } => vec![
+                image.as_bytes().to_vec(),
+                hex(digest).into_bytes(),
+                env_count.to_string().into_bytes(),
+                flag(*command),
+            ],
+            Self::ServiceDelete { data, backups, .. } => vec![flag(*data), flag(*backups)],
+            Self::BackupCreate { mode, ignored, .. } => {
+                vec![mode.as_bytes().to_vec(), ignored.to_string().into_bytes()]
+            }
+            Self::OperationDecide { choice, .. } => vec![choice.as_str().as_bytes().to_vec()],
+            Self::GameSettingsSave {
+                base_rev,
+                changes,
+                ids_digest,
+                origin,
+                effect,
+                ..
+            } => vec![
+                base_rev.to_string().into_bytes(),
+                changes.to_string().into_bytes(),
+                hex(ids_digest).into_bytes(),
+                origin.as_bytes().to_vec(),
+                effect.as_bytes().to_vec(),
+            ],
             _ => Vec::new(),
         }
     }
@@ -236,7 +416,7 @@ impl AdminAct<'_> {
         out.push(self.code());
         push_len_prefixed(out, self.target().as_bytes());
         let params = self.params();
-        // Au plus 2 paramètres.
+        // Au plus 5 paramètres.
         out.push(u8::try_from(params.len()).unwrap_or(u8::MAX));
         for param in &params {
             push_len_prefixed(out, param);
@@ -267,6 +447,25 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         // (BR-ADOPT-008). Rendre un service retire un accès, il n'en donne pas (BR-ADOPT-013).
         | AdminAct::ServicesAdopt { .. } => false,
         AdminAct::ServiceRelease { .. } => true,
+        // Déclarés par HRT-144. DÉFAUT NON VALIDÉ par le propriétaire (revue de la PR 94) : piloter un service
+        // qui existe déjà, ANNULER une opération (le geste qui va dans le sens sûr : il ne retire que ce que
+        // l'opération avait créé pour elle-même), sauvegarder et régler un jeu : le mot de passe de la session
+        // suffit à 5 minutes. Créer un service (image et variables choisies par le compte), supprimer un
+        // service ou une sauvegarde : le mot de passe à chaque fois, comme pour adopter (ce sont les gestes
+        // qui ne se rattrapent pas). RÉPONDRE à une décision (`continue`, `revert`, `keep`, `verified`, et
+        // tout autre choix) : le mot de passe à chaque fois, quelle que soit la réponse, même `cancel` : une
+        // décision peut valider ce que l'acte d'origine exigeait de confirmer (poursuivre une suppression en
+        // attente, lancer un retour arrière, fermer une opération « à vérifier » sur la foi du compte).
+        AdminAct::ServiceStart { .. }
+        | AdminAct::ServiceStop { .. }
+        | AdminAct::ServiceRestart { .. }
+        | AdminAct::OperationCancel { .. }
+        | AdminAct::BackupCreate { .. }
+        | AdminAct::GameSettingsSave { .. } => true,
+        AdminAct::OperationDecide { .. }
+        | AdminAct::ServiceDeploy { .. }
+        | AdminAct::ServiceDelete { .. }
+        | AdminAct::BackupDelete { .. } => false,
     }
 }
 
@@ -397,6 +596,19 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::ServiceRelease],
         contract: Contract::Reauth,
     },
+    // Le suivi des opérations de service (HRT-144, ADR-0045) : annuler, décider.
+    RouteAct {
+        method: "DELETE",
+        pattern: "/operations/services/{id}",
+        kinds: &[ActKind::OperationCancel],
+        contract: Contract::Reauth,
+    },
+    RouteAct {
+        method: "POST",
+        pattern: "/operations/services/{id}/decision",
+        kinds: &[ActKind::OperationDecide],
+        contract: Contract::Reauth,
+    },
     // Le retrait d'un poste : contrat livré, clé du poste courant (Q18).
     RouteAct {
         method: "DELETE",
@@ -448,32 +660,40 @@ mod tests {
         assert_eq!(
             codes,
             vec![
-                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x11, 0x12
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                0x10, 0x11, 0x12, 0x14, 0x19, 0x1B, 0x1D, 0x1E
             ]
         );
+        let mut sorted = codes.clone();
+        sorted.sort_unstable();
+        assert_eq!(codes, sorted, "ALL suit l'ordre des codes");
         assert_eq!(codes.iter().collect::<HashSet<_>>().len(), codes.len());
         assert!(!codes.contains(&0x09), "0x09 est réservé");
     }
 
     #[test]
-    fn every_kind_is_in_the_list_once_and_has_a_route() {
+    fn every_kind_has_one_route_or_is_declared_without_one() {
         let in_routes: Vec<ActKind> = ROUTES
             .iter()
             .flat_map(|route| route.kinds.iter().copied())
             .collect();
         for kind in ActKind::ALL {
-            assert_eq!(
-                in_routes.iter().filter(|k| **k == kind).count(),
-                1,
-                "{kind:?}"
-            );
+            let routed = in_routes.iter().filter(|k| **k == kind).count();
+            let waiting = ActKind::DECLARED_WITHOUT_ROUTE
+                .iter()
+                .filter(|k| **k == kind)
+                .count();
+            // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
+            assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Douze actes en 0x05 ; onze routes d'acte (dont le retrait d'un poste, sous son contrat) en plus
-        // du réglage de fréquence.
-        assert_eq!(in_routes.len(), 12);
+        // Vingt-deux actes en 0x05 : quatorze ont leur route (dont deux pour le mode attaque), huit sont
+        // déclarés pour les tranches suivantes ; treize routes d'acte (dont le retrait d'un poste, sous son
+        // contrat) en plus du réglage de fréquence.
+        assert_eq!(in_routes.len(), 14);
+        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 8);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            11
+            13
         );
     }
 
@@ -626,5 +846,116 @@ mod tests {
         let mut bytes = Vec::new();
         AdminAct::AccountPasswordOwn.write_to(&mut bytes);
         assert_eq!(bytes, vec![0x0A, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn the_acts_declared_for_the_next_slices_sign_a_target_and_never_a_secret() {
+        let key = "h_01J9ZY0G3Q8M2K6W4T7V5N1B9D";
+        for (act, code, covered) in [
+            (AdminAct::ServiceStart { target: key.into() }, 0x0C, true),
+            (AdminAct::ServiceStop { target: key.into() }, 0x0D, true),
+            (AdminAct::ServiceRestart { target: key.into() }, 0x0E, true),
+            (AdminAct::OperationCancel { target: "01OP" }, 0x10, true),
+            (AdminAct::BackupDelete { target: "01BK" }, 0x1B, false),
+        ] {
+            assert_eq!(act.code(), code, "{act:?}");
+            assert_eq!(covered_by_elevation(&act), covered, "{act:?}");
+            assert!(act.params().is_empty(), "{act:?}");
+            assert!(!act.target().is_empty());
+        }
+        let deploy = AdminAct::ServiceDeploy {
+            name: "terraria",
+            image: "ghcr.io/x/terraria:1.4",
+            digest: [0xab; FINGERPRINT_LEN],
+            env_count: 3,
+            command: true,
+        };
+        assert_eq!((deploy.code(), deploy.target()), (0x0F, "terraria"));
+        assert_eq!(
+            deploy.params(),
+            vec![
+                b"ghcr.io/x/terraria:1.4".to_vec(),
+                "ab".repeat(32).into_bytes(),
+                b"3".to_vec(),
+                b"1".to_vec()
+            ]
+        );
+        assert!(!covered_by_elevation(&deploy));
+        let delete = AdminAct::ServiceDelete {
+            target: key.into(),
+            data: true,
+            backups: false,
+        };
+        assert_eq!(delete.params(), vec![b"1".to_vec(), b"0".to_vec()]);
+        assert!(!covered_by_elevation(&delete));
+        let backup = AdminAct::BackupCreate {
+            target: key.into(),
+            mode: "stopped",
+            ignored: 2,
+        };
+        assert_eq!(backup.params(), vec![b"stopped".to_vec(), b"2".to_vec()]);
+        assert!(covered_by_elevation(&backup));
+        let settings = AdminAct::GameSettingsSave {
+            target: key.into(),
+            base_rev: 4,
+            changes: 2,
+            ids_digest: [1; FINGERPRINT_LEN],
+            origin: "form",
+            effect: "restart",
+        };
+        assert_eq!(settings.code(), 0x1E);
+        assert_eq!(settings.params().len(), 5);
+        assert!(covered_by_elevation(&settings));
+    }
+
+    #[test]
+    fn a_decision_signs_its_choice_so_that_another_choice_is_another_act() {
+        let keep = AdminAct::OperationDecide {
+            target: "01OP",
+            choice: OperationChoice::Keep,
+        };
+        let revert = AdminAct::OperationDecide {
+            target: "01OP",
+            choice: OperationChoice::Revert,
+        };
+        assert_ne!(keep, revert);
+        assert_eq!(keep.params(), vec![b"keep".to_vec()]);
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        keep.write_to(&mut a);
+        revert.write_to(&mut b);
+        assert_ne!(a, b);
+        assert_eq!(keep.code(), 0x1D);
+        // Défaut non validé : répondre à une décision demande le mot de passe, quel que soit le choix.
+        for choice in [
+            OperationChoice::Continue,
+            OperationChoice::Cancel,
+            OperationChoice::Revert,
+            OperationChoice::Keep,
+            OperationChoice::Verified,
+            OperationChoice::Unknown,
+        ] {
+            let decide = AdminAct::OperationDecide {
+                target: "01OP",
+                choice,
+            };
+            assert!(!covered_by_elevation(&decide), "{choice:?}");
+        }
+        assert!(covered_by_elevation(&AdminAct::OperationCancel {
+            target: "01OP"
+        }));
+    }
+
+    #[test]
+    fn the_operation_routes_are_acts_and_the_declared_ones_have_no_route_yet() {
+        let cancel = route_act("DELETE", "/operations/services/{id}").expect("annuler");
+        assert_eq!(cancel.kinds, &[ActKind::OperationCancel]);
+        let decide = route_act("POST", "/operations/services/{id}/decision").expect("décider");
+        assert_eq!(decide.kinds, &[ActKind::OperationDecide]);
+        for kind in ActKind::DECLARED_WITHOUT_ROUTE {
+            assert!(
+                ROUTES.iter().all(|route| !route.kinds.contains(&kind)),
+                "{kind:?} déclaré sans route mais présent dans ROUTES"
+            );
+        }
     }
 }

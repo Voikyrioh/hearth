@@ -168,7 +168,8 @@ async fn hello_announces_the_services_capability() {
             "services",
             "service-rights",
             "service-logs",
-            "service-adoption"
+            "service-adoption",
+            "service-ops"
         ])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).
@@ -616,6 +617,8 @@ async fn a_slow_subscriber_is_resynchronised_with_a_new_snapshot() {
             ServicesMessage::ServiceAction(_) => {
                 panic!("aucune action dans une tranche en lecture seule")
             }
+            // Aucune opération de service dans ce scénario ; un message d'un autre type est ignoré.
+            ServicesMessage::Operation(_) => {}
         }
     }
     assert!(

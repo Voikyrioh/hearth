@@ -134,6 +134,7 @@ pub fn container(name: &str, run_state: RunState) -> Observation {
         stop_timeout_s: None,
         tty: false,
         log_driver: Some("json-file".into()),
+        hearth_key: None,
     }
 }
 

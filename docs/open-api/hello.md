@@ -21,7 +21,7 @@ Corps JSON direct (pas d'enveloppe `data`).
   "install_id": "0123456789abcdef0123456789abcdef",
   "managed": false,
   "mac_addresses": ["AA:BB:CC:DD:EE:FF"],
-  "capabilities": ["services", "service-rights", "service-logs", "service-adoption"]
+  "capabilities": ["services", "service-rights", "service-logs", "service-adoption", "service-ops"]
 }
 ```
 

@@ -287,6 +287,7 @@ impl WsClient {
             };
             match frame {
                 Some(Message::Text(text)) => {
+                    // Toute trame d'un autre sujet (mesures, sécurité…) ne se lit pas comme un message `services`.
                     if let Ok(message) =
                         serde_json::from_str::<hearth_proto::stream::ServicesMessage>(text.as_str())
                     {

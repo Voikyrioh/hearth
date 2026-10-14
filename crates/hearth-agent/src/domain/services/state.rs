@@ -16,6 +16,7 @@ use time::{Duration, OffsetDateTime};
 
 use super::hidden::Hidden;
 use super::image::ImageName;
+use super::key::ServiceKey;
 use super::unit::{UnitActivity, UnitStatus};
 
 /// Fenêtre de comptage des démarrages non demandés (`BR-SVC-006`).
@@ -119,6 +120,15 @@ pub struct Observation {
     pub tty: bool,
     /// Le pilote de journaux (`HostConfig.LogConfig.Type`) : `none` ne se relit pas (BR-SLOG-017).
     pub log_driver: Option<String>,
+    /// La clé `h_<ULID>` que l'étiquette `io.hearth.service-id` AFFIRME (ADR-0037). **Une affirmation, jamais
+    /// une identité** : `Config.Labels` contient aussi les étiquettes de l'IMAGE (`LABEL`), qu'un auteur
+    /// d'image publique peut poser sans aucun accès au serveur ; l'ULID d'un service, lui, est affiché à tous
+    /// les comptes. Ne JAMAIS s'en servir pour authentifier, publier, rendre visible ni compter un conteneur
+    /// comme « service de Hearth » sans deux preuves de plus : la clé est celle d'un service connu de la
+    /// base de l'agent ET l'identifiant du conteneur est un de ceux que l'agent a consignés
+    /// (`RecordedContainers`). Son seul usage : la reprise des opérations (`infrastructure::ops_observer`),
+    /// avec cette double vérification. Une étiquette qui n'a pas la forme d'une clé est ignorée.
+    pub hearth_key: Option<ServiceKey>,
 }
 
 impl Observation {
@@ -158,6 +168,7 @@ impl Observation {
             stop_timeout_s: None,
             tty: false,
             log_driver: None,
+            hearth_key: None,
         }
     }
 }
@@ -428,6 +439,7 @@ mod tests {
             stop_timeout_s: None,
             tty: false,
             log_driver: None,
+            hearth_key: None,
         }
     }
 

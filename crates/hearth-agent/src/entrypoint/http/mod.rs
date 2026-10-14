@@ -22,6 +22,7 @@ mod operations;
 mod reauth;
 mod security;
 mod server;
+mod service_ops;
 mod services;
 mod sessions;
 mod update;
@@ -47,6 +48,7 @@ use crate::application::ports::AuditSink;
 use crate::application::security::SecurityService;
 use crate::application::service_adoption::ServiceAdoption;
 use crate::application::service_logs::ServiceLogs;
+use crate::application::service_op_access::ServiceOpAccess;
 use crate::application::services::ServicesRegistry;
 use crate::application::sessions::SessionService;
 use crate::application::update::UpdateService;
@@ -79,6 +81,8 @@ pub struct AppState {
     pub service_logs: Arc<ServiceLogs>,
     /// Adopter un conteneur existant et le relâcher (HRT-80, ADR-0043).
     pub service_adoption: Arc<ServiceAdoption>,
+    /// Lire, annuler et décider les opérations de service, et les suivre en direct (HRT-144, ADR-0045).
+    pub service_ops: Arc<ServiceOpAccess>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -352,6 +356,38 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::ServiceRelease),
         route: || post(services::release),
+    },
+    // Les opérations de service (HRT-144, ADR-0045). Lire : tout compte authentifié, mais une opération sur
+    // un service que le compte ne voit pas est une opération inconnue (`service_op_access::read`). Annuler
+    // et décider : le droit « gérer les services » (niveau `Services`), actes d'administration confirmés
+    // (`OperationCancel` `0x10`, `OperationDecide` `0x1D`, couverts par l'élévation). La réussite s'écrit
+    // sous l'action du genre de l'opération ; l'action de la ligne est celle des refus et des échecs.
+    Endpoint {
+        method: Method::GET,
+        path: "/operations/services/{id}",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(service_ops::get),
+    },
+    Endpoint {
+        method: Method::DELETE,
+        path: "/operations/services/{id}",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::OperationCancel),
+        route: || delete(service_ops::cancel),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/operations/services/{id}/decision",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::OperationDecide),
+        route: || post(service_ops::decide),
     },
     Endpoint {
         method: Method::GET,
@@ -744,6 +780,11 @@ mod tests {
         ("GET", "/services/external", Service),
         ("POST", "/services/adopt", Service),
         ("POST", "/services/{key}/release", Service),
+        // Les opérations de service (HRT-144) : lire est ouvert à tout compte (la visibilité du service est
+        // jugée par `ServiceOpAccess`), annuler et décider exigent le droit et la confirmation de l'acte.
+        ("GET", "/operations/services/{id}", OpenRead),
+        ("DELETE", "/operations/services/{id}", Service),
+        ("POST", "/operations/services/{id}/decision", Service),
         (
             "GET",
             "/accounts",
@@ -809,6 +850,7 @@ mod tests {
         "/engine",
         "/adoptions",
         "/containers",
+        "/operations/services",
     ];
 
     /// BR-GRANT-003 et BR-GRANT-005 : le classement est EXHAUSTIF par construction. Toute route déclarée
@@ -906,8 +948,10 @@ mod tests {
         assert_eq!(
             service_routes,
             [
+                ("DELETE", "/operations/services/{id}"),
                 ("GET", "/services/external"),
                 ("GET", "/services/{key}/env"),
+                ("POST", "/operations/services/{id}/decision"),
                 ("POST", "/services/adopt"),
                 ("POST", "/services/{key}/release"),
             ]

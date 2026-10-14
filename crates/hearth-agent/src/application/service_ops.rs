@@ -10,23 +10,66 @@
 //! la marque `interrupted` ou `needs_attention`. Il ne reprend, ne rejoue et ne défait jamais seul un
 //! geste sur un service ou ses données.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use thiserror::Error;
 use time::OffsetDateTime;
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use super::ports::{
     Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal, OpRecord,
-    Progress, RemoveOutcome, ServiceObserver, StoreError,
+    Progress, RemoveOutcome, ServiceObserver, StepGuard, StoreError,
 };
 use crate::domain::ops::{
-    CancelVerdict, Cause, Choice, ChoiceRefused, LockTable, OpKind, OpPlan, OpStatus, Refusal,
-    StepName, StepState, UndoInfo, apply_choice, cancel_verdict, decision_expired, decision_expiry,
-    latest_state, recover, recover_unreadable_journal,
+    CancelVerdict, Cause, Choice, ChoiceRefused, LockTable, OpKind, OpPlan, OpStatus, OpSummary,
+    OpsIndex, Refusal, StepName, StepRecord, StepState, UndoInfo, apply_choice, cancel_verdict,
+    cleanup_on_cancel, decision_expired, decision_expiry, latest_state, recover,
+    recover_unreadable_journal,
 };
 use crate::domain::services::key::ServiceKey;
 use crate::domain::services::spec::fold_name;
-use hearth_proto::api::service_ops::FINISHED_RETENTION_S;
+use hearth_proto::api::service_ops::{FINISHED_RETENTION_S, MAX_RETAINED_OPERATIONS};
+
+/// Combien de changements d'opération le canal garde pour un abonné lent. Un abonné qui en perd relit les
+/// opérations en cours (`open_snapshots`) : il ne bloque jamais l'agent (HRT-144).
+const FEED_CAPACITY: usize = 256;
+/// Deux publications de progression d'une même opération sont séparées d'au moins cela : la progression
+/// d'un tirage d'image arrive par rafales, chaque publication relit le journal. Un changement d'état n'est
+/// jamais retenu. (La cadence de 500 ms par opération et par abonné est celle du flux, `domain::ops::flush`.)
+const PROGRESS_PUBLISH_MIN: time::Duration = time::Duration::milliseconds(100);
+/// Combien d'opérations suivies par la cadence de progression avant de la remettre à zéro.
+const PROGRESS_GATE_MAX: usize = 1_024;
+/// Combien d'opérations non terminées sont rendues à un abonné qui arrive.
+const MAX_OPEN_SNAPSHOTS: usize = 500;
+
+/// Une opération et son journal d'étapes, tels que le suivi les montre : ce que le message `operation` du
+/// flux et `GET /operations/services/{id}` portent. Aucun secret : un plan, des étapes en codes.
+#[derive(Debug, Clone)]
+pub struct OpSnapshot {
+    pub record: OpRecord,
+    pub steps: Vec<StepRecord>,
+}
+
+impl OpSnapshot {
+    /// L'annulation est encore possible : avant le point de non-retour du genre, dans un statut qui s'annule.
+    pub fn cancellable(&self) -> bool {
+        cancel_verdict(self.record.status, &self.record.plan, &self.steps) == CancelVerdict::Cancel
+    }
+}
+
+fn summary_of(record: &OpRecord) -> OpSummary {
+    OpSummary {
+        id: record.id.clone(),
+        kind: record.kind,
+        account: record.account.clone(),
+        status: record.status,
+        cause: record.cause,
+        forced: record.forced,
+        started_at: record.started_at,
+        finished_at: record.finished_at,
+    }
+}
 
 /// Les verrous en mémoire : une table pure derrière un `Mutex` (sections critiques sans `await`).
 #[derive(Default)]
@@ -56,7 +99,7 @@ pub enum OpError {
     #[error("une opération est déjà en cours sur ce service")]
     ServiceBusy,
     #[error("opération inconnue")]
-    Unknown,
+    NoSuchOperation,
     #[error("l'étape {0} n'est pas dans le plan")]
     UnknownStep(String),
     /// L'ordre du journal est violé : `done` sans `intent` pour un geste destructif, ou un geste sur une
@@ -78,7 +121,7 @@ impl From<JournalError> for OpError {
         match error {
             JournalError::ServiceBusy => Self::ServiceBusy,
             JournalError::Stale => Self::Stale,
-            JournalError::Unknown => Self::Unknown,
+            JournalError::NoSuchOperation => Self::NoSuchOperation,
             JournalError::Store(error) => Self::Storage(error.to_string()),
         }
     }
@@ -140,6 +183,17 @@ pub struct ServiceOps {
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     objects: Arc<dyn CreatedObjects>,
+    /// Chaque changement d'opération, pour le flux. Un abonné lent perd les plus anciens et relit l'état.
+    feed: broadcast::Sender<Arc<OpSnapshot>>,
+    /// `busy` et `last_action` de la liste des services : des projections du journal (BR-LIFE-013).
+    index: Mutex<OpsIndex>,
+    /// Quand la progression de chaque opération a été publiée pour la dernière fois.
+    progress_gate: Mutex<HashMap<String, OffsetDateTime>>,
+    /// Sérialise les publications : lecture du journal, projection et envoi se font d'un seul tenant. Deux
+    /// publications concurrentes (l'exécuteur d'un côté, l'annulation de l'autre) ne peuvent donc pas
+    /// s'envoyer dans l'ordre inverse de leur lecture : un abonné ne reçoit jamais un état plus ancien
+    /// APRÈS un plus récent (revue de la PR 94).
+    publishing: AsyncMutex<()>,
 }
 
 impl ServiceOps {
@@ -150,17 +204,157 @@ impl ServiceOps {
         ids: Arc<dyn IdGen>,
         objects: Arc<dyn CreatedObjects>,
     ) -> Self {
+        let (feed, _) = broadcast::channel(FEED_CAPACITY);
         Self {
             journal,
             locks,
             clock,
             ids,
             objects,
+            feed,
+            index: Mutex::new(OpsIndex::new()),
+            progress_gate: Mutex::new(HashMap::new()),
+            publishing: AsyncMutex::new(()),
         }
     }
 
     pub fn locks(&self) -> &Arc<OpLocks> {
         &self.locks
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Suivi : lire une opération, la suivre en direct, projeter `busy` et `last_action`
+    // -----------------------------------------------------------------------------------------
+
+    /// Les changements d'opération à partir de maintenant. S'abonner AVANT de lire l'état
+    /// (`open_snapshots`) : aucun changement ne se perd entre les deux.
+    pub fn subscribe(&self) -> broadcast::Receiver<Arc<OpSnapshot>> {
+        self.feed.subscribe()
+    }
+
+    /// Une opération et son journal d'étapes ; `None` si elle n'existe pas (ou plus : purgée).
+    pub async fn snapshot(&self, id: &str) -> Result<Option<OpSnapshot>, OpError> {
+        let Some(record) = self.journal.get(id).await? else {
+            return Ok(None);
+        };
+        let steps = self.journal.steps(id).await?;
+        Ok(Some(OpSnapshot { record, steps }))
+    }
+
+    /// Les opérations non terminées (au plus [`MAX_OPEN_SNAPSHOTS`]), de quoi renseigner un abonné qui
+    /// arrive ou qui a perdu des changements. Une opération dont le journal ne se relit pas est ignorée
+    /// (tracée) : elle reste tenue par son verrou.
+    pub async fn open_snapshots(&self) -> Result<Vec<OpSnapshot>, OpError> {
+        let mut out = Vec::new();
+        for record in self.journal.unfinished().await? {
+            if out.len() >= MAX_OPEN_SNAPSHOTS {
+                break;
+            }
+            match self.journal.steps(&record.id).await {
+                Ok(steps) => out.push(OpSnapshot { record, steps }),
+                Err(error) => {
+                    tracing::warn!(op = %record.id, %error, "opération en cours dont le journal ne se relit pas : non montrée");
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Lit la projection `busy` et `last_action` des services (sous un verrou court : ne pas attendre avec).
+    pub fn with_index<R>(&self, read: impl FnOnce(&OpsIndex) -> R) -> R {
+        let guard = self.index.lock().unwrap_or_else(PoisonError::into_inner);
+        read(&guard)
+    }
+
+    /// Rebâtit la projection depuis le journal : les opérations non terminées, puis les dernières terminées.
+    pub async fn rebuild_index(&self) -> Result<(), OpError> {
+        let finished = self
+            .journal
+            .recent_finished(MAX_RETAINED_OPERATIONS)
+            .await?;
+        let open = self.journal.unfinished().await?;
+        let mut index = OpsIndex::new();
+        // Les plus anciennes d'abord : la plus récente terminée gagne, comme à l'usage.
+        for record in finished.iter().rev().chain(open.iter()) {
+            index.apply(&record.service, summary_of(record));
+        }
+        *self.index.lock().unwrap_or_else(PoisonError::into_inner) = index;
+        Ok(())
+    }
+
+    /// À appeler après un changement d'opération fait HORS de ce service (l'annulation et la décision écrivent
+    /// leur statut dans la transaction de leur entrée du journal d'activité, `ServiceOpAccess`) : rend le
+    /// verrou d'une opération devenue terminale, met la projection à jour et prévient les abonnés.
+    pub async fn settle(&self, id: &str) {
+        if let Ok(Some(record)) = self.journal.get(id).await
+            && record.status.is_terminal()
+        {
+            self.locks.with(|table| table.release_all_of(id));
+        }
+        self.publish(id).await;
+    }
+
+    /// Retire ce qu'une opération ANNULÉE avait créé pour elle-même (archive partielle, dossier d'import ou
+    /// d'attente : `cleanup_on_cancel`), objet par objet, revérifié par son numéro d'inode. Après le
+    /// changement de statut, jamais avant : une annulation refusée n'a rien détruit. Idempotent ; un objet
+    /// qui n'est plus lui est laissé (tracé). Aucun geste sur le service ni sur ses données.
+    pub async fn clean_after_cancel(&self, snapshot: &OpSnapshot) {
+        for object in cleanup_on_cancel(&snapshot.record.plan, &snapshot.steps) {
+            match self.objects.remove(&object).await {
+                RemoveOutcome::Removed | RemoveOutcome::AlreadyGone => {}
+                RemoveOutcome::NotOurs | RemoveOutcome::Unverifiable => tracing::warn!(
+                    op = %snapshot.record.id,
+                    kind = ?object.kind,
+                    "objet d'une opération annulée laissé en place : ce n'est plus lui, ou il n'a pas pu être vérifié"
+                ),
+            }
+        }
+    }
+
+    /// Relit l'opération, met la projection à jour et prévient les abonnés. Un échec de lecture est tracé
+    /// et ne change rien pour l'appelant : le suivi n'est jamais ce qui fait échouer un geste.
+    async fn publish(&self, id: &str) {
+        let _one_at_a_time = self.publishing.lock().await;
+        match self.snapshot(id).await {
+            Ok(Some(snapshot)) => {
+                self.index
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .apply(&snapshot.record.service, summary_of(&snapshot.record));
+                if snapshot.record.status.is_terminal() {
+                    self.progress_gate
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .remove(id);
+                }
+                // Personne n'écoute : ce n'est pas une erreur.
+                let _ = self.feed.send(Arc::new(snapshot));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(op = %id, %error, "changement d'opération non annoncé : journal illisible");
+            }
+        }
+    }
+
+    /// Une progression se publie au plus toutes les 100 ms par opération (voir [`PROGRESS_PUBLISH_MIN`]).
+    fn progress_due(&self, id: &str) -> bool {
+        let now = self.clock.now();
+        let mut gate = self
+            .progress_gate
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if gate
+            .get(id)
+            .is_some_and(|last| now >= *last && now - *last < PROGRESS_PUBLISH_MIN)
+        {
+            return false;
+        }
+        if gate.len() >= PROGRESS_GATE_MAX {
+            gate.clear();
+        }
+        gate.insert(id.to_owned(), now);
+        true
     }
 
     /// Accepte une opération : prend les verrous (service exclusif, nom, place lourde), écrit la ligne
@@ -201,6 +395,7 @@ impl ServiceOps {
             self.locks.with(|table| table.release_all_of(&id));
             return Err(error.into());
         }
+        self.publish(&id).await;
         Ok(id)
     }
 
@@ -220,10 +415,28 @@ impl ServiceOps {
         if !undo.is_well_formed() {
             return Err(OpError::OutOfOrder);
         }
-        Ok(self
+        // Le statut est revérifié par l'instruction qui écrit : une annulation qui passe l'opération en
+        // `cancelling` entre la lecture ci-dessus et l'écriture ne laisse pas s'écrire l'`intent` d'un geste
+        // destructif (`Stale`).
+        let guard = if destructive {
+            StepGuard::Executing
+        } else {
+            StepGuard::Unfinished
+        };
+        let seq = self
             .journal
-            .append_step(id, &name, StepState::Intent, undo, self.clock.now(), true)
-            .await?)
+            .append_step(
+                id,
+                &name,
+                StepState::Intent,
+                undo,
+                self.clock.now(),
+                true,
+                guard,
+            )
+            .await?;
+        self.publish(id).await;
+        Ok(seq)
     }
 
     /// Écrit le `done` d'un geste fait. Pour une étape destructive, son `intent` doit être la dernière ligne.
@@ -268,14 +481,28 @@ impl ServiceOps {
                 return Err(OpError::OutOfOrder);
             }
         }
-        Ok(self
+        let seq = self
             .journal
-            .append_step(id, &name, state, undo, self.clock.now(), false)
-            .await?)
+            .append_step(
+                id,
+                &name,
+                state,
+                undo,
+                self.clock.now(),
+                false,
+                StepGuard::Unfinished,
+            )
+            .await?;
+        self.publish(id).await;
+        Ok(seq)
     }
 
     async fn step_of(&self, id: &str, step: &str) -> Result<(OpRecord, StepName, bool), OpError> {
-        let op = self.journal.get(id).await?.ok_or(OpError::Unknown)?;
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
         let name = StepName::parse(step).ok_or_else(|| OpError::UnknownStep(step.to_owned()))?;
         let planned = op
             .plan
@@ -286,10 +513,13 @@ impl ServiceOps {
     }
 
     pub async fn set_progress(&self, id: &str, progress: &Progress) -> Result<(), OpError> {
-        Ok(self
-            .journal
+        self.journal
             .set_progress(id, progress, self.clock.now())
-            .await?)
+            .await?;
+        if self.progress_due(id) {
+            self.publish(id).await;
+        }
+        Ok(())
     }
 
     /// Clôt l'opération dans un statut terminal et rend ses verrous.
@@ -302,7 +532,11 @@ impl ServiceOps {
         if !to.is_terminal() {
             return Err(OpError::IllegalTransition);
         }
-        let op = self.journal.get(id).await?.ok_or(OpError::Unknown)?;
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
         if !op.status.can_become(to) {
             return Err(OpError::IllegalTransition);
         }
@@ -313,6 +547,19 @@ impl ServiceOps {
     pub async fn ask_decision(&self, id: &str, choices: &[Choice]) -> Result<(), OpError> {
         if choices.is_empty() {
             return Err(OpError::Choice(ChoiceRefused::NotOffered));
+        }
+        // « Annuler » ne s'offre jamais au-delà du point de non-retour du genre : la décision n'est pas une
+        // porte dérobée pour annuler là où `DELETE` répond « trop tard » (revue de la PR 94).
+        if choices.contains(&Choice::Cancel) {
+            let op = self
+                .journal
+                .get(id)
+                .await?
+                .ok_or(OpError::NoSuchOperation)?;
+            let steps = self.journal.steps(id).await?;
+            if cancel_verdict(op.status, &op.plan, &steps) == CancelVerdict::TooLate {
+                return Err(OpError::Choice(ChoiceRefused::NotApplicable));
+            }
         }
         let now = self.clock.now();
         let offer = DecisionOffer {
@@ -329,18 +576,29 @@ impl ServiceOps {
                 now,
             )
             .await?;
+        self.publish(id).await;
         Ok(())
     }
 
     /// Applique le choix d'un compte à une opération qui attend. La vérification du DROIT du compte est
     /// celle de la route qui appellera ceci (HRT-64 et suivants).
     pub async fn decide(&self, id: &str, choice: Choice) -> Result<OpStatus, OpError> {
-        let op = self.journal.get(id).await?.ok_or(OpError::Unknown)?;
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
         let offered = op
             .decision
             .as_ref()
             .map(|offer| offer.choices.as_slice())
             .unwrap_or_default();
+        if choice == Choice::Cancel {
+            let steps = self.journal.steps(id).await?;
+            if cancel_verdict(op.status, &op.plan, &steps) == CancelVerdict::TooLate {
+                return Err(OpError::Choice(ChoiceRefused::NotApplicable));
+            }
+        }
         let (next, cause) = apply_choice(op.status, offered, choice).map_err(OpError::Choice)?;
         let cause = (next != OpStatus::Running).then_some(cause);
         self.move_to(id, op.status, next, cause).await?;
@@ -350,7 +608,11 @@ impl ServiceOps {
     /// Demande d'annulation (acte `OperationCancel`, ajouté avec sa route). Avant le point de non-retour du
     /// genre ; après, `TooLate`.
     pub async fn cancel(&self, id: &str) -> Result<CancelOutcome, OpError> {
-        let op = self.journal.get(id).await?.ok_or(OpError::Unknown)?;
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
         let records = self.journal.steps(id).await?;
         match cancel_verdict(op.status, &op.plan, &records) {
             CancelVerdict::TooLate => Ok(CancelOutcome::TooLate),
@@ -394,6 +656,7 @@ impl ServiceOps {
         if to.is_terminal() {
             self.locks.with(|table| table.release_all_of(id));
         }
+        self.publish(id).await;
         Ok(())
     }
 
@@ -425,7 +688,7 @@ impl ServiceOps {
             // colonne fautive, jamais une valeur).
             let recovery = match self.journal.steps(&op.id).await {
                 Ok(records) => {
-                    let observed = observer.observe(&op).await;
+                    let observed = observer.observe(&op, &records).await;
                     recover(op.kind, &op.plan, &records, observed)
                 }
                 Err(error) => {
@@ -485,6 +748,10 @@ impl ServiceOps {
                 _ => summary.interrupted += 1,
             }
         }
+        // La projection `busy` / `last_action` repart du journal tel que la reprise vient de le classer.
+        if let Err(error) = self.rebuild_index().await {
+            tracing::error!(%error, "projection des opérations non rebâtie : busy et last_action seront vides jusqu'au prochain changement");
+        }
         Ok(summary)
     }
 
@@ -542,6 +809,16 @@ impl ServiceOps {
                 Ok(()) => {
                     self.locks.with(|table| table.release_all_of(&op.id));
                     summary.expired += 1;
+                    // Ce que l'opération avait créé pour elle-même part avec elle (ADR-0045 : la décision
+                    // expirée ne laisse plus d'orphelins), après le changement de statut.
+                    if let Ok(steps) = self.journal.steps(&op.id).await {
+                        self.clean_after_cancel(&OpSnapshot {
+                            record: op.clone(),
+                            steps,
+                        })
+                        .await;
+                    }
+                    self.publish(&op.id).await;
                 }
                 // Décidée entre-temps : rien à faire.
                 Err(JournalError::Stale) => {}
@@ -551,6 +828,11 @@ impl ServiceOps {
         let retention =
             time::Duration::seconds(i64::try_from(FINISHED_RETENTION_S).unwrap_or(86_400));
         summary.purged = self.journal.purge_finished(now - retention).await?;
+        // Le nombre d'opérations gardées est borné, même sous la durée de conservation.
+        summary.pruned = self
+            .journal
+            .prune_finished_beyond(MAX_RETAINED_OPERATIONS)
+            .await?;
         Ok(summary)
     }
 
@@ -564,4 +846,6 @@ impl ServiceOps {
 pub struct SweepSummary {
     pub expired: u32,
     pub purged: u64,
+    /// Opérations terminées effacées parce que le journal en gardait plus que `MAX_RETAINED_OPERATIONS`.
+    pub pruned: u64,
 }

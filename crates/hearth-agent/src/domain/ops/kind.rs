@@ -7,6 +7,7 @@ use hearth_proto::api::service_ops::{
 };
 
 use super::locks::LockMode;
+use crate::domain::audit::AuditAction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OpKind {
@@ -67,6 +68,24 @@ impl OpKind {
             Self::Backup => OperationKind::Backup,
             Self::Restore => OperationKind::Restore,
             Self::WorldImport => OperationKind::WorldImport,
+        }
+    }
+
+    /// L'action du journal d'activité de ce genre (HRT-144) : sous elle s'écrivent la réussite d'une
+    /// annulation et celle d'une décision, quel que soit le genre. Correspondance exhaustive : un genre de
+    /// plus oblige à choisir.
+    pub const fn audit_action(self) -> AuditAction {
+        match self {
+            Self::Start => AuditAction::ServiceStart,
+            Self::Stop => AuditAction::ServiceStop,
+            Self::Restart => AuditAction::ServiceRestart,
+            Self::Deploy => AuditAction::ServiceDeploy,
+            Self::Update => AuditAction::ServiceUpdate,
+            Self::Delete => AuditAction::ServiceDelete,
+            Self::Resources => AuditAction::ServiceResources,
+            Self::Backup => AuditAction::ServiceBackupCreate,
+            Self::Restore => AuditAction::ServiceBackupRestore,
+            Self::WorldImport => AuditAction::ServiceWorldImport,
         }
     }
 
@@ -262,6 +281,17 @@ impl Choice {
 
     pub fn parse(text: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|choice| choice.as_str() == text)
+    }
+
+    /// Le libellé du choix tel que le journal d'activité l'écrit (texte fixe, jamais libre).
+    pub const fn audit_label(self) -> &'static str {
+        match self {
+            Self::Continue => "poursuivre",
+            Self::Cancel => "annuler",
+            Self::Revert => "revenir",
+            Self::Keep => "garder",
+            Self::Verified => "j'ai vérifié",
+        }
     }
 
     pub const fn to_wire(self) -> OperationChoice {

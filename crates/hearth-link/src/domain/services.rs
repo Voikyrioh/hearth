@@ -76,6 +76,8 @@ fn sort_key(item: &ServiceItem) -> (String, String) {
 ///   lot rejoué, périmé ou arrivé avant l'instantané est ignoré (l'agent renvoie un instantané à un
 ///   abonné qui a perdu des lots, le client n'a aucune logique de trou).
 /// - `service_action` n'est pas émis par cette tranche : ignoré.
+/// - `operation` (HRT-144) n'est pas une partie de l'état des services : c'est le suivi d'UNE opération,
+///   annoncé à part (`EventSink::service_operation`). Un message d'un type inconnu est ignoré.
 pub fn apply(current: &mut Option<ServicesState>, message: ServicesMessage) -> bool {
     match message {
         ServicesMessage::ServicesSnapshot(mut state) => {
@@ -113,7 +115,7 @@ pub fn apply(current: &mut Option<ServicesState>, message: ServicesMessage) -> b
             state.services.sort_by_cached_key(sort_key);
             true
         }
-        ServicesMessage::ServiceAction(_) => false,
+        ServicesMessage::ServiceAction(_) | ServicesMessage::Operation(_) => false,
     }
 }
 

@@ -603,7 +603,7 @@ pub(crate) fn decode_frame(text: &str) -> Frame {
         let unreadable = match &message {
             ServicesMessage::ServicesSnapshot(state) => state.services.unreadable(),
             ServicesMessage::ServicesDelta(delta) => delta.upserts.unreadable(),
-            ServicesMessage::ServiceAction(_) => 0,
+            ServicesMessage::ServiceAction(_) | ServicesMessage::Operation(_) => 0,
         };
         if unreadable > 0 {
             tracing::warn!(unreadable, "services illisibles par cette version, écartés");

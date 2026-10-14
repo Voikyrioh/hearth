@@ -17,6 +17,7 @@ mod rights;
 mod security;
 mod service_logs;
 mod service_logs_retry;
+mod service_ops;
 mod services;
 mod task;
 mod watchers;
@@ -43,6 +44,7 @@ use events::Fanout;
 pub use reauth::ReauthState;
 pub use rights::ServiceRightsRead;
 pub use service_logs::{LogEnd, LogOutput, ServiceLogReader};
+pub use service_ops::OperationActResult;
 pub use services::{Acted, KnownServices};
 use task::Command;
 
