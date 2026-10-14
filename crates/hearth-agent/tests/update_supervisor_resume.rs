@@ -218,7 +218,7 @@ fn resumes_are_bounded_then_the_work_is_abandoned_once_and_nothing_relaunches_it
     assert_eq!(done.reason, Some(UpdateReason::RollbackFailed));
     let record = last(&world);
     assert_eq!(
-        (record.outcome, record.reason),
+        (record.outcome.wire(), record.reason),
         (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed))
     );
     assert!(
@@ -354,7 +354,7 @@ fn assert_abandoned(world: &World, done: &Supervised) {
     assert_eq!(done.end, End::Abandoned);
     let record = last(world);
     assert_eq!(
-        (record.outcome, record.reason),
+        (record.outcome.wire(), record.reason),
         (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed))
     );
     assert_eq!(
@@ -642,7 +642,7 @@ fn an_abandon_killed_at_any_point_is_settled_by_the_next_start_with_one_result()
         assert_sound(&world, &label);
         let record = last(&world);
         assert_eq!(
-            (record.outcome, record.reason),
+            (record.outcome.wire(), record.reason),
             (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed)),
             "{label}"
         );

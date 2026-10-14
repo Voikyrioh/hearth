@@ -128,7 +128,9 @@ pub struct UpdateProgress {
     /// La version visée.
     pub version: String,
     pub step: UpdateStep,
-    /// 0 à 100, pour l'étape `download` seulement.
+    /// 0 à 100, pour l'étape `download` seulement. Hors des bornes ou illisible : inconnu (`None`), jamais borné
+    /// (BR-COMPAT-001 point 10).
+    #[serde(default, deserialize_with = "crate::lenient::percent")]
     pub percent: Option<u8>,
     /// Pour l'étape `done` seulement.
     pub outcome: Option<UpdateOutcome>,

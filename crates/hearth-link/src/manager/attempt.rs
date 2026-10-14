@@ -52,6 +52,8 @@ pub(crate) enum AttemptResult {
     /// Échec passager (réseau, délai, serveur occupé…) : on réessaiera.
     Failed,
     SessionExpired,
+    /// Fin de session au motif inconnu de cette version (BR-COMPAT-001 point 9).
+    SessionEndedUnknown,
     Revoked,
     /// Le mot de passe mémorisé est refusé (reconnexion silencieuse).
     StoredPasswordRefused,
@@ -76,7 +78,9 @@ fn classify(error: &TransportError) -> AttemptResult {
         TransportError::FingerprintMismatch { presented } => AttemptResult::Fingerprint {
             presented: *presented,
         },
-        TransportError::Api(api) => match api.code {
+        // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8). Un `429` ou `503` qui demande
+        // d'attendre est attendu, un `401` est une session finie, jamais une nouvelle tentative au rythme du client.
+        TransportError::Api(api) => match api.code.map(|code| code.or_from_status(api.status)) {
             Some(ErrorCode::IncompatibleVersion) => {
                 AttemptResult::Incompatible(upgrade_target(&api.details))
             }
@@ -271,9 +275,8 @@ async fn connect_inner(deps: &Deps, shared: &Shared) -> AttemptResult {
                         SessionNotice::Expired => AttemptResult::SessionExpired,
                         SessionNotice::Revoked => AttemptResult::Revoked,
                         // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une fin de session d'un motif inconnu n'est ni
-                        // « expirée » ni « révoquée » : on ne tranche pas, l'agent ferme le flux et la
-                        // tentative suivante apprend le vrai motif par le chemin ordinaire.
-                        SessionNotice::Unknown => AttemptResult::Failed,
+                        // « expirée » ni « révoquée » affirmée, mais reste une fin de session.
+                        SessionNotice::Unknown => AttemptResult::SessionEndedUnknown,
                     };
                 }
                 // Au plus quelques-uns : un agent bavard ne remplit pas la mémoire d'une tentative.
@@ -443,6 +446,31 @@ mod tests {
             classify(&api(Some(ErrorCode::Busy), 503, None)),
             AttemptResult::Failed
         ));
+    }
+
+    /// BR-COMPAT-001 point 8 : un code d'erreur inconnu (agent plus récent) retombe sur le sens du statut.
+    #[test]
+    fn an_unknown_code_keeps_the_meaning_of_its_http_status() {
+        let unknown = Some(ErrorCode::Unknown);
+        let result = classify(&api(unknown, 429, Some(90)));
+        assert!(matches!(result, AttemptResult::RetryAfter(d) if d == Duration::from_secs(90)));
+        let result = classify(&api(unknown, 503, Some(5)));
+        assert!(matches!(result, AttemptResult::RetryAfter(d) if d == Duration::from_secs(5)));
+        assert!(matches!(
+            classify(&api(unknown, 401, None)),
+            AttemptResult::SessionExpired
+        ));
+        assert!(matches!(
+            classify(&api(unknown, 426, None)),
+            AttemptResult::Incompatible(UpgradeTarget::Agent)
+        ));
+        // Ni succès ni attente inventée : un `403` ou un `500` inconnu est un échec ordinaire.
+        for status in [403, 404, 500] {
+            assert!(matches!(
+                classify(&api(unknown, status, None)),
+                AttemptResult::Failed
+            ));
+        }
     }
 
     #[test]

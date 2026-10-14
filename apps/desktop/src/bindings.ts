@@ -861,7 +861,9 @@ export type ProbeDto = {
 
 export type ProtocolDto = "tcp" | "udp" | "sctp" | "unknown";
 
-export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked";
+export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked" | 
+/**  Fin de session pour un motif que cette version ne connaît pas (agent plus récent). */
+"ended";
 
 /**  Le réglage « Demander mon mot de passe » du compte (Q19). */
 export type ReauthModeDto = 

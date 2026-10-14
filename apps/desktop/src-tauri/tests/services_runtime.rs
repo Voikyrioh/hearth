@@ -167,7 +167,8 @@ fn full_state() -> ServicesState {
                 adopted: None,
                 details_reserved: false,
             },
-        ],
+        ]
+        .into(),
     }
 }
 

@@ -32,6 +32,7 @@ defineEmits<{ retry: []; alert: []; client: [] }>();
 const text = computed(() => {
   if (props.blocked === "fingerprint_changed") return t("link.fingerprintBanner");
   if (props.blocked === "incompatible_agent") {
+    if (props.role === "unknown") return t("link.agentTooOldRoleUnknown");
     return t(props.role === "admin" ? "link.agentTooOld" : "link.agentTooOldReadonly");
   }
   if (props.blocked === "incompatible_client") return t("link.clientTooOld");

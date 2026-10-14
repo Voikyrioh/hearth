@@ -34,7 +34,9 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<AccountsResponse
         .iter()
         .map(wire::summary_item)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Json(AccountsResponse { accounts }))
+    Ok(Json(AccountsResponse {
+        accounts: accounts.into(),
+    }))
 }
 
 /// `POST /api/v1/accounts` : crée un compte.

@@ -17,6 +17,8 @@ const props = defineProps<{
   role: Role;
   serverId: string;
   modeOn: boolean;
+  /** Ce client ne sait pas lire l'état du mode attaque : la carte ne dit ni « déjà actif » ni « active-le ». */
+  modeUnknown?: boolean;
 }>();
 
 const others = computed(() => props.alert.others ?? 0);
@@ -41,7 +43,15 @@ const since = computed(() => (props.alert.since ? formatDateTime(props.alert.sin
       </li>
     </ul>
     <p class="card__todo" data-alert-todo>
-      {{ t(modeOn ? "security.cardTodoOn" : "security.cardTodoOff") }}
+      {{
+        t(
+          modeUnknown
+            ? "security.cardTodoUnknown"
+            : modeOn
+              ? "security.cardTodoOn"
+              : "security.cardTodoOff",
+        )
+      }}
     </p>
   </section>
 </template>

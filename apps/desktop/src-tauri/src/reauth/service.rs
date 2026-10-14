@@ -108,7 +108,8 @@ pub fn interpret(status: u16, body: &Value) -> Result<ReauthSettingOutcome, Link
         });
     }
     use hearth_proto::error::ErrorCode;
-    match error.error.code {
+    // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8).
+    match error.error.code.or_from_status(status) {
         ErrorCode::ForbiddenRole => Err(LinkFailure::forbidden(&error.error)),
         ErrorCode::NotFound => refused(ReauthSettingRefusal::Unsupported),
         ErrorCode::Unauthenticated | ErrorCode::SessionExpired => {

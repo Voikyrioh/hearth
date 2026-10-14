@@ -156,6 +156,33 @@ impl ErrorCode {
             Self::InternalError | Self::Unknown => 500,
         }
     }
+
+    /// Le sens d'un statut HTTP quand le code de l'erreur est celui d'une version plus récente
+    /// (`Unknown`) : le code le plus générique de ce statut. Un statut que le protocole n'emploie pas
+    /// reste `Unknown`. Jamais un succès, jamais « réessayer » de soi-même (BR-COMPAT-001 point 8).
+    pub const fn from_status(status: u16) -> Self {
+        match status {
+            401 => Self::Unauthenticated,
+            403 => Self::ForbiddenRole,
+            404 => Self::NotFound,
+            409 => Self::Conflict,
+            422 => Self::ValidationError,
+            426 => Self::IncompatibleVersion,
+            429 => Self::TooManyAttempts,
+            503 => Self::Busy,
+            500..=599 => Self::InternalError,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// Le code à interpréter : lui-même, ou, s'il est inconnu de cette version, le sens du statut HTTP
+    /// de la réponse (le repli par statut d'avant la tolérance aux valeurs inconnues).
+    pub const fn or_from_status(self, status: u16) -> Self {
+        match self {
+            Self::Unknown => Self::from_status(status),
+            known => known,
+        }
+    }
 }
 
 /// Contenu de l'enveloppe `error`.
@@ -264,6 +291,36 @@ fn empty_details() -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// BR-COMPAT-001 point 8 : un code inconnu retombe sur le sens du statut HTTP, jamais sur un succès.
+    #[test]
+    fn an_unknown_code_falls_back_to_the_meaning_of_its_http_status() {
+        for (status, meaning) in [
+            (401, ErrorCode::Unauthenticated),
+            (403, ErrorCode::ForbiddenRole),
+            (404, ErrorCode::NotFound),
+            (409, ErrorCode::Conflict),
+            (422, ErrorCode::ValidationError),
+            (429, ErrorCode::TooManyAttempts),
+            (500, ErrorCode::InternalError),
+            (502, ErrorCode::InternalError),
+            (503, ErrorCode::Busy),
+        ] {
+            assert_eq!(
+                ErrorCode::Unknown.or_from_status(status),
+                meaning,
+                "{status}"
+            );
+            // Un code connu garde son sens, quel que soit le statut.
+            assert_eq!(
+                ErrorCode::Conflict.or_from_status(status),
+                ErrorCode::Conflict
+            );
+        }
+        // Un statut que le protocole n'emploie pas ne dit rien de plus.
+        assert_eq!(ErrorCode::Unknown.or_from_status(418), ErrorCode::Unknown);
+        assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
+    }
 
     const ALL: [(ErrorCode, &str, u16); 47] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),

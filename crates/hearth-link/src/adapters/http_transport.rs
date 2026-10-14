@@ -504,6 +504,15 @@ pub(crate) fn decode_frame(text: &str) -> Frame {
         return Frame::Security(Box::new(view));
     }
     if let Ok(message) = serde_json::from_str::<ServicesMessage>(text) {
+        // Un service illisible par cette version est écarté, jamais en silence (BR-COMPAT-001 point 10).
+        let unreadable = match &message {
+            ServicesMessage::ServicesSnapshot(state) => state.services.unreadable(),
+            ServicesMessage::ServicesDelta(delta) => delta.upserts.unreadable(),
+            ServicesMessage::ServiceAction(_) => 0,
+        };
+        if unreadable > 0 {
+            tracing::warn!(unreadable, "services illisibles par cette version, écartés");
+        }
         return Frame::Services(Box::new(message));
     }
     match serde_json::from_str::<ServerMessage>(text) {

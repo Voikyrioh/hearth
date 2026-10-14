@@ -195,10 +195,15 @@ fn future_value(tagged: bool) -> Value {
     }
 }
 
+/// Les fichiers `.rs` sous `dir`. Un dossier attendu qui n'existe pas (arborescence déplacée) est un ÉCHEC : un
+/// balayage qui ne couvre plus rien ne doit jamais rester vert.
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
+    let entries = std::fs::read_dir(dir).unwrap_or_else(|error| {
+        panic!(
+            "dossier balayé par le garde introuvable ({}) : {error}. Si l'arborescence a bougé, mets le garde à jour.",
+            dir.display()
+        )
+    });
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -213,48 +218,203 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Les `pub enum` qui dérivent `Deserialize` dans `src/`, en `fichier::Type`.
-fn scanned_enums() -> Vec<String> {
-    let src = root().join("src");
+/// Les dossiers de code qui décodent du réseau ou en dépendent, avec le nombre minimal de fichiers attendus (si
+/// moins, c'est que le balayage ne voit plus le code : échec).
+fn scanned_directories() -> Vec<(PathBuf, usize)> {
+    let base = root();
+    vec![
+        (base.join("src"), 15),
+        (base.join("../hearth-link/src"), 15),
+        (base.join("../../apps/desktop/src-tauri/src"), 15),
+    ]
+}
+
+fn files_of(directory: &Path, minimum: usize) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    rust_files(&src, &mut files);
-    let mut found = Vec::new();
-    for file in files {
-        let text = std::fs::read_to_string(&file).expect("lecture");
-        let relative = file
-            .strip_prefix(&src)
-            .expect("préfixe")
-            .to_string_lossy()
-            .replace('\\', "/");
-        let lines: Vec<&str> = text.lines().collect();
-        for (index, line) in lines.iter().enumerate() {
-            let Some(rest) = line.strip_prefix("pub enum ") else {
-                continue;
-            };
-            let name: String = rest
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_')
-                .collect();
-            let mut derives_deserialize = false;
-            let mut back = index;
-            while back > 0 {
-                back -= 1;
-                let above = lines[back].trim_start();
-                if above.starts_with("#[") || above.starts_with("//") {
-                    derives_deserialize |=
-                        above.starts_with("#[derive") && above.contains("Deserialize");
-                } else {
-                    break;
+    rust_files(directory, &mut files);
+    files.retain(|file| !is_test_file(file));
+    assert!(
+        files.len() >= minimum,
+        "le garde ne voit que {} fichier(s) sous {} (au moins {minimum} attendus) : l'arborescence a bougé, le \
+         balayage ne couvre plus rien",
+        files.len(),
+        directory.display()
+    );
+    files
+}
+
+/// Un type (`enum` ou `struct`) trouvé dans un fichier, avec le texte de TOUS ses attributs (une dérivation
+/// repliée sur plusieurs lignes par `rustfmt`, `cfg_attr`, `serde(...)`).
+struct TypeItem {
+    /// `fichier::Type`, le fichier relatif au dossier balayé.
+    key: String,
+    is_enum: bool,
+    attributes: String,
+}
+
+impl TypeItem {
+    fn derives_deserialize(&self) -> bool {
+        self.attributes.contains("derive") && self.attributes.contains("Deserialize")
+    }
+}
+
+/// Le nom d'un type déclaré sur cette ligne, de toute visibilité (`pub`, `pub(crate)`, `pub(super)`, privée) et
+/// à toute indentation (module en ligne).
+fn declared_type(line: &str) -> Option<(bool, String)> {
+    let mut rest = line.trim_start();
+    if let Some(after) = rest.strip_prefix("pub") {
+        rest = after.trim_start();
+        if rest.starts_with('(') {
+            rest = rest[rest.find(')')? + 1..].trim_start();
+        }
+    }
+    let (is_enum, after) = if let Some(after) = rest.strip_prefix("enum ") {
+        (true, after)
+    } else {
+        (false, rest.strip_prefix("struct ")?)
+    };
+    let name: String = after
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    (!name.is_empty()).then_some((is_enum, name))
+}
+
+/// Les lignes de code de production d'un fichier : numéro (à partir de 0) et texte. Le corps d'un module de tests
+/// en ligne (`#[cfg(test)]` puis `mod ... {` jusqu'à son `}` de même indentation) n'est pas lu, mais RIEN d'autre :
+/// un type déclaré après ce module reste vu. Un fichier de tests (`tests.rs`, `tests_*.rs`) n'est pas du code de
+/// production.
+fn production_lines(text: &str) -> Vec<(usize, &str)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        if line.trim() == "#[cfg(test)]" {
+            let next = lines.get(index + 1).map_or("", |next| next.trim_start());
+            if next.starts_with("mod ") || next.starts_with("pub mod ") {
+                if next.trim_end().ends_with(';') {
+                    index += 2;
+                    continue;
                 }
+                let indent = line.len() - line.trim_start().len();
+                let closing = format!("{}}}", " ".repeat(indent));
+                let mut end = index + 2;
+                while end < lines.len() && lines[end] != closing {
+                    end += 1;
+                }
+                index = end + 1;
+                continue;
             }
-            if derives_deserialize {
-                found.push(format!("{relative}::{name}"));
+        }
+        out.push((index, line));
+        index += 1;
+    }
+    out
+}
+
+fn is_test_file(file: &Path) -> bool {
+    file.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem == "tests" || stem.starts_with("tests_"))
+}
+
+/// Les types d'un fichier, avec leurs attributs complets. Les attributs sont lus bloc par bloc (crochets
+/// équilibrés), donc une dérivation sur plusieurs lignes ou une visibilité inhabituelle ne les perd pas. Le
+/// module de tests en ligne n'est pas lu (voir `production_lines`).
+fn type_items(text: &str, relative: &str) -> Vec<TypeItem> {
+    let mut items = Vec::new();
+    let mut pending = String::new();
+    let mut open_depth = 0_i32;
+    for (_, line) in production_lines(text) {
+        let trimmed = line.trim_start();
+        if open_depth > 0 || trimmed.starts_with("#[") {
+            pending.push_str(trimmed);
+            pending.push('\n');
+            open_depth += trimmed.matches('[').count() as i32 - trimmed.matches(']').count() as i32;
+            open_depth = open_depth.max(0);
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+        if let Some((is_enum, name)) = declared_type(trimmed) {
+            items.push(TypeItem {
+                key: format!("{relative}::{name}"),
+                is_enum,
+                attributes: std::mem::take(&mut pending),
+            });
+        } else {
+            pending.clear();
+        }
+    }
+    items
+}
+
+fn relative_to(file: &Path, directory: &Path) -> String {
+    file.strip_prefix(directory)
+        .expect("préfixe")
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}
+
+/// Les types qui dérivent `Deserialize` dans un dossier, en `fichier::Type`.
+fn deserialized_types(directory: &Path, minimum: usize, enums_only: bool) -> Vec<String> {
+    let mut found = Vec::new();
+    for file in files_of(directory, minimum) {
+        let text = std::fs::read_to_string(&file).expect("lecture");
+        for item in type_items(&text, &relative_to(&file, directory)) {
+            if item.derives_deserialize() && (item.is_enum || !enums_only) {
+                found.push(item.key);
             }
         }
     }
     found.sort();
     found
 }
+
+/// Les `enum` qui dérivent `Deserialize` dans `hearth-proto/src`, en `fichier::Type`.
+fn scanned_enums() -> Vec<String> {
+    deserialized_types(&root().join("src"), 15, true)
+}
+
+/// Les énumérations qui dérivent `Deserialize` dans la liaison et la coquille : elles ne sont jamais lues de
+/// l'agent (le protocole est dans `hearth-proto`), mais du disque du client ou de la WebView. Chacune est déclarée
+/// ici avec sa raison ; une nouvelle fait échouer le garde (la lira-t-on de l'agent ? alors elle est dans
+/// `hearth-proto`, tolérante).
+const LOCAL_ENUMS: &[(&str, &str)] = &[
+    (
+        "audit.rs::AuditOutcomeDto",
+        "commande de la WebView (filtre)",
+    ),
+    ("audit.rs::AuditKindDto", "commande de la WebView (filtre)"),
+    (
+        "audit.rs::AuditOriginKindDto",
+        "miroir du DTO, jamais lu de l'agent",
+    ),
+    (
+        "link_dto.rs::RoleDto",
+        "commande de la WebView (rôle choisi)",
+    ),
+    (
+        "reauth/dto.rs::ReauthModeDto",
+        "commande de la WebView (réglage)",
+    ),
+    ("reauth/dto.rs::AdminActKindDto", "commande de la WebView"),
+    (
+        "update/dto.rs::UpdatePhase",
+        "fichier local du client (update.json)",
+    ),
+    (
+        "update/dto.rs::UpdateFailure",
+        "fichier local du client (update.json)",
+    ),
+    (
+        "domain/pending_ops.rs::Phase",
+        "carnet des opérations du client (disque)",
+    ),
+];
 
 #[test]
 fn every_deserialized_enum_of_the_protocol_is_classified_and_every_entry_exists() {
@@ -264,13 +424,46 @@ fn every_deserialized_enum_of_the_protocol_is_classified_and_every_entry_exists(
     let unclassified: Vec<&String> = scanned.iter().filter(|key| !listed.contains(key)).collect();
     assert!(
         unclassified.is_empty(),
-        "énumération(s) lue(s) du fil, non classée(s) dans `enums()` (ajoute-la avec sa variante `Unknown` \
-         `#[serde(other)]`, ou classe-la `Strict` si l'agent la lit comme une commande) : {unclassified:?}"
+        "énumération(s) lue(s) du fil, non classée(s) dans `enums()` (ajoute-la avec sa variante `Unknown`          `#[serde(other)]`, ou classe-la `Strict` si l'agent la lit comme une commande) : {unclassified:?}"
     );
     let stale: Vec<&String> = listed.iter().filter(|key| !scanned.contains(key)).collect();
     assert!(
         stale.is_empty(),
         "entrée(s) de `enums()` sans énumération correspondante (renommée ? sans `Deserialize` ?) : {stale:?}"
+    );
+}
+
+#[test]
+fn every_enum_deserialized_in_the_link_and_the_shell_is_declared_local() {
+    let base = root();
+    let mut scanned = Vec::new();
+    for (directory, minimum) in [
+        (base.join("../hearth-link/src"), 15),
+        (base.join("../../apps/desktop/src-tauri/src"), 15),
+    ] {
+        scanned.extend(deserialized_types(&directory, minimum, true));
+    }
+    scanned.sort();
+    let declared: Vec<String> = LOCAL_ENUMS
+        .iter()
+        .map(|(key, _)| (*key).to_owned())
+        .collect();
+    let undeclared: Vec<&String> = scanned
+        .iter()
+        .filter(|key| !declared.contains(key))
+        .collect();
+    assert!(
+        undeclared.is_empty(),
+        "énumération(s) qui dérive(nt) `Deserialize` dans la liaison ou la coquille, non déclarée(s) dans \
+         `LOCAL_ENUMS` (lue(s) de l'agent ? alors elle va dans `hearth-proto` avec sa variante `Unknown`) : {undeclared:?}"
+    );
+    let stale: Vec<&String> = declared
+        .iter()
+        .filter(|key| !scanned.contains(key))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "entrée(s) de `LOCAL_ENUMS` périmée(s) : {stale:?}"
     );
 }
 
@@ -361,37 +554,322 @@ fn structures_read_from_the_other_side_accept_an_extra_field() {
     assert_eq!(read.role, RoleName::Unknown);
 }
 
-/// Aucune structure lue ne refuse un champ inconnu ni ne se lit par un `Deserialize` écrit à la main :
-/// vrai tant que ces constructions n'existent pas dans les trois endroits qui décodent du réseau.
+/// Aucune structure lue ne refuse un champ inconnu ni ne se lit par un `Deserialize` écrit à la main, et toute
+/// lecture personnalisée (`try_from`, `deserialize_with`, `with`, `remote`, `from`) est déclarée.
 #[test]
 fn nothing_refuses_an_unknown_field_in_what_is_read_from_the_network() {
-    let base = root();
-    let directories = [
-        base.join("src"),
-        base.join("../hearth-link/src"),
-        base.join("../../apps/desktop/src-tauri/src"),
-    ];
     // Les chaînes recherchées sont coupées pour que ce fichier ne se trouve pas lui-même.
-    let forbidden = [
-        concat!("deny_unknown", "_fields"),
-        concat!("impl<'de> ", "Deserialize<'de> for"),
-        concat!("impl<'de> ", "serde::Deserialize<'de> for"),
-    ];
+    let deny = concat!("deny_unknown", "_fields");
     let mut offenders = Vec::new();
-    for directory in directories {
-        let mut files = Vec::new();
-        rust_files(&directory, &mut files);
-        for file in files {
+    for (directory, minimum) in scanned_directories() {
+        for file in files_of(&directory, minimum) {
             let text = std::fs::read_to_string(&file).expect("lecture");
-            for pattern in forbidden {
-                if text.contains(pattern) {
-                    offenders.push(format!("{} : `{pattern}`", file.display()));
+            let relative = relative_to(&file, &directory);
+            if text.contains(deny) {
+                offenders.push(format!("{relative} : `{deny}`"));
+            }
+            // Tout `impl ... Deserialize<'...> for`, quels que soient les génériques et le nom de la durée de vie.
+            for (number, line) in production_lines(&text) {
+                let trimmed = line.trim_start();
+                let hand_written = trimmed.starts_with("impl")
+                    && (trimmed.contains("Deserialize<'") || trimmed.contains("Deserialize <'"));
+                if hand_written && !HAND_WRITTEN.contains(&relative.as_str()) {
+                    offenders.push(format!("{relative}:{}: `{trimmed}`", number + 1));
                 }
             }
         }
     }
     assert!(
         offenders.is_empty(),
-        "une structure lue du réseau refuserait un champ en trop ou se lirait à la main : {offenders:?}"
+        "une structure lue du réseau refuserait un champ en trop ou se lirait à la main sans être déclarée \
+         (`HAND_WRITTEN`, `CUSTOM_READS`) : {offenders:?}"
     );
+}
+
+/// Les seuls `Deserialize` écrits à la main du protocole (tolérants par construction, testés dans le module).
+const HAND_WRITTEN: &[&str] = &["lenient.rs"];
+
+/// Les lectures personnalisées permises : chaque occurrence d'un attribut serde `deserialize_with`, `try_from`,
+/// `with`, `remote` ou `from` dans le code balayé doit y figurer (fichier, texte exact). Chacune rend une valeur
+/// illisible « inconnue » (jamais une valeur plausible) ou ne lit qu'un fichier local.
+const CUSTOM_READS: &[(&str, &str)] = &[
+    ("api/devices.rs", "deserialize_with = \"lenient_proof\""),
+    ("api/reauth.rs", "deserialize_with = \"lenient_proof\""),
+    ("api/sessions.rs", "deserialize_with = \"lenient_proof\""),
+    (
+        "stream.rs",
+        "deserialize_with = \"crate::api::sessions::lenient_proof\"",
+    ),
+    ("api/reauth.rs", "deserialize_with = \"lenient_reauth\""),
+    (
+        "api/metrics.rs",
+        "deserialize_with = \"crate::lenient::measure\"",
+    ),
+    (
+        "api/metrics.rs",
+        "deserialize_with = \"crate::lenient::measures\"",
+    ),
+    (
+        "api/update.rs",
+        "deserialize_with = \"crate::lenient::percent\"",
+    ),
+    (
+        "api/service_ops.rs",
+        "deserialize_with = \"crate::lenient::percent\"",
+    ),
+    // Fichiers locaux du client (carnet des serveurs, opérations suivies), jamais lus de l'agent.
+    ("domain/pending_ops.rs", "try_from = \"String\""),
+    ("domain/server.rs", "try_from = \"String\""),
+    ("domain/server.rs", "with = \"fingerprint_hex\""),
+];
+
+#[test]
+fn every_custom_read_is_declared() {
+    let needles = [
+        "deserialize_with",
+        "try_from =",
+        "serde(with",
+        ", with =",
+        "remote =",
+        "serde(from",
+        ", from =",
+    ];
+    let mut undeclared = Vec::new();
+    let mut seen = Vec::new();
+    for (directory, minimum) in scanned_directories() {
+        for file in files_of(&directory, minimum) {
+            let text = std::fs::read_to_string(&file).expect("lecture");
+            let relative = relative_to(&file, &directory);
+            for (number, line) in production_lines(&text) {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if !needles.iter().any(|needle| trimmed.contains(needle)) {
+                    continue;
+                }
+                if !trimmed.contains("serde") && !trimmed.contains("deserialize_with") {
+                    continue;
+                }
+                let declared = CUSTOM_READS
+                    .iter()
+                    .find(|(path, text)| *path == relative && trimmed.contains(text));
+                match declared {
+                    Some(entry) => seen.push(*entry),
+                    None => undeclared.push(format!("{relative}:{}: `{trimmed}`", number + 1)),
+                }
+            }
+        }
+    }
+    assert!(
+        undeclared.is_empty(),
+        "lecture personnalisée non déclarée dans `CUSTOM_READS` (rend-elle une valeur illisible « inconnue » ? sinon \
+         elle rejette tout un message) : {undeclared:?}"
+    );
+    let stale: Vec<_> = CUSTOM_READS
+        .iter()
+        .filter(|entry| !seen.contains(entry))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "entrée(s) de `CUSTOM_READS` périmée(s) : {stale:?}"
+    );
+}
+
+/// Le DEVENIR d'`Unknown` : une valeur inconnue n'est jamais repliée sur une valeur connue sans que ce choix soit
+/// écrit ici. Deux formes sont cherchées dans tout le code Rust (agent, liaison, coquille, protocole) :
+/// - un motif `X::Unknown | X::Connu` (ou l'inverse) qui lit les deux pareil ;
+/// - un bras `X::Unknown => X::Connu` qui la convertit.
+///
+/// Chaque occurrence acceptée est une DÉCISION, avec sa raison.
+const UNKNOWN_FOLDS: &[(&str, &str, &str)] = &[
+    (
+        "hearth-proto/src/error.rs",
+        "Self::InternalError | Self::Unknown => 500",
+        "un code inconnu n'est jamais émis ; son statut, si on le demande, est une erreur serveur",
+    ),
+    (
+        "hearth-proto/src/error.rs",
+        "Self::Unknown => Self::from_status(status)",
+        "un code inconnu retombe sur le sens du statut HTTP (point 8), jamais sur un succès",
+    ),
+    (
+        "hearth-agent/src/entrypoint/http/auth.rs",
+        "ErrorCode::InternalError | ErrorCode::Unknown => Some(Outcome::Failed(Reason::Internal))",
+        "l'agent n'émet jamais `Unknown` ; s'il arrivait, c'est une erreur interne, jamais un succès",
+    ),
+    (
+        "hearth-agent/src/domain/services/logs.rs",
+        "LogSource::Out | LogSource::Unknown => &mut self.out",
+        "décision de HRT-66 : une source inconnue se traite comme la sortie normale (BR-COMPAT-001, cas limites)",
+    ),
+    (
+        "hearth-link/src/adapters/http_transport.rs",
+        "Ok(ServerMessage::Unknown) | Err(_) => Frame::Other",
+        "un type de message inconnu est ignoré, comme une trame illisible : le flux continue (point 2)",
+    ),
+    (
+        "hearth-agent/src/application/update.rs",
+        "Some(UpdateOutcome::Unknown) | None => {",
+        "une issue que l'agent ne comprend pas a sa propre entrée de journal, ni réussite ni échec (point 7)",
+    ),
+    (
+        "hearth-link/src/manager/attempt.rs",
+        "Some(UpgradeTarget::Client | UpgradeTarget::Unknown) | None => UpgradeTarget::Client",
+        "une cible inconnue se lit « le client » : le seul côté que l'utilisateur met à jour d'ici (BR-COMPAT-001)",
+    ),
+    (
+        "apps/desktop/src-tauri/src/link_dto.rs",
+        "Blocked::IncompatibleVersion(UpgradeTarget::Client | UpgradeTarget::Unknown)",
+        "la liaison ne tient jamais `Unknown` (lu « le client » à la réception) ; bras explicite, pas un `_`",
+    ),
+    (
+        "apps/desktop/src-tauri/src/reauth/service.rs",
+        "Some(RoleDto::Admin | RoleDto::Unknown) | None => RoleName::Admin",
+        "un rôle inconnu se traite comme administrateur : le plus strict (le mot de passe est demandé)",
+    ),
+];
+
+#[test]
+fn an_unknown_value_is_never_folded_into_a_known_one_unless_the_decision_is_written() {
+    let base = root();
+    let roots = [
+        (base.join("src"), "hearth-proto/src"),
+        (base.join("../hearth-link/src"), "hearth-link/src"),
+        (base.join("../hearth-agent/src"), "hearth-agent/src"),
+        (
+            base.join("../../apps/desktop/src-tauri/src"),
+            "apps/desktop/src-tauri/src",
+        ),
+    ];
+    // Les énumérations tolérantes : leur nom, et celui de leur miroir `Dto`.
+    let tolerant: Vec<String> = enums()
+        .iter()
+        .filter(|entry| entry.kind == Kind::Tolerant)
+        .map(|entry| entry.key.rsplit("::").next().expect("nom").to_owned())
+        .collect();
+    let is_tolerant_path = |text: &str| {
+        text.contains("Self::")
+            || text.contains("Dto::")
+            || tolerant
+                .iter()
+                .any(|name| text.contains(&format!("{name}::")))
+    };
+    let mut found = Vec::new();
+    let mut accepted = Vec::new();
+    for (directory, label) in roots {
+        for file in files_of(&directory, 15) {
+            let text = std::fs::read_to_string(&file).expect("lecture");
+            let relative = format!("{label}/{}", relative_to(&file, &directory));
+            for (number, line) in production_lines(&text) {
+                let trimmed = line.trim();
+                if trimmed.starts_with("//") || !trimmed.contains("::Unknown") {
+                    continue;
+                }
+                let pattern = trimmed.split("=>").next().unwrap_or(trimmed);
+                // Une fermeture (`(|x| ...)`) n'est pas une alternative de motif.
+                let mixes =
+                    is_tolerant_path(pattern) && pattern.contains(" | ") && !pattern.contains("(|");
+                let converts = trimmed.contains("::Unknown =>")
+                    && trimmed.split("=>").nth(1).is_some_and(|right| {
+                        let right = right.trim().trim_end_matches(',');
+                        is_tolerant_path(right) && !right.contains("::Unknown")
+                    });
+                if mixes || converts {
+                    match UNKNOWN_FOLDS
+                        .iter()
+                        .find(|(path, text, _)| *path == relative && trimmed.contains(text))
+                    {
+                        Some(entry) => accepted.push(*entry),
+                        None => found.push(format!("{relative}:{}: `{trimmed}`", number + 1)),
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "une valeur inconnue est repliée sur une valeur connue sans décision écrite dans `UNKNOWN_FOLDS` (une valeur \
+         inconnue n'est JAMAIS prise pour une valeur connue, BR-COMPAT-001 point 4) : {found:?}"
+    );
+    let stale: Vec<_> = UNKNOWN_FOLDS
+        .iter()
+        .filter(|entry| !accepted.contains(entry))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "décision(s) de `UNKNOWN_FOLDS` périmée(s) : {stale:?}"
+    );
+}
+
+/// Listes et nombres (BR-COMPAT-001 point 10) : un élément illisible d'une liste est écarté et compté, un nombre
+/// hors bornes ou nul devient inconnu, jamais borné.
+#[test]
+fn an_unreadable_element_is_dropped_and_counted_and_a_number_out_of_bounds_is_unknown() {
+    use hearth_proto::api::accounts::AccountsResponse;
+    use hearth_proto::api::audit::AuditResponse;
+    use hearth_proto::api::devices::DevicesResponse;
+    use hearth_proto::api::metrics::Sample;
+
+    let accounts = serde_json::from_value::<AccountsResponse>(json!({
+        "accounts": [
+            { "id": "a", "username": "marie", "role": "admin", "created_at": "2026-10-01T00:00:00Z",
+              "last_login_at": null, "sessions_open": 0 },
+            { "id": "b", "forme": "nouvelle" },
+            "pas un objet"
+        ]
+    }))
+    .expect("la liste est lue malgré des éléments illisibles");
+    assert_eq!(accounts.accounts.len(), 1);
+    assert_eq!(accounts.accounts.unreadable(), 2);
+
+    let devices = serde_json::from_value::<DevicesResponse>(json!({
+        "devices": [{ "x": 1 }, { "y": 2 }, { "z": 3 }], "max": 8
+    }))
+    .expect("lue");
+    assert_eq!(
+        (devices.devices.len(), devices.devices.unreadable()),
+        (0, 3)
+    );
+
+    let audit = serde_json::from_value::<AuditResponse>(
+        json!({ "events": [null, 4], "next_before": null }),
+    )
+    .expect("lue");
+    assert_eq!(audit.events.unreadable(), 2);
+
+    // La forme du CHAMP change (un objet à la place du tableau) : c'est un autre protocole, rejeté.
+    assert!(
+        serde_json::from_value::<AuditResponse>(
+            json!({ "events": { "a": 1 }, "next_before": null })
+        )
+        .is_err()
+    );
+
+    // Un nombre hors bornes devient inconnu, jamais borné à une valeur plausible.
+    let progress = |percent: Value| {
+        serde_json::from_value::<UpdateProgress>(json!({
+            "version": "1", "step": "download", "percent": percent, "outcome": null, "reason": null
+        }))
+        .expect("lue")
+    };
+    assert_eq!(progress(json!(42)).percent, Some(42));
+    for out_of_bounds in [json!(300), json!(101), json!(-1), json!(1.5), json!("40")] {
+        assert_eq!(
+            progress(out_of_bounds).percent,
+            None,
+            "jamais borné à une valeur plausible"
+        );
+    }
+    assert_eq!(progress(json!(null)).percent, None);
+
+    // Une mesure nulle (c'est ainsi que `serde_json` écrit NaN) est une mesure inconnue, jamais zéro.
+    let sample = serde_json::from_value::<Sample>(json!({
+        "at": "2026-10-14T00:00:00Z", "uptime_s": 1, "cpu": null, "cores": [1.0, null],
+        "mem": { "used_bytes": 1, "total_bytes": 2, "swap_used_bytes": 0, "swap_total_bytes": 0 },
+        "disks": [], "net": null, "gpus": [], "temps": []
+    }))
+    .expect("lue");
+    assert!(sample.cpu.is_nan());
+    assert!(sample.cores[1].is_nan());
 }

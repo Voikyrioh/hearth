@@ -60,7 +60,7 @@ export function stepAnnouncement(step: Exclude<UpdateStep, "done" | "unknown">):
   return t("agentUpdate.announce", { step: stepLabel(step, null, true).toLowerCase() });
 }
 
-const REASONS: Record<UpdateReason, MessageKey> = {
+export const REASONS: Record<UpdateReason, MessageKey> = {
   unreachable: "agentUpdate.resultUnreachable",
   download_failed: "agentUpdate.resultDownloadFailed",
   bad_checksum: "agentUpdate.resultBadChecksum",

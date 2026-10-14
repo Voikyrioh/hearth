@@ -48,7 +48,7 @@ export function originOf(entry: AuditEntry): string {
   return safeText(entry.origin.text);
 }
 
-const OUTCOME_KEYS = {
+export const OUTCOME_KEYS = {
   ok: "audit.outcomeOk",
   denied: "audit.outcomeDenied",
   failed: "audit.outcomeFailed",

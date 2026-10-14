@@ -50,7 +50,9 @@ export type Reason =
   | "expired"
   | "stored_password_refused"
   | "user_disconnected"
-  | "revoked";
+  | "revoked"
+  /** Fin de session pour un motif que ce client ne connaît pas (agent plus récent) : ni expirée ni révoquée affirmée. */
+  | "ended";
 
 /**
  * Événement `link://state`. `seq` est un numéro de séquence strictement croissant PAR SERVEUR,

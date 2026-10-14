@@ -981,6 +981,25 @@ fn after_an_internal_incident_the_link_restarts_offline_and_retries() {
     assert_eq!(rig.state(), LinkState::Connected);
 }
 
+/// BR-COMPAT-001 point 9 : une fin de session au motif inconnu reste une fin de session (déconnecté,
+/// aucune tentative), sans prétendre qu'elle a expiré ni qu'elle a été révoquée.
+#[test]
+fn a_session_ended_for_an_unknown_reason_stops_the_link_without_naming_a_reason_it_does_not_know() {
+    for connected in [true, false] {
+        let mut rig = Rig::connected();
+        if !connected {
+            rig.send_at(5_000, Input::TransportFailed);
+        }
+        rig.send_at(5_100, Input::SessionEndedUnknown);
+        assert_eq!(rig.state(), LinkState::SessionExpired);
+        let reason = rig.machine.status().reason;
+        assert_eq!(reason, Some(Reason::Ended));
+        assert_ne!(reason, Some(Reason::Expired));
+        assert_ne!(reason, Some(Reason::Revoked));
+        assert_eq!(rig.machine.deadline(), None, "aucune tentative");
+    }
+}
+
 #[test]
 fn every_stopped_state_carries_its_reason() {
     let mut rig = Rig::connected();

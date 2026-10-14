@@ -8,7 +8,7 @@ import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import { useAccountActions } from "@/composables/useAccountActions";
 import { useAccountRules } from "@/composables/useAccountRules";
 import { t } from "@/i18n";
-import type { Account } from "@/link";
+import { type Account, modeOn } from "@/link";
 import { useSecurityStore } from "@/stores/security";
 
 // Changement de mot de passe : le sien (`account` absent : ancien puis nouveau, ferme les AUTRES
@@ -44,9 +44,8 @@ const securityEntry = computed(() => security.of(props.serverId));
 const keepSupported = computed(() => securityEntry.value?.status !== "unsupported");
 const attackNoKey = computed(() => {
   const state = securityEntry.value?.state;
-  return (
-    state !== null && state !== undefined && state.attackMode.state !== "off" && !state.keyAtHand
-  );
+  // Un mode attaque inconnu de ce client n'est pas « actif » : l'avertissement ne l'affirme pas.
+  return state !== null && state !== undefined && modeOn(state.attackMode) && !state.keyAtHand;
 });
 const rules = useAccountRules(toRef(props, "username"), password);
 const actions = useAccountActions(() => props.serverId);

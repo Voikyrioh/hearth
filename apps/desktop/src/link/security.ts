@@ -109,7 +109,16 @@ export function alertVisible(alert: SecurityAlert): boolean {
   return alert.own || (alert.others ?? 0) > 0;
 }
 
-/** Le mode attaque est-il en vigueur ou suspendu (le bandeau permanent s'affiche dans les deux cas) ? */
+/**
+ * Le mode attaque est-il en vigueur ou suspendu (le bandeau permanent s'affiche dans les deux cas) ? Un état que
+ * ce client ne connaît pas (`unknown`, agent plus récent) n'est PAS « en vigueur » : on ne l'affirme pas
+ * (BR-COMPAT-001 point 4).
+ */
 export function modeOn(mode: AttackMode): boolean {
-  return mode.state !== "off";
+  return mode.state === "active" || mode.state === "suspended";
+}
+
+/** Ce client ne sait pas lire l'état du mode attaque de ce serveur : aucun geste ne se fonde dessus. */
+export function modeUnknown(mode: AttackMode): boolean {
+  return mode.state === "unknown";
 }

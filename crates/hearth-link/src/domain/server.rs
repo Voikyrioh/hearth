@@ -135,7 +135,7 @@ impl LastKnown {
     pub fn without_secrets(&self) -> Self {
         let mut view = self.clone();
         if let Some(state) = view.services.as_mut() {
-            for item in &mut state.services {
+            for item in state.services.iter_mut() {
                 item.env_names.clear();
                 item.env_names_omitted = 0;
                 item.command = None;

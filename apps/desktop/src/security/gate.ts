@@ -6,6 +6,8 @@ import type { ServerSecurity } from "@/stores/security";
  * Pourquoi le mode attaque ne se change pas d'ici (conception design, écran A : trois raisons, UNE
  * seule affichée, dans cet ordre) :
  * - `readonly` : un compte Lecture seule voit l'alerte mais l'agent lui refuse le geste ;
+ * - `role_unknown` : l'agent a donné un rôle que ce client ne connaît pas (agent plus récent) : ni lecture seule ni
+ *   administrateur affirmé, donc aucun geste proposé (BR-COMPAT-001 point 4) ;
  * - `agent_old` : l'agent de ce serveur est d'avant l'alerte et le mode attaque ;
  * - `not_enrolled` : ce PC n'a pas de clé d'appareil au coffre (Q14 point 3) : la coquille ne part pas.
  *   L'agent accepte la preuve de TOUTE clé inscrite du compte (Q18, BR-TRUST-041), pas seulement celle qui
@@ -16,12 +18,19 @@ import type { ServerSecurity } from "@/stores/security";
  * `null` : le geste est possible. L'interface n'arbitre rien : l'agent reste le juge, ceci n'est que
  * ce qu'on peut dire SANS lui envoyer ce qui serait refusé.
  */
-export type AttackModeBlock = "readonly" | "agent_old" | "not_enrolled" | "unreadable" | "pending";
+export type AttackModeBlock =
+  | "readonly"
+  | "role_unknown"
+  | "agent_old"
+  | "not_enrolled"
+  | "unreadable"
+  | "pending";
 
 export function attackModeBlock(
   role: Role | undefined,
   entry: ServerSecurity | undefined,
 ): AttackModeBlock | null {
+  if (role === "unknown") return "role_unknown";
   if (role !== "admin") return "readonly";
   if (!entry || entry.status === "loading") return "pending";
   if (entry.status === "unsupported") return "agent_old";
@@ -39,6 +48,8 @@ export function blockMessageKey(block: AttackModeBlock | null): MessageKey | und
   switch (block) {
     case "readonly":
       return "security.noPermission";
+    case "role_unknown":
+      return "security.roleUnknown";
     case "agent_old":
       return "security.agentTooOld";
     case "not_enrolled":

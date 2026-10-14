@@ -17,6 +17,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::lenient::Items;
+
 /// Capacité annoncée par `GET /hello` (`capabilities`) quand l'agent sert le sujet `services`.
 /// Un client n'envoie le sujet `services` (ni aucune route des services) qu'à un agent qui l'annonce :
 /// un sujet inconnu fait refuser TOUT le message `subscribe`, `metrics` compris.
@@ -520,7 +522,8 @@ pub struct ServicesState {
     /// que le dernier vu vaut remise à zéro.
     pub rev: u64,
     pub engine: EngineView,
-    pub services: Vec<ServiceItem>,
+    /// Un service illisible par cette version est écarté et compté (BR-COMPAT-001 point 10).
+    pub services: Items<ServiceItem>,
 }
 
 /// Changement d'un lot : services ajoutés ou modifiés, services disparus, état du moteur s'il a changé.
@@ -529,7 +532,8 @@ pub struct ServicesDelta {
     pub rev: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<EngineView>,
-    pub upserts: Vec<ServiceItem>,
+    /// Un service illisible par cette version est écarté et compté (BR-COMPAT-001 point 10).
+    pub upserts: Items<ServiceItem>,
     pub removed: Vec<String>,
 }
 

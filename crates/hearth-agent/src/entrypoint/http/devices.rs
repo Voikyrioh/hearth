@@ -48,7 +48,7 @@ pub async fn list(
         .map(item)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(DevicesResponse {
-        devices,
+        devices: devices.into(),
         max: MAX_DEVICES_PER_ACCOUNT,
     }))
 }

@@ -5,6 +5,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::lenient::Items;
+
 /// Rôle d'un compte sur le fil.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -66,7 +68,8 @@ pub struct AccountItem {
 /// Réponse de `GET /accounts`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountsResponse {
-    pub accounts: Vec<AccountItem>,
+    /// Un compte illisible par cette version est écarté et compté (BR-COMPAT-001 point 10).
+    pub accounts: Items<AccountItem>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

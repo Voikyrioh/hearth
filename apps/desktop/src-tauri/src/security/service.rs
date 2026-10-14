@@ -93,7 +93,8 @@ pub fn interpret(status: u16, body: &Value) -> Result<AttackModeOutcome, LinkFai
         }));
     }
     let error = error.error;
-    Ok(refused(match error.code {
+    // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8).
+    Ok(refused(match error.code.or_from_status(status) {
         ErrorCode::ForbiddenRole => return Err(LinkFailure::forbidden(&error)),
         ErrorCode::NotFound => AttackModeRefusal::Unsupported,
         ErrorCode::Unauthenticated | ErrorCode::SessionExpired => AttackModeRefusal::SessionEnded,

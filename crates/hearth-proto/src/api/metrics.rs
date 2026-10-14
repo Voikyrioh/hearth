@@ -43,6 +43,7 @@ pub struct GpuSample {
 pub struct TempSample {
     /// Nom de la sonde tel que le système le donne (`coretemp Package id 0`).
     pub label: String,
+    #[serde(deserialize_with = "crate::lenient::measure")]
     pub celsius: f32,
 }
 
@@ -53,8 +54,10 @@ pub struct Sample {
     pub at: String,
     pub uptime_s: u64,
     /// Charge globale du processeur.
+    #[serde(deserialize_with = "crate::lenient::measure")]
     pub cpu: f32,
     /// Charge par cœur logique, dans l'ordre du système.
+    #[serde(deserialize_with = "crate::lenient::measures")]
     pub cores: Vec<f32>,
     pub mem: MemorySample,
     pub disks: Vec<DiskSample>,
@@ -73,6 +76,7 @@ pub struct Sample {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepPeak {
     /// Charge globale maximale du pas.
+    #[serde(deserialize_with = "crate::lenient::measure")]
     pub cpu: f32,
     pub mem_used_bytes: u64,
     /// Débits maximaux (chacun son maximum) ; absent si aucune mesure de débit dans le pas.
@@ -98,6 +102,7 @@ pub struct GpuPeak {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TempPeak {
     pub label: String,
+    #[serde(deserialize_with = "crate::lenient::measure")]
     pub celsius: f32,
 }
 

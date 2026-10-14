@@ -1,0 +1,165 @@
+import { describe, expect, it } from "vitest";
+import { roleLabel } from "@/accounts/messages";
+import { knownStep, REASONS, resultMessage } from "@/agentUpdate/messages";
+import { OUTCOME_KEYS, originOf } from "@/audit/format";
+import bindings from "@/bindings.ts?raw";
+import { type MessageKey, t } from "@/i18n";
+import type { AuditEntry } from "@/link";
+import { ATTACK_STATE_KEYS } from "@/security/messages";
+import { STATE_KEYS } from "@/services/format";
+import { OPERATION_TEXTS } from "@/stores/link";
+
+// BR-COMPAT-001 point 4 et 7 : toute union générée (`bindings.ts`) qui contient "unknown" (agent plus récent que ce
+// client) a une entrée dans la table de libellés de l'interface, et cette table est exhaustive. Une union nouvelle
+// dont aucune table n'est déclarée ici fait échouer le test : on ne peut pas ajouter une valeur inconnue à l'écran
+// sans dire ce qu'il en est.
+
+/** Les unions de chaînes de `bindings.ts` : nom -> valeurs. Balayage à la main (commentaires et objets ignorés). */
+function stringUnions(source: string): Map<string, string[]> {
+  const unions = new Map<string, string[]>();
+  const header = "export type ";
+  let from = 0;
+  for (;;) {
+    const start = source.indexOf(header, from);
+    if (start === -1) break;
+    const equals = source.indexOf("=", start);
+    const name = source.slice(start + header.length, equals).trim();
+    let depth = 0;
+    let i = equals + 1;
+    const values: string[] = [];
+    let objectLike = false;
+    for (; i < source.length; i++) {
+      const ch = source[i];
+      if (ch === "/" && source[i + 1] === "*") {
+        i = source.indexOf("*/", i) + 1;
+      } else if (ch === "{" || ch === "(" || ch === "[") {
+        depth++;
+        objectLike = true;
+      } else if (ch === "}" || ch === ")" || ch === "]") {
+        depth--;
+      } else if (ch === '"' && depth === 0) {
+        const end = source.indexOf('"', i + 1);
+        values.push(source.slice(i + 1, end));
+        i = end;
+      } else if (ch === ";" && depth === 0) {
+        break;
+      }
+    }
+    if (!objectLike && values.length > 0 && /^\w+$/.test(name)) unions.set(name, values);
+    from = i + 1;
+  }
+  return unions;
+}
+
+const entry = (kind: AuditEntry["origin"]["kind"]): AuditEntry => ({
+  id: 1,
+  at: "2026-10-14T10:00:00Z",
+  atMs: Date.parse("2026-10-14T10:00:00Z"),
+  account: null,
+  origin: { kind, name: null, addr: null, text: "texte de l'agent" },
+  action: "a",
+  actionLabel: "A",
+  target: null,
+  outcome: "ok",
+  reason: null,
+  repeatCount: 0,
+});
+
+function key(label: string | undefined): void {
+  expect(label, "libellé absent").toBeTruthy();
+}
+
+/** Une clé de message existe dans le dictionnaire (jamais la clé elle-même affichée). */
+function text(messageKey: MessageKey | undefined): string {
+  expect(messageKey, "entrée absente de la table").toBeTruthy();
+  const out = t(messageKey as MessageKey);
+  expect(out).not.toBe(messageKey);
+  expect(out.length).toBeGreaterThan(0);
+  return out;
+}
+
+/** Pour chaque union : comment l'écran dit chaque valeur, `unknown` comprise. */
+const SAYS: Record<string, (value: string) => void> = {
+  AgentUpdateOutcomeDto: (value) =>
+    key(
+      resultMessage({
+        outcome: value as "succeeded",
+        reason: null,
+        version: "9.9.9",
+      }),
+    ),
+  AgentUpdateReasonDto: (value) => {
+    text(REASONS[value as keyof typeof REASONS]);
+  },
+  AgentUpdateStepDto: (value) => {
+    // Une étape inconnue n'a volontairement pas de libellé : l'écran ne marque aucune étape (« en cours »).
+    if (value === "unknown") expect(knownStep("unknown" as never)).toBeNull();
+    else if (value !== "done") expect(knownStep(value as never)).not.toBeNull();
+  },
+  AttackModeStateDto: (value) => {
+    text(ATTACK_STATE_KEYS[value as keyof typeof ATTACK_STATE_KEYS]);
+  },
+  AuditOriginKindDto: (value) => {
+    key(originOf(entry(value as AuditEntry["origin"]["kind"])));
+  },
+  AuditOutcomeDto: (value) => {
+    text(OUTCOME_KEYS[value as keyof typeof OUTCOME_KEYS]);
+  },
+  EngineStateDto: (value) => {
+    // Les états du moteur ont chacun leur texte dans le panneau ; l'état inconnu : `engine.unknownText`.
+    if (value === "unknown") text("engine.unknownText");
+  },
+  OutcomeDto: (value) => {
+    text(OPERATION_TEXTS[value as keyof typeof OPERATION_TEXTS]);
+  },
+  ReauthModeDto: (value) => {
+    if (value === "unknown") text("reauth.settingUnknown");
+    else text(value === "each" ? "reauth.settingEach" : "reauth.settingWindow");
+  },
+  RoleDto: (value) => {
+    key(roleLabel(value as "admin"));
+    if (value === "unknown") expect(roleLabel("unknown")).toBe(t("accounts.roleUnknown"));
+  },
+  ServiceStateDto: (value) => {
+    text(STATE_KEYS[value as keyof typeof STATE_KEYS]);
+  },
+};
+
+/** Les unions qui ne s'affichent nulle part comme un libellé : la raison, par écrit. Une union absente des deux listes échoue. */
+const NOT_SHOWN: Record<string, string> = {
+  AttackModeEndDto: "seul « auto » est lu (annonce de fin automatique) ; jamais affiché",
+  SecurityDeviceDto:
+    "ne sert qu'à la porte du mode attaque (état « pas encore lu »), jamais affiché",
+  DriverDto: "sert à un repère de détail (unité) seulement quand c'est « supervisor » ; sinon rien",
+  OriginDto: "sert au repère « externe » seulement ; sinon rien",
+  ProtocolDto: "dit par portLabel (testé dans services.test.ts)",
+  ScopeDto: "dit par portLabel (testé dans services.test.ts)",
+};
+
+describe("toute union générée qui contient « unknown » a une table de libellés exhaustive", () => {
+  const unions = [...stringUnions(bindings)].filter(([, values]) => values.includes("unknown"));
+
+  it("trouve les unions à contrôler", () => {
+    expect(unions.length).toBeGreaterThanOrEqual(15);
+    expect(unions.map(([name]) => name)).toContain("AttackModeStateDto");
+  });
+
+  it("n'oublie aucune union : chacune est déclarée dans SAYS ou dans NOT_SHOWN", () => {
+    const missing = unions
+      .map(([name]) => name)
+      .filter((name) => !(name in SAYS) && !(name in NOT_SHOWN));
+    expect(missing, `unions sans table de libellés déclarée : ${missing.join(", ")}`).toEqual([]);
+    const stale = [...Object.keys(SAYS), ...Object.keys(NOT_SHOWN)].filter(
+      (name) => !unions.some(([union]) => union === name),
+    );
+    expect(stale, `déclarées mais absentes de bindings.ts : ${stale.join(", ")}`).toEqual([]);
+  });
+
+  for (const [name, values] of unions) {
+    const says = SAYS[name];
+    if (!says) continue;
+    it(`${name} : chaque valeur (${values.join(", ")}) est dite`, () => {
+      for (const value of values) says(value);
+    });
+  }
+});

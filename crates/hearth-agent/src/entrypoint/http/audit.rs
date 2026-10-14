@@ -85,7 +85,7 @@ pub async fn list(
         .map(wire::audit_item)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(AuditResponse {
-        events,
+        events: events.into(),
         next_before: page.next_before,
     }))
 }

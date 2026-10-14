@@ -207,6 +207,12 @@ pub struct AuditPageDto {
 
 impl From<&AuditResponse> for AuditPageDto {
     fn from(page: &AuditResponse) -> Self {
+        if page.events.unreadable() > 0 {
+            tracing::warn!(
+                unreadable = page.events.unreadable(),
+                "entrées du journal illisibles par cette version, écartées"
+            );
+        }
         Self {
             events: page.events.iter().map(AuditEntryDto::from).collect(),
             #[allow(clippy::cast_precision_loss)]

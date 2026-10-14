@@ -6,6 +6,8 @@ La mise à jour s'exécute **côté serveur** : `POST` répond `202` tout de sui
 
 **Valeurs inconnues** (BR-COMPAT-001) : `step`, `outcome` et `reason` sont lus par le client avec un repli. Un agent plus récent peut ajouter une étape, une issue ou une raison : le client la lit `unknown` (`UpdateStep::Unknown`, `UpdateOutcome::Unknown`, `UpdateReason::Unknown`) sans perdre la progression ; une issue `unknown` n'est ni une réussite ni un échec. Ajouter une valeur ne change pas `API_VERSION`.
 
+**Ce que l'agent émet lui-même** (BR-COMPAT-001 point 7). L'agent écrit `update/last.json`, `update/state.json` et `update/phase.json` : après un retour arrière, l'ancien binaire relit ce qu'a écrit le plus récent. Ces fichiers ont leur propre lecture : une étape ou une issue que l'agent ne comprend pas est GARDÉE telle qu'elle a été écrite (le texte d'origine est réécrit à l'identique, jamais en `"unknown"`). Vers les clients, l'agent dit alors `"unknown"` (étape du flux ou `GET /agent/update`, issue de `done` et de `GET /agent/update/last`) : c'est la seule fois où l'agent émet cette valeur, pour dire « je ne sais pas lire ce résultat ». Dans le journal d'activité, une telle issue a sa propre entrée, `Échoué : résultat de la mise à jour inconnu de cette version (écrit par une version plus récente), ni réussite ni échec établis` (jamais « mise à jour échouée » ni « réussie »).
+
 ## `GET /api/v1/agent/update`
 
 - **Rôle** : tous (lecture). Pas de clé d'opération.

@@ -137,6 +137,8 @@ pub enum ReasonDto {
     StoredPasswordRefused,
     UserDisconnected,
     Revoked,
+    /// Fin de session pour un motif que cette version ne connaît pas (agent plus récent).
+    Ended,
 }
 
 /// État du lien d'un serveur (`link://state`). `seq` croît strictement par serveur : l'interface
@@ -190,6 +192,7 @@ impl LinkStateDto {
                 Reason::StoredPasswordRefused => ReasonDto::StoredPasswordRefused,
                 Reason::UserDisconnected => ReasonDto::UserDisconnected,
                 Reason::Revoked => ReasonDto::Revoked,
+                Reason::Ended => ReasonDto::Ended,
             }),
             failed_attempts: info.failed_attempts,
         }

@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn one_failing_request_of_several_fails_the_whole_page() {
         let ok = AuditResponse {
-            events: vec![item(9), item(7)],
+            events: vec![item(9), item(7)].into(),
             next_before: None,
         };
         let results = vec![Ok(ok.clone()), Err(LinkError::Timeout), Ok(ok.clone())];

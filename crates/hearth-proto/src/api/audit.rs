@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::lenient::Items;
+
 /// En-tête de la réponse de l'export, `true` quand le fichier ne contient que les entrées les
 /// plus récentes du résultat (plafond atteint).
 pub const EXPORT_TRUNCATED_HEADER: &str = "x-hearth-export-truncated";
@@ -215,7 +217,8 @@ pub struct AuditEventItem {
 /// Réponse de `GET /audit` : les entrées de la plus récente à la plus ancienne.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditResponse {
-    pub events: Vec<AuditEventItem>,
+    /// Une entrée illisible par cette version est écartée et comptée (BR-COMPAT-001 point 10).
+    pub events: Items<AuditEventItem>,
     /// À passer en `before` pour la page suivante ; absent à la dernière page.
     pub next_before: Option<i64>,
 }
@@ -282,7 +285,7 @@ mod tests {
     #[test]
     fn the_response_round_trips() {
         let response = AuditResponse {
-            events: vec![item()],
+            events: vec![item()].into(),
             next_before: Some(7),
         };
         let back: AuditResponse =

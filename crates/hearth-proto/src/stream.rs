@@ -336,7 +336,7 @@ mod tests {
         let snapshot = ServicesMessage::ServicesSnapshot(ServicesState {
             rev: 3,
             engine: engine.clone(),
-            services: vec![],
+            services: vec![].into(),
         });
         let value = serde_json::to_value(&snapshot).expect("json");
         assert_eq!(value["type"], "services_snapshot");
@@ -349,7 +349,7 @@ mod tests {
         let delta = ServicesMessage::ServicesDelta(ServicesDelta {
             rev: 4,
             engine: None,
-            upserts: vec![],
+            upserts: vec![].into(),
             removed: vec!["c_1".into()],
         });
         assert_eq!(

@@ -509,7 +509,7 @@ impl World {
         inner
             .write_state(&SupervisorState {
                 version: job.version.clone(),
-                step: hearth_proto::api::update::UpdateStep::Restart,
+                step: hearth_proto::api::update::UpdateStep::Restart.into(),
                 previous: job.previous.clone(),
                 requester: job.requester(),
             })

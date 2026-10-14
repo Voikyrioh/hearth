@@ -14,7 +14,7 @@ import {
 import { useServersStore } from "./servers";
 import { useToastsStore } from "./toasts";
 
-const OPERATION_TEXTS = {
+export const OPERATION_TEXTS = {
   done: "operation.done",
   not_executed: "operation.notExecuted",
   unknown: "operation.unknown",
