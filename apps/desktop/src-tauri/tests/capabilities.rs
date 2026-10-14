@@ -87,6 +87,107 @@ fn every_declared_command_is_allowed_to_the_window() {
     );
 }
 
+/// Les noms (`snake_case`) des commandes déclarées dans `build.rs`.
+fn declared_in_build() -> std::collections::BTreeSet<String> {
+    let manifest =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/build.rs")).unwrap();
+    let start = manifest.find("const COMMANDS").unwrap();
+    let block = &manifest[start..manifest[start..].find("];").unwrap() + start];
+    block
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix('"')
+                .and_then(|l| l.split('"').next())
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Les commandes enregistrées dans `lib.rs` (`collect_commands![ ... ]`), par leur dernier segment.
+fn registered_in_lib() -> std::collections::BTreeSet<String> {
+    let lib = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs")).unwrap();
+    let start = lib.find("collect_commands![").unwrap();
+    let block = &lib[start..lib[start..].find("])").unwrap() + start];
+    block
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let path = line.trim().strip_suffix(',')?;
+            Some(path.rsplit("::").next()?.to_owned())
+        })
+        .collect()
+}
+
+/// Les fonctions marquées `#[tauri::command]` dans le code de la coquille.
+fn marked_as_command() -> std::collections::BTreeSet<String> {
+    fn walk(dir: &std::path::Path, found: &mut std::collections::BTreeSet<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                let mut marked = false;
+                for line in text.lines() {
+                    let line = line.trim();
+                    if line == "#[tauri::command]" {
+                        marked = true;
+                    } else if marked
+                        && let Some(rest) = line
+                            .strip_prefix("pub async fn ")
+                            .or_else(|| line.strip_prefix("pub fn "))
+                    {
+                        if let Some(name) = rest.split('(').next() {
+                            found.insert(name.trim().to_owned());
+                        }
+                        marked = false;
+                    }
+                }
+            }
+        }
+    }
+    let mut found = std::collections::BTreeSet::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut found,
+    );
+    found
+}
+
+/// Les quatre listes sont ÉGALES : les fonctions marquées commande, celles enregistrées dans `lib.rs`, celles
+/// déclarées dans `build.rs` et les permissions de `capabilities/default.json`. L'oubli d'une commande dans
+/// l'une d'elles (elle marche en développement et est refusée en production, ou l'inverse) est impossible.
+#[test]
+fn the_four_lists_of_commands_are_the_same() {
+    let marked = marked_as_command();
+    let registered = registered_in_lib();
+    let declared = declared_in_build();
+    let allowed: std::collections::BTreeSet<String> = permissions()
+        .iter()
+        .filter_map(|p| p.strip_prefix("allow-"))
+        .map(|c| c.replace('-', "_"))
+        .collect();
+    assert!(
+        marked.len() > 50,
+        "commandes marquées non lues ({})",
+        marked.len()
+    );
+    assert_eq!(
+        marked, registered,
+        "fonctions `#[tauri::command]` et liste de `lib.rs` (`collect_commands!`) diffèrent"
+    );
+    assert_eq!(
+        registered, declared,
+        "`lib.rs` et `build.rs` (COMMANDS) diffèrent"
+    );
+    assert_eq!(
+        declared, allowed,
+        "`build.rs` et `capabilities/default.json` diffèrent"
+    );
+}
+
 #[test]
 fn no_exposed_command_takes_a_free_route_method_or_body() {
     let bindings =
@@ -243,9 +344,16 @@ const EXPECTED: &[(&str, &str)] = &[
     // qui construit la route) ; `session` est l'identifiant rendu par `openServiceLogs` (une session inconnue ne fait
     // rien) ; `batches` est un nombre de lots acquittés. Aucune ligne ne revient par une commande : elles arrivent par
     // l'événement `link://service-logs`.
-    ("openServiceLogs", "serverId: string, key: string"),
+    // `page` est la génération rendue par `announceLogPage` (la coquille la compare à celle de la fenêtre) ;
+    // `keepServiceLogs` est le battement de vie de cette page et rend les sessions encore ouvertes.
+    ("announceLogPage", ""),
+    (
+        "openServiceLogs",
+        "page: number, serverId: string, key: string",
+    ),
     ("closeServiceLogs", "session: string"),
     ("ackServiceLogs", "session: string, batches: number"),
+    ("keepServiceLogs", "page: number"),
     ("openEngineDocs", ""),
 ];
 
@@ -314,9 +422,11 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "engineRecheck",
     "readServiceRights",
     "revealServiceEnv",
+    "announceLogPage",
     "openServiceLogs",
     "closeServiceLogs",
     "ackServiceLogs",
+    "keepServiceLogs",
     "openEngineDocs",
 ];
 

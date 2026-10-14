@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { type Entry, LogBuffer, lineEntry, MAX_CHARS, MAX_LINES } from "./buffer";
 import { findMatches, segmentsOf } from "./search";
-import { displayText, FOLD_CHARS, foldedText, MAX_LINE_CHARS, stripTerminal } from "./text";
+import {
+  charCount,
+  cutOnCharacter,
+  displayText,
+  FOLD_CHARS,
+  foldedText,
+  MAX_LINE_CHARS,
+  stripTerminal,
+} from "./text";
 import { clockOf, fullTimeOf } from "./time";
 import { endNotice, exitWords, gapText, waitingText } from "./view";
 import {
@@ -274,5 +282,82 @@ describe("avis : valeur inconnue = texte neutre, jamais un état affirmé", () =
     expect(waitingText(12)).toBe("12 nouvelles lignes");
     expect(exitWords(137)).toContain("code 137");
     expect(exitWords(2)).toBe("code 2");
+  });
+});
+
+describe("coupe d'une ligne longue : toujours sur une frontière de caractère", () => {
+  const loneSurrogate = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+  it("301 émojis repliés ne laissent jamais un demi-caractère", () => {
+    const folded = foldedText("😀".repeat(301));
+    expect(loneSurrogate.test(folded)).toBe(false);
+    expect(folded.length).toBeLessThanOrEqual(FOLD_CHARS);
+    expect(Array.from(folded).length).toBe(300);
+  });
+
+  it("ne coupe ni un émoji à plusieurs éléments, ni une lettre et son accent, ni un drapeau", () => {
+    const family = "👨‍👩‍👧‍👦";
+    const text = `${"a".repeat(FOLD_CHARS - 3)}${family}${"b".repeat(50)}`;
+    const folded = foldedText(text);
+    expect(folded).toBe("a".repeat(FOLD_CHARS - 3));
+    const accent = `${"a".repeat(FOLD_CHARS - 1)}é${"b".repeat(50)}`;
+    expect(foldedText(accent)).toBe("a".repeat(FOLD_CHARS - 1));
+    expect(cutOnCharacter("🇫🇷🇫🇷🇫🇷", 5)).toBe("🇫🇷");
+    expect(cutOnCharacter("court", 50)).toBe("court");
+  });
+
+  it("une ligne énorme d'émojis est coupée sur un caractère entier", () => {
+    const shown = displayText("🙂".repeat(MAX_LINE_CHARS + 40));
+    expect(loneSurrogate.test(shown)).toBe(false);
+    expect(Array.from(shown).length).toBeLessThanOrEqual(MAX_LINE_CHARS);
+  });
+
+  it("le compte de caractères est celui qu'on lit, pas celui des unités", () => {
+    expect(charCount("😀".repeat(403))).toBe(403);
+    expect(charCount("👨‍👩‍👧‍👦é")).toBe(2);
+    expect("😀".repeat(403).length).toBe(806);
+  });
+});
+
+describe("avis : lecture fermée par la coquille et place refusée", () => {
+  const base = { failure: null, hasLines: false, remainingS: 0 } as const;
+
+  it("fenêtre fermée : dit ce qui s'est passé et propose de reprendre, sans reprise seule", () => {
+    const hidden = endNotice({ ...base, end: { kind: "closed", cause: "window_hidden" } });
+    expect(hidden?.text).toContain("pendant que la fenêtre était fermée");
+    expect(hidden?.text).toContain("effacées");
+    expect(hidden?.retry).toBe("now");
+    expect(hidden?.retryWord).toBe("resume");
+    expect(hidden?.tone).toBe("info");
+  });
+
+  it("page figée, serveur changé, cause inconnue : un texte clair chacun, jamais le mot d'une autre cause", () => {
+    const idle = endNotice({ ...base, end: { kind: "closed", cause: "idle" } });
+    const lost = endNotice({ ...base, end: { kind: "closed", cause: "lost" } });
+    const other = endNotice({ ...base, end: { kind: "closed", cause: "other" } });
+    const server = endNotice({ ...base, end: { kind: "closed", cause: "server_changed" } });
+    expect(idle?.text).toContain("ne répondait plus");
+    expect(lost?.text).toBe(idle?.text);
+    expect(other?.text).toBe(idle?.text);
+    expect(server?.text).toContain("le lien avec ce serveur a changé");
+    for (const notice of [idle, lost, other, server]) {
+      expect(notice?.retryWord).toBe("resume");
+      expect(notice?.text).not.toContain("fenêtre était fermée");
+    }
+  });
+
+  it("la coquille refuse faute de place : l'écran le dit avec ce qu'il faut faire", () => {
+    const full = endNotice({ end: null, failure: "reads_full", hasLines: false, remainingS: 0 });
+    expect(full?.text).toContain("Trois lectures de journaux sont déjà ouvertes depuis ce PC");
+    expect(full?.text).toContain("attends un peu");
+    expect(full?.text).not.toContain("Impossible");
+    expect(full?.retry).toBe("now");
+    expect(full?.retryWord).toBe("retry");
+  });
+
+  it("plusieurs reprises sans réponse : dit que la lecture ne repart plus seule", () => {
+    const gaveUp = endNotice({ ...base, end: { kind: "unreachable" } });
+    expect(gaveUp?.text).toContain("ne reprend plus seule");
+    expect(gaveUp?.retry).toBe("now");
   });
 });

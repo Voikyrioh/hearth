@@ -368,7 +368,9 @@ const commandNote = computed(() => {
 .detail--logs {
   flex: 1 1 0;
   max-width: none;
-  overflow-y: hidden;
+  /* Les lignes défilent dans leur cadre ; le volet ne défile que si les avis empilés ne laissent plus la place
+     d'une dizaine de lignes (rien n'est jamais coupé). */
+  overflow-y: auto;
 }
 
 .detail[data-gone] .detail__body {

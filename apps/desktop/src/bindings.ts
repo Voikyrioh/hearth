@@ -186,13 +186,20 @@ export const commands = {
 	 */
 	revealServiceEnv: (serverId: string, key: string) => typedError<EnvRevealDto, LinkFailure>(__TAURI_INVOKE("reveal_service_env", { serverId, key })),
 	/**
-	 *  Ouvre la lecture des journaux d'UN service (HRT-67, `BR-SLOG-*`) et rend l'identifiant de sa session. Les
-	 *  lots arrivent à la fenêtre par l'événement `link://service-logs` ; la coquille ne garde aucune ligne, n'en
-	 *  écrit aucune et n'en trace aucune. Au plus trois lectures à la fois (le plafond d'un compte). La lecture se
-	 *  reprend seule après une coupure ; un refus de l'agent est une fin, jamais retentée. Hors « Connecté » :
-	 *  `NotConnected`, rien n'est envoyé.
+	 *  Une page des journaux démarre (ou redémarre) : la coquille lui donne le numéro de sa génération et ferme tout
+	 *  ce que la page précédente de CETTE fenêtre avait laissé ouvert (rechargement, plantage du rendu, navigation
+	 *  brutale). À appeler une fois au démarrage de la page, avant toute ouverture (HRT-67, `BR-SLOG-026`).
 	 */
-	openServiceLogs: (serverId: string, key: string) => typedError<string, LinkFailure>(__TAURI_INVOKE("open_service_logs", { serverId, key })),
+	announceLogPage: () => __TAURI_INVOKE<number>("announce_log_page"),
+	/**
+	 *  Ouvre la lecture des journaux d'UN service (HRT-67, `BR-SLOG-*`) et rend l'identifiant de sa session. Les
+	 *  lots arrivent à la SEULE fenêtre qui l'a ouverte, par l'événement `link://service-logs` ; la coquille ne garde
+	 *  aucune ligne, n'en écrit aucune et n'en trace aucune. `page` : la génération rendue par `announce_log_page`.
+	 *  Au plus trois lectures par serveur (le plafond d'un compte) et douze au total : au-delà `LogReadsFull`. La
+	 *  lecture se reprend seule après une coupure (bornée) ; un refus de l'agent est une fin, jamais retentée. Hors
+	 *  « Connecté » : `NotConnected`, rien n'est envoyé.
+	 */
+	openServiceLogs: (page: number, serverId: string, key: string) => typedError<string, LinkFailure>(__TAURI_INVOKE("open_service_logs", { page, serverId, key })),
 	/**
 	 *  Ferme la lecture d'un onglet : le socket est fermé et la place rendue au compte. Sans effet sur une session
 	 *  déjà finie.
@@ -200,6 +207,12 @@ export const commands = {
 	closeServiceLogs: (session: string) => __TAURI_INVOKE<void>("close_service_logs", { session }),
 	/**  La fenêtre a affiché ces lots : la coquille peut en envoyer d'autres (au plus vingt sans accusé). */
 	ackServiceLogs: (session: string, batches: number) => __TAURI_INVOKE<void>("ack_service_logs", { session, batches }),
+	/**
+	 *  Battement de vie de la page `page` : à envoyer toutes les dix secondes tant qu'une lecture est ouverte. Rend
+	 *  les sessions de cette page que la coquille tient encore ; une session absente a été fermée par elle. Sans
+	 *  battement pendant 45 secondes, la coquille ferme la session d'office.
+	 */
+	keepServiceLogs: (page: number) => __TAURI_INVOKE<string[]>("keep_service_logs", { page }),
 	/**
 	 *  Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est
 	 *  la constante [`ENGINE_DOCS_URL`].
@@ -799,7 +812,17 @@ export type LinkFailure =
  *  Ce PC a une clé mais l'agent ne donne pas de défi à signer : rien n'est parti (ni mot de passe
  *  ni preuve). Ce n'est pas un serveur injoignable.
  */
-{ kind: "device_challenge_unavailable" } | { kind: "internal" };
+{ kind: "device_challenge_unavailable" } | 
+/**
+ *  La coquille tient déjà autant de lectures de journaux que l'agent en permet à un compte (trois par
+ *  serveur) ou que la garde globale en permet : rien n'est envoyé au serveur (HRT-67, `BR-SLOG-026`).
+ */
+{ kind: "log_reads_full" } | 
+/**
+ *  La page n'a pas annoncé sa génération à la coquille (ou c'est une ancienne page) : elle s'annonce de
+ *  nouveau puis réessaie (HRT-67, ADR-0040).
+ */
+{ kind: "log_page_unknown" } | { kind: "internal" };
 
 /**
  *  État du lien d'un serveur (`link://state`). `seq` croît strictement par serveur : l'interface
@@ -819,10 +842,24 @@ export type LinkStateDto = {
 
 export type LinkStateName = "connected" | "reconnecting" | "offline" | "session_expired" | "access_revoked";
 
+/**  Pourquoi la coquille a fermé une lecture que l'interface tenait encore. */
+export type LogClosedCauseDto = 
+/**  La fenêtre a été fermée (cachée dans la zone de notification) : personne ne regarde. */
+"window_hidden" | 
+/**  L'interface n'a plus donné signe de vie dans le délai (page figée ou plantée). */
+"idle" | 
+/**  Le serveur a été déconnecté, changé ou oublié. */
+"server_changed";
+
 /**  Pourquoi une lecture est finie. */
 export type LogEndDto = 
 /**  L'agent a refusé ou fermé la lecture ; `retry_after_s` seulement pour le frein. */
-{ kind: "refused"; refusal: LogRefusalDto; retryAfterS: number | null } | { kind: "session_ended" } | { kind: "unsupported" } | { kind: "unreachable" };
+{ kind: "refused"; refusal: LogRefusalDto; retryAfterS: number | null } | { kind: "session_ended" } | { kind: "unsupported" } | { kind: "unreachable" } | 
+/**
+ *  C'est la COQUILLE qui a fermé la lecture (pas l'agent) : l'interface efface les lignes et propose de
+ *  reprendre. Jamais retentée seule (`BR-SLOG-019`, `BR-SLOG-020`, ADR-0040).
+ */
+{ kind: "closed"; cause: LogClosedCauseDto };
 
 /**
  *  Une ligne. Le texte est celui de l'agent, déjà nettoyé et coupé à 10 000 caractères ; l'interface le neutralise

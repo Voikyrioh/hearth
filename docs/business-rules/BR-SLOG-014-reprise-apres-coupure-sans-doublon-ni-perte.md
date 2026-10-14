@@ -5,7 +5,7 @@ titre: Après une coupure, la lecture reprend à la dernière ligne reçue sans 
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-journaux-service.md (BR-SLOG-014), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lot-1.md §7, §9, §10, HRT-66
-maj: 2026-10-13
+maj: 2026-10-14
 ---
 
 # BR-SLOG-014 — Après une coupure, la lecture reprend à la dernière ligne reçue sans doublon ni perte tant que l'heure du moteur n'a pas reculé ; sinon, ou si la ligne n'existe plus ou si le curseur n'est pas crédible, un trou et les dernières lignes
@@ -17,12 +17,16 @@ Le curseur est l'heure de la dernière ligne reçue (millisecondes) et son rang 
 
 **Limites exactes** : (1) si les 1 000 lignes de la première page tiennent dans la même milliseconde, le rang de la dernière est sous-estimé et une reprise peut répéter des lignes de ce groupe (des doublons, jamais une perte) ; (2) « sans perte » suppose que l'heure du moteur ne recule pas : si elle recule de plus d'une seconde, `RankTracker` ramène les lignes suivantes à l'heure haute déjà vue et le moteur écarte, à la relecture `since`, les lignes écrites avec une heure plus basse. L'agent le détecte (`RankTracker::rewound`) pour ses propres relectures et repart alors des dernières lignes avec `gap { resume_lost }` ; un curseur déjà remis au client dans cette période n'est repris qu'une fois l'heure rattrapée (plus d'une seconde dans le futur : perdu tout de suite) ; une ligne écrite dans la seconde de recul peut être sautée sans trou annoncé. L'affichage « Vu il y a » et le trou d'écran sont portés par le client.
 
+**Reprises du client (HRT-67, ADR-0040) : bornées.** Le client rouvre un socket tombé avec le curseur de la dernière ligne reçue, mais chaque ouverture consomme une ouverture du frein de l'agent (BR-SLOG-027) : délai croissant 1, 2, 4, 8, 16 puis 30 s plus un aléa de 0 à 25 % (jamais retiré), au plus 6 réouvertures de suite, puis fin « injoignable » et un bouton « Réessayer ». Le compte ne repart de zéro qu'après une connexion qui a tenu 30 s : recevoir un message ne suffit pas. Un `503` ou un `429` est attendu AU MOINS le délai demandé par l'agent (jamais plafonné à 30 s), 3 essais au plus ; au-delà d'une heure demandée, la reprise automatique s'arrête. Constantes dans `crates/hearth-link/src/manager/service_logs_retry.rs`.
+
 ## Application (code)
+- `crates/hearth-link/src/manager/service_logs_retry.rs::{Retry, growing_wait, MAX_FAILURES, MAX_WAIT, STABLE_AFTER, JITTER_PERCENT, MAX_BUSY, MAX_ASKED_WAIT}` et `crates/hearth-link/src/manager/service_logs.rs::run` (HRT-67)
 - `crates/hearth-agent/src/domain/services/logs.rs::{RankTracker, ResumeFilter, check_resume, RESUME_MAX_AGE_MS, RESUME_MAX_LINES, CLOCK_SKEW_MS, FROM_START_LINES, RESUME_WINDOW_LINES}`
 - `crates/hearth-agent/src/application/service_logs.rs::Reader::{plan, follow_container}`
 - `crates/hearth-proto/src/api/service_logs.rs::{LogCursor, LogsClientMessage}`
 
 ## Vérification
+- `crates/hearth-link/src/manager/service_logs_retry.rs` (tests) : `a_socket_that_falls_in_a_loop_gives_up_after_six_reopenings`, `a_connection_that_held_long_enough_clears_the_count`, `a_busy_answer_is_waited_at_least_as_asked_even_beyond_thirty_seconds`, `busy_answers_are_retried_fewer_times_than_cuts_and_never_in_a_burst`
 - `crates/hearth-agent/tests/service_logs_ws.rs::a_resume_gives_exactly_what_follows_the_cursor_even_inside_one_millisecond`
 - `crates/hearth-agent/tests/service_logs_ws.rs::a_resume_whose_line_the_engine_no_longer_has_says_so_and_reloads_the_last_lines`
 - `crates/hearth-agent/tests/service_logs_ws.rs::a_resume_that_is_up_to_date_does_not_resend_anything_when_the_service_stops`
@@ -40,5 +44,6 @@ Le curseur est l'heure de la dernière ligne reçue (millisecondes) et son rang 
 - BR-SLOG-009, BR-SLOG-021
 
 ## Historique
+- 2026-10-14 : reprises du client bornées (recul exponentiel avec aléa, essais comptés sans être remis à zéro par un message), `503` et `429` attendus en entier (revue de la PR 95).
 - 2026-10-13 — création (HRT-66, tranche 4 des déploiements : journaux en direct, côté agent et protocole).
 - 2026-10-13 — corrections de la review locale de HRT-66 : reprise bornée (fenêtre de 5 minutes, curseur futur ou illisible, 20 000 lignes sautées au plus, conteneur recréé lu sur 5 000 lignes au plus) ; limite « horloge qui recule » écrite et détectée.

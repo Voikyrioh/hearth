@@ -61,6 +61,8 @@ export function failureMessage(failure: LinkFailure, seconds?: number): string {
       return t("failure.unknownServer");
     case "fingerprint_changed":
     case "verification_required":
+    case "log_reads_full":
+    case "log_page_unknown":
     case "internal":
       return t("failure.generic");
   }

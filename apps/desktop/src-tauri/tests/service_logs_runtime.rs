@@ -21,7 +21,11 @@ use hearth_agent::domain::services::RunState;
 use hearth_agent::domain::services::logs::LogSource;
 use hearth_desktop_lib::link::{LinkRuntime, UiSink};
 use hearth_desktop_lib::link_dto::LinkFailure;
-use hearth_desktop_lib::services::logs::{LogSessions, MAX_SESSIONS, WINDOW};
+use hearth_desktop_lib::services::logs::{
+    IDLE_TIMEOUT, KEEP_ALIVE_PERIOD, LogSessions, MAX_SESSIONS_PER_SERVER, MAX_SESSIONS_TOTAL,
+    WINDOW,
+};
+use hearth_desktop_lib::services::logs_dto::LogClosedCauseDto;
 use hearth_desktop_lib::vault::{CredentialBackend, CredentialVault};
 use hearth_link::LinkConfig;
 use hearth_link::domain::state::Thresholds;
@@ -107,7 +111,29 @@ fn config() -> LinkConfig {
     }
 }
 
+/// Une horloge que le test fait avancer.
+#[derive(Clone, Default)]
+struct Ticker(Arc<std::sync::atomic::AtomicU64>);
+
+impl Ticker {
+    fn clock(&self) -> hearth_desktop_lib::services::logs::Clock {
+        let millis = self.0.clone();
+        Arc::new(move || Duration::from_millis(millis.load(std::sync::atomic::Ordering::SeqCst)))
+    }
+
+    fn advance(&self, by: Duration) {
+        self.0.fetch_add(
+            u64::try_from(by.as_millis()).unwrap(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+}
+
+const MAIN: &str = "main";
+
 struct Rig {
+    time: Ticker,
+    page: u32,
     runtime: Arc<LinkRuntime>,
     engine: Arc<FakeEngine>,
     sessions: Arc<LogSessions>,
@@ -175,10 +201,15 @@ async fn rig(names: &[&str]) -> Rig {
     })
     .await
     .expect("lien non établi");
+    let time = Ticker::default();
+    let sessions = Arc::new(LogSessions::with_clock(time.clock()));
+    let page = sessions.announce_page(MAIN);
     Rig {
+        time,
+        page,
         runtime,
         engine,
-        sessions: Arc::new(LogSessions::default()),
+        sessions,
         sink: Arc::new(Recorder::default()),
         server: server.id,
         _agent: agent,
@@ -187,10 +218,22 @@ async fn rig(names: &[&str]) -> Rig {
 
 impl Rig {
     fn open(&self, name: &str) -> Result<String, LinkFailure> {
+        self.open_as(MAIN, self.page, self.sink.clone(), name)
+    }
+
+    fn open_as(
+        &self,
+        owner: &str,
+        page: u32,
+        sink: Arc<dyn UiSink>,
+        name: &str,
+    ) -> Result<String, LinkFailure> {
         let key = format!("c_{}", container(name, RunState::Running).id);
         self.sessions.open(
             self.runtime.manager(),
-            self.sink.clone(),
+            sink,
+            owner,
+            page,
             &self.server,
             &key,
         )
@@ -246,16 +289,17 @@ async fn a_session_relays_the_status_then_the_lines_in_the_shape_the_window_read
 }
 
 #[tokio::test]
-async fn a_fourth_session_is_refused_before_the_server_and_a_closed_one_gives_its_place_back() {
+async fn a_fourth_session_on_a_server_is_refused_before_the_server_and_a_closed_one_gives_its_place_back()
+ {
     let rig = rig(&["a", "b", "c", "d"]).await;
     let mut held = Vec::new();
     for name in ["a", "b", "c"] {
         held.push(rig.open(name).unwrap());
     }
-    assert_eq!(rig.sessions.open_count(), MAX_SESSIONS);
-    assert!(matches!(rig.open("d"), Err(LinkFailure::Internal)));
+    assert_eq!(rig.sessions.open_count(), MAX_SESSIONS_PER_SERVER);
+    assert!(matches!(rig.open("d"), Err(LinkFailure::LogReadsFull)));
     rig.sessions.close(&held.pop().unwrap());
-    assert_eq!(rig.sessions.open_count(), MAX_SESSIONS - 1);
+    assert_eq!(rig.sessions.open_count(), MAX_SESSIONS_PER_SERVER - 1);
     // Fermer deux fois, ou fermer une session inconnue, ne fait rien.
     rig.sessions.close("log-inconnue");
     assert!(rig.open("d").is_ok());
@@ -354,4 +398,208 @@ async fn the_text_of_a_line_is_in_the_event_for_the_window_and_in_no_debug() {
     assert!(!shown.contains("SENTINEL"), "{shown}");
     assert!(shown.contains("chars"), "{shown}");
     rig.sessions.close(&session);
+}
+
+fn closed_cause(recorder: &Recorder, session: &str) -> Option<String> {
+    recorder
+        .logs(session)
+        .into_iter()
+        .find(|body| body["kind"] == "ended" && body["end"]["kind"] == "closed")
+        .map(|body| body["end"]["cause"].as_str().unwrap().to_owned())
+}
+
+/// Le plafond de la coquille est celui de l'agent, repris de `hearth_proto` : un seul nombre.
+#[test]
+fn the_shell_ceiling_per_server_is_the_one_of_the_agent_and_a_guard_sits_above_it() {
+    let agent = hearth_agent::domain::services::BrakeSettings::production();
+    assert_eq!(MAX_SESSIONS_PER_SERVER, agent.max_reads);
+    const { assert!(MAX_SESSIONS_TOTAL > MAX_SESSIONS_PER_SERVER) };
+    // Trois battements manqués ne ferment rien.
+    assert!(KEEP_ALIVE_PERIOD * 3 < IDLE_TIMEOUT);
+}
+
+#[tokio::test]
+async fn a_reloaded_page_closes_what_the_previous_one_left_and_an_old_page_cannot_open_again() {
+    let rig = rig(&["a", "b", "c", "d"]).await;
+    // La première page ouvre trois lectures puis meurt sans les fermer (rechargement ou plantage du rendu).
+    for name in ["a", "b", "c"] {
+        rig.open(name).unwrap();
+    }
+    assert_eq!(rig.sessions.open_count(), 3);
+    assert!(matches!(rig.open("d"), Err(LinkFailure::LogReadsFull)));
+    // La page suivante s'annonce : tout ce qui restait de la génération précédente est fermé.
+    let second = rig.sessions.announce_page(MAIN);
+    assert_ne!(second, rig.page);
+    assert_eq!(rig.sessions.open_count(), 0, "plus rien d'orphelin");
+    // La vieille page, si elle vit encore, n'ouvre plus rien ; la neuve ouvre.
+    assert!(matches!(rig.open("d"), Err(LinkFailure::LogPageUnknown)));
+    assert!(rig.open_as(MAIN, second, rig.sink.clone(), "d").is_ok());
+    // Un battement de la vieille page ne voit rien.
+    assert!(rig.sessions.keep_alive(MAIN, rig.page).is_empty());
+    assert_eq!(rig.sessions.keep_alive(MAIN, second).len(), 1);
+    // Une page qui ne s'est jamais annoncée n'ouvre rien.
+    assert!(matches!(
+        rig.open_as("autre", 1, rig.sink.clone(), "a"),
+        Err(LinkFailure::LogPageUnknown)
+    ));
+}
+
+#[tokio::test]
+async fn a_reload_in_one_window_leaves_the_reads_of_another_window_alone() {
+    let rig = rig(&["a", "b"]).await;
+    let other = rig.sessions.announce_page("autre");
+    rig.open("a").unwrap();
+    let theirs = rig.open_as("autre", other, rig.sink.clone(), "b").unwrap();
+    rig.sessions.announce_page(MAIN);
+    assert_eq!(rig.sessions.open_count(), 1);
+    assert_eq!(rig.sessions.keep_alive("autre", other), vec![theirs]);
+}
+
+#[tokio::test]
+async fn hiding_the_window_closes_its_reads_tells_the_page_and_gives_the_places_back() {
+    let rig = rig(&["a", "b", "c", "d"]).await;
+    let sessions: Vec<String> = ["a", "b", "c"]
+        .iter()
+        .map(|name| rig.open(name).unwrap())
+        .collect();
+    until("l'état de chaque lecture", || {
+        sessions.iter().all(|s| !rig.sink.logs(s).is_empty())
+    })
+    .await;
+    assert_eq!(
+        rig.sessions
+            .close_window(MAIN, LogClosedCauseDto::WindowHidden),
+        3
+    );
+    assert_eq!(rig.sessions.open_count(), 0);
+    for session in &sessions {
+        assert_eq!(
+            closed_cause(&rig.sink, session).as_deref(),
+            Some("window_hidden")
+        );
+    }
+    // La page, restée la même, ne voit plus ses sessions.
+    assert!(rig.sessions.keep_alive(MAIN, rig.page).is_empty());
+    // Elle peut reprendre : une place est bien rendue, côté agent aussi.
+    let again = rig.open("d").unwrap();
+    until("le nouvel état, place rendue chez l'agent", || {
+        rig.sink
+            .logs(&again)
+            .iter()
+            .any(|body| body["kind"] == "status")
+    })
+    .await;
+    rig.sessions.close(&again);
+}
+
+#[tokio::test]
+async fn a_session_whose_page_went_silent_is_closed_after_the_timeout_and_a_beat_keeps_it() {
+    let rig = rig(&["a"]).await;
+    let session = rig.open("a").unwrap();
+    rig.time.advance(IDLE_TIMEOUT - Duration::from_secs(1));
+    assert_eq!(rig.sessions.reap(), 0, "pas encore");
+    // Un battement de la page repart le délai.
+    assert_eq!(
+        rig.sessions.keep_alive(MAIN, rig.page),
+        vec![session.clone()]
+    );
+    rig.time.advance(IDLE_TIMEOUT - Duration::from_secs(1));
+    assert_eq!(rig.sessions.reap(), 0);
+    // Un accusé est aussi un signe de vie.
+    rig.sessions.acknowledge(&session, 1);
+    rig.time.advance(IDLE_TIMEOUT - Duration::from_secs(1));
+    assert_eq!(rig.sessions.reap(), 0);
+    // Puis le silence dépasse le délai.
+    rig.time.advance(Duration::from_secs(2));
+    assert_eq!(rig.sessions.reap(), 1);
+    assert_eq!(rig.sessions.open_count(), 0);
+    assert_eq!(closed_cause(&rig.sink, &session).as_deref(), Some("idle"));
+}
+
+#[tokio::test]
+async fn the_global_guard_refuses_beyond_its_number() {
+    let rig = rig(&["a", "b", "c"]).await;
+    let sessions = Arc::new(LogSessions::with_limits(rig.time.clock(), 3, 2));
+    let page = sessions.announce_page(MAIN);
+    let open = |name: &str| {
+        let key = format!("c_{}", container(name, RunState::Running).id);
+        sessions.open(
+            rig.runtime.manager(),
+            rig.sink.clone(),
+            MAIN,
+            page,
+            &rig.server,
+            &key,
+        )
+    };
+    assert!(open("a").is_ok());
+    assert!(open("b").is_ok());
+    assert!(matches!(open("c"), Err(LinkFailure::LogReadsFull)));
+    assert_eq!(sessions.open_on(&rig.server), 2);
+    sessions.close_all();
+}
+
+#[tokio::test]
+async fn disconnecting_or_changing_a_server_closes_only_its_reads_and_says_why() {
+    let rig = rig(&["a", "b"]).await;
+    let one = rig.open("a").unwrap();
+    let two = rig.open("b").unwrap();
+    assert_eq!(rig.sessions.open_on(&rig.server), 2);
+    assert_eq!(
+        rig.sessions
+            .close_server("serveur-inconnu", LogClosedCauseDto::ServerChanged),
+        0
+    );
+    assert_eq!(rig.sessions.open_count(), 2);
+    assert_eq!(
+        rig.sessions
+            .close_server(&rig.server, LogClosedCauseDto::ServerChanged),
+        2
+    );
+    assert_eq!(rig.sessions.open_count(), 0);
+    for session in [one, two] {
+        assert_eq!(
+            closed_cause(&rig.sink, &session).as_deref(),
+            Some("server_changed")
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_destroyed_window_and_the_exit_close_everything_without_a_word() {
+    let rig = rig(&["a", "b"]).await;
+    let one = rig.open("a").unwrap();
+    assert_eq!(rig.sessions.forget_window(MAIN), 1);
+    assert_eq!(rig.sessions.open_count(), 0);
+    assert!(
+        closed_cause(&rig.sink, &one).is_none(),
+        "personne à avertir"
+    );
+    // La fenêtre détruite oublie aussi sa génération.
+    assert!(matches!(rig.open("a"), Err(LinkFailure::LogPageUnknown)));
+    let page = rig.sessions.announce_page(MAIN);
+    rig.open_as(MAIN, page, rig.sink.clone(), "a").unwrap();
+    rig.open_as(MAIN, page, rig.sink.clone(), "b").unwrap();
+    rig.sessions.close_all();
+    assert_eq!(rig.sessions.open_count(), 0);
+}
+
+#[tokio::test]
+async fn the_lines_of_a_read_go_only_to_the_sink_of_the_window_that_opened_it() {
+    let rig = rig(&["a", "b"]).await;
+    let other_sink = Arc::new(Recorder::default());
+    let other = rig.sessions.announce_page("autre");
+    rig.push("a", 0);
+    rig.push("b", 0);
+    let mine = rig.open("a").unwrap();
+    let theirs = rig
+        .open_as("autre", other, other_sink.clone(), "b")
+        .unwrap();
+    until("les lignes des deux", || {
+        rig.sink.batches(&mine) >= 1 && other_sink.batches(&theirs) >= 1
+    })
+    .await;
+    assert_eq!(rig.sink.batches(&theirs), 0);
+    assert_eq!(other_sink.batches(&mine), 0);
+    rig.sessions.close_all();
 }

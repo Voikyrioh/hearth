@@ -16,6 +16,7 @@ mod reauth;
 mod rights;
 mod security;
 mod service_logs;
+mod service_logs_retry;
 mod services;
 mod task;
 mod watchers;

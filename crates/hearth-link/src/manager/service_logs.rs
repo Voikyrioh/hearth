@@ -9,9 +9,11 @@
 //!    (`gap { slow }`, `BR-SLOG-007`) ; le moteur n'est jamais ralenti ;
 //! 3. bat le rythme (`ping`) pendant qu'elle attend le consommateur ;
 //! 4. se REPREND seule après une coupure (socket tombé, lien coupé puis revenu) avec le curseur de la dernière
-//!    ligne reçue, avec un délai croissant et un nombre d'essais borné (`BR-SLOG-014`). Un `503 BUSY` attend
-//!    son `Retry-After` ; un refus de l'agent est TERMINAL, jamais retenté (le frein `LOGS_RATE_LIMITED` porte
-//!    son délai, `LOGS_ACCOUNT_LIMIT` demande à l'utilisateur de fermer une lecture) ;
+//!    ligne reçue : délai croissant avec aléa, au plus `MAX_FAILURES` réouvertures de suite, le compte ne
+//!    repartant de zéro qu'après une connexion qui a tenu `STABLE_AFTER` (`BR-SLOG-014`, politique dans
+//!    `service_logs_retry`). Un `503` ou `429` attend EXACTEMENT son `Retry-After` (jamais moins, `MAX_BUSY`
+//!    essais) ; un refus de l'agent est TERMINAL, jamais retenté (le frein `LOGS_RATE_LIMITED` porte son délai,
+//!    `LOGS_ACCOUNT_LIMIT` demande à l'utilisateur de fermer une lecture) ;
 //! 5. s'arrête quand le lecteur est libéré : le socket est alors fermé et la place rendue au compte.
 //!
 //! Le texte d'une ligne est du contenu sensible : ni trace, ni `Debug`, ni disque, ni message d'erreur
@@ -28,9 +30,10 @@ use hearth_proto::error::ErrorCode;
 use hearth_proto::stream::SignedAuth;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tokio::time::{MissedTickBehavior, interval, sleep, timeout};
+use tokio::time::{Instant, MissedTickBehavior, interval, sleep, timeout};
 use zeroize::Zeroize as _;
 
+use super::service_logs_retry::{Next, Retry};
 use super::{LinkManager, Shared};
 use crate::domain::event::StateInfo;
 use crate::domain::server::ServerId;
@@ -42,10 +45,6 @@ use crate::ports::vault::SecretKind;
 /// Messages en attente entre la tâche et son consommateur. Petit à dessein : au-delà, c'est l'agent qui compte
 /// la perte, pas la mémoire du client.
 const CHANNEL_CAPACITY: usize = 32;
-/// Essais consécutifs sans rien recevoir avant de dire « injoignable ».
-const MAX_FAILURES: u32 = 6;
-/// Plafond de l'attente d'un `503 BUSY` ou d'un délai croissant.
-const MAX_WAIT: Duration = Duration::from_secs(30);
 
 /// Ce qu'un lecteur rend, dans l'ordre. Aucun `Debug` ne montre le texte d'une ligne.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,8 +134,8 @@ impl LinkManager {
 enum Read {
     /// Fin définitive.
     End(LogEnd),
-    /// Le socket est tombé ; `progressed` : au moins un message reçu.
-    Cut { progressed: bool },
+    /// Le socket est tombé ; `lasted` : combien de temps il est resté ouvert (zéro s'il ne s'est pas ouvert).
+    Cut { lasted: Duration },
     /// L'agent demande d'attendre (`503 BUSY`).
     Busy(Duration),
     /// Plus personne ne lit : la tâche s'arrête.
@@ -152,7 +151,7 @@ async fn run(
 ) {
     let mut state = shared.state.subscribe();
     let mut cursor: Option<LogCursor> = None;
-    let mut failures = 0u32;
+    let mut retry = Retry::default();
     let mut streaming = false;
     loop {
         if !wait_connected(&mut state, &tx).await {
@@ -175,35 +174,41 @@ async fn run(
                 let _ = tx.send(LogOutput::Ended(end)).await;
                 return;
             }
-            Read::Cut { progressed } => {
-                failures = if progressed { 1 } else { failures + 1 };
+            Read::Cut { lasted } => {
                 if streaming {
                     streaming = false;
                     if tx.send(LogOutput::Interrupted).await.is_err() {
                         return;
                     }
                 }
-                if failures > MAX_FAILURES {
-                    let _ = tx.send(LogOutput::Ended(LogEnd::Unreachable)).await;
+                let deps = &manager.inner.deps;
+                let next = retry.cut(lasted, deps.config.restart_delay, deps.rng.next_u32());
+                if !pause(next, &tx).await {
                     return;
-                }
-                let base = manager.inner.deps.config.restart_delay;
-                let wait = base.saturating_mul(1 << failures.saturating_sub(1).min(4));
-                tokio::select! {
-                    () = sleep(wait.min(MAX_WAIT)) => {}
-                    () = tx.closed() => return,
                 }
             }
-            Read::Busy(wait) => {
-                failures += 1;
-                if failures > MAX_FAILURES {
-                    let _ = tx.send(LogOutput::Ended(LogEnd::Unreachable)).await;
+            Read::Busy(asked) => {
+                let next = retry.busy(asked, manager.inner.deps.rng.next_u32());
+                if !pause(next, &tx).await {
                     return;
                 }
-                tokio::select! {
-                    () = sleep(wait.min(MAX_WAIT)) => {}
-                    () = tx.closed() => return,
-                }
+            }
+        }
+    }
+}
+
+/// Applique la décision de la politique : attendre (sauf si plus personne ne lit) ou finir « injoignable ».
+/// Faux : la tâche s'arrête.
+async fn pause(next: Next, tx: &mpsc::Sender<LogOutput>) -> bool {
+    match next {
+        Next::GiveUp => {
+            let _ = tx.send(LogOutput::Ended(LogEnd::Unreachable)).await;
+            false
+        }
+        Next::Wait(wait) => {
+            tokio::select! {
+                () = sleep(wait) => true,
+                () = tx.closed() => false,
             }
         }
     }
@@ -240,7 +245,11 @@ async fn read_once(
     let token = match deps.vault.get(id, SecretKind::Token) {
         Ok(Some(token)) => token,
         Ok(None) => return Read::End(LogEnd::SessionEnded),
-        Err(_) => return Read::Cut { progressed: false },
+        Err(_) => {
+            return Read::Cut {
+                lasted: Duration::ZERO,
+            };
+        }
     };
     let target = shared.target();
     let proof =
@@ -248,7 +257,11 @@ async fn read_once(
             .await
         {
             Ok(proof) => proof,
-            Err(_) => return Read::Cut { progressed: false },
+            Err(_) => {
+                return Read::Cut {
+                    lasted: Duration::ZERO,
+                };
+            }
         };
     let opened = timeout(
         deps.config.attempt_timeout,
@@ -256,7 +269,11 @@ async fn read_once(
     )
     .await;
     let mut conn = match opened {
-        Err(_) => return Read::Cut { progressed: false },
+        Err(_) => {
+            return Read::Cut {
+                lasted: Duration::ZERO,
+            };
+        }
         Ok(Ok(conn)) => conn,
         Ok(Err(TransportError::Api(api))) => {
             // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8). Jamais un succès ;
@@ -265,16 +282,21 @@ async fn read_once(
             let code = api.code.map(|code| code.or_from_status(api.status));
             return match (api.status, code) {
                 (503 | 429, _) | (_, Some(ErrorCode::Busy | ErrorCode::TooManyAttempts)) => {
-                    Read::Busy(Duration::from_secs(
-                        api.retry_after_s.unwrap_or(1).clamp(1, 30),
-                    ))
+                    // Le délai demandé, sans plafond ici : la politique l'attend EXACTEMENT (au moins une seconde).
+                    Read::Busy(Duration::from_secs(api.retry_after_s.unwrap_or(1).max(1)))
                 }
                 (404 | 405 | 426, _) => Read::End(LogEnd::Unsupported),
                 (401, _) | (_, Some(ErrorCode::Unauthenticated)) => Read::End(LogEnd::SessionEnded),
-                _ => Read::Cut { progressed: false },
+                _ => Read::Cut {
+                    lasted: Duration::ZERO,
+                },
             };
         }
-        Ok(Err(_)) => return Read::Cut { progressed: false },
+        Ok(Err(_)) => {
+            return Read::Cut {
+                lasted: Duration::ZERO,
+            };
+        }
     };
     let auth = SignedAuth::Auth {
         token: token.expose().to_owned(),
@@ -287,10 +309,12 @@ async fn read_once(
     } = auth;
     copy.zeroize();
     if sent.is_err() || conn.send_open(*cursor).await.is_err() {
-        return Read::Cut { progressed: false };
+        return Read::Cut {
+            lasted: Duration::ZERO,
+        };
     }
 
-    let mut progressed = false;
+    let opened_at = Instant::now();
     let mut ping = interval(deps.config.heartbeat_period.min(Duration::from_secs(2)));
     ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut n = 0u64;
@@ -300,14 +324,13 @@ async fn read_once(
                 let message = match frame {
                     Ok(LogsFrame::Message(message)) => *message,
                     Ok(LogsFrame::Other) => continue,
-                    Err(_) => return Read::Cut { progressed },
+                    Err(_) => return Read::Cut { lasted: opened_at.elapsed() },
                 };
                 // Un type de message inconnu (agent plus récent) est ignoré, sans contenu, sans rien conclure :
                 // il ne compte pas comme une réception qui remet les essais à zéro (BR-COMPAT-001 point 2).
                 if matches!(message, LogsServerMessage::Unknown) {
                     continue;
                 }
-                progressed = true;
                 let output = match message {
                     LogsServerMessage::Status(status) => {
                         *streaming = true;
@@ -336,7 +359,7 @@ async fn read_once(
             _ = ping.tick() => {
                 n += 1;
                 if conn.send_ping(n).await.is_err() {
-                    return Read::Cut { progressed };
+                    return Read::Cut { lasted: opened_at.elapsed() };
                 }
             }
             changed = state.changed() => {
@@ -344,7 +367,7 @@ async fn read_once(
                     return Read::Gone;
                 }
                 if state.borrow_and_update().state != LinkState::Connected {
-                    return Read::Cut { progressed };
+                    return Read::Cut { lasted: opened_at.elapsed() };
                 }
             }
             () = tx.closed() => return Read::Gone,

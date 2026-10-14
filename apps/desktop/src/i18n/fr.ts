@@ -1123,11 +1123,12 @@ export const fr = {
     trimmed: "Les lignes plus anciennes ne sont plus affichées (les 5 000 dernières sont gardées).",
     cutSuffix: "… (ligne tronquée, {n} caractères au total)",
     // Hors spec : repli d'une ligne très longue.
-    foldMore: "Afficher la suite ({n} caractères)",
+    foldMore: "Afficher la suite ({n} caractères de plus)",
     foldLess: "Replier la ligne",
     foldedLine: "Début de la ligne, {n} caractères au total",
     timeUnknown: "Heure inconnue",
     activeLine: "Ligne du {time}",
+    activeLineText: "Ligne du {time} : {text}",
     emptyTitle: "Ce service n'a encore rien écrit",
     emptyText: "Les lignes apparaîtront ici dès que le programme en écrira.",
     stoppedBanner:
@@ -1160,6 +1161,17 @@ export const fr = {
       "Tu as ouvert beaucoup de journaux en peu de temps. Attends 1 s avant de réessayer.",
     rateLimitedDone: "Tu peux réessayer.",
     failed: "Impossible de lire les journaux pour le moment.",
+    gaveUp:
+      "La lecture a été coupée plusieurs fois de suite et ne reprend plus seule. Clique sur Réessayer quand le serveur répond.",
+    readsFull:
+      "Trois lectures de journaux sont déjà ouvertes depuis ce PC pour ce serveur. Une lecture oubliée se ferme seule en moins d'une minute : attends un peu, puis réessaie.",
+    closedHidden:
+      "La lecture a été arrêtée pendant que la fenêtre était fermée, et les lignes ont été effacées. Clique sur Reprendre pour relire.",
+    closedIdle:
+      "La lecture a été arrêtée parce que l'application ne répondait plus, et les lignes ont été effacées. Clique sur Reprendre pour relire.",
+    closedServer:
+      "La lecture a été arrêtée parce que le lien avec ce serveur a changé, et les lignes ont été effacées. Clique sur Reprendre pour relire.",
+    resume: "Reprendre",
     // Hors spec : fins que la spec ne décrit pas.
     sessionEnded: "Ta session est terminée. Reconnecte-toi pour lire les journaux.",
     unsupported: "Cet agent est trop ancien pour envoyer les journaux. Mets-le à jour.",

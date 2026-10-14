@@ -8,13 +8,15 @@ import type { GapKind } from "./buffer";
  * NEUTRE (« La lecture des journaux s'est arrêtée. ») : jamais un état affirmé, jamais un bouton fondé dessus.
  */
 
-export type LogsFailure = "not_connected" | "unreachable";
+export type LogsFailure = "not_connected" | "unreachable" | "reads_full";
 
 export interface EndNotice {
   tone: "info" | "warn" | "error";
   text: string;
   /** « Réessayer » : `now` tout de suite, `wait` quand le frein de l'agent demande d'attendre, `none` jamais. */
   retry: "none" | "now" | "wait";
+  /** Le mot du bouton : « Réessayer », ou « Reprendre » quand la lecture a été arrêtée par la coquille. */
+  retryWord: "retry" | "resume";
   /** L'avis est une alerte (lue tout de suite) plutôt qu'une information. */
   alert: boolean;
   /** Les lignes déjà affichées sont grisées. */
@@ -31,6 +33,7 @@ const notice = (
   tone,
   text,
   retry: "none",
+  retryWord: "retry",
   alert: tone === "error",
   stale: false,
   lock: false,
@@ -52,6 +55,8 @@ export function endNotice(input: {
     return notice("info", t("logs.notConnected"), { retry: "now" });
   }
   if (failure === "unreachable") return notice("error", t("logs.failed"), { retry: "now" });
+  // La coquille refuse faute de place : on dit pourquoi et quoi faire, jamais « impossible » avec un bouton sans effet.
+  if (failure === "reads_full") return notice("warn", t("logs.readsFull"), { retry: "now" });
   if (end === null) return null;
   switch (end.kind) {
     case "refused":
@@ -90,10 +95,25 @@ export function endNotice(input: {
     case "unsupported":
       return notice("info", t("logs.unsupported"));
     case "unreachable":
-      return notice("error", t("logs.failed"), { retry: "now" });
+      // Plusieurs reprises de suite sans réponse : la lecture ne repart plus seule, le bouton relance.
+      return notice("error", t("logs.gaveUp"), { retry: "now" });
+    case "closed":
+      return notice("info", closedText(end.cause), { retry: "now", retryWord: "resume" });
     case "unknown":
     default:
       return unknownEnd();
+  }
+}
+
+/** Ce qui est arrivé à une lecture que la coquille a fermée. Les lignes ont été effacées dans tous les cas. */
+function closedText(cause: Extract<LogEnd, { kind: "closed" }>["cause"]): string {
+  switch (cause) {
+    case "window_hidden":
+      return t("logs.closedHidden");
+    case "server_changed":
+      return t("logs.closedServer");
+    default:
+      return t("logs.closedIdle");
   }
 }
 

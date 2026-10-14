@@ -1,4 +1,5 @@
 import type {
+  LogClosedCause,
   LogEnd,
   LogGapReason,
   LogLine,
@@ -7,6 +8,7 @@ import type {
   LogReading,
   LogState,
 } from "./logs";
+import { LinkCommandError } from "./types";
 
 /**
  * Les journaux d'un service du pont SIMULÉ (navigateur de développement, Vitest, Playwright) : un petit agent que
@@ -24,6 +26,13 @@ export const SIM_ACCOUNT_LIMIT = 3;
 /** Rafale d'ouvertures et rythme de remise (`OPEN_BURST`, `OPEN_REFILL_S`). */
 export const SIM_OPEN_BURST = 12;
 export const SIM_OPEN_REFILL_S = 5;
+/** Lectures que la vraie coquille tient au plus pour un serveur (`MAX_SESSIONS_PER_SERVER`) ; à poser à `shellLimit`. */
+export const SIM_SHELL_LIMIT = 3;
+/**
+ * Où la coquille simulée garde le nombre de ses sessions : `window.name`, qui survit au rechargement de la page comme
+ * la vraie coquille survit à la page, sans toucher au stockage (aucune ligne ni rien d'autre n'y est écrit).
+ */
+const SHELL_PREFIX = "hearth-sim-logs-shell=";
 /** Lots du direct : toutes les 100 ms (`BATCH_WINDOW_MS`), 500 lignes au plus (`BATCH_LINES`). */
 const BATCH_MS = 100;
 const BATCH_LINES = 500;
@@ -102,6 +111,46 @@ export class SimulatedLogs {
   brake = true;
   /** Lots envoyés à ce jour, toutes lectures confondues (de quoi mesurer le regroupement). */
   batches = 0;
+  /**
+   * Plafond de la coquille simulée. Sans limite par défaut, pour que le plafond de l'AGENT (`accountLimit`, les
+   * lectures des autres postes du compte) reste éprouvable ; un test de la coquille le pose à `SIM_SHELL_LIMIT`.
+   */
+  shellLimit = Number.POSITIVE_INFINITY;
+  /**
+   * Sessions que la page PRÉCÉDENTE avait laissées ouvertes dans la coquille simulée et que l'annonce de cette page a
+   * fermées (rechargement). La vraie coquille fait de même (`LogSessions::announce_page`).
+   */
+  readonly orphansClosedAtStart: number;
+
+  constructor() {
+    this.orphansClosedAtStart = this.shellCount();
+    this.setShellCount(0);
+  }
+
+  /** Sessions que la coquille simulée tient (elle survit au rechargement de la page). */
+  shellCount(): number {
+    return window.name.startsWith(SHELL_PREFIX)
+      ? Number(window.name.slice(SHELL_PREFIX.length)) || 0
+      : 0;
+  }
+
+  private setShellCount(n: number): void {
+    window.name = `${SHELL_PREFIX}${Math.max(0, n)}`;
+  }
+
+  /** Les commandes de fermeture sont perdues (la page meurt pendant l'appel) : ce qu'elle laisse est un orphelin. */
+  loseCloses = false;
+
+  /** La fenêtre est cachée : la coquille ferme les lectures et le dit à la page (comme `close_window`). */
+  hideWindow(cause: LogClosedCause = "window_hidden"): void {
+    for (const reader of [...this.readers]) {
+      if (reader.closed) continue;
+      reader.closed = true;
+      this.readers.delete(reader);
+      this.setShellCount(this.shellCount() - 1);
+      reader.listener({ kind: "ended", end: { kind: "closed", cause } });
+    }
+  }
 
   /** Lectures ouvertes en ce moment. */
   openCount(): number {
@@ -207,6 +256,8 @@ export class SimulatedLogs {
     this.floods.clear();
     for (const reader of this.readers) reader.closed = true;
     this.readers.clear();
+    this.setShellCount(0);
+    this.shellLimit = Number.POSITIVE_INFINITY;
     this.feeds.clear();
     this.opens = [];
     this.refusal = null;
@@ -312,6 +363,7 @@ export class SimulatedLogs {
   end(serverId: string, serviceKey: string, end: LogEnd): void {
     for (const reader of this.matching(serverId, serviceKey)) {
       reader.listener({ kind: "ended", end });
+      if (!reader.closed) this.setShellCount(this.shellCount() - 1);
       reader.closed = true;
     }
   }
@@ -366,6 +418,9 @@ export class SimulatedLogs {
     options: { refuse?: Extract<LogEnd, { kind: "refused" }> | null } = {},
   ): Promise<LogReading> {
     if (this.failOpen) throw new Error("ouverture impossible");
+    if (this.shellCount() >= this.shellLimit)
+      throw new LinkCommandError({ kind: "log_reads_full" });
+    this.setShellCount(this.shellCount() + 1);
     if (this.openDelayMs > 0) await new Promise((r) => setTimeout(r, this.openDelayMs));
     const reader: Reader = {
       serverId,
@@ -393,6 +448,7 @@ export class SimulatedLogs {
       if (end) {
         listener({ kind: "ended", end });
         reader.closed = true;
+        this.setShellCount(this.shellCount() - 1);
         return;
       }
       this.readers.add(reader);
@@ -412,6 +468,7 @@ export class SimulatedLogs {
         if (reader.closed) return;
         reader.closed = true;
         this.readers.delete(reader);
+        if (!this.loseCloses) this.setShellCount(this.shellCount() - 1);
         this.closedCount += 1;
       },
       ack: (batches) => {

@@ -7,13 +7,13 @@ use std::process::Command;
 use std::sync::Arc;
 
 use hearth_link::domain::server::ServerId;
-use tauri::{AppHandle, State};
+use tauri::{Manager as _, State};
 
 use super::dto::{EngineDto, EnvRevealDto, ServiceRightsDto, ServicesEvent};
 use super::logs::LogSessions;
 use crate::link::LinkRuntime;
-use crate::link_commands::TauriSink;
 use crate::link_dto::LinkFailure;
+use crate::window::WindowSink;
 
 type Runtime_<'a> = State<'a, Arc<LinkRuntime>>;
 
@@ -74,21 +74,37 @@ pub async fn reveal_service_env(
     Ok(EnvRevealDto::from(&revealed))
 }
 
+/// Une page des journaux démarre (ou redémarre) : la coquille lui donne le numéro de sa génération et ferme tout
+/// ce que la page précédente de CETTE fenêtre avait laissé ouvert (rechargement, plantage du rendu, navigation
+/// brutale). À appeler une fois au démarrage de la page, avant toute ouverture (HRT-67, `BR-SLOG-026`).
+#[tauri::command]
+#[specta::specta]
+pub fn announce_log_page(
+    window: tauri::WebviewWindow,
+    sessions: State<'_, Arc<LogSessions>>,
+) -> u32 {
+    sessions.announce_page(window.label())
+}
+
 /// Ouvre la lecture des journaux d'UN service (HRT-67, `BR-SLOG-*`) et rend l'identifiant de sa session. Les
-/// lots arrivent à la fenêtre par l'événement `link://service-logs` ; la coquille ne garde aucune ligne, n'en
-/// écrit aucune et n'en trace aucune. Au plus trois lectures à la fois (le plafond d'un compte). La lecture se
-/// reprend seule après une coupure ; un refus de l'agent est une fin, jamais retentée. Hors « Connecté » :
-/// `NotConnected`, rien n'est envoyé.
+/// lots arrivent à la SEULE fenêtre qui l'a ouverte, par l'événement `link://service-logs` ; la coquille ne garde
+/// aucune ligne, n'en écrit aucune et n'en trace aucune. `page` : la génération rendue par `announce_log_page`.
+/// Au plus trois lectures par serveur (le plafond d'un compte) et douze au total : au-delà `LogReadsFull`. La
+/// lecture se reprend seule après une coupure (bornée) ; un refus de l'agent est une fin, jamais retentée. Hors
+/// « Connecté » : `NotConnected`, rien n'est envoyé.
 #[tauri::command]
 #[specta::specta]
 pub async fn open_service_logs(
-    app: AppHandle,
+    window: tauri::WebviewWindow,
     link: Runtime_<'_>,
     sessions: State<'_, Arc<LogSessions>>,
+    page: u32,
     server_id: String,
     key: String,
 ) -> Result<String, LinkFailure> {
-    sessions.open(link.manager(), Arc::new(TauriSink(app)), &server_id, &key)
+    let owner = window.label().to_owned();
+    let sink = Arc::new(WindowSink::new(window.app_handle().clone(), owner.clone()));
+    sessions.open(link.manager(), sink, &owner, page, &server_id, &key)
 }
 
 /// Ferme la lecture d'un onglet : le socket est fermé et la place rendue au compte. Sans effet sur une session
@@ -104,6 +120,19 @@ pub fn close_service_logs(sessions: State<'_, Arc<LogSessions>>, session: String
 #[specta::specta]
 pub fn ack_service_logs(sessions: State<'_, Arc<LogSessions>>, session: String, batches: u32) {
     sessions.acknowledge(&session, batches);
+}
+
+/// Battement de vie de la page `page` : à envoyer toutes les dix secondes tant qu'une lecture est ouverte. Rend
+/// les sessions de cette page que la coquille tient encore ; une session absente a été fermée par elle. Sans
+/// battement pendant 45 secondes, la coquille ferme la session d'office.
+#[tauri::command]
+#[specta::specta]
+pub fn keep_service_logs(
+    window: tauri::WebviewWindow,
+    sessions: State<'_, Arc<LogSessions>>,
+    page: u32,
+) -> Vec<String> {
+    sessions.keep_alive(window.label(), page)
 }
 
 /// Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est

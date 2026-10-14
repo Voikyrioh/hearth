@@ -264,3 +264,51 @@ describe("accusés", () => {
     expect(bridge.logs.ackedBatches()).toBe(2);
   });
 });
+
+describe("coquille : fenêtre cachée, rechargement, place refusée (ADR-0040)", () => {
+  it("la coquille ferme la lecture : les lignes sont effacées et l'écran propose de reprendre", async () => {
+    bridge.logs.seed("forge", KEY, [{ text: "SECRET-1" }, { text: "SECRET-2" }]);
+    const store = await opened();
+    await vi.waitFor(() => expect(texts(store)).toHaveLength(2));
+    store.pause("manual");
+    bridge.logs.push("forge", KEY, [{ text: "SECRET-EN-ATTENTE" }]);
+    await vi.waitFor(() => expect(store.waiting).toBe(1));
+    bridge.logs.hideWindow();
+    await vi.waitFor(() => expect(store.phase).toBe("ended"));
+    expect(store.end).toEqual({ kind: "closed", cause: "window_hidden" });
+    // Rien ne reste : ni affichées, ni en attente.
+    expect(store.entries()).toEqual([]);
+    expect(store.received).toBe(false);
+    expect(store.waiting).toBe(0);
+    expect(bridge.logs.openCount()).toBe(0);
+    // Pas de reprise silencieuse : la place n'est reprise qu'à la demande.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(bridge.logs.openCount()).toBe(0);
+    expect(bridge.logs.opened).toHaveLength(1);
+    await store.retry();
+    await vi.waitFor(() => expect(store.phase).toBe("reading"));
+    expect(bridge.logs.openCount()).toBe(1);
+    expect(bridge.logs.opened).toHaveLength(2);
+  });
+
+  it("la coquille refuse faute de place : un échec dit, pas un « impossible » sans suite", async () => {
+    bridge.logs.shellLimit = 0;
+    const store = useServiceLogsStore();
+    await store.open("forge", KEY);
+    await vi.waitFor(() => expect(store.phase).toBe("ended"));
+    expect(store.failure).toBe("reads_full");
+    bridge.logs.shellLimit = Number.POSITIVE_INFINITY;
+    await store.retry();
+    await vi.waitFor(() => expect(store.phase).toBe("reading"));
+    expect(store.failure).toBeNull();
+  });
+
+  it("un rechargement ferme ce que la page précédente avait laissé : la place est rendue", () => {
+    // Trois lectures laissées ouvertes dans la coquille simulée par la page qui meurt (rechargée sans fermer).
+    window.name = "hearth-sim-logs-shell=3";
+    const reloaded = new SimulatedLinkBridge({ agents: [SAMPLE_AGENT] });
+    expect(reloaded.logs.orphansClosedAtStart).toBe(3);
+    expect(reloaded.logs.shellCount()).toBe(0);
+    reloaded.logs.reset();
+  });
+});

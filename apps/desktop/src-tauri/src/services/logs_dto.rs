@@ -92,6 +92,23 @@ pub enum LogEndDto {
     SessionEnded,
     Unsupported,
     Unreachable,
+    /// C'est la COQUILLE qui a fermé la lecture (pas l'agent) : l'interface efface les lignes et propose de
+    /// reprendre. Jamais retentée seule (`BR-SLOG-019`, `BR-SLOG-020`, ADR-0040).
+    Closed {
+        cause: LogClosedCauseDto,
+    },
+}
+
+/// Pourquoi la coquille a fermé une lecture que l'interface tenait encore.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum LogClosedCauseDto {
+    /// La fenêtre a été fermée (cachée dans la zone de notification) : personne ne regarde.
+    WindowHidden,
+    /// L'interface n'a plus donné signe de vie dans le délai (page figée ou plantée).
+    Idle,
+    /// Le serveur a été déconnecté, changé ou oublié.
+    ServerChanged,
 }
 
 /// Une ligne. Le texte est celui de l'agent, déjà nettoyé et coupé à 10 000 caractères ; l'interface le neutralise

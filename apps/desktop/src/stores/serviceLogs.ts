@@ -185,9 +185,11 @@ export const useServiceLogsStore = defineStore("serviceLogs", () => {
       case "ended":
         end.value = message.end;
         phase.value = "ended";
-        // Le droit est retiré ou la session finie : les lignes ne restent pas à l'écran (BR-SLOG-019).
+        // Le droit est retiré, la session finie ou la lecture fermée par la coquille (fenêtre cachée, page figée,
+        // serveur changé) : les lignes ne restent pas à l'écran (BR-SLOG-019, BR-SLOG-020).
         if (
           message.end.kind === "session_ended" ||
+          message.end.kind === "closed" ||
           (message.end.kind === "refused" && message.end.refusal === "missing_right")
         ) {
           wipe();
@@ -270,7 +272,12 @@ export const useServiceLogsStore = defineStore("serviceLogs", () => {
       if (mine !== ticket) return;
       phase.value = "ended";
       const kind = failureOf(error)?.kind;
-      failure.value = kind === "not_connected" ? "not_connected" : "unreachable";
+      failure.value =
+        kind === "not_connected"
+          ? "not_connected"
+          : kind === "log_reads_full"
+            ? "reads_full"
+            : "unreachable";
       // Jamais le message d'origine : il pourrait citer ce qui revient du serveur.
       if (!kind) logUiError(new Error("ouverture des journaux en échec"), "serviceLogs:open");
       notifyNow();

@@ -62,7 +62,12 @@ function insideTauri(): boolean {
  * - Sinon (build livré servi dans un navigateur) : pont vide, où toute commande échoue.
  */
 export function createLinkBridge(): LinkBridge {
-  if (insideTauri()) return new TauriLinkBridge();
+  if (insideTauri()) {
+    const bridge = new TauriLinkBridge();
+    // Le démarrage de la page s'annonce à la coquille : ce qu'une page précédente a laissé ouvert est fermé là.
+    void bridge.announceLogPage().catch(() => undefined);
+    return bridge;
+  }
   if (import.meta.env.DEV) {
     // `?servers=none` : navigateur de revue sans serveur enregistré (écran d'accueil).
     const none = new URLSearchParams(window.location.search).get("servers") === "none";

@@ -1,5 +1,6 @@
 import type {
   GapReasonDto,
+  LogClosedCauseDto,
   LogEndDto,
   LogLineDto,
   LogRefusalDto,
@@ -22,6 +23,12 @@ export type LogState = LogStateDto;
 export type LogGapReason = GapReasonDto;
 export type LogRefusal = LogRefusalDto;
 export type LogMarkerKind = MarkerKindDto;
+/**
+ * Pourquoi la COQUILLE a fermé une lecture que l'interface tenait encore : fenêtre fermée, plus de signe de vie,
+ * serveur déconnecté ou changé. `lost` : l'interface a constaté seule que la coquille ne tient plus la session (un
+ * événement perdu) ; `other` : une cause que ce client ne connaît pas.
+ */
+export type LogClosedCause = LogClosedCauseDto | "lost" | "other";
 
 /** Une ligne de journal. `t` : millisecondes depuis l'époque, `null` si l'heure n'est pas lisible. */
 export interface LogLine {
@@ -38,6 +45,8 @@ export type LogEnd =
   | { kind: "session_ended" }
   | { kind: "unsupported" }
   | { kind: "unreachable" }
+  /** La coquille a fermé la lecture : les lignes sont effacées, l'utilisateur peut reprendre. */
+  | { kind: "closed"; cause: LogClosedCause }
   /** Une fin que ce client ne sait pas lire : un message neutre, aucune relance. */
   | { kind: "unknown" };
 
@@ -82,6 +91,14 @@ function toEnd(dto: LogEndDto): LogEnd {
     case "unsupported":
     case "unreachable":
       return { kind: dto.kind };
+    case "closed":
+      return {
+        kind: "closed",
+        cause:
+          dto.cause === "window_hidden" || dto.cause === "idle" || dto.cause === "server_changed"
+            ? dto.cause
+            : "other",
+      };
     default:
       // Une fin que ce client ne connaît pas : neutre, jamais « injoignable » (rien n'est affirmé ni relancé).
       return { kind: "unknown" };

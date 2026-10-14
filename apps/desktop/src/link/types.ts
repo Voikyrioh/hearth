@@ -172,6 +172,10 @@ export type LinkFailure =
   | { kind: "not_recognized" }
   /** Ce PC a une clé mais l'agent ne donne pas de défi à signer : rien n'est parti. */
   | { kind: "device_challenge_unavailable" }
+  /** La coquille tient déjà trois lectures de journaux de ce serveur (ou la garde globale) : rien n'est parti. */
+  | { kind: "log_reads_full" }
+  /** La page n'a pas annoncé sa génération à la coquille : elle s'annonce de nouveau puis réessaie. */
+  | { kind: "log_page_unknown" }
   | { kind: "internal" };
 
 /** Erreur d'une commande de liaison, porteuse de l'échec typé. */

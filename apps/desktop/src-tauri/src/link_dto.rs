@@ -442,6 +442,14 @@ pub enum LinkFailure {
     /// ni preuve). Ce n'est pas un serveur injoignable.
     #[error("défi de la clé indisponible")]
     DeviceChallengeUnavailable,
+    /// La coquille tient déjà autant de lectures de journaux que l'agent en permet à un compte (trois par
+    /// serveur) ou que la garde globale en permet : rien n'est envoyé au serveur (HRT-67, `BR-SLOG-026`).
+    #[error("trop de lectures de journaux ouvertes")]
+    LogReadsFull,
+    /// La page n'a pas annoncé sa génération à la coquille (ou c'est une ancienne page) : elle s'annonce de
+    /// nouveau puis réessaie (HRT-67, ADR-0040).
+    #[error("page des journaux inconnue")]
+    LogPageUnknown,
     #[error("incident interne")]
     Internal,
 }

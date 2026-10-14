@@ -5,7 +5,7 @@ import { useNow } from "@/composables/useNow";
 import { t } from "@/i18n";
 import type { Entry } from "@/logs/buffer";
 import { findMatches, segmentsOf } from "@/logs/search";
-import { FOLD_CHARS, foldedText } from "@/logs/text";
+import { charCount, cutOnCharacter, FOLD_CHARS, foldedText } from "@/logs/text";
 import { clockOf, fullTimeOf } from "@/logs/time";
 import { endNotice, exitWords, gapText, LOG_STATE_KEYS, sourceTag, waitingText } from "@/logs/view";
 import { atBottom, estimateHeight, layout, type Metrics, visibleRange } from "@/logs/windowing";
@@ -71,11 +71,14 @@ const hasSelection = ref(false);
 
 // ── Mesure et fenêtre ───────────────────────────────────────────────────────────────────────
 const DEFAULT_VIEWPORT = 600;
+/** Combien de caractères d'une ligne la zone d'annonce lit au lecteur d'écran. */
+const ACTIVE_EXCERPT = 120;
 let metrics: Metrics = { lineHeight: 18, columns: 100, padding: 2, marker: 32 };
 let tops: number[] = [];
 let heights: number[] = [];
 let list: Entry[] = [];
 const measured = new Map<number, number>();
+const hiddenCache = new Map<number, number>();
 let lastTop = 0;
 let frame = 0;
 
@@ -126,6 +129,7 @@ function rebuild(): void {
   if (measured.size > list.length * 2 + 200) {
     const alive = new Set(list.map((entry) => entry.id));
     for (const id of measured.keys()) if (!alive.has(id)) measured.delete(id);
+    for (const id of hiddenCache.keys()) if (!alive.has(id)) hiddenCache.delete(id);
   }
   heights = list.map(heightOf);
   const placed = layout(heights);
@@ -185,6 +189,8 @@ async function refresh(): Promise<void> {
   await settle();
   if (store.mode === "live") toBottom();
   syncWindow();
+  // La mesure vient de changer la hauteur totale : le bas se recale APRÈS, sinon la dernière ligne reste cachée.
+  if (store.mode === "live") toBottom();
 }
 
 function onScroll(): void {
@@ -267,6 +273,7 @@ onBeforeUnmount(() => {
   // Quitter l'onglet, fermer le détail, changer de service : la lecture est fermée et les lignes sont effacées.
   store.close();
   measured.clear();
+  hiddenCache.clear();
   list = [];
   rows.value = [];
 });
@@ -454,8 +461,12 @@ const activeLine = computed(() => {
   void store.version;
   const found = lines.value.find((entry) => entry.id === activeId.value);
   if (found?.kind !== "line") return null;
-  const when = fullTimeOf(found.t);
-  return t("logs.activeLine", { time: when ?? t("logs.timeUnknown") });
+  const when = fullTimeOf(found.t) ?? t("logs.timeUnknown");
+  // Le début du texte avec l'heure : l'heure seule ne dit rien à qui ne voit pas la ligne.
+  const text = cutOnCharacter(found.text, ACTIVE_EXCERPT);
+  return text === ""
+    ? t("logs.activeLine", { time: when })
+    : t("logs.activeLineText", { time: when, text });
 });
 
 function recomputeMatches(): void {
@@ -517,6 +528,16 @@ function segments(row: Row) {
   return segmentsOf(shown, query.value);
 }
 
+/** Caractères que le repli cache (comptés en caractères, pas en unités du texte). */
+function hiddenChars(entry: Extract<Entry, { kind: "line" }>): number {
+  let known = hiddenCache.get(entry.id);
+  if (known === undefined) {
+    known = Math.max(0, charCount(entry.text) - charCount(foldedText(entry.text)));
+    hiddenCache.set(entry.id, known);
+  }
+  return known;
+}
+
 function restartText(entry: Extract<Entry, { kind: "restart" }>): string {
   if (entry.at === null) return t("logs.restartedUnknown");
   const time = clockOf(entry.at);
@@ -560,7 +581,7 @@ const retrying = computed(() => store.phase === "opening");
           data-logs-retry
           @click="retry"
         >
-          {{ retrying ? t("logs.retrying") : t("logs.retry") }}
+          {{ retrying ? t("logs.retrying") : notice.retryWord === "resume" ? t("logs.resume") : t("logs.retry") }}
         </HButton>
       </template>
     </Callout>
@@ -628,6 +649,8 @@ const retrying = computed(() => store.phase === "opening");
 
     <!-- La fenêtre de lignes -->
     <div v-if="showFrame && !opening" class="frame" :data-stale="stale ? '' : undefined" :data-mixed="mixed ? '' : undefined">
+      <!-- En haut, là où l'historique s'arrête : l'avis des lignes retirées parle du haut de la liste -->
+      <p v-if="store.trimmed" class="trimmed" data-logs-trimmed>{{ t("logs.trimmed") }}</p>
       <div
         ref="scroller"
         class="scroller"
@@ -691,7 +714,7 @@ const retrying = computed(() => store.phase === "opening");
                   {{
                     expanded.has(row.entry.id)
                       ? t("logs.foldLess")
-                      : t("logs.foldMore", { n: row.entry.text.length })
+                      : t("logs.foldMore", { n: hiddenChars(row.entry) })
                   }}
                 </button>
               </div>
@@ -705,9 +728,6 @@ const retrying = computed(() => store.phase === "opening");
               ><span ref="probeChars" class="probe__chars">{{ "0".repeat(100) }}</span></span
             >
           </div>
-        </div>
-        <div v-if="store.trimmed" class="trimmed" data-logs-trimmed>
-          <p class="trimmed__text">{{ t("logs.trimmed") }}</p>
         </div>
         <EmptyState
           v-if="empty"
@@ -730,7 +750,8 @@ const retrying = computed(() => store.phase === "opening");
         {{ floatingLabel }}
       </HButton>
       </div>
-      <p class="info" data-logs-info>{{ activeLine ?? "" }}</p>
+      <!-- Annoncée au lecteur d'écran quand la ligne active CHANGE (geste de l'utilisateur) ; la liste, elle, reste muette -->
+      <p class="info" role="status" aria-live="polite" aria-atomic="true" data-logs-info>{{ activeLine ?? "" }}</p>
     </div>
   </section>
 </template>
@@ -808,7 +829,7 @@ const retrying = computed(() => store.phase === "opening");
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
-  min-height: var(--log-min-height);
+  min-height: var(--log-frame-min-height);
 }
 
 .frame[data-stale] .scroller {
@@ -938,24 +959,11 @@ const retrying = computed(() => store.phase === "opening");
   white-space: pre;
 }
 
-/* Collant en haut de la fenêtre sans prendre de place : les positions des lignes ne bougent pas. */
+/* Au-dessus de la liste, hors de la zone qui défile : toujours visible, sans recouvrir une ligne. */
 .trimmed {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-raised);
-  height: 0;
-}
-
-.trimmed__text {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  margin: 0;
-  padding: var(--space-1) var(--space-3);
-  background: var(--bg);
-  color: var(--tx3);
-  font-family: var(--font-body);
+  flex: 0 0 auto;
+  margin: 0 0 var(--space-1);
+  color: var(--tx-secondary);
   font-size: var(--fs-small);
 }
 

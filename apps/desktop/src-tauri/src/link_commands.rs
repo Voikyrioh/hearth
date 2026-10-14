@@ -13,6 +13,8 @@ use crate::link_dto::{
     AddServerInput, FingerprintEvent, LinkFailure, LinkStateDto, LoginDto, NoticeEvent,
     OperationEventDto, ProbeDto, ServerDto,
 };
+use crate::services::logs::LogSessions;
+use crate::services::logs_dto::LogClosedCauseDto;
 
 /// Les événements de la liaison vont à la fenêtre.
 pub struct TauriSink<R: Runtime>(pub AppHandle<R>);
@@ -23,6 +25,11 @@ impl<R: Runtime> UiSink for TauriSink<R> {
             tracing::warn!(event, %error, "événement non livré à l'interface");
         }
     }
+}
+
+/// Le serveur est déconnecté, changé ou oublié : ses lectures de journaux sont fermées (`BR-SLOG-019`, ADR-0040).
+fn close_logs(logs: &LogSessions, server_id: &str) {
+    logs.close_server(server_id, LogClosedCauseDto::ServerChanged);
 }
 
 type Runtime_<'a> = State<'a, Arc<LinkRuntime>>;
@@ -77,13 +84,20 @@ pub async fn add_and_login(
 pub async fn login(
     app: AppHandle,
     link: Runtime_<'_>,
+    logs: State<'_, Arc<LogSessions>>,
     server_id: String,
     username: String,
     password: String,
     remember: bool,
 ) -> Result<LoginDto, LinkFailure> {
-    link.login(&server_id, &username, password, remember, &TauriSink(app))
-        .await
+    let outcome = link
+        .login(&server_id, &username, password, remember, &TauriSink(app))
+        .await;
+    if outcome.is_ok() {
+        // Un autre compte peut se connecter : les lectures de l'ancien ne continuent pas sous le nouveau.
+        close_logs(&logs, &server_id);
+    }
+    outcome
 }
 
 #[tauri::command]
@@ -91,9 +105,14 @@ pub async fn login(
 pub async fn logout(
     app: AppHandle,
     link: Runtime_<'_>,
+    logs: State<'_, Arc<LogSessions>>,
     server_id: String,
 ) -> Result<(), LinkFailure> {
-    link.logout(&server_id, &TauriSink(app)).await
+    let outcome = link.logout(&server_id, &TauriSink(app)).await;
+    if outcome.is_ok() {
+        close_logs(&logs, &server_id);
+    }
+    outcome
 }
 
 #[tauri::command]
@@ -151,6 +170,7 @@ pub fn ack_unread_operations(link: Runtime_<'_>, op_ids: Vec<String>) {
 pub async fn update_server(
     app: AppHandle,
     link: Runtime_<'_>,
+    logs: State<'_, Arc<LogSessions>>,
     server_id: String,
     name: String,
     color: u8,
@@ -158,16 +178,21 @@ pub async fn update_server(
     port: Option<u16>,
     fingerprint: Option<String>,
 ) -> Result<ServerDto, LinkFailure> {
-    link.update_server(
-        &server_id,
-        name,
-        color,
-        host,
-        port,
-        fingerprint,
-        &TauriSink(app),
-    )
-    .await
+    let outcome = link
+        .update_server(
+            &server_id,
+            name,
+            color,
+            host,
+            port,
+            fingerprint,
+            &TauriSink(app),
+        )
+        .await;
+    if outcome.is_ok() {
+        close_logs(&logs, &server_id);
+    }
+    outcome
 }
 
 #[tauri::command]
@@ -175,9 +200,14 @@ pub async fn update_server(
 pub async fn remove_server(
     app: AppHandle,
     link: Runtime_<'_>,
+    logs: State<'_, Arc<LogSessions>>,
     server_id: String,
 ) -> Result<(), LinkFailure> {
-    link.remove_server(&server_id, &TauriSink(app)).await
+    let outcome = link.remove_server(&server_id, &TauriSink(app)).await;
+    if outcome.is_ok() {
+        close_logs(&logs, &server_id);
+    }
+    outcome
 }
 
 #[tauri::command]
@@ -185,9 +215,14 @@ pub async fn remove_server(
 pub async fn forget_credentials(
     app: AppHandle,
     link: Runtime_<'_>,
+    logs: State<'_, Arc<LogSessions>>,
     server_id: String,
 ) -> Result<(), LinkFailure> {
-    link.forget_credentials(&server_id, &TauriSink(app)).await
+    let outcome = link.forget_credentials(&server_id, &TauriSink(app)).await;
+    if outcome.is_ok() {
+        close_logs(&logs, &server_id);
+    }
+    outcome
 }
 
 /// Dernière vue connue de la machine d'un serveur (tableau de bord) : à lire après l'abonnement à

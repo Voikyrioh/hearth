@@ -11,6 +11,8 @@ import { safeText } from "@/audit/text";
 export const MAX_LINE_CHARS = 10_000;
 /** Au-delà, la ligne est REPLIÉE : ce début est montré, la suite s'affiche à la demande. */
 export const FOLD_CHARS = 600;
+/** Combien de caractères au-delà de la coupe on regarde pour voir où finit un caractère composé. */
+const CLUSTER_LOOKAHEAD = 32;
 /** Largeur d'une tabulation affichée (espaces). */
 const TAB = "    ";
 
@@ -33,6 +35,56 @@ const SEQUENCES = [
   new RegExp(`${ESC}[ -/]{0,16}[0-~]?`, "g"),
 ];
 
+const EXTENDS = /^(?:\p{M}|‍|️|[\u{1F3FB}-\u{1F3FF}]|[\u{E0020}-\u{E007F}])/u;
+const HIGH = (code: number) => code >= 0xd800 && code <= 0xdbff;
+
+/**
+ * Le début de `text`, d'au plus `max` unités UTF-16, coupé sur une FRONTIÈRE DE CARACTÈRE : jamais au milieu d'une
+ * paire de substitution (un émoji), d'un caractère composé (lettre et accent) ni d'un émoji à plusieurs éléments
+ * (famille, drapeau, teinte de peau). Un caractère qui dépasse la coupe est retiré en entier.
+ */
+export function cutOnCharacter(text: string, max: number): string {
+  if (text.length <= max) return text;
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    let end = 0;
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    for (const part of segmenter.segment(text.slice(0, max + CLUSTER_LOOKAHEAD))) {
+      const stop = part.index + part.segment.length;
+      if (stop > max) break;
+      end = stop;
+    }
+    return text.slice(0, end);
+  }
+  // Sans découpeur : jamais au milieu d'une paire, ni juste avant une marque qui se colle au caractère précédent.
+  let end = max;
+  if (HIGH(text.charCodeAt(end - 1))) end -= 1;
+  while (end > 0 && EXTENDS.test(text.slice(end, end + 2))) {
+    end -= 1;
+    if (HIGH(text.charCodeAt(end - 1))) end -= 1;
+  }
+  return text.slice(0, end);
+}
+
+/** Le nombre d'unités UTF-16 qui portent les `count` premiers points de code de `text`. */
+function unitsOf(text: string, count: number): number {
+  let units = 0;
+  for (let n = 0; n < count && units < text.length; n += 1) {
+    units += (text.codePointAt(units) ?? 0) > 0xffff ? 2 : 1;
+  }
+  return units;
+}
+
+/** Le nombre de caractères d'un texte tel qu'on le lit (un émoji, un caractère composé : un seul). */
+export function charCount(text: string): number {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    let n = 0;
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    for (const _ of segmenter.segment(text)) n += 1;
+    return n;
+  }
+  return Array.from(text).length;
+}
+
 /** Le texte sans séquence de terminal. */
 export function stripTerminal(raw: string): string {
   let text = raw;
@@ -47,19 +99,14 @@ export function stripTerminal(raw: string): string {
  */
 export function displayText(raw: string | null | undefined): string {
   let text = stripTerminal(raw ?? "");
+  // Le plafond de l'agent compte des caractères (points de code) ; la coupe tombe sur une frontière de caractère.
   if (text.length > MAX_LINE_CHARS) {
-    // Par points de code : jamais au milieu d'une paire de substitution.
-    text = Array.from(text.slice(0, MAX_LINE_CHARS + 1))
-      .slice(0, MAX_LINE_CHARS)
-      .join("");
+    text = cutOnCharacter(text, unitsOf(text, MAX_LINE_CHARS));
   }
   return safeText(text.split("\t").join(TAB));
 }
 
 /** Le début montré d'une ligne repliée. */
 export function foldedText(text: string): string {
-  if (text.length <= FOLD_CHARS) return text;
-  return Array.from(text.slice(0, FOLD_CHARS + 1))
-    .slice(0, FOLD_CHARS)
-    .join("");
+  return cutOnCharacter(text, FOLD_CHARS);
 }

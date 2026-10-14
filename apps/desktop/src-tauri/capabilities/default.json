@@ -60,9 +60,11 @@
     "allow-engine-recheck",
     "allow-read-service-rights",
     "allow-reveal-service-env",
+    "allow-announce-log-page",
     "allow-open-service-logs",
     "allow-close-service-logs",
     "allow-ack-service-logs",
+    "allow-keep-service-logs",
     "allow-open-engine-docs",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
