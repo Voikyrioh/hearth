@@ -53,6 +53,7 @@ describe("conversions du journal", () => {
     const page = toAuditPage({
       events: [dto, { ...dto, id: null }, { ...dto, id: 0 }, { ...dto, id: 41 }],
       nextBefore: 41,
+      unreadable: 0,
     });
     expect(page.events.map((e) => e.id)).toEqual([42, 41]);
     expect(page.nextBefore).toBe(41);

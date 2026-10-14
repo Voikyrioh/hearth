@@ -149,7 +149,11 @@ fn a_supervisor_killed_at_every_point_of_a_rollback_rolls_back_exactly_once() {
         assert_eq!(world.database(), b"avant+vie", "{label}");
         let record = last(&world);
         assert_eq!(record.outcome, UpdateOutcome::RolledBack, "{label}");
-        assert_eq!(record.reason, Some(UpdateReason::NoAnswer), "{label}");
+        assert_eq!(
+            record.reason,
+            Some(UpdateReason::NoAnswer.into()),
+            "{label}"
+        );
         assert_eq!(world.update_files(), ["last.json", "lock"], "{label}");
         assert_eq!(
             fs::read_dir(world.job.binary.parent().unwrap())
@@ -219,7 +223,10 @@ fn resumes_are_bounded_then_the_work_is_abandoned_once_and_nothing_relaunches_it
     let record = last(&world);
     assert_eq!(
         (record.outcome.wire(), record.reason),
-        (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed))
+        (
+            UpdateOutcome::Failed,
+            Some(UpdateReason::RollbackFailed.into())
+        )
     );
     assert!(
         !record.reported,
@@ -355,7 +362,10 @@ fn assert_abandoned(world: &World, done: &Supervised) {
     let record = last(world);
     assert_eq!(
         (record.outcome.wire(), record.reason),
-        (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed))
+        (
+            UpdateOutcome::Failed,
+            Some(UpdateReason::RollbackFailed.into())
+        )
     );
     assert_eq!(
         world.host.inner.read_marker().unwrap().unwrap().phase,
@@ -454,7 +464,7 @@ fn a_corrupted_marker_guesses_nothing_and_touches_nothing() {
         let record = last(&world);
         assert_eq!(
             record.reason,
-            Some(UpdateReason::RollbackFailed),
+            Some(UpdateReason::RollbackFailed.into()),
             "l'ancien binaire est gardé"
         );
         assert!(world.job.backup.exists(), "copies gardées");
@@ -643,7 +653,10 @@ fn an_abandon_killed_at_any_point_is_settled_by_the_next_start_with_one_result()
         let record = last(&world);
         assert_eq!(
             (record.outcome.wire(), record.reason),
-            (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed)),
+            (
+                UpdateOutcome::Failed,
+                Some(UpdateReason::RollbackFailed.into())
+            ),
             "{label}"
         );
         let marker = world.host.inner.read_marker().unwrap().unwrap();

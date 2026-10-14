@@ -93,6 +93,9 @@ pub fn apply(current: &mut Option<ServicesState>, message: ServicesMessage) -> b
                 return false;
             }
             state.rev = delta.rev;
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un service illisible d'un lot n'est pas appliqué (l'ancien état de ce
+            // service reste) ; il est COMPTÉ avec ceux de l'état tenu, jusqu'au prochain instantané complet.
+            state.services.add_unreadable(delta.upserts.unreadable());
             if let Some(engine) = delta.engine {
                 state.engine = engine;
             }
@@ -286,6 +289,40 @@ mod tests {
         let current = state.as_ref().expect("état");
         assert_eq!(current.rev, 2);
         assert_eq!(current.services[1].state, ServiceState::Error);
+    }
+
+    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un service illisible d'un lot est compté avec ceux de l'état tenu (jamais
+    /// perdu en silence), son ancien état reste, et un instantané complet remet le compte à ce qu'il dit.
+    #[test]
+    fn unreadable_services_of_a_delta_are_counted_until_the_next_snapshot() {
+        use hearth_proto::lenient::Items;
+        let mut state = None;
+        apply(
+            &mut state,
+            ServicesMessage::ServicesSnapshot(ServicesState {
+                rev: 1,
+                engine: engine(EngineState::Ready),
+                services: Items::with_unreadable(
+                    vec![item("c_1", "alpha", ServiceState::Running)],
+                    1,
+                ),
+            }),
+        );
+        assert_eq!(state.as_ref().expect("état").services.unreadable(), 1);
+        apply(
+            &mut state,
+            ServicesMessage::ServicesDelta(ServicesDelta {
+                rev: 2,
+                engine: None,
+                upserts: Items::with_unreadable(vec![], 2),
+                removed: vec![],
+            }),
+        );
+        let current = state.as_ref().expect("état");
+        assert_eq!(current.services.unreadable(), 3);
+        assert_eq!(current.services.len(), 1, "l'ancien état du service reste");
+        apply(&mut state, snapshot(3, vec![]));
+        assert_eq!(state.as_ref().expect("état").services.unreadable(), 0);
     }
 
     #[test]

@@ -28,7 +28,8 @@
       }
     ],
     "me": "01J9ZD6Q8E5W3N2K7M4T1V0XAB",
-    "rightsKnown": true
+    "rightsKnown": true,
+    "unreadable": 0
   },
   "failure": { "kind": "missing_services_right" }
 }

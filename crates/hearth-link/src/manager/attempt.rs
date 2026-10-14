@@ -88,6 +88,12 @@ fn classify(error: &TransportError) -> AttemptResult {
                 AttemptResult::SessionExpired
             }
             Some(ErrorCode::SessionRevoked) => AttemptResult::Revoked,
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un refus (`403`, code connu ou, pour un code inconnu, le sens du statut)
+            // n'est JAMAIS retenté en boucle : la session est dite terminée, sans en deviner le motif, et le
+            // formulaire de connexion est rouvert.
+            Some(ErrorCode::ForbiddenRole) if api.status == 403 => {
+                AttemptResult::SessionEndedUnknown
+            }
             Some(ErrorCode::InvalidCredentials) => AttemptResult::StoredPasswordRefused,
             Some(ErrorCode::TooManyAttempts | ErrorCode::Busy) => match api.retry_after_s {
                 // Plafonné : un serveur détraqué ne nous endort pas pour des jours.
@@ -464,13 +470,30 @@ mod tests {
             classify(&api(unknown, 426, None)),
             AttemptResult::Incompatible(UpgradeTarget::Agent)
         ));
-        // Ni succès ni attente inventée : un `403` ou un `500` inconnu est un échec ordinaire.
-        for status in [403, 404, 500] {
+        // Ni succès ni attente inventée : un `404` ou un `500` inconnu est un échec ordinaire.
+        for status in [404, 500] {
             assert!(matches!(
                 classify(&api(unknown, status, None)),
                 AttemptResult::Failed
             ));
         }
+    }
+
+    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un refus `403` à la connexion, de code inconnu ou connu, n'est jamais
+    /// retenté en boucle : il met fin à la session sans en deviner le motif (message neutre, formulaire rouvert).
+    #[test]
+    fn a_forbidden_refusal_at_connection_is_shown_never_retried() {
+        for code in [Some(ErrorCode::Unknown), Some(ErrorCode::ForbiddenRole)] {
+            assert!(matches!(
+                classify(&api(code, 403, None)),
+                AttemptResult::SessionEndedUnknown
+            ));
+        }
+        // Un `403` n'attend rien d'autre : les attentes et les échecs passagers gardent leur sens.
+        assert!(matches!(
+            classify(&api(Some(ErrorCode::Unknown), 500, None)),
+            AttemptResult::Failed
+        ));
     }
 
     #[test]

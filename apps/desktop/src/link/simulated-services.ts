@@ -53,6 +53,7 @@ export function byName(a: ServiceDto, b: ServiceDto): number {
 }
 
 export class SimulatedServices {
+  private readonly unreadable = new Map<string, number>();
   private readonly books = new Map<string, Book>();
   private readonly listeners = new Set<(event: ServicesEvent) => void>();
   /** `true` : l'abonnement échoue (la lecture de la liste est en échec). */
@@ -137,6 +138,7 @@ export class SimulatedServices {
       kind: "supported",
       engine: this.engine(engine),
       services: services.map((service) => this.service(service)).sort(byName),
+      unreadable: 0,
     });
   }
 
@@ -203,7 +205,7 @@ export class SimulatedServices {
     const current: ServicesViewDto =
       book && book.view.kind === "supported"
         ? book.view
-        : { kind: "supported", engine: this.engine(), services: [] };
+        : { kind: "supported", engine: this.engine(), services: [], unreadable: 0 };
     if (current.kind !== "supported") return;
     this.store(serverId, {
       kind: "supported",
@@ -215,6 +217,7 @@ export class SimulatedServices {
         host: { ...current.engine.host, ...patch.host },
       },
       services: current.services,
+      unreadable: current.unreadable,
     });
   }
 
@@ -237,6 +240,7 @@ export class SimulatedServices {
       kind: "supported",
       engine: book.view.engine,
       services: book.view.services.filter((item) => item.key !== key),
+      unreadable: book.view.unreadable,
     });
   }
 
@@ -331,7 +335,7 @@ export class SimulatedServices {
     const view: ServicesViewDto =
       book && book.view.kind === "supported"
         ? book.view
-        : { kind: "supported", engine: this.engine(), services: [] };
+        : { kind: "supported", engine: this.engine(), services: [], unreadable: 0 };
     if (view.kind !== "supported") return;
     const existing = view.services.find((item) => item.key === patch.key);
     const merged: ServiceDto = existing
@@ -345,11 +349,24 @@ export class SimulatedServices {
         kind: "supported",
         engine: view.engine,
         services: [...view.services.filter((item) => item.key !== patch.key), merged].sort(byName),
+        unreadable: view.unreadable,
       },
     });
   }
 
-  private store(serverId: string, view: ServicesViewDto): void {
+  /** Combien de services l'agent a envoyés sans que cette version sache les lire, par serveur (tests, pilotage). */
+  setUnreadable(serverId: string, count: number): void {
+    const book = this.books.get(serverId);
+    if (book?.view.kind !== "supported") return;
+    this.unreadable.set(serverId, count);
+    this.store(serverId, { ...book.view });
+  }
+
+  private store(serverId: string, shown: ServicesViewDto): void {
+    const view: ServicesViewDto =
+      shown.kind === "supported"
+        ? { ...shown, unreadable: this.unreadable.get(serverId) ?? shown.unreadable }
+        : shown;
     const seq = (this.books.get(serverId)?.seq ?? 0) + 1;
     // Un état annoncé par le serveur porte ses détails lus : seul `setDetailsKnown(false)` fait le disque.
     this.books.set(serverId, {

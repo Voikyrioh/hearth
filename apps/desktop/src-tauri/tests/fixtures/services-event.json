@@ -6,6 +6,7 @@
     "detailsKnown": true,
     "view": {
       "kind": "supported",
+      "unreadable": 0,
       "engine": {
         "state": "ready",
         "name": "Docker Engine - Community",
@@ -98,6 +99,7 @@
     "detailsKnown": true,
     "view": {
       "kind": "supported",
+      "unreadable": 0,
       "engine": {
         "state": "unknown",
         "name": null,

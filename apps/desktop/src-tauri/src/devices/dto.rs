@@ -42,6 +42,8 @@ pub enum TrustedDevicesDto {
     Listed {
         devices: Vec<TrustedDeviceDto>,
         max: u32,
+        /// Combien de postes l'agent a envoyés sans que cette version sache les lire (écartés, comptés).
+        unreadable: u32,
     },
     Unsupported,
 }

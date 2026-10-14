@@ -27,6 +27,8 @@ export interface ServerServices {
    * événement (ce serait l'heure du rejeu, pas celle de la réception).
    */
   engineReceivedAt: number | null;
+  /** Services que l'agent a envoyés sans que cette version sache les lire (écartés, comptés ; 0 hors support). */
+  unreadable: number;
 }
 
 /**

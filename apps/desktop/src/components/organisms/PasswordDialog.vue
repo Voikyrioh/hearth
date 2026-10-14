@@ -8,7 +8,7 @@ import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import { useAccountActions } from "@/composables/useAccountActions";
 import { useAccountRules } from "@/composables/useAccountRules";
 import { t } from "@/i18n";
-import { type Account, modeOn } from "@/link";
+import { type Account, modeOn, modeUnknown } from "@/link";
 import { useSecurityStore } from "@/stores/security";
 
 // Changement de mot de passe : le sien (`account` absent : ancien puis nouveau, ferme les AUTRES
@@ -42,11 +42,17 @@ const securityEntry = computed(() => security.of(props.serverId));
 // L'agent connaît le choix s'il connaît la sécurité (HRT-24 les livre ensemble) ; tant que rien n'est
 // lu, la case reste utilisable (l'agent ignore un champ qu'il ne connaît pas).
 const keepSupported = computed(() => securityEntry.value?.status !== "unsupported");
-const attackNoKey = computed(() => {
+// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un mode attaque que ce client ne sait pas lire ne fait JAMAIS taire cet
+// avertissement de sécurité (BR-COMPAT-001 point 4) ; il est alors formulé au conditionnel pour rester vrai.
+const attackNoKeyKnown = computed(() => {
   const state = securityEntry.value?.state;
-  // Un mode attaque inconnu de ce client n'est pas « actif » : l'avertissement ne l'affirme pas.
   return state !== null && state !== undefined && modeOn(state.attackMode) && !state.keyAtHand;
 });
+const attackNoKeyUnknown = computed(() => {
+  const state = securityEntry.value?.state;
+  return state !== null && state !== undefined && modeUnknown(state.attackMode) && !state.keyAtHand;
+});
+const attackNoKey = computed(() => attackNoKeyKnown.value || attackNoKeyUnknown.value);
 const rules = useAccountRules(toRef(props, "username"), password);
 const actions = useAccountActions(() => props.serverId);
 
@@ -142,7 +148,9 @@ async function perform(adminPassword: string | null) {
         {{ t(keepSupported ? "accounts.keepAddressHelp" : "accounts.keepAddressOldAgent") }}
       </p>
       <p v-if="attackNoKey && !keepAddress" class="password__warn" role="status" data-keep-address-warn>
-        {{ t("accounts.keepAddressAttackNoKey") }}
+        {{
+          t(attackNoKeyKnown ? "accounts.keepAddressAttackNoKey" : "accounts.keepAddressAttackUnknownNoKey")
+        }}
       </p>
     </template>
     <HPasswordInput

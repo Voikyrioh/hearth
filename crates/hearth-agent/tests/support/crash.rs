@@ -512,6 +512,7 @@ impl World {
                 step: hearth_proto::api::update::UpdateStep::Restart.into(),
                 previous: job.previous.clone(),
                 requester: job.requester(),
+                extra: Default::default(),
             })
             .unwrap();
         inner.write_job(&job).unwrap();

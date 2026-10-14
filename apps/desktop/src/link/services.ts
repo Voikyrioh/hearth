@@ -150,6 +150,8 @@ export type ServicesEvent =
       engineReceivedAt: number | null;
       engine: EngineInfo;
       services: ServiceInfo[];
+      /** Combien de services l'agent a envoyés sans que cette version sache les lire (écartés, comptés). */
+      unreadable: number;
     }
   | { kind: "unsupported"; serverId: string; seq: number; agentVersion: string };
 
@@ -230,6 +232,7 @@ export function toServicesEvent(dto: BoundServicesEvent): ServicesEvent {
     engineReceivedAt: dto.engineReceivedAt,
     engine: toEngine(dto.view.engine),
     services: dto.view.services.map((service) => toService(service, dto.detailsKnown)),
+    unreadable: dto.view.unreadable,
   };
 }
 

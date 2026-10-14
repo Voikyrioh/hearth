@@ -451,6 +451,7 @@ describe("ce qui s'affiche (BR-ENGINE-001, 019, BR-SVC-013, 018)", () => {
       lastReady: null,
       receivedAt: NOW,
       engineReceivedAt: NOW,
+      unreadable: 0,
       ...patch,
     };
   }

@@ -77,6 +77,7 @@ fn item(id: &str, username: &str, role: RoleName, rights: &[&str]) -> AccountIte
 #[test]
 fn the_list_of_accounts_carries_the_right_of_each_account_in_the_shape_of_the_reference_sheet() {
     let list = AccountListDto {
+        unreadable: 0,
         accounts: vec![
             AccountDto::from(item(
                 "01J9ZD6Q8E5W3N2K7M4T1V0XAB",
