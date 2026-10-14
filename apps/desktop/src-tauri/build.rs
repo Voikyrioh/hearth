@@ -58,6 +58,7 @@ const COMMANDS: &[&str] = &[
     "list_services_states",
     "engine_recheck",
     "read_service_rights",
+    "reveal_service_env",
     "open_engine_docs",
 ];
 

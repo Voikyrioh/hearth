@@ -51,9 +51,11 @@ import {
 } from "./security";
 import {
   type EngineInfo,
+  type EnvVariable,
   type ServiceRights,
   type ServicesEvent,
   toEngine,
+  toEnvVariables,
   toServiceRights,
   toServicesEvent,
 } from "./services";
@@ -484,6 +486,10 @@ export class TauriLinkBridge implements LinkBridge {
 
   async readServiceRights(serverId: string): Promise<ServiceRights> {
     return toServiceRights(unwrap(await commands.readServiceRights(serverId)));
+  }
+
+  async revealServiceEnv(serverId: string, key: string): Promise<EnvVariable[]> {
+    return toEnvVariables(unwrap(await commands.revealServiceEnv(serverId, key)));
   }
 
   async openEngineDocs(): Promise<void> {

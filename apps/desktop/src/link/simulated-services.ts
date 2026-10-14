@@ -4,7 +4,13 @@ import type {
   ServiceDto,
   ServicesViewDto,
 } from "@/bindings";
-import { type EngineInfo, type ServicesEvent, toEngine, toServicesEvent } from "./services";
+import {
+  type EngineInfo,
+  type EnvVariable,
+  type ServicesEvent,
+  toEngine,
+  toServicesEvent,
+} from "./services";
 import { LinkCommandError, type Unsubscribe } from "./types";
 
 /**
@@ -15,8 +21,9 @@ import { LinkCommandError, type Unsubscribe } from "./types";
  * champ, est relue par les tests de l'interface pour contrôler que rien ne manque ici (voir
  * `simulated-services.test.ts`). Comme `hearth-link`, il tient l'état COMPLET trié par nom sans tenir compte de
  * la casse et n'annonce que des états complets ; comme un agent, il ne dit rien tant que le lien n'est pas
- * « Connecté » et renvoie l'état courant à son retour. Jamais livré (derrière `import.meta.env.DEV`). Aucune
- * valeur ni nom de variable d'environnement, aucune commande.
+ * « Connecté » et renvoie l'état courant à son retour. Jamais livré (derrière `import.meta.env.DEV`). Les
+ * noms de variables et la commande suivent la liste (détail, HRT-63) ; les VALEURS ne sortent que par
+ * `revealEnv`, qui note chaque lecture (le journal de l'agent) sans jamais la garder.
  */
 
 interface Book {
@@ -24,6 +31,8 @@ interface Book {
   view: ServicesViewDto;
   /** Quand la « liaison » a reçu la vue du moteur (comme `hearth-link`), `null` : inconnue. */
   engineReceivedAt: number | null;
+  /** La commande et les noms de variables ont été lus sur le serveur (faux : liste relue du disque). */
+  detailsKnown: boolean;
 }
 
 export type PartialEngine = Partial<Omit<EngineDto, "host">> & {
@@ -54,6 +63,12 @@ export class SimulatedServices {
   readonly rechecks: string[] = [];
   /** Combien de fois la documentation de Docker a été ouverte. */
   docsOpened = 0;
+  /** Les valeurs de variables que l'agent simulé connaît, par serveur puis par clé de service (jamais dans un événement). */
+  private readonly envValues = new Map<string, EnvVariable[]>();
+  /** Chaque révélation réussie, dans l'ordre : ce que l'agent consigne au journal (la clé du service, ni nom ni valeur). */
+  readonly reveals: { serverId: string; key: string }[] = [];
+  /** `true` : la prochaine lecture des valeurs échoue (lien muet, moteur qui ne répond pas) tant que c'est vrai. */
+  failReveal = false;
   /** Combien d'abonnements ont été posés (les tests s'en servent pour « reprendre la lecture »). */
   subscriptions = 0;
 
@@ -100,6 +115,15 @@ export class SimulatedServices {
       ports: [],
       portsOmitted: 0,
       hostNetwork: false,
+      mounts: [],
+      mountsOmitted: 0,
+      restart: "unless_stopped",
+      envNames: [],
+      envNamesOmitted: 0,
+      command: null,
+      graceS: 10,
+      adopted: null,
+      detailsReserved: false,
       ...patch,
       image: { ref: "nginx", tag: "1.27", shortId: "0123456789ab", ...patch.image },
     };
@@ -135,6 +159,42 @@ export class SimulatedServices {
       });
     }
     this.seed(serverId, services, engine);
+  }
+
+  /**
+   * Les variables d'un service : leurs NOMS vont à la liste (comme l'agent), leurs VALEURS restent ici et ne sortent
+   * que par `revealEnv`.
+   */
+  setEnv(serverId: string, key: string, variables: EnvVariable[]): void {
+    this.envValues.set(
+      `${serverId}/${key}`,
+      variables.map((variable) => ({ ...variable })),
+    );
+    this.upsert(serverId, {
+      key,
+      name: this.nameOf(serverId, key),
+      envNames: variables.map((v) => v.name),
+    });
+  }
+
+  /** La lecture des valeurs : réservée au droit (vérifié par l'appelant), consignée, jamais rejouée. */
+  revealEnv(serverId: string, key: string): EnvVariable[] {
+    if (this.failReveal) throw new LinkCommandError({ kind: "unreachable" });
+    const book = this.books.get(serverId);
+    const exists =
+      book?.view.kind === "supported" && book.view.services.some((item) => item.key === key);
+    if (!exists) throw new LinkCommandError({ kind: "internal" });
+    this.reveals.push({ serverId, key });
+    return (this.envValues.get(`${serverId}/${key}`) ?? []).map((variable) => ({ ...variable }));
+  }
+
+  private nameOf(serverId: string, key: string): string {
+    const book = this.books.get(serverId);
+    const found =
+      book?.view.kind === "supported"
+        ? book.view.services.find((item) => item.key === key)
+        : undefined;
+    return found?.name ?? key;
   }
 
   /** Change le moteur (état, nom, version…), la liste reste. */
@@ -199,11 +259,40 @@ export class SimulatedServices {
     if (book) this.books.set(serverId, { ...book, engineReceivedAt: at });
   }
 
+  /**
+   * Fait comme une liste relue du disque au redémarrage hors ligne (`false`) : ni commande ni noms de variables
+   * (écrits nulle part), et l'événement le dit. `true` : ils ont été lus sur le serveur.
+   */
+  setDetailsKnown(serverId: string, known: boolean): void {
+    const book = this.books.get(serverId);
+    if (!book) return;
+    const view: ServicesViewDto =
+      !known && book.view.kind === "supported"
+        ? {
+            ...book.view,
+            services: book.view.services.map((item) => ({
+              ...item,
+              envNames: [],
+              envNamesOmitted: 0,
+              command: null,
+            })),
+          }
+        : book.view;
+    this.books.set(serverId, { ...book, view, detailsKnown: known });
+    this.announce(serverId);
+  }
+
   /** Le dernier événement d'un serveur, tel que la coquille le rejouerait. */
   current(serverId: string): BoundServicesEvent | undefined {
     const book = this.books.get(serverId);
     return book
-      ? { serverId, seq: book.seq, engineReceivedAt: book.engineReceivedAt, view: book.view }
+      ? {
+          serverId,
+          seq: book.seq,
+          engineReceivedAt: book.engineReceivedAt,
+          detailsKnown: book.detailsKnown,
+          view: book.view,
+        }
       : undefined;
   }
 
@@ -251,6 +340,7 @@ export class SimulatedServices {
     this.books.set(serverId, {
       seq: book?.seq ?? 0,
       engineReceivedAt: book ? book.engineReceivedAt : this.now(),
+      detailsKnown: book?.detailsKnown ?? true,
       view: {
         kind: "supported",
         engine: view.engine,
@@ -261,7 +351,13 @@ export class SimulatedServices {
 
   private store(serverId: string, view: ServicesViewDto): void {
     const seq = (this.books.get(serverId)?.seq ?? 0) + 1;
-    this.books.set(serverId, { seq, view, engineReceivedAt: this.received(serverId, view) });
+    // Un état annoncé par le serveur porte ses détails lus : seul `setDetailsKnown(false)` fait le disque.
+    this.books.set(serverId, {
+      seq,
+      view,
+      engineReceivedAt: this.received(serverId, view),
+      detailsKnown: true,
+    });
     this.emit(serverId);
   }
 

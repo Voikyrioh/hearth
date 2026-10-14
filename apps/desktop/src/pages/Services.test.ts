@@ -74,7 +74,11 @@ describe("ouverture de la section (BR-ENGINE-001, 019)", () => {
 
   it("moteur prêt sans service : « Aucun service pour l'instant », compteurs à zéro, sans invitation (le déploiement arrive plus tard)", async () => {
     const { wrapper } = await open((bridge) => bridge.services.seed("forge", []));
-    expect(wrapper.get("[data-services-empty]").text()).toBe("Aucun service pour l'instant");
+    expect(wrapper.get("[data-services-empty]").text()).toContain("Aucun service pour l'instant");
+    // L'état vide dit ce qu'on peut faire ensuite (HRT-137) : ce que la liste montre, et que l'installation arrive.
+    expect(wrapper.get("[data-services-empty]").text()).toContain(
+      "Installer un service depuis Hearth arrive bientôt.",
+    );
     expect(wrapper.findAll("ul[aria-label] li").map((item) => item.text())).toEqual([
       "0 en marche",
       "0 arrêtés",
@@ -485,6 +489,8 @@ describe("liste grisée et datée quand le moteur n'est pas prêt (BR-SVC-018)",
     vi.setSystemTime(Date.now() + 90_000);
     bridge.services.seed("forge", [], { state: "unresponsive" });
     // L'agent garde la liste quand le moteur ne répond pas ; ici elle est vide : la dernière lue prêt reste.
+    // L'horloge de l'interface bat chaque seconde : l'âge se met à jour tout seul.
+    vi.advanceTimersByTime(1000);
     await flushPromises();
     expect(wrapper.get("[data-services-stale]").text()).toBe("Liste du moteur d'il y a 1 min");
     expect(wrapper.findAll("[data-row]")).toHaveLength(2);
@@ -527,7 +533,7 @@ describe("liste non relisible, moteur prêt (HRT-61 list_degraded)", () => {
       "Impossible de lire les services pour le moment.",
     );
     expect(wrapper.get("[data-services-stale]").text()).toBe("Liste du moteur d'il y a 3 min");
-    expect(wrapper.find(".svc__stale--grey").exists()).toBe(true);
+    expect(wrapper.find(".svc__work--grey").exists()).toBe(true);
     expect(wrapper.findAll("[data-row]")).toHaveLength(1);
     expect(wrapper.text()).toContain("Prêt");
     wrapper.unmount();

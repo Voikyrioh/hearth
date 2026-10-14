@@ -65,6 +65,10 @@ describe("les formes du pont simulé sont celles du protocole", () => {
           restarts10m: 4,
           removedOnStop: true,
           ports: [{ hostPort: 8080, containerPort: 80, protocol: "tcp", scope: "all" }],
+          mounts: [{ kind: "folder", source: "/srv/data", target: "/data", readOnly: true }],
+          envNames: ["A"],
+          command: ["nginx"],
+          adopted: { by: "claire", at: "2026-10-13T08:00:00Z" },
         },
       ],
       { name: "Docker Engine - Community" },
@@ -124,16 +128,19 @@ describe("les formes du pont simulé sont celles du protocole", () => {
     });
   });
 
-  it("aucun champ ne désigne une variable d'environnement, une valeur ou une commande", () => {
+  it("aucun champ ne désigne une VALEUR de variable : les noms et la commande vont à la liste, jamais une valeur", () => {
     const sim = bridge();
     sim.services.generate("forge", 20);
+    sim.services.setEnv("forge", "c_0000", [{ name: "MOT_DE_PASSE", value: "valeur-sentinelle" }]);
     const found = [...paths(sim.services.current("forge"))].map((path) => path.toLowerCase());
-    for (const word of ["env", "command", "cmd", "entrypoint", "secret", "value", "password"]) {
+    for (const word of ["env", "secret", "value", "values", "password"]) {
       expect(found.filter((path) => path.split(/[.[\]]/).includes(word))).toEqual([]);
     }
     const converted = toServicesEvent(sim.services.current("forge") as Wire);
     const all = JSON.stringify(converted);
-    expect(all).not.toMatch(/"(env|envNames|command|cmd)"/);
+    expect(all).toContain("MOT_DE_PASSE");
+    expect(all).not.toContain("valeur-sentinelle");
+    expect(JSON.stringify(sim.services.current("forge"))).not.toContain("valeur-sentinelle");
   });
 });
 

@@ -11,10 +11,11 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
+use hearth_agent::application::ports::EngineError;
 use hearth_agent::domain::services::RunState;
 use hearth_link::domain::event::Event;
 use hearth_link::domain::secret::Secret;
-use hearth_link::{Acted, LinkError};
+use hearth_link::{Acted, InputField, LinkError};
 use hearth_proto::api::services::{AdoptionResult, EngineState, ServicesState};
 use support::agent::StaticSupervisor;
 use support::agent::fake_engine::{FakeEngine, container};
@@ -443,6 +444,88 @@ async fn no_unadopted_container_name_image_or_secret_enters_a_trace_of_the_link(
     let traces = capture.0.lock().unwrap().join("\n");
     assert!(!traces.is_empty(), "le niveau le plus bavard a bien parlé");
     for needle in [HIDDEN_NAME, HIDDEN_IMAGE, WRONG, PASSWORD] {
+        assert!(
+            !traces.contains(needle),
+            "visible dans une trace : {needle}"
+        );
+    }
+}
+
+// ── Révéler les valeurs des variables d'un service (HRT-63, BR-SVC-009) ───────────────────────
+
+/// `reveal_service_env` contre un vrai agent : refus sans le droit « gérer les services », réussite avec le
+/// droit, clé inconnue, moteur muet, clé mal formée. Et, test sentinelle, ni un nom de variable ni une valeur
+/// n'entre dans une trace de la liaison, au niveau le plus bavard, ni dans le texte d'une erreur.
+#[tokio::test]
+async fn revealing_the_values_follows_the_right_and_never_leaves_a_trace() {
+    const NAME: &str = "SENTINEL_NOM_VARIABLE_6b1d";
+    const VALUE: &str = "sentinelle-valeur-secrete-92ce";
+    let capture = Capture::default();
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    let engine = Arc::new(FakeEngine::new());
+    let web = container("web", RunState::Running);
+    engine.put_silently(web.clone());
+    engine.set_env(&web.id, &[(NAME, VALUE)]);
+    let world = World::connected(Options {
+        device_key: true,
+        engine: Some(engine.clone()),
+        ..Options::default()
+    })
+    .await;
+    world.agent.adopt_container(&web.id, "web", "marie").await;
+    let key = format!("c_{}", web.id);
+
+    // Sans le droit : refusé, le droit manquant est nommé, rien n'est lu dans le moteur.
+    let refused = world.manager.reveal_service_env(&world.id, &key).await;
+    assert!(
+        matches!(refused, Err(LinkError::MissingRight(_))),
+        "{refused:?}"
+    );
+    assert_eq!(engine.env_read_count(), 0);
+
+    // Avec le droit : les noms et les valeurs reviennent, dans l'ordre du moteur.
+    world.agent.grant_services("marie").await;
+    let revealed = world
+        .manager
+        .reveal_service_env(&world.id, &key)
+        .await
+        .unwrap();
+    assert_eq!(revealed.variables.len(), 1);
+    assert_eq!(revealed.variables[0].name.expose(), NAME);
+    assert_eq!(revealed.variables[0].value.expose(), VALUE);
+    assert_eq!(engine.env_read_count(), 1);
+    // Le Debug de la réponse ne montre rien.
+    let shown = format!("{revealed:?}");
+    assert!(!shown.contains(NAME) && !shown.contains(VALUE), "{shown}");
+
+    // Un service que l'agent ne connaît pas : une erreur, pas des valeurs.
+    let unknown = format!("c_{}", "e".repeat(64));
+    let missing = world.manager.reveal_service_env(&world.id, &unknown).await;
+    assert!(missing.is_err(), "{missing:?}");
+    assert_eq!(engine.env_read_count(), 1, "rien n'a été lu pour l'inconnu");
+
+    // Le moteur ne répond plus : une erreur, et l'agent n'invente pas de valeurs.
+    engine.fail_inspect(&web.id, Some(EngineError::Unreachable));
+    let mute = world.manager.reveal_service_env(&world.id, &key).await;
+    assert!(mute.is_err(), "{mute:?}");
+    engine.fail_inspect(&web.id, None);
+
+    // Une clé qui n'a pas la forme d'une clé de service ne part pas.
+    for bad in ["../accounts", "web", "", "c_a/b"] {
+        assert_eq!(
+            world.manager.reveal_service_env(&world.id, bad).await,
+            Err(LinkError::InvalidInput(InputField::Filter)),
+            "{bad:?}"
+        );
+    }
+
+    let traces = capture.0.lock().unwrap().join("\n");
+    assert!(!traces.is_empty(), "le niveau le plus bavard a bien parlé");
+    for error in [&refused, &missing, &mute] {
+        let text = format!("{error:?}");
+        assert!(!text.contains(NAME) && !text.contains(VALUE), "{text}");
+    }
+    for needle in [NAME, VALUE] {
         assert!(
             !traces.contains(needle),
             "visible dans une trace : {needle}"

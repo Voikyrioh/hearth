@@ -137,6 +137,9 @@ async fn the_last_services_are_the_last_known_view_without_variable_names_nor_co
         .unwrap()
         .expect("la dernière liste est connue");
     assert_eq!(names(&known.state), ["db", "web"]);
+    // Lus sur le serveur pendant cette exécution : les noms et la commande de l'état en mémoire sont les vrais
+    // (la liste relue du disque, elle, le dit autrement : voir `file_store`).
+    assert!(known.details_known);
     // La liaison date la vue du moteur à sa réception (heure de ce poste) : ce repère accompagne l'état
     // et part avec lui au disque (un état relu au démarrage garde sa vraie date, pas celle du rejeu).
     let received = known
@@ -149,12 +152,15 @@ async fn the_last_services_are_the_last_known_view_without_variable_names_nor_co
         })
         .await;
     let Event::Services {
-        engine_received_at, ..
+        engine_received_at,
+        details_known,
+        ..
     } = announced
     else {
         unreachable!();
     };
     assert!(engine_received_at.is_some());
+    assert!(details_known, "un état reçu du serveur porte ses détails");
     assert!(engine_received_at.unwrap() <= received);
 
     // Ce qui part au fichier `snapshots/{id}.json` : la vue entière, sérialisée comme elle l'est sur le

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use hearth_link::domain::server::ServerId;
 use tauri::State;
 
-use super::dto::{EngineDto, ServiceRightsDto, ServicesEvent};
+use super::dto::{EngineDto, EnvRevealDto, ServiceRightsDto, ServicesEvent};
 use crate::link::LinkRuntime;
 use crate::link_dto::LinkFailure;
 
@@ -53,6 +53,23 @@ pub async fn read_service_rights(
 ) -> Result<ServiceRightsDto, LinkFailure> {
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     Ok(link.manager().service_rights(&id).await?.into())
+}
+
+/// Révèle les valeurs des variables d'UN service (HRT-63, `BR-SVC-009`) : une lecture que l'agent réserve aux
+/// comptes qui ont le droit de gérer les services et qu'il consigne au journal. La clé est celle du service
+/// ouvert (vérifiée par la liaison, qui construit le chemin). Les valeurs sont rendues à l'appelant et à lui
+/// seul : la coquille ne les garde pas, ne les trace pas, ne les met pas dans un événement. Hors « Connecté » :
+/// `NotConnected`, rien n'est envoyé ; sans le droit : `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn reveal_service_env(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<EnvRevealDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let revealed = link.manager().reveal_service_env(&id, &key).await?;
+    Ok(EnvRevealDto::from(&revealed))
 }
 
 /// Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est

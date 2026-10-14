@@ -4,7 +4,7 @@ import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
-import type { EngineInfo, ServiceRights, ServicesEvent } from "./services";
+import type { EngineInfo, EnvVariable, ServiceRights, ServicesEvent } from "./services";
 import type {
   AccountInputCheck,
   AccountList,
@@ -233,8 +233,9 @@ export interface LinkBridge {
   /** La progression de la mise à jour d'un agent (`agent-update://progress`) ; rien n'est rejoué : l'état se relit (`getAgentUpdate`). */
   onAgentUpdate(listener: (event: AgentUpdateEvent) => void): Promise<Unsubscribe>;
 
-  // Moteur de conteneurs et services (HRT-62) : LECTURE SEULE, UNE commande typée par geste. L'interface ne
-  // reçoit ni valeur ni nom de variable d'environnement, ni commande de lancement.
+  // Moteur de conteneurs et services (HRT-62) : LECTURE SEULE, UNE commande typée par geste. Les noms de
+  // variables et la commande de lancement arrivent avec la liste (détail, HRT-63) ; une VALEUR de variable ne
+  // se lit que par `revealServiceEnv`, à la demande.
 
   /**
    * L'état du moteur et la liste des services de chaque serveur (`link://services`) : le dernier état connu
@@ -256,6 +257,13 @@ export interface LinkBridge {
    * échec `not_connected`.
    */
   readServiceRights(serverId: string): Promise<ServiceRights>;
+  /**
+   * Révèle les valeurs des variables d'UN service (HRT-63, BR-SVC-009) : une lecture réservée aux comptes qui ont le
+   * droit de gérer les services, que l'agent consigne au journal (sans nom ni valeur). Hors « Connecté » : échec
+   * `not_connected` ; sans le droit : `missing_services_right`. La réponse n'est ni gardée ni tracée par la coquille :
+   * l'appelant la garde en mémoire le temps de l'affichage et l'efface au remasquage.
+   */
+  revealServiceEnv(serverId: string, key: string): Promise<EnvVariable[]>;
   /** Ouvre la documentation officielle de Docker dans le navigateur du PC (l'adresse est une constante de la coquille). */
   openEngineDocs(): Promise<void>;
 

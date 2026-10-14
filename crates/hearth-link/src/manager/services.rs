@@ -10,7 +10,8 @@
 
 use hearth_proto::admin_act::is_service_key;
 use hearth_proto::api::services::{
-    AdoptRequest, AdoptResponse, EngineView, ExternalContainers, ReleaseResponse, ServicesState,
+    AdoptRequest, AdoptResponse, EngineView, EnvReveal, ExternalContainers, ReleaseResponse,
+    ServicesState,
 };
 use serde::de::DeserializeOwned;
 
@@ -19,7 +20,7 @@ use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
 use crate::domain::server::ServerId;
 use crate::domain::time::WallTime;
-use crate::error::LinkError;
+use crate::error::{InputField, LinkError};
 use crate::ports::transport::{ApiRequest, Method};
 
 const RECHECK_PATH: &str = "/engine/recheck";
@@ -37,12 +38,6 @@ pub enum Acted<T> {
     ResultUnknown {
         id: OperationId,
     },
-}
-
-/// La clé d'un service telle qu'elle voyage dans le chemin : la barre oblique inverse d'un nom d'unité
-/// échappé par le système (`\x2d`) est encodée, tout le reste d'une clé de service passe tel quel.
-fn key_segment(key: &str) -> String {
-    key.replace('\\', "%5C")
 }
 
 /// Lit une réponse typée. L'erreur de lecture ne recopie JAMAIS celle de `serde` : une erreur de type cite la
@@ -69,6 +64,9 @@ fn acted<T: DeserializeOwned>(outcome: ActionOutcome, what: &str) -> Result<Acte
 pub struct KnownServices {
     pub state: ServicesState,
     pub engine_received_at: Option<WallTime>,
+    /// Les noms de variables et la commande ont été lus sur le serveur depuis le démarrage de la liaison. Faux
+    /// pour une liste relue du disque, qui est écrite sans eux : leur absence veut alors dire « pas lus ».
+    pub details_known: bool,
 }
 
 impl LinkManager {
@@ -77,9 +75,11 @@ impl LinkManager {
     pub async fn services_state(&self, id: &ServerId) -> Result<Option<KnownServices>, LinkError> {
         Ok(self.last_known(id).await?.and_then(|view| {
             let engine_received_at = view.services_at;
+            let details_known = view.services_details;
             view.services.map(|state| KnownServices {
                 state,
                 engine_received_at,
+                details_known,
             })
         }))
     }
@@ -176,6 +176,49 @@ impl LinkManager {
         }
         parse(response.body, "état du moteur")
     }
+
+    /// Révéler les valeurs des variables d'un service (HRT-63, `BR-SVC-009`) : `GET /services/{key}/env`, une
+    /// LECTURE que l'agent réserve aux comptes qui ont le droit de gérer les services et qu'il consigne au
+    /// journal (sans nom ni valeur). La clé est vérifiée (forme d'une clé de service) puis encodée par le
+    /// code : l'appelant ne fournit jamais un chemin. Hors « Connecté » : `NotConnected`, rien n'est envoyé.
+    /// Rien n'est rejoué ni gardé : si le lien tombe, l'appel échoue et l'interface le refait. La réponse
+    /// n'entre dans aucune trace, et une réponse illisible ne cite jamais son contenu.
+    pub async fn reveal_service_env(
+        &self,
+        id: &ServerId,
+        key: &str,
+    ) -> Result<EnvReveal, LinkError> {
+        if !is_service_key(key) {
+            return Err(LinkError::InvalidInput(InputField::Filter));
+        }
+        let (target, token) = self.credentials(id)?;
+        let body = self
+            .typed_get(
+                &target,
+                &token,
+                format!("/services/{}/env", key_segment(key)),
+            )
+            .await?;
+        serde_json::from_value(body)
+            .map_err(|_| LinkError::Protocol("variables du service illisibles".into()))
+    }
+}
+
+/// La clé d'un service telle qu'elle voyage dans le chemin, l'UNIQUE encodage de la liaison (relâche et
+/// révélation) : tout octet hors lettres, chiffres, `-`, `_` et `.` devient `%XX` (une clé `u_…` peut porter
+/// `\` d'un nom d'unité échappé par le système, `:` ou `@`). L'agent décode le segment, et la liaison le
+/// décode de même (`domain/act.rs`) pour signer la clé en clair : le chemin envoyé et la clé signée ne se
+/// séparent jamais.
+fn key_segment(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    for byte in key.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -207,6 +250,37 @@ mod tests {
             let error = result.unwrap_err();
             assert!(matches!(error, LinkError::Protocol(_)), "{error:?}");
             assert!(!format!("{error} {error:?}").contains(HIDDEN), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn a_key_is_encoded_as_one_path_segment() {
+        assert_eq!(key_segment("c_0123abcd"), "c_0123abcd");
+        assert_eq!(
+            key_segment(r"u_docker-my\x2dapp.service"),
+            "u_docker-my%5Cx2dapp.service"
+        );
+        assert_eq!(key_segment("u_a@b:c.service"), "u_a%40b%3Ac.service");
+        // Un segment ne peut jamais en devenir deux, ni sortir de la route.
+        assert_eq!(key_segment("u_a/b.service"), "u_a%2Fb.service");
+    }
+
+    /// Ce que la liaison envoie est ce que son propre classement d'actes relit : la clé encodée se décode en
+    /// la même clé, pour chaque forme de clé que l'agent peut émettre.
+    #[test]
+    fn an_encoded_key_decodes_to_the_same_key() {
+        for key in [
+            "c_0123abcd",
+            r"u_docker-my\x2dapp.service",
+            "u_a@b:c.service",
+            "u_docker-7dtd.service",
+        ] {
+            let segment = key_segment(key);
+            assert_eq!(
+                hearth_proto::admin_act::decode_segment(&segment).as_deref(),
+                Some(key),
+                "{segment}"
+            );
         }
     }
 }
