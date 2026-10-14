@@ -99,6 +99,44 @@ pub enum ErrorCode {
     WorldGone,
     /// L'opération a passé son point de non-retour : elle ne s'annule plus (ADR-0045).
     TooLateToCancel,
+    // --- Codes des tranches L1 à L3, déclarés d'un coup par HRT-144 : les lots suivants les utilisent sans
+    // --- toucher à ce fichier. Les détails (`details.*`) sont ceux de la conception technique. ---
+    /// Le moteur de conteneurs n'est pas utilisable (`details.engine`).
+    EngineUnavailable,
+    /// Aucun service de cette clé, ou un service que ce compte ne peut pas voir.
+    ServiceNotFound,
+    /// Une opération tient déjà ce service (`details.by`, `details.kind`).
+    ServiceBusy,
+    /// Le service est déjà dans l'état demandé (`details.state`).
+    ServiceAlreadyInState,
+    /// Le service ne se pilote pas ainsi : en pause, ou dans un état non reconnu.
+    ServiceNotDrivable,
+    /// Le nom est pris (`details.holder` : `hearth`, `external` ou `deployment`).
+    NameTaken,
+    /// Le port est tenu (`details.port`, `details.protocol`, `details.holder`, `details.suggested`).
+    PortInUse,
+    /// Dossier refusé (`details.field`, `details.reason`).
+    FolderRefused,
+    /// Un service ne se crée pas sans limite de mémoire et de processeur.
+    LimitsRequired,
+    /// Trop de déploiements à la fois.
+    DeployLimit,
+    /// Aucune opération de cet identifiant, ou une opération sur un service que ce compte ne peut pas voir.
+    OperationNotFound,
+    /// Ce choix n'est pas parmi ceux que l'opération offre.
+    DecisionNotOffered,
+    /// Un contrat de la fiche n'est pas accepté (`details.ids`).
+    AgreementRequired,
+    /// La fiche n'est plus celle que le client a lue (`details.version`, `details.digest`).
+    FicheChanged,
+    /// Une valeur de réglage est refusée (`details.id`, `details.reason`, `details.char?`).
+    SettingRefused,
+    /// Les réglages ont changé depuis la lecture (`details.by`, `details.at`).
+    SettingsConflict,
+    /// Ce réglage exige de recréer le service, ce que cet agent ne sait pas encore faire.
+    RecreateNotAvailable,
+    /// Aucune sauvegarde de cet identifiant.
+    BackupNotFound,
     /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
     /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
     #[serde(other)]
@@ -114,7 +152,11 @@ impl ErrorCode {
             | Self::SessionExpired
             | Self::SessionRevoked => 401,
             Self::ForbiddenRole | Self::WriteDenied => 403,
-            Self::NotFound | Self::FicheUnknown => 404,
+            Self::NotFound
+            | Self::FicheUnknown
+            | Self::ServiceNotFound
+            | Self::OperationNotFound
+            | Self::BackupNotFound => 404,
             Self::MethodNotAllowed => 405,
             Self::PayloadTooLarge => 413,
             Self::OperationInProgress
@@ -139,15 +181,29 @@ impl ErrorCode {
             | Self::RestorePlanChanged
             | Self::HostTooSmall
             | Self::WorldGone
-            | Self::TooLateToCancel => 409,
+            | Self::TooLateToCancel
+            | Self::ServiceBusy
+            | Self::ServiceAlreadyInState
+            | Self::ServiceNotDrivable
+            | Self::NameTaken
+            | Self::PortInUse
+            | Self::DeployLimit
+            | Self::DecisionNotOffered
+            | Self::FicheChanged
+            | Self::SettingsConflict
+            | Self::RecreateNotAvailable => 409,
             Self::ValidationError
             | Self::BadSignature
             | Self::WeakPassword
             | Self::WrongPassword
             | Self::IdempotencyKeyReused
             | Self::PlanSettingRefused
-            | Self::PathRefused => 422,
-            Self::Busy => 503,
+            | Self::PathRefused
+            | Self::FolderRefused
+            | Self::LimitsRequired
+            | Self::AgreementRequired
+            | Self::SettingRefused => 422,
+            Self::Busy | Self::EngineUnavailable => 503,
             Self::IncompatibleVersion => 426,
             Self::TooManyAttempts | Self::TransferLimit => 429,
             Self::TransferExpired => 410,
@@ -322,7 +378,7 @@ mod tests {
         assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
     }
 
-    const ALL: [(ErrorCode, &str, u16); 47] = [
+    const ALL: [(ErrorCode, &str, u16); 66] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -378,6 +434,33 @@ mod tests {
         (ErrorCode::HostTooSmall, "HOST_TOO_SMALL", 409),
         (ErrorCode::WorldGone, "WORLD_GONE", 409),
         (ErrorCode::TooLateToCancel, "TOO_LATE_TO_CANCEL", 409),
+        (ErrorCode::EngineUnavailable, "ENGINE_UNAVAILABLE", 503),
+        (ErrorCode::ServiceNotFound, "SERVICE_NOT_FOUND", 404),
+        (ErrorCode::ServiceBusy, "SERVICE_BUSY", 409),
+        (
+            ErrorCode::ServiceAlreadyInState,
+            "SERVICE_ALREADY_IN_STATE",
+            409,
+        ),
+        (ErrorCode::ServiceNotDrivable, "SERVICE_NOT_DRIVABLE", 409),
+        (ErrorCode::NameTaken, "NAME_TAKEN", 409),
+        (ErrorCode::PortInUse, "PORT_IN_USE", 409),
+        (ErrorCode::FolderRefused, "FOLDER_REFUSED", 422),
+        (ErrorCode::LimitsRequired, "LIMITS_REQUIRED", 422),
+        (ErrorCode::DeployLimit, "DEPLOY_LIMIT", 409),
+        (ErrorCode::OperationNotFound, "OPERATION_NOT_FOUND", 404),
+        (ErrorCode::DecisionNotOffered, "DECISION_NOT_OFFERED", 409),
+        (ErrorCode::AgreementRequired, "AGREEMENT_REQUIRED", 422),
+        (ErrorCode::FicheChanged, "FICHE_CHANGED", 409),
+        (ErrorCode::SettingRefused, "SETTING_REFUSED", 422),
+        (ErrorCode::SettingsConflict, "SETTINGS_CONFLICT", 409),
+        (
+            ErrorCode::RecreateNotAvailable,
+            "RECREATE_NOT_AVAILABLE",
+            409,
+        ),
+        (ErrorCode::BackupNotFound, "BACKUP_NOT_FOUND", 404),
+        (ErrorCode::Unknown, "UNKNOWN", 500),
     ];
 
     #[test]
@@ -442,5 +525,26 @@ mod tests {
             serde_json::from_value(json!({ "error": { "code": "NOT_FOUND", "message": "x" } }))
                 .expect("deserialization");
         assert_eq!(parsed.error.details, json!({}));
+    }
+
+    #[test]
+    fn a_code_this_client_does_not_know_reads_as_unknown_and_never_breaks_the_envelope() {
+        // Un agent plus récent : le corps d'erreur entier se lit, le code est `Unknown`, le message et les
+        // détails restent. Avant, ce corps était rejeté au décodage et le client perdait la raison.
+        let parsed: ErrorBody = serde_json::from_value(json!({
+            "error": { "code": "SOMETHING_FROM_THE_FUTURE", "message": "x", "details": { "a": 1 } }
+        }))
+        .expect("lu");
+        assert_eq!(parsed.error.code, ErrorCode::Unknown);
+        assert_eq!(parsed.error.details, json!({ "a": 1 }));
+        assert_eq!(parsed.error.message, "x");
+    }
+
+    #[test]
+    fn every_code_is_listed_once_in_the_table_of_the_tests() {
+        let mut names: Vec<&str> = ALL.iter().map(|(_, name, _)| *name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), ALL.len());
     }
 }

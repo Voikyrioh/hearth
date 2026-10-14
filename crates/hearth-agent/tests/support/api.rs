@@ -80,7 +80,27 @@ fn state_over(
         engine_enabled,
         EngineTimings::production(),
     );
+    let service_ops = Arc::new(
+        hearth_agent::application::service_op_access::ServiceOpAccess::new(
+            Arc::new(hearth_agent::application::service_ops::ServiceOps::new(
+                Arc::new(hearth_agent::infrastructure::sqlite::SqliteOpJournal::new(
+                    env.db.pool().clone(),
+                )),
+                Arc::new(hearth_agent::application::service_ops::OpLocks::new()),
+                env.clock.clone(),
+                Arc::new(hearth_agent::infrastructure::ids::UlidGen),
+                Arc::new(hearth_agent::infrastructure::created_objects::FsCreatedObjects::new([])),
+            )),
+            services.clone(),
+            Arc::new(hearth_agent::infrastructure::sqlite::SqliteStore::new(
+                env.db.pool().clone(),
+            )),
+            env.clock.clone(),
+            env.trail.clone(),
+        ),
+    );
     AppState {
+        service_ops,
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),
             false,

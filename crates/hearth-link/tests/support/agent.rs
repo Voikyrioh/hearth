@@ -435,6 +435,17 @@ impl TestAgent {
             .await;
     }
 
+    /// Le journal des opérations de service de l'agent (HRT-144) : un test y ACCEPTE une opération comme le
+    /// ferait un lot de geste, puis la lit, la décide ou l'annule par la liaison.
+    pub fn ops(&self) -> Arc<hearth_agent::application::service_ops::ServiceOps> {
+        self.running
+            .as_ref()
+            .expect("agent démarré")
+            .foundations
+            .ops
+            .clone()
+    }
+
     /// Arrêt de l'agent (le dossier de données, donc l'identité, est conservé).
     pub async fn stop(&mut self) {
         if let Some(running) = self.running.take() {

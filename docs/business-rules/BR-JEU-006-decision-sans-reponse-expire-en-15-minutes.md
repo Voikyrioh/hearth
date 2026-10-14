@@ -31,4 +31,5 @@ Une opération `awaiting_decision` porte les choix offerts et la date de la dema
 - BR-EDIT-031, BR-LIFE-013
 
 ## Historique
+- 2026-10-14 — la route de décision refuse une décision expirée avant même le balayage, et le balayage retire ce que l'opération avait créé pour elle-même (HRT-144, BR-OPS-003).
 - 2026-10-13 — création (HRT-83, ADR-0044 et ADR-0045 : socle des services créés par Hearth, côté agent).

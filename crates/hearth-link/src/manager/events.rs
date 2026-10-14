@@ -64,4 +64,16 @@ impl EventSink for Fanout {
         // Aucun abonné : l'événement est simplement perdu.
         let _ = self.sender.send(event);
     }
+
+    /// Le suivi d'une opération de service (HRT-144) ne passe pas par le canal des abonnés (`Event` n'a pas de
+    /// variante pour lui) : il va seulement à la destination supplémentaire, qui l'implémente ou l'ignore.
+    fn service_operation(
+        &self,
+        server: &crate::domain::server::ServerId,
+        operation: Arc<hearth_proto::api::service_ops::OperationView>,
+    ) {
+        if let Some(extra) = &self.extra {
+            extra.service_operation(server, operation);
+        }
+    }
 }

@@ -36,8 +36,20 @@ DOMAIN = b"hearth-device-proof/1"
 USAGE_LOGIN = 0x01
 USAGE_ADMIN_ACT = 0x05
 ACT_AGENT_UPDATE = 0x06
+# Déclarés d'un coup par HRT-144 (`hearth_proto::admin_act::ActKind`) : les scénarios n'en envoient pour l'instant
+# aucun, mais la table des codes est ici pour qui en ajoutera un (une route à venir par lot).
+ACT_SERVICE_START = 0x0C
+ACT_SERVICE_STOP = 0x0D
+ACT_SERVICE_RESTART = 0x0E
+ACT_SERVICE_DEPLOY = 0x0F
+ACT_OPERATION_CANCEL = 0x10
 ACT_SERVICES_ADOPT = 0x11
 ACT_SERVICE_RELEASE = 0x12
+ACT_SERVICE_DELETE = 0x14
+ACT_BACKUP_CREATE = 0x19
+ACT_BACKUP_DELETE = 0x1B
+ACT_OPERATION_DECIDE = 0x1D
+ACT_GAME_SETTINGS_SAVE = 0x1E
 
 
 def connect(host, port):

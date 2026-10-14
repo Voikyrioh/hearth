@@ -207,6 +207,22 @@ pub enum Target {
         target_holder: bool,
         author_holder: Option<bool>,
     },
+    /// Un compte a annulé une opération de service ou tranché ce qu'elle attendait (HRT-144, ADR-0045) : le
+    /// nom du service et le geste. L'entrée est écrite sous l'action du GENRE de l'opération. Jamais un
+    /// identifiant de conteneur, un chemin du serveur, une valeur ni un nom de variable.
+    ServiceOperation {
+        service: ClientName,
+        gesture: OperationGesture,
+    },
+}
+
+/// Ce qu'un compte a fait d'une opération de service (liste fermée : le texte de l'entrée est fixe).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationGesture {
+    /// L'opération a été annulée par le compte.
+    Cancelled,
+    /// Le compte a pris cette décision (le libellé du choix, en français).
+    Decided(&'static str),
 }
 
 /// Pourquoi une adoption devient « à confirmer » ou tombe sans qu'aucun compte agisse (texte fixe).
@@ -260,6 +276,17 @@ impl Target {
             Self::ServiceUnit(name, Some(unit)) => {
                 Some(format!("service {} ({})", name.as_str(), unit.as_str()))
             }
+            Self::ServiceOperation {
+                service,
+                gesture: OperationGesture::Cancelled,
+            } => Some(format!("service {} : opération annulée", service.as_str())),
+            Self::ServiceOperation {
+                service,
+                gesture: OperationGesture::Decided(choice),
+            } => Some(format!(
+                "service {} : décision « {choice} »",
+                service.as_str()
+            )),
             Self::ServiceAdoption(key, cause) => {
                 Some(format!("service {} ({})", key.as_str(), cause.text()))
             }

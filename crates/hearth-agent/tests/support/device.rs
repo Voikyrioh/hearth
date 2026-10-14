@@ -305,6 +305,12 @@ pub fn act_of<'a>(
                 .unwrap_or_else(|| (*key).to_owned())
                 .into(),
         },
+        // Annuler et décider une opération de service (HRT-144) : l'identifiant du chemin, le choix du corps.
+        ("DELETE", ["operations", "services", id]) => AdminAct::OperationCancel { target: id },
+        ("POST", ["operations", "services", id, "decision"]) => AdminAct::OperationDecide {
+            target: id,
+            choice: serde_json::from_value(body["choice"].clone()).expect("choix de la décision"),
+        },
         _ => panic!("{method} {path} n'est pas un acte du contrat commun"),
     }
 }

@@ -218,6 +218,17 @@ Première connexion vers un agent inconnu (pas dans `servers.json`).
 - Proxy TLS interceptant : user accepte probe via proxy (même résultat).
 ```
 
+- [BR-LIFE-020](./BR-LIFE-020-l-issue-d-une-operation-se-relit-apres-une-coupure.md) — L'issue d'une opération se relit après une coupure du lien : l'opération reste lisible 24 heures après sa fin — crates/hearth-agent/src/application/service_op_access.rs::ServiceOpAccess::read — invariant ✓
+- [BR-DEPLOY-028](./BR-DEPLOY-028-l-issue-d-un-deploiement-se-relit-apres-une-coupure.md) — L'issue d'un déploiement se relit après une coupure du lien, par la même route que toute opération de service — crates/hearth-agent/src/application/service_op_access.rs::ServiceOpAccess::read — invariant ✓
+- [BR-OPS-001](./BR-OPS-001-une-operation-n-est-lisible-que-par-qui-voit-son-service.md) — Une opération n'est lisible que par qui peut voir son service ; pour les autres elle n'existe pas — crates/hearth-agent/src/domain/ops/access.rs::{may_see, — invariant ✓
+- [BR-OPS-002](./BR-OPS-002-annuler-avant-le-point-de-non-retour-idempotent-consigne.md) — Une opération s'annule avant son point de non-retour seulement ; l'annulation est idempotente et consignée avec son auteur — crates/hearth-agent/src/domain/ops/decision.rs::cancel_verdict — invariant ✓
+- [BR-OPS-003](./BR-OPS-003-une-decision-parmi-celles-offertes-avant-son-expiration.md) — Une décision d'opération n'est acceptée que parmi les choix offerts, avant son expiration, par un acte confirmé qui signe le choix — crates/hearth-agent/src/domain/ops/decision.rs::{apply_choice, — invariant ✓
+- [BR-OPS-004](./BR-OPS-004-le-suivi-en-direct-un-message-par-500-ms-et-par-operation.md) — Le suivi d'une opération en direct : au plus un message `operation` par 500 ms et par opération, le dernier état n'est jamais perdu, un abonné lent ne bloque pas l'agent — crates/hearth-agent/src/domain/ops/flush.rs::OpFlush — invariant ✓
+- [BR-OPS-005](./BR-OPS-005-busy-et-last-action-sont-des-projections-du-journal.md) — `busy` et `last_action` d'un service sont des projections du journal des opérations, jamais un état à part — crates/hearth-agent/src/domain/ops/index.rs::OpsIndex — invariant ✓
+- [BR-OPS-006](./BR-OPS-006-rien-de-sensible-dans-une-operation-ni-son-suivi.md) — Aucun secret, aucune valeur, aucun chemin du serveur ni nom d'objet dans la vue d'une opération, ses erreurs, le flux, le journal d'activité ou les traces — crates/hearth-agent/src/entrypoint/service_ops_wire.rs::view — invariant ✓
+- [BR-OPS-007](./BR-OPS-007-le-nombre-d-operations-gardees-est-borne.md) — Le journal garde au plus 500 opérations terminées, et 24 heures ; une opération non terminée n'est jamais purgée — crates/hearth-agent/src/application/service_ops.rs::ServiceOps::sweep — invariant ✓
+- [BR-OPS-008](./BR-OPS-008-la-reprise-compte-les-conteneurs-et-ne-presume-jamais-un-etat-bon.md) — La reprise au démarrage compte les conteneurs du service dans le vrai moteur et ne présume jamais un état cohérent — crates/hearth-agent/src/domain/ops/observe.rs::observed_from_presence — invariant ✓
+
 ## Fiches du client Windows (BR-CLIENT)
 
 - [BR-CLIENT-001](./BR-CLIENT-001-installation-sans-droits-administrateur.md) — L'installation se déroule sans droits administrateur ni logiciel tiers — apps/desktop/src-tauri/tauri.conf.json — invariant ✓

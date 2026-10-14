@@ -21,11 +21,15 @@ use crate::domain::services::{
     Hidden, MAX_COMMAND_ARG_CHARS, MAX_COMMAND_ARGS, MAX_ENGINE_TEXT_CHARS, MAX_ENV_NAME_CHARS,
     MAX_ENV_NAMES, MAX_IMAGE_REF_CHARS, MAX_IMAGE_TAG_CHARS, MAX_LABEL_CHARS, MAX_MOUNTS,
     MAX_NAME_CHARS, MAX_PATH_CHARS, MAX_PORTS, MountInfo, MountType, Observation, PortBinding,
-    PortProtocol, PortScope, RestartPolicy, RunState, bounded, bounded_opt,
+    PortProtocol, PortScope, RestartPolicy, RunState, ServiceKey, bounded, bounded_opt,
 };
 
 /// Étiquette posée par Compose sur les conteneurs d'une pile (information seulement).
 const COMPOSE_PROJECT_LABEL: &str = "com.docker.compose.project";
+
+/// Étiquette posée par Hearth sur un conteneur qu'il crée : l'identifiant du service (ULID, la clé du
+/// service est `h_` suivi de cet identifiant, ADR-0037).
+const HEARTH_SERVICE_LABEL: &str = "io.hearth.service-id";
 
 /// Date du moteur (`RFC 3339`, nanosecondes) ; `0001-01-01T00:00:00Z` (jamais) et tout texte
 /// illisible donnent `None`.
@@ -148,6 +152,11 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
                 .and_then(|log| log.typ.as_deref()),
             MAX_ENGINE_TEXT_CHARS,
         ),
+        // Une étiquette qui n'a pas la forme d'une clé est ignorée : ce n'est pas un service de Hearth.
+        hearth_key: config
+            .and_then(|config| config.labels.as_ref())
+            .and_then(|labels| labels.get(HEARTH_SERVICE_LABEL))
+            .and_then(|id| ServiceKey::parse(&format!("h_{id}"))),
     })
 }
 

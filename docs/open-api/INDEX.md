@@ -4,7 +4,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 
 **Actes d'administration** (HRT-28) : les routes qui modifient (hors déconnexion et hors retrait d'un poste, qui garde son contrat) acceptent un membre `reauth` (mot de passe + preuve de clé d'usage `0x05`) ; l'agent l'EXIGE depuis HRT-30 (`GET /security` : `admin_reauth.required: true`) ; sans `reauth`, `426 INCOMPATIBLE_VERSION` « client trop ancien ». Voir [sécurité](./security.md).
 
-37 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
+40 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
@@ -28,6 +28,9 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Services** | GET | [`/services/external`](./services.md) | droit « gérer les services » | Les conteneurs non gérés que ce compte peut choisir d'adopter (HRT-80, BR-ADOPT-005, 006) : clé, nom, image, unité, état, rien d'autre ; jamais sur le flux, jamais gardée ; lecture réussie et refus consignés (`service.external.read`, sans nom, regroupés) |
 | **Services** | POST | [`/services/adopt`](./services.md) | droit « gérer les services » + acte d'administration `0x11` (mot de passe à chaque fois, jamais l'élévation) | Adopte 1 à 50 conteneurs, un résultat par clé (HRT-80, BR-ADOPT-008 à 010) ; une ligne dans la base de l'agent, rien d'écrit sur le service ; une entrée de journal par service (`service.adopt`) |
 | **Services** | POST | [`/services/{key}/release`](./services.md) | droit « gérer les services » + acte d'administration `0x12` (couvert par l'élévation) | « Ne plus gérer » (HRT-80, BR-ADOPT-013) : le service sort de la liste de tous, sans effet ni entrée si déjà relâché ; journal `service.release` |
+| **Services** | GET | [`/operations/services/{id}`](./service-ops.md) | user+ | Une opération de service (HRT-144, ADR-0045) : genre, statut, étapes, progression, décision offerte, cause ; 24 heures après sa fin ; une opération sur un service que le compte ne voit pas répond comme une inconnue (`404 OPERATION_NOT_FOUND`, BR-OPS-001) ; lecture non journalisée |
+| **Services** | DELETE | [`/operations/services/{id}`](./service-ops.md) | droit « gérer les services » + acte d'administration `0x10` (couvert par l'élévation, défaut non validé) | Annule une opération avant son point de non-retour (`TOO_LATE_TO_CANCEL` après), idempotent, consigné sous l'action du genre avec l'auteur (BR-OPS-002) |
+| **Services** | POST | [`/operations/services/{id}/decision`](./service-ops.md) | droit « gérer les services » + acte d'administration `0x1D` (jamais couvert par l'élévation : mot de passe à chaque réponse, défaut non validé ; le choix est signé) | Décide d'une opération qui attend : parmi les choix offerts, avant l'expiration de 15 minutes (`DECISION_NOT_OFFERED` sinon, BR-OPS-003) |
 | **Services** | POST | [`/engine/recheck`](./services.md) | user+ | Relance la détection du moteur et rend son état : un `POST` qui ne modifie rien (`READ_ONLY_POSTS`) |
 | **Comptes** | GET | [`/accounts`](./accounts.md) | admin | Liste comptes, sessions ouvertes, dernier login |
 | **Comptes** | POST | [`/accounts`](./accounts.md) | admin | Créer compte (username, password, role) |
@@ -65,6 +68,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - `413 PAYLOAD_TOO_LARGE` : corps d'une requête suivie au-delà de 1 Mio
 - `503 BUSY` : agent saturé (calculs de mots de passe), en-tête `Retry-After`
 - `500 INTERNAL_ERROR` : erreur serveur
+- Opérations de service (HRT-144) : `404 OPERATION_NOT_FOUND` (inconnue, purgée, ou sur un service que le compte ne voit pas, sans distinction), `409 TOO_LATE_TO_CANCEL`, `409 DECISION_NOT_OFFERED` (`details.reason`) : voir [opérations de service](./service-ops.md). Les autres codes des tranches L1 à L3 sont déclarés (`hearth-proto::error::ErrorCode`) sans route encore : `ENGINE_UNAVAILABLE` 503, `SERVICE_NOT_FOUND` 404, `SERVICE_BUSY`, `SERVICE_ALREADY_IN_STATE`, `SERVICE_NOT_DRIVABLE`, `NAME_TAKEN`, `PORT_IN_USE`, `DEPLOY_LIMIT`, `FICHE_CHANGED`, `SETTINGS_CONFLICT`, `RECREATE_NOT_AVAILABLE` 409, `FOLDER_REFUSED`, `LIMITS_REQUIRED`, `AGREEMENT_REQUIRED`, `SETTING_REFUSED` 422, `BACKUP_NOT_FOUND` 404 ; `FICHE_UNKNOWN` (404) tient lieu de « fiche inconnue ». Un code qu'un client ne connaît pas se lit `UNKNOWN` (jamais une erreur de lecture) : le statut HTTP dit l'essentiel.
 
 ## Conventions
 
@@ -73,4 +77,4 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 - Client : `X-Hearth-Client: poste/version` (nom du poste, retenu avec la session).
 - Accès : chaque route est déclarée dans `ENDPOINTS` (`entrypoint/http/mod.rs`) avec son niveau (public, authentifié, administrateur, ou « premier message » pour le flux, qui s'authentifie lui-même) son suivi par clé et son action de journal (les refus et les échecs sont consignés par la couche d'accès) ; le routeur pose la couche d'accès depuis la table et un test de balayage vérifie que les routes réservées refusent l'appelant sans droit.
 - Réponses : succès = corps JSON propre à la route, sans enveloppe (ex. `/hello`) ; échec = `{ error: { code, message, details } }` (`hearth-proto::error::ErrorBody`).
-- Fiches de route détaillées : [mise à jour de l'agent](./agent-update.md), [hello](./hello.md), [moteur de conteneurs et services](./services.md), [sessions](./sessions.md), [postes de confiance](./devices.md), [sécurité](./security.md), [comptes](./accounts.md), [opérations](./operations.md), [machine](./machine.md), [historique des mesures](./metrics.md), [flux temps réel](./stream.md), [journal](./audit.md).
+- Fiches de route détaillées : [mise à jour de l'agent](./agent-update.md), [hello](./hello.md), [moteur de conteneurs et services](./services.md), [opérations de service](./service-ops.md), [sessions](./sessions.md), [postes de confiance](./devices.md), [sécurité](./security.md), [comptes](./accounts.md), [opérations](./operations.md), [machine](./machine.md), [historique des mesures](./metrics.md), [flux temps réel](./stream.md), [journal](./audit.md).

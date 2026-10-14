@@ -31,6 +31,7 @@ mod proof;
 mod secret_sealer;
 mod security_feed;
 mod service_manager;
+mod service_op_tx;
 mod service_repo;
 mod service_spec_repo;
 mod service_supervisor;
@@ -71,7 +72,7 @@ pub use machine_info::MachineInfo;
 pub use monotonic_clock::MonotonicClock;
 pub use op_journal::{
     CreatedObjects, DecisionOffer, JournalError, NewOp, OpJournal, OpRecord, Progress,
-    RemoveOutcome, ServiceObserver,
+    RecordedContainers, RecordedService, RemoveOutcome, ServiceObserver, StepGuard,
 };
 pub use operation_repo::{OperationRepo, OperationTx};
 pub use password_hasher::{HashError, PasswordHasher};
@@ -81,6 +82,7 @@ pub use secret_sealer::{
 };
 pub use security_feed::SecurityFeed;
 pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState};
+pub use service_op_tx::ServiceOpTx;
 pub use service_repo::{AdoptedRecord, ServiceRepo, SupervisedRecord};
 pub use service_spec_repo::{
     NewRevision, SealedField, ServiceSpecRepo, SpecStoreError, StoredRevision,
