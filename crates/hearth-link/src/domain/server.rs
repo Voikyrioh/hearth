@@ -127,6 +127,12 @@ pub struct LastKnown {
     /// rejoué ou relu du disque garde sa vraie date de réception). Absent d'un fichier d'avant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub services_at: Option<WallTime>,
+    /// Les noms de variables et la commande de `services` ont-ils été LUS sur le serveur depuis le démarrage
+    /// de cette liaison ? Faux pour une vue relue du disque (elle est écrite sans ces champs) : l'absence
+    /// n'y veut pas dire « aucune variable » ni « commande de l'image », seulement « pas lue » (HRT-63).
+    /// Jamais écrit : une vue relue du disque est toujours « pas lue ».
+    #[serde(default, skip_serializing)]
+    pub services_details: bool,
 }
 
 impl LastKnown {
@@ -134,6 +140,7 @@ impl LastKnown {
     /// lancement des services (BR-SVC-020), qui ne doivent jamais être persistés.
     pub fn without_secrets(&self) -> Self {
         let mut view = self.clone();
+        view.services_details = false;
         if let Some(state) = view.services.as_mut() {
             for item in state.services.iter_mut() {
                 item.env_names.clear();

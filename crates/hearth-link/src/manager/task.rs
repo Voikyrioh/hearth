@@ -19,7 +19,7 @@ use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::services::ServicesState;
 use hearth_proto::api::update::{UpdateProgress, UpdateStep};
 use hearth_proto::error::ErrorCode;
-use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice};
+use hearth_proto::stream::{ClientMessage, ServerMessage, ServicesMessage, SessionNotice};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, JoinError, JoinHandle};
 use tokio::time::timeout;
@@ -217,6 +217,9 @@ struct Runner {
     /// Quand cette liaison a reçu la vue du moteur de `services` (heure de ce poste, HRT-62) : le repère de
     /// l'âge de la liste, porté dans l'événement et sur le disque.
     services_at: Option<WallTime>,
+    /// Les noms de variables et la commande de `services` ont-ils été lus sur le serveur depuis le démarrage de
+    /// cette liaison ? Faux pour ce qui vient du disque (écrit sans eux) jusqu'au premier instantané de l'agent.
+    services_details: bool,
     last_contact: Option<WallTime>,
     published: Option<Status>,
     ping_n: u64,
@@ -242,14 +245,15 @@ impl Runner {
         let (internal_tx, internal_rx) = mpsc::channel(64);
         let last_contact = shared.record().last_contact_at;
         let previous = shared.last_known();
-        let (history, machine_info, services, services_at) = match previous {
+        let (history, machine_info, services, services_at, services_details) = match previous {
             Some(view) => (
                 view.history.into_iter().collect(),
                 view.machine.map(Arc::new),
                 view.services,
                 view.services_at,
+                view.services_details,
             ),
-            None => (VecDeque::new(), None, None, None),
+            None => (VecDeque::new(), None, None, None, false),
         };
         Self {
             persister: Persister::spawn(deps.clone(), shared.id()),
@@ -270,6 +274,7 @@ impl Runner {
             machine_info,
             services,
             services_at,
+            services_details,
             last_contact,
             published: None,
             ping_n: 0,
@@ -454,7 +459,13 @@ impl Runner {
             Ok(Frame::Services(message)) => {
                 self.traffic();
                 let before = self.services.as_ref().map(|state| state.engine.clone());
+                // Un instantané remplace tout, détails compris : ils sont alors lus sur le serveur. Un lot, lui,
+                // ne touche que certains services et laisse les autres tels quels.
+                let fresh = matches!(&*message, ServicesMessage::ServicesSnapshot(_));
                 if crate::domain::services::apply(&mut self.services, *message) {
+                    if fresh {
+                        self.services_details = true;
+                    }
                     self.stamp_engine(before.as_ref());
                     self.announce_services();
                     self.persist(false);
@@ -547,6 +558,7 @@ impl Runner {
                 server: self.id.clone(),
                 state: Arc::new(state.clone()),
                 engine_received_at: self.services_at,
+                details_known: self.services_details,
             });
         }
     }
@@ -571,6 +583,7 @@ impl Runner {
             ServicesAtConnect::Unsupported { agent_version } => {
                 self.services = None;
                 self.services_at = None;
+                self.services_details = false;
                 self.refresh_last_known();
                 self.deps.sink.emit(Event::ServicesUnsupported {
                     server: self.id.clone(),
@@ -580,6 +593,7 @@ impl Runner {
             ServicesAtConnect::Supported(Some(state)) => {
                 let before = self.services.as_ref().map(|known| known.engine.clone());
                 self.services = Some(*state);
+                self.services_details = true;
                 self.stamp_engine(before.as_ref());
                 self.announce_services();
             }
@@ -1202,6 +1216,7 @@ impl Runner {
             history: self.history.iter().cloned().collect(),
             services: self.services.clone(),
             services_at: self.services_at,
+            services_details: self.services_details,
         };
         self.shared.set_last_known(view);
     }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { EngineInfo, ServiceInfo, ServiceState } from "@/link";
+import type { EngineInfo, ServiceState } from "@/link";
+import { service } from "@/test/service";
 import { categoryOf, countServices, shownCounts } from "./counts";
 import {
   imageLabel,
@@ -36,28 +37,6 @@ function engine(
     listCurrentAt: null,
     ...patch,
     host: { osId: "debian", osLike: [], init: "systemd", declarative: false, ...host },
-  };
-}
-
-function service(patch: Partial<ServiceInfo> & { key: string }): ServiceInfo {
-  return {
-    name: patch.key,
-    origin: "external",
-    driver: null,
-    unit: null,
-    removedOnStop: false,
-    composeProject: null,
-    state: "running",
-    since: null,
-    createdAt: null,
-    neverStarted: false,
-    exitCode: null,
-    restarts10m: 0,
-    image: { ref: "nginx", tag: "1.27", shortId: "0123456789ab" },
-    ports: [],
-    portsOmitted: 0,
-    hostNetwork: false,
-    ...patch,
   };
 }
 

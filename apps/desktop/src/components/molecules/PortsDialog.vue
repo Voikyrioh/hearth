@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
+import { clip } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
@@ -64,7 +65,7 @@ function onNativeClose() {
       @close="onNativeClose"
     >
       <h2 :id="titleId" class="ports__title">
-        {{ t("services.portsDialogTitle", { name: service.name }) }}
+        {{ t("services.portsDialogTitle", { name: clip(service.name, 80).text }) }}
       </h2>
       <ul class="ports__list">
         <li v-for="(port, index) in service.ports" :key="index" class="ports__item">

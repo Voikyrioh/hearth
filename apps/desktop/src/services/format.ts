@@ -1,3 +1,4 @@
+import { safeText } from "@/audit/text";
 import { formatUptime } from "@/dashboard/format";
 import { t } from "@/i18n";
 import type { ServiceInfo, ServicePort } from "@/link";
@@ -21,8 +22,9 @@ export function shortAge(milliseconds: number): string {
 /** `{image}:{version}` ; une image sans nom dit son identifiant court (BR-SVC-022), jamais une version fausse. */
 export function imageLabel(service: Pick<ServiceInfo, "image">): string {
   const { ref, tag, shortId } = service.image;
-  if (!ref) return t("services.unnamedImage", { id: shortId });
-  return tag ? `${ref}:${tag}` : ref;
+  // Texte du serveur : rendu inoffensif ici, donc partout (liste, détail, nom accessible).
+  if (!ref) return t("services.unnamedImage", { id: safeText(shortId) });
+  return tag ? `${safeText(ref)}:${safeText(tag)}` : safeText(ref);
 }
 
 /** « 8080 vers 80 (TCP) ». */
@@ -153,7 +155,7 @@ export function hasHiddenPorts(
 
 /** Le nom accessible d'une ligne : « {nom}, {image}, {état}{, Créé hors de Hearth}{, réseau du serveur | {n} ports : liste} ». */
 export function rowLabel(service: ServiceInfo): string {
-  const parts = [service.name, imageLabel(service), t(STATE_KEYS[service.state])];
+  const parts = [safeText(service.name), imageLabel(service), t(STATE_KEYS[service.state])];
   if (service.origin === "external") parts.push(t("services.external"));
   // Les ports coupés par l'agent comptent aussi : le total est un minimum, jamais une liste (BR-SVC-021).
   const ports = service.ports.length + service.portsOmitted;

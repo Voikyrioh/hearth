@@ -374,6 +374,7 @@ impl LinkRuntime {
                     &name,
                     &known.state,
                     known.engine_received_at,
+                    known.details_known,
                 ));
             }
         }
@@ -386,9 +387,12 @@ impl LinkRuntime {
         for record in self.manager.servers() {
             let name = record.id.to_string();
             if let Ok(Some(known)) = self.manager.services_state(&record.id).await {
-                let event =
-                    self.services_book()
-                        .on_state(&name, &known.state, known.engine_received_at);
+                let event = self.services_book().on_state(
+                    &name,
+                    &known.state,
+                    known.engine_received_at,
+                    known.details_known,
+                );
                 send(sink, crate::services::dto::EVENT, &event);
             }
         }
@@ -914,10 +918,14 @@ impl LinkRuntime {
                 server,
                 state,
                 engine_received_at,
+                details_known,
             } => {
-                let event =
-                    self.services_book()
-                        .on_state(server.as_str(), &state, engine_received_at);
+                let event = self.services_book().on_state(
+                    server.as_str(),
+                    &state,
+                    engine_received_at,
+                    details_known,
+                );
                 send(sink, crate::services::dto::EVENT, &event);
             }
             // Agent sans la capacité : l'interface le dit, `metrics` continue.

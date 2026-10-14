@@ -6,6 +6,7 @@ import bindings from "@/bindings.ts?raw";
 import { type MessageKey, t } from "@/i18n";
 import type { AuditEntry } from "@/link";
 import { ATTACK_STATE_KEYS } from "@/security/messages";
+import { mountView, restartText } from "@/services/detail";
 import { STATE_KEYS } from "@/services/format";
 import { OPERATION_TEXTS } from "@/stores/link";
 
@@ -119,6 +120,24 @@ const SAYS: Record<string, (value: string) => void> = {
   RoleDto: (value) => {
     key(roleLabel(value as "admin"));
     if (value === "unknown") expect(roleLabel("unknown")).toBe(t("accounts.roleUnknown"));
+  },
+  MountKindDto: (value) => {
+    // Un genre inconnu n'est ni « dossier » ni « volume » : libellé neutre (mountView -> « other »).
+    const kind = mountView({
+      kind: value as "folder",
+      source: "s",
+      target: "t",
+      readOnly: false,
+    }).kind;
+    expect(kind).toBe(value === "unknown" ? "other" : value);
+    if (value === "unknown") text("serviceDetail.mountUnknown");
+  },
+  RestartDto: (value) => {
+    // Une façon de redémarrer inconnue n'est pas devinée : « inconnue de ce client ».
+    const said = restartText(value as "always");
+    expect(said.length).toBeGreaterThan(0);
+    if (value === "unknown") expect(said).toBe(t("serviceDetail.restartUnknown"));
+    else expect(said).not.toBe(t("serviceDetail.restartUnknown"));
   },
   ServiceStateDto: (value) => {
     text(STATE_KEYS[value as keyof typeof STATE_KEYS]);

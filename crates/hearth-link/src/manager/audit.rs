@@ -37,6 +37,13 @@ impl From<FilterError> for LinkError {
 
 /// Un refus de l'agent, lu dans son enveloppe d'erreur.
 pub(super) fn rejection(body: &Value) -> LinkError {
+    rejection_at(body, 0)
+}
+
+/// Comme [`rejection`], avec le statut HTTP de la réponse : un code d'erreur inconnu de cette version
+/// retombe sur le sens du statut (`ErrorCode::or_from_status`, BR-COMPAT-001 point 8), jamais sur un refus
+/// passe-partout.
+pub(super) fn rejection_at(body: &Value, status: u16) -> LinkError {
     let Some(body) = serde_json::from_value::<ErrorBody>(body.clone()).ok() else {
         return LinkError::Rejected(None);
     };
@@ -45,7 +52,7 @@ pub(super) fn rejection(body: &Value) -> LinkError {
     if let Some(right) = body.error.missing_right() {
         return LinkError::MissingRight(right.to_owned());
     }
-    LinkError::Rejected(Some(body.error.code))
+    LinkError::Rejected(Some(body.error.code.or_from_status(status)))
 }
 
 /// Comme [`rejection`], mais un refus qui porte `details.reason` le dit (`RejectedBecause`) : adopter et
@@ -112,7 +119,7 @@ impl LinkManager {
         .await
         .map_err(|_| LinkError::Timeout)??;
         if !(200..300).contains(&response.status) {
-            return Err(rejection(&response.body));
+            return Err(rejection_at(&response.body, response.status));
         }
         Ok(response.body)
     }
@@ -250,6 +257,23 @@ mod tests {
         assert_eq!(
             rejection(&body),
             LinkError::MissingRight("services".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_unknown_error_code_keeps_the_meaning_of_its_http_status() {
+        let future = json!({ "error": { "code": "CODE_DU_FUTUR", "message": "m", "details": {} } });
+        assert_eq!(
+            rejection_at(&future, 403),
+            LinkError::Rejected(Some(ErrorCode::ForbiddenRole))
+        );
+        assert_eq!(
+            rejection_at(&future, 404),
+            LinkError::Rejected(Some(ErrorCode::NotFound))
+        );
+        assert_eq!(
+            rejection_at(&future, 418),
+            LinkError::Rejected(Some(ErrorCode::Unknown))
         );
     }
 

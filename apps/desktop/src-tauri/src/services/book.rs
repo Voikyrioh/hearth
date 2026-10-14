@@ -12,6 +12,7 @@ use super::dto::{ServicesEvent, ServicesViewDto};
 struct Entry {
     seq: u32,
     engine_received_at: Option<f64>,
+    details_known: bool,
     view: ServicesViewDto,
 }
 
@@ -29,16 +30,20 @@ impl ServicesBook {
     /// L'état complet d'un serveur (déjà fusionné par la liaison) : rangé, rendu avec son numéro.
     ///
     /// `engine_received_at` : quand la liaison a reçu la vue du moteur (son étage, pas la fenêtre).
+    /// `details_known` : les noms de variables et la commande ont été lus sur le serveur (faux pour une liste
+    /// relue du disque, écrite sans eux).
     pub fn on_state(
         &mut self,
         server: &str,
         state: &ServicesState,
         engine_received_at: Option<WallTime>,
+        details_known: bool,
     ) -> ServicesEvent {
         self.store(
             server,
             ServicesViewDto::from_state(state),
             engine_received_at.map(millis),
+            details_known,
         )
     }
 
@@ -50,6 +55,7 @@ impl ServicesBook {
                 agent_version: agent_version.to_owned(),
             },
             None,
+            false,
         )
     }
 
@@ -58,6 +64,7 @@ impl ServicesBook {
         server: &str,
         view: ServicesViewDto,
         engine_received_at: Option<f64>,
+        details_known: bool,
     ) -> ServicesEvent {
         let seq = self
             .servers
@@ -68,6 +75,7 @@ impl ServicesBook {
             Entry {
                 seq,
                 engine_received_at,
+                details_known,
                 view: view.clone(),
             },
         );
@@ -75,6 +83,7 @@ impl ServicesBook {
             server_id: server.to_owned(),
             seq,
             engine_received_at,
+            details_known,
             view,
         }
     }
@@ -85,6 +94,7 @@ impl ServicesBook {
             server_id: server.to_owned(),
             seq: entry.seq,
             engine_received_at: entry.engine_received_at,
+            details_known: entry.details_known,
             view: entry.view.clone(),
         })
     }

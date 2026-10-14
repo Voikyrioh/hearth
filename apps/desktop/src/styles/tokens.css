@@ -181,8 +181,15 @@
      les noms coupés à « a..cien-service » quand le repère « Créé hors de Hearth » occupe la ligne (design : 200 px). */
   --svc-columns: minmax(260px, 1.5fr) minmax(180px, 1fr) 200px 270px;
   --svc-columns-compact: minmax(180px, 1fr) 190px 220px;
+  --svc-columns-narrow: minmax(0, 1fr) minmax(120px, 170px);
   --svc-puck: 3px;
+  /* Détail d'un service (HRT-63) : liste compacte à côté du détail, détail borné. */
+  --list-compact-width: 418px;
+  --detail-max: 960px;
+  --env-value-max-height: 112px;
   --command-max-height: 160px;
+  --title-max-height: 96px;
+  --tag-max-width: 280px;
 
   /* États */
   --opacity-disabled: 0.7;

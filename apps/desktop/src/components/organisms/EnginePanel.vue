@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon, { type IconName } from "@/components/atoms/HIcon.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
@@ -142,7 +143,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
           ><HIcon name="check" size="sm" /> {{ t("engine.ready") }}</HTag
         >
         <span v-if="engine.name" class="engine__name">{{
-          t("engine.nameVersion", { name: engine.name, version: engine.version ?? "" }).trim()
+          t("engine.nameVersion", { name: safeText(engine.name), version: safeText(engine.version) }).trim()
         }}</span>
         <ul class="engine__counters" :aria-label="t('engine.counters.label')">
           <li v-for="item in counters" :key="item.key" :class="['count', `count--${item.key}`]">
@@ -199,13 +200,13 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
         <p v-else-if="engine.state === 'unsupported_engine'">
           <MonoText
             :text="t('engine.unsupportedEngineText')"
-            :values="{ engine: engine.name ?? '' }"
+            :values="{ engine: safeText(engine.name) }"
           />
         </p>
         <p v-else-if="engine.state === 'unsupported_version'">
           <MonoText
             :text="t('engine.unsupportedVersionText')"
-            :values="{ version: engine.version ?? '', minimum: engine.minVersion }"
+            :values="{ version: safeText(engine.version), minimum: safeText(engine.minVersion) }"
           />
         </p>
         <p v-else-if="engine.state === 'disabled'">{{ t("engine.disabledText") }}</p>

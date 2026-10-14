@@ -1,30 +1,8 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import { nextTick } from "vue";
-import type { ServiceInfo } from "@/link";
+import { service } from "@/test/service";
 import ServiceTable from "./ServiceTable.vue";
-
-function service(patch: Partial<ServiceInfo> & { key: string }): ServiceInfo {
-  return {
-    name: patch.key,
-    origin: "external",
-    driver: null,
-    unit: null,
-    removedOnStop: false,
-    composeProject: null,
-    state: "running",
-    since: null,
-    createdAt: null,
-    neverStarted: false,
-    exitCode: null,
-    restarts10m: 0,
-    image: { ref: "nginx", tag: "1.27", shortId: "0123456789ab" },
-    ports: [],
-    portsOmitted: 0,
-    hostNetwork: false,
-    ...patch,
-  };
-}
 
 const many = (count: number) =>
   Array.from({ length: count }, (_, index) =>
@@ -218,37 +196,45 @@ describe("ServiceTable : clavier et lecteurs d'écran (I5)", () => {
     wrapper.unmount();
   });
 
-  it("Entrée sur une ligne dont des ports sont cachés ouvre la liste complète, Fermer rend le focus à la ligne", async () => {
+  it("Entrée, Espace et le clic sur une ligne ouvrent le détail de CE service (HRT-63), jamais la fenêtre des ports", async () => {
     const ports = Array.from({ length: 8 }, (_, index) => port(30000 + index));
     const wrapper = mount(ServiceTable, {
-      props: { services: [service({ key: "a", name: "web", ports })] },
+      props: {
+        services: [service({ key: "a", name: "web", ports }), service({ key: "b", name: "zeta" })],
+      },
       attachTo: document.body,
     });
     await nextTick();
-    const row = wrapper.get("[data-row]");
-    (row.element as HTMLElement).focus();
-    await row.trigger("keydown", { key: "Enter" });
-    await flushPromises();
-    const dialog = document.body.querySelector("[data-ports-dialog]");
-    expect(dialog).not.toBeNull();
-    expect(dialog?.textContent).toContain("Ports de web");
-    for (const shown of ports) expect(dialog?.textContent).toContain(`${shown.hostPort} vers 80`);
-    const close = dialog?.querySelector("button");
-    close?.click();
-    await flushPromises();
+    const rows = wrapper.findAll("[data-row]");
+    await rows[0]?.trigger("keydown", { key: "Enter" });
+    await rows[1]?.trigger("keydown", { key: " " });
+    await rows[1]?.trigger("click");
+    expect(wrapper.emitted("open")).toEqual([["a"], ["b"], ["b"]]);
     expect(document.body.querySelector("[data-ports-dialog]")).toBeNull();
-    expect(document.activeElement).toBe(row.element);
     wrapper.unmount();
   });
 
-  it("Entrée sur une ligne dont tous les ports tiennent n'ouvre rien", async () => {
+  it("la ligne du service ouvert est marquée sélectionnée, les autres non", () => {
     const wrapper = mount(ServiceTable, {
-      props: { services: [service({ key: "a", ports: [port(1)] })] },
+      props: {
+        services: [service({ key: "a" }), service({ key: "b" })],
+        selectedKey: "b",
+      },
+    });
+    const rows = wrapper.findAll("[data-row]");
+    expect(rows.map((row) => row.attributes("aria-selected"))).toEqual(["false", "true"]);
+    wrapper.unmount();
+  });
+
+  it("focusKey rend le focus à la ligne d'un service, même si elle n'était pas dessinée", async () => {
+    const wrapper = mount(ServiceTable, {
+      props: { services: many(200) },
       attachTo: document.body,
     });
-    await wrapper.get("[data-row]").trigger("keydown", { key: "Enter" });
+    await nextTick();
+    await (wrapper.vm as unknown as { focusKey(key: string): Promise<void> }).focusKey("c_0150");
     await flushPromises();
-    expect(document.body.querySelector("[data-ports-dialog]")).toBeNull();
+    expect((document.activeElement as HTMLElement | null)?.dataset.key).toBe("c_0150");
     wrapper.unmount();
   });
 

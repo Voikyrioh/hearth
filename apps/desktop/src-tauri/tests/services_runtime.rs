@@ -2,8 +2,8 @@
 //!
 //! 1. La forme de ce que reçoit l'interface : la conversion du protocole (`hearth_proto::api::services`)
 //!    est comparée, champ par champ et valeur par valeur, au fichier `tests/fixtures/services-event.json`,
-//!    que les tests de l'interface (Vitest) relisent aussi pour contrôler le pont simulé. Aucun nom ni
-//!    valeur de variable, aucune commande.
+//!    que les tests de l'interface (Vitest) relisent aussi pour contrôler le pont simulé. Les noms de
+//!    variables et la commande (détail, HRT-63) y sont, jamais une valeur.
 //! 2. La chaîne réelle jusqu'à la sortie de la coquille : un VRAI agent (TLS 1.3, SQLite, faux moteur de
 //!    conteneurs) envoie le sujet `services`, `hearth-link` le reçoit et le fusionne, le relais de la
 //!    coquille l'écrit dans la fenêtre sous le nom `link://services`, et une fenêtre qui arrive après coup
@@ -34,9 +34,9 @@ use hearth_link::domain::event::Event;
 use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::{LinkState, Thresholds};
 use hearth_proto::api::services::{
-    Concealed, EngineState, EngineView, HostInfo, ImageInfo, InitSystem, MIN_ENGINE_VERSION,
-    MountKind, PortProtocol, PortScope, RestartMode, ServiceDriver, ServiceItem, ServiceMount,
-    ServiceOrigin, ServicePort, ServiceState, ServicesState,
+    AdoptionInfo, Concealed, EngineState, EngineView, HostInfo, ImageInfo, InitSystem,
+    MIN_ENGINE_VERSION, MountKind, PortProtocol, PortScope, RestartMode, ServiceDriver,
+    ServiceItem, ServiceMount, ServiceOrigin, ServicePort, ServiceState, ServicesState,
 };
 use serde_json::Value;
 
@@ -114,7 +114,7 @@ fn full_state() -> ServicesState {
                 ],
                 ports_omitted: 3,
                 host_network: false,
-                // Ignorés par la copie de la coquille (détail d'un service, tranche suivante).
+                // Le détail d'un service (HRT-63).
                 mounts: vec![ServiceMount {
                     kind: MountKind::Folder,
                     source: "/srv/data".into(),
@@ -123,15 +123,18 @@ fn full_state() -> ServicesState {
                 }],
                 mounts_omitted: 5,
                 restart: RestartMode::UnlessStopped,
-                // Ignorés aussi (HRT-63 côté client) : la sentinelle ne doit JAMAIS sortir de la coquille.
+                // Les NOMS et la commande vont à l'écran du détail mais jamais dans une trace (`HiddenText`).
                 env_names: vec![Concealed::new("SENTINEL_ENV_NAME")],
                 env_names_omitted: 2,
                 command: Some(vec![Concealed::new("SENTINEL_COMMAND")]),
                 grace_s: Some(30),
                 busy: None,
                 last_action: None,
-                adopted: None,
-                details_reserved: false,
+                adopted: Some(AdoptionInfo {
+                    by: "claire".into(),
+                    at: "2026-10-13T08:00:00Z".into(),
+                }),
+                details_reserved: true,
             },
             ServiceItem {
                 key: "c_77e1".into(),
@@ -176,7 +179,7 @@ fn full_state() -> ServicesState {
 fn the_event_the_window_receives_is_the_reference_file_field_by_field() {
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
     let received = hearth_link::domain::time::WallTime::from_millis(1_790_000_000_000);
-    let event = book.on_state("forge", &full_state(), Some(received));
+    let event = book.on_state("forge", &full_state(), Some(received), true);
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
         fixture()["supported"]
@@ -195,6 +198,25 @@ fn the_event_the_window_receives_is_the_reference_file_field_by_field() {
     assert_eq!(
         serde_json::to_value(&unsupported).unwrap(),
         fixture()["unsupported"]
+    );
+}
+
+/// Une liste relue du disque est écrite sans les noms de variables ni la commande : l'événement le DIT, et le
+/// rejeu à l'abonnement le garde. Leur absence n'y est jamais « aucune variable ».
+#[test]
+fn a_list_read_back_from_the_disk_says_its_details_were_not_read() {
+    let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
+    let mut from_disk = full_state();
+    for item in from_disk.services.iter_mut() {
+        item.env_names.clear();
+        item.command = None;
+    }
+    let event = book.on_state("forge", &from_disk, None, false);
+    assert!(!event.details_known);
+    assert!(!book.current("forge").unwrap().details_known);
+    assert_eq!(
+        serde_json::to_value(&event).unwrap()["detailsKnown"],
+        serde_json::json!(false)
     );
 }
 
@@ -222,13 +244,14 @@ fn a_value_from_a_newer_agent_reaches_the_window_as_unknown() {
     });
     let state: ServicesState = serde_json::from_value(wire).expect("l'instantané est lu");
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
-    let event = book.on_state("futur", &state, None);
+    let event = book.on_state("futur", &state, None, true);
     assert_eq!(serde_json::to_value(&event).unwrap(), fixture()["unknown"]);
 }
 
-/// Aucune clé de l'événement ne désigne une variable d'environnement ni une commande de lancement.
+/// L'événement porte les NOMS des variables et la commande (l'écran du détail les montre), jamais une valeur :
+/// aucune clé ne désigne une valeur, et `Debug` ne laisse rien voir (aucune trace ne peut les contenir).
 #[test]
-fn the_event_carries_no_variable_name_value_nor_command() {
+fn the_event_carries_names_and_command_but_never_a_value_and_debug_hides_them() {
     fn keys(value: &Value, out: &mut Vec<String>) {
         match value {
             Value::Object(map) => {
@@ -242,19 +265,14 @@ fn the_event_carries_no_variable_name_value_nor_command() {
         }
     }
     let mut book = hearth_desktop_lib::services::book::ServicesBook::default();
-    let event = serde_json::to_value(book.on_state("forge", &full_state(), None)).unwrap();
-    assert!(!event.to_string().contains("SENTINEL"), "{event}");
+    let event_dto = book.on_state("forge", &full_state(), None, true);
+    let debug = format!("{event_dto:?}");
+    assert!(!debug.contains("SENTINEL"), "{debug}");
+    let event = serde_json::to_value(&event_dto).unwrap();
+    assert!(event.to_string().contains("SENTINEL_ENV_NAME"));
     let mut found = Vec::new();
     keys(&event, &mut found);
-    for forbidden in [
-        "env",
-        "envnames",
-        "command",
-        "cmd",
-        "entrypoint",
-        "value",
-        "secret",
-    ] {
+    for forbidden in ["value", "values", "secret", "env"] {
         assert!(
             !found.contains(&forbidden.to_owned()),
             "{forbidden} dans {found:?}"
@@ -434,6 +452,7 @@ async fn a_real_agent_reaches_the_window_through_the_link_and_the_shell_relay() 
         server_id,
         seq: replayed,
         engine_received_at,
+        details_known,
         view: ServicesViewDto::Supported { services, .. },
     } = &replay[0]
     else {
@@ -444,6 +463,8 @@ async fn a_real_agent_reaches_the_window_through_the_link_and_the_shell_relay() 
     // La date de réception vient de la liaison : présente, et jamais postérieure à maintenant.
     let received = engine_received_at.expect("la liaison date la vue du moteur");
     assert!(received > 1_700_000_000_000.0);
+    // Reçu du serveur pendant cette exécution : ses détails sont les vrais.
+    assert!(details_known);
     assert!(*replayed >= u32::try_from(second["seq"].as_u64().unwrap()).unwrap());
 
     // 4. « Vérifier à nouveau » : l'agent sonde, l'état du moteur revient.
