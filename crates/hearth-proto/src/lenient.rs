@@ -34,6 +34,11 @@ impl<T> Items<T> {
         Self { items, unreadable }
     }
 
+    /// `more` éléments de plus n'ont pas pu être lus (un lot de changements fusionné dans une liste tenue).
+    pub fn add_unreadable(&mut self, more: u32) {
+        self.unreadable = self.unreadable.saturating_add(more);
+    }
+
     pub fn into_vec(self) -> Vec<T> {
         self.items
     }

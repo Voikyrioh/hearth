@@ -6,6 +6,7 @@
 //! arrière. Relire une issue écrite par un agent plus récent en `Unknown` puis la réécrire détruirait
 //! l'information d'origine : ici, la chaîne lue est conservée et réécrite à l'identique.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::de::DeserializeOwned;
@@ -24,6 +25,44 @@ impl Tolerant for hearth_proto::api::update::UpdateStep {
 
 impl Tolerant for hearth_proto::api::update::UpdateOutcome {
     const UNKNOWN: Self = Self::Unknown;
+}
+
+impl Tolerant for hearth_proto::api::update::UpdateReason {
+    const UNKNOWN: Self = Self::Unknown;
+}
+
+/// Les champs d'un objet du disque que cette version ne connaît pas (écrits par une version plus
+/// récente), gardés tels quels et réécrits avec l'objet (BR-COMPAT-001 point 7 : rien de perdu).
+///
+/// À poser en `#[serde(flatten)]` sur chaque objet que l'agent relit PUIS réécrit (`last.json`,
+/// `state.json` et son demandeur, `phase.json`). Les valeurs sont gardées en JSON brut : objets
+/// imbriqués, listes, nombres, `null` repartent à l'identique (l'ORDRE des clés d'un objet n'est pas
+/// gardé, les clés sont écrites triées ; la mise en forme du fichier change, jamais son contenu).
+/// Un champ inconnu n'est jamais interprété, jamais tracé (seul leur nombre l'est : `Debug`).
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Extras(BTreeMap<String, serde_json::Value>);
+
+impl Extras {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Un champ inconnu, par son nom (tests, diagnostic).
+    pub fn get(&self, name: &str) -> Option<&serde_json::Value> {
+        self.0.get(name)
+    }
+}
+
+/// Le contenu d'un champ inconnu peut être n'importe quoi : seul leur nombre se montre.
+impl fmt::Debug for Extras {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(out, "Extras({} champs)", self.0.len())
+    }
 }
 
 /// Une valeur lue du disque : connue, ou étrangère (texte d'origine gardé, jamais interprété).

@@ -224,7 +224,7 @@ test("changer son mot de passe : la case « Garder ce poste reconnu » est déco
 // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB (BR-COMPAT-001 point 4) : un état du mode attaque que ce client ne sait pas lire
 // (agent plus récent) n'est ni « Actif » ni « Inactif » : libellé neutre, aucun bouton qui agit sur le mode, pas de
 // bandeau permanent qui affirme une attaque, mais l'alerte, elle, reste visible.
-test("mode attaque d'un état inconnu : dit qu'il ne sait pas lire, aucun bouton, aucun bandeau d'attaque", async ({
+test("mode attaque d'un état inconnu : dit qu'il ne sait pas lire, aucun bouton, bandeau neutre et non un bandeau d'attaque", async ({
   page,
 }) => {
   await page.goto("/?nodev#/servers/forge/security");
@@ -238,7 +238,11 @@ test("mode attaque d'un état inconnu : dit qu'il ne sait pas lire, aucun bouton
   await expect(panel.getByRole("button")).toHaveCount(0);
   await expect(panel).not.toContainText("Actif");
   await expect(panel).not.toContainText("Inactif");
-  await expect(modeBanner(page)).toHaveCount(0);
+  // Le bandeau permanent est NEUTRE : il dit que l'état est illisible, n'affirme ni attaque ni calme, sans bouton d'action.
+  await expect(modeBanner(page)).toHaveCount(1);
+  await expect(modeBanner(page)).toContainText("État de protection illisible");
+  await expect(modeBanner(page)).not.toContainText("Mode attaque actif");
+  await expect(modeBanner(page).getByRole("button", { name: /Activer|Désactiver/ })).toHaveCount(0);
   // La marque du serveur ne dit pas « mode attaque actif ».
   await expect(page.locator('[data-server="forge"] [role="img"]')).not.toHaveAttribute(
     "aria-label",
@@ -258,4 +262,32 @@ test("mode attaque d'un état inconnu : dit qu'il ne sait pas lire, aucun bouton
   expect(await sim(page).calls()).not.toContain("attack-mode on");
   expect(await sim(page).calls()).not.toContain("attack-mode off");
   await shoot(page, "attaque-inconnu");
+});
+
+// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un mode attaque connu actif qui devient illisible ne fait pas disparaître le bandeau
+// permanent : il devient neutre, sur toutes les pages du serveur, sans bouton sur le mode attaque.
+test("mode attaque actif puis inconnu : le bandeau permanent devient neutre, partout, et revient quand l'état se relit", async ({
+  page,
+}) => {
+  await page.goto("/?nodev#/servers/forge/dashboard");
+  await sim(page).mode("forge", "active");
+  await expect(modeBanner(page)).toContainText("Mode attaque actif");
+  await sim(page).mode("forge", "unknown");
+  for (const path of ["dashboard", "accounts", "audit", "security"]) {
+    await page.goto(`/?nodev#/servers/forge/${path}`);
+    await expect(modeBanner(page)).toBeVisible();
+    await expect(modeBanner(page)).toContainText("État de protection illisible");
+    await expect(modeBanner(page)).toContainText(
+      "Ce client ne sait pas lire l'état de protection de ce serveur. Mets Hearth à jour sur ce PC.",
+    );
+    await expect(modeBanner(page)).not.toContainText("Mode attaque actif");
+    await expect(modeBanner(page).getByRole("button", { name: /Activer|Désactiver/ })).toHaveCount(
+      0,
+    );
+  }
+  await sim(page).mode("forge", "active");
+  await expect(modeBanner(page)).toContainText("Mode attaque actif");
+  await sim(page).mode("forge", "off");
+  await expect(modeBanner(page)).toHaveCount(0);
+  await shoot(page, "attaque-inconnu-bandeau");
 });

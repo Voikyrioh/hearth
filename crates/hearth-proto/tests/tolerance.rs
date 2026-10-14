@@ -314,6 +314,204 @@ fn production_lines(text: &str) -> Vec<(usize, &str)> {
     out
 }
 
+/// Texte canonique d'un morceau de code : sans espace ni retour à la ligne, sans virgule finale ni `|` initial.
+/// Deux écritures que seul `rustfmt` sépare (repli sur plusieurs lignes, virgule ajoutée, `|` en tête de ligne)
+/// ont le même texte canonique ; rien d'autre ne le fait (un nom, un chemin ou une valeur qui change, si).
+fn canonical(text: &str) -> String {
+    let mut out: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    for (from, to) in [(",)", ")"), (",]", "]"), (",}", "}")] {
+        while out.contains(from) {
+            out = out.replace(from, to);
+        }
+    }
+    out.trim_start_matches('|').trim_end_matches(',').to_owned()
+}
+
+/// Les lignes de production regroupées en instructions : une instruction repliée par `rustfmt` (parenthèses
+/// ouvertes, ligne qui finit par `|` ou `=>`, ligne suivante qui commence par `|`) est une seule ligne logique.
+/// Numéro de la première ligne physique (à partir de 0). Au plus 12 lignes physiques par instruction : une
+/// parenthèse isolée dans une chaîne ne doit pas avaler le fichier.
+fn logical_lines(text: &str) -> Vec<(usize, String)> {
+    let physical = production_lines(text);
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < physical.len() {
+        let (number, first) = physical[index];
+        index += 1;
+        let mut joined = first.trim().to_owned();
+        if joined.is_empty() || joined.starts_with("//") {
+            continue;
+        }
+        for _ in 0..12 {
+            let depth = joined.matches(['(', '[']).count() as i64
+                - joined.matches([')', ']']).count() as i64;
+            let next = physical.get(index).map_or("", |(_, line)| line.trim());
+            // Les parenthèses ouvertes ne joignent pas un bloc (`{`) ni un bras déjà complet (`=>`) : seulement un motif replié.
+            let open_pattern = depth > 0 && !joined.contains('{') && !joined.contains("=>");
+            let continues = open_pattern
+                || joined.ends_with('|')
+                || joined.ends_with("=>")
+                || (next.starts_with('|') && !next.starts_with("||"))
+                || next.starts_with("=>");
+            if !continues || index >= physical.len() {
+                break;
+            }
+            if !next.starts_with("//") {
+                joined.push(' ');
+                joined.push_str(next);
+            }
+            index += 1;
+        }
+        out.push((number, joined));
+    }
+    out
+}
+
+/// Le type dont `impl` est le plus proche avant la ligne logique `before` (pour lire `Self`).
+fn impl_type(lines: &[(usize, String)], before: usize) -> Option<String> {
+    lines[..before].iter().rev().find_map(|(_, line)| {
+        let rest = line.strip_prefix("impl")?;
+        let rest = rest.trim_start();
+        let rest = if rest.starts_with('<') {
+            let mut depth = 0_i32;
+            let mut end = 0;
+            for (i, c) in rest.char_indices() {
+                match c {
+                    '<' => depth += 1,
+                    '>' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            rest[end..].trim_start()
+        } else {
+            rest
+        };
+        let target = rest.split(" for ").nth(1).unwrap_or(rest).trim_start();
+        let name: String = target
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        (!name.is_empty()).then_some(name)
+    })
+}
+
+/// Le type dont une ligne nomme la variante `Unknown` (`Self` lu d'après l'`impl` qui précède).
+fn unknown_owner(lines: &[(usize, String)], at: usize) -> String {
+    let line = &lines[at].1;
+    let end = line.find("::Unknown").unwrap_or(0);
+    let name: String = line[..end]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if name == "Self" {
+        impl_type(lines, at).unwrap_or(name)
+    } else {
+        name
+    }
+}
+
+/// Les lectures personnalisées d'un fichier : (ligne, type, argument canonique). Les attributs sont lus bloc par
+/// bloc (crochets équilibrés, donc repliés ou non), dans `serde(...)` comme sous `cfg_attr`, argument par argument ;
+/// un attribut placé avant un type est celui du type, un attribut placé avant un champ est celui du type courant.
+fn serde_custom_reads(text: &str) -> Vec<(usize, String, String)> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut run: Vec<(usize, String)> = Vec::new();
+    let mut attribute = String::new();
+    let mut depth = 0_i64;
+    let mut start = 0;
+    for (number, line) in production_lines(text) {
+        let trimmed = line.trim_start();
+        if depth > 0 || trimmed.starts_with("#[") {
+            if depth == 0 {
+                start = number;
+                attribute.clear();
+            }
+            attribute.push_str(trimmed);
+            attribute.push(' ');
+            depth += trimmed.matches('[').count() as i64 - trimmed.matches(']').count() as i64;
+            if depth <= 0 {
+                depth = 0;
+                for arg in custom_args(&attribute) {
+                    run.push((start + 1, arg));
+                }
+            }
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            continue;
+        }
+        if let Some((_, name)) = declared_type(trimmed) {
+            current = name;
+        }
+        for (line_number, arg) in run.drain(..) {
+            out.push((line_number, current.clone(), arg));
+        }
+    }
+    out
+}
+
+/// Les arguments `deserialize_with`, `try_from`, `with`, `remote`, `from` des `serde(...)` d'un attribut.
+fn custom_args(attribute: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut rest = attribute;
+    while let Some(at) = rest.find("serde(") {
+        let body = &rest[at + "serde(".len()..];
+        let mut depth = 1_i64;
+        let mut end = body.len();
+        for (i, c) in body.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let inner = &body[..end];
+        let mut level = 0_i64;
+        let mut from = 0;
+        let mut parts = Vec::new();
+        for (i, c) in inner.char_indices() {
+            match c {
+                '(' | '[' => level += 1,
+                ')' | ']' => level -= 1,
+                ',' if level == 0 => {
+                    parts.push(&inner[from..i]);
+                    from = i + 1;
+                }
+                _ => {}
+            }
+        }
+        parts.push(&inner[from..]);
+        for part in parts {
+            let key = part.split('=').next().unwrap_or("").trim();
+            if matches!(
+                key,
+                "deserialize_with" | "try_from" | "with" | "remote" | "from"
+            ) {
+                args.push(canonical(part));
+            }
+        }
+        rest = &body[end..];
+    }
+    args
+}
+
 fn is_test_file(file: &Path) -> bool {
     file.file_stem()
         .and_then(|stem| stem.to_str())
@@ -589,74 +787,101 @@ fn nothing_refuses_an_unknown_field_in_what_is_read_from_the_network() {
 /// Les seuls `Deserialize` écrits à la main du protocole (tolérants par construction, testés dans le module).
 const HAND_WRITTEN: &[&str] = &["lenient.rs"];
 
-/// Les lectures personnalisées permises : chaque occurrence d'un attribut serde `deserialize_with`, `try_from`,
-/// `with`, `remote` ou `from` dans le code balayé doit y figurer (fichier, texte exact). Chacune rend une valeur
-/// illisible « inconnue » (jamais une valeur plausible) ou ne lit qu'un fichier local.
-const CUSTOM_READS: &[(&str, &str)] = &[
-    ("api/devices.rs", "deserialize_with = \"lenient_proof\""),
-    ("api/reauth.rs", "deserialize_with = \"lenient_proof\""),
-    ("api/sessions.rs", "deserialize_with = \"lenient_proof\""),
+/// Les lectures personnalisées permises : chaque argument serde `deserialize_with`, `try_from`, `with`, `remote` ou
+/// `from` du code balayé doit y figurer, retrouvé par le MODULE (chemin du fichier), le NOM DU TYPE qui le porte et
+/// l'argument lui-même (comparé sans espace, donc insensible à un repli de `rustfmt` ; l'attribut peut s'étendre sur
+/// plusieurs lignes). Chacune rend une valeur illisible « inconnue » (jamais une valeur plausible) ou ne lit qu'un
+/// fichier local.
+const CUSTOM_READS: &[(&str, &str, &str)] = &[
+    (
+        "api/devices.rs",
+        "RemoveDeviceRequest",
+        "deserialize_with = \"lenient_proof\"",
+    ),
+    (
+        "api/reauth.rs",
+        "Reauth",
+        "deserialize_with = \"lenient_proof\"",
+    ),
+    (
+        "api/sessions.rs",
+        "DeviceLoginRequest",
+        "deserialize_with = \"lenient_proof\"",
+    ),
     (
         "stream.rs",
+        "SignedAuth",
         "deserialize_with = \"crate::api::sessions::lenient_proof\"",
     ),
-    ("api/reauth.rs", "deserialize_with = \"lenient_reauth\""),
+    (
+        "api/reauth.rs",
+        "SetReauthRequest",
+        "deserialize_with = \"lenient_reauth\"",
+    ),
     (
         "api/metrics.rs",
+        "TempSample",
         "deserialize_with = \"crate::lenient::measure\"",
     ),
     (
         "api/metrics.rs",
+        "Sample",
+        "deserialize_with = \"crate::lenient::measure\"",
+    ),
+    (
+        "api/metrics.rs",
+        "Sample",
         "deserialize_with = \"crate::lenient::measures\"",
     ),
     (
+        "api/metrics.rs",
+        "StepPeak",
+        "deserialize_with = \"crate::lenient::measure\"",
+    ),
+    (
+        "api/metrics.rs",
+        "TempPeak",
+        "deserialize_with = \"crate::lenient::measure\"",
+    ),
+    (
         "api/update.rs",
+        "UpdateProgress",
         "deserialize_with = \"crate::lenient::percent\"",
     ),
     (
         "api/service_ops.rs",
+        "OperationView",
         "deserialize_with = \"crate::lenient::percent\"",
     ),
     // Fichiers locaux du client (carnet des serveurs, opérations suivies), jamais lus de l'agent.
-    ("domain/pending_ops.rs", "try_from = \"String\""),
-    ("domain/server.rs", "try_from = \"String\""),
-    ("domain/server.rs", "with = \"fingerprint_hex\""),
+    (
+        "domain/pending_ops.rs",
+        "OperationId",
+        "try_from = \"String\"",
+    ),
+    ("domain/server.rs", "ServerId", "try_from = \"String\""),
+    (
+        "domain/server.rs",
+        "ServerRecord",
+        "with = \"fingerprint_hex\"",
+    ),
 ];
 
 #[test]
 fn every_custom_read_is_declared() {
-    let needles = [
-        "deserialize_with",
-        "try_from =",
-        "serde(with",
-        ", with =",
-        "remote =",
-        "serde(from",
-        ", from =",
-    ];
     let mut undeclared = Vec::new();
     let mut seen = Vec::new();
     for (directory, minimum) in scanned_directories() {
         for file in files_of(&directory, minimum) {
             let text = std::fs::read_to_string(&file).expect("lecture");
             let relative = relative_to(&file, &directory);
-            for (number, line) in production_lines(&text) {
-                let trimmed = line.trim_start();
-                if trimmed.starts_with("//") {
-                    continue;
-                }
-                if !needles.iter().any(|needle| trimmed.contains(needle)) {
-                    continue;
-                }
-                if !trimmed.contains("serde") && !trimmed.contains("deserialize_with") {
-                    continue;
-                }
-                let declared = CUSTOM_READS
-                    .iter()
-                    .find(|(path, text)| *path == relative && trimmed.contains(text));
+            for (number, ty, arg) in serde_custom_reads(&text) {
+                let declared = CUSTOM_READS.iter().find(|(path, name, wanted)| {
+                    *path == relative && *name == ty && canonical(wanted) == arg
+                });
                 match declared {
                     Some(entry) => seen.push(*entry),
-                    None => undeclared.push(format!("{relative}:{}: `{trimmed}`", number + 1)),
+                    None => undeclared.push(format!("{relative}:{number}: `{ty}` : `{arg}`")),
                 }
             }
         }
@@ -682,49 +907,58 @@ fn every_custom_read_is_declared() {
 /// - un bras `X::Unknown => X::Connu` qui la convertit.
 ///
 /// Chaque occurrence acceptée est une DÉCISION, avec sa raison.
-const UNKNOWN_FOLDS: &[(&str, &str, &str)] = &[
+const UNKNOWN_FOLDS: &[(&str, &str, &str, &str)] = &[
     (
         "hearth-proto/src/error.rs",
+        "ErrorCode",
         "Self::InternalError | Self::Unknown => 500",
         "un code inconnu n'est jamais émis ; son statut, si on le demande, est une erreur serveur",
     ),
     (
         "hearth-proto/src/error.rs",
+        "ErrorCode",
         "Self::Unknown => Self::from_status(status)",
         "un code inconnu retombe sur le sens du statut HTTP (point 8), jamais sur un succès",
     ),
     (
         "hearth-agent/src/entrypoint/http/auth.rs",
+        "ErrorCode",
         "ErrorCode::InternalError | ErrorCode::Unknown => Some(Outcome::Failed(Reason::Internal))",
         "l'agent n'émet jamais `Unknown` ; s'il arrivait, c'est une erreur interne, jamais un succès",
     ),
     (
         "hearth-agent/src/domain/services/logs.rs",
+        "LogSource",
         "LogSource::Out | LogSource::Unknown => &mut self.out",
         "décision de HRT-66 : une source inconnue se traite comme la sortie normale (BR-COMPAT-001, cas limites)",
     ),
     (
         "hearth-link/src/adapters/http_transport.rs",
+        "ServerMessage",
         "Ok(ServerMessage::Unknown) | Err(_) => Frame::Other",
         "un type de message inconnu est ignoré, comme une trame illisible : le flux continue (point 2)",
     ),
     (
         "hearth-agent/src/application/update.rs",
+        "UpdateOutcome",
         "Some(UpdateOutcome::Unknown) | None => {",
         "une issue que l'agent ne comprend pas a sa propre entrée de journal, ni réussite ni échec (point 7)",
     ),
     (
         "hearth-link/src/manager/attempt.rs",
+        "UpgradeTarget",
         "Some(UpgradeTarget::Client | UpgradeTarget::Unknown) | None => UpgradeTarget::Client",
         "une cible inconnue se lit « le client » : le seul côté que l'utilisateur met à jour d'ici (BR-COMPAT-001)",
     ),
     (
         "apps/desktop/src-tauri/src/link_dto.rs",
+        "UpgradeTarget",
         "Blocked::IncompatibleVersion(UpgradeTarget::Client | UpgradeTarget::Unknown)",
         "la liaison ne tient jamais `Unknown` (lu « le client » à la réception) ; bras explicite, pas un `_`",
     ),
     (
         "apps/desktop/src-tauri/src/reauth/service.rs",
+        "RoleDto",
         "Some(RoleDto::Admin | RoleDto::Unknown) | None => RoleName::Admin",
         "un rôle inconnu se traite comme administrateur : le plus strict (le mot de passe est demandé)",
     ),
@@ -761,27 +995,34 @@ fn an_unknown_value_is_never_folded_into_a_known_one_unless_the_decision_is_writ
         for file in files_of(&directory, 15) {
             let text = std::fs::read_to_string(&file).expect("lecture");
             let relative = format!("{label}/{}", relative_to(&file, &directory));
-            for (number, line) in production_lines(&text) {
-                let trimmed = line.trim();
-                if trimmed.starts_with("//") || !trimmed.contains("::Unknown") {
+            let lines = logical_lines(&text);
+            for (at, (number, line)) in lines.iter().enumerate() {
+                if !line.contains("::Unknown") {
                     continue;
                 }
-                let pattern = trimmed.split("=>").next().unwrap_or(trimmed);
+                let pattern = line.split("=>").next().unwrap_or(line);
                 // Une fermeture (`(|x| ...)`) n'est pas une alternative de motif.
                 let mixes =
                     is_tolerant_path(pattern) && pattern.contains(" | ") && !pattern.contains("(|");
-                let converts = trimmed.contains("::Unknown =>")
-                    && trimmed.split("=>").nth(1).is_some_and(|right| {
+                let converts = line.contains("::Unknown =>")
+                    && line.split("=>").nth(1).is_some_and(|right| {
                         let right = right.trim().trim_end_matches(',');
                         is_tolerant_path(right) && !right.contains("::Unknown")
                     });
                 if mixes || converts {
-                    match UNKNOWN_FOLDS
-                        .iter()
-                        .find(|(path, text, _)| *path == relative && trimmed.contains(text))
-                    {
+                    let owner = unknown_owner(&lines, at);
+                    let seen = canonical(&line.replace("Self::", &format!("{owner}::")));
+                    match UNKNOWN_FOLDS.iter().find(|(path, ty, wanted, _)| {
+                        *path == relative
+                            && *ty == owner
+                            && seen.contains(&canonical(
+                                &wanted.replace("Self::", &format!("{owner}::")),
+                            ))
+                    }) {
                         Some(entry) => accepted.push(*entry),
-                        None => found.push(format!("{relative}:{}: `{trimmed}`", number + 1)),
+                        None => {
+                            found.push(format!("{relative}:{}: `{owner}` : `{line}`", number + 1))
+                        }
                     }
                 }
             }
@@ -800,6 +1041,28 @@ fn an_unknown_value_is_never_folded_into_a_known_one_unless_the_decision_is_writ
         stale.is_empty(),
         "décision(s) de `UNKNOWN_FOLDS` périmée(s) : {stale:?}"
     );
+}
+
+/// Le compte des éléments illisibles ne va qu'à l'INTERFACE (liaison, événement, DTO de la coquille) : il n'est jamais
+/// écrit sur le fil. Une liste relue puis réécrite redonne le tableau ordinaire, sans champ en plus ; un ancien client
+/// lit donc exactement ce qu'il lisait, et `API_VERSION` ne bouge pas (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+#[test]
+fn the_unreadable_count_is_never_written_and_the_api_version_does_not_change() {
+    use hearth_proto::api::devices::DevicesResponse;
+    use hearth_proto::version::{API_MIN_SUPPORTED, API_VERSION};
+
+    let devices = serde_json::from_value::<DevicesResponse>(json!({
+        "devices": [{ "x": 1 }], "max": 8
+    }))
+    .expect("lue");
+    assert_eq!(devices.devices.unreadable(), 1);
+    let written = serde_json::to_value(&devices).expect("écrite");
+    assert_eq!(written, json!({ "devices": [], "max": 8 }));
+    assert!(
+        written["devices"].is_array() && written.get("unreadable").is_none(),
+        "le compte ne va pas sur le fil"
+    );
+    assert_eq!((API_VERSION, API_MIN_SUPPORTED), (1, 1));
 }
 
 /// Listes et nombres (BR-COMPAT-001 point 10) : un élément illisible d'une liste est écarté et compté, un nombre

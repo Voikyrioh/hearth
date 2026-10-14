@@ -86,6 +86,8 @@ const done = (
 export class SimulatedAccounts {
   private readonly books = new Map<string, SimAccount[]>();
   private nextId = 1;
+  /** Comptes que l'agent a envoyés sans que ce client sache les lire (écartés, comptés), par serveur. */
+  readonly unreadable = new Map<string, number>();
 
   constructor(private readonly now: () => number) {}
 

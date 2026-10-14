@@ -62,12 +62,18 @@ pub fn check_input(username: &str, password: &Secret) -> AccountInputCheck {
 /// la bibliothèque (`LinkManager::accounts_list`) : un compte Lecture seule est refusé par l'agent
 /// (`LinkFailure::Forbidden`), et le compte de la session n'est lu que si la liste l'a été.
 pub async fn list(manager: &LinkManager, id: &ServerId) -> Result<AccountListDto, LinkFailure> {
-    let read = manager.accounts_list(id).await?;
-    Ok(AccountListDto {
+    Ok(listed(manager.accounts_list(id).await?))
+}
+
+/// La lecture de la bibliothèque, telle que l'interface la reçoit : les comptes lisibles, et COMBIEN ne l'étaient
+/// pas (une liste partielle ne se tait pas, BR-COMPAT-001 point 10).
+pub fn listed(read: hearth_link::AccountsRead) -> AccountListDto {
+    AccountListDto {
+        unreadable: read.accounts.unreadable(),
         accounts: read.accounts.into_iter().map(Into::into).collect(),
         me: read.me,
         rights_known: read.rights_known,
-    })
+    }
 }
 
 pub async fn create(

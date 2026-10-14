@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import UnreadableNote from "@/components/molecules/UnreadableNote.vue";
 import AttackModePanel from "@/components/organisms/AttackModePanel.vue";
 import ErasurePendingNote from "@/components/organisms/ErasurePendingNote.vue";
 import ReauthSettingCard from "@/components/organisms/ReauthSettingCard.vue";
@@ -129,6 +130,7 @@ async function reconnect() {
       @remove="removing = $event"
       @retry="store.load(serverId)"
     />
+    <UnreadableNote :count="entry?.status === 'ready' ? entry.unreadable : 0" />
     <ReauthSettingCard :key="serverId" :server-id="serverId" />
     <ErasurePendingNote v-if="securityEntry?.state?.erasurePending && server?.role === 'admin'" />
     </div>

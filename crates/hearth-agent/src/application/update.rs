@@ -32,9 +32,9 @@ use crate::domain::audit::{Actor, AuditAction, Origin, Outcome, Reason, Target};
 use crate::domain::install::Version;
 use crate::domain::text::hex;
 use crate::domain::update::{
-    CHECK_WINDOW, Job, Leftovers, MAX_BINARY_BYTES, MAX_RESUMES, Marker, Orphan, PercentTracker,
-    Phase, Requester, STOP_GRACE, SupervisorState, UpdateInput, UpdateRecord, UpdateRefusal,
-    UpdateTarget, classify_orphan, plan_update,
+    CHECK_WINDOW, Extras, Job, Kept, Leftovers, MAX_BINARY_BYTES, MAX_RESUMES, Marker, Orphan,
+    PercentTracker, Phase, Requester, STOP_GRACE, SupervisorState, UpdateInput, UpdateRecord,
+    UpdateRefusal, UpdateTarget, classify_orphan, plan_update,
 };
 
 /// Combien de temps le service attend, par défaut, un superviseur qui devait travailler avant d'y
@@ -232,6 +232,7 @@ impl UpdateService {
             step: step.into(),
             previous: self.current.to_string(),
             requester,
+            extra: Extras::default(),
         };
         if let Err(error) = self.host.write_state(&state) {
             tracing::warn!(%error, "trace d'intention de la mise à jour non écrite");
@@ -301,6 +302,7 @@ impl UpdateService {
                             by: actor.account.as_ref().map(ToString::to_string),
                             name: actor.origin.name().map(str::to_owned),
                             addr: actor.origin.addr().map(str::to_owned),
+                            extra: Extras::default(),
                         };
                         Ok((target, first))
                     }
@@ -465,12 +467,13 @@ impl UpdateService {
             version: Some(target.version.to_string()),
             previous: self.current.to_string(),
             outcome: UpdateOutcome::Failed.into(),
-            reason: Some(reason),
+            reason: Some(reason.into()),
             at: self.now_text(),
             requested_by: actor.account.as_ref().map(ToString::to_string),
             client_name: actor.origin.name().map(str::to_owned),
             client_addr: actor.origin.addr().map(str::to_owned),
             reported: true,
+            extra: Default::default(),
         };
         if let Err(error) = self.host.write_last(&record) {
             tracing::error!(%error, "résultat de mise à jour non écrit");
@@ -497,7 +500,7 @@ impl UpdateService {
             // Une issue que cet agent ne comprend pas (fichier écrit par un agent plus récent) est dite `unknown`
             // aux clients ; le fichier, lui, garde la valeur d'origine (BR-COMPAT-001 point 7).
             outcome: Some(record.outcome.wire()),
-            reason: record.reason,
+            reason: record.reason.as_ref().map(Kept::wire),
         });
     }
 
@@ -629,7 +632,7 @@ impl UpdateService {
                 if let Ok(Some(mut marker)) = self.host.read_marker() {
                     marker.phase = Phase::Abandoned;
                     marker.outcome = Some(UpdateOutcome::Failed.into());
-                    marker.reason = Some(UpdateReason::RollbackFailed);
+                    marker.reason = Some(UpdateReason::RollbackFailed.into());
                     marker.settled = true;
                     let _ = self.host.write_marker(&marker);
                 }
@@ -637,12 +640,13 @@ impl UpdateService {
                     version: Some(job.version.clone()),
                     previous: job.previous.clone(),
                     outcome: UpdateOutcome::Failed.into(),
-                    reason: Some(UpdateReason::RollbackFailed),
+                    reason: Some(UpdateReason::RollbackFailed.into()),
                     at: self.now_text(),
                     requested_by: job.requested_by.clone(),
                     client_name: job.client_name.clone(),
                     client_addr: job.client_addr.clone(),
                     reported: false,
+                    extra: Default::default(),
                 };
                 if let Err(error) = self.host.write_last(&record) {
                     tracing::error!(%error, "résultat de mise à jour non écrit");
@@ -711,12 +715,13 @@ impl UpdateService {
                     version: None,
                     previous: self.current.to_string(),
                     outcome: outcome.into(),
-                    reason: Some(reason),
+                    reason: Some(reason.into()),
                     at: self.now_text(),
                     requested_by: None,
                     client_name: None,
                     client_addr: None,
                     reported: false,
+                    extra: Default::default(),
                 };
                 if let Err(error) = self.host.write_last(&record) {
                     tracing::error!(%error, "résultat de mise à jour non écrit");
@@ -747,12 +752,13 @@ impl UpdateService {
                     version: Some(target_text),
                     previous: self.current.to_string(),
                     outcome: UpdateOutcome::Failed.into(),
-                    reason: Some(UpdateReason::SupervisorLaunch),
+                    reason: Some(UpdateReason::SupervisorLaunch.into()),
                     at: self.now_text(),
                     requested_by: requester.by.clone(),
                     client_name: requester.name.clone(),
                     client_addr: requester.addr.clone(),
                     reported: false,
+                    extra: Default::default(),
                 };
                 let _ = self.host.write_last(&record);
                 self.report(record).await;
@@ -768,12 +774,13 @@ impl UpdateService {
             version: Some(version),
             previous,
             outcome: UpdateOutcome::Failed.into(),
-            reason: Some(UpdateReason::Interrupted),
+            reason: Some(UpdateReason::Interrupted.into()),
             at: self.now_text(),
             requested_by: requester.by,
             client_name: requester.name,
             client_addr: requester.addr,
             reported: false,
+            extra: Default::default(),
         };
         // Le résultat d'abord, le nettoyage ensuite : un arrêt entre les deux ne fait pas disparaître
         // la tentative.
@@ -798,12 +805,13 @@ impl UpdateService {
             version: Some(version),
             previous,
             outcome: outcome.into(),
-            reason,
+            reason: reason.map(Into::into),
             at: self.now_text(),
             requested_by: requester.by,
             client_name: requester.name,
             client_addr: requester.addr,
             reported: false,
+            extra: Default::default(),
         };
         if let Err(error) = self.host.write_last(&record) {
             tracing::error!(%error, "résultat de mise à jour non écrit");
@@ -899,7 +907,9 @@ impl UpdateService {
                 );
                 Outcome::Failed(Reason::UpdateOutcomeUnknown)
             }
-            Some(other) => Outcome::Failed(audit_reason(other, record.reason)),
+            Some(other) => {
+                Outcome::Failed(audit_reason(other, record.reason.as_ref().map(Kept::wire)))
+            }
         };
         self.sink
             .record(
@@ -942,6 +952,7 @@ fn requester_of(actor: &Actor) -> Requester {
         by: actor.account.as_ref().map(ToString::to_string),
         name: actor.origin.name().map(str::to_owned),
         addr: actor.origin.addr().map(str::to_owned),
+        extra: Extras::default(),
     }
 }
 

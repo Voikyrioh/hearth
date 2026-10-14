@@ -299,7 +299,7 @@ fn a_new_agent_that_never_answers_is_rolled_back_to_the_exact_old_binary() {
 
     let last = bench.host.read_last().unwrap().unwrap();
     assert_eq!(last.outcome, UpdateOutcome::RolledBack);
-    assert_eq!(last.reason, Some(UpdateReason::NoAnswer));
+    assert_eq!(last.reason, Some(UpdateReason::NoAnswer.into()));
     assert!(!last.reported);
 }
 
@@ -385,7 +385,7 @@ fn a_rollback_that_cannot_restart_the_old_agent_says_so_and_keeps_the_binary_res
         "le binaire d'avant est remis malgré tout"
     );
     let last = bench.host.read_last().unwrap().unwrap();
-    assert_eq!(last.reason, Some(UpdateReason::RollbackFailed));
+    assert_eq!(last.reason, Some(UpdateReason::RollbackFailed.into()));
 }
 
 #[test]

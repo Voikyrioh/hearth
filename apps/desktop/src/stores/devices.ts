@@ -17,6 +17,8 @@ export interface ServerDevices {
   devices: TrustedDevice[];
   /** Postes au plus par compte ; 8 tant que la liste n'a pas été lue. */
   max: number;
+  /** Postes que l'agent a envoyés sans que cette version sache les lire (écartés, comptés). */
+  unreadable: number;
 }
 
 export const useDevicesStore = defineStore("devices", () => {
@@ -37,14 +39,25 @@ export const useDevicesStore = defineStore("devices", () => {
     reads.set(serverId, ticket);
     const known = byServer.value[serverId];
     if (!known || known.status === "error" || known.status === "unsupported") {
-      put(serverId, { status: "loading", devices: known?.devices ?? [], max: known?.max ?? 8 });
+      put(serverId, {
+        status: "loading",
+        devices: known?.devices ?? [],
+        max: known?.max ?? 8,
+        unreadable: known?.unreadable ?? 0,
+      });
     }
     try {
       const list = await getLinkBridge().listTrustedDevices(serverId);
       if (reads.get(serverId) !== ticket) return;
       if (list.kind === "unsupported")
-        put(serverId, { status: "unsupported", devices: [], max: 8 });
-      else put(serverId, { status: "ready", devices: list.devices, max: list.max });
+        put(serverId, { status: "unsupported", devices: [], max: 8, unreadable: 0 });
+      else
+        put(serverId, {
+          status: "ready",
+          devices: list.devices,
+          max: list.max,
+          unreadable: list.unreadable,
+        });
     } catch (error) {
       if (reads.get(serverId) !== ticket) return;
       // Lien coupé ou serveur parti : la dernière liste connue reste (le gabarit la désature).
@@ -53,6 +66,7 @@ export const useDevicesStore = defineStore("devices", () => {
         status: "error",
         devices: current?.devices ?? [],
         max: current?.max ?? 8,
+        unreadable: current?.unreadable ?? 0,
       });
       if (!failureOf(error)) reportUiError(error, "devices:load");
     }

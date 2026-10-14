@@ -203,6 +203,8 @@ pub struct AuditPageDto {
     pub events: Vec<AuditEntryDto>,
     /// Curseur de la page suivante (absent à la fin).
     pub next_before: Option<f64>,
+    /// Combien d'entrées de la page l'agent a envoyées sans que cette version sache les lire (écartées, comptées).
+    pub unreadable: u32,
 }
 
 impl From<&AuditResponse> for AuditPageDto {
@@ -214,6 +216,7 @@ impl From<&AuditResponse> for AuditPageDto {
             );
         }
         Self {
+            unreadable: page.events.unreadable(),
             events: page.events.iter().map(AuditEntryDto::from).collect(),
             #[allow(clippy::cast_precision_loss)]
             next_before: page.next_before.map(|id| id as f64),

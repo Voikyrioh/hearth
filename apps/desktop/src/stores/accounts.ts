@@ -18,6 +18,8 @@ export interface ServerAccounts {
   me: string;
   /** L'agent annonce `service-rights` (BR-GRANT-016) ; faux tant que la liste n'a pas été lue. */
   rightsKnown: boolean;
+  /** Comptes que l'agent a envoyés sans que cette version sache les lire (écartés, comptés). */
+  unreadable: number;
 }
 
 export const useAccountsStore = defineStore("accounts", () => {
@@ -43,6 +45,7 @@ export const useAccountsStore = defineStore("accounts", () => {
         accounts: known?.accounts ?? [],
         me: known?.me ?? "",
         rightsKnown: known?.rightsKnown ?? false,
+        unreadable: known?.unreadable ?? 0,
       });
     }
     try {
@@ -53,12 +56,19 @@ export const useAccountsStore = defineStore("accounts", () => {
         accounts: list.accounts,
         me: list.me,
         rightsKnown: list.rightsKnown,
+        unreadable: list.unreadable,
       });
     } catch (error) {
       if (reads.get(serverId) !== ticket) return;
       // L'agent refuse le rôle (`forbidden`, la seule façon de dire « accès refusé ») : rien à montrer.
       if (failureOf(error)?.kind === "forbidden") {
-        put(serverId, { status: "refused", accounts: [], me: "", rightsKnown: false });
+        put(serverId, {
+          status: "refused",
+          accounts: [],
+          me: "",
+          rightsKnown: false,
+          unreadable: 0,
+        });
         return;
       }
       // Lien coupé ou serveur parti : la dernière liste connue reste (le gabarit la désature).
@@ -68,6 +78,7 @@ export const useAccountsStore = defineStore("accounts", () => {
         accounts: current?.accounts ?? [],
         me: current?.me ?? "",
         rightsKnown: current?.rightsKnown ?? false,
+        unreadable: current?.unreadable ?? 0,
       });
       if (!failureOf(error)) reportUiError(error, "accounts:load");
     }
