@@ -67,3 +67,28 @@ fn a_corrupt_settings_file_is_treated_as_missing_so_the_explanation_is_given_onc
         serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(rewritten["closeHintSeen"], true);
 }
+
+/// HRT-67 : l'événement d'une lecture de journaux va à la seule fenêtre qui l'a ouverte (`emit_to` par étiquette),
+/// jamais aux autres fenêtres.
+#[test]
+fn a_window_sink_reaches_only_its_own_window() {
+    use std::sync::{Arc, Mutex};
+
+    use hearth_desktop_lib::link::UiSink;
+    use hearth_desktop_lib::window::WindowSink;
+    use tauri::Listener as _;
+
+    let app = app();
+    let main = open(&app, "main");
+    let other = open(&app, "autre");
+    let heard: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+    let log = heard.clone();
+    main.listen("link://test", move |_| log.lock().unwrap().push("main"));
+    let log = heard.clone();
+    other.listen("link://test", move |_| log.lock().unwrap().push("autre"));
+
+    let sink = WindowSink::new(app.handle().clone(), "main".to_owned());
+    sink.emit("link://test", serde_json::json!({ "n": 1 }));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert_eq!(*heard.lock().unwrap(), vec!["main"]);
+}

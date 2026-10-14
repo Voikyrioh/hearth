@@ -144,3 +144,27 @@ export function detailsView(service: ServiceInfo, gate: RightsGate): DetailsView
   if (!service.detailsKnown) return "not-read";
   return "visible";
 }
+
+/**
+ * Qui lit les journaux de ce service (BR-SLOG-011, BR-SLOG-018, BR-ADOPT-015) : un service créé par Hearth, tous les
+ * comptes ; un service ADOPTÉ, ceux qui ont le droit de gérer les services. `checking` : le droit est en cours de
+ * lecture (rien n'est dit avant) ; `right-unknown` : il n'a pas pu être lu (par prudence, rien n'est ouvert). L'agent
+ * reste l'arbitre : ce calcul ne fait que dire d'avance, honnêtement, ce que l'agent va répondre.
+ */
+export type LogsAccess = "open" | "reserved" | "right-unknown" | "checking";
+
+export function logsAccess(service: Pick<ServiceInfo, "adopted">, gate: RightsGate): LogsAccess {
+  if (service.adopted === null) return "open";
+  switch (gate.kind) {
+    case "allowed":
+    // Le pilotage est désactivé sur le serveur : la lecture des journaux est jugée par l'agent seul.
+    case "engine-disabled":
+      return "open";
+    case "reading":
+      return "checking";
+    case "denied":
+      return "reserved";
+    default:
+      return "right-unknown";
+  }
+}

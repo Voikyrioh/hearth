@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ack-service-logs"
+description = "Enables the ack_service_logs command without any pre-configured scope."
+commands.allow = ["ack_service_logs"]
+
+[[permission]]
+identifier = "deny-ack-service-logs"
+description = "Denies the ack_service_logs command without any pre-configured scope."
+commands.deny = ["ack_service_logs"]

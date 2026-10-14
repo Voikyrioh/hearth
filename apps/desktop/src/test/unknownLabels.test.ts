@@ -5,6 +5,7 @@ import { OUTCOME_KEYS, originOf } from "@/audit/format";
 import bindings from "@/bindings.ts?raw";
 import { type MessageKey, t } from "@/i18n";
 import type { AuditEntry } from "@/link";
+import { endNotice, gapKindOf, gapText, LOG_STATE_KEYS, sourceTag } from "@/logs/view";
 import { ATTACK_STATE_KEYS } from "@/security/messages";
 import { mountView, restartText } from "@/services/detail";
 import { STATE_KEYS } from "@/services/format";
@@ -121,6 +122,38 @@ const SAYS: Record<string, (value: string) => void> = {
     key(roleLabel(value as "admin"));
     if (value === "unknown") expect(roleLabel("unknown")).toBe(t("accounts.roleUnknown"));
   },
+  GapReasonDto: (value) => {
+    const said = gapText(gapKindOf(value as "slow"), null);
+    expect(said.length).toBeGreaterThan(0);
+    // Une raison inconnue n'est ni « trop lent » ni « le moteur ne les a pas gardées ».
+    if (value === "unknown") {
+      expect(said).toBe(t("logs.gapUnknown"));
+      expect(gapKindOf("unknown")).toBe("unknown");
+    }
+  },
+  LogRefusalDto: (value) => {
+    const notice = endNotice({
+      end: { kind: "refused", refusal: value as "logs_limit", retryAfterS: null },
+      failure: null,
+      hasLines: false,
+      remainingS: 0,
+    });
+    expect(notice?.text.length).toBeGreaterThan(0);
+    // Un code inconnu : fin neutre, aucune relance.
+    if (value === "unknown") {
+      expect(notice?.text).toBe(t("logs.stopReading"));
+      expect(notice?.retry).toBe("none");
+    }
+  },
+  LogSourceDto: (value) => {
+    // Une source inconnue n'est ni une erreur ni la sortie normale : un repère à part.
+    const tag = sourceTag(value as "out");
+    expect(tag).toBe(value === "err" ? "error" : value === "unknown" ? "unknown" : null);
+    if (value === "unknown") text("logs.unknownTag");
+  },
+  LogStateDto: (value) => {
+    text(LOG_STATE_KEYS[value as keyof typeof LOG_STATE_KEYS]);
+  },
   MountKindDto: (value) => {
     // Un genre inconnu n'est ni « dossier » ni « volume » : libellé neutre (mountView -> « other »).
     const kind = mountView({
@@ -151,6 +184,8 @@ const NOT_SHOWN: Record<string, string> = {
     "ne sert qu'à la porte du mode attaque (état « pas encore lu »), jamais affiché",
   DriverDto: "sert à un repère de détail (unité) seulement quand c'est « supervisor » ; sinon rien",
   OriginDto: "sert au repère « externe » seulement ; sinon rien",
+  MarkerKindDto:
+    "seul « restarted » fait un repère ; un repère inconnu est ignoré (serviceLogs.test.ts), jamais affiché",
   ProtocolDto: "dit par portLabel (testé dans services.test.ts)",
   ScopeDto: "dit par portLabel (testé dans services.test.ts)",
 };

@@ -222,6 +222,8 @@ pub fn old_password_stands(result: &Result<AccountOutcome, LinkFailure>) -> bool
             | LinkFailure::UnknownServer
             | LinkFailure::Storage
             | LinkFailure::Vault
+            | LinkFailure::LogReadsFull
+            | LinkFailure::LogPageUnknown
             | LinkFailure::Internal => false,
         },
     }

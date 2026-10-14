@@ -281,6 +281,8 @@ pub struct Options {
     pub extra_sink: Option<Arc<dyn hearth_link::ports::EventSink>>,
     /// Le superviseur de services de l'agent (clés `u_`) ; sans lui, aucun conteneur n'a d'unité.
     pub supervisor: Option<Arc<dyn hearth_agent::application::ports::ServiceSupervisor>>,
+    /// Les nombres du frein des journaux de l'agent (HRT-67) ; sans eux, aucune limite.
+    pub brake: Option<hearth_agent::domain::services::BrakeSettings>,
 }
 
 impl Default for Options {
@@ -298,6 +300,7 @@ impl Default for Options {
             hide_capabilities: false,
             extra_sink: None,
             supervisor: None,
+            brake: None,
         }
     }
 }
@@ -587,6 +590,17 @@ impl hearth_link::ports::Transport for SharedSpy {
     > {
         self.0.open_stream(target).await
     }
+
+    async fn open_service_logs(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        key: &str,
+    ) -> Result<
+        Box<dyn hearth_link::ports::transport::LogsConn>,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.open_service_logs(target, key).await
+    }
 }
 
 #[async_trait]
@@ -800,6 +814,17 @@ impl hearth_link::ports::Transport for Spy {
             state: self.state.clone(),
         }))
     }
+
+    async fn open_service_logs(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        key: &str,
+    ) -> Result<
+        Box<dyn hearth_link::ports::transport::LogsConn>,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.open_service_logs(target, key).await
+    }
 }
 
 /// Un flux qui note les sujets de chaque `subscribe` envoyé (HRT-62 : un agent sans la capacité `services`
@@ -859,9 +884,15 @@ pub fn short_transport() -> HttpTransport {
 impl World {
     /// Agent installé, compte « marie », mandataire, `LinkManager` connecté.
     pub async fn connected(options: Options) -> Self {
-        let agent =
-            TestAgent::install_supervised(options.updating, options.engine, options.supervisor)
-                .await;
+        let agent = TestAgent::install_braked(
+            options.updating,
+            options.engine,
+            options.supervisor,
+            options
+                .brake
+                .unwrap_or(hearth_agent::domain::services::BrakeSettings::relaxed()),
+        )
+        .await;
         agent.create_account("marie", options.role).await;
         let proxy = FaultProxy::start(agent.addr).await;
         let dir = agent::tmp::tempdir().unwrap();

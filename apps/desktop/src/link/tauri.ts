@@ -16,6 +16,7 @@ import {
   type SecurityEvent,
   type ServerDto,
   type ServersEvent,
+  type ServiceLogEvent,
   type SnapshotEvent,
 } from "@/bindings";
 import {
@@ -33,6 +34,7 @@ import {
   toDeviceRemovalOutcome,
   toTrustedDevices,
 } from "./devices";
+import { type LogMessage, type LogReading, toLogMessage } from "./logs";
 import { type MachineEvent, toHistory, toMetrics, toView } from "./machine";
 import {
   type AdminActKind,
@@ -79,6 +81,9 @@ import {
 } from "./types";
 
 /** Noms des événements de la coquille (conception technique, section 9). */
+/** Période du battement de vie des lectures de journaux (`KEEP_ALIVE_PERIOD` de la coquille : dix secondes). */
+export const KEEP_ALIVE_MS = 10_000;
+
 export const LINK_EVENTS = {
   servers: "link://servers",
   state: "link://state",
@@ -93,6 +98,7 @@ export const LINK_EVENTS = {
   agentUpdate: "agent-update://progress",
   security: "link://security",
   services: "link://services",
+  serviceLogs: "link://service-logs",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -159,9 +165,49 @@ function unwrap<T>(result: Result<T>): T {
  */
 export class TauriLinkBridge implements LinkBridge {
   private readonly now: () => number;
+  private readonly keepAliveMs: number;
+  /** La génération de cette page auprès de la coquille (journaux) : annoncée une fois, au démarrage de la page. */
+  private logPage: Promise<number> | null = null;
+  /** Les lectures de journaux ouvertes, avec ce qu'il faut faire si la coquille ne les tient plus. */
+  private readonly readings = new Map<string, () => void>();
+  private keepTimer: ReturnType<typeof setInterval> | undefined;
 
-  constructor(now: () => number = Date.now) {
+  constructor(now: () => number = Date.now, keepAliveMs: number = KEEP_ALIVE_MS) {
     this.now = now;
+    this.keepAliveMs = keepAliveMs;
+  }
+
+  /**
+   * Annonce cette page à la coquille et rend sa génération. La coquille ferme alors tout ce qu'une page précédente
+   * de cette fenêtre (rechargée, plantée) avait laissé ouvert : l'interface n'a pas à le faire (ADR-0040).
+   */
+  announceLogPage(): Promise<number> {
+    if (this.logPage === null) {
+      this.logPage = commands.announceLogPage().catch((error: unknown) => {
+        this.logPage = null;
+        throw error;
+      });
+    }
+    return this.logPage;
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepTimer !== undefined && this.readings.size === 0) {
+      clearInterval(this.keepTimer);
+      this.keepTimer = undefined;
+    }
+  }
+
+  /** Un battement : la coquille rend les sessions qu'elle tient encore ; celles qu'elle a fermées sont dites perdues. */
+  private async beat(): Promise<void> {
+    const asked = [...this.readings.keys()];
+    if (asked.length === 0) return;
+    try {
+      const alive = new Set(await commands.keepServiceLogs(await this.announceLogPage()));
+      for (const id of asked) if (!alive.has(id)) this.readings.get(id)?.();
+    } catch {
+      // Un battement raté n'est pas une perte : le suivant réessaie, et la coquille ferme seule au bout du délai.
+    }
   }
 
   async onServersChanged(listener: (servers: ServerInfo[]) => void): Promise<Unsubscribe> {
@@ -490,6 +536,83 @@ export class TauriLinkBridge implements LinkBridge {
 
   async revealServiceEnv(serverId: string, key: string): Promise<EnvVariable[]> {
     return toEnvVariables(unwrap(await commands.revealServiceEnv(serverId, key)));
+  }
+
+  async openServiceLogs(
+    serverId: string,
+    key: string,
+    listener: (message: LogMessage) => void,
+  ): Promise<LogReading> {
+    // L'écoute est posée AVANT l'ouverture : le premier `status` peut arriver avant la réponse de la commande ; ce
+    // qui arrive d'ici là est gardé, puis rendu dans l'ordre, pour cette session seulement.
+    let session: string | null = null;
+    let closed = false;
+    let unlisten: () => void = () => undefined;
+    const early: ServiceLogEvent[] = [];
+    const finish = () => {
+      closed = true;
+      unlisten();
+      if (session !== null) this.readings.delete(session);
+      this.stopKeepAlive();
+    };
+    const deliver = (event: ServiceLogEvent) => {
+      const message = toLogMessage(event.body);
+      if (!message) return;
+      listener(message);
+      // Une fin (de l'agent ou de la coquille) libère la session côté coquille : plus rien à battre.
+      if (message.kind === "ended") finish();
+    };
+    unlisten = await listen<ServiceLogEvent>(LINK_EVENTS.serviceLogs, (event) => {
+      if (closed) return;
+      if (session === null) early.push(event.payload);
+      else if (event.payload.session === session) deliver(event.payload);
+    });
+    let mine: string;
+    try {
+      mine = await this.openLogSession(serverId, key);
+    } catch (error) {
+      finish();
+      throw error;
+    }
+    session = mine;
+    // Si la coquille ne tient plus la session (événement perdu), l'écran le sait comme pour une fermeture annoncée.
+    this.readings.set(mine, () => {
+      if (closed) return;
+      listener({ kind: "ended", end: { kind: "closed", cause: "lost" } });
+      finish();
+    });
+    this.keepTimer ??= setInterval(() => void this.beat(), this.keepAliveMs);
+    for (const event of early.splice(0)) {
+      if (event.session === mine && !closed) deliver(event);
+    }
+    return {
+      close: () => {
+        if (closed) return;
+        finish();
+        void commands.closeServiceLogs(mine).catch(() => undefined);
+      },
+      ack: (batches) => {
+        if (!closed) void commands.ackServiceLogs(mine, batches).catch(() => undefined);
+      },
+    };
+  }
+
+  /** Ouvre la session côté coquille. Une génération de page inconnue : la page s'annonce de nouveau, une fois. */
+  private async openLogSession(serverId: string, key: string, retried = false): Promise<string> {
+    const page = await this.announceLogPage();
+    try {
+      return unwrap(await commands.openServiceLogs(page, serverId, key));
+    } catch (error) {
+      if (
+        !retried &&
+        error instanceof LinkCommandError &&
+        error.failure.kind === "log_page_unknown"
+      ) {
+        this.logPage = null;
+        return this.openLogSession(serverId, key, true);
+      }
+      throw error;
+    }
   }
 
   async openEngineDocs(): Promise<void> {

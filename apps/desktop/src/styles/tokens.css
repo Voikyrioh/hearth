@@ -191,6 +191,19 @@
   --title-max-height: 96px;
   --tag-max-width: 280px;
 
+  /* Journaux d'un service (HRT-67) : colonnes et mesures de la fenêtre de lignes. */
+  --fs-log: 12.5px;
+  --lh-log: 1.45;
+  --log-time-width: 76px;
+  --log-tag-width: 88px;
+  --log-marker-height: 32px;
+  --log-min-height: 320px;
+  /* Le cadre de lignes peut rétrécir jusqu'à cette hauteur (une dizaine de lignes) : au-dessous, c'est le volet qui défile. */
+  --log-frame-min-height: 160px;
+  /* Haut de page, carte du moteur et marges : ce que la page garde au-dessus et au-dessous de l'onglet Journaux. */
+  --log-chrome: 224px;
+  --log-edge: 2px;
+
   /* États */
   --opacity-disabled: 0.7;
   --opacity-stale: 0.62;

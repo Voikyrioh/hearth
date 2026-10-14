@@ -86,11 +86,13 @@ test("clavier : Entrée ouvre, le focus va au titre, Échap rend le focus à la 
   await row.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator("[data-detail-title]")).toBeFocused();
-  // Les onglets : un seul arrêt, « Journaux » atteignable aux flèches, explique pourquoi il n'est pas actif.
+  // Les onglets : un seul arrêt, « Journaux » atteignable aux flèches et actif (HRT-67), Entrée l'ouvre.
   await page.locator("[data-tab='detail']").focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.locator("[data-tab='logs']")).toBeFocused();
-  await expect(page.locator("[data-tab='logs']")).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-tab='logs']")).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("Enter");
   await expect(page.locator("[data-tab='detail']")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Escape");

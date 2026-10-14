@@ -103,6 +103,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             services::commands::engine_recheck,
             services::commands::read_service_rights,
             services::commands::reveal_service_env,
+            services::commands::announce_log_page,
+            services::commands::open_service_logs,
+            services::commands::close_service_logs,
+            services::commands::ack_service_logs,
+            services::commands::keep_service_logs,
             services::commands::open_engine_docs,
         ])
         .typ::<link_dto::ServersEvent>()
@@ -120,6 +125,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<agent_update::dto::AgentUpdateEvent>()
         .typ::<reauth::dto::ReauthSettingOutcome>()
         .typ::<services::dto::ServicesEvent>()
+        .typ::<services::logs_dto::ServiceLogEvent>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.
@@ -181,6 +187,17 @@ fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
     let runtime = Arc::new(runtime);
     let events = runtime.manager().subscribe();
     app.manage(runtime.clone());
+    let log_sessions = Arc::new(services::logs::LogSessions::default());
+    app.manage(log_sessions.clone());
+    // Filet de la coquille : une lecture dont la page ne donne plus signe de vie est fermée d'office
+    // (ADR-0040, `services::logs::IDLE_TIMEOUT`).
+    tauri::async_runtime::spawn(async move {
+        let mut tick = tokio::time::interval(services::logs::REAP_PERIOD);
+        loop {
+            tick.tick().await;
+            log_sessions.reap();
+        }
+    });
     // Notifications système (une par minute et par serveur) et icône de la zone de notification :
     // branchées avant le relais, l'état courant leur est donné tout de suite.
     let enabled = settings::notify_on_link_change(app.handle(), Path::new(settings::STORE_FILE))
@@ -273,10 +290,18 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
 
-    if let Err(error) = result {
-        fail_startup(&error.to_string());
+    match result {
+        Ok(app) => app.run(|handle, event| {
+            // La sortie de l'application ferme toute lecture de journaux (ADR-0040).
+            if matches!(event, tauri::RunEvent::Exit)
+                && let Some(sessions) = handle.try_state::<Arc<services::logs::LogSessions>>()
+            {
+                sessions.close_all();
+            }
+        }),
+        Err(error) => fail_startup(&error.to_string()),
     }
 }
 

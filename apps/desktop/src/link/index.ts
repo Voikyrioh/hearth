@@ -7,6 +7,7 @@ export * from "./agent-update";
 export * from "./audit";
 export type { LinkBridge } from "./bridge";
 export * from "./devices";
+export * from "./logs";
 export * from "./machine";
 export * from "./messages";
 export * from "./reauth";
@@ -26,6 +27,7 @@ export { SimulatedAccounts, simulatedCheckInput } from "./simulated-accounts";
 export { SimulatedAgentUpdates } from "./simulated-agent-update";
 export { SimulatedAudit } from "./simulated-audit";
 export { SimulatedDevices } from "./simulated-devices";
+export { HOSTILE_LINES, SimulatedLogs } from "./simulated-logs";
 export { bareMachine, type Pinnable, SimulatedMachine, sampleMachine } from "./simulated-machine";
 export { SimulatedReauth } from "./simulated-reauth";
 export { SimulatedSecurity } from "./simulated-security";
@@ -60,7 +62,12 @@ function insideTauri(): boolean {
  * - Sinon (build livré servi dans un navigateur) : pont vide, où toute commande échoue.
  */
 export function createLinkBridge(): LinkBridge {
-  if (insideTauri()) return new TauriLinkBridge();
+  if (insideTauri()) {
+    const bridge = new TauriLinkBridge();
+    // Le démarrage de la page s'annonce à la coquille : ce qu'une page précédente a laissé ouvert est fermé là.
+    void bridge.announceLogPage().catch(() => undefined);
+    return bridge;
+  }
   if (import.meta.env.DEV) {
     // `?servers=none` : navigateur de revue sans serveur enregistré (écran d'accueil).
     const none = new URLSearchParams(window.location.search).get("servers") === "none";

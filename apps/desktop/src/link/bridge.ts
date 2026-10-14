@@ -1,6 +1,7 @@
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
+import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
@@ -264,6 +265,18 @@ export interface LinkBridge {
    * l'appelant la garde en mémoire le temps de l'affichage et l'efface au remasquage.
    */
   revealServiceEnv(serverId: string, key: string): Promise<EnvVariable[]>;
+  /**
+   * Ouvre la lecture des journaux d'UN service (HRT-67, `BR-SLOG-*`) : une lecture par onglet, qui compte dans le
+   * plafond du compte (trois). Les messages arrivent à `listener`, dans l'ordre, jusqu'à la fermeture ou une fin
+   * (`ended`). La lecture se reprend seule après une coupure (`interrupted` puis un nouveau `status`) ; un refus de
+   * l'agent est une fin, jamais retentée. Hors « Connecté » : échec `not_connected`, rien n'est envoyé. Le texte des
+   * lignes est du contenu sensible : ni gardé, ni tracé, ni écrit.
+   */
+  openServiceLogs(
+    serverId: string,
+    key: string,
+    listener: (message: LogMessage) => void,
+  ): Promise<LogReading>;
   /** Ouvre la documentation officielle de Docker dans le navigateur du PC (l'adresse est une constante de la coquille). */
   openEngineDocs(): Promise<void>;
 
