@@ -288,6 +288,8 @@ pub struct TestAgent {
     /// services est désactivé comme avant.
     engine: Option<Arc<FakeEngine>>,
     supervisor: Option<Arc<dyn ServiceSupervisor>>,
+    /// Les nombres du frein des journaux (HRT-67) : sans limite par défaut, sauf pour les scénarios qui les éprouvent.
+    brake: hearth_agent::domain::services::BrakeSettings,
     pub addr: SocketAddr,
 }
 
@@ -322,6 +324,22 @@ impl TestAgent {
         engine: Option<Arc<FakeEngine>>,
         supervisor: Option<Arc<dyn ServiceSupervisor>>,
     ) -> Self {
+        Self::install_braked(
+            updating,
+            engine,
+            supervisor,
+            hearth_agent::domain::services::BrakeSettings::relaxed(),
+        )
+        .await
+    }
+
+    /// Comme `install_supervised`, avec ces nombres pour le frein des journaux (plafond du compte, rafale).
+    pub async fn install_braked(
+        updating: Option<UpdatingFactory>,
+        engine: Option<Arc<FakeEngine>>,
+        supervisor: Option<Arc<dyn ServiceSupervisor>>,
+        brake: hearth_agent::domain::services::BrakeSettings,
+    ) -> Self {
         let dir = tmp::tempdir().unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let clock = Arc::new(TestClock(Mutex::new(
@@ -351,6 +369,7 @@ impl TestAgent {
             updating,
             engine,
             supervisor,
+            brake,
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         };
         agent.start().await;
@@ -392,7 +411,7 @@ impl TestAgent {
                     }),
                     host: Arc::new(DebianHost),
                     timings: engine_timings(),
-                    log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
+                    log_brake: self.brake,
                 },
             )
             .await

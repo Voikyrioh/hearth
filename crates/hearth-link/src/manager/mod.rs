@@ -15,6 +15,7 @@ mod persist;
 mod reauth;
 mod rights;
 mod security;
+mod service_logs;
 mod services;
 mod task;
 mod watchers;
@@ -40,6 +41,7 @@ pub use events::EventStream;
 use events::Fanout;
 pub use reauth::ReauthState;
 pub use rights::ServiceRightsRead;
+pub use service_logs::{LogEnd, LogOutput, ServiceLogReader};
 pub use services::{Acted, KnownServices};
 use task::Command;
 

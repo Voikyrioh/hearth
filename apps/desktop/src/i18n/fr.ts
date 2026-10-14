@@ -957,8 +957,6 @@ export const fr = {
     sections: "Sections du service",
     tabDetail: "Détail",
     tabLogs: "Journaux",
-    // Hors spec : les journaux d'un service ne sont pas encore branchés dans le client.
-    logsSoon: "Les journaux d'un service arrivent dans une prochaine version de Hearth.",
     // Hors spec : démarrer, arrêter et redémarrer ne sont pas encore branchés.
     actionsSoon:
       "Démarrer, arrêter et redémarrer un service arrivent dans une prochaine version de Hearth.",
@@ -1050,6 +1048,102 @@ export const fr = {
   // Le droit de gérer les services (HRT-78, ADR-0041, BR-GRANT-*). Textes de la spécification
   // `2026-10-13-fonctionnelle-droit-de-gerer-les-services`, reprise mot pour mot. Lecture seule : aucun texte ne
   // laisse entendre que le droit se donne depuis l'application (BR-GRANT-005).
+  // Journaux d'un service (HRT-67). Les textes marqués « Hors spec » n'ont pas de formulation validée : à faire valider.
+  logs: {
+    notice:
+      "Les journaux affichent tout ce que le programme écrit, secrets compris. Ne les partage pas sans les relire.",
+    region: "Journaux de {name}",
+    regionHint:
+      "Flèches haut et bas : ligne précédente ou suivante. Début et Fin : première et dernière ligne.",
+    reading: "Lecture des journaux…",
+    live: "En direct",
+    paused: "En pause",
+    stopped: "Arrêté",
+    seen: "Vu il y a {age}",
+    // Hors spec : le socket de lecture est tombé alors que le lien est bon ; la lecture reprend seule.
+    interrupted: "Lecture interrompue. Reprise en cours…",
+    waitingOne: "1 nouvelle ligne",
+    waitingMany: "{n} nouvelles lignes",
+    pause: "Pause",
+    resumeLive: "Reprendre le direct",
+    backToLive: "Revenir au direct",
+    backToLiveCount: "Revenir au direct · {n}",
+    // Hors spec : la maquette n'a pas de recherche ni de copie ; posées dans la barre d'état, à valider.
+    searchLabel: "Chercher dans les lignes chargées",
+    searchPlaceholder: "Chercher",
+    searchNone: "Aucun résultat",
+    searchCount: "{current} sur {total}",
+    searchCountMore: "{current} sur plus de {total}",
+    searchPrevious: "Résultat précédent",
+    searchNext: "Résultat suivant",
+    searchClear: "Effacer la recherche",
+    copy: "Copier la sélection",
+    copied: "Sélection copiée.",
+    copyNothing: "Sélectionne d'abord du texte dans les journaux.",
+    copyFailed: "La copie n'a pas marché.",
+    errorTag: "Erreur",
+    errorTagLabel: "Sortie d'erreur",
+    mixed: "Ce service mélange ses sorties normale et d'erreur : elles ne sont pas distinguables.",
+    restarted: "Le service a redémarré à {time}",
+    restartedMany: "Le service a redémarré {n} fois depuis {time}",
+    restartedUnknown: "Le service a redémarré",
+    gapMissing: "Des lignes manquent ici : le moteur ne les a pas gardées.",
+    gapMissingOne: "1 ligne manque ici",
+    gapMissingMany: "{n} lignes manquent ici",
+    // Hors spec : l'agent compte les lignes perdues quand l'écran lit trop lentement.
+    gapSlowOne: "1 ligne manque ici : le service écrit plus vite que l'écran ne peut suivre.",
+    gapSlowMany: "{n} lignes manquent ici : le service écrit plus vite que l'écran ne peut suivre.",
+    gapSlow: "Des lignes manquent ici : le service écrit plus vite que l'écran ne peut suivre.",
+    gapPauseOne: "1 ligne n'a pas été gardée pendant la pause.",
+    gapPauseMany: "{n} lignes n'ont pas été gardées pendant la pause.",
+    trimmed: "Les lignes plus anciennes ne sont plus affichées (les 5 000 dernières sont gardées).",
+    cutSuffix: "… (ligne tronquée, {n} caractères au total)",
+    // Hors spec : repli d'une ligne très longue.
+    foldMore: "Afficher la suite ({n} caractères)",
+    foldLess: "Replier la ligne",
+    foldedLine: "Début de la ligne, {n} caractères au total",
+    timeUnknown: "Heure inconnue",
+    activeLine: "Ligne du {time}",
+    emptyTitle: "Ce service n'a encore rien écrit",
+    emptyText: "Les lignes apparaîtront ici dès que le programme en écrira.",
+    stoppedBanner:
+      "Ce service est arrêté. Aucune nouvelle ligne n'arrivera tant qu'il ne redémarre pas.",
+    stoppedCode: "S'est arrêté avec le {code} il y a {age}.",
+    stoppedCodeNoAge: "S'est arrêté avec le {code}.",
+    codeWords: "code {code} ({explanation})",
+    codeBare: "code {code}",
+    waiting: "En attente du service",
+    stateUnknown: "État du service inconnu",
+    notKept:
+      "Le moteur n'a pas gardé les journaux de ce service : son conteneur est supprimé à chaque arrêt.",
+    gone: "Ce service n'existe plus. Les lignes affichées sont les dernières reçues.",
+    deploying:
+      "Ce service n'existe pas encore. Les journaux seront disponibles dès qu'il sera créé.",
+    // Hors spec : le moteur n'est pas prêt (la maquette prévoit le panneau du moteur en ligne, pas réutilisé ici).
+    engineNotReady:
+      "Le moteur de conteneurs n'est pas prêt. Les journaux reviendront dès qu'il le sera.",
+    engineStale: "Les lignes affichées sont celles d'avant la panne du moteur.",
+    unreadable:
+      "Le moteur ne permet pas de relire les journaux de ce service : il les envoie ailleurs que dans ses propres fichiers.",
+    serverLimit:
+      "Trop de journaux sont ouverts en même temps sur ce serveur (10). Ferme un autre onglet Journaux pour ouvrir celui-ci.",
+    accountLimit:
+      "Tu lis déjà les journaux de 3 services. Ferme un onglet Journaux pour en ouvrir un autre.",
+    // Hors spec : le frein aux ouvertures en rafale (12 par minute) n'a pas de maquette.
+    rateLimited:
+      "Tu as ouvert beaucoup de journaux en peu de temps. Attends {n} s avant de réessayer.",
+    rateLimitedOne:
+      "Tu as ouvert beaucoup de journaux en peu de temps. Attends 1 s avant de réessayer.",
+    rateLimitedDone: "Tu peux réessayer.",
+    failed: "Impossible de lire les journaux pour le moment.",
+    // Hors spec : fins que la spec ne décrit pas.
+    sessionEnded: "Ta session est terminée. Reconnecte-toi pour lire les journaux.",
+    unsupported: "Cet agent est trop ancien pour envoyer les journaux. Mets-le à jour.",
+    stopReading: "La lecture des journaux s'est arrêtée.",
+    notConnected: "Le lien avec le serveur est coupé. Les journaux reviendront avec lui.",
+    retry: "Réessayer",
+    retrying: "Nouvelle tentative…",
+  },
   rights: {
     tag: "Peut gérer les services",
     // Bulle du repère : ce que le droit permet (BR-GRANT-003) et comment il se donne (BR-GRANT-005).

@@ -8,3 +8,5 @@ En-tête (nom, état, « Ce service n'existe plus. ») collé en haut du volet a
 
 - Props : `serverId`, `opened` (`services/detail.ts::openedService`), `gate` (droit), `reasonId`, `connected`, `engineReady`, `focusTitle`. Émet `back`, `openOther`, `retryRights`.
 - Tests : `pages/ServicesDetail.test.ts`, `services/detail.test.ts`, `e2e/hrt63-detail.spec.ts`.
+
+HRT-67 : l'onglet « Journaux » est actif et adressable (`?onglet=journaux`) ; il remplace le détail et masque la liste (`LogViewer`). Un service adopté se lit avec le droit de gérer les services (`services/detail.ts::logsAccess`).

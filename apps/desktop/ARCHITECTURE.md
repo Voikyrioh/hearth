@@ -3,7 +3,7 @@
 Stack : Tauri 2 (cœur Rust) · Vue 3 · TypeScript · Vite · Pinia · vue-router · Biome · Vitest · Playwright
 Style : coquille mince en Rust, interface en Atomic design. Aucun accès réseau dans l'interface : le réseau est dans `crates/hearth-link`, embarqué par la coquille (ADR-0002, ADR-0013, ADR-0016).
 Entrée : `src-tauri/src/main.rs` (→ `lib.rs::run`), `src/main.ts`
-Maj : 2026-10-07 (HRT-13, HRT-14, HRT-17 lot interface, HRT-23, HRT-26)
+Maj : 2026-10-14 (HRT-67 journaux d'un service : `logs/` règles pures et tampon, `stores/serviceLogs.ts`, `LogViewer`, `link/logs.ts`, `link/simulated-logs.ts`, coquille `services/logs.rs` et `logs_dto.rs`) ; 2026-10-07 (HRT-13, HRT-14, HRT-17 lot interface, HRT-23, HRT-26)
 
 ## Carte
 

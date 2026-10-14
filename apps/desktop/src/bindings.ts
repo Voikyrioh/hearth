@@ -186,6 +186,21 @@ export const commands = {
 	 */
 	revealServiceEnv: (serverId: string, key: string) => typedError<EnvRevealDto, LinkFailure>(__TAURI_INVOKE("reveal_service_env", { serverId, key })),
 	/**
+	 *  Ouvre la lecture des journaux d'UN service (HRT-67, `BR-SLOG-*`) et rend l'identifiant de sa session. Les
+	 *  lots arrivent à la fenêtre par l'événement `link://service-logs` ; la coquille ne garde aucune ligne, n'en
+	 *  écrit aucune et n'en trace aucune. Au plus trois lectures à la fois (le plafond d'un compte). La lecture se
+	 *  reprend seule après une coupure ; un refus de l'agent est une fin, jamais retentée. Hors « Connecté » :
+	 *  `NotConnected`, rien n'est envoyé.
+	 */
+	openServiceLogs: (serverId: string, key: string) => typedError<string, LinkFailure>(__TAURI_INVOKE("open_service_logs", { serverId, key })),
+	/**
+	 *  Ferme la lecture d'un onglet : le socket est fermé et la place rendue au compte. Sans effet sur une session
+	 *  déjà finie.
+	 */
+	closeServiceLogs: (session: string) => __TAURI_INVOKE<void>("close_service_logs", { session }),
+	/**  La fenêtre a affiché ces lots : la coquille peut en envoyer d'autres (au plus vingt sans accusé). */
+	ackServiceLogs: (session: string, batches: number) => __TAURI_INVOKE<void>("ack_service_logs", { session, batches }),
+	/**
 	 *  Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est
 	 *  la constante [`ENGINE_DOCS_URL`].
 	 */
@@ -677,6 +692,8 @@ export type FingerprintEvent = {
 	presentedHex: string,
 };
 
+export type GapReasonDto = "slow" | "rotated" | "resume_lost" | "first_page" | "unknown";
+
 export type GpuInfoDto = {
 	name: string,
 	memoryTotalBytes: number | null,
@@ -802,6 +819,31 @@ export type LinkStateDto = {
 
 export type LinkStateName = "connected" | "reconnecting" | "offline" | "session_expired" | "access_revoked";
 
+/**  Pourquoi une lecture est finie. */
+export type LogEndDto = 
+/**  L'agent a refusé ou fermé la lecture ; `retry_after_s` seulement pour le frein. */
+{ kind: "refused"; refusal: LogRefusalDto; retryAfterS: number | null } | { kind: "session_ended" } | { kind: "unsupported" } | { kind: "unreachable" };
+
+/**
+ *  Une ligne. Le texte est celui de l'agent, déjà nettoyé et coupé à 10 000 caractères ; l'interface le neutralise
+ *  encore (`safeText`) avant de l'afficher. `Debug` ne le montre pas.
+ */
+export type LogLineDto = {
+	/**  Heure du moteur, millisecondes depuis l'époque. */
+	t: number | null,
+	s: LogSourceDto,
+	x: string,
+	/**  Nombre total de caractères d'une ligne que l'agent a coupée. */
+	cut: number | null,
+};
+
+/**  Le code d'un refus de l'agent. `Unknown` : un code d'un agent plus récent, une fin générique. */
+export type LogRefusalDto = "logs_limit" | "logs_account_limit" | "logs_rate_limited" | "logs_unreadable" | "service_not_found" | "engine_unavailable" | "missing_right" | "bad_request" | "unknown";
+
+export type LogSourceDto = "out" | "err" | "unknown";
+
+export type LogStateDto = "live" | "ended" | "waiting" | "unknown";
+
 export type LoginDto = {
 	role: RoleDto,
 	username: string,
@@ -817,6 +859,8 @@ export type MachineDto = {
 	gpus: GpuInfoDto[],
 	capabilities: CapabilitiesDto,
 };
+
+export type MarkerKindDto = "restarted" | "unknown";
 
 export type MemoryDto = {
 	usedBytes: number | null,
@@ -1045,6 +1089,18 @@ export type ServiceDto = {
 	adopted: AdoptionDto | null,
 	/**  Service adopté dont la commande et les noms de variables sont réservés à ce compte. */
 	detailsReserved: boolean,
+};
+
+export type ServiceLogBody = { kind: "status"; state: LogStateDto; container: string | null; mixed: boolean; exitCode: number | null; endedAt: number | null; notKept: boolean } | { kind: "lines"; seq: number; items: LogLineDto[] } | { kind: "gap"; count: number | null; reason: GapReasonDto } | { kind: "marker"; marker: MarkerKindDto; at: number | null } | 
+/**  Le socket est tombé ou le lien est coupé : la lecture reprend seule. */
+{ kind: "interrupted" } | 
+/**  La lecture est finie et ne repart pas seule. */
+{ kind: "ended"; end: LogEndDto };
+
+/**  Un message d'une lecture, adressé à sa session. */
+export type ServiceLogEvent = {
+	session: string,
+	body: ServiceLogBody,
 };
 
 /**

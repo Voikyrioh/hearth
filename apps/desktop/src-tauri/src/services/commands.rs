@@ -7,10 +7,12 @@ use std::process::Command;
 use std::sync::Arc;
 
 use hearth_link::domain::server::ServerId;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::dto::{EngineDto, EnvRevealDto, ServiceRightsDto, ServicesEvent};
+use super::logs::LogSessions;
 use crate::link::LinkRuntime;
+use crate::link_commands::TauriSink;
 use crate::link_dto::LinkFailure;
 
 type Runtime_<'a> = State<'a, Arc<LinkRuntime>>;
@@ -70,6 +72,38 @@ pub async fn reveal_service_env(
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     let revealed = link.manager().reveal_service_env(&id, &key).await?;
     Ok(EnvRevealDto::from(&revealed))
+}
+
+/// Ouvre la lecture des journaux d'UN service (HRT-67, `BR-SLOG-*`) et rend l'identifiant de sa session. Les
+/// lots arrivent à la fenêtre par l'événement `link://service-logs` ; la coquille ne garde aucune ligne, n'en
+/// écrit aucune et n'en trace aucune. Au plus trois lectures à la fois (le plafond d'un compte). La lecture se
+/// reprend seule après une coupure ; un refus de l'agent est une fin, jamais retentée. Hors « Connecté » :
+/// `NotConnected`, rien n'est envoyé.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_service_logs(
+    app: AppHandle,
+    link: Runtime_<'_>,
+    sessions: State<'_, Arc<LogSessions>>,
+    server_id: String,
+    key: String,
+) -> Result<String, LinkFailure> {
+    sessions.open(link.manager(), Arc::new(TauriSink(app)), &server_id, &key)
+}
+
+/// Ferme la lecture d'un onglet : le socket est fermé et la place rendue au compte. Sans effet sur une session
+/// déjà finie.
+#[tauri::command]
+#[specta::specta]
+pub fn close_service_logs(sessions: State<'_, Arc<LogSessions>>, session: String) {
+    sessions.close(&session);
+}
+
+/// La fenêtre a affiché ces lots : la coquille peut en envoyer d'autres (au plus vingt sans accusé).
+#[tauri::command]
+#[specta::specta]
+pub fn ack_service_logs(sessions: State<'_, Arc<LogSessions>>, session: String, batches: u32) {
+    sessions.acknowledge(&session, batches);
 }
 
 /// Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est

@@ -266,8 +266,8 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
     wrapper.unmount();
   });
 
-  it("Démarrer, arrêter, redémarrer et les journaux : dits « prochaine version », aucun bouton ni onglet actif", async () => {
-    const { wrapper } = await open(seedWeb);
+  it("Démarrer, arrêter, redémarrer : dits « prochaine version », aucun bouton ; l'onglet Journaux est actif (HRT-67)", async () => {
+    const { wrapper, router } = await open(seedWeb);
     await openWeb(wrapper);
     expect(wrapper.get("[data-detail-actions-soon]").text()).toContain(
       "arrivent dans une prochaine version",
@@ -277,12 +277,13 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
       .map((button) => button.text());
     expect(buttons.join("|")).not.toMatch(/Démarrer|Arrêter|Redémarrer/);
     const logs = wrapper.get("[data-tab='logs']");
-    expect(logs.attributes("aria-disabled")).toBe("true");
-    expect(logs.attributes("aria-describedby")).toBe(
-      wrapper.get("[data-detail-logs-soon]").attributes("id"),
-    );
+    expect(logs.attributes("aria-disabled")).toBeUndefined();
+    expect(wrapper.find("[data-detail-logs-soon]").exists()).toBe(false);
     await logs.trigger("click");
-    expect(wrapper.get("[data-tab='detail']").attributes("aria-selected")).toBe("true");
+    await flushPromises();
+    expect(router.currentRoute.value.query.onglet).toBe("journaux");
+    expect(wrapper.get("[data-tab='logs']").attributes("aria-selected")).toBe("true");
+    expect(wrapper.find("[data-logs]").exists()).toBe(true);
     wrapper.unmount();
   });
 });

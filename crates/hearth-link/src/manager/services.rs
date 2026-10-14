@@ -209,7 +209,7 @@ impl LinkManager {
 /// `\` d'un nom d'unité échappé par le système, `:` ou `@`). L'agent décode le segment, et la liaison le
 /// décode de même (`domain/act.rs`) pour signer la clé en clair : le chemin envoyé et la clé signée ne se
 /// séparent jamais.
-fn key_segment(key: &str) -> String {
+pub(super) fn key_segment(key: &str) -> String {
     let mut out = String::with_capacity(key.len());
     for byte in key.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.') {

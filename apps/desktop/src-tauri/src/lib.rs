@@ -103,6 +103,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             services::commands::engine_recheck,
             services::commands::read_service_rights,
             services::commands::reveal_service_env,
+            services::commands::open_service_logs,
+            services::commands::close_service_logs,
+            services::commands::ack_service_logs,
             services::commands::open_engine_docs,
         ])
         .typ::<link_dto::ServersEvent>()
@@ -120,6 +123,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<agent_update::dto::AgentUpdateEvent>()
         .typ::<reauth::dto::ReauthSettingOutcome>()
         .typ::<services::dto::ServicesEvent>()
+        .typ::<services::logs_dto::ServiceLogEvent>()
 }
 
 /// Erreur de démarrage, avec l'étape qui a échoué.
@@ -181,6 +185,7 @@ fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
     let runtime = Arc::new(runtime);
     let events = runtime.manager().subscribe();
     app.manage(runtime.clone());
+    app.manage(Arc::new(services::logs::LogSessions::default()));
     // Notifications système (une par minute et par serveur) et icône de la zone de notification :
     // branchées avant le relais, l'état courant leur est donné tout de suite.
     let enabled = settings::notify_on_link_change(app.handle(), Path::new(settings::STORE_FILE))

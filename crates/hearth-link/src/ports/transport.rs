@@ -6,6 +6,7 @@ use hearth_proto::api::hello::HelloResponse;
 use hearth_proto::api::metrics::HistoryResponse;
 use hearth_proto::api::operations::OperationResponse;
 use hearth_proto::api::security::SecurityView;
+use hearth_proto::api::service_logs::{LogCursor, LogsServerMessage};
 use hearth_proto::api::sessions::{
     ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginRequest,
     LoginResponse,
@@ -199,6 +200,27 @@ pub trait StreamConn: Send {
     }
 }
 
+/// Ce qui se lit sur le socket des journaux d'un service (HRT-67).
+pub enum LogsFrame {
+    Message(Box<LogsServerMessage>),
+    /// Trame sans intérêt (contrôle, binaire, message mal formé) : signe de vie, jamais une erreur. Le texte
+    /// d'un message illisible n'est ni gardé ni cité.
+    Other,
+}
+
+/// Un socket de journaux ouvert (`GET /services/{key}/logs`). Même règle que [`StreamConn`] : `recv` peut être
+/// abandonné et repris sans perdre de message. Rien de ce qui passe ici ne se trace : le texte des lignes est du
+/// contenu sensible.
+#[async_trait]
+pub trait LogsConn: Send {
+    /// Premier message : `auth`, avec en option la preuve de la clé d'appareil.
+    async fn send_auth(&mut self, auth: &SignedAuth) -> Result<(), TransportError>;
+    /// `open` : les 1 000 dernières lignes, ou la reprise depuis ce curseur.
+    async fn send_open(&mut self, since: Option<LogCursor>) -> Result<(), TransportError>;
+    async fn send_ping(&mut self, n: u64) -> Result<(), TransportError>;
+    async fn recv(&mut self) -> Result<LogsFrame, TransportError>;
+}
+
 #[async_trait]
 pub trait Transport: Send + Sync {
     /// `GET /hello` : identité de l'agent et empreinte du certificat présenté.
@@ -289,4 +311,17 @@ pub trait Transport: Send + Sync {
     /// Ouvre le flux `/stream` (la requête d'ouverture porte `X-Hearth-Api`). L'authentification
     /// (`auth`) et l'abonnement (`subscribe`) sont envoyés par l'appelant.
     async fn open_stream(&self, target: &Target) -> Result<Box<dyn StreamConn>, TransportError>;
+
+    /// Ouvre le socket des journaux d'un service (la requête d'ouverture porte `X-Hearth-Api`). `key` est une
+    /// clé de service déjà vérifiée et encodée par l'appelant ; l'authentification et `open` sont envoyés par
+    /// lui. Par défaut non pris en charge (transports simulés).
+    async fn open_service_logs(
+        &self,
+        _target: &Target,
+        _key: &str,
+    ) -> Result<Box<dyn LogsConn>, TransportError> {
+        Err(TransportError::Protocol(
+            "journaux non pris en charge".into(),
+        ))
+    }
 }

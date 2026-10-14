@@ -16,6 +16,7 @@ import {
   detailsView,
   exitCodeText,
   graceText,
+  logsAccess,
   mountView,
   type OpenedService,
   reachText,
@@ -28,6 +29,7 @@ import DashCard from "../molecules/DashCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 import EnvVarsSection from "./EnvVarsSection.vue";
+import LogViewer from "./LogViewer.vue";
 
 // Le détail d'un service (HRT-63, BR-SVC-007, 016, 023, 027, 028), à droite de la liste. Les données viennent de la
 // liste déjà chargée (aucune lecture à l'ouverture) ; seules les valeurs des variables se demandent, à part
@@ -35,7 +37,7 @@ import EnvVarsSection from "./EnvVarsSection.vue";
 // reste lisible, grisé, avec « Ce service n'existe plus. », et un homonyme créé ensuite est PROPOSÉ, jamais ouvert
 // d'office. Tout texte vient de l'agent et est interpolé (jamais du HTML) ; une valeur que ce client ne connaît pas
 // s'affiche de façon neutre. Rien n'est inventé pour ce que l'agent ne sait pas encore faire : démarrer, arrêter,
-// redémarrer et les journaux sont dits « prochaine version », sans bouton ni onglet actif.
+// redémarrer sont dits « prochaine version », sans bouton. L'onglet Journaux (HRT-67) lit les journaux du service ouvert.
 const props = defineProps<{
   serverId: string;
   opened: OpenedService;
@@ -45,15 +47,22 @@ const props = defineProps<{
   engineReady: boolean;
   /** Mettre le focus sur le titre à l'ouverture (ouvert par un geste, jamais par l'adresse). */
   focusTitle: boolean;
+  /** L'onglet affiché (dans l'adresse : `&onglet=journaux`). */
+  tab: "detail" | "logs";
+  /** Dernier contact avec le serveur (pour « Vu il y a… » dans les journaux). */
+  lastContactAt: number | null;
 }>();
-const emit = defineEmits<{ back: []; openOther: [key: string]; retryRights: [] }>();
+const emit = defineEmits<{
+  back: [];
+  openOther: [key: string];
+  retryRights: [];
+  "update:tab": [tab: "detail" | "logs"];
+}>();
 
 const now = useNow();
 const idBase = useId();
 const titleId = `${idBase}-title`;
-const logsNoteId = `${idBase}-logs-note`;
 const title = ref<HTMLElement | null>(null);
-const tab = ref<"detail" | "logs">("detail");
 
 /** Le service montré : l'actuel, ou sa dernière version quand il a disparu (lisible, grisé). */
 const service = computed<ServiceInfo | null>(() => {
@@ -67,13 +76,10 @@ const sameName = computed(() => (props.opened.kind === "gone" ? props.opened.sam
 
 const tabs = computed(() => [
   { id: "detail" as const, label: t("serviceDetail.tabDetail") },
-  {
-    id: "logs" as const,
-    label: t("serviceDetail.tabLogs"),
-    disabled: true,
-    describedBy: logsNoteId,
-  },
+  { id: "logs" as const, label: t("serviceDetail.tabLogs") },
 ]);
+/** Qui lit les journaux de ce service (BR-SLOG-018) : tous pour un service créé par Hearth, le droit pour un adopté. */
+const logsGate = computed(() => (service.value ? logsAccess(service.value, props.gate) : "open"));
 
 onMounted(async () => {
   if (!props.focusTitle) return;
@@ -108,7 +114,7 @@ const commandNote = computed(() => {
 
 <template>
   <section
-    class="detail"
+    :class="['detail', { 'detail--logs': tab === 'logs' }]"
     :aria-label="service ? t('serviceDetail.region', { name: clip(service.name, 80).text }) : t('serviceDetail.unnamed')"
     :aria-busy="opened.kind === 'waiting' ? 'true' : undefined"
     :data-gone="gone ? '' : undefined"
@@ -163,20 +169,56 @@ const commandNote = computed(() => {
 
     <header v-if="service" class="detail__head">
       <!-- Démarrer, arrêter, redémarrer : pas encore branchés (l'agent ne sait pas encore les faire) -->
-      <p v-if="!gone" class="detail__soon" data-detail-actions-soon>
+      <p v-if="!gone && tab === 'detail'" class="detail__soon" data-detail-actions-soon>
         <HIcon name="info" size="sm" />
         {{ t("serviceDetail.actionsSoon") }}
       </p>
 
-      <HTabs v-model="tab" :tabs="tabs" :label="t('serviceDetail.sections')" :id-base="idBase" />
-      <p :id="logsNoteId" class="detail__soon" data-detail-logs-soon>
-        <HIcon name="info" size="sm" />
-        {{ t("serviceDetail.logsSoon") }}
-      </p>
+      <HTabs
+        :model-value="tab"
+        :tabs="tabs"
+        :label="t('serviceDetail.sections')"
+        :id-base="idBase"
+        @update:model-value="emit('update:tab', $event)"
+      />
     </header>
 
+    <!-- L'onglet Journaux : une seule lecture, ouverte avec l'onglet, fermée en le quittant (BR-SLOG-020) -->
     <div
-      v-if="service"
+      v-if="service && tab === 'logs'"
+      :id="`${idBase}-panel-logs`"
+      class="detail__logs"
+      role="tabpanel"
+      :aria-labelledby="`${idBase}-tab-logs`"
+      data-detail-logs
+    >
+      <LogViewer
+        v-if="logsGate === 'open'"
+        :server-id="serverId"
+        :service-key="service.key"
+        :service-name="shownName"
+        :connected="connected"
+        :last-contact-at="lastContactAt"
+        :engine-ready="engineReady"
+        :gone="gone"
+        :deploying="service.state === 'deploying'"
+      />
+      <p v-else-if="logsGate === 'reserved'" class="detail__reserved" data-detail-logs-reserved>
+        <HIcon name="lock" size="sm" />
+        {{ t("serviceDetail.reserved") }}
+      </p>
+      <p v-else-if="logsGate === 'right-unknown'" class="detail__reserved" data-detail-logs-right-unknown>
+        <HIcon name="info" size="sm" />
+        {{ t("serviceDetail.rightUnknown") }}
+      </p>
+      <div v-else class="detail__checking" role="status" :aria-label="t('logs.reading')" data-detail-logs-checking>
+        <HSkeleton size="lg" />
+        <HSkeleton size="md" />
+      </div>
+    </div>
+
+    <div
+      v-if="service && tab === 'detail'"
       :id="`${idBase}-panel-detail`"
       class="detail__body"
       role="tabpanel"
@@ -317,6 +359,13 @@ const commandNote = computed(() => {
   overflow-y: auto;
 }
 
+/* L'onglet Journaux remplit la hauteur que la page lui donne : la fenêtre de lignes défile, pas le détail. */
+.detail--logs {
+  flex: 1 1 0;
+  max-width: none;
+  overflow-y: hidden;
+}
+
 .detail[data-gone] .detail__body {
   filter: grayscale(var(--grayscale-stale));
   opacity: var(--opacity-stale);
@@ -411,6 +460,29 @@ const commandNote = computed(() => {
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
+}
+
+/* L'onglet Journaux prend toute la hauteur restante : une seule barre de défilement, celle des lignes. */
+.detail__logs {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.detail__reserved {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--tx-secondary);
+}
+
+.detail__checking {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .detail__sentence {

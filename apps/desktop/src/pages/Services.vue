@@ -31,7 +31,7 @@ import { useServicesStore } from "@/stores/services";
 // Le détail d'un service (HRT-63) s'ouvre à côté de la liste : le service ouvert est dans l'adresse
 // (`?service={clé}`, la clé STABLE, jamais le nom), donc un retour arrière ou un rechargement le retrouve. Il
 // partage le grisé et la datation de la liste (même conteneur) : le détail ouvert ne ment jamais sur son âge.
-const { server, isConnected, isAdmin } = useCurrentServer();
+const { server, isConnected, isAdmin, lastContactAt } = useCurrentServer();
 const store = useServicesStore();
 const now = useNow();
 // Le droit « gérer les services » du compte connecté, lu à l'ouverture et à chaque reconnexion (HRT-78,
@@ -48,18 +48,31 @@ const selectedKey = computed(() => {
   const value = Array.isArray(raw) ? raw[0] : raw;
   return typeof value === "string" && value !== "" && value.length <= 300 ? value : null;
 });
+/** L'onglet du détail : `?onglet=journaux` ouvre les journaux, tout autre valeur (ou rien) le détail. */
+const tab = computed<"detail" | "logs">(() => {
+  const raw = route.query.onglet;
+  return (Array.isArray(raw) ? raw[0] : raw) === "journaux" ? "logs" : "detail";
+});
+
+function setTab(next: "detail" | "logs") {
+  const { onglet: _tab, ...rest } = route.query;
+  void router.replace({ query: next === "logs" ? { ...rest, onglet: "journaux" } : rest });
+}
+
 /** Le détail a été ouvert par un geste dans cette fenêtre (pas par l'adresse) : le focus va à son titre. */
 const openedByGesture = ref(false);
 const table = ref<InstanceType<typeof ServiceTable> | null>(null);
 
 function openDetail(key: string) {
   openedByGesture.value = true;
-  void router.push({ query: { ...route.query, service: key } });
+  // Un autre service s'ouvre toujours sur son détail, jamais sur l'onglet de celui qu'on quitte.
+  const { onglet: _tab, ...rest } = route.query;
+  void router.push({ query: { ...rest, service: key } });
 }
 
 async function closeDetail() {
   const key = selectedKey.value;
-  const { service: _closed, ...rest } = route.query;
+  const { service: _closed, onglet: _tab, ...rest } = route.query;
   await router.push({ query: rest });
   openedByGesture.value = false;
   await nextTick();
@@ -290,6 +303,7 @@ async function openDocs() {
               'svc__work',
               {
                 'svc__work--open': opened,
+                'svc__work--logs': opened && tab === 'logs',
                 'svc__work--grey':
                   (list.kind === 'live' && degradedList) || (list.kind === 'stale' && staleList),
               },
@@ -322,6 +336,9 @@ async function openDocs() {
                 :connected="isConnected"
                 :engine-ready="engineReady"
                 :focus-title="openedByGesture"
+                :tab="tab"
+                :last-contact-at="lastContactAt"
+                @update:tab="setTab"
                 @back="closeDetail"
                 @open-other="openDetail"
                 @retry-rights="rights.retry()"
@@ -425,6 +442,21 @@ async function openDocs() {
 .svc__work--grey {
   filter: grayscale(var(--grayscale-stale));
   opacity: var(--opacity-stale);
+}
+
+/* Les journaux ont besoin de la largeur : la liste est masquée, « Retour à la liste » la ramène (design, écran D). */
+.svc__work--logs .svc__list {
+  display: none;
+}
+
+.svc__work--logs {
+  flex: none;
+  height: calc(100vh - var(--log-chrome));
+  min-height: var(--log-min-height);
+}
+
+.svc__work--logs .svc__detail {
+  max-width: none;
 }
 
 @container svcwork (max-width: 959px) {

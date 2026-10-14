@@ -16,6 +16,7 @@ import {
   type SecurityEvent,
   type ServerDto,
   type ServersEvent,
+  type ServiceLogEvent,
   type SnapshotEvent,
 } from "@/bindings";
 import {
@@ -33,6 +34,7 @@ import {
   toDeviceRemovalOutcome,
   toTrustedDevices,
 } from "./devices";
+import { type LogMessage, type LogReading, toLogMessage } from "./logs";
 import { type MachineEvent, toHistory, toMetrics, toView } from "./machine";
 import {
   type AdminActKind,
@@ -93,6 +95,7 @@ export const LINK_EVENTS = {
   agentUpdate: "agent-update://progress",
   security: "link://security",
   services: "link://services",
+  serviceLogs: "link://service-logs",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -490,6 +493,50 @@ export class TauriLinkBridge implements LinkBridge {
 
   async revealServiceEnv(serverId: string, key: string): Promise<EnvVariable[]> {
     return toEnvVariables(unwrap(await commands.revealServiceEnv(serverId, key)));
+  }
+
+  async openServiceLogs(
+    serverId: string,
+    key: string,
+    listener: (message: LogMessage) => void,
+  ): Promise<LogReading> {
+    // L'écoute est posée AVANT l'ouverture : le premier `status` peut arriver avant la réponse de la commande ; ce
+    // qui arrive d'ici là est gardé, puis rendu dans l'ordre, pour cette session seulement.
+    let session: string | null = null;
+    let closed = false;
+    const early: ServiceLogEvent[] = [];
+    const deliver = (event: ServiceLogEvent) => {
+      const message = toLogMessage(event.body);
+      if (message) listener(message);
+    };
+    const unlisten = await listen<ServiceLogEvent>(LINK_EVENTS.serviceLogs, (event) => {
+      if (closed) return;
+      if (session === null) early.push(event.payload);
+      else if (event.payload.session === session) deliver(event.payload);
+    });
+    let mine: string;
+    try {
+      mine = unwrap(await commands.openServiceLogs(serverId, key));
+    } catch (error) {
+      closed = true;
+      unlisten();
+      throw error;
+    }
+    session = mine;
+    for (const event of early.splice(0)) {
+      if (event.session === mine && !closed) deliver(event);
+    }
+    return {
+      close: () => {
+        if (closed) return;
+        closed = true;
+        unlisten();
+        void commands.closeServiceLogs(mine).catch(() => undefined);
+      },
+      ack: (batches) => {
+        if (!closed) void commands.ackServiceLogs(mine, batches).catch(() => undefined);
+      },
+    };
   }
 
   async openEngineDocs(): Promise<void> {

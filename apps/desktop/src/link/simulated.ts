@@ -2,6 +2,7 @@ import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./ag
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
+import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
@@ -14,6 +15,7 @@ import {
 import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
 import { SimulatedDevices } from "./simulated-devices";
+import { SimulatedLogs } from "./simulated-logs";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import { SimulatedReauth, simulatedCovers } from "./simulated-reauth";
 import { SimulatedSecurity } from "./simulated-security";
@@ -188,6 +190,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly agentUpdates: SimulatedAgentUpdates;
   /** Le moteur de conteneurs et les services simulés (HRT-62) : pilotables par l'appelant (`services.seed`, `setEngine`, `upsert`…). */
   readonly services: SimulatedServices;
+  /** Les journaux des services simulés (HRT-67) : pilotables (`logs.seed`, `push`, `flood`, `interrupt`, `end`…). */
+  readonly logs = new SimulatedLogs();
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -310,6 +314,37 @@ export class SimulatedLinkBridge implements LinkBridge {
     } catch (error) {
       if (error instanceof LinkCommandError) throw error;
       throw this.fail({ kind: "internal" });
+    }
+  }
+
+  /** Les lectures de journaux ouvertes par l'interface (de quoi vérifier « une seule par onglet » et la fermeture). */
+  async openServiceLogs(
+    serverId: string,
+    key: string,
+    listener: (message: LogMessage) => void,
+  ): Promise<LogReading> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("service logs open");
+    // L'agent est l'arbitre (BR-SLOG-024) : un service ADOPTÉ se lit avec le droit de gérer les services seulement.
+    const found =
+      this.services.current(serverId)?.view.kind === "supported"
+        ? this.services.current(serverId)
+        : undefined;
+    const service =
+      found?.view.kind === "supported" ? found.view.services.find((s) => s.key === key) : undefined;
+    const refuse =
+      service?.adopted && !this.accounts.ownRights(this.requireServer(serverId)).granted
+        ? ({ kind: "refused", refusal: "missing_right", retryAfterS: null } as const)
+        : null;
+    try {
+      return await this.logs.open(serverId, key, listener, { refuse });
+    } catch (error) {
+      if (error instanceof LinkCommandError) throw error;
+      throw this.fail({ kind: "unreachable" });
     }
   }
 
@@ -930,6 +965,12 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.publish(serverId, state);
   }
 
+  /** Les lectures de journaux suivent le lien : coupées quand il tombe, reprises par leur curseur à son retour. */
+  private followLink(serverId: string, state: LinkState): void {
+    if (state === "connected") this.logs.linkUp(serverId);
+    else this.logs.linkDown(serverId);
+  }
+
   /** Comme `setState`, avec la raison d'arrêt ou le blocage. */
   publish(
     serverId: string,
@@ -950,6 +991,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       failedAttempts: extra.failedAttempts ?? 0,
     };
     this.events.set(serverId, event);
+    this.followLink(serverId, state);
     if (event.blocked !== "fingerprint_changed") this.alerts.delete(serverId);
     for (const listener of [...this.stateListeners]) listener({ ...event });
     // Le lien est revenu : l'agent renvoie son identité et son historique (BR-DASH-011).

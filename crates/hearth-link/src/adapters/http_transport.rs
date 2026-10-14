@@ -13,6 +13,7 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use hearth_proto::api::hello::HelloResponse;
 use hearth_proto::api::metrics::HistoryResponse;
 use hearth_proto::api::operations::OperationResponse;
+use hearth_proto::api::service_logs::{LogCursor, LogsClientMessage, LogsServerMessage};
 use hearth_proto::api::sessions::{
     ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginRequest,
     LoginResponse,
@@ -41,8 +42,8 @@ use crate::domain::agent_identity;
 use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
 use crate::ports::transport::{
-    ApiError, ApiRequest, ApiResponse, AuditExport, Frame, Method, Pin, Probed, StreamConn, Target,
-    Transport, TransportError,
+    ApiError, ApiRequest, ApiResponse, AuditExport, Frame, LogsConn, LogsFrame, Method, Pin,
+    Probed, StreamConn, Target, Transport, TransportError,
 };
 
 /// Taille maximale d'une réponse HTTP lue (un `GET /metrics/history` en tient largement).
@@ -383,6 +384,42 @@ impl Transport for HttpTransport {
     }
 
     async fn open_stream(&self, target: &Target) -> Result<Box<dyn StreamConn>, TransportError> {
+        let socket = self.connect_ws(target, "/api/v1/stream").await?;
+        Ok(Box::new(WsConn {
+            socket,
+            send_timeout: self.config.send_timeout,
+        }))
+    }
+
+    async fn open_service_logs(
+        &self,
+        target: &Target,
+        key: &str,
+    ) -> Result<Box<dyn LogsConn>, TransportError> {
+        // La clé arrive déjà encodée par la liaison ; tout ce qui ne s'écrit pas dans un segment est refusé.
+        if key.is_empty()
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'%'))
+        {
+            return Err(TransportError::Protocol("clé de service invalide".into()));
+        }
+        let path = format!("/api/v1/services/{key}/logs");
+        let socket = self.connect_ws(target, &path).await?;
+        Ok(Box::new(WsLogs {
+            socket,
+            send_timeout: self.config.send_timeout,
+        }))
+    }
+}
+
+impl HttpTransport {
+    /// Ouvre un WebSocket sur `path` (TLS épinglé, `X-Hearth-Api`). Partagé par le flux et les journaux.
+    async fn connect_ws(
+        &self,
+        target: &Target,
+        path: &str,
+    ) -> Result<WebSocketStream<TlsStream<TcpStream>>, TransportError> {
         require_pinned(target)?;
         let (tls_config, state) =
             client_config(target.pin).map_err(|e| TransportError::Protocol(e.to_string()))?;
@@ -414,13 +451,9 @@ impl Transport for HttpTransport {
             }
         })?;
 
-        let mut request = format!(
-            "wss://{}:{}/api/v1/stream",
-            url_host(&target.host),
-            target.port
-        )
-        .into_client_request()
-        .map_err(|e| TransportError::Protocol(e.to_string()))?;
+        let mut request = format!("wss://{}:{}{path}", url_host(&target.host), target.port)
+            .into_client_request()
+            .map_err(|e| TransportError::Protocol(e.to_string()))?;
         request
             .headers_mut()
             .insert(headers::API_VERSION, HeaderValue::from(API_VERSION));
@@ -437,10 +470,72 @@ impl Transport for HttpTransport {
         .await
         .map_err(|_| TransportError::Timeout)?
         .map_err(map_ws_error)?;
-        Ok(Box::new(WsConn {
-            socket,
-            send_timeout: self.config.send_timeout,
-        }))
+        Ok(socket)
+    }
+}
+
+/// Le socket des journaux d'un service. Aucun texte reçu n'est tracé.
+struct WsLogs {
+    socket: WebSocketStream<TlsStream<TcpStream>>,
+    send_timeout: Duration,
+}
+
+impl WsLogs {
+    async fn send_text(&mut self, text: String) -> Result<(), TransportError> {
+        match timeout(
+            self.send_timeout,
+            self.socket.send(Message::Text(text.into())),
+        )
+        .await
+        {
+            Err(_) => Err(TransportError::Timeout),
+            Ok(Err(error)) => Err(map_ws_error(error)),
+            Ok(Ok(())) => Ok(()),
+        }
+    }
+}
+
+#[async_trait]
+impl LogsConn for WsLogs {
+    async fn send_auth(&mut self, auth: &SignedAuth) -> Result<(), TransportError> {
+        let text =
+            serde_json::to_string(auth).map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.send_text(text).await
+    }
+
+    async fn send_open(&mut self, since: Option<LogCursor>) -> Result<(), TransportError> {
+        let text = serde_json::to_string(&LogsClientMessage::Open {
+            tail: hearth_proto::api::service_logs::TAIL_LINES,
+            since,
+        })
+        .map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.send_text(text).await
+    }
+
+    async fn send_ping(&mut self, n: u64) -> Result<(), TransportError> {
+        let text = serde_json::to_string(&LogsClientMessage::Ping { n })
+            .map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.send_text(text).await
+    }
+
+    async fn recv(&mut self) -> Result<LogsFrame, TransportError> {
+        match self.socket.next().await {
+            None => Err(TransportError::Closed(None)),
+            Some(Err(error)) => Err(map_ws_error(error)),
+            Some(Ok(Message::Close(frame))) => {
+                Err(TransportError::Closed(frame.map(|f| u16::from(f.code))))
+            }
+            Some(Ok(Message::Text(text))) => {
+                Ok(
+                    match serde_json::from_str::<LogsServerMessage>(text.as_str()) {
+                        Ok(message) => LogsFrame::Message(Box::new(message)),
+                        // Jamais l'erreur de `serde` : elle peut citer le texte reçu.
+                        Err(_) => LogsFrame::Other,
+                    },
+                )
+            }
+            Some(Ok(_)) => Ok(LogsFrame::Other),
+        }
     }
 }
 

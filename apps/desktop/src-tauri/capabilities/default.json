@@ -59,6 +59,10 @@
     "allow-list-services-states",
     "allow-engine-recheck",
     "allow-read-service-rights",
+    "allow-reveal-service-env",
+    "allow-open-service-logs",
+    "allow-close-service-logs",
+    "allow-ack-service-logs",
     "allow-open-engine-docs",
     "core:event:allow-listen",
     "core:event:allow-unlisten"

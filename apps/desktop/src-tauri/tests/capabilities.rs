@@ -56,6 +56,37 @@ fn every_permission_is_a_known_command_or_the_event_listener() {
     }
 }
 
+/// L'autre sens : toute commande déclarée dans `build.rs` est permise à la fenêtre. Sans cela, une commande
+/// ajoutée oubliée de `capabilities/default.json` marche en développement et est refusée en production.
+#[test]
+fn every_declared_command_is_allowed_to_the_window() {
+    let manifest =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/build.rs")).unwrap();
+    let start = manifest.find("const COMMANDS").unwrap();
+    let block = &manifest[start..manifest[start..].find("];").unwrap() + start];
+    let allowed = permissions();
+    let mut seen = 0;
+    for line in block.lines().skip(1) {
+        let Some(command) = line
+            .trim()
+            .strip_prefix('"')
+            .and_then(|l| l.split('"').next())
+        else {
+            continue;
+        };
+        seen += 1;
+        let permission = format!("allow-{}", command.replace('_', "-"));
+        assert!(
+            allowed.contains(&permission),
+            "commande déclarée sans permission dans capabilities/default.json : {command}"
+        );
+    }
+    assert!(
+        seen > 50,
+        "les commandes de build.rs n'ont pas été lues ({seen})"
+    );
+}
+
 #[test]
 fn no_exposed_command_takes_a_free_route_method_or_body() {
     let bindings =
@@ -208,6 +239,13 @@ const EXPECTED: &[(&str, &str)] = &[
     // HRT-63 : les valeurs des variables d'UN service (`GET /services/{key}/env`, consignée par l'agent, réservée au
     // droit) ; la clé du service est le seul paramètre, la route est construite par la liaison.
     ("revealServiceEnv", "serverId: string, key: string"),
+    // HRT-67 : la lecture des journaux d'UN service. `key` est la clé du service ouvert (vérifiée par la liaison,
+    // qui construit la route) ; `session` est l'identifiant rendu par `openServiceLogs` (une session inconnue ne fait
+    // rien) ; `batches` est un nombre de lots acquittés. Aucune ligne ne revient par une commande : elles arrivent par
+    // l'événement `link://service-logs`.
+    ("openServiceLogs", "serverId: string, key: string"),
+    ("closeServiceLogs", "session: string"),
+    ("ackServiceLogs", "session: string, batches: number"),
     ("openEngineDocs", ""),
 ];
 
@@ -276,6 +314,9 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "engineRecheck",
     "readServiceRights",
     "revealServiceEnv",
+    "openServiceLogs",
+    "closeServiceLogs",
+    "ackServiceLogs",
     "openEngineDocs",
 ];
 
