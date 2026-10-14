@@ -234,6 +234,11 @@ export type AccountListDto = {
 	 *  que l'agent ne sait pas le dire, pas parce que personne ne l'a (BR-GRANT-016).
 	 */
 	rightsKnown: boolean,
+	/**
+	 *  Combien de comptes de la liste l'agent a envoyés sans que cette version sache les lire (écartés,
+	 *  BR-COMPAT-001 point 10) : l'interface le dit, une liste partielle ne se tait pas.
+	 */
+	unreadable: number,
 };
 
 /**  Issue d'une action de compte. */
@@ -555,6 +560,8 @@ export type AuditPageDto = {
 	events: AuditEntryDto[],
 	/**  Curseur de la page suivante (absent à la fin). */
 	nextBefore: number | null,
+	/**  Combien d'entrées de la page l'agent a envoyées sans que cette version sache les lire (écartées, comptées). */
+	unreadable: number,
 };
 
 export type AvailableDto = {
@@ -1086,7 +1093,12 @@ export type ServicesEvent = {
 };
 
 /**  Ce que l'agent dit des services d'un serveur : l'état complet, ou « cet agent ne les gère pas ». */
-export type ServicesViewDto = { kind: "supported"; engine: EngineDto; services: ServiceDto[] } | 
+export type ServicesViewDto = { kind: "supported"; engine: EngineDto; services: ServiceDto[]; 
+/**
+ *  Combien de services l'agent a envoyés sans que cette version sache les lire (écartés, comptés
+ *  jusqu'au prochain état complet) : l'ancien état d'un tel service reste affiché.
+ */
+unreadable: number } | 
 /**  Pas de capacité `services` dans `/hello` : ni sujet ni route envoyés à cet agent. */
 { kind: "unsupported"; agentVersion: string };
 
@@ -1133,7 +1145,9 @@ export type TrustedDeviceDto = {
  *  La liste des postes, ou « cette fonction n'existe pas sur ce serveur » (agent d'avant la clé
  *  d'appareil : l'agent répond `404`).
  */
-export type TrustedDevicesDto = { kind: "listed"; devices: TrustedDeviceDto[]; max: number } | { kind: "unsupported" };
+export type TrustedDevicesDto = { kind: "listed"; devices: TrustedDeviceDto[]; max: number; 
+/**  Combien de postes l'agent a envoyés sans que cette version sache les lire (écartés, comptés). */
+unreadable: number } | { kind: "unsupported" };
 
 /**
  *  Pourquoi la dernière mise à jour demandée n'a pas abouti. La version en cours reste utilisable

@@ -159,7 +159,9 @@ mod tests {
                 by: Some("marie".into()),
                 name: None,
                 addr: None,
+                extra: Default::default(),
             },
+            extra: Default::default(),
         }
     }
 

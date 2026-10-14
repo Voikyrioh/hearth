@@ -173,4 +173,7 @@ pub struct AccountListDto {
     /// L'agent annonce la capacité `service-rights` : sans elle, `manages_services` est faux pour tous parce
     /// que l'agent ne sait pas le dire, pas parce que personne ne l'a (BR-GRANT-016).
     pub rights_known: bool,
+    /// Combien de comptes de la liste l'agent a envoyés sans que cette version sache les lire (écartés,
+    /// BR-COMPAT-001 point 10) : l'interface le dit, une liste partielle ne se tait pas.
+    pub unreadable: u32,
 }

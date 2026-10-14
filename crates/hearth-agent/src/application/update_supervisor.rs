@@ -196,7 +196,7 @@ impl Supervisor<'_> {
                             job,
                             marker,
                             UpdateOutcome::Failed,
-                            Some(UpdateReason::Swap),
+                            Some(UpdateReason::Swap.into()),
                         ));
                     }
                     if let Err(error) = self.service.stop() {
@@ -231,7 +231,7 @@ impl Supervisor<'_> {
                     self.state(job, UpdateStep::Check);
                     if let Err(error) = self.service.restart() {
                         tracing::error!(%error, "le nouvel agent ne démarre pas");
-                        marker.reason = Some(UpdateReason::NoAnswer);
+                        marker.reason = Some(UpdateReason::NoAnswer.into());
                         self.advance(&mut marker, Phase::RollingBack)?;
                     } else {
                         self.advance(&mut marker, Phase::Checking)?;
@@ -247,11 +247,11 @@ impl Supervisor<'_> {
                         // La boucle ne sort jamais sur « pas encore » ; si elle le faisait un jour,
                         // ce serait un retour arrière, jamais une réussite.
                         Checked::Verdict(Verdict::Wait) => {
-                            marker.reason = Some(UpdateReason::NoAnswer);
+                            marker.reason = Some(UpdateReason::NoAnswer.into());
                             self.advance(&mut marker, Phase::RollingBack)?;
                         }
                         Checked::Verdict(Verdict::Rollback(reason)) => {
-                            marker.reason = Some(reason);
+                            marker.reason = Some(reason.into());
                             self.advance(&mut marker, Phase::RollingBack)?;
                         }
                         Checked::StoppedOnPurpose => return Ok(self.pause(&marker)),
@@ -312,9 +312,12 @@ impl Supervisor<'_> {
                                 return Ok(self.abandon(job, marker, &error.to_string(), false));
                             }
                             let (outcome, reason) = if self.previous_answers(job, plan) {
-                                (UpdateOutcome::RolledBack, marker.reason)
+                                (UpdateOutcome::RolledBack, marker.reason.clone())
                             } else {
-                                (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed))
+                                (
+                                    UpdateOutcome::Failed,
+                                    Some(UpdateReason::RollbackFailed.into()),
+                                )
                             };
                             return Ok(self.conclude(job, marker, outcome, reason));
                         }
@@ -390,12 +393,10 @@ impl Supervisor<'_> {
     }
 
     fn state(&self, job: &Job, step: UpdateStep) {
-        let state = SupervisorState {
-            version: job.version.clone(),
-            step: step.into(),
-            previous: job.previous.clone(),
-            requester: job.requester(),
-        };
+        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : le fichier d'étape de CE travail est mis à jour, pas remplacé (champs d'une
+        // version plus récente gardés, `SupervisorState::stepped`).
+        let found = self.host.read_state().ok().flatten();
+        let state = SupervisorState::stepped(found, job, step);
         if let Err(error) = self.host.write_state(&state) {
             tracing::warn!(%error, "étape du superviseur non écrite");
         }
@@ -425,11 +426,14 @@ impl Supervisor<'_> {
             job,
             marker,
             UpdateOutcome::Failed,
-            Some(if revived {
-                UpdateReason::Swap
-            } else {
-                UpdateReason::RollbackFailed
-            }),
+            Some(
+                if revived {
+                    UpdateReason::Swap
+                } else {
+                    UpdateReason::RollbackFailed
+                }
+                .into(),
+            ),
         )
     }
 
@@ -439,7 +443,7 @@ impl Supervisor<'_> {
         job: &Job,
         mut marker: Marker,
         outcome: UpdateOutcome,
-        reason: Option<UpdateReason>,
+        reason: Option<Kept<UpdateReason>>,
     ) -> Supervised {
         marker.phase = Phase::Concluded;
         marker.outcome = Some(outcome.into());
@@ -461,7 +465,12 @@ impl Supervisor<'_> {
             .clone()
             .unwrap_or(Kept::Known(UpdateOutcome::Failed));
         let outcome = decided.wire();
-        let record = self.record(job, decided.clone(), marker.reason, marker.at.clone());
+        let record = self.record(
+            job,
+            decided.clone(),
+            marker.reason.clone(),
+            marker.at.clone(),
+        );
         // Rejoué après une interruption : un résultat déjà écrit (et peut-être déjà annoncé par l'agent,
         // `reported`) n'est pas réécrit.
         let written = matches!(self.host.read_last(), Ok(Some(last)) if last.at == record.at
@@ -478,7 +487,7 @@ impl Supervisor<'_> {
         self.host.clear_staging();
         Supervised {
             outcome,
-            reason: marker.reason,
+            reason: marker.reason.as_ref().map(Kept::wire),
             end: End::Concluded,
         }
     }
@@ -487,7 +496,7 @@ impl Supervisor<'_> {
         &self,
         job: &Job,
         outcome: Kept<UpdateOutcome>,
-        reason: Option<UpdateReason>,
+        reason: Option<Kept<UpdateReason>>,
         at: Option<String>,
     ) -> UpdateRecord {
         UpdateRecord {
@@ -500,6 +509,7 @@ impl Supervisor<'_> {
             client_name: job.client_name.clone(),
             client_addr: job.client_addr.clone(),
             reported: false,
+            extra: Default::default(),
         }
     }
 
@@ -572,7 +582,7 @@ impl Supervisor<'_> {
     fn decide_abandon(&self, marker: &mut Marker, reason: UpdateReason) {
         marker.phase = Phase::Abandoned;
         marker.outcome = Some(UpdateOutcome::Failed.into());
-        marker.reason = Some(reason);
+        marker.reason = Some(reason.into());
         marker.settled = false;
         marker.at = Some(format_time(self.clock.now()));
     }
@@ -585,7 +595,7 @@ impl Supervisor<'_> {
         let record = self.record(
             job,
             UpdateOutcome::Failed.into(),
-            marker.reason,
+            marker.reason.clone(),
             marker.at.clone(),
         );
         let written = matches!(self.host.read_last(), Ok(Some(last)) if last.at == record.at
@@ -602,7 +612,7 @@ impl Supervisor<'_> {
         self.host.discard_work_files();
         Supervised {
             outcome: UpdateOutcome::Failed,
-            reason: marker.reason,
+            reason: marker.reason.as_ref().map(Kept::wire),
             end: End::Abandoned,
         }
     }

@@ -84,6 +84,8 @@ export const useAuditStore = defineStore("audit", () => {
   const applied = ref<AuditFilter>({ ...EMPTY_AUDIT_FILTER });
   const entries = shallowRef<AuditEntry[]>([]);
   const nextBefore = ref<number | null>(null);
+  /** Entrées que l'agent a envoyées sans que cette version sache les lire, sur les pages lues (écartées, comptées). */
+  const unreadable = ref(0);
   const status = ref<AuditStatus>("idle");
   const failure = ref<LinkFailure | null>(null);
   const loadingMore = ref(false);
@@ -241,6 +243,7 @@ export const useAuditStore = defineStore("audit", () => {
       const buffered = liveBuffer ?? [];
       liveBuffer = null;
       nextBefore.value = page.nextBefore;
+      unreadable.value = page.unreadable;
       pending.value = [];
       pendingOverflow.value = false;
       atTop.value = true;
@@ -276,6 +279,7 @@ export const useAuditStore = defineStore("audit", () => {
       // Seulement du plus ancien que ce qui est là : l'ordre au-dessus ne bouge pas.
       const older = page.events.filter((entry) => entry.id < below);
       nextBefore.value = page.nextBefore;
+      unreadable.value += page.unreadable;
       setEntries(mergeDesc(entries.value, older));
       loadMoreFailed.value = false;
     } catch (error) {
@@ -448,6 +452,7 @@ export const useAuditStore = defineStore("audit", () => {
     pending.value = [];
     pendingOverflow.value = false;
     nextBefore.value = null;
+    unreadable.value = 0;
     status.value = "idle";
     failure.value = null;
     loadingMore.value = false;
@@ -567,6 +572,7 @@ export const useAuditStore = defineStore("audit", () => {
     applied,
     entries,
     nextBefore,
+    unreadable,
     status,
     failure,
     loadingMore,

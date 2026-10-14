@@ -91,6 +91,8 @@ export class SimulatedAudit {
   exportTruncated = false;
   /** Une lecture sur deux échoue tant que c'est vrai (tests de l'erreur de chargement). */
   failReads = false;
+  /** Entrées que l'agent a envoyées sans que ce client sache les lire (écartées, comptées), par serveur. */
+  readonly unreadable = new Map<string, number>();
 
   constructor(private readonly options: SimulatedAuditOptions) {}
 
@@ -249,7 +251,11 @@ export class SimulatedAudit {
     const events = found.slice(0, SIM_PAGE_SIZE).map((entry) => ({ ...entry }));
     const more = found.length > SIM_PAGE_SIZE;
     const last = events[events.length - 1];
-    return { events, nextBefore: more && last ? last.id : null };
+    return {
+      events,
+      nextBefore: more && last ? last.id : null,
+      unreadable: this.unreadable.get(serverId) ?? 0,
+    };
   }
 
   export(serverId: string, filter: AuditFilter): AuditExportResult {

@@ -54,6 +54,7 @@ pub fn listed(
                 );
             }
             Ok(TrustedDevicesDto::Listed {
+                unreadable: list.devices.unreadable(),
                 devices: list.devices.into_iter().map(Into::into).collect(),
                 max: u32::try_from(list.max).unwrap_or(u32::MAX),
             })

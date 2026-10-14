@@ -71,6 +71,8 @@ export interface AuditPage {
   events: AuditEntry[];
   /** Curseur de la page suivante ; `null` à la fin. */
   nextBefore: number | null;
+  /** Combien d'entrées l'agent a envoyées sans que cette version sache les lire (écartées, comptées). */
+  unreadable: number;
 }
 
 export interface AuditExportResult {
@@ -101,6 +103,7 @@ export function toAuditPage(dto: AuditPageDto): AuditPage {
   return {
     events: dto.events.flatMap((event) => toAuditEntry(event) ?? []),
     nextBefore: dto.nextBefore !== null && Number.isFinite(dto.nextBefore) ? dto.nextBefore : null,
+    unreadable: dto.unreadable,
   };
 }
 

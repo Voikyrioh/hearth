@@ -20,6 +20,8 @@ interface Book {
   max: number;
   /** Faux : agent d'avant la clé d'appareil (la liste dit `unsupported`). */
   supported: boolean;
+  /** Postes que l'agent a envoyés sans que ce client sache les lire (écartés, comptés). */
+  unreadable: number;
 }
 
 export class SimulatedDevices {
@@ -41,6 +43,7 @@ export class SimulatedDevices {
       book = {
         max: 8,
         supported: true,
+        unreadable: 0,
         devices: [
           {
             id: this.newId(),
@@ -69,12 +72,13 @@ export class SimulatedDevices {
   seed(
     server: ServerInfo,
     devices: Array<Partial<TrustedDevice> & { name: string }>,
-    options: { max?: number; supported?: boolean } = {},
+    options: { max?: number; supported?: boolean; unreadable?: number } = {},
   ): TrustedDevice[] {
     const at = new Date(this.now()).toISOString();
     const book: Book = {
       max: options.max ?? 8,
       supported: options.supported ?? true,
+      unreadable: options.unreadable ?? 0,
       devices: devices.map((device) => ({
         id: device.id ?? this.newId(),
         name: device.name,
@@ -100,6 +104,7 @@ export class SimulatedDevices {
       kind: "listed",
       devices: book.devices.map((device) => ({ ...device })),
       max: book.max,
+      unreadable: book.unreadable,
     };
   }
 

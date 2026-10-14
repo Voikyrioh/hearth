@@ -130,7 +130,7 @@ impl Client {
             .await
             .unwrap()
         {
-            TrustedDevicesDto::Listed { devices, max } => {
+            TrustedDevicesDto::Listed { devices, max, .. } => {
                 assert_eq!(max, 8);
                 devices
             }

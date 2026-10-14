@@ -152,7 +152,7 @@ fn the_list_keeps_the_agents_order_and_flags_and_exposes_no_key() {
         .into(),
         max: 8,
     };
-    let TrustedDevicesDto::Listed { devices, max } = listed(Ok(list)).unwrap() else {
+    let TrustedDevicesDto::Listed { devices, max, .. } = listed(Ok(list)).unwrap() else {
         panic!("liste attendue");
     };
     assert_eq!(max, 8);

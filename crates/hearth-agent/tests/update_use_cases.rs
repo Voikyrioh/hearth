@@ -340,6 +340,7 @@ async fn a_supervisor_that_still_works_counts_as_an_update_in_progress_after_a_r
             step: UpdateStep::Check.into(),
             previous: "0.1.0".into(),
             requester: Default::default(),
+            extra: Default::default(),
         });
     });
     let status = rig.service.status();
@@ -447,6 +448,7 @@ async fn the_result_written_by_the_supervisor_is_announced_once_and_journaled_on
             client_name: Some("PC-de-marie".into()),
             client_addr: Some("10.0.0.7".into()),
             reported: false,
+            extra: Default::default(),
         });
     });
     let mut events = rig.feed_receiver();
@@ -508,12 +510,13 @@ async fn a_rolled_back_update_is_announced_with_its_reason_and_journaled_as_fail
             version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
             outcome: UpdateOutcome::RolledBack.into(),
-            reason: Some(UpdateReason::NoAnswer),
+            reason: Some(UpdateReason::NoAnswer.into()),
             at: "2026-10-05T10:00:00Z".into(),
             requested_by: Some("marie".into()),
             client_name: None,
             client_addr: None,
             reported: false,
+            extra: Default::default(),
         });
     });
     let mut events = rig.feed_receiver();
@@ -566,6 +569,7 @@ async fn the_result_survives_the_loss_of_the_service_itself() {
             client_name: None,
             client_addr: None,
             reported: true,
+            extra: Default::default(),
         });
     });
     let again = Rig::with_host(&env, true, rig.host.clone());
@@ -640,7 +644,9 @@ fn intent(step: UpdateStep) -> hearth_agent::domain::update::SupervisorState {
             by: Some("marie".into()),
             name: Some("PC-de-marie".into()),
             addr: Some("10.0.0.7".into()),
+            extra: Default::default(),
         },
+        extra: Default::default(),
     }
 }
 
@@ -677,12 +683,13 @@ fn record(outcome: UpdateOutcome, reason: Option<UpdateReason>) -> UpdateRecord 
         version: Some("0.2.0".into()),
         previous: "0.1.0".into(),
         outcome: outcome.into(),
-        reason,
+        reason: reason.map(Into::into),
         at: "2026-10-05T10:00:00Z".into(),
         requested_by: Some("marie".into()),
         client_name: None,
         client_addr: None,
         reported: false,
+        extra: Default::default(),
     }
 }
 
@@ -938,7 +945,12 @@ async fn a_recovery_whose_launch_keeps_failing_is_bounded_across_agent_restarts_
         .with(|s| s.last.clone())
         .expect("un résultat écrit");
     assert_eq!(
-        (last.outcome.wire(), last.reason),
+        (
+            last.outcome.wire(),
+            last.reason
+                .as_ref()
+                .map(hearth_agent::domain::update::Kept::wire)
+        ),
         (UpdateOutcome::Failed, Some(UpdateReason::RollbackFailed))
     );
     // Les démarrages d'après ne retentent rien et ne journalisent plus.

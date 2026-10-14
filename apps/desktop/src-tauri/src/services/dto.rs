@@ -566,6 +566,9 @@ pub enum ServicesViewDto {
     Supported {
         engine: Box<EngineDto>,
         services: Vec<ServiceDto>,
+        /// Combien de services l'agent a envoyés sans que cette version sache les lire (écartés, comptés
+        /// jusqu'au prochain état complet) : l'ancien état d'un tel service reste affiché.
+        unreadable: u32,
     },
     /// Pas de capacité `services` dans `/hello` : ni sujet ni route envoyés à cet agent.
     Unsupported {
@@ -585,6 +588,7 @@ impl ServicesViewDto {
         } = state;
         Self::Supported {
             engine: Box::new(engine.into()),
+            unreadable: services.unreadable(),
             services: services.iter().map(ServiceDto::from).collect(),
         }
     }

@@ -7,6 +7,6 @@ Changement de mot de passe : le sien (`account` absent : « Ancien mot de passe 
 - Props : `open`, `serverId`, `username`, `own` (mode explicite), `account`
 - Événements et slots : Événement `close`
 - Notes : BR-ACCT-008, BR-ACCT-009. Test : `accounts.test.ts`.
-- HRT-26 (Q15) : pour SON mot de passe, la case « Garder ce poste reconnu » (décochée par défaut, aide « Décoché, il l'oublie avec celles des autres postes. »), désactivée avec sa raison quand l'agent est trop ancien, et un avertissement quand le mode attaque est actif sur un poste sans clé enregistrée (ne pas le garder refuse la session tout de suite). Elle envoie `keepAddress`. Test : `pages/SecuritySettings.test.ts`.
+- HRT-26 (Q15) : pour SON mot de passe, la case « Garder ce poste reconnu » (décochée par défaut, aide « Décoché, il l'oublie avec celles des autres postes. »), désactivée avec sa raison quand l'agent est trop ancien, et un avertissement quand le mode attaque est actif sur un poste sans clé enregistrée (ne pas le garder refuse la session tout de suite) ; quand le mode attaque est INCONNU de ce client, l'avertissement reste montré, au conditionnel (un état inconnu ne fait jamais taire un avertissement de sécurité, BR-COMPAT-001 point 4). Elle envoie `keepAddress`. Test : `pages/SecuritySettings.test.ts`.
 
 HRT-30 : habillée par `AdminActDialog` ; pour SON mot de passe, l'ancien mot de passe EST le mot de passe de confirmation (kind `account_password_own`) ; pour un autre compte, kind `account_password` (jamais couvert).

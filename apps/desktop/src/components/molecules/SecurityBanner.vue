@@ -4,19 +4,23 @@ import HIcon from "@/components/atoms/HIcon.vue";
 
 // Base commune des bandeaux de sécurité (conception design, écran B) : un ton (`alert` : attaque
 // probable, contour complet ambre ; `attack` : mode attaque actif, filet gauche rose ; `suspended` :
-// mode suspendu, filet gauche turquoise), un pictogramme, un titre ÉCRIT (le sens ne repose jamais sur
+// mode suspendu, filet gauche turquoise ; `neutral` : état de protection que ce client ne sait pas lire, filet gauche gris, aucune couleur d'alerte), un pictogramme, un titre ÉCRIT (le sens ne repose jamais sur
 // la couleur seule), un texte, des actions. Aucune logique : `tone` choisit le jeton et le pictogramme.
 // `stamp` : « Dernier état connu à {heure} » quand le lien n'est pas « Connecté » (le bandeau ne
 // s'estompe pas, il dit seulement ce qu'il sait). Seul le bandeau d'alerte est `role="alert"` (une
 // attaque qui apparaît mérite d'être annoncée, une fois) ; les autres sont `role="status"`.
 const props = defineProps<{
-  tone: "alert" | "attack" | "suspended";
+  tone: "alert" | "attack" | "suspended" | "neutral";
   title: string;
   stamp?: string;
 }>();
 
 const icon = computed(() =>
-  props.tone === "alert" ? "alert" : props.tone === "attack" ? "shield" : "clock",
+  props.tone === "alert"
+    ? "alert"
+    : props.tone === "attack" || props.tone === "neutral"
+      ? "shield"
+      : "clock",
 );
 </script>
 
@@ -61,6 +65,15 @@ const icon = computed(() =>
 .banner--suspended {
   border-left: var(--sec-edge) solid var(--cool);
   background: var(--cool-tint);
+}
+
+.banner--neutral {
+  border-left: var(--sec-edge) solid var(--tx-secondary);
+  background: var(--card-2);
+}
+
+.banner--neutral .banner__icon {
+  color: var(--tx-secondary);
 }
 
 .banner__icon {

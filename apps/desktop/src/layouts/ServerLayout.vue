@@ -89,8 +89,9 @@ function openSecurityPage() {
         @client="updates.fixClient()"
       />
       <AttackModeBanner
-        v-if="securityState && modeOn(securityState.attackMode)"
+        v-if="securityState && (modeOn(securityState.attackMode) || modeUnknown(securityState.attackMode))"
         :suspended="securityState.attackMode.state === 'suspended'"
+        :unknown="modeUnknown(securityState.attackMode)"
         :minutes="minutes"
         :stamp="stamp"
         :on-page="onSecurityPage"

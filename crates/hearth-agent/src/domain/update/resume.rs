@@ -14,7 +14,7 @@
 use hearth_proto::api::update::{UpdateOutcome, UpdateReason};
 use serde::{Deserialize, Serialize};
 
-use super::kept::Kept;
+use super::kept::{Extras, Kept};
 use super::record::Job;
 
 /// Combien de fois un superviseur interrompu est repris, au plus, pour une même mise à jour.
@@ -71,9 +71,9 @@ pub struct Marker {
     /// La version visée : un marqueur d'une autre version est périmé.
     pub version: String,
     pub phase: Phase,
-    /// Pourquoi le retour arrière.
+    /// Pourquoi le retour arrière. Gardée telle qu'écrite quand cette version ne la comprend pas (`Kept`).
     #[serde(default)]
-    pub reason: Option<UpdateReason>,
+    pub reason: Option<Kept<UpdateReason>>,
     /// Une copie de la base a été prise et doit exister jusqu'à la fin du travail.
     #[serde(default)]
     pub database_copy: bool,
@@ -103,6 +103,10 @@ pub struct Marker {
     /// RFC 3339 : l'instant du résultat, fixé une fois (une reprise réécrit le même résultat).
     #[serde(default)]
     pub at: Option<String>,
+    /// Champs d'une version plus récente, gardés et réécrits (`Extras`). `Phase` en revanche reste FERMÉE
+    /// par décision (BR-COMPAT-001 point 7) : une phase inconnue rend le marqueur illisible.
+    #[serde(flatten)]
+    pub extra: Extras,
 }
 
 fn settled_by_default() -> bool {
@@ -145,6 +149,7 @@ impl Marker {
             revive: false,
             outcome: None,
             at: None,
+            extra: Extras::default(),
         }
     }
 }
@@ -542,7 +547,7 @@ mod tests {
     #[test]
     fn the_marker_survives_the_json_round_trip_and_tolerates_added_fields() {
         let mut m = marker(Phase::RollbackDatabase, 2);
-        m.reason = Some(UpdateReason::NoAnswer);
+        m.reason = Some(UpdateReason::NoAnswer.into());
         let text = serde_json::to_string(&m).unwrap_or_default();
         assert_eq!(serde_json::from_str::<Marker>(&text).ok(), Some(m));
         let older = r#"{"version":"0.2.0","phase":"checking"}"#;

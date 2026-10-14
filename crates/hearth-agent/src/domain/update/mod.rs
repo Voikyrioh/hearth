@@ -16,7 +16,7 @@ mod space;
 mod supervise;
 mod target;
 
-pub use kept::{Kept, Tolerant};
+pub use kept::{Extras, Kept, Tolerant};
 pub use orphan::{Leftovers, Orphan, classify_orphan};
 pub use progress::PercentTracker;
 pub use record::{Job, Requester, SupervisorState, UpdateRecord};

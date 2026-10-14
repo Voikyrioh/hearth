@@ -797,6 +797,7 @@ mod tests {
             client_name: None,
             client_addr: None,
             reported: false,
+            extra: Default::default(),
         };
         host.write_last(&record).unwrap();
         host.write_state(&SupervisorState {
@@ -804,6 +805,7 @@ mod tests {
             step: UpdateStep::Check.into(),
             previous: "0.1.0".into(),
             requester: Default::default(),
+            extra: Default::default(),
         })
         .unwrap();
         // Un autre processus (le nouvel agent) relit le même dossier.
@@ -813,58 +815,100 @@ mod tests {
         assert!(!dir.path().join("update").join("last.json.tmp").exists());
     }
 
-    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB (B2) : les fichiers écrits par un agent PLUS RÉCENT (retour arrière) sont
-    /// relus, réécrits (`reported`, étape de l'ancien) puis relus, sans que la valeur d'origine soit perdue.
+    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB (B2 puis suites) : les fichiers écrits par un agent PLUS RÉCENT (retour
+    /// arrière) sont relus, réécrits DEUX fois (`reported`, étape de l'ancien) puis relus : les valeurs d'origine
+    /// ET les champs voisins inconnus, à tous les niveaux d'imbrication (objets, listes, `null`, nombres),
+    /// sont intacts dans le JSON brut.
     #[test]
-    fn files_written_by_a_newer_agent_are_read_rewritten_and_read_again_without_losing_a_value() {
+    fn files_written_by_a_newer_agent_are_rewritten_twice_without_losing_a_value_or_a_field() {
         use crate::domain::update::{Kept, Marker};
+        use serde_json::{Value, json};
         let (dir, host) = host();
         let update = dir.path().join("update");
         fs::create_dir_all(&update).unwrap();
-        fs::write(
-            update.join("last.json"),
-            r#"{"version":"0.3.0","previous":"0.2.0","outcome":"partly_applied","at":"2026-10-14T10:00:00Z","reported":false,"champ_du_futur":1}"#,
-        )
-        .unwrap();
-        fs::write(
-            update.join("state.json"),
-            r#"{"version":"0.3.0","step":"migrate","previous":"0.2.0"}"#,
-        )
-        .unwrap();
-        let read = host.read_last().unwrap().unwrap();
-        assert!(read.outcome.is_foreign());
-        assert_ne!(read.outcome, UpdateOutcome::Failed);
-        assert_ne!(read.outcome, UpdateOutcome::Succeeded);
-        // Ce que l'agent écrit après l'avoir lue : annoncée.
-        host.write_last(&UpdateRecord {
-            reported: true,
-            ..read
-        })
-        .unwrap();
-        let state = host.read_state().unwrap().unwrap();
-        assert_eq!(state.step, Kept::<UpdateStep>::Foreign("migrate".into()));
-        host.write_state(&state).unwrap();
-        // Relus une seconde fois, et lus en JSON brut : la valeur d'origine est intacte.
-        let again = host.read_last().unwrap().unwrap();
-        assert!(again.reported);
-        assert_eq!(again.outcome, Kept::Foreign("partly_applied".into()));
-        let raw: serde_json::Value =
-            serde_json::from_slice(&fs::read(update.join("last.json")).unwrap()).unwrap();
-        assert_eq!(raw["outcome"], "partly_applied");
-        let raw: serde_json::Value =
-            serde_json::from_slice(&fs::read(update.join("state.json")).unwrap()).unwrap();
-        assert_eq!(raw["step"], "migrate");
-        // Le marqueur d'étape : une issue décidée par un superviseur plus récent est gardée.
-        fs::write(
-            update.join("phase.json"),
-            r#"{"version":"0.3.0","phase":"concluded","outcome":"partly_applied"}"#,
-        )
-        .unwrap();
-        let marker: Marker = host.read_marker().unwrap().unwrap();
-        host.write_marker(&marker).unwrap();
-        let raw: serde_json::Value =
-            serde_json::from_slice(&fs::read(update.join("phase.json")).unwrap()).unwrap();
-        assert_eq!(raw["outcome"], "partly_applied");
+        let future = json!({
+            "champ_du_futur": 1,
+            "objet_du_futur": {"a": [1, {"b": null, "c": [true, "x", [2.5, {"d": {}}]]}], "e": {"f": {"g": -3}}},
+            "liste_du_futur": [],
+            "texte_du_futur": "ça",
+        });
+        let write = |name: &str, base: Value| {
+            let mut object = base.as_object().unwrap().clone();
+            object.extend(future.as_object().unwrap().clone());
+            fs::write(
+                update.join(name),
+                serde_json::to_vec(&Value::Object(object)).unwrap(),
+            )
+            .unwrap();
+        };
+        let raw = |name: &str| -> Value {
+            serde_json::from_slice(&fs::read(update.join(name)).unwrap()).unwrap()
+        };
+        let survives = |name: &str, level: &str| {
+            let value = raw(name);
+            for (key, expected) in future.as_object().unwrap() {
+                assert_eq!(&value[key], expected, "{name} ({level}) : {key}");
+            }
+        };
+
+        write(
+            "last.json",
+            json!({"version":"0.3.0","previous":"0.2.0","outcome":"partly_applied","reason":"raison_du_futur",
+                   "at":"2026-10-14T10:00:00Z","reported":false}),
+        );
+        write(
+            "state.json",
+            json!({"version":"0.3.0","step":"migrate","previous":"0.2.0",
+                   "requester":{"by":"marie","niveau_demandeur":{"x":[1,{"y":null}]}}}),
+        );
+        write(
+            "phase.json",
+            json!({"version":"0.3.0","phase":"concluded","outcome":"partly_applied","reason":"raison_du_futur"}),
+        );
+
+        // Deux réécritures de chacun, comme le font l'annonce (`reported`), le superviseur et l'abandon.
+        for round in 1..=2 {
+            let mut record = host.read_last().unwrap().unwrap();
+            assert!(record.outcome.is_foreign());
+            assert_ne!(record.outcome, UpdateOutcome::Failed);
+            assert_ne!(record.outcome, UpdateOutcome::Succeeded);
+            assert_eq!(record.extra.len(), future.as_object().unwrap().len());
+            record.reported = true;
+            host.write_last(&record).unwrap();
+
+            let state = host.read_state().unwrap().unwrap();
+            assert_eq!(state.step, Kept::<UpdateStep>::Foreign("migrate".into()));
+            host.write_state(&state).unwrap();
+
+            let mut marker: Marker = host.read_marker().unwrap().unwrap();
+            marker.resumes = round;
+            host.write_marker(&marker).unwrap();
+
+            for name in ["last.json", "state.json", "phase.json"] {
+                survives(name, &format!("réécriture {round}"));
+            }
+        }
+
+        // Valeurs d'origine, et champs imbriqués d'un objet connu (le demandeur).
+        let last = raw("last.json");
+        assert_eq!(last["outcome"], "partly_applied");
+        assert_eq!(last["reason"], "raison_du_futur");
+        assert_eq!(last["reported"], true);
+        let state = raw("state.json");
+        assert_eq!(state["step"], "migrate");
+        assert_eq!(state["requester"]["by"], "marie");
+        assert_eq!(
+            state["requester"]["niveau_demandeur"],
+            json!({"x":[1,{"y":null}]})
+        );
+        let marker = raw("phase.json");
+        assert_eq!(marker["outcome"], "partly_applied");
+        assert_eq!(marker["reason"], "raison_du_futur");
+        assert_eq!(marker["resumes"], 2);
+        assert_eq!(
+            host.read_last().unwrap().unwrap().reason,
+            Some(Kept::Foreign("raison_du_futur".into()))
+        );
     }
 
     #[test]
@@ -877,6 +921,7 @@ mod tests {
             step: UpdateStep::Restart.into(),
             previous: "0.1.0".into(),
             requester: Default::default(),
+            extra: Default::default(),
         })
         .unwrap();
         host.write_last(&UpdateRecord {
@@ -889,6 +934,7 @@ mod tests {
             client_name: None,
             client_addr: None,
             reported: true,
+            extra: Default::default(),
         })
         .unwrap();
         host.clear_staging();

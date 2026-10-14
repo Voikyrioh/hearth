@@ -8,7 +8,9 @@ import { useServersStore } from "@/stores/servers";
 import { useToastsStore } from "@/stores/toasts";
 import { startedApp } from "@/test/app";
 import AccountTable from "./AccountTable.vue";
+import AttackModeBanner from "./AttackModeBanner.vue";
 import AttackModePanel from "./AttackModePanel.vue";
+import PasswordDialog from "./PasswordDialog.vue";
 import ReauthSettingCard from "./ReauthSettingCard.vue";
 import SecurityAlertBanner from "./SecurityAlertBanner.vue";
 import SecurityAlertCard from "./SecurityAlertCard.vue";
@@ -87,6 +89,61 @@ describe("un mode attaque que ce client ne sait pas lire", () => {
     expect(todo).toContain("Ce client ne sait pas lire l'état de protection");
     expect(todo).not.toContain("déjà actif");
     expect(todo).not.toContain("active le mode attaque");
+  });
+
+  it("garde un bandeau permanent, neutre, sans bouton d'action sur le mode attaque", async () => {
+    const { pinia } = await startedApp();
+    const wrapper = mount(AttackModeBanner, {
+      props: { suspended: false, minutes: null, unknown: true },
+      global: { plugins: [pinia] },
+    });
+    const banner = wrapper.get("[data-attack-mode-banner]");
+    expect(banner.classes()).toContain("banner--neutral");
+    expect(banner.text()).toContain("État de protection illisible");
+    expect(banner.text()).toContain(NO_READ_TEXT);
+    expect(banner.text()).not.toContain("Mode attaque actif");
+    expect(banner.text()).not.toContain("Seuls les postes reconnus");
+    // Seul geste : ouvrir la page Sécurité, jamais activer ni désactiver.
+    expect(wrapper.findAll("button").map((b) => b.text())).toEqual(["Voir la page Sécurité"]);
+    wrapper.unmount();
+  });
+
+  // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un état inconnu ne fait jamais taire l'avertissement « poste sans clé ».
+  describe("l'avertissement « poste sans clé » du changement de mot de passe", () => {
+    async function warningFor(mode: "off" | "active" | "unknown", keyAtHand: boolean) {
+      const { bridge, pinia } = await startedApp();
+      useServersStore().setCurrent("forge");
+      bridge.security.setMode("forge", mode);
+      const security = useSecurityStore();
+      await security.load("forge");
+      // La fenêtre se bloque d'elle-même sur un poste sans clé au coffre (autre source) : on pose seulement
+      // ici ce que la sécurité dit du poste, pour éprouver l'avertissement.
+      const entry = security.of("forge");
+      if (entry?.state)
+        security.byServer.forge = { ...entry, state: { ...entry.state, keyAtHand } };
+      const wrapper = mount(PasswordDialog, {
+        props: { open: true, serverId: "forge", username: "marie", own: true },
+        global: { plugins: [pinia] },
+        attachTo: document.body,
+      });
+      await flushPromises();
+      const warning = document.querySelector("[data-keep-address-warn]")?.textContent?.trim();
+      wrapper.unmount();
+      return warning;
+    }
+
+    it("est montré, au conditionnel, quand le mode attaque est inconnu et que le poste n'a pas de clé", async () => {
+      const warning = await warningFor("unknown", false);
+      expect(warning).toContain("ne sait pas lire l'état du mode attaque");
+      expect(warning).toContain("si le mode attaque est actif");
+      expect(warning).not.toContain("Le mode attaque est actif et");
+    });
+
+    it("garde sa formulation ferme quand le mode est connu actif, et se tait quand il est inactif ou que le poste a une clé", async () => {
+      expect(await warningFor("active", false)).toContain("Le mode attaque est actif et ce poste");
+      expect(await warningFor("off", false)).toBeUndefined();
+      expect(await warningFor("unknown", true)).toBeUndefined();
+    });
   });
 
   it("n'annonce pas une fin automatique d'un mode qu'on ne savait pas actif", async () => {

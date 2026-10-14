@@ -81,6 +81,29 @@ describe("Sécurité : le mode attaque", () => {
     wrapper.unmount();
   });
 
+  // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : actif puis illisible, le bandeau permanent ne disparaît pas, sur aucune page.
+  it("turns the permanent banner neutral when an active mode becomes unreadable, on every page", async () => {
+    const { wrapper, bridge, router } = await boot("/servers/forge/dashboard");
+    bridge.security.setMode("forge", "active");
+    await flushPromises();
+    expect(wrapper.get("[data-attack-mode-banner]").text()).toContain("Mode attaque actif");
+    bridge.security.setMode("forge", "unknown");
+    await flushPromises();
+    for (const path of ["dashboard", "accounts", "security"]) {
+      await router.push(`/servers/forge/${path}`);
+      await flushPromises();
+      const banner = wrapper.get("[data-attack-mode-banner]");
+      expect(banner.text()).toContain("État de protection illisible");
+      expect(banner.text()).toContain("Mets Hearth à jour sur ce PC.");
+      expect(banner.text()).not.toContain("Mode attaque actif");
+      expect(banner.text()).not.toMatch(/Activer|Désactiver/);
+    }
+    bridge.security.setMode("forge", "off");
+    await flushPromises();
+    expect(wrapper.find("[data-attack-mode-banner]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("keeps the dialog open on a wrong password, with the message under the field, and clears the field", async () => {
     const { wrapper, bridge } = await boot();
     await toggle(wrapper).trigger("click");
