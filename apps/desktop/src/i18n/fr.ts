@@ -18,6 +18,9 @@ export const fr = {
     neverLoggedIn: "Jamais",
     roleAdmin: "Administrateur",
     roleReadonly: "Lecture seule",
+    roleUnknown: "Rôle inconnu de ce client",
+    roleUnknownHint:
+      "Ce client ne reconnaît pas le rôle de ce compte : il ne propose pas de le changer.",
     emptyTitle: "Aucun compte à afficher",
     empty: "Crée un compte avec le bouton « Ajouter un compte », en haut de la page.",
     loadFailed: "Impossible de lire la liste des comptes.",
@@ -141,6 +144,8 @@ export const fr = {
     alertOthersOne: "Une attaque probable vise 1 compte de ce serveur.",
     alertOthersMany: "Une attaque probable vise {n} comptes de ce serveur.",
     alertReadonly: "Tu vois l'alerte, mais seul un administrateur peut activer le mode attaque.",
+    alertRoleUnknown:
+      "Tu vois l'alerte, mais ce client ne reconnaît pas ton rôle sur ce serveur. Mets Hearth à jour sur ce PC.",
     alertReadonlyHint:
       "Tu vois l'alerte mais ne peux pas activer le mode attaque. Contacte un administrateur.",
     moreInfo: "Plus d'infos",
@@ -181,6 +186,11 @@ export const fr = {
     stateOff: "Inactif",
     stateOn: "Actif",
     stateSuspended: "Suspendu",
+    stateUnknown: "Inconnu",
+    modeTextUnknown:
+      "Ce client ne sait pas lire l'état de protection de ce serveur. Mets Hearth à jour sur ce PC.",
+    cardTodoUnknown:
+      "Ce client ne sait pas lire l'état de protection de ce serveur. Mets Hearth à jour sur ce PC, puis regarde le journal d'activité.",
     suspendedText:
       "Le mode attaque est suspendu après le redémarrage du serveur. Il reprend dans {n} min.",
     suspendedSoon:
@@ -205,6 +215,8 @@ export const fr = {
     disabled: "Mode attaque désactivé.",
     autoStopped: "L'attaque semble terminée. Le mode attaque s'est arrêté automatiquement.",
     resumed: "Le mode attaque reprend après 30 minutes de suspension.",
+    roleUnknown:
+      "Ce client ne reconnaît pas ton rôle sur ce serveur : il ne propose pas le mode attaque. Mets Hearth à jour sur ce PC.",
     noPermission:
       "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs.",
     agentTooOld:
@@ -249,6 +261,8 @@ export const fr = {
     settingHelp:
       "Une saisie de ton mot de passe peut valoir 5 minutes pour les actions courantes. Les actions sensibles le redemandent toujours, et la clé de ce poste est vérifiée à chaque action.",
     settingEach: "À chaque action",
+    settingUnknown:
+      "Ce client ne sait pas lire ce réglage sur ce serveur. Mets Hearth à jour sur ce PC.",
     settingWindow: "Toutes les 5 minutes",
     settingTitle: "Changer la fréquence du mot de passe",
     settingMessageEach: "Ton mot de passe te sera demandé à chaque action d'administration.",
@@ -308,6 +322,7 @@ export const fr = {
     offlineBannerNoContact: "Serveur hors ligne. Nouvelle tentative automatique en cours.",
     reconnectFailed: "Reconnexion échouée {n} fois.",
     sessionExpiredNotice: "Ta session a expiré.",
+    sessionEndedNotice: "Ta session s'est terminée.",
     askPassword: "Rentre ton mot de passe pour reprendre.",
     reconnectAction: "Me reconnecter",
     notLoadedYet: "Pas encore chargé, sera disponible quand le serveur reviendra.",
@@ -331,6 +346,8 @@ export const fr = {
       "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent.",
     agentTooOldReadonly:
       "Les versions du client et de l'agent ne sont pas compatibles. Demande à un administrateur de mettre à jour l'agent.",
+    agentTooOldRoleUnknown:
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets Hearth à jour sur ce PC, ou demande à un administrateur de mettre à jour l'agent.",
     clientTooOld:
       "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour le client.",
     updateClient: "Mettre à jour le client",
@@ -620,6 +637,7 @@ export const fr = {
     outcomeOk: "Réussi",
     outcomeDenied: "Refusé",
     outcomeFailed: "Échoué",
+    outcomeUnknown: "Inconnu",
     originCli: "ligne de commande du serveur",
     originAssistant: "assistant",
     countOne: "1 événement",
@@ -698,6 +716,8 @@ export const fr = {
     readFailed: "Impossible de lire l'état de la mise à jour de l'agent.",
     button: "Mettre à jour l'agent",
     readOnlyHint: "Seul un administrateur peut mettre à jour l'agent",
+    roleUnknownHint:
+      "Ce client ne reconnaît pas ton rôle sur ce serveur. Mets Hearth à jour sur ce PC.",
     confirmTitle: "Mettre à jour l'agent ?",
     confirmMessage: "Cette opération redémarrera l'agent brièvement.",
     confirmYes: "Oui, mettre à jour",
@@ -745,11 +765,11 @@ export const fr = {
     resultRollbackFailed:
       "La mise à jour de l'agent n'a pas pu être menée à bout, et le retour à la version précédente n'est pas confirmé. Vérifie l'agent sur le serveur (guide « Mettre à jour l'agent »).",
     resultFailed: "La mise à jour de l'agent n'a pas abouti.",
-    // Issue que ce client ne connaît pas. À trancher par le propriétaire (neutre proposé : « Hearth ne sait pas comment
-    // la mise à jour s'est terminée. Vérifie la version affichée. ») ; aujourd'hui, même texte que l'échec.
-    resultUnknown: "La mise à jour de l'agent n'a pas abouti.",
+    resultUnknown:
+      "La mise à jour de l'agent s'est terminée, mais ce client ne sait pas dire comment. Vérifie la version de l'agent.",
     dismiss: "Compris",
     historySucceeded: "Dernière mise à jour de l'agent : réussie ({when}).",
+    historyUnknown: "Dernière mise à jour de l'agent : issue inconnue de ce client ({when}).",
     historyRolledBack:
       "Dernière mise à jour de l'agent : annulée, retour à la version précédente ({when}).",
     historyFailed: "Dernière mise à jour de l'agent : échouée ({when}).",
@@ -1011,6 +1031,7 @@ export const fr = {
     inService: "Chemin dans le service",
     // Hors spec : « Volume » est le mot de Docker ; le mot courant est « stockage ».
     volume: "Stockage géré par le moteur",
+    mountUnknown: "Emplacement d'un genre inconnu de ce client",
     readWrite: "Lecture et écriture",
     readOnly: "Lecture seule",
     restart: "Redémarrage",
@@ -1083,11 +1104,14 @@ export const fr = {
     copyFailed: "La copie n'a pas marché.",
     errorTag: "Erreur",
     errorTagLabel: "Sortie d'erreur",
+    unknownTag: "Inconnue",
+    unknownTagLabel: "Source de la ligne inconnue de ce client",
     mixed: "Ce service mélange ses sorties normale et d'erreur : elles ne sont pas distinguables.",
     restarted: "Le service a redémarré à {time}",
     restartedMany: "Le service a redémarré {n} fois depuis {time}",
     restartedUnknown: "Le service a redémarré",
     gapMissing: "Des lignes manquent ici : le moteur ne les a pas gardées.",
+    gapUnknown: "Des lignes manquent ici.",
     gapMissingOne: "1 ligne manque ici",
     gapMissingMany: "{n} lignes manquent ici",
     // Hors spec : l'agent compte les lignes perdues quand l'écran lit trop lentement.

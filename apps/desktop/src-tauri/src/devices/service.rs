@@ -46,10 +46,18 @@ pub fn listed(
     result: Result<DevicesResponse, LinkError>,
 ) -> Result<TrustedDevicesDto, LinkFailure> {
     match result {
-        Ok(list) => Ok(TrustedDevicesDto::Listed {
-            devices: list.devices.into_iter().map(Into::into).collect(),
-            max: u32::try_from(list.max).unwrap_or(u32::MAX),
-        }),
+        Ok(list) => {
+            if list.devices.unreadable() > 0 {
+                tracing::warn!(
+                    unreadable = list.devices.unreadable(),
+                    "postes illisibles par cette version, écartés"
+                );
+            }
+            Ok(TrustedDevicesDto::Listed {
+                devices: list.devices.into_iter().map(Into::into).collect(),
+                max: u32::try_from(list.max).unwrap_or(u32::MAX),
+            })
+        }
         Err(LinkError::Rejected(Some(ErrorCode::NotFound))) => Ok(TrustedDevicesDto::Unsupported),
         Err(error) => Err(error.into()),
     }
@@ -103,7 +111,8 @@ pub fn interpret(status: u16, body: &Value) -> Result<DeviceRemovalOutcome, Link
         }));
     };
     let error = error.error;
-    Ok(refused(match error.code {
+    // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8).
+    Ok(refused(match error.code.or_from_status(status) {
         ErrorCode::ForbiddenRole => return Err(LinkFailure::forbidden(&error)),
         ErrorCode::WrongPassword => DeviceRemovalRefusal::WrongPassword,
         ErrorCode::NotFound => DeviceRemovalRefusal::NotFound,

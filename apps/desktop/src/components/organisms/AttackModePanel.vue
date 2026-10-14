@@ -6,8 +6,9 @@ import HTag from "@/components/atoms/HTag.vue";
 import { formatDateTime } from "@/composables/format";
 import { useNotLoadedText } from "@/composables/useNotLoadedText";
 import { t } from "@/i18n";
-import type { AttackMode } from "@/link";
+import { type AttackMode, modeOn, modeUnknown } from "@/link";
 import { type AttackModeBlock, blockMessageKey } from "@/security/gate";
+import { ATTACK_STATE_KEYS } from "@/security/messages";
 
 // Carte « Mode attaque » de la page Sécurité (BR-TRUST-010, 018, 028, 029) : l'état écrit (« Inactif »,
 // « Actif », « Suspendu »), l'explication, et UN bouton qui active ou désactive. Le bouton reste
@@ -34,24 +35,20 @@ defineEmits<{ change: []; reconnect: []; retry: [] }>();
 const notLoadedText = useNotLoadedText();
 const notLoaded = computed(() => props.block === "unreadable" && notLoadedText.value !== null);
 
-const on = computed(() => props.mode.state !== "off");
+// Un état inconnu de ce client (agent plus récent) n'est ni « Actif » ni « Inactif » : libellé neutre, aucun bouton
+// (activer ou désactiver se fonderait sur un état qu'on ne lit pas), aucune explication de ce que « fera » le mode.
+const unknown = computed(() => modeUnknown(props.mode));
+const on = computed(() => modeOn(props.mode));
 const suspended = computed(() => props.mode.state === "suspended");
 const reason = computed(() => {
   if (notLoaded.value) return notLoadedText.value ?? undefined;
   const key = blockMessageKey(props.block);
   return key ? t(key) : undefined;
 });
-const stateLabel = computed(() =>
-  t(
-    suspended.value
-      ? "security.stateSuspended"
-      : on.value
-        ? "security.stateOn"
-        : "security.stateOff",
-  ),
-);
+const stateLabel = computed(() => t(ATTACK_STATE_KEYS[props.mode.state]));
 const tagTone = computed(() => (on.value && !suspended.value ? "accent" : "neutral"));
 const text = computed(() => {
+  if (unknown.value) return t("security.modeTextUnknown");
   if (!suspended.value) {
     if (!on.value) return t("security.modeTextOff");
     return props.mode.since
@@ -87,7 +84,7 @@ const text = computed(() => {
         <li>{{ t("security.attackNoteChallenge") }}</li>
       </ul>
     </details>
-    <div class="panel__actions">
+    <div v-if="!unknown" class="panel__actions">
       <HButton
         :variant="on ? 'secondary' : 'primary'"
         needs-link
@@ -117,7 +114,7 @@ const text = computed(() => {
       </HButton>
     </div>
     <p
-      v-if="reason"
+      v-if="reason && !unknown"
       :class="['panel__reason', { 'panel__reason--warn': block === 'not_enrolled' }]"
       data-attack-mode-reason
     >

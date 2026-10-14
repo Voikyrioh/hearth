@@ -8,8 +8,8 @@ import type { AuditEntryDto, AuditFilterDto, AuditLiveEvent, AuditPageDto } from
  * par des tiers) : elle ne se rend jamais en HTML (`audit/text.ts`).
  */
 
-export type AuditOutcome = "ok" | "denied" | "failed";
-export type AuditOriginKind = "client" | "cli" | "assistant" | "system";
+export type AuditOutcome = "ok" | "denied" | "failed" | "unknown";
+export type AuditOriginKind = "client" | "cli" | "assistant" | "system" | "unknown";
 
 /** Types d'action du filtre (la liste fermée de la spec). */
 export const AUDIT_KINDS = [
@@ -23,7 +23,11 @@ export const AUDIT_KINDS = [
 ] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
-export const AUDIT_OUTCOMES: readonly AuditOutcome[] = ["ok", "denied", "failed"];
+export const AUDIT_OUTCOMES: readonly Exclude<AuditOutcome, "unknown">[] = [
+  "ok",
+  "denied",
+  "failed",
+];
 
 export interface AuditEntry {
   /** Croissant côté agent : ordre et curseur. */

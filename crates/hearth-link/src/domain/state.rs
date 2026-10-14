@@ -111,6 +111,9 @@ pub enum Reason {
     /// Session fermée par l'administration (changement de mot de passe, révocation,
     /// suppression du compte : l'agent répond `SESSION_REVOKED` dans tous les cas).
     Revoked,
+    /// L'agent a mis fin à la session pour un motif que cette version ne connaît pas (agent plus récent) :
+    /// ni expirée ni révoquée affirmée, mais une fin reste une fin (BR-COMPAT-001 point 9).
+    Ended,
 }
 
 /// Pourquoi les tentatives sont arrêtées alors que l'état affiché est `Offline`.
@@ -142,6 +145,9 @@ pub enum Input {
     AccessRevoked,
     /// Le mot de passe mémorisé est refusé à la reconnexion silencieuse (`INVALID_CREDENTIALS`).
     StoredPasswordRefused,
+    /// L'agent annonce la fin de la session avec un motif que cette version ne connaît pas : session finie,
+    /// sans reconnexion silencieuse (le motif réel n'est pas su).
+    SessionEndedUnknown,
     /// Le serveur demande d'attendre (`429`, `503` avec `retry_after_s`) : la prochaine tentative
     /// n'a pas lieu avant ce délai, ni avant le délai habituel s'il est plus long.
     RetryAfter(Duration),
@@ -456,6 +462,11 @@ impl LinkMachine {
                         Phase::Expired(Reason::StoredPasswordRefused),
                         &mut effects,
                     );
+                }
+            }
+            Input::SessionEndedUnknown => {
+                if matches!(self.phase, Phase::Up { .. } | Phase::Down(_)) {
+                    self.stop_trying(now, Phase::Expired(Reason::Ended), &mut effects);
                 }
             }
             Input::RetryAfter(delay) => self.on_retry_after(now, delay),

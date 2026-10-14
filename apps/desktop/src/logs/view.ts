@@ -1,5 +1,5 @@
-import { t } from "@/i18n";
-import type { LogEnd } from "@/link";
+import { type MessageKey, t } from "@/i18n";
+import type { LogEnd, LogGapReason, LogSource, LogState } from "@/link";
 import type { GapKind } from "./buffer";
 
 /**
@@ -76,9 +76,14 @@ export function endNotice(input: {
           });
         case "engine_unavailable":
           return notice("warn", t("logs.engineNotReady"), { retry: "now", stale: true });
-        default:
-          // `bad_request`, `unknown` : une fin générique, sans rien affirmer de plus.
+        case "bad_request":
           return notice("error", t("logs.stopReading"), { retry: "now" });
+        case "unknown":
+          // Un code d'un agent plus récent : une fin neutre, sans rien affirmer ni proposer de relance
+          // (BR-COMPAT-001 point 4). La lecture ne repart jamais seule.
+          return notice("info", t("logs.stopReading"));
+        default:
+          return unknownEnd();
       }
     case "session_ended":
       return notice("error", t("logs.sessionEnded"));
@@ -86,8 +91,42 @@ export function endNotice(input: {
       return notice("info", t("logs.unsupported"));
     case "unreachable":
       return notice("error", t("logs.failed"), { retry: "now" });
+    case "unknown":
     default:
-      return notice("error", t("logs.stopReading"), { retry: "now" });
+      return unknownEnd();
+  }
+}
+
+/** Une fin que ce client ne sait pas lire : un message neutre, aucune relance. */
+const unknownEnd = (): EndNotice => notice("info", t("logs.stopReading"));
+
+/** L'état du service lu, en mots (`unknown` : un état d'un agent plus récent, rien n'est affirmé). */
+export const LOG_STATE_KEYS: Record<LogState, MessageKey> = {
+  live: "logs.live",
+  ended: "logs.stopped",
+  waiting: "logs.waiting",
+  unknown: "logs.stateUnknown",
+};
+
+/**
+ * Le repère d'une ligne : `error` pour la sortie d'erreur, `unknown` pour une source que ce client ne connaît pas
+ * (ni erreur ni sortie normale : un repère neutre), `null` pour la sortie normale.
+ */
+export function sourceTag(source: LogSource): "error" | "unknown" | null {
+  if (source === "err") return "error";
+  if (source === "unknown") return "unknown";
+  return null;
+}
+
+/** Le genre de trou d'un message `gap` : une raison inconnue n'est pas prise pour « le moteur ne les a pas gardées ». */
+export function gapKindOf(reason: LogGapReason): GapKind {
+  switch (reason) {
+    case "slow":
+      return "slow";
+    case "unknown":
+      return "unknown";
+    default:
+      return "missing";
   }
 }
 
@@ -120,6 +159,9 @@ export function gapText(kind: GapKind, count: number | null): string {
         : t(n === 1 ? "logs.gapSlowOne" : "logs.gapSlowMany", { n });
     case "pause":
       return t(n === 1 ? "logs.gapPauseOne" : "logs.gapPauseMany", { n });
+    case "unknown":
+      if (count === null) return t("logs.gapUnknown");
+      return t(n === 1 ? "logs.gapMissingOne" : "logs.gapMissingMany", { n });
     default:
       if (count === null) return t("logs.gapMissing");
       return t(n === 1 ? "logs.gapMissingOne" : "logs.gapMissingMany", { n });

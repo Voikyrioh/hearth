@@ -584,23 +584,35 @@ impl WsConn {
             Some(Ok(Message::Close(frame))) => {
                 Err(TransportError::Closed(frame.map(|f| u16::from(f.code))))
             }
-            Some(Ok(Message::Text(text))) => {
-                Ok(match serde_json::from_str::<ServerMessage>(text.as_str()) {
-                    Ok(message) => Frame::Message(Box::new(message)),
-                    // L'état de sécurité n'est pas un `ServerMessage` (HRT-24) : lu à part.
-                    Err(_) => match serde_json::from_str::<SecurityMessage>(text.as_str()) {
-                        Ok(SecurityMessage::Security(view)) => Frame::Security(Box::new(view)),
-                        // Les services (HRT-62) : lus à part, comme la sécurité.
-                        Err(_) => match serde_json::from_str::<ServicesMessage>(text.as_str()) {
-                            Ok(message) => Frame::Services(Box::new(message)),
-                            // Message mal formé ou d'un type inconnu : on l'ignore, le lien vit.
-                            Err(_) => Frame::Other,
-                        },
-                    },
-                })
-            }
+            Some(Ok(Message::Text(text))) => Ok(decode_frame(text.as_str())),
             Some(Ok(_)) => Ok(Frame::Other),
         }
+    }
+}
+
+/// Lit une trame texte du flux. L'état de sécurité (HRT-24) et les services (HRT-62) ne sont pas des
+/// `ServerMessage` : ils sont lus d'abord, car `ServerMessage` accepte tout `type` (variante `Unknown`,
+/// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB) et les avalerait. Une trame mal formée, ou d'un type que cette version
+/// ne connaît pas, devient `Frame::Other` : on l'ignore, le lien vit.
+pub(crate) fn decode_frame(text: &str) -> Frame {
+    if let Ok(SecurityMessage::Security(view)) = serde_json::from_str::<SecurityMessage>(text) {
+        return Frame::Security(Box::new(view));
+    }
+    if let Ok(message) = serde_json::from_str::<ServicesMessage>(text) {
+        // Un service illisible par cette version est écarté, jamais en silence (BR-COMPAT-001 point 10).
+        let unreadable = match &message {
+            ServicesMessage::ServicesSnapshot(state) => state.services.unreadable(),
+            ServicesMessage::ServicesDelta(delta) => delta.upserts.unreadable(),
+            ServicesMessage::ServiceAction(_) => 0,
+        };
+        if unreadable > 0 {
+            tracing::warn!(unreadable, "services illisibles par cette version, écartés");
+        }
+        return Frame::Services(Box::new(message));
+    }
+    match serde_json::from_str::<ServerMessage>(text) {
+        Ok(ServerMessage::Unknown) | Err(_) => Frame::Other,
+        Ok(message) => Frame::Message(Box::new(message)),
     }
 }
 
@@ -717,6 +729,34 @@ fn api_error(status: u16, headers: &HeaderMap, body: &[u8]) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : `ServerMessage` accepte tout `type` (`Unknown`) ; les trames de sécurité
+    /// et de services, lues avant lui, ne sont pas avalées, et un type inconnu ou une trame mal formée est
+    /// ignoré (`Other`), jamais une erreur.
+    #[test]
+    fn frames_are_routed_by_their_type_and_an_unknown_type_is_ignored() {
+        let security =
+            r#"{"type":"security","alert":{"own":false},"attack_mode":{"state":"mode_du_futur"}}"#;
+        let Frame::Security(view) = decode_frame(security) else {
+            panic!("la sécurité doit rester une trame de sécurité");
+        };
+        assert_eq!(
+            view.attack_mode.state,
+            hearth_proto::api::security::AttackModeState::Unknown
+        );
+        assert!(matches!(
+            decode_frame(r#"{"type":"pong","n":3}"#),
+            Frame::Message(message) if matches!(*message, ServerMessage::Pong { n: 3 })
+        ));
+        for ignored in [
+            r#"{"type":"sujet_du_futur","x":1}"#,
+            r#"{"type":"services_du_futur"}"#,
+            r#"{"pas":"de type"}"#,
+            "pas du json",
+        ] {
+            assert!(matches!(decode_frame(ignored), Frame::Other), "{ignored}");
+        }
+    }
 
     #[tokio::test]
     async fn the_probe_mode_is_refused_for_everything_but_hello() {

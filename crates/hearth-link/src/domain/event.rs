@@ -69,6 +69,8 @@ pub enum SessionEnd {
     Revoked,
     /// Le mot de passe mémorisé est refusé : formulaire de connexion, identifiant prérempli.
     StoredPasswordRefused,
+    /// Fin de session pour un motif que cette version ne connaît pas : ni expirée ni révoquée affirmée.
+    Unknown,
 }
 
 #[derive(Debug, Clone)]

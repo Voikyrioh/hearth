@@ -6,6 +6,7 @@
 //! Les messages des refus (`Display`) sont ceux de la spécification : tutoiement, pas de tiret
 //! cadratin.
 
+mod kept;
 mod orphan;
 mod progress;
 mod record;
@@ -15,6 +16,7 @@ mod space;
 mod supervise;
 mod target;
 
+pub use kept::{Kept, Tolerant};
 pub use orphan::{Leftovers, Orphan, classify_orphan};
 pub use progress::PercentTracker;
 pub use record::{Job, Requester, SupervisorState, UpdateRecord};

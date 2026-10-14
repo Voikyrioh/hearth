@@ -4,7 +4,7 @@
 //! pendant la saisie par la commande `check_account_input`, la ligne de commande de l'agent les
 //! reprend telles quelles. Pur : aucune E/S, jamais de copie d'un mot de passe.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 pub const USERNAME_MIN_LEN: usize = 3;
@@ -12,7 +12,7 @@ pub const USERNAME_MAX_LEN: usize = 32;
 pub const PASSWORD_MIN_LEN: usize = 12;
 
 /// Pourquoi un identifiant est refusé. Le message est celui de la spécification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UsernameProblem {
     #[error("L'identifiant est requis")]
@@ -48,7 +48,7 @@ pub fn check_username(raw: &str) -> Result<String, UsernameProblem> {
 
 /// Une règle de mot de passe non respectée. Le message est celui de la spécification ; `code` est
 /// le code stable de `details.rules` de `WEAK_PASSWORD`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PasswordRule {
     #[error("Le mot de passe est requis")]

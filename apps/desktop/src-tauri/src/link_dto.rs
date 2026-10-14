@@ -33,6 +33,9 @@ pub mod events {
 pub enum RoleDto {
     Admin,
     Readonly,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle à l'interface,
+    // jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    Unknown,
 }
 
 impl From<RoleName> for RoleDto {
@@ -40,6 +43,7 @@ impl From<RoleName> for RoleDto {
         match role {
             RoleName::Admin => Self::Admin,
             RoleName::Readonly => Self::Readonly,
+            RoleName::Unknown => Self::Unknown,
         }
     }
 }
@@ -133,6 +137,8 @@ pub enum ReasonDto {
     StoredPasswordRefused,
     UserDisconnected,
     Revoked,
+    /// Fin de session pour un motif que cette version ne connaît pas (agent plus récent).
+    Ended,
 }
 
 /// État du lien d'un serveur (`link://state`). `seq` croît strictement par serveur : l'interface
@@ -174,7 +180,9 @@ impl LinkStateDto {
             blocked: info.blocked.map(|blocked| match blocked {
                 Blocked::FingerprintChanged => BlockedDto::FingerprintChanged,
                 Blocked::IncompatibleVersion(UpgradeTarget::Agent) => BlockedDto::IncompatibleAgent,
-                Blocked::IncompatibleVersion(UpgradeTarget::Client) => {
+                // `Unknown` n'est jamais tenu par la liaison (lu « client » à la réception) ; l'arme
+                // reste explicite pour que l'inconnu ne passe jamais par un `_`.
+                Blocked::IncompatibleVersion(UpgradeTarget::Client | UpgradeTarget::Unknown) => {
                     BlockedDto::IncompatibleClient
                 }
             }),
@@ -184,6 +192,7 @@ impl LinkStateDto {
                 Reason::StoredPasswordRefused => ReasonDto::StoredPasswordRefused,
                 Reason::UserDisconnected => ReasonDto::UserDisconnected,
                 Reason::Revoked => ReasonDto::Revoked,
+                Reason::Ended => ReasonDto::Ended,
             }),
             failed_attempts: info.failed_attempts,
         }

@@ -10,6 +10,8 @@
 use std::path::PathBuf;
 
 use hearth_proto::api::update::{UpdateOutcome, UpdateReason, UpdateResult, UpdateStep};
+
+use super::kept::Kept;
 use serde::{Deserialize, Serialize};
 
 /// Le travail confié au superviseur.
@@ -75,7 +77,8 @@ pub struct Requester {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SupervisorState {
     pub version: String,
-    pub step: UpdateStep,
+    /// Gardée telle qu'écrite quand cette version ne la comprend pas (`Kept`) : jamais réécrite en `unknown`.
+    pub step: Kept<UpdateStep>,
     /// La version qui tournait avant.
     #[serde(default)]
     pub previous: String,
@@ -90,7 +93,8 @@ pub struct UpdateRecord {
     #[serde(default, with = "version_text")]
     pub version: Option<String>,
     pub previous: String,
-    pub outcome: UpdateOutcome,
+    /// Gardée telle qu'écrite quand cette version ne la comprend pas (`Kept`) : jamais réécrite en `unknown`.
+    pub outcome: Kept<UpdateOutcome>,
     #[serde(default)]
     pub reason: Option<UpdateReason>,
     /// RFC 3339, UTC.
@@ -131,7 +135,8 @@ impl UpdateRecord {
             version: self.version.clone().unwrap_or_default(),
             version_unknown: self.version.is_none(),
             previous: self.previous.clone(),
-            outcome: self.outcome,
+            // Une issue que cet agent ne comprend pas se dit `unknown` au client (et reste intacte sur le disque).
+            outcome: self.outcome.wire(),
             reason: self.reason,
             at: self.at.clone(),
         }
@@ -156,7 +161,7 @@ mod tests {
         let record = UpdateRecord {
             version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
-            outcome: UpdateOutcome::RolledBack,
+            outcome: UpdateOutcome::RolledBack.into(),
             reason: Some(UpdateReason::NoAnswer),
             at: "2026-10-05T10:00:00Z".into(),
             requested_by: Some("marie".into()),
@@ -176,7 +181,7 @@ mod tests {
         let record = UpdateRecord {
             version: None,
             previous: "0.1.0".into(),
-            outcome: UpdateOutcome::Failed,
+            outcome: UpdateOutcome::Failed.into(),
             reason: Some(UpdateReason::Interrupted),
             at: "2026-10-05T10:00:00Z".into(),
             requested_by: None,

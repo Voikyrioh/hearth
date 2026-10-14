@@ -251,6 +251,8 @@ pub enum ModeKind {
     Off,
     Active,
     Suspended,
+    /// L'agent a dit un état que cette version ne connaît pas : ni éteint ni actif affirmé.
+    Unknown,
 }
 
 /// Qui est visé et ce que le compte peut en faire : le texte de la notification d'attaque probable
@@ -305,7 +307,12 @@ pub struct SecurityWatch {
 impl SecurityWatch {
     pub fn observe(&mut self, server: &str, notice: &SecurityNotice) -> SecurityChanges {
         let watched = self.servers.entry(server.to_owned()).or_default();
-        let mode_on = notice.mode != ModeKind::Off;
+        // Un état inconnu ne change pas ce qu'on savait : ni « arrêté » ni « démarré » affirmé.
+        let mode_on = match notice.mode {
+            ModeKind::Off => false,
+            ModeKind::Active | ModeKind::Suspended => true,
+            ModeKind::Unknown => watched.mode_on,
+        };
         let changes = SecurityChanges {
             alert_started: notice.alert_visible && !watched.alert_on,
             alert_ended: !notice.alert_visible && watched.alert_on,

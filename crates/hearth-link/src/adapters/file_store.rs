@@ -463,7 +463,7 @@ mod tests {
                 list_current_at: None,
                 external_count: 0,
             },
-            services: vec![item],
+            services: vec![item].into(),
         };
         let view = LastKnown {
             at: WallTime::from_millis(1_790_000_000_000),

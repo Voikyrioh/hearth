@@ -257,8 +257,10 @@ fn refusal(code: LogsErrorCode) -> LogRefusalDto {
         LogsErrorCode::EngineUnavailable => LogRefusalDto::EngineUnavailable,
         LogsErrorCode::MissingRight => LogRefusalDto::MissingRight,
         LogsErrorCode::BadRequest => LogRefusalDto::BadRequest,
-        // Rendu à part par la liaison (`SessionEnded`) ; ici, jamais seul : une fin générique.
-        LogsErrorCode::Unauthenticated | LogsErrorCode::Unknown => LogRefusalDto::Unknown,
+        // Rendu à part par la liaison (`SessionEnded`) : n'arrive pas ici ; si c'était le cas, une fin générique.
+        LogsErrorCode::Unauthenticated => LogRefusalDto::Unknown,
+        // Un code d'un agent plus récent : une fin générique et neutre (le socket n'a pas de statut HTTP à lire).
+        LogsErrorCode::Unknown => LogRefusalDto::Unknown,
     }
 }
 

@@ -75,6 +75,7 @@ fn role_wire(role: RoleName) -> &'static str {
     match role {
         RoleName::Admin => "admin",
         RoleName::Readonly => "readonly",
+        RoleName::Unknown => unreachable!("jamais signé"),
     }
 }
 
@@ -161,7 +162,7 @@ impl Spec {
     fn altered_all(&self) -> Vec<Spec> {
         let flip = |role: RoleName| match role {
             RoleName::Admin => RoleName::Readonly,
-            RoleName::Readonly => RoleName::Admin,
+            RoleName::Readonly | RoleName::Unknown => RoleName::Admin,
         };
         match self {
             Self::Create { role, .. } => vec![
@@ -211,7 +212,7 @@ impl Spec {
             Self::Setting { mode } => vec![Self::Setting {
                 mode: match mode {
                     ReauthMode::Each => ReauthMode::Window,
-                    ReauthMode::Window => ReauthMode::Each,
+                    ReauthMode::Window | ReauthMode::Unknown => ReauthMode::Each,
                 },
             }],
             Self::Own => Vec::new(),

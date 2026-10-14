@@ -194,7 +194,7 @@ impl UpdateService {
             return Some(match state {
                 Some(state) => UpdateProgress {
                     version: state.version,
-                    step: state.step,
+                    step: state.step.wire(),
                     percent: None,
                     outcome: None,
                     reason: None,
@@ -229,7 +229,7 @@ impl UpdateService {
         let requester = self.running().requester.clone();
         let state = SupervisorState {
             version: version.to_string(),
-            step,
+            step: step.into(),
             previous: self.current.to_string(),
             requester,
         };
@@ -464,7 +464,7 @@ impl UpdateService {
         let record = UpdateRecord {
             version: Some(target.version.to_string()),
             previous: self.current.to_string(),
-            outcome: UpdateOutcome::Failed,
+            outcome: UpdateOutcome::Failed.into(),
             reason: Some(reason),
             at: self.now_text(),
             requested_by: actor.account.as_ref().map(ToString::to_string),
@@ -494,7 +494,9 @@ impl UpdateService {
             version: record.version.clone().unwrap_or_default(),
             step: UpdateStep::Done,
             percent: None,
-            outcome: Some(record.outcome),
+            // Une issue que cet agent ne comprend pas (fichier écrit par un agent plus récent) est dite `unknown`
+            // aux clients ; le fichier, lui, garde la valeur d'origine (BR-COMPAT-001 point 7).
+            outcome: Some(record.outcome.wire()),
             reason: record.reason,
         });
     }
@@ -511,10 +513,10 @@ impl UpdateService {
                 tokio::time::sleep(service.env.timing.watch).await;
                 if service.supervised() {
                     if let Ok(Some(state)) = service.host.read_state()
-                        && seen != Some(state.step)
+                        && seen != Some(state.step.wire())
                     {
-                        seen = Some(state.step);
-                        service.announce(&version, state.step, None);
+                        seen = Some(state.step.wire());
+                        service.announce(&version, state.step.wire(), None);
                     }
                     continue;
                 }
@@ -556,7 +558,9 @@ impl UpdateService {
                 .and_then(|state| Version::parse(&state.version).ok())
                 .unwrap_or(self.current);
             let requester = state.as_ref().map(|state| state.requester.clone());
-            let step = state.map_or(UpdateStep::Check, |state: SupervisorState| state.step);
+            let step = state.map_or(UpdateStep::Check, |state: SupervisorState| {
+                state.step.wire()
+            });
             self.announce(&version, step, None);
             self.watch(version, requester.unwrap_or_default());
             return;
@@ -624,7 +628,7 @@ impl UpdateService {
                 // Le marqueur le dit aussi : abandonné, réglé, plus rien ne reprend.
                 if let Ok(Some(mut marker)) = self.host.read_marker() {
                     marker.phase = Phase::Abandoned;
-                    marker.outcome = Some(UpdateOutcome::Failed);
+                    marker.outcome = Some(UpdateOutcome::Failed.into());
                     marker.reason = Some(UpdateReason::RollbackFailed);
                     marker.settled = true;
                     let _ = self.host.write_marker(&marker);
@@ -632,7 +636,7 @@ impl UpdateService {
                 let record = UpdateRecord {
                     version: Some(job.version.clone()),
                     previous: job.previous.clone(),
-                    outcome: UpdateOutcome::Failed,
+                    outcome: UpdateOutcome::Failed.into(),
                     reason: Some(UpdateReason::RollbackFailed),
                     at: self.now_text(),
                     requested_by: job.requested_by.clone(),
@@ -706,7 +710,7 @@ impl UpdateService {
                     // qui ressemble à une version.
                     version: None,
                     previous: self.current.to_string(),
-                    outcome,
+                    outcome: outcome.into(),
                     reason: Some(reason),
                     at: self.now_text(),
                     requested_by: None,
@@ -742,7 +746,7 @@ impl UpdateService {
                 let record = UpdateRecord {
                     version: Some(target_text),
                     previous: self.current.to_string(),
-                    outcome: UpdateOutcome::Failed,
+                    outcome: UpdateOutcome::Failed.into(),
                     reason: Some(UpdateReason::SupervisorLaunch),
                     at: self.now_text(),
                     requested_by: requester.by.clone(),
@@ -763,7 +767,7 @@ impl UpdateService {
         let record = UpdateRecord {
             version: Some(version),
             previous,
-            outcome: UpdateOutcome::Failed,
+            outcome: UpdateOutcome::Failed.into(),
             reason: Some(UpdateReason::Interrupted),
             at: self.now_text(),
             requested_by: requester.by,
@@ -793,7 +797,7 @@ impl UpdateService {
         let record = UpdateRecord {
             version: Some(version),
             previous,
-            outcome,
+            outcome: outcome.into(),
             reason,
             at: self.now_text(),
             requested_by: requester.by,
@@ -885,9 +889,17 @@ impl UpdateService {
                 (name, addr) => Origin::client(name.as_deref(), addr.as_deref().unwrap_or("")),
             },
         );
-        let outcome = match record.outcome {
-            UpdateOutcome::Succeeded => Outcome::Succeeded,
-            other => Outcome::Failed(audit_reason(other, record.reason)),
+        // Une issue que cet agent ne comprend pas n'est consignée NI comme une réussite NI comme un échec de
+        // la mise à jour : une entrée dédiée dit qu'elle n'a pas pu être lue (BR-COMPAT-001 point 7).
+        let outcome = match record.outcome.known() {
+            Some(UpdateOutcome::Succeeded) => Outcome::Succeeded,
+            Some(UpdateOutcome::Unknown) | None => {
+                tracing::warn!(
+                    "issue de mise à jour inconnue de cette version : gardée telle quelle sur le disque"
+                );
+                Outcome::Failed(Reason::UpdateOutcomeUnknown)
+            }
+            Some(other) => Outcome::Failed(audit_reason(other, record.reason)),
         };
         self.sink
             .record(
@@ -915,6 +927,7 @@ impl UpdateService {
 /// La raison du journal d'activité, d'après le résultat d'une mise à jour.
 pub fn audit_reason(outcome: UpdateOutcome, reason: Option<UpdateReason>) -> Reason {
     match (outcome, reason) {
+        (UpdateOutcome::Unknown, _) => Reason::UpdateOutcomeUnknown,
         (UpdateOutcome::RolledBack, _) => Reason::RolledBack,
         (_, Some(UpdateReason::BadSignature | UpdateReason::BadChecksum)) => Reason::BadSignature,
         (_, Some(UpdateReason::Unreachable | UpdateReason::DownloadFailed)) => {

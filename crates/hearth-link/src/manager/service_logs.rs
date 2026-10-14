@@ -259,13 +259,18 @@ async fn read_once(
         Err(_) => return Read::Cut { progressed: false },
         Ok(Ok(conn)) => conn,
         Ok(Err(TransportError::Api(api))) => {
-            return match (api.status, api.code) {
-                (503, _) | (_, Some(ErrorCode::Busy)) => Read::Busy(Duration::from_secs(
-                    api.retry_after_s.unwrap_or(1).clamp(1, 30),
-                )),
-                (404, _) | (405, _) => Read::End(LogEnd::Unsupported),
-                (426, _) => Read::End(LogEnd::Unsupported),
-                (401, _) => Read::End(LogEnd::SessionEnded),
+            // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8). Jamais un succès ;
+            // l'attente d'un `429`/`503` est celle que l'agent demande, et tout autre échec reste borné par
+            // `MAX_FAILURES` (délai croissant), jamais une boucle.
+            let code = api.code.map(|code| code.or_from_status(api.status));
+            return match (api.status, code) {
+                (503 | 429, _) | (_, Some(ErrorCode::Busy | ErrorCode::TooManyAttempts)) => {
+                    Read::Busy(Duration::from_secs(
+                        api.retry_after_s.unwrap_or(1).clamp(1, 30),
+                    ))
+                }
+                (404 | 405 | 426, _) => Read::End(LogEnd::Unsupported),
+                (401, _) | (_, Some(ErrorCode::Unauthenticated)) => Read::End(LogEnd::SessionEnded),
                 _ => Read::Cut { progressed: false },
             };
         }
@@ -297,6 +302,11 @@ async fn read_once(
                     Ok(LogsFrame::Other) => continue,
                     Err(_) => return Read::Cut { progressed },
                 };
+                // Un type de message inconnu (agent plus récent) est ignoré, sans contenu, sans rien conclure :
+                // il ne compte pas comme une réception qui remet les essais à zéro (BR-COMPAT-001 point 2).
+                if matches!(message, LogsServerMessage::Unknown) {
+                    continue;
+                }
                 progressed = true;
                 let output = match message {
                     LogsServerMessage::Status(status) => {
@@ -315,7 +325,9 @@ async fn read_once(
                             code => LogEnd::Refused { code, retry_after_s: error.retry_after_s },
                         });
                     }
-                    LogsServerMessage::Pong { .. } | LogsServerMessage::Unknown => continue,
+                    LogsServerMessage::Pong { .. } => continue,
+                    // Écarté plus haut, avant `progressed` ; ce bras ne s'exécute jamais.
+                    LogsServerMessage::Unknown => continue,
                 };
                 if !forward(&mut conn, tx, output, &mut ping, &mut n).await {
                     return Read::Gone;

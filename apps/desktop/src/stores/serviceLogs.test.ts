@@ -142,6 +142,17 @@ describe("coupure, reprise, trous, redémarrage", () => {
     await vi.waitFor(() => expect(store.entries().map((e) => e.kind)).toEqual(["restart", "gap"]));
   });
 
+  it("un repère inconnu est ignoré, un trou de raison inconnue n'affirme aucune raison, une source inconnue est gardée", async () => {
+    const store = await opened();
+    bridge.logs.mark("forge", KEY, "unknown");
+    bridge.logs.gap("forge", KEY, "unknown", 3);
+    bridge.logs.push("forge", KEY, [{ text: "x", source: "unknown" }]);
+    await vi.waitFor(() => expect(store.entries().map((e) => e.kind)).toEqual(["gap", "line"]));
+    const [gap, line] = store.entries();
+    expect(gap).toMatchObject({ gap: "unknown", count: 3 });
+    expect(line).toMatchObject({ source: "unknown" });
+  });
+
   it("un état de lecture inconnu est gardé tel quel, sans rien en déduire", async () => {
     const store = await opened();
     bridge.logs.setStatus("forge", KEY, { state: "unknown" });

@@ -256,6 +256,13 @@ describe("avis : valeur inconnue = texte neutre, jamais un état affirmé", () =
     });
     expect(unknown?.text).toBe("La lecture des journaux s'est arrêtée.");
     expect(unknown?.lock).toBe(false);
+    // Neutre : aucune relance proposée (BR-COMPAT-001 point 4).
+    expect(unknown?.retry).toBe("none");
+    expect(unknown?.tone).toBe("info");
+    expect(endNotice({ ...base, end: { kind: "unknown" } })).toMatchObject({
+      text: "La lecture des journaux s'est arrêtée.",
+      retry: "none",
+    });
     expect(endNotice({ ...base, end: null })).toBeNull();
   });
 

@@ -75,6 +75,12 @@ async function cancelEditing(account: Account) {
     ?.focus();
 }
 
+// Un compte au rôle que ce client ne connaît pas (agent plus récent) : aucun changement de rôle proposé sur cette base.
+function changeRoleHint(account: Account): string | undefined {
+  if (account.role === "unknown") return t("accounts.roleUnknownHint");
+  return isLastAdmin(account) ? t("accounts.lastAdmin") : undefined;
+}
+
 function chooseRole(account: Account, role: Role) {
   editing.value = null;
   if (role !== account.role) emit("changeRole", account, role);
@@ -175,8 +181,8 @@ const named = (label: string, account: Account) => `${label} ${account.username}
                   size="sm"
                   variant="secondary"
                   :needs-link="ADMIN"
-                  :disabled="busy || isLastAdmin(account)"
-                  :hint="isLastAdmin(account) ? t('accounts.lastAdmin') : undefined"
+                  :disabled="busy || isLastAdmin(account) || account.role === 'unknown'"
+                  :hint="changeRoleHint(account)"
                   :aria-label="named(t('accounts.changeRole'), account)"
                   @click="startEditing(account)"
                 >

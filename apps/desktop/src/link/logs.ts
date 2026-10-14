@@ -37,7 +37,9 @@ export type LogEnd =
   | { kind: "refused"; refusal: LogRefusal; retryAfterS: number | null }
   | { kind: "session_ended" }
   | { kind: "unsupported" }
-  | { kind: "unreachable" };
+  | { kind: "unreachable" }
+  /** Une fin que ce client ne sait pas lire : un message neutre, aucune relance. */
+  | { kind: "unknown" };
 
 /** Un message d'une lecture, dans l'ordre où l'agent l'a produit. */
 export type LogMessage =
@@ -81,8 +83,8 @@ function toEnd(dto: LogEndDto): LogEnd {
     case "unreachable":
       return { kind: dto.kind };
     default:
-      // Une fin que ce client ne connaît pas : une fin générique de lecture, rien de plus.
-      return { kind: "unreachable" };
+      // Une fin que ce client ne connaît pas : neutre, jamais « injoignable » (rien n'est affirmé ni relancé).
+      return { kind: "unknown" };
   }
 }
 

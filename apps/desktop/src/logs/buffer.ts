@@ -18,6 +18,8 @@ export const BURST_MS = 1_000;
 export type GapKind =
   /** Des lignes manquent : le moteur ne les a pas gardées (coupure trop longue, rotation...). */
   | "missing"
+  /** Des lignes manquent, pour une raison que ce client ne connaît pas (agent plus récent) : rien d'autre n'est affirmé. */
+  | "unknown"
   /** Le client lisait trop lentement : l'agent a gardé les plus récentes et compté les autres (BR-SLOG-007). */
   | "slow"
   /** Des lignes sont arrivées pendant la pause et n'ont pas toutes été gardées (BR-SLOG-006). */

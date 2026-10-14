@@ -1,14 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import { logUiError } from "@/errors/report";
-import {
-  failureOf,
-  getLinkBridge,
-  type LogEnd,
-  type LogGapReason,
-  type LogMessage,
-  type LogReading,
-} from "@/link";
+import { failureOf, getLinkBridge, type LogEnd, type LogMessage, type LogReading } from "@/link";
 import {
   type Entry,
   type GapKind,
@@ -25,7 +18,7 @@ export type LogsPhase = "idle" | "opening" | "reading" | "ended";
 /** `live` : la vue suit le direct ; `auto` : pause posée en remontant ; `manual` : pause demandée. */
 export type LogsMode = "live" | "auto" | "manual";
 
-import type { LogsFailure } from "@/logs/view";
+import { gapKindOf, type LogsFailure } from "@/logs/view";
 
 export type { LogsFailure };
 
@@ -42,8 +35,6 @@ type Op =
   | { op: "lines"; entries: NewEntry[] }
   | { op: "gap"; gap: GapKind; count: number | null; lost: boolean }
   | { op: "restart"; at: number | null };
-
-const gapKind = (reason: LogGapReason): GapKind => (reason === "slow" ? "slow" : "missing");
 
 /**
  * La lecture des journaux d'UN service à la fois (HRT-67, ADR-0040). Ce magasin n'est JAMAIS persisté : les lignes
@@ -179,7 +170,7 @@ export const useServiceLogsStore = defineStore("serviceLogs", () => {
       case "gap":
         receive({
           op: "gap",
-          gap: gapKind(message.reason),
+          gap: gapKindOf(message.reason),
           count: message.count,
           lost: message.reason === "resume_lost",
         });

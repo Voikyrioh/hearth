@@ -172,7 +172,7 @@ impl LinkManager {
         .await
         .map_err(|_| LinkError::Timeout)??;
         if !(200..300).contains(&response.status) {
-            return Err(super::audit::rejection(&response.body));
+            return Err(super::audit::rejection_at(&response.body, response.status));
         }
         parse(response.body, "état du moteur")
     }

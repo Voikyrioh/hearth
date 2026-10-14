@@ -54,6 +54,9 @@ pub enum AuditOutcomeDto {
     Ok,
     Denied,
     Failed,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle à l'interface,
+    // jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -64,6 +67,9 @@ pub enum AuditOriginKindDto {
     Assistant,
     // L'agent lui-même (HRT-25) : fin d'alerte, sortie automatique du mode attaque.
     System,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle à l'interface,
+    // jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    Unknown,
 }
 
 /// Le filtre demandé par l'interface (BR-AUDIT-014, 015, 016). Dates : secondes depuis l'époque.
@@ -116,6 +122,8 @@ impl TryFrom<AuditFilterDto> for AuditFilter {
                     AuditOutcomeDto::Ok => OutcomeName::Ok,
                     AuditOutcomeDto::Denied => OutcomeName::Denied,
                     AuditOutcomeDto::Failed => OutcomeName::Failed,
+                    // L'agent refuse une issue qu'il ne connaît pas (`422`) : le filtre ne sélectionne rien en silence.
+                    AuditOutcomeDto::Unknown => OutcomeName::Unknown,
                 })
                 .collect(),
             from_s: seconds(dto.from_s)?,
@@ -167,6 +175,7 @@ impl From<&AuditEventItem> for AuditEntryDto {
                     OriginKindName::Cli => AuditOriginKindDto::Cli,
                     OriginKindName::Assistant => AuditOriginKindDto::Assistant,
                     OriginKindName::System => AuditOriginKindDto::System,
+                    OriginKindName::Unknown => AuditOriginKindDto::Unknown,
                 },
                 name: item.origin.name.clone(),
                 addr: item.origin.addr.clone(),
@@ -179,6 +188,7 @@ impl From<&AuditEventItem> for AuditEntryDto {
                 OutcomeName::Ok => AuditOutcomeDto::Ok,
                 OutcomeName::Denied => AuditOutcomeDto::Denied,
                 OutcomeName::Failed => AuditOutcomeDto::Failed,
+                OutcomeName::Unknown => AuditOutcomeDto::Unknown,
             },
             reason: item.reason.clone(),
             repeat_count: item.repeat_count,
@@ -197,6 +207,12 @@ pub struct AuditPageDto {
 
 impl From<&AuditResponse> for AuditPageDto {
     fn from(page: &AuditResponse) -> Self {
+        if page.events.unreadable() > 0 {
+            tracing::warn!(
+                unreadable = page.events.unreadable(),
+                "entrées du journal illisibles par cette version, écartées"
+            );
+        }
         Self {
             events: page.events.iter().map(AuditEntryDto::from).collect(),
             #[allow(clippy::cast_precision_loss)]

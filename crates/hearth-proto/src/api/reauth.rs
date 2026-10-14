@@ -58,6 +58,10 @@ pub enum ReauthMode {
     Window,
     /// Le mot de passe est demandé à chaque acte.
     Each,
+    /// Une valeur que cette version ne connaît pas (ajoutée par l'autre côté, plus récent). Tolérée à la
+    /// lecture ; jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    #[serde(other)]
+    Unknown,
 }
 
 impl ReauthMode {
@@ -66,6 +70,8 @@ impl ReauthMode {
         match self {
             Self::Window => "window",
             Self::Each => "each",
+            // Jamais signé ni accepté : un réglage inconnu est refusé avant toute signature.
+            Self::Unknown => "unknown",
         }
     }
 }

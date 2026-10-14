@@ -1,4 +1,12 @@
-import type { LogEnd, LogGapReason, LogLine, LogMessage, LogReading, LogState } from "./logs";
+import type {
+  LogEnd,
+  LogGapReason,
+  LogLine,
+  LogMarkerKind,
+  LogMessage,
+  LogReading,
+  LogState,
+} from "./logs";
 
 /**
  * Les journaux d'un service du pont SIMULÉ (navigateur de développement, Vitest, Playwright) : un petit agent que
@@ -22,7 +30,7 @@ const BATCH_LINES = 500;
 
 export interface SimLineInput {
   text: string;
-  source?: "out" | "err";
+  source?: "out" | "err" | "unknown";
   /** Millisecondes depuis l'époque ; défaut : l'instant de l'écriture, croissant. */
   t?: number;
 }
@@ -230,6 +238,11 @@ export class SimulatedLogs {
       at: this.nextTime(),
     });
     this.setStatus(serverId, serviceKey, { state: "live", exitCode: null, endedAt: null });
+  }
+
+  /** Un repère d'un genre donné (`unknown` : un repère d'un agent plus récent). */
+  mark(serverId: string, serviceKey: string, marker: LogMarkerKind): void {
+    this.broadcast(serverId, serviceKey, { kind: "marker", marker, at: this.nextTime() });
   }
 
   /** Des lignes manquent ici. */

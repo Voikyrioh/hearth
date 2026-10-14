@@ -35,6 +35,8 @@ export function usernameProblemText(problem: UsernameProblem): string {
 }
 
 export function roleLabel(role: Role): string {
+  // Un rôle que ce client ne connaît pas (agent plus récent) n'est dit ni administrateur ni lecture seule.
+  if (role === "unknown") return t("accounts.roleUnknown");
   return t(role === "admin" ? "accounts.roleAdmin" : "accounts.roleReadonly");
 }
 

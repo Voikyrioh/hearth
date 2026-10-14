@@ -141,6 +141,8 @@ fn role_text(role: RoleName) -> &'static str {
     match role {
         RoleName::Admin => "admin",
         RoleName::Readonly => "readonly",
+        // Jamais signé ni accepté : un rôle inconnu est refusé avant toute signature (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+        RoleName::Unknown => "unknown",
     }
 }
 
@@ -252,7 +254,8 @@ impl AdminAct<'_> {
 pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
     match act {
         AdminAct::AccountCreate { role, .. } | AdminAct::AccountRole { role, .. } => {
-            *role != RoleName::Admin
+            // Seul un rôle lecture seule est couvert : un rôle inconnu se traite comme un administrateur, le plus strict (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+            *role == RoleName::Readonly
         }
         AdminAct::AccountDelete { .. } | AdminAct::SessionsRevoke { .. } => true,
         AdminAct::AccountPassword { .. }

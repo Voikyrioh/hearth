@@ -7,7 +7,7 @@ import type { Entry } from "@/logs/buffer";
 import { findMatches, segmentsOf } from "@/logs/search";
 import { FOLD_CHARS, foldedText } from "@/logs/text";
 import { clockOf, fullTimeOf } from "@/logs/time";
-import { endNotice, exitWords, gapText, waitingText } from "@/logs/view";
+import { endNotice, exitWords, gapText, LOG_STATE_KEYS, sourceTag, waitingText } from "@/logs/view";
 import { atBottom, estimateHeight, layout, type Metrics, visibleRange } from "@/logs/windowing";
 import { shortAge } from "@/services/format";
 import { useServiceLogsStore } from "@/stores/serviceLogs";
@@ -363,13 +363,12 @@ const indicator = computed(() => {
     return { icon: "refresh" as const, text: t("logs.interrupted"), tone: "faint" };
   if (store.paused) return { icon: "pause" as const, text: t("logs.paused"), tone: "calm" };
   const state = status.value?.state;
-  if (state === "ended") return { icon: "stop" as const, text: t("logs.stopped"), tone: "calm" };
-  if (state === "waiting") return { icon: "clock" as const, text: t("logs.waiting"), tone: "calm" };
-  if (state === "live") return { icon: "live" as const, text: t("logs.live"), tone: "ok" };
-  if (state === "unknown") {
-    return { icon: "question" as const, text: t("logs.stateUnknown"), tone: "calm" };
-  }
-  return null;
+  if (state === undefined) return null;
+  const text = t(LOG_STATE_KEYS[state]);
+  if (state === "ended") return { icon: "stop" as const, text, tone: "calm" };
+  if (state === "waiting") return { icon: "clock" as const, text, tone: "calm" };
+  if (state === "live") return { icon: "live" as const, text, tone: "ok" };
+  return { icon: "question" as const, text, tone: "calm" };
 });
 
 const pauseLabel = computed(() => {
@@ -673,9 +672,12 @@ const retrying = computed(() => store.phase === "opening");
               >
                 <span class="row__time" :title="fullTimeOf(row.entry.t) ?? undefined">{{ clockOf(row.entry.t) }}</span>
                 <span v-if="!mixed" class="row__tag">
-                  <HTag v-if="row.entry.source === 'err'" tone="crit" :aria-label="t('logs.errorTagLabel')">
+                  <HTag v-if="sourceTag(row.entry.source) === 'error'" tone="crit" :aria-label="t('logs.errorTagLabel')">
                     <HIcon name="alert" size="sm" />
                     {{ t("logs.errorTag") }}
+                  </HTag>
+                  <HTag v-else-if="sourceTag(row.entry.source) === 'unknown'" tone="neutral" :aria-label="t('logs.unknownTagLabel')" data-source-unknown>
+                    {{ t("logs.unknownTag") }}
                   </HTag>
                 </span>
                 <span class="row__text"><template v-for="(part, at) in segments(row)" :key="at"><mark v-if="part.hit" class="row__hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template><span v-if="row.entry.text.length > FOLD_CHARS && !expanded.has(row.entry.id)" class="row__more">…</span><span v-if="row.entry.cut !== null" class="row__cut">{{ t("logs.cutSuffix", { n: row.entry.cut }) }}</span></span>

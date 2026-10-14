@@ -88,7 +88,7 @@ describe("journaux : le pont réel", () => {
     await send("log-1", { kind: "progress" } as unknown as ServiceLogBody);
     await send("log-1", { kind: "ended", end: { kind: "demain" } } as unknown as ServiceLogBody);
     await vi.waitFor(() => expect(seen).toHaveLength(1));
-    expect(seen[0]).toEqual({ kind: "ended", end: { kind: "unreachable" } });
+    expect(seen[0]).toEqual({ kind: "ended", end: { kind: "unknown" } });
   });
 
   it("un échec d'ouverture se rend typé et libère l'écoute", async () => {

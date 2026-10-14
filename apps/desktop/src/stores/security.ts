@@ -61,7 +61,12 @@ export const useSecurityStore = defineStore("security", () => {
     if (!before) return;
     const was = before.attackMode.state;
     const is = now.attackMode.state;
-    if (was !== "off" && is === "off" && now.attackMode.lastEnd === "auto") {
+    // « Terminé tout seul » ne s'annonce que d'un mode qu'on SAVAIT en vigueur (un état inconnu n'en est pas un).
+    if (
+      (was === "active" || was === "suspended") &&
+      is === "off" &&
+      now.attackMode.lastEnd === "auto"
+    ) {
       toasts.push({ kind: "info", message: t("security.autoStopped") });
     }
     if (was === "suspended" && is === "active") {

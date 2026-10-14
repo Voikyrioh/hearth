@@ -29,7 +29,7 @@ use super::ports::{
 use super::update::format_time;
 use crate::domain::install::Version;
 use crate::domain::update::{
-    Answer, Entry, Job, Marker, Phase, RollbackAct, RollbackFacts, Stored, SupervisorState,
+    Answer, Entry, Job, Kept, Marker, Phase, RollbackAct, RollbackFacts, Stored, SupervisorState,
     UpdateRecord, Verdict, check_space, check_verdict, enter, rollback_step, swap_done,
 };
 
@@ -392,7 +392,7 @@ impl Supervisor<'_> {
     fn state(&self, job: &Job, step: UpdateStep) {
         let state = SupervisorState {
             version: job.version.clone(),
-            step,
+            step: step.into(),
             previous: job.previous.clone(),
             requester: job.requester(),
         };
@@ -442,7 +442,7 @@ impl Supervisor<'_> {
         reason: Option<UpdateReason>,
     ) -> Supervised {
         marker.phase = Phase::Concluded;
-        marker.outcome = Some(outcome);
+        marker.outcome = Some(outcome.into());
         marker.reason = reason;
         marker.at = Some(format_time(self.clock.now()));
         if let Err(error) = self.host.write_marker(&marker) {
@@ -454,8 +454,14 @@ impl Supervisor<'_> {
     /// Écrit le résultat décidé, retire l'ancien binaire si c'est une réussite, nettoie. Rejouable :
     /// le résultat est dans le marqueur, il se réécrit à l'identique.
     fn finish(&self, job: &Job, marker: Marker) -> Supervised {
-        let outcome = marker.outcome.unwrap_or(UpdateOutcome::Failed);
-        let record = self.record(job, outcome, marker.reason, marker.at.clone());
+        // Une issue décidée par une autre version (marqueur laissé par un superviseur plus récent) est écrite
+        // telle quelle, jamais remplacée par un échec (BR-COMPAT-001 point 7).
+        let decided = marker
+            .outcome
+            .clone()
+            .unwrap_or(Kept::Known(UpdateOutcome::Failed));
+        let outcome = decided.wire();
+        let record = self.record(job, decided.clone(), marker.reason, marker.at.clone());
         // Rejoué après une interruption : un résultat déjà écrit (et peut-être déjà annoncé par l'agent,
         // `reported`) n'est pas réécrit.
         let written = matches!(self.host.read_last(), Ok(Some(last)) if last.at == record.at
@@ -464,7 +470,7 @@ impl Supervisor<'_> {
         if !written && let Err(error) = self.host.write_last(&record) {
             tracing::error!(%error, "résultat de mise à jour non écrit");
         }
-        if outcome == UpdateOutcome::Succeeded {
+        if decided == UpdateOutcome::Succeeded {
             self.install.discard_backup(&BinaryInstalled {
                 backup: Some(job.backup.clone()),
             });
@@ -480,7 +486,7 @@ impl Supervisor<'_> {
     fn record(
         &self,
         job: &Job,
-        outcome: UpdateOutcome,
+        outcome: Kept<UpdateOutcome>,
         reason: Option<UpdateReason>,
         at: Option<String>,
     ) -> UpdateRecord {
@@ -565,7 +571,7 @@ impl Supervisor<'_> {
 
     fn decide_abandon(&self, marker: &mut Marker, reason: UpdateReason) {
         marker.phase = Phase::Abandoned;
-        marker.outcome = Some(UpdateOutcome::Failed);
+        marker.outcome = Some(UpdateOutcome::Failed.into());
         marker.reason = Some(reason);
         marker.settled = false;
         marker.at = Some(format_time(self.clock.now()));
@@ -576,7 +582,12 @@ impl Supervisor<'_> {
         if marker.revive && self.service.state() != ServiceState::Active {
             let _ = self.service.restart();
         }
-        let record = self.record(job, UpdateOutcome::Failed, marker.reason, marker.at.clone());
+        let record = self.record(
+            job,
+            UpdateOutcome::Failed.into(),
+            marker.reason,
+            marker.at.clone(),
+        );
         let written = matches!(self.host.read_last(), Ok(Some(last)) if last.at == record.at
             && last.outcome == record.outcome);
         if !written && let Err(error) = self.host.write_last(&record) {

@@ -7,3 +7,4 @@ Bandeau « Hors ligne » : « Serveur hors ligne. Dernier contact à 14h23. Nouv
 - Props : `lastContactAt` (sans lui, la phrase omet l'heure), `blocked`, `role`, `clientAction`, `clientBusy`
 - Événements et slots : événements `retry`, `alert`, `client`
 - Notes : Affiché par `ServerLayout` seulement dans l'état « Hors ligne ». Tests : `organisms.test.ts`, `shell.test.ts`.
+- FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un rôle `unknown` lit `link.agentTooOldRoleUnknown` (ni « mets à jour l'agent » d'un administrateur ni « demande à un administrateur » d'un compte lecture seule).
