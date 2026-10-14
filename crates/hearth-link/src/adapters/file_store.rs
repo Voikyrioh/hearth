@@ -406,6 +406,7 @@ mod tests {
             services: None,
             // Le repère de réception de la vue du moteur survit au disque (un état relu garde sa date).
             services_at: Some(WallTime::from_millis(1_790_000_000_500)),
+            services_details: false,
         };
         store.save(&id, &view).await.unwrap();
         assert_eq!(store.load(&id).await.unwrap(), Some(view));
@@ -462,7 +463,7 @@ mod tests {
                 list_current_at: None,
                 external_count: 0,
             },
-            services: vec![item],
+            services: vec![item].into(),
         };
         let view = LastKnown {
             at: WallTime::from_millis(1_790_000_000_000),
@@ -470,6 +471,7 @@ mod tests {
             history: vec![],
             services: Some(state),
             services_at: None,
+            services_details: true,
         };
         store.save(&id, &view).await.unwrap();
         let file = dir.path().join("snapshots").join("a.json");
@@ -482,6 +484,8 @@ mod tests {
         // Le délai d'arrêt n'est pas secret : il reste.
         assert!(text.contains("grace_s"), "{text}");
         let back = store.load(&id).await.unwrap().unwrap();
+        // Ce qui est relu n'a ni noms ni commande, et le DIT : « pas lus » n'est pas « aucun ».
+        assert!(!back.services_details);
         let kept = &back.services.unwrap().services[0];
         assert!(kept.env_names.is_empty() && kept.command.is_none());
         // Un fichier d'avant HRT-63 (sans ces champs) se relit.

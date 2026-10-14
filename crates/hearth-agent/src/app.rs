@@ -64,7 +64,9 @@ use crate::infrastructure::fingerprint::{HmacFingerprinter, NoFingerprint};
 use crate::infrastructure::fingerprint_secret::FileFingerprintSecretStore;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::install::SystemHost;
-use crate::infrastructure::ops_observer::{EngineObserver, UnobservedState};
+use crate::infrastructure::ops_observer::{
+    EngineObserver, SpecRecordedContainers, UnobservedState,
+};
 use crate::infrastructure::random::OsTokenGen;
 use crate::infrastructure::sealer::RingSealerFactory;
 use crate::infrastructure::security_feed::BroadcastSecurityFeed;
@@ -731,7 +733,12 @@ pub async fn start_engined(
     // restées en plein geste sont classées avant d'accepter la moindre requête.
     // La reprise regarde le VRAI moteur (compte les conteneurs du service de chaque opération non terminée,
     // sans jamais lui écrire).
-    let observer = EngineObserver::new(engine.engine.clone());
+    let observer = EngineObserver::new(
+        engine.engine.clone(),
+        Arc::new(SpecRecordedContainers::new(Arc::new(SqliteSpecRepo::new(
+            database.database().pool().clone(),
+        )))),
+    );
     let foundations = service_foundations_observed(
         &config.data_dir,
         database.database(),

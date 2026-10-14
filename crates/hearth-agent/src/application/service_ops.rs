@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use thiserror::Error;
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use super::ports::{
     Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal, OpRecord,
@@ -99,7 +99,7 @@ pub enum OpError {
     #[error("une opération est déjà en cours sur ce service")]
     ServiceBusy,
     #[error("opération inconnue")]
-    Unknown,
+    NoSuchOperation,
     #[error("l'étape {0} n'est pas dans le plan")]
     UnknownStep(String),
     /// L'ordre du journal est violé : `done` sans `intent` pour un geste destructif, ou un geste sur une
@@ -121,7 +121,7 @@ impl From<JournalError> for OpError {
         match error {
             JournalError::ServiceBusy => Self::ServiceBusy,
             JournalError::Stale => Self::Stale,
-            JournalError::Unknown => Self::Unknown,
+            JournalError::NoSuchOperation => Self::NoSuchOperation,
             JournalError::Store(error) => Self::Storage(error.to_string()),
         }
     }
@@ -189,6 +189,11 @@ pub struct ServiceOps {
     index: Mutex<OpsIndex>,
     /// Quand la progression de chaque opération a été publiée pour la dernière fois.
     progress_gate: Mutex<HashMap<String, OffsetDateTime>>,
+    /// Sérialise les publications : lecture du journal, projection et envoi se font d'un seul tenant. Deux
+    /// publications concurrentes (l'exécuteur d'un côté, l'annulation de l'autre) ne peuvent donc pas
+    /// s'envoyer dans l'ordre inverse de leur lecture : un abonné ne reçoit jamais un état plus ancien
+    /// APRÈS un plus récent (revue de la PR 94).
+    publishing: AsyncMutex<()>,
 }
 
 impl ServiceOps {
@@ -209,6 +214,7 @@ impl ServiceOps {
             feed,
             index: Mutex::new(OpsIndex::new()),
             progress_gate: Mutex::new(HashMap::new()),
+            publishing: AsyncMutex::new(()),
         }
     }
 
@@ -308,6 +314,7 @@ impl ServiceOps {
     /// Relit l'opération, met la projection à jour et prévient les abonnés. Un échec de lecture est tracé
     /// et ne change rien pour l'appelant : le suivi n'est jamais ce qui fait échouer un geste.
     async fn publish(&self, id: &str) {
+        let _one_at_a_time = self.publishing.lock().await;
         match self.snapshot(id).await {
             Ok(Some(snapshot)) => {
                 self.index
@@ -491,7 +498,11 @@ impl ServiceOps {
     }
 
     async fn step_of(&self, id: &str, step: &str) -> Result<(OpRecord, StepName, bool), OpError> {
-        let op = self.journal.get(id).await?.ok_or(OpError::Unknown)?;
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
         let name = StepName::parse(step).ok_or_else(|| OpError::UnknownStep(step.to_owned()))?;
         let planned = op
             .plan
@@ -521,7 +532,11 @@ impl ServiceOps {
         if !to.is_terminal() {
             return Err(OpError::IllegalTransition);
         }
-        let op = self.journal.get(id).await?.ok_or(OpError::Unknown)?;
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
         if !op.status.can_become(to) {
             return Err(OpError::IllegalTransition);
         }
@@ -532,6 +547,19 @@ impl ServiceOps {
     pub async fn ask_decision(&self, id: &str, choices: &[Choice]) -> Result<(), OpError> {
         if choices.is_empty() {
             return Err(OpError::Choice(ChoiceRefused::NotOffered));
+        }
+        // « Annuler » ne s'offre jamais au-delà du point de non-retour du genre : la décision n'est pas une
+        // porte dérobée pour annuler là où `DELETE` répond « trop tard » (revue de la PR 94).
+        if choices.contains(&Choice::Cancel) {
+            let op = self
+                .journal
+                .get(id)
+                .await?
+                .ok_or(OpError::NoSuchOperation)?;
+            let steps = self.journal.steps(id).await?;
+            if cancel_verdict(op.status, &op.plan, &steps) == CancelVerdict::TooLate {
+                return Err(OpError::Choice(ChoiceRefused::NotApplicable));
+            }
         }
         let now = self.clock.now();
         let offer = DecisionOffer {
@@ -555,12 +583,22 @@ impl ServiceOps {
     /// Applique le choix d'un compte à une opération qui attend. La vérification du DROIT du compte est
     /// celle de la route qui appellera ceci (HRT-64 et suivants).
     pub async fn decide(&self, id: &str, choice: Choice) -> Result<OpStatus, OpError> {
-        let op = self.journal.get(id).await?.ok_or(OpError::Unknown)?;
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
         let offered = op
             .decision
             .as_ref()
             .map(|offer| offer.choices.as_slice())
             .unwrap_or_default();
+        if choice == Choice::Cancel {
+            let steps = self.journal.steps(id).await?;
+            if cancel_verdict(op.status, &op.plan, &steps) == CancelVerdict::TooLate {
+                return Err(OpError::Choice(ChoiceRefused::NotApplicable));
+            }
+        }
         let (next, cause) = apply_choice(op.status, offered, choice).map_err(OpError::Choice)?;
         let cause = (next != OpStatus::Running).then_some(cause);
         self.move_to(id, op.status, next, cause).await?;
@@ -570,7 +608,11 @@ impl ServiceOps {
     /// Demande d'annulation (acte `OperationCancel`, ajouté avec sa route). Avant le point de non-retour du
     /// genre ; après, `TooLate`.
     pub async fn cancel(&self, id: &str) -> Result<CancelOutcome, OpError> {
-        let op = self.journal.get(id).await?.ok_or(OpError::Unknown)?;
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
         let records = self.journal.steps(id).await?;
         match cancel_verdict(op.status, &op.plan, &records) {
             CancelVerdict::TooLate => Ok(CancelOutcome::TooLate),

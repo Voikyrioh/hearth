@@ -471,11 +471,14 @@ describe("des valeurs inconnues venues de l'agent (HRT-143)", () => {
     expect(wrapper.findAll('[data-state="now"]')).toHaveLength(0);
   });
 
-  it("falls back to the generic message for an outcome the client does not know", async () => {
+  it("says neither success nor failure for an outcome the client does not know", async () => {
     const { wrapper, bridge } = await card();
     await confirmUpdate(wrapper);
     sim(bridge).complete("forge", "brand_new_outcome" as never, null);
     await flushPromises();
-    expect(wrapper.get("[data-agent-result]").text()).toContain("n'a pas abouti");
+    const result = wrapper.get("[data-agent-result]");
+    expect(result.text()).toContain("ce client ne sait pas dire comment");
+    expect(result.text()).not.toContain("n'a pas abouti");
+    expect(result.attributes("data-tone")).toBe("warn");
   });
 });

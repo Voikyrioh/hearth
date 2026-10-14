@@ -60,6 +60,8 @@ fn role_name(role: RoleDto) -> RoleName {
     match role {
         RoleDto::Admin => RoleName::Admin,
         RoleDto::Readonly => RoleName::Readonly,
+        // Jamais offert par l'interface ; l'agent refuse un rôle qu'il ne connaît pas (`422`).
+        RoleDto::Unknown => RoleName::Unknown,
     }
 }
 
@@ -249,7 +251,8 @@ pub fn refusal_from_error(status: u16, body: &Value) -> Result<AccountRefusal, L
         });
     }
     let error = error.error;
-    Ok(match error.code {
+    // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8).
+    Ok(match error.code.or_from_status(status) {
         ErrorCode::ForbiddenRole => return Err(LinkFailure::forbidden(&error)),
         ErrorCode::UsernameTaken => AccountRefusal::UsernameTaken,
         ErrorCode::LastAdmin => AccountRefusal::LastAdmin,

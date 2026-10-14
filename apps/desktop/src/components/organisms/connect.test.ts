@@ -285,6 +285,19 @@ describe("ReconnectPanel", () => {
     expect((wrapper.get("input").element as HTMLInputElement).value).toBe("marie");
   });
 
+  // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une fin de session au motif inconnu reste une fin de session, dite sans motif.
+  it("says a session ended without naming a reason it does not know", async () => {
+    const ctx = await context([SAMPLE_AGENT], "none");
+    const wrapper = mount(ReconnectPanel, {
+      props: { server, reason: "ended" },
+      global: ctx.global,
+    });
+    expect(wrapper.text()).toContain("Ta session s'est terminée.");
+    expect(wrapper.text()).not.toContain("expiré");
+    expect(wrapper.text()).not.toContain("plus accessible");
+    expect(wrapper.text()).toContain("Rentre ton mot de passe pour reprendre.");
+  });
+
   // FIX:01M4D0RHZE7JFMV700JKA3DM1R (C56) : l'identifiant est connu, le curseur est dans le mot de passe.
   it("puts the cursor in the password field when the identifier is already known", async () => {
     const ctx = await context([SAMPLE_AGENT], "none");

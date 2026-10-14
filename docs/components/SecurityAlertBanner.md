@@ -7,3 +7,4 @@ Bandeau « Attaque probable détectée » (HRT-26, BR-TRUST-008, 009), posé par
 - Props : `alert`, `role`, `block`, `stamp`, `onPage`, `modeOn`
 - Événements et slots : `activate`, `details`
 - Notes : BR-TRUST-029 pour Lecture seule. Tests : `pages/SecurityMode.test.ts`, `e2e/attack-mode.spec.ts`.
+- FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : `modeUnknown` (mode attaque que ce client ne lit pas) retire le bouton « Activer » ; un rôle `unknown` dit « ce client ne reconnaît pas ton rôle », jamais « lecture seule ».

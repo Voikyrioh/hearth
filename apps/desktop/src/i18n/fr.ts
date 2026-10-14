@@ -18,6 +18,9 @@ export const fr = {
     neverLoggedIn: "Jamais",
     roleAdmin: "Administrateur",
     roleReadonly: "Lecture seule",
+    roleUnknown: "Rôle inconnu de ce client",
+    roleUnknownHint:
+      "Ce client ne reconnaît pas le rôle de ce compte : il ne propose pas de le changer.",
     emptyTitle: "Aucun compte à afficher",
     empty: "Crée un compte avec le bouton « Ajouter un compte », en haut de la page.",
     loadFailed: "Impossible de lire la liste des comptes.",
@@ -141,6 +144,8 @@ export const fr = {
     alertOthersOne: "Une attaque probable vise 1 compte de ce serveur.",
     alertOthersMany: "Une attaque probable vise {n} comptes de ce serveur.",
     alertReadonly: "Tu vois l'alerte, mais seul un administrateur peut activer le mode attaque.",
+    alertRoleUnknown:
+      "Tu vois l'alerte, mais ce client ne reconnaît pas ton rôle sur ce serveur. Mets Hearth à jour sur ce PC.",
     alertReadonlyHint:
       "Tu vois l'alerte mais ne peux pas activer le mode attaque. Contacte un administrateur.",
     moreInfo: "Plus d'infos",
@@ -181,6 +186,11 @@ export const fr = {
     stateOff: "Inactif",
     stateOn: "Actif",
     stateSuspended: "Suspendu",
+    stateUnknown: "Inconnu",
+    modeTextUnknown:
+      "Ce client ne sait pas lire l'état de protection de ce serveur. Mets Hearth à jour sur ce PC.",
+    cardTodoUnknown:
+      "Ce client ne sait pas lire l'état de protection de ce serveur. Mets Hearth à jour sur ce PC, puis regarde le journal d'activité.",
     suspendedText:
       "Le mode attaque est suspendu après le redémarrage du serveur. Il reprend dans {n} min.",
     suspendedSoon:
@@ -205,6 +215,8 @@ export const fr = {
     disabled: "Mode attaque désactivé.",
     autoStopped: "L'attaque semble terminée. Le mode attaque s'est arrêté automatiquement.",
     resumed: "Le mode attaque reprend après 30 minutes de suspension.",
+    roleUnknown:
+      "Ce client ne reconnaît pas ton rôle sur ce serveur : il ne propose pas le mode attaque. Mets Hearth à jour sur ce PC.",
     noPermission:
       "Tu n'as pas la permission d'activer le mode attaque. C'est réservé aux administrateurs.",
     agentTooOld:
@@ -249,6 +261,8 @@ export const fr = {
     settingHelp:
       "Une saisie de ton mot de passe peut valoir 5 minutes pour les actions courantes. Les actions sensibles le redemandent toujours, et la clé de ce poste est vérifiée à chaque action.",
     settingEach: "À chaque action",
+    settingUnknown:
+      "Ce client ne sait pas lire ce réglage sur ce serveur. Mets Hearth à jour sur ce PC.",
     settingWindow: "Toutes les 5 minutes",
     settingTitle: "Changer la fréquence du mot de passe",
     settingMessageEach: "Ton mot de passe te sera demandé à chaque action d'administration.",
@@ -308,6 +322,7 @@ export const fr = {
     offlineBannerNoContact: "Serveur hors ligne. Nouvelle tentative automatique en cours.",
     reconnectFailed: "Reconnexion échouée {n} fois.",
     sessionExpiredNotice: "Ta session a expiré.",
+    sessionEndedNotice: "Ta session s'est terminée.",
     askPassword: "Rentre ton mot de passe pour reprendre.",
     reconnectAction: "Me reconnecter",
     notLoadedYet: "Pas encore chargé, sera disponible quand le serveur reviendra.",
@@ -331,6 +346,8 @@ export const fr = {
       "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour l'agent.",
     agentTooOldReadonly:
       "Les versions du client et de l'agent ne sont pas compatibles. Demande à un administrateur de mettre à jour l'agent.",
+    agentTooOldRoleUnknown:
+      "Les versions du client et de l'agent ne sont pas compatibles. Mets Hearth à jour sur ce PC, ou demande à un administrateur de mettre à jour l'agent.",
     clientTooOld:
       "Les versions du client et de l'agent ne sont pas compatibles. Mets à jour le client.",
     updateClient: "Mettre à jour le client",
@@ -620,6 +637,7 @@ export const fr = {
     outcomeOk: "Réussi",
     outcomeDenied: "Refusé",
     outcomeFailed: "Échoué",
+    outcomeUnknown: "Inconnu",
     originCli: "ligne de commande du serveur",
     originAssistant: "assistant",
     countOne: "1 événement",
@@ -698,6 +716,8 @@ export const fr = {
     readFailed: "Impossible de lire l'état de la mise à jour de l'agent.",
     button: "Mettre à jour l'agent",
     readOnlyHint: "Seul un administrateur peut mettre à jour l'agent",
+    roleUnknownHint:
+      "Ce client ne reconnaît pas ton rôle sur ce serveur. Mets Hearth à jour sur ce PC.",
     confirmTitle: "Mettre à jour l'agent ?",
     confirmMessage: "Cette opération redémarrera l'agent brièvement.",
     confirmYes: "Oui, mettre à jour",
@@ -745,11 +765,11 @@ export const fr = {
     resultRollbackFailed:
       "La mise à jour de l'agent n'a pas pu être menée à bout, et le retour à la version précédente n'est pas confirmé. Vérifie l'agent sur le serveur (guide « Mettre à jour l'agent »).",
     resultFailed: "La mise à jour de l'agent n'a pas abouti.",
-    // Issue que ce client ne connaît pas. À trancher par le propriétaire (neutre proposé : « Hearth ne sait pas comment
-    // la mise à jour s'est terminée. Vérifie la version affichée. ») ; aujourd'hui, même texte que l'échec.
-    resultUnknown: "La mise à jour de l'agent n'a pas abouti.",
+    resultUnknown:
+      "La mise à jour de l'agent s'est terminée, mais ce client ne sait pas dire comment. Vérifie la version de l'agent.",
     dismiss: "Compris",
     historySucceeded: "Dernière mise à jour de l'agent : réussie ({when}).",
+    historyUnknown: "Dernière mise à jour de l'agent : issue inconnue de ce client ({when}).",
     historyRolledBack:
       "Dernière mise à jour de l'agent : annulée, retour à la version précédente ({when}).",
     historyFailed: "Dernière mise à jour de l'agent : échouée ({when}).",
@@ -941,6 +961,112 @@ export const fr = {
     // Textes écrits pour ce ticket, absents des specs : à valider avec Voiky.
     waitingTitle: "Aucune information pour l'instant",
     waitingText: "La liste des services s'affichera dès que le serveur sera joignable.",
+    // Textes écrits pour HRT-63 / HRT-137, absents des specs : à valider avec Voiky.
+    adopted: "Adopté",
+    externalHelp: "Lancé en dehors de Hearth. Hearth le suit mais ne l'a pas créé.",
+    otherHelp: "Services en pause, ou dans un état que Hearth ne sait pas nommer.",
+    emptyText:
+      "Hearth affiche ici les services qu'il a créés ou que tu lui as confiés. Installer un service depuis Hearth arrive bientôt.",
+    openRow: "Ouvrir le détail de {name}",
+  },
+  // Le détail d'un service (HRT-63, BR-SVC-007 à 009, 016, 023, 027, 028). Textes de la spec `voir-les-services` et du
+  // design du lot 1, mot pour mot ; les autres sont marqués « hors spec ».
+  serviceDetail: {
+    back: "Retour à la liste",
+    region: "Détail du service {name}",
+    sections: "Sections du service",
+    tabDetail: "Détail",
+    tabLogs: "Journaux",
+    // Hors spec : les journaux d'un service ne sont pas encore branchés dans le client.
+    logsSoon: "Les journaux d'un service arrivent dans une prochaine version de Hearth.",
+    // Hors spec : démarrer, arrêter et redémarrer ne sont pas encore branchés.
+    actionsSoon:
+      "Démarrer, arrêter et redémarrer un service arrivent dans une prochaine version de Hearth.",
+    loading: "Lecture du service…",
+    gone: "Ce service n'existe plus.",
+    goneBack: "Retour à la liste",
+    recreated: "Un service nommé « {name} » existe de nouveau.",
+    openRecreated: "Ouvrir le service {name}",
+    // Hors spec : le service ouvert par une adresse n'a jamais été vu par cet écran, son nom est inconnu.
+    unnamed: "Service inconnu",
+    // Hors spec : noms lus par un lecteur d'écran sur un texte du serveur qui défile dans sa zone.
+    nameLabel: "Nom du service",
+    general: "Général",
+    state: "État",
+    lastStop: "Dernier arrêt",
+    recentRestarts: "Redémarrages récents",
+    created: "Créé le",
+    grace: "{n} secondes",
+    graceOne: "{n} seconde",
+    graceLabel: "Délai d'arrêt",
+    resources: "Ressources : non limitées",
+    exitCode: "Code {code} : {explanation}",
+    exitCodeBare: "Code {code}",
+    exit0: "terminé normalement",
+    exit137: "coupé de force (arrêt forcé ou manque de mémoire)",
+    exit143: "arrêt demandé",
+    // Hors spec : mots courants à la place du vocabulaire de Docker (revue de la PR 93), l'ancien terme reste entre
+    // parenthèses là où il aide à chercher de l'aide.
+    imageSection: "Programme et commande",
+    image: "Programme (image)",
+    command: "Commande",
+    commandOfImage: "Commande par défaut du programme",
+    // Hors spec : la commande peut porter un secret ; réservée, par prudence, aux comptes qui peuvent gérer les
+    // services (décision du propriétaire attendue), et pas lue tant que la liste vient du disque.
+    rightUnknown:
+      "Visible seulement pour les comptes qui peuvent gérer les services. Ton droit n'est pas connu pour l'instant.",
+    commandNotRead: "Pas encore lue : elle se lira quand le lien avec le serveur sera revenu.",
+    adoptedNote:
+      "Ce service a été créé hors de Hearth : sa configuration reste celle de son créateur.",
+    adoptedBy: "Adopté par {by} le {date}",
+    // Hors spec : le compte de l'agent n'a pas un nom valide, ou la date manque.
+    adoptedOn: "Adopté le {date}",
+    adoptedByOnly: "Adopté par {by}",
+    reserved: "Réservé aux comptes qui peuvent gérer les services.",
+    ports: "Ports",
+    noPorts: "Aucun port",
+    reachAll: "Joignable depuis : Tout le réseau du serveur",
+    reachLocal: "Joignable depuis : Ce serveur seulement",
+    mounts: "Dossiers de données",
+    noMounts: "Aucun dossier de données",
+    serverFolder: "Dossier du serveur",
+    inService: "Chemin dans le service",
+    // Hors spec : « Volume » est le mot de Docker ; le mot courant est « stockage ».
+    volume: "Stockage géré par le moteur",
+    mountUnknown: "Emplacement d'un genre inconnu de ce client",
+    readWrite: "Lecture et écriture",
+    readOnly: "Lecture seule",
+    restart: "Redémarrage",
+    restartUnlessStopped: "Redémarre tout seul sauf si tu l'arrêtes",
+    restartAlways: "Redémarre toujours",
+    restartNone: "Ne redémarre pas tout seul",
+    restartSupervisor: "Relancé par le système du serveur",
+    // Hors spec : la spec ne nomme pas ce mode de redémarrage, ni le cas d'un mode inconnu de ce client.
+    restartOnFailure: "Redémarre tout seul seulement s'il s'arrête en erreur",
+    restartUnknown: "Hearth ne reconnaît pas la façon dont ce service redémarre.",
+    env: {
+      // Hors spec : le nom courant d'abord, le terme technique entre parenthèses.
+      title: "Réglages (variables d'environnement)",
+      reveal: "Révéler les valeurs",
+      hide: "Masquer les valeurs",
+      reading: "Lecture des valeurs…",
+      masked: "Valeurs masquées",
+      visible: "Valeurs visibles",
+      none: "Aucune variable",
+      empty: "(valeur vide)",
+      maskedValue: "valeur masquée",
+      failed: "Impossible de lire les valeurs. Réessaie.",
+      // Hors spec : la section est indisponible tant que le moteur n'est pas prêt.
+      engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
+      // Texte du design du lot 1 : près du bouton quand le lien est coupé.
+      offline: "Indisponible tant que le serveur est hors ligne.",
+      // Hors spec : la liste relue du disque est écrite sans les noms de variables (ils peuvent porter des secrets).
+      notRead: "Pas encore lus : ils se liront quand le lien avec le serveur sera revenu.",
+      nameLabel: "Nom de la variable",
+      valueLabel: "Valeur de la variable",
+      // Hors spec : l'agent a coupé la liste au-delà de sa borne.
+      omitted: "et {n} autres non listées",
+    },
   },
   // Le droit de gérer les services (HRT-78, ADR-0041, BR-GRANT-*). Textes de la spécification
   // `2026-10-13-fonctionnelle-droit-de-gerer-les-services`, reprise mot pour mot. Lecture seule : aucun texte ne

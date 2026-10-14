@@ -1,5 +1,17 @@
+import type { MessageKey } from "@/i18n";
 import { t } from "@/i18n";
-import type { AttackModeRefusal } from "@/link";
+import type { AttackModeRefusal, AttackModeState } from "@/link";
+
+/**
+ * Le libellé de l'état du mode attaque. Tous les états y sont, `unknown` compris (agent plus récent) : un état que
+ * ce client ne lit pas se dit « Inconnu », jamais « Actif » ni « Inactif » (BR-COMPAT-001 point 4).
+ */
+export const ATTACK_STATE_KEYS: Record<AttackModeState, MessageKey> = {
+  off: "security.stateOff",
+  active: "security.stateOn",
+  suspended: "security.stateSuspended",
+  unknown: "security.stateUnknown",
+};
 
 /**
  * Le texte d'un refus de l'agent à l'activation ou à la désactivation. Choisi d'après `kind` : un refus

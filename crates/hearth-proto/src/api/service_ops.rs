@@ -185,7 +185,12 @@ pub struct OperationView {
     pub step: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<StepView>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Hors des bornes ou illisible : inconnu (`None`), jamais borné (BR-COMPAT-001 point 10).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::lenient::percent"
+    )]
     pub percent: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub items_done: Option<u64>,

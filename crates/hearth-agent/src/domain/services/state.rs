@@ -120,10 +120,14 @@ pub struct Observation {
     pub tty: bool,
     /// Le pilote de journaux (`HostConfig.LogConfig.Type`) : `none` ne se relit pas (BR-SLOG-017).
     pub log_driver: Option<String>,
-    /// La clé `h_<ULID>` portée par l'étiquette `io.hearth.service-id` : le conteneur a été créé par Hearth
-    /// pour ce service (ADR-0037). Sert à compter les conteneurs d'un service à la reprise des opérations
-    /// (HRT-144) ; le registre ne s'en sert pas encore pour publier. Une étiquette qui n'a pas la forme d'une
-    /// clé est ignorée.
+    /// La clé `h_<ULID>` que l'étiquette `io.hearth.service-id` AFFIRME (ADR-0037). **Une affirmation, jamais
+    /// une identité** : `Config.Labels` contient aussi les étiquettes de l'IMAGE (`LABEL`), qu'un auteur
+    /// d'image publique peut poser sans aucun accès au serveur ; l'ULID d'un service, lui, est affiché à tous
+    /// les comptes. Ne JAMAIS s'en servir pour authentifier, publier, rendre visible ni compter un conteneur
+    /// comme « service de Hearth » sans deux preuves de plus : la clé est celle d'un service connu de la
+    /// base de l'agent ET l'identifiant du conteneur est un de ceux que l'agent a consignés
+    /// (`RecordedContainers`). Son seul usage : la reprise des opérations (`infrastructure::ops_observer`),
+    /// avec cette double vérification. Une étiquette qui n'a pas la forme d'une clé est ignorée.
     pub hearth_key: Option<ServiceKey>,
 }
 

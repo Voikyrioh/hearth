@@ -83,7 +83,15 @@ pub fn refusal_of(status: u16, body: &Value) -> OperationRefusal {
                 code: Some(ErrorCode::Conflict),
             },
         },
-        ErrorCode::Unknown => OperationRefusal::Other { status, code: None },
+        // Un code d'un agent plus récent : le sens de son statut HTTP (BR-COMPAT-001 point 8), jamais un des
+        // refus propres à l'opération ci-dessus, dont les `details` ne seraient pas ceux qu'on croit.
+        ErrorCode::Unknown => OperationRefusal::Other {
+            status,
+            code: match ErrorCode::Unknown.or_from_status(status) {
+                ErrorCode::Unknown => None,
+                meaning => Some(meaning),
+            },
+        },
         code => OperationRefusal::Other {
             status,
             code: Some(code),
@@ -171,6 +179,17 @@ mod tests {
             OperationRefusal::Other {
                 status: 418,
                 code: None
+            }
+        );
+        // Un code inconnu d'un statut que le protocole emploie : le sens du statut, pas un refus d'opération.
+        assert_eq!(
+            refusal_of(
+                409,
+                &body("SOMETHING_FROM_THE_FUTURE", json!({ "reason": "expired" }))
+            ),
+            OperationRefusal::Other {
+                status: 409,
+                code: Some(ErrorCode::Conflict)
             }
         );
         assert_eq!(

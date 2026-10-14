@@ -153,7 +153,7 @@ mod tests {
     fn state(step: UpdateStep) -> SupervisorState {
         SupervisorState {
             version: "0.2.0".into(),
-            step,
+            step: step.into(),
             previous: "0.1.0".into(),
             requester: Requester {
                 by: Some("marie".into()),

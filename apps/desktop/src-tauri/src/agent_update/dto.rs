@@ -21,6 +21,9 @@ pub enum AgentUpdateStepDto {
     Restart,
     Check,
     Done,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle à l'interface,
+    // jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    Unknown,
 }
 
 impl From<UpdateStep> for AgentUpdateStepDto {
@@ -32,6 +35,7 @@ impl From<UpdateStep> for AgentUpdateStepDto {
             UpdateStep::Restart => Self::Restart,
             UpdateStep::Check => Self::Check,
             UpdateStep::Done => Self::Done,
+            UpdateStep::Unknown => Self::Unknown,
         }
     }
 }
@@ -42,6 +46,9 @@ pub enum AgentUpdateOutcomeDto {
     Succeeded,
     RolledBack,
     Failed,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle à l'interface,
+    // jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    Unknown,
 }
 
 impl From<UpdateOutcome> for AgentUpdateOutcomeDto {
@@ -50,6 +57,7 @@ impl From<UpdateOutcome> for AgentUpdateOutcomeDto {
             UpdateOutcome::Succeeded => Self::Succeeded,
             UpdateOutcome::RolledBack => Self::RolledBack,
             UpdateOutcome::Failed => Self::Failed,
+            UpdateOutcome::Unknown => Self::Unknown,
         }
     }
 }

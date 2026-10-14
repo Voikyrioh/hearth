@@ -5,12 +5,13 @@
 //! échantillons (canal de diffusion borné), un client qui ne lit plus est abandonné après
 //! `send_timeout`.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code};
 use hearth_proto::api::security::SecurityView;
-use hearth_proto::api::service_ops::OperationView;
+use hearth_proto::api::service_ops::{OperationStatus, OperationView};
 use hearth_proto::api::update::UpdateProgress;
 use hearth_proto::error::{ErrorCode, ErrorDetail};
 use hearth_proto::stream::{
@@ -31,6 +32,7 @@ use crate::domain::audit::AuditRecord;
 use crate::domain::metrics::Sample;
 use crate::domain::ops::OpFlush;
 use crate::domain::secret::Secret;
+use crate::domain::services::ServiceKey;
 use crate::domain::sessions::SessionEnd;
 use crate::domain::stream::{SNAPSHOT_WINDOW, is_new, may_subscribe};
 use crate::entrypoint::http::{self, ApiError, AppState};
@@ -148,6 +150,9 @@ struct Subscriptions {
     op_flush: OpFlush<OperationView>,
     /// L'instant d'où se comptent les millisecondes de `op_flush`.
     op_epoch: Option<Instant>,
+    /// Les opérations dont cette connexion a envoyé un état NON FINAL : si leur état final se perd (abonné
+    /// lent, droit changé), il est relu et renvoyé, jamais laissé « en cours » à l'écran. Borné.
+    op_followed: HashSet<String>,
     /// Instant monotone du dernier échantillon envoyé (snapshot compris) : pas de doublon
     /// (BR-DASH-011), même si l'horloge murale recule.
     last_sent: Option<time::Duration>,
@@ -197,36 +202,118 @@ fn offer_operation(
     subscriptions.op_flush.offer(now, &id, view)
 }
 
-/// Envoie le message `operation` ; `false` si le client ne le reçoit plus.
-async fn send_operation(
+/// Combien d'opérations non finales une connexion retient pour leur renvoyer l'état final si besoin.
+const MAX_FOLLOWED_OPS: usize = 1_024;
+
+/// L'état est final : l'opération ne bougera plus (jamais `Unknown`, qui ne dit rien).
+fn is_final(view: &OperationView) -> bool {
+    matches!(
+        view.status,
+        OperationStatus::Cancelled
+            | OperationStatus::RolledBack
+            | OperationStatus::Succeeded
+            | OperationStatus::Failed
+            | OperationStatus::Interrupted
+    )
+}
+
+/// Ce compte voit-il encore l'opération de cette vue ? Rejugé à CHAQUE envoi, y compris pour un état retenu
+/// par la cadence (le droit ou l'adoption peuvent avoir changé entre-temps).
+fn operation_visible(state: &AppState, session: &CurrentSession, view: &OperationView) -> bool {
+    ServiceKey::parse(&view.key)
+        .is_some_and(|key| state.service_ops.can_see(&key, viewer_of(session)))
+}
+
+/// Envoie le message `operation` et retient l'opération tant que son état n'est pas final ; `false` si le
+/// client ne le reçoit plus.
+async fn deliver_operation(
     socket: &mut WebSocket,
     settings: &StreamSettings,
+    subscriptions: &mut Subscriptions,
     view: OperationView,
 ) -> bool {
+    if is_final(&view) {
+        subscriptions.op_followed.remove(&view.id);
+    } else if subscriptions.op_followed.len() < MAX_FOLLOWED_OPS {
+        subscriptions.op_followed.insert(view.id.clone());
+    }
     send(socket, settings, &ServicesMessage::Operation(view)).await
 }
 
-/// Envoie l'état des opérations EN COURS que ce compte voit : à l'abonnement, après des changements perdus
-/// par un abonné lent, après un changement de droit. Chaque état passe par la cadence. `false` si le client
-/// ne reçoit plus.
+/// Envoie l'état des opérations EN COURS que ce compte voit, à la cadence de la connexion, et rend leurs
+/// identifiants ; `None` si le client ne reçoit plus.
 async fn push_open_operations(
     socket: &mut WebSocket,
     state: &AppState,
     session: &CurrentSession,
     subscriptions: &mut Subscriptions,
-) -> bool {
+) -> Option<HashSet<String>> {
+    let mut open = HashSet::new();
     match state.service_ops.open_for(viewer_of(session)).await {
         Ok(snapshots) => {
             for snapshot in snapshots {
                 let view = service_ops_wire::view(&snapshot);
+                open.insert(view.id.clone());
                 if let Some(view) = offer_operation(subscriptions, view)
-                    && !send_operation(socket, &state.stream.settings, view).await
+                    && !deliver_operation(socket, &state.stream.settings, subscriptions, view).await
                 {
-                    return false;
+                    return None;
                 }
             }
         }
         Err(error) => tracing::warn!(%error, "opérations en cours illisibles : non envoyées"),
+    }
+    Some(open)
+}
+
+/// Remet les opérations de cette connexion à jour après un trou (abonné lent) ou un changement de droit,
+/// SANS perdre un état final :
+/// 1. les états retenus par la cadence partent d'abord (ceux que le compte voit encore) ;
+/// 2. la cadence repart de zéro, les opérations en cours repartent entières ;
+/// 3. toute opération dont cette connexion a montré un état non final et qui n'est plus en cours est relue :
+///    son état final (ou l'état où elle est) est renvoyé si le compte la voit encore. Une opération purgée ou
+///    que le compte ne voit plus est oubliée.
+///
+/// `false` si le client ne reçoit plus.
+async fn resync_operations(
+    socket: &mut WebSocket,
+    state: &AppState,
+    session: &CurrentSession,
+    subscriptions: &mut Subscriptions,
+) -> bool {
+    let settings = &state.stream.settings;
+    for view in subscriptions.op_flush.drain() {
+        if operation_visible(state, session, &view)
+            && !deliver_operation(socket, settings, subscriptions, view).await
+        {
+            return false;
+        }
+    }
+    subscriptions.op_flush = OpFlush::new();
+    let Some(open) = push_open_operations(socket, state, session, subscriptions).await else {
+        return false;
+    };
+    let lost: Vec<String> = subscriptions
+        .op_followed
+        .iter()
+        .filter(|id| !open.contains(*id))
+        .cloned()
+        .collect();
+    for id in lost {
+        match state.service_ops.read(&id, viewer_of(session)).await {
+            Ok(snapshot) => {
+                let view = service_ops_wire::view(&snapshot);
+                if let Some(view) = offer_operation(subscriptions, view)
+                    && !deliver_operation(socket, settings, subscriptions, view).await
+                {
+                    return false;
+                }
+            }
+            // Purgée, ou que ce compte ne voit plus : rien à dire, on l'oublie.
+            Err(_) => {
+                subscriptions.op_followed.remove(&id);
+            }
+        }
     }
     true
 }
@@ -434,18 +521,18 @@ async fn serve(
                     if state.service_ops.can_see(&snapshot.record.service, viewer_of(&session)) {
                         let view = service_ops_wire::view(&snapshot);
                         if let Some(view) = offer_operation(&mut subscriptions, view)
-                            && !send_operation(socket, &settings, view).await
+                            && !deliver_operation(socket, &settings, &mut subscriptions, view).await
                         {
                             return None;
                         }
                     }
                 }
-                // Un abonné lent a perdu des changements : l'état des opérations en cours repart entier, sans
-                // logique de trou à écrire côté client.
+                // Un abonné lent a perdu des changements : les états retenus partent, les opérations en cours
+                // repartent entières, et celles dont il avait un état non final et qui ont fini entre-temps
+                // sont relues : leur état final n'est jamais perdu (revue de la PR 94).
                 Err(RecvError::Lagged(missed)) => {
                     tracing::debug!(missed, "abonné lent : état des opérations renvoyé");
-                    subscriptions.op_flush = OpFlush::new();
-                    if !push_open_operations(socket, state, &session, &mut subscriptions).await {
+                    if !resync_operations(socket, state, &session, &mut subscriptions).await {
                         return None;
                     }
                 }
@@ -456,7 +543,10 @@ async fn serve(
             () = operation_due(subscriptions.op_epoch, subscriptions.op_flush.next_deadline()) => {
                 let now = ops_now_ms(&subscriptions);
                 for view in subscriptions.op_flush.due(now) {
-                    if !send_operation(socket, &settings, view).await {
+                    // Un état retenu part avec la visibilité d'AUJOURD'HUI : un service relâché depuis n'émet plus.
+                    if operation_visible(state, &session, &view)
+                        && !deliver_operation(socket, &settings, &mut subscriptions, view).await
+                    {
                         return None;
                     }
                 }
@@ -496,10 +586,9 @@ async fn serve(
                                 return None;
                             }
                             // Le droit décide aussi des opérations d'un service adopté : elles repartent
-                            // avec ce que le compte voit maintenant.
-                            subscriptions.op_flush = OpFlush::new();
+                            // avec ce que le compte voit maintenant, sans perdre un état final retenu.
                             if subscriptions.operations.is_some()
-                                && !push_open_operations(socket, state, &session, &mut subscriptions).await
+                                && !resync_operations(socket, state, &session, &mut subscriptions).await
                             {
                                 return None;
                             }
@@ -743,6 +832,7 @@ async fn handle_text(
             subscriptions.services = None;
             subscriptions.operations = None;
             subscriptions.op_flush = OpFlush::new();
+            subscriptions.op_followed.clear();
             if topics.contains(&Topic::Services) {
                 let (receiver, snapshot) = state.services.subscribe();
                 subscriptions.services = Some(receiver);
@@ -761,7 +851,10 @@ async fn handle_text(
                 // lire l'état : aucun changement ne se perd entre les deux.
                 subscriptions.operations = Some(state.service_ops.subscribe());
                 subscriptions.op_epoch = Some(Instant::now());
-                if !push_open_operations(socket, state, session, subscriptions).await {
+                if push_open_operations(socket, state, session, subscriptions)
+                    .await
+                    .is_none()
+                {
                     return Handled::Stop;
                 }
             }

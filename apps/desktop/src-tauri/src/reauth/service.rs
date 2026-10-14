@@ -36,7 +36,8 @@ pub async fn state(manager: &LinkManager, id: &ServerId) -> Result<ReauthStateDt
 pub fn covers(kind: AdminActKindDto, role: Option<RoleDto>) -> bool {
     let role = match role {
         Some(RoleDto::Readonly) => RoleName::Readonly,
-        Some(RoleDto::Admin) | None => RoleName::Admin,
+        // Un rôle inconnu (agent plus récent) vaut « Administrateur » : le plus strict.
+        Some(RoleDto::Admin | RoleDto::Unknown) | None => RoleName::Admin,
     };
     let act = match kind {
         AdminActKindDto::AccountCreate => AdminAct::AccountCreate { username: "", role },
@@ -107,7 +108,8 @@ pub fn interpret(status: u16, body: &Value) -> Result<ReauthSettingOutcome, Link
         });
     }
     use hearth_proto::error::ErrorCode;
-    match error.error.code {
+    // Code inconnu (agent plus récent) : le sens du statut HTTP (BR-COMPAT-001 point 8).
+    match error.error.code.or_from_status(status) {
         ErrorCode::ForbiddenRole => Err(LinkFailure::forbidden(&error.error)),
         ErrorCode::NotFound => refused(ReauthSettingRefusal::Unsupported),
         ErrorCode::Unauthenticated | ErrorCode::SessionExpired => {

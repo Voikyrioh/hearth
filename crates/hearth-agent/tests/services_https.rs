@@ -618,7 +618,7 @@ async fn a_slow_subscriber_is_resynchronised_with_a_new_snapshot() {
                 panic!("aucune action dans une tranche en lecture seule")
             }
             // Aucune opération de service dans ce scénario ; un message d'un autre type est ignoré.
-            ServicesMessage::Operation(_) | ServicesMessage::Unknown => {}
+            ServicesMessage::Operation(_) => {}
         }
     }
     assert!(

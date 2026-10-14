@@ -98,7 +98,7 @@ pub enum JournalError {
     #[error("l'opération n'est plus dans le statut attendu")]
     Stale,
     #[error("opération inconnue")]
-    Unknown,
+    NoSuchOperation,
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -180,6 +180,28 @@ pub trait ServiceObserver: Send + Sync {
     /// `steps` est le journal de l'opération, déjà relu par l'appelant : l'observateur n'a pas besoin du
     /// journal pour juger si le plan est allé au bout de ses gestes destructifs.
     async fn observe(&self, op: &OpRecord, steps: &[StepRecord]) -> Observed;
+}
+
+/// Ce que l'agent a CONSIGNÉ d'un service créé par Hearth : de quoi reconnaître ses conteneurs sans croire
+/// une étiquette. Une étiquette de conteneur (`io.hearth.service-id`) peut être posée par n'importe qui, y
+/// compris par l'auteur d'une image (`LABEL`) ; elle ne vaut jamais identité (revue de la PR 94, BR-OPS-008).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordedService {
+    /// Aucun service de cette clé dans la base de l'agent : une étiquette qui le nomme est une affirmation
+    /// d'un tiers.
+    Unknown,
+    /// Le service est connu, mais l'agent n'a consigné AUCUN identifiant de conteneur pour lui (le journal
+    /// ne les consigne pas encore) : un conteneur qui porte l'étiquette ne peut être ni reconnu ni écarté.
+    KnownWithoutContainers,
+    /// Le service est connu, et voici les identifiants de conteneur que l'agent a consignés pour lui (deux
+    /// pendant une recréation : l'ancien et le nouveau).
+    Containers(Vec<String>),
+}
+
+/// Ce que la base de l'agent sait des conteneurs d'un service créé par Hearth.
+#[async_trait]
+pub trait RecordedContainers: Send + Sync {
+    async fn recorded(&self, key: &ServiceKey) -> Result<RecordedService, StoreError>;
 }
 
 /// Ce que devient un objet que l'opération avait créé.

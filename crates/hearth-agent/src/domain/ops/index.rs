@@ -50,8 +50,27 @@ impl OpsIndex {
 
     /// Range l'état d'une opération. Une opération terminée remplace « la dernière action » seulement si
     /// elle est plus récente que celle qui y est ; elle libère l'opération ouverte si c'est la sienne.
+    ///
+    /// **Idempotent et monotone** : un état non terminal qui arrive APRÈS la fin de son opération (deux
+    /// publications dans l'ordre inverse de leur lecture) ne la rouvre jamais, donc ne laisse jamais `busy`
+    /// collé sur un service libre. Une opération n'est jamais rouverte par un état plus ancien : une
+    /// opération qui a commencé avant la dernière terminée du service, ou avant l'ouverte qui y est, est
+    /// périmée (le verrou du service interdit deux opérations à la fois).
     pub fn apply(&mut self, key: &ServiceKey, summary: OpSummary) {
         let entry = self.services.entry(key.clone()).or_default();
+        if !summary.status.is_terminal() {
+            let stale_against_last = entry
+                .last
+                .as_ref()
+                .is_some_and(|last| last.id == summary.id || last.started_at > summary.started_at);
+            let stale_against_open = entry
+                .open
+                .as_ref()
+                .is_some_and(|open| open.id != summary.id && open.started_at > summary.started_at);
+            if stale_against_last || stale_against_open {
+                return;
+            }
+        }
         if summary.status.is_terminal() {
             if entry
                 .open
@@ -174,6 +193,36 @@ mod tests {
             index.last_action(&service).map(|op| op.id.as_str()),
             Some("NEW")
         );
+    }
+
+    #[test]
+    fn a_stale_open_state_never_reopens_a_finished_operation_so_busy_never_sticks() {
+        let service = key("c_0123abcd");
+        let mut index = OpsIndex::new();
+        // L'état final arrive avant un état plus ancien de la même opération.
+        index.apply(&service, summary("A", OpStatus::Cancelled, Some(5)));
+        index.apply(&service, summary("A", OpStatus::Running, None));
+        index.apply(&service, summary("A", OpStatus::Cancelling, None));
+        assert!(index.busy(&service).is_none());
+        assert_eq!(
+            index.last_action(&service).map(|op| op.status),
+            Some(OpStatus::Cancelled)
+        );
+        // Même chose rejoué : le résultat ne change plus (idempotent).
+        index.apply(&service, summary("A", OpStatus::Cancelled, Some(5)));
+        assert!(index.busy(&service).is_none());
+        // Une opération plus ancienne que la dernière terminée ne rouvre rien non plus.
+        let mut newer = summary("NEW", OpStatus::Succeeded, Some(50));
+        newer.started_at += time::Duration::seconds(100);
+        newer.finished_at = Some(newer.started_at + time::Duration::seconds(1));
+        index.apply(&service, newer);
+        index.apply(&service, summary("OLD", OpStatus::Running, None));
+        assert!(index.busy(&service).is_none());
+        // Une opération vraiment nouvelle, elle, ouvre bien le service.
+        let mut fresh = summary("FRESH", OpStatus::Running, None);
+        fresh.started_at += time::Duration::seconds(500);
+        index.apply(&service, fresh);
+        assert_eq!(index.busy(&service).map(|op| op.id.as_str()), Some("FRESH"));
     }
 
     #[test]

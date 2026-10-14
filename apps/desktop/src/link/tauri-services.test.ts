@@ -8,7 +8,7 @@ import type { ServicesEvent as Wire } from "@/bindings";
 import { setLinkBridge } from "@/link";
 import { show } from "@/services/view";
 import { useServicesStore } from "@/stores/services";
-import type { ServicesEvent } from "./services";
+import { type ServicesEvent, toServicesEvent } from "./services";
 import { LINK_EVENTS, TauriLinkBridge } from "./tauri";
 import { LinkCommandError } from "./types";
 
@@ -163,5 +163,68 @@ describe("the store fed by the real bridge", () => {
     });
     expect(show(store.of("forge"))).toEqual({ kind: "old-agent", agentVersion: "0.1.0" });
     store.reset();
+  });
+});
+
+describe("reveal_service_env of the real bridge (HRT-63)", () => {
+  it("sends ONE typed command with the server and the stable key, nothing else, and converts the answer", async () => {
+    const calls = ipc(() => ({
+      variables: [
+        { name: "A", value: "1" },
+        { name: "B", value: "" },
+      ],
+    }));
+    const variables = await new TauriLinkBridge().revealServiceEnv("forge", "c_9f0a");
+    expect(calls).toEqual([
+      { cmd: "reveal_service_env", args: { serverId: "forge", key: "c_9f0a" } },
+    ]);
+    expect(variables).toEqual([
+      { name: "A", value: "1" },
+      { name: "B", value: "" },
+    ]);
+  });
+
+  it("rejects with the typed failure when the right is missing, and never repeats the request", async () => {
+    const calls = ipc(() => {
+      throw { kind: "missing_services_right" };
+    });
+    const error = await new TauriLinkBridge().revealServiceEnv("forge", "c_1").catch((e) => e);
+    expect(error).toBeInstanceOf(LinkCommandError);
+    expect((error as LinkCommandError).failure.kind).toBe("missing_services_right");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("the details of the reference file (mounts, names, command, adoption) reach the service as the interface reads them", async () => {
+    const event = toServicesEvent(fixture.supported);
+    if (event.kind !== "state") throw new Error("état attendu");
+    expect(event.services[0]).toMatchObject({
+      mounts: [{ kind: "folder", source: "/srv/data", target: "/data", readOnly: true }],
+      mountsOmitted: 5,
+      restart: "unless_stopped",
+      envNames: ["SENTINEL_ENV_NAME"],
+      envNamesOmitted: 2,
+      command: ["SENTINEL_COMMAND"],
+      graceS: 30,
+      adopted: { by: "claire", at: Date.parse("2026-10-13T08:00:00Z") },
+      detailsReserved: true,
+    });
+    expect(event.services[1]).toMatchObject({ command: null, adopted: null, graceS: null });
+  });
+
+  it("a list read back from the disk says its details were not read, on every service", () => {
+    expect(fixture.supported.detailsKnown).toBe(true);
+    const fresh = toServicesEvent(fixture.supported);
+    if (fresh.kind !== "state") throw new Error("état attendu");
+    expect(fresh.services.every((service) => service.detailsKnown)).toBe(true);
+    const fromDisk = toServicesEvent({ ...fixture.supported, detailsKnown: false });
+    if (fromDisk.kind !== "state") throw new Error("état attendu");
+    expect(fromDisk.services.every((service) => !service.detailsKnown)).toBe(true);
+  });
+
+  it("an unknown value from a newer agent arrives neutral, never an exception", () => {
+    const event = toServicesEvent(fixture.unknown);
+    if (event.kind !== "state") throw new Error("état attendu");
+    expect(event.services[0]).toMatchObject({ restart: "unknown" });
+    expect(event.services[0]?.mounts[0]).toMatchObject({ kind: "unknown" });
   });
 });

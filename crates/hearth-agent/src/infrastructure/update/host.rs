@@ -790,7 +790,7 @@ mod tests {
         let record = UpdateRecord {
             version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
-            outcome: UpdateOutcome::Succeeded,
+            outcome: UpdateOutcome::Succeeded.into(),
             reason: None,
             at: "2026-10-05T10:00:00Z".into(),
             requested_by: Some("marie".into()),
@@ -801,7 +801,7 @@ mod tests {
         host.write_last(&record).unwrap();
         host.write_state(&SupervisorState {
             version: "0.2.0".into(),
-            step: UpdateStep::Check,
+            step: UpdateStep::Check.into(),
             previous: "0.1.0".into(),
             requester: Default::default(),
         })
@@ -813,6 +813,60 @@ mod tests {
         assert!(!dir.path().join("update").join("last.json.tmp").exists());
     }
 
+    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB (B2) : les fichiers écrits par un agent PLUS RÉCENT (retour arrière) sont
+    /// relus, réécrits (`reported`, étape de l'ancien) puis relus, sans que la valeur d'origine soit perdue.
+    #[test]
+    fn files_written_by_a_newer_agent_are_read_rewritten_and_read_again_without_losing_a_value() {
+        use crate::domain::update::{Kept, Marker};
+        let (dir, host) = host();
+        let update = dir.path().join("update");
+        fs::create_dir_all(&update).unwrap();
+        fs::write(
+            update.join("last.json"),
+            r#"{"version":"0.3.0","previous":"0.2.0","outcome":"partly_applied","at":"2026-10-14T10:00:00Z","reported":false,"champ_du_futur":1}"#,
+        )
+        .unwrap();
+        fs::write(
+            update.join("state.json"),
+            r#"{"version":"0.3.0","step":"migrate","previous":"0.2.0"}"#,
+        )
+        .unwrap();
+        let read = host.read_last().unwrap().unwrap();
+        assert!(read.outcome.is_foreign());
+        assert_ne!(read.outcome, UpdateOutcome::Failed);
+        assert_ne!(read.outcome, UpdateOutcome::Succeeded);
+        // Ce que l'agent écrit après l'avoir lue : annoncée.
+        host.write_last(&UpdateRecord {
+            reported: true,
+            ..read
+        })
+        .unwrap();
+        let state = host.read_state().unwrap().unwrap();
+        assert_eq!(state.step, Kept::<UpdateStep>::Foreign("migrate".into()));
+        host.write_state(&state).unwrap();
+        // Relus une seconde fois, et lus en JSON brut : la valeur d'origine est intacte.
+        let again = host.read_last().unwrap().unwrap();
+        assert!(again.reported);
+        assert_eq!(again.outcome, Kept::Foreign("partly_applied".into()));
+        let raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(update.join("last.json")).unwrap()).unwrap();
+        assert_eq!(raw["outcome"], "partly_applied");
+        let raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(update.join("state.json")).unwrap()).unwrap();
+        assert_eq!(raw["step"], "migrate");
+        // Le marqueur d'étape : une issue décidée par un superviseur plus récent est gardée.
+        fs::write(
+            update.join("phase.json"),
+            r#"{"version":"0.3.0","phase":"concluded","outcome":"partly_applied"}"#,
+        )
+        .unwrap();
+        let marker: Marker = host.read_marker().unwrap().unwrap();
+        host.write_marker(&marker).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(update.join("phase.json")).unwrap()).unwrap();
+        assert_eq!(raw["outcome"], "partly_applied");
+    }
+
     #[test]
     fn clearing_the_staging_keeps_the_result_and_the_lock() {
         let (dir, host) = host();
@@ -820,7 +874,7 @@ mod tests {
         host.prepare_supervisor().unwrap();
         host.write_state(&SupervisorState {
             version: "0.2.0".into(),
-            step: UpdateStep::Restart,
+            step: UpdateStep::Restart.into(),
             previous: "0.1.0".into(),
             requester: Default::default(),
         })
@@ -828,7 +882,7 @@ mod tests {
         host.write_last(&UpdateRecord {
             version: Some("0.2.0".into()),
             previous: "0.1.0".into(),
-            outcome: UpdateOutcome::Failed,
+            outcome: UpdateOutcome::Failed.into(),
             reason: None,
             at: "x".into(),
             requested_by: None,

@@ -14,6 +14,7 @@
 use hearth_proto::api::update::{UpdateOutcome, UpdateReason};
 use serde::{Deserialize, Serialize};
 
+use super::kept::Kept;
 use super::record::Job;
 
 /// Combien de fois un superviseur interrompu est repris, au plus, pour une même mise à jour.
@@ -90,7 +91,8 @@ pub struct Marker {
     pub launches: u32,
     /// Le résultat décidé (phase `Concluded`).
     #[serde(default)]
-    pub outcome: Option<UpdateOutcome>,
+    /// Gardé tel qu'écrit quand cette version ne le comprend pas (`Kept`).
+    pub outcome: Option<Kept<UpdateOutcome>>,
     /// L'abandon est réglé (résultat écrit, traces de travail retirées). Faux : un superviseur tué
     /// pendant l'abandon le règle à la reprise, sans rien journaliser de plus (BR-UPDATE-033).
     #[serde(default = "settled_by_default")]

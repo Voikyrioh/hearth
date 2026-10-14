@@ -153,7 +153,7 @@ export const commands = {
 	 *  L'élévation de 5 minutes couvre-t-elle cet acte ? La règle est celle de l'agent, lue de
 	 *  `hearth-proto` : la fenêtre ne la recopie pas. Ne parle pas à l'agent.
 	 */
-	reauthCovers: (kind: AdminActKindDto, role: "admin" | "readonly" | null) => __TAURI_INVOKE<boolean>("reauth_covers", { kind, role }),
+	reauthCovers: (kind: AdminActKindDto, role: "admin" | "readonly" | "unknown" | null) => __TAURI_INVOKE<boolean>("reauth_covers", { kind, role }),
 	/**
 	 *  Change le réglage « Demander mon mot de passe » (à chaque action, ou 5 minutes). `password` est le
 	 *  mot de passe actuel de confirmation, la preuve de la clé de ce PC est faite par la coquille.
@@ -177,6 +177,14 @@ export const commands = {
 	 *  (BR-GRANT-005). Hors « Connecté » : `NotConnected` sans rien envoyer.
 	 */
 	readServiceRights: (serverId: string) => typedError<ServiceRightsDto, LinkFailure>(__TAURI_INVOKE("read_service_rights", { serverId })),
+	/**
+	 *  Révèle les valeurs des variables d'UN service (HRT-63, `BR-SVC-009`) : une lecture que l'agent réserve aux
+	 *  comptes qui ont le droit de gérer les services et qu'il consigne au journal. La clé est celle du service
+	 *  ouvert (vérifiée par la liaison, qui construit le chemin). Les valeurs sont rendues à l'appelant et à lui
+	 *  seul : la coquille ne les garde pas, ne les trace pas, ne les met pas dans un événement. Hors « Connecté » :
+	 *  `NotConnected`, rien n'est envoyé ; sans le droit : `MissingServicesRight`.
+	 */
+	revealServiceEnv: (serverId: string, key: string) => typedError<EnvRevealDto, LinkFailure>(__TAURI_INVOKE("reveal_service_env", { serverId, key })),
 	/**
 	 *  Ouvre la documentation officielle de Docker dans le navigateur du PC. Aucun paramètre : l'adresse est
 	 *  la constante [`ENGINE_DOCS_URL`].
@@ -293,6 +301,12 @@ export type AddServerInput = {
 /**  Le genre d'un acte d'administration, tel que la fenêtre le connaît (sans cible ni secret). */
 export type AdminActKindDto = "account_create" | "account_role" | "account_password" | "account_delete" | "sessions_revoke" | "agent_update" | "attack_mode_enable" | "attack_mode_disable" | "account_password_own" | "reauth_setting";
 
+/**  Qui a adopté un service, et quand (HRT-79). */
+export type AdoptionDto = {
+	by: string,
+	at: string,
+};
+
 /**  Une version plus récente que l'agent est disponible (BR-UPDATE-022). Seulement son numéro. */
 export type AgentAvailableDto = {
 	version: string,
@@ -314,7 +328,7 @@ export type AgentUpdateOutcome =
  */
 { kind: "unknown"; op_id: string };
 
-export type AgentUpdateOutcomeDto = "succeeded" | "rolled_back" | "failed";
+export type AgentUpdateOutcomeDto = "succeeded" | "rolled_back" | "failed" | "unknown";
 
 /**  Où en est la mise à jour en cours. */
 export type AgentUpdateProgressDto = {
@@ -391,7 +405,7 @@ export type AgentUpdateResultDto = {
 	announced: boolean,
 };
 
-export type AgentUpdateStepDto = "download" | "verify" | "install" | "restart" | "check" | "done";
+export type AgentUpdateStepDto = "download" | "verify" | "install" | "restart" | "check" | "done" | "unknown";
 
 /**  L'état de la mise à jour de l'agent d'un serveur, relu à la demande (affichage, retour du lien). */
 export type AgentUpdateView = {
@@ -441,7 +455,7 @@ export type AttackModeDto = {
 };
 
 /**  Comment le dernier mode attaque s'est terminé. */
-export type AttackModeEndDto = "manual" | "auto" | "cli";
+export type AttackModeEndDto = "manual" | "auto" | "cli" | "unknown";
 
 /**  Issue d'une activation ou d'une désactivation. */
 export type AttackModeOutcome = 
@@ -473,7 +487,7 @@ export type AttackModeRefusal =
 /**  L'agent ne connaît pas cette fonction (agent d'avant le mode attaque). */
 { kind: "unsupported" } | { kind: "session_ended" } | { kind: "session_revoked" } | { kind: "other" };
 
-export type AttackModeStateDto = "off" | "active" | "suspended";
+export type AttackModeStateDto = "off" | "active" | "suspended" | "unknown";
 
 /**
  *  Une entrée du journal. `at` : RFC 3339 en UTC, la source (l'interface l'affiche dans le fuseau du
@@ -532,9 +546,9 @@ export type AuditOriginDto = {
 	text: string,
 };
 
-export type AuditOriginKindDto = "client" | "cli" | "assistant" | "system";
+export type AuditOriginKindDto = "client" | "cli" | "assistant" | "system" | "unknown";
 
-export type AuditOutcomeDto = "ok" | "denied" | "failed";
+export type AuditOutcomeDto = "ok" | "denied" | "failed" | "unknown";
 
 /**  Une page du journal filtré, de la plus récente à la plus ancienne. */
 export type AuditPageDto = {
@@ -640,6 +654,17 @@ export type EngineStateDto = "checking" | "ready" | "stopped" | "access_denied" 
 /**  Un état que ce client ne connaît pas : l'interface dit « non reconnu », sans deviner. */
 "unknown";
 
+/**  La réponse de `reveal_service_env`, dans l'ordre du moteur. */
+export type EnvRevealDto = {
+	variables: EnvVariableDto[],
+};
+
+/**  Une variable révélée (`BR-SVC-009`). Jamais gardée par la coquille : rendue à l'appelant, c'est tout. */
+export type EnvVariableDto = {
+	name: HiddenText,
+	value: HiddenText,
+};
+
 /**
  *  Le certificat présenté n'est plus celui qui a été confirmé (BR-CONN-003). Les empreintes sont
  *  en 8 groupes de 4 pour l'affichage ; `presented_hex` est la forme complète à renvoyer pour
@@ -670,6 +695,13 @@ export type GpuSampleDto = {
 	/**  Absente quand la carte n'expose pas sa température (BR-DASH-007). */
 	tempC: number | null,
 };
+
+/**
+ *  Un texte que l'écran montre mais qu'aucune trace ne doit contenir : nom ou valeur d'une variable
+ *  d'environnement, argument de la commande de lancement. Sur le fil vers l'interface c'est un simple texte ;
+ *  `Debug` ne montre rien (`HiddenText(***)`), il n'y a pas de `Display`.
+ */
+export type HiddenText = string;
 
 /**
  *  L'heure écoulée avant l'instantané (`link://history`), à 1 échantillon par 10 secondes : le tableau de bord
@@ -798,6 +830,16 @@ export type MetricsEvent = {
 	levels: LevelsDto,
 };
 
+export type MountDto = {
+	kind: MountKindDto,
+	/**  Dossier du serveur, ou nom du volume géré par le moteur. */
+	source: string,
+	target: string,
+	readOnly: boolean,
+};
+
+export type MountKindDto = "folder" | "volume" | "unknown";
+
 export type NetDto = {
 	upBytesPerS: number | null,
 	downBytesPerS: number | null,
@@ -861,14 +903,16 @@ export type ProbeDto = {
 
 export type ProtocolDto = "tcp" | "udp" | "sctp" | "unknown";
 
-export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked";
+export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked" | 
+/**  Fin de session pour un motif que cette version ne connaît pas (agent plus récent). */
+"ended";
 
 /**  Le réglage « Demander mon mot de passe » du compte (Q19). */
 export type ReauthModeDto = 
 /**  Une saisie vaut 5 minutes (défaut). */
 "window" | 
 /**  À chaque action. */
-"each";
+"each" | "unknown";
 
 /**  Issue du changement de réglage. */
 export type ReauthSettingOutcome = { kind: "done"; mode: ReauthModeDto } | { kind: "refused"; refusal: ReauthSettingRefusal } | 
@@ -899,7 +943,9 @@ export type ReauthStateDto = {
 	hasDeviceKey: boolean,
 };
 
-export type RoleDto = "admin" | "readonly";
+export type RestartDto = "unless_stopped" | "always" | "on_failure" | "none" | "supervisor" | "unknown";
+
+export type RoleDto = "admin" | "readonly" | "unknown";
 
 /**  Une seconde de la vie de la machine. */
 export type SampleDto = {
@@ -988,6 +1034,19 @@ export type ServiceDto = {
 	/**  Ports publiés au-delà de la borne de l'agent, non listés (`BR-SVC-021`). */
 	portsOmitted: number,
 	hostNetwork: boolean,
+	mounts: MountDto[],
+	mountsOmitted: number,
+	restart: RestartDto,
+	/**  Noms des variables (jamais une valeur). Vide aussi pour un service adopté dont le détail est réservé. */
+	envNames: HiddenText[],
+	envNamesOmitted: number,
+	/**  La commande lancée ; `None` : « Commande de l'image ». */
+	command: HiddenText[] | null,
+	/**  Délai d'arrêt en secondes. */
+	graceS: number | null,
+	adopted: AdoptionDto | null,
+	/**  Service adopté dont la commande et les noms de variables sont réservés à ce compte. */
+	detailsReserved: boolean,
 };
 
 /**
@@ -1017,6 +1076,12 @@ export type ServicesEvent = {
 	 *  capacité) ; l'interface ne la remplace jamais par l'heure à laquelle elle traite l'événement.
 	 */
 	engineReceivedAt: number | null,
+	/**
+	 *  Les noms de variables et la commande de cet état ont été LUS sur le serveur depuis le démarrage de la
+	 *  liaison. Faux pour une liste relue du disque : elle est écrite sans eux (ils peuvent porter des secrets),
+	 *  donc leur absence y veut dire « pas lus », jamais « aucune variable » ni « commande de l'image ».
+	 */
+	detailsKnown: boolean,
 	view: ServicesViewDto,
 };
 

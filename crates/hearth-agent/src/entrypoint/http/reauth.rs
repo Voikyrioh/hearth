@@ -25,11 +25,13 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use hearth_proto::admin_act::{ActKind, AdminAct, RouteAct, decode_segment};
 use hearth_proto::api::accounts::{
-    ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest,
+    ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest, RoleName,
 };
-use hearth_proto::api::reauth::{Reauth, SetReauthRequest, lenient_reauth, reauth_refusal};
+use hearth_proto::api::reauth::{
+    Reauth, ReauthMode, SetReauthRequest, lenient_reauth, reauth_refusal,
+};
 use hearth_proto::api::security::SetAttackModeRequest;
-use hearth_proto::api::service_ops::OperationDecision;
+use hearth_proto::api::service_ops::{OperationChoice, OperationDecision};
 use hearth_proto::api::services::AdoptRequest;
 use hearth_proto::api::update::AgentUpdateRequest;
 use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
@@ -81,17 +83,33 @@ enum Parsed {
 impl Parsed {
     /// `None` : corps illisible pour ce que la route attend.
     fn read(kind: ActKind, bytes: &[u8]) -> Option<Self> {
+        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une valeur d'énumération que cette version ne connaît pas (client
+        // plus récent) rend le corps illisible pour la route : refus de validation avant toute confirmation.
         match kind {
-            ActKind::AccountCreate => serde_json::from_slice(bytes).ok().map(Self::Create),
-            ActKind::AccountRole => serde_json::from_slice(bytes).ok().map(Self::Role),
+            ActKind::AccountCreate => serde_json::from_slice(bytes)
+                .ok()
+                .filter(|request: &CreateAccountRequest| request.role != RoleName::Unknown)
+                .map(Self::Create),
+            ActKind::AccountRole => serde_json::from_slice(bytes)
+                .ok()
+                .filter(|request: &ChangeRoleRequest| request.role != RoleName::Unknown)
+                .map(Self::Role),
             ActKind::AgentUpdate => serde_json::from_slice(bytes).ok().map(Self::Update),
             ActKind::AttackModeEnable | ActKind::AttackModeDisable => {
                 serde_json::from_slice(bytes).ok().map(Self::Attack)
             }
             ActKind::AccountPasswordOwn => serde_json::from_slice(bytes).ok().map(Self::Own),
-            ActKind::ReauthSetting => serde_json::from_slice(bytes).ok().map(Self::Setting),
+            ActKind::ReauthSetting => serde_json::from_slice(bytes)
+                .ok()
+                .filter(|request: &SetReauthRequest| request.password != ReauthMode::Unknown)
+                .map(Self::Setting),
             ActKind::ServicesAdopt => serde_json::from_slice(bytes).ok().map(Self::Adopt),
-            ActKind::OperationDecide => serde_json::from_slice(bytes).ok().map(Self::Decide),
+            // Un choix inconnu (client plus récent, ou texte inventé) n'est pas un acte : refus de validation
+            // avant toute confirmation, jamais un acte signé avec un choix par défaut (BR-COMPAT-001 point 5).
+            ActKind::OperationDecide => serde_json::from_slice(bytes)
+                .ok()
+                .filter(|request: &OperationDecision| request.choice != OperationChoice::Unknown)
+                .map(Self::Decide),
             ActKind::AccountPassword
             | ActKind::AccountDelete
             | ActKind::SessionsRevoke
@@ -109,9 +127,11 @@ impl Parsed {
         }
     }
 
-    /// L'acte reconstruit : sa cible vient du chemin, ses paramètres du corps lu.
-    fn act<'a>(&'a self, kind: ActKind, id: &'a str) -> AdminAct<'a> {
-        match (self, kind) {
+    /// L'acte reconstruit : sa cible vient du chemin, ses paramètres du corps lu. `None` : ce corps ne
+    /// correspond pas à ce genre d'acte (jamais atteint par `read`, mais jamais rattrapé par un autre acte :
+    /// pas de repli, par exemple vers la révocation de sessions).
+    fn act<'a>(&'a self, kind: ActKind, id: &'a str) -> Option<AdminAct<'a>> {
+        Some(match (self, kind) {
             (Self::Create(request), _) => AdminAct::AccountCreate {
                 username: &request.username,
                 role: request.role,
@@ -144,13 +164,34 @@ impl Parsed {
                 target: id,
                 choice: request.choice,
             },
-
             (Self::TargetOnly, ActKind::AccountPassword) => {
                 AdminAct::AccountPassword { target: id }
             }
             (Self::TargetOnly, ActKind::AccountDelete) => AdminAct::AccountDelete { target: id },
-            (Self::TargetOnly, _) => AdminAct::SessionsRevoke { target: id },
-        }
+            (Self::TargetOnly, ActKind::SessionsRevoke) => AdminAct::SessionsRevoke { target: id },
+            // Les autres genres lisent un corps (autre variante) ou n'ont aucune route : jamais « cible seule ».
+            // Liste exhaustive, sans `_` : un genre ajouté à `ActKind` oblige à choisir ici.
+            (
+                Self::TargetOnly,
+                ActKind::AccountCreate
+                | ActKind::AccountRole
+                | ActKind::AccountPasswordOwn
+                | ActKind::AgentUpdate
+                | ActKind::AttackModeEnable
+                | ActKind::AttackModeDisable
+                | ActKind::ReauthSetting
+                | ActKind::ServicesAdopt
+                | ActKind::OperationDecide
+                | ActKind::ServiceStart
+                | ActKind::ServiceStop
+                | ActKind::ServiceRestart
+                | ActKind::ServiceDeploy
+                | ActKind::ServiceDelete
+                | ActKind::BackupCreate
+                | ActKind::BackupDelete
+                | ActKind::GameSettingsSave,
+            ) => return None,
+        })
     }
 }
 
@@ -291,6 +332,10 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
     let Some(parsed) = Parsed::read(kind, &bytes) else {
         return ApiError::invalid("body", "Corps de requête illisible").into_response();
     };
+    // Le corps lu doit correspondre au genre d'acte de la route : sinon il n'y a pas d'acte à confirmer.
+    if parsed.act(kind, &id).is_none() {
+        return ApiError::invalid("body", "Corps de requête illisible").into_response();
+    }
     // Le mode attaque a deux gestes sur une route : le bon `kind` vient de `active`.
     let kind = match &parsed {
         Parsed::Attack(request) if request.active => ActKind::AttackModeEnable,
@@ -323,7 +368,9 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
             let session = caller.0.clone();
             let work = tokio::spawn(
                 async move {
-                    let act = parsed.act(kind, &id);
+                    let Some(act) = parsed.act(kind, &id) else {
+                        return Err(ReauthError::Unavailable);
+                    };
                     sessions
                         .reauthenticate(&session, &token, &act, &reauth, &client)
                         .await
@@ -348,6 +395,65 @@ pub async fn layer(State(state): State<ReauthState>, request: Request, next: Nex
             }
             next.run(Request::from_parts(parts, Body::from(bytes)))
                 .await
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn body(value: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&value).expect("json")
+    }
+
+    /// FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un client plus récent envoie une valeur que cette version ne
+    /// connaît pas dans une commande. Le corps est illisible pour la route (refus de validation typé,
+    /// avant toute confirmation), jamais un acte reconstruit avec une valeur par défaut.
+    #[test]
+    fn a_command_carrying_a_value_this_version_does_not_know_is_unreadable_for_its_route() {
+        let create = body(json!({ "username": "marie", "password": "x", "role": "futur" }));
+        assert!(Parsed::read(ActKind::AccountCreate, &create).is_none());
+        let role = body(json!({ "role": "futur" }));
+        assert!(Parsed::read(ActKind::AccountRole, &role).is_none());
+        let decision = body(json!({ "choice": "futur" }));
+        assert!(Parsed::read(ActKind::OperationDecide, &decision).is_none());
+        let unknown_word = body(json!({ "choice": "unknown" }));
+        assert!(Parsed::read(ActKind::OperationDecide, &unknown_word).is_none());
+        let setting = body(json!({ "password": "futur" }));
+        assert!(Parsed::read(ActKind::ReauthSetting, &setting).is_none());
+        // Les valeurs connues et un champ en trop restent lus.
+        let known =
+            body(json!({ "username": "marie", "password": "x", "role": "admin", "futur": 1 }));
+        assert!(Parsed::read(ActKind::AccountCreate, &known).is_some());
+        assert!(
+            Parsed::read(ActKind::ReauthSetting, &body(json!({ "password": "each" }))).is_some()
+        );
+        assert!(
+            Parsed::read(ActKind::OperationDecide, &body(json!({ "choice": "keep" }))).is_some()
+        );
+    }
+
+    /// Un genre d'acte ne se reconstruit jamais d'un corps d'un autre genre, et « cible seule » ne retombe
+    /// jamais sur la révocation de sessions (revue de la PR 94).
+    #[test]
+    fn a_target_only_body_never_stands_for_an_act_that_reads_a_body() {
+        for kind in ActKind::ALL {
+            let act = Parsed::TargetOnly.act(kind, "x");
+            let target_only = matches!(
+                kind,
+                ActKind::AccountPassword
+                    | ActKind::AccountDelete
+                    | ActKind::SessionsRevoke
+                    | ActKind::ServiceRelease
+                    | ActKind::OperationCancel
+            );
+            assert_eq!(act.is_some(), target_only, "{kind:?}");
+            if let Some(act) = act {
+                assert_eq!(act.kind(), kind, "{kind:?}");
+            }
         }
     }
 }

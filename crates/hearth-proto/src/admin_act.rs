@@ -270,6 +270,8 @@ fn role_text(role: RoleName) -> &'static str {
     match role {
         RoleName::Admin => "admin",
         RoleName::Readonly => "readonly",
+        // Jamais signé ni accepté : un rôle inconnu est refusé avant toute signature (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+        RoleName::Unknown => "unknown",
     }
 }
 
@@ -432,7 +434,8 @@ impl AdminAct<'_> {
 pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
     match act {
         AdminAct::AccountCreate { role, .. } | AdminAct::AccountRole { role, .. } => {
-            *role != RoleName::Admin
+            // Seul un rôle lecture seule est couvert : un rôle inconnu se traite comme un administrateur, le plus strict (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+            *role == RoleName::Readonly
         }
         AdminAct::AccountDelete { .. } | AdminAct::SessionsRevoke { .. } => true,
         AdminAct::AccountPassword { .. }
@@ -444,18 +447,23 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         // (BR-ADOPT-008). Rendre un service retire un accès, il n'en donne pas (BR-ADOPT-013).
         | AdminAct::ServicesAdopt { .. } => false,
         AdminAct::ServiceRelease { .. } => true,
-        // Déclarés par HRT-144. Piloter un service qui existe déjà, annuler ou trancher une opération déjà
-        // confirmée, sauvegarder et régler un jeu : le mot de passe de la session suffit à 5 minutes. Créer
-        // un service (image et variables choisies par le compte), supprimer un service ou une sauvegarde :
-        // le mot de passe à chaque fois, comme pour adopter (ce sont les gestes qui ne se rattrapent pas).
+        // Déclarés par HRT-144. DÉFAUT NON VALIDÉ par le propriétaire (revue de la PR 94) : piloter un service
+        // qui existe déjà, ANNULER une opération (le geste qui va dans le sens sûr : il ne retire que ce que
+        // l'opération avait créé pour elle-même), sauvegarder et régler un jeu : le mot de passe de la session
+        // suffit à 5 minutes. Créer un service (image et variables choisies par le compte), supprimer un
+        // service ou une sauvegarde : le mot de passe à chaque fois, comme pour adopter (ce sont les gestes
+        // qui ne se rattrapent pas). RÉPONDRE à une décision (`continue`, `revert`, `keep`, `verified`, et
+        // tout autre choix) : le mot de passe à chaque fois, quelle que soit la réponse, même `cancel` : une
+        // décision peut valider ce que l'acte d'origine exigeait de confirmer (poursuivre une suppression en
+        // attente, lancer un retour arrière, fermer une opération « à vérifier » sur la foi du compte).
         AdminAct::ServiceStart { .. }
         | AdminAct::ServiceStop { .. }
         | AdminAct::ServiceRestart { .. }
         | AdminAct::OperationCancel { .. }
         | AdminAct::BackupCreate { .. }
-        | AdminAct::OperationDecide { .. }
         | AdminAct::GameSettingsSave { .. } => true,
-        AdminAct::ServiceDeploy { .. }
+        AdminAct::OperationDecide { .. }
+        | AdminAct::ServiceDeploy { .. }
         | AdminAct::ServiceDelete { .. }
         | AdminAct::BackupDelete { .. } => false,
     }
@@ -917,7 +925,24 @@ mod tests {
         revert.write_to(&mut b);
         assert_ne!(a, b);
         assert_eq!(keep.code(), 0x1D);
-        assert!(covered_by_elevation(&keep));
+        // Défaut non validé : répondre à une décision demande le mot de passe, quel que soit le choix.
+        for choice in [
+            OperationChoice::Continue,
+            OperationChoice::Cancel,
+            OperationChoice::Revert,
+            OperationChoice::Keep,
+            OperationChoice::Verified,
+            OperationChoice::Unknown,
+        ] {
+            let decide = AdminAct::OperationDecide {
+                target: "01OP",
+                choice,
+            };
+            assert!(!covered_by_elevation(&decide), "{choice:?}");
+        }
+        assert!(covered_by_elevation(&AdminAct::OperationCancel {
+            target: "01OP"
+        }));
     }
 
     #[test]

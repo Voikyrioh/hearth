@@ -72,7 +72,7 @@ pub use machine_info::MachineInfo;
 pub use monotonic_clock::MonotonicClock;
 pub use op_journal::{
     CreatedObjects, DecisionOffer, JournalError, NewOp, OpJournal, OpRecord, Progress,
-    RemoveOutcome, ServiceObserver, StepGuard,
+    RecordedContainers, RecordedService, RemoveOutcome, ServiceObserver, StepGuard,
 };
 pub use operation_repo::{OperationRepo, OperationTx};
 pub use password_hasher::{HashError, PasswordHasher};

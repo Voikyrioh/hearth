@@ -10,7 +10,7 @@
 //! Une valeur illisible (`NaN`, quantité totale nulle) est normale : on n'alerte pas sur une
 //! mesure qu'on n'a pas.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub const ATTENTION_PERCENT: u64 = 85;
 pub const CRITICAL_PERCENT: u64 = 95;
@@ -26,7 +26,7 @@ pub const CPU_HOLD_MS: i64 = 30_000;
 pub const CPU_MAX_GAP_MS: i64 = 5_000;
 
 /// Niveau d'alerte, du moins grave au plus grave (l'ordre sert aux comparaisons et à `max`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Level {
     Normal,

@@ -51,6 +51,7 @@ export default defineConfig({
         "hrt38-40.spec.ts",
         "services.spec.ts",
         "services-rights.spec.ts",
+        "hrt63-detail.spec.ts",
         "hrt133-sessions.spec.ts",
         "hrt134-141-ux.spec.ts",
       ],

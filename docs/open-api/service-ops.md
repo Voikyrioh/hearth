@@ -37,7 +37,7 @@ Le journal des opérations de service (`service_ops`, `service_op_steps`) rendu 
 
 ## `DELETE /api/v1/operations/services/{id}`
 
-- **Droit** : « gérer les services » (ADR-0041) ; **acte d'administration** `OperationCancel` (`0x10`, couvert par l'élévation de 5 minutes) : corps `{ "reauth": { … } }` (preuve de la clé du poste liée à l'identifiant de l'opération, mot de passe sauf élévation). Suivi par `Idempotency-Key`.
+- **Droit** : « gérer les services » (ADR-0041) ; **acte d'administration** `OperationCancel` (`0x10`, couvert par l'élévation de 5 minutes : défaut non validé par le propriétaire, seule l'annulation est couverte) : corps `{ "reauth": { … } }` (preuve de la clé du poste liée à l'identifiant de l'opération, mot de passe sauf élévation). Suivi par `Idempotency-Key`.
 - Annule l'opération avant son point de non-retour. Une opération en cours passe en `cancelling` (son exécuteur la clôt) ; une opération `accepted` ou `awaiting_decision` passe en `cancelled` tout de suite, son verrou est rendu.
 - **Idempotent** : une opération déjà annulée par un compte répond `200` avec la même issue, sans nouvelle entrée de journal.
 - Réponse `200` : l'`OperationView` après l'annulation.
@@ -46,9 +46,10 @@ Le journal des opérations de service (`service_ops`, `service_op_steps`) rendu 
 
 ## `POST /api/v1/operations/services/{id}/decision`
 
-- **Droit** : « gérer les services » ; **acte** `OperationDecide` (`0x1D`, couvert par l'élévation) ; **le choix est signé** avec l'identifiant de l'opération. Corps : `{ "choice": "continue" | "cancel" | "revert" | "keep" | "verified", "reauth": { … } }`.
+- **Droit** : « gérer les services » ; **acte** `OperationDecide` (`0x1D`, **jamais** couvert par l'élévation : le mot de passe est redemandé à chaque réponse, quel que soit le choix ; défaut non validé par le propriétaire, revue de la PR 94) ; **le choix est signé** avec l'identifiant de l'opération. Corps : `{ "choice": "continue" | "cancel" | "revert" | "keep" | "verified", "reauth": { … } }`.
 - Applique le choix à une opération `awaiting_decision` ou `needs_attention`. Réponse `200` : l'`OperationView` après la décision.
-- Erreurs : `404 OPERATION_NOT_FOUND` ; `409 DECISION_NOT_OFFERED` avec `details.reason` : `not_waiting` (rien n'est attendu), `not_offered` (choix absent de `decision.choices`, ou choix inconnu de l'agent), `not_applicable`, `expired` (attendue depuis 15 minutes ou plus : refusée avant même le balayage, qui l'annule ensuite avec la cause `decision_expired`) ; les erreurs de droit et de confirmation comme ci-dessus.
+- Un choix que l'agent ne connaît pas (`unknown`, ou un texte inventé) : `422 VALIDATION_ERROR` (`details.field = "body"`) AVANT toute confirmation, aucun mot de passe essayé. `cancel` suit la règle de l'annulation : `409 TOO_LATE_TO_CANCEL` après le point de non-retour.
+- Erreurs : `404 OPERATION_NOT_FOUND` ; `409 DECISION_NOT_OFFERED` avec `details.reason` : `not_waiting` (rien n'est attendu), `not_offered` (choix connu mais absent de `decision.choices`), `not_applicable`, `expired` (attendue depuis 15 minutes ou plus : refusée avant même le balayage, qui l'annule ensuite avec la cause `decision_expired`) ; les erreurs de droit et de confirmation comme ci-dessus.
 - « Revenir » démarre un retour arrière (`rolling_back`), jamais un « revenu » sans geste (BR-EDIT-031).
 - **Journal d'activité** : réussite sous l'action du genre de l'opération, cible « service {nom} : décision « {poursuivre|annuler|revenir|garder|j'ai vérifié} » » ; refus et échec sous `operation.decide`.
 
@@ -57,13 +58,13 @@ Le journal des opérations de service (`service_ops`, `service_op_steps`) rendu 
 `{ "type": "operation", …les champs d'`OperationView` à plat… }` (`ServicesMessage::Operation`).
 
 - À l'abonnement au sujet `services` : un message pour chaque opération EN COURS que le compte voit ; puis un message à chaque changement (acceptation, étape, progression, décision, fin).
-- **Au plus un message par 500 ms et par opération** et par connexion ; les états intermédiaires se fondent, **le dernier état d'une opération n'est jamais perdu** (il part à l'échéance). Une rafale de progression est publiée au plus toutes les 100 ms côté agent. Un abonné lent perd les plus anciens changements et reçoit l'état des opérations en cours : il ne ralentit jamais l'agent.
-- Filtré par compte comme la lecture (BR-OPS-001) ; si le droit « gérer les services » change pendant le flux, les opérations en cours repartent avec ce que le compte voit maintenant.
-- Un client qui ne connaît pas ce message (`ServicesMessage::Unknown`) l'ignore. Le jeu d'un abonné qui revient après une coupure : les opérations en cours arrivent à l'abonnement ; l'issue d'une opération terminée pendant la coupure se relit par `GET` (24 heures).
+- **Au plus un message par 500 ms et par opération** et par connexion ; les états intermédiaires se fondent, **le dernier état d'une opération n'est jamais perdu** (il part à l'échéance, ou tout de suite si la cadence est remise à zéro). Une rafale de progression est publiée au plus toutes les 100 ms côté agent. Un abonné lent perd les plus anciens changements et reçoit alors ses états retenus, l'état des opérations en cours, puis l'état final des opérations qu'il suivait et qui ont fini entre-temps : il ne ralentit jamais l'agent, et aucune opération ne reste « en cours » à son écran. Les messages d'une même opération arrivent dans l'ordre de leur état (publications sérialisées).
+- Filtré par compte comme la lecture (BR-OPS-001), la visibilité étant rejugée à chaque envoi ; le droit est relu toutes les 5 secondes : s'il change pendant le flux, les opérations en cours repartent avec ce que le compte voit maintenant (jusqu'à 5 secondes d'avancement d'un service adopté peuvent encore arriver à un compte à qui on retire le droit).
+- Un client qui ne connaît pas ce message lit la trame comme inconnue (`ServerMessage::Unknown`) et l'ignore ; `ServicesMessage` lui-même n'a pas de variante de repli (BR-COMPAT-001 point 2). Le jeu d'un abonné qui revient après une coupure : les opérations en cours arrivent à l'abonnement ; l'issue d'une opération terminée pendant la coupure se relit par `GET` (24 heures).
 
 ## `ServiceItem.busy` et `last_action`
 
-Projections du journal (BR-OPS-005), dans `GET /services` et le sujet `services` : `busy { kind, by, since }` (l'opération non terminée qui tient le service, visible de tous) et `last_action { id, kind, by, status, cause?, forced, finished_at? }` (la dernière terminée). Absents tant que le service n'a aucune opération.
+Projections du journal (BR-OPS-005), dans `GET /services` et le sujet `services` : `busy { kind, by, since }` (l'opération non terminée qui tient le service, visible de tous) et `last_action { id, kind, by, status, cause?, forced, finished_at? }` (la dernière terminée). Absents tant que le service n'a aucune opération, **et absents pour un compte qui ne peut pas lire les opérations du service** (un service adopté sans le droit « gérer les services » : BR-OPS-001, revue de la PR 94). Pour un service créé par Hearth, visibles de tous.
 
 ## Bornes
 

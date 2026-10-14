@@ -14,6 +14,9 @@ pub enum ReauthModeDto {
     Window,
     /// À chaque action.
     Each,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle à l'interface,
+    // jamais prise pour une valeur connue (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+    Unknown,
 }
 
 impl From<ReauthMode> for ReauthModeDto {
@@ -21,6 +24,7 @@ impl From<ReauthMode> for ReauthModeDto {
         match mode {
             ReauthMode::Window => Self::Window,
             ReauthMode::Each => Self::Each,
+            ReauthMode::Unknown => Self::Unknown,
         }
     }
 }
@@ -30,6 +34,8 @@ impl From<ReauthModeDto> for ReauthMode {
         match mode {
             ReauthModeDto::Window => Self::Window,
             ReauthModeDto::Each => Self::Each,
+            // Jamais offert par l'interface ; l'agent refuse un réglage inconnu (`422`).
+            ReauthModeDto::Unknown => Self::Unknown,
         }
     }
 }

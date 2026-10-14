@@ -112,9 +112,7 @@ pub fn apply(current: &mut Option<ServicesState>, message: ServicesMessage) -> b
             state.services.sort_by_cached_key(sort_key);
             true
         }
-        ServicesMessage::ServiceAction(_)
-        | ServicesMessage::Operation(_)
-        | ServicesMessage::Unknown => false,
+        ServicesMessage::ServiceAction(_) | ServicesMessage::Operation(_) => false,
     }
 }
 
@@ -192,7 +190,7 @@ mod tests {
         ServicesMessage::ServicesSnapshot(ServicesState {
             rev,
             engine: engine(EngineState::Ready),
-            services,
+            services: services.into(),
         })
     }
 
@@ -200,7 +198,7 @@ mod tests {
         ServicesMessage::ServicesDelta(ServicesDelta {
             rev,
             engine: None,
-            upserts,
+            upserts: upserts.into(),
             removed: removed.into_iter().map(str::to_owned).collect(),
         })
     }
@@ -297,7 +295,7 @@ mod tests {
         let mut with_engine = ServicesDelta {
             rev: 2,
             engine: Some(engine(EngineState::Stopped)),
-            upserts: vec![],
+            upserts: vec![].into(),
             removed: vec![],
         };
         assert!(apply(
@@ -341,7 +339,7 @@ mod tests {
             ServicesMessage::ServicesDelta(ServicesDelta {
                 rev: 2,
                 engine: Some(degraded.clone()),
-                upserts: vec![],
+                upserts: vec![].into(),
                 removed: vec![],
             })
         ));
@@ -356,7 +354,7 @@ mod tests {
             ServicesMessage::ServicesDelta(ServicesDelta {
                 rev: 4,
                 engine: Some(degraded),
-                upserts: vec![],
+                upserts: vec![].into(),
                 removed: vec![],
             })
         ));
@@ -380,7 +378,7 @@ mod tests {
             ServicesMessage::ServicesSnapshot(ServicesState {
                 rev: 1,
                 engine: view.clone(),
-                services: vec![cut],
+                services: vec![cut].into(),
             }),
         );
         // Un lot sans vue du moteur : la vue (donc ses deux dates) est celle d'avant, rien n'est recalculé ici.

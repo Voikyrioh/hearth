@@ -14,6 +14,7 @@ use hearth_agent::domain::accounts::{Authority, Role};
 use hearth_proto::admin_act::{ActKind, AdminAct};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
+use hearth_proto::api::service_ops::OperationChoice;
 use serde_json::{Value, json};
 use support::api::{Api, Reply, state_with_engine};
 use support::device::{DeviceKey, device_login_body, login_token, reauth_member};
@@ -69,12 +70,22 @@ enum Spec {
     Release {
         key: String,
     },
+    /// Annuler cette opération de service (HRT-144).
+    Cancel {
+        target: String,
+    },
+    /// Répondre à la décision de cette opération (HRT-144) : le choix est signé avec l'identifiant.
+    Decide {
+        target: String,
+        choice: OperationChoice,
+    },
 }
 
 fn role_wire(role: RoleName) -> &'static str {
     match role {
         RoleName::Admin => "admin",
         RoleName::Readonly => "readonly",
+        RoleName::Unknown => unreachable!("jamais signé"),
     }
 }
 
@@ -102,6 +113,11 @@ impl Spec {
             Self::Adopt { keys } => AdminAct::services_adopt(keys.iter().map(String::as_str)),
             Self::Release { key } => AdminAct::ServiceRelease {
                 target: key.as_str().into(),
+            },
+            Self::Cancel { target } => AdminAct::OperationCancel { target },
+            Self::Decide { target, choice } => AdminAct::OperationDecide {
+                target,
+                choice: *choice,
             },
         }
     }
@@ -153,6 +169,16 @@ impl Spec {
                 json!({ "keys": keys }),
             ),
             Self::Release { key } => (Method::POST, format!("/services/{key}/release"), json!({})),
+            Self::Cancel { target } => (
+                Method::DELETE,
+                format!("/operations/services/{target}"),
+                json!({}),
+            ),
+            Self::Decide { target, choice } => (
+                Method::POST,
+                format!("/operations/services/{target}/decision"),
+                json!({ "choice": choice.as_str() }),
+            ),
         }
     }
 
@@ -161,7 +187,7 @@ impl Spec {
     fn altered_all(&self) -> Vec<Spec> {
         let flip = |role: RoleName| match role {
             RoleName::Admin => RoleName::Readonly,
-            RoleName::Readonly => RoleName::Admin,
+            RoleName::Readonly | RoleName::Unknown => RoleName::Admin,
         };
         match self {
             Self::Create { role, .. } => vec![
@@ -211,7 +237,7 @@ impl Spec {
             Self::Setting { mode } => vec![Self::Setting {
                 mode: match mode {
                     ReauthMode::Each => ReauthMode::Window,
-                    ReauthMode::Window => ReauthMode::Each,
+                    ReauthMode::Window | ReauthMode::Unknown => ReauthMode::Each,
                 },
             }],
             Self::Own => Vec::new(),
@@ -229,20 +255,45 @@ impl Spec {
             Self::Release { .. } => vec![Self::Release {
                 key: "c_autre".into(),
             }],
+            Self::Cancel { .. } => vec![Self::Cancel {
+                target: "AUTRE-CIBLE".into(),
+            }],
+            // L'identifiant ET le choix sont signés : changer l'un ou l'autre est un autre acte.
+            Self::Decide { target, choice } => vec![
+                Self::Decide {
+                    target: "AUTRE-CIBLE".into(),
+                    choice: *choice,
+                },
+                Self::Decide {
+                    target: target.clone(),
+                    choice: match choice {
+                        OperationChoice::Continue => OperationChoice::Cancel,
+                        _ => OperationChoice::Continue,
+                    },
+                },
+            ],
         }
     }
 }
 
-/// Les actes de la matrice générique de ce fichier : ceux dont la route existe ET dont la réussite s'écrit
-/// sous leur propre action. Restent à part : les actes déclarés sans route (HRT-144, pas de requête possible)
-/// et l'annulation et la décision d'une opération, dont la réussite s'écrit sous l'action du GENRE de
-/// l'opération (`tests/service_ops_https.rs` les éprouve : preuve liée à l'identifiant et au choix, mot de
-/// passe, élévation, droit).
+/// Les actes de la matrice générique de ce fichier : TOUS ceux dont une route existe, annuler et décider une
+/// opération compris (revue de la PR 94, B1 : la garantie « un acte nouveau ne peut pas échapper à la
+/// matrice » vaut pour les deux actes que HRT-144 ouvre). Restent à part les actes déclarés SANS route : ils
+/// n'ont aucune requête possible, et `the_acts_declared_without_a_route_...` prouve qu'aucune voie ne les
+/// accepte ni ne les tient pour confirmés.
 fn generic_kinds() -> impl Iterator<Item = ActKind> {
-    ActKind::ALL.into_iter().filter(|kind| {
-        !ActKind::DECLARED_WITHOUT_ROUTE.contains(kind)
-            && !matches!(kind, ActKind::OperationCancel | ActKind::OperationDecide)
-    })
+    ActKind::ALL
+        .into_iter()
+        .filter(|kind| !ActKind::DECLARED_WITHOUT_ROUTE.contains(kind))
+}
+
+/// L'action sous laquelle s'écrit la RÉUSSITE d'un acte. Annuler et décider une opération écrivent sous
+/// l'action du GENRE de l'opération (ici un déploiement) ; leurs refus, eux, sous l'action de l'acte.
+fn success_code(kind: ActKind) -> &'static str {
+    match kind {
+        ActKind::OperationCancel | ActKind::OperationDecide => "service.deploy",
+        other => other.audit_code(),
+    }
 }
 
 struct Actor {
@@ -272,6 +323,8 @@ struct Bench {
     marie: Actor,
     carl: Actor,
     paul: Actor,
+    /// De quoi donner une clé de service neuve à chaque opération du banc.
+    services: std::sync::atomic::AtomicU32,
 }
 
 async fn actor(env: &Env, api: &Api, name: &'static str, role: Role) -> Actor {
@@ -299,6 +352,7 @@ async fn bench() -> Bench {
         marie,
         carl,
         paul,
+        services: std::sync::atomic::AtomicU32::new(0),
     }
 }
 
@@ -368,10 +422,70 @@ impl Bench {
                 self.state.services.reload_adopted().await;
                 Spec::Release { key }
             }
+            ActKind::OperationCancel => {
+                self.env.grant_services("marie").await;
+                Spec::Cancel {
+                    target: self.running_operation(false).await,
+                }
+            }
+            ActKind::OperationDecide => {
+                self.env.grant_services("marie").await;
+                Spec::Decide {
+                    target: self.running_operation(true).await,
+                    choice: OperationChoice::Continue,
+                }
+            }
             other => {
                 panic!("{other:?} : pas de scénario dans la matrice générique (voir generic_kinds)")
             }
         }
+    }
+
+    /// Une opération de déploiement en cours sur un service neuf de Hearth (visible de tous), annulable
+    /// (avant son point de non-retour). `waiting` : elle attend une décision, `continue` ou `cancel`.
+    async fn running_operation(&self, waiting: bool) -> String {
+        use hearth_agent::application::service_ops::AcceptRequest;
+        use hearth_agent::domain::ops::{Choice, OpKind, OpPlan, PlannedStep, StepName};
+        use hearth_agent::domain::services::ServiceKey;
+        let step = |text: &str, destructive| PlannedStep {
+            name: StepName::parse(text).unwrap(),
+            destructive,
+        };
+        let plan = OpPlan::new(
+            vec![
+                step("check", false),
+                step("stop_old", true),
+                step("create_new", true),
+            ],
+            Some(StepName::parse("create_new").unwrap()),
+        )
+        .unwrap();
+        let number = self
+            .services
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let key = format!("h_01J9ZY0G3Q8M2K6W4T7V5N{number:04}");
+        let ops = self.state.service_ops.ops().clone();
+        let id = ops
+            .accept(AcceptRequest {
+                op_key: format!("k-{number}"),
+                service: ServiceKey::parse(&key).unwrap(),
+                service_name: "terraria".to_owned(),
+                kind: OpKind::Deploy,
+                account: "marie".to_owned(),
+                plan,
+                forced: false,
+                reserve_name: None,
+                heavy_io: false,
+            })
+            .await
+            .unwrap();
+        ops.start(&id).await.unwrap();
+        if waiting {
+            ops.ask_decision(&id, &[Choice::Continue, Choice::Cancel])
+                .await
+                .unwrap();
+        }
+        id
     }
 
     /// Un conteneur non géré que le moteur connaît, et sa clé.
@@ -428,7 +542,7 @@ impl Bench {
     async fn ok_entries(&self, kind: ActKind) -> i64 {
         self.env.audit_recorder.flush_all().await;
         sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE action = ? AND outcome = 'ok'")
-            .bind(kind.audit_code())
+            .bind(success_code(kind))
             .fetch_one(self.env.db.pool())
             .await
             .unwrap()
@@ -461,7 +575,13 @@ impl Bench {
         .fetch_one(self.env.db.pool())
         .await
         .unwrap();
-        format!("{accounts:?} {counts:?}")
+        // Les opérations de service : un acte refusé ne change ni leur statut ni leur cause.
+        let operations: Vec<(String, String, String)> =
+            sqlx::query_as("SELECT id, status, cause FROM service_ops ORDER BY id")
+                .fetch_all(self.env.db.pool())
+                .await
+                .unwrap();
+        format!("{accounts:?} {counts:?} {operations:?}")
     }
 
     async fn failures(&self) -> i64 {
@@ -1021,6 +1141,9 @@ async fn the_acts_the_elevation_never_covers_ask_for_the_password_during_the_ele
         ActKind::ReauthSetting,
         // Adopter ouvre la frontière de confidentialité : le mot de passe à chaque fois (BR-ADOPT-008).
         ActKind::ServicesAdopt,
+        // Répondre à une décision : le mot de passe à chaque fois, quel que soit le choix (défaut non
+        // validé par le propriétaire, revue de la PR 94).
+        ActKind::OperationDecide,
         ActKind::AttackModeDisable,
     ]
     .into_iter()
@@ -1100,10 +1223,13 @@ async fn the_acts_the_elevation_never_covers_ask_for_the_password_during_the_ele
     b.act(&b.marie, &readonly_account("rouvre2"), PASSWORD)
         .await;
     // Rendre un service adopté retire un accès : couvert aussi (BR-ADOPT-013).
+    // Annuler une opération n'ajoute rien à ce que le compte pouvait déjà faire : couvert aussi (défaut non
+    // validé par le propriétaire, revue de la PR 94).
     for kind in [
         ActKind::AccountDelete,
         ActKind::SessionsRevoke,
         ActKind::ServiceRelease,
+        ActKind::OperationCancel,
     ] {
         let spec = b.spec(kind).await;
         let reply = b.act(&b.marie, &spec, "").await;
@@ -1898,4 +2024,285 @@ async fn opening_an_elevation_is_journaled_with_who_which_device_and_when_never_
     .await
     .unwrap();
     assert_eq!(who, ["marie", "paul"]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// HRT-144 : annuler et décider une opération, et les actes déclarés sans route
+// ---------------------------------------------------------------------------------------------
+
+/// Défaut NON VALIDÉ par le propriétaire (revue de la PR 94) : seule l'ANNULATION est couverte par une saisie
+/// récente du mot de passe ; TOUTE réponse à une décision, quel que soit le choix, le redemande.
+#[tokio::test]
+async fn every_answer_to_a_decision_asks_for_the_password_during_the_elevation_and_only_cancelling_is_covered()
+ {
+    let b = bench().await;
+    b.env.grant_services("marie").await;
+    for (index, choice) in [
+        OperationChoice::Continue,
+        OperationChoice::Cancel,
+        OperationChoice::Revert,
+        OperationChoice::Keep,
+        OperationChoice::Verified,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let opened = b
+            .act(
+                &b.marie,
+                &readonly_account(&format!("ouvre-{index}")),
+                PASSWORD,
+            )
+            .await;
+        assert_eq!(opened.status, StatusCode::CREATED, "{:?}", opened.body);
+        let decide = Spec::Decide {
+            target: b.running_operation(true).await,
+            choice,
+        };
+        let before = b.snapshot().await;
+        let reply = b.act(&b.marie, &decide, "").await;
+        assert_refused_with(
+            &reply,
+            StatusCode::CONFLICT,
+            "POST_NOT_RECOGNIZED",
+            "password_required",
+            &format!("{choice:?} sous élévation"),
+        );
+        assert_eq!(b.snapshot().await, before, "{choice:?}");
+        // Avec le mot de passe, la réponse est examinée (elle peut être refusée pour une autre raison : le
+        // statut de l'opération), mais jamais pour la confirmation.
+        let reply = b.act(&b.marie, &decide, PASSWORD).await;
+        assert_ne!(reply.code(), "POST_NOT_RECOGNIZED", "{choice:?}");
+    }
+    // Annuler, lui, passe sous l'élévation sur la seule preuve de la clé.
+    b.act(&b.marie, &readonly_account("rouvre"), PASSWORD).await;
+    let cancel = Spec::Cancel {
+        target: b.running_operation(false).await,
+    };
+    let verifications = b.env.hasher.verifications();
+    let reply = b.act(&b.marie, &cancel, "").await;
+    assert!(reply.status.is_success(), "{:?}", reply.body);
+    assert_eq!(b.env.hasher.verifications(), verifications);
+}
+
+/// Un choix que cette version ne connaît pas n'est jamais un acte : refus de validation AVANT toute
+/// confirmation (BR-COMPAT-001 point 5), aucun mot de passe essayé, rien ne bouge.
+#[tokio::test]
+async fn a_decision_with_a_choice_this_version_does_not_know_is_refused_before_any_confirmation() {
+    let b = bench().await;
+    b.env.grant_services("marie").await;
+    let target = b.running_operation(true).await;
+    let before = b.snapshot().await;
+    let verifications = b.env.hasher.verifications();
+    for choice in [json!("dance"), json!("unknown"), json!(7), json!(null)] {
+        let reply = b
+            .api
+            .call(
+                Method::POST,
+                &format!("/operations/services/{target}/decision"),
+            )
+            .token(&b.marie.token)
+            .json(&json!({ "choice": choice, "reauth": { "password": PASSWORD } }))
+            .send()
+            .await;
+        assert_eq!(
+            reply.status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{choice} : {:?}",
+            reply.body
+        );
+        assert_eq!(reply.code(), "VALIDATION_ERROR", "{choice}");
+    }
+    assert_eq!(b.snapshot().await, before);
+    assert_eq!(b.env.hasher.verifications(), verifications);
+}
+
+/// Un acte déclaré sans route (HRT-144 : démarrer, arrêter, redémarrer, déployer, supprimer, sauvegarder,
+/// supprimer une sauvegarde, régler un jeu) n'a AUCUNE voie : ni route, ni lecture de corps par la couche
+/// générique, et une preuve valide signée pour lui n'est acceptée par aucune route existante, ne confirme
+/// rien et ne change rien.
+#[tokio::test]
+async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_nothing() {
+    use hearth_proto::admin_act::ROUTES;
+    let b = bench().await;
+    b.env.grant_services("marie").await;
+    let key = "c_0123abcd";
+    let declared: Vec<(ActKind, AdminAct<'_>)> = vec![
+        (
+            ActKind::ServiceStart,
+            AdminAct::ServiceStart { target: key.into() },
+        ),
+        (
+            ActKind::ServiceStop,
+            AdminAct::ServiceStop { target: key.into() },
+        ),
+        (
+            ActKind::ServiceRestart,
+            AdminAct::ServiceRestart { target: key.into() },
+        ),
+        (
+            ActKind::ServiceDeploy,
+            AdminAct::ServiceDeploy {
+                name: "jeu",
+                image: "x:1",
+                digest: [7; 32],
+                env_count: 0,
+                command: false,
+            },
+        ),
+        (
+            ActKind::ServiceDelete,
+            AdminAct::ServiceDelete {
+                target: key.into(),
+                data: true,
+                backups: true,
+            },
+        ),
+        (
+            ActKind::BackupCreate,
+            AdminAct::BackupCreate {
+                target: key.into(),
+                mode: "stopped",
+                ignored: 0,
+            },
+        ),
+        (
+            ActKind::BackupDelete,
+            AdminAct::BackupDelete { target: "01BK" },
+        ),
+        (
+            ActKind::GameSettingsSave,
+            AdminAct::GameSettingsSave {
+                target: key.into(),
+                base_rev: 1,
+                changes: 1,
+                ids_digest: [3; 32],
+                origin: "form",
+                effect: "none",
+            },
+        ),
+    ];
+    assert_eq!(declared.len(), ActKind::DECLARED_WITHOUT_ROUTE.len());
+    for kind in ActKind::DECLARED_WITHOUT_ROUTE {
+        assert!(
+            declared
+                .iter()
+                .any(|(declared_kind, _)| *declared_kind == kind),
+            "{kind:?}"
+        );
+        // Aucune route d'acte ne le porte.
+        assert!(
+            ROUTES.iter().all(|route| !route.kinds.contains(&kind)),
+            "{kind:?}"
+        );
+    }
+    // Des chemins où un lot futur mettrait ces gestes : rien n'y répond tant qu'il n'existe pas.
+    let candidates = [
+        (Method::POST, "/services/c_0123abcd/start"),
+        (Method::POST, "/services/c_0123abcd/stop"),
+        (Method::POST, "/services/c_0123abcd/restart"),
+        (Method::POST, "/services"),
+        (Method::DELETE, "/services/c_0123abcd"),
+        (Method::PUT, "/services/c_0123abcd"),
+        (Method::PATCH, "/services/c_0123abcd"),
+        (Method::POST, "/services/c_0123abcd/backups"),
+        (Method::POST, "/backups"),
+        (Method::DELETE, "/backups/01BK"),
+        (Method::PUT, "/services/c_0123abcd/settings"),
+        (Method::POST, "/deployments"),
+        (Method::POST, "/operations/services"),
+    ];
+    let before = b.snapshot().await;
+    let verifications = b.env.hasher.verifications();
+    for (kind, act) in &declared {
+        let member =
+            reauth_member(&b.api, &b.marie.key, "marie", &b.marie.token, act, PASSWORD).await;
+        // 1. Aucune route à ce chemin ne l'accepte.
+        for (method, path) in &candidates {
+            let reply = b
+                .api
+                .call(method.clone(), path)
+                .token(&b.marie.token)
+                .json(&json!({ "reauth": member }))
+                .send()
+                .await;
+            assert!(
+                matches!(reply.status.as_u16(), 404 | 405),
+                "{kind:?} {method} {path} : {} {:?}",
+                reply.status,
+                reply.body
+            );
+        }
+        // 2. Aucune route d'acte existante ne prend sa preuve pour la sienne : elle est refusée (preuve
+        //    d'un autre acte, ou corps illisible pour la route), jamais acceptée.
+        for route in ROUTES {
+            let path = route
+                .pattern
+                .replace("{id}", "x")
+                .replace("{key}", "c_0123abcd");
+            let method = Method::from_bytes(route.method.as_bytes()).unwrap();
+            let reply = b
+                .api
+                .call(method, &path)
+                .token(&b.marie.token)
+                .json(&json!({ "reauth": member }))
+                .send()
+                .await;
+            assert!(
+                !reply.status.is_success(),
+                "{kind:?} sur {} {path} : {} {:?}",
+                route.method,
+                reply.status,
+                reply.body
+            );
+        }
+        // 3. Rien n'a été écrit au journal d'activité comme réussi pour cet acte.
+        assert_eq!(b.ok_entries(*kind).await, 0, "{kind:?}");
+    }
+    assert_eq!(b.snapshot().await, before, "rien n'a changé");
+    assert_eq!(
+        b.env.hasher.verifications(),
+        verifications,
+        "aucun mot de passe n'a été essayé : la preuve d'un autre acte est refusée avant"
+    );
+}
+
+/// Le droit « gérer les services » est exigé AVANT la confirmation : un compte sans le droit (administrateur
+/// ou lecture seule) qui présente une confirmation parfaite pour annuler ou décider reçoit le refus du droit,
+/// rien ne change, aucun mot de passe n'est essayé ; avec le droit, le même acte passe.
+#[tokio::test]
+async fn an_account_without_the_services_right_cannot_cancel_or_decide_even_with_a_valid_confirmation()
+ {
+    let b = bench().await;
+    let cancel = Spec::Cancel {
+        target: b.running_operation(false).await,
+    };
+    let decide = Spec::Decide {
+        target: b.running_operation(true).await,
+        choice: OperationChoice::Continue,
+    };
+    for who in [&b.marie, &b.carl] {
+        for spec in [&cancel, &decide] {
+            let before = b.snapshot().await;
+            let verifications = b.env.hasher.verifications();
+            let reply = b.act(who, spec, PASSWORD).await;
+            assert_eq!(
+                reply.status,
+                StatusCode::FORBIDDEN,
+                "{} / {spec:?} : {:?}",
+                who.name,
+                reply.body
+            );
+            assert_eq!(reply.code(), "FORBIDDEN_ROLE");
+            assert_eq!(reply.body["error"]["details"]["missing"], "services");
+            assert_eq!(b.snapshot().await, before, "{} / {spec:?}", who.name);
+            assert_eq!(b.env.hasher.verifications(), verifications);
+        }
+    }
+    // Avec le droit, le même acte passe.
+    b.env.grant_services("marie").await;
+    for spec in [&cancel, &decide] {
+        let reply = b.act(&b.marie, spec, PASSWORD).await;
+        assert!(reply.status.is_success(), "{spec:?} : {:?}", reply.body);
+    }
 }

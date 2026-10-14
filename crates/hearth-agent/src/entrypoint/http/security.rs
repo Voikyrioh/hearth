@@ -5,7 +5,7 @@
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, State};
-use hearth_proto::api::reauth::{AdminReauthInfo, SetReauthRequest};
+use hearth_proto::api::reauth::{AdminReauthInfo, ReauthMode, SetReauthRequest};
 use hearth_proto::api::security::{
     AlertInfo, AttackModeEnd, AttackModeInfo, AttackModeState, SecurityResponse, SecurityView,
     SessionDevice, SetAttackModeRequest,
@@ -143,6 +143,13 @@ pub async fn set_reauth(
     body: Result<Json<SetReauthRequest>, JsonRejection>,
 ) -> Result<Json<AdminReauthInfo>, ApiError> {
     let Json(request) = body?;
+    // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un réglage que cette version ne connaît pas est refusé, jamais écrit.
+    if request.password == ReauthMode::Unknown {
+        return Err(ApiError::invalid(
+            "password",
+            "Réglage inconnu de cet agent",
+        ));
+    }
     state
         .sessions
         .set_reauth_mode(&caller.account, request.password, &by)

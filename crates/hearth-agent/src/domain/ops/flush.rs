@@ -106,6 +106,22 @@ impl<T> OpFlush<T> {
             .min()
     }
 
+    /// Rend TOUS les états retenus, sans attendre l'échéance, et les oublie : de quoi ne rien perdre quand la
+    /// cadence est remise à zéro (abonné lent, droit changé). Par opération la plus anciennement servie
+    /// d'abord. Les suivis eux-mêmes restent.
+    pub fn drain(&mut self) -> Vec<T> {
+        let mut held: Vec<(u64, String)> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.pending.is_some())
+            .map(|(id, entry)| (entry.last_sent, id.clone()))
+            .collect();
+        held.sort();
+        held.into_iter()
+            .filter_map(|(_, id)| self.entries.get_mut(&id)?.pending.take())
+            .collect()
+    }
+
     /// Oublie l'opération (elle a disparu pour cet abonné) : ni suivi ni état retenu.
     pub fn forget(&mut self, id: &str) {
         self.entries.remove(id);
@@ -208,6 +224,20 @@ mod tests {
             assert!(flush.tracked() <= MAX_TRACKED_OPS);
         }
         assert_eq!(flush.due(600).first(), Some(&9_999));
+    }
+
+    #[test]
+    fn draining_gives_back_every_held_state_at_once_and_only_those() {
+        let mut flush = OpFlush::new();
+        assert_eq!(flush.offer(0, "a", "a1"), Some("a1"));
+        assert_eq!(flush.offer(10, "b", "b1"), Some("b1"));
+        assert_eq!(flush.offer(20, "a", "a-final"), None);
+        assert_eq!(flush.offer(30, "b", "b-final"), None);
+        assert_eq!(flush.offer(40, "c", "c1"), Some("c1"));
+        // Rien n'attend l'échéance : les deux états finaux sortent maintenant, le plus ancien servi d'abord.
+        assert_eq!(flush.drain(), vec!["a-final", "b-final"]);
+        assert!(flush.drain().is_empty());
+        assert_eq!(flush.next_deadline(), None);
     }
 
     #[test]

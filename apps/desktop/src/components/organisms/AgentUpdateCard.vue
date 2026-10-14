@@ -66,6 +66,7 @@ const compat = computed(() =>
 );
 const compatMessage = computed(() => {
   if (compat.value === "incompatible_client") return t("link.clientTooOld");
+  if (props.server.role === "unknown") return t("link.agentTooOldRoleUnknown");
   return t(isAdmin.value ? "link.agentTooOld" : "link.agentTooOldReadonly");
 });
 
@@ -91,7 +92,12 @@ const announcement = computed(() =>
 const showButton = computed(
   () => available.value !== null && view.value?.managed === false && !running.value,
 );
-const hint = computed(() => (isAdmin.value ? undefined : t("agentUpdate.readOnlyHint")));
+const hint = computed(() => {
+  if (isAdmin.value) return undefined;
+  return t(
+    props.server.role === "unknown" ? "agentUpdate.roleUnknownHint" : "agentUpdate.readOnlyHint",
+  );
+});
 
 const history = computed(() => {
   const last = view.value?.last;

@@ -10,7 +10,14 @@ import { useCurrentServer } from "@/composables/useCurrentServer";
 import { usePageData } from "@/composables/usePageData";
 import { useResumeMinutes } from "@/composables/useResumeMinutes";
 import { reportUiError } from "@/errors/report";
-import { type AttackMode, alertVisible, getLinkBridge, type TrustedDevice } from "@/link";
+import {
+  type AttackMode,
+  alertVisible,
+  getLinkBridge,
+  modeOn,
+  modeUnknown,
+  type TrustedDevice,
+} from "@/link";
 import { attackModeBlock } from "@/security/gate";
 import { useDevicesStore } from "@/stores/devices";
 import { useLinkStore } from "@/stores/link";
@@ -74,7 +81,9 @@ watch(
 const removing = ref<TrustedDevice | null>(null);
 
 function change() {
-  security.ask(serverId.value, mode.value.state === "off");
+  // Un état que ce client ne lit pas ne fonde aucun geste (BR-COMPAT-001 point 4) : ni activer ni désactiver.
+  if (modeUnknown(mode.value)) return;
+  security.ask(serverId.value, !modeOn(mode.value));
 }
 
 // Poste sans clé enregistrée et sans mot de passe mémorisé : se reconnecter par mot de passe l'inscrit.
@@ -98,7 +107,8 @@ async function reconnect() {
       :alert="securityEntry.state.alert"
       :role="server?.role ?? 'readonly'"
       :server-id="serverId"
-      :mode-on="mode.state !== 'off'"
+      :mode-on="modeOn(mode)"
+      :mode-unknown="modeUnknown(mode)"
     />
     <AttackModePanel
       :mode="mode"

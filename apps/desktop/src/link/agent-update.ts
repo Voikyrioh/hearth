@@ -9,10 +9,18 @@ import type { AgentUpdateOutcome as BoundOutcome } from "@/bindings";
  */
 
 /** Les étapes visibles d'une mise à jour (BR-UPDATE-013), dans l'ordre ; `done` la clôt. */
-export type UpdateStep = "download" | "verify" | "install" | "restart" | "check" | "done";
+// "unknown" : une étape d'un agent plus récent que ce client (HRT-143, FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB).
+export type UpdateStep =
+  | "download"
+  | "verify"
+  | "install"
+  | "restart"
+  | "check"
+  | "done"
+  | "unknown";
 
 /** Les étapes affichées, dans l'ordre (hors `done`). */
-export const UPDATE_STEPS: readonly Exclude<UpdateStep, "done">[] = [
+export const UPDATE_STEPS: readonly Exclude<UpdateStep, "done" | "unknown">[] = [
   "download",
   "verify",
   "install",
@@ -20,7 +28,8 @@ export const UPDATE_STEPS: readonly Exclude<UpdateStep, "done">[] = [
   "check",
 ];
 
-export type UpdateOutcome = "succeeded" | "rolled_back" | "failed";
+// "unknown" : ni réussite ni échec affirmés (agent plus récent).
+export type UpdateOutcome = "succeeded" | "rolled_back" | "failed" | "unknown";
 
 /** Pourquoi une mise à jour n'a pas abouti ; `unknown` : une raison que ce client ne connaît pas. */
 export type UpdateReason =

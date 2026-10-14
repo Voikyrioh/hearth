@@ -75,6 +75,9 @@ pub struct DeviceView {
 pub enum TrustError {
     #[error(transparent)]
     Crypto(#[from] CryptoError),
+    /// L'usage demandé pour le défi n'existe pas dans cette version (client plus récent) : refusé.
+    #[error("Usage de défi inconnu")]
+    UnknownPurpose,
 }
 
 #[derive(Debug, Error)]
@@ -211,15 +214,13 @@ impl TrustService {
         purpose: ChallengePurpose,
         addr: &str,
     ) -> Result<ChallengeResponse, TrustError> {
+        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : jamais de défi pour un usage que cette version ne connaît pas.
+        let usage = usage_of(purpose).ok_or(TrustError::UnknownPurpose)?;
         let nonce = self.crypto.nonce()?;
         let emitted_ms = self.now_ms();
-        let mac = self.crypto.mac(&mac_input(
-            usage_of(purpose),
-            &nonce,
-            emitted_ms,
-            username,
-            addr,
-        ));
+        let mac = self
+            .crypto
+            .mac(&mac_input(usage, &nonce, emitted_ms, username, addr));
         let challenge = Challenge {
             nonce,
             emitted_ms,
@@ -632,12 +633,13 @@ impl TrustService {
 }
 
 /// Octet d'usage du défi demandé.
-fn usage_of(purpose: ChallengePurpose) -> u8 {
+fn usage_of(purpose: ChallengePurpose) -> Option<u8> {
     match purpose {
-        ChallengePurpose::Login => 0x01,
-        ChallengePurpose::Session => 0x02,
-        ChallengePurpose::DeviceRemoval => 0x04,
-        ChallengePurpose::AdminAct => 0x05,
+        ChallengePurpose::Login => Some(0x01),
+        ChallengePurpose::Session => Some(0x02),
+        ChallengePurpose::DeviceRemoval => Some(0x04),
+        ChallengePurpose::AdminAct => Some(0x05),
+        ChallengePurpose::Unknown => None,
     }
 }
 
@@ -684,8 +686,14 @@ mod tests {
                 .usage(),
             ),
         ] {
-            assert_eq!(usage_of(purpose), binding_usage);
+            assert_eq!(usage_of(purpose), Some(binding_usage));
         }
+    }
+
+    #[test]
+    fn a_challenge_purpose_this_version_does_not_know_gets_no_usage_byte_and_no_challenge() {
+        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : jamais un défi pour un usage inventé.
+        assert_eq!(usage_of(ChallengePurpose::Unknown), None);
     }
 
     #[test]

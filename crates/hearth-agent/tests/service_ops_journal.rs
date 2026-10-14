@@ -316,7 +316,7 @@ async fn writes_out_of_order_or_outside_the_plan_are_refused() {
     // Opération inconnue.
     assert!(matches!(
         env.ops.intent("NOPE", "stop_old", &none()).await,
-        Err(OpError::Unknown)
+        Err(OpError::NoSuchOperation)
     ));
     // Une opération terminée n'écrit plus.
     env.ops
@@ -1053,7 +1053,7 @@ async fn a_status_change_only_succeeds_from_the_status_the_caller_saw() {
             env.clock.now(),
         )
         .await;
-    assert!(matches!(unknown, Err(JournalError::Unknown)));
+    assert!(matches!(unknown, Err(JournalError::NoSuchOperation)));
     // La progression se range et se relit.
     env.ops
         .set_progress(
@@ -1282,5 +1282,84 @@ async fn a_name_and_a_heavy_seat_survive_a_restart_and_reverting_only_starts_the
             Err(OpError::Locked(Refusal::ServiceBusy { .. }))
         ),
         "le verrou reste tenu pendant le retour arrière"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Revue de la PR 94 : « annuler » ne s'offre pas au-delà du point de non-retour, et les publications
+// d'une même opération ne se défont pas
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn cancel_is_never_offered_as_a_choice_after_the_point_of_no_return() {
+    let env = Env::new().await;
+    let id = running(&env, 1, OpKind::Update).await;
+    env.ops.intent(&id, "create_new", &none()).await.unwrap();
+    // `DELETE` répond « trop tard » : la décision ne doit pas être une porte dérobée pour annuler quand même.
+    assert!(matches!(
+        env.ops
+            .ask_decision(&id, &[Choice::Continue, Choice::Cancel])
+            .await,
+        Err(OpError::Choice(ChoiceRefused::NotApplicable))
+    ));
+    assert_eq!(status(&env, &id).await.status, OpStatus::Running);
+    // Une décision qui n'offre pas « annuler » reste possible.
+    env.ops
+        .ask_decision(&id, &[Choice::Continue])
+        .await
+        .unwrap();
+    assert!(matches!(
+        env.ops.decide(&id, Choice::Cancel).await,
+        Err(OpError::Choice(_))
+    ));
+    assert_eq!(status(&env, &id).await.status, OpStatus::AwaitingDecision);
+}
+
+/// Deux publications de la même opération (l'exécuteur d'un côté, `settle` d'une annulation de l'autre) ne
+/// s'envoient jamais dans l'ordre inverse de leur lecture : l'abonné ne reçoit jamais un état plus ancien
+/// APRÈS l'état final, et la projection `busy` ne reste pas collée sur un service libre.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_publications_never_send_an_older_state_after_the_final_one() {
+    let env = Env::new().await;
+    let ops = Arc::new(env.restarted());
+    let key = service(1);
+    let id = ops
+        .accept(request(key.clone(), OpKind::Update))
+        .await
+        .unwrap();
+    let mut feed = ops.subscribe();
+    ops.start(&id).await.unwrap();
+    let mut settlers = Vec::new();
+    for _ in 0..24 {
+        let (ops, id) = (ops.clone(), id.clone());
+        settlers.push(tokio::spawn(async move {
+            for _ in 0..8 {
+                ops.settle(&id).await;
+                tokio::task::yield_now().await;
+            }
+        }));
+    }
+    ops.finish(&id, OpStatus::Succeeded, None).await.unwrap();
+    for settler in settlers {
+        settler.await.unwrap();
+    }
+    let mut seen_final = false;
+    let mut count = 0;
+    while let Ok(snapshot) = feed.try_recv() {
+        count += 1;
+        let terminal = snapshot.record.status.is_terminal();
+        assert!(
+            terminal || !seen_final,
+            "un état non final ({:?}) est arrivé APRÈS l'état final",
+            snapshot.record.status
+        );
+        seen_final |= terminal;
+    }
+    assert!(seen_final && count > 1);
+    // La projection ne garde pas le service occupé.
+    assert!(ops.with_index(|index| index.busy(&key).is_none()));
+    assert_eq!(
+        ops.with_index(|index| index.last_action(&key).map(|op| op.status)),
+        Some(OpStatus::Succeeded)
     );
 }

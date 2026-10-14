@@ -19,7 +19,7 @@ use hearth_proto::api::security::SecurityView;
 use hearth_proto::api::services::ServicesState;
 use hearth_proto::api::update::{UpdateProgress, UpdateStep};
 use hearth_proto::error::ErrorCode;
-use hearth_proto::stream::{ClientMessage, ServerMessage, SessionNotice};
+use hearth_proto::stream::{ClientMessage, ServerMessage, ServicesMessage, SessionNotice};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, JoinError, JoinHandle};
 use tokio::time::timeout;
@@ -217,6 +217,9 @@ struct Runner {
     /// Quand cette liaison a reçu la vue du moteur de `services` (heure de ce poste, HRT-62) : le repère de
     /// l'âge de la liste, porté dans l'événement et sur le disque.
     services_at: Option<WallTime>,
+    /// Les noms de variables et la commande de `services` ont-ils été lus sur le serveur depuis le démarrage de
+    /// cette liaison ? Faux pour ce qui vient du disque (écrit sans eux) jusqu'au premier instantané de l'agent.
+    services_details: bool,
     last_contact: Option<WallTime>,
     published: Option<Status>,
     ping_n: u64,
@@ -242,14 +245,15 @@ impl Runner {
         let (internal_tx, internal_rx) = mpsc::channel(64);
         let last_contact = shared.record().last_contact_at;
         let previous = shared.last_known();
-        let (history, machine_info, services, services_at) = match previous {
+        let (history, machine_info, services, services_at, services_details) = match previous {
             Some(view) => (
                 view.history.into_iter().collect(),
                 view.machine.map(Arc::new),
                 view.services,
                 view.services_at,
+                view.services_details,
             ),
-            None => (VecDeque::new(), None, None, None),
+            None => (VecDeque::new(), None, None, None, false),
         };
         Self {
             persister: Persister::spawn(deps.clone(), shared.id()),
@@ -270,6 +274,7 @@ impl Runner {
             machine_info,
             services,
             services_at,
+            services_details,
             last_contact,
             published: None,
             ping_n: 0,
@@ -459,7 +464,13 @@ impl Runner {
                     return;
                 }
                 let before = self.services.as_ref().map(|state| state.engine.clone());
+                // Un instantané remplace tout, détails compris : ils sont alors lus sur le serveur. Un lot, lui,
+                // ne touche que certains services et laisse les autres tels quels.
+                let fresh = matches!(&*message, ServicesMessage::ServicesSnapshot(_));
                 if crate::domain::services::apply(&mut self.services, *message) {
+                    if fresh {
+                        self.services_details = true;
+                    }
                     self.stamp_engine(before.as_ref());
                     self.announce_services();
                     self.persist(false);
@@ -516,6 +527,9 @@ impl Runner {
             ServerMessage::Session { kind } => match kind {
                 SessionNotice::Expired => self.session_expired().await,
                 SessionNotice::Revoked => self.access_revoked().await,
+                // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : motif inconnu (agent plus récent) : ni expirée ni révoquée
+                // affirmée, mais une fin de session reste une fin de session : déconnecté, message neutre.
+                SessionNotice::Unknown => self.session_ended_unknown().await,
             },
             ServerMessage::Error(detail) => match detail.code {
                 ErrorCode::SessionExpired | ErrorCode::Unauthenticated => {
@@ -526,6 +540,8 @@ impl Runner {
                 _ => {}
             },
             ServerMessage::Pong { .. } => {}
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un type de message d'un agent plus récent : ignoré, le flux continue.
+            ServerMessage::Unknown => {}
             ServerMessage::Update(progress) => self.on_update(progress).await,
         }
     }
@@ -547,6 +563,7 @@ impl Runner {
                 server: self.id.clone(),
                 state: Arc::new(state.clone()),
                 engine_received_at: self.services_at,
+                details_known: self.services_details,
             });
         }
     }
@@ -571,6 +588,7 @@ impl Runner {
             ServicesAtConnect::Unsupported { agent_version } => {
                 self.services = None;
                 self.services_at = None;
+                self.services_details = false;
                 self.refresh_last_known();
                 self.deps.sink.emit(Event::ServicesUnsupported {
                     server: self.id.clone(),
@@ -580,6 +598,7 @@ impl Runner {
             ServicesAtConnect::Supported(Some(state)) => {
                 let before = self.services.as_ref().map(|known| known.engine.clone());
                 self.services = Some(*state);
+                self.services_details = true;
                 self.stamp_engine(before.as_ref());
                 self.announce_services();
             }
@@ -598,6 +617,9 @@ impl Runner {
             UpdateStep::Done => self.input(Input::RestartEnded).await,
             UpdateStep::Download | UpdateStep::Verify | UpdateStep::Install | UpdateStep::Check => {
             }
+            // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : une étape d'un agent plus récent : l'attente de la coupure ne
+            // change pas (ni annoncée ni levée), l'événement est transmis tel quel avec l'étape inconnue.
+            UpdateStep::Unknown => {}
         }
         self.deps.sink.emit(Event::AgentUpdate {
             server: self.id.clone(),
@@ -666,6 +688,7 @@ impl Runner {
             AttemptResult::Failed => self.input(Input::TransportFailed).await,
             AttemptResult::SessionExpired => self.session_expired().await,
             AttemptResult::Revoked => self.access_revoked().await,
+            AttemptResult::SessionEndedUnknown => self.session_ended_unknown().await,
             AttemptResult::StoredPasswordRefused => self.stored_password_refused().await,
             AttemptResult::RetryAfter(delay) => self.input(Input::RetryAfter(delay)).await,
             AttemptResult::Fingerprint { presented } => {
@@ -801,6 +824,25 @@ impl Runner {
             self.deps.sink.emit(Event::SessionEnded {
                 server: self.id.clone(),
                 kind: SessionEnd::Revoked,
+            });
+        }
+    }
+
+    /// L'agent a mis fin à la session pour un motif que cette version ne connaît pas (BR-COMPAT-001 point 9) :
+    /// déconnecté, le jeton est retiré du coffre, aucune reconnexion silencieuse (le motif réel n'est pas su,
+    /// ce pourrait être une révocation) ; le mot de passe mémorisé n'est pas effacé (rien ne dit qu'il est faux).
+    async fn session_ended_unknown(&mut self) {
+        if self.machine.status().reason == Some(Reason::UserDisconnected)
+            || self.shared.record().signed_out
+        {
+            return;
+        }
+        self.input(Input::SessionEndedUnknown).await;
+        if self.machine.state() == LinkState::SessionExpired {
+            let _ = self.deps.vault.delete(&self.id, SecretKind::Token);
+            self.deps.sink.emit(Event::SessionEnded {
+                server: self.id.clone(),
+                kind: SessionEnd::Unknown,
             });
         }
     }
@@ -1179,6 +1221,7 @@ impl Runner {
             history: self.history.iter().cloned().collect(),
             services: self.services.clone(),
             services_at: self.services_at,
+            services_details: self.services_details,
         };
         self.shared.set_last_known(view);
     }

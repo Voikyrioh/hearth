@@ -64,7 +64,12 @@ const refusalText = (refusal: { kind: string }) =>
 <template>
   <section v-if="state?.supported" class="setting" data-reauth-setting>
     <SettingRow :label="t('reauth.settingLabel')" :help="t('reauth.settingHelp')">
+      <!-- Un réglage que ce client ne sait pas lire (agent plus récent) : ni coché, ni modifiable à l'aveugle. -->
+      <p v-if="state.mode === 'unknown'" class="setting__unknown" data-reauth-unknown>
+        {{ t("reauth.settingUnknown") }}
+      </p>
       <HSegmented
+        v-else
         :model-value="state.mode"
         :options="OPTIONS"
         :label="t('reauth.settingLabel')"
@@ -72,7 +77,7 @@ const refusalText = (refusal: { kind: string }) =>
       />
     </SettingRow>
     <AdminActDialog
-      :open="asked !== null && asked !== state.mode"
+      :open="asked !== null && state.mode !== 'unknown' && asked !== state.mode"
       :server-id="serverId"
       kind="reauth_setting"
       :title="t('reauth.settingTitle')"

@@ -148,7 +148,8 @@ fn the_list_keeps_the_agents_order_and_flags_and_exposes_no_key() {
                 last_addr: "192.168.1.21".into(),
                 current: false,
             },
-        ],
+        ]
+        .into(),
         max: 8,
     };
     let TrustedDevicesDto::Listed { devices, max } = listed(Ok(list)).unwrap() else {

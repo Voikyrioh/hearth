@@ -54,6 +54,9 @@ pub fn seconds_of(mode: ReauthMode) -> i64 {
     match mode {
         ReauthMode::Window => WINDOW_SECONDS,
         ReauthMode::Each => 0,
+        // FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : jamais atteint (la couche d'acte et le handler refusent un réglage
+        // inconnu avant l'écriture) ; au cas où, le plus strict, comme une valeur de colonne inconnue.
+        ReauthMode::Unknown => 0,
     }
 }
 
@@ -192,7 +195,7 @@ mod tests {
                     target: "01OP",
                     choice: hearth_proto::api::service_ops::OperationChoice::Keep,
                 },
-                true,
+                false,
             ),
             (
                 AdminAct::GameSettingsSave {

@@ -287,7 +287,7 @@ impl OpJournal for SqliteOpJournal {
                 Err(if exists {
                     JournalError::Stale
                 } else {
-                    JournalError::Unknown
+                    JournalError::NoSuchOperation
                 })
             }
             Err(error) => Err(storage(RESOURCE)(error).into()),
@@ -327,7 +327,7 @@ impl OpJournal for SqliteOpJournal {
         if done.rows_affected() == 1 {
             Ok(())
         } else {
-            Err(JournalError::Unknown)
+            Err(JournalError::NoSuchOperation)
         }
     }
 
@@ -549,7 +549,7 @@ async fn do_transition(
     Err(if exists.is_some() {
         JournalError::Stale
     } else {
-        JournalError::Unknown
+        JournalError::NoSuchOperation
     })
 }
 

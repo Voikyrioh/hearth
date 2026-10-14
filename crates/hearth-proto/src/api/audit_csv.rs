@@ -58,6 +58,7 @@ pub fn outcome_label(outcome: OutcomeName) -> &'static str {
         OutcomeName::Ok => "Réussi",
         OutcomeName::Denied => "Refusé",
         OutcomeName::Failed => "Échoué",
+        OutcomeName::Unknown => "Inconnu",
     }
 }
 

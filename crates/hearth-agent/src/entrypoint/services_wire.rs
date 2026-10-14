@@ -16,7 +16,7 @@ use super::service_ops_wire;
 use crate::application::ports::EnvEntry;
 use crate::application::ports::HostDescription;
 use crate::application::services::{EngineStatus, ServiceView, ServicesChange, ServicesSnapshot};
-use crate::domain::ops::OpsIndex;
+use crate::domain::ops::{OpsIndex, may_see, origin_of};
 use crate::domain::services::{
     EngineState, KeyKind, MountType, PortProtocol, PortScope, RestartPolicy, ServiceStateKind,
     may_read_details, stop_grace_s,
@@ -225,8 +225,20 @@ pub fn env_reveal(entries: &[EnvEntry]) -> EnvReveal {
 }
 
 /// `busy` et `last_action` d'un service : des PROJECTIONS du journal des opérations (HRT-144, BR-LIFE-013),
-/// jamais un état à part. Absents tant que le service n'a aucune opération.
-fn with_operations(mut item: ServiceItem, view: &ServiceView, ops: &OpsIndex) -> ServiceItem {
+/// jamais un état à part. Absents tant que le service n'a aucune opération, ET absents pour un compte qui ne
+/// peut pas lire les opérations de ce service (BR-OPS-001) : un service adopté est publié à tous les comptes
+/// (détails masqués), mais ses opérations ne le sont qu'au droit « gérer les services ». Dire à un autre
+/// qu'une opération y a eu lieu, qui l'a lancée, ou donner son identifiant, serait dire qu'elle existe.
+fn with_operations(
+    mut item: ServiceItem,
+    view: &ServiceView,
+    reader: Reader,
+    ops: &OpsIndex,
+) -> ServiceItem {
+    let origin = origin_of(&view.key, view.adoption.is_some());
+    if !may_see(origin, reader.may_manage_services) {
+        return item;
+    }
     item.busy = ops.busy(&view.key).map(service_ops_wire::busy);
     item.last_action = ops
         .last_action(&view.key)
@@ -241,7 +253,7 @@ pub fn snapshot(snapshot: &ServicesSnapshot, reader: Reader, ops: &OpsIndex) -> 
         services: snapshot
             .services
             .iter()
-            .map(|view| with_operations(service_item(view, reader), view, ops))
+            .map(|view| with_operations(service_item(view, reader), view, reader, ops))
             .collect(),
     }
 }
@@ -262,7 +274,7 @@ pub fn delta(
         upserts: change
             .upserts
             .iter()
-            .map(|view| with_operations(service_item(view, reader), view, ops))
+            .map(|view| with_operations(service_item(view, reader), view, reader, ops))
             .collect(),
         removed: change
             .removed
@@ -394,6 +406,60 @@ mod tests {
         assert!(without.adopted.is_some());
         let text = serde_json::to_string(&without).expect("json");
         assert!(!text.contains("TOKEN_NAME") && !text.contains("SENTINEL"));
+    }
+
+    /// BR-OPS-001 (revue de la PR 94, B2) : un service adopté est publié à tous les comptes, mais ses
+    /// opérations ne se lisent qu'avec le droit. `busy` et `last_action` (genre, compte, statut, cause,
+    /// identifiant d'opération) n'en disent rien aux autres : ce serait dire qu'une opération existe.
+    #[test]
+    fn busy_and_last_action_of_an_adopted_service_are_for_the_right_only() {
+        use crate::domain::ops::{OpKind, OpStatus, OpSummary};
+        let summary = |id: &str, status: OpStatus, finished: bool| OpSummary {
+            id: id.to_owned(),
+            kind: OpKind::Deploy,
+            account: "SENTINEL-ACCOUNT".to_owned(),
+            status,
+            cause: None,
+            forced: false,
+            started_at: time::OffsetDateTime::UNIX_EPOCH,
+            finished_at: finished.then_some(time::OffsetDateTime::UNIX_EPOCH),
+        };
+        let service = adopted(view("terraria", RunState::Running));
+        let mut index = OpsIndex::new();
+        index.apply(
+            &service.key,
+            summary("SENTINEL-OP-1", OpStatus::Succeeded, true),
+        );
+        index.apply(
+            &service.key,
+            summary("SENTINEL-OP-2", OpStatus::Running, false),
+        );
+        let right = Reader {
+            may_manage_services: true,
+        };
+        let with = with_operations(service_item(&service, right), &service, right, &index);
+        assert!(with.busy.is_some());
+        assert_eq!(
+            with.last_action.as_ref().map(|last| last.id.as_str()),
+            Some("SENTINEL-OP-1")
+        );
+        // Sans le droit : aucun des deux champs, et aucune trace de l'opération dans ce qui est publié.
+        let without = with_operations(
+            service_item(&service, everyone()),
+            &service,
+            everyone(),
+            &index,
+        );
+        assert!(without.busy.is_none() && without.last_action.is_none());
+        let text = serde_json::to_string(&without).expect("json");
+        assert!(!text.contains("SENTINEL"), "{text}");
+        // Un service créé par Hearth, lui, montre ses opérations à tous les comptes (BR-LIFE-013).
+        let mut own = view("web", RunState::Running);
+        own.key = ServiceKey::parse("h_01ARZ3NDEKTSV4RRFFQ69G5FAV").expect("key");
+        let mut index = OpsIndex::new();
+        index.apply(&own.key, summary("OP-HEARTH", OpStatus::Running, false));
+        let item = with_operations(service_item(&own, everyone()), &own, everyone(), &index);
+        assert!(item.busy.is_some());
     }
 
     #[test]

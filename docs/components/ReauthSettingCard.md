@@ -7,3 +7,4 @@ Ligne de réglage « Demander mon mot de passe » de la page Sécurité (HRT-30,
 - Props : `serverId`
 - Événements et slots : aucun
 - Notes : Tests : `components/organisms/reauthSetting.test.ts`, `e2e/reauth.spec.ts`.
+- FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB : un réglage `unknown` n'affiche aucun choix coché ni modifiable ; une phrase dit que ce client ne sait pas le lire (`data-reauth-unknown`).

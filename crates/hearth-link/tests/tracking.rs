@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use hearth_link::adapters::{MemoryVault, OsRng, SystemClock};
-use hearth_link::domain::event::Event;
+use hearth_link::domain::event::{Event, SessionEnd};
 use hearth_link::domain::pending_ops::{OperationId, Outcome, PendingOp};
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::{LastKnown, ServerId, ServerRecord};
@@ -83,6 +83,8 @@ struct Script {
     fail_ping: AtomicBool,
     /// Si posé : la prochaine lecture du flux rend « session révoquée » (une seule fois).
     revoke_next: AtomicBool,
+    /// Si posé : la prochaine lecture du flux rend une fin de session au motif inconnu (une seule fois).
+    unknown_end_next: AtomicBool,
     lookup: Mutex<OperationStatus>,
     flood: tokio::sync::Semaphore,
     wake: tokio::sync::Notify,
@@ -121,6 +123,7 @@ impl Script {
             close_code_next: AtomicU32::new(0),
             fail_ping: AtomicBool::new(false),
             revoke_next: AtomicBool::new(false),
+            unknown_end_next: AtomicBool::new(false),
             lookup: Mutex::new(OperationStatus::Succeeded),
             flood: tokio::sync::Semaphore::new(1 << 40),
             wake: tokio::sync::Notify::new(),
@@ -313,6 +316,7 @@ impl StreamConn for Stream {
         }
         if !self.script.expire_next.load(Ordering::SeqCst)
             && !self.script.revoke_next.load(Ordering::SeqCst)
+            && !self.script.unknown_end_next.load(Ordering::SeqCst)
             && self.script.close_code_next.load(Ordering::SeqCst) == 0
             && !self.script.snapshot_next.load(Ordering::SeqCst)
         {
@@ -330,6 +334,11 @@ impl StreamConn for Stream {
         if self.script.revoke_next.swap(false, Ordering::SeqCst) {
             return Ok(Frame::Message(Box::new(ServerMessage::Session {
                 kind: SessionNotice::Revoked,
+            })));
+        }
+        if self.script.unknown_end_next.swap(false, Ordering::SeqCst) {
+            return Ok(Frame::Message(Box::new(ServerMessage::Session {
+                kind: SessionNotice::Unknown,
             })));
         }
         if self.script.expire_next.swap(false, Ordering::SeqCst) {
@@ -743,6 +752,35 @@ async fn a_crash_right_after_the_send_leaves_the_operation_on_disk_for_the_resta
         matches!(outcome, Outcome::DoneDuringOutage { .. }),
         "{outcome:?}"
     );
+}
+
+// ── Fin de session au motif inconnu (FIX:01M4VR6Y4Q4AVQVT9FCME7Z2SB, BR-COMPAT-001 point 9) ─────────
+
+#[tokio::test]
+async fn a_session_ended_for_an_unknown_reason_disconnects_without_claiming_expiry_or_revocation() {
+    let (rig, id) = connected(Disk::Normal, true).await;
+    let logins = rig.script.logins.load(Ordering::SeqCst);
+    let mut events = rig.manager.subscribe();
+    rig.script.unknown_end_next.store(true, Ordering::SeqCst);
+    wait_state(&rig.manager, &id, LinkState::SessionExpired).await;
+    let status = rig.manager.state(&id).unwrap();
+    assert_eq!(status.reason, Some(Reason::Ended));
+    // Aucune reconnexion silencieuse (le motif réel n'est pas su), le jeton est retiré, le mot de passe reste.
+    tokio::time::sleep(ms(200)).await;
+    assert_eq!(rig.script.logins.load(Ordering::SeqCst), logins);
+    assert_eq!(
+        rig.manager.state(&id).unwrap().state,
+        LinkState::SessionExpired
+    );
+    assert!(rig.vault.get(&id, SecretKind::Token).unwrap().is_none());
+    let mut told = false;
+    while let Some(event) = events.try_recv() {
+        if let Event::SessionEnded { kind, .. } = event {
+            assert_eq!(kind, SessionEnd::Unknown);
+            told = true;
+        }
+    }
+    assert!(told, "la fin de session est annoncée");
 }
 
 // ── Déconnexion contre fin de session ───────────────────────────────────────────────────────

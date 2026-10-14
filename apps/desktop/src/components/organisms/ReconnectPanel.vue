@@ -28,13 +28,17 @@ const title = computed(() =>
     : t("connect.reconnectTitle", { name: props.server.name }),
 );
 const expired = computed(() => !props.revoked && props.reason === "expired");
+const ended = computed(() => !props.revoked && props.reason === "ended");
 const notice = computed(() => {
   if (props.revoked) return t("link.revokedNotice");
+  if (ended.value) return t("link.sessionEndedNotice");
   return expired.value ? t("link.sessionExpiredNotice") : null;
 });
 const hint = computed(() => {
   if (props.revoked) return t("link.revokedHint");
-  if (expired.value || props.reason === "stored_password_refused") return t("link.askPassword");
+  if (expired.value || ended.value || props.reason === "stored_password_refused") {
+    return t("link.askPassword");
+  }
   return null;
 });
 const showForm = computed(() => !props.revoked || otherAccount.value);

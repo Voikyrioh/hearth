@@ -80,7 +80,7 @@ pub enum AccessError {
 impl From<JournalError> for AccessError {
     fn from(error: JournalError) -> Self {
         match error {
-            JournalError::Unknown => Self::NotFound,
+            JournalError::NoSuchOperation => Self::NotFound,
             JournalError::Stale | JournalError::ServiceBusy => Self::Changed,
             JournalError::Store(error) => Self::Store(error),
         }
@@ -91,7 +91,7 @@ impl From<super::service_ops::OpError> for AccessError {
     fn from(error: super::service_ops::OpError) -> Self {
         use super::service_ops::OpError;
         match error {
-            OpError::Unknown => Self::NotFound,
+            OpError::NoSuchOperation => Self::NotFound,
             OpError::Storage(message) => Self::Store(StoreError::Unavailable {
                 resource: "service_ops",
                 message,
@@ -305,6 +305,14 @@ impl ServiceOpAccess {
                 .is_some_and(|offer| decision_expired(offer.since, now))
         {
             return Err(AccessError::Decision(DecisionRefusal::Expired));
+        }
+        // La décision « annuler » suit la règle de `DELETE` : au-delà du point de non-retour, c'est trop tard,
+        // même si un exécuteur a offert ce choix (revue de la PR 94).
+        if choice == Choice::Cancel
+            && cancel_verdict(before.record.status, &before.record.plan, &before.steps)
+                == CancelVerdict::TooLate
+        {
+            return Err(AccessError::TooLate);
         }
         let (next, cause) =
             apply_choice(before.record.status, offered, choice).map_err(|refusal| {

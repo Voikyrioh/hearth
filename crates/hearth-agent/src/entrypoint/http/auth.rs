@@ -166,7 +166,8 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         ErrorCode::PostNotRecognized => Some(Outcome::Denied(Reason::NotRecognized)),
         ErrorCode::NotFound => Some(Outcome::Failed(Reason::NotFound)),
         ErrorCode::Busy => Some(Outcome::Failed(Reason::Busy)),
-        ErrorCode::InternalError => Some(Outcome::Failed(Reason::Internal)),
+        // `Unknown` n'existe qu'à la lecture : l'agent ne l'émet jamais.
+        ErrorCode::InternalError | ErrorCode::Unknown => Some(Outcome::Failed(Reason::Internal)),
         ErrorCode::ManagedInstall => Some(Outcome::Failed(Reason::ManagedInstall)),
         ErrorCode::BadSignature => Some(Outcome::Failed(Reason::BadSignature)),
         ErrorCode::Unauthenticated
@@ -227,8 +228,6 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::BackupNotFound => Some(Outcome::Failed(Reason::NotFound)), // sauvegarde inconnue
         // Le moteur de conteneurs ne répond pas : réessayer plus tard.
         ErrorCode::EngineUnavailable => Some(Outcome::Failed(Reason::Busy)),
-        // Un code que ce binaire ne produit jamais (variante de repli du client) : une erreur interne.
-        ErrorCode::Unknown => Some(Outcome::Failed(Reason::Internal)),
         // Place occupée : réessayer plus tard.
         ErrorCode::HeavyIoBusy // une opération lourde tient déjà la place
         | ErrorCode::TransferLimit => Some(Outcome::Failed(Reason::Busy)), // trop de transferts à la fois

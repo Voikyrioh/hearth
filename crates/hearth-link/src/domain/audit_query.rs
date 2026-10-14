@@ -11,6 +11,7 @@
 
 use hearth_proto::api::audit::action;
 use hearth_proto::api::audit::{AuditEventItem, AuditQuery, AuditResponse, OutcomeName};
+use hearth_proto::lenient::Items;
 
 /// Comptes retenus au plus dans un filtre.
 pub const MAX_ACCOUNTS: usize = 50;
@@ -345,6 +346,8 @@ fn outcome_code(outcome: OutcomeName) -> &'static str {
         OutcomeName::Ok => "ok",
         OutcomeName::Denied => "denied",
         OutcomeName::Failed => "failed",
+        // Jamais construit par le client ; si une valeur inconnue revenait ici, l'agent la refuse.
+        OutcomeName::Unknown => "unknown",
     }
 }
 
@@ -426,7 +429,14 @@ pub fn path(query: &AuditQuery, page: Option<(Option<i64>, u8)>) -> Result<Strin
 /// plus récentes de l'une des requêtes.
 pub fn merge_pages(pages: Vec<AuditResponse>, limit: usize) -> AuditResponse {
     let more_upstream = pages.iter().any(|page| page.next_before.is_some());
-    let mut events: Vec<AuditEventItem> = pages.into_iter().flat_map(|page| page.events).collect();
+    // Les entrées illisibles de chaque page restent comptées (BR-COMPAT-001 point 10).
+    let unreadable = pages.iter().fold(0_u32, |sum, page| {
+        sum.saturating_add(page.events.unreadable())
+    });
+    let mut events: Vec<AuditEventItem> = pages
+        .into_iter()
+        .flat_map(|page| page.events.into_vec())
+        .collect();
     events.sort_by_key(|event| std::cmp::Reverse(event.id));
     events.dedup_by_key(|event| event.id);
     let more = more_upstream || events.len() > limit;
@@ -437,7 +447,7 @@ pub fn merge_pages(pages: Vec<AuditResponse>, limit: usize) -> AuditResponse {
         None
     };
     AuditResponse {
-        events,
+        events: Items::with_unreadable(events, unreadable),
         next_before,
     }
 }

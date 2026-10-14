@@ -4,8 +4,9 @@
 //! l'éprouve par les routes `GET`, `DELETE` et `POST …/decision` et par le sujet `services`.
 //!
 //! Règles : BR-LIFE-013, BR-LIFE-020, BR-EDIT-031, BR-JEU-006, BR-OPS-001 à BR-OPS-008.
-//! Le contrôle de la preuve de clé, du mot de passe et de l'élévation de tous les actes est dans
-//! `admin_reauth.rs` ; ici : ce que font l'annulation et la décision, qui voit quoi, la trace, les bornes.
+//! Le contrôle de la preuve de clé, du mot de passe et de l'élévation de TOUS les actes, annuler et décider
+//! une opération compris, est dans la matrice de `admin_reauth.rs` (revue de la PR 94, B1) ; ici : ce que font
+//! l'annulation et la décision, qui voit quoi, la trace, les bornes.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -544,10 +545,17 @@ async fn a_decision_among_the_offered_ones_is_applied_and_journaled() {
 async fn a_decision_that_is_not_offered_is_refused_whatever_it_is() {
     let b = bench().await;
     let id = waiting(&b).await;
-    for choice in ["revert", "keep", "verified", "dance"] {
+    for choice in ["revert", "keep", "verified"] {
         let reply = b.decide(&b.ada, &id, choice).await;
         assert_eq!(reply.status, 409, "{choice} : {}", reply.text);
         assert_eq!(error_code(&reply), "DECISION_NOT_OFFERED", "{choice}");
+    }
+    // Un choix que cette version ne connaît pas est une commande illisible (BR-COMPAT-001 point 5) : refus de
+    // validation AVANT toute confirmation, jamais pris pour un choix par défaut.
+    for choice in ["dance", "unknown"] {
+        let reply = b.decide(&b.ada, &id, choice).await;
+        assert_eq!(reply.status, 422, "{choice} : {}", reply.text);
+        assert_eq!(error_code(&reply), "VALIDATION_ERROR", "{choice}");
     }
     assert_eq!(
         b.agent
@@ -639,7 +647,6 @@ async fn the_stream_announces_open_operations_at_once_then_every_change_at_most_
     assert_eq!(first.status, OperationStatus::Running);
     // Vingt étapes en rafale : le dernier état part à l'échéance, les intermédiaires se fondent.
     let first_seen = std::time::Instant::now();
-    let mut stamps = vec![first_seen];
     for _ in 0..20 {
         ops.intent(&id, "check", &UndoInfo::default())
             .await
@@ -650,25 +657,37 @@ async fn the_stream_announces_open_operations_at_once_then_every_change_at_most_
     let burst = first_seen.elapsed();
     let mut received = Vec::new();
     while let Some(next) = next_operation(&mut client, Duration::from_millis(900)).await {
-        stamps.push(std::time::Instant::now());
         received.push(next);
     }
-    // Quarante changements en rafale : bien moins de messages (la rafale elle-même peut durer sur une machine
-    // chargée, d'où une borne sur le temps écoulé et non un nombre fixe), et deux messages d'une même
-    // opération ne se suivent jamais de plus près que la cadence (avec la marge de la gigue de réception).
+    // Quarante et un changements en rafale : bien moins de messages. La rafale elle-même peut durer (vingt
+    // validations sur disque en `synchronous = FULL` sur une machine lente), d'où une borne sur le NOMBRE de
+    // messages qui suit la durée écoulée : au plus un par 500 ms, plus celui de l'abonnement et celui que la
+    // cadence retient.
     assert!(
         received.len() <= 2 + usize::try_from(burst.as_millis() / 500).unwrap(),
         "au plus un message par 500 ms et par opération : {} en {:?}",
         received.len(),
         burst
     );
-    for pair in stamps.windows(2).skip(1) {
-        assert!(
-            pair[1] - pair[0] >= Duration::from_millis(350),
-            "deux messages d'une même opération à {:?} d'écart",
-            pair[1] - pair[0]
-        );
-    }
+    // Aucune assertion sur l'écart entre deux RÉCEPTIONS : le test ne lit le flux qu'après la rafale, donc
+    // deux messages espacés de 500 ms par l'agent peuvent se lire à quelques microsecondes l'un de l'autre
+    // (revue de la PR 94, B3). La cadence elle-même, le temps étant un paramètre, est prouvée par les tests
+    // de `domain::ops::flush` (horloge injectée). Ici, des invariants qui ne dépendent pas du temps :
+    // l'ordre des états n'est jamais défait, rien ne suit l'état final, il n'est envoyé qu'une fois.
+    let finals = received
+        .iter()
+        .filter(|view| view.status == OperationStatus::Succeeded)
+        .count();
+    assert_eq!(finals, 1, "l'état final part une seule fois : {received:?}");
+    assert_eq!(
+        received.last().map(|view| view.status),
+        Some(OperationStatus::Succeeded),
+        "rien ne suit l'état final"
+    );
+    assert!(
+        received.iter().all(|view| view.id == id),
+        "seule l'opération suivie est annoncée"
+    );
     let last = received.last().expect("le dernier état n'est jamais perdu");
     assert_eq!(last.status, OperationStatus::Succeeded);
     assert!(!last.cancellable);
@@ -897,4 +916,144 @@ async fn no_path_no_secret_and_no_object_name_reaches_a_response_the_stream_the_
     );
     let value: Value = serde_json::from_str(&b.read(&b.ada, &id).await.text).unwrap();
     assert!(value.get("undo").is_none() && value.get("plan").is_none());
+}
+
+// ---------------------------------------------------------------------------------------------
+// Revue de la PR 94
+// ---------------------------------------------------------------------------------------------
+
+/// B2 : `busy` et `last_action` d'un service ADOPTÉ (publié à tous, détails masqués) ne sont lus qu'avec le
+/// droit : ni dans `GET /services`, ni dans l'instantané du flux. Aucune trace de l'opération (identifiant,
+/// compte, genre) chez un compte sans le droit. Témoin : le compte qui a le droit les voit.
+#[tokio::test]
+async fn an_account_without_the_right_learns_nothing_of_the_operations_of_an_adopted_service() {
+    let adopted = container("adopte", RunState::Running);
+    let adopted_key = format!("c_{}", adopted.id);
+    let b = bench().await;
+    b.engine.put_silently(adopted);
+    b.agent.services().resync().await.expect("liste");
+    b.env.adopt(&adopted_key, "adopte", "ada").await;
+    b.agent.services().reload_adopted().await;
+    let ops = b.agent.ops();
+    // Une opération terminée (devient `last_action`), puis une en cours (`busy`).
+    let finished = accept_on(&ops, &adopted_key, "adopte", "ada").await;
+    ops.start(&finished).await.unwrap();
+    ops.finish(&finished, OpStatus::Succeeded, None)
+        .await
+        .unwrap();
+    let running = ops
+        .accept(AcceptRequest {
+            op_key: "k-second".into(),
+            service: ServiceKey::parse(&adopted_key).unwrap(),
+            service_name: "adopte".into(),
+            kind: OpKind::Deploy,
+            account: "ada".into(),
+            plan: plan(),
+            forced: false,
+            reserve_name: None,
+            heavy_io: false,
+        })
+        .await
+        .unwrap();
+    ops.start(&running).await.unwrap();
+
+    // Le témoin : avec le droit, les deux sont là.
+    let services = b
+        .agent
+        .request("GET", "/services")
+        .token(&b.dan.token)
+        .send()
+        .await;
+    let item = &services.body["services"][0];
+    assert_eq!(item["busy"]["by"], "ada");
+    assert_eq!(item["last_action"]["id"], finished);
+
+    for who in [&b.bob, &b.lucas] {
+        let services = b
+            .agent
+            .request("GET", "/services")
+            .token(&who.token)
+            .send()
+            .await;
+        assert_eq!(services.status, 200);
+        let item = &services.body["services"][0];
+        assert_eq!(item["name"], "adopte", "le service lui-même est publié");
+        assert!(
+            item.get("busy").is_none_or(Value::is_null)
+                && item.get("last_action").is_none_or(Value::is_null),
+            "{item}"
+        );
+        for secret in [&finished, &running] {
+            assert!(
+                !services.text.contains(secret.as_str()),
+                "l'identifiant d'une opération est publié à un compte sans le droit"
+            );
+        }
+        assert!(!services.text.contains("\"busy\"") && !services.text.contains("last_action"));
+        // L'instantané du flux, lui aussi.
+        let mut client = ws::open(&b.agent).await;
+        client.auth(&who.token).await;
+        client.subscribe(&[Topic::Services]).await;
+        let ServicesMessage::ServicesSnapshot(snapshot) = client.next_services().await else {
+            panic!("un instantané est attendu en premier");
+        };
+        let text = serde_json::to_string(&snapshot).unwrap();
+        assert_eq!(snapshot.services.len(), 1);
+        assert!(snapshot.services[0].busy.is_none() && snapshot.services[0].last_action.is_none());
+        for secret in [&finished, &running] {
+            assert!(!text.contains(secret.as_str()), "{text}");
+        }
+    }
+}
+
+/// L'état FINAL d'une opération n'est jamais perdu quand la cadence est remise à zéro par un changement de
+/// droit : l'état retenu par la cadence part, au lieu d'être jeté avec elle.
+#[tokio::test]
+async fn the_final_state_held_by_the_cadence_survives_a_change_of_right() {
+    let b = bench().await;
+    let ops = b.agent.ops();
+    // Une opération d'un service de Hearth (visible de tous) : dan la suit.
+    let id = b.running().await;
+    let mut client = b.subscribed(&b.dan).await;
+    let first = next_operation(&mut client, Duration::from_secs(5))
+        .await
+        .expect("l'opération en cours est annoncée");
+    assert_eq!(first.status, OperationStatus::Running);
+    // L'état final arrive DANS les 500 ms : la cadence le retient. Puis le droit de dan est retiré : la
+    // connexion remet sa cadence à zéro (le service adopté éventuel repart avec ce que dan voit).
+    ops.finish(&id, OpStatus::Succeeded, None).await.unwrap();
+    b.env.revoke_services("dan").await;
+    let mut last = None;
+    while let Some(next) = next_operation(&mut client, Duration::from_secs(2)).await {
+        last = Some(next);
+    }
+    let last = last.expect("l'état final n'est pas perdu");
+    assert_eq!(last.id, id);
+    assert_eq!(last.status, OperationStatus::Succeeded);
+}
+
+/// « Annuler » par la décision suit la règle de `DELETE` : au-delà du point de non-retour, trop tard, même si
+/// l'exécuteur avait offert ce choix avant (revue de la PR 94).
+#[tokio::test]
+async fn cancelling_by_a_decision_after_the_point_of_no_return_is_too_late_like_delete() {
+    let b = bench().await;
+    let ops = b.agent.ops();
+    let id = waiting(&b).await;
+    // Le point de non-retour est franchi pendant l'attente (état écrit directement, comme le ferait un
+    // exécuteur défectueux) : le journal montre un `intent` sur `create_new`.
+    sqlx::query(
+        "INSERT INTO service_op_steps (op_id, seq, step, state, undo_json, at)
+         VALUES (?, 1, 'create_new', 'intent', '{}', '2026-10-14T00:00:00.000Z')",
+    )
+    .bind(&id)
+    .execute(b.env.db.pool())
+    .await
+    .unwrap();
+    let reply = b.decide(&b.ada, &id, "cancel").await;
+    assert_eq!(reply.status, 409, "{}", reply.text);
+    assert_eq!(error_code(&reply), "TOO_LATE_TO_CANCEL");
+    assert_eq!(
+        ops.snapshot(&id).await.unwrap().unwrap().record.status,
+        OpStatus::AwaitingDecision
+    );
 }
