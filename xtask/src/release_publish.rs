@@ -53,10 +53,13 @@ pub const AWS_ENV: [(&str, &str); 2] = [
     ("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required"),
     ("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required"),
 ];
-/// La SEULE phrase qui prouve l'absence d'une clé : celle de `aws s3api head-object` pour un 404 (ligne
-/// entière, texte exact). Supposée, non vérifiée contre Scaleway : à relever au premier dépôt d'essai.
+/// La phrase qui prouve l'absence d'une clé : celle de `aws s3api head-object` pour un 404 (ligne
+/// entière, texte exact). Relevée contre Scaleway (fr-par) : AWS CLI 2.27.0 l'écrit seule sur sa ligne,
+/// AWS CLI 2.38.1 la fait précéder de `ABSENT_PREFIX`. Aucune autre forme n'est acceptée.
 pub const ABSENT_PHRASE: &str =
     "An error occurred (404) when calling the HeadObject operation: Not Found";
+/// Préfixe que les AWS CLI récents (relevé sur 2.38.1) ajoutent à la ligne d'erreur, exactement.
+pub const ABSENT_PREFIX: &str = "aws: [ERROR]: ";
 /// Code de sortie de `aws` pour une erreur renvoyée par le service (un 404 en est une).
 pub const SERVICE_ERROR_CODE: i32 = 254;
 /// Bornes de `curl` pour chaque relecture publique (l'installateur pèse des dizaines de Mo).
@@ -168,14 +171,19 @@ enum Remote {
 }
 
 /// `head-object` est un 404 ? Seulement si `aws` sort avec le code des erreurs de service ET qu'une
-/// ligne de sa sortie d'erreur est EXACTEMENT la phrase attendue. Tout le reste (403, délai, réseau,
+/// ligne de sa sortie d'erreur est EXACTEMENT la phrase attendue, seule ou précédée exactement de
+/// `ABSENT_PREFIX` (rien d'autre devant, rien derrière). Tout le reste (403, délai, réseau,
 /// texte qui contient « 404 » ou « not found » ailleurs) n'est PAS une absence.
 fn proves_absence(output: &CmdOutput) -> bool {
     output.code == Some(SERVICE_ERROR_CODE)
         && output
             .stderr
             .lines()
-            .any(|line| line.trim() == ABSENT_PHRASE)
+            // FIX:01M52VPMJ3KKEN1MP5G1C63QQN
+            .any(|line| {
+                let line = line.trim();
+                line == ABSENT_PHRASE || line.strip_prefix(ABSENT_PREFIX) == Some(ABSENT_PHRASE)
+            })
 }
 
 fn code_text(output: &CmdOutput) -> String {
@@ -1145,7 +1153,7 @@ mod tests {
         assert_eq!(fake.bucket.borrow().len(), 1, "le bucket n'a pas bougé");
     }
 
-    /// Tout ce qui n'est pas la phrase exacte d'un 404 de `head-object` arrête l'outil AVANT toute écriture :
+    /// Tout ce qui n'est pas la phrase exacte d'un 404 de `head-object` (seule ou après `ABSENT_PREFIX`) arrête l'outil AVANT toute écriture :
     /// « état impossible à établir », jamais « absente par défaut ».
     fn assert_stops_before_any_write(code: Option<i32>, text: &str) {
         let (files, fake) = setup();
@@ -1213,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    fn the_exact_404_line_is_the_only_proof_of_absence() {
+    fn the_exact_404_line_alone_is_a_proof_of_absence() {
         let (files, fake) = setup();
         // Précédée d'un avertissement sur une autre ligne : la ligne entière est la phrase.
         *fake.absent_answer.borrow_mut() = (
@@ -1222,6 +1230,35 @@ mod tests {
         );
         run(&fake, &files, true).0.unwrap();
         assert_eq!(fake.writes().len(), 10);
+    }
+
+    #[test]
+    fn the_prefixed_404_line_of_a_recent_aws_cli_is_an_absence() {
+        // AWS CLI 2.38.1 : la même phrase précédée de `aws: [ERROR]: `.
+        let (files, fake) = setup();
+        *fake.absent_answer.borrow_mut() = (
+            Some(SERVICE_ERROR_CODE),
+            format!("\n{ABSENT_PREFIX}{ABSENT_PHRASE}\n"),
+        );
+        run(&fake, &files, true).0.unwrap();
+        assert_eq!(fake.writes().len(), 10);
+    }
+
+    #[test]
+    fn only_the_exact_prefix_is_accepted_before_the_404_line() {
+        for line in [
+            format!("aws: [WARNING]: {ABSENT_PHRASE}"),
+            format!("aws:[ERROR]: {ABSENT_PHRASE}"),
+            format!("aws: [ERROR]:  {ABSENT_PHRASE}"),
+            format!("x aws: [ERROR]: {ABSENT_PHRASE}"),
+            format!("aws: [ERROR]: aws: [ERROR]: {ABSENT_PHRASE}"),
+            format!("aws: [ERROR]: {ABSENT_PHRASE} (proxy)"),
+            "aws: [ERROR]: An error occurred (403) when calling the HeadObject operation: Forbidden"
+                .to_owned(),
+        ] {
+            assert_stops_before_any_write(Some(SERVICE_ERROR_CODE), &line);
+        }
+        assert_stops_before_any_write(Some(255), &format!("{ABSENT_PREFIX}{ABSENT_PHRASE}"));
     }
 
     #[test]
