@@ -31,7 +31,7 @@ impl Drop for Container {
 }
 
 pub fn run() -> Result<(), String> {
-    agent::run()?;
+    agent::run(&[])?;
     let root = docker::repo_root()?;
     machine(
         &root.join("target").join("dist"),

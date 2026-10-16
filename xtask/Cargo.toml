@@ -15,6 +15,7 @@ minisign.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+zeroize.workspace = true
 time.workspace = true
 # `catalog-check` applique le chargeur de fiches de l'agent (HRT-113), inclus par `#[path]`.
 toml.workspace = true

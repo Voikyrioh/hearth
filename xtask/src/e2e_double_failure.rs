@@ -14,7 +14,7 @@ use crate::docker;
 use crate::e2e;
 
 pub fn run() -> Result<(), String> {
-    agent::run()?;
+    agent::run(&[])?;
     let root = docker::repo_root()?;
     e2e::machine(
         &root.join("target").join("dist"),

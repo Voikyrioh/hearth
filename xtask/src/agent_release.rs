@@ -13,18 +13,11 @@
 //! Aucun secret ici : la signature est faite par le détenteur du dépôt, hors du dépôt et hors de la CI
 //! (runbook `docs/runbooks/mettre-a-jour-agent.md`).
 
-use std::path::{Path, PathBuf};
-
 use sha2::{Digest, Sha256};
 
 use crate::release_core::*;
 
-fn root() -> Result<PathBuf, String> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "racine du dépôt introuvable".to_owned())
-}
+use crate::repo_root::repo_root as root;
 
 fn option(args: &[String], name: &str) -> Option<String> {
     args.iter()

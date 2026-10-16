@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::docker::{self, args, mount_path};
-use crate::host::{Host, System};
+use crate::host::{Call, Host, System};
 use crate::release_stage::{head_commit, sha256_hex, tree_problems};
 
 pub const IMAGE: &str =
@@ -104,11 +104,14 @@ impl BuildRecord {
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
-        let bad = |why: &str| {
-            format!(
-                "enregistrement de construction illisible ({why}) : reconstruis l'agent avec cargo xtask agent"
-            )
-        };
+        Self::parse_with(text, "reconstruis l'agent avec cargo xtask agent")
+    }
+
+    /// Comme `parse`, avec le geste à conseiller quand le fichier est illisible (celui du client n'est
+    /// pas produit par `cargo xtask agent`).
+    pub fn parse_with(text: &str, rebuild: &str) -> Result<Self, String> {
+        let bad =
+            |why: &str| format!("enregistrement de construction illisible ({why}) : {rebuild}");
         let mut fields = std::collections::BTreeMap::new();
         for line in text.lines().filter(|line| !line.trim().is_empty()) {
             let (key, value) = line.split_once('=').ok_or_else(|| bad("ligne sans ="))?;
@@ -157,10 +160,26 @@ pub struct Survey {
 }
 
 impl Survey {
+    /// Un relevé « propre » déjà mesuré à ce commit (relu du fichier de `client-record --begin`).
+    pub fn clean_at(commit: &str) -> Self {
+        Self {
+            commit: Ok(commit.to_owned()),
+            problems: Ok(Vec::new()),
+        }
+    }
+
     pub fn take(host: &dyn Host, root: &Path) -> Self {
         Self {
             commit: head_commit(host, root),
             problems: tree_problems(host, root),
+        }
+    }
+
+    /// Relevé pour la construction du client : les entrées de l'agent plus `apps/desktop`.
+    pub fn take_client(host: &dyn Host, root: &Path) -> Self {
+        Self {
+            commit: head_commit(host, root),
+            problems: crate::release_stage::client_tree_problems(host, root),
         }
     }
 
@@ -217,8 +236,158 @@ pub fn report_tree(host: &dyn Host, root: &Path, say: &mut dyn FnMut(&str)) -> S
     survey
 }
 
+/// Refuse un arbre qui n'est pas le commit (HRT-173, BR-RELEASE-007) : une construction de publication
+/// ne part jamais d'un arbre sale, et un état que git n'a pas su dire n'est pas « propre ». `what` dit
+/// ce qui est construit (« de l'agent », « du client »).
+pub fn refuse_unless_clean(survey: &Survey, what: &str) -> Result<(), String> {
+    match survey.state() {
+        "clean" => Ok(()),
+        "dirty" => {
+            let problems = survey.problems.as_deref().unwrap_or_default();
+            Err(format!(
+                "construction {what} refusée : arbre de travail sale ({} écart(s) : {}). Committe ou supprime ces fichiers (git stash -u pour les non suivis), puis recommence la construction depuis le début (pour le client : client-record --begin, puis npm ci). Un binaire signé doit sortir du commit exact qui sera étiqueté",
+                problems.len(),
+                problems
+                    .iter()
+                    .take(5)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" ; ")
+            ))
+        }
+        _ => {
+            let cause = [survey.commit.as_ref().err(), survey.problems.as_ref().err()]
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ; ");
+            Err(format!(
+                "construction {what} refusée : l'état de l'arbre de travail est inconnu ({cause}). Git doit répondre pour qu'un arbre soit déclaré propre"
+            ))
+        }
+    }
+}
+
+/// Erreurs d'un registre public qui passent d'elles-mêmes : limite de débit, panne passagère. Aucune
+/// autre erreur n'est rejouée (même règle que `ci.yml`, job `engine`).
+const TRANSIENT_PULL_ERRORS: [&str; 14] = [
+    "toomanyrequests",
+    "too many requests",
+    "rate exceeded",
+    "rate limit",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "tls handshake timeout",
+    "i/o timeout",
+    "context deadline exceeded",
+    "connection reset",
+    "connection refused",
+    "unexpected eof",
+    "temporary failure in name resolution",
+];
+
+fn is_transient_pull_error(output: &str) -> bool {
+    let text = output.to_lowercase();
+    TRANSIENT_PULL_ERRORS
+        .iter()
+        .any(|needle| text.contains(needle))
+}
+
+const PULL_ATTEMPTS: u32 = 5;
+
+/// Télécharge l'image de la construction avec reprise : cinq essais, attente 5, 10, 20 puis 40 s,
+/// SEULEMENT pour une limite de débit ou une panne passagère du registre ; toute autre erreur arrête
+/// tout de suite. Image déjà présente : rien à faire. Derrière `Host` (faux dans les tests, jamais de
+/// Docker réel).
+pub fn pull_image(host: &dyn Host, image: &str, say: &mut dyn FnMut(&str)) -> Result<(), String> {
+    let inspect = args(&["image", "inspect", image]);
+    if host
+        .run(&Call::new("docker", &inspect))
+        .is_ok_and(|output| output.success)
+    {
+        say("image de construction déjà présente");
+        return Ok(());
+    }
+    let pull = args(&["pull", "--quiet", image]);
+    let mut wait = std::time::Duration::from_secs(5);
+    let mut last = String::new();
+    for attempt in 1..=PULL_ATTEMPTS {
+        let output = host.run(&Call::new("docker", &pull))?;
+        if output.success {
+            say(&format!("image téléchargée (essai {attempt})"));
+            return Ok(());
+        }
+        let text = format!(
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout).trim(),
+            output.stderr
+        )
+        .trim()
+        .to_owned();
+        say(&format!("essai {attempt}/{PULL_ATTEMPTS} : {text}"));
+        if !is_transient_pull_error(&text) {
+            return Err(format!(
+                "téléchargement de l'image refusé (ce n'est pas une panne passagère du registre) : {text}"
+            ));
+        }
+        last = text;
+        if attempt < PULL_ATTEMPTS {
+            host.sleep(wait);
+            wait *= 2;
+        }
+    }
+    Err(format!(
+        "téléchargement de l'image abandonné après {PULL_ATTEMPTS} essais (limite de débit ou panne du registre) : {last}"
+    ))
+}
+
+/// La construction de PUBLICATION (`agent --release`, HRT-173) : l'arbre doit être le commit AVANT et
+/// APRÈS, l'image est téléchargée avec reprise, et l'enregistrement de construction est obligatoire
+/// (la construction échoue si elle n'a pas pu l'écrire). Les deux étapes qui touchent le monde (`pull`,
+/// `build`) sont injectées : les tests n'ont besoin ni de Docker ni de réseau.
+pub fn build_release(
+    host: &dyn Host,
+    root: &Path,
+    binary: &Path,
+    version: &str,
+    pull: &mut dyn FnMut() -> Result<(), String>,
+    build: &mut dyn FnMut() -> Result<PathBuf, String>,
+    say: &mut dyn FnMut(&str),
+) -> Result<PathBuf, String> {
+    remove_record(binary, say);
+    let before = Survey::take(host, root);
+    refuse_unless_clean(&before, "de l'agent")?;
+    if let Ok(commit) = &before.commit {
+        say(&format!("commit construit : {commit}"));
+    }
+    pull()?;
+    let path = build()?;
+    let after = Survey::take(host, root);
+    if recorded_state(&before, &after) != "clean" {
+        refuse_unless_clean(&after, "de l'agent")?;
+        return Err("construction de l'agent refusée : HEAD a changé pendant la construction. Relance sur un commit stable".to_owned());
+    }
+    say(&write_build_record(&path, &before, &after, version)?);
+    Ok(path)
+}
+
+/// Une construction qui échoue ne laisse pas l'enregistrement d'une précédente.
+fn remove_record(binary: &Path, say: &mut dyn FnMut(&str)) {
+    let record = record_path(binary);
+    if let Err(error) = std::fs::remove_file(&record)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        say(&format!(
+            "AVERTISSEMENT : {} non supprimé : {error}",
+            record.display()
+        ));
+    }
+}
+
 /// Écrit l'enregistrement de construction à côté du binaire produit. Toute erreur est rendue au
-/// lecteur comme un avertissement par l'appelant : elle ne fait jamais échouer la construction.
+/// lecteur comme un avertissement par l'appelant en développement ; `agent --release` en fait une erreur.
 pub fn write_build_record(
     binary: &Path,
     before: &Survey,
@@ -247,29 +416,36 @@ pub fn write_build_record(
     ))
 }
 
-pub fn run() -> Result<PathBuf, String> {
+/// `cargo xtask agent [--release]`. Sans l'option : construction de développement (avertit si l'arbre
+/// n'est pas le commit). Avec `--release` : construction de publication, arbre propre exigé (HRT-173).
+pub fn run(args: &[String]) -> Result<PathBuf, String> {
+    crate::release_stage::check_flags(args, &[], &["--release"])?;
+    let release = args.iter().any(|arg| arg == "--release");
     let root = docker::repo_root()?;
     let version = workspace_version(&root)?;
     let binary = root.join("target").join("dist").join("hearth-agent");
-    // Une construction qui échoue ne laisse pas l'enregistrement d'une précédente.
-    let record = record_path(&binary);
-    if let Err(error) = std::fs::remove_file(&record)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        println!(
-            "AVERTISSEMENT : {} non supprimé : {error}",
-            record.display()
-        );
-    }
     let host = System::new();
-    let before = report_tree(&host, &root, &mut |line| println!("{line}"));
-    let path = build(&Build {
+    let spec = Build {
         dist: root.join("target").join("dist"),
         out_name: "hearth-agent".to_owned(),
         env: Vec::new(),
         expect_version: version.clone(),
         expect_key: Some(repo_key_line(&root)?),
-    })?;
+    };
+    if release {
+        return build_release(
+            &host,
+            &root,
+            &binary,
+            &version,
+            &mut || pull_image(&host, IMAGE, &mut |line| println!("{line}")),
+            &mut || build(&spec),
+            &mut |line| println!("{line}"),
+        );
+    }
+    remove_record(&binary, &mut |line| println!("{line}"));
+    let before = report_tree(&host, &root, &mut |line| println!("{line}"));
+    let path = build(&spec)?;
     let after = Survey::take(&host, &root);
     match write_build_record(&path, &before, &after, &version) {
         Ok(line) => println!("{line}"),
@@ -544,5 +720,399 @@ mod tests {
         assert_eq!(record.sha256, sha256_hex(b"agent"));
         assert_eq!(record.tree, "clean");
         assert!(missing.is_err());
+    }
+
+    // ----- HRT-173 : construction de publication (`agent --release`) -----
+
+    use crate::host::CmdOutput;
+    use std::cell::{Cell, RefCell};
+    use std::time::Duration;
+
+    /// Faux Docker : `image inspect` répond `present`, chaque `pull` dépile une réponse. Enregistre les
+    /// appels et les attentes ; ne lance rien.
+    struct DockerFake {
+        present: bool,
+        pulls: RefCell<Vec<Result<(), String>>>,
+        calls: RefCell<Vec<Vec<String>>>,
+        sleeps: RefCell<Vec<Duration>>,
+    }
+
+    impl DockerFake {
+        fn new(present: bool, pulls: Vec<Result<(), &str>>) -> Self {
+            Self {
+                present,
+                pulls: RefCell::new(
+                    pulls
+                        .into_iter()
+                        .rev()
+                        .map(|r| r.map_err(str::to_owned))
+                        .collect(),
+                ),
+                calls: Default::default(),
+                sleeps: Default::default(),
+            }
+        }
+
+        fn pull_count(&self) -> usize {
+            self.calls
+                .borrow()
+                .iter()
+                .filter(|call| call.first().is_some_and(|a| a == "pull"))
+                .count()
+        }
+    }
+
+    impl Host for DockerFake {
+        fn run(&self, call: &Call) -> Result<CmdOutput, String> {
+            assert_eq!(
+                call.program, "docker",
+                "seul docker, jamais d'autre programme"
+            );
+            self.calls.borrow_mut().push(call.args.to_vec());
+            let outcome = if call.args.first().is_some_and(|a| a == "image") {
+                if self.present {
+                    Ok(())
+                } else {
+                    Err("No such image".to_owned())
+                }
+            } else {
+                self.pulls.borrow_mut().pop().expect("pull inattendu")
+            };
+            Ok(match outcome {
+                Ok(()) => CmdOutput {
+                    success: true,
+                    code: Some(0),
+                    stdout: Vec::new(),
+                    stderr: String::new(),
+                },
+                Err(text) => CmdOutput {
+                    success: false,
+                    code: Some(1),
+                    stdout: Vec::new(),
+                    stderr: text,
+                },
+            })
+        }
+        fn elapsed(&self) -> Duration {
+            Duration::ZERO
+        }
+        fn sleep(&self, duration: Duration) {
+            self.sleeps.borrow_mut().push(duration);
+        }
+    }
+
+    const RATE: &str = "toomanyrequests: Rate exceeded";
+
+    fn secs(list: &[u64]) -> Vec<Duration> {
+        list.iter().map(|s| Duration::from_secs(*s)).collect()
+    }
+
+    #[test]
+    fn an_image_already_present_is_not_downloaded() {
+        let fake = DockerFake::new(true, vec![]);
+        pull_image(&fake, IMAGE, &mut |_| {}).unwrap();
+        assert_eq!(fake.pull_count(), 0);
+    }
+
+    #[test]
+    fn a_rate_limit_is_retried_with_a_growing_wait_until_it_passes() {
+        let fake = DockerFake::new(
+            false,
+            vec![Err(RATE), Err("503 Service Unavailable"), Ok(())],
+        );
+        pull_image(&fake, IMAGE, &mut |_| {}).unwrap();
+        assert_eq!(fake.pull_count(), 3);
+        assert_eq!(*fake.sleeps.borrow(), secs(&[5, 10]));
+    }
+
+    #[test]
+    fn five_failed_attempts_give_up_after_waits_of_5_10_20_and_40_seconds() {
+        let fake = DockerFake::new(false, vec![Err(RATE); 5]);
+        let error = pull_image(&fake, IMAGE, &mut |_| {}).unwrap_err();
+        assert_eq!(fake.pull_count(), 5);
+        assert_eq!(*fake.sleeps.borrow(), secs(&[5, 10, 20, 40]));
+        assert!(
+            error.contains("abandonné après 5 essais") && error.contains("toomanyrequests"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn any_other_error_stops_at_once_without_waiting() {
+        let fake = DockerFake::new(
+            false,
+            vec![
+                Err("denied: requested access to the resource is denied"),
+                Ok(()),
+            ],
+        );
+        let error = pull_image(&fake, IMAGE, &mut |_| {}).unwrap_err();
+        assert_eq!(fake.pull_count(), 1);
+        assert!(fake.sleeps.borrow().is_empty());
+        assert!(error.contains("pas une panne passagère"), "{error}");
+    }
+
+    #[test]
+    fn the_transient_errors_are_the_ones_of_the_ci_and_nothing_else() {
+        for transient in [
+            "toomanyrequests: Rate exceeded",
+            "Too Many Requests",
+            "502 Bad Gateway",
+            "TLS handshake timeout",
+            "dial tcp: i/o timeout",
+            "read: connection reset by peer",
+            "unexpected end of file, Unexpected EOF",
+            "Temporary failure in name resolution",
+        ] {
+            assert!(is_transient_pull_error(transient), "{transient}");
+        }
+        for fatal in [
+            "manifest unknown",
+            "denied",
+            "no space left on device",
+            "",
+            "not found",
+        ] {
+            assert!(!is_transient_pull_error(fatal), "{fatal}");
+        }
+    }
+
+    /// Git qui change de réponse quand la construction a eu lieu (`built` passé à `true`).
+    struct Switching<'a> {
+        before: TreeFake,
+        after: TreeFake,
+        built: &'a Cell<bool>,
+    }
+
+    impl Host for Switching<'_> {
+        fn run(&self, call: &Call) -> Result<CmdOutput, String> {
+            if self.built.get() {
+                self.after.run(call)
+            } else {
+                self.before.run(call)
+            }
+        }
+        fn elapsed(&self) -> Duration {
+            Duration::ZERO
+        }
+        fn sleep(&self, _: Duration) {}
+    }
+
+    /// Un dépôt jetable avec un ancien enregistrement à côté du binaire.
+    struct Release {
+        root: PathBuf,
+        binary: PathBuf,
+    }
+
+    impl Release {
+        fn new(name: &str) -> Self {
+            let root = crate::release_stage::fixtures::tmp_dir(name);
+            std::fs::create_dir_all(root.join("target/dist")).unwrap();
+            let binary = root.join("target/dist/hearth-agent");
+            std::fs::write(
+                record_path(&binary),
+                "commit=aa\ntree=clean\nsha256=00\nversion=0\n",
+            )
+            .unwrap();
+            Self { root, binary }
+        }
+    }
+
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn a_release_build_on_a_dirty_tree_is_refused_before_anything_is_pulled_or_built() {
+        let release = Release::new("agent_release_dirty");
+        let (mut pulled, mut built) = (false, false);
+        let host = TreeFake::new(" M Cargo.toml", "abc1234def");
+        let error = build_release(
+            &host,
+            &release.root,
+            &release.binary,
+            "0.1.0",
+            &mut || {
+                pulled = true;
+                Ok(())
+            },
+            &mut || {
+                built = true;
+                Ok(PathBuf::new())
+            },
+            &mut |_| {},
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("refusée") && error.contains("sale") && error.contains("Cargo.toml"),
+            "{error}"
+        );
+        assert!(!pulled && !built);
+        assert!(
+            !record_path(&release.binary).exists(),
+            "l'ancien enregistrement a disparu"
+        );
+    }
+
+    #[test]
+    fn an_unknown_tree_state_is_refused_never_taken_for_clean() {
+        let release = Release::new("agent_release_unknown");
+        let mut mute = TreeFake::new("", "abc1234def");
+        mute.status_fails = true;
+        let error = build_release(
+            &mute,
+            &release.root,
+            &release.binary,
+            "0.1.0",
+            &mut || panic!("rien n'est téléchargé"),
+            &mut || panic!("rien n'est construit"),
+            &mut |_| {},
+        )
+        .unwrap_err();
+        assert!(error.contains("inconnu"), "{error}");
+    }
+
+    fn fake_build(binary: &Path) -> impl FnMut() -> Result<PathBuf, String> + '_ {
+        move || {
+            std::fs::write(binary, b"agent").map_err(|e| e.to_string())?;
+            Ok(binary.to_path_buf())
+        }
+    }
+
+    #[test]
+    fn a_release_build_on_a_clean_tree_pulls_builds_and_records_the_commit() {
+        let release = Release::new("agent_release_ok");
+        let order = RefCell::new(Vec::new());
+        let mut lines = Vec::new();
+        let host = TreeFake::new("", "abc1234def");
+        let mut build = fake_build(&release.binary);
+        let path = build_release(
+            &host,
+            &release.root,
+            &release.binary,
+            "0.1.0",
+            &mut || {
+                order.borrow_mut().push("pull");
+                Ok(())
+            },
+            &mut || {
+                order.borrow_mut().push("build");
+                build()
+            },
+            &mut |line| lines.push(line.to_owned()),
+        )
+        .unwrap();
+        let record =
+            BuildRecord::parse(&std::fs::read_to_string(record_path(&path)).unwrap()).unwrap();
+        assert_eq!(*order.borrow(), ["pull", "build"]);
+        assert_eq!(record.commit, "abc1234def");
+        assert_eq!(record.tree, "clean");
+        assert_eq!(record.sha256, sha256_hex(b"agent"));
+        assert_eq!(record.version, "0.1.0");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("commit construit : abc1234def"))
+        );
+        assert!(host.only_git_ran());
+    }
+
+    #[test]
+    fn a_tree_dirtied_or_a_head_moved_during_the_build_is_refused_and_leaves_no_record() {
+        for (label, after, expected) in [
+            (
+                "sale",
+                TreeFake::new(" M Cargo.lock", "abc1234def"),
+                "Cargo.lock",
+            ),
+            ("head", TreeFake::new("", "fff0000"), "HEAD a changé"),
+        ] {
+            let release = Release::new(&format!("agent_release_after_{label}"));
+            let built = Cell::new(false);
+            let host = Switching {
+                before: TreeFake::new("", "abc1234def"),
+                after,
+                built: &built,
+            };
+            let mut build = fake_build(&release.binary);
+            let error = build_release(
+                &host,
+                &release.root,
+                &release.binary,
+                "0.1.0",
+                &mut || Ok(()),
+                &mut || {
+                    built.set(true);
+                    build()
+                },
+                &mut |_| {},
+            )
+            .unwrap_err();
+            assert!(error.contains(expected), "{label} : {error}");
+            assert!(!record_path(&release.binary).exists(), "{label}");
+        }
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_written_fails_the_release_build() {
+        let release = Release::new("agent_release_no_record");
+        let host = TreeFake::new("", "abc1234def");
+        let error = build_release(
+            &host,
+            &release.root,
+            &release.binary,
+            "0.1.0",
+            &mut || Ok(()),
+            &mut || Ok(release.root.join("target/dist/absent")),
+            &mut |_| {},
+        )
+        .unwrap_err();
+        assert!(error.contains("absent"), "{error}");
+        assert!(!record_path(&release.binary).exists());
+    }
+
+    #[test]
+    fn a_failing_pull_or_build_stops_the_release_build() {
+        let release = Release::new("agent_release_fail");
+        let host = TreeFake::new("", "abc1234def");
+        let pull = build_release(
+            &host,
+            &release.root,
+            &release.binary,
+            "0.1.0",
+            &mut || Err("registre muet".to_owned()),
+            &mut || panic!("pas de construction sans image"),
+            &mut |_| {},
+        )
+        .unwrap_err();
+        let build = build_release(
+            &host,
+            &release.root,
+            &release.binary,
+            "0.1.0",
+            &mut || Ok(()),
+            &mut || Err("docker run a échoué".to_owned()),
+            &mut |_| {},
+        )
+        .unwrap_err();
+        assert!(pull.contains("registre muet") && build.contains("docker run"));
+        assert!(!record_path(&release.binary).exists());
+    }
+
+    #[test]
+    fn the_task_refuses_an_unknown_argument_before_touching_anything() {
+        assert!(
+            run(&["--releas".to_owned()])
+                .unwrap_err()
+                .contains("argument inconnu")
+        );
+    }
+
+    #[test]
+    fn a_record_of_the_client_is_read_with_its_own_advice() {
+        let error = BuildRecord::parse_with("nope", "reconstruis le client").unwrap_err();
+        assert!(error.ends_with("reconstruis le client"), "{error}");
     }
 }

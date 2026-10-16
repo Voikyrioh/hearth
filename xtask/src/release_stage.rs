@@ -408,8 +408,17 @@ pub fn tracked_changes(host: &dyn Host, root: &Path) -> Result<Vec<String>, Stri
 
 /// Les fichiers non suivis et non ignorés sous les entrées de la construction (`BUILD_INPUTS`).
 pub fn untracked_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    untracked_under(host, root, &BUILD_INPUTS)
+}
+
+/// Les fichiers non suivis et non ignorés sous ces chemins.
+pub fn untracked_under(
+    host: &dyn Host,
+    root: &Path,
+    paths: &[&str],
+) -> Result<Vec<String>, String> {
     let mut list = vec!["ls-files", "--others", "--exclude-standard", "--"];
-    list.extend(BUILD_INPUTS);
+    list.extend(paths);
     let out = git_text(
         host,
         root,
@@ -427,6 +436,11 @@ pub fn untracked_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, Str
 /// l'ignorance peut venir du poste (`.git/info/exclude`, `core.excludesFile`), pas du commit : ranger
 /// une migration d'essai ainsi la cacherait de `git status` sans l'ôter du binaire. Refusés.
 pub fn ignored_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    ignored_under(host, root, &BUILD_INPUTS)
+}
+
+/// Les fichiers ignorés sous ces chemins (ou motifs git).
+pub fn ignored_under(host: &dyn Host, root: &Path, paths: &[&str]) -> Result<Vec<String>, String> {
     let mut list = vec![
         "ls-files",
         "--others",
@@ -434,7 +448,7 @@ pub fn ignored_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, Strin
         "--exclude-standard",
         "--",
     ];
-    list.extend(BUILD_INPUTS);
+    list.extend(paths);
     let out = git_text(
         host,
         root,
@@ -477,6 +491,29 @@ pub fn tree_problems(host: &dyn Host, root: &Path) -> Result<Vec<String>, String
     let mut problems = tracked_changes(host, root)?;
     problems.extend(untracked_inputs(host, root)?);
     problems.extend(ignored_inputs(host, root)?);
+    problems.extend(hidden_changes(host, root)?);
+    Ok(problems)
+}
+
+/// Entrées de la construction du CLIENT en plus de `BUILD_INPUTS` : le front et la coquille Tauri
+/// (`apps/desktop`), dont les sources et les `capabilities` lues par glob entrent dans l'installateur.
+pub const CLIENT_EXTRA_INPUTS: [&str; 1] = ["apps/desktop"];
+
+/// Fichiers d'environnement que vite lit à la construction (`.env`, `.env.local`, `.env.production`,
+/// `.env.production.local`…) : ignorés par le dépôt mais ils entrent dans l'installateur (un `.env`
+/// développement y activerait des panneaux simulés). Refusés s'ils existent.
+pub const CLIENT_ENV_FILES: &str = "apps/desktop/.env*";
+
+/// Comme `tree_problems`, pour le client : les non suivis sont cherchés aussi sous `apps/desktop`. Les
+/// IGNORÉS ne le sont pas sous `apps/desktop` (`node_modules`, `dist` y vivent légitimement, ignorés par
+/// le dépôt) : seulement sous `BUILD_INPUTS` et, sous `apps/desktop`, les fichiers `.env*`.
+pub fn client_tree_problems(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let mut problems = tracked_changes(host, root)?;
+    let mut paths = BUILD_INPUTS.to_vec();
+    paths.extend(CLIENT_EXTRA_INPUTS);
+    problems.extend(untracked_under(host, root, &paths)?);
+    problems.extend(ignored_inputs(host, root)?);
+    problems.extend(ignored_under(host, root, &[CLIENT_ENV_FILES])?);
     problems.extend(hidden_changes(host, root)?);
     Ok(problems)
 }
@@ -545,6 +582,38 @@ pub fn check_agent_build(record: &str, agent: &[u8], head: &str) -> Result<(), S
     if record.tree != "clean" {
         return Err(format!(
             "le binaire de l'agent a été construit sur un arbre « {} » (pas propre, ou état inconnu) : reconstruis-le sur un arbre propre et signe-le de nouveau",
+            record.tree
+        ));
+    }
+    Ok(())
+}
+
+/// Refuse un installateur du client qui ne sort pas du commit assemblé (HRT-173, BR-RELEASE-007) :
+/// `record` est le texte de `<installateur>.build`, écrit par `cargo xtask client-record` après la
+/// construction. Somme, commit et état de l'arbre doivent correspondre, comme pour l'agent. Fichier en
+/// clair, falsifiable à la main : une garde contre l'erreur (installateur d'un autre commit glissé dans
+/// le dossier), pas contre la malveillance.
+pub fn check_client_build(record: &str, installer: &[u8], head: &str) -> Result<(), String> {
+    let record = crate::agent::BuildRecord::parse_with(
+        record,
+        "reconstruis le client puis relance cargo xtask client-record",
+    )?;
+    let sha = sha256_hex(installer);
+    if record.sha256 != sha {
+        return Err(format!(
+            "l'installateur du client (sha256 {sha}) n'est pas celui que cargo xtask client-record a enregistré (sha256 {}) : reconstruis-le et signe-le de nouveau",
+            record.sha256
+        ));
+    }
+    if record.commit != head {
+        return Err(format!(
+            "l'installateur du client a été construit sur le commit {} et HEAD est {head} : le client et l'agent d'une version sortent du même commit. Reviens sur {} ou reconstruis le client ici",
+            record.commit, record.commit
+        ));
+    }
+    if record.tree != "clean" {
+        return Err(format!(
+            "l'installateur du client a été construit sur un arbre « {} » (pas propre, ou état inconnu) : reconstruis-le sur un arbre propre et signe-le de nouveau",
             record.tree
         ));
     }
@@ -969,6 +1038,15 @@ pub fn stage_with(
     let client_dir = Path::new(&required(args, "--client-dir")?).to_path_buf();
     let installer_name = installer_file_name(&version);
     let installer = read_bytes(&client_dir.join(&installer_name))?;
+    // L'installateur doit sortir de CE commit : l'enregistrement de `cargo xtask client-record`, à côté de
+    // lui (HRT-173). Jamais assemblé : seuls les fichiers de la liste fermée le sont.
+    let client_record = read_text(&crate::agent::record_path(&client_dir.join(&installer_name)))
+        .map_err(|error| {
+            format!(
+                "enregistrement de construction du client absent ou illisible ({error}) : reconstruis le client puis lance cargo xtask client-record sur ce commit, avant la signature"
+            )
+        })?;
+    check_client_build(&client_record, &installer, &commit)?;
     let installer_signature = read_text(&client_dir.join(format!("{installer_name}.sig")))?;
     let latest_json = read_text(&client_dir.join("latest.json"))?;
     let notes = read_text(&client_dir.join("notes.txt"))?;
@@ -2318,6 +2396,10 @@ mod tests {
             client.join(format!("{installer}.sig")),
             fixture.installer_signature.as_bytes(),
         );
+        write(
+            crate::agent::record_path(&client.join(&installer)),
+            record_for(&fixture.installer, "abc1234def", "clean").as_bytes(),
+        );
         write(client.join("latest.json"), fixture.latest_json.as_bytes());
         write(client.join("notes.txt"), fixture.notes.as_bytes());
         let agent = root.join("dist/hearth-agent");
@@ -2384,6 +2466,78 @@ mod tests {
             assert!(error.contains(expected), "{expected} : {error}");
             assert!(
                 missing.contains("enregistrement de construction"),
+                "{missing}"
+            );
+            assert!(!written && !written_after, "rien n'est écrit");
+        }
+    }
+
+    #[test]
+    fn an_installer_needs_a_matching_build_record() {
+        let installer = b"installateur";
+        let good = record_for(installer, "abc1234def", "clean");
+        assert!(check_client_build(&good, installer, "abc1234def").is_ok());
+        // autre fichier que celui enregistré
+        assert!(
+            check_client_build(&good, b"autre", "abc1234def")
+                .unwrap_err()
+                .contains("pas celui que cargo xtask client-record a enregistré")
+        );
+        // autre commit que HEAD : client et agent ne sortent pas du même commit
+        assert!(
+            check_client_build(&good, installer, "fff0000")
+                .unwrap_err()
+                .contains("construit sur le commit abc1234def")
+        );
+        // arbre pas propre ou inconnu
+        for tree in ["dirty", "unknown"] {
+            let record = record_for(installer, "abc1234def", tree);
+            assert!(
+                check_client_build(&record, installer, "abc1234def")
+                    .unwrap_err()
+                    .contains(tree)
+            );
+        }
+        // illisible : le conseil est celui du client, pas celui de l'agent
+        let error = check_client_build("n'importe quoi", installer, "abc1234def").unwrap_err();
+        assert!(
+            error.contains("client-record") && !error.contains("cargo xtask agent"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn the_stage_refuses_an_installer_without_a_matching_build_before_writing() {
+        type Case = (&'static str, fn(&[u8]) -> String);
+        let cases: [Case; 4] = [
+            ("construit sur le commit", |i| {
+                record_for(i, "fff0000", "clean")
+            }),
+            ("pas propre", |i| record_for(i, "abc1234def", "dirty")),
+            (
+                "pas celui que cargo xtask client-record a enregistré",
+                |_| record_for(b"un autre installateur", "abc1234def", "clean"),
+            ),
+            ("illisible", |_| "n'importe quoi".to_owned()),
+        ];
+        for (n, (expected, record)) in cases.into_iter().enumerate() {
+            let (root, args, _) = staged_repo(&format!("stage_client_ko{n}"), |agent| {
+                record_for(agent, "abc1234def", "clean")
+            });
+            let installer = root.join("client").join(installer_file_name(VERSION));
+            let record_file = crate::agent::record_path(&installer);
+            std::fs::write(&record_file, record(b"installateur")).unwrap();
+            let fake = TreeFake::new("", "abc1234def");
+            let error = stage_with(&fake, &root, &args, &mut |_| {}).unwrap_err();
+            let written = root.join(STAGE_DIR).exists();
+            // Sans enregistrement du client du tout.
+            std::fs::remove_file(&record_file).unwrap();
+            let missing = stage_with(&fake, &root, &args, &mut |_| {}).unwrap_err();
+            let written_after = root.join(STAGE_DIR).exists();
+            let _ = std::fs::remove_dir_all(&root);
+            assert!(error.contains(expected), "{expected} : {error}");
+            assert!(
+                missing.contains("enregistrement de construction du client"),
                 "{missing}"
             );
             assert!(!written && !written_after, "rien n'est écrit");

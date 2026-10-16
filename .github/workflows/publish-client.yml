@@ -11,7 +11,7 @@ name: publish-client
 # `cargo xtask release-stage` et `release-upload` (HRT-51). La release GitHub SANS binaire (étiquette,
 # notes, `SHA256SUMS`) est créée à la main APRÈS le dépôt : voir le runbook.
 #
-# Contenu de l'artefact `hearth-client-signed` : Hearth_X.Y.Z_x64-setup.exe, son `.sig`, `latest.json` (adresse
+# Contenu de l'artefact `hearth-client-signed` : Hearth_X.Y.Z_x64-setup.exe, son `.sig`, son `.build` (enregistrement de construction, HRT-173, relu par `release-stage`), `latest.json` (adresse
 # de l'installateur sur hearth.voikyrioh.fr ; intermédiaire, jamais déposé tel quel : le manifeste du bucket est
 # écrit par `release-stage`, HRT-51) et `notes.txt` (notes saisies au lancement).
 #
@@ -84,12 +84,24 @@ jobs:
         shell: bash
         run: echo "version=$(cargo xtask client-version)" >> "$GITHUB_OUTPUT"
 
+      # HRT-173 : l'arbre doit être le commit avant la construction (refus sinon), puis l'enregistrement
+      # de construction de l'installateur (`.build`) est écrit après, lu par `release-stage`.
+      - name: Relevé de l'arbre avant la construction
+        shell: bash
+        run: cargo xtask client-record --begin
+
       - name: Installateur NSIS
         working-directory: apps/desktop
         shell: bash
         run: |
           npm ci
           npm run tauri build
+
+      - name: Enregistrement de construction de l'installateur
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: cargo xtask client-record --installer "target/release/bundle/nsis/Hearth_${VERSION}_x64-setup.exe" --version "$VERSION"
 
       - name: Installateur présent
         shell: bash
@@ -100,7 +112,9 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hearth-client-installer
-          path: target/release/bundle/nsis/Hearth_${{ steps.version.outputs.version }}_x64-setup.exe
+          path: |
+            target/release/bundle/nsis/Hearth_${{ steps.version.outputs.version }}_x64-setup.exe
+            target/release/bundle/nsis/Hearth_${{ steps.version.outputs.version }}_x64-setup.exe.build
           if-no-files-found: error
           retention-days: 3
 
@@ -166,6 +180,7 @@ jobs:
           mkdir signed
           cp "installer/Hearth_${VERSION}_x64-setup.exe" \
              "installer/Hearth_${VERSION}_x64-setup.exe.sig" \
+             "installer/Hearth_${VERSION}_x64-setup.exe.build" \
              installer/latest.json installer/notes.txt signed/
           sha256sum signed/*
 

@@ -1,15 +1,10 @@
 //! Lancement de `docker` : toujours avec une liste d'arguments.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Racine du dépôt (le dossier qui contient `xtask`).
-pub fn repo_root() -> Result<PathBuf, String> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "racine du dépôt introuvable".to_owned())
-}
+/// Racine du dépôt : définie une seule fois, dans `repo_root.rs`.
+pub use crate::repo_root::repo_root;
 
 /// Chemin d'un montage : `docker --mount` n'aime pas le préfixe `\\?\` de Windows.
 pub fn mount_path(path: &Path) -> String {
