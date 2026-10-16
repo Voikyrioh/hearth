@@ -16,7 +16,6 @@ use std::path::Path;
 use crate::client_release::required;
 use crate::release_core::*;
 use crate::secret::Secret;
-use zeroize::Zeroizing;
 
 pub const KEY_VAR: &str = "HEARTH_AGENT_SIGNING_KEY";
 pub const PASSWORD_VAR: &str = "HEARTH_AGENT_SIGNING_KEY_PASSWORD";
@@ -54,14 +53,13 @@ pub fn sign_agent(
         ));
     }
     check_key(public_key_file)?;
-    // La copie du mot de passe donnée à minisign est effacée dès que la clé est déchiffrée.
-    let password = Zeroizing::new(inputs.password.expose().to_owned());
+    // Limite de la bibliothèque : minisign 0.10 prend le mot de passe en `String` possédée et ne l'efface
+    // pas ; cette copie vit jusqu'à la fin du déchiffrement. Notre `Secret`, lui, est effacé au Drop.
     let secret = minisign::SecretKeyBox::from_string(&decode_key_file(inputs.key.expose()))
-        .and_then(|boxed| boxed.into_secret_key(Some((*password).clone())))
+        .and_then(|boxed| boxed.into_secret_key(Some(inputs.password.expose().to_owned())))
         .map_err(|error| {
             format!("clé secrète de l'agent illisible (ou mot de passe faux) : {error}")
         })?;
-    drop(password);
     let comment = format!("version:{version}");
     let signature = minisign::sign(
         None,

@@ -436,6 +436,11 @@ pub fn untracked_under(
 /// l'ignorance peut venir du poste (`.git/info/exclude`, `core.excludesFile`), pas du commit : ranger
 /// une migration d'essai ainsi la cacherait de `git status` sans l'ôter du binaire. Refusés.
 pub fn ignored_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    ignored_under(host, root, &BUILD_INPUTS)
+}
+
+/// Les fichiers ignorés sous ces chemins (ou motifs git).
+pub fn ignored_under(host: &dyn Host, root: &Path, paths: &[&str]) -> Result<Vec<String>, String> {
     let mut list = vec![
         "ls-files",
         "--others",
@@ -443,7 +448,7 @@ pub fn ignored_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, Strin
         "--exclude-standard",
         "--",
     ];
-    list.extend(BUILD_INPUTS);
+    list.extend(paths);
     let out = git_text(
         host,
         root,
@@ -494,15 +499,21 @@ pub fn tree_problems(host: &dyn Host, root: &Path) -> Result<Vec<String>, String
 /// (`apps/desktop`), dont les sources et les `capabilities` lues par glob entrent dans l'installateur.
 pub const CLIENT_EXTRA_INPUTS: [&str; 1] = ["apps/desktop"];
 
+/// Fichiers d'environnement que vite lit à la construction (`.env`, `.env.local`, `.env.production`,
+/// `.env.production.local`…) : ignorés par le dépôt mais ils entrent dans l'installateur (un `.env`
+/// développement y activerait des panneaux simulés). Refusés s'ils existent.
+pub const CLIENT_ENV_FILES: &str = "apps/desktop/.env*";
+
 /// Comme `tree_problems`, pour le client : les non suivis sont cherchés aussi sous `apps/desktop`. Les
 /// IGNORÉS ne le sont pas sous `apps/desktop` (`node_modules`, `dist` y vivent légitimement, ignorés par
-/// le dépôt) : seulement sous `BUILD_INPUTS`, comme pour l'agent.
+/// le dépôt) : seulement sous `BUILD_INPUTS` et, sous `apps/desktop`, les fichiers `.env*`.
 pub fn client_tree_problems(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
     let mut problems = tracked_changes(host, root)?;
     let mut paths = BUILD_INPUTS.to_vec();
     paths.extend(CLIENT_EXTRA_INPUTS);
     problems.extend(untracked_under(host, root, &paths)?);
     problems.extend(ignored_inputs(host, root)?);
+    problems.extend(ignored_under(host, root, &[CLIENT_ENV_FILES])?);
     problems.extend(hidden_changes(host, root)?);
     Ok(problems)
 }

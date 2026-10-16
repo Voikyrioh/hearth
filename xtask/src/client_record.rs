@@ -119,8 +119,24 @@ pub fn record(
     // Le relevé de début ne sert qu'UNE fois, réussite ou échec : après un refus, il faut tout reconstruire
     // depuis `--begin`, sinon un installateur construit sur un arbre sale passerait avec un arbre rangé.
     let begun = read_begin(root);
+    let times = (
+        std::fs::metadata(begin_path(root)).and_then(|meta| meta.modified()),
+        std::fs::metadata(installer).and_then(|meta| meta.modified()),
+    );
     let _ = std::fs::remove_file(begin_path(root));
-    let before = Survey::clean_at(&begun?);
+    let begun = begun?;
+    // `--begin` rejoué sans reconstruire ne doit pas blanchir un ancien installateur : il doit être plus
+    // récent que le relevé.
+    match times {
+        (Ok(begin_time), Ok(built_time)) if built_time >= begin_time => {}
+        (Ok(_), Ok(_)) => {
+            return Err("l'installateur n'a pas été construit après client-record --begin : recommence depuis --begin".to_owned());
+        }
+        _ => {
+            return Err("dates de modification de l'installateur ou du relevé illisibles : recommence depuis client-record --begin".to_owned());
+        }
+    }
+    let before = Survey::clean_at(&begun);
     let after = Survey::take_client(host, root);
     let state = recorded_state(&before, &after);
     if state != "clean" {
@@ -172,6 +188,18 @@ mod tests {
         }
     }
 
+    impl Repo {
+        /// Simule la construction qui suit `--begin` : l'installateur devient plus récent que le relevé.
+        fn rebuild(&self) {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&self.installer)
+                .unwrap();
+            file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
+                .unwrap();
+        }
+    }
+
     impl Drop for Repo {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
@@ -191,6 +219,7 @@ mod tests {
         let repo = Repo::new("client_record_ok");
         let fake = TreeFake::new("", "abc1234def");
         begin(&fake, &repo.root, &mut quiet()).unwrap();
+        repo.rebuild();
         record(&fake, &repo.root, &repo.installer, VERSION, &mut quiet()).unwrap();
         let parsed = BuildRecord::parse(&record_text(&repo).unwrap()).unwrap();
         assert_eq!(parsed.commit, "abc1234def");
@@ -227,6 +256,7 @@ mod tests {
     fn a_tree_dirtied_by_the_build_is_refused_and_no_record_is_left() {
         let repo = Repo::new("client_record_dirty_after");
         begin(&TreeFake::new("", "abc1234def"), &repo.root, &mut quiet()).unwrap();
+        repo.rebuild();
         // Une construction qui laisse un fichier suivi modifié (ou un non suivi sous les entrées).
         let error = record(
             &TreeFake::new(" M apps/desktop/src/bindings.ts", "abc1234def"),
@@ -247,6 +277,7 @@ mod tests {
     fn a_head_that_moved_during_the_build_is_refused() {
         let repo = Repo::new("client_record_head_moved");
         begin(&TreeFake::new("", "abc1234def"), &repo.root, &mut quiet()).unwrap();
+        repo.rebuild();
         let error = record(
             &TreeFake::new("", "fff0000"),
             &repo.root,
@@ -263,6 +294,7 @@ mod tests {
     fn a_git_that_cannot_answer_after_the_build_is_never_read_as_clean() {
         let repo = Repo::new("client_record_mute_after");
         begin(&TreeFake::new("", "abc1234def"), &repo.root, &mut quiet()).unwrap();
+        repo.rebuild();
         let mut mute = TreeFake::new("", "abc1234def");
         mute.status_fails = true;
         let error = record(&mute, &repo.root, &repo.installer, VERSION, &mut quiet()).unwrap_err();
@@ -304,6 +336,7 @@ mod tests {
         let repo = Repo::new("client_record_name");
         let fake = TreeFake::new("", "abc1234def");
         begin(&fake, &repo.root, &mut quiet()).unwrap();
+        repo.rebuild();
         let other = repo.root.join("Hearth_0.2.0_x64-setup.exe");
         std::fs::write(&other, b"autre").unwrap();
         let error = record(&fake, &repo.root, &other, VERSION, &mut quiet()).unwrap_err();
@@ -357,6 +390,7 @@ mod tests {
     fn after_a_refusal_the_begin_survey_is_gone_and_a_retry_without_rebuilding_is_refused() {
         let repo = Repo::new("client_record_retry");
         begin(&TreeFake::new("", "abc1234def"), &repo.root, &mut quiet()).unwrap();
+        repo.rebuild();
         // Construction sur un arbre sale : refus.
         let dirty = TreeFake::new(" M apps/desktop/src/App.vue", "abc1234def");
         assert!(record(&dirty, &repo.root, &repo.installer, VERSION, &mut quiet()).is_err());
@@ -372,6 +406,7 @@ mod tests {
         let repo = Repo::new("client_record_inputs");
         let fake = TreeFake::new("", "abc1234def");
         begin(&fake, &repo.root, &mut quiet()).unwrap();
+        repo.rebuild();
         let calls = fake.calls.borrow();
         let has = |call: &Vec<String>, word: &str| call.iter().any(|a| a == word);
         let untracked: Vec<_> = calls
@@ -385,11 +420,10 @@ mod tests {
                 .all(|c| has(c, "apps/desktop") && has(c, "crates"))
         );
         assert!(!untracked.is_empty() && !ignored.is_empty());
-        assert!(
-            ignored
-                .iter()
-                .all(|c| !has(c, "apps/desktop") && has(c, "crates"))
-        );
+        // Jamais tout `apps/desktop` (node_modules, dist), seulement ses fichiers d'environnement.
+        assert!(ignored.iter().all(|c| !has(c, "apps/desktop")));
+        assert!(ignored.iter().any(|c| has(c, "apps/desktop/.env*")));
+        assert!(ignored.iter().any(|c| has(c, "crates")));
     }
 
     #[test]
@@ -399,5 +433,27 @@ mod tests {
         fake.untracked = "apps/desktop/src-tauri/capabilities/extra.json".to_owned();
         let error = begin(&fake, &repo.root, &mut quiet()).unwrap_err();
         assert!(error.contains("extra.json"), "{error}");
+    }
+
+    #[test]
+    fn an_ignored_env_file_of_the_client_refuses_the_build() {
+        let repo = Repo::new("client_record_env");
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.ignored = "apps/desktop/.env.production.local".to_owned();
+        let error = begin(&fake, &repo.root, &mut quiet()).unwrap_err();
+        assert!(error.contains(".env.production.local"), "{error}");
+    }
+
+    #[test]
+    fn a_begin_replayed_without_rebuilding_is_refused() {
+        let repo = Repo::new("client_record_replay");
+        let fake = TreeFake::new("", "abc1234def");
+        // L'installateur date d'avant le relevé : pas reconstruit depuis `--begin`.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        begin(&fake, &repo.root, &mut quiet()).unwrap();
+        let error = record(&fake, &repo.root, &repo.installer, VERSION, &mut quiet()).unwrap_err();
+        assert!(error.contains("n'a pas été construit après"), "{error}");
+        assert!(record_text(&repo).is_none());
+        assert!(!begin_path(&repo.root).exists());
     }
 }

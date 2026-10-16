@@ -11,7 +11,7 @@ name: publish-client
 # `cargo xtask release-stage` et `release-upload` (HRT-51). La release GitHub SANS binaire (étiquette,
 # notes, `SHA256SUMS`) est créée à la main APRÈS le dépôt : voir le runbook.
 #
-# Contenu de l'artefact `hearth-client-signed` : Hearth_X.Y.Z_x64-setup.exe, son `.sig`, `latest.json` (adresse
+# Contenu de l'artefact `hearth-client-signed` : Hearth_X.Y.Z_x64-setup.exe, son `.sig`, son `.build` (enregistrement de construction, HRT-173, relu par `release-stage`), `latest.json` (adresse
 # de l'installateur sur hearth.voikyrioh.fr ; intermédiaire, jamais déposé tel quel : le manifeste du bucket est
 # écrit par `release-stage`, HRT-51) et `notes.txt` (notes saisies au lancement).
 #
@@ -179,7 +179,8 @@ jobs:
         run: |
           mkdir signed
           cp "installer/Hearth_${VERSION}_x64-setup.exe" \
-             "installer/Hearth_${VERSION}_x64-setup.exe.sig"              "installer/Hearth_${VERSION}_x64-setup.exe.build" \
+             "installer/Hearth_${VERSION}_x64-setup.exe.sig" \
+             "installer/Hearth_${VERSION}_x64-setup.exe.build" \
              installer/latest.json installer/notes.txt signed/
           sha256sum signed/*
 
