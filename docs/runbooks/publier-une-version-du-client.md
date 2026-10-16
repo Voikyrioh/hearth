@@ -70,6 +70,10 @@ Retirer une version publiée par erreur : remettre le manifeste de la version pr
 - L'artefact de `build` ne peut pas venir d'une autre exécution (portée de l'exécution).
 - Le flux n'a aucun droit d'écriture sur le dépôt (`contents: read`) et ne crée ni brouillon, ni release, ni étiquette.
 
+### Version d'AWS CLI
+
+`release-upload` appelle l'outil `aws` (Scaleway fr-par). Versions testées au premier dépôt réel : **2.27.0** (ligne d'erreur 404 seule) et **2.38.1** (ligne préfixée `aws: [ERROR]: `) ; les deux sont reconnues comme preuve d'absence d'une clé (HRT-171). Une autre forme de ligne arrête l'outil avant toute écriture (« état impossible à établir »).
+
 ## Premier essai (à faire une fois, avant de compter dessus)
 
 L'essai bout en bout (deux versions consécutives, dépôt dans le bucket) est porté par le ticket HRT-56 : ce runbook n'en décrit que les contrôles. Rien de ce qui suit n'a été vérifié sur une vraie version ; le faire avec deux versions consécutives :

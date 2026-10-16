@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M52VPMJ3KKEN1MP5G1C63QQN](./FIX-01M52VPMJ3KKEN1MP5G1C63QQN.md) | La preuve d'absence d'un objet refusait la ligne d'erreur préfixée `aws: [ERROR]: ` des AWS CLI récents (HRT-171) | 2026-10-16 |
 | [FIX-01M4VNGP6RMTHA7XNDDGV2FH1R](./FIX-01M4VNGP6RMTHA7XNDDGV2FH1R.md) | L'état « à confirmer » d'une adoption ne survivait pas au redémarrage, et le passage de relecture jugeait « non relue » une adoption faite pendant ses lectures (HRT-80, PR 89) | 2026-10-14 |
 | [FIX-01M4VNGP6R446RGM9FB3JEJG7P](./FIX-01M4VNGP6R446RGM9FB3JEJG7P.md) | Après un échec d'écriture, la lecture des candidats du même compte était servie sans entrée au journal (HRT-80, PR 89) | 2026-10-14 |
 | [FIX-01M4W5A9CK7Q2R8T3X6V0DNYHE](./FIX-01M4W5A9CK7Q2R8T3X6V0DNYHE.md) | `decode_segment` acceptait `%+f` (la couche et le routeur ne lisaient pas la même clé) (HRT-80) | 2026-10-14 |
