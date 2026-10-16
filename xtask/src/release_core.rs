@@ -61,7 +61,7 @@ pub fn check_key(public_key_file: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn decode_key_file(file: &str) -> String {
+pub fn decode_key_file(file: &str) -> String {
     use base64::Engine as _;
     let file = file.trim();
     if file.starts_with("untrusted comment:") {

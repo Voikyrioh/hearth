@@ -24,6 +24,10 @@
 //! - `release-stage`, `release-upload` : assemble une version en local (`target/release-stage/`, tout
 //!   revérifié) puis la dépose au bucket (essai à blanc par défaut, `--confirm`, manifeste EN DERNIER ;
 //!   HRT-51, BR-RELEASE-001 à 003).
+//! - `agent --release`, `client-record`, `agent-sign`, `ci-root-check` : constructions vérifiables du flux
+//!   de publication (HRT-173, BR-RELEASE-007) : arbre propre exigé, enregistrement de construction du
+//!   client et de l'agent relu par `release-stage`, signature de l'agent par la clé de l'environnement,
+//!   racine du dépôt égale à l'espace de travail de GitHub.
 //! - `agent-manifest` : section `agent` du `latest.json`, signature vérifiée contre la clé
 //!   embarquée dans l'agent (HRT-17, ADR-0021, runbook `mettre-a-jour-agent`).
 //!
@@ -33,9 +37,11 @@
 
 mod agent;
 mod agent_release;
+mod agent_sign;
 mod br_check;
 mod catalog_check;
 mod ci;
+mod client_record;
 mod client_release;
 mod docker;
 mod e2e;
@@ -46,6 +52,8 @@ mod release_core;
 mod release_preflight;
 mod release_publish;
 mod release_stage;
+mod repo_root;
+mod secret;
 mod shellcheck;
 mod test_tmp;
 
@@ -53,10 +61,27 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let task = std::env::args().nth(1);
+    // Le binaire transmis d'un job à l'autre ne sait où est le dépôt que par son chemin de compilation :
+    // en environnement GitHub, ces tâches vérifient d'abord qu'il est celui de l'espace de travail.
+    if matches!(
+        task.as_deref(),
+        Some(
+            "client-sign"
+                | "client-manifest"
+                | "agent-sign"
+                | "release-stage"
+                | "release-upload"
+                | "release-github"
+        )
+    ) && let Err(message) = repo_root::guard()
+    {
+        eprintln!("erreur : {message}");
+        return ExitCode::FAILURE;
+    }
     let result = match task.as_deref() {
         None | Some("help") => {
             println!(
-                "tâches :\n  agent         construit le binaire statique de l'agent en conteneur (target/dist/hearth-agent)\n  e2e-install   installation de bout en bout dans un conteneur jetable\n  e2e-update    mise à jour de l'agent à distance de bout en bout (retour automatique compris)
+                "tâches :\n  agent         construit le binaire statique de l'agent en conteneur (target/dist/hearth-agent) ; --release : construction de publication (arbre propre exigé avant et après, image téléchargée avec reprise, enregistrement de construction obligatoire)\n  e2e-install   installation de bout en bout dans un conteneur jetable\n  e2e-update    mise à jour de l'agent à distance de bout en bout (retour automatique compris)
   e2e-double-failure  la double panne de la mise à jour de l'agent (superviseur tué, retour arrière sans geste) sur un vrai systemd
   shellcheck    contrôle les scripts de deploy/ avec shellcheck (en conteneur)\n  test-tmp-check  échoue si la suite de tests a laissé des dossiers temporaires (--clean les supprime)\n  br-check      toute référence BR-… du code et des docs a sa fiche
   catalog-check contrôle les fiches de serveur de jeu (chargeur réel, ids.lock) ; --release refuse une fiche preview
@@ -65,11 +90,17 @@ fn main() -> ExitCode {
   release-preflight     contrôles avant toute construction (HRT-172) : branche main, numéros concordants dans les cinq fichiers, notes, clé de développement, HEAD, version non publiée ni étiquette orpheline (env HEARTH_REF, HEARTH_SHA, HEARTH_NOTES, GH_TOKEN ; sorties version et commit) ; --versions-only : numéros et clés seulement, sans réseau (CI de chaque PR)
   release-stage         assemble une version sous target/release-stage/, refuse un arbre qui n'est pas son commit (suivi modifié, non suivi ou ignoré sous les entrées de la construction, fichier masqué) et un agent sans enregistrement de construction (cargo xtask agent) de ce commit, puis enregistre le commit (--client-dir D --agent-binary F --agent-signature S [--install-script P]) après avoir revérifié signatures, sommes, adresses et liste fermée
   release-upload        dépose la version assemblée au bucket (refuse un arbre qui n'est pas son commit ou un autre commit que celui assemblé ; seul git, en lecture, tourne dans l'essai à blanc) : ESSAI À BLANC par défaut, --confirm pour écrire (fichiers, relecture publique, script, manifeste en dernier, chacun relu dans le bucket ; refuse un manifeste en place de version supérieure sauf --allow-rollback ; nécessite l'outil aws et ses variables AWS_* dans l'environnement)
+  client-record         enregistrement de construction de l'installateur (HRT-173) : --begin avant la construction (arbre propre exigé), puis --installer F --version X.Y.Z après (écrit F.build : somme, commit, arbre) ; relu par release-stage
+  agent-sign            signe le binaire de l'agent (--binary F --version X.Y.Z --out S) avec la clé de HEARTH_AGENT_SIGNING_KEY et son mot de passe HEARTH_AGENT_SIGNING_KEY_PASSWORD (obligatoire) ; commentaire signé version:X.Y.Z ; relue contre update-key.pub
+  ci-root-check         en environnement GitHub, la racine du dépôt compilée dans xtask doit être $GITHUB_WORKSPACE
   agent-manifest        vérifie la signature de l'agent contre sa clé embarquée puis ajoute la section `agent` à latest.json (cible de la mise à jour de l'agent)"
             );
             return ExitCode::SUCCESS;
         }
-        Some("agent") => agent::run().map(|_| ()),
+        Some("agent") => agent::run(&std::env::args().skip(2).collect::<Vec<_>>()).map(|_| ()),
+        Some("client-record") => client_record::run(&std::env::args().skip(2).collect::<Vec<_>>()),
+        Some("agent-sign") => agent_sign::run(&std::env::args().skip(2).collect::<Vec<_>>()),
+        Some("ci-root-check") => repo_root::run_check(),
         Some("e2e-install") => e2e::run(),
         Some("e2e-update") => e2e_update::run(),
         Some("e2e-double-failure") => e2e_double_failure::run(),

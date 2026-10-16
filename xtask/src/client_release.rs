@@ -25,16 +25,11 @@
 //! Aucun secret ici : la signature de l'installateur se fait dans le flux de publication, avec la
 //! clé secrète des secrets du dépôt (runbook `docs/runbooks/publier-une-version-du-client.md`).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::release_core::*;
 
-pub(crate) fn root() -> Result<PathBuf, String> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "racine du dépôt introuvable".to_owned())
-}
+pub(crate) use crate::repo_root::repo_root as root;
 
 pub(crate) fn option(args: &[String], name: &str) -> Option<String> {
     args.iter()
