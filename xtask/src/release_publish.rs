@@ -400,7 +400,7 @@ fn read_back(
 }
 
 /// `X.Y.Z` -> nombres (la forme a déjà été vérifiée par `check_version`).
-fn triple(version: &str) -> Result<(u64, u64, u64), String> {
+pub(crate) fn triple(version: &str) -> Result<(u64, u64, u64), String> {
     check_version(version)?;
     let mut parts = version.split('.').map(|part| {
         part.parse::<u64>()
