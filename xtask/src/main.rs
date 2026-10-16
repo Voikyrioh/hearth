@@ -93,7 +93,12 @@ fn main() -> ExitCode {
             agent_release::run_manifest(&std::env::args().skip(2).collect::<Vec<_>>())
         }
         Some("release-preflight") => {
-            release_preflight::run(&std::env::args().skip(2).collect::<Vec<_>>())
+            match release_preflight::run(&std::env::args().skip(2).collect::<Vec<_>>()) {
+                Ok(()) => Ok(()),
+                // Déjà annoncé en annotation de l'exécution.
+                Err(release_preflight::RunError::Announced) => return ExitCode::FAILURE,
+                Err(release_preflight::RunError::Failed(message)) => Err(message),
+            }
         }
         Some("release-stage") => {
             release_stage::run_stage(&std::env::args().skip(2).collect::<Vec<_>>())
@@ -106,10 +111,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            // Un message vide a déjà été annoncé (annotation de l'exécution, `ci::fail`).
-            if !message.is_empty() {
-                eprintln!("erreur : {message}");
-            }
+            eprintln!("erreur : {message}");
             ExitCode::FAILURE
         }
     }

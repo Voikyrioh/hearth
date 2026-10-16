@@ -78,27 +78,37 @@ pub fn run_check(args: &[String]) -> Result<(), String> {
             package["version"]
         ));
     }
-    check_tag_is_free(&repository, &remote_tag_lookup)?;
+    let host = crate::host::System::new();
+    check_tag_is_free(&repository, &|tag| tag_lookup(&host, &root, tag))?;
     println!("publication possible : version {repository}, clé publique de production");
     Ok(())
 }
 
 /// `git ls-remote --exit-code --tags origin refs/tags/{tag}` : 0 = l'étiquette existe, 2 = elle n'existe
-/// pas, autre = interrogation impossible. Lecture seule. Le nom vient de `check_tag_is_free`, déjà
-/// validé `vX.Y.Z` ; arguments en liste, aucun interpréteur.
-fn remote_tag_lookup(tag: &str) -> Result<TagLookup, String> {
-    let output = std::process::Command::new("git")
-        .current_dir(root()?)
-        .args(["ls-remote", "--exit-code", "--tags", "origin"])
-        .arg(format!("refs/tags/{tag}"))
-        .output()
-        .map_err(|error| format!("git : {error}"))?;
-    match output.status.code() {
+/// pas, autre = interrogation impossible. Lecture seule, derrière `Host` (faux dans les tests). Le nom
+/// vient de `check_tag_is_free` ou de `release-preflight`, déjà validé `vX.Y.Z` ; arguments en liste,
+/// aucun interpréteur. Seule lecture d'étiquette de `xtask`.
+pub(crate) fn tag_lookup(
+    host: &dyn crate::host::Host,
+    root: &Path,
+    tag: &str,
+) -> Result<TagLookup, String> {
+    let argv = [
+        "-C".to_owned(),
+        root.to_string_lossy().into_owned(),
+        "ls-remote".to_owned(),
+        "--exit-code".to_owned(),
+        "--tags".to_owned(),
+        "origin".to_owned(),
+        format!("refs/tags/{tag}"),
+    ];
+    let output = host.run(&crate::host::Call::new("git", &argv))?;
+    match output.code {
         Some(0) => Ok(TagLookup::Present),
         Some(2) => Ok(TagLookup::Absent),
         other => Err(format!(
             "git ls-remote : code {other:?} {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            output.stderr.lines().next().unwrap_or("").trim()
         )),
     }
 }

@@ -180,30 +180,25 @@ pub fn version_files(read: &dyn Fn(&str) -> Option<String>) -> Vec<VersionEntry>
 pub fn check_versions(entries: &[VersionEntry]) -> Result<String, String> {
     let source = entries
         .first()
-        .and_then(|first| first.found.clone())
-        .filter(|_| {
-            entries
-                .first()
-                .is_some_and(|first| first.label == CARGO_TOML)
-        });
+        .filter(|first| first.label == CARGO_TOML)
+        .and_then(|first| first.found.clone());
     let agrees = |entry: &VersionEntry| match entry.expect {
         Expect::Same => entry.found.is_some() && entry.found == source,
         Expect::Absent => entry.found.is_none(),
     };
-    if source.is_none() || !entries.iter().all(agrees) {
+    let Some(version) = source.clone().filter(|_| entries.iter().all(agrees)) else {
         let list = entries
             .iter()
-            .map(|entry| match (&entry.found, entry.expect) {
-                (Some(found), _) => format!("{} → {found}", entry.label),
-                (None, _) => format!("{} → aucun numéro", entry.label),
+            .map(|entry| match &entry.found {
+                Some(found) => format!("{} → {found}", entry.label),
+                None => format!("{} → aucun numéro", entry.label),
             })
             .collect::<Vec<_>>()
             .join(", ");
         return Err(format!(
             "Les numéros de version du dépôt ne concordent pas : {list}."
         ));
-    }
-    let version = source.unwrap_or_default();
+    };
     check_version(&version)?;
     Ok(version)
 }
@@ -231,13 +226,7 @@ pub fn check_notes(notes: &str) -> Result<(), String> {
 pub fn check_keys(read: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
     for path in [CLIENT_KEY, AGENT_KEY] {
         let key = read(path).ok_or_else(|| format!("{path} est illisible"))?;
-        check_key(&key).map_err(|error| {
-            if path == CLIENT_KEY {
-                error
-            } else {
-                format!("{path} : {error}")
-            }
-        })?;
+        check_key(&key).map_err(|error| format!("{path} : {error}"))?;
     }
     Ok(())
 }
@@ -280,9 +269,12 @@ pub enum Manifest {
 }
 
 fn triple_of(version: &str) -> Option<(u64, u64, u64)> {
-    check_version(version).ok()?;
-    let mut parts = version.split('.').map(|part| part.parse::<u64>().ok());
-    Some((parts.next()??, parts.next()??, parts.next()??))
+    crate::release_publish::triple(version).ok()
+}
+
+/// Le refus d'un manifeste public qu'on n'a pas su lire (jamais pris pour une absence).
+fn unreadable_message(cause: &str) -> String {
+    format!("Le manifeste public n'a pas pu être lu ({cause}) : publication arrêtée.")
 }
 
 /// BR-RELEASE-008 : table de la conception 9.2. « Publiée » = le manifeste l'annonce ET la release
@@ -294,11 +286,7 @@ pub fn published_state(
     release: bool,
 ) -> Result<(), String> {
     let announced = match manifest {
-        Manifest::Unreadable(cause) => {
-            return Err(format!(
-                "Le manifeste public n'a pas pu être lu ({cause}) : publication arrêtée."
-            ));
-        }
+        Manifest::Unreadable(cause) => return Err(unreadable_message(cause)),
         Manifest::Absent => None,
         Manifest::Version(found) => Some(found.as_str()),
     };
@@ -428,7 +416,6 @@ pub fn lookup_release(host: &dyn Host, version: &str, token: &str) -> Result<boo
         "--user-agent",
         "hearth-xtask",
     ];
-    let config;
     let mut call_input: Option<Vec<u8>> = None;
     if !token.is_empty() {
         if !token
@@ -437,8 +424,7 @@ pub fn lookup_release(host: &dyn Host, version: &str, token: &str) -> Result<boo
         {
             return Err("le jeton GitHub (GH_TOKEN) contient un caractère inutilisable".to_owned());
         }
-        config = format!("header = \"Authorization: Bearer {token}\"\n");
-        call_input = Some(config.clone().into_bytes());
+        call_input = Some(format!("header = \"Authorization: Bearer {token}\"\n").into_bytes());
         extra.extend(["--config", "-"]);
     }
     let args = curl_args(&extra, &url);
@@ -483,24 +469,12 @@ pub fn head_commit(host: &dyn Host, root: &Path) -> Result<String, String> {
     }
 }
 
-/// L'étiquette `vX.Y.Z` existe-t-elle sur `origin` ? `git ls-remote --exit-code --tags` : 0 = oui,
-/// 2 = non, tout autre code = erreur (jamais « absente par défaut »).
+/// L'étiquette `vX.Y.Z` existe-t-elle sur `origin` ? Une seule lecture, celle de
+/// `client_release::tag_lookup` (0 présente, 2 absente, autre = erreur, jamais « absente par défaut »).
 pub fn lookup_tag(host: &dyn Host, root: &Path, version: &str) -> Result<bool, String> {
     check_version(version)?;
-    let reference = format!("refs/tags/v{version}");
-    let output = git_call(
-        host,
-        root,
-        &["ls-remote", "--exit-code", "--tags", "origin", &reference],
-    )?;
-    match output.code {
-        Some(0) => Ok(true),
-        Some(2) => Ok(false),
-        other => Err(format!(
-            "git ls-remote : code {other:?} {}",
-            short(&output.stderr)
-        )),
-    }
+    crate::client_release::tag_lookup(host, root, &format!("v{version}"))
+        .map(|found| found == TagLookup::Present)
 }
 
 // --- orchestration ------------------------------------------------------------------------------
@@ -545,8 +519,8 @@ pub fn preflight(
     check_keys(read)?;
     check_head(&head_commit(host, root)?, &inputs.sha)?;
     let manifest = read_public_manifest(host);
-    if matches!(manifest, Manifest::Unreadable(_)) {
-        published_state(&version, &manifest, false, false)?;
+    if let Manifest::Unreadable(cause) = &manifest {
+        return Err(unreadable_message(cause));
     }
     let tag = lookup_tag(host, root, &version).map_err(|cause| {
         format!(
@@ -567,12 +541,25 @@ pub fn preflight(
     })
 }
 
+/// Pourquoi `run` échoue.
+#[derive(Debug)]
+pub enum RunError {
+    /// Le refus a déjà été annoncé en annotation de l'exécution : rien à réafficher.
+    Announced,
+    /// Message à afficher.
+    Failed(String),
+}
+
 /// `cargo xtask release-preflight [--versions-only]`.
-pub fn run(args: &[String]) -> Result<(), String> {
+pub fn run(args: &[String]) -> Result<(), RunError> {
     let versions_only = match args {
         [] => false,
         [flag] if flag == "--versions-only" => true,
-        _ => return Err("usage : release-preflight [--versions-only]".to_owned()),
+        _ => {
+            return Err(RunError::Failed(
+                "usage : release-preflight [--versions-only]".to_owned(),
+            ));
+        }
     };
     let env = |name: &str| std::env::var(name).unwrap_or_default();
     let inputs = Inputs {
@@ -582,13 +569,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         token: env("GH_TOKEN"),
         versions_only,
     };
-    let root = crate::client_release::root()?;
+    let root = crate::client_release::root().map_err(RunError::Failed)?;
     let read = |path: &str| std::fs::read_to_string(root.join(path)).ok();
     match preflight(&System::new(), &root, &read, &inputs) {
         Ok(outcome) => {
-            ci::output("version", &outcome.version)?;
+            ci::output("version", &outcome.version).map_err(RunError::Failed)?;
             if let Some(commit) = &outcome.commit {
-                ci::output("commit", commit)?;
+                ci::output("commit", commit).map_err(RunError::Failed)?;
             }
             let said = match &outcome.commit {
                 Some(commit) => format!(
@@ -600,16 +587,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     outcome.version
                 ),
             };
-            if ci::is_github() {
+            if ci::is_github() && outcome.commit.is_some() {
                 ci::notice(&said);
             } else {
                 println!("{said}");
             }
             Ok(())
         }
-        // Annoncé en annotation : `main` n'a pas à le répéter (message vide = rien à afficher).
-        Err(message) if ci::fail(&message) => Err(String::new()),
-        Err(message) => Err(message),
+        // Annoncé en annotation : `main` n'a pas à le répéter.
+        Err(message) if ci::fail(&message) => Err(RunError::Announced),
+        Err(message) => Err(RunError::Failed(message)),
     }
 }
 
@@ -1503,11 +1490,10 @@ mod tests {
 
     #[test]
     fn the_flag_is_the_only_argument() {
-        assert!(
-            run(&["--autre".to_owned()])
-                .unwrap_err()
-                .starts_with("usage")
-        );
+        assert!(matches!(
+            run(&["--autre".to_owned()]),
+            Err(RunError::Failed(message)) if message.starts_with("usage")
+        ));
         assert!(run(&["--versions-only".to_owned(), "x".to_owned()]).is_err());
     }
 }

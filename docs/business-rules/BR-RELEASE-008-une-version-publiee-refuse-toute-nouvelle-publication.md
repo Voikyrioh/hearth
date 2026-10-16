@@ -28,7 +28,7 @@ Une version déposée en partie sans manifeste n'est pas vue ici (le contrôle n
 
 ## Application (code)
 - `xtask/src/release_preflight.rs::published_state` : la table ci-dessus (pure).
-- `xtask/src/release_preflight.rs::read_public_manifest` (`parse_manifest`), `::lookup_release`, `::lookup_tag` : les trois lectures, derrière le port `Host` (faux dans les tests).
+- `xtask/src/release_preflight.rs::read_public_manifest` (`parse_manifest`), `::lookup_release`, `::lookup_tag` (qui appelle l'unique lecture d'étiquette `client_release::tag_lookup`, partagée avec `client-release-check`) : les trois lectures, derrière le port `Host` (faux dans les tests).
 - `xtask/src/release_preflight.rs::preflight` : l'ordre ; le manifeste illisible arrête avant de chercher l'étiquette et la release.
 
 ## Vérification
