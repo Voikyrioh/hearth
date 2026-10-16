@@ -175,6 +175,14 @@ impl Survey {
         }
     }
 
+    /// Relevé pour la construction du client : les entrées de l'agent plus `apps/desktop`.
+    pub fn take_client(host: &dyn Host, root: &Path) -> Self {
+        Self {
+            commit: head_commit(host, root),
+            problems: crate::release_stage::client_tree_problems(host, root),
+        }
+    }
+
     /// `clean` seulement si le commit est connu ET rien ne sépare l'arbre de lui.
     pub fn state(&self) -> &'static str {
         match (&self.commit, &self.problems) {
@@ -230,14 +238,14 @@ pub fn report_tree(host: &dyn Host, root: &Path, say: &mut dyn FnMut(&str)) -> S
 
 /// Refuse un arbre qui n'est pas le commit (HRT-173, BR-RELEASE-007) : une construction de publication
 /// ne part jamais d'un arbre sale, et un état que git n'a pas su dire n'est pas « propre ». `what` dit
-/// ce qui est construit (« l'agent », « le client »).
+/// ce qui est construit (« de l'agent », « du client »).
 pub fn refuse_unless_clean(survey: &Survey, what: &str) -> Result<(), String> {
     match survey.state() {
         "clean" => Ok(()),
         "dirty" => {
             let problems = survey.problems.as_deref().unwrap_or_default();
             Err(format!(
-                "construction de {what} refusée : arbre de travail sale ({} écart(s) : {}). Committe ou supprime ces fichiers (git stash -u pour les non suivis), puis relance. Un binaire signé doit sortir du commit exact qui sera étiqueté",
+                "construction {what} refusée : arbre de travail sale ({} écart(s) : {}). Committe ou supprime ces fichiers (git stash -u pour les non suivis), puis recommence la construction depuis le début (pour le client : client-record --begin, puis npm ci). Un binaire signé doit sortir du commit exact qui sera étiqueté",
                 problems.len(),
                 problems
                     .iter()
@@ -255,7 +263,7 @@ pub fn refuse_unless_clean(survey: &Survey, what: &str) -> Result<(), String> {
                 .collect::<Vec<_>>()
                 .join(" ; ");
             Err(format!(
-                "construction de {what} refusée : l'état de l'arbre de travail est inconnu ({cause}). Git doit répondre pour qu'un arbre soit déclaré propre"
+                "construction {what} refusée : l'état de l'arbre de travail est inconnu ({cause}). Git doit répondre pour qu'un arbre soit déclaré propre"
             ))
         }
     }
@@ -327,7 +335,7 @@ pub fn pull_image(host: &dyn Host, image: &str, say: &mut dyn FnMut(&str)) -> Re
         last = text;
         if attempt < PULL_ATTEMPTS {
             host.sleep(wait);
-            wait = (wait * 2).min(std::time::Duration::from_secs(60));
+            wait *= 2;
         }
     }
     Err(format!(
@@ -350,7 +358,7 @@ pub fn build_release(
 ) -> Result<PathBuf, String> {
     remove_record(binary, say);
     let before = Survey::take(host, root);
-    refuse_unless_clean(&before, "l'agent")?;
+    refuse_unless_clean(&before, "de l'agent")?;
     if let Ok(commit) = &before.commit {
         say(&format!("commit construit : {commit}"));
     }
@@ -358,7 +366,7 @@ pub fn build_release(
     let path = build()?;
     let after = Survey::take(host, root);
     if recorded_state(&before, &after) != "clean" {
-        refuse_unless_clean(&after, "l'agent")?;
+        refuse_unless_clean(&after, "de l'agent")?;
         return Err("construction de l'agent refusée : HEAD a changé pendant la construction. Relance sur un commit stable".to_owned());
     }
     say(&write_build_record(&path, &before, &after, version)?);

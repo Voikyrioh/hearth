@@ -408,8 +408,17 @@ pub fn tracked_changes(host: &dyn Host, root: &Path) -> Result<Vec<String>, Stri
 
 /// Les fichiers non suivis et non ignorés sous les entrées de la construction (`BUILD_INPUTS`).
 pub fn untracked_inputs(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    untracked_under(host, root, &BUILD_INPUTS)
+}
+
+/// Les fichiers non suivis et non ignorés sous ces chemins.
+pub fn untracked_under(
+    host: &dyn Host,
+    root: &Path,
+    paths: &[&str],
+) -> Result<Vec<String>, String> {
     let mut list = vec!["ls-files", "--others", "--exclude-standard", "--"];
-    list.extend(BUILD_INPUTS);
+    list.extend(paths);
     let out = git_text(
         host,
         root,
@@ -476,6 +485,23 @@ pub fn hidden_changes(host: &dyn Host, root: &Path) -> Result<Vec<String>, Strin
 pub fn tree_problems(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
     let mut problems = tracked_changes(host, root)?;
     problems.extend(untracked_inputs(host, root)?);
+    problems.extend(ignored_inputs(host, root)?);
+    problems.extend(hidden_changes(host, root)?);
+    Ok(problems)
+}
+
+/// Entrées de la construction du CLIENT en plus de `BUILD_INPUTS` : le front et la coquille Tauri
+/// (`apps/desktop`), dont les sources et les `capabilities` lues par glob entrent dans l'installateur.
+pub const CLIENT_EXTRA_INPUTS: [&str; 1] = ["apps/desktop"];
+
+/// Comme `tree_problems`, pour le client : les non suivis sont cherchés aussi sous `apps/desktop`. Les
+/// IGNORÉS ne le sont pas sous `apps/desktop` (`node_modules`, `dist` y vivent légitimement, ignorés par
+/// le dépôt) : seulement sous `BUILD_INPUTS`, comme pour l'agent.
+pub fn client_tree_problems(host: &dyn Host, root: &Path) -> Result<Vec<String>, String> {
+    let mut problems = tracked_changes(host, root)?;
+    let mut paths = BUILD_INPUTS.to_vec();
+    paths.extend(CLIENT_EXTRA_INPUTS);
+    problems.extend(untracked_under(host, root, &paths)?);
     problems.extend(ignored_inputs(host, root)?);
     problems.extend(hidden_changes(host, root)?);
     Ok(problems)

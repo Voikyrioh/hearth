@@ -48,8 +48,8 @@ fn begin_path(root: &Path) -> PathBuf {
 
 /// Relève l'état de l'arbre avant la construction. Refuse un arbre sale ou inconnu.
 pub fn begin(host: &dyn Host, root: &Path, say: &mut dyn FnMut(&str)) -> Result<(), String> {
-    let survey = Survey::take(host, root);
-    refuse_unless_clean(&survey, "le client")?;
+    let survey = Survey::take_client(host, root);
+    refuse_unless_clean(&survey, "du client")?;
     let Ok(commit) = &survey.commit else {
         return Err("commit en place inconnu".to_owned());
     };
@@ -116,12 +116,16 @@ pub fn record(
     }
     let bytes =
         std::fs::read(installer).map_err(|error| format!("{} : {error}", installer.display()))?;
-    let before = Survey::clean_at(&read_begin(root)?);
-    let after = Survey::take(host, root);
+    // Le relevé de début ne sert qu'UNE fois, réussite ou échec : après un refus, il faut tout reconstruire
+    // depuis `--begin`, sinon un installateur construit sur un arbre sale passerait avec un arbre rangé.
+    let begun = read_begin(root);
+    let _ = std::fs::remove_file(begin_path(root));
+    let before = Survey::clean_at(&begun?);
+    let after = Survey::take_client(host, root);
     let state = recorded_state(&before, &after);
     if state != "clean" {
         // Dit pourquoi : arbre modifié par la construction, ou git muet, ou HEAD changé.
-        refuse_unless_clean(&after, "le client")?;
+        refuse_unless_clean(&after, "du client")?;
         return Err(format!(
             "construction du client refusée : HEAD a changé pendant la construction (état {state}). Relance sur un commit stable"
         ));
@@ -138,8 +142,6 @@ pub fn record(
     };
     std::fs::write(&path, record.render())
         .map_err(|error| format!("{} : {error}", path.display()))?;
-    // Le relevé de début ne sert qu'une fois.
-    let _ = std::fs::remove_file(begin_path(root));
     say(&format!(
         "enregistrement de construction : {} (commit {}, arbre clean)",
         path.display(),
@@ -349,5 +351,53 @@ mod tests {
             .is_err()
         );
         assert!(run(&["--installer".to_owned(), "x".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn after_a_refusal_the_begin_survey_is_gone_and_a_retry_without_rebuilding_is_refused() {
+        let repo = Repo::new("client_record_retry");
+        begin(&TreeFake::new("", "abc1234def"), &repo.root, &mut quiet()).unwrap();
+        // Construction sur un arbre sale : refus.
+        let dirty = TreeFake::new(" M apps/desktop/src/App.vue", "abc1234def");
+        assert!(record(&dirty, &repo.root, &repo.installer, VERSION, &mut quiet()).is_err());
+        // L'arbre est rangé (git checkout) mais l'installateur n'a pas été reconstruit : refus aussi.
+        let tidy = TreeFake::new("", "abc1234def");
+        let error = record(&tidy, &repo.root, &repo.installer, VERSION, &mut quiet()).unwrap_err();
+        assert!(error.contains("--begin"), "{error}");
+        assert!(record_text(&repo).is_none());
+    }
+
+    #[test]
+    fn the_client_looks_for_untracked_files_under_apps_desktop_but_not_for_ignored_ones() {
+        let repo = Repo::new("client_record_inputs");
+        let fake = TreeFake::new("", "abc1234def");
+        begin(&fake, &repo.root, &mut quiet()).unwrap();
+        let calls = fake.calls.borrow();
+        let has = |call: &Vec<String>, word: &str| call.iter().any(|a| a == word);
+        let untracked: Vec<_> = calls
+            .iter()
+            .filter(|c| has(c, "--others") && !has(c, "--ignored"))
+            .collect();
+        let ignored: Vec<_> = calls.iter().filter(|c| has(c, "--ignored")).collect();
+        assert!(
+            untracked
+                .iter()
+                .all(|c| has(c, "apps/desktop") && has(c, "crates"))
+        );
+        assert!(!untracked.is_empty() && !ignored.is_empty());
+        assert!(
+            ignored
+                .iter()
+                .all(|c| !has(c, "apps/desktop") && has(c, "crates"))
+        );
+    }
+
+    #[test]
+    fn an_untracked_file_under_apps_desktop_refuses_the_client_build() {
+        let repo = Repo::new("client_record_untracked");
+        let mut fake = TreeFake::new("", "abc1234def");
+        fake.untracked = "apps/desktop/src-tauri/capabilities/extra.json".to_owned();
+        let error = begin(&fake, &repo.root, &mut quiet()).unwrap_err();
+        assert!(error.contains("extra.json"), "{error}");
     }
 }

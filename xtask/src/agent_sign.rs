@@ -13,15 +13,16 @@
 use std::io::Cursor;
 use std::path::Path;
 
-use crate::client_release::{option, required};
+use crate::client_release::required;
 use crate::release_core::*;
 use crate::secret::Secret;
+use zeroize::Zeroizing;
 
 pub const KEY_VAR: &str = "HEARTH_AGENT_SIGNING_KEY";
 pub const PASSWORD_VAR: &str = "HEARTH_AGENT_SIGNING_KEY_PASSWORD";
 
 /// Les deux secrets de la signature. `Debug` ne montre aucune valeur.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SigningInputs {
     pub key: Secret,
     pub password: Secret,
@@ -53,11 +54,14 @@ pub fn sign_agent(
         ));
     }
     check_key(public_key_file)?;
+    // La copie du mot de passe donnée à minisign est effacée dès que la clé est déchiffrée.
+    let password = Zeroizing::new(inputs.password.expose().to_owned());
     let secret = minisign::SecretKeyBox::from_string(&decode_key_file(inputs.key.expose()))
-        .and_then(|boxed| boxed.into_secret_key(Some(inputs.password.expose().to_owned())))
+        .and_then(|boxed| boxed.into_secret_key(Some((*password).clone())))
         .map_err(|error| {
             format!("clé secrète de l'agent illisible (ou mot de passe faux) : {error}")
         })?;
+    drop(password);
     let comment = format!("version:{version}");
     let signature = minisign::sign(
         None,
@@ -81,7 +85,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     crate::release_stage::check_flags(args, &["--binary", "--version", "--out"], &[])?;
     let binary = required(args, "--binary")?;
     let version = required(args, "--version")?;
-    let out = option(args, "--out").ok_or("--out manquant")?;
+    let out = required(args, "--out")?;
     let root = crate::repo_root::repo_root()?;
     let cargo = std::fs::read_to_string(root.join("Cargo.toml"))
         .map_err(|error| format!("Cargo.toml : {error}"))?;

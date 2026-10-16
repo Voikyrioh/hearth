@@ -1,7 +1,6 @@
 //! Une valeur secrète lue de l'environnement (mot de passe ou clé de signature de l'agent, HRT-173) :
 //! son `Debug` ne l'écrit jamais, et elle n'est lue que par `expose`.
 
-#[derive(Clone)]
 pub struct Secret(String);
 
 impl Secret {
@@ -21,6 +20,13 @@ impl Secret {
 
     pub fn is_blank(&self) -> bool {
         self.0.trim().is_empty()
+    }
+}
+
+/// La valeur est effacée de la mémoire quand le secret disparaît.
+impl Drop for Secret {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
     }
 }
 
