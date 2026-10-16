@@ -1153,7 +1153,7 @@ mod tests {
         assert_eq!(fake.bucket.borrow().len(), 1, "le bucket n'a pas bougé");
     }
 
-    /// Tout ce qui n'est pas la phrase exacte d'un 404 de `head-object` arrête l'outil AVANT toute écriture :
+    /// Tout ce qui n'est pas la phrase exacte d'un 404 de `head-object` (seule ou après `ABSENT_PREFIX`) arrête l'outil AVANT toute écriture :
     /// « état impossible à établir », jamais « absente par défaut ».
     fn assert_stops_before_any_write(code: Option<i32>, text: &str) {
         let (files, fake) = setup();
@@ -1221,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    fn the_exact_404_line_is_the_only_proof_of_absence() {
+    fn the_exact_404_line_alone_is_a_proof_of_absence() {
         let (files, fake) = setup();
         // Précédée d'un avertissement sur une autre ligne : la ligne entière est la phrase.
         *fake.absent_answer.borrow_mut() = (
@@ -1238,11 +1238,7 @@ mod tests {
         let (files, fake) = setup();
         *fake.absent_answer.borrow_mut() = (
             Some(SERVICE_ERROR_CODE),
-            format!(
-                "
-{ABSENT_PREFIX}{ABSENT_PHRASE}
-"
-            ),
+            format!("\n{ABSENT_PREFIX}{ABSENT_PHRASE}\n"),
         );
         run(&fake, &files, true).0.unwrap();
         assert_eq!(fake.writes().len(), 10);
