@@ -33,7 +33,7 @@ Les clés de publication sont en place depuis le 2026-10-12 : la clé publique d
 
 ## Publier une version
 
-1. Choisir la version `X.Y.Z` (pas de préversion). La changer à **deux** endroits, dans une PR : `version` de `[workspace.package]` du `Cargo.toml` racine et `version` de `apps/desktop/package.json`. C'est la SEULE source du numéro : le flux ne demande aucune version dans son formulaire, il lit celle du dépôt (`cargo xtask client-version`), donc le numéro signé est celui du binaire construit.
+1. Choisir la version `X.Y.Z` (pas de préversion). La changer dans **cinq** fichiers, dans une PR : `version` de `[workspace.package]` du `Cargo.toml` racine (la source), `Cargo.lock` (les cinq paquets du dépôt, que `cargo build` met à jour), `version` de `apps/desktop/package.json`, `version` et `packages[""].version` de `apps/desktop/package-lock.json`, et AUCUN champ `version` dans `apps/desktop/src-tauri/tauri.conf.json`. `cargo xtask release-preflight --versions-only` (lancé par la CI de chaque PR, voir plus bas) vérifie la concordance. Le numéro de `Cargo.toml` est la SEULE source du numéro : le flux ne demande aucune version dans son formulaire, il lit celle du dépôt (`cargo xtask client-version`), donc le numéro signé est celui du binaire construit.
 2. Fusionner la PR, puis : Actions > **publish-client** > Run workflow, **depuis `main`** (le flux refuse toute autre branche : le binaire signé doit venir de ce qui est fusionné), avec les notes de version (texte brut : elles s'affichent telles quelles dans le client, en une liste de lignes par exemple).
 3. Le flux, en deux jobs : **`build`** (aucun secret) : garde de publication, construction de l'installateur NSIS (`Hearth_X.Y.Z_x64-setup.exe`), installateur passé en artefact. **Avant d'approuver `sign`, relis le journal de `build`** (voir plus bas : c'est la seule relecture qui retient encore quelque chose). **`sign`** (installe aucune dépendance npm, droit `contents: read` seulement) : compile `xtask`, puis une seule étape voit la clé secrète : `cargo xtask client-sign` signe avec la version dans le commentaire signé (`version:X.Y.Z`) et RELIT la signature contre `update-key.pub` (une clé secrète qui n'est pas la paire du fichier du dépôt est refusée ici) ; `client-manifest` revérifie, puis écrit `latest.json` avec l'adresse `https://hearth.voikyrioh.fr/api/releases/X.Y.Z/Hearth_X.Y.Z_x64-setup.exe` ; enfin l'artefact **`hearth-client-signed`** (conservé 1 jour) : `Hearth_X.Y.Z_x64-setup.exe`, `Hearth_X.Y.Z_x64-setup.exe.sig`, `latest.json`, `notes.txt`. Le journal affiche les sommes SHA-256 de ces fichiers. Aucune release n'est créée.
 4. Sur ta machine (Windows PowerShell), télécharger l'artefact, comparer les sommes, puis le SUPPRIMER de GitHub (il est public tant qu'il existe) :
@@ -61,6 +61,25 @@ Les clés de publication sont en place depuis le 2026-10-12 : la clé publique d
    En Bash, la continuation de ligne est `\` au lieu de la backtick. Aucun binaire n'est joint : ni installateur, ni `.sig`, ni `latest.json`. L'étiquette pointe la source du binaire (dépôt AGPL) ; une étiquette posée sur le mauvais commit ne se corrige pas proprement. Pas de `--draft` : la release ne pilote plus aucune mise à jour. Commande à lancer hors des heures employeur (gel Git du propriétaire).
 
 Retirer une version publiée par erreur : remettre le manifeste de la version précédente dans le bucket (`releases/PREC/manifest.json` vers `releases/manifest.json`, conception distribution Scaleway, section 8.2), le numéro est brûlé ; les clients qui l'ont déjà installée ne reviennent pas en arrière (jamais de rétrogradation, ADR-0017) : publier une version suivante qui corrige. La release GitHub déjà créée se supprime ou s'annote à la main.
+
+## Contrôles préalables (`release-preflight`, HRT-172)
+
+`cargo xtask release-preflight` refuse AVANT toute construction une publication invalide ou déjà faite. Ordre : 1. la branche est `main` ; 2. les numéros concordent dans les cinq fichiers ; 3. les notes ne sont pas vides (2000 caractères au plus) ; 4. ni la clé publique du client ni celle de l'agent n'est une clé de développement ; 5. `HEAD` est le commit lancé ; 6. la version n'est pas déjà publiée et aucune étiquette n'est orpheline. Règles `BR-RELEASE-004`, `006` et `008`. Variables lues : `HEARTH_REF`, `HEARTH_SHA`, `HEARTH_NOTES`, `GH_TOKEN` ; sorties du job : `version`, `commit`. Le flux qui l'appelle arrive avec HRT-175 ; d'ici là, la commande se lance à la main (`cargo xtask release-preflight`, avec ces variables dans l'environnement) pour savoir si une publication serait refusée. `cargo xtask release-preflight --versions-only` ne fait que les points 2 et 4, sans réseau ni variable : la CI le lance à chaque PR.
+
+Que faire de chaque message (exacts) :
+
+| Message | Cause | Geste |
+|---|---|---|
+| « La publication ne part que de main. » | lancement depuis une autre branche | fusionner puis relancer depuis `main` |
+| « Les numéros de version du dépôt ne concordent pas : … » | un des cinq fichiers diverge (la liste dit lequel) | corriger dans une PR, fusionner, relancer |
+| « Les notes de version sont requises. » / « … dépassent 2000 caractères. » | notes vides ou trop longues | relancer avec des notes |
+| clé de DÉVELOPPEMENT | `update-key.pub` du client ou de l'agent est celle de développement | ne jamais publier avec ; voir « En cas de perte ou de rotation » |
+| « La version X est déjà publiée. » | le manifeste public l'annonce et la release existe | passer au numéro suivant |
+| « La version X est annoncée mais sa release GitHub manque : … » | publication coupée entre le manifeste et la release | relancer l'étape en échec de l'exécution d'origine |
+| « L'étiquette vX existe mais le manifeste ne l'annonce pas : à examiner à la main. » | étiquette ou release sans manifeste | examiner (numéro brûlé, étiquette posée à la main ?) ; ne rien supprimer sans comprendre |
+| « Le manifeste annonce déjà une version plus récente (M) que celle du dépôt (X). » | le dépôt est en retard sur ce qui est publié | corriger le numéro du dépôt |
+| « Le manifeste public n'a pas pu être lu (…) : publication arrêtée. » | API injoignable, défi Cloudflare, réponse illisible | jamais prise pour une absence ; réessayer, voir `hearth.voikyrioh.fr/api` |
+| « L'étiquette vX n'a pas pu être cherchée … » / « La release GitHub vX n'a pas pu être cherchée … » | `git ls-remote` ou l'API GitHub en échec | réessayer |
 
 ## Ce que la séparation en deux jobs protège, et ce qu'elle ne protège pas
 

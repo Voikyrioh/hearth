@@ -19,12 +19,27 @@ pub struct CmdOutput {
 /// Une commande à lancer : programme, arguments en liste, entrée standard facultative, variables
 /// d'environnement ajoutées (jamais de secret : les identifiants viennent de l'environnement du
 /// processus parent, lus par le programme lui-même).
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Call<'a> {
     pub program: &'a str,
     pub args: &'a [String],
     pub input: Option<&'a [u8]>,
     pub env: &'a [(&'a str, &'a str)],
+}
+
+/// `Debug` écrit à la main : l'entrée standard peut porter un jeton, elle n'est jamais affichée.
+impl std::fmt::Debug for Call<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Call")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field(
+                "input",
+                &self.input.map(|bytes| format!("<{} octets>", bytes.len())),
+            )
+            .field("env", &self.env)
+            .finish()
+    }
 }
 
 impl<'a> Call<'a> {
@@ -203,5 +218,21 @@ mod tests {
             .run(&Call::new("hearth-programme-qui-n-existe-pas", &list))
             .unwrap_err();
         assert!(error.contains("introuvable"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    #[test]
+    fn debug_never_shows_the_standard_input() {
+        let list = vec!["--config".to_owned(), "-".to_owned()];
+        let call = Call::new("curl", &list).input(b"header = Bearer secret-token");
+        let text = format!("{call:?}");
+        assert!(
+            !text.contains("secret-token") && text.contains("octets"),
+            "{text}"
+        );
     }
 }
