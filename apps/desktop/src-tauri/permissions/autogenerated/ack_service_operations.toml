@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ack-service-operations"
+description = "Enables the ack_service_operations command without any pre-configured scope."
+commands.allow = ["ack_service_operations"]
+
+[[permission]]
+identifier = "deny-ack-service-operations"
+description = "Denies the ack_service_operations command without any pre-configured scope."
+commands.deny = ["ack_service_operations"]

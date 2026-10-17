@@ -128,7 +128,11 @@ fn full_state() -> ServicesState {
                 env_names_omitted: 2,
                 command: Some(vec![Concealed::new("SENTINEL_COMMAND")]),
                 grace_s: Some(30),
-                busy: None,
+                busy: Some(hearth_proto::api::services::BusyInfo {
+                    kind: "update".into(),
+                    by: "marie".into(),
+                    since: "2026-10-13T09:30:00Z".into(),
+                }),
                 last_action: None,
                 adopted: Some(AdoptionInfo {
                     by: "claire".into(),

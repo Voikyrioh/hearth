@@ -18,6 +18,7 @@ pub mod logging;
 pub mod presence;
 pub mod reauth;
 pub mod security;
+pub mod service_ops;
 pub mod services;
 pub mod settings;
 pub mod startup;
@@ -109,6 +110,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             services::commands::ack_service_logs,
             services::commands::keep_service_logs,
             services::commands::open_engine_docs,
+            service_ops::commands::list_service_operations,
+            service_ops::commands::ack_service_operations,
+            service_ops::commands::decide_service_operation,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()

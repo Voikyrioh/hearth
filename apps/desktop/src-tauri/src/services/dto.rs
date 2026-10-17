@@ -240,6 +240,7 @@ pub enum ServiceStateDto {
     RestartLoop,
     Paused,
     Deploying,
+    Updating,
     Unknown,
 }
 
@@ -254,6 +255,7 @@ impl From<ServiceState> for ServiceStateDto {
             ServiceState::RestartLoop => Self::RestartLoop,
             ServiceState::Paused => Self::Paused,
             ServiceState::Deploying => Self::Deploying,
+            ServiceState::Updating => Self::Updating,
             ServiceState::Unknown => Self::Unknown,
         }
     }
@@ -433,6 +435,25 @@ impl From<&AdoptionInfo> for AdoptionDto {
     }
 }
 
+/// L'action qui tient le service (`BR-SVC-031`, `BR-OPS-005`) : son genre (code), qui l'a lancée, depuis quand.
+/// Absente tant que rien ne tient le service, et pour un compte qui ne peut pas lire ses opérations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+pub struct BusyDto {
+    pub kind: String,
+    pub by: String,
+    pub since: String,
+}
+
+impl From<&hearth_proto::api::services::BusyInfo> for BusyDto {
+    fn from(busy: &hearth_proto::api::services::BusyInfo) -> Self {
+        Self {
+            kind: busy.kind.clone(),
+            by: busy.by.clone(),
+            since: busy.since.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 pub struct ServiceDto {
     pub key: String,
@@ -479,6 +500,8 @@ pub struct ServiceDto {
     /// Service adopté dont la commande et les noms de variables sont réservés à ce compte.
     #[serde(rename = "detailsReserved")]
     pub details_reserved: bool,
+    /// L'action qui tient le service (`BR-SVC-031`) ; absente si rien ne le tient ou si le compte ne lit pas ses opérations.
+    pub busy: Option<BusyDto>,
 }
 
 impl From<&ServiceItem> for ServiceDto {
@@ -512,8 +535,8 @@ impl From<&ServiceItem> for ServiceDto {
             grace_s,
             adopted,
             details_reserved,
-            // Les actes (tranche suivante) : jamais remplis par l'agent de cette tranche.
-            busy: _,
+            // `busy` : l'action qui tient le service (HRT-84) ; `last_action` : pas encore affichée.
+            busy,
             last_action: _,
         } = item;
         Self {
@@ -555,6 +578,7 @@ impl From<&ServiceItem> for ServiceDto {
             grace_s: *grace_s,
             adopted: adopted.as_ref().map(AdoptionDto::from),
             details_reserved: *details_reserved,
+            busy: busy.as_ref().map(BusyDto::from),
         }
     }
 }

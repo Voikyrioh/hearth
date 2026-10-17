@@ -54,6 +54,8 @@ pub enum AdminActKindDto {
     AttackModeDisable,
     AccountPasswordOwn,
     ReauthSetting,
+    /// Décider d'une opération de service (HRT-84) : jamais couvert par l'élévation.
+    OperationDecide,
 }
 
 /// L'état de la confirmation des actes pour un serveur : lu de l'agent à l'ouverture d'une fenêtre

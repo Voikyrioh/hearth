@@ -55,6 +55,10 @@ pub fn covers(kind: AdminActKindDto, role: Option<RoleDto>) -> bool {
         AdminActKindDto::ReauthSetting => AdminAct::ReauthSetting {
             mode: ReauthMode::Each,
         },
+        AdminActKindDto::OperationDecide => AdminAct::OperationDecide {
+            target: "",
+            choice: hearth_proto::api::service_ops::OperationChoice::Continue,
+        },
     };
     covered_by_elevation(&act)
 }
@@ -144,6 +148,7 @@ mod tests {
             (Kind::AttackModeDisable, None, false),
             (Kind::AccountPasswordOwn, None, false),
             (Kind::ReauthSetting, None, false),
+            (Kind::OperationDecide, None, false),
         ] {
             assert_eq!(covers(kind, role), covered, "{kind:?} {role:?}");
         }
