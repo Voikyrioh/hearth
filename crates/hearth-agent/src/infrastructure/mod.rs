@@ -9,6 +9,8 @@ pub mod config;
 pub mod created_objects;
 pub mod crypto;
 pub mod data_dir;
+#[cfg(unix)]
+pub(crate) mod dir_fd;
 pub mod engine;
 pub mod file_lock;
 pub mod fingerprint;

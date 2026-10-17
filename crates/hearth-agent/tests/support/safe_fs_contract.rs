@@ -60,7 +60,7 @@ pub fn run(fs: &dyn SafeFs, uid: u32, gid: u32) {
         Err(FsError::NotRegular)
     );
 
-    // Mesure : trois éléments sous `world` (saves, server.cfg), un budget épuisé n'est jamais « complet ».
+    // Mesure : deux éléments sous `world` (saves, server.cfg), dans le budget la mesure est complète.
     let measure = root.measure(&rel("world"), BUDGET).unwrap();
     assert_eq!(measure.items, 2);
     assert!(!measure.partial);

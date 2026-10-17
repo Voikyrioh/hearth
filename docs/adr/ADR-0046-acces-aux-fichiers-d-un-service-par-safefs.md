@@ -20,7 +20,7 @@ L'agent est root. Le contenu du dossier de données d'un service est écrit par 
 1. **Port `SafeFs` + `ServiceRoot`** (`application/ports/safe_fs.rs`), seul chemin vers le dossier d'un service. Aucun `std::fs` avec un chemin composé dans les cas d'usage. Le port ne connaît aucun chemin absolu : `(racine, RelPath)`.
 2. **`RelPath` jugé par le domaine** (`domain/files/`) avant tout appel système : ni vide, ni absolu, ni `.` ni `..`, sans octet nul, 255 octets par composant, 4 096 au total, 64 niveaux.
 3. **Résolution composant par composant** : la racine est ouverte une fois ; chaque composant est ouvert par `openat(parent, nom, O_DIRECTORY | O_NOFOLLOW)` depuis le descripteur du précédent, et son périphérique (`fstat`) doit être celui de la racine. `openat2` avec `RESOLVE_BENEATH` n'est PAS utilisé à ce stade : le repli de l'avant-projet est retenu seul, parce qu'il ne dépend ni de la version du noyau ni du filtre d'appels système de l'unité, et qu'il ferme le même risque (un lien ou un remplacement en cours d'opération ne détourne rien) ; ses limites sont dites ci-dessous.
-4. **Même objet vérifié et utilisé** : le type d'un fichier est lu sur le descripteur ouvert (`O_NOFOLLOW | O_NONBLOCK`, `fstat`) ; un tube, un socket, un périphérique, un lien : classés, jamais lus.
+4. **Jugé avant d'être ouvert, même objet vérifié et utilisé** : un fichier à lire est d'abord DÉSIGNÉ sans être ouvert (`openat(parent, nom, O_PATH | O_NOFOLLOW)`, `fstat`) : sur un périphérique, c'est l'ouverture elle-même qui agit (un chien de garde s'arme, une bande se rembobine), l'agent étant root. Un tube, un socket, un périphérique, un lien : classés, jamais ouverts. Un fichier ordinaire est ensuite rouvert par `/proc/self/fd/<n>`, qui mène au même objet que le descripteur (aucun nom du dossier relu), et son identité (périphérique, inode) est revérifiée.
 5. **Fichier à plusieurs noms** : lu, supprimable, jamais modifié.
 6. **Écriture atomique** : fichier d'attente du même dossier (création exclusive, sans suivre de lien), propriétaire et droits posés sur le descripteur avant la première donnée, `fsync`, `renameat`, `fsync` du dossier. Jamais de bit setuid, setgid ni sticky (`Perms` les refuse).
 7. **Suppression par descripteurs** (`unlinkat` relatif au parent ouvert) ; un lien est retiré comme lien ; aucun point de montage franchi ; la racine d'un service ne se retire que par `SafeFs::remove_service_root`.
@@ -42,11 +42,11 @@ fs.remove_service_root(&key)?;
 
 ## Doc
 
-Pages de manuel `openat(2)` (`O_NOFOLLOW`, `O_DIRECTORY`, `O_NONBLOCK`), `renameat(2)`, `unlinkat(2)`, `fstatat(2)` ; documentation de `rustix::fs`.
+Pages de manuel `openat(2)` (`O_NOFOLLOW`, `O_DIRECTORY`, `O_PATH`), `proc(5)` (`/proc/self/fd`), `renameat(2)`, `unlinkat(2)`, `fstatat(2)` ; documentation de `rustix::fs`.
 
 ## Périmètre
 
-`infrastructure/fs/` de l'agent (adaptateur), `application/ports/safe_fs.rs` (port), `domain/files/` (`RelPath`). Jamais dans `hearth-proto`. Les fichiers propres à l'agent (`/var/lib/hearth`) n'en ont pas besoin.
+`infrastructure/fs/` de l'agent (adaptateur ; primitives par descripteur partagées avec `archive_fs` dans `infrastructure/dir_fd.rs`), `application/ports/safe_fs.rs` (port), `domain/files/` (`RelPath`). Jamais dans `hearth-proto`. Les fichiers propres à l'agent (`/var/lib/hearth`) n'en ont pas besoin.
 
 ## Comment l'appliquer
 
@@ -59,7 +59,8 @@ Pages de manuel `openat(2)` (`O_NOFOLLOW`, `O_DIRECTORY`, `O_NONBLOCK`), `rename
 - Un montage « bind » du même système de fichiers garde le même `st_dev` : il n'est pas vu. `openat2` avec `RESOLVE_BENEATH | RESOLVE_NO_XDEV` le verrait ; à reprendre si le besoin se confirme (sonde au démarrage).
 - Entre le contrôle d'un fichier existant et le renommage, le service peut encore écrire l'ancien contenu : la course est dite, pas fermée.
 - Un jeu qui range ses données derrière des liens n'est pas parcourable à travers eux.
-- Hors Linux, `FsError::Unsupported`.
+- Hors Linux, `FsError::Unsupported`. La lecture exige `/proc` monté (réouverture par `/proc/self/fd`) ; sans lui, `FsError::Io`.
+- `remove_tree` et `remove_service_root` lisent tous les noms d'un dossier avant d'effacer : mémoire proportionnelle au plus grand dossier (suivi HRT-179).
 
 ## Alternatives rejetées
 

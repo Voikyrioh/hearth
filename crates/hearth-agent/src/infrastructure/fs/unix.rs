@@ -9,50 +9,34 @@ use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use rustix::fs::{
-    AtFlags, CWD, Dir, FileType, Gid, Mode, OFlags, Stat, Uid, fchmod, fchown, fstat, fsync,
-    mkdirat, openat, renameat, statat, unlinkat,
+    AtFlags, CWD, Dir, FileType, Mode, OFlags, Stat, fchmod, fstat, fsync, mkdirat, openat,
+    renameat, statat, unlinkat,
 };
 use rustix::io::Errno;
-use rustix::process::geteuid;
 
 use super::SERVICES_DIR;
 use crate::application::ports::{FsError, Measure, Perms};
 use crate::domain::files::{MAX_DEPTH, RelPath};
 use crate::domain::services::ServiceKey;
+use crate::infrastructure::dir_fd::{self, CREATE_FILE, OPEN_DIR, is_trusted};
 
-/// Ouvrir un dossier sans suivre un lien à son dernier composant.
-const OPEN_DIR: OFlags = OFlags::RDONLY
-    .union(OFlags::DIRECTORY)
-    .union(OFlags::NOFOLLOW)
-    .union(OFlags::CLOEXEC);
+/// Désigner un objet SANS l'ouvrir (`O_PATH`) : aucun effet d'ouverture sur un périphérique ou un tube,
+/// un lien est désigné lui-même, jamais suivi. Son type se juge ensuite sur ce descripteur.
+const DESIGNATE: OFlags = OFlags::PATH.union(OFlags::NOFOLLOW).union(OFlags::CLOEXEC);
 
-/// Créer un fichier NEUF, sans suivre un lien.
-const CREATE_FILE: OFlags = OFlags::WRONLY
-    .union(OFlags::CREATE)
-    .union(OFlags::EXCL)
-    .union(OFlags::NOFOLLOW)
-    .union(OFlags::CLOEXEC);
-
-/// Ouvrir un fichier en lecture sans suivre de lien ni bloquer sur un tube nommé.
-const OPEN_READ: OFlags = OFlags::RDONLY
-    .union(OFlags::NOFOLLOW)
-    .union(OFlags::NONBLOCK)
-    .union(OFlags::CLOEXEC);
+/// Rouvrir en lecture un fichier ordinaire déjà désigné.
+const REOPEN_READ: OFlags = OFlags::RDONLY.union(OFlags::NOCTTY).union(OFlags::CLOEXEC);
 
 /// Fichiers à plusieurs noms retenus pour ne les compter qu'une fois ; au-delà, la mesure est partielle.
 const MAX_TRACKED_HARDLINKS: usize = 100_000;
 
 /// Le budget de temps est relu toutes les 1 024 entrées.
 const CLOCK_EVERY: u64 = 1024;
-
-fn mode(bits: u32) -> Mode {
-    Mode::from_bits_truncate(bits)
-}
 
 fn fs_error(errno: Errno) -> FsError {
     match errno {
@@ -80,22 +64,16 @@ fn disk_bytes(stat: &Stat) -> u64 {
     u64::try_from(i128::from(stat.st_blocks) * 512).unwrap_or(0)
 }
 
-/// Propriétaire puis droits, sur un descripteur : jamais le masque ambiant, jamais un bit spécial.
+/// Propriétaire puis droits, sur un descripteur : jamais un bit spécial (`Perms` les refuse).
 fn apply(fd: &OwnedFd, perms: Perms) -> Result<(), FsError> {
-    fchown(
-        fd,
-        Some(Uid::from_raw(perms.owner().uid())),
-        Some(Gid::from_raw(perms.owner().gid())),
-    )
-    .map_err(fs_error)?;
-    fchmod(fd, mode(perms.mode())).map_err(fs_error)
+    let owner = perms.owner();
+    dir_fd::apply(fd, owner.uid(), owner.gid(), perms.mode()).map_err(fs_error)
 }
 
-/// Un dossier de confiance : à l'utilisateur EFFECTIF de l'agent, ni le groupe ni les autres n'y
-/// écrivent (sinon un autre compte pourrait y substituer un lien entre deux appels).
+/// Un dossier de confiance (`dir_fd::is_trusted`), sinon `UnsafeRoot`.
 fn check_trusted(dir: &OwnedFd) -> Result<Stat, FsError> {
     let stat = fstat(dir).map_err(fs_error)?;
-    if stat.st_uid != geteuid().as_raw() || stat.st_mode & 0o022 != 0 {
+    if !is_trusted(&stat) {
         return Err(FsError::UnsafeRoot);
     }
     Ok(stat)
@@ -328,10 +306,21 @@ impl UnixRoot {
 
     pub(super) fn read_file(&self, rel: &RelPath, max: u64) -> Result<Vec<u8>, FsError> {
         let (parent, leaf) = self.parent_of(rel)?;
-        let fd = openat(&parent, leaf, OPEN_READ, Mode::empty()).map_err(fs_error)?;
-        let stat = fstat(&fd).map_err(fs_error)?;
-        if file_type(&stat) != FileType::RegularFile {
-            return Err(FsError::NotRegular);
+        // Juger AVANT d'ouvrir : sur un périphérique, c'est l'ouverture elle-même qui agit.
+        let handle = openat(&parent, leaf, DESIGNATE, Mode::empty()).map_err(fs_error)?;
+        let designated = fstat(&handle).map_err(fs_error)?;
+        match file_type(&designated) {
+            FileType::RegularFile => {}
+            FileType::Symlink => return Err(FsError::Blocked),
+            _ => return Err(FsError::NotRegular),
+        }
+        if dev_of(&designated) != self.dev {
+            return Err(FsError::CrossesDevice);
+        }
+        let fd = reopen(&handle, REOPEN_READ)?;
+        let opened = fstat(&fd).map_err(fs_error)?;
+        if (opened.st_dev, opened.st_ino) != (designated.st_dev, designated.st_ino) {
+            return Err(FsError::Blocked);
         }
         let mut out = Vec::new();
         File::from(fd)
@@ -364,6 +353,15 @@ impl UnixRoot {
         remove_entry(&parent, &name, self.dev, rel.depth())?;
         fsync(&parent).map_err(fs_error)
     }
+}
+
+/// Rouvre l'objet désigné par `handle` (`O_PATH`) par `/proc/self/fd/<n>` : ce lien du noyau mène au
+/// MÊME objet que le descripteur, aucun nom du dossier du service n'est relu entre le jugement et
+/// l'ouverture.
+fn reopen(handle: &OwnedFd, flags: OFlags) -> Result<OwnedFd, FsError> {
+    let link = format!("/proc/self/fd/{}", handle.as_raw_fd());
+    openat(CWD, link.as_str(), flags, Mode::empty())
+        .map_err(|errno| FsError::Io(io::Error::from(errno).kind()))
 }
 
 /// Remplit le fichier d'attente, le rend durable puis le met en place par renommage dans le MÊME dossier.
@@ -441,12 +439,23 @@ impl Walker {
         };
         if file_type(&stat) == FileType::Directory {
             // Jamais par un lien ; jamais dans un autre système de fichiers.
-            let Ok(child) = openat(dir, name, OPEN_DIR, Mode::empty()) else {
-                return;
+            let child = match openat(dir, name, OPEN_DIR, Mode::empty()) {
+                Ok(child) => child,
+                // Disparu ou remplacé par un lien entre le relevé et l'ouverture : rien à compter.
+                Err(Errno::NOENT | Errno::LOOP | Errno::NOTDIR) => return,
+                Err(_) => {
+                    self.total.partial = true;
+                    return;
+                }
             };
             match fstat(&child) {
                 Ok(opened) if dev_of(&opened) == self.dev => {}
-                _ => return,
+                // Un point de montage : hors de la mesure, jamais descendu.
+                Ok(_) => return,
+                Err(_) => {
+                    self.total.partial = true;
+                    return;
+                }
             }
             self.count(&stat, false);
             self.walk(&child, depth + 1);

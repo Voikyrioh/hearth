@@ -11,7 +11,7 @@ maj: 2026-10-17
 # BR-DEL-009 : La taille d'un dossier de service se mesure sans rien lire, dans un budget de temps, et dit quand elle est partielle
 
 ## Règle
-`ServiceRoot::measure(rel, budget)` parcourt l'arbre par `getdents` et `fstatat(AT_SYMLINK_NOFOLLOW)`, additionne `st_blocks × 512` (taille sur le disque), compte les éléments, ne lit aucun contenu, ne franchit aucun point de montage et ne suit aucun lien. Un fichier à plusieurs noms n'est compté qu'une fois (jusqu'à 100 000 identités retenues, au-delà la mesure est partielle). Le budget est relu toutes les 1 024 entrées ; dépassé, ou profondeur de 64 niveaux atteinte, ou erreur de lecture : `partial = true`, la valeur est « au moins ».
+`ServiceRoot::measure(rel, budget)` parcourt l'arbre par `getdents` et `fstatat(AT_SYMLINK_NOFOLLOW)`, additionne `st_blocks × 512` (taille sur le disque), compte les éléments, ne lit aucun contenu, ne franchit aucun point de montage et ne suit aucun lien. Un fichier à plusieurs noms n'est compté qu'une fois (jusqu'à 100 000 identités retenues, au-delà la mesure est partielle). Le budget est relu toutes les 1 024 entrées ; dépassé, ou profondeur de 64 niveaux atteinte, ou erreur de lecture ou d'ouverture d'un dossier (hors disparition ou remplacement par un lien pendant le parcours) : `partial = true` ; un point de montage est hors de la mesure, sans la rendre partielle, la valeur est « au moins ».
 
 ## Application (code)
 - `crates/hearth-agent/src/infrastructure/fs/unix.rs::{UnixRoot::measure_tree, Walker}`
@@ -29,3 +29,4 @@ maj: 2026-10-17
 
 ## Historique
 - 2026-10-17 : création (HRT-145).
+- 2026-10-17 : un dossier qui ne s'ouvre pas rend la mesure partielle, review de la PR #101.

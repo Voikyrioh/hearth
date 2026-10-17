@@ -285,6 +285,32 @@ fn a_named_pipe_is_neither_read_nor_overwritten_and_nothing_blocks() {
     );
 }
 
+/// Un périphérique planté par un service root : jugé sans être ouvert (`O_PATH`), jamais lu. Root
+/// seulement (`mknod` d'un périphérique) ; le périphérique « null » (1, 3) n'a aucun effet s'il était
+/// ouvert quand même.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_device_node_is_judged_without_being_opened() {
+    use rustix::fs::{CWD, FileType, Mode, makedev, mknodat};
+    if !geteuid().is_root() {
+        return;
+    }
+    let f = fixture();
+    mknodat(
+        CWD,
+        f.root_path.join("dev"),
+        FileType::CharacterDevice,
+        Mode::RUSR | Mode::WUSR,
+        makedev(1, 3),
+    )
+    .unwrap();
+    assert_eq!(f.root.read_file(&rel("dev"), 100), Err(FsError::NotRegular));
+    assert_eq!(
+        f.root.write_file(&rel("dev"), b"x", perms(0o600)),
+        Err(FsError::NotRegular)
+    );
+}
+
 #[test]
 fn a_read_over_the_limit_is_refused_and_exactly_the_limit_is_accepted() {
     let f = fixture();

@@ -12,8 +12,8 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 
 use rustix::fs::{
-    AtFlags, CWD, Dir, FileType, Gid, Mode, OFlags, RenameFlags, Stat, Uid, fchmod, fchown, fstat,
-    fsync, mkdirat, openat, renameat_with, statat, unlinkat,
+    AtFlags, CWD, Dir, FileType, Mode, RenameFlags, Stat, fchmod, fstat, fsync, mkdirat, openat,
+    renameat_with, statat, unlinkat,
 };
 use rustix::io::Errno;
 use rustix::process::geteuid;
@@ -23,29 +23,13 @@ use crate::domain::archive::{
     ArchiveLimits, ArchivePath, ArchiveRefusal, Cancel, ExtractReport, ExtractSink, Inspection,
     SinkError, extract as extract_archive,
 };
-
-/// Ouvrir un dossier sans suivre un lien à son dernier composant.
-const OPEN_DIR: OFlags = OFlags::RDONLY
-    .union(OFlags::DIRECTORY)
-    .union(OFlags::NOFOLLOW)
-    .union(OFlags::CLOEXEC);
-
-/// Créer un fichier NEUF, sans suivre un lien.
-const CREATE_FILE: OFlags = OFlags::WRONLY
-    .union(OFlags::CREATE)
-    .union(OFlags::EXCL)
-    .union(OFlags::NOFOLLOW)
-    .union(OFlags::CLOEXEC);
+use crate::infrastructure::dir_fd::{self, CREATE_FILE, OPEN_DIR, is_trusted};
 
 /// Plus long nom de fichier que les systèmes de fichiers courants acceptent.
 const NAME_MAX: usize = 255;
 
 /// Profondeur au-delà de laquelle un parcours par descripteur s'arrête (l'archive est jugée à 32).
 const MAX_TREE_DEPTH: usize = 64;
-
-fn mode(bits: u32) -> Mode {
-    Mode::from_bits_truncate(bits)
-}
 
 fn io_kind(errno: Errno) -> io::ErrorKind {
     io::Error::from(errno).kind()
@@ -60,15 +44,9 @@ fn blocked_or_io(errno: Errno) -> SinkError {
     }
 }
 
-/// Pose le propriétaire puis les droits demandés par l'appelant, sur un descripteur : jamais le
-/// masque ambiant (`umask`), jamais ce que dit l'archive.
+/// Le propriétaire et les droits demandés par l'appelant, jamais ce que dit l'archive.
 fn apply(fd: &OwnedFd, owner: FileOwner, bits: u32) -> Result<(), Errno> {
-    fchown(
-        fd,
-        Some(Uid::from_raw(owner.uid())),
-        Some(Gid::from_raw(owner.gid())),
-    )?;
-    fchmod(fd, mode(bits))
+    dir_fd::apply(fd, owner.uid(), owner.gid(), bits)
 }
 
 /// Un objet du système de fichiers : périphérique et inode.
@@ -262,7 +240,7 @@ pub(super) fn open_parent(root: &Path, parents: &[&OsStr]) -> Result<OwnedFd, Ar
 /// groupe ni autres n'y écrivent.
 pub(super) fn check_parent(parent: &OwnedFd) -> Result<(), ArchiveRefusal> {
     let stat = fstat(parent).map_err(|_| ArchiveRefusal::UnsafeDestination)?;
-    if stat.st_uid != geteuid().as_raw() || stat.st_mode & 0o022 != 0 {
+    if !is_trusted(&stat) {
         return Err(ArchiveRefusal::UnsafeDestination);
     }
     Ok(())
