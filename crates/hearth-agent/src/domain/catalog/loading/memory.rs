@@ -48,6 +48,48 @@ impl TierId {
     }
 }
 
+/// Pourquoi une liste d'identifiants de crans est refusée : l'indice et le texte fautif.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TierListError {
+    Unknown { index: usize, id: String },
+    Twice { index: usize, id: String },
+}
+
+/// Le seul endroit qui lit une liste d'identifiants de crans (`memory_tier[].id`, `tiers.hidden`) : chaque
+/// identifiant est connu et n'apparaît qu'une fois (BR-RES-032).
+pub fn parse_tier_ids<'a>(
+    ids: impl IntoIterator<Item = &'a str>,
+) -> Result<Vec<TierId>, TierListError> {
+    let mut out: Vec<TierId> = Vec::new();
+    for (index, raw) in ids.into_iter().enumerate() {
+        let Some(id) = TierId::parse(raw) else {
+            return Err(TierListError::Unknown {
+                index,
+                id: raw.to_string(),
+            });
+        };
+        if out.contains(&id) {
+            return Err(TierListError::Twice {
+                index,
+                id: raw.to_string(),
+            });
+        }
+        out.push(id);
+    }
+    Ok(out)
+}
+
+/// Les identifiants déclarés par `[[resources.memory_tier]]`, dans l'ordre du fichier.
+pub fn declared_ids(file: &FicheFile) -> Result<Vec<TierId>, TierListError> {
+    parse_tier_ids(file.resources.memory_tier.iter().map(|t| t.id.as_str()))
+}
+
+/// Les identifiants de `[resources.tiers] hidden`.
+pub fn hidden_ids(file: &FicheFile) -> Result<Vec<TierId>, TierListError> {
+    let hidden = file.resources.tiers.as_ref().map(|t| t.hidden.as_slice());
+    parse_tier_ids(hidden.unwrap_or_default().iter().map(String::as_str))
+}
+
 /// Un cran servi au client : sa limite, et la preuve du chiffre dont elle vient.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServedTier {
@@ -95,12 +137,10 @@ pub fn recommended_gap(file: &FicheFile) -> Option<RecommendedGap> {
 /// `[resources.tiers] hidden`, n'est jamais servi (BR-RES-031, BR-RES-032, BR-RES-033).
 pub fn memory_tiers(file: &FicheFile) -> Vec<ServedTier> {
     let memory = &file.resources.memory;
-    let hidden: Vec<TierId> = file
-        .resources
-        .tiers
-        .as_ref()
-        .map(|t| t.hidden.iter().filter_map(|id| TierId::parse(id)).collect())
-        .unwrap_or_default();
+    // Une `FicheFile` ne sort du chargeur que si ces deux listes sont valides (`check_memory_tiers`) : l'échec
+    // est impossible ici, et ne servirait de toute façon aucun cran déclaré.
+    let hidden = hidden_ids(file).unwrap_or_default();
+    let declared = declared_ids(file).unwrap_or_default();
     let mut out = Vec::new();
     let min_measured = matches!(
         memory.evidence,
@@ -130,15 +170,13 @@ pub fn memory_tiers(file: &FicheFile) -> Vec<ServedTier> {
             evidence: memory.evidence.clone(),
         });
     }
-    for tier in &file.resources.memory_tier {
-        if let Some(id) = TierId::parse(&tier.id) {
-            out.push(ServedTier {
-                id,
-                from_bytes: Some(tier.from_bytes),
-                below_bytes: None,
-                evidence: tier.evidence.clone(),
-            });
-        }
+    for (id, tier) in declared.into_iter().zip(&file.resources.memory_tier) {
+        out.push(ServedTier {
+            id,
+            from_bytes: Some(tier.from_bytes),
+            below_bytes: None,
+            evidence: tier.evidence.clone(),
+        });
     }
     out.retain(|t| !hidden.contains(&t.id));
     out.sort_by_key(|t| t.id);

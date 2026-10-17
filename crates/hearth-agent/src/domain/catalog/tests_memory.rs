@@ -129,6 +129,11 @@ fn from_bytes_must_rise_strictly_above_the_recommended_memory() {
         tier("smooth", 4 * GB, MEASURED)
     );
     assert_eq!(culprit(with_memory(&mem, &flat)), "ultra");
+    // Le refus situe le cran par sa place dans le fichier, comme les autres refus de crans.
+    assert_eq!(
+        refused(&with_memory(&mem, &flat)).chemin,
+        "resources.memory_tier[0]"
+    );
     let inverted = format!(
         "{}{}",
         tier("community", 3 * GB, MEASURED),

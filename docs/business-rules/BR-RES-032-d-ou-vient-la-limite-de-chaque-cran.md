@@ -17,6 +17,7 @@ maj: 2026-10-17
 - `crates/hearth-agent/src/domain/catalog/loading/invariants.rs::check_memory_tiers`
 - `crates/hearth-agent/src/domain/catalog/loading/schema/fiche.rs::MemoryTier`
 - `crates/hearth-agent/src/domain/catalog/loading/memory.rs::TierId`
+- `crates/hearth-agent/src/domain/catalog/loading/memory.rs::parse_tier_ids` (seule lecture des listes `memory_tier[].id` et `tiers.hidden` : identifiant connu, une seule fois)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_memory.rs::declared_tiers_with_a_bad_identifier_are_refused`

@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use super::error::{FicheRefusee, Fichier, Motif};
 use super::limits::*;
 use super::loader::{check_text, check_variant_refs};
-use super::memory::{TierId, recommended_gap};
+use super::memory::{TierId, TierListError, declared_ids, hidden_ids, recommended_gap};
 use super::model::{Fiche, Setting, ValueSpec};
 use super::schema::fiche::{
     Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, PlainEvidence,
@@ -1304,45 +1304,27 @@ fn check_resources(file: &FicheFile) -> Result<(), FicheRefusee> {
 fn check_memory_tiers(file: &FicheFile) -> Result<(), FicheRefusee> {
     let f = Fichier::Fiche;
     let r = &file.resources;
-    let mut seen: Vec<TierId> = Vec::new();
-    let mut floor = r.memory.recommended_bytes;
-    let mut declared: Vec<(TierId, &MemoryTier)> = Vec::new();
-    for (i, tier) in r.memory_tier.iter().enumerate() {
-        let at = format!("resources.memory_tier[{i}]");
-        let Some(id) = TierId::parse(&tier.id) else {
-            return Err(refuse(
-                f,
-                at,
-                Motif::CranInconnu {
-                    id: tier.id.clone(),
-                },
-            ));
-        };
+    hidden_ids(file).map_err(|e| tier_list_refused(|_| "resources.tiers.hidden".to_string(), e))?;
+    let ids = declared_ids(file)
+        .map_err(|e| tier_list_refused(|i| format!("resources.memory_tier[{i}]"), e))?;
+    let mut declared: Vec<(TierId, usize, &MemoryTier)> = Vec::new();
+    for (i, (id, tier)) in ids.into_iter().zip(&r.memory_tier).enumerate() {
         if !id.is_declarable() {
             return Err(refuse(
                 f,
-                at,
+                format!("resources.memory_tier[{i}]"),
                 Motif::CranNonDeclarable {
                     id: tier.id.clone(),
                 },
             ));
         }
-        if seen.contains(&id) {
-            return Err(refuse(
-                f,
-                at,
-                Motif::CranEnDouble {
-                    id: tier.id.clone(),
-                },
-            ));
-        }
-        seen.push(id);
-        declared.push((id, tier));
+        declared.push((id, i, tier));
     }
     // Strictement croissants dans l'ordre des crans, et tous au-dessus de la mémoire recommandée.
-    declared.sort_by_key(|(id, _)| *id);
-    for (_, tier) in declared {
-        let at = format!("resources.memory_tier[{}]", tier.id);
+    let mut floor = r.memory.recommended_bytes;
+    declared.sort_by_key(|(id, _, _)| *id);
+    for (_, i, tier) in declared {
+        let at = format!("resources.memory_tier[{i}]");
         match &tier.evidence {
             Evidence::Plain(PlainEvidence::Measured) => {}
             Evidence::Plain(_) => {
@@ -1378,20 +1360,19 @@ fn check_memory_tiers(file: &FicheFile) -> Result<(), FicheRefusee> {
         }
         floor = Some(tier.from_bytes);
     }
-    if let Some(tiers) = &r.tiers {
-        let mut hidden: Vec<TierId> = Vec::new();
-        for id in &tiers.hidden {
-            let at = "resources.tiers.hidden".to_string();
-            let Some(parsed) = TierId::parse(id) else {
-                return Err(refuse(f, at, Motif::CranInconnu { id: id.clone() }));
-            };
-            if hidden.contains(&parsed) {
-                return Err(refuse(f, at, Motif::CranEnDouble { id: id.clone() }));
-            }
-            hidden.push(parsed);
+    Ok(())
+}
+
+/// Refus typé d'une liste d'identifiants de crans ; `at` situe l'élément fautif par son indice.
+fn tier_list_refused(at: impl Fn(usize) -> String, e: TierListError) -> FicheRefusee {
+    match e {
+        TierListError::Unknown { index, id } => {
+            refuse(Fichier::Fiche, at(index), Motif::CranInconnu { id })
+        }
+        TierListError::Twice { index, id } => {
+            refuse(Fichier::Fiche, at(index), Motif::CranEnDouble { id })
         }
     }
-    Ok(())
 }
 
 fn check_worlds_shape(file: &FicheFile) -> Result<(), FicheRefusee> {
