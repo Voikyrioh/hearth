@@ -652,6 +652,20 @@ async fn stop_by_supervisor(
     }
 }
 
+/// Les dates de sortie d'« active » et d'arrivée à « inactive » d'une unité, en clair (diagnostic d'échec).
+fn stop_times(unit: &str) -> String {
+    std::process::Command::new("systemctl")
+        .args([
+            "show",
+            "--property=ActiveState,SubState,ActiveExitTimestampMonotonic,InactiveEnterTimestampMonotonic",
+            "--",
+            unit,
+        ])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default()
+}
+
 /// Les trois ordres du port `ServiceSupervisor` contre un vrai systemd et un vrai moteur (HRT-64, BR-LIFE-002,
 /// BR-LIFE-009, BR-LIFE-012). L'unité se relance toujours : un arrêt par le superviseur doit pourtant TENIR.
 #[tokio::test]
@@ -719,6 +733,7 @@ ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{
     };
     // La durée de l'arrêt que le système a datée lui-même (BR-LIFE-009) : lue, et pas plus longue que l'attente.
     let measured_stop = supervisor.last_stop_duration(&unit).await;
+    let raw_after_stop = stop_times(DRIVE_UNIT);
     tokio::time::sleep(Duration::from_secs(6)).await;
     let UnitLookup::Loaded(later) = supervisor.unit(&unit).await else {
         panic!("l'unité reste chargée");
@@ -783,21 +798,12 @@ ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{
     assert_eq!(after_restart.activity, UnitActivity::Active);
     // Le système date l'arrêt seul : après un arrêt comme après un redémarrage, jamais plus que l'attente de
     // l'agent (le démarrage d'un redémarrage n'y entre pas).
-    let raw = std::process::Command::new("systemctl")
-        .args([
-            "show",
-            &format!(
-                "--property={}",
-                hearth_agent::domain::services::STOP_TIMES_PROPERTIES
-            ),
-            "--",
-            DRIVE_UNIT,
-        ])
-        .output()
-        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-        .unwrap_or_default();
-    let measured_stop =
-        measured_stop.unwrap_or_else(|| panic!("durée de l'arrêt lue de systemctl show : {raw:?}"));
+    let measured_stop = measured_stop.unwrap_or_else(|| {
+        panic!(
+            "durée de l'arrêt lue de systemctl show : juste après {raw_after_stop:?}, à la fin {:?}",
+            stop_times(DRIVE_UNIT)
+        )
+    });
     assert!(
         measured_stop <= stop_took,
         "{measured_stop:?} > {stop_took:?}"
