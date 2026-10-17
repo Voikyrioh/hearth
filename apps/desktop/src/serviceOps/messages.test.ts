@@ -87,7 +87,7 @@ describe("les textes d'une opération", () => {
     expect(statusText(op({ status: "needs_attention" }))).toBe(
       "L'état de ce service est à vérifier.",
     );
-    expect(statusText(op({ status: "unknown" }))).toBe("État de l'opération inconnu.");
+    expect(statusText(op({ status: "unknown" }))).toBe("L'état de cette opération est inconnu.");
   });
 
   it("un refus inconnu a une phrase neutre", () => {

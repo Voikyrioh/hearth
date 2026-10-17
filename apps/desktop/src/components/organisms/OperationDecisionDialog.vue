@@ -4,7 +4,6 @@ import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import { formatClock } from "@/composables/format";
 import { useOperationActions } from "@/composables/useOperationActions";
 import { t } from "@/i18n";
-import type { DecisionRefusal } from "@/link";
 import { CHOICE_KEYS, operationTitle, refusalText } from "@/serviceOps/messages";
 import type { TrackedOperation } from "@/stores/serviceOps";
 
@@ -56,8 +55,8 @@ function perform(adminPassword: string | null) {
   return actions.decide(op.id, choice, adminPassword);
 }
 
-function refusal(refused: { kind: string; retry_after_s?: number }): string {
-  return refusalText(refused as DecisionRefusal);
+function refusal(refused: { kind: string }): string {
+  return refusalText(refused);
 }
 </script>
 

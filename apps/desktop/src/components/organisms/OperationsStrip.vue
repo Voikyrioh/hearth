@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HMeter from "@/components/atoms/HMeter.vue";
 import { t } from "@/i18n";
@@ -79,6 +79,7 @@ watch(
     }, 500);
   },
 );
+onBeforeUnmount(() => clearTimeout(timer));
 
 function launched(tracked: TrackedOperation): string | null {
   return props.launchedBy(tracked.operation);
@@ -94,7 +95,7 @@ function launched(tracked: TrackedOperation): string | null {
     data-operations-strip
   >
     <h2 class="strip__title">{{ t("serviceOps.stripTitle") }}</h2>
-    <p class="strip__live" role="status" aria-live="polite">{{ announced }}</p>
+    <p class="sr-only" role="status" aria-live="polite">{{ announced }}</p>
     <ul class="strip__list">
       <li
         v-for="tracked in shown"
@@ -197,17 +198,6 @@ function launched(tracked: TrackedOperation): string | null {
   text-transform: uppercase;
 }
 
-.strip__live {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 .strip__list {
   display: flex;
   flex-direction: column;
@@ -219,10 +209,10 @@ function launched(tracked: TrackedOperation): string | null {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(80px, 1fr) auto auto;
+  grid-template-columns: var(--op-columns);
   align-items: center;
   gap: var(--space-3);
-  min-height: 40px;
+  min-height: var(--target-size);
   min-width: 0;
 }
 

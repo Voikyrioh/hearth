@@ -198,8 +198,22 @@ function launchedByOf(operation: TrackedOperation["operation"]): string | null {
 function seeOperation(tracked: TrackedOperation) {
   openDetail(tracked.operation.key);
 }
-/** La fenêtre de décision, ouverte sur l'opération qui attend. */
-const deciding = ref<TrackedOperation | null>(null);
+/**
+ * La fenêtre de décision, ouverte sur l'opération qui attend. On retient son identifiant et on relit le magasin :
+ * la fenêtre suit les choix et l'échéance à jour, et se ferme quand l'opération ne court plus.
+ */
+const decidingId = ref<string | null>(null);
+const deciding = computed(() =>
+  decidingId.value === null
+    ? null
+    : (running.value.find((tracked) => tracked.operation.id === decidingId.value) ?? null),
+);
+watch(deciding, (tracked) => {
+  if (tracked === null) decidingId.value = null;
+});
+function decide(tracked: TrackedOperation) {
+  decidingId.value = tracked.operation.id;
+}
 
 function recheck() {
   if (server.value) void store.recheck(server.value.id);
@@ -270,7 +284,7 @@ async function openDocs() {
         :launched-by="launchedByOf"
         :allowed="rights.canAct.value"
         @see="seeOperation"
-        @decide="deciding = $event"
+        @decide="decide"
       />
 
       <!-- Le droit de gérer les services : la raison pour laquelle aucune action n'est proposée (BR-GRANT-014, 016) -->
@@ -375,7 +389,7 @@ async function openDocs() {
                 @back="closeDetail"
                 @open-other="openDetail"
                 @retry-rights="rights.retry()"
-                @decide="deciding = $event"
+                @decide="decide"
               />
             </div>
           </div>
@@ -398,7 +412,7 @@ async function openDocs() {
       :open="deciding !== null"
       :server-id="server.id"
       :tracked="deciding"
-      @close="deciding = null"
+      @close="decidingId = null"
     />
   </div>
 </template>

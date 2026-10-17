@@ -113,7 +113,11 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
     const name = nameOf(event.serverId, operation.key);
     if (isFinished(operation.status)) {
       entries.delete(id);
-      if (announced.has(id)) return;
+      // Déjà dite : un rejeu de la coquille (l'acquittement précédent n'est pas arrivé), on la réacquitte.
+      if (announced.has(id)) {
+        acknowledge(event.serverId, operation.id);
+        return;
+      }
       announced.add(id);
       if (announced.size > MAX_REMEMBERED) {
         const oldest = announced.values().next().value;
@@ -140,8 +144,12 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
     if (message) {
       useToastsStore().push({ kind: OUTCOME_KINDS[operation.status] ?? "info", message });
     }
+    acknowledge(serverId, operation.id);
+  }
+
+  function acknowledge(serverId: string, opId: string): void {
     void getLinkBridge()
-      .ackServiceOperations(serverId, [operation.id])
+      .ackServiceOperations(serverId, [opId])
       .catch((error) => logUiError(error, "serviceOps:ack"));
   }
 
@@ -167,10 +175,17 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
     }
   }
 
-  /** Suit les opérations de tous les serveurs (un seul abonnement, quel que soit le nombre d'appels). */
+  /**
+   * Suit les opérations de tous les serveurs (un seul abonnement, quel que soit le nombre d'appels). Démarré par
+   * `App.vue` : une issue se dit quelle que soit la page ouverte. La liste des services est suivie aussi, c'est
+   * d'elle que vient le nom d'un service.
+   */
   function start(): Promise<void> {
     if (following) return pending ?? Promise.resolve();
     following = true;
+    useServicesStore()
+      .start()
+      .catch((error) => logUiError(error, "serviceOps:services"));
     pending = subscribe();
     return pending;
   }

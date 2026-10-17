@@ -195,8 +195,9 @@ const SAYS: Record<string, (value: string) => void> = {
       decision: null,
       cause: null,
     });
-    expect(statusText(operation).length).toBeGreaterThan(0);
     const finished = ["cancelled", "rolled_back", "succeeded", "failed", "interrupted"];
+    // Un statut en cours a toujours son texte ; un statut définitif n'en a pas, son issue a une phrase.
+    expect(statusText(operation) === null).toBe(finished.includes(value));
     expect(outcomeText(operation, "web") !== null).toBe(finished.includes(value));
   },
   OperationChoiceDto: (value) => {

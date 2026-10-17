@@ -95,7 +95,11 @@ describe("le magasin des opérations de service", () => {
       "Le déploiement de terraria a réussi.",
     ]);
     expect(toasts.items[0]?.kind).toBe("success");
-    expect(bridge.serviceOps.acknowledged).toEqual([{ serverId: "forge", ids: ["A"] }]);
+    // Le rejeu d'une issue déjà dite (numéro plus grand : la coquille la rejoue faute d'acquittement) est réacquitté.
+    expect(bridge.serviceOps.acknowledged).toEqual([
+      { serverId: "forge", ids: ["A"] },
+      { serverId: "forge", ids: ["A"] },
+    ]);
     store.reset();
   });
 

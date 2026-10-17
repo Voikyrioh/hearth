@@ -56,18 +56,14 @@ const STEP_KEYS: Record<string, MessageKey> = {
   erase: "serviceOps.steps.erase",
 };
 
-const STATUS_KEYS: Record<OperationStatus, MessageKey> = {
+/** Le texte d'un statut EN COURS ; un statut définitif n'en a pas (son issue se dit par `outcomeText`). */
+const STATUS_KEYS: Partial<Record<OperationStatus, MessageKey>> = {
   accepted: "serviceOps.status.accepted",
   running: "serviceOps.status.running",
   awaiting_decision: "serviceOps.status.awaitingDecision",
   needs_attention: "serviceOps.status.needsAttention",
   cancelling: "serviceOps.status.cancelling",
   rolling_back: "serviceOps.status.rollingBack",
-  cancelled: "serviceOps.status.running",
-  rolled_back: "serviceOps.status.running",
-  succeeded: "serviceOps.status.running",
-  failed: "serviceOps.status.running",
-  interrupted: "serviceOps.status.running",
   unknown: "serviceOps.status.unknown",
 };
 
@@ -97,15 +93,18 @@ const REFUSAL_KEYS: Partial<Record<DecisionRefusal["kind"], MessageKey>> = {
   changed: "serviceOps.refused.changed",
 };
 
-/** Le texte d'un refus de décision qui n'est pas celui de la confirmation (le mot de passe se dit sous son champ). */
-export function refusalText(refusal: DecisionRefusal): string {
-  const key = REFUSAL_KEYS[refusal.kind] ?? "serviceOps.refused.other";
+/**
+ * Le texte d'un refus de décision qui n'est pas celui de la confirmation (le mot de passe se dit sous son champ).
+ * Un code que ce client ne connaît pas devient le refus générique.
+ */
+export function refusalText(refusal: { kind: string }): string {
+  const key = REFUSAL_KEYS[refusal.kind as DecisionRefusal["kind"]] ?? "serviceOps.refused.other";
   return t(key);
 }
 
 /**
  * Le titre d'une opération. L'effacement des données d'un service est dit sans chemin ni progression à un compte
- * qui n'a pas le droit de gérer les services (BR-SVC-029) : `detailed` faux.
+ * qui n'a pas le droit de gérer les services (BR-SVC-029, BR-DEL-031) : `detailed` faux.
  */
 export function operationTitle(
   operation: ServiceOperation,
@@ -125,9 +124,10 @@ export function stepText(operation: ServiceOperation): string | null {
   return key ? t(key) : null;
 }
 
-/** Une ligne d'état de l'opération (en attente, en cours, réponse attendue…). */
-export function statusText(operation: ServiceOperation): string {
-  return t(STATUS_KEYS[operation.status]);
+/** Une ligne d'état de l'opération (en attente, en cours, réponse attendue…), `null` pour un statut définitif. */
+export function statusText(operation: ServiceOperation): string | null {
+  const key = STATUS_KEYS[operation.status];
+  return key ? t(key) : null;
 }
 
 /** La phrase d'issue d'une opération terminée, ou `null` si elle ne l'est pas. */
