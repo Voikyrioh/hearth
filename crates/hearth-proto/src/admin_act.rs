@@ -98,8 +98,7 @@ impl ActKind {
     /// en la retirant d'ici. Tant qu'un acte est ici, aucune route ne le porte, aucune requête ne peut le
     /// produire, et le test de `ROUTES` le sait. `0x13` (`ServiceUpdate`), `0x15` à `0x18`, `0x1A` et `0x1C`
     /// sont réservés par la conception et ne sont pas encore déclarés.
-    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 5] = [
-        Self::ServiceDeploy,
+    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 4] = [
         Self::ServiceDelete,
         Self::BackupCreate,
         Self::BackupDelete,
@@ -215,8 +214,8 @@ pub enum AdminAct<'a> {
     /// variables et si une commande est fixée. Jamais le nom ni la valeur d'une variable, jamais la
     /// commande : une signature observée ne doit pas servir à tester un secret hors ligne.
     ServiceDeploy {
-        name: &'a str,
-        image: &'a str,
+        name: Cow<'a, str>,
+        image: Cow<'a, str>,
         digest: [u8; FINGERPRINT_LEN],
         env_count: u32,
         command: bool,
@@ -273,6 +272,24 @@ fn role_text(role: RoleName) -> &'static str {
 }
 
 impl AdminAct<'_> {
+    /// L'acte d'un déploiement (HRT-68) : le nom (cible), `dépôt:version`, l'empreinte de la partie non secrète
+    /// ([`crate::api::service_spec::deploy_digest`]), le NOMBRE de variables et si une commande est fixée. Ni
+    /// valeur, ni nom de variable, ni commande. Source unique pour l'agent (qui reconstruit l'acte depuis le
+    /// corps) et la liaison cliente (qui le signe).
+    pub fn service_deploy(spec: &crate::api::deploy::DeploySpec) -> AdminAct<'static> {
+        use crate::api::service_spec::{deploy_digest, deploy_image_ref};
+        AdminAct::ServiceDeploy {
+            name: Cow::Owned(spec.name.clone()),
+            image: Cow::Owned(deploy_image_ref(&spec.image, spec.tag.as_deref())),
+            digest: deploy_digest(spec),
+            env_count: u32::try_from(spec.env.len()).unwrap_or(u32::MAX),
+            command: spec
+                .command
+                .as_deref()
+                .is_some_and(|command| !command.trim().is_empty()),
+        }
+    }
+
     /// L'acte d'adoption de ces clés (dans n'importe quel ordre) : leur nombre et l'empreinte SHA-256 de
     /// leurs clés triées (ordre des octets), chacune précédée de sa longueur sur deux octets. Source unique
     /// pour l'agent (qui reconstruit l'acte depuis le corps) et la liaison cliente (qui le signe).
@@ -593,6 +610,14 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::ServiceRelease],
         contract: Contract::Reauth,
     },
+    // Déployer une image (HRT-68, BR-DEPLOY-030) : le nom est la cible signée ; jamais couvert par
+    // l'élévation (le mot de passe à chaque fois).
+    RouteAct {
+        method: "POST",
+        pattern: "/deployments",
+        kinds: &[ActKind::ServiceDeploy],
+        contract: Contract::Reauth,
+    },
     // Démarrer, arrêter, redémarrer un service (HRT-64, BR-LIFE-016) : la clé du service est la cible signée.
     RouteAct {
         method: "POST",
@@ -702,14 +727,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-deux actes en 0x05 : dix-sept ont leur route (dont deux pour le mode attaque), cinq sont
-        // déclarés pour les tranches suivantes ; seize routes d'acte (dont le retrait d'un poste, sous son
+        // Vingt-deux actes en 0x05 : dix-huit ont leur route (dont deux pour le mode attaque), quatre sont
+        // déclarés pour les tranches suivantes ; dix-sept routes d'acte (dont le retrait d'un poste, sous son
         // contrat) en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 17);
-        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 5);
+        assert_eq!(in_routes.len(), 18);
+        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 4);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            16
+            17
         );
     }
 
@@ -880,8 +905,8 @@ mod tests {
             assert!(!act.target().is_empty());
         }
         let deploy = AdminAct::ServiceDeploy {
-            name: "terraria",
-            image: "ghcr.io/x/terraria:1.4",
+            name: "terraria".into(),
+            image: "ghcr.io/x/terraria:1.4".into(),
             digest: [0xab; FINGERPRINT_LEN],
             env_count: 3,
             command: true,

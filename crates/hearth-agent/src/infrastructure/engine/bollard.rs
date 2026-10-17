@@ -21,23 +21,32 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use bollard::models::{EventMessage, EventMessageTypeEnum, SystemVersion};
+use bollard::models::{
+    ContainerCreateBody, CreateImageInfo, EventMessage, EventMessageTypeEnum, HostConfig, Mount,
+    MountType, PortBinding, PortMap, RestartPolicy, RestartPolicyNameEnum, SystemVersion,
+};
 use bollard::query_parameters::{
-    EventsOptionsBuilder, InspectContainerOptionsBuilder, ListContainersOptionsBuilder,
+    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, EventsOptionsBuilder,
+    InspectContainerOptionsBuilder, ListContainersOptionsBuilder, RemoveContainerOptionsBuilder,
     RestartContainerOptionsBuilder, StopContainerOptionsBuilder,
 };
 use bollard::{API_DEFAULT_VERSION, ClientVersion, Docker};
 use futures_util::{StreamExt, stream};
+use hearth_proto::api::deploy::DEPLOY_TIMEOUT_S;
+use hearth_proto::api::service_spec::split_image;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::errors::translate;
+use super::errors::{translate, translate_create, translate_pull};
 use super::installed::InstallMarkers;
 use super::translate::{env_entries_of, observation_from};
 use crate::application::ports::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, LogQuery,
-    LogStream, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EngineInfo, EnvEntry, Listing,
+    LogQuery, LogStream, PullStream, Unreadable,
 };
 use crate::domain::ops::wait_budget;
+use crate::domain::services::plan::ContainerPlan;
+use crate::domain::services::pull::{LayerEvent, PullTracker};
+use crate::domain::services::spec::{SpecProtocol, SpecRestart};
 use crate::domain::services::{
     Announced, ApiVersion, EngineProbe, MAX_ENGINE_TEXT_CHARS, MAX_NAME_CHARS, MIN_API_VERSION,
     Observation, ProbeOutcome, bounded,
@@ -544,6 +553,95 @@ impl ContainerEngine for BollardEngine {
             .map_err(|error| translate(&error))
     }
 
+    async fn image_present(&self, image: &str) -> Result<bool, EngineError> {
+        let docker = self.inner.docker().await?;
+        match docker.inspect_image(image).await {
+            Ok(_) => Ok(true),
+            Err(error) => match translate(&error) {
+                EngineError::NotFound => Ok(false),
+                other => Err(other),
+            },
+        }
+    }
+
+    fn pull(&self, image: &str) -> PullStream {
+        let inner = self.inner.clone();
+        let (repository, tag) = split_image(image, None);
+        stream::once(async move { inner.docker().await })
+            .flat_map(move |docker| match docker {
+                Ok(docker) => {
+                    // Un téléchargement dure des minutes : la borne est celle du déploiement (30 minutes),
+                    // pas les 10 s des lectures. L'appelant l'arrête avant, ou l'abandonne (annulation).
+                    let docker = docker.with_timeout(Duration::from_secs(DEPLOY_TIMEOUT_S));
+                    let options = CreateImageOptionsBuilder::default()
+                        .from_image(&repository)
+                        .tag(&tag)
+                        .build();
+                    docker
+                        .create_image(Some(options), None, None)
+                        .scan(PullTracker::new(), |tracker, item| {
+                            let out = match item {
+                                Ok(info) => {
+                                    layer_event(&info).map(|event| Ok(tracker.apply(event)))
+                                }
+                                Err(error) => Some(Err(translate_pull(&error))),
+                            };
+                            futures_util::future::ready(Some(out))
+                        })
+                        .filter_map(futures_util::future::ready)
+                        .boxed()
+                }
+                Err(error) => stream::once(async move { Err(error) }).boxed(),
+            })
+            .boxed()
+    }
+
+    async fn create(&self, plan: &ContainerPlan) -> Result<String, EngineError> {
+        let docker = self.inner.docker().await?;
+        let options = CreateContainerOptionsBuilder::default()
+            .name(&plan.name)
+            .build();
+        docker
+            .create_container(Some(options), create_body(plan))
+            .await
+            .map(|created| created.id)
+            .map_err(|error| translate_create(&error))
+    }
+
+    async fn remove(&self, id: &str) -> Result<(), EngineError> {
+        let docker = self.inner.docker().await?;
+        let options = RemoveContainerOptionsBuilder::default()
+            .v(true)
+            .force(true)
+            .build();
+        match docker.remove_container(id, Some(options)).await {
+            Ok(()) => Ok(()),
+            Err(error) => match translate(&error) {
+                // Déjà parti : le but est atteint.
+                EngineError::NotFound => Ok(()),
+                other => Err(other),
+            },
+        }
+    }
+
+    async fn info(&self) -> Result<EngineInfo, EngineError> {
+        let docker = self.inner.docker().await?;
+        let info = docker.info().await.map_err(|error| translate(&error))?;
+        Ok(EngineInfo {
+            cpus: info
+                .ncpu
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or_default(),
+            memory_bytes: info
+                .mem_total
+                .and_then(|n| u64::try_from(n).ok())
+                .unwrap_or_default(),
+            storage_dir: info
+                .docker_root_dir
+                .filter(|dir| dir.starts_with('/') && !dir.contains('\0')),
+        })
+    }
+
     fn events(&self) -> EngineEvents {
         let inner = self.inner.clone();
         stream::once(async move { inner.docker().await })
@@ -565,6 +663,108 @@ impl ContainerEngine for BollardEngine {
                 Err(error) => stream::once(async move { Err(error) }).boxed(),
             })
             .boxed()
+    }
+}
+
+/// L'événement d'une couche que la progression suit, sinon `None`. Le texte du moteur est lu pour être
+/// reconnu, jamais gardé ni affiché.
+fn layer_event(info: &CreateImageInfo) -> Option<LayerEvent> {
+    let layer = info.id.clone().filter(|id| !id.is_empty())?;
+    let status = info.status.as_deref()?;
+    if status.starts_with("Downloading") {
+        let detail = info.progress_detail.as_ref()?;
+        return Some(LayerEvent::Downloading {
+            layer,
+            current: detail
+                .current
+                .and_then(|n| u64::try_from(n).ok())
+                .unwrap_or(0),
+            total: detail
+                .total
+                .and_then(|n| u64::try_from(n).ok())
+                .unwrap_or(0),
+        });
+    }
+    matches!(
+        status,
+        "Download complete" | "Pull complete" | "Already exists"
+    )
+    .then_some(LayerEvent::Done { layer })
+}
+
+/// Le corps de création d'un conteneur, depuis le plan fermé : rien d'autre que ce que [`ContainerPlan`] porte.
+/// Les dossiers montés sont des montages de type `bind` structurés (jamais une chaîne `source:cible` à
+/// découper), les ports n'ont pas d'adresse (tout le réseau, BR-DEPLOY-035), le redémarrage est
+/// `unless-stopped`, les limites sont posées, le swap est égal à la mémoire (la limite est réelle).
+fn create_body(plan: &ContainerPlan) -> ContainerCreateBody {
+    let mut port_bindings: PortMap = HashMap::new();
+    let mut exposed = Vec::new();
+    for port in &plan.ports {
+        let protocol = match port.protocol {
+            SpecProtocol::Tcp => "tcp",
+            SpecProtocol::Udp => "udp",
+            SpecProtocol::Sctp => "sctp",
+        };
+        let key = format!("{}/{protocol}", port.container_port);
+        if !exposed.contains(&key) {
+            exposed.push(key.clone());
+        }
+        port_bindings
+            .entry(key)
+            .or_insert_with(|| Some(Vec::new()))
+            .get_or_insert_with(Vec::new)
+            .push(PortBinding {
+                host_ip: None,
+                host_port: Some(port.host_port.to_string()),
+            });
+    }
+    let memory = i64::try_from(plan.memory_bytes).unwrap_or(i64::MAX);
+    let host_config = HostConfig {
+        port_bindings: (!port_bindings.is_empty()).then_some(port_bindings),
+        mounts: (!plan.binds.is_empty()).then(|| {
+            plan.binds
+                .iter()
+                .map(|bind| Mount {
+                    target: Some(bind.target.clone()),
+                    source: Some(bind.host_path.clone()),
+                    typ: Some(MountType::BIND),
+                    read_only: Some(bind.read_only),
+                    ..Mount::default()
+                })
+                .collect()
+        }),
+        restart_policy: Some(RestartPolicy {
+            name: Some(match plan.restart {
+                SpecRestart::No => RestartPolicyNameEnum::NO,
+                SpecRestart::Always => RestartPolicyNameEnum::ALWAYS,
+                SpecRestart::UnlessStopped => RestartPolicyNameEnum::UNLESS_STOPPED,
+                SpecRestart::OnFailure => RestartPolicyNameEnum::ON_FAILURE,
+            }),
+            maximum_retry_count: None,
+        }),
+        memory: Some(memory),
+        memory_swap: Some(memory),
+        nano_cpus: Some(i64::from(plan.cpu_millis) * 1_000_000),
+        ..HostConfig::default()
+    };
+    ContainerCreateBody {
+        image: Some(plan.image.clone()),
+        labels: Some(plan.labels.clone().into_iter().collect()),
+        env: (!plan.env.is_empty()).then(|| {
+            plan.env
+                .iter()
+                .map(|(name, value)| format!("{}={}", name.expose(), value.expose()))
+                .collect()
+        }),
+        cmd: plan
+            .command
+            .as_ref()
+            .map(|command| command.iter().map(|arg| arg.expose().to_owned()).collect()),
+        exposed_ports: (!exposed.is_empty()).then_some(exposed),
+        open_stdin: plan.stdin_open.then_some(true),
+        stop_timeout: plan.stop_grace_s.map(i64::from),
+        host_config: Some(host_config),
+        ..ContainerCreateBody::default()
     }
 }
 

@@ -84,6 +84,11 @@ enum Spec {
         target: String,
         choice: OperationChoice,
     },
+    /// Déployer cette image (HRT-68) : le nom, `dépôt:version`, l'empreinte de la partie non secrète, le nombre de
+    /// variables et la présence d'une commande sont signés ; jamais leurs valeurs.
+    Deploy {
+        body: Value,
+    },
 }
 
 fn role_wire(role: RoleName) -> &'static str {
@@ -135,6 +140,9 @@ impl Spec {
                 target,
                 choice: *choice,
             },
+            Self::Deploy { body } => AdminAct::service_deploy(
+                &serde_json::from_value(body.clone()).expect("corps du déploiement"),
+            ),
         }
     }
 
@@ -207,6 +215,7 @@ impl Spec {
                 format!("/operations/services/{target}/decision"),
                 json!({ "choice": choice.as_str() }),
             ),
+            Self::Deploy { body } => (Method::POST, "/deployments".into(), body.clone()),
         }
     }
 
@@ -290,6 +299,25 @@ impl Spec {
             Self::Cancel { .. } => vec![Self::Cancel {
                 target: "AUTRE-CIBLE".into(),
             }],
+            // Le nom, l'image, un port, un dossier, une limite : chacun est dans l'empreinte ou la cible signée ; le
+            // nombre de variables et la présence d'une commande aussi.
+            Self::Deploy { body } => {
+                let changed = |change: &dyn Fn(&mut Value)| {
+                    let mut other = body.clone();
+                    change(&mut other);
+                    Self::Deploy { body: other }
+                };
+                vec![
+                    changed(&|b| b["name"] = json!("autre-nom")),
+                    changed(&|b| b["image"] = json!("autre-image")),
+                    changed(&|b| b["tag"] = json!("2.0")),
+                    changed(&|b| b["ports"] = json!([{ "host_port": 9999, "container_port": 80 }])),
+                    changed(&|b| b["mounts"] = json!([{ "target": "/data" }])),
+                    changed(&|b| b["resources"]["memory_bytes"] = json!(268_435_456_u64)),
+                    changed(&|b| b["env"] = json!([{ "name": "A", "value": "v" }])),
+                    changed(&|b| b["command"] = json!("run")),
+                ]
+            }
             // L'identifiant ET le choix sont signés : changer l'un ou l'autre est un autre acte.
             Self::Decide { target, choice } => vec![
                 Self::Decide {
@@ -483,6 +511,20 @@ impl Bench {
                 Spec::Decide {
                     target: self.running_operation(true).await,
                     choice: OperationChoice::Continue,
+                }
+            }
+            ActKind::ServiceDeploy => {
+                // Le droit de gérer les services, et l'image déjà là : le déploiement va à son terme.
+                self.env.grant_services("marie").await;
+                self.engine.have_image("nginx:latest");
+                let n = self
+                    .services
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Spec::Deploy {
+                    body: json!({
+                        "name": format!("deploye-{n}"), "image": "nginx",
+                        "resources": { "cpu_millis": 500, "memory_bytes": 134_217_728_u64 }
+                    }),
                 }
             }
             other => {
@@ -690,10 +732,13 @@ async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_succe
         // (BR-UPDATE-024), pas par la requête.
         if matches!(
             kind,
-            ActKind::ServiceStart | ActKind::ServiceStop | ActKind::ServiceRestart
+            ActKind::ServiceStart
+                | ActKind::ServiceStop
+                | ActKind::ServiceRestart
+                | ActKind::ServiceDeploy
         ) {
-            // Démarrer, arrêter, redémarrer répondent `202` (HRT-64) : leur entrée réussie est écrite à la fin
-            // de l'action, à l'arrière-plan.
+            // Démarrer, arrêter, redémarrer répondent `202` (HRT-64), comme déployer (HRT-68) : leur entrée
+            // réussie est écrite à la fin de l'action, à l'arrière-plan.
             let started = std::time::Instant::now();
             while b.ok_entries(kind).await - before < 1 {
                 assert!(
@@ -2212,16 +2257,6 @@ async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_
     let key = "c_0123abcd";
     let declared: Vec<(ActKind, AdminAct<'_>)> = vec![
         (
-            ActKind::ServiceDeploy,
-            AdminAct::ServiceDeploy {
-                name: "jeu",
-                image: "x:1",
-                digest: [7; 32],
-                env_count: 0,
-                command: false,
-            },
-        ),
-        (
             ActKind::ServiceDelete,
             AdminAct::ServiceDelete {
                 target: key.into(),
@@ -2277,7 +2312,6 @@ async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_
         (Method::POST, "/backups"),
         (Method::DELETE, "/backups/01BK"),
         (Method::PUT, "/services/c_0123abcd/settings"),
-        (Method::POST, "/deployments"),
         (Method::POST, "/operations/services"),
     ];
     let before = b.snapshot().await;

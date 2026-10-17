@@ -10,7 +10,7 @@
 //! … is too new`) : c'est ce qui éprouve la négociation de version de l'adaptateur.
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -43,6 +43,14 @@ pub struct DaemonContainer {
     pub log_driver: String,
     /// Ce que le conteneur a écrit (HRT-66).
     pub logs: Vec<DaemonLog>,
+    /// `Config.Labels` (HRT-68).
+    pub labels: BTreeMap<String, String>,
+    /// `HostConfig.Memory`, en octets ; 0 : aucune limite.
+    pub memory: i64,
+    /// `HostConfig.NanoCpus` ; 0 : aucune limite.
+    pub nano_cpus: i64,
+    /// `HostConfig.Mounts` de type `bind` : (source, cible, lecture seule).
+    pub mounts: Vec<(String, String, bool)>,
 }
 
 /// Un message de journal du conteneur, comme le moteur le garde : une sortie, une heure, des octets.
@@ -104,6 +112,10 @@ impl DaemonContainer {
             tty: false,
             log_driver: "json-file".to_owned(),
             logs: Vec::new(),
+            labels: BTreeMap::new(),
+            memory: 0,
+            nano_cpus: 0,
+            mounts: Vec::new(),
         }
     }
 }
@@ -126,6 +138,10 @@ pub struct DaemonConfig {
     pub version_silent: bool,
     /// Statut de `GET /containers/json` (200, ou 403 comme un proxy qui refuse la liste).
     pub list_status: u16,
+    /// `GET /info` : processeurs, mémoire totale et dossier des images (HRT-68).
+    pub ncpu: i64,
+    pub mem_total: i64,
+    pub root_dir: String,
 }
 
 impl Default for DaemonConfig {
@@ -140,6 +156,9 @@ impl Default for DaemonConfig {
             ping_delay: std::time::Duration::ZERO,
             version_silent: false,
             list_status: 200,
+            ncpu: 8,
+            mem_total: 16 * 1024 * 1024 * 1024,
+            root_dir: "/var/lib/docker".into(),
         }
     }
 }
@@ -156,6 +175,44 @@ struct State {
     /// Combien de messages de journal le démon a écrits sur le socket, par conteneur (HRT-66) : un
     /// lecteur qui ne vide pas son socket arrête ce compte.
     served_logs: BTreeMap<String, usize>,
+    /// Les images présentes sur le serveur (HRT-68).
+    images: BTreeSet<String>,
+    /// Ce que le registre rend pour `dépôt:version`.
+    registry: BTreeMap<String, DaemonPull>,
+    /// Les dépôts connus du registre : une version absente d'un dépôt connu est `manifest unknown`.
+    known_repositories: BTreeSet<String>,
+    /// Combien de téléchargements le client a abandonnés avant la fin.
+    pull_aborts: usize,
+    /// Les corps de création reçus, tels quels.
+    created_bodies: Vec<Value>,
+}
+
+/// Ce que le registre du faux démon rend pour une image : des lignes de progression au format du moteur.
+#[derive(Debug, Clone)]
+pub struct DaemonPull {
+    pub lines: Vec<Value>,
+    /// Attente entre deux lignes, en millisecondes.
+    pub delay_ms: u64,
+}
+
+impl DaemonPull {
+    /// Une image à une couche, avec la progression que Docker écrit.
+    pub fn one_layer(delay_ms: u64) -> Self {
+        let layer = "5b1f0f0e2a7c";
+        Self {
+            lines: vec![
+                json!({ "status": "Pulling from library/busybox", "id": "1.36" }),
+                json!({ "status": "Pulling fs layer", "progressDetail": {}, "id": layer }),
+                json!({ "status": "Downloading", "progressDetail": { "current": 1000, "total": 4000 }, "progress": "[=>   ]", "id": layer }),
+                json!({ "status": "Downloading", "progressDetail": { "current": 4000, "total": 4000 }, "progress": "[====>]", "id": layer }),
+                json!({ "status": "Download complete", "progressDetail": {}, "id": layer }),
+                json!({ "status": "Extracting", "progressDetail": { "current": 4000, "total": 4000 }, "id": layer }),
+                json!({ "status": "Pull complete", "progressDetail": {}, "id": layer }),
+                json!({ "status": "Status: Downloaded newer image for busybox:1.36" }),
+            ],
+            delay_ms,
+        }
+    }
 }
 
 pub struct FakeDaemon {
@@ -192,6 +249,11 @@ impl FakeDaemon {
             vanished: Default::default(),
             requests: Vec::new(),
             served_logs: BTreeMap::new(),
+            images: BTreeSet::new(),
+            registry: BTreeMap::new(),
+            known_repositories: BTreeSet::new(),
+            pull_aborts: 0,
+            created_bodies: Vec::new(),
         }));
         let (events, _) = broadcast::channel(256);
         let connections: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::default();
@@ -301,6 +363,43 @@ impl FakeDaemon {
     pub fn requests(&self) -> Vec<String> {
         self.lock().requests.clone()
     }
+
+    /// L'image `dépôt:version` est déjà sur le serveur.
+    pub fn have_image(&self, image: &str) {
+        self.lock().images.insert(image.to_owned());
+    }
+
+    pub fn forget_image(&self, image: &str) {
+        self.lock().images.remove(image);
+    }
+
+    pub fn has_image(&self, image: &str) -> bool {
+        self.lock().images.contains(image)
+    }
+
+    /// Le registre rend cette image quand on la demande ; son dépôt devient connu.
+    pub fn publish_image(&self, image: &str, pull: DaemonPull) {
+        let mut state = self.lock();
+        if let Some((repository, _)) = image.rsplit_once(':') {
+            state.known_repositories.insert(repository.to_owned());
+        }
+        state.registry.insert(image.to_owned(), pull);
+    }
+
+    /// Combien de téléchargements le client a abandonnés avant leur fin.
+    pub fn pull_aborts(&self) -> usize {
+        self.lock().pull_aborts
+    }
+
+    /// Les corps de création reçus, tels que le moteur les a lus.
+    pub fn created_bodies(&self) -> Vec<Value> {
+        self.lock().created_bodies.clone()
+    }
+
+    /// Ce conteneur, tel que le démon le tient.
+    pub fn container(&self, id: &str) -> Option<DaemonContainer> {
+        self.lock().containers.get(id).cloned()
+    }
 }
 
 /// Une réponse : statut, type de contenu, corps, en-têtes en plus.
@@ -323,8 +422,10 @@ fn json_reply(status: u16, body: Value) -> Reply {
 fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        201 => "Created",
         204 => "No Content",
         304 => "Not Modified",
+        409 => "Conflict",
         500 => "Internal Server Error",
         400 => "Bad Request",
         403 => "Forbidden",
@@ -350,7 +451,29 @@ async fn handle(
             return;
         }
     }
-    let text = String::from_utf8_lossy(&head).into_owned();
+    let header_end = head
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map_or(head.len(), |at| at + 4);
+    let text = String::from_utf8_lossy(&head[..header_end]).into_owned();
+    // Le corps de la requête (création d'un conteneur) : `Content-Length` octets après les en-têtes.
+    let length = text
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    let mut body_bytes = head[header_end..].to_vec();
+    while body_bytes.len() < length && body_bytes.len() < 1024 * 1024 {
+        match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => body_bytes.extend_from_slice(&chunk[..read]),
+        }
+    }
     let request_line = text.lines().next().unwrap_or_default();
     let mut parts = request_line.split_whitespace();
     let (method, target) = (
@@ -391,6 +514,39 @@ async fn handle(
     {
         let reply = order(&state, &events, id, verb, &query).await;
         write_reply(&mut stream, reply).await;
+        return;
+    }
+    // Créer, supprimer, récupérer (HRT-68).
+    if method == "POST" && route == "/containers/create" {
+        let body: Value = serde_json::from_slice(&body_bytes).unwrap_or(Value::Null);
+        let reply = create_container(&state, &events, &query, &body);
+        write_reply(&mut stream, reply).await;
+        return;
+    }
+    if method == "DELETE"
+        && let Some(id) = route.strip_prefix("/containers/")
+        && !id.contains('/')
+    {
+        let removed = state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .containers
+            .remove(id)
+            .is_some();
+        let reply = if removed {
+            announce(&events, id, "destroy");
+            empty_reply(204)
+        } else {
+            json_reply(
+                404,
+                json!({ "message": format!("No such container: {id}") }),
+            )
+        };
+        write_reply(&mut stream, reply).await;
+        return;
+    }
+    if method == "POST" && route == "/images/create" {
+        pull_image(stream, state.clone(), query).await;
         return;
     }
     if method != "GET" {
@@ -606,6 +762,25 @@ fn route_reply(state: &State, config: &DaemonConfig, route: &str) -> Reply {
                 "KernelVersion": "6.1.0-13-amd64", "BuildTime": "2023-10-26T09:08:01.000000000+00:00"
             }),
         ),
+        "/info" => json_reply(
+            200,
+            json!({
+                "ID": "FAKE", "Containers": state.containers.len(), "NCPU": config.ncpu,
+                "MemTotal": config.mem_total, "DockerRootDir": config.root_dir,
+                "ServerVersion": config.engine_version, "OSType": "linux", "Architecture": "x86_64"
+            }),
+        ),
+        image if image.starts_with("/images/") && image.ends_with("/json") => {
+            let name = &image["/images/".len()..image.len() - "/json".len()];
+            if state.images.contains(name) {
+                json_reply(
+                    200,
+                    json!({ "Id": format!("sha256:{}", "0123456789abcdef".repeat(4)), "RepoTags": [name] }),
+                )
+            } else {
+                json_reply(404, json!({ "message": format!("No such image: {name}") }))
+            }
+        }
         "/containers/json" if config.list_status != 200 => json_reply(
             config.list_status,
             json!({ "message": "access denied by authorization plugin" }),
@@ -647,7 +822,7 @@ fn summary(c: &DaemonContainer) -> Value {
         "Command": "sleep 300", "Created": 1_791_882_000,
         "Ports": c.publish.map(|(host, container)| vec![json!({
             "IP": "0.0.0.0", "PrivatePort": container, "PublicPort": host, "Type": "tcp" })]).unwrap_or_default(),
-        "Labels": {}, "State": c.status, "Status": c.status,
+        "Labels": c.labels, "State": c.status, "Status": c.status,
         "HostConfig": { "NetworkMode": "default" },
         "Mounts": []
     })
@@ -689,13 +864,17 @@ fn inspect(c: &DaemonContainer) -> Value {
             "NetworkMode": "default",
             "RestartPolicy": { "Name": c.restart, "MaximumRetryCount": 0 },
             "AutoRemove": false,
+            "Memory": c.memory, "NanoCpus": c.nano_cpus,
             "PortBindings": bindings,
             "LogConfig": { "Type": c.log_driver, "Config": {} }
         },
-        "Mounts": [],
+        "Mounts": c.mounts.iter().map(|(source, target, read_only)| json!({
+            "Type": "bind", "Source": source, "Destination": target,
+            "Mode": if *read_only { "ro" } else { "rw" }, "RW": !read_only, "Propagation": "rprivate"
+        })).collect::<Vec<_>>(),
         "Config": {
             "Hostname": &c.id[..12], "Image": c.image, "Env": c.env,
-            "Cmd": c.cmd, "Labels": {}, "Tty": c.tty
+            "Cmd": c.cmd, "Labels": c.labels, "Tty": c.tty
         },
         "NetworkSettings": { "Ports": live }
     })
@@ -866,5 +1045,161 @@ async fn stream_logs(mut stream: TcpStream, state: Arc<Mutex<State>>, id: String
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
     }
     let _ = stream.write_all(b"0\r\n\r\n").await;
+    let _ = stream.shutdown().await;
+}
+
+/// `POST /containers/create?name=…` : comme le moteur. Une image absente répond `404 No such image`, un nom pris
+/// `409 Conflict`. Le corps lu (étiquettes, variables, commande, limites, ports, montages, règle de
+/// redémarrage) est ce que l'inspection rendra ensuite.
+fn create_container(
+    state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<String>,
+    query: &str,
+    body: &Value,
+) -> Reply {
+    let name = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("name="))
+        .unwrap_or_default()
+        .to_owned();
+    let image = body["Image"].as_str().unwrap_or_default().to_owned();
+    let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+    if !guard.images.contains(&image) {
+        return json_reply(404, json!({ "message": format!("No such image: {image}") }));
+    }
+    if let Some(existing) = guard.containers.values().find(|c| c.name == name) {
+        return json_reply(
+            409,
+            json!({ "message": format!(
+                "Conflict. The container name \"/{name}\" is already in use by container \"{}\". You have to remove (or rename) that container to be able to reuse that name.",
+                existing.id
+            ) }),
+        );
+    }
+    let mut container = DaemonContainer::new(&name, "created");
+    container.image = image;
+    container.cmd = body["Cmd"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    container.env = body["Env"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    container.labels = body["Labels"]
+        .as_object()
+        .map(|labels| {
+            labels
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let host = &body["HostConfig"];
+    container.restart = host["RestartPolicy"]["Name"]
+        .as_str()
+        .unwrap_or("no")
+        .to_owned();
+    container.memory = host["Memory"].as_i64().unwrap_or(0);
+    container.nano_cpus = host["NanoCpus"].as_i64().unwrap_or(0);
+    container.publish = host["PortBindings"].as_object().and_then(|ports| {
+        ports.iter().find_map(|(key, bindings)| {
+            let container_port: u16 = key.split('/').next()?.parse().ok()?;
+            let host_port: u16 = bindings.get(0)?["HostPort"].as_str()?.parse().ok()?;
+            Some((host_port, container_port))
+        })
+    });
+    container.mounts = host["Mounts"]
+        .as_array()
+        .map(|mounts| {
+            mounts
+                .iter()
+                .filter(|m| m["Type"] == "bind")
+                .filter_map(|m| {
+                    Some((
+                        m["Source"].as_str()?.to_owned(),
+                        m["Target"].as_str()?.to_owned(),
+                        m["ReadOnly"].as_bool().unwrap_or(false),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let id = container.id.clone();
+    guard.containers.insert(id.clone(), container);
+    guard.created_bodies.push(body.clone());
+    drop(guard);
+    announce(events, &id, "create");
+    json_reply(201, json!({ "Id": id, "Warnings": [] }))
+}
+
+/// `POST /images/create?fromImage=…&tag=…` : des lignes de progression au format du moteur, puis l'image est là.
+/// Un registre qui ne connaît pas l'image répond `404 pull access denied` (privée ou introuvable), une version
+/// absente d'un dépôt connu `404 manifest unknown`. Un client qui coupe la connexion avant la fin est compté.
+async fn pull_image(mut stream: TcpStream, state: Arc<Mutex<State>>, query: String) {
+    let param = |name: &str| {
+        query
+            .split('&')
+            .find_map(|pair| pair.strip_prefix(&format!("{name}=")))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let repository = param("fromImage");
+    let tag = param("tag");
+    let reference = format!("{repository}:{tag}");
+    let found = {
+        let guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+        match guard.registry.get(&reference) {
+            Some(pull) => Ok(pull.clone()),
+            None if guard.known_repositories.contains(&repository) => Err(format!(
+                "manifest for {reference} not found: manifest unknown: manifest unknown"
+            )),
+            None => Err(format!(
+                "pull access denied for {repository}, repository does not exist or may require 'docker login': denied: requested access to the resource is denied"
+            )),
+        }
+    };
+    let pull = match found {
+        Ok(pull) => pull,
+        Err(message) => {
+            write_reply(&mut stream, json_reply(404, json!({ "message": message }))).await;
+            return;
+        }
+    };
+    let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+    if stream.write_all(head.as_bytes()).await.is_err() {
+        return;
+    }
+    for line in &pull.lines {
+        if pull.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(pull.delay_ms)).await;
+        }
+        if stream
+            .write_all(format!("{line}\n").as_bytes())
+            .await
+            .is_err()
+        {
+            state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pull_aborts += 1;
+            return;
+        }
+    }
+    state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .images
+        .insert(reference);
     let _ = stream.shutdown().await;
 }

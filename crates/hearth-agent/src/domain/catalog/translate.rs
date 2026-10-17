@@ -8,7 +8,8 @@
 //! identifiant, sa source est toujours `<racine de données>/<service>/<id>` (décidée par l'appelant).
 //!
 //! `ServiceSpecDraft` est un type minimal local : HRT-101 le remplace par le vrai `ServiceSpec` (ADR-0044) et
-//! branche alors le validateur du déploiement ordinaire (`DeploymentValidator`, ci-dessous).
+//! branche alors le validateur du déploiement ordinaire (`DeploymentValidator`, ci-dessous ; son implémentation
+//! est `domain::services::deploy::OrdinaryDeployment`, HRT-68).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -499,14 +500,15 @@ pub fn translate(fiche: &Fiche, request: &Request<'_>) -> Result<ServiceSpecDraf
 
 // ---- Validateur du déploiement ordinaire : l'interface attendue -----------------------------------------------
 
-/// Ce que le déploiement ordinaire (HRT-68, HRT-101) exige d'une description. Il n'existe pas encore dans
-/// `main` : cette interface est CELLE QU'ON ATTEND de lui, pour que la description d'une fiche soit refusée par
-/// le même validateur que celle d'un déploiement fait à la main. Aucune implémentation de complaisance ici.
+/// Ce que le déploiement ordinaire exige d'une description. Le vrai validateur existe depuis HRT-68 :
+/// `domain::services::deploy::OrdinaryDeployment`, qui applique les MÊMES fonctions que le déploiement fait à la
+/// main (nom et version de l'image, variables, ports, dossiers, commande), pour que la description d'une fiche
+/// soit refusée par les mêmes règles. HRT-101 le branche sur la traduction ; ce fichier n'en tient aucune copie.
 pub trait DeploymentValidator {
     fn validate(&self, spec: &ServiceSpecDraft) -> Result<(), String>;
 }
 
-/// Validateur absent : à remplacer par le vrai à HRT-101.
+/// Validateur absent : le remplaçant est `OrdinaryDeployment` (HRT-68) ; HRT-101 le branche.
 pub struct NotYetWired;
 
 impl DeploymentValidator for NotYetWired {

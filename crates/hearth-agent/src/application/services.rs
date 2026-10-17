@@ -47,8 +47,8 @@ use async_trait::async_trait;
 
 use crate::application::ports::{
     AdoptedRecord, AuditSink, Clock, ContainerEngine, ContainerRef, EngineError, EnvEntry,
-    HostDescription, HostEnvironment, MonotonicClock, ServiceIntents, ServiceRepo,
-    ServiceSupervisor, StopIntent, StoreError, SupervisedRecord, SupervisorError,
+    HostDescription, HostEnvironment, MonotonicClock, ServiceContainers, ServiceIntents,
+    ServiceRepo, ServiceSupervisor, StopIntent, StoreError, SupervisedRecord, SupervisorError,
 };
 use crate::domain::audit::{Actor, AdoptionCause, AuditAction, ClientName, Outcome, Target};
 use crate::domain::services::image::ImageName;
@@ -203,6 +203,15 @@ pub struct LifecycleTarget {
     pub adopted: bool,
 }
 
+/// Un déploiement en cours, tel que la liste le montre (HRT-68) : de quoi afficher une ligne, rien de secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Deploying {
+    name: String,
+    repository: String,
+    tag: String,
+    since: OffsetDateTime,
+}
+
 /// L'état complet : moteur et services (triés par nom sans tenir compte de la casse).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServicesSnapshot {
@@ -307,6 +316,12 @@ struct Inner {
     /// Propriétaire de chaque conteneur connu (`None` : lancé par personne qu'on sache voir). Cherché
     /// une fois par conteneur ; oublié avec lui.
     owners: HashMap<String, Option<UnitName>>,
+    /// Les conteneurs que l'agent a créés pour ses services (`service_containers`, HRT-68) : identifiant du
+    /// conteneur vers la clé `h_`. Le registre ne reconnaît un service « créé par Hearth » que par eux.
+    hearth_ids: HashMap<String, ServiceKey>,
+    /// Les déploiements en cours (HRT-68) : leur ligne « Déploiement en cours » tient la place du service tant
+    /// que son conteneur n'existe pas.
+    deploying: HashMap<ServiceKey, Deploying>,
     /// Ce que le superviseur dit de chaque unité connue.
     units: HashMap<UnitName, UnitLookup>,
     /// Lectures « introuvable, sans conteneur » consécutives par unité (`BR-ADOPT-017`) : l'adoption ne
@@ -409,8 +424,14 @@ fn better(candidate: &Observation, current: &Observation) -> bool {
 /// La clé du service d'un conteneur : `u_<unité>` s'il est lancé sous une unité, sinon `c_<id>`.
 fn key_of(
     owners: &HashMap<String, Option<UnitName>>,
+    hearth_ids: &HashMap<String, ServiceKey>,
     observation: &Observation,
 ) -> Option<ServiceKey> {
+    // Un conteneur que l'agent a créé et consigné est le service de Hearth dont il porte la clé `h_`. L'étiquette
+    // du conteneur n'y est pour rien : seule la consignation vaut preuve (ADR-0037, HRT-68).
+    if let Some(key) = hearth_ids.get(&observation.id) {
+        return Some(key.clone());
+    }
     match owners.get(&observation.id) {
         Some(Some(unit)) => Some(ServiceKey::for_unit(unit)),
         _ => ServiceKey::for_container(&observation.id),
@@ -517,6 +538,8 @@ pub struct ServicesRegistry {
     /// Les arrêts voulus, en base (HRT-64). Posé une fois par la racine de composition ; absent, ils ne sont
     /// retenus qu'en mémoire.
     intents: OnceLock<Arc<dyn ServiceIntents>>,
+    /// Les conteneurs créés par l'agent, en base (HRT-68). Posé une fois par la racine de composition.
+    created: OnceLock<Arc<dyn ServiceContainers>>,
     changes: broadcast::Sender<Arc<ServicesChange>>,
     /// Réveille la tâche (« Vérifier à nouveau »).
     wake: Notify,
@@ -609,6 +632,8 @@ impl ServicesRegistry {
                 read_failing: false,
                 tracking_lost: false,
                 owners: HashMap::new(),
+                hearth_ids: HashMap::new(),
+                deploying: HashMap::new(),
                 units: HashMap::new(),
                 gone_reads: HashMap::new(),
                 remembered: HashMap::new(),
@@ -625,6 +650,7 @@ impl ServicesRegistry {
             monotonic,
             audit: OnceLock::new(),
             intents: OnceLock::new(),
+            created: OnceLock::new(),
             changes,
             wake: Notify::new(),
         })
@@ -638,6 +664,11 @@ impl ServicesRegistry {
     /// Branche les arrêts voulus en base (une seule fois ; un second appel est sans effet).
     pub fn set_intents(&self, intents: Arc<dyn ServiceIntents>) {
         let _ = self.intents.set(intents);
+    }
+
+    /// Branche les conteneurs créés par l'agent, en base (une seule fois ; un second appel est sans effet).
+    pub fn set_containers(&self, containers: Arc<dyn ServiceContainers>) {
+        let _ = self.created.set(containers);
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -981,7 +1012,7 @@ impl ServicesRegistry {
                 }
             }
             for observation in listing.observations {
-                let key = key_of(&inner.owners, &observation);
+                let key = key_of(&inner.owners, &inner.hearth_ids, &observation);
                 note_start(&mut inner.windows, key, &observation);
                 inner.containers.insert(observation.id.clone(), observation);
             }
@@ -1046,7 +1077,7 @@ impl ServicesRegistry {
             for (id, result) in read {
                 match result {
                     Ok(Some(observation)) => {
-                        let key = key_of(&inner.owners, &observation);
+                        let key = key_of(&inner.owners, &inner.hearth_ids, &observation);
                         note_start(&mut inner.windows, key, &observation);
                         inner.containers.insert(observation.id.clone(), observation);
                     }
@@ -1124,7 +1155,7 @@ impl ServicesRegistry {
             let live: HashSet<ServiceKey> = inner
                 .containers
                 .values()
-                .filter_map(|observation| key_of(&inner.owners, observation))
+                .filter_map(|observation| key_of(&inner.owners, &inner.hearth_ids, observation))
                 .collect();
             for key in lapsed(&inner.adopted, &live) {
                 inner.lapse(key, AdoptionCause::ContainerGone);
@@ -1150,7 +1181,7 @@ impl ServicesRegistry {
             .containers
             .values()
             .filter(|observation| {
-                key_of(&inner.owners, observation).is_none_or(|key| {
+                key_of(&inner.owners, &inner.hearth_ids, observation).is_none_or(|key| {
                     matches!(visibility_of(&key, &inner.adopted), Visibility::Hidden)
                 })
             })
@@ -1169,7 +1200,7 @@ impl ServicesRegistry {
         Self::release_shared_units(inner);
         let mut chosen: HashMap<ServiceKey, Observation> = HashMap::new();
         for observation in inner.containers.values() {
-            let Some(key) = key_of(&inner.owners, observation) else {
+            let Some(key) = key_of(&inner.owners, &inner.hearth_ids, observation) else {
                 continue;
             };
             if chosen
@@ -1304,6 +1335,37 @@ impl ServicesRegistry {
                         status,
                         container_present: false,
                     }),
+                    adoption: None,
+                },
+            );
+        }
+        // Un déploiement en cours tient la place du service tant que son conteneur n'existe pas (HRT-68,
+        // BR-DEPLOY-024) : nom, image et version, jamais une variable ni la commande.
+        for (key, row) in &inner.deploying {
+            if target.contains_key(key) {
+                continue;
+            }
+            let mut observation = Observation::unreadable(key.as_str(), &row.name);
+            observation.run_state = RunState::Created;
+            observation.created_at = Some(row.since);
+            observation.image = ImageName {
+                reference: Some(row.repository.clone()),
+                tag: Some(row.tag.clone()),
+                short_id: String::new(),
+            };
+            target.insert(
+                key.clone(),
+                ServiceView {
+                    key: key.clone(),
+                    observation,
+                    derived: Derived {
+                        state: ServiceStateKind::Deploying,
+                        since: Some(row.since),
+                        never_started: true,
+                        exit_code: None,
+                    },
+                    restarts_10m: 0,
+                    supervision: None,
                     adoption: None,
                 },
             );
@@ -1724,6 +1786,79 @@ impl ServicesRegistry {
             .map(|observation| Self::holder_of(&inner, observation))
     }
 
+    /// Le conteneur qui publie ce port du serveur, arrêtés compris (HRT-68, BR-DEPLOY-008) : celui qui tourne
+    /// de préférence (il TIENT le port), sinon un conteneur arrêté (il le RÉSERVE). Un conteneur non géré
+    /// n'est jamais nommé (BR-ADOPT-022).
+    pub fn port_claim(
+        &self,
+        host_port: u16,
+        protocol: hearth_proto::api::deploy::DeployProtocol,
+    ) -> Option<crate::domain::services::ports::Claim> {
+        use crate::domain::services::ports::{Claim, Claimant};
+        let wanted = match protocol {
+            hearth_proto::api::deploy::DeployProtocol::Tcp => PortProtocol::Tcp,
+            hearth_proto::api::deploy::DeployProtocol::Udp => PortProtocol::Udp,
+        };
+        let inner = self.lock();
+        let mut best: Option<(bool, Claimant)> = None;
+        for observation in inner.containers.values() {
+            if !observation
+                .ports
+                .iter()
+                .any(|port| port.host_port == host_port && port.protocol == wanted)
+            {
+                continue;
+            }
+            let running = matches!(
+                observation.run_state,
+                RunState::Running | RunState::Restarting | RunState::Paused
+            );
+            let claimant = match Self::holder_of(&inner, observation) {
+                Holder::Service(name) => Claimant::Service(name),
+                Holder::Unmanaged => Claimant::Unmanaged,
+            };
+            if best.as_ref().is_none_or(|(held, _)| running && !held) {
+                best = Some((running, claimant));
+            }
+        }
+        best.map(|(running, claimant)| Claim { claimant, running })
+    }
+
+    /// Les limites déjà engagées sur la machine : des TOTAUX, jamais un nom (HRT-68, `GET /engine/capacity`).
+    pub fn committed(&self) -> hearth_proto::api::deploy::CommittedTotals {
+        use hearth_proto::api::deploy::CommittedTotals;
+        let inner = self.lock();
+        let mut totals = CommittedTotals::default();
+        for observation in inner.containers.values() {
+            let managed = key_of(&inner.owners, &inner.hearth_ids, observation)
+                .map(|key| visibility_of(&key, &inner.adopted))
+                .is_some_and(|visibility| !matches!(visibility, Visibility::Hidden));
+            let running = observation.run_state == RunState::Running;
+            for (committed, value) in [
+                (&mut totals.memory, observation.memory_limit_bytes),
+                (
+                    &mut totals.cpu_millis,
+                    observation.cpu_millis.map(u64::from),
+                ),
+            ] {
+                let Some(value) = value else { continue };
+                let (all, live) = if managed {
+                    (&mut committed.managed_all, &mut committed.managed_running)
+                } else {
+                    (
+                        &mut committed.unmanaged_all,
+                        &mut committed.unmanaged_running,
+                    )
+                };
+                *all = all.saturating_add(value);
+                if running {
+                    *live = live.saturating_add(value);
+                }
+            }
+        }
+        totals
+    }
+
     /// Qui porte ce nom de service, sans tenir compte de la casse (`BR-ADOPT-022` : « Ce nom est déjà
     /// pris », sans autre indication quand c'est un conteneur non adopté).
     pub fn name_holder(&self, name: &str) -> Option<Holder> {
@@ -1736,7 +1871,9 @@ impl ServicesRegistry {
     }
 
     fn holder_of(inner: &Inner, observation: &Observation) -> Holder {
-        match key_of(&inner.owners, observation).map(|key| visibility_of(&key, &inner.adopted)) {
+        match key_of(&inner.owners, &inner.hearth_ids, observation)
+            .map(|key| visibility_of(&key, &inner.adopted))
+        {
             Some(Visibility::Hearth | Visibility::Adopted(_)) => {
                 Holder::Service(observation.name.clone())
             }
@@ -1797,7 +1934,7 @@ impl ServicesRegistry {
         }
         let mut chosen: HashMap<ServiceKey, Observation> = HashMap::new();
         for observation in inner.containers.values() {
-            let Some(key) = key_of(&inner.owners, observation) else {
+            let Some(key) = key_of(&inner.owners, &inner.hearth_ids, observation) else {
                 continue;
             };
             if !matches!(visibility_of(&key, &inner.adopted), Visibility::Hidden) {
@@ -1885,7 +2022,68 @@ impl ServicesRegistry {
         self.reload_adopted().await;
         self.load_remembered().await;
         self.load_intents().await;
+        self.load_created().await;
         self.poll_units().await;
+    }
+
+    /// Reprend les conteneurs que l'agent a créés pour ses services (HRT-68) : sans eux, un service créé par
+    /// Hearth redeviendrait, au redémarrage de l'agent, un conteneur hors Hearth caché.
+    async fn load_created(&self) {
+        let Some(created) = self.created.get() else {
+            return;
+        };
+        match created.all().await {
+            Ok(records) => {
+                let mut inner = self.lock();
+                for (id, key) in records {
+                    inner.hearth_ids.insert(id, key);
+                }
+                self.commit(&mut inner);
+            }
+            Err(error) => tracing::warn!(%error, "conteneurs créés par l'agent illisibles"),
+        }
+    }
+
+    /// L'agent vient de créer ce conteneur pour ce service : il est « créé par Hearth » (HRT-68). L'appelant l'a
+    /// déjà consigné en base. La ligne « Déploiement en cours » du service cède la place au conteneur.
+    pub fn register_hearth_container(&self, key: &ServiceKey, container_id: &str) {
+        let mut inner = self.lock();
+        inner
+            .hearth_ids
+            .insert(container_id.to_owned(), key.clone());
+        self.commit(&mut inner);
+    }
+
+    /// Ce conteneur n'est plus (supprimé après un échec au démarrage, ou service supprimé).
+    pub fn forget_hearth_container(&self, container_id: &str) {
+        let mut inner = self.lock();
+        inner.hearth_ids.remove(container_id);
+        inner.containers.remove(container_id);
+        self.commit(&mut inner);
+    }
+
+    /// Un déploiement commence : « Déploiement en cours » apparaît dans la liste, pour tous les comptes, avec
+    /// son nom, son image et sa version, jamais ses variables ni sa commande (HRT-68, BR-DEPLOY-024).
+    pub fn begin_deploying(&self, key: &ServiceKey, name: &str, repository: &str, tag: &str) {
+        let mut inner = self.lock();
+        inner.deploying.insert(
+            key.clone(),
+            Deploying {
+                name: name.to_owned(),
+                repository: repository.to_owned(),
+                tag: tag.to_owned(),
+                since: self.clock.now(),
+            },
+        );
+        self.commit(&mut inner);
+    }
+
+    /// Le déploiement est fini (réussi, échoué ou annulé) : la ligne cède la place au service, ou disparaît.
+    pub fn end_deploying(&self, key: &ServiceKey) {
+        let mut inner = self.lock();
+        if inner.deploying.remove(key).is_some() {
+            self.commit(&mut inner);
+        }
     }
 
     /// Reprend les arrêts voulus depuis Hearth qu'un démarrage précédent avait retenus (HRT-64).

@@ -217,6 +217,14 @@ impl ServiceSpecs {
         )))
     }
 
+    /// Le service qui porte ce nom (déjà replié) dans sa révision courante (HRT-68, BR-DEPLOY-004).
+    pub async fn holder_of_name(
+        &self,
+        folded: &str,
+    ) -> Result<Option<ServiceKey>, SpecServiceError> {
+        Ok(self.repo.holder_of_name(folded).await?)
+    }
+
     /// Les numéros de révision gardés.
     pub async fn revisions(&self, key: &ServiceKey) -> Result<Vec<u32>, SpecServiceError> {
         Ok(self.repo.revisions(key).await?)

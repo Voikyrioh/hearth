@@ -17,6 +17,7 @@ mod fingerprint;
 mod gpu_probe;
 mod host_environment;
 mod host_folders;
+mod host_ports;
 mod id_gen;
 mod identity_store;
 mod install_host;
@@ -31,6 +32,7 @@ mod proof;
 mod safe_fs;
 mod secret_sealer;
 mod security_feed;
+mod service_containers;
 mod service_intents;
 mod service_manager;
 mod service_op_tx;
@@ -54,14 +56,15 @@ pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, LogQuery,
-    LogStream, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EngineInfo, EnvEntry, Listing,
+    LogQuery, LogStream, PullProgress, PullStream, Unreadable,
 };
 pub use device_repo::{DeviceRepo, DeviceTx};
 pub use fingerprint::{FingerprintSecretError, FingerprintSecretStore, RequestFingerprinter};
 pub use gpu_probe::GpuProbe;
 pub use host_environment::{HostDescription, HostEnvironment};
 pub use host_folders::HostFolders;
+pub use host_ports::HostPorts;
 pub use id_gen::IdGen;
 pub use identity_store::{IdentityError, IdentityStore, PublicIdentity};
 pub use install_host::{
@@ -84,6 +87,7 @@ pub use secret_sealer::{
     KeyCheckRepo, KeyRead, KeyStoreError, SealError, SealerFactory, SecretSealer, ServicesKeyStore,
 };
 pub use security_feed::SecurityFeed;
+pub use service_containers::ServiceContainers;
 pub use service_intents::{ServiceIntents, StopIntent};
 pub use service_manager::{ServiceError, ServiceKind, ServiceManager, ServiceSpec, ServiceState};
 pub use service_op_tx::ServiceOpTx;

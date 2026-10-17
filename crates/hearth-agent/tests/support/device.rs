@@ -322,6 +322,10 @@ pub fn act_of<'a>(
                 .unwrap_or_else(|| (*key).to_owned())
                 .into(),
         },
+        // Déployer (HRT-68) : la même fonction que l'agent et la liaison cliente.
+        ("POST", ["deployments"]) => hearth_proto::admin_act::AdminAct::service_deploy(
+            &serde_json::from_value(body.clone()).expect("corps du déploiement"),
+        ),
         // Annuler et décider une opération de service (HRT-144) : l'identifiant du chemin, le choix du corps.
         ("DELETE", ["operations", "services", id]) => AdminAct::OperationCancel { target: id },
         ("POST", ["operations", "services", id, "decision"]) => AdminAct::OperationDecide {

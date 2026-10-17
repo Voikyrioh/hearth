@@ -187,7 +187,17 @@ impl OrderFailure {
             EngineError::Unreachable | EngineError::Denied => Self::Unreachable,
             EngineError::Timeout => Self::TimedOut,
             EngineError::PortInUse => Self::PortInUse,
-            EngineError::Refused | EngineError::Unsupported => Self::Refused,
+            EngineError::Refused
+            | EngineError::Unsupported
+            // Les erreurs de récupération et de création n'arrivent pas d'un ordre de cycle de vie.
+            | EngineError::ImageNotFound
+            | EngineError::TagNotFound
+            | EngineError::ImagePrivateOrMissing
+            | EngineError::RegistryUnreachable
+            | EngineError::RegistryRateLimited
+            | EngineError::PlatformMismatch
+            | EngineError::DiskFull
+            | EngineError::NameTaken => Self::Refused,
         }
     }
 
@@ -873,7 +883,7 @@ fn journal<T>(result: Result<T, OpError>, what: &'static str) {
 }
 
 /// La raison du journal d'activité d'une cause d'opération (liste fermée, `BR-LIFE-018`).
-fn reason_of(cause: Cause) -> Reason {
+pub(crate) fn reason_of(cause: Cause) -> Reason {
     match cause {
         Cause::PortInUse => Reason::PortInUse,
         Cause::StoppedRightAfterStart => Reason::StoppedRightAfterStart,
@@ -883,6 +893,15 @@ fn reason_of(cause: Cause) -> Reason {
         Cause::Timeout => Reason::Timeout,
         Cause::Interrupted => Reason::Interrupted,
         Cause::ServiceNotFound => Reason::ServiceNotFound,
+        Cause::CancelledByAccount => Reason::CancelledByAccount,
+        Cause::ImageNotFound => Reason::ImageNotFound,
+        Cause::TagNotFound => Reason::TagNotFound,
+        Cause::ImagePrivateOrMissing => Reason::ImagePrivateOrMissing,
+        Cause::RegistryUnreachable => Reason::RegistryUnreachable,
+        Cause::RegistryRateLimited => Reason::RegistryRateLimited,
+        Cause::PlatformMismatch => Reason::PlatformMismatch,
+        Cause::DiskFull => Reason::DiskFull,
+        Cause::NameTaken => Reason::NameTaken,
         Cause::NotExecuted
         | Cause::RunsWithPrevious
         | Cause::RunsWithNew
@@ -891,7 +910,6 @@ fn reason_of(cause: Cause) -> Reason {
         | Cause::TwoStates
         | Cause::StateUnknown
         | Cause::DecisionExpired
-        | Cause::CancelledByAccount
         | Cause::DecidedByAccount
         | Cause::ForcedStop => Reason::Internal,
     }

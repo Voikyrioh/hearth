@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::domain::secret::Secret;
 use crate::domain::services::logs::LogLine;
+use crate::domain::services::plan::ContainerPlan;
 use crate::domain::services::{EngineProbe, Hidden, Observation};
 
 /// Erreur d'un échange avec le moteur. Le texte du moteur n'en fait JAMAIS partie : il est traduit
@@ -36,6 +37,30 @@ pub enum EngineError {
     /// BR-LIFE-006). Reconnu dans le texte du moteur par l'adaptateur, qui ne le fait jamais sortir.
     #[error("un port demandé par le conteneur est déjà pris")]
     PortInUse,
+    /// Récupérer une image (HRT-68, BR-DEPLOY-017) : l'image n'existe pas.
+    #[error("image introuvable")]
+    ImageNotFound,
+    /// L'image existe, pas cette version.
+    #[error("version introuvable")]
+    TagNotFound,
+    /// Le registre répond la même chose pour une image privée et pour une image inconnue.
+    #[error("image privée ou introuvable")]
+    ImagePrivateOrMissing,
+    /// Le registre est injoignable depuis le serveur.
+    #[error("registre injoignable")]
+    RegistryUnreachable,
+    /// La limite de téléchargements du registre est atteinte.
+    #[error("limite du registre atteinte")]
+    RegistryRateLimited,
+    /// L'image n'existe pas pour l'architecture du serveur.
+    #[error("architecture incompatible")]
+    PlatformMismatch,
+    /// Le disque du moteur est plein.
+    #[error("disque plein")]
+    DiskFull,
+    /// Un conteneur porte déjà ce nom (créer).
+    #[error("nom déjà pris")]
+    NameTaken,
 }
 
 impl EngineError {
@@ -83,6 +108,25 @@ pub struct EnvEntry {
 /// Le flux des événements. Sa FIN (ou une erreur) veut dire que le moteur est à revérifier : sonde
 /// immédiate puis relecture complète.
 pub type EngineEvents = Pin<Box<dyn Stream<Item = Result<EngineEvent, EngineError>> + Send>>;
+
+/// La progression d'une récupération d'image, agrégée sur toutes les couches (HRT-68).
+pub use crate::domain::services::pull::PullProgress;
+
+/// La récupération d'une image : une progression à chaque événement du moteur ; la FIN du flux veut dire que
+/// l'image est là ; une erreur la termine. L'ABANDONNER ferme la connexion au moteur : le téléchargement
+/// s'arrête et rien n'est créé (annulation, BR-DEPLOY-016).
+pub type PullStream = Pin<Box<dyn Stream<Item = Result<PullProgress, EngineError>> + Send>>;
+
+/// Ce que le moteur dit de la machine (BR-DEPLOY-038, BR-DEPLOY-018). Lu sur la machine, pas dans un conteneur.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineInfo {
+    /// Processeurs logiques.
+    pub cpus: u32,
+    /// Mémoire totale, en octets.
+    pub memory_bytes: u64,
+    /// Le dossier où le moteur range ses images (`DockerRootDir`), pour lire l'espace libre.
+    pub storage_dir: Option<String>,
+}
 
 /// Ce que la lecture des journaux d'un conteneur demande au moteur (HRT-66).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,4 +201,26 @@ pub trait ContainerEngine: Send + Sync {
     /// Arrête (avec le même délai de grâce) puis démarre, d'un seul ordre du moteur. Un démarrage qui
     /// échoue après l'arrêt laisse le conteneur arrêté et rend l'erreur du démarrage (`PortInUse`…).
     async fn restart(&self, id: &str, grace: Duration) -> Result<(), EngineError>;
+
+    /// L'image `dépôt:version` est-elle déjà sur le serveur (HRT-68, BR-DEPLOY-018) ? Si oui, elle est
+    /// utilisée telle quelle, sans interroger le registre.
+    async fn image_present(&self, image: &str) -> Result<bool, EngineError>;
+
+    /// Récupère l'image (HRT-68). Voir [`PullStream`]. Les échecs sont typés (`ImageNotFound`,
+    /// `TagNotFound`, `ImagePrivateOrMissing`, `RegistryUnreachable`, `RegistryRateLimited`,
+    /// `PlatformMismatch`, `DiskFull`) et ne portent jamais le texte du moteur. Aucun identifiant de registre
+    /// n'est transmis : les registres privés sont hors de ce lot (BR-DEPLOY-017).
+    fn pull(&self, image: &str) -> PullStream;
+
+    /// Crée le conteneur d'un service depuis le plan fermé, SANS le démarrer (HRT-68). Rend son identifiant.
+    /// `NameTaken` si un conteneur porte déjà ce nom ; `NotFound` si l'image a disparu entre-temps.
+    async fn create(&self, plan: &ContainerPlan) -> Result<String, EngineError>;
+
+    /// Supprime un conteneur arrêté ou jamais démarré, volumes anonymes compris, sans toucher aux dossiers
+    /// montés. Absent : réussit (le but est atteint). Sert à ne laisser aucun conteneur orphelin après un
+    /// échec au démarrage (BR-DEPLOY-019).
+    async fn remove(&self, id: &str) -> Result<(), EngineError>;
+
+    /// Les bornes de la machine et le dossier des images (HRT-68).
+    async fn info(&self) -> Result<EngineInfo, EngineError>;
 }

@@ -1203,6 +1203,10 @@ async fn the_engine_socket_is_drained_whatever_the_client_does_with_the_real_ada
             timings: fast_timings(),
             log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
             lifecycle: support::engine::fast_lifecycle(),
+            host_ports: std::sync::Arc::new(support::fake_host::FakeHostPorts::new()),
+            free_space: std::sync::Arc::new(support::fake_host::FakeFreeSpace::new()),
+            deploy: support::engine::fast_deploy(),
+            safe_fs: None,
         },
     )
     .await;
@@ -1416,6 +1420,10 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
             timings: fast_timings(),
             log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
             lifecycle: support::engine::fast_lifecycle(),
+            host_ports: std::sync::Arc::new(support::fake_host::FakeHostPorts::new()),
+            free_space: std::sync::Arc::new(support::fake_host::FakeFreeSpace::new()),
+            deploy: support::engine::fast_deploy(),
+            safe_fs: None,
         },
     )
     .await;

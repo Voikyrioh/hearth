@@ -313,7 +313,7 @@ fn lifecycle_error(error: LifecycleError) -> ApiError {
 }
 
 /// La clé d'opération du client (rejeu après coupure), bornée ; absente, vide (le journal la garde telle quelle).
-fn operation_key(headers: &HeaderMap) -> String {
+pub(super) fn operation_key(headers: &HeaderMap) -> String {
     headers
         .get(IDEMPOTENCY_KEY)
         .and_then(|value| value.to_str().ok())

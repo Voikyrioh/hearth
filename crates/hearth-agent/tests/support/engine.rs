@@ -61,6 +61,19 @@ pub fn parts_supervised(
         // Les tests qui ne portent pas sur le plafond par compte ni sur le frein les détendent.
         log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
         lifecycle: fast_lifecycle(),
+        host_ports: Arc::new(super::fake_host::FakeHostPorts::new()),
+        free_space: Arc::new(super::fake_host::FakeFreeSpace::new()),
+        deploy: fast_deploy(),
+        safe_fs: Some(Arc::new(super::fake_safe_fs::FakeSafeFs::new())),
+    }
+}
+
+/// La surveillance qui suit un déploiement : 10 s devient 300 ms (HRT-68).
+pub fn fast_deploy() -> hearth_agent::application::deployments::DeployTimings {
+    hearth_agent::application::deployments::DeployTimings {
+        deadline: Duration::from_secs(60),
+        watch: Duration::from_millis(300),
+        poll: Duration::from_millis(20),
     }
 }
 
