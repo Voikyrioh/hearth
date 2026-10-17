@@ -58,6 +58,7 @@ pub(crate) fn service_state(state: ServiceStateKind) -> WireState {
         ServiceStateKind::RestartLoop => WireState::RestartLoop,
         ServiceStateKind::Paused => WireState::Paused,
         ServiceStateKind::Stopping => WireState::Stopping,
+        ServiceStateKind::Deploying => WireState::Deploying,
         ServiceStateKind::Unknown => WireState::Unknown,
     }
 }
@@ -312,6 +313,8 @@ mod tests {
             env_omitted: 0,
             command: Some(vec![Hidden::new("run"), Hidden::new("--flag=SENTINEL")]),
             stop_timeout_s: None,
+            memory_limit_bytes: None,
+            cpu_millis: None,
             tty: false,
             log_driver: None,
             hearth_key: None,

@@ -66,11 +66,66 @@ pub async fn state_with_engine(
     state
 }
 
+/// Ce que les tests du déploiement règlent : les sockets du serveur, l'espace libre, les dossiers de données
+/// (en mémoire) et les délais (HRT-68).
+pub struct DeployRig {
+    pub host_ports: Arc<super::fake_host::FakeHostPorts>,
+    pub free_space: Arc<super::fake_host::FakeFreeSpace>,
+    pub safe_fs: Arc<super::fake_safe_fs::FakeSafeFs>,
+    pub timings: hearth_agent::application::deployments::DeployTimings,
+}
+
+impl DeployRig {
+    pub fn new() -> Self {
+        Self {
+            host_ports: Arc::new(super::fake_host::FakeHostPorts::new()),
+            free_space: Arc::new(super::fake_host::FakeFreeSpace::new()),
+            safe_fs: Arc::new(super::fake_safe_fs::FakeSafeFs::new()),
+            // La surveillance de 10 s devient 300 ms.
+            timings: hearth_agent::application::deployments::DeployTimings {
+                deadline: std::time::Duration::from_secs(60),
+                watch: std::time::Duration::from_millis(300),
+                poll: std::time::Duration::from_millis(20),
+            },
+        }
+    }
+}
+
+impl Default for DeployRig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Comme `state_with_engine`, avec ce décor de déploiement.
+pub async fn state_with_deploy(
+    env: &Env,
+    update: Arc<hearth_agent::application::update::UpdateService>,
+    engine: Arc<FakeEngine>,
+    rig: &DeployRig,
+) -> AppState {
+    let state = state_over_rig(env, update, engine, true, rig);
+    state.services.recheck().await;
+    state.services.reload_adopted().await;
+    state.services.resync().await.expect("liste des conteneurs");
+    state
+}
+
 fn state_over(
     env: &Env,
     update: Arc<hearth_agent::application::update::UpdateService>,
     engine: Arc<FakeEngine>,
     engine_enabled: bool,
+) -> AppState {
+    state_over_rig(env, update, engine, engine_enabled, &DeployRig::new())
+}
+
+fn state_over_rig(
+    env: &Env,
+    update: Arc<hearth_agent::application::update::UpdateService>,
+    engine: Arc<FakeEngine>,
+    engine_enabled: bool,
+    rig: &DeployRig,
 ) -> AppState {
     // Avec la VRAIE base des adoptions et des arrêts voulus : `reload_adopted` lit ce que `Env::adopt` écrit, et
     // piloter un service (HRT-64) demande un service publié.
@@ -95,6 +150,47 @@ fn state_over(
         Arc::new(hearth_agent::infrastructure::ids::UlidGen),
         Arc::new(hearth_agent::infrastructure::created_objects::FsCreatedObjects::new([])),
     ));
+    // Les conteneurs que l'agent crée sont consignés dans la vraie base (HRT-68).
+    let repo = Arc::new(
+        hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
+    );
+    services.set_containers(repo.clone());
+    let spec_repo = Arc::new(hearth_agent::infrastructure::sqlite::SqliteSpecRepo::new(
+        env.db.pool().clone(),
+    ));
+    let specs = Arc::new(hearth_agent::application::service_specs::ServiceSpecs::new(
+        spec_repo.clone(),
+        Arc::new(hearth_agent::application::secret_vault::SecretVault::new(
+            Arc::new(
+                hearth_agent::infrastructure::services_key::FileServicesKeyStore::new(
+                    env.dir.path(),
+                ),
+            ),
+            spec_repo,
+            Arc::new(hearth_agent::infrastructure::sealer::RingSealerFactory),
+        )),
+        env.clock.clone(),
+    ));
+    let deployments = hearth_agent::application::deployments::Deployments::new(
+        services.clone(),
+        ops.clone(),
+        specs,
+        engine.clone(),
+        rig.host_ports.clone(),
+        rig.free_space.clone(),
+        rig.safe_fs.clone(),
+        repo,
+        env.audit_sink.clone(),
+        Arc::new(hearth_agent::infrastructure::ids::UlidGen),
+        env.clock.clone(),
+        hearth_agent::application::deployments::DeployContext {
+            install_id: "install-test".into(),
+            agent_port: 7341,
+            services_root: "/var/lib/hearth/services".into(),
+            folders: None,
+            timings: rig.timings,
+        },
+    );
     let service_lifecycle = hearth_agent::application::service_lifecycle::ServiceLifecycle::new(
         services.clone(),
         ops.clone(),
@@ -121,6 +217,7 @@ fn state_over(
     AppState {
         service_ops,
         service_lifecycle,
+        deployments,
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),
             false,

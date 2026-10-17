@@ -1413,6 +1413,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         env.adopt(&key, name, "marie").await;
         drive_keys.insert(verb, key);
     }
+    // L'image du déploiement est déjà sur le serveur (HRT-68) : rien à récupérer, le déploiement réussit.
+    engine.have_image("nginx:latest");
     let state = state_with_engine(
         &env,
         support::update::Rig::new(&env, false, false).service,
@@ -1667,6 +1669,20 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 )
                 .await
             }
+            // Déployer une image (HRT-68) : `202`, et UNE entrée réussie, écrite à la fin du déploiement à
+            // l'arrière-plan (attendue plus bas).
+            ("POST", "/deployments") => {
+                api.act(
+                    &marie,
+                    Method::POST,
+                    "/deployments",
+                    json!({
+                        "name": "balayage", "image": "nginx",
+                        "resources": { "cpu_millis": 500, "memory_bytes": 134_217_728_u64 }
+                    }),
+                )
+                .await
+            }
             // Annuler et décider une opération de service (HRT-144) : la réussite s'écrit sous l'action du
             // GENRE de l'opération, une seule entrée.
             ("DELETE", "/operations/services/{id}") => {
@@ -1757,6 +1773,18 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 assert!(
                     reply.status.is_success(),
                     "/engine/recheck : {:?}",
+                    reply.body
+                );
+                reads += 1;
+                continue;
+            }
+            // Les bornes de la machine (HRT-68) : une lecture ; le pilotage des services est coupé dans ce banc,
+            // donc `503 ENGINE_UNAVAILABLE` (le moteur n'est pas prêt) ; rien n'est écrit au journal.
+            "/engine/capacity" => {
+                let reply = api.get("/engine/capacity").token(&marie.token).send().await;
+                assert!(
+                    matches!(reply.status.as_u16(), 200 | 503),
+                    "/engine/capacity : {:?}",
                     reply.body
                 );
                 reads += 1;

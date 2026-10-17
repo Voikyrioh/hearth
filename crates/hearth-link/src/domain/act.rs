@@ -15,6 +15,7 @@ use hearth_proto::admin_act::{
     ActKind, AdminAct, Contract, ROUTES, RouteAct, decode_segment, is_service_key,
 };
 use hearth_proto::api::accounts::RoleName;
+use hearth_proto::api::deploy::DeploySpec;
 use hearth_proto::api::reauth::ReauthMode;
 use hearth_proto::api::service_ops::OperationChoice;
 use serde_json::Value;
@@ -192,10 +193,17 @@ fn build<'a>(
             target: id_ref()?,
             choice: choice(body)?,
         },
+        // Déployer (HRT-68, BR-DEPLOY-030) : le nom, `dépôt:version`, l'empreinte de la partie non secrète, le
+        // nombre de variables et la présence d'une commande se lisent du corps ; jamais une valeur, un nom de
+        // variable ni la commande (une seule fonction, partagée avec l'agent : `AdminAct::service_deploy`).
+        ActKind::ServiceDeploy => {
+            let spec: DeploySpec =
+                serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
+            AdminAct::service_deploy(&spec)
+        }
         // Déclarés pour les tranches suivantes, sans route dans `ROUTES` : aucune requête ne peut les viser
         // (`route_of` ne lit que `ROUTES`). Le lot qui ajoute leur route écrit ici comment les reconstruire.
-        ActKind::ServiceDeploy
-        | ActKind::ServiceDelete
+        ActKind::ServiceDelete
         | ActKind::BackupCreate
         | ActKind::BackupDelete
         | ActKind::GameSettingsSave => return Err(Unreadable),
@@ -242,6 +250,9 @@ mod tests {
             "/me/reauth" => json!({ "password": "each" }),
             "/services/adopt" => json!({ "keys": ["c_0123abcd", "u_docker-x.service"] }),
             "/operations/services/{id}/decision" => json!({ "choice": "keep" }),
+            "/deployments" => {
+                json!({ "name": "web", "image": "nginx", "env": [{ "name": "A", "value": "v" }] })
+            }
             _ => json!({}),
         };
         (path, body)

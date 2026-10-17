@@ -145,6 +145,14 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
         stop_timeout_s: config
             .and_then(|config| config.stop_timeout)
             .and_then(|seconds| u32::try_from(seconds).ok()),
+        memory_limit_bytes: host_config
+            .and_then(|host| host.memory)
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .filter(|bytes| *bytes > 0),
+        // `NanoCpus` : un milliardième de cœur ; `CpuQuota / CpuPeriod` quand c'est ainsi que la limite est posée.
+        cpu_millis: host_config
+            .and_then(cpu_millis_of)
+            .filter(|millis| *millis > 0),
         tty: config.and_then(|config| config.tty).unwrap_or(false),
         log_driver: bounded_opt(
             host_config
@@ -158,6 +166,18 @@ pub fn observation_from(response: &ContainerInspectResponse) -> Option<Observati
             .and_then(|labels| labels.get(HEARTH_SERVICE_LABEL))
             .and_then(|id| ServiceKey::parse(&format!("h_{id}"))),
     })
+}
+
+/// La limite de processeur en millicœurs : `NanoCpus`, à défaut `CpuQuota / CpuPeriod`.
+fn cpu_millis_of(host: &bollard::models::HostConfig) -> Option<u32> {
+    if let Some(nano) = host.nano_cpus.filter(|nano| *nano > 0) {
+        return u32::try_from(nano / 1_000_000).ok();
+    }
+    let (quota, period) = (host.cpu_quota?, host.cpu_period?);
+    if quota <= 0 || period <= 0 {
+        return None;
+    }
+    u32::try_from(quota.saturating_mul(1000) / period).ok()
 }
 
 /// Les noms des variables d'une liste `NOM=valeur` (la valeur est jetée sur place), nettoyés et bornés ;

@@ -102,6 +102,26 @@ impl Harness for FakeHarness {
         self.engine.remove(id);
     }
 
+    fn image(&self) -> String {
+        "hearth-contract/sleeper:1".to_owned()
+    }
+
+    async fn forget_image(&self, image: &str) {
+        self.engine.forget_image(image);
+    }
+
+    fn missing_image(&self) -> String {
+        "hearth-contract/nothing-here:1".to_owned()
+    }
+
+    fn missing_tag(&self) -> String {
+        "hearth-contract/sleeper:no-such-tag".to_owned()
+    }
+
+    fn scratch_dir(&self) -> String {
+        "/var/lib/hearth-contract-scratch".to_owned()
+    }
+
     async fn print(&self, id: &str, source: LogSource, text: &str) {
         let at_ms = NEXT_LOG_MS.fetch_add(1, Ordering::SeqCst);
         self.engine.push_log(id, source, at_ms, text);
@@ -110,8 +130,14 @@ impl Harness for FakeHarness {
 
 #[tokio::test]
 async fn the_fake_engine_honours_the_engine_contract() {
+    let engine = Arc::new(FakeEngine::new());
+    // Le registre du faux connaît l'image du contrat ; il ne connaît ni l'image inconnue ni la version inconnue.
+    engine.publish_image(
+        "hearth-contract/sleeper:1",
+        support::fake_engine::PullScript::two_layers(),
+    );
     let harness = FakeHarness {
-        engine: Arc::new(FakeEngine::new()),
+        engine,
         runs: Mutex::default(),
     };
     engine_contract::run(&harness, "contract").await;

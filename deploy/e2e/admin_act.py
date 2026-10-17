@@ -18,10 +18,19 @@ ce que fait la liaison cliente, avec `openssl` pour Ed25519 :
                                                                lit un corps JSON (`{}`) et le rend + `reauth` pour
                                                                `POST /services/KEY/VERB`, VERB étant `start`, `stop`
                                                                ou `restart` (codes d'acte 0x0C, 0x0D, 0x0E, HRT-64)
+    admin_act.py confirm-deploy HOST PORT TOKEN USER PASSWORD KEYFILE
+                                                               lit le corps de `POST /deployments` (nom, image,
+                                                               ports, montages, limites…) et le rend + `reauth`
+                                                               (code d'acte 0x0F, HRT-68) ; jamais couvert par
+                                                               l'élévation, ni valeur ni nom de variable signés
+    admin_act.py confirm-cancel HOST PORT TOKEN USER PASSWORD KEYFILE ID
+                                                               lit un corps JSON (`{}`) et le rend + `reauth` pour
+                                                               `DELETE /operations/services/ID` (code d'acte 0x10,
+                                                               annuler un déploiement, HRT-68)
 
 Les actes pris en charge sont la mise à jour de l'agent (code 0x06), les deux actes d'adoption de services
-(0x11, 0x12) et les trois actes de cycle de vie d'un service (0x0C, 0x0D, 0x0E) : ce sont les seuls que les
-scénarios envoient. La disposition du message signé est celle de
+(0x11, 0x12), les trois actes de cycle de vie d'un service (0x0C, 0x0D, 0x0E), déployer (0x0F) et annuler une
+opération (0x10) : ce sont les seuls que les scénarios envoient. La disposition du message signé est celle de
 `hearth_proto::device_proof::signing_bytes` ; la cible signée d'une adoption est le nombre et l'empreinte
 des clés triées (`hearth_proto::admin_act::AdminAct::services_adopt`).
 Aucun secret n'est écrit sur la sortie d'erreur.
@@ -198,6 +207,97 @@ def confirm_release(host, port, token, user, password, keyfile, key):
     print(json.dumps(request))
 
 
+def put(digest, raw):
+    """Un texte précédé de sa longueur sur 4 octets (`hearth_proto::api::service_spec::deploy_digest`)."""
+    digest.update(len(raw).to_bytes(4, "big") + raw)
+
+
+def split_image(image, tag):
+    """`(dépôt, version)` comme `hearth_proto::api::service_spec::split_image` : la version écrite dans l'image
+    passe dans le champ Version, une version vide vaut `latest`."""
+    image = image.strip()
+    after_slash = image.rfind("/") + 1
+    colon = image[after_slash:].rfind(":")
+    if colon >= 0:
+        repository, embedded = image[: after_slash + colon], image[after_slash + colon + 1 :]
+    else:
+        repository, embedded = image, None
+    chosen = embedded or (tag or "").strip() or "latest"
+    return repository, chosen
+
+
+def deploy_digest(spec):
+    """L'empreinte de la partie non secrète d'un déploiement : la même que `deploy_digest` de `hearth-proto`."""
+    digest = hashlib.sha256()
+    put(digest, b"hearth/deploy-digest/1")
+    put(digest, spec["name"].encode())
+    repository, tag = split_image(spec["image"], spec.get("tag"))
+    put(digest, repository.encode())
+    put(digest, tag.encode())
+    ports = sorted(
+        (p["host_port"], p["container_port"], 1 if p.get("protocol", "tcp") == "udp" else 0)
+        for p in spec.get("ports", [])
+    )
+    digest.update(len(ports).to_bytes(4, "big"))
+    for host, container, udp in ports:
+        digest.update(host.to_bytes(2, "big") + container.to_bytes(2, "big"))
+        put(digest, b"udp" if udp else b"tcp")
+    mounts = sorted(
+        (
+            m["target"],
+            1 if m.get("place", "managed") == "host" else 0,
+            m.get("host_path") is not None,
+            m.get("host_path") or "",
+            bool(m.get("read_only", False)),
+            bool(m.get("create", False)),
+            bool(m.get("confirmed", False)),
+        )
+        for m in spec.get("mounts", [])
+    )
+    digest.update(len(mounts).to_bytes(4, "big"))
+    for target, host, _, host_path, read_only, create, confirmed in mounts:
+        put(digest, target.encode())
+        put(digest, b"host" if host else b"managed")
+        put(digest, host_path.encode())
+        digest.update(bytes([int(read_only), int(create), int(confirmed)]))
+    resources = spec.get("resources", {})
+    cpu, memory = resources.get("cpu_millis"), resources.get("memory_bytes")
+    digest.update(b"\x00" if cpu is None else b"\x01" + cpu.to_bytes(4, "big"))
+    digest.update(b"\x00" if memory is None else b"\x01" + memory.to_bytes(8, "big"))
+    accept = spec.get("accept", {})
+    digest.update(bytes([int(bool(accept.get("reserved_ports"))), int(bool(accept.get("low_disk")))]))
+    return digest.hexdigest()
+
+
+def deploy_params(spec):
+    """Les paramètres signés d'un déploiement : `dépôt:version`, l'empreinte, le NOMBRE de variables, `cmd:0|1`.
+    Jamais une valeur, un nom de variable ni la commande."""
+    repository, tag = split_image(spec["image"], spec.get("tag"))
+    command = bool((spec.get("command") or "").strip())
+    return [
+        f"{repository}:{tag}".encode(),
+        deploy_digest(spec).encode(),
+        str(len(spec.get("env", []))).encode(),
+        b"1" if command else b"0",
+    ]
+
+
+def confirm_deploy(host, port, token, user, password, keyfile):
+    """Déployer une image (HRT-68) : la cible signée est le nom du service."""
+    request = json.load(sys.stdin)
+    tail = act_tail(ACT_SERVICE_DEPLOY, request["name"].encode(), deploy_params(request))
+    (request["reauth"],) = signed_member(host, port, token, user, password, keyfile, tail)
+    print(json.dumps(request))
+
+
+def confirm_cancel(host, port, token, user, password, keyfile, operation):
+    """Annuler une opération de service (HRT-144) : la cible signée est son identifiant, sans paramètre."""
+    request = json.load(sys.stdin)
+    tail = act_tail(ACT_OPERATION_CANCEL, operation.encode(), [])
+    (request["reauth"],) = signed_member(host, port, token, user, password, keyfile, tail)
+    print(json.dumps(request))
+
+
 SERVICE_ACTS = {
     "start": ACT_SERVICE_START,
     "stop": ACT_SERVICE_STOP,
@@ -227,6 +327,13 @@ def main():
         confirm_release(*args)
     elif command == "confirm-service":
         confirm_service(*args)
+    elif command == "confirm-deploy":
+        confirm_deploy(*args)
+    elif command == "confirm-cancel":
+        confirm_cancel(*args)
+    elif command == "deploy-digest":
+        # Sans réseau : l'empreinte d'un corps lu sur l'entrée standard (le test de `hearth-proto` la compare).
+        print(deploy_digest(json.load(sys.stdin)))
     else:
         sys.exit("commande inconnue")
 

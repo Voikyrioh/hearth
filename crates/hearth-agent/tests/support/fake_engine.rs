@@ -17,15 +17,19 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, watch};
 
 use hearth_agent::application::ports::{
-    ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, LogQuery,
-    LogStream, Unreadable,
+    ContainerEngine, EngineError, EngineEvent, EngineEvents, EngineInfo, EnvEntry, Listing,
+    LogQuery, LogStream, PullStream, Unreadable,
 };
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::services::image::image_name;
 use hearth_agent::domain::services::logs::{LineAssembler, LogLine, LogSource};
+use hearth_agent::domain::services::plan::ContainerPlan;
+use hearth_agent::domain::services::pull::{LayerEvent, PullTracker};
+use hearth_agent::domain::services::spec::SpecProtocol;
 use hearth_agent::domain::services::{
     Announced, ApiVersion, EngineProbe, Hidden, Observation, ProbeOutcome, RestartPolicy, RunState,
 };
+use hearth_agent::domain::services::{MountInfo, MountType, PortBinding, PortProtocol, PortScope};
 
 #[derive(Debug, Clone)]
 enum Feed {
@@ -57,6 +61,83 @@ struct State {
     log_epochs: BTreeMap<String, u64>,
     /// La mise en scène des ordres d'écriture (HRT-64).
     script: WriteScript,
+    /// Récupérer, créer, supprimer (HRT-68).
+    deploy: DeployScript,
+}
+
+/// Ce que le registre du faux sait d'une image : des événements de couche rejoués, puis l'issue.
+#[derive(Clone)]
+pub struct PullScript {
+    pub events: Vec<LayerEvent>,
+    /// Temps entre deux événements (virtuel sous `tokio::time::pause`).
+    pub delay: Duration,
+    /// L'erreur de la fin ; `None` : l'image arrive.
+    pub error: Option<EngineError>,
+}
+
+impl PullScript {
+    /// Une image à deux couches qui arrive.
+    pub fn two_layers() -> Self {
+        let down = |layer: &str, current, total| LayerEvent::Downloading {
+            layer: layer.into(),
+            current,
+            total,
+        };
+        Self {
+            events: vec![
+                down("a", 0, 100),
+                down("a", 50, 100),
+                down("b", 10, 300),
+                LayerEvent::Done { layer: "a".into() },
+                down("b", 300, 300),
+                LayerEvent::Done { layer: "b".into() },
+            ],
+            delay: Duration::ZERO,
+            error: None,
+        }
+    }
+
+    /// Une récupération qui échoue d'emblée avec cette erreur.
+    pub fn failing(error: EngineError) -> Self {
+        Self {
+            events: Vec::new(),
+            delay: Duration::ZERO,
+            error: Some(error),
+        }
+    }
+}
+
+/// Ce que le faux a reçu pour créer un conteneur, avec les secrets en clair (le faux est un décor de test).
+#[derive(Debug, Clone)]
+pub struct CreatedPlan {
+    pub name: String,
+    pub image: String,
+    pub labels: BTreeMap<String, String>,
+    pub env: Vec<(String, String)>,
+    pub command: Option<Vec<String>>,
+    pub ports: Vec<(u16, u16, SpecProtocol)>,
+    pub binds: Vec<(String, String, bool)>,
+    pub cpu_millis: u32,
+    pub memory_bytes: u64,
+}
+
+#[derive(Default)]
+struct DeployScript {
+    /// Images présentes sur le serveur.
+    images: BTreeSet<String>,
+    /// Ce que le registre rend pour une image absente ; pas d'entrée : « privée ou introuvable ».
+    registry: BTreeMap<String, PullScript>,
+    pulls: Vec<String>,
+    /// Récupérations abandonnées avant leur fin (annulation).
+    pulls_abandoned: Arc<AtomicUsize>,
+    created: Vec<CreatedPlan>,
+    removed: Vec<String>,
+    create_error: Option<EngineError>,
+    info: Option<EngineInfo>,
+    info_error: Option<EngineError>,
+    next_id: u64,
+    /// Le programme du conteneur de ce NOM s'arrête aussitôt démarré, avec ce code (BR-DEPLOY-020).
+    exit_on_start: BTreeMap<String, i64>,
 }
 
 /// Un ordre d'écriture reçu par le faux, dans l'ordre.
@@ -163,6 +244,8 @@ pub fn container(name: &str, run_state: RunState) -> Observation {
         env_omitted: 0,
         command: None,
         stop_timeout_s: None,
+        memory_limit_bytes: None,
+        cpu_millis: None,
         tty: false,
         log_driver: Some("json-file".into()),
         hearth_key: None,
@@ -187,6 +270,7 @@ impl FakeEngine {
                 log_errors: BTreeMap::new(),
                 log_epochs: BTreeMap::new(),
                 script: WriteScript::default(),
+                deploy: DeployScript::default(),
             })),
             feed,
             probes: AtomicU64::new(0),
@@ -357,6 +441,67 @@ impl FakeEngine {
         self.lock().script.now = now;
     }
 
+    // -----------------------------------------------------------------------------------------
+    // Mise en scène de la récupération, de la création et de la suppression (HRT-68)
+    // -----------------------------------------------------------------------------------------
+
+    /// L'image est déjà sur le serveur.
+    pub fn have_image(&self, image: &str) {
+        self.lock().deploy.images.insert(image.to_owned());
+    }
+
+    /// L'image n'est pas sur le serveur.
+    pub fn forget_image(&self, image: &str) {
+        self.lock().deploy.images.remove(image);
+    }
+
+    /// Ce que le registre rend pour cette image quand elle est récupérée.
+    pub fn publish_image(&self, image: &str, script: PullScript) {
+        self.lock().deploy.registry.insert(image.to_owned(), script);
+    }
+
+    /// Les images dont la récupération a été demandée, dans l'ordre.
+    pub fn pulls(&self) -> Vec<String> {
+        self.lock().deploy.pulls.clone()
+    }
+
+    /// Combien de récupérations ont été abandonnées avant leur fin.
+    pub fn pulls_abandoned(&self) -> usize {
+        self.lock().deploy.pulls_abandoned.load(Ordering::SeqCst)
+    }
+
+    /// Ce que le faux a reçu pour créer des conteneurs, dans l'ordre.
+    pub fn created(&self) -> Vec<CreatedPlan> {
+        self.lock().deploy.created.clone()
+    }
+
+    /// Les identifiants supprimés, dans l'ordre.
+    pub fn removed(&self) -> Vec<String> {
+        self.lock().deploy.removed.clone()
+    }
+
+    /// `create` échoue avec cette erreur (None : rétablit).
+    pub fn fail_create(&self, error: Option<EngineError>) {
+        self.lock().deploy.create_error = error;
+    }
+
+    /// Les bornes de la machine que `info` rend.
+    pub fn set_info(&self, info: Option<EngineInfo>) {
+        self.lock().deploy.info = info;
+    }
+
+    /// Le programme du conteneur de ce nom s'arrête aussitôt démarré, avec ce code.
+    pub fn exit_on_start(&self, name: &str, code: i64) {
+        self.lock()
+            .deploy
+            .exit_on_start
+            .insert(name.to_owned(), code);
+    }
+
+    pub fn fail_info(&self, error: Option<EngineError>) {
+        self.lock().deploy.info_error = error;
+    }
+
     fn script_now(state: &State) -> time::OffsetDateTime {
         state
             .script
@@ -490,6 +635,13 @@ impl FakeEngine {
                 return Err(EngineError::PortInUse);
             }
             Self::mark_running(&mut state, id);
+            let exits = state
+                .containers
+                .get(id)
+                .and_then(|container| state.deploy.exit_on_start.get(&container.name).copied());
+            if let Some(code) = exits {
+                Self::mark_exited(&mut state, id, code);
+            }
         }
         self.wake_logs();
         self.emit(id, "start");
@@ -716,6 +868,218 @@ impl ContainerEngine for FakeEngine {
             container.finished_at = finished;
         }
         Ok(())
+    }
+
+    async fn image_present(&self, image: &str) -> Result<bool, EngineError> {
+        let state = self.lock();
+        if let Some(error) = state.list_error {
+            return Err(error);
+        }
+        Ok(state.deploy.images.contains(image))
+    }
+
+    fn pull(&self, image: &str) -> PullStream {
+        let (script, abandoned, list_error) = {
+            let mut state = self.lock();
+            state.deploy.pulls.push(image.to_owned());
+            (
+                state.deploy.registry.get(image).cloned(),
+                state.deploy.pulls_abandoned.clone(),
+                state.list_error,
+            )
+        };
+        let state = self.state.clone();
+        let image = image.to_owned();
+        if let Some(error) = list_error {
+            return stream::once(async move { Err(error) }).boxed();
+        }
+        let Some(script) = script else {
+            // Le registre ne connaît pas cette image : privée ou introuvable, il ne distingue pas.
+            return stream::once(async { Err(EngineError::ImagePrivateOrMissing) }).boxed();
+        };
+        struct Run {
+            script: PullScript,
+            next: usize,
+            tracker: PullTracker,
+            state: Arc<Mutex<State>>,
+            image: String,
+            abandoned: Arc<AtomicUsize>,
+            finished: bool,
+        }
+        impl Drop for Run {
+            fn drop(&mut self) {
+                if !self.finished {
+                    self.abandoned.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+        let run = Run {
+            script,
+            next: 0,
+            tracker: PullTracker::new(),
+            state,
+            image,
+            abandoned,
+            finished: false,
+        };
+        stream::unfold(run, |mut run| async move {
+            if run.finished {
+                return None;
+            }
+            if run.next < run.script.events.len() {
+                if !run.script.delay.is_zero() {
+                    tokio::time::sleep(run.script.delay).await;
+                }
+                let event = run.script.events[run.next].clone();
+                run.next += 1;
+                let progress = run.tracker.apply(event);
+                return Some((Ok(progress), run));
+            }
+            run.finished = true;
+            if let Some(error) = run.script.error {
+                return Some((Err(error), run));
+            }
+            run.state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .deploy
+                .images
+                .insert(run.image.clone());
+            None
+        })
+        .boxed()
+    }
+
+    async fn create(&self, plan: &ContainerPlan) -> Result<String, EngineError> {
+        let id = {
+            let mut state = self.lock();
+            if let Some(error) = state.list_error.or(state.deploy.create_error) {
+                return Err(error);
+            }
+            if state
+                .containers
+                .values()
+                .any(|container| container.name == plan.name)
+            {
+                return Err(EngineError::NameTaken);
+            }
+            if !state.deploy.images.contains(&plan.image) {
+                return Err(EngineError::NotFound);
+            }
+            state.deploy.next_id += 1;
+            let id: String = Sha256::digest(
+                format!("created-{}-{}", plan.name, state.deploy.next_id).as_bytes(),
+            )
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+            let mut observation = container(&plan.name, RunState::Created);
+            observation.id = id.clone();
+            observation.image = image_name(&plan.image, "sha256:0123456789abcdef0123456789abcdef");
+            observation.ports = plan
+                .ports
+                .iter()
+                .map(|port| PortBinding {
+                    host_port: port.host_port,
+                    container_port: port.container_port,
+                    protocol: match port.protocol {
+                        SpecProtocol::Tcp => PortProtocol::Tcp,
+                        SpecProtocol::Udp => PortProtocol::Udp,
+                        SpecProtocol::Sctp => PortProtocol::Sctp,
+                    },
+                    scope: PortScope::All,
+                })
+                .collect();
+            observation.mounts = plan
+                .binds
+                .iter()
+                .map(|bind| MountInfo {
+                    kind: MountType::Folder,
+                    source: bind.host_path.clone(),
+                    target: bind.target.clone(),
+                    read_only: bind.read_only,
+                })
+                .collect();
+            observation.restart = RestartPolicy::UnlessStopped;
+            observation.env_names = plan
+                .env
+                .iter()
+                .map(|(name, _)| Hidden::new(name.expose()))
+                .collect();
+            observation.command = plan.command.as_ref().map(|command| {
+                command
+                    .iter()
+                    .map(|arg| Hidden::new(arg.expose()))
+                    .collect()
+            });
+            observation.memory_limit_bytes = Some(plan.memory_bytes);
+            observation.cpu_millis = Some(plan.cpu_millis);
+            observation.hearth_key = plan
+                .labels
+                .get("io.hearth.service-id")
+                .and_then(|ulid| hearth_agent::domain::services::ServiceKey::for_hearth(ulid));
+            let pairs: Vec<(String, String)> = plan
+                .env
+                .iter()
+                .map(|(name, value)| (name.expose().to_owned(), value.expose().to_owned()))
+                .collect();
+            state.envs.insert(id.clone(), pairs.clone());
+            state.deploy.created.push(CreatedPlan {
+                name: plan.name.clone(),
+                image: plan.image.clone(),
+                labels: plan.labels.clone(),
+                env: pairs,
+                command: plan
+                    .command
+                    .as_ref()
+                    .map(|command| command.iter().map(|a| a.expose().to_owned()).collect()),
+                ports: plan
+                    .ports
+                    .iter()
+                    .map(|p| (p.host_port, p.container_port, p.protocol))
+                    .collect(),
+                binds: plan
+                    .binds
+                    .iter()
+                    .map(|b| (b.host_path.clone(), b.target.clone(), b.read_only))
+                    .collect(),
+                cpu_millis: plan.cpu_millis,
+                memory_bytes: plan.memory_bytes,
+            });
+            state.containers.insert(id.clone(), observation);
+            id
+        };
+        self.wake_logs();
+        self.emit(&id, "create");
+        Ok(id)
+    }
+
+    async fn remove(&self, id: &str) -> Result<(), EngineError> {
+        let existed = {
+            let mut state = self.lock();
+            if let Some(error) = state.list_error {
+                return Err(error);
+            }
+            state.deploy.removed.push(id.to_owned());
+            state.containers.remove(id).is_some()
+        };
+        if existed {
+            self.wake_logs();
+            self.emit(id, "destroy");
+        }
+        Ok(())
+    }
+
+    async fn info(&self) -> Result<EngineInfo, EngineError> {
+        let state = self.lock();
+        if let Some(error) = state.list_error.or(state.deploy.info_error) {
+            return Err(error);
+        }
+        Ok(state.deploy.info.clone().unwrap_or(EngineInfo {
+            cpus: 8,
+            memory_bytes: 16 * 1024 * 1024 * 1024,
+            storage_dir: Some("/var/lib/docker".into()),
+        }))
     }
 
     fn events(&self) -> EngineEvents {

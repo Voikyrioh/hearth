@@ -110,27 +110,57 @@ impl Harness for DaemonHarness {
         let stream = if source == LogSource::Err { 2 } else { 1 };
         self.daemon.push_log(id, stream, at_ms, text);
     }
+
+    fn image(&self) -> String {
+        "busybox:1.36".to_owned()
+    }
+
+    async fn forget_image(&self, image: &str) {
+        self.daemon.forget_image(image);
+    }
+
+    fn missing_image(&self) -> String {
+        "hearth-contract/nothing-here:1".to_owned()
+    }
+
+    fn missing_tag(&self) -> String {
+        "busybox:no-such-tag".to_owned()
+    }
+
+    fn scratch_dir(&self) -> String {
+        "/var/lib/hearth-contract-scratch".to_owned()
+    }
 }
 
 #[tokio::test]
 async fn the_bollard_adapter_honours_the_engine_contract_against_a_fake_daemon() {
     let daemon = Arc::new(FakeDaemon::start().await);
+    // Le registre du faux démon connaît l'image du contrat (et donc son dépôt : une autre version est
+    // `manifest unknown`), pas l'image inconnue.
+    daemon.publish_image(
+        "busybox:1.36",
+        support::fake_daemon::DaemonPull::one_layer(0),
+    );
     let harness = DaemonHarness {
         engine: Arc::new(engine_of(&daemon)),
         daemon: daemon.clone(),
         runs: Mutex::default(),
     };
     engine_contract::run(&harness, "contract").await;
-    // Le démon n'a vu que des lectures, et les trois seules routes d'écriture du port (HRT-64) : démarrer,
-    // arrêter, redémarrer un conteneur. Jamais créer, supprimer, tirer une image.
+    // Le démon n'a vu que des lectures et les écritures du port : démarrer, arrêter, redémarrer (HRT-64), tirer
+    // une image, créer et supprimer un conteneur (HRT-68). Rien d'autre : ni exécution dans un conteneur, ni
+    // construction, ni réseau, ni volume.
     let requests = daemon.requests();
     assert!(!requests.is_empty());
     for request in requests {
-        let write = request.starts_with("POST ")
-            && ["/start", "/stop", "/restart"]
+        let write = (request.starts_with("POST ")
+            && (["/start", "/stop", "/restart"]
                 .iter()
                 .any(|verb| request.ends_with(verb))
-            && request.contains("/containers/");
+                && request.contains("/containers/")
+                || request.ends_with("/containers/create")
+                || request.ends_with("/images/create")))
+            || (request.starts_with("DELETE ") && request.contains("/containers/"));
         assert!(request.starts_with("GET ") || write, "{request}");
     }
 }

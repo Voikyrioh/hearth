@@ -220,6 +220,19 @@ pub enum Target {
         service: ClientName,
         note: LifecycleNote,
     },
+    /// Un déploiement terminé, réussi ou non (HRT-68, BR-DEPLOY-025) : le nom du service, l'image et sa version,
+    /// les ports du SERVEUR, le NOMBRE de variables et si une commande est fixée. Jamais le nom ni la valeur d'une
+    /// variable, jamais la commande, jamais un chemin (les dossiers gérés par Hearth n'y figurent pas).
+    ServiceDeploy {
+        service: ClientName,
+        image: ClientName,
+        host_ports: Vec<u16>,
+        env_count: u32,
+        custom_command: bool,
+        /// Le service s'est arrêté dans les 10 secondes qui ont suivi son lancement : déploiement réussi, service
+        /// conservé (BR-DEPLOY-020).
+        stopped_right_after_start: bool,
+    },
 }
 
 /// Ce qu'une issue de démarrage, d'arrêt ou de redémarrage a de particulier (texte fixe).
@@ -310,6 +323,32 @@ impl Target {
                 service,
                 note: LifecycleNote::Forced,
             } => Some(format!("service {} (arrêt forcé)", service.as_str())),
+            Self::ServiceDeploy {
+                service,
+                image,
+                host_ports,
+                env_count,
+                custom_command,
+                stopped_right_after_start,
+            } => {
+                let mut text = format!("service {} : image {}", service.as_str(), image.as_str());
+                if !host_ports.is_empty() {
+                    let ports: Vec<String> = host_ports.iter().map(u16::to_string).collect();
+                    text.push_str(&format!(", ports {}", ports.join(", ")));
+                }
+                match env_count {
+                    0 => {}
+                    1 => text.push_str(", 1 variable"),
+                    n => text.push_str(&format!(", {n} variables")),
+                }
+                if *custom_command {
+                    text.push_str(", commande personnalisée");
+                }
+                if *stopped_right_after_start {
+                    text.push_str(", arrêté juste après le démarrage");
+                }
+                Some(text)
+            }
             Self::ServiceAdoption(key, cause) => {
                 Some(format!("service {} ({})", key.as_str(), cause.text()))
             }
@@ -438,6 +477,32 @@ pub enum Reason {
     Timeout,
     /// L'agent s'est arrêté pendant l'action (HRT-64, BR-LIFE-020).
     Interrupted,
+    /// Déployer (HRT-68, BR-DEPLOY-025) : image introuvable.
+    ImageNotFound,
+    /// Version introuvable pour cette image.
+    TagNotFound,
+    /// Image privée ou introuvable (le registre ne distingue pas).
+    ImagePrivateOrMissing,
+    /// Registre injoignable depuis le serveur.
+    RegistryUnreachable,
+    /// Limite de téléchargements du registre.
+    RegistryRateLimited,
+    /// Architecture incompatible.
+    PlatformMismatch,
+    /// Disque plein.
+    DiskFull,
+    /// Nom déjà pris.
+    NameTaken,
+    /// Dossier refusé.
+    FolderRefused,
+    /// Réglage hors du plan fermé d'un service créé par Hearth (BR-DEPLOY-035).
+    SettingNotAllowed,
+    /// Limites de mémoire et de processeur absentes ou hors bornes (BR-DEPLOY-038).
+    LimitsRequired,
+    /// Deux déploiements sont déjà en cours (BR-DEPLOY-023).
+    DeployLimit,
+    /// Annulé par l'utilisateur (BR-DEPLOY-025).
+    CancelledByAccount,
 }
 
 impl Reason {
@@ -502,6 +567,19 @@ impl Reason {
             Self::RestartedByHost => "repart tout seul".to_owned(),
             Self::Timeout => "délai dépassé".to_owned(),
             Self::Interrupted => "interrompu par un redémarrage de l'agent".to_owned(),
+            Self::ImageNotFound => "image introuvable".to_owned(),
+            Self::TagNotFound => "version introuvable".to_owned(),
+            Self::ImagePrivateOrMissing => "image privée ou introuvable".to_owned(),
+            Self::RegistryUnreachable => "registre injoignable".to_owned(),
+            Self::RegistryRateLimited => "limite du registre".to_owned(),
+            Self::PlatformMismatch => "architecture incompatible".to_owned(),
+            Self::DiskFull => "disque plein".to_owned(),
+            Self::NameTaken => "nom déjà pris".to_owned(),
+            Self::FolderRefused => "dossier refusé".to_owned(),
+            Self::SettingNotAllowed => "réglage non permis".to_owned(),
+            Self::LimitsRequired => "limites de ressources requises".to_owned(),
+            Self::DeployLimit => "deux déploiements déjà en cours".to_owned(),
+            Self::CancelledByAccount => "annulé par l'utilisateur".to_owned(),
         }
     }
 }

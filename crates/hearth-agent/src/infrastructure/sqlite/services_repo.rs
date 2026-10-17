@@ -200,6 +200,8 @@ fn from_stored(stored: StoredView) -> Result<Observation, StoreError> {
         env_omitted: 0,
         command: None,
         stop_timeout_s: stored.stop_timeout_s,
+        memory_limit_bytes: None,
+        cpu_millis: None,
         tty: false,
         log_driver: None,
         hearth_key: None,

@@ -175,8 +175,12 @@ pub struct InterruptedAction {
 /// Ce que le démarrage a fait de chaque opération non terminée.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecoverySummary {
-    /// Les actions de cycle de vie interrompues, de la plus ancienne à la plus récente.
+    /// Les actions de cycle de vie et les déploiements interrompus, de la plus ancienne à la plus récente.
     pub interrupted_actions: Vec<InterruptedAction>,
+    /// Les déploiements interrompus AVANT la création de leur conteneur (HRT-68, BR-DEPLOY-019) : rien n'a été
+    /// créé, leur description écrite à l'acceptation ne doit pas rester (elle garderait le nom). Le démarrage
+    /// l'efface (`ServiceSpecs::forget`) et retire leur dossier de données.
+    pub abandoned_deploys: Vec<ServiceKey>,
     pub interrupted: u32,
     pub needs_attention: u32,
     /// Opérations `needs_attention` déjà là au démarrage, dont le verrou a été repris.
@@ -780,7 +784,10 @@ impl ServiceOps {
                 }
                 _ => {
                     summary.interrupted += 1;
-                    if op.kind.is_lifecycle() {
+                    if op.kind == OpKind::Deploy && recovery.cause == Cause::NotExecuted {
+                        summary.abandoned_deploys.push(op.service.clone());
+                    }
+                    if op.kind.is_lifecycle() || op.kind == OpKind::Deploy {
                         summary.interrupted_actions.push(InterruptedAction {
                             account: op.account.clone(),
                             service_name: op.service_name.clone(),

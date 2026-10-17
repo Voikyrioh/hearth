@@ -157,6 +157,22 @@ pub enum OperationCause {
     Interrupted,
     /// Le service n'existait plus au moment de l'action (BR-LIFE-015).
     ServiceNotFound,
+    /// Déployer (HRT-68, BR-DEPLOY-017) : l'image n'existe pas.
+    ImageNotFound,
+    /// L'image existe mais pas cette version.
+    TagNotFound,
+    /// Le registre dit la même chose d'une image privée et d'une image inconnue.
+    ImagePrivateOrMissing,
+    /// Le registre est injoignable depuis le serveur.
+    RegistryUnreachable,
+    /// La limite de téléchargements du registre est atteinte.
+    RegistryRateLimited,
+    /// L'image n'existe pas pour l'architecture du serveur.
+    PlatformMismatch,
+    /// Le disque du moteur est plein.
+    DiskFull,
+    /// Un conteneur a pris le nom entre la vérification et la création (BR-DEPLOY-025).
+    NameTaken,
     /// Une cause que ce client ne connaît pas.
     #[serde(other)]
     Unknown,

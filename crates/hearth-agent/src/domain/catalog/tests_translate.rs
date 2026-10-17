@@ -12,8 +12,8 @@ use super::loading::value::{ChannelPath, Charset, container_target_ok, first_ref
 use super::settings_state::{InstallContext, Reason, resolve_install};
 use super::test_support::*;
 use super::translate::{
-    DeploymentValidator, EnvValue, NotYetWired, Request, ServiceSpecDraft, TranslateError,
-    translate,
+    DeploymentValidator, EnvDraft, EnvValue, NotYetWired, Request, ServiceSpecDraft,
+    TranslateError, translate,
 };
 use crate::domain::secret::Secret;
 
@@ -744,8 +744,8 @@ fn property_every_accepted_fiche_and_valid_answers_give_a_closed_description() {
 
 // ---- Validateur du déploiement ordinaire : à brancher ---------------------------------------------------------------------------
 
-/// L'interface attendue est posée (`DeploymentValidator`) ; le validateur n'existe pas encore dans `main`
-/// (HRT-68, HRT-101). Cette garde empêche qu'on prenne le branchement manquant pour une validation.
+/// L'interface est posée (`DeploymentValidator`) ; le branchement de la traduction est HRT-101. Cette garde
+/// empêche qu'on prenne le placeholder `NotYetWired` pour une validation.
 #[test]
 fn the_ordinary_deployment_validator_is_not_wired_yet_and_says_so() {
     let draft = translate(&terraria(), &Inputs::new().request(None, false)).expect("valide");
@@ -758,12 +758,11 @@ fn the_ordinary_deployment_validator_is_not_wired_yet_and_says_so() {
     );
 }
 
-/// À BRANCHER (HRT-101) : remplacer `NotYetWired` par le vrai validateur ; ce test doit alors passer. Il échoue
-/// volontairement tant que le validateur n'existe pas : ne pas l'activer avant.
+/// I1 « plan égal à celui du validateur » : toute fiche embarquée, une fois traduite, est acceptée par le validateur
+/// du déploiement ordinaire (HRT-68), le même que celui d'une image déployée à la main.
 #[test]
-#[ignore = "à brancher : validateur du déploiement ordinaire (HRT-68 / HRT-101), I1 « plan égal à celui du validateur »"]
 fn every_accepted_fiche_is_accepted_by_the_ordinary_deployment_validator() {
-    let validator: &dyn DeploymentValidator = &NotYetWired;
+    let validator: &dyn DeploymentValidator = &crate::domain::services::deploy::OrdinaryDeployment;
     for embedded in EMBEDDED {
         let fiche = embedded.load().expect("chargée");
         let draft = translate(&fiche, &Inputs::new().request(None, false)).expect("valide");
@@ -771,4 +770,41 @@ fn every_accepted_fiche_is_accepted_by_the_ordinary_deployment_validator() {
             .validate(&draft)
             .unwrap_or_else(|why| panic!("{} : {why}", embedded.dir));
     }
+}
+
+/// Le validateur du déploiement ordinaire refuse ce que le déploiement fait à la main refuse, par un code fixe qui
+/// ne cite jamais la valeur (HRT-68, I1).
+#[test]
+fn the_ordinary_deployment_validator_refuses_what_a_hand_made_deployment_refuses() {
+    use crate::domain::services::deploy::OrdinaryDeployment;
+    let draft = |change: &dyn Fn(&mut ServiceSpecDraft)| {
+        let mut draft =
+            translate(&terraria(), &Inputs::new().request(None, false)).expect("valide");
+        change(&mut draft);
+        OrdinaryDeployment.validate(&draft)
+    };
+    assert_eq!(draft(&|_| {}), Ok(()));
+    assert_eq!(
+        draft(&|d| d.image_repository = "Bad Image".into()),
+        Err("image:bad_format".into())
+    );
+    assert_eq!(
+        draft(&|d| d.env.push(EnvDraft {
+            name: "1-SENTINEL".into(),
+            value: EnvValue::Plain("SENTINEL-VALUE".into()),
+        })),
+        Err("env:bad_name".into())
+    );
+    assert_eq!(
+        draft(&|d| d.folders.push(d.folders[0].clone())),
+        Err("mounts:duplicate".into())
+    );
+    assert_eq!(
+        draft(&|d| d.command = vec!["x".into(); 65]),
+        Err("command:bad_format".into())
+    );
+    assert_eq!(
+        draft(&|d| d.ports.push(d.ports[0].clone())),
+        Err("ports:duplicate".into())
+    );
 }

@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{OriginKindName, OutcomeName};
+use hearth_proto::api::deploy::{DeployPlace, DeployProtocol, MountStatus, NameStatus, PortStatus};
 use hearth_proto::api::metrics::HistoryWindow;
 use hearth_proto::api::operations::OperationStatus as HttpOperationStatus;
 use hearth_proto::api::reauth::ReauthMode;
@@ -149,6 +150,9 @@ fn enums() -> Vec<Entry> {
         ),
         entry!("api/service_ops.rs::StepStateView", Tolerant, StepStateView),
         entry!("api/service_spec.rs::DriftView", Tolerant, DriftView),
+        entry!("api/deploy.rs::NameStatus", Tolerant, NameStatus),
+        entry!("api/deploy.rs::PortStatus", Tolerant, PortStatus),
+        entry!("api/deploy.rs::MountStatus", Tolerant, MountStatus),
         entry!("api/services.rs::EngineState", Tolerant, EngineState),
         entry!("api/services.rs::InitSystem", Tolerant, InitSystem),
         entry!("api/services.rs::ServiceState", Tolerant, ServiceState),
@@ -177,6 +181,10 @@ fn enums() -> Vec<Entry> {
         ),
         // Ce que l'AGENT lit du client : des commandes. Un inconnu est un refus du message, jamais une action.
         entry!("stream.rs::Topic", Strict, Topic),
+        // Déployer (HRT-68) : le protocole d'un port et l'emplacement d'un dossier sont des champs de commande ;
+        // un inconnu est refusé au décodage, jamais remplacé par un défaut.
+        entry!("api/deploy.rs::DeployProtocol", Strict, DeployProtocol),
+        entry!("api/deploy.rs::DeployPlace", Strict, DeployPlace),
         entry!("stream.rs::ClientMessage", Strict, tagged ClientMessage),
         entry!("stream.rs::SignedAuth", Strict, tagged SignedAuth),
         entry!("api/service_logs.rs::LogsClientMessage", Strict, tagged LogsClientMessage),

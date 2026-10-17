@@ -14,6 +14,7 @@
 mod accounts;
 mod audit;
 mod auth;
+mod deployments;
 mod devices;
 mod error;
 mod hello;
@@ -41,6 +42,7 @@ use tracing::Level;
 
 use crate::application::accounts::AccountService;
 use crate::application::audit::AuditService;
+use crate::application::deployments::Deployments;
 use crate::application::hello::HelloService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
@@ -86,6 +88,8 @@ pub struct AppState {
     pub service_ops: Arc<ServiceOpAccess>,
     /// Démarrer, arrêter, redémarrer un service (HRT-64, ADR-0037, ADR-0045).
     pub service_lifecycle: Arc<ServiceLifecycle>,
+    /// Déployer une image et les bornes de la machine (HRT-68, ADR-0039).
+    pub deployments: Arc<Deployments>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -132,7 +136,11 @@ pub struct Endpoint {
 /// Les routes `POST` qui ne modifient rien : un calcul sans effet ni écriture (le défi de la clé
 /// d'appareil) ou une lecture relancée (`/engine/recheck` relance la détection du moteur, sans rien
 /// écrire ni dans le moteur ni dans la base). Elles n'ont ni action de journal ni entrée de réussite.
-const READ_ONLY_POSTS: &[&str] = &["/sessions/challenge", "/engine/recheck"];
+const READ_ONLY_POSTS: &[&str] = &[
+    "/sessions/challenge",
+    "/engine/recheck",
+    "/deployments/check",
+];
 
 impl Endpoint {
     /// La route modifie-t-elle quelque chose ?
@@ -359,6 +367,38 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::ServiceRelease),
         route: || post(services::release),
+    },
+    // Déployer une image (HRT-68, ADR-0039) : `POST /deployments` est un acte d'administration confirmé
+    // (`ServiceDeploy` `0x0F`, jamais couvert par l'élévation), réservé au droit « gérer les services » ; la
+    // vérification du formulaire est une consultation (un `POST` qui ne modifie rien, sans journal, `BR-DEPLOY-033`)
+    // réservée au même droit : elle dit qui tient un port. Les bornes de la machine sont ouvertes à tous.
+    Endpoint {
+        method: Method::POST,
+        path: "/deployments/check",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        // Une consultation : seul un refus faute de droit est consigné (BR-AUDIT-021), jamais un constat.
+        audit: Some(AuditAction::ServiceDeploy),
+        route: || post(deployments::check),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/deployments",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceDeploy),
+        route: || post(deployments::create),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/engine/capacity",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(deployments::capacity),
     },
     // Démarrer, arrêter, redémarrer un service (HRT-64, ADR-0037) : trois actes d'administration confirmés
     // (`ServiceStart` `0x0C`, `ServiceStop` `0x0D`, `ServiceRestart` `0x0E`, couverts par l'élévation),
@@ -668,7 +708,10 @@ mod tests {
         for endpoint in ENDPOINTS.iter().filter(|e| e.method == Method::POST) {
             assert_eq!(
                 endpoint.modifies(),
-                !matches!(endpoint.path, "/sessions/challenge" | "/engine/recheck"),
+                !matches!(
+                    endpoint.path,
+                    "/sessions/challenge" | "/engine/recheck" | "/deployments/check"
+                ),
                 "{}",
                 endpoint.path
             );
@@ -777,9 +820,13 @@ mod tests {
         /// de personne (réponse d'un service inconnu). `Access::Services` ne peut pas l'exprimer : il est
         /// jugé à l'ouverture d'une requête, pas rejoué pendant un socket.
         ServiceStream,
+        /// Une consultation réservée au droit de gérer les services : un `POST` qui ne modifie rien, ni suivi ;
+        /// seul un refus faute de droit est consigné (la vérification du formulaire de déploiement,
+        /// `BR-DEPLOY-033`).
+        ServiceCheck,
     }
 
-    use Class::{Admin, OpenRead, Own, Public, Service, ServiceStream, Stream};
+    use Class::{Admin, OpenRead, Own, Public, Service, ServiceCheck, ServiceStream, Stream};
 
     const CLASSES: &[(&str, &str, Class)] = &[
         ("GET", "/hello", Public),
@@ -805,6 +852,12 @@ mod tests {
         ("GET", "/stream", Stream),
         ("GET", "/services", OpenRead),
         ("POST", "/engine/recheck", OpenRead),
+        // Déployer une image (HRT-68) : le droit est exigé par le niveau, la confirmation par la table des actes de
+        // `hearth-proto` ; la vérification est une consultation du même droit ; les bornes de la machine sont
+        // ouvertes à tous (des totaux, jamais un nom).
+        ("POST", "/deployments", Service),
+        ("POST", "/deployments/check", ServiceCheck),
+        ("GET", "/engine/capacity", OpenRead),
         // Journaux en direct (HRT-66, HRT-79) : le droit et l'adoption sont jugés par `may_read`, pas par
         // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
@@ -915,7 +968,7 @@ mod tests {
                 Stream | ServiceStream => Access::FirstMessage,
                 Own | OpenRead => Access::Authenticated,
                 Admin(_) => Access::Admin,
-                Service => Access::Services,
+                Service | ServiceCheck => Access::Services,
             };
             assert_eq!(endpoint.access, expected, "{method} {path} : {class:?}");
             let under_service_prefix = SERVICE_PREFIXES
@@ -923,7 +976,7 @@ mod tests {
                 .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")));
             if under_service_prefix {
                 assert!(
-                    matches!(class, OpenRead | Service | ServiceStream),
+                    matches!(class, OpenRead | Service | ServiceStream | ServiceCheck),
                     "{method} {path} : une route de service est ouverte à tous (liste fermée) ou de niveau `services`"
                 );
             }
@@ -935,6 +988,19 @@ mod tests {
                         "{method} {path} : une lecture en direct ne modifie rien"
                     );
                     assert_eq!(endpoint.audit, None, "{method} {path}");
+                }
+                ServiceCheck => {
+                    assert!(
+                        under_service_prefix
+                            && !endpoint.modifies()
+                            && !endpoint.tracked
+                            && endpoint.version_checked,
+                        "{method} {path} : une consultation ne modifie rien et n'est pas suivie"
+                    );
+                    assert!(
+                        endpoint.audit.is_some(),
+                        "{method} {path} : un refus faute de droit se consigne"
+                    );
                 }
                 OpenRead => {
                     assert!(
@@ -990,6 +1056,7 @@ mod tests {
                 ("DELETE", "/operations/services/{id}"),
                 ("GET", "/services/external"),
                 ("GET", "/services/{key}/env"),
+                ("POST", "/deployments"),
                 ("POST", "/operations/services/{id}/decision"),
                 ("POST", "/services/adopt"),
                 ("POST", "/services/{key}/release"),
