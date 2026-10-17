@@ -415,19 +415,26 @@ pub(crate) fn triple(version: &str) -> Result<(u64, u64, u64), String> {
     }
 }
 
+/// Ce que dit le manifeste EN PLACE dans le bucket, lu avant toute écriture.
+#[derive(Debug, Default)]
+struct InPlace {
+    /// Versions annoncées plus récentes que celle déposée (vide hors retour arrière accepté) : le
+    /// retour arrière accepté doit laisser une ligne, que l'appelant affiche avant la première écriture.
+    newer: Vec<String>,
+    /// La version que les utilisateurs voient aujourd'hui (la plus récente du client et de l'agent ;
+    /// `None` : aucun manifeste), pour le message d'un dépôt interrompu.
+    announced: Option<String>,
+}
+
 /// Lit le manifeste EN PLACE dans le bucket (avant toute écriture) : refus si sa version, client ou
 /// agent, est supérieure à celle déposée, sauf retour arrière explicite. Absent = premier dépôt.
-/// Rend les versions annoncées plus récentes que celle déposée (vide hors retour arrière accepté) : le
-/// retour arrière accepté doit laisser une ligne, que l'appelant affiche avant la première écriture.
-/// Rend aussi la version que les utilisateurs voient aujourd'hui (la plus récente du client et de
-/// l'agent ; `None` : aucun manifeste), pour le message d'un dépôt interrompu.
-fn check_not_older(
+fn read_manifest_in_place(
     host: &dyn Host,
     version: &str,
     allow_rollback: bool,
-) -> Result<(Vec<String>, Option<String>), String> {
+) -> Result<InPlace, String> {
     let Some(bytes) = fetch(host, MANIFEST_KEY)? else {
-        return Ok((Vec::new(), None));
+        return Ok(InPlace::default());
     };
     let unreadable = |detail: &str| {
         format!(
@@ -463,7 +470,7 @@ fn check_not_older(
     }
     let announced = announced.map(|(_, text)| text);
     if newer.is_empty() || allow_rollback {
-        return Ok((newer, announced));
+        return Ok(InPlace { newer, announced });
     }
     Err(format!(
         "REFUS : le manifeste en place annonce {} alors que la version déposée est {version}. Un dépôt ne ramène pas la version annoncée en arrière par accident (dossier assemblé resté sous target/ après un retour sur un ancien commit ?). Rien n'a été écrit. Si le retour arrière est voulu, relance avec --allow-rollback",
@@ -549,8 +556,8 @@ fn dry_run_report(version: &str, writes: &[PlannedWrite], options: Options) -> V
 }
 
 /// Écriture de ce qui manque (fichiers de la version, depuis les octets vérifiés), relecture publique,
-/// puis script : tout ce qui précède le manifeste. `done` compte les clés écrites ou reconnues identiques.
-#[allow(clippy::too_many_arguments)]
+/// puis script : tout ce qui précède le manifeste. L'erreur porte le nombre de fichiers écrits ou
+/// reconnus identiques avant elle.
 fn deposit_before_manifest(
     host: &dyn Host,
     version: &str,
@@ -559,25 +566,26 @@ fn deposit_before_manifest(
     writes: &[PlannedWrite],
     options: Options,
     say: &mut dyn FnMut(String),
-    done: &mut usize,
-) -> Result<(), String> {
+) -> Result<(), (usize, String)> {
+    let after = |done: usize| move |error: String| (done, error);
+    let mut done = 0;
     for (write, remote) in state {
         if *remote == Remote::Same {
             say(format!("déjà présent, identique : {}", write.key));
         } else {
-            put(host, write, &files[&write.key])?;
+            put(host, write, &files[&write.key]).map_err(after(done))?;
             say(format!("écrit : {}", write.key));
         }
-        *done += 1;
+        done += 1;
     }
-    read_back(host, version, writes, say)?;
+    read_back(host, version, writes, say).map_err(after(done))?;
     say("relecture publique : toutes les sommes sont bonnes".to_owned());
     for write in writes.iter().filter(|write| write.kind == Kind::Script) {
-        put(host, write, &files[&write.key])?;
+        put(host, write, &files[&write.key]).map_err(after(done))?;
         say(format!("écrit : {}", write.key));
-        verify_written(host, write, options.stage_dir)?;
+        verify_written(host, write, options.stage_dir).map_err(after(done))?;
         say(format!("relu dans le bucket, identique : {}", write.key));
-        *done += 1;
+        done += 1;
     }
     Ok(())
 }
@@ -621,8 +629,8 @@ pub fn publish(
         return Err(refuse_different(&refused, version));
     }
     // 1a bis. Le manifeste en place n'annonce pas une version plus récente.
-    let (newer, announced) =
-        check_not_older(host, version, options.allow_rollback).map_err(|error| {
+    let InPlace { newer, announced } =
+        read_manifest_in_place(host, version, options.allow_rollback).map_err(|error| {
             if error.contains("Rien n'a été écrit") {
                 error
             } else {
@@ -637,12 +645,12 @@ pub fn publish(
     }
     // 1b à 3. Tout ce qui précède le manifeste : un échec ici laisse les utilisateurs sur la version
     // précédente (BR-RELEASE-009 : message d'un dépôt interrompu, puis relance de la même exécution).
-    let total = writes.len() - 1;
-    let mut done = 0;
-    deposit_before_manifest(
-        host, version, files, &state, &writes, options, say, &mut done,
-    )
-    .map_err(|error| interrupted(done, total, announced.as_deref(), &error))?;
+    let total = writes
+        .iter()
+        .filter(|write| write.kind != Kind::Manifest)
+        .count();
+    deposit_before_manifest(host, version, files, &state, &writes, options, say)
+        .map_err(|(done, error)| interrupted(done, total, announced.as_deref(), &error))?;
     // 4. Le manifeste EN DERNIER, relu dans le bucket (un échec ici n'est pas « avant le manifeste »).
     for write in writes.iter().filter(|write| write.kind == Kind::Manifest) {
         put(host, write, &files[&write.key])?;
@@ -726,15 +734,8 @@ pub fn run_upload(args: &[String]) -> Result<(), String> {
             "Essai à blanc du dépôt"
         };
         crate::ci::summary(&format!(
-            "### {title}
-
-```text
-{}
-```",
-            lines.join(
-                "
-"
-            )
+            "### {title}\n\n```text\n{}\n```",
+            lines.join("\n")
         ));
     }
     result
@@ -744,7 +745,12 @@ pub fn run_upload(args: &[String]) -> Result<(), String> {
 /// codes de sortie et ses messages) ; la ligne lue est rendue pour le compte rendu.
 pub fn check_aws_version(host: &dyn Host) -> Result<String, String> {
     let args = args(&["--version"]);
-    let output = host.run(&Call::new("aws", &args))?;
+    let output = host.run(&Call::new("aws", &args)).map_err(|error| {
+        format!(
+            "L'outil aws doit être l'AWS CLI en version 2 : « aws --version » n'a pas pu être lancé ({}). Rien n'a été écrit.",
+            short(&error)
+        )
+    })?;
     // Selon la version, la ligne est sur la sortie standard ou sur la sortie d'erreur.
     let text = if output.stdout.is_empty() {
         output.stderr.clone()
@@ -1937,5 +1943,26 @@ mod tests {
             assert!(error.contains("version 2") && error.contains("Rien n'a été écrit"));
         }
         assert!(check_aws_version(&aws_says(Some(1), line, "")).is_err());
+    }
+
+    #[test]
+    fn a_missing_aws_gives_the_message_of_the_spec() {
+        struct Missing;
+        impl Host for Missing {
+            fn run(&self, _: &Call) -> Result<CmdOutput, String> {
+                Err("aws : programme introuvable".to_owned())
+            }
+            fn elapsed(&self) -> Duration {
+                Duration::ZERO
+            }
+            fn sleep(&self, _: Duration) {}
+        }
+        let error = check_aws_version(&Missing).unwrap_err();
+        assert!(
+            error.starts_with("L'outil aws doit être l'AWS CLI en version 2 : ")
+                && error.contains("introuvable")
+                && error.ends_with("Rien n'a été écrit."),
+            "{error}"
+        );
     }
 }

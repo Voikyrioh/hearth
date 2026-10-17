@@ -177,8 +177,13 @@ pub(crate) fn manifest_text(
     env_notes: &str,
     now: &str,
 ) -> Result<ManifestText, String> {
+    // Une seule règle des notes, d'où qu'elles viennent (spec section 2 : 1 à 2000 caractères).
     let (notes, write_notes_to) = match option(args, "--notes-file") {
-        Some(file) => (read(&file)?, None),
+        Some(file) => {
+            let notes = read(&file)?;
+            crate::release_preflight::check_notes(&notes)?;
+            (notes, None)
+        }
         None => {
             crate::release_preflight::check_notes(env_notes)?;
             let out = required(args, "--out")?;
@@ -227,14 +232,7 @@ pub fn run_manifest(args: &[String]) -> Result<(), String> {
         println!("notes écrites : {}", path.display());
     }
     let out = required(args, "--out")?;
-    std::fs::write(
-        &out,
-        format!(
-            "{text}
-"
-        ),
-    )
-    .map_err(|error| format!("{out} : {error}"))?;
+    std::fs::write(&out, format!("{text}\n")).map_err(|error| format!("{out} : {error}"))?;
     println!("manifeste écrit : {out}");
     Ok(())
 }
@@ -346,8 +344,7 @@ mod tests {
     fn the_notes_come_from_the_environment_and_land_in_notes_txt_next_to_the_manifest() {
         let input = manifest_text(
             &argv(&["--out", "dir/latest.json"]),
-            "  Corrections.
-",
+            "  Corrections.\n",
             "2026-10-17T13:10:00Z",
         )
         .unwrap();
@@ -369,11 +366,7 @@ mod tests {
             "2026-01-01T00:00:00Z"
         );
         assert_eq!(
-            manifest_text(
-                &args, "  
-", "n"
-            )
-            .unwrap_err(),
+            manifest_text(&args, "  \n", "n").unwrap_err(),
             "Les notes de version sont requises."
         );
         assert_eq!(
@@ -381,6 +374,26 @@ mod tests {
             "Les notes de version dépassent 2000 caractères."
         );
         assert!(manifest_text(&args, &"é".repeat(2000), "n").is_ok());
+    }
+
+    #[test]
+    fn notes_from_a_file_follow_the_same_rule_and_are_not_rewritten() {
+        let dir = crate::release_stage::fixtures::tmp_dir("cr_notes_file");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("notes.txt");
+        let path = file.to_string_lossy().into_owned();
+        let args = argv(&["--out", "latest.json", "--notes-file", &path]);
+        std::fs::write(&file, "  \n").unwrap();
+        let empty = manifest_text(&args, "ignorées", "n").unwrap_err();
+        std::fs::write(&file, "é".repeat(2001)).unwrap();
+        let long = manifest_text(&args, "ignorées", "n").unwrap_err();
+        std::fs::write(&file, "Corrections.").unwrap();
+        let ok = manifest_text(&args, "ignorées", "n").unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+        assert_eq!(empty, "Les notes de version sont requises.");
+        assert_eq!(long, "Les notes de version dépassent 2000 caractères.");
+        assert_eq!(ok.notes, "Corrections.");
+        assert_eq!(ok.write_notes_to, None);
     }
 
     #[test]

@@ -46,15 +46,6 @@ fn published(version: &str) -> String {
     format!("Version {version} publiée : manifeste à jour, release v{version} créée.")
 }
 
-/// Ce que `release-github` reçoit de l'environnement.
-#[derive(Debug, Clone, Default)]
-pub struct Inputs {
-    /// Le commit lancé (`HEARTH_SHA`).
-    pub sha: String,
-    /// Jeton de lecture de l'API (`GH_TOKEN`).
-    pub token: String,
-}
-
 /// Ce que le dossier assemblé dit de la version à publier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Staged {
@@ -328,17 +319,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let stage_dir = option(args, "--stage-dir")
         .map_or_else(|| root.join(STAGE_DIR), |dir| Path::new(&dir).to_path_buf());
     let notes_file = option(args, "--notes-file").ok_or("--notes-file manquant")?;
-    let inputs = Inputs {
-        sha: std::env::var("HEARTH_SHA").unwrap_or_default(),
-        token: std::env::var("GH_TOKEN").unwrap_or_default(),
-    };
-    let staged = read_staged(&stage_dir, &inputs.sha)?;
+    let sha = std::env::var("HEARTH_SHA").unwrap_or_default();
+    let token = std::env::var("GH_TOKEN").unwrap_or_default();
+    let staged = read_staged(&stage_dir, &sha)?;
     ensure_release(
         &System::new(),
         &root,
         &staged,
         &notes_file,
-        &inputs.token,
+        &token,
         &mut |line| println!("{line}"),
     )?;
     crate::ci::summary(&success_summary(&staged));
@@ -360,7 +349,7 @@ mod tests {
 
     /// GitHub, `origin` et le manifeste public en mémoire ; `gh` modifie l'état.
     struct Fake {
-        /// Étiquette : `ls-remote` rend (code, sortie).
+        /// Étiquette sur `origin` : `None` absente, sinon le commit qu'elle pointe.
         tag: RefCell<Option<String>>,
         tag_lookup_fails: bool,
         /// Release : `None` absente, sinon les noms de ses fichiers joints.

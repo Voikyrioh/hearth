@@ -152,18 +152,14 @@ fn main() -> ExitCode {
         Err(message) => {
             // Mode GitHub, tâches de publication : la PREMIÈRE ligne (le message de la spec) en annotation
             // et au résumé, le détail technique sur les lignes suivantes (journal seulement).
-            if matches!(task.as_deref(), Some("release-upload" | "release-github"))
-                && let Some((first, detail)) = message.split_once('\n')
-                && ci::fail(first)
-            {
-                eprintln!("{detail}");
-                return ExitCode::FAILURE;
-            }
-            if matches!(task.as_deref(), Some("release-upload" | "release-github"))
-                && !message.contains('\n')
-                && ci::fail(&message)
-            {
-                return ExitCode::FAILURE;
+            if matches!(task.as_deref(), Some("release-upload" | "release-github")) {
+                let (first, detail) = message.split_once('\n').unwrap_or((message.as_str(), ""));
+                if ci::fail(first) {
+                    if !detail.is_empty() {
+                        eprintln!("{detail}");
+                    }
+                    return ExitCode::FAILURE;
+                }
             }
             eprintln!("erreur : {message}");
             ExitCode::FAILURE
