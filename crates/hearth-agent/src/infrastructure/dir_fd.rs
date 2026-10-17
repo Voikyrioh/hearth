@@ -21,7 +21,7 @@ pub(crate) const CREATE_FILE: OFlags = OFlags::WRONLY
     .union(OFlags::NOFOLLOW)
     .union(OFlags::CLOEXEC);
 
-pub(crate) fn mode(bits: u32) -> Mode {
+fn mode(bits: u32) -> Mode {
     Mode::from_bits_truncate(bits)
 }
 
