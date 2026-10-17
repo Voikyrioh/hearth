@@ -32,6 +32,7 @@ Le délai de grâce d'un service est celui de son unité (`TimeoutStopUSec`) pou
 - `crates/hearth-agent/tests/support/engine_contract.rs::writes (137 après le délai, trois exécutants)`
 
 ## Cas limites
+- Une unité qu'aucune autre ne retient (ni voulue par une cible, ni requise) est déchargée par systemd dès son arrêt et relue sans dates (`...Monotonic=0`) : l'arrêt est alors jugé sur l'attente de l'agent. Une unité redémarrée reste chargée : sa durée d'arrêt est toujours lue (vérifié en CI, `engine_supervised.rs`). Sur NixOS, les unités des conteneurs sont voulues par `multi-user.target`.
 - Le délai n'est pas réglable depuis Hearth dans ce lot.
 
 ## Règles liées

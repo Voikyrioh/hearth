@@ -114,7 +114,8 @@ pub const STOP_TIMES_PROPERTIES: &str =
 /// La durée du dernier arrêt de l'unité, mesurée par le système lui-même, d'une sortie de `systemctl show
 /// --property=<STOP_TIMES_PROPERTIES>` : de la sortie d'« active » à l'arrivée à « inactive ». Après un
 /// redémarrage, ce sont les instants de l'arrêt qui l'a précédé : le démarrage n'y entre pas. `None` : pas de
-/// réponse, un instant à zéro (jamais arrivé) ou une arrivée avant le départ (l'unité est repartie depuis
+/// réponse, un instant à zéro (jamais arrivé, ou unité qu'aucune autre ne retient, déchargée à son arrêt
+/// puis relue sans dates) ou une arrivée avant le départ (l'unité est repartie depuis
 /// sans s'être arrêtée de nouveau).
 pub fn parse_stop_duration(text: &str) -> Option<std::time::Duration> {
     let read = |name: &str| {

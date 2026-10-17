@@ -787,6 +787,9 @@ ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{
                 &third_id[..12.min(third_id.len())],
                 after_restart.activity
             ),
+            format!(
+                "durée d'arrêt datée par le système : arrêt {measured_stop:?} (unité déchargée à l'arrêt : aucune), redémarrage {measured_restart_stop:?}"
+            ),
         ],
     );
     assert_eq!(after_stop.activity, UnitActivity::Inactive);
@@ -796,17 +799,13 @@ ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{
     assert_eq!(restarted, Ok(()));
     assert_ne!(third_id, second_id);
     assert_eq!(after_restart.activity, UnitActivity::Active);
-    // Le système date l'arrêt seul : après un arrêt comme après un redémarrage, jamais plus que l'attente de
-    // l'agent (le démarrage d'un redémarrage n'y entre pas).
-    let measured_stop = measured_stop.unwrap_or_else(|| {
-        panic!(
-            "durée de l'arrêt lue de systemctl show : juste après {raw_after_stop:?}, à la fin {:?}",
-            stop_times(DRIVE_UNIT)
-        )
-    });
+    // Le système date l'arrêt seul, démarrage d'un redémarrage exclu. Une unité arrêtée qu'aucune autre ne
+    // retient (celle du test n'est voulue par aucune cible) est déchargée aussitôt et revient sans dates
+    // (`...Monotonic=0`) : l'agent retombe alors sur sa propre attente. Une unité redémarrée reste chargée : la
+    // durée DOIT être lue.
     assert!(
-        measured_stop <= stop_took,
-        "{measured_stop:?} > {stop_took:?}"
+        measured_stop.is_none_or(|took| took <= stop_took),
+        "{measured_stop:?} > {stop_took:?} ; juste après {raw_after_stop:?}"
     );
     let measured_restart_stop =
         measured_restart_stop.expect("durée de l'arrêt du redémarrage lue de systemctl show");
