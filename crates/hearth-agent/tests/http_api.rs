@@ -1654,7 +1654,10 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             }
             // Démarrer, arrêter, redémarrer (HRT-64) : `202`, et UNE entrée réussie, écrite à la fin de
             // l'action à l'arrière-plan (attendue plus bas).
-            ("POST", "/services/{key}/start" | "/services/{key}/stop" | "/services/{key}/restart") => {
+            (
+                "POST",
+                "/services/{key}/start" | "/services/{key}/stop" | "/services/{key}/restart",
+            ) => {
                 let verb = endpoint.path.rsplit('/').next().unwrap();
                 api.act(
                     &marie,

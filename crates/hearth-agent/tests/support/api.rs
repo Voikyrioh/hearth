@@ -77,9 +77,9 @@ fn state_over(
     let services = ServicesRegistry::with_supervision(
         engine.clone(),
         Arc::new(hearth_agent::infrastructure::supervisor::NoSupervisor),
-        Arc::new(hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(
-            env.db.pool().clone(),
-        )),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
+        ),
         &super::engine::TestHost,
         env.clock.clone(),
         Arc::new(SystemMonotonic::new()),

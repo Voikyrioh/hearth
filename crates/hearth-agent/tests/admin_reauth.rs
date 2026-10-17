@@ -613,6 +613,20 @@ impl Bench {
 
     /// Un instantané de ce qu'un acte pourrait changer.
     async fn snapshot(&self) -> String {
+        // Démarrer, arrêter, redémarrer (HRT-64) s'exécutent à l'arrière-plan : l'état est relevé une fois
+        // leur action terminée, pas pendant.
+        let started = std::time::Instant::now();
+        while sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM service_ops WHERE kind IN ('start', 'stop', 'restart') AND finished_at IS NULL",
+        )
+        .fetch_one(self.env.db.pool())
+        .await
+        .unwrap()
+            > 0
+            && started.elapsed() < std::time::Duration::from_secs(10)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
         let accounts: Vec<(String, String, String, i64)> = sqlx::query_as(
             "SELECT username, role, password_hash, reauth_window_s FROM accounts ORDER BY username",
         )
