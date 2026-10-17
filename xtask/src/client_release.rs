@@ -19,7 +19,9 @@
 //!   publication. Écrit `F.sig` (le contenu du `.sig` en base64, comme Tauri).
 //! - `client-manifest --version X.Y.Z --installer-file I --signature-file F --url U --notes-file N
 //!   --date D --out O` : vérifie la signature (clé du dépôt, version signée), puis écrit le manifeste
-//!   au format statique du greffon de mise à jour de Tauri. `U` est exactement
+//!   au format statique du greffon de mise à jour de Tauri. Sans `--notes-file`, les notes viennent de `HEARTH_NOTES`
+//!   (1 à 2000 caractères) et sont écrites dans `notes.txt` à côté de `--out` ; sans `--date`, la date UTC du
+//!   moment (HRT-174). `U` est exactement
 //!   `https://hearth.voikyrioh.fr/api/releases/{X.Y.Z}/Hearth_{X.Y.Z}_x64-setup.exe` (sans `v`).
 //!
 //! Aucun secret ici : la signature de l'installateur se fait dans le flux de publication, avec la
@@ -158,6 +160,48 @@ pub fn run_sign(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Notes et date du manifeste (HRT-174). `--notes-file N` : notes lues dans le fichier (flux manuel).
+/// Sans lui : notes de `HEARTH_NOTES` (contrôlées par la règle du lancement, spec section 2), écrites dans
+/// `notes.txt` à côté de `--out` pour que `release-stage` les relise. `--date D` : sinon, la date UTC du
+/// moment, à la seconde. Aucun secret n'entre ici.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ManifestText {
+    pub notes: String,
+    /// Fichier à écrire avec les notes (absent : elles viennent déjà d'un fichier).
+    pub write_notes_to: Option<std::path::PathBuf>,
+    pub date: String,
+}
+
+pub(crate) fn manifest_text(
+    args: &[String],
+    env_notes: &str,
+    now: &str,
+) -> Result<ManifestText, String> {
+    let (notes, write_notes_to) = match option(args, "--notes-file") {
+        Some(file) => (read(&file)?, None),
+        None => {
+            crate::release_preflight::check_notes(env_notes)?;
+            let out = required(args, "--out")?;
+            let dir = Path::new(&out).parent().unwrap_or_else(|| Path::new(""));
+            (env_notes.trim().to_owned(), Some(dir.join("notes.txt")))
+        }
+    };
+    Ok(ManifestText {
+        notes,
+        write_notes_to,
+        date: option(args, "--date").unwrap_or_else(|| now.to_owned()),
+    })
+}
+
+/// La date UTC du moment, RFC 3339 à la seconde (`2026-10-17T13:10:00Z`).
+fn utc_now() -> Result<String, String> {
+    let now = time::OffsetDateTime::now_utc()
+        .replace_nanosecond(0)
+        .map_err(|error| error.to_string())?;
+    now.format(&time::format_description::well_known::Rfc3339)
+        .map_err(|error| error.to_string())
+}
+
 /// `cargo xtask client-manifest …`.
 pub fn run_manifest(args: &[String]) -> Result<(), String> {
     // Ce que le client refuserait n'est jamais publié : signature vérifiée contre la clé du dépôt.
@@ -168,15 +212,29 @@ pub fn run_manifest(args: &[String]) -> Result<(), String> {
         &std::fs::read(&installer).map_err(|error| format!("{installer} : {error}"))?,
         &required(args, "--version")?,
     )?;
+    let env_notes = std::env::var("HEARTH_NOTES").unwrap_or_default();
+    let input = manifest_text(args, &env_notes, &utc_now()?)?;
     let text = manifest(
         &required(args, "--version")?,
-        &read(&required(args, "--notes-file")?)?,
+        &input.notes,
         &read(&required(args, "--signature-file")?)?,
         &required(args, "--url")?,
-        &required(args, "--date")?,
+        &input.date,
     )?;
+    if let Some(path) = &input.write_notes_to {
+        std::fs::write(path, &input.notes)
+            .map_err(|error| format!("{} : {error}", path.display()))?;
+        println!("notes écrites : {}", path.display());
+    }
     let out = required(args, "--out")?;
-    std::fs::write(&out, format!("{text}\n")).map_err(|error| format!("{out} : {error}"))?;
+    std::fs::write(
+        &out,
+        format!(
+            "{text}
+"
+        ),
+    )
+    .map_err(|error| format!("{out} : {error}"))?;
     println!("manifeste écrit : {out}");
     Ok(())
 }
@@ -278,6 +336,61 @@ mod tests {
                 .contains("obligatoire")
         );
         assert!(sign_installer("pas une clé", "pw", data, "x", "1.2.0", 7).is_err());
+    }
+
+    fn argv(list: &[&str]) -> Vec<String> {
+        list.iter().map(|arg| (*arg).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_notes_come_from_the_environment_and_land_in_notes_txt_next_to_the_manifest() {
+        let input = manifest_text(
+            &argv(&["--out", "dir/latest.json"]),
+            "  Corrections.
+",
+            "2026-10-17T13:10:00Z",
+        )
+        .unwrap();
+        assert_eq!(input.notes, "Corrections.");
+        assert_eq!(
+            input.write_notes_to,
+            Some(std::path::PathBuf::from("dir").join("notes.txt"))
+        );
+        assert_eq!(input.date, "2026-10-17T13:10:00Z");
+    }
+
+    #[test]
+    fn an_explicit_date_wins_and_empty_or_too_long_notes_are_refused() {
+        let args = argv(&["--out", "latest.json", "--date", "2026-01-01T00:00:00Z"]);
+        assert_eq!(
+            manifest_text(&args, "x", "2026-10-17T13:10:00Z")
+                .unwrap()
+                .date,
+            "2026-01-01T00:00:00Z"
+        );
+        assert_eq!(
+            manifest_text(
+                &args, "  
+", "n"
+            )
+            .unwrap_err(),
+            "Les notes de version sont requises."
+        );
+        assert_eq!(
+            manifest_text(&args, &"é".repeat(2001), "n").unwrap_err(),
+            "Les notes de version dépassent 2000 caractères."
+        );
+        assert!(manifest_text(&args, &"é".repeat(2000), "n").is_ok());
+    }
+
+    #[test]
+    fn the_current_utc_date_is_a_whole_second_rfc3339_ending_in_z() {
+        let now = utc_now().unwrap();
+        assert!(now.ends_with('Z') && !now.contains('.'), "{now}");
+        assert!(
+            time::OffsetDateTime::parse(&now, &time::format_description::well_known::Rfc3339)
+                .is_ok()
+        );
     }
 
     #[test]
