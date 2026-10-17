@@ -11,6 +11,7 @@ catalog/
 │   ├── error.rs      → `FicheRefusee { fichier, chemin, ligne, motif }`, `Motif` (un motif par invariant, `invariant()` le nomme), `message_pour(dossier)`
 │   ├── value.rs      → alphabets fermés (`Charset`, `first_refused_char`), `ChannelPath` (chemin relatif validé), adresses `https`, ordres, drapeaux, versions pointées, `extract_game_version`, `forbidden_in_file`
 │   ├── schema/       → `fiche.rs` et `settings.rs` : structures serde, `deny_unknown_fields` à tous les niveaux
+│   ├── memory.rs     → mémoire recommandée et crans (HRT-122) : `TierId`, `memory_tiers` (crans servis, jamais un chiffre calculé d'un autre), `recommended_gap` (règle de publication)
 │   ├── model.rs      → `Fiche`, `Setting`, `ValueSpec`, `validate_value` (une valeur contre son type), `fiche_digest` (SHA-256 des deux fichiers avec leurs longueurs)
 │   ├── loader.rs     → `load(origine, octets)` : taille, UTF-8, analyse fermée, bornes, invariants, préréglages résolus, cohérence des réglages
 │   ├── invariants.rs → I1 à I9 : `check_bounds`, `check_fiche_file`, `check_cross`, `check_url`, `check_derive`
@@ -24,4 +25,4 @@ catalog/
 
 Tests : `test_support.rs` (une fiche minimale et une fiche riche, dont les fiches piégées sont dérivées d'UNE modification), `tests_fiches.rs` (format fermé, I1 à I9, cohérence, Terraria, `ids.lock`), `tests_state.rs` (réglages, écart, arrêt), `tests_translate.rs` (traduction et test de propriété à graine fixe), `architecture_guard.rs`.
 
-Règles : BR-FICHE-005 à 011, 037, 038, 046 à 049 ; BR-JEU-002, 038, 039, 040.
+Règles : BR-FICHE-005 à 011, 037, 038, 046 à 049 ; BR-RES-031 à 033, 038 ; BR-JEU-002, 038, 039, 040.
