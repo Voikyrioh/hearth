@@ -42,6 +42,14 @@ La version 1 décrivait une fiche à quelques questions, dont les fichiers de co
 - L'empreinte est le SHA-256 de `u32(longueur) || fiche.toml || u32(longueur) || settings.toml` (longueurs gros-boutistes).
 - `rerun-if-changed=catalog` : `build.rs` ne se relance que si le dossier du catalogue change.
 
+## Évolution : mémoire recommandée et crans de mémoire (HRT-122)
+
+Rien n'est retiré du format. Deux blocs facultatifs s'ajoutent sous `[resources]` : `[[resources.memory_tier]]` (zéro à trois entrées : `id` parmi `smooth`, `ultra`, `community` ; `from_bytes` ; `evidence`) et `[resources.tiers] hidden = [...]` (crans sans sens pour ce jeu, parmi les six identifiants `unstable`, `slow`, `recommended`, `smooth`, `ultra`, `community`). « Instable », « Lent » et « Recommandé » ne s'écrivent pas : ils se déduisent de `min_bytes` et `recommended_bytes` (`BR-RES-032`). Le champ `evidence` d'un cran reprend la forme de HRT-113 telle quelle : `"measured"` ou `{ publisher = "https://..." }` (l'adresse est dans la preuve, il n'y a donc pas de champ `url` séparé) ; `measured_idle` et `unmeasured` sont refusés (`CranPreuveInterdite`). Aucun champ de texte : les libellés et les textes sont ceux de Hearth. Refus typés : `CranInconnu`, `CranEnDouble`, `CranNonDeclarable`, `CranBorneInvalide` (non croissants, pas au-dessus de la mémoire recommandée, ou pas de mémoire recommandée), `CranPreuveInterdite`, `AdresseNonHttps` (I5).
+
+Règle de publication (`BR-RES-038`) : une fiche `published` porte `memory.recommended_bytes` avec une preuve `measured` ou `publisher`. Le chargeur la refuse sinon (`PublieeSansMemoireRecommandee`) ; `cargo xtask catalog-check --release` dit en plus ce qui manque à une fiche `preview` (mémoire recommandée absente ou mesurée au repos seulement). Une mesure au repos est un plancher, jamais multipliée en recommandation. Terraria reste `preview` tant que HRT-149 n'a pas relevé son chiffre.
+
+Mise en œuvre : `loading/memory.rs` (`memory_tiers`, `recommended_gap`), `invariants.rs::check_memory_tiers`. Premier usage servi : « Recommandé » ; les autres crans sont servis dès que la fiche leur donne un chiffre fondé. Servir les crans dans la réponse du catalogue et du service installé reste à faire (tranche suivante, hors domaine pur).
+
 ## Quand NE PAS l'appliquer / limites
 - Le format borne ce que Hearth demande au moteur, pas ce que l'image fait une fois lancée ni ce qu'elle télécharge.
 - Un service adopté n'a ni fiche ni réglages (`FICHE-054`).
