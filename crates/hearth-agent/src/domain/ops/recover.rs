@@ -86,7 +86,15 @@ pub fn recover(
     };
 
     if !any_destructive_row {
-        return interrupted(Cause::NotExecuted);
+        // Démarrer, arrêter, redémarrer (HRT-64, BR-LIFE-020) : ni l'ordre donné au moteur ni son issue ne se
+        // lisent dans le journal (aucune de leurs étapes n'est destructive), donc « non exécuté » serait
+        // faux : l'issue est inconnue, et le compte relit l'état réel.
+        let cause = if kind.is_lifecycle() {
+            Cause::Interrupted
+        } else {
+            Cause::NotExecuted
+        };
+        return interrupted(cause);
     }
     let states: Vec<_> = destructive
         .iter()
@@ -452,5 +460,36 @@ mod tests {
         let rows = vec![with_object(row(1, "create_new", Intent), escaping)];
         let recovery = recover(OpKind::Update, &update_plan(), &rows, Observed::Ambiguous);
         assert!(recovery.cleanup.is_empty());
+    }
+
+    /// Démarrer, arrêter, redémarrer (HRT-64, BR-LIFE-020) : aucun geste n'est destructif au sens du journal
+    /// (un arrêt ne perd aucune donnée de l'agent, et il se rejoue par le compte), donc l'agent qui redémarre
+    /// classe l'action `interrupted` avec sa cause propre, verrou rendu, jamais « à vérifier ».
+    #[test]
+    fn a_lifecycle_action_cut_by_a_restart_is_interrupted_and_frees_the_service() {
+        let plan = OpPlan::new(
+            vec![PlannedStep {
+                name: name("stop"),
+                destructive: false,
+            }],
+            None,
+        )
+        .unwrap();
+        for kind in [OpKind::Start, OpKind::Stop, OpKind::Restart] {
+            for rows in [
+                vec![],
+                vec![row(1, "stop", Intent)],
+                vec![row(1, "stop", Done)],
+            ] {
+                let recovery = recover(kind, &plan, &rows, Observed::Unreadable);
+                assert_eq!(recovery.status, OpStatus::Interrupted, "{kind:?}");
+                assert_eq!(recovery.cause, Cause::Interrupted, "{kind:?}");
+                assert!(!recovery.keeps_lock);
+                assert!(recovery.choices.is_empty());
+            }
+        }
+        // Les autres genres gardent leur cause : « non exécuté ».
+        let delete = recover(OpKind::Delete, &plan, &[], Observed::Unreadable);
+        assert_eq!(delete.cause, Cause::NotExecuted);
     }
 }

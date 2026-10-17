@@ -204,11 +204,7 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::NoSpace // espace disque insuffisant
         // Codes des tranches L1 à L3 (HRT-144), déclarés d'un coup : chacun est classé ici, la route qui le
         // rendra peut préciser une raison plus fine.
-        | ErrorCode::ServiceBusy // une opération tient déjà le service
-        | ErrorCode::ServiceAlreadyInState // déjà dans l'état demandé
-        | ErrorCode::ServiceNotDrivable // en pause ou état non reconnu
         | ErrorCode::NameTaken // nom pris
-        | ErrorCode::PortInUse // port tenu
         | ErrorCode::DeployLimit // trop de déploiements à la fois
         | ErrorCode::DecisionNotOffered // choix absent de ceux que l'opération offre
         | ErrorCode::FicheChanged // fiche changée depuis sa lecture
@@ -226,8 +222,13 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::ServiceNotFound // service inconnu
         | ErrorCode::OperationNotFound // opération inconnue, ou sur un service que le compte ne voit pas
         | ErrorCode::BackupNotFound => Some(Outcome::Failed(Reason::NotFound)), // sauvegarde inconnue
+        // Démarrer, arrêter, redémarrer (HRT-64, BR-LIFE-018) : une cause typée par refus, dans la liste fermée.
+        ErrorCode::ServiceBusy => Some(Outcome::Failed(Reason::ActionInProgress)), // une opération tient déjà le service
+        ErrorCode::ServiceAlreadyInState => Some(Outcome::Failed(Reason::AlreadyInState)), // déjà dans l'état demandé
+        ErrorCode::ServiceNotDrivable => Some(Outcome::Failed(Reason::NotDrivable)), // en pause, en arrêt, état non reconnu
+        ErrorCode::PortInUse => Some(Outcome::Failed(Reason::PortInUse)), // port tenu
         // Le moteur de conteneurs ne répond pas : réessayer plus tard.
-        ErrorCode::EngineUnavailable => Some(Outcome::Failed(Reason::Busy)),
+        ErrorCode::EngineUnavailable => Some(Outcome::Failed(Reason::EngineUnavailable)),
         // Place occupée : réessayer plus tard.
         ErrorCode::HeavyIoBusy // une opération lourde tient déjà la place
         | ErrorCode::TransferLimit => Some(Outcome::Failed(Reason::Busy)), // trop de transferts à la fois

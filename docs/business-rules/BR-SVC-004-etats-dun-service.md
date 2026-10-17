@@ -11,16 +11,18 @@ maj: 2026-10-13
 # BR-SVC-004 — L'état d'un service est un des neuf états fermés, dérivé par une fonction pure
 
 ## Règle
-L'état d'un service est toujours un et un seul de neuf (liste fermée) : en marche, arrêté, démarrage, arrêt en cours, en erreur, redémarre en boucle, en pause, déploiement en cours, état non reconnu. Cette tranche produit en marche, arrêté, en erreur, redémarre en boucle, en pause, arrêt en cours (conteneur en suppression) et non reconnu ; démarrage et déploiement en cours arrivent avec les tranches 3 et 5. `derive_state` est une fonction pure.
+L'état d'un service est toujours un et un seul de neuf (liste fermée) : en marche, arrêté, démarrage, arrêt en cours, en erreur, redémarre en boucle, en pause, déploiement en cours, état non reconnu. Cette tranche produit en marche, arrêté, en erreur, redémarre en boucle, en pause, arrêt en cours (conteneur en suppression) et non reconnu ; « Démarrage » et « Arrêt en cours » sont aussi montrés quand c'est Hearth qui agit (HRT-64, `overlay_transition` : jamais vers « En marche » par avance, BR-LIFE-004 et BR-LIFE-012) ; le déploiement en cours arrive avec la tranche 5. `derive_state` est une fonction pure.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/state.rs::derive_state`
-- `crates/hearth-agent/src/domain/services/state.rs::ServiceStateKind`
+- `crates/hearth-agent/src/domain/services/state.rs::{ServiceStateKind, overlay_transition}`
 - `crates/hearth-proto/src/api/services.rs::ServiceState`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/services/state.rs::tests::derive_state_exit_codes`
 - `crates/hearth-agent/src/domain/services/state.rs::tests::every_other_run_state_has_its_service_state`
+- `crates/hearth-agent/src/domain/services/state.rs::tests::a_hearth_stop_shows_stopping_only_over_a_service_that_runs`
 
 ## Historique
 - 2026-10-13 — création (HRT-61, tranche 1 des déploiements : moteur détecté et liste en lecture seule).
+- 2026-10-17 — HRT-64 : « Démarrage » et « Arrêt en cours » montrés pendant une action de Hearth.

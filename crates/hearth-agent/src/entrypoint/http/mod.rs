@@ -47,6 +47,7 @@ use crate::application::operations::OperationService;
 use crate::application::ports::AuditSink;
 use crate::application::security::SecurityService;
 use crate::application::service_adoption::ServiceAdoption;
+use crate::application::service_lifecycle::ServiceLifecycle;
 use crate::application::service_logs::ServiceLogs;
 use crate::application::service_op_access::ServiceOpAccess;
 use crate::application::services::ServicesRegistry;
@@ -83,6 +84,8 @@ pub struct AppState {
     pub service_adoption: Arc<ServiceAdoption>,
     /// Lire, annuler et décider les opérations de service, et les suivre en direct (HRT-144, ADR-0045).
     pub service_ops: Arc<ServiceOpAccess>,
+    /// Démarrer, arrêter, redémarrer un service (HRT-64, ADR-0037, ADR-0045).
+    pub service_lifecycle: Arc<ServiceLifecycle>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -356,6 +359,37 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::ServiceRelease),
         route: || post(services::release),
+    },
+    // Démarrer, arrêter, redémarrer un service (HRT-64, ADR-0037) : trois actes d'administration confirmés
+    // (`ServiceStart` `0x0C`, `ServiceStop` `0x0D`, `ServiceRestart` `0x0E`, couverts par l'élévation),
+    // asynchrones (`202`), réservés au droit « gérer les services » (BR-LIFE-001). La couche d'accès consigne
+    // les refus et les échecs sous l'action de la ligne ; la réussite est écrite à la fin de l'action.
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/start",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceStart),
+        route: || post(services::start),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/stop",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceStop),
+        route: || post(services::stop),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/restart",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceRestart),
+        route: || post(services::restart),
     },
     // Les opérations de service (HRT-144, ADR-0045). Lire : tout compte authentifié, mais une opération sur
     // un service que le compte ne voit pas est une opération inconnue (`service_op_access::read`). Annuler
@@ -780,6 +814,11 @@ mod tests {
         ("GET", "/services/external", Service),
         ("POST", "/services/adopt", Service),
         ("POST", "/services/{key}/release", Service),
+        // Démarrer, arrêter, redémarrer (HRT-64) : le droit est exigé par le niveau, la confirmation par la table
+        // des actes de `hearth-proto` (BR-LIFE-001, BR-LIFE-016).
+        ("POST", "/services/{key}/start", Service),
+        ("POST", "/services/{key}/stop", Service),
+        ("POST", "/services/{key}/restart", Service),
         // Les opérations de service (HRT-144) : lire est ouvert à tout compte (la visibilité du service est
         // jugée par `ServiceOpAccess`), annuler et décider exigent le droit et la confirmation de l'acte.
         ("GET", "/operations/services/{id}", OpenRead),
@@ -954,6 +993,9 @@ mod tests {
                 ("POST", "/operations/services/{id}/decision"),
                 ("POST", "/services/adopt"),
                 ("POST", "/services/{key}/release"),
+                ("POST", "/services/{key}/restart"),
+                ("POST", "/services/{key}/start"),
+                ("POST", "/services/{key}/stop"),
             ]
         );
         // Et les deux seules routes protégées de l'inventaire : le mot de passe d'autrui et la suppression.

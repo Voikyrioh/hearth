@@ -18,6 +18,7 @@ Toute opération (démarrer, arrêter, redémarrer, déployer, modifier, supprim
 - `crates/hearth-agent/src/domain/ops/kind.rs::OpKind::lock_mode`
 - `crates/hearth-agent/src/application/service_ops.rs::ServiceOps::accept`
 - `crates/hearth-agent/migrations/0012_service_specs_and_ops.sql (index service_ops_open)`
+- `crates/hearth-agent/src/application/service_lifecycle.rs::ServiceLifecycle::request` (HRT-64)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/ops/locks.rs::tests`
@@ -25,14 +26,16 @@ Toute opération (démarrer, arrêter, redémarrer, déployer, modifier, supprim
 - `crates/hearth-agent/tests/service_ops_journal.rs::an_accepted_operation_takes_the_service_and_gives_it_back_when_it_ends`
 - `crates/hearth-agent/tests/service_ops_journal.rs::the_unique_index_is_the_belt_when_the_memory_lock_has_a_defect`
 - `crates/hearth-agent/tests/service_ops_journal.rs::heavy_io_has_one_seat_for_the_whole_server`
+- `crates/hearth-agent/tests/service_lifecycle_https.rs::a_second_request_on_a_busy_service_is_refused_with_who_holds_it_and_other_services_are_free`
 
 ## Cas limites
-- Le message « Une action est déjà en cours sur ce service. » et le nom du compte viennent avec les routes (HRT-64).
+- Le refus est typé (`409 SERVICE_BUSY`, `details.by` le compte, `details.kind` le genre) : « Une action est déjà en cours sur ce service. » (HRT-64, `ServiceLifecycle::request` lit l'index du journal avant l'état du service ; deux demandes simultanées sont départagées par le verrou en mémoire puis la base).
 - Le verrou est VISIBLE de tous : `ServiceItem.busy` (type, compte, depuis quand) est la projection de l'opération non terminée du service (BR-OPS-005, HRT-144).
 
 ## Règles liées
 - BR-FILES-024, BR-DEL-019, BR-EDIT-031
 
 ## Historique
+- 2026-10-17 — le refus typé et le compte qui tient le verrou (HRT-64).
 - 2026-10-14 — `busy` et `last_action` projetés du journal (HRT-144).
 - 2026-10-13 — création (HRT-83, ADR-0044 et ADR-0045 : socle des services créés par Hearth, côté agent).

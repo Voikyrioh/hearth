@@ -159,7 +159,7 @@ jobs:
   # chez AWS : sa limite anonyme existe pourtant, `toomanyrequests: Rate exceeded` le 2026-10-13, d'où l'étape de téléchargement avec reprise ci-dessous). Ce job n'a jamais été exécuté avant sa première PR.
   engine:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       HEARTH_TEST_ENGINE: "1"
     steps:
@@ -198,7 +198,9 @@ jobs:
           echo "::error::téléchargement de $IMAGE abandonné après 5 essais (limite de débit ou panne du registre, pas un défaut du code testé) : $(printf '%s' "$out" | tr '\n' ' ')"
           exit 1
       # La suite de contrat (liste, inspection, événements, journaux : fin, dernières lignes, reprise, suivi,
-      # terminal, ligne géante, pilote `none`) et le débit soutenu des journaux : 60 s à environ 1 000 lignes
+      # terminal, ligne géante, pilote `none` ; HRT-64 : démarrer, arrêter dans le délai et de force avec le
+      # code 137, redémarrer, un port pris, un conteneur inconnu, l'arrêt d'un conteneur `--rm`) et le débit
+      # soutenu des journaux : 60 s à environ 1 000 lignes
       # par seconde, sans perte ni doublon, mémoire du lecteur stable (HRT-66).
       - name: Suite de contrat de l'adaptateur contre un vrai moteur
         env:
@@ -216,11 +218,14 @@ jobs:
       # arrêt par l'API du moteur sur ce conteneur (question ouverte de la section 0 de la conception) :
       # la réponse est dans le journal de l'étape et dans le résumé du job. Il ne la juge pas. Il
       # consigne aussi l'arrêt PAR LE SUPERVISEUR (durée, état de l'unité, conteneur, registre) d'une
-      # unité transitoire et d'une unité de fichier, puis juge. Pire cas des attentes du test : environ
-      # 7 minutes (3 x 60 s de démarrage, 30 s, 2 x (60 s + 30 s), hors téléchargement) ; l'étape est
-      # coupée à 12 minutes, le job à 20.
-      - name: Service supervisé par une unité systemd (propriétaire détecté, arrêts consignés)
-        timeout-minutes: 12
+      # unité transitoire et d'une unité de fichier, puis juge. HRT-64 (ADR-0037) : les trois ordres du
+      # superviseur (arrêter, démarrer, redémarrer, `systemctl`) sur une unité de fichier qui se relance
+      # toujours : l'arrêt TIENT, le démarrage recrée le conteneur, le redémarrage le remplace. Pire cas des
+      # attentes : environ 13 minutes (3 x 60 s de démarrage, 30 s, 2 x (60 s + 30 s) pour le premier test ;
+      # 60 s, 50 s, 6 s, 2 x 60 s pour le second, hors téléchargement) ; l'étape est coupée à 16 minutes, le
+      # job à 25.
+      - name: Service supervisé par une unité systemd (propriétaire détecté, arrêts consignés, trois ordres)
+        timeout-minutes: 16
         run: |
           bin="$(cargo test -p hearth-agent --test engine_supervised --no-run --message-format=json \
             | jq -r 'select(.reason == "compiler-artifact" and .target.name == "engine_supervised" and .executable != null) | .executable' \
@@ -234,7 +239,7 @@ jobs:
           units="$(systemctl list-units --all --plain --no-legend 'hearth-e2e*' || true)"
           if [ -n "$left" ] || [ -n "$units" ]; then
             docker ps -a --filter name=hearth-e2e; echo "$units"
-            sudo systemctl stop 'hearth-e2e*' || true; sudo rm -f /run/systemd/system/hearth-e2e-file.service
+            sudo systemctl stop 'hearth-e2e*' || true; sudo rm -f /run/systemd/system/hearth-e2e-file.service /run/systemd/system/hearth-e2e-drive.service
             [ -z "$left" ] || docker rm -f $left
             exit 1
           fi

@@ -331,6 +331,44 @@ impl OpJournal for SqliteOpJournal {
         }
     }
 
+    async fn mark_forced(&self, id: &str, at: OffsetDateTime) -> Result<(), JournalError> {
+        let at = format_date(RESOURCE, at)?;
+        let done = sqlx::query(
+            "UPDATE service_ops SET forced = 1, updated_at = ?
+              WHERE id = ? AND finished_at IS NULL",
+        )
+        .bind(at)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(storage(RESOURCE))?;
+        if done.rows_affected() == 1 {
+            Ok(())
+        } else {
+            Err(JournalError::NoSuchOperation)
+        }
+    }
+
+    async fn annotate_cause(
+        &self,
+        id: &str,
+        cause: Cause,
+        at: OffsetDateTime,
+    ) -> Result<bool, JournalError> {
+        let at = format_date(RESOURCE, at)?;
+        let done = sqlx::query(
+            "UPDATE service_ops SET cause = ?, updated_at = ?
+              WHERE id = ? AND status = 'succeeded' AND cause = ''",
+        )
+        .bind(cause.as_str())
+        .bind(at)
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(done.rows_affected() == 1)
+    }
+
     async fn expired_decisions(
         &self,
         older_than: OffsetDateTime,

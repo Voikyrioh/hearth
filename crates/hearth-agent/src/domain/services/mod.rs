@@ -41,12 +41,12 @@ pub use log_brake::{AccountBrake, BrakeSettings, OpenRefusal, REFUSALS_BEFORE_EN
 pub use state::{
     Derived, MountInfo, MountType, Observation, PortBinding, PortProtocol, PortScope,
     RESTART_LOOP_STARTS, RESTART_LOOP_WINDOW, RestartPolicy, RunState, STARTING_MAX,
-    ServiceStateKind, StartWindow, compare_names, derive_state, derive_supervised,
-    derive_unit_state, stop_grace_s,
+    ServiceStateKind, StartWindow, Transition, TransitionKind, compare_names, derive_state,
+    derive_supervised, derive_unit_state, honour_stop_request, overlay_transition, stop_grace_s,
 };
 pub use unit::{
-    ClientClaim, UnitActivity, UnitLookup, UnitName, UnitStatus, attribute, client_refs,
-    is_engine_client, parse_main_pid, parse_show, unit_of_cgroup,
+    ClientClaim, STOP_TIMES_PROPERTIES, UnitActivity, UnitLookup, UnitName, UnitStatus, attribute,
+    client_refs, is_engine_client, parse_main_pid, parse_show, parse_stop_duration, unit_of_cgroup,
 };
 pub use visibility::{
     Adoption, CONFIRMATION_TTL, Holder, UNIT_GONE_READS, Visibility, confirmation_expired,

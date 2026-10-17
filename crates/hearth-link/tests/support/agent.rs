@@ -273,6 +273,31 @@ impl ServiceSupervisor for StaticSupervisor {
     async fn unit(&self, _unit: &UnitName) -> UnitLookup {
         UnitLookup::Unavailable
     }
+
+    // Les tests de la liaison ne pilotent aucun service (HRT-64 est côté agent) : un ordre est refusé.
+    async fn start(
+        &self,
+        _unit: &UnitName,
+        _wait: std::time::Duration,
+    ) -> Result<(), hearth_agent::application::ports::SupervisorError> {
+        Err(hearth_agent::application::ports::SupervisorError::Unavailable)
+    }
+
+    async fn stop(
+        &self,
+        _unit: &UnitName,
+        _wait: std::time::Duration,
+    ) -> Result<(), hearth_agent::application::ports::SupervisorError> {
+        Err(hearth_agent::application::ports::SupervisorError::Unavailable)
+    }
+
+    async fn restart(
+        &self,
+        _unit: &UnitName,
+        _wait: std::time::Duration,
+    ) -> Result<(), hearth_agent::application::ports::SupervisorError> {
+        Err(hearth_agent::application::ports::SupervisorError::Unavailable)
+    }
 }
 
 pub struct TestAgent {
@@ -412,6 +437,7 @@ impl TestAgent {
                     host: Arc::new(DebianHost),
                     timings: engine_timings(),
                     log_brake: self.brake,
+                    lifecycle: hearth_agent::application::service_lifecycle::LifecycleTimings::production(),
                 },
             )
             .await
