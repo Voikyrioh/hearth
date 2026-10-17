@@ -717,6 +717,8 @@ ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{
     let UnitLookup::Loaded(after_stop) = supervisor.unit(&unit).await else {
         panic!("l'unité d'un fichier, arrêtée, reste chargée");
     };
+    // La durée de l'arrêt que le système a datée lui-même (BR-LIFE-009) : lue, et pas plus longue que l'attente.
+    let measured_stop = supervisor.last_stop_duration(&unit).await;
     tokio::time::sleep(Duration::from_secs(6)).await;
     let UnitLookup::Loaded(later) = supervisor.unit(&unit).await else {
         panic!("l'unité reste chargée");
@@ -735,6 +737,7 @@ ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{
     let began = Instant::now();
     let restarted = supervisor.restart(&unit, wait).await;
     let restart_took = began.elapsed();
+    let measured_restart_stop = supervisor.last_stop_duration(&unit).await;
     eventually(
         "le conteneur est remplacé",
         Duration::from_secs(60),
@@ -778,4 +781,17 @@ ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{
     assert_eq!(restarted, Ok(()));
     assert_ne!(third_id, second_id);
     assert_eq!(after_restart.activity, UnitActivity::Active);
+    // Le système date l'arrêt seul : après un arrêt comme après un redémarrage, jamais plus que l'attente de
+    // l'agent (le démarrage d'un redémarrage n'y entre pas).
+    let measured_stop = measured_stop.expect("durée de l'arrêt lue de systemctl show");
+    assert!(
+        measured_stop <= stop_took,
+        "{measured_stop:?} > {stop_took:?}"
+    );
+    let measured_restart_stop =
+        measured_restart_stop.expect("durée de l'arrêt du redémarrage lue de systemctl show");
+    assert!(
+        measured_restart_stop <= restart_took,
+        "{measured_restart_stop:?} > {restart_took:?}"
+    );
 }
