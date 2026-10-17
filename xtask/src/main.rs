@@ -31,6 +31,9 @@
 //!   de publication (HRT-173, BR-RELEASE-007) : arbre propre exigé, enregistrement de construction du
 //!   client et de l'agent relu par `release-stage`, signature de l'agent par la clé de l'environnement,
 //!   racine du dépôt égale à l'espace de travail de GitHub.
+//! - `workflow_check` (tests seulement) : le flux `.github/workflows/publish.yml` est lu comme du texte et ses promesses
+//!   vérifiées (déclencheur unique, aucun secret hors de l'étape du job `publish`, permissions, essai à blanc ;
+//!   HRT-175, BR-RELEASE-004, 005 et 011).
 //! - `agent-manifest` : section `agent` du `latest.json`, signature vérifiée contre la clé
 //!   embarquée dans l'agent (HRT-17, ADR-0021, runbook `mettre-a-jour-agent`).
 //!
@@ -60,6 +63,8 @@ mod repo_root;
 mod secret;
 mod shellcheck;
 mod test_tmp;
+#[cfg(test)]
+mod workflow_check;
 
 use std::process::ExitCode;
 
