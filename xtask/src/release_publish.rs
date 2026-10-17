@@ -2,11 +2,14 @@
 //! 8.2) : dépose au bucket privé le dossier assemblé par `release-stage`.
 //!
 //! - SANS `--confirm` : ESSAI À BLANC. Affiche chaque écriture prévue (clé d'objet, somme, taille),
-//!   n'écrit rien et ne lance AUCUNE commande (ni `aws`, ni `curl`).
-//! - AVEC `--confirm`, dans cet ordre, jamais un autre :
+//!   n'écrit rien et ne lance AUCUNE commande (ni `aws`, ni `curl`) ; première ligne « Essai à blanc :
+//!   rien n'a été déposé. … » (BR-RELEASE-011).
+//! - AVEC `--confirm`, dans cet ordre, jamais un autre (HRT-174 : `aws --version` d'abord, majeure 2
+//!   exigée ; messages exacts de la spec fonctionnelle section 4 pour le refus et le dépôt interrompu,
+//!   BR-RELEASE-009) :
 //!   1. les fichiers de la version (`releases/X.Y.Z/*`). AVANT toute écriture, chaque clé est cherchée :
 //!      absente, elle sera écrite ; présente avec le MÊME contenu, elle est passée ; présente avec un
-//!      AUTRE contenu, REFUS et arrêt sans rien avoir écrit (une version déposée ne se réécrit jamais,
+//!      AUTRE contenu, refus et arrêt sans rien avoir écrit (une version déposée ne se réécrit jamais,
 //!      BR-RELEASE-001). Toujours avant toute écriture : lecture du manifeste en place, refus si sa
 //!      version est SUPÉRIEURE à celle déposée (sauf `--allow-rollback`) ;
 //!   2. relecture de chaque fichier par l'adresse publique `https://hearth.voikyrioh.fr/api/releases/…`
@@ -412,17 +415,26 @@ pub(crate) fn triple(version: &str) -> Result<(u64, u64, u64), String> {
     }
 }
 
+/// Ce que dit le manifeste EN PLACE dans le bucket, lu avant toute écriture.
+#[derive(Debug, Default)]
+struct InPlace {
+    /// Versions annoncées plus récentes que celle déposée (vide hors retour arrière accepté) : le
+    /// retour arrière accepté doit laisser une ligne, que l'appelant affiche avant la première écriture.
+    newer: Vec<String>,
+    /// La version que les utilisateurs voient aujourd'hui (la plus récente du client et de l'agent ;
+    /// `None` : aucun manifeste), pour le message d'un dépôt interrompu.
+    announced: Option<String>,
+}
+
 /// Lit le manifeste EN PLACE dans le bucket (avant toute écriture) : refus si sa version, client ou
 /// agent, est supérieure à celle déposée, sauf retour arrière explicite. Absent = premier dépôt.
-/// Rend les versions annoncées plus récentes que celle déposée (vide hors retour arrière accepté) : le
-/// retour arrière accepté doit laisser une ligne, que l'appelant affiche avant la première écriture.
-fn check_not_older(
+fn read_manifest_in_place(
     host: &dyn Host,
     version: &str,
     allow_rollback: bool,
-) -> Result<Vec<String>, String> {
+) -> Result<InPlace, String> {
     let Some(bytes) = fetch(host, MANIFEST_KEY)? else {
-        return Ok(Vec::new());
+        return Ok(InPlace::default());
     };
     let unreadable = |detail: &str| {
         format!(
@@ -433,6 +445,7 @@ fn check_not_older(
         serde_json::from_slice(&bytes).map_err(|error| unreadable(&error.to_string()))?;
     let deposited = triple(version)?;
     let mut newer = Vec::new();
+    let mut announced: Option<((u64, u64, u64), String)> = None;
     let fields = [
         ("version (client)", value["version"].as_str(), true),
         ("agent.version", value["agent"]["version"].as_str(), false),
@@ -444,18 +457,137 @@ fn check_not_older(
                 if found_triple > deposited {
                     newer.push(format!("{label} {found}"));
                 }
+                if announced
+                    .as_ref()
+                    .is_none_or(|(best, _)| found_triple > *best)
+                {
+                    announced = Some((found_triple, found.to_owned()));
+                }
             }
             None if required => return Err(unreadable(&format!("{label} manque"))),
             None => {}
         }
     }
+    let announced = announced.map(|(_, text)| text);
     if newer.is_empty() || allow_rollback {
-        return Ok(newer);
+        return Ok(InPlace { newer, announced });
     }
     Err(format!(
         "REFUS : le manifeste en place annonce {} alors que la version déposée est {version}. Un dépôt ne ramène pas la version annoncée en arrière par accident (dossier assemblé resté sous target/ après un retour sur un ancien commit ?). Rien n'a été écrit. Si le retour arrière est voulu, relance avec --allow-rollback",
         newer.join(" et ")
     ))
+}
+
+/// Spec fonctionnelle section 4 : un fichier déjà déposé avec un autre contenu. Première ligne = le
+/// message de la spec ; le détail technique (clés, règle) suit, jamais dans le message principal.
+fn refuse_different(keys: &[String], version: &str) -> String {
+    let (names, verb) = if keys.len() == 1 {
+        (keys[0].clone(), "est déjà déposé")
+    } else {
+        (keys.join(", "), "sont déjà déposés")
+    };
+    format!(
+        "{names} {verb} avec un autre contenu : rien n'est écrasé. Si une exécution précédente a échoué, relancez l'étape en échec de cette exécution-là.\nUne version déposée ne se réécrit jamais (BR-RELEASE-001) ; aucune écriture n'a eu lieu. Si le numéro {version} a été signé puis déposé en partie par une autre exécution, il est brûlé : passez à la version suivante (Cargo.toml et apps/desktop/package.json)."
+    )
+}
+
+/// Spec fonctionnelle section 4 : le dépôt s'est arrêté avant le manifeste. `done` compte les fichiers
+/// écrits OU reconnus identiques, `total` tous les fichiers hors manifeste. `announced` : la version que
+/// les utilisateurs voient (manifeste en place), `None` si aucune.
+fn interrupted(done: usize, total: usize, announced: Option<&str>, detail: &str) -> String {
+    let seen = announced.map_or_else(
+        || "les utilisateurs ne voient encore aucune version".to_owned(),
+        |version| format!("les utilisateurs voient toujours {version}"),
+    );
+    format!(
+        "Dépôt interrompu après {done} fichiers sur {total}. Le manifeste n'a pas été déposé : {seen}. Relancez l'étape en échec.\n{detail}"
+    )
+}
+
+/// Spec fonctionnelle section 4 : l'essai à blanc. Première ligne = le message de la spec ; puis la
+/// liste des écritures et le manifeste, rien n'est écrit et ni `aws` ni `curl` ne sont lancés.
+fn dry_run_report(version: &str, writes: &[PlannedWrite], options: Options) -> Vec<String> {
+    let mut lines = vec![
+        "Essai à blanc : rien n'a été déposé. Fichiers et manifeste qui l'auraient été ci-dessous."
+            .to_owned(),
+        format!(
+            "Aucun appel à aws ni à curl (seul git, en lecture, vérifie l'arbre et le commit). Ajoutez --confirm pour déposer. Bucket s3://{BUCKET} ({ENDPOINT})"
+        ),
+        "avant toute écriture : lecture du manifeste en place, refus si sa version est supérieure à celle déposée (--allow-rollback pour un retour arrière voulu)"
+            .to_owned(),
+    ];
+    if options.allow_rollback {
+        lines.push(
+            "--allow-rollback est ARMÉ : si le manifeste en place annonce une version supérieure à celle déposée, il sera remplacé sans refus (le dépôt réel affichera alors une ligne « RETOUR ARRIÈRE » avant sa première écriture)"
+                .to_owned(),
+        );
+    }
+    for (at, write) in writes.iter().enumerate() {
+        let note = match write.kind {
+            Kind::Version => "refus si la clé existe avec un autre contenu, passée si identique",
+            Kind::Script => {
+                "après la relecture publique des fichiers de la version, puis relu dans le bucket"
+            }
+            Kind::Manifest => {
+                "EN DERNIER, seulement si toutes les relectures sont bonnes, puis relu dans le bucket"
+            }
+        };
+        lines.push(format!(
+            "{:>2}. écrire {}  sha256={}  {} octets  [{}]  ({note})",
+            at + 1,
+            write.key,
+            write.sum,
+            write.size,
+            write.content_type
+        ));
+        if write.kind == Kind::Version
+            && writes
+                .get(at + 1)
+                .is_none_or(|next| next.kind != Kind::Version)
+        {
+            lines.push(format!(
+                "    puis relire les {} fichiers de la version sous {DOWNLOAD_PREFIX}{version}/ (jusqu'à {} min) et comparer les sommes",
+                writes.iter().filter(|w| w.kind == Kind::Version).count(),
+                PATIENCE.as_secs() / 60
+            ));
+        }
+    }
+    lines
+}
+
+/// Écriture de ce qui manque (fichiers de la version, depuis les octets vérifiés), relecture publique,
+/// puis script : tout ce qui précède le manifeste. L'erreur porte le nombre de fichiers écrits ou
+/// reconnus identiques avant elle.
+fn deposit_before_manifest(
+    host: &dyn Host,
+    version: &str,
+    files: &Files,
+    state: &[(&PlannedWrite, Remote)],
+    writes: &[PlannedWrite],
+    options: Options,
+    say: &mut dyn FnMut(String),
+) -> Result<(), (usize, String)> {
+    let after = |done: usize| move |error: String| (done, error);
+    let mut done = 0;
+    for (write, remote) in state {
+        if *remote == Remote::Same {
+            say(format!("déjà présent, identique : {}", write.key));
+        } else {
+            put(host, write, &files[&write.key]).map_err(after(done))?;
+            say(format!("écrit : {}", write.key));
+        }
+        done += 1;
+    }
+    read_back(host, version, writes, say).map_err(after(done))?;
+    say("relecture publique : toutes les sommes sont bonnes".to_owned());
+    for write in writes.iter().filter(|write| write.kind == Kind::Script) {
+        put(host, write, &files[&write.key]).map_err(after(done))?;
+        say(format!("écrit : {}", write.key));
+        verify_written(host, write, options.stage_dir).map_err(after(done))?;
+        say(format!("relu dans le bucket, identique : {}", write.key));
+        done += 1;
+    }
+    Ok(())
 }
 
 /// Dépose (ou, sans `confirm`, décrit) la version. `say` reçoit chaque ligne de compte rendu.
@@ -476,50 +608,8 @@ pub fn publish(
         ));
     }
     if !options.confirm {
-        say(format!(
-            "ESSAI À BLANC : rien n'est écrit et ni aws ni curl ne sont lancés (seul git, en lecture, vérifie l'arbre et le commit). Ajoute --confirm pour déposer. Bucket s3://{BUCKET} ({ENDPOINT})"
-        ));
-        say(
-            "avant toute écriture : lecture du manifeste en place, refus si sa version est supérieure à celle déposée (--allow-rollback pour un retour arrière voulu)"
-                .to_owned(),
-        );
-        if options.allow_rollback {
-            say(
-                "--allow-rollback est ARMÉ : si le manifeste en place annonce une version supérieure à celle déposée, il sera remplacé sans refus (le dépôt réel affichera alors une ligne « RETOUR ARRIÈRE » avant sa première écriture)"
-                    .to_owned(),
-            );
-        }
-        for (at, write) in writes.iter().enumerate() {
-            let note = match write.kind {
-                Kind::Version => {
-                    "refus si la clé existe avec un autre contenu, passée si identique"
-                }
-                Kind::Script => {
-                    "après la relecture publique des fichiers de la version, puis relu dans le bucket"
-                }
-                Kind::Manifest => {
-                    "EN DERNIER, seulement si toutes les relectures sont bonnes, puis relu dans le bucket"
-                }
-            };
-            say(format!(
-                "{:>2}. écrire {}  sha256={}  {} octets  [{}]  ({note})",
-                at + 1,
-                write.key,
-                write.sum,
-                write.size,
-                write.content_type
-            ));
-            if write.kind == Kind::Version
-                && writes
-                    .get(at + 1)
-                    .is_none_or(|next| next.kind != Kind::Version)
-            {
-                say(format!(
-                    "    puis relire les {} fichiers de la version sous {DOWNLOAD_PREFIX}{version}/ (jusqu'à {} min) et comparer les sommes",
-                    writes.iter().filter(|w| w.kind == Kind::Version).count(),
-                    PATIENCE.as_secs() / 60
-                ));
-            }
+        for line in dry_run_report(version, &writes, options) {
+            say(line);
         }
         return Ok(());
     }
@@ -536,45 +626,37 @@ pub fn publish(
         state.push((write, remote));
     }
     if !refused.is_empty() {
-        return Err(format!(
-            "REFUS : {} existe déjà dans le bucket avec un autre contenu. Une version déposée ne se réécrit jamais. Aucune écriture n'a eu lieu. Si le numéro {version} a déjà été signé puis déposé en partie, il est brûlé : passe à la version suivante (Cargo.toml et apps/desktop/package.json), resigne, relance release-stage",
-            refused.join(", ")
-        ));
+        return Err(refuse_different(&refused, version));
     }
     // 1a bis. Le manifeste en place n'annonce pas une version plus récente.
-    let newer = check_not_older(host, version, options.allow_rollback).map_err(|error| {
-        if error.contains("Rien n'a été écrit") {
-            error
-        } else {
-            nothing_written(error)
-        }
-    })?;
+    let InPlace { newer, announced } =
+        read_manifest_in_place(host, version, options.allow_rollback).map_err(|error| {
+            if error.contains("Rien n'a été écrit") {
+                error
+            } else {
+                nothing_written(error)
+            }
+        })?;
     if !newer.is_empty() {
         say(format!(
             "RETOUR ARRIÈRE : le manifeste en place annonce {}, il sera remplacé par {version}",
             newer.join(" et ")
         ));
     }
-    // 1b. Écriture de ce qui manque, depuis les octets vérifiés.
-    for (write, remote) in &state {
-        if *remote == Remote::Same {
-            say(format!("déjà présent, identique : {}", write.key));
-        } else {
-            put(host, write, &files[&write.key])?;
-            say(format!("écrit : {}", write.key));
-        }
-    }
-    // 2. Relecture publique de tous les fichiers de la version.
-    read_back(host, version, &writes, say)?;
-    say("relecture publique : toutes les sommes sont bonnes".to_owned());
-    // 3 et 4. Le script, puis le manifeste EN DERNIER, chacun relu dans le bucket (sans cache).
-    for kind in [Kind::Script, Kind::Manifest] {
-        for write in writes.iter().filter(|write| write.kind == kind) {
-            put(host, write, &files[&write.key])?;
-            say(format!("écrit : {}", write.key));
-            verify_written(host, write, options.stage_dir)?;
-            say(format!("relu dans le bucket, identique : {}", write.key));
-        }
+    // 1b à 3. Tout ce qui précède le manifeste : un échec ici laisse les utilisateurs sur la version
+    // précédente (BR-RELEASE-009 : message d'un dépôt interrompu, puis relance de la même exécution).
+    let total = writes
+        .iter()
+        .filter(|write| write.kind != Kind::Manifest)
+        .count();
+    deposit_before_manifest(host, version, files, &state, &writes, options, say)
+        .map_err(|(done, error)| interrupted(done, total, announced.as_deref(), &error))?;
+    // 4. Le manifeste EN DERNIER, relu dans le bucket (un échec ici n'est pas « avant le manifeste »).
+    for write in writes.iter().filter(|write| write.kind == Kind::Manifest) {
+        put(host, write, &files[&write.key])?;
+        say(format!("écrit : {}", write.key));
+        verify_written(host, write, options.stage_dir)?;
+        say(format!("relu dans le bucket, identique : {}", write.key));
     }
     let agent_sum = writes
         .iter()
@@ -639,9 +721,54 @@ pub fn parse_upload_args(args: &[String]) -> Result<UploadArgs, String> {
 
 /// `cargo xtask release-upload [--confirm] [--allow-rollback] [--stage-dir D]`.
 pub fn run_upload(args: &[String]) -> Result<(), String> {
-    upload_with(&System::new(), &root()?, args, &mut |line| {
-        println!("{line}")
-    })
+    let mut lines = Vec::new();
+    let result = upload_with(&System::new(), &root()?, args, &mut |line| {
+        println!("{line}");
+        lines.push(line);
+    });
+    // Mode GitHub : le compte rendu entier au résumé de l'exécution (confort, jamais bloquant).
+    if crate::ci::is_github() && !lines.is_empty() {
+        let title = if args.iter().any(|arg| arg == "--confirm") {
+            "Dépôt au bucket"
+        } else {
+            "Essai à blanc du dépôt"
+        };
+        crate::ci::summary(&format!(
+            "### {title}\n\n```text\n{}\n```",
+            lines.join("\n")
+        ));
+    }
+    result
+}
+
+/// `aws --version` : première ligne du dépôt réel. L'AWS CLI v2 est exigée (le dépôt s'appuie sur ses
+/// codes de sortie et ses messages) ; la ligne lue est rendue pour le compte rendu.
+pub fn check_aws_version(host: &dyn Host) -> Result<String, String> {
+    let args = args(&["--version"]);
+    let output = host.run(&Call::new("aws", &args)).map_err(|error| {
+        format!(
+            "L'outil aws doit être l'AWS CLI en version 2 : « aws --version » n'a pas pu être lancé ({}). Rien n'a été écrit.",
+            short(&error)
+        )
+    })?;
+    // Selon la version, la ligne est sur la sortie standard ou sur la sortie d'erreur.
+    let text = if output.stdout.is_empty() {
+        output.stderr.clone()
+    } else {
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let line = text.lines().next().unwrap_or("").trim().to_owned();
+    let major = line
+        .strip_prefix("aws-cli/")
+        .and_then(|rest| rest.split('.').next())
+        .and_then(|major| major.parse::<u32>().ok());
+    match (output.success, major) {
+        (true, Some(2)) => Ok(format!("aws --version : {line}")),
+        _ => Err(format!(
+            "L'outil aws doit être l'AWS CLI en version 2 : « aws --version » a répondu « {} ». Rien n'a été écrit.",
+            short(&line)
+        )),
+    }
 }
 
 /// Le corps de `release-upload`, avec l'exécuteur et la racine injectés. La garde de l'arbre et du
@@ -677,6 +804,9 @@ pub fn upload_with(
     check_version(&version)?;
     if workspace_version(&cargo).as_deref() != Some(version.as_str()) {
         return Err("version du dossier assemblé différente de celle du dépôt".to_owned());
+    }
+    if parsed.confirm {
+        say(check_aws_version(host)?);
     }
     publish(
         host,
@@ -969,7 +1099,11 @@ mod tests {
         assert!(fake.calls.borrow().is_empty(), "ni aws ni curl");
         assert!(fake.bucket.borrow().is_empty());
         let text = lines.join("\n");
-        assert!(text.contains("ESSAI À BLANC") && text.contains("--confirm"));
+        assert_eq!(
+            lines[0],
+            "Essai à blanc : rien n'a été déposé. Fichiers et manifeste qui l'auraient été ci-dessous."
+        );
+        assert!(text.contains("--confirm"));
         assert!(text.contains("--allow-rollback"));
         for write in plan(VERSION, &files).unwrap() {
             assert!(
@@ -1137,12 +1271,13 @@ mod tests {
         fake.insert(&taken, b"un autre binaire");
         let (result, lines) = run(&fake, &files, true);
         let error = result.unwrap_err();
-        assert!(
-            error.contains("REFUS")
-                && error.contains(&taken)
-                && error.contains("ne se réécrit jamais"),
-            "{error}"
+        assert_eq!(
+            error.lines().next().unwrap(),
+            format!(
+                "{taken} est déjà déposé avec un autre contenu : rien n'est écrasé. Si une exécution précédente a échoué, relancez l'étape en échec de cette exécution-là."
+            )
         );
+        assert!(error.contains("ne se réécrit jamais"), "{error}");
         assert!(
             fake.writes().is_empty(),
             "aucune écriture : {:?}",
@@ -1289,6 +1424,11 @@ mod tests {
         assert!(
             error.contains("l'écriture de") && error.contains("Relance la même commande"),
             "{error}"
+        );
+        // Spec section 4 : première ligne exacte, 4 fichiers sur 9 (hors manifeste), rien d'annoncé encore.
+        assert_eq!(
+            error.lines().next().unwrap(),
+            "Dépôt interrompu après 4 fichiers sur 9. Le manifeste n'a pas été déposé : les utilisateurs ne voient encore aucune version. Relancez l'étape en échec."
         );
         // 4 fichiers déposés, le 5e a échoué ; ni script ni manifeste, aucune relecture.
         assert_eq!(fake.writes().len(), 5);
@@ -1694,5 +1834,135 @@ mod tests {
             "{error}"
         );
         assert!(fake.only_git_ran());
+    }
+
+    #[test]
+    fn several_different_files_are_named_in_one_refusal() {
+        let (files, fake) = setup();
+        let one = version_key(VERSION, AGENT_BINARY);
+        let two = version_key(VERSION, "SHA256SUMS");
+        fake.insert(&one, b"x");
+        fake.insert(&two, b"y");
+        let error = run(&fake, &files, true).0.unwrap_err();
+        let first = error.lines().next().unwrap();
+        assert!(first.contains(&one) && first.contains(&two));
+        assert!(first.contains("sont déjà déposés avec un autre contenu : rien n'est écrasé."));
+        assert!(fake.writes().is_empty());
+    }
+
+    #[test]
+    fn an_interrupted_deposit_says_what_users_still_see() {
+        let (files, fake) = setup();
+        fake.insert(MANIFEST_KEY, &manifest_of("0.0.9", Some("0.0.8")));
+        fake.fail_put_number.set(Some(3));
+        let error = run(&fake, &files, true).0.unwrap_err();
+        assert_eq!(
+            error.lines().next().unwrap(),
+            "Dépôt interrompu après 2 fichiers sur 9. Le manifeste n'a pas été déposé : les utilisateurs voient toujours 0.0.9. Relancez l'étape en échec."
+        );
+        // Le manifeste en place n'a pas bougé.
+        assert_eq!(
+            fake.bucket.borrow()[MANIFEST_KEY],
+            manifest_of("0.0.9", Some("0.0.8"))
+        );
+    }
+
+    #[test]
+    fn identical_files_count_as_done_in_the_interrupted_message() {
+        let (files, fake) = setup();
+        for write in plan(VERSION, &files).unwrap().iter().take(3) {
+            fake.insert(&write.key, &files[&write.key]);
+        }
+        fake.fail_put_number.set(Some(1));
+        let error = run(&fake, &files, true).0.unwrap_err();
+        // Trois reconnus identiques, le quatrième échoue à l'écriture : les trois comptent.
+        assert!(
+            error
+                .lines()
+                .next()
+                .unwrap()
+                .starts_with("Dépôt interrompu après 3 fichiers sur 9."),
+            "{error}"
+        );
+        assert!(!fake.bucket.borrow().contains_key(MANIFEST_KEY));
+    }
+
+    #[test]
+    fn the_dry_run_lists_the_files_and_the_manifest_and_writes_nothing() {
+        let (files, fake) = setup();
+        let (result, lines) = run(&fake, &files, false);
+        result.unwrap();
+        assert!(fake.calls.borrow().is_empty());
+        let writes = plan(VERSION, &files).unwrap();
+        let listed = lines.iter().filter(|l| l.contains(" écrire ")).count();
+        assert_eq!(listed, writes.len());
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains(MANIFEST_KEY) && l.contains("EN DERNIER"))
+        );
+    }
+
+    fn aws_says(code: Option<i32>, stdout: &str, stderr: &str) -> impl Host {
+        struct Said(CmdOutput);
+        impl Host for Said {
+            fn run(&self, call: &Call) -> Result<CmdOutput, String> {
+                assert_eq!(call.program, "aws");
+                assert_eq!(call.args, ["--version".to_owned()]);
+                Ok(self.0.clone())
+            }
+            fn elapsed(&self) -> Duration {
+                Duration::ZERO
+            }
+            fn sleep(&self, _: Duration) {}
+        }
+        Said(CmdOutput {
+            success: code == Some(0),
+            code,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.to_owned(),
+        })
+    }
+
+    #[test]
+    fn only_the_major_version_two_of_aws_is_accepted() {
+        let line = "aws-cli/2.38.1 Python/3.13.4 Linux/6.8 exe/x86_64.ubuntu.24";
+        assert_eq!(
+            check_aws_version(&aws_says(Some(0), line, "")).unwrap(),
+            format!("aws --version : {line}")
+        );
+        // Certaines versions écrivent sur la sortie d'erreur.
+        assert!(check_aws_version(&aws_says(Some(0), "", line)).is_ok());
+        for bad in [
+            "aws-cli/1.29.0 Python/3.9",
+            "aws-cli/3.0.0 Python/3.9",
+            "autre chose",
+            "",
+        ] {
+            let error = check_aws_version(&aws_says(Some(0), bad, "")).unwrap_err();
+            assert!(error.contains("version 2") && error.contains("Rien n'a été écrit"));
+        }
+        assert!(check_aws_version(&aws_says(Some(1), line, "")).is_err());
+    }
+
+    #[test]
+    fn a_missing_aws_gives_the_message_of_the_spec() {
+        struct Missing;
+        impl Host for Missing {
+            fn run(&self, _: &Call) -> Result<CmdOutput, String> {
+                Err("aws : programme introuvable".to_owned())
+            }
+            fn elapsed(&self) -> Duration {
+                Duration::ZERO
+            }
+            fn sleep(&self, _: Duration) {}
+        }
+        let error = check_aws_version(&Missing).unwrap_err();
+        assert!(
+            error.starts_with("L'outil aws doit être l'AWS CLI en version 2 : ")
+                && error.contains("introuvable")
+                && error.ends_with("Rien n'a été écrit."),
+            "{error}"
+        );
     }
 }

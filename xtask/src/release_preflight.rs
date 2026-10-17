@@ -308,7 +308,7 @@ pub fn published_state(
 }
 
 /// Une cause lisible et bornée : première ligne, 120 caractères.
-fn short(text: &str) -> String {
+pub(crate) fn short(text: &str) -> String {
     let line = text.lines().next().unwrap_or("").trim();
     let mut cut: String = line.chars().take(120).collect();
     if line.chars().count() > 120 {
@@ -319,7 +319,7 @@ fn short(text: &str) -> String {
 
 /// Bornes de `curl` : connexion 15 s, réponse 60 s. Pas de `--fail` (le corps d'un 404 est lu),
 /// pas de `--location` (une redirection est un code autre que 200 : arrêt), HTTPS 1.2 minimum.
-fn curl_args(extra: &[&str], url: &str) -> Vec<String> {
+pub(crate) fn curl_args(extra: &[&str], url: &str) -> Vec<String> {
     let mut args: Vec<String> = [
         "--disable",
         "--silent",
@@ -343,7 +343,7 @@ fn curl_args(extra: &[&str], url: &str) -> Vec<String> {
 }
 
 /// Corps et code HTTP d'une réponse de `curl --write-out "\n%{http_code}"`.
-fn http_reply(output: &CmdOutput) -> Result<(u16, &[u8]), String> {
+pub(crate) fn http_reply(output: &CmdOutput) -> Result<(u16, &[u8]), String> {
     if !output.success {
         return Err(format!("curl : {}", short(&output.stderr)));
     }
@@ -405,6 +405,16 @@ fn parse_manifest(body: &[u8]) -> Manifest {
 /// `tag_name` demandé = oui, 404 = non, tout le reste = erreur. Le jeton (s'il y en a un) passe par
 /// l'entrée standard de `curl` (`--config -`), jamais par un argument ; il n'apparaît dans aucun message.
 pub fn lookup_release(host: &dyn Host, version: &str, token: &str) -> Result<bool, String> {
+    fetch_release(host, version, token).map(|found| found.is_some())
+}
+
+/// La release `vX.Y.Z` telle que GitHub la rend (200 + bon `tag_name`) ; `None` sur 404. Même doctrine
+/// que `lookup_release` : tout le reste est une erreur.
+pub(crate) fn fetch_release(
+    host: &dyn Host,
+    version: &str,
+    token: &str,
+) -> Result<Option<Value>, String> {
     check_version(version)?;
     let tag = format!("v{version}");
     let url = format!("https://api.github.com/repos/{REPOSITORY}/releases/tags/{tag}");
@@ -435,12 +445,12 @@ pub fn lookup_release(host: &dyn Host, version: &str, token: &str) -> Result<boo
     let output = host.run(&call)?;
     let (code, body) = http_reply(&output).map_err(|error| format!("release {tag} : {error}"))?;
     match code {
-        404 => Ok(false),
+        404 => Ok(None),
         200 => {
             let value: Value = serde_json::from_slice(body)
                 .map_err(|_| format!("release {tag} : réponse illisible"))?;
             if value["tag_name"] == tag.as_str() {
-                Ok(true)
+                Ok(Some(value))
             } else {
                 Err(format!(
                     "release {tag} : la réponse n'est pas celle de cette étiquette"
@@ -451,7 +461,7 @@ pub fn lookup_release(host: &dyn Host, version: &str, token: &str) -> Result<boo
     }
 }
 
-fn git_call(host: &dyn Host, root: &Path, args: &[&str]) -> Result<CmdOutput, String> {
+pub(crate) fn git_call(host: &dyn Host, root: &Path, args: &[&str]) -> Result<CmdOutput, String> {
     let mut argv = vec!["-C".to_owned(), root.to_string_lossy().into_owned()];
     argv.extend(args.iter().map(|arg| (*arg).to_owned()));
     let env = [("GIT_OPTIONAL_LOCKS", "0")];
