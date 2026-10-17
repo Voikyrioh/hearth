@@ -39,7 +39,7 @@ export interface Resources {
 
 /**
  * Les valeurs de départ des deux curseurs (BR-RES-037 : jamais « sans limite »). Une fiche donne sa mémoire
- * recommandée (BR-RES-038), ramenée au maximum de la machine si elle le dépasse ; une application sans fiche reçoit
+ * recommandée, ramenée au maximum de la machine si elle le dépasse ; une application sans fiche reçoit
  * la proposition de BR-RES-039.
  */
 export function startingResources(

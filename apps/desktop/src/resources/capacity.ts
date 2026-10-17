@@ -7,7 +7,7 @@ export interface EngineCapacity {
   cpus: number;
   /** Mémoire totale de la machine, lue sur la machine et non dans un conteneur : le plafond du curseur de mémoire. */
   memoryBytes: number;
-  /** Réserve du système et de Hearth (le plus grand de 1 Go et de 5 % de la mémoire, BR-RES-007). */
+  /** Réserve du système et de Hearth (le plus grand de 1 Go et de 5 % de la mémoire). */
   reserveBytes: number;
   /** Somme des limites de mémoire des services en marche, gérés ou non : un total, jamais un nom. */
   committedMemoryBytes: number;
