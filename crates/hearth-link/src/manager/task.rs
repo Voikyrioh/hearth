@@ -106,6 +106,14 @@ enum Internal {
     /// Efface le jeton d'une session fermée par `logout`, dès que le verrou d'écriture du serveur est
     /// libre (FIX:01M46G7Z0ZP43T53M2F5KG4VKS).
     EraseToken,
+    /// Le délai après le retour du lien est écoulé : relire les opérations de service que l'agent n'a pas
+    /// redites (HRT-84).
+    OpsResync,
+    /// La relecture d'une opération de service suivie.
+    OpRead {
+        id: String,
+        read: attempt::OpRead,
+    },
     /// Le suivi n'a pas pu être écrit sur disque à temps : la requête n'est PAS partie.
     NotSent {
         id: OperationId,
@@ -220,6 +228,8 @@ struct Runner {
     /// Les noms de variables et la commande de `services` ont-ils été lus sur le serveur depuis le démarrage de
     /// cette liaison ? Faux pour ce qui vient du disque (écrit sans eux) jusqu'au premier instantané de l'agent.
     services_details: bool,
+    /// Les opérations de service suivies (HRT-84) : ce qui est annoncé à l'interface, une issue une seule fois.
+    ops: crate::domain::service_op_tracker::OpTracker,
     last_contact: Option<WallTime>,
     published: Option<Status>,
     ping_n: u64,
@@ -275,6 +285,7 @@ impl Runner {
             services,
             services_at,
             services_details,
+            ops: crate::domain::service_op_tracker::OpTracker::new(),
             last_contact,
             published: None,
             ping_n: 0,
@@ -460,7 +471,9 @@ impl Runner {
                 self.traffic();
                 // Le suivi d'une opération (HRT-144) : annoncé tel quel, il ne change pas l'état des services.
                 if let hearth_proto::stream::ServicesMessage::Operation(view) = *message {
-                    self.deps.sink.service_operation(&self.id, Arc::new(view));
+                    if let Some(announced) = self.ops.apply(view) {
+                        self.deps.sink.service_operation(&self.id, announced);
+                    }
                     return;
                 }
                 let before = self.services.as_ref().map(|state| state.engine.clone());
@@ -678,6 +691,7 @@ impl Runner {
                         self.on_security(*view);
                     }
                     self.on_services_connect(services);
+                    self.schedule_ops_resync();
                 } else {
                     // Résultat périmé (déconnexion entre-temps) : on ne le garde pas.
                     self.stream = None;
@@ -737,6 +751,8 @@ impl Runner {
             }
             Internal::OpResponse { id, result } => self.on_op_response(id, result).await,
             Internal::Lookup { id, lookup } => self.on_lookup(id, lookup),
+            Internal::OpsResync => self.resync_ops(),
+            Internal::OpRead { id, read } => self.on_op_read(&id, read),
             Internal::NotSent { id, slow } => self.on_not_sent(&id, slow),
             Internal::EraseToken => {
                 if !self.erase_token_if_signed_out() {
@@ -996,6 +1012,56 @@ impl Runner {
         let ids = self.pending.to_resolve();
         if !ids.is_empty() {
             self.spawn_resolver(ids, Duration::ZERO);
+        }
+    }
+
+    /// Au retour du lien, l'agent redit les opérations en cours à l'abonnement ; celles qu'il ne redit pas
+    /// ont fini (ou disparu) pendant la coupure : on les relit après un court délai (BR-RESIL-010).
+    fn schedule_ops_resync(&mut self) {
+        self.ops.link_restored();
+        if self.ops.unconfirmed().is_empty() {
+            return;
+        }
+        let sender = self.internal_tx.clone();
+        let delay = self.deps.config.ops_resync_delay;
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let _ = sender.send(Internal::OpsResync).await;
+        });
+    }
+
+    fn resync_ops(&mut self) {
+        let ids = self.ops.unconfirmed();
+        if ids.is_empty() {
+            return;
+        }
+        let deps = self.deps.clone();
+        let shared = self.shared.clone();
+        let sender = self.internal_tx.clone();
+        tokio::spawn(async move {
+            for id in ids {
+                let read = attempt::read_operation(&deps, &shared, &id).await;
+                if sender.send(Internal::OpRead { id, read }).await.is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    fn on_op_read(&mut self, id: &str, read: attempt::OpRead) {
+        match read {
+            attempt::OpRead::View(view) => {
+                if let Some(announced) = self.ops.apply(*view) {
+                    self.deps.sink.service_operation(&self.id, announced);
+                }
+            }
+            attempt::OpRead::Gone => {
+                if self.ops.forget(id) {
+                    self.deps.sink.service_operation_gone(&self.id, id);
+                }
+            }
+            // Relue au prochain retour du lien.
+            attempt::OpRead::Unreachable => {}
         }
     }
 
