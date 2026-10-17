@@ -27,4 +27,4 @@ Chaque cran déclaré porte sa preuve sur l'échelle de BR-FICHE-008 : `"measure
 - BR-FICHE-008, BR-RES-032
 
 ## Historique
-- 2026-10-17 — création (HRT-122, domaine pur : fiche et chargeur ; le curseur du client et la réponse du catalogue suivent).
+- 2026-10-17 — création (HRT-122, domaine pur : fiche et chargeur ; la réponse du catalogue suit avec HRT-181, le curseur du client avec HRT-123).

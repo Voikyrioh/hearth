@@ -48,7 +48,7 @@ Rien n'est retiré du format. Deux blocs facultatifs s'ajoutent sous `[resources
 
 Règle de publication (`BR-RES-038`) : une fiche `published` porte `memory.recommended_bytes` avec une preuve `measured` ou `publisher`. Le chargeur la refuse sinon (`PublieeSansMemoireRecommandee`) ; `cargo xtask catalog-check --release` dit en plus ce qui manque à une fiche `preview` (mémoire recommandée absente ou mesurée au repos seulement). Une mesure au repos est un plancher, jamais multipliée en recommandation. Terraria reste `preview` tant que HRT-149 n'a pas relevé son chiffre.
 
-Mise en œuvre : `loading/memory.rs` (`memory_tiers`, `recommended_gap`), `invariants.rs::check_memory_tiers`. Premier usage servi : « Recommandé » ; les autres crans sont servis dès que la fiche leur donne un chiffre fondé. Servir les crans dans la réponse du catalogue et du service installé reste à faire (tranche suivante, hors domaine pur).
+Mise en œuvre : `loading/memory.rs` (`memory_tiers`, `recommended_gap`), `invariants.rs::check_memory_tiers`. Premier usage servi : « Recommandé » ; les autres crans sont servis dès que la fiche leur donne un chiffre fondé. Servir les crans dans la réponse du catalogue et du service installé reste à faire : HRT-181 (hors domaine pur).
 
 ## Quand NE PAS l'appliquer / limites
 - Le format borne ce que Hearth demande au moteur, pas ce que l'image fait une fois lancée ni ce qu'elle télécharge.

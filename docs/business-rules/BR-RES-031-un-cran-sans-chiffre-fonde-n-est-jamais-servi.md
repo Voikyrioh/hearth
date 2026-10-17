@@ -31,4 +31,4 @@ Hearth ne sert que les crans de mémoire auxquels la fiche donne un chiffre fond
 - BR-RES-032, BR-RES-033, BR-RES-038
 
 ## Historique
-- 2026-10-17 — création (HRT-122, domaine pur : fiche et chargeur ; le curseur du client et la réponse du catalogue suivent).
+- 2026-10-17 — création (HRT-122, domaine pur : fiche et chargeur ; la réponse du catalogue suit avec HRT-181, le curseur du client avec HRT-123).

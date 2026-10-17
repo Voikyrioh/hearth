@@ -30,4 +30,4 @@ Une fiche `published` a `memory.recommended_bytes` avec une preuve `measured` ou
 - BR-FICHE-008, BR-RES-031
 
 ## Historique
-- 2026-10-17 — création (HRT-122, domaine pur : fiche et chargeur ; le curseur du client et la réponse du catalogue suivent).
+- 2026-10-17 — création (HRT-122, domaine pur : fiche et chargeur ; la réponse du catalogue suit avec HRT-181, le curseur du client avec HRT-123).
