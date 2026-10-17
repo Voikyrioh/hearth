@@ -76,8 +76,11 @@ jobs:
           toolchain: "1.95"
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # bash (et non pwsh, défaut de Windows) : sous pwsh, un `run: |` multi-lignes ne garde que le code de sortie
+      # de la DERNIÈRE commande, un lint ou un clippy en échec passait inaperçu (HRT-84).
       - name: Interface (installation, Biome, types, Vitest, build)
         working-directory: apps/desktop
+        shell: bash
         run: |
           npm ci
           npm run lint
@@ -88,6 +91,7 @@ jobs:
       # Interface servie par Vite avec le pont simulé (captures 1366/1920/2560) ET build livré servi en statique (pont vide).
       - name: Scénarios navigateur (Playwright)
         working-directory: apps/desktop
+        shell: bash
         run: |
           npx playwright install chromium
           npm run e2e
@@ -108,6 +112,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Coquille Tauri (clippy, tests)
+        shell: bash
         run: |
           cargo clippy -p hearth-desktop --all-targets -- -D warnings
           cargo test -p hearth-desktop
