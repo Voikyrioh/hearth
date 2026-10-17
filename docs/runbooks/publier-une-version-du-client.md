@@ -31,6 +31,65 @@ Les clés de publication sont en place depuis le 2026-10-12 : la clé publique d
    gh secret set HEARTH_CLIENT_SIGNING_KEY_PASSWORD --env release --repo Voikyrioh/hearth
    ```
 
+## Le flux « Publier une version » (HRT-175, BR-RELEASE-004, 005 et 011)
+
+Le fichier `.github/workflows/publish.yml` (Actions > **Publier une version**) remplace à terme `publish-client` : il construit le client ET l'agent, les signe, les assemble, les dépose dans le bucket, puis pose l'étiquette et la release GitHub. Tant que la première vraie publication par ce flux n'a pas réussi (HRT-176), `publish-client` et la procédure manuelle plus bas restent le chemin connu : ne lance pas les deux pour le même numéro. Les étapes `xtask` qu'il enchaîne sont celles des sections « Contrôles préalables » et « Constructions vérifiables » ; la logique n'est pas dans le YAML.
+
+### À créer avant la première exécution (gestes du propriétaire)
+
+Rien de ceci n'est dans le dépôt, et le flux ne le crée pas. Sans l'environnement `release` protégé, GitHub en crée un SANS protection à la première exécution : à faire AVANT de lancer le flux.
+
+1. **Clé d'API Scaleway dédiée** `hearth-releases-ci` (console Scaleway > IAM) : lecture et écriture d'objets du bucket `voikyrioh-hearth-releases` seulement (`GetObject`, `HeadObject`, `PutObject`), AUCUN droit de suppression ni de liste. Elle remplace ta clé personnelle dans la CI.
+2. **Environnement GitHub `release`** (Settings > Environments > `release`, nom exact ; il existe déjà pour `publish-client`, à compléter) :
+
+   | Réglage | Valeur |
+   |---|---|
+   | Required reviewers | toi (Voikyrioh) |
+   | Prevent self-review | DÉCOCHÉ (tu lances ET tu approuves ; coché, plus personne ne pourrait approuver) |
+   | Allow administrators to bypass | décoché si la case existe |
+   | Wait timer | 0 |
+   | Deployment branches and tags | « Selected branches and tags », règle `main` seule, aucune étiquette |
+
+   L'attente d'approbation expire après 30 jours (fixé par GitHub). Les constructions non signées sont gardées 7 jours : approuver plus tard que cela, c'est relancer une NOUVELLE exécution (rien n'a été signé ni déposé, aucun numéro n'est brûlé).
+3. **Six secrets de l'environnement `release`** (secrets d'ENVIRONNEMENT, pas de dépôt ni d'organisation), posés depuis ta machine, valeur lue sur l'entrée standard :
+
+   | Nom | Contenu | État |
+   |---|---|---|
+   | `HEARTH_CLIENT_SIGNING_KEY` | clé secrète du client (format Tauri) | déjà posé (HRT-16) |
+   | `HEARTH_CLIENT_SIGNING_KEY_PASSWORD` | son mot de passe | déjà posé |
+   | `HEARTH_AGENT_SIGNING_KEY` | contenu du fichier de clé secrète minisign de l'agent (identifiant `29944AFE28EABECE`) | À POSER |
+   | `HEARTH_AGENT_SIGNING_KEY_PASSWORD` | son mot de passe, OBLIGATOIRE (si la clé locale n'est pas chiffrée : `minisign -C` d'abord, même identifiant, aucun agent installé n'est touché) | À POSER |
+   | `HEARTH_RELEASES_ACCESS_KEY_ID` | identifiant de la clé `hearth-releases-ci` | À POSER |
+   | `HEARTH_RELEASES_SECRET_ACCESS_KEY` | son secret | À POSER |
+
+   ```powershell
+   Get-Content -Raw <fichier-de-cle-agent> | gh secret set HEARTH_AGENT_SIGNING_KEY --env release --repo Voikyrioh/hearth
+   gh secret set HEARTH_AGENT_SIGNING_KEY_PASSWORD --env release --repo Voikyrioh/hearth
+   gh secret set HEARTH_RELEASES_ACCESS_KEY_ID --env release --repo Voikyrioh/hearth
+   gh secret set HEARTH_RELEASES_SECRET_ACCESS_KEY --env release --repo Voikyrioh/hearth
+   ```
+
+   Changement de doctrine : la clé de signature de l'agent quitte ta seule machine pour l'environnement `release` (jusqu'ici « jamais dans la CI »). Garde la sauvegarde hors GitHub (gestionnaire de mots de passe), comme pour celle du client. La décision sera consignée par l'ADR de HRT-176. Les noms `HEARTH_RELEASES_*` ne deviennent `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` que dans l'étape « Déposer au bucket ».
+
+### Lancer, relire, approuver
+
+1. Numéros de version dans les cinq fichiers (voir « Publier une version », étape 1), PR fusionnée.
+2. Actions > **Publier une version** > Run workflow, **branche `main`**, notes de version (texte brut, 2000 caractères au plus), case **essai à blanc** : laisse-la cochée pour une répétition (par défaut). Décochée, la publication est réelle.
+3. Jobs, dans l'ordre, SANS aucun secret : `preflight` (contrôles préalables, compile `xtask` une fois), `build-client` (Windows) et `build-agent` (Ubuntu, en conteneur) en parallèle, puis `review` qui écrit au résumé de l'exécution la version, le commit, les deux sommes SHA-256, le mode et les notes. Aucun cache n'est utilisé : le client sans cache est long (de l'ordre de 20 à 30 minutes, non mesuré).
+4. **Avant d'approuver, relis les journaux de `build-client` et `build-agent`** (dépendances installées, étapes, durée, sommes) : c'est la seule relecture qui retient encore quelque chose, les dépendances ayant pu être compromises pendant la construction. Puis approuve `publish` (« Review deployments »).
+5. `publish` (environnement `release`, 45 minutes) : garde de la racine, installation de l'AWS CLI épinglée (version **2.38.1** et somme SHA-256 du zip officiel vérifiée avant `unzip`, une montée de version est une PR), signature du client puis de l'agent, manifeste, assemblage (`release-stage`), puis :
+   - **essai à blanc** : `release-upload` sans `--confirm` liste les fichiers et le manifeste dans le résumé, ne touche à rien ; aucun secret du bucket, aucun artefact signé, `release-github` est sauté (BR-RELEASE-011) ;
+   - **réel** : l'artefact `hearth-release-signed` (14 jours) est gardé juste avant le dépôt, puis `release-upload --confirm`, puis `release-github` pose l'étiquette `vX.Y.Z` sur le commit lancé et crée la release (sans binaire, avec `SHA256SUMS`).
+6. Une seule exécution à la fois (file `hearth-publish`, sans annulation de celle qui tourne) ; un troisième lancement annule celui qui attendait.
+
+### Reprise après un échec (BR-RELEASE-009)
+
+Relance l'étape en échec de la MÊME exécution (Re-run failed jobs), jamais une nouvelle exécution pour le même numéro. Un fichier déjà déposé avec le même contenu est reconnu et passé ; un fichier différent est refusé sans rien écraser. En réel, la relance de `publish` retrouve les fichiers signés de la tentative précédente (artefact `hearth-release-signed`) et ne signe pas une seconde fois. À VÉRIFIER à la première relance réelle (HRT-176) : qu'une relance du job voit bien l'artefact déposé par la tentative précédente ; à la première tentative, l'échec de l'étape « Reprise éventuelle » est attendu (artefact absent, l'étape est en `continue-on-error`). Au-delà de 14 jours, une version déposée en partie ne se termine plus : prendre le numéro suivant.
+
+### Nom des secrets attendus et ce que le dépôt vérifie
+
+Le dépôt vérifie lui-même (tests `xtask/src/workflow_check.rs`, lancés par `cargo test`, donc par la CI de chaque PR) : déclencheur `workflow_dispatch` seul, secrets cités seulement dans l'`env:` d'étapes du job `publish`, permissions explicites par job, `contents: write` pour `release-github` seul, entrées du formulaire jamais interpolées dans un `run:`, extraction de `github.sha` sans identifiants conservés, actions épinglées par SHA, aucun cache, AWS CLI épinglée et sa somme vérifiée avant installation, étapes d'écriture sautées en essai à blanc. Il ne peut PAS vérifier les réglages GitHub ci-dessus (réviseurs, branche `main`, secrets présents) : un flux modifié sur une autre branche n'est arrêté que par la règle de branche de l'environnement `release`.
+
 ## Publier une version
 
 1. Choisir la version `X.Y.Z` (pas de préversion). La changer dans **cinq** fichiers, dans une PR : `version` de `[workspace.package]` du `Cargo.toml` racine (la source), `Cargo.lock` (les cinq paquets du dépôt, que `cargo build` met à jour), `version` de `apps/desktop/package.json`, `version` et `packages[""].version` de `apps/desktop/package-lock.json`, et AUCUN champ `version` dans `apps/desktop/src-tauri/tauri.conf.json`. `cargo xtask release-preflight --versions-only` (lancé par la CI de chaque PR, voir plus bas) vérifie la concordance. Le numéro de `Cargo.toml` est la SEULE source du numéro : le flux ne demande aucune version dans son formulaire, il lit celle du dépôt (`cargo xtask client-version`), donc le numéro signé est celui du binaire construit.
