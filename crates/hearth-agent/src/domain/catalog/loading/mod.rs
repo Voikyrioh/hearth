@@ -9,6 +9,7 @@ pub mod ids_lock;
 pub mod invariants;
 pub mod limits;
 pub mod loader;
+pub mod memory;
 pub mod model;
 pub mod schema;
 pub mod value;

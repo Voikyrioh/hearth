@@ -18,10 +18,11 @@ use std::collections::BTreeSet;
 use super::error::{FicheRefusee, Fichier, Motif};
 use super::limits::*;
 use super::loader::{check_text, check_variant_refs};
+use super::memory::{TierId, recommended_gap};
 use super::model::{Fiche, Setting, ValueSpec};
 use super::schema::fiche::{
-    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, PortRole, Proof, Publish,
-    Status, Step, StepKind, WorldSaved,
+    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, PlainEvidence,
+    PortRole, Proof, Publish, Status, Step, StepKind, WorldSaved,
 };
 use super::schema::settings::{ArgForm, SettingsFile};
 use super::value::{
@@ -1283,6 +1284,112 @@ fn check_resources(file: &FicheFile) -> Result<(), FicheRefusee> {
                 quoi: "processeur minimal supérieur au recommandé",
             },
         ));
+    }
+    check_memory_tiers(file)?;
+    if file.status == Status::Published
+        && let Some(gap) = recommended_gap(file)
+    {
+        return Err(refuse(
+            f,
+            "resources.memory",
+            Motif::PublieeSansMemoireRecommandee {
+                raison: gap.explication(),
+            },
+        ));
+    }
+    Ok(())
+}
+
+/// HRT-122 : les crans déclarés (BR-RES-032, BR-RES-033) et la liste des crans cachés.
+fn check_memory_tiers(file: &FicheFile) -> Result<(), FicheRefusee> {
+    let f = Fichier::Fiche;
+    let r = &file.resources;
+    let mut seen: Vec<TierId> = Vec::new();
+    let mut floor = r.memory.recommended_bytes;
+    let mut declared: Vec<(TierId, &MemoryTier)> = Vec::new();
+    for (i, tier) in r.memory_tier.iter().enumerate() {
+        let at = format!("resources.memory_tier[{i}]");
+        let Some(id) = TierId::parse(&tier.id) else {
+            return Err(refuse(
+                f,
+                at,
+                Motif::CranInconnu {
+                    id: tier.id.clone(),
+                },
+            ));
+        };
+        if !id.is_declarable() {
+            return Err(refuse(
+                f,
+                at,
+                Motif::CranNonDeclarable {
+                    id: tier.id.clone(),
+                },
+            ));
+        }
+        if seen.contains(&id) {
+            return Err(refuse(
+                f,
+                at,
+                Motif::CranEnDouble {
+                    id: tier.id.clone(),
+                },
+            ));
+        }
+        seen.push(id);
+        declared.push((id, tier));
+    }
+    // Strictement croissants dans l'ordre des crans, et tous au-dessus de la mémoire recommandée.
+    declared.sort_by_key(|(id, _)| *id);
+    for (_, tier) in declared {
+        let at = format!("resources.memory_tier[{}]", tier.id);
+        match &tier.evidence {
+            Evidence::Plain(PlainEvidence::Measured) => {}
+            Evidence::Plain(_) => {
+                return Err(refuse(
+                    f,
+                    at,
+                    Motif::CranPreuveInterdite {
+                        id: tier.id.clone(),
+                    },
+                ));
+            }
+            Evidence::Publisher(p) => check_url(f, &at, &p.publisher)?,
+        }
+        let Some(below) = floor else {
+            return Err(refuse(
+                f,
+                at,
+                Motif::CranBorneInvalide {
+                    id: tier.id.clone(),
+                    raison: "la fiche n'a pas de mémoire recommandée sous laquelle placer ce cran",
+                },
+            ));
+        };
+        if tier.from_bytes <= below {
+            return Err(refuse(
+                f,
+                at,
+                Motif::CranBorneInvalide {
+                    id: tier.id.clone(),
+                    raison: "`from_bytes` doit être au-dessus de la mémoire recommandée et des crans précédents",
+                },
+            ));
+        }
+        floor = Some(tier.from_bytes);
+    }
+    if let Some(tiers) = &r.tiers {
+        let mut hidden: Vec<TierId> = Vec::new();
+        for id in &tiers.hidden {
+            let at = "resources.tiers.hidden".to_string();
+            let Some(parsed) = TierId::parse(id) else {
+                return Err(refuse(f, at, Motif::CranInconnu { id: id.clone() }));
+            };
+            if hidden.contains(&parsed) {
+                return Err(refuse(f, at, Motif::CranEnDouble { id: id.clone() }));
+            }
+            hidden.push(parsed);
+        }
     }
     Ok(())
 }

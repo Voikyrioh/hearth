@@ -104,6 +104,11 @@ impl Fiche {
         self.retired.iter().find(|r| r.id == id)
     }
 
+    /// Les crans de mémoire servis au client pour cette fiche (HRT-122, BR-RES-030 à 033).
+    pub fn memory_tiers(&self) -> Vec<super::memory::ServedTier> {
+        super::memory::memory_tiers(&self.file)
+    }
+
     pub fn digest_hex(&self) -> String {
         hex(&self.digest)
     }
