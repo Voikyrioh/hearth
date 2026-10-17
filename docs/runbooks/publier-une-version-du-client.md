@@ -80,6 +80,12 @@ Que faire de chaque message (exacts) :
 | « Le manifeste annonce déjà une version plus récente (M) que celle du dépôt (X). » | le dépôt est en retard sur ce qui est publié | corriger le numéro du dépôt |
 | « Le manifeste public n'a pas pu être lu (…) : publication arrêtée. » | API injoignable, défi Cloudflare, réponse illisible | jamais prise pour une absence ; réessayer, voir `hearth.voikyrioh.fr/api` |
 | « L'étiquette vX n'a pas pu être cherchée … » / « La release GitHub vX n'a pas pu être cherchée … » | `git ls-remote` ou l'API GitHub en échec | réessayer |
+| « {fichier} est déjà déposé avec un autre contenu : rien n'est écrasé. Si une exécution précédente a échoué, relancez l'étape en échec de cette exécution-là. » | une autre exécution a déjà déposé des fichiers signés différemment (BR-RELEASE-001, 009) | relancer l'étape en échec de l'exécution d'origine ; sinon le numéro est brûlé, passer au suivant |
+| « Dépôt interrompu après {n} fichiers sur {total}. Le manifeste n'a pas été déposé : … Relancez l'étape en échec. » | panne pendant le dépôt, avant le manifeste : les utilisateurs voient toujours l'ancienne version | relancer l'étape en échec de la même exécution (les fichiers identiques sont passés) |
+| « L'outil aws doit être l'AWS CLI en version 2 … » | `aws --version` ne répond pas `aws-cli/2.x` | installer l'AWS CLI v2 ; rien n'a été écrit |
+| « Version déposée et annoncée, mais la release GitHub n'a pas pu être créée : relancez l'étape en échec. » | échec de `release-github` après le manifeste | relancer l'étape `release-github` seule : elle ne crée que ce qui manque (BR-RELEASE-010) |
+| « L'étiquette vX pointe sur le commit … et non sur … : à examiner à la main. » | une étiquette existe sur un autre commit | examiner ; ne rien supprimer ni déplacer sans comprendre |
+| « Essai à blanc : rien n'a été déposé. Fichiers et manifeste qui l'auraient été ci-dessous. » | `release-upload` sans `--confirm` | rien à faire : relire la liste (BR-RELEASE-011) |
 
 ## Constructions vérifiables (HRT-173, BR-RELEASE-007)
 
