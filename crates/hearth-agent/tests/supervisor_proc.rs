@@ -638,11 +638,12 @@ async fn each_order_is_systemctl_with_one_argument_each_and_the_unit_after_a_dou
     let supervisor = ProcSystemd::new(dir.path().to_path_buf(), script.clone().into_os_string());
     let wait = std::time::Duration::from_secs(5);
     let service = unit("docker-7dtd.service");
-    for (verb, result) in [
-        ("start", supervisor.start(&service, wait).await),
-        ("stop", supervisor.stop(&service, wait).await),
-        ("restart", supervisor.restart(&service, wait).await),
-    ] {
+    for verb in ["start", "stop", "restart"] {
+        let result = match verb {
+            "start" => supervisor.start(&service, wait).await,
+            "stop" => supervisor.stop(&service, wait).await,
+            _ => supervisor.restart(&service, wait).await,
+        };
         assert_eq!(result, Ok(()), "{verb}");
         let args = std::fs::read_to_string(format!("{}.args", script.display())).unwrap();
         // Jamais `disable`, `mask`, `daemon-reload` : trois arguments, le verbe, `--`, l'unité.
