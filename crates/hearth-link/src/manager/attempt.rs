@@ -418,20 +418,18 @@ pub(crate) enum OpRead {
 }
 
 /// `GET /operations/services/{id}` pour une opération suivie (BR-RESIL-010). L'identifiant vient de
-/// l'agent (messages du flux) ; il est contrôlé avant de devenir un chemin.
+/// l'agent (messages du flux) ; il est contrôlé avant de devenir un chemin (`operation_path`).
 pub(crate) async fn read_operation(deps: &Deps, shared: &Shared, op_id: &str) -> OpRead {
-    let valid =
-        !op_id.is_empty() && op_id.len() <= 64 && op_id.bytes().all(|b| b.is_ascii_alphanumeric());
-    if !valid {
+    let Some(path) = crate::domain::service_ops::operation_path(op_id) else {
         return OpRead::Gone;
-    }
+    };
     let token = match deps.vault.get(&shared.id(), SecretKind::Token) {
         Ok(Some(token)) => token,
         _ => return OpRead::Unreachable,
     };
     let request = crate::ports::transport::ApiRequest {
         method: crate::ports::transport::Method::Get,
-        path: format!("/operations/services/{op_id}"),
+        path,
         body: None,
         idempotency_key: None,
     };

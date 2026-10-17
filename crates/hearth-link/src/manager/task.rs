@@ -109,6 +109,8 @@ enum Internal {
     /// Le délai après le retour du lien est écoulé : relire les opérations de service que l'agent n'a pas
     /// redites (HRT-84).
     OpsResync,
+    /// Une relecture n'a pas eu de réponse utilisable : nouvel essai si le lien tient encore (HRT-84).
+    OpsRetry,
     /// La relecture d'une opération de service suivie.
     OpRead {
         id: String,
@@ -135,6 +137,10 @@ enum AttemptKind {
 
 /// Trames consécutives traitées avant de rendre la main au reste de la boucle.
 const FRAME_BUDGET: u32 = 32;
+
+/// Nouveaux essais de relecture des opérations de service après un retour du lien, espacés de 3, 5 puis 7 fois
+/// `ops_resync_delay` (HRT-84, BR-RESIL-010).
+const OPS_RESYNC_RETRIES: u8 = 3;
 
 /// Ce qui a réveillé la boucle.
 enum WakeUp {
@@ -230,6 +236,8 @@ struct Runner {
     services_details: bool,
     /// Les opérations de service suivies (HRT-84) : ce qui est annoncé à l'interface, une issue une seule fois.
     ops: crate::domain::service_op_tracker::OpTracker,
+    /// Les nouveaux essais de relecture qui restent depuis le dernier retour du lien.
+    ops_retries_left: u8,
     last_contact: Option<WallTime>,
     published: Option<Status>,
     ping_n: u64,
@@ -286,6 +294,7 @@ impl Runner {
             services_at,
             services_details,
             ops: crate::domain::service_op_tracker::OpTracker::new(),
+            ops_retries_left: 0,
             last_contact,
             published: None,
             ping_n: 0,
@@ -752,6 +761,7 @@ impl Runner {
             Internal::OpResponse { id, result } => self.on_op_response(id, result).await,
             Internal::Lookup { id, lookup } => self.on_lookup(id, lookup),
             Internal::OpsResync => self.resync_ops(),
+            Internal::OpsRetry => self.retry_ops_resync(),
             Internal::OpRead { id, read } => self.on_op_read(&id, read),
             Internal::NotSent { id, slow } => self.on_not_sent(&id, slow),
             Internal::EraseToken => {
@@ -1019,15 +1029,31 @@ impl Runner {
     /// ont fini (ou disparu) pendant la coupure : on les relit après un court délai (BR-RESIL-010).
     fn schedule_ops_resync(&mut self) {
         self.ops.link_restored();
+        self.ops_retries_left = OPS_RESYNC_RETRIES;
         if self.ops.unconfirmed().is_empty() {
             return;
         }
+        self.delay_ops_resync(self.deps.config.ops_resync_delay);
+    }
+
+    fn delay_ops_resync(&self, delay: Duration) {
         let sender = self.internal_tx.clone();
-        let delay = self.deps.config.ops_resync_delay;
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             let _ = sender.send(Internal::OpsResync).await;
         });
+    }
+
+    /// Une relecture sans réponse utilisable alors que le lien tient : sans nouvel essai, l'opération resterait
+    /// « en cours » (et son service verrouillé à l'écran) jusqu'à la prochaine coupure. Quelques essais
+    /// espacés, puis on attend le prochain retour du lien.
+    fn retry_ops_resync(&mut self) {
+        if self.stream.is_none() || self.ops_retries_left == 0 {
+            return;
+        }
+        self.ops_retries_left -= 1;
+        let attempt = u32::from(OPS_RESYNC_RETRIES - self.ops_retries_left);
+        self.delay_ops_resync(self.deps.config.ops_resync_delay * (1 + 2 * attempt));
     }
 
     fn resync_ops(&mut self) {
@@ -1039,11 +1065,16 @@ impl Runner {
         let shared = self.shared.clone();
         let sender = self.internal_tx.clone();
         tokio::spawn(async move {
+            let mut unreachable = false;
             for id in ids {
                 let read = attempt::read_operation(&deps, &shared, &id).await;
+                unreachable |= matches!(read, attempt::OpRead::Unreachable);
                 if sender.send(Internal::OpRead { id, read }).await.is_err() {
                     return;
                 }
+            }
+            if unreachable {
+                let _ = sender.send(Internal::OpsRetry).await;
             }
         });
     }
@@ -1060,7 +1091,7 @@ impl Runner {
                     self.deps.sink.service_operation_gone(&self.id, id);
                 }
             }
-            // Relue au prochain retour du lien.
+            // Relue par un nouvel essai (`OpsRetry`), sinon au prochain retour du lien.
             attempt::OpRead::Unreachable => {}
         }
     }

@@ -164,9 +164,9 @@ fn is_zero(value: &u32) -> bool {
     *value == 0
 }
 
-/// L'état d'un service (`BR-SVC-004`, dix états). `starting`, `stopping`, `deploying` et `updating`
-/// (« Modification en cours », HRT-84) appartiennent aux tranches suivantes : l'agent d'aujourd'hui ne les
-/// produit pas. Un client plus ancien lit `updating` comme `unknown`.
+/// L'état d'un service (`BR-SVC-004`, dix états). `starting` et `stopping` sont montrés pendant une action de
+/// Hearth (HRT-64) ; `deploying` et `updating` (« Modification en cours », HRT-84) appartiennent aux tranches
+/// suivantes : l'agent d'aujourd'hui ne les produit pas. Un client plus ancien lit `updating` comme `unknown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceState {

@@ -6,6 +6,9 @@
 
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
+use hearth_link::domain::service_ops::{
+    DecisionReason, OperationRefusal, operation_path, refusal_of,
+};
 use hearth_link::ports::transport::Method;
 use hearth_link::{ActionOutcome, ActionRequest, LinkManager};
 use hearth_proto::api::service_ops::{OperationChoice, OperationView};
@@ -15,9 +18,6 @@ use serde_json::{Value, json};
 use super::dto::{DecisionOutcome, DecisionRefusal, OperationChoiceDto, OperationDto};
 use crate::link_dto::{InvalidField, LinkFailure};
 use crate::reauth::wire::{Confirmation, confirmation_of};
-
-/// Un identifiant d'opération de l'agent : un ULID, lettres et chiffres, 64 au plus.
-const ID_MAX_LEN: usize = 64;
 
 fn invalid() -> LinkFailure {
     LinkFailure::InvalidInput {
@@ -32,15 +32,10 @@ pub fn plan(op_id: &str, choice: OperationChoiceDto) -> Result<ActionRequest, Li
     if choice == OperationChoice::Unknown {
         return Err(invalid());
     }
-    let valid = !op_id.is_empty()
-        && op_id.len() <= ID_MAX_LEN
-        && op_id.bytes().all(|b| b.is_ascii_alphanumeric());
-    if !valid {
-        return Err(invalid());
-    }
+    let path = operation_path(op_id).ok_or_else(invalid)?;
     Ok(ActionRequest {
         method: Method::Post,
-        path: format!("/operations/services/{op_id}/decision"),
+        path: format!("{path}/decision"),
         body: Some(json!({ "choice": choice.as_str() })),
     })
 }
@@ -63,7 +58,9 @@ pub async fn decide(
     }
 }
 
-/// La réponse de l'agent : l'opération après la décision, ou un refus typé par son code.
+/// La réponse de l'agent : l'opération après la décision, ou un refus typé par son code. Les refus propres à
+/// une opération sont lus par la liaison (`refusal_of`, source unique) ; seuls ceux de la confirmation et le
+/// droit retiré se lisent ici, comme pour tout acte de la coquille.
 pub fn interpret(status: u16, body: &Value) -> Result<DecisionOutcome, LinkFailure> {
     if (200..300).contains(&status) {
         let view: OperationView =
@@ -72,44 +69,58 @@ pub fn interpret(status: u16, body: &Value) -> Result<DecisionOutcome, LinkFailu
             operation: Box::new(OperationDto::from(&view)),
         });
     }
-    let refused = |refusal| Ok(DecisionOutcome::Refused { refusal });
-    let Ok(parsed) = serde_json::from_value::<ErrorBody>(body.clone()) else {
-        return match status {
-            403 => Err(LinkFailure::Forbidden),
-            404 => refused(DecisionRefusal::NotFound),
-            _ => refused(DecisionRefusal::Other),
-        };
-    };
-    // Les refus de la confirmation se lisent partout pareil (BR-TRUST-040, 045).
-    if let Some(confirmation) = confirmation_of(&parsed)? {
-        return refused(match confirmation {
-            Confirmation::WrongPassword => DecisionRefusal::WrongPassword,
-            Confirmation::PasswordRequired => DecisionRefusal::PasswordRequired,
-            Confirmation::TooManyAttempts { retry_after_s } => {
-                DecisionRefusal::TooManyAttempts { retry_after_s }
+    match serde_json::from_value::<ErrorBody>(body.clone()) {
+        Ok(parsed) => {
+            // Les refus de la confirmation se lisent partout pareil (BR-TRUST-040, 045).
+            if let Some(confirmation) = confirmation_of(&parsed)? {
+                return Ok(refused(match confirmation {
+                    Confirmation::WrongPassword => DecisionRefusal::WrongPassword,
+                    Confirmation::PasswordRequired => DecisionRefusal::PasswordRequired,
+                    Confirmation::TooManyAttempts { retry_after_s } => {
+                        DecisionRefusal::TooManyAttempts { retry_after_s }
+                    }
+                    Confirmation::Busy => DecisionRefusal::Busy,
+                }));
             }
-            Confirmation::Busy => DecisionRefusal::Busy,
-        });
+            // Le droit retiré entre-temps : l'interface le relit et le dit (BR-GRANT-010).
+            if parsed.error.code.or_from_status(status) == ErrorCode::ForbiddenRole {
+                return Err(LinkFailure::forbidden(&parsed.error));
+            }
+        }
+        Err(_) if status == 403 => return Err(LinkFailure::Forbidden),
+        Err(_) => {}
     }
-    let error = parsed.error;
-    match error.code.or_from_status(status) {
-        // Le droit retiré entre-temps : l'interface le relit et le dit (BR-GRANT-010).
-        ErrorCode::ForbiddenRole => Err(LinkFailure::forbidden(&error)),
-        ErrorCode::OperationNotFound => refused(DecisionRefusal::NotFound),
-        ErrorCode::TooLateToCancel => refused(DecisionRefusal::TooLate),
-        ErrorCode::DecisionNotOffered => refused(match error.details["reason"].as_str() {
-            Some("not_waiting") => DecisionRefusal::NotWaiting,
-            Some("not_offered") => DecisionRefusal::NotOffered,
-            Some("not_applicable") => DecisionRefusal::NotApplicable,
-            Some("expired") => DecisionRefusal::Expired,
-            _ => DecisionRefusal::Other,
-        }),
-        ErrorCode::Conflict => refused(match error.details["reason"].as_str() {
-            Some("operation_changed") => DecisionRefusal::Changed,
-            _ => DecisionRefusal::Other,
-        }),
-        ErrorCode::Busy => refused(DecisionRefusal::Busy),
-        _ => refused(DecisionRefusal::Other),
+    Ok(refused(decision_refusal(refusal_of(status, body))))
+}
+
+fn refused(refusal: DecisionRefusal) -> DecisionOutcome {
+    DecisionOutcome::Refused { refusal }
+}
+
+/// Le refus lu par la liaison, dans la liste fermée de l'interface.
+fn decision_refusal(refusal: OperationRefusal) -> DecisionRefusal {
+    match refusal {
+        OperationRefusal::NotFound
+        | OperationRefusal::Other {
+            status: 404,
+            code: None,
+        } => DecisionRefusal::NotFound,
+        OperationRefusal::TooLate => DecisionRefusal::TooLate,
+        OperationRefusal::DecisionNotOffered(reason) => match reason {
+            DecisionReason::NotWaiting => DecisionRefusal::NotWaiting,
+            DecisionReason::NotOffered => DecisionRefusal::NotOffered,
+            DecisionReason::NotApplicable => DecisionRefusal::NotApplicable,
+            DecisionReason::Expired => DecisionRefusal::Expired,
+            DecisionReason::Unknown => DecisionRefusal::Other,
+        },
+        OperationRefusal::Changed => DecisionRefusal::Changed,
+        OperationRefusal::Other {
+            code: Some(ErrorCode::Busy),
+            ..
+        } => DecisionRefusal::Busy,
+        OperationRefusal::NotCancellable { .. }
+        | OperationRefusal::MissingRight(_)
+        | OperationRefusal::Other { .. } => DecisionRefusal::Other,
     }
 }
 
