@@ -783,7 +783,21 @@ ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{
     assert_eq!(after_restart.activity, UnitActivity::Active);
     // Le système date l'arrêt seul : après un arrêt comme après un redémarrage, jamais plus que l'attente de
     // l'agent (le démarrage d'un redémarrage n'y entre pas).
-    let measured_stop = measured_stop.expect("durée de l'arrêt lue de systemctl show");
+    let raw = std::process::Command::new("systemctl")
+        .args([
+            "show",
+            &format!(
+                "--property={}",
+                hearth_agent::domain::services::STOP_TIMES_PROPERTIES
+            ),
+            "--",
+            DRIVE_UNIT,
+        ])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default();
+    let measured_stop =
+        measured_stop.unwrap_or_else(|| panic!("durée de l'arrêt lue de systemctl show : {raw:?}"));
     assert!(
         measured_stop <= stop_took,
         "{measured_stop:?} > {stop_took:?}"
