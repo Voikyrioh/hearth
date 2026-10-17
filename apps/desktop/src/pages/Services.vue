@@ -9,6 +9,8 @@ import EmptyState from "@/components/molecules/EmptyState.vue";
 import ServiceRightReason from "@/components/molecules/ServiceRightReason.vue";
 import UnreadableNote from "@/components/molecules/UnreadableNote.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
+import OperationDecisionDialog from "@/components/organisms/OperationDecisionDialog.vue";
+import OperationsStrip from "@/components/organisms/OperationsStrip.vue";
 import ServiceDetail from "@/components/organisms/ServiceDetail.vue";
 import ServiceTable from "@/components/organisms/ServiceTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
@@ -18,10 +20,12 @@ import { useServiceRights } from "@/composables/useServiceRights";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
 import { getLinkBridge, type ServiceInfo } from "@/link";
+import { launchedBy } from "@/serviceOps/messages";
 import { countServices } from "@/services/counts";
 import { openedService } from "@/services/detail";
 import { shortAge } from "@/services/format";
 import { show } from "@/services/view";
+import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import { useServicesStore } from "@/stores/services";
 
 // La section « Services » d'un serveur, en LECTURE SEULE (HRT-62) : l'état du moteur d'abord (BR-ENGINE-001),
@@ -34,6 +38,8 @@ import { useServicesStore } from "@/stores/services";
 // partage le grisé et la datation de la liste (même conteneur) : le détail ouvert ne ment jamais sur son âge.
 const { server, isConnected, isAdmin, lastContactAt } = useCurrentServer();
 const store = useServicesStore();
+// Les opérations de service en cours (HRT-84, BR-SVC-029) : la bande, la fenêtre de décision.
+const operations = useServiceOpsStore();
 const now = useNow();
 // Le droit « gérer les services » du compte connecté, lu à l'ouverture et à chaque reconnexion (HRT-78,
 // BR-GRANT-011). Aucun bouton d'action de service n'existe encore dans cette section : ceux des tickets suivants
@@ -93,7 +99,10 @@ const rightsNotice = computed(
 watch(
   () => server.value?.id,
   (id) => {
-    if (id) void store.start();
+    if (id) {
+      void store.start();
+      void operations.start();
+    }
   },
   { immediate: true },
 );
@@ -178,6 +187,20 @@ const opened = computed(() =>
 );
 const engineReady = computed(() => engine.value?.state === "ready");
 
+/** Les opérations en cours de CE serveur, la plus ancienne d'abord (visibles de tous les comptes, BR-SVC-029). */
+const running = computed(() => (server.value ? operations.of(server.value.id) : []));
+/** Qui a lancé l'opération : l'indication de la liste des services (`busy`), jamais deviné. */
+function launchedByOf(operation: TrackedOperation["operation"]): string | null {
+  const service = entry.value?.services.find((item) => item.key === operation.key);
+  return launchedBy(service?.busy?.by);
+}
+/** « Voir » ouvre le détail du service touché, où se trouve la carte de l'opération. */
+function seeOperation(tracked: TrackedOperation) {
+  openDetail(tracked.operation.key);
+}
+/** La fenêtre de décision, ouverte sur l'opération qui attend. */
+const deciding = ref<TrackedOperation | null>(null);
+
 function recheck() {
   if (server.value) void store.recheck(server.value.id);
 }
@@ -239,6 +262,15 @@ async function openDocs() {
         :recheck="server ? store.recheckOf(server.id) : 'idle'"
         @recheck="recheck"
         @docs="openDocs"
+      />
+
+      <!-- Les opérations en cours : visibles de tous les comptes (BR-SVC-029) -->
+      <OperationsStrip
+        :operations="running"
+        :launched-by="launchedByOf"
+        :allowed="rights.canAct.value"
+        @see="seeOperation"
+        @decide="deciding = $event"
       />
 
       <!-- Le droit de gérer les services : la raison pour laquelle aucune action n'est proposée (BR-GRANT-014, 016) -->
@@ -343,6 +375,7 @@ async function openDocs() {
                 @back="closeDetail"
                 @open-other="openDetail"
                 @retry-rights="rights.retry()"
+                @decide="deciding = $event"
               />
             </div>
           </div>
@@ -359,6 +392,14 @@ async function openDocs() {
         <UnreadableNote :count="entry?.unreadable ?? 0" />
       </template>
     </template>
+
+    <OperationDecisionDialog
+      v-if="server"
+      :open="deciding !== null"
+      :server-id="server.id"
+      :tracked="deciding"
+      @close="deciding = null"
+    />
   </div>
 </template>
 
