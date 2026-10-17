@@ -1,4 +1,4 @@
-//! Mémoire recommandée d'une fiche et crans de mémoire (HRT-122 ; BR-RES-030 à 038, ADR-0050).
+//! Mémoire recommandée d'une fiche et crans de mémoire (HRT-122 ; BR-RES-031 à 033, 038, ADR-0050).
 //!
 //! Domaine pur, autonome (`super::` seulement). Trois crans se DÉDUISENT de `min_bytes` et `recommended_bytes`
 //! (« Instable », « Lent », « Recommandé ») ; trois se DÉCLARENT (`[[resources.memory_tier]]` : « Fluide »,

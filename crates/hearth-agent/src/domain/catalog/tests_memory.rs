@@ -1,4 +1,4 @@
-//! Mémoire recommandée et crans de mémoire (HRT-122 ; BR-RES-030 à 033, BR-RES-038). Chaque fiche piégée est
+//! Mémoire recommandée et crans de mémoire (HRT-122 ; BR-RES-031 à 033, BR-RES-038). Chaque fiche piégée est
 //! dérivée de la fiche de base par UNE modification et doit être refusée avec LE bon motif typé.
 
 use super::Fiche;

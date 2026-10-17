@@ -104,7 +104,7 @@ impl Fiche {
         self.retired.iter().find(|r| r.id == id)
     }
 
-    /// Les crans de mémoire servis au client pour cette fiche (HRT-122, BR-RES-030 à 033).
+    /// Les crans de mémoire servis au client pour cette fiche (HRT-122, BR-RES-031 à 033).
     pub fn memory_tiers(&self) -> Vec<super::memory::ServedTier> {
         super::memory::memory_tiers(&self.file)
     }
