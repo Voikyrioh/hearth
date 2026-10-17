@@ -1,8 +1,9 @@
-//! Le superviseur systemd en détection seule (HRT-63, ADR-0037) : le propriétaire d'un conteneur lu dans
-//! un faux arbre `/proc`, l'état d'une unité lu dans un faux `systemctl`. Aucune unité n'est jamais
-//! touchée ; `systemctl` absent, muet ou lent est un cas normal et silencieux.
+//! Le superviseur systemd : détection (HRT-63, ADR-0037) puis démarrer, arrêter, redémarrer une unité (HRT-64) : le propriétaire d'un conteneur lu dans
+//! un faux arbre `/proc`, l'état d'une unité lu dans un faux `systemctl`. Aucune vraie unité n'est touchée ;
+//! `systemctl` absent, muet ou lent est un cas normal et silencieux pour la détection. Les trois ordres sont
+//! lancés sans interpréteur, un argument chacun, le nom d'unité après `--` (BR-LIFE-002, BR-LIFE-009).
 //!
-//! Règles : BR-SVC-001, BR-SVC-003, BR-SVC-016.
+//! Règles : BR-SVC-001, BR-SVC-003, BR-SVC-016, BR-LIFE-002, BR-LIFE-009, BR-LIFE-019, BR-LIFE-021.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -13,7 +14,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::Path;
 
-use hearth_agent::application::ports::{ContainerRef, ServiceSupervisor};
+use hearth_agent::application::ports::{ContainerRef, ServiceSupervisor, SupervisorError};
 use hearth_agent::domain::services::{ServiceKey, UnitLookup, UnitName, attribute};
 #[cfg(unix)]
 use hearth_agent::domain::services::{UnitActivity, UnitStatus};
@@ -592,4 +593,89 @@ async fn a_silent_failing_or_slow_systemctl_is_unavailable_and_an_unknown_unit_i
         UnitLookup::Unavailable
     );
     assert!(started.elapsed() < std::time::Duration::from_secs(5));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Les trois ordres (HRT-64)
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn without_a_supervisor_every_order_is_unavailable() {
+    let wait = std::time::Duration::from_secs(1);
+    let docker = unit("docker-x.service");
+    assert_eq!(
+        NoSupervisor.start(&docker, wait).await,
+        Err(SupervisorError::Unavailable)
+    );
+    assert_eq!(
+        NoSupervisor.stop(&docker, wait).await,
+        Err(SupervisorError::Unavailable)
+    );
+    assert_eq!(
+        NoSupervisor.restart(&docker, wait).await,
+        Err(SupervisorError::Unavailable)
+    );
+    // Une commande absente ne se lance pas : même réponse, sans panique.
+    let dir = tmp::tempdir().unwrap();
+    let missing = ProcSystemd::new(
+        dir.path().to_path_buf(),
+        dir.path()
+            .join("nowhere")
+            .join("systemctl")
+            .into_os_string(),
+    );
+    assert_eq!(
+        missing.stop(&docker, wait).await,
+        Err(SupervisorError::Unavailable)
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn each_order_is_systemctl_with_one_argument_each_and_the_unit_after_a_double_dash() {
+    let dir = tmp::tempdir().unwrap();
+    let script = fake_systemctl(dir.path(), "printf '%s\\n' \"$@\" > \"$0.args\"");
+    let supervisor = ProcSystemd::new(dir.path().to_path_buf(), script.clone().into_os_string());
+    let wait = std::time::Duration::from_secs(5);
+    let service = unit("docker-7dtd.service");
+    for (verb, result) in [
+        ("start", supervisor.start(&service, wait).await),
+        ("stop", supervisor.stop(&service, wait).await),
+        ("restart", supervisor.restart(&service, wait).await),
+    ] {
+        assert_eq!(result, Ok(()), "{verb}");
+        let args = std::fs::read_to_string(format!("{}.args", script.display())).unwrap();
+        // Jamais `disable`, `mask`, `daemon-reload` : trois arguments, le verbe, `--`, l'unité.
+        assert_eq!(
+            args.lines().collect::<Vec<_>>(),
+            [verb, "--", "docker-7dtd.service"]
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failing_or_slow_systemctl_gives_a_typed_error_and_a_slow_one_is_cut_at_the_wait() {
+    let dir = tmp::tempdir().unwrap();
+    let service = unit("docker-7dtd.service");
+    // Un échec du système (unité en échec, inconnue) : refusé, sans lire la sortie.
+    let script = fake_systemctl(dir.path(), "echo 'sentinel-secret' >&2; exit 5");
+    let supervisor = ProcSystemd::new(dir.path().to_path_buf(), script.into_os_string());
+    let refused = supervisor
+        .start(&service, std::time::Duration::from_secs(5))
+        .await
+        .unwrap_err();
+    assert_eq!(refused, SupervisorError::Refused);
+    assert!(!format!("{refused} {refused:?}").contains("sentinel"));
+    // Trop lent : abandonné à l'échéance de l'attente de l'action (BR-LIFE-021), sans attendre la commande.
+    let script = fake_systemctl(dir.path(), "sleep 20");
+    let supervisor = ProcSystemd::new(dir.path().to_path_buf(), script.into_os_string());
+    let began = std::time::Instant::now();
+    assert_eq!(
+        supervisor
+            .stop(&service, std::time::Duration::from_millis(300))
+            .await,
+        Err(SupervisorError::Timeout)
+    );
+    assert!(began.elapsed() < std::time::Duration::from_secs(5));
 }

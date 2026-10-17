@@ -161,9 +161,22 @@ pub enum CancelOutcome {
     NotCancellable,
 }
 
+/// Une action de cycle de vie (démarrer, arrêter, redémarrer) que l'arrêt de l'agent a interrompue (HRT-64,
+/// BR-LIFE-020) : le compte, le nom du service au moment de l'action et le geste. Le démarrage de l'agent les
+/// donne pour qu'elles soient consignées au journal d'activité ; il ne les reprend, ne les rejoue ni ne les
+/// défait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterruptedAction {
+    pub account: String,
+    pub service_name: String,
+    pub kind: OpKind,
+}
+
 /// Ce que le démarrage a fait de chaque opération non terminée.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecoverySummary {
+    /// Les actions de cycle de vie interrompues, de la plus ancienne à la plus récente.
+    pub interrupted_actions: Vec<InterruptedAction>,
     pub interrupted: u32,
     pub needs_attention: u32,
     /// Opérations `needs_attention` déjà là au démarrage, dont le verrou a été repris.
@@ -522,6 +535,26 @@ impl ServiceOps {
         Ok(())
     }
 
+    /// Note que l'opération a forcé (HRT-64, BR-LIFE-009). Avant sa fin.
+    pub async fn mark_forced(&self, id: &str) -> Result<(), OpError> {
+        self.journal.mark_forced(id, self.clock.now()).await?;
+        self.publish(id).await;
+        Ok(())
+    }
+
+    /// Pose, après coup, une cause sur une réussite qui n'en a pas (HRT-64, BR-LIFE-005, BR-LIFE-011) et
+    /// prévient les abonnés. `false` : rien n'a changé.
+    pub async fn annotate(&self, id: &str, cause: Cause) -> Result<bool, OpError> {
+        let written = self
+            .journal
+            .annotate_cause(id, cause, self.clock.now())
+            .await?;
+        if written {
+            self.publish(id).await;
+        }
+        Ok(written)
+    }
+
     /// Clôt l'opération dans un statut terminal et rend ses verrous.
     pub async fn finish(
         &self,
@@ -745,7 +778,16 @@ impl ServiceOps {
                         "opération interrompue dans un état à vérifier : le verrou du service est conservé et rien n'est rejoué"
                     );
                 }
-                _ => summary.interrupted += 1,
+                _ => {
+                    summary.interrupted += 1;
+                    if op.kind.is_lifecycle() {
+                        summary.interrupted_actions.push(InterruptedAction {
+                            account: op.account.clone(),
+                            service_name: op.service_name.clone(),
+                            kind: op.kind,
+                        });
+                    }
+                }
             }
         }
         // La projection `busy` / `last_action` repart du journal tel que la reprise vient de le classer.

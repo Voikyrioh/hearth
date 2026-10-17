@@ -1,23 +1,40 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 //! Faux superviseur de services : des propriétaires de conteneurs et des états d'unités réglables, des
 //! compteurs d'appels. Sert à tous les tests de l'agent (aucun systemd sur le poste de développement).
-//! Comme le vrai, il n'agit jamais sur une unité.
+//! Comme le vrai, il ne fait que démarrer, arrêter ou redémarrer une unité (HRT-64) : l'état de l'unité change
+//! en conséquence, ou l'ordre échoue comme le test le règle.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::Semaphore;
 
-use hearth_agent::application::ports::{ContainerRef, ServiceSupervisor};
+use hearth_agent::application::ports::{ContainerRef, ServiceSupervisor, SupervisorError};
 use hearth_agent::domain::services::{UnitActivity, UnitLookup, UnitName, UnitStatus};
+
+/// Un ordre reçu par le faux superviseur, dans l'ordre.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Order {
+    Start(UnitName, Duration),
+    Stop(UnitName, Duration),
+    Restart(UnitName, Duration),
+}
 
 #[derive(Default)]
 struct State {
     /// Identifiant de conteneur vers l'unité qui le possède.
     owners: HashMap<String, UnitName>,
     units: HashMap<UnitName, UnitLookup>,
+    orders: Vec<Order>,
+    /// Les ordres de cette unité échouent ainsi.
+    order_errors: HashMap<UnitName, SupervisorError>,
+    /// Un arrêt de cette unité met ce temps (virtuel sous `tokio::time::pause`).
+    stop_delays: HashMap<UnitName, Duration>,
+    /// Les ordres de cette unité ne rendent jamais la main.
+    hanging: Vec<UnitName>,
 }
 
 pub struct FakeSupervisor {
@@ -117,6 +134,63 @@ impl FakeSupervisor {
     pub fn unit_queries(&self) -> u64 {
         self.unit_queries.load(Ordering::SeqCst)
     }
+
+    /// Les ordres reçus jusqu'ici.
+    pub fn orders(&self) -> Vec<Order> {
+        self.lock().orders.clone()
+    }
+
+    /// Les ordres de cette unité échouent ainsi (None : rétablit).
+    pub fn fail_orders(&self, unit: &UnitName, error: Option<SupervisorError>) {
+        let mut state = self.lock();
+        match error {
+            Some(error) => state.order_errors.insert(unit.clone(), error),
+            None => state.order_errors.remove(unit),
+        };
+    }
+
+    /// Un arrêt de cette unité met ce temps.
+    pub fn set_stop_delay(&self, unit: &UnitName, delay: Duration) {
+        self.lock().stop_delays.insert(unit.clone(), delay);
+    }
+
+    /// Les ordres de cette unité ne rendent jamais la main.
+    pub fn make_hang(&self, unit: &UnitName) {
+        self.lock().hanging.push(unit.clone());
+    }
+
+    /// Range un ordre, applique ses effets sur l'état de l'unité et rend son issue.
+    async fn order(&self, order: Order, unit: &UnitName) -> Result<(), SupervisorError> {
+        let (error, delay, hang) = {
+            let mut state = self.lock();
+            state.orders.push(order.clone());
+            (
+                state.order_errors.get(unit).copied(),
+                state.stop_delays.get(unit).copied().unwrap_or_default(),
+                state.hanging.contains(unit),
+            )
+        };
+        if hang {
+            std::future::pending::<()>().await;
+        }
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let activity = match order {
+            Order::Stop(..) => {
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+                UnitActivity::Inactive
+            }
+            Order::Start(..) | Order::Restart(..) => UnitActivity::Active,
+        };
+        let mut state = self.lock();
+        if let Some(UnitLookup::Loaded(status)) = state.units.get_mut(unit) {
+            status.activity = activity;
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -152,5 +226,17 @@ impl ServiceSupervisor for FakeSupervisor {
             .get(unit)
             .copied()
             .unwrap_or(UnitLookup::Unavailable)
+    }
+
+    async fn start(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError> {
+        self.order(Order::Start(unit.clone(), wait), unit).await
+    }
+
+    async fn stop(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError> {
+        self.order(Order::Stop(unit.clone(), wait), unit).await
+    }
+
+    async fn restart(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError> {
+        self.order(Order::Restart(unit.clone(), wait), unit).await
     }
 }

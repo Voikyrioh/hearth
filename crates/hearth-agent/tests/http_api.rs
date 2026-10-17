@@ -1384,6 +1384,35 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     engine.put_silently(to_adopt);
     engine.put_silently(to_release);
     env.adopt(&release_key, "a-relacher", "marie").await;
+    // Trois services adoptés à piloter (HRT-64) : un arrêté à démarrer, deux qui tournent à arrêter et à
+    // redémarrer.
+    let mut drive_keys = std::collections::HashMap::new();
+    for (verb, name, state) in [
+        (
+            "start",
+            "a-demarrer",
+            hearth_agent::domain::services::RunState::Exited,
+        ),
+        (
+            "stop",
+            "a-arreter",
+            hearth_agent::domain::services::RunState::Running,
+        ),
+        (
+            "restart",
+            "a-redemarrer",
+            hearth_agent::domain::services::RunState::Running,
+        ),
+    ] {
+        let mut observation = container(name, state);
+        if state == hearth_agent::domain::services::RunState::Exited {
+            observation.exit_code = Some(0);
+        }
+        let key = format!("c_{}", observation.id);
+        engine.put_silently(observation);
+        env.adopt(&key, name, "marie").await;
+        drive_keys.insert(verb, key);
+    }
     let state = state_with_engine(
         &env,
         support::update::Rig::new(&env, false, false).service,
@@ -1623,6 +1652,18 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 )
                 .await
             }
+            // Démarrer, arrêter, redémarrer (HRT-64) : `202`, et UNE entrée réussie, écrite à la fin de
+            // l'action à l'arrière-plan (attendue plus bas).
+            ("POST", "/services/{key}/start" | "/services/{key}/stop" | "/services/{key}/restart") => {
+                let verb = endpoint.path.rsplit('/').next().unwrap();
+                api.act(
+                    &marie,
+                    Method::POST,
+                    &format!("/services/{}/{verb}", drive_keys[verb]),
+                    json!({}),
+                )
+                .await
+            }
             // Annuler et décider une opération de service (HRT-144) : la réussite s'écrit sous l'action du
             // GENRE de l'opération, une seule entrée.
             ("DELETE", "/operations/services/{id}") => {
@@ -1654,6 +1695,19 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             endpoint.path,
             reply.body
         );
+        if reply.status == StatusCode::ACCEPTED {
+            let started = std::time::Instant::now();
+            while successes(&env).await - before < 1 {
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(10),
+                    "{} {} : l'entrée de réussite n'est jamais écrite",
+                    endpoint.method,
+                    endpoint.path
+                );
+                env.audit_recorder.flush_all().await;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
         assert_eq!(
             successes(&env).await - before,
             1,

@@ -214,6 +214,21 @@ pub enum Target {
         service: ClientName,
         gesture: OperationGesture,
     },
+    /// Un service démarré, arrêté ou redémarré (HRT-64, BR-LIFE-018), avec ce que l'issue a de particulier
+    /// (liste fermée). Le nom du service est le seul détail d'un conteneur que l'entrée écrit.
+    ServiceLifecycle {
+        service: ClientName,
+        note: LifecycleNote,
+    },
+}
+
+/// Ce qu'une issue de démarrage, d'arrêt ou de redémarrage a de particulier (texte fixe).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LifecycleNote {
+    /// Rien à signaler.
+    Plain,
+    /// Le service ne s'est pas arrêté dans son délai : il a été coupé de force (BR-LIFE-009).
+    Forced,
 }
 
 /// Ce qu'un compte a fait d'une opération de service (liste fermée : le texte de l'entrée est fixe).
@@ -287,6 +302,14 @@ impl Target {
                 "service {} : décision « {choice} »",
                 service.as_str()
             )),
+            Self::ServiceLifecycle {
+                service,
+                note: LifecycleNote::Plain,
+            } => Some(format!("service {}", service.as_str())),
+            Self::ServiceLifecycle {
+                service,
+                note: LifecycleNote::Forced,
+            } => Some(format!("service {} (arrêt forcé)", service.as_str())),
             Self::ServiceAdoption(key, cause) => {
                 Some(format!("service {} ({})", key.as_str(), cause.text()))
             }
@@ -393,6 +416,28 @@ pub enum Reason {
     OpensThrottled {
         over: u32,
     },
+    /// Une autre action tient déjà ce service (HRT-64, BR-LIFE-013, BR-LIFE-018).
+    ActionInProgress,
+    /// Le service est déjà dans l'état demandé (HRT-64, BR-LIFE-014).
+    AlreadyInState,
+    /// Le service est dans un état où l'action n'a pas de sens : en pause, en arrêt, état non reconnu, ou, pour
+    /// redémarrer, pas en marche (HRT-64, BR-LIFE-003, BR-LIFE-014).
+    NotDrivable,
+    /// Un port que le service demande est déjà pris : il reste arrêté (HRT-64, BR-LIFE-006).
+    PortInUse,
+    /// Le programme s'est arrêté dans les 10 secondes qui ont suivi son lancement (HRT-64, BR-LIFE-005).
+    StoppedRightAfterStart,
+    /// Le moteur de conteneurs est inaccessible ou pas prêt (HRT-64, BR-LIFE-019).
+    EngineUnavailable,
+    /// Le moteur ou le système du serveur a refusé l'ordre (HRT-64, BR-LIFE-019).
+    EngineRefused,
+    /// Arrêté depuis Hearth, le service est reparti tout seul : une règle du serveur le relance (HRT-64,
+    /// BR-LIFE-011).
+    RestartedByHost,
+    /// Le moteur n'a pas répondu dans le délai d'arrêt du service plus 30 secondes (HRT-64, BR-LIFE-021).
+    Timeout,
+    /// L'agent s'est arrêté pendant l'action (HRT-64, BR-LIFE-020).
+    Interrupted,
 }
 
 impl Reason {
@@ -447,6 +492,16 @@ impl Reason {
             Self::OpensThrottled { over } => {
                 format!("plus de {over} ouvertures de journaux refusées en 10 minutes")
             }
+            Self::ActionInProgress => "action déjà en cours".to_owned(),
+            Self::AlreadyInState => "déjà dans l'état demandé".to_owned(),
+            Self::NotDrivable => "état du service incompatible avec l'action".to_owned(),
+            Self::PortInUse => "port occupé".to_owned(),
+            Self::StoppedRightAfterStart => "arrêté juste après le démarrage".to_owned(),
+            Self::EngineUnavailable => "moteur inaccessible".to_owned(),
+            Self::EngineRefused => "refusé par le moteur".to_owned(),
+            Self::RestartedByHost => "repart tout seul".to_owned(),
+            Self::Timeout => "délai dépassé".to_owned(),
+            Self::Interrupted => "interrompu par un redémarrage de l'agent".to_owned(),
         }
     }
 }
@@ -656,6 +711,50 @@ mod tests {
 
     fn marie() -> Username {
         Username::parse("marie").unwrap()
+    }
+
+    #[test]
+    fn a_lifecycle_entry_names_the_service_and_says_when_the_stop_was_forced() {
+        let name = ClientName::parse("terraria").unwrap();
+        let plain = Target::ServiceLifecycle {
+            service: name.clone(),
+            note: LifecycleNote::Plain,
+        };
+        let forced = Target::ServiceLifecycle {
+            service: name,
+            note: LifecycleNote::Forced,
+        };
+        assert_eq!(plain.text().unwrap(), "service terraria");
+        assert_eq!(forced.text().unwrap(), "service terraria (arrêt forcé)");
+    }
+
+    #[test]
+    fn the_lifecycle_reasons_are_the_closed_list_of_the_rule_in_french() {
+        // BR-LIFE-018 : « port occupé », « arrêté juste après le démarrage », « moteur inaccessible », « service
+        // introuvable », « droits insuffisants », « action déjà en cours », « déjà dans l'état demandé », « repart
+        // tout seul », « délai dépassé », « interrompu par un redémarrage de l'agent », « refusé par le moteur ».
+        for (reason, text) in [
+            (Reason::PortInUse, "port occupé"),
+            (
+                Reason::StoppedRightAfterStart,
+                "arrêté juste après le démarrage",
+            ),
+            (Reason::EngineUnavailable, "moteur inaccessible"),
+            (Reason::ServiceNotFound, "service introuvable"),
+            (Reason::InsufficientRights, "droits insuffisants"),
+            (Reason::ActionInProgress, "action déjà en cours"),
+            (Reason::AlreadyInState, "déjà dans l'état demandé"),
+            (Reason::RestartedByHost, "repart tout seul"),
+            (Reason::Timeout, "délai dépassé"),
+            (
+                Reason::Interrupted,
+                "interrompu par un redémarrage de l'agent",
+            ),
+            (Reason::EngineRefused, "refusé par le moteur"),
+        ] {
+            assert_eq!(reason.text(), text);
+            assert_eq!(reason.group_text(), text);
+        }
     }
 
     #[test]

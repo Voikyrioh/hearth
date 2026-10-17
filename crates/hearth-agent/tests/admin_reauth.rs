@@ -70,6 +70,11 @@ enum Spec {
     Release {
         key: String,
     },
+    /// Démarrer, arrêter ou redémarrer ce service (HRT-64) : `kind` est l'un des trois actes.
+    Drive {
+        kind: ActKind,
+        key: String,
+    },
     /// Annuler cette opération de service (HRT-144).
     Cancel {
         target: String,
@@ -113,6 +118,17 @@ impl Spec {
             Self::Adopt { keys } => AdminAct::services_adopt(keys.iter().map(String::as_str)),
             Self::Release { key } => AdminAct::ServiceRelease {
                 target: key.as_str().into(),
+            },
+            Self::Drive { kind, key } => match kind {
+                ActKind::ServiceStart => AdminAct::ServiceStart {
+                    target: key.as_str().into(),
+                },
+                ActKind::ServiceStop => AdminAct::ServiceStop {
+                    target: key.as_str().into(),
+                },
+                _ => AdminAct::ServiceRestart {
+                    target: key.as_str().into(),
+                },
             },
             Self::Cancel { target } => AdminAct::OperationCancel { target },
             Self::Decide { target, choice } => AdminAct::OperationDecide {
@@ -169,6 +185,18 @@ impl Spec {
                 json!({ "keys": keys }),
             ),
             Self::Release { key } => (Method::POST, format!("/services/{key}/release"), json!({})),
+            Self::Drive { kind, key } => (
+                Method::POST,
+                format!(
+                    "/services/{key}/{}",
+                    match kind {
+                        ActKind::ServiceStart => "start",
+                        ActKind::ServiceStop => "stop",
+                        _ => "restart",
+                    }
+                ),
+                json!({}),
+            ),
             Self::Cancel { target } => (
                 Method::DELETE,
                 format!("/operations/services/{target}"),
@@ -253,6 +281,10 @@ impl Spec {
                 ]
             }
             Self::Release { .. } => vec![Self::Release {
+                key: "c_autre".into(),
+            }],
+            Self::Drive { kind, .. } => vec![Self::Drive {
+                kind: *kind,
                 key: "c_autre".into(),
             }],
             Self::Cancel { .. } => vec![Self::Cancel {
@@ -421,6 +453,24 @@ impl Bench {
                 self.env.adopt(&key, "a-relacher", "marie").await;
                 self.state.services.reload_adopted().await;
                 Spec::Release { key }
+            }
+            ActKind::ServiceStart | ActKind::ServiceStop | ActKind::ServiceRestart => {
+                // Un service adopté qui tourne ; pour le démarrer, il est d'abord arrêté.
+                self.env.grant_services("marie").await;
+                // Un service par geste : deux gestes à la suite sur le même service se heurteraient au verrou.
+                let name = format!("a-piloter-{kind:?}");
+                let key = self.unmanaged(&name).await;
+                self.env.adopt(&key, &name, "marie").await;
+                self.state.services.reload_adopted().await;
+                if kind == ActKind::ServiceStart {
+                    let id = key.trim_start_matches("c_").to_owned();
+                    self.engine.update(&id, |container| {
+                        container.run_state = hearth_agent::domain::services::RunState::Exited;
+                        container.exit_code = Some(0);
+                    });
+                    self.state.services.resync().await.expect("liste");
+                }
+                Spec::Drive { kind, key }
             }
             ActKind::OperationCancel => {
                 self.env.grant_services("marie").await;
@@ -624,7 +674,22 @@ async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_succe
         );
         // La mise à jour de l'agent répond `202` : son entrée réussie est écrite par l'agent qui revient
         // (BR-UPDATE-024), pas par la requête.
-        if kind != ActKind::AgentUpdate {
+        if matches!(
+            kind,
+            ActKind::ServiceStart | ActKind::ServiceStop | ActKind::ServiceRestart
+        ) {
+            // Démarrer, arrêter, redémarrer répondent `202` (HRT-64) : leur entrée réussie est écrite à la fin
+            // de l'action, à l'arrière-plan.
+            let started = std::time::Instant::now();
+            while b.ok_entries(kind).await - before < 1 {
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(10),
+                    "{kind:?} : l'entrée de réussite n'est pas écrite"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            assert_eq!(b.ok_entries(kind).await - before, 1, "{kind:?}");
+        } else if kind != ActKind::AgentUpdate {
             assert_eq!(b.ok_entries(kind).await - before, 1, "{kind:?}");
         }
     }
@@ -1225,11 +1290,15 @@ async fn the_acts_the_elevation_never_covers_ask_for_the_password_during_the_ele
     // Rendre un service adopté retire un accès : couvert aussi (BR-ADOPT-013).
     // Annuler une opération n'ajoute rien à ce que le compte pouvait déjà faire : couvert aussi (défaut non
     // validé par le propriétaire, revue de la PR 94).
+    // Démarrer, arrêter et redémarrer un service existant sont couverts aussi (HRT-64, BR-LIFE-016).
     for kind in [
         ActKind::AccountDelete,
         ActKind::SessionsRevoke,
         ActKind::ServiceRelease,
         ActKind::OperationCancel,
+        ActKind::ServiceStart,
+        ActKind::ServiceStop,
+        ActKind::ServiceRestart,
     ] {
         let spec = b.spec(kind).await;
         let reply = b.act(&b.marie, &spec, "").await;
@@ -2117,8 +2186,8 @@ async fn a_decision_with_a_choice_this_version_does_not_know_is_refused_before_a
     assert_eq!(b.env.hasher.verifications(), verifications);
 }
 
-/// Un acte déclaré sans route (HRT-144 : démarrer, arrêter, redémarrer, déployer, supprimer, sauvegarder,
-/// supprimer une sauvegarde, régler un jeu) n'a AUCUNE voie : ni route, ni lecture de corps par la couche
+/// Un acte déclaré sans route (HRT-144 : déployer, supprimer, sauvegarder, supprimer une sauvegarde, régler un
+/// jeu ; démarrer, arrêter et redémarrer ont leur route depuis HRT-64 et sont dans la matrice générique) n'a AUCUNE voie : ni route, ni lecture de corps par la couche
 /// générique, et une preuve valide signée pour lui n'est acceptée par aucune route existante, ne confirme
 /// rien et ne change rien.
 #[tokio::test]
@@ -2128,18 +2197,6 @@ async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_
     b.env.grant_services("marie").await;
     let key = "c_0123abcd";
     let declared: Vec<(ActKind, AdminAct<'_>)> = vec![
-        (
-            ActKind::ServiceStart,
-            AdminAct::ServiceStart { target: key.into() },
-        ),
-        (
-            ActKind::ServiceStop,
-            AdminAct::ServiceStop { target: key.into() },
-        ),
-        (
-            ActKind::ServiceRestart,
-            AdminAct::ServiceRestart { target: key.into() },
-        ),
         (
             ActKind::ServiceDeploy,
             AdminAct::ServiceDeploy {
@@ -2198,9 +2255,6 @@ async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_
     }
     // Des chemins où un lot futur mettrait ces gestes : rien n'y répond tant qu'il n'existe pas.
     let candidates = [
-        (Method::POST, "/services/c_0123abcd/start"),
-        (Method::POST, "/services/c_0123abcd/stop"),
-        (Method::POST, "/services/c_0123abcd/restart"),
         (Method::POST, "/services"),
         (Method::DELETE, "/services/c_0123abcd"),
         (Method::PUT, "/services/c_0123abcd"),

@@ -1,4 +1,5 @@
-//! Le superviseur systemd, par `/proc` et `systemctl show` (HRT-63, ADR-0037). DÉTECTION SEULE.
+//! Le superviseur systemd, par `/proc` et `systemctl` (HRT-63, ADR-0037) : détection, puis démarrer, arrêter
+//! et redémarrer une unité (HRT-64).
 //!
 //! **Propriétaire d'un conteneur.** Un conteneur lancé par une unité (`ExecStart=docker run --name=x
 //! ...`, ou `systemd-run docker run ...`) a un processus client du moteur (`docker` ou `podman`)
@@ -14,6 +15,12 @@
 //! d'arriver ici. `systemctl` absent du `PATH`, système sans systemd, délai dépassé ou sortie
 //! illisible sont des cas NORMAUX : `UnitLookup::Unavailable`, sans bruit.
 //!
+//! **Les ordres.** `systemctl start|stop|restart -- <unité>`, lancé SANS interpréteur, un argument chacun, le
+//! nom d'unité (un `UnitName`, validé, lu dans `/proc` ou reçu dans une clé validée) toujours après `--`,
+//! avec un délai (l'attente de l'action, BR-LIFE-021). `systemctl` attend la fin du travail du système : un
+//! arrêt rend la main quand l'unité est arrêtée, après SON délai d'arrêt (BR-LIFE-009). La sortie de
+//! `systemctl` n'est jamais lue ni tracée. Jamais `disable`, `mask`, `daemon-reload` ni `edit`.
+//!
 //! Limites de lecture : au plus `MAX_PROCESSES` processus parcourus, `SCAN_BUDGET` de temps, 64 Kio de
 //! ligne de commande et 16 Kio de groupe de contrôle par processus.
 
@@ -27,7 +34,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
-use crate::application::ports::{ContainerRef, ServiceSupervisor};
+use crate::application::ports::{ContainerRef, ServiceSupervisor, SupervisorError};
 use crate::domain::services::unit::SHOW_PROPERTIES;
 use crate::domain::services::{
     ClientClaim, UnitLookup, UnitName, attribute, client_refs, is_engine_client, parse_main_pid,
@@ -105,6 +112,59 @@ impl ProcSystemd {
     }
 }
 
+/// Les trois verbes que l'agent donne à `systemctl` (liste fermée : jamais un texte venu d'ailleurs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Order {
+    Start,
+    Stop,
+    Restart,
+}
+
+impl Order {
+    const fn verb(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+        }
+    }
+}
+
+impl ProcSystemd {
+    /// Donne un ordre à une unité et attend sa fin, au plus `wait`.
+    async fn order(
+        &self,
+        order: Order,
+        unit: &UnitName,
+        wait: Duration,
+    ) -> Result<(), SupervisorError> {
+        let mut command = tokio::process::Command::from(scrubbed(&self.systemctl));
+        command
+            .arg(order.verb())
+            .arg("--")
+            .arg(unit.as_str())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let work = async {
+            let mut child = command.spawn().map_err(|_| SupervisorError::Unavailable)?;
+            let status = child
+                .wait()
+                .await
+                .map_err(|_| SupervisorError::Unavailable)?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(SupervisorError::Refused)
+            }
+        };
+        tokio::time::timeout(wait, work)
+            .await
+            .unwrap_or(Err(SupervisorError::Timeout))
+    }
+}
+
 #[async_trait]
 impl ServiceSupervisor for ProcSystemd {
     async fn owners(&self, containers: &[ContainerRef]) -> HashMap<String, UnitName> {
@@ -141,6 +201,18 @@ impl ServiceSupervisor for ProcSystemd {
             Some(text) => parse_show(&text),
             None => UnitLookup::Unavailable,
         }
+    }
+
+    async fn start(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError> {
+        self.order(Order::Start, unit, wait).await
+    }
+
+    async fn stop(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError> {
+        self.order(Order::Stop, unit, wait).await
+    }
+
+    async fn restart(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError> {
+        self.order(Order::Restart, unit, wait).await
     }
 }
 

@@ -47,18 +47,19 @@ use async_trait::async_trait;
 
 use crate::application::ports::{
     AdoptedRecord, AuditSink, Clock, ContainerEngine, ContainerRef, EngineError, EnvEntry,
-    HostDescription, HostEnvironment, MonotonicClock, ServiceRepo, ServiceSupervisor, StoreError,
-    SupervisedRecord,
+    HostDescription, HostEnvironment, MonotonicClock, ServiceIntents, ServiceRepo,
+    ServiceSupervisor, StopIntent, StoreError, SupervisedRecord, SupervisorError,
 };
 use crate::domain::audit::{Actor, AdoptionCause, AuditAction, ClientName, Outcome, Target};
 use crate::domain::services::image::ImageName;
 use crate::domain::services::logs::{LogContainer, LogOrigin, LogTarget};
 use crate::domain::services::{
     Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, KeyKind, Observation,
-    PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow, UnitLookup,
-    UnitName, UnitStatus, Visibility, classify_probe, compare_names, confirmation_expired,
-    derive_state, derive_supervised, gone_long_enough, lapsed, unit_answered, unit_is_gone,
-    unread_unit_adoptions, visibility_of,
+    PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow, Transition,
+    TransitionKind, UnitLookup, UnitName, UnitStatus, Visibility, classify_probe, compare_names,
+    confirmation_expired, derive_state, derive_supervised, gone_long_enough, honour_stop_request,
+    lapsed, overlay_transition, stop_grace_s, unit_answered, unit_is_gone, unread_unit_adoptions,
+    visibility_of,
 };
 
 /// Capacité de la diffusion : un abonné qui prend plus de 64 lots de retard relit un instantané.
@@ -177,6 +178,29 @@ pub struct Supervision {
     /// Le conteneur du service existe. `false` : le service est listé d'après son unité, avec ses
     /// derniers réglages connus.
     pub container_present: bool,
+}
+
+/// Qui pilote un service (HRT-64, ADR-0037) : le moteur de conteneurs, ou le système du serveur pour un
+/// service lancé par une unité. Un service supervisé n'est JAMAIS piloté par le moteur : c'est le seul chemin
+/// où l'arrêt tient, où le démarrage est possible et où le délai d'arrêt du service est respecté.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Driver {
+    Engine { container_id: String },
+    Supervisor { unit: UnitName },
+}
+
+/// Un service publié, tel que le cas d'usage de pilotage a besoin de le voir.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LifecycleTarget {
+    pub key: ServiceKey,
+    /// Le nom du service (conteneur) : il va au journal d'activité, jamais plus que lui.
+    pub name: String,
+    /// L'état publié (ce que le client voit).
+    pub state: ServiceStateKind,
+    pub driver: Driver,
+    /// Le délai d'arrêt du service, en secondes (`BR-LIFE-009`) : celui de l'unité, sinon du conteneur, sinon 10.
+    pub grace_s: u32,
+    pub adopted: bool,
 }
 
 /// L'état complet : moteur et services (triés par nom sans tenir compte de la casse).
@@ -300,6 +324,13 @@ struct Inner {
     last_exit: HashMap<UnitName, i64>,
     /// Instant monotone de la dernière relecture de l'état des unités.
     last_unit_poll: Option<Duration>,
+    /// Les arrêts demandés depuis Hearth et non encore défaits (HRT-64, `service_intents`) : la clé et le
+    /// moment de la demande. Un service arrêté avec un code non nul n'est pas « En erreur ».
+    stop_intents: HashMap<ServiceKey, OffsetDateTime>,
+    /// Arrêts voulus à effacer de la base : le service est revu en marche depuis, ou n'existe plus.
+    intents_to_clear: HashSet<ServiceKey>,
+    /// Ce que Hearth fait aux services en ce moment (HRT-64) : « Arrêt en cours », « Démarrage ».
+    transitions: HashMap<ServiceKey, Transition>,
 }
 
 impl Inner {
@@ -431,6 +462,18 @@ impl ServiceSupervisor for NoSupervision {
     async fn unit(&self, _unit: &UnitName) -> UnitLookup {
         UnitLookup::Unavailable
     }
+
+    async fn start(&self, _unit: &UnitName, _wait: Duration) -> Result<(), SupervisorError> {
+        Err(SupervisorError::Unavailable)
+    }
+
+    async fn stop(&self, _unit: &UnitName, _wait: Duration) -> Result<(), SupervisorError> {
+        Err(SupervisorError::Unavailable)
+    }
+
+    async fn restart(&self, _unit: &UnitName, _wait: Duration) -> Result<(), SupervisorError> {
+        Err(SupervisorError::Unavailable)
+    }
 }
 
 /// Une sonde en cours : retirée du compte quand elle finit OU qu'elle est abandonnée en route.
@@ -470,6 +513,9 @@ pub struct ServicesRegistry {
     /// Le journal d'activité, pour consigner ce que le registre décide seul (passage « à confirmer » et chute
     /// d'une adoption). Posé une fois par la racine de composition ; absent, rien n'est consigné.
     audit: OnceLock<Arc<dyn AuditSink>>,
+    /// Les arrêts voulus, en base (HRT-64). Posé une fois par la racine de composition ; absent, ils ne sont
+    /// retenus qu'en mémoire.
+    intents: OnceLock<Arc<dyn ServiceIntents>>,
     changes: broadcast::Sender<Arc<ServicesChange>>,
     /// Réveille la tâche (« Vérifier à nouveau »).
     wake: Notify,
@@ -570,10 +616,14 @@ impl ServicesRegistry {
                 present_units: HashSet::new(),
                 last_exit: HashMap::new(),
                 last_unit_poll: None,
+                stop_intents: HashMap::new(),
+                intents_to_clear: HashSet::new(),
+                transitions: HashMap::new(),
             }),
             clock,
             monotonic,
             audit: OnceLock::new(),
+            intents: OnceLock::new(),
             changes,
             wake: Notify::new(),
         })
@@ -582,6 +632,11 @@ impl ServicesRegistry {
     /// Branche le journal d'activité (une seule fois ; un second appel est sans effet).
     pub fn set_audit(&self, sink: Arc<dyn AuditSink>) {
         let _ = self.audit.set(sink);
+    }
+
+    /// Branche les arrêts voulus en base (une seule fois ; un second appel est sans effet).
+    pub fn set_intents(&self, intents: Arc<dyn ServiceIntents>) {
+        let _ = self.intents.set(intents);
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -1139,7 +1194,7 @@ impl ServicesRegistry {
                 _ => None,
             };
             let (derived, supervision) = match unit {
-                // Aucune action de Hearth dans cette tranche : l'arrêt n'est jamais « demandé ».
+                // L'arrêt demandé depuis Hearth est appliqué après coup (`apply_hearth_actions`).
                 None => (derive_state(&observation, restarts_10m, false), None),
                 Some(unit) => {
                     present_units.insert(unit.clone());
@@ -1187,6 +1242,10 @@ impl ServicesRegistry {
                     )
                 }
             };
+            let running_since = (observation.run_state == RunState::Running)
+                .then_some(observation.started_at)
+                .flatten();
+            let derived = Self::apply_hearth_actions(inner, &key, running_since, derived);
             target.insert(
                 key.clone(),
                 ServiceView {
@@ -1231,6 +1290,7 @@ impl ServicesRegistry {
                 Some(memory.last_seen),
                 now,
             );
+            let derived = Self::apply_hearth_actions(inner, &key, None, derived);
             target.insert(
                 key.clone(),
                 ServiceView {
@@ -1247,6 +1307,43 @@ impl ServicesRegistry {
                 },
             );
         }
+        // Un arrêt voulu dont le service n'existe plus n'a plus de raison d'être (la liste est celle du moteur).
+        let gone: Vec<ServiceKey> = inner
+            .stop_intents
+            .keys()
+            .filter(|key| !target.contains_key(*key))
+            .cloned()
+            .collect();
+        for key in gone {
+            inner.stop_intents.remove(&key);
+            inner.intents_to_clear.insert(key);
+        }
+    }
+
+    /// Ce que Hearth a demandé à ce service, par-dessus l'état que le moteur ou l'unité donne (HRT-64) :
+    /// un arrêt demandé fait d'une sortie non nulle un arrêt (`BR-SVC-005`) tant que le service n'a pas été
+    /// revu en marche DEPUIS la demande ; une étape en cours (« Arrêt en cours », « Démarrage ») recouvre
+    /// l'état tant que Hearth agit (`BR-LIFE-012`). Jamais vers « En marche ».
+    fn apply_hearth_actions(
+        inner: &mut Inner,
+        key: &ServiceKey,
+        running_since: Option<OffsetDateTime>,
+        mut derived: Derived,
+    ) -> Derived {
+        if let Some(asked_at) = inner.stop_intents.get(key).copied() {
+            if derived.state == ServiceStateKind::Running
+                && running_since.is_some_and(|since| since > asked_at)
+            {
+                inner.stop_intents.remove(key);
+                inner.intents_to_clear.insert(key.clone());
+            } else {
+                derived = honour_stop_request(derived);
+            }
+        }
+        if let Some(transition) = inner.transitions.get(key).copied() {
+            derived = overlay_transition(derived, running_since, transition);
+        }
+        derived
     }
 
     /// Une unité ne supervise qu'UN conteneur vivant. Quand deux conteneurs vivants ou plus lui sont
@@ -1555,7 +1652,25 @@ impl ServicesRegistry {
                 tracing::warn!(%error, "service supervisé non oublié");
             }
         }
+        self.flush_intent_clears().await;
         self.flush_journal().await;
+    }
+
+    /// Efface de la base les arrêts voulus que le registre a défaits seul (service revu en marche, ou
+    /// disparu). Une clé dont l'effacement échoue reste en file.
+    async fn flush_intent_clears(&self) {
+        let Some(intents) = self.intents.get() else {
+            return;
+        };
+        let keys: Vec<ServiceKey> = self.lock().intents_to_clear.iter().cloned().collect();
+        for key in keys {
+            match intents.clear(&key).await {
+                Ok(()) => {
+                    self.lock().intents_to_clear.remove(&key);
+                }
+                Err(error) => tracing::warn!(%error, "arrêt voulu non effacé"),
+            }
+        }
     }
 
     /// Consigne au journal d'activité (auteur : le système) les passages « à confirmer » et les chutes
@@ -1758,7 +1873,25 @@ impl ServicesRegistry {
         self.lock().awaiting_boot_load = true;
         self.reload_adopted().await;
         self.load_remembered().await;
+        self.load_intents().await;
         self.poll_units().await;
+    }
+
+    /// Reprend les arrêts voulus depuis Hearth qu'un démarrage précédent avait retenus (HRT-64).
+    async fn load_intents(&self) {
+        let Some(intents) = self.intents.get() else {
+            return;
+        };
+        match intents.load().await {
+            Ok(records) => {
+                let mut inner = self.lock();
+                for StopIntent { key, at, .. } in records {
+                    inner.stop_intents.insert(key, at);
+                }
+                self.commit(&mut inner);
+            }
+            Err(error) => tracing::warn!(%error, "arrêts voulus illisibles"),
+        }
     }
 
     /// Lit les services adoptés (HRT-79) et recalcule ce qui est publié. À appeler après toute écriture
@@ -1946,6 +2079,104 @@ impl ServicesRegistry {
             return LogTarget::NoContainer { origin };
         }
         LogTarget::Container(LogContainer::from_observation(&view.observation, origin))
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Démarrer, arrêter, redémarrer (HRT-64) : ce que le cas d'usage `ServiceLifecycle` demande au registre
+    // -----------------------------------------------------------------------------------------
+
+    /// Le moteur est-il prêt ? L'état PUBLIÉ (après l'anti-clignotement), celui que le client voit.
+    pub fn engine_state(&self) -> EngineState {
+        self.engine_status().state
+    }
+
+    /// Ce qu'il faut savoir d'un service publié pour le piloter, ou `None` : clé inconnue, service non publié
+    /// (ni créé par Hearth ni adopté : la réponse est celle d'un service inconnu, `BR-ADOPT-004`,
+    /// `BR-LIFE-024`), pilotage désactivé (`BR-GRANT-015`). Le pilote est celui du service, pas du
+    /// conteneur : une clé `u_` se pilote par son unité, jamais par le moteur (ADR-0037).
+    pub fn lifecycle_target(&self, key: &ServiceKey) -> Option<LifecycleTarget> {
+        if !self.enabled {
+            return None;
+        }
+        let inner = self.lock();
+        let view = inner.published.get(key)?;
+        let unit_status = view
+            .supervision
+            .as_ref()
+            .and_then(|supervision| supervision.status.as_ref());
+        let driver = match key.unit() {
+            Some(unit) => Driver::Supervisor { unit },
+            None => Driver::Engine {
+                container_id: view.observation.id.clone(),
+            },
+        };
+        Some(LifecycleTarget {
+            key: key.clone(),
+            name: view.observation.name.clone(),
+            state: view.derived.state,
+            driver,
+            grace_s: stop_grace_s(&view.observation, unit_status),
+            adopted: view.adoption.is_some(),
+        })
+    }
+
+    /// Hearth va arrêter ce service : l'arrêt est retenu en mémoire (la base l'a déjà, écrite AVANT l'ordre).
+    pub fn note_stop_requested(&self, key: &ServiceKey, at: OffsetDateTime) {
+        let mut inner = self.lock();
+        inner.intents_to_clear.remove(key);
+        inner.stop_intents.insert(key.clone(), at);
+        self.commit(&mut inner);
+    }
+
+    /// Hearth a démarré ce service, ou l'arrêt n'a pas eu lieu : l'arrêt voulu est oublié en mémoire (l'appelant
+    /// l'efface de la base).
+    pub fn forget_stop_requested(&self, key: &ServiceKey) {
+        let mut inner = self.lock();
+        inner.intents_to_clear.remove(key);
+        if inner.stop_intents.remove(key).is_some() {
+            self.commit(&mut inner);
+        }
+    }
+
+    /// Hearth agit sur ce service : « Arrêt en cours » ou « Démarrage » est montré jusqu'à `end_transition`.
+    pub fn begin_transition(&self, key: &ServiceKey, kind: TransitionKind) {
+        let mut inner = self.lock();
+        inner.transitions.insert(
+            key.clone(),
+            Transition {
+                kind,
+                since: self.clock.now(),
+            },
+        );
+        self.commit(&mut inner);
+    }
+
+    /// Hearth a fini d'agir sur ce service : l'état redevient celui du moteur.
+    pub fn end_transition(&self, key: &ServiceKey) {
+        let mut inner = self.lock();
+        if inner.transitions.remove(key).is_some() {
+            self.commit(&mut inner);
+        }
+    }
+
+    /// Les démarrages entre `from` et `until` ont été demandés par Hearth : ils ne comptent pas pour « redémarre
+    /// en boucle » (`BR-SVC-006`).
+    pub fn exempt_starts(&self, key: &ServiceKey, from: OffsetDateTime, until: OffsetDateTime) {
+        let mut inner = self.lock();
+        inner
+            .windows
+            .entry(key.clone())
+            .or_default()
+            .exempt(from, until);
+        self.commit(&mut inner);
+    }
+
+    /// Relit ce conteneur tout de suite, sans attendre l'événement du moteur : le cas d'usage s'appuie sur ce
+    /// que le client verra. Une lecture qui échoue est sans effet (le suivi en direct la reprendra).
+    pub async fn reread(&self, container_id: &str) {
+        if let Err(error) = self.refresh(vec![container_id.to_owned()]).await {
+            tracing::debug!(%error, "relecture d'un conteneur après une action : moteur perdu");
+        }
     }
 
     /// Combien attendre avant de retenter une relecture après `failures` échecs de suite : une
@@ -2320,6 +2551,173 @@ mod tests {
             .into_iter()
             .map(|AdoptedRecord { key, by, at, .. }| (key, Adoption { by, at }))
             .collect();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Démarrer, arrêter, redémarrer (HRT-64) : ce que le registre sait de ce que Hearth fait
+    // ---------------------------------------------------------------------------------------------
+
+    async fn listed(
+        run_state: RunState,
+        exit_code: Option<i64>,
+    ) -> (Arc<ServicesRegistry>, Arc<FakeEngine>, ServiceKey) {
+        let (registry, engine, _mono) = registry(true);
+        let mut web = container("web", run_state);
+        web.exit_code = exit_code;
+        let id = web.id.clone();
+        engine.put_silently(web);
+        registry.probe_and_apply(false).await;
+        registry.resync().await.expect("resync");
+        let key = ServiceKey::for_container(&id).expect("clé");
+        (registry, engine, key)
+    }
+
+    fn state_of(registry: &ServicesRegistry, key: &ServiceKey) -> ServiceStateKind {
+        registry
+            .snapshot()
+            .services
+            .iter()
+            .find(|view| &view.key == key)
+            .map(|view| view.derived.state)
+            .expect("service publié")
+    }
+
+    #[tokio::test]
+    async fn a_stop_asked_from_hearth_makes_a_non_zero_exit_a_stop_until_the_service_runs_again() {
+        let (registry, engine, key) = listed(RunState::Exited, Some(137)).await;
+        // Sans arrêt demandé : une sortie non nulle est une erreur (BR-SVC-005).
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Error);
+        // Hearth a demandé l'arrêt : la même sortie est un arrêt voulu (BR-LIFE-010).
+        let asked = crate::infrastructure::engine::fake::at(12);
+        registry.note_stop_requested(&key, asked);
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Stopped);
+        // Le service repart APRÈS la demande, puis s'arrête de nouveau avec un code non nul : l'arrêt voulu
+        // est défait dès qu'il est revu en marche, la nouvelle sortie est une erreur.
+        let id = container("web", RunState::Running).id;
+        engine.update(&id, |web| {
+            web.run_state = RunState::Running;
+            web.started_at = Some(crate::infrastructure::engine::fake::at(13));
+            web.exit_code = None;
+        });
+        registry.refresh(vec![id.clone()]).await.expect("refresh");
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Running);
+        assert!(registry.lock().stop_intents.is_empty());
+        assert!(registry.lock().intents_to_clear.contains(&key));
+        engine.update(&id, |web| {
+            web.run_state = RunState::Exited;
+            web.exit_code = Some(1);
+        });
+        registry.refresh(vec![id]).await.expect("refresh");
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Error);
+    }
+
+    #[tokio::test]
+    async fn a_service_still_running_when_the_stop_is_asked_keeps_its_stop_until_it_has_stopped() {
+        // Le conteneur tourne depuis avant la demande : le revoir en marche pendant l'arrêt ne défait rien.
+        let (registry, _engine, key) = listed(RunState::Running, None).await;
+        registry.note_stop_requested(&key, crate::infrastructure::engine::fake::at(12));
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Running);
+        assert!(registry.lock().stop_intents.contains_key(&key));
+        // Hearth démarre le service : l'arrêt voulu est oublié.
+        registry.forget_stop_requested(&key);
+        assert!(registry.lock().stop_intents.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_stop_intent_of_a_service_that_no_longer_exists_goes() {
+        let (registry, engine, key) = listed(RunState::Exited, Some(137)).await;
+        registry.note_stop_requested(&key, crate::infrastructure::engine::fake::at(12));
+        let id = container("web", RunState::Running).id;
+        engine.remove(&id);
+        registry.refresh(vec![id]).await.expect("refresh");
+        assert!(registry.lock().stop_intents.is_empty());
+        assert!(registry.lock().intents_to_clear.contains(&key));
+    }
+
+    #[tokio::test]
+    async fn hearth_shows_the_step_it_is_taking_and_never_running_in_advance() {
+        let (registry, engine, key) = listed(RunState::Running, None).await;
+        let (mut receiver, _) = registry.subscribe();
+        registry.begin_transition(&key, TransitionKind::Stopping);
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Stopping);
+        let change = receiver.try_recv().expect("un lot");
+        assert_eq!(change.upserts.len(), 1);
+        registry.end_transition(&key);
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Running);
+        // Un démarrage en cours sur un service arrêté : « Démarrage », jamais « En marche » par avance.
+        let id = container("web", RunState::Running).id;
+        engine.update(&id, |web| {
+            web.run_state = RunState::Exited;
+            web.exit_code = Some(0);
+        });
+        registry.refresh(vec![id]).await.expect("refresh");
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Stopped);
+        registry.begin_transition(&key, TransitionKind::Starting);
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Starting);
+        registry.end_transition(&key);
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Stopped);
+    }
+
+    #[tokio::test]
+    async fn the_starts_hearth_asked_for_do_not_make_a_restart_loop() {
+        let (registry, engine, key) = listed(RunState::Running, None).await;
+        let id = container("web", RunState::Running).id;
+        let wall = crate::infrastructure::engine::fake::at(12);
+        let minutes_ago = |m: i64| wall - time::Duration::minutes(m);
+        // Trois exécutions en trois minutes que le serveur a relancées : une boucle (BR-SVC-006).
+        for ago in [3, 2, 1] {
+            engine.update(&id, |web| web.started_at = Some(minutes_ago(ago)));
+            registry.refresh(vec![id.clone()]).await.expect("refresh");
+        }
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::RestartLoop);
+        // Les trois sont ceux de Hearth (redémarrage, démarrage, redémarrage) : ils ne comptent pas.
+        registry.exempt_starts(&key, minutes_ago(4), wall);
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Running);
+        // Un démarrage ensuite, du serveur, compte de nouveau.
+        engine.update(&id, |web| {
+            web.started_at = Some(wall + time::Duration::minutes(1))
+        });
+        registry.refresh(vec![id]).await.expect("refresh");
+        assert_eq!(state_of(&registry, &key), ServiceStateKind::Running);
+    }
+
+    #[tokio::test]
+    async fn only_a_published_service_has_a_lifecycle_target_and_the_pilot_follows_the_key() {
+        let (registry, engine, key) = listed(RunState::Running, None).await;
+        let target = registry.lifecycle_target(&key).expect("service publié");
+        assert_eq!(target.name, "web");
+        assert_eq!(target.state, ServiceStateKind::Running);
+        assert_eq!(target.grace_s, 10, "le délai du moteur par défaut");
+        assert!(target.adopted);
+        assert!(matches!(target.driver, Driver::Engine { .. }));
+        assert_eq!(registry.engine_state(), EngineState::Ready);
+        // Une clé inconnue, ou un conteneur que le filtre retient : même réponse, aucune cible.
+        assert!(
+            registry
+                .lifecycle_target(&ServiceKey::parse("c_0123abcd").expect("clé"))
+                .is_none()
+        );
+        let mut hidden = container("cachette", RunState::Running);
+        hidden.stop_timeout_s = Some(120);
+        let hidden_key = ServiceKey::for_container(&hidden.id).expect("clé");
+        engine.put_silently(hidden);
+        registry.resync().await.expect("resync");
+        assert!(registry.lifecycle_target(&hidden_key).is_none());
+        // Un délai d'arrêt déclaré par le conteneur est celui du service.
+        let mut slow = container("db", RunState::Running);
+        slow.stop_timeout_s = Some(120);
+        let slow_key = ServiceKey::for_container(&slow.id).expect("clé");
+        engine.put_silently(slow);
+        // La première lecture a défait l'adoption de ce conteneur, absent alors (BR-ADOPT-017).
+        adopt_vocabulary(&registry);
+        registry.resync().await.expect("resync");
+        assert_eq!(
+            registry.lifecycle_target(&slow_key).map(|t| t.grace_s),
+            Some(120)
+        );
+        // Le coupe-circuit : pilotage désactivé, aucune cible (BR-GRANT-015).
+        let (off, _engine, _mono) = registry_at(false, crate::infrastructure::engine::fake::at(12));
+        assert!(off.lifecycle_target(&key).is_none());
     }
 
     #[tokio::test]

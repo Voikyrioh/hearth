@@ -5,9 +5,10 @@
 //! qu'en CI Linux). La même suite de contrat (`tests/support/engine_contract.rs`) passe contre ce
 //! faux, contre un faux démon HTTP local et contre un vrai moteur, ce qui l'empêche de mentir.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -54,6 +55,36 @@ struct State {
     /// Génération des flux de journaux de chaque conteneur : l'augmenter ferme ceux déjà ouverts (le
     /// moteur ferme le suivi quand le conteneur s'arrête, même s'il est reparti aussitôt).
     log_epochs: BTreeMap<String, u64>,
+    /// La mise en scène des ordres d'écriture (HRT-64).
+    script: WriteScript,
+}
+
+/// Un ordre d'écriture reçu par le faux, dans l'ordre.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Call {
+    Start(String),
+    Stop(String, Duration),
+    Restart(String, Duration),
+}
+
+/// Ce que le faux fait des ordres `start`, `stop` et `restart` (HRT-64) : par défaut, tout réussit aussitôt.
+#[derive(Default)]
+struct WriteScript {
+    calls: Vec<Call>,
+    /// `start` échoue avec cette erreur (le conteneur reste dans son état).
+    start_errors: BTreeMap<String, EngineError>,
+    /// `stop` échoue avec cette erreur avant toute action.
+    stop_errors: BTreeMap<String, EngineError>,
+    /// Temps que met un arrêt propre (virtuel sous `tokio::time::pause`).
+    stop_delays: BTreeMap<String, Duration>,
+    /// Le programme ignore l'ordre d'arrêt : le moteur attend le délai de grâce puis le tue (code 137).
+    stubborn: BTreeSet<String>,
+    /// Le moteur ne répond jamais à l'ordre d'arrêt.
+    hanging: BTreeSet<String>,
+    /// Une règle du serveur relance le conteneur ce temps après chaque arrêt.
+    relaunch: BTreeMap<String, Duration>,
+    /// Les dates écrites par le faux (`None` : l'heure réelle).
+    now: Option<time::OffsetDateTime>,
 }
 
 /// Un morceau d'octets écrit par un conteneur sur l'une de ses sorties, à l'heure du moteur.
@@ -155,6 +186,7 @@ impl FakeEngine {
                 logs: BTreeMap::new(),
                 log_errors: BTreeMap::new(),
                 log_epochs: BTreeMap::new(),
+                script: WriteScript::default(),
             })),
             feed,
             probes: AtomicU64::new(0),
@@ -271,6 +303,197 @@ impl FakeEngine {
     /// `list` met ce temps à répondre (`Duration::ZERO` : rétablit).
     pub fn set_list_delay(&self, delay: std::time::Duration) {
         self.lock().list_delay = delay;
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Mise en scène des ordres d'écriture (HRT-64)
+    // -----------------------------------------------------------------------------------------
+
+    /// Les ordres d'écriture reçus jusqu'ici, dans l'ordre.
+    pub fn calls(&self) -> Vec<Call> {
+        self.lock().script.calls.clone()
+    }
+
+    /// `start` de ce conteneur échoue (None : rétablit).
+    pub fn fail_start(&self, id: &str, error: Option<EngineError>) {
+        let mut state = self.lock();
+        match error {
+            Some(error) => state.script.start_errors.insert(id.to_owned(), error),
+            None => state.script.start_errors.remove(id),
+        };
+    }
+
+    /// `stop` de ce conteneur échoue (None : rétablit).
+    pub fn fail_stop(&self, id: &str, error: Option<EngineError>) {
+        let mut state = self.lock();
+        match error {
+            Some(error) => state.script.stop_errors.insert(id.to_owned(), error),
+            None => state.script.stop_errors.remove(id),
+        };
+    }
+
+    /// Un arrêt propre de ce conteneur met ce temps (`Duration::ZERO` : aussitôt).
+    pub fn set_stop_delay(&self, id: &str, delay: Duration) {
+        self.lock().script.stop_delays.insert(id.to_owned(), delay);
+    }
+
+    /// Ce programme ignore l'ordre d'arrêt : tué à l'échéance du délai de grâce, code 137.
+    pub fn make_stubborn(&self, id: &str) {
+        self.lock().script.stubborn.insert(id.to_owned());
+    }
+
+    /// Le moteur ne répond jamais à l'ordre d'arrêt de ce conteneur.
+    pub fn make_hang_on_stop(&self, id: &str) {
+        self.lock().script.hanging.insert(id.to_owned());
+    }
+
+    /// Une règle du serveur relance ce conteneur ce temps après chaque arrêt.
+    pub fn relaunch_after_stop(&self, id: &str, after: Duration) {
+        self.lock().script.relaunch.insert(id.to_owned(), after);
+    }
+
+    /// Les dates que le faux écrit (début d'exécution, fin) : cette heure, au lieu de l'heure réelle.
+    pub fn set_now(&self, now: Option<time::OffsetDateTime>) {
+        self.lock().script.now = now;
+    }
+
+    fn script_now(state: &State) -> time::OffsetDateTime {
+        state
+            .script
+            .now
+            .unwrap_or_else(time::OffsetDateTime::now_utc)
+    }
+
+    /// Le conteneur tourne : exécution commencée maintenant.
+    fn mark_running(state: &mut State, id: &str) {
+        let now = Self::script_now(state);
+        if let Some(container) = state.containers.get_mut(id) {
+            container.run_state = RunState::Running;
+            container.started_at = Some(now);
+            container.finished_at = None;
+            container.exit_code = None;
+        }
+    }
+
+    /// Le conteneur est arrêté (ou supprimé s'il se supprime à l'arrêt) : fin d'exécution maintenant.
+    fn mark_exited(state: &mut State, id: &str, code: i64) -> bool {
+        let now = Self::script_now(state);
+        let remove = state
+            .containers
+            .get(id)
+            .is_some_and(|container| container.auto_remove);
+        if remove {
+            state.containers.remove(id);
+        } else if let Some(container) = state.containers.get_mut(id) {
+            container.run_state = RunState::Exited;
+            container.exit_code = Some(code);
+            container.finished_at = Some(now);
+        }
+        remove
+    }
+
+    /// Un arrêt, du début à la fin (délai propre ou de grâce, code, suppression, relance par le serveur).
+    async fn do_stop(&self, id: &str, grace: Duration) -> Result<(), EngineError> {
+        let (wait, code, hang) = {
+            let state = self.lock();
+            if let Some(error) = state
+                .list_error
+                .or_else(|| state.script.stop_errors.get(id).copied())
+            {
+                return Err(error);
+            }
+            let Some(container) = state.containers.get(id) else {
+                return Err(EngineError::NotFound);
+            };
+            if !matches!(
+                container.run_state,
+                RunState::Running | RunState::Restarting | RunState::Paused
+            ) {
+                // Déjà arrêté : le moteur répond « non modifié ».
+                return Ok(());
+            }
+            let stubborn = state.script.stubborn.contains(id);
+            let delay = state
+                .script
+                .stop_delays
+                .get(id)
+                .copied()
+                .unwrap_or_default();
+            (
+                if stubborn { grace } else { delay },
+                if stubborn { 137 } else { 0 },
+                state.script.hanging.contains(id),
+            )
+        };
+        if hang {
+            std::future::pending::<()>().await;
+        }
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+        let (removed, relaunch) = {
+            let mut state = self.lock();
+            let removed = Self::mark_exited(&mut state, id, code);
+            (removed, state.script.relaunch.get(id).copied())
+        };
+        self.wake_logs();
+        self.emit(id, "die");
+        self.emit(id, "stop");
+        if removed {
+            self.emit(id, "destroy");
+        }
+        if let Some(after) = relaunch.filter(|_| !removed) {
+            let state = self.state.clone();
+            let feed = self.feed.clone();
+            let id = id.to_owned();
+            tokio::spawn(async move {
+                tokio::time::sleep(after).await;
+                {
+                    let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+                    FakeEngine::mark_running(&mut state, &id);
+                }
+                let _ = feed.send(Feed::Event(EngineEvent {
+                    container_id: id,
+                    action: "start".to_owned(),
+                }));
+            });
+        }
+        Ok(())
+    }
+
+    fn do_start(&self, id: &str) -> Result<(), EngineError> {
+        {
+            let mut state = self.lock();
+            if let Some(error) = state
+                .list_error
+                .or_else(|| state.script.start_errors.get(id).copied())
+            {
+                return Err(error);
+            }
+            let Some(container) = state.containers.get(id) else {
+                return Err(EngineError::NotFound);
+            };
+            if container.run_state == RunState::Running {
+                return Ok(());
+            }
+            // Un port publié que tient déjà un autre conteneur en marche : le moteur refuse le démarrage.
+            let taken = container.ports.iter().any(|port| {
+                state.containers.values().any(|other| {
+                    other.id != id
+                        && other.run_state == RunState::Running
+                        && other.ports.iter().any(|held| {
+                            held.host_port == port.host_port && held.protocol == port.protocol
+                        })
+                })
+            });
+            if taken {
+                return Err(EngineError::PortInUse);
+            }
+            Self::mark_running(&mut state, id);
+        }
+        self.wake_logs();
+        self.emit(id, "start");
+        Ok(())
     }
 
     fn wake_logs(&self) {
@@ -461,6 +684,28 @@ impl ContainerEngine for FakeEngine {
             _open: OpenGuard(self.log_open.clone()),
         };
         stream::unfold(follower, Follower::step).boxed()
+    }
+
+    async fn start(&self, id: &str) -> Result<(), EngineError> {
+        self.lock().script.calls.push(Call::Start(id.to_owned()));
+        self.do_start(id)
+    }
+
+    async fn stop(&self, id: &str, grace: Duration) -> Result<(), EngineError> {
+        self.lock()
+            .script
+            .calls
+            .push(Call::Stop(id.to_owned(), grace));
+        self.do_stop(id, grace).await
+    }
+
+    async fn restart(&self, id: &str, grace: Duration) -> Result<(), EngineError> {
+        self.lock()
+            .script
+            .calls
+            .push(Call::Restart(id.to_owned(), grace));
+        self.do_stop(id, grace).await?;
+        self.do_start(id)
     }
 
     fn events(&self) -> EngineEvents {

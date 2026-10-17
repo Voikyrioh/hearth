@@ -55,6 +55,11 @@ impl Harness for DaemonHarness {
         if spec.log_driver_none {
             container.log_driver = "none".into();
         }
+        // Un programme qui répond à l'ordre d'arrêt ne s'appelle pas `sleep` (le faux démon s'en sert pour
+        // savoir qui ignore le signal).
+        if spec.run == Run::Obedient {
+            container.cmd = vec!["obedient".to_owned()];
+        }
         let id = container.id.clone();
         self.runs.lock().unwrap().insert(id.clone(), spec.run);
         self.daemon.put(container);
@@ -67,7 +72,7 @@ impl Harness for DaemonHarness {
         self.daemon.update(id, |container| {
             container.started_at = "2026-10-13T10:00:00.123456789Z".into();
             match run {
-                Run::Forever => {
+                Run::Forever | Run::Obedient => {
                     container.status = "running".into();
                     container.exit_code = 0;
                     container.finished_at = "0001-01-01T00:00:00Z".into();
@@ -116,11 +121,17 @@ async fn the_bollard_adapter_honours_the_engine_contract_against_a_fake_daemon()
         runs: Mutex::default(),
     };
     engine_contract::run(&harness, "contract").await;
-    // Lecture seule : le démon n'a vu que des GET, et aucune route d'écriture.
+    // Le démon n'a vu que des lectures, et les trois seules routes d'écriture du port (HRT-64) : démarrer,
+    // arrêter, redémarrer un conteneur. Jamais créer, supprimer, tirer une image.
     let requests = daemon.requests();
     assert!(!requests.is_empty());
     for request in requests {
-        assert!(request.starts_with("GET "), "{request}");
+        let write = request.starts_with("POST ")
+            && ["/start", "/stop", "/restart"]
+                .iter()
+                .any(|verb| request.ends_with(verb))
+            && request.contains("/containers/");
+        assert!(request.starts_with("GET ") || write, "{request}");
     }
 }
 

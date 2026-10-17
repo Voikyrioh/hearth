@@ -6,10 +6,12 @@
 //! - un vrai moteur, en CI Linux seulement (`tests/engine_real.rs`, `--ignored`).
 //!
 //! C'est ce qui empêche le faux de mentir : ce que le faux promet, le vrai le tient, sinon le job
-//! `engine` de la CI échoue. La suite ne touche qu'à la LECTURE (liste, inspection, événements) ; les
-//! écritures dont elle a besoin pour préparer son décor (créer, démarrer, arrêter, supprimer) sont
-//! faites par l'exécutant, jamais par le port. Les journaux (HRT-66) y sont lus aussi : fin, dernières
-//! lignes, reprise par curseur, suivi, terminal, ligne géante, pilote `none`, conteneur inconnu.
+//! `engine` de la CI échoue. La suite LIT par le port (liste, inspection, événements) ; les écritures dont
+//! elle a besoin pour préparer son décor (créer, démarrer, arrêter, supprimer) sont faites par l'exécutant.
+//! Les journaux (HRT-66) y sont lus aussi : fin, dernières lignes, reprise par curseur, suivi, terminal,
+//! ligne géante, pilote `none`, conteneur inconnu. Les trois ordres que le port écrit (HRT-64 : démarrer,
+//! arrêter, redémarrer) y sont éprouvés par le port lui-même (`writes`) : déjà dans l'état, délai de grâce et
+//! code 137, arrêt propre, port pris, conteneur inconnu.
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
@@ -42,8 +44,11 @@ pub struct Spec {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Run {
-    /// Tourne jusqu'à ce qu'on l'arrête.
+    /// Tourne jusqu'à ce qu'on l'arrête, et IGNORE l'ordre d'arrêt (comme un `sleep` qui est le processus 1 d'un
+    /// conteneur) : le moteur le tue à l'échéance du délai de grâce, code 137.
     Forever,
+    /// Tourne jusqu'à ce qu'on l'arrête et y répond : sort de lui-même, code 0, dès l'ordre d'arrêt.
+    Obedient,
     /// Sort tout de suite avec ce code.
     ExitsWith(i64),
 }
@@ -276,6 +281,9 @@ pub async fn run(harness: &dyn Harness, prefix: &str) {
 
     // 8. Les journaux (HRT-66).
     logs(harness, &engine, prefix).await;
+
+    // 9. Les ordres que le port écrit (HRT-64).
+    writes(harness, &engine, prefix).await;
 
     // Nettoyage.
     harness.remove(&running).await;
@@ -531,4 +539,136 @@ async fn logs(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefix: 
     harness.remove(&id).await;
     harness.remove(&tty).await;
     harness.remove(&silent).await;
+}
+
+/// Le conteneur tourne-t-il, d'après le port ?
+async fn running(engine: &Arc<dyn ContainerEngine>, id: &str) -> bool {
+    engine
+        .inspect(id)
+        .await
+        .expect("inspection")
+        .is_some_and(|observation| observation.run_state == RunState::Running)
+}
+
+async fn spec_for(name: String, publish: Option<(u16, u16)>, run: Run) -> Spec {
+    Spec {
+        name,
+        publish,
+        env: vec![],
+        run,
+        tty: false,
+        log_driver_none: false,
+    }
+}
+
+/// Les trois ordres du port (HRT-64, BR-LIFE-004, BR-LIFE-009, BR-LIFE-012) : démarrer, arrêter dans le délai ou
+/// de force (137), redémarrer, un port pris, un conteneur inconnu. Chaque exécutant les tient pareil.
+async fn writes(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefix: &str) {
+    // Démarrer : « en marche » vient du moteur ; déjà en marche, l'ordre réussit sans rien changer.
+    let deaf = harness
+        .create(&spec_for(format!("{prefix}-w-deaf"), Some((18_090, 80)), Run::Forever).await)
+        .await;
+    assert!(!running(engine, &deaf).await);
+    engine.start(&deaf).await.expect("démarrer");
+    assert!(running(engine, &deaf).await);
+    engine.start(&deaf).await.expect("déjà en marche : réussit");
+
+    // Un port que le conteneur publie est déjà pris : le démarrage échoue avec son code propre, le conteneur
+    // reste arrêté (BR-LIFE-006), et le texte du moteur ne sort pas de l'erreur.
+    let taken = harness
+        .create(
+            &spec_for(
+                format!("{prefix}-w-taken"),
+                Some((18_090, 80)),
+                Run::Forever,
+            )
+            .await,
+        )
+        .await;
+    let refused = engine.start(&taken).await.expect_err("port pris");
+    assert_eq!(refused, EngineError::PortInUse);
+    assert!(!format!("{refused} {refused:?}").contains("18090"));
+    assert!(!running(engine, &taken).await);
+    harness.remove(&taken).await;
+
+    // Arrêter un programme qui ignore l'ordre : le moteur attend le délai de grâce, puis le tue (137).
+    let began = tokio::time::Instant::now();
+    engine
+        .stop(&deaf, Duration::from_secs(1))
+        .await
+        .expect("arrêter");
+    assert!(
+        began.elapsed() >= Duration::from_millis(900),
+        "le moteur attend le délai de grâce : {:?}",
+        began.elapsed()
+    );
+    let stopped = engine
+        .inspect(&deaf)
+        .await
+        .expect("inspection")
+        .expect("existe");
+    assert_eq!(stopped.run_state, RunState::Exited);
+    assert_eq!(stopped.exit_code, Some(137), "tué à l'échéance du délai");
+    // Déjà arrêté : l'ordre réussit sans rien changer.
+    engine
+        .stop(&deaf, Duration::from_secs(1))
+        .await
+        .expect("déjà arrêté : réussit");
+    harness.remove(&deaf).await;
+
+    // Un programme qui répond à l'ordre sort aussitôt, code 0, bien avant son délai de grâce.
+    let polite = harness
+        .create(&spec_for(format!("{prefix}-w-polite"), None, Run::Obedient).await)
+        .await;
+    engine.start(&polite).await.expect("démarrer");
+    let before = engine
+        .inspect(&polite)
+        .await
+        .expect("inspection")
+        .expect("existe")
+        .started_at;
+    let began = tokio::time::Instant::now();
+    engine
+        .restart(&polite, Duration::from_secs(10))
+        .await
+        .expect("redémarrer");
+    assert!(
+        began.elapsed() < Duration::from_secs(8),
+        "un arrêt propre n'attend pas le délai : {:?}",
+        began.elapsed()
+    );
+    // Redémarrer : un seul ordre, le conteneur tourne de nouveau, d'une exécution neuve.
+    let restarted = engine
+        .inspect(&polite)
+        .await
+        .expect("inspection")
+        .expect("existe");
+    assert_eq!(restarted.run_state, RunState::Running);
+    assert!(restarted.started_at > before, "une exécution neuve");
+    let began = tokio::time::Instant::now();
+    engine
+        .stop(&polite, Duration::from_secs(10))
+        .await
+        .expect("arrêter");
+    assert!(began.elapsed() < Duration::from_secs(8));
+    let stopped = engine
+        .inspect(&polite)
+        .await
+        .expect("inspection")
+        .expect("existe");
+    assert_eq!(stopped.run_state, RunState::Exited);
+    assert_eq!(stopped.exit_code, Some(0), "sorti de lui-même");
+    harness.remove(&polite).await;
+
+    // Un conteneur qui n'existe pas (ou plus) : « introuvable », pour les trois ordres.
+    let nowhere = "f".repeat(64);
+    assert_eq!(engine.start(&nowhere).await, Err(EngineError::NotFound));
+    assert_eq!(
+        engine.stop(&nowhere, Duration::from_secs(1)).await,
+        Err(EngineError::NotFound)
+    );
+    assert_eq!(
+        engine.restart(&nowhere, Duration::from_secs(1)).await,
+        Err(EngineError::NotFound)
+    );
 }

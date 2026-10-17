@@ -8,6 +8,8 @@
 //! - [`decision`] : annuler (avant le point de non-retour), décider, expirer.
 //! - [`access`] : qui voit une opération (le service qu'elle touche décide).
 //! - [`index`] : `busy` et `last_action` du fil, projections du journal.
+//! - [`lifecycle`] : démarrer, arrêter, redémarrer (HRT-64) : l'état permet-il le geste, combien attendre, l'arrêt
+//!   a-t-il été forcé.
 //! - [`flush`] : la cadence des messages `operation` d'un abonné (500 ms par opération).
 //! - [`observe`] : le décompte des conteneurs du moteur devient l'état que `recover` classe.
 //! - [`locks`] : le verrou par service (exclusif, partagé en écriture de fichiers, aucun) et les deux
@@ -18,6 +20,7 @@ pub mod decision;
 pub mod flush;
 pub mod index;
 pub mod kind;
+pub mod lifecycle;
 pub mod locks;
 pub mod observe;
 pub mod plan;
@@ -30,6 +33,11 @@ pub use decision::{
 pub use flush::{MAX_TRACKED_OPS, OpFlush};
 pub use index::{MAX_INDEXED_SERVICES, OpSummary, OpsIndex, ServiceOpsEntry};
 pub use kind::{Cause, Choice, OpKind, OpStatus};
+pub use lifecycle::{
+    AfterStop, Gesture, KILLED_EXIT_CODE, RESTART_WATCH, STARTUP_WATCH, StateRefusal, WAIT_FLOOR,
+    WAIT_MARGIN, check_state, engine_ready, engine_stop_was_forced, supervised_stop_was_forced,
+    wait_budget, wait_budget_with,
+};
 pub use locks::{Holder, LockMode, LockTable, ReadKind, Refusal};
 pub use observe::{Presence, observed_from_presence};
 pub use plan::{

@@ -1202,6 +1202,7 @@ async fn the_engine_socket_is_drained_whatever_the_client_does_with_the_real_ada
             host: Arc::new(support::engine::TestHost),
             timings: fast_timings(),
             log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
+            lifecycle: support::engine::fast_lifecycle(),
         },
     )
     .await;
@@ -1414,6 +1415,7 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
             host: Arc::new(support::engine::TestHost),
             timings: fast_timings(),
             log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
+            lifecycle: support::engine::fast_lifecycle(),
         },
     )
     .await;
