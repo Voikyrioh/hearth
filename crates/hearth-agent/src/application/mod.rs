@@ -14,6 +14,7 @@ pub mod ports;
 pub mod secret_vault;
 pub mod security;
 pub mod service_adoption;
+pub mod service_lifecycle;
 pub mod service_logs;
 pub mod service_op_access;
 pub mod service_ops;

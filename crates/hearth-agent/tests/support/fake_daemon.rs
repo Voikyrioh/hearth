@@ -323,6 +323,9 @@ fn json_reply(status: u16, body: Value) -> Reply {
 fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        204 => "No Content",
+        304 => "Not Modified",
+        500 => "Internal Server Error",
         400 => "Bad Request",
         403 => "Forbidden",
         404 => "Not Found",
@@ -379,6 +382,17 @@ async fn handle(
         write_reply(&mut stream, json_reply(400, json!({ "message": message }))).await;
         return;
     }
+    // Les trois seuls ordres d'écriture du port (HRT-64) : démarrer, arrêter, redémarrer un conteneur.
+    if method == "POST"
+        && let Some((id, verb)) = route
+            .strip_prefix("/containers/")
+            .and_then(|rest| rest.split_once('/'))
+        && matches!(verb, "start" | "stop" | "restart")
+    {
+        let reply = order(&state, &events, id, verb, &query).await;
+        write_reply(&mut stream, reply).await;
+        return;
+    }
     if method != "GET" {
         write_reply(
             &mut stream,
@@ -410,6 +424,133 @@ async fn handle(
         route_reply(&guard, &config, route)
     };
     write_reply(&mut stream, reply).await;
+}
+
+fn empty_reply(status: u16) -> Reply {
+    Reply {
+        status,
+        content_type: "text/plain; charset=utf-8",
+        body: String::new(),
+        extra: vec![],
+    }
+}
+
+fn announce(events: &broadcast::Sender<String>, id: &str, action: &str) {
+    let line = json!({
+        "Type": "container", "Action": action, "status": action, "id": id,
+        "Actor": { "ID": id, "Attributes": { "image": "busybox:1.36", "name": "x" } },
+        "scope": "local", "time": 1_791_885_600, "timeNano": 1_791_885_600_000_000_000u64
+    });
+    // Sans abonné, `send` rend une erreur : personne n'écoute, ce n'est pas un échec.
+    let _ = events.send(format!("{line}\n"));
+}
+
+/// L'heure de maintenant, au format du moteur (nanosecondes).
+fn now_stamp() -> String {
+    let now = time::OffsetDateTime::now_utc();
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.nanosecond()
+    )
+}
+
+/// `POST /containers/{id}/(start|stop|restart)` : comme le moteur. Démarrer un conteneur qui tourne ou
+/// arrêter un conteneur arrêté répond `304` ; un conteneur inconnu `404` ; un port déjà tenu par un autre
+/// conteneur en marche `500`. Un programme qui s'appelle `sleep` ignore l'ordre d'arrêt : le démon attend le
+/// délai de grâce (`t`), puis le tue (code 137) ; les autres sortent aussitôt, code 0.
+async fn order(
+    state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<String>,
+    id: &str,
+    verb: &str,
+    query: &str,
+) -> Reply {
+    let grace: u64 = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("t="))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(10);
+    let missing = || {
+        json_reply(
+            404,
+            json!({ "message": format!("No such container: {id}") }),
+        )
+    };
+    if verb != "start" {
+        // Arrêter (ou la première moitié d'un redémarrage).
+        let deaf = {
+            let guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(container) = guard.containers.get(id) else {
+                return missing();
+            };
+            if container.status != "running" {
+                if verb == "stop" {
+                    return empty_reply(304);
+                }
+                None
+            } else {
+                Some(container.cmd.first().map(String::as_str) == Some("sleep"))
+            }
+        };
+        if let Some(deaf) = deaf {
+            if deaf {
+                tokio::time::sleep(std::time::Duration::from_secs(grace)).await;
+            }
+            {
+                let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Some(container) = guard.containers.get_mut(id) {
+                    container.status = "exited".into();
+                    container.exit_code = if deaf { 137 } else { 0 };
+                    container.finished_at = now_stamp();
+                }
+            }
+            announce(events, id, "die");
+            announce(events, id, "stop");
+        }
+        if verb == "stop" {
+            return empty_reply(204);
+        }
+    }
+    // Démarrer (ou la seconde moitié d'un redémarrage).
+    let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(container) = guard.containers.get(id) else {
+        return missing();
+    };
+    if container.status == "running" {
+        return empty_reply(304);
+    }
+    if let Some((host, _)) = container.publish {
+        let taken = guard.containers.values().any(|other| {
+            other.id != id && other.status == "running" && other.publish.map(|p| p.0) == Some(host)
+        });
+        if taken {
+            return json_reply(
+                500,
+                json!({ "message": format!(
+                    "driver failed programming external connectivity on endpoint {} ({id}): Bind for 0.0.0.0:{host} failed: port is already allocated",
+                    container.name
+                ) }),
+            );
+        }
+    }
+    if let Some(container) = guard.containers.get_mut(id) {
+        container.status = "running".into();
+        container.exit_code = 0;
+        container.started_at = now_stamp();
+        // Comme le moteur : un redémarrage garde la fin de l'exécution arrêtée (le code est remis à zéro).
+        if verb != "restart" {
+            container.finished_at = "0001-01-01T00:00:00Z".into();
+        }
+    }
+    drop(guard);
+    announce(events, id, "start");
+    empty_reply(204)
 }
 
 /// `/v1.43/containers/json` -> (Some((1, 43)), `/containers/json`).

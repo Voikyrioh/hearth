@@ -134,6 +134,15 @@ pub enum OperationCauseDto {
     DecisionExpired,
     CancelledByAccount,
     DecidedByAccount,
+    ForcedStop,
+    PortInUse,
+    StoppedRightAfterStart,
+    EngineUnavailable,
+    EngineRefused,
+    RestartedByHost,
+    Timeout,
+    Interrupted,
+    ServiceNotFound,
     Unknown,
 }
 
@@ -150,6 +159,15 @@ impl From<OperationCause> for OperationCauseDto {
             OperationCause::DecisionExpired => Self::DecisionExpired,
             OperationCause::CancelledByAccount => Self::CancelledByAccount,
             OperationCause::DecidedByAccount => Self::DecidedByAccount,
+            OperationCause::ForcedStop => Self::ForcedStop,
+            OperationCause::PortInUse => Self::PortInUse,
+            OperationCause::StoppedRightAfterStart => Self::StoppedRightAfterStart,
+            OperationCause::EngineUnavailable => Self::EngineUnavailable,
+            OperationCause::EngineRefused => Self::EngineRefused,
+            OperationCause::RestartedByHost => Self::RestartedByHost,
+            OperationCause::Timeout => Self::Timeout,
+            OperationCause::Interrupted => Self::Interrupted,
+            OperationCause::ServiceNotFound => Self::ServiceNotFound,
             OperationCause::Unknown => Self::Unknown,
         }
     }

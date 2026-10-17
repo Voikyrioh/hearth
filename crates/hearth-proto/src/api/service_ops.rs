@@ -138,6 +138,25 @@ pub enum OperationCause {
     CancelledByAccount,
     /// Le compte a pris la décision.
     DecidedByAccount,
+    /// Démarrer, arrêter, redémarrer (HRT-64, BR-LIFE-018) : le service ne s'est pas arrêté dans son délai, il a
+    /// été coupé de force.
+    ForcedStop,
+    /// Un port que le service demande est déjà pris : il reste arrêté (BR-LIFE-006).
+    PortInUse,
+    /// Le programme s'est arrêté dans les 10 secondes qui ont suivi son lancement (BR-LIFE-005).
+    StoppedRightAfterStart,
+    /// Le moteur était inaccessible (BR-LIFE-019).
+    EngineUnavailable,
+    /// Le moteur (ou le système du serveur) a refusé l'ordre (BR-LIFE-019).
+    EngineRefused,
+    /// Arrêté depuis Hearth, le service est reparti tout seul dans les 30 secondes (BR-LIFE-011).
+    RestartedByHost,
+    /// Le moteur n'a pas répondu dans le délai d'arrêt du service plus 30 secondes (BR-LIFE-021).
+    Timeout,
+    /// L'agent s'est arrêté pendant l'action : le résultat est inconnu (BR-LIFE-020).
+    Interrupted,
+    /// Le service n'existait plus au moment de l'action (BR-LIFE-015).
+    ServiceNotFound,
     /// Une cause que ce client ne connaît pas.
     #[serde(other)]
     Unknown,

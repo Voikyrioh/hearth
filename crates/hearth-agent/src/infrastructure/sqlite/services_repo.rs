@@ -30,6 +30,11 @@ impl SqliteServiceRepo {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
+
+    /// Le bassin, pour les autres dépôts de la même famille (`intents_repo`).
+    pub(super) fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
 }
 
 /// La forme stockée d'un service supervisé : ses réglages, rien de ce qui est secret.

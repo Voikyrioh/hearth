@@ -114,12 +114,12 @@ impl Parsed {
             | ActKind::AccountDelete
             | ActKind::SessionsRevoke
             | ActKind::ServiceRelease
-            | ActKind::OperationCancel => Some(Self::TargetOnly),
-            // Déclarés pour les tranches suivantes : aucune route ne les porte, donc aucun corps à lire.
-            ActKind::ServiceStart
+            | ActKind::ServiceStart
             | ActKind::ServiceStop
             | ActKind::ServiceRestart
-            | ActKind::ServiceDeploy
+            | ActKind::OperationCancel => Some(Self::TargetOnly),
+            // Déclarés pour les tranches suivantes : aucune route ne les porte, donc aucun corps à lire.
+            ActKind::ServiceDeploy
             | ActKind::ServiceDelete
             | ActKind::BackupCreate
             | ActKind::BackupDelete
@@ -157,6 +157,13 @@ impl Parsed {
             (Self::TargetOnly, ActKind::ServiceRelease) => {
                 AdminAct::ServiceRelease { target: id.into() }
             }
+            (Self::TargetOnly, ActKind::ServiceStart) => {
+                AdminAct::ServiceStart { target: id.into() }
+            }
+            (Self::TargetOnly, ActKind::ServiceStop) => AdminAct::ServiceStop { target: id.into() },
+            (Self::TargetOnly, ActKind::ServiceRestart) => {
+                AdminAct::ServiceRestart { target: id.into() }
+            }
             (Self::TargetOnly, ActKind::OperationCancel) => {
                 AdminAct::OperationCancel { target: id }
             }
@@ -182,9 +189,6 @@ impl Parsed {
                 | ActKind::ReauthSetting
                 | ActKind::ServicesAdopt
                 | ActKind::OperationDecide
-                | ActKind::ServiceStart
-                | ActKind::ServiceStop
-                | ActKind::ServiceRestart
                 | ActKind::ServiceDeploy
                 | ActKind::ServiceDelete
                 | ActKind::BackupCreate
@@ -448,6 +452,9 @@ mod tests {
                     | ActKind::AccountDelete
                     | ActKind::SessionsRevoke
                     | ActKind::ServiceRelease
+                    | ActKind::ServiceStart
+                    | ActKind::ServiceStop
+                    | ActKind::ServiceRestart
                     | ActKind::OperationCancel
             );
             assert_eq!(act.is_some(), target_only, "{kind:?}");

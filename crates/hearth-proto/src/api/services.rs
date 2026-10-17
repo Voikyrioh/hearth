@@ -517,6 +517,17 @@ pub struct ReleaseResponse {
     pub released: bool,
 }
 
+/// La réponse (`202`) de `POST /services/{key}/start`, `/stop` et `/restart` (HRT-64, BR-LIFE-009,
+/// BR-LIFE-016) : l'action est acceptée, elle s'exécute à l'arrière-plan. `action_id` est l'identifiant de
+/// l'opération (`GET /operations/services/{id}`, `last_action` du service) ; `grace_s` est le délai d'arrêt du
+/// service, en secondes, que la fenêtre de confirmation et le décompte affichent. L'issue réelle ne se lit
+/// jamais dans cette réponse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionAccepted {
+    pub action_id: String,
+    pub grace_s: u32,
+}
+
 /// Le contenu de `GET /services` et de `services_snapshot` : l'état du moteur et tous les services,
 /// arrêtés compris, triés par nom sans tenir compte de la casse (`BR-SVC-012`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

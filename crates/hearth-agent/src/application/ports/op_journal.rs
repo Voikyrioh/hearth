@@ -152,6 +152,22 @@ pub trait OpJournal: Send + Sync {
         at: OffsetDateTime,
     ) -> Result<(), JournalError>;
 
+    /// Note que l'opération a dû forcer (arrêt coupé de force après le délai de grâce, BR-LIFE-009). Seulement
+    /// tant qu'elle n'est pas terminée : le statut final la porte ensuite telle quelle (HRT-64).
+    async fn mark_forced(&self, id: &str, at: OffsetDateTime) -> Result<(), JournalError>;
+
+    /// Pose une cause sur une opération TERMINÉE EN SUCCÈS qui n'en a pas, après coup : le service est reparti
+    /// tout seul après l'arrêt (BR-LIFE-011), ou il s'est arrêté dans les 10 secondes du démarrage
+    /// (BR-LIFE-005). Ces deux constats arrivent après que l'action a fini et rendu son verrou (la
+    /// surveillance ne bloque aucune autre action). Rend `false` si rien n'a été écrit (l'opération n'est pas
+    /// une réussite, ou porte déjà une cause) : une cause n'en remplace jamais une autre (HRT-64).
+    async fn annotate_cause(
+        &self,
+        id: &str,
+        cause: Cause,
+        at: OffsetDateTime,
+    ) -> Result<bool, JournalError>;
+
     /// Les opérations en attente de décision depuis `older_than` ou avant.
     async fn expired_decisions(
         &self,
