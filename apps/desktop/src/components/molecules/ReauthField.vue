@@ -3,7 +3,7 @@ import { ref } from "vue";
 import HPasswordInput from "@/components/atoms/HPasswordInput.vue";
 import { t } from "@/i18n";
 
-// Le champ « Ton mot de passe » de la confirmation d'un acte d'administration (HRT-30). Un seul motif
+// Le champ « Votre mot de passe » de la confirmation d'un acte d'administration (HRT-30). Un seul motif
 // pour tous les actes : masqué, `current-password` (jamais mémorisé par le navigateur : aucune valeur
 // n'est gardée ici), aide sous le champ, erreur sous le champ (mot de passe faux, attente). Vidé par la
 // fenêtre qui le porte après CHAQUE envoi.

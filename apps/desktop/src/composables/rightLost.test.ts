@@ -10,7 +10,7 @@ import { useAccountActions } from "./useAccountActions";
 import { useServerAction } from "./useServerAction";
 
 // HRT-78 (BR-GRANT-010, 011) : un refus du serveur faute du droit de gérer les services ferme la fenêtre ouverte
-// avec « Tu n'as plus le droit de gérer les services de ce serveur. », relit le droit, et les boutons se
+// avec « Vous n'avez plus le droit de gérer les services de ce serveur. », relit le droit, et les boutons se
 // désactivent. Aucune fenêtre d'action de service n'existe encore : c'est le mécanisme commun qui est éprouvé
 // DE BOUT EN BOUT (C2 de la review) : un vrai composable d'actions (`useAccountActions`) reçoit le refus du pont, en
 // tire le rapport `right_lost` avec l'identifiant du serveur, et la VRAIE fenêtre `AdminActDialog` se ferme dessus.
@@ -47,7 +47,7 @@ function probe(serverId: string | null) {
 }
 
 describe("useServerAction : le refus faute du droit", () => {
-  it("dit « Tu n'as plus le droit… », relit le droit du serveur et ne parle jamais de rôle", async () => {
+  it("dit « Vous n'avez plus le droit… », relit le droit du serveur et ne parle jamais de rôle", async () => {
     const ctx = await mountContext();
     await useServiceRightsStore().load("forge");
     ctx.bridge.setServiceRightOnServer("forge", "marie", false);
@@ -56,7 +56,7 @@ describe("useServerAction : le refus faute du droit", () => {
     expect(await p.run()).toBeNull();
     await flushPromises();
     const messages = useToastsStore().items.map((toast) => toast.message);
-    expect(messages).toEqual(["Tu n'as plus le droit de gérer les services de ce serveur."]);
+    expect(messages).toEqual(["Vous n'avez plus le droit de gérer les services de ce serveur."]);
     expect(messages.join(" ")).not.toMatch(/administrateur|rôle/i);
     expect(p.state()?.rightLost.value).toBe(true);
     expect(p.state()?.failedReport()).toEqual({ kind: "right_lost" });
@@ -127,7 +127,7 @@ describe("la fenêtre ouverte se ferme quand le serveur refuse faute du droit", 
     await submit();
     expect(open.value).toBe(false);
     expect(useToastsStore().items.map((toast) => toast.message)).toEqual([
-      "Tu n'as plus le droit de gérer les services de ce serveur.",
+      "Vous n'avez plus le droit de gérer les services de ce serveur.",
     ]);
     expect(ctx.bridge.rightsReads.length).toBe(reads + 1);
     expect(useServiceRightsStore().of("forge")?.rights?.granted).toBe(false);

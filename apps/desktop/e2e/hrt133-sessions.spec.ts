@@ -59,7 +59,7 @@ test("tu n'as pas le droit, paul l'a : la fenêtre dit que ses postes de confian
     await dialog(page).screenshot({ path: `${SHOTS}/hrt133-confirm-${width}.png` });
   }
   await page.setViewportSize({ width: 1366, height: 800 });
-  await dialog(page).getByLabel("Ton mot de passe").fill(OWN);
+  await dialog(page).getByLabel("Votre mot de passe").fill(OWN);
   await dialog(page).getByRole("button", { name: "Fermer les sessions" }).click();
   await expect(page.locator(".toast")).toContainText("Sessions de paul fermées.");
   await expect(row(page, "paul").locator("td").nth(3)).toHaveText("0");

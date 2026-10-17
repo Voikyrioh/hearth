@@ -11,14 +11,15 @@ maj: 2026-10-17
 # BR-SVC-029 — La bande « Opérations en cours »
 
 ## Règle
-La bande est le lieu où retrouver une opération longue une fois sa fenêtre fermée. Elle est visible de tous les comptes du serveur ; chaque ligne dit le service, l'opération, son étape, sa progression et « Lancée par {compte}. ». Les comptes sans le droit de gérer les services lisent « Effacement des données de {nom} en cours. » sans chemin ni progression. Une opération toujours en cours au retour du lien est reconstruite depuis l'état du serveur, sans message ; l'issue d'une opération terminée est annoncée une seule fois (BR-RESIL-010). Une opération qui attend une décision porte le bouton de cette décision, réservé au droit : sans lui le bouton est désactivé avec sa raison. La décision est un acte d'administration confirmé, mot de passe redemandé à chaque réponse. Aucun bouton d'annulation dans la bande.
+La bande est le lieu où retrouver une opération longue une fois sa fenêtre fermée. Elle est visible de tous les comptes du serveur ; chaque ligne dit le service, l'opération, son étape, sa progression et « Lancée par {compte}. ». Les comptes sans le droit de gérer les services lisent « Effacement des données de {nom} en cours. » sans chemin ni progression (BR-DEL-031). Une opération toujours en cours au retour du lien est reconstruite depuis l'état du serveur, sans message ; l'issue d'une opération terminée est annoncée une seule fois (BR-RESIL-010). Une opération qui attend une décision porte le bouton de cette décision, réservé au droit : sans lui le bouton est désactivé avec sa raison. La décision est un acte d'administration confirmé, mot de passe redemandé à chaque réponse. Aucun bouton d'annulation dans la bande.
 
 ## Application (code)
 - `crates/hearth-link/src/domain/service_op_tracker.rs::OpTracker` (une issue une fois, reconstruction sans message)
-- `crates/hearth-link/src/manager/task.rs` (relecture des opérations non redites au retour du lien)
+- `crates/hearth-link/src/manager/task.rs` (relecture des opérations non redites au retour du lien, nouveaux essais tant que le lien tient)
+- `crates/hearth-link/src/domain/service_ops.rs::refusal_of` (refus d'une décision, lu aussi par la coquille)
 - `apps/desktop/src-tauri/src/service_ops/book.rs::OpsBook` (état tenu, rejeu, acquittement)
 - `apps/desktop/src-tauri/src/service_ops/service.rs::decide`
-- `apps/desktop/src/stores/serviceOps.ts`
+- `apps/desktop/src/stores/serviceOps.ts` (démarré par `App.vue` : une issue se dit quelle que soit la page ; un rejeu déjà dit est réacquitté)
 - `apps/desktop/src/components/organisms/OperationsStrip.vue`
 
 ## Vérification
@@ -34,3 +35,4 @@ La bande est le lieu où retrouver une opération longue une fois sa fenêtre fe
 
 ## Historique
 - 2026-10-17 — création (HRT-84, suivi uniforme côté client).
+- 2026-10-17 — review : magasin démarré au lancement, fenêtre de décision qui suit l'opération, relecture réessayée, refus lus par la liaison.

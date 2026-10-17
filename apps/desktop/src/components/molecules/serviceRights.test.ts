@@ -10,9 +10,9 @@ import ServicesRightRow from "./ServicesRightRow.vue";
 // Le composant de raison partagé et la ligne « Gestion des services » (HRT-78, BR-GRANT-013, 014, 016). Textes de la
 // spécification mot pour mot ; la raison est liée au bouton par `aria-describedby` ; la commande copiée est
 // exactement le texte affiché ; aucune case ni commutateur (le droit ne se donne pas depuis l'application).
-const REASON = "Ton compte ne peut pas gérer les services de ce serveur.";
-const ADMIN_INTRO = "Le droit se donne depuis le serveur. Lance cette commande sur le serveur :";
-const ASK = "Demande à la personne qui administre ce serveur.";
+const REASON = "Votre compte ne peut pas gérer les services de ce serveur.";
+const ADMIN_INTRO = "Le droit se donne depuis le serveur. Lancez cette commande sur le serveur :";
+const ASK = "Demandez à la personne qui administre ce serveur.";
 const OLD = "Ce serveur doit être mis à jour pour gérer les droits sur les services.";
 
 const writeText = vi.fn();
@@ -84,7 +84,7 @@ describe("ServiceRightReason", () => {
   it("lecture en échec : la raison de l'échec et « Vérifier à nouveau » qui relit", async () => {
     const wrapper = mount(ServiceRightReason, { props: { gate: { kind: "failed" }, id: "why" } });
     expect(wrapper.get("[data-rights-sentence]").text()).toBe(
-      "Impossible de lire ton droit sur les services. Réessaie.",
+      "Impossible de lire votre droit sur les services. Réessayez.",
     );
     await wrapper.get("[data-rights-retry]").trigger("click");
     expect(wrapper.emitted("retry")).toHaveLength(1);
@@ -160,7 +160,7 @@ describe("la commande à copier", () => {
     await wrapper.get("[data-copy]").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain(
-      "La copie a échoué. Sélectionne le texte et copie-le toi-même.",
+      "La copie a échoué. Sélectionnez le texte et copiez-le vous-même.",
     );
   });
 });
