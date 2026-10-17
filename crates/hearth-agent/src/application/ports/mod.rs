@@ -28,6 +28,7 @@ mod op_journal;
 mod operation_repo;
 mod password_hasher;
 mod proof;
+mod safe_fs;
 mod secret_sealer;
 mod security_feed;
 mod service_manager;
@@ -77,6 +78,7 @@ pub use op_journal::{
 pub use operation_repo::{OperationRepo, OperationTx};
 pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
+pub use safe_fs::{FsError, Measure, Ownership, Perms, SafeFs, ServiceRoot};
 pub use secret_sealer::{
     KeyCheckRepo, KeyRead, KeyStoreError, SealError, SealerFactory, SecretSealer, ServicesKeyStore,
 };
