@@ -403,21 +403,20 @@ impl ServiceLifecycle {
     // -----------------------------------------------------------------------------------------
 
     async fn execute(self: Arc<Self>, job: Job) {
-        let began = Instant::now();
+        let started = Instant::now();
         let finish = {
             // L'étape annoncée ne survit pas à l'action, ni à la tâche si elle est abandonnée.
             let _step = StepShown {
                 registry: &self.registry,
                 key: job.target.key.clone(),
             };
-            let started = Instant::now();
             match job.gesture {
                 Gesture::Stop => self.run_stop(&job, started).await,
                 Gesture::Start => self.run_start(&job).await,
                 Gesture::Restart => self.run_restart(&job, started).await,
             }
         };
-        self.settle(&job, finish, began.elapsed()).await;
+        self.settle(&job, finish, started.elapsed()).await;
     }
 
     /// Arrêter : l'arrêt voulu est écrit AVANT l'ordre (`BR-LIFE-010`).

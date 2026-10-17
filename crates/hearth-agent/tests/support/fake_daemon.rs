@@ -543,7 +543,10 @@ async fn order(
         container.status = "running".into();
         container.exit_code = 0;
         container.started_at = now_stamp();
-        container.finished_at = "0001-01-01T00:00:00Z".into();
+        // Comme le moteur : un redémarrage garde la fin de l'exécution arrêtée (le code est remis à zéro).
+        if verb != "restart" {
+            container.finished_at = "0001-01-01T00:00:00Z".into();
+        }
     }
     drop(guard);
     announce(events, id, "start");

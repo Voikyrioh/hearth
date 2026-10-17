@@ -645,6 +645,17 @@ async fn writes(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefix
         .expect("existe");
     assert_eq!(restarted.run_state, RunState::Running);
     assert!(restarted.started_at > before, "une exécution neuve");
+    // Le démarrage garde la fin de l'exécution arrêtée : c'est elle qui date l'arrêt d'un redémarrage
+    // (BR-LIFE-009, le code de sortie étant remis à zéro).
+    let finished = restarted
+        .finished_at
+        .expect("la fin de l'exécution arrêtée reste lisible après le redémarrage");
+    assert!(
+        before.is_some_and(|start| finished >= start)
+            && restarted.started_at.is_some_and(|start| finished <= start),
+        "fin entre l'ancienne et la nouvelle exécution : {before:?} {finished:?} {:?}",
+        restarted.started_at
+    );
     let began = tokio::time::Instant::now();
     engine
         .stop(&polite, Duration::from_secs(10))
