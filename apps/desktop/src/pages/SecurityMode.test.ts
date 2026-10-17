@@ -65,7 +65,7 @@ describe("Sécurité : le mode attaque", () => {
     await toggle(wrapper).trigger("click");
     await flushPromises();
     expect(dialog()?.textContent).toContain("Activer le mode attaque ?");
-    expect(dialog()?.textContent).toContain("redonne ton mot de passe");
+    expect(dialog()?.textContent).toContain("saisissez de nouveau votre mot de passe");
     // Le bouton attend le mot de passe.
     expect(dialogButton("Activer le mode attaque")?.getAttribute("aria-disabled")).toBe("true");
     await confirm(GOOD);

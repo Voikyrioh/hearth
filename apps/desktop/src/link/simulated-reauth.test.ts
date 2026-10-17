@@ -97,7 +97,7 @@ describe("les textes d'une clé non reconnue et d'un mot de passe manquant", () 
     expect(text).toContain("8 postes");
     expect(text).toContain("hearth-agent account revoke");
     expect(failureMessage({ kind: "invalid_input", field: "credentials" })).toBe(
-      "Cette action demande ton mot de passe.",
+      "Cette action demande votre mot de passe.",
     );
   });
 });

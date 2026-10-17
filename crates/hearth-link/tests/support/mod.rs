@@ -75,6 +75,7 @@ fn scaled_config() -> LinkConfig {
         snapshot_save_period: Duration::from_millis(200),
         restart_delay: Duration::from_millis(50),
         recheck_delay: Duration::from_millis(100),
+        ops_resync_delay: Duration::from_millis(100),
         ..LinkConfig::default()
     }
 }

@@ -3,7 +3,7 @@
 Stack : Rust (Cargo workspace + Tauri 2) · Vue 3 · SQLite · Tokio · axum · rustls
 Style : Hexagonale (agent, link) · Atomic design (front)
 Entrée : `crates/hearth-agent/src/main.rs` (→ `entrypoint/cli.rs`), `apps/desktop/src-tauri/main.rs`, `apps/desktop/src/main.ts`
-Maj : 2026-10-17
+Maj : 2026-10-17 (HRT-84 suivi des opérations côté client : `hearth-link` `domain/service_op_tracker.rs`, coquille `service_ops/`, bande « Opérations en cours »)
 
 ## Vue d'ensemble
 

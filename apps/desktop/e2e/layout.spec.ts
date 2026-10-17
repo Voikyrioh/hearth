@@ -663,7 +663,7 @@ for (const size of SIZES) {
     await shoot(page, "hrt46-maj-disponible", size.width, size.height);
     await forge.locator("[data-agent-update-button]").click();
     const dialog = page.locator("dialog[open]");
-    await dialog.getByLabel("Ton mot de passe").fill("Correct-Horse-9");
+    await dialog.getByLabel("Votre mot de passe").fill("Correct-Horse-9");
     await dialog.getByRole("button", { name: "Oui, mettre à jour" }).click();
     await page.evaluate(() => {
       const bridge = (

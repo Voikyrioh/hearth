@@ -160,7 +160,7 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
     expect(mounts).toContain("Stockage géré par le moteur");
     expect(mounts).toContain("Lecture et écriture");
     expect(text).toContain("30 secondes");
-    expect(text).toContain("Redémarre tout seul sauf si tu l'arrêtes");
+    expect(text).toContain("Redémarre tout seul sauf si vous l'arrêtez");
     expect(text).toContain("Ressources : non limitées");
     expect(text).toContain("Créé le");
     wrapper.unmount();
@@ -441,13 +441,13 @@ describe("les variables d'environnement (BR-SVC-008, BR-SVC-009)", () => {
     wrapper.unmount();
   });
 
-  it("lecture en échec : « Impossible de lire les valeurs. Réessaie. », valeurs masquées, on peut réessayer", async () => {
+  it("lecture en échec : « Impossible de lire les valeurs. Réessayez. », valeurs masquées, on peut réessayer", async () => {
     const { wrapper, bridge } = await open(seedWeb);
     await openWeb(wrapper);
     bridge.services.failReveal = true;
     await reveal(wrapper);
     expect(wrapper.get("[data-env-failed]").text()).toBe(
-      "Impossible de lire les valeurs. Réessaie.",
+      "Impossible de lire les valeurs. Réessayez.",
     );
     expect(wrapper.html()).not.toContain(SECRET);
     bridge.services.failReveal = false;
@@ -464,7 +464,7 @@ describe("les variables d'environnement (BR-SVC-008, BR-SVC-009)", () => {
     bridge.setServiceRightOnServer("forge", "marie", false);
     await reveal(wrapper);
     expect(wrapper.get("[data-env-failed]").text()).toBe(
-      "Tu n'as plus le droit de gérer les services de ce serveur.",
+      "Vous n'avez plus le droit de gérer les services de ce serveur.",
     );
     expect(bridge.refusedReveals).toEqual(["forge"]);
     expect(bridge.rightsReads.length).toBeGreaterThan(reads);
@@ -483,7 +483,7 @@ describe("les variables d'environnement (BR-SVC-008, BR-SVC-009)", () => {
     const toggle = wrapper.get("[data-env-toggle]");
     expect(toggle.attributes("aria-disabled")).toBe("true");
     expect(wrapper.get("[data-env-reason]").text()).toContain(
-      "Ton compte ne peut pas gérer les services de ce serveur.",
+      "Votre compte ne peut pas gérer les services de ce serveur.",
     );
     expect(wrapper.get("[data-env-reason] pre").text()).toBe(
       "sudo hearth-agent account services marie --grant",
@@ -497,7 +497,7 @@ describe("les variables d'environnement (BR-SVC-008, BR-SVC-009)", () => {
     wrapper.unmount();
   });
 
-  it("compte en lecture seule sans le droit : « Demande à la personne qui administre ce serveur. »", async () => {
+  it("compte en lecture seule sans le droit : « Demandez à la personne qui administre ce serveur. »", async () => {
     const { wrapper } = await open(
       (sim) => {
         sim.services.seed("salon", [{ ...WEB }]);
@@ -508,7 +508,7 @@ describe("les variables d'environnement (BR-SVC-008, BR-SVC-009)", () => {
     );
     await openWeb(wrapper);
     expect(wrapper.get("[data-env-reason]").text()).toContain(
-      "Demande à la personne qui administre ce serveur.",
+      "Demandez à la personne qui administre ce serveur.",
     );
     expect(wrapper.get("[data-env-reason]").find("pre").exists()).toBe(false);
     wrapper.unmount();

@@ -28,6 +28,7 @@ export function service(patch: Partial<ServiceInfo> & { key: string }): ServiceI
     graceS: null,
     adopted: null,
     detailsReserved: false,
+    busy: null,
     detailsKnown: true,
     ...patch,
   };

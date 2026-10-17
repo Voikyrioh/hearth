@@ -121,7 +121,9 @@ describe("supprimer un compte qui peut gérer les services (BR-GRANT-005)", () =
     await confirmDialog("Supprimer");
     const messages = useToastsStore().items.map((t) => t.message);
     expect(messages).toContain(HINT);
-    expect(messages).not.toContain("Tu n'as plus le droit de gérer les services de ce serveur.");
+    expect(messages).not.toContain(
+      "Vous n'avez plus le droit de gérer les services de ce serveur.",
+    );
     expect(wrapper.find(`[data-account="paul"]`).exists()).toBe(true);
     wrapper.unmount();
   });

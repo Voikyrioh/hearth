@@ -42,7 +42,7 @@ async function ready(page: Page) {
   return open;
 }
 
-test("chaque acte d'une fenêtre demande « Ton mot de passe » quand l'agent l'annonce", async ({
+test("chaque acte d'une fenêtre demande « Votre mot de passe » quand l'agent l'annonce", async ({
   page,
 }) => {
   await page.goto("/?nodev#/servers/forge/accounts");
@@ -50,10 +50,10 @@ test("chaque acte d'une fenêtre demande « Ton mot de passe » quand l'agent l'
     .getByRole("button", { name: /^Changer le mot de passe/ })
     .click();
   const open = await ready(page);
-  await expect(open.getByLabel("Ton mot de passe")).toBeVisible();
+  await expect(open.getByLabel("Votre mot de passe")).toBeVisible();
   await expect(
     open.getByText(
-      "Pour confirmer, redonne ton mot de passe. La clé de ce poste est vérifiée en même temps.",
+      "Pour confirmer, saisissez de nouveau votre mot de passe. La clé de ce poste est vérifiée en même temps.",
     ),
   ).toBeVisible();
   await expect(open.getByRole("button", { name: "Changer le mot de passe" })).toHaveAttribute(
@@ -71,7 +71,7 @@ test("pendant le délai de 5 minutes : un acte couvert n'a pas de champ et dit l
     .getByRole("button", { name: /^Fermer les/ })
     .click();
   const first = await ready(page);
-  await first.getByLabel("Ton mot de passe").fill(OWN);
+  await first.getByLabel("Votre mot de passe").fill(OWN);
   await first.getByRole("button", { name: "Fermer les sessions", exact: true }).click();
   await expect(dialog(page)).toHaveCount(0);
   // Supprimer un compte est couvert : pas de champ, le temps restant est écrit.
@@ -79,9 +79,9 @@ test("pendant le délai de 5 minutes : un acte couvert n'a pas de champ et dit l
     .getByRole("button", { name: /^Supprimer/ })
     .click();
   const second = await ready(page);
-  await expect(second.getByLabel("Ton mot de passe")).toHaveCount(0);
+  await expect(second.getByLabel("Votre mot de passe")).toHaveCount(0);
   await expect(second.locator("[data-reauth-elevated]")).toContainText(
-    /Il te sera redemandé dans \d+ min \d+ s/,
+    /Il vous sera redemandé dans \d+ min \d+ s/,
   );
   await shoot(page, "reauth-delai");
   await second.getByRole("button", { name: "Annuler" }).click();
@@ -90,7 +90,7 @@ test("pendant le délai de 5 minutes : un acte couvert n'a pas de champ et dit l
     .getByRole("button", { name: /^Changer le mot de passe/ })
     .click();
   const third = await ready(page);
-  await expect(third.getByLabel("Ton mot de passe")).toBeVisible();
+  await expect(third.getByLabel("Votre mot de passe")).toBeVisible();
 });
 
 test("le délai s'est fermé chez l'agent : la fenêtre redemande le mot de passe sans perdre la saisie", async ({
@@ -99,7 +99,7 @@ test("le délai s'est fermé chez l'agent : la fenêtre redemande le mot de pass
   await page.goto("/?nodev#/servers/forge/accounts");
   await page.getByRole("button", { name: "Ajouter un compte" }).click();
   const first = await ready(page);
-  await first.getByLabel("Ton mot de passe").fill(OWN);
+  await first.getByLabel("Votre mot de passe").fill(OWN);
   await first.getByLabel("Identifiant").fill("sophie");
   await first.getByLabel("Mot de passe du nouveau compte").fill(GOOD);
   await first.getByLabel("Confirme le mot de passe").fill(GOOD);
@@ -108,7 +108,7 @@ test("le délai s'est fermé chez l'agent : la fenêtre redemande le mot de pass
   // Le délai est ouvert : une deuxième création n'a pas de champ…
   await page.getByRole("button", { name: "Ajouter un compte" }).click();
   const second = await ready(page);
-  await expect(second.getByLabel("Ton mot de passe")).toHaveCount(0);
+  await expect(second.getByLabel("Votre mot de passe")).toHaveCount(0);
   await second.getByLabel("Identifiant").fill("marc");
   await second.getByLabel("Mot de passe du nouveau compte").fill(GOOD);
   await second.getByLabel("Confirme le mot de passe").fill(GOOD);
@@ -116,10 +116,10 @@ test("le délai s'est fermé chez l'agent : la fenêtre redemande le mot de pass
   await simReauth(page, "close");
   await second.getByRole("button", { name: "Créer", exact: true }).click();
   await expect(second.getByText("Le délai est terminé.")).toBeVisible();
-  await expect(second.getByLabel("Ton mot de passe")).toBeVisible();
+  await expect(second.getByLabel("Votre mot de passe")).toBeVisible();
   await expect(second.getByLabel("Identifiant")).toHaveValue("marc");
   await expect(second.getByLabel("Mot de passe du nouveau compte")).toHaveValue(GOOD);
-  await second.getByLabel("Ton mot de passe").fill(OWN);
+  await second.getByLabel("Votre mot de passe").fill(OWN);
   await second.getByRole("button", { name: "Créer", exact: true }).click();
   await expect(page.locator(".toast").filter({ hasText: "Compte marc créé." })).toBeVisible();
 });
@@ -134,10 +134,10 @@ test("un mot de passe faux reste sous le champ, la fenêtre reste ouverte, le ch
   const open = await ready(page);
   await open.getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
   await open.getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
-  await open.getByLabel("Ton mot de passe").fill("Faux-Mot-De-Passe-1");
+  await open.getByLabel("Votre mot de passe").fill("Faux-Mot-De-Passe-1");
   await open.getByRole("button", { name: "Changer le mot de passe" }).click();
   await expect(open.getByText("Mot de passe actuel incorrect.")).toBeVisible();
-  await expect(open.getByLabel("Ton mot de passe")).toHaveValue("");
+  await expect(open.getByLabel("Votre mot de passe")).toHaveValue("");
   await expect(dialog(page)).toHaveCount(1);
 });
 
@@ -160,7 +160,7 @@ test("poste sans clé : rien ne part, l'écran dit quoi faire et propose de se r
   await expect(
     open.getByRole("button", { name: "Me reconnecter pour enregistrer ce poste" }),
   ).toBeVisible();
-  await expect(open.getByLabel("Ton mot de passe")).toHaveCount(0);
+  await expect(open.getByLabel("Votre mot de passe")).toHaveCount(0);
   // HRT-40 (C41) : plus de bouton d'action grisé.
   await expect(open.getByRole("button", { name: "Supprimer", exact: true })).toHaveCount(0);
   expect((await calls(page)).filter((call) => call.startsWith("account delete"))).toHaveLength(0);
@@ -178,7 +178,7 @@ test("agent qui n'annonce pas la confirmation : aucun acte, la fenêtre dit de m
   const open = dialog(page);
   // Comme la liaison : aucun acte ne part, ni champ ni bouton d'envoi, l'écran le dit.
   await expect(open.locator("[data-reauth-agent-old]")).toContainText("Mets à jour l'agent");
-  await expect(open.getByLabel("Ton mot de passe")).toHaveCount(0);
+  await expect(open.getByLabel("Votre mot de passe")).toHaveCount(0);
   // HRT-40 (C40) : plus de bouton d'action grisé, un bouton qui mène aux réglages.
   await expect(open.getByRole("button", { name: "Supprimer", exact: true })).toHaveCount(0);
   await expect(open.getByRole("button", { name: "Aller aux réglages" })).toBeVisible();
@@ -197,10 +197,12 @@ test("page Sécurité : la ligne « Demander mon mot de passe » se lit et se ch
   );
   await line.getByRole("radio", { name: "À chaque action" }).click();
   const open = await ready(page);
-  await expect(open.getByText("Ton mot de passe te sera demandé à chaque action")).toBeVisible();
+  await expect(
+    open.getByText("Votre mot de passe vous sera demandé à chaque action"),
+  ).toBeVisible();
   // Rien n'est parti avant la confirmation ; un réglage est un acte : toujours confirmé.
   expect((await calls(page)).filter((call) => call.startsWith("reauth setting"))).toHaveLength(0);
-  await open.getByLabel("Ton mot de passe").fill(OWN);
+  await open.getByLabel("Votre mot de passe").fill(OWN);
   await open.getByRole("button", { name: "Changer", exact: true }).click();
   await expect(line.getByRole("radio", { name: "À chaque action" })).toHaveAttribute(
     "aria-checked",

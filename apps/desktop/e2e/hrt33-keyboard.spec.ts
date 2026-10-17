@@ -47,14 +47,14 @@ test("créer un compte : le curseur est dans l'identifiant, ce qui est tapé n'a
   await ready(page);
   await expect(dialog(page).getByLabel("Identifiant")).toBeFocused();
   // La confirmation des actes porte son propre exemple (C19).
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveAttribute(
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toHaveAttribute(
     "placeholder",
-    "Le tien, pour confirmer",
+    "Le vôtre, pour confirmer",
   );
   await page.keyboard.type("sophie");
   await expect(dialog(page).getByLabel("Identifiant")).toHaveValue("sophie");
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveValue("");
-  // Tab : le mot de passe du NOUVEAU compte, puis la confirmation, avant « Ton mot de passe ».
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toHaveValue("");
+  // Tab : le mot de passe du NOUVEAU compte, puis la confirmation, avant « Votre mot de passe ».
   await page.keyboard.press("Tab");
   await expect(dialog(page).getByLabel("Mot de passe du nouveau compte")).toBeFocused();
   await page.keyboard.type(GOOD);
@@ -72,15 +72,15 @@ test("un mot de passe de confirmation faux ne vide que la confirmation (C18)", a
   await page.keyboard.type("sophie");
   await dialog(page).getByLabel("Mot de passe du nouveau compte").fill(GOOD);
   await dialog(page).getByLabel("Confirme le mot de passe du compte").fill(GOOD);
-  await dialog(page).getByLabel("Ton mot de passe").fill("Mauvais-Mot-De-Passe-1");
+  await dialog(page).getByLabel("Votre mot de passe").fill("Mauvais-Mot-De-Passe-1");
   await dialog(page).getByRole("button", { name: "Créer", exact: true }).click();
   await expect(dialog(page).getByText("Mot de passe actuel incorrect.")).toBeVisible();
   await expect(dialog(page).getByLabel("Identifiant")).toHaveValue("sophie");
   await expect(dialog(page).getByLabel("Mot de passe du nouveau compte")).toHaveValue(GOOD);
   await expect(dialog(page).getByLabel("Confirme le mot de passe du compte")).toHaveValue(GOOD);
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveValue("");
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toHaveValue("");
   // Le curseur est revenu dans la confirmation : on la retape au clavier, sans clic.
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toBeFocused();
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toBeFocused();
   await page.keyboard.type(OWN);
   await dialog(page).getByRole("button", { name: "Créer", exact: true }).click();
   await expect(page.locator(".toast").filter({ hasText: "Compte sophie créé." })).toBeVisible();

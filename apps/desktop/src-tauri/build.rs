@@ -65,6 +65,9 @@ const COMMANDS: &[&str] = &[
     "ack_service_logs",
     "keep_service_logs",
     "open_engine_docs",
+    "list_service_operations",
+    "ack_service_operations",
+    "decide_service_operation",
 ];
 
 fn main() {

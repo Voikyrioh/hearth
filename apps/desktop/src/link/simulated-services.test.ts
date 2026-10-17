@@ -69,6 +69,7 @@ describe("les formes du pont simulé sont celles du protocole", () => {
           envNames: ["A"],
           command: ["nginx"],
           adopted: { by: "claire", at: "2026-10-13T08:00:00Z" },
+          busy: { kind: "update", by: "marie", since: "2026-10-13T09:30:00Z" },
         },
       ],
       { name: "Docker Engine - Community" },

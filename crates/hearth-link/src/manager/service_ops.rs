@@ -50,18 +50,8 @@ fn result_of(outcome: ActionOutcome) -> Result<OperationActResult, LinkError> {
     }
 }
 
-/// Un identifiant d'opération de l'agent : un ULID, lettres et chiffres. Même borne que l'agent côté acte.
-const ID_MAX_LEN: usize = 64;
-
 fn operation_path(op_id: &str) -> Result<String, LinkError> {
-    let valid = !op_id.is_empty()
-        && op_id.len() <= ID_MAX_LEN
-        && op_id.bytes().all(|b| b.is_ascii_alphanumeric());
-    if valid {
-        Ok(format!("/operations/services/{op_id}"))
-    } else {
-        Err(LinkError::UnreadableAct)
-    }
+    crate::domain::service_ops::operation_path(op_id).ok_or(LinkError::UnreadableAct)
 }
 
 impl LinkManager {

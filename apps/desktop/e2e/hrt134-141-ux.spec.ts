@@ -183,7 +183,7 @@ test("HRT-135 : sur son propre compte, l'avertissement précède la commande qui
   await page.locator("tr[data-account='marie'] .table__open").click();
   const dialog = page.getByRole("dialog");
   const warning = dialog.locator("[data-rights-own-warning]");
-  await expect(warning).toContainText("C'est ton propre compte");
+  await expect(warning).toContainText("C'est votre propre compte");
   const order = await dialog.evaluate((root) => {
     const warn = root.querySelector("[data-rights-own-warning]");
     const command = root.querySelector("[data-rights-command]");
