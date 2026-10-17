@@ -245,11 +245,14 @@ jobs:
           aws --version
           aws --version | grep -F "aws-cli/${AWS_CLI_VERSION} "
       # Reprise (BR-RELEASE-009) : en réel, une relance de la même exécution retrouve les fichiers déjà
-      # signés ; à la première tentative l'artefact n'existe pas, et l'échec de ce téléchargement est
-      # attendu.
+      # signés par la tentative précédente (vérifié le 2026-10-17 par un flux jetable : une relance voit
+      # l'artefact de la tentative 1). Rien à reprendre à la première tentative : l'étape est sautée. Une
+      # relance où `publish` n'avait pas encore signé échoue ici, c'est attendu (`continue-on-error`). Un
+      # artefact repris repasse par `verify_stage` dans `release-upload` (signatures, commit) : il ne passe
+      # pas sans les clés.
       - name: Reprise éventuelle des fichiers signés
         id: resume
-        if: inputs.essai == false
+        if: inputs.essai == false && github.run_attempt != '1'
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -267,6 +270,16 @@ jobs:
         with:
           name: hearth-agent-unsigned
           path: ${{ runner.temp }}/agent
+      # Ce qui est signé est ce que le propriétaire a relu : les sommes affichées par `review` (une somme
+      # vide ou différente arrête tout avant la première clé).
+      - name: Les constructions sont celles relues
+        if: steps.resume.outcome != 'success'
+        env:
+          CLIENT_SHA256: ${{ needs.build-client.outputs.sha256 }}
+          AGENT_SHA256: ${{ needs.build-agent.outputs.sha256 }}
+        run: |
+          echo "${CLIENT_SHA256}  ${RUNNER_TEMP}/client/Hearth_${VERSION}_x64-setup.exe" | sha256sum --check -
+          echo "${AGENT_SHA256}  ${RUNNER_TEMP}/agent/hearth-agent" | sha256sum --check -
       - name: Signer le client
         if: steps.resume.outcome != 'success'
         env:

@@ -235,7 +235,8 @@ fn secret_violations(text: &str) -> Vec<String> {
     let lines = parse(text);
     let mut found = Vec::new();
     for (index, line) in lines.iter().enumerate() {
-        if !line.text.contains("secrets.") {
+        // `secrets` et pas `secrets.` : `toJSON(secrets)` ou `secrets['…']` ne doivent pas passer à côté.
+        if !line.text.contains("secrets") {
             continue;
         }
         let parent = lines[..index]
@@ -545,6 +546,50 @@ fn shape_violations(text: &str) -> Vec<String> {
     found
 }
 
+/// Ce qui est signé est ce que le propriétaire a relu : dans `publish`, une étape compare les deux
+/// constructions téléchargées aux sommes affichées par `review` (sorties des jobs de construction), AVANT
+/// les deux signatures.
+fn approved_build_violations(text: &str) -> Vec<String> {
+    let lines = parse(text);
+    let all = jobs(&lines);
+    let Some(publish) = all.iter().find(|job| job.name == "publish") else {
+        return vec!["job publish absent".to_owned()];
+    };
+    let all_steps = steps(publish);
+    let position = |name: &str| {
+        all_steps
+            .iter()
+            .position(|step| step[0].text == format!("name: {name}"))
+    };
+    let check = all_steps.iter().position(|step| {
+        let script = run_script(step).unwrap_or_default();
+        let checks = |variable: &str, file: &str| {
+            script.iter().any(|line| {
+                line.starts_with(&format!("echo \"${{{variable}}}  "))
+                    && line.contains(file)
+                    && line.ends_with("| sha256sum --check -")
+            })
+        };
+        has(
+            step,
+            10,
+            "CLIENT_SHA256: ${{ needs.build-client.outputs.sha256 }}",
+        ) && has(
+            step,
+            10,
+            "AGENT_SHA256: ${{ needs.build-agent.outputs.sha256 }}",
+        ) && checks("CLIENT_SHA256", "_x64-setup.exe\"")
+            && checks("AGENT_SHA256", "/agent/hearth-agent\"")
+    });
+    match (check, position("Signer le client"), position("Signer l'agent")) {
+        (Some(check), Some(client), Some(agent)) if check < client && check < agent => Vec::new(),
+        (None, ..) => vec![
+            "publish doit vérifier les deux constructions contre les sommes de build-client et build-agent".to_owned(),
+        ],
+        _ => vec!["la vérification des sommes doit précéder les deux signatures".to_owned()],
+    }
+}
+
 fn aws_violations(text: &str) -> Vec<String> {
     let lines = parse(text);
     let mut found = Vec::new();
@@ -659,6 +704,51 @@ mod tests {
             ))
             .is_empty()
         );
+        // Tous les secrets d'un coup, ou par crochets : sans `secrets.`, toujours vus.
+        for leak in [
+            "${{ toJSON(secrets) }}",
+            "${{ secrets['HEARTH_CLIENT_SIGNING_KEY'] }}",
+        ] {
+            let text = damaged(
+                "      HEARTH_NOTES: ${{ inputs.notes }}\n      # AWS CLI",
+                &format!(
+                    "      HEARTH_NOTES: ${{{{ inputs.notes }}}}\n      LEAK: {leak}\n      # AWS CLI"
+                ),
+            );
+            assert!(!secret_violations(&text).is_empty(), "{leak} accepté");
+        }
+    }
+
+    #[test]
+    fn what_is_signed_is_what_the_owner_reviewed() {
+        assert_eq!(approved_build_violations(&read()), Vec::<String>::new());
+        let gone = damaged(
+            "          echo \"${AGENT_SHA256}  ${RUNNER_TEMP}/agent/hearth-agent\" | sha256sum --check -\n",
+            "",
+        );
+        assert!(!approved_build_violations(&gone).is_empty());
+        let other_sum = damaged(
+            "          AGENT_SHA256: ${{ needs.build-agent.outputs.sha256 }}\n        run:",
+            "          AGENT_SHA256: ${{ needs.build-client.outputs.sha256 }}\n        run:",
+        );
+        assert!(!approved_build_violations(&other_sum).is_empty());
+        // Vérification déplacée après la signature du client.
+        let text = read();
+        let start = text
+            .find("      # Ce qui est signé est ce que le propriétaire a relu")
+            .unwrap();
+        let end = text[start..]
+            .find("      - name: Signer le client")
+            .unwrap()
+            + start;
+        let block = text[start..end].to_owned();
+        let moved = text.replacen(&block, "", 1).replacen(
+            "      - name: Signer l'agent\n",
+            &format!("{block}      - name: Signer l'agent\n"),
+            1,
+        );
+        assert_ne!(moved, text);
+        assert!(!approved_build_violations(&moved).is_empty());
     }
 
     #[test]
