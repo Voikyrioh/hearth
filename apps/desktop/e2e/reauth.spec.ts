@@ -197,7 +197,9 @@ test("page Sécurité : la ligne « Demander mon mot de passe » se lit et se ch
   );
   await line.getByRole("radio", { name: "À chaque action" }).click();
   const open = await ready(page);
-  await expect(open.getByText("Votre mot de passe vous sera demandé à chaque action")).toBeVisible();
+  await expect(
+    open.getByText("Votre mot de passe vous sera demandé à chaque action"),
+  ).toBeVisible();
   // Rien n'est parti avant la confirmation ; un réglage est un acte : toujours confirmé.
   expect((await calls(page)).filter((call) => call.startsWith("reauth setting"))).toHaveLength(0);
   await open.getByLabel("Votre mot de passe").fill(OWN);

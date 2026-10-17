@@ -208,8 +208,9 @@ const deciding = computed(() =>
     ? null
     : (running.value.find((tracked) => tracked.operation.id === decidingId.value) ?? null),
 );
+// Fermée aussi quand l'opération n'attend plus de réponse (un autre compte a répondu).
 watch(deciding, (tracked) => {
-  if (tracked === null) decidingId.value = null;
+  if (tracked === null || tracked.operation.decision === null) decidingId.value = null;
 });
 function decide(tracked: TrackedOperation) {
   decidingId.value = tracked.operation.id;
