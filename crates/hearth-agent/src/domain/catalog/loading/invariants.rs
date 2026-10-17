@@ -1304,7 +1304,8 @@ fn check_resources(file: &FicheFile) -> Result<(), FicheRefusee> {
 fn check_memory_tiers(file: &FicheFile) -> Result<(), FicheRefusee> {
     let f = Fichier::Fiche;
     let r = &file.resources;
-    hidden_ids(file).map_err(|e| tier_list_refused(|_| "resources.tiers.hidden".to_string(), e))?;
+    hidden_ids(file)
+        .map_err(|e| tier_list_refused(|i| format!("resources.tiers.hidden[{i}]"), e))?;
     let ids = declared_ids(file)
         .map_err(|e| tier_list_refused(|i| format!("resources.memory_tier[{i}]"), e))?;
     let mut declared: Vec<(TierId, usize, &MemoryTier)> = Vec::new();

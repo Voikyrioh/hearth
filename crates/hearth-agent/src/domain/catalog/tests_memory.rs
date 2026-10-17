@@ -225,6 +225,11 @@ fn hidden_lists_the_six_identifiers_only_once_each() {
         .motif,
         Motif::CranEnDouble { id: "ultra".into() }
     );
+    let twice = refused(&with_memory(
+        &mem,
+        "[resources.tiers]\nhidden = [\"ultra\", \"ultra\"]\n",
+    ));
+    assert_eq!(twice.chemin, "resources.tiers.hidden[1]");
 }
 
 // ---- Règle de publication (BR-RES-038) -------------------------------------------------------------------------
