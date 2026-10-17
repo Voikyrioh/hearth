@@ -138,10 +138,6 @@ enum AttemptKind {
 /// Trames consécutives traitées avant de rendre la main au reste de la boucle.
 const FRAME_BUDGET: u32 = 32;
 
-/// Nouveaux essais de relecture des opérations de service après un retour du lien, espacés de 3, 5 puis 7 fois
-/// `ops_resync_delay` (HRT-84, BR-RESIL-010).
-const OPS_RESYNC_RETRIES: u8 = 3;
-
 /// Ce qui a réveillé la boucle.
 enum WakeUp {
     Frame(Result<Frame, TransportError>),
@@ -1029,7 +1025,7 @@ impl Runner {
     /// ont fini (ou disparu) pendant la coupure : on les relit après un court délai (BR-RESIL-010).
     fn schedule_ops_resync(&mut self) {
         self.ops.link_restored();
-        self.ops_retries_left = OPS_RESYNC_RETRIES;
+        self.ops_retries_left = crate::domain::service_op_tracker::RESYNC_RETRIES;
         if self.ops.unconfirmed().is_empty() {
             return;
         }
@@ -1048,12 +1044,17 @@ impl Runner {
     /// « en cours » (et son service verrouillé à l'écran) jusqu'à la prochaine coupure. Quelques essais
     /// espacés, puis on attend le prochain retour du lien.
     fn retry_ops_resync(&mut self) {
-        if self.stream.is_none() || self.ops_retries_left == 0 {
+        if self.stream.is_none() {
             return;
         }
+        let base = self.deps.config.ops_resync_delay;
+        let Some(delay) =
+            crate::domain::service_op_tracker::resync_retry_delay(base, self.ops_retries_left)
+        else {
+            return;
+        };
         self.ops_retries_left -= 1;
-        let attempt = u32::from(OPS_RESYNC_RETRIES - self.ops_retries_left);
-        self.delay_ops_resync(self.deps.config.ops_resync_delay * (1 + 2 * attempt));
+        self.delay_ops_resync(delay);
     }
 
     fn resync_ops(&mut self) {

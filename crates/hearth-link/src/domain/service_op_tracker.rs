@@ -13,11 +13,25 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 
 use hearth_proto::api::service_ops::{OperationStatus, OperationView};
 
 /// Combien d'issues déjà annoncées on retient pour ne pas les annoncer deux fois.
 const FINISHED_MEMORY: usize = 256;
+
+/// Nouveaux essais de relecture, après un retour du lien, quand la lecture n'a pas eu de réponse utilisable.
+pub const RESYNC_RETRIES: u8 = 3;
+
+/// Le délai avant le prochain essai de relecture, ou `None` s'il n'en reste plus (`retries_left` : les essais
+/// restants avant celui-ci). Espacés de 3, 5 puis 7 fois `base` ; ensuite, le prochain retour du lien.
+pub fn resync_retry_delay(base: Duration, retries_left: u8) -> Option<Duration> {
+    if retries_left == 0 {
+        return None;
+    }
+    let attempt = u32::from(RESYNC_RETRIES.saturating_sub(retries_left)) + 1;
+    Some(base * (1 + 2 * attempt))
+}
 
 /// Le statut est-il définitif ? `needs_attention` ne l'est pas : l'agent la garde et attend une décision.
 pub fn is_finished(status: OperationStatus) -> bool {
@@ -225,6 +239,24 @@ mod tests {
         assert!(tracker.forget("A"));
         assert!(!tracker.forget("A"));
         assert!(tracker.unconfirmed().is_empty());
+    }
+
+    #[test]
+    fn the_resync_retries_are_spaced_then_stop() {
+        let base = Duration::from_secs(2);
+        let delays: Vec<_> = (0..=RESYNC_RETRIES)
+            .rev()
+            .map(|left| resync_retry_delay(base, left))
+            .collect();
+        assert_eq!(
+            delays,
+            [
+                Some(Duration::from_secs(6)),
+                Some(Duration::from_secs(10)),
+                Some(Duration::from_secs(14)),
+                None,
+            ]
+        );
     }
 
     #[test]
