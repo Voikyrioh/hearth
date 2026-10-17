@@ -1,0 +1,349 @@
+name: Publier une version
+
+# Publication d'une version de Hearth : client Windows et agent Linux (HRT-175, conception technique
+# « publier une version » sections 6 et 8, BR-RELEASE-004 à 011, runbook
+# docs/runbooks/publier-une-version-du-client.md).
+#
+# DÉCLENCHÉ À LA MAIN SEULEMENT (Actions, « Run workflow »), depuis `main` : aucun push, aucune PR, aucune
+# étiquette ne le lance (BR-RELEASE-004). Le numéro n'est PAS saisi : il est lu dans le dépôt par
+# `release-preflight` (BR-RELEASE-006).
+#
+# Enchaînement, SANS aucun secret jusqu'à l'approbation du propriétaire (BR-RELEASE-005) :
+#   preflight -> build-client + build-agent -> review -> [approbation de l'environnement `release`] -> publish
+#   -> release-github
+# Seul `publish` déclare l'environnement `release` et reçoit des secrets, chacun dans l'`env:` de SON étape.
+# `release-github` n'a besoin d'aucun secret, seulement du jeton automatique en `contents: write`.
+#
+# Toute la logique est dans `xtask` (testée) : un `run:` appelle `xtask` ou un outil, il ne décide rien.
+# `xtask` est compilé UNE fois dans `preflight` (sans secret) puis transmis : le job à clés n'a ni chaîne
+# Rust ni Node et n'exécute aucun script des dépendances du dépôt. Aucun cache, nulle part (une entrée de
+# construction qui ne vient pas du commit). Les entrées du formulaire ne sont JAMAIS interpolées dans un
+# `run:` : elles passent par `env:`. Tous les extraits viennent de `github.sha`, figé pour l'exécution et
+# ses relances (BR-RELEASE-007).
+#
+# Essai à blanc (`essai` coché, par défaut) : tout est construit, signé et assemblé, `release-upload` liste
+# ce qu'il écrirait et ne touche à rien ; aucun secret du bucket, aucun artefact signé, aucune release
+# GitHub (BR-RELEASE-011). Les clés de signature sont tout de même lues (l'approbation est demandée).
+#
+# Environnement GitHub `release` et secrets à créer par le propriétaire AVANT la première exécution :
+# voir le runbook. Noms attendus (secrets de l'ENVIRONNEMENT, pas du dépôt) :
+#   HEARTH_CLIENT_SIGNING_KEY, HEARTH_CLIENT_SIGNING_KEY_PASSWORD,
+#   HEARTH_AGENT_SIGNING_KEY, HEARTH_AGENT_SIGNING_KEY_PASSWORD,
+#   HEARTH_RELEASES_ACCESS_KEY_ID, HEARTH_RELEASES_SECRET_ACCESS_KEY.
+#
+# `publish-client.yml` reste le chemin connu jusqu'à la première vraie publication par ce flux (HRT-176).
+
+on:
+  workflow_dispatch:
+    inputs:
+      essai:
+        description: "Essai à blanc (rien n'est déposé ni créé)"
+        type: boolean
+        default: true
+      notes:
+        description: "Notes de version (texte brut, affiché tel quel dans le client)"
+        type: string
+        required: true
+
+permissions: {}
+
+# Une seule exécution à la fois, y compris pendant l'attente d'approbation ; jamais d'annulation de celle
+# qui tourne.
+concurrency:
+  group: hearth-publish
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Contrôles préalables
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.preflight.outputs.version }}
+      commit: ${{ steps.preflight.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.95"
+      - name: Compiler xtask
+        run: cargo build -p xtask --locked
+      - name: Contrôles préalables
+        id: preflight
+        env:
+          HEARTH_REF: ${{ github.ref }}
+          HEARTH_SHA: ${{ github.sha }}
+          HEARTH_NOTES: ${{ inputs.notes }}
+          GH_TOKEN: ${{ github.token }}
+        run: target/debug/xtask release-preflight
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hearth-xtask
+          path: target/debug/xtask
+          if-no-files-found: error
+          retention-days: 14
+
+  build-client:
+    name: Construire le client
+    needs: preflight
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    outputs:
+      sha256: ${{ steps.sum.outputs.sha256 }}
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.95"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      # L'arbre doit être le commit avant la construction (refus sinon) ; relevé AVANT `npm ci`.
+      - name: Relevé de l'arbre avant la construction
+        shell: bash
+        run: cargo xtask client-record --begin
+      - name: Installateur NSIS
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          npm ci
+          npm run tauri build
+      - name: Enregistrement de construction de l'installateur
+        shell: bash
+        run: cargo xtask client-record --installer "target/release/bundle/nsis/Hearth_${VERSION}_x64-setup.exe" --version "$VERSION"
+      - name: Somme de l'installateur
+        id: sum
+        shell: bash
+        run: echo "sha256=$(sha256sum "target/release/bundle/nsis/Hearth_${VERSION}_x64-setup.exe" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hearth-client-unsigned
+          path: |
+            target/release/bundle/nsis/Hearth_${{ needs.preflight.outputs.version }}_x64-setup.exe
+            target/release/bundle/nsis/Hearth_${{ needs.preflight.outputs.version }}_x64-setup.exe.build
+          if-no-files-found: error
+          retention-days: 7
+
+  build-agent:
+    name: Construire l'agent
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    outputs:
+      sha256: ${{ steps.sum.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.95"
+      - name: Agent statique (construction de publication, en conteneur)
+        run: cargo xtask agent --release
+      - name: Somme de l'agent
+        id: sum
+        run: echo "sha256=$(sha256sum target/dist/hearth-agent | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hearth-agent-unsigned
+          path: |
+            target/dist/hearth-agent
+            target/dist/hearth-agent.build
+          if-no-files-found: error
+          retention-days: 7
+
+  # Point de relecture : ce job est vert, puis GitHub affiche `publish` « en attente de revue ». C'est ici
+  # que le propriétaire relit les journaux de `build-client` et `build-agent` (dépendances installées,
+  # durée, sommes) AVANT d'approuver : la seule relecture qui retient encore quelque chose.
+  review:
+    name: Approuver la publication
+    needs: [preflight, build-client, build-agent]
+    runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 5
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      COMMIT: ${{ needs.preflight.outputs.commit }}
+      CLIENT_SHA256: ${{ needs.build-client.outputs.sha256 }}
+      AGENT_SHA256: ${{ needs.build-agent.outputs.sha256 }}
+      ESSAI: ${{ inputs.essai }}
+      HEARTH_NOTES: ${{ inputs.notes }}
+    steps:
+      - name: Résumé de la publication
+        run: |
+          {
+            echo "## Publier la version ${VERSION}"
+            echo
+            if [ "$ESSAI" = "true" ]; then
+              echo "Mode : **essai à blanc** (rien n'est déposé, aucune release créée)."
+            else
+              echo "Mode : **publication réelle**."
+            fi
+            echo
+            echo "- Version : \`${VERSION}\`"
+            echo "- Commit : \`${COMMIT}\`"
+            echo "- Installateur du client, SHA-256 : \`${CLIENT_SHA256}\`"
+            echo "- Agent, SHA-256 : \`${AGENT_SHA256}\`"
+            echo
+            echo "Notes de version :"
+            echo
+            printf '%s\n' "$HEARTH_NOTES" | sed 's/^/> /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Approbation::Constructions terminées. En attente de l'approbation du propriétaire."
+
+  publish:
+    name: Signer, assembler et déposer
+    needs: [preflight, build-client, build-agent, review]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      HEARTH_NOTES: ${{ inputs.notes }}
+      # AWS CLI épinglée : version ET somme SHA-256 du zip officiel. Une montée de version est une PR
+      # (relever la somme sur le zip officiel de la nouvelle version).
+      AWS_CLI_VERSION: "2.38.1"
+      AWS_CLI_SHA256: b11ed416d91f4251da363a17706938eeaf0e520745754c104c0c1890dd8363c7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hearth-xtask
+          path: target/debug
+      - name: Outil xtask et garde de la racine
+        run: |
+          chmod +x target/debug/xtask
+          target/debug/xtask ci-root-check
+      - name: Installer l'AWS CLI épinglée
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/awscliv2.zip" \
+            "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWS_CLI_VERSION}.zip"
+          echo "${AWS_CLI_SHA256}  ${RUNNER_TEMP}/awscliv2.zip" | sha256sum --check -
+          unzip -q "$RUNNER_TEMP/awscliv2.zip" -d "$RUNNER_TEMP/awscli"
+          sudo "$RUNNER_TEMP/awscli/aws/install" --update
+          aws --version
+          aws --version | grep -F "aws-cli/${AWS_CLI_VERSION} "
+      # Reprise (BR-RELEASE-009) : en réel, une relance de la même exécution retrouve les fichiers déjà
+      # signés ; à la première tentative l'artefact n'existe pas, et l'échec de ce téléchargement est
+      # attendu.
+      - name: Reprise éventuelle des fichiers signés
+        id: resume
+        if: inputs.essai == false
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hearth-release-signed
+          path: target
+      - name: Récupérer les constructions non signées
+        if: steps.resume.outcome != 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hearth-client-unsigned
+          path: ${{ runner.temp }}/client
+      - name: Récupérer l'agent non signé
+        if: steps.resume.outcome != 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hearth-agent-unsigned
+          path: ${{ runner.temp }}/agent
+      - name: Signer le client
+        if: steps.resume.outcome != 'success'
+        env:
+          HEARTH_CLIENT_SIGNING_KEY: ${{ secrets.HEARTH_CLIENT_SIGNING_KEY }}
+          HEARTH_CLIENT_SIGNING_KEY_PASSWORD: ${{ secrets.HEARTH_CLIENT_SIGNING_KEY_PASSWORD }}
+        run: target/debug/xtask client-sign --installer "$RUNNER_TEMP/client/Hearth_${VERSION}_x64-setup.exe" --version "$VERSION"
+      - name: Signer l'agent
+        if: steps.resume.outcome != 'success'
+        env:
+          HEARTH_AGENT_SIGNING_KEY: ${{ secrets.HEARTH_AGENT_SIGNING_KEY }}
+          HEARTH_AGENT_SIGNING_KEY_PASSWORD: ${{ secrets.HEARTH_AGENT_SIGNING_KEY_PASSWORD }}
+        run: target/debug/xtask agent-sign --binary "$RUNNER_TEMP/agent/hearth-agent" --version "$VERSION" --out "$RUNNER_TEMP/agent/hearth-agent.minisig"
+      - name: Manifeste et assemblage
+        if: steps.resume.outcome != 'success'
+        run: |
+          target/debug/xtask client-manifest \
+            --version "$VERSION" \
+            --installer-file "$RUNNER_TEMP/client/Hearth_${VERSION}_x64-setup.exe" \
+            --signature-file "$RUNNER_TEMP/client/Hearth_${VERSION}_x64-setup.exe.sig" \
+            --url "https://hearth.voikyrioh.fr/api/releases/${VERSION}/Hearth_${VERSION}_x64-setup.exe" \
+            --out "$RUNNER_TEMP/client/latest.json"
+          target/debug/xtask release-stage \
+            --client-dir "$RUNNER_TEMP/client" \
+            --agent-binary "$RUNNER_TEMP/agent/hearth-agent" \
+            --agent-signature "$RUNNER_TEMP/agent/hearth-agent.minisig"
+          cp "$RUNNER_TEMP/client/notes.txt" target/release-notes.txt
+      # Réel seulement : c'est le point où les fichiers signés quittent la machine (artefact de 14 jours,
+      # fenêtre de reprise). Le contenu est posé dans un dossier à part pour que l'artefact se restaure
+      # tel quel sous `target/`.
+      - name: Garder les fichiers signés
+        if: inputs.essai == false && steps.resume.outcome != 'success'
+        run: |
+          mkdir -p "$RUNNER_TEMP/signed"
+          cp -R target/release-stage "$RUNNER_TEMP/signed/release-stage"
+          cp target/release-notes.txt "$RUNNER_TEMP/signed/release-notes.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: inputs.essai == false && steps.resume.outcome != 'success'
+        with:
+          name: hearth-release-signed
+          path: ${{ runner.temp }}/signed
+          if-no-files-found: error
+          retention-days: 14
+      - name: Essai à blanc du dépôt (rien n'est écrit)
+        if: inputs.essai == true
+        run: target/debug/xtask release-upload
+      - name: Déposer au bucket
+        if: inputs.essai == false
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.HEARTH_RELEASES_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.HEARTH_RELEASES_SECRET_ACCESS_KEY }}
+        run: target/debug/xtask release-upload --confirm
+
+  release-github:
+    name: Étiqueter et créer la release
+    needs: [preflight, publish]
+    if: inputs.essai == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hearth-xtask
+          path: target/debug
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hearth-release-signed
+          path: target
+      - name: Étiquette et release GitHub
+        env:
+          HEARTH_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x target/debug/xtask
+          target/debug/xtask release-github --stage-dir target/release-stage --notes-file target/release-notes.txt
