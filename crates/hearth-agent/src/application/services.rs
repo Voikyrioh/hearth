@@ -327,8 +327,9 @@ struct Inner {
     /// Les arrêts demandés depuis Hearth et non encore défaits (HRT-64, `service_intents`) : la clé et le
     /// moment de la demande. Un service arrêté avec un code non nul n'est pas « En erreur ».
     stop_intents: HashMap<ServiceKey, OffsetDateTime>,
-    /// Arrêts voulus à effacer de la base : le service est revu en marche depuis, ou n'existe plus.
-    intents_to_clear: HashSet<ServiceKey>,
+    /// Arrêts voulus à effacer de la base (la clé et la date de LA demande défaite) : le service est revu en
+    /// marche depuis, ou n'existe plus. La date garde d'effacer un arrêt redemandé entre-temps.
+    intents_to_clear: HashMap<ServiceKey, OffsetDateTime>,
     /// Ce que Hearth fait aux services en ce moment (HRT-64) : « Arrêt en cours », « Démarrage ».
     transitions: HashMap<ServiceKey, Transition>,
 }
@@ -617,7 +618,7 @@ impl ServicesRegistry {
                 last_exit: HashMap::new(),
                 last_unit_poll: None,
                 stop_intents: HashMap::new(),
-                intents_to_clear: HashSet::new(),
+                intents_to_clear: HashMap::new(),
                 transitions: HashMap::new(),
             }),
             clock,
@@ -1315,8 +1316,9 @@ impl ServicesRegistry {
             .cloned()
             .collect();
         for key in gone {
-            inner.stop_intents.remove(&key);
-            inner.intents_to_clear.insert(key);
+            if let Some(asked_at) = inner.stop_intents.remove(&key) {
+                inner.intents_to_clear.insert(key, asked_at);
+            }
         }
     }
 
@@ -1335,7 +1337,7 @@ impl ServicesRegistry {
                 && running_since.is_some_and(|since| since > asked_at)
             {
                 inner.stop_intents.remove(key);
-                inner.intents_to_clear.insert(key.clone());
+                inner.intents_to_clear.insert(key.clone(), asked_at);
             } else {
                 derived = honour_stop_request(derived);
             }
@@ -1657,16 +1659,25 @@ impl ServicesRegistry {
     }
 
     /// Efface de la base les arrêts voulus que le registre a défaits seul (service revu en marche, ou
-    /// disparu). Une clé dont l'effacement échoue reste en file.
+    /// disparu). Seule la demande défaite est effacée (`clear_if`) : un arrêt redemandé pendant l'écriture,
+    /// verrou relâché, reste en base. Une clé dont l'effacement échoue reste en file.
     async fn flush_intent_clears(&self) {
         let Some(intents) = self.intents.get() else {
             return;
         };
-        let keys: Vec<ServiceKey> = self.lock().intents_to_clear.iter().cloned().collect();
-        for key in keys {
-            match intents.clear(&key).await {
+        let pending: Vec<(ServiceKey, OffsetDateTime)> = self
+            .lock()
+            .intents_to_clear
+            .iter()
+            .map(|(key, at)| (key.clone(), *at))
+            .collect();
+        for (key, at) in pending {
+            match intents.clear_if(&key, at).await {
                 Ok(()) => {
-                    self.lock().intents_to_clear.remove(&key);
+                    let mut inner = self.lock();
+                    if inner.intents_to_clear.get(&key) == Some(&at) {
+                        inner.intents_to_clear.remove(&key);
+                    }
                 }
                 Err(error) => tracing::warn!(%error, "arrêt voulu non effacé"),
             }
@@ -2602,7 +2613,7 @@ mod tests {
         registry.refresh(vec![id.clone()]).await.expect("refresh");
         assert_eq!(state_of(&registry, &key), ServiceStateKind::Running);
         assert!(registry.lock().stop_intents.is_empty());
-        assert!(registry.lock().intents_to_clear.contains(&key));
+        assert!(registry.lock().intents_to_clear.contains_key(&key));
         engine.update(&id, |web| {
             web.run_state = RunState::Exited;
             web.exit_code = Some(1);
@@ -2631,7 +2642,7 @@ mod tests {
         engine.remove(&id);
         registry.refresh(vec![id]).await.expect("refresh");
         assert!(registry.lock().stop_intents.is_empty());
-        assert!(registry.lock().intents_to_clear.contains(&key));
+        assert!(registry.lock().intents_to_clear.contains_key(&key));
     }
 
     #[tokio::test]

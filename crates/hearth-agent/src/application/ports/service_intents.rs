@@ -31,4 +31,9 @@ pub trait ServiceIntents: Send + Sync {
 
     /// Oublie l'arrêt voulu d'un service : Hearth l'a démarré, ou il est revu en marche, ou il n'existe plus.
     async fn clear(&self, key: &ServiceKey) -> Result<(), StoreError>;
+
+    /// Oublie l'arrêt voulu de CETTE demande (`at`), jamais un arrêt redemandé depuis : le registre efface
+    /// ce qu'il a défait seul sans tenir de verrou pendant l'écriture, un nouvel arrêt peut avoir été écrit
+    /// entre-temps (HRT-64).
+    async fn clear_if(&self, key: &ServiceKey, at: OffsetDateTime) -> Result<(), StoreError>;
 }

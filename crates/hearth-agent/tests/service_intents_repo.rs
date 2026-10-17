@@ -85,6 +85,27 @@ async fn clearing_forgets_one_service_and_only_that_one() {
 }
 
 #[tokio::test]
+async fn clearing_a_given_request_never_forgets_a_stop_asked_again_since() {
+    let dir = tmp::tempdir().unwrap();
+    let database = Database::open(dir.path()).await.unwrap();
+    let repo = SqliteServiceRepo::new(database.pool().clone());
+    let key = ServiceKey::parse("c_aaa1").unwrap();
+    // Le registre a défait l'arrêt de la minute 1 ; un nouvel arrêt est écrit (minute 3) avant qu'il efface.
+    repo.save(&intent("c_aaa1", "aaa1", "marie", 3))
+        .await
+        .unwrap();
+    repo.clear_if(&key, at(1)).await.unwrap();
+    assert_eq!(
+        repo.load().await.unwrap(),
+        vec![intent("c_aaa1", "aaa1", "marie", 3)]
+    );
+    // La demande elle-même s'efface, relue après un redémarrage comprise.
+    let reloaded = repo.load().await.unwrap().remove(0);
+    repo.clear_if(&key, reloaded.at).await.unwrap();
+    assert!(repo.load().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn an_unreadable_line_is_skipped_and_never_fatal() {
     let dir = tmp::tempdir().unwrap();
     let database = Database::open(dir.path()).await.unwrap();

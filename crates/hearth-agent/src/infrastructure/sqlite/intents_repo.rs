@@ -4,6 +4,7 @@
 
 use async_trait::async_trait;
 use sqlx::Row;
+use time::OffsetDateTime;
 
 use super::convert::{format_date, parse_date, storage};
 use super::services_repo::SqliteServiceRepo;
@@ -64,6 +65,18 @@ impl ServiceIntents for SqliteServiceRepo {
     async fn clear(&self, key: &ServiceKey) -> Result<(), StoreError> {
         sqlx::query("DELETE FROM service_intents WHERE service_key = ?")
             .bind(key.as_str())
+            .execute(self.pool())
+            .await
+            .map_err(storage(RESOURCE))?;
+        Ok(())
+    }
+
+    async fn clear_if(&self, key: &ServiceKey, at: OffsetDateTime) -> Result<(), StoreError> {
+        // La date est écrite et relue par le même format : l'égalité de texte est celle des instants.
+        let at = format_date(RESOURCE, at)?;
+        sqlx::query("DELETE FROM service_intents WHERE service_key = ? AND at = ?")
+            .bind(key.as_str())
+            .bind(at)
             .execute(self.pool())
             .await
             .map_err(storage(RESOURCE))?;
