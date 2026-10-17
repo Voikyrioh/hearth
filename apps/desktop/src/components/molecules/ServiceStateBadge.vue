@@ -7,7 +7,7 @@ import type { ServiceState } from "@/link";
 import { STATE_KEYS } from "@/services/format";
 
 // L'état d'un service : un pictogramme ET un mot, jamais la couleur seule (BR-SVC-004). La seule source
-// d'icône et de ton d'un état. Les états de transition (Démarrage, Arrêt en cours, Déploiement en cours)
+// d'icône et de ton d'un état. Les états de transition (Démarrage, Arrêt en cours, Déploiement en cours, Modification en cours)
 // montrent l'arc d'attente, qui reste visible quand le mouvement est réduit.
 const props = defineProps<{ state: ServiceState }>();
 
@@ -20,6 +20,7 @@ const ICONS: Record<ServiceState, IconName | "spinner"> = {
   restart_loop: "loop",
   paused: "pause",
   deploying: "spinner",
+  updating: "spinner",
   unknown: "question",
 };
 
@@ -67,7 +68,8 @@ const icon = computed(() => ICONS[props.state]);
 
 .badge--starting .badge__icon,
 .badge--stopping .badge__icon,
-.badge--deploying .badge__icon {
+.badge--deploying .badge__icon,
+.badge--updating .badge__icon {
   color: var(--ac);
 }
 </style>

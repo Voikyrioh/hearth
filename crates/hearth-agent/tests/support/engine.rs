@@ -9,6 +9,7 @@ use super::fake_engine::FakeEngine;
 use super::fake_supervisor::FakeSupervisor;
 use hearth_agent::app::EngineParts;
 use hearth_agent::application::ports::{HostDescription, HostEnvironment};
+use hearth_agent::application::service_lifecycle::LifecycleTimings;
 use hearth_agent::application::services::EngineTimings;
 
 pub struct TestHost;
@@ -59,5 +60,18 @@ pub fn parts_supervised(
         timings,
         // Les tests qui ne portent pas sur le plafond par compte ni sur le frein les détendent.
         log_brake: hearth_agent::domain::services::BrakeSettings::relaxed(),
+        lifecycle: fast_lifecycle(),
+    }
+}
+
+/// Des surveillances courtes après une action (HRT-64) : 10 s et 30 s deviennent 300 ms et 600 ms.
+pub fn fast_lifecycle() -> LifecycleTimings {
+    LifecycleTimings {
+        startup_watch: Duration::from_millis(300),
+        restart_watch: Duration::from_millis(600),
+        poll: Duration::from_millis(20),
+        exemption_margin: Duration::from_secs(2),
+        wait_margin: Duration::from_secs(1),
+        wait_floor: Duration::from_secs(1),
     }
 }

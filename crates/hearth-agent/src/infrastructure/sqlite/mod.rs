@@ -11,6 +11,7 @@ mod attack_mode_repo;
 mod audit_repo;
 mod convert;
 mod device_repo;
+mod intents_repo;
 mod known_address_repo;
 mod login_attempt_repo;
 mod operation_repo;

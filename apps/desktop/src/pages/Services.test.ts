@@ -121,7 +121,7 @@ const ENGINE_CASES: {
     name: "arrêté",
     engine: { state: "stopped" },
     title: "Moteur arrêté",
-    text: "Le moteur de conteneurs est installé mais arrêté. S'il vient de démarrer, attends quelques secondes.",
+    text: "Le moteur de conteneurs est installé mais arrêté. S'il vient de démarrer, attendez quelques secondes.",
     command: "sudo systemctl enable --now docker",
     readonlyNote: true,
   },
@@ -171,7 +171,7 @@ describe.each(ENGINE_CASES)("moteur $name", ({ engine, title, text, command, rea
     expect(wrapper.find("[data-readonly-note]").exists()).toBe(readonlyNote);
     if (readonlyNote) {
       expect(wrapper.get("[data-readonly-note]").text()).toBe(
-        "Demande à un administrateur de ce serveur de régler cela.",
+        "Demandez à un administrateur de ce serveur de régler cela.",
       );
     }
     // « Vérifier à nouveau » est une lecture : elle reste proposée.
@@ -192,7 +192,7 @@ describe("aide propre à la distribution (BR-ENGINE-005, 007, 017)", () => {
     expect(wrapper.get("pre").text()).toBe("virtualisation.docker.enable = true;");
     expect(wrapper.text()).toContain("À ajouter sur le serveur, pas dans Hearth");
     expect(wrapper.text()).toContain("Copier le texte");
-    expect(wrapper.text()).toContain("Ajouter le moteur à la configuration de ton serveur");
+    expect(wrapper.text()).toContain("Ajouter le moteur à la configuration de votre serveur");
     expect(wrapper.text()).toContain("Ce serveur est configuré de façon déclarative");
     expect(wrapper.get("pre").text()).not.toMatch(/sudo|apt|dnf|pacman/);
     expect(wrapper.text()).toContain("Distribution détectée : nixos");
@@ -210,7 +210,7 @@ describe("aide propre à la distribution (BR-ENGINE-005, 007, 017)", () => {
     );
     expect(wrapper.get("pre").text()).toContain(command);
     expect(wrapper.text()).toContain(`Distribution détectée : ${osId}`);
-    expect(wrapper.text()).toContain("Installer le moteur sur ton serveur");
+    expect(wrapper.text()).toContain("Installer le moteur sur votre serveur");
     wrapper.unmount();
   });
 
@@ -219,7 +219,7 @@ describe("aide propre à la distribution (BR-ENGINE-005, 007, 017)", () => {
       sim.services.seed("forge", [], { state: "absent", name: null, host: { osId: "gentoo" } }),
     );
     expect(wrapper.text()).toContain(
-      "Hearth ne reconnaît pas la distribution de ce serveur. Suis la documentation officielle de Docker pour ton système.",
+      "Hearth ne reconnaît pas la distribution de ce serveur. Suivez la documentation officielle de Docker pour votre système.",
     );
     NO_COMMAND(wrapper);
     expect(wrapper.text()).not.toContain("Distribution détectée");
@@ -246,7 +246,7 @@ describe("aide propre à la distribution (BR-ENGINE-005, 007, 017)", () => {
     await wrapper.get("[data-copy]").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain(
-      "Impossible de copier. Sélectionne la commande et copie-la à la main.",
+      "Impossible de copier. Sélectionnez la commande et copiez-la à la main.",
     );
     vi.unstubAllGlobals();
     wrapper.unmount();
@@ -261,7 +261,7 @@ describe("aide propre à la distribution (BR-ENGINE-005, 007, 017)", () => {
       }),
     );
     expect(wrapper.text()).toContain(
-      "qui a déjà tous les droits du serveur : ce refus vient d'un réglage de sécurité du serveur ou du moteur, que Hearth ne peut pas corriger. Vérifie la configuration de sécurité du moteur sur le serveur.",
+      "qui a déjà tous les droits du serveur : ce refus vient d'un réglage de sécurité du serveur ou du moteur, que Hearth ne peut pas corriger. Vérifiez la configuration de sécurité du moteur sur le serveur.",
     );
     NO_COMMAND(wrapper);
     expect(wrapper.text()).not.toContain("Copier");

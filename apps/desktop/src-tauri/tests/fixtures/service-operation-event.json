@@ -1,0 +1,56 @@
+{
+  "running": {
+    "serverId": "forge",
+    "seq": 1,
+    "change": {
+      "kind": "upsert",
+      "operation": {
+        "id": "01J9ZY0G3Q8M2K6W4T7V5N1B9D",
+        "key": "h_01J9ZY0G3Q8M2K6W4T7V5N1B9E",
+        "kind": "deploy",
+        "status": "running",
+        "step": "pull",
+        "steps": [
+          { "step": "check", "state": "done" },
+          { "step": "pull", "state": "intent" }
+        ],
+        "percent": 40,
+        "itemsDone": 3.0,
+        "bytesDone": 400.0,
+        "bytesTotal": 1000.0,
+        "etaS": 12.0,
+        "cancellable": true,
+        "decision": null,
+        "cause": null
+      }
+    }
+  },
+  "awaiting": {
+    "serverId": "forge",
+    "seq": 2,
+    "change": {
+      "kind": "upsert",
+      "operation": {
+        "id": "01J9ZY0G3Q8M2K6W4T7V5N1B9F",
+        "key": "h_01J9ZY0G3Q8M2K6W4T7V5N1B9G",
+        "kind": "update",
+        "status": "awaiting_decision",
+        "step": null,
+        "steps": [],
+        "percent": null,
+        "itemsDone": null,
+        "bytesDone": null,
+        "bytesTotal": null,
+        "etaS": null,
+        "cancellable": false,
+        "decision": { "choices": ["revert", "keep"], "expiresAt": 1791972900000.0 },
+        "cause": "decided_by_account"
+      }
+    }
+  },
+  "gone": {
+    "serverId": "forge",
+    "seq": 3,
+    "change": { "kind": "gone", "id": "01J9ZY0G3Q8M2K6W4T7V5N1B9D" }
+  }
+}

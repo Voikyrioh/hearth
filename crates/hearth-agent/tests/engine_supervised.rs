@@ -31,6 +31,11 @@
 //! `TimeoutStopSec=20`, comme un serveur de jeu. Toutes les attentes sont bornées (60 s, 30 s) et
 //! annoncées dans leurs messages ; l'étape CI porte son propre `timeout-minutes`.
 //!
+//! Un second test (HRT-64, ADR-0037) éprouve les TROIS ORDRES du port `ServiceSupervisor` sur l'unité d'un
+//! fichier qui se relance toujours (`Restart=always`), comme celles de NixOS : arrêter par le superviseur
+//! TIENT (l'unité ne repart pas seule, contrairement à un arrêt par l'API du moteur), démarrer recrée le
+//! conteneur, redémarrer le remplace. Les durées sont consignées.
+//!
 //! Ce test n'a JAMAIS été exécuté sur le poste de développement : il ne l'est qu'en CI. Il compile
 //! partout (aucune API propre à Linux) mais ne s'exécute que sous Linux.
 
@@ -79,6 +84,11 @@ const FILE_CONTAINER: &str = "hearth-e2e-file";
 const FILE_KEY: &str = "u_hearth-e2e-file.service";
 const FILE_UNIT_PATH: &str = "/run/systemd/system/hearth-e2e-file.service";
 
+/// L'unité du second test (les trois ordres du superviseur), écrite dans un fichier.
+const DRIVE_UNIT: &str = "hearth-e2e-drive.service";
+const DRIVE_CONTAINER: &str = "hearth-e2e-drive";
+const DRIVE_UNIT_PATH: &str = "/run/systemd/system/hearth-e2e-drive.service";
+
 fn enabled() -> bool {
     std::env::var("HEARTH_TEST_SUPERVISED").as_deref() == Ok("1")
 }
@@ -116,13 +126,17 @@ struct Cleanup;
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
-        for unit in [UNIT, FILE_UNIT] {
+        for unit in [UNIT, FILE_UNIT, DRIVE_UNIT] {
             let _ = run("systemctl", &["stop", unit]);
             let _ = run("systemctl", &["reset-failed", unit]);
         }
         let _ = std::fs::remove_file(FILE_UNIT_PATH);
+        let _ = std::fs::remove_file(DRIVE_UNIT_PATH);
         let _ = run("systemctl", &["daemon-reload"]);
-        let _ = run("docker", &["rm", "-f", CONTAINER, FILE_CONTAINER]);
+        let _ = run(
+            "docker",
+            &["rm", "-f", CONTAINER, FILE_CONTAINER, DRIVE_CONTAINER],
+        );
     }
 }
 
@@ -636,4 +650,167 @@ async fn stop_by_supervisor(
         container_after: container_id_of(container),
         settled: reached,
     }
+}
+
+/// Les dates de sortie d'« active » et d'arrivée à « inactive » d'une unité, en clair (diagnostic d'échec).
+fn stop_times(unit: &str) -> String {
+    std::process::Command::new("systemctl")
+        .args([
+            "show",
+            "--property=ActiveState,SubState,ActiveExitTimestampMonotonic,InactiveEnterTimestampMonotonic",
+            "--",
+            unit,
+        ])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// Les trois ordres du port `ServiceSupervisor` contre un vrai systemd et un vrai moteur (HRT-64, BR-LIFE-002,
+/// BR-LIFE-009, BR-LIFE-012). L'unité se relance toujours : un arrêt par le superviseur doit pourtant TENIR.
+#[tokio::test]
+#[ignore = "vrai moteur et vrai systemd, root : HEARTH_TEST_SUPERVISED=1 (étape `supervised` du job `engine`)"]
+async fn the_supervisor_stops_starts_and_restarts_a_unit_and_the_stop_holds() {
+    if !enabled() {
+        eprintln!("HEARTH_TEST_SUPERVISED=1 n'est pas posé : test non exécuté");
+        return;
+    }
+    assert!(is_root(), "l'étape `supervised` s'exécute en root");
+    assert!(
+        std::path::Path::new("/run/systemd/system").is_dir(),
+        "l'étape `supervised` demande un système avec systemd"
+    );
+    drop(Cleanup);
+    let _cleanup = Cleanup;
+    image_pull::ensure(IMAGE);
+
+    std::fs::write(
+        DRIVE_UNIT_PATH,
+        format!(
+            "[Service]
+Restart=always
+RestartSec=3
+TimeoutStopSec={STOP_TIMEOUT_S}
+ExecStartPre=-/usr/bin/env docker rm -f {DRIVE_CONTAINER}
+ExecStart=/usr/bin/env docker run --rm --name {DRIVE_CONTAINER} {IMAGE} sh -c '{CONTAINER_SCRIPT}'
+"
+        ),
+    )
+    .expect("unité écrite dans /run/systemd/system");
+    must("systemctl", &["daemon-reload"]);
+    must("systemctl", &["start", "--no-block", DRIVE_UNIT]);
+    let running = || {
+        run(
+            "docker",
+            &["inspect", "--format", "{{.State.Running}}", DRIVE_CONTAINER],
+        )
+        .as_deref()
+            == Some("true")
+    };
+    eventually(
+        "le conteneur de l'unité tourne",
+        Duration::from_secs(60),
+        running,
+    )
+    .await;
+    let first_id = container_id_of(DRIVE_CONTAINER);
+    let unit = UnitName::parse(DRIVE_UNIT).unwrap();
+    let supervisor = ProcSystemd::system();
+    let wait = Duration::from_secs(u64::from(STOP_TIMEOUT_S) + 30);
+
+    // Arrêter : l'ordre rend la main quand l'unité est arrêtée, dans son délai, et l'arrêt TIENT bien que
+    // l'unité se relance toujours (un arrêt explicite n'est jamais défait par `Restart=always`).
+    let began = Instant::now();
+    let stopped = supervisor.stop(&unit, wait).await;
+    let stop_took = began.elapsed();
+    assert_eq!(stopped, Ok(()), "arrêter l'unité");
+    assert!(
+        stop_took < Duration::from_secs(u64::from(STOP_TIMEOUT_S) + 5),
+        "l'arrêt est borné par le délai de l'unité : {stop_took:?}"
+    );
+    let UnitLookup::Loaded(after_stop) = supervisor.unit(&unit).await else {
+        panic!("l'unité d'un fichier, arrêtée, reste chargée");
+    };
+    // La durée de l'arrêt que le système a datée lui-même (BR-LIFE-009) : lue, et pas plus longue que l'attente.
+    let measured_stop = supervisor.last_stop_duration(&unit).await;
+    let raw_after_stop = stop_times(DRIVE_UNIT);
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let UnitLookup::Loaded(later) = supervisor.unit(&unit).await else {
+        panic!("l'unité reste chargée");
+    };
+    let held =
+        later.activity == UnitActivity::Inactive && container_id_of(DRIVE_CONTAINER).is_empty();
+
+    // Démarrer : le système recrée le conteneur, d'un identifiant neuf.
+    let began = Instant::now();
+    let started = supervisor.start(&unit, wait).await;
+    let start_took = began.elapsed();
+    eventually("le conteneur est recréé", Duration::from_secs(60), running).await;
+    let second_id = container_id_of(DRIVE_CONTAINER);
+
+    // Redémarrer : d'un seul ordre, le conteneur est remplacé.
+    let began = Instant::now();
+    let restarted = supervisor.restart(&unit, wait).await;
+    let restart_took = began.elapsed();
+    let measured_restart_stop = supervisor.last_stop_duration(&unit).await;
+    eventually(
+        "le conteneur est remplacé",
+        Duration::from_secs(60),
+        || running() && container_id_of(DRIVE_CONTAINER) != second_id,
+    )
+    .await;
+    let third_id = container_id_of(DRIVE_CONTAINER);
+    let UnitLookup::Loaded(after_restart) = supervisor.unit(&unit).await else {
+        panic!("l'unité reste chargée");
+    };
+
+    record(
+        "Service supervisé : arrêter, démarrer, redémarrer par le superviseur",
+        &[
+            format!(
+                "arrêt : {stopped:?} en {} ms ; unité {:?} juste après ; encore {:?} six secondes plus tard (l'unité se relance toujours, `RestartSec=3`)",
+                stop_took.as_millis(),
+                after_stop.activity,
+                later.activity
+            ),
+            format!("l'arrêt tient (unité arrêtée, aucun conteneur) : {held}"),
+            format!(
+                "démarrage : {started:?} en {} ms ; nouveau conteneur {} (différent du premier : {})",
+                start_took.as_millis(),
+                &second_id[..12.min(second_id.len())],
+                second_id != first_id
+            ),
+            format!(
+                "redémarrage : {restarted:?} en {} ms ; conteneur remplacé ({} puis {}) ; unité {:?}",
+                restart_took.as_millis(),
+                &second_id[..12.min(second_id.len())],
+                &third_id[..12.min(third_id.len())],
+                after_restart.activity
+            ),
+            format!(
+                "durée d'arrêt datée par le système : arrêt {measured_stop:?} (unité déchargée à l'arrêt : aucune), redémarrage {measured_restart_stop:?}"
+            ),
+        ],
+    );
+    assert_eq!(after_stop.activity, UnitActivity::Inactive);
+    assert!(held, "un arrêt par le superviseur doit tenir");
+    assert_eq!(started, Ok(()));
+    assert_ne!(second_id, first_id);
+    assert_eq!(restarted, Ok(()));
+    assert_ne!(third_id, second_id);
+    assert_eq!(after_restart.activity, UnitActivity::Active);
+    // Le système date l'arrêt seul, démarrage d'un redémarrage exclu. Une unité arrêtée qu'aucune autre ne
+    // retient (celle du test n'est voulue par aucune cible) est déchargée aussitôt et revient sans dates
+    // (`...Monotonic=0`) : l'agent retombe alors sur sa propre attente. Une unité redémarrée reste chargée : la
+    // durée DOIT être lue.
+    assert!(
+        measured_stop.is_none_or(|took| took <= stop_took),
+        "{measured_stop:?} > {stop_took:?} ; juste après {raw_after_stop:?}"
+    );
+    let measured_restart_stop =
+        measured_restart_stop.expect("durée de l'arrêt du redémarrage lue de systemctl show");
+    assert!(
+        measured_restart_stop <= restart_took,
+        "{measured_restart_stop:?} > {restart_took:?}"
+    );
 }

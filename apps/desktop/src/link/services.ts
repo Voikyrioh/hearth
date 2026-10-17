@@ -124,6 +124,11 @@ export interface ServiceInfo {
    * `command` à `null` y veulent dire « pas lus », JAMAIS « aucune variable » ni « commande de l'image ».
    */
   detailsKnown: boolean;
+  /**
+   * L'action qui tient le service (BR-SVC-031, HRT-84) : son genre (code de l'agent), qui l'a lancée et depuis quand
+   * (ms). `null` : rien ne tient le service, ou ce compte ne peut pas lire ses opérations (jamais deviné).
+   */
+  busy: { kind: string; by: string; since: number | null } | null;
 }
 
 /** Une variable révélée par un compte qui a le droit (BR-SVC-009). Gardée en mémoire le temps de l'affichage, jamais écrite. */
@@ -209,6 +214,9 @@ export function toService(dto: ServiceDto, detailsKnown: boolean): ServiceInfo {
     adopted: dto.adopted ? { by: dto.adopted.by, at: parseDate(dto.adopted.at) } : null,
     detailsReserved: dto.detailsReserved,
     detailsKnown,
+    busy: dto.busy
+      ? { kind: dto.busy.kind, by: dto.busy.by, since: parseDate(dto.busy.since) }
+      : null,
   };
 }
 

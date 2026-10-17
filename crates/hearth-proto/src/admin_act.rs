@@ -98,10 +98,7 @@ impl ActKind {
     /// en la retirant d'ici. Tant qu'un acte est ici, aucune route ne le porte, aucune requête ne peut le
     /// produire, et le test de `ROUTES` le sait. `0x13` (`ServiceUpdate`), `0x15` à `0x18`, `0x1A` et `0x1C`
     /// sont réservés par la conception et ne sont pas encore déclarés.
-    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 8] = [
-        Self::ServiceStart,
-        Self::ServiceStop,
-        Self::ServiceRestart,
+    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 5] = [
         Self::ServiceDeploy,
         Self::ServiceDelete,
         Self::BackupCreate,
@@ -596,6 +593,25 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::ServiceRelease],
         contract: Contract::Reauth,
     },
+    // Démarrer, arrêter, redémarrer un service (HRT-64, BR-LIFE-016) : la clé du service est la cible signée.
+    RouteAct {
+        method: "POST",
+        pattern: "/services/{key}/start",
+        kinds: &[ActKind::ServiceStart],
+        contract: Contract::Reauth,
+    },
+    RouteAct {
+        method: "POST",
+        pattern: "/services/{key}/stop",
+        kinds: &[ActKind::ServiceStop],
+        contract: Contract::Reauth,
+    },
+    RouteAct {
+        method: "POST",
+        pattern: "/services/{key}/restart",
+        kinds: &[ActKind::ServiceRestart],
+        contract: Contract::Reauth,
+    },
     // Le suivi des opérations de service (HRT-144, ADR-0045) : annuler, décider.
     RouteAct {
         method: "DELETE",
@@ -686,14 +702,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-deux actes en 0x05 : quatorze ont leur route (dont deux pour le mode attaque), huit sont
-        // déclarés pour les tranches suivantes ; treize routes d'acte (dont le retrait d'un poste, sous son
+        // Vingt-deux actes en 0x05 : dix-sept ont leur route (dont deux pour le mode attaque), cinq sont
+        // déclarés pour les tranches suivantes ; seize routes d'acte (dont le retrait d'un poste, sous son
         // contrat) en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 14);
-        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 8);
+        assert_eq!(in_routes.len(), 17);
+        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 5);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            13
+            16
         );
     }
 
@@ -951,6 +967,15 @@ mod tests {
         assert_eq!(cancel.kinds, &[ActKind::OperationCancel]);
         let decide = route_act("POST", "/operations/services/{id}/decision").expect("décider");
         assert_eq!(decide.kinds, &[ActKind::OperationDecide]);
+        for (pattern, kind) in [
+            ("/services/{key}/start", ActKind::ServiceStart),
+            ("/services/{key}/stop", ActKind::ServiceStop),
+            ("/services/{key}/restart", ActKind::ServiceRestart),
+        ] {
+            let route = route_act("POST", pattern).expect("route de cycle de vie");
+            assert_eq!(route.kinds, &[kind]);
+            assert_eq!(route.contract, Contract::Reauth);
+        }
         for kind in ActKind::DECLARED_WITHOUT_ROUTE {
             assert!(
                 ROUTES.iter().all(|route| !route.kinds.contains(&kind)),

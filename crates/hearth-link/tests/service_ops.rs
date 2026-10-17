@@ -10,12 +10,15 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use hearth_agent::application::service_ops::AcceptRequest;
-use hearth_agent::domain::ops::{Choice, OpKind, OpPlan, PlannedStep, StepName, UndoInfo};
+use hearth_agent::domain::ops::{
+    Choice, OpKind, OpPlan, OpStatus, PlannedStep, StepName, UndoInfo,
+};
 use hearth_agent::domain::services::ServiceKey;
 use hearth_link::domain::event::Event;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::domain::service_ops::{DecisionReason, OperationRefusal};
+use hearth_link::domain::state::LinkState;
 use hearth_link::ports::EventSink;
 use hearth_link::{LinkError, OperationActResult};
 use hearth_proto::api::service_ops::{OperationChoice, OperationStatus, OperationView};
@@ -40,6 +43,15 @@ impl EventSink for Collector {
 }
 
 impl Collector {
+    fn count(&self, id: &str, status: OperationStatus) -> usize {
+        self.0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|operation| operation.id == id && operation.status == status)
+            .count()
+    }
+
     async fn wait(&self, what: &str, predicate: impl Fn(&OperationView) -> bool) -> OperationView {
         let started = std::time::Instant::now();
         loop {
@@ -269,4 +281,57 @@ async fn without_the_right_the_refusal_names_the_missing_right() {
             .await
             .is_ok()
     );
+}
+
+/// BR-RESIL-010, BR-SVC-029 : après une coupure, l'opération qui court encore est reconstruite sans nouveau
+/// message ; celle qui a fini pendant la coupure annonce son issue UNE fois.
+#[tokio::test]
+async fn after_a_cut_a_running_operation_is_rebuilt_silently_and_a_finished_one_announces_once() {
+    let (world, collector) = world().await;
+    let still_running = running(&world, FIRST).await;
+    let finishing = running(&world, SECOND).await;
+    collector
+        .wait("l'opération qui court", |o| {
+            o.id == still_running && o.status == OperationStatus::Running
+        })
+        .await;
+    collector
+        .wait("l'opération qui finira", |o| {
+            o.id == finishing && o.status == OperationStatus::Running
+        })
+        .await;
+    let before = collector.0.lock().unwrap().len();
+
+    let mark = world.recorder.mark();
+    world.proxy.refuse();
+    world.proxy.cut();
+    world
+        .recorder
+        .wait_state(mark, LinkState::Reconnecting, WAIT)
+        .await;
+    world
+        .agent
+        .ops()
+        .finish(&finishing, OpStatus::Succeeded, None)
+        .await
+        .unwrap();
+    let mark = world.recorder.mark();
+    world.proxy.heal();
+    world
+        .recorder
+        .wait_state(mark, LinkState::Connected, WAIT)
+        .await;
+
+    // L'issue de celle qui a fini pendant la coupure : relue, annoncée.
+    collector
+        .wait("l'issue relue", |o| {
+            o.id == finishing && o.status == OperationStatus::Succeeded
+        })
+        .await;
+    // Laisse passer la relecture de toutes les opérations non redites, puis compte.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(collector.count(&finishing, OperationStatus::Succeeded), 1);
+    // Celle qui court encore : l'agent l'a redite à l'abonnement, identique, rien de nouveau.
+    let after = collector.0.lock().unwrap().len();
+    assert_eq!(after, before + 1, "seule l'issue est un message de plus");
 }

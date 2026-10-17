@@ -5,6 +5,7 @@ import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
+import type { DecisionOutcome, OperationChoice, ServiceOperationEvent } from "./serviceOps";
 import type { EngineInfo, EnvVariable, ServiceRights, ServicesEvent } from "./services";
 import type {
   AccountInputCheck,
@@ -279,6 +280,31 @@ export interface LinkBridge {
   ): Promise<LogReading>;
   /** Ouvre la documentation officielle de Docker dans le navigateur du PC (l'adresse est une constante de la coquille). */
   openEngineDocs(): Promise<void>;
+
+  // Opérations de service (HRT-84, ADR-0045) : le suivi, uniforme pour toute opération longue. Aucune méthode
+  // de ce pont ne lance ni n'annule une opération ; la seule qui agit est la décision, un acte confirmé.
+
+  /**
+   * Les opérations de service de chaque serveur (`link://service-operations`) : celles qui courent et les issues
+   * pas encore acquittées (rejouées à l'abonnement, même hors ligne), puis chaque changement. Une opération qui
+   * court encore au retour du lien est reconstruite par l'état tenu côté Rust, sans nouveau message ; l'issue
+   * d'une opération terminée est annoncée UNE fois (BR-RESIL-010). `seq` croît strictement : le récepteur écarte
+   * tout changement dont `seq` n'est pas supérieur au dernier connu pour la même opération.
+   */
+  onServiceOperations(listener: (event: ServiceOperationEvent) => void): Promise<Unsubscribe>;
+  /** L'interface a annoncé l'issue de ces opérations : elles ne sont plus rejouées. Ne parle pas à l'agent. */
+  ackServiceOperations(serverId: string, opIds: string[]): Promise<void>;
+  /**
+   * Décide d'une opération qui attend le compte (`BR-SVC-029`) : un acte d'administration confirmé, le mot de passe
+   * est redemandé à chaque réponse (`adminPassword`, jamais gardé). Sans le droit « gérer les services » : échec
+   * `missing_services_right`. Jamais rejoué : un résultat inconnu se lit sur le flux.
+   */
+  decideServiceOperation(
+    serverId: string,
+    opId: string,
+    choice: OperationChoice,
+    adminPassword: string | null,
+  ): Promise<DecisionOutcome>;
 
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;

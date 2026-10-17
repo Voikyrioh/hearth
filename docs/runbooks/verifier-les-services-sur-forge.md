@@ -1,6 +1,6 @@
 # Vérifier les services sur la forge
 
-Squelette (HRT-61) du runbook de vérification des services sur le serveur forge. Il grossit à chaque tranche des déploiements (HRT-63, 64, 66, 68, 70) ; Voiky exécute et consigne (HRT-71). Cette première partie ne couvre que la tranche 1 : le moteur détecté et la liste en lecture seule. Rien dans cette tranche n'écrit dans le moteur ni dans la base : c'est sans risque pour les services qui tournent.
+Squelette (HRT-61) du runbook de vérification des services sur le serveur forge. Il grossit à chaque tranche des déploiements (HRT-63, 64, 66, 68, 70) ; Voiky exécute et consigne (HRT-71). La partie 1 ne couvre que la tranche 1 : le moteur détecté et la liste en lecture seule, sans risque pour les services qui tournent. **La partie 2 (HRT-64) agit sur les services** : démarrer, arrêter, redémarrer.
 
 ## Règles de sécurité de cette vérification
 
@@ -37,10 +37,25 @@ Depuis HRT-79 la liste ne montre plus que les services créés par Hearth et les
 
 À consigner dans la session : version de l'agent, date, résultat de chaque étape, écarts. Ce que la CI seule prouve : le comportement d'un vrai Docker et d'un vrai systemd (`engine_supervised.rs`, étape `supervised`).
 
+## Partie 2 : démarrer, arrêter et redémarrer un service (HRT-64)
+
+À exécuter après la mise à jour de l'agent forge avec la version qui porte HRT-64, avec un compte qui a le droit (partie 1 bis) et la clé d'un poste inscrit (`admin_act.py confirm-service`). **Règles propres à cette partie** : jamais Terraria sans autosave PUIS sauvegarde préalables (l'arrêt d'un conteneur ne sauvegarde pas) ; 7 Days to Die est le seul service qui exerce le délai d'arrêt réel (120 s) ; jamais de `docker stop` à la main pour comparer pendant que Hearth agit sur le même service.
+
+1. **Le service de test.** Un conteneur sans importance, adopté : `docker run -d --name hearth-verif busybox:1.36 sleep 600`, puis l'adopter (partie 1 bis, étape 8). Il ignore l'ordre d'arrêt (processus 1 sans gestionnaire) : c'est le cas de l'arrêt forcé.
+2. **Arrêter.** `POST /api/v1/services/{key}/stop` (corps confirmé par `admin_act.py confirm-service stop …`). Attendu : `202 { action_id, grace_s: 10 }` ; l'état passe « Arrêt en cours » puis « Arrêté » au bout de 10 s ; l'opération (`GET /operations/services/{action_id}`) est `succeeded` avec la cause `forced_stop` ; le journal d'activité écrit « Service {nom} (arrêt forcé) » ; la sortie du conteneur (137) n'est PAS « En erreur ». À consigner : la durée, le code de sortie (`docker inspect`).
+3. **L'arrêt tient.** Redémarrer le serveur ou l'agent (`systemctl restart hearth-agent`) : le service reste « Arrêté » (la ligne `service_intents` est relue au démarrage ; le moteur ne relance pas un conteneur arrêté à la main avec `unless-stopped`).
+4. **Démarrer.** `POST …/start` : `202`, « Démarrage » puis « En marche » (confirmé par le moteur), l'arrêt voulu est effacé. Port pris : démarrer un second conteneur de test qui publie le même port hôte échoue avec la cause `port_in_use` (« port occupé ») et reste « Arrêté ».
+5. **Redémarrer.** `POST …/restart` sur le service en marche : « Arrêt en cours », « Démarrage », « En marche » ; trois redémarrages de suite ne font PAS « Redémarre en boucle ». Redémarrer un service arrêté : `409 SERVICE_NOT_DRIVABLE`, rien n'est converti en démarrage.
+6. **Refus.** Deux demandes à la suite : la seconde reçoit `409 SERVICE_BUSY` avec le compte ; un compte sans le droit reçoit `403` (consigné « droits insuffisants ») ; une clé inventée reçoit `404 SERVICE_NOT_FOUND`.
+7. **Un service géré par le système (7 Days to Die, `u_docker-7dtd.service`).** Arrêter par Hearth passe par `systemctl stop docker-7dtd.service` : `grace_s` vaut 120, l'attente 150 s, le serveur de jeu a le temps de sauvegarder ; le service reste « Arrêté » (l'unité ne repart pas seule, contrairement à un arrêt par l'API du moteur sur un conteneur `--rm`). La confirmation d'arrêt côté client doit dire « géré par le système du serveur ». À consigner : la durée réelle de l'arrêt et l'état de l'unité (`systemctl show docker-7dtd.service -p ActiveState,Result`). Ne jamais tenter sur Terraria.
+8. **Coupure.** Couper le lien du client pendant un arrêt de 7 Days to Die : l'agent va au bout ; au retour, l'opération est relisible (`succeeded`) ; aucune seconde action n'est partie.
+9. **Nettoyage.** `docker rm -f hearth-verif`, puis relâcher le service de test.
+
+À consigner dans la session : version de l'agent, date, résultat de chaque étape, durées, écarts. Ce que la CI seule prouve : le comportement d'un vrai Docker (arrêt dans le délai et de force, port pris, redémarrage, `--rm`, job `engine`) et d'un vrai systemd (arrêter, démarrer, redémarrer une unité qui se relance toujours, `engine_supervised.rs`).
+
 ## Parties suivantes (squelette)
 
-- Partie 2 (HRT-63) : détail d'un service, variables masquées puis révélées, service géré par une unité systemd (`u_docker-*.service`), ce que fait un arrêt par l'API du moteur sur un conteneur `--rm`.
-- Partie 3 (HRT-64) : démarrer, arrêter, redémarrer un service (jamais Terraria sans sauvegarde ; 7 Days to Die : le délai d'arrêt réel de 120 s).
+- Partie 2 bis (HRT-63) : détail d'un service, variables masquées puis révélées, service géré par une unité systemd (`u_docker-*.service`), ce que fait un arrêt par l'API du moteur sur un conteneur `--rm`.
 - Partie 4 (HRT-66) : journaux en direct, pilote `journald`.
 - Partie 5 (HRT-68, HRT-70) : déployer une image, dossiers de données, retour des services après `nixos-rebuild switch` et après un redémarrage du serveur.
 

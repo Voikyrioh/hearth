@@ -10,7 +10,10 @@
 //! - **Les journaux** (HRT-66) passent par `logs.rs`, écrit à la main sur le même socket : le décodeur de
 //!   `bollard::Docker::logs` accumule sans borne une ligne de terminal sans fin de ligne et écrit les octets
 //!   restants dans une trace `debug` (voir l'en-tête de `logs.rs`).
-//! - **Lecture seule** : rien de ce fichier n'écrit dans le moteur.
+//! - **Écrire** (HRT-64) : `start`, `stop` et `restart` seulement. Un ordre d'arrêt dure jusqu'au délai de
+//!   grâce du conteneur (120 s pour un serveur de jeu qui sauvegarde) : ces appels ont un délai de requête
+//!   propre, celui de l'attente de l'action (`wait_budget`), pas les 10 s des lectures. Un conteneur déjà
+//!   dans l'état visé (le moteur répond « non modifié », 304) n'est pas une erreur.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -21,6 +24,7 @@ use async_trait::async_trait;
 use bollard::models::{EventMessage, EventMessageTypeEnum, SystemVersion};
 use bollard::query_parameters::{
     EventsOptionsBuilder, InspectContainerOptionsBuilder, ListContainersOptionsBuilder,
+    RestartContainerOptionsBuilder, StopContainerOptionsBuilder,
 };
 use bollard::{API_DEFAULT_VERSION, ClientVersion, Docker};
 use futures_util::{StreamExt, stream};
@@ -33,6 +37,7 @@ use crate::application::ports::{
     ContainerEngine, EngineError, EngineEvent, EngineEvents, EnvEntry, Listing, LogQuery,
     LogStream, Unreadable,
 };
+use crate::domain::ops::wait_budget;
 use crate::domain::services::{
     Announced, ApiVersion, EngineProbe, MAX_ENGINE_TEXT_CHARS, MAX_NAME_CHARS, MIN_API_VERSION,
     Observation, ProbeOutcome, bounded,
@@ -227,6 +232,16 @@ impl Inner {
         let docker = self.build(reply.api_version)?;
         *self.client.lock().unwrap_or_else(PoisonError::into_inner) = Some(docker.clone());
         Ok(docker)
+    }
+
+    /// Un client pour un ordre (démarrer, arrêter, redémarrer) : son délai de requête est l'attente de l'action
+    /// (le délai de grâce du conteneur plus la marge, au moins le plancher), pas les 10 s des lectures ; et le
+    /// délai de grâce en secondes pour la requête. Démarrer passe un délai nul : l'attente est le plancher.
+    async fn docker_for_order(&self, grace: Duration) -> Result<(Docker, i32), EngineError> {
+        let docker = self.docker().await?;
+        let seconds = i32::try_from(grace.as_secs()).unwrap_or(i32::MAX);
+        let wait = wait_budget(u32::try_from(grace.as_secs()).unwrap_or(u32::MAX));
+        Ok((docker.with_timeout(wait), seconds))
     }
 
     /// Un client à la version d'API du moteur, au plus celle de `bollard`.
@@ -501,6 +516,32 @@ impl ContainerEngine for BollardEngine {
 
     fn logs(&self, id: &str, query: LogQuery) -> LogStream {
         super::logs::open(self.inner.target.clone(), id.to_owned(), query)
+    }
+
+    async fn start(&self, id: &str) -> Result<(), EngineError> {
+        let (docker, _) = self.inner.docker_for_order(Duration::ZERO).await?;
+        docker
+            .start_container(id, None)
+            .await
+            .map_err(|error| translate(&error))
+    }
+
+    async fn stop(&self, id: &str, grace: Duration) -> Result<(), EngineError> {
+        let (docker, seconds) = self.inner.docker_for_order(grace).await?;
+        let options = StopContainerOptionsBuilder::default().t(seconds).build();
+        docker
+            .stop_container(id, Some(options))
+            .await
+            .map_err(|error| translate(&error))
+    }
+
+    async fn restart(&self, id: &str, grace: Duration) -> Result<(), EngineError> {
+        let (docker, seconds) = self.inner.docker_for_order(grace).await?;
+        let options = RestartContainerOptionsBuilder::default().t(seconds).build();
+        docker
+            .restart_container(id, Some(options))
+            .await
+            .map_err(|error| translate(&error))
     }
 
     fn events(&self) -> EngineEvents {

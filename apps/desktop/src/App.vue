@@ -14,6 +14,7 @@ import { useAgentUpdatesStore } from "@/stores/agentUpdates";
 import { useLinkStore } from "@/stores/link";
 import { useSecurityStore } from "@/stores/security";
 import { useServersStore } from "@/stores/servers";
+import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useToastsStore } from "@/stores/toasts";
 import { useUpdatesStore } from "@/stores/updates";
 
@@ -38,6 +39,12 @@ useAgentUpdatesStore()
 useSecurityStore()
   .start()
   .catch((error) => reportUiError(error, "security:start"));
+
+// Opérations de service de chaque serveur (HRT-84, BR-SVC-029, BR-RESIL-010) : l'issue d'une opération se dit
+// une fois, quelle que soit la page ouverte ; la bande et la fenêtre de décision lisent le même magasin.
+useServiceOpsStore()
+  .start()
+  .catch((error) => reportUiError(error, "serviceOps:start"));
 
 // Panneau de simulation : seulement en mode développement (retiré du binaire livré).
 const DevLinkPanel = import.meta.env.DEV

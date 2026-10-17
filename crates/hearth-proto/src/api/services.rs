@@ -164,8 +164,9 @@ fn is_zero(value: &u32) -> bool {
     *value == 0
 }
 
-/// L'état d'un service (`BR-SVC-004`). `starting`, `stopping` et `deploying` appartiennent aux
-/// tranches suivantes : cette tranche ne les produit jamais.
+/// L'état d'un service (`BR-SVC-004`, dix états). `starting` et `stopping` sont montrés pendant une action de
+/// Hearth (HRT-64) ; `deploying` et `updating` (« Modification en cours », HRT-84) appartiennent aux tranches
+/// suivantes : l'agent d'aujourd'hui ne les produit pas. Un client plus ancien lit `updating` comme `unknown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceState {
@@ -177,6 +178,8 @@ pub enum ServiceState {
     RestartLoop,
     Paused,
     Deploying,
+    /// Le service est recréé par une modification : classé « en transition ».
+    Updating,
     /// État du moteur que l'agent ne sait pas nommer, ou état que ce client ne connaît pas.
     #[serde(other)]
     Unknown,
@@ -512,6 +515,17 @@ pub struct AdoptResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseResponse {
     pub released: bool,
+}
+
+/// La réponse (`202`) de `POST /services/{key}/start`, `/stop` et `/restart` (HRT-64, BR-LIFE-009,
+/// BR-LIFE-016) : l'action est acceptée, elle s'exécute à l'arrière-plan. `action_id` est l'identifiant de
+/// l'opération (`GET /operations/services/{id}`, `last_action` du service) ; `grace_s` est le délai d'arrêt du
+/// service, en secondes, que la fenêtre de confirmation et le décompte affichent. L'issue réelle ne se lit
+/// jamais dans cette réponse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionAccepted {
+    pub action_id: String,
+    pub grace_s: u32,
 }
 
 /// Le contenu de `GET /services` et de `services_snapshot` : l'état du moteur et tous les services,

@@ -15,7 +15,7 @@ export const COUNT_KEYS: readonly CountKey[] = [
   "other",
 ];
 
-/** « En erreur » regroupe « En erreur » et « Redémarre en boucle » ; « en transition » : Démarrage, Arrêt en cours, Déploiement en cours ; « autres » : En pause, État non reconnu. */
+/** « En erreur » regroupe « En erreur » et « Redémarre en boucle » ; « en transition » : Démarrage, Arrêt en cours, Déploiement en cours, Modification en cours (BR-SVC-011, BR-ENGINE-004) ; « autres » : En pause, État non reconnu. */
 export function categoryOf(state: ServiceState): CountKey {
   switch (state) {
     case "running":
@@ -28,6 +28,7 @@ export function categoryOf(state: ServiceState): CountKey {
     case "starting":
     case "stopping":
     case "deploying":
+    case "updating":
       return "transition";
     case "paused":
     case "unknown":
@@ -48,4 +49,19 @@ export function shownCounts(counts: Counts): { key: CountKey; n: number }[] {
   return COUNT_KEYS.filter(
     (key) => key === "running" || key === "stopped" || key === "error" || counts[key] > 0,
   ).map((key) => ({ key, n: counts[key] }));
+}
+
+/** Le filtre par état de la liste (BR-SVC-011) : « Tous », « En marche », « Arrêté », « En erreur ». */
+export type StateFilter = "all" | "running" | "stopped" | "error";
+
+/**
+ * Un service est-il visible sous ce filtre ? « En erreur » regroupe « En erreur » et « Redémarre en boucle ».
+ * Un service en transition (« Démarrage », « Arrêt en cours », « Déploiement en cours », « Modification en
+ * cours »), « En pause » et « État non reconnu » ne sont visibles que sous « Tous » (BR-SVC-011). `acting` : une
+ * action de l'utilisateur tient le service, qui reste visible sous le filtre actif jusqu'à la fin de l'action.
+ */
+export function visibleUnder(filter: StateFilter, state: ServiceState, acting = false): boolean {
+  if (filter === "all") return true;
+  if (acting) return true;
+  return categoryOf(state) === filter;
 }

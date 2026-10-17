@@ -41,6 +41,8 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     case "attack_mode_disable":
     case "account_password_own":
     case "reauth_setting":
+    // Répondre à une opération n'est jamais couvert : le mot de passe est redemandé à chaque réponse.
+    case "operation_decide":
       return false;
   }
 }

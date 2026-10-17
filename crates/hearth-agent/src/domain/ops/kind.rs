@@ -89,6 +89,11 @@ impl OpKind {
         }
     }
 
+    /// Démarrer, arrêter, redémarrer : les trois gestes de cycle de vie (HRT-64), qui ne changent que l'état.
+    pub const fn is_lifecycle(self) -> bool {
+        matches!(self, Self::Start | Self::Stop | Self::Restart)
+    }
+
     /// Le genre réserve le NOM du service tant qu'il n'est pas terminé (BR-DEL-019) : suppression et
     /// déploiement. Sert à rebâtir la réservation d'une opération « à vérifier » au démarrage.
     pub const fn reserves_name(self) -> bool {
@@ -330,10 +335,28 @@ pub enum Cause {
     DecisionExpired,
     CancelledByAccount,
     DecidedByAccount,
+    /// Démarrer, arrêter, redémarrer (HRT-64, BR-LIFE-018) : coupé de force après le délai d'arrêt.
+    ForcedStop,
+    /// Un port demandé par le service est déjà pris (BR-LIFE-006).
+    PortInUse,
+    /// Le programme s'est arrêté dans les 10 secondes qui ont suivi son lancement (BR-LIFE-005).
+    StoppedRightAfterStart,
+    /// Le moteur est inaccessible (BR-LIFE-019).
+    EngineUnavailable,
+    /// Le moteur ou le système du serveur a refusé l'ordre (BR-LIFE-019).
+    EngineRefused,
+    /// Reparti tout seul après un arrêt demandé (BR-LIFE-011).
+    RestartedByHost,
+    /// Pas de réponse dans le délai d'arrêt plus 30 secondes (BR-LIFE-021).
+    Timeout,
+    /// L'agent s'est arrêté pendant l'action (BR-LIFE-020).
+    Interrupted,
+    /// Le service n'existait plus au moment de l'action (BR-LIFE-015).
+    ServiceNotFound,
 }
 
 impl Cause {
-    pub const ALL: [Cause; 10] = [
+    pub const ALL: [Cause; 19] = [
         Self::NotExecuted,
         Self::RunsWithPrevious,
         Self::RunsWithNew,
@@ -344,6 +367,15 @@ impl Cause {
         Self::DecisionExpired,
         Self::CancelledByAccount,
         Self::DecidedByAccount,
+        Self::ForcedStop,
+        Self::PortInUse,
+        Self::StoppedRightAfterStart,
+        Self::EngineUnavailable,
+        Self::EngineRefused,
+        Self::RestartedByHost,
+        Self::Timeout,
+        Self::Interrupted,
+        Self::ServiceNotFound,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -358,6 +390,15 @@ impl Cause {
             Self::DecisionExpired => "decision_expired",
             Self::CancelledByAccount => "cancelled_by_account",
             Self::DecidedByAccount => "decided_by_account",
+            Self::ForcedStop => "forced_stop",
+            Self::PortInUse => "port_in_use",
+            Self::StoppedRightAfterStart => "stopped_right_after_start",
+            Self::EngineUnavailable => "engine_unavailable",
+            Self::EngineRefused => "engine_refused",
+            Self::RestartedByHost => "restarted_by_host",
+            Self::Timeout => "timeout",
+            Self::Interrupted => "interrupted",
+            Self::ServiceNotFound => "service_not_found",
         }
     }
 
@@ -377,6 +418,15 @@ impl Cause {
             Self::DecisionExpired => OperationCause::DecisionExpired,
             Self::CancelledByAccount => OperationCause::CancelledByAccount,
             Self::DecidedByAccount => OperationCause::DecidedByAccount,
+            Self::ForcedStop => OperationCause::ForcedStop,
+            Self::PortInUse => OperationCause::PortInUse,
+            Self::StoppedRightAfterStart => OperationCause::StoppedRightAfterStart,
+            Self::EngineUnavailable => OperationCause::EngineUnavailable,
+            Self::EngineRefused => OperationCause::EngineRefused,
+            Self::RestartedByHost => OperationCause::RestartedByHost,
+            Self::Timeout => OperationCause::Timeout,
+            Self::Interrupted => OperationCause::Interrupted,
+            Self::ServiceNotFound => OperationCause::ServiceNotFound,
         }
     }
 }

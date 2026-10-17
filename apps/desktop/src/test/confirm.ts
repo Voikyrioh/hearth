@@ -17,7 +17,7 @@ export function dialogButton(label: string): HTMLButtonElement | undefined {
   );
 }
 
-/** Le champ « Ton mot de passe » de la confirmation d'un acte, s'il est affiché. */
+/** Le champ « Votre mot de passe » de la confirmation d'un acte, s'il est affiché. */
 export function reauthField(): HTMLInputElement | null {
   return document.querySelector<HTMLInputElement>("dialog [data-reauth-field] input");
 }

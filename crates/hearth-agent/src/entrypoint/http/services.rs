@@ -18,6 +18,13 @@
 //! confirmation complète d'un acte d'administration, jamais couverte par l'élévation ; relâcher la
 //! confirmation, couverte par l'élévation. La liste n'est jamais consignée quand elle réussit.
 //!
+//! `POST /services/{key}/start`, `/stop` et `/restart` (HRT-64, ADR-0037, ADR-0045) : trois actes
+//! d'administration confirmés, réservés aux comptes qui ont le droit « gérer les services » (niveau
+//! `Services`). Ils répondent `202 { action_id, grace_s }` : l'ordre est donné à l'arrière-plan, l'issue se lit
+//! dans l'opération. Les refus connus d'avance sont SYNCHRONES et typés : moteur pas prêt, service inconnu,
+//! action en cours, déjà dans l'état, état qui ne permet pas le geste. Aucun message ne répète une clé, un
+//! nom, un chemin ni un texte du moteur.
+//!
 //! `GET /services/{key}/env` révèle les VALEURS des variables d'un service : réservée aux comptes qui
 //! ont le droit « gérer les services », quel que soit leur rôle (niveau `Services`, ADR-0041 : un
 //! administrateur sans le droit est refusé, un compte en lecture seule qui l'a est servi ; la couche
@@ -28,21 +35,25 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, Path, State};
 use axum::http::header::{CACHE_CONTROL, PRAGMA};
-use axum::http::{HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use hearth_proto::api::services::{
-    AdoptRequest, AdoptResponse, AdoptionItem, AdoptionResult, EngineView, ExternalContainer,
-    ExternalContainers, ImageInfo, ReleaseResponse, ServicesState, adoption_refusal,
+    ActionAccepted, AdoptRequest, AdoptResponse, AdoptionItem, AdoptionResult, EngineView,
+    ExternalContainer, ExternalContainers, ImageInfo, ReleaseResponse, ServicesState,
+    adoption_refusal,
 };
 use hearth_proto::error::{ErrorBody, ErrorCode};
+use hearth_proto::headers::IDEMPOTENCY_KEY;
 
 use super::auth::{Caller, Requester};
 use super::{ApiError, AppState};
 use crate::application::service_adoption::{AdoptionError, Invalid, KeyOutcome};
+use crate::application::service_lifecycle::{Accepted, LifecycleError};
 use crate::application::services::RevealError;
 use crate::application::sessions::Reauthenticated;
-use crate::domain::audit::{AuditAction, Outcome, Target};
-use crate::domain::services::ServiceKey;
+use crate::domain::audit::{Actor, AuditAction, Outcome, Target};
+use crate::domain::ops::Gesture;
+use crate::domain::services::{ServiceKey, ServiceStateKind};
 use crate::entrypoint::services_wire::{self, Reader};
 
 /// `GET /api/v1/services` : le même contenu que `services_snapshot` du flux (repli, tests).
@@ -259,4 +270,107 @@ pub async fn release(
         None => false,
     };
     Ok(Json(ReleaseResponse { released }))
+}
+
+/// Le refus d'une demande de démarrer, arrêter ou redémarrer, avec le code typé que le client affiche sans
+/// attendre. Les textes sont fixes : le nom du service est dans la fenêtre du client, pas dans l'erreur.
+fn lifecycle_error(error: LifecycleError) -> ApiError {
+    match error {
+        LifecycleError::EngineUnavailable(engine) => ApiError(ErrorBody::with_details(
+            ErrorCode::EngineUnavailable,
+            "Le moteur de conteneurs n'est pas prêt. Le service n'a pas été modifié.",
+            serde_json::json!({ "engine": services_wire::engine_state(engine) }),
+        )),
+        LifecycleError::NotFound => {
+            ApiError::new(ErrorCode::ServiceNotFound, "Ce service n'existe plus.")
+        }
+        LifecycleError::AlreadyInState(state) => ApiError(ErrorBody::with_details(
+            ErrorCode::ServiceAlreadyInState,
+            match state {
+                ServiceStateKind::Running | ServiceStateKind::Starting => {
+                    "Ce service est déjà en marche."
+                }
+                ServiceStateKind::RestartLoop => "Ce service redémarre déjà en boucle.",
+                _ => "Ce service est déjà arrêté.",
+            },
+            serde_json::json!({ "state": services_wire::service_state(state) }),
+        )),
+        LifecycleError::NotDrivable(state) => ApiError(ErrorBody::with_details(
+            ErrorCode::ServiceNotDrivable,
+            "Ce service ne peut pas être piloté dans l'état où il est.",
+            serde_json::json!({ "state": services_wire::service_state(state) }),
+        )),
+        LifecycleError::Busy { by, kind } => ApiError(ErrorBody::with_details(
+            ErrorCode::ServiceBusy,
+            "Une action est déjà en cours sur ce service.",
+            serde_json::json!({ "by": by, "kind": kind.to_wire() }),
+        )),
+        LifecycleError::Internal(message) => {
+            tracing::error!(error = %message, "demande de pilotage d'un service en échec");
+            ApiError::new(ErrorCode::InternalError, "Une erreur interne est survenue.")
+        }
+    }
+}
+
+/// La clé d'opération du client (rejeu après coupure), bornée ; absente, vide (le journal la garde telle quelle).
+fn operation_key(headers: &HeaderMap) -> String {
+    headers
+        .get(IDEMPOTENCY_KEY)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| value.len() <= 128)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+async fn lifecycle(
+    state: &AppState,
+    gesture: Gesture,
+    key: &str,
+    actor: Actor,
+    headers: &HeaderMap,
+) -> Result<(StatusCode, Json<ActionAccepted>), ApiError> {
+    // Une clé mal formée est un service inconnu, comme pour toute route de service.
+    let key = ServiceKey::parse(key).ok_or_else(|| lifecycle_error(LifecycleError::NotFound))?;
+    let Accepted { action_id, grace_s } = state
+        .service_lifecycle
+        .request(gesture, &key, actor, &operation_key(headers))
+        .await
+        .map_err(lifecycle_error)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ActionAccepted { action_id, grace_s }),
+    ))
+}
+
+/// `POST /api/v1/services/{key}/start` (acte `ServiceStart` `0x0C`).
+pub async fn start(
+    State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
+    Requester(actor): Requester,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<ActionAccepted>), ApiError> {
+    lifecycle(&state, Gesture::Start, &key, actor, &headers).await
+}
+
+/// `POST /api/v1/services/{key}/stop` (acte `ServiceStop` `0x0D`).
+pub async fn stop(
+    State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
+    Requester(actor): Requester,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<ActionAccepted>), ApiError> {
+    lifecycle(&state, Gesture::Stop, &key, actor, &headers).await
+}
+
+/// `POST /api/v1/services/{key}/restart` (acte `ServiceRestart` `0x0E`).
+pub async fn restart(
+    State(state): State<AppState>,
+    _confirmed: Extension<Reauthenticated>,
+    Requester(actor): Requester,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<(StatusCode, Json<ActionAccepted>), ApiError> {
+    lifecycle(&state, Gesture::Restart, &key, actor, &headers).await
 }

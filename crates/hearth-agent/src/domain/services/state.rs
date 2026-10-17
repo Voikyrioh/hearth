@@ -365,11 +365,82 @@ pub fn derive_supervised(
     }
 }
 
+/// Ce que Hearth est en train de faire à un service (HRT-64, BR-LIFE-004, BR-LIFE-012) : l'état « Arrêt en
+/// cours » ou « Démarrage » est montré avant que le moteur ne le dise, quand c'est Hearth qui l'a demandé et
+/// que le pilote ne rend pas l'étape visible de lui-même (un conteneur en train de s'arrêter est encore
+/// « en marche » pour le moteur jusqu'à son dernier souffle). Jamais montré « En marche » par avance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Transition {
+    pub kind: TransitionKind,
+    /// Depuis quand Hearth a donné l'ordre. Un conteneur dont l'exécution a commencé APRÈS cet instant est le
+    /// nouveau, pas celui qu'on arrête.
+    pub since: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransitionKind {
+    /// Hearth arrête le service.
+    Stopping,
+    /// Hearth démarre le service.
+    Starting,
+    /// Hearth redémarre le service : « Arrêt en cours » tant que l'ancien tourne, « Démarrage » quand il est
+    /// arrêté, « En marche » dès que le nouveau tourne.
+    Restarting,
+}
+
+/// L'état dérivé, recouvert par ce que Hearth fait en ce moment. Pure, et PRUDENTE : elle ne change que les
+/// états où l'étape annoncée est vraie, et jamais vers « En marche ».
+///
+/// - `Stopping` : un service qui tourne (même en boucle) ou démarre devient « Arrêt en cours » ;
+/// - `Starting` : un service arrêté ou en erreur devient « Démarrage » ;
+/// - `Restarting` : l'ancien conteneur (exécution commencée au plus tard à `since`) devient « Arrêt en
+///   cours » ; arrêté ou en erreur, « Démarrage » ; un conteneur dont l'exécution a commencé après `since`
+///   est le nouveau : il est « En marche ». Un état en pause ou non reconnu n'est jamais recouvert.
+pub fn overlay_transition(
+    mut derived: Derived,
+    running_since: Option<OffsetDateTime>,
+    transition: Transition,
+) -> Derived {
+    use ServiceStateKind::{Error, RestartLoop, Running, Starting, Stopped, Stopping};
+    let came_after = running_since.is_some_and(|at| at > transition.since);
+    let shown = match (transition.kind, derived.state) {
+        (TransitionKind::Stopping, Running | RestartLoop | Starting) => Some(Stopping),
+        (TransitionKind::Starting, Stopped | Error) => Some(Starting),
+        (TransitionKind::Restarting, Running | RestartLoop) if !came_after => Some(Stopping),
+        (TransitionKind::Restarting, Stopped | Error) => Some(Starting),
+        _ => None,
+    };
+    if let Some(state) = shown {
+        derived.state = state;
+        derived.since = Some(transition.since);
+    }
+    derived
+}
+
+/// Un arrêt demandé depuis Hearth (`service_intents`, HRT-64, BR-LIFE-010, BR-SVC-005) : un service qui s'est
+/// arrêté de lui-même avec un code non nul n'est « En erreur » que si personne ne l'a arrêté. Avec un arrêt
+/// demandé, la sortie voulue (le plus souvent 137 ou 143, un programme tué à l'échéance ou qui répond à
+/// l'ordre par son code) est « Arrêté ». Le code de sortie reste lu tel quel.
+pub fn honour_stop_request(mut derived: Derived) -> Derived {
+    if derived.state == ServiceStateKind::Error {
+        derived.state = ServiceStateKind::Stopped;
+    }
+    derived
+}
+
+/// Combien de plages d'exemption au plus une fenêtre retient (les plus anciennes partent).
+const MAX_EXEMPTIONS: usize = 8;
+
 /// Les démarrages des 10 dernières minutes d'un service, comptés par l'agent (fenêtre glissante, en
 /// mémoire). Un démarrage est un instant de début d'exécution (`StartedAt`) distinct du précédent.
+///
+/// **Un démarrage demandé par Hearth ne compte pas** (HRT-64, BR-SVC-006, BR-SVC-015) : « redémarre en
+/// boucle » veut dire que le serveur relance le service sans cesse, pas qu'un compte l'a redémarré trois
+/// fois. L'acte de Hearth exempte la plage de temps où il a donné ses ordres ([`StartWindow::exempt`]).
 #[derive(Debug, Clone, Default)]
 pub struct StartWindow {
     starts: VecDeque<OffsetDateTime>,
+    exempt: VecDeque<(OffsetDateTime, OffsetDateTime)>,
 }
 
 impl StartWindow {
@@ -377,11 +448,31 @@ impl StartWindow {
         Self::default()
     }
 
-    /// Note un début d'exécution vu dans une observation ; le même instant n'est compté qu'une fois.
+    /// Note un début d'exécution vu dans une observation ; le même instant n'est compté qu'une fois, et un
+    /// instant exempté (démarrage demandé par Hearth) jamais.
     pub fn observe(&mut self, started_at: OffsetDateTime) {
+        if self.is_exempt(started_at) {
+            return;
+        }
         if self.starts.back() != Some(&started_at) {
             self.starts.push_back(started_at);
         }
+    }
+
+    /// Les débuts d'exécution compris entre `from` et `until` (bornes comprises) ont été demandés par Hearth :
+    /// ceux déjà comptés sont retirés, ceux qui seront vus ensuite ne le seront pas.
+    pub fn exempt(&mut self, from: OffsetDateTime, until: OffsetDateTime) {
+        self.starts.retain(|at| !(from <= *at && *at <= until));
+        self.exempt.push_back((from, until));
+        while self.exempt.len() > MAX_EXEMPTIONS {
+            self.exempt.pop_front();
+        }
+    }
+
+    fn is_exempt(&self, at: OffsetDateTime) -> bool {
+        self.exempt
+            .iter()
+            .any(|(from, until)| *from <= at && at <= *until)
     }
 
     /// Démarrages dans les 10 minutes qui précèdent `now` (les plus anciens sont oubliés).
@@ -697,5 +788,168 @@ mod tests {
         let mut names = vec!["web", "Api", "db", "API", "Zed", "alpha"];
         names.sort_by(|a, b| compare_names(a, b));
         assert_eq!(names, vec!["alpha", "API", "Api", "db", "web", "Zed"]);
+    }
+
+    /// 2026-10-13 00:00:00 UTC plus `minutes` minutes : les démarrages se comptent sur dix minutes.
+    fn minute(minutes: i64) -> OffsetDateTime {
+        datetime(0) + Duration::minutes(minutes)
+    }
+
+    fn derived(state: ServiceStateKind) -> Derived {
+        Derived {
+            state,
+            since: Some(datetime(0)),
+            never_started: false,
+            exit_code: None,
+        }
+    }
+
+    #[test]
+    fn a_hearth_stop_shows_stopping_only_over_a_service_that_runs() {
+        let since = datetime(5);
+        let stopping = Transition {
+            kind: TransitionKind::Stopping,
+            since,
+        };
+        for state in [
+            ServiceStateKind::Running,
+            ServiceStateKind::RestartLoop,
+            ServiceStateKind::Starting,
+        ] {
+            let shown = overlay_transition(derived(state), Some(datetime(1)), stopping);
+            assert_eq!(shown.state, ServiceStateKind::Stopping, "{state:?}");
+            assert_eq!(shown.since, Some(since));
+        }
+        for state in [
+            ServiceStateKind::Stopped,
+            ServiceStateKind::Error,
+            ServiceStateKind::Paused,
+            ServiceStateKind::Unknown,
+            ServiceStateKind::Stopping,
+        ] {
+            assert_eq!(
+                overlay_transition(derived(state), None, stopping),
+                derived(state),
+                "{state:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hearth_start_shows_starting_over_a_stopped_service_and_never_running_in_advance() {
+        let starting = Transition {
+            kind: TransitionKind::Starting,
+            since: datetime(5),
+        };
+        for state in [ServiceStateKind::Stopped, ServiceStateKind::Error] {
+            assert_eq!(
+                overlay_transition(derived(state), None, starting).state,
+                ServiceStateKind::Starting
+            );
+        }
+        // Le moteur dit « en marche » : c'est lui qui fait foi, jamais une étape annoncée par avance.
+        assert_eq!(
+            overlay_transition(
+                derived(ServiceStateKind::Running),
+                Some(datetime(6)),
+                starting
+            ),
+            derived(ServiceStateKind::Running)
+        );
+        for state in [
+            ServiceStateKind::Paused,
+            ServiceStateKind::Unknown,
+            ServiceStateKind::Stopping,
+        ] {
+            assert_eq!(
+                overlay_transition(derived(state), None, starting),
+                derived(state)
+            );
+        }
+    }
+
+    #[test]
+    fn a_restart_goes_through_stopping_then_starting_then_the_new_run_is_running() {
+        let restarting = Transition {
+            kind: TransitionKind::Restarting,
+            since: datetime(5),
+        };
+        // L'ancien conteneur tourne encore (exécution commencée avant l'ordre) : arrêt en cours.
+        assert_eq!(
+            overlay_transition(
+                derived(ServiceStateKind::Running),
+                Some(datetime(1)),
+                restarting
+            )
+            .state,
+            ServiceStateKind::Stopping
+        );
+        // Il est arrêté : démarrage.
+        assert_eq!(
+            overlay_transition(
+                derived(ServiceStateKind::Stopped),
+                Some(datetime(1)),
+                restarting
+            )
+            .state,
+            ServiceStateKind::Starting
+        );
+        // Une nouvelle exécution a commencé après l'ordre : « en marche », sans recouvrement.
+        assert_eq!(
+            overlay_transition(
+                derived(ServiceStateKind::Running),
+                Some(datetime(6)),
+                restarting
+            ),
+            derived(ServiceStateKind::Running)
+        );
+    }
+
+    #[test]
+    fn a_start_asked_by_hearth_is_not_counted_toward_the_restart_loop() {
+        let mut window = StartWindow::new();
+        // Trois démarrages vus, dont le dernier est celui que Hearth a demandé.
+        window.observe(minute(0));
+        window.observe(minute(1));
+        window.observe(minute(2));
+        assert_eq!(window.count(minute(3)), 3);
+        window.exempt(minute(2), minute(2));
+        assert_eq!(window.count(minute(3)), 2);
+        // Le même démarrage, vu de nouveau après la déclaration, n'est pas recompté.
+        window.observe(minute(2));
+        assert_eq!(window.count(minute(3)), 2);
+        // Un démarrage d'une autre heure compte toujours.
+        window.observe(minute(3));
+        assert_eq!(window.count(minute(3)), 3);
+    }
+
+    #[test]
+    fn the_exemptions_are_bounded() {
+        let mut window = StartWindow::new();
+        for hour in 0..20 {
+            window.exempt(minute(hour), minute(hour));
+        }
+        assert!(window.exempt.len() <= 8);
+        // La plus ancienne a été oubliée : son démarrage compte de nouveau.
+        window.observe(minute(0));
+        assert_eq!(window.count(minute(0)), 1);
+    }
+
+    #[test]
+    fn a_stop_asked_from_hearth_turns_an_error_into_a_stop_and_changes_nothing_else() {
+        let mut error = derived(ServiceStateKind::Error);
+        error.exit_code = Some(137);
+        let honoured = honour_stop_request(error.clone());
+        assert_eq!(honoured.state, ServiceStateKind::Stopped);
+        assert_eq!(honoured.exit_code, Some(137));
+        for state in [
+            ServiceStateKind::Running,
+            ServiceStateKind::Stopped,
+            ServiceStateKind::RestartLoop,
+            ServiceStateKind::Paused,
+            ServiceStateKind::Unknown,
+        ] {
+            assert_eq!(honour_stop_request(derived(state)), derived(state));
+        }
     }
 }

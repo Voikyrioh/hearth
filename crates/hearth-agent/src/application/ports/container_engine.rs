@@ -1,4 +1,5 @@
 use std::pin::Pin;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -31,6 +32,10 @@ pub enum EngineError {
     /// de journaux `none`, 501), BR-SLOG-017.
     #[error("le moteur ne permet pas de relire les journaux de ce conteneur")]
     Unsupported,
+    /// Un port que le conteneur publie est déjà pris sur le serveur : il ne démarre pas (HRT-64,
+    /// BR-LIFE-006). Reconnu dans le texte du moteur par l'adaptateur, qui ne le fait jamais sortir.
+    #[error("un port demandé par le conteneur est déjà pris")]
+    PortInUse,
 }
 
 impl EngineError {
@@ -99,11 +104,12 @@ pub struct LogQuery {
 /// conteneur s'est arrêté (ou que le moteur a coupé). L'abandonner ferme la connexion au moteur.
 pub type LogStream = Pin<Box<dyn Stream<Item = Result<LogLine, EngineError>> + Send>>;
 
-/// Le moteur de conteneurs vu par l'agent, EN LECTURE SEULE (HRT-61, ADR-0036).
+/// Le moteur de conteneurs vu par l'agent (HRT-61, ADR-0036).
 ///
-/// Cinq méthodes (HRT-63 ajoute `env`, HRT-66 ajoute `logs`), aucune n'écrit : ni démarrer, ni arrêter, ni créer, ni supprimer, ni télécharger.
-/// Une méthode d'écriture « pour plus tard » n'a pas sa place ici : chaque tranche ajoute les siennes
-/// avec son faux et son cas dans la suite de contrat (`tests/support/engine_contract.rs`).
+/// Cinq méthodes de lecture (HRT-63 ajoute `env`, HRT-66 ajoute `logs`), puis les trois premières qui
+/// ÉCRIVENT (HRT-64) : `start`, `stop`, `restart`. Rien d'autre n'écrit encore : ni créer, ni supprimer, ni
+/// télécharger. Une méthode d'écriture « pour plus tard » n'a pas sa place ici : chaque tranche ajoute les
+/// siennes avec son faux et son cas dans la suite de contrat (`tests/support/engine_contract.rs`).
 ///
 /// Aucun type de `bollard` ne sort de l'adaptateur. Une [`Observation`] ne porte ni valeur ni nom de
 /// variable d'environnement, ni commande.
@@ -136,4 +142,19 @@ pub trait ContainerEngine: Send + Sync {
     /// arrivent dans le flux : `NotFound` (conteneur disparu), `Unsupported` (journaux non relisibles),
     /// `Unreachable` / `Timeout` / `Denied` / `Refused`.
     fn logs(&self, id: &str, query: LogQuery) -> LogStream;
+
+    /// Démarre un conteneur (HRT-64, BR-LIFE-004). Déjà en marche : réussit sans rien changer (le moteur
+    /// répond « non modifié »). `NotFound` s'il n'existe plus ; `PortInUse` si un port qu'il publie est pris
+    /// (le conteneur reste arrêté). Rend la main quand le moteur a lancé le processus : « en marche » ne veut
+    /// pas dire « prêt » (BR-LIFE-005).
+    async fn start(&self, id: &str) -> Result<(), EngineError>;
+
+    /// Arrête un conteneur : l'ordre d'arrêt propre, puis, si le conteneur est encore là au bout de `grace`,
+    /// `SIGKILL` (BR-LIFE-009). Déjà arrêté : réussit sans rien changer. Ne rend la main qu'une fois le
+    /// conteneur arrêté ; l'appelant borne l'attente (`BR-LIFE-021`), l'adaptateur aussi (`Timeout`).
+    async fn stop(&self, id: &str, grace: Duration) -> Result<(), EngineError>;
+
+    /// Arrête (avec le même délai de grâce) puis démarre, d'un seul ordre du moteur. Un démarrage qui
+    /// échoue après l'arrêt laisse le conteneur arrêté et rend l'erreur du démarrage (`PortInUse`…).
+    async fn restart(&self, id: &str, grace: Duration) -> Result<(), EngineError>;
 }

@@ -76,10 +76,10 @@ test("B, administrateur sans le droit : la raison et la commande à copier, copi
   const block = notice(page);
   await expect(block).toBeVisible();
   await expect(block.locator("[data-rights-sentence]")).toHaveText(
-    "Ton compte ne peut pas gérer les services de ce serveur.",
+    "Votre compte ne peut pas gérer les services de ce serveur.",
   );
   await expect(block.locator("[data-rights-follow]")).toHaveText(
-    "Le droit se donne depuis le serveur. Lance cette commande sur le serveur :",
+    "Le droit se donne depuis le serveur. Lancez cette commande sur le serveur :",
   );
   const shown = (await block.locator("pre").textContent()) ?? "";
   expect(shown).toBe("sudo hearth-agent account services marie --grant");
@@ -104,10 +104,10 @@ test("C, lecture seule sans le droit : la raison et à qui s'adresser, jamais de
   await openAs(page, "salon", "services", (s) => s.setServiceRightOnServer("salon", "paul", false));
   const block = notice(page);
   await expect(block.locator("[data-rights-sentence]")).toHaveText(
-    "Ton compte ne peut pas gérer les services de ce serveur.",
+    "Votre compte ne peut pas gérer les services de ce serveur.",
   );
   await expect(block.locator("[data-rights-follow]")).toHaveText(
-    "Demande à la personne qui administre ce serveur.",
+    "Demandez à la personne qui administre ce serveur.",
   );
   await expect(block.locator("pre")).toHaveCount(0);
   await shoot(block, page, "droit-raison-lecture-seule");
@@ -135,7 +135,7 @@ test("lecture du droit en échec, puis « Vérifier à nouveau »", async ({ pag
     s.failRightsReads = true;
   });
   await expect(notice(page).locator("[data-rights-sentence]")).toHaveText(
-    "Impossible de lire ton droit sur les services. Réessaie.",
+    "Impossible de lire votre droit sur les services. Réessayez.",
   );
   await sim(page, (s) => {
     s.failRightsReads = false;

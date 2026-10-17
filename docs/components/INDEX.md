@@ -90,6 +90,9 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`PasswordDialog`](./PasswordDialog.md) — Changement de mot de passe (le sien ou celui d'un autre compte).
 - [`OwnAccountCard`](./OwnAccountCard.md) — « Mon compte » d'un serveur dans les réglages.
 - [`AgentUpdateCard`](./AgentUpdateCard.md) — « État du serveur : {nom} » : versions, mise à jour de l'agent, étapes, résultat.
+- [`OperationCard`](./OperationCard.md) — La carte d'une opération de service : étape, progression, qui l'a lancée, bouton de la décision.
+- [`OperationsStrip`](./OperationsStrip.md) — La bande « Opérations en cours » de la section Services.
+- [`OperationDecisionDialog`](./OperationDecisionDialog.md) — La fenêtre de décision d'une opération (acte confirmé, mot de passe à chaque réponse).
 - [`AgentUpdateSteps`](./AgentUpdateSteps.md) — Les étapes d'une mise à jour de l'agent (téléchargement, vérification, installation, redémarrage, contrôle).
 - [`MachineCard`](./MachineCard.md) — Sections Machine et Durée de fonctionnement.
 - [`CpuCard`](./CpuCard.md) — Section Processeur (jauge, courbe, cœurs).

@@ -749,6 +749,26 @@ CODE=$(adopt_call POST "/services/$ESCAPED_PATH/release" "$ADOPT_TOKEN" "$CONFIR
 CONFIRMED=$(printf '{}'     | python3 /deploy/e2e/admin_act.py confirm-release 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "$PW" "$ADOPT_KEYFILE" "$ESCAPED_KEY")     || die "relâche : confirmation non signée (autre clé)"
 CODE=$(adopt_call POST "/services/$OTHER_KEY/release" "$ADOPT_TOKEN" "$CONFIRMED")
 { [ "$CODE" = 409 ] && body_matches '"reason": *"proof_invalid"'; } || die "relâche : une preuve pour une autre clé devrait être refusée, proof_invalid (reçu $CODE) : $(cat "$OUT.body")"
+# --------------------------------------------------------------------------------------------
+# HRT-64 : démarrer, arrêter, redémarrer. Sans moteur de conteneurs on ne peut pas piloter un vrai service ici
+# (le vrai moteur est dans le job `engine`). Ce que cette étape prouve sur un vrai agent sous systemd : les trois
+# routes EXIGENT la confirmation, `admin_act.py` signe exactement la clé que l'agent reconstruit du chemin (codes
+# d'acte 0x0C, 0x0D, 0x0E), une preuve signée pour une autre clé est refusée, et un moteur absent est refusé
+# tout de suite, de façon typée (503 ENGINE_UNAVAILABLE), le refus étant au journal d'activité.
+# --------------------------------------------------------------------------------------------
+for VERB in start stop restart; do
+    CODE=$(adopt_call POST "/services/$UNKNOWN_KEY/$VERB" "$ADOPT_TOKEN" '{}')
+    { [ "$CODE" = 426 ] && body_matches '"reason": *"reauth_required"'; } || die "$VERB sans confirmation : 426 reauth_required attendu (reçu $CODE) : $(cat "$OUT.body")"
+    CONFIRMED=$(printf '{}'         | python3 /deploy/e2e/admin_act.py confirm-service "$VERB" 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "$PW" "$ADOPT_KEYFILE" "$UNKNOWN_KEY")         || die "$VERB : confirmation non signée"
+    CODE=$(adopt_call POST "/services/$UNKNOWN_KEY/$VERB" "$ADOPT_TOKEN" "$CONFIRMED")
+    { [ "$CODE" = 503 ] && body_matches '"code": *"ENGINE_UNAVAILABLE"' && body_matches '"engine": *"absent"'; } || die "$VERB confirmé sans moteur : 503 ENGINE_UNAVAILABLE (engine absent) attendu (reçu $CODE) : $(cat "$OUT.body")"
+    # Une preuve NEUVE signée pour une clé, envoyée pour une autre : refusée (la cible ne colle pas).
+    CONFIRMED=$(printf '{}'         | python3 /deploy/e2e/admin_act.py confirm-service "$VERB" 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "$PW" "$ADOPT_KEYFILE" "$UNKNOWN_KEY")         || die "$VERB : confirmation non signée (autre clé)"
+    CODE=$(adopt_call POST "/services/$OTHER_KEY/$VERB" "$ADOPT_TOKEN" "$CONFIRMED")
+    { [ "$CODE" = 409 ] && body_matches '"reason": *"proof_invalid"'; } || die "$VERB : une preuve pour une autre clé devrait être refusée, proof_invalid (reçu $CODE) : $(cat "$OUT.body")"
+    [ "$(audit_count "service.$VERB" failed)" = 1 ] || die "$VERB : le refus (moteur inaccessible) devrait être au journal, une entrée"
+done
+ok "démarrer, arrêter, redémarrer de bout en bout (sans moteur) : confirmation exigée, preuve reconnue, preuve pour une autre clé refusée, moteur absent refusé et consigné"
 run "$INSTALLED" account services "$USER_NAME" --revoke || die "adoption : retrait du droit"
 [ "$(adopt_call GET /services/external "$ADOPT_TOKEN")" = 403 ] || die "adoption : droit retiré, la liste des candidats devrait être refusée : $(cat "$OUT.body")"
 ok "adoption et relâche de bout en bout (sans moteur) : droit exigé, lecture des candidats au journal, confirmation exigée, preuve reconnue, preuve pour une autre clé refusée, clé au nom échappé, moteur non prêt"

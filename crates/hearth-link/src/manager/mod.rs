@@ -94,6 +94,9 @@ pub struct LinkConfig {
     pub restart_delay: Duration,
     /// Attente avant de relire une opération que l'agent dit « en cours ».
     pub recheck_delay: Duration,
+    /// Attente, après le retour du lien, avant de relire les opérations de service que l'agent n'a pas
+    /// redites à l'abonnement (HRT-84, BR-RESIL-010) : 2 s.
+    pub ops_resync_delay: Duration,
     /// S'abonner aussi au journal d'activité (compte administrateur).
     pub subscribe_audit: bool,
     /// Taille du canal d'événements.
@@ -113,6 +116,7 @@ impl Default for LinkConfig {
             snapshot_save_period: Duration::from_secs(30),
             restart_delay: Duration::from_secs(1),
             recheck_delay: Duration::from_millis(500),
+            ops_resync_delay: Duration::from_secs(2),
             subscribe_audit: false,
             event_capacity: 1024,
         }

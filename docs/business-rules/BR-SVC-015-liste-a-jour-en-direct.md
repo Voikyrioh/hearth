@@ -11,7 +11,7 @@ maj: 2026-10-13
 # BR-SVC-015 — La liste se tient à jour en direct (delta sous 500 ms, relecture au retour)
 
 ## Règle
-La liste se tient à jour sans rechargement, dans les 5 secondes après le changement réel (création, suppression, changement d'état, y compris en ligne de commande). L'agent suit les événements du moteur : les événements d'un lot de 250 ms sont regroupés, chaque conteneur touché est relu (un seul), et un delta part moins de 500 ms après l'événement ; une rupture du flux déclenche une sonde puis une relecture complète. Un abonné trop lent reçoit un nouvel instantané.
+La liste se tient à jour sans rechargement, dans les 5 secondes après le changement réel (création, suppression, changement d'état, y compris en ligne de commande). L'agent suit les événements du moteur : les événements d'un lot de 250 ms sont regroupés, chaque conteneur touché est relu (un seul), et un delta part moins de 500 ms après l'événement ; une rupture du flux déclenche une sonde puis une relecture complète. Un abonné trop lent reçoit un nouvel instantané. Les actions de Hearth (HRT-64) sont des changements comme les autres : l'étape annoncée (« Arrêt en cours », « Démarrage ») et la fin de l'action font chacune un delta, et les démarrages que Hearth demande sont exemptés de l'anti-boucle (BR-SVC-006).
 
 ## Application (code)
 - `crates/hearth-agent/src/application/services.rs::ServicesRegistry::{ready_phase, refresh, resync, commit}`

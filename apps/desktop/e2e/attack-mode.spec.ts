@@ -87,13 +87,13 @@ test("alerte : le bandeau s'affiche sur toutes les pages, activer depuis l'alert
   await alertBanner(page).getByRole("button", { name: "Activer le mode attaque" }).click();
   await expect(dialog(page)).toContainText("Activer le mode attaque ?");
   // Comme les autres fenêtres à mot de passe : le champ reçoit le focus à l'ouverture.
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toBeFocused();
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toBeFocused();
   // Mauvais mot de passe : refusé DANS la fenêtre, le champ est vidé.
-  await dialog(page).getByLabel("Ton mot de passe").fill("Faux-Mot-De-Passe-1");
+  await dialog(page).getByLabel("Votre mot de passe").fill("Faux-Mot-De-Passe-1");
   await dialog(page).getByRole("button", { name: "Activer le mode attaque" }).click();
   await expect(dialog(page)).toContainText("Mot de passe actuel incorrect.");
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveValue("");
-  await dialog(page).getByLabel("Ton mot de passe").fill(GOOD);
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toHaveValue("");
+  await dialog(page).getByLabel("Votre mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Activer le mode attaque" }).click();
   await expect(dialog(page)).toHaveCount(0);
   // Les deux bandeaux coexistent ; la marque passe au mode attaque.
@@ -123,7 +123,7 @@ test("page Sécurité : carte du mode attaque, désactivation, variante suspendu
   await expect(page.locator("[data-attack-mode-state]")).toHaveText("Actif");
   await page.getByRole("button", { name: "Désactiver le mode attaque" }).click();
   await expect(dialog(page)).toContainText("Désactiver le mode attaque ?");
-  await dialog(page).getByLabel("Ton mot de passe").fill(GOOD);
+  await dialog(page).getByLabel("Votre mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Désactiver le mode attaque" }).click();
   await expect(page.locator("[data-attack-mode-state]")).toHaveText("Inactif");
   await expect(modeBanner(page)).toHaveCount(0);

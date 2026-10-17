@@ -72,7 +72,7 @@ describe("le droit de gérer les services par le pont réel", () => {
     const failure = (error as LinkCommandError).failure;
     expect(failure).toEqual({ kind: "missing_services_right" });
     const text = failureMessage(failure);
-    expect(text).toBe("Tu n'as pas le droit de gérer les services de ce serveur.");
+    expect(text).toBe("Vous n'avez pas le droit de gérer les services de ce serveur.");
     expect(text).not.toMatch(/administrateur|rôle/i);
   });
 
