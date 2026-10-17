@@ -15,11 +15,11 @@ Une fois l'arrêt terminé, une surveillance de 30 secondes relit le service. S'
 
 ## Application (code)
 - `crates/hearth-agent/src/application/service_lifecycle.rs::ServiceLifecycle::{watch, still_last}`
-- `crates/hearth-agent/src/domain/ops/lifecycle.rs::{RESTART_WATCH, AfterStop, cause_after_stop}`
+- `crates/hearth-agent/src/domain/ops/lifecycle.rs::{RESTART_WATCH, Watch, Sighting, cause_after}`
 
 ## Vérification
 - `crates/hearth-agent/tests/service_lifecycle_https.rs::a_service_that_comes_back_alone_after_a_stop_is_told_and_one_that_stays_stopped_is_not`
-- `crates/hearth-agent/src/domain/ops/lifecycle.rs::tests::a_service_that_comes_back_is_told_and_one_that_stays_stopped_says_nothing`
+- `crates/hearth-agent/src/domain/ops/lifecycle.rs::tests::the_watch_after_an_action_says_only_what_it_guards_against`
 
 ## Cas limites
 - Sur NixOS, arrêter un conteneur `--rm` par l'API du moteur le fait relancer par l'unité : c'est pourquoi un service supervisé est piloté par son unité (BR-LIFE-002).

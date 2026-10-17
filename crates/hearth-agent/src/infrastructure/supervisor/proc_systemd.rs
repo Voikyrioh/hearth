@@ -35,10 +35,10 @@ use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
 use crate::application::ports::{ContainerRef, ServiceSupervisor, SupervisorError};
-use crate::domain::services::unit::SHOW_PROPERTIES;
+use crate::domain::services::unit::{SHOW_PROPERTIES, STOP_TIMES_PROPERTIES};
 use crate::domain::services::{
     ClientClaim, UnitLookup, UnitName, attribute, client_refs, is_engine_client, parse_main_pid,
-    parse_show, unit_of_cgroup,
+    parse_show, parse_stop_duration, unit_of_cgroup,
 };
 use crate::infrastructure::install::scrub::scrubbed;
 
@@ -85,10 +85,15 @@ impl ProcSystemd {
     /// Lance `systemctl show` ; `None` si la commande n'existe pas, échoue, dépasse son délai ou ne
     /// rend rien d'exploitable.
     async fn show(&self, unit: &UnitName) -> Option<String> {
+        self.show_properties(unit, SHOW_PROPERTIES).await
+    }
+
+    /// `systemctl show` pour une liste fermée de propriétés (une constante du domaine, jamais un texte reçu).
+    async fn show_properties(&self, unit: &UnitName, properties: &'static str) -> Option<String> {
         let mut command = tokio::process::Command::from(scrubbed(&self.systemctl));
         command
             .arg("show")
-            .arg(format!("--property={SHOW_PROPERTIES}"))
+            .arg(format!("--property={properties}"))
             .arg("--")
             .arg(unit.as_str())
             .stdin(Stdio::null())
@@ -213,6 +218,12 @@ impl ServiceSupervisor for ProcSystemd {
 
     async fn restart(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError> {
         self.order(Order::Restart, unit, wait).await
+    }
+
+    async fn last_stop_duration(&self, unit: &UnitName) -> Option<Duration> {
+        self.show_properties(unit, STOP_TIMES_PROPERTIES)
+            .await
+            .and_then(|text| parse_stop_duration(&text))
     }
 }
 

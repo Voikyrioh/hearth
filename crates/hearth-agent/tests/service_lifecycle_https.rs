@@ -444,6 +444,72 @@ async fn a_restart_whose_start_meets_a_taken_port_leaves_the_service_stopped_not
     assert_eq!(b.state_of(&key), ServiceStateKind::Stopped);
 }
 
+#[tokio::test]
+async fn a_restart_is_forced_by_the_time_its_stop_took_never_by_its_start() {
+    // BR-LIFE-009, BR-LIFE-012 : le démarrage remet le code de sortie à zéro ; c'est la fin de l'exécution
+    // arrêtée (l'heure du moteur) moins l'heure de l'ordre qui dit si l'arrêt a pris tout son délai.
+    let b = bench().await;
+    let (key, id) = publish_with(&b, "terraria", RunState::Running, |c| {
+        c.stop_timeout_s = Some(1);
+    })
+    .await;
+    b.engine.make_stubborn(&id);
+    // L'exécution arrêtée finit une seconde après l'ordre : tout le délai.
+    let accepted = b.accepted("restart", &key).await;
+    let operation = b.finished(&accepted.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    assert_eq!(operation.cause, Some(OperationCause::ForcedStop));
+    assert!(b.last_action(&key).await.forced);
+
+    // Un service au délai plus long, arrêté en une seconde : pas forcé, quoi que dure le démarrage.
+    let (slow, _) = publish_with(&b, "valheim", RunState::Running, |c| {
+        c.stop_timeout_s = Some(30);
+    })
+    .await;
+    let accepted = b.accepted("restart", &slow).await;
+    let operation = b.finished(&accepted.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    assert_eq!(operation.cause, None);
+    assert!(!b.last_action(&slow).await.forced);
+}
+
+#[tokio::test]
+async fn a_unit_is_judged_forced_by_the_stop_the_system_measured() {
+    // BR-LIFE-009 : pour une unité, la durée de l'arrêt que le système a datée, démarrage exclu.
+    let b = bench().await;
+    let unit = unit_named("docker-7dtd.service");
+    let observation = container("7dtd", RunState::Running);
+    b.supervisor.set_owner(&observation.id, &unit);
+    b.supervisor.set_status(
+        &unit,
+        hearth_agent::domain::services::UnitStatus {
+            timeout_stop_s: Some(1),
+            ..running_unit()
+        },
+    );
+    b.engine.put_silently(observation);
+    b.agent.services().resync().await.expect("liste");
+    let key = "u_docker-7dtd.service";
+    b.env.adopt(key, "7dtd", "ada").await;
+    b.agent.services().reload_adopted().await;
+
+    // L'arrêt de l'unité a pris tout son délai : forcé.
+    b.supervisor.set_stop_delay(&unit, Duration::from_secs(1));
+    let accepted = b.accepted("restart", key).await;
+    assert_eq!(accepted.grace_s, 1);
+    let operation = b.finished(&accepted.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    assert_eq!(operation.cause, Some(OperationCause::ForcedStop));
+
+    // Un arrêt rapide : pas forcé.
+    b.supervisor
+        .set_stop_delay(&unit, Duration::from_millis(100));
+    let accepted = b.accepted("restart", key).await;
+    let operation = b.finished(&accepted.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    assert_eq!(operation.cause, None);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Les refus synchrones (BR-LIFE-013 à BR-LIFE-015, BR-LIFE-019, BR-LIFE-023, BR-LIFE-024)
 // ---------------------------------------------------------------------------------------------

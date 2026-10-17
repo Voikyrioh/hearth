@@ -15,11 +15,12 @@ Une fois l'action terminée (le verrou est rendu, aucune autre action n'est bloq
 
 ## Application (code)
 - `crates/hearth-agent/src/application/service_lifecycle.rs::ServiceLifecycle::{watch, watch_later}`
-- `crates/hearth-agent/src/domain/ops/lifecycle.rs::{STARTUP_WATCH, cause_of_early_exit}`
+- `crates/hearth-agent/src/domain/ops/lifecycle.rs::{STARTUP_WATCH, Watch, Sighting, cause_after}`
 - `crates/hearth-agent/src/infrastructure/sqlite/ops_repo.rs::SqliteOpJournal::annotate_cause`
 
 ## Vérification
 - `crates/hearth-agent/tests/service_lifecycle_https.rs::a_service_that_stops_right_after_its_start_is_noted_on_the_finished_action`
+- `crates/hearth-agent/src/domain/ops/lifecycle.rs::tests::the_watch_after_an_action_says_only_what_it_guards_against`
 - `crates/hearth-agent/tests/service_ops_journal.rs::forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_only`
 
 ## Cas limites

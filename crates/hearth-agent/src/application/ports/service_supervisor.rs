@@ -62,4 +62,11 @@ pub trait ServiceSupervisor: Send + Sync {
     /// Redémarre l'unité d'un seul geste du système (BR-LIFE-012 : une étape trop brève peut ne pas se voir)
     /// et attend, au plus `wait`.
     async fn restart(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError>;
+
+    /// Combien de temps le dernier arrêt de l'unité a duré, mesuré par le système (BR-LIFE-009) : de la sortie
+    /// d'« active » à l'arrivée à « inactive », démarrage d'un redémarrage exclu. `None` : le superviseur ne le
+    /// sait pas (pas de réponse, unité jamais arrêtée) ; l'arrêt n'est alors jamais dit forcé.
+    async fn last_stop_duration(&self, _unit: &UnitName) -> Option<Duration> {
+        None
+    }
 }

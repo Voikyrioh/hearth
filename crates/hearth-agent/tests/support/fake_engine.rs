@@ -705,7 +705,17 @@ impl ContainerEngine for FakeEngine {
             .calls
             .push(Call::Restart(id.to_owned(), grace));
         self.do_stop(id, grace).await?;
-        self.do_start(id)
+        let finished = self
+            .lock()
+            .containers
+            .get(id)
+            .and_then(|container| container.finished_at);
+        self.do_start(id)?;
+        // Comme le vrai moteur : le démarrage remet le code à zéro mais garde la fin de l'exécution arrêtée.
+        if let Some(container) = self.lock().containers.get_mut(id) {
+            container.finished_at = finished;
+        }
+        Ok(())
     }
 
     fn events(&self) -> EngineEvents {

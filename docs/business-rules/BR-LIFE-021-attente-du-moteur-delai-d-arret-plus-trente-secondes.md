@@ -16,7 +16,7 @@ L'attente d'un ordre est `max(délai d'arrêt + 30 s, 60 s)` (`wait_budget`), la
 ## Application (code)
 - `crates/hearth-agent/src/domain/ops/lifecycle.rs::{wait_budget, wait_budget_with}`
 - `crates/hearth-agent/src/application/service_lifecycle.rs::{LifecycleTimings::wait_for, ServiceLifecycle::order}`
-- `crates/hearth-agent/src/infrastructure/engine/bollard.rs::BollardEngine::docker_for_stop`
+- `crates/hearth-agent/src/infrastructure/engine/bollard.rs::BollardEngine::docker_for_order`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/ops/lifecycle.rs::tests::the_wait_is_the_grace_plus_thirty_seconds_and_at_least_sixty`

@@ -34,8 +34,8 @@ pub use flush::{MAX_TRACKED_OPS, OpFlush};
 pub use index::{MAX_INDEXED_SERVICES, OpSummary, OpsIndex, ServiceOpsEntry};
 pub use kind::{Cause, Choice, OpKind, OpStatus};
 pub use lifecycle::{
-    AfterStop, Gesture, KILLED_EXIT_CODE, RESTART_WATCH, STARTUP_WATCH, StateRefusal, WAIT_FLOOR,
-    WAIT_MARGIN, check_state, engine_ready, engine_stop_was_forced, supervised_stop_was_forced,
+    Gesture, KILLED_EXIT_CODE, RESTART_WATCH, STARTUP_WATCH, Sighting, StateRefusal, StopEvidence,
+    WAIT_FLOOR, WAIT_MARGIN, Watch, cause_after, check_state, engine_ready, stop_was_forced,
     wait_budget, wait_budget_with,
 };
 pub use locks::{Holder, LockMode, LockTable, ReadKind, Refusal};

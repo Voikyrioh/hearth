@@ -110,7 +110,7 @@ pub fn engine_ready(state: EngineState) -> bool {
     state == EngineState::Ready
 }
 
-/// Combien d'ordres de grâce plus tard on cesse d'attendre le moteur : le délai d'arrêt du service plus 30
+/// Au bout de combien de temps on cesse d'attendre le pilote : le délai d'arrêt du service plus 30
 /// secondes, au moins 60 secondes (BR-LIFE-021).
 pub fn wait_budget(grace_s: u32) -> Duration {
     wait_budget_with(grace_s, WAIT_MARGIN, WAIT_FLOOR)
@@ -146,44 +146,84 @@ const FORCED_TOLERANCE: Duration = Duration::from_secs(1);
 /// Le code de sortie d'un processus tué (`SIGKILL`).
 pub const KILLED_EXIT_CODE: i64 = 137;
 
-/// L'arrêt d'un service piloté par le moteur a-t-il été forcé ? Il l'est quand le processus est mort sous un
-/// `SIGKILL` (code 137) APRÈS que le délai de grâce s'est écoulé (BR-LIFE-009). Un 137 plus tôt est un autre
-/// tueur (mémoire épuisée, ordre venu d'ailleurs) : ce n'est pas l'arrêt de Hearth qui l'a forcé.
-pub fn engine_stop_was_forced(exit_code: Option<i64>, elapsed: Duration, grace_s: u32) -> bool {
-    exit_code == Some(KILLED_EXIT_CODE)
-        && elapsed + FORCED_TOLERANCE >= Duration::from_secs(u64::from(grace_s))
-}
-
-/// L'arrêt d'un service piloté par le système du serveur a-t-il été forcé ? Le système ne rend pas le code de
-/// sortie : un arrêt qui a pris tout son délai d'arrêt est tenu pour forcé (le système envoie `SIGKILL` à
-/// l'échéance). Limite assumée, dite dans l'ADR-0037 : un arrêt propre qui finit pile à l'échéance est pris
-/// pour un arrêt forcé.
-pub fn supervised_stop_was_forced(elapsed: Duration, grace_s: u32) -> bool {
-    grace_s > 0 && elapsed >= Duration::from_secs(u64::from(grace_s))
-}
-
-/// Ce qui est arrivé à un service surveillé après un arrêt voulu.
+/// Ce que l'agent sait de l'arrêt qui vient d'avoir lieu, pour juger s'il a été forcé (BR-LIFE-009).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AfterStop {
-    /// Il est resté arrêté pendant toute la surveillance.
-    StayedStopped,
-    /// Il tourne de nouveau : une règle du serveur l'a relancé.
-    CameBack,
+pub enum StopEvidence {
+    /// Le moteur rend le code de sortie de l'exécution arrêtée ; l'agent a mesuré son attente de l'ordre.
+    ExitCode { code: Option<i64>, waited: Duration },
+    /// Le pilote ne rend pas de code : la durée de l'arrêt seule, mesurée au plus près de lui (le système
+    /// pour une unité, la fin d'exécution du moteur pour un redémarrage, l'attente de l'agent à défaut).
+    Took(Duration),
+    /// Rien de fiable : un redémarrage dont l'arrêt n'a pas pu être daté.
+    Unknown,
 }
 
-/// La cause d'une opération terminée par un arrêt que le serveur a défait (BR-LIFE-011).
-pub const fn cause_after_stop(after: AfterStop) -> Option<Cause> {
-    match after {
-        AfterStop::StayedStopped => None,
-        AfterStop::CameBack => Some(Cause::RestartedByHost),
+/// L'arrêt a-t-il été forcé ?
+///
+/// - avec le code de sortie : le processus est mort sous `SIGKILL` (137) APRÈS que le délai de grâce s'est
+///   écoulé. Un 137 plus tôt est un autre tueur (mémoire épuisée, ordre venu d'ailleurs) : ce n'est pas
+///   l'arrêt de Hearth qui l'a forcé ;
+/// - avec la seule durée : l'arrêt a pris tout son délai (le pilote envoie `SIGKILL` à l'échéance). Limite
+///   assumée, dite dans l'ADR-0037 : un arrêt propre qui finit pile à l'échéance est pris pour forcé ;
+/// - sans rien : jamais forcé (on ne l'annonce pas sans le savoir).
+///
+/// Un délai illimité ou illisible (zéro) ne se dépasse pas.
+pub fn stop_was_forced(evidence: StopEvidence, grace_s: u32) -> bool {
+    let grace = Duration::from_secs(u64::from(grace_s));
+    match evidence {
+        StopEvidence::ExitCode { code, waited } => {
+            code == Some(KILLED_EXIT_CODE) && waited + FORCED_TOLERANCE >= grace
+        }
+        StopEvidence::Took(took) => grace_s > 0 && took >= grace,
+        StopEvidence::Unknown => false,
     }
 }
 
-/// Un démarrage dont le programme s'est arrêté aussitôt (BR-LIFE-005). Un code zéro est une fin normale mais
-/// l'action a quand même échoué à tenir le service en marche : la cause est la même, le code de sortie fait la
-/// différence dans le message du client.
-pub const fn cause_of_early_exit() -> Cause {
-    Cause::StoppedRightAfterStart
+/// Ce que la surveillance qui suit une action terminée guette (BR-LIFE-005, BR-LIFE-011).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Watch {
+    /// Le service vient d'être lancé : s'arrête-t-il aussitôt ?
+    Started,
+    /// Le service vient d'être arrêté : repart-il tout seul ?
+    Stopped,
+}
+
+impl Watch {
+    /// Ce que le geste laisse à surveiller une fois réussi.
+    pub const fn after(gesture: Gesture) -> Self {
+        if gesture.leaves_running() {
+            Self::Started
+        } else {
+            Self::Stopped
+        }
+    }
+}
+
+/// Ce que le pilote dit d'un service à un instant, quel qu'il soit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sighting {
+    Running,
+    /// Le pilote le relance (moteur « en relance », unité « en activation »).
+    Restarting,
+    Stopped,
+    /// Le conteneur ou l'unité n'existe plus.
+    Gone,
+    /// Le pilote n'a pas répondu : on ne sait rien.
+    Unknown,
+}
+
+/// La cause que la surveillance pose sur l'action terminée, ou `None` tant que rien n'est à dire : un service
+/// lancé qui s'arrête ou que le pilote relance (`stopped_right_after_start`, BR-LIFE-005), un service arrêté
+/// qui tourne de nouveau (`restarted_by_host`, BR-LIFE-011). Le code de sortie n'y entre pas : un code zéro
+/// est une fin normale mais l'action a quand même échoué à tenir le service en marche.
+pub const fn cause_after(watch: Watch, seen: Sighting) -> Option<Cause> {
+    match (watch, seen) {
+        (Watch::Started, Sighting::Stopped | Sighting::Restarting | Sighting::Gone) => {
+            Some(Cause::StoppedRightAfterStart)
+        }
+        (Watch::Stopped, Sighting::Running | Sighting::Restarting) => Some(Cause::RestartedByHost),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -305,55 +345,56 @@ mod tests {
     #[test]
     fn a_kill_after_the_grace_is_a_forced_stop_and_an_earlier_one_is_not() {
         let grace = 10;
-        assert!(engine_stop_was_forced(
-            Some(137),
-            Duration::from_secs(10),
-            grace
-        ));
-        assert!(engine_stop_was_forced(
-            Some(137),
-            Duration::from_millis(9_200),
-            grace
-        ));
-        assert!(!engine_stop_was_forced(
-            Some(137),
-            Duration::from_secs(2),
-            grace
-        ));
-        assert!(!engine_stop_was_forced(
-            Some(0),
-            Duration::from_secs(10),
-            grace
-        ));
-        assert!(!engine_stop_was_forced(
-            Some(143),
-            Duration::from_secs(10),
-            grace
-        ));
-        assert!(!engine_stop_was_forced(
-            None,
-            Duration::from_secs(10),
-            grace
-        ));
+        let exit = |code, waited_ms| StopEvidence::ExitCode {
+            code,
+            waited: Duration::from_millis(waited_ms),
+        };
+        assert!(stop_was_forced(exit(Some(137), 10_000), grace));
+        assert!(stop_was_forced(exit(Some(137), 9_200), grace));
+        assert!(!stop_was_forced(exit(Some(137), 2_000), grace));
+        assert!(!stop_was_forced(exit(Some(0), 10_000), grace));
+        assert!(!stop_was_forced(exit(Some(143), 10_000), grace));
+        assert!(!stop_was_forced(exit(None, 10_000), grace));
     }
 
     #[test]
-    fn a_supervised_stop_is_forced_only_when_it_used_its_whole_delay() {
-        assert!(supervised_stop_was_forced(Duration::from_secs(120), 120));
-        assert!(supervised_stop_was_forced(Duration::from_secs(150), 120));
-        assert!(!supervised_stop_was_forced(Duration::from_secs(3), 120));
+    fn a_stop_known_by_its_duration_is_forced_only_when_it_used_its_whole_delay() {
+        let took = |s| StopEvidence::Took(Duration::from_secs(s));
+        assert!(stop_was_forced(took(120), 120));
+        assert!(stop_was_forced(took(150), 120));
+        assert!(!stop_was_forced(took(3), 120));
         // Un délai illimité ou illisible (zéro) ne se dépasse pas.
-        assert!(!supervised_stop_was_forced(Duration::from_secs(500), 0));
+        assert!(!stop_was_forced(took(500), 0));
+        // Sans rien de fiable, jamais annoncé.
+        assert!(!stop_was_forced(StopEvidence::Unknown, 120));
     }
 
     #[test]
-    fn a_service_that_comes_back_is_told_and_one_that_stays_stopped_says_nothing() {
-        assert_eq!(cause_after_stop(AfterStop::StayedStopped), None);
-        assert_eq!(
-            cause_after_stop(AfterStop::CameBack),
-            Some(Cause::RestartedByHost)
-        );
-        assert_eq!(cause_of_early_exit(), Cause::StoppedRightAfterStart);
+    fn the_watch_after_an_action_says_only_what_it_guards_against() {
+        use Sighting as S;
+        for seen in [S::Stopped, S::Restarting, S::Gone] {
+            assert_eq!(
+                cause_after(Watch::Started, seen),
+                Some(Cause::StoppedRightAfterStart),
+                "{seen:?}"
+            );
+        }
+        for seen in [S::Running, S::Unknown] {
+            assert_eq!(cause_after(Watch::Started, seen), None, "{seen:?}");
+        }
+        for seen in [S::Running, S::Restarting] {
+            assert_eq!(
+                cause_after(Watch::Stopped, seen),
+                Some(Cause::RestartedByHost),
+                "{seen:?}"
+            );
+        }
+        for seen in [S::Stopped, S::Gone, S::Unknown] {
+            assert_eq!(cause_after(Watch::Stopped, seen), None, "{seen:?}");
+        }
+        assert_eq!(Watch::after(Gesture::Start), Watch::Started);
+        assert_eq!(Watch::after(Gesture::Restart), Watch::Started);
+        assert_eq!(Watch::after(Gesture::Stop), Watch::Stopped);
     }
 
     #[test]

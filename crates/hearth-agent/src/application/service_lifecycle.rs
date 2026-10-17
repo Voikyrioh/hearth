@@ -45,9 +45,9 @@ use super::service_ops::{AcceptRequest, InterruptedAction, OpError, ServiceOps};
 use super::services::{Driver, LifecycleTarget, ServicesRegistry};
 use crate::domain::audit::{Actor, ClientName, LifecycleNote, Outcome, Reason, Target};
 use crate::domain::ops::{
-    Cause, Gesture, Holder, OpKind, OpStatus, RESTART_WATCH, Refusal, STARTUP_WATCH, StateRefusal,
-    UndoInfo, WAIT_FLOOR, WAIT_MARGIN, check_state, engine_ready, engine_stop_was_forced,
-    supervised_stop_was_forced, wait_budget_with,
+    Cause, Gesture, Holder, OpKind, OpStatus, RESTART_WATCH, Refusal, STARTUP_WATCH, Sighting,
+    StateRefusal, StopEvidence, UndoInfo, WAIT_FLOOR, WAIT_MARGIN, Watch, cause_after, check_state,
+    engine_ready, stop_was_forced, wait_budget_with,
 };
 use crate::domain::services::{
     EngineState, RunState, ServiceKey, ServiceStateKind, TransitionKind, UnitActivity, UnitLookup,
@@ -163,14 +163,6 @@ impl Finish {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Watch {
-    /// Le service vient d'être lancé : s'arrête-t-il aussitôt ?
-    Started,
-    /// Le service vient d'être arrêté : repart-il tout seul ?
-    Stopped,
-}
-
 /// Pourquoi un ordre n'a pas abouti, indépendamment du pilote (jamais un texte du moteur).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OrderFailure {
@@ -220,21 +212,6 @@ impl OrderFailure {
             Self::TimedOut => Finish::unknown(Cause::Timeout),
         }
     }
-}
-
-/// Ce que la lecture du service dit de lui, par n'importe quel pilote.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Seen {
-    Running,
-    /// Le moteur le relance (état « en relance »).
-    Restarting,
-    Stopped {
-        exit_code: Option<i64>,
-    },
-    /// Le conteneur ou l'unité n'existe plus.
-    Gone,
-    /// Le pilote n'a pas répondu : on ne sait rien.
-    Unknown,
 }
 
 /// L'étape annoncée tant que l'action dure, retirée quoi qu'il arrive (même si la tâche est abandonnée).
@@ -377,10 +354,12 @@ impl ServiceLifecycle {
             })?;
         if let Err(error) = self.ops.start(&id).await {
             // L'opération ne peut pas démarrer : elle est close, le verrou rendu, rien n'a été ordonné.
-            let _ = self
-                .ops
-                .finish(&id, OpStatus::Failed, Some(Cause::StepFailed))
-                .await;
+            journal(
+                self.ops
+                    .finish(&id, OpStatus::Failed, Some(Cause::StepFailed))
+                    .await,
+                "finish",
+            );
             return Err(LifecycleError::Internal(error.to_string()));
         }
         let accepted = Accepted {
@@ -424,6 +403,7 @@ impl ServiceLifecycle {
     // -----------------------------------------------------------------------------------------
 
     async fn execute(self: Arc<Self>, job: Job) {
+        let began = Instant::now();
         let finish = {
             // L'étape annoncée ne survit pas à l'action, ni à la tâche si elle est abandonnée.
             let _step = StepShown {
@@ -437,7 +417,7 @@ impl ServiceLifecycle {
                 Gesture::Restart => self.run_restart(&job, started).await,
             }
         };
-        self.settle(&job, finish).await;
+        self.settle(&job, finish, began.elapsed()).await;
     }
 
     /// Arrêter : l'arrêt voulu est écrit AVANT l'ordre (`BR-LIFE-010`).
@@ -464,20 +444,23 @@ impl ServiceLifecycle {
         }
         self.registry
             .begin_transition(key, TransitionKind::Stopping);
+        let ordered_at = self.clock.now();
         let ordered = self.order(job).await;
         match ordered {
             Ok(()) => {
-                let _ = self.ops.done(&job.id, "stop", &UndoInfo::default()).await;
-                let forced = self.stop_was_forced(job, started.elapsed()).await;
-                if forced {
-                    let _ = self.ops.mark_forced(&job.id).await;
-                }
+                journal(
+                    self.ops.done(&job.id, "stop", &UndoInfo::default()).await,
+                    "done",
+                );
+                let forced = self
+                    .stop_was_forced(job, started.elapsed(), ordered_at)
+                    .await;
                 self.refresh(job).await;
-                Finish::done(forced, Watch::Stopped)
+                Finish::done(forced, Watch::after(job.gesture))
             }
             Err(failure) => {
                 let finish = failure.finish();
-                let _ = self.ops.failed(&job.id, "stop").await;
+                journal(self.ops.failed(&job.id, "stop").await, "failed");
                 // L'ordre n'a pas eu lieu (refusé, pilote absent, service disparu) : rien n'a été arrêté, l'arrêt
                 // voulu n'a pas lieu d'être. Un résultat inconnu le garde : l'arrêt a peut-être eu lieu.
                 if finish.status == OpStatus::Failed {
@@ -504,14 +487,17 @@ impl ServiceLifecycle {
             .begin_transition(key, TransitionKind::Starting);
         match self.order(job).await {
             Ok(()) => {
-                let _ = self.ops.done(&job.id, "start", &UndoInfo::default()).await;
+                journal(
+                    self.ops.done(&job.id, "start", &UndoInfo::default()).await,
+                    "done",
+                );
                 self.forget_stop(key).await;
                 self.exempt_starts(job);
                 self.refresh(job).await;
-                Finish::done(false, Watch::Started)
+                Finish::done(false, Watch::after(job.gesture))
             }
             Err(failure) => {
-                let _ = self.ops.failed(&job.id, "start").await;
+                journal(self.ops.failed(&job.id, "start").await, "failed");
                 self.refresh(job).await;
                 failure.finish()
             }
@@ -532,29 +518,31 @@ impl ServiceLifecycle {
         }
         self.registry
             .begin_transition(key, TransitionKind::Restarting);
+        let ordered_at = self.clock.now();
         match self.order(job).await {
             Ok(()) => {
-                let _ = self
-                    .ops
-                    .done(&job.id, "restart", &UndoInfo::default())
-                    .await;
+                journal(
+                    self.ops
+                        .done(&job.id, "restart", &UndoInfo::default())
+                        .await,
+                    "done",
+                );
                 self.forget_stop(key).await;
                 self.exempt_starts(job);
-                let forced = supervised_stop_was_forced(started.elapsed(), job.target.grace_s);
-                if forced {
-                    let _ = self.ops.mark_forced(&job.id).await;
-                }
+                let forced = self
+                    .stop_was_forced(job, started.elapsed(), ordered_at)
+                    .await;
                 self.refresh(job).await;
-                Finish::done(forced, Watch::Started)
+                Finish::done(forced, Watch::after(job.gesture))
             }
             Err(failure) => {
-                let _ = self.ops.failed(&job.id, "restart").await;
+                journal(self.ops.failed(&job.id, "restart").await, "failed");
                 let finish = failure.finish();
                 // Arrêté puis pas reparti : l'arrêt est celui de Hearth.
                 if finish.status == OpStatus::Failed
                     && matches!(
                         self.seen(&job.target.driver).await,
-                        Seen::Stopped { .. } | Seen::Gone
+                        Sighting::Stopped | Sighting::Gone
                     )
                 {
                     self.keep_stop(job).await;
@@ -609,50 +597,88 @@ impl ServiceLifecycle {
             .unwrap_or(Err(OrderFailure::TimedOut))
     }
 
-    /// L'arrêt qui vient d'aboutir a-t-il été forcé (`BR-LIFE-009`) ? Le moteur dit le code de sortie ; le
-    /// système du serveur, non : le temps pris le dit (`supervised_stop_was_forced`). Un conteneur déjà
-    /// supprimé (il se supprime à l'arrêt) n'a plus de code : le temps aussi.
-    async fn stop_was_forced(&self, job: &Job, elapsed: Duration) -> bool {
-        let grace_s = job.target.grace_s;
-        match &job.target.driver {
-            Driver::Engine { container_id } => match self.engine.inspect(container_id).await {
-                Ok(Some(observation)) => {
-                    engine_stop_was_forced(observation.exit_code, elapsed, grace_s)
+    /// L'arrêt qui vient d'aboutir a-t-il été forcé (`BR-LIFE-009`) ? Le jugement est celui du domaine
+    /// ([`stop_was_forced`]) ; ici, seulement la preuve la plus proche du pilote, et la marque au journal.
+    async fn stop_was_forced(
+        &self,
+        job: &Job,
+        waited: Duration,
+        ordered_at: OffsetDateTime,
+    ) -> bool {
+        let evidence = self.stop_evidence(job, waited, ordered_at).await;
+        let forced = stop_was_forced(evidence, job.target.grace_s);
+        if forced {
+            journal(self.ops.mark_forced(&job.id).await, "forced");
+        }
+        forced
+    }
+
+    /// La preuve de l'arrêt qui vient d'avoir lieu, par pilote et par geste :
+    /// - arrêter par le moteur : le code de sortie et l'attente de l'agent ; un conteneur déjà supprimé (il se
+    ///   supprime à l'arrêt) n'a plus de code : l'attente seule ;
+    /// - redémarrer par le moteur : le démarrage remet le code à zéro ; reste la fin de l'exécution arrêtée
+    ///   (`FinishedAt`, que le démarrage garde) moins l'heure de l'ordre ; sans elle, rien ;
+    /// - par le système : la durée de l'arrêt qu'il a mesurée lui-même, démarrage d'un redémarrage exclu ; à
+    ///   défaut, l'attente de l'agent pour un arrêt, rien pour un redémarrage (elle compte le démarrage).
+    async fn stop_evidence(
+        &self,
+        job: &Job,
+        waited: Duration,
+        ordered_at: OffsetDateTime,
+    ) -> StopEvidence {
+        match (&job.target.driver, job.gesture) {
+            (Driver::Engine { container_id }, Gesture::Restart) => {
+                match self.engine.inspect(container_id).await {
+                    Ok(Some(observation)) => observation
+                        .finished_at
+                        .and_then(|end| Duration::try_from(end - ordered_at).ok())
+                        .map_or(StopEvidence::Unknown, StopEvidence::Took),
+                    _ => StopEvidence::Unknown,
                 }
-                _ => supervised_stop_was_forced(elapsed, grace_s),
+            }
+            (Driver::Engine { container_id }, _) => match self.engine.inspect(container_id).await {
+                Ok(Some(observation)) => StopEvidence::ExitCode {
+                    code: observation.exit_code,
+                    waited,
+                },
+                _ => StopEvidence::Took(waited),
             },
-            Driver::Supervisor { .. } => supervised_stop_was_forced(elapsed, grace_s),
+            (Driver::Supervisor { unit }, gesture) => {
+                match self.supervisor.last_stop_duration(unit).await {
+                    Some(took) => StopEvidence::Took(took),
+                    None if gesture == Gesture::Restart => StopEvidence::Unknown,
+                    None => StopEvidence::Took(waited),
+                }
+            }
         }
     }
 
     /// Ce que le pilote dit du service, maintenant.
-    async fn seen(&self, driver: &Driver) -> Seen {
+    async fn seen(&self, driver: &Driver) -> Sighting {
         match driver {
             Driver::Engine { container_id } => match self.engine.inspect(container_id).await {
                 Ok(Some(observation)) => match observation.run_state {
-                    RunState::Running | RunState::Paused => Seen::Running,
-                    RunState::Restarting => Seen::Restarting,
+                    RunState::Running | RunState::Paused => Sighting::Running,
+                    RunState::Restarting => Sighting::Restarting,
                     RunState::Created | RunState::Exited | RunState::Dead | RunState::Removing => {
-                        Seen::Stopped {
-                            exit_code: observation.exit_code,
-                        }
+                        Sighting::Stopped
                     }
-                    RunState::Unknown => Seen::Unknown,
+                    RunState::Unknown => Sighting::Unknown,
                 },
-                Ok(None) => Seen::Gone,
-                Err(_) => Seen::Unknown,
+                Ok(None) => Sighting::Gone,
+                Err(_) => Sighting::Unknown,
             },
             Driver::Supervisor { unit } => match self.supervisor.unit(unit).await {
                 UnitLookup::Loaded(status) => match status.activity {
-                    UnitActivity::Active => Seen::Running,
-                    UnitActivity::Activating => Seen::Restarting,
+                    UnitActivity::Active => Sighting::Running,
+                    UnitActivity::Activating => Sighting::Restarting,
                     UnitActivity::Inactive | UnitActivity::Failed | UnitActivity::Deactivating => {
-                        Seen::Stopped { exit_code: None }
+                        Sighting::Stopped
                     }
-                    UnitActivity::Other => Seen::Unknown,
+                    UnitActivity::Other => Sighting::Unknown,
                 },
-                UnitLookup::NotLoaded => Seen::Gone,
-                UnitLookup::Unavailable => Seen::Unknown,
+                UnitLookup::NotLoaded => Sighting::Gone,
+                UnitLookup::Unavailable => Sighting::Unknown,
             },
         }
     }
@@ -706,11 +732,21 @@ impl ServiceLifecycle {
         }
     }
 
-    /// Clôt l'opération, la consigne au journal d'activité, puis lance la surveillance qui suit.
-    async fn settle(self: &Arc<Self>, job: &Job, finish: Finish) {
+    /// Clôt l'opération, la consigne au journal d'activité et aux traces, puis lance la surveillance qui suit.
+    /// La trace dit l'opération, jamais le service : sa clé porte le nom d'une unité (`u_`).
+    async fn settle(self: &Arc<Self>, job: &Job, finish: Finish, took: Duration) {
         if let Err(error) = self.ops.finish(&job.id, finish.status, finish.cause).await {
             tracing::error!(%error, "action de service non close dans le journal");
         }
+        tracing::info!(
+            operation = %job.id,
+            kind = job.gesture.step(),
+            status = ?finish.status,
+            cause = finish.cause.map(Cause::as_str),
+            forced = finish.forced,
+            duration_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+            "action de cycle de vie terminée"
+        );
         self.record(job, finish.status, finish.cause).await;
         if let Some(watch) = finish.watch {
             self.watch_later(job, watch);
@@ -750,6 +786,10 @@ impl ServiceLifecycle {
     fn watch_later(self: &Arc<Self>, job: &Job, watch: Watch) {
         if self.watches.fetch_add(1, Ordering::SeqCst) >= MAX_WATCHES {
             self.watches.fetch_sub(1, Ordering::SeqCst);
+            tracing::warn!(
+                operation = %job.id,
+                "surveillance de fin d'action non lancée : {MAX_WATCHES} déjà en cours"
+            );
             return;
         }
         let seat = WatchSeat(Arc::clone(&self.watches));
@@ -790,13 +830,8 @@ impl ServiceLifecycle {
             if !self.still_last(key, id) {
                 return;
             }
-            let seen = self.seen(driver).await;
-            let cause = match (watch, seen) {
-                (Watch::Started, Seen::Stopped { .. } | Seen::Restarting | Seen::Gone) => {
-                    Cause::StoppedRightAfterStart
-                }
-                (Watch::Stopped, Seen::Running | Seen::Restarting) => Cause::RestartedByHost,
-                _ => continue,
+            let Some(cause) = cause_after(watch, self.seen(driver).await) else {
+                continue;
             };
             // Une cause n'en remplace pas une autre : la surveillance ne dit rien d'une action forcée.
             match self.ops.annotate(id, cause).await {
@@ -827,6 +862,14 @@ impl ServiceLifecycle {
         self.ops.with_index(|index| {
             index.busy(key).is_none() && index.last_action(key).is_some_and(|last| last.id == id)
         })
+    }
+}
+
+/// Une écriture du journal des opérations qui échoue ne fait pas échouer l'action (l'ordre est donné, ou ne
+/// le sera pas), mais elle se voit : la reprise au démarrage lira une étape incomplète.
+fn journal<T>(result: Result<T, OpError>, what: &'static str) {
+    if let Err(error) = result {
+        tracing::warn!(%error, write = what, "journal de l'action non écrit");
     }
 }
 

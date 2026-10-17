@@ -35,6 +35,8 @@ struct State {
     stop_delays: HashMap<UnitName, Duration>,
     /// Les ordres de cette unité ne rendent jamais la main.
     hanging: Vec<UnitName>,
+    /// La durée du dernier arrêt de chaque unité, telle que le système la mesure (arrêt ou redémarrage).
+    last_stops: HashMap<UnitName, Duration>,
 }
 
 pub struct FakeSupervisor {
@@ -149,7 +151,7 @@ impl FakeSupervisor {
         };
     }
 
-    /// Un arrêt de cette unité met ce temps.
+    /// Un arrêt de cette unité (seul ou dans un redémarrage) met ce temps.
     pub fn set_stop_delay(&self, unit: &UnitName, delay: Duration) {
         self.lock().stop_delays.insert(unit.clone(), delay);
     }
@@ -176,16 +178,19 @@ impl FakeSupervisor {
         if let Some(error) = error {
             return Err(error);
         }
+        // Arrêter et redémarrer passent par l'arrêt de l'unité : il prend son temps et le système le date.
+        let stops = matches!(order, Order::Stop(..) | Order::Restart(..));
+        if stops && !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
         let activity = match order {
-            Order::Stop(..) => {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                UnitActivity::Inactive
-            }
+            Order::Stop(..) => UnitActivity::Inactive,
             Order::Start(..) | Order::Restart(..) => UnitActivity::Active,
         };
         let mut state = self.lock();
+        if stops {
+            state.last_stops.insert(unit.clone(), delay);
+        }
         if let Some(UnitLookup::Loaded(status)) = state.units.get_mut(unit) {
             status.activity = activity;
         }
@@ -238,5 +243,9 @@ impl ServiceSupervisor for FakeSupervisor {
 
     async fn restart(&self, unit: &UnitName, wait: Duration) -> Result<(), SupervisorError> {
         self.order(Order::Restart(unit.clone(), wait), unit).await
+    }
+
+    async fn last_stop_duration(&self, unit: &UnitName) -> Option<Duration> {
+        self.lock().last_stops.get(unit).copied()
     }
 }

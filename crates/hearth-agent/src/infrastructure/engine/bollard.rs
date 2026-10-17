@@ -234,9 +234,10 @@ impl Inner {
         Ok(docker)
     }
 
-    /// Un client dont le délai de requête couvre l'arrêt (le délai de grâce du conteneur, plus la marge de
-    /// l'attente d'une action), et le délai de grâce en secondes pour la requête.
-    async fn docker_for_stop(&self, grace: Duration) -> Result<(Docker, i32), EngineError> {
+    /// Un client pour un ordre (démarrer, arrêter, redémarrer) : son délai de requête est l'attente de l'action
+    /// (le délai de grâce du conteneur plus la marge, au moins le plancher), pas les 10 s des lectures ; et le
+    /// délai de grâce en secondes pour la requête. Démarrer passe un délai nul : l'attente est le plancher.
+    async fn docker_for_order(&self, grace: Duration) -> Result<(Docker, i32), EngineError> {
         let docker = self.docker().await?;
         let seconds = i32::try_from(grace.as_secs()).unwrap_or(i32::MAX);
         let wait = wait_budget(u32::try_from(grace.as_secs()).unwrap_or(u32::MAX));
@@ -518,7 +519,7 @@ impl ContainerEngine for BollardEngine {
     }
 
     async fn start(&self, id: &str) -> Result<(), EngineError> {
-        let docker = self.inner.docker().await?;
+        let (docker, _) = self.inner.docker_for_order(Duration::ZERO).await?;
         docker
             .start_container(id, None)
             .await
@@ -526,7 +527,7 @@ impl ContainerEngine for BollardEngine {
     }
 
     async fn stop(&self, id: &str, grace: Duration) -> Result<(), EngineError> {
-        let (docker, seconds) = self.inner.docker_for_stop(grace).await?;
+        let (docker, seconds) = self.inner.docker_for_order(grace).await?;
         let options = StopContainerOptionsBuilder::default().t(seconds).build();
         docker
             .stop_container(id, Some(options))
@@ -535,7 +536,7 @@ impl ContainerEngine for BollardEngine {
     }
 
     async fn restart(&self, id: &str, grace: Duration) -> Result<(), EngineError> {
-        let (docker, seconds) = self.inner.docker_for_stop(grace).await?;
+        let (docker, seconds) = self.inner.docker_for_order(grace).await?;
         let options = RestartContainerOptionsBuilder::default().t(seconds).build();
         docker
             .restart_container(id, Some(options))

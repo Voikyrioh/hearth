@@ -106,6 +106,30 @@ pub enum UnitLookup {
 /// Les propriétés demandées à `systemctl show` (`--property=`), séparées par des virgules.
 pub const SHOW_PROPERTIES: &str = "LoadState,ActiveState,SubState,Restart,TimeoutStopUSec,MainPID";
 
+/// Les propriétés qui datent le dernier arrêt de l'unité (HRT-64, BR-LIFE-009) : quand elle a quitté « active »
+/// et quand elle est arrivée à « inactive », en microsecondes de l'horloge monotone du système.
+pub const STOP_TIMES_PROPERTIES: &str =
+    "ActiveExitTimestampMonotonic,InactiveEnterTimestampMonotonic";
+
+/// La durée du dernier arrêt de l'unité, mesurée par le système lui-même, d'une sortie de `systemctl show
+/// --property=<STOP_TIMES_PROPERTIES>` : de la sortie d'« active » à l'arrivée à « inactive ». Après un
+/// redémarrage, ce sont les instants de l'arrêt qui l'a précédé : le démarrage n'y entre pas. `None` : pas de
+/// réponse, un instant à zéro (jamais arrivé) ou une arrivée avant le départ (l'unité est repartie depuis
+/// sans s'être arrêtée de nouveau).
+pub fn parse_stop_duration(text: &str) -> Option<std::time::Duration> {
+    let read = |name: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .filter(|us| *us != 0)
+    };
+    let left = read("ActiveExitTimestampMonotonic")?;
+    let stopped = read("InactiveEnterTimestampMonotonic")?;
+    stopped
+        .checked_sub(left)
+        .map(std::time::Duration::from_micros)
+}
+
 /// Le processus principal de l'unité (`MainPID`) d'une sortie de `systemctl show`. `0` (aucun processus)
 /// et tout texte illisible donnent `None`.
 pub fn parse_main_pid(text: &str) -> Option<u32> {
@@ -370,6 +394,33 @@ mod tests {
 
     fn args(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn the_last_stop_is_measured_by_the_system_from_leaving_active_to_reaching_inactive() {
+        let text =
+            "ActiveExitTimestampMonotonic=1000000\nInactiveEnterTimestampMonotonic=121500000\n";
+        assert_eq!(
+            parse_stop_duration(text),
+            Some(std::time::Duration::from_micros(120_500_000))
+        );
+        // Jamais arrêtée, ou une seule des deux dates : rien à mesurer.
+        for text in [
+            "ActiveExitTimestampMonotonic=0\nInactiveEnterTimestampMonotonic=0\n",
+            "ActiveExitTimestampMonotonic=5\n",
+            "InactiveEnterTimestampMonotonic=5\n",
+            "ActiveExitTimestampMonotonic=abc\nInactiveEnterTimestampMonotonic=5\n",
+            "",
+        ] {
+            assert_eq!(parse_stop_duration(text), None, "{text:?}");
+        }
+        // Une arrivée à « inactive » plus ancienne que la sortie d'« active » : pas d'arrêt fini depuis.
+        assert_eq!(
+            parse_stop_duration(
+                "ActiveExitTimestampMonotonic=9\nInactiveEnterTimestampMonotonic=5\n"
+            ),
+            None
+        );
     }
 
     #[test]
