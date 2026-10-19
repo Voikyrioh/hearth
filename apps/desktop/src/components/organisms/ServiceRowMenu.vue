@@ -127,6 +127,7 @@ onBeforeUnmount(() => listen(false));
       needs-link
       :disabled="controls.disabled"
       :hint="controls.reason ?? undefined"
+      tabindex="-1"
       aria-haspopup="menu"
       :aria-expanded="open ? 'true' : 'false'"
       :aria-controls="open ? menuId : undefined"

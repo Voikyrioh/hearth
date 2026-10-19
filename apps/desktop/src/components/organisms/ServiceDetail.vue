@@ -221,7 +221,7 @@ const commandNote = computed(() => {
       />
       <!-- Démarrer, arrêter, redémarrer (HRT-65) : les gestes que l'état offre, la raison écrite dessous si un geste est bloqué -->
       <LifecycleButtons
-        v-if="!gone && controls"
+        v-if="!gone && tab === 'detail' && controls"
         :controls="controls"
         :name="shownName"
         @gesture="emit('gesture', service, $event)"
