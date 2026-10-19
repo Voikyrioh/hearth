@@ -1104,6 +1104,8 @@ impl Deployments {
             self.forget_spec(&job.key).await;
             self.remove_folders(job).await;
         }
+        // La ligne « Déploiement en cours » part AVANT la clôture : qui lit l'issue ne la voit plus dans la liste.
+        self.registry.end_deploying(&job.key);
         if let Err(error) = self.ops.finish(&job.id, finish.status, finish.cause).await {
             tracing::error!(%error, "déploiement non clos dans le journal");
         }

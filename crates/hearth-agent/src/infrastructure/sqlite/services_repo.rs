@@ -336,7 +336,11 @@ impl ServiceRepo for SqliteServiceRepo {
         since: OffsetDateTime,
     ) -> Result<Vec<(ServiceKey, OffsetDateTime)>, StoreError> {
         let since_text = format_date(ADOPTED, since)?;
-        let mut tx = self.pool.begin().await.map_err(storage(ADOPTED))?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(storage(ADOPTED))?;
         let mut effective = Vec::with_capacity(marks.len());
         for (key, adopted_at) in marks {
             let adopted_at = format_date(ADOPTED, *adopted_at)?;
