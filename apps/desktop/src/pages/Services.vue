@@ -26,7 +26,7 @@ import { launchedBy } from "@/serviceOps/messages";
 import { countServices } from "@/services/counts";
 import { openedService } from "@/services/detail";
 import { shortAge } from "@/services/format";
-import { type Controls, controlsOf, type Gesture } from "@/services/lifecycle";
+import { type Controls, controlsOf } from "@/services/lifecycle";
 import { pilotLock } from "@/services/pilot";
 import { show } from "@/services/view";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
@@ -245,9 +245,6 @@ const lifecycleLocked = computed(() => {
     ? pilotLock(current, operations.forService(server.value.id, current.key) !== undefined).locked
     : false;
 });
-async function gesture(service: ServiceInfo, kind: Gesture) {
-  await lifecycle.request(service, kind);
-}
 /** La fenêtre se ferme : le focus revient au bouton d'origine, sinon au titre du détail (le bouton a pu disparaître). */
 async function closeLifecycle() {
   lifecycle.cancel();
@@ -408,7 +405,7 @@ async function openDocs() {
                 :selected-key="selectedKey"
                 :controls-for="rights.canAct.value ? controlsFor : undefined"
                 @open="openDetail"
-                @gesture="gesture"
+                @gesture="lifecycle.request"
               />
               <EmptyState
                 v-else
@@ -435,7 +432,7 @@ async function openDocs() {
                 @open-other="openDetail"
                 @retry-rights="rights.retry()"
                 @decide="decide"
-                @gesture="gesture"
+                @gesture="lifecycle.request"
               />
             </div>
           </div>

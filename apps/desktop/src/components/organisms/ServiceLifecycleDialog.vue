@@ -3,7 +3,7 @@ import { computed } from "vue";
 import Callout from "@/components/molecules/Callout.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { ActReport } from "@/composables/useReauth";
-import type { ServiceInfo } from "@/link";
+import { LIFECYCLE_ACT_KINDS, type ServiceInfo } from "@/link";
 import {
   effectText,
   type Gesture,
@@ -36,13 +36,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: [] }>();
 
-const kind = computed(() =>
-  props.gesture === "start"
-    ? ("service_start" as const)
-    : props.gesture === "stop"
-      ? ("service_stop" as const)
-      : ("service_restart" as const),
-);
+const kind = computed(() => LIFECYCLE_ACT_KINDS[props.gesture]);
 const shown = computed(() => props.current ?? props.service);
 const name = computed(() => nameOf(props.service));
 const stale = computed(() => staleNotice(props.gesture, props.current, props.locked));

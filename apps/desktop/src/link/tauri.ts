@@ -581,12 +581,11 @@ export class TauriLinkBridge implements LinkBridge {
     gesture: LifecycleGesture,
     adminPassword: string | null,
   ): Promise<LifecycleOutcome> {
-    const run =
-      gesture === "start"
-        ? commands.serviceStart
-        : gesture === "stop"
-          ? commands.serviceStop
-          : commands.serviceRestart;
+    const run = {
+      start: commands.serviceStart,
+      stop: commands.serviceStop,
+      restart: commands.serviceRestart,
+    }[gesture];
     return toLifecycleOutcome(unwrap(await run(serverId, key, adminPassword)));
   }
 

@@ -223,7 +223,6 @@ const commandNote = computed(() => {
       <LifecycleButtons
         v-if="!gone && tab === 'detail' && controls"
         :controls="controls"
-        :name="shownName"
         @gesture="emit('gesture', service, $event)"
       />
 

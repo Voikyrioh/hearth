@@ -7,7 +7,11 @@ import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
-import type { LifecycleGesture, LifecycleOutcome } from "./serviceLifecycle";
+import {
+  LIFECYCLE_ACT_KINDS,
+  type LifecycleGesture,
+  type LifecycleOutcome,
+} from "./serviceLifecycle";
 import type {
   DecisionOutcome,
   OperationChoice,
@@ -345,11 +349,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       throw this.fail({ kind: "missing_services_right" });
     const confirmation = this.reauth.confirm(
       serverId,
-      gesture === "start"
-        ? "service_start"
-        : gesture === "stop"
-          ? "service_stop"
-          : "service_restart",
+      LIFECYCLE_ACT_KINDS[gesture],
       server.role,
       adminPassword,
       this.own(serverId),

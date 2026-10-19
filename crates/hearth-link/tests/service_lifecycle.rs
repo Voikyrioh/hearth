@@ -14,6 +14,7 @@ use hearth_link::domain::secret::Secret;
 use hearth_link::domain::service_lifecycle::{Gesture, Refusal, refusal_of};
 use hearth_link::{ActionOutcome, LinkError};
 use hearth_proto::api::services::{ActionAccepted, ServiceState, ServicesState};
+use hearth_proto::error::ErrorCode;
 use support::agent::fake_engine::{FakeEngine, container};
 use support::{Options, PASSWORD, WAIT, World};
 
@@ -146,14 +147,21 @@ async fn the_refusals_of_the_agent_come_back_typed_and_nothing_is_ordered() {
     let world = World::connected(options()).await;
     let password = Secret::from(PASSWORD);
 
-    // Sans le droit « gérer les services » : le droit manquant est nommé.
-    assert!(matches!(
+    // Sans le droit « gérer les services » : l'acte part, l'agent le refuse (`403 FORBIDDEN_ROLE`) ; la coquille le lit.
+    let (status, body) = refused(
         world
             .manager
             .service_gesture(&world.id, &web_key(), Gesture::Stop, Some(&password))
-            .await,
-        Err(LinkError::MissingRight(_)) | Ok(ActionOutcome::Completed { status: 403, .. })
-    ));
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        refusal_of(status, &body),
+        Refusal::Other {
+            status: 403,
+            code: Some(ErrorCode::ForbiddenRole)
+        }
+    );
     adopt_web(&world).await;
 
     // Un conteneur non adopté n'est pas pilotable : même réponse qu'une clé inconnue (BR-LIFE-015, 024).

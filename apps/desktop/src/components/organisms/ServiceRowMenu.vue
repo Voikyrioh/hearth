@@ -3,7 +3,7 @@ import { nextTick, onBeforeUnmount, ref, useId } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import { t } from "@/i18n";
-import { type Controls, type Gesture, LABEL_KEYS } from "@/services/lifecycle";
+import { type Controls, type Gesture, ICONS, LABEL_KEYS } from "@/services/lifecycle";
 
 // Le menu d'actions d'une ligne de la liste (HRT-65, BR-LIFE-003) : les mêmes gestes que le détail, pour les comptes
 // qui ont le droit, aux seules entrées que l'état propose. Aucune entrée proposée : le bouton n'existe pas (le parent
@@ -157,7 +157,7 @@ onBeforeUnmount(() => listen(false));
             @click="pick(gesture)"
           >
             <HIcon
-              :name="gesture === 'start' ? 'play' : gesture === 'stop' ? 'stop' : 'refresh'"
+              :name="ICONS[gesture]"
               size="sm"
             />
             {{ t(LABEL_KEYS[gesture]) }}

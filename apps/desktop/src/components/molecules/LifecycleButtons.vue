@@ -3,14 +3,14 @@ import { computed, useId } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import { t } from "@/i18n";
-import { type Controls, type Gesture, LABEL_KEYS } from "@/services/lifecycle";
+import { type Controls, type Gesture, ICONS, LABEL_KEYS } from "@/services/lifecycle";
 
 // Les boutons de pilotage d'un service (HRT-65, BR-LIFE-003, 013, BR-GRANT-014) : Démarrer, Arrêter, Redémarrer.
 // Un geste que l'état n'offre pas est ABSENT, pas grisé. Un geste que le droit, le moteur, le lien ou le verrou d'une
 // action bloquent reste visible, `aria-disabled`, focusable, et la raison est écrite sous le groupe en texte
 // permanent (jamais une infobulle seule) ; le lien coupé garde l'infobulle du socle (`needs-link`). Quand aucun
 // geste n'est offert, la phrase qui le dit tient leur place.
-const props = defineProps<{ controls: Controls; name: string }>();
+const props = defineProps<{ controls: Controls }>();
 const emit = defineEmits<{ gesture: [gesture: Gesture] }>();
 
 const reasonId = useId();
@@ -40,7 +40,7 @@ const reason = computed(() => {
         :data-lifecycle-action="gesture"
         @click="emit('gesture', gesture)"
       >
-        <HIcon :name="gesture === 'start' ? 'play' : gesture === 'stop' ? 'stop' : 'refresh'" size="sm" />
+        <HIcon :name="ICONS[gesture]" size="sm" />
         {{ t(LABEL_KEYS[gesture]) }}
       </HButton>
     </div>

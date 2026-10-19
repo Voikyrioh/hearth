@@ -1,8 +1,10 @@
 import { isHearthUsername } from "@/accounts/name";
 import { safeText } from "@/audit/text";
+import type { IconName } from "@/components/atoms/HIcon.vue";
 import { type MessageKey, t } from "@/i18n";
-import type { LifecycleRefusal, ServiceInfo, ServiceState } from "@/link";
+import type { LifecycleGesture, LifecycleRefusal, ServiceInfo, ServiceState } from "@/link";
 import { launchedBy } from "@/serviceOps/messages";
+import { ENGINE_STATE_KEYS, STATE_KEYS } from "@/services/format";
 import type { PilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
 
@@ -14,9 +16,15 @@ import { canAct, type RightsGate } from "@/services/rights";
  * inoffensif (`safeText`), jamais du HTML.
  */
 
-export type Gesture = "start" | "stop" | "restart";
+/** Le geste de pilotage : celui du pont (`LifecycleGesture`), seule définition. */
+export type Gesture = LifecycleGesture;
 
-export const GESTURES: readonly Gesture[] = ["start", "stop", "restart"];
+/** L'icône de chaque geste (boutons du détail, menu de la ligne). */
+export const ICONS: Record<Gesture, IconName> = {
+  start: "play",
+  stop: "stop",
+  restart: "refresh",
+};
 
 /** Les gestes que l'état propose (BR-LIFE-003) : un geste que l'état ne propose pas n'existe pas, il n'est pas grisé. */
 const OFFERED: Partial<Record<ServiceState, readonly Gesture[]>> = {
@@ -76,11 +84,11 @@ export function controlsOf(input: {
     note,
     by: null,
   });
-  // Une action tient le service, quel que soit l'état réel affiché : les boutons sont désactivés (BR-SVC-031).
   const absent = noGestureReason(service.state);
   if (absent === "not-drivable") return none(t("lifecycle.notDrivable"));
   if (absent === "transition") return none(t("serviceOps.busy"));
   const gestures = offeredGestures(service.state);
+  // Une action tient le service, quel que soit l'état réel affiché : les boutons sont désactivés (BR-SVC-031).
   if (lock.locked) {
     return { gestures, disabled: true, reason: t("serviceOps.busy"), note: null, by: lock.by };
   }
@@ -117,19 +125,6 @@ function rightsReason(gate: RightsGate): string | null {
 }
 
 // ── Les textes ───────────────────────────────────────────────────────────────────────────────────
-
-const STATE_KEYS: Record<ServiceState, MessageKey> = {
-  running: "services.state.running",
-  stopped: "services.state.stopped",
-  starting: "services.state.starting",
-  stopping: "services.state.stopping",
-  error: "services.state.error",
-  restart_loop: "services.state.restartLoop",
-  paused: "services.state.paused",
-  deploying: "services.state.deploying",
-  updating: "services.state.updating",
-  unknown: "services.state.unknown",
-};
 
 export function stateName(state: ServiceState): string {
   return t(STATE_KEYS[state]);
@@ -254,7 +249,8 @@ export function refusalText(refusal: { kind: string }, service: Pick<ServiceInfo
   const shown = refusal as LifecycleRefusal;
   switch (shown.kind) {
     case "engine_unavailable": {
-      const state = shown.engine ? ENGINE_STATE_KEYS[shown.engine] : undefined;
+      const state =
+        shown.engine && shown.engine !== "checking" ? ENGINE_STATE_KEYS[shown.engine] : undefined;
       return state
         ? t("lifecycle.refusedEngine", { state: t(state) })
         : t("lifecycle.refusedEngineNoState");
@@ -273,19 +269,6 @@ export function refusalText(refusal: { kind: string }, service: Pick<ServiceInfo
       return t("lifecycle.refusedOther");
   }
 }
-
-const ENGINE_STATE_KEYS: Record<string, MessageKey> = {
-  checking: "engine.state.unknown",
-  ready: "engine.state.ready",
-  stopped: "engine.state.stopped",
-  access_denied: "engine.state.accessDenied",
-  unresponsive: "engine.state.unresponsive",
-  absent: "engine.state.absent",
-  unsupported_engine: "engine.state.unsupportedEngine",
-  unsupported_version: "engine.state.unsupportedVersion",
-  disabled: "engine.state.disabled",
-  unknown: "engine.state.unknown",
-};
 
 /** « Le service {nom} est déjà arrêté / en marche. » (BR-LIFE-014) : l'état dit par l'agent, jamais deviné. */
 export function alreadyText(

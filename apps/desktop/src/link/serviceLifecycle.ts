@@ -1,4 +1,5 @@
 import type { LifecycleOutcome as BoundLifecycleOutcome } from "@/bindings";
+import type { AdminActKind } from "./reauth";
 import type { OperationKind } from "./serviceOps";
 import type { EngineState, ServiceState } from "./services";
 
@@ -9,6 +10,13 @@ import type { EngineState, ServiceState } from "./services";
  */
 
 export type LifecycleGesture = "start" | "stop" | "restart";
+
+/** L'acte d'administration de chaque geste : ce que la confirmation lit et ce que l'agent vérifie. */
+export const LIFECYCLE_ACT_KINDS: Record<LifecycleGesture, AdminActKind> = {
+  start: "service_start",
+  stop: "service_stop",
+  restart: "service_restart",
+};
 
 /** Pourquoi l'agent a refusé le geste (liste fermée de codes ; l'interface les met en phrases). */
 export type LifecycleRefusal =
