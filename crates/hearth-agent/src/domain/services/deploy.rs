@@ -33,6 +33,7 @@ use crate::domain::files::RelPath;
 use crate::domain::secret::Secret;
 
 /// Longueur maximale du nom d'un service (BR-DEPLOY-003).
+pub const NAME_MIN_CHARS: usize = 2;
 pub const NAME_MAX_CHARS: usize = 63;
 /// Limite de processeur la plus basse : un quart de cœur (BR-DEPLOY-038).
 pub const MIN_CPU_MILLIS: u32 = 250;
@@ -236,14 +237,16 @@ fn valid_path_component(component: &str) -> bool {
 }
 
 /// Le nom d'un service (BR-DEPLOY-003) : lettres sans accent, chiffres, tirets et points, commence par une
-/// lettre ou un chiffre, 1 à 63 caractères.
+/// lettre ou un chiffre, 2 à 63 caractères. Le moteur refuse un nom de conteneur d'un seul caractère
+/// (`[a-zA-Z0-9][a-zA-Z0-9_.-]+`) : il est refusé ici, avant de télécharger quoi que ce soit.
 pub fn validate_name(name: &str) -> Result<(), Invalid> {
     let mut chars = name.chars();
     let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphanumeric());
     let rest_ok = name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'));
-    if name.is_empty() || name.chars().count() > NAME_MAX_CHARS || !first_ok || !rest_ok {
+    let length = name.chars().count();
+    if !(NAME_MIN_CHARS..=NAME_MAX_CHARS).contains(&length) || !first_ok || !rest_ok {
         return Err(Invalid {
             field: "name",
             reason: "bad_format",
@@ -667,12 +670,13 @@ mod tests {
     }
 
     #[test]
-    fn the_name_is_letters_digits_dashes_and_dots_from_one_to_sixty_three() {
-        for good in ["a", "web", "Web-1.2", "9lives", &"x".repeat(63)] {
+    fn the_name_is_letters_digits_dashes_and_dots_from_two_to_sixty_three() {
+        for good in ["ab", "web", "Web-1.2", "9lives", &"x".repeat(63)] {
             assert!(validate_name(good).is_ok(), "{good}");
         }
         for bad in [
             "",
+            "a",
             "-web",
             ".web",
             "wéb",
