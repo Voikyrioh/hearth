@@ -18,6 +18,7 @@ maj: 2026-10-17
 - `crates/hearth-link/src/domain/act.rs::build`
 - `crates/hearth-agent/src/entrypoint/http/reauth.rs::Parsed`
 - `deploy/e2e/admin_act.py::confirm_service`
+- `crates/hearth-link/src/manager/service_lifecycle.rs::LinkManager::service_gesture` et `apps/desktop/src-tauri/src/service_ops/lifecycle.rs` (client, HRT-65)
 
 ## Vérification
 - `crates/hearth-proto/src/admin_act.rs::tests::the_operation_routes_are_acts_and_the_declared_ones_have_no_route_yet`
