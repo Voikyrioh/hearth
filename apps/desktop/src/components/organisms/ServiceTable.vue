@@ -470,11 +470,19 @@ defineExpose({ visible, focusKey });
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  overflow: hidden;
 }
 
+/* Le nom ne descend jamais sous sa fin (« …fin-du-nom », `HMiddleText`) : quand la colonne est étroite (colonne des
+   actions, HRT-65), ce sont les repères qui se raccourcissent, jamais un texte qui en recouvre un autre. */
 .name {
-  min-width: 0;
   font-weight: var(--fw-semibold);
+}
+
+.name-line :deep(.tag) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail-line {
@@ -532,7 +540,7 @@ defineExpose({ visible, focusKey });
 /* La colonne des actions s'ajoute à celles du mode (large, compact, volet). */
 .table--actions .table__head,
 .table--actions .row {
-  grid-template-columns: var(--svc-columns) var(--svc-actions);
+  grid-template-columns: var(--svc-columns-with-actions) var(--svc-actions);
 }
 
 .band {
