@@ -40,6 +40,8 @@ export function offeredGestures(state: ServiceState): readonly Gesture[] {
 
 /**
  * Un service créé hors de Hearth et pas adopté (BR-LIFE-024) : l'agent le refuse comme une clé inconnue. FIX:01M5A5VG2H1ESNN212NNMT2PP0
+ * Garde défensive : l'agent ne publie jamais un tel service (BR-ADOPT-012, `visibility_of` → caché), seul le
+ * simulateur en montre un. Ne pas en déduire qu'un service externe de la liste peut être non adopté.
  */
 export function isNotAdopted(service: Pick<ServiceInfo, "origin" | "adopted">): boolean {
   return service.origin === "external" && service.adopted === null;
