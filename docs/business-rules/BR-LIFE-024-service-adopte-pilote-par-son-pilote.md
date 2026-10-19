@@ -15,7 +15,7 @@ Seuls les services PUBLIÉS se pilotent (`ServicesRegistry::lifecycle_target`) :
 
 ## Application (code)
 - `crates/hearth-agent/src/application/services.rs::ServicesRegistry::lifecycle_target`
-- Client (garde défensive : l'agent ne publie jamais un conteneur non adopté, BR-ADOPT-012 ; seul le simulateur en montre un) : `apps/desktop/src/services/lifecycle.ts::isNotAdopted`, `controlsOf` (aucun geste, ni bouton ni menu « … », la raison est écrite) et `refusalText` (un refus `service_not_found` sur un service non adopté dit la raison, pas « n'existe plus »), FIX:01M5A5VG2H1ESNN212NNMT2PP0
+- Client (garde défensive : l'agent ne publie jamais un conteneur non adopté, BR-ADOPT-001 ; seul le simulateur en montre un) : `apps/desktop/src/services/lifecycle.ts::isNotAdopted`, `controlsOf` (aucun geste, ni bouton ni menu « … », la raison est écrite) et `refusalText` (un refus `service_not_found` sur un service non adopté dit la raison, pas « n'existe plus »), FIX:01M5A5VG2H1ESNN212NNMT2PP0
 
 ## Vérification
 - `crates/hearth-agent/src/application/services.rs::tests::only_a_published_service_has_a_lifecycle_target_and_the_pilot_follows_the_key`
